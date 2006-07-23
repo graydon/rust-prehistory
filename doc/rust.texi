@@ -1,0 +1,671 @@
+\input texinfo   @c -*-texinfo-*-
+@c %**start of header
+@setfilename rust.info
+@settitle Rust Documentation
+@setchapternewpage odd
+@c %**end of header
+
+@syncodeindex fn cp
+
+@ifinfo
+This manual is for the ``Rust'' programming language.
+
+Copyright 2006 Graydon Hoare
+
+All rights reserved
+Licensed to the public under the terms of the GNU GPL (>= 2.0).
+See the file COPYING for details
+@end ifinfo
+
+@dircategory Programming
+@direntry
+* rust: (rust).         Rust programming language
+@end direntry
+
+@titlepage
+@title Rust
+@subtitle A general-purpose programming language
+@author Graydon Hoare
+
+@page
+@vskip 0pt plus 1filll
+Copyright @copyright{} 2006 Graydon Hoare
+All rights reserved
+Licensed to the public under the terms of the GNU GPL (>= 2.0).
+See the file COPYING for details
+@end titlepage
+
+@ifnottex
+@node Top
+@top Top
+
+Rust Documentation
+
+Rust is a general-purpose programming language. It supports
+imperative-procedural, concurrent-actor and pure-functional
+styles. Rust also supports generic programming and metaprogramming, in
+both static and dynamic forms.
+
+
+@node    Fundamentals
+@chapter Fundamentals
+
+
+@page
+@node    Design perspective
+@section Design perspective
+
+
+Rust is a ``curly-brace'' block-structured language; it generally
+visually resembles the ``C'' family, but differs significantly in
+syntactic and semantic details.
+
+Rust's semantics are a mixture of elements found in Ada, OCaml, CLU
+and Hermes. 
+
+The language design attempts to maximize the following goals:
+
+@itemize
+@item Error detection and isolation.
+@item Clarity and precision of expression.
+@item Implementation simplicity.
+@item Runtime efficiency.
+@end itemize
+
+In pursuit of these goals, some common language features were
+rejected. While not unique in rejecting these features -- similar
+rejections are made in the ancestral languages noted above -- the
+informed reader should keep in mind that such rejections are usually
+@emph{intentional}. An uncommon technique does not necessariliy arise
+from ignorance of the alternative. This manual may provide discussion
+or footnotes for additional rationale, when notable cases arise.
+
+Three characteristics of Rust's design motivate most of the rejected
+features.
+
+First, Rust occasionally strays from the standard language-design
+principles of @i{minimality} and @i{orthogonality}. Rust is
+unapologetically a medium-sized language; there are many languages
+smaller and simpler. Some Rust constructs are only useful in
+particular ``safe'' or ``efficient'' combinations. Other constructs
+are conspicuously duplicated -- with important specializations for
+different cases -- due to concerns for safety, clarity or speed. 
+
+Second, while Rust can probably be classified as a ``static language''
+-- owing to the presence of a strong static type system and a certain
+amount of static reasoning about storage and lifecycle -- it also
+resists the habit many ``static languages'' have of throwing out all
+information and language-tool functionality after compile time. Rust's
+dynamic semantics are intended to support many of the useful features
+of ``dynamic language'' environments such as reflective debugging,
+live code generation, ``hot'' code replacement, heterogeneous
+collections and latent-typed generic functions.
+
+Third, Rust rejects a family of features that stem from a particular
+interpretation of the Object Orientation paradigm, and that have come
+to be ``canonical'' in mainstream (non-academic) language
+designs. Features such as code-inheritence, ubiquitous dynamic
+binding, cyclical memory graphs, pointer-rich data structures, tracing
+garbage collection, and shared-visibility concurrency are all avoided
+in Rust. The legitimate motivations for these features are addressed
+via other means.
+
+@page
+@node    Structural artifacts
+@section Structural artifacts
+
+A collection of Rust source code can be thought of @emph{structurally}
+as a set of artifacts that logically @i{contain} one another. There
+are four kinds of artifacts in this view: @i{containers}, @i{modules},
+@i{values}, and @i{slots}.
+
+@subsection Containers
+
+A @dfn{container} is a unit of configuration, linkage and distribution
+for Rust code. Containers logically contain modules. Containers have
+``unfriendly'' names -- names that look like ugly and meaningless
+numbers -- but these names are ``universally unique''.
+
+The source form of a container is a @dfn{container file}, which is a
+text file ending in @code{.rc}. The compiled form of a container is a
+binary dynamic-link library, such as an ELF or PE library (ending in
+@code{.so} or @code{.dll} respectively).
+
+Container files contain a description of a tree of modules, and
+instructions about how to compile the container. The Rust compiler
+operates on container files. Container files may reference other
+containers, in order to import qualified module names from them, but
+the reference graph of container files is a DAG.
+
+@subsection Modules
+
+A @dfn{module} is a unit of organization within a container. The tree
+of modules in a container corresponds 1:1 with a tree of directories
+and files in a filesystem. Thus there are two kinds of modules:
+@dfn{directory modules} and @dfn{source modules}. A directory module
+contains sub-modules. A source module contains values.
+
+Source modules, also called @dfn{source files}, are files ending
+in @code{.rs}. These files contain values.
+
+Modules are arranged in a human-friendly namespace within a container.
+It is the responsibility of a team of programmers working on a
+container to ensure that their module names to not collide, inside the
+container. Module names can be reused in different containers,
+however; the names in one container cannot collide with the names in
+another container.
+
+Modules contain values. There are many types of value; the complete
+list is provided in the next section. For now it is sufficient to note
+that most Rust code is concerned with manipulating values. Much more
+than the portion of Rust code that relates to modules and containers.
+
+@subsection Slots
+
+Finally, within values there may be @i{slots}. Values are also
+@emph{referenced} by slots. A @dfn{slot} is a named memory location
+that can refer to a value. Each module defines a set of slots that are
+the ``top level'' slots of the module. Further slots exist in many
+contexts:
+
+@itemize
+@item Variables within functions, iterators, predicates.
+@item Fields within records, alternatives and programs.
+@item Components of vectors.
+@end itemize
+
+
+@page
+@node    Values
+@section Values
+
+There are many kinds of value in a Rust module.
+
+@menu
+* Primitive values::          Values supported by (some) hardware.
+* Dynamic values::            Latently-typed values.
+* Arithmetic values::         High-precision numbers.
+* Textual values::            Strings and characters.
+* Records::                   Fixed products of heterogeneous types.
+* Vectors::                   Dynamic products of homogeneous types.
+* Alternatives::              Sums of heterogeneous types.
+* Functions::                 Simple subroutines.
+* Iterators::                 Scoped coroutines.
+* Predicates::                Pure functions involved in typestates.
+* Programs::                  General coroutines.
+* Processes::                 Instances of programs.
+* Ports::                     Inter-process message inputs.
+* Channels::                  Weak capabilities to send messages to ports.
+* Types::                     Values representing types.
+* Quotations::                Values representing source code.
+@end menu
+
+@node       Primitive values
+@subsection Primitive values
+
+@node       Dynamic values
+@subsection Dynamic values
+
+@node       Arithmetic values
+@subsection Arithmetic values
+
+@node       Textual values
+@subsection Textual values
+
+@node       Records
+@subsection Records
+
+@node       Vectors
+@subsection Vectors
+
+@node       Alternatives
+@subsection Alternatives
+
+@node       Functions
+@subsection Functions
+
+@node       Iterators
+@subsection Iterators
+
+@node       Predicates
+@subsection Predicates
+
+@node       Programs
+@subsection Programs
+
+@node       Processes
+@subsection Processes
+
+@node       Ports
+@subsection Ports
+
+@node       Channels
+@subsection Channels
+
+@node       Types
+@subsection Types
+
+@node       Quotations
+@subsection Quotations
+
+
+@page
+@node    Type system
+@section Type system
+
+
+@node       Value and slot types
+@subsection Value and slot types
+
+Every value has a unique type. 
+
+Every slot has a unique type.
+
+If a slot @var{S} references a value @var{V}, the type of @var{S} is
+identical to the type of @var{V}.
+
+
+@node       Limitation
+@subsection Limitation
+
+Some types are @i{limited}. A type @var{T} is @dfn{limited} iff any of
+these conditions hold:
+
+@itemize
+@item The type @var{T} is declared as @code{lim}.
+@item The type @var{T} contains a limited slot.
+@item The type @var{T} is a process type.
+@end itemize
+
+Limited values cannot be copied or transmitted. See @ref{Memory model}
+for the definitions of copying and transmission.
+
+A type that is a process type or declares itself limited is called 
+@dfn{directly limited}. A type that simply contains a limited slot
+is called @dfn{indirectly limited}.
+
+
+@node       Purity
+@subsection Purity
+
+Subroutines (functions or iterators) may be @i{pure} or @i{impure}. A
+subroutine @var{S} is @dfn{impure} iff any of these conditions hold:
+
+@itemize
+@item The subroutine @var{S} is @emph{not} declared as @code{pure}
+@item The subroutine @var{S} calls any impure subroutines.
+@item The subroutine @var{S} calls any channels.
+@end itemize
+
+Purity exists as a concept in Rust for two reasons:
+
+@itemize
+@item As a basic aid to code comprehension. Pure subroutines are easier
+to reason about, so programmers may wish to ensure that portions of
+their work are pure.
+@item Predicates are effectively pure boolean functions. Predicates
+are @emph{required} to be pure for the typestate system to function
+correctly. Since purity is required for predicates, extending the
+concept of purity to functions and iterators permits predicates to
+call them safely. Otherwise predicates would have to be
+self-contained.
+@end itemize
+    
+
+@page
+@node    Typestates
+@section Typestates
+
+Every block of statements containing expressions maps to a block of
+primitive statements in a normal form. In this form, every statement
+is logically one of:
+
+@itemize 
+@item A conditional jump statement.
+@item A move or copy statement between two slots.
+@item An allocation or deallocation statement.
+@item Invocation of a function, iterator, or channel with a ``call message''.
+@end itemize
+
+A @dfn{point} is defined as the boundary between two normalized
+sequential statements.  Every point in a normalized block has a
+@i{typestate}. Two typestates are therefore defined for each
+normalized statement: 
+
+@itemize
+@item The @dfn{prestate}, that preceeds the statement.
+@item The @dfn{poststate}, that follows the statement.
+@end itemize
+
+A @dfn{typestate} is formally a set of @var{N}-ary boolean predicates
+over visible slots.
+
+Typestates form a semilattice ordered by subset-inclusion: @var{X} <
+@var{Y} means @var{X} is a subset of @var{Y}, and the semilattice
+``join'' operation is ``set intersection''.
+
+When @var{K} statements lead to a single point, the point's typestate
+is the pairwise join of the @var{K} poststates of preceeding
+statements.
+
+Predicates are declared with @code{pred}, and have names and
+signatures similar to functions. The body of a predicate is
+syntactically a pure boolean function. The signature of a predicate
+cannot include the keyword @code{pure} or the @code{bool} return type;
+these are implied and non-optional.
+
+
+@node       Asserting predicates
+@subsection Asserting predicates
+
+The @code{assert} statement either adds the asserted predicate to its
+poststate, or else fails, raising an exception. If a predicate is
+declared as @code{auto}, assertions are inserted automatically some
+contexts. 
+
+Specifically: every operation (statement type) has a set of
+preconditions, formulated as predicates. If a precondition names a
+predicate that is not present in the statement's prestate, one of two
+cases occurs:
+
+@itemize
+@item If the missing predicates are all @code{auto} and all the 
+preconditions of the missing @code{auto}-predicates are met, the
+compiler may insert assertions for each missing predicate.
+@item Otherwise the condition is a compile-time error.
+
+
+@node       Dropping predicates
+@subsection Dropping predicates
+
+All predicates in a typestate can be @i{dropped}. To @dfn{drop} a
+predicate is to remove it from the typestate at the associated
+point. For a slot @var{S}, dropping the @code{init(S)} predicate may
+cause memory to be released or finalizer to be run. See @ref{Memory
+model} for discussion. All other predicates can be dropped without
+side-effect.
+
+
+@node       Predicates on moved values
+@subsection Predicates on moved values
+
+When a statement moves a value from a slot @var{A} to a slot @var{B}: 
+
+@itemize
+@item Every predicate involving @var{B} is dropped.
+@item Every remaining predicate involving @var{A} has @var{B} 
+substituted for @var{A}.
+@end itemize
+
+
+@node       Predicates on copied values
+@subsection Predicates on copied values
+
+When a statement copies a value from a slot @var{A} to a slot @var{B}: 
+
+@itemize
+@item Every predicate involving @var{B} is dropped.
+@item For every remaining predicate @var{P} involving @var{A}, 
+a copy of @var{P} is added to the typestate with @var{B} substituted
+for @var{A}.
+@end itemize
+
+
+@node          Formal typestates
+@subsubsection Formal typestates
+
+When defining a type @var{T}, a typestate @var{S} can optionally be
+associated with @var{T}. When present, we say that @var{S} is the
+@dfn{formal typestate} of @var{T}. When a slot has a type @var{T} with
+a formal typestate @var{S}, it means that all the predicates in
+@var{S} are present in the typestate of every point in which the slot
+is @i{visible}.
+
+A slot becomes @dfn{visible} at the point immediately following the
+statement containing its declaration, and remains visible through to
+the end of the last statement in the block containing its declaration.
+
+
+@node       Reflection
+@subsection Reflection
+
+Types and predicates are reflected into runtime values. Runtime values
+can always be converted to type @code{dyn} or @code{lim dyn}, which
+carries the type of its value (including formal typestate) along with
+it.
+
+The runtime representation of a type can be compared to the runtime
+representation of another type.
+
+To connect runtime and compile-time values, a type-switch statement
+exists over @code{dyn} values; each arm of the type-switch
+temporarily moves the @code{dyn}'s value into a typed slot.
+
+
+@node       Type system comparison with other languages
+@subsection Type system comparison with other languages
+
+We borrow structure (but not terminology) from Ada and Hermes when
+organizing the type system. In particular:
+
+@itemize
+@item A constrained type (an Ada "subtype") is a base type plus a set of
+constraints. Constraints are formulated using Hermes-style
+typestate predicates rather than Ada's fixed set of constraints.
+@item There is no general subtype lattice (as in OO languages). There is only
+one type for each value. This is common to both languages.
+@end itemize
+
+
+@node       Pragmatic notes
+@subsection Pragmatic notes
+
+Constrained types do not participate in overload resolution, because
+predicates can always be dropped.
+
+If you wish to produce a new type that wraps an old type, you can just
+make a single-field rec. The allocation rules will not impose any
+penalty for doing so.
+
+
+@page
+@node    Memory model
+@section Memory model
+
+
+@node       Semantic model
+@subsection Semantic model
+
+Rust's memory model logically consists of a set of values, arranged
+in a DAG. Values have 1:1 type relationship so values may be said to
+be limited or not, just like types. See @ref{Limited types} for
+details.
+
+The relationships between slots and values are the edges in the
+memory DAG.
+
+
+@node       Initialization 
+@subsection Initialization 
+
+Every slot is either @i{initialized} or @i{empty}.
+
+A slot @var{S} is @dfn{initialized} iff it refers to a value in the
+memory DAG, otherwise @var{S} is @dfn{empty}. When the slot
+@var{S} is initialized, the predicate @code{init(S)} is added to the
+typestate. If the predicate @code{init(S)} is dropped, the slot
+@var{S} becomes empty.
+
+
+@node       Sharing
+@subsection Sharing
+
+Conceptually, every slot holds a unique subtree that is not shared.
+
+In real memory, some number of memory subtrees may be shared
+copy-on-write (CoW). This is why we say that memory is a DAG. The
+amount of sharing is at the discretion of the implementation, within
+some restrictions:
+
+@itemize
+@item Limited values cannot be shared, because they cannot be copied.
+@item Interior values cannot be shared (see @ref{Allocation modes}).
+@end itemize
+
+When a node is shared CoW, it has a reference-count and its memory is
+reclaimed only when the reference count drops to zero. When a node is
+not shared CoW, its memory is reclaimed at a specific point: when its
+slot loses the @code{init} predicate.
+
+
+@node       Assignment
+@subsection Assignment
+
+Rust has two built-in notions of assignment. 
+
+First, one can @dfn{move} a value between slots. Movement is
+written with the operator @code{<-}; an example is @code{B <- A;}
+which means "move A to B". All values can be moved. 
+
+Second, one can @dfn{copy} a value between slots. Copying is
+written with the operator @code{=}; an example is @code{B = A;}
+which means "copy A to B". Limited values cannot be copied.
+
+In both move and copy assignments, the left slot is called the
+@dfn{destination} and the right slot is called the @dfn{source}.
+
+The affect of copying and movement on typestates is described in
+@ref{Predicates and assignment}. In short, predicates associated with
+the destination slot are dropped, and predicates associated with the
+source slot are either replaced or duplicated to refer to the
+destination slot.
+
+The @code{init} predicate models the initialization state of a slot,
+and thus the presence or absence of a slot's reference to a
+value. When an @code{init} predicate is dropped during an assignment,
+it may thereby drop a reference to a value. This in turn may cause
+either finalization -- if the value is limited and contains processes
+with finalizers -- and/or storage reclamation, if the unreferenced
+value was exterior-allocated (see @ref{Allocation modes}).
+
+The behavior of a move or copy is completely defined by the typestate
+transition rules in @ref{Predicates and assignment}, as well as one
+additional rule: that in either @code{B = A;} or @code{B <- A}, if the
+prestate has @code{init(A)} and slot @var{A} refers to value @var{V}
+before the assignment, then slot @var{B} refers to value @var{V} after
+the assignment.
+
+
+@node       Allocation modes
+@subsection Allocation modes
+
+Values can be allocated in either an @i{exterior} or @i{interior}
+mode. @dfn{Exterior allocation} typically means ``allocated on the
+heap''. @dfn{Interior allocation} means that the value is allocated
+within a contiguous block of memory owned by some other
+value. Interior allocations are commonly made for slots in @code{rec}
+and @code{vec} values, as well as slots in the runtime stack.
+
+Slots also have modes, each of which may imply that the slot's
+referent has a particular allocation mode. See @ref{Slot modes}.
+
+
+@node       Value transplanting
+@subsection Value transplanting
+
+When a value is moved or copied into a slot that requires an
+allocation mode different from the allocation mode of the value, the
+value may be @i{transplanted} during the move or
+copy. @dfn{Transplanting} a value means moving or copying the value by
+byte-copying it into a new location in memory. Transplanting may also
+involve allocating fresh memory from the heap, if the transplant
+destination is exterior.
+
+The slot modes (see @ref{Slot modes}) ensure that directly limited
+types are never transplanted.
+
+Rust's memory model strives to minimize three things simultaneously: 
+
+@itemize
+@item The amount of value transplanting.
+@item The amount of exterior allocation.
+@item The amount users have to think about either of the above.
+@end itemize
+
+
+@node       Type size
+@subsection Type size
+
+Values consume a particular amount of memory when they are allocated.
+The type of a value may, or may not, determine how much memory is
+required to store a value of that type.
+
+If a type is parametric, opaque, or forward-declared (and not yet
+undefined) we say that it is of @dfn{indefinite size}. Otherwise we
+say that the type has @dfn{definite size}. Since values and slots also
+have unique types, we may refer to slots or values as having definite
+or indefinite size.
+
+Note however that under the slot modes (see @ref{Slot modes}), the
+space allocated for a slot itself has definite size: slots either
+contain values with definite size, or else hold addresses, which have
+definite size themselves. Thus the contribution of a slot to its
+containing structure's size is always definite. In other words, the
+property of ``having indefinite size'' does not ``infect'' containing
+structures.
+
+If a type has definite size that is equal to or smaller than the size
+of a machine word (in bits), we say that the type has @dfn{subword
+size}.  All types with definite sizes larger than a machine word, as
+well as types with indefinite size, are said to have @dfn{superword
+size}.
+
+
+@node       Slot modes
+@subsection Slot modes
+
+Slots have modes. A slot's mode determines how the slot relates to its
+referent. There are four slot modes:
+
+@itemize
+@item Immediate
+@item Dependent
+@item Exterior
+@item Interior
+@end itemize
+
+A slot is immediate iff it has subword size. The space allocated to an
+immediate slot is also used to contain the value, and every copy is
+effectively a ``transplant'' because there is no advantage to copying
+less than the full value.
+
+A slot is dependent iff its type has superword size, but refers to a
+value that is statically known to be initialized and constant at every
+point where the slot is visible. The most important cases of dependent
+slots are non-immediate constant slots for subroutine arguments,
+yields and returns, and the arms of @code{alt} statements. Dependent
+slots hold addresses of either interior or exterior values, but do
+@emph{not} manipulate reference counts, deinitialize or deallocate
+values.
+
+A slot is interior iff its type has definite size, its type is not
+directly limited, and the slot is not dependent. Interior slots always
+contain their interior allocation; assignment of an exterior value to
+an interior slot causes a transplant to the interior storage. Interior
+slots are somewhat similar to immediate slots, insofar as their value
+is stored within the structure that contains the slot. Interior slots
+differ from immediate slots insofar as the @emph{address} of an
+interior slot can be stored in a dependent slot. Immediate slots are
+always passed by value.
+
+A slot is exterior iff the slot is not dependent, and either its type
+has indefinite size or its type is directly limited. Exterior slots
+always contain the address of an exterior allocation; assignment of an
+interior value to an exterior slot causes a transplant to exterior
+storage.
+
+@node Index
+
+@printindex cp
+
+@bye
