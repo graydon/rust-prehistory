@@ -1,0 +1,43 @@
+Minor technical note: a byte-oriented universal code similar to the
+Elias Omega code. We use this for encoding variable-length numbers.
+
+Numbers are encoded as groups.
+
+A group is either a prefix or the final group.
+
+If a group N is a K-bit prefix group, its most significant bit is 1
+and its K-1 least significant bits describe a number J, where J+1
+bytes are used to encode group N+1.
+
+If a group is the K-bit final group, its most significant bit is 0 and
+its its K-1 least significant bits describe a number in normal binary
+code.
+
+Here are some selected codes:
+
+                 byte 0     byte 1     byte 2     byte 3     byte 4
+N        bits: 0 1234567  0 1234567  0 1234567  0 1234567  0 1234567
+--------------------------------------------------------------------
+
+0              0 0000000
+1              0 0000001
+2              0 0000010
+...
+127            0 1111111
+128            1 0000001  0 0000000  1 0000000
+129            1 0000001  0 0000000  1 0000001
+...
+32767          1 0000001  0 1111111  1 1111111
+32768          1 0000010  0 0000000  1 0000000  0 0000000
+32769          1 0000010  0 0000000  1 0000000  0 0000001
+...
+8388607        1 0000010  0 1111111  1 1111111  1 1111111
+8388608        1 0000011  0 0000000  1 0000000  0 0000000  0 0000000
+8388609        1 0000011  0 0000000  1 0000000  0 0000000  0 0000001
+...
+
+
+Only one prefix byte is required for all numbers consuming less than
+128 bytes (1024 bits) in final position. A reasonable software decoder
+may inline the first handful of prefix configurations, as they are
+most likely on a given machine.

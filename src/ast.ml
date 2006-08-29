@@ -15,17 +15,16 @@ open Hashtbl;;
 type rs_name = string array
 ;;
 
-
 type ty_prim =
-    TY_unsigned of int
-  | TY_signed of int
-  | TY_ieee_bfp of int
-  | TY_ieee_dfp of int
-  | TY_ptr of int (* like unsigned, but no arithmetic ops *)
+    TY_unsigned
+  | TY_signed
+  | TY_ieee_bfp
+  | TY_ieee_dfp
 ;;
 
 type ty_arith =
     TY_int
+  | TY_nat
   | TY_rat
 ;;
 
@@ -34,45 +33,50 @@ type rs_type =
   | TY_dyn
   | TY_type
 
-  | TY_prim of ty_prim
+  | TY_prim of (ty_prim * int)
   | TY_arith of ty_arith
   | TY_str
   | TY_char
 
   | TY_rec of ty_rec
   | TY_alt of ty_alt
-  | TY_vec of ty_vec
+  | TY_vec 
 
   | TY_func of ty_subr
   | TY_iter of ty_subr
   | TY_chan of ty_sig
 
+  | TY_port of ty_sig
   | TY_prog
   | TY_proc 
-  | TY_port of ty_sig
 
   | TY_pred of ty_pred
   | TY_quote of ty_quote
+
   | TY_const of rs_type
+  | TY_ref of rs_type
+  | TY_named of rs_name
+  | TY_param of (rs_type * string array)
+
+  | TY_lim of rs_type
 
 (* 
- * An fstate may include *optional* names in its args.
+ * An state may include *optional* names in its params.
  * The "formal" name is implied where names are missing,
  * which is for example the return / yield value on a subr
- * or the vector-element type on a vec.
+ * or the vector-element type on a vec. This is denoted with "*".
+ * 
+ * It is a semantic error to omit names in a context where
+ * no implied formal parameter exists.
  *)
    
-and rs_fstate = 
+and rs_pred = 
     { 
-      fstate_name: rs_name;
-      fstate_args: (rs_name option) array; 
+      pred_name: rs_name;
+      pred_args: (rs_name option) array; 
     }
-   
-and rs_state = 
-    { 
-      state_name: rs_name;
-      state_args: rs_name array; 
-    }
+
+and rs_state = rs_pred array
 
 and ty_rec = 
     { 
@@ -94,12 +98,6 @@ and ty_alt_case =
       alt_case_rec: ty_rec;
     }
 
-and ty_vec = 
-    { 
-      vec_elt_type: rs_type;
-      vec_state: rs_fstate;
-    }
-
 and ty_subr = 
     { 
       subr_inline: bool; 
@@ -107,40 +105,48 @@ and ty_subr =
       subr_sig: ty_sig; 
     }
 
+and rs_param_mode = 
+    PARAM_move_in 
+  | PARAM_move_out 
+  | PARAM_move_inout 
+  | PARAM_copy 
+
+and rs_param = 
+    {
+     param_type: rs_type;
+     param_mode: rs_param_mode;
+   }
+
 and ty_sig = 
     { 
-      sig_params: rs_type array;
+      sig_params: rs_param array;
       sig_result: rs_type; 
       sig_istate: rs_state;
-      sig_ostate: rs_fstate;
-    }
-
-and ty_prog = 
-    { 
-      prog_auto: bool; 
+      sig_ostate: rs_state;
     }
 
 and ty_pred = 
     { 
       pred_auto: bool;
       pred_inline: bool; 
-      pred_params: rs_type array;
-      pred_state: rs_state;
+      pred_params: rs_param array;
+      pred_istate: rs_state;
     }
 
 and ty_quote = 
     TY_quote_expr
   | TY_quote_type
+  | TY_quote_decl
   | TY_quote_stmt
       (* Probably this list should be a lot longer; the canonical rule
 	 I've been using is to make a quotation type for every
 	 nonterminal *)
 
 
-let init_star_fstate : rs_fstate = 
+let init_star_pred : rs_pred = 
     { 
-      fstate_name = Array.make 1 "init";
-      fstate_args = Array.make 1 None; 
+      pred_name = Array.make 1 "init";
+      pred_args = Array.make 1 None; 
     }
 ;;
     
@@ -151,7 +157,6 @@ type val_prim =
   | VAL_signed of int
   | VAL_ieee_bfp of float
   | VAL_ieee_dfp of (int * int)
-  | VAL_ptr of int
 
 (*
  * The "value" type is the result of evaluation of an expression. Or
@@ -183,9 +188,9 @@ and rs_val_dyn =
   | VAL_alt of val_rec
   | VAL_vec of val_vec
 
-  | VAL_func of rs_stmt
-  | VAL_iter of rs_stmt
-  | VAL_chan of int
+  | VAL_func of (string array * rs_stmt)
+  | VAL_iter of (string array * rs_stmt)
+  | VAL_chan of (string array * int)
 
   | VAL_prog of val_prog
   | VAL_proc of val_proc
@@ -198,6 +203,7 @@ and val_quote =
 
     VAL_quote_expr
   | VAL_quote_type
+  | VAL_quote_decl
   | VAL_quote_stmt
 
 and val_rec = val_rec_slot array
@@ -234,12 +240,14 @@ and val_proc =
    }
 
 and proc_exec_state = 
+
     PROC_RUN 
   | PROC_RECV 
   | PROC_SEND 
   | PROC_FINI
 
 and rs_stmt =
+
     STMT_while of stmt_while
   | STMT_foreach of stmt_foreach
   | STMT_for of stmt_for
@@ -248,7 +256,7 @@ and rs_stmt =
   | STMT_yield of (rs_expr option)
   | STMT_return of rs_expr
   | STMT_block of (rs_stmt array)
-  | STMT_assert of rs_fstate
+  | STMT_assert of rs_pred
   | STMT_seti of rs_expr * rs_expr * rs_expr
   | STMT_set of rs_expr * rs_expr
 
@@ -287,14 +295,14 @@ and stmt_try =
    }
 
 and rs_expr =
-    
+
     EXPR_binary of (rs_binop * rs_expr * rs_expr)
   | EXPR_unary of (rs_unop * rs_expr)
   | EXPR_literal of rs_val
   | EXPR_name of rs_name
 
-and rs_binop =
-    
+and rs_binop =    
+
     BINOP_or
   | BINOP_and
 
@@ -319,7 +327,8 @@ and rs_binop =
   | BINOP_idx
 
 and rs_unop =
-  | UNOP_not
+
+    UNOP_not
 
 and rs_decl = 
     { 
@@ -330,7 +339,9 @@ and rs_decl =
     }
 ;;
 
-type rs_decl_top = 
-    PUBLIC of rs_decl
-  | PRIVATE of rs_decl
-;;
+type rs_visibility = 
+    VIS_public
+  | VIS_standard
+  | VIS_private
+
+type rs_decl_top = (rs_visibility * rs_decl)

@@ -57,11 +57,11 @@ both static and dynamic forms.
 
 
 Rust is a ``curly-brace'' block-structured language; it generally
-visually resembles the ``C'' family, but differs significantly in
+visually resembles the C family, but differs significantly in
 syntactic and semantic details.
 
-Rust's semantics are a mixture of elements found in Ada, OCaml, CLU
-and Hermes. 
+Rust's semantics are a mixture of elements found in Ada, Mesa, ML, CLU
+and Hermes.
 
 The language design attempts to maximize the following goals:
 
@@ -116,31 +116,31 @@ via other means.
 
 A collection of Rust source code can be thought of @emph{structurally}
 as a set of artifacts that logically @i{contain} one another. There
-are four kinds of artifacts in this view: @i{containers}, @i{modules},
+are four kinds of artifacts in this view: @i{crates}, @i{modules},
 @i{values}, and @i{slots}.
 
-@subsection Containers
+@subsection Crate
 
-A @dfn{container} is a unit of configuration, linkage and distribution
-for Rust code. Containers logically contain modules. Containers have
+A @dfn{crate} is a unit of configuration, linkage and distribution
+for Rust code. Crates logically contain modules. Crates have
 ``unfriendly'' names -- names that look like ugly and meaningless
 numbers -- but these names are ``universally unique''.
 
-The source form of a container is a @dfn{container file}, which is a
-text file ending in @code{.rc}. The compiled form of a container is a
+The source form of a crate is a @dfn{crate file}, which is a
+text file ending in @code{.rc}. The compiled form of a crate is a
 binary dynamic-link library, such as an ELF or PE library (ending in
 @code{.so} or @code{.dll} respectively).
 
-Container files contain a description of a tree of modules, and
-instructions about how to compile the container. The Rust compiler
-operates on container files. Container files may reference other
-containers, in order to import qualified module names from them, but
-the reference graph of container files is a DAG.
+Crate files contain a description of a tree of modules, and
+instructions about how to compile the crate. The Rust compiler
+operates on crate files. Crate files may reference other
+crates, in order to import qualified module names from them, but
+the reference graph of crate files is a DAG.
 
 @subsection Modules
 
-A @dfn{module} is a unit of organization within a container. The tree
-of modules in a container corresponds 1:1 with a tree of directories
+A @dfn{module} is a unit of organization within a crate. The tree
+of modules in a crate corresponds 1:1 with a tree of directories
 and files in a filesystem. Thus there are two kinds of modules:
 @dfn{directory modules} and @dfn{source modules}. A directory module
 contains sub-modules. A source module contains values.
@@ -148,17 +148,17 @@ contains sub-modules. A source module contains values.
 Source modules, also called @dfn{source files}, are files ending
 in @code{.rs}. These files contain values.
 
-Modules are arranged in a human-friendly namespace within a container.
+Modules are arranged in a human-friendly namespace within a crate.
 It is the responsibility of a team of programmers working on a
-container to ensure that their module names to not collide, inside the
-container. Module names can be reused in different containers,
-however; the names in one container cannot collide with the names in
-another container.
+crate to ensure that their module names to not collide, inside the
+crate. Module names can be reused in different crates,
+however; the names in one crate cannot collide with the names in
+another crate.
 
 Modules contain values. There are many types of value; the complete
 list is provided in the next section. For now it is sufficient to note
 that most Rust code is concerned with manipulating values. Much more
-than the portion of Rust code that relates to modules and containers.
+than the portion of Rust code that relates to modules and crates.
 
 @subsection Slots
 
@@ -182,7 +182,7 @@ contexts:
 There are many kinds of value in a Rust module.
 
 @menu
-* Primitive values::          Values supported by (some) hardware.
+* Primitive values::          Machine-level values.
 * Dynamic values::            Latently-typed values.
 * Arithmetic values::         High-precision numbers.
 * Textual values::            Strings and characters.
@@ -209,26 +209,202 @@ There are many kinds of value in a Rust module.
 @node       Arithmetic values
 @subsection Arithmetic values
 
+The types of arithmetic value are:
+
+@itemize
+@item @code{nat}, the type of arbitrary-precision naturals.
+@item @code{int}, the type of arbitrary-precision integers.
+@item @code{rat}, the type of arbitrary-precision rationals.
+@end itemize
+
+All these types are represented internally as alternatives; on N-bit
+systems, typically, N-1-bit integral values of any of these types are
+stored as single machine words.
+
 @node       Textual values
 @subsection Textual values
+
+The types of textual value are:
+
+@itemize
+@item @code{char}, the type of unicode codepoints, as @code{u32} values.
+@item @code{str}, the type of unicode strings, equal to @code{vec[char]}.
+@item @code{strenc.utf8}, a @code{vec[u8] : strenc.is_utf8(*)}, the type of unicode strings encoded into UTF-8.
+@item @code{strenc.*}, various other character encodings.
+@end itemize
+
+It should be emphasized that the primary string type should be blindly
+memory-copied into an external buffer, as it will produce a sequence
+of numbers in the host byte order, and not necessarily equal to a
+particular UCS-4 encoding. When externalizing a string, care should be
+taken to select an appropriate encoding from the standard @code{enc.*}
+module.
 
 @node       Records
 @subsection Records
 
+The @code{rec} type introduces new record types that have named fields,
+similar to the @code{struct} types of C.
+
+Records are denoted with the keyword @code{rec}. The fields of a
+record are defined, as a list of slots within braces, similar to the
+slot declarations in a stack frame.
+
+Record fields can carry typestate constraints, similar to slots in a
+stack frame. Record types can also carry formal typestates relating to
+the record as a whole, or to some of its fields.
+
+
 @node       Vectors
 @subsection Vectors
+
+Vectors are the only variable-size type built into Rust. All
+vairable-size structures need to be built out of vectors.
+
+Vectors are parametric types, denoted with the keyword @code{vec}.  A
+vector of type @code{T} is denoted as @code{vec[T]}.
+
+A vector has two associated sizes: one representing the vector's
+allocated size, and one representing a bound on the initialized range
+of the vector. Within the initialized-range bound, all elements carry
+the @code{init} typestate. 
+
+Vectors dynamically resize using doubling and halving operations that
+amortize byte-copying costs to a constant factor per element.
+
+Because vectors automatically resize and byte-copy their contents,
+they represent a form of transplantation (see @ref{Value
+transplanting}), therefore vectors cannot contain directly limited
+values (see @ref{Limitation}). For values with indirectly limited type
+@code{T}, vectors of @code{T} are supported provided, but the vector
+must be declared as @code{lim vec[T]}.
+
+Because the @code{init} typestate is managed homogeneously over the
+initialized range of the vector, not per-element, vectors cannot have
+individual elements deinitialized. Instead, the following operations
+are defined:
+
+@itemize
+@item Elements can be swapped inside the vector.
+@item An element of the appropriate type can be appended to the vector.
+@item A vector of the same element type can be appended to the vector.
+@item The vector can be truncated to any size smaller than its current size.
+@item An element of the vector can be swapped with an external, initialized value.
+@end itemize
+
+Vectors can have an associated formal typestate that applies to every
+element in the vector, or to the vector as a whole.
 
 @node       Alternatives
 @subsection Alternatives
 
+Alternatives are structures that contain, at any given point, exactly
+one of an explicitly enumerated set of possible values.  They are
+similar to the disjoint sum types of ML, and can be seen as a ``safe''
+version of @code{union} types in C.
+
+Alternatives are denoted with the @code{alt} keyword. The possible
+values of the alternative are called @i{cases}, and the cases are
+denoted with unique identifiers, that act as labels.
+
+The space consumed by an N-alternative has two components:
+
+@itemize
+@item The space for the cases, which is the maximum space required 
+for any of the cases. This space is used regardless of case.
+@item The space for the discriminant field, which is @code{ceil(log_2(N))}
+bits.
+@end itemize
+
+If the space consumed by an alternative can fit inside a single word,
+Rust is obliged to store it this way. In particular, on a machine that
+effectively ``does not use'' K low bits of its pointers (due to
+alignment restrictions), those K low bits can be used to encode a
+@code{2^K}-case alternative. Rust must perform this optimization.
+
 @node       Functions
 @subsection Functions
+
+Functions are subroutines that have a single point where control
+enters, and that are given a single point in their caller to return
+to. A function @i{returns} a value. A function can also pass multiple
+values back to its caller through arguments. The calling convention in
+Rust provides a variety of modes. Un-annotated parameters are simply
+copied into functions (``call by value'') and discarded when the
+function completes; if such parameters are constant, the copy can be a
+very efficient dependent slot (see @ref{Slot modes}). 
+
+However, limited types cannot be copied, and in some cases named
+``output parameters'' are also desirable. For this reason Rust
+supports three parameter-mode annotations:
+
+@itemize
+@item @code{in}, which means ``move in''
+@item @code{out}, which means ``move out''
+@item @code{inout}, which means ``move in and out''
+@end itemize
+
+Return values are always passed by moving, since the slot containing
+the return value is only visible up until the point of return, not
+beyond.
+
+Reference parameters, like reference slots everywhere, are denoted
+with a @code{^} prefix on the type name. See @ref{Slot modes} for
+details.
+
+Constant parameters, like constant slots everywhere, are denoted with
+a @code{=} suffix on the type name. See @ref{Constant types and slots}
+for details.
+
+Functions are required to support proper tail-calls.
+
+Functions may be pure. A pure function performs no communication
+tasks: it does not send on any channel, nor does it spawn or otherwise
+interact with a process type.
 
 @node       Iterators
 @subsection Iterators
 
+Iterators are subroutines that have a primary point where control
+enters and are passed a primary return address, like functions. Unlike
+functions, iterators are also passed a secondary yield address, and
+may have several points within them where a value can be
+yielded. Yielding a value suspends the iterator and calls back to the
+yield address with the yielded value as a parameter.  After yielding,
+an iterator may be resumed, which restores execution at the point
+immediately following the yield.
+
+Iterators are a very limited type of coroutine: they are allocated on
+the stack like functions, and run to completion before their caller
+can return. Essentially they are ``nested coroutines''; but their
+implementation can be very efficient as a result: the iterator frame
+remains allocated during iteration, and control only jumps between the
+caller frame and the iterator frame.
+
+Iterators are also required to support proper tail-calls. Iterators
+must also support proper tail-@emph{yields}.  A tail-yield occurs when
+a primary iterator invokes a sub-iterator only to yield every value
+yielded by the sub-iterator. Then the primary iterator passes its
+caller's yield address to the sub-iterator, for direct yielding
+between the sub-iterator and caller. When such a tail-yield happens in
+tail-call position (the last statement of an iterator), the iterator
+is requried to replace its stack frame with the frame of the
+sub-iterator, as a function would.
+
+Iterators may also be pure. Purity of iterators means the same thing
+as purity in functions.
+
 @node       Predicates
 @subsection Predicates
+
+Predicates are boolean pure functions that connect runtime values
+to the typestate system. Typestates consist of predicates applied
+to slots at points; introducing a new predicate thereby enlarges 
+the set of possible typestates. 
+
+Predicates can be asserted with the keyword @code{assert}. The 
+poststate of a statement @code{assert(p,q,r)} is equal to the
+prestate 
 
 @node       Programs
 @subsection Programs
@@ -257,7 +433,7 @@ There are many kinds of value in a Rust module.
 @node       Value and slot types
 @subsection Value and slot types
 
-Every value has a unique type. 
+Every value has a unique type.
 
 Every slot has a unique type.
 
@@ -272,7 +448,6 @@ Some types are @i{limited}. A type @var{T} is @dfn{limited} iff any of
 these conditions hold:
 
 @itemize
-@item The type @var{T} is declared as @code{lim}.
 @item The type @var{T} contains a limited slot.
 @item The type @var{T} is a process type.
 @end itemize
@@ -280,9 +455,13 @@ these conditions hold:
 Limited values cannot be copied or transmitted. See @ref{Memory model}
 for the definitions of copying and transmission.
 
-A type that is a process type or declares itself limited is called 
-@dfn{directly limited}. A type that simply contains a limited slot
-is called @dfn{indirectly limited}.
+A type that is a process type is called @dfn{directly limited}. A type
+that simply contains a limited slot is called @dfn{indirectly
+limited}.
+
+Limitation ``infects'' the structure that contains it; any type that
+is indirectly limited must be declared as such with the keyword
+@code{lim}.
 
 
 @node       Purity
@@ -333,7 +512,7 @@ sequential statements.  Every point in a normalized block has a
 normalized statement: 
 
 @itemize
-@item The @dfn{prestate}, that preceeds the statement.
+@item The @dfn{prestate}, that precedes the statement.
 @item The @dfn{poststate}, that follows the statement.
 @end itemize
 
@@ -345,7 +524,7 @@ Typestates form a semilattice ordered by subset-inclusion: @var{X} <
 ``join'' operation is ``set intersection''.
 
 When @var{K} statements lead to a single point, the point's typestate
-is the pairwise join of the @var{K} poststates of preceeding
+is the pairwise join of the @var{K} poststates of preceding
 statements.
 
 Predicates are declared with @code{pred}, and have names and
@@ -639,7 +818,7 @@ immediate slot is also used to contain the value, and every copy is
 effectively a ``transplant'' because there is no advantage to copying
 less than the full value.
 
-A slot is dependent iff its type has superword size, but refers to a
+A slot can be dependent iff its type has superword size and refers to a
 value that is statically known to be initialized and constant at every
 point where the slot is visible. The most important cases of dependent
 slots are non-immediate constant slots for subroutine arguments,
@@ -658,11 +837,40 @@ differ from immediate slots insofar as the @emph{address} of an
 interior slot can be stored in a dependent slot. Immediate slots are
 always passed by value.
 
-A slot is exterior iff the slot is not dependent, and either its type
-has indefinite size or its type is directly limited. Exterior slots
-always contain the address of an exterior allocation; assignment of an
-interior value to an exterior slot causes a transplant to exterior
-storage.
+A slot can be exterior iff the slot's type has indefinite size or its
+type is directly limited, and the slot is not dependent. Exterior
+slots always contain the address of an exterior allocation; assignment
+of an interior value to an exterior slot causes a transplant to
+exterior storage.
+
+Rust could --- but does not --- select slot modes completely
+automatically. To provide the user with a suggestive mental picture of
+the space costs of their code, Rust provides an @emph{explicit
+notation} for slots with exterior or dependent mode: the slot
+qualifier @code{^}, pronounced ``ref''. By writing @code{^T} for a
+slot of some type @code{T}, the user can be sure that only a
+fixed-size storage cell (an address) will be allocated for the slot in
+its containing structure. The user cannot control whether dependent or
+exterior mode is chosen to implement a reference slot: dependent mode
+is always chosen in preference to exterior mode, whenever possible.
+
+It should be emphasized, however, that the @code{^} qualifier does
+@emph{not} produce an separately denotable concept of ``address'':
+there is no mechanism for denoting or manipulating the address stored
+in a reference slot, and all the type-state rules are identical for
+reference and non-reference slots. 
+
+@node       Constant types and slots
+@subsection Constant types and slots
+
+Every type has a constant form, denoted by appending @code{=}
+(pronounced ``const'') to a type expression: for example @code{int=}
+is the type of integer constants. The @code{=} annotation can be made
+in a type definition or in a slot declaration, or both. If a constant
+type is definined, all slots of that type are implicitly constant. In
+a constant slot declaration, an initializer must be present (or
+implied, as in the case of a subroutine parameter slot).
+
 
 @node Index
 

@@ -6,9 +6,11 @@
   let _ =
     List.iter (fun (kwd, tok) -> Hashtbl.add keyword_table kwd tok)
               [ ("crate", CRATE);
-                ("module", MODULE);
+                ("mod", MOD);
                 ("use", USE);
-                ("pub", PUB);
+
+                ("pub", PUBLIC);
+                ("priv", PRIVATE);
 
                 ("meta", META);
                 ("syntax", SYNTAX);
@@ -27,17 +29,22 @@
 
                 ("type", TYPE);
                 ("pred", PRED);
+                ("assert", ASSERT);
 
-                ("const", CONST);
+                ("lim", LIM);
                 ("pure", PURE);
+
+                ("in", IN);
+                ("out", OUT);
+                ("inout", INOUT);
 
                 ("auto", AUTO);
                 ("inline", INLINE);
 
                 ("nil", NIL);
-                ("ptr", PTR);
 
                 ("int", INT);
+                ("nat", NAT);
                 ("rat", RAT);
 
                 ("char", CHAR);
@@ -64,8 +71,8 @@
 }
 
 let bin = "0b" ['0' '1']['0' '1' '_']*
-let hex = "0x" ['0'-'9' 'a'-'f' 'A'-'F']['0'-'9' 'a'-'f' 'A'-'F' '_']*
 let oct = "0o" ['0'-'7']['0'-'7' '_']*
+let hex = "0x" ['0'-'9' 'a'-'f' 'A'-'F']['0'-'9' 'a'-'f' 'A'-'F' '_']*
 let dec = ['-' '+']?['0'-'9']* ['.']? ['0'-'9']+ (['e''E']['-''+']?['0'-'9']+)? 
 let id = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
@@ -76,15 +83,18 @@ rule token = parse
 | [ '*' ]                      { STAR }
 | [ '/' ]                      { SLASH }
 | [ '%' ]                      { PERCENT }
-| [ '=' ]                      { ASSIGN }
-| "+="                         { PLUS_ASSIGN }
-| "-="                         { MINUS_ASSIGN }
-| "*="                         { STAR_ASSIGN }
-| "/="                         { SLASH_ASSIGN }
-| "%="                         { PERCENT_ASSIGN }
+| [ '=' ]                      { EQ }
+| "+="                         { PLUS_EQ }
+| "-="                         { MINUS_EQ }
+| "*="                         { STAR_EQ }
+| "/="                         { SLASH_EQ }
+| "%="                         { PERCENT_EQ }
+| "<-"                         { LARROW }
+| "->"                         { RARROW }
+| "^"                          { CARET }
 | [ '<' ]                      { LT }
 | "<="                         { LE }
-| "=="                         { EQ }
+| "=="                         { EQEQ }
 | ">="                         { GE }
 | [ '>' ]                      { GT }
 | [ '!' ]                      { NOT }
