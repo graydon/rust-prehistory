@@ -15,6 +15,8 @@ let numty n =
 
 /* Declarations */
 
+%token EOF
+
 /* Expression nodes that reduce to overridable 2 or 3-operand calls. */
 %token PLUS MINUS STAR SLASH PERCENT
 %token EQ PLUS_EQ MINUS_EQ STAR_EQ SLASH_EQ PERCENT_EQ
@@ -36,7 +38,7 @@ let numty n =
 /* Control-flow keywords. */
 %token IF ELSE WHILE FOR
 %token TRY FAIL FINI
-%token YIELD RET
+%token YIELD RETURN
 
 /* Type and type-state keywords. */
 %token TYPE PRED ASSERT
@@ -127,8 +129,6 @@ let numty n =
 
 /* Rules */
 
-program: FUNC  { 1 }
-
 expr: 
     expr OR expr        { EXPR_binary (BINOP_or, $1, $3)  }
   | expr AND expr       { EXPR_binary (BINOP_and, $1, $3) }
@@ -152,7 +152,7 @@ expr:
   | NOT expr            { EXPR_unary  (UNOP_not, $2)      }
 
   | literal             { EXPR_literal $1                 }
-  | name                { EXPR_name $1                    }
+  | lval                { EXPR_lval $1                    }
 
 
 literal:
@@ -163,6 +163,15 @@ literal:
   | LIT_NUM             { VAL_dyn (TY_arith (numty $1),
 				   VAL_arith $1)          }
 
+lidx_list: 
+    IDENT                             {  [LIDX_ident $1]       }
+  | lidx_list DOT IDENT               {  (LIDX_ident $3) :: $1 }
+  | lidx_list DOT LPAREN expr RPAREN  {  (LIDX_index $4) :: $1 }
+
+lval:
+    lidx_list            { Array.of_list (List.rev $1) }
+
+
 name_list: 
     IDENT DOT name_list  { $1 :: $3 }
   | IDENT                { [$1]     }  
@@ -172,8 +181,8 @@ name:
 
 
 ident_list: 
-    IDENT DOT ident_list { $1 :: $3 }
-  | IDENT                { [$1]     }  
+    IDENT COMMA ident_list { $1 :: $3 }
+  | IDENT                  { [$1]     }  
 
 idents: 
   ident_list             { Array.of_list $1 }
@@ -197,13 +206,45 @@ simple_ty_expr:
   | PROC                 { TY_proc                         }
   | VEC                  { TY_vec                          }
 
-  | CARET simple_ty_expr { TY_ref $2                       }
-  | simple_ty_expr EQ    { TY_const $1                     }
+  | simple_ty_expr CARET { TY_ref $1                       }
+  | MINUS simple_ty_expr { TY_const $2                     }
   | name                 { TY_named $1                     }
   | simple_ty_expr 
             LBRACKET
             idents
             RBRACKET     { TY_param ($1, $3)               }
+
+
+stmt: 
+    WHILE LPAREN expr RPAREN stmt     { STMT_while { while_expr = $3; 
+						     while_body = $5; } }
+  | IF LPAREN expr RPAREN stmt 
+      ELSE stmt                       { STMT_if { if_test = $3;
+						  if_then = $5;
+						  if_else = Some $7; } }
+
+  | IF LPAREN expr RPAREN stmt        { STMT_if { if_test = $3;
+						  if_then = $5;
+						  if_else = None } }
+
+  | YIELD expr SEMI                   { STMT_yield (Some $2)  }
+  | YIELD SEMI                        { STMT_yield None     }
+  | RETURN expr SEMI                  { STMT_return $2 }
+  | ASSERT pred SEMI                  { STMT_assert $2   }
+
+  | block_stmt                        { $1 }
+
+  | lval LARROW expr SEMI             { STMT_move ($1, $3) }
+  | lval EQ expr SEMI                 { STMT_copy ($1, $3) }
+
+stmt_list: 
+    stmt stmt_list               { $1 :: $2 }
+  | stmt                         { [$1]     }
+
+block_stmt:
+    LBRACE stmt_list RBRACE           { STMT_block (Array.of_list $2) }
+  | LBRACE RBRACE                     { STMT_block (Array.of_list []) }
+
 
 param_mode:
     IN                           { PARAM_move_in    }
@@ -274,23 +315,33 @@ sig_decl:
 
 
 decl:
-   FUNC IDENT sig_decl SEMI   {  { decl_name = $2; 
-				   decl_type = TY_func { subr_inline = false; 
-							 subr_pure = false;
-							 subr_sig = $3; };
-				   decl_value = VAL_dyn (TY_nil, VAL_nil);
-				   decl_state = Array.of_list []; } }
+   FUNC IDENT sig_decl SEMI 
+      {  { decl_name = $2; 
+	   decl_type = TY_func { subr_inline = false; 
+				 subr_pure = false;
+				 subr_sig = $3; };
+	   decl_value = VAL_dyn (TY_nil, VAL_nil);
+	   decl_state = Array.of_list []; } }
+
+  | FUNC IDENT sig_decl block_stmt 
+      {  { decl_name = $2; 
+	   decl_type = TY_func { subr_inline = false; 
+				 subr_pure = false;
+				 subr_sig = $3; };
+	   decl_value = VAL_dyn (TY_nil, VAL_nil);
+	   decl_state = Array.of_list []; } }
+
 decl_top:
     PUBLIC decl           { (VIS_public, $2)   }
   | PRIVATE decl          { (VIS_private, $2)  }
   | decl                  { (VIS_standard, $1) }
 
 decl_top_list:
-    decl_top SEMI decl_top_list              { $1 :: $3 }
-  | decl_top SEMI                            { [$1]     }  
+    decl_top decl_top_list              { $1 :: $2 }
+  | decl_top                            { [$1]     }  
 
 sourcefile:
-   decl_top_list        { Array.of_list $1 }
+   decl_top_list EOF      { Array.of_list $1 }
 
 %%
 

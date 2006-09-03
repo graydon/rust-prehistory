@@ -349,11 +349,11 @@ the return value is only visible up until the point of return, not
 beyond.
 
 Reference parameters, like reference slots everywhere, are denoted
-with a @code{^} prefix on the type name. See @ref{Slot modes} for
+with a @code{^} suffix on the type name. See @ref{Slot modes} for
 details.
 
 Constant parameters, like constant slots everywhere, are denoted with
-a @code{=} suffix on the type name. See @ref{Constant types and slots}
+a @code{-} prefix on the type name. See @ref{Constant types and slots}
 for details.
 
 Functions are required to support proper tail-calls.

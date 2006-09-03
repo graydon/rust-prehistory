@@ -25,7 +25,7 @@
                 ("fini", FINI);
 
                 ("yield", YIELD);
-                ("ret", RET);
+                ("return", RETURN);
 
                 ("type", TYPE);
                 ("pred", PRED);
@@ -105,6 +105,17 @@ rule token = parse
 | ">>>"                        { ASR }
 | [ '.' ]                      { DOT }
 | [ '~' ]                      { TILDE }
+
+| [ '(' ]                      { LPAREN }
+| [ ')' ]                      { RPAREN }
+| [ '[' ]                      { LBRACKET }
+| [ ']' ]                      { RBRACKET }
+| [ '{' ]                      { LBRACE }
+| [ '}' ]                      { RBRACE }
+| [ ';' ]                      { SEMI }
+| [ ':' ]                      { COLON }
+| [ ',' ]                      { COMMA }
+
 | id as i                 
                                { try
 		       		    Hashtbl.find keyword_table i
@@ -117,3 +128,4 @@ rule token = parse
 | ['"']    (([^'"']|"\\\"")* as s)   ['"']      { LIT_STR s }
 | ['\'']   ( [^'\''] as c)           ['\'']     { LIT_CHAR c } 
 | "'\\''"                                       { LIT_CHAR '\'' }
+| eof                           { EOF }

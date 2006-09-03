@@ -255,10 +255,10 @@ and rs_stmt =
   | STMT_try of stmt_try
   | STMT_yield of (rs_expr option)
   | STMT_return of rs_expr
-  | STMT_block of (rs_stmt array)
   | STMT_assert of rs_pred
-  | STMT_seti of rs_expr * rs_expr * rs_expr
-  | STMT_set of rs_expr * rs_expr
+  | STMT_block of (rs_stmt array)
+  | STMT_move of rs_lval * rs_expr
+  | STMT_copy of rs_lval * rs_expr
 
 and stmt_while = 
     {
@@ -299,7 +299,13 @@ and rs_expr =
     EXPR_binary of (rs_binop * rs_expr * rs_expr)
   | EXPR_unary of (rs_unop * rs_expr)
   | EXPR_literal of rs_val
-  | EXPR_name of rs_name
+  | EXPR_lval of rs_lval
+
+and rs_lval = rs_lidx array
+
+and rs_lidx =
+    LIDX_ident of string
+  | LIDX_index of rs_expr
 
 and rs_binop =    
 
@@ -323,8 +329,6 @@ and rs_binop =
   | BINOP_mul
   | BINOP_div
   | BINOP_mod
-
-  | BINOP_idx
 
 and rs_unop =
 
