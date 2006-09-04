@@ -18,40 +18,61 @@ let numty n =
 %token EOF
 
 /* Expression nodes that reduce to overridable 2 or 3-operand calls. */
-%token PLUS MINUS STAR SLASH PERCENT
-%token EQ PLUS_EQ MINUS_EQ STAR_EQ SLASH_EQ PERCENT_EQ
-%token LT LE EQEQ NE GE GT 
-%token NOT AND OR LSL LSR ASR
+%token <Ast.rs_pos> PLUS MINUS STAR SLASH PERCENT
+%token <Ast.rs_pos> EQ PLUS_EQ MINUS_EQ STAR_EQ SLASH_EQ PERCENT_EQ
+%token <Ast.rs_pos> LT LE EQEQ NE GE GT 
+%token <Ast.rs_pos> NOT AND OR LSL LSR ASR
 
-/* No user-overriding beyond this line. */
-%token DOT CARET
+/**************************************************************/
+/* No user-overriding operators or symbols beyond this line.  */
+/**************************************************************/
 
-/* Structural symbols. */
-%token COMMA SEMI COLON LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET RARROW LARROW
+/* Structural symbols, erased in AST so no position. */
+%token CARET DOT COMMA SEMI COLON RARROW LARROW
+%token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET 
 
 /* Keywords for the crate and module system. */
-%token CRATE MOD USE PUB
+%token <Ast.rs_pos> CRATE MOD USE PUB
 
 /* Metaprogramming keywords. */
-%token SYNTAX META TILDE
+%token <Ast.rs_pos> SYNTAX META TILDE
 
 /* Control-flow keywords. */
-%token IF ELSE WHILE FOR
-%token TRY FAIL FINI
-%token YIELD RETURN
+%token <Ast.rs_pos> IF ELSE WHILE FOR
+%token <Ast.rs_pos> TRY FAIL FINI
+%token <Ast.rs_pos> YIELD RETURN
 
 /* Type and type-state keywords. */
-%token TYPE PRED ASSERT
+%token <Ast.rs_pos> TYPE PRED ASSERT
 
 /* Parameter qualifiers. */
-%token IN OUT INOUT
+%token <Ast.rs_pos> IN OUT INOUT
 
 /* Type qualifiers. */
-%token LIM PURE
+%token <Ast.rs_pos> LIM PURE
 
 /* Declarator qualifiers. */
-%token PUBLIC PRIVATE AUTO INLINE
+%token <Ast.rs_pos> PUBLIC PRIVATE AUTO INLINE
 
+
+/* Magic runtime services. */
+%token <Ast.rs_pos> SPAWN LOG REFLECT EVAL
+
+/* Literals. */
+%token <Num.num * Ast.rs_pos> LIT_NUM
+%token <string * Ast.rs_pos> LIT_STR 
+%token <char * Ast.rs_pos> LIT_CHAR 
+
+/* Identifiers. */
+%token <string * Ast.rs_pos> IDENT
+
+
+/* 
+ * Type constructors are copied around so much that
+ * we have decided not to give them positions. It's 
+ * just as likely to be wrong as right. 
+ */
+      
 /* Basic types. */
 %token NIL 
 %token INT NAT RAT
@@ -67,17 +88,6 @@ let numty n =
 /* Process types. */
 %token PROC PROG PORT
 
-/* Magic runtime services. */
-%token SPAWN LOG REFLECT EVAL
-
-/* Literals. */
-%token <Num.num> LIT_NUM
-%token <string> LIT_STR 
-%token <char> LIT_CHAR 
-
-/* Identifiers. */
-%token <string> IDENT
-
 /* Precedences (mostly borrowed from C). */
 %left OR
 %left AND
@@ -91,7 +101,7 @@ let numty n =
 /* Entries. */
 %start sourcefile
 
-%type <rs_val>           literal
+%type <rs_expr>          literal
 %type <rs_expr>          expr
 
 %type <string list>      name_list
@@ -130,41 +140,59 @@ let numty n =
 /* Rules */
 
 expr: 
-    expr OR expr        { EXPR_binary (BINOP_or, $1, $3)  }
-  | expr AND expr       { EXPR_binary (BINOP_and, $1, $3) }
+    expr OR expr        { EXPR_binary (BINOP_or, $2, $1, $3)  }
+  | expr AND expr       { EXPR_binary (BINOP_and, $2, $1, $3) }
 
-  | expr LT expr        { EXPR_binary (BINOP_lt, $1, $3)  }
-  | expr LE expr        { EXPR_binary (BINOP_le, $1, $3)  }
-  | expr GE expr        { EXPR_binary (BINOP_ge, $1, $3)  }
-  | expr GT expr        { EXPR_binary (BINOP_gt, $1, $3)  }
+  | expr LT expr        { EXPR_binary (BINOP_lt, $2, $1, $3)  }
+  | expr LE expr        { EXPR_binary (BINOP_le, $2, $1, $3)  }
+  | expr GE expr        { EXPR_binary (BINOP_ge, $2, $1, $3)  }
+  | expr GT expr        { EXPR_binary (BINOP_gt, $2, $1, $3)  }
 
-  | expr LSL expr       { EXPR_binary (BINOP_lsl, $1, $3) }
-  | expr LSR expr       { EXPR_binary (BINOP_lsr, $1, $3) }
-  | expr ASR expr       { EXPR_binary (BINOP_asr, $1, $3) }
+  | expr LSL expr       { EXPR_binary (BINOP_lsl, $2, $1, $3) }
+  | expr LSR expr       { EXPR_binary (BINOP_lsr, $2, $1, $3) }
+  | expr ASR expr       { EXPR_binary (BINOP_asr, $2, $1, $3) }
 
-  | expr PLUS expr      { EXPR_binary (BINOP_add, $1, $3) }
-  | expr MINUS expr     { EXPR_binary (BINOP_sub, $1, $3) }
+  | expr PLUS expr      { EXPR_binary (BINOP_add, $2, $1, $3) }
+  | expr MINUS expr     { EXPR_binary (BINOP_sub, $2, $1, $3) }
 
-  | expr STAR expr      { EXPR_binary (BINOP_mul, $1, $3) }
-  | expr SLASH expr     { EXPR_binary (BINOP_div, $1, $3) }
-  | expr PERCENT expr   { EXPR_binary (BINOP_mod, $1, $3) }
+  | expr STAR expr      { EXPR_binary (BINOP_mul, $2, $1, $3) }
+  | expr SLASH expr     { EXPR_binary (BINOP_div, $2, $1, $3) }
+  | expr PERCENT expr   { EXPR_binary (BINOP_mod, $2, $1, $3) }
 
-  | NOT expr            { EXPR_unary  (UNOP_not, $2)      }
+  | NOT expr            { EXPR_unary  (UNOP_not, $1, $2)      }
+      
+  | lval 
+      LPAREN 
+      exprs 
+      RPAREN            { EXPR_call ($1, $3)              }
 
-  | literal             { EXPR_literal $1                 }
+  | lval 
+      LPAREN 
+      RPAREN            { EXPR_call ($1, Array.of_list [])}
+
+  | literal             { $1                              }
   | lval                { EXPR_lval $1                    }
 
+expr_list:
+    expr COMMA expr_list      { $1 :: $3 }
+  | expr                      { [$1]     }
+
+exprs:
+    expr_list                 { Array.of_list $1 }
 
 literal:
-    LIT_STR             { VAL_dyn (TY_str, VAL_str $1)    }
+    LIT_STR             { EXPR_literal (VAL_dyn (TY_str, VAL_str (fst $1)), 
+					(snd $1))                             }
 
-  | LIT_CHAR            { VAL_dyn (TY_char, VAL_char $1)  }
+  | LIT_CHAR            { EXPR_literal (VAL_dyn (TY_char, VAL_char (fst $1)), 
+					(snd $1))                             }
 
-  | LIT_NUM             { VAL_dyn (TY_arith (numty $1),
-				   VAL_arith $1)          }
+  | LIT_NUM             { EXPR_literal (VAL_dyn (TY_arith (numty (fst $1)),
+						 VAL_arith (fst $1)), 
+					(snd $1))                             }
 
 lidx_list: 
-    IDENT                             {  [LIDX_ident $1]       }
+    IDENT                             {  [LIDX_ident $1] }
   | lidx_list DOT IDENT               {  (LIDX_ident $3) :: $1 }
   | lidx_list DOT LPAREN expr RPAREN  {  (LIDX_index $4) :: $1 }
 
@@ -173,68 +201,151 @@ lval:
 
 
 name_list: 
-    IDENT DOT name_list  { $1 :: $3 }
-  | IDENT                { [$1]     }  
+    IDENT DOT name_list  { (fst $1) :: $3 }
+  | IDENT                { [fst $1]       }  
 
 name: 
   name_list              { Array.of_list $1 }
 
 
 ident_list: 
-    IDENT COMMA ident_list { $1 :: $3 }
-  | IDENT                  { [$1]     }  
+    IDENT COMMA ident_list { (fst $1) :: $3 }
+  | IDENT                  { [fst $1]       }  
 
 idents: 
   ident_list             { Array.of_list $1 }
 
-
-simple_ty_expr:
-    NIL                  { TY_nil                          }
-
-  | UNSIGNED             { TY_prim (TY_unsigned, $1)       }
-  | SIGNED               { TY_prim (TY_signed, $1)         }
-  | BFP                  { TY_prim (TY_ieee_bfp, $1)       }
-  | DFP                  { TY_prim (TY_ieee_dfp, $1)       }
-
-  | INT                  { TY_arith (TY_int)               }
+mach_ty_expr:
+    UNSIGNED             { TY_mach (TY_unsigned, $1)       }
+  | SIGNED               { TY_mach (TY_signed, $1)         }
+  | BFP                  { TY_mach (TY_ieee_bfp, $1)       }
+  | DFP                  { TY_mach (TY_ieee_dfp, $1)       }
+      
+arith_ty_expr:
+    INT                  { TY_arith (TY_int)               }
   | NAT                  { TY_arith (TY_nat)               }
   | RAT                  { TY_arith (TY_rat)               }
+
+prim_ty_expr:
+    NIL                  { TY_nil                          }
+
+  | mach_ty_expr         { $1                              }
+  | arith_ty_expr        { $1                              }
 
   | STR                  { TY_str                          }
   | CHAR                 { TY_char                         }
 
   | PROC                 { TY_proc                         }
   | VEC                  { TY_vec                          }
-
-  | simple_ty_expr CARET { TY_ref $1                       }
-  | MINUS simple_ty_expr { TY_const $2                     }
   | name                 { TY_named $1                     }
-  | simple_ty_expr 
+  | prim_ty_expr 
             LBRACKET
             idents
             RBRACKET     { TY_param ($1, $3)               }
+  | LPAREN 
+      complex_ty_expr 
+      RPAREN             { $2                              }
+
+
+simple_ty_expr:
+          prim_ty_expr        { $1                              }
+  |       prim_ty_expr CARET  { TY_ref $1                       }
+  | MINUS prim_ty_expr        { TY_const $2                     }
+  | MINUS prim_ty_expr CARET  { TY_const (TY_ref $2)            }
+
+subr:
+    FUNC  { fun r -> TY_func r }
+  | ITER  { fun r -> TY_iter r }
+
+qualified_subr:
+
+    INLINE PURE subr    { fun s -> $3 { subr_inline = true; 
+					subr_pure = true; 
+					subr_sig = s; } }
+
+  | INLINE subr         { fun s -> $2 { subr_inline = true; 
+					subr_pure = false; 
+					subr_sig = s; } }
+
+  | PURE subr           { fun s -> $2 { subr_inline = false; 
+					subr_pure = true; 
+					subr_sig = s; } }
+
+  | subr                { fun s -> $1 { subr_inline = false; 
+					subr_pure = false; 
+					subr_sig = s; } }
+
+rec_slot:
+    simple_ty_expr IDENT SEMI   { { rec_slot_name = (fst $2);
+				    rec_slot_type = $1;
+				    rec_slot_state = Array.of_list []} }
+
+  | simple_ty_expr IDENT state  { { rec_slot_name = (fst $2);
+				    rec_slot_type = $1;
+				    rec_slot_state = $3} }
+				    
+
+rec_slot_list:
+    rec_slot rec_slot_list      { $1 :: $2 }
+  | rec_slot                    { [$1]     }
+
+rec_slots:
+    rec_slot_list               { Array.of_list $1 }
+
+rec_body:
+    rec_slots                   { { rec_slots = $1; 
+				    rec_state = Array.of_list [] } }
+
+  | rec_slots state             { { rec_slots = $1;
+				    rec_state = $2 } }
+
+alt_case:
+    IDENT                         { { alt_case_name = (fst $1); 
+				      alt_case_rec = None } } 
+
+  | IDENT LBRACE rec_body RBRACE  { { alt_case_name = (fst $1);
+				      alt_case_rec = Some $3 } }
+
+alt_case_list:
+    alt_case alt_case_list        { $1 :: $2 }
+  | alt_case                      { [$1]     }
+
+alt_cases:
+  alt_case_list                   { Array.of_list $1 }
+
+complex_ty_expr:
+    simple_ty_expr                { $1        }
+  | qualified_subr sig_decl       { $1 $2     }
+  | REC LBRACE rec_body RBRACE    { TY_rec $3 }
+  | ALT LBRACE alt_cases RBRACE   { TY_alt $3 }
 
 
 stmt: 
     WHILE LPAREN expr RPAREN stmt     { STMT_while { while_expr = $3; 
-						     while_body = $5; } }
-  | IF LPAREN expr RPAREN stmt 
-      ELSE stmt                       { STMT_if { if_test = $3;
+						     while_body = $5;
+						     while_pos = $1} }
+  | IF LPAREN expr RPAREN 
+      block_stmt 
+      ELSE 
+      block_stmt                      { STMT_if { if_test = $3;
 						  if_then = $5;
-						  if_else = Some $7; } }
+						  if_else = Some $7;
+						  if_pos = $1     } }
 
-  | IF LPAREN expr RPAREN stmt        { STMT_if { if_test = $3;
+  | IF LPAREN expr RPAREN 
+      stmt                            { STMT_if { if_test = $3;
 						  if_then = $5;
-						  if_else = None } }
+						  if_else = None;
+						  if_pos = $1     } }
 
-  | YIELD expr SEMI                   { STMT_yield (Some $2)  }
-  | YIELD SEMI                        { STMT_yield None     }
-  | RETURN expr SEMI                  { STMT_return $2 }
-  | ASSERT pred SEMI                  { STMT_assert $2   }
+  | YIELD expr SEMI                   { STMT_yield ((Some $2), $1)  }
+  | YIELD SEMI                        { STMT_yield (None, $1)       }
+  | RETURN expr SEMI                  { STMT_return ($2, $1)        }
+  | ASSERT pred SEMI                  { STMT_assert ($2, $1)        }
 
-  | block_stmt                        { $1 }
+  | block_stmt                        { $1                          }
 
-  | lval LARROW expr SEMI             { STMT_move ($1, $3) }
+  | lval LARROW lval SEMI             { STMT_move ($1, $3) }
   | lval EQ expr SEMI                 { STMT_copy ($1, $3) }
 
 stmt_list: 
@@ -252,8 +363,12 @@ param_mode:
   | INOUT                        { PARAM_move_inout }
 
 param:
-    simple_ty_expr param_mode    { { param_type = $1; param_mode = $2;       } }
-  | simple_ty_expr               { { param_type = $1; param_mode = PARAM_copy; } }
+    simple_ty_expr param_mode IDENT    { { param_type = $1; 
+					   param_mode = $2; 
+					   param_name = (fst $3) } }
+  | simple_ty_expr IDENT               { { param_type = $1; 
+					   param_mode = PARAM_copy; 
+					   param_name = (fst $2) } }
 
 param_list:
     param COMMA param_list       { $1 :: $3 }
@@ -292,11 +407,11 @@ paren_params:
   | LPAREN RPAREN                { Array.of_list [] }
 
 paren_params_and_maybe_state:
-    paren_params COLON state     { ($1, $3)               }
+    paren_params state           { ($1, $2)               }
   | paren_params                 { ($1, Array.of_list []) }
 
 simple_ty_expr_and_maybe_state:
-    simple_ty_expr COLON state   { ($1, $3)               }
+    simple_ty_expr state         { ($1, $2)               }
   | simple_ty_expr               { ($1, Array.of_list []) }
 
 sig_decl:
@@ -315,21 +430,19 @@ sig_decl:
 
 
 decl:
-   FUNC IDENT sig_decl SEMI 
-      {  { decl_name = $2; 
-	   decl_type = TY_func { subr_inline = false; 
-				 subr_pure = false;
-				 subr_sig = $3; };
+    TYPE IDENT EQ complex_ty_expr SEMI
+      {  { decl_name = (fst $2);
+	   decl_type = TY_type;
 	   decl_value = VAL_dyn (TY_nil, VAL_nil);
-	   decl_state = Array.of_list []; } }
-
-  | FUNC IDENT sig_decl block_stmt 
-      {  { decl_name = $2; 
-	   decl_type = TY_func { subr_inline = false; 
-				 subr_pure = false;
-				 subr_sig = $3; };
+	   decl_state = Array.of_list [];
+	   decl_pos = (snd $2)                       } }
+      
+  | qualified_subr IDENT sig_decl block_stmt 
+      {  { decl_name = (fst $2); 
+	   decl_type = $1 $3;
 	   decl_value = VAL_dyn (TY_nil, VAL_nil);
-	   decl_state = Array.of_list []; } }
+	   decl_state = Array.of_list [];
+	   decl_pos = (snd $2)                       } }
 
 decl_top:
     PUBLIC decl           { (VIS_public, $2)   }

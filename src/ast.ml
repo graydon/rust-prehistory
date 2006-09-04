@@ -12,10 +12,16 @@ open Hashtbl;;
 (* Slot names are given by a dot-separated path within the current
    module namespace. *)
 
+type rs_pos = (string * int * int)
+;;
+
+let nopos : rs_pos = ("no-file", 0, 0)
+;;
+
 type rs_name = string array
 ;;
 
-type ty_prim =
+type ty_mach =
     TY_unsigned
   | TY_signed
   | TY_ieee_bfp
@@ -33,7 +39,7 @@ type rs_type =
   | TY_dyn
   | TY_type
 
-  | TY_prim of (ty_prim * int)
+  | TY_mach of (ty_mach * int)
   | TY_arith of ty_arith
   | TY_str
   | TY_char
@@ -88,6 +94,7 @@ and ty_rec_slot =
     { 
       rec_slot_name: string;
       rec_slot_type: rs_type;
+      rec_slot_state: rs_state;
     }
 
 and ty_alt = ty_alt_case array
@@ -95,7 +102,7 @@ and ty_alt = ty_alt_case array
 and ty_alt_case = 
     { 
       alt_case_name: string;
-      alt_case_rec: ty_rec;
+      alt_case_rec: ty_rec option;
     }
 
 and ty_subr = 
@@ -115,6 +122,7 @@ and rs_param =
     {
      param_type: rs_type;
      param_mode: rs_param_mode;
+     param_name: string;
    }
 
 and ty_sig = 
@@ -152,7 +160,7 @@ let init_star_pred : rs_pred =
     
 (* Values *)
 
-type val_prim = 
+type val_mach = 
     VAL_unsigned of int
   | VAL_signed of int
   | VAL_ieee_bfp of float
@@ -179,7 +187,7 @@ type rs_val =
 and rs_val_dyn =
 
     VAL_nil
-  | VAL_prim of val_prim
+  | VAL_mach of val_mach
   | VAL_arith of Num.num
   | VAL_str of string
   | VAL_char of char
@@ -188,9 +196,9 @@ and rs_val_dyn =
   | VAL_alt of val_rec
   | VAL_vec of val_vec
 
-  | VAL_func of (string array * rs_stmt)
-  | VAL_iter of (string array * rs_stmt)
-  | VAL_chan of (string array * int)
+  | VAL_func of (ty_subr * rs_stmt)
+  | VAL_iter of (ty_subr * rs_stmt)
+  | VAL_chan of (ty_subr * int)
 
   | VAL_prog of val_prog
   | VAL_proc of val_proc
@@ -206,13 +214,7 @@ and val_quote =
   | VAL_quote_decl
   | VAL_quote_stmt
 
-and val_rec = val_rec_slot array
-
-and val_rec_slot = 
-    {
-     val_rec_slot_name: string;
-     val_rec_slot_val: rs_val option;
-   }
+and val_rec = (string, rs_val) Hashtbl.t 
       
 and val_alt =
     {
@@ -253,23 +255,25 @@ and rs_stmt =
   | STMT_for of stmt_for
   | STMT_if of stmt_if
   | STMT_try of stmt_try
-  | STMT_yield of (rs_expr option)
-  | STMT_return of rs_expr
-  | STMT_assert of rs_pred
+  | STMT_yield of (rs_expr option * rs_pos)
+  | STMT_return of (rs_expr * rs_pos)
+  | STMT_assert of (rs_pred * rs_pos)
   | STMT_block of (rs_stmt array)
-  | STMT_move of rs_lval * rs_expr
+  | STMT_move of rs_lval * rs_lval
   | STMT_copy of rs_lval * rs_expr
 
 and stmt_while = 
     {
      while_expr: rs_expr;
      while_body: rs_stmt;
+     while_pos: rs_pos;
    }
       
 and stmt_foreach = 
     {
-     foreach_bindings: (string * rs_expr) array;
+     foreach_bindings: rs_decl array;
      foreach_body: rs_stmt;
+     foreach_pos: rs_pos;
    }
       
 and stmt_for = 
@@ -278,6 +282,7 @@ and stmt_for =
      for_test: rs_expr;
      for_step: rs_stmt;
      for_body: rs_stmt;
+     for_pos: rs_pos;
    }
 
 and stmt_if = 
@@ -285,6 +290,7 @@ and stmt_if =
      if_test: rs_expr;
      if_then: rs_stmt;
      if_else: rs_stmt option;
+     if_pos: rs_pos;
    }
 
 and stmt_try = 
@@ -292,19 +298,21 @@ and stmt_try =
      try_body: rs_stmt;
      try_fail: rs_stmt option;
      try_fini: rs_stmt option;
+     try_pos: rs_pos;
    }
 
 and rs_expr =
 
-    EXPR_binary of (rs_binop * rs_expr * rs_expr)
-  | EXPR_unary of (rs_unop * rs_expr)
-  | EXPR_literal of rs_val
+    EXPR_binary of (rs_binop * rs_pos * rs_expr * rs_expr)
+  | EXPR_unary of (rs_unop * rs_pos * rs_expr)
+  | EXPR_literal of (rs_val * rs_pos)
   | EXPR_lval of rs_lval
+  | EXPR_call of (rs_lval * (rs_expr array) )
 
 and rs_lval = rs_lidx array
 
 and rs_lidx =
-    LIDX_ident of string
+    LIDX_ident of (string * rs_pos)
   | LIDX_index of rs_expr
 
 and rs_binop =    
@@ -337,6 +345,7 @@ and rs_unop =
 and rs_decl = 
     { 
       decl_name: string;
+      decl_pos: rs_pos;
       decl_type: rs_type;
       decl_value: rs_val;
       decl_state: rs_state;

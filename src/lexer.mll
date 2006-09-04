@@ -2,70 +2,89 @@
 
 {
   open Parser;;
+  let bump_line p = { p with 
+		      Lexing.pos_lnum = p.Lexing.pos_lnum + 1; 
+		      Lexing.pos_bol = p.Lexing.pos_cnum }
+  ;;
+
+  let lexpos lbuf = let p = lbuf.Lexing.lex_start_p in
+                     (p.Lexing.pos_fname,
+		      p.Lexing.pos_lnum ,
+		      (p.Lexing.pos_cnum) - (p.Lexing.pos_bol))
+  ;;
+
+
   let keyword_table = Hashtbl.create 100
   let _ =
     List.iter (fun (kwd, tok) -> Hashtbl.add keyword_table kwd tok)
-              [ ("crate", CRATE);
-                ("mod", MOD);
-                ("use", USE);
+              [ ("crate", fun p -> CRATE p);
+                ("mod", fun p -> MOD p);
+                ("use", fun p -> USE p);
 
-                ("pub", PUBLIC);
-                ("priv", PRIVATE);
+                ("pub", fun p -> PUBLIC p);
+                ("priv", fun p -> PRIVATE p);
 
-                ("meta", META);
-                ("syntax", SYNTAX);
+                ("meta", fun p -> META p);
+                ("syntax", fun p -> SYNTAX p);
 
-                ("if", IF);
-                ("else", ELSE);
-                ("while", WHILE);
-                ("for", FOR);
+                ("if", fun p -> IF p);
+                ("else", fun p -> ELSE p);
+                ("while", fun p -> WHILE p);
+                ("for", fun p -> FOR p);
 
-                ("try", TRY);
-                ("fail", FAIL);
-                ("fini", FINI);
+                ("try", fun p -> TRY p);
+                ("fail", fun p -> FAIL p);
+                ("fini", fun p -> FINI p);
 
-                ("yield", YIELD);
-                ("return", RETURN);
+                ("yield", fun p -> YIELD p);
+                ("return", fun p -> RETURN p);
 
-                ("type", TYPE);
-                ("pred", PRED);
-                ("assert", ASSERT);
+                ("type", fun p -> TYPE p);
+                ("pred", fun p -> PRED p);
+                ("assert", fun p -> ASSERT p);
 
-                ("lim", LIM);
-                ("pure", PURE);
+                ("lim", fun p -> LIM p);
+                ("pure", fun p -> PURE p);
 
-                ("in", IN);
-                ("out", OUT);
-                ("inout", INOUT);
+                ("in", fun p -> IN p);
+                ("out", fun p -> OUT p);
+                ("inout", fun p -> INOUT p);
 
-                ("auto", AUTO);
-                ("inline", INLINE);
+                ("auto", fun p -> AUTO p);
+                ("inline", fun p -> INLINE p);
 
-                ("nil", NIL);
+                ("spawn", fun p -> SPAWN p);
+                ("log", fun p -> LOG p);
+                ("reflect", fun p -> REFLECT p);
+                ("eval", fun p -> EVAL p);
 
-                ("int", INT);
-                ("nat", NAT);
-                ("rat", RAT);
+		(* 
+		 * Type constructors are copied around so much that
+		 * we have decided not to give them positions. It's 
+		 * just as likely to be wrong as right. 
+		 *)
 
-                ("char", CHAR);
-                ("str", STR);
+                ("nil", fun _ -> NIL);
 
-                ("alt", ALT);
-                ("vec", VEC);
-                ("dyn", DYN);
+                ("int", fun _ -> INT);
+                ("nat", fun _ -> NAT);
+                ("rat", fun _ -> RAT);
 
-                ("func", FUNC);
-                ("iter", ITER);
-                ("chan", CHAN);
+                ("char", fun _ -> CHAR);
+                ("str", fun _ -> STR);
 
-                ("proc", PROC);
-                ("prog", PROG);
-                ("port", PORT);
+                ("alt", fun _ -> ALT);
+                ("vec", fun _ -> VEC);
+                ("dyn", fun _ -> DYN);
 
-                ("spawn", SPAWN);
-                ("log", LOG);
-                ("reflect", REFLECT);
-                ("eval", EVAL);
+                ("func", fun _ -> FUNC);
+                ("iter", fun _ -> ITER);
+                ("chan", fun _ -> CHAN);
+
+                ("proc", fun _ -> PROC);
+                ("prog", fun _ -> PROG);
+                ("port", fun _ -> PORT);
+
               ]
 ;;
 }
@@ -77,55 +96,62 @@ let dec = ['-' '+']?['0'-'9']* ['.']? ['0'-'9']+ (['e''E']['-''+']?['0'-'9']+)?
 let id = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 rule token = parse
-  [ ' ' '\t' '\n' ]            { token lexbuf }
-| [ '+' ]                      { PLUS }
-| [ '-' ]                      { MINUS }
-| [ '*' ]                      { STAR }
-| [ '/' ]                      { SLASH }
-| [ '%' ]                      { PERCENT }
-| [ '=' ]                      { EQ }
-| "+="                         { PLUS_EQ }
-| "-="                         { MINUS_EQ }
-| "*="                         { STAR_EQ }
-| "/="                         { SLASH_EQ }
-| "%="                         { PERCENT_EQ }
-| "<-"                         { LARROW }
-| "->"                         { RARROW }
-| "^"                          { CARET }
-| [ '<' ]                      { LT }
-| "<="                         { LE }
-| "=="                         { EQEQ }
-| ">="                         { GE }
-| [ '>' ]                      { GT }
-| [ '!' ]                      { NOT }
-| [ '&' ]                      { AND }
-| [ '|' ]                      { OR }
-| "<<"                         { LSL }
-| ">>"                         { LSR }
-| ">>>"                        { ASR }
-| [ '.' ]                      { DOT }
-| [ '~' ]                      { TILDE }
+  [ ' ' '\t' '\r' ]            { token lexbuf }
+| '\n'                         { lexbuf.Lexing.lex_curr_p 
+				 <- (bump_line lexbuf.Lexing.lex_curr_p);
+				 token lexbuf }
 
-| [ '(' ]                      { LPAREN }
-| [ ')' ]                      { RPAREN }
-| [ '[' ]                      { LBRACKET }
-| [ ']' ]                      { RBRACKET }
-| [ '{' ]                      { LBRACE }
-| [ '}' ]                      { RBRACE }
-| [ ';' ]                      { SEMI }
-| [ ':' ]                      { COLON }
-| [ ',' ]                      { COMMA }
+| '+'                          { PLUS       (lexpos lexbuf) }
+| '-'                          { MINUS      (lexpos lexbuf) }
+| '*'                          { STAR       (lexpos lexbuf) }
+| '/'                          { SLASH      (lexpos lexbuf) }
+| '%'                          { PERCENT    (lexpos lexbuf) }
+| '='                          { EQ         (lexpos lexbuf) }
+| "+="                         { PLUS_EQ    (lexpos lexbuf) }
+| "-="                         { MINUS_EQ   (lexpos lexbuf) }
+| "*="                         { STAR_EQ    (lexpos lexbuf) }
+| "/="                         { SLASH_EQ   (lexpos lexbuf) }
+| "%="                         { PERCENT_EQ (lexpos lexbuf) }
+| '<'                          { LT         (lexpos lexbuf) }
+| "<="                         { LE         (lexpos lexbuf) }
+| "=="                         { EQEQ       (lexpos lexbuf) }
+| ">="                         { GE         (lexpos lexbuf) }
+| '>'                          { GT         (lexpos lexbuf) }
+| '!'                          { NOT        (lexpos lexbuf) }
+| '&'                          { AND        (lexpos lexbuf) }
+| '|'                          { OR         (lexpos lexbuf) }
+| "<<"                         { LSL        (lexpos lexbuf) }
+| ">>"                         { LSR        (lexpos lexbuf) }
+| ">>>"                        { ASR        (lexpos lexbuf) }
+| '~'                          { TILDE      (lexpos lexbuf) }
+
+| "^"                          { CARET    }
+| '.'                          { DOT      }
+| ','                          { COMMA    }
+| ';'                          { SEMI     }
+| ':'                          { COLON    }
+| "<-"                         { LARROW   }
+| "->"                         { RARROW   }
+| '('                          { LPAREN   }
+| ')'                          { RPAREN   }
+| '['                          { LBRACKET }
+| ']'                          { RBRACKET }
+| '{'                          { LBRACE   }
+| '}'                          { RBRACE   }
 
 | id as i                 
-                               { try
-		       		    Hashtbl.find keyword_table i
-		                 with
-			 	    Not_found -> IDENT i }
+                                { try
+		       		    let tf = Hashtbl.find keyword_table i in
+				      tf (lexpos lexbuf) 
+		                  with
+			 	    Not_found -> IDENT (i, lexpos lexbuf)        }
 
-| (bin|oct|hex) as n            { LIT_NUM (Num.num_of_int (int_of_string n)) }
-| dec as d                      { LIT_NUM (Num.num_of_string d) }
+| (bin|oct|hex) as n            { LIT_NUM (Num.num_of_int (int_of_string n), 
+					   lexpos lexbuf)                        }
+| dec as d                      { LIT_NUM (Num.num_of_string d, lexpos lexbuf)   }
 
-| ['"']    (([^'"']|"\\\"")* as s)   ['"']      { LIT_STR s }
-| ['\'']   ( [^'\''] as c)           ['\'']     { LIT_CHAR c } 
-| "'\\''"                                       { LIT_CHAR '\'' }
+| ['"']    (([^'"']|"\\\"")* as s)   ['"']      { LIT_STR  (s, lexpos lexbuf)    }
+| ['\'']   ( [^'\''] as c)           ['\'']     { LIT_CHAR (c, lexpos lexbuf)    }
+| "'\\''"                                       { LIT_CHAR ('\'', lexpos lexbuf) }
+
 | eof                           { EOF }
