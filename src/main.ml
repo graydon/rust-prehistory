@@ -1,14 +1,12 @@
 let _ =
   let lexbuf = Lexing.from_channel (open_in Sys.argv.(1)) in
   try
-    let result = Parser.sourcefile Lexer.token lexbuf in
-    for i=0 to Array.length result - 1 do
-      match result.(i) with
-	(vis,decl) -> 
-	  Printf.printf "parsed decl: %s\n" decl.Ast.decl_name
-    done;
+    let sf = Parser.sourcefile Lexer.token lexbuf in
+    Hashtbl.iter (fun name (vis,decl) -> 
+      Printf.printf "parsed decl: %s\n" name)
+      sf;
     flush stdout;
-    Interp.interpret result;
+    Interp.interpret sf;
     flush stdout
   with 
     Parsing.Parse_error ->

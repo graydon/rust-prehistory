@@ -62,7 +62,8 @@ type rs_type =
   | TY_const of rs_type
   | TY_ref of rs_type
   | TY_named of rs_name
-  | TY_param of (rs_type * string array)
+  | TY_abstr of (rs_type * string array)
+  | TY_apply of (rs_type * rs_type array)
 
   | TY_lim of rs_type
 
@@ -242,11 +243,11 @@ and val_proc =
    }
 
 and proc_exec_state = 
-
-    PROC_RUN 
-  | PROC_RECV 
-  | PROC_SEND 
+    PROC_INIT
   | PROC_FINI
+  | PROC_MAIN 
+  | PROC_SEND 
+  | PROC_RECV 
 
 and rs_stmt =
 
@@ -261,6 +262,7 @@ and rs_stmt =
   | STMT_block of (rs_stmt array)
   | STMT_move of rs_lval * rs_lval
   | STMT_copy of rs_lval * rs_expr
+  | STMT_call of (rs_lval * (rs_expr array) )
 
 and stmt_while = 
     {

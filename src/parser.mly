@@ -133,11 +133,22 @@ let numty n =
 %type <rs_decl>              decl
 %type <rs_decl_top>          decl_top
 %type <rs_decl_top list>     decl_top_list
-%type <Ast.rs_decl_top array>    sourcefile
+%type <(string, Ast.rs_decl_top) Hashtbl.t>    sourcefile
 
 %%
 
 /* Rules */
+
+call:
+    lval 
+      LPAREN 
+      exprs 
+      RPAREN            { ($1, $3)                            }
+
+  | lval 
+      LPAREN 
+      RPAREN            { ($1, Array.of_list [])              }
+
 
 expr: 
     expr OR expr        { EXPR_binary (BINOP_or, $2, $1, $3)  }
@@ -161,17 +172,9 @@ expr:
 
   | NOT expr            { EXPR_unary  (UNOP_not, $1, $2)      }
       
-  | lval 
-      LPAREN 
-      exprs 
-      RPAREN            { EXPR_call ($1, $3)              }
-
-  | lval 
-      LPAREN 
-      RPAREN            { EXPR_call ($1, Array.of_list [])}
-
-  | literal             { $1                              }
-  | lval                { EXPR_lval $1                    }
+  | call                { EXPR_call $1                        }
+  | literal             { $1                                  }
+  | lval                { EXPR_lval $1                        }
 
 expr_list:
     expr COMMA expr_list      { $1 :: $3 }
@@ -240,8 +243,9 @@ prim_ty_expr:
   | name                 { TY_named $1                     }
   | prim_ty_expr 
             LBRACKET
-            idents
-            RBRACKET     { TY_param ($1, $3)               }
+            simple_ty_exprs
+            RBRACKET     { TY_apply ($1, $3)               }
+
   | LPAREN 
       complex_ty_expr 
       RPAREN             { $2                              }
@@ -252,6 +256,13 @@ simple_ty_expr:
   |       prim_ty_expr CARET  { TY_ref $1                       }
   | MINUS prim_ty_expr        { TY_const $2                     }
   | MINUS prim_ty_expr CARET  { TY_const (TY_ref $2)            }
+
+simple_ty_expr_list:
+    simple_ty_expr COMMA simple_ty_expr_list  { $1 :: $3 }
+  | simple_ty_expr                            { [$1]     }
+
+simple_ty_exprs:
+  simple_ty_expr_list                         { Array.of_list $1 }
 
 subr:
     FUNC  { fun r -> TY_func r }
@@ -342,6 +353,7 @@ stmt:
   | YIELD SEMI                        { STMT_yield (None, $1)       }
   | RETURN expr SEMI                  { STMT_return ($2, $1)        }
   | ASSERT pred SEMI                  { STMT_assert ($2, $1)        }
+  | call SEMI                         { STMT_call $1                }
 
   | block_stmt                        { $1                          }
 
@@ -454,7 +466,15 @@ decl_top_list:
   | decl_top                            { [$1]     }  
 
 sourcefile:
-   decl_top_list EOF      { Array.of_list $1 }
+   decl_top_list EOF      
+      { 
+	let bindings = Hashtbl.create 100 in
+	List.iter 
+	  (fun (vis,decl) -> 
+	    Hashtbl.add bindings decl.decl_name (vis,decl))
+	  $1;
+	bindings
+      }
 
 %%
 

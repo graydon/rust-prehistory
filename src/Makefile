@@ -6,6 +6,8 @@ main: parser.cmo lexer.cmo ast.cmo interp.cmo main.cmo
 
 main.cmo: parser.cmi lexer.cmi
 
+interp.cmo: ast.cmi interp.ml
+
 .phony: clean
 
 clean:

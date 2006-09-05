@@ -11,3 +11,9 @@ inline iter bar (zug[a,b,c] z, int i)
 
 
 type t = alt { happy { int p; -a q; } sad };
+
+func main(sys.rt^ rt, vec[str]^ args) -> int
+{
+        rt.put("hello, world\n");
+}
+
