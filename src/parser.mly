@@ -29,7 +29,8 @@ let numty n =
 
 /* Structural symbols, erased in AST so no position. */
 %token CARET DOT COMMA SEMI COLON RARROW LARROW
-%token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET 
+%token LPAREN RPAREN LBRACKET RBRACKET 
+%token <Ast.rs_pos> LBRACE RBRACE 
 
 /* Keywords for the crate and module system. */
 %token <Ast.rs_pos> CRATE MOD USE PUB
@@ -365,8 +366,8 @@ stmt_list:
   | stmt                         { [$1]     }
 
 block_stmt:
-    LBRACE stmt_list RBRACE           { STMT_block (Array.of_list $2) }
-  | LBRACE RBRACE                     { STMT_block (Array.of_list []) }
+    LBRACE stmt_list RBRACE           { STMT_block (Array.of_list $2, $1) }
+  | LBRACE RBRACE                     { STMT_block (Array.of_list [], $1) }
 
 
 param_mode:
@@ -477,27 +478,40 @@ decl_slot:
 
 
 prog_item:
-    decl_slot                   { PROG_decl $1                        }
-  | INIT sig_decl block_stmt    { PROG_init ($2, $3, $1)              }
-  | FINI block_stmt             { PROG_fini ($2, $1)                  }
-  | MAIN block_stmt             { PROG_main ($2, $1)                  }
-
-prog_item_list:
-    prog_item prog_item_list    { $1 :: $2                            }
-  | prog_item                   { [$1]                                }
+    decl_slot                   { (fun (p, b) -> (p, $1 :: b))        }
+  | INIT sig_decl block_stmt    
+      { (fun (p, b) -> ({p with prog_init = Some ($2, $3)}, b))       }
+  | MAIN block_stmt    
+      { (fun (p, b) -> ({p with prog_main = Some $2}, b))             }
+  | FINI block_stmt    
+      { (fun (p, b) -> ({p with prog_fini = Some $2}, b))             }
 
 prog_items:
-    prog_item_list              { Array.of_list $1                    }
+    prog_items prog_item        { fun pb -> $2 ($1 pb)                }
+  | prog_item                   { $1                                  }
 
 prog_body:
-    LBRACE prog_items RBRACE    { $2                                  }
-  | LBRACE RBRACE               { Array.of_list []                    }
+    LBRACE prog_items RBRACE 
+      { let p = { prog_auto = false;
+		  prog_init = None;
+		  prog_main = None;
+		  prog_fini = None;
+		  prog_decls = Array.of_list [] } in      
+        let (pp,b) = ($2 (p,[])) in
+	{ pp with prog_decls = Array.of_list b }
+      }
+
+  | LBRACE RBRACE                   
+      { let p = { prog_auto = false;
+		  prog_init = None;
+		  prog_main = None;
+		  prog_fini = None;
+		  prog_decls = Array.of_list [] }
+      in p }
 
 prog_head:
-    AUTO PROG                   { fun items -> { prog_auto = true;
-						 prog_items = items } }
-  | PROG                        { fun items -> { prog_auto = false;
-						 prog_items = items } }
+    AUTO PROG                   { fun p -> { p with prog_auto = true; } }
+  | PROG                        { fun p -> p }
 
 decl_top:
     decl 

@@ -126,6 +126,8 @@ rule token = parse
 | ">>"                         { LSR        (lexpos lexbuf) }
 | ">>>"                        { ASR        (lexpos lexbuf) }
 | '~'                          { TILDE      (lexpos lexbuf) }
+| '{'                          { LBRACE     (lexpos lexbuf) }
+| '}'                          { RBRACE     (lexpos lexbuf) }
 
 | "^"                          { CARET    }
 | '.'                          { DOT      }
@@ -138,8 +140,6 @@ rule token = parse
 | ')'                          { RPAREN   }
 | '['                          { LBRACKET }
 | ']'                          { RBRACKET }
-| '{'                          { LBRACE   }
-| '}'                          { RBRACE   }
 
 | id as i                 
                                 { try

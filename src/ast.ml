@@ -225,27 +225,33 @@ and val_alt =
 
 and val_vec = rs_val array
 
-and val_prog_item = 
-    PROG_init of (ty_sig * rs_stmt * rs_pos)
-  | PROG_fini of (rs_stmt * rs_pos)
-  | PROG_main of (rs_stmt * rs_pos)
-  | PROG_decl of rs_decl
-
 and val_prog = 
     { 
       prog_auto: bool;
-      prog_items: val_prog_item array;
+      prog_init: (ty_sig * rs_stmt) option;
+      prog_main: rs_stmt option;
+      prog_fini: rs_stmt option;
+      prog_decls: rs_decl array;
     }
 
 and rs_block = 
     {
+     mutable block_pc: int;
+     block_stmts: rs_stmt array;
      block_names: string Stack.t;
+     block_pos: rs_pos;
     }
-      
+
+and rs_frame_flavour = 
+    FRAME_iter of ty_sig
+  | FRAME_func of ty_sig
+  | FRAME_init of ty_sig
+  | FRAME_main
+  | FRAME_fini 
+
 and rs_frame = 
     {
-     mutable frame_pc: int;
-     frame_stmts: rs_stmt array;
+     frame_flavour: rs_frame_flavour;
      frame_blocks: rs_block Stack.t;
     }
 
@@ -284,7 +290,7 @@ and rs_stmt =
   | STMT_yield of (rs_expr option * rs_pos)
   | STMT_return of (rs_expr * rs_pos)
   | STMT_assert of (rs_pred * rs_pos)
-  | STMT_block of (rs_stmt array)
+  | STMT_block of ((rs_stmt array) * rs_pos)
   | STMT_move of rs_lval * rs_lval
   | STMT_copy of rs_lval * rs_expr
   | STMT_call of (rs_lval * (rs_expr array) )
