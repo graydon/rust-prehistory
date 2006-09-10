@@ -39,7 +39,7 @@ let numty n =
 
 /* Control-flow keywords. */
 %token <Ast.rs_pos> IF ELSE WHILE FOR
-%token <Ast.rs_pos> TRY FAIL FINI
+%token <Ast.rs_pos> TRY FAIL INIT MAIN FINI
 %token <Ast.rs_pos> YIELD RETURN
 
 /* Type and type-state keywords. */
@@ -104,7 +104,6 @@ let numty n =
 %type <rs_expr>          literal
 %type <rs_expr>          expr
 
-%type <string list>      name_list
 %type <rs_name>          name
 
 %type <string list>      ident_list
@@ -131,8 +130,8 @@ let numty n =
 %type <ty_sig>           sig_decl
 
 %type <rs_decl>              decl
-%type <rs_decl_top>          decl_top
-%type <rs_decl_top list>     decl_top_list
+%type <rs_decl_top>          qual_decl_top
+%type <rs_decl_top list>     qual_decl_top_list
 %type <(string, Ast.rs_decl_top) Hashtbl.t>    sourcefile
 
 %%
@@ -195,22 +194,20 @@ literal:
 					(snd $1))                             }
 
 lidx_list: 
-    IDENT                             {  [LIDX_ident $1] }
-  | lidx_list DOT IDENT               {  (LIDX_ident $3) :: $1 }
-  | lidx_list DOT LPAREN expr RPAREN  {  (LIDX_index $4) :: $1 }
+    IDENT                             { [LIDX_ident $1]       }
+  | lidx_list DOT IDENT               { (LIDX_ident $3) :: $1 }
+  | lidx_list DOT LPAREN expr RPAREN  { (LIDX_index $4) :: $1 }
 
 lval:
     lidx_list            { Array.of_list (List.rev $1) }
 
-
-name_list: 
-    IDENT DOT name_list  { (fst $1) :: $3 }
-  | IDENT                { [fst $1]       }  
-
 name: 
-  name_list              { Array.of_list $1 }
-
-
+      lval               { Array.map (fun x -> 
+                                      match x with 
+					LIDX_ident i -> (fst i)
+				      | LIDX_index _ -> raise Parse_error) 
+			     $1 }
+      
 ident_list: 
     IDENT COMMA ident_list { (fst $1) :: $3 }
   | IDENT                  { [fst $1]       }  
@@ -239,6 +236,7 @@ prim_ty_expr:
   | CHAR                 { TY_char                         }
 
   | PROC                 { TY_proc                         }
+  | PROG                 { TY_proc                         }
   | VEC                  { TY_vec                          }
   | name                 { TY_named $1                     }
   | prim_ty_expr 
@@ -287,13 +285,15 @@ qualified_subr:
 					subr_sig = s; } }
 
 rec_slot:
-    simple_ty_expr IDENT SEMI   { { rec_slot_name = (fst $2);
-				    rec_slot_type = $1;
-				    rec_slot_state = Array.of_list []} }
-
-  | simple_ty_expr IDENT state  { { rec_slot_name = (fst $2);
-				    rec_slot_type = $1;
-				    rec_slot_state = $3} }
+    simple_ty_expr IDENT SEMI   
+      { { rec_slot_name = (fst $2);
+	  rec_slot_type = $1;
+	  rec_slot_state = Array.of_list []} }
+      
+  | simple_ty_expr IDENT state SEMI  
+      { { rec_slot_name = (fst $2);
+	  rec_slot_type = $1;
+	  rec_slot_state = $3} }
 				    
 
 rec_slot_list:
@@ -353,12 +353,12 @@ stmt:
   | YIELD SEMI                        { STMT_yield (None, $1)       }
   | RETURN expr SEMI                  { STMT_return ($2, $1)        }
   | ASSERT pred SEMI                  { STMT_assert ($2, $1)        }
-  | call SEMI                         { STMT_call $1                }
-
   | block_stmt                        { $1                          }
+  | lval LARROW lval SEMI             { STMT_move ($1, $3)          }
+  | lval EQ expr SEMI                 { STMT_copy ($1, $3)          }
+  | call SEMI                         { STMT_call $1                }
+  | decl_slot                         { STMT_decl $1                }
 
-  | lval LARROW lval SEMI             { STMT_move ($1, $3) }
-  | lval EQ expr SEMI                 { STMT_copy ($1, $3) }
 
 stmt_list: 
     stmt stmt_list               { $1 :: $2 }
@@ -441,6 +441,8 @@ sig_decl:
   }
 
 
+/* members of "decl" are constants, OK in nearly every context */
+
 decl:
     TYPE IDENT EQ complex_ty_expr SEMI
       {  { decl_name = (fst $2);
@@ -456,17 +458,70 @@ decl:
 	   decl_state = Array.of_list [];
 	   decl_pos = (snd $2)                       } }
 
-decl_top:
-    PUBLIC decl           { (VIS_public, $2)   }
-  | PRIVATE decl          { (VIS_private, $2)  }
-  | decl                  { (VIS_standard, $1) }
+decl_slot:
+    decl  { $1 }
 
-decl_top_list:
-    decl_top decl_top_list              { $1 :: $2 }
-  | decl_top                            { [$1]     }  
+  | simple_ty_expr IDENT SEMI
+      { { decl_name = (fst $2);
+	  decl_type = $1;
+	  decl_value = VAL_dyn (TY_nil, VAL_nil);
+	  decl_state = Array.of_list [];
+	  decl_pos = (snd $2); } }
+
+  | simple_ty_expr IDENT state SEMI
+      { { decl_name = (fst $2);
+	  decl_type = $1;
+	  decl_value = VAL_dyn (TY_nil, VAL_nil);
+	  decl_state = $3;
+	  decl_pos = (snd $2); } }
+
+
+prog_item:
+    decl_slot                   { PROG_decl $1                        }
+  | INIT sig_decl block_stmt    { PROG_init ($2, $3, $1)              }
+  | FINI block_stmt             { PROG_fini ($2, $1)                  }
+  | MAIN block_stmt             { PROG_main ($2, $1)                  }
+
+prog_item_list:
+    prog_item prog_item_list    { $1 :: $2                            }
+  | prog_item                   { [$1]                                }
+
+prog_items:
+    prog_item_list              { Array.of_list $1                    }
+
+prog_body:
+    LBRACE prog_items RBRACE    { $2                                  }
+  | LBRACE RBRACE               { Array.of_list []                    }
+
+prog_head:
+    AUTO PROG                   { fun items -> { prog_auto = true;
+						 prog_items = items } }
+  | PROG                        { fun items -> { prog_auto = false;
+						 prog_items = items } }
+
+decl_top:
+    decl 
+      { $1 }
+
+  | prog_head IDENT prog_body    
+      {  { decl_name = (fst $2);
+	   decl_type = TY_prog;
+	   decl_value = VAL_dyn (TY_prog, VAL_prog ($1 $3));
+	   decl_state = Array.of_list [];
+	   decl_pos = (snd $2); } }
+  
+
+qual_decl_top:
+    PUBLIC decl_top       { (VIS_public, $2)   }
+  | PRIVATE decl_top      { (VIS_private, $2)  }
+  | decl_top              { (VIS_standard, $1) }
+
+qual_decl_top_list:
+    qual_decl_top qual_decl_top_list              { $1 :: $2 }
+  | qual_decl_top                                 { [$1]     }  
 
 sourcefile:
-   decl_top_list EOF      
+   qual_decl_top_list EOF      
       { 
 	let bindings = Hashtbl.create 100 in
 	List.iter 

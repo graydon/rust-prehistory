@@ -34,6 +34,8 @@
 
                 ("try", fun p -> TRY p);
                 ("fail", fun p -> FAIL p);
+                ("init", fun p -> INIT p);
+                ("main", fun p -> MAIN p);
                 ("fini", fun p -> FINI p);
 
                 ("yield", fun p -> YIELD p);

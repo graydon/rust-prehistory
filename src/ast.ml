@@ -225,20 +225,45 @@ and val_alt =
 
 and val_vec = rs_val array
 
+and val_prog_item = 
+    PROG_init of (ty_sig * rs_stmt * rs_pos)
+  | PROG_fini of (rs_stmt * rs_pos)
+  | PROG_main of (rs_stmt * rs_pos)
+  | PROG_decl of rs_decl
+
 and val_prog = 
     { 
-      prog_init: rs_stmt option;
-      prog_fini: rs_stmt option;
-      prog_main: rs_stmt;
-      prog_decls: rs_decl array;
+      prog_auto: bool;
+      prog_items: val_prog_item array;
+    }
+
+and rs_block = 
+    {
+     block_names: string Stack.t;
+    }
+      
+and rs_frame = 
+    {
+     mutable frame_pc: int;
+     frame_stmts: rs_stmt array;
+     frame_blocks: rs_block Stack.t;
     }
 
 and val_proc = 
     {
      proc_prog: val_prog;
      proc_env: (string, rs_val) Hashtbl.t;
-     proc_pc: int;
-     proc_state: proc_exec_state;
+
+   (* 
+    * Frames are held in a "push-down list": head is the top
+    * frame, but current executing frame may not be top due to iter
+    * protocol.  
+    *)
+
+     mutable proc_frame: int;
+     mutable proc_frames: rs_frame list;
+
+     mutable proc_state: proc_exec_state;
      proc_ports: int array;
    }
 
@@ -263,6 +288,7 @@ and rs_stmt =
   | STMT_move of rs_lval * rs_lval
   | STMT_copy of rs_lval * rs_expr
   | STMT_call of (rs_lval * (rs_expr array) )
+  | STMT_decl of rs_decl
 
 and stmt_while = 
     {
