@@ -9,8 +9,10 @@ open Hashtbl;;
  *
  *)
 
-(* Slot names are given by a dot-separated path within the current
-   module namespace. *)
+(* 
+ * Slot names are given by a dot-separated path within the current
+ * module namespace. 
+ *)
 
 type rs_pos = (string * int * int)
 ;;
@@ -18,10 +20,25 @@ type rs_pos = (string * int * int)
 let nopos : rs_pos = ("no-file", 0, 0)
 ;;
 
-type rs_name = string array
+(* "names" are statically computable references to particular slots;
+   they never involve vector indexing. They are formed by a
+   dot-separated sequence of identifier and/or literal-number
+   components, the latter representing tuple components (foo.0, foo.1,
+   etc). *)
+
+type rs_name_component =
+    COMP_string of string
+  | COMP_tupidx of int
 ;;
 
-type ty_mach =
+type rs_name = 
+   {
+   name_base: string;
+   name_rest: rs_name_component array;
+   }
+;;
+
+type ty_mach = 
     TY_unsigned
   | TY_signed
   | TY_ieee_bfp
@@ -46,10 +63,10 @@ type rs_type =
 
   | TY_rec of ty_rec
   | TY_alt of ty_alt
-  | TY_vec 
+  | TY_tup of ty_tup
+  | TY_vec of ty_vec
 
-  | TY_func of ty_subr
-  | TY_iter of ty_subr
+  | TY_subr of ty_subr
   | TY_chan of ty_sig
 
   | TY_port of ty_sig
@@ -68,21 +85,45 @@ type rs_type =
   | TY_lim of rs_type
 
 (* 
- * An state may include *optional* names in its params.
- * The "formal" name is implied where names are missing,
- * which is for example the return / yield value on a subr
- * or the vector-element type on a vec. This is denoted with "*".
+ * In closed type terms a predicate in the state may refer to
+ * components of the term by anchoring off the "formal symbol" '*',
+ * which represents "the term this state is attached to". 
  * 
- * It is a semantic error to omit names in a context where
- * no implied formal parameter exists.
- *)
-   
+ * 
+ * For example, if I have a tuple type (int,int),
+ * I may wish to enforce the lt predicate on it;
+ * I can write this as a closed type term like:
+ * 
+ * ( int, int ) : lt( *.0, *.1 )
+ * 
+ * In fact all tuple types are converted to this
+ * form for purpose of type-compatibility testing;
+ * the tuple
+ * 
+ * func ( int x, int y ) : lt( x, y ) -> int
+ * 
+ * actually has type
+ * 
+ * func (( int, int ) : lt( *.0, *.1 )) -> int
+ * 
+ *)      
+
+and parg_base_type = 
+    PARG_formal 
+  | PARG_free of string
+
+and rs_parg =
+    {
+      parg_base: parg_base_type;
+      parg_rest: rs_name_component array;
+    }
+
 and rs_pred = 
     { 
       pred_name: rs_name;
-      pred_args: (rs_name option) array; 
+      pred_args: rs_parg array;
     }
-
+      
 and rs_state = rs_pred array
 
 and ty_rec = 
@@ -106,40 +147,39 @@ and ty_alt_case =
       alt_case_rec: ty_rec option;
     }
 
+and ty_tup = 
+    {
+      tup_types: rs_type array;
+      tup_state: rs_state;
+    }
+
+and ty_vec =
+    {
+      vec_elt_type: rs_type;
+    }
+
 and ty_subr = 
+    TY_func of ty_qual_sig
+  | TY_iter of ty_qual_sig
+
+and ty_qual_sig = 
     { 
       subr_inline: bool; 
       subr_pure: bool;
       subr_sig: ty_sig; 
     }
 
-and rs_param_mode = 
-    PARAM_move_in 
-  | PARAM_move_out 
-  | PARAM_move_inout 
-  | PARAM_copy 
-
-and rs_param = 
-    {
-     param_type: rs_type;
-     param_mode: rs_param_mode;
-     param_name: string;
-   }
-
 and ty_sig = 
     { 
-      sig_params: rs_param array;
-      sig_result: rs_type; 
-      sig_istate: rs_state;
-      sig_ostate: rs_state;
+      sig_param_tup: ty_tup;
+      sig_result_tup: ty_tup; 
     }
 
 and ty_pred = 
     { 
       pred_auto: bool;
       pred_inline: bool; 
-      pred_params: rs_param array;
-      pred_istate: rs_state;
+      pred_param_tup: ty_tup;
     }
 
 and ty_quote = 
@@ -151,13 +191,6 @@ and ty_quote =
 	 I've been using is to make a quotation type for every
 	 nonterminal *)
 
-
-let init_star_pred : rs_pred = 
-    { 
-      pred_name = Array.make 1 "init";
-      pred_args = Array.make 1 None; 
-    }
-;;
     
 (* Values *)
 
@@ -194,12 +227,13 @@ and rs_val_dyn =
   | VAL_char of char
 
   | VAL_rec of val_rec
-  | VAL_alt of val_rec
+  | VAL_alt of val_alt
   | VAL_vec of val_vec
+  | VAL_tup of val_tup
 
-  | VAL_func of (ty_subr * rs_stmt)
-  | VAL_iter of (ty_subr * rs_stmt)
-  | VAL_chan of (ty_subr * int)
+  | VAL_func of val_subr
+  | VAL_iter of val_subr
+  | VAL_chan of (ty_qual_sig * int)
 
   | VAL_prog of val_prog
   | VAL_proc of val_proc
@@ -215,6 +249,19 @@ and val_quote =
   | VAL_quote_decl
   | VAL_quote_stmt
 
+
+and rs_subr_bind = 
+    {
+     bind_subr: ty_subr;
+     bind_names: string array;
+    }
+
+and val_subr = 
+    {
+     subr_bind: rs_subr_bind;
+     subr_body: rs_stmt;
+    }
+
 and val_rec = (string, rs_val) Hashtbl.t 
       
 and val_alt =
@@ -225,10 +272,12 @@ and val_alt =
 
 and val_vec = rs_val array
 
+and val_tup = rs_val array
+
 and val_prog = 
     { 
       prog_auto: bool;
-      prog_init: (ty_sig * rs_stmt) option;
+      prog_init: ((ty_sig * string array) * rs_stmt) option;
       prog_main: rs_stmt option;
       prog_fini: rs_stmt option;
       prog_decls: rs_decl array;
@@ -243,9 +292,9 @@ and rs_block =
     }
 
 and rs_frame_flavour = 
-    FRAME_iter of ty_sig
-  | FRAME_func of ty_sig
-  | FRAME_init of ty_sig
+    FRAME_iter of rs_subr_bind
+  | FRAME_func of rs_subr_bind
+  | FRAME_init of (ty_sig * string array)
   | FRAME_main
   | FRAME_fini 
 
@@ -343,11 +392,15 @@ and rs_expr =
   | EXPR_lval of rs_lval
   | EXPR_call of (rs_lval * (rs_expr array) )
 
-and rs_lval = rs_lidx array
-
 and rs_lidx =
-    LIDX_ident of (string * rs_pos)
+    LIDX_named of (rs_name_component * rs_pos)
   | LIDX_index of rs_expr
+
+and rs_lval = 
+    {
+     lval_base: string;
+     lval_rest: rs_lidx array;
+    }
 
 and rs_binop =    
 

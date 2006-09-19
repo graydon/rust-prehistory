@@ -48,10 +48,6 @@
                 ("lim", fun p -> LIM p);
                 ("pure", fun p -> PURE p);
 
-                ("in", fun p -> IN p);
-                ("out", fun p -> OUT p);
-                ("inout", fun p -> INOUT p);
-
                 ("auto", fun p -> AUTO p);
                 ("inline", fun p -> INLINE p);
 

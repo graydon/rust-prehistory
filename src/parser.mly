@@ -1,6 +1,6 @@
 %{
 
-	(* Header *)
+(* Header *)
 
 open Ast;;
 
@@ -10,6 +10,38 @@ let numty n =
   | _           -> TY_int
 ;;
 
+let smallnum n =
+  match n with
+    Num.Int i -> i
+  | _         -> raise Parse_error
+;;
+
+let anonymize_tuple (tupty, names) =
+  let dict = Hashtbl.create 100 in
+  let name_to_tupidx name = 
+    try
+      COMP_tupidx (Hashtbl.find dict name)
+    with      
+      Not_found -> raise Parse_error
+  in
+  let bind_parg parg =
+    match parg.parg_base with 
+      PARG_formal -> parg
+    | PARG_free name -> 
+	let head = name_to_tupidx name in
+	let tail = Array.to_list parg.parg_rest in
+	{ parg with 
+	  parg_rest = Array.of_list (head :: tail) }
+  in
+  let bind_pred pred =
+    { pred with 
+      pred_args = Array.map bind_parg pred.pred_args }
+  in
+  let n = ref 0 in
+  List.iter (fun name -> Hashtbl.add dict name !n; incr n) names;  
+  { tupty with 
+    tup_state = Array.map bind_pred tupty.tup_state }
+;;
 
 %}
 
@@ -45,9 +77,6 @@ let numty n =
 
 /* Type and type-state keywords. */
 %token <Ast.rs_pos> TYPE PRED ASSERT
-
-/* Parameter qualifiers. */
-%token <Ast.rs_pos> IN OUT INOUT
 
 /* Type qualifiers. */
 %token <Ast.rs_pos> LIM PURE
@@ -112,23 +141,9 @@ let numty n =
 
 %type <rs_type>          simple_ty_expr
 
-%type <rs_param_mode>    param_mode
-%type <rs_param>         param
-%type <rs_param list>    param_list
-%type <rs_param array>   params
-%type <rs_param array>   paren_params
-
-%type <rs_name option>          pred_arg
-%type <(rs_name option) list>   pred_arg_list
-%type <(rs_name option) array>  pred_args
 %type <rs_pred>                 pred
 %type <rs_pred list>            pred_list
 %type <rs_pred array>           preds
-
-%type <((rs_param array) * (rs_pred array))>   paren_params_and_maybe_state
-%type <(rs_type * (rs_pred array))>            simple_ty_expr_and_maybe_state
-
-%type <ty_sig>           sig_decl
 
 %type <rs_decl>              decl
 %type <rs_decl_top>          qual_decl_top
@@ -148,12 +163,12 @@ call:
   | lval 
       LPAREN 
       RPAREN            { ($1, Array.of_list [])              }
-
+      
 
 expr: 
     expr OR expr        { EXPR_binary (BINOP_or, $2, $1, $3)  }
   | expr AND expr       { EXPR_binary (BINOP_and, $2, $1, $3) }
-
+      
   | expr LT expr        { EXPR_binary (BINOP_lt, $2, $1, $3)  }
   | expr LE expr        { EXPR_binary (BINOP_le, $2, $1, $3)  }
   | expr GE expr        { EXPR_binary (BINOP_ge, $2, $1, $3)  }
@@ -194,20 +209,28 @@ literal:
 						 VAL_arith (fst $1)), 
 					(snd $1))                             }
 
-lidx_list: 
-    IDENT                             { [LIDX_ident $1]       }
-  | lidx_list DOT IDENT               { (LIDX_ident $3) :: $1 }
-  | lidx_list DOT LPAREN expr RPAREN  { (LIDX_index $4) :: $1 }
+lidx: 
+    IDENT                     { LIDX_named (COMP_string (fst $1), (snd $1))       }
+  | LIT_NUM                   { LIDX_named (COMP_tupidx (smallnum (fst $1)), (snd $1)) }
+  | LPAREN expr RPAREN        { LIDX_index $2 }
+
+lidx_list:
+    lidx DOT lidx_list        { $1 :: $3 }
+  | lidx                      { [$1]     }
 
 lval:
-    lidx_list            { Array.of_list (List.rev $1) }
-
+    IDENT                     { { lval_base = (fst $1);
+				  lval_rest = Array.of_list [] } }
+  | IDENT DOT lidx_list       { { lval_base = (fst $1); 
+				  lval_rest = Array.of_list $3 } }
 name: 
-      lval               { Array.map (fun x -> 
-                                      match x with 
-					LIDX_ident i -> (fst i)
-				      | LIDX_index _ -> raise Parse_error) 
-			     $1 }
+      lval               { { name_base = $1.lval_base;
+			     name_rest = 
+			     Array.map (fun x -> 
+                               match x with 
+				 LIDX_named i -> (fst i)
+			       | LIDX_index _ -> raise Parse_error) 
+			     $1.lval_rest } }
       
 ident_list: 
     IDENT COMMA ident_list { (fst $1) :: $3 }
@@ -215,6 +238,87 @@ ident_list:
 
 idents: 
   ident_list             { Array.of_list $1 }
+
+
+
+name_comp:
+    IDENT                     { COMP_string (fst $1)             }
+  | LIT_NUM                   { COMP_tupidx (smallnum (fst $1))  }
+
+name_comp_list:
+    name_comp DOT name_comp_list   { $1 :: $3 }
+  | name_comp                      { [$1]     }
+
+name_comps:
+    name_comp_list            { Array.of_list $1 }
+
+pred_arg_base:
+    IDENT                        { PARG_free (fst $1) }
+  | STAR                         { PARG_formal  }
+
+pred_arg:
+    pred_arg_base DOT name_comps { { parg_base = $1;
+				     parg_rest = $3; } }
+  | pred_arg_base                { { parg_base = $1;
+				     parg_rest = Array.of_list []; } }
+
+pred_arg_list:
+    pred_arg COMMA pred_arg_list { $1 :: $3 }
+  | pred_arg                     { [$1]     }  
+
+pred_args:
+    pred_arg_list                { Array.of_list $1 }
+
+pred:
+    name LPAREN pred_args RPAREN { { pred_name = $1; 
+				     pred_args = $3 } }
+
+pred_list:
+    pred COMMA pred_list         { $1 :: $3 }
+  | pred                         { [$1]     }  
+    
+preds:
+    pred_list                    { Array.of_list $1 }
+
+state:
+    COLON preds                  { $2 }
+
+anonymous_tuple_type:
+    LPAREN 
+    simple_ty_expr_list 
+    RPAREN                       { { tup_types = Array.of_list $2;
+				     tup_state = Array.of_list [] } }
+  | LPAREN RPAREN                { { tup_types = Array.of_list [];
+				     tup_state = Array.of_list [] } }
+binding:
+      simple_ty_expr IDENT       { ($1,$2)  }
+
+binding_list:
+    binding COMMA binding_list   { $1 :: $3 }
+  | binding                      { [$1]     }
+
+binding_tuple_type_maybe_state:
+
+    LPAREN binding_list RPAREN state  
+      { let (types,npos) = List.split $2 in
+        let (names,poss) = List.split npos in
+        ({ tup_types = Array.of_list types; 
+	   tup_state = $4; }, names) }
+
+  | LPAREN binding_list RPAREN        
+      { let (types,npos) = List.split $2 in
+        let (names,poss) = List.split npos in
+      ({ tup_types = Array.of_list types;
+	 tup_state = Array.of_list []; }, names) }
+
+anonymous_tuple_type_maybe_state:
+    anonymous_tuple_type state        { {$1 with tup_state = $2} }
+  | anonymous_tuple_type              { $1                       }
+   
+tuple_ty:
+    anonymous_tuple_type_maybe_state { $1                   } 
+  | binding_tuple_type_maybe_state   { (anonymize_tuple $1) }
+
 
 mach_ty_expr:
     UNSIGNED             { TY_mach (TY_unsigned, $1)       }
@@ -238,16 +342,19 @@ prim_ty_expr:
 
   | PROC                 { TY_proc                         }
   | PROG                 { TY_proc                         }
-  | VEC                  { TY_vec                          }
+  | VEC
+      LBRACKET
+      simple_ty_expr
+      RBRACKET           { TY_vec { vec_elt_type = $3 }    }
   | name                 { TY_named $1                     }
   | prim_ty_expr 
             LBRACKET
             simple_ty_exprs
             RBRACKET     { TY_apply ($1, $3)               }
-
+  | anonymous_tuple_type { TY_tup $1                       }
   | LPAREN 
-      complex_ty_expr 
-      RPAREN             { $2                              }
+    complex_ty_expr
+    RPAREN               { $2                              }
 
 
 simple_ty_expr:
@@ -263,27 +370,27 @@ simple_ty_expr_list:
 simple_ty_exprs:
   simple_ty_expr_list                         { Array.of_list $1 }
 
-subr:
+subr_variety:
     FUNC  { fun r -> TY_func r }
   | ITER  { fun r -> TY_iter r }
 
-qualified_subr:
+subr_qual:
 
-    INLINE PURE subr    { fun s -> $3 { subr_inline = true; 
-					subr_pure = true; 
-					subr_sig = s; } }
-
-  | INLINE subr         { fun s -> $2 { subr_inline = true; 
-					subr_pure = false; 
-					subr_sig = s; } }
-
-  | PURE subr           { fun s -> $2 { subr_inline = false; 
-					subr_pure = true; 
-					subr_sig = s; } }
-
-  | subr                { fun s -> $1 { subr_inline = false; 
-					subr_pure = false; 
-					subr_sig = s; } }
+    INLINE PURE subr_variety    { fun s -> $3 { subr_inline = true; 
+						subr_pure = true; 
+						subr_sig = s; } }
+      
+  | INLINE subr_variety         { fun s -> $2 { subr_inline = true; 
+						subr_pure = false; 
+						subr_sig = s; } }
+      
+  | PURE subr_variety           { fun s -> $2 { subr_inline = false; 
+						subr_pure = true; 
+						subr_sig = s; } }
+      
+  | subr_variety                { fun s -> $1 { subr_inline = false; 
+						subr_pure = false; 
+						subr_sig = s; } }
 
 rec_slot:
     simple_ty_expr IDENT SEMI   
@@ -326,11 +433,11 @@ alt_cases:
   alt_case_list                   { Array.of_list $1 }
 
 complex_ty_expr:
-    simple_ty_expr                { $1        }
-  | qualified_subr sig_decl       { $1 $2     }
-  | REC LBRACE rec_body RBRACE    { TY_rec $3 }
-  | ALT LBRACE alt_cases RBRACE   { TY_alt $3 }
-
+    simple_ty_expr                    { $1                          }
+  | subr_ty                           { TY_subr $1                  }
+  | tuple_ty                          { TY_tup $1                   }
+  | REC LBRACE rec_body RBRACE        { TY_rec $3                   }
+  | ALT LBRACE alt_cases RBRACE       { TY_alt $3                   }
 
 stmt: 
     WHILE LPAREN expr RPAREN stmt     { STMT_while { while_expr = $3; 
@@ -369,77 +476,37 @@ block_stmt:
     LBRACE stmt_list RBRACE           { STMT_block (Array.of_list $2, $1) }
   | LBRACE RBRACE                     { STMT_block (Array.of_list [], $1) }
 
+subr_ty:
+      subr_qual
+      tuple_ty
+      RARROW
+      anonymous_tuple_type_maybe_state
+{
+  $1 { sig_param_tup = $2;
+       sig_result_tup = $4; }
+}
 
-param_mode:
-    IN                           { PARAM_move_in    }
-  | OUT                          { PARAM_move_out   }
-  | INOUT                        { PARAM_move_inout }
-
-param:
-    simple_ty_expr param_mode IDENT    { { param_type = $1; 
-					   param_mode = $2; 
-					   param_name = (fst $3) } }
-  | simple_ty_expr IDENT               { { param_type = $1; 
-					   param_mode = PARAM_copy; 
-					   param_name = (fst $2) } }
-
-param_list:
-    param COMMA param_list       { $1 :: $3 }
-  | param                        { [$1]     }  
-
-params: 
-  param_list                     { Array.of_list $1 }
-
-
-pred_arg:
-    name                         { Some $1 }
-  | STAR                         { None    }
-
-pred_arg_list:
-    pred_arg COMMA pred_arg_list { $1 :: $3 }
-  | pred_arg                     { [$1]     }  
-
-pred_args:
-    pred_arg_list                { Array.of_list $1 }
-
-pred:
-    name LPAREN pred_args RPAREN { { pred_name = $1; pred_args = $3 } }
-
-pred_list:
-    pred COMMA pred_list         { $1 :: $3 }
-  | pred                         { [$1]     }  
-    
-preds:
-    pred_list                    { Array.of_list $1 }
-
-state:
-    COLON preds                  { $2 }
-
-paren_params:
-    LPAREN params RPAREN         { $2               }
-  | LPAREN RPAREN                { Array.of_list [] }
-
-paren_params_and_maybe_state:
-    paren_params state           { ($1, $2)               }
-  | paren_params                 { ($1, Array.of_list []) }
-
-simple_ty_expr_and_maybe_state:
-    simple_ty_expr state         { ($1, $2)               }
-  | simple_ty_expr               { ($1, Array.of_list []) }
-
-sig_decl:
-  paren_params_and_maybe_state 
+sig_bind:
+  binding_tuple_type_maybe_state
   RARROW 
-  simple_ty_expr_and_maybe_state
+  anonymous_tuple_type_maybe_state
+{
+ match $1 with (itypes, inames) -> 
+   ({ sig_param_tup = itypes;
+      sig_result_tup = $3 }, 
+    Array.of_list inames)
+}
+      
+subr_bind:
+      sig_bind
   {
-    match ($1,$3) with ((args,istate),(res,ostate)) -> 
-    { 
-      sig_params = args;
-      sig_result = res;
-      sig_istate = istate;
-      sig_ostate = ostate;
-    }
-  }
+    match $1 with (sigt, inames) -> 
+      fun qualfn ->
+	{ 
+	  bind_subr = qualfn sigt;
+	  bind_names = inames;
+	}
+ }
 
 
 /* members of "decl" are constants, OK in nearly every context */
@@ -452,12 +519,13 @@ decl:
 	   decl_state = Array.of_list [];
 	   decl_pos = (snd $2)                       } }
       
-  | qualified_subr IDENT sig_decl block_stmt 
-      {  { decl_name = (fst $2); 
-	   decl_type = $1 $3;
-	   decl_value = VAL_dyn (TY_nil, VAL_nil);
-	   decl_state = Array.of_list [];
-	   decl_pos = (snd $2)                       } }
+  | subr_qual IDENT subr_bind block_stmt 
+      {  let bs = $3 $1 in
+      { decl_name = (fst $2); 
+	decl_type = TY_subr bs.bind_subr;
+	decl_value = VAL_dyn (TY_nil, VAL_nil);
+	decl_state = Array.of_list [];
+	decl_pos = (snd $2)                       } }
 
 decl_slot:
     decl  { $1 }
@@ -479,7 +547,7 @@ decl_slot:
 
 prog_item:
     decl_slot                   { (fun (p, b) -> (p, $1 :: b))        }
-  | INIT sig_decl block_stmt    
+  | INIT sig_bind block_stmt    
       { (fun (p, b) -> ({p with prog_init = Some ($2, $3)}, b))       }
   | MAIN block_stmt    
       { (fun (p, b) -> ({p with prog_main = Some $2}, b))             }
