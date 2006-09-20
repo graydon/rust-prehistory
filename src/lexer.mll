@@ -62,8 +62,6 @@
 		 * just as likely to be wrong as right. 
 		 *)
 
-                ("nil", fun _ -> NIL);
-
                 ("int", fun _ -> INT);
                 ("nat", fun _ -> NAT);
                 ("rat", fun _ -> RAT);
@@ -132,6 +130,7 @@ rule token = parse
 | ':'                          { COLON    }
 | "<-"                         { LARROW   }
 | "->"                         { RARROW   }
+| "()"                         { NIL      }
 | '('                          { LPAREN   }
 | ')'                          { RPAREN   }
 | '['                          { LBRACKET }

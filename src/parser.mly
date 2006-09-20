@@ -4,6 +4,13 @@
 
 open Ast;;
 
+let ty_NIL:ty_tup = { tup_types = Array.of_list [];
+		      tup_state = Array.of_list [] }
+;;
+
+let val_NIL:val_tup = Array.of_list []
+;;
+
 let numty n =
   match n with 
     Num.Ratio _ -> TY_rat
@@ -284,12 +291,11 @@ state:
     COLON preds                  { $2 }
 
 anonymous_tuple_type:
-    LPAREN 
     simple_ty_expr_list 
-    RPAREN                       { { tup_types = Array.of_list $2;
+                                 { { tup_types = Array.of_list $1;
 				     tup_state = Array.of_list [] } }
-  | LPAREN RPAREN                { { tup_types = Array.of_list [];
-				     tup_state = Array.of_list [] } }
+  | NIL                          { ty_NIL }
+
 binding:
       simple_ty_expr IDENT       { ($1,$2)  }
 
@@ -332,9 +338,8 @@ arith_ty_expr:
   | RAT                  { TY_arith (TY_rat)               }
 
 prim_ty_expr:
-    NIL                  { TY_nil                          }
 
-  | mach_ty_expr         { $1                              }
+    mach_ty_expr         { $1                              }
   | arith_ty_expr        { $1                              }
 
   | STR                  { TY_str                          }
@@ -351,7 +356,6 @@ prim_ty_expr:
             LBRACKET
             simple_ty_exprs
             RBRACKET     { TY_apply ($1, $3)               }
-  | anonymous_tuple_type { TY_tup $1                       }
   | LPAREN 
     complex_ty_expr
     RPAREN               { $2                              }
@@ -433,8 +437,7 @@ alt_cases:
   alt_case_list                   { Array.of_list $1 }
 
 complex_ty_expr:
-    simple_ty_expr                    { $1                          }
-  | subr_ty                           { TY_subr $1                  }
+    subr_ty                           { TY_subr $1                  }
   | tuple_ty                          { TY_tup $1                   }
   | REC LBRACE rec_body RBRACE        { TY_rec $3                   }
   | ALT LBRACE alt_cases RBRACE       { TY_alt $3                   }
@@ -512,10 +515,10 @@ subr_bind:
 /* members of "decl" are constants, OK in nearly every context */
 
 decl:
-    TYPE IDENT EQ complex_ty_expr SEMI
+    TYPE IDENT EQ simple_ty_expr SEMI
       {  { decl_name = (fst $2);
 	   decl_type = TY_type;
-	   decl_value = VAL_dyn (TY_nil, VAL_nil);
+	   decl_value = VAL_dyn (TY_tup ty_NIL, VAL_tup val_NIL);
 	   decl_state = Array.of_list [];
 	   decl_pos = (snd $2)                       } }
       
@@ -523,7 +526,7 @@ decl:
       {  let bs = $3 $1 in
       { decl_name = (fst $2); 
 	decl_type = TY_subr bs.bind_subr;
-	decl_value = VAL_dyn (TY_nil, VAL_nil);
+	decl_value = VAL_dyn (TY_tup ty_NIL, VAL_tup val_NIL);
 	decl_state = Array.of_list [];
 	decl_pos = (snd $2)                       } }
 
@@ -533,14 +536,14 @@ decl_slot:
   | simple_ty_expr IDENT SEMI
       { { decl_name = (fst $2);
 	  decl_type = $1;
-	  decl_value = VAL_dyn (TY_nil, VAL_nil);
+	  decl_value = VAL_dyn (TY_tup ty_NIL, VAL_tup val_NIL);
 	  decl_state = Array.of_list [];
 	  decl_pos = (snd $2); } }
 
   | simple_ty_expr IDENT state SEMI
       { { decl_name = (fst $2);
 	  decl_type = $1;
-	  decl_value = VAL_dyn (TY_nil, VAL_nil);
+	  decl_value = VAL_dyn (TY_tup ty_NIL, VAL_tup val_NIL);
 	  decl_state = $3;
 	  decl_pos = (snd $2); } }
 

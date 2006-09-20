@@ -52,8 +52,7 @@ type ty_arith =
 ;;
 
 type rs_type = 
-    TY_nil
-  | TY_dyn
+    TY_dyn
   | TY_type
 
   | TY_mach of (ty_mach * int)
@@ -220,8 +219,7 @@ type rs_val =
 
 and rs_val_dyn =
 
-    VAL_nil
-  | VAL_mach of val_mach
+    VAL_mach of val_mach
   | VAL_arith of Num.num
   | VAL_str of string
   | VAL_char of char
