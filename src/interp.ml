@@ -5,57 +5,7 @@ exception Interp_err of string
 ;;
 
 
-let new_proc prog = { proc_prog = prog;
-		      proc_env = Hashtbl.create 100;
-		      proc_frame = 0;
-		      proc_frames = [];
-		      proc_state = PROC_INIT;
-		      proc_ports = Array.of_list [] }
-;;
-
-
-
-let enter_block proc stmts pos  =
-  if proc.proc_frames = [] 
-  then 
-    raise (Interp_err "entering block with no frame")
-  else
-    let frame = List.nth proc.proc_frames proc.proc_frame in
-    let block = { block_pc = 0;
-		  block_stmts = stmts;
-		  block_names = Stack.create();
-		  block_pos = pos } in
-    Stack.push block frame.frame_blocks
-;;
-
-
-let enter_init_frame proc = 
-  match proc.proc_prog.prog_init with 
-    Some (signature, STMT_block (stmts,pos)) -> 
-      proc.proc_frames <- ({ frame_flavour = FRAME_init signature;
-			     frame_blocks = Stack.create () }
-			     :: proc.proc_frames);
-      enter_block proc stmts pos
-  | _ -> ()
-;;
-
-
-let enter_main_frame proc = 
-  match proc.proc_prog.prog_main with 
-    Some (STMT_block (stmts,pos)) -> 
-      proc.proc_frames <- ({ frame_flavour = FRAME_main;
-			     frame_blocks = Stack.create () } 
-			   :: proc.proc_frames);
-      enter_block proc stmts pos
-  | _ -> ()  
-;;
-
-
-let proc_finished p =
-  match p.proc_state with
-    PROC_FINI when p.proc_frames = [] -> true
-  | _ -> false
-;;
+(* output formatting *)
 
 let fmt_nc out nc =
   match nc with 
@@ -129,7 +79,73 @@ and fmt_lval out lv =
     lv.lval_rest
 ;;
 
-let exec_stmt s = 
+(* Execution *)
+
+let bind_decl decl env =
+  Printf.printf "binding decl of '%s'\n" decl.decl_name;
+  Hashtbl.add env decl.decl_name decl.decl_value
+;;
+
+let new_proc prog = 
+  let env = Hashtbl.create (Array.length prog.prog_decls) in 
+  Array.iter (fun decl -> bind_decl decl env) prog.prog_decls;
+  { proc_prog = prog;
+    proc_env = env;
+    proc_frame = 0;
+    proc_frames = [];
+    proc_state = PROC_INIT;
+    proc_ports = Array.of_list [] }
+;;
+
+
+
+let enter_block proc stmts pos  =
+  if proc.proc_frames = [] 
+  then 
+    raise (Interp_err "entering block with no frame")
+  else
+    Printf.printf "entering block\n";
+    let frame = List.nth proc.proc_frames proc.proc_frame in
+    let block = { block_pc = 0;
+		  block_stmts = stmts;
+		  block_names = Stack.create();
+		  block_pos = pos } in
+    Stack.push block frame.frame_blocks
+;;
+
+
+let enter_init_frame proc = 
+  Printf.printf "entering init frame\n";
+  match proc.proc_prog.prog_init with 
+    Some (signature, STMT_block (stmts,pos)) -> 
+      proc.proc_frames <- ({ frame_flavour = FRAME_init signature;
+			     frame_blocks = Stack.create () }
+			     :: proc.proc_frames);
+      enter_block proc stmts pos
+  | _ -> ()
+;;
+
+
+let enter_main_frame proc = 
+  Printf.printf "entering main frame\n";
+  match proc.proc_prog.prog_main with 
+    Some (STMT_block (stmts,pos)) -> 
+      proc.proc_frames <- ({ frame_flavour = FRAME_main;
+			     frame_blocks = Stack.create () } 
+			   :: proc.proc_frames);
+      enter_block proc stmts pos
+  | _ -> ()  
+;;
+
+
+let proc_finished p =
+  match p.proc_state with
+    PROC_FINI when p.proc_frames = [] -> true
+  | _ -> false
+;;
+
+
+let exec_stmt env s = 
   match s with 
     STMT_while w -> ()
   | STMT_foreach f -> ()
@@ -140,9 +156,12 @@ let exec_stmt s =
   | STMT_return r -> ()
   | STMT_assert a -> ()
   | STMT_block b -> ()
-  | STMT_move (dst,src) -> (Printf.printf "moving %a to %a" fmt_lval src fmt_lval dst)
-  | STMT_copy (dst,src) -> (Printf.printf "copying %a to %a" fmt_expr src fmt_lval dst)
-  | STMT_call (fn,args) -> (Printf.printf "calling: %a" fmt_expr (EXPR_call (fn,args)))
+  | STMT_move (dst,src) -> (Printf.printf "moving %a to %a\n" fmt_lval src fmt_lval dst)
+  | STMT_copy (dst,src) -> (Printf.printf "copying %a to %a\n" fmt_expr src fmt_lval dst)
+  | STMT_call (fn,args) -> 
+      let e = EXPR_call (fn,args) in 
+      (Printf.printf "calling: %a\n" fmt_expr e);
+      (* eval_expr e *)
   | STMT_decl d -> ()
 ;;
 
@@ -150,11 +169,13 @@ let step_proc p =
   match p.proc_state with
 
     PROC_INIT when p.proc_frames = [] -> 
+      Printf.printf "completed init, beginning main\n";
       p.proc_state <- PROC_MAIN;
       p.proc_frame <- 0;
       enter_main_frame p
 
   | PROC_MAIN when p.proc_frames = [] -> 
+      Printf.printf "completed main, finishing\n";
       p.proc_state <- PROC_FINI
 
   | PROC_MAIN 
@@ -165,42 +186,44 @@ let step_proc p =
       if (b.block_pc >= Array.length b.block_stmts)
       then 
 	(let _ = Stack.pop f.frame_blocks in
+	Printf.printf "leaving frame\n";
 	if Stack.is_empty f.frame_blocks
 	then 
 	  p.proc_frames <- List.tl p.proc_frames)
       else
 	((match b.block_pos with 
-	  (file,line,_) -> Printf.printf "(block %s:%d, pc=%d)" file line b.block_pc);
-	 exec_stmt b.block_stmts.(b.block_pc);
+	  (file,line,_) -> Printf.printf "(block %s:%d, pc=%d)\n" file line b.block_pc);
+	 exec_stmt p.proc_env b.block_stmts.(b.block_pc);
 	 b.block_pc <- b.block_pc + 1)
 	  
   | _ -> (raise (Interp_err "interpreter wedged"))
 ;;
 
-let get_prog_val v = 
+let get_const_prog_val v = 
   match v with 
-    VAL_dyn (TY_prog, VAL_prog (vp)) -> vp
+    Some (VAL_dyn (TY_const (TY_prog), VAL_prog (vp))) -> vp
   | _ -> raise (Interp_err "non-value")
 ;;
 
 let find_entry_prog sf entry_name = 
   let binding = Hashtbl.find sf entry_name in 
   match binding with 
-    (VIS_public, d) when (d.decl_type = TY_prog) -> get_prog_val d.decl_value
+    (VIS_public, d) when (d.decl_type = TY_const (TY_prog)) 
+    -> get_const_prog_val d.decl_value
   | _ -> raise (Interp_err ("cannot find 'pub prog " ^ entry_name ^ "'"))
 ;;
 
 let interpret sf entry_name = 
   let p = new_proc (find_entry_prog sf entry_name) in
   try
-    Printf.printf "interpreting...\n";
+    Printf.printf "interpreting\n";
     enter_init_frame p;
     while not (proc_finished p) do
-      Printf.printf "stepping... ";
+      Printf.printf "stepping...\n";
       step_proc p;
-      Printf.printf " ... ok\n"
+      Printf.printf "... stepped\n"
     done;
-    Printf.printf "yay!"
+    Printf.printf "yay!\n"
   with
     Interp_err s -> 
       Printf.printf "Interpreter error: %s" s

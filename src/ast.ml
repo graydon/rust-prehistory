@@ -305,7 +305,7 @@ and rs_frame =
 and val_proc = 
     {
      proc_prog: val_prog;
-     proc_env: (string, rs_val) Hashtbl.t;
+     proc_env: (string, (rs_val option)) Hashtbl.t;
 
    (* 
     * Frames are held in a "push-down list": head is the top
@@ -432,7 +432,7 @@ and rs_decl =
       decl_name: string;
       decl_pos: rs_pos;
       decl_type: rs_type;
-      decl_value: rs_val;
+      decl_value: rs_val option;
       decl_state: rs_state;
     }
 ;;

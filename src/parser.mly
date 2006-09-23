@@ -4,12 +4,16 @@
 
 open Ast;;
 
-let ty_NIL:ty_tup = { tup_types = Array.of_list [];
-		      tup_state = Array.of_list [] }
+let arr ls = Array.of_list ls
 ;;
 
-let val_NIL:val_tup = Array.of_list []
-;;
+let ty_NIL:ty_tup = { tup_types = arr []; tup_state = arr [] };;
+let val_NIL:val_tup = arr [];;
+let t_NIL = TY_tup ty_NIL;;
+let v_NIL = VAL_tup val_NIL;;
+let d_NIL = VAL_dyn (t_NIL, v_NIL);;
+
+
 
 let numty n =
   match n with 
@@ -38,7 +42,7 @@ let anonymize_tuple (tupty, names) =
 	let head = name_to_tupidx name in
 	let tail = Array.to_list parg.parg_rest in
 	{ parg with 
-	  parg_rest = Array.of_list (head :: tail) }
+	  parg_rest = arr (head :: tail) }
   in
   let bind_pred pred =
     { pred with 
@@ -169,7 +173,7 @@ call:
 
   | lval 
       LPAREN 
-      RPAREN            { ($1, Array.of_list [])              }
+      RPAREN            { ($1, arr [])              }
       
 
 expr: 
@@ -203,7 +207,7 @@ expr_list:
   | expr                      { [$1]     }
 
 exprs:
-    expr_list                 { Array.of_list $1 }
+    expr_list                 { arr $1 }
 
 literal:
     LIT_STR             { EXPR_literal (VAL_dyn (TY_str, VAL_str (fst $1)), 
@@ -227,9 +231,9 @@ lidx_list:
 
 lval:
     IDENT                     { { lval_base = (fst $1);
-				  lval_rest = Array.of_list [] } }
+				  lval_rest = arr [] } }
   | IDENT DOT lidx_list       { { lval_base = (fst $1); 
-				  lval_rest = Array.of_list $3 } }
+				  lval_rest = arr $3 } }
 name: 
       lval               { { name_base = $1.lval_base;
 			     name_rest = 
@@ -244,7 +248,7 @@ ident_list:
   | IDENT                  { [fst $1]       }  
 
 idents: 
-  ident_list             { Array.of_list $1 }
+  ident_list             { arr $1 }
 
 
 
@@ -257,7 +261,7 @@ name_comp_list:
   | name_comp                      { [$1]     }
 
 name_comps:
-    name_comp_list            { Array.of_list $1 }
+    name_comp_list            { arr $1 }
 
 pred_arg_base:
     IDENT                        { PARG_free (fst $1) }
@@ -267,14 +271,14 @@ pred_arg:
     pred_arg_base DOT name_comps { { parg_base = $1;
 				     parg_rest = $3; } }
   | pred_arg_base                { { parg_base = $1;
-				     parg_rest = Array.of_list []; } }
+				     parg_rest = arr []; } }
 
 pred_arg_list:
     pred_arg COMMA pred_arg_list { $1 :: $3 }
   | pred_arg                     { [$1]     }  
 
 pred_args:
-    pred_arg_list                { Array.of_list $1 }
+    pred_arg_list                { arr $1 }
 
 pred:
     name LPAREN pred_args RPAREN { { pred_name = $1; 
@@ -285,15 +289,15 @@ pred_list:
   | pred                         { [$1]     }  
     
 preds:
-    pred_list                    { Array.of_list $1 }
+    pred_list                    { arr $1 }
 
 state:
     COLON preds                  { $2 }
 
 anonymous_tuple_type:
     simple_ty_expr_list 
-                                 { { tup_types = Array.of_list $1;
-				     tup_state = Array.of_list [] } }
+                                 { { tup_types = arr $1;
+				     tup_state = arr [] } }
   | NIL                          { ty_NIL }
 
 binding:
@@ -308,14 +312,14 @@ binding_tuple_type_maybe_state:
     LPAREN binding_list RPAREN state  
       { let (types,npos) = List.split $2 in
         let (names,poss) = List.split npos in
-        ({ tup_types = Array.of_list types; 
+        ({ tup_types = arr types; 
 	   tup_state = $4; }, names) }
 
   | LPAREN binding_list RPAREN        
       { let (types,npos) = List.split $2 in
         let (names,poss) = List.split npos in
-      ({ tup_types = Array.of_list types;
-	 tup_state = Array.of_list []; }, names) }
+      ({ tup_types = arr types;
+	 tup_state = arr []; }, names) }
 
 anonymous_tuple_type_maybe_state:
     anonymous_tuple_type state        { {$1 with tup_state = $2} }
@@ -372,7 +376,7 @@ simple_ty_expr_list:
   | simple_ty_expr                            { [$1]     }
 
 simple_ty_exprs:
-  simple_ty_expr_list                         { Array.of_list $1 }
+  simple_ty_expr_list                         { arr $1 }
 
 subr_variety:
     FUNC  { fun r -> TY_func r }
@@ -400,7 +404,7 @@ rec_slot:
     simple_ty_expr IDENT SEMI   
       { { rec_slot_name = (fst $2);
 	  rec_slot_type = $1;
-	  rec_slot_state = Array.of_list []} }
+	  rec_slot_state = arr []} }
       
   | simple_ty_expr IDENT state SEMI  
       { { rec_slot_name = (fst $2);
@@ -413,11 +417,11 @@ rec_slot_list:
   | rec_slot                    { [$1]     }
 
 rec_slots:
-    rec_slot_list               { Array.of_list $1 }
+    rec_slot_list               { arr $1 }
 
 rec_body:
     rec_slots                   { { rec_slots = $1; 
-				    rec_state = Array.of_list [] } }
+				    rec_state = arr [] } }
 
   | rec_slots state             { { rec_slots = $1;
 				    rec_state = $2 } }
@@ -434,7 +438,7 @@ alt_case_list:
   | alt_case                      { [$1]     }
 
 alt_cases:
-  alt_case_list                   { Array.of_list $1 }
+  alt_case_list                   { arr $1 }
 
 complex_ty_expr:
     subr_ty                           { TY_subr $1                  }
@@ -476,8 +480,8 @@ stmt_list:
   | stmt                         { [$1]     }
 
 block_stmt:
-    LBRACE stmt_list RBRACE           { STMT_block (Array.of_list $2, $1) }
-  | LBRACE RBRACE                     { STMT_block (Array.of_list [], $1) }
+    LBRACE stmt_list RBRACE           { STMT_block (arr $2, $1) }
+  | LBRACE RBRACE                     { STMT_block (arr [], $1) }
 
 subr_ty:
       subr_qual
@@ -497,7 +501,7 @@ sig_bind:
  match $1 with (itypes, inames) -> 
    ({ sig_param_tup = itypes;
       sig_result_tup = $3 }, 
-    Array.of_list inames)
+    arr inames)
 }
       
 subr_bind:
@@ -518,16 +522,16 @@ decl:
     TYPE IDENT EQ simple_ty_expr SEMI
       {  { decl_name = (fst $2);
 	   decl_type = TY_type;
-	   decl_value = VAL_dyn (TY_tup ty_NIL, VAL_tup val_NIL);
-	   decl_state = Array.of_list [];
+	   decl_value = None;
+	   decl_state = arr [];
 	   decl_pos = (snd $2)                       } }
       
   | subr_qual IDENT subr_bind block_stmt 
       {  let bs = $3 $1 in
       { decl_name = (fst $2); 
 	decl_type = TY_subr bs.bind_subr;
-	decl_value = VAL_dyn (TY_tup ty_NIL, VAL_tup val_NIL);
-	decl_state = Array.of_list [];
+	decl_value = None;
+	decl_state = arr [];
 	decl_pos = (snd $2)                       } }
 
 decl_slot:
@@ -536,14 +540,14 @@ decl_slot:
   | simple_ty_expr IDENT SEMI
       { { decl_name = (fst $2);
 	  decl_type = $1;
-	  decl_value = VAL_dyn (TY_tup ty_NIL, VAL_tup val_NIL);
-	  decl_state = Array.of_list [];
+	  decl_value = None;
+	  decl_state = arr [];
 	  decl_pos = (snd $2); } }
 
   | simple_ty_expr IDENT state SEMI
       { { decl_name = (fst $2);
 	  decl_type = $1;
-	  decl_value = VAL_dyn (TY_tup ty_NIL, VAL_tup val_NIL);
+	  decl_value = None;
 	  decl_state = $3;
 	  decl_pos = (snd $2); } }
 
@@ -567,9 +571,9 @@ prog_body:
 		  prog_init = None;
 		  prog_main = None;
 		  prog_fini = None;
-		  prog_decls = Array.of_list [] } in      
+		  prog_decls = arr [] } in      
         let (pp,b) = ($2 (p,[])) in
-	{ pp with prog_decls = Array.of_list b }
+	{ pp with prog_decls = arr b }
       }
 
   | LBRACE RBRACE                   
@@ -577,7 +581,7 @@ prog_body:
 		  prog_init = None;
 		  prog_main = None;
 		  prog_fini = None;
-		  prog_decls = Array.of_list [] }
+		  prog_decls = arr [] }
       in p }
 
 prog_head:
@@ -590,9 +594,9 @@ decl_top:
 
   | prog_head IDENT prog_body    
       {  { decl_name = (fst $2);
-	   decl_type = TY_prog;
-	   decl_value = VAL_dyn (TY_prog, VAL_prog ($1 $3));
-	   decl_state = Array.of_list [];
+	   decl_type = TY_const (TY_prog);
+	   decl_value = Some (VAL_dyn (TY_const (TY_prog), VAL_prog ($1 $3)));
+	   decl_state = arr [];
 	   decl_pos = (snd $2); } }
   
 
