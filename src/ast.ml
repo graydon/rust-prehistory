@@ -338,8 +338,8 @@ and rs_stmt =
   | STMT_return of (rs_expr * rs_pos)
   | STMT_assert of (rs_pred * rs_pos)
   | STMT_block of ((rs_stmt array) * rs_pos)
-  | STMT_move of rs_lval * rs_lval
-  | STMT_copy of rs_lval * rs_expr
+  | STMT_move of (rs_lval * rs_lval)
+  | STMT_copy of (rs_lval * rs_expr)
   | STMT_call of (rs_lval * (rs_expr array) )
   | STMT_decl of rs_decl
 
