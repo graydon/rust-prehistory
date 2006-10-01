@@ -51,6 +51,11 @@ type ty_arith =
   | TY_rat
 ;;
 
+type subr_flavour = 
+    SUBR_func
+  | SUBR_iter
+;;
+
 type rs_type = 
     TY_dyn
   | TY_type
@@ -65,7 +70,7 @@ type rs_type =
   | TY_tup of ty_tup
   | TY_vec of ty_vec
 
-  | TY_subr of ty_subr
+  | TY_subr of (subr_flavour * ty_qual_sig)
   | TY_chan of ty_sig
 
   | TY_port of ty_sig
@@ -157,10 +162,6 @@ and ty_vec =
       vec_elt_type: rs_type;
     }
 
-and ty_subr = 
-    TY_func of ty_qual_sig
-  | TY_iter of ty_qual_sig
-
 and ty_qual_sig = 
     { 
       subr_inline: bool; 
@@ -229,8 +230,7 @@ and rs_val_dyn =
   | VAL_vec of val_vec
   | VAL_tup of val_tup
 
-  | VAL_func of val_subr
-  | VAL_iter of val_subr
+  | VAL_subr of (subr_flavour * val_subr)
   | VAL_chan of (ty_qual_sig * int)
 
   | VAL_prog of val_prog
@@ -250,9 +250,9 @@ and val_quote =
 
 and rs_subr_bind = 
     {
-     bind_subr: ty_subr;
+     bind_sig: ty_qual_sig;
      bind_names: string array;
-    }
+   }
 
 and val_subr = 
     {
@@ -292,7 +292,7 @@ and rs_block =
 and rs_frame_flavour = 
     FRAME_iter of rs_subr_bind
   | FRAME_func of rs_subr_bind
-  | FRAME_init of (ty_sig * string array)
+  | FRAME_init of rs_subr_bind
   | FRAME_main
   | FRAME_fini 
 

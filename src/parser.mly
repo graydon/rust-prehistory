@@ -13,8 +13,6 @@ let t_NIL = TY_tup ty_NIL;;
 let v_NIL = VAL_tup val_NIL;;
 let d_NIL = VAL_dyn (t_NIL, v_NIL);;
 
-
-
 let numty n =
   match n with 
     Num.Ratio _ -> TY_rat
@@ -172,8 +170,7 @@ call:
       RPAREN            { ($1, $3)                            }
 
   | lval 
-      LPAREN 
-      RPAREN            { ($1, arr [])              }
+      NIL               { ($1, arr [])                        }
       
 
 expr: 
@@ -307,7 +304,7 @@ binding_list:
     binding COMMA binding_list   { $1 :: $3 }
   | binding                      { [$1]     }
 
-binding_tuple_type_maybe_state:
+nonempty_binding_tuple_type_maybe_state:
 
     LPAREN binding_list RPAREN state  
       { let (types,npos) = List.split $2 in
@@ -321,13 +318,17 @@ binding_tuple_type_maybe_state:
       ({ tup_types = arr types;
 	 tup_state = arr []; }, names) }
 
+binding_tuple_type_maybe_state:
+    nonempty_binding_tuple_type_maybe_state  { $1                }
+  | NIL                                      { (ty_NIL, [])      }
+
 anonymous_tuple_type_maybe_state:
     anonymous_tuple_type state        { {$1 with tup_state = $2} }
   | anonymous_tuple_type              { $1                       }
    
 tuple_ty:
-    anonymous_tuple_type_maybe_state { $1                   } 
-  | binding_tuple_type_maybe_state   { (anonymize_tuple $1) }
+    anonymous_tuple_type_maybe_state          { $1                   } 
+  | nonempty_binding_tuple_type_maybe_state   { (anonymize_tuple $1) }
 
 
 mach_ty_expr:
@@ -378,27 +379,27 @@ simple_ty_expr_list:
 simple_ty_exprs:
   simple_ty_expr_list                         { arr $1 }
 
-subr_variety:
-    FUNC  { fun r -> TY_func r }
-  | ITER  { fun r -> TY_iter r }
+subr_flavour:
+    FUNC  { SUBR_func }
+  | ITER  { SUBR_iter }
 
 subr_qual:
 
-    INLINE PURE subr_variety    { fun s -> $3 { subr_inline = true; 
-						subr_pure = true; 
-						subr_sig = s; } }
+    INLINE PURE subr_flavour    { fun s -> ($3, { subr_inline = true; 
+						  subr_pure = true; 
+						  subr_sig = s; }) }
       
-  | INLINE subr_variety         { fun s -> $2 { subr_inline = true; 
-						subr_pure = false; 
-						subr_sig = s; } }
+  | INLINE subr_flavour         { fun s -> ($2, { subr_inline = true; 
+						  subr_pure = false; 
+						  subr_sig = s; }) }
       
-  | PURE subr_variety           { fun s -> $2 { subr_inline = false; 
-						subr_pure = true; 
-						subr_sig = s; } }
+  | PURE subr_flavour           { fun s -> ($2, { subr_inline = false; 
+						  subr_pure = true; 
+						  subr_sig = s; }) }
       
-  | subr_variety                { fun s -> $1 { subr_inline = false; 
-						subr_pure = false; 
-						subr_sig = s; } }
+  | subr_flavour                { fun s -> ($1, { subr_inline = false; 
+						  subr_pure = false; 
+						  subr_sig = s; }) }
 
 rec_slot:
     simple_ty_expr IDENT SEMI   
@@ -487,7 +488,7 @@ subr_ty:
       subr_qual
       tuple_ty
       RARROW
-      anonymous_tuple_type_maybe_state
+      tuple_ty
 {
   $1 { sig_param_tup = $2;
        sig_result_tup = $4; }
@@ -496,7 +497,7 @@ subr_ty:
 sig_bind:
   binding_tuple_type_maybe_state
   RARROW 
-  anonymous_tuple_type_maybe_state
+  tuple_ty
 {
  match $1 with (itypes, inames) -> 
    ({ sig_param_tup = itypes;
@@ -506,13 +507,18 @@ sig_bind:
       
 subr_bind:
       sig_bind
-  {
+  {   
     match $1 with (sigt, inames) -> 
       fun qualfn ->
-	{ 
-	  bind_subr = qualfn sigt;
-	  bind_names = inames;
-	}
+	let subr = (qualfn sigt) in
+	let (flav, qual_sig) = subr in
+	let bind = 
+	  {
+	   bind_sig = qual_sig;
+	   bind_names = inames;
+	 }
+	in
+	(subr,bind)
  }
 
 
@@ -524,15 +530,24 @@ decl:
 	   decl_type = TY_type;
 	   decl_value = None;
 	   decl_state = arr [];
-	   decl_pos = (snd $2)                       } }
+	   decl_pos = (snd $2)                       } 
+      }
       
   | subr_qual IDENT subr_bind block_stmt 
-      {  let bs = $3 $1 in
-      { decl_name = (fst $2); 
-	decl_type = TY_subr bs.bind_subr;
-	decl_value = None;
-	decl_state = arr [];
-	decl_pos = (snd $2)                       } }
+      {  
+	 let (subr, bind) = $3 $1 in
+	 let (flav, qual_sig) = subr in
+	 { decl_name = (fst $2); 
+	   decl_type = TY_subr subr;
+	   decl_value = 
+	   Some 
+	     (VAL_dyn 
+		((TY_subr subr), 
+		 (VAL_subr (flav, { subr_bind = bind;
+				    subr_body = $4 }))));
+	   decl_state = arr [];
+	   decl_pos = (snd $2)                       } 
+      }
 
 decl_slot:
     decl  { $1 }

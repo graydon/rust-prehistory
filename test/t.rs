@@ -22,9 +22,19 @@ pub prog entry
                 put = rt.put;
         }
 
+        func foo(int x) -> ()
+	{
+		bar();
+	}
+
+	func bar() -> ()
+	{
+		foo(10);
+	}
+
         main
         {
-                put("hello, world\n");
+                foo(10);
         }
 
         fini
