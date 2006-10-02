@@ -50,6 +50,7 @@
 
                 ("auto", fun p -> AUTO p);
                 ("inline", fun p -> INLINE p);
+                ("native", fun p -> NATIVE p);
 
                 ("spawn", fun p -> SPAWN p);
                 ("log", fun p -> LOG p);
@@ -147,8 +148,8 @@ rule token = parse
 					   lexpos lexbuf)                        }
 | dec as d                      { LIT_NUM (Num.num_of_string d, lexpos lexbuf)   }
 
-| ['"']    (([^'"']|"\\\"")* as s)   ['"']      { LIT_STR  (s, lexpos lexbuf)    }
-| ['\'']   ( [^'\''] as c)           ['\'']     { LIT_CHAR (c, lexpos lexbuf)    }
-| "'\\''"                                       { LIT_CHAR ('\'', lexpos lexbuf) }
+| (['"'] ([^'"']|"\\\"")* ['"'])  as s    { LIT_STR  ((Scanf.sscanf s "%S" (fun x -> x)), lexpos lexbuf)    }
+| (['\''] [^'\'']         ['\'']) as c    { LIT_CHAR ((Scanf.sscanf c "%C" (fun x -> x)), lexpos lexbuf)    }
+| "'\\''"                                 { LIT_CHAR ('\'', lexpos lexbuf) }
 
 | eof                           { EOF }

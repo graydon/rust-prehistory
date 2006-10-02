@@ -254,10 +254,14 @@ and rs_subr_bind =
      bind_names: string array;
    }
 
+and rs_subr_body = 
+    BODY_block of rs_stmt
+  | BODY_native of string
+
 and val_subr = 
     {
      subr_bind: rs_subr_bind;
-     subr_body: rs_stmt;
+     subr_body: rs_subr_body;
     }
 
 and val_rec = (string, rs_val) Hashtbl.t 
@@ -306,6 +310,7 @@ and val_proc =
     {
      proc_prog: val_prog;
      proc_env: (string, (rs_val option)) Hashtbl.t;
+     proc_natives: (string, (val_proc -> (rs_val array) -> unit)) Hashtbl.t;
 
    (* 
     * Frames are held in a "push-down list": head is the top
@@ -316,7 +321,7 @@ and val_proc =
      mutable proc_frame: int;
      mutable proc_frames: rs_frame list;
 
-     mutable proc_state: proc_exec_state;
+     mutable proc_state: proc_exec_state;     
      proc_ports: int array;
    }
 

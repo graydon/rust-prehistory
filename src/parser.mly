@@ -91,7 +91,7 @@ let anonymize_tuple (tupty, names) =
 %token <Ast.rs_pos> LIM PURE
 
 /* Declarator qualifiers. */
-%token <Ast.rs_pos> PUBLIC PRIVATE AUTO INLINE
+%token <Ast.rs_pos> PUBLIC PRIVATE AUTO INLINE NATIVE
 
 
 /* Magic runtime services. */
@@ -544,10 +544,27 @@ decl:
 	     (VAL_dyn 
 		((TY_subr subr), 
 		 (VAL_subr (flav, { subr_bind = bind;
-				    subr_body = $4 }))));
+				    subr_body = (BODY_block $4) }))));
 	   decl_state = arr [];
 	   decl_pos = (snd $2)                       } 
       }
+
+  | NATIVE subr_qual IDENT subr_bind SEMI
+      {  
+	 let (subr, bind) = $4 $2 in
+	 let (flav, qual_sig) = subr in
+	 { decl_name = (fst $3); 
+	   decl_type = TY_subr subr;
+	   decl_value = 
+	   Some 
+	     (VAL_dyn 
+		((TY_subr subr), 
+		 (VAL_subr (flav, { subr_bind = bind;
+				    subr_body = BODY_native (fst $3) }))));
+	   decl_state = arr [];
+	   decl_pos = (snd $3)                       } 
+      }
+
 
 decl_slot:
     decl  { $1 }

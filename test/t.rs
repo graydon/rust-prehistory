@@ -22,14 +22,13 @@ pub prog entry
                 put = rt.put;
         }
 
+        native func putstr(str x) -> ();
+        native func putint(int x) -> ();
+
         func foo(int x) -> ()
 	{
-		bar();
-	}
-
-	func bar() -> ()
-	{
-		foo(10);
+		putstr("Hello, world\n");
+		putint(x);
 	}
 
         main

@@ -159,19 +159,18 @@ let types_equal p q =
   p = q
 ;;
 
-let bind_args env args bind =
+let check_args env args bind = 
   let param_types = bind.bind_sig.subr_sig.sig_param_tup.tup_types in
   let n_args = Array.length args in 
   let n_types = Array.length param_types in
   let n_names = Array.length bind.bind_names in
 
   Printf.printf "Checking %d args against %d types\n" n_args n_types;
-  Printf.printf "Binding %d args to %d parameters\n" n_args n_names;
 
   if n_names != n_types then
     raise (Interp_err "Inconsistent signature!");
   
-  if n_args != n_names then 
+  if n_args != n_types then 
     raise (Interp_err "Bad number of args");
   
   for i = 0 to n_args - 1 
@@ -182,6 +181,20 @@ let bind_args env args bind =
 	Printf.printf "checking arg type %d\n" i;
 	if (not (types_equal t param_types.(i)))
 	then raise (Interp_err "Bad argument type"));
+  done
+;;
+
+
+let bind_args env args bind =
+  check_args env args bind;
+  let n_args = Array.length args in 
+  let n_names = Array.length bind.bind_names in
+
+  Printf.printf "Binding %d args to %d parameters\n" n_args n_names;
+  
+  for i = 0 to n_args - 1 
+  do
+    let arg = args.(i) in
     Hashtbl.add env bind.bind_names.(i) (Some arg)
   done
 ;;
@@ -191,6 +204,7 @@ let new_proc prog =
   Array.iter (fun decl -> bind_decl decl env) prog.prog_decls;
   { proc_prog = prog;
     proc_env = env;
+    proc_natives = Hashtbl.create 0;
     proc_frame = 0;
     proc_frames = [];
     proc_state = PROC_INIT;
@@ -261,12 +275,21 @@ let pluck full_val =
 
 let enter_frame_val proc frame_val args =
   match (pluck frame_val) with 
-    VAL_subr (SUBR_func, s) -> 
-      (bind_and_enter_frame proc (FRAME_func s.subr_bind)
-	 (Some (s.subr_bind,args)) s.subr_body)
-  | VAL_subr (SUBR_iter, s) -> 
-      (bind_and_enter_frame proc (FRAME_iter s.subr_bind)
-	 (Some (s.subr_bind,args)) s.subr_body)
+    VAL_subr (flav, s) -> 
+      (match s.subr_body with 
+	BODY_native n -> 
+	  check_args proc.proc_env args s.subr_bind;
+	  Printf.printf "resolving native %s\n" n;
+	  let native_fn = Hashtbl.find proc.proc_natives n in
+	  (native_fn proc args)
+      | BODY_block block_stmt -> 
+	  let sba = Some (s.subr_bind, args) in
+	  let frame = 
+	    (match flav with 
+	      SUBR_func -> (FRAME_func s.subr_bind)
+	    | SUBR_iter -> (FRAME_iter s.subr_bind))
+	  in
+	  bind_and_enter_frame proc frame sba block_stmt)
   | _ -> raise (Interp_err "Entering non-subroutine value")
 ;;
   
@@ -405,10 +428,27 @@ let init_args =
   Array.of_list [init_runtime; init_argv]
 ;;
 
+let bind_std_natives proc = 
+  let reg name fn = Hashtbl.add proc.proc_natives name fn in 
+  let getstr v = 
+    (match v with 
+      VAL_dyn (_,VAL_str s) -> s
+    | _ -> raise (Interp_err "expected string arg"))
+  in
+  let getint v = 
+    (match v with 
+      VAL_dyn (_,VAL_arith n) -> n
+    | _ -> raise (Interp_err "expected string arg"))
+  in
+  reg "putstr" (fun p args -> print_string (getstr args.(0)));
+  reg "putint" (fun p args -> print_string (Num.string_of_num (getint args.(0))))
+;;
+
 
 let interpret sf entry_name = 
   let p = new_proc (find_entry_prog sf entry_name) in
   try
+    bind_std_natives p;
     Printf.printf "interpreting\n";
     enter_init_frame p init_args;
     while not (proc_finished p) do
