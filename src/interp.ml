@@ -6,9 +6,173 @@ exception Interp_err of string
 
 
 (*****************************************************************)
-(*                    Output Formatting                          *)
+(*           "Slightly lowered" stack-machine form               *)
+(*                                                               *)
+(*   (We'll probably revisit this and turn it into numbered      *)
+(*    local slots soon. For now we use named locals and slots)   *)
 (*****************************************************************)
 
+type rs_jump_form = 
+    JMP_conditional
+  | JMP_direct
+
+type rs_op = 
+    OP_push of rs_val
+  | OP_binop of rs_binop
+  | OP_unop of rs_unop
+  | OP_pop
+
+  | OP_load_lval of rs_lval
+  | OP_store_lval of rs_lval
+
+  | OP_alloc_local of string
+  | OP_undef_local of string
+  | OP_clear_local of string
+
+  | OP_pos of rs_pos
+
+  | OP_jump of (rs_jump_form * int option)
+  | OP_call
+  | OP_return
+  | OP_yield
+
+  | OP_bad
+;;
+
+type rs_code = rs_op array
+;;
+
+type rs_emitter = 
+  { 
+    mutable emit_pc: int;
+    mutable emit_code: rs_code;
+  }
+;;
+
+let new_emitter _ = 
+  { 
+    emit_pc = 0;
+    emit_code = Array.create 4 OP_bad;
+  }
+;;
+
+let grow_if_necessary e =
+  let len = Array.length e.emit_code in
+  if e.emit_pc >= len - 1
+  then
+    let n = Array.create (2 * len) OP_bad in
+    Array.blit e.emit_code 0 n 0 len;
+    e.emit_code <- n 
+;;
+
+
+let emit_op e op =
+  grow_if_necessary e;
+  e.emit_code.(e.emit_pc) <- op;
+  e.emit_pc <- e.emit_pc + 1
+;;
+
+
+let backpatch_fwd_jump_to_here e fwd_jump_pc =
+  match e.emit_code.(e.emit_pc) with
+    OP_jump (form, None) -> 
+      e.emit_code.(fwd_jump_pc) <- OP_jump (form, (Some e.emit_pc))
+  | _ -> raise (Interp_err "Backpatching bad opcode")
+;;
+
+
+let rec emit_expr emit e = 
+  match e with 
+    EXPR_binary (op, pos, e1, e2) -> 
+      emit_expr emit e1;
+      emit_expr emit e2;
+      emit_op emit (OP_pos pos);
+      emit_op emit (OP_binop op)
+	
+  | EXPR_unary (op, pos, e) -> 
+      emit_expr emit e;
+      emit_op emit (OP_pos pos);
+      emit_op emit (OP_unop op)
+
+  | EXPR_literal (v, pos) -> 
+      emit_op emit (OP_pos pos);
+      emit_op emit (OP_push v)
+
+  | EXPR_lval lv -> 
+      emit_op emit (OP_load_lval lv)
+
+  | EXPR_call (lv, args) -> 
+      Array.iter (emit_expr emit) args;
+      emit_op emit (OP_load_lval lv);
+      emit_op emit (OP_call);
+;;
+
+
+let rec emit_stmt emit stmt = 
+  match stmt with 
+    STMT_while sw -> 
+      let restart_pc = emit.emit_pc in
+      (emit_op emit (OP_pos sw.while_pos);
+       emit_expr emit sw.while_expr;
+       emit_op emit (OP_unop UNOP_not);
+       let jump_to_exit_pc = emit.emit_pc in
+       (emit_op emit (OP_jump (JMP_conditional, None));
+	emit_stmt emit sw.while_body;
+	emit_op emit (OP_jump (JMP_direct, Some restart_pc));
+	backpatch_fwd_jump_to_here emit jump_to_exit_pc))
+	
+  | STMT_if si -> 
+      emit_op emit (OP_pos si.if_pos);
+      emit_expr emit si.if_test;
+      emit_op emit (OP_unop UNOP_not);
+      let jump_to_else_pc = emit.emit_pc in
+      (emit_op emit (OP_jump (JMP_conditional, None));
+       emit_stmt emit si.if_then;
+       let jump_to_end_pc = emit.emit_pc in
+       (emit_op emit (OP_jump (JMP_direct, None));
+	backpatch_fwd_jump_to_here emit jump_to_else_pc;
+        (match si.if_else with 
+	  Some el -> emit_stmt emit el
+	| None -> ());
+	backpatch_fwd_jump_to_here emit jump_to_end_pc))
+
+  | STMT_return (e, pos) -> 
+      emit_expr emit e;
+      emit_op emit (OP_pos pos);
+      emit_op emit OP_return
+
+  | STMT_block (stmts, pos) ->
+      emit_op emit (OP_pos pos);      
+      Array.iter (emit_stmt emit) stmts
+
+  | STMT_move (lv2, lv1) -> 
+      emit_op emit (OP_load_lval lv1);
+      emit_op emit (OP_store_lval lv2)
+
+  | STMT_copy (lv, e) -> 
+      emit_expr emit e;
+      emit_op emit (OP_store_lval lv)
+	
+  | STMT_call (lv, args) -> 
+      Array.iter (emit_expr emit) args;
+      emit_op emit (OP_load_lval lv);
+      emit_op emit (OP_call);
+      emit_op emit (OP_pop)
+
+  | STMT_decl decl -> 
+      emit_op emit (OP_alloc_local decl.decl_name)
+
+
+  | STMT_try _
+  | STMT_yield _
+  | STMT_assert _
+  | STMT_foreach _
+  | STMT_for _ -> raise (Interp_err "cannot translate all statements yet")
+
+
+(*****************************************************************)
+(*                    Output Formatting                          *)
+(*****************************************************************)
 
 let fmt_nc out nc =
   match nc with 
@@ -141,7 +305,41 @@ let rec fmt_type out t =
   | TY_apply (ty, args) -> output_string out "(apply ...)"
 
   | TY_lim t -> Printf.fprintf out "(lim %a)" fmt_type t
+;;
 
+
+let fmt_jmp out j = 
+  match j with 
+    JMP_conditional -> output_string out "conditional jump"
+  | JMP_direct -> output_string out "direct jump"
+;;
+
+let fmt_op out op = 
+  match op with
+    OP_push v -> Printf.fprintf out "PUSH (%a)" fmt_lit v
+  | OP_binop op -> Printf.fprintf out "BINOP (%a)" fmt_binop op
+  | OP_unop op -> Printf.fprintf out "UNOP (%a)" fmt_unop op
+  | OP_pop -> output_string out "POP"
+
+  | OP_load_lval lv -> Printf.fprintf out "LOAD %a" fmt_lval lv
+  | OP_store_lval lv -> Printf.fprintf out "STORE %a" fmt_lval lv
+
+  | OP_alloc_local s -> Printf.fprintf out "ALLOC_LOCAL %s" s
+  | OP_undef_local s -> Printf.fprintf out "UNDEF_LOCAL %s" s
+  | OP_clear_local s -> Printf.fprintf out "CLEAR_LOCAL %s" s
+
+  | OP_pos (file,line,col) -> Printf.fprintf out "POS (%s:%d:%d)" file line col
+
+  | OP_jump (JMP_conditional, Some addr) -> Printf.fprintf out "CJUMP %d" addr
+  | OP_jump (JMP_direct, Some addr) -> Printf.fprintf out "JUMP %d" addr
+  | OP_jump (_,None) -> Printf.fprintf out "<unpatched [C]JUMP>"
+  | OP_call -> output_string out "CALL"
+  | OP_return -> output_string out "RETURN"
+  | OP_yield -> output_string out "YIELD"
+
+  | OP_bad -> output_string out "-"
+;;
+  
 
 (*****************************************************************)
 (*                     Execution                                 *)
@@ -216,6 +414,14 @@ let enter_block proc block_stmt =
   then 
     raise (Interp_err "entering block with no frame")
   else
+
+    let emitter = new_emitter () in
+    emit_stmt emitter block_stmt;
+    Printf.printf "== begin emitted code ==:\n";
+    Array.iteri (fun i op -> Printf.printf "%d: %a\n" i fmt_op op) emitter.emit_code;
+    Printf.printf "== end emitted code ==:\n";
+    
+    
     match block_stmt with 
       (STMT_block (stmts, pos)) -> 
 	Printf.printf "entering block\n";

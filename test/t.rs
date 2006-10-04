@@ -26,9 +26,9 @@ pub prog entry
         native func putint(int x) -> ();
 
         func foo(int x) -> ()
-	{
+	{	
 		putstr("Hello, world\n");
-		putint(x);
+		putint(x + 200 / 5);
 	}
 
         main

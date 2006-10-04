@@ -25,7 +25,10 @@ lexer.cmo lexer.cmi: lexer.ml parser.cmi ast.cmi
 %.cmo: %.ml
 	ocamlc -c $<
 
-%.cmi: %.mli %.ml
+%.cmi: %.ml
+	ocamlc -c $<
+
+%.cmi: %.mli
 	ocamlc -c $<
 
 %.ml: %.mll
