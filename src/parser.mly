@@ -130,7 +130,7 @@ let anonymize_tuple (tupty, names) =
 /* Precedences (mostly borrowed from C). */
 %left OR
 %left AND
-%left EQ NE
+%left EQEQ NE
 %left LT LE GE GT
 %left LSL LSR ASR
 %left PLUS MINUS
@@ -176,6 +176,9 @@ call:
 expr: 
     expr OR expr        { EXPR_binary (BINOP_or, $2, $1, $3)  }
   | expr AND expr       { EXPR_binary (BINOP_and, $2, $1, $3) }
+
+  | expr NE expr        { EXPR_binary (BINOP_ne, $2, $1, $3)  }
+  | expr EQEQ expr      { EXPR_binary (BINOP_eq, $2, $1, $3)  }
       
   | expr LT expr        { EXPR_binary (BINOP_lt, $2, $1, $3)  }
   | expr LE expr        { EXPR_binary (BINOP_le, $2, $1, $3)  }
@@ -194,6 +197,7 @@ expr:
   | expr PERCENT expr   { EXPR_binary (BINOP_mod, $2, $1, $3) }
 
   | NOT expr            { EXPR_unary  (UNOP_not, $1, $2)      }
+  | LPAREN expr RPAREN  { $2                                  }
       
   | call                { EXPR_call $1                        }
   | literal             { $1                                  }

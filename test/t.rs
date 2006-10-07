@@ -29,6 +29,18 @@ pub prog entry
 		int y;
 		foo bleh;
 		putstr("Hello, world\n");
+		x = x + 200 / 5;
+		while (x < 60)
+		{
+			putstr("counting: ");
+			putint(x);
+			putstr("\n");
+			if ((x % 2) == 0)
+			{
+				putstr("ooh, an even number!\n");
+			}
+			x = x + 1;
+		}
 	}
 
         main

@@ -114,6 +114,7 @@ rule token = parse
 | '<'                          { LT         (lexpos lexbuf) }
 | "<="                         { LE         (lexpos lexbuf) }
 | "=="                         { EQEQ       (lexpos lexbuf) }
+| "!="                         { NE         (lexpos lexbuf) }
 | ">="                         { GE         (lexpos lexbuf) }
 | '>'                          { GT         (lexpos lexbuf) }
 | '!'                          { NOT        (lexpos lexbuf) }

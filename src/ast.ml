@@ -345,6 +345,7 @@ and val_proc =
      mutable proc_frames: rs_frame list;
      mutable proc_state: proc_exec_state;
      mutable proc_pos: rs_pos;
+     mutable proc_jumped: bool;
      proc_ports: int array;
    }
 
