@@ -52,7 +52,7 @@
                 ("inline", fun p -> INLINE p);
                 ("native", fun p -> NATIVE p);
 
-                ("spawn", fun p -> SPAWN p);
+                ("new", fun p -> NEW p);
                 ("log", fun p -> LOG p);
                 ("reflect", fun p -> REFLECT p);
                 ("eval", fun p -> EVAL p);
@@ -63,6 +63,8 @@
 		 * just as likely to be wrong as right. 
 		 *)
 
+		("bool", fun _ -> BOOL);
+		
                 ("int", fun _ -> INT);
                 ("nat", fun _ -> NAT);
                 ("rat", fun _ -> RAT);
@@ -81,7 +83,7 @@
                 ("proc", fun _ -> PROC);
                 ("prog", fun _ -> PROG);
                 ("port", fun _ -> PORT);
-
+		
               ]
 ;;
 }

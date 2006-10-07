@@ -5,43 +5,6 @@ exception Interp_err of string
 ;;
 
 
-(*****************************************************************)
-(*           "Slightly lowered" stack-machine form               *)
-(*                                                               *)
-(*   (We'll probably revisit this and turn it into numbered      *)
-(*    local slots soon. For now we use named locals and slots)   *)
-(*****************************************************************)
-
-type rs_jump_form = 
-    JMP_conditional
-  | JMP_direct
-
-type rs_op = 
-    OP_push of rs_val
-  | OP_binop of rs_binop
-  | OP_unop of rs_unop
-  | OP_pop
-
-  | OP_load_lval of rs_lval
-  | OP_store_lval of rs_lval
-
-  | OP_alloc_local of string
-  | OP_undef_local of string
-  | OP_clear_local of string
-
-  | OP_pos of rs_pos
-
-  | OP_jump of (rs_jump_form * int option)
-  | OP_call
-  | OP_return
-  | OP_yield
-
-  | OP_bad
-;;
-
-type rs_code = rs_op array
-;;
-
 type rs_emitter = 
   { 
     mutable emit_pc: int;
@@ -99,11 +62,11 @@ let rec emit_expr emit e =
       emit_op emit (OP_push v)
 
   | EXPR_lval lv -> 
-      emit_op emit (OP_load_lval lv)
+      emit_op emit (OP_copy_lval lv)
 
   | EXPR_call (lv, args) -> 
       Array.iter (emit_expr emit) args;
-      emit_op emit (OP_load_lval lv);
+      emit_op emit (OP_copy_lval lv);
       emit_op emit (OP_call);
 ;;
 
@@ -142,11 +105,13 @@ let rec emit_stmt emit stmt =
       emit_op emit OP_return
 
   | STMT_block (stmts, pos) ->
-      emit_op emit (OP_pos pos);      
-      Array.iter (emit_stmt emit) stmts
+      emit_op emit (OP_pos pos);
+      emit_op emit (OP_enter_scope);
+      Array.iter (emit_stmt emit) stmts;
+      emit_op emit (OP_exit_scope)
 
   | STMT_move (lv2, lv1) -> 
-      emit_op emit (OP_load_lval lv1);
+      emit_op emit (OP_move_lval lv1);
       emit_op emit (OP_store_lval lv2)
 
   | STMT_copy (lv, e) -> 
@@ -155,7 +120,7 @@ let rec emit_stmt emit stmt =
 	
   | STMT_call (lv, args) -> 
       Array.iter (emit_expr emit) args;
-      emit_op emit (OP_load_lval lv);
+      emit_op emit (OP_copy_lval lv);
       emit_op emit (OP_call);
       emit_op emit (OP_pop)
 
@@ -278,6 +243,7 @@ let rec fmt_type out t =
     TY_dyn -> output_string out "dyn"
   | TY_type -> output_string out "type"
 
+  | TY_bool -> output_string out "bool"
   | TY_mach (m,n) -> Printf.fprintf out "%c%d" (ty_mach_prefix m) n
   | TY_arith a -> output_string out (ty_arith_name a)
   | TY_str -> output_string out "str"
@@ -321,12 +287,14 @@ let fmt_op out op =
   | OP_unop op -> Printf.fprintf out "UNOP (%a)" fmt_unop op
   | OP_pop -> output_string out "POP"
 
-  | OP_load_lval lv -> Printf.fprintf out "LOAD %a" fmt_lval lv
+  | OP_copy_lval lv -> Printf.fprintf out "COPY %a" fmt_lval lv
+  | OP_move_lval lv -> Printf.fprintf out "MOVE %a" fmt_lval lv
   | OP_store_lval lv -> Printf.fprintf out "STORE %a" fmt_lval lv
 
+  | OP_enter_scope -> output_string out "ENTER_SCOPE"
   | OP_alloc_local s -> Printf.fprintf out "ALLOC_LOCAL %s" s
   | OP_undef_local s -> Printf.fprintf out "UNDEF_LOCAL %s" s
-  | OP_clear_local s -> Printf.fprintf out "CLEAR_LOCAL %s" s
+  | OP_exit_scope -> output_string out "EXIT_SCOPE"
 
   | OP_pos (file,line,col) -> Printf.fprintf out "POS (%s:%d:%d)" file line col
 
@@ -345,11 +313,6 @@ let fmt_op out op =
 (*                     Execution                                 *)
 (*****************************************************************)
 
-let bind_decl decl env =
-  Printf.printf "binding decl of '%s'\n" decl.decl_name;
-  Hashtbl.add env decl.decl_name decl.decl_value
-;;
-
 
 let types_equal p q =
   Printf.printf "comparing types: %a == %a ? %B\n" 
@@ -357,7 +320,8 @@ let types_equal p q =
   p = q
 ;;
 
-let check_args env args bind = 
+
+let check_args args bind = 
   let param_types = bind.bind_sig.subr_sig.sig_param_tup.tup_types in
   let n_args = Array.length args in 
   let n_types = Array.length param_types in
@@ -384,7 +348,7 @@ let check_args env args bind =
 
 
 let bind_args env args bind =
-  check_args env args bind;
+  check_args args bind;
   let n_args = Array.length args in 
   let n_names = Array.length bind.bind_names in
 
@@ -397,52 +361,151 @@ let bind_args env args bind =
   done
 ;;
 
+let bind_and_enter_frame proc fflav sba block_stmt =
+  let emitter = new_emitter () in 
+  emit_stmt emitter block_stmt;
+  emit_op emitter OP_return;
+  Printf.printf "== begin emitted code ==:\n";
+  Array.iteri (fun i op -> Printf.printf "%6d: %a\n" i fmt_op op) emitter.emit_code;
+  Printf.printf "== end emitted code ==:\n";
+  let frame = 
+    { 
+      frame_pc = 0;
+      frame_code = emitter.emit_code;
+      frame_flavour = fflav;		
+      frame_scope = [];
+      frame_scope_stack = Stack.create ();
+      frame_expr_stack = Stack.create ();
+    }
+  in
+  proc.proc_frames <- (frame :: proc.proc_frames);
+  (match sba with 
+    Some (binding,args) -> bind_args proc.proc_env args binding
+  | None -> ());
+;;
+
+
+let exec_op proc op = 
+  let frame = List.hd proc.proc_frames in 
+  let stk = frame.frame_expr_stack in
+  let trueval = (VAL_dyn (TY_bool, VAL_bool false)) in
+
+  match op with 
+    OP_push v -> Stack.push v stk
+  | OP_binop _
+  | OP_unop _ -> raise (Interp_err "cannot handle unary or binary ops yet")
+  | OP_pop -> let _ = Stack.pop stk in ()
+	
+  | OP_copy_lval lv 
+  | OP_move_lval lv -> 
+      if Array.length lv.lval_rest != 0 
+      then raise (Interp_err "cannot handle complex lvals yet")
+      else	  
+	let ov = Hashtbl.find proc.proc_env lv.lval_base in
+	(match ov with 
+	  Some v -> Stack.push v stk
+	| None -> raise (Interp_err "extracting undefined value"));
+	(match op with 
+	  OP_move_lval _ -> 
+	    Hashtbl.replace proc.proc_env lv.lval_base None
+	| _ -> ())
+	  
+  | OP_store_lval lv -> 
+      if Array.length lv.lval_rest != 0 
+      then raise (Interp_err "cannot handle complex lvals yet")
+      else	  
+	let v = Stack.pop stk in
+	Hashtbl.add proc.proc_env lv.lval_base (Some v)
+	  
+  | OP_enter_scope -> 
+      Stack.push frame.frame_scope frame.frame_scope_stack;
+      frame.frame_scope <- []
+	  
+  | OP_alloc_local s -> 
+      frame.frame_scope <- s :: frame.frame_scope;
+      Hashtbl.add proc.proc_env s None
+	
+  | OP_undef_local s -> 
+      Hashtbl.replace proc.proc_env s None
+	
+  | OP_exit_scope -> 
+      List.iter (fun x -> Hashtbl.remove proc.proc_env x) frame.frame_scope;
+      frame.frame_scope <- Stack.pop frame.frame_scope_stack
+	  
+  | OP_pos p -> 
+      (match p with 
+	(file,line,col) -> 
+	  Printf.printf "exec pos (%s:%d:%d)" file line col;
+	  proc.proc_pos <- p)
+	
+  | OP_jump (JMP_conditional, Some addr) -> 
+      (match (Stack.pop frame.frame_expr_stack) with 
+	(VAL_dyn (_, VAL_bool b)) -> 
+	  if b 
+	  then frame.frame_pc <- addr
+      | _ -> raise (Interp_err "conditional jump on non-boolean value"))
+	
+  | OP_jump (JMP_direct, Some addr) -> 
+      frame.frame_pc <- addr
+	  
+  | OP_jump (_,None) -> 
+      raise (Interp_err "executing unpatched jump")
+	
+  | OP_call -> 
+      (match (Stack.pop frame.frame_expr_stack) with 
+	(VAL_dyn (_, VAL_subr (SUBR_func, subr))) -> 
+	  let isig = subr.subr_bind.bind_sig.subr_sig in
+	  let nargs = Array.length isig.sig_param_tup.tup_types in 
+	  let args = Array.create nargs trueval in
+	  for i = (nargs - 1) downto 0 
+	  do 
+	    args.(i) <- Stack.pop frame.frame_expr_stack
+	  done;
+	  let sba = Some (subr.subr_bind, args) in
+	  (match subr.subr_body with 
+	    BODY_block b -> 
+	      bind_and_enter_frame proc (FRAME_func subr.subr_bind) sba b
+	  | BODY_native n -> 
+	      check_args args subr.subr_bind;
+	      Printf.printf "resolving native %s\n" n;
+	      let native_fn = Hashtbl.find proc.proc_natives n in
+	      (native_fn proc args);
+	      Stack.push trueval stk)	  
+      | _ -> raise (Interp_err "calling non-function"))
+	
+  | OP_return -> 
+      List.iter (fun x -> Hashtbl.remove proc.proc_env x) frame.frame_scope;
+      while not (Stack.is_empty frame.frame_scope_stack)
+      do
+	frame.frame_scope <- Stack.pop frame.frame_scope_stack;
+	List.iter (fun x -> Hashtbl.remove proc.proc_env x) frame.frame_scope;
+      done;
+      proc.proc_frames <- List.tl proc.proc_frames;
+      (match proc.proc_frames with 
+	x :: _ -> Stack.push trueval x.frame_expr_stack
+      | _ -> ())
+	  
+  | OP_yield -> raise (Interp_err "cannot yield yet")
+  | OP_bad -> raise (Interp_err "executing bad instruction")
+;;
+
+
+let bind_decl decl env =
+  Printf.printf "binding decl of '%s'\n" decl.decl_name;
+  Hashtbl.add env decl.decl_name decl.decl_value
+;;
+
+
 let new_proc prog = 
   let env = Hashtbl.create (Array.length prog.prog_decls) in 
   Array.iter (fun decl -> bind_decl decl env) prog.prog_decls;
   { proc_prog = prog;
     proc_env = env;
     proc_natives = Hashtbl.create 0;
-    proc_frame = 0;
     proc_frames = [];
     proc_state = PROC_INIT;
-    proc_ports = Array.of_list [] }
-;;
-
-let enter_block proc block_stmt =
-  if proc.proc_frames = [] 
-  then 
-    raise (Interp_err "entering block with no frame")
-  else
-
-    let emitter = new_emitter () in
-    emit_stmt emitter block_stmt;
-    Printf.printf "== begin emitted code ==:\n";
-    Array.iteri (fun i op -> Printf.printf "%d: %a\n" i fmt_op op) emitter.emit_code;
-    Printf.printf "== end emitted code ==:\n";
-    
-    
-    match block_stmt with 
-      (STMT_block (stmts, pos)) -> 
-	Printf.printf "entering block\n";
-	let frame = List.nth proc.proc_frames proc.proc_frame in
-	let block = { block_pc = 0;
-		      block_stmts = stmts;
-		      block_names = Stack.create();
-		      block_pos = pos } in
-	Stack.push block frame.frame_blocks
-    | _ -> raise (Interp_err "\"entering\" non-block statement")
-;;
-
-
-let bind_and_enter_frame proc fflav sba block_stmt =
-  proc.proc_frames <- ({ frame_flavour = fflav;
-			 frame_blocks = Stack.create () }
-		       :: proc.proc_frames);
-  (match sba with 
-    Some (binding,args) -> bind_args proc.proc_env args binding
-  | None -> ());
-  enter_block proc block_stmt
+    proc_ports = Array.of_list [];
+    proc_pos = ("",0,0) }
 ;;
 
   
@@ -473,33 +536,6 @@ let enter_main_frame proc =
 ;;
 
 
-let pluck full_val = 
-  match full_val with 
-    VAL_dyn (_,v) -> v
-;;
-	
-
-let enter_frame_val proc frame_val args =
-  match (pluck frame_val) with 
-    VAL_subr (flav, s) -> 
-      (match s.subr_body with 
-	BODY_native n -> 
-	  check_args proc.proc_env args s.subr_bind;
-	  Printf.printf "resolving native %s\n" n;
-	  let native_fn = Hashtbl.find proc.proc_natives n in
-	  (native_fn proc args)
-      | BODY_block block_stmt -> 
-	  let sba = Some (s.subr_bind, args) in
-	  let frame = 
-	    (match flav with 
-	      SUBR_func -> (FRAME_func s.subr_bind)
-	    | SUBR_iter -> (FRAME_iter s.subr_bind))
-	  in
-	  bind_and_enter_frame proc frame sba block_stmt)
-  | _ -> raise (Interp_err "Entering non-subroutine value")
-;;
-  
-
 let proc_finished p =
   match p.proc_state with
     PROC_FINI when p.proc_frames = [] -> true
@@ -507,63 +543,12 @@ let proc_finished p =
 ;;
 
 
-let lookup_lval lval env =
-  if Array.length lval.lval_rest != 0 
-  then raise (Interp_err "can't handle multi-component lvals yet!")
-  else 
-    match Hashtbl.find env lval.lval_base with 
-      Some v -> (Printf.printf "resolved lval %s\n" lval.lval_base); v
-    | None -> 
-	raise 
-	  (Interp_err 
-	     (Printf.sprintf 
-		"resolved lval %s in uninitialized state" 
-		lval.lval_base))
-;;
-
-
-
-let rec eval_expr proc expr =
-  match expr with 
-    EXPR_binary (binop, pos, e1, e2) -> raise (Interp_err "can't handle binary exprs yet")
-  | EXPR_unary (unop, pos, e) -> raise (Interp_err "can't handle unary exprs yet")
-  | EXPR_literal (v, pos) -> v
-  | EXPR_lval lval -> lookup_lval lval proc.proc_env
-  | EXPR_call (lval, args) -> raise (Interp_err "can't handle call exprs yet")
-
-and eval_args_and_call proc lval args =
-  let subr_val = lookup_lval lval proc.proc_env in
-  let arg_vals = Array.map (eval_expr proc) args in
-  enter_frame_val proc subr_val arg_vals   
-;;
-
-let exec_stmt proc stmt = 
-  match stmt with 
-    STMT_while w -> ()
-  | STMT_foreach f -> ()
-  | STMT_for f -> ()
-  | STMT_if i -> ()
-  | STMT_try t -> ()
-  | STMT_yield y -> ()
-  | STMT_return r -> ()
-  | STMT_assert a -> ()
-  | STMT_block b -> ()
-  | STMT_move (dst,src) -> (Printf.printf "moving %a to %a\n" fmt_lval src fmt_lval dst)
-  | STMT_copy (dst,src) -> (Printf.printf "copying %a to %a\n" fmt_expr src fmt_lval dst)
-  | STMT_call (lval,args) -> 
-      let e = EXPR_call (lval,args) in 
-      (Printf.printf "calling: %a\n" fmt_expr e);
-      eval_args_and_call proc lval args      
-  | STMT_decl d -> ()
-;;
-
 let step_proc p =
   match p.proc_state with
 
     PROC_INIT when p.proc_frames = [] -> 
       Printf.printf "completed init, beginning main\n";
       p.proc_state <- PROC_MAIN;
-      p.proc_frame <- 0;
       enter_main_frame p
 
   | PROC_MAIN when p.proc_frames = [] -> 
@@ -573,20 +558,12 @@ let step_proc p =
   | PROC_MAIN 
   | PROC_INIT 
   | PROC_FINI -> 
-      let f = List.nth p.proc_frames p.proc_frame in
-      let b = Stack.top f.frame_blocks in
-      if (b.block_pc >= Array.length b.block_stmts)
-      then 
-	(let _ = Stack.pop f.frame_blocks in
-	Printf.printf "leaving frame\n";
-	if Stack.is_empty f.frame_blocks
-	then 
-	  p.proc_frames <- List.tl p.proc_frames)
-      else
-	((match b.block_pos with 
-	  (file,line,_) -> Printf.printf "(block %s:%d, pc=%d)\n" file line b.block_pc);
-	 exec_stmt p b.block_stmts.(b.block_pc);
-	 b.block_pc <- b.block_pc + 1)
+      let f = List.hd p.proc_frames in
+      Printf.printf "(pc=%d)\n" f.frame_pc;
+      if (f.frame_pc >= Array.length f.frame_code)
+      then exec_op p OP_return
+      else exec_op p f.frame_code.(f.frame_pc);
+      f.frame_pc <- f.frame_pc + 1
 	  
   | _ -> (raise (Interp_err "interpreter wedged"))
 ;;

@@ -9,6 +9,7 @@ open Hashtbl;;
  *
  *)
 
+
 (* 
  * Slot names are given by a dot-separated path within the current
  * module namespace. 
@@ -60,6 +61,7 @@ type rs_type =
     TY_dyn
   | TY_type
 
+  | TY_bool
   | TY_mach of (ty_mach * int)
   | TY_arith of ty_arith
   | TY_str
@@ -187,9 +189,10 @@ and ty_quote =
   | TY_quote_type
   | TY_quote_decl
   | TY_quote_stmt
-      (* Probably this list should be a lot longer; the canonical rule
-	 I've been using is to make a quotation type for every
-	 nonterminal *)
+
+   (* Probably this list should be a lot longer; the canonical rule *)
+   (* I've been using is to make a quotation type for every *)
+   (* nonterminal *)
 
     
 (* Values *)
@@ -220,7 +223,8 @@ type rs_val =
 
 and rs_val_dyn =
 
-    VAL_mach of val_mach
+    VAL_bool of bool
+  | VAL_mach of val_mach
   | VAL_arith of Num.num
   | VAL_str of string
   | VAL_char of char
@@ -270,7 +274,7 @@ and val_alt =
     {
      val_alt_case: ty_alt_case;
      val_alt_rec: val_rec;
-   }
+    }
 
 and val_vec = rs_val array
 
@@ -285,13 +289,35 @@ and val_prog =
       prog_decls: rs_decl array;
     }
 
-and rs_block = 
-    {
-     mutable block_pc: int;
-     block_stmts: rs_stmt array;
-     block_names: string Stack.t;
-     block_pos: rs_pos;
-    }
+and rs_jump_form = 
+    JMP_conditional
+  | JMP_direct
+
+and rs_op = 
+    OP_push of rs_val
+  | OP_binop of rs_binop
+  | OP_unop of rs_unop
+  | OP_pop
+
+  | OP_copy_lval of rs_lval
+  | OP_move_lval of rs_lval
+  | OP_store_lval of rs_lval
+
+  | OP_enter_scope
+  | OP_alloc_local of string
+  | OP_undef_local of string
+  | OP_exit_scope
+
+  | OP_pos of rs_pos
+
+  | OP_jump of (rs_jump_form * int option)
+  | OP_call
+  | OP_return
+  | OP_yield
+
+  | OP_bad
+
+and rs_code = rs_op array
 
 and rs_frame_flavour = 
     FRAME_iter of rs_subr_bind
@@ -302,8 +328,12 @@ and rs_frame_flavour =
 
 and rs_frame = 
     {
+     mutable frame_pc: int;
+     frame_code: rs_code;
      frame_flavour: rs_frame_flavour;
-     frame_blocks: rs_block Stack.t;
+     mutable frame_scope: string list;
+     frame_scope_stack: (string list) Stack.t;
+     frame_expr_stack: rs_val Stack.t;
     }
 
 and val_proc = 
@@ -312,16 +342,9 @@ and val_proc =
      proc_env: (string, (rs_val option)) Hashtbl.t;
      proc_natives: (string, (val_proc -> (rs_val array) -> unit)) Hashtbl.t;
 
-   (* 
-    * Frames are held in a "push-down list": head is the top
-    * frame, but current executing frame may not be top due to iter
-    * protocol.  
-    *)
-
-     mutable proc_frame: int;
      mutable proc_frames: rs_frame list;
-
-     mutable proc_state: proc_exec_state;     
+     mutable proc_state: proc_exec_state;
+     mutable proc_pos: rs_pos;
      proc_ports: int array;
    }
 
@@ -446,5 +469,8 @@ type rs_visibility =
     VIS_public
   | VIS_standard
   | VIS_private
+;;
 
 type rs_decl_top = (rs_visibility * rs_decl)
+;;
+

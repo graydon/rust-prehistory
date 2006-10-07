@@ -19,7 +19,6 @@ pub prog entry
 
         init(sys.rt^ rt, vec[str]^ args) -> nil
         {
-                put = rt.put;
         }
 
         native func putstr(str x) -> ();
@@ -27,8 +26,9 @@ pub prog entry
 
         func foo(int x) -> ()
 	{	
+		int y;
+		foo bleh;
 		putstr("Hello, world\n");
-		putint(x + 200 / 5);
 	}
 
         main

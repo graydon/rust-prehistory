@@ -95,7 +95,7 @@ let anonymize_tuple (tupty, names) =
 
 
 /* Magic runtime services. */
-%token <Ast.rs_pos> SPAWN LOG REFLECT EVAL
+%token <Ast.rs_pos> NEW LOG REFLECT EVAL
 
 /* Literals. */
 %token <Num.num * Ast.rs_pos> LIT_NUM
@@ -114,7 +114,7 @@ let anonymize_tuple (tupty, names) =
       
 /* Basic types. */
 %token NIL 
-%token INT NAT RAT
+%token BOOL INT NAT RAT
 %token CHAR STR
 %token <int> BFP DFP SIGNED UNSIGNED
 
