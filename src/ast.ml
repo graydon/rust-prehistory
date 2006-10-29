@@ -173,15 +173,15 @@ and ty_qual_sig =
 
 and ty_sig = 
     { 
-      sig_param_tup: ty_tup;
-      sig_result_tup: ty_tup; 
+      sig_param_ty: rs_type;
+      sig_result_ty: rs_type; 
     }
 
 and ty_pred = 
     { 
       pred_auto: bool;
       pred_inline: bool; 
-      pred_param_tup: ty_tup;
+      pred_param_ty: rs_type;
     }
 
 and ty_quote = 
@@ -369,7 +369,7 @@ and rs_stmt =
   | STMT_block of ((rs_stmt array) * rs_pos)
   | STMT_move of (rs_lval * rs_lval)
   | STMT_copy of (rs_lval * rs_expr)
-  | STMT_call of (rs_lval * (rs_expr array) )
+  | STMT_call of (rs_lval * rs_expr)
   | STMT_decl of rs_decl
 
 and stmt_while = 
@@ -415,9 +415,10 @@ and rs_expr =
 
     EXPR_binary of (rs_binop * rs_pos * rs_expr * rs_expr)
   | EXPR_unary of (rs_unop * rs_pos * rs_expr)
+  | EXPR_tuple of (rs_expr array * rs_pos)
   | EXPR_literal of (rs_val * rs_pos)
   | EXPR_lval of rs_lval
-  | EXPR_call of (rs_lval * (rs_expr array) )
+  | EXPR_call of (rs_lval * rs_expr)
 
 and rs_lidx =
     LIDX_named of (rs_name_component * rs_pos)

@@ -67,13 +67,7 @@ let rec fmt_expr out e =
   | EXPR_lval lv -> fmt_lval out lv
   | EXPR_call (lv, args) -> 
       fmt_lval out lv;
-      output_string out "(";
-      Array.iteri 
-	(fun i arg -> 
-	  (if i = 0 then () else output_string out ", ");
-	  fmt_expr out arg) 
-	args;
-      output_string out ")";
+      fmt_expr out args
 
 and fmt_lval out lv = 
   output_string out lv.lval_base;
