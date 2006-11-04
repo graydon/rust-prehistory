@@ -192,7 +192,7 @@ let ehsize = 52;;
 let phentsize = 32;;
 let shentsize = 40;;
 
-let mk_basic_ia32_ehdr n_phdrs phdr_off n_shdrs shdr_off = 
+let mk_basic_x86_ehdr n_phdrs phdr_off n_shdrs shdr_off = 
   { 
     e_ident = [| 
     0x7f;             (* EI_MAG0 *)
@@ -291,7 +291,7 @@ type basic_elf_file =
     }
 ;;
 
-let mk_basic_ia32_elf_file fn = 
+let mk_basic_x86_elf_file fn = 
   (* As this is just a boostrap system, we adopt an incredibly cheesy *)
   (* fixed-sizes-for-everything layout, and fault if they're overrun. *)
   (* The file is < 4mb long:                                          *)
@@ -379,7 +379,7 @@ let mk_basic_ia32_elf_file fn =
   let f = 
     { 
       file_buf = openbuf fn (Int32.to_int file_size);
-      file_ehdr = (mk_basic_ia32_ehdr 
+      file_ehdr = (mk_basic_x86_ehdr 
 		     n_phdrs phdr_off 
 		     n_shdrs shdr_off);
       
@@ -456,7 +456,165 @@ let mk_basic_ia32_elf_file fn =
 ;;
 
 (*
-let f = mk_basic_ia32_elf_file "test.elf32" in
+let f = mk_basic_x86_elf_file "test.elf32" in
 Unix.close f.file_buf.buf_fd
 ;;
 *)
+
+
+(* x86 instruction emitting... *)
+
+let modrm m rm reg_or_subopcode = 
+  (((m land 0b11) lsl 6) 
+     lor 
+   (rm land 0b111)) 
+    lor 
+  ((reg_or_subopcode land 0b111) lsl 3)
+;;
+
+let modrm_deref_EAX = modrm 0b00 0b000;;
+let modrm_deref_ECX = modrm 0b00 0b001;;
+let modrm_deref_EDX = modrm 0b00 0b010;;
+let modrm_deref_EBX = modrm 0b00 0b011;;
+let modrm_disp32    = modrm 0b00 0b101;;
+let modrm_deref_ESI = modrm 0b00 0b110;;
+let modrm_deref_EDI = modrm 0b00 0b111;;
+
+let modrm_deref_EAX_plus_disp8 = modrm 0b01 0b000;;
+let modrm_deref_ECX_plus_disp8 = modrm 0b01 0b001;;
+let modrm_deref_EDX_plus_disp8 = modrm 0b01 0b010;;
+let modrm_deref_EBX_plus_disp8 = modrm 0b01 0b011;;
+let modrm_deref_EBP_plus_disp8 = modrm 0b01 0b101;;
+let modrm_deref_ESI_plus_disp8 = modrm 0b01 0b110;;
+let modrm_deref_EDI_plus_disp8 = modrm 0b01 0b111;;
+
+let modrm_deref_EAX_plus_disp32 = modrm 0b01 0b000;;
+let modrm_deref_ECX_plus_disp32 = modrm 0b01 0b001;;
+let modrm_deref_EDX_plus_disp32 = modrm 0b01 0b010;;
+let modrm_deref_EBX_plus_disp32 = modrm 0b01 0b011;;
+let modrm_deref_EBP_plus_disp32 = modrm 0b01 0b101;;
+let modrm_deref_ESI_plus_disp32 = modrm 0b01 0b110;;
+let modrm_deref_EDI_plus_disp32 = modrm 0b01 0b111;;
+
+let modrm_EAX = modrm 0b01 0b000;;
+let modrm_ECX = modrm 0b01 0b001;;
+let modrm_EDX = modrm 0b01 0b010;;
+let modrm_EBX = modrm 0b01 0b011;;
+let modrm_ESP = modrm 0b01 0b011;;
+let modrm_EBP = modrm 0b01 0b101;;
+let modrm_ESI = modrm 0b01 0b110;;
+let modrm_EDI = modrm 0b01 0b111;;
+
+let reg2_EAX = 0b000;;
+let reg2_ECX = 0b001;;
+let reg2_EDX = 0b010;;
+let reg2_EBX = 0b011;;
+let reg2_ESP = 0b100;;
+let reg2_EBP = 0b101;;
+let reg2_ESI = 0b110;;
+let reg2_EDI = 0b111;;
+
+let slash0 = 0;;
+let slash1 = 1;;
+let slash2 = 2;;
+let slash3 = 3;;
+let slash4 = 4;;
+let slash5 = 5;;
+let slash6 = 6;;
+let slash7 = 7;;
+
+let plusrd_EAX opc = opc + 0;;
+let plusrd_ECX opc = opc + 1;;
+let plusrd_EDX opc = opc + 2;;
+let plusrd_EBX opc = opc + 3;;
+let plusrd_ESP opc = opc + 4;;
+let plusrd_EBP opc = opc + 5;;
+let plusrd_ESI opc = opc + 6;;
+let plusrd_EDI opc = opc + 7;;
+
+
+(* We use a fixed, extremely suboptimal assignment of       *)
+(* registers. Every binary operation has either this form:  *)
+(*                                                          *)
+(*  POP EBX                                                 *)
+(*  POP EAX                                                 *)
+(*  EAX <- EAX op EBX                                       *)
+(*  PUSH EAX                                                *)
+(*                                                          *)
+(*  or this form:                                           *)
+(*                                                          *)
+(*  POP EBX                                                 *)
+(*  POP EAX                                                 *)
+(*  (EDX,EAX) <- EAX op EBX                                 *)
+(*  PUSH EDX                                                *)
+(*  PUSH EAX                                                *)
+(*                                                          *)
+(* some other registers are permanently assigned:           *)
+(*                                                          *)
+(*  EBP    frame base pointer                               *)
+(*  ESP    stack pointer                                    *)
+(*                                                          *)
+(*  ESI    crate static data pointer                        *)
+(*  EDI    process control bloc pointer                     *)
+
+let disp32 = int_to_u32_lsb0;;
+
+let push_local n = 
+  if (n * 4) < 256
+  then [| 0xff; modrm_deref_EBP_plus_disp8 slash6; (n * 4) |]
+  else Array.append 
+      [| 0xff; modrm_deref_EBP_plus_disp32 slash6 |] 
+      (disp32 (n * 4))
+;;
+
+let pop_local n = 
+  if (n * 4) < 256
+  then [| 0x8f; modrm_deref_EBP_plus_disp8 slash0; (n * 4) |]
+  else Array.append 
+      [| 0x8f; modrm_deref_EBP_plus_disp32 slash0 |] 
+      (disp32 (n * 4))
+;;
+
+
+let pop_EAX = plusrd_EAX 0x58;;
+let pop_EBX = plusrd_EBX 0x58;;
+
+let push_EAX = plusrd_EAX 0x50;;
+let push_EDX = plusrd_EDX 0x50;;
+
+(* For ops listed as "NN /r  OP rm/32 r32"  *)
+let simple_binary_op op = 
+  [| pop_EBX; 
+     pop_EAX; 
+     op; modrm_EAX reg2_EBX; 
+     push_EAX |]
+;;
+
+let op_ADD = simple_binary_op 0x01;;
+let op_SUB = simple_binary_op 0x29;;
+
+let op_AND = simple_binary_op 0x21;;
+let op_OR = simple_binary_op 0x21;;
+let op_XOR = simple_binary_op 0x29;;
+
+let op_NOT = [| pop_EAX; 
+		0xf7; modrm_EAX slash2; 
+		push_EAX |];;
+
+let op_NEG = [| pop_EAX; 
+		0xf7; modrm_EAX slash3; 
+		push_EAX |];;
+
+let op_MUL = [| pop_EBX;
+		pop_EAX;
+		0xf7; modrm_EBX slash4;
+		push_EDX;
+		push_EAX |];;
+
+let op_DIV = [| pop_EBX;
+		pop_EAX;
+		0xf7; modrm_EBX slash6;
+		push_EDX;
+		push_EAX |];;
+		
+let op_POP = [| pop_EAX; |];;

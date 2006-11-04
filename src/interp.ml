@@ -65,6 +65,14 @@ let rec fmt_expr out e =
       Printf.fprintf out "%a(%a)" fmt_unop op fmt_expr e2	
   | EXPR_literal (v,_) -> fmt_lit out v
   | EXPR_lval lv -> fmt_lval out lv
+  | EXPR_tuple (es,_) -> 
+      (output_string out "(";
+       Array.iteri 
+	 (fun i x -> 
+	   if i != 0 then output_string out ", " else (); 
+	   fmt_expr out x) es;
+       output_string out ")")
+	
   | EXPR_call (lv, args) -> 
       fmt_lval out lv;
       fmt_expr out args
@@ -235,11 +243,15 @@ let rec emit_expr emit e =
       emit_op emit (OP_pos pos);
       emit_op emit (OP_push v)
 
+  | EXPR_tuple (es, pos) -> 
+      emit_op emit (OP_pos pos);
+      Array.iter (emit_expr emit) es
+
   | EXPR_lval lv -> 
       emit_op emit (OP_copy_lval lv)
 
-  | EXPR_call (lv, args) -> 
-      Array.iter (emit_expr emit) args;
+  | EXPR_call (lv, arg) -> 
+      emit_expr emit arg;
       emit_op emit (OP_copy_lval lv);
       emit_op emit (OP_call);
 ;;
@@ -292,8 +304,8 @@ let rec emit_stmt emit stmt =
       emit_expr emit e;
       emit_op emit (OP_store_lval lv)
 	
-  | STMT_call (lv, args) -> 
-      Array.iter (emit_expr emit) args;
+  | STMT_call (lv, arg) -> 
+      emit_expr emit arg;
       emit_op emit (OP_copy_lval lv);
       emit_op emit (OP_call);
       emit_op emit (OP_pop)
@@ -323,8 +335,14 @@ let types_equal p q =
 ;;
 
 
+let sig_param_types s = 
+  match s.sig_param_ty with
+    TY_tup tt -> tt.tup_types
+  | x -> [| x |]
+;;  
+
 let check_args args bind = 
-  let param_types = bind.bind_sig.subr_sig.sig_param_tup.tup_types in
+  let param_types = sig_param_types bind.bind_sig.subr_sig in
   let n_args = Array.length args in 
   let n_types = Array.length param_types in
   let n_names = Array.length bind.bind_names in
@@ -521,7 +539,7 @@ let exec_op proc op =
       (match (Stack.pop frame.frame_expr_stack) with 
 	(VAL_dyn (_, VAL_subr (SUBR_func, subr))) -> 
 	  let isig = subr.subr_bind.bind_sig.subr_sig in
-	  let nargs = Array.length isig.sig_param_tup.tup_types in 
+	  let nargs = Array.length (sig_param_types isig) in 
 	  let args = Array.create nargs trueval in
 	  for i = (nargs - 1) downto 0 
 	  do 

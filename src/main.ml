@@ -11,7 +11,7 @@ let _ =
     try
       lexbuf.Lexing.lex_start_p <- spos;
       lexbuf.Lexing.lex_curr_p <- cpos;
-      let sf = Parser.sourcefile Lexer.token lexbuf in
+      let sf = Ll1parser.sourcefile Lexer.token lexbuf in
       Hashtbl.iter (fun name (vis,decl) -> 
 	Printf.printf "parsed decl: %s\n" name)
 	sf;
