@@ -1,10 +1,10 @@
 
 LIBS=nums.cma unix.cma bigarray.cma
 
-main: ll1parser.cmo lexer.cmo ast.cmo interp.cmo main.cmo asm.cmo
+main: ll1parser.cmo lexer.cmo ast.cmo interp.cmo asm.cmo # main.cmo 
 	ocamlc -o $@ $(LIBS) $^ 
 
-main.cmo: parser.cmi lexer.cmi interp.cmi
+main.cmo: lexer.cmi interp.cmi # parser.cmi 
 
 interp.cmo: ast.cmi interp.ml 
 

@@ -4,7 +4,7 @@
 type arr = (int, 
 	    Bigarray.int8_unsigned_elt, 
 	    Bigarray.c_layout) 
-      Bigarray.Array1.t
+    Bigarray.Array1.t
 ;;
 
 type buf = { buf_fd: Unix.file_descr;
@@ -188,6 +188,7 @@ let write_program_header_at (b:buf) (pos:int) (ph:program_header) =
   !p
 ;;
 
+(* Fixed sizes of structs involved in elf32 spec. *)
 let ehsize = 52;;
 let phentsize = 32;;
 let shentsize = 40;;
@@ -195,7 +196,7 @@ let shentsize = 40;;
 let mk_basic_x86_ehdr n_phdrs phdr_off n_shdrs shdr_off = 
   { 
     e_ident = [| 
-    0x7f;             (* EI_MAG0 *)
+      0x7f;             (* EI_MAG0 *)
    (Char.code 'E');   (* EI_MAG1 *)
    (Char.code 'L');   (* EI_MAG2 *)
    (Char.code 'F');   (* EI_MAG3 *)
@@ -228,6 +229,7 @@ let mk_basic_x86_ehdr n_phdrs phdr_off n_shdrs shdr_off =
   }
 ;;
 
+(* Section types *)
 let sht_NULL = 0l;;
 let sht_PROGBITS = 1l;;
 let sht_SYMTAB = 2l;;
@@ -235,14 +237,17 @@ let sht_STRTAB = 3l;;
 let sht_RELA = 4l;;
 let sht_NOBITS = 8l;;
 
+(* Section flags *)
 let shf_WRITE = 1l;;
 let shf_ALLOC = 2l;;
 let shf_EXECINSTR = 4l;;
 
+(* Program (segment) types *)
 let pt_NULL = 0l;;
 let pt_LOAD = 1l;;
 let pt_PHDR = 6l;;
 
+(* Program (segment) flags *)
 let pf_X = 1l;;
 let pf_W = 2l;;
 let pf_R = 4l;;
@@ -358,25 +363,6 @@ let mk_basic_x86_elf_file fn =
   let rw_size        = Int32.add data_size bss_size in
   let rw_addr        = Int32.add load_base re_size in
 
-  let write_section_names f =
-    let pos0 = Int32.to_int f.file_shdr_shstrtab.sh_offset in
-    let setname pos (sh, name) = 
-      (sh.sh_name <- Int32.of_int (pos - pos0);
-       write_zstring f.file_buf pos name)
-    in
-
-    List.fold_left 
-      setname pos0
-      [
-       (f.file_shdr_null,     "");
-       (f.file_shdr_text,     ".text");
-       (f.file_shdr_rodata,   ".rodata");
-       (f.file_shdr_data,     ".data");
-       (f.file_shdr_bss,      ".bss");
-       (f.file_shdr_shstrtab, ".shstrtab")
-     ]
-  in 
-  let f = 
     { 
       file_buf = openbuf fn (Int32.to_int file_size);
       file_ehdr = (mk_basic_x86_ehdr 
@@ -430,12 +416,32 @@ let mk_basic_x86_elf_file fn =
 			     ~typ: pt_LOAD ~flags: [pf_R; pf_W] ~align: 0x1000l
 			     ~off: rw_off ~addr: rw_addr ~sz: rw_size);
     }
-  in
+;;
+
+let write_basic_x86_elf_file f =
+  let write_section_names f =
+    let pos0 = Int32.to_int f.file_shdr_shstrtab.sh_offset in
+    let setname pos (sh, name) = 
+      (sh.sh_name <- Int32.of_int (pos - pos0);
+       write_zstring f.file_buf pos name)
+    in
+
+    List.fold_left 
+      setname pos0
+      [
+       (f.file_shdr_null,     "");
+       (f.file_shdr_text,     ".text");
+       (f.file_shdr_rodata,   ".rodata");
+       (f.file_shdr_data,     ".data");
+       (f.file_shdr_bss,      ".bss");
+       (f.file_shdr_shstrtab, ".shstrtab")
+     ]
+  in 
   let ws = write_section_header_at f.file_buf in
   let wp = write_program_header_at f.file_buf in
   let _ = write_section_names f in 
   let _ = write_elf_header_at f.file_buf 0 f.file_ehdr in  
-  let _ = List.fold_left ws (Int32.to_int shdr_off)
+  let _ = List.fold_left ws (Int32.to_int f.file_ehdr.e_shoff)
       [
        f.file_shdr_null;
        f.file_shdr_text;
@@ -445,24 +451,17 @@ let mk_basic_x86_elf_file fn =
        f.file_shdr_shstrtab
      ] 
   in
-  let _ = List.fold_left wp (Int32.to_int phdr_off)
-      [
-       f.file_phdr_phdr; 
-       f.file_phdr_re_load;
-       f.file_phdr_rw_load
-     ] 
+  let _ = List.fold_left wp (Int32.to_int f.file_ehdr.e_phoff)
+    [
+      f.file_phdr_phdr; 
+      f.file_phdr_re_load;
+      f.file_phdr_rw_load
+    ]
   in
-  f
+    ()
 ;;
 
-(*
-let f = mk_basic_x86_elf_file "test.elf32" in
-Unix.close f.file_buf.buf_fd
-;;
-*)
-
-
-(* x86 instruction emitting... *)
+(* x86 instruction emitting *)
 
 let modrm m rm reg_or_subopcode = 
   (((m land 0b11) lsl 6) 
@@ -578,9 +577,22 @@ let pop_local n =
 
 let pop_EAX = plusrd_EAX 0x58;;
 let pop_EBX = plusrd_EBX 0x58;;
+let pop_ECX = plusrd_ECX 0x58;;
+let pop_EDX = plusrd_EDX 0x58;;
+let pop_ESI = plusrd_ESI 0x58;;
+let pop_EDI = plusrd_EDI 0x58;;
 
 let push_EAX = plusrd_EAX 0x50;;
+let push_EBX = plusrd_EBX 0x50;;
+let push_ECX = plusrd_ECX 0x50;;
 let push_EDX = plusrd_EDX 0x50;;
+let push_ESI = plusrd_ESI 0x50;;
+let push_EDI = plusrd_EDI 0x50;;
+
+let mov_EAX_imm8 = plusrd_EAX 0xB0;;
+
+let push_imm8 i  = [| 0x6A; ub i 0 |]
+let push_imm32 i = Array.append [| 0x68 |] (int_to_u32_lsb0 i)
 
 (* For ops listed as "NN /r  OP rm/32 r32"  *)
 let simple_binary_op op = 
@@ -618,3 +630,83 @@ let op_DIV = [| pop_EBX;
 		push_EAX |];;
 		
 let op_POP = [| pop_EAX; |];;
+
+
+(* 
+ * Note: our calling convention here is like everywhere else: "cdecl"
+ * 
+ * that is to say, the caller of f(a,b,c,d,e) emits:
+ * 
+ * push e
+ * push d
+ * push c
+ * push b
+ * push a
+ * call f
+ * push EAX  -- return val was in EAX
+ * 
+ * With "SYSCALL5 i" the only difference is that "call f" takes the form of
+ * popping args off the stack and into registers, loading an immediate syscall 
+ * number into EAX, and invoking int 0x80.
+ * 
+ * pop EBX
+ * pop ECX
+ * pop EDX
+ * pop ESI
+ * pop EDI
+ * mov EAX i
+ * int 0x80
+ *
+ *)
+
+let op_SYSCALL0 i = [| mov_EAX_imm8; ub i 0; 0xCD; 0x80; push_EAX |];;
+let op_SYSCALL1 i = [| mov_EAX_imm8; ub i 0; pop_EBX; 0xCD; 0x80; push_EAX |];;
+let op_SYSCALL2 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; 0xCD; 0x80; push_EAX |];;
+let op_SYSCALL3 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; pop_EDX; 0xCD; 0x80; push_EAX |];;
+let op_SYSCALL4 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; pop_EDX; pop_ESI; 0xCD; 0x80; push_EAX |];;
+let op_SYSCALL5 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; pop_EDX; pop_ESI; pop_EDI; 0xCD; 0x80; push_EAX |];;
+
+let op_SYS_EXIT  = op_SYSCALL1 1;;    (* sys_exit(int status)                         *)
+let op_SYS_FORK  = op_SYSCALL0 2;;    (* sys_fork()                                   *)
+let op_SYS_READ  = op_SYSCALL3 3;;    (* sys_read(int fd, char* buf, size_t count)    *)
+let op_SYS_WRITE = op_SYSCALL3 4;;    (* sys_write(int fd, char* buf, size_t count)   *)
+let op_SYS_OPEN  = op_SYSCALL3 4;;    (* sys_open(const char *f, int flags, int mode) *)
+let op_SYS_CLOSE = op_SYSCALL1 4;;    (* sys_close(unsigned int fd)                   *)
+
+
+(* Basic test *)
+
+let test_asm _ = 
+  let f = mk_basic_x86_elf_file "test.elf32" in
+  let buf = f.file_buf in
+  let txt_pos = ref (Int32.to_int f.file_shdr_text.sh_offset) in
+  let rodata_pos = ref (Int32.to_int f.file_shdr_rodata.sh_offset) in
+  let append_ro_zstring str = (rodata_pos := write_zstring buf (!rodata_pos) str) in
+  let append_ro_rawstring str = (rodata_pos := write_rawstring buf (!rodata_pos) str) in
+  let append_rodata dat = (rodata_pos := write_bytes buf (!rodata_pos) dat) in
+  let append_insns iss = (txt_pos := write_bytes buf (!txt_pos) iss) in
+  let push_rodata_addr dpos = push_imm32 ((dpos - (Int32.to_int f.file_shdr_rodata.sh_offset)) + (Int32.to_int f.file_shdr_rodata.sh_addr)) in
+  let 
+      call_write str = (let dp = !rodata_pos in
+			  append_ro_rawstring str;
+			  append_insns (Array.concat 
+					  [
+					    push_imm32 (String.length str);
+					    push_rodata_addr dp;
+					    push_imm32 1; (* fd1 *)
+					    op_SYS_WRITE
+					  ]))
+  in
+    f.file_ehdr.e_entry <- f.file_shdr_text.sh_addr;
+    call_write "hello, world!\n";
+    append_insns (Array.concat 
+		    [
+		      push_imm32 23;
+		      op_SYS_EXIT
+		    ]);
+    write_basic_x86_elf_file f;
+    Unix.close f.file_buf.buf_fd
+;;
+
+test_asm ();;
+
