@@ -334,6 +334,8 @@ let mk_basic_sym ~name ~value ~size ~ty ~bind ~shndx =
     }
 
 
+type fixup = FIXUP_VMA | FIXUP_SIZE;;
+
 type basic_elf_file = 
     { 
       file_buf: buf;
@@ -352,31 +354,15 @@ type basic_elf_file =
       file_phdr_re_load: program_header;
       file_phdr_rw_load: program_header;
 
+      (* Symbol table management *)
       file_syms: (string, (int * int * int * int)) Hashtbl.t;
-      mutable file_fixups: (int * string) list;
+      file_fixups: (int * fixup * string) Stack.t;
+      add_data_sym: (string -> int -> int -> unit);
+      add_rodata_sym: (string -> int -> int -> unit);
+      add_func_sym: (string -> int -> int -> unit);
+      add_vma_fixup: (int -> string -> unit);
+      add_size_fixup: (int -> string -> unit);
     }
-;;
-
-let textndx        = 1;;  (* Section index of .text *)
-let rodatandx      = 2;;  (* Section index of .rodata *)
-let datandx        = 3;;  (* Section index of .data *)
-let shstrndx       = 5;;  (* Section index of .shstrtab *)
-let strndx         = 7;;  (* Section index of .strtab *)
-
-let add_data_sym f name vma size = 
-  Hashtbl.add f.file_syms name (stt_OBJECT, datandx, vma, size)
-;;
-
-let add_rodata_sym f name vma size = 
-  Hashtbl.add f.file_syms name (stt_OBJECT, rodatandx, vma, size)
-;;
-
-let add_func_sym f name vma size = 
-  Hashtbl.add f.file_syms name (stt_FUNC, textndx, vma, size)
-;;
-
-let add_fixup f off name = 
-  f.file_fixups <- ((off, name) :: f.file_fixups)
 ;;
 
 
@@ -419,6 +405,12 @@ let mk_basic_x86_elf_file fn =
   (* section 7: .strtab                                               *)
 
   let n_shdrs        = 8 in
+  let textndx        = 1 in  (* Section index of .text *)
+  let rodatandx      = 2 in  (* Section index of .rodata *)
+  let datandx        = 3 in  (* Section index of .data *)
+  let shstrndx       = 5 in  (* Section index of .shstrtab *)
+  let strndx         = 7 in  (* Section index of .strtab *)
+
   let text_off       = eh_phdr_size in
   let rodata_off     = Int32.add text_off text_size in
   let data_off       = Int32.add rodata_off rodata_size in
@@ -455,6 +447,9 @@ let mk_basic_x86_elf_file fn =
   let rw_file_size   = data_size in
   let rw_mem_size    = Int32.add data_size bss_size in
   let rw_addr        = Int32.add load_base re_size in
+
+  let symtab = Hashtbl.create 100 in
+  let fixups = Stack.create () in
 
     { 
       file_buf = openbuf fn (Int32.to_int file_size);
@@ -531,8 +526,19 @@ let mk_basic_x86_elf_file fn =
 			     ~off: rw_off ~addr: rw_addr 
 			     ~filesz: rw_file_size ~memsz: rw_mem_size);
 
-      file_syms = Hashtbl.create 100;
-      file_fixups = [];
+      file_syms = symtab;
+      file_fixups = fixups;
+
+      add_data_sym = (fun name vma size ->
+			Hashtbl.add symtab name (stt_OBJECT, datandx, vma, size));
+      
+      add_rodata_sym = (fun name vma size ->
+			  Hashtbl.add symtab name (stt_OBJECT, rodatandx, vma, size));
+      add_func_sym  = (fun name vma size ->
+			 Hashtbl.add symtab name (stt_FUNC, textndx, vma, size));
+      
+      add_vma_fixup = (fun off name -> Stack.push (off, FIXUP_VMA, name) fixups);
+      add_size_fixup = (fun off name -> Stack.push (off, FIXUP_SIZE, name) fixups);
     }
 ;;
 
@@ -559,8 +565,12 @@ let write_basic_x86_elf_file f =
   in 
   let ws pos sh = write_section_header_at f.file_buf pos (pos + shentsize) sh in
   let wp pos ph = write_program_header_at f.file_buf pos (pos + phentsize) ph in
+
+  (* Write the section names and elf header. *)
   let _ = write_section_names () in 
   let _ = write_elf_header_at f.file_buf 0 f.file_ehdr.e_ehsize f.file_ehdr in  
+
+  (* Write the section headers. *)
   let _ = List.fold_left ws (Int32.to_int f.file_ehdr.e_shoff)
       [
        f.file_shdr_null;
@@ -573,6 +583,8 @@ let write_basic_x86_elf_file f =
        f.file_shdr_strtab
      ] 
   in
+
+  (* Write the program headers. *)
   let _ = List.fold_left wp (Int32.to_int f.file_ehdr.e_phoff)
     [
       f.file_phdr_phdr; 
@@ -580,6 +592,8 @@ let write_basic_x86_elf_file f =
       f.file_phdr_rw_load
     ]
   in
+
+  (* Write the symbol table. *)
   let _ = 
     let sym_pos = ref (Int32.to_int f.file_shdr_symtab.sh_offset) in
     let str_pos0 = Int32.to_int f.file_shdr_strtab.sh_offset in 
@@ -617,6 +631,20 @@ let write_basic_x86_elf_file f =
       while (!sym_pos) + symsize < sym_lim do
 	wsym null_sym;
       done
+  in
+
+  (* Apply the fixups. *)
+  let _ = 
+    let apply_fixup (off, ty, name) = 
+      let (_,_,vma,size) = Hashtbl.find f.file_syms name in
+      let 
+	  v = (match ty with 
+		   FIXUP_VMA -> vma
+		 | FIXUP_SIZE -> size)
+      in
+      let _ = write_bytes f.file_buf off (off + 4) (int_to_u32_lsb0 v) in ()
+    in	  
+    Stack.iter apply_fixup f.file_fixups
   in
     ()
 ;;
@@ -844,40 +872,52 @@ let test_asm _ =
   let rodata_shdr = f.file_shdr_rodata in
 
   let text_off = (Int32.to_int text_shdr.sh_offset) in
-  let text_vma = (Int32.to_int text_shdr.sh_addr) in
-  let text_pos = ref text_off in
   let text_lim = text_off + (Int32.to_int text_shdr.sh_size) in
+  let text_pos = ref text_off in
+  let text_size _ = (!text_pos - text_off) in
+  let text_vma _ = (Int32.to_int text_shdr.sh_addr) + (text_size()) in
 
   let rodata_off = (Int32.to_int rodata_shdr.sh_offset) in
-  let rodata_vma = (Int32.to_int f.file_shdr_rodata.sh_addr) in
-  let rodata_pos = ref rodata_off in
   let rodata_lim = rodata_off + (Int32.to_int rodata_shdr.sh_size) in
+  let rodata_pos = ref rodata_off in
+  let rodata_size _ = (!rodata_pos - rodata_off) in
+  let rodata_vma _ = (Int32.to_int rodata_shdr.sh_addr) + (rodata_size()) in
 
-  let append_ro_rawstring str = (rodata_pos := write_rawstring buf (!rodata_pos) rodata_lim str) in
-  let append_insns iss = (text_pos := write_bytes buf (!text_pos) text_lim iss) in
-  let push_rodata_addr dpos = push_imm32 ((dpos - rodata_off) + rodata_vma) in
-  let 
-      call_write str = (let dp = !rodata_pos in
-			  append_ro_rawstring str;
-			  append_insns (Array.concat 
-					  [
-					    push_imm32 (String.length str);
-					    push_rodata_addr dp;
-					    push_imm32 1; (* fd1 *)
-					    op_SYS_WRITE
-					  ]))
+  let append_ro_rawstring str = 
+    rodata_pos := write_rawstring buf !rodata_pos rodata_lim str 
   in
-  let 
-      main = (Array.concat 
-		[
-		  push_imm32 23;
-		  op_SYS_EXIT
-		])
+
+  let append_rodata_sym f data sym = 
+    let size = String.length data in
+      f.add_rodata_sym sym (rodata_vma()) size;
+      append_ro_rawstring data
   in
+
+  let append_insns iss = (text_pos := write_bytes buf !text_pos text_lim iss) in
+  let append_push_sizeof sym = 
+    append_insns (push_imm32 0);
+    f.add_size_fixup (!text_pos - 4) sym
+  in
+  let append_push_vmaof sym = 
+    append_insns (push_imm32 0);
+    f.add_vma_fixup (!text_pos - 4) sym
+  in
+    
+  let literal_data = "Hello, world\n" in
+  let literal_symbol = "lit1" in
+  let main_vma = text_vma() in
+
     f.file_ehdr.e_entry <- f.file_shdr_text.sh_addr;
-    call_write "hello, world!\n";
-    add_func_sym f "main" text_vma (Array.length main);
-    append_insns main;
+    
+    append_push_sizeof literal_symbol;
+    append_push_vmaof literal_symbol;
+    append_insns (push_imm32 1); (* fd 1 *)
+    append_insns op_SYS_WRITE;
+    append_insns op_SYS_EXIT;
+
+    f.add_func_sym "main" main_vma (text_size());
+    append_rodata_sym f literal_data literal_symbol;
+
     write_basic_x86_elf_file f;
     Unix.close f.file_buf.buf_fd
 ;;
