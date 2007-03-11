@@ -152,7 +152,7 @@ Modules are arranged in a human-friendly namespace within a crate.
 It is the responsibility of a team of programmers working on a
 crate to ensure that their module names to not collide, inside the
 crate. Module names can be reused in different crates,
-however; the names in one crate cannot collide with the names in
+however; the names in one crate are unrelated to the names in
 another crate.
 
 Modules contain values. There are many types of value; the complete
@@ -164,14 +164,14 @@ than the portion of Rust code that relates to modules and crates.
 
 Finally, within values there may be @i{slots}. Values are also
 @emph{referenced} by slots. A @dfn{slot} is a named memory location
-that can refer to a value. Each module defines a set of slots that are
-the ``top level'' slots of the module. Further slots exist in many
-contexts:
+that can refer to a value. Each source module defines a set of slots
+that are the ``top level'' slots of the module. Further slots exist in
+many contexts:
 
 @itemize
-@item Variables within functions, iterators, predicates.
+@item Variables within functions, ports and predicates.
 @item Fields within records, alternatives and programs.
-@item Components of vectors.
+@item Components of vectors and arrays.
 @end itemize
 
 
@@ -187,10 +187,10 @@ There are many kinds of value in a Rust module.
 * Arithmetic values::         High-precision numbers.
 * Textual values::            Strings and characters.
 * Records::                   Fixed products of heterogeneous types.
+* Arrays::                    Fixed products of homogeneous types.
 * Vectors::                   Dynamic products of homogeneous types.
 * Alternatives::              Sums of heterogeneous types.
-* Functions::                 Simple subroutines.
-* Iterators::                 Scoped coroutines.
+* Functions::                 Subroutines and scoped coroutines.
 * Predicates::                Pure functions involved in typestates.
 * Programs::                  General coroutines.
 * Processes::                 Instances of programs.
@@ -233,12 +233,12 @@ The types of textual value are:
 @item @code{strenc.*}, various other character encodings.
 @end itemize
 
-It should be emphasized that the primary string type should be blindly
-memory-copied into an external buffer, as it will produce a sequence
-of numbers in the host byte order, and not necessarily equal to a
-particular UCS-4 encoding. When externalizing a string, care should be
-taken to select an appropriate encoding from the standard @code{enc.*}
-module.
+It should be emphasized that the primary string type should not be
+blindly memory-copied into an external buffer, as it will produce a
+sequence of numbers in the host byte order, and not necessarily equal
+to a particular UTF-8 or UCS-4 encoding. When externalizing a string,
+care should be taken to select an appropriate encoding from the
+standard @code{enc.*} module.
 
 @node       Records
 @subsection Records
@@ -246,28 +246,51 @@ module.
 The @code{rec} type introduces new record types that have named fields,
 similar to the @code{struct} types of C.
 
-Records are denoted with the keyword @code{rec}. The fields of a
-record are defined, as a list of slots within braces, similar to the
-slot declarations in a stack frame.
+Anonymous record literals and record types are denoted with the
+keyword @code{rec}. The fields of a record are defined, as a list of
+slots within braces, similar to the slot declarations in a stack
+frame.
 
 Record fields can carry typestate constraints, similar to slots in a
 stack frame. Record types can also carry formal typestates relating to
 the record as a whole, or to some of its fields.
 
+@node       Arrays
+@subsection Arrays
+
+Arrays are homogeneous containers with a fixed number of fixed-size
+dimensions. 
+
+Arrays are parametric types: they are parameterized by the type of
+value stored in them, by the number of dimensions (the rank of the
+array) and the size of each dimension. Arrays may be considered as a
+family of synthetic types:
+
+ type array[ty T, nat x] = ...
+ type array[ty T, nat x, nat y] = ...
+ type array[ty T, nat x, nat y, nat z] = ...
+ ...
+
+each of which is implemented by the language.
+
+All elements of an array carry the @code{init} predicate: arrays are
+initialized with a default value that is copied to each member of the
+array. Limited arrays are not permitted: only unlimited types may be
+stored in arrays.
 
 @node       Vectors
 @subsection Vectors
 
-Vectors are the only variable-size type built into Rust. All
-vairable-size structures need to be built out of vectors.
+Vectors are variable size, homogeneous, 1-dimensional containers. 
 
-Vectors are parametric types, denoted with the keyword @code{vec}.  A
-vector of type @code{T} is denoted as @code{vec[T]}.
+Vectors are parametric types, denoted with the keyword
+@code{vec}. Anonymous vector literals and vector types containing type
+@code{T} are denoted as @code{vec[T]}.
 
 A vector has two associated sizes: one representing the vector's
 allocated size, and one representing a bound on the initialized range
 of the vector. Within the initialized-range bound, all elements carry
-the @code{init} typestate. 
+the @code{init} predicate. 
 
 Vectors dynamically resize using doubling and halving operations that
 amortize byte-copying costs to a constant factor per element.
@@ -277,9 +300,10 @@ they represent a form of transplantation (see @ref{Value
 transplanting}), therefore vectors cannot contain directly limited
 values (see @ref{Limitation}). For values with indirectly limited type
 @code{T}, vectors of @code{T} are supported provided, but the vector
-must be declared as @code{lim vec[T]}.
+must be declared as @code{lim vec[T]}, as such a vector type itself is
+indirectly limited.
 
-Because the @code{init} typestate is managed homogeneously over the
+Because the @code{init} predicate is managed homogeneously over the
 initialized range of the vector, not per-element, vectors cannot have
 individual elements deinitialized. Instead, the following operations
 are defined:
@@ -320,91 +344,144 @@ If the space consumed by an alternative can fit inside a single word,
 Rust is obliged to store it this way. In particular, on a machine that
 effectively ``does not use'' K low bits of its pointers (due to
 alignment restrictions), those K low bits can be used to encode a
-@code{2^K}-case alternative. Rust must perform this optimization.
+@code{2^K}-case alternative. Every implementation of Rust must perform
+this optimization.
 
 @node       Functions
 @subsection Functions
 
-Functions are subroutines that have a single point where control
-enters, and that are given a single point in their caller to return
-to. A function @i{returns} a value. A function can also pass multiple
-values back to its caller through arguments. The calling convention in
-Rust provides a variety of modes. Un-annotated parameters are simply
-copied into functions (``call by value'') and discarded when the
-function completes; if such parameters are constant, the copy can be a
-very efficient dependent slot (see @ref{Slot modes}). 
+Functions model subroutines as well as 4 limited, stack-scoped forms
+of coroutine. Functions are given either one or two points in their
+caller's frame to return and/or yield to. A function @i{returns} a
+value if it moves a value into the caller-allocated return slot,
+deallocates its frame and jumps to the return point. A function
+@i{yields} a value if it moves a value into the caller-allocated yield
+slot, moves the current program counter into the caller-allocated
+resume slot, jumps to the yield point and @emph{does not} deallocate
+its frame. If a function yields, the caller may @i{resume} the
+function and permit it to return of its own accord, or may
+@i{terminate} the function by jumping to the function's epilogue and
+tearing down its frame. Every function eventually executes its
+epilogue, either caused by a return, an exception, or caller
+termination.
 
-However, limited types cannot be copied, and in some cases named
-``output parameters'' are also desirable. For this reason Rust
-supports three parameter-mode annotations:
+Each argument to a function occupies 1 word or less. If the storage
+type of an argument is larger than a word, an address is placed in the
+argument slot. If the storage type of an argument is equal to or
+smaller than a word, the argument value is copied or moved into the
+argument slot directly.
+
+The arguments to a function implicitly occupy a tuple, though it is a
+special tuple that contains only immediate or dependent slots. The
+argument tuple implicitly carries the @code{all} predicate; thus each
+parameter carries the @code{init} predicate in the callee. Similarly
+the yield and return slots allocated in the caller carry the
+@code{init} predicate when visible (after the jump of a yield or
+return). The yield slot is either immediate or dependent; the return
+slot is either immediate, interior or exterior.
+
+An un-annotated function parameter implies that the associated
+argument is copied into the argument tuple during a call, though in
+the case of superword-sized arguments such copies are made lazily in
+the callee if and only if the callee writes to the argument; read-only
+use of an argument simply loads through the provided address without
+making a copy of the argument. Superword-sized ``copy'' arguments and
+yields are @emph{the} canonical case of a dependent slot (see
+@ref{Slot modes}).
+
+A function parameter of type @code{T} can be annotated in two ways:
 
 @itemize
-@item @code{in}, which means ``move in''
-@item @code{out}, which means ``move out''
-@item @code{inout}, which means ``move in and out''
+@item @code{T-}, which means ``move in''
+@item @code{T+}, which means ``move in and out''
 @end itemize
 
-Return values are always passed by moving, since the slot containing
-the return value is only visible up until the point of return, not
-beyond.
+A ``move in'' parameter is moved from its caller frame into its callee
+frame: once control enters the callee, the slot holding the moved
+parameter in the caller has lost the @code{init} predicate.
 
-Reference parameters, like reference slots everywhere, are denoted
-with a @code{^} suffix on the type name. See @ref{Slot modes} for
-details.
+A ``move in and out'' parameter is like a ``move in'' parameter,
+except that the value in the callee's parameter slot is moved out
+again, back to the caller's frame, when the function returns.
 
-Constant parameters, like constant slots everywhere, are denoted with
-a @code{-} prefix on the type name. See @ref{Constant types and slots}
-for details.
+There is no parameter annotation that implies ``move out'' without
+``move in'': to move a value out of a function, simply return or yield
+the value. Return values always use ``move semantics'' since the slot
+containing the return value is only visible up until the point of
+return, not beyond. Yield values use ``copy semantics'' by default,
+via an immediate or dependent yield slot; the yield type expression on
+a yielding function signature can be annotated with the @code{+}
+suffix to get ``move'' semantics on the yield value.
+
+Parameter types, return types and yield types can all be annotated as
+exterior using the @code{^} prefix, just like all slot
+declarations. See @ref{Slot modes}.
 
 Functions are required to support proper tail-calls.
 
 Functions may be pure. A pure function performs no communication
 tasks: it does not send on any channel, nor does it spawn or otherwise
-interact with a process type.
+interact with a process type. See @ref{Purity}.
 
-@node       Iterators
-@subsection Iterators
+In addition to the basic call/return protocol for functions, which is
+declared with the @code{func} keyword, 4 types of scoped coroutine are
+supported, that may yield before they return:
 
-Iterators are subroutines that have a primary point where control
-enters and are passed a primary return address, like functions. Unlike
-functions, iterators are also passed a secondary yield address, and
-may have several points within them where a value can be
-yielded. Yielding a value suspends the iterator and calls back to the
-yield address with the yielded value as a parameter.  After yielding,
-an iterator may be resumed, which restores execution at the point
-immediately following the yield.
+@itemize
+@item @code{func!} denotes a function that yields once.
+@item @code{func?} denotes a function that yields 0 or 1 times.
+@item @code{func*} denotes a function that yields 0 or more times.
+@item @code{func+} denotes a function that yields 1 or more times.
+@end itemize
 
-Iterators are a very limited type of coroutine: they are allocated on
-the stack like functions, and run to completion before their caller
-can return. Essentially they are ``nested coroutines''; but their
-implementation can be very efficient as a result: the iterator frame
-remains allocated during iteration, and control only jumps between the
-caller frame and the iterator frame.
+Scoped coroutines are also required to support proper
+tail-@emph{yields}. A tail-yield occurs when a primary coroutine
+invokes a sub-coroutine with a construct that yield every value
+yielded by the sub-coroutine. Then the primary coroutine passes its
+caller's yield address to the sub-coroutine, for direct yielding
+between the sub-coroutine and caller. When such a tail-yield happens
+in tail-call position (the last statement of a coroutine before a
+return), the coroutine is requried to replace its stack frame with the
+frame of the sub-coroutine, as with a return-based tail call.
 
-Iterators are also required to support proper tail-calls. Iterators
-must also support proper tail-@emph{yields}.  A tail-yield occurs when
-a primary iterator invokes a sub-iterator only to yield every value
-yielded by the sub-iterator. Then the primary iterator passes its
-caller's yield address to the sub-iterator, for direct yielding
-between the sub-iterator and caller. When such a tail-yield happens in
-tail-call position (the last statement of an iterator), the iterator
-is requried to replace its stack frame with the frame of the
-sub-iterator, as a function would.
+The 4 types of coroutine combine with 4 specific caller-side control
+structures to 4 important non-copying calling patterns. Each is
+useful, and interacts in a precise manner with the typestate checking
+algorithm. One way to picture the differences is to picture the
+control-flow graph in the caller: when binding a yielded value inside
+a temporary control block, the caller's control graph has either none,
+one, or both of a ``bypass edge'' (if no yield occurs) and a ``back
+edge'' (if more than one yield occurs). Combining these possibilities
+produces 4 possible scenarios: neither (@code{func!}), bypass-no-back
+(@code{func?}), back-no-bypass (@code{func+}) and both (@code{func*}).
 
-Iterators may also be pure. Purity of iterators means the same thing
-as purity in functions.
+A function declaration also defines an associated @i{call record} that
+represents the parameter-passing requirements of the function in a way
+that is accessible to introspection or polymorphic invocation. This
+record contains an @i{arguments tuple}, a @i{return value slot}, and
+possibly a @i{yield value slot}. Given a call record, there are 5
+polymorphic @i{apply} operators that will invoke a function of
+compatible type. Invocation involves forming a call frame full of
+immediate or dependent slots for each value in the call record's
+argument tuple, copying or moving values into those slots, then
+running the callee. Yields and returns from the function are
+tail-yielded or tail-returned back to the caller of the apply
+operator. This permits writing polymorphic call-proxying code while
+keeping the standard case efficient.
+
 
 @node       Predicates
 @subsection Predicates
 
-Predicates are boolean pure functions that connect runtime values
-to the typestate system. Typestates consist of predicates applied
-to slots at points; introducing a new predicate thereby enlarges 
-the set of possible typestates. 
+Predicates are boolean pure functions that connect runtime values to
+the typestate system. A typestate is a set of predicates applied to a
+set of slots at a particular point; introducing a new predicate
+thereby enlarges the set of possible typestates. See @ref{Typestates}.
 
-Predicates can be asserted with the keyword @code{assert}. The 
-poststate of a statement @code{assert(p,q,r)} is equal to the
-prestate 
+Predicates can be asserted with the keyword @code{assert}. The
+poststate of a statement @code{assert p(q,r)} is the union of the
+prestate with the predicate @code{p} applied to slots @code{q} and
+@code{r}.
 
 @node       Programs
 @subsection Programs
@@ -467,19 +544,19 @@ is indirectly limited must be declared as such with the keyword
 @node       Purity
 @subsection Purity
 
-Subroutines (functions or iterators) may be @i{pure} or @i{impure}. A
-subroutine @var{S} is @dfn{impure} iff any of these conditions hold:
+Functions may be @i{pure} or @i{impure}. A
+function @var{S} is @dfn{impure} iff any of these conditions hold:
 
 @itemize
-@item The subroutine @var{S} is @emph{not} declared as @code{pure}
-@item The subroutine @var{S} calls any impure subroutines.
-@item The subroutine @var{S} calls any channels.
+@item The function @var{S} is @emph{not} declared as @code{pure}
+@item The function @var{S} calls any impure functions.
+@item The function @var{S} calls any channels.
 @end itemize
 
 Purity exists as a concept in Rust for two reasons:
 
 @itemize
-@item As a basic aid to code comprehension. Pure subroutines are easier
+@item As a basic aid to code comprehension. Pure functions are easier
 to reason about, so programmers may wish to ensure that portions of
 their work are pure.
 @item Predicates are effectively pure boolean functions. Predicates
@@ -628,9 +705,9 @@ We borrow structure (but not terminology) from Ada and Hermes when
 organizing the type system. In particular:
 
 @itemize
-@item A constrained type (an Ada "subtype") is a base type plus a set of
-constraints. Constraints are formulated using Hermes-style
-typestate predicates rather than Ada's fixed set of constraints.
+@item A constrained type -- similar to an Ada "subtype" -- is a base type accompanied with a set of
+constraints. Constraints are formulated using Hermes-style typestate
+predicates rather than Ada's fixed set of constraints.
 @item There is no general subtype lattice (as in OO languages). There is only
 one type for each value. This is common to both languages.
 @end itemize
@@ -642,10 +719,9 @@ one type for each value. This is common to both languages.
 Constrained types do not participate in overload resolution, because
 predicates can always be dropped.
 
-If you wish to produce a new type that wraps an old type, you can just
-make a single-field rec. The allocation rules will not impose any
-penalty for doing so.
-
+If you wish to produce a new type that wraps an old type and
+@emph{does} participate in overload resolution, you can use the
+@code{newtype} type operator, which duplicates a type expression.
 
 @page
 @node    Memory model
@@ -655,13 +731,13 @@ penalty for doing so.
 @node       Semantic model
 @subsection Semantic model
 
-Rust's memory model logically consists of a set of values, arranged
-in a DAG. Values have 1:1 type relationship so values may be said to
-be limited or not, just like types. See @ref{Limited types} for
-details.
+Rust's memory model logically consists of a set of values, arranged in
+a logical tree, and physical DAG. Values have 1:1 type relationship so
+values may be said to be limited or not, just like types. See
+@ref{Limited types} for details.
 
-The relationships between slots and values are the edges in the
-memory DAG.
+The relationships between slots and values are the edges in the memory
+DAG.
 
 
 @node       Initialization 
@@ -679,22 +755,18 @@ typestate. If the predicate @code{init(S)} is dropped, the slot
 @node       Sharing
 @subsection Sharing
 
-Conceptually, every slot holds a unique subtree that is not shared.
+Semantically, every slot holds a unique subtree that is not
+shared. This is why we say that memory is arranged into a logical
+tree.
 
-In real memory, some number of memory subtrees may be shared
+In physical memory, some number of memory subtrees may be shared
 copy-on-write (CoW). This is why we say that memory is a DAG. The
-amount of sharing is at the discretion of the implementation, within
-some restrictions:
-
-@itemize
-@item Limited values cannot be shared, because they cannot be copied.
-@item Interior values cannot be shared (see @ref{Allocation modes}).
-@end itemize
-
-When a node is shared CoW, it has a reference-count and its memory is
-reclaimed only when the reference count drops to zero. When a node is
-not shared CoW, its memory is reclaimed at a specific point: when its
-slot loses the @code{init} predicate.
+amount of sharing is specified and obligatory: exterior allocations
+have reference counts stored at the beginning of their allocation, and
+are reclaimed when the reference count drops to zero. Interior
+allocations are reclaimed when the slot containing the allocation
+becomes empty (loses the @code{init} predicate). See @ref{Allocation
+modes}.
 
 
 @node       Assignment
@@ -743,7 +815,7 @@ mode. @dfn{Exterior allocation} typically means ``allocated on the
 heap''. @dfn{Interior allocation} means that the value is allocated
 within a contiguous block of memory owned by some other
 value. Interior allocations are commonly made for slots in @code{rec}
-and @code{vec} values, as well as slots in the runtime stack.
+and @code{vec} values, as well as slots in function and port frames.
 
 Slots also have modes, each of which may imply that the slot's
 referent has a particular allocation mode. See @ref{Slot modes}.
@@ -780,8 +852,8 @@ The type of a value may, or may not, determine how much memory is
 required to store a value of that type.
 
 If a type is parametric, opaque, or forward-declared (and not yet
-undefined) we say that it is of @dfn{indefinite size}. Otherwise we
-say that the type has @dfn{definite size}. Since values and slots also
+defined) we say that has of @dfn{indefinite size}. Otherwise we say
+that the type has @dfn{definite size}. Since values and slots also
 have unique types, we may refer to slots or values as having definite
 or indefinite size.
 
@@ -818,41 +890,59 @@ immediate slot is also used to contain the value, and every copy is
 effectively a ``transplant'' because there is no advantage to copying
 less than the full value.
 
-A slot can be dependent iff its type has superword size and refers to a
-value that is statically known to be initialized and constant at every
-point where the slot is visible. The most important cases of dependent
-slots are non-immediate constant slots for subroutine arguments,
-yields and returns, and the arms of @code{alt} statements. Dependent
-slots hold addresses of either interior or exterior values, but do
-@emph{not} manipulate reference counts, deinitialize or deallocate
-values.
+A slot is dependent iff all of the following 3 conditions hold:
 
-A slot is interior iff its type has definite size, its type is not
-directly limited, and the slot is not dependent. Interior slots always
-contain their interior allocation; assignment of an exterior value to
-an interior slot causes a transplant to the interior storage. Interior
-slots are somewhat similar to immediate slots, insofar as their value
-is stored within the structure that contains the slot. Interior slots
-differ from immediate slots insofar as the @emph{address} of an
-interior slot can be stored in a dependent slot. Immediate slots are
-always passed by value.
+@itemize 
+@item The slot type has superword size
+@item The slot has the @code{init} predicate everywhere it is visible
+@item The slot is not written to anywhere it is visible
+@end itemize
 
-A slot can be exterior iff the slot's type has indefinite size or its
-type is directly limited, and the slot is not dependent. Exterior
-slots always contain the address of an exterior allocation; assignment
-of an interior value to an exterior slot causes a transplant to
-exterior storage.
+The most important cases of dependent slots are non-immediate slots
+for function arguments, yields and returns, and the arms of @code{alt}
+statements. Dependent slots hold addresses of either interior or
+exterior values, but do @emph{not} manipulate reference counts,
+deinitialize or deallocate values.
 
-Rust could --- but does not --- select slot modes completely
-automatically. To provide the user with a suggestive mental picture of
-the space costs of their code, Rust provides an @emph{explicit
-notation} for slots with exterior or dependent mode: the slot
-qualifier @code{^}, pronounced ``ref''. By writing @code{^T} for a
-slot of some type @code{T}, the user can be sure that only a
-fixed-size storage cell (an address) will be allocated for the slot in
-its containing structure. The user cannot control whether dependent or
-exterior mode is chosen to implement a reference slot: dependent mode
-is always chosen in preference to exterior mode, whenever possible.
+A slot is interior iff all of the following 4 conditions hold:
+
+@itemize 
+@item The slot type has definite, superword size
+@item The slot type is not directly limited
+@item The slot is not dependent 
+@item The slot is not explicitly marked as exterior
+@end itemize
+
+Interior slots always contain their interior allocation; assignment of
+an exterior value to an interior slot causes a transplant to the
+interior storage. Interior slots are somewhat similar to immediate
+slots, insofar as their value is stored within the memory structure
+that contains the slot. Interior slots differ from immediate slots
+insofar as the @emph{address} of an interior slot can be stored in a
+dependent slot. The address of an immediate slot is never taken; they
+are always copied or moved in full.
+
+Exterior slots always contain the address of an exterior allocation;
+assignment of an interior value to an exterior slot causes a
+transplant to exterior storage.
+
+A slot is exterior iff its declaration has been @emph{marked} as
+exterior, with the slot qualifier @code{^}. By writing @code{^T} for a
+slot with type @code{T}, the programmer states that the slot will
+always refer to an exterior allocation.
+
+A non-dependent slot @emph{must be} marked as exterior if either of
+the following two conditions hold:
+
+@itemize 
+@item The slot type has indefinite size
+@item The slot type is directly limited
+@end itemize
+
+Even outside of these cases, however, the programmer may insert
+exterior annotations simply to control the ``shape'' of allocated
+memory: to vary the time/space tradeoff between efficiently-allocated
+interior allocations and efficiently-rearranged exterior allocations.
 
 It should be emphasized, however, that the @code{^} qualifier does
 @emph{not} produce an separately denotable concept of ``address'':
@@ -860,16 +950,6 @@ there is no mechanism for denoting or manipulating the address stored
 in a reference slot, and all the type-state rules are identical for
 reference and non-reference slots. 
 
-@node       Constant types and slots
-@subsection Constant types and slots
-
-Every type has a constant form, denoted by appending @code{=}
-(pronounced ``const'') to a type expression: for example @code{int=}
-is the type of integer constants. The @code{=} annotation can be made
-in a type definition or in a slot declaration, or both. If a constant
-type is definined, all slots of that type are implicitly constant. In
-a constant slot declaration, an initializer must be present (or
-implied, as in the case of a subroutine parameter slot).
 
 
 @node Index
