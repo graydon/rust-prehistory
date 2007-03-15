@@ -13,6 +13,7 @@ This manual is for the ``Rust'' programming language.
 Copyright 2006 Graydon Hoare
 
 All rights reserved
+
 Licensed to the public under the terms of the GNU GPL (>= 2.0).
 See the file COPYING for details
 @end ifinfo
@@ -46,34 +47,47 @@ imperative-procedural, concurrent-actor and pure-functional
 styles. Rust also supports generic programming and metaprogramming, in
 both static and dynamic forms.
 
+@end ifnottex
 
-@node    Fundamentals
-@chapter Fundamentals
+@menu
+* Introduction::               Background, intentions, relationships to other languages
+* Lexicon::                    The basic terms used when discussing Rust
+* Artifacts::                  A catalogue of the syntactic forms and their meanings
+@end menu
 
+@ifnottex
+Complete table of contents
+@end ifnottex
 
-@page
-@node    Design perspective
-@section Design perspective
+@contents
 
+@node    Introduction
+@chapter Introduction
+
+@quotation
+  It should be easy to say what you want to happen, and just as easy
+  to say what you want to @emph{not happen}.
+@end quotation
 
 Rust is a ``curly-brace'' block-structured language; it generally
 visually resembles the C family, but differs significantly in
-syntactic and semantic details.
+syntactic and semantic details. 
 
 Rust's semantics are a mixture of elements found in Ada, Mesa, ML, CLU
-and Hermes.
+and Hermes. It can most readily be considered a descendent of Hermes,
+though there is no formal relationship.
 
 The language design attempts to maximize the following goals:
 
 @itemize
-@item Error detection and isolation.
+@item Error isolation, detection and prevention.
 @item Clarity and precision of expression.
 @item Implementation simplicity.
 @item Runtime efficiency.
 @end itemize
 
 In pursuit of these goals, some common language features were
-rejected. While not unique in rejecting these features -- similar
+rejected. While not unique in rejecting these features -- some similar
 rejections are made in the ancestral languages noted above -- the
 informed reader should keep in mind that such rejections are usually
 @emph{intentional}. An uncommon technique does not necessariliy arise
@@ -109,6 +123,229 @@ binding, cyclical memory graphs, pointer-rich data structures, tracing
 garbage collection, and shared-visibility concurrency are all avoided
 in Rust. The legitimate motivations for these features are addressed
 via other means.
+
+@node    Lexicon
+@chapter Lexicon
+
+Rust is defined in terms that may be familiar to readers experienced
+with other programming languages. Nevertheless it is important to
+clarify the meaning of certain terms which are used in precise, and
+occasionally unusual ways within the language definition.
+
+In the following sections, some terms are used but not defined. In
+some cases example code is given with portions unexplained. The
+purpose of the following sections is to provide suggestive intuitions
+about major concepts in Rust. Precise definitions are provided in
+later chapters.
+
+
+@node    Programs and Processes
+@section Programs and Processes
+
+Rust borrows operating system terminology in order to differentiate
+two important artifacts: @i{programs} and @i{processes}. A program is
+the inert, non-executing form of rust code. A process is the
+instantiated, ``live'', possibly-executing form of rust code. A
+program can be executed, a process @emph{is the executing state} of a
+program; every process has a program that it is currently executing.
+We will use these terms precisely and non-interchangeably.
+
+Programs and processes are Rust's fundamental units of encapsulation,
+state, behavior and concurrency. A collection of rust code may define
+many distinct programs, and each program can be instantiated into many
+distinct processes. Processes execute functions, exchange messages
+with other processes, and may spawn further sub-processes. Processes
+may execute concurrently, or may have their execution interleaved.
+
+There is some similarity between the OOP terms ``class'' and
+``object'' and the Rust terms ``program'' and ``process''. In OOP,
+classes are instantiated into objects; in Rust, programs are
+instantiated into processes. This symmetry may help your intuition,
+but it is not sufficient to motivate us to adopt the OOP terminology:
+there are sufficient differences between Rust's process model and OOP
+that such terminology would cause confusion. Rust does not define
+anything called a ``class'' or an ``object''.
+
+When we wish to speak of operating system processes we will use the
+term ``operating system processes'' or ``OS processes''; otherwise the
+word ``process'' refers to a rust process. Rust processes are
+considerably smaller and more lightweight than operating system
+processes: a single OS process running Rust code may contain thousands
+or millions of Rust processes.
+
+We may sometimes speak of ``a program doing something''. This is a
+short-hand way of saying that ``a process that is an instance of the
+program would do something''. Programs themselves do not @emph{do}
+anything; they are inert values. The difference is important to
+maintain in your mind, as Rust defines very different operations on
+programs and processes. Programs may be parsed, printed, copied,
+transmitted, compiled, typechecked or executed. Processes may be
+started, paused, resumed, stopped, or queried for various execution
+parameters.
+
+@node    Values and Slots
+@section Values and Slots
+
+Rust programs manipulate values. A Rust @i{value} is any information
+that can be denoted by a Rust term. Values occupy memory: every value
+consumes a certain number of bits. Numbers are values, as are strings,
+records, vectors, arrays, programs, processes, and many other things
+besides.
+
+Some values have slots. A @i{slot} is a memory location @emph{inside}
+a value that can @emph{refer to} another value. Variables within a
+module or stack frame are slots, as are the fields within records or
+the components of tuples, vectors and arrays. 
+
+@node    Types, Predicates and Constraints
+@section Types, Predicates and Constraints
+
+Every Rust value has a type. A @i{type} is a static description of a
+subset of all the possible values. Types are built from a set of
+fundamental types such as ``number'' or ``character'', and a set of
+type constructors such as ``record'', ``function'', ``tuple'', or
+``vector''. The type of a value determines much about how you can use
+the value. For example, this code:
+
+@example
+type coord3d = (int, int, int);
+
+type buf = vec[byte];
+
+type employee = rec @{ 
+                      string name; 
+                      dec salary; 
+                    @};
+@end example
+
+introduces 3 new types: a tuple type, a vector type, and a record type.
+
+A @i{predicate} is a pure boolean function. We say that a predicate
+``holds'' over a value if the predicate returns @code{true} when
+applied to the value, otherwise we say that the predicate ``does not
+hold'' over the value. For example, this code:
+
+@example
+pred is_even(int x) @{
+  return x % 2 == 0;
+@}
+
+pred is_nonzero(int x) @{
+  return x != 0;
+@}
+@end example
+
+introduces 2 new predicates: one that tests for even-ness and one that
+tests for nonzero-ness.
+
+Every slot has both a type and a constraint. A @i{constraint} is a
+set of zero or more predicates. A slot can refer to a value if and
+only if the value has the same type as the slot, and the slot's
+constraint holds over the value. For example, this code:
+
+@example
+int foo : is_even(*), is_nonzero(*);
+@end example
+
+introduces an integer slot that is constrained to be even and nonzero.
+
+@node    Points, Typestates and Assertions
+@section Points, Typestates and Assertions
+
+Rust borrows terminology from the Hermes programming language to
+describe a particular static error-checking technique. This technique
+is called @i{typestate checking}. To define typestates, we must define
+points: a @i{point} exists before or after any statement in a Rust
+program. For example, this code:
+
+@example
+ s = "hello, world";
+ print(s);
+@end example
+
+Consists of two statements and three points: 
+
+@itemize
+@item the point before the first statement
+@item the point between the two statements
+@item the point after the second statement
+@end itemize
+
+Every point in a rust program has a static typestate, just as every
+slot or value has a static type. A @i{typestate} is a set of
+predicates; the typestate of a point is the set of predicates that
+must hold at that point. The predicates in a typestate can refer to
+@emph{any slots} visible at the typestate's point. The static
+@i{typestate checking algorithm} ensures that program control only
+flows through points that contain predicates known to hold.
+
+Because many predicates are not computable statically -- they depend
+on the dynamic state of values -- programmers must occasionally insert
+assertions. An @i{assertion} is simply a statement that calls a
+predicate with the built-in operator @code{assert}, which prevents
+execution from proceeding if the predicate does not hold. Thus the
+typestate checking algorithm inserts an assertion's predicate into the
+typestate of the point after the assertion. For example, this code:
+
+@example
+int x;
+int y : is_even(*);
+x = foo();
+y = x;
+@end example
+
+consists of two slots -- @code{x} and @code{y} -- and two statements,
+thus three points. The first statement calls @code{foo} and assigns
+its result to @code{x}. The second statement assigns @code{x} to
+@code{y}. This code is @emph{erroneous} according to the typestate
+checking algorithm: the point before the second statement does not 
+contain the @code{is_even(x)} predicate, so the assignment would violate
+the constraint on @code{y}.
+
+The code can be corrected using an assertion. This corrected code:
+
+@example
+int x;
+int y : is_even(*);
+x = foo();
+assert is_even(x);
+y = x;
+@end example
+
+Consists of three statements and four points. At the first two points,
+the typestate does not contain the @code{is_even(x)} predicate. At the
+third point -- the point @emph{after} the assertion -- the typestate
+@emph{does} contain the @code{is_even(x)} predicate. So the third
+statement is now legal: if the third statement ever executes, it will
+assign a value @emph{statically} known to satisfy the constraint
+placed on the slot @code{y}.
+
+It is crucial to understand that the typestate of the third point is a
+@emph{static} fact about @emph{static} entities -- slots, points and
+predicates -- even though the runtime behavior will vary depending on
+the runtime value of @code{x}. If the predicate fails at runtime,
+control will not proceed past the @code{assert} statement, and the
+assignment will never be made.
+
+To reiterate: the typestate checking algorithm is not responsible for
+statically evaluating predicates. It simply calculates the predicates
+that are @emph{known to hold} at each point -- if control ever reaches
+the point -- and reports on mismatches between the predicates known to
+hold at a point and the predicates @emph{required} by slot constraints.
+
+Typestates encode requirements for complicated dynamic assertions in
+the language's static checking system. This makes it easier to rule
+out erroneous inputs to functions and programs that you write:
+function parameters and return values are slots just like variables,
+and can be annotated with constraints. In this respect typestates are
+similar to a form of ``design by contract'', except that the typestate
+checking algorithm examines the static control-flow graph and
+minimizes the number of times an expensive assertion must be
+(re-)checked.
+
+
+@node    Artifacts
+@chapter Artifacts
 
 @page
 @node    Structural artifacts
@@ -629,7 +866,7 @@ cases occurs:
 preconditions of the missing @code{auto}-predicates are met, the
 compiler may insert assertions for each missing predicate.
 @item Otherwise the condition is a compile-time error.
-
+@end itemize
 
 @node       Dropping predicates
 @subsection Dropping predicates
