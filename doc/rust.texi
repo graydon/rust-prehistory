@@ -69,9 +69,9 @@ Complete table of contents
   to say what you want to @emph{not happen}.
 @end quotation
 
-Rust is a ``curly-brace'' block-structured language; it generally
-visually resembles the C family, but differs significantly in
-syntactic and semantic details. 
+Rust is a ``curly-brace'' block-structured language; it visually
+resembles the Algol / C family, but differs significantly in syntactic
+and semantic details.
 
 Rust's semantics are a mixture of elements found in Ada, Mesa, ML, CLU
 and Hermes. It can most readily be considered a descendent of Hermes,
@@ -94,7 +94,7 @@ informed reader should keep in mind that such rejections are usually
 from ignorance of the alternative. This manual may provide discussion
 or footnotes for additional rationale, when notable cases arise.
 
-Three characteristics of Rust's design motivate most of the rejected
+Four characteristics of Rust's design motivate most of the rejected
 features.
 
 First, Rust occasionally strays from the standard language-design
@@ -119,10 +119,20 @@ Third, Rust rejects a family of features that stem from a particular
 interpretation of the Object Orientation paradigm, and that have come
 to be ``canonical'' in mainstream (non-academic) language
 designs. Features such as code-inheritence, ubiquitous dynamic
-binding, cyclical memory graphs, pointer-rich data structures, tracing
-garbage collection, and shared-visibility concurrency are all avoided
-in Rust. The legitimate motivations for these features are addressed
-via other means.
+binding, cyclical memory graphs, pointer-rich data structures, and
+shared-visibility concurrency are all avoided in Rust. The legitimate
+motivations for these features are addressed via other means.
+
+Fourth, Rust rejects models of computation that require expensive
+runtime mechanisms to support. Specifically lazy or implicit
+evaluation, implicit data parallelism, software transactional memory
+and tracing garbage collection are all intentionally omitted. Rust
+presents a model of computation deemed ``most obvious'' on Von Neumann
+machines: linear memory segments, explicit co-routines and
+communication primitives, and strict, sequential execution within
+primary routines. Parallelism is supported -- indeed it is ubiquitous
+in Rust's abstractions -- but only in explicit terms.
+
 
 @node    Lexicon
 @chapter Lexicon
@@ -176,11 +186,11 @@ or millions of Rust processes.
 We may sometimes speak of ``a program doing something''. This is a
 short-hand way of saying that ``a process that is an instance of the
 program would do something''. Programs themselves do not @emph{do}
-anything; they are inert values. The difference is important to
-maintain in your mind, as Rust defines very different operations on
-programs and processes. Programs may be parsed, printed, copied,
-transmitted, compiled, typechecked or executed. Processes may be
-started, paused, resumed, stopped, or queried for various execution
+anything; they are inert values, pieces of text. The difference is
+important to maintain in your mind, as Rust defines very different
+operations on programs and processes. Programs may be parsed, printed,
+copied, transmitted, compiled, typechecked or executed. Processes may
+be started, paused, resumed, stopped, or queried for various execution
 parameters.
 
 @node    Values and Slots
@@ -197,15 +207,22 @@ a value that can @emph{refer to} another value. Variables within a
 module or stack frame are slots, as are the fields within records or
 the components of tuples, vectors and arrays. 
 
-@node    Types, Predicates and Constraints
-@section Types, Predicates and Constraints
+@node    Types, Forms, Predicates and Constraints
+@section Types, Forms, Predicates and Constraints
 
-Every Rust value has a type. A @i{type} is a static description of a
-subset of all the possible values. Types are built from a set of
-fundamental types such as ``number'' or ``character'', and a set of
-type constructors such as ``record'', ``function'', ``tuple'', or
-``vector''. The type of a value determines much about how you can use
-the value. For example, this code:
+Every Rust slot has a type. A @i{type} is a static description of a
+subset of all the possible values. A type has two parts: 
+
+@itemize
+@item the @i{form} of the type
+@item the @i{constraint} of the type
+@end itemize
+
+The form of a type describes how many bits the type occupies in
+memory, and how to interpret those bits. Forms are built from a set of
+fundamental ``machine-level'' forms such as ``number'' or
+``character'', and a set of form constructors such as ``record'',
+``function'', ``tuple'', or ``vector''. For example, this code:
 
 @example
 type coord3d = (int, int, int);
@@ -218,9 +235,11 @@ type employee = rec @{
                     @};
 @end example
 
-introduces 3 new types: a tuple type, a vector type, and a record type.
+introduces 3 new types: one with a tuple form, one with a vector form,
+and one with a record form. 
 
-A @i{predicate} is a pure boolean function. We say that a predicate
+The @i{constraint} of a type is a set of zero or more predicates. A
+@i{predicate} is a pure boolean function. We say that a predicate
 ``holds'' over a value if the predicate returns @code{true} when
 applied to the value, otherwise we say that the predicate ``does not
 hold'' over the value. For example, this code:
@@ -236,18 +255,30 @@ pred is_nonzero(int x) @{
 @end example
 
 introduces 2 new predicates: one that tests for even-ness and one that
-tests for nonzero-ness.
+tests for nonzero-ness. Predicates and types can be bundled together
+into a type definition. For example, this code:
 
-Every slot has both a type and a constraint. A @i{constraint} is a
-set of zero or more predicates. A slot can refer to a value if and
-only if the value has the same type as the slot, and the slot's
-constraint holds over the value. For example, this code:
+@example
+type even_nonzero_int = int : is_even(*), is_nonzero(*);
+@end example
+
+defines a new name for the type of integers that are even and nonzero.
+
+A slot can refer to a value if and only if the value has the same form
+as the slot's type, and the constraints in the slot's type all hold
+over the value. For example, this code:
 
 @example
 int foo : is_even(*), is_nonzero(*);
 @end example
 
-introduces an integer slot that is constrained to be even and nonzero.
+introduces an integer slot that is constrained to be even and
+nonzero. Using our earlier definition, it could be equivalently
+written as this code:
+
+@example
+even_nonzero_int foo;
+@end example
 
 @node    Points, Typestates and Assertions
 @section Points, Typestates and Assertions
@@ -272,12 +303,12 @@ Consists of two statements and three points:
 @end itemize
 
 Every point in a rust program has a static typestate, just as every
-slot or value has a static type. A @i{typestate} is a set of
-predicates; the typestate of a point is the set of predicates that
-must hold at that point. The predicates in a typestate can refer to
-@emph{any slots} visible at the typestate's point. The static
-@i{typestate checking algorithm} ensures that program control only
-flows through points that contain predicates known to hold.
+slot has a static type. A @i{typestate} is a set of predicates; the
+typestate of a point is the set of predicates that must hold at that
+point. The predicates in a typestate can refer to @emph{any slots}
+visible at the typestate's point. The static @i{typestate checking
+algorithm} ensures that program control only flows through points that
+contain predicates known to hold.
 
 Because many predicates are not computable statically -- they depend
 on the dynamic state of values -- programmers must occasionally insert
@@ -354,7 +385,7 @@ minimizes the number of times an expensive assertion must be
 A collection of Rust source code can be thought of @emph{structurally}
 as a set of artifacts that logically @i{contain} one another. There
 are four kinds of artifacts in this view: @i{crates}, @i{modules},
-@i{values}, and @i{slots}.
+@i{slots} and @i{values}.
 
 @subsection Crate
 
@@ -376,14 +407,14 @@ the reference graph of crate files is a DAG.
 
 @subsection Modules
 
-A @dfn{module} is a unit of organization within a crate. The tree
-of modules in a crate corresponds 1:1 with a tree of directories
-and files in a filesystem. Thus there are two kinds of modules:
-@dfn{directory modules} and @dfn{source modules}. A directory module
-contains sub-modules. A source module contains values.
+A @dfn{module} is a unit of @emph{name organization} within a
+crate. The tree of modules in a crate corresponds 1:1 with a tree of
+directories and files in a filesystem. Thus there are two kinds of
+modules: @dfn{directory modules} and @dfn{source modules}. A directory
+module contains sub-modules. A source module contains values.
 
 Source modules, also called @dfn{source files}, are files ending
-in @code{.rs}. These files contain values.
+in @code{.rs}. These files contain code that defines slots.
 
 Modules are arranged in a human-friendly namespace within a crate.
 It is the responsibility of a team of programmers working on a
@@ -392,18 +423,19 @@ crate. Module names can be reused in different crates,
 however; the names in one crate are unrelated to the names in
 another crate.
 
-Modules contain values. There are many types of value; the complete
-list is provided in the next section. For now it is sufficient to note
-that most Rust code is concerned with manipulating values. Much more
-than the portion of Rust code that relates to modules and crates.
+Modules contain slots, and some of those slots point to values. There
+are many types of value; the complete list is provided in the next
+section. For now it is sufficient to note that most Rust code is
+concerned with manipulating values. Much more than the portion of Rust
+code that relates to modules and crates.
 
 @subsection Slots
 
-Finally, within values there may be @i{slots}. Values are also
-@emph{referenced} by slots. A @dfn{slot} is a named memory location
-that can refer to a value. Each source module defines a set of slots
-that are the ``top level'' slots of the module. Further slots exist in
-many contexts:
+Finally, within modules there are @i{slots}. A @dfn{slot} is a named
+memory location that can refer to a value. Some values will contain
+more slots, that in turn may refer to more values. Each source module
+defines a set of slots that are the ``top level'' slots of the
+module. Further slots exist in many contexts:
 
 @itemize
 @item Variables within functions, ports and predicates.
@@ -416,13 +448,13 @@ many contexts:
 @node    Values
 @section Values
 
-There are many kinds of value in a Rust module.
+Rust defines a wide variety of types and type constructors.
 
 @menu
-* Primitive values::          Machine-level values.
-* Dynamic values::            Latently-typed values.
-* Arithmetic values::         High-precision numbers.
-* Textual values::            Strings and characters.
+* Primitive types::           Machine-level values.
+* Dynamic types::             Latently-typed values.
+* Arithmetic types::          High-precision numbers.
+* Textual types::             Strings and characters.
 * Records::                   Fixed products of heterogeneous types.
 * Arrays::                    Fixed products of homogeneous types.
 * Vectors::                   Dynamic products of homogeneous types.
@@ -484,13 +516,14 @@ The @code{rec} type introduces new record types that have named fields,
 similar to the @code{struct} types of C.
 
 Anonymous record literals and record types are denoted with the
-keyword @code{rec}. The fields of a record are defined, as a list of
-slots within braces, similar to the slot declarations in a stack
-frame.
+keyword @code{rec}. The fields of a record are defined, as a sequence
+of slot declarations within braces, similar to the slot declarations
+in a stack frame.
 
-Record fields can carry typestate constraints, similar to slots in a
-stack frame. Record types can also carry formal typestates relating to
-the record as a whole, or to some of its fields.
+Record fields can carry ``inline'' typestate constraints, similar to
+slots in a stack frame. Record types can also carry formal typestates
+relating to the record as a whole, or to some combination of its
+fields.
 
 @node       Arrays
 @subsection Arrays
@@ -513,7 +546,9 @@ each of which is implemented by the language.
 All elements of an array carry the @code{init} predicate: arrays are
 initialized with a default value that is copied to each member of the
 array. Limited arrays are not permitted: only unlimited types may be
-stored in arrays.
+stored in arrays. Since it is impossible to de-initialize a single
+element of an array, it would be impossible to ``move out'' a limited
+value.
 
 @node       Vectors
 @subsection Vectors
@@ -598,15 +633,14 @@ resume slot, jumps to the yield point and @emph{does not} deallocate
 its frame. If a function yields, the caller may @i{resume} the
 function and permit it to return of its own accord, or may
 @i{terminate} the function by jumping to the function's epilogue and
-tearing down its frame. Every function eventually executes its
+deallocating its frame. Every function eventually executes its
 epilogue, either caused by a return, an exception, or caller
 termination.
 
-Each argument to a function occupies 1 word or less. If the storage
-type of an argument is larger than a word, an address is placed in the
-argument slot. If the storage type of an argument is equal to or
-smaller than a word, the argument value is copied or moved into the
-argument slot directly.
+Each argument to a function occupies 1 word or less. If the form of an
+argument is larger than a word, an address is placed in the argument
+slot. If the form of an argument is equal to or smaller than a word,
+the argument value is copied or moved into the argument slot directly.
 
 The arguments to a function implicitly occupy a tuple, though it is a
 special tuple that contains only immediate or dependent slots. The
@@ -630,7 +664,7 @@ A function parameter of type @code{T} can be annotated in two ways:
 
 @itemize
 @item @code{T-}, which means ``move in''
-@item @code{T+}, which means ``move in and out''
+@item @code{T=}, which means ``move in and out''
 @end itemize
 
 A ``move in'' parameter is moved from its caller frame into its callee
@@ -747,18 +781,22 @@ prestate with the predicate @code{p} applied to slots @code{q} and
 @node       Value and slot types
 @subsection Value and slot types
 
-Every value has a unique type.
+Every value has a unique form.
 
 Every slot has a unique type.
 
-If a slot @var{S} references a value @var{V}, the type of @var{S} is
-identical to the type of @var{V}.
+If a slot @var{S} references a value @var{V}, type of @var{S} has a
+form that is identical to the form of @var{V}, and the type of @var{S}
+has a constraint that holds over @var{V}. Of course @var{S} may be
+further constrained by other predicates at its point of declaration,
+but those predicates @emph{add} to the constraint in the type of
+@var{S}. They do not replace it.
 
 
 @node       Limitation
 @subsection Limitation
 
-Some types are @i{limited}. A type @var{T} is @dfn{limited} iff any of
+Some types are @i{limited}. A type @var{T} is @dfn{limited} iff either of
 these conditions hold:
 
 @itemize
@@ -771,7 +809,7 @@ for the definitions of copying and transmission.
 
 A type that is a process type is called @dfn{directly limited}. A type
 that simply contains a limited slot is called @dfn{indirectly
-limited}.
+limited}. 
 
 Limitation ``infects'' the structure that contains it; any type that
 is indirectly limited must be declared as such with the keyword
