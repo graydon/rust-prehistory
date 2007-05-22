@@ -1,4 +1,5 @@
 open Ast
+open Val
 ;;
 
 exception Interp_err of string
@@ -15,15 +16,20 @@ let fmt_nc out nc =
   | COMP_tupidx i -> Printf.fprintf out "%d" i
 ;;
 
+let fmt_val out lit = 
+  Printf.fprintf out "val"
+
 let fmt_lit out lit = 
   match lit with 
-    VAL_dyn (TY_str, VAL_str s) -> 
+    LIT_str s -> 
       Printf.fprintf out "\"%s\"" (String.escaped s)
-  | VAL_dyn (TY_char, VAL_char c) -> 
+  | LIT_char c -> 
       Printf.fprintf out "'%c'" c
-  | VAL_dyn (_, VAL_arith n) -> 
+  | LIT_bool b -> 
+      Printf.fprintf out "%s" (if b then "true" else "false")
+  | LIT_arith (_, _, n) -> 
       Printf.fprintf out "%s" (Num.string_of_num n)
-  | _ -> output_string out "**error:non-literal**"
+  | _ -> output_string out "**unhandled literal**"
 ;;
 
 let fmt_binop out op = 
@@ -63,7 +69,7 @@ let rec fmt_expr out e =
       Printf.fprintf out "(%a)%a(%a)" fmt_binop op fmt_expr lhs fmt_expr rhs
   | EXPR_unary (op, _, e2) -> 
       Printf.fprintf out "%a(%a)" fmt_unop op fmt_expr e2	
-  | EXPR_literal (v,_) -> fmt_lit out v
+  | EXPR_literal (lv,_) -> fmt_lit out lv
   | EXPR_lval lv -> fmt_lval out lv
   | EXPR_tuple (es,_) -> 
       (output_string out "(";
@@ -126,18 +132,15 @@ let rec fmt_type out t =
   | TY_tup t -> output_string out "(tup ...)"
   | TY_vec v -> output_string out "(vec ...)"
 
-  | TY_subr s -> output_string out "(subr ...)"
+  | TY_func s -> output_string out "(func ...)"
   | TY_chan c -> output_string out "(chan ...)"
 
-  | TY_port c -> output_string out "(port ...)"
   | TY_prog -> output_string out "prog"
   | TY_proc -> output_string out "proc"
 
   | TY_pred p -> output_string out "(pred ...)"
   | TY_quote q -> output_string out "(quote ...)"
 
-  | TY_const t -> Printf.fprintf out "(const %a)" fmt_type t
-  | TY_ref t -> Printf.fprintf out "(ref %a)" fmt_type t
   | TY_named n -> fmt_name out n 
   | TY_abstr (ty, params) -> output_string out "(abstr ...)"
   | TY_apply (ty, args) -> output_string out "(apply ...)"
@@ -154,7 +157,7 @@ let fmt_jmp out j =
 
 let fmt_op out op = 
   match op with
-    OP_push v -> Printf.fprintf out "PUSH (%a)" fmt_lit v
+    OP_push v -> Printf.fprintf out "PUSH (%a)" fmt_val v
   | OP_binop op -> Printf.fprintf out "BINOP (%a)" fmt_binop op
   | OP_unop op -> Printf.fprintf out "UNOP (%a)" fmt_unop op
   | OP_pop -> output_string out "POP"
@@ -178,6 +181,8 @@ let fmt_op out op =
   | OP_yield -> output_string out "YIELD"
 
   | OP_bad -> output_string out "-"
+
+  | OP_send -> output_string out "SEND"
 ;;
   
 
@@ -189,41 +194,69 @@ let fmt_op out op =
 type rs_emitter = 
   { 
     mutable emit_pc: int;
-    mutable emit_code: rs_code;
+    mutable emit_ops: ops;
   }
 ;;
 
 let new_emitter _ = 
   { 
     emit_pc = 0;
-    emit_code = Array.create 4 OP_bad;
+    emit_ops = Array.create 4 OP_bad;
   }
 ;;
 
 let grow_if_necessary e =
-  let len = Array.length e.emit_code in
+  let len = Array.length e.emit_ops in
   if e.emit_pc >= len - 1
   then
     let n = Array.create (2 * len) OP_bad in
-    Array.blit e.emit_code 0 n 0 len;
-    e.emit_code <- n 
+    Array.blit e.emit_ops 0 n 0 len;
+    e.emit_ops <- n 
 ;;
 
 
 let emit_op e op =
   grow_if_necessary e;
-  e.emit_code.(e.emit_pc) <- op;
+  e.emit_ops.(e.emit_pc) <- op;
   e.emit_pc <- e.emit_pc + 1
 ;;
 
 
 let backpatch_fwd_jump_to_here e fwd_jump_pc =
-  match e.emit_code.(fwd_jump_pc) with
+  match e.emit_ops.(fwd_jump_pc) with
     OP_jump (form, None) -> 
-      e.emit_code.(fwd_jump_pc) <- OP_jump (form, (Some e.emit_pc))
+      e.emit_ops.(fwd_jump_pc) <- OP_jump (form, (Some e.emit_pc))
   | op -> 
       raise (Interp_err "backpatching bad opcode")
 ;;
+
+let val_mach_of_lit_mach lm = 
+  match lm with
+    LIT_unsigned (i, _) -> VAL_unsigned i
+  | LIT_signed (i, _) -> VAL_signed i
+  | LIT_ieee_bfp f -> VAL_ieee_bfp f
+  | LIT_ieee_dfp i -> VAL_ieee_dfp i
+
+let ty_mach_of_lit_mach lm = 
+  match lm with
+   (* 
+    * FIXME: figure out a nice lexical strategy for giving
+    * the word size in a mach literal. Maybe just use 
+    * syntax reader? ~u32{0x1234_ffff} is not so bad?
+    *)
+    LIT_unsigned (i, _) -> (TY_unsigned, 64)
+  | LIT_signed (i, _) -> (TY_signed, 64)
+  | LIT_ieee_bfp f -> (TY_ieee_bfp, 64)
+  | LIT_ieee_dfp i -> (TY_ieee_dfp, 128)
+
+let val_of_literal lit = 
+  match lit with
+    LIT_str s -> (TY_str, VAL_str s)
+  | LIT_char c -> (TY_char, VAL_char c)
+  | LIT_bool b -> (TY_bool, VAL_bool b)
+  | LIT_mach m -> (TY_mach (ty_mach_of_lit_mach m), VAL_mach (val_mach_of_lit_mach m))
+  | LIT_arith (_, _, n) -> (TY_arith (Ll1parser.numty n), VAL_arith n)
+  | _ -> raise (Interp_err "unhandled literal in val_of_literal")
 
 
 let rec emit_expr emit e = 
@@ -241,7 +274,7 @@ let rec emit_expr emit e =
 
   | EXPR_literal (v, pos) -> 
       emit_op emit (OP_pos pos);
-      emit_op emit (OP_push v)
+      emit_op emit (OP_push (VAL_dyn (val_of_literal v)))
 
   | EXPR_tuple (es, pos) -> 
       emit_op emit (OP_pos pos);
@@ -318,6 +351,7 @@ let rec emit_stmt emit stmt =
   | STMT_yield _
   | STMT_assert _
   | STMT_foreach _
+  | STMT_send _
   | STMT_for _ -> raise (Interp_err "cannot translate all statements yet")
 ;;
 
@@ -387,12 +421,12 @@ let bind_and_enter_frame proc fflav sba block_stmt =
   emit_stmt emitter block_stmt;
   emit_op emitter OP_return;
      Printf.printf "== begin emitted code ==:\n";
-     Array.iteri (fun i op -> Printf.printf "%6d: %a\n" i fmt_op op) emitter.emit_code;
+     Array.iteri (fun i op -> Printf.printf "%6d: %a\n" i fmt_op op) emitter.emit_ops;
      Printf.printf "== end emitted code ==:\n";
   let frame = 
     { 
       frame_pc = 0;
-      frame_code = emitter.emit_code;
+      frame_code = emitter.emit_ops;
       frame_flavour = fflav;		
       frame_scope = [];
       frame_scope_stack = Stack.create ();

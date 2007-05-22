@@ -15,10 +15,10 @@ open Hashtbl;;
  * module namespace. 
  *)
 
-type rs_pos = (string * int * int)
+type pos = (string * int * int)
 ;;
 
-let nopos : rs_pos = ("no-file", 0, 0)
+let nopos : pos = ("no-file", 0, 0)
 ;;
 
 (* "names" are statically computable references to particular slots;
@@ -27,15 +27,15 @@ let nopos : rs_pos = ("no-file", 0, 0)
    components, the latter representing tuple components (foo.0, foo.1,
    etc). *)
 
-type rs_name_component =
+type name_component =
     COMP_string of string
   | COMP_tupidx of int
 ;;
 
-type rs_name = 
+type name = 
    {
    name_base: string;
-   name_rest: rs_name_component array;
+   name_rest: name_component array;
    }
 ;;
 
@@ -52,12 +52,15 @@ type ty_arith =
   | TY_rat
 ;;
 
-type subr_flavour = 
-    SUBR_func
-  | SUBR_iter
+type proto = 
+    PROTO_call  (* func  foo(...): returns 1 value. A function.                             *)
+  | PROTO_bang  (* func! foo(...): yields 1 value. Never resumes.                           *)
+  | PROTO_ques  (* func? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
+  | PROTO_star  (* func* foo(...): may yield N >= 0 values, then returns.                   *)
+  | PROTO_plus  (* func+ foo(...): yields N > 0 values then returns.                        *)
 ;;
 
-type rs_type = 
+type ty = 
     TY_dyn
   | TY_type
 
@@ -72,23 +75,36 @@ type rs_type =
   | TY_tup of ty_tup
   | TY_vec of ty_vec
 
-  | TY_subr of (subr_flavour * ty_qual_sig)
+  | TY_func of ty_func
   | TY_chan of ty_sig
 
-  | TY_port of ty_sig
   | TY_prog
   | TY_proc 
 
   | TY_pred of ty_pred
   | TY_quote of ty_quote
 
-  | TY_const of rs_type
-  | TY_ref of rs_type
-  | TY_named of rs_name
-  | TY_abstr of (rs_type * string array)
-  | TY_apply of (rs_type * rs_type array)
+  | TY_named of name
+  | TY_abstr of (ty * ty_abstr array)
+  | TY_apply of (ty * ty array)
 
-  | TY_lim of rs_type
+  | TY_lim of ty
+	
+and ty_abstr = 
+    { 
+      abstr_name: string;
+      abstr_lim: bool
+    }
+	  
+(* Slots can have an "external" qualifier put on them.  If present,
+  the external qualifier means that the slot refers to an external
+  allocation. If absent, the standard allocation-packing rules apply:
+  we try to use immediate or dependent mode, and fall back to internal
+  (with transplanting) otherwise. *)
+
+and slot = 
+    SLOT_external of ty
+  | SLOT_standard of ty
 
 (* 
  * In closed type terms a predicate in the state may refer to
@@ -114,40 +130,40 @@ type rs_type =
  * 
  *)      
 
-and parg_base_type = 
-    PARG_formal 
-  | PARG_free of string
+and parg_base = 
+    BASE_formal 
+  | BASE_free of string
 
-and rs_parg =
+and parg =
     {
-      parg_base: parg_base_type;
-      parg_rest: rs_name_component array;
+      parg_base: parg_base;
+      parg_rest: name_component array;
     }
 
-and rs_pred = 
+and pred = 
     { 
-      pred_name: rs_name;
-      pred_args: rs_parg array;
+      pred_name: name;
+      pred_args: parg array;
     }
       
-and rs_state = rs_pred array
+and state = pred array
 
 and ty_rec = 
     { 
-      rec_slots: ty_rec_slot array;
-      rec_state: rs_state;
+      rec_slots: rec_slot array;
+      rec_state: state;
     }
 
-and ty_rec_slot = 
+and rec_slot = 
     { 
       rec_slot_name: string;
-      rec_slot_type: rs_type;
-      rec_slot_state: rs_state;
+      rec_slot_type: slot;
+      rec_slot_state: state;
     }
 
-and ty_alt = ty_alt_case array
+and ty_alt = alt_case array
 
-and ty_alt_case = 
+and alt_case = 
     { 
       alt_case_name: string;
       alt_case_rec: ty_rec option;
@@ -155,35 +171,43 @@ and ty_alt_case =
 
 and ty_tup = 
     {
-      tup_types: rs_type array;
-      tup_state: rs_state;
+      tup_types: ty array;
+      tup_state: state;
     }
 
 and ty_vec =
     {
-      vec_elt_type: rs_type;
+      vec_elt_type: ty;
+      vec_elt_state: state;
     }
 
-and ty_qual_sig = 
+and ty_func = 
     { 
-      subr_inline: bool; 
-      subr_pure: bool;
-      subr_sig: ty_sig; 
+      func_inline: bool; 
+      func_pure: bool;
+      func_sig: ty_sig; 
     }
+
+and param_mode = 
+    PARAM_copy
+  | PARAM_move_in
+  | PARAM_move_in_out
 
 and ty_sig = 
     { 
-      sig_param_ty: rs_type;
-      sig_result_ty: rs_type; 
+      sig_proto: proto;
+      sig_param_ty: ty_tup;
+      sig_param_modes: param_mode array;
+      sig_result_ty: ty;
     }
 
 and ty_pred = 
     { 
-      pred_auto: bool;
-      pred_inline: bool; 
-      pred_param_ty: rs_type;
+      ty_pred_auto: bool;
+      ty_pred_inline: bool;
+      ty_pred_param_ty: ty;
     }
-
+	  
 and ty_quote = 
     TY_quote_expr
   | TY_quote_type
@@ -193,244 +217,111 @@ and ty_quote =
    (* Probably this list should be a lot longer; the canonical rule *)
    (* I've been using is to make a quotation type for every *)
    (* nonterminal *)
-
-    
-(* Values *)
-
-type val_mach = 
-    VAL_unsigned of int
-  | VAL_signed of int
-  | VAL_ieee_bfp of float
-  | VAL_ieee_dfp of (int * int)
-
-(*
- * The "value" type is the result of evaluation of an expression. Or
- * seen another way, it is the sort of thing that can be put in a
- * slot.
- *
- * Implementations are required to be able to construct dyns, but 
- * implementations are *not* required to construct anything fancier
- * than dyns. So here our interpreter is defined purely over dyns. 
- * All our values are dyns at runtime. 
- *
- * Our 'dyn' type, therefore, is only relevant to the static reasoning
- * stage; it represents places where the compiler lacks static type
- * information.
- *)
-
-type rs_val = 
-    VAL_dyn of (rs_type * rs_val_dyn)
-
-and rs_val_dyn =
-
-    VAL_bool of bool
-  | VAL_mach of val_mach
-  | VAL_arith of Num.num
-  | VAL_str of string
-  | VAL_char of char
-
-  | VAL_rec of val_rec
-  | VAL_alt of val_alt
-  | VAL_vec of val_vec
-  | VAL_tup of val_tup
-
-  | VAL_subr of (subr_flavour * val_subr)
-  | VAL_chan of (ty_qual_sig * int)
-
-  | VAL_prog of val_prog
-  | VAL_proc of val_proc
-  | VAL_port of (val_proc * int)
-
-  | VAL_type of rs_type
-  | VAL_quote of val_quote
-
-and val_quote = 
-
-    VAL_quote_expr
-  | VAL_quote_type
-  | VAL_quote_decl
-  | VAL_quote_stmt
-
-
-and rs_subr_bind = 
-    {
-     bind_sig: ty_qual_sig;
-     bind_names: string array;
-   }
-
-and rs_subr_body = 
-    BODY_block of rs_stmt
-  | BODY_native of string
-
-and val_subr = 
-    {
-     subr_bind: rs_subr_bind;
-     subr_body: rs_subr_body;
-    }
-
-and val_rec = (string, rs_val) Hashtbl.t 
-      
-and val_alt =
-    {
-     val_alt_case: ty_alt_case;
-     val_alt_rec: val_rec;
-    }
-
-and val_vec = rs_val array
-
-and val_tup = rs_val array
-
-and val_prog = 
-    { 
-      prog_auto: bool;
-      prog_init: ((ty_sig * string array) * rs_stmt) option;
-      prog_main: rs_stmt option;
-      prog_fini: rs_stmt option;
-      prog_decls: rs_decl array;
-    }
-
-and rs_jump_form = 
-    JMP_conditional
-  | JMP_direct
-
-and rs_op = 
-    OP_push of rs_val
-  | OP_binop of rs_binop
-  | OP_unop of rs_unop
-  | OP_pop
-
-  | OP_copy_lval of rs_lval
-  | OP_move_lval of rs_lval
-  | OP_store_lval of rs_lval
-
-  | OP_enter_scope
-  | OP_alloc_local of string
-  | OP_undef_local of string
-  | OP_exit_scope
-
-  | OP_pos of rs_pos
-
-  | OP_jump of (rs_jump_form * int option)
-  | OP_call
-  | OP_return
-  | OP_yield
-
-  | OP_bad
-
-and rs_code = rs_op array
-
-and rs_frame_flavour = 
-    FRAME_iter of rs_subr_bind
-  | FRAME_func of rs_subr_bind
-  | FRAME_init of rs_subr_bind
-  | FRAME_main
-  | FRAME_fini 
-
-and rs_frame = 
-    {
-     mutable frame_pc: int;
-     frame_code: rs_code;
-     frame_flavour: rs_frame_flavour;
-     mutable frame_scope: string list;
-     frame_scope_stack: (string list) Stack.t;
-     frame_expr_stack: rs_val Stack.t;
-    }
-
-and val_proc = 
-    {
-     proc_prog: val_prog;
-     proc_env: (string, (rs_val option)) Hashtbl.t;
-     proc_natives: (string, (val_proc -> (rs_val array) -> unit)) Hashtbl.t;
-
-     mutable proc_frames: rs_frame list;
-     mutable proc_state: proc_exec_state;
-     mutable proc_pos: rs_pos;
-     mutable proc_jumped: bool;
-     proc_ports: int array;
-   }
-
-and proc_exec_state = 
-    PROC_INIT
-  | PROC_FINI
-  | PROC_MAIN 
-  | PROC_SEND 
-  | PROC_RECV 
-
-and rs_stmt =
-
+          
+and stmt =
     STMT_while of stmt_while
   | STMT_foreach of stmt_foreach
   | STMT_for of stmt_for
   | STMT_if of stmt_if
   | STMT_try of stmt_try
-  | STMT_yield of (rs_expr option * rs_pos)
-  | STMT_return of (rs_expr * rs_pos)
-  | STMT_assert of (rs_pred * rs_pos)
-  | STMT_block of ((rs_stmt array) * rs_pos)
-  | STMT_move of (rs_lval * rs_lval)
-  | STMT_copy of (rs_lval * rs_expr)
-  | STMT_call of (rs_lval * rs_expr)
-  | STMT_decl of rs_decl
+  | STMT_yield of (expr option * pos)
+  | STMT_return of (expr * pos)
+  | STMT_assert of (pred * pos)
+  | STMT_block of ((stmt array) * pos)
+  | STMT_move of (lval * lval)
+  | STMT_copy of (lval * expr)
+  | STMT_call of (lval * expr)
+  | STMT_send of (lval * expr) (* Async call *)
+  | STMT_decl of decl
 
 and stmt_while = 
     {
-     while_expr: rs_expr;
-     while_body: rs_stmt;
-     while_pos: rs_pos;
+     while_expr: expr;
+     while_body: stmt;
+     while_pos: pos;
    }
       
 and stmt_foreach = 
     {
-     foreach_bindings: rs_decl array;
-     foreach_body: rs_stmt;
-     foreach_pos: rs_pos;
+     foreach_bindings: decl array;
+     foreach_body: stmt;
+     foreach_pos: pos;
    }
       
 and stmt_for = 
     {
-     for_init: rs_stmt;
-     for_test: rs_expr;
-     for_step: rs_stmt;
-     for_body: rs_stmt;
-     for_pos: rs_pos;
+     for_init: stmt;
+     for_test: expr;
+     for_step: stmt;
+     for_body: stmt;
+     for_pos: pos;
    }
 
 and stmt_if = 
     {
-     if_test: rs_expr;
-     if_then: rs_stmt;
-     if_else: rs_stmt option;
-     if_pos: rs_pos;
+     if_test: expr;
+     if_then: stmt;
+     if_else: stmt option;
+     if_pos: pos;
    }
 
 and stmt_try = 
     {
-     try_body: rs_stmt;
-     try_fail: rs_stmt option;
-     try_fini: rs_stmt option;
-     try_pos: rs_pos;
+     try_body: stmt;
+     try_fail: stmt option;
+     try_fini: stmt option;
+     try_pos: pos;
    }
 
-and rs_expr =
+and expr =
+    EXPR_literal of (lit * pos)
+  | EXPR_binary of (binop * pos * expr * expr)
+  | EXPR_unary of (unop * pos * expr)
+  | EXPR_tuple of (expr array * pos)
+  | EXPR_lval of lval
+  | EXPR_call of (lval * expr)
 
-    EXPR_binary of (rs_binop * rs_pos * rs_expr * rs_expr)
-  | EXPR_unary of (rs_unop * rs_pos * rs_expr)
-  | EXPR_tuple of (rs_expr array * rs_pos)
-  | EXPR_literal of (rs_val * rs_pos)
-  | EXPR_lval of rs_lval
-  | EXPR_call of (rs_lval * rs_expr)
+and radix = HEX | DEC | BIN
 
-and rs_lidx =
-    LIDX_named of (rs_name_component * rs_pos)
-  | LIDX_index of rs_expr
+and lit = 
+    LIT_str of string
+  | LIT_char of char
+  | LIT_bool of bool
+  | LIT_mach of lit_mach
+  | LIT_arith of (ty_arith * radix * Num.num)
+  | LIT_custom of lit_custom
+  | LIT_quote of lit_quote
 
-and rs_lval = 
+and lit_quote = 
+    QUOTE_expr of expr
+  | QUOTE_type of ty
+  | QUOTE_decl of decl
+  | QUOTE_stmt of stmt
+
+and lit_mach = 
+    LIT_unsigned of int * radix
+  | LIT_signed of int * radix
+  | LIT_ieee_bfp of float
+  | LIT_ieee_dfp of (int * int)
+
+and lit_custom = 
     {
-     lval_base: string;
-     lval_rest: rs_lidx array;
+     lit_expander: lval;
+     lit_arg: expr;
+     lit_text: string;
     }
 
-and rs_binop =    
+and lidx =
+    LIDX_named of (name_component * pos)
+  | LIDX_index of expr
+
+and lval = 
+    {
+     lval_base: string;
+     lval_rest: lidx array;
+    }
+
+and binop =    
 
     BINOP_or
   | BINOP_and
@@ -453,26 +344,72 @@ and rs_binop =
   | BINOP_div
   | BINOP_mod
 
-and rs_unop =
-
+and unop =
     UNOP_not
 
-and rs_decl = 
+and decl = 
     { 
       decl_name: string;
-      decl_pos: rs_pos;
-      decl_type: rs_type;
-      decl_value: rs_val option;
-      decl_state: rs_state;
+      decl_pos: pos;
+      decl_artifact: artifact;
+    }
+
+and artifact = 
+    ARTIFACT_type of ty
+  | ARTIFACT_code of code
+  | ARTIFACT_slot of (slot * (expr option))
+
+and code = 
+    CODE_prog of prog
+  | CODE_func of func
+  | CODE_port of port
+
+and bind = 
+    {
+     bind_ty: ty_sig;
+     bind_names: string array;
+   }
+
+and func = 
+    {
+     func_proto: proto;
+     func_bind: bind;
+     func_body: fbody;
+   }
+
+and fbody = 
+    FBODY_native of int
+  | FBODY_stmt of stmt
+
+and port = 
+    {
+     port_proto: proto;
+     port_bind: bind;
+     port_auto_body: stmt option;
+    }
+
+and init = 
+    {
+     init_bind: bind;
+     init_body: stmt;
+   }
+
+and prog = 
+    { 
+      prog_auto: bool;
+      prog_init: init option;
+      prog_main: stmt option;
+      prog_fini: stmt option;
+      prog_decls: decl array;
     }
 ;;
 
-type rs_visibility = 
+type visibility = 
     VIS_public
-  | VIS_standard
-  | VIS_private
+  | VIS_crate
+  | VIS_local
 ;;
 
-type rs_decl_top = (rs_visibility * rs_decl)
+type decl_top = (visibility * decl)
 ;;
 

@@ -77,7 +77,7 @@ Rust's semantics are a mixture of elements found in Ada, Mesa, ML, CLU
 and Hermes. It can most readily be considered a descendent of Hermes,
 though there is no formal relationship.
 
-The language design attempts to maximize the following goals:
+The language design pursues the following goals:
 
 @itemize
 @item Error isolation, detection and prevention.
@@ -124,14 +124,17 @@ shared-visibility concurrency are all avoided in Rust. The legitimate
 motivations for these features are addressed via other means.
 
 Fourth, Rust rejects models of computation that require expensive
-runtime mechanisms to support. Specifically lazy or implicit
-evaluation, implicit data parallelism, software transactional memory
-and tracing garbage collection are all intentionally omitted. Rust
-presents a model of computation deemed ``most obvious'' on Von Neumann
-machines: linear memory segments, explicit co-routines and
-communication primitives, and strict, sequential execution within
-primary routines. Parallelism is supported -- indeed it is ubiquitous
-in Rust's abstractions -- but only in explicit terms.
+runtime mechanisms to support, or appear to be ``hiding'' important
+aspects of real computing machinery behind too much abstraction. Of
+course this distinction is aesthetic and subjective.  To be specific:
+Rust intentionally omits lazy or implicit evaluation, implicit data
+parallelism, software transactional memory and tracing garbage
+collection. Rust presents a model of computation deemed ``most
+obvious'' on Von Neumann machines: linear memory segments with
+explicit owners, explicit co-routines and communication primitives,
+and strict, sequential execution within primary routines. Parallelism
+is supported -- indeed it is ubiquitous in Rust's abstractions -- but
+only in explicit terms.
 
 
 @node    Lexicon
@@ -199,13 +202,15 @@ parameters.
 Rust programs manipulate values. A Rust @i{value} is any information
 that can be denoted by a Rust term. Values occupy memory: every value
 consumes a certain number of bits. Numbers are values, as are strings,
-records, vectors, arrays, programs, processes, and many other things
+records, vectors, programs, processes, and many other things
 besides.
 
-Some values have slots. A @i{slot} is a memory location @emph{inside}
-a value that can @emph{refer to} another value. Variables within a
-module or stack frame are slots, as are the fields within records or
-the components of tuples, vectors and arrays. 
+Some values have slots. A @i{slot} is a named set of bits
+@emph{inside} a value that can @emph{refer to} another value, either
+directly by containing the referent, or indirectly by storing a memory
+address of the referent. Variables within a module or stack frame are
+slots, as are the fields within records or the components of tuples
+and vectors.
 
 @node    Types, Forms, Predicates and Constraints
 @section Types, Forms, Predicates and Constraints
@@ -440,7 +445,7 @@ module. Further slots exist in many contexts:
 @itemize
 @item Variables within functions, ports and predicates.
 @item Fields within records, alternatives and programs.
-@item Components of vectors and arrays.
+@item Components of vectors.
 @end itemize
 
 
@@ -456,7 +461,6 @@ Rust defines a wide variety of types and type constructors.
 * Arithmetic types::          High-precision numbers.
 * Textual types::             Strings and characters.
 * Records::                   Fixed products of heterogeneous types.
-* Arrays::                    Fixed products of homogeneous types.
 * Vectors::                   Dynamic products of homogeneous types.
 * Alternatives::              Sums of heterogeneous types.
 * Functions::                 Subroutines and scoped coroutines.
@@ -524,31 +528,6 @@ Record fields can carry ``inline'' typestate constraints, similar to
 slots in a stack frame. Record types can also carry formal typestates
 relating to the record as a whole, or to some combination of its
 fields.
-
-@node       Arrays
-@subsection Arrays
-
-Arrays are homogeneous containers with a fixed number of fixed-size
-dimensions. 
-
-Arrays are parametric types: they are parameterized by the type of
-value stored in them, by the number of dimensions (the rank of the
-array) and the size of each dimension. Arrays may be considered as a
-family of synthetic types:
-
- type array[ty T, nat x] = ...
- type array[ty T, nat x, nat y] = ...
- type array[ty T, nat x, nat y, nat z] = ...
- ...
-
-each of which is implemented by the language.
-
-All elements of an array carry the @code{init} predicate: arrays are
-initialized with a default value that is copied to each member of the
-array. Limited arrays are not permitted: only unlimited types may be
-stored in arrays. Since it is impossible to de-initialize a single
-element of an array, it would be impossible to ``move out'' a limited
-value.
 
 @node       Vectors
 @subsection Vectors

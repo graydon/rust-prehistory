@@ -75,7 +75,6 @@
 }
 
 let bin = "0b" ['0' '1']['0' '1' '_']*
-let oct = "0o" ['0'-'7']['0'-'7' '_']*
 let hex = "0x" ['0'-'9' 'a'-'f' 'A'-'F']['0'-'9' 'a'-'f' 'A'-'F' '_']*
 let dec = ['-' '+']?['0'-'9']* ['.']? ['0'-'9']+ (['e''E']['-''+']?['0'-'9']+)? 
 let id = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
@@ -140,8 +139,9 @@ rule token = parse
 | "query+"                      { QUERY_PLUS }
 
 | ('#' ['0' - '9']+) as s       { TUPIDX (int_of_string s)                       }
-| (bin|oct|hex) as n            { LIT_NUM (Num.num_of_int (int_of_string n))     }
-| dec as d                      { LIT_NUM (Num.num_of_string d)                  }
+| bin as n                      { LIT_BIN (Num.num_of_int (int_of_string n))     }
+| hex as n                      { LIT_HEX (Num.num_of_int (int_of_string n))     }
+| dec as d                      { LIT_DEC (Num.num_of_string d)                  }
 | (['"'] ([^'"']|"\\\"")* ['"'])  as s    { LIT_STR  (Scanf.sscanf s "%S" (fun x -> x))    }
 | (['\''] [^'\'']         ['\'']) as c    { LIT_CHAR (Scanf.sscanf c "%C" (fun x -> x))    }
 | "'\\''"                                 { LIT_CHAR ('\'')                                }

@@ -1,5 +1,5 @@
 
-exception Parse_err of (Ast.rs_pos * string)
+exception Parse_err of (Ast.pos * string)
 ;;
 
 type token = 
@@ -91,7 +91,9 @@ type token =
   | EVAL
 
   (* Literals *)
-  | LIT_NUM       of (Num.num)
+  | LIT_BIN       of (Num.num)
+  | LIT_HEX       of (Num.num)
+  | LIT_DEC       of (Num.num)
   | LIT_STR       of (string)
   | LIT_CHAR      of (char)
 
@@ -223,7 +225,9 @@ let string_of_tok t =
   | EVAL       -> "eval"
 
   (* Literals *)
-  | LIT_NUM n  -> (Num.string_of_num n)
+  | LIT_HEX n  -> (Num.string_of_num n)
+  | LIT_DEC n  -> (Num.string_of_num n)
+  | LIT_BIN n  -> (Num.string_of_num n)
   | LIT_STR s  -> ("\"" ^ (String.escaped s) ^ "\"")
   | LIT_CHAR c -> ("'" ^ (Char.escaped c) ^ "'")
 
@@ -344,23 +348,30 @@ and parse_ATOMIC_expr ps =
       expect ps RPAREN;
       e
 	
-  | LIT_NUM n -> 
+  | LIT_BIN n -> 
       bump ps;
-      Ast.EXPR_literal 
-	(Ast.VAL_dyn (Ast.TY_arith (numty n), 
-		      Ast.VAL_arith n), pos)
+      Ast.EXPR_literal
+	(Ast.LIT_arith (numty n, Ast.BIN, n), pos)
+
+  | LIT_HEX n -> 
+      bump ps;
+      Ast.EXPR_literal
+	(Ast.LIT_arith (numty n, Ast.HEX, n), pos)
+
+  | LIT_DEC n -> 
+      bump ps;
+      Ast.EXPR_literal
+	(Ast.LIT_arith (numty n, Ast.DEC, n), pos)
 
   | LIT_STR str ->
       bump ps;
       Ast.EXPR_literal 
-	(Ast.VAL_dyn (Ast.TY_str, 
-		      Ast.VAL_str str), pos)
+	(Ast.LIT_str str, pos)
 
   | LIT_CHAR ch ->
       bump ps;
       Ast.EXPR_literal 
-	(Ast.VAL_dyn (Ast.TY_char, 
-		      Ast.VAL_char ch), pos)
+	(Ast.LIT_char ch, pos)
 
   | IDENT str -> 
       bump ps;
@@ -457,8 +468,21 @@ and parse_tuple_expr ps =
       Ast.EXPR_tuple (Array.of_list (List.rev !exprs), pos)
   | _ -> lhs
 
+
 and parse_expr ps =
   parse_tuple_expr ps
+
+
+and parse_slot ps = 
+  match peek ps with
+    CARET -> 
+      bump ps;
+      let t = parse_ty ps in 
+      Ast.SLOT_external t
+  | _ -> 
+    let t = parse_ty ps in 
+    Ast.SLOT_standard t
+
 
 and parse_ty ps = 
   match peek ps with 
@@ -489,11 +513,6 @@ and parse_ty ps =
   | CHAR -> 
       bump ps; 
       Ast.TY_char
-
-  | CARET -> 
-      bump ps;
-      let t = parse_ty ps in 
-      Ast.TY_ref t
 
   | _ -> failwith "unimplemented parse rules"
   
