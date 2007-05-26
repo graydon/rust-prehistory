@@ -10,7 +10,7 @@
 @ifinfo
 This manual is for the ``Rust'' programming language.
 
-Copyright 2006 Graydon Hoare
+Copyright 2006, 2007 Graydon Hoare
 
 All rights reserved
 
@@ -42,10 +42,10 @@ See the file COPYING for details
 
 Rust Documentation
 
-Rust is a general-purpose programming language. It supports
-imperative-procedural, concurrent-actor and pure-functional
-styles. Rust also supports generic programming and metaprogramming, in
-both static and dynamic forms.
+Rust is a general-purpose programming language. It supports imperative
+procedural, concurrent actor and pure functional styles. Rust also
+supports generic programming and metaprogramming, in both static and
+dynamic forms.
 
 @end ifnottex
 
@@ -159,8 +159,8 @@ Rust borrows operating system terminology in order to differentiate
 two important artifacts: @i{programs} and @i{processes}. A program is
 the inert, non-executing form of rust code. A process is the
 instantiated, ``live'', possibly-executing form of rust code. A
-program can be executed, a process @emph{is the executing state} of a
-program; every process has a program that it is currently executing.
+program can be executed, a process @emph{is an executing instance} of
+a program; every process has a program that it is currently executing.
 We will use these terms precisely and non-interchangeably.
 
 Programs and processes are Rust's fundamental units of encapsulation,
@@ -173,8 +173,8 @@ may execute concurrently, or may have their execution interleaved.
 There is some similarity between the OOP terms ``class'' and
 ``object'' and the Rust terms ``program'' and ``process''. In OOP,
 classes are instantiated into objects; in Rust, programs are
-instantiated into processes. This symmetry may help your intuition,
-but it is not sufficient to motivate us to adopt the OOP terminology:
+instantiated into processes. This similarity may help your intuition,
+but it is not enough to motivate us to adopt the OOP terminology:
 there are sufficient differences between Rust's process model and OOP
 that such terminology would cause confusion. Rust does not define
 anything called a ``class'' or an ``object''.
@@ -212,15 +212,15 @@ address of the referent. Variables within a module or stack frame are
 slots, as are the fields within records or the components of tuples
 and vectors.
 
-@node    Types, Forms, Predicates and Constraints
-@section Types, Forms, Predicates and Constraints
+@node    Types, Forms, Predicates, Constraints and Conditions
+@section Types, Forms, Predicates, Constraints and Conditions
 
 Every Rust slot has a type. A @i{type} is a static description of a
 subset of all the possible values. A type has two parts: 
 
 @itemize
 @item the @i{form} of the type
-@item the @i{constraint} of the type
+@item the @i{condition} of the type
 @end itemize
 
 The form of a type describes how many bits the type occupies in
@@ -243,11 +243,21 @@ type employee = rec @{
 introduces 3 new types: one with a tuple form, one with a vector form,
 and one with a record form. 
 
-The @i{constraint} of a type is a set of zero or more predicates. A
-@i{predicate} is a pure boolean function. We say that a predicate
+The @i{condition} of a type is a set of zero or more constraints. 
+
+A @i{constraint} is a predicate applied to some arguments. Arguments
+to a constraint may either be visible slots, or else the implicit
+``formal slot'' named @code{*}.
+
+A @i{predicate} is a pure boolean function. We say that a predicate
 ``holds'' over a value if the predicate returns @code{true} when
 applied to the value, otherwise we say that the predicate ``does not
-hold'' over the value. For example, this code:
+hold'' over the value. We may also generalize this to speak of a
+constraint ``holding'' if its predicate holds over the constraint's
+arguments, or of a condition ``holding'' when @emph{all} the
+constraints in the condition hold.
+
+For example, this code:
 
 @example
 pred is_even(int x) @{
@@ -259,7 +269,7 @@ pred is_nonzero(int x) @{
 @}
 @end example
 
-introduces 2 new predicates: one that tests for even-ness and one that
+defines 2 new predicates: one that tests for even-ness and one that
 tests for nonzero-ness. Predicates and types can be bundled together
 into a type definition. For example, this code:
 
@@ -270,8 +280,8 @@ type even_nonzero_int = int : is_even(*), is_nonzero(*);
 defines a new name for the type of integers that are even and nonzero.
 
 A slot can refer to a value if and only if the value has the same form
-as the slot's type, and the constraints in the slot's type all hold
-over the value. For example, this code:
+as the slot's type, and the condition in the slot's type holds. For
+example, this code:
 
 @example
 int foo : is_even(*), is_nonzero(*);
@@ -307,21 +317,26 @@ Consists of two statements and three points:
 @item the point after the second statement
 @end itemize
 
-Every point in a rust program has a static typestate, just as every
-slot has a static type. A @i{typestate} is a set of predicates; the
-typestate of a point is the set of predicates that must hold at that
-point. The predicates in a typestate can refer to @emph{any slots}
-visible at the typestate's point. The static @i{typestate checking
-algorithm} ensures that program control only flows through points that
-contain predicates known to hold.
+Just as every slot in a Rust program has a dynamic value that conforms
+to a static type, every @emph{point} in a Rust program has a dynamic
+state that conforms to a static @i{typestate}.  The @i{typestate} of a
+point is just a condition -- a set of constraints -- associated with
+the point. The typestate of a point is a condition that is statically
+guaranteed to hold at that point. The constraints in a typestate can
+refer to @emph{any slots} visible at the typestate's point. The static
+@i{typestate checking algorithm} ensures that when the program runs,
+the dynamic state of the process at a given point @emph{will} conform
+to the point's typestate.
 
 Because many predicates are not computable statically -- they depend
 on the dynamic state of values -- programmers must occasionally insert
-assertions. An @i{assertion} is simply a statement that calls a
-predicate with the built-in operator @code{assert}, which prevents
-execution from proceeding if the predicate does not hold. Thus the
-typestate checking algorithm inserts an assertion's predicate into the
-typestate of the point after the assertion. For example, this code:
+assertions. An @i{assertion} is a statement that calls a predicate
+with the built-in operator @code{assert}; this operator prevents
+execution from proceeding if the predicate does not hold over the
+provided arguments. Failed assertions generate runtime exceptions,
+preventing control from proceeding past the assertion. Statically, an
+assertion add its constraint into the typestate of the point after the
+assertion. For example, this code:
 
 @example
 int x;
@@ -334,9 +349,9 @@ consists of two slots -- @code{x} and @code{y} -- and two statements,
 thus three points. The first statement calls @code{foo} and assigns
 its result to @code{x}. The second statement assigns @code{x} to
 @code{y}. This code is @emph{erroneous} according to the typestate
-checking algorithm: the point before the second statement does not 
-contain the @code{is_even(x)} predicate, so the assignment would violate
-the constraint on @code{y}.
+checking algorithm: the point before the second statement does not
+contain the @code{is_even(x)} constraint, so the assignment would
+violate the condition of @code{y}.
 
 The code can be corrected using an assertion. This corrected code:
 
@@ -349,12 +364,12 @@ y = x;
 @end example
 
 Consists of three statements and four points. At the first two points,
-the typestate does not contain the @code{is_even(x)} predicate. At the
-third point -- the point @emph{after} the assertion -- the typestate
-@emph{does} contain the @code{is_even(x)} predicate. So the third
-statement is now legal: if the third statement ever executes, it will
-assign a value @emph{statically} known to satisfy the constraint
-placed on the slot @code{y}.
+the typestate does not contain the @code{is_even(x)} constraint. At
+the third point -- the point @emph{after} the assertion -- the
+typestate @emph{does} contain the @code{is_even(x)} constraint. So the
+third statement is now legal: if the third statement ever executes, it
+will assign a value @emph{statically} known to satisfy the condition
+of @code{y}.
 
 It is crucial to understand that the typestate of the third point is a
 @emph{static} fact about @emph{static} entities -- slots, points and
@@ -364,16 +379,17 @@ control will not proceed past the @code{assert} statement, and the
 assignment will never be made.
 
 To reiterate: the typestate checking algorithm is not responsible for
-statically evaluating predicates. It simply calculates the predicates
-that are @emph{known to hold} at each point -- if control ever reaches
-the point -- and reports on mismatches between the predicates known to
-hold at a point and the predicates @emph{required} by slot constraints.
+statically evaluating constraints. It simply calculates the
+constraints that are @emph{known to hold} at each point -- if control
+ever reaches the point -- and reports on mismatches between the
+constraints known to hold at a point and the constraints
+@emph{required} by statements.
 
 Typestates encode requirements for complicated dynamic assertions in
 the language's static checking system. This makes it easier to rule
 out erroneous inputs to functions and programs that you write:
 function parameters and return values are slots just like variables,
-and can be annotated with constraints. In this respect typestates are
+and can be annotated with conditions. In this respect typestates are
 similar to a form of ``design by contract'', except that the typestate
 checking algorithm examines the static control-flow graph and
 minimizes the number of times an expensive assertion must be
@@ -524,10 +540,9 @@ keyword @code{rec}. The fields of a record are defined, as a sequence
 of slot declarations within braces, similar to the slot declarations
 in a stack frame.
 
-Record fields can carry ``inline'' typestate constraints, similar to
-slots in a stack frame. Record types can also carry formal typestates
-relating to the record as a whole, or to some combination of its
-fields.
+Record fields can carry ``inline'' conditions, similar to slots in a
+stack frame. Complete record types can also carry conditions relating
+to the record as a whole, or to some combination of its fields.
 
 @node       Vectors
 @subsection Vectors
@@ -567,7 +582,7 @@ are defined:
 @item An element of the vector can be swapped with an external, initialized value.
 @end itemize
 
-Vectors can have an associated formal typestate that applies to every
+Vector types can have an associated condition that applies to every
 element in the vector, or to the vector as a whole.
 
 @node       Alternatives
@@ -686,7 +701,7 @@ supported, that may yield before they return:
 
 Scoped coroutines are also required to support proper
 tail-@emph{yields}. A tail-yield occurs when a primary coroutine
-invokes a sub-coroutine with a construct that yield every value
+invokes a sub-coroutine with a construct that yields every value
 yielded by the sub-coroutine. Then the primary coroutine passes its
 caller's yield address to the sub-coroutine, for direct yielding
 between the sub-coroutine and caller. When such a tail-yield happens
@@ -724,14 +739,22 @@ keeping the standard case efficient.
 @subsection Predicates
 
 Predicates are boolean pure functions that connect runtime values to
-the typestate system. A typestate is a set of predicates applied to a
-set of slots at a particular point; introducing a new predicate
-thereby enlarges the set of possible typestates. See @ref{Typestates}.
+the typestate system. The typestate system statically assigns a
+condition to each point in a program, and checks that conditions
+required by statements are met at every point. A condition is a set of
+constraints. A constraint is a predicate applied to slots. Thus,
+introducing a new predicate enlarges the set of possible constraints
+and conditions. See @ref{Typestates}.
 
-Predicates can be asserted with the keyword @code{assert}. The
-poststate of a statement @code{assert p(q,r)} is the union of the
-prestate with the predicate @code{p} applied to slots @code{q} and
-@code{r}.
+Predicates are declared with @code{pred}, and have names and
+signatures similar to functions. The body of a predicate is
+syntactically a pure boolean function. The signature of a predicate
+cannot include the keyword @code{pure} or the @code{bool} return type;
+these are implied and non-optional.
+
+Conditions can be asserted with the keyword @code{assert}. The
+postcondition of a statement @code{assert p(q,r), x(y,z)} is the union
+of the precondition with the condition @code{p(q,r), x(y,z)}.
 
 @node       Programs
 @subsection Programs
@@ -766,9 +789,10 @@ Every slot has a unique type.
 
 If a slot @var{S} references a value @var{V}, type of @var{S} has a
 form that is identical to the form of @var{V}, and the type of @var{S}
-has a constraint that holds over @var{V}. Of course @var{S} may be
-further constrained by other predicates at its point of declaration,
-but those predicates @emph{add} to the constraint in the type of
+has a condition that holds when @var{V} is substituted for the formal
+slot @code{*} in the condition. Of course @var{S} may be further
+constrained by other constraints at its point of declaration, but
+those constraints @emph{add} to the condition in the type of
 @var{S}. They do not replace it.
 
 
@@ -776,7 +800,7 @@ but those predicates @emph{add} to the constraint in the type of
 @subsection Limitation
 
 Some types are @i{limited}. A type @var{T} is @dfn{limited} iff either of
-these conditions hold:
+these constraints hold:
 
 @itemize
 @item The type @var{T} contains a limited slot.
@@ -799,7 +823,7 @@ is indirectly limited must be declared as such with the keyword
 @subsection Purity
 
 Functions may be @i{pure} or @i{impure}. A
-function @var{S} is @dfn{impure} iff any of these conditions hold:
+function @var{S} is @dfn{impure} iff any of these constraints hold:
 
 @itemize
 @item The function @var{S} is @emph{not} declared as @code{pure}
@@ -826,123 +850,143 @@ self-contained.
 @node    Typestates
 @section Typestates
 
-Every block of statements containing expressions maps to a block of
-primitive statements in a normal form. In this form, every statement
-is logically one of:
+Every block of statements containing expressions decomposes to a block
+of primitive statements in a normal form. In this form, every
+statement is logically one of:
 
 @itemize 
-@item A conditional jump statement.
-@item A move or copy statement between two slots.
-@item An allocation or deallocation statement.
-@item Invocation of a function, iterator, or channel with a ``call message''.
+@item A statement declaring a slot.
+@item A conditional or unconditional jump to another statement.
+@item A load statement on one slot.
+@item A copy or move statement on two slots.
+@item An ALU statement on three slots.
+@item A heap allocation or deallocation statement.
+@item Invocation of a function or channel.
+@item A return or yield.
 @end itemize
 
-A @dfn{point} is defined as the boundary between two normalized
-sequential statements.  Every point in a normalized block has a
-@i{typestate}. Two typestates are therefore defined for each
-normalized statement: 
+Every normalized statement has two associated @dfn{points}: one before
+the statement and one after the statement. Each point has an associated
+@emph{condition}:
 
 @itemize
-@item The @dfn{prestate}, that precedes the statement.
-@item The @dfn{poststate}, that follows the statement.
+@item The @dfn{precondition} of a statement is the condition the statement requires in the point before the condition.
+@item The @dfn{postcondition} of a statement is the condition the statement enforces in the point after the statement.
 @end itemize
 
-A @dfn{typestate} is formally a set of @var{N}-ary boolean predicates
-over visible slots.
+Any constraint present in the precondition and @emph{absent} in the
+postcondition is considered to be @emph{dropped} by the statement.
 
-Typestates form a semilattice ordered by subset-inclusion: @var{X} <
-@var{Y} means @var{X} is a subset of @var{Y}, and the semilattice
-``join'' operation is ``set intersection''.
+The typestate checking system analyzes the preconditions and
+postconditions of each statement, and calculates a condition for each
+point called a typestate. For a given statement, we call these
+typestates the prestate and a poststate.
 
-When @var{K} statements lead to a single point, the point's typestate
-is the pairwise join of the @var{K} poststates of preceding
-statements.
+@itemize
+@item The @dfn{prestate} of a statement is the typestate of the point before the statement.
+@item The @dfn{poststate} of a statement is the typestate of the point after the statement.
+@end itemize
 
-Predicates are declared with @code{pred}, and have names and
-signatures similar to functions. The body of a predicate is
-syntactically a pure boolean function. The signature of a predicate
-cannot include the keyword @code{pure} or the @code{bool} return type;
-these are implied and non-optional.
+A @dfn{typestate} is a condition that has @emph{been determined by the
+typestate algorithm} to hold at a point. This is a subtle but important point to 
+understand: preconditions and postconditions are @emph{inputs} to the typestate
+algorithm; prestates and poststates are @emph{outputs} from the typestate algorithm.
 
+The typestate algorithm analyzes the preconditions and postconditions
+of every statement in a block, and attempts to compute a condition for
+each typestate. Specifically:
 
-@node       Asserting predicates
-@subsection Asserting predicates
+@itemize
+@item Initially, every typestate is empty.
+@item Each statement's poststate is given the union of the statement's prestate, precondition, and postcondition.
+@item Each statement's poststate has the difference between the statement's precondition and postcondition removed.
+@item Each statement's prestate is given the intersection of the poststates of every statement that jumps to it.
+@item The previous three steps are repeated until no typestates change.
+@end itemize
 
-The @code{assert} statement either adds the asserted predicate to its
-poststate, or else fails, raising an exception. If a predicate is
-declared as @code{auto}, assertions are inserted automatically some
-contexts. 
+After the typestates of a block are computed, the typestate algorithm
+checks that every constraint in the precondition of a statement is
+satisfied by its prestate. If any preconditions are not satisfied and
+no automatic assertions exist, the mismatch is considered an error.
 
-Specifically: every operation (statement type) has a set of
-preconditions, formulated as predicates. If a precondition names a
-predicate that is not present in the statement's prestate, one of two
-cases occurs:
+@node       Asserting conditions
+@subsection Asserting conditions
+
+The @code{assert} statement adds the constraints in the asserted
+condition to its postcondition. At runtime, if the assertion succeeds
+it has no effect, and if it fails it raises an exception. If a
+predicate is declared as @code{auto}, assertions are inserted
+automatically some contexts.
+
+Specifically: When checking whether a statement's precondition is
+satisfied by its prestate, if the precondition names a predicate that
+is not present in the prestate, one of two cases occurs:
 
 @itemize
 @item If the missing predicates are all @code{auto} and all the 
 preconditions of the missing @code{auto}-predicates are met, the
-compiler may insert assertions for each missing predicate.
+compiler may insert assertions for each missing predicate (and restart
+the typestate algorithm).
 @item Otherwise the condition is a compile-time error.
 @end itemize
 
-@node       Dropping predicates
-@subsection Dropping predicates
+@node       Dropping constraints
+@subsection Dropping constraints
 
-All predicates in a typestate can be @i{dropped}. To @dfn{drop} a
-predicate is to remove it from the typestate at the associated
-point. For a slot @var{S}, dropping the @code{init(S)} predicate may
+All constraints in a typestate can be @i{dropped}. To @dfn{drop} a
+constraint is to remove it from the typestate at the associated
+point. For a slot @var{S}, dropping the @code{init(S)} constraint may
 cause memory to be released or finalizer to be run. See @ref{Memory
-model} for discussion. All other predicates can be dropped without
+model} for discussion. All other constraints can be dropped without
 side-effect.
 
 
-@node       Predicates on moved values
-@subsection Predicates on moved values
+@node       Constraints on moved values
+@subsection Constraints on moved values
 
 When a statement moves a value from a slot @var{A} to a slot @var{B}: 
 
 @itemize
-@item Every predicate involving @var{B} is dropped.
-@item Every remaining predicate involving @var{A} has @var{B} 
+@item Every constraint involving @var{B} is dropped.
+@item Every remaining constraint involving @var{A} has @var{B} 
 substituted for @var{A}.
 @end itemize
 
 
-@node       Predicates on copied values
-@subsection Predicates on copied values
+@node       Constraints on copied values
+@subsection Constraints on copied values
 
 When a statement copies a value from a slot @var{A} to a slot @var{B}: 
 
 @itemize
-@item Every predicate involving @var{B} is dropped.
-@item For every remaining predicate @var{P} involving @var{A}, 
+@item Every constraint involving @var{B} is dropped.
+@item For every remaining constraint @var{P} involving @var{A}, 
 a copy of @var{P} is added to the typestate with @var{B} substituted
 for @var{A}.
 @end itemize
 
 
-@node          Formal typestates
-@subsubsection Formal typestates
+@node          Slot conditions
+@subsubsection Slot conditions
 
-When defining a type @var{T}, a typestate @var{S} can optionally be
-associated with @var{T}. When present, we say that @var{S} is the
-@dfn{formal typestate} of @var{T}. When a slot has a type @var{T} with
-a formal typestate @var{S}, it means that all the predicates in
-@var{S} are present in the typestate of every point in which the slot
-is @i{visible}.
+When a slot @var{S} has a type @var{T} with condition @var{C}, it
+means that all the constraints in @var{C} will be present, with
+@var{S} substituted for the formal slot @code{*}, in the typestate of
+every point to which @var{S} is @i{visible}.
 
 A slot becomes @dfn{visible} at the point immediately following the
 statement containing its declaration, and remains visible through to
-the end of the last statement in the block containing its declaration.
+the point after the last statement in the block containing the slot's
+declaration.
 
 
 @node       Reflection
 @subsection Reflection
 
-Types and predicates are reflected into runtime values. Runtime values
+Types and constraints are reflected into runtime values. Runtime values
 can always be converted to type @code{dyn} or @code{lim dyn}, which
-carries the type of its value (including formal typestate) along with
-it.
+carries the type of its value and type (both form and state) along
+with it.
 
 The runtime representation of a type can be compared to the runtime
 representation of another type.
@@ -959,19 +1003,19 @@ We borrow structure (but not terminology) from Ada and Hermes when
 organizing the type system. In particular:
 
 @itemize
-@item A constrained type -- similar to an Ada "subtype" -- is a base type accompanied with a set of
-constraints. Constraints are formulated using Hermes-style typestate
+@item All rust types carry conditions,similar to an Ada "subtype". Conditions are formulated using Hermes-style 
 predicates rather than Ada's fixed set of constraints.
 @item There is no general subtype lattice (as in OO languages). There is only
-one type for each value. This is common to both languages.
+one type for each value. This is common between Rust and Hermes.
 @end itemize
 
 
 @node       Pragmatic notes
 @subsection Pragmatic notes
 
-Constrained types do not participate in overload resolution, because
-predicates can always be dropped.
+Type conditions do not participate in function overload resolution,
+because predicates can always be dropped. Only type forms are
+considered in when resolving overloaded function names.
 
 If you wish to produce a new type that wraps an old type and
 @emph{does} participate in overload resolution, you can use the
