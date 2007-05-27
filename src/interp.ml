@@ -221,7 +221,6 @@ let emit_op e op =
   e.emit_pc <- e.emit_pc + 1
 ;;
 
-
 let backpatch_fwd_jump_to_here e fwd_jump_pc =
   match e.emit_ops.(fwd_jump_pc) with
     OP_jump (form, None) -> 
@@ -368,17 +367,10 @@ let types_equal p q =
   p = q
 ;;
 
-
-let sig_param_types s = 
-  match s.sig_param_ty with
-    TY_tup tt -> tt.tup_types
-  | x -> [| x |]
-;;  
-
 let check_args args bind = 
-  let param_types = sig_param_types bind.bind_sig.subr_sig in
+  let param_tup_ty = bind.bind_ty.sig_param_ty in
   let n_args = Array.length args in 
-  let n_types = Array.length param_types in
+  let n_types = Array.length param_tup_ty.tup_types in
   let n_names = Array.length bind.bind_names in
 
   (* Printf.printf "Checking %d args against %d types\n" n_args n_types; *)
@@ -395,7 +387,7 @@ let check_args args bind =
     (match arg with 
       VAL_dyn (t,_) -> 
 	(* Printf.printf "checking arg type %d\n" i; *)
-	if (not (types_equal t param_types.(i)))
+	if (not (types_equal t param_tup_ty.tup_types.(i)))
 	then raise (Interp_err "Bad argument type"));
   done
 ;;
@@ -426,7 +418,7 @@ let bind_and_enter_frame proc fflav sba block_stmt =
   let frame = 
     { 
       frame_pc = 0;
-      frame_code = emitter.emit_ops;
+      frame_ops = emitter.emit_ops;
       frame_flavour = fflav;		
       frame_scope = [];
       frame_scope_stack = Stack.create ();
@@ -571,24 +563,24 @@ let exec_op proc op =
 	
   | OP_call -> 
       (match (Stack.pop frame.frame_expr_stack) with 
-	(VAL_dyn (_, VAL_subr (SUBR_func, subr))) -> 
-	  let isig = subr.subr_bind.bind_sig.subr_sig in
-	  let nargs = Array.length (sig_param_types isig) in 
+	(VAL_dyn (_, VAL_func func)) -> 
+	  let isig = func.func_bind.bind_ty in
+	  let nargs = Array.length (isig.sig_param_ty.tup_types) in 
 	  let args = Array.create nargs trueval in
 	  for i = (nargs - 1) downto 0 
 	  do 
 	    args.(i) <- Stack.pop frame.frame_expr_stack
 	  done;
-	  let sba = Some (subr.subr_bind, args) in
-	  (match subr.subr_body with 
-	    BODY_block b -> 
-	      bind_and_enter_frame proc (FRAME_func subr.subr_bind) sba b
-	  | BODY_native n -> 
-	      check_args args subr.subr_bind;
+	  let sba = Some (func.func_bind, args) in
+	  (match func.func_body with 
+	    FBODY_stmt s -> 
+	      bind_and_enter_frame proc (FRAME_func (func.func_proto, func.func_bind)) sba s
+	  | FBODY_native n -> 
+	      check_args args func.func_bind;
 	      (* Printf.printf "resolving native %s\n" n; *)
 	      let native_fn = Hashtbl.find proc.proc_natives n in
 	      (native_fn proc args);
-	      Stack.push trueval stk)	  
+	      Stack.push trueval stk)
       | _ -> raise (Interp_err "calling non-function"))
 	
   | OP_return -> 
@@ -604,20 +596,33 @@ let exec_op proc op =
       | _ -> ())
 	  
   | OP_yield -> raise (Interp_err "cannot yield yet")
+  | OP_send -> raise (Interp_err "cannot send yet")
   | OP_bad -> raise (Interp_err "executing bad instruction")
 ;;
 
 
 let bind_decl decl env =
   (* Printf.printf "binding decl of '%s'\n" decl.decl_name; *)
-  Hashtbl.add env decl.decl_name decl.decl_value
+  let bv = 
+    match decl.decl_artifact with
+      ARTIFACT_code (ty, (CODE_func f)) -> Some (VAL_dyn (ty, VAL_func f))
+    | ARTIFACT_slot (_, None) -> None
+    | ARTIFACT_slot (_, Some (EXPR_literal (lit, _))) -> 
+	Some (VAL_dyn (val_of_literal lit))
+    | _ ->  raise (Interp_err "bad binding")
+  in
+  Hashtbl.add env decl.decl_name bv
+  
 ;;
 
+let procid = ref 1
+;;
 
 let new_proc prog = 
   let env = Hashtbl.create (Array.length prog.prog_decls) in 
   Array.iter (fun decl -> bind_decl decl env) prog.prog_decls;
-  { proc_prog = prog;
+  { proc_id = (incr procid; !procid);
+    proc_prog = prog;
     proc_env = env;
     proc_natives = Hashtbl.create 0;
     proc_frames = [];
@@ -631,17 +636,10 @@ let new_proc prog =
 let enter_init_frame proc args = 
   (* Printf.printf "entering init frame\n"; *)
   match proc.proc_prog.prog_init with 
-    Some ((sigt,names), block_stmt) -> 
-      let bind = 
-	{ 
-	  bind_sig = { subr_inline = false;
-		       subr_pure = true;
-		       subr_sig = sigt; };
-	  bind_names = names
-	} 
-      in
+    Some init -> 
+      let bind = init.init_bind in
       let fflav = FRAME_init bind in      
-      bind_and_enter_frame proc fflav (Some (bind,args)) block_stmt
+      bind_and_enter_frame proc fflav (Some (bind, args)) init.init_body
   | _ -> ()
 ;;
 
@@ -679,9 +677,9 @@ let step_proc p =
   | PROC_FINI -> 
       let f = List.hd p.proc_frames in
       (* Printf.printf "(pc=%d)\n" f.frame_pc; *)
-      if (f.frame_pc >= Array.length f.frame_code)
+      if (f.frame_pc >= Array.length f.frame_ops)
       then exec_op p OP_return
-      else exec_op p f.frame_code.(f.frame_pc);
+      else exec_op p f.frame_ops.(f.frame_pc);
       if p.proc_jumped
       then p.proc_jumped <- false
       else f.frame_pc <- f.frame_pc + 1
@@ -695,25 +693,20 @@ let step_proc p =
 (*****************************************************************)
 
 
-let get_const_prog_val v = 
-  match v with 
-    Some (VAL_dyn (TY_const (TY_prog), VAL_prog (vp))) -> vp
-  | _ -> raise (Interp_err "non-value")
-;;
-
-
 let find_entry_prog sf entry_name = 
   let binding = Hashtbl.find sf entry_name in 
   match binding with 
-    (VIS_public, d) when (d.decl_type = TY_const (TY_prog)) 
-    -> get_const_prog_val d.decl_value
-  | _ -> raise (Interp_err ("cannot find 'pub prog " ^ entry_name ^ "'"))
+    (VIS_public, d) -> 
+      (match d.decl_artifact with
+	ARTIFACT_code (_, (CODE_prog prog)) -> prog
+      | _ -> raise (Interp_err ("cannot find 'pub prog " ^ entry_name ^ "'")))
+  | _ -> raise (Interp_err ("cannot find 'pub " ^ entry_name ^ "'"))
 ;;
 
 
 let init_runtime = 
-  let t = TY_ref (TY_named { name_base = "sys";
-			     name_rest = Array.of_list [COMP_string "rt"] })
+  let t = TY_named { name_base = "sys";
+		     name_rest = Array.of_list [COMP_string "rt"] }
   in
   let v = VAL_rec ( Hashtbl.create 0 )
   in
@@ -722,7 +715,8 @@ let init_runtime =
 
 
 let init_argv =
-  let t = TY_ref (TY_vec { vec_elt_type = TY_str }) in
+  let t = TY_vec { vec_elt_type = TY_str; 
+		   vec_elt_state = Array.of_list []} in
   let v = VAL_vec (Array.of_list []) in
   VAL_dyn (t,v)
 ;;

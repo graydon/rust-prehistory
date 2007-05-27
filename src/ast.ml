@@ -356,7 +356,7 @@ and decl =
 
 and artifact = 
     ARTIFACT_type of ty
-  | ARTIFACT_code of code
+  | ARTIFACT_code of (ty * code)
   | ARTIFACT_slot of (slot * (expr option))
 
 and code = 
@@ -378,7 +378,7 @@ and func =
    }
 
 and fbody = 
-    FBODY_native of int
+    FBODY_native of string
   | FBODY_stmt of stmt
 
 and port = 
