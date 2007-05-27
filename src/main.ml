@@ -4,6 +4,7 @@ let _ =
     (Printf.printf "usage: %s FILE.rs ENTRY\n"  Sys.argv.(0);
      exit 1)
   else
+    Printf.printf "starting up\n";
     let fname = Sys.argv.(1) in
     let lexbuf = Lexing.from_channel (open_in fname) in
     let spos = { lexbuf.Lexing.lex_start_p with Lexing.pos_fname = fname } in

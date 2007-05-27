@@ -63,12 +63,8 @@
                 ("vec", VEC);
                 ("dyn", DYN);
 
-                ("func", FUNC);
-                ("chan", CHAN);
-
                 ("proc", PROC);
                 ("prog", PROG);
-                ("port", PORT);
 		
               ]
 ;;
@@ -125,6 +121,21 @@ rule token = parse
 | '['                          { LBRACKET   }
 | ']'                          { RBRACKET   }
 
+| "func"                       { FUNC      }
+| "func?"                      { FUNC_Q    }
+| "func*"                      { FUNC_STAR }
+| "func+"                      { FUNC_PLUS }
+
+| "chan"                       { CHAN      }
+| "chan?"                      { CHAN_Q    }
+| "chan*"                      { CHAN_STAR }
+| "chan+"                      { CHAN_PLUS }
+
+| "port"                       { PORT      }
+| "port?"                      { PORT_Q    }
+| "port*"                      { PORT_STAR }
+| "port+"                      { PORT_PLUS }
+
 | id as i                 
                                 { 
 				  try
@@ -132,11 +143,6 @@ rule token = parse
 		                  with
 			 	    Not_found -> IDENT (i)  
 				}
-
-| "query"                       { QUERY      }
-| "query?"                      { QUERY_Q    }
-| "query*"                      { QUERY_STAR }
-| "query+"                      { QUERY_PLUS }
 
 | ('#' ['0' - '9']+) as s       { TUPIDX (int_of_string s)                       }
 | bin as n                      { LIT_BIN (Num.num_of_int (int_of_string n))     }
