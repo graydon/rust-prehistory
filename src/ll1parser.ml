@@ -1,7 +1,4 @@
 
-exception Parse_err of (Ast.pos * string)
-;;
-
 type token = 
 
   (* Expression operator symbols *)
@@ -292,8 +289,12 @@ let arl ls = Array.of_list (List.rev ls)
 
 type pstate = 
     { mutable pstate_peek : token;
+      mutable pstate_ctxt : (string * Ast.pos) list;
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf }
+;;
+
+exception Parse_err of (pstate * string)
 ;;
 
 let lexpos ps = 
@@ -303,6 +304,12 @@ let lexpos ps =
    (p.Lexing.pos_cnum) - (p.Lexing.pos_bol))
 ;;
 
+let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
+  (ps.pstate_ctxt <- (n, lexpos ps) :: ps.pstate_ctxt;
+   let res = f ps in
+   ps.pstate_ctxt <- List.tl ps.pstate_ctxt;
+   res)
+
 let peek ps = 
   (Printf.printf "peeking at: %s\n" (string_of_tok ps.pstate_peek);
    ps.pstate_peek)
@@ -310,7 +317,8 @@ let peek ps =
 ;;
 
 let bump ps = 
-  ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf
+  (Printf.printf "bumping past: %s\n" (string_of_tok ps.pstate_peek);
+   ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf)
 ;;
 
 
@@ -325,13 +333,12 @@ let rec expect ps t =
   if p == t 
   then bump ps
   else 
-    let pos = lexpos ps in
     let msg = ("Expected '" ^ (string_of_tok t) ^ 
 	       "', found '" ^ (string_of_tok p ) ^ "'") in
-    raise (Parse_err (pos, msg))
+    raise (Parse_err (ps, msg))
 
 and err str ps = 
-  (Parse_err (lexpos ps, (str)))
+  (Parse_err (ps, (str)))
     
 and unexpected ps = 
   err ("Unexpected token '" ^ (string_of_tok (peek ps)) ^ "'") ps
@@ -370,7 +377,6 @@ and parse_lval ps base pos =
 
 
 and parse_ATOMIC_expr ps =
-  let _ = Printf.printf ">>> ATOMIC expr\n" in
   let pos = lexpos ps in
   match peek ps with
     LPAREN -> 
@@ -436,8 +442,7 @@ and binop_rhs ps lhs rhs_parse_fn op =
   Ast.EXPR_binary (op, pos, lhs, (rhs_parse_fn ps))
 
 and parse_FACTOR_expr ps =
-  let _ = Printf.printf ">>> FACTOR expr\n" in
-  let lhs = parse_NEGATION_expr ps in
+  let lhs = ctxt "FACTOR" parse_NEGATION_expr ps in
   match peek ps with 
     STAR    -> binop_rhs ps lhs parse_FACTOR_expr Ast.BINOP_mul
   | SLASH   -> binop_rhs ps lhs parse_FACTOR_expr Ast.BINOP_div
@@ -445,16 +450,14 @@ and parse_FACTOR_expr ps =
   | _       -> lhs
 
 and parse_TERM_expr ps =
-  let _ = Printf.printf ">>> TERM expr\n" in
-  let lhs = parse_FACTOR_expr ps in
+  let lhs = ctxt "TERM" parse_FACTOR_expr ps in
   match peek ps with 
     PLUS  -> binop_rhs ps lhs parse_TERM_expr Ast.BINOP_add
   | MINUS -> binop_rhs ps lhs parse_TERM_expr Ast.BINOP_sub
   | _     -> lhs
 
 and parse_SHIFT_expr ps =
-  let _ = Printf.printf ">>> SHIFT expr\n" in
-  let lhs = parse_TERM_expr ps in
+  let lhs = ctxt "SHIFT" parse_TERM_expr ps in
   match peek ps with 
     LSL -> binop_rhs ps lhs parse_SHIFT_expr Ast.BINOP_lsl
   | LSR -> binop_rhs ps lhs parse_SHIFT_expr Ast.BINOP_lsr
@@ -462,8 +465,7 @@ and parse_SHIFT_expr ps =
   | _   -> lhs
 
 and parse_RELATIONAL_expr ps =
-  let _ = Printf.printf ">>> RELATIONAL expr\n" in
-  let lhs = parse_SHIFT_expr ps in
+  let lhs = ctxt "RELATIONAL" parse_SHIFT_expr ps in
   match peek ps with 
     LT -> binop_rhs ps lhs parse_RELATIONAL_expr Ast.BINOP_lt
   | LE -> binop_rhs ps lhs parse_RELATIONAL_expr Ast.BINOP_le
@@ -472,30 +474,26 @@ and parse_RELATIONAL_expr ps =
   | _  -> lhs
 
 and parse_EQUALITY_expr ps =
-  let _ = Printf.printf ">>> EQUALITY expr\n" in
-  let lhs = parse_RELATIONAL_expr ps in
+  let lhs = ctxt "EQUALITY" parse_RELATIONAL_expr ps in
   match peek ps with 
     EQEQ -> binop_rhs ps lhs parse_EQUALITY_expr Ast.BINOP_eq
   | NE   -> binop_rhs ps lhs parse_EQUALITY_expr Ast.BINOP_ne
   | _    -> lhs
 
 and parse_AND_expr ps =
-  let _ = Printf.printf ">>> AND expr\n" in
-  let lhs = parse_EQUALITY_expr ps in
+  let lhs = ctxt "AND" parse_EQUALITY_expr ps in
   match peek ps with 
     AND -> binop_rhs ps lhs parse_AND_expr Ast.BINOP_and
   | _   -> lhs
 
 and parse_OR_expr ps =
-  let _ = Printf.printf ">>> OR expr\n" in
-  let lhs = parse_AND_expr ps in
+  let lhs = ctxt "OR" parse_AND_expr ps in
   match peek ps with 
     OR -> binop_rhs ps lhs parse_OR_expr Ast.BINOP_or
   | _  -> lhs
 
 and parse_tuple_expr ps =
-  let _ = Printf.printf ">>> tuple expr\n" in
-  let lhs = parse_OR_expr ps in 
+  let lhs = ctxt "tuple" parse_OR_expr ps in 
   match peek ps with 
     COMMA -> 
       let pos = lexpos ps in
@@ -518,10 +516,10 @@ and parse_slot ps =
   match peek ps with
     CARET -> 
       bump ps;
-      let t = parse_ty ps in 
+      let t = ctxt "slot" parse_ty ps in 
       Ast.SLOT_external t
   | _ -> 
-    let t = parse_ty ps in 
+    let t = ctxt "slot" parse_ty ps in 
     Ast.SLOT_standard t
 
 
@@ -563,16 +561,16 @@ and parse_stmt ps =
     IF -> 
       bump ps;
       expect ps LPAREN;
-      let e = parse_expr ps in
+      let e = ctxt "stmt: if cond" parse_expr ps in
       expect ps RPAREN;
-      let then_stmt = parse_stmt ps in
+      let then_stmt = ctxt "stmt: if-then stmt" parse_stmt ps in
       let else_stmt = 
 	match then_stmt with 
 	  Ast.STMT_block _ -> 
 	    (match peek ps with 
 	      ELSE -> 
 		bump ps;
-		Some (parse_stmt ps)
+		Some (ctxt "stmt: if-else stmt" parse_stmt ps)
 	    | _ -> None)
 	| _  -> None
       in
@@ -585,9 +583,9 @@ and parse_stmt ps =
   | WHILE -> 
       bump ps;
       expect ps LPAREN;
-      let e = parse_expr ps in
+      let e = ctxt "stmt: while cond" parse_expr ps in
       expect ps RPAREN;
-      let s = parse_stmt ps in
+      let s = ctxt "stmt: while body" parse_stmt ps in
       Ast.STMT_while 
 	{ Ast.while_expr = e;
 	  Ast.while_body = s;
@@ -595,7 +593,7 @@ and parse_stmt ps =
 	
   | RETURN -> 
       bump ps;
-      let e = parse_expr ps in 
+      let e = ctxt "stmt: return expr" parse_expr ps in 
       Ast.STMT_return (e, pos)
 	
   | LBRACE -> 
@@ -604,22 +602,22 @@ and parse_stmt ps =
 	match peek ps with 
 	  RBRACE -> (bump ps; stmts)
 	| _ -> 
-	    let h = parse_stmt ps in 
+	    let h = ctxt "stmt: block member" parse_stmt ps in 
 	    parse_stmts (h::stmts)
       in
       Ast.STMT_block (arl (parse_stmts []), pos)
 
   | IDENT str -> 
       bump ps;
-      let lval = parse_lval ps str pos in
+      let lval = ctxt "stmt: lval" parse_lval ps str pos in
       (match peek ps with 
 	LPAREN -> 
-	  let e = parse_expr ps in 
+	  let e = ctxt "stmt: call" parse_expr ps in 
 	  expect ps SEMI;
 	  Ast.STMT_call (lval, e)
       | EQ -> 
 	  bump ps;
-	  let e = parse_expr ps in 
+	  let e = ctxt "stmt: copy" parse_expr ps in 
 	  expect ps SEMI;
 	  Ast.STMT_copy (lval, e)
       | _ -> raise (unexpected ps))
@@ -631,7 +629,7 @@ and parse_prog_items p declist ps =
   match peek ps with 
     MAIN -> 
       bump ps; 
-      let main = parse_stmt ps in 
+      let main = ctxt "prog_item: main" parse_stmt ps in 
       (match p.Ast.prog_main with
 	None -> parse_prog_items { p with Ast.prog_main = Some main } declist ps
       | _ -> raise (err "duplicate main declaration" ps))
@@ -641,7 +639,7 @@ and parse_prog_items p declist ps =
       {p with Ast.prog_decls = arl declist }
 
   |_ -> 
-      let decl = parse_decl ps in 
+      let decl = ctxt "prog_item: decl" parse_decl ps in 
       parse_prog_items p (decl :: declist) ps
 
 	
@@ -670,8 +668,8 @@ and parse_decl ps =
   match peek ps with 
     PROG -> 
       bump ps;
-      let n = parse_ident ps in
-      let prog = parse_prog ps in
+      let n = ctxt "decl: prog ident" parse_ident ps in
+      let prog = ctxt "decl: prog body" parse_prog ps in
       let prog = { prog with Ast.prog_auto = auto } in
       { Ast.decl_name = n;
 	Ast.decl_pos = pos;
@@ -696,34 +694,47 @@ and parse_decl_top ps =
   match peek ps with 
     PUBLIC -> 
       bump ps;
-      let d = parse_decl ps in
+      let d = ctxt "decl_top: public" parse_decl ps in
       (Ast.VIS_public, d)
 
   | PRIVATE -> 
       bump ps;
-      let d = parse_decl ps in
+      let d = ctxt "decl_top: private" parse_decl ps in
       (Ast.VIS_local, d)
 
   | _ -> 
       bump ps;
-      let d = parse_decl ps in
+      let d = ctxt "decl_top: crate" parse_decl ps in
       (Ast.VIS_crate, d)
 
 and parse_topdecls ps decls =
   match peek ps with
     EOF -> List.rev decls
   | _ -> 
-      let d = parse_decl_top ps in
+      let d = ctxt "topdecls" parse_decl_top ps in
       parse_topdecls ps (d::decls)
 
 and sourcefile tok lbuf = 
   let first = tok lbuf in
   let ps = { pstate_peek = first;
+	     pstate_ctxt = [];
 	     pstate_lexfun = tok;
 	     pstate_lexbuf = lbuf }
   in  
   let bindings = Hashtbl.create 100 in
-  let decls = parse_topdecls ps [] in
+  let decls =       
+    try 
+      parse_topdecls ps []
+    with 
+      Parse_err (ps, str) -> 
+	Printf.printf "Parser error: %s\n" str;
+	List.iter 
+	  (fun (cx,(file,line,col)) -> 
+	    Printf.printf "%s:%d:%d:E [PARSE CONTEXT] %s\n" file line col cx) 
+	  ps.pstate_ctxt;
+	[]
+  in
+
   List.iter 
     (fun (vis,decl) -> 
       Hashtbl.add bindings decl.Ast.decl_name (vis,decl)) decls;
