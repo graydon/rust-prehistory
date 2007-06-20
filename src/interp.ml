@@ -5,6 +5,8 @@ open Val
 exception Interp_err of string
 ;;
 
+let arr ls = Array.of_list ls
+;;
 
 (*****************************************************************)
 (*                    Output Formatting                          *)
@@ -368,9 +370,9 @@ let types_equal p q =
 ;;
 
 let check_args args bind = 
-  let param_tup_ty = bind.bind_ty.sig_param_ty in
+  let param_types = bind.bind_ty.sig_param_types in
   let n_args = Array.length args in 
-  let n_types = Array.length param_tup_ty.tup_types in
+  let n_types = Array.length param_types in
   let n_names = Array.length bind.bind_names in
 
   (* Printf.printf "Checking %d args against %d types\n" n_args n_types; *)
@@ -387,7 +389,7 @@ let check_args args bind =
     (match arg with 
       VAL_dyn (t,_) -> 
 	(* Printf.printf "checking arg type %d\n" i; *)
-	if (not (types_equal t param_tup_ty.tup_types.(i)))
+	if (not (types_equal t param_types.(i)))
 	then raise (Interp_err "Bad argument type"));
   done
 ;;
@@ -565,7 +567,7 @@ let exec_op proc op =
       (match (Stack.pop frame.frame_expr_stack) with 
 	(VAL_dyn (_, VAL_func func)) -> 
 	  let isig = func.func_bind.bind_ty in
-	  let nargs = Array.length (isig.sig_param_ty.tup_types) in 
+	  let nargs = Array.length (isig.sig_param_types) in 
 	  let args = Array.create nargs trueval in
 	  for i = (nargs - 1) downto 0 
 	  do 
@@ -574,7 +576,8 @@ let exec_op proc op =
 	  let sba = Some (func.func_bind, args) in
 	  (match func.func_body with 
 	    FBODY_stmt s -> 
-	      bind_and_enter_frame proc (FRAME_func (func.func_proto, func.func_bind)) sba s
+	      bind_and_enter_frame proc (FRAME_func (func.func_bind.bind_ty.sig_proto, 
+						     func.func_bind)) sba s
 	  | FBODY_native n -> 
 	      check_args args func.func_bind;
 	      (* Printf.printf "resolving native %s\n" n; *)

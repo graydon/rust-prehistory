@@ -188,16 +188,17 @@ and ty_func =
       func_sig: ty_sig; 
     }
 
-and param_mode = 
-    PARAM_copy
-  | PARAM_move_in
-  | PARAM_move_in_out
+and pmode = 
+    PMODE_copy
+  | PMODE_move_in
+  | PMODE_move_in_out
 
 and ty_sig = 
     { 
       sig_proto: proto;
-      sig_param_ty: ty_tup;
-      sig_param_modes: param_mode array;
+      sig_param_types: ty array;
+      sig_param_modes: pmode array;
+      sig_param_state: state;
       sig_result_ty: ty;
     }
 

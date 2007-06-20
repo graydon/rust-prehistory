@@ -492,6 +492,26 @@ and parse_OR_expr ps =
     OR -> binop_rhs ps lhs parse_OR_expr Ast.BINOP_or
   | _  -> lhs
 
+
+(* Tuples are *not* paren-enclosed expressions. That would make
+   1-element tuples ambiguous with paren-enclosed expressions for
+   order-of-operation overriding and function args. Instead, N-ary
+   tuples are only defined for N >= 2, and comma is the tuple
+   constructor: the lowest-precedence binary operator. *)
+
+(* Hopefully the user will never care enough to notice this. The only
+   place it feels weird is in handling functions. But function
+   signatures are carefully arranged syntactic sugar in the first
+   place: they combine an optional naming of the function, a naming of
+   parameters, a typing of parameters, declaration of parameter
+   passing modes, and declaration of a cross-parameter typestate. An
+   "N-ary" function for N >=2 can only be applied to a compatible
+   N-tuple. A 0-ary function can only be applied to (), and a 1-ary
+   function can only be applied to a compatible value. This is how
+   users expect to interpret 0-ary and 1-ary "tuples" anyways. The
+   parse context for a call-argument list is not the same parse
+   context as a tuple expression. *)
+
 and parse_tuple_expr ps =
   let lhs = ctxt "tuple" parse_OR_expr ps in 
   match peek ps with 
@@ -657,6 +677,46 @@ and parse_prog ps =
       parse_prog_items prog [] ps
   | _ -> raise (unexpected ps)
 
+and parse_bind_param ps =
+  let ty = ctxt "bind_param: type" parse_ty ps in
+  let pmode = 
+    match peek ps with
+      MINUS -> (bump ps; Ast.PMODE_move_in)
+    | EQ -> (bump ps; Ast.PMODE_move_in_out)
+    | _ -> Ast.PMODE_copy
+  in
+  let name = ctxt "bind_param: ident" parse_ident ps in
+  (ty, pmode, name)
+
+and parse_bind ps = 
+  expect ps LPAREN;  
+  match peek ps with
+    RPAREN -> (bump ps; [])
+  | _ -> 
+      let p0 = ctxt "bind: param 0" parse_bind_param ps in
+      let params = ref [p0] in
+      while peek ps == COMMA
+      do
+	bump ps;
+	let p = ctxt "bind: param n" parse_bind_param ps in
+	params := p :: !params
+      done;
+      expect ps RPAREN;
+      List.rev !params
+
+(* parse_func starts at the first lparen of the sig. *)
+and parse_func ps =
+  let bindings = ctxt "func: bindings" parse_bind ps in
+  let (tys, pmodes, names) = 
+    List.fold_left
+      (fun 
+	(tys, pmodes, names)
+	  (ty,pmode,name) ->
+	    (ty::tys, pmode::pmodes, name::names))
+      ([],[],[])
+      bindings
+  in
+  (tys, pmodes, names)
 
 and parse_decl ps = 
   let pos = lexpos ps in  
