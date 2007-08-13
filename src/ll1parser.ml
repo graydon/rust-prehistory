@@ -27,6 +27,7 @@ type token =
   | ASR
 
   (* Structural symbols *)
+  | AT
   | CARET
   | DOT
   | COMMA
@@ -347,7 +348,24 @@ and parse_ident ps =
   match peek ps with
     IDENT id -> (bump ps; id)
   | _ -> raise (unexpected ps)
-	
+
+and parse_name_component ps =
+  let pos = lexpos ps in
+  match peek ps with
+    IDENT str -> bump ps; (Ast.COMP_string str)
+  | TUPIDX i -> bump ps; (Ast.COMP_tupidx i)
+  | _ -> raise (unexpected ps)
+
+and parse_name base ps = 
+  let rest = ref [] in
+  while peek ps == DOT 
+  do
+    bump ps;
+    rest := ((ctxt "name: rest" parse_name_component ps) :: !rest);
+  done;
+  { name_base = base,
+    name_rest = arl !rest }
+
 and parse_lval ps base pos =
   let components = ref [] in 
   while peek ps == DOT 
@@ -355,14 +373,10 @@ and parse_lval ps base pos =
     bump ps;
     let pos = lexpos ps in
     match peek ps with
-      IDENT str -> 
-	bump ps;
+      IDENT _ | TUPIDX _ -> 
 	components := ((Ast.LIDX_named 
-			  ((Ast.COMP_string str), pos)) :: !components)
-    | TUPIDX i -> 
-	bump ps;
-	components := ((Ast.LIDX_named 
-			  ((Ast.COMP_tupidx i), pos)) :: !components)
+			  (ctxt "lval: components" parse_name_component ps), pos) 
+		       :: !components)
     | LPAREN -> 
 	bump ps;
 	let e = parse_expr ps in
@@ -370,7 +384,6 @@ and parse_lval ps base pos =
 	components := ((Ast.LIDX_index e) :: !components)
     | _ -> 
 	raise (unexpected ps)
-
   done;
   { Ast.lval_base = base;
     Ast.lval_rest = arl !components }
@@ -526,24 +539,35 @@ and parse_tuple_expr ps =
       done;
       Ast.EXPR_tuple (arl !exprs, pos)
   | _ -> lhs
-
-
+	
+	
 and parse_expr ps =
   parse_tuple_expr ps
 
-
 and parse_slot ps = 
-  match peek ps with
-    CARET -> 
-      bump ps;
-      let t = ctxt "slot" parse_ty ps in 
-      Ast.SLOT_external t
-  | _ -> 
-    let t = ctxt "slot" parse_ty ps in 
-    Ast.SLOT_standard t
-
-
+  let mode = 
+    match peek ps with
+      CARET -> bump ps; Ast.SLOT_exterior
+    | AT -> bump ps; Ast.SLOT_alias
+    | _ -> Ast.SLOT_interior
+  in
+  let form = ctxt "slot: form" parse_ty_form ps in 
+  let ident = ctxt "slot: ident" parse_ident ps in
+  let state = ctxt "slot: state" parse_state ps in 
+  {
+   Ast.slot_mode = mode;
+   Ast.slot_ty = { Ast.ty_form = form;
+		   Ast.ty_state = state };
+   Ast.slot_ident = ident
+ }
+	
 and parse_ty ps = 
+  let form = ctxt "ty: form" parse_ty_form ps in  
+  let state = ctxt "ty: state" parse_state ps in
+  { Ast.ty_form = form;
+    Ast.ty_state = state }
+    
+and parse_ty_form ps = 
   match peek ps with 
     TYPE -> 
       bump ps; 
@@ -574,7 +598,19 @@ and parse_ty ps =
       Ast.TY_char
 
   | _ -> failwith "unimplemented parse rules"
-  
+
+and parse_block ps = 
+  let pos = lexpos ps in
+  expect ps LBRACE;
+  let stmts = ref [] in
+  while peek ps != RBRACE 
+  do
+    let s = ctxt "block: stmt" parse_stmt ps in
+    stmts := s :: (!stmts)
+  done;
+  expect RBRACE;
+  Ast.STMT_block ((arl !stmts), pos)
+    
 and parse_stmt ps =
   let pos = lexpos ps in
   match peek ps with 
@@ -583,16 +619,13 @@ and parse_stmt ps =
       expect ps LPAREN;
       let e = ctxt "stmt: if cond" parse_expr ps in
       expect ps RPAREN;
-      let then_stmt = ctxt "stmt: if-then stmt" parse_stmt ps in
+      let then_stmt = ctxt "stmt: if-then" parse_block ps in
       let else_stmt = 
-	match then_stmt with 
-	  Ast.STMT_block _ -> 
-	    (match peek ps with 
-	      ELSE -> 
-		bump ps;
-		Some (ctxt "stmt: if-else stmt" parse_stmt ps)
-	    | _ -> None)
-	| _  -> None
+	(match peek ps with 
+	  ELSE -> 
+	    bump ps;
+	    Some (ctxt "stmt: if-else" parse_block ps)
+	| _ -> None)
       in
       Ast.STMT_if 
 	{ Ast.if_test = e;
@@ -616,16 +649,7 @@ and parse_stmt ps =
       let e = ctxt "stmt: return expr" parse_expr ps in 
       Ast.STMT_return (e, pos)
 	
-  | LBRACE -> 
-      bump ps;
-      let rec parse_stmts stmts = 
-	match peek ps with 
-	  RBRACE -> (bump ps; stmts)
-	| _ -> 
-	    let h = ctxt "stmt: block member" parse_stmt ps in 
-	    parse_stmts (h::stmts)
-      in
-      Ast.STMT_block (arl (parse_stmts []), pos)
+  | LBRACE -> ctxt "stmt: block" parse_block ps
 
   | IDENT str -> 
       bump ps;
@@ -678,43 +702,75 @@ and parse_prog ps =
   | _ -> raise (unexpected ps)
 
 and parse_bind_param ps =
-  let ty = ctxt "bind_param: type" parse_ty ps in
+  let form = ctxt "bind_param: type" parse_ty_form ps in
   let pmode = 
     match peek ps with
       MINUS -> (bump ps; Ast.PMODE_move_in)
     | EQ -> (bump ps; Ast.PMODE_move_in_out)
     | _ -> Ast.PMODE_copy
   in
-  let name = ctxt "bind_param: ident" parse_ident ps in
-  (ty, pmode, name)
+  let ident = ctxt "bind_param: ident" parse_ident ps in
+  let state = ctxt "bind_param: state" parse_state ps in 
+  let ty = { Ast.ty_form = form; Ast.ty_state = state } in
+  (ty, pmode, ident)
 
-and parse_bind ps = 
-  expect ps LPAREN;  
+and parse_constraint ps = 
+  match peek ps with 
+    
+
+and parse_state ps = 
   match peek ps with
-    RPAREN -> (bump ps; [])
-  | _ -> 
-      let p0 = ctxt "bind: param 0" parse_bind_param ps in
-      let params = ref [p0] in
+    COLON -> 
+      bump ps;
+      let c = ctxt "state: constraint 0" parse_constraint ps in
+      let constraints = ref [c] in
       while peek ps == COMMA
       do
 	bump ps;
-	let p = ctxt "bind: param n" parse_bind_param ps in
-	params := p :: !params
-      done;
-      expect ps RPAREN;
-      List.rev !params
+	let c = ctxt "state: constraint 0" parse_constraint ps in
+	constraints := c :: !constraints
+      done
+	   
+
+and parse_bind proto ps = 
+  expect ps LPAREN;  
+  let (tys, pmodes, idents) = 
+    match peek ps with
+      RPAREN -> (bump ps; ([], [], []))
+    | _ -> 
+	let (t,p,i) = ctxt "bind: param 0" parse_bind_param ps in
+	let tys = ref [t] in
+	let pmodes = ref [p] in
+	let idents = ref [i] in
+	while peek ps == COMMA
+	do
+	  bump ps;
+	  let (t,p,i) = ctxt "bind: param n" parse_bind_param ps in
+	  tys := t :: !tys;
+	  pmodes := p :: !pmodes;
+	  idents := n :: !idents
+	done;
+	expect ps RPAREN;
+	(arl !tys, arl !pmodes, arl !names)
+  in
+  let state = ctxt "bind: param state" parse_state ps in
+    
+  { Ast.bind_ty = 
+    { Ast.sig_proto = proto,
+      Ast.sig_param_types = tys,
+      Ast.sig_param_modes = pmodes,
+      Ast.sig_param_state = state,
+      Ast.sig_result_ty = ...      
+    },
+    Ast.bind_idents = idents }
+
 
 (* parse_func starts at the first lparen of the sig. *)
 and parse_func ps =
   let bindings = ctxt "func: bindings" parse_bind ps in
-  let (tys, pmodes, names) = 
-    List.fold_left
-      (fun 
-	(tys, pmodes, names)
-	  (ty,pmode,name) ->
-	    (ty::tys, pmode::pmodes, name::names))
-      ([],[],[])
-      bindings
+  expect ps LBRACE;
+  let body = ctxt "func: body" parse_stmts
+  expect ps RBRACE;
   in
   (tys, pmodes, names)
 

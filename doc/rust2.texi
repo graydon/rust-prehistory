@@ -1,0 +1,150 @@
+\input texinfo   @c -*-texinfo-*-
+@c %**start of header
+@setfilename rust.info
+@settitle Rust Documentation
+@setchapternewpage odd
+@c %**end of header
+
+@syncodeindex fn cp
+
+@ifinfo
+This manual is for the ``Rust'' programming language.
+
+Copyright 2005-2007 Graydon Hoare
+
+All rights reserved
+
+Licensed to the public under the terms of the GNU GPL (>= 2.0).
+See the file COPYING for details
+@end ifinfo
+
+@dircategory Programming
+@direntry
+* rust: (rust).         Rust programming language
+@end direntry
+
+@titlepage
+@title Rust
+@subtitle A general-purpose programming language
+@author Graydon Hoare
+
+@page
+@vskip 0pt plus 1filll
+Copyright @copyright{} 2005-2007 Graydon Hoare
+All rights reserved
+Licensed to the public under the terms of the GNU GPL (>= 3.0).
+See the file COPYING for details
+@end titlepage
+
+@ifnottex
+@node Top
+@top Top
+
+Rust Documentation
+
+Rust is a general-purpose programming language. It supports imperative
+procedural, concurrent actor and pure functional styles. Rust also
+supports generic programming and metaprogramming, in both static and
+dynamic styles.
+
+@end ifnottex
+
+@menu
+* Introduction::               Background, intentions, relationships to other languages
+* Tutorial::                   Gentle introduction to reading Rust code
+* Reference::                  Systematic reference of language elements
+* Rationale::                  Detailed discussion of design motivations and reasoning
+@end menu
+
+@ifnottex
+Complete table of contents
+@end ifnottex
+
+@c ############################################################
+@c begin main body of nodes
+@c ############################################################
+
+@c ############################################################
+@c introduction
+@c ############################################################
+
+@c ############################################################
+@c tutorial 
+@c ############################################################
+
+@c ############################################################
+@c reference
+@c ############################################################
+
+@menu
+* Ref.Comp::                    Compilation and component model.
+* Ref.Comp.Crate::              Units of compilation, distribution and loading.
+* Ref.Comp.Crate.Dep::          Inter-crate dependency logic.
+* Ref.Comp.Mod::                Units of source-file and name organization.
+* Ref.Comp.Meta.Syntax::        Simple metaprogramming through syntax extension.
+* Ref.Comp.Meta.General::       General-purpose staged compilation.
+
+* Ref.Mem::                     Semantic model of memory.
+* Ref.Mem.Alloc::               Memory allocation model.
+* Ref.Mem.Own::                 Memory ownership model.
+* Ref.Mem.Slot::                Memory containment and reference model.
+
+* Ref.Proc::                    Semantic model of processes.
+* Ref.Proc.Comm::               Inter-process communication.
+* Ref.Proc.Life::               Process lifecycle and state transitions.
+* Ref.Proc.Sched::              Process scheduling model.
+
+* Ref.Run::                     Organization of runtime services.
+* Ref.Run.Mem::                 Runtime memory management service.
+* Ref.Run.Comp::                Runtime dynamic compilation service.
+* Ref.Run.Load::                Runtime component loading service.
+* Ref.Run.Comm::                Runtime communication multiplexing service.
+* Ref.Run.Probe::               Runtime diagnostic service.
+* Ref.Run.Fault::               Runtime fault handler.
+
+* Ref.Form::                    The forms of values held in memory.
+* Ref.Form.Dyn::                An open sum of every possible form.
+* Ref.Form.Prim::               Primitive machine-level forms.
+* Ref.Form.Arith::              High-precision numeric forms.
+* Ref.Form.Text::               Strings and characters.
+* Ref.Form.Rec::                Fixed products of heterogeneous forms.
+* Ref.Form.Vec::                Open products of homogeneous forms.
+* Ref.Form.Alt::                Closed sums of heterogeneous forms.
+* Ref.Form.Func::               Subroutines and scoped coroutine forms.
+* Ref.Form.Prog::               General coroutine-description forms.
+* Ref.Form.Proc::               General coroutine-instance forms.
+* Ref.Form.Port::               Unique inter-process message-receive queues.
+* Ref.Form.Chan::               Weak inter-process message-send capabilities.
+* Ref.Form.Type::               Forms describing types.
+* Ref.Form.Quote::              Forms describing source code.
+
+* Ref.Stat::                    Static analysis of programs.
+* Ref.Stat.Stmt::               Program execution as sequences of statements.
+* Ref.Stat.Stmt.Point::         Inter-statement positions of logical judgments.
+* Ref.Stat.Stmt.State::         Program frames as groups of slots.
+* Ref.Stat.Stmt.Cfg::           The control flow graph formed by statements.
+* Ref.Stat.Pred::               Static predicates covering dynamic judgments.
+* Ref.Stat.Slot::               Program frames as groups of slots.
+* Ref.Stat.Slot.Constr::        Predicates applied to slots.
+* Ref.Stat.Slot.Type::          Static types of slots.
+* Ref.Stat.Slot.Type.Form::     Interpretation of a slot's memory.
+* Ref.Stat.Slot.Type.Cond::     Implicit constraints on a slot.
+* Ref.Stat.Typestates::         Conditions that hold over statements at points.
+* Ref.Stat.Assert::             Explicit manipulation of typestates.
+
+@end menu
+
+@c ############################################################
+@c rationale
+@c ############################################################
+
+
+@c ############################################################
+@c end main body of nodes
+@c ############################################################
+
+@node Index
+
+@printindex cp
+
+@bye

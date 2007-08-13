@@ -23,7 +23,6 @@
                 ("if", IF);
                 ("else", ELSE);
                 ("while", WHILE);
-                ("for", FOR);
 
                 ("try", TRY);
                 ("fail", FAIL);
@@ -108,6 +107,7 @@ rule token = parse
 | '{'                          { LBRACE     }
 | '}'                          { RBRACE     }
 
+| "@"                          { AT         }
 | "^"                          { CARET      }
 | '.'                          { DOT        }
 | ','                          { COMMA      }
@@ -122,19 +122,28 @@ rule token = parse
 | ']'                          { RBRACKET   }
 
 | "func"                       { FUNC      }
-| "func?"                      { FUNC_Q    }
+| "func?"                      { FUNC_QUES }
+| "func!"                      { FUNC_BANG }
 | "func*"                      { FUNC_STAR }
 | "func+"                      { FUNC_PLUS }
 
 | "chan"                       { CHAN      }
-| "chan?"                      { CHAN_Q    }
+| "chan?"                      { CHAN_QUES }
+| "chan!"                      { CHAN_BANG }
 | "chan*"                      { CHAN_STAR }
 | "chan+"                      { CHAN_PLUS }
 
 | "port"                       { PORT      }
-| "port?"                      { PORT_Q    }
+| "port?"                      { PORT_QUES }
+| "port!"                      { PORT_BANG }
 | "port*"                      { PORT_STAR }
 | "port+"                      { PORT_PLUS }
+
+| "for"                        { FUNC      }
+| "for?"                       { FUNC_QUES }
+| "for!"                       { FUNC_BANG }
+| "for*"                       { FUNC_STAR }
+| "for+"                       { FUNC_PLUS }
 
 | id as i                 
                                 { 

@@ -23,21 +23,16 @@ let nopos : pos = ("no-file", 0, 0)
 
 (* "names" are statically computable references to particular slots;
    they never involve vector indexing. They are formed by a
-   dot-separated sequence of identifier and/or literal-number
-   components, the latter representing tuple components (foo.0, foo.1,
-   etc). *)
+   dot-separated sequence of identifier and/or tuple-index components,
+   the latter representing tuple components (foo.#0, foo.#1, etc). 
+   
+   Each component of a name may also be type-parametric; you must 
+   supply type parameters to reference through a type-parametric name
+   component. So for example if foo is parametric in 2 types, you can
+   write foo[int,int].bar but not foo.bar.
+   
+ *)
 
-type name_component =
-    COMP_string of string
-  | COMP_tupidx of int
-;;
-
-type name = 
-   {
-   name_base: string;
-   name_rest: name_component array;
-   }
-;;
 
 type ty_mach = 
     TY_unsigned
@@ -60,7 +55,25 @@ type proto =
   | PROTO_plus  (* func+ foo(...): yields N > 0 values then returns.                        *)
 ;;
 
+type name_component =
+    COMP_string of string
+  | COMP_tupidx of int
+;;
+
+type name = 
+   {
+   name_base: string;
+   name_rest: name_component array;
+   }
+;;
+
 type ty = 
+    {
+     ty_form: form,
+     ty_state: state
+   }
+
+and form = 
     TY_dyn
   | TY_type
 
@@ -96,15 +109,20 @@ and ty_abstr =
       abstr_lim: bool
     }
 	  
-(* Slots can have an "external" qualifier put on them.  If present,
-  the external qualifier means that the slot refers to an external
-  allocation. If absent, the standard allocation-packing rules apply:
-  we try to use immediate or dependent mode, and fall back to internal
-  (with transplanting) otherwise. *)
+(* Slots can have a mode qualifier put on them: exterior or alias.
+ * If there is no qualifier, the slot is interior. *)
 
 and slot = 
-    SLOT_external of ty
-  | SLOT_standard of ty
+    { 
+      slot_mode: slot_mode;
+      slot_ty: ty;
+      slot_ident: ident;
+    }
+
+and slot_mode = 
+    SLOT_exterior
+  | SLOT_interior
+  | SLOT_alias
 
 (* 
  * In closed type terms a predicate in the state may refer to
@@ -116,7 +134,7 @@ and slot =
  * I may wish to enforce the lt predicate on it;
  * I can write this as a closed type term like:
  * 
- * ( int, int ) : lt( *.0, *.1 )
+ * ( int, int ) : lt( *.#0, *.#1 )
  * 
  * In fact all tuple types are converted to this
  * form for purpose of type-compatibility testing;
@@ -126,7 +144,7 @@ and slot =
  * 
  * actually has type
  * 
- * func (( int, int ) : lt( *.0, *.1 )) -> int
+ * func (( int, int ) : lt( *.#0, *.#1 )) -> int
  * 
  *)      
 
@@ -188,16 +206,16 @@ and ty_func =
       func_sig: ty_sig; 
     }
 
-and pmode = 
-    PMODE_copy
-  | PMODE_move_in
-  | PMODE_move_in_out
+and param_mode = 
+    PARAM_copy
+  | PARAM_move_in
+  | PARAM_move_in_out
 
 and ty_sig = 
     { 
       sig_proto: proto;
       sig_param_types: ty array;
-      sig_param_modes: pmode array;
+      sig_param_modes: param_mode array;
       sig_param_state: state;
       sig_result_ty: ty;
     }
