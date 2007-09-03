@@ -1040,6 +1040,7 @@ and parse_decl ps =
 	    Some (ctxt "decl: slot init" parse_expr ps)
 	| _ -> None
       in
+      expect ps SEMI;
       { Ast.decl_ident = slot.Ast.slot_ident;
 	Ast.decl_pos = pos;
 	Ast.decl_artifact = Ast.ARTIFACT_slot (slot, init) }

@@ -205,6 +205,29 @@ let fmt_op out op =
 ;;
   
 
+let fmt_stack out stk = 
+  Stack.iter (fun x -> Printf.fprintf out " %a" fmt_res x) stk
+;;
+
+let trace_op proc =
+  let frame = List.hd proc.proc_frames in
+  let stk = frame.frame_eval_stack in
+  let op = 
+    if (frame.frame_pc >= Array.length frame.frame_ops)
+    then OP_return
+    else frame.frame_ops.(frame.frame_pc);
+  in
+  if Stack.is_empty stk
+  then ()
+  else Printf.printf 
+      "       | %a\n" 
+      fmt_stack stk;
+  Printf.printf
+    "%6d | %a \n"
+    frame.frame_pc
+    fmt_op op
+;;
+
 (*****************************************************************)
 (*                    Code Generation                            *)
 (*****************************************************************)
@@ -374,7 +397,8 @@ let rec emit_stmt emit stmt =
       Array.iter (emit_expr_full false emit) args;
       emit_op emit (OP_push (LVAL lv));
       emit_op emit (OP_copy);
-      emit_op emit (OP_call)
+      emit_op emit (OP_call);
+      emit_op emit (OP_pop)
 
   | STMT_decl decl -> 
       emit_op emit (OP_pos decl.decl_pos);
@@ -385,6 +409,10 @@ let rec emit_stmt emit stmt =
 	ARTIFACT_type ty -> 
 	  emit_op emit (OP_push (RVAL { rv_type = TY_type;
 					rv_val = VAL_type ty }))
+
+      | ARTIFACT_slot (_, None) -> ()
+      | ARTIFACT_slot (_, Some e) -> emit_expr emit e
+	  
       | ARTIFACT_code (CODE_func (fty, func)) -> 
 	  emit_op emit (OP_push (RVAL { rv_type = TY_func fty;
 					rv_val = VAL_func func }))
@@ -415,7 +443,7 @@ let types_equal p q =
 
 
 let load proc lv =
-  Printf.printf("loading from %s\n") lv.lval_base;
+  (* Printf.printf("loading from %s\n") lv.lval_base; *)
   if Array.length lv.lval_rest != 0 
   then raise (Interp_err "cannot handle complex lvals yet")
   else Hashtbl.find proc.proc_env lv.lval_base
@@ -442,7 +470,7 @@ let exec_load clear_slot proc res =
 
   
 (* FIXME: we don't move anything *out* yet *)
-let bind_args (env:(Ast.ident, Val.rv option) Hashtbl.t) args bind =
+let bind_args env args bind =
 
   let param_types = bind.bind_ty.sig_param_types in
   let n_args = Array.length args in 
@@ -618,7 +646,6 @@ let exec_op proc op =
       raise (Interp_err "executing unpatched jump")
 	
   | OP_call -> 
-      Printf.printf "calling\n";
       (match (Stack.pop frame.frame_eval_stack) with 
 	(RVAL { rv_type=_; rv_val=(VAL_func func) }) -> 
 	  let isig = func.func_bind.bind_ty in
@@ -658,7 +685,6 @@ let exec_op proc op =
       | _ -> raise (Interp_err "calling non-function"))
 	
   | OP_return -> 
-      Printf.printf "returning\n";
       List.iter (fun x -> Hashtbl.remove proc.proc_env x) frame.frame_scope;
       while not (Stack.is_empty frame.frame_scope_stack)
       do
@@ -753,13 +779,14 @@ let step_proc p =
   | PROC_MAIN 
   | PROC_INIT 
   | PROC_FINI -> 
+      trace_op p;
       let f = List.hd p.proc_frames in
-      Printf.printf "(pc=%d) stk=[" f.frame_pc;
-      Stack.iter (fun x -> Printf.printf " %a" fmt_res x) f.frame_eval_stack;
-      Printf.printf " ]\n";
-      if (f.frame_pc >= Array.length f.frame_ops)
-      then exec_op p OP_return
-      else exec_op p f.frame_ops.(f.frame_pc);
+      let op = 
+	if (f.frame_pc >= Array.length f.frame_ops)
+	then OP_return
+	else f.frame_ops.(f.frame_pc);
+      in
+      exec_op p op;      
       if p.proc_jumped
       then p.proc_jumped <- false
       else f.frame_pc <- f.frame_pc + 1
@@ -818,8 +845,12 @@ let bind_std_natives proc =
       Some { rv_type=_; rv_val=VAL_arith n } -> n
     | _ -> raise (Interp_err "expected arith arg"))
   in
-  reg "putstr" (fun p args -> print_string (getstr args.(0)));
-  reg "putint" (fun p args -> print_string (Num.string_of_num (getint args.(0))))
+  let log s =   
+    Printf.printf "\nlog: %S\n\n" s
+  in
+
+  reg "putstr" (fun p args -> log (getstr args.(0)));
+  reg "putint" (fun p args -> log (Num.string_of_num (getint args.(0))))
 ;;
 
 

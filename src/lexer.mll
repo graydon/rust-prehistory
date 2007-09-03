@@ -37,6 +37,9 @@
                 ("pred", PRED);
                 ("assert", ASSERT);
 
+		("let", LET);
+		("const", CONST);
+
                 ("lim", LIM);
                 ("pure", PURE);
 
@@ -49,6 +52,7 @@
                 ("reflect", REFLECT);
                 ("eval", EVAL);
 
+		("nil", NIL);
 		("bool", BOOL);
 		
                 ("int", INT);
@@ -71,7 +75,12 @@
 
 let bin = "0b" ['0' '1']['0' '1' '_']*
 let hex = "0x" ['0'-'9' 'a'-'f' 'A'-'F']['0'-'9' 'a'-'f' 'A'-'F' '_']*
+
+(* FIXME: this makes expressions like x-1 fail to parse because -1 is seen as
+ * a single lexeme. User must write x - 1. Look into fixing this. 
+ *)
 let dec = ['-' '+']?['0'-'9']* ['.']? ['0'-'9']+ (['e''E']['-''+']?['0'-'9']+)? 
+
 let id = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 rule token = parse
@@ -119,8 +128,6 @@ rule token = parse
 | ')'                          { RPAREN     }
 | '['                          { LBRACKET   }
 | ']'                          { RBRACKET   }
-
-| "nil"                        { NIL        }
 
 | "func"                       { FUNC      }
 | "func?"                      { FUNC_QUES }
