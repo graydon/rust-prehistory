@@ -6,25 +6,14 @@ type val_mach =
   | VAL_ieee_bfp of float
   | VAL_ieee_dfp of (int * int)
 
-(*
- * The "value" type is the result of evaluation of an expression. Or
- * seen another way, it is the sort of thing that can be put in a
- * slot.
- *
- * Implementations are required to be able to construct dyns, but 
- * implementations are *not* required to construct anything fancier
- * than dyns. So here our interpreter is defined purely over dyns. 
- * All our values are dyns at runtime. 
- *
- * Our 'dyn' type, therefore, is only relevant to the static reasoning
- * stage; it represents places where the compiler lacks static type
- * information.
- *)
+type result = 
+    RVAL of rv
+  | LVAL of Ast.lval
 
-type v = 
-    VAL_dyn of (Ast.ty * val_dyn)
+and rv = { rv_type: Ast.ty;
+	   rv_val: v }
 
-and val_dyn =
+and v =
 
     VAL_bool of bool
   | VAL_mach of val_mach
@@ -76,14 +65,14 @@ and jump_form =
   | JMP_direct
 
 and op = 
-    OP_push of v
+    OP_push of result
   | OP_binop of Ast.binop
   | OP_unop of Ast.unop
   | OP_pop
 
-  | OP_copy_lval of Ast.lval
-  | OP_move_lval of Ast.lval
-  | OP_store_lval of Ast.lval
+  | OP_copy
+  | OP_move
+  | OP_store
 
   | OP_enter_scope
   | OP_alloc_local of string
@@ -94,6 +83,7 @@ and op =
 
   | OP_jump of (jump_form * int option)
   | OP_call
+  | OP_new
   | OP_send
   | OP_return
   | OP_yield
@@ -116,15 +106,15 @@ and frame =
      frame_flavour: frame_flavour;
      mutable frame_scope: string list;
      frame_scope_stack: (string list) Stack.t;
-     frame_expr_stack: v Stack.t;
+     frame_eval_stack: result Stack.t;
     }
 
 and val_proc = 
     {
      proc_id: int;
      proc_prog: Ast.prog;
-     proc_env: (string, (v option)) Hashtbl.t;
-     proc_natives: (string, (val_proc -> (v array) -> unit)) Hashtbl.t;
+     proc_env: (string, (rv option)) Hashtbl.t;
+     proc_natives: (string, (val_proc -> (result array) -> unit)) Hashtbl.t;
 
      mutable proc_frames: frame list;
      mutable proc_state: proc_exec_state;

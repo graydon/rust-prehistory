@@ -29,10 +29,7 @@ ll1parser.cmo ll1parser.cmi: ll1parser.ml ast.cmi ast.cmo
 lexer.cmo lexer.cmi: lexer.ml ll1parser.cmi ast.cmi
 	ocamlc -c $(OCAMLCFLAGS) $<
 
-%.cmo: %.ml
-	ocamlc -c $(OCAMLCFLAGS) $<
-
-%.cmi: %.ml
+%.cmo %.cmi: %.ml
 	ocamlc -c $(OCAMLCFLAGS) $<
 
 %.cmi: %.mli

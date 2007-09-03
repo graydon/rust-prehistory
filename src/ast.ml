@@ -15,7 +15,13 @@ open Hashtbl;;
  * module namespace. 
  *)
 
-type pos = (string * int * int)
+type ident = string
+;;
+
+type filename = string
+;;
+
+type pos = (filename * int * int)
 ;;
 
 let nopos : pos = ("no-file", 0, 0)
@@ -23,8 +29,8 @@ let nopos : pos = ("no-file", 0, 0)
 
 (* "names" are statically computable references to particular slots;
    they never involve vector indexing. They are formed by a
-   dot-separated sequence of identifier and/or tuple-index components,
-   the latter representing tuple components (foo.#0, foo.#1, etc). 
+   dot-separated sequence of identifier and/or index components,
+   the latter representing tuple/call/ctor components (foo.#0, foo.#1, etc). 
    
    Each component of a name may also be type-parametric; you must 
    supply type parameters to reference through a type-parametric name
@@ -49,31 +55,25 @@ type ty_arith =
 
 type proto = 
     PROTO_call  (* func  foo(...): returns 1 value. A function.                             *)
-  | PROTO_bang  (* func! foo(...): yields 1 value. Never resumes.                           *)
   | PROTO_ques  (* func? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
+  | PROTO_bang  (* func! foo(...): yields 1 value. Never resumes.                           *)
   | PROTO_star  (* func* foo(...): may yield N >= 0 values, then returns.                   *)
   | PROTO_plus  (* func+ foo(...): yields N > 0 values then returns.                        *)
 ;;
 
 type name_component =
-    COMP_string of string
-  | COMP_tupidx of int
+    COMP_ident of ident
+  | COMP_idx of int
 ;;
 
 type name = 
-   {
-   name_base: string;
-   name_rest: name_component array;
+    {
+     name_base: ident;
+     name_rest: name_component array;
    }
 ;;
 
 type ty = 
-    {
-     ty_form: form,
-     ty_state: state
-   }
-
-and form = 
     TY_dyn
   | TY_type
 
@@ -98,41 +98,47 @@ and form =
   | TY_quote of ty_quote
 
   | TY_named of name
+
   | TY_abstr of (ty * ty_abstr array)
   | TY_apply of (ty * ty array)
+  | TY_constrained of (ty * state)
 
   | TY_lim of ty
 	
 and ty_abstr = 
     { 
-      abstr_name: string;
+      abstr_name: ident;
       abstr_lim: bool
     }
 	  
-(* Slots can have a mode qualifier put on them: exterior or alias.
- * If there is no qualifier, the slot is interior. *)
+(* Slots can have an smode qualifier put on them: exterior or alias.
+ * If there is no qualifier, the slot is interior. Slots acquire an
+ * implicit state from their type, but can also have an explicit state
+ * stuck on them. *)
 
 and slot = 
     { 
-      slot_mode: slot_mode;
+      slot_const: bool;
+      slot_smode: smode;
       slot_ty: ty;
       slot_ident: ident;
+      slot_state: state;
     }
 
-and slot_mode = 
-    SLOT_exterior
-  | SLOT_interior
-  | SLOT_alias
+and smode = 
+    SMODE_exterior
+  | SMODE_interior
+  | SMODE_alias
 
 (* 
- * In closed type terms a predicate in the state may refer to
+ * In closed type terms a constraint in the state may refer to
  * components of the term by anchoring off the "formal symbol" '*',
  * which represents "the term this state is attached to". 
  * 
  * 
  * For example, if I have a tuple type (int,int),
  * I may wish to enforce the lt predicate on it;
- * I can write this as a closed type term like:
+ * I can write this as a constrained type term like:
  * 
  * ( int, int ) : lt( *.#0, *.#1 )
  * 
@@ -148,23 +154,23 @@ and slot_mode =
  * 
  *)      
 
-and parg_base = 
+and carg_base = 
     BASE_formal 
-  | BASE_free of string
+  | BASE_named of ident
 
-and parg =
+and carg =
     {
-      parg_base: parg_base;
-      parg_rest: name_component array;
+      carg_base: carg_base;
+      carg_rest: name_component array;
     }
 
-and pred = 
+and constr = 
     { 
-      pred_name: name;
-      pred_args: parg array;
+      constr_name: name;
+      constr_args: carg array;
     }
       
-and state = pred array
+and state = constr array
 
 and ty_rec = 
     { 
@@ -174,7 +180,7 @@ and ty_rec =
 
 and rec_slot = 
     { 
-      rec_slot_name: string;
+      rec_slot_ident: ident;
       rec_slot_type: slot;
       rec_slot_state: state;
     }
@@ -183,7 +189,7 @@ and ty_alt = alt_case array
 
 and alt_case = 
     { 
-      alt_case_name: string;
+      alt_case_name: ident;
       alt_case_rec: ty_rec option;
     }
 
@@ -206,18 +212,26 @@ and ty_func =
       func_sig: ty_sig; 
     }
 
-and param_mode = 
-    PARAM_copy
-  | PARAM_move_in
-  | PARAM_move_in_out
+and pmode = 
+    PMODE_copy
+  | PMODE_move_in
+  | PMODE_move_out
+  | PMODE_move_in_out
 
 and ty_sig = 
     { 
       sig_proto: proto;
+
+      sig_param_smodes: smode array;
       sig_param_types: ty array;
-      sig_param_modes: param_mode array;
-      sig_param_state: state;
+      sig_param_pmodes: pmode array;
+
+      sig_invoke_state: state;
+
+      sig_result_smode: smode;
       sig_result_ty: ty;
+      sig_result_pmode: pmode;
+
     }
 
 and ty_pred = 
@@ -245,12 +259,12 @@ and stmt =
   | STMT_try of stmt_try
   | STMT_yield of (expr option * pos)
   | STMT_return of (expr * pos)
-  | STMT_assert of (pred * pos)
+  | STMT_assert of (constr * pos)
   | STMT_block of ((stmt array) * pos)
   | STMT_move of (lval * lval)
   | STMT_copy of (lval * expr)
-  | STMT_call of (lval * expr)
-  | STMT_send of (lval * expr) (* Async call *)
+  | STMT_call of (lval * (expr array))
+  | STMT_send of (lval * (expr array)) (* Async call *)
   | STMT_decl of decl
 
 and stmt_while = 
@@ -296,9 +310,9 @@ and expr =
     EXPR_literal of (lit * pos)
   | EXPR_binary of (binop * pos * expr * expr)
   | EXPR_unary of (unop * pos * expr)
-  | EXPR_tuple of (expr array * pos)
-  | EXPR_lval of lval
-  | EXPR_call of (lval * expr)
+  | EXPR_lval of (lval * pos)
+  | EXPR_call of (lval * pos * (expr array))
+  | EXPR_new of (ty * pos * (expr array))
 
 and radix = HEX | DEC | BIN
 
@@ -336,7 +350,7 @@ and lidx =
 
 and lval = 
     {
-     lval_base: string;
+     lval_base: ident;
      lval_rest: lidx array;
     }
 
@@ -368,25 +382,25 @@ and unop =
 
 and decl = 
     { 
-      decl_name: string;
+      decl_ident: ident;
       decl_pos: pos;
       decl_artifact: artifact;
     }
 
 and artifact = 
     ARTIFACT_type of ty
-  | ARTIFACT_code of (ty * code)
+  | ARTIFACT_code of code
   | ARTIFACT_slot of (slot * (expr option))
 
 and code = 
     CODE_prog of prog
-  | CODE_func of func
+  | CODE_func of (ty_func * func)
   | CODE_port of port
 
 and bind = 
     {
      bind_ty: ty_sig;
-     bind_names: string array;
+     bind_idents: ident array;
    }
 
 and func = 
@@ -397,7 +411,7 @@ and func =
    }
 
 and fbody = 
-    FBODY_native of string
+    FBODY_native of ident
   | FBODY_stmt of stmt
 
 and port = 

@@ -14,8 +14,8 @@ let arr ls = Array.of_list ls
 
 let fmt_nc out nc =
   match nc with 
-    COMP_string s -> Printf.fprintf out "%s" s
-  | COMP_tupidx i -> Printf.fprintf out "%d" i
+    COMP_ident s -> Printf.fprintf out "%s" s
+  | COMP_idx i -> Printf.fprintf out "%d" i
 ;;
 
 let fmt_val out lit = 
@@ -65,42 +65,6 @@ let fmt_unop out op =
       UNOP_not -> "!")
 ;;
 
-let rec fmt_expr out e = 
-  match e with
-    EXPR_binary (op, _, lhs, rhs) -> 
-      Printf.fprintf out "(%a)%a(%a)" fmt_binop op fmt_expr lhs fmt_expr rhs
-  | EXPR_unary (op, _, e2) -> 
-      Printf.fprintf out "%a(%a)" fmt_unop op fmt_expr e2	
-  | EXPR_literal (lv,_) -> fmt_lit out lv
-  | EXPR_lval lv -> fmt_lval out lv
-  | EXPR_tuple (es,_) -> 
-      (output_string out "(";
-       Array.iteri 
-	 (fun i x -> 
-	   if i != 0 then output_string out ", " else (); 
-	   fmt_expr out x) es;
-       output_string out ")")
-	
-  | EXPR_call (lv, args) -> 
-      fmt_lval out lv;
-      fmt_expr out args
-
-and fmt_lval out lv = 
-  output_string out lv.lval_base;
-  Array.iter 
-    (fun x -> match x with 
-      LIDX_named (nc, _) -> (Printf.fprintf out ".%a" fmt_nc nc)
-    | LIDX_index e -> (Printf.fprintf out ".(%a)" fmt_expr e))
-    lv.lval_rest
-;;
-
-
-let fmt_name out n = 
-  output_string out n.name_base;
-  Array.iter (fun c -> Printf.fprintf out ".%a" fmt_nc c) n.name_rest
-;;
-
-
 let ty_mach_prefix m = 
   match m with 
     TY_unsigned -> 'u'
@@ -117,6 +81,11 @@ let ty_arith_name n =
   | TY_rat -> "rat"
 ;;
 
+
+let fmt_name out n = 
+  output_string out n.name_base;
+  Array.iter (fun c -> Printf.fprintf out ".%a" fmt_nc c) n.name_rest
+;;
 
 let rec fmt_type out t = 
   match t with 
@@ -146,8 +115,50 @@ let rec fmt_type out t =
   | TY_named n -> fmt_name out n 
   | TY_abstr (ty, params) -> output_string out "(abstr ...)"
   | TY_apply (ty, args) -> output_string out "(apply ...)"
+	
+  | TY_constrained (ty, _) -> (output_string out "(";
+			       fmt_type out ty;
+			       output_string out ": ...state)" )
 
   | TY_lim t -> Printf.fprintf out "(lim %a)" fmt_type t
+;;
+
+
+let rec fmt_expr out e = 
+  match e with
+    EXPR_binary (op, _, lhs, rhs) -> 
+      Printf.fprintf out "(%a)%a(%a)" fmt_binop op fmt_expr lhs fmt_expr rhs
+  | EXPR_unary (op, _, e2) -> 
+      Printf.fprintf out "%a(%a)" fmt_unop op fmt_expr e2	
+  | EXPR_literal (lit, _) -> 
+      fmt_lit out lit
+  | EXPR_lval (lv, _) -> 
+      fmt_lval out lv	
+  | EXPR_call (lv, _, args) -> 
+      fmt_lval out lv;
+      fmt_exprs out args;
+  | EXPR_new (ty, _, args) -> 
+      output_string out "new ";
+      fmt_type out ty;      
+      fmt_exprs out args
+
+
+and fmt_exprs out exprs = 
+  output_string out "(";
+  Array.iteri 
+    (fun i x -> 
+      if i != 0 then output_string out ", " else (); 
+      fmt_expr out x) exprs;
+  output_string out ")"
+  
+
+and fmt_lval out lv = 
+  output_string out lv.lval_base;
+  Array.iter 
+    (fun x -> match x with 
+      LIDX_named (nc, _) -> (Printf.fprintf out ".%a" fmt_nc nc)
+    | LIDX_index e -> (Printf.fprintf out ".(%a)" fmt_expr e))
+    lv.lval_rest
 ;;
 
 
@@ -164,9 +175,9 @@ let fmt_op out op =
   | OP_unop op -> Printf.fprintf out "UNOP (%a)" fmt_unop op
   | OP_pop -> output_string out "POP"
 
-  | OP_copy_lval lv -> Printf.fprintf out "COPY %a" fmt_lval lv
-  | OP_move_lval lv -> Printf.fprintf out "MOVE %a" fmt_lval lv
-  | OP_store_lval lv -> Printf.fprintf out "STORE %a" fmt_lval lv
+  | OP_copy -> output_string out "COPY"
+  | OP_move -> output_string out "MOVE"
+  | OP_store -> output_string out "STORE"
 
   | OP_enter_scope -> output_string out "ENTER_SCOPE"
   | OP_alloc_local s -> Printf.fprintf out "ALLOC_LOCAL %s" s
@@ -179,6 +190,7 @@ let fmt_op out op =
   | OP_jump (JMP_direct, Some addr) -> Printf.fprintf out "JUMP %d" addr
   | OP_jump (_,None) -> Printf.fprintf out "<unpatched [C]JUMP>"
   | OP_call -> output_string out "CALL"
+  | OP_new -> output_string out "NEW"
   | OP_return -> output_string out "RETURN"
   | OP_yield -> output_string out "YIELD"
 
@@ -252,15 +264,18 @@ let ty_mach_of_lit_mach lm =
 
 let val_of_literal lit = 
   match lit with
-    LIT_str s -> (TY_str, VAL_str s)
-  | LIT_char c -> (TY_char, VAL_char c)
-  | LIT_bool b -> (TY_bool, VAL_bool b)
-  | LIT_mach m -> (TY_mach (ty_mach_of_lit_mach m), VAL_mach (val_mach_of_lit_mach m))
-  | LIT_arith (_, _, n) -> (TY_arith (Ll1parser.numty n), VAL_arith n)
+    LIT_str s -> { rv_type = TY_str; rv_val = VAL_str s }
+  | LIT_char c -> { rv_type = TY_char; rv_val = VAL_char c }
+  | LIT_bool b -> { rv_type = TY_bool; rv_val = VAL_bool b }
+  | LIT_mach m -> { rv_type = TY_mach (ty_mach_of_lit_mach m);
+		    rv_val = VAL_mach (val_mach_of_lit_mach m) }
+  | LIT_arith (_, _, n) -> 
+      { rv_type = (TY_arith (Ll1parser.numty n));
+	rv_val = VAL_arith n }
   | _ -> raise (Interp_err "unhandled literal in val_of_literal")
 
 
-let rec emit_expr emit e = 
+let rec emit_expr_full deref_lvals emit e = 
   match e with 
     EXPR_binary (op, pos, e1, e2) -> 
       emit_expr emit e1;
@@ -275,19 +290,28 @@ let rec emit_expr emit e =
 
   | EXPR_literal (v, pos) -> 
       emit_op emit (OP_pos pos);
-      emit_op emit (OP_push (VAL_dyn (val_of_literal v)))
+      emit_op emit (OP_push (RVAL (val_of_literal v)))
 
-  | EXPR_tuple (es, pos) -> 
+  | EXPR_lval (lv, pos) -> 
       emit_op emit (OP_pos pos);
-      Array.iter (emit_expr emit) es
+      emit_op emit (OP_push (LVAL lv));
+      if deref_lvals
+      then emit_op emit (OP_copy)
+      else ()
 
-  | EXPR_lval lv -> 
-      emit_op emit (OP_copy_lval lv)
+  | EXPR_call (lv, _, args) -> 
+      Array.iter (emit_expr_full false emit) args;
+      emit_op emit (OP_push (LVAL lv));
+      emit_op emit (OP_copy);
+      emit_op emit (OP_call)
 
-  | EXPR_call (lv, arg) -> 
-      emit_expr emit arg;
-      emit_op emit (OP_copy_lval lv);
-      emit_op emit (OP_call);
+  | EXPR_new (ty, pos, args) -> 
+      Array.iter (emit_expr_full false emit) args;
+      emit_op emit (OP_push (RVAL { rv_type = TY_type;
+				    rv_val = VAL_type ty }));
+      emit_op emit (OP_new)
+	
+and emit_expr emit e = emit_expr_full true emit e
 ;;
 
 
@@ -330,23 +354,38 @@ let rec emit_stmt emit stmt =
       Array.iter (emit_stmt emit) stmts;
       emit_op emit (OP_exit_scope)
 
-  | STMT_move (lv2, lv1) -> 
-      emit_op emit (OP_move_lval lv1);
-      emit_op emit (OP_store_lval lv2)
+  | STMT_move (dst, src) -> 
+      emit_op emit (OP_push (LVAL dst));
+      emit_op emit (OP_push (LVAL src));
+      emit_op emit (OP_move);
+      emit_op emit (OP_store)
 
   | STMT_copy (lv, e) -> 
+      emit_op emit (OP_push (LVAL lv));
       emit_expr emit e;
-      emit_op emit (OP_store_lval lv)
+      emit_op emit (OP_store)
 	
-  | STMT_call (lv, arg) -> 
-      emit_expr emit arg;
-      emit_op emit (OP_copy_lval lv);
-      emit_op emit (OP_call);
-      emit_op emit (OP_pop)
+  | STMT_call (lv, args) -> 
+      Array.iter (emit_expr_full false emit) args;
+      emit_op emit (OP_push (LVAL lv));
+      emit_op emit (OP_copy);
+      emit_op emit (OP_call)
 
   | STMT_decl decl -> 
-      emit_op emit (OP_alloc_local decl.decl_name)
+      emit_op emit (OP_pos decl.decl_pos);
+      emit_op emit (OP_alloc_local decl.decl_ident);
+      emit_op emit (OP_push (LVAL { lval_base = decl.decl_ident;
+				    lval_rest = arr [] }));	  
+      (match decl.decl_artifact with
+	ARTIFACT_type ty -> 
+	  emit_op emit (OP_push (RVAL { rv_type = TY_type;
+					rv_val = VAL_type ty }))
+      | ARTIFACT_code (CODE_func (fty, func)) -> 
+	  emit_op emit (OP_push (RVAL { rv_type = TY_func fty;
+					rv_val = VAL_func func }))
+      | _ -> raise (Interp_err "cannot allocate ports yet"));
 
+      emit_op emit (OP_store)
 
   | STMT_try _
   | STMT_yield _
@@ -373,7 +412,7 @@ let check_args args bind =
   let param_types = bind.bind_ty.sig_param_types in
   let n_args = Array.length args in 
   let n_types = Array.length param_types in
-  let n_names = Array.length bind.bind_names in
+  let n_names = Array.length bind.bind_idents in
 
   (* Printf.printf "Checking %d args against %d types\n" n_args n_types; *)
 
@@ -387,25 +426,30 @@ let check_args args bind =
   do
     let arg = args.(i) in
     (match arg with 
-      VAL_dyn (t,_) -> 
+      LVAL _ -> raise (Interp_err "Lval argument")
+    | RVAL rv -> 
 	(* Printf.printf "checking arg type %d\n" i; *)
-	if (not (types_equal t param_types.(i)))
+	if (not (types_equal rv.rv_type param_types.(i)))
 	then raise (Interp_err "Bad argument type"));
   done
 ;;
 
 
-let bind_args env args bind =
+let bind_args (env:(Ast.ident, Val.rv option) Hashtbl.t) args bind =
   check_args args bind;
   let n_args = Array.length args in 
-  let n_names = Array.length bind.bind_names in
+  let n_names = Array.length bind.bind_idents in
 
   (* Printf.printf "Binding %d args to %d parameters\n" n_args n_names; *)
   
   for i = 0 to n_args - 1 
   do
     let arg = args.(i) in
-    Hashtbl.add env bind.bind_names.(i) (Some arg)
+    let arg' = match arg with 
+      RVAL rv -> rv
+    | LVAL _ -> raise (Interp_err "cannot bind lvalue args yet")
+    in
+    Hashtbl.add env bind.bind_idents.(i) (Some arg')
   done
 ;;
 
@@ -424,7 +468,7 @@ let bind_and_enter_frame proc fflav sba block_stmt =
       frame_flavour = fflav;		
       frame_scope = [];
       frame_scope_stack = Stack.create ();
-      frame_expr_stack = Stack.create ();
+      frame_eval_stack = Stack.create ();
     }
   in
   proc.proc_frames <- (frame :: proc.proc_frames);
@@ -437,8 +481,12 @@ let bind_and_enter_frame proc fflav sba block_stmt =
 let exec_unop op stk =
   let top = Stack.pop stk in
   match (op, top) with 
-    (UNOP_not, VAL_dyn (TY_bool, VAL_bool b)) -> 
-      Stack.push (VAL_dyn (TY_bool, VAL_bool (not b))) stk
+    (UNOP_not, 
+     RVAL { rv_type = TY_bool;
+	    rv_val = VAL_bool b }) -> 
+	      
+     Stack.push (RVAL { rv_type = TY_bool;
+			rv_val = VAL_bool (not b)}) stk
   | _ -> raise (Interp_err "unknown unary operator or operand")
 ;;
 
@@ -446,18 +494,21 @@ let exec_unop op stk =
 let exec_binop op stk =
   let rhs = Stack.pop stk in
   let lhs = Stack.pop stk in
-  let push_bool b = Stack.push (VAL_dyn (TY_bool, VAL_bool b)) stk in
+  let push_bool b = 
+    Stack.push (RVAL { rv_type = TY_bool;
+		       rv_val = VAL_bool b }) stk in
   let push_num n = 
     let nty = 
       match n with 
 	Num.Ratio _ -> TY_rat
       | _           -> TY_int
     in
-    Stack.push (VAL_dyn (TY_arith nty, VAL_arith n)) stk
+    Stack.push (RVAL { rv_type = TY_arith nty;
+		       rv_val = VAL_arith n }) stk
   in
   match (lhs,rhs) with 
-    (VAL_dyn (TY_bool, VAL_bool lb),
-     VAL_dyn (TY_bool, VAL_bool rb)) -> 
+    (RVAL { rv_type=TY_bool; rv_val=VAL_bool lb },
+     RVAL { rv_type=TY_bool; rv_val=VAL_bool rb }) -> 
        let res = 
 	 (match op with 
 	   BINOP_or -> lb || rb
@@ -474,8 +525,8 @@ let exec_binop op stk =
 	 )
        in
        push_bool res
-  | (VAL_dyn (TY_arith _, VAL_arith ln),
-     VAL_dyn (TY_arith _, VAL_arith rn)) -> 
+  | (RVAL { rv_type=TY_arith _; rv_val=VAL_arith ln },
+     RVAL { rv_type=TY_arith _; rv_val=VAL_arith rn }) -> 
        (match op with 
 	 BINOP_add -> push_num (Num.add_num ln rn)
        | BINOP_sub -> push_num (Num.sub_num ln rn)
@@ -499,8 +550,8 @@ let exec_binop op stk =
 
 let exec_op proc op = 
   let frame = List.hd proc.proc_frames in 
-  let stk = frame.frame_expr_stack in
-  let trueval = (VAL_dyn (TY_bool, VAL_bool false)) in
+  let stk = frame.frame_eval_stack in
+  let trueval = (RVAL { rv_type = TY_bool; rv_val = VAL_bool false }) in
 
   match op with 
     OP_push v -> Stack.push v stk
@@ -508,26 +559,32 @@ let exec_op proc op =
   | OP_unop op -> exec_unop op stk
   | OP_pop -> let _ = Stack.pop stk in ()
 	
-  | OP_copy_lval lv 
-  | OP_move_lval lv -> 
-      if Array.length lv.lval_rest != 0 
-      then raise (Interp_err "cannot handle complex lvals yet")
-      else	  
-	let ov = Hashtbl.find proc.proc_env lv.lval_base in
-	(match ov with 
-	  Some v -> Stack.push v stk
-	| None -> raise (Interp_err "extracting undefined value"));
-	(match op with 
-	  OP_move_lval _ -> 
-	    Hashtbl.replace proc.proc_env lv.lval_base None
-	| _ -> ())
+  | OP_copy 
+  | OP_move -> 
+      let r = Stack.pop stk in
+      (match r with 
+	RVAL _ -> raise (Interp_err "reading from rval")
+      | LVAL lv -> 
+	  if Array.length lv.lval_rest != 0 
+	  then raise (Interp_err "cannot handle complex lvals yet")
+	  else	  
+	    let rvo = Hashtbl.find proc.proc_env lv.lval_base in
+	    (match rvo with 
+	      Some rv -> Stack.push (RVAL rv) stk
+	    | None -> raise (Interp_err "extracting undefined value"));
+	    (if op = OP_move 
+	    then Hashtbl.replace proc.proc_env lv.lval_base None
+	    else ()))
 	  
-  | OP_store_lval lv -> 
-      if Array.length lv.lval_rest != 0 
-      then raise (Interp_err "cannot handle complex lvals yet")
-      else	  
-	let v = Stack.pop stk in
-	Hashtbl.add proc.proc_env lv.lval_base (Some v)
+  | OP_store -> 
+      let src = Stack.pop stk in
+      let dst = Stack.pop stk in
+      (match (src, dst) with
+	(RVAL rv, LVAL lv) -> 
+	  if Array.length lv.lval_rest != 0 
+	  then raise (Interp_err "cannot handle complex lvals yet")
+	  else Hashtbl.add proc.proc_env lv.lval_base (Some rv)
+      | _ -> raise (Interp_err "bad operand combination to store"))
 	  
   | OP_enter_scope -> 
       Stack.push frame.frame_scope frame.frame_scope_stack;
@@ -551,8 +608,8 @@ let exec_op proc op =
 	  proc.proc_pos <- p)
 	
   | OP_jump (JMP_conditional, Some addr) -> 
-      (match (Stack.pop frame.frame_expr_stack) with 
-	(VAL_dyn (_, VAL_bool b)) -> 
+      (match (Stack.pop frame.frame_eval_stack) with 
+	(RVAL { rv_type=TY_bool; rv_val=VAL_bool b }) -> 
 	  if b 
 	  then (frame.frame_pc <- addr; proc.proc_jumped <- true)
       | _ -> raise (Interp_err "conditional jump on non-boolean value"))
@@ -564,14 +621,14 @@ let exec_op proc op =
       raise (Interp_err "executing unpatched jump")
 	
   | OP_call -> 
-      (match (Stack.pop frame.frame_expr_stack) with 
-	(VAL_dyn (_, VAL_func func)) -> 
+      (match (Stack.pop frame.frame_eval_stack) with 
+	(RVAL { rv_type=_; rv_val=(VAL_func func) }) -> 
 	  let isig = func.func_bind.bind_ty in
 	  let nargs = Array.length (isig.sig_param_types) in 
 	  let args = Array.create nargs trueval in
 	  for i = (nargs - 1) downto 0 
 	  do 
-	    args.(i) <- Stack.pop frame.frame_expr_stack
+	    args.(i) <- Stack.pop frame.frame_eval_stack
 	  done;
 	  let sba = Some (func.func_bind, args) in
 	  (match func.func_body with 
@@ -595,9 +652,10 @@ let exec_op proc op =
       done;
       proc.proc_frames <- List.tl proc.proc_frames;
       (match proc.proc_frames with 
-	x :: _ -> Stack.push trueval x.frame_expr_stack
+	x :: _ -> Stack.push trueval x.frame_eval_stack
       | _ -> ())
 	  
+  | OP_new -> raise (Interp_err "cannot new yet")
   | OP_yield -> raise (Interp_err "cannot yield yet")
   | OP_send -> raise (Interp_err "cannot send yet")
   | OP_bad -> raise (Interp_err "executing bad instruction")
@@ -608,13 +666,15 @@ let bind_decl decl env =
   (* Printf.printf "binding decl of '%s'\n" decl.decl_name; *)
   let bv = 
     match decl.decl_artifact with
-      ARTIFACT_code (ty, (CODE_func f)) -> Some (VAL_dyn (ty, VAL_func f))
+      ARTIFACT_code (CODE_func (ty, f)) -> 
+	Some { rv_type = TY_func ty;
+	       rv_val = VAL_func f }
     | ARTIFACT_slot (_, None) -> None
     | ARTIFACT_slot (_, Some (EXPR_literal (lit, _))) -> 
-	Some (VAL_dyn (val_of_literal lit))
+	Some (val_of_literal lit)
     | _ ->  raise (Interp_err "bad binding")
   in
-  Hashtbl.add env decl.decl_name bv
+  Hashtbl.add env decl.decl_ident bv
   
 ;;
 
@@ -701,7 +761,7 @@ let find_entry_prog sf entry_name =
   match binding with 
     (VIS_public, d) -> 
       (match d.decl_artifact with
-	ARTIFACT_code (_, (CODE_prog prog)) -> prog
+	ARTIFACT_code (CODE_prog prog) -> prog
       | _ -> raise (Interp_err ("cannot find 'pub prog " ^ entry_name ^ "'")))
   | _ -> raise (Interp_err ("cannot find 'pub " ^ entry_name ^ "'"))
 ;;
@@ -709,11 +769,11 @@ let find_entry_prog sf entry_name =
 
 let init_runtime = 
   let t = TY_named { name_base = "sys";
-		     name_rest = Array.of_list [COMP_string "rt"] }
+		     name_rest = Array.of_list [COMP_ident "rt"] }
   in
   let v = VAL_rec ( Hashtbl.create 0 )
   in
-  VAL_dyn (t,v)
+  RVAL { rv_type=t; rv_val=v }
 ;;
 
 
@@ -721,7 +781,7 @@ let init_argv =
   let t = TY_vec { vec_elt_type = TY_str; 
 		   vec_elt_state = Array.of_list []} in
   let v = VAL_vec (Array.of_list []) in
-  VAL_dyn (t,v)
+  RVAL { rv_type=t; rv_val=v }
 ;;
 
 
@@ -733,13 +793,13 @@ let bind_std_natives proc =
   let reg name fn = Hashtbl.add proc.proc_natives name fn in 
   let getstr v = 
     (match v with 
-      VAL_dyn (_,VAL_str s) -> s
+      RVAL { rv_type=_; rv_val=VAL_str s } -> s
     | _ -> raise (Interp_err "expected string arg"))
   in
   let getint v = 
     (match v with 
-      VAL_dyn (_,VAL_arith n) -> n
-    | _ -> raise (Interp_err "expected string arg"))
+      RVAL { rv_type=_; rv_val=VAL_arith n } -> n
+    | _ -> raise (Interp_err "expected arith arg"))
   in
   reg "putstr" (fun p args -> print_string (getstr args.(0)));
   reg "putint" (fun p args -> print_string (Num.string_of_num (getint args.(0))))
