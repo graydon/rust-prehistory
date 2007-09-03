@@ -77,6 +77,7 @@ type ty =
     TY_dyn
   | TY_type
 
+  | TY_nil
   | TY_bool
   | TY_mach of (ty_mach * int)
   | TY_arith of ty_arith

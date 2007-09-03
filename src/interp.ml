@@ -92,6 +92,7 @@ let rec fmt_type out t =
     TY_dyn -> output_string out "dyn"
   | TY_type -> output_string out "type"
 
+  | TY_nil -> output_string out "nil"
   | TY_bool -> output_string out "bool"
   | TY_mach (m,n) -> Printf.fprintf out "%c%d" (ty_mach_prefix m) n
   | TY_arith a -> output_string out (ty_arith_name a)
@@ -621,6 +622,7 @@ let exec_op proc op =
       raise (Interp_err "executing unpatched jump")
 	
   | OP_call -> 
+      Printf.printf "calling\n";
       (match (Stack.pop frame.frame_eval_stack) with 
 	(RVAL { rv_type=_; rv_val=(VAL_func func) }) -> 
 	  let isig = func.func_bind.bind_ty in
@@ -644,6 +646,7 @@ let exec_op proc op =
       | _ -> raise (Interp_err "calling non-function"))
 	
   | OP_return -> 
+      Printf.printf "returning\n";
       List.iter (fun x -> Hashtbl.remove proc.proc_env x) frame.frame_scope;
       while not (Stack.is_empty frame.frame_scope_stack)
       do
@@ -739,7 +742,7 @@ let step_proc p =
   | PROC_INIT 
   | PROC_FINI -> 
       let f = List.hd p.proc_frames in
-      (* Printf.printf "(pc=%d)\n" f.frame_pc; *)
+      Printf.printf "(pc=%d)\n" f.frame_pc;
       if (f.frame_pc >= Array.length f.frame_ops)
       then exec_op p OP_return
       else exec_op p f.frame_ops.(f.frame_pc);

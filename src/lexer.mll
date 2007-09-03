@@ -115,11 +115,12 @@ rule token = parse
 | ':'                          { COLON      }
 | "<-"                         { LARROW     }
 | "->"                         { RARROW     }
-| "()"                         { NIL        }
 | '('                          { LPAREN     }
 | ')'                          { RPAREN     }
 | '['                          { LBRACKET   }
 | ']'                          { RBRACKET   }
+
+| "nil"                        { NIL        }
 
 | "func"                       { FUNC      }
 | "func?"                      { FUNC_QUES }
@@ -153,7 +154,7 @@ rule token = parse
 			 	    Not_found -> IDENT (i)  
 				}
 
-| ('#' ['0' - '9']+) as s       { TUPIDX (int_of_string s)                       }
+| ('#' ['0' - '9']+) as s       { IDX (int_of_string s)                          }
 | bin as n                      { LIT_BIN (Num.num_of_int (int_of_string n))     }
 | hex as n                      { LIT_HEX (Num.num_of_int (int_of_string n))     }
 | dec as d                      { LIT_DEC (Num.num_of_string d)                  }

@@ -248,7 +248,7 @@ let string_of_tok t =
   | IDX i   -> ("#" ^ (string_of_int i))
 
   (* Reserved type names *)
-  | NIL        -> "()"
+  | NIL        -> "nil"
   | BOOL       -> "bool"
   | INT        -> "int"
   | NAT        -> "nat"
@@ -324,7 +324,11 @@ let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
 
 
 let peek ps = 
-  (Printf.printf "peeking at: %s\n" (string_of_tok ps.pstate_peek);
+  (Printf.printf "peeking at: %s     // %s\n" 
+     (string_of_tok ps.pstate_peek)
+     (match ps.pstate_ctxt with
+       (s, _) :: _ -> s
+     | _ -> "<empty>");
    ps.pstate_peek)
 
 ;;
@@ -375,24 +379,17 @@ let arl ls = Array.of_list (List.rev ls)
 
 (* Parser combinators *)
 
-let separated_by needOne sep rule ps =
-  let accum = 
-    if needOne
-    then 
-      let init = rule ps
-      in ref [init] 
-    else 
-      ref []
-  in
+let one_or_more sep rule ps = 
+  let accum = ref [rule ps] in
   while peek ps == sep
-  do
+  do 
     bump ps;
     accum := (rule ps) :: !accum
   done;
   arl !accum
 ;;
 
-let bracketed_seq_nosep needOne bra ket rule ps =
+let bracketed_seq needOne bra ket sepOpt rule ps =
   expect ps bra;
   let accum = 
     if needOne
@@ -404,6 +401,12 @@ let bracketed_seq_nosep needOne bra ket rule ps =
   in
   while peek ps != ket
   do
+    (match sepOpt with 
+      None -> ()
+    | Some tok -> 
+	if !accum = []
+	then () 
+	else expect ps tok);    
     accum := (rule ps) :: !accum
   done;
   expect ps ket;
@@ -411,29 +414,30 @@ let bracketed_seq_nosep needOne bra ket rule ps =
 ;;
 
 
-let bracketed_zero_or_more_nosep bra ket rule ps =
-  bracketed_seq_nosep false bra ket rule ps
+let path sep rule ps = 
+  let accum = ref [] in
+  while peek ps == sep
+  do
+    expect ps sep;
+    accum := (ctxt "path" rule ps) :: !accum
+  done;
+  arl !accum
+;;
+  
+
+let bracketed_zero_or_more bra ket sepOpt rule ps =
+  bracketed_seq false bra ket sepOpt (ctxt "bracketed_seq_nosep" rule) ps
 ;;
 
 
-let bracketed_one_or_more_nosep bra ket rule ps =
-  bracketed_seq_nosep true bra ket rule ps
-;;
-
-
-let zero_or_more sep rule ps =
-  separated_by false sep rule ps
-;;
-
-
-let one_or_more sep rule ps = 
-  separated_by true sep rule ps
+let bracketed_one_or_more bra ket sepOpt rule ps =
+  bracketed_seq true bra ket sepOpt (ctxt "bracketed_one_or_more_nosep" rule) ps
 ;;
 
 
 let bracketed bra ket rule ps =
   expect ps bra;
-  let res = rule ps in
+  let res = ctxt "bracketed" rule ps in
   expect ps ket;
   res
 
@@ -474,13 +478,7 @@ let parse_name_component ps =
 
 let parse_name ps = 
   let base = ctxt "name: base" parse_ident ps in
-  let rest = 
-    match peek ps with 
-      DOT -> (bump ps; 
-	      ctxt "name: rest" 
-		(zero_or_more DOT parse_name_component) ps)
-    | _ -> arr []
-  in
+  let rest = ctxt "name: rest" (path DOT parse_name_component) ps in
   { Ast.name_base = base;
     Ast.name_rest = rest }
 ;;
@@ -501,8 +499,7 @@ let parse_carg ps =
     | IDENT str -> Ast.BASE_named str
     | _ -> raise (unexpected ps)
   in
-  let rest = ctxt "carg: rest" 
-      (zero_or_more DOT parse_name_component) ps in
+  let rest = ctxt "carg: rest" (path DOT parse_name_component) ps in
   { 
     Ast.carg_base = base;
     Ast.carg_rest = rest;
@@ -519,8 +516,9 @@ let parse_constraint ps =
       let n = ctxt "constraint: name" parse_name ps in
       let 
 	  args = ctxt "constraint: args" 
-	  (bracketed LPAREN RPAREN
-	     (zero_or_more COMMA parse_carg)) ps
+	  (bracketed_zero_or_more 
+	     LPAREN RPAREN (Some COMMA) 
+	     parse_carg) ps
       in
       { Ast.constr_name = n;
 	Ast.constr_args = args }
@@ -531,6 +529,7 @@ let parse_constraint ps =
 let parse_state ps = 
   match peek ps with
     COLON -> 
+      bump ps;
       ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps
   | _ -> arr []
 ;;
@@ -565,6 +564,10 @@ let rec parse_base_ty ps =
   | CHAR -> 
       bump ps; 
       Ast.TY_char
+
+  | NIL -> 
+      bump ps;
+      Ast.TY_nil
 
   | _ -> raise (unexpected ps)
 
@@ -612,21 +615,16 @@ let rec parse_lidx ps =
   | _ -> raise (unexpected ps)
 
 
-and parse_lval ps base pos =
-  let rest = 
-    match peek ps with 
-      DOT -> (bump ps; 
-	      ctxt "lval: rest" 
-		(zero_or_more DOT parse_lidx) ps)
-    | _ -> arr []
-  in
+and parse_lval ps =
+  let base = (ctxt "lval: base" parse_ident ps) in
+  let rest = ctxt "lval: rest" (path DOT parse_lidx) ps in
   { Ast.lval_base = base;
     Ast.lval_rest = rest }
-
+    
 
 and parse_expr_list ps = 
-  (bracketed LPAREN RPAREN
-     (zero_or_more COMMA parse_expr)) ps 
+  bracketed_zero_or_more LPAREN RPAREN (Some COMMA) 
+    (ctxt "expr list" parse_expr) ps
 
 
 and parse_ATOMIC_expr ps =
@@ -662,10 +660,9 @@ and parse_ATOMIC_expr ps =
       Ast.EXPR_literal 
 	(Ast.LIT_char ch, pos)
 
-  | IDENT str -> 
-      bump ps;
+  | IDENT _ -> 
       let pos = lexpos ps in
-      let lval = parse_lval ps str pos in
+      let lval = parse_lval ps in
       (match peek ps with 
 	LPAREN -> 
 	  let args = ctxt "call: args" parse_expr_list ps in
@@ -771,7 +768,7 @@ and parse_block ps =
   let pos = lexpos ps in
   let 
       stmts = ctxt "block: stmts" 
-      (bracketed_zero_or_more_nosep LBRACE RBRACE parse_stmt) ps
+      (bracketed_zero_or_more LBRACE RBRACE None (ctxt "block: stmt" parse_stmt)) ps
   in
   Ast.STMT_block (stmts, pos)
 
@@ -833,9 +830,8 @@ and parse_stmt ps =
       Ast.STMT_decl decl
 
 
-  | IDENT str ->       
-      let pos = lexpos ps in      
-      let lval = ctxt "stmt: lval" parse_lval ps str pos in
+  | IDENT _ ->
+      let lval = ctxt "stmt: lval" parse_lval ps in
       (match peek ps with 
 	
 	LPAREN -> 
@@ -850,10 +846,7 @@ and parse_stmt ps =
 	  Ast.STMT_copy (lval, e)
 
       | LARROW -> 
-	  bump ps;
-	  let pos = lexpos ps in      
-	  let base = ctxt "stmt: move rhs base" parse_ident ps in
-	  let rhs = ctxt "stmt: move rhs rest" parse_lval ps base pos in 
+	  let rhs = ctxt "stmt: move rhs rest" parse_lval ps in 
 	  expect ps SEMI;
 	  Ast.STMT_move (lval, rhs)
 
@@ -933,9 +926,11 @@ and parse_bind proto ps =
   in
   let istate = ctxt "bind: param state" parse_state ps in
 
-  let result_smode = ctxt "bind: smode" parse_smode ps in
-  let result_ty = ctxt "bind: param ty" parse_ty ps in
-  let result_pmode = ctxt "bind: param ty" parse_pmode ps in
+  expect ps RARROW;
+
+  let result_smode = ctxt "bind: result smode" parse_smode ps in
+  let result_ty = ctxt "bind: result ty" parse_ty ps in
+  let result_pmode = ctxt "bind: result pmode" parse_pmode ps in
     
   { Ast.bind_ty = 
     { Ast.sig_proto = proto;
