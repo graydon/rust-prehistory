@@ -18,9 +18,6 @@ let fmt_nc out nc =
   | COMP_idx i -> Printf.fprintf out "%d" i
 ;;
 
-let fmt_val out lit = 
-  Printf.fprintf out "val"
-
 let fmt_lit out lit = 
   match lit with 
     LIT_str s -> 
@@ -125,6 +122,13 @@ let rec fmt_type out t =
 ;;
 
 
+let fmt_res out r = 
+  match r with
+    LVAL lv -> Printf.fprintf out "lval:%s" lv.lval_base
+  | RVAL rv -> (Printf.fprintf out "rval:";
+		fmt_type out rv.rv_type)
+;;
+
 let rec fmt_expr out e = 
   match e with
     EXPR_binary (op, _, lhs, rhs) -> 
@@ -171,7 +175,7 @@ let fmt_jmp out j =
 
 let fmt_op out op = 
   match op with
-    OP_push v -> Printf.fprintf out "PUSH (%a)" fmt_val v
+    OP_push v -> Printf.fprintf out "PUSH (%a)" fmt_res v
   | OP_binop op -> Printf.fprintf out "BINOP (%a)" fmt_binop op
   | OP_unop op -> Printf.fprintf out "UNOP (%a)" fmt_unop op
   | OP_pop -> output_string out "POP"
@@ -409,48 +413,53 @@ let types_equal p q =
   p = q
 ;;
 
-let check_args args bind = 
+
+let load proc lv =
+  Printf.printf("loading from %s\n") lv.lval_base;
+  if Array.length lv.lval_rest != 0 
+  then raise (Interp_err "cannot handle complex lvals yet")
+  else Hashtbl.find proc.proc_env lv.lval_base
+;;
+
+let store proc lv rvo = 
+  Hashtbl.replace proc.proc_env lv.lval_base rvo
+;;
+
+let exec_load clear_slot proc res = 
+  let frame = List.hd proc.proc_frames in 
+  let stk = frame.frame_eval_stack in
+  match res with 
+    RVAL rv -> raise (Interp_err "loading from rval")
+  | LVAL lv -> 
+      (* FIXME: check for limitation on arg? *)      
+      (match load proc lv with 
+	Some rv -> Stack.push (RVAL rv) stk
+      | None -> raise (Interp_err "loading undefined value"));
+      if clear_slot
+      then store proc lv None
+      else ()
+;;
+
+  
+(* FIXME: we don't move anything *out* yet *)
+let bind_args (env:(Ast.ident, Val.rv option) Hashtbl.t) args bind =
+
   let param_types = bind.bind_ty.sig_param_types in
   let n_args = Array.length args in 
   let n_types = Array.length param_types in
   let n_names = Array.length bind.bind_idents in
 
-  (* Printf.printf "Checking %d args against %d types\n" n_args n_types; *)
-
-  if n_names != n_types then
-    raise (Interp_err "Inconsistent signature!");
-  
-  if n_args != n_types then 
-    raise (Interp_err "Bad number of args");
-  
-  for i = 0 to n_args - 1 
-  do
-    let arg = args.(i) in
-    (match arg with 
-      LVAL _ -> raise (Interp_err "Lval argument")
-    | RVAL rv -> 
-	(* Printf.printf "checking arg type %d\n" i; *)
-	if (not (types_equal rv.rv_type param_types.(i)))
-	then raise (Interp_err "Bad argument type"));
-  done
-;;
-
-
-let bind_args (env:(Ast.ident, Val.rv option) Hashtbl.t) args bind =
-  check_args args bind;
-  let n_args = Array.length args in 
-  let n_names = Array.length bind.bind_idents in
-
   (* Printf.printf "Binding %d args to %d parameters\n" n_args n_names; *)
   
   for i = 0 to n_args - 1 
-  do
+  do	
     let arg = args.(i) in
-    let arg' = match arg with 
-      RVAL rv -> rv
-    | LVAL _ -> raise (Interp_err "cannot bind lvalue args yet")
-    in
-    Hashtbl.add env bind.bind_idents.(i) (Some arg')
+    match arg with 
+      None -> ()
+    | Some rv -> 
+	if (not (types_equal rv.rv_type param_types.(i)))
+	then raise (Interp_err "Bad argument type");
+    Hashtbl.add env bind.bind_idents.(i) arg
   done
 ;;
 
@@ -552,7 +561,8 @@ let exec_binop op stk =
 let exec_op proc op = 
   let frame = List.hd proc.proc_frames in 
   let stk = frame.frame_eval_stack in
-  let trueval = (RVAL { rv_type = TY_bool; rv_val = VAL_bool false }) in
+  let trueval = { rv_type = TY_bool; rv_val = VAL_bool false } in
+  let trueres = (RVAL trueval) in
 
   match op with 
     OP_push v -> Stack.push v stk
@@ -560,22 +570,8 @@ let exec_op proc op =
   | OP_unop op -> exec_unop op stk
   | OP_pop -> let _ = Stack.pop stk in ()
 	
-  | OP_copy 
-  | OP_move -> 
-      let r = Stack.pop stk in
-      (match r with 
-	RVAL _ -> raise (Interp_err "reading from rval")
-      | LVAL lv -> 
-	  if Array.length lv.lval_rest != 0 
-	  then raise (Interp_err "cannot handle complex lvals yet")
-	  else	  
-	    let rvo = Hashtbl.find proc.proc_env lv.lval_base in
-	    (match rvo with 
-	      Some rv -> Stack.push (RVAL rv) stk
-	    | None -> raise (Interp_err "extracting undefined value"));
-	    (if op = OP_move 
-	    then Hashtbl.replace proc.proc_env lv.lval_base None
-	    else ()))
+  | OP_copy -> exec_load false proc (Stack.pop stk) 
+  | OP_move -> exec_load true proc (Stack.pop stk) 
 	  
   | OP_store -> 
       let src = Stack.pop stk in
@@ -627,10 +623,26 @@ let exec_op proc op =
 	(RVAL { rv_type=_; rv_val=(VAL_func func) }) -> 
 	  let isig = func.func_bind.bind_ty in
 	  let nargs = Array.length (isig.sig_param_types) in 
-	  let args = Array.create nargs trueval in
+	  let args = Array.create nargs None in
 	  for i = (nargs - 1) downto 0 
 	  do 
-	    args.(i) <- Stack.pop frame.frame_eval_stack
+	    let rvOpt = 
+	      match isig.sig_param_pmodes.(i) with
+		PMODE_copy -> 
+		  (match Stack.pop frame.frame_eval_stack with
+		    RVAL rv -> Some rv
+		  | LVAL lv -> load proc lv)
+	      | PMODE_move_out -> None
+	      | PMODE_move_in
+	      | PMODE_move_in_out -> 
+		  (match Stack.pop frame.frame_eval_stack with
+		    RVAL rv -> raise (Interp_err "moving in from rval")
+		  | LVAL lv -> 
+		      let rvo = load proc lv in
+		      store proc lv None;
+		      rvo)
+	    in	      
+	    args.(i) <- rvOpt
 	  done;
 	  let sba = Some (func.func_bind, args) in
 	  (match func.func_body with 
@@ -638,11 +650,11 @@ let exec_op proc op =
 	      bind_and_enter_frame proc (FRAME_func (func.func_bind.bind_ty.sig_proto, 
 						     func.func_bind)) sba s
 	  | FBODY_native n -> 
-	      check_args args func.func_bind;
+	      (* check_args args func.func_bind; *)
 	      (* Printf.printf "resolving native %s\n" n; *)
 	      let native_fn = Hashtbl.find proc.proc_natives n in
 	      (native_fn proc args);
-	      Stack.push trueval stk)
+	      Stack.push trueres stk)
       | _ -> raise (Interp_err "calling non-function"))
 	
   | OP_return -> 
@@ -655,7 +667,7 @@ let exec_op proc op =
       done;
       proc.proc_frames <- List.tl proc.proc_frames;
       (match proc.proc_frames with 
-	x :: _ -> Stack.push trueval x.frame_eval_stack
+	x :: _ -> Stack.push trueres x.frame_eval_stack
       | _ -> ())
 	  
   | OP_new -> raise (Interp_err "cannot new yet")
@@ -742,7 +754,9 @@ let step_proc p =
   | PROC_INIT 
   | PROC_FINI -> 
       let f = List.hd p.proc_frames in
-      Printf.printf "(pc=%d)\n" f.frame_pc;
+      Printf.printf "(pc=%d) stk=[" f.frame_pc;
+      Stack.iter (fun x -> Printf.printf " %a" fmt_res x) f.frame_eval_stack;
+      Printf.printf " ]\n";
       if (f.frame_pc >= Array.length f.frame_ops)
       then exec_op p OP_return
       else exec_op p f.frame_ops.(f.frame_pc);
@@ -776,7 +790,7 @@ let init_runtime =
   in
   let v = VAL_rec ( Hashtbl.create 0 )
   in
-  RVAL { rv_type=t; rv_val=v }
+  Some { rv_type=t; rv_val=v }
 ;;
 
 
@@ -784,7 +798,7 @@ let init_argv =
   let t = TY_vec { vec_elt_type = TY_str; 
 		   vec_elt_state = Array.of_list []} in
   let v = VAL_vec (Array.of_list []) in
-  RVAL { rv_type=t; rv_val=v }
+  Some { rv_type=t; rv_val=v }
 ;;
 
 
@@ -796,12 +810,12 @@ let bind_std_natives proc =
   let reg name fn = Hashtbl.add proc.proc_natives name fn in 
   let getstr v = 
     (match v with 
-      RVAL { rv_type=_; rv_val=VAL_str s } -> s
+      Some { rv_type=_; rv_val=VAL_str s } -> s
     | _ -> raise (Interp_err "expected string arg"))
   in
   let getint v = 
     (match v with 
-      RVAL { rv_type=_; rv_val=VAL_arith n } -> n
+      Some { rv_type=_; rv_val=VAL_arith n } -> n
     | _ -> raise (Interp_err "expected arith arg"))
   in
   reg "putstr" (fun p args -> print_string (getstr args.(0)));

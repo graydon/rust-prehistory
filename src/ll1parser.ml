@@ -954,7 +954,7 @@ and parse_func native_id_opt proto ps =
   let body = 
     match native_id_opt with
       None -> Ast.FBODY_stmt (ctxt "func: body" parse_block ps)
-    | Some id -> Ast.FBODY_native id
+    | Some id -> (expect ps SEMI; Ast.FBODY_native id)
   in
   { Ast.func_proto = proto;
     Ast.func_bind = bind;

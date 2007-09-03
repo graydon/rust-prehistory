@@ -114,7 +114,7 @@ and val_proc =
      proc_id: int;
      proc_prog: Ast.prog;
      proc_env: (string, (rv option)) Hashtbl.t;
-     proc_natives: (string, (val_proc -> (result array) -> unit)) Hashtbl.t;
+     proc_natives: (string, (val_proc -> ((rv option) array) -> unit)) Hashtbl.t;
 
      mutable proc_frames: frame list;
      mutable proc_state: proc_exec_state;
