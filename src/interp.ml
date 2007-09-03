@@ -206,7 +206,16 @@ let fmt_op out op =
   
 
 let fmt_stack out stk = 
-  Stack.iter (fun x -> Printf.fprintf out " %a" fmt_res x) stk
+  output_string out "[";
+  let i = ref 0 in
+  let f x = 
+    Printf.fprintf out "%s%a" 
+      (if !i == 0 then "" else ", ")
+      fmt_res x;
+    i := !i + 1
+  in
+  Stack.iter f stk;
+  output_string out "]";
 ;;
 
 let trace_op proc =
@@ -217,11 +226,14 @@ let trace_op proc =
     then OP_return
     else frame.frame_ops.(frame.frame_pc);
   in
-  if Stack.is_empty stk
-  then ()
-  else Printf.printf 
-      "       | %a\n" 
-      fmt_stack stk;
+  (match op with 
+    OP_pos _ -> ()
+  | _ ->
+      if Stack.is_empty stk
+      then ()
+      else Printf.printf 
+	  "       |  %a\n" 
+	  fmt_stack stk);
   Printf.printf
     "%6d | %a \n"
     frame.frame_pc
