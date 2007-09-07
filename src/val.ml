@@ -107,6 +107,7 @@ and frame =
      mutable frame_scope: string list;
      frame_scope_stack: (string list) Stack.t;
      frame_eval_stack: result Stack.t;
+     frame_mod: string;
     }
 
 and val_proc = 
@@ -120,6 +121,8 @@ and val_proc =
      mutable proc_state: proc_exec_state;
      mutable proc_pos: Ast.pos;
      mutable proc_jumped: bool;
+     mutable proc_resched: bool;
+     mutable proc_trace: bool;
      proc_ports: Ast.port array;
    }
 
@@ -129,3 +132,18 @@ and proc_exec_state =
   | PROC_MAIN 
   | PROC_SEND 
   | PROC_RECV 
+
+;;
+
+type val_mod = 
+    (string, (Ast.visibility * rv)) Hashtbl.t
+;;
+
+type interp = 
+    {
+     mutable interp_nextproc: int;
+     interp_procs: (int, val_proc) Hashtbl.t;
+     interp_runq: int Queue.t;
+     interp_mods: (string, val_mod) Hashtbl.t
+   }
+;;

@@ -446,16 +446,11 @@ let rec emit_stmt emit stmt =
 
 
 let types_equal p q =
-  (* 
-     Printf.printf "comparing types: %a == %a ? %B\n" 
-     fmt_type p fmt_type q (p = q); 
-   *)
   p = q
 ;;
 
 
 let load proc lv =
-  (* Printf.printf("loading from %s\n") lv.lval_base; *)
   if Array.length lv.lval_rest != 0 
   then raise (Interp_err "cannot handle complex lvals yet")
   else Hashtbl.find proc.proc_env lv.lval_base
@@ -488,8 +483,6 @@ let bind_args env args bind =
   let n_args = Array.length args in 
   let n_types = Array.length param_types in
   let n_names = Array.length bind.bind_idents in
-
-  (* Printf.printf "Binding %d args to %d parameters\n" n_args n_names; *)
   
   for i = 0 to n_args - 1 
   do	
@@ -504,7 +497,7 @@ let bind_args env args bind =
 ;;
 
 
-let bind_and_enter_frame proc fflav sba block_stmt =
+let bind_and_enter_frame proc modname fflav sba block_stmt =
   let emitter = new_emitter () in 
   emit_stmt emitter block_stmt;
   emit_op emitter OP_return;
@@ -519,6 +512,7 @@ let bind_and_enter_frame proc fflav sba block_stmt =
       frame_scope = [];
       frame_scope_stack = Stack.create ();
       frame_eval_stack = Stack.create ();
+      frame_mod = modname;
     }
   in
   proc.proc_frames <- (frame :: proc.proc_frames);
@@ -598,6 +592,15 @@ let exec_binop op stk =
 ;;
 
 
+let exec_jump proc frame addr =
+  if addr < frame.frame_pc
+  then proc.proc_resched <- true
+  else ();
+  frame.frame_pc <- addr; 
+  proc.proc_jumped <- true  
+;;
+
+
 let exec_op proc op = 
   let frame = List.hd proc.proc_frames in 
   let stk = frame.frame_eval_stack in
@@ -638,27 +641,22 @@ let exec_op proc op =
       List.iter (fun x -> Hashtbl.remove proc.proc_env x) frame.frame_scope;
       frame.frame_scope <- Stack.pop frame.frame_scope_stack
 	  
-  | OP_pos p -> 
-      (match p with 
-	(file,line,col) -> 
-	  (* Printf.printf "exec pos (%s:%d:%d)\n" file line col; *)
-	  proc.proc_pos <- p)
-	
+  | OP_pos p -> proc.proc_pos <- p
+	    
   | OP_jump (JMP_conditional, Some addr) -> 
-      (match (Stack.pop frame.frame_eval_stack) with 
+      (match Stack.pop stk with 
 	(RVAL { rv_type=TY_bool; rv_val=VAL_bool b }) -> 
 	  if b 
-	  then (frame.frame_pc <- addr; proc.proc_jumped <- true)
+	  then exec_jump proc frame addr
+	  else ()
       | _ -> raise (Interp_err "conditional jump on non-boolean value"))
 	
-  | OP_jump (JMP_direct, Some addr) -> 
-      (frame.frame_pc <- addr; proc.proc_jumped <- true)
-	  
-  | OP_jump (_,None) -> 
-      raise (Interp_err "executing unpatched jump")
+  | OP_jump (JMP_direct, Some addr) -> exec_jump proc frame addr	  
+  | OP_jump (_,None) -> raise (Interp_err "executing unpatched jump")
 	
   | OP_call -> 
-      (match (Stack.pop frame.frame_eval_stack) with 
+      proc.proc_resched <- true;
+      (match Stack.pop stk with 
 	(RVAL { rv_type=_; rv_val=(VAL_func func) }) -> 
 	  let isig = func.func_bind.bind_ty in
 	  let nargs = Array.length (isig.sig_param_types) in 
@@ -668,13 +666,13 @@ let exec_op proc op =
 	    let rvOpt = 
 	      match isig.sig_param_pmodes.(i) with
 		PMODE_copy -> 
-		  (match Stack.pop frame.frame_eval_stack with
+		  (match Stack.pop stk with
 		    RVAL rv -> Some rv
 		  | LVAL lv -> load proc lv)
 	      | PMODE_move_out -> None
 	      | PMODE_move_in
 	      | PMODE_move_in_out -> 
-		  (match Stack.pop frame.frame_eval_stack with
+		  (match Stack.pop stk with
 		    RVAL rv -> raise (Interp_err "moving in from rval")
 		  | LVAL lv -> 
 		      let rvo = load proc lv in
@@ -686,11 +684,11 @@ let exec_op proc op =
 	  let sba = Some (func.func_bind, args) in
 	  (match func.func_body with 
 	    FBODY_stmt s -> 
-	      bind_and_enter_frame proc (FRAME_func (func.func_bind.bind_ty.sig_proto, 
-						     func.func_bind)) sba s
+	      bind_and_enter_frame proc "<some-module>" 
+		(FRAME_func (func.func_bind.bind_ty.sig_proto, 
+			     func.func_bind)) sba s
 	  | FBODY_native n -> 
 	      (* check_args args func.func_bind; *)
-	      (* Printf.printf "resolving native %s\n" n; *)
 	      let native_fn = Hashtbl.find proc.proc_natives n in
 	      (native_fn proc args);
 	      Stack.push trueres stk)
@@ -716,7 +714,6 @@ let exec_op proc op =
 
 
 let bind_decl decl env =
-  (* Printf.printf "binding decl of '%s'\n" decl.decl_name; *)
   let bv = 
     match decl.decl_artifact with
       ARTIFACT_code (CODE_func (ty, f)) -> 
@@ -731,40 +728,64 @@ let bind_decl decl env =
   
 ;;
 
-let procid = ref 1
+let bind_std_natives proc = 
+  let reg name fn = Hashtbl.add proc.proc_natives name fn in 
+  let getstr v = 
+    (match v with 
+      Some { rv_type=_; rv_val=VAL_str s } -> s
+    | _ -> raise (Interp_err "expected string arg"))
+  in
+  let getint v = 
+    (match v with 
+      Some { rv_type=_; rv_val=VAL_arith n } -> n
+    | _ -> raise (Interp_err "expected arith arg"))
+  in
+  let log s =   
+    Printf.printf "\nlog: %S\n\n" s
+  in
+
+  reg "putstr" (fun p args -> log (getstr args.(0)));
+  reg "putint" (fun p args -> log (Num.string_of_num (getint args.(0))))
 ;;
 
-let new_proc prog = 
+
+let new_proc it prog = 
+  let procid = it.interp_nextproc in  
+  it.interp_nextproc <- procid + 1;
   let env = Hashtbl.create (Array.length prog.prog_decls) in 
   Array.iter (fun decl -> bind_decl decl env) prog.prog_decls;
-  { proc_id = (incr procid; !procid);
-    proc_prog = prog;
-    proc_env = env;
-    proc_natives = Hashtbl.create 0;
-    proc_frames = [];
-    proc_state = PROC_INIT;
-    proc_ports = Array.of_list [];
-    proc_pos = ("",0,0);
-    proc_jumped = false }
+  let proc = { proc_id = procid;
+	       proc_prog = prog;
+	       proc_env = env;
+	       proc_natives = Hashtbl.create 0;
+	       proc_frames = [];
+	       proc_state = PROC_INIT;
+	       proc_ports = Array.of_list [];
+	       proc_pos = ("",0,0);
+	       proc_jumped = false;
+	       proc_resched = false;
+	       proc_trace = true }
+  in
+  bind_std_natives proc;
+  Hashtbl.add it.interp_procs procid proc;
+  Queue.add procid it.interp_runq;
+  proc
 ;;
-
   
 let enter_init_frame proc args = 
-  (* Printf.printf "entering init frame\n"; *)
   match proc.proc_prog.prog_init with 
     Some init -> 
       let bind = init.init_bind in
       let fflav = FRAME_init bind in      
-      bind_and_enter_frame proc fflav (Some (bind, args)) init.init_body
+      bind_and_enter_frame proc "<some-module>" fflav (Some (bind, args)) init.init_body
   | _ -> ()
 ;;
 
 
 let enter_main_frame proc = 
-  (* Printf.printf "entering main frame\n"; *)
   match proc.proc_prog.prog_main with 
     Some block_stmt -> 
-      bind_and_enter_frame proc FRAME_main None block_stmt
+      bind_and_enter_frame proc "<some-module>" FRAME_main None block_stmt
   | _ -> ()  
 ;;
 
@@ -780,25 +801,25 @@ let step_proc p =
   match p.proc_state with
 
     PROC_INIT when p.proc_frames = [] -> 
-      (* Printf.printf "completed init, beginning main\n"; *)
       p.proc_state <- PROC_MAIN;
       enter_main_frame p
 
   | PROC_MAIN when p.proc_frames = [] -> 
-      (* Printf.printf "completed main, finishing\n"; *)
       p.proc_state <- PROC_FINI
 
   | PROC_MAIN 
   | PROC_INIT 
   | PROC_FINI -> 
-      trace_op p;
+      if p.proc_trace
+      then trace_op p
+      else ();
       let f = List.hd p.proc_frames in
       let op = 
 	if (f.frame_pc >= Array.length f.frame_ops)
 	then OP_return
 	else f.frame_ops.(f.frame_pc);
       in
-      exec_op p op;      
+      exec_op p op;
       if p.proc_jumped
       then p.proc_jumped <- false
       else f.frame_pc <- f.frame_pc + 1
@@ -845,38 +866,53 @@ let init_args =
   Array.of_list [init_runtime; init_argv]
 ;;
 
-let bind_std_natives proc = 
-  let reg name fn = Hashtbl.add proc.proc_natives name fn in 
-  let getstr v = 
-    (match v with 
-      Some { rv_type=_; rv_val=VAL_str s } -> s
-    | _ -> raise (Interp_err "expected string arg"))
-  in
-  let getint v = 
-    (match v with 
-      Some { rv_type=_; rv_val=VAL_arith n } -> n
-    | _ -> raise (Interp_err "expected arith arg"))
-  in
-  let log s =   
-    Printf.printf "\nlog: %S\n\n" s
-  in
 
-  reg "putstr" (fun p args -> log (getstr args.(0)));
-  reg "putint" (fun p args -> log (Num.string_of_num (getint args.(0))))
-;;
+(*****************************************************************)
+(*                    Interpreter structure                      *)
+(*****************************************************************)
 
+
+let new_interp _ = 
+  { interp_nextproc = 0;
+    interp_procs = Hashtbl.create 100;
+    interp_runq = Queue.create ();
+    interp_mods = Hashtbl.create 100; }
 
 let interpret sf entry_name = 
-  let p = new_proc (find_entry_prog sf entry_name) in
-  try
-    bind_std_natives p;
-    Printf.printf "interpreting\n";
-    enter_init_frame p init_args;
-    while not (proc_finished p) do
-      step_proc p;
-    done;
-    Printf.printf "yay!\n"
-  with
-    Interp_err s -> 
-      Printf.printf "Interpreter error: %s\n" s
+  Printf.printf "interpreting\n";
+  let it = new_interp () in
+  let entryproc = new_proc it (find_entry_prog sf entry_name) in
+  enter_init_frame entryproc init_args;
+  let curr = ref entryproc.proc_id in
+  while not (Queue.is_empty it.interp_runq)
+  do
+    let pid = Queue.take it.interp_runq in
+    if Hashtbl.mem it.interp_procs pid
+    then 
+      let p = Hashtbl.find it.interp_procs pid in
+      p.proc_resched <- false;
+      try
+	if not (proc_finished p) 
+	then 
+	  (
+	   if not ((!curr) = pid)
+	   then Printf.printf "switching to proc %d\n" p.proc_id
+	   else ();
+	   curr := pid;
+	   
+	   while not p.proc_resched 
+	   do 
+	     step_proc p;
+	   done;
+	   Queue.add p.proc_id it.interp_runq
+	  )
+	else
+	  ()
+      with
+	Interp_err s -> 
+	  Printf.printf "Interpreter error: %s\n" s	    
+    else
+      ()
+  done;
+  Printf.printf "process run queue is empty, exiting\n"
 ;;
