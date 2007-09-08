@@ -20,6 +20,13 @@ types
 
 - can probably ignore the quote type for now
 
+
+static
+------
+
+- write static typechecker
+- write static typestate algorithm
+
 general
 -------
 

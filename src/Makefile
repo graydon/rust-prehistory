@@ -3,31 +3,17 @@ LIBS=nums.cma unix.cma bigarray.cma
 
 OCAMLCFLAGS:=-g
 
-main: ll1parser.cmo lexer.cmo val.cmo ast.cmo interp.cmo asm.cmo main.cmo 
+# list them in link order, please!
+MLS:=ast.ml val.ml ll1parser.ml lexer.ml trace.ml interp.ml main.ml 
+CMOS:=$(patsubst %.ml, %.cmo, $(MLS))
+
+main: $(CMOS)
 	ocamlc $(OCAMLCFLAGS) -o $@ $(LIBS) $^ 
-
-main.cmo: lexer.cmi interp.cmi # parser.cmi 
-
-val.cmi val.cmo: ast.cmi
-
-interp.cmi interp.cmo: val.cmi ast.cmi interp.ml ll1parser.cmi
 
 .phony: clean
 
 clean:
-	rm -f *.cmo *.cmi lexer.ml parser.ml parser.mli
-
-ll1parser.cmo ll1parser.cmi: ll1parser.ml ast.cmi ast.cmo
-	ocamlc -c $(OCAMLCFLAGS) $<
-
-# parser.cmo: parser.ml parser.cmi ast.cmi ast.cmo
-# 	ocamlc -c $<
-
-# parser.cmi: parser.mli ast.cmi ast.cmo
-# 	ocamlc -c $<
-
-lexer.cmo lexer.cmi: lexer.ml ll1parser.cmi ast.cmi
-	ocamlc -c $(OCAMLCFLAGS) $<
+	rm -f *.cmo *.cmi lexer.ml 
 
 %.cmo %.cmi: %.ml
 	ocamlc -c $(OCAMLCFLAGS) $<
@@ -40,3 +26,8 @@ lexer.cmo lexer.cmi: lexer.ml ll1parser.cmi ast.cmi
 
 %.ml %.mli: %.mly
 	ocamlyacc -v $<
+
+.depend: $(MLS) Makefile
+	ocamldep $(MLS) > .depend
+
+include .depend
