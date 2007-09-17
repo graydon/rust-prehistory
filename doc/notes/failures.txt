@@ -1,0 +1,64 @@
+
+- budget exceeded
+  - time
+  - space
+  - other (dyn)
+- resource too busy
+  - entry queue depth exceeded
+- program logic error
+- input error
+- hardware error
+
+
+transient / permanent
+local / propagated
+
+
+signalling:
+
+  - sync local sw signals: logic error, overflow, etc.
+  - async local sw signals: alarms, "please kill this lwp"
+  - async sw env signals a la unix (timer, sigchild, sighup, etc.)
+  - async hw env signals: fpu, ipi, io interrupt
+
+mesa suggests we can restart with a value if signals have restart types.
+
+in rust process model, unwinding affects dynamic call chain, might
+leave callee process intact (in accept loop) while unwinding caller. 
+
+should signal handler be able to change status of callee (eg. to
+"broken, please reset me")? or propagate signal to callee's owner?
+
+crucial points: 
+
+  - well-defined signal prioritization, masking, saturation, dropping.
+    no implementation-defined races. text must do what it says, even
+    if the most precise form is a bit verbose.
+
+  - implementability: what are the atomic hw ops we have these days?
+  - comprehensiveness: what are the hw/sw env requirements?
+  - usability: can users get it right most of the time?
+
+
+what can we borrow from the existing lexicon?
+
+  - exceptions that unwind the dynamic stack
+  - signals that result in "spontaneous calls"
+  - erlang: exception that hits a process' mainloop kills process,
+    signals owner/group.
+
+possible picture (from hermes?):
+
+  - calls have declared exns, plus "failed(dyn)" exn
+  - in rendezvous, callee may return callmsg in exn state yet resume
+    mainloop w/o exn
+  - if exn propagates to the point of discarding callmsg w/o concrete
+    return, return is in "failed" exn state.
+  - if exn hits process mainloop, process is terminated, async signal
+    is optionally sent to owner/group.
+  - signals == message delivery
+    - interface involves binding (proc,signal)->port
+    - if no handler bound, throws "failed(signal)"
+    - if port overflows, is disconnected or times out, throws "failed(signal-delivery)"
+    - if unwinding exceeds budget, stops pc and signals owner/group
+    - open question: what if env races with our delivery? can it be made to not do so?

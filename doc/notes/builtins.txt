@@ -1,0 +1,33 @@
+There is a logic to the set of builtin types.
+
+First, if a type can reasonably be assumed to be provided directly in
+hardware, it's a builtin.  This covers the N-bit twos-complement
+signed and and unsigned integral types, plus any N-bit
+ieee754-specified bfp and dfp math types. These are denoted uNNNN /
+sNNNN / bNNNN / dNNNN. For example, u1, u2, u3, u4, u8, u32, s64, b64,
+d128. Each ABI defines a set of convenience type aliases for these:
+word, sword, flo and dec. bit is an alias for u1 and byte is an alias
+for u8. signed bytes are an abomination.
+
+(note that machine alignment rules may cause multibyte slots to align
+ and pad their container type)
+
+Second, if a type has one of a handful of literal forms that we want
+to support "unadorned" in the text, we need to support parsing and
+initializing types denoted by the literal form. So for example "str"
+and "char" are builtin, even though they model alts / vecs of integral
+types; the compiler nonetheless needs to *build* those when it sees
+str/char literals, and it needs to spit them out in a human-digestable
+form when reflecting and pretty-printing. Similarly the
+arbitrary-precision int and rat types are builtin because they must be
+initialized from integral / fp literals, and print back to them.
+
+The tilde operator exists as an escape hatch for new types that you
+wish to give literal support to. The dividing line between the handful
+of types we want to provide builtin literal support for and those we
+wish to leave for the tilde operator is a matter of taste; we have
+erred on the side of conservatism and only included a small number:
+number and string types (plus algebraic types built of them). When a
+tilde-expander registers with the compiler it can also register a
+pretty-printing helper against any types it wishes to handle printing.
+

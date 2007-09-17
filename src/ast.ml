@@ -64,54 +64,57 @@ type proto =
 type name_component =
     COMP_ident of ident
   | COMP_idx of int
-;;
+  | COMP_app of (ty array)
 
-type name = 
+and name = 
     {
      name_base: ident;
      name_rest: name_component array;
    }
-;;
 
-type ty = 
+(* 
+ * Type expressions are transparent to type names, their equality is structural.
+ * (after normalization to remove eg. redundant multiple limitations and lift
+ * constraints). 
+ * 
+ * Type expressions do *not* cover data definitions (recs and alts). Those 
+ * can be *named* in a type expression -- much like in ML -- but they are declared
+ * in their own syntactic forms. 
+ *)
+and ty = 
+
     TY_dyn
-  | TY_type
-
   | TY_nil
   | TY_bool
+  | TY_char
+  | TY_str
+
+      (* 
+       * These 2 can probably be redefined as algebraic types.
+       *)
+
+  | TY_type  
+  | TY_prog
+
   | TY_mach of (ty_mach * int)
   | TY_arith of ty_arith
-  | TY_str
-  | TY_char
 
-  | TY_rec of ty_rec
-  | TY_alt of ty_alt
   | TY_tup of ty_tup
   | TY_vec of ty_vec
 
   | TY_func of ty_func
   | TY_chan of ty_sig
-
-  | TY_prog
-  | TY_proc 
+  | TY_port of ty_sig
 
   | TY_pred of ty_pred
   | TY_quote of ty_quote
 
   | TY_named of name
 
-  | TY_abstr of (ty * ty_abstr array)
-  | TY_apply of (ty * ty array)
   | TY_constrained of (ty * state)
 
   | TY_lim of ty
 	
-and ty_abstr = 
-    { 
-      abstr_name: ident;
-      abstr_lim: bool
-    }
-	  
 (* Slots can have an smode qualifier put on them: exterior or alias.
  * If there is no qualifier, the slot is interior. Slots acquire an
  * implicit state from their type, but can also have an explicit state
@@ -161,9 +164,9 @@ and carg_base =
 
 and carg =
     {
-      carg_base: carg_base;
-      carg_rest: name_component array;
-    }
+     carg_base: carg_base;
+     carg_rest: name_component array;
+   }
 
 and constr = 
     { 
@@ -173,43 +176,64 @@ and constr =
       
 and state = constr array
 
-and ty_rec = 
+and prog = 
+    {
+     prog_auto: bool;
+     prog_init: init option;
+     prog_main: stmt option;
+     prog_fini: stmt option;
+     prog_decls: decl array;
+     prog_plugs: plug_impl array;
+   } 
+
+and plug_decl = 
+    {
+      plug_decl_ident: ident;
+      plug_decl_chans: (ident * ty_sig) array;
+    }
+      
+and plug_impl =
+    {
+      plug_impl_decl_ident: ident;
+      plug_impl_ident: ident;
+      plug_impl_ports: (ident * port) array;
+    }
+      
+and rec_decl = 
     { 
-      rec_slots: rec_slot array;
-      rec_state: state;
+      rec_decl_ident: ident;
+      rec_decl_slots: slot array;
+      rec_decl_state: state;
     }
 
-and rec_slot = 
-    { 
-      rec_slot_ident: ident;
-      rec_slot_type: slot;
-      rec_slot_state: state;
+and alt_decl = 
+    {
+      alt_decl_ident: ident;
+      alt_decl_cases: alt_decl_case array
     }
 
-and ty_alt = alt_case array
-
-and alt_case = 
+and alt_decl_case = 
     { 
-      alt_case_name: ident;
-      alt_case_rec: ty_rec option;
+      alt_decl_case_ident: ident;
+      alt_decl_case_slot: slot;
     }
 
 and ty_tup = 
     {
-      tup_types: ty array;
-      tup_state: state;
-    }
+     tup_types: ty array;
+     tup_state: state;
+   }
 
 and ty_vec =
     {
-      vec_elt_type: ty;
-      vec_elt_state: state;
-    }
+     vec_elt_type: ty;
+     vec_elt_state: state;
+   }
 
 and ty_func = 
     { 
-      func_inline: bool; 
       func_pure: bool;
+      func_inline: bool;
       func_sig: ty_sig; 
     }
 
@@ -238,20 +262,19 @@ and ty_sig =
 and ty_pred = 
     { 
       ty_pred_auto: bool;
-      ty_pred_inline: bool;
-      ty_pred_param_ty: ty;
+      ty_pred_sig: ty_sig;
     }
-	  
+      
 and ty_quote = 
     TY_quote_expr
   | TY_quote_type
   | TY_quote_decl
   | TY_quote_stmt
-
-   (* Probably this list should be a lot longer; the canonical rule *)
-   (* I've been using is to make a quotation type for every *)
-   (* nonterminal *)
-          
+      
+      (* Probably this list should be a lot longer; the canonical rule *)
+      (* I've been using is to make a quotation type for every *)
+      (* nonterminal *)
+      
 and stmt =
     STMT_while of stmt_while
   | STMT_foreach of stmt_foreach
@@ -265,47 +288,51 @@ and stmt =
   | STMT_move of (lval * lval)
   | STMT_copy of (lval * expr)
   | STMT_call of (lval * (expr array))
-  | STMT_send of (lval * (expr array)) (* Async call *)
+  | STMT_send of (lval * (expr array))
   | STMT_decl of decl
-
+	
 and stmt_while = 
     {
-     while_expr: expr;
-     while_body: stmt;
-     while_pos: pos;
-   }
+      while_expr: expr;
+      while_body: stmt;
+      while_pos: pos;
+    }
       
 and stmt_foreach = 
     {
-     foreach_bindings: decl array;
-     foreach_body: stmt;
-     foreach_pos: pos;
-   }
+      foreach_bindings: decl array;
+      foreach_body: stmt;
+      foreach_pos: pos;
+    }
       
 and stmt_for = 
     {
-     for_init: stmt;
-     for_test: expr;
-     for_step: stmt;
-     for_body: stmt;
-     for_pos: pos;
-   }
+      for_init: stmt;
+      for_test: expr;
+      for_step: stmt;
+      for_body: stmt;
+      for_pos: pos;
+    }
 
 and stmt_if = 
     {
-     if_test: expr;
-     if_then: stmt;
-     if_else: stmt option;
-     if_pos: pos;
-   }
+      if_test: expr;
+      if_then: stmt;
+      if_else: stmt option;
+      if_pos: pos;
+    }
 
 and stmt_try = 
     {
-     try_body: stmt;
-     try_fail: stmt option;
-     try_fini: stmt option;
-     try_pos: pos;
-   }
+      try_body: stmt;
+      try_fail: stmt option;
+      try_fini: stmt option;
+      try_pos: pos;
+    }
+
+and rec_input = 
+    REC_from_copy of (ident * expr)
+  | REC_from_move of (ident * lval)
 
 and expr =
     EXPR_literal of (lit * pos)
@@ -313,10 +340,13 @@ and expr =
   | EXPR_unary of (unop * pos * expr)
   | EXPR_lval of (lval * pos)
   | EXPR_call of (lval * pos * (expr array))
-  | EXPR_new of (ty * pos * (expr array))
-
-and radix = HEX | DEC | BIN
-
+  | EXPR_rec of (name * pos * (rec_input array))
+	
+and radix = 
+    HEX
+  | DEC 
+  | BIN
+      
 and lit = 
     LIT_str of string
   | LIT_char of char
@@ -325,6 +355,9 @@ and lit =
   | LIT_arith of (ty_arith * radix * Num.num)
   | LIT_custom of lit_custom
   | LIT_quote of lit_quote
+  | LIT_func of (ty_func * func)
+  | LIT_prog of prog
+
 
 and lit_quote = 
     QUOTE_expr of expr
@@ -340,23 +373,22 @@ and lit_mach =
 
 and lit_custom = 
     {
-     lit_expander: lval;
-     lit_arg: expr;
-     lit_text: string;
+      lit_expander: lval;
+      lit_arg: expr;
+      lit_text: string;
     }
 
 and lidx =
     LIDX_named of (name_component * pos)
   | LIDX_index of expr
-
+	
 and lval = 
     {
-     lval_base: ident;
-     lval_rest: lidx array;
+      lval_base: ident;
+      lval_rest: lidx array;
     }
 
 and binop =    
-
     BINOP_or
   | BINOP_and
 
@@ -382,34 +414,27 @@ and unop =
     UNOP_not
 
 and decl = 
-    { 
-      decl_ident: ident;
-      decl_pos: pos;
-      decl_artifact: artifact;
-    }
+    DECL_type of (pos * ident * ty)
+  | DECL_slot of (pos * slot * (expr option))
+  | DECL_port of (pos * port)
+  | DECL_data of (pos * data)
 
-and artifact = 
-    ARTIFACT_type of ty
-  | ARTIFACT_code of code
-  | ARTIFACT_slot of (slot * (expr option))
-
-and code = 
-    CODE_prog of prog
-  | CODE_func of (ty_func * func)
-  | CODE_port of port
+and data = 
+  | DATA_rec of rec_decl
+  | DATA_alt of alt_decl
 
 and bind = 
     {
-     bind_ty: ty_sig;
-     bind_idents: ident array;
-   }
+      bind_ty: ty_sig;
+      bind_idents: ident array;
+    }
 
 and func = 
     {
-     func_proto: proto;
-     func_bind: bind;
-     func_body: fbody;
-   }
+      func_proto: proto;
+      func_bind: bind;
+      func_body: fbody;
+    }
 
 and fbody = 
     FBODY_native of ident
@@ -417,26 +442,17 @@ and fbody =
 
 and port = 
     {
-     port_proto: proto;
-     port_bind: bind;
-     port_auto_body: stmt option;
+      port_ident: ident;
+      port_proto: proto;
+      port_bind: bind;
+      port_auto_body: stmt option;
     }
 
 and init = 
     {
-     init_bind: bind;
-     init_body: stmt;
-   }
-
-and prog = 
-    { 
-      prog_auto: bool;
-      prog_init: init option;
-      prog_main: stmt option;
-      prog_fini: stmt option;
-      prog_decls: decl array;
+      init_bind: bind;
+      init_body: stmt;
     }
-;;
 
 type visibility = 
     VIS_public
@@ -445,4 +461,15 @@ type visibility =
 ;;
 
 type decl_top = (visibility * decl)
+;;
+
+(* Helper functions for querying AST. *)
+
+let decl_id d =
+  match d with
+    DECL_type (_, id, _) -> id
+  | DECL_slot (_, s, _) -> s.slot_ident
+  | DECL_port (_, p) -> p.port_ident
+  | DECL_data (_, (DATA_rec dr)) -> dr.rec_decl_ident
+  | DECL_data (_, (DATA_alt ar)) -> ar.alt_decl_ident
 ;;

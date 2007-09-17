@@ -10,6 +10,7 @@ let fmt_nc out nc =
   match nc with 
     COMP_ident s -> Printf.fprintf out "%s" s
   | COMP_idx i -> Printf.fprintf out "%d" i
+  | COMP_app _ -> output_string out "[...]"
 ;;
 
 let fmt_lit out lit = 
@@ -22,6 +23,11 @@ let fmt_lit out lit =
       Printf.fprintf out "%s" (if b then "true" else "false")
   | LIT_arith (_, _, n) -> 
       Printf.fprintf out "%s" (Num.string_of_num n)
+  | LIT_func f -> 
+      output_string out "func(...){...}"
+  | LIT_prog f -> 
+      output_string out "prog(...){...}"
+
   | _ -> output_string out "**unhandled literal**"
 ;;
 
@@ -90,23 +96,19 @@ let rec fmt_type out t =
   | TY_str -> output_string out "str"
   | TY_char -> output_string out "char"
 
-  | TY_rec r -> output_string out "(rec ...)"
-  | TY_alt a -> output_string out "(alt ...)"
   | TY_tup t -> output_string out "(tup ...)"
   | TY_vec v -> output_string out "(vec ...)"
 
   | TY_func s -> output_string out "(func ...)"
   | TY_chan c -> output_string out "(chan ...)"
+  | TY_port s -> output_string out "(port ...)"
 
   | TY_prog -> output_string out "prog"
-  | TY_proc -> output_string out "proc"
 
   | TY_pred p -> output_string out "(pred ...)"
   | TY_quote q -> output_string out "(quote ...)"
 
   | TY_named n -> fmt_name out n 
-  | TY_abstr (ty, params) -> output_string out "(abstr ...)"
-  | TY_apply (ty, args) -> output_string out "(apply ...)"
 	
   | TY_constrained (ty, _) -> (output_string out "(";
 			       fmt_type out ty;
@@ -135,11 +137,10 @@ let rec fmt_expr out e =
       fmt_lval out lv	
   | EXPR_call (lv, _, args) -> 
       fmt_lval out lv;
-      fmt_exprs out args;
-  | EXPR_new (ty, _, args) -> 
-      output_string out "new ";
-      fmt_type out ty;      
       fmt_exprs out args
+  | EXPR_rec (name,_,_) -> 
+      fmt_name out name;
+      output_string out "{...}"
 
 
 and fmt_exprs out exprs = 

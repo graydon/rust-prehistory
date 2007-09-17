@@ -209,8 +209,7 @@ Some values have slots. A @i{slot} is a named set of bits
 @emph{inside} a value that can @emph{refer to} another value, either
 directly by containing the referent, or indirectly by storing a memory
 address of the referent. Variables within a module or stack frame are
-slots, as are the fields within records or the components of tuples
-and vectors.
+slots, as are the fields within records or the components of vectors.
 
 @node    Types, Forms, Predicates, Constraints and Conditions
 @section Types, Forms, Predicates, Constraints and Conditions
@@ -225,23 +224,30 @@ subset of all the possible values. A type has two parts:
 
 The form of a type describes how many bits the type occupies in
 memory, and how to interpret those bits. Forms are built from a set of
-fundamental ``machine-level'' forms such as ``number'' or
-``character'', and a set of form constructors such as ``record'',
-``function'', ``tuple'', or ``vector''. For example, this code:
+fundamental ``machine-level'', and can be combined in two ways. First,
+code may declare new forms by making ``data'' declarations. These
+introduce new forms of record or disjoint union, with specific field
+names and a unique constructor name. Second, code may combine existing
+types in transparent structural combinations: functions and
+vectors. For example, this code:
 
 @example
-type coord3d = (int, int, int);
-
-type buf = vec[byte];
-
-type employee = rec @{ 
+data employee = rec @{ 
                       string name; 
                       dec salary; 
                     @};
+
+type byte = u8;
+type buf = vec[byte];
 @end example
 
-introduces 3 new types: one with a tuple form, one with a vector form,
-and one with a record form. 
+introduces 3 new types. The first is a record data type with two named
+fields; values of this record type are only form-compatible with slots
+declard as type @code{employee}. The second and third present
+transparent type abbreviations for unsigned 8-bit values and vectors
+thereof; values of the vector type are form-compatible with slots
+declared as any other abbreviation for the same type, or indeed merely
+declared as the normalized type name @code{vec[u8]}.
 
 The @i{condition} of a type is a set of zero or more constraints. 
 
@@ -637,15 +643,19 @@ and function calls, caller control suspends when callee control is
 active. 
 
 The arguments to a function or channel implicitly occupy an ``argument
-tuple'', though it is a special tuple the programmer cannot directly
-access. In the case of a function, the argument tuple may be
-coincident in memory with the slots of the callee. Arguments flow
-through the argument tuple transparently, most of the time. The only
-time it is relevant to know about is when aplying an unknown function
-or channel type to an unknown argument-tuple type.
+record'', though it is a special record declared and managed
+automatically by the language. In the case of a function, the argument
+record may be coincident in memory with the slots of the
+callee. Arguments flow through the argument record transparently, most
+of the time. The only time it is relevant to know about is when
+aplying an unknown function or channel type to an unknown
+argument-record type. In that case, the argument-record type
+associated with the function must be compatible with the function it
+is being combined with. For a function type @var{T}, the argument
+record type is a nested type called @code{T.args}.
 
 An un-annotated parameter implies that the associated argument is
-copied into the argument tuple during a call, then copied into the
+copied into the argument record during a call, then copied into the
 caller's frame.  A parameter slot of type @code{T} can be annotated in
 three additional ways:
 
@@ -656,13 +666,13 @@ three additional ways:
 @end itemize
 
 A ``move in'' parameter is moved from the caller frame into the
-argument tuple and then into the callee frame: the caller's slot loses
+argument record and then into the callee frame: the caller's slot loses
 its @code{init} predicate at the point of the call, and the callee
 gains it. The mnemonic is that @code{T-} parameters ``consume'' values
 of type @code{T} from their caller.
 
 A ``move out'' parameter is moved from the callee frame into the
-argument tuple and then back to the caller frame when the call
+argument record and then back to the caller frame when the call
 returns. The callee slot loses the @code{init} predicate at the return
 point, and the caller slot gains it.  The mnemonic is that @code{T+}
 parameters ``produce'' values of type @code{T} for their caller.
@@ -727,11 +737,11 @@ back-no-bypass (@code{func+}) and both (@code{func*}).
 A function declaration also defines an associated @i{call record} that
 represents the parameter-passing requirements of the function in a way
 that is accessible to introspection or polymorphic invocation. This
-record contains an @i{arguments tuple}, and either a @i{return value
+record contains an @i{arguments record}, and either a @i{return value
 slot} or @i{yield value slot}. Given a call record, there are 5
 polymorphic @i{apply} operators that will invoke a function of
 compatible type. Invocation involves forming a callee frame full of
-slots for each value in the call record's argument tuple, copying or
+slots for each value in the call record's argument record, copying or
 moving values into those slots, then running the callee. Yields and
 returns from the function are tail-yielded or tail-returned back to
 the caller of the apply operator. This permits writing polymorphic
@@ -1266,9 +1276,8 @@ node to itself through an alias, creating an ownership cycle.
 Aliases may hold addresses of either interior or exterior values, but
 do @emph{not} manipulate exterior reference counts, deinitialize or
 deallocate values. It is a static error to mark a slot as an alias if
-the alias-ness properties cannot be statically proven. For example
-record, process, vector or tuple slots may not be aliases, because the
-containing structures have indefinite lifetimes.
+the alias-ness properties cannot be statically proven, so only
+specific syntactic contexts permit alias slot declarations.
 
 Like exterior slots, alias slots are always 1 word in size. Also
 like exterior slots, alias slots with deferred size are required

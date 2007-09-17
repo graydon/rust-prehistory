@@ -81,6 +81,8 @@ let val_of_literal lit =
   | LIT_arith (_, _, n) -> 
       { rv_type = (TY_arith (Ll1parser.numty n));
 	rv_val = VAL_arith n }
+  | LIT_func (fty, f) -> { rv_type = TY_func fty; rv_val = VAL_func f }
+  | LIT_prog p -> { rv_type = TY_prog; rv_val = VAL_prog p }
   | _ -> raise (Interp_err "unhandled literal in val_of_literal")
 
 
@@ -114,11 +116,7 @@ let rec emit_expr_full deref_lvals emit e =
       emit_op emit (OP_copy);
       emit_op emit (OP_call)
 
-  | EXPR_new (ty, pos, args) -> 
-      Array.iter (emit_expr_full false emit) args;
-      emit_op emit (OP_push (RVAL { rv_type = TY_type;
-				    rv_val = VAL_type ty }));
-      emit_op emit (OP_new)
+  | _ -> raise (Interp_err "unhandled expression form")
 	
 and emit_expr emit e = emit_expr_full true emit e
 ;;
@@ -181,25 +179,27 @@ let rec emit_stmt emit stmt =
       emit_op emit (OP_call);
       emit_op emit (OP_pop)
 
-  | STMT_decl decl -> 
-      emit_op emit (OP_pos decl.decl_pos);
-      emit_op emit (OP_alloc_local decl.decl_ident);
-      emit_op emit (OP_push (LVAL { lval_base = decl.decl_ident;
-				    lval_rest = arr [] }));	  
-      (match decl.decl_artifact with
-	ARTIFACT_type ty -> 
-	  emit_op emit (OP_push (RVAL { rv_type = TY_type;
-					rv_val = VAL_type ty }))
-
-      | ARTIFACT_slot (_, None) -> ()
-      | ARTIFACT_slot (_, Some e) -> emit_expr emit e
-	  
-      | ARTIFACT_code (CODE_func (fty, func)) -> 
-	  emit_op emit (OP_push (RVAL { rv_type = TY_func fty;
-					rv_val = VAL_func func }))
-      | _ -> raise (Interp_err "cannot allocate ports yet"));
-
+  | STMT_decl (DECL_type (pos, ident, ty)) -> 
+      emit_op emit (OP_pos pos);
+      emit_op emit (OP_alloc_local ident);
+      emit_op emit (OP_push (LVAL { lval_base = ident;
+				    lval_rest = arr [] }));
+      emit_op emit (OP_push (RVAL { rv_type = TY_type;
+				    rv_val = VAL_type ty }));
       emit_op emit (OP_store)
+
+  | STMT_decl (DECL_slot (pos, slot, exprOpt)) -> 
+      emit_op emit (OP_pos pos);
+      emit_op emit (OP_alloc_local slot.slot_ident);
+      emit_op emit (OP_push (LVAL { lval_base = slot.slot_ident;
+				    lval_rest = arr [] }));
+      (match exprOpt with
+	None -> ()
+      | Some e -> emit_expr emit e);
+      emit_op emit (OP_store)
+       
+  | STMT_decl _ -> raise (Interp_err "cannot translate other decl types yet");
+
 
   | STMT_try _
   | STMT_yield _
@@ -482,16 +482,13 @@ let exec_op proc op =
 
 let bind_decl decl env =
   let bv = 
-    match decl.decl_artifact with
-      ARTIFACT_code (CODE_func (ty, f)) -> 
-	Some { rv_type = TY_func ty;
-	       rv_val = VAL_func f }
-    | ARTIFACT_slot (_, None) -> None
-    | ARTIFACT_slot (_, Some (EXPR_literal (lit, _))) -> 
+    match decl with
+    | DECL_slot (_, _, None) -> None
+    | DECL_slot (_, _, Some (EXPR_literal (lit, _))) -> 
 	Some (val_of_literal lit)
     | _ ->  raise (Interp_err "bad binding")
   in
-  Hashtbl.add env decl.decl_ident bv
+  Hashtbl.add env (Ast.decl_id decl) bv
   
 ;;
 
@@ -604,8 +601,8 @@ let find_entry_prog sf entry_name =
   let binding = Hashtbl.find sf entry_name in 
   match binding with 
     (VIS_public, d) -> 
-      (match d.decl_artifact with
-	ARTIFACT_code (CODE_prog prog) -> prog
+      (match d with
+	DECL_slot (_, _, Some (EXPR_literal ((LIT_prog prog), _))) -> prog
       | _ -> raise (Interp_err ("cannot find 'pub prog " ^ entry_name ^ "'")))
   | _ -> raise (Interp_err ("cannot find 'pub " ^ entry_name ^ "'"))
 ;;
@@ -624,7 +621,8 @@ let init_runtime =
 let init_argv =
   let t = TY_vec { vec_elt_type = TY_str; 
 		   vec_elt_state = Array.of_list []} in
-  let v = VAL_vec (Array.of_list []) in
+  let v = VAL_vec { vec_storage = Array.of_list [];
+		    vec_initsz = 0 } in
   Some { rv_type=t; rv_val=v }
 ;;
 

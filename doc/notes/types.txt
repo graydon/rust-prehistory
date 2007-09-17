@@ -1,0 +1,106 @@
+Types
+~~~~~
+
+Every value has a unique type. 
+Every slot has a unique type.
+The value held in a slot always has the same type as the slot.
+
+
+Limitation
+~~~~~~~~~~
+
+Some types (and values) are "limited". A type is limited if:
+
+  - It is declared as "lim".
+  - It contains a limited slot.
+  - It contains a process.
+
+Limited values cannot be copied or transmitted. See the memory
+model for discussion.
+
+
+Typestates
+~~~~~~~~~~
+
+Every program containing symbolic expressions maps to a sequence of
+statements in a 3-operand-statement normal form with
+call-by-value-return move-semantics on slots and bindings.
+
+Every "point" (inbetween normalized statements) in a program has a
+typestate. Two typestates are therefore defined for each statement:
+its prestate and its poststate.
+
+A typestate is formally a set of N-ary boolean predicates over visible
+slots.
+
+Typestates form a semilattice ordered by subset-inclusion (x < y means
+x is a subset of y), where 'join' means 'set intersection'.
+
+When N statements lead to a single point, the point's typestate
+is the pairwise join of the N poststates of predeeding statements.
+
+All poststates can be dropped. Dropping the 'init' poststate from a
+slot causes heap memory to be released, if the slot holds the last
+owning heap reference to its referent. If the referent is a proc, the
+associated prog's fini() function is executed. All other predicates
+can be dropped without side-effect.
+
+When a statement writes to a slot, predicates holding over the slot
+are dropped.
+
+Every operation (statement type) has a set of preconditions,
+formulated as predicates.
+
+If a precondition names a predicate that is not present in the
+statement's prestate, one of two options exists:
+
+  - If the missing predicates are all 'auto' and all the 
+    preconditions of the missing predicates are met, the
+    compiler may insert assertions for each missing predicate.
+
+  - Otherwise it is a compile-time error.
+
+If a type has an associated "formal typestate", it means that the
+predicates in the typestate hold over any slot (hence value) given
+that type, for all statements in which the slot is visible.
+
+
+Reflection
+~~~~~~~~~~
+
+Types and predicates are reflected into runtime values. Runtime values
+can always be converted to type "dyn", which carries the type of its
+value (including formal typestate) along with it. Limited values
+cannot be placed in a dyn; but they can be placed in a "lim dyn". The
+runtime representation of a type can be compared to the runtime
+representation of another type.  To connect runtime and compile-time
+values, a type-switch statement exists over 'dyn' values; each arm of
+the type-switch syntactically aliases the dyn's value into a typed
+slot.
+
+
+Relationships to other languages
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+We borrow structure (but not terminology) from Ada and Hermes when
+organizing the type system. In particular:
+
+  - A type describes a particular set of values, as in both languages.
+
+  - A constrained type (an Ada "subtype") is a base type plus a set of
+    constraints. Constraints are formulated using Hermes-style
+    typestate predicates rather than Ada's fixed set of constraints.
+
+  - There is no subtype lattice (as in OO languages). There is only
+    one type for each value.
+
+
+Pragmatic notes
+~~~~~~~~~~~~~~~
+
+  - Constrained types do not participate in overload resolution, 
+    because predicates can always be dropped.
+
+  - If you wish to produce a new type that wraps an old type, you can
+    just make a single-alternative alt or a single-field rec. The 
+    allocation rules should not impose any penalty for doing this.

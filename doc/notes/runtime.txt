@@ -1,0 +1,59 @@
+
+"Dumb" runtime organization (revisit if inefficient)
+====================================================
+
+Code is emitted into crates. 
+
+We assume a loader that loads a crate at an arbitrary address.
+
+Every crate has a TOC.
+
+The TOC has a set of addresses-of-imported-values that are lazily
+resolved, and a set of addresses-of-crates-using-me that are informed
+when the crate is reloaded.
+
+One register is always dedicated to the current crate's TOC address.
+
+All intra-crate references are pc-relative if possible, or vector
+through fixed offsets in the crate TOC if impossible (for example,
+IA32 can only do pc-relative jumps; AMD64 permits general pc-relative
+operands).
+
+Thus any change to a file in a crate causes full relinking of the
+crate. An aggressive compiler can delay interprocedural optimizations
+to the point of crate linking, if it wants.
+
+All inter-crate procedure calls vector through the TOC.
+
+The TOC also contains a "relink" section that can be stripped. The
+relink section holds all the relocs in the crate, organized both by
+pointee (in order to re-run the relocs when the pointee is reloaded)
+and pointer (in order to update the reloc source when pointer is
+reloaded). When you reload a module into a relink-capable crate, the
+module is either rewritten in-place (if it fits) or mapped into a 
+fresh location, then incrementally relinked.
+
+See L&L pg 171-172 for a description of the scheme. It's the AIX
+convention. It optimizes for the case of fast loading and execution
+for large blocks of code, at the expense of slower linking during
+development.
+
+Note that this is *not* how loaded ELF or PE code works (well, it's
+similar to PE). To interface with that code we will require stub
+routines.
+
+One register is also dedicated to top-of-stack. Frame base can be
+calculated implicitly from top-of-stack at every point; we don't
+support alloca() and we know every allocation size.
+
+Remaining register allocation is either linear-scan or
+usage-counting. Either way: *simple*.
+
+Procs consist of a control block and a stack. Each proc's stack is a
+linked list of stack pages. Each stack page is a power-of-two from a
+buddy allocator.
+
+Procs are grouped into single-threaded OS processes. OS processes
+communicate over unix domain sockets (or a win32 socket/pipe?), and
+can pass capabilities to one another over these channels via sendmsg()
+and SCM_RIGHTS (or DuplicateHandle in win32?).

@@ -84,7 +84,6 @@ type token =
   | NATIVE
 
   (* Magic runtime services *)
-  | NEW
   | LOG
   | REFLECT
   | EVAL
@@ -139,8 +138,8 @@ type token =
   | PORT_PLUS
 
   (* Process types *)
-  | PROC
   | PROG
+  | PLUG
 
   | EOF
       
@@ -231,7 +230,6 @@ let string_of_tok t =
   | NATIVE     -> "native"
 
   (* Magic runtime services *)
-  | NEW        -> "new"
   | LOG        -> "log"
   | REFLECT    -> "reflect"
   | EVAL       -> "eval"
@@ -285,9 +283,9 @@ let string_of_tok t =
   | PORT_STAR       -> "port*"
   | PORT_PLUS       -> "port+"
 
-  (* Process/program types *)
-  | PROC       -> "proc"
+  (* Process/program declarator types *)
   | PROG       -> "prog"
+  | PLUG       -> "plug"
 
   | EOF        -> "<EOF>"
 ;;
@@ -468,31 +466,37 @@ let parse_ident ps =
 ;;
 
 	
-let parse_name_component ps =
+let rec parse_name_component ps =
   match peek ps with
     IDENT str -> bump ps; (Ast.COMP_ident str)
   | IDX i -> bump ps; (Ast.COMP_idx i)
+  | LBRACKET -> 
+      let 
+	  tys = ctxt "name_component: apply" 
+	  (bracketed LBRACKET RBRACKET 
+	     (one_or_more COMMA parse_ty))
+	  ps
+      in
+      Ast.COMP_app tys
+	
   | _ -> raise (unexpected ps)
-;;
 
 
-let parse_name ps = 
+and parse_name ps = 
   let base = ctxt "name: base" parse_ident ps in
   let rest = ctxt "name: rest" (path DOT parse_name_component) ps in
   { Ast.name_base = base;
     Ast.name_rest = rest }
-;;
 
 
-let parse_constraint_arg ps =
+and parse_constraint_arg ps =
   match peek ps with
     IDENT n -> bump ps; Ast.BASE_named n
   | STAR -> bump ps; Ast.BASE_formal
   | _ -> raise (unexpected ps)
-;;
 
 
-let parse_carg ps = 
+and parse_carg ps = 
   let base = 
     match peek ps with
       STAR -> Ast.BASE_formal
@@ -506,7 +510,7 @@ let parse_carg ps =
   }
     
 
-let parse_constraint ps = 
+and parse_constraint ps = 
   match peek ps with 
     (* NB: A constraint *looks* a lot like an EXPR_call, but is restricted *)
     (* syntactically: the constraint name needs to be a name (not an lval) *)
@@ -523,19 +527,17 @@ let parse_constraint ps =
       { Ast.constr_name = n;
 	Ast.constr_args = args }
   | _ -> raise (unexpected ps)
-;;
-    
 
-let parse_state ps = 
+
+and parse_state ps = 
   match peek ps with
     COLON -> 
       bump ps;
       ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps
   | _ -> arr []
-;;
   
   
-let rec parse_base_ty ps = 
+and parse_base_ty ps = 
   match peek ps with 
     TYPE -> 
       bump ps; 
@@ -580,16 +582,7 @@ and parse_ty_rest base ps =
 	  state = ctxt "ty_rest: state" parse_state ps 
       in
       parse_ty_rest (Ast.TY_constrained (base, state)) ps
-	
-  | LBRACKET -> 
-      let 
-	  rest = ctxt "ty_rest: apply" 
-	  (bracketed LBRACKET RBRACKET 
-	     (one_or_more COMMA parse_ty))
-	  ps
-      in
-      parse_ty_rest (Ast.TY_apply (base, rest)) ps
-	
+		
   | _ -> base
 
 and parse_ty ps = 
@@ -621,6 +614,25 @@ and parse_lval ps =
   { Ast.lval_base = base;
     Ast.lval_rest = rest }
     
+
+and parse_rec_input ps = 
+  let lab = (ctxt "rec input: label" parse_ident ps) in
+  match peek ps with
+    EQ -> 
+      bump ps;
+      let expr = (ctxt "rec input: expr" parse_expr ps) in
+      Ast.REC_from_copy (lab, expr)
+  | LARROW -> 
+      bump ps; 
+      let lval = (ctxt "rec input: lval" parse_lval ps) in
+      Ast.REC_from_move (lab, lval)
+  | _ -> raise (unexpected ps)
+      
+
+and parse_rec_inputs ps = 
+  bracketed_zero_or_more LBRACE RBRACE (Some COMMA) 
+    (ctxt "rec inputs" parse_rec_input) ps
+
 
 and parse_expr_list ps = 
   bracketed_zero_or_more LPAREN RPAREN (Some COMMA) 
@@ -659,24 +671,33 @@ and parse_ATOMIC_expr ps =
       bump ps;
       Ast.EXPR_literal 
 	(Ast.LIT_char ch, pos)
-
+	
   | IDENT _ -> 
       let pos = lexpos ps in
       let lval = parse_lval ps in
       (match peek ps with 
 	LPAREN -> 
 	  let args = ctxt "call: args" parse_expr_list ps in
-	  Ast.EXPR_call (lval, pos, args)	    
+	  Ast.EXPR_call (lval, pos, args)
+      | LBRACE -> 
+	  let name = name_of_lval ps lval in
+	  let inputs = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
+	  Ast.EXPR_rec (name, pos, inputs)
       | _ -> Ast.EXPR_lval (lval, pos))
-
-  | NEW -> 
-      bump ps;
-      let pos = lexpos ps in
-      let ty = ctxt "new: ty" parse_ty ps in
-      let args = ctxt "new: args" parse_expr_list ps in
-      Ast.EXPR_new (ty, pos, args)
   
   | _ -> raise (unexpected ps)
+
+
+and name_of_lval ps lval = 
+    let extract_nc lidx = 
+      match lidx with 
+	Ast.LIDX_named (nc, pos) -> nc
+      | Ast.LIDX_index _ ->
+	raise (Parse_err (ps, "expression-based lval found " ^ 
+			  "where static name required"))
+    in
+    { Ast.name_base = lval.Ast.lval_base;
+      Ast.name_rest = Array.map extract_nc lval.Ast.lval_rest }
 
 
 and parse_NEGATION_expr ps =
@@ -824,7 +845,7 @@ and parse_stmt ps =
   | LET | CONST
   | FUNC | FUNC_QUES | FUNC_BANG | FUNC_STAR | FUNC_PLUS
   | PORT | PORT_QUES | PORT_BANG | PORT_STAR | PORT_PLUS
-  | PROG | AUTO | NATIVE
+  | PROG | PLUG | AUTO | NATIVE
     -> 
       let decl = ctxt "stmt: decl" parse_decl ps in
       Ast.STMT_decl decl
@@ -879,7 +900,8 @@ and parse_prog ps =
 	       Ast.prog_init = None;
 	       Ast.prog_main = None;
 	       Ast.prog_fini = None;
-	       Ast.prog_decls = arr []; }
+	       Ast.prog_decls = arr [];
+	       Ast.prog_plugs = arr []; }
   in
   match peek ps with 
     LBRACE -> 
@@ -961,13 +983,15 @@ and parse_func native_id_opt proto ps =
     Ast.func_body = body; }
     
 and parse_port auto proto ps =
+  let id = parse_ident ps in
   let bind = ctxt "port: bindings" (parse_bind proto) ps in
   let body = 
     if auto 
     then Some (ctxt "port: body" parse_block ps) 
     else None 
   in
-  { Ast.port_proto = proto;
+  { Ast.port_ident = id;
+    Ast.port_proto = proto;
     Ast.port_bind = bind;
     Ast.port_auto_body = body }
 
@@ -989,7 +1013,7 @@ and parse_decl ps =
 
   let inline = 
     match peek ps with 
-      NATIVE -> bump ps; true
+      INLINE -> bump ps; true
     | _ -> false
   in    
 
@@ -1012,9 +1036,14 @@ and parse_decl ps =
 		Ast.func_pure = pure;
 		Ast.func_sig = func.Ast.func_bind.Ast.bind_ty } 
     in    
-    { Ast.decl_ident = id; 
-      Ast.decl_pos = pos;
-      Ast.decl_artifact = Ast.ARTIFACT_code (Ast.CODE_func (fty, func)) }
+    let fexpr = Ast.EXPR_literal (Ast.LIT_func (fty, func), pos) in
+    let slot = { Ast.slot_const = true;
+		 Ast.slot_smode = Ast.SMODE_exterior;
+		 Ast.slot_ty = Ast.TY_func fty;
+		 Ast.slot_ident = id;
+		 Ast.slot_state = arl []; }
+    in
+    Ast.DECL_slot (pos, slot, Some fexpr) 
   in
 
   let do_port proto ps = 
@@ -1022,11 +1051,8 @@ and parse_decl ps =
     if native 
     then raise (Parse_err (ps, "meaningless 'native' port"))
     else ();
-    let id = parse_ident ps in
     let port = parse_port auto proto ps in 
-    { Ast.decl_ident = id; 
-      Ast.decl_pos = pos;
-      Ast.decl_artifact = Ast.ARTIFACT_code (Ast.CODE_port port) }
+    Ast.DECL_port (pos, port)
   in
 
   let do_slot const ps =
@@ -1041,20 +1067,23 @@ and parse_decl ps =
 	| _ -> None
       in
       expect ps SEMI;
-      { Ast.decl_ident = slot.Ast.slot_ident;
-	Ast.decl_pos = pos;
-	Ast.decl_artifact = Ast.ARTIFACT_slot (slot, init) }
+      Ast.DECL_slot (pos, slot, init)
   in
     
   match peek ps with 
     PROG -> 
       bump ps;
-      let n = ctxt "decl: prog ident" parse_ident ps in
+      let id = ctxt "decl: prog ident" parse_ident ps in
       let prog = ctxt "decl: prog body" parse_prog ps in
       let prog = { prog with Ast.prog_auto = auto } in
-      { Ast.decl_ident = n;
-	Ast.decl_pos = pos;
-	Ast.decl_artifact = Ast.ARTIFACT_code (Ast.CODE_prog prog) }
+      let pexpr = Ast.EXPR_literal (Ast.LIT_prog prog, pos) in
+      let slot = { Ast.slot_const = true;
+		   Ast.slot_smode = Ast.SMODE_exterior;
+		   Ast.slot_ty = Ast.TY_prog;
+		   Ast.slot_ident = id;
+		   Ast.slot_state = arl []; }
+    in
+    Ast.DECL_slot (pos, slot, Some pexpr) 
 	
   | FUNC -> do_func Ast.PROTO_call ps
   | FUNC_QUES -> do_func Ast.PROTO_ques ps
@@ -1081,7 +1110,7 @@ and parse_decl_top ps =
       bump ps;
       let d = ctxt "decl_top: public" parse_decl ps in
       (Ast.VIS_public, d)
-
+	
   | PRIVATE -> 
       bump ps;
       let d = ctxt "decl_top: private" parse_decl ps in
@@ -1091,6 +1120,7 @@ and parse_decl_top ps =
       bump ps;
       let d = ctxt "decl_top: crate" parse_decl ps in
       (Ast.VIS_crate, d)
+
 
 and parse_topdecls ps decls =
   match peek ps with
@@ -1122,7 +1152,7 @@ and sourcefile tok lbuf =
 
   List.iter 
     (fun (vis,decl) -> 
-      Hashtbl.add bindings decl.Ast.decl_ident (vis,decl)) decls;
+      Hashtbl.add bindings (Ast.decl_id decl) (vis,decl)) decls;
   bindings
 
 

@@ -40,14 +40,12 @@
 		("let", LET);
 		("const", CONST);
 
-                ("lim", LIM);
                 ("pure", PURE);
 
                 ("auto", AUTO);
                 ("inline", INLINE);
                 ("native", NATIVE);
 
-                ("new", NEW);
                 ("log", LOG);
                 ("reflect", REFLECT);
                 ("eval", EVAL);
@@ -66,7 +64,6 @@
                 ("vec", VEC);
                 ("dyn", DYN);
 
-                ("proc", PROC);
                 ("prog", PROG);
 		
               ]

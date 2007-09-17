@@ -52,11 +52,12 @@ and val_rec = (string, v) Hashtbl.t
       
 and val_alt =
     {
-     val_alt_case: Ast.alt_case;
-     val_alt_rec: val_rec;
+     val_alt_case: Ast.alt_decl_case;
+     val_alt_val: v;
     }
 
-and val_vec = v array
+and val_vec = { vec_storage: v array;
+		vec_initsz: int }
 
 and val_tup = v array
 
@@ -122,7 +123,7 @@ and val_proc =
      mutable proc_pos: Ast.pos;
      mutable proc_jumped: bool;
      mutable proc_resched: bool;
-     mutable proc_trace: bool;
+     mutable proc_trace: bool;     
      proc_ports: Ast.port array;
    }
 
