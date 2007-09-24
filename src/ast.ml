@@ -84,6 +84,7 @@ and name =
 and ty = 
 
     TY_dyn
+  | TY_native
   | TY_nil
   | TY_bool
   | TY_char

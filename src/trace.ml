@@ -104,6 +104,7 @@ let rec fmt_type out t =
   | TY_port s -> output_string out "(port ...)"
 
   | TY_prog -> output_string out "prog"
+  | TY_native -> output_string out "native"
 
   | TY_pred p -> output_string out "(pred ...)"
   | TY_quote q -> output_string out "(quote ...)"

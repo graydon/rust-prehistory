@@ -467,11 +467,11 @@ let exec_op proc op =
       | _ -> raise (Interp_err "calling non-function"))
 	
   | OP_return -> 
-      List.iter (fun x -> Hashtbl.remove proc.proc_env x) frame.frame_scope;
+      List.iter (Hashtbl.remove proc.proc_env) frame.frame_scope;
       while not (Stack.is_empty frame.frame_scope_stack)
       do
 	frame.frame_scope <- Stack.pop frame.frame_scope_stack;
-	List.iter (fun x -> Hashtbl.remove proc.proc_env x) frame.frame_scope;
+	List.iter (Hashtbl.remove proc.proc_env) frame.frame_scope;
       done;
       proc.proc_frames <- List.tl proc.proc_frames;
       (match proc.proc_frames with 
@@ -497,7 +497,7 @@ let bind_decl decl env =
   
 ;;
 
-let bind_std_natives proc = 
+let rec bind_std_natives it proc = 
   let reg name fn = Hashtbl.add proc.proc_natives name fn in 
   let getstr v = 
     (match v with 
@@ -513,12 +513,25 @@ let bind_std_natives proc =
     Printf.printf "\nlog: %S\n\n" s
   in
 
+  let spawn parent v = 
+    match v with
+      Some { rv_type=_; rv_val=(VAL_prog prog) } -> 
+	let frame = get_frame "spawn" parent in 
+	let stk = frame.frame_eval_stack in
+	let nproc = new_proc it prog in
+	let rval = Val.RVAL { rv_type = Ast.TY_lim Ast.TY_native;
+			      rv_val = (Val.VAL_native (Val.NATIVE_proc nproc)) }
+	in
+	Stack.push rval stk
+    | _ -> raise (Interp_err "expected prog arg")
+  in
+
   reg "putstr" (fun p args -> log (getstr args.(0)));
-  reg "putint" (fun p args -> log (Num.string_of_num (getint args.(0))))
-;;
+  reg "putint" (fun p args -> log (Num.string_of_num (getint args.(0))));
+  reg "spawn" (fun p args -> spawn p args.(0))
 
 
-let new_proc it prog = 
+and new_proc it prog = 
   let procid = it.interp_nextproc in  
   it.interp_nextproc <- procid + 1;
   let env = Hashtbl.create (Array.length prog.prog_decls) in 
@@ -535,7 +548,7 @@ let new_proc it prog =
 	       proc_resched = false;
 	       proc_trace = true }
   in
-  bind_std_natives proc;
+  bind_std_natives it proc;
   Hashtbl.add it.interp_procs procid proc;
   Queue.add procid it.interp_runq;
   proc

@@ -30,11 +30,14 @@ and v =
   | VAL_chan of val_chan
 
   | VAL_prog of Ast.prog
-  | VAL_proc of val_proc
 
   | VAL_type of Ast.ty
+  | VAL_native of val_native
   | VAL_quote of val_quote
 
+and val_native = 
+  | NATIVE_proc of val_proc
+  (* Add more natives here as required by language *)
 
 and val_quote = 
     VAL_quote_expr of Ast.expr

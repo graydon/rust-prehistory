@@ -571,6 +571,14 @@ and parse_base_ty ps =
       bump ps;
       Ast.TY_nil
 
+  | PROG -> 
+      bump ps;
+      Ast.TY_prog
+
+  | NATIVE -> 
+      bump ps;
+      Ast.TY_native
+
   | _ -> raise (unexpected ps)
 
 
