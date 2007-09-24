@@ -214,23 +214,25 @@ let fmt_stack out stk =
 ;;
 
 let trace_op proc =
-  let frame = List.hd proc.proc_frames in
-  let stk = frame.frame_eval_stack in
-  let op = 
-    if (frame.frame_pc >= Array.length frame.frame_ops)
-    then OP_return
-    else frame.frame_ops.(frame.frame_pc);
-  in
-  (match op with 
-    OP_pos _ -> ()
-  | _ ->
-      if Stack.is_empty stk
-      then ()
-      else Printf.printf 
-	  "       |  %a\n" 
-	  fmt_stack stk);
-  Printf.printf
-    "%6d | %a \n"
-    frame.frame_pc
-    fmt_op op
+  match proc.proc_frames with
+    [] -> ()
+  | frame::_ -> 
+      let stk = frame.frame_eval_stack in
+      let op = 
+	if (frame.frame_pc >= Array.length frame.frame_ops)
+	then OP_return
+	else frame.frame_ops.(frame.frame_pc);
+      in
+      (match op with 
+	OP_pos _ -> ()
+      | _ ->
+	  if Stack.is_empty stk
+	  then ()
+	  else Printf.printf 
+	      "       |  %a\n" 
+	      fmt_stack stk);
+      Printf.printf
+	"%6d | %a \n"
+	frame.frame_pc
+	fmt_op op
 ;;

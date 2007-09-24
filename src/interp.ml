@@ -218,6 +218,11 @@ let types_equal p q =
   p = q
 ;;
 
+let get_frame ctxt proc = 
+  match proc.proc_frames with
+    (x::xs) -> x
+  | [] -> raise (Interp_err (ctxt ^ ": process has no frames!"))
+;;
 
 let load proc lv =
   if Array.length lv.lval_rest != 0 
@@ -230,7 +235,7 @@ let store proc lv rvo =
 ;;
 
 let exec_load clear_slot proc res = 
-  let frame = List.hd proc.proc_frames in 
+  let frame = get_frame "exec_load" proc in 
   let stk = frame.frame_eval_stack in
   match res with 
     RVAL rv -> raise (Interp_err "loading from rval")
@@ -369,7 +374,7 @@ let exec_jump proc frame addr =
 
 
 let exec_op proc op = 
-  let frame = List.hd proc.proc_frames in 
+  let frame = get_frame "exec_op" proc in 
   let stk = frame.frame_eval_stack in
   let trueval = { rv_type = TY_bool; rv_val = VAL_bool false } in
   let trueres = (RVAL trueval) in
@@ -570,14 +575,14 @@ let step_proc p =
 
   | PROC_MAIN when p.proc_frames = [] -> 
       p.proc_state <- PROC_FINI
-
-  | PROC_MAIN 
-  | PROC_INIT 
+	  
+  | PROC_INIT
+  | PROC_MAIN
   | PROC_FINI -> 
       if p.proc_trace
       then Trace.trace_op p
       else ();
-      let f = List.hd p.proc_frames in
+      let f = get_frame "step_proc" p in
       let op = 
 	if (f.frame_pc >= Array.length f.frame_ops)
 	then OP_return
@@ -586,7 +591,7 @@ let step_proc p =
       exec_op p op;
       if p.proc_jumped
       then p.proc_jumped <- false
-      else f.frame_pc <- f.frame_pc + 1
+      else f.frame_pc <- f.frame_pc + 1;
 	  
   | _ -> (raise (Interp_err "interpreter wedged"))
 ;;
@@ -661,15 +666,17 @@ let interpret sf entry_name =
 	then 
 	  (
 	   if not ((!curr) = pid)
-	   then Printf.printf "switching to proc %d\n" p.proc_id
-	   else ();
+	   then Printf.printf "switching to proc %d\n" p.proc_id;
+
 	   curr := pid;
 	   
-	   while not p.proc_resched 
+	   while (not p.proc_resched) && (not (proc_finished p))
 	   do 
-	     step_proc p;
+	     step_proc p
 	   done;
-	   Queue.add p.proc_id it.interp_runq
+
+	   if (not (proc_finished p))
+	   then Queue.add p.proc_id it.interp_runq
 	  )
 	else
 	  ()
