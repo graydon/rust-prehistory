@@ -8,11 +8,12 @@ MLS:=ast.ml val.ml ll1parser.ml lexer.ml trace.ml interp.ml main.ml
 CMOS:=$(patsubst %.ml, %.cmo, $(MLS))
 CMXS:=$(patsubst %.ml, %.cmx, $(MLS))
 
-mainx: $(CMXS)
-	ocamlopt.opt -o $@ $(LIBS) $^ 
 
 main: $(CMOS)
-	ocamlc.opt $(OCAMLCFLAGS) -o $@ $(LIBS) $^ 
+	ocamlc $(OCAMLCFLAGS) -o $@ $(LIBS) $^ 
+
+mainx: $(CMXS)
+	ocamlopt -o $@ $(LIBS) $^ 
 
 .phony: clean
 
@@ -20,10 +21,10 @@ clean:
 	rm -f *.cmo *.cmi lexer.ml 
 
 %.cmo: %.ml
-	ocamlc.opt -c $(OCAMLCFLAGS) $<
+	ocamlc -c $(OCAMLCFLAGS) $<
 
 %.cmx: %.ml
-	ocamlopt.opt -c $<
+	ocamlopt -c $<
 
 %.ml: %.mll
 	ocamllex $<

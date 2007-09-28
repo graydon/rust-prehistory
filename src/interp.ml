@@ -218,21 +218,20 @@ let types_equal p q =
   p = q
 ;;
 
-let lookup_name_in_dir_modu name dir = 
+let rec lookup_name_in_dir_modu name dir = 
   let m = Hashtbl.find dir.Ast.dir_ents name.name_base in
   match m with
     MODU_src s -> 
       if Array.length name.name_rest = 0 
-      then VAL.val_prog (s.Ast.src_prog)
+      then VAL_prog (s.Ast.src_prog)
       else raise (Interp_err "don't know how to look into prog substructures yet")
   | MODU_dir d -> 
-      if Array.length name.name_rest = 0 
-      then raise (Interp_err "looking up a dir module")
-      else 
-	match Array.to_list name.Ast.name_rest with 
-	  (Ast.COMP_ident id)::rest -> 
-	    lookup_name_in_dir_modu { name_base = id;
-				      name_rest = Array.of_list rest; } d
+      (match Array.to_list name.Ast.name_rest with 
+	[] -> raise (Interp_err "looking up a dir module")	    
+      | (Ast.COMP_ident id)::rest -> 
+	  lookup_name_in_dir_modu { name_base = id;
+				    name_rest = Array.of_list rest; } d
+      | _ -> raise (Interp_err "looking up non-ident name component"))
 ;;
 
 let get_frame ctxt proc = 
@@ -655,14 +654,14 @@ let str_to_name str =
     [] -> raise (Interp_err "empty name")
   | base :: rest -> 
       { Ast.name_base = base;
-	Ast.name_rest = List.map (fun x -> COMP_ident x) rest; }
+	Ast.name_rest = Array.of_list (List.map (fun x -> COMP_ident x) rest); }
 ;;
 
 let find_entry_prog root entry_name = 
   let name = str_to_name entry_name in
-  let v = lookup_name_in_mod name root in
+  let v = lookup_name_in_dir_modu name root in
   match v with 
-    VAL_proc p -> p
+    VAL_prog p -> p
   | _ -> raise (Interp_err ("found non-proc val for " ^ entry_name))
 ;;
 

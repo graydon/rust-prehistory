@@ -1134,6 +1134,7 @@ and parse_decl_top ps =
 
 
 let make_parser tok fname = 
+  Printf.printf "making parser for: %s\n" fname;
   let lexbuf = Lexing.from_channel (open_in fname) in
   let spos = { lexbuf.Lexing.lex_start_p with Lexing.pos_fname = fname } in
   let cpos = { lexbuf.Lexing.lex_curr_p with Lexing.pos_fname = fname } in
@@ -1155,7 +1156,7 @@ let rec parse_modu_ents tok prefix ents ps =
       EQ -> 
 	bump ps;
 	(match peek ps with
-	  LIT_STR s -> s
+	  LIT_STR s -> bump ps; s
 	| _ -> raise (unexpected ps))
     | _ -> name
   in
@@ -1163,7 +1164,7 @@ let rec parse_modu_ents tok prefix ents ps =
     match peek ps with
       SEMI -> 
 	bump ps;
-	let p = make_parser tok fname in
+	let p = make_parser tok (Filename.concat prefix fname) in
 	let msg = "topdecls of '" ^ fname ^ "':" in
 	let prog = { Ast.prog_auto = false; 
 		     Ast.prog_init = None;
@@ -1172,13 +1173,13 @@ let rec parse_modu_ents tok prefix ents ps =
 		     Ast.prog_decls = arr [];
 		     Ast.prog_plugs = arr []; }
 	in
-	let prog = parse_prog_items EOF prog [] ps in
+	let prog = parse_prog_items EOF prog [] p in
 	Ast.MODU_src { Ast.src_fname = fname;
 		       Ast.src_prog = prog; }
     | RBRACE -> 
 	bump ps;
 	let subprefix = Filename.concat prefix fname in
-	let dir = parse_modu_dir tok fname subprefix ps in
+	let dir = Ast.MODU_dir (parse_modu_dir tok fname subprefix ps) in
 	expect ps LBRACE;
 	dir
     | _ -> raise (unexpected ps)
@@ -1191,8 +1192,8 @@ and parse_modu_dir tok fname prefix ps =
   List.iter 
     (fun (name,m) -> Hashtbl.add ents name m) 
     entlist;
-  Ast.MODU_dir { Ast.dir_fname = fname;
-		 Ast.dir_ents = ents; }
+  { Ast.dir_fname = fname;
+    Ast.dir_ents = ents; }
 ;;
 
 let report_error (ps, str) = 
@@ -1207,7 +1208,7 @@ let parse_crate tok fname =
   let ps = make_parser tok fname in
   let dir =  
     try 
-      parse_modu_dir tok fname "" ps
+      parse_modu_dir tok fname (Filename.dirname fname) ps
     with 
       Parse_err perr -> 
 	report_error perr; 
