@@ -218,6 +218,23 @@ let types_equal p q =
   p = q
 ;;
 
+let lookup_name_in_dir_modu name dir = 
+  let m = Hashtbl.find dir.Ast.dir_ents name.name_base in
+  match m with
+    MODU_src s -> 
+      if Array.length name.name_rest = 0 
+      then VAL.val_prog (s.Ast.src_prog)
+      else raise (Interp_err "don't know how to look into prog substructures yet")
+  | MODU_dir d -> 
+      if Array.length name.name_rest = 0 
+      then raise (Interp_err "looking up a dir module")
+      else 
+	match Array.to_list name.Ast.name_rest with 
+	  (Ast.COMP_ident id)::rest -> 
+	    lookup_name_in_dir_modu { name_base = id;
+				      name_rest = Array.of_list rest; } d
+;;
+
 let get_frame ctxt proc = 
   match proc.proc_frames with
     (x::xs) -> x
@@ -519,8 +536,8 @@ let rec bind_std_natives it proc =
 	let frame = get_frame "spawn" parent in 
 	let stk = frame.frame_eval_stack in
 	let nproc = new_proc it prog in
-	let rval = Val.RVAL { rv_type = Ast.TY_lim Ast.TY_native;
-			      rv_val = (Val.VAL_native (Val.NATIVE_proc nproc)) }
+	let rval = RVAL { rv_type = Ast.TY_lim Ast.TY_native;
+			  rv_val = (VAL_native (NATIVE_proc nproc)) }
 	in
 	Stack.push rval stk
     | _ -> raise (Interp_err "expected prog arg")
@@ -614,15 +631,39 @@ let step_proc p =
 (*                Initialization and Entry                       *)
 (*****************************************************************)
 
+let split_str sep s = 
+  let tmp = ref [] in
+  let accum = Buffer.create 100 in
+  let flush _ = (tmp := ((Buffer.contents accum) :: (!tmp)); 
+		 Buffer.clear accum)
+  in
+  let f c = 
+    if c = sep 
+    then flush ()
+    else Buffer.add_char accum c
+  in
+  String.iter f s;
+  if Buffer.length accum > 0
+  then flush();
+  List.rev (!tmp)
+;;
 
-let find_entry_prog sf entry_name = 
-  let binding = Hashtbl.find sf entry_name in 
-  match binding with 
-    (VIS_public, d) -> 
-      (match d with
-	DECL_slot (_, _, Some (EXPR_literal ((LIT_prog prog), _))) -> prog
-      | _ -> raise (Interp_err ("cannot find 'pub prog " ^ entry_name ^ "'")))
-  | _ -> raise (Interp_err ("cannot find 'pub " ^ entry_name ^ "'"))
+
+let str_to_name str = 
+  let comps = split_str '.' str in
+  match comps with 
+    [] -> raise (Interp_err "empty name")
+  | base :: rest -> 
+      { Ast.name_base = base;
+	Ast.name_rest = List.map (fun x -> COMP_ident x) rest; }
+;;
+
+let find_entry_prog root entry_name = 
+  let name = str_to_name entry_name in
+  let v = lookup_name_in_mod name root in
+  match v with 
+    VAL_proc p -> p
+  | _ -> raise (Interp_err ("found non-proc val for " ^ entry_name))
 ;;
 
 
@@ -654,17 +695,18 @@ let init_args =
 (*                    Interpreter structure                      *)
 (*****************************************************************)
 
-
-let new_interp _ = 
+let new_interp root = 
   { interp_nextproc = 0;
     interp_procs = Hashtbl.create 100;
     interp_runq = Queue.create ();
-    interp_mods = Hashtbl.create 100; }
+    interp_root = root; }
+;;
 
-let interpret sf entry_name = 
+
+let interpret root entry_name = 
   Printf.printf "interpreting\n";
-  let it = new_interp () in
-  let entryproc = new_proc it (find_entry_prog sf entry_name) in
+  let it = new_interp root in
+  let entryproc = new_proc it (find_entry_prog root entry_name) in
   enter_init_frame entryproc init_args;
   let curr = ref entryproc.proc_id in
   while not (Queue.is_empty it.interp_runq)

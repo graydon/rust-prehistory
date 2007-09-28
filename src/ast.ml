@@ -461,8 +461,6 @@ type visibility =
   | VIS_local
 ;;
 
-type decl_top = (visibility * decl)
-;;
 
 (* Helper functions for querying AST. *)
 
@@ -473,4 +471,22 @@ let decl_id d =
   | DECL_port (_, p) -> p.port_ident
   | DECL_data (_, (DATA_rec dr)) -> dr.rec_decl_ident
   | DECL_data (_, (DATA_alt ar)) -> ar.alt_decl_ident
+;;
+
+
+type modu_src = 
+    {
+     src_fname: string;
+     src_prog: prog;
+    }
+
+and modu_dir = 
+    {     
+     dir_fname: string;
+     dir_ents: (string, modu) Hashtbl.t;
+    }
+      
+and modu = 
+    MODU_dir of modu_dir
+  | MODU_src of modu_src
 ;;

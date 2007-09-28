@@ -136,11 +136,6 @@ and proc_exec_state =
   | PROC_MAIN 
   | PROC_SEND 
   | PROC_RECV 
-
-;;
-
-type val_mod = 
-    (string, (Ast.visibility * rv)) Hashtbl.t
 ;;
 
 type interp = 
@@ -148,6 +143,6 @@ type interp =
      mutable interp_nextproc: int;
      interp_procs: (int, val_proc) Hashtbl.t;
      interp_runq: int Queue.t;
-     interp_mods: (string, val_mod) Hashtbl.t
+     interp_root: Ast.modu_dir;
    }
 ;;

@@ -883,23 +883,24 @@ and parse_stmt ps =
 
   | _ -> raise (unexpected ps)
 
-and parse_prog_items p declist ps =
+and parse_prog_items term p declist ps =
   let pos = lexpos ps in 
   match peek ps with 
     MAIN -> 
       bump ps; 
       let main = ctxt "prog_item: main" parse_stmt ps in 
       (match p.Ast.prog_main with
-	None -> parse_prog_items { p with Ast.prog_main = Some main } declist ps
+	None -> parse_prog_items term { p with Ast.prog_main = Some main } declist ps
       | _ -> raise (err "duplicate main declaration" ps))
 
-  | RBRACE -> 
-      bump ps; 
-      {p with Ast.prog_decls = arl declist }
-
-  |_ -> 
-      let decl = ctxt "prog_item: decl" parse_decl ps in 
-      parse_prog_items p (decl :: declist) ps
+  | x -> 
+      if x = term
+      then 
+	(bump ps; {p with Ast.prog_decls = arl declist })
+      else 
+	let decl = ctxt "prog_item: decl" parse_decl ps in 
+	parse_prog_items term p (decl :: declist) ps
+      
 
 	
 and parse_prog ps = 
@@ -914,7 +915,7 @@ and parse_prog ps =
   match peek ps with 
     LBRACE -> 
       bump ps; 
-      parse_prog_items prog [] ps
+      parse_prog_items RBRACE prog [] ps
   | _ -> raise (unexpected ps)
 
 and parse_bind_param ps =
@@ -1128,40 +1129,89 @@ and parse_decl_top ps =
       bump ps;
       let d = ctxt "decl_top: crate" parse_decl ps in
       (Ast.VIS_crate, d)
+;;
 
 
-and parse_topdecls ps decls =
-  match peek ps with
-    EOF -> List.rev decls
-  | _ -> 
-      let d = ctxt "topdecls" parse_decl_top ps in
-      parse_topdecls ps (d::decls)
 
-and sourcefile tok lbuf = 
-  let first = tok lbuf in
-  let ps = { pstate_peek = first;
-	     pstate_ctxt = [];
-	     pstate_lexfun = tok;
-	     pstate_lexbuf = lbuf }
-  in  
-  let bindings = Hashtbl.create 100 in
-  let decls =       
-    try 
-      parse_topdecls ps []
-    with 
-      Parse_err (ps, str) -> 
-	Printf.printf "Parser error: %s\n" str;
-	List.iter 
-	  (fun (cx,(file,line,col)) -> 
-	    Printf.printf "%s:%d:%d:E [PARSE CONTEXT] %s\n" file line col cx) 
-	  ps.pstate_ctxt;
-	[]
+let make_parser tok fname = 
+  let lexbuf = Lexing.from_channel (open_in fname) in
+  let spos = { lexbuf.Lexing.lex_start_p with Lexing.pos_fname = fname } in
+  let cpos = { lexbuf.Lexing.lex_curr_p with Lexing.pos_fname = fname } in
+  lexbuf.Lexing.lex_start_p <- spos;
+  lexbuf.Lexing.lex_curr_p <- cpos;
+  let first = tok lexbuf in
+  { pstate_peek = first;
+    pstate_ctxt = [];
+    pstate_lexfun = tok;
+    pstate_lexbuf = lexbuf }
+;;
+
+
+let rec parse_modu_ents tok prefix ents ps = 
+  expect ps MOD;
+  let name = ctxt "modu: name" parse_ident ps in
+  let fname = 
+    match peek ps with
+      EQ -> 
+	bump ps;
+	(match peek ps with
+	  LIT_STR s -> s
+	| _ -> raise (unexpected ps))
+    | _ -> name
   in
-
+  let m = 
+    match peek ps with
+      SEMI -> 
+	bump ps;
+	let p = make_parser tok fname in
+	let msg = "topdecls of '" ^ fname ^ "':" in
+	let prog = { Ast.prog_auto = false; 
+		     Ast.prog_init = None;
+		     Ast.prog_main = None;
+		     Ast.prog_fini = None;
+		     Ast.prog_decls = arr [];
+		     Ast.prog_plugs = arr []; }
+	in
+	let prog = parse_prog_items EOF prog [] ps in
+	Ast.MODU_src { Ast.src_fname = fname;
+		       Ast.src_prog = prog; }
+    | RBRACE -> 
+	bump ps;
+	let subprefix = Filename.concat prefix fname in
+	let dir = parse_modu_dir tok fname subprefix ps in
+	expect ps LBRACE;
+	dir
+    | _ -> raise (unexpected ps)
+  in
+  ((name, m) :: ents)
+    
+and parse_modu_dir tok fname prefix ps = 
+  let entlist = parse_modu_ents tok prefix [] ps in
+  let ents = Hashtbl.create (List.length entlist) in
   List.iter 
-    (fun (vis,decl) -> 
-      Hashtbl.add bindings (Ast.decl_id decl) (vis,decl)) decls;
-  bindings
+    (fun (name,m) -> Hashtbl.add ents name m) 
+    entlist;
+  Ast.MODU_dir { Ast.dir_fname = fname;
+		 Ast.dir_ents = ents; }
+;;
 
+let report_error (ps, str) = 
+  Printf.printf "Parser error: %s\n" str;
+  List.iter 
+    (fun (cx,(file,line,col)) -> 
+      Printf.printf "%s:%d:%d:E [PARSE CONTEXT] %s\n" file line col cx) 
+    ps.pstate_ctxt
+;;
 
+let parse_crate tok fname = 
+  let ps = make_parser tok fname in
+  let dir =  
+    try 
+      parse_modu_dir tok fname "" ps
+    with 
+      Parse_err perr -> 
+	report_error perr; 
+	failwith "parse error"
+  in
+  dir
 ;;
