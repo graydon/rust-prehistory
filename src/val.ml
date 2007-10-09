@@ -91,6 +91,7 @@ and op =
   | OP_send
   | OP_return
   | OP_yield
+  | OP_resume
 
   | OP_bad
 
@@ -121,6 +122,7 @@ and val_proc =
      proc_env: (string, (rv option)) Hashtbl.t;
      proc_natives: (string, (val_proc -> ((rv option) array) -> unit)) Hashtbl.t;
 
+     mutable proc_frame: int;
      mutable proc_frames: frame list;
      mutable proc_state: proc_exec_state;
      mutable proc_pos: Ast.pos;

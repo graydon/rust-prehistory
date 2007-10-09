@@ -1,0 +1,89 @@
+2007-Oct-07
+-----------
+
+So far we've been very antagonistic towards any "clever" requirements
+in a runtime: if the semantic model doesn't *spell out* the
+optimization strategy, chances are no runtime will ever manage to be
+smart enough to "discover" one.
+
+This position has failed to address one important issue, and I need to
+nail it down before going on: how do you efficiently schedule and
+dispatch message-receives. If we can't do that efficiently, we're
+sunk. Efficient here means: constant space per proc, constant
+dispatching time.
+
+So let's sketch the situation. Note this is not necessarily related to
+handling dynamic alts and binding-channels-to-sets; it might be nice
+if it handles it, but not essential. This is for the case of a fixed
+set of ports and a fixed set of dispatching alts visible in the
+proc. The only variable size is the number of queued callers and the
+number
+
+So, naively -- worst case -- we have 1 run queue including the
+sleepers, we pull people out in random order, and each sleeper points
+to the target it's trying to enter, and the first one to enter a proc
+wins. That works, but it's effectively busy-waiting the sleepers when 
+anyone is making progress; you only idle when *everyone* is blocked.
+
+The crucial problem is devising the constant-size data structure that
+maps N callers into queues in a variable partition of between 0 .. K
+queues, such that you can do the following in O(1):
+
+  - add a member to, or remove a member from, a queue
+  - figure out if there's anyone in a queue
+  - pick a representative from that queue at random
+
+First, note the following facts:
+
+  - doubling/halving vectors waste no more than 75% of their space.
+  - 2-space copying collectors waste no more than 50% of their space
+
+So we build a 2+10N-word structure given N processes:
+
+  - 2 4N-word vectors representing 2 spaces for d/h queue sub-vectors,
+    densely packed, copied back and forth between the spaces as they
+    need reallocation.
+  - 2 control words representing "end of current space" in each space.
+  - a 2N-word vector of 2-word control records that refer into
+    the 2 spaces
+
+So a million processes require <=10 million words, or ~40mb, of
+scheduling queues on a 32-bit machine. Not great, but not bad. Bounded
+at least. And really, no process is going to eat less than 10 words of
+stack and control state anyways; we just don't want to wind up
+charging more for the queues than we do for the process abstraction in
+a neutral-ish, low-stack form (say an auto proc with small-ish ports).
+The proc can get by with 1 word in its header for every queue, and
+combine all the auto ports into a single queue. So for abundant
+million-copy auto-proc sort of procs, 1 word period: pointing to the
+queue ID in the entry scheduler. Yay.
+
+This gives us O(1) randomized scheduling on every queue assuming we
+use an O(1) PRNG (I like ISAAC). Then when you execute an alt, it
+picks 2 words from the PRNG, uses the first to pick a queue and the
+second to pick a caller within the queue to wake (or should it pick 1
+word mod total waiters, then distribute to the queue that held that
+waiter? slightly slower to dispatch if you have a large number of
+ports, but gives a different model of fairness...). Either way:
+simple, fast, easy to guess what will happen, smoothes out load lumps
+at every step of the system.
+
+That last question is curious. Suppose you have a proc with a million
+processes waiting on port A, and 1 process waiting on port B.
+
+Should the B process get a ~1/1million chance to run, or a ~1/2 chance
+to run? Which is easier to imagine the designer wanting more often?
+Which is easier for the designer to work around if they mean the other
+thing? I think the designer is more likely to want to get a guarantee
+of the latter (1/2 chance) because they have more to count on that
+way; they can always combine event streams together dynamically if
+they want the other sort of behavior. It's easy enough to just have a
+proc hold an internal work buffer that it mixes its own trouble into
+and processes as it wishes. Also, it doesn't hurt that the 1/2 case
+scales better :)
+
+Also note that if you have dynamic ports, you may have a larger-size
+scheduling pool.
+
+Woo! I think this issue is (finally) solved. I chewed on it for 24+
+hours solid. Bleah.

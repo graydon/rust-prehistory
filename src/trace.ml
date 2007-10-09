@@ -194,6 +194,7 @@ let fmt_op out op =
   | OP_new -> output_string out "NEW"
   | OP_return -> output_string out "RETURN"
   | OP_yield -> output_string out "YIELD"
+  | OP_resume -> output_string out "RESUME"
 
   | OP_bad -> output_string out "-"
 

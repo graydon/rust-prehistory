@@ -235,9 +235,10 @@ let rec lookup_name_in_dir_modu name dir =
 ;;
 
 let get_frame ctxt proc = 
-  match proc.proc_frames with
-    (x::xs) -> x
-  | [] -> raise (Interp_err (ctxt ^ ": process has no frames!"))
+  if (proc.proc_frame < 0
+    || proc.proc_frame > (List.length proc.proc_frames))
+  then raise (Interp_err (ctxt ^ ": bad frame request in frames"))
+  else List.nth proc.proc_frames proc.proc_frame 
 ;;
 
 let load proc lv =
@@ -493,9 +494,18 @@ let exec_op proc op =
       (match proc.proc_frames with 
 	x :: _ -> Stack.push trueres x.frame_eval_stack
       | _ -> ())
+
+  | OP_resume -> 
+      if proc.proc_frame = 0 
+      then raise (Interp_err "resuming at top of stack");
+      proc.proc_frame <- proc.proc_frame - 1;
+      proc.proc_resched <- true
+
+  | OP_yield -> 
+      proc.proc_frame <- proc.proc_frame + 1;
+      proc.proc_resched <- true
 	  
   | OP_new -> raise (Interp_err "cannot new yet")
-  | OP_yield -> raise (Interp_err "cannot yield yet")
   | OP_send -> raise (Interp_err "cannot send yet")
   | OP_bad -> raise (Interp_err "executing bad instruction")
 ;;
@@ -556,6 +566,7 @@ and new_proc it prog =
 	       proc_prog = prog;
 	       proc_env = env;
 	       proc_natives = Hashtbl.create 0;
+	       proc_frame = 0;
 	       proc_frames = [];
 	       proc_state = PROC_INIT;
 	       proc_ports = Array.of_list [];
