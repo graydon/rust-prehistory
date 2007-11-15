@@ -132,18 +132,6 @@ Complete table of contents
 * Ref.Stat.Typestates::         Conditions that hold over statements at points.
 * Ref.Stat.Assert::             Explicit manipulation of typestates.
 
-@c nb: language needs ``become'' to explicitly say when you want local dtors to run.
-@c ``return'' means ``after expr'', ``become'' means ``before expr''. 
-@c you can remove this note, but do not remove ``become'' from the language.
-
-* Ref.Stat.Ctrl.Return::        Statement for stopping and producing a value.
-* Ref.Stat.Ctrl.Become::        Statement for stopping and executing a tail call.
-* Ref.Stat.Ctrl.Yield::         Statement for pausing and producing a value.
-* Ref.Stat.Ctrl.While::         Statement for simple conditional looping.
-* Ref.Stat.Ctrl.For::           Statement for complex conditional looping.
-* Ref.Stat.Ctrl.If::            Statement for simple conditional branching.
-* Ref.Stat.Ctrl.Alt::           Statement for complex conditional branching.
-
 @end menu
 
 @c ############################################################

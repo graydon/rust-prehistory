@@ -18,7 +18,7 @@ mainx: $(CMXS)
 .phony: clean
 
 clean:
-	rm -f *.cmo *.cmi *.o *.cmx lexer.ml 
+	rm -f *.cmo *.cmi lexer.ml 
 
 %.cmo: %.ml
 	ocamlc -c $(OCAMLCFLAGS) $<
