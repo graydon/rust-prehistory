@@ -1,0 +1,97 @@
+
+// sketch
+
+struct proc { 
+  word_t mem_budget;
+  word_t tick_budget;
+  word_t curr_mem;
+  word_t curr_ticks;
+  stk_seg *stk;
+  byte_t *env;          // optional -- closures only
+  msg_que *q;
+  regs saved_regs;
+  void state[];         // computed
+}
+
+struct regs {
+  word_t pc;
+  word_t sp;
+  word_t gprs[n];
+}
+
+struct stk_seg { 
+  stk_seg *prev;
+  stk_seg *next;
+  word_t size;
+  word_t live;
+  byte_t frames[]; // computed
+}
+
+struct frame { 
+  frame_desc *desc; // points to the code + frame descriptor
+  void *retpc;
+  void *yieldpc;    // optional
+  byte_t *env;      // optional -- closures only
+  byte_t slots[];   // computed
+}
+
+struct vec {
+  word_t refs;
+  word_t size;
+  word_t live;
+  word_t init;
+  byte_t slots[];  // computed
+}
+  
+  
+Stack segments are arranged in a linked list off a proc. The first is
+small-ish, and each subsequent segment in the list is double the size
+of the previous. probably there are only a few. It is important not to
+waste too much time shuffling or reallocating stack segments, else you
+lose the benefit!
+
+returning from a frame when live = 0 means going back to
+prev. entering a frame when live + framesz > size means allocating a
+next and going to it.
+
+Ok. So if this is the "rough" shape of the runtime model, how do we
+implement it? To interface with system libraries we really have no
+choice -- especially on win32 -- but to go through their shared libs.
+So we interface with them at a loader level. We have a bunch of
+addresses of entries into their system. We still have the problem of
+implementing the basic rust runtime services -- processes, schedulers,
+allocation, CoW, generic traversal, loading and unloading, signals,
+i/o multiplexing -- which are "under" the rust language semantics.
+
+The answer is perhaps surprising. We implement a librustrt.so /
+rustrt.dll in C. This contains the runtime system needed by rust
+crates; it's the part that converts rust's abstractions to OS
+abstractions. Rust *crates* are executable ELF or PE files that import
+the rust rt library and contain a tiny executable entry stub that
+simply pushes the address of the rust entry point -- different from
+the process entry point! -- for the crate on the C stack and calls
+into the rt library. The rt library initializes itself, sets up
+function pointers in an interface table, pushes a pointer to that
+table on the stack and calls *back* through the provided pointer into
+the crate, to the provided rust entry point. Rust then saves registers
+and commences normal operation, with the provision that it now has a
+special pointer into the rt service table that it can call through to
+get common things done. 
+
+But there is a twist: rust crates can *also* be LoadLibrary()'ed or
+dlopen()'d and have the "rust entry point" extracted *by a host
+process*; the rust entry point is the sole exported OS-visible symbol
+in a rust crate. So if that host process provides a suitable function
+pointer table then the rust crate can be run as an embedded
+component. Turns out you can dynamically link a ".EXE" file or an ELF
+executable just fine.
+
+The key point is that rust crates are activated explicitly and
+parameterized explicitly by an interface table *passed into them* at
+runtime. They do not use indirect jumps through the PE import table or
+ELF PLT. So the dynamic linking is something you get to do manually,
+or let the startup stub code in the executable do it, in which case it
+uses its sole imported symbol -- the rust runtime library import entry
+-- to set up a standard interface and use it.
+
+Smashing!
