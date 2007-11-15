@@ -87,3 +87,96 @@ scheduling pool.
 
 Woo! I think this issue is (finally) solved. I chewed on it for 24+
 hours solid. Bleah.
+
+2007-Oct-10
+-----------
+
+Multithreading.
+
+Hmm. I am generally not interested in multithreading: it's not worth
+the pain. There are reasons you might want it, but they're few.
+
+But let's just jot down "the simplest possible MT solution" and see if 
+it works. First, note that modern systems guarantee word-aligned writes
+are atomic and all have an atomic compare-and-swap (CAS) instruction.
+So you are never going to have to race over refcount operations or 
+twiddling owner IDs or whatever. So:
+
+  - Every directly limited type has a single owner, which implies a 
+    single reference. That much is obvious.
+
+  - If I have a single reference and limitation infects, then the path
+    from the thread register that owns me to me is all
+    single-referenced values.
+
+  - So: directly or indirectly limited slots make up a true
+    tree. Always. There is always a true tree of process ownership,
+    for example. Moving process references around only happens between
+    portions of a tree-shaped data structure. If a thread can see node
+    N in that tree, it is the only thread that can see the subtree
+    under N.
+
+  - The only stuff that might be "visible" to multiple threads
+    simultaneously is the daggy "value" stuff. That's all refcounted
+    along pointer edges. And we CoW any "value" into our own thread's
+    tree any time we're performing an update: we don't expect other
+    threads can "see" changes we make. We always edit "our own copy".
+    There is no semantic "shared visibility mutation" in this
+    language, never has been.
+
+  - So all we need to reason about in MT terms is the CoW system and
+    the message queue system, and interactions with the outside world.
+    Which, unfortunately, we *always* have to reason about quite
+    carefully anyways.
+
+  - CoW is CAS-based. The path from your thread registers/stack to a
+    heap memory write is *always* an lval-lookup LHS of an assignment
+    statement. So to perform such a write you go step by step ensuring
+    refcount=1. If you see a >1 edge you must pause, make a shallow
+    copy, rewrite "your" rc=1 base value that's holding the shared
+    edge to instead hold your copy, and carry on. When you get to the
+    leaf you write.
+
+    When you are forming a new reference to a shared value, you must
+    increment the shared value refcount safely. You do this with a
+    CAS.
+
+    When you are dropping a refcount due to a value you're freeing,
+    you must get the refcount to 0, then free. If you CAS the value
+    1->0 successfully, you're the guy who gets to free the memory. If
+    you're unsuccessful, someone else beat you to it (or re-referenced
+    the value) and you're off the hook.
+
+    aliases permit concurrent reads but reading through them should
+    always use a memory barrier pointer-read sort of thing to ensure a
+    coherent view. Or maybe it's that writes to heap pages always need
+    to run a memory barrier op on the containing object? I can never
+    remember...
+
+  - The message queue system is a little hairier, but not hugely. You
+    have a single Big Scheduler Of Processes and a bunch -- say 64 or
+    512 -- of threads. You can activate only as many procs as you have
+    threads at any moment, and you may occasionally have to have one
+    wait on another due to a message send or an attempted proc
+    lifecycle event; in those cases the proc becomes blocked, the
+    thread sticks it back in the run queue, and it's "dormant data"
+    for other threads to diddle.  You only possibly get stuck when you
+    have an imperative like "I'm dying" and you are trying to clean up
+    a proc you own. You can post the proc-death event but it might
+    take a moment to "really" die. So you have a sort of grim reaper
+    pseudo-proc that you have to message synchronously to confirm the
+    death of another proc.
+    
+    ... OR ... you never have 1 thread running a proc with another
+    thread running a parent proc. In order to activate a proc you have
+    to block -- all the way up to the root of the proc tree -- its
+    parents. So they're only likely to give you a little moment to run
+    in, not a lot. That is probably a better rule. Explicit priority
+    delegation: no inversion possible! The thread scheduler has to
+    perform the topological allocation.
+
+  - The other hairy part is that the message-send queue, the proc run
+    queue, and the idle thread queue probably all have to be some
+    fancy MT-safe lockless queues. Because the threads are all going
+    to be independently and concurrently hammering on those
+    things. But such structures exist.
