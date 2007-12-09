@@ -1,12 +1,92 @@
 
 (* 
+ * Frames look like this, as in C (stack grows down):
+ * 
+ *    [arg0     ]
+ *    ...        
+ *    [argN     ]
+ *    [env ptr  ]
+ *    [desc ptr ]
+ *    [yield sp ] 
+ *    [yield pc ]
+ *    [return sp]
+ *    [return pc]  <-- sp for this frame.
+ *    [local 0  ] 
+ *    ...
+ *    [local N  ]
+ *    [spill 0  ]
+ *    ...
+ *    [spill N  ]
+ * 
+ * All you have to work with is sp. At sp there is a return
+ * pc, at sp+4 there is a saved sp of the frame under us,
+ * which we reload before jumping back to pc=*sp. Note that 
+ * the values of sps do not need to be anything remotely
+ * like linear. Stack segments may go all over the heap.
+ * 
+ * At sp+8 there is a descriptor that tells you what 
+ * sort of frame you're in. You should not look at anything
+ * aside from sp, sp+4 and sp+8 "generically"; you have
+ * to use the descriptor to do anything else.
+ * 
+ * If the descriptor says you're in a function that can yield,
+ * you will then have a yield pc and yield sp above it. If the
+ * descriptor says you're in a closure, you will have an 
+ * environment pointer above that. Above these optional parts
+ * you'll have the args.
+ * 
+ * The caller must know at least the following when it makes
+ * a call:
+ * 
+ *   - if it's calling into a yielding function
+ *   - if it's calling into a closure
+ *   - if it's tail-calling
+ *   - if it's tail-yielding
+ * 
+ * It needs to know these things for the following reasons:
+ * 
+ *   - When entering a yielding function, two extra words need
+ *     to be reserved. Nothing needs to be put in them unless
+ *     it's a tail-yield; the prologue of the callee will set 
+ *     it up normally.
+ * 
+ *   - When entering a closure, the environment needs to be
+ *     set.
+ * 
+ *   - When tail-calling, the current frame is taken apart
+ *     and a new frame built in its place before jumping to
+ *     the target.
+ * 
+ *   - When tail-yielding, the current frame remains but the
+ *     caller copies its yield sp and pc to the callee. It does
+ *     this by calling to an address a few words inside the callee,
+ *     past the callee prologue that would *normally* set up the
+ *     default yield sp and yield pc from the incoming return sp
+ *     and return pc.
+ * 
+ * 
+ *)
+
+(* 
+ * Register assignments in our ABI are as follows:
+ * 
+ *  EAX, ECX, EDX, EBX, ESI, EDI -- the 6 GPRs we can freely assign
+ *  ESP - points to the frame we're inside
+ *  EBP - points to the proc we're inside
+ * 
+ * We assign virtual regs to the 6 GPRs using Poletto and Sarkar's
+ * linear-scan algorithm.
+ * 
+ *)
+
+(* 
  * x86/ia32 instructions have 6 parts: 
  * 
  *    [pre][op][modrm][sib][disp][imm]
  * 
  * [pre] = 0..4 bytes of prefix
  * [op] = 1..3 byte opcode
- * [modrm] = 0 or 1 byte:  [mod:2][reg/op:3][r/m:3]
+ * [modrm] = 0 or 1 byte: [mod:2][reg/op:3][r/m:3]
  * [sib] = 0 or 1 byte: [scale:2][index:3][base:3]
  * [disp] = 1, 2 or 4 byte displacement
  * [imm] = 1, 2 or 4 byte immediate
@@ -38,7 +118,7 @@
  *   110 - ESI or XMM6
  *   111 - EDI or XMM7
  * 
- * The next-lowest 3 bits denote sub-modes of the primary mode selected
+ * The final low 3 bits denote sub-modes of the primary mode selected
  * with the top 2 bits. In particular, they "mostly" select the reg that is 
  * to be used for effective address calculation.
  * 
@@ -51,6 +131,12 @@
  * 
  *  - In primary mode 00, r/m=101 means "just disp32", no register is involved.
  *    There is no way to use EBP in primary mode 00.
+ * 
+ * Some opcodes are written 0xNN +rd. This means "we decided to chew up a whole
+ * pile of opcodes here, with each opcode including a hard-wired reference to a
+ * register". For example, POP is "0x58 +rd", which means that the 1-byte insns
+ * 0x58..0x5f are chewed up for "POP EAX" ... "POP EDI" (again, the canonical
+ * order of register numberings)
  *)
 
 (* x86 instruction emitting *)
