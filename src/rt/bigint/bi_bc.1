@@ -1,0 +1,131 @@
+.TH bi_bc 1 "28 July 2000"
+.SH NAME
+bi_bc - simple arbitrary-precision calculator
+.SH SYNOPSIS
+.B bi_bc
+.SH DESCRIPTION
+.PP
+A simple calculator program that handles arbitrarily-large numbers.
+It's similar to the standard "bc" calculator, but can handle larger
+numbers, goes somewhat faster, and has some more special functions.
+However unlike "bc" it does not handle fractional numbers, only integers.
+It also does not implement bc's booleans, bit operations, functions, etc.
+It does implement variables and assignments, but they can only be
+one letter long.
+.PP
+The basic operations are the usual ones with the usual precedence,
+plus a couple extra:
+.IP "x + y"
+addition
+.IP "x - y"
+subtraction
+.IP "x * y"
+multiplication
+.IP "x / y"
+division
+.IP "x % y"
+remainder
+.IP "-x"
+unary negation
+.IP "x ^ y"
+exponentiation
+.IP "x!"
+factorial
+.PP
+You can use parentheses to group sub-expressions.
+Then there are the special functions:
+.IP "sqrt( x )"
+square root
+.IP "gcd( x, y )"
+greatest common divisor
+.IP "lcm( x, y )"
+least common multiple
+.IP "modpow( x, y, z )"
+modular exponentiation - equivalent to ( x ^ y ) % z, but much faster
+.IP "modinv( x, y )"
+modular inverse
+.IP "random( x )"
+random number in [0..x)
+.IP "bits( x )"
+number of bits in x
+.IP "jacobi( x, y )"
+the Jacobi symbol
+.IP "isprime( x, y )"
+check whether x is a prime number, to certainty y
+.IP "genprime( x, y )"
+generate a probable prime number x bits long, with certainty y
+.PP
+For the last two functions, the certainty just specifies how many times
+to run the probabilistic prime check.
+Each iteration that the number passes through means it has at least
+a 50% chance of being prime.
+10 iterations means the chance is at least a thousand to one in favor of
+primality, or to put it another way, less than a one in a thousand chance
+that the number is actually composite.
+With 20 iterations, the chance goes to less than one in a million.
+.SH EXAMPLE
+.PP
+Here's how you could use bi_bc to do an RSA encryption and decryption.
+.PP
+First, decide how many bits long you want your keys to be.
+Let's say 500.
+Generate two prime numbers half that long (takes a couple seconds each):
+.nf
+    p = genprime(250,20)
+    q = genprime(250,20)
+.fi
+Compute their product, and the product of one less than the primes:
+.nf
+    n = p * q
+    o = (p-1) * (q-1)
+.fi
+Pick a public key - a random number less than o:
+.nf
+    e = random(o)
+.fi
+Compute the corresponding private key:
+.nf
+    d = modinv(e,o)
+.fi
+If this step fails (due to e not being relatively prime to o), pick another e.
+It may take a few tries.
+.PP
+Now you have your public and private keys.
+Pick a message to encrypt, up to 500 bits long:
+.nf
+    m = 12345678901234567890123456789012345678901234567890
+.fi
+Encrypt it with your public key (this takes a few seconds):
+.nf
+    c = modpow(m,e,n)
+.fi
+Decrypt it with your private key (also takes a few seconds):
+.nf
+    modpow(c,d,n)
+    12345678901234567890123456789012345678901234567890
+.fi
+That's all there is to it!
+.SH "SEE ALSO"
+bi_factor(1), bigint(3)
+.SH AUTHOR
+Copyright © 2000 by Jef Poskanzer <jef@mail.acme.com>. All rights reserved.
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\" 
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
