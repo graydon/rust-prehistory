@@ -21,7 +21,8 @@ type slot = Vreg of int
 
 type op = 
     ADD | SUB | NEG 
-  | MUL | DIV | MOD 
+  | MUL | DIV 
+  | MOD 
   | MOV 
   | LAND | LOR | LNOT 
   | BAND | BOR | BXOR | BNOT 
@@ -31,7 +32,7 @@ type op =
   | END
 ;;
 
-type quad = { quad_lab: label;
+type quad = { quad_lab: label option;
 	      quad_op: op;
 	      quad_dst: slot;
 	      quad_lhs: slot;
@@ -50,8 +51,8 @@ let rec fmt_slot out slot =
     | Local i -> Printf.fprintf out "local:%d" i
     | Lit i -> Printf.fprintf out "lit:%s" (Int32.to_string i)
     | Deref (s,i) -> Printf.fprintf out "*(%a + %s)" fmt_slot s (Int32.to_string i)
-    | Nil -> Printf.printf "nil"
     | Label i -> Printf.fprintf out "label:%d" i
+    | Nil -> ()
 ;;
 
 let fmt_op out op = 
@@ -84,12 +85,17 @@ let fmt_op out op =
        | CALL -> "CALL"
        | RET -> "RET"
        | NOP -> "NOP"
-       | END -> "END")
+       | END -> "---")
   
+
+let fmt_lab out l = 
+  match l with 
+      None -> Printf.fprintf out "  "
+    | Some i -> Printf.fprintf out "%d:\n  " i
   
 let fmt_quad out q = 
-  Printf.fprintf out "%d: %a <- %a %a %a"
-    q.quad_lab
+  Printf.fprintf out "%a %a <- %a %a %a"
+    fmt_lab q.quad_lab
     fmt_slot q.quad_dst
     fmt_op q.quad_op
     fmt_slot q.quad_lhs
@@ -102,12 +108,13 @@ let print_quads qs =
 
 type emitter = { emit_n_hardregs: int;
 		 mutable emit_pc: int;
+		 mutable emit_next_label: int; 
 		 mutable emit_next_vreg: int; 
 		 mutable emit_next_spill: int;
 		 mutable emit_quads: quads; }
 
 
-let badq = { quad_lab = 0;
+let badq = { quad_lab = None;
 	     quad_op = END;
 	     quad_dst = Nil;
 	     quad_lhs = Nil;
@@ -118,6 +125,7 @@ let new_emitter n_hardregs =
   { 
     emit_n_hardregs = n_hardregs;
     emit_pc = 0;
+    emit_next_label = 0;
     emit_next_vreg = 0;
     emit_next_spill = 0;
     emit_quads = Array.create 4 badq;
@@ -137,6 +145,12 @@ let next_spill e =
     i
 ;;
 
+let next_label e = 
+  let i = e.emit_next_label in
+    e.emit_next_label <- i + 1;
+    i
+;;
+
 let grow_if_necessary e =
   let len = Array.length e.emit_quads in
   if e.emit_pc >= len - 1
@@ -146,9 +160,9 @@ let grow_if_necessary e =
     e.emit_quads <- n 
 ;;
 
-let emit_quad e op dst lhs rhs =
+let emit_quad e lab op dst lhs rhs =
   grow_if_necessary e;
-  e.emit_quads.(e.emit_pc) <- { quad_lab = e.emit_pc;
+  e.emit_quads.(e.emit_pc) <- { quad_lab = lab;
 				quad_op = op;
 				quad_dst = dst;
 				quad_lhs = lhs;

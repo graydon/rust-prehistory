@@ -82,6 +82,69 @@ let remove_redundant_moves e =
 ;;
 
 
+(* 
+ * On some ISAs we have hard register constraints. An example of this is 
+ * on x86, where we have MUL placing its result in (EDX,EAX) no matter
+ * what. 
+ * 
+ * In this case, when we have a quad of the form 
+ * 
+ *   i: (MUL,vreg dst, vreg a, vreg b) 
+ * 
+ * we have an ISA-specific "constraint" rule that replaces it with the following, 
+ * pushing our quad numbers down by 1:
+ * 
+ *   i  : (MUL, [vreg x, vreg y], vreg a, vreg b)
+ *   i+1: (MOV, [vreg dst], vreg x)
+ *   i+2: (MOV, [vreg dst], vreg y)
+ * 
+ * and we insert a 2 fresh live intervals for fresh vregs x and y
+ * 
+ *    { live_vreg: x; 
+ *      live_slot: Fixed (HWreg EDX); 
+ *      live_startpoint: i;
+ *      live_endpoint: i+1; }
+ * 
+ *    { live_vreg: y; 
+ *      live_slot: Fixed (HWreg EAX); 
+ *      live_startpoint: i;
+ *      live_endpoint: i+2; }
+ * 
+ * Constraint rules must be careful not to insert unsatisfiable quads. This 
+ * example will cause any live interval allocated to EAX or EDX to be 
+ * reassigned to a spill slot; if any of those spilled intervals happened to 
+ * be Fixed() to some other HWregs, the spill be unsatisfiable.
+ * 
+ * 
+ *)
+
+let build_incoming_edges quads = 
+  (* 
+   * Here we build a vector of "incoming edge sets", one for each quad. The
+   * incoming edge set for a quad j is a bit vector with a i=true for every
+   * other quad i that jumps to j.
+   * 
+   * We use this during iterative dataflow calculation, later.
+   *)
+  let n = Array.length quads in
+  let new_bitv _ = Bitv.create n false in
+  let (incoming_edges:Bitv.t array) = Array.init n new_bitv in    
+  let note_edge i j = Bitv.set incoming_edges.(j) i true in
+  let note_slot i s = 
+    match s with 
+	Label j -> note_edge i j
+      | _ -> ()
+  in
+  for i = 0 to n - 1 do
+    let q = quads.(i) in
+      note_slot i q.quad_dst;
+      note_slot i q.quad_lhs;
+      note_slot i q.quad_rhs
+  done;
+    incoming_edges
+;;
+
+
 let calculate_live_intervals e = 
   (*
    * NB: this algorithm is not terribly accurate. You will get
@@ -218,16 +281,16 @@ let test _ =
   let h = next_vreg emit in
   let i = next_vreg emit in
 
-    emit_quad emit ADD a b c;
-    emit_quad emit ADD d e f;
-    emit_quad emit ADD g h i;
-    emit_quad emit MOV a a Nil;
-    emit_quad emit SUB a b c;
-    emit_quad emit MOV a b Nil;
-    emit_quad emit MOV b b Nil;
-    emit_quad emit MOV d d Nil;
-    emit_quad emit SUB d e f;
-    emit_quad emit SUB g h i;
+    emit_quad emit None ADD a b c;
+    emit_quad emit None ADD d e f;
+    emit_quad emit None ADD g h i;
+    emit_quad emit None MOV a a Nil;
+    emit_quad emit None SUB a b c;
+    emit_quad emit None MOV a b Nil;
+    emit_quad emit None MOV b b Nil;
+    emit_quad emit None MOV d d Nil;
+    emit_quad emit None SUB d e f;
+    emit_quad emit None SUB g h i;
 
     Printf.printf "initial quads:\n";
     print_quads emit.emit_quads;
