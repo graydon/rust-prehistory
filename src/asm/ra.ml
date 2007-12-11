@@ -215,8 +215,8 @@ let calculate_live_bitvectors e =
       Printf.printf "[%6d] live vregs: " i;
       Bitv.iteri (fun i b -> 
 		    if b 
-		    then Printf.printf " %-3d" i
-		    else Printf.printf "    ") 
+		    then Printf.printf " %-2d" i
+		    else Printf.printf "   ") 
 	live_vregs.(i);
       Printf.printf "\n";
     done;
