@@ -90,20 +90,20 @@ let fmt_op out op =
 
 let fmt_lab out l = 
   match l with 
-      None -> Printf.fprintf out "  "
-    | Some i -> Printf.fprintf out "%d:\n  " i
+      None -> ()
+    | Some i -> Printf.fprintf out "\t[label=%d]" i
   
 let fmt_quad out q = 
-  Printf.fprintf out "%a %a <- %a %a %a"
-    fmt_lab q.quad_lab
+  Printf.fprintf out "%a <- %a %a %a %a"
     fmt_slot q.quad_dst
     fmt_op q.quad_op
     fmt_slot q.quad_lhs
     fmt_slot q.quad_rhs
+    fmt_lab q.quad_lab
 ;;
 
 let print_quads qs = 
-  Array.iter (Printf.printf "%a\n" fmt_quad) qs
+  Array.iteri (fun i q -> Printf.printf "[%6d]\t%a\n" i fmt_quad q) qs
 ;;
 
 type emitter = { emit_n_hardregs: int;
