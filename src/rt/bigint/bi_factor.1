@@ -1,0 +1,67 @@
+.TH bi_factor 1 "28 July 2000"
+.SH NAME
+bi_factor - prime-factor large numbers
+.SH SYNOPSIS
+.B bi_factor
+.I number number-number ...
+.SH DESCRIPTION
+.PP
+The program will compute the prime factors of each number you
+give it as an argument.
+If no arguments are given, it will read numbers from standard input,
+one per line.
+In addition to plain number, you can also specify a range of numbers
+as "number-number", or you can use up to 3 trailing dots as wildcards.
+Here are some examples:
+.nf
+% bi_factor 223092871 2147483647
+223092871 = 317 703763
+2147483647 = 2147483647
+% bi_factor 65534-65538
+65534 = 2 7 31 151
+65535 = 3 5 17 257
+65536 = 2^16
+65537 = 65537
+65538 = 2 3^2 11 331
+% bi_factor 123456789.
+1234567890 = 2 3^2 5 3607 3803
+1234567891 = 1234567891
+1234567892 = 2^2 41 7527853
+1234567893 = 3 13 31655587
+1234567894 = 2 7 47 479 3917
+1234567895 = 5 11 23 975943
+1234567896 = 2^3 3 83 619763
+1234567897 = 17 73 994817
+1234567898 = 2 61 10119409
+1234567899 = 3^4 109 139831
+.fi
+.PP
+bi_factor uses a "bigint" library to handle numbers much larger than
+the usual 32-bit or 64-bit computer word size.
+However, the factoring algorithm that bi_factor currently uses is the
+slowest one around, trial division, so there's not much point in trying
+to factor numbers larger than 16 digits or so (which is about 53 bits).
+.SH "SEE ALSO"
+factor(1), bigint(3)
+.SH AUTHOR
+Copyright © 2000 by Jef Poskanzer <jef@mail.acme.com>. All rights reserved.
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\" 
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
