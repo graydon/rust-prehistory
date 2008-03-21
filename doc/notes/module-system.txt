@@ -1,0 +1,78 @@
+
+suppose rust uses a module system similar to the flatt & owens one.
+
+we have 2 types that make it up: units and modules.
+
+both are 1st class values: they can be passed around as values.
+
+a module defines a single letrec of types and constants. modules are
+*always* concrete, usable values. the types can be inhabited by
+values, the constants can be accessed and used. A top-level module
+needs to have all its dependencies satisfied to compile properly.
+
+a unit defines a statically-parameterized module. units cannot be
+"reached into". units have imports and exports. the set of imports and
+exports, as well as any relationships between those, makes up a unit
+type for the unit.
+
+units can be wired together into composite units, in a specific
+expression form, and if a unit value has no imports remaining it can
+be instantiated into a module containing all of its exports.
+
+the compilation model of rust is then that you write your code in a
+bunch of files and then you write a top-level "compilation entry"
+module that implements a standard tooling interface: one that, when
+it is itself compiled, produces a data structure that the compiler
+uses to drive compilation of the rest of your files into a module.
+
+the module produced by compile time should probably itself be one that
+implements a load-time tooling interface, and only *that* causes the
+construction of runtime artifacts (rather than baking a set of
+load-time actions into the language semantics).
+
+the module produced by compilation, and the subsequent module produced
+by loading, may not be done of course; you can always have it depend
+on some further runtime parameterization. but this organization gives
+you the *option* to do quite a lot of compile-time and load-time
+metaprogramming.
+
+
+so erm...
+
+
+
+         units: static parts with imports and exports; what the compiler produces and the linker consumes
+       modules: records of constants (including functions and types) that can be projected to interfaces
+      programs: templates for processes
+     processes: identities, running programs; each copy differs, arranged in a tree
+   pure values: values constructed from literals and type-constructors alone
+general values: pure values AND channels to processes (that may go dead)
+limited values: general values AND processes
+
+all copies of general values are identical; they may be freely
+copied. limited values may not be copied, as they represent
+identities.
+
+All type constructors (including modules and functions) may be pure,
+general or limited. Purity requires that all subcomponents -- and all
+arguments to subcomponents -- are pure. Limitation requires that all
+*supercomponents* -- and all functions taking or returning the limited
+type -- are limited. Purity is delicate, limitation is
+infectious. 
+
+Modules may implement a particular interface. There's an explicit
+structural subtyping "action" that can coerce a module of one
+interface to a subtype-compatible interface. This produces a remapping
+table on the fly.
+
+Note that functions can accept or return limited values, whereas
+channels cannot; channels can also not be pure, by definition. A
+general channel can therefore be promoted to a general function, and
+this is performed automatically by the explicit subtyping operation on
+interfaces (as is every form of type-state weakening on function
+signatures that follows subtype logic).
+
+When you spawn a process, you get a limited module holding the
+process, and a collection of channels for all the process' ports.
+This limited module can be coerced down to a non-limited (general)
+interface full of functions, which is the usual mechanism.
