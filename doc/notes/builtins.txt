@@ -1,16 +1,48 @@
 There is a logic to the set of builtin types.
 
 First, if a type can reasonably be assumed to be provided directly in
-hardware, it's a builtin.  This covers the N-bit twos-complement
-signed and and unsigned integral types, plus any N-bit
-ieee754-specified bfp and dfp math types. These are denoted uNNNN /
-sNNNN / bNNNN / dNNNN. For example, u1, u2, u3, u4, u8, u32, s64, b64,
-d128. Each ABI defines a set of convenience type aliases for these:
-word, sword, flo and dec. bit is an alias for u1 and byte is an alias
-for u8. signed bytes are an abomination.
+hardware, it's a builtin.  This covers the 2^N-bit 2s-complement
+signed and and unsigned integral types, for N <= K. In the rust 1.0
+language standard, K is 7: the set of 2s-complement types are:
+
+ u1, u2, u4, u8, u16, u32, u64, u128
+ s1, s2, s4, s8, s16, s32, s64, s128
+
+Though all s\d+ and u\d+ type names are reserved by the language, in 
+the language-standard module. 
+
+A specific interface for binary floating point number systems exists,
+based on the terminology of ISO10967 (language independent
+arithmetic).  Namely an interface that describes the parameters of a
+floating point system, including a boolean flag indicating whether it
+conforms to IEEE754 or not.
+
+A module satisfying this interface is bound to the name "floating" in
+the language standard module, and the type name "flo" is an alias for
+floating.t. Other modules, possibly with hardware support, may exist
+under the modules IEEE754 or IEEE754R, but this is implementation
+dependent. The interface provided by "floating" is the
+highest-precision binary floating point type available on a given
+platform.
+
+A general "dec" type is also present in the language. This is *not*
+any of the decimal types with limited precision available in IEEE854 /
+IEEE754R; it is an arbitrary-precision decimal type (2 bignums: a
+significand and an exponent) and arithmetic operations on it are
+well-defined, slow, portable and pure.
+
+At a language level, a lexeme is reserved for the dec type -- the
+lexeme that has scientific notation input and/or decimal points -- and
+a conversion exists to most other numeric types. Dec operations may be
+compiled out, but not flo operations.
+
+The standard module defines a set of convenience type aliases for
+these: word, sword, flo and dec. bit is an alias for u1 and byte is an
+alias for u8. signed bytes are an abomination.
 
 (note that machine alignment rules may cause multibyte slots to align
  and pad their container type)
+
 
 Second, if a type has one of a handful of literal forms that we want
 to support "unadorned" in the text, we need to support parsing and
@@ -19,8 +51,8 @@ and "char" are builtin, even though they model alts / vecs of integral
 types; the compiler nonetheless needs to *build* those when it sees
 str/char literals, and it needs to spit them out in a human-digestable
 form when reflecting and pretty-printing. Similarly the
-arbitrary-precision int and rat types are builtin because they must be
-initialized from integral / fp literals, and print back to them.
+arbitrary-precision int and dec types are builtin because they must be
+initialized from integral / decimal literals, and print back to them.
 
 The tilde operator exists as an escape hatch for new types that you
 wish to give literal support to. The dividing line between the handful

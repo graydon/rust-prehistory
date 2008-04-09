@@ -1,0 +1,2 @@
+- produce empty PE executable recognized by objdump
+
