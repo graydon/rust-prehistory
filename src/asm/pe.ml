@@ -30,7 +30,7 @@
    Alignments are also relatively standard and fixed for Win32/PE32:
    4k memory pages, 512 byte disk sectors.
    
-   Since this is a stupid assembler, and we're not generating an awful
+   Since this is a stupid emitter, and we're not generating an awful
    lot of sections, we are not going to differentiate between these
    two kinds of alignment: we just align our sections to memory pages
    and sometimes waste most of them. Shucks.
@@ -452,60 +452,62 @@ type pe_section_id =
     (* Maybe support more later. *)
     SECTION_ID_CODE
   | SECTION_ID_DATA
+  | SECTION_ID_RDATA
   | SECTION_ID_BSS
   | SECTION_ID_IMPORTS
 ;;
 
 type pe_section_characteristics = 
     (* Maybe support more later. *)
-    SECTION_IS_TEXT
-  | SECTION_IS_DATA
-  | SECTION_IS_BSS
-  | SECTION_PERMIT_READ
-  | SECTION_PERMIT_WRITE
-  | SECTION_PERMIT_EXEC
+	IMAGE_SCN_CNT_CODE
+  | IMAGE_SCN_CNT_INITIALIZED_DATA
+  | IMAGE_SCN_CNT_UNINITIALIZED_DATA
+  | IMAGE_SCN_MEM_SHARED
+  | IMAGE_SCN_MEM_EXECUTE
+  | IMAGE_SCN_MEM_READ
+  | IMAGE_SCN_MEM_WRITE
 
 let pe_section_header
     ~(id:pe_section_id)
-    ~(virtual_size:int32)
-    ~(virtual_address:int32)    
-    ~(size_of_raw_data:fixup32)    (* File size. *)
-    ~(pointer_to_raw_data:fixup32) (* File ptr.  *)
+    ~(size_fixup:fixup32)
+    ~(rva_fixup:fixup32)
     : item =   
   let
       characteristics = 
     match id with 
-		SECTION_ID_CODE -> [ SECTION_IS_TEXT; 
-							 SECTION_PERMIT_READ;
-							 SECTION_PERMIT_EXEC ]
-      | SECTION_ID_DATA -> [ SECTION_IS_DATA;
-							 SECTION_PERMIT_READ;
-							 SECTION_PERMIT_WRITE ]
-      | SECTION_ID_BSS -> [ SECTION_IS_BSS;
-							SECTION_PERMIT_READ;
-							SECTION_PERMIT_WRITE ]
-      | SECTION_ID_IMPORTS -> [ SECTION_IS_DATA;
-								SECTION_PERMIT_READ;
-								SECTION_PERMIT_WRITE ]
+		SECTION_ID_CODE -> [ IMAGE_SCN_CNT_CODE;
+							 IMAGE_SCN_MEM_READ;
+							 IMAGE_SCN_MEM_EXECUTE ]
+      | SECTION_ID_DATA -> [ IMAGE_SCN_CNT_INITIALIZED_DATA;
+							 IMAGE_SCN_MEM_READ;
+							 IMAGE_SCN_MEM_WRITE ]
+      | SECTION_ID_RDATA -> [ IMAGE_SCN_CNT_INITIALIZED_DATA;
+							  IMAGE_SCN_MEM_READ ]
+      | SECTION_ID_BSS -> [ IMAGE_SCN_CNT_UNINITIALIZED_DATA;
+							IMAGE_SCN_MEM_READ;
+							IMAGE_SCN_MEM_WRITE ]
+      | SECTION_ID_IMPORTS -> [ IMAGE_SCN_CNT_INITIALIZED_DATA;
+								IMAGE_SCN_MEM_READ;
+								IMAGE_SCN_MEM_WRITE ]
   in
     
     SEQ [|      
       STRING (match id with 
-				  SECTION_ID_CODE -> "CODE\x00\x00\x00\x00"
-				| SECTION_ID_DATA -> "DATA\x00\x00\x00\x00"
-				| SECTION_ID_BSS -> "BSS\x00\x00\x00\x00\x00"
+				  SECTION_ID_CODE -> ".text\x00\x00\x00"
+				| SECTION_ID_DATA -> ".data\x00\x00\x00"
+				| SECTION_ID_RDATA -> ".rdata\x00\x00"
+				| SECTION_ID_BSS -> ".bss\x00\x00\x00\x00"
 				| SECTION_ID_IMPORTS -> ".idata\x00\x00");
 
-	  (* The next two are supposed to be "virtual size" and "virtual
-		 address" respectively; but these only differ from the raw
-		 file size / position if our file and section alignments
-		 differ. They don't here, so we're cool.  *)
+	  (* The next two pairs are only supposed to be different if the 
+		 file and section alignments differ. This is a stupid emitter
+		 so they're not, no problem. *)
 
-	  FIXUP32_USE32 size_of_raw_data;
-	  FIXUP32_USE32 pointer_to_raw_data;
+	  FIXUP32_USE32 size_fixup; (* "Virtual size"    *)
+	  FIXUP32_USE32 rva_fixup;  (* "Virtual address" *)
 
-      FIXUP32_USE32 size_of_raw_data;
-      FIXUP32_USE32 pointer_to_raw_data;
+	  FIXUP32_USE32 size_fixup; (* "Size of raw data"    *)
+	  FIXUP32_USE32 rva_fixup;  (* "Pointer to raw data" *)
       
       WORD32 0l;      (* Reserved. *)
       WORD32 0l;      (* Reserved. *)
@@ -513,12 +515,13 @@ let pe_section_header
       
       WORD32 (fold_flags32 
 				(fun c -> match c with 
-					 SECTION_IS_TEXT -> 0x20l
-				   | SECTION_IS_DATA -> 0x40l
-				   | SECTION_IS_BSS -> 0x80l
-				   | SECTION_PERMIT_READ -> 0x40000000l
-				   | SECTION_PERMIT_WRITE -> 0x80000000l
-				   | SECTION_PERMIT_EXEC -> 0x20000000l)
+					 IMAGE_SCN_CNT_CODE -> 0x20l
+				   | IMAGE_SCN_CNT_INITIALIZED_DATA -> 0x40l
+				   | IMAGE_SCN_CNT_UNINITIALIZED_DATA -> 0x80l
+				   | IMAGE_SCN_MEM_SHARED -> 0x10000000l
+				   | IMAGE_SCN_MEM_EXECUTE -> 0x20000000l
+				   | IMAGE_SCN_MEM_READ -> 0x40000000l
+				   | IMAGE_SCN_MEM_WRITE -> 0x80000000l)
 				characteristics)
     |]
 ;;
@@ -714,10 +717,8 @@ let testfile =
   in
   let import_section_header = (pe_section_header 
 								 ~id: SECTION_ID_IMPORTS
-								 ~virtual_size: 0l
-								 ~virtual_address: 0l
-								 ~size_of_raw_data: test_import_dir_size_fixup
-								 ~pointer_to_raw_data: test_import_dir_rva_fixup)
+								 ~size_fixup: test_import_dir_size_fixup
+								 ~rva_fixup: test_import_dir_rva_fixup)
   in
   let all_idata = FIXUP32_DEF_SZ(test_all_idata_size_fixup,
 								 ALIGN(pe_alignment,
