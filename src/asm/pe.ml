@@ -29,11 +29,16 @@
 
    Alignments are also relatively standard and fixed for Win32/PE32:
    4k memory pages, 512 byte disk sectors.
-
+   
+   Since this is a stupid assembler, and we're not generating an awful
+   lot of sections, we are not going to differentiate between these
+   two kinds of alignment: we just align our sections to memory pages
+   and sometimes waste most of them. Shucks.
+   
 *)
+
 let pe_image_base = 0x400000l;;
-let pe_section_alignment = 0x1000l;;
-let pe_file_alignment = 0x200l;;
+let pe_alignment = 0x1000l;;
 
 (* 
 
@@ -382,8 +387,8 @@ let pe_optional_loader_header
        WORD32 base_of_code;
        WORD32 base_of_data;
        WORD32 pe_image_base;
-       WORD32 pe_section_alignment;
-       WORD32 pe_file_alignment;
+       WORD32 pe_alignment;
+       WORD32 pe_alignment;
 
        WORD16 4;     (* Major OS version: NT4.     *)
        WORD16 0;     (* Minor OS version.          *)
@@ -491,9 +496,13 @@ let pe_section_header
 				| SECTION_ID_BSS -> "BSS\x00\x00\x00\x00\x00"
 				| SECTION_ID_IMPORTS -> ".idata\x00\x00");
 
-	  (* Note: these two should, I think, actually be aligned up to the section alignment sizes. *)
-	  FIXUP32_USE32 size_of_raw_data;    (* "virtual size" *)
-	  FIXUP32_USE32 pointer_to_raw_data; (* "virtual address" -- NB. some docs say to zero this?! *)
+	  (* The next two are supposed to be "virtual size" and "virtual
+		 address" respectively; but these only differ from the raw
+		 file size / position if our file and section alignments
+		 differ. They don't here, so we're cool.  *)
+
+	  FIXUP32_USE32 size_of_raw_data;
+	  FIXUP32_USE32 pointer_to_raw_data;
 
       FIXUP32_USE32 size_of_raw_data;
       FIXUP32_USE32 pointer_to_raw_data;
@@ -561,9 +570,7 @@ type pe_import_dll_entry =
      (also in this section).
 
      Curiously, of the 5 documents I've consulted on the nature of the
-     first 3 fields, I find a variety of interpretations, none of which
-     seem to matter in practice: in real programs, they are always set to
-     zero and nothing bad happens. So we do that here too.
+     first 3 fields, I find a variety of interpretations.
 
   *)
 
@@ -577,16 +584,15 @@ let pe_import_section
       (entry:pe_import_dll_entry)
       : item =
 	SEQ [| 	  
-	  (* 
-	   * Note: documented opinions vary greatly about whether the first, last, 
-	   * or both of the slots in one of these rows points to the RVA of the 
-	   * name/hint used to look the import up. This table format is a mess!
-	   *)
-	  FIXUP32_USE32 entry.pe_import_dll_thunks_rva; (* Import lookup table? *)
+	  (* Note: documented opinions vary greatly about whether the
+	     first, last, or both of the slots in one of these rows points
+	     to the RVA of the name/hint used to look the import up. This
+	     table format is a mess!  *)
+	  FIXUP32_USE32 entry.pe_import_dll_thunks_rva; (* Import lookup table. *)
 	  WORD32 0l;                                    (* Timestamp, unused.   *)
 	  WORD32 0xffffffffl;                           (* Forwarder chain, unused. *)
 	  FIXUP32_USE32 entry.pe_import_dll_name_rva;
-	  FIXUP32_USE32 entry.pe_import_dll_thunks_rva; (* Import address table? *)
+	  FIXUP32_USE32 entry.pe_import_dll_thunks_rva; (* Import address table. *)
 	|]
   in
 
@@ -614,10 +620,8 @@ let pe_import_section
   let form_thunk_string
       (thunk:pe_import_thunk) = 
     SEQ [| 
-      (* 
-		 Thunk string entries begin with a 2-byte "hint", 
-		 but we just set it to zero. 
-      *)
+      (* Thunk string entries begin with a 2-byte "hint", but we just
+		 set it to zero.  *)
       FIXUP32_DEF (thunk.pe_import_thunk_name_rva, (WORD16 0));
       ZSTRING thunk.pe_import_thunk_name;
       (if String.length thunk.pe_import_thunk_name mod 2 == 0
@@ -644,7 +648,7 @@ let pe_import_section
   let strings = SEQ (Array.map form_dir_entry_string imports)
   in
     FIXUP32_DEF_SZ (size_fixup, 
-					ALIGN (pe_file_alignment,						   
+					ALIGN (pe_alignment,						   
 						   FIXUP32_DEF (rva_fixup, 
 										SEQ 
 										  [| 
@@ -655,7 +659,7 @@ let pe_import_section
 										  |])))
       
 ;;
- 
+
 
 
 (*********************************************************************************)
@@ -702,7 +706,7 @@ let testfile =
 									   ~size_fixup: test_optional_header_size_fixup
 									   ~import_directory_rva: test_import_dir_rva_fixup
 									   ~import_directory_size: test_import_dir_size_fixup)
-  in    
+  in
   let test_import_section = (pe_import_section 
 							   ~rva_fixup: test_import_dir_rva_fixup
 							   ~size_fixup: test_import_dir_size_fixup
@@ -716,7 +720,7 @@ let testfile =
 								 ~pointer_to_raw_data: test_import_dir_rva_fixup)
   in
   let all_idata = FIXUP32_DEF_SZ(test_all_idata_size_fixup,
-								 ALIGN(pe_file_alignment, 
+								 ALIGN(pe_alignment,
 									   SEQ 
 										 [| 
 										   test_import_section; 
@@ -729,12 +733,11 @@ let testfile =
 									   test_pe_header;
 									   test_optional_loader_header; 
 									   import_section_header;
-									   ALIGN (pe_file_alignment, MARK) 
 									 |])
   in 
   let all_items = SEQ [| all_headers;
 						 all_idata;
-						 ALIGN (pe_file_alignment, MARK) |]
+						 ALIGN (pe_alignment, MARK) |]
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin "rust_out.exe" in
