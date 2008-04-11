@@ -1,0 +1,52 @@
+
+
+We'd like pieces of code to be reifiable, synthesizable, and
+re-absorbable. Including types.
+
+How?
+
+   dyn -- a (value,type) pair, plus an operator to dyn-ify any typed value
+   typecase -- ability to switch out of a dyn
+   type comparisons -- ability to compare 2 unknown types
+   type reification -- ability to traverse and analyze a type term
+   
+   ast -- representatives of all rust terms
+   reify -- operator to turn a value into its ast
+   quote -- syntax extension for entering literal asts
+   env -- ability to reify the current environment
+   mask -- separating off sections of the environment?
+   eval -- operator to absorb an ast into an environment
+
+What does it mean for a value to have a type?
+
+   Structure of types. Literally: telling the runtime how to traverse
+   the structure of the object.  Which bits to consider as pointers
+   vs. integers vs. container-parts.
+
+   In a variable stored in a static environment -- say an activation
+   frame -- the frame stores a pointer to its code value, and that
+   code value stores a frame layout description, including the types
+   of all the slots. No problemo.
+
+   If I pass a dyn to you, you have no idea what the type of the thing
+   is. Your frame has no idea.  So I have to pass the type with the
+   value.
+
+   Should the type be separable? Sure, why not? Suppose I want to run
+   a function to perform some calculation on the type alone. Might as
+   well be possible.
+
+What difficulties arise when traversing a type?
+
+   If I hit a named subterm, I have to look it up (or it can be
+   expanded inline, if it's acyclic)
+
+   Suppose I package a type by saying "here is an environment with N
+   terms, and the one we're talking about is term K in this
+   environment". Is that useful? Practical?
+
+   The environment can carry a minimal set of terms, rather than say
+   an entire module of unrelated terms. This is useful in a
+   compatibility sense: types T and V are equal when their minimal
+   dependency environments are equal?
+

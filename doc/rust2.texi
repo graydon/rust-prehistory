@@ -78,9 +78,7 @@ Complete table of contents
 
 @menu
 * Ref.Comp::                    Compilation and component model.
-* Ref.Comp.Crate::              Units of compilation, distribution and loading.
-* Ref.Comp.Crate.Dep::          Inter-crate dependency logic.
-* Ref.Comp.Mod::                Units of source-file and name organization.
+* Ref.Comp.Crate::              Units of compilation, versioning, distribution and loading.
 * Ref.Comp.Meta.Syntax::        Simple metaprogramming through syntax extension.
 * Ref.Comp.Meta.General::       General-purpose staged compilation.
 
@@ -110,11 +108,15 @@ Complete table of contents
 * Ref.Form.Rec::                Fixed products of heterogeneous forms.
 * Ref.Form.Vec::                Open products of homogeneous forms.
 * Ref.Form.Alt::                Closed sums of heterogeneous forms.
-* Ref.Form.Func::               Subroutines and scoped coroutine forms.
+* Ref.Form.Fn::                 Subroutines and scoped coroutine forms.
 * Ref.Form.Prog::               General coroutine-description forms.
 * Ref.Form.Proc::               General coroutine-instance forms.
 * Ref.Form.Port::               Unique inter-process message-receive queues.
-* Ref.Form.Chan::               Weak inter-process message-send capabilities.
+
+* Ref.Form.Part::               Units of aggregation and information hiding.
+* Ref.Form.Pack::               Units of linkage and dependency.
+* Ref.Form.Plug::               Interfaces between parts.
+
 * Ref.Form.Type::               Forms describing types.
 * Ref.Form.Quote::              Forms describing source code.
 
@@ -132,17 +134,29 @@ Complete table of contents
 * Ref.Stat.Typestates::         Conditions that hold over statements at points.
 * Ref.Stat.Assert::             Explicit manipulation of typestates.
 
-@c nb: language needs ``become'' to explicitly say when you want local dtors to run.
-@c ``return'' means ``after expr'', ``become'' means ``before expr''. 
-@c you can remove this note, but do not remove ``become'' from the language.
+@c nb: language needs ``be'' (become) to explicitly say when you want local dtors to run.
+@c ``ret'' (return) means ``after expr'', ``be'' means ``before expr''. It is also 
+@c required for algorithmic correctness in a variety of patterns; since there are
+@c call-expressions that cannot be tail-calling (such as those that pass aliases to 
+@c locals) it is better to require the programmer to signal their intent; we can then
+@c check and complain if their intent cannot be satisfied.
 
-* Ref.Stat.Ctrl.Return::        Statement for stopping and producing a value.
-* Ref.Stat.Ctrl.Become::        Statement for stopping and executing a tail call.
-* Ref.Stat.Ctrl.Yield::         Statement for pausing and producing a value.
+@c you can remove this note, but do not remove ``be'' from the language.
+
+* Ref.Stat.Ctrl.Be::            Statement for stopping and executing a tail call.
+* Ref.Stat.Ctrl.Ret::           Statement for stopping and producing a value.
+* Ref.Stat.Ctrl.Put::           Statement for pausing and producing a value.
+* Ref.Stat.Ctrl.Goto::          Statement for local nonnlinear control transfer.
+* Ref.Stat.Ctrl.Fail::          Statement for nonlocal control transfer during failure.
+* Ref.Stat.Ctrl.Log::           Statement for logging values to diagnostic buffers.
 * Ref.Stat.Ctrl.While::         Statement for simple conditional looping.
 * Ref.Stat.Ctrl.For::           Statement for complex conditional looping.
 * Ref.Stat.Ctrl.If::            Statement for simple conditional branching.
 * Ref.Stat.Ctrl.Alt::           Statement for complex conditional branching.
+* Ref.Stat.Ctrl.Prove::         Statement for static assertion of typestate.
+* Ref.Stat.Ctrl.Check::         Statement for dynamic assertion of typestate.
+* Ref.Stat.Ctrl.IfCheck::       Statement for dynamic testing of typestate.
+
 
 @end menu
 

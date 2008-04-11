@@ -660,21 +660,21 @@ caller's frame.  A parameter slot of type @code{T} can be annotated in
 three additional ways:
 
 @itemize
-@item @code{T-}, which means ``move in''
-@item @code{T+}, which means ``move out''
+@item @code{T>}, which means ``move in''
+@item @code{T<}, which means ``move out''
 @item @code{T=}, which means ``move in and out''
 @end itemize
 
 A ``move in'' parameter is moved from the caller frame into the
 argument record and then into the callee frame: the caller's slot loses
 its @code{init} predicate at the point of the call, and the callee
-gains it. The mnemonic is that @code{T-} parameters ``consume'' values
+gains it. The mnemonic is that @code{T>} parameters ``consume'' values
 of type @code{T} from their caller.
 
 A ``move out'' parameter is moved from the callee frame into the
 argument record and then back to the caller frame when the call
 returns. The callee slot loses the @code{init} predicate at the return
-point, and the caller slot gains it.  The mnemonic is that @code{T+}
+point, and the caller slot gains it.  The mnemonic is that @code{T<}
 parameters ``produce'' values of type @code{T} for their caller.
 
 A ``move in and out'' slot does both of the above.
@@ -683,7 +683,7 @@ Yields do not move values into ``move out'' or ``move in and out''
 parameter slots; only returns.
 
 Un-annotated yield and return slots use copy semantics. They can be
-annotated with the @code{+} suffix to imply ``move out'' semantics. 
+annotated with the @code{>} suffix to imply ``move out'' semantics. 
 
 Parameter types, return types and yield types can all be annotated as
 exterior using the @code{^} prefix, just like all slot
