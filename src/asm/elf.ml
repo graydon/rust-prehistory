@@ -648,3 +648,63 @@ let write_basic_x86_elf_file f =
   in
     ()
 ;;
+
+(* Basic test *)
+
+let test_asm _ = 
+  let f = mk_basic_x86_elf_file "test.elf32" in
+  let buf = f.file_buf in
+
+  let text_shdr = f.file_shdr_text in
+  let rodata_shdr = f.file_shdr_rodata in
+
+  let text_off = (Int32.to_int text_shdr.sh_offset) in
+  let text_lim = text_off + (Int32.to_int text_shdr.sh_size) in
+  let text_pos = ref text_off in
+  let text_size _ = (!text_pos - text_off) in
+  let text_vma _ = (Int32.to_int text_shdr.sh_addr) + (text_size()) in
+
+  let rodata_off = (Int32.to_int rodata_shdr.sh_offset) in
+  let rodata_lim = rodata_off + (Int32.to_int rodata_shdr.sh_size) in
+  let rodata_pos = ref rodata_off in
+  let rodata_size _ = (!rodata_pos - rodata_off) in
+  let rodata_vma _ = (Int32.to_int rodata_shdr.sh_addr) + (rodata_size()) in
+
+  let append_ro_rawstring str = 
+    rodata_pos := write_rawstring buf !rodata_pos rodata_lim str 
+  in
+
+  let append_rodata_sym f data sym = 
+    let size = String.length data in
+      f.add_rodata_sym sym (rodata_vma()) size;
+      append_ro_rawstring data
+  in
+
+  let append_insns iss = (text_pos := write_bytes buf !text_pos text_lim iss) in
+  let append_push_sizeof sym = 
+    append_insns (push_imm32 0);
+    f.add_size_fixup (!text_pos - 4) sym
+  in
+  let append_push_vmaof sym = 
+    append_insns (push_imm32 0);
+    f.add_vma_fixup (!text_pos - 4) sym
+  in
+    
+  let literal_data = "Hello, world\n" in
+  let literal_symbol = "lit1" in
+  let main_vma = text_vma() in
+
+    f.file_ehdr.e_entry <- f.file_shdr_text.sh_addr;
+    
+    append_push_sizeof literal_symbol;
+    append_push_vmaof literal_symbol;
+    append_insns (push_imm32 1); (* fd 1 *)
+    append_insns op_SYS_WRITE;
+    append_insns op_SYS_EXIT;
+
+    f.add_func_sym "main" main_vma (text_size());
+    append_rodata_sym f literal_data literal_symbol;
+
+    write_basic_x86_elf_file f;
+    Unix.close f.file_buf.buf_fd
+;;

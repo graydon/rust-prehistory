@@ -271,3 +271,73 @@ let op_SYS_WRITE = op_SYSCALL3 4;;    (* sys_write(int fd, char* buf, size_t cou
 let op_SYS_OPEN  = op_SYSCALL3 4;;    (* sys_open(const char *f, int flags, int mode) *)
 let op_SYS_CLOSE = op_SYSCALL1 4;;    (* sys_close(unsigned int fd)                   *)
 
+
+
+
+(* 
+ * Frames look like this, as in C (stack grows down):
+ * 
+ *    [arg0     ]
+ *    ...        
+ *    [argN     ]
+ *    [env ptr  ]
+ *    [desc ptr ]
+ *    [yield sp ] 
+ *    [yield pc ]
+ *    [return sp]
+ *    [return pc]  <-- sp for this frame.
+ *    [local 0  ] 
+ *    ...
+ *    [local N  ]
+ *    [spill 0  ]
+ *    ...
+ *    [spill N  ]
+ * 
+ * All you have to work with is sp. At sp there is a return
+ * pc, at sp+4 there is a saved sp of the frame under us,
+ * which we reload before jumping back to pc=*sp. Note that 
+ * the values of sps do not need to be anything remotely
+ * like linear. Stack segments may go all over the heap.
+ * 
+ * At sp+8 there is a descriptor that tells you what 
+ * sort of frame you're in. You should not look at anything
+ * aside from sp, sp+4 and sp+8 "generically"; you have
+ * to use the descriptor to do anything else.
+ * 
+ * If the descriptor says you're in a function that can yield,
+ * you will then have a yield pc and yield sp above it. If the
+ * descriptor says you're in a closure, you will have an 
+ * environment pointer above that. Above these optional parts
+ * you'll have the args.
+ * 
+ * The caller must know at least the following when it makes
+ * a call:
+ * 
+ *   - if it's calling into a yielding function
+ *   - if it's calling into a closure
+ *   - if it's tail-calling
+ *   - if it's tail-yielding
+ * 
+ * It needs to know these things for the following reasons:
+ * 
+ *   - When entering a yielding function, two extra words need
+ *     to be reserved. Nothing needs to be put in them unless
+ *     it's a tail-yield; the prologue of the callee will set 
+ *     it up normally.
+ * 
+ *   - When entering a closure, the environment needs to be
+ *     set.
+ * 
+ *   - When tail-calling, the current frame is taken apart
+ *     and a new frame built in its place before jumping to
+ *     the target.
+ * 
+ *   - When tail-yielding, the current frame remains but the
+ *     caller copies its yield sp and pc to the callee. It does
+ *     this by calling to an address a few words inside the callee,
+ *     past the callee prologue that would *normally* set up the
+ *     default yield sp and yield pc from the incoming return sp
+ *     and return pc.
+ * 
+ * 
+ *)

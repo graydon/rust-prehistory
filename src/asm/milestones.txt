@@ -1,2 +1,8 @@
 - produce empty PE executable recognized by objdump
+- move item-writing code into common module
+- extend fixup-resolving code to small micro-expression grammar
+- redo PE code in terms of common-asm and items-with-expressions 
+- modify x86 cogen to emit items
+- make small x86 program that just exits
+- get windows to accept running it
 

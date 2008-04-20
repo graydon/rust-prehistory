@@ -50,3 +50,110 @@ What difficulties arise when traversing a type?
    compatibility sense: types T and V are equal when their minimal
    dependency environments are equal?
 
+Working from slightly modified napier88 design: system should be
+persistable (not persistent). That is: every running program should
+serialize in a way that is both sensibly de-serializable *and* can be
+massaged into working / being interpreted in a future context.
+Persistence of data should, in other words, not prevent *evoution* of
+the system.
+
+How?
+
+Napier decided to do structural typing, on the basis that the bindings
+from types to environments became basically irrelevant: types are
+closed terms in this model, and with a little bit of clever
+hash-consing and care to chose normalizing forms, you don't need to
+worry about which environment a type gets defined in. This is very
+helpful in evolving the system.
+
+The napier docs are concerned that combining universal quantifiers and
+recursive structural types leads to undecidable equivalence, for
+example they give this term:
+
+  type anyarr[T] = variant { simple: t, complex: anyarr[array[T]] }
+
+They claim this is not decidable. Why? Hmm. Because anyarr[T] expands
+at each unfolding rather than contracting or remaining constant,
+i.e. the checking process potentially diverges? Well, it's a messy
+term anyways. One way or another -- we need to find the rationale! --
+they add a restriction that supposedly recovers decidability:
+
+  The specialisation of a recursive operator on the right hand side of
+  its own definition may not include any types which are constructed
+  over its own formal parameters.
+
+IOW the term has to contract. These are ok:
+
+     type x[T] = ... x[T] ... 
+     type x[T] = ... x[Y] ...
+
+but this is not:
+
+     type x[T] = ... x[foo[x[T]]]
+
+That's fine. Let's assume we have to use that too for now.
+
+Persistence! I want to think about this and be clear about it. Rust
+modules should be persistable.
+
+
+  level 0 encoding: the elias omega octet code
+  level 1 encoding: the code numbers for a file:
+
+     "Rust"   : ascii < omega-octets, so just |0x52 0x75 0x73 0x74| 
+     <vers>   : a version number (hint), we start with 0
+     <body>   : an artifact constructed from a grammar!
+
+        type terms:
+
+          hw types
+          ---------------------- 
+           s<N>
+           u<N>
+           flo = ieee754.bfp
+           dec = ieee754r.dfp
+
+          prim types
+          ---------------------- 
+           nil
+           bool
+           int
+           char = unicode5.codepoint
+           str = unicode5.utf8_nfc
+           prog
+           proc
+
+          dynamics
+          ----------------------
+           dyn
+           env (is this required? merely a napier idiom, or deep issue?)           
+
+          anonymous constructors
+          ----------------------
+           vec[]
+           tup[]
+           abs[]
+           func[]()->
+           func?[]()->
+           func![]()->
+           func*[]()->
+           func+[]()->
+           port[]()->
+           port?[]()->
+           port![]()->
+           port*[]()->
+           port+[]()->
+           chan[]()->
+           chan?[]()->
+           chan![]()->
+           chan*[]()->
+           chan+[]()->
+
+          labeling constructors
+          ---------------------- 
+           rec{}
+           alt{}
+
+          AST nodes:
+          ...
+
