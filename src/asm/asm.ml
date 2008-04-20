@@ -218,12 +218,6 @@ let resolve_fixups (item:item)
 	  | ALIGN_FILE (n, item) -> 
 		  let spill = (!file_pos) mod n in
 		  let pad = (n - spill) mod n in
-			print_string ("padding file for alignment, " 
-						  ^ (string_of_int (!file_pos))
-						  ^ " -> "
-						  ^ (string_of_int (pad + (!file_pos)))
-						  ^ "\n");
-
 			file_pos := (!file_pos) + pad;
 			(* 
 			 * NB: aligning the file *causes* likewise alignment of
@@ -247,8 +241,7 @@ let resolve_fixups (item:item)
 			f.fixup_file_pos <- Some fpos1;
 			f.fixup_mem_pos <- Some mpos1;
 			f.fixup_file_sz <- Some ((!file_pos) - fpos1);
-			f.fixup_mem_sz <- Some (Int64.sub (!mem_pos) mpos1);
-			print_string ("defining fixup '" ^ f.fixup_name ^ "' fsize=" ^ (string_of_int ((!file_pos) - fpos1)) ^ "\n")
+			f.fixup_mem_sz <- Some (Int64.sub (!mem_pos) mpos1)
   in
 	resolve_item item 
 ;;  

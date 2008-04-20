@@ -669,7 +669,7 @@ let testfile =
   let text_section = (pe_text_section 
 						~text_fixup: text_fixup)
   in
-  let bss_section = def_file_aligned bss_fixup MARK
+  let bss_section = def_aligned bss_fixup (BSS 0x10L)
   in
   let text_header = (pe_section_header 
 					   ~id: SECTION_ID_TEXT
