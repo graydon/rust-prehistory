@@ -76,3 +76,84 @@ When you spawn a process, you get a limited module holding the
 process, and a collection of channels for all the process' ports.
 This limited module can be coerced down to a non-limited (general)
 interface full of functions, which is the usual mechanism.
+
+
+---- snip ----
+
+No. Let's back off from recursive "modules". It's a difficult and
+researchy area and we're not in the business of doing research. Rust
+is supposed to *work* predictably and reliably, even if that means
+being a little sub-optimal. Let's go back to the original design:
+
+A crate is a unit of compilation, loading, naming and distribution:
+an ELF .so or PE .dll.
+
+A crate depends on other crates in a strict DAG. 
+
+crate dependencies are expressed by label, label+version, or
+label+version+authenticators (SHA1 hashes or such). We call each of
+these a crate specifier. A given specifier gets a versioned list of
+crates at runtime, so you can do a little bit of hot-code
+upgrade/rollback.
+
+crate linkage requires type compatibility on transparent exports, and
+specifier refinement for opaque exports. If P and Q both require
+specifiers that can be satisfied by the same crate R, then their
+dependencies on R are merged into a composite dependency that has the
+more-specific of the two dependencies.
+
+inter-crate calls twiddle crate refcounts.
+
+double vision: A uses B and C. B and C use D. D exports T. B defines
+a function f(int)->T and C defines a function g(T)->int. Code in A 
+tries to do g(f(10)). Does this typecheck?
+
+Let's assume T is opaquely exported because if it's transparent, it's
+simple. So for the opaque case, typechecking succeeds if we decide
+the two Ts are the same. How?
+
+Every name reference (type or otherwise) resolves to a number inside a
+specifier. Every specifier in the dependency set of a crate causes the
+allocation of a crate-slot at runtime and is filled in by a crate that
+satisfies the specifier. For B or C to export f or g, they have to
+export their view of T, which means they have to export their
+specifiers for D. In other words: each crate exports a set of names
+and a map from those names to offsets in runtime crate-slots, each of
+which is loaded in order to satisfy a specifier. So the crate has to
+statically export every specifier used to support a name it's
+exporting, as part of the description of the exported name.
+
+A imports B and C, so its set of specifiers is at least the union of
+the exported specifiers of B and C. This includes two specifiers for
+D, of possibly-varying specificity. The expression g(f(10)) checks iff
+the specifiers for D from B and C can be merged into a single
+specifier / dependency for D.
+
+Conventional "double vision" as dreyer complains about is only a
+problem in the context of *recursive* modules, and we're doing a
+system that is not concerned with that. Recursion *within* a crate is
+fine, recursion *between* crates is verboten.
+
+This is a perfectly reasonable design, allows medium-level static
+recursion (within the crate), and has important practical
+interpretation (fast loading, clear load boundaries, hot loading, hot
+unloading, etc.) so I am happy with the restriction.
+
+Question: do we support existential ADTs? Or just plugs? I would say
+the latter, but what about "pure data structures", eg. "associative
+map"? How do you abstract it away w/o abstracting away from
+concurrency / direct function-call access? An existential would be
+ok... but syntactically perhaps awkward. Seems also to duplicate some
+of the machinery of crates. And plugs. Bleah.
+
+Maybe a plug should be an existential? Well sure. But let's call it a
+module.
+
+assoc_map = mod[T] { type C[T]; 
+                     fun* each(C[T])->T;
+                     fun* has(C[T],T)->bool; }
+
+
+Here is the key point: a module is not a functor, is not recursive,
+and does not imply independent compilation. A crate, a record *or* a
+process can be used to implement a module type. 

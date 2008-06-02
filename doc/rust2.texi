@@ -10,7 +10,7 @@
 @ifinfo
 This manual is for the ``Rust'' programming language.
 
-Copyright 2005-2007 Graydon Hoare
+Copyright 2005-2008 Graydon Hoare
 
 All rights reserved
 
@@ -30,7 +30,7 @@ See the file COPYING for details
 
 @page
 @vskip 0pt plus 1filll
-Copyright @copyright{} 2005-2007 Graydon Hoare
+Copyright @copyright{} 2005-2008 Graydon Hoare
 All rights reserved
 Licensed to the public under the terms of the GNU GPL (>= 3.0).
 See the file COPYING for details
@@ -97,11 +97,10 @@ Complete table of contents
 * Ref.Run.Comp::                Runtime dynamic compilation service.
 * Ref.Run.Load::                Runtime component loading service.
 * Ref.Run.Comm::                Runtime communication multiplexing service.
-* Ref.Run.Probe::               Runtime diagnostic service.
 * Ref.Run.Fault::               Runtime fault handler.
 
 * Ref.Form::                    The forms of values held in memory.
-* Ref.Form.Dyn::                An open sum of every possible form.
+* Ref.Form.Any::                An open sum of every possible form.
 * Ref.Form.Prim::               Primitive machine-level forms.
 * Ref.Form.Arith::              High-precision numeric forms.
 * Ref.Form.Text::               Strings and characters.
@@ -109,54 +108,90 @@ Complete table of contents
 * Ref.Form.Vec::                Open products of homogeneous forms.
 * Ref.Form.Alt::                Closed sums of heterogeneous forms.
 * Ref.Form.Fn::                 Subroutines and scoped coroutine forms.
-* Ref.Form.Prog::               General coroutine-description forms.
-* Ref.Form.Proc::               General coroutine-instance forms.
-* Ref.Form.Port::               Unique inter-process message-receive queues.
 
-* Ref.Form.Part::               Units of aggregation and information hiding.
-* Ref.Form.Pack::               Units of linkage and dependency.
-* Ref.Form.Plug::               Interfaces between parts.
+* Ref.Form.Port::               Unique inter-process message-receive queues.
+* Ref.Form.Chan::               Copyable inter-process message-sending capabilities.
+* Ref.Form.Proc::               General coroutine-instance forms.
+* Ref.Form.Prog::               General coroutine-description forms.
+
+@c curious: if we make channels and ports dynamic, the only thing that
+@c makes a prog different from a fun(T)->nil is that it can have a
+@c destructor. Those are definitely important, but is there anything
+@c else? Most of the below-the-surface machinery of a proc is
+@c implicit.  On the other hand, perhaps a prog gives rise to an
+@c implicit module type covering a chan for each of its public ports?
+@c That module would be the the return type of a spawn expression, and
+@c would probably be quite useful. This makes prog a sort of derived form,
+@c even if it's a ubquitous one, it is going to cover for class types.
+@c
+@c We can even make it such that a prog is the only spawnable form, but 
+@c there are several standard ones that wrap various fns. That is probably
+@c best, actually.
+
+* Ref.Form.Mod::                Units of information hiding.
 
 * Ref.Form.Type::               Forms describing types.
 * Ref.Form.Quote::              Forms describing source code.
 
 * Ref.Stat::                    Static analysis of programs.
-* Ref.Stat.Stmt::               Program execution as sequences of statements.
-* Ref.Stat.Stmt.Point::         Inter-statement positions of logical judgments.
-* Ref.Stat.Stmt.State::         Program frames as groups of slots.
-* Ref.Stat.Stmt.Cfg::           The control flow graph formed by statements.
 * Ref.Stat.Pred::               Static predicates covering dynamic judgments.
-* Ref.Stat.Slot::               Program frames as groups of slots.
-* Ref.Stat.Slot.Constr::        Predicates applied to slots.
+* Ref.Stat.Slot::               Components of structures and control frames.
+* Ref.Stat.Slot.Constr::        A set of predicates holding over a set of slots.
 * Ref.Stat.Slot.Type::          Static types of slots.
 * Ref.Stat.Slot.Type.Form::     Interpretation of a slot's memory.
-* Ref.Stat.Slot.Type.Cond::     Implicit constraints on a slot.
-* Ref.Stat.Typestates::         Conditions that hold over statements at points.
-* Ref.Stat.Assert::             Explicit manipulation of typestates.
+* Ref.Stat.Slot.Type.Constr::   Constraints implied by a slot's type.
+* Ref.Stat.Stmt::               Program execution as sequences of statements.
+* Ref.Stat.Stmt.Point::         Inter-statement positions of logical judgments.
+* Ref.Stat.Stmt.Cfg::           The control flow graph formed by statements.
+* Ref.Stat.Stmt.Typestate::     Constraints that hold at points.
+* Ref.Stat.Stmt.Cond::          Constraints required and implied by a statement.
+* Ref.Stat.Stmt.Assert::        Explicit manipulation of typestate.
 
-@c nb: language needs ``be'' (become) to explicitly say when you want local dtors to run.
-@c ``ret'' (return) means ``after expr'', ``be'' means ``before expr''. It is also 
-@c required for algorithmic correctness in a variety of patterns; since there are
-@c call-expressions that cannot be tail-calling (such as those that pass aliases to 
-@c locals) it is better to require the programmer to signal their intent; we can then
-@c check and complain if their intent cannot be satisfied.
-
+@c nb: language needs ``be'' (become) to explicitly say when you want
+@c local dtors to run.  ``ret'' (return) means ``after expr'', ``be''
+@c means ``before expr''. It is also required for algorithmic
+@c correctness in a variety of patterns; since there are
+@c call-expressions that cannot be tail-calling (such as those that
+@c pass aliases to locals) it is better to require the programmer to
+@c signal their intent; we can then check and complain if their intent
+@c cannot be satisfied.
+@c
 @c you can remove this note, but do not remove ``be'' from the language.
+@c
+@c Hmm, now I am not sure about that: you can always insist that
+@c ret-calls *mean* tail calls and when they cannot be satisfied as
+@c such, you just split the ret statement from the call-statement or
+@c call-expr line. Minimality argues for this.
 
-* Ref.Stat.Ctrl.Be::            Statement for stopping and executing a tail call.
-* Ref.Stat.Ctrl.Ret::           Statement for stopping and producing a value.
-* Ref.Stat.Ctrl.Put::           Statement for pausing and producing a value.
-* Ref.Stat.Ctrl.Goto::          Statement for local nonnlinear control transfer.
-* Ref.Stat.Ctrl.Fail::          Statement for nonlocal control transfer during failure.
-* Ref.Stat.Ctrl.Log::           Statement for logging values to diagnostic buffers.
-* Ref.Stat.Ctrl.While::         Statement for simple conditional looping.
-* Ref.Stat.Ctrl.For::           Statement for complex conditional looping.
-* Ref.Stat.Ctrl.If::            Statement for simple conditional branching.
-* Ref.Stat.Ctrl.Alt::           Statement for complex conditional branching.
-* Ref.Stat.Ctrl.Prove::         Statement for static assertion of typestate.
-* Ref.Stat.Ctrl.Check::         Statement for dynamic assertion of typestate.
-* Ref.Stat.Ctrl.IfCheck::       Statement for dynamic testing of typestate.
+* Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
+* Ref.Stmt.Ret::                Statement for stopping and producing a value.
+* Ref.Stmt.Put::                Statement for pausing and producing a value.
+* Ref.Stmt.Goto::               Statement for local nonnlinear control transfer.
+* Ref.Stmt.Fail::               Statement for nonlocal control transfer during failure.
+* Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
+* Ref.Stmt.While::              Statement for simple conditional looping.
+* Ref.Stmt.For::                Statement for complex conditional looping.
+* Ref.Stmt.If::                 Statement for simple conditional branching.
+* Ref.Stmt.Alt::                Statement for complex conditional branching.
+* Ref.Stmt.Prove::              Statement for static assertion of typestate.
+* Ref.Stmt.Check::              Statement for dynamic assertion of typestate.
+* Ref.Stmt.IfCheck::            Statement for dynamic testing of typestate.
 
+@c note that ``prove'' is probably un-necessary. If you are going to
+@c *need* to acquire a type-state p(X,Y,Z) in order to verify a
+@c statement, and it can be acquired purely using static predicates,
+@c surely the typestate system can check the inputs to the static
+@c predicate p(...) and chain backwards into the existing prestate?
+@c This should not be a problem.
+@c  
+@c I suppose the key to 'prove' is error reporting: you can 'prove'
+@c something at a particular point in the program even if you are not
+@c sure how you're intending to use it. Might otherwise find it hard
+@c to understand the error messages.
+@c
+@c FIXME: make sure you *have* a way of declaring static
+@c predicates. It's simple, you just use an equals sign: pred
+@c foo(a,b,c) = bar(a,b), baz(b,c);
 
 @end menu
 

@@ -1,18 +1,14 @@
 
-LIBS=nums.cma unix.cma bigarray.cma
-
+LIBS=unix.cmxa nums.cmxa
 OCAMLCFLAGS:=-g
 
 # list them in link order, please!
-MLS:=ast.ml val.ml ll1parser.ml lexer.ml trace.ml interp.ml main.ml 
+MLS:=ast.ml ll1parser.ml lexer.ml main.ml 
 CMOS:=$(patsubst %.ml, %.cmo, $(MLS))
 CMXS:=$(patsubst %.ml, %.cmx, $(MLS))
 
 
-main: $(CMOS)
-	ocamlc $(OCAMLCFLAGS) -o $@ $(LIBS) $^ 
-
-mainx: $(CMXS)
+main: $(CMXS)
 	ocamlopt -o $@ $(LIBS) $^ 
 
 .phony: clean

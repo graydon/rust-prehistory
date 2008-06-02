@@ -1,5 +1,9 @@
 (* Values *)
 
+type proc_id = int
+
+type port_id = int
+
 type val_mach = 
     VAL_unsigned of int
   | VAL_signed of int
@@ -17,7 +21,7 @@ and v =
 
     VAL_bool of bool
   | VAL_mach of val_mach
-  | VAL_arith of Num.num
+  | VAL_int of Big_int.big_int
   | VAL_str of string
   | VAL_char of char
 
@@ -27,7 +31,8 @@ and v =
   | VAL_tup of val_tup
 
   | VAL_func of Ast.func
-  | VAL_chan of val_chan
+  | VAL_chan of (proc_id * port_id)
+  | VAL_port of port_id
 
   | VAL_prog of Ast.prog
 
@@ -44,12 +49,6 @@ and val_quote =
   | VAL_quote_type of Ast.ty
   | VAL_quote_decl of Ast.decl
   | VAL_quote_stmt of Ast.stmt
-
-and val_chan = 
-    {
-     chan_proc: int;
-     chan_port: int;
-    }
 
 and val_rec = (string, v) Hashtbl.t 
       
@@ -89,8 +88,9 @@ and op =
   | OP_call
   | OP_new
   | OP_send
-  | OP_return
-  | OP_yield
+  | OP_ret
+  | OP_put
+  | OP_be
   | OP_resume
 
   | OP_bad
@@ -98,9 +98,8 @@ and op =
 and ops = op array
 
 and frame_flavour = 
-    FRAME_func of (Ast.proto * Ast.bind)
-  | FRAME_port of (Ast.proto * Ast.bind)
-  | FRAME_init of Ast.bind
+    FRAME_func of Ast.func
+  | FRAME_init of Ast.init
   | FRAME_main
   | FRAME_fini
 
@@ -128,16 +127,15 @@ and val_proc =
      mutable proc_pos: Ast.pos;
      mutable proc_jumped: bool;
      mutable proc_resched: bool;
-     mutable proc_trace: bool;     
-     proc_ports: Ast.port array;
+     mutable proc_trace: bool; 
+     proc_ports: (v Queue.t) array;
    }
 
 and proc_exec_state = 
     PROC_INIT
   | PROC_FINI
   | PROC_MAIN 
-  | PROC_SEND 
-  | PROC_RECV 
+  | PROC_WAIT
 ;;
 
 type interp = 

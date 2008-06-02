@@ -269,3 +269,54 @@ Various points:
   - plugs can be partially delegated using 
      "plug foo(bar) = other { .. exeception ports ... }"
     which is as close as we're going to come to supporting "inheritence"!
+
+2008-May-24
+-----------
+
+some simplifications:
+
+Plugs, dead. ADTs (modules) live. Types can be abstract in
+them. Visible inside, invisible outside. Existential style,
+SML+functor style or possibly a bit like mixml but with any
+simplifications required to make it behave with out DAG storage model
+(i.e. perhaps iso-recursive cyclical types permitted in module,
+cyclical function calls, but no cyclical value ownership. Module
+refcounted as a whole? possibly but assume existential-style at worst.)
+
+Channels with signatures and call protocols dead. Auto ports
+dead. Channels with *data types* live, buffered and async (overflow =>
+drop, erlang style, or at least call a condition handler) using
+movable (non-copyable) ports and alt statements that literally just
+pull out a value from the queue. predicate: armed(port).
+
+Move in / out / inout on fn signatures dead. Copyables are copied unless
+annotated with @, which means alias (as before). Non-copyable are moved in
+and dropped. Non-copyable return values are moved-out. Encode what you 
+mean in copyable/non-copyable nature. If you have a move-out on yield it
+is actually threaded in and out of the callee with each yield; you can
+modify it in the caller and pass it "back down", between yields. This
+provides a system for 'send', the facility in some generator-systems, 
+without as much complexity.
+
+copyability of a composite structure is inferred by the contents of
+the structure, is provided by the compiler, cannot be sensibly
+dropped, cannot be asserted.
+
+init is implied as true for all statically named members of a
+composite structure (rec or alt), implied as true for every incoming
+arg of a fn and outgoing ret val of a fn, and every local val in a
+proc. init is *not* implied on local slots, it's computed by dataflow.
+
+I guess you can put prove init(x); someplace to ensure it's doing what
+you mean.
+
+
+2008-May-30
+-----------
+
+Can you alias a non-copyable? Hmm. There is very little point! You
+would not be able to copy an alias-of-a-non-copyable and, as it's an
+alias, you would not be able to move (modify) it either. The only use
+would be taking an alias to a non-copyable record that has copyable
+components you wish to extract. Useful? Perhaps. Does this violate the
+ownership model? I do not think so. Hard to prove though.

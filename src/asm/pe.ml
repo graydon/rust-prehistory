@@ -413,6 +413,7 @@ type pe_import =
     { 
       pe_import_name_fixup: fixup;
       pe_import_name: string;
+	  pe_import_address_fixup: fixup;
     }
 
 type pe_import_dll_entry = 
@@ -472,19 +473,31 @@ let pe_import_section
 	|]
   in
 
-  let form_import
+  let form_ILT_slot
       (import:pe_import)
       : item = 
-    (WORD32 (M_POS import.pe_import_name_fixup))
+	(WORD32 (M_POS import.pe_import_name_fixup))
+  in
+
+  let form_IAT_slot
+      (import:pe_import)
+      : item = 
+	(DEF (import.pe_import_address_fixup, (WORD32 (M_POS import.pe_import_name_fixup))))
   in
     
   let form_tables_for_dll
 	  (dll:pe_import_dll_entry)
       : item = 
 	let terminator = WORD32 (IMM 0L) in
-    let table = 
+    let ilt = 
 	  SEQ [| 
-		SEQ (Array.map form_import dll.pe_import_dll_imports);
+		SEQ (Array.map form_ILT_slot dll.pe_import_dll_imports);
+		terminator 
+	  |]
+	in
+    let iat = 
+	  SEQ [| 
+		SEQ (Array.map form_IAT_slot dll.pe_import_dll_imports);
 		terminator 
 	  |]
 	in
@@ -492,8 +505,8 @@ let pe_import_section
       then failwith "empty imports"
       else 
 		SEQ [|
-		  DEF (dll.pe_import_dll_ILT_fixup, table);
-		  DEF (dll.pe_import_dll_IAT_fixup, table) 
+		  DEF (dll.pe_import_dll_ILT_fixup, ilt);
+		  DEF (dll.pe_import_dll_IAT_fixup, iat) 
 		|]
 			
   in
@@ -544,6 +557,14 @@ let pe_import_section
 ;;
 
 let pe_text_section
+	~(exit_fn_fixup:fixup)
+	~(text_fixup:fixup)
+    : item =
+  def_aligned
+	text_fixup
+	(BYTES [| |])
+
+let pe_text_section0
 	~(text_fixup:fixup)
     : item =
   def_aligned
@@ -624,6 +645,7 @@ let test_imports =
 		{ 
 		  pe_import_name_fixup = new_fixup "import name";
 		  pe_import_name = "ExitProcess";
+		  pe_import_address_fixup = new_fixup "import address";
 		} 
       |];
   }
@@ -667,6 +689,7 @@ let testfile =
   in
 
   let text_section = (pe_text_section 
+						~exit_fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
 						~text_fixup: text_fixup)
   in
   let bss_section = def_aligned bss_fixup (BSS 0x10L)

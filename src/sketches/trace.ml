@@ -21,8 +21,8 @@ let fmt_lit out lit =
       Printf.fprintf out "'%c'" c
   | LIT_bool b -> 
       Printf.fprintf out "%s" (if b then "true" else "false")
-  | LIT_arith (_, _, n) -> 
-      Printf.fprintf out "%s" (Num.string_of_num n)
+  | LIT_int (_, s) -> 
+      output_string out s
   | LIT_func f -> 
       output_string out "func(...){...}"
   | LIT_prog f -> 
@@ -59,7 +59,8 @@ let fmt_binop out op =
 let fmt_unop out op = 
   output_string out 
     (match op with
-      UNOP_not -> "!")
+         UNOP_not -> "!"
+       | UNOP_neg -> "-")
 ;;
 
 let ty_mach_prefix m = 
@@ -71,14 +72,6 @@ let ty_mach_prefix m =
 ;;
 
 
-let ty_arith_name n =
-  match n with 
-    TY_int -> "int"
-  | TY_nat -> "nat"
-  | TY_rat -> "rat"
-;;
-
-
 let fmt_name out n = 
   output_string out n.name_base;
   Array.iter (fun c -> Printf.fprintf out ".%a" fmt_nc c) n.name_rest
@@ -86,36 +79,33 @@ let fmt_name out n =
 
 let rec fmt_type out t = 
   match t with 
-    TY_dyn -> output_string out "dyn"
-  | TY_type -> output_string out "type"
-
-  | TY_nil -> output_string out "nil"
-  | TY_bool -> output_string out "bool"
-  | TY_mach (m,n) -> Printf.fprintf out "%c%d" (ty_mach_prefix m) n
-  | TY_arith a -> output_string out (ty_arith_name a)
-  | TY_str -> output_string out "str"
-  | TY_char -> output_string out "char"
-
-  | TY_tup t -> output_string out "(tup ...)"
-  | TY_vec v -> output_string out "(vec ...)"
-
-  | TY_func s -> output_string out "(func ...)"
-  | TY_chan c -> output_string out "(chan ...)"
-  | TY_port s -> output_string out "(port ...)"
-
-  | TY_prog -> output_string out "prog"
-  | TY_native -> output_string out "native"
-
-  | TY_pred p -> output_string out "(pred ...)"
-  | TY_quote q -> output_string out "(quote ...)"
+      TY_type -> output_string out "type"
+        
+    | TY_any -> output_string out "any"
+    | TY_nil -> output_string out "nil"
+    | TY_bool -> output_string out "bool"
+    | TY_mach (m,n) -> Printf.fprintf out "%c%d" (ty_mach_prefix m) n
+    | TY_int -> output_string out "int"
+    | TY_str -> output_string out "str"
+    | TY_char -> output_string out "char"
+        
+    | TY_tup t -> output_string out "(tup ...)"
+    | TY_vec v -> output_string out "(vec ...)"
+        
+    | TY_func s -> output_string out "(func ...)"
+    | TY_chan t -> Printf.fprintf out "chan[%a]" fmt_type t
+    | TY_port t -> Printf.fprintf out "port[%a]" fmt_type t
+        
+    | TY_prog -> output_string out "prog"
+    | TY_native -> output_string out "native"
+        
+    | TY_quote q -> output_string out "(quote ...)"
 
   | TY_named n -> fmt_name out n 
 	
   | TY_constrained (ty, _) -> (output_string out "(";
 			       fmt_type out ty;
 			       output_string out ": ...state)" )
-
-  | TY_lim t -> Printf.fprintf out "(lim %a)" fmt_type t
 ;;
 
 
@@ -192,8 +182,8 @@ let fmt_op out op =
   | OP_jump (_,None) -> Printf.fprintf out "<unpatched [C]JUMP>"
   | OP_call -> output_string out "CALL"
   | OP_new -> output_string out "NEW"
-  | OP_return -> output_string out "RETURN"
-  | OP_yield -> output_string out "YIELD"
+  | OP_ret -> output_string out "RET"
+  | OP_put -> output_string out "PUT"
   | OP_resume -> output_string out "RESUME"
 
   | OP_bad -> output_string out "-"

@@ -39,7 +39,6 @@ let nopos : pos = ("no-file", 0, 0)
    
  *)
 
-
 type ty_mach = 
     TY_unsigned
   | TY_signed
@@ -47,15 +46,8 @@ type ty_mach =
   | TY_ieee_dfp
 ;;
 
-type ty_arith =
-    TY_int
-  | TY_nat
-  | TY_rat
-;;
-
 type proto = 
-    PROTO_call  (* func  foo(...): returns 1 value. A function.                             *)
-  | PROTO_ques  (* func? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
+    PROTO_ques  (* func? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
   | PROTO_bang  (* func! foo(...): yields 1 value. Never resumes.                           *)
   | PROTO_star  (* func* foo(...): may yield N >= 0 values, then returns.                   *)
   | PROTO_plus  (* func+ foo(...): yields N > 0 values then returns.                        *)
@@ -74,8 +66,7 @@ and name =
 
 (* 
  * Type expressions are transparent to type names, their equality is structural.
- * (after normalization to remove eg. redundant multiple limitations and lift
- * constraints). 
+ * (after normalization)
  * 
  * Type expressions do *not* cover data definitions (recs and alts). Those 
  * can be *named* in a type expression -- much like in ML -- but they are declared
@@ -83,7 +74,7 @@ and name =
  *)
 and ty = 
 
-    TY_dyn
+    TY_any
   | TY_native
   | TY_nil
   | TY_bool
@@ -97,37 +88,34 @@ and ty =
   | TY_type  
   | TY_prog
 
+  | TY_int
   | TY_mach of (ty_mach * int)
-  | TY_arith of ty_arith
 
   | TY_tup of ty_tup
   | TY_vec of ty_vec
 
   | TY_func of ty_func
-  | TY_chan of ty_sig
-  | TY_port of ty_sig
+  | TY_chan of ty
+  | TY_port of ty
 
-  | TY_pred of ty_pred
   | TY_quote of ty_quote
 
   | TY_named of name
 
-  | TY_constrained of (ty * state)
-
-  | TY_lim of ty
-	
+  | TY_constrained of (ty * constrs)
+    
 (* Slots can have an smode qualifier put on them: exterior or alias.
  * If there is no qualifier, the slot is interior. Slots acquire an
- * implicit state from their type, but can also have an explicit state
- * stuck on them. *)
+ * implicit set of constraints from their type, but can also have an
+ * explicit set of constraints stuck on them.  
+ *)
 
 and slot = 
     { 
-      slot_const: bool;
       slot_smode: smode;
       slot_ty: ty;
       slot_ident: ident;
-      slot_state: state;
+      slot_constrs: constrs;
     }
 
 and smode = 
@@ -135,29 +123,27 @@ and smode =
   | SMODE_interior
   | SMODE_alias
 
-(* 
- * In closed type terms a constraint in the state may refer to
- * components of the term by anchoring off the "formal symbol" '*',
- * which represents "the term this state is attached to". 
+(* In closed type terms a constraint may refer to components of the
+ * term by anchoring off the "formal symbol" '*', which represents "the
+ * term this constraint is attached to".
  * 
  * 
- * For example, if I have a tuple type (int,int),
- * I may wish to enforce the lt predicate on it;
- * I can write this as a constrained type term like:
+ * For example, if I have a tuple type tup[int,int], I may wish to enforce
+ * the lt predicate on it; I can write this as a constrained type term
+ * like:
  * 
- * ( int, int ) : lt( *.#0, *.#1 )
+ * tup[int, int] : lt( *.#0, *.#1 )
  * 
- * In fact all tuple types are converted to this
- * form for purpose of type-compatibility testing;
- * the tuple
+ * In fact all tuple types are converted to this form for purpose of
+ * type-compatibility testing; the tuple
  * 
- * func ( int x, int y ) : lt( x, y ) -> int
+ * func (int x, int y) : lt(x, y) -> int
  * 
  * actually has type
  * 
- * func (( int, int ) : lt( *.#0, *.#1 )) -> int
+ * func (tup[int, int] : lt( *.#0, *.#1 )) -> int
  * 
- *)      
+ *)
 
 and carg_base = 
     BASE_formal 
@@ -165,9 +151,9 @@ and carg_base =
 
 and carg =
     {
-     carg_base: carg_base;
-     carg_rest: name_component array;
-   }
+      carg_base: carg_base;
+      carg_rest: name_component array;
+    }
 
 and constr = 
     { 
@@ -175,36 +161,21 @@ and constr =
       constr_args: carg array;
     }
       
-and state = constr array
+and constrs = constr array
 
 and prog = 
     {
-     prog_auto: bool;
-     prog_init: init option;
-     prog_main: stmt option;
-     prog_fini: stmt option;
-     prog_decls: decl array;
-     prog_plugs: plug_impl array;
-   } 
-
-and plug_decl = 
-    {
-      plug_decl_ident: ident;
-      plug_decl_chans: (ident * ty_sig) array;
-    }
-      
-and plug_impl =
-    {
-      plug_impl_decl_ident: ident;
-      plug_impl_ident: ident;
-      plug_impl_ports: (ident * port) array;
-    }
+      prog_init: init option;
+      prog_main: stmt option;
+      prog_fini: stmt option;
+      prog_decls: decl array;
+    } 
       
 and rec_decl = 
     { 
       rec_decl_ident: ident;
       rec_decl_slots: slot array;
-      rec_decl_state: state;
+      rec_decl_constrs: constrs;
     }
 
 and alt_decl = 
@@ -221,49 +192,33 @@ and alt_decl_case =
 
 and ty_tup = 
     {
-     tup_types: ty array;
-     tup_state: state;
-   }
+      tup_types: ty array;
+      tup_constrs: constrs;
+    }
 
 and ty_vec =
     {
-     vec_elt_type: ty;
-     vec_elt_state: state;
-   }
-
-and ty_func = 
-    { 
-      func_pure: bool;
-      func_inline: bool;
-      func_sig: ty_sig; 
+      vec_elt_type: ty;
     }
-
-and pmode = 
-    PMODE_copy
-  | PMODE_move_in
-  | PMODE_move_out
-  | PMODE_move_in_out
 
 and ty_sig = 
     { 
-      sig_proto: proto;
-
       sig_param_smodes: smode array;
       sig_param_types: ty array;
-      sig_param_pmodes: pmode array;
 
-      sig_invoke_state: state;
+      sig_pre_cond: constrs;
+      sig_post_cond: constrs;
 
       sig_result_smode: smode;
       sig_result_ty: ty;
-      sig_result_pmode: pmode;
-
     }
 
-and ty_pred = 
-    { 
-      ty_pred_auto: bool;
-      ty_pred_sig: ty_sig;
+and ty_func = 
+    {
+      func_pure: bool;
+      func_inline: bool;
+      func_sig: ty_sig;
+      func_proto: proto option;
     }
       
 and ty_quote = 
@@ -272,7 +227,7 @@ and ty_quote =
   | TY_quote_decl
   | TY_quote_stmt
       
-      (* Probably this list should be a lot longer; the canonical rule *)
+(* Probably this list should be a lot longer; the canonical rule *)
       (* I've been using is to make a quotation type for every *)
       (* nonterminal *)
       
@@ -282,16 +237,19 @@ and stmt =
   | STMT_for of stmt_for
   | STMT_if of stmt_if
   | STMT_try of stmt_try
-  | STMT_yield of (expr option * pos)
-  | STMT_return of (expr * pos)
-  | STMT_assert of (constr * pos)
+  | STMT_put of (expr option * pos)
+  | STMT_ret of (expr * pos)
+  | STMT_prove of (constrs * pos)
+  | STMT_check of (constrs * pos)
+  | STMT_checkif of (constrs * stmt * pos)
   | STMT_block of ((stmt array) * pos)
   | STMT_move of (lval * lval)
   | STMT_copy of (lval * expr)
   | STMT_call of (lval * (expr array))
-  | STMT_send of (lval * (expr array))
+  | STMT_be of (lval * (expr array))
+  | STMT_send of (lval * expr)
   | STMT_decl of decl
-	
+    
 and stmt_while = 
     {
       while_expr: expr;
@@ -301,7 +259,8 @@ and stmt_while =
       
 and stmt_foreach = 
     {
-      foreach_bindings: decl array;
+      foreach_proto: proto;
+      foreach_binding: decl;
       foreach_body: stmt;
       foreach_pos: pos;
     }
@@ -342,18 +301,13 @@ and expr =
   | EXPR_lval of (lval * pos)
   | EXPR_call of (lval * pos * (expr array))
   | EXPR_rec of (name * pos * (rec_input array))
-	
-and radix = 
-    HEX
-  | DEC 
-  | BIN
-      
+          
 and lit = 
     LIT_str of string
   | LIT_char of char
   | LIT_bool of bool
   | LIT_mach of lit_mach
-  | LIT_arith of (ty_arith * radix * Num.num)
+  | LIT_int of (Big_int.big_int * string)
   | LIT_custom of lit_custom
   | LIT_quote of lit_quote
   | LIT_func of (ty_func * func)
@@ -367,10 +321,10 @@ and lit_quote =
   | QUOTE_stmt of stmt
 
 and lit_mach = 
-    LIT_unsigned of int * radix
-  | LIT_signed of int * radix
-  | LIT_ieee_bfp of float
-  | LIT_ieee_dfp of (int * int)
+    LIT_unsigned of (int * string)
+  | LIT_signed of (int * string)
+  | LIT_ieee_bfp of (float * string)
+  | LIT_ieee_dfp of ((int * int) * string)
 
 and lit_custom = 
     {
@@ -382,7 +336,7 @@ and lit_custom =
 and lidx =
     LIDX_named of (name_component * pos)
   | LIDX_index of expr
-	
+    
 and lval = 
     {
       lval_base: ident;
@@ -413,54 +367,43 @@ and binop =
 
 and unop =
     UNOP_not
+  | UNOP_neg
 
 and decl = 
     DECL_type of (pos * ident * ty)
-  | DECL_slot of (pos * slot * (expr option))
-  | DECL_port of (pos * port)
+  | DECL_pred of (pos * ident * pred)
   | DECL_data of (pos * data)
+  | DECL_slot of (pos * slot * (expr option))
 
 and data = 
   | DATA_rec of rec_decl
   | DATA_alt of alt_decl
 
-and bind = 
-    {
-      bind_ty: ty_sig;
-      bind_idents: ident array;
-    }
-
 and func = 
     {
-      func_proto: proto;
-      func_bind: bind;
+      func_ty: ty_func;
+      func_bind: ident array;
       func_body: fbody;
+    }
+
+and pred = 
+    {
+      pred_auto: bool;
+      pred_ty: ty_sig;
+      pred_bind: ident array;
+      pred_body: fbody;
     }
 
 and fbody = 
     FBODY_native of ident
   | FBODY_stmt of stmt
 
-and port = 
-    {
-      port_ident: ident;
-      port_proto: proto;
-      port_bind: bind;
-      port_auto_body: stmt option;
-    }
-
 and init = 
     {
-      init_bind: bind;
+      init_sig: ty_sig;
+      init_bind: ident array;
       init_body: stmt;
     }
-
-type visibility = 
-    VIS_public
-  | VIS_crate
-  | VIS_local
-;;
-
 
 (* Helper functions for querying AST. *)
 
@@ -468,7 +411,7 @@ let decl_id d =
   match d with
     DECL_type (_, id, _) -> id
   | DECL_slot (_, s, _) -> s.slot_ident
-  | DECL_port (_, p) -> p.port_ident
+  | DECL_pred (_, id, _) -> id
   | DECL_data (_, (DATA_rec dr)) -> dr.rec_decl_ident
   | DECL_data (_, (DATA_alt ar)) -> ar.alt_decl_ident
 ;;
