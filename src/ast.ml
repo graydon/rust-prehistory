@@ -24,6 +24,9 @@ type filename = string
 type pos = (filename * int * int)
 ;;
 
+type nonce = int
+;;
+
 let nopos : pos = ("no-file", 0, 0)
 ;;
 
@@ -67,10 +70,6 @@ and name =
 (* 
  * Type expressions are transparent to type names, their equality is structural.
  * (after normalization)
- * 
- * Type expressions do *not* cover data definitions (recs and alts). Those 
- * can be *named* in a type expression -- much like in ML -- but they are declared
- * in their own syntactic forms. 
  *)
 and ty = 
 
@@ -93,28 +92,32 @@ and ty =
 
   | TY_tup of ty_tup
   | TY_vec of ty_vec
+  | TY_rec of ty_rec
+  | TY_alt of ty_alt
 
   | TY_func of ty_func
   | TY_chan of ty
   | TY_port of ty
-
+      
   | TY_quote of ty_quote
-
+      
   | TY_named of name
-
+  | TY_opaque of nonce
+      
   | TY_constrained of (ty * constrs)
-    
+  | TY_mod of (mod_type_items)
+      
+
 (* Slots can have an smode qualifier put on them: exterior or alias.
  * If there is no qualifier, the slot is interior. Slots acquire an
  * implicit set of constraints from their type, but can also have an
  * explicit set of constraints stuck on them.  
  *)
-
+      
 and slot = 
     { 
       slot_smode: smode;
       slot_ty: ty;
-      slot_ident: ident;
       slot_constrs: constrs;
     }
 
@@ -122,6 +125,7 @@ and smode =
     SMODE_exterior
   | SMODE_interior
   | SMODE_alias
+
 
 (* In closed type terms a constraint may refer to components of the
  * term by anchoring off the "formal symbol" '*', which represents "the
@@ -148,7 +152,7 @@ and smode =
 and carg_base = 
     BASE_formal 
   | BASE_named of ident
-
+      
 and carg =
     {
       carg_base: carg_base;
@@ -162,50 +166,46 @@ and constr =
     }
       
 and constrs = constr array
-
+    
 and prog = 
     {
       prog_init: init option;
       prog_main: stmt option;
       prog_fini: stmt option;
-      prog_decls: decl array;
+      prog_mod: mod_items;
     } 
       
-and rec_decl = 
+and ty_rec = 
     { 
-      rec_decl_ident: ident;
-      rec_decl_slots: slot array;
-      rec_decl_constrs: constrs;
+      rec_slots: (ident, slot) Hashtbl.t;
+      rec_constrs: constrs;
     }
-
-and alt_decl = 
-    {
-      alt_decl_ident: ident;
-      alt_decl_cases: alt_decl_case array
-    }
-
-and alt_decl_case = 
-    { 
-      alt_decl_case_ident: ident;
-      alt_decl_case_slot: slot;
-    }
-
+      
+(* 
+ * An alt type is modeled -- structurally -- as an array of its N
+ * variant types. The types do not have to be disjoint.
+ * 
+ * An alt *declaration* -- as a binding in a module -- is modeled as a
+ * triple of a type, an injection function, and a projection function.
+ *)
+and ty_alt = ty array
+    
 and ty_tup = 
     {
       tup_types: ty array;
       tup_constrs: constrs;
     }
-
+      
 and ty_vec =
     {
       vec_elt_type: ty;
     }
-
+      
 and ty_sig = 
     { 
       sig_param_smodes: smode array;
       sig_param_types: ty array;
-
+      
       sig_pre_cond: constrs;
       sig_post_cond: constrs;
 
@@ -243,13 +243,14 @@ and stmt =
   | STMT_check of (constrs * pos)
   | STMT_checkif of (constrs * stmt * pos)
   | STMT_block of ((stmt array) * pos)
-  | STMT_move of (lval * lval)
-  | STMT_copy of (lval * expr)
-  | STMT_call of (lval * (expr array))
-  | STMT_be of (lval * (expr array))
-  | STMT_send of (lval * expr)
-  | STMT_decl of decl
-    
+  | STMT_move of (lval * lval * pos)
+  | STMT_copy of (lval * expr * pos)
+  | STMT_call of (lval * (expr array) * pos)
+  | STMT_be of (lval * (expr array) * pos)
+  | STMT_send of (lval * expr * pos)
+  | STMT_decl of (ident * mod_item * pos)
+  | STMT_use of (ty * ident * lval * pos)
+      
 and stmt_while = 
     {
       while_expr: expr;
@@ -260,7 +261,7 @@ and stmt_while =
 and stmt_foreach = 
     {
       foreach_proto: proto;
-      foreach_binding: decl;
+      foreach_slot: (ident * slot);
       foreach_body: stmt;
       foreach_pos: pos;
     }
@@ -301,6 +302,7 @@ and expr =
   | EXPR_lval of (lval * pos)
   | EXPR_call of (lval * pos * (expr array))
   | EXPR_rec of (name * pos * (rec_input array))
+  | EXPR_mod of (mod_items * pos)
           
 and lit = 
     LIT_str of string
@@ -313,11 +315,12 @@ and lit =
   | LIT_func of (ty_func * func)
   | LIT_prog of prog
 
-
+(* 
+ * Need to add more quotes as time progresses.
+ *)
 and lit_quote = 
     QUOTE_expr of expr
   | QUOTE_type of ty
-  | QUOTE_decl of decl
   | QUOTE_stmt of stmt
 
 and lit_mach = 
@@ -369,15 +372,6 @@ and unop =
     UNOP_not
   | UNOP_neg
 
-and decl = 
-    DECL_type of (pos * ident * ty)
-  | DECL_pred of (pos * ident * pred)
-  | DECL_data of (pos * data)
-  | DECL_slot of (pos * slot * (expr option))
-
-and data = 
-  | DATA_rec of rec_decl
-  | DATA_alt of alt_decl
 
 and func = 
     {
@@ -388,7 +382,6 @@ and func =
 
 and pred = 
     {
-      pred_auto: bool;
       pred_ty: ty_sig;
       pred_bind: ident array;
       pred_body: fbody;
@@ -397,7 +390,7 @@ and pred =
 and fbody = 
     FBODY_native of ident
   | FBODY_stmt of stmt
-
+      
 and init = 
     {
       init_sig: ty_sig;
@@ -405,31 +398,64 @@ and init =
       init_body: stmt;
     }
 
-(* Helper functions for querying AST. *)
+(* 
+ * An 'a decl is a sort-of-thing that represents a parametric (generative)
+ * declaration. Every reference to one of these involves applying 0 or more 
+ * type arguments, as part of *name resolution*.
+ * 
+ * Slots are *not* parametric declarations. A slot has a specific type 
+ * even if it's a type that's bound by a quantifier in its environment.
+ *)
 
-let decl_id d =
-  match d with
-    DECL_type (_, id, _) -> id
-  | DECL_slot (_, s, _) -> s.slot_ident
-  | DECL_pred (_, id, _) -> id
-  | DECL_data (_, (DATA_rec dr)) -> dr.rec_decl_ident
-  | DECL_data (_, (DATA_alt ar)) -> ar.alt_decl_ident
-;;
-
-
-type modu_src = 
+and 'a decl = 
     {
-     src_fname: string;
-     src_prog: prog;
+      decl_params: ident array;
+      decl_item: 'a;
     }
 
-and modu_dir = 
-    {     
-     dir_fname: string;
-     dir_ents: (string, modu) Hashtbl.t;
-    }
+(* 
+ * We have module types and module expressions. A module expression is 
+ * a table of module items. A module type is a table of module-type items.
+ * 
+ * The latter describe the former, despite the fact that modules can 
+ * contain types: module types are not *equivalent* to module expressions,
+ * and every module expression gives rise to a module value that conforms to
+ * a possibly-existential module type.
+ * 
+ * Module values of particular module types are 'opened' by a 'use' statement.
+ * This converts a module with opaque existential types into a module with
+ * a corresponding set of concrete, disjoint opaque (skolem) types. These can
+ * be projected out of the module bound by the 'use' statement in subsequent
+ * declarations and statements, without risk of collision with other types.
+ * 
+ * For this reason, the MOD_TYPE_ITEM_opaque_type constructor takes no 
+ * arguments -- it simply describes the presence of *some* existential type
+ * in a module -- but whatever that existential may be, it is converted  
+ * in the bound module to a MOD_ITEM_type (TY_opaque i) for some fresh i, 
+ * when 'use'd.
+ * 
+ * This technique is explained in some depth in section 4.2 of the 
+ * paper "first class modules for haskell", by Mark Shields and Simon 
+ * Peyton Jones. Hopefully I'm doing it right. It's a little near the 
+ * limit of tricks I understand.
+ *)
+   
+and mod_item = 
+    MOD_ITEM_type of ty decl
+  | MOD_ITEM_pred of pred decl
+  | MOD_ITEM_mod of mod_items decl
+  | MOD_ITEM_slot of slot
+   
       
-and modu = 
-    MODU_dir of modu_dir
-  | MODU_src of modu_src
+and mod_type_item = 
+    MOD_TYPE_ITEM_opaque_type
+  | MOD_TYPE_ITEM_public_type of ty decl
+  | MOD_TYPE_ITEM_pred of ty decl
+  | MOD_TYPE_ITEM_mod of mod_type_items decl
+  | MOD_TYPE_ITEM_slot of ty
+
+and mod_type_items = (ident, mod_type_item) Hashtbl.t
+
+
+and mod_items = (ident, mod_item) Hashtbl.t
 ;;

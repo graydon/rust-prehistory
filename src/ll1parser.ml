@@ -584,7 +584,7 @@ and parse_rec_input ps =
           bump ps;
           let expr = (ctxt "rec input: expr" parse_expr ps) in
             Ast.REC_from_copy (lab, expr)
-      | LARROW -> 
+      | COLONEQ -> 
           bump ps; 
           let lval = (ctxt "rec input: lval" parse_lval ps) in
             Ast.REC_from_move (lab, lval)

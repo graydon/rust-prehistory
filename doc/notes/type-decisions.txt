@@ -319,4 +319,87 @@ would not be able to copy an alias-of-a-non-copyable and, as it's an
 alias, you would not be able to move (modify) it either. The only use
 would be taking an alias to a non-copyable record that has copyable
 components you wish to extract. Useful? Perhaps. Does this violate the
-ownership model? I do not think so. Hard to prove though.
+ownership model? I do not think so. Hard to prove though. Let's assume
+no aliasing of non-copyables. An alias is a cheap, non-transplanting
+copy. There are not many things to do with non-copyables anyways.
+
+
+2008-June-03
+------------
+
+More on module systems. Let's assume we have support for modules with
+types and values. And suppose we have first-class modules, so I can
+say
+
+  // a module type
+  type mt = mod { type e; fn mk()->e; fn eat(e)->nil; }   
+
+  // a 1st class module value, of module type
+  let mt mv = mod { type e = int; fn mk()->e { ret 1; } fn eat(int i) { } }  
+
+  // a module use, turning a first class module into 
+  // a member of the static environment.
+  use mt mm = mv;
+  let mm.e me = mm.mk();
+  mm.eat(me);
+
+What happens when we let 'me' escape from this scope? It has a type
+that cannot be denoted statically outside the scope, to begin with! So
+there would be no way of writing a function that gives it as a return
+value. Hooray for not supporting type inference :)
+
+Maybe this will work? Why don't most module systems work this way? Hmm.
+
+
+2008-June-05
+------------
+
+Concrete example. Two files implementing sets. One uses lists, one uses
+trees. Common module type interface for both.
+
+type set[e] = mod { type t; 
+                    let t empty; 
+                    fn union(@t a, @t b) -> t;
+                    fn singleton(@e v) -> t;
+                    fn contains(@e v) -> bool; }   
+
+mod listSet[e] = set[e] { type t = list[e].t;
+                          let t empty = new list[e].t({});
+                          fn union(@t a, @t b) -> t { ret list[e].union(a,b); }
+                          fn singleton(@e v) -> t { ret new list[e].t({v}); }
+                          fn contains(@e v) -> bool { ret list[e].contains(v); } }
+
+mod treeSet[e] = set[e] { type t = tree[e].t;
+                          let t empty = new tree[e].t({});
+                          fn union(@t a, @t b) -> t { ret tree[e].union(a,b); }
+                          fn singleton(@e v) -> t { ret new tree[e].t({v}); }
+                          fn contains(@e v) -> bool { ret tree[e].contains(v); } }
+
+
+fn doSomeSetStuff[e](@set[e] s, @e elt) -> nil
+{
+   use set[e] sm = s[e];
+   sm.t v = sm.union(sm.empty, sm.singleton(elt));   
+}
+
+let set[int] s1 = listSet[int];
+let set[int] s2 = treeSet[int];
+let set[int] s3 = mod set[int] { type t = []; ... }
+
+doSomeSetStuff[int](s1, 10);
+doSomeSetStuff[int](s2, 10);
+doSomeSetStuff[int](s3, 10);
+
+This has 4 new syntactic forms (the first-class module literal
+expression above doesn't work):
+
+  - a possibly-generative module declaration: mod modName[params] = modType[args] { mod-elts }
+
+  - a module type expression: mod { mod-ty-elts }
+
+  - a module expression: mod modType[args] { mod-elts }
+
+  - a module-use that "opens" a module, assigning new opaque types to
+    each of its existential members.
+
+
