@@ -1,16 +1,13 @@
 prog woohoo
 {
   
-  native func putstr(str s) -> nil;
-  native func putint(int i) -> nil;
-  
-  func foo(int x) -> nil
+  lim fn foo(int x) -> ()
     {
-      let int y = x + 2;
+      val int y = x + 2;
       putstr("hello from rust code");
       while (y < 10) {
-	putint(y);
-	y = y + 2;
+        putint(y);
+        y = y + 2;
       }
     }
   
@@ -20,11 +17,3 @@ prog woohoo
     }
 }
 
-// type proc = lim native; 
-native func spawn(prog p) -> native;
-main 
-{
-  spawn(woohoo);
-  spawn(woohoo);
-  spawn(woohoo);
-}

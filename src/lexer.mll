@@ -14,14 +14,14 @@
                 ("mod", MOD);
                 ("use", USE);
 
-                ("pub", PUB);
-
-                ("meta", META);
                 ("syntax", SYNTAX);
+                ("meta", META);
 
                 ("if", IF);
                 ("else", ELSE);
                 ("while", WHILE);
+                ("do", DO);
+                ("alt", ALT);
 
                 ("try", TRY);
                 ("fail", FAIL);
@@ -29,28 +29,21 @@
                 ("main", MAIN);
                 ("fini", FINI);
 
-                ("put", PUT);
-                ("ret", RET);
-                ("be", BE);
-
                 ("type", TYPE);
                 ("pred", PRED);
                 ("check", CHECK);
                 ("prove", PROVE);
 
-                ("let", LET);
-
                 ("pure", PURE);
-
                 ("auto", AUTO);
-                ("inline", INLINE);
-                ("native", NATIVE);
+
+                ("pub", PUB);
+
+                ("val", VAL);
+                ("dyn", DYN);
 
                 ("log", LOG);
-                ("reflect", REFLECT);
-                ("eval", EVAL);
 
-                ("nil", NIL);
                 ("bool", BOOL);
         
                 ("int", INT);
@@ -58,13 +51,18 @@
                 ("char", CHAR);
                 ("str", STR);
 
-                ("alt", ALT);
+                ("rec", REC);
+                ("tag", TAG);
                 ("vec", VEC);
                 ("any", ANY);
+                ("lim", LIM);
 
-                ("prog", PROG);
+
                 ("port", PORT);
                 ("chan", CHAN);
+
+                ("prog", PROG);
+                ("proc", PROC);
 
                 ("true", LIT_BOOL true);
                 ("false", LIT_BOOL false);
@@ -114,28 +112,42 @@ rule token = parse
 | "@"                          { AT         }
 | "^"                          { CARET      }
 | '.'                          { DOT        }
+| '.' '.'                      { DOTDOT     }
 | ','                          { COMMA      }
 | ';'                          { SEMI       }
-| ':' '='                      { COLONEQ    }
 | ':'                          { COLON      }
 | "<-"                         { LARROW     }
+| "<|"                         { SEND       }
 | "->"                         { RARROW     }
+| "()"                         { NIL        }
 | '('                          { LPAREN     }
 | ')'                          { RPAREN     }
 | '['                          { LBRACKET   }
 | ']'                          { RBRACKET   }
 
-| "func"                       { FUNC      }
-| "func?"                      { FUNC_QUES }
-| "func!"                      { FUNC_BANG }
-| "func*"                      { FUNC_STAR }
-| "func+"                      { FUNC_PLUS }
+| "fn"                         { FN None                }
+| "fn?"                        { FN (Some Ast.PROTO_ques)   }
+| "fn!"                        { FN (Some Ast.PROTO_bang)   }
+| "fn*"                        { FN (Some Ast.PROTO_star)   }
+| "fn+"                        { FN (Some Ast.PROTO_plus)   }
 
-| "for"                        { FOR       }
-| "for?"                       { FOR_QUES  }
-| "for!"                       { FOR_BANG  }
-| "for*"                       { FOR_STAR  }
-| "for+"                       { FOR_PLUS  }
+| "for"                        { FOR None               }
+| "for?"                       { FOR (Some Ast.PROTO_ques)  }
+| "for!"                       { FOR (Some Ast.PROTO_bang)  }
+| "for*"                       { FOR (Some Ast.PROTO_star)  }
+| "for+"                       { FOR (Some Ast.PROTO_plus)  }
+
+| "ret"                        { RET None               }
+| "ret?"                       { RET (Some Ast.PROTO_ques)  }
+| "ret!"                       { RET (Some Ast.PROTO_bang)  }
+| "ret*"                       { RET (Some Ast.PROTO_star)  }
+| "ret+"                       { RET (Some Ast.PROTO_plus)  }
+
+| "put"                        { PUT None               }
+| "put?"                       { PUT (Some Ast.PROTO_ques)  }
+| "put!"                       { PUT (Some Ast.PROTO_bang)  }
+| "put*"                       { PUT (Some Ast.PROTO_star)  }
+| "put+"                       { PUT (Some Ast.PROTO_plus)  }
 
 | id as i                 
                                { try

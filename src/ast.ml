@@ -10,6 +10,15 @@ open Hashtbl;;
  *)
 
 
+type filename = string
+;;
+
+type pos = (filename * int * int) 
+type span = {lo: pos; hi: pos}
+type 'a spanned = { node: 'a; span: span }
+;;
+
+
 (* 
  * Slot names are given by a dot-separated path within the current
  * module namespace. 
@@ -18,17 +27,9 @@ open Hashtbl;;
 type ident = string
 ;;
 
-type filename = string
-;;
-
-type pos = (filename * int * int)
-;;
-
 type nonce = int
 ;;
 
-let nopos : pos = ("no-file", 0, 0)
-;;
 
 (* "names" are statically computable references to particular slots;
    they never involve vector indexing. They are formed by a
@@ -50,10 +51,10 @@ type ty_mach =
 ;;
 
 type proto = 
-    PROTO_ques  (* func? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
-  | PROTO_bang  (* func! foo(...): yields 1 value. Never resumes.                           *)
-  | PROTO_star  (* func* foo(...): may yield N >= 0 values, then returns.                   *)
-  | PROTO_plus  (* func+ foo(...): yields N > 0 values then returns.                        *)
+    PROTO_ques  (* fn? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
+  | PROTO_bang  (* fn! foo(...): yields 1 value. Never resumes.                           *)
+  | PROTO_star  (* fn* foo(...): may yield N >= 0 values, then returns.                   *)
+  | PROTO_plus  (* fn+ foo(...): yields N > 0 values then returns.                        *)
 ;;
 
 type name_component =
@@ -74,57 +75,41 @@ and name =
 and ty = 
 
     TY_any
-  | TY_native
   | TY_nil
   | TY_bool
+  | TY_mach of (ty_mach * int)
+  | TY_int
   | TY_char
   | TY_str
-
-      (* 
-       * These 2 can probably be redefined as algebraic types.
-       *)
-
-  | TY_type  
-  | TY_prog
-
-  | TY_int
-  | TY_mach of (ty_mach * int)
 
   | TY_tup of ty_tup
   | TY_vec of ty_vec
   | TY_rec of ty_rec
-  | TY_alt of ty_alt
 
-  | TY_func of ty_func
+  (* 
+   * Note that ty_idx is only valid inside a slot of a ty_iso group, not 
+   * in a general type term. 
+   *)
+  | TY_tag of ty_tag
+  | TY_iso of ty_iso
+  | TY_idx of int
+
+  | TY_fn of ty_fn
   | TY_chan of ty
   | TY_port of ty
-      
-  | TY_quote of ty_quote
-      
+
   | TY_named of name
   | TY_opaque of nonce
       
   | TY_constrained of (ty * constrs)
   | TY_mod of (mod_type_items)
-      
-
-(* Slots can have an smode qualifier put on them: exterior or alias.
- * If there is no qualifier, the slot is interior. Slots acquire an
- * implicit set of constraints from their type, but can also have an
- * explicit set of constraints stuck on them.  
- *)
+  | TY_prog of ty_prog
+  | TY_lim of ty
       
 and slot = 
-    { 
-      slot_smode: smode;
-      slot_ty: ty;
-      slot_constrs: constrs;
-    }
-
-and smode = 
-    SMODE_exterior
-  | SMODE_interior
-  | SMODE_alias
+    SLOT_exterior of ty
+  | SLOT_interior of ty
+  | SLOT_alias of ty
 
 
 (* In closed type terms a constraint may refer to components of the
@@ -132,20 +117,20 @@ and smode =
  * term this constraint is attached to".
  * 
  * 
- * For example, if I have a tuple type tup[int,int], I may wish to enforce
+ * For example, if I have a tuple type (int,int), I may wish to enforce
  * the lt predicate on it; I can write this as a constrained type term
  * like:
  * 
- * tup[int, int] : lt( *.#0, *.#1 )
+ * (int,int) : lt( *.#0, *.#1 )
  * 
  * In fact all tuple types are converted to this form for purpose of
- * type-compatibility testing; the tuple
+ * type-compatibility testing; the argument tuple in a function
  * 
- * func (int x, int y) : lt(x, y) -> int
+ * fn (int x, int y) : lt(x, y) -> int
  * 
- * actually has type
+ * desugars to
  * 
- * func (tup[int, int] : lt( *.#0, *.#1 )) -> int
+ * fn ((int, int) : lt( *.#0, *.#1 )) -> int
  * 
  *)
 
@@ -175,26 +160,30 @@ and prog =
       prog_mod: mod_items;
     } 
       
-and ty_rec = 
-    { 
-      rec_slots: (ident, slot) Hashtbl.t;
-      rec_constrs: constrs;
-    }
+and ty_rec = (ident, slot) Hashtbl.t
       
-(* 
- * An alt type is modeled -- structurally -- as an array of its N
- * variant types. The types do not have to be disjoint.
+(* ty_tag is a sum type.
  * 
- * An alt *declaration* -- as a binding in a module -- is modeled as a
- * triple of a type, an injection function, and a projection function.
+ * a tag type expression either normalizes to a TY_tag or a TY_iso,
+ * which (like in ocaml) is an indexed projection from an iso-recursive
+ * group of TY_tags.
  *)
-and ty_alt = ty array
-    
-and ty_tup = 
+
+and ty_tag = (ident, slot) Hashtbl.t
+
+and ty_iso = 
     {
-      tup_types: ty array;
-      tup_constrs: constrs;
+      iso_index: int;
+      iso_group: ty_tag array
     }
+
+      
+and ty_tup = slot array
+
+and tup_lvals = lval array
+
+and tup_expr = expr array
+
       
 and ty_vec =
     {
@@ -203,67 +192,89 @@ and ty_vec =
       
 and ty_sig = 
     { 
-      sig_param_smodes: smode array;
-      sig_param_types: ty array;
-      
-      sig_pre_cond: constrs;
-      sig_post_cond: constrs;
-
-      sig_result_smode: smode;
-      sig_result_ty: ty;
+      sig_input_slot: slot;      
+      sig_output_slot: slot;
     }
 
-and ty_func = 
+and ty_fn = 
     {
-      func_pure: bool;
-      func_inline: bool;
-      func_sig: ty_sig;
-      func_proto: proto option;
+      fn_pure: bool;
+      fn_lim: ty_limit;
+      fn_sig: ty_sig;
+      fn_proto: proto option;
+    }
+
+
+and ty_prog = 
+    {
+      prog_mod_ty: mod_type_items;
+      prog_init_ty: ty;
     }
       
-and ty_quote = 
-    TY_quote_expr
-  | TY_quote_type
-  | TY_quote_decl
-  | TY_quote_stmt
-      
-(* Probably this list should be a lot longer; the canonical rule *)
-      (* I've been using is to make a quotation type for every *)
-      (* nonterminal *)
-      
-and stmt =
+(* put+ f(a,b) means to call f with current put addr and self as ret
+ * addr. this is a 'tail yield' that bypasses us during f execution.
+ * 
+ * ret+ f(a,b) means to call f with current pur addr and current ret
+ * addr. this is a 'tail call' that destroys us.
+ *)
+and stmt' =
     STMT_while of stmt_while
+  | STMT_do_while of stmt_while
   | STMT_foreach of stmt_foreach
   | STMT_for of stmt_for
   | STMT_if of stmt_if
   | STMT_try of stmt_try
-  | STMT_put of (expr option * pos)
-  | STMT_ret of (expr * pos)
-  | STMT_prove of (constrs * pos)
-  | STMT_check of (constrs * pos)
-  | STMT_checkif of (constrs * stmt * pos)
-  | STMT_block of ((stmt array) * pos)
-  | STMT_move of (lval * lval * pos)
-  | STMT_copy of (lval * expr * pos)
-  | STMT_call of (lval * (expr array) * pos)
-  | STMT_be of (lval * (expr array) * pos)
-  | STMT_send of (lval * expr * pos)
-  | STMT_decl of (ident * mod_item * pos)
-  | STMT_use of (ty * ident * lval * pos)
+  | STMT_put of (proto option * expr option)
+  | STMT_ret of (proto option * expr option)
+  | STMT_alt_tag of (ident, (slot * stmt)) Hashtbl.t
+  | STMT_alt_type of stmt_alt_type
+  | STMT_alt_port of stmt_alt_port
+  | STMT_prove of (constrs)
+  | STMT_check of (constrs)
+  | STMT_checkif of (constrs * stmt)
+  | STMT_block of ((stmt array))
+  | STMT_copy of stmt_copy
+  | STMT_call of (lval * (expr array))
+  | STMT_send of (lval * expr)
+  | STMT_recv of (lval * lval)
+  | STMT_decl of stmt_decl 
+  | STMT_use of (ty * ident * lval)
       
+and stmt = stmt' spanned
+
+and stmt_alt_type = 
+    { 
+      alt_type_arms: (ident * slot * stmt) array;
+      alt_type_else: stmt option;
+    }
+
+and stmt_decl = 
+    DECL_mod_item of (ident * mod_item)
+  | DECL_slot_tup of (ty_tup * (ident array) * (expr option))
+
+and stmt_copy = 
+    COPY_to_lval of lval * expr
+  | COPY_to_tup of tup_lvals * expr
+      
+and stmt_alt_port = 
+    { 
+      (* else expr is a timeout value, a b64 count of seconds. *)
+      alt_port_arms: (lval * lval) array;
+      alt_port_else: (expr * stmt) option;
+    }
+
 and stmt_while = 
     {
       while_expr: expr;
       while_body: stmt;
-      while_pos: pos;
     }
       
 and stmt_foreach = 
     {
       foreach_proto: proto;
       foreach_slot: (ident * slot);
+      foreach_call: (lval * expr array);
       foreach_body: stmt;
-      foreach_pos: pos;
     }
       
 and stmt_for = 
@@ -272,7 +283,6 @@ and stmt_for =
       for_test: expr;
       for_step: stmt;
       for_body: stmt;
-      for_pos: pos;
     }
 
 and stmt_if = 
@@ -280,7 +290,6 @@ and stmt_if =
       if_test: expr;
       if_then: stmt;
       if_else: stmt option;
-      if_pos: pos;
     }
 
 and stmt_try = 
@@ -288,46 +297,37 @@ and stmt_try =
       try_body: stmt;
       try_fail: stmt option;
       try_fini: stmt option;
-      try_pos: pos;
     }
 
 and rec_input = 
     REC_from_copy of (ident * expr)
   | REC_from_move of (ident * lval)
 
-and expr =
-    EXPR_literal of (lit * pos)
-  | EXPR_binary of (binop * pos * expr * expr)
-  | EXPR_unary of (unop * pos * expr)
-  | EXPR_lval of (lval * pos)
-  | EXPR_call of (lval * pos * (expr array))
-  | EXPR_rec of (name * pos * (rec_input array))
-  | EXPR_mod of (mod_items * pos)
-          
+and expr' =
+    EXPR_literal of lit
+  | EXPR_binary of (binop * expr * expr)
+  | EXPR_unary of (unop * expr)
+  | EXPR_lval of lval
+  | EXPR_call of (lval * (expr array))
+  | EXPR_fn of fn
+  | EXPR_prog of prog
+  | EXPR_mod of  (ty * mod_items)
+  | EXPR_rec of (ty * (rec_input array))
+
+and expr = expr' spanned
+    
 and lit = 
-    LIT_str of string
-  | LIT_char of char
+  | LIT_nil
   | LIT_bool of bool
-  | LIT_mach of lit_mach
-  | LIT_int of (Big_int.big_int * string)
-  | LIT_custom of lit_custom
-  | LIT_quote of lit_quote
-  | LIT_func of (ty_func * func)
-  | LIT_prog of prog
-
-(* 
- * Need to add more quotes as time progresses.
- *)
-and lit_quote = 
-    QUOTE_expr of expr
-  | QUOTE_type of ty
-  | QUOTE_stmt of stmt
-
-and lit_mach = 
-    LIT_unsigned of (int * string)
+  | LIT_unsigned of (int * string)
   | LIT_signed of (int * string)
   | LIT_ieee_bfp of (float * string)
   | LIT_ieee_dfp of ((int * int) * string)
+  | LIT_int of (Big_int.big_int * string)
+  | LIT_char of char
+  | LIT_str of string
+  | LIT_custom of lit_custom
+
 
 and lit_custom = 
     {
@@ -337,14 +337,16 @@ and lit_custom =
     }
 
 and lidx =
-    LIDX_named of (name_component * pos)
+    LIDX_named of name_component
   | LIDX_index of expr
-    
-and lval = 
+      
+and lval' = 
     {
       lval_base: ident;
       lval_rest: lidx array;
     }
+
+and lval = lval' spanned
 
 and binop =    
     BINOP_or
@@ -367,29 +369,26 @@ and binop =
   | BINOP_mul
   | BINOP_div
   | BINOP_mod
+  | BINOP_send
 
 and unop =
     UNOP_not
   | UNOP_neg
 
 
-and func = 
+and fn = 
     {
-      func_ty: ty_func;
-      func_bind: ident array;
-      func_body: fbody;
+      fn_ty: ty_fn;
+      fn_bind: ident array;
+      fn_body: stmt;
     }
 
 and pred = 
     {
       pred_ty: ty_sig;
       pred_bind: ident array;
-      pred_body: fbody;
+      pred_body: stmt;
     }
-
-and fbody = 
-    FBODY_native of ident
-  | FBODY_stmt of stmt
       
 and init = 
     {
@@ -407,9 +406,14 @@ and init =
  * even if it's a type that's bound by a quantifier in its environment.
  *)
 
+
+and ty_limit = 
+    LIMITED
+  | UNLIMITED
+
 and 'a decl = 
     {
-      decl_params: ident array;
+      decl_params: (ty_limit * ident) array;
       decl_item: 'a;
     }
 
@@ -439,20 +443,28 @@ and 'a decl =
  * Peyton Jones. Hopefully I'm doing it right. It's a little near the 
  * limit of tricks I understand.
  *)
-   
-and mod_item = 
-    MOD_ITEM_type of ty decl
+
+and mod_item' = 
+    MOD_ITEM_opaque_type of ty decl
+  | MOD_ITEM_public_type of ty decl
   | MOD_ITEM_pred of pred decl
   | MOD_ITEM_mod of mod_items decl
-  | MOD_ITEM_slot of slot
-   
+  | MOD_ITEM_fn of fn decl
+  | MOD_ITEM_prog of prog decl
+  | MOD_ITEM_slot of (slot * expr option)
+
+and mod_item = mod_item' spanned   
       
-and mod_type_item = 
-    MOD_TYPE_ITEM_opaque_type
+and mod_type_item' = 
+    MOD_TYPE_ITEM_opaque_type of ty_limit decl
   | MOD_TYPE_ITEM_public_type of ty decl
   | MOD_TYPE_ITEM_pred of ty decl
   | MOD_TYPE_ITEM_mod of mod_type_items decl
-  | MOD_TYPE_ITEM_slot of ty
+  | MOD_TYPE_ITEM_fn of ty_fn decl
+  | MOD_TYPE_ITEM_prog of ty_prog decl
+  | MOD_TYPE_ITEM_slot of ty decl
+
+and mod_type_item = mod_type_item' spanned
 
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
 

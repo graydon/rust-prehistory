@@ -403,3 +403,104 @@ expression above doesn't work):
     each of its existential members.
 
 
+2008-June-08
+------------
+
+prog is a special form for a reason.
+
+first, prog has a dtor, which is simply useful. but we have finally so we can argue that
+a dtor is not enough to argue for a prog.
+
+more importantly, prog has local vars that are visible to all fns declared in prog, but 
+can only be written-to by init, main and fini (none of which call one another).
+
+prog can also have dyns declared in it, which are visible to all the fns within it. 
+
+these two make them *somewhat* like classes.
+
+(also they have an implicit module of chans connected to all their
+ports, manufactured when they're allocated)
+
+
+2008-June-13
+------------
+
+ALL TYPES COPYABLE, NOT ALL TRANSMITTABLE
+
+You can always form another reference to a process or port, to stick
+elsewhere in a data structure. You just can't always <- send it
+through a channel. So the proper predicate on a type is
+"transmittable", not "copyable". You won't form cycles because you
+can't store "into" a proc or port. The "move" operator is dead.
+
+One simply cannot declare a port or chan that carries a non-transmit
+type. Therefore each type is marked with whether or not it's a transmit
+type, and every type-parametric binding is marked with whether or not
+it can be instantiated for non-transmit types.
+
+Since this inference might be confusing, we require that parametric
+bindings carry a leading 'lim' on parameters that can handle limited
+types, and we make a 'lim type' type declaration form for marking
+limited types (which is checked against the definition). All other
+binding-sugar forms also carry a prefix-'lim' form: lim fn f(...) or
+lim mod m(...). Module and function expressions can close over limited
+values.
+
+Prog declarations can *not* close over limited values, because a 'lim prog'
+could never be spawned. It's by-definition a nonsense type. 
+
+
+TUPLES
+
+With this change, the tuple constructor "," is back, functions taking
+"multiple values" just take a tuple, destructuring bind on tuples is
+available, and we're looking more and more like aleph. Woo.
+
+
+CHAN, send and receive syntaxes
+
+We do something a little like alef here, but not entirely:
+
+  unary receive:    <-port or <-vec[port], permitting say foo(<-port)
+  binary receive:   var <- port  or   var <- vec[port]
+  binary send:      chan <| data
+
+
+
+
+TAGS, DATA and TYPE
+
+the "tag" data constructor is for unions and enums, not alt. alt is 
+a prefix keyword for 'alt type', 'alt tag', and 'alt port' constructs.
+
+tag types are like ocaml tag types: sugar for a
+sum-injection/iso-recursive-fold operation and a corresponding
+sum-projection/iso-recursive-unfold operation when used in
+destructuring context ('alt tag').
+
+The iso-recursive thing supports multiple mutually-iso-recursive types
+by bundling up all the mutually-recursive types in a scope, sorting them,
+mu-binding them and then defining each binding as an indexed projection
+out of the mu-binding. Thus, as follows:
+
+so:
+
+ {
+   type exp = tag varexp(var) | letexp(dec,exp);
+   type dec = tag valdec(var,exp) | seqdec(dec,dec);
+ }
+
+turns into bindings:
+
+  exp -> #1 @ u[A,B].(var+(B,A), (var,A)+(B,B))
+  dec -> #2 @ u[A,B].(var+(B,A), (var,A)+(B,B))
+
+this is absolutely delicious. hooray for re-covering ground someone
+else has done. Note that there are awful details about tag-naming the
+members of the type and considering them equal if they have equal
+structure (and equal tag-names? ooh). I'm somewhat partial to this
+design since it's simple and makes (some) more programs typecheck,
+while (some) others -- mostly those doing fancy things with modules
+and opaque types -- not.  I'm ok with that tradeoff, I think. Though I
+will read through dreyer tldi 03 to be sure.
+
