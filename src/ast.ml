@@ -83,7 +83,7 @@ and ty =
   | TY_str
 
   | TY_tup of ty_tup
-  | TY_vec of ty_vec
+  | TY_vec of ty
   | TY_rec of ty_rec
 
   (* 
@@ -109,7 +109,8 @@ and ty =
 and slot = 
     SLOT_exterior of ty
   | SLOT_interior of ty
-  | SLOT_alias of ty
+  | SLOT_read_alias of ty
+  | SLOT_write_alias of ty
 
 
 (* In closed type terms a constraint may refer to components of the
@@ -121,7 +122,7 @@ and slot =
  * the lt predicate on it; I can write this as a constrained type term
  * like:
  * 
- * (int,int) : lt( *.#0, *.#1 )
+ * (int,int) : lt( *.(0), *.(1) )
  * 
  * In fact all tuple types are converted to this form for purpose of
  * type-compatibility testing; the argument tuple in a function
@@ -130,7 +131,7 @@ and slot =
  * 
  * desugars to
  * 
- * fn ((int, int) : lt( *.#0, *.#1 )) -> int
+ * fn ((int, int) : lt( *.(0), *.(1) )) -> int
  * 
  *)
 
@@ -169,7 +170,7 @@ and ty_rec = (ident, slot) Hashtbl.t
  * group of TY_tags.
  *)
 
-and ty_tag = (ident, slot) Hashtbl.t
+and ty_tag = (ident, ty) Hashtbl.t
 
 and ty_iso = 
     {
@@ -183,13 +184,7 @@ and ty_tup = slot array
 and tup_lvals = lval array
 
 and tup_expr = expr array
-
-      
-and ty_vec =
-    {
-      vec_elt_type: ty;
-    }
-      
+           
 and ty_sig = 
     { 
       sig_input_slot: slot;      

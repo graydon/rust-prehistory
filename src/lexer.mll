@@ -109,6 +109,7 @@ rule token = parse
 | '{'                          { LBRACE     }
 | '}'                          { RBRACE     }
 
+| '#'                          { POUND      }
 | "@"                          { AT         }
 | "^"                          { CARET      }
 | '.'                          { DOT        }
@@ -156,7 +157,6 @@ rule token = parse
                                      Not_found -> IDENT (i)  
                                            }
 
-| ('#' ['0' - '9']+) as s       { IDX (int_of_string s)                          }
 | bin as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }
 | hex as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }
 | dec as n                      { LIT_INT (Big_int.big_int_of_string n, n)                 }

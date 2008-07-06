@@ -23,6 +23,7 @@ type token =
 
   (* Structural symbols *)
   | AT
+  | TILDE
   | CARET
   | DOT
   | DOTDOT
@@ -47,7 +48,7 @@ type token =
   (* Metaprogramming keywords *)
   | SYNTAX
   | META
-  | TILDE
+  | POUND
 
   (* Statement keywords *)
   | IF
@@ -152,6 +153,7 @@ let string_of_tok t =
 
     (* Structural symbols *)
     | AT         -> "@"
+    | TILDE      -> "~"
     | CARET      -> "^"
     | DOT        -> "."
     | DOTDOT     -> ".."
@@ -176,7 +178,7 @@ let string_of_tok t =
     (* Metaprogramming keywords *)
     | SYNTAX     -> "syntax"
     | META       -> "meta"
-    | TILDE      -> "~"
+    | POUND      -> "#"
 
     (* Control-flow keywords *)
     | IF         -> "if"
@@ -366,17 +368,17 @@ let arl ls = Array.of_list (List.rev ls)
 
 (* Parser combinators *)
 
-let one_or_more sep rule ps = 
-  let accum = ref [rule ps] in
+let one_or_more sep prule ps = 
+  let accum = ref [prule ps] in
     while peek ps == sep
     do 
       bump ps;
-      accum := (rule ps) :: !accum
+      accum := (prule ps) :: !accum
     done;
     arl !accum
 ;;
 
-let bracketed_seq mandatory bra ket sepOpt rule ps =
+let bracketed_seq mandatory bra ket sepOpt prule ps =
   expect ps bra;
   let accum = ref [] in
   let dosep _ = 
@@ -389,24 +391,24 @@ let bracketed_seq mandatory bra ket sepOpt rule ps =
   in
     while mandatory > List.length (!accum) do
       dosep ();
-      accum := (rule ps) :: (!accum)
+      accum := (prule ps) :: (!accum)
     done;
     while peek ps != ket
     do
       dosep ();    
-      accum := (rule ps) :: !accum
+      accum := (prule ps) :: !accum
     done;
     expect ps ket;
     arl !accum
 ;;
 
 
-let path sep rule ps = 
+let path sep prule ps = 
   let accum = ref [] in
     while peek ps == sep
     do
       expect ps sep;
-      accum := (ctxt "path" rule ps) :: !accum
+      accum := (ctxt "path" prule ps) :: !accum
     done;
     arl !accum
 ;;
@@ -506,7 +508,7 @@ and parse_constraint ps =
 and parse_constrs ps = 
   ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps            
         
-and parse_base_ty ps = 
+and parse_atomic_ty ps = 
   match peek ps with 
           
       BOOL -> 
@@ -517,56 +519,107 @@ and parse_base_ty ps =
         bump ps; 
         Ast.TY_int
 
-    | STR -> 
-        bump ps; 
-        Ast.TY_str
-
     | CHAR -> 
         bump ps; 
         Ast.TY_char
 
+    | STR -> 
+        bump ps; 
+        Ast.TY_str
+
     | NIL -> 
         bump ps;
         Ast.TY_nil
+          
+    | ANY -> 
+        bump ps;
+        Ast.TY_any
 
+    | CHAN -> 
+        Ast.TY_chan (bracketed LBRACE RBRACE parse_ty ps)
+
+    | PORT -> 
+        Ast.TY_port (bracketed LBRACE RBRACE parse_ty ps)
+
+    | VEC -> 
+        Ast.TY_vec (bracketed LBRACE RBRACE parse_ty ps)
+
+    | LIM -> 
+        bump ps;
+        Ast.TY_lim (parse_atomic_ty ps)
+
+    | IDENT _ -> Ast.TY_named (parse_name ps)
+                  
+
+    | TAG -> 
+        bump ps;
+        let htab = Hashtbl.create 2 in 
+        let parse_tag_entry ps = 
+          let ident = parse_ident ps in
+          let ty = 
+            match peek ps with 
+                LPAREN -> bracketed LPAREN RPAREN parse_ty ps
+              | NIL -> Ast.TY_nil
+              | _ -> Ast.TY_nil
+          in
+            Hashtbl.add htab ident ty
+        in
+        let _ = one_or_more OR parse_tag_entry ps in
+          Ast.TY_tag htab
+
+    | LBRACE -> 
+        let htab = Hashtbl.create 2 in 
+        let parse_rec_entry ps = 
+          let (slot, ident) = parse_slot_and_ident false ps in 
+            Hashtbl.add htab ident slot
+        in
+        let _ = bracketed_zero_or_more LBRACE RBRACE None parse_rec_entry ps in
+          Ast.TY_rec htab
+            
+    | LPAREN -> bracketed LPAREN RPAREN parse_ty ps
+
+            
     | _ -> raise (unexpected ps)
 
 
-and parse_slot ps =
-  match peek ps with
-      AT -> 
+and parse_slot param_slot ps =
+  match (peek ps, param_slot) with
+      (AT, _) -> 
         bump ps;
         let ty = parse_ty ps in
-          Ast.SLOT_alias ty
+          Ast.SLOT_exterior ty
 
-    | CARET -> 
+    | (CARET, true) -> 
         bump ps; 
         let ty = parse_ty ps in 
-          Ast.SLOT_exterior ty
+          Ast.SLOT_write_alias ty
+
+    | (TILDE, true) -> 
+        bump ps; 
+        let ty = parse_ty ps in 
+          Ast.SLOT_read_alias ty
             
     | _ -> 
         let ty = parse_ty ps in 
           Ast.SLOT_interior ty
-        
+
+and parse_tuple_ty ps = 
+          one_or_more COMMA parse_ty ps
+            
+and parse_constrained_ty ps = 
+          let base = ctxt "ty: base" parse_atomic_ty ps in
+            match peek ps with
+        COLON -> 
+          bump ps;
+          let constrs = ctxt "ty: constrs" parse_constrs ps in
+            Ast.TY_constrained (base, constrs)
+              
+      | _ -> base                
+          
 and parse_ty ps = 
-  match peek ps with 
-      LPAREN -> bracketed LPAREN RPAREN parse_ty ps
-    | _ -> 
-        let base = ctxt "ty: base" parse_base_ty ps in
-          match peek ps with
-              COLON -> 
-                bump ps;
-                let constrs = ctxt "ty: constrs" parse_constrs ps in
-                  Ast.TY_constrained (base, constrs)
-                    
-            | _ -> base                
-;;
+          parse_constrained_ty ps
 
-
-(* The Giant Mutually-Recursive AST Parse Functions *)
-
-
-let rec parse_lidx ps = 
+and parse_lidx ps = 
   match peek ps with
       IDENT _ | IDX _ -> 
         let ncomp = ctxt "lidx: name component" parse_name_component ps in
@@ -751,23 +804,23 @@ and parse_or_expr ps =
 and parse_expr (ps:pstate) : Ast.expr  =
   ctxt "expr" parse_or_expr ps
 
-and parse_slot_and_ident ps = 
-  let slot = ctxt "slot and ident: slot" parse_slot ps in
+and parse_slot_and_ident param_slot ps = 
+  let slot = ctxt "slot and ident: slot" (parse_slot param_slot) ps in
   let ident = ctxt "slot and ident: ident" parse_ident ps in
     (slot, ident)
       
- and parse_two_or_more_tup_slots_and_idents ps = 
+ and parse_two_or_more_tup_slots_and_idents param_slot ps = 
   let both = 
-    ctxt "tup slots and idents" 
-      (bracketed_two_or_more LPAREN RPAREN (Some COMMA) parse_slot_and_ident) ps
+    ctxt "two+ tup slots and idents" 
+      (bracketed_two_or_more LPAREN RPAREN (Some COMMA) (parse_slot_and_ident param_slot)) ps
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arl slots, arl idents)
 
- and parse_one_or_more_tup_slots_and_idents ps = 
+ and parse_one_or_more_tup_slots_and_idents param_slot ps = 
   let both = 
-    ctxt "tup slots and idents" 
-      (bracketed_one_or_more LPAREN RPAREN (Some COMMA) parse_slot_and_ident) ps
+    ctxt "one+ tup slots and idents" 
+      (bracketed_one_or_more LPAREN RPAREN (Some COMMA) (parse_slot_and_ident param_slot)) ps
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arl slots, arl idents)
@@ -794,7 +847,7 @@ and parse_init ps =
 and parse_slot_and_ident_and_init ps = 
   let (slot, ident) = 
     ctxt "slot and init: ident and slot" 
-      parse_slot_and_ident ps 
+      (parse_slot_and_ident false) ps 
   in
   let init = ctxt "stmt slot decl: init" parse_init ps in
     (slot, ident, init)
@@ -864,7 +917,7 @@ and parse_stmt ps =
                LPAREN -> 
                  let (slots, idents) = 
                    ctxt "stmt tup decl: slots and idents" 
-                     parse_two_or_more_tup_slots_and_idents ps in
+                     (parse_two_or_more_tup_slots_and_idents false) ps in
                  let init = ctxt "stmt tup decl: init" parse_init ps in
                  let bpos = lexpos ps in 
                    span apos bpos 
@@ -970,14 +1023,14 @@ and parse_sig_and_bind ps =
       | LPAREN -> 
           let (slots, idents) = 
             ctxt "sig and bind: idents and slots" 
-              parse_one_or_more_tup_slots_and_idents ps in
+              (parse_one_or_more_tup_slots_and_idents true) ps in
             if Array.length slots = 1
             then (slots.(0), idents)
             else (Ast.SLOT_interior (Ast.TY_tup slots), idents)
       | _ -> raise (unexpected ps)
   in
   let _ = expect ps RARROW in
-  let output_slot = ctxt "sig and bind: output" parse_slot ps in
+  let output_slot = ctxt "sig and bind: output" (parse_slot true) ps in
     ({ Ast.sig_input_slot = input_slot;
        Ast.sig_output_slot = output_slot }, idents)
 

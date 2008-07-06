@@ -504,3 +504,52 @@ while (some) others -- mostly those doing fancy things with modules
 and opaque types -- not.  I'm ok with that tradeoff, I think. Though I
 will read through dreyer tldi 03 to be sure.
 
+
+2008-June-28
+------------
+
+An unfortunate fact: suppose we want to implement to make a module
+implementation of a data structure -- say a hashtable -- and you want
+it to be abstract and mutable, then you want to do *at least* things
+like:
+
+  tab = tab.insert(tab, key, val)
+
+but doing that with CoW means that by the time you're in tab.insert
+you have 2 live refs to the exterior vec and you're going to have to
+duplicate it. Ouch!
+
+Besides, you really want to do something more like:
+
+ tab.insert(tab, key, val) 
+
+as a single statement, without having to update tab. this means you
+really want writable aliases as a param slot mode.
+
+What are the semantics?
+
+  - writable aliases can only be formed in calls
+
+  - writable aliases can only be formed on things you *already have*
+    write permission on, have already CoW'ed
+
+  - you can't form 2 aliases to the same thing, or to anything that
+    *might be* the same thing. so if you form a write-alias a vec member
+    in a callexpr, all other members of that vec are prohibited from
+    being write-aliased simultaneously (since we can't statically know
+    whether you are hitting the same slot in multiple
+    index-expressions).
+
+  - all typestates of write-aliased slots drop to nil in the caller
+    *during* the call -- in case the call happens to be an iterator --
+    and the callee is obliged to re-establish the write-aliased slots to 
+    the signature typestate before returning. Any preds that cover the
+    write-aliased slot in the caller and are missing from the write-aliased
+    slot signature typestate are dropped in the caller. If it wants them
+    back it must assert them when it regains control.
+
+So we re-form ~ and ^ to mean read-alias and write-alias, respectively,
+and steal # from tuple-indexing (since we have destructuring assignment now 
+anyways) and use it for static metaprogram escape (think #include!)
+
+
