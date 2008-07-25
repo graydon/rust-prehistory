@@ -10,13 +10,13 @@
 type label = int
 
 type slot = Vreg of int
-	    | HWreg of int
-	    | Spill of int
-	    | Local of int
-	    | Lit of int32
-	    | Deref of (slot * int32)
-	    | Nil
-	    | Label of label
+			| HWreg of int
+			| Spill of int
+			| Local of int
+			| Lit of int32
+			| Deref of (slot * int32)
+			| Nil
+			| Label of label
 ;;
 
 type op = 
@@ -33,11 +33,11 @@ type op =
 ;;
 
 type quad = { quad_lab: label option;
-	      quad_op: op;
-	      quad_dst: slot;
-	      quad_lhs: slot;
-	      quad_rhs: slot;
-	    }
+			  quad_op: op;
+			  quad_dst: slot;
+			  quad_lhs: slot;
+			  quad_rhs: slot;
+			}
 ;;
 
 type quads = quad array
@@ -58,7 +58,7 @@ let rec fmt_slot out slot =
 let fmt_op out op = 
   output_string out
     (match op with 
-	 ADD -> "ADD"
+		 ADD -> "ADD"
        | SUB -> "SUB"
        | NEG -> "NEG"
        | MUL -> "MUL"
@@ -107,11 +107,11 @@ let print_quads qs =
 ;;
 
 type emitter = { emit_n_hardregs: int;
-		 mutable emit_pc: int;
-		 mutable emit_next_label: int; 
-		 mutable emit_next_vreg: int; 
-		 mutable emit_next_spill: int;
-		 mutable emit_quads: quads; }
+				 mutable emit_pc: int;
+				 mutable emit_next_label: int; 
+				 mutable emit_next_vreg: int; 
+				 mutable emit_next_spill: int;
+				 mutable emit_quads: quads; }
 
 
 let badq = { quad_lab = None;
@@ -162,11 +162,12 @@ let grow_if_necessary e =
 
 let emit_quad e lab op dst lhs rhs =
   grow_if_necessary e;
-  e.emit_quads.(e.emit_pc) <- { quad_lab = lab;
-				quad_op = op;
-				quad_dst = dst;
-				quad_lhs = lhs;
-				quad_rhs = rhs; };
+  e.emit_quads.(e.emit_pc) <- 
+	{ quad_lab = lab;
+	  quad_op = op;
+	  quad_dst = dst;
+	  quad_lhs = lhs;
+	  quad_rhs = rhs; };
   e.emit_pc <- e.emit_pc + 1
 ;;
 

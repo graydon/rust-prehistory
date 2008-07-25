@@ -32,15 +32,14 @@ type nonce = int
 
 
 (* "names" are statically computable references to particular slots;
-   they never involve vector indexing. They are formed by a
-   dot-separated sequence of identifier and/or index components,
-   the latter representing tuple/call/ctor components (foo.#0, foo.#1, etc). 
+   they never involve dynamic indexing (nor even static tuple-indexing;
+   you could add it but there are few contexts that need names that would
+   benefit from it). 
    
    Each component of a name may also be type-parametric; you must 
    supply type parameters to reference through a type-parametric name
    component. So for example if foo is parametric in 2 types, you can
-   write foo[int,int].bar but not foo.bar.
-   
+   write foo[int,int].bar but not foo.bar.   
  *)
 
 type ty_mach = 
@@ -58,15 +57,11 @@ type proto =
 ;;
 
 type name_component =
-    COMP_ident of ident
+	COMP_ident of ident
+  | COMP_app of (ident * (ty array))
   | COMP_idx of int
-  | COMP_app of (ty array)
 
-and name = 
-    {
-     name_base: ident;
-     name_rest: name_component array;
-   }
+and name = name_component array
 
 (* 
  * Type expressions are transparent to type names, their equality is structural.
@@ -122,7 +117,7 @@ and slot =
  * the lt predicate on it; I can write this as a constrained type term
  * like:
  * 
- * (int,int) : lt( *.(0), *.(1) )
+ * (int,int) : lt( *.{0}, *.{1} )
  * 
  * In fact all tuple types are converted to this form for purpose of
  * type-compatibility testing; the argument tuple in a function
@@ -131,7 +126,7 @@ and slot =
  * 
  * desugars to
  * 
- * fn ((int, int) : lt( *.(0), *.(1) )) -> int
+ * fn ((int, int) : lt( *.{0}, *.{1} )) -> int
  * 
  *)
 
@@ -221,7 +216,7 @@ and stmt' =
   | STMT_try of stmt_try
   | STMT_put of (proto option * expr option)
   | STMT_ret of (proto option * expr option)
-  | STMT_alt_tag of (ident, (slot * stmt)) Hashtbl.t
+  | STMT_alt_tag of stmt_alt_tag
   | STMT_alt_type of stmt_alt_type
   | STMT_alt_port of stmt_alt_port
   | STMT_prove of (constrs)
@@ -237,8 +232,15 @@ and stmt' =
       
 and stmt = stmt' spanned
 
+and stmt_alt_tag = 
+	{
+	  alt_tag_expr: expr;
+	  alt_tag_arms: (ident, (slot * stmt)) Hashtbl.t;
+	}
+
 and stmt_alt_type = 
     { 
+	  alt_type_expr: expr;
       alt_type_arms: (ident * slot * stmt) array;
       alt_type_else: stmt option;
     }
@@ -294,20 +296,16 @@ and stmt_try =
       try_fini: stmt option;
     }
 
-and rec_input = 
-    REC_from_copy of (ident * expr)
-  | REC_from_move of (ident * lval)
-
 and expr' =
     EXPR_literal of lit
   | EXPR_binary of (binop * expr * expr)
   | EXPR_unary of (unop * expr)
   | EXPR_lval of lval
-  | EXPR_call of (lval * (expr array))
   | EXPR_fn of fn
   | EXPR_prog of prog
-  | EXPR_mod of  (ty * mod_items)
-  | EXPR_rec of (ty * (rec_input array))
+  | EXPR_mod of (ty * mod_items)
+  | EXPR_rec of ((ident, expr) Hashtbl.t)
+  | EXPR_vec of (expr array)
 
 and expr = expr' spanned
     
@@ -337,12 +335,14 @@ and lidx =
       
 and lval' = 
     {
-      lval_base: ident;
+      lval_base: name_component;
       lval_rest: lidx array;
     }
 
-and lval = lval' spanned
-
+and lval = 
+	LVAL_named of (lval' spanned)
+  | LVAL_temp of nonce
+	  
 and binop =    
     BINOP_or
   | BINOP_and

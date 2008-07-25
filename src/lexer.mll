@@ -73,8 +73,10 @@
 
 let bin = "0b" ['0' '1']['0' '1' '_']*
 let hex = "0x" ['0'-'9' 'a'-'f' 'A'-'F']['0'-'9' 'a'-'f' 'A'-'F' '_']*
+let dec = ['0'-'9']+
+let exp = ['e''E']['-''+']? dec
+let flo = (dec '.' dec (exp?)) | (dec exp)
 
-let dec = ['0'-'9']* ['.']? ['0'-'9']+ (['e''E']['-''+']?['0'-'9']+)? 
 
 let id = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
@@ -107,6 +109,7 @@ rule token = parse
 | ">>>"                        { ASR        }
 | '~'                          { TILDE      }
 | '{'                          { LBRACE     }
+| '{' (dec as n) '}'           { IDX (int_of_string n) }
 | '}'                          { RBRACE     }
 
 | '#'                          { POUND      }
@@ -159,7 +162,8 @@ rule token = parse
 
 | bin as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }
 | hex as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }
-| dec as n                      { LIT_INT (Big_int.big_int_of_string n, n)                 }
+| dec as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }
+| flo as n                      { LIT_FLO n                                                }
 | (['"'] ([^'"']|"\\\"")* ['"'])  as s    { LIT_STR  (Scanf.sscanf s "%S" (fun x -> x))    }
 | (['\''] [^'\'']         ['\'']) as c    { LIT_CHAR (Scanf.sscanf c "%C" (fun x -> x))    }
 | "'\\''"                                 { LIT_CHAR ('\'')                                }

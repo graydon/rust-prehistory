@@ -89,6 +89,7 @@ type token =
 
   (* Literals *)
   | LIT_INT       of (Big_int.big_int * string)
+  | LIT_FLO       of (string)
   | LIT_STR       of (string)
   | LIT_CHAR      of (char)
   | LIT_BOOL      of (bool)
@@ -234,13 +235,14 @@ let string_of_tok t =
 
     (* Literals *)
     | LIT_INT (n,s)  -> s
+	| LIT_FLO n -> n
     | LIT_STR s  -> ("\"" ^ (String.escaped s) ^ "\"")
     | LIT_CHAR c -> ("'" ^ (Char.escaped c) ^ "'")
     | LIT_BOOL b -> if b then "true" else "false"
 
     (* Name components *)
     | IDENT s    -> s
-    | IDX i   -> ("#" ^ (string_of_int i))
+	| IDX i      -> ("{" ^ (string_of_int i) ^ "}")
 
     (* Reserved type names *)
     | NIL        -> "nil"
@@ -367,6 +369,15 @@ let arl ls = Array.of_list (List.rev ls)
 
 
 (* Parser combinators *)
+let path sep prule ps = 
+  let accum = ref [] in
+    while peek ps == sep
+    do
+      expect ps sep;
+      accum := (ctxt "path" prule ps) :: !accum
+    done;
+    arl !accum
+;;
 
 let one_or_more sep prule ps = 
   let accum = ref [prule ps] in
@@ -403,17 +414,6 @@ let bracketed_seq mandatory bra ket sepOpt prule ps =
 ;;
 
 
-let path sep prule ps = 
-  let accum = ref [] in
-    while peek ps == sep
-    do
-      expect ps sep;
-      accum := (ctxt "path" prule ps) :: !accum
-    done;
-    arl !accum
-;;
-
-
 let bracketed_zero_or_more bra ket sepOpt prule ps =
   bracketed_seq 0 bra ket sepOpt (ctxt "bracketed_seq" prule) ps
 ;;
@@ -442,28 +442,26 @@ let parse_ident ps =
     | _ -> raise (unexpected ps)
 ;;
 
+let rec parse_name_component ps = 
+  match peek ps with 
+	  IDENT id -> 
+		bump ps; 
+		(match peek ps with
+			 LBRACKET -> 
+			   let tys = 
+				 ctxt "name_component: apply" 
+				   (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
+			   in
+				 Ast.COMP_app (id, tys)
+				   
+		   | _ -> Ast.COMP_ident id)
+	| IDX i -> 
+		Ast.COMP_idx i
 
-let rec parse_name_component ps =
-  match peek ps with
-      IDENT str -> bump ps; (Ast.COMP_ident str)
-    | IDX i -> bump ps; (Ast.COMP_idx i)
-    | LBRACKET -> 
-        let 
-            tys = 
-          ctxt "name_component: apply" 
-            (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
-        in
-          Ast.COMP_app tys
-            
-    | _ -> raise (unexpected ps)
-
+	| _ -> raise (unexpected ps)
 
 and parse_name ps = 
-  let base = ctxt "name: base" parse_ident ps in
-  let rest = ctxt "name: rest" (path DOT parse_name_component) ps in
-    { Ast.name_base = base;
-      Ast.name_rest = rest }
-
+  one_or_more DOT parse_name_component ps
 
 and parse_constraint_arg ps =
   match peek ps with
@@ -553,7 +551,7 @@ and parse_atomic_ty ps =
 
     | TAG -> 
         bump ps;
-        let htab = Hashtbl.create 2 in 
+        let htab = Hashtbl.create 4 in 
         let parse_tag_entry ps = 
           let ident = parse_ident ps in
           let ty = 
@@ -568,7 +566,7 @@ and parse_atomic_ty ps =
           Ast.TY_tag htab
 
     | LBRACE -> 
-        let htab = Hashtbl.create 2 in 
+        let htab = Hashtbl.create 4 in 
         let parse_rec_entry ps = 
           let (slot, ident) = parse_slot_and_ident false ps in 
             Hashtbl.add htab ident slot
@@ -604,11 +602,11 @@ and parse_slot param_slot ps =
           Ast.SLOT_interior ty
 
 and parse_tuple_ty ps = 
-          one_or_more COMMA parse_ty ps
+  one_or_more COMMA parse_ty ps
             
 and parse_constrained_ty ps = 
-          let base = ctxt "ty: base" parse_atomic_ty ps in
-            match peek ps with
+  let base = ctxt "ty: base" parse_atomic_ty ps in
+    match peek ps with
         COLON -> 
           bump ps;
           let constrs = ctxt "ty: constrs" parse_constrs ps in
@@ -617,8 +615,8 @@ and parse_constrained_ty ps =
       | _ -> base                
           
 and parse_ty ps = 
-          parse_constrained_ty ps
-
+  parse_constrained_ty ps
+	
 and parse_lidx ps = 
   match peek ps with
       IDENT _ | IDX _ -> 
@@ -634,35 +632,34 @@ and parse_lidx ps =
 
 and parse_lval ps =
   let apos = lexpos ps in
-  let base = ctxt "lval: base" parse_ident ps in
+  let base = ctxt "lval: base" parse_name_component ps in
   let rest = ctxt "lval: rest" (path DOT parse_lidx) ps in
   let bpos = lexpos ps in
-    span apos bpos 
-      { Ast.lval_base = base;
-        Ast.lval_rest = rest }
+    Ast.LVAL_named (span apos bpos 
+					  { Ast.lval_base = base;
+						Ast.lval_rest = rest })
       
 
-and parse_rec_input ps = 
+and parse_rec_input htab ps = 
   let lab = (ctxt "rec input: label" parse_ident ps) in
     match peek ps with
         EQ -> 
           bump ps;
           let expr = (ctxt "rec input: expr" parse_expr ps) in
-            Ast.REC_from_copy (lab, expr)
-      | LARROW -> 
-          bump ps; 
-          let lval = (ctxt "rec input: lval" parse_lval ps) in
-            Ast.REC_from_move (lab, lval)
+			Hashtbl.add htab lab expr
       | _ -> raise (unexpected ps)
           
 
 and parse_rec_inputs ps = 
-  bracketed_zero_or_more LBRACE RBRACE (Some COMMA) 
-    (ctxt "rec inputs" parse_rec_input) ps
+  let htab = Hashtbl.create 4 in
+  let _ = bracketed_zero_or_more LBRACE RBRACE (Some COMMA) 
+    (ctxt "rec inputs" (parse_rec_input htab)) ps
+  in
+	htab
 
 
-and parse_expr_list ps = 
-  bracketed_zero_or_more LPAREN RPAREN (Some COMMA) 
+and parse_expr_list bra ket ps = 
+  bracketed_zero_or_more bra ket (Some COMMA) 
     (ctxt "expr list" parse_expr) ps
 
 
@@ -691,38 +688,40 @@ and parse_atomic_expr ps =
           (Ast.EXPR_literal 
              (Ast.LIT_char ch))
           
+    | LBRACE -> 
+        let apos = lexpos ps in
+        let htab = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
+        let bpos = lexpos ps in
+          span apos bpos (Ast.EXPR_rec htab)
+
+	| LBRACKET -> 
+        let apos = lexpos ps in
+		let exprs = ctxt "vec expr: exprs" (parse_expr_list LBRACKET RBRACKET) ps in
+        let bpos = lexpos ps in
+		  span apos bpos (Ast.EXPR_vec exprs)
+			
     | IDENT _ -> 
         let apos = lexpos ps in
         let lval = parse_lval ps in
+        let bpos = lexpos ps in 
+          span apos bpos (Ast.EXPR_lval lval)
+ 
+		  (* 
+			FIXME: desugar this into a prefix of stmts. 
           (match peek ps with 
+			   
                LPAREN -> 
-                 let args = ctxt "call: args" parse_expr_list ps in
+                 let args = ctxt "call: args" (parse_expr_list LPAREN RPAREN) ps in
                  let bpos = lexpos ps in
                    span apos bpos (Ast.EXPR_call (lval, args))
-             | LBRACE -> 
-                 let ty = ctxt "rec expr: ty" parse_ty ps in
-                 let inputs = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
-                 let bpos = lexpos ps in
-                   span apos bpos (Ast.EXPR_rec (ty, inputs))
              | _ -> 
                  let bpos = lexpos ps in 
-                   span apos bpos (Ast.EXPR_lval lval))
+                   span apos bpos (Ast.EXPR_lval lval)) 
+		  *)
             
     | _ -> raise (unexpected ps)
+
         
-
-and name_of_lval ps lval = 
-  let extract_nc lidx = 
-    match lidx with 
-        Ast.LIDX_named nc -> nc
-      | Ast.LIDX_index _ ->
-          raise (Parse_err (ps, "expression-based lval found " ^ 
-                              "where static name required"))
-  in
-    { Ast.name_base = lval.Ast.node.Ast.lval_base;
-      Ast.name_rest = Array.map extract_nc lval.Ast.node.Ast.lval_rest }
-
-
 and parse_negation_expr ps =
   match peek ps with
       NOT ->
@@ -956,7 +955,7 @@ and parse_stmt ps =
             (match peek ps with 
                  
                  LPAREN -> 
-                   let args = ctxt "stmt: call args" parse_expr_list ps in 
+                   let args = ctxt "stmt: call args" (parse_expr_list LPAREN RPAREN) ps in 
                    let _ = expect ps SEMI in
                    let bpos = lexpos ps in
                      span apos bpos (Ast.STMT_call (lval, args))
@@ -1007,7 +1006,7 @@ and parse_prog ps =
   let prog = { Ast.prog_init = None;
                Ast.prog_main = None;
                Ast.prog_fini = None;
-               Ast.prog_mod = Hashtbl.create 0; }
+               Ast.prog_mod = Hashtbl.create 4; }
   in
     match peek ps with 
         LBRACE -> 
@@ -1179,7 +1178,7 @@ let rec parse_crate_entry tok prefix htab ps =
     Hashtbl.add htab name item_mod
       
 and parse_raw_mod_items ps = 
-  let htab = Hashtbl.create 0 in
+  let htab = Hashtbl.create 4 in
     while peek ps != EOF
     do
       let (ident, item) = parse_mod_item ps in
@@ -1190,7 +1189,7 @@ and parse_raw_mod_items ps =
       
       
 and parse_crate_entries tok fname prefix ps = 
-    let htab = Hashtbl.create 0 in
+    let htab = Hashtbl.create 4 in
       while peek ps != EOF
       do 
         parse_crate_entry tok prefix htab ps
