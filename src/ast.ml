@@ -93,6 +93,7 @@ and ty =
   | TY_chan of ty
   | TY_port of ty
 
+  | TY_auto
   | TY_named of name
   | TY_opaque of nonce
       
@@ -224,7 +225,7 @@ and stmt' =
   | STMT_checkif of (constrs * stmt)
   | STMT_block of ((stmt array))
   | STMT_copy of stmt_copy
-  | STMT_call of (lval * (expr array))
+  | STMT_call of (lval * lval * (expr array))
   | STMT_send of (lval * expr)
   | STMT_recv of (lval * lval)
   | STMT_decl of stmt_decl 
@@ -248,6 +249,7 @@ and stmt_alt_type =
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
   | DECL_slot_tup of (ty_tup * (ident array) * (expr option))
+  | DECL_temp of (ty * nonce)
 
 and stmt_copy = 
     COPY_to_lval of lval * expr

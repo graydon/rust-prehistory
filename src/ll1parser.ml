@@ -1,4 +1,7 @@
 
+let tmp_nonce = ref 0 
+;;
+
 type token = 
 
     (* Expression operator symbols *)
@@ -668,6 +671,11 @@ and parse_expr_list bra ket ps =
   arj1st (bracketed_zero_or_more bra ket (Some COMMA) 
 			(ctxt "expr list" parse_expr) ps)
 
+and build_tmp _ = 
+  let nonce = (tmp_nonce := (!tmp_nonce) + 1; !tmp_nonce) in
+  let tmp = Ast.LVAL_temp (nonce) in
+	(nonce, tmp)
+
 and parse_atomic_expr ps =
   match peek ps with
       LPAREN -> 
@@ -709,23 +717,23 @@ and parse_atomic_expr ps =
 		  (stmts, span apos bpos (Ast.EXPR_vec exprs))
 			
     | IDENT _ -> 
-        let apos = lexpos ps in
-        let (stmts, lval) = parse_lval ps in
-        let bpos = lexpos ps in 
-          (stmts, span apos bpos (Ast.EXPR_lval lval))
- 
-		  (* 
-			FIXME: desugar this into a prefix of stmts. 
+        let apos = lexpos ps in 
+		let (lstmts, lval) = parse_lval ps in
           (match peek ps with 
 			   
                LPAREN -> 
-                 let args = ctxt "call: args" (parse_expr_list LPAREN RPAREN) ps in
+                 let (astmts, args) = ctxt "call: args" (parse_expr_list LPAREN RPAREN) ps in
                  let bpos = lexpos ps in
-                   span apos bpos (Ast.EXPR_call (lval, args))
+				 let (nonce, tmp) = build_tmp () in
+				 let decl = span apos bpos (Ast.STMT_decl (Ast.DECL_temp (Ast.TY_auto, nonce))) in
+				 let call = span apos bpos (Ast.STMT_call (tmp, lval, args)) in
+				 let cstmts = [| decl; call |] in
+				 let stmts = Array.concat [lstmts; astmts; cstmts] in
+				   (stmts, span apos bpos (Ast.EXPR_lval tmp))
+					 
              | _ -> 
-                 let bpos = lexpos ps in 
-                   span apos bpos (Ast.EXPR_lval lval)) 
-		  *)
+				 let bpos = lexpos ps in 
+				   (lstmts, span apos bpos (Ast.EXPR_lval lval)))
             
     | _ -> raise (unexpected ps)
 
@@ -870,7 +878,7 @@ and parse_stmt ps =
 	  if Array.length stmts = 0
 	  then stmt
 	  else 
-		span apos bpos (Ast.STMT_block (Array.append stmts (Array.make 1 stmt)))
+		span apos bpos (Ast.STMT_block (Array.append stmts [| stmt |]))
   in
   let apos = lexpos ps in
     match peek ps with 
@@ -981,7 +989,11 @@ and parse_stmt ps =
                    let _ = expect ps SEMI in
 				   let stmts = Array.append lstmts astmts in
                    let bpos = lexpos ps in
-                     spans stmts apos bpos (Ast.STMT_call (lval, args))
+				   let (nonce, tmp) = build_tmp () in	
+				   let decl = span apos bpos (Ast.STMT_decl (Ast.DECL_temp (Ast.TY_auto, nonce))) in
+				   let call = span apos bpos (Ast.STMT_call (tmp, lval, args)) in
+					 span apos bpos 
+					   (Ast.STMT_block (Array.append stmts [| decl; call |]))
 
                | EQ -> 
                    bump ps;
