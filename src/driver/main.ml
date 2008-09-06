@@ -5,5 +5,6 @@ let _ =
      exit 1);
   let fname = Sys.argv.(1) in
   let _ = Ll1parser.parse_crate Lexer.token fname in
-    Printf.printf "parsed OK"
+    Printf.printf "parsed OK";
+	Pe.emit_testfile "rust_out.exe";
 ;;

@@ -575,7 +575,7 @@ let pe_text_section
 		
 (*********************************************************************************)
 
-let test_imports = 
+let test_imports0 = 
   { 
     pe_import_dll_name_fixup = new_fixup "dll name";
     pe_import_dll_name = "KERNEL32.dll";
@@ -592,7 +592,24 @@ let test_imports =
   }
 ;;
 
-let testfile = 
+let test_imports = 
+  { 
+    pe_import_dll_name_fixup = new_fixup "dll name";
+    pe_import_dll_name = "rustrt.dll";
+    pe_import_dll_ILT_fixup = new_fixup "dll ILT";
+    pe_import_dll_IAT_fixup = new_fixup "dll IAT";
+    pe_import_dll_imports = 
+      [| 
+		{ 
+		  pe_import_name_fixup = new_fixup "import name";
+		  pe_import_name = "rs_init";
+		  pe_import_address_fixup = new_fixup "import address";
+		} 
+      |];
+  }
+;;
+
+let emit_testfile outfile = 
 
   let all_hdrs_fixup = new_fixup "all headers" in
   let all_init_data_fixup = new_fixup "all initialized data" in
@@ -679,7 +696,7 @@ let testfile =
 							 ALIGN_MEM (pe_mem_alignment, MARK) |]))
   in
   let buf = Buffer.create 16 in
-  let out = open_out_bin "rust_out.exe" in
+  let out = open_out_bin outfile in
 	resolve_fixups all_items;
 	lower_item ~lsb0: true ~buf: buf ~it: all_items;
 	Buffer.output_buffer out buf;

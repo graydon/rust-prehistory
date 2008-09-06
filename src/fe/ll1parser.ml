@@ -1044,7 +1044,7 @@ and parse_prog ps =
   let prog_cell = ref prog in
   let stmts_cell = ref [] in 
   let _ = ctxt "prog" (bracketed_zero_or_more LBRACE RBRACE None 
-						 (parse_prog_item prog_cell stmts_cell))
+						 (parse_prog_item prog_cell stmts_cell)) ps
   in
 	(Array.concat (List.rev !stmts_cell), !prog_cell)
         
