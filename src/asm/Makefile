@@ -5,7 +5,7 @@ LIBS=nums.cma unix.cma bigarray.cma
 OCAMLCFLAGS:=-g
 
 # list them in link order, please!
-MLS:=asm.ml pe.ml
+MLS:=asm.ml il.ml x86.ml pe.ml
 CMOS:=$(patsubst %.ml, %.cmo, $(MLS))
 CMXS:=$(patsubst %.ml, %.cmx, $(MLS))
 

@@ -58,57 +58,44 @@
  * order of register numberings)
  *)
 
+(* 
+ * Notes on register availability of x86:
+ * 
+ * There are 8 GPRs but we use 3 of them for specific purposes:
+ * 
+ *   - ESP always points to the current stack frame.
+ *   - EBP always points to the current process.
+ *   - EDX is reserved for reload/spill operations on locals that did not make
+ *     it into hardregs. It is chosen for this because it's also occasionally
+ *     clobbered by other ops (mul, udiv and idiv, f.e.) and this saves us
+ *     having to bother with fancy support for clobbered regs.
+ * 
+ * We tell IL that we have 5 GPRs then, and permit most register-register ops
+ * on any of these 5, mostly-unconstrained. Still need to support pre-allocating
+ * EAX for the destination of mul/imul
+ * 
+ *)
+
 (* x86 instruction emitting *)
 
 let modrm m rm reg_or_subopcode = 
-  (((m land 0b11) lsl 6) 
+  if (((m land 0b11) != m) or
+		((rm land 0b111) != rm) or
+		((reg_or_subopcode land 0b111) != reg_or_subopcode))
+  then raise (Invalid_argument "X86.modrm_deref")
+  else 
+	((((m land 0b11) lsl 6) 
+      lor 
+	  (rm land 0b111)) 
      lor 
-   (rm land 0b111)) 
-    lor 
-  ((reg_or_subopcode land 0b111) lsl 3)
+	  ((reg_or_subopcode land 0b111) lsl 3))
 ;;
 
-let modrm_deref_EAX = modrm 0b00 0b000;;
-let modrm_deref_ECX = modrm 0b00 0b001;;
-let modrm_deref_EDX = modrm 0b00 0b010;;
-let modrm_deref_EBX = modrm 0b00 0b011;;
-let modrm_disp32    = modrm 0b00 0b101;;
-let modrm_deref_ESI = modrm 0b00 0b110;;
-let modrm_deref_EDI = modrm 0b00 0b111;;
-
-let modrm_deref_EAX_plus_disp8 = modrm 0b01 0b000;;
-let modrm_deref_ECX_plus_disp8 = modrm 0b01 0b001;;
-let modrm_deref_EDX_plus_disp8 = modrm 0b01 0b010;;
-let modrm_deref_EBX_plus_disp8 = modrm 0b01 0b011;;
-let modrm_deref_EBP_plus_disp8 = modrm 0b01 0b101;;
-let modrm_deref_ESI_plus_disp8 = modrm 0b01 0b110;;
-let modrm_deref_EDI_plus_disp8 = modrm 0b01 0b111;;
-
-let modrm_deref_EAX_plus_disp32 = modrm 0b01 0b000;;
-let modrm_deref_ECX_plus_disp32 = modrm 0b01 0b001;;
-let modrm_deref_EDX_plus_disp32 = modrm 0b01 0b010;;
-let modrm_deref_EBX_plus_disp32 = modrm 0b01 0b011;;
-let modrm_deref_EBP_plus_disp32 = modrm 0b01 0b101;;
-let modrm_deref_ESI_plus_disp32 = modrm 0b01 0b110;;
-let modrm_deref_EDI_plus_disp32 = modrm 0b01 0b111;;
-
-let modrm_EAX = modrm 0b01 0b000;;
-let modrm_ECX = modrm 0b01 0b001;;
-let modrm_EDX = modrm 0b01 0b010;;
-let modrm_EBX = modrm 0b01 0b011;;
-let modrm_ESP = modrm 0b01 0b011;;
-let modrm_EBP = modrm 0b01 0b101;;
-let modrm_ESI = modrm 0b01 0b110;;
-let modrm_EDI = modrm 0b01 0b111;;
-
-let reg2_EAX = 0b000;;
-let reg2_ECX = 0b001;;
-let reg2_EDX = 0b010;;
-let reg2_EBX = 0b011;;
-let reg2_ESP = 0b100;;
-let reg2_EBP = 0b101;;
-let reg2_ESI = 0b110;;
-let reg2_EDI = 0b111;;
+let modrm_deref_reg = modrm 0b00 ;;
+let modrm_deref_disp32 = modrm 0b00 0b101 ;;
+let modrm_deref_reg_plus_disp8 = modrm 0b01 ;;
+let modrm_deref_reg_plus_disp32 = modrm 0b10 ;;
+let modrm_reg = modrm 0b11 ;;
 
 let slash0 = 0;;
 let slash1 = 1;;
@@ -119,116 +106,119 @@ let slash5 = 5;;
 let slash6 = 6;;
 let slash7 = 7;;
 
-let plusrd_EAX opc = opc + 0;;
-let plusrd_ECX opc = opc + 1;;
-let plusrd_EDX opc = opc + 2;;
-let plusrd_EBX opc = opc + 3;;
-let plusrd_ESP opc = opc + 4;;
-let plusrd_EBP opc = opc + 5;;
-let plusrd_ESI opc = opc + 6;;
-let plusrd_EDI opc = opc + 7;;
 
-(* Following is no longer true: we have a register allocator. *)
+(* Translate an IL-level hwreg number from 0..nregs into the 3-bit code number
+ * used through the mod r/m byte and /r sub-register specifiers of the x86 ISA.
+ * 
+ * See "Table 2-2: 32-Bit Addressing Forms with the ModR/M Byte", in the IA32
+ * Architecture Software Developer's Manual, volume 2a.  *)
 
-(* We use a fixed, extremely suboptimal assignment of       *)
-(* registers. Every binary operation has either this form:  *)
-(*                                                          *)
-(*  POP EBX                                                 *)
-(*  POP EAX                                                 *)
-(*  EAX <- EAX op EBX                                       *)
-(*  PUSH EAX                                                *)
-(*                                                          *)
-(*  or this form:                                           *)
-(*                                                          *)
-(*  POP EBX                                                 *)
-(*  POP EAX                                                 *)
-(*  (EDX,EAX) <- EAX op EBX                                 *)
-(*  PUSH EDX                                                *)
-(*  PUSH EAX                                                *)
-(*                                                          *)
-(* some other registers are permanently assigned:           *)
-(*                                                          *)
-(*  EBP    frame base pointer                               *)
-(*  ESP    stack pointer                                    *)
-(*                                                          *)
-(*  ESI    crate static data pointer                        *)
-(*  EDI    process control bloc pointer                     *)
+let eax = 0b000;;
+let ecx = 0b001;;
+let edx = 0b010;;
+let ebx = 0b011;;
+let ebp = 0b101;;
+let esi = 0b110;;
+let edi = 0b111;;
 
-let disp32 = int_to_u32_lsb0;;
-
-let push_local n = 
-  if (n * 4) < 256
-  then [| 0xff; modrm_deref_EBP_plus_disp8 slash6; (n * 4) |]
-  else Array.append 
-      [| 0xff; modrm_deref_EBP_plus_disp32 slash6 |] 
-      (disp32 (n * 4))
+let reg r = 
+  match r with 
+	  0 -> eax
+	| 1 -> ecx
+	| 2 -> ebx
+	| 3 -> esi
+	| 4 -> edi
+	| _ -> raise (Invalid_argument "X86.reg")
 ;;
 
-let pop_local n = 
-  if (n * 4) < 256
-  then [| 0x8f; modrm_deref_EBP_plus_disp8 slash0; (n * 4) |]
-  else Array.append 
-      [| 0x8f; modrm_deref_EBP_plus_disp32 slash0 |] 
-      (disp32 (n * 4))
-;;
+(* FIXME: factor the instruction selector often. There's lots of
+ * semi-redundancy in the ISA.
+ *)
 
+let select_insn t = 
+  match (t.Il.triple_op, t.Il.triple_dst, t.Il.triple_src) with
+	  (Il.ADD, Il.HWreg dst, Il.HWreg src) -> 
+		Asm.BYTES [| 0x03; modrm_reg (reg dst) (reg src) |]
+	| (Il.SUB, Il.HWreg dst, Il.HWreg src) -> 
+		Asm.BYTES [| 0x29; modrm_reg (reg dst) (reg src) |]
+	| (Il.NEG, Il.HWreg dst, Il.Nil) -> 
+		Asm.BYTES [| 0xF7; modrm_reg (reg dst) slash3 |]
 
-let pop_EAX = plusrd_EAX 0x58;;
-let pop_EBX = plusrd_EBX 0x58;;
-let pop_ECX = plusrd_ECX 0x58;;
-let pop_EDX = plusrd_EDX 0x58;;
-let pop_ESI = plusrd_ESI 0x58;;
-let pop_EDI = plusrd_EDI 0x58;;
+	(* The mess that is the DIV/IDIV/MUL/IMUL instructions:
+	 * 
+	 * They can only ever write to EAX:EDX. So we only recognize EAX as a
+	 * destination at all. Needs pre-allocation. If you're trying to take a MOD
+	 * rather than a DIV, we move the EDX part (remainder) to EAX (quotient),
+	 * overwriting it. In this way DIV and IDIV get used for dual-duty.  
+	 *)
 
-let push_EAX = plusrd_EAX 0x50;;
-let push_EBX = plusrd_EBX 0x50;;
-let push_ECX = plusrd_ECX 0x50;;
-let push_EDX = plusrd_EDX 0x50;;
-let push_ESI = plusrd_ESI 0x50;;
-let push_EDI = plusrd_EDI 0x50;;
+	| (Il.UMUL, Il.HWreg 0, Il.HWreg src) -> 
+		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash4 |]
+	| (Il.IMUL, Il.HWreg 0, Il.HWreg src) -> 
+		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash5 |]
+	| (Il.UDIV, Il.HWreg 0, Il.HWreg src) -> 
+		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash6 |]
+	| (Il.UMOD, Il.HWreg 0, Il.HWreg src) -> 
+		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash6;
+					 0x89; modrm_reg eax edx; |]
+	| (Il.IDIV, Il.HWreg 0, Il.HWreg src) -> 
+		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash7 |]
+	| (Il.IMOD, Il.HWreg 0, Il.HWreg src) -> 
+		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash7;
+					 0x89; modrm_reg eax edx; |]
+		  
+	| (Il.MOV, Il.HWreg dst, Il.Imm imm) -> 
+		Asm.SEQ [| Asm.BYTES [| 0xB8 + (reg dst) |];
+				   Asm.WORD32 imm |]
 
-let mov_EAX_imm8 = plusrd_EAX 0xB0;;
+	| (Il.MOV, Il.HWreg dst, Il.Deref ((Il.Imm imm), disp)) -> 
+		Asm.SEQ [| Asm.BYTES [| 0x8B; modrm_deref_disp32 (reg dst) |];
+				   Asm.WORD32 (Asm.ADD ((Asm.IMM disp),imm)) |]
 
-let push_imm8 i  = [| 0x6A; ub i 0 |]
-let push_imm32 i = Array.append [| 0x68 |] (int_to_u32_lsb0 i)
+	| (Il.MOV, Il.HWreg dst, Il.HWreg src) -> 
+		Asm.BYTES [| 0x89; modrm_reg (reg dst) (reg src); |]
 
-(* For ops listed as "NN /r  OP rm/32 r32"  *)
-let simple_binary_op op = 
-  [| pop_EBX; 
-     pop_EAX; 
-     op; modrm_EAX reg2_EBX; 
-     push_EAX |]
-;;
-
-let op_ADD = simple_binary_op 0x01;;
-let op_SUB = simple_binary_op 0x29;;
-
-let op_AND = simple_binary_op 0x21;;
-let op_OR = simple_binary_op 0x21;;
-let op_XOR = simple_binary_op 0x29;;
-
-let op_NOT = [| pop_EAX; 
-		0xf7; modrm_EAX slash2; 
-		push_EAX |];;
-
-let op_NEG = [| pop_EAX; 
-		0xf7; modrm_EAX slash3; 
-		push_EAX |];;
-
-let op_MUL = [| pop_EBX;
-		pop_EAX;
-		0xf7; modrm_EBX slash4;
-		push_EDX;
-		push_EAX |];;
-
-let op_DIV = [| pop_EBX;
-		pop_EAX;
-		0xf7; modrm_EBX slash6;
-		push_EDX;
-		push_EAX |];;
+	| (Il.MOV, Il.HWreg dst, (Il.Deref ((Il.HWreg src), disp))) -> 
+		if disp = 0L
+		then Asm.BYTES [| 0x8B; modrm_deref_reg (reg dst) (reg src); |]
+		else 
+		  if (Int64.logand disp 0xffL) = disp
+		  then Asm.BYTES [| 0x8B; 
+							modrm_deref_reg_plus_disp8 (reg dst) (reg src);
+							Int64.to_int disp |]			
+		  else 
+			if (Int64.logand disp 0xffffffffL) = disp
+			then 
+			  Asm.SEQ [| 
+				Asm.BYTES [| 0x8B; modrm_deref_reg_plus_disp32 (reg dst) (reg src); |];
+				Asm.WORD32 (Asm.IMM disp) |]
 		
-let op_POP = [| pop_EAX; |];;
+			else
+			  raise (Invalid_argument "X86.select_insn: displacement overflow")
 
+	| (Il.CCALL, Il.HWreg r, Il.Imm arg) -> 
+		Asm.SEQ [|
+		  Asm.BYTES [| 0x68; |]; Asm.WORD32 arg; (* push arg *)
+		  Asm.BYTES [| 0xff; modrm_reg (reg r) slash2 |] (* call *r *)
+		|]
+
+	| (Il.JMP, Il.HWreg dst, Il.Nil) -> 
+		Asm.BYTES [| 0xff; modrm_reg (reg dst) slash4 |]
+
+	| (Il.BNOT, Il.HWreg dst, Il.Nil) -> 
+		Asm.BYTES [| 0xF7; modrm_reg (reg dst) slash2 |]
+	| (Il.BXOR, Il.HWreg dst, Il.HWreg src) -> 
+		Asm.BYTES [| 0x33; modrm_reg (reg dst) (reg src) |]
+	| (Il.BOR, Il.HWreg dst, Il.HWreg src) -> 
+		Asm.BYTES [| 0x09; modrm_reg (reg dst) (reg src) |]
+
+	| (Il.END, _, _) -> Asm.BYTES [| 0x90 |]
+	| (Il.NOP, _, _) -> Asm.BYTES [| 0x90 |]
+
+	| _ -> raise (Invalid_argument "X86.select_insn: no matching insn")
+
+
+(* Somewhat obsolete stuff follows to EOF ... salvaging *)
 
 (* 
  * Note: our calling convention here is like everywhere else: "cdecl"
@@ -256,7 +246,7 @@ let op_POP = [| pop_EAX; |];;
  * int 0x80
  *
  *)
-
+(* 
 let op_SYSCALL0 i = [| mov_EAX_imm8; ub i 0; 0xCD; 0x80; push_EAX |];;
 let op_SYSCALL1 i = [| mov_EAX_imm8; ub i 0; pop_EBX; 0xCD; 0x80; push_EAX |];;
 let op_SYSCALL2 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; 0xCD; 0x80; push_EAX |];;
@@ -270,7 +260,7 @@ let op_SYS_READ  = op_SYSCALL3 3;;    (* sys_read(int fd, char* buf, size_t coun
 let op_SYS_WRITE = op_SYSCALL3 4;;    (* sys_write(int fd, char* buf, size_t count)   *)
 let op_SYS_OPEN  = op_SYSCALL3 4;;    (* sys_open(const char *f, int flags, int mode) *)
 let op_SYS_CLOSE = op_SYSCALL1 4;;    (* sys_close(unsigned int fd)                   *)
-
+*)
 
 
 
