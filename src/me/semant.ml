@@ -9,13 +9,21 @@
  *   - checking type-states
  *   - inferring points of allocation and deallocation
  *)
-(* 
-let trans_expr emit expr = 
-	match expr with 
-		Ast.EXPR_literal (Ast.LIT_nil) -> Il.Nil
-	  | Ast.EXPR_literal (Ast.LIT_bool false) -> Il.lit 0l
-	  | Ast.EXPR_literal (Ast.LIT_bool true) -> Il.lit 1l
-	  | Ast.EXPR_literal (Ast.LIT_char c) -> Il.lit (Char.code c)
+
+let rec trans_expr emit expr = 
+	match expr.Ast.node with 
+		Ast.EXPR_literal (Ast.LIT_nil) -> 
+		  Il.Nil
+
+	  | Ast.EXPR_literal (Ast.LIT_bool false) -> 
+		  Il.Imm (Asm.IMM 0L)
+
+	  | Ast.EXPR_literal (Ast.LIT_bool true) -> 
+		  Il.Imm (Asm.IMM 1L)
+
+	  | Ast.EXPR_literal (Ast.LIT_char c) -> 
+		  Il.Imm (Asm.IMM (Int64.of_int (Char.code c)))
+
 	  (* ...literals *)
 	  | Ast.EXPR_binary (binop, a, b) -> 
 		  let lhs = trans_expr emit a in
@@ -25,16 +33,27 @@ let trans_expr emit expr =
 			  Ast.BINOP_and -> Il.LAND
 			| _ -> Il.ADD
 		  in
-			emit_triple emit None Il.MOV dst lhs;
-			emit_triple emit None op dst rhs;
+			Il.emit_triple emit None Il.MOV dst lhs;
+			Il.emit_triple emit None op dst rhs;
 			dst
+
 	  | Ast.EXPR_unary (unop, a) -> 
 		  let src = trans_expr emit a in
 		  let dst = Il.next_vreg emit in 
-		  let op = match binop with
+		  let op = match unop with
 			  Ast.UNOP_not -> Il.LNOT
 			| Ast.UNOP_neg -> Il.NEG
 		  in
-			emit_triple emit None op dst src;
+			Il.emit_triple emit None op dst src;
 			dst
-*)
+	  | _ -> raise (Invalid_argument "Semant.trans_expr: unimplemented translation")
+
+let rec trans_stmt emit stmt = 
+  match stmt.Ast.node with 
+	  Ast.STMT_copy (Ast.COPY_to_lval (lval, expr)) -> 
+		let dst = Il.Nil in
+		let src = trans_expr emit expr in
+		  Il.emit_triple emit None Il.MOV dst src;
+		  dst
+
+	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")

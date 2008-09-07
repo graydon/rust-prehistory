@@ -4,7 +4,7 @@ OCAMLC_FLAGS:=-g $(ML_INCS)
 
 # list them in link order, please!
 BE_MLS:=be/asm.ml be/il.ml be/x86.ml be/pe.ml
-ME_MLS:=me/semant.ml
+ME_MLS:=me/env.ml me/semant.ml
 FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml 
 DRIVER_MLS:=driver/main.ml 
 
