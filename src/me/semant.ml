@@ -9,7 +9,6 @@
  *   - checking type-states
  *   - inferring points of allocation and deallocation
  *)
-
 (* 
 let trans_expr emit expr = 
 	match expr with 
@@ -26,16 +25,16 @@ let trans_expr emit expr =
 			  Ast.BINOP_and -> Il.LAND
 			| _ -> Il.ADD
 		  in
-			emit_quad emit None op dst lhs rhs;
+			emit_triple emit None Il.MOV dst lhs;
+			emit_triple emit None op dst rhs;
 			dst
 	  | Ast.EXPR_unary (unop, a) -> 
-		  let lhs = trans_expr emit a in
-		  let rhs = Il.Nil in
+		  let src = trans_expr emit a in
 		  let dst = Il.next_vreg emit in 
 		  let op = match binop with
 			  Ast.UNOP_not -> Il.LNOT
 			| Ast.UNOP_neg -> Il.NEG
 		  in
-			emit_quad emit None op dst lhs rhs;
-			dst		  
+			emit_triple emit None op dst src;
+			dst
 *)
