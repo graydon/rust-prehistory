@@ -9,7 +9,7 @@ FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml
 DRIVER_MLS:=driver/main.ml 
 
 COMPILER:=rustc
-COMPILER_MLS:=$(BE_MLS) $(ME_MLS) $(FE_MLS) $(DRIVER_MLS)
+COMPILER_MLS:=$(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_MLS)
 COMPILER_CMOS:=$(patsubst %.ml, %.cmo, $(COMPILER_MLS))
 
 RUNTIME_CS:=rt/rust.c
