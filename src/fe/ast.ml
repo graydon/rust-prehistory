@@ -227,7 +227,7 @@ and stmt' =
   | STMT_prove of (constrs)
   | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
-  | STMT_block of ((stmt array))
+  | STMT_block of stmt_block
   | STMT_copy of stmt_copy
   | STMT_call of (lval * lval * (expr array))
   | STMT_send of (lval * expr)
@@ -249,6 +249,13 @@ and stmt_alt_type =
       alt_type_arms: (ident * slot * stmt) array;
       alt_type_else: stmt option;
     }
+
+and stmt_block = 
+	{
+	  block_temps: (nonce, ty) Hashtbl.t;
+	  block_items: mod_items;
+	  block_stmts: stmt array;
+	}
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)

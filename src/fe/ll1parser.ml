@@ -853,7 +853,9 @@ and parse_block ps =
 					 (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
   in
   let bpos = lexpos ps in 
-    span apos bpos (Ast.STMT_block stmts)
+    span apos bpos (Ast.STMT_block { Ast.block_temps = Hashtbl.create 4;
+									 Ast.block_items = Hashtbl.create 4;
+									 Ast.block_stmts = stmts })
 
 and parse_init ps = 
   let init = 

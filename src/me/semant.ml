@@ -10,6 +10,47 @@
  *   - inferring points of allocation and deallocation
  *)
 
+(* 
+let rec resolve_types_block blocks block = 
+  let blocks = block :: blocks in
+	for i = Array.length - 1 downto 0 
+	do
+	  resolve_types_in_stmt blocks block.(i)
+	done
+	  
+and resolve_types_stmt blocks stmt = 
+  match stmt.node with 
+	  Ast.STMT_while w -> 
+		resolve_types_expr w.Ast.while_expr;
+		resolve_types_stmt w.Ast.while_body
+
+	| Ast.STMT_do_while w -> 
+		resolve_types_expr w.Ast.while_expr;
+		resolve_types_stmt w.Ast.while_body
+
+	| Ast.STMT_foreach f -> 
+		
+	| Ast.STMT_for of stmt_for
+	| Ast.STMT_if of stmt_if
+	| Ast.STMT_try of stmt_try
+	| Ast.STMT_put of (proto option * expr option)
+	| Ast.STMT_ret of (proto option * expr option)
+	| Ast.STMT_alt_tag of stmt_alt_tag
+	| Ast.STMT_alt_type of stmt_alt_type
+	| Ast.STMT_alt_port of stmt_alt_port
+	| Ast.STMT_prove of (constrs)
+	| Ast.STMT_check of (constrs)
+	| Ast.STMT_checkif of (constrs * stmt)
+	| Ast.STMT_block of stmt_block
+	| Ast.STMT_copy of stmt_copy
+	| Ast.STMT_call _ -> () (lval * lval * (expr array))
+	| Ast.STMT_send _ -> ()
+	| Ast.STMT_recv _ -> ()
+	| Ast.STMT_decl of stmt_decl 
+	| Ast.STMT_use (ty, ident, lval)
+
+*)  
+
 let rec trans_expr emit expr = 
 	match expr.Ast.node with 
 		Ast.EXPR_literal (Ast.LIT_nil) -> 
