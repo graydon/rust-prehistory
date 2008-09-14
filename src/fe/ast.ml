@@ -56,12 +56,18 @@ type proto =
   | PROTO_plus  (* fn+ foo(...): yields N > 0 values then returns.                        *)
 ;;
 
+type name_base = 
+	BASE_ident of ident
+  | BASE_temp of nonce
+
 type name_component =
 	COMP_ident of ident
-  | COMP_app of (ident * (ty array))
+  | COMP_app of (ty array)
   | COMP_idx of int
 
-and name = name_component array
+and name = 
+	NAME_base of name_base
+  | NAME_ext of (name * name_component)
 
 (* 
  * Type expressions are transparent to type names, their equality is structural.
@@ -133,13 +139,11 @@ and slot =
 
 and carg_base = 
     BASE_formal 
-  | BASE_named of ident
+  | BASE_named of name_base
       
 and carg =
-    {
-      carg_base: carg_base;
-      carg_rest: name_component array;
-    }
+	CARG_base of carg_base
+  | CARG_ext of (carg * name_component)
 
 and constr = 
     { 
@@ -248,7 +252,6 @@ and stmt_alt_type =
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
-  | DECL_slot_tup of (ty_tup * (ident array) * (expr option))
   | DECL_temp of (ty * nonce)
 
 and stmt_copy = 
@@ -331,19 +334,15 @@ and lit_custom =
       lit_text: string;
     }
 
-and lidx =
-    LIDX_named of name_component
-  | LIDX_index of expr
+and lval_component =
+    COMP_named of name_component
+  | COMP_expr of expr
       
 and lval' = 
-    {
-      lval_base: name_component;
-      lval_rest: lidx array;
-    }
+	LVAL_base of name_base
+  | LVAL_ext of (lval' * lval_component)
 
-and lval = 
-	LVAL_named of (lval' spanned)
-  | LVAL_temp of nonce
+and lval = lval' spanned
 	  
 and binop =    
     BINOP_or

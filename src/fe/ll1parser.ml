@@ -452,45 +452,70 @@ let parse_ident ps =
 
 let rec parse_name_component ps = 
   match peek ps with 
-	  IDENT id -> 
-		bump ps; 
-		(match peek ps with
-			 LBRACKET -> 
-			   let tys = 
-				 ctxt "name_component: apply" 
-				   (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
-			   in
-				 Ast.COMP_app (id, tys)
-				   
-		   | _ -> Ast.COMP_ident id)
+	  IDENT id -> bump ps; Ast.COMP_ident id
+	| LBRACKET -> 
+		let tys = 
+		  ctxt "name_component: apply" 
+			(bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
+		in
+		  Ast.COMP_app tys
 	| IDX i -> 
-		Ast.COMP_idx i
-
+		bump ps; 
+		Ast.COMP_idx i		  
 	| _ -> raise (unexpected ps)
 
-and parse_name ps = 
-  one_or_more DOT parse_name_component ps
+and parse_name_base ps = 
+  match peek ps with 
+	  IDENT i -> bump ps; Ast.BASE_ident i
+	| _ -> raise (unexpected ps)
 
-and parse_constraint_arg ps =
-  match peek ps with
-      IDENT n -> bump ps; Ast.BASE_named n
-    | STAR -> bump ps; Ast.BASE_formal
-    | _ -> raise (unexpected ps)
+and parse_name ps =
+  let base = Ast.NAME_base (parse_name_base ps) in
+	match peek ps with 
+		DOT -> 
+		  bump ps;
+		  let comps = one_or_more DOT parse_name_component ps in 
+			Array.fold_left (fun x y -> Ast.NAME_ext (x, y)) base comps
+	  | _ -> base
 
+and parse_carg_base ps = 
+  match peek ps with 
+	  STAR -> bump ps; Ast.BASE_formal
+	| _ -> Ast.BASE_named (parse_name_base ps)
 
 and parse_carg ps = 
-  let base = 
-    match peek ps with
-        STAR -> Ast.BASE_formal
-      | IDENT str -> Ast.BASE_named str
-      | _ -> raise (unexpected ps)
-  in
-  let rest = ctxt "carg: rest" (path DOT parse_name_component) ps in
-    { 
-      Ast.carg_base = base;
-      Ast.carg_rest = rest;
-    }
+  let base = Ast.CARG_base (parse_carg_base ps) in
+	match peek ps with 
+		DOT -> 
+		  bump ps;
+		  let comps = one_or_more DOT parse_name_component ps in 
+			Array.fold_left (fun x y -> Ast.CARG_ext (x, y)) base comps
+	  | _ -> base
+
+and parse_lval_component ps = 
+  match peek ps with 
+	  LPAREN -> 
+        bump ps;
+        let (stmts, e) = ctxt "lval_component: expr" parse_expr ps in
+          expect ps RPAREN;
+          (stmts, Ast.COMP_expr e)
+	| _ -> ([||], Ast.COMP_named (parse_name_component ps))
       
+
+and parse_lval ps = 
+  let apos = lexpos ps in 
+  let base = Ast.LVAL_base (parse_name_base ps) in 
+	match peek ps with 
+		DOT -> 
+		  bump ps;
+		  let (stmts', comps) = arj1st (one_or_more DOT parse_lval_component ps) in 
+		  let bpos = lexpos ps in 
+		  let lval' = Array.fold_left (fun x y -> Ast.LVAL_ext (x, y)) base comps in
+			(stmts', span apos bpos lval')
+	  | _ ->
+		  let bpos = lexpos ps in 
+			([||], span apos bpos base)
+  
 
 and parse_constraint ps = 
   match peek ps with 
@@ -624,29 +649,7 @@ and parse_constrained_ty ps =
           
 and parse_ty ps = 
   parse_constrained_ty ps
-	
-and parse_lidx ps = 
-  match peek ps with
-      IDENT _ | IDX _ -> 
-        let ncomp = ctxt "lidx: name component" parse_name_component ps in
-          (arr [], Ast.LIDX_named (ncomp))
-    | LPAREN -> 
-        bump ps;
-        let (stmts, e) = ctxt "lidx: expr" parse_expr ps in
-          expect ps RPAREN;
-          (stmts, Ast.LIDX_index e)
-    | _ -> raise (unexpected ps)
-        
 
-and parse_lval ps =
-  let apos = lexpos ps in
-  let base = ctxt "lval: base" parse_name_component ps in
-  let (stmts, rest) = arj1st (ctxt "lval: rest" (path DOT parse_lidx) ps) in
-  let bpos = lexpos ps in
-    (stmts, Ast.LVAL_named (span apos bpos 
-							  { Ast.lval_base = base;
-								Ast.lval_rest = rest }))
-      
 
 and parse_rec_input htab ps = 
   let lab = (ctxt "rec input: label" parse_ident ps) in
@@ -671,10 +674,11 @@ and parse_expr_list bra ket ps =
   arj1st (bracketed_zero_or_more bra ket (Some COMMA) 
 			(ctxt "expr list" parse_expr) ps)
 
-and build_tmp _ = 
+and build_tmp ty apos bpos = 
   let nonce = (tmp_nonce := (!tmp_nonce) + 1; !tmp_nonce) in
-  let tmp = Ast.LVAL_temp (nonce) in
-	(nonce, tmp)
+  let decl = span apos bpos (Ast.STMT_decl (Ast.DECL_temp (ty, nonce))) in
+  let tmp = span apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce)) in
+	(nonce, tmp, decl)
 
 and parse_atomic_expr ps =
   match peek ps with
@@ -724,8 +728,7 @@ and parse_atomic_expr ps =
                LPAREN -> 
                  let (astmts, args) = ctxt "call: args" (parse_expr_list LPAREN RPAREN) ps in
                  let bpos = lexpos ps in
-				 let (nonce, tmp) = build_tmp () in
-				 let decl = span apos bpos (Ast.STMT_decl (Ast.DECL_temp (Ast.TY_auto, nonce))) in
+				 let (nonce, tmp, decl) = build_tmp Ast.TY_auto apos bpos in
 				 let call = span apos bpos (Ast.STMT_call (tmp, lval, args)) in
 				 let cstmts = [| decl; call |] in
 				 let stmts = Array.concat [lstmts; astmts; cstmts] in
@@ -846,8 +849,8 @@ and parse_slot_and_ident param_slot ps =
       
 and parse_block ps = 
   let apos = lexpos ps in
-  let stmts = ctxt "block: stmts" 
-    (bracketed_zero_or_more LBRACE RBRACE None parse_stmt) ps
+  let stmts = arj (ctxt "block: stmts" 
+					 (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
   in
   let bpos = lexpos ps in 
     span apos bpos (Ast.STMT_block stmts)
@@ -866,31 +869,31 @@ and parse_init ps =
 
 and parse_slot_and_ident_and_init ps = 
   let (slot, ident) = 
-    ctxt "slot and init: ident and slot" 
+    ctxt "slot, ident and init: slot and ident" 
       (parse_slot_and_ident false) ps 
   in
-  let (stmts, init) = ctxt "stmt slot decl: init" parse_init ps in
+  let (stmts, init) = ctxt "slot, ident and init: init" parse_init ps in
     (stmts, slot, ident, init)
 	  
-and parse_stmt ps =
+(* 
+ * We have no way to parse a single Ast.stmt; any incoming syntactic statement
+ * may desugar to N>1 real Ast.stmts 
+ *)
+and parse_stmts ps =
   let spans stmts apos bpos stmt = 
-	let stmt = span apos bpos stmt in
-	  if Array.length stmts = 0
-	  then stmt
-	  else 
-		span apos bpos (Ast.STMT_block (Array.append stmts [| stmt |]))
+	Array.append stmts [| (span apos bpos stmt) |]
   in
   let apos = lexpos ps in
     match peek ps with 
         IF -> 
           bump ps;
-          let (stmts, e) = ctxt "stmt: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
-          let then_stmt = ctxt "stmt: if-then" parse_block ps in
+          let (stmts, e) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
+          let then_stmt = ctxt "stmts: if-then" parse_block ps in
           let else_stmt = 
             (match peek ps with 
                  ELSE -> 
                    bump ps;
-                   Some (ctxt "stmt: if-else" parse_block ps)
+                   Some (ctxt "stmts: if-else" parse_block ps)
                | _ -> None)
           in
           let bpos = lexpos ps in
@@ -902,13 +905,13 @@ and parse_stmt ps =
 
       | WHILE -> 
           bump ps;
-          let (stmts, e) = ctxt "stmt: while cond" (bracketed LPAREN RPAREN parse_expr) ps in
-          let s = ctxt "stmt: while body" parse_stmt ps in
+          let (stmts, test) = ctxt "stmts: while cond" (bracketed LPAREN RPAREN parse_expr) ps in
+          let body_stmt = ctxt "stmts: while body" parse_block ps in
           let bpos = lexpos ps in
             spans stmts apos bpos 
               (Ast.STMT_while 
-                 { Ast.while_expr = e;
-                   Ast.while_body = s; })
+                 { Ast.while_expr = test;
+                   Ast.while_body = body_stmt; })
               
       | PUT proto -> 
           bump ps;
@@ -916,7 +919,7 @@ and parse_stmt ps =
             match peek ps with
                 SEMI -> (arr [], None)
               | _ -> 
-                  let (stmts, expr) = ctxt "stmt: put expr" parse_expr ps in 
+                  let (stmts, expr) = ctxt "stmts: put expr" parse_expr ps in 
                     expect ps SEMI;
                     (stmts, Some expr)
           in
@@ -929,28 +932,53 @@ and parse_stmt ps =
             match peek ps with
                 SEMI -> (arr [], None)
               | _ -> 
-                  let (stmts, expr) = ctxt "stmt: ret expr" parse_expr ps in 
+                  let (stmts, expr) = ctxt "stmts: ret expr" parse_expr ps in 
                     expect ps SEMI;
                     (stmts, Some expr)
           in
           let bpos = lexpos ps in
             spans stmts apos bpos (Ast.STMT_ret (proto, e))
               
-      | LBRACE -> ctxt "stmt: block" parse_block ps
+      | LBRACE -> [| ctxt "stmts: block" parse_block ps |]
 
       | VAL -> 
           bump ps;
           (match peek ps with 
-               LPAREN -> 
+               LPAREN -> 				 
                  let (slots, idents) = 
                    ctxt "stmt tup decl: slots and idents" 
-                     (parse_two_or_more_tup_slots_and_idents false) ps in
+                     (bracketed LPAREN RPAREN (parse_two_or_more_tup_slots_and_idents false)) ps in
                  let (stmts, init) = ctxt "stmt tup decl: init" parse_init ps in
                  let bpos = lexpos ps in 
-                   spans stmts apos bpos 
-                     (Ast.STMT_decl 
-                        (Ast.DECL_slot_tup 
-                           (slots, idents, init)))
+				   (* 
+					* A little destructuring assignment sugar:
+					* 
+					*   val (int a, int b) = foo();
+					* 
+					* desugars to:
+					* 
+					*   temp (int, int) t_n = foo();
+					*   val int a = t_n.{0};
+					*   val int b = t_n.{1};
+					* 
+					*)
+				 let (nonce, tmp, tempdecl) = 
+				   build_tmp (Ast.TY_tup slots) apos bpos in
+
+				 let makedecl i slot = 
+				   let ext = Ast.COMP_named (Ast.COMP_idx i) in
+				   let lval = Ast.LVAL_ext (tmp.Ast.node, ext) in
+				   let expr' = Ast.EXPR_lval (span apos bpos lval) in
+				   let expropt = Some (span apos bpos expr') in
+				   let item = Ast.MOD_ITEM_slot (slot, expropt) in
+				   let decl = Ast.DECL_mod_item (idents.(i), 
+												 (span apos bpos item))
+				   in
+					 span apos bpos (Ast.STMT_decl decl)
+				 in
+				 let valdecls = Array.mapi makedecl slots in
+				   Array.concat [stmts; [| tempdecl |]; valdecls]
+
              | _ -> 
                  let (stmts, slot, ident, init) = 
 				   ctxt "stmt slot" parse_slot_and_ident_and_init ps in
@@ -989,11 +1017,9 @@ and parse_stmt ps =
                    let _ = expect ps SEMI in
 				   let stmts = Array.append lstmts astmts in
                    let bpos = lexpos ps in
-				   let (nonce, tmp) = build_tmp () in	
-				   let decl = span apos bpos (Ast.STMT_decl (Ast.DECL_temp (Ast.TY_auto, nonce))) in
+				   let (nonce, tmp, decl) = build_tmp Ast.TY_auto apos bpos in	
 				   let call = span apos bpos (Ast.STMT_call (tmp, lval, args)) in
-					 span apos bpos 
-					   (Ast.STMT_block (Array.append stmts [| decl; call |]))
+					 Array.append stmts [| decl; call |]
 
                | EQ -> 
                    bump ps;

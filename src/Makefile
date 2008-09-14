@@ -46,4 +46,4 @@ clean:
 	ocamldep $(ML_INCS) $(COMPILER_MLS) > .depend
 	gcc -MM $(RUNTIME_CS) >>.depend
 
--include .depend
+include .depend
