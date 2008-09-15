@@ -831,21 +831,25 @@ and parse_slot_and_ident param_slot ps =
   let ident = ctxt "slot and ident: ident" parse_ident ps in
     (slot, ident)
       
- and parse_two_or_more_tup_slots_and_idents param_slot ps = 
+and parse_two_or_more_tup_slots_and_idents param_slot ps = 
   let both = 
     ctxt "two+ tup slots and idents" 
       (bracketed_two_or_more LPAREN RPAREN (Some COMMA) (parse_slot_and_ident param_slot)) ps
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
-
- and parse_one_or_more_tup_slots_and_idents param_slot ps = 
+	  
+and parse_one_or_more_tup_slots_and_idents param_slot ps = 
   let both = 
     ctxt "one+ tup slots and idents" 
       (bracketed_one_or_more LPAREN RPAREN (Some COMMA) (parse_slot_and_ident param_slot)) ps
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
+	  
+and new_scope _ = 
+  { Ast.scope_temps = Hashtbl.create 4;
+	Ast.scope_items = Hashtbl.create 4; }
       
 and parse_block ps = 
   let apos = lexpos ps in
@@ -853,8 +857,7 @@ and parse_block ps =
 					 (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
   in
   let bpos = lexpos ps in 
-    span apos bpos (Ast.STMT_block { Ast.block_temps = Hashtbl.create 4;
-									 Ast.block_items = Hashtbl.create 4;
+    span apos bpos (Ast.STMT_block { Ast.block_scope = new_scope ();
 									 Ast.block_stmts = stmts })
 
 and parse_init ps = 

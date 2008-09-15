@@ -250,10 +250,15 @@ and stmt_alt_type =
       alt_type_else: stmt option;
     }
 
+and scope = 
+	{
+	  scope_temps: (nonce, ty) Hashtbl.t;
+	  scope_items: mod_items;
+	}
+
 and stmt_block = 
 	{
-	  block_temps: (nonce, ty) Hashtbl.t;
-	  block_items: mod_items;
+	  block_scope: scope;
 	  block_stmts: stmt array;
 	}
 
@@ -281,13 +286,14 @@ and stmt_while =
 and stmt_foreach = 
     {
       foreach_proto: proto;
-      foreach_slot: (ident * slot);
+	  foreach_scope: scope;
       foreach_call: (lval * expr array);
       foreach_body: stmt;
     }
       
 and stmt_for = 
     {
+	  for_scope: scope;
       for_init: stmt;
       for_test: expr;
       for_step: stmt;
