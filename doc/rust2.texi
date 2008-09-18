@@ -161,7 +161,9 @@ Complete table of contents
 @c Hmm, now I am not sure about that: you can always insist that
 @c ret-calls *mean* tail calls and when they cannot be satisfied as
 @c such, you just split the ret statement from the call-statement or
-@c call-expr line. Minimality argues for this.
+@c call-expr line. Minimality argues for this. But no, this means a user
+@c may need a tail-call and (stupidly) write a non-tail call, leaving
+@c the splitting to discovery during debugging. Not good. Keep ``be''.
 
 * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
 * Ref.Stmt.Ret::                Statement for stopping and producing a value.

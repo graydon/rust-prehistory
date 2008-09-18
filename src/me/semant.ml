@@ -239,16 +239,13 @@ and resolve_stmt cx stmt =
 				 Hashtbl.add scope.Ast.scope_items id item;
 				 resolve_mod_item cx id item
 				   
-			 | Ast.DECL_temp (ty, nonce) -> 
-				 Hashtbl.add scope.Ast.scope_temps nonce ty)
+			 | Ast.DECL_temp (ty, nonce, e) -> 
+				 Hashtbl.add scope.Ast.scope_temps nonce (ty, e))
 
-	| Ast.STMT_copy cp -> 
-		(match cp with 
-			 Ast.COPY_to_lval (lval, expr) -> 
-			   resolve_lval cx lval;
-			   resolve_expr cx expr
-		   | _ -> ())
-
+	| Ast.STMT_copy (lval, expr) -> 
+		resolve_lval cx lval;
+		resolve_expr cx expr
+		  
 	| Ast.STMT_call (dst, fn, args) -> 
 		resolve_lval cx dst;
 		resolve_lval cx fn;
@@ -310,7 +307,7 @@ let rec trans_expr emit expr =
 
 let rec trans_stmt emit stmt = 
   match stmt.Ast.node with 
-	  Ast.STMT_copy (Ast.COPY_to_lval (lval, expr)) -> 
+	  Ast.STMT_copy (lval, expr) -> 
 		let dst = Il.Nil in
 		let src = trans_expr emit expr in
 		  Il.emit_triple emit None Il.MOV dst src;

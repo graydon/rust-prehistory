@@ -221,6 +221,7 @@ and stmt' =
   | STMT_try of stmt_try
   | STMT_put of (proto option * expr option)
   | STMT_ret of (proto option * expr option)
+  | STMT_be of (proto option * lval * (expr array))
   | STMT_alt_tag of stmt_alt_tag
   | STMT_alt_type of stmt_alt_type
   | STMT_alt_port of stmt_alt_port
@@ -228,7 +229,7 @@ and stmt' =
   | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
   | STMT_block of stmt_block
-  | STMT_copy of stmt_copy
+  | STMT_copy of (lval * expr)
   | STMT_call of (lval * lval * (expr array))
   | STMT_send of (lval * expr)
   | STMT_recv of (lval * lval)
@@ -252,7 +253,7 @@ and stmt_alt_type =
 
 and scope = 
 	{
-	  scope_temps: (nonce, ty) Hashtbl.t;
+	  scope_temps: (nonce, (ty * (expr option))) Hashtbl.t;
 	  scope_items: mod_items;
 	}
 
@@ -264,11 +265,8 @@ and stmt_block =
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
-  | DECL_temp of (ty * nonce)
+  | DECL_temp of (ty * nonce * (expr option))
 
-and stmt_copy = 
-    COPY_to_lval of lval * expr
-  | COPY_to_tup of tup_lvals * expr
       
 and stmt_alt_port = 
     { 

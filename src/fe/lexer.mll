@@ -153,6 +153,12 @@ rule token = parse
 | "put*"                       { PUT (Some Ast.PROTO_star)  }
 | "put+"                       { PUT (Some Ast.PROTO_plus)  }
 
+| "be"                         { BE None               }
+| "be?"                        { BE (Some Ast.PROTO_ques)  }
+| "be!"                        { BE (Some Ast.PROTO_bang)  }
+| "be*"                        { BE (Some Ast.PROTO_star)  }
+| "be+"                        { BE (Some Ast.PROTO_plus)  }
+
 | id as i                 
                                { try
                                      Hashtbl.find keyword_table i
