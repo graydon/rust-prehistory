@@ -6,6 +6,9 @@ let _ =
   let fname = Sys.argv.(1) in
   let crate_items = Ll1parser.parse_crate Lexer.token fname in
     Printf.printf "parsed OK\n";
-	Semant.resolve_mod_items Semant.root_ctxt crate_items;
+	(try
+	   Semant.resolve_mod_items Semant.root_ctxt crate_items;
+	 with 
+		 Semant.Semant_err (_, str) -> Printf.printf "semantic error: %s\n" str);	  
 	Pe.emit_testfile "rust_out.exe";
 ;;

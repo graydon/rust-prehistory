@@ -59,10 +59,11 @@ type proto =
 type name_base = 
 	BASE_ident of ident
   | BASE_temp of nonce
+  | BASE_app of (ident * (ty array))
 
-type name_component =
+and name_component = 
 	COMP_ident of ident
-  | COMP_app of (ty array)
+  | COMP_app of (ident * (ty array))
   | COMP_idx of int
 
 and name = 
@@ -99,7 +100,6 @@ and ty =
   | TY_chan of ty
   | TY_port of ty
 
-  | TY_auto
   | TY_named of name
   | TY_opaque of nonce
       
@@ -113,6 +113,7 @@ and slot =
   | SLOT_interior of ty
   | SLOT_read_alias of ty
   | SLOT_write_alias of ty
+  | SLOT_auto
 
 
 (* In closed type terms a constraint may refer to components of the
@@ -203,7 +204,7 @@ and ty_fn =
 and ty_prog = 
     {
       prog_mod_ty: mod_type_items;
-      prog_init_ty: ty;
+      prog_init_ty: ty_sig option;
     }
       
 (* put+ f(a,b) means to call f with current put addr and self as ret
@@ -251,11 +252,15 @@ and stmt_alt_type =
       alt_type_else: stmt option;
     }
 
-and scope = 
+and scope_frame = 
 	{
-	  scope_temps: (nonce, (ty * (expr option))) Hashtbl.t;
+	  scope_temps: (nonce, (slot * (expr option))) Hashtbl.t;
 	  scope_items: mod_items;
 	}
+
+and scope =
+	SCOPE_frame of scope_frame
+  | SCOPE_type of mod_type_items
 
 and stmt_block = 
 	{
@@ -265,7 +270,7 @@ and stmt_block =
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
-  | DECL_temp of (ty * nonce * (expr option))
+  | DECL_temp of (slot * nonce * (expr option))
 
       
 and stmt_alt_port = 
@@ -465,11 +470,11 @@ and mod_item = mod_item' spanned
 and mod_type_item' = 
     MOD_TYPE_ITEM_opaque_type of ty_limit decl
   | MOD_TYPE_ITEM_public_type of ty decl
-  | MOD_TYPE_ITEM_pred of ty decl
+  | MOD_TYPE_ITEM_pred of ty_sig decl
   | MOD_TYPE_ITEM_mod of mod_type_items decl
   | MOD_TYPE_ITEM_fn of ty_fn decl
   | MOD_TYPE_ITEM_prog of ty_prog decl
-  | MOD_TYPE_ITEM_slot of ty decl
+  | MOD_TYPE_ITEM_slot of slot
 
 and mod_type_item = mod_type_item' spanned
 

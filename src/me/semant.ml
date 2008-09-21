@@ -10,8 +10,8 @@
  *   - inferring points of allocation and deallocation
  *)
 
-exception Semant_err of ((Ast.span option) * string)
-;;
+
+
 
 let ty_nonce = ref 0 
 ;;
@@ -24,33 +24,37 @@ type ctxt =
 	  ctxt_span: Ast.span option; }
 ;;
 
+exception Semant_err of ((Ast.span option) * string)
+;;
+
+let err cx str = 
+  (Semant_err (cx.ctxt_span, (str)))
+;;
+
 let	root_ctxt = { ctxt_scopes = []; 
 				  ctxt_span = None }
 ;;
 
-let rec lookup span ident scopes = 
-  match scopes with 
-	  [] -> raise (Semant_err (span, "unknown identifier: '" ^ ident ^ "'"))
-	| (x::xs) -> 
-		let tab = x.Ast.scope_items in 
-		  if Hashtbl.mem tab ident
-		  then Hashtbl.find tab ident
-		  else lookup span ident xs
-;;
-
 
 let extend_ctxt_scopes cx items =  
-  let scopes = { Ast.scope_temps = Hashtbl.create 0;
-				 Ast.scope_items = items } :: cx.ctxt_scopes in
+  let scopes = (Ast.SCOPE_frame 
+				  { Ast.scope_temps = Hashtbl.create 0;
+					Ast.scope_items = items } :: cx.ctxt_scopes) 
+  in
 	{ cx with ctxt_scopes = scopes }
+;;
+
+let extend_ctxt_scopes_ty cx tyitems =  
+  let scopes = (Ast.SCOPE_type tyitems) :: cx.ctxt_scopes in
+	{ cx with ctxt_scopes = scopes }
+;;
+
   
-
-let rec resolve_mod_items cx items = 
-  let cx = extend_ctxt_scopes cx items in
-	Hashtbl.iter (resolve_mod_item cx) items
-
-	  
-and param_ctxt cx params span =
+(* 
+ * Extend a context with bindings for the type parameters of a
+ * module item, mapping each to a new anonymous type.
+ *)
+let param_ctxt cx params span =
   let nparams = Array.length params in
 	if nparams = 0
 	then cx
@@ -68,8 +72,301 @@ and param_ctxt cx params span =
 	  in
 		Array.iter addty params;
 		extend_ctxt_scopes cx htab
+;;
+
+(* 
+ * Extend a context with bindings for the type parameters of a
+ * module item or module-type item, given actual arguments. 
+ *)
+let apply_ctxt_generic cx extend ctor params args span = 
+  let nparams = Array.length params in 
+  let nargs = Array.length args in 
+	if nargs != nparams 
+	then raise (err cx "mismatched number of type parameters and arguments")
+	else 
+	  if nparams = 0
+	  then cx
+	  else
+		let htab = Hashtbl.create nparams in 
+		let addty i (lim, ident) = 
+		  let ty = 
+			match (args.(i), lim) with 
+				(Ast.TY_lim _, Ast.UNLIMITED) -> 
+				  raise (err cx "passing limited type where unlimited required")
+			  | (Ast.TY_lim t, Ast.LIMITED) -> Ast.TY_lim t
+			  | (t, Ast.LIMITED) -> Ast.TY_lim t
+			  | (t, Ast.UNLIMITED) -> t
+		  in
+		  let item' = (ctor { Ast.decl_params = [| |];
+							  Ast.decl_item = ty })
+		  in
+			Hashtbl.add htab ident { Ast.node = item'; 
+									 Ast.span = span }
+		in
+		  Array.iteri addty params;
+		  extend cx htab
+;;
+
+let apply_ctxt cx params args span = 
+  apply_ctxt_generic cx 
+	extend_ctxt_scopes 
+	(fun x -> Ast.MOD_ITEM_public_type x)
+	params args span
+;;
+
+let apply_ctxt_ty cx params args span = 
+  apply_ctxt_generic cx 
+	extend_ctxt_scopes_ty
+	(fun x -> Ast.MOD_TYPE_ITEM_public_type x)
+	params args span
+;;
+
+
+(* 
+ * 'binding' is mostly just to permit returning a single ocaml type 
+ * from a scope-based lookup; scopes (and the things found in them) 
+ * have two separate flavours, those formed from modules and those 
+ * formed from module *types*. The latter can nest in the former,
+ * but not vice-versa.
+ *)
+
+type binding = 
+	BINDING_item of Ast.mod_item
+  | BINDING_type_item of Ast.mod_type_item
+  | BINDING_temp of (Ast.slot * (Ast.expr option))
+
+let rec lookup_ident cx ident = 
+  match cx.ctxt_scopes with 
+	  [] -> raise (err cx ("unknown identifier: '" ^ ident ^ "'"))
+	| (x::xs) -> 
+		match x with 
+			Ast.SCOPE_frame sf -> 
+			  let tab = sf.Ast.scope_items in
+				if Hashtbl.mem tab ident
+				then 
+				  let item = Hashtbl.find tab ident in 
+					({ cx with ctxt_span = Some item.Ast.span }, 
+					 BINDING_item item)
+				else lookup_ident { cx with ctxt_scopes = xs } ident
+		  | Ast.SCOPE_type st -> 
+			  if Hashtbl.mem st ident
+			  then 
+				let tyitem = Hashtbl.find st ident in 
+				  ({ cx with ctxt_span = Some tyitem.Ast.span }, 
+				   BINDING_type_item tyitem)
+			  else lookup_ident { cx with ctxt_scopes = xs } ident
+;;
+
+
+let rec lookup_temp cx temp = 
+  match cx.ctxt_scopes with 
+	  [] -> raise (err cx ("unknown temporary: '" ^ (string_of_int temp) ^ "'"))
+	| (x::xs) -> 
+		match x with 
+			Ast.SCOPE_frame sf -> 
+			  let tab = sf.Ast.scope_temps in
+				if Hashtbl.mem tab temp
+				then 
+				  let se = Hashtbl.find tab temp in 
+					({ cx with ctxt_span = None }, 
+					 BINDING_temp se)
+				else lookup_temp { cx with ctxt_scopes = xs } temp
+		  | _ -> lookup_temp { cx with ctxt_scopes = xs } temp
+;;
+
+let rec mod_type_of_mod m = 
+  let ty_items = Hashtbl.create 4 in 
+  let add n i = Hashtbl.add ty_items n (mod_type_item_of_mod_item i) in
+	Hashtbl.iter add m;
+	ty_items
+	  
+and mod_type_item_of_mod_item item = 
+  let decl params item = 
+	{ Ast.decl_params = params;
+	  Ast.decl_item = item }
+  in
+  let ty = 
+	match item.Ast.node with 
+		Ast.MOD_ITEM_opaque_type td -> 
+		  (match (td.Ast.decl_params, td.Ast.decl_item) with 
+			   (params, Ast.TY_lim _) -> 
+				 Ast.MOD_TYPE_ITEM_opaque_type 
+				   (decl params Ast.LIMITED)
+			 | (params, _) -> 
+				 Ast.MOD_TYPE_ITEM_opaque_type 
+				   (decl params Ast.UNLIMITED))
+	  | Ast.MOD_ITEM_public_type td ->
+		  Ast.MOD_TYPE_ITEM_public_type td
+	  | Ast.MOD_ITEM_pred pd -> 
+		  Ast.MOD_TYPE_ITEM_pred 
+			(decl pd.Ast.decl_params pd.Ast.decl_item.Ast.pred_ty)
+	  | Ast.MOD_ITEM_mod md ->
+			Ast.MOD_TYPE_ITEM_mod 
+			  (decl md.Ast.decl_params (mod_type_of_mod md.Ast.decl_item))
+	  | Ast.MOD_ITEM_fn fd -> 
+		  Ast.MOD_TYPE_ITEM_fn
+			(decl fd.Ast.decl_params fd.Ast.decl_item.Ast.fn_ty)
+	  | Ast.MOD_ITEM_prog pd -> 
+		  let prog = pd.Ast.decl_item in
+		  let init_ty = (match prog.Ast.prog_init with 
+							 None -> None
+						   | Some init -> Some init.Ast.init_sig)
+		  in
+		  let prog_ty = 
+			{ Ast.prog_mod_ty = mod_type_of_mod prog.Ast.prog_mod;
+			  Ast.prog_init_ty = init_ty; }
+		  in
+			Ast.MOD_TYPE_ITEM_prog (decl pd.Ast.decl_params prog_ty)
+	  | Ast.MOD_ITEM_slot (slot, _) -> 
+		  Ast.MOD_TYPE_ITEM_slot slot
+  in
+	{ Ast.span = item.Ast.span;
+	  Ast.node = ty }
+;;
+
+
+let mod_scope items = 
+  { Ast.scope_temps = Hashtbl.create 4;
+	Ast.scope_items = items; }
+;;
+
+
+let type_component_of_type_item cx tyitem comp = 
+  match comp with 
+	  Ast.COMP_ident id -> 
+		(match tyitem.Ast.node with 
+			 Ast.MOD_TYPE_ITEM_mod md -> 
+			   let params = md.Ast.decl_params in 
+			   let tyitems = md.Ast.decl_item in 				 
+				 if Hashtbl.mem tyitems id
+				 then 
+				   let cx = param_ctxt cx params tyitem.Ast.span in
+				   let cx = extend_ctxt_scopes_ty cx tyitems in
+				   let ty_item = (Hashtbl.find tyitems id) in
+					 (cx, ty_item)
+				 else raise (err cx ("unknown component of module type: '" ^ id ^ "'"))
+		   | _ -> raise (err cx ("looking up type in non-module type item: '" ^ id ^ "'")))
+	| Ast.COMP_app (id, tys) -> 
+		raise (Invalid_argument 
+				 ("Semant.type_component_of_type_item lookup_type_in_item_by_component: " ^ 
+					"unimplemented parametric types when looking up '" ^ id ^ "'"))
+	| Ast.COMP_idx i -> 
+		raise (err cx ("illegal index component in type name: .{" ^ (string_of_int i) ^ "}"))
+;;
+
+
+let apply_args_to_item cx item args = 
+  let app params = 
+	apply_ctxt cx params args item.Ast.span
+  in
+	match item.Ast.node with 
+		Ast.MOD_ITEM_opaque_type td -> 
+		  let cx = app td.Ast.decl_params in
+			(cx, Ast.MOD_ITEM_opaque_type { td with Ast.decl_params = [| |] })
+			  
+	  | Ast.MOD_ITEM_public_type td -> 
+		  let cx = app td.Ast.decl_params in
+			(cx, Ast.MOD_ITEM_public_type { td with Ast.decl_params = [| |] })
+			  
+	| Ast.MOD_ITEM_pred pd -> 
+		let cx = app pd.Ast.decl_params in
+		  (cx, Ast.MOD_ITEM_pred { pd with Ast.decl_params = [| |] })
+			
+	| Ast.MOD_ITEM_mod md ->
+		let cx = app md.Ast.decl_params in 
+		  (cx, Ast.MOD_ITEM_mod { md with Ast.decl_params = [| |] })
+
+	| Ast.MOD_ITEM_fn fd -> 
+		let cx = app fd.Ast.decl_params in 
+		  (cx, Ast.MOD_ITEM_fn { fd with Ast.decl_params = [| |] })
+
+	| Ast.MOD_ITEM_prog pd ->
+		let cx = app pd.Ast.decl_params in 
+		  (cx, Ast.MOD_ITEM_prog { pd with Ast.decl_params = [| |] })
+
+	| Ast.MOD_ITEM_slot _ -> 
+		raise (err cx "applying types to slot")
+;;
+
+
+let apply_args_to_type_item cx tyitem args = 
+  let app params = 
+	apply_ctxt_ty cx params args tyitem.Ast.span
+  in
+	match tyitem.Ast.node with 
+		Ast.MOD_TYPE_ITEM_opaque_type td -> 
+		  let cx = app td.Ast.decl_params in
+			(cx, Ast.MOD_TYPE_ITEM_opaque_type { td with Ast.decl_params = [| |] })
+			  
+	  | Ast.MOD_TYPE_ITEM_public_type td -> 
+		  let cx = app td.Ast.decl_params in
+			(cx, Ast.MOD_TYPE_ITEM_public_type { td with Ast.decl_params = [| |] })
+			  
+	| Ast.MOD_TYPE_ITEM_pred pd -> 
+		let cx = app pd.Ast.decl_params in
+		  (cx, Ast.MOD_TYPE_ITEM_pred { pd with Ast.decl_params = [| |] })
+			
+	| Ast.MOD_TYPE_ITEM_mod md ->
+		let cx = app md.Ast.decl_params in 
+		  (cx, Ast.MOD_TYPE_ITEM_mod { md with Ast.decl_params = [| |] })
+
+	| Ast.MOD_TYPE_ITEM_fn fd -> 
+		let cx = app fd.Ast.decl_params in 
+		  (cx, Ast.MOD_TYPE_ITEM_fn { fd with Ast.decl_params = [| |] })
+
+	| Ast.MOD_TYPE_ITEM_prog pd ->
+		let cx = app pd.Ast.decl_params in 
+		  (cx, Ast.MOD_TYPE_ITEM_prog { pd with Ast.decl_params = [| |] })
+
+	| Ast.MOD_TYPE_ITEM_slot _ -> 
+		raise (err cx "applying types to slot")
+;;
 		  
 
+let rec lookup cx 
+	(basefn : ctxt -> (ctxt * binding) -> (ctxt * 'a))
+	(extfn : ctxt -> (ctxt * 'a) -> Ast.name_component -> (ctxt * 'a)) 
+	name = 
+  match name with 
+	  Ast.NAME_base (Ast.BASE_ident id) -> basefn cx (lookup_ident cx id)
+	| Ast.NAME_base (Ast.BASE_app (id, args)) -> 
+		let (cx, binding) = lookup_ident cx id in
+		  (match binding with 
+			   BINDING_item bi -> 
+				 let ((cx':ctxt), item) = apply_args_to_item cx bi args in 
+				   basefn cx (cx', BINDING_item {bi with Ast.node = item})
+			 | BINDING_type_item bti -> 
+				 let ((cx':ctxt), tyitem) = apply_args_to_type_item cx bti args in 
+				   basefn cx (cx', BINDING_type_item {bti with Ast.node = tyitem})
+			 | BINDING_temp _ -> 
+				 raise (err cx "applying types to temporary binding"))
+	| Ast.NAME_base (Ast.BASE_temp temp) -> 
+		basefn cx (lookup_temp cx temp)
+	| Ast.NAME_ext (base, comp) -> 
+		let base' = lookup cx basefn extfn base in
+		  extfn cx base' comp 
+;;
+
+
+let lookup_type_item cx name = 
+  let basefn cx (cx', binding) = 
+	match binding with 
+		BINDING_item item -> (cx', mod_type_item_of_mod_item item)
+	  | BINDING_type_item tyitem -> (cx', tyitem)
+	  | _ -> raise (err cx "unhandled case in Semant.lookup_type")
+  in
+  let extfn cx (cx', tyitem) comp = 
+	type_component_of_type_item cx' tyitem comp 
+  in
+	lookup cx basefn extfn name
+;;
+
+
+let rec resolve_mod_items cx items = 
+  let cx = extend_ctxt_scopes cx items in
+	Hashtbl.iter (resolve_mod_item cx) items
+
+		  
 and resolve_mod_item cx id item =
   Printf.printf "resolving mod item %s\n" id;
   let span = item.Ast.span in
@@ -136,7 +433,48 @@ and resolve_block cx block =
   in
 	Array.iter (resolve_stmt cx) block.Ast.block_stmts
 
-	  
+  
+and resolve_ty cx t = 
+  match t with 
+	  Ast.TY_any -> ()
+	| Ast.TY_nil -> ()
+	| Ast.TY_bool -> ()
+	| Ast.TY_mach (tm, sz) -> ()
+	| Ast.TY_int -> ()
+	| Ast.TY_char -> ()
+	| Ast.TY_str -> ()
+
+	| Ast.TY_tup tt -> ()
+	| Ast.TY_vec t -> ()
+	| Ast.TY_rec tr -> ()
+
+	| Ast.TY_fn tfn -> ()
+	| Ast.TY_chan t -> ()
+	| Ast.TY_port t -> ()
+		
+	| Ast.TY_named nm -> ()
+		(* 
+		let
+			(cx, defn) = lookup_type cx nm
+		in
+		  resolve_ty cx defn
+		*)
+
+	| Ast.TY_opaque non -> ()
+
+	(* 
+	   | Ast.TY_tag of ty_tag
+	   | Ast.TY_iso of ty_iso
+	   | Ast.TY_idx of int
+	   
+	   | Ast.TY_constrained (t, cstrs)
+	   | Ast.TY_mod items -> ()
+	   | Ast.TY_prog tp -> ()
+	   | Ast.TY_lim t -> ()
+	*)
+	| _ -> ()
+		
+		
 and resolve_expr cx expr = 
   let cx = { cx with ctxt_span = Some expr.Ast.span } in
 	match expr.Ast.node with 
@@ -158,18 +496,15 @@ and resolve_expr cx expr =
 	  | Ast.EXPR_vec v -> 
 		  Array.iter (resolve_expr cx) v
 	  | Ast.EXPR_literal _ -> ()
-
+		  
 		  
 and resolve_lval cx lval = 
   match lval.Ast.node with 
 	  Ast.LVAL_base (Ast.BASE_ident id) -> 
-		(try
-		   let _ = lookup cx.ctxt_span id cx.ctxt_scopes in			
-			 Printf.printf "lval: %s (resolved)\n" id
-		 with 
-			 Semant_err (_, str) -> Printf.printf "semantic error: %s\n" str)		  
+		let _ = lookup_ident cx id in
+		  Printf.printf "lval: %s (resolved)\n" id
 	| _ -> ()
-
+		
 
 and resolve_stmt_option cx stmtopt = 
   match stmtopt with 
@@ -196,13 +531,13 @@ and resolve_stmt cx stmt =
 	| Ast.STMT_foreach f -> 
 		let (fn, args) = f.Ast.foreach_call in
 		  resolve_lval cx fn;
+		  Array.iter (resolve_expr cx) args;
 		  let cx = 
 			{ cx with ctxt_scopes = 
 				f.Ast.foreach_scope :: cx.ctxt_scopes } 
 		  in
-			Array.iter (resolve_expr cx) args;
 			resolve_stmt cx f.Ast.foreach_body
-
+			  
 	| Ast.STMT_for f -> 
 		resolve_stmt cx f.Ast.for_init;
 		let cx = 
@@ -233,7 +568,10 @@ and resolve_stmt cx stmt =
 		resolve_block cx b
 
 	| Ast.STMT_decl d -> 
-		let scope = List.hd cx.ctxt_scopes in
+		let scope = (match cx.ctxt_scopes with 
+						 ((Ast.SCOPE_frame f)::_) -> f
+					   | _ -> raise (err cx "non-frame scope containing decl"))
+		in
 		  (match d with 
 			   Ast.DECL_mod_item (id, item) -> 
 				 Hashtbl.add scope.Ast.scope_items id item;
@@ -250,20 +588,20 @@ and resolve_stmt cx stmt =
 		resolve_lval cx dst;
 		resolve_lval cx fn;
 		Array.iter (resolve_expr cx) args
-
-(* 
-	| Ast.STMT_alt_tag of stmt_alt_tag
-	| Ast.STMT_alt_type of stmt_alt_type
-	| Ast.STMT_alt_port of stmt_alt_port
-	| Ast.STMT_prove of (constrs)
-	| Ast.STMT_check of (constrs)
-	| Ast.STMT_checkif of (constrs * stmt)
-	| Ast.STMT_send _ -> ()
-	| Ast.STMT_recv _ -> ()
-	| Ast.STMT_use (ty, ident, lval) 
-*)
-		  | _ -> ()
-
+		  
+	(* 
+	   | Ast.STMT_alt_tag of stmt_alt_tag
+	   | Ast.STMT_alt_type of stmt_alt_type
+	   | Ast.STMT_alt_port of stmt_alt_port
+	   | Ast.STMT_prove of (constrs)
+	   | Ast.STMT_check of (constrs)
+	   | Ast.STMT_checkif of (constrs * stmt)
+	   | Ast.STMT_send _ -> ()
+	   | Ast.STMT_recv _ -> ()
+	   | Ast.STMT_use (ty, ident, lval) 
+	*)
+	| _ -> ()
+			  
 
 (* Translation *)
 

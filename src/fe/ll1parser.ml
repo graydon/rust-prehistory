@@ -459,13 +459,17 @@ let parse_ident ps =
 
 let rec parse_name_component ps = 
   match peek ps with 
-	  IDENT id -> bump ps; Ast.COMP_ident id
-	| LBRACKET -> 
-		let tys = 
-		  ctxt "name_component: apply" 
-			(bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
-		in
-		  Ast.COMP_app tys
+	  IDENT id -> 
+		(bump ps; 
+		 match peek ps with 
+			 LBRACKET -> 
+			   let tys = 
+				 ctxt "name_component: apply" 
+				   (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
+			   in
+				 Ast.COMP_app (id, tys)
+		   | _ -> Ast.COMP_ident id)
+		  
 	| IDX i -> 
 		bump ps; 
 		Ast.COMP_idx i		  
@@ -473,7 +477,16 @@ let rec parse_name_component ps =
 
 and parse_name_base ps = 
   match peek ps with 
-	  IDENT i -> bump ps; Ast.BASE_ident i
+	  IDENT i -> 
+		(bump ps; 
+		 match peek ps with 
+			 LBRACKET -> 
+			   let tys = 
+				 ctxt "name_base: apply" 
+				   (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
+			   in
+				 Ast.BASE_app (i, tys)
+		   | _ -> Ast.BASE_ident i)
 	| _ -> raise (unexpected ps)
 
 and parse_name ps =
@@ -681,9 +694,9 @@ and parse_expr_list bra ket ps =
   arj1st (bracketed_zero_or_more bra ket (Some COMMA) 
 			(ctxt "expr list" parse_expr) ps)
 
-and build_tmp ty apos bpos eo = 
+and build_tmp slot apos bpos eo = 
   let nonce = (tmp_nonce := (!tmp_nonce) + 1; !tmp_nonce) in
-  let decl = span apos bpos (Ast.STMT_decl (Ast.DECL_temp (ty, nonce, eo))) in
+  let decl = span apos bpos (Ast.STMT_decl (Ast.DECL_temp (slot, nonce, eo))) in
   let tmp = span apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce)) in
 	(nonce, tmp, decl)
 
@@ -735,7 +748,7 @@ and parse_atomic_expr ps =
                LPAREN -> 
                  let (astmts, args) = ctxt "call: args" (parse_expr_list LPAREN RPAREN) ps in
                  let bpos = lexpos ps in
-				 let (nonce, tmp, decl) = build_tmp Ast.TY_auto apos bpos None in
+				 let (nonce, tmp, decl) = build_tmp Ast.SLOT_auto apos bpos None in
 				 let call = span apos bpos (Ast.STMT_call (tmp, lval, args)) in
 				 let cstmts = [| decl; call |] in
 				 let stmts = Array.concat [lstmts; astmts; cstmts] in
@@ -854,9 +867,9 @@ and parse_one_or_more_tup_slots_and_idents param_slot ps =
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
 	  
-and new_scope _ = 
-  { Ast.scope_temps = Hashtbl.create 4;
-	Ast.scope_items = Hashtbl.create 4; }
+and new_frame_scope _ = 
+  Ast.SCOPE_frame { Ast.scope_temps = Hashtbl.create 4;
+					Ast.scope_items = Hashtbl.create 4; }
       
 and parse_block ps = 
   let apos = lexpos ps in
@@ -864,7 +877,7 @@ and parse_block ps =
 					 (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
   in
   let bpos = lexpos ps in 
-    span apos bpos (Ast.STMT_block { Ast.block_scope = new_scope ();
+    span apos bpos (Ast.STMT_block { Ast.block_scope = new_frame_scope ();
 									 Ast.block_stmts = stmts })
 
 and parse_init ps = 
@@ -983,7 +996,7 @@ and parse_stmts ps =
 					* 
 					*)
 				 let (nonce, tmp, tempdecl) = 
-				   build_tmp (Ast.TY_tup slots) apos bpos init in
+				   build_tmp (Ast.SLOT_interior (Ast.TY_tup slots)) apos bpos init in
 
 				 let makedecl i slot = 
 				   let expropt = 
@@ -1047,7 +1060,7 @@ and parse_stmts ps =
 			 *)
 			
 		  let (nonce, tmp, tempdecl) = 
-			build_tmp Ast.TY_auto apos bpos (Some expr) in
+			build_tmp Ast.SLOT_auto apos bpos (Some expr) in
 			
 		  let make_copy i dst = 
 			let ext = Ast.COMP_named (Ast.COMP_idx i) in
@@ -1068,7 +1081,7 @@ and parse_stmts ps =
                    let _ = expect ps SEMI in
 				   let stmts = Array.append lstmts astmts in
                    let bpos = lexpos ps in
-				   let (nonce, tmp, decl) = build_tmp Ast.TY_auto apos bpos None in	
+				   let (nonce, tmp, decl) = build_tmp Ast.SLOT_auto apos bpos None in	
 				   let call = span apos bpos (Ast.STMT_call (tmp, lval, args)) in
 					 Array.append stmts [| decl; call |]
 
