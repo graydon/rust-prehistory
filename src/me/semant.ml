@@ -361,6 +361,66 @@ let lookup_type_item cx name =
 	lookup cx basefn extfn name
 ;;
 
+let join_array sep arr = 
+  let s = ref "" in
+	for i = 0 to Array.length arr do
+	  if i = 0
+	  then s := arr.(i)
+	  else s := (!s) ^ sep ^ arr.(i)
+	done;
+	(!s)
+;;
+
+
+let string_of_ty ty = 
+  (* FIXME: possibly flesh this out, though it's just diagnostic. *)
+  "T"
+;;
+
+
+let string_of_name_component comp = 
+  match comp with 
+	  Ast.COMP_ident id -> id
+	| Ast.COMP_app (id, tys) -> 
+		id ^ "[" ^ (join_array "," (Array.map string_of_ty tys)) ^ "]"
+	| Ast.COMP_idx i -> 
+		"{" ^ (string_of_int i) ^ "}"
+;;
+
+
+let rec string_of_name name = 
+  match name with 
+	  Ast.NAME_base (Ast.BASE_ident id) -> id
+	| Ast.NAME_base (Ast.BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
+	| Ast.NAME_base (Ast.BASE_app (id, tys)) -> 
+		id ^ "[" ^ (join_array "," (Array.map string_of_ty tys)) ^ "]"
+	| Ast.NAME_ext (n, c) -> 
+		(string_of_name n) ^ "." ^ (string_of_name_component c)
+;;
+		
+
+let lookup_type cx name = 
+  let parametric = 
+	err cx "Semant.lookup_type found parametric binding, concrete type required"
+  in
+  let (cx', tyitem) = lookup_type_item cx name in 
+	match tyitem.Ast.node with 
+		Ast.MOD_TYPE_ITEM_opaque_type td -> 
+		  if Array.length td.Ast.decl_params != 0
+		  then raise parametric
+		  else 
+			let opaque = Ast.TY_opaque (next_ty_nonce ()) in
+			  (match td.Ast.decl_item with 
+				   Ast.LIMITED -> (cx', Ast.TY_lim opaque)
+				 | Ast.UNLIMITED -> (cx', opaque))
+	  | Ast.MOD_TYPE_ITEM_public_type td -> 
+		  if Array.length td.Ast.decl_params != 0
+		  then raise parametric
+		  else (cx', td.Ast.decl_item)
+
+	  | _ -> raise (err cx ((string_of_name name) ^ " names a non-type item"))
+;;
+
 
 let rec resolve_mod_items cx items = 
   let cx = extend_ctxt_scopes cx items in
@@ -384,6 +444,12 @@ and resolve_mod_item cx id item =
 			resolve_fn span cx fn.Ast.decl_item
 
 	  | Ast.MOD_ITEM_slot (s, eo) -> 
+		  (match s with 
+			   Ast.SLOT_exterior t -> resolve_ty cx t
+			 | Ast.SLOT_interior t -> resolve_ty cx t
+			 | Ast.SLOT_read_alias t -> resolve_ty cx t
+			 | Ast.SLOT_write_alias t -> resolve_ty cx t
+			 | Ast.SLOT_auto -> raise (err cx "auto slot inference not implemented"));
 		  (match eo with
 			   None -> ()
 			 | Some e -> resolve_expr cx e)
@@ -452,13 +518,11 @@ and resolve_ty cx t =
 	| Ast.TY_chan t -> ()
 	| Ast.TY_port t -> ()
 		
-	| Ast.TY_named nm -> ()
-		(* 
+	| Ast.TY_named nm ->
 		let
 			(cx, defn) = lookup_type cx nm
 		in
 		  resolve_ty cx defn
-		*)
 
 	| Ast.TY_opaque non -> ()
 

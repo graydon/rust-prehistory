@@ -1236,6 +1236,7 @@ and parse_mod_item ps =
           let params = ctxt "mod ty item: type params" parse_ty_params ps in
           let _ = expect ps EQ in
           let ty = ctxt "mod type item: ty" parse_ty ps in
+          let _ = expect ps SEMI in
           let bpos = lexpos ps in
           let decl = { Ast.decl_params = params;
                        Ast.decl_item = ty; } 

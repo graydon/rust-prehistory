@@ -1,9 +1,12 @@
 prog woohoo
 {
-  
+  type t = int;
+  fn putstr(str s) -> () {}
+  fn putint(int i) -> () {}
+  fn zerg(int i) -> int { ret i; }
   lim fn foo(int x) -> ()
     {
-      val int y = x + 2;
+      val t y = x + 2;
       putstr("hello");
       while (zerg(y+2) < 10) {
         putint(y);
