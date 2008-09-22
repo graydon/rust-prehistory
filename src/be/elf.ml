@@ -1,161 +1,491 @@
-(* This is a very simple bootstrap assembler/linker for x86 elf32    *)
-(* linux ABI binaries, that should be enough to get us going.        *)
+(*    
+   Module for writing System V ELF files.
+*)
 
-type arr = (int, 
-	    Bigarray.int8_unsigned_elt, 
-	    Bigarray.c_layout) 
-    Bigarray.Array1.t
+open Asm
 ;;
 
-type buf = { buf_fd: Unix.file_descr;
-	     buf_arr: arr }
+
+(* Fixed sizes of structs involved in elf32 spec. *)
+let elf32_ehsize = 52L;;
+let elf32_phentsize = 32L;;
+let elf32_shentsize = 40L;;
+let elf32_symsize = 16L;;
+
+
+type ei_class = 
+	ELFCLASSNONE 
+  | ELFCLASS32 
+  | ELFCLASS64
 ;;
 
-let openbuf (fn:string) (sz:int) = 
-  let fd = Unix.openfile fn [Unix.O_RDWR; Unix.O_CREAT] 0o700 in
-  let alayout = Bigarray.c_layout in
-  let akind = Bigarray.int8_unsigned in
-  let shared = true in
-  let a = Bigarray.Array1.map_file fd akind alayout shared sz in
-  { buf_arr = a;
-    buf_fd = fd }
+
+type ei_data = 
+	ELFDATANONE 
+  | ELFDATA2LSB 
+  | ELFDATA2MSB
+;;
+
+
+let elf_identification ei_class ei_data = 
+  SEQ 
+	[| 
+	  STRING "\x7fELF";
+	  BYTES 
+		[|
+		  (match ei_class with  (* EI_CLASS *)
+			   ELFCLASSNONE -> 0
+			 | ELFCLASS32 -> 1
+			 | ELFCLASS64 -> 2);
+		  (match ei_data with   (* EI_DATA *)
+			   ELFDATANONE -> 0
+			 | ELFDATA2LSB -> 1
+			 | ELFDATA2MSB -> 2);
+		  1;                    (* EI_VERSION = EV_CURRENT *)
+		  0;                    (* EI_PAD #7 *)
+		  0;                    (* EI_PAD #8 *)
+		  0;                    (* EI_PAD #9 *)
+		  0;                    (* EI_PAD #A *)
+		  0;                    (* EI_PAD #B *)
+		  0;                    (* EI_PAD #C *)
+		  0;                    (* EI_PAD #D *)
+		  0;                    (* EI_PAD #E *)
+		  0;                    (* EI_PAD #F *)
+		|]
+	|]
+;;
+
+
+type e_type = 
+	ET_NONE 
+  | ET_REL
+  | ET_EXEC 
+  | ET_DYN
+  | ET_CORE
+;;
+
+
+type e_machine = 
+    (* Maybe support more later. *)
+	EM_NONE
+  | EM_386
+  | EM_X86_64
+;;
+
+
+type e_version = 
+	EV_NONE
+  | EV_CURRENT
+;;
+
+
+let elf32_header 
+	~(ei_data:ei_data) 
+	~(e_type:e_type)
+	~(e_machine:e_machine)
+	~(e_version:e_version)
+	~(e_entry_fixup:fixup)
+	~(e_phoff_fixup:fixup)
+	~(e_shoff_fixup:fixup)
+	~(e_phnum:int64)
+	~(e_shnum:int64)
+	~(e_shstrndx:int64)
+	: item = 
+  let elf_header_fixup = new_fixup "elf header" in
+	DEF 
+	  (elf_header_fixup, 
+	   SEQ [| elf_identification ELFCLASS32 ei_data;
+			  WORD32 (IMM (match e_type with 
+							   ET_NONE -> 0L
+							 | ET_REL -> 1L
+							 | ET_EXEC -> 2L
+							 | ET_DYN -> 3L
+							 | ET_CORE -> 4L));
+			  WORD32 (IMM (match e_machine with 
+							   EM_NONE -> 0L
+							 | EM_386 -> 3L
+							 | EM_X86_64 -> 62L));
+			  WORD32 (IMM (match e_version with 
+							   EV_NONE -> 0L
+							 | EV_CURRENT -> 1L));
+			  WORD32 (M_POS e_entry_fixup);
+			  WORD32 (F_POS e_phoff_fixup);
+			  WORD32 (F_POS e_shoff_fixup);
+			  WORD16 (IMM elf32_ehsize);
+			  WORD16 (IMM elf32_phentsize);
+			  WORD16 (IMM e_phnum);
+			  WORD16 (IMM elf32_shentsize);
+			  WORD16 (IMM e_shnum);
+			  WORD16 (IMM e_shstrndx); 
+		   |])	  
+;;
+
+
+type sh_type = 
+	SHT_NULL
+  | SHT_PROGBITS
+  | SHT_SYMTAB
+  | SHT_STRTAB
+  | SHT_RELA
+  | SHT_HASH
+  | SHT_DYNAMIC
+  | SHT_NOTE
+  | SHT_NOBITS
+  | SHT_REL
+  | SHT_SHLIB
+  | SHT_DYNSYM
+;;
+
+
+type sh_flags = 
+	SHF_WRITE
+  | SHF_ALLOC
+  | SHF_EXECINSTR
+;;
+
+
+let section_header 
+	~(shstring_table_fixup:fixup)
+	~(shname_string_fixup:fixup option)
+	~(sh_type:sh_type)
+	~(sh_flags:sh_flags list)
+	~(section_fixup:fixup option)
+	~(sh_addralign:int64)
+	~(sh_entsize:int64)
+	: item = 
+  SEQ 
+	[|
+	  (* sh_name *)	  
+	  WORD32 (match shname_string_fixup with 
+				  None -> (IMM 0L)
+				| Some nf -> 
+					(SUB 
+					   ((F_POS nf),
+						(F_POS shstring_table_fixup))));
+	  WORD32 (IMM (match sh_type with 
+					   SHT_NULL -> 0L
+					 | SHT_PROGBITS -> 1L
+					 | SHT_SYMTAB -> 2L
+					 | SHT_STRTAB -> 3L
+					 | SHT_RELA -> 4L
+					 | SHT_HASH -> 5L
+					 | SHT_DYNAMIC -> 6L
+					 | SHT_NOTE -> 7L
+					 | SHT_NOBITS -> 8L
+					 | SHT_REL -> 9L
+					 | SHT_SHLIB -> 10L
+					 | SHT_DYNSYM -> 11L));
+	  WORD32 (IMM (fold_flags 
+					 (fun f -> match f with 
+						  SHF_WRITE -> 0x1L
+						| SHF_ALLOC -> 0x2L
+						| SHF_EXECINSTR -> 0x3L) sh_flags));
+	  WORD32 (match section_fixup with 
+				  None -> (IMM 0L)
+				| Some s -> (M_POS s));
+	  WORD32 (match section_fixup with 
+				  None -> (IMM 0L)
+				| Some s -> (F_POS s));
+	  WORD32 (match section_fixup with 
+				  None -> (IMM 0L)
+				| Some s -> (F_SZ s));
+	  WORD32 (IMM 0L); (* sh_link, possibly use later. *)
+	  WORD32 (IMM 0L); (* sh_info *)
+	  WORD32 (IMM sh_addralign);
+	  WORD32 (IMM sh_entsize);
+	|]
+;;
+
+
+type p_type = 
+	PT_NULL
+  | PT_LOAD
+  | PT_DYNAMIC
+  | PT_INTERP
+  | PT_NOTE
+  | PT_SHLIB
+  | PT_PHDR
+;;
+
+
+type p_flag = 
+	PF_X
+  | PF_W
+  | PF_R
+;;
+
+
+let program_header 
+	~(p_type:p_type)
+	~(segment_fixup:fixup)
+	~(p_flags:p_flag list)
+	~(p_align:int64)
+	: item = 
+  SEQ 
+	[|
+	  WORD32 (IMM (match p_type with 
+					   PT_NULL -> 0L
+					 | PT_LOAD -> 1L 
+					 | PT_DYNAMIC -> 2L
+					 | PT_INTERP -> 3L
+					 | PT_NOTE -> 4L
+					 | PT_SHLIB -> 5L
+				   | PT_PHDR -> 6L));
+	  WORD32 (F_POS segment_fixup);
+	  WORD32 (M_POS segment_fixup);
+	  WORD32 (IMM 0L); (* p_paddr, 0 on most archs *)
+	  WORD32 (F_SZ segment_fixup);
+	  WORD32 (M_SZ segment_fixup);
+	  WORD32 (IMM (fold_flags
+					 (fun f -> 
+						match f with 
+							PF_X -> 0x1L
+						| PF_W -> 0x2L
+						| PF_R -> 0x4L)
+					 p_flags));
+	  WORD32 (IMM p_align);
+	|]
+;;
+
+
+type st_bind = 
+	STB_LOCAL
+  | STB_GLOBAL
+  | STB_WEAK
+;;
+
+
+type st_type = 
+	STT_NOTYPE
+  | STT_OBJECT
+  | STT_FUNC
+  | STT_SECTION
+  | STT_FILE
+;;
+
+
+(* Special symbol-section indices *)
+let shn_UNDEF   = 0;;
+let shn_ABS     = 0xfff1;;
+let shn_ABS     = 0xfff2;;
+
+	
+let symbol 
+	~(string_table_fixup:fixup)
+	~(name_string_fixup:fixup)
+	~(sym_target_fixup:fixup)
+	~(st_bind:st_bind)
+	~(st_type:st_type)
+	~(st_shndx:int64)
+	: item = 
+  let st_bind_num = 
+	match st_bind with 
+		STB_LOCAL -> 0L
+	  | STB_GLOBAL -> 1L
+	  | STB_WEAK -> 2L
+  in
+  let st_type_num = 
+	match st_type with
+		STT_NOTYPE -> 0L
+	  | STT_OBJECT -> 1L
+	  | STT_FUNC -> 2L		  
+	  | STT_SECTION -> 3L
+	  | STT_FILE -> 4L
+  in
+	SEQ 
+	  [|
+		WORD32 (SUB 
+				  ((F_POS name_string_fixup),
+				   (F_POS string_table_fixup)));
+		WORD32 (M_POS sym_target_fixup);
+		WORD32 (M_SZ sym_target_fixup);
+		WORD8           (* st_info *)
+		  (OR 
+			 ((SLL ((IMM st_bind_num), 4)),
+			  (AND ((IMM st_type_num), (IMM 0xfL)))));
+		WORD8 (IMM 0L); (* st_other *)
+		WORD16 (IMM st_shndx);
+	  |]
+;;
+
+let elf32_x86_file 
+	~(e_entry_fixup:fixup)
+	: item = 
+
+  (* There are 8 official section headers in the file we're making:   *)
+  (* section 0: <null section>                                        *)
+  (* section 1: .text                                                 *)
+  (* section 2: .rodata                                               *)
+  (* section 3: .data                                                 *)
+  (* section 4: .bss                                                  *)
+  (* section 5: .shstrtab                                             *)
+  (* section 6: .symtab                                               *)
+  (* section 7: .strtab                                               *)
+
+  let null_section_name_fixup = new_fixup "string name of <null> section" in
+  let text_section_name_fixup = new_fixup "string name of '.text' section" in
+  let rodata_section_name_fixup = new_fixup "string name of '.rodata section" in
+  let data_section_name_fixup = new_fixup "string name of '.data' section" in
+  let bss_section_name_fixup = new_fixup "string name of '.bss' section" in
+  let shstrtab_section_name_fixup = new_fixup "string name of '.shstrtab section" in
+  let symtab_section_name_fixup = new_fixup "string name of '.symtab' section" in
+  let strtab_section_name_fixup = new_fixup "string name of '.strtab' section" in
+
+  let n_shdrs        = 8L in
+  let textndx        = 1L in  (* Section index of .text *)
+  let rodatandx      = 2L in  (* Section index of .rodata *)
+  let datandx        = 3L in  (* Section index of .data *)
+  let shstrndx       = 5L in  (* Section index of .shstrtab *)
+  let strndx         = 7L in  (* Section index of .strtab *)
+
+  let section_header_table_fixup = new_fixup "section header table" in	
+  let null_section_fixup = new_fixup "null section" in	
+  let text_section_fixup = new_fixup "text section" in	
+  let rodata_section_fixup = new_fixup "rodata section" in	
+  let data_section_fixup = new_fixup "data section" in	
+  let bss_section_fixup = new_fixup "bss section" in	
+  let shstrtab_section_fixup = new_fixup "shstrtab section" in	
+  let symtab_section_fixup = new_fixup "symbtab section" in	
+  let strtab_section_fixup = new_fixup "strtab section" in	
+
+  let section_header_table = 
+	SEQ
+	  [|
+		(* <null> *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: None
+		   ~sh_type: SHT_NULL
+		   ~sh_flags: []
+		   ~section_fixup: None
+		   ~sh_addralign: 0L
+		   ~sh_entsize: 0L);
+
+		(* .text *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: (Some text_section_name_fixup)
+		   ~sh_type: SHT_PROGBITS
+		   ~sh_flags: [ SHF_ALLOC; SHF_EXECINSTR ]
+		   ~section_fixup: (Some text_section_fixup)
+		   ~sh_addralign: 32L
+		   ~sh_entsize: 0L);
+
+		(* .rodata *)
+		(section_header 
+		   ~shstring_table_fixup: strtab_section_fixup
+		   ~shname_string_fixup: (Some rodata_section_name_fixup)
+		   ~sh_type: SHT_PROGBITS
+		   ~sh_flags: [ SHF_ALLOC ]
+		   ~section_fixup: (Some rodata_section_fixup)
+		   ~sh_addralign: 32L
+		   ~sh_entsize: 0L);
+
+		(* .data *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: (Some data_section_name_fixup)
+		   ~sh_type: SHT_PROGBITS
+		   ~sh_flags: [ SHF_ALLOC; SHF_WRITE ]
+		   ~section_fixup: (Some data_section_fixup)
+		   ~sh_addralign: 32L
+		   ~sh_entsize: 0L);
+
+		(* .bss *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: (Some bss_section_name_fixup)
+		   ~sh_type: SHT_NOBITS
+		   ~sh_flags: [ SHF_ALLOC; SHF_WRITE ]
+		   ~section_fixup: (Some bss_section_fixup)
+		   ~sh_addralign: 32L
+		   ~sh_entsize: 0L);
+
+		(* .shstrtab *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: (Some shstrtab_section_name_fixup)
+		   ~sh_type: SHT_STRTAB
+		   ~sh_flags: []
+		   ~section_fixup: (Some shstrtab_section_fixup)
+		   ~sh_addralign: 1L
+		   ~sh_entsize: 0L);
+
+		(* .symtab *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: (Some symtab_section_name_fixup)
+		   ~sh_type: SHT_SYMTAB
+		   ~sh_flags: []
+		   ~section_fixup: (Some symtab_section_fixup)
+		   ~sh_addralign: 4L
+		   ~sh_entsize: 0L);
+
+		(* .strtab *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: (Some strtab_section_name_fixup)
+		   ~sh_type: SHT_STRTAB
+		   ~sh_flags: []
+		   ~section_fixup: (Some strtab_section_fixup)
+		   ~sh_addralign: 1L
+		   ~sh_entsize: 0L);
+	  |]
+  in
+
+  (* There are 3 official program headers in the file we're making:   *)
+  (* segment 0: PHDR                                                  *)
+  (* segment 1: RE / LOAD                                             *)
+  (* segment 2: RW / LOAD                                             *)
+
+  let n_phdrs = 3L in
+  let program_header_table_fixup = new_fixup "program header table" in
+  let segment_0_fixup = new_fixup "segment 0" in
+  let segment_1_fixup = new_fixup "segment 1" in
+  let segment_2_fixup = new_fixup "segment 2" in
+
+  let program_header_table = 
+	SEQ
+	  [| 
+		(program_header 
+		   ~p_type: PT_PHDR
+		   ~segment_fixup: segment_0_fixup
+		   ~p_flags: [ PF_R; PF_X ]
+		   ~p_align: 4L);
+		(program_header 
+		   ~p_type: PT_LOAD
+		   ~segment_fixup: segment_1_fixup
+		   ~p_flags: [ PF_R; PF_X ]
+		   ~p_align: 0x1000L);
+		(program_header 
+		   ~p_type: PT_LOAD
+		   ~segment_fixup: segment_2_fixup
+		   ~p_flags: [ PF_R; PF_W ]
+		   ~p_align: 0x1000L);		
+	  |]
+  in
+
+	SEQ 
+	  [| 
+		elf32_header 
+		  ~ei_data: ELFDATA2LSB
+		  ~e_type: ET_EXEC
+		  ~e_machine: EM_386
+		  ~e_version: EV_CURRENT
+		  
+		  ~e_entry_fixup: e_entry_fixup
+		  ~e_phoff_fixup: program_header_table_fixup
+		  ~e_shoff_fixup: section_header_table_fixup
+		  ~e_phnum: n_phdrs
+		  ~e_shnum: n_shdrs
+		  ~e_shstrndx: shstrndx;
+		program_header_table;
+		(* ... *)
+		section_header_table;
+	|]
 ;;
 
 (* 
- * "lim" here is the offset that is one-past-the-last-byte we want to accept,
- * a la C++ iterators 
-*)
-let check_write (pos:int) (lim:int) (proposed_len:int) =
-  (if (pos < 0) then failwith "check_write: pos0 < 0");
-  (if (lim < pos) then failwith "check_write: lim < pos0");
-  (if (proposed_len > (lim - pos)) then failwith "write_bytes: write exceeds limit")
-;;  
-
-let write_bytes (b:buf) (pos0:int) (lim:int) (bytes:int array) =
-  let
-      write1 pos byte = (b.buf_arr.{pos} <- (byte land 0xff); 
-			 pos + 1)
-  in
-    check_write pos0 lim (Array.length bytes);
-    Array.fold_left write1 pos0 bytes
-;;
-
-let write_rawstring (b:buf) (pos0:int) (lim:int) (str:string) =
-  let len = (String.length str) in
-    check_write pos0 lim len;
-    for i = 0 to len - 1 do
-      b.buf_arr.{pos0 + i} <- ((Char.code str.[i]) land 0xff)
-    done;
-    pos0 + len
-;;
-
-let write_zstring (b:buf) (pos0:int) (lim:int) (str:string) =
-  let len = (String.length str) in
-    check_write pos0 lim (len+1);
-    for i = 0 to len - 1 do
-      b.buf_arr.{pos0 + i} <- ((Char.code str.[i]) land 0xff)
-    done;
-    b.buf_arr.{pos0 + len} <- 0;
-    pos0 + len + 1
-;;
-
-let ub i n = (i lsr (n * 8)) land 0xff ;;
-let sb i n = (i asr (n * 8)) land 0xff ;;
-let ubl i n = Int32.to_int (Int32.logand (Int32.shift_right_logical i (n * 8)) 0xffl) ;;
-let ubL i n = Int64.to_int (Int64.logand (Int64.shift_right_logical i (n * 8)) 0xffL) ;;
-
-let int_to_u8 i = [| ub i 0 |] ;;
-let int_to_s8 i = [| sb i 0 |] ;;
-
-let int_to_u16_lsb0 i = [| ub i 0; ub i 1 |] ;;
-let int_to_u16_msb0 i = [| ub i 1; ub i 0 |] ;;
-let int_to_s16_lsb0 i = [| sb i 0; sb i 1 |] ;;
-let int_to_s16_msb0 i = [| sb i 1; sb i 0 |] ;;
-
-let int_to_u32_lsb0 i = [| ub i 0; ub i 1; ub i 2; ub i 3 |] ;;
-let int_to_u32_msb0 i = [| ub i 3; ub i 2; ub i 1; ub i 0 |] ;;
-let int_to_s32_lsb0 i = [| sb i 0; sb i 1; sb i 2; sb i 3 |] ;;
-let int_to_s32_msb0 i = [| sb i 3; sb i 2; sb i 1; sb i 0 |] ;;
-
-let int32_lsb0 i = [| ubl i 0; ubl i 1; ubl i 2; ubl i 3 |] ;;
-let int32_msb0 i = [| ubl i 3; ubl i 2; ubl i 1; ubl i 0 |] ;;
-
-let int_to_u64_lsb0 i = [| ub i 0; ub i 1; ub i 2; ub i 3;
-			   ub i 4; ub i 5; ub i 6; ub i 7 |] ;;
-let int_to_u64_msb0 i = [| ub i 7; ub i 6; ub i 5; ub i 4;
-			   ub i 3; ub i 2; ub i 1; ub i 0 |] ;;
-let int_to_s64_lsb0 i = [| sb i 0; sb i 1; sb i 2; sb i 3;
-			   sb i 4; sb i 5; sb i 6; sb i 7 |] ;;
-let int_to_s64_msb0 i = [| sb i 7; sb i 6; sb i 5; sb i 4; 
-			   sb i 3; sb i 2; sb i 1; sb i 0 |] ;;
-
-let int64_lsb0 i = [| ubL i 0; ubL i 1; ubL i 2; ubL i 3;
-		      ubL i 4; ubL i 5; ubL i 6; ubL i 7 |] ;;
-let int64_msb0 i = [| ubL i 7; ubL i 6; ubL i 5; ubL i 4;
-		      ubL i 3; ubL i 2; ubL i 1; ubL i 0 |] ;;
-
-
-type int8 = int;;
-type int16 = int;;
-
-(* ELF stuff *)
-
-type elf_header = 
-    { 
-      e_ident: int8 array;
-      e_type: int16;
-      e_machine: int16; 
-      e_version: int32;
-      mutable e_entry: int32;
-      mutable e_phoff: int32;
-      mutable e_shoff: int32;
-      e_flags: int32;
-      e_ehsize: int16;
-      e_phentsize: int16;
-      mutable e_phnum: int16; 
-      e_shentsize: int16;
-      mutable e_shnum: int16; 
-      mutable e_shstrndx: int16;
-    }
-
-
-type section_header = 
-    {
-     mutable sh_name: int32;
-     sh_type: int32;
-     sh_flags: int32;
-     mutable sh_addr: int32;
-     mutable sh_offset: int32;
-     mutable sh_size: int32;
-     mutable sh_link: int32;
-     mutable sh_info: int32;
-     sh_addralign: int32;
-     mutable sh_entsize: int32;
-   }
-;;
-
-type program_header = 
-    {
-     p_type: int32;
-     p_offset: int32;
-     p_vaddr: int32;
-     p_paddr: int32;
-     p_filesz: int32;
-     p_memsz: int32;
-     p_flags: int32;
-     p_align: int32;
-   }
-
-type symbol = 
-    {
-      st_name: int32;   (* : Elf32_Word *)
-      st_value: int32;  (* : Elf32_Addr *)
-      st_size: int32;   (* : Elf32_Word *)
-      st_info: int;     (* u8 *)
-      st_other: int;    (* u8 *)
-      st_shndx: int;    (* : Elf32_Half *)
-    }
-
 
 let write_elf_header_at (b:buf) (pos:int) (lim:int) (eh:elf_header) =
   let p = ref pos in 
@@ -214,114 +544,10 @@ let write_sym_at (b:buf) (pos:int) (lim:int) (s:symbol) =
     wh s.st_shndx;
     !p
 ;;
-
-(* Fixed sizes of structs involved in elf32 spec. *)
-let ehsize = 52;;
-let phentsize = 32;;
-let shentsize = 40;;
-let symsize = 16;;
-
-let mk_basic_x86_ehdr n_phdrs phdr_off n_shdrs shdr_off shstrndx = 
-  { 
-    e_ident = [| 
-      0x7f;             (* EI_MAG0 *)
-   (Char.code 'E');   (* EI_MAG1 *)
-   (Char.code 'L');   (* EI_MAG2 *)
-   (Char.code 'F');   (* EI_MAG3 *)
-   1;                 (* EI_CLASS = ELFCLASS32 *)
-   1;                 (* EI_DATA = ELFDATA2LSB *)
-   1;                 (* EI_VERSION = EV_CURRENT *)
-   0;                 (* EI_PAD #7 *)
-   0;                 (* EI_PAD #8 *)
-   0;                 (* EI_PAD #9 *)
-   0;                 (* EI_PAD #A *)
-   0;                 (* EI_PAD #B *)
-   0;                 (* EI_PAD #C *)
-   0;                 (* EI_PAD #D *)
-   0;                 (* EI_PAD #E *)
-   0;                 (* EI_PAD #F *)
-   |];
-    e_type = 2;               (* ET_EXEC : Elf32_Half *)
-    e_machine = 3;            (* EM_386  : Elf32_Half *)
-    e_version = 1l;           (* EV_CURRENT : Elf32_Word *)
-    e_entry = 0l;             (* : Elf32_Addr *)
-    e_phoff = phdr_off;       (* : Elf32_Off *)
-    e_shoff = shdr_off;       (* : Elf32_Off *)
-    e_flags = 0l;             (* : Elf32_Word *)
-    e_ehsize = ehsize;        (* : Elf32_Half *)
-    e_phentsize = phentsize;  (* : Elf32_Half *)
-    e_phnum = n_phdrs;        (* : Elf32_Half *)
-    e_shentsize = shentsize;  (* : Elf32_Half *)
-    e_shnum = n_shdrs;        (* : Elf32_Half *)
-    e_shstrndx = shstrndx;    (* : Elf32_Half *)
-  }
-;;
-
-(* Section types *)
-let sht_NULL = 0l;;
-let sht_PROGBITS = 1l;;
-let sht_SYMTAB = 2l;;
-let sht_STRTAB = 3l;;
-let sht_RELA = 4l;;
-let sht_NOBITS = 8l;;
-
-(* Section flags *)
-let shf_WRITE = 1l;;
-let shf_ALLOC = 2l;;
-let shf_EXECINSTR = 4l;;
-
-(* Program (segment) types *)
-let pt_NULL = 0l;;
-let pt_LOAD = 1l;;
-let pt_PHDR = 6l;;
-
-(* Program (segment) flags *)
-let pf_X = 1l;;
-let pf_W = 2l;;
-let pf_R = 4l;;
-
-(* Symbol types (ELF32_ST_TYPE) *)
-let stt_NOTYPE  = 0;;
-let stt_OBJECT  = 1;;
-let stt_FUNC    = 2;;
-let stt_SECTION = 3;;
-let stt_FILE    = 4;;
-
-(* Symbol binding (ELF32_ST_BIND) *)
-let stb_LOCAL   = 0;;
-let stb_GLOBAL  = 1;;
-let stb_WEAK    = 2;;
-
-(* Symbol section indices *)
-let shn_UNDEF   = 0;;
-let shn_ABS     = 0xfff1;;
+ 
 
 
-let mk_basic_shdr ~typ ~align ~off ~addr ~sz ~flags = 
-{
- sh_name = 0l;
- sh_type = typ;
- sh_flags = List.fold_left Int32.logor 0l flags;
- sh_addr = addr;
- sh_offset = off;
- sh_size = sz;
- sh_link = 0l;
- sh_info = 0l;
- sh_addralign = align;
- sh_entsize = 0l
-}
 
-let mk_basic_phdr ~typ ~align ~off ~addr ~filesz ~memsz ~flags =
-  {
-   p_type = typ;
-   p_offset = off;
-   p_vaddr = addr;
-   p_paddr = addr;
-   p_filesz = filesz;
-   p_memsz = memsz;
-   p_flags = List.fold_left Int32.logor 0l flags;
-   p_align = align
- }
 
 let mk_basic_sym ~name ~value ~size ~ty ~bind ~shndx =
     {
@@ -708,3 +934,4 @@ let test_asm _ =
     write_basic_x86_elf_file f;
     Unix.close f.file_buf.buf_fd
 ;;
+*)

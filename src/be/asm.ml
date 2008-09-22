@@ -374,3 +374,6 @@ and
 ;;
 
 
+let fold_flags (f:'a -> int64) (flags:'a list) : int64 = 
+  List.fold_left (Int64.logor) 0x0L (List.map f flags)
+;;
