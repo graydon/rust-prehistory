@@ -95,13 +95,13 @@ let elf32_header
 	DEF 
 	  (elf_header_fixup, 
 	   SEQ [| elf_identification ELFCLASS32 ei_data;
-			  WORD32 (IMM (match e_type with 
+			  WORD16 (IMM (match e_type with 
 							   ET_NONE -> 0L
 							 | ET_REL -> 1L
 							 | ET_EXEC -> 2L
 							 | ET_DYN -> 3L
 							 | ET_CORE -> 4L));
-			  WORD32 (IMM (match e_machine with 
+			  WORD16 (IMM (match e_machine with 
 							   EM_NONE -> 0L
 							 | EM_386 -> 3L
 							 | EM_X86_64 -> 62L));
@@ -111,6 +111,7 @@ let elf32_header
 			  WORD32 (M_POS e_entry_fixup);
 			  WORD32 (F_POS e_phoff_fixup);
 			  WORD32 (F_POS e_shoff_fixup);
+			  WORD32 (IMM 0L); (* e_flags *)
 			  WORD16 (IMM elf32_ehsize);
 			  WORD16 (IMM elf32_phentsize);
 			  WORD16 (IMM e_phnum);
@@ -146,22 +147,19 @@ type sh_flags =
 
 let section_header 
 	~(shstring_table_fixup:fixup)
-	~(shname_string_fixup:fixup option)
+	~(shname_string_fixup:fixup)
 	~(sh_type:sh_type)
 	~(sh_flags:sh_flags list)
 	~(section_fixup:fixup option)
 	~(sh_addralign:int64)
 	~(sh_entsize:int64)
+	~(sh_link:int64 option)
 	: item = 
   SEQ 
 	[|
-	  (* sh_name *)	  
-	  WORD32 (match shname_string_fixup with 
-				  None -> (IMM 0L)
-				| Some nf -> 
-					(SUB 
-					   ((F_POS nf),
-						(F_POS shstring_table_fixup))));
+	  WORD32 (SUB 
+				((F_POS shname_string_fixup),
+				 (F_POS shstring_table_fixup)));
 	  WORD32 (IMM (match sh_type with 
 					   SHT_NULL -> 0L
 					 | SHT_PROGBITS -> 1L
@@ -189,7 +187,9 @@ let section_header
 	  WORD32 (match section_fixup with 
 				  None -> (IMM 0L)
 				| Some s -> (F_SZ s));
-	  WORD32 (IMM 0L); (* sh_link, possibly use later. *)
+	  WORD32 (IMM (match sh_link with 
+					   None -> 0L
+					 | Some i -> i)); 
 	  WORD32 (IMM 0L); (* sh_info *)
 	  WORD32 (IMM sh_addralign);
 	  WORD32 (IMM sh_entsize);
@@ -339,7 +339,6 @@ let elf32_x86_file
   let strndx         = 7L in  (* Section index of .strtab *)
 
   let section_header_table_fixup = new_fixup "section header table" in	
-  let null_section_fixup = new_fixup "null section" in	
   let text_section_fixup = new_fixup "text section" in	
   let rodata_section_fixup = new_fixup "rodata section" in	
   let data_section_fixup = new_fixup "data section" in	
@@ -348,88 +347,110 @@ let elf32_x86_file
   let symtab_section_fixup = new_fixup "symbtab section" in	
   let strtab_section_fixup = new_fixup "strtab section" in	
 
+  let shstrtab_section = 
+	SEQ
+	  [|
+		DEF(null_section_name_fixup, ZSTRING "");
+		DEF(text_section_name_fixup, ZSTRING ".text");
+		DEF(rodata_section_name_fixup, ZSTRING ".rodata");
+		DEF(data_section_name_fixup, ZSTRING ".data");
+		DEF(bss_section_name_fixup, ZSTRING ".bss");
+		DEF(shstrtab_section_name_fixup, ZSTRING ".shstrtab");
+		DEF(symtab_section_name_fixup, ZSTRING ".symtab");
+		DEF(strtab_section_name_fixup, ZSTRING ".strtab");
+	  |]
+  in
+
   let section_header_table = 
 	SEQ
 	  [|
 		(* <null> *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
-		   ~shname_string_fixup: None
+		   ~shname_string_fixup: null_section_name_fixup
 		   ~sh_type: SHT_NULL
 		   ~sh_flags: []
 		   ~section_fixup: None
 		   ~sh_addralign: 0L
-		   ~sh_entsize: 0L);
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
 
 		(* .text *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
-		   ~shname_string_fixup: (Some text_section_name_fixup)
+		   ~shname_string_fixup: text_section_name_fixup
 		   ~sh_type: SHT_PROGBITS
 		   ~sh_flags: [ SHF_ALLOC; SHF_EXECINSTR ]
 		   ~section_fixup: (Some text_section_fixup)
 		   ~sh_addralign: 32L
-		   ~sh_entsize: 0L);
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
 
 		(* .rodata *)
 		(section_header 
-		   ~shstring_table_fixup: strtab_section_fixup
-		   ~shname_string_fixup: (Some rodata_section_name_fixup)
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: rodata_section_name_fixup
 		   ~sh_type: SHT_PROGBITS
 		   ~sh_flags: [ SHF_ALLOC ]
 		   ~section_fixup: (Some rodata_section_fixup)
 		   ~sh_addralign: 32L
-		   ~sh_entsize: 0L);
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
 
 		(* .data *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
-		   ~shname_string_fixup: (Some data_section_name_fixup)
+		   ~shname_string_fixup: data_section_name_fixup
 		   ~sh_type: SHT_PROGBITS
 		   ~sh_flags: [ SHF_ALLOC; SHF_WRITE ]
 		   ~section_fixup: (Some data_section_fixup)
 		   ~sh_addralign: 32L
-		   ~sh_entsize: 0L);
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
 
 		(* .bss *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
-		   ~shname_string_fixup: (Some bss_section_name_fixup)
+		   ~shname_string_fixup: bss_section_name_fixup
 		   ~sh_type: SHT_NOBITS
 		   ~sh_flags: [ SHF_ALLOC; SHF_WRITE ]
 		   ~section_fixup: (Some bss_section_fixup)
 		   ~sh_addralign: 32L
-		   ~sh_entsize: 0L);
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
 
 		(* .shstrtab *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
-		   ~shname_string_fixup: (Some shstrtab_section_name_fixup)
+		   ~shname_string_fixup: shstrtab_section_name_fixup
 		   ~sh_type: SHT_STRTAB
 		   ~sh_flags: []
 		   ~section_fixup: (Some shstrtab_section_fixup)
 		   ~sh_addralign: 1L
-		   ~sh_entsize: 0L);
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
 
 		(* .symtab *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
-		   ~shname_string_fixup: (Some symtab_section_name_fixup)
+		   ~shname_string_fixup: symtab_section_name_fixup
 		   ~sh_type: SHT_SYMTAB
 		   ~sh_flags: []
 		   ~section_fixup: (Some symtab_section_fixup)
 		   ~sh_addralign: 4L
-		   ~sh_entsize: 0L);
+		   ~sh_entsize: elf32_symsize
+		   ~sh_link: (Some strndx));
 
 		(* .strtab *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
-		   ~shname_string_fixup: (Some strtab_section_name_fixup)
+		   ~shname_string_fixup: strtab_section_name_fixup
 		   ~sh_type: SHT_STRTAB
 		   ~sh_flags: []
 		   ~section_fixup: (Some strtab_section_fixup)
 		   ~sh_addralign: 1L
-		   ~sh_entsize: 0L);
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
 	  |]
   in
 
@@ -465,25 +486,140 @@ let elf32_x86_file
 	  |]
   in
 
+  let elf_header = 
+	elf32_header 
+	  ~ei_data: ELFDATA2LSB
+	  ~e_type: ET_EXEC
+	  ~e_machine: EM_386
+	  ~e_version: EV_CURRENT
+	  
+	  ~e_entry_fixup: e_entry_fixup
+	  ~e_phoff_fixup: program_header_table_fixup
+	  ~e_shoff_fixup: section_header_table_fixup
+	  ~e_phnum: n_phdrs
+	  ~e_shnum: n_shdrs
+	  ~e_shstrndx: shstrndx
+  in	
+
+  let data_sym name st_bind fixup =
+	let name_fixup = new_fixup "data symbol name fixup" in
+	let strtab_entry = DEF (name_fixup, ZSTRING name) in
+	let symtab_entry =
+	  symbol 
+		~string_table_fixup: strtab_section_fixup
+		~name_string_fixup: name_fixup
+		~sym_target_fixup: fixup
+		~st_bind: st_bind
+		~st_type: STT_OBJECT
+		~st_shndx: datandx
+	in
+	  (strtab_entry, symtab_entry)
+  in
+    
+  let rodata_sym name st_bind fixup =
+	let name_fixup = new_fixup "rodata symbol name fixup" in
+	let strtab_entry = DEF (name_fixup, ZSTRING name) in
+	let symtab_entry =
+	  symbol 
+		~string_table_fixup: strtab_section_fixup
+		~name_string_fixup: name_fixup
+		~sym_target_fixup: fixup
+		~st_bind: st_bind
+		~st_type: STT_OBJECT
+		~st_shndx: rodatandx
+	in
+	  (strtab_entry, symtab_entry)
+  in
+
+  let func_sym name st_bind fixup =
+	let name_fixup = new_fixup "func symbol name fixup" in
+	let strtab_entry = DEF (name_fixup, ZSTRING name) in
+	let symtab_entry =
+	  symbol 
+		~string_table_fixup: strtab_section_fixup
+		~name_string_fixup: name_fixup
+		~sym_target_fixup: fixup
+		~st_bind: st_bind
+		~st_type: STT_FUNC
+		~st_shndx: textndx
+	in
+	  (strtab_entry, symtab_entry)
+  in
+
+  (* Juicy bits from the caller. *)
+  let text_section = 
+	DEF (text_section_fixup, 
+		 SEQ [| STRING "[some text]" |])
+  in
+  let rodata_section = 
+	DEF (rodata_section_fixup,
+		 SEQ [| STRING "[some rodata]"|])
+  in
+  let data_section = 
+	DEF (data_section_fixup,
+		 SEQ [| STRING "[some data]" |])
+  in
+  let bss_section = 
+	DEF (bss_section_fixup,
+		 SEQ [| |])
+  in
+  let symtab_section = 
+	DEF (symtab_section_fixup,
+		 SEQ [| |])
+  in
+  let strtab_section = 
+	DEF (strtab_section_fixup,
+		 SEQ [| |])
+  in
+	
 	SEQ 
 	  [| 
-		elf32_header 
-		  ~ei_data: ELFDATA2LSB
-		  ~e_type: ET_EXEC
-		  ~e_machine: EM_386
-		  ~e_version: EV_CURRENT
-		  
-		  ~e_entry_fixup: e_entry_fixup
-		  ~e_phoff_fixup: program_header_table_fixup
-		  ~e_shoff_fixup: section_header_table_fixup
-		  ~e_phnum: n_phdrs
-		  ~e_shnum: n_shdrs
-		  ~e_shstrndx: shstrndx;
-		program_header_table;
-		(* ... *)
-		section_header_table;
-	|]
+		DEF 
+		  (segment_0_fixup, 
+		   SEQ 
+			 [| 
+			   elf_header;
+			   DEF (program_header_table_fixup,
+					program_header_table);
+			 |]);
+		DEF 
+		  (segment_1_fixup, 
+		   SEQ 
+			 [| 
+			   text_section;
+			   rodata_section;		   
+			 |]);
+		DEF 
+		  (segment_2_fixup, 
+		   SEQ 
+			 [| 
+			   data_section;
+			   bss_section;
+			 |]);
+		DEF (shstrtab_section_fixup,
+			 shstrtab_section);
+		DEF (symtab_section_fixup,
+			 symtab_section);
+		DEF (strtab_section_fixup,
+			 strtab_section);
+		DEF (section_header_table_fixup,
+			 section_header_table);
+	  |]
 ;;
+
+let emit_testfile outfile = 
+  let entry_fixup = new_fixup "entry fixup" in
+  let all_items = 
+	DEF (entry_fixup, 
+		 elf32_x86_file entry_fixup) 
+  in
+  let buf = Buffer.create 16 in
+  let out = open_out_bin outfile in
+	resolve_fixups all_items;
+	lower_item ~lsb0: true ~buf: buf ~it: all_items;
+	Buffer.output_buffer out buf;
+	flush out;
+	close_out out
 
 (* 
 

@@ -10,5 +10,6 @@ let _ =
 	   Semant.resolve_mod_items Semant.root_ctxt crate_items;
 	 with 
 		 Semant.Semant_err (_, str) -> Printf.printf "semantic error: %s\n" str);	  
-	Pe.emit_testfile "rust_out.exe";
+	(* Pe.emit_testfile "rust_out.exe"; *)
+	Elf.emit_testfile "rust_out";
 ;;
