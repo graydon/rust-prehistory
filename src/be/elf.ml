@@ -309,7 +309,10 @@ let symbol
 ;;
 
 let elf32_x86_file 
-	~(e_entry_fixup:fixup)
+	~(entry_name:string)
+	~(text_items:(string, item) Hashtbl.t)
+	~(data_items:(string, item) Hashtbl.t)
+	~(rodata_items:(string, item) Hashtbl.t)
 	: item = 
 
   (* There are 8 official section headers in the file we're making:   *)
@@ -486,6 +489,8 @@ let elf32_x86_file
 	  |]
   in
 
+  let e_entry_fixup = new_fixup "entry symbol" in
+
   let elf_header = 
 	elf32_header 
 	  ~ei_data: ELFDATA2LSB
@@ -531,10 +536,10 @@ let elf32_x86_file
 	  (strtab_entry, symtab_entry)
   in
 
-  let func_sym name st_bind fixup =
-	let name_fixup = new_fixup "func symbol name fixup" in
-	let strtab_entry = DEF (name_fixup, ZSTRING name) in
-	let symtab_entry =
+  let text_sym name st_bind fixup =
+	let name_fixup = new_fixup "text symbol name fixup" in
+	let strtab_item = DEF (name_fixup, ZSTRING name) in
+	let symtab_item =
 	  symbol 
 		~string_table_fixup: strtab_section_fixup
 		~name_string_fixup: name_fixup
@@ -543,21 +548,63 @@ let elf32_x86_file
 		~st_type: STT_FUNC
 		~st_shndx: textndx
 	in
-	  (strtab_entry, symtab_entry)
+	  (strtab_item, symtab_item)
+  in
+
+  let items_of_symbol sym_emitter st_bind symname symbody x = 
+	let (strtab_items, symtab_items, body_items) = x in
+	let body_fixup = new_fixup "symbol body fixup" in
+	let body_item = 
+	  if symname = entry_name
+	  then DEF (e_entry_fixup, DEF (body_fixup, symbody))
+	  else DEF (body_fixup, symbody) 
+	in
+	let (strtab_item, symtab_item) = sym_emitter symname st_bind body_fixup in
+	  ((strtab_item :: strtab_items),
+	   (symtab_item :: symtab_items),
+	   (body_item :: body_items))
+  in
+
+  let (text_strtab_items, 
+	   text_symtab_items,
+	   text_body_items) = 
+	Hashtbl.fold (items_of_symbol text_sym STB_GLOBAL) text_items ([],[],[])
+  in
+
+  let (rodata_strtab_items, 
+	   rodata_symtab_items,
+	   rodata_body_items) = 
+	Hashtbl.fold (items_of_symbol rodata_sym STB_GLOBAL) rodata_items ([],[],[])
+  in
+
+  let (data_strtab_items, 
+	   data_symtab_items,
+	   data_body_items) = 
+	Hashtbl.fold (items_of_symbol data_sym STB_GLOBAL) data_items ([],[],[])
+  in
+
+  let symtab_items = (text_symtab_items @ 
+						rodata_symtab_items @
+						data_symtab_items) 
+  in
+
+  let strtab_items = (text_strtab_items @ 
+						rodata_strtab_items @
+						data_strtab_items) 
   in
 
   (* Juicy bits from the caller. *)
   let text_section = 
 	DEF (text_section_fixup, 
-		 SEQ [| STRING "[some text]" |])
+		 SEQ (Array.of_list text_body_items))
   in
   let rodata_section = 
 	DEF (rodata_section_fixup,
-		 SEQ [| STRING "[some rodata]"|])
+		 SEQ (Array.of_list rodata_body_items))
   in
   let data_section = 
 	DEF (data_section_fixup,
-		 SEQ [| STRING "[some data]" |])
+		 SEQ (Array.of_list data_body_items))
   in
   let bss_section = 
 	DEF (bss_section_fixup,
@@ -565,15 +612,18 @@ let elf32_x86_file
   in
   let symtab_section = 
 	DEF (symtab_section_fixup,
-		 SEQ [| |])
+		 SEQ (Array.of_list symtab_items))
   in
   let strtab_section = 
 	DEF (strtab_section_fixup,
-		 SEQ [| |])
+		 SEQ (Array.of_list strtab_items))
   in
+
+  let load_address = 0x0804_8000L in
 	
 	SEQ 
-	  [| 
+	  [|
+		MEMPOS load_address;
 		DEF 
 		  (segment_0_fixup, 
 		   SEQ 
@@ -608,10 +658,18 @@ let elf32_x86_file
 ;;
 
 let emit_testfile outfile = 
-  let entry_fixup = new_fixup "entry fixup" in
+  let text_items = Hashtbl.create 4 in
+  let rodata_items = Hashtbl.create 4 in
+  let data_items = Hashtbl.create 4 in
+  let _ = 
+	Hashtbl.add text_items "entryfn" (STRING "x86 code here")
+  in
   let all_items = 
-	DEF (entry_fixup, 
-		 elf32_x86_file entry_fixup) 
+	elf32_x86_file 
+	  ~entry_name: "entryfn"
+	  ~text_items: text_items
+	  ~data_items: data_items
+	  ~rodata_items: rodata_items
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin outfile in
