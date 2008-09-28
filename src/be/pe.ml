@@ -562,7 +562,7 @@ let pe_text_section
 	  exit_fn_imm = Il.Imm (ADD ((IMM pe_image_base),
 								 (M_POS exit_fn_fixup)))
   in
-	Il.emit_triple emit None Il.MOV (Il.HWreg 2) (Il.Deref (exit_fn_imm, 0L));
+	Il.emit_triple emit None (Il.MOV Il.DATA32) (Il.HWreg 2) (Il.Deref (exit_fn_imm, 0L));
 	Il.emit_triple emit None Il.CCALL (Il.HWreg 2) (Il.Imm (IMM 7L));
 	def_aligned
 	  text_fixup

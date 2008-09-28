@@ -113,21 +113,37 @@ let slash7 = 7;;
  * See "Table 2-2: 32-Bit Addressing Forms with the ModR/M Byte", in the IA32
  * Architecture Software Developer's Manual, volume 2a.  *)
 
-let eax = 0b000;;
-let ecx = 0b001;;
-let edx = 0b010;;
-let ebx = 0b011;;
-let ebp = 0b101;;
-let esi = 0b110;;
-let edi = 0b111;;
+let n_hardregs = 5
+
+let eax = 0
+let ecx = 1
+let ebx = 2
+let esi = 3
+let edi = 4
+let edx = 5
+let ebp = 6
+let esp = 7
+
+let code_eax = 0b000;;
+let code_ecx = 0b001;;
+let code_edx = 0b010;;
+let code_ebx = 0b011;;
+let code_esp = 0b100;;
+let code_ebp = 0b101;;
+let code_esi = 0b110;;
+let code_edi = 0b111;;
 
 let reg r = 
   match r with 
-	  0 -> eax
-	| 1 -> ecx
-	| 2 -> ebx
-	| 3 -> esi
-	| 4 -> edi
+	  0 -> code_eax
+	| 1 -> code_ecx
+	| 2 -> code_ebx
+	| 3 -> code_esi
+	| 4 -> code_edi
+		(* Never assigned by the register allocator, but synthetic code uses them *)
+	| 5 -> code_edx
+	| 6 -> code_ebp
+	| 7 -> code_esp
 	| _ -> raise (Invalid_argument "X86.reg")
 ;;
 
@@ -160,25 +176,25 @@ let select_insn t =
 		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash6 |]
 	| (Il.UMOD, Il.HWreg 0, Il.HWreg src) -> 
 		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash6;
-					 0x89; modrm_reg eax edx; |]
+					 0x89; modrm_reg (reg eax) (reg edx); |]
 	| (Il.IDIV, Il.HWreg 0, Il.HWreg src) -> 
 		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash7 |]
 	| (Il.IMOD, Il.HWreg 0, Il.HWreg src) -> 
 		Asm.BYTES [| 0xF7; modrm_reg (reg src) slash7;
-					 0x89; modrm_reg eax edx; |]
+					 0x89; modrm_reg (reg eax) (reg edx); |]
 		  
-	| (Il.MOV, Il.HWreg dst, Il.Imm imm) -> 
+	| ((Il.MOV Il.DATA32), Il.HWreg dst, Il.Imm imm) -> 
 		Asm.SEQ [| Asm.BYTES [| 0xB8 + (reg dst) |];
 				   Asm.WORD32 imm |]
 
-	| (Il.MOV, Il.HWreg dst, Il.Deref ((Il.Imm imm), disp)) -> 
+	| ((Il.MOV Il.DATA32), Il.HWreg dst, Il.Deref ((Il.Imm imm), disp)) -> 
 		Asm.SEQ [| Asm.BYTES [| 0x8B; modrm_deref_disp32 (reg dst) |];
 				   Asm.WORD32 (Asm.ADD ((Asm.IMM disp),imm)) |]
 
-	| (Il.MOV, Il.HWreg dst, Il.HWreg src) -> 
+	| ((Il.MOV Il.DATA32), Il.HWreg dst, Il.HWreg src) -> 
 		Asm.BYTES [| 0x89; modrm_reg (reg dst) (reg src); |]
 
-	| (Il.MOV, Il.HWreg dst, (Il.Deref ((Il.HWreg src), disp))) -> 
+	| ((Il.MOV Il.DATA32), Il.HWreg dst, (Il.Deref ((Il.HWreg src), disp))) -> 
 		if disp = 0L
 		then Asm.BYTES [| 0x8B; modrm_deref_reg (reg dst) (reg src); |]
 		else 
@@ -196,14 +212,35 @@ let select_insn t =
 			else
 			  raise (Invalid_argument "X86.select_insn: displacement overflow")
 
-	| (Il.CCALL, Il.HWreg r, Il.Imm arg) -> 
-		Asm.SEQ [|
-		  Asm.BYTES [| 0x68; |]; Asm.WORD32 arg; (* push arg *)
-		  Asm.BYTES [| 0xff; modrm_reg (reg r) slash2 |] (* call *r *)
-		|]
+	| (Il.CCALL, Il.HWreg r, Il.Nil) -> 
+		Asm.BYTES [| 0xff; modrm_reg (reg r) slash2 |]
+
+	| (Il.CCALL, Il.Pcrel f, Il.Nil) -> 
+		let pcrel_mark_fixup = Asm.new_fixup "ccall-pcrel mark fixup" in 
+		  Asm.SEQ [| Asm.BYTES [| 0xe8; |];
+					 (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
+										   Asm.M_POS pcrel_mark_fixup)));
+					 Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+		  
+	| (Il.CPUSH Il.DATA32, Il.HWreg r, Il.Nil) -> 		
+		Asm.BYTES [| 0xff; modrm_reg (reg r) slash6 |]
+
+	| (Il.CPUSH Il.DATA8, Il.Imm e, Il.Nil) -> 
+		Asm.SEQ [| Asm.BYTES [| 0x6a; |];
+				   Asm.WORD8 e |]
+
 
 	| (Il.JMP, Il.HWreg dst, Il.Nil) -> 
 		Asm.BYTES [| 0xff; modrm_reg (reg dst) slash4 |]
+		  
+	| (Il.JMP, Il.Pcrel f, Il.Nil) -> 
+		(* FIXME: relaxations! *)
+		let pcrel_mark_fixup = Asm.new_fixup "jmp-pcrel mark fixup" in 
+		  Asm.SEQ [| Asm.BYTES [| 0xe9; |];
+					 (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
+										   Asm.M_POS pcrel_mark_fixup)));
+					 Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+			
 
 	| (Il.BNOT, Il.HWreg dst, Il.Nil) -> 
 		Asm.BYTES [| 0xF7; modrm_reg (reg dst) slash2 |]

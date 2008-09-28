@@ -15,9 +15,13 @@ type slot = Vreg of int
 			| PP (* Process pointer *)
 			| Local of int
 			| Imm of Asm.expr64
+			| Pcrel of Asm.fixup
 			| Deref of (slot * int64)
 			| Nil
 			| Label of label
+;;
+
+type datasz = DATA8 | DATA16 | DATA32 | DATA64 
 ;;
 
 type op = 
@@ -25,13 +29,14 @@ type op =
   | IMUL | UMUL
   | IDIV | UDIV
   | IMOD | UMOD
-  | MOV 
+  | MOV of datasz 
   | LAND | LOR | LNOT 
   | BAND | BOR | BXOR | BNOT 
   | LSL | LSR | ASR
   | JNZ | JZ | JC | JNC | JO | JNO | JMP 
-  | CALL | RET | YIELD | RESUME | CCALL 
+  | CALL | RET | YIELD | RESUME 
   | NOP 
+  | CCALL | CPUSH of datasz | CPOP of datasz
   | END
 ;;
 
@@ -53,9 +58,19 @@ let rec fmt_slot out slot =
 	| PP -> Printf.fprintf out "PP"
     | Local i -> Printf.fprintf out "local:%d" i
     | Imm i -> Printf.fprintf out "imm:??" 
+	| Pcrel f -> Printf.fprintf out "pcrel:(%s)" f.Asm.fixup_name 
     | Deref (s,i) -> Printf.fprintf out "*(%a + %s)" fmt_slot s (Int64.to_string i)
     | Label i -> Printf.fprintf out "label:%d" i
     | Nil -> ()
+;;
+
+
+let fmt_datasz d = 
+  match d with 
+	  DATA8 -> "DATA8"
+	| DATA16 -> "DATA16"
+	| DATA32 -> "DATA32"
+	| DATA64 -> "DATA64"
 ;;
 
 let fmt_op out op = 
@@ -70,7 +85,7 @@ let fmt_op out op =
        | IDIV -> "IDIV"
        | UMOD -> "UMOD"
        | IMOD -> "IMOD"
-       | MOV -> "MOV"
+       | MOV d -> "MOV" ^ (fmt_datasz d)
        | LAND -> "LAND"
        | LOR -> "LOR"
        | LNOT -> "LNOT"
@@ -92,10 +107,13 @@ let fmt_op out op =
        | RET -> "RET"
        | NOP -> "NOP"
 	   | CCALL -> "CCALL"
+	   | CPUSH d -> "CPUSH" ^ (fmt_datasz d)
+	   | CPOP d -> "CPOP" ^ (fmt_datasz d)
 	   | RESUME -> "RESUME"
 	   | YIELD -> "YIELD"
        | END -> "---")
-  
+;;
+
 
 let fmt_lab out l = 
   match l with 
