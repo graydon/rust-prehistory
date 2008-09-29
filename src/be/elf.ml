@@ -11,7 +11,7 @@ let elf32_ehsize = 52L;;
 let elf32_phentsize = 32L;;
 let elf32_shentsize = 40L;;
 let elf32_symsize = 16L;;
-
+let elf32_rela_entsz = 8L;;
 
 type ei_class = 
 	ELFCLASSNONE 
@@ -425,30 +425,33 @@ let elf32_linux_x86_file
    *     essentially exit(main(argc,argv)).
    *)
 
+  let x86_items_of_emitted_triples e = 
+	(SEQ (Array.map X86.select_insn e.Il.emit_triples))
+  in
+
   let synthetic_start_fn = 
 	let init_fixup = new_fixup "_init function entry" in
 	let fini_fixup = new_fixup "_fini function entry" in
 	let main_fixup = new_fixup "main function entry" in
 	let libc_start_main_plt_fixup = new_fixup "__libc_start_main@plt stub" in
 	let e = Il.new_emitter X86.n_hardregs in
-	let emit = Il.emit_triple e None in
-	  emit (Il.CPUSH Il.DATA32) (Il.HWreg X86.eax) Il.Nil;
-	  emit (Il.CPUSH Il.DATA32) (Il.HWreg X86.esp) Il.Nil;
-	  emit (Il.CPUSH Il.DATA32) (Il.HWreg X86.edx) Il.Nil;
-	  emit (Il.CPUSH Il.DATA32) (Il.Imm (M_POS fini_fixup)) Il.Nil;
-	  emit (Il.CPUSH Il.DATA32) (Il.Imm (M_POS init_fixup)) Il.Nil;
-	  emit (Il.CPUSH Il.DATA32) (Il.HWreg X86.ecx) Il.Nil;
-	  emit (Il.CPUSH Il.DATA32) (Il.HWreg X86.esi) Il.Nil;
-	  emit (Il.CPUSH Il.DATA32) (Il.Imm (M_POS main_fixup)) Il.Nil;
-	  emit Il.CCALL (Il.Imm (M_POS libc_start_main_plt_fixup)) Il.Nil;
-	  (SEQ (Array.map X86.select_insn e.Il.emit_triples))
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.eax) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.esp) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.edx) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS fini_fixup)) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS init_fixup)) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.ecx) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.esi) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS main_fixup)) Il.Nil;
+	  Il.emit e Il.CCALL (Il.Imm (M_POS libc_start_main_plt_fixup)) Il.Nil;
+	  x86_items_of_emitted_triples e
   in
 
   (* And now, Procedure Linkage Tables (PLTs) and Global Offset Tables
    * (GOTs). The PLT goes in a section called .plt and GOT in a section
    * called .got. The portion of the GOT that holds PLT jump slots goes
-   * in a section called .got.plt. Dynamic relocations for the former
-   * go in section .rela.plt and for the latter in .rela.got.
+   * in a section called .got.plt. Dynamic relocations for these jump slots
+   * go in section .rela.plt.
    * 
    * The easiest way to understand the PLT/GOT system is to draw it:
    * 
@@ -480,27 +483,54 @@ let elf32_linux_x86_file
    * fill them in with "jump slot relocs", type R_386_JUMP_SLOT, each
    * of which says in effect which PLT entry it's to point back to and
    * which symbol it's to be resolved to later. These relocs go in the 
-   * section .rel.got.
+   * section .rela.plt.
    *)
 
-(*
   let (plt_items, got_items, got_reloc_items) = 
+	let plt0_fixup = new_fixup "PLT[0]" in
+	let got1_fixup = new_fixup "GOT[1]" in
+	let got2_fixup = new_fixup "GOT[2]" in	  
+	let got_prefix = SEQ [| WORD32 (IMM 0L); 
+							DEF (got1_fixup, WORD32 (IMM 0L)); 
+							DEF (got2_fixup, WORD32 (IMM 0L)); |] 
+	in
+	let plt0_item = 
+	  let e = Il.new_emitter X86.n_hardregs in
+		Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS got1_fixup)) Il.Nil;
+		Il.emit e Il.JMP (Il.Pcrel got2_fixup) Il.Nil;
+		Il.emit e Il.NOP Il.Nil Il.Nil;
+		Il.emit e Il.NOP Il.Nil Il.Nil;
+		Il.emit e Il.NOP Il.Nil Il.Nil;
+		Il.emit e Il.NOP Il.Nil Il.Nil;
+		x86_items_of_emitted_triples e
+	in
 	let form_item_triple i = 
 	  let e = Il.new_emitter X86.n_hardregs in 
-	  let emit = Il.emit_triple e None in 
 	  let jump_slot_fixup = new_fixup ("jump slot #" ^ string_of_int i) in
-		emit Il.JMP (Il.Imm (M_PO
-	  let plt_item = 
+	  let jump_slot_initial_target_fixup = 
+		new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
+ 	  let plt_item = 
+		Il.emit e Il.JMP (Il.Pcrel jump_slot_fixup) Il.Nil;
+		Il.emit_full e (Some jump_slot_initial_target_fixup)
+		  (Il.CPUSH Il.DATA32) (Il.Imm (IMM (Int64.of_int i))) Il.Nil;
+		Il.emit e Il.JMP (Il.Pcrel plt0_fixup) Il.Nil;
+		x86_items_of_emitted_triples e
+	  in
+	  let got_item = WORD32 (M_POS jump_slot_fixup) in 
+		0
+	in
+	  (0,0,0)
+  in
+(*	  in
 *)
-	
-	
+
   (* 
    * The existence of the GOT/PLT mish-mash causes, therefore, the
    * following new sections:
    * 
    *   .plt       - the PLT itself, in the r/x text segment
    *   .got.plt   - the PLT-used portion of the GOT, in the r/w segment
-   *   .rela.got  - the dynamic relocs for the GOT, in the r/x segment
+   *   .rela.plt  - the dynamic relocs for the GOT-PLT, in the r/x segment
    * 
    * In addition, because we're starting up a dynamically linked executable,
    * we have to have several more sections!
@@ -530,7 +560,7 @@ let elf32_linux_x86_file
   (* section 3:  .rodata                   ...                        *)
   (* section 4:  .dynsym                   ...                        *)
   (* section 5:  .dynstr                   ...                        *)
-  (* section 6:  .rela.dyn                 ...                        *)
+  (* section 6:  .rela.plt                 ...                        *)
   (*                                                                  *)
   (* section 7:  .data              (segment 3: R+W, LOAD)            *)
   (* section 8:  .bss                      ...                        *)
@@ -545,7 +575,7 @@ let elf32_linux_x86_file
   let rodata_section_name_fixup = new_fixup "string name of '.rodata' section" in
   let dynsym_section_name_fixup = new_fixup "string name of '.dynsym' section" in
   let dynstr_section_name_fixup = new_fixup "string name of '.dynstr' section" in
-  let rela_dyn_section_name_fixup = new_fixup "string name of '.rela.dyn' section" in
+  let rela_plt_section_name_fixup = new_fixup "string name of '.rela.plt' section" in
   let data_section_name_fixup = new_fixup "string name of '.data' section" in
   let bss_section_name_fixup = new_fixup "string name of '.bss' section" in
   let dynamic_section_name_fixup = new_fixup "string name of '.dynamic' section" in
@@ -557,7 +587,7 @@ let elf32_linux_x86_file
   let rodatandx      = 3L in  (* Section index of .rodata *)
   let dynsymndx      = 4L in  (* Section index of .dynsym *)
   let dynstrndx      = 5L in  (* Section index of .dynstr *)
-  let reladynndx     = 6L in  (* Section index of .rela.dyn *)
+  let relapltndx     = 6L in  (* Section index of .rela.dyn *)
   let datandx        = 7L in  (* Section index of .data *)
   let bssndx         = 8L in  (* Section index of .bss *)
   let dynamicndx     = 9L in  (* Section index of .dynamic *)
@@ -569,7 +599,7 @@ let elf32_linux_x86_file
   let rodata_section_fixup = new_fixup ".rodata section" in
   let dynsym_section_fixup = new_fixup ".dynsym section" in
   let dynstr_section_fixup = new_fixup ".dynstr section" in
-  let rela_dyn_section_fixup = new_fixup ".rela.dyn section" in
+  let rela_plt_section_fixup = new_fixup ".rela.plt section" in
   let data_section_fixup = new_fixup ".data section" in
   let bss_section_fixup = new_fixup ".bss section" in
   let dynamic_section_fixup = new_fixup ".dynamic section" in
@@ -584,7 +614,7 @@ let elf32_linux_x86_file
 		DEF(rodata_section_name_fixup, ZSTRING ".rodata");
 		DEF(dynsym_section_name_fixup, ZSTRING ".dynsym");
 		DEF(dynstr_section_name_fixup, ZSTRING ".dynstr");
-		DEF(rela_dyn_section_name_fixup, ZSTRING ".rela.dyn");
+		DEF(rela_plt_section_name_fixup, ZSTRING ".rela.plt");
 		DEF(data_section_name_fixup, ZSTRING ".data");
 		DEF(bss_section_name_fixup, ZSTRING ".bss");
 		DEF(dynamic_section_name_fixup, ZSTRING ".dynamic");
@@ -660,6 +690,17 @@ let elf32_linux_x86_file
 		   ~sh_addralign: 1L
 		   ~sh_entsize: 0L
 		   ~sh_link: None);
+
+		(* .rela.plt *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: rela_plt_section_name_fixup
+		   ~sh_type: SHT_RELA
+		   ~sh_flags: [ SHF_ALLOC ]
+		   ~section_fixup: (Some rela_plt_section_fixup)
+		   ~sh_addralign: 4L
+		   ~sh_entsize: elf32_rela_entsz
+		   ~sh_link: (Some dynsymndx));
 
 		(* .data *)
 		(section_header 
@@ -917,7 +958,7 @@ let emit_testfile outfile =
   let rodata_item = DEF (rodata_fixup, (STRING str)) in
   let emitter = Il.new_emitter X86.n_hardregs in
   let text_item = 
-	Il.emit_triple emitter None (Il.MOV Il.DATA32) (Il.HWreg X86.eax) (Il.Imm (F_SZ rodata_fixup));
+	Il.emit emitter (Il.MOV Il.DATA32) (Il.HWreg X86.eax) (Il.Imm (F_SZ rodata_fixup));
 	(SEQ (Array.map X86.select_insn emitter.Il.emit_triples))
   in	
   let _ = 
@@ -938,454 +979,3 @@ let emit_testfile outfile =
 	Buffer.output_buffer out buf;
 	flush out;
 	close_out out
-
-(* 
-
-let write_elf_header_at (b:buf) (pos:int) (lim:int) (eh:elf_header) =
-  let p = ref pos in 
-  let wbs bs = (p := write_bytes b !p lim bs) in
-  let wh h = wbs (int_to_u16_lsb0 h) in
-  let ww w = wbs (int32_lsb0 w) in
-  wbs eh.e_ident;
-  wh eh.e_type;
-  wh eh.e_machine;
-  ww eh.e_version;
-  ww eh.e_entry;
-  ww eh.e_phoff;
-  ww eh.e_shoff;
-  ww eh.e_flags;
-  wh eh.e_ehsize;
-  wh eh.e_phentsize;
-  wh eh.e_phnum;
-  wh eh.e_shentsize;
-  wh eh.e_shnum;
-  wh eh.e_shstrndx;
-  !p
-;;
-
-let write_section_header_at (b:buf) (pos:int) (lim:int) (sh:section_header) =
-  let p = ref pos in 
-  let wbs bs = (p := write_bytes b !p lim bs) in
-  let ww w = wbs (int32_lsb0 w) in
-  List.iter ww 
-    [ sh.sh_name; sh.sh_type; sh.sh_flags; sh.sh_addr; 
-      sh.sh_offset; sh.sh_size; sh.sh_link; sh.sh_info; 
-      sh.sh_addralign; sh.sh_entsize; ];
-  !p
-;;
-
-let write_program_header_at (b:buf) (pos:int) (lim:int) (ph:program_header) =
-  let p = ref pos in 
-  let wbs bs = (p := write_bytes b !p lim bs) in
-  let ww w = wbs (int32_lsb0 w) in
-  List.iter ww 
-    [ ph.p_type; ph.p_offset; ph.p_vaddr; ph.p_paddr; 
-      ph.p_filesz; ph.p_memsz; ph.p_flags; ph.p_align ];
-  !p
-;;
-
-let write_sym_at (b:buf) (pos:int) (lim:int) (s:symbol) =
-  let p = ref pos in 
-  let wbs bs = (p := write_bytes b !p lim bs) in
-  let wh h = wbs (int_to_u16_lsb0 h) in
-  let wb b = wbs (int_to_u8 b) in
-  let ww w = wbs (int32_lsb0 w) in
-    ww s.st_name;
-    ww s.st_value;
-    ww s.st_size;
-    wb s.st_info;
-    wb s.st_other;
-    wh s.st_shndx;
-    !p
-;;
- 
-
-
-
-
-let mk_basic_sym ~name ~value ~size ~ty ~bind ~shndx =
-    {
-      st_name = name;
-      st_value = value;
-      st_size = size;
-      st_info = ((bind lsl 4) lor (ty land 0xf));
-      st_other = 0;
-      st_shndx = shndx
-    }
-
-
-type fixup = FIXUP_VMA | FIXUP_SIZE;;
-
-type basic_elf_file = 
-    { 
-      file_buf: buf;
-      file_ehdr: elf_header;
-      
-      file_shdr_null: section_header;
-      file_shdr_text: section_header;
-      file_shdr_rodata: section_header;
-      file_shdr_data: section_header;
-      file_shdr_bss: section_header;
-      file_shdr_shstrtab: section_header;
-      file_shdr_symtab: section_header;
-      file_shdr_strtab: section_header;
-      
-      file_phdr_phdr: program_header;
-      file_phdr_re_load: program_header;
-      file_phdr_rw_load: program_header;
-
-      (* Symbol table management *)
-      file_syms: (string, (int * int * int * int)) Hashtbl.t;
-      file_fixups: (int * fixup * string) Stack.t;
-      add_data_sym: (string -> int -> int -> unit);
-      add_rodata_sym: (string -> int -> int -> unit);
-      add_func_sym: (string -> int -> int -> unit);
-      add_vma_fixup: (int -> string -> unit);
-      add_size_fixup: (int -> string -> unit);
-    }
-;;
-
-
-let mk_basic_x86_elf_file fn = 
-  (* As this is just a boostrap system, we adopt an incredibly cheesy *)
-  (* fixed-sizes-for-everything layout, and fault if they're overrun. *)
-  (* The file is < 4mb long:                                          *)
-  (*      4kb for eh and phdrs, before the main sections              *)
-  (*      1mb for the .text section                                   *)
-  (*      1mb for the .data section                                   *)
-  (*      1mb for the .rodata section                                 *)
-  (*      4kb for the .shstrtab sectin                                *)
-  (*      4kb for the .symtab section                                 *)
-  (*    512kb for the .strtab section                                 *)
-  (*      4kb for shdrs at end of file                                *)
-  (*                                                                  *)
-  (* Note that since all these are big round numbers, we don't do     *)
-  (* any explicit alignment padding on the section boundaries. If     *)
-  (* you were to improve this to be dense you would have to do so.    *)
-  
-  let load_base      = 0x0804_8000l in
-  let eh_phdr_size   = 0x0000_1000l in
-  let text_size      = 0x0010_0000l in
-  let rodata_size    = 0x0010_0000l in
-  let data_size      = 0x0010_0000l in
-  let bss_size       = 0x0010_0000l in (* NOBITS, not "in" the file *)
-  let shstrtab_size  = 0x0000_1000l in
-  let symtab_size    = 0x0000_1000l in
-  let strtab_size    = 0x0008_0000l in
-  let shdr_size      = 0x0000_1000l in
-  
-  (* There are 8 official section headers in the file we're making:   *)
-  (* section 0: <null section>                                        *)
-  (* section 1: .text                                                 *)
-  (* section 2: .rodata                                               *)
-  (* section 3: .data                                                 *)
-  (* section 4: .bss                                                  *)
-  (* section 5: .shstrtab                                             *)
-  (* section 6: .symtab                                               *)
-  (* section 7: .strtab                                               *)
-
-  let n_shdrs        = 8 in
-  let textndx        = 1 in  (* Section index of .text *)
-  let rodatandx      = 2 in  (* Section index of .rodata *)
-  let datandx        = 3 in  (* Section index of .data *)
-  let shstrndx       = 5 in  (* Section index of .shstrtab *)
-  let strndx         = 7 in  (* Section index of .strtab *)
-
-  let text_off       = eh_phdr_size in
-  let rodata_off     = Int32.add text_off text_size in
-  let data_off       = Int32.add rodata_off rodata_size in
-  (* NB: bss is NOBITS so it's normal to "overlap" with shstrtab *)
-  let bss_off        = Int32.add data_off data_size in
-  let shstrtab_off   = Int32.add data_off data_size in
-  let symtab_off     = Int32.add shstrtab_off shstrtab_size in
-  let strtab_off     = Int32.add symtab_off symtab_size in
-  let shdr_off       = Int32.add strtab_off strtab_size in
-  
-  let text_addr      = Int32.add load_base text_off in
-  let rodata_addr    = Int32.add load_base rodata_off in
-  let data_addr      = Int32.add load_base data_off in
-  let bss_addr       = Int32.add load_base bss_off in
-  
-  let file_size      = Int32.add shdr_off shdr_size in
-
-  (* There are 3 official program headers in the file we're making:   *)
-  (* segment 0: PHDR                                                  *)
-  (* segment 1: RE / LOAD                                             *)
-  (* segment 2: RW / LOAD                                             *)
-
-  let n_phdrs        = 3 in
-  let phdr_off       = Int32.of_int ehsize in 
-  let phdr_size      = (Int32.mul 
-			  (Int32.of_int n_phdrs) 
-			  (Int32.of_int phentsize))
-  in
-  let phdr_addr      = Int32.add load_base phdr_off in
-  let re_off         = 0l in
-  let re_size        = data_off in
-  let re_addr        = load_base in
-  let rw_off         = data_off in
-  let rw_file_size   = data_size in
-  let rw_mem_size    = Int32.add data_size bss_size in
-  let rw_addr        = Int32.add load_base re_size in
-
-  let symtab = Hashtbl.create 100 in
-  let fixups = Stack.create () in
-
-    { 
-      file_buf = openbuf fn (Int32.to_int file_size);
-      file_ehdr = (mk_basic_x86_ehdr 
-		     n_phdrs phdr_off 
-		     n_shdrs shdr_off
-		     shstrndx);
-      
-      file_shdr_null = (mk_basic_shdr 
-			  ~typ: sht_NULL ~flags: [] 
-			  ~align: 0l ~addr: 0l
-			  ~off: 0l ~sz: 0l);
-      
-      file_shdr_text = (mk_basic_shdr 
-			  ~typ: sht_PROGBITS 
-			  ~flags: [shf_ALLOC; shf_EXECINSTR]
-			  ~align: 32l ~addr: text_addr 
-			  ~off: text_off ~sz: text_size);
-      
-      file_shdr_rodata = (mk_basic_shdr 
-			    ~typ: sht_PROGBITS
-			    ~flags: [shf_ALLOC] 
-			    ~align: 32l ~addr: rodata_addr
-			    ~off: rodata_off ~sz: rodata_size);
-
-      file_shdr_data = (mk_basic_shdr 
-			  ~typ: sht_PROGBITS
-			  ~flags: [shf_ALLOC; shf_WRITE] 
-			  ~align: 32l ~addr: data_addr
-			  ~off: data_off ~sz: data_size);
-      
-      file_shdr_bss = (mk_basic_shdr 
-			 ~typ: sht_NOBITS
-			 ~flags: [shf_ALLOC; shf_WRITE] 
-			 ~align: 32l ~addr: bss_addr
-			 ~off: bss_off ~sz: bss_size);
-
-      file_shdr_shstrtab = (mk_basic_shdr 
-			      ~typ: sht_STRTAB
-			      ~flags: [] 
-			      ~align: 1l ~addr: 0l
-			      ~off: shstrtab_off ~sz: shstrtab_size);
-
-      file_shdr_symtab = (let 
-			      sh = (mk_basic_shdr 
-				      ~typ: sht_SYMTAB
-				      ~flags: [] 
-				      ~align: 4l ~addr: 0l
-				      ~off: symtab_off ~sz: symtab_size)
-			  in
-			    sh.sh_entsize <- Int32.of_int symsize;
-			    sh.sh_link <- Int32.of_int strndx;
-			    sh
-			 );
-      
-      file_shdr_strtab = (mk_basic_shdr 
-			    ~typ: sht_STRTAB
-			    ~flags: [] 
-			    ~align: 1l ~addr: 0l
-			    ~off: strtab_off ~sz: strtab_size);
-      
-      file_phdr_phdr = (mk_basic_phdr 
-			  ~typ: pt_PHDR ~flags: [pf_R; pf_X] ~align: 4l
-			  ~off: phdr_off ~addr: phdr_addr 
-			  ~filesz: phdr_size ~memsz: phdr_size);
-
-      file_phdr_re_load = (mk_basic_phdr 
-			     ~typ: pt_LOAD ~flags: [pf_R; pf_X] ~align: 0x1000l
-			     ~off: re_off ~addr: re_addr 
-			     ~filesz: re_size ~memsz: re_size);
-
-      file_phdr_rw_load = (mk_basic_phdr 
-			     ~typ: pt_LOAD ~flags: [pf_R; pf_W] ~align: 0x1000l
-			     ~off: rw_off ~addr: rw_addr 
-			     ~filesz: rw_file_size ~memsz: rw_mem_size);
-
-      file_syms = symtab;
-      file_fixups = fixups;
-
-      add_data_sym = (fun name vma size ->
-			Hashtbl.add symtab name (stt_OBJECT, datandx, vma, size));
-      
-      add_rodata_sym = (fun name vma size ->
-			  Hashtbl.add symtab name (stt_OBJECT, rodatandx, vma, size));
-      add_func_sym  = (fun name vma size ->
-			 Hashtbl.add symtab name (stt_FUNC, textndx, vma, size));
-      
-      add_vma_fixup = (fun off name -> Stack.push (off, FIXUP_VMA, name) fixups);
-      add_size_fixup = (fun off name -> Stack.push (off, FIXUP_SIZE, name) fixups);
-    }
-;;
-
-let write_basic_x86_elf_file f =
-  let write_section_names _ =
-    let pos0 = Int32.to_int f.file_shdr_shstrtab.sh_offset in
-    let setname pos (sh, name) = 
-      (sh.sh_name <- Int32.of_int (pos - pos0);
-       write_zstring f.file_buf pos (pos + shentsize) name)
-    in
-
-    List.fold_left 
-      setname pos0
-      [
-       (f.file_shdr_null,     "");
-       (f.file_shdr_text,     ".text");
-       (f.file_shdr_rodata,   ".rodata");
-       (f.file_shdr_data,     ".data");
-       (f.file_shdr_bss,      ".bss");
-       (f.file_shdr_shstrtab, ".shstrtab");
-       (f.file_shdr_symtab,   ".symtab");
-       (f.file_shdr_strtab,   ".strtab")
-     ]
-  in 
-  let ws pos sh = write_section_header_at f.file_buf pos (pos + shentsize) sh in
-  let wp pos ph = write_program_header_at f.file_buf pos (pos + phentsize) ph in
-
-  (* Write the section names and elf header. *)
-  let _ = write_section_names () in 
-  let _ = write_elf_header_at f.file_buf 0 f.file_ehdr.e_ehsize f.file_ehdr in  
-
-  (* Write the section headers. *)
-  let _ = List.fold_left ws (Int32.to_int f.file_ehdr.e_shoff)
-      [
-       f.file_shdr_null;
-       f.file_shdr_text;
-       f.file_shdr_rodata;
-       f.file_shdr_data;
-       f.file_shdr_bss;
-       f.file_shdr_shstrtab;
-       f.file_shdr_symtab;
-       f.file_shdr_strtab
-     ] 
-  in
-
-  (* Write the program headers. *)
-  let _ = List.fold_left wp (Int32.to_int f.file_ehdr.e_phoff)
-    [
-      f.file_phdr_phdr; 
-      f.file_phdr_re_load;
-      f.file_phdr_rw_load
-    ]
-  in
-
-  (* Write the symbol table. *)
-  let _ = 
-    let sym_pos = ref (Int32.to_int f.file_shdr_symtab.sh_offset) in
-    let str_pos0 = Int32.to_int f.file_shdr_strtab.sh_offset in 
-    let str_pos = ref str_pos0 in 
-    let sym_lim = (!sym_pos) + (Int32.to_int f.file_shdr_symtab.sh_size) in
-    let str_lim = (!str_pos) + (Int32.to_int f.file_shdr_strtab.sh_size) in
-
-    let wsym s = (sym_pos := write_sym_at f.file_buf (!sym_pos) sym_lim s) in
-    let wstr s = (str_pos := write_zstring f.file_buf (!str_pos) str_lim s) in
-    let 
-	null_sym = (mk_basic_sym 
-		      ~name: (Int32.of_int 0) 
-		      ~value: (Int32.of_int 0) 
-		      ~size: (Int32.of_int 0)
-		      ~ty: 0 ~bind: 0 ~shndx: shn_UNDEF)
-    in
-    let wsyms = 
-      Hashtbl.iter 
-	(fun name (ty, section, vma, size) -> 
-	   let 
-	       sym = (mk_basic_sym 
-			~name: (Int32.of_int ((!str_pos) - str_pos0))
-			~value: (Int32.of_int vma) 
-			~size: (Int32.of_int size)
-			~ty: ty
-			~bind: stb_GLOBAL 
-			~shndx: section)
-	   in
-	     wsym sym;
-	     wstr name)
-    in
-      wstr "";
-      wsym null_sym;
-      wsyms f.file_syms;
-      while (!sym_pos) + symsize < sym_lim do
-	wsym null_sym;
-      done
-  in
-
-  (* Apply the fixups. *)
-  let _ = 
-    let apply_fixup (off, ty, name) = 
-      let (_,_,vma,size) = Hashtbl.find f.file_syms name in
-      let 
-	  v = (match ty with 
-		   FIXUP_VMA -> vma
-		 | FIXUP_SIZE -> size)
-      in
-      let _ = write_bytes f.file_buf off (off + 4) (int_to_u32_lsb0 v) in ()
-    in	  
-    Stack.iter apply_fixup f.file_fixups
-  in
-    ()
-;;
-
-(* Basic test *)
-
-let test_asm _ = 
-  let f = mk_basic_x86_elf_file "test.elf32" in
-  let buf = f.file_buf in
-
-  let text_shdr = f.file_shdr_text in
-  let rodata_shdr = f.file_shdr_rodata in
-
-  let text_off = (Int32.to_int text_shdr.sh_offset) in
-  let text_lim = text_off + (Int32.to_int text_shdr.sh_size) in
-  let text_pos = ref text_off in
-  let text_size _ = (!text_pos - text_off) in
-  let text_vma _ = (Int32.to_int text_shdr.sh_addr) + (text_size()) in
-
-  let rodata_off = (Int32.to_int rodata_shdr.sh_offset) in
-  let rodata_lim = rodata_off + (Int32.to_int rodata_shdr.sh_size) in
-  let rodata_pos = ref rodata_off in
-  let rodata_size _ = (!rodata_pos - rodata_off) in
-  let rodata_vma _ = (Int32.to_int rodata_shdr.sh_addr) + (rodata_size()) in
-
-  let append_ro_rawstring str = 
-    rodata_pos := write_rawstring buf !rodata_pos rodata_lim str 
-  in
-
-  let append_rodata_sym f data sym = 
-    let size = String.length data in
-      f.add_rodata_sym sym (rodata_vma()) size;
-      append_ro_rawstring data
-  in
-
-  let append_insns iss = (text_pos := write_bytes buf !text_pos text_lim iss) in
-  let append_push_sizeof sym = 
-    append_insns (push_imm32 0);
-    f.add_size_fixup (!text_pos - 4) sym
-  in
-  let append_push_vmaof sym = 
-    append_insns (push_imm32 0);
-    f.add_vma_fixup (!text_pos - 4) sym
-  in
-    
-  let literal_data = "Hello, world\n" in
-  let literal_symbol = "lit1" in
-  let main_vma = text_vma() in
-
-    f.file_ehdr.e_entry <- f.file_shdr_text.sh_addr;
-    
-    append_push_sizeof literal_symbol;
-    append_push_vmaof literal_symbol;
-    append_insns (push_imm32 1); (* fd 1 *)
-    append_insns op_SYS_WRITE;
-    append_insns op_SYS_EXIT;
-
-    f.add_func_sym "main" main_vma (text_size());
-    append_rodata_sym f literal_data literal_symbol;
-
-    write_basic_x86_elf_file f;
-    Unix.close f.file_buf.buf_fd
-;;
-*)

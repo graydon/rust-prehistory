@@ -692,8 +692,8 @@ let rec trans_expr emit expr =
 			  Ast.BINOP_and -> Il.LAND
 			| _ -> Il.ADD
 		  in
-			Il.emit_triple emit None (Il.MOV Il.DATA32) dst lhs;
-			Il.emit_triple emit None op dst rhs;
+			Il.emit emit (Il.MOV Il.DATA32) dst lhs;
+			Il.emit emit op dst rhs;
 			dst
 
 	  | Ast.EXPR_unary (unop, a) -> 
@@ -703,7 +703,7 @@ let rec trans_expr emit expr =
 			  Ast.UNOP_not -> Il.LNOT
 			| Ast.UNOP_neg -> Il.NEG
 		  in
-			Il.emit_triple emit None op dst src;
+			Il.emit emit op dst src;
 			dst
 	  | _ -> raise (Invalid_argument "Semant.trans_expr: unimplemented translation")
 
@@ -712,7 +712,7 @@ let rec trans_stmt emit stmt =
 	  Ast.STMT_copy (lval, expr) -> 
 		let dst = Il.Nil in
 		let src = trans_expr emit expr in
-		  Il.emit_triple emit None (Il.MOV Il.DATA32) dst src;
+		  Il.emit emit (Il.MOV Il.DATA32) dst src;
 		  dst
 
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")

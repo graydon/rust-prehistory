@@ -1,0 +1,22 @@
+how do relaxations work?
+
+you support an asm item called a relaxation-choice-point. each relaxation choice point has N options
+ordered from least to most desirable, an expression that the choice depends on, and a ref cell
+holding the current choice number. choice numbers are all initially 0, marking the least desirable
+and presumably biggest option.
+
+the assembler does a first-pass resolution of all the fixups. It then looks at the relaxations.  for
+each relaxation at choice n, it takes choice n+1 and attempts to serialize it in an exception
+handler.  if it serializes, it means that the values all fit in their WORDN size slots, so the
+relaxation should proceed: n <- n+1 and a "something changed" mark is set.
+
+once all relaxations are processed, if "something changed", *all* fixups are reset to None and the
+whole file is re-serialized in an exception handler. If that succeeds -- it should, unless two local
+relaxations were possible but when combined violate one another by moving two things too far apart
+-- the process repeats. If it fails, relaxation in general is said to contain an unsatisfiable
+constraint at iteration K, we reset *all* relaxations to choice 0, and run the entire outer loop
+again but for only K-1 iterations, "the furthest we got" before the unsatisfiable constraint. 
+
+this is a little involved, but you get way smaller object code, so it ought to be worthwhile.
+
+we'll get to this soon!

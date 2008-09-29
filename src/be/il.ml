@@ -1,14 +1,4 @@
 
-(* 
- * Every triple has a label, which is used as a potential target for a
- * local jump. The label is initially the same as the triple's index in the
- * block. As some triples may be deleted as redundant, it's possible that
- * the indices will shift down a bit. The triple with label N is always at
- * some index M <= N in the block. We never insert new triples.
- *)
-
-type label = int
-
 type slot = Vreg of int
 			| HWreg of int
 			| SP (* Stack pointer *)
@@ -18,7 +8,7 @@ type slot = Vreg of int
 			| Pcrel of Asm.fixup
 			| Deref of (slot * int64)
 			| Nil
-			| Label of label
+			| Label of int
 ;;
 
 type datasz = DATA8 | DATA16 | DATA32 | DATA64 
@@ -40,10 +30,10 @@ type op =
   | END
 ;;
 
-type triple = { triple_lab: label option;
-				triple_op: op;
+type triple = { triple_op: op;
 				triple_dst: slot;
 				triple_src: slot;
+				triple_fixup: Asm.fixup option;
 			  }
 ;;
 
@@ -115,17 +105,12 @@ let fmt_op out op =
 ;;
 
 
-let fmt_lab out l = 
-  match l with 
-      None -> ()
-    | Some i -> Printf.fprintf out "\t[label=%d]" i
-  
-let fmt_triple out t = 
-  Printf.fprintf out "%a <- %a %a %a"
-    fmt_slot t.triple_dst
+let fmt_triple out t =   
+  Printf.fprintf out "%a %a %a"
     fmt_op t.triple_op
+    fmt_slot t.triple_dst
     fmt_slot t.triple_src
-    fmt_lab t.triple_lab
+    
 ;;
 
 let print_triples qs = 
@@ -134,23 +119,21 @@ let print_triples qs =
 
 type emitter = { emit_n_hardregs: int;
 				 mutable emit_pc: int;
-				 mutable emit_next_label: int; 
 				 mutable emit_next_vreg: int; 
 				 mutable emit_next_spill: int;
 				 mutable emit_triples: triples; }
 
 
-let badt = { triple_lab = None;
-			 triple_op = END;
+let badt = { triple_op = END;
 			 triple_dst = Nil;
-			 triple_src = Nil }
+			 triple_src = Nil;
+			 triple_fixup = None }
 ;;
 
 let new_emitter n_hardregs = 
   { 
     emit_n_hardregs = n_hardregs;
     emit_pc = 0;
-    emit_next_label = 0;
     emit_next_vreg = 0;
     emit_next_spill = 0;
     emit_triples = Array.create 4 badt;
@@ -170,11 +153,6 @@ let next_spill e =
     i
 ;;
 
-let next_label e = 
-  let i = e.emit_next_label in
-    e.emit_next_label <- i + 1;
-    i
-;;
 
 let grow_if_necessary e =
   let len = Array.length e.emit_triples in
@@ -185,13 +163,19 @@ let grow_if_necessary e =
     e.emit_triples <- n 
 ;;
 
-let emit_triple e lab op dst src =
+
+
+let emit_full e fix op dst src =
   grow_if_necessary e;
   e.emit_triples.(e.emit_pc) <- 
-	{ triple_lab = lab;
-	  triple_op = op;
+	{ triple_op = op;
 	  triple_dst = dst;
-	  triple_src = src;};
+	  triple_src = src;
+	  triple_fixup = fix };
   e.emit_pc <- e.emit_pc + 1
+;;
+
+let emit e op dst src = 
+  emit_full e None op dst src
 ;;
 
