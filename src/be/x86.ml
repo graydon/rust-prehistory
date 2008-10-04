@@ -226,9 +226,15 @@ let select_insn t =
 	  | (Il.CPUSH Il.DATA32, Il.HWreg r, Il.Nil) -> 		
 		  Asm.BYTES [| 0xff; modrm_reg (reg r) slash6 |]
 
+	  | (Il.CPUSH Il.DATA32, Il.Imm i, Il.Nil) -> 		
+		  Asm.SEQ [| Asm.BYTES [| 0x68; |];
+					 Asm.WORD32 i |]
+
 	  | (Il.CPUSH Il.DATA8, Il.Imm e, Il.Nil) -> 
 		  Asm.SEQ [| Asm.BYTES [| 0x6a; |];
 					 Asm.WORD8 e |]
+
+	  | (Il.CRET, _, _) -> Asm.BYTES [| 0xC3 |]
 
 
 	  | (Il.JMP, Il.HWreg dst, Il.Nil) -> 
@@ -238,6 +244,14 @@ let select_insn t =
 		  (* FIXME: relaxations! *)
 		  let pcrel_mark_fixup = Asm.new_fixup "jmp-pcrel mark fixup" in 
 			Asm.SEQ [| Asm.BYTES [| 0xe9; |];
+					   (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
+											 Asm.M_POS pcrel_mark_fixup)));
+					   Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+
+	  | (Il.JMP, Il.Deref (Il.Pcrel f, 0L), Il.Nil) -> 
+		  (* FIXME: relaxations! *)
+		  let pcrel_mark_fixup = Asm.new_fixup "jmp-pcrel mark fixup" in 
+			Asm.SEQ [| Asm.BYTES [| 0xff; modrm_deref_disp32 slash4 |];
 					   (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
 											 Asm.M_POS pcrel_mark_fixup)));
 					   Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
@@ -253,7 +267,10 @@ let select_insn t =
 	  | (Il.END, _, _) -> Asm.BYTES [| 0x90 |]
 	  | (Il.NOP, _, _) -> Asm.BYTES [| 0x90 |]
 
-	  | _ -> raise (Invalid_argument "X86.select_insn: no matching insn")
+	  | _ -> 
+		  Il.fmt_triple stdout t;
+		  Printf.printf "\n";
+		  raise (Invalid_argument "X86.select_insn: no matching insn")
   in
 	match t.Il.triple_fixup with 
 		None -> item

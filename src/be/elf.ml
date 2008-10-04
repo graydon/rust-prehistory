@@ -11,7 +11,7 @@ let elf32_ehsize = 52L;;
 let elf32_phentsize = 32L;;
 let elf32_shentsize = 40L;;
 let elf32_symsize = 16L;;
-let elf32_rela_entsz = 8L;;
+let elf32_rela_entsz = 0xcL;;
 
 type ei_class = 
 	ELFCLASSNONE 
@@ -230,7 +230,7 @@ let program_header
 					 | PT_INTERP -> 3L
 					 | PT_NOTE -> 4L
 					 | PT_SHLIB -> 5L
-				   | PT_PHDR -> 6L));
+					 | PT_PHDR -> 6L));
 	  WORD32 (F_POS segment_fixup);
 	  WORD32 (M_POS segment_fixup);
 	  WORD32 (IMM 0L); (* p_paddr, 0 on most archs *)
@@ -265,15 +265,15 @@ type st_type =
 
 
 (* Special symbol-section indices *)
-let shn_UNDEF   = 0;;
-let shn_ABS     = 0xfff1;;
-let shn_ABS     = 0xfff2;;
+let shn_UNDEF   = 0L;;
+let shn_ABS     = 0xfff1L;;
+let shn_ABS     = 0xfff2L;;
 
 	
 let symbol 
 	~(string_table_fixup:fixup)
 	~(name_string_fixup:fixup)
-	~(sym_target_fixup:fixup)
+	~(sym_target_fixup:fixup option)
 	~(st_bind:st_bind)
 	~(st_type:st_type)
 	~(st_shndx:int64)
@@ -297,8 +297,12 @@ let symbol
 		WORD32 (SUB 
 				  ((F_POS name_string_fixup),
 				   (F_POS string_table_fixup)));
-		WORD32 (M_POS sym_target_fixup);
-		WORD32 (M_SZ sym_target_fixup);
+		WORD32 (match sym_target_fixup with
+					None -> (IMM 0L)
+				  | Some f -> (M_POS f));
+		WORD32 (match sym_target_fixup with 
+					None -> (IMM 0L)
+				  | Some f -> (M_SZ f));
 		WORD8           (* st_info *)
 		  (OR 
 			 ((SLL ((IMM st_bind_num), 4)),
@@ -391,67 +395,75 @@ let elf32_dyn_item d =
 				 WORD32 expr |]
 ;;
 
+type elf32_386_reloc_type = 
+	R_386_NONE 
+  | R_386_32
+  | R_386_PC32
+  | R_386_GOT32 
+  | R_386_PLT32
+  | R_386_COPY
+  | R_386_GLOB_DAT
+  | R_386_JMP_SLOT
+  | R_386_RELATIVE
+  | R_386_GOTOFF
+  | R_386_GOTPC
+;;
+
+
+type elf32_386_rela = 
+	{ elf32_386_rela_type: elf32_386_reloc_type;
+	  elf32_386_rela_offset: expr64;
+	  elf32_386_rela_sym: expr64;
+	  elf32_386_rela_addend: expr64 }
+;;
+
+let elf32_386_rela_item r = 
+  let type_val = 
+	match r.elf32_386_rela_type with 
+		R_386_NONE -> 0L
+	  | R_386_32 -> 1L
+	  | R_386_PC32 -> 2L
+	  | R_386_GOT32 -> 3L
+	  | R_386_PLT32 -> 4L
+	  | R_386_COPY -> 5L
+	  | R_386_GLOB_DAT -> 6L
+	  | R_386_JMP_SLOT -> 7L
+	  | R_386_RELATIVE -> 8L
+	  | R_386_GOTOFF -> 9L
+	  | R_386_GOTPC -> 10L
+  in
+  let info_expr = 
+	WORD32 
+	  (OR 
+		 (SLL ((r.elf32_386_rela_sym), 8),
+		  AND ((IMM 0xffL), (IMM type_val))))
+  in
+	SEQ [| WORD32 r.elf32_386_rela_offset;
+		   info_expr;
+		   WORD32 r.elf32_386_rela_addend |]
+;;
+	
+
+let x86_items_of_emitted_triples e = 
+  (SEQ (Array.map X86.select_insn e.Il.emit_triples))
+;;				  
+  
+
 let elf32_linux_x86_file 
 	~(entry_name:string)
 	~(text_items:(string, item) Hashtbl.t)
 	~(data_items:(string, item) Hashtbl.t)
 	~(rodata_items:(string, item) Hashtbl.t)
-	: item = 
+	~(import_fixups:(string, fixup) Hashtbl.t)
+	: item = 	
 
-
-  (* 
-   * Startup on elf-linux is more complex than in win32. It's
-   * thankfully documented in some detail around the net.
+  (* Procedure Linkage Tables (PLTs), Global Offset Tables
+   * (GOTs), and the relocations that set them up:
    * 
-   *   - The elf entry address is for _start.
-   * 
-   *   - _start pushes: 
-   * 
-   *       eax   (should be zero)
-   *       esp   (holding the kernel-provided stack end)
-   *       edx   (address of _rtld_fini)
-   *       address of _fini
-   *       address of _init
-   *       ecx   (argv)
-   *       esi   (argc)
-   *       address of main 
-   * 
-   *     and then calls __libc_start_main@plt.
-   * 
-   *   - This means any sensible binary has a PLT. Fun. So
-   *     We call into the PLT, which itself is just a bunch
-   *     of indirect jumps through slots in the GOT, and wind
-   *     up in __libc_start_main. Which calls _init, then 
-   *     essentially exit(main(argc,argv)).
-   *)
-
-  let x86_items_of_emitted_triples e = 
-	(SEQ (Array.map X86.select_insn e.Il.emit_triples))
-  in
-
-  let synthetic_start_fn = 
-	let init_fixup = new_fixup "_init function entry" in
-	let fini_fixup = new_fixup "_fini function entry" in
-	let main_fixup = new_fixup "main function entry" in
-	let libc_start_main_plt_fixup = new_fixup "__libc_start_main@plt stub" in
-	let e = Il.new_emitter X86.n_hardregs in
-	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.eax) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.esp) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.edx) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS fini_fixup)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS init_fixup)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.ecx) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.esi) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS main_fixup)) Il.Nil;
-	  Il.emit e Il.CCALL (Il.Imm (M_POS libc_start_main_plt_fixup)) Il.Nil;
-	  x86_items_of_emitted_triples e
-  in
-
-  (* And now, Procedure Linkage Tables (PLTs) and Global Offset Tables
-   * (GOTs). The PLT goes in a section called .plt and GOT in a section
-   * called .got. The portion of the GOT that holds PLT jump slots goes
-   * in a section called .got.plt. Dynamic relocations for these jump slots
-   * go in section .rela.plt.
+   * The PLT goes in a section called .plt and GOT in a section called
+   * .got. The portion of the GOT that holds PLT jump slots goes in a
+   * section called .got.plt. Dynamic relocations for these jump slots go in
+   * section .rela.plt.
    * 
    * The easiest way to understand the PLT/GOT system is to draw it:
    * 
@@ -486,8 +498,7 @@ let elf32_linux_x86_file
    * section .rela.plt.
    *)
 
-  let (plt_items, got_items, got_reloc_items) = 
-	let plt0_fixup = new_fixup "PLT[0]" in
+ 	let plt0_fixup = new_fixup "PLT[0]" in
 	let got1_fixup = new_fixup "GOT[1]" in
 	let got2_fixup = new_fixup "GOT[2]" in	  
 	let got_prefix = SEQ [| WORD32 (IMM 0L); 
@@ -497,32 +508,14 @@ let elf32_linux_x86_file
 	let plt0_item = 
 	  let e = Il.new_emitter X86.n_hardregs in
 		Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS got1_fixup)) Il.Nil;
-		Il.emit e Il.JMP (Il.Pcrel got2_fixup) Il.Nil;
+		Il.emit e Il.JMP (Il.Deref ((Il.Pcrel got2_fixup), 0L)) Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil;
-		x86_items_of_emitted_triples e
+		DEF (plt0_fixup, (x86_items_of_emitted_triples e))
 	in
-	let form_item_triple i = 
-	  let e = Il.new_emitter X86.n_hardregs in 
-	  let jump_slot_fixup = new_fixup ("jump slot #" ^ string_of_int i) in
-	  let jump_slot_initial_target_fixup = 
-		new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
- 	  let plt_item = 
-		Il.emit e Il.JMP (Il.Pcrel jump_slot_fixup) Il.Nil;
-		Il.emit_full e (Some jump_slot_initial_target_fixup)
-		  (Il.CPUSH Il.DATA32) (Il.Imm (IMM (Int64.of_int i))) Il.Nil;
-		Il.emit e Il.JMP (Il.Pcrel plt0_fixup) Il.Nil;
-		x86_items_of_emitted_triples e
-	  in
-	  let got_item = WORD32 (M_POS jump_slot_fixup) in 
-		0
-	in
-	  (0,0,0)
-  in
-(*	  in
-*)
+
 
   (* 
    * The existence of the GOT/PLT mish-mash causes, therefore, the
@@ -548,8 +541,6 @@ let elf32_linux_x86_file
    *)
 		
 		
-
-
   (* There are 11 official section headers in the file we're making:  *)
   (*                                                                  *)
   (* section 0: <null section>                                        *)
@@ -575,23 +566,26 @@ let elf32_linux_x86_file
   let rodata_section_name_fixup = new_fixup "string name of '.rodata' section" in
   let dynsym_section_name_fixup = new_fixup "string name of '.dynsym' section" in
   let dynstr_section_name_fixup = new_fixup "string name of '.dynstr' section" in
+  let plt_section_name_fixup = new_fixup "string name of '.plt' section" in
+  let got_plt_section_name_fixup = new_fixup "string name of '.got.plt' section" in
   let rela_plt_section_name_fixup = new_fixup "string name of '.rela.plt' section" in
   let data_section_name_fixup = new_fixup "string name of '.data' section" in
   let bss_section_name_fixup = new_fixup "string name of '.bss' section" in
   let dynamic_section_name_fixup = new_fixup "string name of '.dynamic' section" in
   let shstrtab_section_name_fixup = new_fixup "string name of '.shstrtab' section" in
 
-  let n_shdrs        = 11L in
   let interpndx      = 1L in  (* Section index of .interp *)
   let textndx        = 2L in  (* Section index of .text *)
   let rodatandx      = 3L in  (* Section index of .rodata *)
   let dynsymndx      = 4L in  (* Section index of .dynsym *)
   let dynstrndx      = 5L in  (* Section index of .dynstr *)
-  let relapltndx     = 6L in  (* Section index of .rela.dyn *)
-  let datandx        = 7L in  (* Section index of .data *)
-  let bssndx         = 8L in  (* Section index of .bss *)
-  let dynamicndx     = 9L in  (* Section index of .dynamic *)
-  let shstrtabndx    = 10L in (* Section index of .shstrtab *)
+  let pltndx         = 6L in  (* Section index of .plt *)
+  let gotpltndx      = 7L in  (* Section index of .got.plt *)
+  let relapltndx     = 8L in  (* Section index of .rela.plt *)
+  let datandx        = 9L in  (* Section index of .data *)
+  let bssndx         = 10L in (* Section index of .bss *)
+  let dynamicndx     = 11L in (* Section index of .dynamic *)
+  let shstrtabndx    = 12L in (* Section index of .shstrtab *)
 
   let section_header_table_fixup = new_fixup ".section header table" in
   let interp_section_fixup = new_fixup ".interp section" in
@@ -599,6 +593,8 @@ let elf32_linux_x86_file
   let rodata_section_fixup = new_fixup ".rodata section" in
   let dynsym_section_fixup = new_fixup ".dynsym section" in
   let dynstr_section_fixup = new_fixup ".dynstr section" in
+  let plt_section_fixup = new_fixup ".plt section" in
+  let got_plt_section_fixup = new_fixup ".got.plt section" in
   let rela_plt_section_fixup = new_fixup ".rela.plt section" in
   let data_section_fixup = new_fixup ".data section" in
   let bss_section_fixup = new_fixup ".bss section" in
@@ -614,6 +610,8 @@ let elf32_linux_x86_file
 		DEF(rodata_section_name_fixup, ZSTRING ".rodata");
 		DEF(dynsym_section_name_fixup, ZSTRING ".dynsym");
 		DEF(dynstr_section_name_fixup, ZSTRING ".dynstr");
+		DEF(plt_section_name_fixup, ZSTRING ".plt");
+		DEF(got_plt_section_name_fixup, ZSTRING ".got.plt");
 		DEF(rela_plt_section_name_fixup, ZSTRING ".rela.plt");
 		DEF(data_section_name_fixup, ZSTRING ".data");
 		DEF(bss_section_name_fixup, ZSTRING ".bss");
@@ -622,9 +620,8 @@ let elf32_linux_x86_file
 	  |]
   in
 
-  let section_header_table = 
-	SEQ
-	  [|
+  let section_headers = 
+[|
 		(* <null> *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
@@ -678,7 +675,7 @@ let elf32_linux_x86_file
 		   ~section_fixup: (Some dynsym_section_fixup)
 		   ~sh_addralign: 8L
 		   ~sh_entsize: elf32_symsize
-		   ~sh_link: None);
+		   ~sh_link: (Some dynstrndx) );
 
 		(* .dynstr *)
 		(section_header 
@@ -688,6 +685,28 @@ let elf32_linux_x86_file
 		   ~sh_flags: [ SHF_ALLOC ]
 		   ~section_fixup: (Some dynstr_section_fixup)
 		   ~sh_addralign: 1L
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
+
+		(* .plt *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: plt_section_name_fixup
+		   ~sh_type: SHT_PROGBITS
+		   ~sh_flags: [ SHF_ALLOC; SHF_EXECINSTR ]
+		   ~section_fixup: (Some plt_section_fixup)
+		   ~sh_addralign: 4L
+		   ~sh_entsize: 0L
+		   ~sh_link: None);
+
+		(* .got.plt *)
+		(section_header 
+		   ~shstring_table_fixup: shstrtab_section_fixup
+		   ~shname_string_fixup: got_plt_section_name_fixup
+		   ~sh_type: SHT_PROGBITS
+		   ~sh_flags: [ SHF_ALLOC; SHF_WRITE ]
+		   ~section_fixup: (Some got_plt_section_fixup)
+		   ~sh_addralign: 4L
 		   ~sh_entsize: 0L
 		   ~sh_link: None);
 
@@ -747,38 +766,52 @@ let elf32_linux_x86_file
 		   ~sh_link: None);
 	  |]
   in
+  let section_header_table = SEQ section_headers in
+
 
   (* There are 3 official program headers in the file we're making:   *)
-  (* segment 0: PHDR                                                  *)
-  (* segment 1: RE / LOAD                                             *)
-  (* segment 2: RW / LOAD                                             *)
+  (* segment 0: RX / PHDR                                             *)
+  (* segment 1: RX / INTERP                                           *)
+  (* segment 2: RX / LOAD                                             *)
+  (* segment 3: RW / LOAD                                             *)
+  (* segment 4: RW / DYNAMIC                                          *)
 
-  let n_phdrs = 3L in
   let program_header_table_fixup = new_fixup "program header table" in
   let segment_0_fixup = new_fixup "segment 0" in
   let segment_1_fixup = new_fixup "segment 1" in
   let segment_2_fixup = new_fixup "segment 2" in
+  let segment_3_fixup = new_fixup "segment 3" in
+  let segment_4_fixup = new_fixup "segment 4" in
 
-  let program_header_table = 
-	SEQ
-	  [| 
+  let program_headers = [| 
 		(program_header 
 		   ~p_type: PT_PHDR
 		   ~segment_fixup: segment_0_fixup
 		   ~p_flags: [ PF_R; PF_X ]
 		   ~p_align: 4L);
+		(program_header
+		   ~p_type: PT_INTERP
+		   ~segment_fixup: segment_1_fixup
+		   ~p_flags: [ PF_R; PF_X ]
+		   ~p_align: 0x1L); 
 		(program_header 
 		   ~p_type: PT_LOAD
-		   ~segment_fixup: segment_1_fixup
+		   ~segment_fixup: segment_2_fixup
 		   ~p_flags: [ PF_R; PF_X ]
 		   ~p_align: 0x1000L);
 		(program_header 
 		   ~p_type: PT_LOAD
-		   ~segment_fixup: segment_2_fixup
+		   ~segment_fixup: segment_3_fixup
+		   ~p_flags: [ PF_R; PF_W ]
+		   ~p_align: 0x1000L);		
+		(program_header 
+		   ~p_type: PT_DYNAMIC
+		   ~segment_fixup: segment_4_fixup
 		   ~p_flags: [ PF_R; PF_W ]
 		   ~p_align: 0x1000L);		
 	  |]
   in
+  let program_header_table = SEQ program_headers in
 
   let e_entry_fixup = new_fixup "entry symbol" in
 
@@ -792,19 +825,19 @@ let elf32_linux_x86_file
 	  ~e_entry_fixup: e_entry_fixup
 	  ~e_phoff_fixup: program_header_table_fixup
 	  ~e_shoff_fixup: section_header_table_fixup
-	  ~e_phnum: n_phdrs
-	  ~e_shnum: n_shdrs
+	  ~e_phnum: (Int64.of_int (Array.length program_headers))
+	  ~e_shnum: (Int64.of_int (Array.length section_headers))
 	  ~e_shstrndx: shstrtabndx
   in	
 
   let data_sym name st_bind fixup =
-	let name_fixup = new_fixup "data symbol name fixup" in
+	let name_fixup = new_fixup ("data symbol name fixup: '" ^ name ^ "'") in
 	let strtab_entry = DEF (name_fixup, ZSTRING name) in
 	let symtab_entry =
 	  symbol 
 		~string_table_fixup: dynstr_section_fixup
 		~name_string_fixup: name_fixup
-		~sym_target_fixup: fixup
+		~sym_target_fixup: (Some fixup)
 		~st_bind: STB_GLOBAL
 		~st_type: STT_OBJECT
 		~st_shndx: datandx
@@ -813,13 +846,13 @@ let elf32_linux_x86_file
   in
     
   let rodata_sym name st_bind fixup =
-	let name_fixup = new_fixup "rodata symbol name fixup" in
+	let name_fixup = new_fixup ("rodata symbol name fixup: '" ^ name ^ "'") in
 	let strtab_entry = DEF (name_fixup, ZSTRING name) in
 	let symtab_entry =
 	  symbol 
 		~string_table_fixup: dynstr_section_fixup
 		~name_string_fixup: name_fixup
-		~sym_target_fixup: fixup
+		~sym_target_fixup: (Some fixup)
 		~st_bind: st_bind
 		~st_type: STT_OBJECT
 		~st_shndx: rodatandx
@@ -828,13 +861,13 @@ let elf32_linux_x86_file
   in
 
   let text_sym name st_bind fixup =
-	let name_fixup = new_fixup "text symbol name fixup" in
+	let name_fixup = new_fixup ("text symbol name fixup: '" ^ name ^ "'") in
 	let strtab_item = DEF (name_fixup, ZSTRING name) in
 	let symtab_item =
 	  symbol 
 		~string_table_fixup: dynstr_section_fixup
 		~name_string_fixup: name_fixup
-		~sym_target_fixup: fixup
+		~sym_target_fixup: (Some fixup)
 		~st_bind: st_bind
 		~st_type: STT_FUNC
 		~st_shndx: textndx
@@ -842,9 +875,24 @@ let elf32_linux_x86_file
 	  (strtab_item, symtab_item)
   in
 
+  let import_sym name st_bind fixup =
+	let name_fixup = new_fixup ("import symbol name fixup: '" ^ name ^ "'") in
+	let strtab_item = DEF (name_fixup, ZSTRING name) in
+	let symtab_item =
+	  symbol 
+		~string_table_fixup: dynstr_section_fixup
+		~name_string_fixup: name_fixup
+		~sym_target_fixup: None
+		~st_bind: st_bind
+		~st_type: STT_FUNC
+		~st_shndx: shn_UNDEF
+	in
+	  (strtab_item, symtab_item)
+  in
+
   let items_of_symbol sym_emitter st_bind symname symbody x = 
 	let (strtab_items, symtab_items, body_items) = x in
-	let body_fixup = new_fixup "symbol body fixup" in
+	let body_fixup = new_fixup ("symbol body fixup: '" ^ symname ^ "'") in
 	let body_item = 
 	  if symname = entry_name
 	  then DEF (e_entry_fixup, DEF (body_fixup, symbody))
@@ -854,6 +902,39 @@ let elf32_linux_x86_file
 	  ((strtab_item :: strtab_items),
 	   (symtab_item :: symtab_items),
 	   (body_item :: body_items))
+  in
+
+  let items_of_import_symbol sym_emitter st_bind symname plt_entry_fixup x = 
+	let (i, strtab_items, symtab_items,
+		 plt_items, got_plt_items, rela_plt_items) = x in
+	let (strtab_item, symtab_item) = sym_emitter symname st_bind None in
+	let e = Il.new_emitter X86.n_hardregs in 
+	let jump_slot_fixup = new_fixup ("jump slot #" ^ string_of_int i) in
+	let jump_slot_initial_target_fixup = 
+	  new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
+ 	let plt_item = 	  
+	  Il.emit_full e (Some plt_entry_fixup) 
+		Il.JMP (Il.Deref ((Il.Pcrel jump_slot_fixup), 0L)) Il.Nil;
+	  Il.emit_full e (Some jump_slot_initial_target_fixup)
+		(Il.CPUSH Il.DATA32) (Il.Imm (IMM (Int64.of_int i))) Il.Nil;
+	  Il.emit e Il.JMP (Il.Pcrel plt0_fixup) Il.Nil;
+	  x86_items_of_emitted_triples e
+	in
+	let got_plt_item = DEF (jump_slot_fixup, 
+							WORD32 (M_POS jump_slot_initial_target_fixup)) in 
+	let rela_plt = 
+	  { elf32_386_rela_type = R_386_JMP_SLOT;
+		elf32_386_rela_offset = (M_POS jump_slot_fixup);
+		elf32_386_rela_sym = (IMM (Int64.of_int i));
+		elf32_386_rela_addend = (IMM 0L) }
+	in
+	let rela_plt_item = elf32_386_rela_item rela_plt in 
+	  (i+1,
+	   (strtab_item :: strtab_items),
+	   (symtab_item :: symtab_items),
+	   (plt_item :: plt_items),
+	   (got_plt_item :: got_plt_items),
+	   (rela_plt_item :: rela_plt_items))
   in
 
   let (text_strtab_items, 
@@ -874,17 +955,36 @@ let elf32_linux_x86_file
 	Hashtbl.fold (items_of_symbol data_sym STB_GLOBAL) data_items ([],[],[])
   in
 
-  let dynsym_items = (text_symtab_items @ 
+  let (_,
+	   import_strtab_items, 
+	   import_symtab_items,
+	   plt_items,
+	   got_plt_items,
+	   rela_plt_items) = 
+	Hashtbl.fold (items_of_import_symbol import_sym STB_GLOBAL) import_fixups 
+	  (0,[],[],[plt0_item],[got_prefix],[])
+  in
+  let import_symtab_items = List.rev import_symtab_items in
+  let plt_items = List.rev plt_items in
+  let got_plt_items = List.rev got_plt_items in
+
+
+  let dynsym_items = (import_symtab_items @ 
+						text_symtab_items @ 
 						rodata_symtab_items @
 						data_symtab_items) 
   in
 
-  let dynstr_items = (text_strtab_items @ 
+  let dynstr_items = (import_strtab_items @
+						text_strtab_items @ 
 						rodata_strtab_items @
 						data_strtab_items) 
   in
 
-  (* Juicy bits from the caller. *)
+  let interp_section = 
+	DEF (interp_section_fixup, ZSTRING "/lib/ld-linux.so.2")
+  in
+
   let text_section = 
 	DEF (text_section_fixup, 
 		 SEQ (Array.of_list text_body_items))
@@ -910,6 +1010,26 @@ let elf32_linux_x86_file
 		 SEQ (Array.of_list dynstr_items))
   in
 
+  let plt_section = 
+	DEF (plt_section_fixup,
+		 SEQ (Array.of_list plt_items))
+  in
+
+  let got_plt_section = 
+	DEF (got_plt_section_fixup,
+		 SEQ (Array.of_list got_plt_items))
+  in
+
+  let rela_plt_section = 
+	DEF (rela_plt_section_fixup,
+		 SEQ (Array.of_list rela_plt_items))
+  in
+
+  let dynamic_section = 
+	DEF (dynamic_section_fixup, MARK)
+  in
+
+
   let load_address = 0x0804_8000L in
 	
 	SEQ 
@@ -923,26 +1043,31 @@ let elf32_linux_x86_file
 			   DEF (program_header_table_fixup,
 					program_header_table);
 			 |]);
-		DEF 
-		  (segment_1_fixup, 
-		   SEQ 
-			 [| 
-			   text_section;
-			   rodata_section;		   
-			 |]);
+		DEF
+		  (segment_1_fixup, interp_section);
 		DEF 
 		  (segment_2_fixup, 
 		   SEQ 
 			 [| 
+			   text_section;
+			   rodata_section;		   
+			   dynsym_section;
+			   dynstr_section;
+			   plt_section;
+			   rela_plt_section;			   
+			 |]);
+		DEF 
+		  (segment_3_fixup, 
+		   SEQ 
+			 [| 
 			   data_section;
+			   got_plt_section;
 			   bss_section;
 			 |]);
+		DEF (segment_4_fixup, 
+			 dynamic_section);
 		DEF (shstrtab_section_fixup,
 			 shstrtab_section);
-		DEF (dynsym_section_fixup,
-			 dynsym_section);
-		DEF (dynstr_section_fixup,
-			 dynstr_section);
 		DEF (section_header_table_fixup,
 			 section_header_table);
 	  |]
@@ -952,25 +1077,76 @@ let emit_testfile outfile =
   let text_items = Hashtbl.create 4 in
   let rodata_items = Hashtbl.create 4 in
   let data_items = Hashtbl.create 4 in
+  let import_fixups = Hashtbl.create 4 in 
 
-  let rodata_fixup = new_fixup "rodata item" in
-  let str = "hello, world\n" in
-  let rodata_item = DEF (rodata_fixup, (STRING str)) in
-  let emitter = Il.new_emitter X86.n_hardregs in
-  let text_item = 
-	Il.emit emitter (Il.MOV Il.DATA32) (Il.HWreg X86.eax) (Il.Imm (F_SZ rodata_fixup));
-	(SEQ (Array.map X86.select_insn emitter.Il.emit_triples))
-  in	
+  (* 
+   * Startup on elf-linux is more complex than in win32. It's
+   * thankfully documented in some detail around the net.
+   * 
+   *   - The elf entry address is for _start.
+   * 
+   *   - _start pushes: 
+   * 
+   *       eax   (should be zero)
+   *       esp   (holding the kernel-provided stack end)
+   *       edx   (address of _rtld_fini)
+   *       address of _fini
+   *       address of _init
+   *       ecx   (argv)
+   *       esi   (argc)
+   *       address of main 
+   * 
+   *     and then calls __libc_start_main@plt.
+   * 
+   *   - This means any sensible binary has a PLT. Fun. So
+   *     We call into the PLT, which itself is just a bunch
+   *     of indirect jumps through slots in the GOT, and wind
+   *     up in __libc_start_main. Which calls _init, then 
+   *     essentially exit(main(argc,argv)).
+   *)
+
+
+  let init_fixup = new_fixup "_init function entry" in
+  let fini_fixup = new_fixup "_fini function entry" in
+  let main_fixup = new_fixup "main function entry" in
+  let rust_start_fixup = new_fixup "rust_start" in 
+  let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
+
+  let start_fn = 
+	let e = Il.new_emitter X86.n_hardregs in
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.eax) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.esp) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.edx) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS fini_fixup)) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS init_fixup)) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.ecx) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.HWreg X86.esi) Il.Nil;
+	  Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS main_fixup)) Il.Nil;
+	  Il.emit e Il.CCALL (Il.Pcrel libc_start_main_fixup) Il.Nil;
+	  x86_items_of_emitted_triples e
+  in
+
+  let do_nothing_fn = 
+	let e = Il.new_emitter X86.n_hardregs in
+	  Il.emit e Il.CRET Il.Nil Il.Nil;
+	  x86_items_of_emitted_triples e
+  in
+
   let _ = 
-	Hashtbl.add text_items "entryfn" text_item;
-	Hashtbl.add rodata_items "str" rodata_item
+	Hashtbl.add text_items "_start" start_fn;
+	Hashtbl.add text_items "_init" (DEF (init_fixup, do_nothing_fn));
+	Hashtbl.add text_items "_fini" (DEF (fini_fixup, do_nothing_fn));
+	Hashtbl.add text_items "main" (DEF (main_fixup, do_nothing_fn));
+	Hashtbl.add import_fixups "__libc_start_main" libc_start_main_fixup;
+	Hashtbl.add import_fixups "rust_start" rust_start_fixup
   in
   let all_items = 
 	elf32_linux_x86_file 
-	  ~entry_name: "entryfn"
+	  ~entry_name: "_start"
 	  ~text_items: text_items
 	  ~data_items: data_items
 	  ~rodata_items: rodata_items
+	  ~import_fixups: import_fixups
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin outfile in

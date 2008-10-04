@@ -26,7 +26,7 @@ type op =
   | JNZ | JZ | JC | JNC | JO | JNO | JMP 
   | CALL | RET | YIELD | RESUME 
   | NOP 
-  | CCALL | CPUSH of datasz | CPOP of datasz
+  | CCALL | CPUSH of datasz | CPOP of datasz | CRET
   | END
 ;;
 
@@ -99,6 +99,7 @@ let fmt_op out op =
 	   | CCALL -> "CCALL"
 	   | CPUSH d -> "CPUSH" ^ (fmt_datasz d)
 	   | CPOP d -> "CPOP" ^ (fmt_datasz d)
+	   | CRET -> "CRET"
 	   | RESUME -> "RESUME"
 	   | YIELD -> "YIELD"
        | END -> "---")
