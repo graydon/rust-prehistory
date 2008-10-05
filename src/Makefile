@@ -13,16 +13,14 @@ COMPILER_MLS:=$(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_MLS)
 COMPILER_CMOS:=$(patsubst %.ml, %.cmo, $(COMPILER_MLS))
 
 RUNTIME_CS:=rt/rust.c
-RUNTIME_OBJS:=$(patsubst %.c, %.o, $(RUNTIME_CS))
-RUNTIME:=rustrt.dll
 
-all: $(COMPILER) $(RUNTIME) 
+OSTYPE:=$(shell uname -s)
+CPUTYPE:=$(shell uname -m)
 
-$(COMPILER): $(COMPILER_CMOS)
-	ocamlc -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $^ 
+include config/$(OSTYPE)-$(CPUTYPE).mk
 
-$(RUNTIME): $(RUNTIME_OBJS)
-	gcc -shared -o $@ $^
+$(COMPILER): $(COMPILER_CMOS) Makefile
+	ocamlc -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(COMPILER_CMOS)
 
 .phony: clean
 
@@ -31,15 +29,12 @@ clean:
 	rm -f fe/lexer.ml 
 	rm -f $(COMPILER) $(RUNTIME)
 	rm -f .depend
-	rm -f rust_out.exe
+	rm -f rust_out.exe rust_out
 
-%.o: %.c
-	gcc -c -o $@ $<
-
-%.cmo: %.ml
+%.cmo: %.ml Makefile
 	ocamlc -c -o $@ $(OCAMLC_FLAGS) $<
 
-%.ml: %.mll
+%.ml: %.mll Makefile
 	ocamllex -o $@ $<
 
 .depend: $(COMPILER_MLS) $(RUNTIME_CS) Makefile

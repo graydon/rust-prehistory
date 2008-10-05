@@ -233,7 +233,7 @@ let program_header
 					 | PT_PHDR -> 6L));
 	  WORD32 (F_POS segment_fixup);
 	  WORD32 (M_POS segment_fixup);
-	  WORD32 (IMM 0L); (* p_paddr, 0 on most archs *)
+	  WORD32 (M_POS segment_fixup); (* IMM 0L); p_paddr, 0 on most archs *)
 	  WORD32 (F_SZ segment_fixup);
 	  WORD32 (M_SZ segment_fixup);
 	  WORD32 (IMM (fold_flags
@@ -351,48 +351,48 @@ type d_tag =
 
 type elf32_dyn = (d_tag * expr64);;
 
+let elf32_num_of_dyn_tag tag = 
+  match tag with 
+	  DT_NULL -> 0L
+	| DT_NEEDED -> 1L 
+	| DT_PLTRELSZ -> 2L
+	| DT_PLTGOT -> 3L
+	| DT_HASH -> 4L
+	| DT_STRTAB -> 5L
+	| DT_SYMTAB -> 6L
+	| DT_RELA -> 7L
+	| DT_RELASZ -> 8L
+	| DT_RELAENT -> 9L
+	| DT_STRSZ -> 10L
+	| DT_SYMENT -> 11L
+	| DT_INIT -> 12L
+	| DT_FINI -> 13L
+	| DT_SONAME -> 14L
+	| DT_RPATH -> 15L
+	| DT_SYMBOLIC -> 16L
+	| DT_REL -> 17L
+	| DT_RELSZ -> 18L
+	| DT_RELENT -> 19L
+	| DT_PLTREL -> 20L
+	| DT_DEBUG -> 21L
+	| DT_TEXTREL -> 22L
+	| DT_JMPREL -> 23L
+	| DT_BIND_NOW -> 24L
+	| DT_INIT_ARRAY -> 25L
+	| DT_FINI_ARRAY -> 26L
+	| DT_INIT_ARRAYSZ -> 27L
+	| DT_FINI_ARRAYSZ -> 28L
+	| DT_RUNPATH -> 29L
+	| DT_FLAGS -> 30L
+	| DT_ENCODING -> 31L
+	| DT_PREINIT_ARRAY -> 32L 
+	| DT_PREINIT_ARRAYSZ -> 33L
+;;
+
 let elf32_dyn_item d = 
-  match d with 
-	  (tag, expr) -> 
-		let tagval = 
-		  match tag with 
-			  DT_NULL -> 0L
-			| DT_NEEDED -> 1L 
-			| DT_PLTRELSZ -> 2L
-			| DT_PLTGOT -> 3L
-			| DT_HASH -> 4L
-			| DT_STRTAB -> 5L
-			| DT_SYMTAB -> 6L
-			| DT_RELA -> 7L
-			| DT_RELASZ -> 8L
-			| DT_RELAENT -> 9L
-			| DT_STRSZ -> 10L
-			| DT_SYMENT -> 11L
-			| DT_INIT -> 12L
-			| DT_FINI -> 13L
-			| DT_SONAME -> 14L
-			| DT_RPATH -> 15L
-			| DT_SYMBOLIC -> 16L
-			| DT_REL -> 17L
-			| DT_RELSZ -> 18L
-			| DT_RELENT -> 19L
-			| DT_PLTREL -> 20L
-			| DT_DEBUG -> 21L
-			| DT_TEXTREL -> 22L
-			| DT_JMPREL -> 23L
-			| DT_BIND_NOW -> 24L
-			| DT_INIT_ARRAY -> 25L
-			| DT_FINI_ARRAY -> 26L
-			| DT_INIT_ARRAYSZ -> 27L
-			| DT_FINI_ARRAYSZ -> 28L
-			| DT_RUNPATH -> 29L
-			| DT_FLAGS -> 30L
-			| DT_ENCODING -> 31L
-			| DT_PREINIT_ARRAY -> 32L 
-			| DT_PREINIT_ARRAYSZ -> 33L
-		in
-		  SEQ [| WORD32 (IMM tagval);
-				 WORD32 expr |]
+  let (tag, expr) = d in
+  let tagval = elf32_num_of_dyn_tag tag in
+	SEQ [| WORD32 (IMM tagval); WORD32 expr |]
 ;;
 
 type elf32_386_reloc_type = 
@@ -455,6 +455,7 @@ let elf32_linux_x86_file
 	~(data_items:(string, item) Hashtbl.t)
 	~(rodata_items:(string, item) Hashtbl.t)
 	~(import_fixups:(string, fixup) Hashtbl.t)
+	~(needed_libs:string array)
 	: item = 	
 
   (* Procedure Linkage Tables (PLTs), Global Offset Tables
@@ -508,7 +509,7 @@ let elf32_linux_x86_file
 	let plt0_item = 
 	  let e = Il.new_emitter X86.n_hardregs in
 		Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (M_POS got1_fixup)) Il.Nil;
-		Il.emit e Il.JMP (Il.Deref ((Il.Pcrel got2_fixup), 0L)) Il.Nil;
+		Il.emit e Il.JMP (Il.Deref (Il.Imm (M_POS got2_fixup), 0L)) Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil;
@@ -539,8 +540,7 @@ let elf32_linux_x86_file
    * d_tag.
    * 
    *)
-		
-		
+
   (* There are 11 official section headers in the file we're making:  *)
   (*                                                                  *)
   (* section 0: <null section>                                        *)
@@ -771,7 +771,7 @@ let elf32_linux_x86_file
 
   (* There are 3 official program headers in the file we're making:   *)
   (* segment 0: RX / PHDR                                             *)
-  (* segment 1: RX / INTERP                                           *)
+  (* segment 1: R  / INTERP                                           *)
   (* segment 2: RX / LOAD                                             *)
   (* segment 3: RW / LOAD                                             *)
   (* segment 4: RW / DYNAMIC                                          *)
@@ -783,32 +783,38 @@ let elf32_linux_x86_file
   let segment_3_fixup = new_fixup "segment 3" in
   let segment_4_fixup = new_fixup "segment 4" in
 
+  let segment_0_align = 4 in
+  let segment_1_align = 1 in
+  let segment_2_align = 0x1000 in
+  let segment_3_align = 0x1000 in
+  let segment_4_align = 0x1000 in
+
   let program_headers = [| 
 		(program_header 
 		   ~p_type: PT_PHDR
 		   ~segment_fixup: segment_0_fixup
 		   ~p_flags: [ PF_R; PF_X ]
-		   ~p_align: 4L);
+		   ~p_align: (Int64.of_int segment_0_align));
 		(program_header
 		   ~p_type: PT_INTERP
 		   ~segment_fixup: segment_1_fixup
-		   ~p_flags: [ PF_R; PF_X ]
-		   ~p_align: 0x1L); 
+		   ~p_flags: [ PF_R ]
+		   ~p_align: (Int64.of_int segment_1_align)); 
 		(program_header 
 		   ~p_type: PT_LOAD
 		   ~segment_fixup: segment_2_fixup
 		   ~p_flags: [ PF_R; PF_X ]
-		   ~p_align: 0x1000L);
+		   ~p_align: (Int64.of_int segment_2_align));
 		(program_header 
 		   ~p_type: PT_LOAD
 		   ~segment_fixup: segment_3_fixup
 		   ~p_flags: [ PF_R; PF_W ]
-		   ~p_align: 0x1000L);		
+		   ~p_align: (Int64.of_int segment_3_align));
 		(program_header 
 		   ~p_type: PT_DYNAMIC
 		   ~segment_fixup: segment_4_fixup
 		   ~p_flags: [ PF_R; PF_W ]
-		   ~p_align: 0x1000L);		
+		   ~p_align: (Int64.of_int segment_4_align));
 	  |]
   in
   let program_header_table = SEQ program_headers in
@@ -914,7 +920,7 @@ let elf32_linux_x86_file
 	  new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
  	let plt_item = 	  
 	  Il.emit_full e (Some plt_entry_fixup) 
-		Il.JMP (Il.Deref ((Il.Pcrel jump_slot_fixup), 0L)) Il.Nil;
+		Il.JMP (Il.Deref (Il.Imm (M_POS jump_slot_fixup), 0L)) Il.Nil;
 	  Il.emit_full e (Some jump_slot_initial_target_fixup)
 		(Il.CPUSH Il.DATA32) (Il.Imm (IMM (Int64.of_int i))) Il.Nil;
 	  Il.emit e Il.JMP (Il.Pcrel plt0_fixup) Il.Nil;
@@ -962,23 +968,64 @@ let elf32_linux_x86_file
 	   got_plt_items,
 	   rela_plt_items) = 
 	Hashtbl.fold (items_of_import_symbol import_sym STB_GLOBAL) import_fixups 
-	  (0,[],[],[plt0_item],[got_prefix],[])
+	  (1,[],[],[plt0_item],[got_prefix],[])
   in
   let import_symtab_items = List.rev import_symtab_items in
   let plt_items = List.rev plt_items in
   let got_plt_items = List.rev got_plt_items in
+  let rela_plt_items = List.rev rela_plt_items in
 
+  let dynamic_needed_strtab_items = Array.make (Array.length needed_libs) MARK in
 
-  let dynsym_items = (import_symtab_items @ 
-						text_symtab_items @ 
-						rodata_symtab_items @
-						data_symtab_items) 
+  let dynamic_items = 
+	let dynamic_needed_items = Array.make (Array.length needed_libs) MARK in
+	  for i = 0 to (Array.length needed_libs) - 1 do
+		let fixup = new_fixup ("needed library name fixup: " ^ needed_libs.(i)) in		  
+		  dynamic_needed_items.(i) <- elf32_dyn_item (DT_NEEDED, SUB (M_POS fixup, 
+																	  M_POS dynstr_section_fixup));
+		  dynamic_needed_strtab_items.(i) <- DEF (fixup, ZSTRING needed_libs.(i))
+	  done;
+	  (SEQ [| 
+		 SEQ dynamic_needed_items;
+		 elf32_dyn_item (DT_STRTAB, M_POS dynstr_section_fixup);
+		 elf32_dyn_item (DT_STRSZ, M_SZ dynstr_section_fixup);
+
+		 elf32_dyn_item (DT_SYMTAB, M_POS dynsym_section_fixup);
+		 elf32_dyn_item (DT_SYMENT, IMM elf32_symsize);
+
+		 elf32_dyn_item (DT_PLTGOT, M_POS got_plt_section_fixup);
+		 
+		 elf32_dyn_item (DT_PLTREL, IMM (elf32_num_of_dyn_tag DT_RELA));
+		 elf32_dyn_item (DT_PLTRELSZ, M_SZ rela_plt_section_fixup);
+		 elf32_dyn_item (DT_JMPREL, M_POS rela_plt_section_fixup);
+
+		 elf32_dyn_item (DT_NULL, IMM 0L) 
+	   |])	
   in
 
-  let dynstr_items = (import_strtab_items @
-						text_strtab_items @ 
-						rodata_strtab_items @
-						data_strtab_items) 
+  let null_strtab_fixup = new_fixup "null dynstrtab entry" in
+  let null_strtab_item = DEF (null_strtab_fixup, ZSTRING "") in
+  let null_symtab_item = (symbol 
+							~string_table_fixup: dynstr_section_fixup
+							~name_string_fixup: null_strtab_fixup
+							~sym_target_fixup: None
+							~st_bind: STB_LOCAL
+							~st_type: STT_NOTYPE
+							~st_shndx: 0L) in
+
+  let dynsym_items = (null_symtab_item ::
+						(import_symtab_items @ 
+						   text_symtab_items @ 
+						   rodata_symtab_items @
+						   data_symtab_items))
+  in
+
+  let dynstr_items = (null_strtab_item :: 
+						(import_strtab_items @
+						   text_strtab_items @ 
+						   rodata_strtab_items @
+						   data_strtab_items @
+						   (Array.to_list dynamic_needed_strtab_items)))
   in
 
   let interp_section = 
@@ -1026,7 +1073,7 @@ let elf32_linux_x86_file
   in
 
   let dynamic_section = 
-	DEF (dynamic_section_fixup, MARK)
+	DEF (dynamic_section_fixup, dynamic_items)
   in
 
 
@@ -1035,37 +1082,46 @@ let elf32_linux_x86_file
 	SEQ 
 	  [|
 		MEMPOS load_address;
-		DEF 
-		  (segment_0_fixup, 
-		   SEQ 
-			 [| 
-			   elf_header;
-			   DEF (program_header_table_fixup,
-					program_header_table);
-			 |]);
-		DEF
-		  (segment_1_fixup, interp_section);
-		DEF 
-		  (segment_2_fixup, 
-		   SEQ 
-			 [| 
-			   text_section;
-			   rodata_section;		   
-			   dynsym_section;
-			   dynstr_section;
-			   plt_section;
-			   rela_plt_section;			   
-			 |]);
-		DEF 
-		  (segment_3_fixup, 
-		   SEQ 
-			 [| 
-			   data_section;
-			   got_plt_section;
-			   bss_section;
-			 |]);
-		DEF (segment_4_fixup, 
-			 dynamic_section);
+		ALIGN_FILE 
+		  (segment_2_align, 
+		   DEF 
+			 (segment_2_fixup, 
+			  SEQ 
+				[| 
+				  elf_header;
+				  ALIGN_FILE
+					(segment_0_align,					 
+					 DEF 
+					   (segment_0_fixup, 
+						SEQ 
+						  [| 
+							DEF (program_header_table_fixup,
+								 program_header_table);
+						  |]));
+				  ALIGN_FILE 
+					(segment_1_align,
+					 DEF (segment_1_fixup, interp_section));
+				  text_section;
+				  rodata_section;		   
+				  dynsym_section;
+				  dynstr_section;
+				  plt_section;
+				  rela_plt_section;			   
+				|]));
+		ALIGN_FILE
+		  (segment_3_align, 
+		   DEF 
+			 (segment_3_fixup, 
+			  SEQ 
+				[| 
+				  data_section;
+				  got_plt_section;
+				  bss_section;
+				  ALIGN_FILE 
+					(segment_4_align, 
+					 DEF (segment_4_fixup, 
+						  dynamic_section));
+				|]));
 		DEF (shstrtab_section_fixup,
 			 shstrtab_section);
 		DEF (section_header_table_fixup,
@@ -1128,8 +1184,17 @@ let emit_testfile outfile =
 
   let do_nothing_fn = 
 	let e = Il.new_emitter X86.n_hardregs in
+	  Il.emit e (Il.MOV Il.DATA32) (Il.HWreg X86.eax) (Il.Imm (IMM 0xffL));
 	  Il.emit e Il.CRET Il.Nil Il.Nil;
 	  x86_items_of_emitted_triples e
+  in
+
+  let needed_libs = 
+	[| 	  
+	  "ld-linux.so.2";
+	  "libc.so.6";
+	  "librustrt.so"
+	|]
   in
 
   let _ = 
@@ -1147,6 +1212,7 @@ let emit_testfile outfile =
 	  ~data_items: data_items
 	  ~rodata_items: rodata_items
 	  ~import_fixups: import_fixups
+	  ~needed_libs: needed_libs
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin outfile in

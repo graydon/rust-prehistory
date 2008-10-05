@@ -248,13 +248,10 @@ let select_insn t =
 											 Asm.M_POS pcrel_mark_fixup)));
 					   Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
 
-	  | (Il.JMP, Il.Deref (Il.Pcrel f, 0L), Il.Nil) -> 
+	  | (Il.JMP, Il.Deref (Il.Imm i, 0L), Il.Nil) -> 
 		  (* FIXME: relaxations! *)
-		  let pcrel_mark_fixup = Asm.new_fixup "jmp-pcrel mark fixup" in 
-			Asm.SEQ [| Asm.BYTES [| 0xff; modrm_deref_disp32 slash4 |];
-					   (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
-											 Asm.M_POS pcrel_mark_fixup)));
-					   Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+		  Asm.SEQ [| Asm.BYTES [| 0xff; modrm_deref_disp32 slash4 |];
+					 (Asm.WORD32 i); |]
 			  
 
 	  | (Il.BNOT, Il.HWreg dst, Il.Nil) -> 
