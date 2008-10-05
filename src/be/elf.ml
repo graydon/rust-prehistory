@@ -1184,7 +1184,13 @@ let emit_testfile outfile =
 
   let do_nothing_fn = 
 	let e = Il.new_emitter X86.n_hardregs in
-	  Il.emit e (Il.MOV Il.DATA32) (Il.HWreg X86.eax) (Il.Imm (IMM 0xffL));
+	  Il.emit e Il.CRET Il.Nil Il.Nil;
+	  x86_items_of_emitted_triples e
+  in
+
+  let main_fn = 
+	let e = Il.new_emitter X86.n_hardregs in
+	  Il.emit e Il.CCALL (Il.Pcrel rust_start_fixup) Il.Nil;
 	  Il.emit e Il.CRET Il.Nil Il.Nil;
 	  x86_items_of_emitted_triples e
   in
@@ -1201,7 +1207,7 @@ let emit_testfile outfile =
 	Hashtbl.add text_items "_start" start_fn;
 	Hashtbl.add text_items "_init" (DEF (init_fixup, do_nothing_fn));
 	Hashtbl.add text_items "_fini" (DEF (fini_fixup, do_nothing_fn));
-	Hashtbl.add text_items "main" (DEF (main_fixup, do_nothing_fn));
+	Hashtbl.add text_items "main" (DEF (main_fixup, main_fn));
 	Hashtbl.add import_fixups "__libc_start_main" libc_start_main_fixup;
 	Hashtbl.add import_fixups "rust_start" rust_start_fixup
   in
