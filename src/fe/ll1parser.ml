@@ -297,9 +297,9 @@ type pstate =
     { mutable pstate_peek : token;
       mutable pstate_ctxt : (string * Ast.pos) list;
       pstate_lexfun       : Lexing.lexbuf -> token;
-      pstate_lexbuf       : Lexing.lexbuf }
+      pstate_lexbuf       : Lexing.lexbuf;
+	  pstate_sess         : Session.sess }
 ;;
-
 
 exception Parse_err of (pstate * string)
 ;;
@@ -313,7 +313,7 @@ let lexpos ps =
 ;;
 
 let span apos bpos x = 
-  { Ast.node = x; Ast.span = { Ast.lo = apos; Ast.hi = bpos } }
+  { Ast.node = x; Ast.span = { Session.lo = apos; Session.hi = bpos } }
 
 let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
   (ps.pstate_ctxt <- (n, lexpos ps) :: ps.pstate_ctxt;
@@ -324,18 +324,24 @@ let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
 
 
 let peek ps = 
-  (Printf.printf "peeking at: %s     // %s\n" 
+  (if ps.pstate_sess.Session.sess_log_parse
+   then Printf.fprintf ps.pstate_sess.Session.sess_log_out 
+	 "peeking at: %s     // %s\n" 
      (string_of_tok ps.pstate_peek)
      (match ps.pstate_ctxt with
           (s, _) :: _ -> s
-        | _ -> "<empty>");
+        | _ -> "<empty>")
+   else ();
    ps.pstate_peek)
 
 ;;
 
 
 let bump ps = 
-  (Printf.printf "bumping past: %s\n" (string_of_tok ps.pstate_peek);
+  (if ps.pstate_sess.Session.sess_log_parse
+   then Printf.fprintf ps.pstate_sess.Session.sess_log_out 
+	 "bumping past: %s\n" (string_of_tok ps.pstate_peek)
+   else ();
    ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf)
 ;;
 
@@ -1251,8 +1257,12 @@ and parse_mod_item ps =
       | _ -> raise (unexpected ps)
 
 
-let make_parser tok fname = 
-  Printf.printf "making parser for: %s\n" fname;
+let make_parser sess tok fname = 
+  if sess.Session.sess_log_parse
+  then 
+	Printf.fprintf sess.Session.sess_log_out "making parser for: %s\n" fname
+  else 
+	();
   let lexbuf = Lexing.from_channel (open_in fname) in
   let spos = { lexbuf.Lexing.lex_start_p with Lexing.pos_fname = fname } in
   let cpos = { lexbuf.Lexing.lex_curr_p with Lexing.pos_fname = fname } in
@@ -1262,7 +1272,8 @@ let make_parser tok fname =
       { pstate_peek = first;
         pstate_ctxt = [];
         pstate_lexfun = tok;
-        pstate_lexbuf = lexbuf }
+        pstate_lexbuf = lexbuf;
+		pstate_sess = sess }
 ;;
 
 
@@ -1284,7 +1295,7 @@ let rec parse_crate_entry tok prefix htab ps =
     match peek ps with
         SEMI -> 
           bump ps;
-          let p = make_parser tok (Filename.concat prefix fname) in
+          let p = make_parser ps.pstate_sess tok (Filename.concat prefix fname) in
             parse_raw_mod_items p
               
       | RBRACE -> 
@@ -1325,22 +1336,23 @@ and parse_crate_entries tok fname prefix ps =
       htab
 ;;
 
-let report_error (ps, str) = 
-  Printf.printf "Parser error: %s\n" str;
+let report_error out (ps, str) = 
+  Printf.fprintf out "Parser error: %s\n" str;
   List.iter 
     (fun (cx,(file,line,col)) -> 
-       Printf.printf "%s:%d:%d:E [PARSE CONTEXT] %s\n" file line col cx) 
+       Printf.fprintf out "%s:%d:%d:E [PARSE CONTEXT] %s\n" file line col cx) 
     ps.pstate_ctxt
 ;;
 
-let parse_crate tok fname = 
-  let ps = make_parser tok fname in
+let parse_crate sess tok = 
+  let fname = sess.Session.sess_crate in
+  let ps = make_parser sess tok fname in
   let htab =  
     try 
       parse_crate_entries tok fname (Filename.dirname fname) ps
     with 
         Parse_err perr -> 
-          report_error perr; 
+		  report_error sess.Session.sess_log_out perr; 
           failwith "parse error"
   in
     htab

@@ -180,3 +180,9 @@ twiddling owner IDs or whatever. So:
     fancy MT-safe lockless queues. Because the threads are all going
     to be independently and concurrently hammering on those
     things. But such structures exist.
+
+---
+
+Native pointers are limited, non-transmittable. Native functions are statically imported and
+statically bound, single-entry, CDECL. Crate defn can specify transitive closure of acceptable
+native dependencies, or * if you don't care.

@@ -21,7 +21,8 @@ let next_ty_nonce _ = (ty_nonce := (!ty_nonce) + 1; !ty_nonce)
 
 type ctxt = 
 	{ ctxt_scopes: Ast.scope list;
-	  ctxt_span: Ast.span option; }
+	  ctxt_span: Ast.span option;
+	  ctxt_sess: Session.sess }
 ;;
 
 exception Semant_err of ((Ast.span option) * string)
@@ -31,8 +32,9 @@ let err cx str =
   (Semant_err (cx.ctxt_span, (str)))
 ;;
 
-let	root_ctxt = { ctxt_scopes = []; 
-				  ctxt_span = None }
+let	root_ctxt sess = { ctxt_scopes = []; 
+					   ctxt_span = None;
+					   ctxt_sess = sess }
 ;;
 
 
@@ -428,7 +430,10 @@ let rec resolve_mod_items cx items =
 
 		  
 and resolve_mod_item cx id item =
-  Printf.printf "resolving mod item %s\n" id;
+  if cx.ctxt_sess.Session.sess_log_env
+  then Printf.fprintf cx.ctxt_sess.Session.sess_log_out
+	"resolving mod item %s\n" id
+  else ();
   let span = item.Ast.span in
 	match item.Ast.node with 
 		Ast.MOD_ITEM_mod md ->
@@ -566,7 +571,10 @@ and resolve_lval cx lval =
   match lval.Ast.node with 
 	  Ast.LVAL_base (Ast.BASE_ident id) -> 
 		let _ = lookup_ident cx id in
-		  Printf.printf "lval: %s (resolved)\n" id
+		  if cx.ctxt_sess.Session.sess_log_env
+		  then Printf.fprintf cx.ctxt_sess.Session.sess_log_out			
+			"lval: %s (resolved)\n" id
+		  else ()
 	| _ -> ()
 		
 

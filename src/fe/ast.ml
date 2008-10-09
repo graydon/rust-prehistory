@@ -1,5 +1,3 @@
-open Array;;
-open Hashtbl;;
 
 (* 
  * There are two kinds of rust files:
@@ -10,11 +8,8 @@ open Hashtbl;;
  *)
 
 
-type filename = string
-;;
-
-type pos = (filename * int * int) 
-type span = {lo: pos; hi: pos}
+type span = Session.span
+type pos = Session.pos
 type 'a spanned = { node: 'a; span: span }
 ;;
 
@@ -100,12 +95,13 @@ and ty =
   | TY_chan of ty
   | TY_port of ty
 
+  | TY_mod of (mod_type_items)
+  | TY_prog of ty_prog
+
   | TY_named of name
   | TY_opaque of nonce
       
   | TY_constrained of (ty * constrs)
-  | TY_mod of (mod_type_items)
-  | TY_prog of ty_prog
   | TY_lim of ty
       
 and slot = 

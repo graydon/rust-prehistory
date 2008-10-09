@@ -1,6 +1,11 @@
 (*    
-   Module for writing System V ELF files.
-*)
+ * Module for writing System V ELF files.
+ * 
+ * Presently heavily infected with x86 and elf32 specificities, though
+ * they are reasonably well marked. Needs a fair bit of refactoring to
+ * work for other elf targets.
+ * 
+ *)
 
 open Asm
 ;;
@@ -574,17 +579,17 @@ let elf32_linux_x86_file
   let dynamic_section_name_fixup = new_fixup "string name of '.dynamic' section" in
   let shstrtab_section_name_fixup = new_fixup "string name of '.shstrtab' section" in
 
-  let interpndx      = 1L in  (* Section index of .interp *)
+  (* let interpndx      = 1L in *)  (* Section index of .interp *)
   let textndx        = 2L in  (* Section index of .text *)
   let rodatandx      = 3L in  (* Section index of .rodata *)
   let dynsymndx      = 4L in  (* Section index of .dynsym *)
   let dynstrndx      = 5L in  (* Section index of .dynstr *)
-  let pltndx         = 6L in  (* Section index of .plt *)
-  let gotpltndx      = 7L in  (* Section index of .got.plt *)
-  let relapltndx     = 8L in  (* Section index of .rela.plt *)
+  (* let pltndx         = 6L in *)  (* Section index of .plt *)
+  (* let gotpltndx      = 7L in *)  (* Section index of .got.plt *)
+  (* let relapltndx     = 8L in *)  (* Section index of .rela.plt *)
   let datandx        = 9L in  (* Section index of .data *)
-  let bssndx         = 10L in (* Section index of .bss *)
-  let dynamicndx     = 11L in (* Section index of .dynamic *)
+  (* let bssndx         = 10L in *) (* Section index of .bss *)
+  (* let dynamicndx     = 11L in *) (* Section index of .dynamic *)
   let shstrtabndx    = 12L in (* Section index of .shstrtab *)
 
   let section_header_table_fixup = new_fixup ".section header table" in
@@ -621,7 +626,7 @@ let elf32_linux_x86_file
   in
 
   let section_headers = 
-[|
+	[|
 		(* <null> *)
 		(section_header 
 		   ~shstring_table_fixup: shstrtab_section_fixup
