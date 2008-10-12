@@ -250,12 +250,12 @@ and stmt_alt_type =
 
 and scope_frame = 
 	{
-	  scope_temps: (nonce, (slot * (expr option))) Hashtbl.t;
-	  scope_items: mod_items;
+	  scope_temps: (nonce, (int64 * slot * (expr option))) Hashtbl.t;
+	  scope_items: (ident, (int64 * mod_item)) Hashtbl.t;
 	}
 
 and scope =
-	SCOPE_frame of scope_frame
+	SCOPE_frame of ((int64 ref) * scope_frame)
   | SCOPE_type of mod_type_items
 
 and stmt_block = 

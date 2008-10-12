@@ -874,8 +874,8 @@ and parse_one_or_more_tup_slots_and_idents param_slot ps =
     (arr slots, arr idents)
 	  
 and new_frame_scope _ = 
-  Ast.SCOPE_frame { Ast.scope_temps = Hashtbl.create 4;
-					Ast.scope_items = Hashtbl.create 4; }
+  Ast.SCOPE_frame ((ref 0L),  { Ast.scope_temps = Hashtbl.create 4;
+								Ast.scope_items = Hashtbl.create 4; })
       
 and parse_block ps = 
   let apos = lexpos ps in

@@ -73,7 +73,15 @@ let crate_items =
   Ll1parser.parse_crate sess Lexer.token 
 ;;
 
-let _ = Semant.resolve_mod_items (Semant.root_ctxt sess) crate_items
+let _ = 
+  try 
+	Semant.resolve_mod_items (Semant.root_ctxt sess) crate_items
+  with
+	  Semant.Semant_err (spano, str) -> 
+		match spano with 
+			None -> Printf.printf "semantic error: %s\n" str
+		  | Some span -> 			  
+			  Printf.printf "%s:E:%s\n" (Session.fmt_span span) str
 ;;
 
 let _ = 
