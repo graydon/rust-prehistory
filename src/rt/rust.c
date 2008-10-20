@@ -1,6 +1,6 @@
-int
+void
 rust_start()
 {
-  printf("control is in librustrt.so\n");
-  return 37;
+  printf("control is in rust runtime library\n");
+  exit(37);
 }

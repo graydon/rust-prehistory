@@ -556,17 +556,18 @@ let pe_text_section
 	~(text_fixup:fixup)
     : item =
   let
-	  emit = Il.new_emitter 5 	
+	  e = Il.new_emitter 5 	
   in
   let 
 	  exit_fn_imm = Il.Imm (ADD ((IMM pe_image_base),
 								 (M_POS exit_fn_fixup)))
   in
-	Il.emit emit (Il.MOV Il.DATA32) (Il.HWreg 2) (Il.Deref (exit_fn_imm, 0L));
-	Il.emit emit Il.CCALL (Il.HWreg 2) (Il.Imm (IMM 7L));
+	Il.emit e (Il.MOV Il.DATA32) (Il.HWreg 2) (Il.Deref (exit_fn_imm, 0L));
+	Il.emit e (Il.CPUSH Il.DATA32) (Il.Imm (IMM 7L)) Il.Nil;
+	Il.emit e Il.CCALL (Il.HWreg 2) Il.Nil;
 	def_aligned
 	  text_fixup
-	  (SEQ (Array.map X86.select_insn emit.Il.emit_triples))
+	  (SEQ (Array.map X86.select_insn e.Il.emit_triples))
 		
 (*********************************************************************************)
 
@@ -597,7 +598,7 @@ let test_imports =
       [| 
 		{ 
 		  pe_import_name_fixup = new_fixup "import name";
-		  pe_import_name = "rs_init";
+		  pe_import_name = "rust_start";
 		  pe_import_address_fixup = new_fixup "import address";
 		} 
       |];
