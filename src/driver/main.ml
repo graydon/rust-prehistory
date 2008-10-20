@@ -53,18 +53,18 @@ let argspecs =
 Arg.parse 
   argspecs 
   (fun arg -> sess.Session.sess_crate <- arg)
-  ("usage: " ^Sys.argv.(0) ^ " [options] CRATE_FILE.rc\n")
+  ("usage: " ^ Sys.argv.(0) ^ " [options] CRATE_FILE.rc\n")
 ;;
 
 let _ =
   if sess.Session.sess_out = "" 
-  then (Printf.printf "Error: no output file specified\n"; exit 1)
+  then (Printf.fprintf stderr "Error: no output file specified\n"; exit 1)
   else ()
 ;;
   
 let _ = 
   if sess.Session.sess_crate = "" 
-  then (Printf.printf "Error: empty crate filename\n"; exit 1)
+  then (Printf.fprintf stderr "Error: empty crate filename\n"; exit 1)
   else ()
 ;;
 
@@ -81,7 +81,7 @@ let _ =
 		match spano with 
 			None -> Printf.printf "semantic error: %s\n" str
 		  | Some span -> 			  
-			  Printf.printf "%s:E:%s\n" (Session.fmt_span span) str
+			  Printf.fprintf stderr "%s:E:%s\n" (Session.fmt_span span) str
 ;;
 
 let _ = 

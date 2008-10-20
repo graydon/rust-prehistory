@@ -52,17 +52,17 @@ type proto =
 ;;
 
 type name_base = 
-	BASE_ident of ident
+    BASE_ident of ident
   | BASE_temp of nonce
   | BASE_app of (ident * (ty array))
 
 and name_component = 
-	COMP_ident of ident
+    COMP_ident of ident
   | COMP_app of (ident * (ty array))
   | COMP_idx of int
 
 and name = 
-	NAME_base of name_base
+    NAME_base of name_base
   | NAME_ext of (name * name_component)
 
 (* 
@@ -98,8 +98,8 @@ and ty =
   | TY_mod of (mod_type_items)
   | TY_prog of ty_prog
 
-  | TY_named of name
   | TY_opaque of nonce
+  | TY_named of name
       
   | TY_constrained of (ty * constrs)
   | TY_lim of ty
@@ -139,7 +139,7 @@ and carg_base =
   | BASE_named of name_base
       
 and carg =
-	CARG_base of carg_base
+    CARG_base of carg_base
   | CARG_ext of (carg * name_component)
 
 and constr = 
@@ -177,8 +177,6 @@ and ty_iso =
 
       
 and ty_tup = slot array
-
-and tup_lvals = lval array
 
 and tup_expr = expr array
            
@@ -236,33 +234,30 @@ and stmt' =
 and stmt = stmt' spanned
 
 and stmt_alt_tag = 
-	{
-	  alt_tag_expr: expr;
-	  alt_tag_arms: (ident, (slot * stmt)) Hashtbl.t;
-	}
+    {
+      alt_tag_expr: expr;
+      alt_tag_arms: (ident, (slot * stmt)) Hashtbl.t;
+    }
 
 and stmt_alt_type = 
     { 
-	  alt_type_expr: expr;
+      alt_type_expr: expr;
       alt_type_arms: (ident * slot * stmt) array;
       alt_type_else: stmt option;
     }
 
-and scope_frame = 
-	{
-	  scope_temps: (nonce, (int64 * slot * (expr option))) Hashtbl.t;
-	  scope_items: (ident, (int64 * mod_item)) Hashtbl.t;
-	}
-
-and scope =
-	SCOPE_frame of ((int64 ref) * scope_frame)
-  | SCOPE_type of mod_type_items
+and frame = 
+    {
+      mutable frame_size: int64;
+      frame_temps: (nonce, (int64 * slot * (expr option))) Hashtbl.t;
+      frame_items: (ident, (int64 * int * mod_item)) Hashtbl.t;
+    }
 
 and stmt_block = 
-	{
-	  block_scope: scope;
-	  block_stmts: stmt array;
-	}
+    {
+      block_frame: frame;
+      block_stmts: stmt array;
+    }
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
@@ -285,14 +280,14 @@ and stmt_while =
 and stmt_foreach = 
     {
       foreach_proto: proto;
-	  foreach_scope: scope;
+      foreach_frame: frame;
       foreach_call: (lval * expr array);
       foreach_body: stmt;
     }
       
 and stmt_for = 
     {
-	  for_scope: scope;
+      for_frame: frame;
       for_init: stmt;
       for_test: expr;
       for_step: stmt;
@@ -349,13 +344,23 @@ and lit_custom =
 and lval_component =
     COMP_named of name_component
   | COMP_expr of expr
-      
+    
+and lval_resolved = 
+    RES_fp (* frame pointer   *)
+  | RES_pp (* proc pointer    *)
+  | RES_cp (* crate pointer   *)
+  | RES_rp (* runtime pointer *)
+  | RES_off of (int64 * lval_resolved)
+  | RES_deref of lval_resolved
+      (* FIXME: will need more nodes in here for exterior-deref and translated arithmetic *)
+
 and lval' = 
-	LVAL_base of name_base
+    LVAL_base of name_base
   | LVAL_ext of (lval' * lval_component)
+  | LVAL_resolved of (ty * lval_resolved)
 
 and lval = lval' spanned
-	  
+      
 and binop =    
     BINOP_or
   | BINOP_and
@@ -479,3 +484,11 @@ and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
 and mod_items = (ident, mod_item) Hashtbl.t
 ;;
+
+(* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
+ *)

@@ -1,3 +1,4 @@
+
 (* 
  * This module performs most of the semantic lowering:
  *
@@ -20,7 +21,8 @@ let next_ty_nonce _ = (ty_nonce := (!ty_nonce) + 1; !ty_nonce)
 ;;
 
 type ctxt = 
-	{ ctxt_scopes: Ast.scope list;
+	{ ctxt_frame_scopes: Ast.frame list;
+	  ctxt_type_scopes: Ast.mod_type_items list;
 	  ctxt_span: Ast.span option;
 	  ctxt_sess: Session.sess;
 	  ctxt_log: out_channel option;
@@ -34,7 +36,8 @@ let err cx str =
   (Semant_err (cx.ctxt_span, (str)))
 ;;
 
-let	root_ctxt sess = { ctxt_scopes = []; 
+let	root_ctxt sess = { ctxt_frame_scopes = []; 
+					   ctxt_type_scopes = [];
 					   ctxt_span = None;
 					   ctxt_sess = sess;
 					   ctxt_log = (if sess.Session.sess_log_env
@@ -109,15 +112,15 @@ and size_of_slot cx s =
 	| Ast.SLOT_auto -> raise (err cx "SLOT_auto in size_of_slot")
 ;;
 
-let layout_scope cx scope = 
-  match scope with 
-	  Ast.SCOPE_type ti -> ()
-	| Ast.SCOPE_frame (len, sf) -> 
-		let get_temp_slot nonce (i, s, eo) sz = ((nonce, i, s, eo) :: sz) in
-		let get_named_slot name (i, item) sz = ((name, i, item) :: sz) in
-		let temp_slots = Hashtbl.fold get_temp_slot sf.Ast.scope_temps [] in 
-		let named_items = Hashtbl.fold get_named_slot sf.Ast.scope_items [] in
-		let temp_slots = 
+let layout_frame 
+	(cx:ctxt) 
+	(frame:Ast.frame) 
+	: unit = 
+  let get_temp_slot nonce (i, s, eo) sz = ((nonce, i, s, eo) :: sz) in
+  let get_named_slot name (i, n, item) sz = ((name, i, n, item) :: sz) in
+  let temp_slots = Hashtbl.fold get_temp_slot frame.Ast.frame_temps [] in 
+  let named_items = Hashtbl.fold get_named_slot frame.Ast.frame_items [] in
+  let temp_slots = 
 		  Array.of_list 
 			(Sort.list 
 			   (fun (a, _, _, _) (b, _, _, _) -> a < b) temp_slots) 
@@ -125,53 +128,63 @@ let layout_scope cx scope =
 		let named_items = 
 		  Array.of_list 
 			(Sort.list 
-			   (fun (a, _, _) (b, _, _) -> a < b) named_items) 
+			   (fun (_, _, a, _) (_, _, b, _) -> a < b) named_items) 
 		in
-		  len := 0L;
-		  Hashtbl.clear sf.Ast.scope_temps;
-		  Hashtbl.clear sf.Ast.scope_items;
+		  frame.Ast.frame_size <- 0L;
+		  Hashtbl.clear frame.Ast.frame_temps;
+		  Hashtbl.clear frame.Ast.frame_items;
 		  for i = 0 to (Array.length temp_slots) - 1 do
 			let (nonce, _, s, eo) = temp_slots.(i) in
 			let sz = size_of_slot cx s in
 			  (match cx.ctxt_log with 
 				   None -> ()
-				 | Some out -> Printf.printf "laying out temp item %d: %Ld bytes @ %Ld\n" i sz (!len));
-			  Hashtbl.add sf.Ast.scope_temps nonce ((!len), s, eo);
-			  len := Int64.add (!len) sz
+				 | Some out -> Printf.printf 
+					 "laying out temp item %d: %Ld bytes @ %Ld\n" 
+					   i sz frame.Ast.frame_size);
+			  Hashtbl.add frame.Ast.frame_temps nonce (frame.Ast.frame_size, s, eo);
+			  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
 		  done;
 		  for i = 0 to (Array.length named_items) - 1 do
-			let (name, _, item) = named_items.(i) in
+			let (name, _, n, item) = named_items.(i) in
 			let sz = match item.Ast.node with 
 				Ast.MOD_ITEM_slot (slot, _) -> size_of_slot cx slot 
 			  | _ -> 0L
 			in
 			  (match cx.ctxt_log with 
 				   None -> ()
-				 | Some out -> Printf.printf "laying out item %d (%s): %Ld bytes @ %Ld\n" i name sz (!len));
-			  Hashtbl.add sf.Ast.scope_items name ((!len), item);
-			  len := Int64.add (!len) sz
+				 | Some out -> Printf.printf 
+					 "laying out item %d (%s): %Ld bytes @ %Ld\n" 
+					   i name sz frame.Ast.frame_size);
+			  Hashtbl.add frame.Ast.frame_items name (frame.Ast.frame_size, n, item);
+			  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
 		  done
 ;; 
 
-let extend_ctxt_scopes cx items =  
-  let items' = Hashtbl.create (Hashtbl.length items) in 
-  let insert_item name item = 
-	Hashtbl.add items' name (-1L, item)
-  in
-	Hashtbl.iter insert_item items;	
-  let scope = Ast.SCOPE_frame 
-	((ref 0L), { Ast.scope_temps = Hashtbl.create 0;
-				 Ast.scope_items = items' })
-  in  
-	layout_scope cx scope;
-	let scopes = (scope :: cx.ctxt_scopes) 
+let extend_ctxt_by_frame 
+	(cx:ctxt)
+	(items:(Ast.ident * Ast.mod_item) array)
+	: ctxt = 
+  let items' = Hashtbl.create (Array.length items) in
+	for i = 0 to (Array.length items) - 1
+	do
+	  let (ident, item) = items.(i) in 
+		Hashtbl.add items' ident (-1L, i, item)
+	done;
+	let frame = 
+	  { Ast.frame_size = 0L;
+		Ast.frame_temps = Hashtbl.create 0;
+		Ast.frame_items = items'; }
 	in
-	  { cx with ctxt_scopes = scopes }
+	  layout_frame cx frame;
+	  { cx with ctxt_frame_scopes = (frame :: cx.ctxt_frame_scopes) }
 ;;
 
-let extend_ctxt_scopes_ty cx tyitems =  
-  let scopes = (Ast.SCOPE_type tyitems) :: cx.ctxt_scopes in
-	{ cx with ctxt_scopes = scopes }
+let extend_ctxt_by_mod_ty 
+	(cx:ctxt) 
+	(tyitems:Ast.mod_type_items) 
+	: ctxt = 
+  let scopes = tyitems :: cx.ctxt_type_scopes in
+	{ cx with ctxt_type_scopes = scopes }
 ;;
 
   
@@ -184,8 +197,7 @@ let param_ctxt cx params span =
 	if nparams = 0
 	then cx
 	else 
-	  let htab = Hashtbl.create nparams in
-	  let addty (lim, ident) = 
+	  let bind (lim, ident) = 
 		let nonce = next_ty_nonce () in
 		let item' = (Ast.MOD_ITEM_public_type
 					   { Ast.decl_params = [| |];
@@ -193,10 +205,9 @@ let param_ctxt cx params span =
 											  Ast.LIMITED -> (Ast.TY_lim (Ast.TY_opaque nonce))
 											| Ast.UNLIMITED -> (Ast.TY_opaque nonce))})
 		in
-		  Hashtbl.add htab ident { Ast.node = item'; Ast.span = span }
+		  (ident, { Ast.node = item'; Ast.span = span })
 	  in
-		Array.iter addty params;
-		extend_ctxt_scopes cx htab
+		extend_ctxt_by_frame cx (Array.map bind params)
 ;;
 
 (* 
@@ -232,16 +243,26 @@ let apply_ctxt_generic cx extend ctor params args span =
 		  extend cx htab
 ;;
 
+let linearize_items_for_frame 
+	(items:(Ast.ident,Ast.mod_item) Hashtbl.t)
+	: ((Ast.ident * Ast.mod_item) array) = 
+	let get_named_slot name item sz = ((name, item) :: sz) in
+	let named_items = Hashtbl.fold get_named_slot items [] in
+	  (Array.of_list 
+		 (Sort.list 
+			(fun (a, _) (b, _) -> a < b) named_items))
+;;
+
 let apply_ctxt cx params args span = 
   apply_ctxt_generic cx 
-	extend_ctxt_scopes 
+	(fun cx items -> extend_ctxt_by_frame cx (linearize_items_for_frame items))
 	(fun x -> Ast.MOD_ITEM_public_type x)
 	params args span
 ;;
 
 let apply_ctxt_ty cx params args span = 
   apply_ctxt_generic cx 
-	extend_ctxt_scopes_ty
+	extend_ctxt_by_mod_ty
 	(fun x -> Ast.MOD_TYPE_ITEM_public_type x)
 	params args span
 ;;
@@ -253,50 +274,67 @@ let apply_ctxt_ty cx params args span =
  * have two separate flavours, those formed from modules and those 
  * formed from module *types*. The latter can nest in the former,
  * but not vice-versa.
+ * 
+ * All lookup functions should therefore consult the possibly-empty
+ * nested type-scope before looking in 
+ * the enclosing frame scope list.
  *)
 
 type binding = 
-	BINDING_item of (int64 * Ast.mod_item)
+	BINDING_item of (Ast.lval_resolved * Ast.mod_item)
+  | BINDING_temp of (Ast.lval_resolved * Ast.slot * (Ast.expr option))
   | BINDING_type_item of Ast.mod_type_item
-  | BINDING_temp of (int64 * Ast.slot * (Ast.expr option))
 
-let rec lookup_ident cx ident = 
-  match cx.ctxt_scopes with 
-	  [] -> raise (err cx ("unknown identifier: '" ^ ident ^ "'"))
-	| (x::xs) -> 
-		match x with 
-			Ast.SCOPE_frame (_, sf) -> 
-			  let tab = sf.Ast.scope_items in
-				if Hashtbl.mem tab ident
-				then 
-				  let (i, item) = Hashtbl.find tab ident in 
-					({ cx with ctxt_span = Some item.Ast.span }, 
-					 BINDING_item (i, item))
-				else lookup_ident { cx with ctxt_scopes = xs } ident
-		  | Ast.SCOPE_type st -> 
-			  if Hashtbl.mem st ident
-			  then 
-				let tyitem = Hashtbl.find st ident in 
-				  ({ cx with ctxt_span = Some tyitem.Ast.span }, 
-				   BINDING_type_item tyitem)
-			  else lookup_ident { cx with ctxt_scopes = xs } ident
+let rec lookup_ident 
+	(cx:ctxt) 
+	(fp:Ast.lval_resolved) 
+	(ident:Ast.ident)
+	: (ctxt * binding) = 
+  match cx.ctxt_type_scopes with 
+	  (x::xs) -> 
+		if Hashtbl.mem x ident
+		then 
+		  let tyitem = Hashtbl.find x ident in 
+			({ cx with ctxt_span = Some tyitem.Ast.span }, 
+			 BINDING_type_item tyitem)
+		else 
+		  lookup_ident 
+			{ cx with ctxt_type_scopes = xs } fp ident
+	| [] -> 
+		(match cx.ctxt_frame_scopes with 
+			 [] -> raise (err cx ("unknown identifier: '" ^ ident ^ "'"))
+		   | (x::xs) -> 
+			   let tab = x.Ast.frame_items in
+				 if Hashtbl.mem tab ident
+				 then 
+				   let (off, n, item) = Hashtbl.find tab ident in
+					 ({cx with ctxt_span = Some item.Ast.span}, 
+					  BINDING_item (Ast.RES_off (off, fp), item))
+				 else 
+				   lookup_ident 
+					 { cx with ctxt_frame_scopes = xs } 
+					 (Ast.RES_deref (Ast.RES_off (0L, fp))) ident)
 ;;
 
 
-let rec lookup_temp cx temp = 
-  match cx.ctxt_scopes with 
+let rec lookup_temp (cx:ctxt) 
+	(fp:Ast.lval_resolved) 
+	(temp:Ast.nonce) 
+	: (ctxt * binding) = 
+  match cx.ctxt_frame_scopes with 
 	  [] -> raise (err cx ("unknown temporary: '" ^ (string_of_int temp) ^ "'"))
 	| (x::xs) -> 
-		match x with 
-			Ast.SCOPE_frame (_, sf) -> 
-			  let tab = sf.Ast.scope_temps in
-				if Hashtbl.mem tab temp
-				then 
-				  let se = Hashtbl.find tab temp in 
-					({ cx with ctxt_span = None }, 
-					 BINDING_temp se)
-				else lookup_temp { cx with ctxt_scopes = xs } temp
-		  | _ -> lookup_temp { cx with ctxt_scopes = xs } temp
+		let tab = x.Ast.frame_temps in
+		if Hashtbl.mem tab temp
+		then 
+		  let (off, slot, eo) = Hashtbl.find tab temp in 
+			({ cx with ctxt_span = None }, 
+			 BINDING_temp (Ast.RES_off (off, fp), slot, eo))
+		else 
+		  lookup_temp 
+			{ cx with ctxt_frame_scopes = xs } 
+			(Ast.RES_deref (Ast.RES_off (0L, fp)))
+			temp
 ;;
 
 let rec mod_type_of_mod m = 
@@ -350,12 +388,6 @@ and mod_type_item_of_mod_item item =
 ;;
 
 
-let mod_scope items = 
-  { Ast.scope_temps = Hashtbl.create 4;
-	Ast.scope_items = items; }
-;;
-
-
 let type_component_of_type_item cx tyitem comp = 
   match comp with 
 	  Ast.COMP_ident id -> 
@@ -366,7 +398,7 @@ let type_component_of_type_item cx tyitem comp =
 				 if Hashtbl.mem tyitems id
 				 then 
 				   let cx = param_ctxt cx params tyitem.Ast.span in
-				   let cx = extend_ctxt_scopes_ty cx tyitems in
+				   let cx = extend_ctxt_by_mod_ty cx tyitems in
 				   let ty_item = (Hashtbl.find tyitems id) in
 					 (cx, ty_item)
 				 else raise (err cx ("unknown component of module type: '" ^ id ^ "'"))
@@ -453,9 +485,9 @@ let rec lookup cx
 	(extfn : ctxt -> (ctxt * 'a) -> Ast.name_component -> (ctxt * 'a)) 
 	name = 
   match name with 
-	  Ast.NAME_base (Ast.BASE_ident id) -> basefn cx (lookup_ident cx id)
+	  Ast.NAME_base (Ast.BASE_ident id) -> basefn cx (lookup_ident cx Ast.RES_fp id)
 	| Ast.NAME_base (Ast.BASE_app (id, args)) -> 
-		let (cx, binding) = lookup_ident cx id in
+		let (cx, binding) = lookup_ident cx Ast.RES_fp id in
 		  (match binding with 
 			   BINDING_item (i, bi) -> 
 				 let ((cx':ctxt), item) = apply_args_to_item cx bi args in 
@@ -466,7 +498,7 @@ let rec lookup cx
 			 | BINDING_temp _ -> 
 				 raise (err cx "applying types to temporary binding"))
 	| Ast.NAME_base (Ast.BASE_temp temp) -> 
-		basefn cx (lookup_temp cx temp)
+		basefn cx (lookup_temp cx Ast.RES_fp temp)
 	| Ast.NAME_ext (base, comp) -> 
 		let base' = lookup cx basefn extfn base in
 		  extfn cx base' comp 
@@ -548,7 +580,7 @@ let lookup_type cx name =
 
 
 let rec resolve_mod_items cx items = 
-  let cx = extend_ctxt_scopes cx items in
+  let cx = extend_ctxt_by_frame cx (linearize_items_for_frame items) in
 	Hashtbl.iter (resolve_mod_item cx) items
 
 		  
@@ -588,7 +620,6 @@ and resolve_mod_item cx id item =
 and resolve_fn span cx fn = 
   let bind = fn.Ast.fn_bind in
   let nbind = Array.length bind in
-  let htab = Hashtbl.create nbind in
   let slots = 
 	match fn.Ast.fn_ty.Ast.fn_sig.Ast.sig_input_slot with
 		Ast.SLOT_interior (Ast.TY_tup slots) -> 
@@ -597,19 +628,18 @@ and resolve_fn span cx fn =
 		  else slots
 	  | slot -> [| slot |]
   in
-  let addslot i s = 
+  let mapslot i s = 
 	let item' = (Ast.MOD_ITEM_slot (s, None)) in
 	let item = { Ast.node = item'; Ast.span = span } in
-	  Hashtbl.add htab bind.(i) item
+	  (bind.(i), item)
   in
-	Array.iteri addslot slots;	  
-	let cx = extend_ctxt_scopes cx htab in
-	  resolve_stmt cx fn.Ast.fn_body
+  let cx = extend_ctxt_by_frame cx (Array.mapi mapslot slots) in
+	resolve_stmt cx fn.Ast.fn_body
 
 		
 and resolve_prog cx prog = 
   let items = prog.Ast.prog_mod in
-  let cx = extend_ctxt_scopes cx items in
+  let cx = extend_ctxt_by_frame cx (linearize_items_for_frame items) in
 	Hashtbl.iter (resolve_mod_item cx) items;
 	resolve_init cx prog.Ast.prog_init;
   	resolve_stmt_option cx prog.Ast.prog_main;
@@ -622,11 +652,11 @@ and resolve_init cx init =
 
 and resolve_block cx block = 
   let cx' = 
-	{ cx with ctxt_scopes = 
-		block.Ast.block_scope :: cx.ctxt_scopes } 
+	{ cx with ctxt_frame_scopes = 
+		block.Ast.block_frame :: cx.ctxt_frame_scopes } 
   in
-	Array.iter (resolve_stmt cx') block.Ast.block_stmts;
-	layout_scope cx block.Ast.block_scope
+	layout_frame cx block.Ast.block_frame;
+	Array.iter (resolve_stmt cx') block.Ast.block_stmts
 
   
 and resolve_ty cx t = 
@@ -694,7 +724,7 @@ and resolve_expr cx expr =
 and resolve_lval cx lval = 
   match lval.Ast.node with 
 	  Ast.LVAL_base (Ast.BASE_ident id) -> 
-		let _ = lookup_ident cx id in
+		let _ = lookup_ident cx Ast.RES_fp id in
 		  if cx.ctxt_sess.Session.sess_log_env
 		  then Printf.fprintf cx.ctxt_sess.Session.sess_log_out			
 			"lval: %s (resolved)\n" id
@@ -730,23 +760,23 @@ and resolve_stmt cx stmt =
 		  resolve_lval cx fn;
 		  Array.iter (resolve_expr cx) args;
 		  let cx' = 
-			{ cx with ctxt_scopes = 
-				f.Ast.foreach_scope :: cx.ctxt_scopes } 
+			{ cx with ctxt_frame_scopes = 
+				f.Ast.foreach_frame :: cx.ctxt_frame_scopes } 
 		  in
+			layout_frame cx f.Ast.foreach_frame;
 			resolve_stmt cx' f.Ast.foreach_body;
-			layout_scope cx f.Ast.foreach_scope;
 			()
 			  
 	| Ast.STMT_for f -> 
 		resolve_stmt cx f.Ast.for_init;
 		let cx' = 
-		  { cx with ctxt_scopes =
-			  f.Ast.for_scope :: cx.ctxt_scopes }
+		  { cx with ctxt_frame_scopes =
+			  f.Ast.for_frame :: cx.ctxt_frame_scopes }
 		in
+		  layout_frame cx f.Ast.for_frame;
 		  resolve_expr cx' f.Ast.for_test;
 		  resolve_stmt cx' f.Ast.for_step;
 		  resolve_stmt cx' f.Ast.for_body;
-		  layout_scope cx f.Ast.for_scope;
 
 	| Ast.STMT_if i -> 
 		resolve_expr cx i.Ast.if_test;
@@ -768,22 +798,13 @@ and resolve_stmt cx stmt =
 		resolve_block cx b
 
 	| Ast.STMT_decl d -> 
-		let scope = (match cx.ctxt_scopes with 
-						 ((Ast.SCOPE_frame (_, f))::_) -> f
-					   | _ -> raise (err cx "non-frame scope containing decl"))
-		in
-		  (match d with 
-			   Ast.DECL_mod_item (id, item) -> 
-				 Hashtbl.add scope.Ast.scope_items id (-1L, item);
-				 resolve_mod_item cx id item
-				   
-			 | Ast.DECL_temp (slot, nonce, eo) -> 
-				 let slot = match slot with 
-					 Ast.SLOT_auto -> infer_slot_from_init cx eo 
-				   | other -> other
-				 in
-				   Hashtbl.add scope.Ast.scope_temps nonce (-1L, slot, eo))
-
+		(match d with 
+			 Ast.DECL_mod_item (id, item) -> 
+			   resolve_mod_item cx id item
+				 
+		   | Ast.DECL_temp (slot, nonce, eo) -> 
+			   resolve_expr_option cx eo)
+			
 	| Ast.STMT_copy (lval, expr) -> 
 		resolve_lval cx lval;
 		resolve_expr cx expr;
@@ -858,3 +879,11 @@ let rec trans_stmt emit stmt =
 		  dst
 
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")
+
+(* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
+ *)
