@@ -359,7 +359,7 @@ and lval' =
   | LVAL_ext of (lval' * lval_component)
   | LVAL_resolved of (ty * lval_resolved)
 
-and lval = lval' spanned
+and lval = (lval' ref) spanned
       
 and binop =    
     BINOP_or

@@ -112,6 +112,15 @@ and size_of_slot cx s =
 	| Ast.SLOT_auto -> raise (err cx "SLOT_auto in size_of_slot")
 ;;
 
+let type_of_slot cx s = 
+  match s with 
+	  Ast.SLOT_exterior t -> t
+	| Ast.SLOT_read_alias t -> t
+	| Ast.SLOT_write_alias t -> t
+	| Ast.SLOT_interior t -> t
+	| Ast.SLOT_auto -> raise (err cx "SLOT_auto in type_of_slot")
+;;
+
 let layout_frame 
 	(cx:ctxt) 
 	(frame:Ast.frame) 
@@ -612,7 +621,8 @@ and resolve_mod_item cx id item =
 			 | Ast.SLOT_auto -> raise (err cx "auto slot inference not implemented"));
 		  (match eo with
 			   None -> ()
-			 | Some e -> resolve_expr cx e)
+			 | Some e -> 
+				 let _ = resolve_expr cx e in ())
 
 	  | _ -> ()
 
@@ -720,16 +730,30 @@ and resolve_expr cx expr =
 		  Array.iter (resolve_expr cx) v
 	  | Ast.EXPR_literal _ -> ()
 		  
-		  
+
 and resolve_lval cx lval = 
-  match lval.Ast.node with 
-	  Ast.LVAL_base (Ast.BASE_ident id) -> 
-		let _ = lookup_ident cx Ast.RES_fp id in
-		  if cx.ctxt_sess.Session.sess_log_env
-		  then Printf.fprintf cx.ctxt_sess.Session.sess_log_out			
-			"lval: %s (resolved)\n" id
-		  else ()
-	| _ -> ()
+  let lval' = 
+	match !(lval.Ast.node) with 
+		Ast.LVAL_base (Ast.BASE_ident id) -> 
+		  let (cx, binding) = lookup_ident cx Ast.RES_fp id in
+			if cx.ctxt_sess.Session.sess_log_env
+			then Printf.fprintf cx.ctxt_sess.Session.sess_log_out			
+			  "lval: %s (resolved)\n" id
+			else ();
+			(match binding with 
+				 BINDING_item (resolved, item) -> 
+				   (match item.Ast.node with 
+						Ast.MOD_ITEM_slot (slot, _) -> 
+						  Ast.LVAL_resolved (type_of_slot cx slot, resolved)
+					  | _ -> 
+						  raise (err cx ("lval '" ^ id ^ "' resolved to a non-slot item, not yet handled")))
+			   | BINDING_temp (resolved, slot, _) -> 
+				   Ast.LVAL_resolved (type_of_slot cx slot, resolved)
+			   | BINDING_type_item _ -> 
+				   raise (err cx ("lval '" ^ id ^ "' resolved to a type name")))
+	  | _ -> !(lval.Ast.node)
+  in
+	lval.Ast.node := lval'
 		
 
 and resolve_stmt_option cx stmtopt = 

@@ -529,7 +529,7 @@ and parse_lval_component ps =
 	| _ -> ([||], Ast.COMP_named (parse_name_component ps))
       
 
-and parse_lval ps = 
+and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) = 
   let apos = lexpos ps in 
   let base = Ast.LVAL_base (parse_name_base ps) in 
 	match peek ps with 
@@ -538,10 +538,10 @@ and parse_lval ps =
 		  let (stmts', comps) = arj1st (one_or_more DOT parse_lval_component ps) in 
 		  let bpos = lexpos ps in 
 		  let lval' = Array.fold_left (fun x y -> Ast.LVAL_ext (x, y)) base comps in
-			(stmts', span apos bpos lval')
+			(stmts', span apos bpos (ref lval'))
 	  | _ ->
 		  let bpos = lexpos ps in 
-			([||], span apos bpos base)
+			([||], span apos bpos (ref base))
   
 
 and parse_constraint ps = 
@@ -704,7 +704,7 @@ and parse_expr_list bra ket ps =
 and build_tmp slot apos bpos eo = 
   let nonce = (tmp_nonce := (!tmp_nonce) + 1; !tmp_nonce) in
   let decl = span apos bpos (Ast.STMT_decl (Ast.DECL_temp (slot, nonce, eo))) in
-  let tmp = span apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce)) in
+  let tmp = span apos bpos (ref (Ast.LVAL_base (Ast.BASE_temp nonce))) in
 	(nonce, tmp, decl)
 
 and parse_atomic_expr ps =
@@ -1039,8 +1039,8 @@ and parse_stmts ps =
 						 None -> None
 					   | Some _ -> 
 						   let ext = Ast.COMP_named (Ast.COMP_idx i) in
-						   let lval = Ast.LVAL_ext (tmp.Ast.node, ext) in
-						   let expr' = Ast.EXPR_lval (span apos bpos lval) in
+						   let lval' = Ast.LVAL_ext ((!(tmp.Ast.node)), ext) in
+						   let expr' = Ast.EXPR_lval (span apos bpos (ref lval')) in
 							 Some (span apos bpos expr') 
 				   in
 				   let item = Ast.MOD_ITEM_slot (slot, expropt) in
@@ -1105,8 +1105,8 @@ and parse_stmts ps =
 			
 		  let make_copy i dst = 
 			let ext = Ast.COMP_named (Ast.COMP_idx i) in
-			let src = Ast.LVAL_ext (tmp.Ast.node, ext) in
-			let e' = Ast.EXPR_lval (span apos bpos src) in
+			let src = Ast.LVAL_ext (!(tmp.Ast.node), ext) in
+			let e' = Ast.EXPR_lval (span apos bpos (ref src)) in
 			let e = span apos bpos e' in
 			  span apos bpos (Ast.STMT_copy (dst, e))
 		  in
