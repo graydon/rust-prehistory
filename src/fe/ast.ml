@@ -100,6 +100,7 @@ and ty =
 
   | TY_opaque of nonce
   | TY_named of name
+  | TY_type
       
   | TY_constrained of (ty * constrs)
   | TY_lim of ty
@@ -177,8 +178,6 @@ and ty_iso =
 
       
 and ty_tup = slot array
-
-and tup_expr = expr array
            
 and ty_sig = 
     { 
@@ -214,9 +213,9 @@ and stmt' =
   | STMT_for of stmt_for
   | STMT_if of stmt_if
   | STMT_try of stmt_try
-  | STMT_put of (proto option * expr option)
-  | STMT_ret of (proto option * expr option)
-  | STMT_be of (proto option * lval * (expr array))
+  | STMT_put of (proto option * lval option)
+  | STMT_ret of (proto option * lval option)
+  | STMT_be of (proto option * lval * (lval array))
   | STMT_alt_tag of stmt_alt_tag
   | STMT_alt_type of stmt_alt_type
   | STMT_alt_port of stmt_alt_port
@@ -224,9 +223,9 @@ and stmt' =
   | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
   | STMT_block of stmt_block
-  | STMT_copy of (lval * expr)
-  | STMT_call of (lval * lval * (expr array))
-  | STMT_send of (lval * expr)
+  | STMT_copy of (lval * lval)
+  | STMT_call of (lval * lval * (lval array))
+  | STMT_send of (lval * lval)
   | STMT_recv of (lval * lval)
   | STMT_decl of stmt_decl 
   | STMT_use of (ty * ident * lval)
@@ -235,13 +234,13 @@ and stmt = stmt' spanned
 
 and stmt_alt_tag = 
     {
-      alt_tag_expr: expr;
+      alt_tag_lval: lval;
       alt_tag_arms: (ident, (slot * stmt)) Hashtbl.t;
     }
 
 and stmt_alt_type = 
     { 
-      alt_type_expr: expr;
+      alt_type_lval: lval;
       alt_type_arms: (ident * slot * stmt) array;
       alt_type_else: stmt option;
     }
@@ -266,14 +265,14 @@ and stmt_decl =
       
 and stmt_alt_port = 
     { 
-      (* else expr is a timeout value, a b64 count of seconds. *)
+      (* else lval is a timeout value, a b64 count of seconds. *)
       alt_port_arms: (lval * lval) array;
-      alt_port_else: (expr * stmt) option;
+      alt_port_else: (lval * stmt) option;
     }
 
 and stmt_while = 
     {
-      while_expr: expr;
+      while_lval: ((stmt array) * lval);
       while_body: stmt;
     }
       
@@ -281,7 +280,7 @@ and stmt_foreach =
     {
       foreach_proto: proto;
       foreach_frame: frame;
-      foreach_call: (lval * expr array);
+      foreach_call: (lval * lval array);
       foreach_body: stmt;
     }
       
@@ -289,14 +288,14 @@ and stmt_for =
     {
       for_frame: frame;
       for_init: stmt;
-      for_test: expr;
+      for_test: ((stmt array) * lval);
       for_step: stmt;
       for_body: stmt;
     }
 
 and stmt_if = 
     {
-      if_test: expr;
+      if_test: lval;
       if_then: stmt;
       if_else: stmt option;
     }
@@ -310,14 +309,12 @@ and stmt_try =
 
 and expr' =
     EXPR_literal of lit
-  | EXPR_binary of (binop * expr * expr)
-  | EXPR_unary of (unop * expr)
+  | EXPR_binary of (binop * lval * lval)
+  | EXPR_unary of (unop * lval)
   | EXPR_lval of lval
-  | EXPR_fn of fn
-  | EXPR_prog of prog
-  | EXPR_mod of (ty * mod_items)
-  | EXPR_rec of ((ident, expr) Hashtbl.t)
-  | EXPR_vec of (expr array)
+  | EXPR_rec of ((ident, lval) Hashtbl.t)
+  | EXPR_vec of (lval array)
+  | EXPR_tup of (lval array)
 
 and expr = expr' spanned
     
@@ -337,13 +334,13 @@ and lit =
 and lit_custom = 
     {
       lit_expander: lval;
-      lit_arg: expr;
+      lit_arg: lval;
       lit_text: string;
     }
 
 and lval_component =
     COMP_named of name_component
-  | COMP_expr of expr
+  | COMP_lval of lval
     
 and lval_resolved = 
     RES_fp (* frame pointer   *)
@@ -431,12 +428,12 @@ and 'a decl =
     }
 
 (* 
- * We have module types and module expressions. A module expression is 
+ * We have module types and module declarations. A module declaration is 
  * a table of module items. A module type is a table of module-type items.
  * 
  * The latter describe the former, despite the fact that modules can 
- * contain types: module types are not *equivalent* to module expressions,
- * and every module expression gives rise to a module value that conforms to
+ * contain types: module types are not *equivalent* to module declarations,
+ * and every module declaration gives rise to a module value that conforms to
  * a possibly-existential module type.
  * 
  * Module values of particular module types are 'opened' by a 'use' statement.
