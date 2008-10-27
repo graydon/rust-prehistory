@@ -48,30 +48,29 @@ let	root_ctxt sess = { ctxt_frame_scopes = [];
 
 let rec expr_type cx expr = 
   (* FIXME: local type inference is more ugly than this *)
-  let cx = { cx with ctxt_span = Some expr.Ast.span } in
-	match expr.Ast.node with 
-		Ast.EXPR_literal lit -> 
-		  (match lit with 
-			   Ast.LIT_nil -> Ast.TY_nil
-			 | Ast.LIT_bool _ -> Ast.TY_bool
-			 | Ast.LIT_unsigned (n, _) -> Ast.TY_mach (Ast.TY_unsigned, n)
-			 | Ast.LIT_signed (n, _) -> Ast.TY_mach (Ast.TY_signed, n)
-			 | Ast.LIT_ieee_bfp _ -> Ast.TY_mach (Ast.TY_ieee_bfp, 64)
-			 | Ast.LIT_ieee_dfp _ -> Ast.TY_mach (Ast.TY_ieee_dfp, 128)
-			 | Ast.LIT_int _ -> Ast.TY_int
-			 | Ast.LIT_char _ -> Ast.TY_char
-			 | Ast.LIT_str _ -> Ast.TY_str
-			 | _ -> Ast.TY_any)		  
-	  | Ast.EXPR_binary (_, a, b) -> 
-		  let aty = expr_type cx a in
-			(* let bty = expr_type cx b in *)
-			aty
-	  | Ast.EXPR_unary (_, e) -> 
-		  expr_type cx e
-	  | Ast.EXPR_lval lv -> 
-		  (* FIXME: resolve lval, get type *)
-		  Ast.TY_any
-	  | _ -> raise (err cx "unhandled expression type in expr_type")
+  match expr with 
+	  Ast.EXPR_literal lit -> 
+		(match lit with 
+			 Ast.LIT_nil -> Ast.TY_nil
+		   | Ast.LIT_bool _ -> Ast.TY_bool
+		   | Ast.LIT_unsigned (n, _) -> Ast.TY_mach (Ast.TY_unsigned, n)
+		   | Ast.LIT_signed (n, _) -> Ast.TY_mach (Ast.TY_signed, n)
+		   | Ast.LIT_ieee_bfp _ -> Ast.TY_mach (Ast.TY_ieee_bfp, 64)
+		   | Ast.LIT_ieee_dfp _ -> Ast.TY_mach (Ast.TY_ieee_dfp, 128)
+		   | Ast.LIT_int _ -> Ast.TY_int
+		   | Ast.LIT_char _ -> Ast.TY_char
+		   | Ast.LIT_str _ -> Ast.TY_str
+		   | _ -> Ast.TY_any)		  
+ 		  
+	(* FIXME: resolve lvals, get type *)
+	| Ast.EXPR_binary (_, a, b) -> 
+		Ast.TY_any
+	| Ast.EXPR_unary (_, e) -> 
+		Ast.TY_any
+	| Ast.EXPR_lval lv -> 
+		Ast.TY_any
+
+	| _ -> raise (err cx "unhandled expression type in expr_type")
 ;;
 
 
@@ -125,14 +124,14 @@ let layout_frame
 	(cx:ctxt) 
 	(frame:Ast.frame) 
 	: unit = 
-  let get_temp_slot nonce (i, s, eo) sz = ((nonce, i, s, eo) :: sz) in
+  let get_temp_slot nonce (i, s) sz = ((nonce, i, s) :: sz) in
   let get_named_slot name (i, n, item) sz = ((name, i, n, item) :: sz) in
   let temp_slots = Hashtbl.fold get_temp_slot frame.Ast.frame_temps [] in 
   let named_items = Hashtbl.fold get_named_slot frame.Ast.frame_items [] in
   let temp_slots = 
 		  Array.of_list 
 			(Sort.list 
-			   (fun (a, _, _, _) (b, _, _, _) -> a < b) temp_slots) 
+			   (fun (a, _, _) (b, _, _) -> a < b) temp_slots) 
 		in
 		let named_items = 
 		  Array.of_list 
@@ -143,14 +142,14 @@ let layout_frame
 		  Hashtbl.clear frame.Ast.frame_temps;
 		  Hashtbl.clear frame.Ast.frame_items;
 		  for i = 0 to (Array.length temp_slots) - 1 do
-			let (nonce, _, s, eo) = temp_slots.(i) in
+			let (nonce, _, s) = temp_slots.(i) in
 			let sz = size_of_slot cx s in
 			  (match cx.ctxt_log with 
 				   None -> ()
 				 | Some out -> Printf.printf 
 					 "laying out temp item %d: %Ld bytes @ %Ld\n" 
 					   i sz frame.Ast.frame_size);
-			  Hashtbl.add frame.Ast.frame_temps nonce (frame.Ast.frame_size, s, eo);
+			  Hashtbl.add frame.Ast.frame_temps nonce (frame.Ast.frame_size, s);
 			  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
 		  done;
 		  for i = 0 to (Array.length named_items) - 1 do
@@ -291,7 +290,7 @@ let apply_ctxt_ty cx params args span =
 
 type binding = 
 	BINDING_item of (Ast.lval_resolved * Ast.mod_item)
-  | BINDING_temp of (Ast.lval_resolved * Ast.slot * (Ast.expr option))
+  | BINDING_temp of (Ast.lval_resolved * Ast.slot)
   | BINDING_type_item of Ast.mod_type_item
 
 let rec lookup_ident 
@@ -336,9 +335,9 @@ let rec lookup_temp (cx:ctxt)
 		let tab = x.Ast.frame_temps in
 		if Hashtbl.mem tab temp
 		then 
-		  let (off, slot, eo) = Hashtbl.find tab temp in 
+		  let (off, slot) = Hashtbl.find tab temp in 
 			({ cx with ctxt_span = None }, 
-			 BINDING_temp (Ast.RES_off (off, fp), slot, eo))
+			 BINDING_temp (Ast.RES_off (off, fp), slot))
 		else 
 		  lookup_temp 
 			{ cx with ctxt_frame_scopes = xs } 
@@ -668,6 +667,20 @@ and resolve_block cx block =
 	layout_frame cx block.Ast.block_frame;
 	Array.iter (resolve_stmt cx') block.Ast.block_stmts
 
+and resolve_slot cx slot = 
+  match slot with 
+	  Ast.SLOT_exterior ty -> 
+		resolve_ty cx ty
+	| Ast.SLOT_interior ty -> 
+		resolve_ty cx ty
+	| Ast.SLOT_read_alias ty ->
+		resolve_ty cx ty
+	| Ast.SLOT_write_alias ty ->
+		resolve_ty cx ty
+	| Ast.SLOT_auto -> 
+		(* FIXME: infer type, update slot *)
+		()
+		  
   
 and resolve_ty cx t = 
   match t with 
@@ -709,26 +722,21 @@ and resolve_ty cx t =
 		
 		
 and resolve_expr cx expr = 
-  let cx = { cx with ctxt_span = Some expr.Ast.span } in
-	match expr.Ast.node with 
-		Ast.EXPR_binary (_, a, b) -> 
-		  resolve_expr cx a;
-		  resolve_expr cx b
-	  | Ast.EXPR_unary (_, e) -> 
-		  resolve_expr cx e
-	  | Ast.EXPR_lval lval -> 
-		  resolve_lval cx lval
-	  | Ast.EXPR_fn fn -> 
-		  resolve_fn expr.Ast.span cx fn
-	  | Ast.EXPR_prog p -> 
-		  resolve_prog cx p
-	  | Ast.EXPR_mod (ty, items) -> 
-		  resolve_mod_items cx items
-	  | Ast.EXPR_rec htab -> 
-		  Hashtbl.iter (fun _ e -> resolve_expr cx e) htab
-	  | Ast.EXPR_vec v -> 
-		  Array.iter (resolve_expr cx) v
-	  | Ast.EXPR_literal _ -> ()
+  match expr with 
+	  Ast.EXPR_binary (_, a, b) -> 
+		resolve_lval cx a;
+		resolve_lval cx b
+	| Ast.EXPR_unary (_, e) -> 
+		resolve_lval cx e
+	| Ast.EXPR_lval lval -> 
+		resolve_lval cx lval
+	| Ast.EXPR_rec htab -> 
+		Hashtbl.iter (fun _ lv -> resolve_lval cx lv) htab
+	| Ast.EXPR_vec v -> 
+		Array.iter (resolve_lval cx) v
+	| Ast.EXPR_tup v -> 
+		Array.iter (resolve_lval cx) v
+	| Ast.EXPR_literal _ -> ()
 		  
 
 and resolve_lval cx lval = 
@@ -747,7 +755,7 @@ and resolve_lval cx lval =
 						  Ast.LVAL_resolved (type_of_slot cx slot, resolved)
 					  | _ -> 
 						  raise (err cx ("lval '" ^ id ^ "' resolved to a non-slot item, not yet handled")))
-			   | BINDING_temp (resolved, slot, _) -> 
+			   | BINDING_temp (resolved, slot) -> 
 				   Ast.LVAL_resolved (type_of_slot cx slot, resolved)
 			   | BINDING_type_item _ -> 
 				   raise (err cx ("lval '" ^ id ^ "' resolved to a type name")))
@@ -767,22 +775,33 @@ and resolve_expr_option cx expropt =
 	  None -> ()
 	| Some e -> resolve_expr cx e
 
+and resolve_lval_option cx lopt = 
+  match lopt with 
+	  None -> ()
+	| Some lv -> resolve_lval cx lv
+
+and resolve_stmts cx stmts = 
+  Array.iter (resolve_stmt cx) stmts
 		
 and resolve_stmt cx stmt = 
   let cx = { cx with ctxt_span = Some stmt.Ast.span } in
   match stmt.Ast.node with 
 	  Ast.STMT_while w -> 
-		resolve_expr cx w.Ast.while_expr;
-		resolve_stmt cx w.Ast.while_body
+		let (stmts, lval) = w.Ast.while_lval in
+		  resolve_lval cx lval;
+		  resolve_stmts cx stmts;
+		  resolve_stmt cx w.Ast.while_body
 
 	| Ast.STMT_do_while w -> 
-		resolve_expr cx w.Ast.while_expr;
-		resolve_stmt cx w.Ast.while_body
+		let (stmts, lval) = w.Ast.while_lval in
+		  resolve_lval cx lval;
+		  resolve_stmts cx stmts;
+		  resolve_stmt cx w.Ast.while_body
 
 	| Ast.STMT_foreach f -> 
 		let (fn, args) = f.Ast.foreach_call in
 		  resolve_lval cx fn;
-		  Array.iter (resolve_expr cx) args;
+		  Array.iter (resolve_lval cx) args;
 		  let cx' = 
 			{ cx with ctxt_frame_scopes = 
 				f.Ast.foreach_frame :: cx.ctxt_frame_scopes } 
@@ -797,13 +816,15 @@ and resolve_stmt cx stmt =
 		  { cx with ctxt_frame_scopes =
 			  f.Ast.for_frame :: cx.ctxt_frame_scopes }
 		in
+		let (stmts, lval) = f.Ast.for_test in
 		  layout_frame cx f.Ast.for_frame;
-		  resolve_expr cx' f.Ast.for_test;
+		  resolve_stmts cx' stmts;
+		  resolve_lval cx' lval;
 		  resolve_stmt cx' f.Ast.for_step;
 		  resolve_stmt cx' f.Ast.for_body;
 
 	| Ast.STMT_if i -> 
-		resolve_expr cx i.Ast.if_test;
+		resolve_lval cx i.Ast.if_test;
 		resolve_stmt cx i.Ast.if_then;
 		resolve_stmt_option cx i.Ast.if_else
 
@@ -812,11 +833,11 @@ and resolve_stmt cx stmt =
 		resolve_stmt_option cx t.Ast.try_fail;
 		resolve_stmt_option cx t.Ast.try_fini
 		
-	| Ast.STMT_put (_, eo) -> 
-		resolve_expr_option cx eo
+	| Ast.STMT_put (_, lo) -> 
+		resolve_lval_option cx lo
 
-	| Ast.STMT_ret (_, eo) -> 
-		resolve_expr_option cx eo
+	| Ast.STMT_ret (_, lo) -> 
+		resolve_lval_option cx lo
 
 	| Ast.STMT_block b -> 
 		resolve_block cx b
@@ -826,8 +847,8 @@ and resolve_stmt cx stmt =
 			 Ast.DECL_mod_item (id, item) -> 
 			   resolve_mod_item cx id item
 				 
-		   | Ast.DECL_temp (slot, nonce, eo) -> 
-			   resolve_expr_option cx eo)
+		   | Ast.DECL_temp (slot, nonce) -> 
+			   resolve_slot cx slot)
 			
 	| Ast.STMT_copy (lval, expr) -> 
 		resolve_lval cx lval;
@@ -837,7 +858,7 @@ and resolve_stmt cx stmt =
 	| Ast.STMT_call (dst, fn, args) -> 
 		resolve_lval cx dst;
 		resolve_lval cx fn;
-		Array.iter (resolve_expr cx) args;
+		Array.iter (resolve_lval cx) args;
 		update_inferred_type cx dst (lval_type cx fn)
 		  
 	(* 
@@ -856,6 +877,8 @@ and resolve_stmt cx stmt =
 
 (* Translation *)
 
+let trans_lval emit _ = Il.Nil
+
 let rec trans_expr emit expr = 
 	match expr.Ast.node with 
 		Ast.EXPR_literal (Ast.LIT_nil) -> 
@@ -870,10 +893,9 @@ let rec trans_expr emit expr =
 	  | Ast.EXPR_literal (Ast.LIT_char c) -> 
 		  Il.Imm (Asm.IMM (Int64.of_int (Char.code c)))
 
-	  (* ...literals *)
 	  | Ast.EXPR_binary (binop, a, b) -> 
-		  let lhs = trans_expr emit a in
-		  let rhs = trans_expr emit b in
+		  let lhs = trans_lval emit a in
+		  let rhs = trans_lval emit b in
 		  let dst = Il.next_vreg emit in 
 		  let op = match binop with
 			  Ast.BINOP_and -> Il.LAND
@@ -884,7 +906,7 @@ let rec trans_expr emit expr =
 			dst
 
 	  | Ast.EXPR_unary (unop, a) -> 
-		  let src = trans_expr emit a in
+		  let src = trans_lval emit a in
 		  let dst = Il.next_vreg emit in 
 		  let op = match unop with
 			  Ast.UNOP_not -> Il.LNOT
@@ -896,9 +918,9 @@ let rec trans_expr emit expr =
 
 let rec trans_stmt emit stmt = 
   match stmt.Ast.node with 
-	  Ast.STMT_copy (lval, expr) -> 
+	  Ast.STMT_copy (lv_dst, lv_src) -> 
 		let dst = Il.Nil in
-		let src = trans_expr emit expr in
+		let src = trans_lval emit lv_src in
 		  Il.emit emit (Il.MOV Il.DATA32) dst src;
 		  dst
 

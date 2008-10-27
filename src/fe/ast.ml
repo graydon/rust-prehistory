@@ -223,7 +223,7 @@ and stmt' =
   | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
   | STMT_block of stmt_block
-  | STMT_copy of (lval * lval)
+  | STMT_copy of (lval * expr)
   | STMT_call of (lval * lval * (lval array))
   | STMT_send of (lval * lval)
   | STMT_recv of (lval * lval)
@@ -248,7 +248,7 @@ and stmt_alt_type =
 and frame = 
     {
       mutable frame_size: int64;
-      frame_temps: (nonce, (int64 * slot * (expr option))) Hashtbl.t;
+      frame_temps: (nonce, (int64 * slot)) Hashtbl.t;
       frame_items: (ident, (int64 * int * mod_item)) Hashtbl.t;
     }
 
@@ -260,7 +260,7 @@ and stmt_block =
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
-  | DECL_temp of (slot * nonce * (expr option))
+  | DECL_temp of (slot * nonce)
 
       
 and stmt_alt_port = 
@@ -307,7 +307,7 @@ and stmt_try =
       try_fini: stmt option;
     }
 
-and expr' =
+and expr =
     EXPR_literal of lit
   | EXPR_binary of (binop * lval * lval)
   | EXPR_unary of (unop * lval)
@@ -316,8 +316,6 @@ and expr' =
   | EXPR_vec of (lval array)
   | EXPR_tup of (lval array)
 
-and expr = expr' spanned
-    
 and lit = 
   | LIT_nil
   | LIT_bool of bool
