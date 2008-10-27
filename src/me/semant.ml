@@ -79,6 +79,11 @@ let lval_type cx lval =
   Ast.TY_any
 ;;
 
+let lval_fn_result_type cx lval =
+  (* FIXME: this will be painful *)
+  Ast.TY_any
+;;
+
 let infer_slot_from_init cx eo = 
   match eo with 
 	  None -> Ast.SLOT_auto
@@ -87,6 +92,7 @@ let infer_slot_from_init cx eo =
 
 let update_inferred_type cx lval ty = 
   (* FIXME: this will be painful *)
+  
   ()
 ;;
 
@@ -143,7 +149,7 @@ let layout_frame
 		  Hashtbl.clear frame.Ast.frame_items;
 		  for i = 0 to (Array.length temp_slots) - 1 do
 			let (nonce, _, s) = temp_slots.(i) in
-			let sz = size_of_slot cx s in
+			let sz = size_of_slot cx (!s) in
 			  (match cx.ctxt_log with 
 				   None -> ()
 				 | Some out -> Printf.printf 
@@ -155,7 +161,7 @@ let layout_frame
 		  for i = 0 to (Array.length named_items) - 1 do
 			let (name, _, n, item) = named_items.(i) in
 			let sz = match item.Ast.node with 
-				Ast.MOD_ITEM_slot (slot, _) -> size_of_slot cx slot 
+				Ast.MOD_ITEM_slot (slot, _) -> size_of_slot cx (!slot)
 			  | _ -> 0L
 			in
 			  (match cx.ctxt_log with 
@@ -337,7 +343,7 @@ let rec lookup_temp (cx:ctxt)
 		then 
 		  let (off, slot) = Hashtbl.find tab temp in 
 			({ cx with ctxt_span = None }, 
-			 BINDING_temp (Ast.RES_off (off, fp), slot))
+			 BINDING_temp (Ast.RES_off (off, fp), (!slot)))
 		else 
 		  lookup_temp 
 			{ cx with ctxt_frame_scopes = xs } 
@@ -389,7 +395,7 @@ and mod_type_item_of_mod_item item =
 		  in
 			Ast.MOD_TYPE_ITEM_prog (decl pd.Ast.decl_params prog_ty)
 	  | Ast.MOD_ITEM_slot (slot, _) -> 
-		  Ast.MOD_TYPE_ITEM_slot slot
+		  Ast.MOD_TYPE_ITEM_slot (!slot)
   in
 	{ Ast.span = item.Ast.span;
 	  Ast.node = ty }
@@ -612,7 +618,7 @@ and resolve_mod_item cx id item =
 			resolve_fn span cx fn.Ast.decl_item
 
 	  | Ast.MOD_ITEM_slot (s, eo) -> 
-		  (match s with 
+		  (match (!s) with 
 			   Ast.SLOT_exterior t -> resolve_ty cx t
 			 | Ast.SLOT_interior t -> resolve_ty cx t
 			 | Ast.SLOT_read_alias t -> resolve_ty cx t
@@ -638,7 +644,7 @@ and resolve_fn span cx fn =
 	  | slot -> [| slot |]
   in
   let mapslot i s = 
-	let item' = (Ast.MOD_ITEM_slot (s, None)) in
+	let item' = (Ast.MOD_ITEM_slot ((ref s), None)) in
 	let item = { Ast.node = item'; Ast.span = span } in
 	  (bind.(i), item)
   in
@@ -752,7 +758,7 @@ and resolve_lval cx lval =
 				 BINDING_item (resolved, item) -> 
 				   (match item.Ast.node with 
 						Ast.MOD_ITEM_slot (slot, _) -> 
-						  Ast.LVAL_resolved (type_of_slot cx slot, resolved)
+						  Ast.LVAL_resolved (type_of_slot cx (!slot), resolved)
 					  | _ -> 
 						  raise (err cx ("lval '" ^ id ^ "' resolved to a non-slot item, not yet handled")))
 			   | BINDING_temp (resolved, slot) -> 
@@ -848,7 +854,7 @@ and resolve_stmt cx stmt =
 			   resolve_mod_item cx id item
 				 
 		   | Ast.DECL_temp (slot, nonce) -> 
-			   resolve_slot cx slot)
+			   resolve_slot cx (!slot))
 			
 	| Ast.STMT_copy (lval, expr) -> 
 		resolve_lval cx lval;
@@ -859,7 +865,7 @@ and resolve_stmt cx stmt =
 		resolve_lval cx dst;
 		resolve_lval cx fn;
 		Array.iter (resolve_lval cx) args;
-		update_inferred_type cx dst (lval_type cx fn)
+		update_inferred_type cx dst (lval_fn_result_type cx fn)
 		  
 	(* 
 	   | Ast.STMT_alt_tag of stmt_alt_tag

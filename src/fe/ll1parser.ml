@@ -704,7 +704,7 @@ and parse_expr_list bra ket ps =
 
 and build_tmp ps slot apos bpos = 
   let nonce = (tmp_nonce := (!tmp_nonce) + 1; !tmp_nonce) in
-  let decl = (Ast.DECL_temp (slot, nonce)) in
+  let decl = (Ast.DECL_temp ((ref slot), nonce)) in
   let declstmt = span apos bpos (Ast.STMT_decl decl) in
   let tmp = span apos bpos (ref (Ast.LVAL_base (Ast.BASE_temp nonce))) in
     add_block_decl ps decl;
@@ -1040,7 +1040,7 @@ and parse_stmts ps =
 						   let expr = Ast.EXPR_lval (span apos bpos (ref lval')) in
 							 Some (expr)
 				   in
-				   let item = Ast.MOD_ITEM_slot (slot, expropt) in
+				   let item = Ast.MOD_ITEM_slot ((ref slot), expropt) in
 				   let decl = Ast.DECL_mod_item (idents.(i), 
 												 (span apos bpos item))
 				   in
@@ -1057,7 +1057,7 @@ and parse_stmts ps =
                  let decl = (Ast.DECL_mod_item 
                                (ident, 
                                 (span apos bpos 
-                                   (Ast.MOD_ITEM_slot (slot, match init with 
+                                   (Ast.MOD_ITEM_slot ((ref slot), match init with 
                                                            None -> None
                                                          | Some lv -> Some (Ast.EXPR_lval lv))))))
                  in
@@ -1264,10 +1264,11 @@ and parse_mod_item ps =
           bump ps;
           let (stmts, slot, ident, init) = ctxt "mod slot" parse_slot_and_ident_and_init ps in
           let bpos = lexpos ps in
-            (ident, stmts, span apos bpos (Ast.MOD_ITEM_slot (slot, match init with 
+            (ident, stmts, span apos bpos (Ast.MOD_ITEM_slot ((ref slot), 
+                                                              match init with 
                                                                   None -> None 
                                                                 | Some lval -> Some (Ast.EXPR_lval lval))))
-
+              
       | TYPE -> 
           bump ps;
           let ident = ctxt "mod ty item: ident" parse_ident ps in

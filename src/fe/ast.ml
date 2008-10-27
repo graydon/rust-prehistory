@@ -248,7 +248,7 @@ and stmt_alt_type =
 and frame = 
     {
       mutable frame_size: int64;
-      frame_temps: (nonce, (int64 * slot)) Hashtbl.t;
+      frame_temps: (nonce, (int64 * (slot ref))) Hashtbl.t;
       frame_items: (ident, (int64 * int * mod_item)) Hashtbl.t;
     }
 
@@ -260,7 +260,7 @@ and stmt_block =
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
-  | DECL_temp of (slot * nonce)
+  | DECL_temp of ((slot ref) * nonce)
 
       
 and stmt_alt_port = 
@@ -459,10 +459,10 @@ and mod_item' =
   | MOD_ITEM_mod of mod_items decl
   | MOD_ITEM_fn of fn decl
   | MOD_ITEM_prog of prog decl
-  | MOD_ITEM_slot of (slot * expr option)
+  | MOD_ITEM_slot of ((slot ref) * expr option)
 
 and mod_item = mod_item' spanned   
-      
+
 and mod_type_item' = 
     MOD_TYPE_ITEM_opaque_type of ty_limit decl
   | MOD_TYPE_ITEM_public_type of ty decl
