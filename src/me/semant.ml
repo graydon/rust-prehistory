@@ -26,10 +26,14 @@ type ctxt =
 	  ctxt_span: Ast.span option;
 	  ctxt_sess: Session.sess;
 	  ctxt_log: out_channel option;
+	  ctxt_iterate: bool ref;
 	  ctxt_ptrsz: int64 }
 ;;
 
 exception Semant_err of ((Ast.span option) * string)
+;;
+
+exception Auto_slot
 ;;
 
 let err cx str = 
@@ -43,57 +47,54 @@ let	root_ctxt sess = { ctxt_frame_scopes = [];
 					   ctxt_log = (if sess.Session.sess_log_env
 								   then Some sess.Session.sess_log_out
 								   else None);
+					   ctxt_iterate = ref true;
 					   ctxt_ptrsz = 4L }
 ;;
 
-let rec expr_type cx expr = 
-  (* FIXME: local type inference is more ugly than this *)
+let lval_type cx lval =
+  match !(lval.Ast.node) with 
+	  Ast.LVAL_resolved (ty, _) -> Some ty
+	| _ -> None
+;;
+
+let expr_type cx expr = 
   match expr with 
 	  Ast.EXPR_literal lit -> 
 		(match lit with 
-			 Ast.LIT_nil -> Ast.TY_nil
-		   | Ast.LIT_bool _ -> Ast.TY_bool
-		   | Ast.LIT_unsigned (n, _) -> Ast.TY_mach (Ast.TY_unsigned, n)
-		   | Ast.LIT_signed (n, _) -> Ast.TY_mach (Ast.TY_signed, n)
-		   | Ast.LIT_ieee_bfp _ -> Ast.TY_mach (Ast.TY_ieee_bfp, 64)
-		   | Ast.LIT_ieee_dfp _ -> Ast.TY_mach (Ast.TY_ieee_dfp, 128)
-		   | Ast.LIT_int _ -> Ast.TY_int
-		   | Ast.LIT_char _ -> Ast.TY_char
-		   | Ast.LIT_str _ -> Ast.TY_str
-		   | _ -> Ast.TY_any)		  
- 		  
-	(* FIXME: resolve lvals, get type *)
+			 Ast.LIT_nil -> Some Ast.TY_nil
+		   | Ast.LIT_bool _ -> Some Ast.TY_bool
+		   | Ast.LIT_unsigned (n, _) -> Some (Ast.TY_mach (Ast.TY_unsigned, n))
+		   | Ast.LIT_signed (n, _) -> Some (Ast.TY_mach (Ast.TY_signed, n))
+		   | Ast.LIT_ieee_bfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_bfp, 64))
+		   | Ast.LIT_ieee_dfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_dfp, 128))
+		   | Ast.LIT_int _ -> Some Ast.TY_int
+		   | Ast.LIT_char _ -> Some Ast.TY_char
+		   | Ast.LIT_str _ -> Some Ast.TY_str
+		   | Ast.LIT_custom _ -> None)
+		  
+	(* FIXME: check appropriateness of applying op to type *)
 	| Ast.EXPR_binary (_, a, b) -> 
-		Ast.TY_any
-	| Ast.EXPR_unary (_, e) -> 
-		Ast.TY_any
-	| Ast.EXPR_lval lv -> 
-		Ast.TY_any
+		(match (lval_type cx a, lval_type cx b) with 
+			 (Some t1, Some t2) -> 
+			   if t1 = t2 
+			   then Some t1
+			   else raise (err cx "mismatched binary expression types in expr_type")
+		   | _ -> None)
 
+	| Ast.EXPR_unary (_, lv) -> lval_type cx lv
+	| Ast.EXPR_lval lv -> lval_type cx lv		  
 	| _ -> raise (err cx "unhandled expression type in expr_type")
 ;;
 
-
-let lval_type cx lval = 
-  (* FIXME: this will be painful *)
-  Ast.TY_any
-;;
-
 let lval_fn_result_type cx lval =
-  (* FIXME: this will be painful *)
-  Ast.TY_any
+  (* FIXME *)
+  None
 ;;
 
-let infer_slot_from_init cx eo = 
-  match eo with 
-	  None -> Ast.SLOT_auto
-	| Some e -> Ast.SLOT_interior (expr_type cx e)
-;;
 
-let update_inferred_type cx lval ty = 
-  (* FIXME: this will be painful *)
-  
-  ()
+let lval_fn_arg_type cx fn i = 
+  (* FIXME *)
+  None
 ;;
 
 let rec size_of_ty cx t = 
@@ -114,16 +115,16 @@ and size_of_slot cx s =
 	| Ast.SLOT_write_alias _ -> cx.ctxt_ptrsz
 	| Ast.SLOT_interior t -> 
 		size_of_ty cx t
-	| Ast.SLOT_auto -> raise (err cx "SLOT_auto in size_of_slot")
+	| Ast.SLOT_auto -> raise Auto_slot
 ;;
 
 let type_of_slot cx s = 
   match s with 
-	  Ast.SLOT_exterior t -> t
-	| Ast.SLOT_read_alias t -> t
-	| Ast.SLOT_write_alias t -> t
-	| Ast.SLOT_interior t -> t
-	| Ast.SLOT_auto -> raise (err cx "SLOT_auto in type_of_slot")
+	  Ast.SLOT_exterior t -> Some t
+	| Ast.SLOT_read_alias t -> Some t
+	| Ast.SLOT_write_alias t -> Some t
+	| Ast.SLOT_interior t -> Some t
+	| Ast.SLOT_auto -> None
 ;;
 
 let layout_frame 
@@ -144,34 +145,39 @@ let layout_frame
 			(Sort.list 
 			   (fun (_, _, a, _) (_, _, b, _) -> a < b) named_items) 
 		in
-		  frame.Ast.frame_size <- 0L;
-		  Hashtbl.clear frame.Ast.frame_temps;
-		  Hashtbl.clear frame.Ast.frame_items;
-		  for i = 0 to (Array.length temp_slots) - 1 do
-			let (nonce, _, s) = temp_slots.(i) in
-			let sz = size_of_slot cx (!s) in
-			  (match cx.ctxt_log with 
-				   None -> ()
-				 | Some out -> Printf.printf 
-					 "laying out temp item %d: %Ld bytes @ %Ld\n" 
-					   i sz frame.Ast.frame_size);
-			  Hashtbl.add frame.Ast.frame_temps nonce (frame.Ast.frame_size, s);
-			  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
-		  done;
-		  for i = 0 to (Array.length named_items) - 1 do
-			let (name, _, n, item) = named_items.(i) in
-			let sz = match item.Ast.node with 
-				Ast.MOD_ITEM_slot (slot, _) -> size_of_slot cx (!slot)
-			  | _ -> 0L
-			in
-			  (match cx.ctxt_log with 
-				   None -> ()
-				 | Some out -> Printf.printf 
-					 "laying out item %d (%s): %Ld bytes @ %Ld\n" 
-					   i name sz frame.Ast.frame_size);
-			  Hashtbl.add frame.Ast.frame_items name (frame.Ast.frame_size, n, item);
-			  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
-		  done
+		  try 
+			frame.Ast.frame_size <- 0L;
+			for i = 0 to (Array.length temp_slots) - 1 do
+			  let (nonce, _, s) = temp_slots.(i) in
+			  let sz = size_of_slot cx (!s) in
+				(match cx.ctxt_log with 
+					 None -> ()
+				   | Some out -> Printf.printf 
+					   "laying out temp item %d: %Ld bytes @ %Ld\n%!" 
+						 i sz frame.Ast.frame_size);
+				Hashtbl.replace frame.Ast.frame_temps nonce (frame.Ast.frame_size, s);
+				frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
+			done;
+			for i = 0 to (Array.length named_items) - 1 do
+			  let (name, _, n, item) = named_items.(i) in
+			  let sz = match item.Ast.node with 
+				  Ast.MOD_ITEM_slot (slot, _) -> size_of_slot cx (!slot)
+				| _ -> 0L
+			  in
+				(match cx.ctxt_log with 
+					 None -> ()
+				   | Some out -> Printf.printf 
+					   "laying out item %d (%s): %Ld bytes @ %Ld\n%!" 
+						 i name sz frame.Ast.frame_size);
+				Hashtbl.replace frame.Ast.frame_items name (frame.Ast.frame_size, n, item);
+				frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
+			done
+		  with 
+			  Auto_slot -> 
+				((match cx.ctxt_log with 
+					  None -> ()
+					| Some out -> Printf.printf "hit auto slot, iterating\n");
+				 cx.ctxt_iterate := true)
 ;; 
 
 let extend_ctxt_by_frame 
@@ -296,7 +302,7 @@ let apply_ctxt_ty cx params args span =
 
 type binding = 
 	BINDING_item of (Ast.lval_resolved * Ast.mod_item)
-  | BINDING_temp of (Ast.lval_resolved * Ast.slot)
+  | BINDING_temp of (Ast.lval_resolved * (Ast.slot ref))
   | BINDING_type_item of Ast.mod_type_item
 
 let rec lookup_ident 
@@ -330,7 +336,6 @@ let rec lookup_ident
 					 (Ast.RES_deref (Ast.RES_off (0L, fp))) ident)
 ;;
 
-
 let rec lookup_temp (cx:ctxt) 
 	(fp:Ast.lval_resolved) 
 	(temp:Ast.nonce) 
@@ -343,12 +348,26 @@ let rec lookup_temp (cx:ctxt)
 		then 
 		  let (off, slot) = Hashtbl.find tab temp in 
 			({ cx with ctxt_span = None }, 
-			 BINDING_temp (Ast.RES_off (off, fp), (!slot)))
+			 BINDING_temp (Ast.RES_off (off, fp), slot))
 		else 
 		  lookup_temp 
 			{ cx with ctxt_frame_scopes = xs } 
 			(Ast.RES_deref (Ast.RES_off (0L, fp)))
 			temp
+;;
+
+let lookup_base cx base = 
+  match base with 
+	  (Ast.BASE_ident id) -> lookup_ident cx Ast.RES_fp id
+	| (Ast.BASE_temp t) -> lookup_temp cx Ast.RES_fp t
+	| _ -> raise (err cx "unhandled name base variant in lookup_base")
+;;
+
+let fmt_base cx base = 
+  match base with 
+	  Ast.BASE_ident id -> id
+	| Ast.BASE_temp t -> ("temp#" ^ (string_of_int t))
+	| _ -> raise (err cx "unhandled name base variant in fmt_base")
 ;;
 
 let rec mod_type_of_mod m = 
@@ -601,7 +620,7 @@ let rec resolve_mod_items cx items =
 and resolve_mod_item cx id item =
   if cx.ctxt_sess.Session.sess_log_env
   then Printf.fprintf cx.ctxt_sess.Session.sess_log_out
-	"resolving mod item %s\n" id
+	"resolving mod item %s\n%!" id
   else ();
   let span = item.Ast.span in
 	match item.Ast.node with 
@@ -670,9 +689,14 @@ and resolve_block cx block =
 	{ cx with ctxt_frame_scopes = 
 		block.Ast.block_frame :: cx.ctxt_frame_scopes } 
   in
+	(match cx.ctxt_log with 
+		 None -> ()
+	   | Some out -> Printf.printf "resolving block with %d items, %d temps\n%!"
+		   (Hashtbl.length block.Ast.block_frame.Ast.frame_items)
+			 (Hashtbl.length block.Ast.block_frame.Ast.frame_temps));
 	layout_frame cx block.Ast.block_frame;
 	Array.iter (resolve_stmt cx') block.Ast.block_stmts
-
+	  
 and resolve_slot cx slot = 
   match slot with 
 	  Ast.SLOT_exterior ty -> 
@@ -684,7 +708,6 @@ and resolve_slot cx slot =
 	| Ast.SLOT_write_alias ty ->
 		resolve_ty cx ty
 	| Ast.SLOT_auto -> 
-		(* FIXME: infer type, update slot *)
 		()
 		  
   
@@ -730,45 +753,61 @@ and resolve_ty cx t =
 and resolve_expr cx expr = 
   match expr with 
 	  Ast.EXPR_binary (_, a, b) -> 
-		resolve_lval cx a;
-		resolve_lval cx b
+		resolve_lval cx None a;
+		resolve_lval cx None b
 	| Ast.EXPR_unary (_, e) -> 
-		resolve_lval cx e
+		resolve_lval cx None e
 	| Ast.EXPR_lval lval -> 
-		resolve_lval cx lval
+		resolve_lval cx None lval
 	| Ast.EXPR_rec htab -> 
-		Hashtbl.iter (fun _ lv -> resolve_lval cx lv) htab
+		Hashtbl.iter (fun _ lv -> resolve_lval cx None lv) htab
 	| Ast.EXPR_vec v -> 
-		Array.iter (resolve_lval cx) v
+		Array.iter (resolve_lval cx None) v
 	| Ast.EXPR_tup v -> 
-		Array.iter (resolve_lval cx) v
+		Array.iter (resolve_lval cx None) v
 	| Ast.EXPR_literal _ -> ()
 		  
 
-and resolve_lval cx lval = 
+and resolve_lval cx tyo lval = 
+  let orig = !(lval.Ast.node) in
+  let resolve_slot resolved slot = 
+	match (tyo, (type_of_slot cx (!slot))) with 
+		(None, None) -> (cx.ctxt_iterate := true; orig)
+	  | (None, Some t) -> Ast.LVAL_resolved (t, resolved)
+	  | (Some t1, Some t2) -> 
+		  if t1 = t2 
+		  then Ast.LVAL_resolved (t1, resolved)
+		  else raise (err cx ("differing inferred types in resolve_lval"))
+	  | (Some t1, None) -> 
+		  (match cx.ctxt_log with 
+			   None -> ()
+			 | Some out -> Printf.printf "propagating type in resolve_lval\n%!");
+		  slot := Ast.SLOT_interior t1;
+		  Ast.LVAL_resolved (t1, resolved)
+  in
   let lval' = 
-	match !(lval.Ast.node) with 
-		Ast.LVAL_base (Ast.BASE_ident id) -> 
-		  let (cx, binding) = lookup_ident cx Ast.RES_fp id in
-			if cx.ctxt_sess.Session.sess_log_env
-			then Printf.fprintf cx.ctxt_sess.Session.sess_log_out			
-			  "lval: %s (resolved)\n" id
-			else ();
+	match orig with 
+		Ast.LVAL_resolved _ -> orig
+	  | Ast.LVAL_base base -> 
+		  let (cx, binding) = lookup_base cx base in
+			(match cx.ctxt_log with 
+				 None -> ()
+			   | Some out -> Printf.printf "resolved lval: %s\n%!" (fmt_base cx base));
 			(match binding with 
 				 BINDING_item (resolved, item) -> 
 				   (match item.Ast.node with 
 						Ast.MOD_ITEM_slot (slot, _) -> 
-						  Ast.LVAL_resolved (type_of_slot cx (!slot), resolved)
+						  resolve_slot resolved slot
 					  | _ -> 
-						  raise (err cx ("lval '" ^ id ^ "' resolved to a non-slot item, not yet handled")))
+						  raise (err cx ("lval '" ^ (fmt_base cx base) ^ 
+										   "' resolved to a non-slot item, not yet handled")))
 			   | BINDING_temp (resolved, slot) -> 
-				   Ast.LVAL_resolved (type_of_slot cx slot, resolved)
+				   resolve_slot resolved slot
 			   | BINDING_type_item _ -> 
-				   raise (err cx ("lval '" ^ id ^ "' resolved to a type name")))
-	  | _ -> !(lval.Ast.node)
+				   raise (err cx ("lval '" ^ (fmt_base cx base) ^ "' resolved to a type name")))
+	  | _ -> raise (err cx ("unhandled lval form in resolve_lval"))		  
   in
 	lval.Ast.node := lval'
-		
 
 and resolve_stmt_option cx stmtopt = 
   match stmtopt with 
@@ -784,7 +823,7 @@ and resolve_expr_option cx expropt =
 and resolve_lval_option cx lopt = 
   match lopt with 
 	  None -> ()
-	| Some lv -> resolve_lval cx lv
+	| Some lv -> resolve_lval cx None lv
 
 and resolve_stmts cx stmts = 
   Array.iter (resolve_stmt cx) stmts
@@ -794,20 +833,21 @@ and resolve_stmt cx stmt =
   match stmt.Ast.node with 
 	  Ast.STMT_while w -> 
 		let (stmts, lval) = w.Ast.while_lval in
-		  resolve_lval cx lval;
+		  resolve_lval cx (Some Ast.TY_bool) lval;
 		  resolve_stmts cx stmts;
 		  resolve_stmt cx w.Ast.while_body
 
 	| Ast.STMT_do_while w -> 
 		let (stmts, lval) = w.Ast.while_lval in
-		  resolve_lval cx lval;
+		  resolve_lval cx (Some Ast.TY_bool) lval;
 		  resolve_stmts cx stmts;
 		  resolve_stmt cx w.Ast.while_body
 
 	| Ast.STMT_foreach f -> 
+		(* FIXME: foreaches are a bit wrong at the moment. *)
 		let (fn, args) = f.Ast.foreach_call in
-		  resolve_lval cx fn;
-		  Array.iter (resolve_lval cx) args;
+		  resolve_lval cx None fn;
+		  Array.iter (resolve_lval cx None) args;
 		  let cx' = 
 			{ cx with ctxt_frame_scopes = 
 				f.Ast.foreach_frame :: cx.ctxt_frame_scopes } 
@@ -825,12 +865,12 @@ and resolve_stmt cx stmt =
 		let (stmts, lval) = f.Ast.for_test in
 		  layout_frame cx f.Ast.for_frame;
 		  resolve_stmts cx' stmts;
-		  resolve_lval cx' lval;
+		  resolve_lval cx' (Some Ast.TY_bool) lval;
 		  resolve_stmt cx' f.Ast.for_step;
 		  resolve_stmt cx' f.Ast.for_body;
 
 	| Ast.STMT_if i -> 
-		resolve_lval cx i.Ast.if_test;
+		resolve_lval cx (Some Ast.TY_bool) i.Ast.if_test;
 		resolve_stmt cx i.Ast.if_then;
 		resolve_stmt_option cx i.Ast.if_else
 
@@ -857,16 +897,14 @@ and resolve_stmt cx stmt =
 			   resolve_slot cx (!slot))
 			
 	| Ast.STMT_copy (lval, expr) -> 
-		resolve_lval cx lval;
 		resolve_expr cx expr;
-		update_inferred_type cx lval (expr_type cx expr)
+		resolve_lval cx (expr_type cx expr) lval;
 		  
 	| Ast.STMT_call (dst, fn, args) -> 
-		resolve_lval cx dst;
-		resolve_lval cx fn;
-		Array.iter (resolve_lval cx) args;
-		update_inferred_type cx dst (lval_fn_result_type cx fn)
-		  
+		resolve_lval cx None fn;
+		Array.iteri (fun i -> resolve_lval cx (lval_fn_arg_type cx fn i)) args;
+		resolve_lval cx (lval_fn_result_type cx fn) dst
+
 	(* 
 	   | Ast.STMT_alt_tag of stmt_alt_tag
 	   | Ast.STMT_alt_type of stmt_alt_type

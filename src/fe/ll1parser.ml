@@ -327,7 +327,7 @@ let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
 let peek ps = 
   (if ps.pstate_sess.Session.sess_log_parse
    then Printf.fprintf ps.pstate_sess.Session.sess_log_out 
-	 "peeking at: %s     // %s\n" 
+	 "peeking at: %s     // %s\n%!" 
      (string_of_tok ps.pstate_peek)
      (match ps.pstate_ctxt with
           (s, _) :: _ -> s
@@ -341,7 +341,7 @@ let peek ps =
 let bump ps = 
   (if ps.pstate_sess.Session.sess_log_parse
    then Printf.fprintf ps.pstate_sess.Session.sess_log_out 
-	 "bumping past: %s\n" (string_of_tok ps.pstate_peek)
+	 "bumping past: %s\n%!" (string_of_tok ps.pstate_peek)
    else ();
    ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf)
 ;;
@@ -704,11 +704,16 @@ and parse_expr_list bra ket ps =
 
 and build_tmp ps slot apos bpos = 
   let nonce = (tmp_nonce := (!tmp_nonce) + 1; !tmp_nonce) in
-  let decl = (Ast.DECL_temp ((ref slot), nonce)) in
-  let declstmt = span apos bpos (Ast.STMT_decl decl) in
-  let tmp = span apos bpos (ref (Ast.LVAL_base (Ast.BASE_temp nonce))) in
-    add_block_decl ps decl;
-	(nonce, tmp, declstmt)
+    if ps.pstate_sess.Session.sess_log_parse
+    then 
+	  Printf.fprintf ps.pstate_sess.Session.sess_log_out "building temporary %d\n%!" nonce
+    else 
+	  ();
+    let decl = (Ast.DECL_temp ((ref slot), nonce)) in
+    let declstmt = span apos bpos (Ast.STMT_decl decl) in
+    let tmp = span apos bpos (ref (Ast.LVAL_base (Ast.BASE_temp nonce))) in
+      add_block_decl ps decl;
+	  (nonce, tmp, declstmt)
 
 and span_bump_lit ps ty lit = 
   let apos = lexpos ps in 
@@ -1293,7 +1298,7 @@ and parse_mod_item ps =
 let make_parser sess tok fname = 
   if sess.Session.sess_log_parse
   then 
-	Printf.fprintf sess.Session.sess_log_out "making parser for: %s\n" fname
+	Printf.fprintf sess.Session.sess_log_out "making parser for: %s\n%!" fname
   else 
 	();
   let lexbuf = Lexing.from_channel (open_in fname) in
@@ -1371,10 +1376,10 @@ and parse_crate_entries tok fname prefix ps =
 ;;
 
 let report_error out (ps, str) = 
-  Printf.fprintf out "Parser error: %s\n" str;
+  Printf.fprintf out "Parser error: %s\n%!" str;
   List.iter 
     (fun (cx,(file,line,col)) -> 
-       Printf.fprintf out "%s:%d:%d:E [PARSE CONTEXT] %s\n" file line col cx) 
+       Printf.fprintf out "%s:%d:%d:E [PARSE CONTEXT] %s\n%!" file line col cx) 
     ps.pstate_ctxt
 ;;
 

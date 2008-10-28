@@ -75,7 +75,11 @@ let crate_items =
 
 let _ = 
   try 
-	Semant.resolve_mod_items (Semant.root_ctxt sess) crate_items
+	let cx = (Semant.root_ctxt sess) in
+	  while !(cx.Semant.ctxt_iterate) do
+		cx.Semant.ctxt_iterate := false;
+		Semant.resolve_mod_items cx crate_items;
+	  done
   with
 	  Semant.Semant_err (spano, str) -> 
 		match spano with 
