@@ -57,6 +57,36 @@ let lval_type cx lval =
 	| _ -> None
 ;;
 
+let rec size_of_ty cx t = 
+  match t with 
+	  Ast.TY_nil -> 0L
+	| Ast.TY_bool -> 1L
+	| Ast.TY_mach (_, n) -> Int64.of_int (n / 8)
+	| Ast.TY_int -> cx.ctxt_ptrsz
+	| Ast.TY_char -> 4L
+	| Ast.TY_str -> cx.ctxt_ptrsz
+	| Ast.TY_tup tys -> (Array.fold_left (fun n ty -> Int64.add n (size_of_slot cx ty)) 0L tys)
+	| _ -> raise (err cx "unhandled type in size_of_ty")
+
+and size_of_slot cx s = 
+  match s with 
+	  Ast.SLOT_exterior _ -> cx.ctxt_ptrsz
+	| Ast.SLOT_read_alias _ -> cx.ctxt_ptrsz
+	| Ast.SLOT_write_alias _ -> cx.ctxt_ptrsz
+	| Ast.SLOT_interior t -> 
+		size_of_ty cx t
+	| Ast.SLOT_auto -> raise Auto_slot
+;;
+
+let type_of_slot cx s = 
+  match s with 
+	  Ast.SLOT_exterior t -> Some t
+	| Ast.SLOT_read_alias t -> Some t
+	| Ast.SLOT_write_alias t -> Some t
+	| Ast.SLOT_interior t -> Some t
+	| Ast.SLOT_auto -> None
+;;
+
 let expr_type cx expr = 
   match expr with 
 	  Ast.EXPR_literal lit -> 
@@ -86,45 +116,42 @@ let expr_type cx expr =
 	| _ -> raise (err cx "unhandled expression type in expr_type")
 ;;
 
-let lval_fn_result_type cx lval =
-  (* FIXME *)
-  None
+let lval_fn_result_type cx fn =
+  let rec f ty = 
+    match ty with 
+        Ast.TY_fn f -> 
+          let slot = f.Ast.fn_sig.Ast.sig_output_slot in
+            type_of_slot cx slot
+      | Ast.TY_lim t -> f t
+      | _ -> raise (err cx "non-function type in function context")
+  in
+    match !(fn.Ast.node) with 
+        Ast.LVAL_resolved (ty, _) -> f ty
+      | _ -> None
 ;;
 
 
 let lval_fn_arg_type cx fn i = 
-  (* FIXME *)
-  None
-;;
-
-let rec size_of_ty cx t = 
-  match t with 
-	  Ast.TY_nil -> 0L
-	| Ast.TY_bool -> 1L
-	| Ast.TY_mach (_, n) -> Int64.of_int (n / 8)
-	| Ast.TY_int -> cx.ctxt_ptrsz
-	| Ast.TY_char -> 4L
-	| Ast.TY_str -> cx.ctxt_ptrsz
-	| Ast.TY_tup tys -> (Array.fold_left (fun n ty -> Int64.add n (size_of_slot cx ty)) 0L tys)
-	| _ -> raise (err cx "unhandled type in size_of_ty")
-
-and size_of_slot cx s = 
-  match s with 
-	  Ast.SLOT_exterior _ -> cx.ctxt_ptrsz
-	| Ast.SLOT_read_alias _ -> cx.ctxt_ptrsz
-	| Ast.SLOT_write_alias _ -> cx.ctxt_ptrsz
-	| Ast.SLOT_interior t -> 
-		size_of_ty cx t
-	| Ast.SLOT_auto -> raise Auto_slot
-;;
-
-let type_of_slot cx s = 
-  match s with 
-	  Ast.SLOT_exterior t -> Some t
-	| Ast.SLOT_read_alias t -> Some t
-	| Ast.SLOT_write_alias t -> Some t
-	| Ast.SLOT_interior t -> Some t
-	| Ast.SLOT_auto -> None
+  let badcount = "argument-count mismatch in lval_fn_arg_type" in
+  let rec f ty = 
+    match ty with 
+        Ast.TY_fn f -> 
+          let slot = f.Ast.fn_sig.Ast.sig_input_slot in
+            (match type_of_slot cx slot with
+                 None -> None
+               | Some (Ast.TY_tup tup) -> 
+                   (if i >= 0 or i < Array.length tup
+                    then type_of_slot cx tup.(i)
+                    else raise (err cx badcount))
+               | Some t -> 
+                   (if i = 0 
+                    then Some t
+                    else raise (err cx badcount)))
+      | _ -> raise (err cx "non-function type in lval_fn_arg_type")
+  in
+    match !(fn.Ast.node) with 
+        Ast.LVAL_resolved (ty, _) -> f ty
+      | _ -> None
 ;;
 
 let layout_frame 
@@ -798,6 +825,7 @@ and resolve_lval cx tyo lval =
 				   (match item.Ast.node with 
 						Ast.MOD_ITEM_slot (slot, _) -> 
 						  resolve_slot resolved slot
+                      | Ast.MOD_ITEM_fn _ -> orig
 					  | _ -> 
 						  raise (err cx ("lval '" ^ (fmt_base cx base) ^ 
 										   "' resolved to a non-slot item, not yet handled")))

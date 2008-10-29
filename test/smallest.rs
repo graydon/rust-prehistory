@@ -16,7 +16,7 @@ prog woohoo
   
   main
     {
-      //foo(0);
+	  //foo(0);
 	  val int x = 2 + 2;
     }
 }
