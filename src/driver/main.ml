@@ -53,18 +53,18 @@ let argspecs =
 Arg.parse 
   argspecs 
   (fun arg -> sess.Session.sess_crate <- arg)
-  ("usage: " ^ Sys.argv.(0) ^ " [options] CRATE_FILE.rc\n")
+  ("usage: " ^ Sys.argv.(0) ^ " [options] CRATE_FILE.rc\n%!")
 ;;
 
 let _ =
   if sess.Session.sess_out = "" 
-  then (Printf.fprintf stderr "Error: no output file specified\n"; exit 1)
+  then (Printf.fprintf stderr "Error: no output file specified\n%!"; exit 1)
   else ()
 ;;
   
 let _ = 
   if sess.Session.sess_crate = "" 
-  then (Printf.fprintf stderr "Error: empty crate filename\n"; exit 1)
+  then (Printf.fprintf stderr "Error: empty crate filename\n%!"; exit 1)
   else ()
 ;;
 
@@ -75,17 +75,13 @@ let crate_items =
 
 let _ = 
   try 
-	let cx = (Semant.root_ctxt sess) in
-	  while !(cx.Semant.ctxt_iterate) do
-		cx.Semant.ctxt_iterate := false;
-		Semant.resolve_mod_items cx crate_items;
-	  done
+	Semant.resolve_crate sess crate_items
   with
 	  Semant.Semant_err (spano, str) -> 
 		match spano with 
-			None -> Printf.printf "semantic error: %s\n" str
+			None -> Printf.printf "semantic error: %s\n%!" str
 		  | Some span -> 			  
-			  Printf.fprintf stderr "%s:E:%s\n" (Session.fmt_span span) str
+			  Printf.fprintf stderr "%s:E:%s\n%!" (Session.fmt_span span) str
 ;;
 
 let _ = 
@@ -93,3 +89,11 @@ let _ =
 	  Session.Win32_x86_pe -> Pe.emit_testfile sess.Session.sess_out
 	| Session.Linux_x86_elf -> Elf.emit_testfile sess.Session.sess_out
 ;;
+
+(* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
+ *)

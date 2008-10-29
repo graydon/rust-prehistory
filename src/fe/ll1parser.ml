@@ -539,10 +539,16 @@ and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) =
 		  let (stmts', comps) = arj1st (one_or_more DOT parse_lval_component ps) in 
 		  let bpos = lexpos ps in 
 		  let lval' = Array.fold_left (fun x y -> Ast.LVAL_ext (x, y)) base comps in
-			(stmts', span apos bpos (ref lval'))
+          let lval = { Ast.lval_src = span apos bpos lval';
+                       Ast.lval_res = ref None }
+          in
+			(stmts', lval)
 	  | _ ->
 		  let bpos = lexpos ps in 
-			([||], span apos bpos (ref base))
+          let lval = { Ast.lval_src = span apos bpos base;
+                       Ast.lval_res = ref None }
+          in
+			([||], lval)
   
 
 and parse_constraint ps = 
@@ -711,7 +717,9 @@ and build_tmp ps slot apos bpos =
 	  ();
     let decl = (Ast.DECL_temp ((ref slot), nonce)) in
     let declstmt = span apos bpos (Ast.STMT_decl decl) in
-    let tmp = span apos bpos (ref (Ast.LVAL_base (Ast.BASE_temp nonce))) in
+    let tmp = { Ast.lval_src = span apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce));
+                Ast.lval_res = ref None } 
+    in
       add_block_decl ps decl;
 	  (nonce, tmp, declstmt)
 
@@ -731,7 +739,7 @@ and parse_atomic_expr ps =
         let (stmts, e) = ctxt "paren expr" parse_expr ps in
         let _ = expect ps RPAREN in
         let bpos = lexpos ps in 
-          (stmts, span apos bpos e.Ast.node)
+          (stmts, { e with Ast.lval_src = span apos bpos e.Ast.lval_src.Ast.node})
             
     | LIT_INT (n,s) -> span_bump_lit ps Ast.TY_int (Ast.LIT_int (n, s))
     | LIT_STR str -> span_bump_lit ps Ast.TY_str (Ast.LIT_str str)
@@ -1041,9 +1049,11 @@ and parse_stmts ps =
 						 None -> None
 					   | Some _ -> 
 						   let ext = Ast.COMP_named (Ast.COMP_idx i) in
-						   let lval' = Ast.LVAL_ext ((!(tmp.Ast.node)), ext) in
-						   let expr = Ast.EXPR_lval (span apos bpos (ref lval')) in
-							 Some (expr)
+						   let lval' = Ast.LVAL_ext (tmp.Ast.lval_src.Ast.node, ext) in
+                           let lval = { Ast.lval_src = span apos bpos lval';
+                                        Ast.lval_res = ref None } 
+                           in
+							 Some (Ast.EXPR_lval lval)
 				   in
 				   let item = Ast.MOD_ITEM_slot ((ref slot), expropt) in
 				   let decl = Ast.DECL_mod_item (idents.(i), 
@@ -1106,8 +1116,11 @@ and parse_stmts ps =
 		  let copy = span apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_lval lval)) in
 		  let make_copy i dst = 
 			let ext = Ast.COMP_named (Ast.COMP_idx i) in
-			let src = Ast.LVAL_ext (!(tmp.Ast.node), ext) in
-			let e = Ast.EXPR_lval (span apos bpos (ref src)) in
+			let src = Ast.LVAL_ext (tmp.Ast.lval_src.Ast.node, ext) in
+            let lval = { Ast.lval_src = span apos bpos src;
+                         Ast.lval_res = ref None }
+            in
+			let e = Ast.EXPR_lval lval in
 			  span apos bpos (Ast.STMT_copy (dst, e))
 		  in
 		    let copies = Array.mapi make_copy lvals in 

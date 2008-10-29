@@ -340,21 +340,30 @@ and lval_component =
     COMP_named of name_component
   | COMP_lval of lval
     
-and lval_resolved = 
+and resolved_path = 
     RES_fp (* frame pointer   *)
   | RES_pp (* proc pointer    *)
   | RES_cp (* crate pointer   *)
   | RES_rp (* runtime pointer *)
-  | RES_off of (int64 * lval_resolved)
-  | RES_deref of lval_resolved
-      (* FIXME: will need more nodes in here for exterior-deref and translated arithmetic *)
+  | RES_off of (int64 * resolved_path)
+  | RES_deref of resolved_path
+  | RES_idx of (resolved_path * lval_resolved)
+
+and lval_resolved = 
+    {
+      res_path: resolved_path;
+      res_slot: slot ref;
+    }
 
 and lval' = 
     LVAL_base of name_base
   | LVAL_ext of (lval' * lval_component)
-  | LVAL_resolved of (ty * lval_resolved)
 
-and lval = (lval' ref) spanned
+and lval = 
+    { 
+      lval_src: lval' spanned;
+      lval_res: (lval_resolved option) ref;
+    }
       
 and binop =    
     BINOP_or
@@ -479,6 +488,7 @@ and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
 and mod_items = (ident, mod_item) Hashtbl.t
 ;;
+
 
 (* 
  * Local Variables:

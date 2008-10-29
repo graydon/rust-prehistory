@@ -26,7 +26,8 @@ type ctxt =
 	  ctxt_span: Ast.span option;
 	  ctxt_sess: Session.sess;
 	  ctxt_log: out_channel option;
-	  ctxt_iterate: bool ref;
+	  ctxt_made_progress: bool ref;
+	  ctxt_contains_autos: bool ref;
 	  ctxt_ptrsz: int64 }
 ;;
 
@@ -47,14 +48,9 @@ let	root_ctxt sess = { ctxt_frame_scopes = [];
 					   ctxt_log = (if sess.Session.sess_log_env
 								   then Some sess.Session.sess_log_out
 								   else None);
-					   ctxt_iterate = ref true;
+					   ctxt_made_progress = ref true;
+                       ctxt_contains_autos = ref false;
 					   ctxt_ptrsz = 4L }
-;;
-
-let lval_type cx lval =
-  match !(lval.Ast.node) with 
-	  Ast.LVAL_resolved (ty, _) -> Some ty
-	| _ -> None
 ;;
 
 let rec size_of_ty cx t = 
@@ -65,10 +61,10 @@ let rec size_of_ty cx t =
 	| Ast.TY_int -> cx.ctxt_ptrsz
 	| Ast.TY_char -> 4L
 	| Ast.TY_str -> cx.ctxt_ptrsz
-	| Ast.TY_tup tys -> (Array.fold_left (fun n ty -> Int64.add n (size_of_slot cx ty)) 0L tys)
+	| Ast.TY_tup tys -> (Array.fold_left (fun n ty -> Int64.add n (slot_size cx ty)) 0L tys)
 	| _ -> raise (err cx "unhandled type in size_of_ty")
 
-and size_of_slot cx s = 
+and slot_size cx s = 
   match s with 
 	  Ast.SLOT_exterior _ -> cx.ctxt_ptrsz
 	| Ast.SLOT_read_alias _ -> cx.ctxt_ptrsz
@@ -78,13 +74,19 @@ and size_of_slot cx s =
 	| Ast.SLOT_auto -> raise Auto_slot
 ;;
 
-let type_of_slot cx s = 
+let slot_type cx s = 
   match s with 
 	  Ast.SLOT_exterior t -> Some t
 	| Ast.SLOT_read_alias t -> Some t
 	| Ast.SLOT_write_alias t -> Some t
 	| Ast.SLOT_interior t -> Some t
 	| Ast.SLOT_auto -> None
+;;
+
+let lval_type cx lval =
+  match !(lval.Ast.lval_res) with 
+      Some res -> slot_type cx !(res.Ast.res_slot)
+	| _ -> None
 ;;
 
 let expr_type cx expr = 
@@ -121,12 +123,12 @@ let lval_fn_result_type cx fn =
     match ty with 
         Ast.TY_fn f -> 
           let slot = f.Ast.fn_sig.Ast.sig_output_slot in
-            type_of_slot cx slot
+            slot_type cx slot
       | Ast.TY_lim t -> f t
       | _ -> raise (err cx "non-function type in function context")
   in
-    match !(fn.Ast.node) with 
-        Ast.LVAL_resolved (ty, _) -> f ty
+    match lval_type cx fn with 
+        Some t -> f t
       | _ -> None
 ;;
 
@@ -137,11 +139,11 @@ let lval_fn_arg_type cx fn i =
     match ty with 
         Ast.TY_fn f -> 
           let slot = f.Ast.fn_sig.Ast.sig_input_slot in
-            (match type_of_slot cx slot with
+            (match slot_type cx slot with
                  None -> None
                | Some (Ast.TY_tup tup) -> 
                    (if i >= 0 or i < Array.length tup
-                    then type_of_slot cx tup.(i)
+                    then slot_type cx tup.(i)
                     else raise (err cx badcount))
                | Some t -> 
                    (if i = 0 
@@ -149,8 +151,8 @@ let lval_fn_arg_type cx fn i =
                     else raise (err cx badcount)))
       | _ -> raise (err cx "non-function type in lval_fn_arg_type")
   in
-    match !(fn.Ast.node) with 
-        Ast.LVAL_resolved (ty, _) -> f ty
+    match lval_type cx fn with 
+        Some ty -> f ty
       | _ -> None
 ;;
 
@@ -176,7 +178,7 @@ let layout_frame
 			frame.Ast.frame_size <- 0L;
 			for i = 0 to (Array.length temp_slots) - 1 do
 			  let (nonce, _, s) = temp_slots.(i) in
-			  let sz = size_of_slot cx (!s) in
+			  let sz = slot_size cx (!s) in
 				(match cx.ctxt_log with 
 					 None -> ()
 				   | Some out -> Printf.printf 
@@ -188,7 +190,7 @@ let layout_frame
 			for i = 0 to (Array.length named_items) - 1 do
 			  let (name, _, n, item) = named_items.(i) in
 			  let sz = match item.Ast.node with 
-				  Ast.MOD_ITEM_slot (slot, _) -> size_of_slot cx (!slot)
+				  Ast.MOD_ITEM_slot (slot, _) -> slot_size cx (!slot)
 				| _ -> 0L
 			  in
 				(match cx.ctxt_log with 
@@ -203,8 +205,8 @@ let layout_frame
 			  Auto_slot -> 
 				((match cx.ctxt_log with 
 					  None -> ()
-					| Some out -> Printf.printf "hit auto slot, iterating\n");
-				 cx.ctxt_iterate := true)
+					| Some out -> Printf.printf "hit auto slot\n");
+				 cx.ctxt_contains_autos := true)
 ;; 
 
 let extend_ctxt_by_frame 
@@ -328,13 +330,13 @@ let apply_ctxt_ty cx params args span =
  *)
 
 type binding = 
-	BINDING_item of (Ast.lval_resolved * Ast.mod_item)
-  | BINDING_temp of (Ast.lval_resolved * (Ast.slot ref))
+	BINDING_item of (Ast.resolved_path * Ast.mod_item)
+  | BINDING_temp of (Ast.resolved_path * (Ast.slot ref))
   | BINDING_type_item of Ast.mod_type_item
 
 let rec lookup_ident 
 	(cx:ctxt) 
-	(fp:Ast.lval_resolved) 
+	(fp:Ast.resolved_path) 
 	(ident:Ast.ident)
 	: (ctxt * binding) = 
   match cx.ctxt_type_scopes with 
@@ -364,7 +366,7 @@ let rec lookup_ident
 ;;
 
 let rec lookup_temp (cx:ctxt) 
-	(fp:Ast.lval_resolved) 
+	(fp:Ast.resolved_path) 
 	(temp:Ast.nonce) 
 	: (ctxt * binding) = 
   match cx.ctxt_frame_scopes with 
@@ -664,16 +666,9 @@ and resolve_mod_item cx id item =
 			resolve_fn span cx fn.Ast.decl_item
 
 	  | Ast.MOD_ITEM_slot (s, eo) -> 
-		  (match (!s) with 
-			   Ast.SLOT_exterior t -> resolve_ty cx t
-			 | Ast.SLOT_interior t -> resolve_ty cx t
-			 | Ast.SLOT_read_alias t -> resolve_ty cx t
-			 | Ast.SLOT_write_alias t -> resolve_ty cx t
-			 | Ast.SLOT_auto -> raise (err cx "auto slot inference not implemented"));
-		  (match eo with
-			   None -> ()
-			 | Some e -> 
-				 let _ = resolve_expr cx e in ())
+          let cx = { cx with ctxt_span = Some span } in
+            resolve_slot cx None s;
+            resolve_expr_option cx eo
 
 	  | _ -> ()
 
@@ -724,19 +719,30 @@ and resolve_block cx block =
 	layout_frame cx block.Ast.block_frame;
 	Array.iter (resolve_stmt cx') block.Ast.block_stmts
 	  
-and resolve_slot cx slot = 
-  match slot with 
-	  Ast.SLOT_exterior ty -> 
-		resolve_ty cx ty
-	| Ast.SLOT_interior ty -> 
-		resolve_ty cx ty
-	| Ast.SLOT_read_alias ty ->
-		resolve_ty cx ty
-	| Ast.SLOT_write_alias ty ->
-		resolve_ty cx ty
+and resolve_slot cx tyo slot = 
+  let resolve_and_check_type ty = 
+    resolve_ty cx ty;
+    match tyo with 
+        None -> ()
+      | Some t -> 
+          if ty = t
+          then ()
+          else raise (err cx "mismatched types in resolve_slot")
+  in
+    match !slot with 
+	  Ast.SLOT_exterior ty -> resolve_and_check_type ty
+	| Ast.SLOT_interior ty -> resolve_and_check_type ty
+	| Ast.SLOT_read_alias ty -> resolve_and_check_type ty
+	| Ast.SLOT_write_alias ty -> resolve_and_check_type ty
 	| Ast.SLOT_auto -> 
-		()
-		  
+        (match tyo with 
+             None -> ()
+           | Some t -> 
+               (match cx.ctxt_log with 
+		            None -> ()
+	              | Some out -> Printf.printf "propagating types in resolve_slot\n%!");
+               cx.ctxt_made_progress := true;
+               slot := Ast.SLOT_interior t)
   
 and resolve_ty cx t = 
   match t with 
@@ -796,46 +802,34 @@ and resolve_expr cx expr =
 		  
 
 and resolve_lval cx tyo lval = 
-  let orig = !(lval.Ast.node) in
-  let resolve_slot resolved slot = 
-	match (tyo, (type_of_slot cx (!slot))) with 
-		(None, None) -> (cx.ctxt_iterate := true; orig)
-	  | (None, Some t) -> Ast.LVAL_resolved (t, resolved)
-	  | (Some t1, Some t2) -> 
-		  if t1 = t2 
-		  then Ast.LVAL_resolved (t1, resolved)
-		  else raise (err cx ("differing inferred types in resolve_lval"))
-	  | (Some t1, None) -> 
-		  (match cx.ctxt_log with 
-			   None -> ()
-			 | Some out -> Printf.printf "propagating type in resolve_lval\n%!");
-		  slot := Ast.SLOT_interior t1;
-		  Ast.LVAL_resolved (t1, resolved)
+  let bind_to_slot path slot = 
+    let res = { Ast.res_path = path;
+                Ast.res_slot = slot; } 
+    in
+      resolve_slot cx tyo slot;
+      lval.Ast.lval_res := Some res
   in
-  let lval' = 
-	match orig with 
-		Ast.LVAL_resolved _ -> orig
-	  | Ast.LVAL_base base -> 
-		  let (cx, binding) = lookup_base cx base in
-			(match cx.ctxt_log with 
-				 None -> ()
-			   | Some out -> Printf.printf "resolved lval: %s\n%!" (fmt_base cx base));
-			(match binding with 
-				 BINDING_item (resolved, item) -> 
-				   (match item.Ast.node with 
-						Ast.MOD_ITEM_slot (slot, _) -> 
-						  resolve_slot resolved slot
-                      | Ast.MOD_ITEM_fn _ -> orig
-					  | _ -> 
-						  raise (err cx ("lval '" ^ (fmt_base cx base) ^ 
-										   "' resolved to a non-slot item, not yet handled")))
-			   | BINDING_temp (resolved, slot) -> 
-				   resolve_slot resolved slot
-			   | BINDING_type_item _ -> 
-				   raise (err cx ("lval '" ^ (fmt_base cx base) ^ "' resolved to a type name")))
-	  | _ -> raise (err cx ("unhandled lval form in resolve_lval"))		  
-  in
-	lval.Ast.node := lval'
+    match !(lval.Ast.lval_res) with 
+        Some r -> resolve_slot cx tyo r.Ast.res_slot
+      | None -> 
+	      (match lval.Ast.lval_src.Ast.node with 
+	         | Ast.LVAL_base base -> 
+		         let (_, binding) = lookup_base cx base in
+			       (match cx.ctxt_log with 
+				        None -> ()
+			          | Some out -> Printf.printf "resolved lval: %s\n%!" (fmt_base cx base));
+			       (match binding with 
+				        BINDING_item (path, item) -> 
+				          (match item.Ast.node with 
+						       Ast.MOD_ITEM_slot (slot, _) -> bind_to_slot path slot
+                             | Ast.MOD_ITEM_fn _ -> ()
+					         | _ -> 
+						         raise (err cx ("lval '" ^ (fmt_base cx base) ^ 
+										          "' resolved to a non-slot item, not yet handled")))
+			          | BINDING_temp (path, slot) -> bind_to_slot path slot
+			          | BINDING_type_item _ -> 
+				          raise (err cx ("lval '" ^ (fmt_base cx base) ^ "' resolved to a type name")))
+	         | _ -> raise (err cx ("unhandled lval form in resolve_lval")))
 
 and resolve_stmt_option cx stmtopt = 
   match stmtopt with 
@@ -922,7 +916,7 @@ and resolve_stmt cx stmt =
 			   resolve_mod_item cx id item
 				 
 		   | Ast.DECL_temp (slot, nonce) -> 
-			   resolve_slot cx (!slot))
+			   resolve_slot cx None slot)
 			
 	| Ast.STMT_copy (lval, expr) -> 
 		resolve_expr cx expr;
@@ -945,7 +939,21 @@ and resolve_stmt cx stmt =
 	   | Ast.STMT_use (ty, ident, lval) 
 	*)
 	| _ -> ()
-			  
+
+let resolve_crate sess items = 
+  let cx = root_ctxt sess in
+	while !(cx.ctxt_made_progress) do
+      (match cx.ctxt_log with 
+		   None -> ()
+		 | Some out -> Printf.printf "\n\n=== fresh resolution pass ===\n%!");
+      cx.ctxt_contains_autos := false;
+      cx.ctxt_made_progress := false;
+	  resolve_mod_items cx items;
+	done;
+    if !(cx.ctxt_contains_autos)
+    then raise (err cx "progress wedged but autos remain")
+    else ()
+
 
 (* Translation *)
 
