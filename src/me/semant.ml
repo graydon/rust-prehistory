@@ -25,7 +25,6 @@ type ctxt =
 	  ctxt_type_scopes: Ast.mod_type_items list;
 	  ctxt_span: Ast.span option;
 	  ctxt_sess: Session.sess;
-	  ctxt_log: out_channel option;
 	  ctxt_made_progress: bool ref;
 	  ctxt_contains_autos: bool ref;
 	  ctxt_ptrsz: int64 }
@@ -45,12 +44,18 @@ let	root_ctxt sess = { ctxt_frame_scopes = [];
 					   ctxt_type_scopes = [];
 					   ctxt_span = None;
 					   ctxt_sess = sess;
-					   ctxt_log = (if sess.Session.sess_log_env
-								   then Some sess.Session.sess_log_out
-								   else None);
 					   ctxt_made_progress = ref true;
                        ctxt_contains_autos = ref false;
 					   ctxt_ptrsz = 4L }
+;;
+
+let log cx = 
+  let sess = cx.ctxt_sess in
+  let k1 s = 
+    Printf.fprintf sess.Session.sess_log_out "env: %s\n%!" s
+  in
+  let k2 s = () in 
+    Printf.ksprintf (if sess.Session.sess_log_env then k1 else k2)
 ;;
 
 let rec size_of_ty cx t = 
@@ -179,11 +184,8 @@ let layout_frame
 			for i = 0 to (Array.length temp_slots) - 1 do
 			  let (nonce, _, s) = temp_slots.(i) in
 			  let sz = slot_size cx (!s) in
-				(match cx.ctxt_log with 
-					 None -> ()
-				   | Some out -> Printf.printf 
-					   "laying out temp item %d: %Ld bytes @ %Ld\n%!" 
-						 i sz frame.Ast.frame_size);
+                log cx "laying out temp item %d: %Ld bytes @ %Ld" 
+                  i sz frame.Ast.frame_size;
 				Hashtbl.replace frame.Ast.frame_temps nonce (frame.Ast.frame_size, s);
 				frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
 			done;
@@ -193,26 +195,22 @@ let layout_frame
 				  Ast.MOD_ITEM_slot (slot, _) -> slot_size cx (!slot)
 				| _ -> 0L
 			  in
-				(match cx.ctxt_log with 
-					 None -> ()
-				   | Some out -> Printf.printf 
-					   "laying out item %d (%s): %Ld bytes @ %Ld\n%!" 
-						 i name sz frame.Ast.frame_size);
+                log cx "laying out item %d (%s): %Ld bytes @ %Ld" 
+				  i name sz frame.Ast.frame_size;
 				Hashtbl.replace frame.Ast.frame_items name (frame.Ast.frame_size, n, item);
 				frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
 			done
 		  with 
 			  Auto_slot -> 
-				((match cx.ctxt_log with 
-					  None -> ()
-					| Some out -> Printf.printf "hit auto slot\n");
-				 cx.ctxt_contains_autos := true)
+                log cx "hit auto slot";
+				cx.ctxt_contains_autos := true
 ;; 
 
 let extend_ctxt_by_frame 
 	(cx:ctxt)
 	(items:(Ast.ident * Ast.mod_item) array)
 	: ctxt = 
+  log cx "extending ctxt by frame";
   let items' = Hashtbl.create (Array.length items) in
 	for i = 0 to (Array.length items) - 1
 	do
@@ -647,10 +645,7 @@ let rec resolve_mod_items cx items =
 
 		  
 and resolve_mod_item cx id item =
-  if cx.ctxt_sess.Session.sess_log_env
-  then Printf.fprintf cx.ctxt_sess.Session.sess_log_out
-	"resolving mod item %s\n%!" id
-  else ();
+  log cx "resolving mod item %s" id;
   let span = item.Ast.span in
 	match item.Ast.node with 
 		Ast.MOD_ITEM_mod md ->
@@ -711,11 +706,9 @@ and resolve_block cx block =
 	{ cx with ctxt_frame_scopes = 
 		block.Ast.block_frame :: cx.ctxt_frame_scopes } 
   in
-	(match cx.ctxt_log with 
-		 None -> ()
-	   | Some out -> Printf.printf "resolving block with %d items, %d temps\n%!"
-		   (Hashtbl.length block.Ast.block_frame.Ast.frame_items)
-			 (Hashtbl.length block.Ast.block_frame.Ast.frame_temps));
+    log cx "resolving block with %d items, %d temps"
+	  (Hashtbl.length block.Ast.block_frame.Ast.frame_items)
+	  (Hashtbl.length block.Ast.block_frame.Ast.frame_temps);
 	layout_frame cx block.Ast.block_frame;
 	Array.iter (resolve_stmt cx') block.Ast.block_stmts
 	  
@@ -738,9 +731,7 @@ and resolve_slot cx tyo slot =
         (match tyo with 
              None -> ()
            | Some t -> 
-               (match cx.ctxt_log with 
-		            None -> ()
-	              | Some out -> Printf.printf "propagating types in resolve_slot\n%!");
+               log cx "propagating types in resolve_slot";
                cx.ctxt_made_progress := true;
                slot := Ast.SLOT_interior t)
   
@@ -815,9 +806,7 @@ and resolve_lval cx tyo lval =
 	      (match lval.Ast.lval_src.Ast.node with 
 	         | Ast.LVAL_base base -> 
 		         let (_, binding) = lookup_base cx base in
-			       (match cx.ctxt_log with 
-				        None -> ()
-			          | Some out -> Printf.printf "resolved lval: %s\n%!" (fmt_base cx base));
+                   log cx "resolved lval: %s" (fmt_base cx base);
 			       (match binding with 
 				        BINDING_item (path, item) -> 
 				          (match item.Ast.node with 
@@ -943,9 +932,8 @@ and resolve_stmt cx stmt =
 let resolve_crate sess items = 
   let cx = root_ctxt sess in
 	while !(cx.ctxt_made_progress) do
-      (match cx.ctxt_log with 
-		   None -> ()
-		 | Some out -> Printf.printf "\n\n=== fresh resolution pass ===\n%!");
+      log cx "";
+      log cx "=== fresh resolution pass ===";
       cx.ctxt_contains_autos := false;
       cx.ctxt_made_progress := false;
 	  resolve_mod_items cx items;
