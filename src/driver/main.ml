@@ -79,7 +79,7 @@ let _ =
   with
 	  Semant.Semant_err (spano, str) -> 
 		match spano with 
-			None -> Printf.printf "semantic error: %s\n%!" str
+			None -> Printf.fprintf stderr "semantic error: %s\n%!" str
 		  | Some span -> 			  
 			  Printf.fprintf stderr "%s:E:%s\n%!" (Session.fmt_span span) str
 ;;

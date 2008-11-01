@@ -77,11 +77,12 @@ let dec = ['0'-'9']+
 let exp = ['e''E']['-''+']? dec
 let flo = (dec '.' dec (exp?)) | (dec exp)
 
+let ws = [ ' ' '\t' '\r' ]
 
 let id = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 rule token = parse
-  [ ' ' '\t' '\r' ]            { token lexbuf }
+  ws+                          { token lexbuf }
 | '\n'                         { lexbuf.Lexing.lex_curr_p 
                                      <- (bump_line lexbuf.Lexing.lex_curr_p);
                                  token lexbuf }
@@ -123,7 +124,7 @@ rule token = parse
 | "<-"                         { LARROW     }
 | "<|"                         { SEND       }
 | "->"                         { RARROW     }
-| "()"                         { NIL        }
+| '(' ws* ')'                  { NIL        }
 | '('                          { LPAREN     }
 | ')'                          { RPAREN     }
 | '['                          { LBRACKET   }

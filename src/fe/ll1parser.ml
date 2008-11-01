@@ -898,7 +898,7 @@ and new_frame _ =
 and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit = 
   let frame = 
     match ps.pstate_block_frames with 
-        [] -> raise (err "missing bock frame in add_block_decl" ps)
+        [] -> raise (err "missing block frame in add_block_decl" ps)
       | (f::_) -> f
   in
     match decl with 
@@ -1195,16 +1195,25 @@ and parse_prog ps =
 
 and parse_sig_and_bind ps = 
   let (input_slot, idents) = 
-    match peek ps with 
-        NIL -> (Ast.SLOT_interior (Ast.TY_nil), arr [])
-      | LPAREN -> 
-          let (slots, idents) = 
-            ctxt "sig and bind: idents and slots" 
-              (parse_one_or_more_tup_slots_and_idents true) ps in
-            if Array.length slots = 1
-            then (slots.(0), idents)
-            else (Ast.SLOT_interior (Ast.TY_tup slots), idents)
-      | _ -> raise (unexpected ps)
+    let apos = lexpos ps in  
+      match peek ps with 
+          NIL -> (Ast.SLOT_interior (Ast.TY_nil), arr [])
+        | LPAREN ->           
+            let (slots, idents) = 
+              ctxt "sig and bind: idents and slots" 
+                (parse_one_or_more_tup_slots_and_idents true) ps in
+            let bpos = lexpos ps in  
+              for i = 0 to (Array.length slots) - 1
+              do
+                let item = span apos bpos (Ast.MOD_ITEM_slot ((ref slots.(i)), None)) in
+                let decl = Ast.DECL_mod_item (idents.(i), item) in
+                  add_block_decl ps decl;
+              done;
+              if Array.length slots = 1
+              then (slots.(0), idents)
+              else (Ast.SLOT_interior (Ast.TY_tup slots), idents)
+
+        | _ -> raise (unexpected ps)
   in
   let _ = expect ps RARROW in
   let output_slot = ctxt "sig and bind: output" (parse_slot true) ps in
@@ -1214,14 +1223,19 @@ and parse_sig_and_bind ps =
 
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn proto_opt lim pure ps =
-  let (si, bind) = ctxt "fn: sig and bind" parse_sig_and_bind ps in
-  let body = ctxt "fn: body" parse_block ps in
-    { Ast.fn_ty = { Ast.fn_pure = pure;
-                    Ast.fn_proto = proto_opt;
-                    Ast.fn_lim = lim; 
-                    Ast.fn_sig = si; };
-      Ast.fn_bind = bind;
-      Ast.fn_body = body; }
+  let frames = ps.pstate_block_frames in
+  let frame = new_frame () in 
+    ps.pstate_block_frames <- frame :: frames;     
+    let (si, bind) = ctxt "fn: sig and bind" parse_sig_and_bind ps in
+    let body = ctxt "fn: body" parse_block ps in
+      ps.pstate_block_frames <- frames;
+      { Ast.fn_ty = { Ast.fn_pure = pure;
+                      Ast.fn_proto = proto_opt;
+                      Ast.fn_lim = lim; 
+                      Ast.fn_sig = si; };
+        Ast.fn_bind = bind;
+        Ast.fn_frame = frame;
+        Ast.fn_body = body; }
 
 and flag ps tok = 
   if peek ps = tok

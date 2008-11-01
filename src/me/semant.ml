@@ -27,6 +27,7 @@ type ctxt =
 	  ctxt_sess: Session.sess;
 	  ctxt_made_progress: bool ref;
 	  ctxt_contains_autos: bool ref;
+	  ctxt_contains_unresolved_types: bool ref;
 	  ctxt_ptrsz: int64 }
 ;;
 
@@ -46,6 +47,7 @@ let	root_ctxt sess = { ctxt_frame_scopes = [];
 					   ctxt_sess = sess;
 					   ctxt_made_progress = ref true;
                        ctxt_contains_autos = ref false;
+                       ctxt_contains_unresolved_types = ref false;
 					   ctxt_ptrsz = 4L }
 ;;
 
@@ -56,6 +58,68 @@ let log cx =
   in
   let k2 s = () in 
     Printf.ksprintf (if sess.Session.sess_log_env then k1 else k2)
+;;
+
+
+let join_array sep arr = 
+  let s = ref "" in
+	for i = 0 to Array.length arr do
+	  if i = 0
+	  then s := arr.(i)
+	  else s := (!s) ^ sep ^ arr.(i)
+	done;
+	(!s)
+;;
+
+let rec string_of_name_component comp = 
+  match comp with 
+	  Ast.COMP_ident id -> id
+	| Ast.COMP_app (id, tys) -> 
+		id ^ "[" ^ (join_array "," (Array.map string_of_ty tys)) ^ "]"
+	| Ast.COMP_idx i -> 
+		"{" ^ (string_of_int i) ^ "}"
+
+and string_of_name name = 
+  match name with 
+	  Ast.NAME_base (Ast.BASE_ident id) -> id
+	| Ast.NAME_base (Ast.BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
+	| Ast.NAME_base (Ast.BASE_app (id, tys)) -> 
+		id ^ "[" ^ (join_array "," (Array.map string_of_ty tys)) ^ "]"
+	| Ast.NAME_ext (n, c) -> 
+		(string_of_name n) ^ "." ^ (string_of_name_component c)
+
+and string_of_ty ty = 
+  (* FIXME: possibly flesh this out, though it's just diagnostic. *)
+  match ty with 
+      Ast.TY_any -> "any"
+    | Ast.TY_nil -> "nil"
+    | Ast.TY_bool -> "bool"
+    | Ast.TY_mach _ -> "mach"
+    | Ast.TY_int -> "int"
+    | Ast.TY_char -> "char"
+    | Ast.TY_str -> "str"
+
+    | Ast.TY_tup _ -> "tup"
+    | Ast.TY_vec _ -> "vec"
+    | Ast.TY_rec _ -> "rec"
+
+    | Ast.TY_tag _ -> "tag"
+    | Ast.TY_iso _ -> "iso"
+    | Ast.TY_idx _ -> "idx"
+
+    | Ast.TY_fn _ -> "fn"
+    | Ast.TY_chan _ -> "chan"
+    | Ast.TY_port _ -> "port"
+        
+    | Ast.TY_mod _ -> "mod"
+    | Ast.TY_prog _ -> "prog"
+
+    | Ast.TY_opaque _ -> "opaque"
+    | Ast.TY_named name -> "named:" ^ (string_of_name name)
+    | Ast.TY_type -> "ty"
+      
+    | Ast.TY_constrained _ -> "constrained"
+    | Ast.TY_lim _ -> "lim"
 ;;
 
 let rec size_of_ty cx t = 
@@ -95,32 +159,45 @@ let lval_type cx lval =
 ;;
 
 let expr_type cx expr = 
-  match expr with 
-	  Ast.EXPR_literal lit -> 
-		(match lit with 
-			 Ast.LIT_nil -> Some Ast.TY_nil
-		   | Ast.LIT_bool _ -> Some Ast.TY_bool
-		   | Ast.LIT_unsigned (n, _) -> Some (Ast.TY_mach (Ast.TY_unsigned, n))
-		   | Ast.LIT_signed (n, _) -> Some (Ast.TY_mach (Ast.TY_signed, n))
-		   | Ast.LIT_ieee_bfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_bfp, 64))
-		   | Ast.LIT_ieee_dfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_dfp, 128))
-		   | Ast.LIT_int _ -> Some Ast.TY_int
-		   | Ast.LIT_char _ -> Some Ast.TY_char
-		   | Ast.LIT_str _ -> Some Ast.TY_str
-		   | Ast.LIT_custom _ -> None)
-		  
-	(* FIXME: check appropriateness of applying op to type *)
-	| Ast.EXPR_binary (_, a, b) -> 
-		(match (lval_type cx a, lval_type cx b) with 
-			 (Some t1, Some t2) -> 
-			   if t1 = t2 
-			   then Some t1
-			   else raise (err cx "mismatched binary expression types in expr_type")
-		   | _ -> None)
-
-	| Ast.EXPR_unary (_, lv) -> lval_type cx lv
-	| Ast.EXPR_lval lv -> lval_type cx lv		  
-	| _ -> raise (err cx "unhandled expression type in expr_type")
+  let concretize tyo = 
+    match tyo with 
+        Some (Ast.TY_named _) -> None
+      | Some t -> Some t
+      | None -> None
+  in
+    match expr with 
+	    Ast.EXPR_literal lit -> 
+		  (match lit with 
+			   Ast.LIT_nil -> Some Ast.TY_nil
+		     | Ast.LIT_bool _ -> Some Ast.TY_bool
+		     | Ast.LIT_unsigned (n, _) -> Some (Ast.TY_mach (Ast.TY_unsigned, n))
+		     | Ast.LIT_signed (n, _) -> Some (Ast.TY_mach (Ast.TY_signed, n))
+		     | Ast.LIT_ieee_bfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_bfp, 64))
+		     | Ast.LIT_ieee_dfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_dfp, 128))
+		     | Ast.LIT_int _ -> Some Ast.TY_int
+		     | Ast.LIT_char _ -> Some Ast.TY_char
+		     | Ast.LIT_str _ -> Some Ast.TY_str
+		     | Ast.LIT_custom _ -> None)
+		    
+	  (* FIXME: check appropriateness of applying op to type *)
+	  | Ast.EXPR_binary (op, a, b) -> 
+		  (match (concretize (lval_type cx a), 
+                  concretize (lval_type cx b)) with 
+			   (Some t1, Some t2) -> 
+			     if t1 = t2 
+			     then 
+                   match op with 
+                       Ast.BINOP_eq | Ast.BINOP_ne
+                     | Ast.BINOP_lt | Ast.BINOP_le
+                     | Ast.BINOP_gt | Ast.BINOP_ge -> Some Ast.TY_bool
+                     | _ -> Some t1
+			     else raise (err cx ("mismatched binary expression types in expr_type: "
+                                     ^ (string_of_ty t1) ^ " vs. " ^ (string_of_ty t2)))
+		     | _ -> (cx.ctxt_contains_unresolved_types := true; None))
+            
+	  | Ast.EXPR_unary (_, lv) -> concretize (lval_type cx lv)
+	  | Ast.EXPR_lval lv -> concretize (lval_type cx lv)
+	  | _ -> raise (err cx "unhandled expression type in expr_type")
 ;;
 
 let lval_fn_result_type cx fn =
@@ -133,7 +210,11 @@ let lval_fn_result_type cx fn =
       | _ -> raise (err cx "non-function type in function context")
   in
     match lval_type cx fn with 
-        Some t -> f t
+        Some t -> 
+          let ft = f t in
+          let s = (match ft with None -> "<none>" | Some t -> string_of_ty t) in
+            log cx "function return type: %s" s;
+            ft
       | _ -> None
 ;;
 
@@ -161,107 +242,36 @@ let lval_fn_arg_type cx fn i =
       | _ -> None
 ;;
 
-let layout_frame 
-	(cx:ctxt) 
-	(frame:Ast.frame) 
-	: unit = 
-  let get_temp_slot nonce (i, s) sz = ((nonce, i, s) :: sz) in
-  let get_named_slot name (i, n, item) sz = ((name, i, n, item) :: sz) in
-  let temp_slots = Hashtbl.fold get_temp_slot frame.Ast.frame_temps [] in 
-  let named_items = Hashtbl.fold get_named_slot frame.Ast.frame_items [] in
-  let temp_slots = 
-		  Array.of_list 
-			(Sort.list 
-			   (fun (a, _, _) (b, _, _) -> a < b) temp_slots) 
-		in
-		let named_items = 
-		  Array.of_list 
-			(Sort.list 
-			   (fun (_, _, a, _) (_, _, b, _) -> a < b) named_items) 
-		in
-		  try 
-			frame.Ast.frame_size <- 0L;
-			for i = 0 to (Array.length temp_slots) - 1 do
-			  let (nonce, _, s) = temp_slots.(i) in
-			  let sz = slot_size cx (!s) in
-                log cx "laying out temp item %d: %Ld bytes @ %Ld" 
-                  i sz frame.Ast.frame_size;
-				Hashtbl.replace frame.Ast.frame_temps nonce (frame.Ast.frame_size, s);
-				frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
-			done;
-			for i = 0 to (Array.length named_items) - 1 do
-			  let (name, _, n, item) = named_items.(i) in
-			  let sz = match item.Ast.node with 
-				  Ast.MOD_ITEM_slot (slot, _) -> slot_size cx (!slot)
-				| _ -> 0L
-			  in
-                log cx "laying out item %d (%s): %Ld bytes @ %Ld" 
-				  i name sz frame.Ast.frame_size;
-				Hashtbl.replace frame.Ast.frame_items name (frame.Ast.frame_size, n, item);
-				frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
-			done
-		  with 
-			  Auto_slot -> 
-                log cx "hit auto slot";
-				cx.ctxt_contains_autos := true
-;; 
 
-let extend_ctxt_by_frame 
-	(cx:ctxt)
-	(items:(Ast.ident * Ast.mod_item) array)
-	: ctxt = 
-  log cx "extending ctxt by frame";
-  let items' = Hashtbl.create (Array.length items) in
-	for i = 0 to (Array.length items) - 1
-	do
-	  let (ident, item) = items.(i) in 
-		Hashtbl.add items' ident (-1L, i, item)
-	done;
-	let frame = 
-	  { Ast.frame_size = 0L;
-		Ast.frame_temps = Hashtbl.create 0;
-		Ast.frame_items = items'; }
-	in
-	  layout_frame cx frame;
-	  { cx with ctxt_frame_scopes = (frame :: cx.ctxt_frame_scopes) }
-;;
-
-let extend_ctxt_by_mod_ty 
-	(cx:ctxt) 
-	(tyitems:Ast.mod_type_items) 
-	: ctxt = 
-  let scopes = tyitems :: cx.ctxt_type_scopes in
-	{ cx with ctxt_type_scopes = scopes }
-;;
-
-  
 (* 
- * Extend a context with bindings for the type parameters of a
- * module item, mapping each to a new anonymous type.
+ * 'binding' is mostly just to permit returning a single ocaml type 
+ * from a scope-based lookup; scopes (and the things found in them) 
+ * have two separate flavours, those formed from modules and those 
+ * formed from module *types*. The latter can nest in the former,
+ * but not vice-versa.
+ * 
+ * All lookup functions should therefore consult the possibly-empty
+ * nested type-scope before looking in 
+ * the enclosing frame scope list.
  *)
-let param_ctxt cx params span =
-  let nparams = Array.length params in
-	if nparams = 0
-	then cx
-	else 
-	  let bind (lim, ident) = 
-		let nonce = next_ty_nonce () in
-		let item' = (Ast.MOD_ITEM_public_type
-					   { Ast.decl_params = [| |];
-						 Ast.decl_item = (match lim with 
-											  Ast.LIMITED -> (Ast.TY_lim (Ast.TY_opaque nonce))
-											| Ast.UNLIMITED -> (Ast.TY_opaque nonce))})
-		in
-		  (ident, { Ast.node = item'; Ast.span = span })
-	  in
-		extend_ctxt_by_frame cx (Array.map bind params)
-;;
+
+type binding = 
+	BINDING_item of (Ast.resolved_path * Ast.mod_item)
+  | BINDING_temp of (Ast.resolved_path * (Ast.slot ref))
+  | BINDING_type_item of Ast.mod_type_item
+
 
 (* 
  * Extend a context with bindings for the type parameters of a
  * module item or module-type item, given actual arguments. 
  *)
-let apply_ctxt_generic cx extend ctor params args span = 
+let apply_ctxt_generic 
+    (cx:ctxt)
+    (extend:ctxt -> ((Ast.ident,('a Ast.spanned)) Hashtbl.t) -> 'b)
+    (ctor:Ast.ty Ast.decl -> 'a)
+    (params:((Ast.ty_limit * Ast.ident) array))
+    (args:Ast.ty array)
+    (span:Ast.span) = 
   let nparams = Array.length params in 
   let nargs = Array.length args in 
 	if nargs != nparams 
@@ -288,9 +298,37 @@ let apply_ctxt_generic cx extend ctor params args span =
 		in
 		  Array.iteri addty params;
 		  extend cx htab
-;;
 
-let linearize_items_for_frame 
+
+let rec extend_ctxt_by_mod_ty 
+	(cx:ctxt) 
+	(tyitems:Ast.mod_type_items) 
+	: ctxt = 
+  let scopes = tyitems :: cx.ctxt_type_scopes in
+	{ cx with ctxt_type_scopes = scopes }
+  
+(* 
+ * Extend a context with bindings for the type parameters of a
+ * module item, mapping each to a new anonymous type.
+ *)
+and param_ctxt cx params span =
+  let nparams = Array.length params in
+	if nparams = 0
+	then cx
+	else 
+	  let bind (lim, ident) = 
+		let nonce = next_ty_nonce () in
+		let item' = (Ast.MOD_ITEM_public_type
+					   { Ast.decl_params = [| |];
+						 Ast.decl_item = (match lim with 
+											  Ast.LIMITED -> (Ast.TY_lim (Ast.TY_opaque nonce))
+											| Ast.UNLIMITED -> (Ast.TY_opaque nonce))})
+		in
+		  (ident, { Ast.node = item'; Ast.span = span })
+	  in
+		extend_ctxt_by_frame cx (Array.map bind params)
+
+and linearize_items_for_frame 
 	(items:(Ast.ident,Ast.mod_item) Hashtbl.t)
 	: ((Ast.ident * Ast.mod_item) array) = 
 	let get_named_slot name item sz = ((name, item) :: sz) in
@@ -298,41 +336,22 @@ let linearize_items_for_frame
 	  (Array.of_list 
 		 (Sort.list 
 			(fun (a, _) (b, _) -> a < b) named_items))
-;;
 
-let apply_ctxt cx params args span = 
+and apply_ctxt cx params args span = 
   apply_ctxt_generic cx 
 	(fun cx items -> extend_ctxt_by_frame cx (linearize_items_for_frame items))
 	(fun x -> Ast.MOD_ITEM_public_type x)
 	params args span
-;;
 
-let apply_ctxt_ty cx params args span = 
+
+and apply_ctxt_ty cx params args span = 
   apply_ctxt_generic cx 
 	extend_ctxt_by_mod_ty
 	(fun x -> Ast.MOD_TYPE_ITEM_public_type x)
 	params args span
-;;
 
 
-(* 
- * 'binding' is mostly just to permit returning a single ocaml type 
- * from a scope-based lookup; scopes (and the things found in them) 
- * have two separate flavours, those formed from modules and those 
- * formed from module *types*. The latter can nest in the former,
- * but not vice-versa.
- * 
- * All lookup functions should therefore consult the possibly-empty
- * nested type-scope before looking in 
- * the enclosing frame scope list.
- *)
-
-type binding = 
-	BINDING_item of (Ast.resolved_path * Ast.mod_item)
-  | BINDING_temp of (Ast.resolved_path * (Ast.slot ref))
-  | BINDING_type_item of Ast.mod_type_item
-
-let rec lookup_ident 
+and lookup_ident 
 	(cx:ctxt) 
 	(fp:Ast.resolved_path) 
 	(ident:Ast.ident)
@@ -361,9 +380,9 @@ let rec lookup_ident
 				   lookup_ident 
 					 { cx with ctxt_frame_scopes = xs } 
 					 (Ast.RES_deref (Ast.RES_off (0L, fp))) ident)
-;;
 
-let rec lookup_temp (cx:ctxt) 
+
+and lookup_temp (cx:ctxt) 
 	(fp:Ast.resolved_path) 
 	(temp:Ast.nonce) 
 	: (ctxt * binding) = 
@@ -381,23 +400,23 @@ let rec lookup_temp (cx:ctxt)
 			{ cx with ctxt_frame_scopes = xs } 
 			(Ast.RES_deref (Ast.RES_off (0L, fp)))
 			temp
-;;
 
-let lookup_base cx base = 
+
+and lookup_base cx base = 
   match base with 
 	  (Ast.BASE_ident id) -> lookup_ident cx Ast.RES_fp id
 	| (Ast.BASE_temp t) -> lookup_temp cx Ast.RES_fp t
 	| _ -> raise (err cx "unhandled name base variant in lookup_base")
-;;
 
-let fmt_base cx base = 
+
+and fmt_base cx base = 
   match base with 
 	  Ast.BASE_ident id -> id
 	| Ast.BASE_temp t -> ("temp#" ^ (string_of_int t))
 	| _ -> raise (err cx "unhandled name base variant in fmt_base")
-;;
 
-let rec mod_type_of_mod m = 
+
+and mod_type_of_mod m = 
   let ty_items = Hashtbl.create 4 in 
   let add n i = Hashtbl.add ty_items n (mod_type_item_of_mod_item i) in
 	Hashtbl.iter add m;
@@ -445,10 +464,9 @@ and mod_type_item_of_mod_item item =
   in
 	{ Ast.span = item.Ast.span;
 	  Ast.node = ty }
-;;
 
 
-let type_component_of_type_item cx tyitem comp = 
+and type_component_of_type_item cx tyitem comp = 
   match comp with 
 	  Ast.COMP_ident id -> 
 		(match tyitem.Ast.node with 
@@ -469,10 +487,9 @@ let type_component_of_type_item cx tyitem comp =
 					"unimplemented parametric types when looking up '" ^ id ^ "'"))
 	| Ast.COMP_idx i -> 
 		raise (err cx ("illegal index component in type name: .{" ^ (string_of_int i) ^ "}"))
-;;
 
 
-let apply_args_to_item cx item args = 
+and apply_args_to_item cx item args = 
   let app params = 
 	apply_ctxt cx params args item.Ast.span
   in
@@ -485,28 +502,27 @@ let apply_args_to_item cx item args =
 		  let cx = app td.Ast.decl_params in
 			(cx, Ast.MOD_ITEM_public_type { td with Ast.decl_params = [| |] })
 			  
-	| Ast.MOD_ITEM_pred pd -> 
-		let cx = app pd.Ast.decl_params in
-		  (cx, Ast.MOD_ITEM_pred { pd with Ast.decl_params = [| |] })
-			
-	| Ast.MOD_ITEM_mod md ->
-		let cx = app md.Ast.decl_params in 
-		  (cx, Ast.MOD_ITEM_mod { md with Ast.decl_params = [| |] })
+	  | Ast.MOD_ITEM_pred pd -> 
+		  let cx = app pd.Ast.decl_params in
+		    (cx, Ast.MOD_ITEM_pred { pd with Ast.decl_params = [| |] })
+			  
+	  | Ast.MOD_ITEM_mod md ->
+		  let cx = app md.Ast.decl_params in 
+		    (cx, Ast.MOD_ITEM_mod { md with Ast.decl_params = [| |] })
+              
+	  | Ast.MOD_ITEM_fn fd -> 
+		  let cx = app fd.Ast.decl_params in 
+		    (cx, Ast.MOD_ITEM_fn { fd with Ast.decl_params = [| |] })
+              
+	  | Ast.MOD_ITEM_prog pd ->
+		  let cx = app pd.Ast.decl_params in 
+		    (cx, Ast.MOD_ITEM_prog { pd with Ast.decl_params = [| |] })
+              
+	  | Ast.MOD_ITEM_slot _ -> 
+		  raise (err cx "applying types to slot")
 
-	| Ast.MOD_ITEM_fn fd -> 
-		let cx = app fd.Ast.decl_params in 
-		  (cx, Ast.MOD_ITEM_fn { fd with Ast.decl_params = [| |] })
 
-	| Ast.MOD_ITEM_prog pd ->
-		let cx = app pd.Ast.decl_params in 
-		  (cx, Ast.MOD_ITEM_prog { pd with Ast.decl_params = [| |] })
-
-	| Ast.MOD_ITEM_slot _ -> 
-		raise (err cx "applying types to slot")
-;;
-
-
-let apply_args_to_type_item cx tyitem args = 
+and apply_args_to_type_item cx tyitem args = 
   let app params = 
 	apply_ctxt_ty cx params args tyitem.Ast.span
   in
@@ -537,10 +553,9 @@ let apply_args_to_type_item cx tyitem args =
 
 	| Ast.MOD_TYPE_ITEM_slot _ -> 
 		raise (err cx "applying types to slot")
-;;
 		  
 
-let rec lookup cx 
+and lookup cx 
 	(basefn : ctxt -> (ctxt * binding) -> (ctxt * 'a))
 	(extfn : ctxt -> (ctxt * 'a) -> Ast.name_component -> (ctxt * 'a)) 
 	name = 
@@ -562,10 +577,9 @@ let rec lookup cx
 	| Ast.NAME_ext (base, comp) -> 
 		let base' = lookup cx basefn extfn base in
 		  extfn cx base' comp 
-;;
 
 
-let lookup_type_item cx name = 
+and lookup_type_item cx name = 
   let basefn cx (cx', binding) = 
 	match binding with 
 		BINDING_item (_, item) -> (cx', mod_type_item_of_mod_item item)
@@ -576,47 +590,9 @@ let lookup_type_item cx name =
 	type_component_of_type_item cx' tyitem comp 
   in
 	lookup cx basefn extfn name
-;;
-
-let join_array sep arr = 
-  let s = ref "" in
-	for i = 0 to Array.length arr do
-	  if i = 0
-	  then s := arr.(i)
-	  else s := (!s) ^ sep ^ arr.(i)
-	done;
-	(!s)
-;;
 
 
-let string_of_ty ty = 
-  (* FIXME: possibly flesh this out, though it's just diagnostic. *)
-  "T"
-;;
-
-
-let string_of_name_component comp = 
-  match comp with 
-	  Ast.COMP_ident id -> id
-	| Ast.COMP_app (id, tys) -> 
-		id ^ "[" ^ (join_array "," (Array.map string_of_ty tys)) ^ "]"
-	| Ast.COMP_idx i -> 
-		"{" ^ (string_of_int i) ^ "}"
-;;
-
-
-let rec string_of_name name = 
-  match name with 
-	  Ast.NAME_base (Ast.BASE_ident id) -> id
-	| Ast.NAME_base (Ast.BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
-	| Ast.NAME_base (Ast.BASE_app (id, tys)) -> 
-		id ^ "[" ^ (join_array "," (Array.map string_of_ty tys)) ^ "]"
-	| Ast.NAME_ext (n, c) -> 
-		(string_of_name n) ^ "." ^ (string_of_name_component c)
-;;
-		
-
-let lookup_type cx name = 
+and lookup_type cx name = 
   let parametric = 
 	err cx "Semant.lookup_type found parametric binding, concrete type required"
   in
@@ -636,10 +612,86 @@ let lookup_type cx name =
 		  else (cx', td.Ast.decl_item)
 
 	  | _ -> raise (err cx ((string_of_name name) ^ " names a non-type item"))
-;;
 
 
-let rec resolve_mod_items cx items = 
+and layout_frame 
+	(cx:ctxt) 
+	(frame:Ast.frame) 
+	: unit = 
+  let get_temp_slot nonce (i, s) sz = ((nonce, i, s) :: sz) in
+  let get_named_slot name (i, n, item) sz = ((name, i, n, item) :: sz) in
+  let temp_slots = Hashtbl.fold get_temp_slot frame.Ast.frame_temps [] in 
+  let named_items = Hashtbl.fold get_named_slot frame.Ast.frame_items [] in
+  let temp_slots = 
+		  Array.of_list 
+			(Sort.list 
+			   (fun (a, _, _) (b, _, _) -> a < b) temp_slots) 
+		in
+		let named_items = 
+		  Array.of_list 
+			(Sort.list 
+			   (fun (_, _, a, _) (_, _, b, _) -> a < b) named_items) 
+		in
+		  for i = 0 to (Array.length temp_slots) - 1 do
+			let (_, _, s) = temp_slots.(i) in
+              resolve_slot_ref cx None s;
+          done;          
+		  for i = 0 to (Array.length named_items) - 1 do
+			let (_, _, _, item) = named_items.(i) in
+              match item.Ast.node with 
+				  Ast.MOD_ITEM_slot (slot, _) -> 
+                    resolve_slot_ref cx None slot;
+                | _ -> ()
+          done;
+		  try 
+			frame.Ast.frame_size <- 0L;
+			for i = 0 to (Array.length temp_slots) - 1 do
+			  let (nonce, _, s) = temp_slots.(i) in
+                log cx "laying out temp item %d" i;
+			    let sz = slot_size cx (!s) in
+                  log cx "  == %Ld bytes @ %Ld" sz frame.Ast.frame_size;
+				  Hashtbl.replace frame.Ast.frame_temps nonce (frame.Ast.frame_size, s);
+				  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
+			done;
+			for i = 0 to (Array.length named_items) - 1 do
+			  let (name, _, n, item) = named_items.(i) in
+                log cx "laying out item %d (%s)" i name;
+			    let sz = match item.Ast.node with 
+				    Ast.MOD_ITEM_slot (slot, _) -> 
+                      slot_size cx (!slot)
+				  | _ -> 0L
+			    in
+                  log cx "  == %Ld bytes @ %Ld " sz frame.Ast.frame_size;
+				  Hashtbl.replace frame.Ast.frame_items name (frame.Ast.frame_size, n, item);
+				  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
+			done
+		  with 
+			  Auto_slot -> 
+                log cx "hit auto slot";
+				cx.ctxt_contains_autos := true
+
+
+and extend_ctxt_by_frame 
+	(cx:ctxt)
+	(items:(Ast.ident * Ast.mod_item) array)
+	: ctxt = 
+  log cx "extending ctxt by frame";
+  let items' = Hashtbl.create (Array.length items) in
+	for i = 0 to (Array.length items) - 1
+	do
+	  let (ident, item) = items.(i) in 
+		Hashtbl.add items' ident (-1L, i, item)
+	done;
+	let frame = 
+	  { Ast.frame_size = 0L;
+		Ast.frame_temps = Hashtbl.create 0;
+		Ast.frame_items = items'; }
+	in
+	  layout_frame cx frame;
+	  { cx with ctxt_frame_scopes = (frame :: cx.ctxt_frame_scopes) }
+
+
+and resolve_mod_items cx items = 
   let cx = extend_ctxt_by_frame cx (linearize_items_for_frame items) in
 	Hashtbl.iter (resolve_mod_item cx) items
 
@@ -662,7 +714,9 @@ and resolve_mod_item cx id item =
 
 	  | Ast.MOD_ITEM_slot (s, eo) -> 
           let cx = { cx with ctxt_span = Some span } in
-            resolve_slot cx None s;
+            resolve_slot_ref cx (match eo with 
+                                     None -> None
+                                   | Some e -> expr_type cx e) s;
             resolve_expr_option cx eo
 
 	  | _ -> ()
@@ -711,57 +765,81 @@ and resolve_block cx block =
 	  (Hashtbl.length block.Ast.block_frame.Ast.frame_temps);
 	layout_frame cx block.Ast.block_frame;
 	Array.iter (resolve_stmt cx') block.Ast.block_stmts
-	  
-and resolve_slot cx tyo slot = 
+
+and resolve_slot 
+    (cx:ctxt) 
+    (tyo:Ast.ty option) 
+    (slot:Ast.slot) 
+    : Ast.slot = 
   let resolve_and_check_type ty = 
-    resolve_ty cx ty;
-    match tyo with 
-        None -> ()
-      | Some t -> 
-          if ty = t
-          then ()
-          else raise (err cx "mismatched types in resolve_slot")
+    let ty = resolve_ty cx ty in
+      match tyo with 
+          None -> ty
+        | Some t -> 
+            if ty = t
+            then ty
+            else raise (err cx ("mismatched types in resolve_slot: slot is " 
+                                ^ (string_of_ty ty) 
+                                ^ " constraint implies " 
+                                ^ (string_of_ty t)))
   in
-    match !slot with 
-	  Ast.SLOT_exterior ty -> resolve_and_check_type ty
-	| Ast.SLOT_interior ty -> resolve_and_check_type ty
-	| Ast.SLOT_read_alias ty -> resolve_and_check_type ty
-	| Ast.SLOT_write_alias ty -> resolve_and_check_type ty
+    match slot with 
+	  Ast.SLOT_exterior ty -> 
+        Ast.SLOT_exterior (resolve_and_check_type ty)
+	| Ast.SLOT_interior ty -> 
+        Ast.SLOT_interior (resolve_and_check_type ty)
+	| Ast.SLOT_read_alias ty -> 
+        Ast.SLOT_read_alias (resolve_and_check_type ty)
+	| Ast.SLOT_write_alias ty -> 
+        Ast.SLOT_write_alias (resolve_and_check_type ty)
 	| Ast.SLOT_auto -> 
         (match tyo with 
-             None -> ()
-           | Some t -> 
-               log cx "propagating types in resolve_slot";
-               cx.ctxt_made_progress := true;
-               slot := Ast.SLOT_interior t)
+             None -> Ast.SLOT_auto
+           | Some t -> Ast.SLOT_interior t)
+
+and resolve_slot_ref 
+    (cx:ctxt) 
+    (tyo:Ast.ty option) 
+    (slotr:Ast.slot ref) 
+    : unit = 
+  let slot = !slotr in
+  let newslot = resolve_slot cx tyo (!slotr) in
+    if slot = newslot
+    then ()
+    else (log cx "----- made progress ----";
+          cx.ctxt_made_progress := true;
+          slotr := newslot)
   
-and resolve_ty cx t = 
+and resolve_ty 
+    (cx:ctxt)
+    (t:Ast.ty)
+    : Ast.ty = 
   match t with 
-	  Ast.TY_any -> ()
-	| Ast.TY_nil -> ()
-	| Ast.TY_bool -> ()
-	| Ast.TY_mach (tm, sz) -> ()
-	| Ast.TY_int -> ()
-	| Ast.TY_char -> ()
-	| Ast.TY_str -> ()
+	  Ast.TY_any | Ast.TY_nil | Ast.TY_bool 
+    | Ast.TY_mach _ | Ast.TY_int | Ast.TY_char
+	| Ast.TY_str | Ast.TY_opaque _ -> t
 
-	| Ast.TY_tup tt -> ()
-	| Ast.TY_vec t -> ()
-	| Ast.TY_rec tr -> ()
-
-	| Ast.TY_fn tfn -> ()
-	| Ast.TY_chan t -> ()
-	| Ast.TY_port t -> ()
-		
+	| Ast.TY_tup tt ->
+        Ast.TY_tup (Array.map (resolve_slot cx None) tt)
+	| Ast.TY_vec t -> 
+        Ast.TY_vec (resolve_ty cx t)
+	| Ast.TY_rec tr ->
+        let newt = Hashtbl.create (Hashtbl.length tr) in
+          (Hashtbl.iter (fun k s -> Hashtbl.add newt k (resolve_slot cx None s)) tr;
+           Ast.TY_rec newt)
+	| Ast.TY_chan t -> 
+        Ast.TY_chan (resolve_ty cx t)
+	| Ast.TY_port t -> 
+        Ast.TY_port (resolve_ty cx t)
+		  
 	| Ast.TY_named nm ->
 		let
 			(cx, defn) = lookup_type cx nm
 		in
 		  resolve_ty cx defn
 
-	| Ast.TY_opaque non -> ()
-
 	(* 
+	   | Ast.TY_fn tfn -> ()
 	   | Ast.TY_tag of ty_tag
 	   | Ast.TY_iso of ty_iso
 	   | Ast.TY_idx of int
@@ -771,7 +849,8 @@ and resolve_ty cx t =
 	   | Ast.TY_prog tp -> ()
 	   | Ast.TY_lim t -> ()
 	*)
-	| _ -> ()
+
+	| _ -> raise (err cx "unhandled type in resolve_ty")
 		
 		
 and resolve_expr cx expr = 
@@ -797,11 +876,11 @@ and resolve_lval cx tyo lval =
     let res = { Ast.res_path = path;
                 Ast.res_slot = slot; } 
     in
-      resolve_slot cx tyo slot;
+      resolve_slot_ref cx tyo slot;
       lval.Ast.lval_res := Some res
   in
     match !(lval.Ast.lval_res) with 
-        Some r -> resolve_slot cx tyo r.Ast.res_slot
+        Some r -> resolve_slot_ref cx tyo r.Ast.res_slot
       | None -> 
 	      (match lval.Ast.lval_src.Ast.node with 
 	         | Ast.LVAL_base base -> 
@@ -905,7 +984,7 @@ and resolve_stmt cx stmt =
 			   resolve_mod_item cx id item
 				 
 		   | Ast.DECL_temp (slot, nonce) -> 
-			   resolve_slot cx None slot)
+			   resolve_slot_ref cx None slot)
 			
 	| Ast.STMT_copy (lval, expr) -> 
 		resolve_expr cx expr;
@@ -935,11 +1014,13 @@ let resolve_crate sess items =
       log cx "";
       log cx "=== fresh resolution pass ===";
       cx.ctxt_contains_autos := false;
+      cx.ctxt_contains_unresolved_types := false;
       cx.ctxt_made_progress := false;
 	  resolve_mod_items cx items;
 	done;
-    if !(cx.ctxt_contains_autos)
-    then raise (err cx "progress wedged but autos remain")
+    if !(cx.ctxt_contains_autos) or
+      !(cx.ctxt_contains_unresolved_types)
+    then raise (err cx "progress wedged but crate incomplete")
     else ()
 
 

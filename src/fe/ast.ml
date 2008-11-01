@@ -397,6 +397,7 @@ and fn =
     {
       fn_ty: ty_fn;
       fn_bind: ident array;
+      fn_frame: frame;
       fn_body: stmt;
     }
 
