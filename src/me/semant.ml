@@ -13,6 +13,11 @@
 
 
 
+let new_layout _ = 
+  { Ast.layout_size = 0L; 
+    Ast.layout_offset = 0L;
+    Ast.layout_align = 0L }
+;;
 
 let ty_nonce = ref 0 
 ;;
@@ -69,6 +74,12 @@ let join_array sep arr =
 	  else s := (!s) ^ sep ^ arr.(i)
 	done;
 	(!s)
+;;
+
+let string_of_key k = 
+  match k with 
+      Ast.KEY_temp i -> "<temp#" ^ (string_of_int i) ^ ">"
+    | Ast.KEY_ident i -> i
 ;;
 
 let rec string_of_name_component comp = 
@@ -154,7 +165,7 @@ let slot_type cx s =
 
 let lval_type cx lval =
   match !(lval.Ast.lval_res) with 
-      Some res -> slot_type cx !(res.Ast.res_slot)
+      Some res -> slot_type cx !(res.Ast.res_slot.Ast.node)
 	| _ -> None
 ;;
 
@@ -257,7 +268,7 @@ let lval_fn_arg_type cx fn i =
 
 type binding = 
 	BINDING_item of (Ast.resolved_path * Ast.mod_item)
-  | BINDING_temp of (Ast.resolved_path * (Ast.slot ref))
+  | BINDING_slot of (Ast.resolved_path * ((Ast.slot ref) Ast.spanned))
   | BINDING_type_item of Ast.mod_type_item
 
 
@@ -370,16 +381,23 @@ and lookup_ident
 		(match cx.ctxt_frame_scopes with 
 			 [] -> raise (err cx ("unknown identifier: '" ^ ident ^ "'"))
 		   | (x::xs) -> 
-			   let tab = x.Ast.frame_items in
-				 if Hashtbl.mem tab ident
+			   let tab = x.Ast.frame_slots in
+				 if Hashtbl.mem tab (Ast.KEY_ident ident)
 				 then 
-				   let (off, n, item) = Hashtbl.find tab ident in
-					 ({cx with ctxt_span = Some item.Ast.span}, 
-					  BINDING_item (Ast.RES_off (off, fp), item))
+				   let (layout, slotr) = Hashtbl.find tab (Ast.KEY_ident ident) in
+					 ({cx with ctxt_span = Some slotr.Ast.span}, 
+					  BINDING_slot (Ast.RES_off (layout.Ast.layout_offset, fp), slotr))
 				 else 
-				   lookup_ident 
-					 { cx with ctxt_frame_scopes = xs } 
-					 (Ast.RES_deref (Ast.RES_off (0L, fp))) ident)
+			       let tab = x.Ast.frame_items in
+				     if Hashtbl.mem tab ident
+				     then 
+				       let (layout, item) = Hashtbl.find tab ident in
+					     ({cx with ctxt_span = Some item.Ast.span}, 
+					      BINDING_item (Ast.RES_off (layout.Ast.layout_offset, fp), item))
+                     else 
+				       lookup_ident 
+					     { cx with ctxt_frame_scopes = xs } 
+					     (Ast.RES_deref (Ast.RES_off (0L, fp))) ident)
 
 
 and lookup_temp (cx:ctxt) 
@@ -389,18 +407,18 @@ and lookup_temp (cx:ctxt)
   match cx.ctxt_frame_scopes with 
 	  [] -> raise (err cx ("unknown temporary: '" ^ (string_of_int temp) ^ "'"))
 	| (x::xs) -> 
-		let tab = x.Ast.frame_temps in
-		if Hashtbl.mem tab temp
-		then 
-		  let (off, slot) = Hashtbl.find tab temp in 
-			({ cx with ctxt_span = None }, 
-			 BINDING_temp (Ast.RES_off (off, fp), slot))
-		else 
-		  lookup_temp 
-			{ cx with ctxt_frame_scopes = xs } 
-			(Ast.RES_deref (Ast.RES_off (0L, fp)))
-			temp
-
+		let tab = x.Ast.frame_slots in
+		  if Hashtbl.mem tab (Ast.KEY_temp temp)
+		  then 
+		    let (layout, slot) = Hashtbl.find tab (Ast.KEY_temp temp) in 
+			  ({ cx with ctxt_span = Some slot.Ast.span }, 
+			   BINDING_slot (Ast.RES_off (layout.Ast.layout_offset, fp), slot))
+		  else 
+		    lookup_temp 
+			  { cx with ctxt_frame_scopes = xs } 
+			  (Ast.RES_deref (Ast.RES_off (0L, fp)))
+			  temp
+              
 
 and lookup_base cx base = 
   match base with 
@@ -459,8 +477,6 @@ and mod_type_item_of_mod_item item =
 			  Ast.prog_init_ty = init_ty; }
 		  in
 			Ast.MOD_TYPE_ITEM_prog (decl pd.Ast.decl_params prog_ty)
-	  | Ast.MOD_ITEM_slot (slot, _) -> 
-		  Ast.MOD_TYPE_ITEM_slot (!slot)
   in
 	{ Ast.span = item.Ast.span;
 	  Ast.node = ty }
@@ -517,9 +533,6 @@ and apply_args_to_item cx item args =
 	  | Ast.MOD_ITEM_prog pd ->
 		  let cx = app pd.Ast.decl_params in 
 		    (cx, Ast.MOD_ITEM_prog { pd with Ast.decl_params = [| |] })
-              
-	  | Ast.MOD_ITEM_slot _ -> 
-		  raise (err cx "applying types to slot")
 
 
 and apply_args_to_type_item cx tyitem args = 
@@ -550,9 +563,6 @@ and apply_args_to_type_item cx tyitem args =
 	| Ast.MOD_TYPE_ITEM_prog pd ->
 		let cx = app pd.Ast.decl_params in 
 		  (cx, Ast.MOD_TYPE_ITEM_prog { pd with Ast.decl_params = [| |] })
-
-	| Ast.MOD_TYPE_ITEM_slot _ -> 
-		raise (err cx "applying types to slot")
 		  
 
 and lookup cx 
@@ -570,8 +580,8 @@ and lookup cx
 			 | BINDING_type_item bti -> 
 				 let ((cx':ctxt), tyitem) = apply_args_to_type_item cx bti args in 
 				   basefn cx (cx', BINDING_type_item {bti with Ast.node = tyitem})
-			 | BINDING_temp _ -> 
-				 raise (err cx "applying types to temporary binding"))
+			 | BINDING_slot _ -> 
+				 raise (err cx "applying types to slot"))
 	| Ast.NAME_base (Ast.BASE_temp temp) -> 
 		basefn cx (lookup_temp cx Ast.RES_fp temp)
 	| Ast.NAME_ext (base, comp) -> 
@@ -618,58 +628,44 @@ and layout_frame
 	(cx:ctxt) 
 	(frame:Ast.frame) 
 	: unit = 
-  let get_temp_slot nonce (i, s) sz = ((nonce, i, s) :: sz) in
-  let get_named_slot name (i, n, item) sz = ((name, i, n, item) :: sz) in
-  let temp_slots = Hashtbl.fold get_temp_slot frame.Ast.frame_temps [] in 
-  let named_items = Hashtbl.fold get_named_slot frame.Ast.frame_items [] in
-  let temp_slots = 
+  let get_slot key (l, s) sz = ((key, l, s) :: sz) in
+  let slots = Hashtbl.fold get_slot frame.Ast.frame_slots [] in 
+  let slots = 
 		  Array.of_list 
 			(Sort.list 
-			   (fun (a, _, _) (b, _, _) -> a < b) temp_slots) 
-		in
-		let named_items = 
-		  Array.of_list 
-			(Sort.list 
-			   (fun (_, _, a, _) (_, _, b, _) -> a < b) named_items) 
-		in
-		  for i = 0 to (Array.length temp_slots) - 1 do
-			let (_, _, s) = temp_slots.(i) in
-              resolve_slot_ref cx None s;
-          done;          
-		  for i = 0 to (Array.length named_items) - 1 do
-			let (_, _, _, item) = named_items.(i) in
-              match item.Ast.node with 
-				  Ast.MOD_ITEM_slot (slot, _) -> 
-                    resolve_slot_ref cx None slot;
-                | _ -> ()
-          done;
-		  try 
-			frame.Ast.frame_size <- 0L;
-			for i = 0 to (Array.length temp_slots) - 1 do
-			  let (nonce, _, s) = temp_slots.(i) in
-                log cx "laying out temp item %d" i;
-			    let sz = slot_size cx (!s) in
-                  log cx "  == %Ld bytes @ %Ld" sz frame.Ast.frame_size;
-				  Hashtbl.replace frame.Ast.frame_temps nonce (frame.Ast.frame_size, s);
-				  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
-			done;
-			for i = 0 to (Array.length named_items) - 1 do
-			  let (name, _, n, item) = named_items.(i) in
-                log cx "laying out item %d (%s)" i name;
-			    let sz = match item.Ast.node with 
-				    Ast.MOD_ITEM_slot (slot, _) -> 
-                      slot_size cx (!slot)
-				  | _ -> 0L
-			    in
-                  log cx "  == %Ld bytes @ %Ld " sz frame.Ast.frame_size;
-				  Hashtbl.replace frame.Ast.frame_items name (frame.Ast.frame_size, n, item);
-				  frame.Ast.frame_size <- Int64.add frame.Ast.frame_size sz
-			done
-		  with 
-			  Auto_slot -> 
-                log cx "hit auto slot";
-				cx.ctxt_contains_autos := true
-
+			   (fun (a, _, _) (b, _, _) -> a < b) slots)
+  in
+    (* FIXME: lay out the module items too. *)
+    (* 
+       let get_item name (l, i) sz = ((name, l, i) :: sz) in
+       let items = Hashtbl.fold get_slot frame.Ast.frame_items [] in
+       let items = 
+	   Array.of_list 
+	   (Sort.list 
+	   (fun (a, _, _) (b, _, _) -> a < b) items) 
+       in
+    *)
+	for i = 0 to (Array.length slots) - 1 do
+	  let (_, _, s) = slots.(i) in
+        resolve_slot_ref cx None s;
+    done;          
+	try 
+	  frame.Ast.frame_layout.Ast.layout_size <- 0L;
+	  for i = 0 to (Array.length slots) - 1 do
+        let offset = frame.Ast.frame_layout.Ast.layout_size in
+		let (key, layout, s) = slots.(i) in
+          log cx "laying out slot %d (%s)" i (string_of_key key);
+		  let sz = slot_size cx (!(s.Ast.node)) in
+            log cx "  == %Ld bytes @ %Ld" sz offset;
+            layout.Ast.layout_size <- sz;
+            layout.Ast.layout_offset <- offset;
+			frame.Ast.frame_layout.Ast.layout_size <- Int64.add offset sz
+	  done;
+	with 
+		Auto_slot -> 
+          log cx "hit auto slot";
+		  cx.ctxt_contains_autos := true
+            
 
 and extend_ctxt_by_frame 
 	(cx:ctxt)
@@ -680,11 +676,11 @@ and extend_ctxt_by_frame
 	for i = 0 to (Array.length items) - 1
 	do
 	  let (ident, item) = items.(i) in 
-		Hashtbl.add items' ident (-1L, i, item)
+		Hashtbl.add items' ident (new_layout(), item)
 	done;
 	let frame = 
-	  { Ast.frame_size = 0L;
-		Ast.frame_temps = Hashtbl.create 0;
+	  { Ast.frame_layout = new_layout();
+		Ast.frame_slots = Hashtbl.create 0;
 		Ast.frame_items = items'; }
 	in
 	  layout_frame cx frame;
@@ -712,33 +708,14 @@ and resolve_mod_item cx id item =
 		  let cx = param_ctxt cx fn.Ast.decl_params span in
 			resolve_fn span cx fn.Ast.decl_item
 
-	  | Ast.MOD_ITEM_slot (s, eo) -> 
-          let cx = { cx with ctxt_span = Some span } in
-            resolve_slot_ref cx (match eo with 
-                                     None -> None
-                                   | Some e -> expr_type cx e) s;
-            resolve_expr_option cx eo
-
 	  | _ -> ()
 
 
 and resolve_fn span cx fn = 
-  let bind = fn.Ast.fn_bind in
-  let nbind = Array.length bind in
-  let slots = 
-	match fn.Ast.fn_ty.Ast.fn_sig.Ast.sig_input_slot with
-		Ast.SLOT_interior (Ast.TY_tup slots) -> 
-		  if nbind = 1
-		  then [| Ast.SLOT_interior (Ast.TY_tup slots) |]
-		  else slots
-	  | slot -> [| slot |]
+  let cx = 
+	{ cx with ctxt_frame_scopes = 
+		fn.Ast.fn_frame :: cx.ctxt_frame_scopes } 
   in
-  let mapslot i s = 
-	let item' = (Ast.MOD_ITEM_slot ((ref s), None)) in
-	let item = { Ast.node = item'; Ast.span = span } in
-	  (bind.(i), item)
-  in
-  let cx = extend_ctxt_by_frame cx (Array.mapi mapslot slots) in
 	resolve_stmt cx fn.Ast.fn_body
 
 		
@@ -760,9 +737,9 @@ and resolve_block cx block =
 	{ cx with ctxt_frame_scopes = 
 		block.Ast.block_frame :: cx.ctxt_frame_scopes } 
   in
-    log cx "resolving block with %d items, %d temps"
+    log cx "resolving block with %d items, %d slots"
 	  (Hashtbl.length block.Ast.block_frame.Ast.frame_items)
-	  (Hashtbl.length block.Ast.block_frame.Ast.frame_temps);
+	  (Hashtbl.length block.Ast.block_frame.Ast.frame_slots);
 	layout_frame cx block.Ast.block_frame;
 	Array.iter (resolve_stmt cx') block.Ast.block_stmts
 
@@ -800,15 +777,15 @@ and resolve_slot
 and resolve_slot_ref 
     (cx:ctxt) 
     (tyo:Ast.ty option) 
-    (slotr:Ast.slot ref) 
+    (slotr:(Ast.slot ref) Ast.spanned) 
     : unit = 
-  let slot = !slotr in
-  let newslot = resolve_slot cx tyo (!slotr) in
+  let slot = !(slotr.Ast.node) in
+  let newslot = resolve_slot cx tyo slot in
     if slot = newslot
     then ()
     else (log cx "----- made progress ----";
           cx.ctxt_made_progress := true;
-          slotr := newslot)
+          slotr.Ast.node := newslot)
   
 and resolve_ty 
     (cx:ctxt)
@@ -889,12 +866,11 @@ and resolve_lval cx tyo lval =
 			       (match binding with 
 				        BINDING_item (path, item) -> 
 				          (match item.Ast.node with 
-						       Ast.MOD_ITEM_slot (slot, _) -> bind_to_slot path slot
-                             | Ast.MOD_ITEM_fn _ -> ()
+                               Ast.MOD_ITEM_fn _ -> ()
 					         | _ -> 
 						         raise (err cx ("lval '" ^ (fmt_base cx base) ^ 
 										          "' resolved to a non-slot item, not yet handled")))
-			          | BINDING_temp (path, slot) -> bind_to_slot path slot
+			          | BINDING_slot (path, slot) -> bind_to_slot path slot
 			          | BINDING_type_item _ -> 
 				          raise (err cx ("lval '" ^ (fmt_base cx base) ^ "' resolved to a type name")))
 	         | _ -> raise (err cx ("unhandled lval form in resolve_lval")))
@@ -983,7 +959,7 @@ and resolve_stmt cx stmt =
 			 Ast.DECL_mod_item (id, item) -> 
 			   resolve_mod_item cx id item
 				 
-		   | Ast.DECL_temp (slot, nonce) -> 
+		   | Ast.DECL_slot (key, slot) -> 
 			   resolve_slot_ref cx None slot)
 			
 	| Ast.STMT_copy (lval, expr) -> 

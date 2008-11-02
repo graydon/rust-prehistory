@@ -245,11 +245,22 @@ and stmt_alt_type =
       alt_type_else: stmt option;
     }
 
+and slot_key = 
+    KEY_ident of ident
+  | KEY_temp of nonce
+
+and layout = 
+    { 
+      mutable layout_size: int64;
+      mutable layout_offset: int64;
+      mutable layout_align: int64; 
+    }
+
 and frame = 
     {
-      mutable frame_size: int64;
-      frame_temps: (nonce, (int64 * (slot ref))) Hashtbl.t;
-      frame_items: (ident, (int64 * int * mod_item)) Hashtbl.t;
+      frame_layout: layout;
+      frame_slots: (slot_key, (layout * ((slot ref) spanned))) Hashtbl.t;
+      frame_items: (ident, (layout * mod_item)) Hashtbl.t;
     }
 
 and stmt_block = 
@@ -260,7 +271,7 @@ and stmt_block =
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
-  | DECL_temp of ((slot ref) * nonce)
+  | DECL_slot of (slot_key * ((slot ref) spanned))
 
       
 and stmt_alt_port = 
@@ -352,7 +363,7 @@ and resolved_path =
 and lval_resolved = 
     {
       res_path: resolved_path;
-      res_slot: slot ref;
+      res_slot: (slot ref) spanned;
     }
 
 and lval' = 
@@ -469,7 +480,6 @@ and mod_item' =
   | MOD_ITEM_mod of mod_items decl
   | MOD_ITEM_fn of fn decl
   | MOD_ITEM_prog of prog decl
-  | MOD_ITEM_slot of ((slot ref) * expr option)
 
 and mod_item = mod_item' spanned   
 
@@ -480,7 +490,6 @@ and mod_type_item' =
   | MOD_TYPE_ITEM_mod of mod_type_items decl
   | MOD_TYPE_ITEM_fn of ty_fn decl
   | MOD_TYPE_ITEM_prog of ty_prog decl
-  | MOD_TYPE_ITEM_slot of slot
 
 and mod_type_item = mod_type_item' spanned
 

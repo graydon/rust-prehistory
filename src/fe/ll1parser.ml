@@ -715,7 +715,7 @@ and build_tmp ps slot apos bpos =
 	  Printf.fprintf ps.pstate_sess.Session.sess_log_out "building temporary %d\n%!" nonce
     else 
 	  ();
-    let decl = (Ast.DECL_temp ((ref slot), nonce)) in
+    let decl = (Ast.DECL_slot (Ast.KEY_temp nonce, (span apos bpos (ref slot)))) in
     let declstmt = span apos bpos (Ast.STMT_decl decl) in
     let tmp = { Ast.lval_src = span apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce));
                 Ast.lval_res = ref None } 
@@ -889,10 +889,15 @@ and parse_one_or_more_tup_slots_and_idents param_slot ps =
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
-	  
+
+and new_layout _ = 
+  { Ast.layout_size = 0L; 
+    Ast.layout_offset = 0L;
+    Ast.layout_align = 0L }
+	
 and new_frame _ = 
-  { Ast.frame_size = 0L;
-	Ast.frame_temps = Hashtbl.create 0;
+  { Ast.frame_layout = new_layout ();
+	Ast.frame_slots = Hashtbl.create 0;
 	Ast.frame_items = Hashtbl.create 0; }
 
 and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit = 
@@ -904,10 +909,10 @@ and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit =
     match decl with 
 	    Ast.DECL_mod_item (id, item) -> 
 		  Hashtbl.add frame.Ast.frame_items id 
-			(-1L, (Hashtbl.length frame.Ast.frame_items), item)
-	  | Ast.DECL_temp (slot, nonce) -> 
-		  Hashtbl.add frame.Ast.frame_temps nonce 
-            (-1L, slot)
+			((new_layout()), item)
+	  | Ast.DECL_slot (key, slot) -> 
+		  Hashtbl.add frame.Ast.frame_slots key
+            ((new_layout()), slot)
 
 and parse_block ps = 
   let frames = ps.pstate_block_frames in
@@ -1042,45 +1047,53 @@ and parse_stmts ps =
 				 let (nonce, tmp, tempdecl) = 
 				   build_tmp ps (Ast.SLOT_interior (Ast.TY_tup slots)) apos bpos 
                  in
+                   
+                 let copies = ref [] in
 
 				 let makedecl i slot = 
-				   let expropt = 
-					 match init with 
-						 None -> None
-					   | Some _ -> 
-						   let ext = Ast.COMP_named (Ast.COMP_idx i) in
-						   let lval' = Ast.LVAL_ext (tmp.Ast.lval_src.Ast.node, ext) in
-                           let lval = { Ast.lval_src = span apos bpos lval';
-                                        Ast.lval_res = ref None } 
-                           in
-							 Some (Ast.EXPR_lval lval)
-				   in
-				   let item = Ast.MOD_ITEM_slot ((ref slot), expropt) in
-				   let decl = Ast.DECL_mod_item (idents.(i), 
-												 (span apos bpos item))
-				   in
+				   (match init with 
+					    None -> ()
+					  | Some _ -> 
+						  let ext = Ast.COMP_named (Ast.COMP_idx i) in
+						  let src_lval' = Ast.LVAL_ext (tmp.Ast.lval_src.Ast.node, ext) in
+                          let src_lval = { Ast.lval_src = span apos bpos src_lval';
+                                           Ast.lval_res = ref None } 
+                          in
+                          let dst_lval' = Ast.LVAL_base (Ast.BASE_ident idents.(i)) in
+                          let dst_lval = { Ast.lval_src = span apos bpos dst_lval';
+                                           Ast.lval_res = ref None }
+                          in
+                          let copy = span apos bpos (Ast.STMT_copy (dst_lval, (Ast.EXPR_lval src_lval))) in
+                            copies := copy :: (!copies));                   
+				   let slotr = (span apos bpos (ref slot)) in
+				   let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slotr) in
                      add_block_decl ps decl;
 					 span apos bpos (Ast.STMT_decl decl)
 				 in
-				   let valdecls = Array.mapi makedecl slots in
-                     Array.concat [stmts; [| tempdecl |]; valdecls]
-                       
+				 let valdecls = Array.mapi makedecl slots in
+                   Array.concat [stmts; [| tempdecl |]; valdecls; arl (!copies)]
+                     
              | _ -> 
                  let (stmts, slot, ident, init) = 
 				   ctxt "stmt slot" parse_slot_and_ident_and_init ps in
                  let bpos = lexpos ps in 
-                 let decl = (Ast.DECL_mod_item 
-                               (ident, 
-                                (span apos bpos 
-                                   (Ast.MOD_ITEM_slot ((ref slot), match init with 
-                                                           None -> None
-                                                         | Some lv -> Some (Ast.EXPR_lval lv))))))
+                 let decl = (Ast.DECL_slot (Ast.KEY_ident ident, 
+                                            (span apos bpos (ref slot))))
+                 in
+                 let copy = match init with 
+                     None -> [| |]
+                   | Some lv -> [| span apos bpos 
+                                     (Ast.STMT_copy ({ Ast.lval_src = 
+                                                         span apos bpos 
+                                                           (Ast.LVAL_base (Ast.BASE_ident ident));
+                                                       Ast.lval_res = ref None; },
+                                                     Ast.EXPR_lval lv)) |]
                  in
                    add_block_decl ps decl;
-                   spans stmts apos bpos (Ast.STMT_decl decl))
-            
-            
-            
+                   Array.concat [stmts; [| span apos bpos (Ast.STMT_decl decl) |]; copy])
+                     
+                     
+                     
       | LIM | PORT | PROG | MOD | (FN _) -> 
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
           let bpos = lexpos ps in 
@@ -1205,8 +1218,8 @@ and parse_sig_and_bind ps =
             let bpos = lexpos ps in  
               for i = 0 to (Array.length slots) - 1
               do
-                let item = span apos bpos (Ast.MOD_ITEM_slot ((ref slots.(i)), None)) in
-                let decl = Ast.DECL_mod_item (idents.(i), item) in
+                let slotr = span apos bpos (ref slots.(i)) in
+                let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slotr) in
                   add_block_decl ps decl;
               done;
               if Array.length slots = 1
@@ -1291,16 +1304,7 @@ and parse_mod_item ps =
             (ident, arr [], 
              span apos bpos 
                (Ast.MOD_ITEM_fn decl))
-              
-      | VAL ->     
-          bump ps;
-          let (stmts, slot, ident, init) = ctxt "mod slot" parse_slot_and_ident_and_init ps in
-          let bpos = lexpos ps in
-            (ident, stmts, span apos bpos (Ast.MOD_ITEM_slot ((ref slot), 
-                                                              match init with 
-                                                                  None -> None 
-                                                                | Some lval -> Some (Ast.EXPR_lval lval))))
-              
+
       | TYPE -> 
           bump ps;
           let ident = ctxt "mod ty item: ident" parse_ident ps in
