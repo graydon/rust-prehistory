@@ -363,8 +363,12 @@ and resolved_path =
 and lval_resolved = 
     {
       res_path: resolved_path;
-      res_slot: (slot ref) spanned;
+      res_target: resolved_target;
     }
+
+and resolved_target = 
+    RES_slot of (slot ref) spanned
+  | RES_item of mod_item
 
 and lval' = 
     LVAL_base of name_base

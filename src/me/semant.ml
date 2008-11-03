@@ -163,97 +163,6 @@ let slot_type cx s =
 	| Ast.SLOT_auto -> None
 ;;
 
-let lval_type cx lval =
-  match !(lval.Ast.lval_res) with 
-      Some res -> slot_type cx !(res.Ast.res_slot.Ast.node)
-	| _ -> None
-;;
-
-let expr_type cx expr = 
-  let concretize tyo = 
-    match tyo with 
-        Some (Ast.TY_named _) -> None
-      | Some t -> Some t
-      | None -> None
-  in
-    match expr with 
-	    Ast.EXPR_literal lit -> 
-		  (match lit with 
-			   Ast.LIT_nil -> Some Ast.TY_nil
-		     | Ast.LIT_bool _ -> Some Ast.TY_bool
-		     | Ast.LIT_unsigned (n, _) -> Some (Ast.TY_mach (Ast.TY_unsigned, n))
-		     | Ast.LIT_signed (n, _) -> Some (Ast.TY_mach (Ast.TY_signed, n))
-		     | Ast.LIT_ieee_bfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_bfp, 64))
-		     | Ast.LIT_ieee_dfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_dfp, 128))
-		     | Ast.LIT_int _ -> Some Ast.TY_int
-		     | Ast.LIT_char _ -> Some Ast.TY_char
-		     | Ast.LIT_str _ -> Some Ast.TY_str
-		     | Ast.LIT_custom _ -> None)
-		    
-	  (* FIXME: check appropriateness of applying op to type *)
-	  | Ast.EXPR_binary (op, a, b) -> 
-		  (match (concretize (lval_type cx a), 
-                  concretize (lval_type cx b)) with 
-			   (Some t1, Some t2) -> 
-			     if t1 = t2 
-			     then 
-                   match op with 
-                       Ast.BINOP_eq | Ast.BINOP_ne
-                     | Ast.BINOP_lt | Ast.BINOP_le
-                     | Ast.BINOP_gt | Ast.BINOP_ge -> Some Ast.TY_bool
-                     | _ -> Some t1
-			     else raise (err cx ("mismatched binary expression types in expr_type: "
-                                     ^ (string_of_ty t1) ^ " vs. " ^ (string_of_ty t2)))
-		     | _ -> (cx.ctxt_contains_unresolved_types := true; None))
-            
-	  | Ast.EXPR_unary (_, lv) -> concretize (lval_type cx lv)
-	  | Ast.EXPR_lval lv -> concretize (lval_type cx lv)
-	  | _ -> raise (err cx "unhandled expression type in expr_type")
-;;
-
-let lval_fn_result_type cx fn =
-  let rec f ty = 
-    match ty with 
-        Ast.TY_fn f -> 
-          let slot = f.Ast.fn_sig.Ast.sig_output_slot in
-            slot_type cx slot
-      | Ast.TY_lim t -> f t
-      | _ -> raise (err cx "non-function type in function context")
-  in
-    match lval_type cx fn with 
-        Some t -> 
-          let ft = f t in
-          let s = (match ft with None -> "<none>" | Some t -> string_of_ty t) in
-            log cx "function return type: %s" s;
-            ft
-      | _ -> None
-;;
-
-
-let lval_fn_arg_type cx fn i = 
-  let badcount = "argument-count mismatch in lval_fn_arg_type" in
-  let rec f ty = 
-    match ty with 
-        Ast.TY_fn f -> 
-          let slot = f.Ast.fn_sig.Ast.sig_input_slot in
-            (match slot_type cx slot with
-                 None -> None
-               | Some (Ast.TY_tup tup) -> 
-                   (if i >= 0 or i < Array.length tup
-                    then slot_type cx tup.(i)
-                    else raise (err cx badcount))
-               | Some t -> 
-                   (if i = 0 
-                    then Some t
-                    else raise (err cx badcount)))
-      | _ -> raise (err cx "non-function type in lval_fn_arg_type")
-  in
-    match lval_type cx fn with 
-        Some ty -> f ty
-      | _ -> None
-;;
-
-
 (* 
  * 'binding' is mostly just to permit returning a single ocaml type 
  * from a scope-based lookup; scopes (and the things found in them) 
@@ -439,6 +348,15 @@ and mod_type_of_mod m =
   let add n i = Hashtbl.add ty_items n (mod_type_item_of_mod_item i) in
 	Hashtbl.iter add m;
 	ty_items
+
+and prog_type_of_prog prog = 
+  let init_ty = (match prog.Ast.prog_init with 
+					 None -> None
+				   | Some init -> Some init.Ast.init_sig)
+  in
+	{ Ast.prog_mod_ty = mod_type_of_mod prog.Ast.prog_mod;
+	  Ast.prog_init_ty = init_ty; }
+
 	  
 and mod_type_item_of_mod_item item = 
   let decl params item = 
@@ -467,16 +385,8 @@ and mod_type_item_of_mod_item item =
 		  Ast.MOD_TYPE_ITEM_fn
 			(decl fd.Ast.decl_params fd.Ast.decl_item.Ast.fn_ty)
 	  | Ast.MOD_ITEM_prog pd -> 
-		  let prog = pd.Ast.decl_item in
-		  let init_ty = (match prog.Ast.prog_init with 
-							 None -> None
-						   | Some init -> Some init.Ast.init_sig)
-		  in
-		  let prog_ty = 
-			{ Ast.prog_mod_ty = mod_type_of_mod prog.Ast.prog_mod;
-			  Ast.prog_init_ty = init_ty; }
-		  in
-			Ast.MOD_TYPE_ITEM_prog (decl pd.Ast.decl_params prog_ty)
+          let prog_ty = prog_type_of_prog pd.Ast.decl_item in
+	        Ast.MOD_TYPE_ITEM_prog (decl pd.Ast.decl_params prog_ty)
   in
 	{ Ast.span = item.Ast.span;
 	  Ast.node = ty }
@@ -601,6 +511,38 @@ and lookup_type_item cx name =
   in
 	lookup cx basefn extfn name
 
+and type_of_mod_item cx item = 
+  let check_concrete params ty = 
+    if Array.length params = 0 
+    then ty 
+    else raise (err cx "item has parametric type in type_of_mod_item")
+  in
+	match item.Ast.node with 
+		Ast.MOD_ITEM_opaque_type td -> 
+          check_concrete td.Ast.decl_params Ast.TY_type
+			  
+	  | Ast.MOD_ITEM_public_type td -> 
+          check_concrete td.Ast.decl_params Ast.TY_type
+			  
+	  | Ast.MOD_ITEM_pred pd -> 
+          check_concrete pd.Ast.decl_params 
+            (Ast.TY_fn { Ast.fn_pure = true;
+                         Ast.fn_lim = Ast.UNLIMITED;
+                         Ast.fn_sig = pd.Ast.decl_item.Ast.pred_ty;
+                         Ast.fn_proto = None })
+			  
+	  | Ast.MOD_ITEM_mod md ->
+          check_concrete md.Ast.decl_params 
+            (Ast.TY_mod (mod_type_of_mod md.Ast.decl_item))
+              
+	  | Ast.MOD_ITEM_fn fd -> 
+          check_concrete fd.Ast.decl_params
+            (Ast.TY_fn fd.Ast.decl_item.Ast.fn_ty)
+            
+	  | Ast.MOD_ITEM_prog pd ->
+          check_concrete pd.Ast.decl_params
+            (Ast.TY_prog (prog_type_of_prog pd.Ast.decl_item))
+
 
 and lookup_type cx name = 
   let parametric = 
@@ -622,6 +564,94 @@ and lookup_type cx name =
 		  else (cx', td.Ast.decl_item)
 
 	  | _ -> raise (err cx ((string_of_name name) ^ " names a non-type item"))
+
+and lval_type cx lval =
+  match !(lval.Ast.lval_res) with 
+      Some res -> 
+        (match res.Ast.res_target with 
+             (Ast.RES_slot slotr) -> slot_type cx !(slotr.Ast.node)
+           | (Ast.RES_item item) -> Some (type_of_mod_item cx item))
+	| _ -> None
+
+and expr_type cx expr = 
+  let concretize tyo = 
+    match tyo with 
+        Some (Ast.TY_named _) -> None
+      | Some t -> Some t
+      | None -> None
+  in
+    match expr with 
+	    Ast.EXPR_literal lit -> 
+		  (match lit with 
+			   Ast.LIT_nil -> Some Ast.TY_nil
+		     | Ast.LIT_bool _ -> Some Ast.TY_bool
+		     | Ast.LIT_unsigned (n, _) -> Some (Ast.TY_mach (Ast.TY_unsigned, n))
+		     | Ast.LIT_signed (n, _) -> Some (Ast.TY_mach (Ast.TY_signed, n))
+		     | Ast.LIT_ieee_bfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_bfp, 64))
+		     | Ast.LIT_ieee_dfp _ -> Some (Ast.TY_mach (Ast.TY_ieee_dfp, 128))
+		     | Ast.LIT_int _ -> Some Ast.TY_int
+		     | Ast.LIT_char _ -> Some Ast.TY_char
+		     | Ast.LIT_str _ -> Some Ast.TY_str
+		     | Ast.LIT_custom _ -> None)
+		    
+	  (* FIXME: check appropriateness of applying op to type *)
+	  | Ast.EXPR_binary (op, a, b) -> 
+		  (match (concretize (lval_type cx a), 
+                  concretize (lval_type cx b)) with 
+			   (Some t1, Some t2) -> 
+			     if t1 = t2 
+			     then 
+                   match op with 
+                       Ast.BINOP_eq | Ast.BINOP_ne
+                     | Ast.BINOP_lt | Ast.BINOP_le
+                     | Ast.BINOP_gt | Ast.BINOP_ge -> Some Ast.TY_bool
+                     | _ -> Some t1
+			     else raise (err cx ("mismatched binary expression types in expr_type: "
+                                     ^ (string_of_ty t1) ^ " vs. " ^ (string_of_ty t2)))
+		     | _ -> (cx.ctxt_contains_unresolved_types := true; None))
+            
+	  | Ast.EXPR_unary (_, lv) -> concretize (lval_type cx lv)
+	  | Ast.EXPR_lval lv -> concretize (lval_type cx lv)
+	  | _ -> raise (err cx "unhandled expression type in expr_type")
+
+and lval_fn_result_type cx fn =
+  let rec f ty = 
+    match ty with 
+        Ast.TY_fn f -> 
+          let slot = f.Ast.fn_sig.Ast.sig_output_slot in
+            slot_type cx slot
+      | Ast.TY_lim t -> f t
+      | _ -> raise (err cx "non-function type in function context")
+  in
+    match lval_type cx fn with 
+        Some t -> 
+          let ft = f t in
+          let s = (match ft with None -> "<none>" | Some t -> string_of_ty t) in
+            log cx "function return type: %s" s;
+            ft
+      | _ -> None
+
+and lval_fn_arg_type cx fn i = 
+  let badcount = "argument-count mismatch in lval_fn_arg_type" in
+  let rec f ty = 
+    match ty with 
+        Ast.TY_fn f -> 
+          let slot = f.Ast.fn_sig.Ast.sig_input_slot in
+            (match slot_type cx slot with
+                 None -> None
+               | Some (Ast.TY_tup tup) -> 
+                   (if i >= 0 or i < Array.length tup
+                    then slot_type cx tup.(i)
+                    else raise (err cx badcount))
+               | Some t -> 
+                   (if i = 0 
+                    then Some t
+                    else raise (err cx badcount)))
+      | _ -> raise (err cx "non-function type in lval_fn_arg_type")
+  in
+    match lval_type cx fn with 
+        Some ty -> f ty
+      | _ -> None
 
 
 and layout_frame 
@@ -851,25 +881,28 @@ and resolve_expr cx expr =
 and resolve_lval cx tyo lval = 
   let bind_to_slot path slot = 
     let res = { Ast.res_path = path;
-                Ast.res_slot = slot; } 
+                Ast.res_target = Ast.RES_slot slot; } 
     in
       resolve_slot_ref cx tyo slot;
       lval.Ast.lval_res := Some res
   in
+  let bind_to_item path item = 
+    let res = { Ast.res_path = path;
+                Ast.res_target = Ast.RES_item item; } 
+    in
+      lval.Ast.lval_res := Some res
+  in
     match !(lval.Ast.lval_res) with 
-        Some r -> resolve_slot_ref cx tyo r.Ast.res_slot
+        Some r -> (match r.Ast.res_target with
+                       Ast.RES_slot slotr -> resolve_slot_ref cx tyo slotr
+                     | Ast.RES_item _ -> ())
       | None -> 
 	      (match lval.Ast.lval_src.Ast.node with 
 	         | Ast.LVAL_base base -> 
 		         let (_, binding) = lookup_base cx base in
                    log cx "resolved lval: %s" (fmt_base cx base);
 			       (match binding with 
-				        BINDING_item (path, item) -> 
-				          (match item.Ast.node with 
-                               Ast.MOD_ITEM_fn _ -> ()
-					         | _ -> 
-						         raise (err cx ("lval '" ^ (fmt_base cx base) ^ 
-										          "' resolved to a non-slot item, not yet handled")))
+				        BINDING_item (path, item) -> bind_to_item path item
 			          | BINDING_slot (path, slot) -> bind_to_slot path slot
 			          | BINDING_type_item _ -> 
 				          raise (err cx ("lval '" ^ (fmt_base cx base) ^ "' resolved to a type name")))

@@ -39,7 +39,7 @@
 
                 ("pub", PUB);
 
-                ("val", VAL);
+                ("let", LET);
                 ("dyn", DYN);
 
                 ("log", LOG);

@@ -6,20 +6,21 @@ prog woohoo
   fn putstr(str s) -> () {}
   fn putint(int i) -> () {}
   fn zerg(int i) -> int { ret i; }
-  lim fn foo(int x) -> ()
+  lim fn foo(int x) -> int
   {
-	val t y = x + 2;
-    //putstr("hello");
+	let t y = x + 2;
+    putstr("hello");
     while (y+2 < 10) {
-      //val () j = putint(y);
+      let () j = putint(y);
 	  y = y + 2;
 	}
+	ret y;
   }
   
   main
     {
-	  //val int i = foo(0);
-	  val int x = 2 + 2;
+	  let int i = foo(0);
+	  let int x = 2 + 2;
     }
 }
 

@@ -84,8 +84,8 @@ type token =
   (* Module-item qualifiers *)
   | PUB
 
-  (* Module value / stmt declarators. *) 
-  | VAL
+  (* Value / stmt declarators. *) 
+  | LET
   | DYN
 
   (* Magic runtime services *)
@@ -236,8 +236,8 @@ let string_of_tok t =
     (* Declarator qualifiers *)
     | PUB        -> "pub"
 
-    (* Module value / stmt declarators. *) 
-    | VAL        -> "val"
+    (* Value / stmt declarators. *) 
+    | LET        -> "val"
     | DYN        -> "dyn"
 
     (* Magic runtime services *)
@@ -1023,7 +1023,7 @@ and parse_stmts ps =
               
       | LBRACE -> [| ctxt "stmts: block" parse_block ps |]
 
-      | VAL -> 
+      | LET -> 
           bump ps;
           (match peek ps with 
                LPAREN -> 				 
@@ -1035,13 +1035,13 @@ and parse_stmts ps =
 				   (* 
 					* A little destructuring assignment sugar:
 					* 
-					*   val (int a, int b) = foo();
+					*   let (int a, int b) = foo();
 					* 
 					* desugars to:
 					* 
 					*   temp (int, int) t_n = foo();
-					*   val int a = t_n.{0};
-					*   val int b = t_n.{1};
+					*   let int a = t_n.{0};
+					*   let int b = t_n.{1};
 					* 
 					*)
 				 let (nonce, tmp, tempdecl) = 
@@ -1070,8 +1070,8 @@ and parse_stmts ps =
                      add_block_decl ps decl;
 					 span apos bpos (Ast.STMT_decl decl)
 				 in
-				 let valdecls = Array.mapi makedecl slots in
-                   Array.concat [stmts; [| tempdecl |]; valdecls; arl (!copies)]
+				 let letdecls = Array.mapi makedecl slots in
+                   Array.concat [stmts; [| tempdecl |]; letdecls; arl (!copies)]
                      
              | _ -> 
                  let (stmts, slot, ident, init) = 
