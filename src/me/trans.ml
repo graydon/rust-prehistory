@@ -51,3 +51,31 @@ let rec trans_stmt emit stmt =
 		  dst
 
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")
+
+and trans_fn emit fn = ()
+
+and trans_prog emit p = ()
+
+and trans_mod_item emit name item = 
+  match item.node with 
+	  Ast.MOD_ITEM_fn f -> trans_fn emit f.Ast.decl_item
+	| Ast.MOD_ITEM_mod m -> trans_mod_items emit m.Ast.decl_item
+	| Ast.MOD_ITEM_prog p -> trans_prog emit p.Ast.decl_item
+	| _ -> ()
+ 
+
+and trans_mod_items emit items = 
+  Hashtbl.iter (trans_mod_item emit) items
+
+and trans_crate crate = 
+  let emit = Il.new_emitter X86.n_hardregs in
+	trans_mod_items emit crate;
+	emit.Il.emit_triples
+
+(* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
+ *)

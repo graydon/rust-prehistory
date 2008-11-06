@@ -1134,7 +1134,7 @@ let elf32_linux_x86_file
 	  |]
 ;;
 
-let emit_testfile outfile = 
+let emit_file outfile code = 
   let text_items = Hashtbl.create 4 in
   let rodata_items = Hashtbl.create 4 in
   let data_items = Hashtbl.create 4 in
@@ -1213,6 +1213,7 @@ let emit_testfile outfile =
 	Hashtbl.add text_items "_init" (DEF (init_fixup, do_nothing_fn));
 	Hashtbl.add text_items "_fini" (DEF (fini_fixup, do_nothing_fn));
 	Hashtbl.add text_items "main" (DEF (main_fixup, main_fn));
+	Hashtbl.add text_items "rust_code" code;
 	Hashtbl.add import_fixups "__libc_start_main" libc_start_main_fixup;
 	Hashtbl.add import_fixups "rust_start" rust_start_fixup
   in

@@ -605,7 +605,7 @@ let test_imports =
   }
 ;;
 
-let emit_testfile outfile = 
+let emit_file outfile code = 
 
   let all_hdrs_fixup = new_fixup "all headers" in
   let all_init_data_fixup = new_fixup "all initialized data" in
@@ -642,9 +642,11 @@ let emit_testfile outfile =
 						 ~import_dir_fixup: import_dir_fixup)
   in
 
-  let text_section = (pe_text_section 
-						~exit_fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
-						~text_fixup: text_fixup)
+  let text_section = (def_aligned text_fixup code)
+	(* (pe_text_section 
+	   ~exit_fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
+	   ~text_fixup: text_fixup)
+	*)
   in
   let bss_section = def_aligned bss_fixup (BSS 0x10L)
   in

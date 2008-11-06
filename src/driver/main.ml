@@ -86,10 +86,16 @@ let _ =
 			  Printf.fprintf stderr "%s:E:%s\n%!" (fmt_span span) str
 ;;
 
-let _ = 
+let triples = Trans.trans_crate crate_items
+;;
+
+let code = (Asm.SEQ (Array.map X86.select_insn triples))
+;;
+
+let items = 
   match sess.Session.sess_fmt with 
-	  Session.Win32_x86_pe -> Pe.emit_testfile sess.Session.sess_out
-	| Session.Linux_x86_elf -> Elf.emit_testfile sess.Session.sess_out
+	  Session.Win32_x86_pe -> Pe.emit_file sess.Session.sess_out code
+	| Session.Linux_x86_elf -> Elf.emit_file sess.Session.sess_out code
 ;;
 
 (* 
