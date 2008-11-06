@@ -1,4 +1,6 @@
 
+open Common;;
+
 let fmt = 
   match Sys.os_type with 
 	  "Unix" -> Session.Linux_x86_elf
@@ -81,7 +83,7 @@ let _ =
 		match spano with 
 			None -> Printf.fprintf stderr "semantic error: %s\n%!" str
 		  | Some span -> 			  
-			  Printf.fprintf stderr "%s:E:%s\n%!" (Session.fmt_span span) str
+			  Printf.fprintf stderr "%s:E:%s\n%!" (fmt_span span) str
 ;;
 
 let _ = 

@@ -1,4 +1,6 @@
 
+open Common;;
+
 let tmp_nonce = ref 0 
 ;;
 
@@ -296,7 +298,7 @@ let string_of_tok t =
 type pstate = 
     { mutable pstate_peek         : token;
       mutable pstate_block_frames : Ast.frame list;
-      mutable pstate_ctxt         : (string * Ast.pos) list;
+      mutable pstate_ctxt         : (string * pos) list;
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
 	  pstate_sess         : Session.sess }
@@ -314,7 +316,7 @@ let lexpos ps =
 ;;
 
 let span apos bpos x = 
-  { Ast.node = x; Ast.span = { Session.lo = apos; Session.hi = bpos } }
+  { node = x; span = { lo = apos; hi = bpos } }
 
 let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
   (ps.pstate_ctxt <- (n, lexpos ps) :: ps.pstate_ctxt;
@@ -739,7 +741,7 @@ and parse_atomic_expr ps =
         let (stmts, e) = ctxt "paren expr" parse_expr ps in
         let _ = expect ps RPAREN in
         let bpos = lexpos ps in 
-          (stmts, { e with Ast.lval_src = span apos bpos e.Ast.lval_src.Ast.node})
+          (stmts, { e with Ast.lval_src = span apos bpos e.Ast.lval_src.node})
             
     | LIT_INT (n,s) -> span_bump_lit ps Ast.TY_int (Ast.LIT_int (n, s))
     | LIT_STR str -> span_bump_lit ps Ast.TY_str (Ast.LIT_str str)
@@ -889,11 +891,6 @@ and parse_one_or_more_tup_slots_and_idents param_slot ps =
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
-
-and new_layout _ = 
-  { Ast.layout_size = 0L; 
-    Ast.layout_offset = 0L;
-    Ast.layout_align = 0L }
 	
 and new_frame _ = 
   { Ast.frame_layout = new_layout ();
@@ -1055,7 +1052,7 @@ and parse_stmts ps =
 					    None -> ()
 					  | Some _ -> 
 						  let ext = Ast.COMP_named (Ast.COMP_idx i) in
-						  let src_lval' = Ast.LVAL_ext (tmp.Ast.lval_src.Ast.node, ext) in
+						  let src_lval' = Ast.LVAL_ext (tmp.Ast.lval_src.node, ext) in
                           let src_lval = { Ast.lval_src = span apos bpos src_lval';
                                            Ast.lval_res = ref None } 
                           in
@@ -1129,7 +1126,7 @@ and parse_stmts ps =
 		  let copy = span apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_lval lval)) in
 		  let make_copy i dst = 
 			let ext = Ast.COMP_named (Ast.COMP_idx i) in
-			let src = Ast.LVAL_ext (tmp.Ast.lval_src.Ast.node, ext) in
+			let src = Ast.LVAL_ext (tmp.Ast.lval_src.node, ext) in
             let lval = { Ast.lval_src = span apos bpos src;
                          Ast.lval_res = ref None }
             in
@@ -1242,7 +1239,8 @@ and parse_fn proto_opt lim pure ps =
     let (si, bind) = ctxt "fn: sig and bind" parse_sig_and_bind ps in
     let body = ctxt "fn: body" parse_block ps in
       ps.pstate_block_frames <- frames;
-      { Ast.fn_ty = { Ast.fn_pure = pure;
+      { Ast.fn_fixup = new_fixup "function";
+        Ast.fn_ty = { Ast.fn_pure = pure;
                       Ast.fn_proto = proto_opt;
                       Ast.fn_lim = lim; 
                       Ast.fn_sig = si; };

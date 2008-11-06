@@ -76,6 +76,8 @@
  * 
  *)
 
+open Common;;
+
 (* x86 instruction emitting *)
 
 let modrm m rm reg_or_subopcode = 
@@ -217,7 +219,7 @@ let select_insn t =
 		  Asm.BYTES [| 0xff; modrm_reg (reg r) slash2 |]
 
 	  | (Il.CCALL, Il.Pcrel f, Il.Nil) -> 
-		  let pcrel_mark_fixup = Asm.new_fixup "ccall-pcrel mark fixup" in 
+		  let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in 
 			Asm.SEQ [| Asm.BYTES [| 0xe8; |];
 					   (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
 											 Asm.M_POS pcrel_mark_fixup)));
@@ -242,7 +244,7 @@ let select_insn t =
 			
 	  | (Il.JMP, Il.Pcrel f, Il.Nil) -> 
 		  (* FIXME: relaxations! *)
-		  let pcrel_mark_fixup = Asm.new_fixup "jmp-pcrel mark fixup" in 
+		  let pcrel_mark_fixup = new_fixup "jmp-pcrel mark fixup" in 
 			Asm.SEQ [| Asm.BYTES [| 0xe9; |];
 					   (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
 											 Asm.M_POS pcrel_mark_fixup)));

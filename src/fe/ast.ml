@@ -7,12 +7,7 @@
  *
  *)
 
-
-type span = Session.span
-type pos = Session.pos
-type 'a spanned = { node: 'a; span: span }
-;;
-
+open Common;;
 
 (* 
  * Slot names are given by a dot-separated path within the current
@@ -249,12 +244,6 @@ and slot_key =
     KEY_ident of ident
   | KEY_temp of nonce
 
-and layout = 
-    { 
-      mutable layout_size: int64;
-      mutable layout_offset: int64;
-      mutable layout_align: int64; 
-    }
 
 and frame = 
     {
@@ -410,6 +399,7 @@ and unop =
 
 and fn = 
     {
+      fn_fixup: fixup;
       fn_ty: ty_fn;
       fn_bind: ident array;
       fn_frame: frame;

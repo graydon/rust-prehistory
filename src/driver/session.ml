@@ -1,17 +1,9 @@
 (* 
- * This module goes at the *bottom* of the dependency DAG, and holds logging, 
+ * This module goes near the *bottom* of the dependency DAG, and holds logging, 
  * option, and global-state machinery for a single run of the compiler.
  *)
 
-type filename = string
-type pos = (filename * int * int) 
-type span = {lo: pos; hi: pos}
-
-let fmt_span span = 
-	let (filename, line0, col0) = span.lo in 
-	let (_, line1, col1) = span.hi in 
-	Printf.sprintf "%s:%d:%d - %d:%d" filename line0 col0 line1 col1
-;;
+open Common;;
 
 type sess_fmt = 
 	Linux_x86_elf

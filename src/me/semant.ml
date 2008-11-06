@@ -11,13 +11,7 @@
  *   - inferring points of allocation and deallocation
  *)
 
-
-
-let new_layout _ = 
-  { Ast.layout_size = 0L; 
-    Ast.layout_offset = 0L;
-    Ast.layout_align = 0L }
-;;
+open Common;;
 
 let ty_nonce = ref 0 
 ;;
@@ -28,7 +22,7 @@ let next_ty_nonce _ = (ty_nonce := (!ty_nonce) + 1; !ty_nonce)
 type ctxt = 
 	{ ctxt_frame_scopes: Ast.frame list;
 	  ctxt_type_scopes: Ast.mod_type_items list;
-	  ctxt_span: Ast.span option;
+	  ctxt_span: span option;
 	  ctxt_sess: Session.sess;
 	  ctxt_made_progress: bool ref;
 	  ctxt_contains_autos: bool ref;
@@ -36,7 +30,7 @@ type ctxt =
 	  ctxt_ptrsz: int64 }
 ;;
 
-exception Semant_err of ((Ast.span option) * string)
+exception Semant_err of ((span option) * string)
 ;;
 
 exception Auto_slot
@@ -177,7 +171,7 @@ let slot_type cx s =
 
 type binding = 
 	BINDING_item of (Ast.resolved_path * Ast.mod_item)
-  | BINDING_slot of (Ast.resolved_path * ((Ast.slot ref) Ast.spanned))
+  | BINDING_slot of (Ast.resolved_path * ((Ast.slot ref) spanned))
   | BINDING_type_item of Ast.mod_type_item
 
 
@@ -187,11 +181,11 @@ type binding =
  *)
 let apply_ctxt_generic 
     (cx:ctxt)
-    (extend:ctxt -> ((Ast.ident,('a Ast.spanned)) Hashtbl.t) -> 'b)
+    (extend:ctxt -> ((Ast.ident,('a spanned)) Hashtbl.t) -> 'b)
     (ctor:Ast.ty Ast.decl -> 'a)
     (params:((Ast.ty_limit * Ast.ident) array))
     (args:Ast.ty array)
-    (span:Ast.span) = 
+    (span:span) = 
   let nparams = Array.length params in 
   let nargs = Array.length args in 
 	if nargs != nparams 
@@ -213,8 +207,8 @@ let apply_ctxt_generic
 		  let item' = (ctor { Ast.decl_params = [| |];
 							  Ast.decl_item = ty })
 		  in
-			Hashtbl.add htab ident { Ast.node = item'; 
-									 Ast.span = span }
+			Hashtbl.add htab ident { node = item'; 
+									 span = span }
 		in
 		  Array.iteri addty params;
 		  extend cx htab
@@ -244,7 +238,7 @@ and param_ctxt cx params span =
 											  Ast.LIMITED -> (Ast.TY_lim (Ast.TY_opaque nonce))
 											| Ast.UNLIMITED -> (Ast.TY_opaque nonce))})
 		in
-		  (ident, { Ast.node = item'; Ast.span = span })
+		  (ident, { node = item'; span = span })
 	  in
 		extend_ctxt_by_frame cx (Array.map bind params)
 
@@ -281,7 +275,7 @@ and lookup_ident
 		if Hashtbl.mem x ident
 		then 
 		  let tyitem = Hashtbl.find x ident in 
-			({ cx with ctxt_span = Some tyitem.Ast.span }, 
+			({ cx with ctxt_span = Some tyitem.span }, 
 			 BINDING_type_item tyitem)
 		else 
 		  lookup_ident 
@@ -294,15 +288,15 @@ and lookup_ident
 				 if Hashtbl.mem tab (Ast.KEY_ident ident)
 				 then 
 				   let (layout, slotr) = Hashtbl.find tab (Ast.KEY_ident ident) in
-					 ({cx with ctxt_span = Some slotr.Ast.span}, 
-					  BINDING_slot (Ast.RES_off (layout.Ast.layout_offset, fp), slotr))
+					 ({cx with ctxt_span = Some slotr.span}, 
+					  BINDING_slot (Ast.RES_off (layout.layout_offset, fp), slotr))
 				 else 
 			       let tab = x.Ast.frame_items in
 				     if Hashtbl.mem tab ident
 				     then 
 				       let (layout, item) = Hashtbl.find tab ident in
-					     ({cx with ctxt_span = Some item.Ast.span}, 
-					      BINDING_item (Ast.RES_off (layout.Ast.layout_offset, fp), item))
+					     ({cx with ctxt_span = Some item.span}, 
+					      BINDING_item (Ast.RES_off (layout.layout_offset, fp), item))
                      else 
 				       lookup_ident 
 					     { cx with ctxt_frame_scopes = xs } 
@@ -320,8 +314,8 @@ and lookup_temp (cx:ctxt)
 		  if Hashtbl.mem tab (Ast.KEY_temp temp)
 		  then 
 		    let (layout, slot) = Hashtbl.find tab (Ast.KEY_temp temp) in 
-			  ({ cx with ctxt_span = Some slot.Ast.span }, 
-			   BINDING_slot (Ast.RES_off (layout.Ast.layout_offset, fp), slot))
+			  ({ cx with ctxt_span = Some slot.span }, 
+			   BINDING_slot (Ast.RES_off (layout.layout_offset, fp), slot))
 		  else 
 		    lookup_temp 
 			  { cx with ctxt_frame_scopes = xs } 
@@ -364,7 +358,7 @@ and mod_type_item_of_mod_item item =
 	  Ast.decl_item = item }
   in
   let ty = 
-	match item.Ast.node with 
+	match item.node with 
 		Ast.MOD_ITEM_opaque_type td -> 
 		  (match (td.Ast.decl_params, td.Ast.decl_item) with 
 			   (params, Ast.TY_lim _) -> 
@@ -388,20 +382,20 @@ and mod_type_item_of_mod_item item =
           let prog_ty = prog_type_of_prog pd.Ast.decl_item in
 	        Ast.MOD_TYPE_ITEM_prog (decl pd.Ast.decl_params prog_ty)
   in
-	{ Ast.span = item.Ast.span;
-	  Ast.node = ty }
+	{ span = item.span;
+	  node = ty }
 
 
 and type_component_of_type_item cx tyitem comp = 
   match comp with 
 	  Ast.COMP_ident id -> 
-		(match tyitem.Ast.node with 
+		(match tyitem.node with 
 			 Ast.MOD_TYPE_ITEM_mod md -> 
 			   let params = md.Ast.decl_params in 
 			   let tyitems = md.Ast.decl_item in 				 
 				 if Hashtbl.mem tyitems id
 				 then 
-				   let cx = param_ctxt cx params tyitem.Ast.span in
+				   let cx = param_ctxt cx params tyitem.span in
 				   let cx = extend_ctxt_by_mod_ty cx tyitems in
 				   let ty_item = (Hashtbl.find tyitems id) in
 					 (cx, ty_item)
@@ -417,9 +411,9 @@ and type_component_of_type_item cx tyitem comp =
 
 and apply_args_to_item cx item args = 
   let app params = 
-	apply_ctxt cx params args item.Ast.span
+	apply_ctxt cx params args item.span
   in
-	match item.Ast.node with 
+	match item.node with 
 		Ast.MOD_ITEM_opaque_type td -> 
 		  let cx = app td.Ast.decl_params in
 			(cx, Ast.MOD_ITEM_opaque_type { td with Ast.decl_params = [| |] })
@@ -447,9 +441,9 @@ and apply_args_to_item cx item args =
 
 and apply_args_to_type_item cx tyitem args = 
   let app params = 
-	apply_ctxt_ty cx params args tyitem.Ast.span
+	apply_ctxt_ty cx params args tyitem.span
   in
-	match tyitem.Ast.node with 
+	match tyitem.node with 
 		Ast.MOD_TYPE_ITEM_opaque_type td -> 
 		  let cx = app td.Ast.decl_params in
 			(cx, Ast.MOD_TYPE_ITEM_opaque_type { td with Ast.decl_params = [| |] })
@@ -486,10 +480,10 @@ and lookup cx
 		  (match binding with 
 			   BINDING_item (i, bi) -> 
 				 let ((cx':ctxt), item) = apply_args_to_item cx bi args in 
-				   basefn cx (cx', BINDING_item (i, {bi with Ast.node = item}))
+				   basefn cx (cx', BINDING_item (i, {bi with node = item}))
 			 | BINDING_type_item bti -> 
 				 let ((cx':ctxt), tyitem) = apply_args_to_type_item cx bti args in 
-				   basefn cx (cx', BINDING_type_item {bti with Ast.node = tyitem})
+				   basefn cx (cx', BINDING_type_item {bti with node = tyitem})
 			 | BINDING_slot _ -> 
 				 raise (err cx "applying types to slot"))
 	| Ast.NAME_base (Ast.BASE_temp temp) -> 
@@ -517,7 +511,7 @@ and type_of_mod_item cx item =
     then ty 
     else raise (err cx "item has parametric type in type_of_mod_item")
   in
-	match item.Ast.node with 
+	match item.node with 
 		Ast.MOD_ITEM_opaque_type td -> 
           check_concrete td.Ast.decl_params Ast.TY_type
 			  
@@ -549,7 +543,7 @@ and lookup_type cx name =
 	err cx "Semant.lookup_type found parametric binding, concrete type required"
   in
   let (cx', tyitem) = lookup_type_item cx name in 
-	match tyitem.Ast.node with 
+	match tyitem.node with 
 		Ast.MOD_TYPE_ITEM_opaque_type td -> 
 		  if Array.length td.Ast.decl_params != 0
 		  then raise parametric
@@ -569,7 +563,7 @@ and lval_type cx lval =
   match !(lval.Ast.lval_res) with 
       Some res -> 
         (match res.Ast.res_target with 
-             (Ast.RES_slot slotr) -> slot_type cx !(slotr.Ast.node)
+             (Ast.RES_slot slotr) -> slot_type cx !(slotr.node)
            | (Ast.RES_item item) -> Some (type_of_mod_item cx item))
 	| _ -> None
 
@@ -680,16 +674,16 @@ and layout_frame
         resolve_slot_ref cx None s;
     done;          
 	try 
-	  frame.Ast.frame_layout.Ast.layout_size <- 0L;
+	  frame.Ast.frame_layout.layout_size <- 0L;
 	  for i = 0 to (Array.length slots) - 1 do
-        let offset = frame.Ast.frame_layout.Ast.layout_size in
+        let offset = frame.Ast.frame_layout.layout_size in
 		let (key, layout, s) = slots.(i) in
           log cx "laying out slot %d (%s)" i (string_of_key key);
-		  let sz = slot_size cx (!(s.Ast.node)) in
+		  let sz = slot_size cx (!(s.node)) in
             log cx "  == %Ld bytes @ %Ld" sz offset;
-            layout.Ast.layout_size <- sz;
-            layout.Ast.layout_offset <- offset;
-			frame.Ast.frame_layout.Ast.layout_size <- Int64.add offset sz
+            layout.layout_size <- sz;
+            layout.layout_offset <- offset;
+			frame.Ast.frame_layout.layout_size <- Int64.add offset sz
 	  done;
 	with 
 		Auto_slot -> 
@@ -724,8 +718,8 @@ and resolve_mod_items cx items =
 		  
 and resolve_mod_item cx id item =
   log cx "resolving mod item %s" id;
-  let span = item.Ast.span in
-	match item.Ast.node with 
+  let span = item.span in
+	match item.node with 
 		Ast.MOD_ITEM_mod md ->
 		  let cx = param_ctxt cx md.Ast.decl_params span in
 			resolve_mod_items cx md.Ast.decl_item
@@ -807,15 +801,15 @@ and resolve_slot
 and resolve_slot_ref 
     (cx:ctxt) 
     (tyo:Ast.ty option) 
-    (slotr:(Ast.slot ref) Ast.spanned) 
+    (slotr:(Ast.slot ref) spanned) 
     : unit = 
-  let slot = !(slotr.Ast.node) in
+  let slot = !(slotr.node) in
   let newslot = resolve_slot cx tyo slot in
     if slot = newslot
     then ()
     else (log cx "----- made progress ----";
           cx.ctxt_made_progress := true;
-          slotr.Ast.node := newslot)
+          slotr.node := newslot)
   
 and resolve_ty 
     (cx:ctxt)
@@ -897,7 +891,7 @@ and resolve_lval cx tyo lval =
                        Ast.RES_slot slotr -> resolve_slot_ref cx tyo slotr
                      | Ast.RES_item _ -> ())
       | None -> 
-	      (match lval.Ast.lval_src.Ast.node with 
+	      (match lval.Ast.lval_src.node with 
 	         | Ast.LVAL_base base -> 
 		         let (_, binding) = lookup_base cx base in
                    log cx "resolved lval: %s" (fmt_base cx base);
@@ -928,8 +922,8 @@ and resolve_stmts cx stmts =
   Array.iter (resolve_stmt cx) stmts
 		
 and resolve_stmt cx stmt = 
-  let cx = { cx with ctxt_span = Some stmt.Ast.span } in
-  match stmt.Ast.node with 
+  let cx = { cx with ctxt_span = Some stmt.span } in
+  match stmt.node with 
 	  Ast.STMT_while w -> 
 		let (stmts, lval) = w.Ast.while_lval in
 		  resolve_lval cx (Some Ast.TY_bool) lval;
@@ -1038,7 +1032,7 @@ let resolve_crate sess items =
 let trans_lval emit _ = Il.Nil
 
 let rec trans_expr emit expr = 
-	match expr.Ast.node with 
+	match expr.node with 
 		Ast.EXPR_literal (Ast.LIT_nil) -> 
 		  Il.Nil
 
@@ -1075,7 +1069,7 @@ let rec trans_expr emit expr =
 	  | _ -> raise (Invalid_argument "Semant.trans_expr: unimplemented translation")
 
 let rec trans_stmt emit stmt = 
-  match stmt.Ast.node with 
+  match stmt.node with 
 	  Ast.STMT_copy (lv_dst, lv_src) -> 
 		let dst = Il.Nil in
 		let src = trans_lval emit lv_src in

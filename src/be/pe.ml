@@ -21,8 +21,8 @@
 
 *)
 
-open Asm
-;;
+open Asm;;
+open Common;;
 
 (* 
 

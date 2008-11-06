@@ -1,11 +1,13 @@
 
+open Common;;
+
 type slot = Vreg of int
 			| HWreg of int
 			| SP (* Stack pointer *)
 			| PP (* Process pointer *)
 			| Local of int
 			| Imm of Asm.expr64
-			| Pcrel of Asm.fixup
+			| Pcrel of fixup
 			| Deref of (slot * int64)
 			| Nil
 			| Label of int
@@ -33,7 +35,7 @@ type op =
 type triple = { triple_op: op;
 				triple_dst: slot;
 				triple_src: slot;
-				triple_fixup: Asm.fixup option;
+				triple_fixup: fixup option;
 			  }
 ;;
 
@@ -48,7 +50,7 @@ let rec fmt_slot out slot =
 	| PP -> Printf.fprintf out "PP"
     | Local i -> Printf.fprintf out "local:%d" i
     | Imm i -> Printf.fprintf out "imm:??" 
-	| Pcrel f -> Printf.fprintf out "pcrel:(%s)" f.Asm.fixup_name 
+	| Pcrel f -> Printf.fprintf out "pcrel:(%s)" f.fixup_name 
     | Deref (s,i) -> Printf.fprintf out "*(%a + %s)" fmt_slot s (Int64.to_string i)
     | Label i -> Printf.fprintf out "label:%d" i
     | Nil -> ()

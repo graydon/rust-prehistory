@@ -7,8 +7,8 @@
  * 
  *)
 
-open Asm
-;;
+open Asm;;
+open Common;;
 
 
 (* Fixed sizes of structs involved in elf32 spec. *)

@@ -61,22 +61,7 @@
 
 *)
 
-type fixup = 
-	{ fixup_name: string;
-	  mutable fixup_file_pos: int option;
-	  mutable fixup_file_sz: int option;
-	  mutable fixup_mem_pos: int64 option;
-	  mutable fixup_mem_sz: int64 option }
-;;
-
-let new_fixup (s:string) 
-	: fixup = 
-  { fixup_name = s;
-	fixup_file_pos = None;
-	fixup_file_sz = None;
-	fixup_mem_pos = None;
-	fixup_mem_sz = None }
-;;
+open Common;;
 
 type ('a, 'b) expr = 
 	IMM of 'a
