@@ -20,7 +20,7 @@ let sess:Session.sess =
 					   | Session.Win32_x86_pe -> ".exe"));
 	Session.sess_log_lex = false;
 	Session.sess_log_parse = false;
-	Session.sess_log_env = false;
+	Session.sess_log_resolve = false;
 	Session.sess_log_type = false;
 	Session.sess_log_trans = false;
 	Session.sess_log_reg = false;
@@ -43,7 +43,7 @@ let argspecs =
 	 "output filename (default: " ^ sess.Session.sess_out ^ ")");
 	("-llex", Arg.Unit (fun _ -> sess.Session.sess_log_lex <- true), "log lexing");
 	("-lparse", Arg.Unit (fun _ -> sess.Session.sess_log_parse <- true), "log parsing");
-	("-lenv", Arg.Unit (fun _ -> sess.Session.sess_log_env <- true), "log environment construction");
+	("-lresolve", Arg.Unit (fun _ -> sess.Session.sess_log_resolve <- true), "log resolution");
 	("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
 	("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
 	("-lreg", Arg.Unit (fun _ -> sess.Session.sess_log_reg <- true), "log register allocation");
@@ -77,7 +77,7 @@ let crate_items =
 
 let _ = 
   try 
-	Semant.resolve_crate sess crate_items
+	Resolve.resolve_crate sess crate_items
   with
 	  Semant.Semant_err (spano, str) -> 
 		match spano with 

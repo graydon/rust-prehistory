@@ -6,7 +6,7 @@ OCAMLC_FLAGS:=-g $(ML_INCS)
 UTIL_BOT_MLS:=util/common.ml 
 DRIVER_BOT_MLS:=driver/session.ml 
 BE_MLS:=be/asm.ml be/il.ml be/x86.ml be/pe.ml be/elf.ml
-ME_MLS:=me/semant.ml
+ME_MLS:=me/semant.ml me/resolve.ml me/trans.ml
 FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml 
 DRIVER_TOP_MLS:=driver/main.ml 
 
