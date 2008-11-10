@@ -164,6 +164,7 @@ type item =
   | PAD of int
   | BSS of int64
   | MEMPOS of int64
+  | BYTE of int
   | BYTES of int array
   | CHAR of char
   | STRING of string
@@ -192,6 +193,7 @@ let resolve_fixups (item:item)
       | PAD i -> bump i
       | BSS i -> mem_pos := Int64.add (!mem_pos) i
 	  | MEMPOS i -> mem_pos := i
+      | BYTE i -> bump 1
       | BYTES ia -> bump (Array.length ia)
       | CHAR _ -> bump 1
       | STRING s -> bump (String.length s)
@@ -307,6 +309,8 @@ let rec lower_item
       | BSS _ -> ()
 
 	  | MEMPOS _ -> ()
+
+      | BYTE i -> byte 1
 
       | BYTES bs -> 
 		  Array.iter byte bs

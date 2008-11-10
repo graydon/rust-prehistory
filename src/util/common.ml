@@ -8,6 +8,13 @@ type pos = (filename * int * int)
 type span = {lo: pos; hi: pos}
 type 'a spanned = { node: 'a; span: span }
 
+type abi_pseudo_reg = 
+	FP (* frame pointer *)
+  | PP (* process pointer *)
+  | CP (* crate pointer *)
+  | RP (* runtime pointer *)
+;;
+
 let fmt_span span = 
 	let (filename, line0, col0) = span.lo in 
 	let (_, line1, col1) = span.hi in 

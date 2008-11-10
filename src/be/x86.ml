@@ -77,6 +77,10 @@
  *)
 
 open Common;;
+open Il;;
+
+exception Unrecognized
+;;
 
 (* x86 instruction emitting *)
 
@@ -153,125 +157,182 @@ let reg r =
  * semi-redundancy in the ISA.
  *)
 
-let select_insn t = 
+
+let imm_is_byte n = (n == (Int64.logand 0xffL n))
+;;
+
+  
+let rm_r (oper:operand) (r:int) = 
+  match oper with 
+      Reg (HWreg rm) -> 
+        Asm.BYTE (modrm_reg (reg rm) r)
+    | Mem (_, None, disp) -> 
+        Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
+                   Asm.WORD32 disp |]
+    | Mem (_, Some (HWreg rm), disp) -> 
+        (match disp with 
+             Asm.IMM 0L -> 
+               Asm.BYTE (modrm_deref_reg (reg rm) r)
+           | Asm.IMM n when imm_is_byte n -> 
+               Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
+                          Asm.WORD8 disp|]
+           | _ -> 
+               Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
+                          Asm.WORD32 disp |])
+    | _ -> raise Unrecognized
+;;
+
+
+let insn_rm_r (op:int) (oper:operand) (r:int) : Asm.item = 
+  Asm.SEQ [| Asm.BYTE op; rm_r oper r |]
+;;
+
+
+let insn_rm_r_imm8 (op:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item = 
+  Asm.SEQ [| Asm.BYTE op; rm_r oper r; Asm.WORD8 i |]
+;;
+
+
+let insn_rm_r_imm32 (op:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item = 
+  Asm.SEQ [| Asm.BYTE op; rm_r oper r; Asm.WORD32 i |]
+;;
+
+
+let insn_rm_r_imm (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item = 
+  match i with 
+      Asm.IMM n when imm_is_byte n -> 
+        insn_rm_r_imm8 op8 oper r i
+    | _ -> 
+        insn_rm_r_imm32 op32 oper r i
+;;
+
+
+let is_rm32 (oper:operand) : bool = 
+  match oper with 
+      Mem (M32, _, _) -> true
+    | Reg (HWreg _) -> true
+    | _ -> false
+;;
+
+
+let is_rm8 (oper:operand) : bool = 
+  match oper with 
+      Mem (M8, _, _) -> true
+    | Reg (HWreg _) -> true
+    | _ -> false
+;;
+
+
+let mov (dst:operand) (src:operand) : Asm.item = 
+  match (dst,src) with 
+      (Mem (M8, _, _), Reg (HWreg r)) -> 
+        insn_rm_r 0x88 dst (reg r)
+    | (_, Reg (HWreg r)) when is_rm32 dst -> 
+        insn_rm_r 0x89 dst (reg r)
+    | (Reg (HWreg r), Mem (M8, _, _)) -> 
+        insn_rm_r 0x8a src (reg r)
+    | (Reg (HWreg r), Mem (M32, _, _)) -> 
+        insn_rm_r 0x8b src (reg r);
+        
+    | (_, Imm (Asm.IMM n)) when is_rm8 dst && imm_is_byte n -> 
+        insn_rm_r_imm8 0xc6 dst slash0 (Asm.IMM n)
+          
+    | (_, Imm i) when is_rm32 dst -> 
+        insn_rm_r_imm32 0xc7 dst slash0 i
+          
+    | _ -> raise Unrecognized
+;;
+
+
+let select_item_misc t =           
+  match (t.quad_op, t.quad_dst, t.quad_lhs, t.quad_rhs) with
+      
+	  (CCALL, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash2          
+	| (CCALL, Pcrel f, _, _) -> 
+		let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in 
+		  Asm.SEQ [| Asm.BYTES [| 0xe8; |];
+					 (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
+										   Asm.M_POS pcrel_mark_fixup)));
+					 Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+
+	| (CPUSH M32, Reg (HWreg r), _, _) -> Asm.BYTE (0x50 + (reg r))
+	| (CPUSH M32, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash6
+	| (CPUSH M32, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD32 i |]          
+	| (CPUSH M8, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD8 i |]
+          
+	| (CRET, _, _, _) -> Asm.BYTE 0xc3
+                
+	| (JMP, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash4
+	| (JMP, Pcrel f, _, _) -> 
+		(* FIXME: relaxations! *)
+		let pcrel_mark_fixup = new_fixup "jmp-pcrel mark fixup" in 
+		  Asm.SEQ [| Asm.BYTE 0xe9;
+					 (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
+										   Asm.M_POS pcrel_mark_fixup)));
+					 Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+
+	| (DEAD, _, _, _) -> Asm.MARK
+	| (END, _, _, _) -> Asm.BYTES [| 0x90 |]
+	| (NOP, _, _, _) -> Asm.BYTES [| 0x90 |]
+        
+	| _ -> 
+		raise (Invalid_argument ("X86.select_item_misc: no matching insn: " ^ (string_of_quad t)))
+;;
+
+
+let alu_binop dst src immslash rm_dst_op rm_src_op = 
+  match (dst, src) with 
+      (Reg (HWreg r), _) when is_rm32 src -> insn_rm_r rm_src_op src (reg r)
+    | (_, Reg (HWreg r)) when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
+    | (Reg (HWreg _), Imm i) -> insn_rm_r_imm 0x83 0x81 dst immslash i 
+    | _ -> raise Unrecognized
+;;
+
+
+let mul_like src slash = 
+  if is_rm32 src
+  then insn_rm_r 0x7f src slash
+  else raise Unrecognized
+;;
+
+
+let mod_like src slash = 
+  Asm.SEQ [| mul_like src slash; 
+             mov (Reg (HWreg eax)) (Reg (HWreg edx)) |]
+;;
+
+
+let select_insn q =  
   let item = 
-	match (t.Il.triple_op, t.Il.triple_dst, t.Il.triple_src) with
-		(Il.ADD, Il.HWreg dst, Il.HWreg src) -> 
-		  Asm.BYTES [| 0x03; modrm_reg (reg dst) (reg src) |]
-	  | (Il.SUB, Il.HWreg dst, Il.HWreg src) -> 
-		  Asm.BYTES [| 0x29; modrm_reg (reg dst) (reg src) |]
-	  | (Il.NEG, Il.HWreg dst, Il.Nil) -> 
-		  Asm.BYTES [| 0xF7; modrm_reg (reg dst) slash3 |]
+    if q.quad_dst = q.quad_lhs 
+    then 
+      let binop = alu_binop q.quad_lhs q.quad_rhs in
+      let unop = insn_rm_r 0xf7 q.quad_lhs in
+      let mulop = mul_like q.quad_rhs in
+      let modop = mod_like q.quad_rhs in
+        match (q.quad_dst, q.quad_op) with 
+            (_, ADD) -> binop slash0 0x1 0x3 
+          | (_, SUB) -> binop slash5 0x29 0x2b
+          | (_, AND) -> binop slash4 0x21 0x23
+          | (_, OR) -> binop slash1 0x09 0x0b
+          | (_, XOR) -> binop slash6 0x31 0x33
+              
+          | (Reg (HWreg 0), UMUL) -> mulop slash4
+          | (Reg (HWreg 0), IMUL) -> mulop slash5
+          | (Reg (HWreg 0), UDIV) -> mulop slash6
+          | (Reg (HWreg 0), IDIV) -> mulop slash7
 
-	  (* The mess that is the DIV/IDIV/MUL/IMUL instructions:
-	   * 
-	   * They can only ever write to EAX:EDX. So we only recognize EAX as a
-	   * destination at all. Needs pre-allocation. If you're trying to take a MOD
-	   * rather than a DIV, we move the EDX part (remainder) to EAX (quotient),
-	   * overwriting it. In this way DIV and IDIV get used for dual-duty.  
-	   *)
+          | (Reg (HWreg 0), UMOD) -> modop slash6
+          | (Reg (HWreg 0), IMOD) -> modop slash7
+              
+          | (_, NEG) -> unop slash3 
+          | (_, NOT) -> unop slash2
 
-	  | (Il.UMUL, Il.HWreg 0, Il.HWreg src) -> 
-		  Asm.BYTES [| 0xF7; modrm_reg (reg src) slash4 |]
-	  | (Il.IMUL, Il.HWreg 0, Il.HWreg src) -> 
-		  Asm.BYTES [| 0xF7; modrm_reg (reg src) slash5 |]
-	  | (Il.UDIV, Il.HWreg 0, Il.HWreg src) -> 
-		  Asm.BYTES [| 0xF7; modrm_reg (reg src) slash6 |]
-	  | (Il.UMOD, Il.HWreg 0, Il.HWreg src) -> 
-		  Asm.BYTES [| 0xF7; modrm_reg (reg src) slash6;
-					   0x89; modrm_reg (reg eax) (reg edx); |]
-	  | (Il.IDIV, Il.HWreg 0, Il.HWreg src) -> 
-		  Asm.BYTES [| 0xF7; modrm_reg (reg src) slash7 |]
-	  | (Il.IMOD, Il.HWreg 0, Il.HWreg src) -> 
-		  Asm.BYTES [| 0xF7; modrm_reg (reg src) slash7;
-					   0x89; modrm_reg (reg eax) (reg edx); |]
-			
-	  | ((Il.MOV Il.DATA32), Il.HWreg dst, Il.Imm imm) -> 
-		  Asm.SEQ [| Asm.BYTES [| 0xB8 + (reg dst) |];
-					 Asm.WORD32 imm |]
-
-	  | ((Il.MOV Il.DATA32), Il.HWreg dst, Il.Deref ((Il.Imm imm), disp)) -> 
-		  Asm.SEQ [| Asm.BYTES [| 0x8B; modrm_deref_disp32 (reg dst) |];
-					 Asm.WORD32 (Asm.ADD ((Asm.IMM disp),imm)) |]
-
-	  | ((Il.MOV Il.DATA32), Il.HWreg dst, Il.HWreg src) -> 
-		  Asm.BYTES [| 0x89; modrm_reg (reg dst) (reg src); |]
-
-	  | ((Il.MOV Il.DATA32), Il.HWreg dst, (Il.Deref ((Il.HWreg src), disp))) -> 
-		  if disp = 0L
-		  then Asm.BYTES [| 0x8B; modrm_deref_reg (reg dst) (reg src); |]
-		  else 
-			if (Int64.logand disp 0xffL) = disp
-			then Asm.BYTES [| 0x8B; 
-							  modrm_deref_reg_plus_disp8 (reg dst) (reg src);
-							  Int64.to_int disp |]			
-			else 
-			  if (Int64.logand disp 0xffffffffL) = disp
-			  then 
-				Asm.SEQ [| 
-				  Asm.BYTES [| 0x8B; modrm_deref_reg_plus_disp32 (reg dst) (reg src); |];
-				  Asm.WORD32 (Asm.IMM disp) |]
-				  
-			  else
-				raise (Invalid_argument "X86.select_insn: displacement overflow")
-
-	  | (Il.CCALL, Il.HWreg r, Il.Nil) -> 
-		  Asm.BYTES [| 0xff; modrm_reg (reg r) slash2 |]
-
-	  | (Il.CCALL, Il.Pcrel f, Il.Nil) -> 
-		  let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in 
-			Asm.SEQ [| Asm.BYTES [| 0xe8; |];
-					   (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
-											 Asm.M_POS pcrel_mark_fixup)));
-					   Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
-			  
-	  | (Il.CPUSH Il.DATA32, Il.HWreg r, Il.Nil) -> 		
-		  Asm.BYTES [| 0xff; modrm_reg (reg r) slash6 |]
-
-	  | (Il.CPUSH Il.DATA32, Il.Imm i, Il.Nil) -> 		
-		  Asm.SEQ [| Asm.BYTES [| 0x68; |];
-					 Asm.WORD32 i |]
-
-	  | (Il.CPUSH Il.DATA8, Il.Imm e, Il.Nil) -> 
-		  Asm.SEQ [| Asm.BYTES [| 0x6a; |];
-					 Asm.WORD8 e |]
-
-	  | (Il.CRET, _, _) -> Asm.BYTES [| 0xC3 |]
-
-
-	  | (Il.JMP, Il.HWreg dst, Il.Nil) -> 
-		  Asm.BYTES [| 0xff; modrm_reg (reg dst) slash4 |]
-			
-	  | (Il.JMP, Il.Pcrel f, Il.Nil) -> 
-		  (* FIXME: relaxations! *)
-		  let pcrel_mark_fixup = new_fixup "jmp-pcrel mark fixup" in 
-			Asm.SEQ [| Asm.BYTES [| 0xe9; |];
-					   (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
-											 Asm.M_POS pcrel_mark_fixup)));
-					   Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
-
-	  | (Il.JMP, Il.Deref (Il.Imm i, 0L), Il.Nil) -> 
-		  (* FIXME: relaxations! *)
-		  Asm.SEQ [| Asm.BYTES [| 0xff; modrm_deref_disp32 slash4 |];
-					 (Asm.WORD32 i); |]
-			  
-
-	  | (Il.BNOT, Il.HWreg dst, Il.Nil) -> 
-		  Asm.BYTES [| 0xF7; modrm_reg (reg dst) slash2 |]
-	  | (Il.BXOR, Il.HWreg dst, Il.HWreg src) -> 
-		  Asm.BYTES [| 0x33; modrm_reg (reg dst) (reg src) |]
-	  | (Il.BOR, Il.HWreg dst, Il.HWreg src) -> 
-		  Asm.BYTES [| 0x09; modrm_reg (reg dst) (reg src) |]
-
-	  | (Il.END, _, _) -> Asm.BYTES [| 0x90 |]
-	  | (Il.NOP, _, _) -> Asm.BYTES [| 0x90 |]
-
-	  | _ -> 
-		  Il.fmt_triple stdout t;
-		  Printf.printf "\n";
-		  raise (Invalid_argument "X86.select_insn: no matching insn")
+          | _ -> select_item_misc q
+    else 
+      select_item_misc q
   in
-	match t.Il.triple_fixup with 
+	match q.quad_fixup with 
 		None -> item
 	  | Some f -> Asm.DEF (f, item)
 ;;
@@ -388,4 +449,13 @@ let op_SYS_CLOSE = op_SYSCALL1 4;;    (* sys_close(unsigned int fd)             
  *     and return pc.
  * 
  * 
+ *)
+
+
+(* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
  *)

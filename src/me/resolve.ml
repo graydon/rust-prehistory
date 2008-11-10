@@ -319,11 +319,11 @@ and lookup_base cx base =
 	| _ -> raise (err cx "unhandled name base variant in lookup_base")
 
 
-and fmt_base cx base = 
+and string_of_base cx base = 
   match base with 
 	  Ast.BASE_ident id -> id
 	| Ast.BASE_temp t -> ("temp#" ^ (string_of_int t))
-	| _ -> raise (err cx "unhandled name base variant in fmt_base")
+	| _ -> raise (err cx "unhandled name base variant in string_of_base")
 
 
 and mod_type_of_mod m = 
@@ -883,12 +883,12 @@ and resolve_lval cx tyo lval =
 	      (match lval.Ast.lval_src.node with 
 	         | Ast.LVAL_base base -> 
 		         let (_, binding) = lookup_base cx base in
-                   log cx "resolved lval: %s" (fmt_base cx base);
+                   log cx "resolved lval: %s" (string_of_base cx base);
 			       (match binding with 
 				        BINDING_item (path, item) -> bind_to_item path item
 			          | BINDING_slot (path, slot) -> bind_to_slot path slot
 			          | BINDING_type_item _ -> 
-				          raise (err cx ("lval '" ^ (fmt_base cx base) ^ "' resolved to a type name")))
+				          raise (err cx ("lval '" ^ (string_of_base cx base) ^ "' resolved to a type name")))
 	         | _ -> raise (err cx ("unhandled lval form in resolve_lval")))
 
 and resolve_stmt_option cx stmtopt = 

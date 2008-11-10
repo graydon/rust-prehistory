@@ -3,14 +3,14 @@ open Il;;
 (* Poletto and Sarkar's linear-scan algorithm. *)
 
 type live_interval = { live_vreg: int;
-		       live_slot: slot;
-		       live_startpoint: int;
-		       live_endpoint: int; }
+					   live_operand: operand;
+					   live_startpoint: int;
+					   live_endpoint: int; }
 
 let fmt_live_interval out li = 
-  Printf.fprintf out "vreg %d = %a : [%d,%d]" 
+  Printf.fprintf out "vreg %d = %s : [%d,%d]" 
     li.live_vreg 
-    fmt_slot li.live_slot
+    (string_of_operand li.live_operand)
     li.live_startpoint
     li.live_endpoint
 ;;
@@ -42,7 +42,7 @@ struct
   let compare x y = compare x y
 end
 ;;
-  
+
 (* Live Intervals *)
 module LI = Set.Make(StartOrderedIntervals);;
 
@@ -57,28 +57,32 @@ let print_live_intervals is =
 ;;
 
 let convert_regs_using_intervals intervals e =
-  let vreg_slots = Array.create e.emit_next_vreg Nil in
-  let convert_slot s = 
+  let vreg_operands = Array.create e.emit_next_vreg Nil in
+  let convert_operand s = 
     match s with 
-	Vreg i -> vreg_slots.(i)
+		Reg (Vreg i) -> vreg_operands.(i)
       | x -> x
   in
   let convert_quad q = 
     { q with 
-	quad_dst = convert_slot q.quad_dst;
-	quad_lhs = convert_slot q.quad_lhs;
-	quad_rhs = convert_slot q.quad_rhs }
+		quad_dst = convert_operand q.quad_dst;
+		quad_lhs = convert_operand q.quad_lhs;
+		quad_rhs = convert_operand q.quad_rhs }
   in
-    LI.iter (fun i -> vreg_slots.(i.live_vreg) <- i.live_slot) intervals;
+    LI.iter (fun i -> vreg_operands.(i.live_vreg) <- i.live_operand) intervals;
     e.emit_quads <- Array.map convert_quad e.emit_quads
 ;;
 
-let remove_redundant_moves e =
-  let useful q = not (q.quad_op = MOV && q.quad_dst = q.quad_lhs) in
-    e.emit_quads <- 
-      Array.of_list 
-      (List.filter useful 
-	 (Array.to_list e.emit_quads))
+let kill_redundant_moves e =
+  for i = 0 to (Array.length e.emit_quads) -1
+  do
+	let q = e.emit_quads.(i) in
+      match q.quad_op with 
+          MOV -> 
+            if q.quad_dst = q.quad_lhs
+            then e.emit_quads.(i) <- deadq
+        | _ -> ()
+  done
 ;;
 
 
@@ -101,48 +105,48 @@ let remove_redundant_moves e =
  * and we insert a 2 fresh live intervals for fresh vregs x and y
  * 
  *    { live_vreg: x; 
- *      live_slot: Fixed (HWreg EDX); 
+ *      live_operand: Fixed (HWreg EDX); 
  *      live_startpoint: i;
  *      live_endpoint: i+1; }
  * 
  *    { live_vreg: y; 
- *      live_slot: Fixed (HWreg EAX); 
+ *      live_operand: Fixed (HWreg EAX); 
  *      live_startpoint: i;
  *      live_endpoint: i+2; }
  * 
  * Constraint rules must be careful not to insert unsatisfiable quads. This 
  * example will cause any live interval allocated to EAX or EDX to be 
- * reassigned to a spill slot; if any of those spilled intervals happened to 
+ * reassigned to a spill operand; if any of those spilled intervals happened to 
  * be Fixed() to some other HWregs, the spill be unsatisfiable.
  * 
  * 
  *)
 
 let quad_jump_target_labels q = 
-  let slot_jump_target_labels s = 
+  let operand_jump_target_labels s = 
     match s with 
-	Label i -> [i]
+		Label i -> [i]
       | _ -> []
   in
-    List.concat (List.map slot_jump_target_labels [q.quad_dst; q.quad_lhs; q.quad_rhs])
+    List.concat (List.map operand_jump_target_labels [q.quad_dst; q.quad_lhs; q.quad_rhs])
 ;;
 
 let quad_used_vregs q = 
-  let slot_used_vregs s = 
+  let operand_used_vregs s = 
     match s with 
-	Vreg i -> [i]
+		Reg (Vreg i) -> [i]
       | _ -> []
   in
-    List.concat (List.map slot_used_vregs [q.quad_lhs; q.quad_rhs])
+    List.concat (List.map operand_used_vregs [q.quad_lhs; q.quad_rhs])
 ;;
 
 let quad_defined_vregs q = 
-  let slot_defined_vregs s = 
+  let operand_defined_vregs s = 
     match s with 
-	Vreg i -> [i]
+		Reg (Vreg i) -> [i]
       | _ -> []
   in
-    List.concat (List.map slot_defined_vregs [q.quad_dst])
+    List.concat (List.map operand_defined_vregs [q.quad_dst])
 ;;
 
 let quad_is_unconditional_jump q =
@@ -164,49 +168,43 @@ let calculate_live_bitvectors e =
 
   let quads = e.emit_quads in 
   let n_quads = Array.length quads in
-  let labels = Array.create n_quads (-1) in
   let n_vregs = e.emit_next_vreg in
   let new_bitv _ = Bitv.create n_vregs false in
   let (live_vregs:Bitv.t array) = Array.init n_quads new_bitv in
   let bitvs_equal a b = ((Bitv.to_list a) = (Bitv.to_list b)) in
 	
   let changed = ref true in
-    for i = 0 to n_quads - 1 do
-      match quads.(i).quad_lab with
-	  None -> ()
-	| Some lab -> labels.(lab) <- i
-    done;
     while !changed do
       changed := false;
       Printf.printf "iterating live bitvector calculation\n";
       for i = n_quads - 1 downto 0 do
-	let quad = quads.(i) in
-	let curr_live = live_vregs.(i) in
-	let new_live = Bitv.copy curr_live in 
-	let union_with q = Bitv.iteri_true (fun i -> Bitv.set new_live i true) live_vregs.(q) in
+		let quad = quads.(i) in
+		let curr_live = live_vregs.(i) in
+		let new_live = Bitv.copy curr_live in 
+		let union_with q = Bitv.iteri_true (fun i -> Bitv.set new_live i true) live_vregs.(q) in
 
-	  (* Union in all our jump targets. *)
-	  List.iter union_with (List.map (Array.get labels) (quad_jump_target_labels quad));
+		  (* Union in all our jump targets. *)
+		  List.iter union_with (quad_jump_target_labels quad);
 
-	  (* Union in our block successor if we have one *)
-	  if i < (n_quads - 1) && (not (quad_is_unconditional_jump quad))
-	  then union_with (i+1) 
-	  else ();
+		  (* Union in our block successor if we have one *)
+		  if i < (n_quads - 1) && (not (quad_is_unconditional_jump quad))
+		  then union_with (i+1) 
+		  else ();
 
-	  (* Set any vreg we set to false. *)
-	  List.iter (fun i -> Bitv.set new_live i false) (quad_defined_vregs quad);
+		  (* Set any vreg we set to false. *)
+		  List.iter (fun i -> Bitv.set new_live i false) (quad_defined_vregs quad);
 
-	  (* But then set any vreg we use to true. *)
-	  List.iter (fun i -> Bitv.set new_live i true) (quad_used_vregs quad);
-	  
-	  (* Possibly update matters. *)
-	  if bitvs_equal curr_live new_live
-	  then ()
-	  else 
-	    begin 
-	      live_vregs.(i) <- new_live;
-	      changed := true
-	    end
+		  (* But then set any vreg we use to true. *)
+		  List.iter (fun i -> Bitv.set new_live i true) (quad_used_vregs quad);
+		  
+		  (* Possibly update matters. *)
+		  if bitvs_equal curr_live new_live
+		  then ()
+		  else 
+			begin 
+			  live_vregs.(i) <- new_live;
+			  changed := true
+			end
       done
     done;
     Printf.printf "finished calculating live bitvectors\n";
@@ -214,10 +212,10 @@ let calculate_live_bitvectors e =
     for i = 0 to n_quads - 1 do
       Printf.printf "[%6d] live vregs: " i;
       Bitv.iteri (fun i b -> 
-		    if b 
-		    then Printf.printf " %-2d" i
-		    else Printf.printf "   ") 
-	live_vregs.(i);
+					if b 
+					then Printf.printf " %-2d" i
+					else Printf.printf "   ") 
+		live_vregs.(i);
       Printf.printf "\n";
     done;
     Printf.printf "=========================\n";
@@ -237,12 +235,12 @@ let calculate_live_intervals e =
     Array.iteri note_bitv live_bitvs;
     let intervals = ref LI.empty in
       for v = 0 to n_vregs - 1 do
-	let interval = { live_vreg = v;
-			 live_slot = Vreg v;
-			 live_startpoint = vreg_lo.(v);
-			 live_endpoint = vreg_hi.(v) }
-	in
-	  intervals := LI.add interval (!intervals)
+		let interval = { live_vreg = v;
+						 live_operand = Reg (Vreg v);
+						 live_startpoint = vreg_lo.(v);
+						 live_endpoint = vreg_hi.(v) }
+		in
+		  intervals := LI.add interval (!intervals)
       done;
       (!intervals)
 ;;
@@ -256,8 +254,8 @@ let expire_old_intervals intervals active curr : (LI.t * AI.t * HR.t) =
   in
   let (expired, kept) = AI.partition should_expire active in
   let free interval hardregs = 
-    match interval.live_slot with
-	HWreg i -> HR.add i hardregs
+    match interval.live_operand with
+		Reg (HWreg i) -> HR.add i hardregs
       | _ -> failwith "expiring non-hardreg interval"
   in
   let freed = AI.fold free expired HR.empty in
@@ -270,13 +268,13 @@ let spill_at_interval spill_num active curr : (live_interval * live_interval * A
     if spill.live_endpoint > curr.live_endpoint 
     then
       let active = AI.remove spill active in
-      let curr = { curr with live_slot = spill.live_slot } in
+      let curr = { curr with live_operand = spill.live_operand } in
       let active = AI.add curr active in
-      let spill = { spill with live_slot = Spill spill_num } in
-	(curr, spill, active)
+      let spill = { spill with live_operand = Spill spill_num } in
+		(curr, spill, active)
     else
-      let curr = { curr with live_slot = Spill spill_num } in
-	(curr, curr, active)
+      let curr = { curr with live_operand = Spill spill_num } in
+		(curr, curr, active)
 ;;
 
 
@@ -289,48 +287,49 @@ let linear_scan_register_allocation e =
       if n_active > e.emit_n_hardregs
       then failwith "more active hardregs than available"
       else 
-	if n_active = e.emit_n_hardregs
-	then 
-	  let spill_num = next_spill e in
-	  let (curr, spilled,active) = spill_at_interval spill_num active interval in
-	  let intervals = LI.remove curr intervals in
-	  let intervals = LI.remove spilled intervals in
-	  let intervals = LI.add curr intervals in
-	  let intervals = LI.add spilled intervals in
-	    (intervals, active, free)
-	else
-	  let hr = HR.min_elt free in
-	  let free = HR.remove hr free in
-	  let interval = { interval with live_slot = HWreg hr } in
-	  let intervals = LI.add interval intervals in
-	  let active = AI.add interval active in
-	    (intervals, active, free)
+		if n_active = e.emit_n_hardregs
+		then 
+		  let spill_num = next_spill e in
+		  let (curr, spilled,active) = spill_at_interval spill_num active interval in
+		  let intervals = LI.remove curr intervals in
+		  let intervals = LI.remove spilled intervals in
+		  let intervals = LI.add curr intervals in
+		  let intervals = LI.add spilled intervals in
+			(intervals, active, free)
+		else
+		  let hr = HR.min_elt free in
+		  let free = HR.remove hr free in
+		  let interval = { interval with live_operand = Reg (HWreg hr) } in
+		  let intervals = LI.add interval intervals in
+		  let active = AI.add interval active in
+			(intervals, active, free)
   in
   let initial_intervals = LI.empty in
   let initial_active = AI.empty in
   let initial_free = (let x = ref HR.empty in 
-			for i = 1 to e.emit_n_hardregs do
-			  x := HR.add i (!x)
-			done;
-			!x)
+						for i = 1 to e.emit_n_hardregs do
+						  x := HR.add i (!x)
+						done;
+						!x)
   in
   let initials = (initial_intervals, initial_active, initial_free) in
   let unallocated_intervals:LI.t = calculate_live_intervals e in
 
-      let _ = Printf.printf "unallocated live intervals:\n" in
-      let _ = print_live_intervals unallocated_intervals in
+  let _ = Printf.printf "unallocated live intervals:\n" in
+  let _ = print_live_intervals unallocated_intervals in
 
   let (allocated_intervals, _, _) = 
     LI.fold process unallocated_intervals initials 
   in
 
-       let _ = Printf.printf "allocated live intervals:\n" in
-       let _ = print_live_intervals allocated_intervals in
+  let _ = Printf.printf "allocated live intervals:\n" in
+  let _ = print_live_intervals allocated_intervals in
 
     convert_regs_using_intervals allocated_intervals e;
-    remove_redundant_moves e
+    kill_redundant_moves e
 ;;
-  
+
+(* 
 let test _ = 
   let emit = new_emitter 6 in
 
@@ -364,3 +363,13 @@ let test _ =
 ;;
 
 test();
+*)
+
+
+(* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
+ *)

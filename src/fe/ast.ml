@@ -341,13 +341,10 @@ and lval_component =
   | COMP_lval of lval
     
 and resolved_path = 
-    RES_fp (* frame pointer   *)
-  | RES_pp (* proc pointer    *)
-  | RES_cp (* crate pointer   *)
-  | RES_rp (* runtime pointer *)
+    RES_pr of abi_pseudo_reg
   | RES_off of (int64 * resolved_path)
   | RES_deref of resolved_path
-  | RES_idx of (resolved_path * lval_resolved)
+  | RES_idx of (resolved_path * resolved_path)
 
 and lval_resolved = 
     {
