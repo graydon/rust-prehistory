@@ -278,18 +278,18 @@ and lookup_ident
 				 then 
 				   let (layout, slotr) = Hashtbl.find tab (Ast.KEY_ident ident) in
 					 ({cx with ctxt_span = Some slotr.span}, 
-					  BINDING_slot (Ast.RES_off (layout.layout_offset, fp), slotr))
+					  BINDING_slot (Ast.RES_deref (layout.layout_offset, fp), slotr))
 				 else 
 			       let tab = x.Ast.frame_items in
 				     if Hashtbl.mem tab ident
 				     then 
 				       let (layout, item) = Hashtbl.find tab ident in
 					     ({cx with ctxt_span = Some item.span}, 
-					      BINDING_item (Ast.RES_off (layout.layout_offset, fp), item))
+					      BINDING_item (Ast.RES_deref (layout.layout_offset, fp), item))
                      else 
 				       lookup_ident 
 					     { cx with ctxt_frame_scopes = xs } 
-					     (Ast.RES_deref (Ast.RES_off (0L, fp))) ident)
+					     (Ast.RES_deref (0L, fp)) ident)
 
 
 and lookup_temp (cx:ctxt) 
@@ -304,18 +304,18 @@ and lookup_temp (cx:ctxt)
 		  then 
 		    let (layout, slot) = Hashtbl.find tab (Ast.KEY_temp temp) in 
 			  ({ cx with ctxt_span = Some slot.span }, 
-			   BINDING_slot (Ast.RES_off (layout.layout_offset, fp), slot))
+			   BINDING_slot (Ast.RES_deref (layout.layout_offset, fp), slot))
 		  else 
 		    lookup_temp 
 			  { cx with ctxt_frame_scopes = xs } 
-			  (Ast.RES_deref (Ast.RES_off (0L, fp)))
+			  (Ast.RES_deref (0L, fp))
 			  temp
               
 
 and lookup_base cx base = 
   match base with 
-	  (Ast.BASE_ident id) -> lookup_ident cx Ast.RES_fp id
-	| (Ast.BASE_temp t) -> lookup_temp cx Ast.RES_fp t
+	  (Ast.BASE_ident id) -> lookup_ident cx (Ast.RES_pr FP) id
+	| (Ast.BASE_temp t) -> lookup_temp cx (Ast.RES_pr FP) t
 	| _ -> raise (err cx "unhandled name base variant in lookup_base")
 
 
@@ -463,9 +463,9 @@ and lookup cx
 	(extfn : ctxt -> (ctxt * 'a) -> Ast.name_component -> (ctxt * 'a)) 
 	name = 
   match name with 
-	  Ast.NAME_base (Ast.BASE_ident id) -> basefn cx (lookup_ident cx Ast.RES_fp id)
+	  Ast.NAME_base (Ast.BASE_ident id) -> basefn cx (lookup_ident cx (Ast.RES_pr FP) id)
 	| Ast.NAME_base (Ast.BASE_app (id, args)) -> 
-		let (cx, binding) = lookup_ident cx Ast.RES_fp id in
+		let (cx, binding) = lookup_ident cx (Ast.RES_pr FP) id in
 		  (match binding with 
 			   BINDING_item (i, bi) -> 
 				 let ((cx':ctxt), item) = apply_args_to_item cx bi args in 
@@ -476,7 +476,7 @@ and lookup cx
 			 | BINDING_slot _ -> 
 				 raise (err cx "applying types to slot"))
 	| Ast.NAME_base (Ast.BASE_temp temp) -> 
-		basefn cx (lookup_temp cx Ast.RES_fp temp)
+		basefn cx (lookup_temp cx (Ast.RES_pr FP) temp)
 	| Ast.NAME_ext (base, comp) -> 
 		let base' = lookup cx basefn extfn base in
 		  extfn cx base' comp 

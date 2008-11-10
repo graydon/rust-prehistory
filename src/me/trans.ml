@@ -5,30 +5,30 @@ open Common;;
 
 let rec trans_lval_path emit lvp = 
   match lvp with 
-      Ast.RES_pr pr -> Il.Reg (Il.preg pr)
+      Ast.RES_pr pr -> Il.Reg (Il.Preg pr)
     | Ast.RES_idx (a, b) -> 
         let av = trans_lval_path emit a in
         let bv = trans_lval_path emit b in          
 		let tmp = Il.Reg (Il.next_vreg emit) in 
 		  Il.emit emit Il.ADD tmp av bv;
           tmp
-    | Ast.RES_deref (Ast.RES_off (off, Ast.RES_pr pr)) -> 
-        Il.Deref (Il.Preg pr, Asm.IMM off)
-    | Ast.RES_deref lv -> 
+    | Ast.RES_deref (off, Ast.RES_pr pr) -> 
+        Il.Mem (Il.M32, Some (Il.Preg pr), Asm.IMM off)        
+    | Ast.RES_deref (off, lv) -> 
         let addr = trans_lval_path emit lv in
-		let tmp = Il.Reg (Il.next_vreg emit) in 
-		  Il.emit emit Il.MOV tmp addr Il.Nil;
-          Il.Deref (tmp, Asm.IMM 0L)
+		let tmp = (Il.next_vreg emit) in 
+		  Il.emit emit Il.MOV (Il.Reg tmp) addr Il.Nil;
+          Il.Mem (Il.M32, Some tmp, Asm.IMM off)
 ;;
 
 let trans_lval emit lv = 
-  match !lv.Ast.lval_res with 
-      None -> raise Semant_err (None, "unresolved lval in trans_lval")
-    | Some res -> trans_lval_path emit res.Ast.resolved_path
+  match !(lv.Ast.lval_res) with 
+      None -> raise (Semant_err (None, "unresolved lval in trans_lval"))
+    | Some res -> trans_lval_path emit res.Ast.res_path
 ;;
 
 let trans_expr emit expr = 
-	match expr.node with 
+	match expr with 
 		Ast.EXPR_literal (Ast.LIT_nil) -> 
 		  Il.Nil
 
@@ -44,9 +44,9 @@ let trans_expr emit expr =
 	  | Ast.EXPR_binary (binop, a, b) -> 
 		  let lhs = trans_lval emit a in
 		  let rhs = trans_lval emit b in
-		  let dst = Il.next_vreg emit in 
+		  let dst = Il.Reg (Il.next_vreg emit) in 
 		  let op = match binop with
-			  Ast.BINOP_and -> Il.LAND
+			  Ast.BINOP_and -> Il.AND
 			| _ -> Il.ADD
 		  in
 			Il.emit emit op dst lhs rhs;
@@ -54,25 +54,26 @@ let trans_expr emit expr =
 
 	  | Ast.EXPR_unary (unop, a) -> 
 		  let src = trans_lval emit a in
-		  let dst = Il.next_vreg emit in 
+		  let dst = Il.Reg (Il.next_vreg emit) in 
 		  let op = match unop with
-			  Ast.UNOP_not -> Il.LNOT
+			  Ast.UNOP_not -> Il.NOT
 			| Ast.UNOP_neg -> Il.NEG
 		  in
 			Il.emit emit op dst src Il.Nil;
 			dst
-	  | _ -> raise (Invalid_argument "Semant.trans_expr: unimplemented translation")
+	  | _ -> Il.Nil (* raise (Invalid_argument "Semant.trans_expr: unimplemented translation") *)
 ;;
 
 let rec trans_stmt emit stmt = 
   match stmt.node with 
-	  Ast.STMT_copy (lv_dst, lv_src) -> 
-		let dst = Il.Nil in
-		let src = trans_lval emit lv_src in
-		  Il.emit emit (Il.MOV Il.DATA32) dst src Il.Nil
+	  Ast.STMT_copy (lv_dst, e_src) -> 
+		let dst = trans_lval emit lv_dst in
+		let src = trans_expr emit e_src in
+		  Il.emit emit Il.MOV dst src Il.Nil
 
 	| Ast.STMT_block stmts -> 
 		Array.iter (trans_stmt emit) stmts.Ast.block_stmts
+    | _ -> ()
 (* 
     | Ast.STMT_while sw -> 
         let fwd_jmp_pc = emit.emit_pc in 
@@ -99,8 +100,8 @@ let rec trans_stmt emit stmt =
   | STMT_recv of (lval * lval)
   | STMT_decl of stmt_decl 
   | STMT_use of (ty * ident * lval)
-*)
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")
+*)
 
 and trans_fn emit fn = 
   trans_stmt emit fn.Ast.fn_body

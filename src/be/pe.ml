@@ -559,12 +559,13 @@ let pe_text_section
 	  e = Il.new_emitter 5 	
   in
   let 
-	  exit_fn_imm = Il.Imm (ADD ((IMM pe_image_base),
-								 (M_POS exit_fn_fixup)))
+	  exit_fn_imm = (ADD ((IMM pe_image_base),
+						  (M_POS exit_fn_fixup)))    
   in
-	Il.emit e (Il.MOV Il.M32) (Il.HWreg 2) (Il.Deref (exit_fn_imm, 0L)) Il.Nil;
+  let ebx = Il.Reg (Il.HWreg X86.ebx) in    
+	Il.emit e Il.MOV ebx (Il.Mem (Il.M32, None, exit_fn_imm)) Il.Nil;
 	Il.emit e (Il.CPUSH Il.M32) (Il.Imm (IMM 7L)) Il.Nil Il.Nil;
-	Il.emit e Il.CCALL (Il.HWreg 2) Il.Nil Il.Nil;
+	Il.emit e Il.CCALL ebx Il.Nil Il.Nil;
 	def_aligned
 	  text_fixup
 	  (SEQ (Array.map X86.select_insn e.Il.emit_quads))
