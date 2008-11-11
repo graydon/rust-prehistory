@@ -174,7 +174,7 @@ let string_of_quad t =
 	| CALL | RESUME | CCALL | CPUSH _ | CPOP _ ->
 		Printf.sprintf "%s %s"
 		  (string_of_op t.quad_op)
-		  (string_of_operand t.quad_lhs)
+		  (string_of_operand t.quad_dst)
           
 	| RET | YIELD | CRET | NOP | DEAD | END -> 
 		(string_of_op t.quad_op)

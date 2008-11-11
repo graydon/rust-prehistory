@@ -3,13 +3,14 @@
 open Semant;;
 open Common;;
 
-(* At some point abstract this out per-machine-arch. *)
+(* +++ At some point abstract this out per-machine-arch. *)
 let is_2addr_machine = true;;
 let ptr_mem = Il.M32;;
 let fp_abi_operand = Il.Reg (Il.HWreg X86.esp);;
 let pp_abi_operand = Il.Reg (Il.HWreg X86.ebp);;
 let cp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 0L);;
 let rp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 4L);;
+(* --- At some point abstract this out per-machine-arch. *)
 
 let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
 
@@ -80,9 +81,11 @@ let trans_expr emit expr =
 
             (* FIXME: switch on type of operands. *)
             (* FIXME: wire to reg X86.eax, sigh.  *)
+                (* 
             | Ast.BINOP_mul -> Il.UMUL
             | Ast.BINOP_div -> Il.UDIV
             | Ast.BINOP_mod -> Il.UMOD
+                *)
                 
                 (* 
                    | Ast.BINOP_eq ->
@@ -94,7 +97,7 @@ let trans_expr emit expr =
                    | Ast.BINOP_gt
                 *)                
                 
-			| _ -> Il.OR
+			| _ -> raise (Invalid_argument "Semant.trans_expr: unimplemented binop")
 		  in
             if is_2addr_machine
             then 
@@ -122,20 +125,39 @@ let trans_expr emit expr =
 ;;
 
 
-let rec trans_stmt emit stmt = 
-  match stmt.node with 
-	  Ast.STMT_copy (lv_dst, e_src) -> 
-		let dst = trans_lval emit lv_dst in
-		let src = trans_expr emit e_src in
-		  Il.emit emit Il.MOV dst src Il.Nil
+let rec trans_stmt emit stmt =
+  let def i fixup = 
+    emit.Il.emit_quads.(i) <- { emit.Il.emit_quads.(i) 
+                                with Il.quad_fixup = Some fixup }
+  in
+  let new_qfix i = new_fixup ("quad#" ^ (string_of_int i)) in
+    
+    match stmt.node with 
+	    Ast.STMT_copy (lv_dst, e_src) -> 
+		  let dst = trans_lval emit lv_dst in
+		  let src = trans_expr emit e_src in
+		    Il.emit emit Il.MOV dst src Il.Nil
+              
+	  | Ast.STMT_block stmts -> 
+		  Array.iter (trans_stmt emit) stmts.Ast.block_stmts
+          
+      | Ast.STMT_while sw -> 
+          let back_jmp_target = emit.Il.emit_pc in 
+          let (head_stmts, head_lval) = sw.Ast.while_lval in
+		    Array.iter (trans_stmt emit) head_stmts;
+            let v = trans_lval emit head_lval in
+            let fwd_jmp_target = emit.Il.emit_pc in
+            let back_jmp_fixup = new_qfix back_jmp_target in
+            let fwd_jmp_fixup = new_qfix fwd_jmp_target in
+              Il.emit emit Il.JZ v Il.Nil Il.Nil;
+              trans_stmt emit sw.Ast.while_body;
+              Il.emit emit Il.JMP (Il.Pcrel back_jmp_fixup) Il.Nil Il.Nil;
+                def back_jmp_target back_jmp_fixup;
+                def fwd_jmp_target fwd_jmp_fixup
 
-	| Ast.STMT_block stmts -> 
-		Array.iter (trans_stmt emit) stmts.Ast.block_stmts
-    | _ -> ()
+      | _ -> ()
+                
 (* 
-    | Ast.STMT_while sw -> 
-        let fwd_jmp_pc = emit.emit_pc in 
-          Il.emit emit 
 
     | Ast.STMT_do_while sw ->
   | STMT_foreach of stmt_foreach
@@ -151,8 +173,6 @@ let rec trans_stmt emit stmt =
   | STMT_prove of (constrs)
   | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
-  | STMT_block of stmt_block
-  | STMT_copy of (lval * expr)
   | STMT_call of (lval * lval * (lval array))
   | STMT_send of (lval * lval)
   | STMT_recv of (lval * lval)

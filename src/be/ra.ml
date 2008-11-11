@@ -64,6 +64,8 @@ let convert_regs_using_intervals intervals e =
 	  | Mem (m, Some (Vreg i), off) -> 
           (match vreg_operands.(i) with 
                Reg vr -> Mem (m, Some vr, off)
+                 (* FIXME: Spill ABI logic needs to be injected here. *)
+             | Spill i -> Mem (M32, Some (HWreg X86.esp), (Asm.IMM (Int64.of_int (i*4))))
              | _ -> raise (Invalid_argument "Ra.convert_regs_using_intervals"))
       | _ -> s
   in
