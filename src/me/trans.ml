@@ -3,22 +3,44 @@
 open Semant;;
 open Common;;
 
+(* At some point abstract this out per-machine-arch. *)
+let is_2addr_machine = true;;
+let ptr_mem = Il.M32;;
+let fp_abi_operand = Il.Reg (Il.HWreg X86.esp);;
+let pp_abi_operand = Il.Reg (Il.HWreg X86.ebp);;
+let cp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 0L);;
+let rp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 4L);;
+
+let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
+
 let rec trans_lval_path emit lvp = 
   match lvp with 
-      Ast.RES_pr pr -> Il.Reg (Il.Preg pr)
+      Ast.RES_pr FP -> fp_abi_operand
+    | Ast.RES_pr PP -> pp_abi_operand
+    | Ast.RES_pr CP -> cp_abi_operand
+    | Ast.RES_pr RP -> rp_abi_operand
     | Ast.RES_idx (a, b) -> 
         let av = trans_lval_path emit a in
         let bv = trans_lval_path emit b in          
 		let tmp = Il.Reg (Il.next_vreg emit) in 
 		  Il.emit emit Il.ADD tmp av bv;
           tmp
-    | Ast.RES_deref (off, Ast.RES_pr pr) -> 
-        Il.Mem (Il.M32, Some (Il.Preg pr), Asm.IMM off)        
-    | Ast.RES_deref (off, lv) -> 
-        let addr = trans_lval_path emit lv in
-		let tmp = (Il.next_vreg emit) in 
-		  Il.emit emit Il.MOV (Il.Reg tmp) addr Il.Nil;
-          Il.Mem (Il.M32, Some tmp, Asm.IMM off)
+    | Ast.RES_off (off, lv) -> 
+        (match trans_lval_path emit lv with             
+             Il.Mem (m, v, Asm.IMM off') -> 
+               Il.Mem (m, v, Asm.IMM (Int64.add off off'))
+           | v -> 
+               let tmp = Il.Reg (Il.next_vreg emit) in
+                 Il.emit emit Il.ADD tmp v (Il.Imm (Asm.IMM off));
+                 tmp)
+    | Ast.RES_deref lv -> 
+        (match trans_lval_path emit lv with 
+             Il.Reg r -> 
+               Il.Mem (ptr_mem, Some r, Asm.IMM 0L)
+           | v -> 
+		       let tmp = (Il.next_vreg emit) in 
+		         Il.emit emit Il.MOV (Il.Reg tmp) v Il.Nil;
+                 Il.Mem (ptr_mem, Some tmp, Asm.IMM 0L))
 ;;
 
 let trans_lval emit lv = 
@@ -46,10 +68,40 @@ let trans_expr emit expr =
 		  let rhs = trans_lval emit b in
 		  let dst = Il.Reg (Il.next_vreg emit) in 
 		  let op = match binop with
-			  Ast.BINOP_and -> Il.AND
-			| _ -> Il.ADD
+              Ast.BINOP_or -> Il.OR
+            | Ast.BINOP_and -> Il.AND
+
+            | Ast.BINOP_lsl -> Il.LSL
+            | Ast.BINOP_lsr -> Il.LSR
+            | Ast.BINOP_asr -> Il.ASR
+                
+            | Ast.BINOP_add -> Il.ADD
+            | Ast.BINOP_sub -> Il.SUB
+
+            (* FIXME: switch on type of operands. *)
+            (* FIXME: wire to reg X86.eax, sigh.  *)
+            | Ast.BINOP_mul -> Il.UMUL
+            | Ast.BINOP_div -> Il.UDIV
+            | Ast.BINOP_mod -> Il.UMOD
+                
+                (* 
+                   | Ast.BINOP_eq ->
+                   | Ast.BINOP_ne -> 
+                   
+                   | Ast.BINOP_lt
+                   | Ast.BINOP_le
+                   | Ast.BINOP_ge
+                   | Ast.BINOP_gt
+                *)                
+                
+			| _ -> Il.OR
 		  in
-			Il.emit emit op dst lhs rhs;
+            if is_2addr_machine
+            then 
+			  (Il.emit emit Il.MOV dst lhs Il.Nil;
+               Il.emit emit op dst dst rhs)
+            else
+			  Il.emit emit op dst lhs rhs;
 			dst
 
 	  | Ast.EXPR_unary (unop, a) -> 
@@ -59,10 +111,16 @@ let trans_expr emit expr =
 			  Ast.UNOP_not -> Il.NOT
 			| Ast.UNOP_neg -> Il.NEG
 		  in
-			Il.emit emit op dst src Il.Nil;
+            if is_2addr_machine
+            then 
+			  (Il.emit emit Il.MOV dst src Il.Nil;
+               Il.emit emit op dst dst Il.Nil)
+            else               
+			  Il.emit emit op dst src Il.Nil;
 			dst
-	  | _ -> Il.Nil (* raise (Invalid_argument "Semant.trans_expr: unimplemented translation") *)
+	  | _ -> marker (* raise (Invalid_argument "Semant.trans_expr: unimplemented translation") *)
 ;;
+
 
 let rec trans_stmt emit stmt = 
   match stmt.node with 
@@ -123,6 +181,7 @@ and trans_mod_items emit items =
 and trans_crate crate = 
   let emit = Il.new_emitter X86.n_hardregs in
 	trans_mod_items emit crate;
+    Il.print_quads emit.Il.emit_quads;
     emit
 
 (* 

@@ -304,33 +304,35 @@ let mod_like src slash =
 
 let select_insn q =  
   let item = 
-    if q.quad_dst = q.quad_lhs 
-    then 
-      let binop = alu_binop q.quad_lhs q.quad_rhs in
-      let unop = insn_rm_r 0xf7 q.quad_lhs in
-      let mulop = mul_like q.quad_rhs in
-      let modop = mod_like q.quad_rhs in
-        match (q.quad_dst, q.quad_op) with 
-            (_, ADD) -> binop slash0 0x1 0x3 
-          | (_, SUB) -> binop slash5 0x29 0x2b
-          | (_, AND) -> binop slash4 0x21 0x23
-          | (_, OR) -> binop slash1 0x09 0x0b
-          | (_, XOR) -> binop slash6 0x31 0x33
-              
-          | (Reg (HWreg 0), UMUL) -> mulop slash4
-          | (Reg (HWreg 0), IMUL) -> mulop slash5
-          | (Reg (HWreg 0), UDIV) -> mulop slash6
-          | (Reg (HWreg 0), IDIV) -> mulop slash7
-
-          | (Reg (HWreg 0), UMOD) -> modop slash6
-          | (Reg (HWreg 0), IMOD) -> modop slash7
-              
-          | (_, NEG) -> unop slash3 
-          | (_, NOT) -> unop slash2
-
-          | _ -> select_item_misc q
+    if q.quad_op = MOV 
+    then mov q.quad_dst q.quad_lhs 
     else 
-      select_item_misc q
+      if q.quad_dst = q.quad_lhs 
+      then 
+        let binop = alu_binop q.quad_lhs q.quad_rhs in
+        let unop = insn_rm_r 0xf7 q.quad_lhs in
+        let mulop = mul_like q.quad_rhs in
+        let modop = mod_like q.quad_rhs in
+          match (q.quad_dst, q.quad_op) with 
+              (_, ADD) -> binop slash0 0x1 0x3 
+            | (_, SUB) -> binop slash5 0x29 0x2b
+            | (_, AND) -> binop slash4 0x21 0x23
+            | (_, OR) -> binop slash1 0x09 0x0b
+                
+            | (Reg (HWreg 0), UMUL) -> mulop slash4
+            | (Reg (HWreg 0), IMUL) -> mulop slash5
+            | (Reg (HWreg 0), UDIV) -> mulop slash6
+            | (Reg (HWreg 0), IDIV) -> mulop slash7
+                
+            | (Reg (HWreg 0), UMOD) -> modop slash6
+            | (Reg (HWreg 0), IMOD) -> modop slash7
+                
+            | (_, NEG) -> unop slash3 
+            | (_, NOT) -> unop slash2
+                
+            | _ -> select_item_misc q
+      else 
+        select_item_misc q
   in
 	match q.quad_fixup with 
 		None -> item

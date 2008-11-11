@@ -61,7 +61,11 @@ let convert_regs_using_intervals intervals e =
   let convert_operand s = 
     match s with 
 		Reg (Vreg i) -> vreg_operands.(i)
-      | x -> x
+	  | Mem (m, Some (Vreg i), off) -> 
+          (match vreg_operands.(i) with 
+               Reg vr -> Mem (m, Some vr, off)
+             | _ -> raise (Invalid_argument "Ra.convert_regs_using_intervals"))
+      | _ -> s
   in
   let convert_quad q = 
     { q with 
@@ -135,9 +139,10 @@ let quad_used_vregs q =
   let operand_used_vregs s = 
     match s with 
 		Reg (Vreg i) -> [i]
+	  | Mem (_, Some (Vreg i), _) -> [i]
       | _ -> []
   in
-    List.concat (List.map operand_used_vregs [q.quad_lhs; q.quad_rhs])
+    List.concat (List.map operand_used_vregs [q.quad_dst; q.quad_lhs; q.quad_rhs])
 ;;
 
 let quad_defined_vregs q = 

@@ -27,7 +27,7 @@ type op =
   | IDIV | UDIV
   | IMOD | UMOD
   | MOV 
-  | AND | OR | XOR | NOT 
+  | AND | OR | NOT 
   | LSL | LSR | ASR
   | JNZ | JZ | JC | JNC | JO | JNO | JMP 
   | CALL | RET | YIELD | RESUME 
@@ -88,7 +88,7 @@ let string_of_operand operand =
   match operand with
       Reg r -> string_of_reg r
     | Spill i -> "spill:" ^ (string_of_int i)
-    | Imm (Asm.IMM i) -> Printf.sprintf "imm:%Ld" i
+    | Imm (Asm.IMM i) -> Printf.sprintf "imm:0x%Lx" i
     | Imm _ -> "imm:??" 
 	| Pcrel f -> "pcrel:" ^ f.fixup_name 
     | Mem (_, (Some r),(Asm.IMM 0L)) -> Printf.sprintf "*(%s)" (string_of_reg r)
@@ -97,7 +97,7 @@ let string_of_operand operand =
     | Mem (_, None,(Asm.IMM n)) -> Printf.sprintf "*(%Ld)" n
     | Mem (_, None,_) -> "*(??)" 
     | Label i -> "label:" ^ (string_of_int i)
-    | Nil -> ""
+    | Nil -> "nil"
 ;;
 
 
@@ -124,7 +124,6 @@ let string_of_op op =
     | MOV -> "MOV"
     | AND -> "AND"
     | OR -> "OR"
-    | XOR -> "XOR"
     | NOT -> "NOT"
     | LSL -> "LSL"
     | LSR -> "LSR"
@@ -153,7 +152,7 @@ let string_of_op op =
 let string_of_quad t = 
   match t.quad_op with 
       ADD | SUB | IMUL | UMUL | IDIV | UDIV | IMOD | UMOD
-	| AND | OR | XOR | LSL | LSR | ASR -> 
+	| AND | OR | LSL | LSR | ASR -> 
 		Printf.sprintf "%s = %s %s %s"
 		  (string_of_operand t.quad_dst)
 		  (string_of_operand t.quad_lhs)

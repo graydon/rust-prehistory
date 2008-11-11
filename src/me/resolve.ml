@@ -278,18 +278,18 @@ and lookup_ident
 				 then 
 				   let (layout, slotr) = Hashtbl.find tab (Ast.KEY_ident ident) in
 					 ({cx with ctxt_span = Some slotr.span}, 
-					  BINDING_slot (Ast.RES_deref (layout.layout_offset, fp), slotr))
+					  BINDING_slot (Ast.RES_off (layout.layout_offset, (Ast.RES_deref fp)), slotr))
 				 else 
 			       let tab = x.Ast.frame_items in
 				     if Hashtbl.mem tab ident
 				     then 
 				       let (layout, item) = Hashtbl.find tab ident in
 					     ({cx with ctxt_span = Some item.span}, 
-					      BINDING_item (Ast.RES_deref (layout.layout_offset, fp), item))
+					      BINDING_item (Ast.RES_off (layout.layout_offset, (Ast.RES_deref fp)), item))
                      else 
 				       lookup_ident 
 					     { cx with ctxt_frame_scopes = xs } 
-					     (Ast.RES_deref (0L, fp)) ident)
+					     (Ast.RES_deref fp) ident)
 
 
 and lookup_temp (cx:ctxt) 
@@ -304,11 +304,11 @@ and lookup_temp (cx:ctxt)
 		  then 
 		    let (layout, slot) = Hashtbl.find tab (Ast.KEY_temp temp) in 
 			  ({ cx with ctxt_span = Some slot.span }, 
-			   BINDING_slot (Ast.RES_deref (layout.layout_offset, fp), slot))
+			   BINDING_slot (Ast.RES_off (layout.layout_offset, (Ast.RES_deref fp)), slot))
 		  else 
 		    lookup_temp 
 			  { cx with ctxt_frame_scopes = xs } 
-			  (Ast.RES_deref (0L, fp))
+			  (Ast.RES_deref fp)
 			  temp
               
 

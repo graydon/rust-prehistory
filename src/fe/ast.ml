@@ -342,7 +342,8 @@ and lval_component =
     
 and resolved_path = 
     RES_pr of abi_pseudo_reg
-  | RES_deref of (int64 * resolved_path)
+  | RES_off of (int64 * resolved_path)
+  | RES_deref of resolved_path
   | RES_idx of (resolved_path * resolved_path)
 
 and lval_resolved = 
