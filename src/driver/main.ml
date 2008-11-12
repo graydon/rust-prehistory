@@ -87,12 +87,21 @@ let _ =
 ;;
 
 let emit = Trans.trans_crate crate_items
+let _ = Il.print_quads emit.Il.emit_quads
+let _ = Ra.reg_alloc emit
+let _ = Il.print_quads emit.Il.emit_quads
 ;;
 
-let _ = Ra.linear_scan_register_allocation emit
+let pick q = 
+  try 
+    X86.select_insn q
+  with
+      X86.Unrecognized -> 
+        Printf.fprintf stderr "unrecognized quad: %s\n%!" (Il.string_of_quad q);
+        Asm.MARK
 ;;
-
-let code = (Asm.SEQ (Array.map X86.select_insn emit.Il.emit_quads))
+          
+let code = (Asm.SEQ (Array.map pick emit.Il.emit_quads))        
 ;;
 
 let _ = match sess.Session.sess_fmt with 

@@ -207,6 +207,18 @@ let insn_rm_r_imm (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : A
 ;;
 
 
+let insn_pcrel (op1:int) (op2:int option) (fix:fixup) : Asm.item = 
+  let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in 
+	Asm.SEQ [| 
+      (match op2 with 
+           Some op2 -> Asm.BYTES [| op1; op2 |]
+         | None -> Asm.BYTE op1);
+      (Asm.WORD32 (Asm.SUB (Asm.M_POS fix, 
+							Asm.M_POS pcrel_mark_fixup)));
+	  Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+;;
+
+
 let is_rm32 (oper:operand) : bool = 
   match oper with 
       Mem (M32, _, _) -> true
@@ -220,6 +232,17 @@ let is_rm8 (oper:operand) : bool =
       Mem (M8, _, _) -> true
     | Reg (HWreg _) -> true
     | _ -> false
+;;
+
+
+let cmp (a:operand) (b:operand) : Asm.item = 
+  match (a,b) with 
+      (Reg (HWreg eax), Imm (Asm.IMM n)) when imm_is_byte n -> 
+        Asm.SEQ [| Asm.BYTE 0x3d; Asm.WORD32 (Asm.IMM n) |]
+    | (_, Imm i) when is_rm32 a -> insn_rm_r_imm 0x83 0x81 a slash7 i
+    | (_, Reg (HWreg r)) -> insn_rm_r 0x39 a r
+    | (Reg (HWreg r), _) -> insn_rm_r 0x3b b r
+    | _ -> raise Unrecognized
 ;;
 
 
@@ -244,16 +267,11 @@ let mov (dst:operand) (src:operand) : Asm.item =
 ;;
 
 
-let select_item_misc t =           
+let select_item_misc t =
   match (t.quad_op, t.quad_dst, t.quad_lhs, t.quad_rhs) with
       
 	  (CCALL, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash2          
-	| (CCALL, Pcrel f, _, _) -> 
-		let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in 
-		  Asm.SEQ [| Asm.BYTES [| 0xe8; |];
-					 (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
-										   Asm.M_POS pcrel_mark_fixup)));
-					 Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+	| (CCALL, Pcrel f, _, _) -> insn_pcrel 0xe8 None f
 
 	| (CPUSH M32, Reg (HWreg r), _, _) -> Asm.BYTE (0x50 + (reg r))
 	| (CPUSH M32, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash6
@@ -261,22 +279,27 @@ let select_item_misc t =
 	| (CPUSH M8, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD8 i |]
           
 	| (CRET, _, _, _) -> Asm.BYTE 0xc3
-                
+
+	| (JC,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x82) f
+	| (JNC, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x83) f
+	| (JO,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x80) f
+	| (JNO, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x81) f
+	| (JE,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x84) f
+	| (JNE, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x85) f
+	| (JL,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x8c) f                     
+	| (JLE, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x8e) f                     
+	| (JG,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x8f) f                     
+	| (JGE, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x8d) f                     
+
 	| (JMP, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash4
-	| (JMP, Pcrel f, _, _) -> 
-		(* FIXME: relaxations! *)
-		let pcrel_mark_fixup = new_fixup "jmp-pcrel mark fixup" in 
-		  Asm.SEQ [| Asm.BYTE 0xe9;
-					 (Asm.WORD32 (Asm.SUB (Asm.M_POS f, 
-										   Asm.M_POS pcrel_mark_fixup)));
-					 Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+	| (JMP, Pcrel f, _, _) -> insn_pcrel 0xe9 None f
 
 	| (DEAD, _, _, _) -> Asm.MARK
 	| (END, _, _, _) -> Asm.BYTES [| 0x90 |]
 	| (NOP, _, _, _) -> Asm.BYTES [| 0x90 |]
         
 	| _ -> 
-		raise (Invalid_argument ("X86.select_item_misc: no matching insn: " ^ (string_of_quad t)))
+		raise Unrecognized
 ;;
 
 
@@ -304,35 +327,38 @@ let mod_like src slash =
 
 let select_insn q =  
   let item = 
-    if q.quad_op = MOV 
-    then mov q.quad_dst q.quad_lhs 
-    else 
-      if q.quad_dst = q.quad_lhs 
-      then 
-        let binop = alu_binop q.quad_lhs q.quad_rhs in
-        let unop = insn_rm_r 0xf7 q.quad_lhs in
-        let mulop = mul_like q.quad_rhs in
-        let modop = mod_like q.quad_rhs in
-          match (q.quad_dst, q.quad_op) with 
-              (_, ADD) -> binop slash0 0x1 0x3 
-            | (_, SUB) -> binop slash5 0x29 0x2b
-            | (_, AND) -> binop slash4 0x21 0x23
-            | (_, OR) -> binop slash1 0x09 0x0b
-                
-            | (Reg (HWreg 0), UMUL) -> mulop slash4
-            | (Reg (HWreg 0), IMUL) -> mulop slash5
-            | (Reg (HWreg 0), UDIV) -> mulop slash6
-            | (Reg (HWreg 0), IDIV) -> mulop slash7
-                
-            | (Reg (HWreg 0), UMOD) -> modop slash6
-            | (Reg (HWreg 0), IMOD) -> modop slash7
-                
-            | (_, NEG) -> unop slash3 
-            | (_, NOT) -> unop slash2
-                
-            | _ -> select_item_misc q
-      else 
-        select_item_misc q
+    match q.quad_op with 
+        MOV -> mov q.quad_dst q.quad_lhs 
+      | CMP -> cmp q.quad_dst q.quad_lhs 
+      | _ -> 
+          begin
+            if q.quad_dst = q.quad_lhs 
+            then 
+              let binop = alu_binop q.quad_lhs q.quad_rhs in
+              let unop = insn_rm_r 0xf7 q.quad_lhs in
+              let mulop = mul_like q.quad_rhs in
+              let modop = mod_like q.quad_rhs in
+                match (q.quad_dst, q.quad_op) with 
+                    (_, ADD) -> binop slash0 0x1 0x3 
+                  | (_, SUB) -> binop slash5 0x29 0x2b
+                  | (_, AND) -> binop slash4 0x21 0x23
+                  | (_, OR) -> binop slash1 0x09 0x0b
+                      
+                  | (Reg (HWreg 0), UMUL) -> mulop slash4
+                  | (Reg (HWreg 0), IMUL) -> mulop slash5
+                  | (Reg (HWreg 0), UDIV) -> mulop slash6
+                  | (Reg (HWreg 0), IDIV) -> mulop slash7
+                      
+                  | (Reg (HWreg 0), UMOD) -> modop slash6
+                  | (Reg (HWreg 0), IMOD) -> modop slash7
+                      
+                  | (_, NEG) -> unop slash3 
+                  | (_, NOT) -> unop slash2
+                      
+                  | _ -> select_item_misc q
+            else 
+              select_item_misc q
+          end
   in
 	match q.quad_fixup with 
 		None -> item

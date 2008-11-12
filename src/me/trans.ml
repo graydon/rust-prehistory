@@ -50,14 +50,15 @@ let trans_lval emit lv =
     | Some res -> trans_lval_path emit res.Ast.res_path
 ;;
 
-let trans_expr emit expr = 
+let trans_expr e expr = 
+  let emit = Il.emit e in
 	match expr with 
 		Ast.EXPR_literal (Ast.LIT_nil) -> 
 		  Il.Nil
 
 	  | Ast.EXPR_literal (Ast.LIT_bool false) -> 
 		  Il.Imm (Asm.IMM 0L)
-
+            
 	  | Ast.EXPR_literal (Ast.LIT_bool true) -> 
 		  Il.Imm (Asm.IMM 1L)
 
@@ -65,13 +66,13 @@ let trans_expr emit expr =
 		  Il.Imm (Asm.IMM (Int64.of_int (Char.code c)))
 
 	  | Ast.EXPR_binary (binop, a, b) -> 
-		  let lhs = trans_lval emit a in
-		  let rhs = trans_lval emit b in
-		  let dst = Il.Reg (Il.next_vreg emit) in 
+		  let lhs = trans_lval e a in
+		  let rhs = trans_lval e b in
+		  let dst = Il.Reg (Il.next_vreg e) in 
 		  let op = match binop with
               Ast.BINOP_or -> Il.OR
             | Ast.BINOP_and -> Il.AND
-
+                
             | Ast.BINOP_lsl -> Il.LSL
             | Ast.BINOP_lsr -> Il.LSR
             | Ast.BINOP_asr -> Il.ASR
@@ -86,75 +87,74 @@ let trans_expr emit expr =
             | Ast.BINOP_div -> Il.UDIV
             | Ast.BINOP_mod -> Il.UMOD
                 *)
+            (*    
+            | Ast.BINOP_eq ->
+            | Ast.BINOP_ne -> 
                 
-                (* 
-                   | Ast.BINOP_eq ->
-                   | Ast.BINOP_ne -> 
-                   
-                   | Ast.BINOP_lt
-                   | Ast.BINOP_le
-                   | Ast.BINOP_ge
-                   | Ast.BINOP_gt
+            | Ast.BINOP_lt
+            | Ast.BINOP_le
+            | Ast.BINOP_ge
+            | Ast.BINOP_gt
                 *)                
                 
-			| _ -> raise (Invalid_argument "Semant.trans_expr: unimplemented binop")
+			| _ -> Il.OR (* raise (Invalid_argument "Semant.trans_expr: unimplemented binop") *)
 		  in
             if is_2addr_machine
             then 
-			  (Il.emit emit Il.MOV dst lhs Il.Nil;
-               Il.emit emit op dst dst rhs)
+			  (emit Il.MOV dst lhs Il.Nil;
+               emit op dst dst rhs)
             else
-			  Il.emit emit op dst lhs rhs;
+			  emit op dst lhs rhs;
 			dst
-
+              
 	  | Ast.EXPR_unary (unop, a) -> 
-		  let src = trans_lval emit a in
-		  let dst = Il.Reg (Il.next_vreg emit) in 
+		  let src = trans_lval e a in
+		  let dst = Il.Reg (Il.next_vreg e) in 
 		  let op = match unop with
 			  Ast.UNOP_not -> Il.NOT
 			| Ast.UNOP_neg -> Il.NEG
 		  in
             if is_2addr_machine
             then 
-			  (Il.emit emit Il.MOV dst src Il.Nil;
-               Il.emit emit op dst dst Il.Nil)
+			  (emit Il.MOV dst src Il.Nil;
+               emit op dst dst Il.Nil)
             else               
-			  Il.emit emit op dst src Il.Nil;
+			  emit op dst src Il.Nil;
 			dst
 	  | _ -> marker (* raise (Invalid_argument "Semant.trans_expr: unimplemented translation") *)
 ;;
 
 
-let rec trans_stmt emit stmt =
-  let def i fixup = 
-    emit.Il.emit_quads.(i) <- { emit.Il.emit_quads.(i) 
-                                with Il.quad_fixup = Some fixup }
+let rec trans_stmt e stmt =
+  let emit = Il.emit e in
+  let mark _ = e.Il.emit_pc in 
+  let badlab = Il.Label (-1) in
+  let imm_true = Il.Imm (Asm.IMM 1L) in
+  let imm_false = Il.Imm (Asm.IMM 0L) in
+  let patch i = 
+    e.Il.emit_quads.(i) <- { e.Il.emit_quads.(i)
+                             with Il.quad_dst = Il.Label (mark()) }
   in
-  let new_qfix i = new_fixup ("quad#" ^ (string_of_int i)) in
-    
     match stmt.node with 
 	    Ast.STMT_copy (lv_dst, e_src) -> 
-		  let dst = trans_lval emit lv_dst in
-		  let src = trans_expr emit e_src in
-		    Il.emit emit Il.MOV dst src Il.Nil
+		  let dst = trans_lval e lv_dst in
+		  let src = trans_expr e e_src in
+		    emit Il.MOV dst src Il.Nil
               
 	  | Ast.STMT_block stmts -> 
-		  Array.iter (trans_stmt emit) stmts.Ast.block_stmts
+		  Array.iter (trans_stmt e) stmts.Ast.block_stmts
           
       | Ast.STMT_while sw -> 
-          let back_jmp_target = emit.Il.emit_pc in 
+          let back_jmp_target = mark() in 
           let (head_stmts, head_lval) = sw.Ast.while_lval in
-		    Array.iter (trans_stmt emit) head_stmts;
-            let v = trans_lval emit head_lval in
-            let fwd_jmp_target = emit.Il.emit_pc in
-            let back_jmp_fixup = new_qfix back_jmp_target in
-            let fwd_jmp_fixup = new_qfix fwd_jmp_target in
-              Il.emit emit Il.JZ v Il.Nil Il.Nil;
-              trans_stmt emit sw.Ast.while_body;
-              Il.emit emit Il.JMP (Il.Pcrel back_jmp_fixup) Il.Nil Il.Nil;
-                def back_jmp_target back_jmp_fixup;
-                def fwd_jmp_target fwd_jmp_fixup
-
+		    Array.iter (trans_stmt e) head_stmts;
+            let v = trans_lval e head_lval in
+              emit Il.CMP v imm_false Il.Nil;
+              let fwd_jmp_quad = mark() in
+                emit Il.JE badlab Il.Nil Il.Nil;
+                trans_stmt e sw.Ast.while_body;
+                emit Il.JMP (Il.Label back_jmp_target) Il.Nil Il.Nil;
+                patch fwd_jmp_quad
       | _ -> ()
                 
 (* 
@@ -201,7 +201,6 @@ and trans_mod_items emit items =
 and trans_crate crate = 
   let emit = Il.new_emitter X86.n_hardregs in
 	trans_mod_items emit crate;
-    Il.print_quads emit.Il.emit_quads;
     emit
 
 (* 

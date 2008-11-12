@@ -26,10 +26,11 @@ type op =
   | IMUL | UMUL
   | IDIV | UDIV
   | IMOD | UMOD
-  | MOV 
+  | MOV | CMP
   | AND | OR | NOT 
   | LSL | LSR | ASR
-  | JNZ | JZ | JC | JNC | JO | JNO | JMP 
+  | JE | JNE | JL | JLE | JG | JGE
+  | JC | JNC | JO | JNO | JMP 
   | CALL | RET | YIELD | RESUME 
   | CCALL | CPUSH of mem | CPOP of mem | CRET
   | NOP | DEAD | END
@@ -122,18 +123,23 @@ let string_of_op op =
     | UMOD -> "UMOD"
     | IMOD -> "IMOD"
     | MOV -> "MOV"
+    | CMP -> "CMP"
     | AND -> "AND"
     | OR -> "OR"
     | NOT -> "NOT"
     | LSL -> "LSL"
     | LSR -> "LSR"
     | ASR -> "ASR"
-    | JNZ -> "JNZ"
-    | JZ -> "JZ"
     | JC -> "JC"
     | JNC ->"JNC"
     | JO -> "JO"
     | JNO -> "JNO"
+    | JE -> "JE"
+    | JNE -> "JNE"
+    | JL -> "JL"
+    | JLE -> "JLE"
+    | JG -> "JG"
+    | JGE -> "JGE"
     | JMP -> "JMP"
     | CALL -> "CALL"
     | RET -> "RET"
@@ -169,9 +175,15 @@ let string_of_quad t =
 		Printf.sprintf "%s = %s"
 		  (string_of_operand t.quad_dst)
 		  (string_of_operand t.quad_lhs)
+
+	| CMP -> 
+		Printf.sprintf "%s %s %s"
+		  (string_of_op t.quad_op)
+		  (string_of_operand t.quad_dst)
+		  (string_of_operand t.quad_lhs)
 	      
-	| JNZ | JZ | JC | JNC | JO | JNO | JMP 
-	| CALL | RESUME | CCALL | CPUSH _ | CPOP _ ->
+	| JMP | JE | JNE | JL | JLE | JG | JGE | JC | JNC | JO | JNO
+    | CALL | RESUME | CCALL | CPUSH _ | CPOP _ ->
 		Printf.sprintf "%s %s"
 		  (string_of_op t.quad_op)
 		  (string_of_operand t.quad_dst)
@@ -181,7 +193,7 @@ let string_of_quad t =
 ;;
 
 let print_quads qs = 
-  Array.iteri (fun i q -> Printf.printf "[%6d]\t%s\n" i (string_of_quad q)) qs
+  Array.iteri (fun i q -> Printf.fprintf stderr "[%6d]\t%s\n" i (string_of_quad q)) qs
 ;;
 
 type emitter = { emit_n_hardregs: int;

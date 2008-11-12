@@ -1,4 +1,5 @@
 open Il;;
+open Common;;
 
 (* Poletto and Sarkar's linear-scan algorithm. *)
 
@@ -53,21 +54,22 @@ module AI = Set.Make(EndOrderedIntervals);;
 module HR = Set.Make(OrderedInts);;
 
 let print_live_intervals is = 
-  LI.iter (Printf.printf "%a\n" fmt_live_interval) is
+  LI.iter (Printf.fprintf stderr "%a\n" fmt_live_interval) is
 ;;
 
-let convert_regs_using_intervals intervals e =
-  let vreg_operands = Array.create e.emit_next_vreg Nil in
+let convert_labels e = 
+  let new_labels = ref [] in 
   let convert_operand s = 
     match s with 
-		Reg (Vreg i) -> vreg_operands.(i)
-	  | Mem (m, Some (Vreg i), off) -> 
-          (match vreg_operands.(i) with 
-               Reg vr -> Mem (m, Some vr, off)
-                 (* FIXME: Spill ABI logic needs to be injected here. *)
-             | Spill i -> Mem (M32, Some (HWreg X86.esp), (Asm.IMM (Int64.of_int (i*4))))
-             | _ -> raise (Invalid_argument "Ra.convert_regs_using_intervals"))
-      | _ -> s
+        Label lab -> 
+          let fix = (match e.emit_quads.(lab).quad_fixup with 
+                         None -> ( let fix = new_fixup ("quad#" ^ (string_of_int lab)) in
+                                     new_labels := (lab, fix) :: (!new_labels);
+                                     fix)
+                       | Some f -> f)
+          in
+            Pcrel fix
+      | x -> x
   in
   let convert_quad q = 
     { q with 
@@ -75,9 +77,64 @@ let convert_regs_using_intervals intervals e =
 		quad_lhs = convert_operand q.quad_lhs;
 		quad_rhs = convert_operand q.quad_rhs }
   in
-    LI.iter (fun i -> vreg_operands.(i.live_vreg) <- i.live_operand) intervals;
-    e.emit_quads <- Array.map convert_quad e.emit_quads
+    e.emit_quads <- Array.map convert_quad e.emit_quads;
+    List.iter (fun (i, fix) -> 
+                 e.emit_quads.(i) <- { e.emit_quads.(i) 
+                                       with quad_fixup = Some fix })
+      (!new_labels)
 ;;
+
+
+let convert_vregs intervals e =
+  let vreg_operands = Array.create e.emit_next_vreg Nil in
+  let spill_reg = (HWreg X86.edx) in
+  let spill_slot i = Mem (M32, Some (HWreg X86.esp), (Asm.IMM (Int64.of_int (i*4)))) in
+  let mov a b = { quad_op = MOV; 
+                  quad_dst = a;
+                  quad_lhs = b;
+                  quad_rhs = Nil;
+                  quad_fixup = None }
+  in
+  let convert_operand s = 
+    match s with 
+		Reg (Vreg i) -> 
+          (match vreg_operands.(i) with 
+               Reg (HWreg r) -> (None, Reg (HWreg r))
+             | Spill i -> (None, spill_slot i)
+             | x -> raise (Invalid_argument ("Ra.convert_vregs: " ^ (Il.string_of_operand x))))
+	  | Mem (m, Some (Vreg i), off) -> 
+          (match vreg_operands.(i) with 
+               Reg (HWreg r) -> (None, Mem (m, Some (HWreg r), off))
+             | Spill i -> 
+                 (Some (mov (Reg spill_reg) (spill_slot i)), 
+                  Mem (m, Some spill_reg, off))
+             | x -> raise (Invalid_argument ("Ra.convert_vregs: " ^ (Il.string_of_operand x))))
+      | _ -> (None, s)
+  in
+  let quads = ref [] in 
+  let prepend q = quads := q :: (!quads) in
+  let convert_quad q = 
+    (* This is a 2-address machine, so we don't need to worry about 
+     * dst having a different spill mem base from lhs. 
+     * FIXME: generalize to non-2-addr-machines.
+     * FIXME: try to work out how to handle the 2-spill-reg case
+     *        without *actually* having to reserve 2 spill regs! 
+     *)
+    let (_, dst) = convert_operand q.quad_dst in
+    let (prefix_2, lhs) = convert_operand q.quad_lhs in
+    let (prefix_3, rhs) = convert_operand q.quad_rhs in
+      (match (prefix_2, prefix_3) with 
+           (None, None) -> ()
+         | (Some p, None) -> prepend p
+         | (None, Some p) -> prepend p
+         | (Some _, Some _) -> (raise (Invalid_argument "Ra.convert_vregs: two spill regs needed")));
+      prepend { q with quad_dst = dst; quad_lhs = lhs; quad_rhs = rhs }
+  in
+    LI.iter (fun i -> vreg_operands.(i.live_vreg) <- i.live_operand) intervals;
+    Array.iter convert_quad e.emit_quads;
+    e.emit_quads <- Array.of_list (List.rev (!quads));
+;;
+
 
 let kill_redundant_moves e =
   for i = 0 to (Array.length e.emit_quads) -1
@@ -183,7 +240,7 @@ let calculate_live_bitvectors e =
   let changed = ref true in
     while !changed do
       changed := false;
-      Printf.printf "iterating live bitvector calculation\n";
+      Printf.fprintf stderr "iterating live bitvector calculation\n";
       for i = n_quads - 1 downto 0 do
 		let quad = quads.(i) in
 		let curr_live = live_vregs.(i) in
@@ -214,18 +271,18 @@ let calculate_live_bitvectors e =
 			end
       done
     done;
-    Printf.printf "finished calculating live bitvectors\n";
-    Printf.printf "=========================\n";
+    Printf.fprintf stderr "finished calculating live bitvectors\n";
+    Printf.fprintf stderr "=========================\n";
     for i = 0 to n_quads - 1 do
-      Printf.printf "[%6d] live vregs: " i;
+      Printf.fprintf stderr "[%6d] live vregs: " i;
       Bitv.iteri (fun i b -> 
 					if b 
-					then Printf.printf " %-2d" i
-					else Printf.printf "   ") 
+					then Printf.fprintf stderr " %-2d" i
+					else Printf.fprintf stderr "   ") 
 		live_vregs.(i);
-      Printf.printf "\n";
+      Printf.fprintf stderr "\n";
     done;
-    Printf.printf "=========================\n";
+    Printf.fprintf stderr "=========================\n";
     live_vregs
 ;;
 
@@ -285,7 +342,7 @@ let spill_at_interval spill_num active curr : (live_interval * live_interval * A
 ;;
 
 
-let linear_scan_register_allocation e =
+let reg_alloc e =
   let process interval (intervals, active, free) 
       : (LI.t * AI.t * HR.t) = 
     let (intervals, active, freed) = expire_old_intervals intervals active interval in
@@ -322,17 +379,18 @@ let linear_scan_register_allocation e =
   let initials = (initial_intervals, initial_active, initial_free) in
   let unallocated_intervals:LI.t = calculate_live_intervals e in
 
-  let _ = Printf.printf "unallocated live intervals:\n" in
+  let _ = Printf.fprintf stderr "unallocated live intervals:\n" in
   let _ = print_live_intervals unallocated_intervals in
 
   let (allocated_intervals, _, _) = 
     LI.fold process unallocated_intervals initials 
   in
 
-  let _ = Printf.printf "allocated live intervals:\n" in
+  let _ = Printf.fprintf stderr "allocated live intervals:\n" in
   let _ = print_live_intervals allocated_intervals in
 
-    convert_regs_using_intervals allocated_intervals e;
+    convert_labels e;
+    convert_vregs allocated_intervals e;
     kill_redundant_moves e
 ;;
 
