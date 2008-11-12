@@ -87,7 +87,8 @@ let convert_labels e =
 
 let convert_vregs intervals e =
   let vreg_operands = Array.create e.emit_next_vreg Nil in
-  let spill_reg = (HWreg X86.edx) in
+  let spill_reg_1 = (HWreg X86.edx) in
+  let spill_reg_2 = (HWreg X86.edi) in
   let spill_slot i = Mem (M32, Some (HWreg X86.esp), (Asm.IMM (Int64.of_int (i*4)))) in
   let mov a b = { quad_op = MOV; 
                   quad_dst = a;
@@ -95,40 +96,61 @@ let convert_vregs intervals e =
                   quad_rhs = Nil;
                   quad_fixup = None }
   in
-  let convert_operand s = 
+  let nop = { quad_op = NOP; 
+              quad_dst = Nil;
+              quad_lhs = Nil;
+              quad_rhs = Nil;
+              quad_fixup = None }
+  in
+  let convert_operand s spill_reg = 
     match s with 
 		Reg (Vreg i) -> 
           (match vreg_operands.(i) with 
                Reg (HWreg r) -> (None, Reg (HWreg r))
-             | Spill i -> (None, spill_slot i)
+             | Spill i -> (Some i, Reg spill_reg)
              | x -> raise (Invalid_argument ("Ra.convert_vregs: " ^ (Il.string_of_operand x))))
 	  | Mem (m, Some (Vreg i), off) -> 
           (match vreg_operands.(i) with 
                Reg (HWreg r) -> (None, Mem (m, Some (HWreg r), off))
              | Spill i -> 
-                 (Some (mov (Reg spill_reg) (spill_slot i)), 
-                  Mem (m, Some spill_reg, off))
+                 (Some i, Mem (m, Some spill_reg, off))
              | x -> raise (Invalid_argument ("Ra.convert_vregs: " ^ (Il.string_of_operand x))))
       | _ -> (None, s)
   in
   let quads = ref [] in 
   let prepend q = quads := q :: (!quads) in
   let convert_quad q = 
-    (* This is a 2-address machine, so we don't need to worry about 
-     * dst having a different spill mem base from lhs. 
-     * FIXME: generalize to non-2-addr-machines.
-     * FIXME: try to work out how to handle the 2-spill-reg case
-     *        without *actually* having to reserve 2 spill regs! 
-     *)
-    let (_, dst) = convert_operand q.quad_dst in
-    let (prefix_2, lhs) = convert_operand q.quad_lhs in
-    let (prefix_3, rhs) = convert_operand q.quad_rhs in
-      (match (prefix_2, prefix_3) with 
-           (None, None) -> ()
-         | (Some p, None) -> prepend p
-         | (None, Some p) -> prepend p
-         | (Some _, Some _) -> (raise (Invalid_argument "Ra.convert_vregs: two spill regs needed")));
-      prepend { q with quad_dst = dst; quad_lhs = lhs; quad_rhs = rhs }
+
+    (* 
+     * Some lemmas on spills (x86-specific):
+     * 
+     *   #1 A quad has at most 2 distinct operands (x86, fact)
+     *   #2 A quad has at most 1 distinct *memory* operand (x86, fact)
+     *   #3 A spill reg might be used as a base reg in a memory operand
+     *   #4 The RA might have assigned a spill slot to both distinct operands
+     * 
+     *  So: we need 2 spill regs. Crap. I guess other IRs get around this by
+     *  not permitting memory ops in most non-load / non-store quads?
+    *)
+    (* prepend nop; *)
+    let prepend_any_load spill = 
+      match spill with 
+          None -> ()
+        | Some i -> prepend (mov (Reg (spill_reg_1)) (spill_slot i))
+    in
+    let prepend_any_store spill = 
+      match spill with 
+          None -> ()
+        | Some i -> prepend (mov (spill_slot i) (Reg (spill_reg_1)))
+    in
+    let (spilled_dst, dst) = convert_operand q.quad_dst spill_reg_1 in
+    let (spilled_lhs, lhs) = convert_operand q.quad_lhs spill_reg_1 in
+    let (spilled_rhs, rhs) = convert_operand q.quad_rhs spill_reg_2 in
+    let q' = { q with quad_dst = dst; quad_lhs = lhs; quad_rhs = rhs } in
+      prepend_any_load spilled_lhs;
+      prepend_any_load spilled_rhs;
+      prepend q';
+      prepend_any_store spilled_dst
   in
     LI.iter (fun i -> vreg_operands.(i.live_vreg) <- i.live_operand) intervals;
     Array.iter convert_quad e.emit_quads;

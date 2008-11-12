@@ -119,7 +119,8 @@ let slash7 = 7;;
  * See "Table 2-2: 32-Bit Addressing Forms with the ModR/M Byte", in the IA32
  * Architecture Software Developer's Manual, volume 2a.  *)
 
-let n_hardregs = 5
+(* This is the number of not-reserved-for-something-else hardregs. *)
+let n_hardregs = 4
 
 let eax = 0
 let ecx = 1
@@ -145,8 +146,8 @@ let reg r =
 	| 1 -> code_ecx
 	| 2 -> code_ebx
 	| 3 -> code_esi
-	| 4 -> code_edi
 		(* Never assigned by the register allocator, but synthetic code uses them *)
+	| 4 -> code_edi
 	| 5 -> code_edx
 	| 6 -> code_ebp
 	| 7 -> code_esp
