@@ -53,9 +53,26 @@ let rec trans_lval_path emit lvp =
 ;;
 
 let trans_lval emit lv = 
-  match !(lv.Ast.lval_res) with 
-      None -> raise (Semant_err (None, "unresolved lval in trans_lval"))
-    | Some res -> trans_lval_path emit res.Ast.res_path
+  match lv.Ast.lval_src.node with 
+      (* FIXME: only do this if the temp is subword-sized. *)
+      Ast.LVAL_base (Ast.BASE_temp n) -> 
+        begin
+          let tab = emit.Il.emit_temp_to_vreg_map in 
+          if Hashtbl.mem tab n
+          then Il.Reg (Il.Vreg (Hashtbl.find tab n))
+          else 
+            let vr = (Il.next_vreg emit) in
+              (match vr with 
+                   Il.Vreg v -> Hashtbl.add tab n v
+                 | _ -> ());              
+              Il.Reg vr
+        end
+    | _ -> 
+        begin
+          match !(lv.Ast.lval_res) with 
+              None -> raise (Semant_err (None, "unresolved lval in trans_lval"))
+            | Some res -> trans_lval_path emit res.Ast.res_path
+        end
 ;;
 
 let trans_expr e expr = 
@@ -87,15 +104,14 @@ let trans_expr e expr =
 			dst
           in
           let rela cjmp = 
-            (*
             if is_2addr_machine
             then 
               begin
                 let t = Il.Reg (Il.next_vreg e) in
-                emit Il.MOV t lhs Il.Nil;
-                emit Il.CMP Il.Nil t rhs
+                  emit Il.MOV t lhs Il.Nil;
+                  emit Il.CMP Il.Nil t rhs
               end
-            else *)
+            else 
               emit Il.CMP Il.Nil lhs rhs;
             emit Il.MOV dst imm_true Il.Nil;
             let j = mark e in

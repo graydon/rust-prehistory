@@ -16,6 +16,7 @@ prog woohoo
 		y = y + 2;
 	  }
 	}
+	let int x = y;
 	ret y;
   }
   

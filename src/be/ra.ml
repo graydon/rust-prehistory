@@ -132,7 +132,7 @@ let convert_vregs intervals e =
      *  So: we need 2 spill regs. Oh well. I guess other IRs get around this by
      *  not permitting memory ops in most non-load / non-store quads?
     *)
-    prepend nop;
+    (* prepend nop; *)
     let prepend_any_load spill = 
       match spill with 
           None -> ()
@@ -219,7 +219,7 @@ let quad_jump_target_labels q =
 let quad_used_vregs q = 
   let operand_used_vregs s = 
     match s with 
-		Reg (Vreg i) -> Printf.fprintf stderr "quad uses vreg %d\n" i; [i]
+		Reg (Vreg i) -> [i]
 	  | Mem (_, Some (Vreg i), _) -> [i]
       | _ -> []
   in
@@ -229,8 +229,7 @@ let quad_used_vregs q =
 let quad_defined_vregs q = 
   let operand_defined_vregs s = 
     match s with 
-		Reg (Vreg i) -> Printf.fprintf stderr "quad defines vreg %d\n" i; [i]
-          
+		Reg (Vreg i) -> [i]
       | _ -> []
   in
     List.concat (List.map operand_defined_vregs [q.quad_dst])
@@ -241,23 +240,15 @@ let quad_is_unconditional_jump q =
       JMP -> true
     | _ -> false
 ;;
-
-(* 
- * A vreg v is live at i if:
- * 
- *   - quad i uses v
- *   - some quad j exists s.t. i jumps to j and v is live at j
- * 
- * We therefore calculate iteratively from bottom to top.
- *)
-
+ 
 let calculate_live_bitvectors e = 
 
   let quads = e.emit_quads in 
   let n_quads = Array.length quads in
   let n_vregs = e.emit_next_vreg in
   let new_bitv _ = Bitv.create n_vregs false in
-  let (live_vregs:Bitv.t array) = Array.init n_quads new_bitv in
+  let (live_in_vregs:Bitv.t array) = Array.init n_quads new_bitv in
+  let (live_out_vregs:Bitv.t array) = Array.init n_quads new_bitv in
   let bitvs_equal a b = ((Bitv.to_list a) = (Bitv.to_list b)) in
 	
   let changed = ref true in
@@ -266,44 +257,44 @@ let calculate_live_bitvectors e =
       Printf.fprintf stderr "iterating live bitvector calculation\n";
       for i = n_quads - 1 downto 0 do
 		let quad = quads.(i) in
-		let curr_live = live_vregs.(i) in
-		let new_live = Bitv.copy curr_live in 
-		let union_with q = Bitv.iteri_true (fun i -> Bitv.set new_live i true) live_vregs.(q) in
+		let live_in = live_in_vregs.(i) in
+		let live_in_saved = Bitv.copy live_in in 
+		let live_out = live_out_vregs.(i) in
+		let live_out_saved = Bitv.copy live_out in 
+
+		let union bv1 bv2 = Bitv.iteri_true (fun i -> Bitv.set bv1 i true) bv2 in
+
+        let defined = new_bitv() in 
+          
+          List.iter (fun i -> Bitv.set live_in i true) (quad_used_vregs quad);
+          List.iter (fun i -> Bitv.set defined i true) (quad_defined_vregs quad);
+
+          for i = 0 to (n_vregs - 1)
+          do
+            if Bitv.get live_out i && not (Bitv.get defined i)
+            then Bitv.set live_in i true
+            else ()
+          done;
 
 		  (* Union in all our jump targets. *)
-		  List.iter union_with (quad_jump_target_labels quad);
+		  List.iter (fun i -> union live_out live_in_vregs.(i)) (quad_jump_target_labels quad);
 
 		  (* Union in our block successor if we have one *)
 		  if i < (n_quads - 1) && (not (quad_is_unconditional_jump quad))
-		  then union_with (i+1) 
+		  then union live_out live_in_vregs.(i+1) 
 		  else ();
-
-		  (* Set any vreg we set to false. *)
-		  List.iter (fun i -> Bitv.set new_live i false) (quad_defined_vregs quad);
-
-		  (* But then set any vreg we use to true. *)
-		  List.iter (fun i -> Bitv.set new_live i true) (quad_used_vregs quad);
 		  
 		  (* Possibly update matters. *)
-		  if bitvs_equal curr_live new_live
+		  if bitvs_equal live_in live_in_saved &&
+            bitvs_equal live_out live_out_saved
 		  then ()
 		  else 
 			begin 
-			  live_vregs.(i) <- new_live;
+			  live_in_vregs.(i) <- live_in;
+			  live_out_vregs.(i) <- live_out;
 			  changed := true
 			end
-      done;
-    Printf.fprintf stderr "=========================\n";
-    for i = 0 to n_quads - 1 do
-      Printf.fprintf stderr "[%6d] live vregs: " i;
-      Bitv.iteri (fun i b -> 
-					if b 
-					then Printf.fprintf stderr " %-2d" i
-					else Printf.fprintf stderr "   ") 
-		live_vregs.(i);
-      Printf.fprintf stderr "\n";
-    done;
-    Printf.fprintf stderr "=========================\n";
+      done
     done;
     Printf.fprintf stderr "finished calculating live bitvectors\n";
     Printf.fprintf stderr "=========================\n";
@@ -313,24 +304,30 @@ let calculate_live_bitvectors e =
 					if b 
 					then Printf.fprintf stderr " %-2d" i
 					else Printf.fprintf stderr "   ") 
-		live_vregs.(i);
+		(Bitv.bw_or live_in_vregs.(i) live_out_vregs.(i));
       Printf.fprintf stderr "\n";
     done;
     Printf.fprintf stderr "=========================\n";
-    live_vregs
+    (live_in_vregs, live_out_vregs)
 ;;
 
 let calculate_live_intervals e = 
-  let live_bitvs = calculate_live_bitvectors e in
+  let (live_in_bitvs, live_out_bitvs) = calculate_live_bitvectors e in
   let n_vregs = e.emit_next_vreg in
-  let vreg_lo = Array.create n_vregs (Array.length live_bitvs) in
+  let vreg_lo = Array.create n_vregs (Array.length live_in_bitvs) in
   let vreg_hi = Array.create n_vregs (-1) in
   let note_vreg i v = 
     vreg_lo.(v) <- min vreg_lo.(v) i;
-    vreg_hi.(v) <- max vreg_lo.(v) i
+    vreg_hi.(v) <- max vreg_hi.(v) i
   in
   let note_bitv i b = Bitv.iteri_true (note_vreg i) b in
-    Array.iteri note_bitv live_bitvs;
+    (* 
+     * FIXME: this is a poor approximation of liveness; really we should 
+     * run the interval-based algorithm over inter-instruction *points* 
+     * the same way we run the typestate algorithm on stmts.
+     *)
+    Array.iteri note_bitv live_in_bitvs;
+    Array.iteri note_bitv live_out_bitvs;
     let intervals = ref LI.empty in
       for v = 0 to n_vregs - 1 do
 		let interval = { live_vreg = v;
