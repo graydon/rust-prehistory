@@ -92,7 +92,6 @@ let string_of_operand operand =
     | Imm (Asm.IMM i) -> Printf.sprintf "imm:0x%Lx" i
     | Imm _ -> "imm:??" 
 	| Pcrel f -> "pcrel:" ^ f.fixup_name 
-    | Mem (_, (Some r),(Asm.IMM 0L)) -> Printf.sprintf "*(%s)" (string_of_reg r)
     | Mem (_, (Some r),(Asm.IMM n)) -> Printf.sprintf "%s[%Ld]" (string_of_reg r) n
     | Mem (_, (Some r),_) -> Printf.sprintf "%s[??]" (string_of_reg r)
     | Mem (_, None,(Asm.IMM n)) -> Printf.sprintf "*(%Ld)" n
@@ -179,8 +178,8 @@ let string_of_quad t =
 	| CMP -> 
 		Printf.sprintf "%s %s %s"
 		  (string_of_op t.quad_op)
-		  (string_of_operand t.quad_dst)
 		  (string_of_operand t.quad_lhs)
+		  (string_of_operand t.quad_rhs)
 	      
 	| JMP | JE | JNE | JL | JLE | JG | JGE | JC | JNC | JO | JNO
     | CALL | RESUME | CCALL | CPUSH _ | CPOP _ ->

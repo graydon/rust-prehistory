@@ -13,6 +13,14 @@ let rp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 4L);;
 (* --- At some point abstract this out per-machine-arch. *)
 
 let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
+let imm_true = Il.Imm (Asm.IMM 1L);;
+let imm_false = Il.Imm (Asm.IMM 0L);;
+let mark e = e.Il.emit_pc;;
+let patch e i = 
+  e.Il.emit_quads.(i) <- { e.Il.emit_quads.(i)
+                           with Il.quad_dst = Il.Label (mark e) }
+;;  
+let badlab = Il.Label (-1);;
 
 let rec trans_lval_path emit lvp = 
   match lvp with 
@@ -69,36 +77,7 @@ let trans_expr e expr =
 		  let lhs = trans_lval e a in
 		  let rhs = trans_lval e b in
 		  let dst = Il.Reg (Il.next_vreg e) in 
-		  let op = match binop with
-              Ast.BINOP_or -> Il.OR
-            | Ast.BINOP_and -> Il.AND
-                
-            | Ast.BINOP_lsl -> Il.LSL
-            | Ast.BINOP_lsr -> Il.LSR
-            | Ast.BINOP_asr -> Il.ASR
-                
-            | Ast.BINOP_add -> Il.ADD
-            | Ast.BINOP_sub -> Il.SUB
-
-            (* FIXME: switch on type of operands. *)
-            (* FIXME: wire to reg X86.eax, sigh.  *)
-                (* 
-            | Ast.BINOP_mul -> Il.UMUL
-            | Ast.BINOP_div -> Il.UDIV
-            | Ast.BINOP_mod -> Il.UMOD
-                *)
-            (*    
-            | Ast.BINOP_eq ->
-            | Ast.BINOP_ne -> 
-                
-            | Ast.BINOP_lt
-            | Ast.BINOP_le
-            | Ast.BINOP_ge
-            | Ast.BINOP_gt
-                *)                
-                
-			| _ -> Il.OR (* raise (Invalid_argument "Semant.trans_expr: unimplemented binop") *)
-		  in
+          let arith op = 
             if is_2addr_machine
             then 
 			  (emit Il.MOV dst lhs Il.Nil;
@@ -106,7 +85,55 @@ let trans_expr e expr =
             else
 			  emit op dst lhs rhs;
 			dst
-              
+          in
+          let rela cjmp = 
+            (*
+            if is_2addr_machine
+            then 
+              begin
+                let t = Il.Reg (Il.next_vreg e) in
+                emit Il.MOV t lhs Il.Nil;
+                emit Il.CMP Il.Nil t rhs
+              end
+            else *)
+              emit Il.CMP Il.Nil lhs rhs;
+            emit Il.MOV dst imm_true Il.Nil;
+            let j = mark e in
+              emit cjmp badlab Il.Nil Il.Nil;
+              emit Il.MOV dst imm_false Il.Nil;
+              patch e j;
+              dst
+          in
+            begin 
+		      match binop with
+                  Ast.BINOP_or -> arith Il.OR
+                | Ast.BINOP_and -> arith Il.AND
+                    
+                | Ast.BINOP_lsl -> arith Il.LSL
+                | Ast.BINOP_lsr -> arith Il.LSR
+                | Ast.BINOP_asr -> arith Il.ASR
+                    
+                | Ast.BINOP_add -> arith Il.ADD
+                | Ast.BINOP_sub -> arith Il.SUB
+                    
+                (* FIXME: switch on type of operands. *)
+                (* FIXME: wire to reg X86.eax, sigh.  *)
+                (* 
+                   | Ast.BINOP_mul -> Il.UMUL
+                   | Ast.BINOP_div -> Il.UDIV
+                   | Ast.BINOP_mod -> Il.UMOD
+                *)
+                    
+                | Ast.BINOP_eq -> rela Il.JE                
+                | Ast.BINOP_ne -> rela Il.JNE                
+                | Ast.BINOP_lt -> rela Il.JL
+                | Ast.BINOP_le -> rela Il.JLE
+                | Ast.BINOP_ge -> rela Il.JGE
+                | Ast.BINOP_gt -> rela Il.JG
+                    
+			    | _ -> raise (Invalid_argument "Semant.trans_expr: unimplemented binop")
+            end
+
 	  | Ast.EXPR_unary (unop, a) -> 
 		  let src = trans_lval e a in
 		  let dst = Il.Reg (Il.next_vreg e) in 
@@ -127,14 +154,6 @@ let trans_expr e expr =
 
 let rec trans_stmt e stmt =
   let emit = Il.emit e in
-  let mark _ = e.Il.emit_pc in 
-  let badlab = Il.Label (-1) in
-  let imm_true = Il.Imm (Asm.IMM 1L) in
-  let imm_false = Il.Imm (Asm.IMM 0L) in
-  let patch i = 
-    e.Il.emit_quads.(i) <- { e.Il.emit_quads.(i)
-                             with Il.quad_dst = Il.Label (mark()) }
-  in
     match stmt.node with 
 	    Ast.STMT_copy (lv_dst, e_src) -> 
 		  let dst = trans_lval e lv_dst in
@@ -145,16 +164,34 @@ let rec trans_stmt e stmt =
 		  Array.iter (trans_stmt e) stmts.Ast.block_stmts
           
       | Ast.STMT_while sw -> 
-          let back_jmp_target = mark() in 
+          let back_jmp_target = mark e in 
           let (head_stmts, head_lval) = sw.Ast.while_lval in
 		    Array.iter (trans_stmt e) head_stmts;
             let v = trans_lval e head_lval in
-              emit Il.CMP v imm_false Il.Nil;
-              let fwd_jmp_quad = mark() in
+              emit Il.CMP Il.Nil v imm_false;
+              let fwd_jmp_quad = mark e in
                 emit Il.JE badlab Il.Nil Il.Nil;
                 trans_stmt e sw.Ast.while_body;
                 emit Il.JMP (Il.Label back_jmp_target) Il.Nil Il.Nil;
-                patch fwd_jmp_quad
+                patch e fwd_jmp_quad
+                  
+      | Ast.STMT_if si -> 
+          let v = trans_lval e si.Ast.if_test in 
+            emit Il.CMP Il.Nil v imm_true;
+            let skip_thn_clause_jmp = mark e in 
+              emit Il.JE badlab Il.Nil Il.Nil;
+              trans_stmt e si.Ast.if_then;
+              begin 
+                match si.Ast.if_else with 
+                    None -> patch e skip_thn_clause_jmp
+                  | Some els -> 
+                      let skip_els_clause_jmp = mark e in
+                        emit Il.JE badlab Il.Nil Il.Nil;
+                        patch e skip_thn_clause_jmp;
+                        trans_stmt e els;
+                        patch e skip_els_clause_jmp                        
+              end
+
       | _ -> ()
                 
 (* 
@@ -162,7 +199,6 @@ let rec trans_stmt e stmt =
     | Ast.STMT_do_while sw ->
   | STMT_foreach of stmt_foreach
   | STMT_for of stmt_for
-  | STMT_if of stmt_if
   | STMT_try of stmt_try
   | STMT_put of (proto option * lval option)
   | STMT_ret of (proto option * lval option)

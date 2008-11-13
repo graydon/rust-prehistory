@@ -330,7 +330,7 @@ let select_insn q =
   let item = 
     match q.quad_op with 
         MOV -> mov q.quad_dst q.quad_lhs 
-      | CMP -> cmp q.quad_dst q.quad_lhs 
+      | CMP -> cmp q.quad_lhs q.quad_rhs
       | _ -> 
           begin
             if q.quad_dst = q.quad_lhs 

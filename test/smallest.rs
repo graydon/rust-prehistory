@@ -12,7 +12,9 @@ prog woohoo
     putstr("hello");
     while (y+2 < 10) {
       let () j = putint(y);
-	  y = y + 2;
+	  if (y - 3 == 4) {
+		y = y + 2;
+	  }
 	}
 	ret y;
   }

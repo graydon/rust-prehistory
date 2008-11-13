@@ -122,17 +122,17 @@ let convert_vregs intervals e =
   let convert_quad q = 
 
     (* 
-     * Some lemmas on spills (x86-specific):
+     * Some notes on spills (x86-specific):
      * 
      *   #1 A quad has at most 2 distinct operands (x86, fact)
      *   #2 A quad has at most 1 distinct *memory* operand (x86, fact)
      *   #3 A spill reg might be used as a base reg in a memory operand
      *   #4 The RA might have assigned a spill slot to both distinct operands
      * 
-     *  So: we need 2 spill regs. Crap. I guess other IRs get around this by
+     *  So: we need 2 spill regs. Oh well. I guess other IRs get around this by
      *  not permitting memory ops in most non-load / non-store quads?
     *)
-    (* prepend nop; *)
+    prepend nop;
     let prepend_any_load spill = 
       match spill with 
           None -> ()
@@ -219,17 +219,18 @@ let quad_jump_target_labels q =
 let quad_used_vregs q = 
   let operand_used_vregs s = 
     match s with 
-		Reg (Vreg i) -> [i]
+		Reg (Vreg i) -> Printf.fprintf stderr "quad uses vreg %d\n" i; [i]
 	  | Mem (_, Some (Vreg i), _) -> [i]
       | _ -> []
   in
-    List.concat (List.map operand_used_vregs [q.quad_dst; q.quad_lhs; q.quad_rhs])
+    List.concat (List.map operand_used_vregs [q.quad_lhs; q.quad_rhs])
 ;;
 
 let quad_defined_vregs q = 
   let operand_defined_vregs s = 
     match s with 
-		Reg (Vreg i) -> [i]
+		Reg (Vreg i) -> Printf.fprintf stderr "quad defines vreg %d\n" i; [i]
+          
       | _ -> []
   in
     List.concat (List.map operand_defined_vregs [q.quad_dst])
@@ -291,7 +292,18 @@ let calculate_live_bitvectors e =
 			  live_vregs.(i) <- new_live;
 			  changed := true
 			end
-      done
+      done;
+    Printf.fprintf stderr "=========================\n";
+    for i = 0 to n_quads - 1 do
+      Printf.fprintf stderr "[%6d] live vregs: " i;
+      Bitv.iteri (fun i b -> 
+					if b 
+					then Printf.fprintf stderr " %-2d" i
+					else Printf.fprintf stderr "   ") 
+		live_vregs.(i);
+      Printf.fprintf stderr "\n";
+    done;
+    Printf.fprintf stderr "=========================\n";
     done;
     Printf.fprintf stderr "finished calculating live bitvectors\n";
     Printf.fprintf stderr "=========================\n";
