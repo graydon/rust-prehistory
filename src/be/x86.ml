@@ -159,20 +159,22 @@ let reg r =
  *)
 
 
-let imm_is_byte n = (n == (Int64.logand 0xffL n))
+let imm_is_byte n = (n = (Int64.logand 0xffL n))
 ;;
 
   
 let rm_r (oper:operand) (r:int) = 
+  let reg_ebp = 6 in
+  let reg_esp = 7 in 
   match oper with 
       Reg (HWreg rm) -> 
         Asm.BYTE (modrm_reg (reg rm) r)
     | Mem (_, None, disp) -> 
         Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
                    Asm.WORD32 disp |]
-    | Mem (_, Some (HWreg rm), disp) -> 
+    | Mem (_, Some (HWreg rm), disp) when rm != reg_esp -> 
         (match disp with 
-             Asm.IMM 0L -> 
+             Asm.IMM 0L when rm != reg_ebp -> 
                Asm.BYTE (modrm_deref_reg (reg rm) r)
            | Asm.IMM n when imm_is_byte n -> 
                Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
@@ -238,9 +240,7 @@ let is_rm8 (oper:operand) : bool =
 
 let cmp (a:operand) (b:operand) : Asm.item = 
   match (a,b) with 
-      (Reg (HWreg eax), Imm (Asm.IMM n)) when imm_is_byte n -> 
-        Asm.SEQ [| Asm.BYTE 0x3d; Asm.WORD32 (Asm.IMM n) |]
-    | (_, Imm i) when is_rm32 a -> insn_rm_r_imm 0x83 0x81 a slash7 i
+      (_, Imm i) when is_rm32 a -> insn_rm_r_imm 0x83 0x81 a slash7 i
     | (_, Reg (HWreg r)) -> insn_rm_r 0x39 a r
     | (Reg (HWreg r), _) -> insn_rm_r 0x3b b r
     | _ -> raise Unrecognized

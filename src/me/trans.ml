@@ -6,10 +6,10 @@ open Common;;
 (* +++ At some point abstract this out per-machine-arch. *)
 let is_2addr_machine = true;;
 let ptr_mem = Il.M32;;
-let fp_abi_operand = Il.Reg (Il.HWreg X86.esp);;
-let pp_abi_operand = Il.Reg (Il.HWreg X86.ebp);;
-let cp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 0L);;
-let rp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 4L);;
+let fp_abi_operand = Il.Reg (Il.HWreg X86.ebp);;
+let pp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 0L);;
+let cp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 4L);;
+let rp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 8L);;
 (* --- At some point abstract this out per-machine-arch. *)
 
 let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;

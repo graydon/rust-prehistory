@@ -93,7 +93,7 @@ let convert_vregs intervals e =
   let vreg_operands = Array.create e.emit_next_vreg Nil in
   let spill_reg_1 = (HWreg X86.edx) in
   let spill_reg_2 = (HWreg X86.edi) in
-  let spill_slot i = Mem (M32, Some (HWreg X86.esp), (Asm.IMM (Int64.of_int (i*4)))) in
+  let spill_slot i = Mem (M32, Some (HWreg X86.ebp), (Asm.IMM (Int64.of_int (i*4)))) in
   let mov a b = { quad_op = MOV; 
                   quad_dst = a;
                   quad_lhs = b;
@@ -420,7 +420,7 @@ let reg_alloc e =
   let initial_intervals = LI.empty in
   let initial_active = AI.empty in
   let initial_free = (let x = ref HR.empty in 
-						for i = 1 to e.emit_n_hardregs do
+						for i = 0 to e.emit_n_hardregs - 1 do
 						  x := HR.add i (!x)
 						done;
 						!x)
