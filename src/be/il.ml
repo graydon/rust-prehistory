@@ -196,7 +196,6 @@ let print_quads qs =
 ;;
 
 type emitter = { emit_n_hardregs: int;
-                 emit_temp_to_vreg_map: (int, int) Hashtbl.t;
 				 mutable emit_pc: int;
 				 mutable emit_next_vreg: int; 
 				 mutable emit_next_spill: int;
@@ -221,7 +220,6 @@ let new_emitter n_hardregs =
   { 
     emit_n_hardregs = n_hardregs;
     emit_pc = 0;
-    emit_temp_to_vreg_map = Hashtbl.create 4;
     emit_next_vreg = 0;
     emit_next_spill = 0;
     emit_quads = Array.create 4 badq;

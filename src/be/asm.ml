@@ -310,7 +310,7 @@ let rec lower_item
 
 	  | MEMPOS _ -> ()
 
-      | BYTE i -> byte 1
+      | BYTE i -> byte i
 
       | BYTES bs -> 
 		  Array.iter byte bs
@@ -366,3 +366,12 @@ and
 let fold_flags (f:'a -> int64) (flags:'a list) : int64 = 
   List.fold_left (Int64.logor) 0x0L (List.map f flags)
 ;;
+
+
+(* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
+ *)

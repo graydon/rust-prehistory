@@ -10,14 +10,15 @@ prog woohoo
   {
 	let t y = x + 2;
     putstr("hello");
-    while (y+2 < 10) {
-      let () j = putint(y);
+    while (y < 10) {
+	  putint(y);
 	  if (y - 3 == 4) {
 		y = y + 2;
 	  }
 	}
-	let int x = y;
-	ret y;
+	let t z;
+	z = z + 0x55;
+	foo(z);
   }
   
   main

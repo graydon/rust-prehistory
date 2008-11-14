@@ -364,6 +364,7 @@ and lval =
     { 
       lval_src: lval' spanned;
       lval_res: (lval_resolved option) ref;
+      lval_vreg: (int option) ref;
     }
       
 and binop =    

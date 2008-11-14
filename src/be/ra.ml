@@ -84,6 +84,10 @@ let convert_labels e =
       (!new_labels)
 ;;
 
+let kill_quad i e =
+  e.emit_quads.(i) <- 
+    { deadq with Il.quad_fixup = e.emit_quads.(i).Il.quad_fixup }
+;;
 
 let convert_vregs intervals e =
   let vreg_operands = Array.create e.emit_next_vreg Nil in
@@ -108,13 +112,15 @@ let convert_vregs intervals e =
           (match vreg_operands.(i) with 
                Reg (HWreg r) -> (None, Reg (HWreg r))
              | Spill i -> (Some i, Reg spill_reg)
-             | x -> raise (Invalid_argument ("Ra.convert_vregs: " ^ (Il.string_of_operand x))))
+             | x -> raise (Invalid_argument ("Ra.convert_vregs 1: vreg:" 
+                                             ^ (string_of_int i) ^ " = " 
+                                             ^ (Il.string_of_operand x))))
 	  | Mem (m, Some (Vreg i), off) -> 
           (match vreg_operands.(i) with 
                Reg (HWreg r) -> (None, Mem (m, Some (HWreg r), off))
              | Spill i -> 
                  (Some i, Mem (m, Some spill_reg, off))
-             | x -> raise (Invalid_argument ("Ra.convert_vregs: " ^ (Il.string_of_operand x))))
+             | x -> raise (Invalid_argument ("Ra.convert_vregs 2: " ^ (Il.string_of_operand x))))
       | _ -> (None, s)
   in
   let quads = ref [] in 
@@ -152,7 +158,16 @@ let convert_vregs intervals e =
       prepend q';
       prepend_any_store spilled_dst
   in
+  let convert_dead_quad i q = 
+    match q.quad_dst with 
+		Reg (Vreg j) -> 
+          (match vreg_operands.(j) with 
+               Il.Nil -> kill_quad i e
+             | _ -> ())
+      | _ -> ()
+  in
     LI.iter (fun i -> vreg_operands.(i.live_vreg) <- i.live_operand) intervals;
+    Array.iteri convert_dead_quad e.emit_quads;
     Array.iter convert_quad e.emit_quads;
     e.emit_quads <- Array.of_list (List.rev (!quads));
 ;;
@@ -165,7 +180,7 @@ let kill_redundant_moves e =
       match q.quad_op with 
           MOV -> 
             if q.quad_dst = q.quad_lhs
-            then e.emit_quads.(i) <- deadq
+            then kill_quad i e
         | _ -> ()
   done
 ;;
@@ -330,12 +345,15 @@ let calculate_live_intervals e =
     Array.iteri note_bitv live_out_bitvs;
     let intervals = ref LI.empty in
       for v = 0 to n_vregs - 1 do
-		let interval = { live_vreg = v;
-						 live_operand = Reg (Vreg v);
-						 live_startpoint = vreg_lo.(v);
-						 live_endpoint = vreg_hi.(v) }
-		in
-		  intervals := LI.add interval (!intervals)
+        if vreg_hi.(v) = (-1)
+        then ()
+        else 
+		  let interval = { live_vreg = v;
+						   live_operand = Reg (Vreg v);
+						   live_startpoint = vreg_lo.(v);
+						   live_endpoint = vreg_hi.(v) }
+		  in
+		    intervals := LI.add interval (!intervals)
       done;
       (!intervals)
 ;;
