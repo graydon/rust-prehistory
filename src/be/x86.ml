@@ -366,6 +366,21 @@ let select_insn q =
 	  | Some f -> Asm.DEF (f, item)
 ;;
 
+let select_insns (sess:Session.sess) (q:Il.quads) : Asm.item = 
+  let sel q = 
+    try 
+      select_insn q 
+    with 
+        Unrecognized -> 
+          Session.fail sess
+            "E:Assembly error: unrecognized quad: %s\n%!" 
+            (Il.string_of_quad q);
+          Asm.MARK
+  in
+    Asm.SEQ (Array.map sel q)
+;;
+
+
 (* Somewhat obsolete stuff follows to EOF ... salvaging *)
 
 (* 

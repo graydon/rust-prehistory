@@ -191,14 +191,8 @@ let string_of_quad t =
 		(string_of_op t.quad_op)
 ;;
 
-let print_quads qs = 
-  Array.iteri (fun i q -> Printf.fprintf stderr "[%6d]\t%s\n" i (string_of_quad q)) qs
-;;
-
-type emitter = { emit_n_hardregs: int;
-				 mutable emit_pc: int;
+type emitter = { mutable emit_pc: int;
 				 mutable emit_next_vreg: int; 
-				 mutable emit_next_spill: int;
 				 mutable emit_quads: quads; }
 
 
@@ -209,6 +203,7 @@ let badq = { quad_op = END;
 			 quad_fixup = None }
 ;;
 
+
 let deadq = { quad_op = DEAD;
 			  quad_dst = Nil;
 			  quad_lhs = Nil;
@@ -216,27 +211,20 @@ let deadq = { quad_op = DEAD;
 			  quad_fixup = None }
 ;;
 
-let new_emitter n_hardregs = 
+
+let new_emitter _ = 
   { 
-    emit_n_hardregs = n_hardregs;
     emit_pc = 0;
     emit_next_vreg = 0;
-    emit_next_spill = 0;
     emit_quads = Array.create 4 badq;
   }
 ;;
+
 
 let next_vreg e = 
   let i = e.emit_next_vreg in
     e.emit_next_vreg <- i + 1;
     (Vreg i)
-;;
-
-
-let next_spill e = 
-  let i = e.emit_next_spill in
-    e.emit_next_spill <- i + 1;
-    i
 ;;
 
 

@@ -1,6 +1,40 @@
 open Il;;
 open Common;;
 
+type ctxt = 
+	{ 
+      ctxt_sess: Session.sess; 
+      ctxt_n_vregs: int;
+      ctxt_n_hardregs: int;
+      mutable ctxt_quads: Il.quads;
+	  mutable ctxt_next_spill: int;      
+      (* More state as necessary. *)
+    }
+;;
+
+let	root_ctxt sess quads vregs hardregs = 
+  { 
+    ctxt_sess = sess;
+    ctxt_quads = quads;
+    ctxt_n_vregs = vregs;
+    ctxt_n_hardregs = hardregs;
+    ctxt_next_spill = 0
+  }
+;;
+
+let log cx = Session.log "ra" 
+  cx.ctxt_sess.Session.sess_log_ra
+  cx.ctxt_sess.Session.sess_log_out
+;;
+
+let next_spill cx = 
+  let i = cx.ctxt_next_spill in
+    cx.ctxt_next_spill <- i + 1;
+    i
+;;
+
+exception Ra_error of string ;;
+
 (* Poletto and Sarkar's linear-scan algorithm. *)
 
 type live_interval = { live_vreg: int;
@@ -8,8 +42,8 @@ type live_interval = { live_vreg: int;
 					   live_startpoint: int;
 					   live_endpoint: int; }
 
-let fmt_live_interval out li = 
-  Printf.fprintf out "vreg %d = %s : [%d,%d]" 
+let string_of_live_interval li = 
+  Printf.sprintf "vreg %d = %s : [%d,%d]" 
     li.live_vreg 
     (string_of_operand li.live_operand)
     li.live_startpoint
@@ -53,16 +87,16 @@ module AI = Set.Make(EndOrderedIntervals);;
 (* Hard Registers *)
 module HR = Set.Make(OrderedInts);;
 
-let print_live_intervals is = 
-  LI.iter (Printf.fprintf stderr "%a\n" fmt_live_interval) is
+let log_live_intervals cx is = 
+  LI.iter (fun i -> log cx "%s" (string_of_live_interval i)) is
 ;;
 
-let convert_labels e = 
+let convert_labels cx = 
   let new_labels = ref [] in 
   let convert_operand s = 
     match s with 
         Label lab -> 
-          let fix = (match e.emit_quads.(lab).quad_fixup with 
+          let fix = (match cx.ctxt_quads.(lab).quad_fixup with 
                          None -> ( let fix = new_fixup ("quad#" ^ (string_of_int lab)) in
                                      new_labels := (lab, fix) :: (!new_labels);
                                      fix)
@@ -77,20 +111,20 @@ let convert_labels e =
 		quad_lhs = convert_operand q.quad_lhs;
 		quad_rhs = convert_operand q.quad_rhs }
   in
-    e.emit_quads <- Array.map convert_quad e.emit_quads;
+    cx.ctxt_quads <- Array.map convert_quad cx.ctxt_quads;
     List.iter (fun (i, fix) -> 
-                 e.emit_quads.(i) <- { e.emit_quads.(i) 
+                 cx.ctxt_quads.(i) <- { cx.ctxt_quads.(i) 
                                        with quad_fixup = Some fix })
       (!new_labels)
 ;;
 
-let kill_quad i e =
-  e.emit_quads.(i) <- 
-    { deadq with Il.quad_fixup = e.emit_quads.(i).Il.quad_fixup }
+let kill_quad i cx =
+  cx.ctxt_quads.(i) <- 
+    { deadq with Il.quad_fixup = cx.ctxt_quads.(i).Il.quad_fixup }
 ;;
 
-let convert_vregs intervals e =
-  let vreg_operands = Array.create e.emit_next_vreg Nil in
+let convert_vregs intervals cx =
+  let vreg_operands = Array.create cx.ctxt_n_vregs Nil in
   let spill_reg_1 = (HWreg X86.edx) in
   let spill_reg_2 = (HWreg X86.edi) in
   let spill_slot i = Mem (M32, Some (HWreg X86.ebp), (Asm.IMM (Int64.of_int (i*4)))) in
@@ -112,7 +146,7 @@ let convert_vregs intervals e =
           (match vreg_operands.(i) with 
                Reg (HWreg r) -> (None, Reg (HWreg r))
              | Spill i -> (Some i, Reg spill_reg)
-             | x -> raise (Invalid_argument ("Ra.convert_vregs 1: vreg:" 
+             | x -> raise (Ra_error ("Ra.convert_vregs 1: vreg:" 
                                              ^ (string_of_int i) ^ " = " 
                                              ^ (Il.string_of_operand x))))
 	  | Mem (m, Some (Vreg i), off) -> 
@@ -120,7 +154,7 @@ let convert_vregs intervals e =
                Reg (HWreg r) -> (None, Mem (m, Some (HWreg r), off))
              | Spill i -> 
                  (Some i, Mem (m, Some spill_reg, off))
-             | x -> raise (Invalid_argument ("Ra.convert_vregs 2: " ^ (Il.string_of_operand x))))
+             | x -> raise (Ra_error ("Ra.convert_vregs 2: " ^ (Il.string_of_operand x))))
       | _ -> (None, s)
   in
   let quads = ref [] in 
@@ -162,25 +196,25 @@ let convert_vregs intervals e =
     match q.quad_dst with 
 		Reg (Vreg j) -> 
           (match vreg_operands.(j) with 
-               Il.Nil -> kill_quad i e
+               Il.Nil -> kill_quad i cx
              | _ -> ())
       | _ -> ()
   in
     LI.iter (fun i -> vreg_operands.(i.live_vreg) <- i.live_operand) intervals;
-    Array.iteri convert_dead_quad e.emit_quads;
-    Array.iter convert_quad e.emit_quads;
-    e.emit_quads <- Array.of_list (List.rev (!quads));
+    Array.iteri convert_dead_quad cx.ctxt_quads;
+    Array.iter convert_quad cx.ctxt_quads;
+    cx.ctxt_quads <- Array.of_list (List.rev (!quads));
 ;;
 
 
-let kill_redundant_moves e =
-  for i = 0 to (Array.length e.emit_quads) -1
+let kill_redundant_moves cx =
+  for i = 0 to (Array.length cx.ctxt_quads) -1
   do
-	let q = e.emit_quads.(i) in
+	let q = cx.ctxt_quads.(i) in
       match q.quad_op with 
           MOV -> 
             if q.quad_dst = q.quad_lhs
-            then kill_quad i e
+            then kill_quad i cx
         | _ -> ()
   done
 ;;
@@ -256,11 +290,11 @@ let quad_is_unconditional_jump q =
     | _ -> false
 ;;
  
-let calculate_live_bitvectors e = 
+let calculate_live_bitvectors cx = 
 
-  let quads = e.emit_quads in 
+  let quads = cx.ctxt_quads in 
   let n_quads = Array.length quads in
-  let n_vregs = e.emit_next_vreg in
+  let n_vregs = cx.ctxt_n_vregs in
   let new_bitv _ = Bitv.create n_vregs false in
   let (live_in_vregs:Bitv.t array) = Array.init n_quads new_bitv in
   let (live_out_vregs:Bitv.t array) = Array.init n_quads new_bitv in
@@ -269,7 +303,7 @@ let calculate_live_bitvectors e =
   let changed = ref true in
     while !changed do
       changed := false;
-      Printf.fprintf stderr "iterating live bitvector calculation\n";
+      log cx "iterating live bitvector calculation";
       for i = n_quads - 1 downto 0 do
 		let quad = quads.(i) in
 		let live_in = live_in_vregs.(i) in
@@ -311,24 +345,29 @@ let calculate_live_bitvectors e =
 			end
       done
     done;
-    Printf.fprintf stderr "finished calculating live bitvectors\n";
-    Printf.fprintf stderr "=========================\n";
-    for i = 0 to n_quads - 1 do
-      Printf.fprintf stderr "[%6d] live vregs: " i;
-      Bitv.iteri (fun i b -> 
-					if b 
-					then Printf.fprintf stderr " %-2d" i
-					else Printf.fprintf stderr "   ") 
-		(Bitv.bw_or live_in_vregs.(i) live_out_vregs.(i));
-      Printf.fprintf stderr "\n";
+    log cx "finished calculating live bitvectors";
+    log cx "=========================";
+    for q = 0 to n_quads - 1 do
+      let buf = Buffer.create 128 in
+      let live_vregs = (Bitv.bw_or 
+                          live_in_vregs.(q) 
+                          live_out_vregs.(q)) 
+      in
+        for v = 0 to (Bitv.length live_vregs) - 1
+        do
+          if Bitv.get live_vregs v
+          then Printf.bprintf buf " %-2d" v
+          else Buffer.add_string buf "   "
+        done;
+        log cx "[%6d] live vregs: %s" q (Buffer.contents buf)
     done;
-    Printf.fprintf stderr "=========================\n";
+    log cx "=========================";
     (live_in_vregs, live_out_vregs)
 ;;
 
-let calculate_live_intervals e = 
-  let (live_in_bitvs, live_out_bitvs) = calculate_live_bitvectors e in
-  let n_vregs = e.emit_next_vreg in
+let calculate_live_intervals cx = 
+  let (live_in_bitvs, live_out_bitvs) = calculate_live_bitvectors cx in
+  let n_vregs = cx.ctxt_n_vregs in
   let vreg_lo = Array.create n_vregs (Array.length live_in_bitvs) in
   let vreg_hi = Array.create n_vregs (-1) in
   let note_vreg i v = 
@@ -391,99 +430,88 @@ let spill_at_interval spill_num active curr : (live_interval * live_interval * A
 ;;
 
 
-let reg_alloc e =
-  let process interval (intervals, active, free) 
-      : (LI.t * AI.t * HR.t) = 
-    let (intervals, active, freed) = expire_old_intervals intervals active interval in
-    let free = HR.union free freed in
-    let n_active = AI.cardinal active in
-      if n_active > e.emit_n_hardregs
-      then failwith "more active hardregs than available"
-      else 
-		if n_active = e.emit_n_hardregs
-		then 
-		  let spill_num = next_spill e in
-		  let (curr, spilled,active) = spill_at_interval spill_num active interval in
-		  let intervals = LI.remove curr intervals in
-		  let intervals = LI.remove spilled intervals in
-		  let intervals = LI.add curr intervals in
-		  let intervals = LI.add spilled intervals in
-			(intervals, active, free)
-		else
-		  let hr = HR.min_elt free in
-		  let free = HR.remove hr free in
-		  let interval = { interval with live_operand = Reg (HWreg hr) } in
-		  let intervals = LI.add interval intervals in
-		  let active = AI.add interval active in
-			(intervals, active, free)
-  in
-  let initial_intervals = LI.empty in
-  let initial_active = AI.empty in
-  let initial_free = (let x = ref HR.empty in 
-						for i = 0 to e.emit_n_hardregs - 1 do
-						  x := HR.add i (!x)
-						done;
-						!x)
-  in
-  let initials = (initial_intervals, initial_active, initial_free) in
-  let unallocated_intervals:LI.t = calculate_live_intervals e in
+let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (hardregs:int) =
+  try 
+    let cx = root_ctxt sess quads vregs hardregs in 
+    let _ = 
+      begin
+        log cx "un-allocated quads:";
+        for i = 0 to (Array.length cx.ctxt_quads) - 1
+        do 
+          log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_quads.(i))
+        done
+      end
+    in
+    let process interval (intervals, active, free) 
+        : (LI.t * AI.t * HR.t) = 
+      let (intervals, active, freed) = expire_old_intervals intervals active interval in
+      let free = HR.union free freed in
+      let n_active = AI.cardinal active in
+        if n_active > cx.ctxt_n_hardregs
+        then failwith "more active hardregs than available"
+        else 
+		  if n_active = cx.ctxt_n_hardregs
+		  then 
+		    let spill_num = next_spill cx in
+		    let (curr, spilled,active) = spill_at_interval spill_num active interval in
+		    let intervals = LI.remove curr intervals in
+		    let intervals = LI.remove spilled intervals in
+		    let intervals = LI.add curr intervals in
+		    let intervals = LI.add spilled intervals in
+			  (intervals, active, free)
+		  else
+		    let hr = HR.min_elt free in
+		    let free = HR.remove hr free in
+		    let interval = { interval with live_operand = Reg (HWreg hr) } in
+		    let intervals = LI.add interval intervals in
+		    let active = AI.add interval active in
+			  (intervals, active, free)
+    in
+    let initial_intervals = LI.empty in
+    let initial_active = AI.empty in
+    let initial_free = (let x = ref HR.empty in 
+						  for i = 0 to cx.ctxt_n_hardregs - 1 do
+						    x := HR.add i (!x)
+						  done;
+						  !x)
+    in
+    let initials = (initial_intervals, initial_active, initial_free) in
+    let unallocated_intervals:LI.t = calculate_live_intervals cx in
 
-  let _ = Printf.fprintf stderr "unallocated live intervals:\n" in
-  let _ = print_live_intervals unallocated_intervals in
+    let _ = log cx "unallocated live intervals:" in
+    let _ = log_live_intervals cx unallocated_intervals in
 
-  let (allocated_intervals, _, _) = 
-    LI.fold process unallocated_intervals initials 
-  in
+    let (allocated_intervals, _, _) = 
+      LI.fold process unallocated_intervals initials 
+    in
 
-  let _ = Printf.fprintf stderr "allocated live intervals:\n" in
-  let _ = print_live_intervals allocated_intervals in
+    let _ = log cx "allocated live intervals:" in
+    let _ = log_live_intervals cx allocated_intervals in
 
-    convert_labels e;
-    convert_vregs allocated_intervals e;
-    kill_redundant_moves e
+      convert_labels cx;
+      convert_vregs allocated_intervals cx;
+      kill_redundant_moves cx;
+      
+      log cx "register-allocated quads:";
+      for i = 0 to (Array.length cx.ctxt_quads) - 1
+      do 
+        log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_quads.(i))
+      done;
+
+      cx.ctxt_quads
+
+  with 
+      Ra_error s -> 
+        Session.fail sess "RA Error: %s" s;
+        quads
+        
 ;;
-
-(* 
-let test _ = 
-  let emit = new_emitter 6 in
-
-  let a = next_vreg emit in
-  let b = next_vreg emit in
-  let c = next_vreg emit in
-  let d = next_vreg emit in
-  let e = next_vreg emit in
-  let f = next_vreg emit in
-  let g = next_vreg emit in
-  let h = next_vreg emit in
-  let i = next_vreg emit in
-
-    emit_quad emit None ADD a b c;
-    emit_quad emit None ADD d e f;
-    emit_quad emit None ADD g h i;
-    emit_quad emit None JMP g (Label 1) g;
-    emit_quad emit None SUB a b c;    
-    emit_quad emit None MOV a b Nil;
-    emit_quad emit None MOV b b Nil;
-    emit_quad emit None MOV d d Nil;
-    emit_quad emit (Some 1) MOV a a Nil;
-    emit_quad emit None SUB d e f;
-    emit_quad emit None SUB g h i;
-
-    Printf.printf "initial quads:\n";
-    print_quads emit.emit_quads;
-    linear_scan_register_allocation emit;
-    Printf.printf "final quads:\n";
-    print_quads emit.emit_quads
-;;
-
-test();
-*)
 
 
 (* 
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)

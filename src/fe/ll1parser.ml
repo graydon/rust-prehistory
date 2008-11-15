@@ -304,6 +304,11 @@ type pstate =
 	  pstate_sess         : Session.sess }
 ;;
 
+let log (ps:pstate) = Session.log "parse" 
+  ps.pstate_sess.Session.sess_log_parse
+  ps.pstate_sess.Session.sess_log_out
+;;
+
 exception Parse_err of (pstate * string)
 ;;
 
@@ -327,25 +332,22 @@ let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
 
 
 let peek ps = 
-  (if ps.pstate_sess.Session.sess_log_parse
-   then Printf.fprintf ps.pstate_sess.Session.sess_log_out 
-	 "peeking at: %s     // %s\n%!" 
-     (string_of_tok ps.pstate_peek)
-     (match ps.pstate_ctxt with
-          (s, _) :: _ -> s
-        | _ -> "<empty>")
-   else ();
-   ps.pstate_peek)
-
+  begin
+    log ps "peeking at: %s     // %s\n%!" 
+      (string_of_tok ps.pstate_peek)
+      (match ps.pstate_ctxt with
+           (s, _) :: _ -> s
+         | _ -> "<empty>");
+    ps.pstate_peek
+  end
 ;;
 
 
 let bump ps = 
-  (if ps.pstate_sess.Session.sess_log_parse
-   then Printf.fprintf ps.pstate_sess.Session.sess_log_out 
-	 "bumping past: %s\n%!" (string_of_tok ps.pstate_peek)
-   else ();
-   ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf)
+  begin 
+    log ps "bumping past: %s\n%!" (string_of_tok ps.pstate_peek);
+    ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf
+  end
 ;;
 
 
@@ -1318,23 +1320,23 @@ and parse_mod_item ps =
 
 
 let make_parser sess tok fname = 
-  if sess.Session.sess_log_parse
-  then 
-	Printf.fprintf sess.Session.sess_log_out "making parser for: %s\n%!" fname
-  else 
-	();
   let lexbuf = Lexing.from_channel (open_in fname) in
   let spos = { lexbuf.Lexing.lex_start_p with Lexing.pos_fname = fname } in
   let cpos = { lexbuf.Lexing.lex_curr_p with Lexing.pos_fname = fname } in
     lexbuf.Lexing.lex_start_p <- spos;
     lexbuf.Lexing.lex_curr_p <- cpos;
     let first = tok lexbuf in
+    let ps = 
       { pstate_peek = first;
         pstate_ctxt = [];
         pstate_block_frames = [];
         pstate_lexfun = tok;
         pstate_lexbuf = lexbuf;
 		pstate_sess = sess }
+    in
+      log ps "made parser for: %s\n%!" fname;
+      ps
+
 ;;
 
 
@@ -1397,26 +1399,20 @@ and parse_crate_entries tok fname prefix ps =
       htab
 ;;
 
-let report_error out (ps, str) = 
-  Printf.fprintf out "Parser error: %s\n%!" str;
-  List.iter 
-    (fun (cx,(file,line,col)) -> 
-       Printf.fprintf out "%s:%d:%d:E [PARSE CONTEXT] %s\n%!" file line col cx) 
-    ps.pstate_ctxt
-;;
-
-let parse_crate sess tok = 
-  let fname = sess.Session.sess_crate in
-  let ps = make_parser sess tok fname in
-  let htab =  
-    try 
+let parse_crate (sess:Session.sess) tok = 
+  try 
+    let fname = sess.Session.sess_crate in
+    let ps = make_parser sess tok fname in
       parse_crate_entries tok fname (Filename.dirname fname) ps
-    with 
-        Parse_err perr -> 
-		  report_error sess.Session.sess_log_out perr; 
-          failwith "parse error"
-  in
-    htab
+  with 
+      Parse_err (ps, str) -> 
+        Session.fail sess "Parse error: %s\n%!" str;
+        List.iter 
+          (fun (cx,pos) -> 
+             Session.fail sess "%s:E (parse context): %s\n%!" 
+               (Session.string_of_pos pos) cx) 
+          ps.pstate_ctxt;
+        Hashtbl.create 0
 ;;
 
 
@@ -1424,6 +1420,6 @@ let parse_crate sess tok =
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)

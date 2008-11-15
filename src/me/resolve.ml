@@ -22,30 +22,27 @@ type ctxt =
 	  ctxt_ptrsz: int64 }
 ;;
 
+let	root_ctxt sess = 
+  { ctxt_frame_scopes = []; 
+	ctxt_type_scopes = [];
+	ctxt_span = None;
+	ctxt_sess = sess;
+	ctxt_made_progress = ref true;
+    ctxt_contains_autos = ref false;
+    ctxt_contains_unresolved_types = ref false;
+	ctxt_ptrsz = 4L }
+;;
+
+let log cx = Session.log "resolve" 
+  cx.ctxt_sess.Session.sess_log_resolve
+  cx.ctxt_sess.Session.sess_log_out
+;;
+
 let err cx str = 
   (Semant_err (cx.ctxt_span, (str)))
 ;;
 
 exception Auto_slot
-;;
-
-let	root_ctxt sess = { ctxt_frame_scopes = []; 
-					   ctxt_type_scopes = [];
-					   ctxt_span = None;
-					   ctxt_sess = sess;
-					   ctxt_made_progress = ref true;
-                       ctxt_contains_autos = ref false;
-                       ctxt_contains_unresolved_types = ref false;
-					   ctxt_ptrsz = 4L }
-;;
-
-let log cx = 
-  let sess = cx.ctxt_sess in
-  let k1 s = 
-    Printf.fprintf sess.Session.sess_log_out "resolve: %s\n%!" s
-  in
-  let k2 s = () in 
-    Printf.ksprintf (if sess.Session.sess_log_resolve then k1 else k2)
 ;;
 
 
@@ -1000,27 +997,38 @@ and resolve_stmt cx stmt =
 	*)
 	| _ -> ()
 
-let resolve_crate sess items = 
-  let cx = root_ctxt sess in
-	while !(cx.ctxt_made_progress) do
-      log cx "";
-      log cx "=== fresh resolution pass ===";
-      cx.ctxt_contains_autos := false;
-      cx.ctxt_contains_unresolved_types := false;
-      cx.ctxt_made_progress := false;
-	  resolve_mod_items cx items;
-	done;
-    if !(cx.ctxt_contains_autos) or
-      !(cx.ctxt_contains_unresolved_types)
-    then raise (err cx "progress wedged but crate incomplete")
-    else ()
-
-
+let resolve_crate (sess:Session.sess) (items:Ast.mod_items) = 
+  try 
+    let cx = root_ctxt sess in
+	  while !(cx.ctxt_made_progress) do
+        log cx "";
+        log cx "=== fresh resolution pass ===";
+        cx.ctxt_contains_autos := false;
+        cx.ctxt_contains_unresolved_types := false;
+        cx.ctxt_made_progress := false;
+	    resolve_mod_items cx items;
+	  done;
+      if !(cx.ctxt_contains_autos) or
+        !(cx.ctxt_contains_unresolved_types)
+      then 
+        raise (err cx "progress ceased, but crate incomplete")
+      else ()
+  with 
+	  Semant_err (spano, str) -> 
+        begin
+		  match spano with 
+			  None -> 
+                Session.fail sess "Resolve error: %s\n%!" str
+		    | Some span -> 			  
+			    Session.fail sess "%s:E:Resolve error: %s\n%!" 
+                  (Session.string_of_span span) str
+        end
+;;
 
 (* 
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)

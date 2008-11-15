@@ -1,44 +1,45 @@
 
 open Common;;
 
-let fmt = 
+let (targ:Common.target) = 
   match Sys.os_type with 
-	  "Unix" -> Session.Linux_x86_elf
-	| "Win32" -> Session.Win32_x86_pe
-	| "Cygwin" -> Session.Win32_x86_pe
-	| _ -> Session.Linux_x86_elf
+	  "Unix" -> Linux_x86_elf
+	| "Win32" -> Win32_x86_pe
+	| "Cygwin" -> Win32_x86_pe
+	| _ -> Linux_x86_elf
 ;;
 
-let sess:Session.sess = 
+let (sess:Session.sess) = 
   {
 	Session.sess_crate = "";
 	(* FIXME: need something fancier here for unix sub-flavours. *)
-	Session.sess_fmt = fmt;
+	Session.sess_targ = targ;
 	Session.sess_out = 
-	  ("rust_out" ^ (match fmt with 
-						 Session.Linux_x86_elf -> ""
-					   | Session.Win32_x86_pe -> ".exe"));
+	  ("rust_out" ^ (match targ with 
+						 Linux_x86_elf -> ""
+					   | Win32_x86_pe -> ".exe"));
 	Session.sess_log_lex = false;
 	Session.sess_log_parse = false;
 	Session.sess_log_resolve = false;
 	Session.sess_log_type = false;
 	Session.sess_log_trans = false;
-	Session.sess_log_reg = false;
+	Session.sess_log_ra = false;
 	Session.sess_log_insn = false;
-	Session.sess_log_obj = false;
+	Session.sess_log_obj = false;   
 	Session.sess_log_out = stderr;
+    Session.sess_failed = false;
   }
 
 let argspecs = 
   [
-	("-f", Arg.Symbol (["linux-x86-elf"; "win32-x86-pe"], 
-					  fun s -> (sess.Session.sess_fmt <- 
+	("-t", Arg.Symbol (["linux-x86-elf"; "win32-x86-pe"], 
+					   fun s -> (sess.Session.sess_targ <- 
 								  (match s with 
-									   "win32-x86-pe" -> Session.Win32_x86_pe
-									 | _ -> Session.Linux_x86_elf))),
-	 ("output format (default: " ^ (match sess.Session.sess_fmt with 
-										Session.Win32_x86_pe -> "win32-x86-pe"
-									  | Session.Linux_x86_elf -> "linux-x86-elf") ^ ")"));
+									   "win32-x86-pe" -> Win32_x86_pe
+									 | _ -> Linux_x86_elf))),
+	 ("target (default: " ^ (match sess.Session.sess_targ with 
+										Win32_x86_pe -> "win32-x86-pe"
+									  | Linux_x86_elf -> "linux-x86-elf") ^ ")"));
 	("-o", Arg.String (fun s -> sess.Session.sess_out <- s),
 	 "output filename (default: " ^ sess.Session.sess_out ^ ")");
 	("-llex", Arg.Unit (fun _ -> sess.Session.sess_log_lex <- true), "log lexing");
@@ -46,10 +47,16 @@ let argspecs =
 	("-lresolve", Arg.Unit (fun _ -> sess.Session.sess_log_resolve <- true), "log resolution");
 	("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
 	("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
-	("-lreg", Arg.Unit (fun _ -> sess.Session.sess_log_reg <- true), "log register allocation");
+	("-lra", Arg.Unit (fun _ -> sess.Session.sess_log_ra <- true), "log register allocation");
 	("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");
 	("-lobj", Arg.Unit (fun _ -> sess.Session.sess_log_obj <- true), "log object file generation")
   ]
+;;
+
+let exit_if_failed _ = 
+  if sess.Session.sess_failed 
+  then exit 1 
+  else ()
 ;;
 
 Arg.parse 
@@ -71,48 +78,36 @@ let _ =
 ;;
 
 
-let crate_items = 
-  Ll1parser.parse_crate sess Lexer.token 
+let (crate_items:Ast.mod_items) = Ll1parser.parse_crate sess Lexer.token;;
+let _ = exit_if_failed ()
 ;;
 
-let _ = 
-  try 
-	Resolve.resolve_crate sess crate_items
-  with
-	  Semant.Semant_err (spano, str) -> 
-		match spano with 
-			None -> Printf.fprintf stderr "semantic error: %s\n%!" str
-		  | Some span -> 			  
-			  Printf.fprintf stderr "%s:E:%s\n%!" (fmt_span span) str
+
+let _ = Resolve.resolve_crate sess crate_items;;
+let _ = exit_if_failed ()
 ;;
 
-let emit = Trans.trans_crate crate_items
-let _ = Il.print_quads emit.Il.emit_quads
-let _ = Ra.reg_alloc emit
-let _ = Il.print_quads emit.Il.emit_quads
+let (quads,n_vregs) = Trans.trans_crate sess crate_items;;
+let _ = exit_if_failed ()
 ;;
 
-let pick q = 
-  try 
-    X86.select_insn q
-  with
-      X86.Unrecognized -> 
-        Printf.fprintf stderr "unrecognized quad: %s\n%!" (Il.string_of_quad q);
-        Asm.MARK
-;;
-          
-let code = (Asm.SEQ (Array.map pick emit.Il.emit_quads))        
+let quads = Ra.reg_alloc sess quads n_vregs X86.n_hardregs;;
+let _ = exit_if_failed ()
 ;;
 
-let _ = match sess.Session.sess_fmt with 
-	Session.Win32_x86_pe -> Pe.emit_file sess.Session.sess_out code
-  | Session.Linux_x86_elf -> Elf.emit_file sess.Session.sess_out code
+let (code:Asm.item) = X86.select_insns sess quads;;
+let _ = exit_if_failed ()
+;;
+
+let _ = match sess.Session.sess_targ with 
+	Win32_x86_pe -> Pe.emit_file sess.Session.sess_out code
+  | Linux_x86_elf -> Elf.emit_file sess.Session.sess_out code
 ;;
 
 (* 
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)

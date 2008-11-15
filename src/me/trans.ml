@@ -22,6 +22,11 @@ let patch e i =
 ;;  
 let badlab = Il.Label (-1);;
 
+let log sess = Session.log "trans" 
+  sess.Session.sess_log_trans
+  sess.Session.sess_log_out
+;;
+
 let rec trans_lval_path emit lvp = 
   match lvp with 
       Ast.RES_pr FP -> fp_abi_operand
@@ -271,15 +276,37 @@ and trans_mod_item emit name item =
 and trans_mod_items emit items = 
   Hashtbl.iter (trans_mod_item emit) items
 
-and trans_crate crate = 
-  let emit = Il.new_emitter X86.n_hardregs in
-	trans_mod_items emit crate;
-    emit
+and trans_crate (sess:Session.sess) (crate:Ast.mod_items) = 
+  try
+    let emit = Il.new_emitter () in
+	  trans_mod_items emit crate;
+      begin
+        log sess "emitted quads:";
+        for i = 0 to (Array.length emit.Il.emit_quads) - 1
+        do 
+          log sess "[%6d]\t%s" i (Il.string_of_quad emit.Il.emit_quads.(i));
+        done
+      end;
+
+      (emit.Il.emit_quads, emit.Il.emit_next_vreg)
+
+    with 
+	  Semant_err (spano, str) -> 
+        begin
+		  match spano with 
+			  None -> 
+                Session.fail sess "Trans error: %s\n%!" str
+		    | Some span -> 			  
+			    Session.fail sess "%s:E:Trans error: %s\n%!" 
+                  (Session.string_of_span span) str
+        end;
+        ([| |], 0)
+;;
 
 (* 
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)

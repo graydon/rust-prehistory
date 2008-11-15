@@ -8,6 +8,12 @@ type pos = (filename * int * int)
 type span = {lo: pos; hi: pos}
 type 'a spanned = { node: 'a; span: span }
 
+type target = 
+	Linux_x86_elf
+  | Win32_x86_pe
+;;
+
+
 type abi_pseudo_reg = 
 	FP (* frame pointer *)
   | PP (* process pointer *)
@@ -15,11 +21,6 @@ type abi_pseudo_reg =
   | RP (* runtime pointer *)
 ;;
 
-let fmt_span span = 
-	let (filename, line0, col0) = span.lo in 
-	let (_, line1, col1) = span.hi in 
-	Printf.sprintf "%s:%d:%d - %d:%d" filename line0 col0 line1 col1
-;;
 
 type fixup = 
 	{ fixup_name: string;
@@ -28,6 +29,7 @@ type fixup =
 	  mutable fixup_mem_pos: int64 option;
 	  mutable fixup_mem_sz: int64 option }
 ;;
+
 
 let new_fixup (s:string) 
 	: fixup = 
@@ -38,6 +40,7 @@ let new_fixup (s:string)
 	fixup_mem_sz = None }
 ;;
 
+
 type layout = 
     { 
       mutable layout_size: int64;
@@ -45,6 +48,7 @@ type layout =
       mutable layout_align: int64; 
     }
 ;;
+
 
 let new_layout _ = 
   { layout_size = 0L; 
