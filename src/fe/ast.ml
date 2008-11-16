@@ -208,9 +208,9 @@ and stmt' =
   | STMT_for of stmt_for
   | STMT_if of stmt_if
   | STMT_try of stmt_try
-  | STMT_put of (proto option * lval option)
-  | STMT_ret of (proto option * lval option)
-  | STMT_be of (proto option * lval * (lval array))
+  | STMT_put of (proto option * atom option)
+  | STMT_ret of (proto option * atom option)
+  | STMT_be of (proto option * lval * (atom array))
   | STMT_alt_tag of stmt_alt_tag
   | STMT_alt_type of stmt_alt_type
   | STMT_alt_port of stmt_alt_port
@@ -219,8 +219,8 @@ and stmt' =
   | STMT_checkif of (constrs * stmt)
   | STMT_block of stmt_block
   | STMT_copy of (lval * expr)
-  | STMT_call of (lval * lval * (lval array))
-  | STMT_send of (lval * lval)
+  | STMT_call of (lval * lval * (atom array))
+  | STMT_send of (lval * atom)
   | STMT_recv of (lval * lval)
   | STMT_decl of stmt_decl 
   | STMT_use of (ty * ident * lval)
@@ -272,7 +272,7 @@ and stmt_alt_port =
 
 and stmt_while = 
     {
-      while_lval: ((stmt array) * lval);
+      while_lval: ((stmt array) * atom);
       while_body: stmt;
     }
       
@@ -288,14 +288,14 @@ and stmt_for =
     {
       for_frame: frame;
       for_init: stmt;
-      for_test: ((stmt array) * lval);
+      for_test: ((stmt array) * atom);
       for_step: stmt;
       for_body: stmt;
     }
 
 and stmt_if = 
     {
-      if_test: lval;
+      if_test: atom;
       if_then: stmt;
       if_else: stmt option;
     }
@@ -307,14 +307,17 @@ and stmt_try =
       try_fini: stmt option;
     }
 
+and atom = 
+    ATOM_literal of (lit spanned)
+  | ATOM_lval of lval
+
 and expr =
-    EXPR_literal of lit
-  | EXPR_binary of (binop * lval * lval)
-  | EXPR_unary of (unop * lval)
-  | EXPR_lval of lval
-  | EXPR_rec of ((ident, lval) Hashtbl.t)
-  | EXPR_vec of (lval array)
-  | EXPR_tup of (lval array)
+    EXPR_binary of (binop * atom * atom)
+  | EXPR_unary of (unop * atom)
+  | EXPR_atom of atom
+  | EXPR_rec of ((ident, atom) Hashtbl.t)
+  | EXPR_vec of (atom array)
+  | EXPR_tup of (atom array)
 
 and lit = 
   | LIT_nil
@@ -338,7 +341,7 @@ and lit_custom =
 
 and lval_component =
     COMP_named of name_component
-  | COMP_lval of lval
+  | COMP_atom of atom
     
 and resolved_path = 
     RES_pr of abi_pseudo_reg
@@ -496,6 +499,6 @@ and mod_items = (ident, mod_item) Hashtbl.t
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)

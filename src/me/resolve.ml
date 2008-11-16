@@ -553,16 +553,17 @@ and lval_type cx lval =
            | (Ast.RES_item item) -> Some (type_of_mod_item cx item))
 	| _ -> None
 
-and expr_type cx expr = 
+and atom_type cx atom = 
   let concretize tyo = 
     match tyo with 
         Some (Ast.TY_named _) -> None
       | Some t -> Some t
       | None -> None
   in
-    match expr with 
-	    Ast.EXPR_literal lit -> 
-		  (match lit with 
+    match atom with 
+        Ast.ATOM_lval lv -> concretize (lval_type cx lv)
+      | Ast.ATOM_literal lit -> 
+		  (match lit.node with 
 			   Ast.LIT_nil -> Some Ast.TY_nil
 		     | Ast.LIT_bool _ -> Some Ast.TY_bool
 		     | Ast.LIT_unsigned (n, _) -> Some (Ast.TY_mach (Ast.TY_unsigned, n))
@@ -573,11 +574,14 @@ and expr_type cx expr =
 		     | Ast.LIT_char _ -> Some Ast.TY_char
 		     | Ast.LIT_str _ -> Some Ast.TY_str
 		     | Ast.LIT_custom _ -> None)
+
+and expr_type cx expr = 
+    match expr with 
+	    Ast.EXPR_atom atom -> atom_type cx atom
 		    
 	  (* FIXME: check appropriateness of applying op to type *)
 	  | Ast.EXPR_binary (op, a, b) -> 
-		  (match (concretize (lval_type cx a), 
-                  concretize (lval_type cx b)) with 
+		  (match (atom_type cx a, atom_type cx b) with 
 			   (Some t1, Some t2) -> 
 			     if t1 = t2 
 			     then 
@@ -590,8 +594,7 @@ and expr_type cx expr =
                                      ^ (string_of_ty t1) ^ " vs. " ^ (string_of_ty t2)))
 		     | _ -> (cx.ctxt_contains_unresolved_types := true; None))
             
-	  | Ast.EXPR_unary (_, lv) -> concretize (lval_type cx lv)
-	  | Ast.EXPR_lval lv -> concretize (lval_type cx lv)
+	  | Ast.EXPR_unary (_, atom) -> atom_type cx atom
 	  | _ -> raise (err cx "unhandled expression type in expr_type")
 
 and lval_fn_result_type cx fn =
@@ -843,20 +846,25 @@ and resolve_ty
 and resolve_expr cx expr = 
   match expr with 
 	  Ast.EXPR_binary (_, a, b) -> 
-		resolve_lval cx None a;
-		resolve_lval cx None b
+		resolve_atom cx None a;
+		resolve_atom cx None b
 	| Ast.EXPR_unary (_, e) -> 
-		resolve_lval cx None e
-	| Ast.EXPR_lval lval -> 
-		resolve_lval cx None lval
+		resolve_atom cx None e
+	| Ast.EXPR_atom atom -> 
+		resolve_atom cx None atom
 	| Ast.EXPR_rec htab -> 
-		Hashtbl.iter (fun _ lv -> resolve_lval cx None lv) htab
+		Hashtbl.iter (fun _ lv -> resolve_atom cx None lv) htab
 	| Ast.EXPR_vec v -> 
-		Array.iter (resolve_lval cx None) v
+		Array.iter (resolve_atom cx None) v
 	| Ast.EXPR_tup v -> 
-		Array.iter (resolve_lval cx None) v
-	| Ast.EXPR_literal _ -> ()
+		Array.iter (resolve_atom cx None) v
 		  
+
+and resolve_atom cx tyo atom = 
+  match atom with 
+      Ast.ATOM_literal _ -> ()
+    | Ast.ATOM_lval lv -> resolve_lval cx tyo lv
+
 
 and resolve_lval cx tyo lval = 
   let bind_to_slot path slot = 
@@ -904,6 +912,11 @@ and resolve_lval_option cx lopt =
 	  None -> ()
 	| Some lv -> resolve_lval cx None lv
 
+and resolve_atom_option cx aopt = 
+  match aopt with 
+	  None -> ()
+	| Some atom -> resolve_atom cx None atom
+
 and resolve_stmts cx stmts = 
   Array.iter (resolve_stmt cx) stmts
 		
@@ -911,14 +924,14 @@ and resolve_stmt cx stmt =
   let cx = { cx with ctxt_span = Some stmt.span } in
   match stmt.node with 
 	  Ast.STMT_while w -> 
-		let (stmts, lval) = w.Ast.while_lval in
-		  resolve_lval cx (Some Ast.TY_bool) lval;
+		let (stmts, atom) = w.Ast.while_lval in
+		  resolve_atom cx (Some Ast.TY_bool) atom;
 		  resolve_stmts cx stmts;
 		  resolve_stmt cx w.Ast.while_body
 
 	| Ast.STMT_do_while w -> 
-		let (stmts, lval) = w.Ast.while_lval in
-		  resolve_lval cx (Some Ast.TY_bool) lval;
+		let (stmts, atom) = w.Ast.while_lval in
+		  resolve_atom cx (Some Ast.TY_bool) atom;
 		  resolve_stmts cx stmts;
 		  resolve_stmt cx w.Ast.while_body
 
@@ -941,15 +954,15 @@ and resolve_stmt cx stmt =
 		  { cx with ctxt_frame_scopes =
 			  f.Ast.for_frame :: cx.ctxt_frame_scopes }
 		in
-		let (stmts, lval) = f.Ast.for_test in
+		let (stmts, atom) = f.Ast.for_test in
 		  layout_frame cx f.Ast.for_frame;
 		  resolve_stmts cx' stmts;
-		  resolve_lval cx' (Some Ast.TY_bool) lval;
+		  resolve_atom cx' (Some Ast.TY_bool) atom;
 		  resolve_stmt cx' f.Ast.for_step;
 		  resolve_stmt cx' f.Ast.for_body;
 
 	| Ast.STMT_if i -> 
-		resolve_lval cx (Some Ast.TY_bool) i.Ast.if_test;
+		resolve_atom cx (Some Ast.TY_bool) i.Ast.if_test;
 		resolve_stmt cx i.Ast.if_then;
 		resolve_stmt_option cx i.Ast.if_else
 
@@ -959,10 +972,10 @@ and resolve_stmt cx stmt =
 		resolve_stmt_option cx t.Ast.try_fini
 		
 	| Ast.STMT_put (_, lo) -> 
-		resolve_lval_option cx lo
+		resolve_atom_option cx lo
 
 	| Ast.STMT_ret (_, lo) -> 
-		resolve_lval_option cx lo
+		resolve_atom_option cx lo
 
 	| Ast.STMT_block b -> 
 		resolve_block cx b
@@ -981,7 +994,7 @@ and resolve_stmt cx stmt =
 		  
 	| Ast.STMT_call (dst, fn, args) -> 
 		resolve_lval cx None fn;
-		Array.iteri (fun i -> resolve_lval cx (lval_fn_arg_type cx fn i)) args;
+		Array.iteri (fun i -> resolve_atom cx (lval_fn_arg_type cx fn i)) args;
 		resolve_lval cx (lval_fn_result_type cx fn) dst
 
 	(* 

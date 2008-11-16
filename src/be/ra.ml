@@ -266,13 +266,18 @@ let quad_jump_target_labels q =
 ;;
 
 let quad_used_vregs q = 
-  let operand_used_vregs s = 
+  let operand_directly_used_vregs s = 
     match s with 
 		Reg (Vreg i) -> [i]
-	  | Mem (_, Some (Vreg i), _) -> [i]
       | _ -> []
   in
-    List.concat (List.map operand_used_vregs [q.quad_lhs; q.quad_rhs])
+  let operand_mem_used_vregs s = 
+    match s with 
+        Mem (_, Some (Vreg i), _) -> [i]
+      | _ -> []
+  in
+    List.concat ((List.map operand_mem_used_vregs [q.quad_dst; q.quad_lhs; q.quad_rhs])
+                 @ (List.map operand_directly_used_vregs [q.quad_lhs; q.quad_rhs]))
 ;;
 
 let quad_defined_vregs q = 

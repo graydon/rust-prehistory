@@ -98,27 +98,41 @@ let trans_lval emit lv =
         end
 ;;
 
+let trans_atom e atom = 
+  match atom with 
+    | Ast.ATOM_lval lv -> 
+        trans_lval e lv
+          
+	| Ast.ATOM_literal lit -> 
+        begin 
+          match lit.node with 
+              Ast.LIT_nil -> 
+		        Il.Nil
+                  
+	        | Ast.LIT_bool false -> 
+		        Il.Imm (Asm.IMM 0L)
+          
+	        | Ast.LIT_bool true -> 
+		        Il.Imm (Asm.IMM 1L)
+          
+	        | Ast.LIT_char c -> 
+		        Il.Imm (Asm.IMM (Int64.of_int (Char.code c)))
+          
+	        | Ast.LIT_int (bi, s) -> 
+		        Il.Imm (Asm.IMM (Int64.of_int (Big_int.int_of_big_int bi)))
+                  
+          
+	        | _ -> marker (* raise  (Invalid_argument "Trans.trans_atom: unimplemented translation") *)
+        end
+        
+
 let trans_expr e expr = 
   let emit = Il.emit e in
-	match expr with 
-		Ast.EXPR_literal (Ast.LIT_nil) -> 
-		  Il.Nil
+    match expr with 
 
-	  | Ast.EXPR_literal (Ast.LIT_bool false) -> 
-		  Il.Imm (Asm.IMM 0L)
-            
-	  | Ast.EXPR_literal (Ast.LIT_bool true) -> 
-		  Il.Imm (Asm.IMM 1L)
-
-	  | Ast.EXPR_literal (Ast.LIT_char c) -> 
-		  Il.Imm (Asm.IMM (Int64.of_int (Char.code c)))
-
-	  | Ast.EXPR_literal (Ast.LIT_int (bi, s)) -> 
-		  Il.Imm (Asm.IMM (Int64.of_int (Big_int.int_of_big_int bi)))
-
-	  | Ast.EXPR_binary (binop, a, b) -> 
-		  let lhs = trans_lval e a in
-		  let rhs = trans_lval e b in
+	    Ast.EXPR_binary (binop, a, b) -> 
+	      let lhs = trans_atom e a in
+		  let rhs = trans_atom e b in
 		  let dst = Il.Reg (Il.next_vreg e) in 
           let arith op = 
             if is_2addr_machine
@@ -173,11 +187,11 @@ let trans_expr e expr =
                 | Ast.BINOP_ge -> rela Il.JGE
                 | Ast.BINOP_gt -> rela Il.JG
                     
-			    | _ -> raise (Invalid_argument "Semant.trans_expr: unimplemented binop")
+			    | _ -> raise (Invalid_argument "Trans.trans_expr: unimplemented binop")
             end
 
 	  | Ast.EXPR_unary (unop, a) -> 
-		  let src = trans_lval e a in
+		  let src = trans_atom e a in
 		  let dst = Il.Reg (Il.next_vreg e) in 
 		  let op = match unop with
 			  Ast.UNOP_not -> Il.NOT
@@ -190,7 +204,11 @@ let trans_expr e expr =
             else               
 			  emit op dst src Il.Nil;
 			dst
-	  | _ -> marker (* raise (Invalid_argument "Semant.trans_expr: unimplemented translation") *)
+
+      | Ast.EXPR_atom a -> 
+          trans_atom e a
+              
+	  | _ -> raise (Invalid_argument "Trans.trans_expr: unimplemented translation")
 ;;
 
 
@@ -207,9 +225,9 @@ let rec trans_stmt e stmt =
           
       | Ast.STMT_while sw -> 
           let back_jmp_target = mark e in 
-          let (head_stmts, head_lval) = sw.Ast.while_lval in
+          let (head_stmts, head_atom) = sw.Ast.while_lval in
 		    Array.iter (trans_stmt e) head_stmts;
-            let v = trans_lval e head_lval in
+            let v = trans_atom e head_atom in
               emit Il.CMP Il.Nil v imm_false;
               let fwd_jmp_quad = mark e in
                 emit Il.JE badlab Il.Nil Il.Nil;
@@ -218,7 +236,7 @@ let rec trans_stmt e stmt =
                 patch e fwd_jmp_quad
                   
       | Ast.STMT_if si -> 
-          let v = trans_lval e si.Ast.if_test in 
+          let v = trans_atom e si.Ast.if_test in 
             emit Il.CMP Il.Nil v imm_true;
             let skip_thn_clause_jmp = mark e in 
               emit Il.JE badlab Il.Nil Il.Nil;
