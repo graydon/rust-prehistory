@@ -17,6 +17,7 @@ type sess =
   mutable sess_log_trans: bool;
   mutable sess_log_ra: bool;
   mutable sess_log_insn: bool;
+  mutable sess_log_asm: bool;
   mutable sess_log_obj: bool;
   mutable sess_log_out: out_channel;
   mutable sess_failed: bool;

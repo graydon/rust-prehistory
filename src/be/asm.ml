@@ -193,7 +193,14 @@ let new_relaxation (items:item array) =
 		  relax_choice = ref 0; }
 ;;
 
-let rec resolve_item (item:item) : unit = 
+
+let log sess = Session.log "asm" 
+  sess.Session.sess_log_asm
+  sess.Session.sess_log_out
+;;
+
+
+let rec resolve_item (sess:Session.sess) (item:item) : unit = 
   let relaxations = ref [] in 
   let reset_relaxation rel = 
 	rel.relax_choice := ((Array.length rel.relax_options) - 1);
@@ -216,13 +223,13 @@ let rec resolve_item (item:item) : unit =
 	  false
 	with 
 		Relax_more r -> 
-			begin 
-			  relax r;
-			  true
-			end
+		  begin 
+			relax r;
+			true
+		  end
   in
 	while still_relaxing item do
-	  Printf.printf "relaxing...\n";
+	  log sess "relaxing";
 	done;
 	resolve_item_full dummy_collector item
 

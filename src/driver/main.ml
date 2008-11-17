@@ -25,6 +25,7 @@ let (sess:Session.sess) =
 	Session.sess_log_trans = false;
 	Session.sess_log_ra = false;
 	Session.sess_log_insn = false;
+	Session.sess_log_asm = false;
 	Session.sess_log_obj = false;   
 	Session.sess_log_out = stderr;
     Session.sess_failed = false;
@@ -49,6 +50,7 @@ let argspecs =
 	("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
 	("-lra", Arg.Unit (fun _ -> sess.Session.sess_log_ra <- true), "log register allocation");
 	("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");
+	("-lasm", Arg.Unit (fun _ -> sess.Session.sess_log_asm <- true), "log assembly");
 	("-lobj", Arg.Unit (fun _ -> sess.Session.sess_log_obj <- true), "log object file generation")
   ]
 ;;
@@ -87,11 +89,11 @@ let _ = Resolve.resolve_crate sess crate_items;;
 let _ = exit_if_failed ()
 ;;
 
-let (quads,n_vregs) = Trans.trans_crate sess crate_items;;
+let ((quads:Il.quads),(n_vregs:int)) = Trans.trans_crate sess crate_items;;
 let _ = exit_if_failed ()
 ;;
 
-let quads = Ra.reg_alloc sess quads n_vregs X86.n_hardregs;;
+let (quads:Il.quads) = Ra.reg_alloc sess quads n_vregs X86.n_hardregs;;
 let _ = exit_if_failed ()
 ;;
 
@@ -100,8 +102,8 @@ let _ = exit_if_failed ()
 ;;
 
 let _ = match sess.Session.sess_targ with 
-	Win32_x86_pe -> Pe.emit_file sess.Session.sess_out code
-  | Linux_x86_elf -> Elf.emit_file sess.Session.sess_out code
+	Win32_x86_pe -> Pe.emit_file sess code
+  | Linux_x86_elf -> Elf.emit_file sess code
 ;;
 
 (* 

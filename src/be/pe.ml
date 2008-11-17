@@ -606,7 +606,7 @@ let test_imports =
   }
 ;;
 
-let emit_file outfile code = 
+let emit_file (sess:Session.sess) (code:Asm.item) : unit = 
 
   let all_hdrs_fixup = new_fixup "all headers" in
   let all_init_data_fixup = new_fixup "all initialized data" in
@@ -695,8 +695,8 @@ let emit_file outfile code =
 							 ALIGN_MEM (pe_mem_alignment, MARK) |]))
   in
   let buf = Buffer.create 16 in
-  let out = open_out_bin outfile in
-	resolve_item all_items;
+  let out = open_out_bin sess.Session.sess_out in
+	resolve_item sess all_items;
 	lower_item ~lsb0: true ~buf: buf ~it: all_items;
 	Buffer.output_buffer out buf;
 	flush out;

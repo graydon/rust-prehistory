@@ -1134,7 +1134,7 @@ let elf32_linux_x86_file
 	  |]
 ;;
 
-let emit_file outfile code = 
+let emit_file (sess:Session.sess) (code:Asm.item) = 
   let text_items = Hashtbl.create 4 in
   let rodata_items = Hashtbl.create 4 in
   let data_items = Hashtbl.create 4 in
@@ -1227,8 +1227,8 @@ let emit_file outfile code =
 	  ~needed_libs: needed_libs
   in
   let buf = Buffer.create 16 in
-  let out = open_out_bin outfile in
-	resolve_item all_items;
+  let out = open_out_bin sess.Session.sess_out in
+	resolve_item sess all_items;
 	lower_item ~lsb0: true ~buf: buf ~it: all_items;
 	Buffer.output_buffer out buf;
 	flush out;
