@@ -84,16 +84,17 @@ let (crate_items:Ast.mod_items) = Ll1parser.parse_crate sess Lexer.token;;
 let _ = exit_if_failed ()
 ;;
 
+let (abi:Abi.abi) = X86.abi;;
 
-let _ = Resolve.resolve_crate sess crate_items;;
+let _ = Resolve.resolve_crate sess abi crate_items;;
 let _ = exit_if_failed ()
 ;;
 
-let ((quads:Il.quads),(n_vregs:int)) = Trans.trans_crate sess crate_items;;
+let ((quads:Il.quads),(n_vregs:int)) = Trans.trans_crate sess abi crate_items;;
 let _ = exit_if_failed ()
 ;;
 
-let (quads:Il.quads) = Ra.reg_alloc sess quads n_vregs X86.n_hardregs;;
+let (quads:Il.quads) = Ra.reg_alloc sess quads n_vregs abi;;
 let _ = exit_if_failed ()
 ;;
 

@@ -19,10 +19,10 @@ type ctxt =
 	  ctxt_made_progress: bool ref;
 	  ctxt_contains_autos: bool ref;
 	  ctxt_contains_unresolved_types: bool ref;
-	  ctxt_ptrsz: int64 }
+	  ctxt_abi: Abi.abi }
 ;;
 
-let	root_ctxt sess = 
+let	new_ctxt sess abi = 
   { ctxt_frame_scopes = []; 
 	ctxt_type_scopes = [];
 	ctxt_span = None;
@@ -30,7 +30,7 @@ let	root_ctxt sess =
 	ctxt_made_progress = ref true;
     ctxt_contains_autos = ref false;
     ctxt_contains_unresolved_types = ref false;
-	ctxt_ptrsz = 4L }
+	ctxt_abi = abi }
 ;;
 
 let log cx = Session.log "resolve" 
@@ -118,17 +118,17 @@ let rec size_of_ty cx t =
 	  Ast.TY_nil -> 0L
 	| Ast.TY_bool -> 1L
 	| Ast.TY_mach (_, n) -> Int64.of_int (n / 8)
-	| Ast.TY_int -> cx.ctxt_ptrsz
+	| Ast.TY_int -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
 	| Ast.TY_char -> 4L
-	| Ast.TY_str -> cx.ctxt_ptrsz
+	| Ast.TY_str -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
 	| Ast.TY_tup tys -> (Array.fold_left (fun n ty -> Int64.add n (slot_size cx ty)) 0L tys)
 	| _ -> raise (err cx "unhandled type in size_of_ty")
 
 and slot_size cx s = 
   match s with 
-	  Ast.SLOT_exterior _ -> cx.ctxt_ptrsz
-	| Ast.SLOT_read_alias _ -> cx.ctxt_ptrsz
-	| Ast.SLOT_write_alias _ -> cx.ctxt_ptrsz
+	  Ast.SLOT_exterior _ -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.SLOT_read_alias _ -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.SLOT_write_alias _ -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
 	| Ast.SLOT_interior t -> 
 		size_of_ty cx t
 	| Ast.SLOT_auto -> raise Auto_slot
@@ -1010,9 +1010,13 @@ and resolve_stmt cx stmt =
 	*)
 	| _ -> ()
 
-let resolve_crate (sess:Session.sess) (items:Ast.mod_items) = 
+let resolve_crate 
+    (sess:Session.sess) 
+    (abi:Abi.abi) 
+    (items:Ast.mod_items) 
+    : unit = 
   try 
-    let cx = root_ctxt sess in
+    let cx = new_ctxt sess abi in
 	  while !(cx.ctxt_made_progress) do
         log cx "";
         log cx "=== fresh resolution pass ===";

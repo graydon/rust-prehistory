@@ -1,10 +1,10 @@
 (*    
  * Module for writing System V ELF files.
  * 
- * Presently heavily infected with x86 and elf32 specificities, though
- * they are reasonably well marked. Needs a fair bit of refactoring to
- * work for other elf targets.
- * 
+ * FIXME: Presently heavily infected with x86 and elf32 specificities,
+ * though they are reasonably well marked. Needs to be refactored to
+ * depend on abi fields if it's to be usable for other elf
+ * configurations.
  *)
 
 open Asm;;

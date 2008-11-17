@@ -3,58 +3,78 @@
 open Semant;;
 open Common;;
 
-(* +++ At some point abstract this out per-machine-arch. *)
-let is_2addr_machine = true;;
-let ptr_mem = Il.M32;;
-let fp_abi_operand = Il.Reg (Il.HWreg X86.ebp);;
-let pp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 0L);;
-let cp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 4L);;
-let rp_abi_operand = Il.Mem (Il.M32, Some (Il.HWreg X86.ebp), Asm.IMM 8L);;
-(* --- At some point abstract this out per-machine-arch. *)
+type ctxt = 
+    {
+      ctxt_emit: Il.emitter;
+      ctxt_sess: Session.sess;
+      ctxt_abi: Abi.abi;
+    }
+
+let new_ctxt (sess:Session.sess) (abi:Abi.abi) : ctxt = 
+  { 
+    ctxt_emit = Il.new_emitter ();
+    ctxt_sess = sess;
+    ctxt_abi = abi
+  }
+
 
 let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
 let imm_true = Il.Imm (Asm.IMM 1L);;
 let imm_false = Il.Imm (Asm.IMM 0L);;
-let mark e = e.Il.emit_pc;;
-let patch e i = 
-  e.Il.emit_quads.(i) <- { e.Il.emit_quads.(i)
-                           with Il.quad_dst = Il.Label (mark e) }
-;;  
 let badlab = Il.Label (-1);;
 
-let log sess = Session.log "trans" 
-  sess.Session.sess_log_trans
-  sess.Session.sess_log_out
+let mark (cx:ctxt) : int = 
+  cx.ctxt_emit.Il.emit_pc
 ;;
 
-let rec trans_lval_path emit lvp = 
-  match lvp with 
-      Ast.RES_pr FP -> fp_abi_operand
-    | Ast.RES_pr PP -> pp_abi_operand
-    | Ast.RES_pr CP -> cp_abi_operand
-    | Ast.RES_pr RP -> rp_abi_operand
-    | Ast.RES_idx (a, b) -> 
-        let av = trans_lval_path emit a in
-        let bv = trans_lval_path emit b in          
-		let tmp = Il.Reg (Il.next_vreg emit) in 
-		  Il.emit emit Il.ADD tmp av bv;
-          tmp
-    | Ast.RES_off (off, lv) -> 
-        (match trans_lval_path emit lv with             
-             Il.Mem (m, v, Asm.IMM off') -> 
-               Il.Mem (m, v, Asm.IMM (Int64.add off off'))
-           | v -> 
-               let tmp = Il.Reg (Il.next_vreg emit) in
-                 Il.emit emit Il.ADD tmp v (Il.Imm (Asm.IMM off));
-                 tmp)
-    | Ast.RES_deref lv -> 
-        (match trans_lval_path emit lv with 
-             Il.Reg r -> 
-               Il.Mem (ptr_mem, Some r, Asm.IMM 0L)
-           | v -> 
-		       let tmp = (Il.next_vreg emit) in 
-		         Il.emit emit Il.MOV (Il.Reg tmp) v Il.Nil;
-                 Il.Mem (ptr_mem, Some tmp, Asm.IMM 0L))
+let patch (cx:ctxt) (i:int) : unit = 
+  cx.ctxt_emit.Il.emit_quads.(i) 
+  <- { cx.ctxt_emit.Il.emit_quads.(i)
+       with Il.quad_dst = Il.Label (mark cx) }
+;;  
+
+let log cx = Session.log "trans" 
+  cx.ctxt_sess.Session.sess_log_trans
+  cx.ctxt_sess.Session.sess_log_out
+;;
+
+let rec trans_resolved_path 
+    (cx:ctxt) 
+    (resp:Ast.resolved_path) = 
+  let emit = Il.emit cx.ctxt_emit in  
+    match resp with 
+        Ast.RES_pr FP -> cx.ctxt_abi.Abi.abi_fp_operand
+      | Ast.RES_pr PP -> cx.ctxt_abi.Abi.abi_pp_operand
+      | Ast.RES_pr CP -> cx.ctxt_abi.Abi.abi_cp_operand
+      | Ast.RES_pr RP -> cx.ctxt_abi.Abi.abi_rp_operand
+      | Ast.RES_idx (a, b) -> 
+          let av = trans_resolved_path cx a in
+          let bv = trans_resolved_path cx b in          
+		  let tmp = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+            begin
+		      emit Il.ADD tmp av bv;
+              tmp
+            end
+      | Ast.RES_off (off, lv) -> 
+          begin
+            match trans_resolved_path cx lv with
+                Il.Mem (m, v, Asm.IMM off') -> 
+                  Il.Mem (m, v, Asm.IMM (Int64.add off off'))
+              | v -> 
+                  let tmp = Il.Reg (Il.next_vreg cx.ctxt_emit) in
+                    emit Il.ADD tmp v (Il.Imm (Asm.IMM off));
+                    tmp
+          end
+      | Ast.RES_deref lv -> 
+          begin
+            match trans_resolved_path cx lv with 
+                Il.Reg r -> 
+                  Il.Mem (cx.ctxt_abi.Abi.abi_ptr_mem, Some r, Asm.IMM 0L)
+              | v -> 
+		          let tmp = (Il.next_vreg cx.ctxt_emit) in 
+		            emit Il.MOV (Il.Reg tmp) v Il.Nil;
+                    Il.Mem (cx.ctxt_abi.Abi.abi_ptr_mem, Some tmp, Asm.IMM 0L)
+          end
 ;;
 
 (* FIXME: the analysis here has to be a fair bit deeper. The thing to
@@ -72,9 +92,13 @@ let rec trans_lval_path emit lvp =
  * threat to the logic is implemented!  
  *)
 
-let trans_lval emit lv = 
+let trans_lval 
+    (cx:ctxt) 
+    (lv:Ast.lval)
+    : Il.operand = 
   match !(lv.Ast.lval_res) with 
-      None -> raise (Semant_err (None, "unresolved lval in trans_lval"))
+      None -> raise (Semant_err (Some lv.Ast.lval_src.span, 
+                                 "unresolved lval in trans_lval"))
     | Some res -> 
         begin 
           match res.Ast.res_path with 
@@ -86,7 +110,7 @@ let trans_lval emit lv =
                     match !cell with 
                         Some v -> Il.Reg (Il.Vreg v)
                       | None -> 
-                          let vr = (Il.next_vreg emit) in
+                          let vr = (Il.next_vreg cx.ctxt_emit) in
                             begin
                               match vr with 
                                   Il.Vreg v -> cell := Some v
@@ -94,14 +118,17 @@ let trans_lval emit lv =
                             end;
                             Il.Reg vr
                 end
-            | pth -> trans_lval_path emit pth
+            | pth -> trans_resolved_path cx pth
         end
 ;;
 
-let trans_atom e atom = 
+let trans_atom 
+    (cx:ctxt) 
+    (atom:Ast.atom)
+    : Il.operand = 
   match atom with 
     | Ast.ATOM_lval lv -> 
-        trans_lval e lv
+        trans_lval cx lv
           
 	| Ast.ATOM_literal lit -> 
         begin 
@@ -121,21 +148,23 @@ let trans_atom e atom =
 	        | Ast.LIT_int (bi, s) -> 
 		        Il.Imm (Asm.IMM (Int64.of_int (Big_int.int_of_big_int bi)))
                   
-          
 	        | _ -> marker (* raise  (Invalid_argument "Trans.trans_atom: unimplemented translation") *)
         end
         
 
-let trans_expr e expr = 
-  let emit = Il.emit e in
+let trans_expr 
+    (cx:ctxt) 
+    (expr:Ast.expr)
+    : Il.operand = 
+  let emit = Il.emit cx.ctxt_emit in
     match expr with 
-
+        
 	    Ast.EXPR_binary (binop, a, b) -> 
-	      let lhs = trans_atom e a in
-		  let rhs = trans_atom e b in
-		  let dst = Il.Reg (Il.next_vreg e) in 
+	      let lhs = trans_atom cx a in
+		  let rhs = trans_atom cx b in
+		  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
           let arith op = 
-            if is_2addr_machine
+            if cx.ctxt_abi.Abi.abi_is_2addr_machine
             then 
 			  (emit Il.MOV dst lhs Il.Nil;
                emit op dst dst rhs)
@@ -144,20 +173,20 @@ let trans_expr e expr =
 			dst
           in
           let rela cjmp = 
-            if is_2addr_machine
+            if cx.ctxt_abi.Abi.abi_is_2addr_machine
             then 
               begin
-                let t = Il.Reg (Il.next_vreg e) in
+                let t = Il.Reg (Il.next_vreg cx.ctxt_emit) in
                   emit Il.MOV t lhs Il.Nil;
                   emit Il.CMP Il.Nil t rhs
               end
             else 
               emit Il.CMP Il.Nil lhs rhs;
             emit Il.MOV dst imm_true Il.Nil;
-            let j = mark e in
+            let j = mark cx in
               emit cjmp badlab Il.Nil Il.Nil;
               emit Il.MOV dst imm_false Il.Nil;
-              patch e j;
+              patch cx j;
               dst
           in
             begin 
@@ -191,13 +220,13 @@ let trans_expr e expr =
             end
 
 	  | Ast.EXPR_unary (unop, a) -> 
-		  let src = trans_atom e a in
-		  let dst = Il.Reg (Il.next_vreg e) in 
+		  let src = trans_atom cx a in
+		  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
 		  let op = match unop with
 			  Ast.UNOP_not -> Il.NOT
 			| Ast.UNOP_neg -> Il.NEG
 		  in
-            if is_2addr_machine
+            if cx.ctxt_abi.Abi.abi_is_2addr_machine
             then 
 			  (emit Il.MOV dst src Il.Nil;
                emit op dst dst Il.Nil)
@@ -206,50 +235,53 @@ let trans_expr e expr =
 			dst
 
       | Ast.EXPR_atom a -> 
-          trans_atom e a
+          trans_atom cx a
               
 	  | _ -> raise (Invalid_argument "Trans.trans_expr: unimplemented translation")
 ;;
 
 
-let rec trans_stmt e stmt =
-  let emit = Il.emit e in
+let rec trans_stmt 
+    (cx:ctxt) 
+    (stmt:Ast.stmt)
+    : unit =
+  let emit = Il.emit cx.ctxt_emit in
     match stmt.node with 
 	    Ast.STMT_copy (lv_dst, e_src) -> 
-		  let dst = trans_lval e lv_dst in
-		  let src = trans_expr e e_src in
+		  let dst = trans_lval cx lv_dst in
+		  let src = trans_expr cx e_src in
 		    emit Il.MOV dst src Il.Nil
               
 	  | Ast.STMT_block stmts -> 
-		  Array.iter (trans_stmt e) stmts.Ast.block_stmts
+		  Array.iter (trans_stmt cx) stmts.Ast.block_stmts
           
       | Ast.STMT_while sw -> 
-          let back_jmp_target = mark e in 
+          let back_jmp_target = mark cx in 
           let (head_stmts, head_atom) = sw.Ast.while_lval in
-		    Array.iter (trans_stmt e) head_stmts;
-            let v = trans_atom e head_atom in
+		    Array.iter (trans_stmt cx) head_stmts;
+            let v = trans_atom cx head_atom in
               emit Il.CMP Il.Nil v imm_false;
-              let fwd_jmp_quad = mark e in
+              let fwd_jmp_quad = mark cx in
                 emit Il.JE badlab Il.Nil Il.Nil;
-                trans_stmt e sw.Ast.while_body;
+                trans_stmt cx sw.Ast.while_body;
                 emit Il.JMP (Il.Label back_jmp_target) Il.Nil Il.Nil;
-                patch e fwd_jmp_quad
+                patch cx fwd_jmp_quad
                   
       | Ast.STMT_if si -> 
-          let v = trans_atom e si.Ast.if_test in 
+          let v = trans_atom cx si.Ast.if_test in 
             emit Il.CMP Il.Nil v imm_true;
-            let skip_thn_clause_jmp = mark e in 
+            let skip_thn_clause_jmp = mark cx in 
               emit Il.JE badlab Il.Nil Il.Nil;
-              trans_stmt e si.Ast.if_then;
+              trans_stmt cx si.Ast.if_then;
               begin 
                 match si.Ast.if_else with 
-                    None -> patch e skip_thn_clause_jmp
+                    None -> patch cx skip_thn_clause_jmp
                   | Some els -> 
-                      let skip_els_clause_jmp = mark e in
+                      let skip_els_clause_jmp = mark cx in
                         emit Il.JE badlab Il.Nil Il.Nil;
-                        patch e skip_thn_clause_jmp;
-                        trans_stmt e els;
-                        patch e skip_els_clause_jmp                        
+                        patch cx skip_thn_clause_jmp;
+                        trans_stmt cx els;
+                        patch cx skip_els_clause_jmp                        
               end
 
       | _ -> ()
@@ -277,38 +309,49 @@ let rec trans_stmt e stmt =
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")
 *)
 
-and trans_fn emit fn = 
-  trans_stmt emit fn.Ast.fn_body
+and trans_fn (cx:ctxt) (fn:Ast.fn) : unit = 
+  trans_stmt cx fn.Ast.fn_body
 
-and trans_prog emit p = 
-  trans_mod_items emit p.Ast.prog_mod
+and trans_prog (cx:ctxt) (p:Ast.prog) : unit = 
+  trans_mod_items cx p.Ast.prog_mod
 
-and trans_mod_item emit name item = 
+and trans_mod_item 
+    (cx:ctxt) 
+    (name:Ast.ident) 
+    (item:Ast.mod_item) 
+    : unit = 
   match item.node with 
-	  Ast.MOD_ITEM_fn f -> trans_fn emit f.Ast.decl_item
-	| Ast.MOD_ITEM_mod m -> trans_mod_items emit m.Ast.decl_item
-	| Ast.MOD_ITEM_prog p -> trans_prog emit p.Ast.decl_item
+	  Ast.MOD_ITEM_fn f -> trans_fn cx f.Ast.decl_item
+	| Ast.MOD_ITEM_mod m -> trans_mod_items cx m.Ast.decl_item
+	| Ast.MOD_ITEM_prog p -> trans_prog cx p.Ast.decl_item
 	| _ -> ()
  
 
-and trans_mod_items emit items = 
-  Hashtbl.iter (trans_mod_item emit) items
-
-and trans_crate (sess:Session.sess) (crate:Ast.mod_items) = 
+and trans_mod_items 
+    (cx:ctxt) 
+    (items:Ast.mod_items)
+    : unit = 
+  Hashtbl.iter (trans_mod_item cx) items
+    
+and trans_crate 
+    (sess:Session.sess)
+    (abi:Abi.abi)
+    (crate:Ast.mod_items) 
+    : (Il.quads * int) = 
   try
-    let emit = Il.new_emitter () in
-	  trans_mod_items emit crate;
-      begin
-        log sess "emitted quads:";
-        for i = 0 to (Array.length emit.Il.emit_quads) - 1
-        do 
-          log sess "[%6d]\t%s" i (Il.string_of_quad emit.Il.emit_quads.(i));
-        done
-      end;
-
-      (emit.Il.emit_quads, emit.Il.emit_next_vreg)
-
-    with 
+    let cx = new_ctxt sess abi in 
+	  trans_mod_items cx crate;
+      let quads = cx.ctxt_emit.Il.emit_quads in
+        begin
+          log cx "emitted quads:";
+          for i = 0 to (Array.length quads) - 1
+          do 
+            log cx "[%6d]\t%s" i (Il.string_of_quad quads.(i));
+          done
+        end;        
+        (quads, cx.ctxt_emit.Il.emit_next_vreg)
+          
+  with 
 	  Semant_err (spano, str) -> 
         begin
 		  match spano with 

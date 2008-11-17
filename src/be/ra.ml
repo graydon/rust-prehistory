@@ -12,7 +12,7 @@ type ctxt =
     }
 ;;
 
-let	root_ctxt sess quads vregs hardregs = 
+let	new_ctxt sess quads vregs hardregs = 
   { 
     ctxt_sess = sess;
     ctxt_quads = quads;
@@ -134,12 +134,14 @@ let convert_vregs intervals cx =
                   quad_rhs = Nil;
                   quad_fixup = None }
   in
+    (* 
   let nop = { quad_op = NOP; 
               quad_dst = Nil;
               quad_lhs = Nil;
               quad_rhs = Nil;
               quad_fixup = None }
   in
+    *)
   let convert_operand s spill_reg = 
     match s with 
 		Reg (Vreg i) -> 
@@ -435,9 +437,9 @@ let spill_at_interval spill_num active curr : (live_interval * live_interval * A
 ;;
 
 
-let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (hardregs:int) =
+let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
   try 
-    let cx = root_ctxt sess quads vregs hardregs in 
+    let cx = new_ctxt sess quads vregs abi.Abi.abi_n_hardregs in 
     let _ = 
       begin
         log cx "un-allocated quads:";

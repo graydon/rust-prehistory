@@ -61,7 +61,7 @@
 (* 
  * Notes on register availability of x86:
  * 
- * There are 8 GPRs but we use 3 of them for specific purposes:
+ * There are 8 GPRs but we use 4 of them for specific purposes:
  * 
  *   - ESP always points to the current stack frame.
  *   - EBP always points to the current process.
@@ -69,10 +69,15 @@
  *     it into hardregs. It is chosen for this because it's also occasionally
  *     clobbered by other ops (mul, udiv and idiv, f.e.) and this saves us
  *     having to bother with fancy support for clobbered regs.
+ *   - EDI we also use for reload/spill, because we're using complex addressing 
+ *     modes and, sadly, this means we can have 2 spill slots used as memory
+ *     base operands in use in a single instruction. On the upside, complex
+ *     addressing modes are possibly still cheaper than lots of manual address
+ *     arithmetic!
  * 
- * We tell IL that we have 5 GPRs then, and permit most register-register ops
- * on any of these 5, mostly-unconstrained. Still need to support pre-allocating
- * EAX for the destination of mul/imul
+ * We tell IL that we have 4 GPRs then, and permit most register-register ops
+ * on any of these 4, mostly-unconstrained. Still need to support pre-allocating
+ * EAX for the destination of mul/imul.
  * 
  *)
 
@@ -81,8 +86,6 @@ open Il;;
 
 exception Unrecognized
 ;;
-
-(* x86 instruction emitting *)
 
 let modrm m rm reg_or_subopcode = 
   if (((m land 0b11) != m) or
@@ -113,14 +116,13 @@ let slash6 = 6;;
 let slash7 = 7;;
 
 
-(* Translate an IL-level hwreg number from 0..nregs into the 3-bit code number
+(* 
+ * Translate an IL-level hwreg number from 0..nregs into the 3-bit code number
  * used through the mod r/m byte and /r sub-register specifiers of the x86 ISA.
  * 
  * See "Table 2-2: 32-Bit Addressing Forms with the ModR/M Byte", in the IA32
- * Architecture Software Developer's Manual, volume 2a.  *)
-
-(* This is the number of not-reserved-for-something-else hardregs. *)
-let n_hardregs = 4
+ * Architecture Software Developer's Manual, volume 2a.  
+ *)
 
 let eax = 0
 let ecx = 1
@@ -154,43 +156,76 @@ let reg r =
 	| _ -> raise (Invalid_argument "X86.reg")
 ;;
 
-(* FIXME: factor the instruction selector often. There's lots of
- * semi-redundancy in the ISA.
+let reg_str r = 
+  match r with 
+	  0 -> "eax"
+	| 1 -> "ecx"
+	| 2 -> "ebx"
+	| 3 -> "esi"
+	| 4 -> "edi"
+	| 5 -> "edx"
+	| 6 -> "ebp"
+	| 7 -> "esp"
+	| _ -> raise (Invalid_argument "X86.reg_str")
+;;
+
+
+(* This is a basic ABI. You might need to customize it by platform. *)
+let n_hardregs = 4;;
+let (abi:Abi.abi) = 
+  {
+    Abi.abi_ptrsz = 4;
+    Abi.abi_ptr_mem = Il.M32;
+
+    Abi.abi_is_2addr_machine = true;
+    Abi.abi_n_hardregs = n_hardregs;
+    Abi.abi_str_of_hardreg = reg_str;
+    
+    Abi.abi_fp_operand = Il.Reg (Il.HWreg ebp);
+    Abi.abi_pp_operand = Il.Mem (Il.M32, Some (Il.HWreg ebp), Asm.IMM 0L);
+    Abi.abi_cp_operand = Il.Mem (Il.M32, Some (Il.HWreg ebp), Asm.IMM 4L);
+    Abi.abi_rp_operand = Il.Mem (Il.M32, Some (Il.HWreg ebp), Asm.IMM 8L);
+  }
+
+
+(* 
+ * NB: factor the instruction selector often. There's lots of
+ * semi-redundancy in the ISA.  
  *)
 
 
 let imm_is_byte n = (n = (Int64.logand 0xffL n))
 ;;
 
-  
+
 let rm_r (oper:operand) (r:int) = 
   let reg_ebp = 6 in
   let reg_esp = 7 in 
-  match oper with 
-      Reg (HWreg rm) -> 
-        Asm.BYTE (modrm_reg (reg rm) r)
-    | Mem (_, None, disp) -> 
-        Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
-                   Asm.WORD32 disp |]
-    | Mem (_, Some (HWreg rm), disp) when rm != reg_esp -> 
-        (match disp with 
-             Asm.IMM 0L when rm != reg_ebp -> 
-               Asm.BYTE (modrm_deref_reg (reg rm) r)
-           | Asm.IMM n when imm_is_byte n -> 
-               Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
-                          Asm.WORD8 disp|]
-           | Asm.IMM _ -> 
-               Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
-                          Asm.WORD32 disp |]
-           | _ -> 
-               Asm.new_relaxation
-                 [|
-                   Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
-                              Asm.WORD32 disp |];
-                   Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
-                              Asm.WORD8 disp|];
-                 |])
-    | _ -> raise Unrecognized
+    match oper with 
+        Reg (HWreg rm) -> 
+          Asm.BYTE (modrm_reg (reg rm) r)
+      | Mem (_, None, disp) -> 
+          Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
+                     Asm.WORD32 disp |]
+      | Mem (_, Some (HWreg rm), disp) when rm != reg_esp -> 
+          (match disp with 
+               Asm.IMM 0L when rm != reg_ebp -> 
+                 Asm.BYTE (modrm_deref_reg (reg rm) r)
+             | Asm.IMM n when imm_is_byte n -> 
+                 Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
+                            Asm.WORD8 disp|]
+             | Asm.IMM _ -> 
+                 Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
+                            Asm.WORD32 disp |]
+             | _ -> 
+                 Asm.new_relaxation
+                   [|
+                     Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
+                                Asm.WORD32 disp |];
+                     Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
+                                Asm.WORD8 disp|];
+                   |])
+      | _ -> raise Unrecognized
 ;;
 
 
@@ -315,7 +350,7 @@ let select_item_misc t =
 	| (CPUSH M32, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash6
 	| (CPUSH M32, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD32 i |]          
 	| (CPUSH M8, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD8 i |]
-          
+        
 	| (CRET, _, _, _) -> Asm.BYTE 0xc3
 
 	| (JC,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x72 0x0f 0x82 f
@@ -537,6 +572,6 @@ let op_SYS_CLOSE = op_SYSCALL1 4;;    (* sys_close(unsigned int fd)             
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)
