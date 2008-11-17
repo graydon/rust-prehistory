@@ -179,9 +179,17 @@ let rm_r (oper:operand) (r:int) =
            | Asm.IMM n when imm_is_byte n -> 
                Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
                           Asm.WORD8 disp|]
-           | _ -> 
+           | Asm.IMM _ -> 
                Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
-                          Asm.WORD32 disp |])
+                          Asm.WORD32 disp |]
+           | _ -> 
+               Asm.new_relaxation
+                 [|
+                   Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
+                              Asm.WORD32 disp |];
+                   Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
+                              Asm.WORD8 disp|];
+                 |])
     | _ -> raise Unrecognized
 ;;
 
@@ -205,20 +213,49 @@ let insn_rm_r_imm (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : A
   match i with 
       Asm.IMM n when imm_is_byte n -> 
         insn_rm_r_imm8 op8 oper r i
-    | _ -> 
+    | Asm.IMM k -> 
         insn_rm_r_imm32 op32 oper r i
+    | _ -> 
+        Asm.new_relaxation
+          [| 
+            insn_rm_r_imm32 op32 oper r i;
+            insn_rm_r_imm8 op8 oper r i 
+          |]
 ;;
 
 
-let insn_pcrel (op1:int) (op2:int option) (fix:fixup) : Asm.item = 
+let insn_pcrel_relax
+    (op8_item:Asm.item) 
+    (op32_item:Asm.item) 
+    (fix:fixup) 
+    : Asm.item = 
   let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in 
-	Asm.SEQ [| 
-      (match op2 with 
-           Some op2 -> Asm.BYTES [| op1; op2 |]
-         | None -> Asm.BYTE op1);
-      (Asm.WORD32 (Asm.SUB (Asm.M_POS fix, 
-							Asm.M_POS pcrel_mark_fixup)));
-	  Asm.DEF (pcrel_mark_fixup, Asm.MARK) |]
+  let def = Asm.DEF (pcrel_mark_fixup, Asm.MARK) in
+  let pcrel_expr = (Asm.SUB (Asm.M_POS fix, 
+						     Asm.M_POS pcrel_mark_fixup))
+  in
+    Asm.new_relaxation 
+      [|
+        Asm.SEQ [| op32_item; Asm.WORD32 pcrel_expr; def |];
+        Asm.SEQ [| op8_item; Asm.WORD8 pcrel_expr; def |];
+      |]
+;;
+
+let insn_pcrel_simple (op32:int) (fix:fixup) : Asm.item = 
+  let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in 
+  let def = Asm.DEF (pcrel_mark_fixup, Asm.MARK) in
+  let pcrel_expr = (Asm.SUB (Asm.M_POS fix, 
+						     Asm.M_POS pcrel_mark_fixup))
+  in
+    Asm.SEQ [| Asm.BYTE op32; Asm.WORD32 pcrel_expr; def |]
+;;
+
+let insn_pcrel (op8:int) (op32:int) (fix:fixup) : Asm.item = 
+  insn_pcrel_relax (Asm.BYTE op8) (Asm.BYTE op32) fix
+;;
+
+let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.item = 
+  insn_pcrel_relax (Asm.BYTE op8) (Asm.BYTES [| prefix32; op32 |]) fix
 ;;
 
 
@@ -272,7 +309,7 @@ let select_item_misc t =
   match (t.quad_op, t.quad_dst, t.quad_lhs, t.quad_rhs) with
       
 	  (CCALL, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash2          
-	| (CCALL, Pcrel f, _, _) -> insn_pcrel 0xe8 None f
+	| (CCALL, Pcrel f, _, _) -> insn_pcrel_simple 0xe8 f
 
 	| (CPUSH M32, Reg (HWreg r), _, _) -> Asm.BYTE (0x50 + (reg r))
 	| (CPUSH M32, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash6
@@ -281,19 +318,19 @@ let select_item_misc t =
           
 	| (CRET, _, _, _) -> Asm.BYTE 0xc3
 
-	| (JC,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x82) f
-	| (JNC, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x83) f
-	| (JO,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x80) f
-	| (JNO, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x81) f
-	| (JE,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x84) f
-	| (JNE, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x85) f
-	| (JL,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x8c) f                     
-	| (JLE, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x8e) f                     
-	| (JG,  Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x8f) f                     
-	| (JGE, Pcrel f, _, _) -> insn_pcrel 0x0f (Some 0x8d) f                     
+	| (JC,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x72 0x0f 0x82 f
+	| (JNC, Pcrel f, _, _) -> insn_pcrel_prefix32 0x73 0x0f 0x83 f
+	| (JO,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x70 0x0f 0x80 f
+	| (JNO, Pcrel f, _, _) -> insn_pcrel_prefix32 0x71 0x0f 0x81 f
+	| (JE,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x74 0x0f 0x84 f
+	| (JNE, Pcrel f, _, _) -> insn_pcrel_prefix32 0x75 0x0f 0x85 f
+	| (JL,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x7c 0x0f 0x8c f
+	| (JLE, Pcrel f, _, _) -> insn_pcrel_prefix32 0x7e 0x0f 0x8e f
+	| (JG,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x7f 0x0f 0x8f f
+	| (JGE, Pcrel f, _, _) -> insn_pcrel_prefix32 0x7d 0x0f 0x8d f
 
 	| (JMP, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash4
-	| (JMP, Pcrel f, _, _) -> insn_pcrel 0xe9 None f
+	| (JMP, Pcrel f, _, _) -> insn_pcrel 0xeb 0xe9 f
 
 	| (DEAD, _, _, _) -> Asm.MARK
 	| (END, _, _, _) -> Asm.BYTES [| 0x90 |]

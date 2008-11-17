@@ -63,6 +63,9 @@
 
 open Common;;
 
+exception Bad_fit of string;;
+exception Undef_sym of string;;
+
 type ('a, 'b) expr = 
 	IMM of 'a
   | ADD of (('a, 'b) expr) * (('a, 'b) expr)
@@ -96,16 +99,16 @@ let rec eval32 (e:expr32)
 	let x = Int64.to_int32 v in 
 	  if (Int64.compare v (Int64.of_int32 x)) = 0 then
 		x 
-	  else failwith (kind
-					 ^ " fixup " 
-					 ^ name 
-					 ^ " overflowed 32 bits in eval32: " 
-					 ^ Int64.to_string v)
+	  else raise (Bad_fit (kind
+						   ^ " fixup " 
+						   ^ name 
+						   ^ " overflowed 32 bits in eval32: " 
+						   ^ Int64.to_string v))
   in
   let expandInt kind name v = Int32.of_int v in
   let checkdef kind name v inj =
 	match v with 
-		None -> failwith (kind ^ " fixup " ^ name ^ " undefined in eval32")
+		None -> raise (Undef_sym (kind ^ " fixup " ^ name ^ " undefined in eval32"))
 	  | Some x -> inj kind name x
   in
   match e with 
@@ -133,7 +136,7 @@ let rec eval64 (e:expr64)
 	: int64  = 
   let checkdef kind name v inj =
 	match v with 
-		None -> failwith (kind ^ " fixup '" ^ name ^ "' undefined in eval64")
+		None -> raise (Undef_sym (kind ^ " fixup '" ^ name ^ "' undefined in eval64"))
 	  | Some x -> inj x
   in
   match e with 
@@ -176,9 +179,54 @@ type item =
   | ALIGN_FILE of (int * item)
   | ALIGN_MEM of (int * item)
   | DEF of (fixup * item)
+  | RELAX of relaxation
+
+and relaxation = 
+	{ relax_options: item array;
+	  relax_choice: int ref; }
 ;;
 
-let resolve_fixups (item:item)
+exception Relax_more of relaxation;;
+
+let new_relaxation (items:item array) = 
+  RELAX { relax_options = items;
+		  relax_choice = ref 0; }
+;;
+
+let rec resolve_item (item:item) : unit = 
+  let relaxations = ref [] in 
+  let reset_relaxation rel = 
+	rel.relax_choice := ((Array.length rel.relax_options) - 1);
+  in
+  let real_collector rel = 
+	reset_relaxation rel;
+	relaxations := rel :: (!relaxations) 
+  in
+  let dummy_collector _ = () in 
+  let _ = resolve_item_full real_collector item in
+  let dummy_buffer = Buffer.create 0xffff in 
+  let relax r = 
+	r.relax_choice := (!(r.relax_choice)) - 1
+  in
+  let still_relaxing item = 
+	try
+	  Buffer.reset dummy_buffer;
+	  resolve_item_full dummy_collector item;
+	  lower_item true dummy_buffer item;
+	  false
+	with 
+		Relax_more r -> 
+			begin 
+			  relax r;
+			  true
+			end
+  in
+	while still_relaxing item do
+	  Printf.printf "relaxing...\n";
+	done;
+	resolve_item_full dummy_collector item
+
+and resolve_item_full (relaxation_collector:relaxation -> unit) (item:item)
     : unit =   
   let file_pos = ref 0 in
   let mem_pos = ref 0L in
@@ -229,22 +277,24 @@ let resolve_fixups (item:item)
 			f.fixup_mem_pos <- Some mpos1;
 			f.fixup_file_sz <- Some ((!file_pos) - fpos1);
 			f.fixup_mem_sz <- Some (Int64.sub (!mem_pos) mpos1)
+
+	  | RELAX rel ->
+		  (relaxation_collector rel;
+		   resolve_item rel.relax_options.(!(rel.relax_choice)))
   in
 	resolve_item item 
-;;  
-
-
-let rec lower_item
+	  
+and lower_item
     ~(lsb0:bool)
     ~(buf:Buffer.t)
     ~(it:item)
     : unit =
   let byte (i:int) = 
 	if i < 0
-	then failwith "byte underflow"
+	then raise (Bad_fit "byte underflow")
 	else 
 	  if i > 255
-	  then failwith "byte overflow"
+	  then raise (Bad_fit "byte overflow")
 	  else Buffer.add_char buf (Char.chr i) 
   in
   let word (nbytes:int) (e:expr64) = 
@@ -280,10 +330,18 @@ let rec lower_item
 	let shift = Int64.shift_right_logical in  
 	let emit1 k = Buffer.add_char buf (Char.chr (Int64.to_int k)) in
 	  if Int64.compare i bot = (-1) 
-	  then failwith ("word underflow: " ^ (Int64.to_string i) ^ " into " ^ (string_of_int nbytes) ^ " bytes")
+	  then raise (Bad_fit ("word underflow: " 
+						   ^ (Int64.to_string i) 
+						   ^ " into " 
+						   ^ (string_of_int nbytes) 
+						   ^ " bytes"))
 	  else 
 		if Int64.compare i top = 1
-		then failwith ("word overflow: " ^ (Int64.to_string i) ^ " into " ^ (string_of_int nbytes) ^ " bytes")
+		then raise (Bad_fit ("word overflow: " 
+							 ^ (Int64.to_string i) 
+							 ^ " into " 
+							 ^ (string_of_int nbytes) 
+							 ^ " bytes"))
 		else 
 		  if lsb0
 		  then 
@@ -340,6 +398,12 @@ let rec lower_item
 
 	  | ALIGN_MEM (_, i) -> lower_item_2 lsb0 buf i
       | DEF (f, i) ->  lower_item_2 lsb0 buf i;
+	  | RELAX rel -> 
+		  try 
+			lower_item_2 lsb0 buf rel.relax_options.(!(rel.relax_choice))
+		  with 
+			  Bad_fit s -> raise (Relax_more rel)
+							 		 
 (*
 		  (* 
 		   * We need to ensure that if the DEF advanced the file_pos 
@@ -361,7 +425,7 @@ and
     (* Some odd recursion bug? Unifier gets sad without this indirection. *)
     lower_item_2 lsb0 buf i = lower_item lsb0 buf i
 ;;
-
+  
 
 let fold_flags (f:'a -> int64) (flags:'a list) : int64 = 
   List.fold_left (Int64.logor) 0x0L (List.map f flags)
@@ -372,6 +436,6 @@ let fold_flags (f:'a -> int64) (flags:'a list) : int64 =
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)

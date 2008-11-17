@@ -696,7 +696,7 @@ let emit_file outfile code =
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin outfile in
-	resolve_fixups all_items;
+	resolve_item all_items;
 	lower_item ~lsb0: true ~buf: buf ~it: all_items;
 	Buffer.output_buffer out buf;
 	flush out;
@@ -708,6 +708,6 @@ let emit_file outfile code =
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)
