@@ -358,7 +358,7 @@ and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =
     emit Il.NOP Il.Nil Il.Nil Il.Nil;
     emit Il.NOP Il.Nil Il.Nil Il.Nil;
     Il.emit_full cx.ctxt_emit (Some fn.Ast.fn_fixup) Il.MOV (r X86.ebp) (r X86.esp) Il.Nil;
-    emit Il.SUB (r X86.ebp) (r X86.ebp) (Il.Imm (Asm.IMM fn.Ast.fn_frame.Ast.frame_layout.layout_size));
+    emit Il.SUB (r X86.esp) (r X86.esp) (Il.Imm (Asm.IMM fn.Ast.fn_frame.Ast.frame_layout.layout_size));
     trans_stmt cx fn.Ast.fn_body;
     emit Il.MOV (r X86.esp) (r X86.ebp) Il.Nil;
     Il.emit cx.ctxt_emit Il.CRET Il.Nil Il.Nil Il.Nil
