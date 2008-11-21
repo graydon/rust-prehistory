@@ -178,6 +178,11 @@ let (abi:Abi.abi) =
     Abi.abi_ptr_mem = Il.M32;
 
     Abi.abi_is_2addr_machine = true;
+    Abi.abi_has_pcrel_loads = false;
+    Abi.abi_has_pcrel_jumps = true;
+    Abi.abi_has_imm_loads = false;
+    Abi.abi_has_imm_jumps = false;
+    
     Abi.abi_n_hardregs = n_hardregs;
     Abi.abi_str_of_hardreg = reg_str;
     
@@ -350,6 +355,8 @@ let select_item_misc t =
 	| (CPUSH M32, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash6
 	| (CPUSH M32, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD32 i |]          
 	| (CPUSH M8, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD8 i |]
+
+	| (CPOP M32, r, _, _) when is_rm32 r -> insn_rm_r 0x8f r slash0
         
 	| (CRET, _, _, _) -> Asm.BYTE 0xc3
 

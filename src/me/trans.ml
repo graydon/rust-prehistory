@@ -92,34 +92,63 @@ let rec trans_resolved_path
  * threat to the logic is implemented!  
  *)
 
-let trans_lval 
+let trans_lval_full
     (cx:ctxt) 
     (lv:Ast.lval)
+    (pcrel_ok:bool)
+    (imm_ok:bool)
     : Il.operand = 
   match !(lv.Ast.lval_res) with 
       None -> raise (Semant_err (Some lv.Ast.lval_src.span, 
                                  "unresolved lval in trans_lval"))
     | Some res -> 
-        begin 
-          match res.Ast.res_path with 
-              (Ast.RES_off (n, (Ast.RES_deref (Ast.RES_pr FP)))) when n != 0L -> 
-                begin
-                  (* In this case, we're translating a local. We'll assign a vreg. *)
-                  (* FIXME: only do this if the local is subword-sized. *)
-                  let cell = lv.Ast.lval_vreg in 
-                    match !cell with 
-                        Some v -> Il.Reg (Il.Vreg v)
-                      | None -> 
-                          let vr = (Il.next_vreg cx.ctxt_emit) in
-                            begin
-                              match vr with 
-                                  Il.Vreg v -> cell := Some v
-                                | _ -> failwith "non-vreg in Trans.trans_lval"
-                            end;
-                            Il.Reg vr
-                end
-            | pth -> trans_resolved_path cx pth
-        end
+        match res.Ast.res_target with 
+            Ast.RES_item ri -> 
+              begin
+                match ri.node with 
+                    (Ast.MOD_ITEM_fn fd) -> 
+                      let fix = fd.Ast.decl_item.Ast.fn_fixup in
+                      if pcrel_ok
+                      then Il.Pcrel fix
+                      else 
+                        let imm = (Il.Imm (Asm.M_POS fix)) in 
+                          if imm_ok 
+                          then imm
+                          else 
+                            let tmp = (Il.next_vreg cx.ctxt_emit) in 
+		                      Il.emit cx.ctxt_emit Il.MOV (Il.Reg tmp) imm Il.Nil;
+                              (Il.Reg tmp)
+                  | _ -> raise (Semant_err (Some lv.Ast.lval_src.span, 
+                                            "unhandled form of mod item in trans_lval"))
+              end
+          | _ -> 
+              begin 
+                match res.Ast.res_path with 
+                    (Ast.RES_off (n, (Ast.RES_deref (Ast.RES_pr FP)))) when n != 0L -> 
+                      begin
+                        (* In this case, we're translating a local. We'll assign a vreg. *)
+                        (* FIXME: only do this if the local is subword-sized. *)
+                        let cell = lv.Ast.lval_vreg in 
+                          match !cell with 
+                              Some v -> Il.Reg (Il.Vreg v)
+                            | None -> 
+                                let vr = (Il.next_vreg cx.ctxt_emit) in
+                                  begin
+                                    match vr with 
+                                        Il.Vreg v -> cell := Some v
+                                      | _ -> failwith "non-vreg in Trans.trans_lval"
+                                  end;
+                                  Il.Reg vr
+                      end
+                  | pth -> trans_resolved_path cx pth
+              end
+;;
+
+let trans_lval
+    (cx:ctxt) 
+    (lv:Ast.lval)
+    : Il.operand = 
+  trans_lval_full cx lv false false
 ;;
 
 let trans_atom 
@@ -284,6 +313,18 @@ let rec trans_stmt
                         patch cx skip_els_clause_jmp                        
               end
 
+      | Ast.STMT_call (dst, fn, args) -> 
+          let abi = cx.ctxt_abi in
+            (* FIXME: factor out call protocol into ABI bits. *)
+            for i = 0 to (Array.length args) - 1 do              
+              emit (Il.CPUSH Il.M32) (trans_atom cx args.(i)) Il.Nil Il.Nil
+            done;
+            emit Il.CCALL (trans_lval_full cx fn abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) Il.Nil Il.Nil;
+            for i = 0 to (Array.length args) - 1 do   
+              emit (Il.CPOP Il.M32) (Il.Reg (Il.HWreg X86.edx)) Il.Nil Il.Nil
+            done
+            
+
       | _ -> ()
                 
 (* 
@@ -301,7 +342,6 @@ let rec trans_stmt
   | STMT_prove of (constrs)
   | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
-  | STMT_call of (lval * lval * (lval array))
   | STMT_send of (lval * lval)
   | STMT_recv of (lval * lval)
   | STMT_decl of stmt_decl 
@@ -309,9 +349,20 @@ let rec trans_stmt
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")
 *)
 
-and trans_fn (cx:ctxt) (fn:Ast.fn) : unit = 
-  trans_stmt cx fn.Ast.fn_body
-
+and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =   
+  let emit = Il.emit cx.ctxt_emit in  
+  let r x = Il.Reg (Il.HWreg x) in
+    (* FIXME: factor out prologue / epilogue into ABI bits. *)
+    emit Il.NOP Il.Nil Il.Nil Il.Nil;
+    emit Il.NOP Il.Nil Il.Nil Il.Nil;
+    emit Il.NOP Il.Nil Il.Nil Il.Nil;
+    emit Il.NOP Il.Nil Il.Nil Il.Nil;
+    Il.emit_full cx.ctxt_emit (Some fn.Ast.fn_fixup) Il.MOV (r X86.ebp) (r X86.esp) Il.Nil;
+    emit Il.SUB (r X86.ebp) (r X86.ebp) (Il.Imm (Asm.IMM fn.Ast.fn_frame.Ast.frame_layout.layout_size));
+    trans_stmt cx fn.Ast.fn_body;
+    emit Il.MOV (r X86.esp) (r X86.ebp) Il.Nil;
+    Il.emit cx.ctxt_emit Il.CRET Il.Nil Il.Nil Il.Nil
+      
 and trans_prog (cx:ctxt) (p:Ast.prog) : unit = 
   trans_mod_items cx p.Ast.prog_mod
 
