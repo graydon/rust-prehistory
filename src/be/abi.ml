@@ -48,12 +48,12 @@
  * frame layout:
  * 
  * [0] return PC
- * [0] link to process                         <-- frame pointer (x86:ebp) 
- * [1*ptr] link to type descriptor
- * [2*ptr] outgoing slot = N bytes             <-- start of 'args'
- * [N+2*ptr] link to parent closure
- * [N+3*ptr] arg tuple = K bytes
- * [N+K+3*ptr] link to our closure             <-- start of 'locals'
+ * [1*ptr] link to process                     <-- frame pointer (x86:ebp) 
+ * [2*ptr] link to type descriptor
+ * [4*ptr] outgoing slot = N bytes             <-- start of 'args'
+ * [N+4*ptr] arg tuple = K bytes
+ * [3*ptr] yield PC (possibly delta from retpc)
+ * [4*ptr] link to closure
  * [N+K+4*ptr] spill0
  * ...         ...
  * ...         spillN

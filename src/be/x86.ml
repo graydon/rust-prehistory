@@ -171,7 +171,7 @@ let reg_str r =
 
 
 (* This is a basic ABI. You might need to customize it by platform. *)
-let n_hardregs = 4;;
+let n_hardregs = 6;;
 let (abi:Abi.abi) = 
   {
     Abi.abi_ptrsz = 4;
