@@ -195,6 +195,8 @@ let string_of_quad f t =
 
 type emitter = { mutable emit_pc: int;
 				 mutable emit_next_vreg: int; 
+                 emit_preallocator: (quad -> quad);
+                 emit_is_2addr: bool;
 				 mutable emit_quads: quads; }
 
 
@@ -214,10 +216,12 @@ let deadq = { quad_op = DEAD;
 ;;
 
 
-let new_emitter _ = 
+let new_emitter (preallocator:quad -> quad) (is_2addr:bool) = 
   { 
     emit_pc = 0;
     emit_next_vreg = 0;
+    emit_preallocator = preallocator;
+    emit_is_2addr = is_2addr;
     emit_quads = Array.create 4 badq;
   }
 ;;
@@ -240,16 +244,43 @@ let grow_if_necessary e =
 ;;
 
 
+  
 
 let emit_full e fix op dst lhs rhs =
-  grow_if_necessary e;
-  e.emit_quads.(e.emit_pc) <- 
-	{ quad_op = op;
-	  quad_dst = dst;
-	  quad_lhs = lhs;
-	  quad_rhs = rhs;
-	  quad_fixup = fix };
-  e.emit_pc <- e.emit_pc + 1
+  let fixup = ref fix in 
+  let emit_quad q = 
+    grow_if_necessary e;
+    e.emit_quads.(e.emit_pc) <- { q with quad_fixup = (!fixup) };
+    fixup := None;
+    e.emit_pc <- e.emit_pc + 1
+  in
+  let mq op d l r = { quad_op = op; quad_dst = d; 
+                      quad_lhs = l; quad_rhs = r; quad_fixup = None }
+  in
+  let emit_mov dst src = emit_quad (mq MOV dst src Nil) in
+  let quad = (mq op dst lhs rhs) in
+  let quad' = e.emit_preallocator quad in 
+    if quad'.quad_lhs != quad.quad_lhs
+    then emit_mov quad'.quad_lhs quad.quad_lhs
+    else ();
+    if quad'.quad_rhs != quad.quad_rhs
+    then emit_mov quad'.quad_rhs quad.quad_rhs
+    else ();
+    if e.emit_is_2addr 
+      && (quad'.quad_lhs != quad'.quad_dst)
+      && (quad'.quad_dst != Nil)
+      && (quad'.quad_lhs != Nil)
+      && (quad'.quad_rhs != Nil)
+    then 
+      begin
+        emit_mov quad'.quad_dst quad'.quad_lhs;
+        emit_quad { quad' with quad_lhs = quad'.quad_dst }
+      end
+    else 
+      emit_quad quad';
+    if quad'.quad_dst != quad.quad_dst
+    then emit_mov quad.quad_dst quad'.quad_dst 
+    else ();
 ;;
 
 let emit e op dst lhs rhs = 

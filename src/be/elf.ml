@@ -512,7 +512,7 @@ let elf32_linux_x86_file
 							DEF (got2_fixup, WORD32 (IMM 0L)); |] 
 	in
 	let plt0_item = 
-	  let e = Il.new_emitter X86.n_hardregs in
+	  let e = Il.new_emitter X86.prealloc_quad true in
 		Il.emit e (Il.CPUSH Il.M32) (Il.Imm (M_POS got1_fixup)) Il.Nil Il.Nil;
 		Il.emit e Il.JMP (Il.Mem (Il.M32, None, (M_POS got2_fixup))) Il.Nil Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil Il.Nil;
@@ -919,7 +919,7 @@ let elf32_linux_x86_file
 	let (i, strtab_items, symtab_items,
 		 plt_items, got_plt_items, rela_plt_items) = x in
 	let (strtab_item, symtab_item) = sym_emitter symname st_bind None in
-	let e = Il.new_emitter X86.n_hardregs in 
+	let e = Il.new_emitter X86.prealloc_quad true in 
 	let jump_slot_fixup = new_fixup ("jump slot #" ^ string_of_int i) in
 	let jump_slot_initial_target_fixup = 
 	  new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
@@ -1174,7 +1174,7 @@ let emit_file (sess:Session.sess) (code:Asm.item) =
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
   let start_fn = 
-	let e = Il.new_emitter X86.n_hardregs in
+	let e = Il.new_emitter X86.prealloc_quad true in
 	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.Hreg X86.eax)) Il.Nil Il.Nil;
 	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.Hreg X86.esp)) Il.Nil Il.Nil;
 	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.Hreg X86.edx)) Il.Nil Il.Nil;
@@ -1188,13 +1188,13 @@ let emit_file (sess:Session.sess) (code:Asm.item) =
   in
 
   let do_nothing_fn = 
-	let e = Il.new_emitter X86.n_hardregs in
+	let e = Il.new_emitter X86.prealloc_quad true in
 	  Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 	  x86_items_of_emitted_quads e
   in
 
   let main_fn = 
-	let e = Il.new_emitter X86.n_hardregs in
+	let e = Il.new_emitter X86.prealloc_quad true in
 	  Il.emit e Il.CCALL (Il.Pcrel rust_start_fixup) Il.Nil Il.Nil;
 	  Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 	  x86_items_of_emitted_quads e

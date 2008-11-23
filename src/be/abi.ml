@@ -80,7 +80,7 @@ type abi =
     abi_n_hardregs: int;
     abi_str_of_hardreg: (int -> string);
     abi_prealloc_quad: (Il.quad -> Il.quad);
-    abi_clobbers: (Il.quad -> int list); 
+    abi_clobbers: (Il.quad -> Il.hreg list); 
     
     abi_fp_operand: Il.operand;
     abi_pp_operand: Il.operand;

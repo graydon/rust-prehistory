@@ -12,7 +12,7 @@ prog woohoo
     putstr("hello");
     while (y < 10) {
 	  putint(y);
-	  if (y - 3 == 4) {
+	  if (y * 3 == 4) {
 		y = y + 2;
 	  }
 	}

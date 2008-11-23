@@ -317,39 +317,46 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
                     quad_rhs = Nil;
                     quad_fixup = None }
     in
-    let spill_specific_hreg hreg i = 
-      let vreg = Hashtbl.find hreg_to_vreg hreg in
-      let spill =
-        if Hashtbl.mem vreg_to_spill vreg
-        then Hashtbl.find vreg_to_spill vreg
-        else 
-          begin
-            let s = next_spill cx in 
-              Hashtbl.add vreg_to_spill vreg s;
-              s
-          end
-      in
-        Hashtbl.remove vreg_to_hreg vreg;
-        Hashtbl.remove hreg_to_vreg hreg;
-        active_hregs := List.filter (fun x -> x != hreg) (!active_hregs);
-        inactive_hregs := hreg :: (!inactive_hregs); 
-        if (Bitv.get (live_out_vregs.(i)) vreg) && 
-          (Hashtbl.mem dirty_vregs vreg)
-        then 
-          begin
-            Hashtbl.remove dirty_vregs vreg;
-            prepend (mov (spill_slot spill) (Reg (Hreg hreg)))
-          end
-        else
-          ();  
+    let spill_specific_hreg i hreg = 
+      if (Hashtbl.mem hreg_to_vreg hreg) && 
+        (hreg < cx.ctxt_abi.Abi.abi_n_hardregs) 
+      then 
+        begin
+          let vreg = Hashtbl.find hreg_to_vreg hreg in
+          let spill =
+            if Hashtbl.mem vreg_to_spill vreg
+            then Hashtbl.find vreg_to_spill vreg
+            else 
+              begin
+                let s = next_spill cx in 
+                  Hashtbl.add vreg_to_spill vreg s;
+                  s
+              end
+          in
+            Hashtbl.remove vreg_to_hreg vreg;
+            Hashtbl.remove hreg_to_vreg hreg;
+            active_hregs := List.filter (fun x -> x != hreg) (!active_hregs);
+            inactive_hregs := hreg :: (!inactive_hregs); 
+            if (Bitv.get (live_out_vregs.(i)) vreg) && 
+              (Hashtbl.mem dirty_vregs vreg)
+            then 
+              begin
+                Hashtbl.remove dirty_vregs vreg;
+                prepend (mov (spill_slot spill) (Reg (Hreg hreg)))
+              end
+            else
+              ()
+        end
+      else
+        ()
     in
     let spill_some_hreg i = 
       match !active_hregs with 
           [] -> raise (Ra_error ("spilling with no active hregs"));
-        | x::xs -> 
+        | h::hs -> 
             begin 
-              spill_specific_hreg x i;
-              x
+              spill_specific_hreg i h;
+              h
             end
     in
     let spill_all_regs i = 
@@ -366,7 +373,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
       else ()
     in
 
-    let use_vreg i vreg = 
+    let use_vreg def i vreg = 
       if Hashtbl.mem vreg_to_hreg vreg
       then Hashtbl.find vreg_to_hreg vreg
       else 
@@ -376,16 +383,29 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
             | x::_ -> x
         in
           inactive_hregs := List.filter (fun x -> x != hreg) (!inactive_hregs);
-          active_hregs := (!active_hregs) @ [hreg];           
+          active_hregs := (!active_hregs) @ [hreg];
           Hashtbl.add hreg_to_vreg hreg vreg;
           Hashtbl.add vreg_to_hreg vreg hreg;
-          reload vreg hreg;
+          if def
+          then ()
+          else 
+            reload vreg hreg;
           hreg
     in
-    let use_operand i oper = 
+    let use_operand def i oper =
       match oper with 
-          Reg (Vreg v) -> Reg (Hreg (use_vreg i v))
-        | Mem (a, Some (Vreg v), b) -> Mem (a, Some (Hreg (use_vreg i v)), b)
+          Reg (Vreg v) -> Reg (Hreg (use_vreg def i v))
+        | Mem (a, Some (Vreg v), b) -> Mem (a, Some (Hreg (use_vreg def i v)), b)
+        | Reg (Hreg h) -> 
+            begin 
+              spill_specific_hreg i h; 
+              Reg (Hreg h)
+            end
+        | Mem (a, Some (Hreg h), b) -> 
+            begin
+              spill_specific_hreg i h; 
+              Mem (a, Some (Hreg h), b)
+            end
         | x -> x
     in
       convert_labels cx;
@@ -395,23 +415,25 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
       done;
       for i = 0 to (Array.length cx.ctxt_quads) - 1
       do
-        let quad = cx.ctxt_quads.(i) in          
+        let quad = cx.ctxt_quads.(i) in
+        let clobbers = cx.ctxt_abi.Abi.abi_clobbers quad in
           begin
             fixup := quad.quad_fixup;
+            List.iter (spill_specific_hreg i) clobbers;
             if is_beginning_of_basic_block quad
             then 
               begin
                 spill_all_regs i;
                 prepend { quad with 
-                            quad_dst = use_operand i quad.quad_dst;
-                            quad_lhs = use_operand i quad.quad_lhs;
-                            quad_rhs = use_operand i quad.quad_rhs }
+                            quad_dst = use_operand true i quad.quad_dst;
+                            quad_lhs = use_operand false i quad.quad_lhs;
+                            quad_rhs = use_operand false i quad.quad_rhs }
               end
             else 
               let newq = { quad with 
-                             quad_dst = use_operand i quad.quad_dst;
-                             quad_lhs = use_operand i quad.quad_lhs;
-                             quad_rhs = use_operand i quad.quad_rhs }
+                             quad_dst = use_operand true i quad.quad_dst;
+                             quad_lhs = use_operand false i quad.quad_lhs;
+                             quad_rhs = use_operand false i quad.quad_rhs }
               in
                 begin
                   if is_end_of_basic_block quad

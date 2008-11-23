@@ -12,7 +12,7 @@ type ctxt =
 
 let new_ctxt (sess:Session.sess) (abi:Abi.abi) : ctxt = 
   { 
-    ctxt_emit = Il.new_emitter ();
+    ctxt_emit = Il.new_emitter abi.Abi.abi_prealloc_quad abi.Abi.abi_is_2addr_machine;
     ctxt_sess = sess;
     ctxt_abi = abi
   }
@@ -193,24 +193,11 @@ let trans_expr
 		  let rhs = trans_atom cx b in
 		  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
           let arith op = 
-            if cx.ctxt_abi.Abi.abi_is_2addr_machine
-            then 
-			  (emit Il.MOV dst lhs Il.Nil;
-               emit op dst dst rhs)
-            else
-			  emit op dst lhs rhs;
+			emit op dst lhs rhs;
 			dst
           in
           let rela cjmp = 
-            if cx.ctxt_abi.Abi.abi_is_2addr_machine
-            then 
-              begin
-                let t = Il.Reg (Il.next_vreg cx.ctxt_emit) in
-                  emit Il.MOV t lhs Il.Nil;
-                  emit Il.CMP Il.Nil t rhs
-              end
-            else 
-              emit Il.CMP Il.Nil lhs rhs;
+            emit Il.CMP Il.Nil lhs rhs;
             emit Il.MOV dst imm_true Il.Nil;
             let j = mark cx in
               emit cjmp badlab Il.Nil Il.Nil;
@@ -231,12 +218,9 @@ let trans_expr
                 | Ast.BINOP_sub -> arith Il.SUB
                     
                 (* FIXME: switch on type of operands. *)
-                (* FIXME: wire to reg X86.eax, sigh.  *)
-                (* 
-                   | Ast.BINOP_mul -> Il.UMUL
-                   | Ast.BINOP_div -> Il.UDIV
-                   | Ast.BINOP_mod -> Il.UMOD
-                *)
+                | Ast.BINOP_mul -> arith Il.UMUL
+                | Ast.BINOP_div -> arith Il.UDIV
+                | Ast.BINOP_mod -> arith Il.UMOD
                     
                 | Ast.BINOP_eq -> rela Il.JE                
                 | Ast.BINOP_ne -> rela Il.JNE                
@@ -255,12 +239,7 @@ let trans_expr
 			  Ast.UNOP_not -> Il.NOT
 			| Ast.UNOP_neg -> Il.NEG
 		  in
-            if cx.ctxt_abi.Abi.abi_is_2addr_machine
-            then 
-			  (emit Il.MOV dst src Il.Nil;
-               emit op dst dst Il.Nil)
-            else               
-			  emit op dst src Il.Nil;
+			emit op dst src Il.Nil;
 			dst
 
       | Ast.EXPR_atom a -> 

@@ -169,9 +169,25 @@ let reg_str r =
 	| _ -> raise (Invalid_argument "X86.reg_str")
 ;;
 
-
 (* This is a basic ABI. You might need to customize it by platform. *)
 let n_hardregs = 6;;
+
+let prealloc_quad (quad:Il.quad) : Il.quad = 
+  match quad.Il.quad_op with 
+      Il.IMUL | Il.UMUL -> { quad with Il.quad_dst = Il.Reg (Il.Hreg eax) }
+    | Il.IDIV | Il.UDIV -> { quad with Il.quad_dst = Il.Reg (Il.Hreg eax) }
+    | Il.IMOD | Il.UMOD -> { quad with Il.quad_dst = Il.Reg (Il.Hreg edx) }
+    | _ -> quad
+;;
+
+let clobbers (quad:Il.quad) : Il.hreg list = 
+  match quad.Il.quad_op with
+      Il.IMUL | Il.UMUL -> [ edx ]
+    | Il.IDIV | Il.UDIV -> [ edx ]
+    | Il.IMOD | Il.UMOD -> [ eax ]
+    | _ -> []  
+;;
+  
 let (abi:Abi.abi) = 
   {
     Abi.abi_ptrsz = 4;
@@ -185,8 +201,8 @@ let (abi:Abi.abi) =
     
     Abi.abi_n_hardregs = n_hardregs;
     Abi.abi_str_of_hardreg = reg_str;
-    Abi.abi_prealloc_quad = (fun q -> q);
-    Abi.abi_clobbers = (fun q -> []);
+    Abi.abi_prealloc_quad = prealloc_quad;
+    Abi.abi_clobbers = clobbers;
     
     Abi.abi_fp_operand = Il.Reg (Il.Hreg ebp);
     Abi.abi_pp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 0L);
@@ -396,14 +412,13 @@ let alu_binop dst src immslash rm_dst_op rm_src_op =
 
 let mul_like src slash = 
   if is_rm32 src
-  then insn_rm_r 0x7f src slash
-  else raise Unrecognized
-;;
-
-
-let mod_like src slash = 
-  Asm.SEQ [| mul_like src slash; 
-             mov (Reg (Hreg eax)) (Reg (Hreg edx)) |]
+  then insn_rm_r 0xf7 src slash
+  else 
+    match src with 
+        Imm i -> 
+          Asm.SEQ [| mov (Reg (Hreg edx)) src;
+                     insn_rm_r 0xf7 (Reg (Hreg edx)) slash |]
+      | _ -> raise Unrecognized
 ;;
 
 
@@ -419,20 +434,19 @@ let select_insn q =
               let binop = alu_binop q.quad_lhs q.quad_rhs in
               let unop = insn_rm_r 0xf7 q.quad_lhs in
               let mulop = mul_like q.quad_rhs in
-              let modop = mod_like q.quad_rhs in
                 match (q.quad_dst, q.quad_op) with 
                     (_, ADD) -> binop slash0 0x1 0x3 
                   | (_, SUB) -> binop slash5 0x29 0x2b
                   | (_, AND) -> binop slash4 0x21 0x23
                   | (_, OR) -> binop slash1 0x09 0x0b
-                      
+
                   | (Reg (Hreg 0), UMUL) -> mulop slash4
                   | (Reg (Hreg 0), IMUL) -> mulop slash5
                   | (Reg (Hreg 0), UDIV) -> mulop slash6
                   | (Reg (Hreg 0), IDIV) -> mulop slash7
                       
-                  | (Reg (Hreg 0), UMOD) -> modop slash6
-                  | (Reg (Hreg 0), IMOD) -> modop slash7
+                  | (Reg (Hreg 0), UMOD) -> mulop slash6
+                  | (Reg (Hreg 0), IMOD) -> mulop slash7
                       
                   | (_, NEG) -> unop slash3 
                   | (_, NOT) -> unop slash2

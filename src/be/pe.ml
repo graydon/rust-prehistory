@@ -550,13 +550,13 @@ let pe_import_section
 		 |])
       
 ;;
-
+(* 
 let pe_text_section
 	~(exit_fn_fixup:fixup)
 	~(text_fixup:fixup)
     : item =
   let
-	  e = Il.new_emitter 5 	
+	  e = Il.new_emitter  5 	
   in
   let 
 	  exit_fn_imm = (ADD ((IMM pe_image_base),
@@ -569,7 +569,7 @@ let pe_text_section
 	def_aligned
 	  text_fixup
 	  (SEQ (Array.map X86.select_insn e.Il.emit_quads))
-		
+*)
 (*********************************************************************************)
 
 let test_imports0 = 
