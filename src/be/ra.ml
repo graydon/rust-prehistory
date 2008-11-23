@@ -5,20 +5,22 @@ type ctxt =
 	{ 
       ctxt_sess: Session.sess; 
       ctxt_n_vregs: int;
-      ctxt_n_hardregs: int;
+      ctxt_abi: Abi.abi;
       mutable ctxt_quads: Il.quads;
 	  mutable ctxt_next_spill: int;      
+	  mutable ctxt_next_label: int;      
       (* More state as necessary. *)
     }
 ;;
 
-let	new_ctxt sess quads vregs hardregs = 
+let	new_ctxt sess quads vregs abi = 
   { 
     ctxt_sess = sess;
     ctxt_quads = quads;
     ctxt_n_vregs = vregs;
-    ctxt_n_hardregs = hardregs;
-    ctxt_next_spill = 0
+    ctxt_abi = abi;
+    ctxt_next_spill = 0;
+    ctxt_next_label = 0;
   }
 ;;
 
@@ -33,6 +35,12 @@ let next_spill cx =
     i
 ;;
 
+let next_label cx = 
+  let i = cx.ctxt_next_label in 
+    cx.ctxt_next_label <- i + 1;
+    (".L" ^ (string_of_int i))
+;;
+
 exception Ra_error of string ;;
 
 let convert_labels cx = 
@@ -41,7 +49,7 @@ let convert_labels cx =
     match s with 
         Label lab -> 
           let fix = (match cx.ctxt_quads.(lab).quad_fixup with 
-                         None -> ( let fix = new_fixup "target" in
+                         None -> ( let fix = new_fixup (next_label cx) in
                                      new_labels := (lab, fix) :: (!new_labels);
                                      fix)
                        | Some f -> f)
@@ -99,19 +107,19 @@ let kill_redundant_moves cx =
  * and we insert a 2 fresh live intervals for fresh vregs x and y
  * 
  *    { live_vreg: x; 
- *      live_operand: Fixed (HWreg EDX); 
+ *      live_operand: Fixed (Hreg EDX); 
  *      live_startpoint: i;
  *      live_endpoint: i+1; }
  * 
  *    { live_vreg: y; 
- *      live_operand: Fixed (HWreg EAX); 
+ *      live_operand: Fixed (Hreg EAX); 
  *      live_startpoint: i;
  *      live_endpoint: i+2; }
  * 
  * Constraint rules must be careful not to insert unsatisfiable quads. This 
  * example will cause any live interval allocated to EAX or EDX to be 
  * reassigned to a spill operand; if any of those spilled intervals happened to 
- * be Fixed() to some other HWregs, the spill be unsatisfiable.
+ * be Fixed() to some other Hregs, the spill be unsatisfiable.
  * 
  * 
  *)
@@ -245,18 +253,48 @@ let is_beginning_of_basic_block quad =
     | Some _ -> true
 ;;
 
+let dump_quads cx = 
+  let f = cx.ctxt_abi.Abi.abi_str_of_hardreg in
+  let len = (Array.length cx.ctxt_quads) - 1 in
+  let ndigits_of n = (int_of_float (log10 (float_of_int n))) in
+  let padded_num n maxnum = 
+    let ndigits = ndigits_of n in
+    let maxdigits = ndigits_of maxnum in 
+    let pad = String.make (maxdigits - ndigits) ' ' in
+      Printf.sprintf "%s%d" pad n
+  in
+  let padded_str str maxlen = 
+    let pad = String.make (maxlen - (String.length str)) ' ' in
+      Printf.sprintf "%s%s" pad str
+  in
+  let maxlablen = ref 0 in 
+  for i = 0 to len
+  do
+    let q = cx.ctxt_quads.(i) in
+    match q.quad_fixup with 
+        None -> ()
+      | Some f -> maxlablen := max (!maxlablen) ((String.length f.fixup_name) + 1)
+  done;
+  for i = 0 to len
+  do
+    let q = cx.ctxt_quads.(i) in
+    let qs = (string_of_quad f q) in
+    let lab = match q.quad_fixup with
+        None -> ""
+      | Some f -> f.fixup_name ^ ":"
+    in
+      log cx "[%s] %s %s" (padded_num i len) (padded_str lab (!maxlablen)) qs
+  done
+;;
 
 (* Simple local register allocator. Nothing fancy. *)
 let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
   try 
-    let cx = new_ctxt sess quads vregs abi.Abi.abi_n_hardregs in 
+    let cx = new_ctxt sess quads vregs abi in 
     let _ = 
       begin
         log cx "un-allocated quads:";
-        for i = 0 to (Array.length cx.ctxt_quads) - 1
-        do 
-          log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_quads.(i))
-        done
+        dump_quads cx
       end
     in
     let (live_in_vregs, live_out_vregs) = calculate_live_bitvectors cx in
@@ -272,7 +310,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
       newq := {q with quad_fixup = !fixup} :: (!newq);
       fixup := None
     in
-    let spill_slot i = Mem (M32, Some (HWreg X86.ebp), (Asm.IMM (Int64.of_int (i*4)))) in
+    let spill_slot i = Mem (M32, Some (Hreg X86.ebp), (Asm.IMM (Int64.of_int (i*4)))) in
     let mov a b = { quad_op = MOV; 
                     quad_dst = a;
                     quad_lhs = b;
@@ -300,7 +338,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
         then 
           begin
             Hashtbl.remove dirty_vregs vreg;
-            prepend (mov (spill_slot spill) (Reg (HWreg hreg)))
+            prepend (mov (spill_slot spill) (Reg (Hreg hreg)))
           end
         else
           ();  
@@ -324,7 +362,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
     let reload vreg hreg = 
       if Hashtbl.mem vreg_to_spill vreg
       then 
-        prepend (mov (Reg (HWreg hreg)) (spill_slot (Hashtbl.find vreg_to_spill vreg)))
+        prepend (mov (Reg (Hreg hreg)) (spill_slot (Hashtbl.find vreg_to_spill vreg)))
       else ()
     in
 
@@ -346,12 +384,12 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
     in
     let use_operand i oper = 
       match oper with 
-          Reg (Vreg v) -> Reg (HWreg (use_vreg i v))
-        | Mem (a, Some (Vreg v), b) -> Mem (a, Some (HWreg (use_vreg i v)), b)
+          Reg (Vreg v) -> Reg (Hreg (use_vreg i v))
+        | Mem (a, Some (Vreg v), b) -> Mem (a, Some (Hreg (use_vreg i v)), b)
         | x -> x
     in
       convert_labels cx;
-      for i = 0 to cx.ctxt_n_hardregs - 1
+      for i = 0 to cx.ctxt_abi.Abi.abi_n_hardregs - 1
       do
         inactive_hregs := i :: (!inactive_hregs)
       done;
@@ -388,10 +426,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
       kill_redundant_moves cx;
       
       log cx "register-allocated quads:";
-      for i = 0 to (Array.length cx.ctxt_quads) - 1
-      do 
-        log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_quads.(i))
-      done;
+      dump_quads cx;
 
       cx.ctxt_quads
 

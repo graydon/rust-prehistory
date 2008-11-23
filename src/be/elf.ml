@@ -1175,13 +1175,13 @@ let emit_file (sess:Session.sess) (code:Asm.item) =
 
   let start_fn = 
 	let e = Il.new_emitter X86.n_hardregs in
-	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.HWreg X86.eax)) Il.Nil Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.HWreg X86.esp)) Il.Nil Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.HWreg X86.edx)) Il.Nil Il.Nil;
+	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.Hreg X86.eax)) Il.Nil Il.Nil;
+	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.Hreg X86.esp)) Il.Nil Il.Nil;
+	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.Hreg X86.edx)) Il.Nil Il.Nil;
 	  Il.emit e (Il.CPUSH Il.M32) (Il.Imm (M_POS fini_fixup)) Il.Nil Il.Nil;
 	  Il.emit e (Il.CPUSH Il.M32) (Il.Imm (M_POS init_fixup)) Il.Nil Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.HWreg X86.ecx)) Il.Nil Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.HWreg X86.esi)) Il.Nil Il.Nil;
+	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.Hreg X86.ecx)) Il.Nil Il.Nil;
+	  Il.emit e (Il.CPUSH Il.M32) (Il.Reg (Il.Hreg X86.esi)) Il.Nil Il.Nil;
 	  Il.emit e (Il.CPUSH Il.M32) (Il.Imm (M_POS main_fixup)) Il.Nil Il.Nil;
 	  Il.emit e Il.CCALL (Il.Pcrel libc_start_main_fixup) Il.Nil Il.Nil;
 	  x86_items_of_emitted_quads e

@@ -321,7 +321,7 @@ let rec trans_stmt
             done;
             emit Il.CCALL (trans_lval_full cx fn abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) Il.Nil Il.Nil;
             for i = 0 to (Array.length args) - 1 do   
-              emit (Il.CPOP Il.M32) (Il.Reg (Il.HWreg X86.edx)) Il.Nil Il.Nil
+              emit (Il.CPOP Il.M32) (Il.Reg (Il.Hreg X86.edx)) Il.Nil Il.Nil
             done
             
 
@@ -351,7 +351,7 @@ let rec trans_stmt
 
 and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =   
   let emit = Il.emit cx.ctxt_emit in  
-  let r x = Il.Reg (Il.HWreg x) in
+  let r x = Il.Reg (Il.Hreg x) in
     (* FIXME: factor out prologue / epilogue into ABI bits. *)
     emit Il.NOP Il.Nil Il.Nil Il.Nil;
     emit Il.NOP Il.Nil Il.Nil Il.Nil;
@@ -397,7 +397,7 @@ and trans_crate
           log cx "emitted quads:";
           for i = 0 to (Array.length quads) - 1
           do 
-            log cx "[%6d]\t%s" i (Il.string_of_quad quads.(i));
+            log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
           done
         end;        
         (quads, cx.ctxt_emit.Il.emit_next_vreg)

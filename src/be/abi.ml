@@ -79,6 +79,8 @@ type abi =
     abi_has_imm_jumps: bool;
     abi_n_hardregs: int;
     abi_str_of_hardreg: (int -> string);
+    abi_prealloc_quad: (Il.quad -> Il.quad);
+    abi_clobbers: (Il.quad -> int list); 
     
     abi_fp_operand: Il.operand;
     abi_pp_operand: Il.operand;

@@ -4,15 +4,19 @@ open Common;;
 type mem = M8 | M16 | M32 | M64 
 ;;
 
+type vreg = int
+;;
 
-type reg = Vreg of int
-		   | HWreg of int
+type hreg = int
+;;
+
+type reg = Vreg of vreg
+		   | Hreg of hreg
            | Preg of abi_pseudo_reg
 ;;
 
 
-type operand =  Spill of int
-			    | Label of int
+type operand =  Label of int
 			    | Imm of Asm.expr64
 			    | Pcrel of fixup
                 | Reg of reg
@@ -52,15 +56,14 @@ type quads = quad array
 
 let is_primitive_reg r = 
   match r with 
-      HWreg _ -> true
+      Hreg _ -> true
     | _ -> false
 ;;
 
 
 let is_primitive_operand op = 
   match op with 
-      Spill _ -> false
-    | Label _ -> false
+      Label _ -> false
     | Reg r -> is_primitive_reg r
     | Mem (_, Some r, _) -> is_primitive_reg r
     | _ -> true
@@ -74,29 +77,28 @@ let is_primitive_quad q =
 ;;
 
 
-let string_of_reg r = 
+let string_of_reg (f:int->string) r = 
   match r with 
-      Vreg i -> "vreg:" ^ (string_of_int i)
-    | HWreg i -> "hreg:" ^ (string_of_int i)
-    | Preg PP -> "pp"
-    | Preg FP -> "fp"
-    | Preg CP -> "cp"
-    | Preg RP -> "rp"
+      Vreg i -> "<v" ^ (string_of_int i) ^ ">"
+    | Hreg i -> f i
+    | Preg PP -> "<pp>"
+    | Preg FP -> "<fp>"
+    | Preg CP -> "<cp>"
+    | Preg RP -> "<rp>"
 ;;
 
 
-let string_of_operand operand = 
+let string_of_operand (f:int->string) operand = 
   match operand with
-      Reg r -> string_of_reg r
-    | Spill i -> "spill:" ^ (string_of_int i)
-    | Imm (Asm.IMM i) -> Printf.sprintf "imm:0x%Lx" i
-    | Imm _ -> "imm:??" 
-	| Pcrel f -> "pcrel:" ^ f.fixup_name 
-    | Mem (_, (Some r),(Asm.IMM n)) -> Printf.sprintf "%s[%Ld]" (string_of_reg r) n
-    | Mem (_, (Some r),_) -> Printf.sprintf "%s[??]" (string_of_reg r)
+      Reg r -> string_of_reg f r
+    | Imm (Asm.IMM i) -> Printf.sprintf "0x%Lx" i
+    | Imm _ -> "<imm??>" 
+	| Pcrel f -> "<" ^ f.fixup_name ^ ">"
+    | Mem (_, (Some r),(Asm.IMM n)) -> Printf.sprintf "%s[%Ld]" (string_of_reg f r) n
+    | Mem (_, (Some r),_) -> Printf.sprintf "%s[??]" (string_of_reg f r)
     | Mem (_, None,(Asm.IMM n)) -> Printf.sprintf "*(%Ld)" n
     | Mem (_, None,_) -> "*(??)" 
-    | Label i -> "label:" ^ (string_of_int i)
+    | Label i -> "<lab" ^ (string_of_int i) ^ ">"
     | Nil -> "nil"
 ;;
 
@@ -154,38 +156,38 @@ let string_of_op op =
 ;;
 
 
-let string_of_quad t = 
+let string_of_quad f t = 
   match t.quad_op with 
       ADD | SUB | IMUL | UMUL | IDIV | UDIV | IMOD | UMOD
 	| AND | OR | LSL | LSR | ASR -> 
 		Printf.sprintf "%s = %s %s %s"
-		  (string_of_operand t.quad_dst)
-		  (string_of_operand t.quad_lhs)
+		  (string_of_operand f t.quad_dst)
+		  (string_of_operand f t.quad_lhs)
 		  (string_of_op t.quad_op)
-		  (string_of_operand t.quad_rhs)
+		  (string_of_operand f t.quad_rhs)
 
 	| NOT | NEG -> 
 		Printf.sprintf "%s = %s %s"
-		  (string_of_operand t.quad_dst)
+		  (string_of_operand f t.quad_dst)
 		  (string_of_op t.quad_op)
-		  (string_of_operand t.quad_lhs)
+		  (string_of_operand f t.quad_lhs)
 		  
 	| MOV -> 
 		Printf.sprintf "%s = %s"
-		  (string_of_operand t.quad_dst)
-		  (string_of_operand t.quad_lhs)
+		  (string_of_operand f t.quad_dst)
+		  (string_of_operand f t.quad_lhs)
 
 	| CMP -> 
 		Printf.sprintf "%s %s %s"
 		  (string_of_op t.quad_op)
-		  (string_of_operand t.quad_lhs)
-		  (string_of_operand t.quad_rhs)
+		  (string_of_operand f t.quad_lhs)
+		  (string_of_operand f t.quad_rhs)
 	      
 	| JMP | JE | JNE | JL | JLE | JG | JGE | JC | JNC | JO | JNO
     | CALL | RESUME | CCALL | CPUSH _ | CPOP _ ->
 		Printf.sprintf "%s %s"
 		  (string_of_op t.quad_op)
-		  (string_of_operand t.quad_dst)
+		  (string_of_operand f t.quad_dst)
           
 	| RET | YIELD | CRET | NOP | DEAD | END -> 
 		(string_of_op t.quad_op)
@@ -259,6 +261,6 @@ let emit e op dst lhs rhs =
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
  * End:
  *)

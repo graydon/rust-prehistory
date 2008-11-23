@@ -185,11 +185,13 @@ let (abi:Abi.abi) =
     
     Abi.abi_n_hardregs = n_hardregs;
     Abi.abi_str_of_hardreg = reg_str;
+    Abi.abi_prealloc_quad = (fun q -> q);
+    Abi.abi_clobbers = (fun q -> []);
     
-    Abi.abi_fp_operand = Il.Reg (Il.HWreg ebp);
-    Abi.abi_pp_operand = Il.Mem (Il.M32, Some (Il.HWreg ebp), Asm.IMM 0L);
-    Abi.abi_cp_operand = Il.Mem (Il.M32, Some (Il.HWreg ebp), Asm.IMM 4L);
-    Abi.abi_rp_operand = Il.Mem (Il.M32, Some (Il.HWreg ebp), Asm.IMM 8L);
+    Abi.abi_fp_operand = Il.Reg (Il.Hreg ebp);
+    Abi.abi_pp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 0L);
+    Abi.abi_cp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 4L);
+    Abi.abi_rp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 8L);
   }
 
 
@@ -207,12 +209,12 @@ let rm_r (oper:operand) (r:int) =
   let reg_ebp = 6 in
   let reg_esp = 7 in 
     match oper with 
-        Reg (HWreg rm) -> 
+        Reg (Hreg rm) -> 
           Asm.BYTE (modrm_reg (reg rm) r)
       | Mem (_, None, disp) -> 
           Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
                      Asm.WORD32 disp |]
-      | Mem (_, Some (HWreg rm), disp) when rm != reg_esp -> 
+      | Mem (_, Some (Hreg rm), disp) when rm != reg_esp -> 
           (match disp with 
                Asm.IMM 0L when rm != reg_ebp -> 
                  Asm.BYTE (modrm_deref_reg (reg rm) r)
@@ -302,7 +304,7 @@ let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.it
 let is_rm32 (oper:operand) : bool = 
   match oper with 
       Mem (M32, _, _) -> true
-    | Reg (HWreg _) -> true
+    | Reg (Hreg _) -> true
     | _ -> false
 ;;
 
@@ -310,7 +312,7 @@ let is_rm32 (oper:operand) : bool =
 let is_rm8 (oper:operand) : bool = 
   match oper with 
       Mem (M8, _, _) -> true
-    | Reg (HWreg _) -> true
+    | Reg (Hreg _) -> true
     | _ -> false
 ;;
 
@@ -318,21 +320,21 @@ let is_rm8 (oper:operand) : bool =
 let cmp (a:operand) (b:operand) : Asm.item = 
   match (a,b) with 
       (_, Imm i) when is_rm32 a -> insn_rm_r_imm 0x83 0x81 a slash7 i
-    | (_, Reg (HWreg r)) -> insn_rm_r 0x39 a r
-    | (Reg (HWreg r), _) -> insn_rm_r 0x3b b r
+    | (_, Reg (Hreg r)) -> insn_rm_r 0x39 a r
+    | (Reg (Hreg r), _) -> insn_rm_r 0x3b b r
     | _ -> raise Unrecognized
 ;;
 
 
 let mov (dst:operand) (src:operand) : Asm.item = 
   match (dst,src) with 
-      (Mem (M8, _, _), Reg (HWreg r)) -> 
+      (Mem (M8, _, _), Reg (Hreg r)) -> 
         insn_rm_r 0x88 dst (reg r)
-    | (_, Reg (HWreg r)) when is_rm32 dst -> 
+    | (_, Reg (Hreg r)) when is_rm32 dst -> 
         insn_rm_r 0x89 dst (reg r)
-    | (Reg (HWreg r), Mem (M8, _, _)) -> 
+    | (Reg (Hreg r), Mem (M8, _, _)) -> 
         insn_rm_r 0x8a src (reg r)
-    | (Reg (HWreg r), Mem (M32, _, _)) -> 
+    | (Reg (Hreg r), Mem (M32, _, _)) -> 
         insn_rm_r 0x8b src (reg r);
         
     | (_, Imm (Asm.IMM n)) when is_rm8 dst && imm_is_byte n -> 
@@ -351,7 +353,7 @@ let select_item_misc t =
 	  (CCALL, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash2          
 	| (CCALL, Pcrel f, _, _) -> insn_pcrel_simple 0xe8 f
 
-	| (CPUSH M32, Reg (HWreg r), _, _) -> Asm.BYTE (0x50 + (reg r))
+	| (CPUSH M32, Reg (Hreg r), _, _) -> Asm.BYTE (0x50 + (reg r))
 	| (CPUSH M32, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash6
 	| (CPUSH M32, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD32 i |]          
 	| (CPUSH M8, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD8 i |]
@@ -385,9 +387,9 @@ let select_item_misc t =
 
 let alu_binop dst src immslash rm_dst_op rm_src_op = 
   match (dst, src) with 
-      (Reg (HWreg r), _) when is_rm32 src -> insn_rm_r rm_src_op src (reg r)
-    | (_, Reg (HWreg r)) when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
-    | (Reg (HWreg _), Imm i) -> insn_rm_r_imm 0x83 0x81 dst immslash i 
+      (Reg (Hreg r), _) when is_rm32 src -> insn_rm_r rm_src_op src (reg r)
+    | (_, Reg (Hreg r)) when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
+    | (Reg (Hreg _), Imm i) -> insn_rm_r_imm 0x83 0x81 dst immslash i 
     | _ -> raise Unrecognized
 ;;
 
@@ -401,7 +403,7 @@ let mul_like src slash =
 
 let mod_like src slash = 
   Asm.SEQ [| mul_like src slash; 
-             mov (Reg (HWreg eax)) (Reg (HWreg edx)) |]
+             mov (Reg (Hreg eax)) (Reg (Hreg edx)) |]
 ;;
 
 
@@ -424,13 +426,13 @@ let select_insn q =
                   | (_, AND) -> binop slash4 0x21 0x23
                   | (_, OR) -> binop slash1 0x09 0x0b
                       
-                  | (Reg (HWreg 0), UMUL) -> mulop slash4
-                  | (Reg (HWreg 0), IMUL) -> mulop slash5
-                  | (Reg (HWreg 0), UDIV) -> mulop slash6
-                  | (Reg (HWreg 0), IDIV) -> mulop slash7
+                  | (Reg (Hreg 0), UMUL) -> mulop slash4
+                  | (Reg (Hreg 0), IMUL) -> mulop slash5
+                  | (Reg (Hreg 0), UDIV) -> mulop slash6
+                  | (Reg (Hreg 0), IDIV) -> mulop slash7
                       
-                  | (Reg (HWreg 0), UMOD) -> modop slash6
-                  | (Reg (HWreg 0), IMOD) -> modop slash7
+                  | (Reg (Hreg 0), UMOD) -> modop slash6
+                  | (Reg (Hreg 0), IMOD) -> modop slash7
                       
                   | (_, NEG) -> unop slash3 
                   | (_, NOT) -> unop slash2
@@ -453,7 +455,7 @@ let select_insns (sess:Session.sess) (q:Il.quads) : Asm.item =
         Unrecognized -> 
           Session.fail sess
             "E:Assembly error: unrecognized quad: %s\n%!" 
-            (Il.string_of_quad q);
+            (Il.string_of_quad reg_str q);
           Asm.MARK
   in
     Asm.SEQ (Array.map sel q)

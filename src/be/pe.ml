@@ -562,7 +562,7 @@ let pe_text_section
 	  exit_fn_imm = (ADD ((IMM pe_image_base),
 						  (M_POS exit_fn_fixup)))    
   in
-  let ebx = Il.Reg (Il.HWreg X86.ebx) in    
+  let ebx = Il.Reg (Il.Hreg X86.ebx) in    
 	Il.emit e Il.MOV ebx (Il.Mem (Il.M32, None, exit_fn_imm)) Il.Nil;
 	Il.emit e (Il.CPUSH Il.M32) (Il.Imm (IMM 7L)) Il.Nil Il.Nil;
 	Il.emit e Il.CCALL ebx Il.Nil Il.Nil;
