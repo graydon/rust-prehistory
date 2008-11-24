@@ -245,10 +245,17 @@ and slot_key =
   | KEY_temp of nonce
 
 
+and local =
+    {
+      local_slot: (slot ref) spanned;
+      local_vreg: (int option) ref;
+      local_layout: layout;
+    }
+
 and frame = 
     {
       frame_layout: layout;
-      frame_slots: (slot_key, (layout * ((slot ref) spanned))) Hashtbl.t;
+      frame_locals: (slot_key, local) Hashtbl.t;
       frame_items: (ident, (layout * mod_item)) Hashtbl.t;
     }
 
@@ -356,7 +363,7 @@ and lval_resolved =
     }
 
 and resolved_target = 
-    RES_slot of (slot ref) spanned
+    RES_slot of local
   | RES_item of mod_item
 
 and lval' = 
@@ -367,7 +374,6 @@ and lval =
     { 
       lval_src: lval' spanned;
       lval_res: (lval_resolved option) ref;
-      lval_vreg: (int option) ref;
     }
       
 and binop =    

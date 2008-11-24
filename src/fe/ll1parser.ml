@@ -535,8 +535,7 @@ and parse_lval_component (ps:pstate)
       
 and new_lval src = 
   { Ast.lval_src = src;
-    Ast.lval_res = ref None;
-    Ast.lval_vreg = ref None; }
+    Ast.lval_res = ref None; }
 
 and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) = 
   let apos = lexpos ps in 
@@ -897,7 +896,7 @@ and parse_one_or_more_tup_slots_and_idents param_slot ps =
 	
 and new_frame _ = 
   { Ast.frame_layout = new_layout ();
-	Ast.frame_slots = Hashtbl.create 0;
+	Ast.frame_locals = Hashtbl.create 0;
 	Ast.frame_items = Hashtbl.create 0; }
 
 and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit = 
@@ -911,8 +910,10 @@ and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit =
 		  Hashtbl.add frame.Ast.frame_items id 
 			((new_layout()), item)
 	  | Ast.DECL_slot (key, slot) -> 
-		  Hashtbl.add frame.Ast.frame_slots key
-            ((new_layout()), slot)
+		  Hashtbl.add frame.Ast.frame_locals key
+            { Ast.local_layout = new_layout();
+              Ast.local_slot = slot;
+              Ast.local_vreg = ref None; }
 
 and parse_block ps = 
   let frames = ps.pstate_block_frames in

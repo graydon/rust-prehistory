@@ -155,14 +155,14 @@ let trans_lval_full
                   | _ -> raise (Semant_err (Some lv.Ast.lval_src.span, 
                                             "unhandled form of mod item in trans_lval"))
               end
-          | _ -> 
+          | Ast.RES_slot local -> 
               begin 
                 match res.Ast.res_path with 
                     (Ast.RES_off (n, (Ast.RES_deref (Ast.RES_pr FP)))) when n != 0L -> 
                       begin
                         (* In this case, we're translating a local. We'll assign a vreg. *)
                         (* FIXME: only do this if the local is subword-sized. *)
-                        let cell = lv.Ast.lval_vreg in 
+                        let cell = local.Ast.local_vreg in 
                           match !cell with 
                               Some v -> Il.Reg (Il.Vreg v)
                             | None -> 
