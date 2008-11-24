@@ -87,44 +87,6 @@ let kill_redundant_moves cx =
   done
 ;;
 
-
-(* 
- * On some ISAs we have hard register constraints. An example of this is 
- * on x86, where we have MUL placing its result in (EDX,EAX) no matter
- * what. 
- * 
- * In this case, when we have a quad of the form 
- * 
- *   i: (MUL,vreg dst, vreg a, vreg b) 
- * 
- * we have an ISA-specific "constraint" rule that replaces it with the following, 
- * pushing our quad numbers down by 1:
- * 
- *   i  : (MUL, [vreg x, vreg y], vreg a, vreg b)
- *   i+1: (MOV, [vreg dst], vreg x)
- *   i+2: (MOV, [vreg dst], vreg y)
- * 
- * and we insert a 2 fresh live intervals for fresh vregs x and y
- * 
- *    { live_vreg: x; 
- *      live_operand: Fixed (Hreg EDX); 
- *      live_startpoint: i;
- *      live_endpoint: i+1; }
- * 
- *    { live_vreg: y; 
- *      live_operand: Fixed (Hreg EAX); 
- *      live_startpoint: i;
- *      live_endpoint: i+2; }
- * 
- * Constraint rules must be careful not to insert unsatisfiable quads. This 
- * example will cause any live interval allocated to EAX or EDX to be 
- * reassigned to a spill operand; if any of those spilled intervals happened to 
- * be Fixed() to some other Hregs, the spill be unsatisfiable.
- * 
- * 
- *)
-
-
 let quad_jump_target_labels q = 
   let operand_jump_target_labels s = 
     match s with 
@@ -174,50 +136,68 @@ let calculate_live_bitvectors cx =
   let (live_out_vregs:Bitv.t array) = Array.init n_quads new_bitv in
   let bitvs_equal a b = ((Bitv.to_list a) = (Bitv.to_list b)) in
 	
-  let changed = ref true in
-    while !changed do
-      changed := false;
-      log cx "iterating live bitvector calculation";
-      for i = n_quads - 1 downto 0 do
-		let quad = quads.(i) in
-		let live_in = live_in_vregs.(i) in
-		let live_in_saved = Bitv.copy live_in in 
-		let live_out = live_out_vregs.(i) in
-		let live_out_saved = Bitv.copy live_out in 
+  let outer_changed = ref true in
+    while !outer_changed do      
+      outer_changed := false;
+      for i = 0 to n_quads - 1 do
+        live_in_vregs.(i) <- new_bitv ();
+        live_out_vregs.(i) <- new_bitv () 
+      done;
+      let inner_changed = ref true in
+        while !inner_changed do
+          inner_changed := false;
+          log cx "iterating live bitvector calculation";
+          for i = n_quads - 1 downto 0 do
+		    let quad = quads.(i) in
+		    let live_in = live_in_vregs.(i) in
+		    let live_in_saved = Bitv.copy live_in in 
+		    let live_out = live_out_vregs.(i) in
+		    let live_out_saved = Bitv.copy live_out in 
 
-		let union bv1 bv2 = Bitv.iteri_true (fun i -> Bitv.set bv1 i true) bv2 in
+		    let union bv1 bv2 = Bitv.iteri_true (fun i -> Bitv.set bv1 i true) bv2 in
 
-        let defined = new_bitv() in 
-          
-          List.iter (fun i -> Bitv.set live_in i true) (quad_used_vregs quad);
-          List.iter (fun i -> Bitv.set defined i true) (quad_defined_vregs quad);
+            let defined = new_bitv() in 
+              
+              List.iter (fun i -> Bitv.set live_in i true) (quad_used_vregs quad);
+              List.iter (fun i -> Bitv.set defined i true) (quad_defined_vregs quad);
 
-          for i = 0 to (n_vregs - 1)
-          do
-            if Bitv.get live_out i && not (Bitv.get defined i)
-            then Bitv.set live_in i true
-            else ()
-          done;
+              for i = 0 to (n_vregs - 1)
+              do
+                if Bitv.get live_out i && not (Bitv.get defined i)
+                then Bitv.set live_in i true
+                else ()
+              done;
 
-		  (* Union in all our jump targets. *)
-		  List.iter (fun i -> union live_out live_in_vregs.(i)) (quad_jump_target_labels quad);
+		      (* Union in all our jump targets. *)
+		      List.iter (fun i -> union live_out live_in_vregs.(i)) (quad_jump_target_labels quad);
 
-		  (* Union in our block successor if we have one *)
-		  if i < (n_quads - 1) && (not (quad_is_unconditional_jump quad))
-		  then union live_out live_in_vregs.(i+1) 
-		  else ();
-		  
-		  (* Possibly update matters. *)
-		  if bitvs_equal live_in live_in_saved &&
-            bitvs_equal live_out live_out_saved
-		  then ()
-		  else 
-			begin 
-			  live_in_vregs.(i) <- live_in;
-			  live_out_vregs.(i) <- live_out;
-			  changed := true
-			end
-      done
+		      (* Union in our block successor if we have one *)
+		      if i < (n_quads - 1) && (not (quad_is_unconditional_jump quad))
+		      then union live_out live_in_vregs.(i+1) 
+		      else ();
+		      
+		      (* Possibly update matters. *)
+		      if bitvs_equal live_in live_in_saved &&
+                bitvs_equal live_out live_out_saved
+		      then ()
+		      else 
+			    begin 
+			      live_in_vregs.(i) <- live_in;
+			      live_out_vregs.(i) <- live_out;
+			      inner_changed := true
+			    end
+          done
+        done;
+        for i = 0 to n_quads - 1 do
+          let quad = quads.(i) in
+            match (quad.quad_op, quad.quad_dst)  with 
+                (MOV, Reg (Vreg v)) when not (Bitv.get (live_out_vregs.(i)) v) -> 
+                  begin
+                    kill_quad i cx;
+                    outer_changed := true;
+                  end
+              | _ -> ()
+        done
     done;
     log cx "finished calculating live bitvectors";
     log cx "=========================";

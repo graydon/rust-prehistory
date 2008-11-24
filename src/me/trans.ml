@@ -5,27 +5,35 @@ open Common;;
 
 type ctxt = 
     {
-      ctxt_emit: Il.emitter;
+      mutable ctxt_emit: Il.emitter;
       ctxt_sess: Session.sess;
       ctxt_abi: Abi.abi;
+      mutable ctxt_path: string list;
+      mutable ctxt_data_items: Asm.item list;
+      ctxt_text_items: (string, (Il.quads * int)) Hashtbl.t;
     }
+
 
 let new_ctxt (sess:Session.sess) (abi:Abi.abi) : ctxt = 
   { 
     ctxt_emit = Il.new_emitter abi.Abi.abi_prealloc_quad abi.Abi.abi_is_2addr_machine;
     ctxt_sess = sess;
-    ctxt_abi = abi
+    ctxt_abi = abi;
+    ctxt_path = [];
+    ctxt_data_items = [];
+    ctxt_text_items = Hashtbl.create 0
   }
-
 
 let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
 let imm_true = Il.Imm (Asm.IMM 1L);;
 let imm_false = Il.Imm (Asm.IMM 0L);;
 let badlab = Il.Label (-1);;
 
+
 let mark (cx:ctxt) : int = 
   cx.ctxt_emit.Il.emit_pc
 ;;
+
 
 let patch (cx:ctxt) (i:int) : unit = 
   cx.ctxt_emit.Il.emit_quads.(i) 
@@ -33,10 +41,36 @@ let patch (cx:ctxt) (i:int) : unit =
        with Il.quad_dst = Il.Label (mark cx) }
 ;;  
 
+
 let log cx = Session.log "trans" 
   cx.ctxt_sess.Session.sess_log_trans
   cx.ctxt_sess.Session.sess_log_out
 ;;
+
+
+let reset_emitter (cx:ctxt) : unit = 
+  cx.ctxt_emit <- 
+    (Il.new_emitter 
+       cx.ctxt_abi.Abi.abi_prealloc_quad 
+       cx.ctxt_abi.Abi.abi_is_2addr_machine)
+;;
+
+
+let capture_emitted_quads (cx:ctxt) : unit = 
+  let n_vregs = cx.ctxt_emit.Il.emit_next_vreg in 
+  let quads = cx.ctxt_emit.Il.emit_quads in 
+  let name = String.concat "." (List.rev cx.ctxt_path) in
+    begin
+      log cx "emitted quads for %s:" name;
+      for i = 0 to (Array.length quads) - 1
+      do 
+        log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
+      done;
+      Hashtbl.add cx.ctxt_text_items name (quads, n_vregs);
+      reset_emitter cx
+    end
+;;
+
 
 let rec trans_resolved_path 
     (cx:ctxt) 
@@ -144,12 +178,14 @@ let trans_lval_full
               end
 ;;
 
+
 let trans_lval
     (cx:ctxt) 
     (lv:Ast.lval)
     : Il.operand = 
   trans_lval_full cx lv false false
 ;;
+
 
 let trans_atom 
     (cx:ctxt) 
@@ -298,11 +334,13 @@ let rec trans_stmt
             for i = 0 to (Array.length args) - 1 do              
               emit (Il.CPUSH Il.M32) (trans_atom cx args.(i)) Il.Nil Il.Nil
             done;
-            emit Il.CCALL (trans_lval_full cx fn abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) Il.Nil Il.Nil;
-            for i = 0 to (Array.length args) - 1 do   
-              emit (Il.CPOP Il.M32) (Il.Reg (Il.Hreg X86.edx)) Il.Nil Il.Nil
-            done
-            
+            let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+            let dst = trans_lval cx dst in
+            let fn = (trans_lval_full cx fn abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
+            emit Il.CCALL vr fn Il.Nil;
+            emit Il.MOV dst vr Il.Nil;
+            emit Il.ADD abi.Abi.abi_sp_operand abi.Abi.abi_sp_operand 
+              (Il.Imm (Asm.IMM (Int64.of_int (4 * (Array.length args)))));
 
       | _ -> ()
                 
@@ -328,59 +366,56 @@ let rec trans_stmt
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")
 *)
 
-and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =   
+and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =
+  let _ = reset_emitter cx in
   let emit = Il.emit cx.ctxt_emit in  
   let r x = Il.Reg (Il.Hreg x) in
     (* FIXME: factor out prologue / epilogue into ABI bits. *)
-    emit Il.NOP Il.Nil Il.Nil Il.Nil;
-    emit Il.NOP Il.Nil Il.Nil Il.Nil;
-    emit Il.NOP Il.Nil Il.Nil Il.Nil;
-    emit Il.NOP Il.Nil Il.Nil Il.Nil;
     Il.emit_full cx.ctxt_emit (Some fn.Ast.fn_fixup) Il.MOV (r X86.ebp) (r X86.esp) Il.Nil;
     emit Il.SUB (r X86.esp) (r X86.esp) (Il.Imm (Asm.IMM fn.Ast.fn_frame.Ast.frame_layout.layout_size));
     trans_stmt cx fn.Ast.fn_body;
     emit Il.MOV (r X86.esp) (r X86.ebp) Il.Nil;
-    Il.emit cx.ctxt_emit Il.CRET Il.Nil Il.Nil Il.Nil
+    Il.emit cx.ctxt_emit Il.CRET Il.Nil Il.Nil Il.Nil;
+    capture_emitted_quads cx
+
       
 and trans_prog (cx:ctxt) (p:Ast.prog) : unit = 
   trans_mod_items cx p.Ast.prog_mod
+
 
 and trans_mod_item 
     (cx:ctxt) 
     (name:Ast.ident) 
     (item:Ast.mod_item) 
     : unit = 
-  match item.node with 
-	  Ast.MOD_ITEM_fn f -> trans_fn cx f.Ast.decl_item
-	| Ast.MOD_ITEM_mod m -> trans_mod_items cx m.Ast.decl_item
-	| Ast.MOD_ITEM_prog p -> trans_prog cx p.Ast.decl_item
-	| _ -> ()
- 
+  let oldpath = cx.ctxt_path in 
+    cx.ctxt_path <- name :: cx.ctxt_path;
+    begin
+      match item.node with 
+	      Ast.MOD_ITEM_fn f -> trans_fn cx f.Ast.decl_item
+	    | Ast.MOD_ITEM_mod m -> trans_mod_items cx m.Ast.decl_item
+	    | Ast.MOD_ITEM_prog p -> trans_prog cx p.Ast.decl_item
+	    | _ -> ()
+    end;
+    cx.ctxt_path <- oldpath
+            
 
 and trans_mod_items 
     (cx:ctxt) 
     (items:Ast.mod_items)
     : unit = 
   Hashtbl.iter (trans_mod_item cx) items
+
     
 and trans_crate 
     (sess:Session.sess)
     (abi:Abi.abi)
     (crate:Ast.mod_items) 
-    : (Il.quads * int) = 
+    : ((string, (Il.quads * int)) Hashtbl.t * Asm.item list) = 
   try
     let cx = new_ctxt sess abi in 
 	  trans_mod_items cx crate;
-      let quads = cx.ctxt_emit.Il.emit_quads in
-        begin
-          log cx "emitted quads:";
-          for i = 0 to (Array.length quads) - 1
-          do 
-            log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
-          done
-        end;        
-        (quads, cx.ctxt_emit.Il.emit_next_vreg)
-          
+      (cx.ctxt_text_items, cx.ctxt_data_items)
   with 
 	  Semant_err (spano, str) -> 
         begin
@@ -391,7 +426,7 @@ and trans_crate
 			    Session.fail sess "%s:E:Trans error: %s\n%!" 
                   (Session.string_of_span span) str
         end;
-        ([| |], 0)
+        (Hashtbl.create 0, [])
 ;;
 
 (* 

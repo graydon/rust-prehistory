@@ -82,6 +82,7 @@ type abi =
     abi_prealloc_quad: (Il.quad -> Il.quad);
     abi_clobbers: (Il.quad -> Il.hreg list); 
     
+    abi_sp_operand: Il.operand;
     abi_fp_operand: Il.operand;
     abi_pp_operand: Il.operand;
     abi_cp_operand: Il.operand;

@@ -90,15 +90,19 @@ let _ = Resolve.resolve_crate sess abi crate_items;;
 let _ = exit_if_failed ()
 ;;
 
-let ((quads:Il.quads),(n_vregs:int)) = Trans.trans_crate sess abi crate_items;;
+let ((text_items:(string, (Il.quads * int)) Hashtbl.t), 
+     (data_items:Asm.item list)) = Trans.trans_crate sess abi crate_items;;
 let _ = exit_if_failed ()
 ;;
 
-let (quads:Il.quads) = Ra.reg_alloc sess quads n_vregs abi;;
+let (text_quads:Il.quads list) = 
+  Hashtbl.fold 
+    (fun name (quads,n_vregs) accum -> (Ra.reg_alloc sess quads n_vregs abi) :: accum) 
+    text_items [];;
 let _ = exit_if_failed ()
 ;;
 
-let (code:Asm.item) = X86.select_insns sess quads;;
+let (code:Asm.item) = Asm.SEQ (Array.of_list (List.map (X86.select_insns sess) text_quads));;
 let _ = exit_if_failed ()
 ;;
 

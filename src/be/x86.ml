@@ -177,6 +177,7 @@ let prealloc_quad (quad:Il.quad) : Il.quad =
       Il.IMUL | Il.UMUL -> { quad with Il.quad_dst = Il.Reg (Il.Hreg eax) }
     | Il.IDIV | Il.UDIV -> { quad with Il.quad_dst = Il.Reg (Il.Hreg eax) }
     | Il.IMOD | Il.UMOD -> { quad with Il.quad_dst = Il.Reg (Il.Hreg edx) }
+    | Il.CCALL -> { quad with Il.quad_dst = Il.Reg (Il.Hreg eax) }
     | _ -> quad
 ;;
 
@@ -185,7 +186,8 @@ let clobbers (quad:Il.quad) : Il.hreg list =
       Il.IMUL | Il.UMUL -> [ edx ]
     | Il.IDIV | Il.UDIV -> [ edx ]
     | Il.IMOD | Il.UMOD -> [ eax ]
-    | _ -> []  
+    | Il.CCALL -> [ eax; ecx; edx; ]
+    | _ -> []
 ;;
   
 let (abi:Abi.abi) = 
@@ -204,6 +206,7 @@ let (abi:Abi.abi) =
     Abi.abi_prealloc_quad = prealloc_quad;
     Abi.abi_clobbers = clobbers;
     
+    Abi.abi_sp_operand = Il.Reg (Il.Hreg esp);
     Abi.abi_fp_operand = Il.Reg (Il.Hreg ebp);
     Abi.abi_pp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 0L);
     Abi.abi_cp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 4L);
@@ -366,8 +369,8 @@ let mov (dst:operand) (src:operand) : Asm.item =
 let select_item_misc t =
   match (t.quad_op, t.quad_dst, t.quad_lhs, t.quad_rhs) with
       
-	  (CCALL, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash2          
-	| (CCALL, Pcrel f, _, _) -> insn_pcrel_simple 0xe8 f
+	  (CCALL, Reg (Hreg 0), r, _) when is_rm32 r -> insn_rm_r 0xff r slash2
+	| (CCALL, Reg (Hreg 0), Pcrel f, _) -> insn_pcrel_simple 0xe8 f
 
 	| (CPUSH M32, Reg (Hreg r), _, _) -> Asm.BYTE (0x50 + (reg r))
 	| (CPUSH M32, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash6
