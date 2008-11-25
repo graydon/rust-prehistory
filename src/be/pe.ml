@@ -550,26 +550,39 @@ let pe_import_section
 		 |])
       
 ;;
-(* 
+
 let pe_text_section
-	~(exit_fn_fixup:fixup)
+	~(fn_fixup:fixup)
 	~(text_fixup:fixup)
+    ~(crate_code:item)
     : item =
   let
-	  e = Il.new_emitter  5 	
+	  e = Il.new_emitter X86.prealloc_quad true
   in
   let 
-	  exit_fn_imm = (ADD ((IMM pe_image_base),
-						  (M_POS exit_fn_fixup)))    
+	  fn_imm = (ADD ((IMM pe_image_base),
+					 (M_POS fn_fixup)))
   in
-  let ebx = Il.Reg (Il.Hreg X86.ebx) in    
-	Il.emit e Il.MOV ebx (Il.Mem (Il.M32, None, exit_fn_imm)) Il.Nil;
+  let eax = Il.Reg (Il.Hreg X86.eax) in    
+  let ecx = Il.Reg (Il.Hreg X86.ecx) in    
+    (* 
+     * We are called from the Microsoft C library startup routine,
+     * and assumed to be stdcall; so we have to clean up our own 
+     * stack before returning.
+     *)
+	Il.emit e Il.MOV ecx (Il.Mem (Il.M32, None, fn_imm)) Il.Nil;
 	Il.emit e (Il.CPUSH Il.M32) (Il.Imm (IMM 7L)) Il.Nil Il.Nil;
-	Il.emit e Il.CCALL ebx Il.Nil Il.Nil;
+	Il.emit e Il.CCALL eax ecx Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
+	Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 	def_aligned
 	  text_fixup
-	  (SEQ (Array.map X86.select_insn e.Il.emit_quads))
-*)
+      (SEQ [|
+	    (SEQ (Array.map X86.select_insn e.Il.emit_quads));
+        crate_code
+      |])
+;;
+
 (*********************************************************************************)
 
 let test_imports0 = 
@@ -638,16 +651,15 @@ let emit_file (sess:Session.sess) (code:Asm.item) : unit =
 						 ~base_of_data: 0L
 						 ~image_fixup: image_fixup
 						 ~subsys: IMAGE_SUBSYSTEM_WINDOWS_CUI
-						 ~all_hdrs_fixup: all_hdrs_fixup
-						 ~loader_hdr_fixup: loader_hdr_fixup
-						 ~import_dir_fixup: import_dir_fixup)
+						 ~all_hdrs_fixup
+						 ~loader_hdr_fixup
+						 ~import_dir_fixup)
   in
 
-  let text_section = (def_aligned text_fixup code)
-	(* (pe_text_section 
-	   ~exit_fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
-	   ~text_fixup: text_fixup)
-	*)
+  let text_section = (pe_text_section 
+	                    ~fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
+	                    ~text_fixup: text_fixup
+                        ~crate_code: code)
   in
   let bss_section = def_aligned bss_fixup (BSS 0x10L)
   in
@@ -697,7 +709,7 @@ let emit_file (sess:Session.sess) (code:Asm.item) : unit =
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in
 	resolve_item sess all_items;
-	lower_item ~lsb0: true ~buf: buf ~it: all_items;
+	lower_item ~lsb0: true ~buf ~it: all_items;
 	Buffer.output_buffer out buf;
 	flush out;
 	close_out out

@@ -3,10 +3,10 @@
 RUNTIME_OBJS:=$(patsubst %.c, %.o, $(RUNTIME_CS))
 RUNTIME:=rustrt.dll
 
-all: $(COMPILER) $(RUNTIME) Makefile
+all: $(COMPILER) $(RUNTIME) $(MKFILES)
 
-$(RUNTIME): $(RUNTIME_OBJS) Makefile
+$(RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
 	gcc -shared -o $@ -fPIC $(RUNTIME_OBJS)
 
-%.o: %.c Makefile
-	gcc -c -o $@ $<
+%.o: %.c $(MKFILES)
+	gcc -Wall -Werror -pedantic -std=c99 -c -o $@ $<

@@ -1,3 +1,8 @@
+#ifndef RUST_H__
+#define RUST_H__
+
+#include <stdlib.h>
+#include <stdint.h>
 
 /* Basic scalar types we will use. */
 
@@ -49,7 +54,7 @@ typedef enum {
   rust_type_s64 = 27,
 
   rust_type_b64 = 28,
-  rust_type_b128 = 29,
+  rust_type_b128 = 29
 
 } rust_type_tag_t;
 
@@ -104,6 +109,12 @@ typedef struct rust_regs {
   uintptr_t sp;
 } rust_regs_t;
 
+
+/* Runtime closures over lexical environments. */
+typedef struct rust_env {
+  uintptr_t x;
+} rust_env_t;
+
 /* There are 4 frame types, depending on the frame descriptor. */
 
 typedef struct rust_simple_frame {
@@ -142,10 +153,13 @@ typedef struct rust_stk_seg {
   uint8_t data[];
 } rust_stk_seg_t;
 
-/* Runtime closures over lexical environments. */
-typedef struct rust_env {
-};
+typedef struct rust_code {
+  uintptr_t x;
+} rust_code_t;
 
+typedef struct rust_msg_queue {
+  uintptr_t x;
+} rust_msg_queue_t;
 
 typedef struct rust_proc { 
 
@@ -165,6 +179,10 @@ typedef struct rust_proc {
 
 } rust_proc_t;
 
+typedef struct rust_rt { 
+  void (*log_uint32_t)(uint32_t i);
+} rust_rt_t;
+
 /* A proc gets activated */
 typedef struct rust_active_proc {
   rust_proc_t *proc;
@@ -172,20 +190,4 @@ typedef struct rust_active_proc {
   
 } rust_activation_t;
 
-
-
-struct frame { 
-  frame_desc *desc; // points to the code + frame descriptor
-  void *retpc;
-  void *yieldpc;    // optional
-  uint8_t *env;      // optional -- closures only
-  uint8_t slots[];   // computed
-}
-
-struct vec {
-  word_t refs;
-  word_t size;
-  word_t live;
-  word_t init;
-  uint8_t slots[];  // computed
-}
+#endif /* RUST_H__ */

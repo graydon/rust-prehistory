@@ -19,9 +19,12 @@ RUNTIME_CS:=rt/rust.c
 OSTYPE:=$(shell uname -s)
 CPUTYPE:=$(shell uname -m)
 
-include config/$(OSTYPE)-$(CPUTYPE).mk
+CONFIGMK:=config/$(OSTYPE)-$(CPUTYPE).mk
+MKFILES:=Makefile $(CONFIGMK)
 
-$(COMPILER): $(COMPILER_CMOS) Makefile
+include $(CONFIGMK)
+
+$(COMPILER): $(COMPILER_CMOS) $(MKFILES)
 	ocamlc -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(COMPILER_CMOS)
 
 .phony: clean
@@ -33,18 +36,18 @@ clean:
 	rm -f .depend
 	rm -f rust_out.exe rust_out
 
-%.cmo:: %.cmi 
+%.cmo: %.cmi $(MKFILES)
 
-%.cmi: %.mli Makefile
+%.cmi: %.mli $(MKFILES)
 	ocamlc -c -o $@ $(OCAMLC_FLAGS) $<
 
-%.cmo: %.ml Makefile
+%.cmo: %.ml $(MKFILES)
 	ocamlc -c -o $@ $(OCAMLC_FLAGS) $<
 
-%.ml: %.mll Makefile
+%.ml: %.mll $(MKFILES)
 	ocamllex -o $@ $<
 
-.depend: $(COMPILER_MLS) $(RUNTIME_CS) Makefile
+.depend: $(COMPILER_MLS) $(RUNTIME_CS) $(MKFILES)
 	ocamldep $(ML_INCS) $(COMPILER_MLS) > .depend
 	gcc -MM $(RUNTIME_CS) >>.depend
 
