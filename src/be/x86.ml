@@ -61,23 +61,13 @@
 (* 
  * Notes on register availability of x86:
  * 
- * There are 8 GPRs but we use 4 of them for specific purposes:
+ * There are 8 GPRs but we use 2 of them for specific purposes:
  * 
  *   - ESP always points to the current stack frame.
- *   - EBP always points to the current process.
- *   - EDX is reserved for reload/spill operations on locals that did not make
- *     it into hardregs. It is chosen for this because it's also occasionally
- *     clobbered by other ops (mul, udiv and idiv, f.e.) and this saves us
- *     having to bother with fancy support for clobbered regs.
- *   - EDI we also use for reload/spill, because we're using complex addressing 
- *     modes and, sadly, this means we can have 2 spill slots used as memory
- *     base operands in use in a single instruction. On the upside, complex
- *     addressing modes are possibly still cheaper than lots of manual address
- *     arithmetic!
- * 
- * We tell IL that we have 4 GPRs then, and permit most register-register ops
- * on any of these 4, mostly-unconstrained. Still need to support pre-allocating
- * EAX for the destination of mul/imul.
+ *   - EBP always points to the current frame base.
+ *
+ * We tell IL that we have 6 GPRs then, and permit most register-register ops
+ * on any of these 6, mostly-unconstrained. 
  * 
  *)
 
@@ -190,6 +180,12 @@ let clobbers (quad:Il.quad) : Il.hreg list =
     | _ -> []
 ;;
   
+
+let spill_slot framesz i = 
+  Il.Mem (Il.M32, Some (Il.Hreg ebp), 
+          (Asm.IMM (Int64.add (Int64.add framesz 12L) (Int64.mul 4L (Int64.of_int i)))))
+;;
+
 let (abi:Abi.abi) = 
   {
     Abi.abi_ptrsz = 4;
@@ -211,6 +207,8 @@ let (abi:Abi.abi) =
     Abi.abi_pp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 0L);
     Abi.abi_cp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 4L);
     Abi.abi_rp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 8L);
+    Abi.abi_frame_base = 12L;
+    Abi.abi_spill_slot = spill_slot;
   }
 
 
@@ -372,10 +370,10 @@ let select_item_misc t =
 	  (CCALL, Reg (Hreg 0), r, _) when is_rm32 r -> insn_rm_r 0xff r slash2
 	| (CCALL, Reg (Hreg 0), Pcrel f, _) -> insn_pcrel_simple 0xe8 f
 
-	| (CPUSH M32, Reg (Hreg r), _, _) -> Asm.BYTE (0x50 + (reg r))
-	| (CPUSH M32, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash6
-	| (CPUSH M32, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD32 i |]          
-	| (CPUSH M8, Imm i, _, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD8 i |]
+	| (CPUSH M32, _, Reg (Hreg r), _) -> Asm.BYTE (0x50 + (reg r))
+	| (CPUSH M32, _, r, _) when is_rm32 r -> insn_rm_r 0xff r slash6
+	| (CPUSH M32, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD32 i |]          
+	| (CPUSH M8, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD8 i |]
 
 	| (CPOP M32, r, _, _) when is_rm32 r -> insn_rm_r 0x8f r slash0
         

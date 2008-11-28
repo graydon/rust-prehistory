@@ -268,7 +268,7 @@ let dump_quads cx =
 ;;
 
 (* Simple local register allocator. Nothing fancy. *)
-let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
+let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (framesz:int64) =
   try 
     let cx = new_ctxt sess quads vregs abi in 
     let _ = 
@@ -290,7 +290,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
       newq := {q with quad_fixup = !fixup} :: (!newq);
       fixup := None
     in
-    let spill_slot i = Mem (M32, Some (Hreg X86.ebp), (Asm.IMM (Int64.of_int (i*4)))) in
+    let spill_slot i = abi.Abi.abi_spill_slot framesz i in
     let mov a b = { quad_op = MOV; 
                     quad_dst = a;
                     quad_lhs = b;

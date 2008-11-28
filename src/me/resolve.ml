@@ -277,18 +277,19 @@ and lookup_ident
                    let slotr = local.Ast.local_slot in
                    let layout = local.Ast.local_layout in 
 					 ({cx with ctxt_span = Some slotr.span}, 
-					  BINDING_slot (Ast.RES_off (layout.layout_offset, (Ast.RES_deref fp)), local))
+					  BINDING_slot (Ast.RES_member (layout, (Ast.RES_deref fp)), local))
 				 else 
 			       let tab = x.Ast.frame_items in
 				     if Hashtbl.mem tab ident
 				     then 
 				       let (layout, item) = Hashtbl.find tab ident in
 					     ({cx with ctxt_span = Some item.span}, 
-					      BINDING_item (Ast.RES_off (layout.layout_offset, (Ast.RES_deref fp)), item))
+					      BINDING_item (Ast.RES_member (layout, (Ast.RES_deref fp)), item))
                      else 
+                       
 				       lookup_ident 
 					     { cx with ctxt_frame_scopes = xs } 
-					     (Ast.RES_deref fp) ident)
+					     (if x.Ast.frame_heavy then (Ast.RES_deref fp) else fp) ident)
 
 
 and lookup_temp (cx:ctxt) 
@@ -304,12 +305,13 @@ and lookup_temp (cx:ctxt)
 		    let local = Hashtbl.find tab (Ast.KEY_temp temp) in 
             let layout = local.Ast.local_layout in 
             let slot = local.Ast.local_slot in 
+              log cx "found temporary temp %d at offset %Ld" temp layout.layout_offset;
 			  ({ cx with ctxt_span = Some slot.span }, 
-			   BINDING_slot (Ast.RES_off (layout.layout_offset, (Ast.RES_deref fp)), local))
+			   BINDING_slot (Ast.RES_member (layout, (Ast.RES_deref fp)), local))
 		  else 
 		    lookup_temp 
 			  { cx with ctxt_frame_scopes = xs } 
-			  (Ast.RES_deref fp)
+			  (if x.Ast.frame_heavy then (Ast.RES_deref fp) else fp)
 			  temp
               
 
@@ -662,12 +664,15 @@ and layout_frame
 	   (fun (a, _, _) (b, _, _) -> a < b) items) 
        in
     *)
+    (* 
+       FIXME: should offset current 'light' frame to end of parent frame.
+    *)
 	for i = 0 to (Array.length slots) - 1 do
 	  let (_, _, s) = slots.(i) in
         resolve_slot_ref cx None s;
     done;          
 	try 
-	  frame.Ast.frame_layout.layout_size <- 0L;
+	  frame.Ast.frame_layout.layout_size <- cx.ctxt_abi.Abi.abi_frame_base;
 	  for i = 0 to (Array.length slots) - 1 do
         let offset = frame.Ast.frame_layout.layout_size in
 		let (key, layout, s) = slots.(i) in
@@ -696,7 +701,8 @@ and extend_ctxt_by_frame
 		Hashtbl.add items' ident (new_layout(), item)
 	done;
 	let frame = 
-	  { Ast.frame_layout = new_layout();
+	  { Ast.frame_heavy = false;
+        Ast.frame_layout = new_layout();
 		Ast.frame_locals = Hashtbl.create 0;
 		Ast.frame_items = items'; }
 	in

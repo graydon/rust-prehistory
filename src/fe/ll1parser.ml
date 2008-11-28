@@ -894,8 +894,9 @@ and parse_one_or_more_tup_slots_and_idents param_slot ps =
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
 	
-and new_frame _ = 
-  { Ast.frame_layout = new_layout ();
+and new_frame heavy = 
+  { Ast.frame_heavy = heavy;
+    Ast.frame_layout = new_layout ();
 	Ast.frame_locals = Hashtbl.create 0;
 	Ast.frame_items = Hashtbl.create 0; }
 
@@ -917,7 +918,7 @@ and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit =
 
 and parse_block ps = 
   let frames = ps.pstate_block_frames in
-  let frame = new_frame () in 
+  let frame = new_frame false in 
     ps.pstate_block_frames <- frame :: frames; 
     let apos = lexpos ps in
     let stmts = arj (ctxt "block: stmts" 
@@ -1234,7 +1235,7 @@ and parse_sig_and_bind ps =
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn proto_opt lim pure ps =
   let frames = ps.pstate_block_frames in
-  let frame = new_frame () in 
+  let frame = new_frame true in 
     ps.pstate_block_frames <- frame :: frames;     
     let (si, bind) = ctxt "fn: sig and bind" parse_sig_and_bind ps in
     let body = ctxt "fn: body" parse_block ps in

@@ -571,7 +571,7 @@ let pe_text_section
      * stack before returning.
      *)
 	Il.emit e Il.MOV ecx (Il.Mem (Il.M32, None, fn_imm)) Il.Nil;
-	Il.emit e (Il.CPUSH Il.M32) (Il.Imm (IMM 7L)) Il.Nil Il.Nil;
+	Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (IMM 7L)) Il.Nil;
 	Il.emit e Il.CCALL eax ecx Il.Nil;
     Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
 	Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;

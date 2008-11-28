@@ -87,6 +87,8 @@ type abi =
     abi_pp_operand: Il.operand;
     abi_cp_operand: Il.operand;
     abi_rp_operand: Il.operand;  
+    abi_frame_base: int64;
+    abi_spill_slot: (int64 -> int -> Il.operand);
   }
 
 

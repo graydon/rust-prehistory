@@ -254,6 +254,7 @@ and local =
 
 and frame = 
     {
+      frame_heavy: bool;
       frame_layout: layout;
       frame_locals: (slot_key, local) Hashtbl.t;
       frame_items: (ident, (layout * mod_item)) Hashtbl.t;
@@ -352,7 +353,7 @@ and lval_component =
     
 and resolved_path = 
     RES_pr of abi_pseudo_reg
-  | RES_off of (int64 * resolved_path)
+  | RES_member of (layout * resolved_path)
   | RES_deref of resolved_path
   | RES_idx of (resolved_path * resolved_path)
 

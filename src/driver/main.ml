@@ -96,9 +96,11 @@ let _ = exit_if_failed ()
 ;;
 
 let (text_quads:Il.quads list) = 
-  Hashtbl.fold 
-    (fun name (quads,n_vregs) accum -> (Ra.reg_alloc sess quads n_vregs abi) :: accum) 
-    text_items [];;
+  (* FIXME: get the frame size from the translation. *)
+  let frame_sz = 64L in 
+    Hashtbl.fold 
+      (fun name (quads,n_vregs) accum -> (Ra.reg_alloc sess quads n_vregs abi frame_sz) :: accum) 
+      text_items [];;
 let _ = exit_if_failed ()
 ;;
 

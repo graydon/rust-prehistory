@@ -89,14 +89,14 @@ let rec trans_resolved_path
 		      emit Il.ADD tmp av bv;
               tmp
             end
-      | Ast.RES_off (off, lv) -> 
+      | Ast.RES_member (layout, lv) -> 
           begin
             match trans_resolved_path cx lv with
                 Il.Mem (m, v, Asm.IMM off') -> 
-                  Il.Mem (m, v, Asm.IMM (Int64.add off off'))
+                  Il.Mem (m, v, Asm.IMM (Int64.add layout.layout_offset off'))
               | v -> 
                   let tmp = Il.Reg (Il.next_vreg cx.ctxt_emit) in
-                    emit Il.ADD tmp v (Il.Imm (Asm.IMM off));
+                    emit Il.ADD tmp v (Il.Imm (Asm.IMM layout.layout_offset));
                     tmp
           end
       | Ast.RES_deref lv -> 
@@ -158,23 +158,50 @@ let trans_lval_full
           | Ast.RES_slot local -> 
               begin 
                 match res.Ast.res_path with 
-                    (Ast.RES_off (n, (Ast.RES_deref (Ast.RES_pr FP)))) when n != 0L -> 
-                      begin
-                        (* In this case, we're translating a local. We'll assign a vreg. *)
-                        (* FIXME: only do this if the local is subword-sized. *)
-                        let cell = local.Ast.local_vreg in 
-                          match !cell with 
-                              Some v -> Il.Reg (Il.Vreg v)
-                            | None -> 
-                                let vr = (Il.next_vreg cx.ctxt_emit) in
-                                  begin
-                                    match vr with 
-                                        Il.Vreg v -> cell := Some v
-                                      | _ -> failwith "non-vreg in Trans.trans_lval"
-                                  end;
-                                  Il.Reg vr
-                      end
-                  | pth -> trans_resolved_path cx pth
+                    (Ast.RES_member (layout, (Ast.RES_deref (Ast.RES_pr FP))))
+                       when (Int64.compare layout.layout_offset cx.ctxt_abi.Abi.abi_frame_base) >= 0 -> 
+                         begin
+                          (* In this case, we're translating a local. We'll assign a vreg. *)
+                          (* FIXME: only do this if the local is subword-sized. *)
+                          let cell = local.Ast.local_vreg in 
+                            match !cell with 
+                                Some v -> Il.Reg (Il.Vreg v)
+                              | None -> 
+                                  let vr = (Il.next_vreg cx.ctxt_emit) in
+                                    begin
+                                      match vr with 
+                                          Il.Vreg v -> cell := Some v
+                                        | _ -> failwith "non-vreg in Trans.trans_lval"
+                                    end;
+                                    Il.Reg vr
+                        end
+                  | pth -> 
+                      let rec rp_str p = 
+                        match p with 
+                            Ast.RES_pr FP -> "FP"
+                          | Ast.RES_pr PP -> "PP"
+                          | Ast.RES_pr CP -> "CP"
+                          | Ast.RES_pr RP -> "RP"
+                          | Ast.RES_idx (a, b) -> 
+                              Printf.sprintf "RES_idx(%s,%s)" (rp_str a) (rp_str b)
+                          | Ast.RES_member (layout, lv) -> 
+                              Printf.sprintf "RES_member(%Ld,%s)" layout.layout_offset (rp_str lv)
+                          | Ast.RES_deref lv -> 
+                              Printf.sprintf "RES_deref(%s)" (rp_str lv)                                
+                      in
+                      let nbstr nb = 
+                        match nb with 
+	                        (Ast.BASE_ident id) -> id
+	                      | (Ast.BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
+	                      | (Ast.BASE_app (id, tys)) -> "[...]"
+                      in
+                      let lvstr = 
+                        match lv.Ast.lval_src.node with 
+                            Ast.LVAL_base nbase -> nbstr nbase
+                          | _ -> "??"
+                      in                        
+                        log cx "translating lval path for %s: %s" lvstr (rp_str pth); 
+                        trans_resolved_path cx pth
               end
 ;;
 
@@ -332,7 +359,7 @@ let rec trans_stmt
           let abi = cx.ctxt_abi in
             (* FIXME: factor out call protocol into ABI bits. *)
             for i = 0 to (Array.length args) - 1 do              
-              emit (Il.CPUSH Il.M32) (trans_atom cx args.(i)) Il.Nil Il.Nil
+              emit (Il.CPUSH Il.M32) Il.Nil (trans_atom cx args.(i)) Il.Nil
             done;
             let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
             let dst = trans_lval cx dst in

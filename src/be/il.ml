@@ -248,16 +248,35 @@ let grow_if_necessary e =
 
 let emit_full e fix op dst lhs rhs =
   let fixup = ref fix in 
-  let emit_quad q = 
+  let emit_quad_bottom q = 
     grow_if_necessary e;
     e.emit_quads.(e.emit_pc) <- { q with quad_fixup = (!fixup) };
     fixup := None;
     e.emit_pc <- e.emit_pc + 1
   in
+
   let mq op d l r = { quad_op = op; quad_dst = d; 
                       quad_lhs = l; quad_rhs = r; quad_fixup = None }
   in
-  let emit_mov dst src = emit_quad (mq MOV dst src Nil) in
+
+  let emit_quad q = 
+    (* decay mem-mem movs *)
+    match (q.quad_op, q.quad_dst, q.quad_lhs) with 
+        (MOV, Mem _, Mem _) -> 
+          begin
+            let dst = q.quad_dst in
+            let src = q.quad_lhs in
+            let v =(Reg (next_vreg e)) in 
+              emit_quad_bottom (mq MOV v src Nil);
+              emit_quad_bottom (mq MOV dst v Nil)
+          end
+      | _ -> emit_quad_bottom q
+  in
+
+  let emit_mov dst src = 
+    emit_quad (mq MOV dst src Nil)
+  in
+
   let quad = (mq op dst lhs rhs) in
   let quad' = e.emit_preallocator quad in 
     if quad'.quad_lhs != quad.quad_lhs
