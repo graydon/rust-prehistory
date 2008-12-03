@@ -118,19 +118,18 @@ let rec size_of_ty cx t =
 	  Ast.TY_nil -> 0L
 	| Ast.TY_bool -> 1L
 	| Ast.TY_mach (_, n) -> Int64.of_int (n / 8)
-	| Ast.TY_int -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.TY_int -> cx.ctxt_abi.Abi.abi_ptrsz
 	| Ast.TY_char -> 4L
-	| Ast.TY_str -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.TY_str -> cx.ctxt_abi.Abi.abi_ptrsz
 	| Ast.TY_tup tys -> (Array.fold_left (fun n ty -> Int64.add n (slot_size cx ty)) 0L tys)
 	| _ -> raise (err cx "unhandled type in size_of_ty")
 
 and slot_size cx s = 
   match s with 
-	  Ast.SLOT_exterior _ -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
-	| Ast.SLOT_read_alias _ -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
-	| Ast.SLOT_write_alias _ -> Int64.of_int cx.ctxt_abi.Abi.abi_ptrsz
-	| Ast.SLOT_interior t -> 
-		size_of_ty cx t
+	  Ast.SLOT_exterior _ -> cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.SLOT_read_alias _ -> cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.SLOT_write_alias _ -> cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.SLOT_interior t -> size_of_ty cx t
 	| Ast.SLOT_auto -> raise Auto_slot
 ;;
 
@@ -250,7 +249,55 @@ and apply_ctxt_ty cx params args span =
 	(fun x -> Ast.MOD_TYPE_ITEM_public_type x)
 	params args span
 
-
+(* 
+ * Our lookup system integrates notions of the layout of frames, but is presently
+ * not quite correct. What we want to do is:
+ * 
+ *   - Frames look, broadly, like this (growing downward):
+ * 
+ *     +----------------------------+ <-- Rewind tail calls to here. If varargs are supported,
+ *     |caller args                 |     must use memmove or similar "overlap-permitting" move,
+ *     |...                         |     if supporting tail-calling. 
+ *     |...                         |
+ *     +----------------------------+ <-- fp + wordsz + abi_operand_blocksz
+ *     |caller non-reg ABI operands |
+ *     |possibly empty, if fastcall |
+ *     |  - process pointer?        |
+ *     |  - runtime pointer?        |
+ *     |  - yield pc or delta?      |
+ *     |  - yield slot addr?        |
+ *     |  - ret slot addr?          |
+ *     +----------------------------+ <-- fp + wordsz
+ *     |return pc pushed by machine |
+ *     +----------------------------+ <-- fp
+ *     |frame-allocated stuff       |
+ *     |determined in resolve       |
+ *     |...                         |
+ *     |...                         |
+ *     |...                         |
+ *     +----------------------------+ <-- fp - framesz
+ *     |spills determined in ra     |
+ *     |...                         |
+ *     |...                         |
+ *     +----------------------------+ <-- fp - (framesz + spillsz)
+ * 
+ *   - Divide slots into two classes:
+ *     - Those that are never aliased and fit in a word, so are vreg-allocated
+ *     - All others
+ * 
+ *   - Look up entries in the frame *before* layout, type-resolve, and mark as 
+ *     aliased when we encounter an aliasing statement.
+ * 
+ *   - Lay out the frame *on exit* of the resolve pass, given what we now know
+ *     wrt the slot types and aliasing:
+ *     - Non-aliased, word-fitting slots consume no frame space *yet*; they are
+ *       given a generic value that indicates "try a vreg". The register allocator
+ *       may spill them later, if it needs to, but that's not our concern.
+ *     - Aliased / too-big slots are frame-allocated, need to be laid out in the
+ *       frame at fixed offsets, so need to be assigned Common.layout values. 
+ *       (Is this true of aliased word-fitting? Can we not runtime-calculate the 
+ *       position of a spill slot? Meh.)
+ *)
 and lookup_ident 
 	(cx:ctxt) 
 	(fp:Ast.resolved_path) 
@@ -276,8 +323,15 @@ and lookup_ident
 				   let local = Hashtbl.find tab (Ast.KEY_ident ident) in
                    let slotr = local.Ast.local_slot in
                    let layout = local.Ast.local_layout in 
+                   let sz = slot_size cx (!(slotr.node)) in
+                   let resolved = 
+                     if Int64.compare sz cx.ctxt_abi.Abi.abi_ptrsz > 0 ||
+                       (!(local.Ast.local_aliased))
+                     then Ast.RES_member (layout, (Ast.RES_deref fp))
+                     else Ast.RES_vreg local.Ast.local_vreg
+                   in
 					 ({cx with ctxt_span = Some slotr.span}, 
-					  BINDING_slot (Ast.RES_member (layout, (Ast.RES_deref fp)), local))
+					  BINDING_slot (resolved, local))
 				 else 
 			       let tab = x.Ast.frame_items in
 				     if Hashtbl.mem tab ident
@@ -304,10 +358,24 @@ and lookup_temp (cx:ctxt)
 		  then 
 		    let local = Hashtbl.find tab (Ast.KEY_temp temp) in 
             let layout = local.Ast.local_layout in 
-            let slot = local.Ast.local_slot in 
+            let slotr = local.Ast.local_slot in 
+            let sz = slot_size cx (!(slotr.node)) in
+            let resolved = 
+              (* 
+               * Ho ho, isn't this amusing! We cannot complete a lookup of a slot until we 
+               * decide how big it is. But we cannot decide how big it is until we've done
+               * local type inference. And we can't do *that* until we look up its slot
+               * entry. So we need to make split the "do type inference" and the "resolve
+               * how you access a slot" passes in two. With final frame layout after *both*.
+               *)
+              if Int64.compare sz cx.ctxt_abi.Abi.abi_ptrsz > 0 ||
+                (!(local.Ast.local_aliased))
+              then Ast.RES_member (layout, (Ast.RES_deref fp))
+              else Ast.RES_vreg local.Ast.local_vreg
+            in
               log cx "found temporary temp %d at offset %Ld" temp layout.layout_offset;
-			  ({ cx with ctxt_span = Some slot.span }, 
-			   BINDING_slot (Ast.RES_member (layout, (Ast.RES_deref fp)), local))
+			  ({ cx with ctxt_span = Some slotr.span }, 
+			   BINDING_slot (resolved, local))
 		  else 
 		    lookup_temp 
 			  { cx with ctxt_frame_scopes = xs } 

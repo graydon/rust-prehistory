@@ -914,6 +914,7 @@ and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit =
 		  Hashtbl.add frame.Ast.frame_locals key
             { Ast.local_layout = new_layout();
               Ast.local_slot = slot;
+              Ast.local_aliased = ref false;
               Ast.local_vreg = ref None; }
 
 and parse_block ps = 

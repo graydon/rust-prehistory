@@ -188,7 +188,7 @@ let spill_slot framesz i =
 
 let (abi:Abi.abi) = 
   {
-    Abi.abi_ptrsz = 4;
+    Abi.abi_ptrsz = 4L;
     Abi.abi_ptr_mem = Il.M32;
 
     Abi.abi_is_2addr_machine = true;

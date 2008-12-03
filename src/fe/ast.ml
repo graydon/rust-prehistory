@@ -249,6 +249,7 @@ and local =
     {
       local_slot: (slot ref) spanned;
       local_vreg: (int option) ref;
+      local_aliased: bool ref;
       local_layout: layout;
     }
 
@@ -351,21 +352,34 @@ and lval_component =
     COMP_named of name_component
   | COMP_atom of atom
     
+
+(* 
+ * An lval can resolve to:
+ * 
+ *   - A local slot that you access through memory operations because it's big, or 
+ *     because it is aliased.
+ * 
+ *   - A module item that you access indirectly through a pointer or some memory structure.
+ * 
+ *   - A purely local slot that is register sized.
+ *)
+      
 and resolved_path = 
     RES_pr of abi_pseudo_reg
   | RES_member of (layout * resolved_path)
   | RES_deref of resolved_path
   | RES_idx of (resolved_path * resolved_path)
+  | RES_vreg of ((int option) ref)
+
+and resolved_target = 
+    RES_slot of local
+  | RES_item of mod_item
 
 and lval_resolved = 
     {
       res_path: resolved_path;
       res_target: resolved_target;
     }
-
-and resolved_target = 
-    RES_slot of local
-  | RES_item of mod_item
 
 and lval' = 
     LVAL_base of name_base

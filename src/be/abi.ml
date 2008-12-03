@@ -69,7 +69,7 @@
 
 type abi =
   {
-    abi_ptrsz: int;
+    abi_ptrsz: int64;
     abi_ptr_mem: Il.mem;
 
     abi_is_2addr_machine: bool;
