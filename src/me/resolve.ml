@@ -155,8 +155,8 @@ let slot_type cx s =
  *)
 
 type binding = 
-	BINDING_item of (Ast.resolved_path * Ast.mod_item)
-  | BINDING_slot of (Ast.resolved_path * Ast.local)
+	BINDING_item of ((Ast.resolved_path option) * Ast.mod_item)
+  | BINDING_slot of ((Ast.resolved_path option) * Ast.local)
   | BINDING_type_item of Ast.mod_type_item
 
 
@@ -323,24 +323,31 @@ and lookup_ident
 				   let local = Hashtbl.find tab (Ast.KEY_ident ident) in
                    let slotr = local.Ast.local_slot in
                    let layout = local.Ast.local_layout in 
-                   let sz = slot_size cx (!(slotr.node)) in
-                   let resolved = 
-                     if Int64.compare sz cx.ctxt_abi.Abi.abi_ptrsz > 0 ||
-                       (!(local.Ast.local_aliased))
-                     then Ast.RES_member (layout, (Ast.RES_deref fp))
-                     else Ast.RES_vreg local.Ast.local_vreg
+                   let pathopt = 
+                     try
+                       let sz = slot_size cx (!(slotr.node)) in
+                         if Int64.compare sz cx.ctxt_abi.Abi.abi_ptrsz > 0 ||
+                           (!(local.Ast.local_aliased))
+                         then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
+                         else Some (Ast.RES_vreg local.Ast.local_vreg)
+                     with 
+                         Auto_slot -> 
+                           begin 
+                             cx.ctxt_contains_autos := true; 
+                             None
+                           end
                    in
 					 ({cx with ctxt_span = Some slotr.span}, 
-					  BINDING_slot (resolved, local))
+					  BINDING_slot (pathopt, local))
 				 else 
 			       let tab = x.Ast.frame_items in
 				     if Hashtbl.mem tab ident
 				     then 
 				       let (layout, item) = Hashtbl.find tab ident in
+                       let pathopt = Some (Ast.RES_member (layout, (Ast.RES_deref fp))) in
 					     ({cx with ctxt_span = Some item.span}, 
-					      BINDING_item (Ast.RES_member (layout, (Ast.RES_deref fp)), item))
-                     else 
-                       
+					      BINDING_item (pathopt, item))
+                     else                        
 				       lookup_ident 
 					     { cx with ctxt_frame_scopes = xs } 
 					     (if x.Ast.frame_heavy then (Ast.RES_deref fp) else fp) ident)
@@ -359,23 +366,23 @@ and lookup_temp (cx:ctxt)
 		    let local = Hashtbl.find tab (Ast.KEY_temp temp) in 
             let layout = local.Ast.local_layout in 
             let slotr = local.Ast.local_slot in 
-            let sz = slot_size cx (!(slotr.node)) in
-            let resolved = 
-              (* 
-               * Ho ho, isn't this amusing! We cannot complete a lookup of a slot until we 
-               * decide how big it is. But we cannot decide how big it is until we've done
-               * local type inference. And we can't do *that* until we look up its slot
-               * entry. So we need to make split the "do type inference" and the "resolve
-               * how you access a slot" passes in two. With final frame layout after *both*.
-               *)
-              if Int64.compare sz cx.ctxt_abi.Abi.abi_ptrsz > 0 ||
-                (!(local.Ast.local_aliased))
-              then Ast.RES_member (layout, (Ast.RES_deref fp))
-              else Ast.RES_vreg local.Ast.local_vreg
+            let pathopt = 
+              try
+                let sz = slot_size cx (!(slotr.node)) in
+                  if Int64.compare sz cx.ctxt_abi.Abi.abi_ptrsz > 0 ||
+                    (!(local.Ast.local_aliased))
+                  then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
+                  else Some (Ast.RES_vreg local.Ast.local_vreg)
+              with 
+                  Auto_slot -> 
+                    begin 
+                      cx.ctxt_contains_autos := true; 
+                      None
+                    end
             in
-              log cx "found temporary temp %d at offset %Ld" temp layout.layout_offset;
+              log cx "found temporary temp %d" temp;
 			  ({ cx with ctxt_span = Some slotr.span }, 
-			   BINDING_slot (resolved, local))
+			   BINDING_slot (pathopt, local))
 		  else 
 		    lookup_temp 
 			  { cx with ctxt_frame_scopes = xs } 
@@ -620,12 +627,10 @@ and lookup_type cx name =
 	  | _ -> raise (err cx ((string_of_name name) ^ " names a non-type item"))
 
 and lval_type cx lval =
-  match !(lval.Ast.lval_res) with 
-      Some res -> 
-        (match res.Ast.res_target with 
-             (Ast.RES_slot local) -> slot_type cx !(local.Ast.local_slot.node)
-           | (Ast.RES_item item) -> Some (type_of_mod_item cx item))
-	| _ -> None
+  match !(lval.Ast.lval_res.Ast.res_target) with 
+      Some (Ast.RES_slot local) -> slot_type cx !(local.Ast.local_slot.node)
+    | Some (Ast.RES_item item) -> Some (type_of_mod_item cx item)
+| _ -> None
 
 and atom_type cx atom = 
   let concretize tyo = 
@@ -715,12 +720,22 @@ and layout_frame
 	(cx:ctxt) 
 	(frame:Ast.frame) 
 	: unit = 
-  let get_slot key local sz = ((key, local.Ast.local_layout, local.Ast.local_slot) :: sz) in
+  let get_slot key local sz = 
+    (* 
+     * Only consider for layout those slots that are not assigned to 
+     * vregs. FIXME: possibly make the distinction of layout vs. vreg
+     * disjoint in the AST type.
+     *)
+    match !(local.Ast.local_vreg) with 
+        None -> 
+          ((key, local.Ast.local_layout, local.Ast.local_slot) :: sz) 
+      | Some _ -> sz
+  in
   let slots = Hashtbl.fold get_slot frame.Ast.frame_locals [] in 
   let slots = 
-		  Array.of_list 
-			(Sort.list 
-			   (fun (a, _, _) (b, _, _) -> a < b) slots)
+	Array.of_list 
+	  (Sort.list 
+		 (fun (a, _, _) (b, _, _) -> a < b) slots)
   in
     (* FIXME: lay out the module items too. *)
     (* 
@@ -733,8 +748,8 @@ and layout_frame
        in
     *)
     (* 
-       FIXME: should offset current 'light' frame to end of parent frame.
-    *)
+     * FIXME: should offset current 'light' frame to end of parent 'heavy' frame.
+     *)
 	for i = 0 to (Array.length slots) - 1 do
 	  let (_, _, s) = slots.(i) in
         resolve_slot_ref cx None s;
@@ -945,34 +960,45 @@ and resolve_atom cx tyo atom =
 
 
 and resolve_lval cx tyo lval = 
-  let bind_to_slot path local = 
-    let res = { Ast.res_path = path;
-                Ast.res_target = Ast.RES_slot local; } 
-    in
-      resolve_slot_ref cx tyo local.Ast.local_slot;
-      lval.Ast.lval_res := Some res
+  let bind_to_slot pathopt local = 
+    lval.Ast.lval_res.Ast.res_path := pathopt;
+    lval.Ast.lval_res.Ast.res_target := Some (Ast.RES_slot local);
+    resolve_slot_ref cx tyo local.Ast.local_slot
   in
-  let bind_to_item path item = 
-    let res = { Ast.res_path = path;
-                Ast.res_target = Ast.RES_item item; } 
-    in
-      lval.Ast.lval_res := Some res
+  let bind_to_item pathopt item = 
+    lval.Ast.lval_res.Ast.res_path := pathopt;
+    lval.Ast.lval_res.Ast.res_target := Some (Ast.RES_item item)
   in
-    match !(lval.Ast.lval_res) with 
-        Some r -> (match r.Ast.res_target with
-                       Ast.RES_slot local -> resolve_slot_ref cx tyo local.Ast.local_slot
-                     | Ast.RES_item _ -> ())
+    match !(lval.Ast.lval_res.Ast.res_path) with 
+        Some pth -> 
+          begin 
+            match !(lval.Ast.lval_res.Ast.res_target) with
+                Some (Ast.RES_slot local) -> resolve_slot_ref cx tyo local.Ast.local_slot
+              | Some (Ast.RES_item _) -> ()
+              | None -> raise (err cx "lval path resolved but no target?")
+          end
       | None -> 
-	      (match lval.Ast.lval_src.node with 
-	         | Ast.LVAL_base base -> 
-		         let (_, binding) = lookup_base cx base in
-                   log cx "resolved lval: %s" (string_of_base cx base);
-			       (match binding with 
-				        BINDING_item (path, item) -> bind_to_item path item
-			          | BINDING_slot (path, local) -> bind_to_slot path local
-			          | BINDING_type_item _ -> 
-				          raise (err cx ("lval '" ^ (string_of_base cx base) ^ "' resolved to a type name")))
-	         | _ -> raise (err cx ("unhandled lval form in resolve_lval")))
+          begin
+	        match lval.Ast.lval_src.node with 
+	          | Ast.LVAL_base base -> 
+                  let _ = 
+                    begin
+                      match !(lval.Ast.lval_res.Ast.res_target) with 
+                          None -> log cx "first-pass resolving lval: %s" (string_of_base cx base)
+                        | Some _ -> log cx "Nth-pass resolving lval: %s" (string_of_base cx base)
+                    end
+                  in
+		          let (_, binding) = lookup_base cx base in
+                    log cx "resolved lval: %s" (string_of_base cx base);
+                    begin
+			          match binding with 
+				          BINDING_item (pathopt, item) -> bind_to_item pathopt item
+			            | BINDING_slot (pathopt, local) -> bind_to_slot pathopt local
+			            | BINDING_type_item _ -> 
+				            raise (err cx ("lval '" ^ (string_of_base cx base) ^ "' resolved to a type name"))
+                    end
+	          | _ -> raise (err cx ("unhandled lval form in resolve_lval"))
+          end
 
 and resolve_stmt_option cx stmtopt = 
   match stmtopt with 

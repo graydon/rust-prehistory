@@ -377,8 +377,8 @@ and resolved_target =
 
 and lval_resolved = 
     {
-      res_path: resolved_path;
-      res_target: resolved_target;
+      res_path: (resolved_path option) ref;
+      res_target: (resolved_target option) ref;
     }
 
 and lval' = 
@@ -388,7 +388,7 @@ and lval' =
 and lval = 
     { 
       lval_src: lval' spanned;
-      lval_res: (lval_resolved option) ref;
+      lval_res: lval_resolved;
     }
       
 and binop =    

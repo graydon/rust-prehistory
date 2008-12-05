@@ -535,7 +535,8 @@ and parse_lval_component (ps:pstate)
       
 and new_lval src = 
   { Ast.lval_src = src;
-    Ast.lval_res = ref None; }
+    Ast.lval_res = { Ast.res_path = ref None;
+                     Ast.res_target = ref None } }
 
 and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) = 
   let apos = lexpos ps in 

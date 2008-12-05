@@ -125,6 +125,39 @@ let rec trans_resolved_path
 
 ;;
 
+let rec string_of_resolved_path p = 
+  match p with 
+      Ast.RES_pr FP -> "FP"
+    | Ast.RES_pr PP -> "PP"
+    | Ast.RES_pr CP -> "CP"
+    | Ast.RES_pr RP -> "RP"
+    | Ast.RES_idx (a, b) -> 
+        Printf.sprintf "RES_idx(%s,%s)" 
+          (string_of_resolved_path a) 
+          (string_of_resolved_path b)
+    | Ast.RES_member (layout, lv) -> 
+        Printf.sprintf "RES_member(%Ld,%s)" 
+          layout.layout_offset 
+          (string_of_resolved_path lv)
+    | Ast.RES_deref lv -> 
+        Printf.sprintf "RES_deref(%s)" 
+          (string_of_resolved_path lv)
+    | Ast.RES_vreg _ -> "vreg"
+;;
+
+let string_of_name_base nb = 
+  match nb with 
+	  (Ast.BASE_ident id) -> id
+	| (Ast.BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
+	| (Ast.BASE_app (id, tys)) -> "[...]"
+;;
+
+let string_of_lval lv = 
+  match lv.Ast.lval_src.node with 
+      Ast.LVAL_base nbase -> string_of_name_base nbase
+    | _ -> "??"
+;;
+
 
 let trans_lval_full
     (cx:ctxt) 
@@ -132,60 +165,38 @@ let trans_lval_full
     (pcrel_ok:bool)
     (imm_ok:bool)
     : Il.operand = 
-  match !(lv.Ast.lval_res) with 
-      None -> raise (Semant_err (Some lv.Ast.lval_src.span, 
-                                 "unresolved lval in trans_lval"))
-    | Some res ->
-        begin
-          match res.Ast.res_target with 
-              Ast.RES_item ri -> 
-                begin
-                  match ri.node with 
-                      (Ast.MOD_ITEM_fn fd) -> 
-                        let fix = fd.Ast.decl_item.Ast.fn_fixup in
-                          if pcrel_ok
-                          then Il.Pcrel fix
-                          else 
-                            let imm = (Il.Imm (Asm.M_POS fix)) in 
-                              if imm_ok 
-                              then imm
-                              else 
-                                let tmp = (Il.next_vreg cx.ctxt_emit) in 
-		                          Il.emit cx.ctxt_emit Il.MOV (Il.Reg tmp) imm Il.Nil;
-                                  (Il.Reg tmp)
-                    | _ -> raise (Semant_err (Some lv.Ast.lval_src.span, 
-                                              "unhandled form of mod item in trans_lval"))
-                end
-            | _ -> 
-                let rec rp_str p = 
-                  match p with 
-                      Ast.RES_pr FP -> "FP"
-                    | Ast.RES_pr PP -> "PP"
-                    | Ast.RES_pr CP -> "CP"
-                    | Ast.RES_pr RP -> "RP"
-                    | Ast.RES_idx (a, b) -> 
-                        Printf.sprintf "RES_idx(%s,%s)" (rp_str a) (rp_str b)
-                    | Ast.RES_member (layout, lv) -> 
-                        Printf.sprintf "RES_member(%Ld,%s)" layout.layout_offset (rp_str lv)
-                    | Ast.RES_deref lv -> 
-                        Printf.sprintf "RES_deref(%s)" (rp_str lv)
-                    | Ast.RES_vreg _ -> "vreg"
-                in
-                let nbstr nb = 
-                  match nb with 
-	                  (Ast.BASE_ident id) -> id
-	                | (Ast.BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
-	                | (Ast.BASE_app (id, tys)) -> "[...]"
-                in
-                let lvstr = 
-                  match lv.Ast.lval_src.node with 
-                      Ast.LVAL_base nbase -> nbstr nbase
-                    | _ -> "??"
-                in
-                  log cx "translating lval path for %s: %s" lvstr (rp_str res.Ast.res_path); 
-                  trans_resolved_path cx res.Ast.res_path
-        end
-        ;;
+  let res = lv.Ast.lval_res in
+    match (!(res.Ast.res_path), !(res.Ast.res_target)) with         
+        _, None | None, _ -> raise (Semant_err (Some lv.Ast.lval_src.span, 
+                                                "unresolved lval in trans_lval"))
+      | (Some path, Some target)  ->
+          begin
+            match target with 
+                Ast.RES_item ri -> 
+                  begin
+                    match ri.node with 
+                        (Ast.MOD_ITEM_fn fd) -> 
+                          let fix = fd.Ast.decl_item.Ast.fn_fixup in
+                            if pcrel_ok
+                            then Il.Pcrel fix
+                            else 
+                              let imm = (Il.Imm (Asm.M_POS fix)) in 
+                                if imm_ok 
+                                then imm
+                                else 
+                                  let tmp = (Il.next_vreg cx.ctxt_emit) in 
+		                            Il.emit cx.ctxt_emit Il.MOV (Il.Reg tmp) imm Il.Nil;
+                                    (Il.Reg tmp)
+                      | _ -> raise (Semant_err (Some lv.Ast.lval_src.span, 
+                                                "unhandled form of mod item in trans_lval"))
+                  end
+              | _ -> 
+                  log cx "translating lval path for %s: %s" 
+                    (string_of_lval lv) 
+                    (string_of_resolved_path path); 
+                  trans_resolved_path cx path
+          end
+;;
         
 
 let trans_lval
