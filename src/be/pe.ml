@@ -618,20 +618,26 @@ let test_imports =
   }
 ;;
 
-let emit_file (sess:Session.sess) (code:Asm.item) : unit = 
-
+let emit_file 
+    (sess:Session.sess) 
+    (code:Asm.item) 
+    (data:Asm.item) 
+    (entry_prog_fixup:fixup) 
+    : unit = 
+  
   let all_hdrs_fixup = new_fixup "all headers" in
   let all_init_data_fixup = new_fixup "all initialized data" in
   let loader_hdr_fixup = new_fixup "loader header" in
   let import_dir_fixup = new_fixup "import directory" in
   let text_fixup = new_fixup "text section" in
   let bss_fixup = new_fixup "bss section" in
+  let idata_fixup = new_fixup "idata section" in
   let image_fixup = new_fixup "image fixup" in
 
   let header = (pe_header 
 				  ~machine: IMAGE_FILE_MACHINE_I386
 				  ~pointer_to_symbol_table: 0L
-				  ~number_of_sections: 3L
+				  ~number_of_sections: 4L
 				  ~number_of_symbols: 0L
 				  ~loader_hdr_fixup: loader_hdr_fixup
 				  ~characteristics:[IMAGE_FILE_EXECUTABLE_IMAGE;
@@ -657,7 +663,7 @@ let emit_file (sess:Session.sess) (code:Asm.item) : unit =
 
   let text_section = (pe_text_section 
 	                    ~startup_fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
-                        ~startup_fn_arg_fixup: text_fixup
+                        ~startup_fn_arg_fixup: entry_prog_fixup
 	                    ~text_fixup: text_fixup
                         ~crate_code: code)
   in
@@ -672,19 +678,25 @@ let emit_file (sess:Session.sess) (code:Asm.item) : unit =
 					   ~id: SECTION_ID_BSS
 					   ~hdr_fixup: bss_fixup)
   in
-  let import_section = (pe_import_section 
+  let import_section = (pe_import_section
 						  ~section_fixup: import_dir_fixup
 						  ~dlls: [| test_imports |])
   in
-  let import_header = (pe_section_header 
+  let import_header = (pe_section_header
 						 ~id: SECTION_ID_IMPORTS
 						 ~hdr_fixup: import_dir_fixup)
   in
+  let idata_header = (pe_section_header
+                        ~id: SECTION_ID_DATA
+                        ~hdr_fixup: idata_fixup)
+  in
+  let idata_section = def_aligned idata_fixup data in
   let all_init_data = (def_aligned 
 						 all_init_data_fixup 
 						 (SEQ 
 							[| 
 							  import_section; 
+                              idata_section
 							|]))
   in
   let all_headers = (def_file_aligned 
@@ -696,7 +708,8 @@ let emit_file (sess:Session.sess) (code:Asm.item) : unit =
 							loader_header; 
 							text_header;
 							bss_header;
-							import_header
+							import_header;
+                            idata_header
 						  |]))
   in 
   let all_items = SEQ [| MEMPOS pe_image_base;

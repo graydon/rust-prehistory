@@ -161,7 +161,25 @@ typedef struct rust_msg_queue {
   uintptr_t x;
 } rust_msg_queue_t;
 
-typedef struct rust_proc { 
+
+typedef struct rust_rt { 
+  void (*log_uint32_t)(uint32_t i);
+} rust_rt_t;
+
+
+struct rust_proc;
+struct rust_prog;
+
+typedef struct rust_proc rust_proc_t;
+typedef struct rust_prog rust_prog_t;
+
+struct rust_prog { 
+  void (*init_code)(rust_proc_t*);
+  void (*main_code)(rust_proc_t*);
+  void (*fini_code)(rust_proc_t*);
+};
+
+struct rust_proc { 
 
   /* Proc accounting. */
   uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */
@@ -169,19 +187,16 @@ typedef struct rust_proc {
   uint64_t tick_budget;   /* N ticks in proc lifetime. 0 = unlimited.       */
   uint64_t curr_ticks;    /* N ticks currently consumed.                    */
 
+  rust_rt_t *rt;
   rust_stk_seg_t *stk;    
   rust_env_t *env;
-  rust_code_t *code;
+  rust_prog_t *prog;
   rust_msg_queue_t *q;
   rust_regs_t regs;       /* CPU regs are saved here when not running.       */
 
   uint8_t data[];         /* Official-style C99 "flexible array" element.    */
 
-} rust_proc_t;
-
-typedef struct rust_rt { 
-  void (*log_uint32_t)(uint32_t i);
-} rust_rt_t;
+};
 
 /* A proc gets activated */
 typedef struct rust_active_proc {
@@ -191,3 +206,11 @@ typedef struct rust_active_proc {
 } rust_activation_t;
 
 #endif /* RUST_H__ */
+
+/* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
+ */

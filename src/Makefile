@@ -30,7 +30,7 @@ $(COMPILER): $(COMPILER_CMOS) $(MKFILES)
 .phony: clean
 
 clean:
-	rm -f */*.cmo */*.cmi */*.o 
+	rm -f */*.cmo */*.cmi */*.o *.o
 	rm -f fe/lexer.ml 
 	rm -f $(COMPILER) $(RUNTIME)
 	rm -f .depend

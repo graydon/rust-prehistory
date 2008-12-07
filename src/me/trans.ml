@@ -8,6 +8,7 @@ type ctxt =
       mutable ctxt_emit: Il.emitter;
       ctxt_sess: Session.sess;
       ctxt_abi: Abi.abi;
+      ctxt_entry_prog: fixup;
       mutable ctxt_path: string list;
       mutable ctxt_data_items: Asm.item list;
       ctxt_text_items: (string, (Il.quads * int)) Hashtbl.t;
@@ -20,6 +21,7 @@ let new_ctxt (sess:Session.sess) (abi:Abi.abi) : ctxt =
     ctxt_sess = sess;
     ctxt_abi = abi;
     ctxt_path = [];
+    ctxt_entry_prog = new_fixup "entry prog fixup";
     ctxt_data_items = [];
     ctxt_text_items = Hashtbl.create 0
   }
@@ -392,9 +394,46 @@ and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =
   trans_stmt cx fn.Ast.fn_body;
   cx.ctxt_abi.Abi.abi_emit_epilogue cx.ctxt_emit fn;
   capture_emitted_quads cx
-    
-and trans_prog (cx:ctxt) (p:Ast.prog) : unit = 
-  trans_mod_items cx p.Ast.prog_mod
+
+and trans_prog_stmt (cx:ctxt) (s:Ast.stmt) (ncomp:string) : fixup = 
+  let oldpath = cx.ctxt_path in 
+    cx.ctxt_path <- ncomp :: cx.ctxt_path;
+    let name = String.concat "." (List.rev cx.ctxt_path) in
+    let fix = new_fixup name in
+      reset_emitter cx;
+      Il.emit_full cx.ctxt_emit (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
+      trans_stmt cx s;
+      capture_emitted_quads cx;
+      cx.ctxt_path <- oldpath;
+      fix
+
+and trans_prog (cx:ctxt) (p:Ast.prog) : unit =   
+  let name = String.concat "." (List.rev cx.ctxt_path) in
+  let _ = log cx "translating program: %s" name in
+  let init = 
+    (* FIXME: translate the init part as well. *)
+    Asm.IMM 0L
+  in
+  let main =     
+    match p.Ast.prog_main with 
+        None -> Asm.IMM 0L
+      | Some main -> Asm.M_POS (trans_prog_stmt cx main "main")            
+  in
+  let fini = 
+    match p.Ast.prog_fini with 
+        None -> Asm.IMM 0L
+      | Some main -> Asm.M_POS (trans_prog_stmt cx main "fini")
+  in
+  let prog = 
+    (* FIXME: only DEF the entry prog if its name matches a crate param! *)
+    (* FIXME: extract prog layout from ABI. *)    
+    Asm.DEF (cx.ctxt_entry_prog, 
+             Asm.SEQ [| Asm.WORD32 init; 
+                        Asm.WORD32 main; 
+                        Asm.WORD32 fini |]) 
+  in
+    cx.ctxt_data_items <- prog :: cx.ctxt_data_items;
+    trans_mod_items cx p.Ast.prog_mod
 
 
 and trans_mod_item 
@@ -425,11 +464,11 @@ and trans_crate
     (sess:Session.sess)
     (abi:Abi.abi)
     (crate:Ast.mod_items) 
-    : ((string, (Il.quads * int)) Hashtbl.t * Asm.item list) = 
+    : ((string, (Il.quads * int)) Hashtbl.t * Asm.item list * fixup) = 
   try
     let cx = new_ctxt sess abi in 
 	  trans_mod_items cx crate;
-      (cx.ctxt_text_items, cx.ctxt_data_items)
+      (cx.ctxt_text_items, cx.ctxt_data_items, cx.ctxt_entry_prog)
   with 
 	  Semant_err (spano, str) -> 
         begin
@@ -440,7 +479,7 @@ and trans_crate
 			    Session.fail sess "%s:E:Trans error: %s\n%!" 
                   (Session.string_of_span span) str
         end;
-        (Hashtbl.create 0, [])
+        (Hashtbl.create 0, [], new_fixup "entry prog fixup")
 ;;
 
 (* 

@@ -91,7 +91,8 @@ let _ = exit_if_failed ()
 ;;
 
 let ((text_items:(string, (Il.quads * int)) Hashtbl.t), 
-     (data_items:Asm.item list)) = Trans.trans_crate sess abi crate_items;;
+     (data_items:Asm.item list),
+     (entry_prog_fixup:fixup)) = Trans.trans_crate sess abi crate_items;;
 let _ = exit_if_failed ()
 ;;
 
@@ -108,8 +109,11 @@ let (code:Asm.item) = Asm.SEQ (Array.of_list (List.map (X86.select_insns sess) t
 let _ = exit_if_failed ()
 ;;
 
+let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
+;;
+
 let _ = match sess.Session.sess_targ with 
-	Win32_x86_pe -> Pe.emit_file sess code
+	Win32_x86_pe -> Pe.emit_file sess code data entry_prog_fixup
   | Linux_x86_elf -> Elf.emit_file sess code
 ;;
 
