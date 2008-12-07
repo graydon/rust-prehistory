@@ -193,19 +193,31 @@ let spill_slot (framesz:int64) (i:int) : Il.operand =
 let fn_prologue (e:Il.emitter) (f:Ast.fn) : unit =
   let r x = Il.Reg (Il.Hreg x) in
   let framesz = (Asm.IMM f.Ast.fn_frame.Ast.frame_layout.layout_size) in
-    Il.emit_full e (Some f.Ast.fn_fixup) Il.MOV (r ebp) (r esp) Il.Nil;
-    Il.emit      e                       Il.SUB (r esp) (r esp) (Il.Imm framesz)
+    Il.emit_full e (Some f.Ast.fn_fixup) (Il.CPUSH Il.M32) (Il.Nil) (r ebp) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebx) Il.Nil;
+    Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
+    Il.emit e Il.SUB (r esp) (r esp) (Il.Imm framesz)
 ;;
 
 let fn_epilogue (e:Il.emitter) (f:Ast.fn) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
     Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r ebx) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r esi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r edi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r ebp) Il.Nil Il.Nil;
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
 
 let main_prologue (e:Il.emitter) (block:Ast.block) : unit =
   let r x = Il.Reg (Il.Hreg x) in
   let framesz = (Asm.IMM block.node.Ast.block_frame.Ast.frame_layout.layout_size) in
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebp) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebx) Il.Nil;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
     Il.emit e Il.SUB (r esp) (r esp) (Il.Imm framesz)
 ;;
@@ -213,7 +225,45 @@ let main_prologue (e:Il.emitter) (block:Ast.block) : unit =
 let main_epilogue (e:Il.emitter) (block:Ast.block) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
     Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r ebx) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r esi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r edi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r ebp) Il.Nil Il.Nil;
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+;;
+
+let word_n reg i = 
+  Il.Mem (Il.M32, Some reg, Asm.IMM (Int64.mul (Int64.of_int i) 4L))
+;;
+
+(* 
+ * Our arrangement is this:
+ * 
+ *   *ebp+20+(4*N) = [argN   ]
+ *   ...    
+ *   *ebp+20       = [arg0   ] = proc ptr
+ *   *ebp+16       = [retpc  ]
+ *   *ebp+12       = [old-ebp]
+ *   *ebp+8        = [old-edi]
+ *   *ebp+4        = [old-esi]
+ *   *ebp          = [old-ebx]
+ * 
+ *)
+
+let proc_ptr = word_n (Il.Hreg ebp) 5;;
+
+let load_proc_word (e:Il.emitter) (i:int) : Il.reg = 
+  let vr = Il.next_vreg e in 
+    Il.emit e Il.MOV (Il.Reg vr) proc_ptr Il.Nil;
+    Il.emit e Il.MOV (Il.Reg vr) (word_n vr i) Il.Nil;
+    vr
+;;
+
+let load_kern_fn (e:Il.emitter) (i:int) : Il.reg = 
+  let vr = Il.next_vreg e in
+  let rt = load_proc_word e 0 in
+    Il.emit e Il.MOV (Il.Reg vr) (word_n rt i) Il.Nil;
+    vr
 ;;
 
 let (abi:Abi.abi) = 
@@ -236,13 +286,12 @@ let (abi:Abi.abi) =
     Abi.abi_emit_main_prologue = main_prologue;
     Abi.abi_emit_main_epilogue = main_epilogue;
     Abi.abi_clobbers = clobbers;
-    
+
     Abi.abi_sp_operand = Il.Reg (Il.Hreg esp);
     Abi.abi_fp_operand = Il.Reg (Il.Hreg ebp);
-    Abi.abi_pp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 0L);
-    Abi.abi_cp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 4L);
-    Abi.abi_rp_operand = Il.Mem (Il.M32, Some (Il.Hreg ebp), Asm.IMM 8L);
-    Abi.abi_frame_base = 12L;
+    Abi.abi_pp_operand = proc_ptr;
+    Abi.abi_load_kern_fn = load_kern_fn;
+    Abi.abi_frame_base = 0L;
     Abi.abi_spill_slot = spill_slot;
   }
 

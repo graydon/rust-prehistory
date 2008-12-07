@@ -81,8 +81,8 @@ let rec trans_resolved_path
     match resp with 
         Ast.RES_pr FP -> cx.ctxt_abi.Abi.abi_fp_operand
       | Ast.RES_pr PP -> cx.ctxt_abi.Abi.abi_pp_operand
-      | Ast.RES_pr CP -> cx.ctxt_abi.Abi.abi_cp_operand
-      | Ast.RES_pr RP -> cx.ctxt_abi.Abi.abi_rp_operand
+      | Ast.RES_pr CP -> Il.Nil
+      | Ast.RES_pr RP -> Il.Nil
       | Ast.RES_idx (a, b) -> 
           let av = trans_resolved_path cx a in
           let bv = trans_resolved_path cx b in          
@@ -404,19 +404,21 @@ and trans_prog_block (cx:ctxt) (b:Ast.block) (ncomp:string) : fixup =
     let name = String.concat "." (List.rev cx.ctxt_path) in
     let fix = new_fixup name in
     let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
-    let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+    let strfix = new_fixup "hello world string" in
+    let str = Asm.DEF (strfix, Asm.ZSTRING "hello, world") in
+      cx.ctxt_data_items <- str :: cx.ctxt_data_items;
       reset_emitter cx;
-      cx.ctxt_abi.Abi.abi_emit_main_prologue cx.ctxt_emit b;
       Il.emit_full cx.ctxt_emit (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
-      (* Il.emit cx.ctxt_emit Il.MOV vr cx.ctxt_abi.Abi.abi_rp_operand Il.Nil; *)
-      Il.emit cx.ctxt_emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM 0xdeadbeefL)) Il.Nil;
-      Il.emit cx.ctxt_emit Il.CCALL dst (cx.ctxt_abi.Abi.abi_rp_operand) Il.Nil;
-      Il.emit cx.ctxt_emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
-      trans_block cx b;
-      cx.ctxt_abi.Abi.abi_emit_main_epilogue cx.ctxt_emit b;
-      capture_emitted_quads cx;
-      cx.ctxt_path <- oldpath;
-      fix
+      cx.ctxt_abi.Abi.abi_emit_main_prologue cx.ctxt_emit b;
+      let vr = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 1 in
+        Il.emit cx.ctxt_emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS strfix)) Il.Nil;
+        Il.emit cx.ctxt_emit Il.CCALL dst (Il.Reg vr) Il.Nil;
+        Il.emit cx.ctxt_emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
+        trans_block cx b;
+        cx.ctxt_abi.Abi.abi_emit_main_epilogue cx.ctxt_emit b;
+        capture_emitted_quads cx;
+        cx.ctxt_path <- oldpath;
+        fix
 
 and trans_prog (cx:ctxt) (p:Ast.prog) : unit =   
   let name = String.concat "." (List.rev cx.ctxt_path) in

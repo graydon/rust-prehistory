@@ -23,7 +23,6 @@ prog woohoo
   
   main
     {
-	  let int i = foo(0);
 	  let int x = 2 + 2;
     }
 }

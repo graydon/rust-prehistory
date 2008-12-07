@@ -6,7 +6,7 @@ RUNTIME:=rustrt.dll
 all: $(COMPILER) $(RUNTIME) $(MKFILES)
 
 $(RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
-	gcc -shared -o $@ -fPIC $(RUNTIME_OBJS)
+	gcc -shared -g -o $@ -fPIC $(RUNTIME_OBJS)
 
 %.o: rt/%.c $(MKFILES)
-	gcc -Wall -Werror -pedantic -std=c99 -c -o $@ $<
+	gcc -Wall -Werror -pedantic -std=c99 -g -c -o $@ $<

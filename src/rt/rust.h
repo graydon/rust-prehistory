@@ -163,7 +163,8 @@ typedef struct rust_msg_queue {
 
 
 typedef struct rust_rt { 
-  void (*log_uint32_t)(uint32_t i);
+  void (*log_uint32_t)(uint32_t);
+  void (*log_str)(char *);
 } rust_rt_t;
 
 
@@ -174,18 +175,12 @@ typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
 
 struct rust_prog { 
-  void (*init_code)(rust_proc_t*);
-  void (*main_code)(rust_proc_t*);
-  void (*fini_code)(rust_proc_t*);
+  void __cdecl (*init_code)(rust_proc_t*);
+  void __cdecl (*main_code)(rust_proc_t*);
+  void __cdecl (*fini_code)(rust_proc_t*);
 };
 
 struct rust_proc { 
-
-  /* Proc accounting. */
-  uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */
-  uintptr_t curr_mem;     /* N bytes currently owned.                       */
-  uint64_t tick_budget;   /* N ticks in proc lifetime. 0 = unlimited.       */
-  uint64_t curr_ticks;    /* N ticks currently consumed.                    */
 
   rust_rt_t *rt;
   rust_stk_seg_t *stk;    
@@ -193,6 +188,12 @@ struct rust_proc {
   rust_prog_t *prog;
   rust_msg_queue_t *q;
   rust_regs_t regs;       /* CPU regs are saved here when not running.       */
+
+  /* Proc accounting. */
+  uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */
+  uintptr_t curr_mem;     /* N bytes currently owned.                       */
+  uint64_t tick_budget;   /* N ticks in proc lifetime. 0 = unlimited.       */
+  uint64_t curr_ticks;    /* N ticks currently consumed.                    */
 
   uint8_t data[];         /* Official-style C99 "flexible array" element.    */
 
