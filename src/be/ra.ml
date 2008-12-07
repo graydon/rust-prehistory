@@ -267,6 +267,14 @@ let dump_quads cx =
   done
 ;;
 
+let htab_keys htab = 
+  Hashtbl.fold (fun k _ accum -> k :: accum) htab []
+;;
+
+let list_to_str list eltstr = 
+  (String.concat "," (List.map eltstr (List.sort compare list)))
+;;
+
 (* Simple local register allocator. Nothing fancy. *)
 let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (framesz:int64) =
   try 
@@ -291,44 +299,54 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       fixup := None
     in
     let spill_slot i = abi.Abi.abi_spill_slot framesz i in
+    let hr_str = cx.ctxt_abi.Abi.abi_str_of_hardreg in
     let mov a b = { quad_op = MOV; 
                     quad_dst = a;
                     quad_lhs = b;
                     quad_rhs = Nil;
                     quad_fixup = None }
     in
-    let spill_specific_hreg i hreg = 
+    let clean_hreg i hreg = 
       if (Hashtbl.mem hreg_to_vreg hreg) && 
         (hreg < cx.ctxt_abi.Abi.abi_n_hardregs) 
       then 
-        begin
-          let vreg = Hashtbl.find hreg_to_vreg hreg in
-          let spill =
-            if Hashtbl.mem vreg_to_spill vreg
-            then Hashtbl.find vreg_to_spill vreg
-            else 
-              begin
-                let s = next_spill cx in 
-                  Hashtbl.add vreg_to_spill vreg s;
-                  s
-              end
-          in
-            Hashtbl.remove vreg_to_hreg vreg;
-            Hashtbl.remove hreg_to_vreg hreg;
-            active_hregs := List.filter (fun x -> x != hreg) (!active_hregs);
-            inactive_hregs := hreg :: (!inactive_hregs); 
-            if (Bitv.get (live_out_vregs.(i)) vreg) && 
-              (Hashtbl.mem dirty_vregs vreg)
-            then 
-              begin
-                Hashtbl.remove dirty_vregs vreg;
-                prepend (mov (spill_slot spill) (Reg (Hreg hreg)))
-              end
-            else
-              ()
-        end
-      else
-        ()
+        let vreg = Hashtbl.find hreg_to_vreg hreg in
+          if Hashtbl.mem dirty_vregs vreg
+          then 
+            begin
+              Hashtbl.remove dirty_vregs vreg;
+              if (Bitv.get (live_out_vregs.(i)) vreg)
+              then 
+                let spill =
+                  if Hashtbl.mem vreg_to_spill vreg
+                  then Hashtbl.find vreg_to_spill vreg
+                  else 
+                    begin
+                      let s = next_spill cx in 
+                        Hashtbl.replace vreg_to_spill vreg s;
+                        s
+                    end
+                in
+                  prepend (mov (spill_slot spill) (Reg (Hreg hreg)))
+              else ()
+            end
+          else ()
+      else ()
+    in
+    let inactivate_hreg hreg = 
+      if (Hashtbl.mem hreg_to_vreg hreg) && 
+        (hreg < cx.ctxt_abi.Abi.abi_n_hardregs) 
+      then 
+        let vreg = Hashtbl.find hreg_to_vreg hreg in
+          Hashtbl.remove vreg_to_hreg vreg;
+          Hashtbl.remove hreg_to_vreg hreg;
+          active_hregs := List.filter (fun x -> x != hreg) (!active_hregs);
+          inactive_hregs := hreg :: (!inactive_hregs); 
+      else ()
+    in          
+    let spill_specific_hreg i hreg =       
+      clean_hreg i hreg;
+      inactivate_hreg hreg
     in
     let spill_some_hreg i = 
       match !active_hregs with 
@@ -364,8 +382,8 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
         in
           inactive_hregs := List.filter (fun x -> x != hreg) (!inactive_hregs);
           active_hregs := (!active_hregs) @ [hreg];
-          Hashtbl.add hreg_to_vreg hreg vreg;
-          Hashtbl.add vreg_to_hreg vreg hreg;
+          Hashtbl.replace hreg_to_vreg hreg vreg;
+          Hashtbl.replace vreg_to_hreg vreg hreg;
           if def
           then ()
           else 
@@ -375,7 +393,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let use_operand def i oper =
       match oper with 
           Reg (Vreg v) -> Reg (Hreg (use_vreg def i v))
-        | Mem (a, Some (Vreg v), b) -> Mem (a, Some (Hreg (use_vreg def i v)), b)
+        | Mem (a, Some (Vreg v), b) -> Mem (a, Some (Hreg (use_vreg false i v)), b)
         | Reg (Hreg h) -> 
             begin 
               spill_specific_hreg i h; 
@@ -397,9 +415,33 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       do
         let quad = cx.ctxt_quads.(i) in
         let clobbers = cx.ctxt_abi.Abi.abi_clobbers quad in
+        let used = quad_used_vregs quad in
+        let defined = quad_defined_vregs quad in
           begin
+            if List.exists (fun def -> List.mem def clobbers) defined
+            then raise (Ra_error ("clobber and defined sets overlap"));
+            begin
+              let hr (v:int) : string = 
+                if Hashtbl.mem vreg_to_hreg v 
+                then hr_str (Hashtbl.find vreg_to_hreg v)
+                else "??" 
+              in
+              let vr_str (v:int) : string = Printf.sprintf "v%d=%s" v (hr v) in
+              let lstr lab ls fn = 
+                if List.length ls = 0 
+                then ()
+                else log cx "\t%s: [%s]" lab (list_to_str ls fn)
+              in
+                log cx "processing quad %d = %s" i (string_of_quad hr_str quad);
+                (lstr "dirt" (htab_keys dirty_vregs) vr_str);
+                (lstr "clob" clobbers hr_str);
+                (lstr "in" (Bitv.to_list live_in_vregs.(i)) vr_str);
+                (lstr "out" (Bitv.to_list live_out_vregs.(i)) vr_str);
+                (lstr "use" used vr_str);
+                (lstr "def" defined vr_str);
+            end;
             fixup := quad.quad_fixup;
-            List.iter (spill_specific_hreg i) clobbers;
+            List.iter (clean_hreg i) clobbers;
             if is_beginning_of_basic_block quad
             then 
               begin
@@ -422,7 +464,9 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                 end;
                 prepend newq
           end;
-          List.iter (fun i -> Hashtbl.add dirty_vregs i ()) (quad_defined_vregs quad);
+          List.iter inactivate_hreg clobbers;
+          List.iter (fun i -> Hashtbl.replace dirty_vregs i ()) 
+            (quad_defined_vregs quad);
       done;
       cx.ctxt_quads <- Array.of_list (List.rev (!newq));
       kill_redundant_moves cx;

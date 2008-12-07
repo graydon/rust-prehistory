@@ -412,9 +412,12 @@ let is_rm32 (oper:operand) : bool =
 
 
 let is_rm8 (oper:operand) : bool = 
+  (* 
+   * NB: you can't refer to the Hregs in question as rm8 values
+   * because if you do, MOV only writes to the low 8 bit subreg.
+   *)
   match oper with 
       Mem (M8, _, _) -> true
-    | Reg (Hreg _) -> true
     | _ -> false
 ;;
 
@@ -434,6 +437,11 @@ let mov (dst:operand) (src:operand) : Asm.item =
         insn_rm_r 0x88 dst (reg r)
     | (_, Reg (Hreg r)) when is_rm32 dst -> 
         insn_rm_r 0x89 dst (reg r)
+          (* 
+           * FIXME: this is incorrect; you want either MOVSX or MOVZX;
+           * must redo M8/M16/M32/M64 modes as specifically
+           * signed/unsigned. Probably best to use Ast.ty_mach.
+           *)
     | (Reg (Hreg r), Mem (M8, _, _)) -> 
         insn_rm_r 0x8a src (reg r)
     | (Reg (Hreg r), Mem (M32, _, _)) -> 

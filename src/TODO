@@ -1,10 +1,22 @@
 
+progress:
+ - fix frame accesses to use ebp-foo rather than, er, ebp+foo
+   - probably overhaul frame-layout stuff in general
+ - allocate proc stack
+ - on activation, switch from C stack to proc stack
+ - on back-edges / calls, check timeout, possibly reschedule
+ - add timer thread to runtime
+ - write simple RR scheduler
 
- - move prologue / epilogue generation into ABI
+cleanup:
+ - use a datatype for kernel function codes, not int numbers
+ - use a datatype for fields inside each kernel C structure
  - move explicit code gen flags to ABI "pre digester" function
  - pass constant data through to PE/ELF as asm items
    - possibly design load-time constant rules for language? meh
- - pass a crate pointer into the runtime
+ - pass a crate pointer into the runtime rather than root prog
  - start crate structure real stupid: refcount + 1 function table
- - have the runtime allocate a *kernel* function table 
- - have the runtime call back into crate fn 0, passing kernel function table
+ - replace Il.mem with Ast.ty_mach
+ - consolidate formatting functions
+ - type-annotate everything
+ - make callee-saves in prologue/epilogue depend on reg use
