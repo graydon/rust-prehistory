@@ -77,9 +77,14 @@ type abi =
     abi_has_pcrel_jumps: bool;
     abi_has_imm_loads: bool;
     abi_has_imm_jumps: bool;
+
     abi_n_hardregs: int;
     abi_str_of_hardreg: (int -> string);
+
     abi_prealloc_quad: (Il.quad -> Il.quad);
+    abi_emit_prologue: (Il.emitter -> Ast.fn -> unit);
+    abi_emit_epilogue: (Il.emitter -> Ast.fn -> unit);
+
     abi_clobbers: (Il.quad -> Il.hreg list); 
     
     abi_sp_operand: Il.operand;

@@ -1,0 +1,10 @@
+
+
+ - move prologue / epilogue generation into ABI
+ - move explicit code gen flags to ABI "pre digester" function
+ - pass constant data through to PE/ELF as asm items
+   - possibly design load-time constant rules for language? meh
+ - pass a crate pointer into the runtime
+ - start crate structure real stupid: refcount + 1 function table
+ - have the runtime allocate a *kernel* function table 
+ - have the runtime call back into crate fn 0, passing kernel function table

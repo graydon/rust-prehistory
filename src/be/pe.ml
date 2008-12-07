@@ -44,6 +44,8 @@ let pe_image_base = 0x400000L;;
 let pe_file_alignment = 0x200;;
 let pe_mem_alignment = 0x1000;;
 
+let rva (f:fixup) = (SUB ((M_POS f), (IMM pe_image_base)));;
+
 let def_file_aligned f i = 
   ALIGN_FILE 
 	(pe_file_alignment, 
@@ -239,9 +241,9 @@ let pe_loader_header
        WORD32 (F_SZ text_fixup);            (* "size of code"            *)
 	   WORD32 (F_SZ init_data_fixup);       (* "size of all init data"   *)
        WORD32 (IMM size_of_uninit_data);
-       WORD32 (M_POS entry_point_fixup);    (* "address of entry point"  *)
-       WORD32 (M_POS text_fixup);           (* "base of code"            *)
-       WORD32 (M_POS init_data_fixup);      (* "base of data"            *)
+       WORD32 (rva entry_point_fixup);    (* "address of entry point"  *)
+       WORD32 (rva text_fixup);           (* "base of code"            *)
+       WORD32 (rva init_data_fixup);      (* "base of data"            *)
        WORD32 (IMM pe_image_base);
        WORD32 (IMM (Int64.of_int 
 					  pe_mem_alignment));
@@ -291,7 +293,7 @@ let pe_loader_header
        
        WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Export dir.        *) 
 
-       WORD32 (M_POS import_dir_fixup);
+       WORD32 (rva import_dir_fixup);
        WORD32 (M_SZ import_dir_fixup);
 
        WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Resource dir.      *) 
@@ -368,7 +370,7 @@ let pe_section_header
 		 so they're not, no problem. *)
 
 	  WORD32 (M_SZ hdr_fixup);  (* "Virtual size"    *)
-	  WORD32 (M_POS hdr_fixup); (* "Virtual address" *)
+	  WORD32 (rva hdr_fixup); (* "Virtual address" *)
 
 	  WORD32 (F_SZ hdr_fixup);  (* "Size of raw data"    *)
 	  WORD32 (F_POS hdr_fixup); (* "Pointer to raw data" *)
@@ -460,24 +462,24 @@ let pe_import_section
 	     first, last, or both of the slots in one of these rows points
 	     to the RVA of the name/hint used to look the import up. This
 	     table format is a mess!  *)
-	  WORD32 (M_POS entry.pe_import_dll_ILT_fixup);    (* Import lookup table. *)
+	  WORD32 (rva entry.pe_import_dll_ILT_fixup);    (* Import lookup table. *)
 	  WORD32 (IMM 0L);                                 (* Timestamp, unused.   *)
 	  WORD32 (IMM 0x0L);                               (* Forwarder chain, unused. *)
-	  WORD32 (M_POS entry.pe_import_dll_name_fixup);
-	  WORD32 (M_POS entry.pe_import_dll_IAT_fixup);    (* Import address table.*)
+	  WORD32 (rva entry.pe_import_dll_name_fixup);
+	  WORD32 (rva entry.pe_import_dll_IAT_fixup);    (* Import address table.*)
 	|]
   in
 
   let form_ILT_slot
       (import:pe_import)
       : item = 
-	(WORD32 (M_POS import.pe_import_name_fixup))
+	(WORD32 (rva import.pe_import_name_fixup))
   in
 
   let form_IAT_slot
       (import:pe_import)
       : item = 
-	(DEF (import.pe_import_address_fixup, (WORD32 (M_POS import.pe_import_name_fixup))))
+	(DEF (import.pe_import_address_fixup, (WORD32 (rva import.pe_import_name_fixup))))
   in
     
   let form_tables_for_dll
@@ -552,16 +554,13 @@ let pe_import_section
 ;;
 
 let pe_text_section
-	~(fn_fixup:fixup)
+	~(startup_fn_fixup:fixup)
+	~(startup_fn_arg_fixup:fixup)
 	~(text_fixup:fixup)
     ~(crate_code:item)
     : item =
   let
 	  e = Il.new_emitter X86.prealloc_quad true
-  in
-  let 
-	  fn_imm = (ADD ((IMM pe_image_base),
-					 (M_POS fn_fixup)))
   in
   let eax = Il.Reg (Il.Hreg X86.eax) in    
   let ecx = Il.Reg (Il.Hreg X86.ecx) in    
@@ -570,8 +569,8 @@ let pe_text_section
      * and assumed to be stdcall; so we have to clean up our own 
      * stack before returning.
      *)
-	Il.emit e Il.MOV ecx (Il.Mem (Il.M32, None, fn_imm)) Il.Nil;
-	Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (IMM 7L)) Il.Nil;
+	Il.emit e Il.MOV ecx (Il.Mem (Il.M32, None, (M_POS startup_fn_fixup))) Il.Nil;
+	Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS startup_fn_arg_fixup)) Il.Nil;
 	Il.emit e Il.CCALL eax ecx Il.Nil;
     Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
 	Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
@@ -657,7 +656,8 @@ let emit_file (sess:Session.sess) (code:Asm.item) : unit =
   in
 
   let text_section = (pe_text_section 
-	                    ~fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
+	                    ~startup_fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
+                        ~startup_fn_arg_fixup: text_fixup
 	                    ~text_fixup: text_fixup
                         ~crate_code: code)
   in
@@ -699,12 +699,13 @@ let emit_file (sess:Session.sess) (code:Asm.item) : unit =
 							import_header
 						  |]))
   in 
-  let all_items = (def_file_aligned image_fixup
-					 (SEQ [| all_headers;
-							 text_section;
-							 bss_section;
-							 all_init_data;
-							 ALIGN_MEM (pe_mem_alignment, MARK) |]))
+  let all_items = SEQ [| MEMPOS pe_image_base;
+                         (def_file_aligned image_fixup
+					        (SEQ [| all_headers;
+							        text_section;
+							        bss_section;
+							        all_init_data;
+							        ALIGN_MEM (pe_mem_alignment, MARK) |]))|]
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in

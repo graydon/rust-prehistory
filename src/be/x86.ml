@@ -160,7 +160,7 @@ let reg_str r =
 ;;
 
 (* This is a basic ABI. You might need to customize it by platform. *)
-let n_hardregs = 6;;
+let (n_hardregs:int) = 6;;
 
 let prealloc_quad (quad:Il.quad) : Il.quad = 
   match quad.Il.quad_op with 
@@ -181,9 +181,26 @@ let clobbers (quad:Il.quad) : Il.hreg list =
 ;;
   
 
-let spill_slot framesz i = 
-  Il.Mem (Il.M32, Some (Il.Hreg ebp), 
-          (Asm.IMM (Int64.add (Int64.add framesz 12L) (Int64.mul 4L (Int64.of_int i)))))
+let spill_slot (framesz:int64) (i:int) : Il.operand = 
+  Il.Mem 
+    (Il.M32, Some (Il.Hreg ebp), 
+     (Asm.IMM 
+        (Int64.add 
+           (Int64.add framesz 12L) 
+           (Int64.mul 4L (Int64.of_int i)))))
+;;
+
+let prologue (e:Il.emitter) (f:Ast.fn) : unit =
+  let r x = Il.Reg (Il.Hreg x) in
+  let framesz = (Asm.IMM f.Ast.fn_frame.Ast.frame_layout.layout_size) in
+    Il.emit_full e (Some f.Ast.fn_fixup) Il.MOV (r ebp) (r esp) Il.Nil;
+    Il.emit      e                       Il.SUB (r esp) (r esp) (Il.Imm framesz)
+;;
+
+let epilogue (e:Il.emitter) (f:Ast.fn) : unit = 
+  let r x = Il.Reg (Il.Hreg x) in
+    Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
+    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
 
 let (abi:Abi.abi) = 
@@ -200,6 +217,9 @@ let (abi:Abi.abi) =
     Abi.abi_n_hardregs = n_hardregs;
     Abi.abi_str_of_hardreg = reg_str;
     Abi.abi_prealloc_quad = prealloc_quad;
+ 
+    Abi.abi_emit_prologue = prologue;
+    Abi.abi_emit_epilogue = epilogue;
     Abi.abi_clobbers = clobbers;
     
     Abi.abi_sp_operand = Il.Reg (Il.Hreg esp);
@@ -218,11 +238,12 @@ let (abi:Abi.abi) =
  *)
 
 
-let imm_is_byte n = (n = (Int64.logand 0xffL n))
+let imm_is_byte (n:int64) : bool = 
+  n = (Int64.logand 0xffL n)
 ;;
 
 
-let rm_r (oper:operand) (r:int) = 
+let rm_r (oper:operand) (r:int) : Asm.item = 
   let reg_ebp = 6 in
   let reg_esp = 7 in 
     match oper with 
@@ -364,8 +385,8 @@ let mov (dst:operand) (src:operand) : Asm.item =
 ;;
 
 
-let select_item_misc t =
-  match (t.quad_op, t.quad_dst, t.quad_lhs, t.quad_rhs) with
+let select_item_misc (q:quad) : Asm.item =
+  match (q.quad_op, q.quad_dst, q.quad_lhs, q.quad_rhs) with
       
 	  (CCALL, Reg (Hreg 0), r, _) when is_rm32 r -> insn_rm_r 0xff r slash2
 	| (CCALL, Reg (Hreg 0), Pcrel f, _) -> insn_pcrel_simple 0xe8 f
@@ -423,7 +444,7 @@ let mul_like src slash =
 ;;
 
 
-let select_insn q =  
+let select_insn (q:quad) : Asm.item =  
   let item = 
     match q.quad_op with 
         MOV -> mov q.quad_dst q.quad_lhs 

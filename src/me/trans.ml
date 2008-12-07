@@ -387,18 +387,12 @@ let rec trans_stmt
 *)
 
 and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =
-  let _ = reset_emitter cx in
-  let emit = Il.emit cx.ctxt_emit in  
-  let r x = Il.Reg (Il.Hreg x) in
-    (* FIXME: factor out prologue / epilogue into ABI bits. *)
-    Il.emit_full cx.ctxt_emit (Some fn.Ast.fn_fixup) Il.MOV (r X86.ebp) (r X86.esp) Il.Nil;
-    emit Il.SUB (r X86.esp) (r X86.esp) (Il.Imm (Asm.IMM fn.Ast.fn_frame.Ast.frame_layout.layout_size));
-    trans_stmt cx fn.Ast.fn_body;
-    emit Il.MOV (r X86.esp) (r X86.ebp) Il.Nil;
-    Il.emit cx.ctxt_emit Il.CRET Il.Nil Il.Nil Il.Nil;
-    capture_emitted_quads cx
-
-      
+  reset_emitter cx;
+  cx.ctxt_abi.Abi.abi_emit_prologue cx.ctxt_emit fn;
+  trans_stmt cx fn.Ast.fn_body;
+  cx.ctxt_abi.Abi.abi_emit_epilogue cx.ctxt_emit fn;
+  capture_emitted_quads cx
+    
 and trans_prog (cx:ctxt) (p:Ast.prog) : unit = 
   trans_mod_items cx p.Ast.prog_mod
 
