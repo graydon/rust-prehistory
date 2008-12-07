@@ -822,7 +822,7 @@ and resolve_fn span cx fn =
 	{ cx with ctxt_frame_scopes = 
 		fn.Ast.fn_frame :: cx.ctxt_frame_scopes } 
   in
-	resolve_stmt cx fn.Ast.fn_body
+	resolve_block cx fn.Ast.fn_body
 
 		
 and resolve_prog cx prog = 
@@ -830,24 +830,24 @@ and resolve_prog cx prog =
   let cx = extend_ctxt_by_frame cx (linearize_items_for_frame items) in
 	Hashtbl.iter (resolve_mod_item cx) items;
 	resolve_init cx prog.Ast.prog_init;
-  	resolve_stmt_option cx prog.Ast.prog_main;
-  	resolve_stmt_option cx prog.Ast.prog_fini;
+  	resolve_block_option cx prog.Ast.prog_main;
+  	resolve_block_option cx prog.Ast.prog_fini;
 
 
 and resolve_init cx init = 
   ()
 
 
-and resolve_block cx block = 
+and resolve_block cx (block:Ast.block) = 
   let cx' = 
 	{ cx with ctxt_frame_scopes = 
-		block.Ast.block_frame :: cx.ctxt_frame_scopes } 
+		block.node.Ast.block_frame :: cx.ctxt_frame_scopes } 
   in
     log cx "resolving block with %d items, %d slots"
-	  (Hashtbl.length block.Ast.block_frame.Ast.frame_items)
-	  (Hashtbl.length block.Ast.block_frame.Ast.frame_locals);
-	layout_frame cx block.Ast.block_frame;
-	Array.iter (resolve_stmt cx') block.Ast.block_stmts
+	  (Hashtbl.length block.node.Ast.block_frame.Ast.frame_items)
+	  (Hashtbl.length block.node.Ast.block_frame.Ast.frame_locals);
+	layout_frame cx block.node.Ast.block_frame;
+	Array.iter (resolve_stmt cx') block.node.Ast.block_stmts
 
 and resolve_slot 
     (cx:ctxt) 
@@ -1000,10 +1000,10 @@ and resolve_lval cx tyo lval =
 	          | _ -> raise (err cx ("unhandled lval form in resolve_lval"))
           end
 
-and resolve_stmt_option cx stmtopt = 
-  match stmtopt with 
+and resolve_block_option cx (blockopt:Ast.block option) = 
+  match blockopt with 
 	  None -> ()
-	| Some s -> resolve_stmt cx s
+	| Some s -> resolve_block cx s
 
 
 and resolve_expr_option cx expropt = 
@@ -1031,13 +1031,13 @@ and resolve_stmt cx stmt =
 		let (stmts, atom) = w.Ast.while_lval in
 		  resolve_atom cx (Some Ast.TY_bool) atom;
 		  resolve_stmts cx stmts;
-		  resolve_stmt cx w.Ast.while_body
+		  resolve_block cx w.Ast.while_body
 
 	| Ast.STMT_do_while w -> 
 		let (stmts, atom) = w.Ast.while_lval in
 		  resolve_atom cx (Some Ast.TY_bool) atom;
 		  resolve_stmts cx stmts;
-		  resolve_stmt cx w.Ast.while_body
+		  resolve_block cx w.Ast.while_body
 
 	| Ast.STMT_foreach f -> 
 		(* FIXME: foreaches are a bit wrong at the moment. *)
@@ -1049,7 +1049,7 @@ and resolve_stmt cx stmt =
 				f.Ast.foreach_frame :: cx.ctxt_frame_scopes } 
 		  in
 			layout_frame cx f.Ast.foreach_frame;
-			resolve_stmt cx' f.Ast.foreach_body;
+			resolve_block cx' f.Ast.foreach_body;
 			()
 			  
 	| Ast.STMT_for f -> 
@@ -1067,13 +1067,13 @@ and resolve_stmt cx stmt =
 
 	| Ast.STMT_if i -> 
 		resolve_atom cx (Some Ast.TY_bool) i.Ast.if_test;
-		resolve_stmt cx i.Ast.if_then;
-		resolve_stmt_option cx i.Ast.if_else
+		resolve_block cx i.Ast.if_then;
+		resolve_block_option cx i.Ast.if_else
 
 	| Ast.STMT_try t -> 
-		resolve_stmt cx t.Ast.try_body;
-		resolve_stmt_option cx t.Ast.try_fail;
-		resolve_stmt_option cx t.Ast.try_fini
+		resolve_block cx t.Ast.try_body;
+		resolve_block_option cx t.Ast.try_fail;
+		resolve_block_option cx t.Ast.try_fini
 		
 	| Ast.STMT_put (_, lo) -> 
 		resolve_atom_option cx lo

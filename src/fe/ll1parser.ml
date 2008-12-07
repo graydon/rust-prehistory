@@ -919,19 +919,23 @@ and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit =
               Ast.local_vreg = ref None; }
 
 and parse_block ps = 
+  let apos = lexpos ps in
   let frames = ps.pstate_block_frames in
   let frame = new_frame false in 
     ps.pstate_block_frames <- frame :: frames; 
-    let apos = lexpos ps in
     let stmts = arj (ctxt "block: stmts" 
 					   (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
     in
     let bpos = lexpos ps in 
-    let res = span apos bpos (Ast.STMT_block { Ast.block_frame = frame;
-									           Ast.block_stmts = stmts })
-    in
       ps.pstate_block_frames <- frames;
-      res
+      span apos bpos { Ast.block_frame = frame;
+		               Ast.block_stmts = stmts }
+
+and parse_block_stmt ps = 
+  let apos = lexpos ps in
+  let block = parse_block ps in
+  let bpos = lexpos ps in 
+    span apos bpos (Ast.STMT_block block)
 
 and parse_init ps = 
   let init = 
@@ -966,8 +970,8 @@ and parse_stmts ps =
         IF -> 
           bump ps;
           let (stmts, atom) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
-          let then_stmt = ctxt "stmts: if-then" parse_block ps in
-          let else_stmt = 
+          let then_block = ctxt "stmts: if-then" parse_block ps in
+          let else_block = 
             (match peek ps with 
                  ELSE -> 
                    bump ps;
@@ -978,18 +982,18 @@ and parse_stmts ps =
             spans stmts apos bpos 
               (Ast.STMT_if 
                  { Ast.if_test = atom;
-                   Ast.if_then = then_stmt;
-                   Ast.if_else = else_stmt; })
+                   Ast.if_then = then_block;
+                   Ast.if_else = else_block; })
 
       | WHILE -> 
           bump ps;
           let (stmts, test) = ctxt "stmts: while cond" (bracketed LPAREN RPAREN parse_expr) ps in
-          let body_stmt = ctxt "stmts: while body" parse_block ps in
+          let body_block = ctxt "stmts: while body" parse_block ps in
           let bpos = lexpos ps in
             spans stmts apos bpos 
               (Ast.STMT_while 
                  { Ast.while_lval = (stmts, test);
-                   Ast.while_body = body_stmt; })
+                   Ast.while_body = body_block; })
               
       | PUT proto -> 
           bump ps;
@@ -1025,7 +1029,7 @@ and parse_stmts ps =
 		  let be = span apos bpos (Ast.STMT_be (proto, lval, args)) in
 		  Array.concat [ lstmts; astmts; [| be |] ]
               
-      | LBRACE -> [| ctxt "stmts: block" parse_block ps |]
+      | LBRACE -> [| ctxt "stmts: block" parse_block_stmt ps |]
 
       | LET -> 
           bump ps;

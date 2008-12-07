@@ -190,14 +190,27 @@ let spill_slot (framesz:int64) (i:int) : Il.operand =
            (Int64.mul 4L (Int64.of_int i)))))
 ;;
 
-let prologue (e:Il.emitter) (f:Ast.fn) : unit =
+let fn_prologue (e:Il.emitter) (f:Ast.fn) : unit =
   let r x = Il.Reg (Il.Hreg x) in
   let framesz = (Asm.IMM f.Ast.fn_frame.Ast.frame_layout.layout_size) in
     Il.emit_full e (Some f.Ast.fn_fixup) Il.MOV (r ebp) (r esp) Il.Nil;
     Il.emit      e                       Il.SUB (r esp) (r esp) (Il.Imm framesz)
 ;;
 
-let epilogue (e:Il.emitter) (f:Ast.fn) : unit = 
+let fn_epilogue (e:Il.emitter) (f:Ast.fn) : unit = 
+  let r x = Il.Reg (Il.Hreg x) in
+    Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
+    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+;;
+
+let main_prologue (e:Il.emitter) (block:Ast.block) : unit =
+  let r x = Il.Reg (Il.Hreg x) in
+  let framesz = (Asm.IMM block.node.Ast.block_frame.Ast.frame_layout.layout_size) in
+    Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
+    Il.emit e Il.SUB (r esp) (r esp) (Il.Imm framesz)
+;;
+
+let main_epilogue (e:Il.emitter) (block:Ast.block) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
     Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
@@ -218,8 +231,10 @@ let (abi:Abi.abi) =
     Abi.abi_str_of_hardreg = reg_str;
     Abi.abi_prealloc_quad = prealloc_quad;
  
-    Abi.abi_emit_prologue = prologue;
-    Abi.abi_emit_epilogue = epilogue;
+    Abi.abi_emit_fn_prologue = fn_prologue;
+    Abi.abi_emit_fn_epilogue = fn_epilogue;
+    Abi.abi_emit_main_prologue = main_prologue;
+    Abi.abi_emit_main_epilogue = main_epilogue;
     Abi.abi_clobbers = clobbers;
     
     Abi.abi_sp_operand = Il.Reg (Il.Hreg esp);

@@ -149,8 +149,8 @@ and constrs = constr array
 and prog = 
     {
       prog_init: init option;
-      prog_main: stmt option;
-      prog_fini: stmt option;
+      prog_main: block option;
+      prog_fini: block option;
       prog_mod: mod_items;
     } 
       
@@ -217,7 +217,7 @@ and stmt' =
   | STMT_prove of (constrs)
   | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
-  | STMT_block of stmt_block
+  | STMT_block of block
   | STMT_copy of (lval * expr)
   | STMT_call of (lval * lval * (atom array))
   | STMT_send of (lval * atom)
@@ -261,11 +261,13 @@ and frame =
       frame_items: (ident, (layout * mod_item)) Hashtbl.t;
     }
 
-and stmt_block = 
+and block' = 
     {
       block_frame: frame;
       block_stmts: stmt array;
     }
+
+and block = block' spanned
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
@@ -282,7 +284,7 @@ and stmt_alt_port =
 and stmt_while = 
     {
       while_lval: ((stmt array) * atom);
-      while_body: stmt;
+      while_body: block;
     }
       
 and stmt_foreach = 
@@ -290,7 +292,7 @@ and stmt_foreach =
       foreach_proto: proto;
       foreach_frame: frame;
       foreach_call: (lval * lval array);
-      foreach_body: stmt;
+      foreach_body: block;
     }
       
 and stmt_for = 
@@ -305,15 +307,15 @@ and stmt_for =
 and stmt_if = 
     {
       if_test: atom;
-      if_then: stmt;
-      if_else: stmt option;
+      if_then: block;
+      if_else: block option;
     }
 
 and stmt_try = 
     {
-      try_body: stmt;
-      try_fail: stmt option;
-      try_fini: stmt option;
+      try_body: block;
+      try_fail: block option;
+      try_fini: block option;
     }
 
 and atom = 
@@ -425,7 +427,7 @@ and fn =
       fn_ty: ty_fn;
       fn_bind: ident array;
       fn_frame: frame;
-      fn_body: stmt;
+      fn_body: block;
     }
 
 and pred = 
@@ -439,7 +441,7 @@ and init =
     {
       init_sig: ty_sig;
       init_bind: ident array;
-      init_body: stmt;
+      init_body: block;
     }
 
 (* 

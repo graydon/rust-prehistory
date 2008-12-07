@@ -318,8 +318,8 @@ let rec trans_stmt
 		  let src = trans_expr cx e_src in
 		    emit Il.MOV dst src Il.Nil
               
-	  | Ast.STMT_block stmts -> 
-		  Array.iter (trans_stmt cx) stmts.Ast.block_stmts
+	  | Ast.STMT_block block -> 
+          trans_block cx block		  
           
       | Ast.STMT_while sw -> 
           let back_jmp_target = mark cx in 
@@ -329,7 +329,7 @@ let rec trans_stmt
               emit Il.CMP Il.Nil v imm_false;
               let fwd_jmp_quad = mark cx in
                 emit Il.JE badlab Il.Nil Il.Nil;
-                trans_stmt cx sw.Ast.while_body;
+                trans_block cx sw.Ast.while_body;
                 emit Il.JMP (Il.Label back_jmp_target) Il.Nil Il.Nil;
                 patch cx fwd_jmp_quad
                   
@@ -338,7 +338,7 @@ let rec trans_stmt
             emit Il.CMP Il.Nil v imm_true;
             let skip_thn_clause_jmp = mark cx in 
               emit Il.JE badlab Il.Nil Il.Nil;
-              trans_stmt cx si.Ast.if_then;
+              trans_block cx si.Ast.if_then;
               begin 
                 match si.Ast.if_else with 
                     None -> patch cx skip_thn_clause_jmp
@@ -346,7 +346,7 @@ let rec trans_stmt
                       let skip_els_clause_jmp = mark cx in
                         emit Il.JE badlab Il.Nil Il.Nil;
                         patch cx skip_thn_clause_jmp;
-                        trans_stmt cx els;
+                        trans_block cx els;
                         patch cx skip_els_clause_jmp                        
               end
 
@@ -388,21 +388,32 @@ let rec trans_stmt
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")
 *)
 
+and trans_block (cx:ctxt) (block:Ast.block) : unit = 
+  Array.iter (trans_stmt cx) block.node.Ast.block_stmts
+
 and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =
   reset_emitter cx;
-  cx.ctxt_abi.Abi.abi_emit_prologue cx.ctxt_emit fn;
-  trans_stmt cx fn.Ast.fn_body;
-  cx.ctxt_abi.Abi.abi_emit_epilogue cx.ctxt_emit fn;
+  cx.ctxt_abi.Abi.abi_emit_fn_prologue cx.ctxt_emit fn;
+  trans_block cx fn.Ast.fn_body;
+  cx.ctxt_abi.Abi.abi_emit_fn_epilogue cx.ctxt_emit fn;
   capture_emitted_quads cx
 
-and trans_prog_stmt (cx:ctxt) (s:Ast.stmt) (ncomp:string) : fixup = 
+and trans_prog_block (cx:ctxt) (b:Ast.block) (ncomp:string) : fixup = 
   let oldpath = cx.ctxt_path in 
     cx.ctxt_path <- ncomp :: cx.ctxt_path;
     let name = String.concat "." (List.rev cx.ctxt_path) in
     let fix = new_fixup name in
+    let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+    let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
       reset_emitter cx;
+      cx.ctxt_abi.Abi.abi_emit_main_prologue cx.ctxt_emit b;
       Il.emit_full cx.ctxt_emit (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
-      trans_stmt cx s;
+      (* Il.emit cx.ctxt_emit Il.MOV vr cx.ctxt_abi.Abi.abi_rp_operand Il.Nil; *)
+      Il.emit cx.ctxt_emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM 0xdeadbeefL)) Il.Nil;
+      Il.emit cx.ctxt_emit Il.CCALL dst (cx.ctxt_abi.Abi.abi_rp_operand) Il.Nil;
+      Il.emit cx.ctxt_emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
+      trans_block cx b;
+      cx.ctxt_abi.Abi.abi_emit_main_epilogue cx.ctxt_emit b;
       capture_emitted_quads cx;
       cx.ctxt_path <- oldpath;
       fix
@@ -417,12 +428,12 @@ and trans_prog (cx:ctxt) (p:Ast.prog) : unit =
   let main =     
     match p.Ast.prog_main with 
         None -> Asm.IMM 0L
-      | Some main -> Asm.M_POS (trans_prog_stmt cx main "main")            
+      | Some main -> Asm.M_POS (trans_prog_block cx main "main")            
   in
   let fini = 
     match p.Ast.prog_fini with 
         None -> Asm.IMM 0L
-      | Some main -> Asm.M_POS (trans_prog_stmt cx main "fini")
+      | Some main -> Asm.M_POS (trans_prog_block cx main "fini")
   in
   let prog = 
     (* FIXME: only DEF the entry prog if its name matches a crate param! *)
