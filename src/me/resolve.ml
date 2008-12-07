@@ -1027,7 +1027,10 @@ and resolve_stmts cx stmts =
 and resolve_stmt cx stmt = 
   let cx = { cx with ctxt_span = Some stmt.span } in
   match stmt.node with 
-	  Ast.STMT_while w -> 
+	  Ast.STMT_log a -> 
+		  resolve_atom cx None a
+
+	| Ast.STMT_while w -> 
 		let (stmts, atom) = w.Ast.while_lval in
 		  resolve_atom cx (Some Ast.TY_bool) atom;
 		  resolve_stmts cx stmts;

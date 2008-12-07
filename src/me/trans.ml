@@ -214,7 +214,7 @@ let trans_atom
     (atom:Ast.atom)
     : Il.operand = 
   match atom with 
-    | Ast.ATOM_lval lv -> 
+      Ast.ATOM_lval lv -> 
         trans_lval cx lv
           
 	| Ast.ATOM_literal lit -> 
@@ -234,7 +234,13 @@ let trans_atom
           
 	        | Ast.LIT_int (bi, s) -> 
 		        Il.Imm (Asm.IMM (Int64.of_int (Big_int.int_of_big_int bi)))
-                  
+
+            | Ast.LIT_str s -> 
+                let strfix = new_fixup "string fixup" in
+                let str = Asm.DEF (strfix, Asm.ZSTRING s) in
+                  cx.ctxt_data_items <- str :: cx.ctxt_data_items;
+                  (Il.Imm (Asm.M_POS strfix))
+
 	        | _ -> marker (* raise  (Invalid_argument "Trans.trans_atom: unimplemented translation") *)
         end
         
@@ -306,6 +312,34 @@ let trans_expr
 	  | _ -> raise (Invalid_argument "Trans.trans_expr: unimplemented translation")
 ;;
 
+let atom_type at = 
+  match at with 
+      Ast.ATOM_literal {node=(Ast.LIT_str _); span=_} -> Some Ast.TY_str
+    | Ast.ATOM_literal {node=(Ast.LIT_int _); span=_} -> Some Ast.TY_int
+    | Ast.ATOM_lval lv -> 
+        begin
+          match !(lv.Ast.lval_res.Ast.res_target) with 
+              Some (Ast.RES_slot local) -> 
+                let slotr = local.Ast.local_slot in 
+                let slot = !(slotr.node) in
+                  begin
+                    match slot with 
+                        Ast.SLOT_exterior t -> Some t
+                      | Ast.SLOT_interior t -> Some t
+                      | Ast.SLOT_read_alias t -> Some t
+                      | Ast.SLOT_write_alias t -> Some t
+                      | Ast.SLOT_auto -> 
+                          raise (Semant_err 
+                                   (Some lv.Ast.lval_src.span, 
+                                    "Unresolved auto slot in Trans.atom_type"))
+                  end
+            | Some _ -> None
+            | None -> raise (Semant_err 
+                               (Some lv.Ast.lval_src.span, 
+                                "Unresolved lval in Trans.atom_type"))
+        end
+    | _ -> None
+;;
 
 let rec trans_stmt 
     (cx:ctxt) 
@@ -313,7 +347,17 @@ let rec trans_stmt
     : unit =
   let emit = Il.emit cx.ctxt_emit in
     match stmt.node with 
-	    Ast.STMT_copy (lv_dst, e_src) -> 
+
+        Ast.STMT_log a ->
+          begin
+            match atom_type a with 
+                Some Ast.TY_str -> trans_log_str cx a
+              | Some Ast.TY_int -> trans_log_int cx a
+              | Some _ -> raise (Invalid_argument "Trans.trans_stmt: unimplemented known logging type")
+              | _ -> raise (Invalid_argument "Trans.trans_stmt: unimplemented unknown logging type")
+          end
+          
+	  | Ast.STMT_copy (lv_dst, e_src) -> 
 		  let dst = trans_lval cx lv_dst in
 		  let src = trans_expr cx e_src in
 		    emit Il.MOV dst src Il.Nil
@@ -388,6 +432,24 @@ let rec trans_stmt
 	| _ -> raise (Invalid_argument "Semant.trans_stmt: unimplemented translation")
 *)
 
+
+and trans_log_int (cx:ctxt) (a:Ast.atom) : unit = 
+  let v = trans_atom cx a in 
+  let f = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 0 in
+  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+    Il.emit cx.ctxt_emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+    Il.emit cx.ctxt_emit Il.CCALL dst (Il.Reg f) Il.Nil;
+    Il.emit cx.ctxt_emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
+
+and trans_log_str (cx:ctxt) (a:Ast.atom) : unit = 
+  let v = trans_atom cx a in
+  let f = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 1 in
+  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+    Il.emit cx.ctxt_emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+    Il.emit cx.ctxt_emit Il.CCALL dst (Il.Reg f) Il.Nil;
+    Il.emit cx.ctxt_emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
+
+
 and trans_block (cx:ctxt) (block:Ast.block) : unit = 
   Array.iter (trans_stmt cx) block.node.Ast.block_stmts
 
@@ -403,22 +465,14 @@ and trans_prog_block (cx:ctxt) (b:Ast.block) (ncomp:string) : fixup =
     cx.ctxt_path <- ncomp :: cx.ctxt_path;
     let name = String.concat "." (List.rev cx.ctxt_path) in
     let fix = new_fixup name in
-    let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
-    let strfix = new_fixup "hello world string" in
-    let str = Asm.DEF (strfix, Asm.ZSTRING "hello, world") in
-      cx.ctxt_data_items <- str :: cx.ctxt_data_items;
       reset_emitter cx;
       Il.emit_full cx.ctxt_emit (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
-      cx.ctxt_abi.Abi.abi_emit_main_prologue cx.ctxt_emit b;
-      let vr = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 1 in
-        Il.emit cx.ctxt_emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS strfix)) Il.Nil;
-        Il.emit cx.ctxt_emit Il.CCALL dst (Il.Reg vr) Il.Nil;
-        Il.emit cx.ctxt_emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
-        trans_block cx b;
-        cx.ctxt_abi.Abi.abi_emit_main_epilogue cx.ctxt_emit b;
-        capture_emitted_quads cx;
-        cx.ctxt_path <- oldpath;
-        fix
+      cx.ctxt_abi.Abi.abi_emit_main_prologue cx.ctxt_emit b;      
+      trans_block cx b;
+      cx.ctxt_abi.Abi.abi_emit_main_epilogue cx.ctxt_emit b;
+      capture_emitted_quads cx;
+      cx.ctxt_path <- oldpath;
+      fix
 
 and trans_prog (cx:ctxt) (p:Ast.prog) : unit =   
   let name = String.concat "." (List.rev cx.ctxt_path) in

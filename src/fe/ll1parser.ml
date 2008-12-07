@@ -967,7 +967,15 @@ and parse_stmts ps =
   in
   let apos = lexpos ps in
     match peek ps with 
-        IF -> 
+        
+        LOG -> 
+          bump ps;
+          let (stmts, atom) = ctxt "stmts: log value" parse_expr ps in
+            expect ps SEMI;
+            let bpos = lexpos ps in
+              spans stmts apos bpos (Ast.STMT_log atom) 
+              
+      | IF -> 
           bump ps;
           let (stmts, atom) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
           let then_block = ctxt "stmts: if-then" parse_block ps in

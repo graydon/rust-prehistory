@@ -202,7 +202,8 @@ and ty_prog =
  * addr. this is a 'tail call' that destroys us.
  *)
 and stmt' =
-    STMT_while of stmt_while
+    STMT_log of atom
+  | STMT_while of stmt_while
   | STMT_do_while of stmt_while
   | STMT_foreach of stmt_foreach
   | STMT_for of stmt_for

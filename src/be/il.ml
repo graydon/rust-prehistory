@@ -184,7 +184,12 @@ let string_of_quad f t =
 		  (string_of_operand f t.quad_rhs)
 	      
 	| JMP | JE | JNE | JL | JLE | JG | JGE | JC | JNC | JO | JNO
-    | CALL | RESUME | CCALL | CPUSH _ | CPOP _ ->
+    | CALL | RESUME | CCALL | CPUSH _  ->
+		Printf.sprintf "%s %s"
+		  (string_of_op t.quad_op)
+		  (string_of_operand f t.quad_lhs)
+          
+    | CPOP _ -> 
 		Printf.sprintf "%s %s"
 		  (string_of_op t.quad_op)
 		  (string_of_operand f t.quad_dst)
