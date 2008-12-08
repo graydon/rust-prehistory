@@ -1,6 +1,7 @@
 
 progress:
- - fix frame accesses to use ebp-foo rather than, er, ebp+foo
+ - replace "heavy frames" with arg-frames / local-frames, since
+   they are really categorically different creatures.
    - probably overhaul frame-layout stuff in general
  - allocate proc stack
  - on activation, switch from C stack to proc stack

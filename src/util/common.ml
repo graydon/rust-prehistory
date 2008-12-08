@@ -46,6 +46,7 @@ type layout =
       mutable layout_size: int64;
       mutable layout_offset: int64;
       mutable layout_align: int64; 
+      mutable layout_done: bool; 
     }
 ;;
 
@@ -53,5 +54,26 @@ type layout =
 let new_layout _ = 
   { layout_size = 0L; 
     layout_offset = 0L;
-    layout_align = 0L }
+    layout_align = 0L;
+    layout_done = false}
 ;;
+
+let htab_keys htab = 
+  Hashtbl.fold (fun k _ accum -> k :: accum) htab []
+;;
+
+let htab_vals htab = 
+  Hashtbl.fold (fun _ v accum -> v :: accum) htab []
+;;
+
+let htab_pairs htab = 
+  Hashtbl.fold (fun k v accum -> (k,v) :: accum) htab []
+;;
+
+(* 
+ * Local Variables:
+ * fill-column: 70; 
+ * indent-tabs-mode: nil
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * End:
+ *)

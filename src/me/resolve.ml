@@ -118,17 +118,17 @@ let rec size_of_ty cx t =
 	  Ast.TY_nil -> 0L
 	| Ast.TY_bool -> 1L
 	| Ast.TY_mach (_, n) -> Int64.of_int (n / 8)
-	| Ast.TY_int -> cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.TY_int -> cx.ctxt_abi.Abi.abi_ptr_sz
 	| Ast.TY_char -> 4L
-	| Ast.TY_str -> cx.ctxt_abi.Abi.abi_ptrsz
+	| Ast.TY_str -> cx.ctxt_abi.Abi.abi_ptr_sz
 	| Ast.TY_tup tys -> (Array.fold_left (fun n ty -> Int64.add n (slot_size cx ty)) 0L tys)
 	| _ -> raise (err cx "unhandled type in size_of_ty")
 
 and slot_size cx s = 
   match s with 
-	  Ast.SLOT_exterior _ -> cx.ctxt_abi.Abi.abi_ptrsz
-	| Ast.SLOT_read_alias _ -> cx.ctxt_abi.Abi.abi_ptrsz
-	| Ast.SLOT_write_alias _ -> cx.ctxt_abi.Abi.abi_ptrsz
+	  Ast.SLOT_exterior _ -> cx.ctxt_abi.Abi.abi_ptr_sz
+	| Ast.SLOT_read_alias _ -> cx.ctxt_abi.Abi.abi_ptr_sz
+	| Ast.SLOT_write_alias _ -> cx.ctxt_abi.Abi.abi_ptr_sz
 	| Ast.SLOT_interior t -> size_of_ty cx t
 	| Ast.SLOT_auto -> raise Auto_slot
 ;;
@@ -259,7 +259,7 @@ and apply_ctxt_ty cx params args span =
  *     |caller args                 |     must use memmove or similar "overlap-permitting" move,
  *     |...                         |     if supporting tail-calling. 
  *     |...                         |
- *     +----------------------------+ <-- fp + wordsz + abi_operand_blocksz
+ *     +----------------------------+ <-- fp + abi_frame_base_sz + abi_implicit_args_sz
  *     |caller non-reg ABI operands |
  *     |possibly empty, if fastcall |
  *     |  - process pointer?        |
@@ -267,8 +267,9 @@ and apply_ctxt_ty cx params args span =
  *     |  - yield pc or delta?      |
  *     |  - yield slot addr?        |
  *     |  - ret slot addr?          |
- *     +----------------------------+ <-- fp + wordsz
+ *     +----------------------------+ <-- fp + abi_frame_base_sz
  *     |return pc pushed by machine |
+ *     |plus any callee-save stuff  |
  *     +----------------------------+ <-- fp
  *     |frame-allocated stuff       |
  *     |determined in resolve       |
@@ -298,6 +299,13 @@ and apply_ctxt_ty cx params args span =
  *       (Is this true of aliased word-fitting? Can we not runtime-calculate the 
  *       position of a spill slot? Meh.)
  *)
+
+and should_use_vreg (cx:ctxt) (local:Ast.local) : bool = 
+  let slotr = local.Ast.local_slot in 
+  let sz = slot_size cx (!(slotr.node)) in
+    (Int64.compare sz cx.ctxt_abi.Abi.abi_ptr_sz > 0 ||
+       (!(local.Ast.local_aliased)))
+
 and lookup_ident 
 	(cx:ctxt) 
 	(fp:Ast.resolved_path) 
@@ -321,15 +329,13 @@ and lookup_ident
 				 if Hashtbl.mem tab (Ast.KEY_ident ident)
 				 then 
 				   let local = Hashtbl.find tab (Ast.KEY_ident ident) in
-                   let slotr = local.Ast.local_slot in
                    let layout = local.Ast.local_layout in 
+                   let slotr = local.Ast.local_slot in                          
                    let pathopt = 
                      try
-                       let sz = slot_size cx (!(slotr.node)) in
-                         if Int64.compare sz cx.ctxt_abi.Abi.abi_ptrsz > 0 ||
-                           (!(local.Ast.local_aliased))
-                         then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
-                         else Some (Ast.RES_vreg local.Ast.local_vreg)
+                       if should_use_vreg cx local 
+                       then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
+                       else Some (Ast.RES_vreg local.Ast.local_vreg)
                      with 
                          Auto_slot -> 
                            begin 
@@ -368,11 +374,9 @@ and lookup_temp (cx:ctxt)
             let slotr = local.Ast.local_slot in 
             let pathopt = 
               try
-                let sz = slot_size cx (!(slotr.node)) in
-                  if Int64.compare sz cx.ctxt_abi.Abi.abi_ptrsz > 0 ||
-                    (!(local.Ast.local_aliased))
-                  then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
-                  else Some (Ast.RES_vreg local.Ast.local_vreg)
+                if should_use_vreg cx local
+                then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
+                else Some (Ast.RES_vreg local.Ast.local_vreg)
               with 
                   Auto_slot -> 
                     begin 
@@ -720,57 +724,77 @@ and layout_frame
 	(cx:ctxt) 
 	(frame:Ast.frame) 
 	: unit = 
-  let get_slot key local sz = 
-    (* 
-     * Only consider for layout those slots that are not assigned to 
-     * vregs. FIXME: possibly make the distinction of layout vs. vreg
-     * disjoint in the AST type.
-     *)
-    match !(local.Ast.local_vreg) with 
-        None -> 
-          ((key, local.Ast.local_layout, local.Ast.local_slot) :: sz) 
-      | Some _ -> sz
+  let _ = 
+    Hashtbl.iter 
+      (fun k local -> resolve_slot_ref cx None local.Ast.local_slot) 
+      frame.Ast.frame_locals
   in
-  let slots = Hashtbl.fold get_slot frame.Ast.frame_locals [] in 
-  let slots = 
-	Array.of_list 
-	  (Sort.list 
-		 (fun (a, _, _) (b, _, _) -> a < b) slots)
-  in
-    (* FIXME: lay out the module items too. *)
-    (* 
-       let get_item name (l, i) sz = ((name, l, i) :: sz) in
-       let items = Hashtbl.fold get_slot frame.Ast.frame_items [] in
-       let items = 
-	   Array.of_list 
-	   (Sort.list 
-	   (fun (a, _, _) (b, _, _) -> a < b) items) 
-       in
-    *)
-    (* 
-     * FIXME: should offset current 'light' frame to end of parent 'heavy' frame.
-     *)
-	for i = 0 to (Array.length slots) - 1 do
-	  let (_, _, s) = slots.(i) in
-        resolve_slot_ref cx None s;
-    done;          
+  let slots = htab_pairs frame.Ast.frame_locals in 
 	try 
-	  frame.Ast.frame_layout.layout_size <- cx.ctxt_abi.Abi.abi_frame_base;
-	  for i = 0 to (Array.length slots) - 1 do
-        let offset = frame.Ast.frame_layout.layout_size in
-		let (key, layout, s) = slots.(i) in
-          log cx "laying out slot %d (%s)" i (string_of_key key);
-		  let sz = slot_size cx (!(s.node)) in
-            log cx "  == %Ld bytes @ %Ld" sz offset;
-            layout.layout_size <- sz;
-            layout.layout_offset <- offset;
-			frame.Ast.frame_layout.layout_size <- Int64.add offset sz
-	  done;
+      let slots = 
+        List.filter 
+          (fun (k,local) -> not (should_use_vreg cx local)) 
+          slots 
+      in
+      let slots = 
+	    Array.of_list 
+	      (Sort.list (fun (a, _) (b, _) -> a < b) slots)
+      in
+      let frame_sz = 
+        Array.fold_left 
+          (fun x (_,local) -> 
+             Int64.add x (slot_size cx (!(local.Ast.local_slot.node)))) 
+          0L slots
+      in
+        (* FIXME: actually, "heavy frame" layout works entirely differently, as 
+         * the "frame" is actually the incoming parameter list. We can't sort it
+         * and shouldn't filter it and ... really we should not be using the frame
+         * structure at all for such things. Or they need their own flavour. Ugh. *)
+      let frame_offset = 
+        Int64.add frame_sz
+          begin
+            if frame.Ast.frame_heavy
+            then cx.ctxt_abi.Abi.abi_frame_base_sz
+            else 
+              begin
+                match cx.ctxt_frame_scopes with 
+                    [] -> 0L
+                  | x::_ -> 
+                      begin 
+                        (* 
+                         * FIXME: it is not really true that 'not done layout' means
+                         * the same thing as 'auto slot'. It really just means we lack
+                         * enough information to lay ourselves out yet. But it's practically
+                         * similar here.
+                         *)
+                        if x.Ast.frame_layout.layout_done
+                        then x.Ast.frame_layout.layout_offset
+                        else raise Auto_slot
+                      end
+              end
+          end
+      in
+        log cx "beginning%s frame layout for %Ld byte frame @ %Ld" 
+          (if frame.Ast.frame_heavy then " heavy" else " light") frame_sz frame_offset;
+        let offset = ref 0L in 
+	      frame.Ast.frame_layout.layout_size <- frame_sz;
+          frame.Ast.frame_layout.layout_offset <- frame_offset;
+	      for i = 0 to (Array.length slots) - 1 do          
+		    let (key, local) = slots.(i) in
+            let layout = local.Ast.local_layout in 
+              log cx "laying out slot %d (%s)" i (string_of_key key);
+		      let sz = slot_size cx (!(local.Ast.local_slot.node)) in
+                log cx "  == %Ld bytes @ %Ld" sz (!offset);
+                layout.layout_size <- sz;
+                layout.layout_offset <- (!offset);
+                layout.layout_done <- true;
+                offset := Int64.add sz (!offset);
+	      done;
+          frame.Ast.frame_layout.layout_done <- true;
 	with 
 		Auto_slot -> 
           log cx "hit auto slot";
 		  cx.ctxt_contains_autos := true
-            
 
 and extend_ctxt_by_frame 
 	(cx:ctxt)
@@ -822,7 +846,8 @@ and resolve_fn span cx fn =
 	{ cx with ctxt_frame_scopes = 
 		fn.Ast.fn_frame :: cx.ctxt_frame_scopes } 
   in
-	resolve_block cx fn.Ast.fn_body
+	resolve_block cx fn.Ast.fn_body;
+    layout_frame cx fn.Ast.fn_frame
 
 		
 and resolve_prog cx prog = 
@@ -846,8 +871,8 @@ and resolve_block cx (block:Ast.block) =
     log cx "resolving block with %d items, %d slots"
 	  (Hashtbl.length block.node.Ast.block_frame.Ast.frame_items)
 	  (Hashtbl.length block.node.Ast.block_frame.Ast.frame_locals);
-	layout_frame cx block.node.Ast.block_frame;
-	Array.iter (resolve_stmt cx') block.node.Ast.block_stmts
+	Array.iter (resolve_stmt cx') block.node.Ast.block_stmts;
+	layout_frame cx block.node.Ast.block_frame
 
 and resolve_slot 
     (cx:ctxt) 

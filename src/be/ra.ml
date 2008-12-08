@@ -267,10 +267,6 @@ let dump_quads cx =
   done
 ;;
 
-let htab_keys htab = 
-  Hashtbl.fold (fun k _ accum -> k :: accum) htab []
-;;
-
 let list_to_str list eltstr = 
   (String.concat "," (List.map eltstr (List.sort compare list)))
 ;;

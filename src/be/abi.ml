@@ -69,7 +69,7 @@
 
 type abi =
   {
-    abi_ptrsz: int64;
+    abi_ptr_sz: int64;
     abi_ptr_mem: Il.mem;
 
     abi_is_2addr_machine: bool;
@@ -94,7 +94,8 @@ type abi =
     abi_sp_operand: Il.operand;
     abi_fp_operand: Il.operand;
     abi_pp_operand: Il.operand;
-    abi_frame_base: int64;
+    abi_implicit_args_sz: int64;
+    abi_frame_base_sz: int64;
     abi_spill_slot: (int64 -> int -> Il.operand);
   }
 

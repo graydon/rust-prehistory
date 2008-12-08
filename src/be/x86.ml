@@ -266,9 +266,12 @@ let load_kern_fn (e:Il.emitter) (i:int) : Il.reg =
     vr
 ;;
 
+let ptr_sz = 4L
+;;
+
 let (abi:Abi.abi) = 
   {
-    Abi.abi_ptrsz = 4L;
+    Abi.abi_ptr_sz = ptr_sz;
     Abi.abi_ptr_mem = Il.M32;
 
     Abi.abi_is_2addr_machine = true;
@@ -291,7 +294,8 @@ let (abi:Abi.abi) =
     Abi.abi_fp_operand = Il.Reg (Il.Hreg ebp);
     Abi.abi_pp_operand = proc_ptr;
     Abi.abi_load_kern_fn = load_kern_fn;
-    Abi.abi_frame_base = 0L;
+    Abi.abi_frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L ptr_sz;
+    Abi.abi_implicit_args_sz = (* proc ptr *) ptr_sz;
     Abi.abi_spill_slot = spill_slot;
   }
 
