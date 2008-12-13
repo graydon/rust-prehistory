@@ -18,6 +18,7 @@ type ctxt =
 	  ctxt_sess: Session.sess;
 	  ctxt_made_progress: bool ref;
 	  ctxt_contains_autos: bool ref;
+	  ctxt_contains_un_laid_out_frames: bool ref;
 	  ctxt_contains_unresolved_types: bool ref;
 	  ctxt_abi: Abi.abi }
 ;;
@@ -29,6 +30,7 @@ let	new_ctxt sess abi =
 	ctxt_sess = sess;
 	ctxt_made_progress = ref true;
     ctxt_contains_autos = ref false;
+    ctxt_contains_un_laid_out_frames = ref false;
     ctxt_contains_unresolved_types = ref false;
 	ctxt_abi = abi }
 ;;
@@ -42,8 +44,8 @@ let err cx str =
   (Semant_err (cx.ctxt_span, (str)))
 ;;
 
-exception Auto_slot
-;;
+exception Auto_slot;;
+exception Un_laid_out_frame;;
 
 
 let join_array sep arr = 
@@ -322,41 +324,61 @@ and lookup_ident
 		  lookup_ident 
 			{ cx with ctxt_type_scopes = xs } fp ident
 	| [] -> 
-		(match cx.ctxt_frame_scopes with 
-			 [] -> raise (err cx ("unknown identifier: '" ^ ident ^ "'"))
-		   | (x::xs) -> 
-			   let tab = x.Ast.frame_locals in
-				 if Hashtbl.mem tab (Ast.KEY_ident ident)
-				 then 
-				   let local = Hashtbl.find tab (Ast.KEY_ident ident) in
-                   let layout = local.Ast.local_layout in 
-                   let slotr = local.Ast.local_slot in                          
-                   let pathopt = 
-                     try
-                       if should_use_vreg cx local 
-                       then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
-                       else Some (Ast.RES_vreg local.Ast.local_vreg)
-                     with 
-                         Auto_slot -> 
-                           begin 
-                             cx.ctxt_contains_autos := true; 
-                             None
-                           end
-                   in
-					 ({cx with ctxt_span = Some slotr.span}, 
-					  BINDING_slot (pathopt, local))
-				 else 
-			       let tab = x.Ast.frame_items in
-				     if Hashtbl.mem tab ident
-				     then 
-				       let (layout, item) = Hashtbl.find tab ident in
-                       let pathopt = Some (Ast.RES_member (layout, (Ast.RES_deref fp))) in
-					     ({cx with ctxt_span = Some item.span}, 
-					      BINDING_item (pathopt, item))
-                     else                        
-				       lookup_ident 
-					     { cx with ctxt_frame_scopes = xs } 
-					     (if x.Ast.frame_heavy then (Ast.RES_deref fp) else fp) ident)
+        begin
+		  match cx.ctxt_frame_scopes with 
+			  [] -> raise (err cx ("unknown identifier: '" ^ ident ^ "'"))
+		    | (x::xs) -> 
+                let local_opt = 
+                  match x with 
+                      Ast.FRAME_heavy hf -> 
+                        let args = !(hf.Ast.heavy_frame_arg_slots) in
+                          if List.exists (fun (k,_) -> k = ident) args
+                          then Some (List.assoc ident args)
+                          else None
+                    | Ast.FRAME_light lf -> 
+			            let tab = lf.Ast.light_frame_locals in
+				          if Hashtbl.mem tab (Ast.KEY_ident ident)
+				          then Some (Hashtbl.find tab (Ast.KEY_ident ident))
+                          else None
+                in
+                  match local_opt with       
+                      Some local -> 
+                        let layout = local.Ast.local_layout in 
+                        let slotr = local.Ast.local_slot in                          
+                        let pathopt =                          
+                          try
+                            if should_use_vreg cx local 
+                            then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
+                            else Some (Ast.RES_vreg local.Ast.local_vreg)
+                          with 
+                              Auto_slot -> 
+                                begin 
+                                  cx.ctxt_contains_autos := true; 
+                                  None
+                                end
+                        in
+					      ({cx with ctxt_span = Some slotr.span}, 
+					       BINDING_slot (pathopt, local))
+                    | None -> 
+                        begin
+                          match x with 
+                              Ast.FRAME_heavy _ -> 
+                                lookup_ident 
+					              { cx with ctxt_frame_scopes = xs } 
+					              (Ast.RES_deref fp) ident
+                            | Ast.FRAME_light lf ->  
+			                    let tab = lf.Ast.light_frame_items in
+				                  if Hashtbl.mem tab ident
+				                  then 
+				                    let (layout, item) = Hashtbl.find tab ident in
+                                    let pathopt = Some (Ast.RES_member (layout, (Ast.RES_deref fp))) in
+					                  ({cx with ctxt_span = Some item.span}, 
+					                   BINDING_item (pathopt, item))
+                                  else                        
+				                    lookup_ident 
+					                  { cx with ctxt_frame_scopes = xs } fp ident
+                        end
+        end
 
 
 and lookup_temp (cx:ctxt) 
@@ -366,33 +388,36 @@ and lookup_temp (cx:ctxt)
   match cx.ctxt_frame_scopes with 
 	  [] -> raise (err cx ("unknown temporary: '" ^ (string_of_int temp) ^ "'"))
 	| (x::xs) -> 
-		let tab = x.Ast.frame_locals in
-		  if Hashtbl.mem tab (Ast.KEY_temp temp)
-		  then 
-		    let local = Hashtbl.find tab (Ast.KEY_temp temp) in 
-            let layout = local.Ast.local_layout in 
-            let slotr = local.Ast.local_slot in 
-            let pathopt = 
-              try
-                if should_use_vreg cx local
-                then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
-                else Some (Ast.RES_vreg local.Ast.local_vreg)
-              with 
-                  Auto_slot -> 
-                    begin 
-                      cx.ctxt_contains_autos := true; 
-                      None
-                    end
-            in
-              log cx "found temporary temp %d" temp;
-			  ({ cx with ctxt_span = Some slotr.span }, 
-			   BINDING_slot (pathopt, local))
-		  else 
-		    lookup_temp 
-			  { cx with ctxt_frame_scopes = xs } 
-			  (if x.Ast.frame_heavy then (Ast.RES_deref fp) else fp)
-			  temp
-              
+        begin
+          match x with 
+              Ast.FRAME_light lf ->                 
+		        let tab = lf.Ast.light_frame_locals in
+		          if Hashtbl.mem tab (Ast.KEY_temp temp)
+		          then 
+		            let local = Hashtbl.find tab (Ast.KEY_temp temp) in 
+                    let layout = local.Ast.local_layout in 
+                    let slotr = local.Ast.local_slot in 
+                    let pathopt = 
+                      try
+                        if should_use_vreg cx local
+                        then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
+                        else Some (Ast.RES_vreg local.Ast.local_vreg)
+                      with 
+                          Auto_slot -> 
+                            begin 
+                              cx.ctxt_contains_autos := true; 
+                              None
+                            end
+                    in
+                      log cx "found temporary temp %d" temp;
+			          ({ cx with ctxt_span = Some slotr.span }, 
+			           BINDING_slot (pathopt, local))
+		          else 
+		            lookup_temp { cx with ctxt_frame_scopes = xs } fp temp
+            | _ -> 
+                lookup_temp 
+			      { cx with ctxt_frame_scopes = xs } (Ast.RES_deref fp) temp
+        end
 
 and lookup_base cx base = 
   match base with 
@@ -724,82 +749,103 @@ and layout_frame
 	(cx:ctxt) 
 	(frame:Ast.frame) 
 	: unit = 
-  let _ = 
-    Hashtbl.iter 
-      (fun k local -> resolve_slot_ref cx None local.Ast.local_slot) 
-      frame.Ast.frame_locals
-  in
-  let slots = htab_pairs frame.Ast.frame_locals in 
-	try 
-      let slots = 
-        List.filter 
-          (fun (k,local) -> not (should_use_vreg cx local)) 
-          slots 
-      in
-      let slots = 
-	    Array.of_list 
-	      (Sort.list (fun (a, _) (b, _) -> a < b) slots)
-      in
-      let frame_sz = 
-        Array.fold_left 
-          (fun x (_,local) -> 
-             Int64.add x (slot_size cx (!(local.Ast.local_slot.node)))) 
-          0L slots
-      in
-        (* FIXME: actually, "heavy frame" layout works entirely differently, as 
-         * the "frame" is actually the incoming parameter list. We can't sort it
-         * and shouldn't filter it and ... really we should not be using the frame
-         * structure at all for such things. Or they need their own flavour. Ugh. *)
-      let frame_offset = 
-        Int64.add frame_sz
-          begin
-            if frame.Ast.frame_heavy
-            then cx.ctxt_abi.Abi.abi_frame_base_sz
-            else 
-              begin
+  try 
+    let (heavy,frame_offset,frame_layout,slots) = 
+      match frame with 
+          Ast.FRAME_light lf -> 
+            begin
+              let _ = 
+                Hashtbl.iter 
+                  (fun k local -> resolve_slot_ref cx None local.Ast.local_slot) 
+                  lf.Ast.light_frame_locals
+              in
+              let slots = htab_pairs lf.Ast.light_frame_locals in 
+              let slots = List.filter 
+                (fun (k,local) -> not (should_use_vreg cx local)) 
+                slots 
+              in
+              let slots = 
+                Array.of_list 
+	              (Sort.list (fun (a, _) (b, _) -> a < b) slots)
+              in
+              let offset = 
                 match cx.ctxt_frame_scopes with 
                     [] -> 0L
                   | x::_ -> 
                       begin 
-                        (* 
-                         * FIXME: it is not really true that 'not done layout' means
-                         * the same thing as 'auto slot'. It really just means we lack
-                         * enough information to lay ourselves out yet. But it's practically
-                         * similar here.
-                         *)
-                        if x.Ast.frame_layout.layout_done
-                        then x.Ast.frame_layout.layout_offset
-                        else raise Auto_slot
+                        let layout =
+                          match x with 
+                              Ast.FRAME_heavy hf -> hf.Ast.heavy_frame_layout
+                            | Ast.FRAME_light lf -> lf.Ast.light_frame_layout
+                        in                            
+                          if layout.layout_done
+                          then layout.layout_offset
+                          else raise Un_laid_out_frame
                       end
-              end
+              in
+                (false,offset,lf.Ast.light_frame_layout,slots)
+            end
+        | Ast.FRAME_heavy hf -> 
+            let offset = cx.ctxt_abi.Abi.abi_frame_base_sz in
+            let slots = 
+              Array.of_list (List.map 
+                               (fun (k,v) -> (Ast.KEY_ident k, v))
+                               (!(hf.Ast.heavy_frame_arg_slots)))
+            in
+              (true,offset,hf.Ast.heavy_frame_layout,slots)
+    in
+    let frame_sz = 
+      Array.fold_left 
+        (fun x (_,local) -> 
+           Int64.add x (slot_size cx (!(local.Ast.local_slot.node)))) 
+        0L slots
+      (* FIXME: actually, "heavy frame" layout works entirely differently, as 
+       * the "frame" is actually the incoming parameter list. We can't sort it
+       * and shouldn't filter it and ... really we should not be using the frame
+       * structure at all for such things. Or they need their own flavour. Ugh. *)
+    in
+      log cx "beginning%s frame layout for %Ld byte frame @ %Ld (done: %b)" 
+        (if heavy then " heavy" else " light") frame_sz frame_offset frame_layout.layout_done;
+      let offset = ref 0L in 
+	    frame_layout.layout_size <- frame_sz;
+        frame_layout.layout_offset <- frame_offset;
+	    for i = 0 to (Array.length slots) - 1 do          
+		  let (key, local) = slots.(i) in
+          let layout = local.Ast.local_layout in 
+            log cx "laying out slot %d (%s)" i (string_of_key key);
+		    let sz = slot_size cx (!(local.Ast.local_slot.node)) in
+              log cx "  == %Ld bytes @ %Ld" sz (!offset);
+              layout.layout_size <- sz;
+              layout.layout_offset <- (!offset);
+              layout.layout_done <- true;
+              offset := Int64.add sz (!offset);
+	    done;
+        if not frame_layout.layout_done 
+        then 
+          begin
+            log cx "setting layout_done <- true";
+            frame_layout.layout_done <- true;
+            cx.ctxt_made_progress := true
           end
-      in
-        log cx "beginning%s frame layout for %Ld byte frame @ %Ld" 
-          (if frame.Ast.frame_heavy then " heavy" else " light") frame_sz frame_offset;
-        let offset = ref 0L in 
-	      frame.Ast.frame_layout.layout_size <- frame_sz;
-          frame.Ast.frame_layout.layout_offset <- frame_offset;
-	      for i = 0 to (Array.length slots) - 1 do          
-		    let (key, local) = slots.(i) in
-            let layout = local.Ast.local_layout in 
-              log cx "laying out slot %d (%s)" i (string_of_key key);
-		      let sz = slot_size cx (!(local.Ast.local_slot.node)) in
-                log cx "  == %Ld bytes @ %Ld" sz (!offset);
-                layout.layout_size <- sz;
-                layout.layout_offset <- (!offset);
-                layout.layout_done <- true;
-                offset := Int64.add sz (!offset);
-	      done;
-          frame.Ast.frame_layout.layout_done <- true;
-	with 
-		Auto_slot -> 
-          log cx "hit auto slot";
-		  cx.ctxt_contains_autos := true
+        else
+            log cx "layout was already done";          
+  with 
+	  Auto_slot -> 
+        log cx "hit auto slot";
+		cx.ctxt_contains_autos := true
+
+    | Un_laid_out_frame -> 
+        log cx "hit un-laid-out frame";
+        cx.ctxt_contains_un_laid_out_frames := true
 
 and extend_ctxt_by_frame 
 	(cx:ctxt)
 	(items:(Ast.ident * Ast.mod_item) array)
 	: ctxt = 
+  (* 
+   * FIXME: frames for type parameters (which is what these are) are
+   * totally broken and need reworking into a sane part of the ABI.
+   *)
   log cx "extending ctxt by frame";
   let items' = Hashtbl.create (Array.length items) in
 	for i = 0 to (Array.length items) - 1
@@ -807,16 +853,15 @@ and extend_ctxt_by_frame
 	  let (ident, item) = items.(i) in 
 		Hashtbl.add items' ident (new_layout(), item)
 	done;
-	let frame = 
-	  { Ast.frame_heavy = false;
-        Ast.frame_layout = new_layout();
-		Ast.frame_locals = Hashtbl.create 0;
-		Ast.frame_items = items'; }
-	in
-	  layout_frame cx frame;
+    let light = { Ast.light_frame_layout = new_layout();
+		          Ast.light_frame_locals = Hashtbl.create 0;
+		          Ast.light_frame_items = items'; }
+    in
+    let frame = Ast.FRAME_light light in        
+      light.Ast.light_frame_layout.layout_done <- true;
 	  { cx with ctxt_frame_scopes = (frame :: cx.ctxt_frame_scopes) }
-
-
+        
+        
 and resolve_mod_items cx items = 
   let cx = extend_ctxt_by_frame cx (linearize_items_for_frame items) in
 	Hashtbl.iter (resolve_mod_item cx) items
@@ -844,10 +889,10 @@ and resolve_mod_item cx id item =
 and resolve_fn span cx fn = 
   let cx = 
 	{ cx with ctxt_frame_scopes = 
-		fn.Ast.fn_frame :: cx.ctxt_frame_scopes } 
+		(Ast.FRAME_heavy fn.Ast.fn_frame) :: cx.ctxt_frame_scopes } 
   in
 	resolve_block cx fn.Ast.fn_body;
-    layout_frame cx fn.Ast.fn_frame
+    layout_frame cx (Ast.FRAME_heavy fn.Ast.fn_frame)
 
 		
 and resolve_prog cx prog = 
@@ -866,13 +911,13 @@ and resolve_init cx init =
 and resolve_block cx (block:Ast.block) = 
   let cx' = 
 	{ cx with ctxt_frame_scopes = 
-		block.node.Ast.block_frame :: cx.ctxt_frame_scopes } 
+		(Ast.FRAME_light block.node.Ast.block_frame) :: cx.ctxt_frame_scopes } 
   in
     log cx "resolving block with %d items, %d slots"
-	  (Hashtbl.length block.node.Ast.block_frame.Ast.frame_items)
-	  (Hashtbl.length block.node.Ast.block_frame.Ast.frame_locals);
+	  (Hashtbl.length block.node.Ast.block_frame.Ast.light_frame_items)
+	  (Hashtbl.length block.node.Ast.block_frame.Ast.light_frame_locals);
 	Array.iter (resolve_stmt cx') block.node.Ast.block_stmts;
-	layout_frame cx block.node.Ast.block_frame
+	layout_frame cx (Ast.FRAME_light block.node.Ast.block_frame)
 
 and resolve_slot 
     (cx:ctxt) 
@@ -1074,9 +1119,9 @@ and resolve_stmt cx stmt =
 		  Array.iter (resolve_lval cx None) args;
 		  let cx' = 
 			{ cx with ctxt_frame_scopes = 
-				f.Ast.foreach_frame :: cx.ctxt_frame_scopes } 
+				(Ast.FRAME_light f.Ast.foreach_frame) :: cx.ctxt_frame_scopes } 
 		  in
-			layout_frame cx f.Ast.foreach_frame;
+			layout_frame cx (Ast.FRAME_light f.Ast.foreach_frame);
 			resolve_block cx' f.Ast.foreach_body;
 			()
 			  
@@ -1084,10 +1129,10 @@ and resolve_stmt cx stmt =
 		resolve_stmt cx f.Ast.for_init;
 		let cx' = 
 		  { cx with ctxt_frame_scopes =
-			  f.Ast.for_frame :: cx.ctxt_frame_scopes }
+			  (Ast.FRAME_light f.Ast.for_frame) :: cx.ctxt_frame_scopes }
 		in
 		let (stmts, atom) = f.Ast.for_test in
-		  layout_frame cx f.Ast.for_frame;
+		  layout_frame cx (Ast.FRAME_light f.Ast.for_frame);
 		  resolve_stmts cx' stmts;
 		  resolve_atom cx' (Some Ast.TY_bool) atom;
 		  resolve_stmt cx' f.Ast.for_step;
@@ -1154,11 +1199,13 @@ let resolve_crate
         log cx "=== fresh resolution pass ===";
         cx.ctxt_contains_autos := false;
         cx.ctxt_contains_unresolved_types := false;
+        cx.ctxt_contains_un_laid_out_frames := false;
         cx.ctxt_made_progress := false;
 	    resolve_mod_items cx items;
 	  done;
       if !(cx.ctxt_contains_autos) or
-        !(cx.ctxt_contains_unresolved_types)
+        !(cx.ctxt_contains_unresolved_types) or
+        !(cx.ctxt_contains_un_laid_out_frames)
       then 
         raise (err cx "progress ceased, but crate incomplete")
       else ()

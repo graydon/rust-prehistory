@@ -894,12 +894,21 @@ and parse_one_or_more_tup_slots_and_idents param_slot ps =
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
-	
-and new_frame heavy = 
-  { Ast.frame_heavy = heavy;
-    Ast.frame_layout = new_layout ();
-	Ast.frame_locals = Hashtbl.create 0;
-	Ast.frame_items = Hashtbl.create 0; }
+
+and new_heavy_frame _ =
+  { 
+    Ast.heavy_frame_layout = new_layout ();
+    Ast.heavy_frame_arg_slots = ref [];
+    Ast.heavy_frame_ret_slot = ref None;
+    Ast.heavy_frame_put_slot = ref None;
+  }
+
+and new_light_frame _ = 
+  { 
+    Ast.light_frame_layout = new_layout ();
+	Ast.light_frame_locals = Hashtbl.create 0;
+	Ast.light_frame_items = Hashtbl.create 0;
+  }
 
 and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit = 
   let frame = 
@@ -907,22 +916,46 @@ and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit =
         [] -> raise (err "missing block frame in add_block_decl" ps)
       | (f::_) -> f
   in
-    match decl with 
-	    Ast.DECL_mod_item (id, item) -> 
-		  Hashtbl.add frame.Ast.frame_items id 
-			((new_layout()), item)
-	  | Ast.DECL_slot (key, slot) -> 
-		  Hashtbl.add frame.Ast.frame_locals key
-            { Ast.local_layout = new_layout();
-              Ast.local_slot = slot;
-              Ast.local_aliased = ref false;
-              Ast.local_vreg = ref None; }
+  let new_local slot = 
+    { Ast.local_layout = new_layout();
+      Ast.local_slot = slot;
+      Ast.local_aliased = ref false;
+      Ast.local_vreg = ref None; }
+  in
+    match frame with 
+        Ast.FRAME_heavy hf -> 
+          begin
+            match decl with 
+	            Ast.DECL_mod_item (id, item) -> 
+                  raise (err "adding mod item to heavy frame" ps)
+	          | Ast.DECL_slot (key, slot) ->
+                  begin
+                    match key with
+                        Ast.KEY_temp _ -> raise (err "adding temp slot to heavy frame" ps)
+                      | Ast.KEY_ident id ->             
+                          hf.Ast.heavy_frame_arg_slots :=
+                            (id, new_local slot) :: (!(hf.Ast.heavy_frame_arg_slots))
+                  end                    
+          end
+      | Ast.FRAME_light lf -> 
+          begin
+            match decl with 
+	            Ast.DECL_mod_item (id, item) -> 
+		          Hashtbl.add lf.Ast.light_frame_items id 
+			        ((new_layout()), item)
+	          | Ast.DECL_slot (key, slot) -> 
+		          Hashtbl.add lf.Ast.light_frame_locals key
+                    { Ast.local_layout = new_layout();
+                      Ast.local_slot = slot;
+                      Ast.local_aliased = ref false;
+                      Ast.local_vreg = ref None; }
+          end
 
 and parse_block ps = 
   let apos = lexpos ps in
   let frames = ps.pstate_block_frames in
-  let frame = new_frame false in 
-    ps.pstate_block_frames <- frame :: frames; 
+  let frame = new_light_frame () in 
+    ps.pstate_block_frames <- (Ast.FRAME_light frame) :: frames; 
     let stmts = arj (ctxt "block: stmts" 
 					   (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
     in
@@ -1249,8 +1282,8 @@ and parse_sig_and_bind ps =
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn proto_opt lim pure ps =
   let frames = ps.pstate_block_frames in
-  let frame = new_frame true in 
-    ps.pstate_block_frames <- frame :: frames;     
+  let frame = new_heavy_frame () in 
+    ps.pstate_block_frames <- (Ast.FRAME_heavy frame) :: frames;
     let (si, bind) = ctxt "fn: sig and bind" parse_sig_and_bind ps in
     let body = ctxt "fn: body" parse_block ps in
       ps.pstate_block_frames <- frames;

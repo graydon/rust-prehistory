@@ -254,17 +254,28 @@ and local =
       local_layout: layout;
     }
 
-and frame = 
-    {
-      frame_heavy: bool;
-      frame_layout: layout;
-      frame_locals: (slot_key, local) Hashtbl.t;
-      frame_items: (ident, (layout * mod_item)) Hashtbl.t;
+and heavy_frame =
+    { 
+      heavy_frame_layout: layout;
+      heavy_frame_arg_slots: ((ident * local) list) ref;
+      heavy_frame_ret_slot: (local option) ref;
+      heavy_frame_put_slot: (local option) ref;
     }
+
+and light_frame = 
+    {
+      light_frame_layout: layout;
+      light_frame_locals: (slot_key, local) Hashtbl.t;
+      light_frame_items: (ident, (layout * mod_item)) Hashtbl.t;  
+    }
+
+and frame = 
+    FRAME_heavy of heavy_frame
+  | FRAME_light of light_frame
 
 and block' = 
     {
-      block_frame: frame;
+      block_frame: light_frame;
       block_stmts: stmt array;
     }
 
@@ -291,14 +302,14 @@ and stmt_while =
 and stmt_foreach = 
     {
       foreach_proto: proto;
-      foreach_frame: frame;
+      foreach_frame: light_frame;
       foreach_call: (lval * lval array);
       foreach_body: block;
     }
       
 and stmt_for = 
     {
-      for_frame: frame;
+      for_frame: light_frame;
       for_init: stmt;
       for_test: ((stmt array) * atom);
       for_step: stmt;
@@ -427,7 +438,7 @@ and fn =
       fn_fixup: fixup;
       fn_ty: ty_fn;
       fn_bind: ident array;
-      fn_frame: frame;
+      fn_frame: heavy_frame;
       fn_body: block;
     }
 
@@ -442,6 +453,7 @@ and init =
     {
       init_sig: ty_sig;
       init_bind: ident array;
+      init_frame: heavy_frame;
       init_body: block;
     }
 

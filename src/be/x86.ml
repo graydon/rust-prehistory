@@ -192,7 +192,7 @@ let spill_slot (framesz:int64) (i:int) : Il.operand =
 
 let fn_prologue (e:Il.emitter) (f:Ast.fn) : unit =
   let r x = Il.Reg (Il.Hreg x) in
-  let framesz = (Asm.IMM f.Ast.fn_frame.Ast.frame_layout.layout_size) in
+  let framesz = (Asm.IMM f.Ast.fn_frame.Ast.heavy_frame_layout.layout_size) in
     Il.emit_full e (Some f.Ast.fn_fixup) (Il.CPUSH Il.M32) (Il.Nil) (r ebp) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
@@ -213,7 +213,7 @@ let fn_epilogue (e:Il.emitter) (f:Ast.fn) : unit =
 
 let main_prologue (e:Il.emitter) (block:Ast.block) : unit =
   let r x = Il.Reg (Il.Hreg x) in
-  let framesz = (Asm.IMM block.node.Ast.block_frame.Ast.frame_layout.layout_size) in
+  let framesz = (Asm.IMM block.node.Ast.block_frame.Ast.light_frame_layout.layout_size) in
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebp) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
