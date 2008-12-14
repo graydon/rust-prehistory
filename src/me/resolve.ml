@@ -744,82 +744,30 @@ and lval_fn_arg_type cx fn i =
         Some ty -> f ty
       | _ -> None
 
-
-and layout_frame 
-	(cx:ctxt) 
-	(frame:Ast.frame) 
-	: unit = 
-  try 
-    let (heavy,frame_offset,frame_layout,slots) = 
-      match frame with 
-          Ast.FRAME_light lf -> 
-            begin
-              let _ = 
-                Hashtbl.iter 
-                  (fun k local -> resolve_slot_ref cx None local.Ast.local_slot) 
-                  lf.Ast.light_frame_locals
-              in
-              let slots = htab_pairs lf.Ast.light_frame_locals in 
-              let slots = List.filter 
-                (fun (k,local) -> not (should_use_vreg cx local)) 
-                slots 
-              in
-              let slots = 
-                Array.of_list 
-	              (Sort.list (fun (a, _) (b, _) -> a < b) slots)
-              in
-              let offset = 
-                match cx.ctxt_frame_scopes with 
-                    [] -> 0L
-                  | x::_ -> 
-                      begin 
-                        let layout =
-                          match x with 
-                              Ast.FRAME_heavy hf -> hf.Ast.heavy_frame_layout
-                            | Ast.FRAME_light lf -> lf.Ast.light_frame_layout
-                        in                            
-                          if layout.layout_done
-                          then layout.layout_offset
-                          else raise Un_laid_out_frame
-                      end
-              in
-                (false,offset,lf.Ast.light_frame_layout,slots)
-            end
-        | Ast.FRAME_heavy hf -> 
-            let offset = cx.ctxt_abi.Abi.abi_frame_base_sz in
-            let slots = 
-              Array.of_list (List.map 
-                               (fun (k,v) -> (Ast.KEY_ident k, v))
-                               (!(hf.Ast.heavy_frame_arg_slots)))
-            in
-              (true,offset,hf.Ast.heavy_frame_layout,slots)
-    in
-    let frame_sz = 
-      Array.fold_left 
-        (fun x (_,local) -> 
-           Int64.add x (slot_size cx (!(local.Ast.local_slot.node)))) 
-        0L slots
-      (* FIXME: actually, "heavy frame" layout works entirely differently, as 
-       * the "frame" is actually the incoming parameter list. We can't sort it
-       * and shouldn't filter it and ... really we should not be using the frame
-       * structure at all for such things. Or they need their own flavour. Ugh. *)
-    in
+and layout_frame_inner
+    (cx:ctxt)
+    (heavy:bool)
+    (frame_off:int64)
+    (frame_sz:int64)
+    (frame_layout:layout)
+    (slots:(Ast.slot_key * Ast.local) array)
+    : unit = 
       log cx "beginning%s frame layout for %Ld byte frame @ %Ld (done: %b)" 
-        (if heavy then " heavy" else " light") frame_sz frame_offset frame_layout.layout_done;
-      let offset = ref 0L in 
+        (if heavy then " heavy" else " light") frame_sz frame_off frame_layout.layout_done;
+      let off = ref 0L in 
 	    frame_layout.layout_size <- frame_sz;
-        frame_layout.layout_offset <- frame_offset;
+        frame_layout.layout_offset <- frame_off;
 	    for i = 0 to (Array.length slots) - 1 do          
 		  let (key, local) = slots.(i) in
           let layout = local.Ast.local_layout in 
             log cx "laying out slot %d (%s)" i (string_of_key key);
 		    let sz = slot_size cx (!(local.Ast.local_slot.node)) in
-              log cx "  == %Ld bytes @ %Ld" sz (!offset);
+              log cx "  == %Ld bytes @ %Ld" sz (!off);
               layout.layout_size <- sz;
-              layout.layout_offset <- (!offset);
+              layout.layout_offset <- (!off);
               layout.layout_done <- true;
-              offset := Int64.add sz (!offset);
-	    done;
+              off := Int64.add (!off) sz
+        done;
         if not frame_layout.layout_done 
         then 
           begin
@@ -828,16 +776,75 @@ and layout_frame
             cx.ctxt_made_progress := true
           end
         else
-            log cx "layout was already done";          
+          log cx "layout was already done"
+  
+
+and layout_frame 
+	(cx:ctxt) 
+	(frame:Ast.frame) 
+	: unit = 
+  try 
+    let slots_sz slots = 
+      Array.fold_left 
+        (fun x (_,local) -> 
+           Int64.add x (slot_size cx (!(local.Ast.local_slot.node)))) 
+        0L slots
+    in
+      match frame with 
+          Ast.FRAME_light lf -> 
+            begin
+              let _ = 
+                Hashtbl.iter 
+                  (fun k local -> resolve_slot_ref cx None local.Ast.local_slot) 
+                  lf.Ast.light_frame_locals
+              in
+              let slots = 
+                Array.of_list 
+	              (Sort.list 
+                     (fun (a, _) (b, _) -> a < b)
+                     (List.filter 
+                        (fun (k,local) -> not (should_use_vreg cx local))
+                        (htab_pairs lf.Ast.light_frame_locals)))
+              in
+              let sz = slots_sz slots in 
+              let offset = 
+                match cx.ctxt_frame_scopes with 
+                    [] -> 0L
+                  | x::_ -> 
+                      begin 
+                        match x with 
+                            Ast.FRAME_heavy hf -> 0L
+                          | Ast.FRAME_light lf ->                               
+                              let layout = lf.Ast.light_frame_layout in                            
+                                if layout.layout_done
+                                then (Int64.sub layout.layout_offset sz)
+                                else raise Un_laid_out_frame
+                      end
+              in
+                layout_frame_inner cx false offset sz lf.Ast.light_frame_layout slots
+            end
+        | Ast.FRAME_heavy hf -> 
+            let offset = cx.ctxt_abi.Abi.abi_frame_base_sz in
+            let _ = 
+              List.iter 
+                (fun (_,local) -> resolve_slot_ref cx None local.Ast.local_slot) 
+                (!(hf.Ast.heavy_frame_arg_slots))
+            in
+            let slots = 
+              Array.of_list (List.map 
+                               (fun (k,v) -> (Ast.KEY_ident k, v))
+                               (!(hf.Ast.heavy_frame_arg_slots)))
+            in
+              layout_frame_inner cx true offset (slots_sz slots) hf.Ast.heavy_frame_layout slots
   with 
 	  Auto_slot -> 
         log cx "hit auto slot";
 		cx.ctxt_contains_autos := true
-
+          
     | Un_laid_out_frame -> 
         log cx "hit un-laid-out frame";
         cx.ctxt_contains_un_laid_out_frames := true
-
+          
 and extend_ctxt_by_frame 
 	(cx:ctxt)
 	(items:(Ast.ident * Ast.mod_item) array)
