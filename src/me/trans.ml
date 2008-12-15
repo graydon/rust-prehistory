@@ -400,14 +400,16 @@ let rec trans_stmt
             for i = 0 to (Array.length args) - 1 do              
               emit (Il.CPUSH Il.M32) Il.Nil (trans_atom cx args.(i)) Il.Nil
             done;
+            (* Emit arg0: the process pointer. *)
+            emit (Il.CPUSH Il.M32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
             let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
             let dst = trans_lval cx dst in
             let fn = (trans_lval_full cx fn abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
-            emit Il.CCALL vr fn Il.Nil;
-            emit Il.MOV dst vr Il.Nil;
-            emit Il.ADD abi.Abi.abi_sp_operand abi.Abi.abi_sp_operand 
-              (Il.Imm (Asm.IMM (Int64.of_int (4 * (Array.length args)))));
-
+              emit Il.CCALL vr fn Il.Nil;
+              emit Il.MOV dst vr Il.Nil;
+              emit Il.ADD abi.Abi.abi_sp_operand abi.Abi.abi_sp_operand 
+                (Il.Imm (Asm.IMM (Int64.of_int (4 * (1 + (Array.length args))))));
+              
       | _ -> ()
                 
 (* 

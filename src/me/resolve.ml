@@ -347,9 +347,15 @@ and lookup_ident
                         let slotr = local.Ast.local_slot in                          
                         let pathopt =                          
                           try
-                            if should_use_vreg cx local 
-                            then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
-                            else Some (Ast.RES_vreg local.Ast.local_vreg)
+                            match x with 
+                                Ast.FRAME_light _ -> 
+                                  if should_use_vreg cx local 
+                                  then Some (Ast.RES_member (layout, (Ast.RES_deref fp)))
+                                  else Some (Ast.RES_vreg local.Ast.local_vreg)
+                              | Ast.FRAME_heavy hf -> 
+                                  Some (Ast.RES_member 
+                                          (hf.Ast.heavy_frame_layout,
+                                           (Ast.RES_member (layout, (Ast.RES_deref fp)))))
                           with 
                               Auto_slot -> 
                                 begin 
@@ -824,7 +830,11 @@ and layout_frame
                 layout_frame_inner cx false offset sz lf.Ast.light_frame_layout slots
             end
         | Ast.FRAME_heavy hf -> 
-            let offset = cx.ctxt_abi.Abi.abi_frame_base_sz in
+            let offset = 
+              Int64.add 
+                cx.ctxt_abi.Abi.abi_frame_base_sz 
+                cx.ctxt_abi.Abi.abi_implicit_args_sz 
+            in
             let _ = 
               List.iter 
                 (fun (_,local) -> resolve_slot_ref cx None local.Ast.local_slot) 
