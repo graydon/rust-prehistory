@@ -54,7 +54,9 @@ let mark (cx:ctxt) : int =
 let patch (cx:ctxt) (i:int) : unit = 
   cx.ctxt_emit.Il.emit_quads.(i) 
   <- { cx.ctxt_emit.Il.emit_quads.(i)
-       with Il.quad_lhs = Il.Label (mark cx) }
+       with Il.quad_lhs = Il.Label (mark cx) };
+  (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
+  Il.emit cx.ctxt_emit Il.DEAD Il.Nil Il.Nil Il.Nil
 ;;  
 
 
@@ -420,14 +422,14 @@ let rec trans_stmt
           let v = trans_atom cx si.Ast.if_test in 
             emit Il.CMP Il.Nil v imm_true;
             let skip_thn_clause_jmp = mark cx in 
-              emit Il.JE Il.Nil badlab Il.Nil;
+              emit Il.JNE Il.Nil badlab Il.Nil;
               trans_block cx si.Ast.if_then;
               begin 
                 match si.Ast.if_else with 
                     None -> patch cx skip_thn_clause_jmp
                   | Some els -> 
                       let skip_els_clause_jmp = mark cx in
-                        emit Il.JE Il.Nil badlab Il.Nil;
+                        emit Il.JMP Il.Nil badlab Il.Nil;
                         patch cx skip_thn_clause_jmp;
                         trans_block cx els;
                         patch cx skip_els_clause_jmp                        
