@@ -232,16 +232,20 @@ let main_epilogue (e:Il.emitter) (block:Ast.block) : unit =
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
 
+let word_sz = 4L
+;;
+
 let word_n reg i = 
-  Il.Mem (Il.M32, Some reg, Asm.IMM (Int64.mul (Int64.of_int i) 4L))
+  Il.Mem (Il.M32, Some reg, Asm.IMM (Int64.mul (Int64.of_int i) word_sz))
 ;;
 
 (* 
- * Our arrangement is this:
+ * Our arrangement on x86 is this:
  * 
  *   *ebp+20+(4*N) = [argN   ]
  *   ...    
- *   *ebp+20       = [arg0   ] = proc ptr
+ *   *ebp+24       = [arg1   ] = proc ptr
+ *   *ebp+20       = [arg0   ] = out ptr
  *   *ebp+16       = [retpc  ]
  *   *ebp+12       = [old-ebp]
  *   *ebp+8        = [old-edi]
@@ -250,7 +254,7 @@ let word_n reg i =
  * 
  *)
 
-let proc_ptr = word_n (Il.Hreg ebp) 5;;
+let proc_ptr = word_n (Il.Hreg ebp) 6;;
 
 let load_proc_word (e:Il.emitter) (i:int) : Il.reg = 
   let vr = Il.next_vreg e in 
@@ -266,12 +270,9 @@ let load_kern_fn (e:Il.emitter) (i:int) : Il.reg =
     vr
 ;;
 
-let ptr_sz = 4L
-;;
-
 let (abi:Abi.abi) = 
   {
-    Abi.abi_ptr_sz = ptr_sz;
+    Abi.abi_ptr_sz = word_sz;
     Abi.abi_ptr_mem = Il.M32;
 
     Abi.abi_is_2addr_machine = true;
@@ -294,8 +295,8 @@ let (abi:Abi.abi) =
     Abi.abi_fp_operand = Il.Reg (Il.Hreg ebp);
     Abi.abi_pp_operand = proc_ptr;
     Abi.abi_load_kern_fn = load_kern_fn;
-    Abi.abi_frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L ptr_sz;
-    Abi.abi_implicit_args_sz = (* proc ptr *) ptr_sz;
+    Abi.abi_frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;
+    Abi.abi_implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;
     Abi.abi_spill_slot = spill_slot;
   }
 
@@ -476,19 +477,19 @@ let select_item_misc (q:quad) : Asm.item =
         
 	| (CRET, _, _, _) -> Asm.BYTE 0xc3
 
-	| (JC,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x72 0x0f 0x82 f
-	| (JNC, Pcrel f, _, _) -> insn_pcrel_prefix32 0x73 0x0f 0x83 f
-	| (JO,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x70 0x0f 0x80 f
-	| (JNO, Pcrel f, _, _) -> insn_pcrel_prefix32 0x71 0x0f 0x81 f
-	| (JE,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x74 0x0f 0x84 f
-	| (JNE, Pcrel f, _, _) -> insn_pcrel_prefix32 0x75 0x0f 0x85 f
-	| (JL,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x7c 0x0f 0x8c f
-	| (JLE, Pcrel f, _, _) -> insn_pcrel_prefix32 0x7e 0x0f 0x8e f
-	| (JG,  Pcrel f, _, _) -> insn_pcrel_prefix32 0x7f 0x0f 0x8f f
-	| (JGE, Pcrel f, _, _) -> insn_pcrel_prefix32 0x7d 0x0f 0x8d f
+	| (JC,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x72 0x0f 0x82 f
+	| (JNC, _, Pcrel f, _) -> insn_pcrel_prefix32 0x73 0x0f 0x83 f
+	| (JO,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x70 0x0f 0x80 f
+	| (JNO, _, Pcrel f, _) -> insn_pcrel_prefix32 0x71 0x0f 0x81 f
+	| (JE,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x74 0x0f 0x84 f
+	| (JNE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x75 0x0f 0x85 f
+	| (JL,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x7c 0x0f 0x8c f
+	| (JLE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x7e 0x0f 0x8e f
+	| (JG,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x7f 0x0f 0x8f f
+	| (JGE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x7d 0x0f 0x8d f
 
-	| (JMP, r, _, _) when is_rm32 r -> insn_rm_r 0xff r slash4
-	| (JMP, Pcrel f, _, _) -> insn_pcrel 0xeb 0xe9 f
+	| (JMP, _, r, _) when is_rm32 r -> insn_rm_r 0xff r slash4
+	| (JMP, _, Pcrel f, _) -> insn_pcrel 0xeb 0xe9 f
 
 	| (DEAD, _, _, _) -> Asm.MARK
 	| (END, _, _, _) -> Asm.BYTES [| 0x90 |]

@@ -902,6 +902,11 @@ and resolve_mod_item cx id item =
 
 	  | _ -> ()
 
+and new_local (slot:(Ast.slot ref) spanned) = 
+  { Ast.local_layout = new_layout();
+    Ast.local_slot = slot;
+    Ast.local_aliased = ref false;
+    Ast.local_vreg = ref None; }
 
 and resolve_fn span cx fn = 
   let cx = 
@@ -909,9 +914,19 @@ and resolve_fn span cx fn =
 		(Ast.FRAME_heavy fn.Ast.fn_frame) :: cx.ctxt_frame_scopes } 
   in
 	resolve_block cx fn.Ast.fn_body;
-    layout_frame cx (Ast.FRAME_heavy fn.Ast.fn_frame)
-
-		
+    layout_frame cx (Ast.FRAME_heavy fn.Ast.fn_frame);
+    (* FIXME: ret/put slots are a mess. Clean up. *)
+    let outslot = 
+      resolve_slot cx None fn.Ast.fn_ty.Ast.fn_sig.Ast.sig_output_slot        
+    in
+    let outslotr = { node=ref outslot; span=span} in
+    let outlocal = new_local outslotr in 
+    let outlayout = outlocal.Ast.local_layout in 
+      outlayout.layout_size <- slot_size cx outslot;
+      outlayout.layout_offset <-  cx.ctxt_abi.Abi.abi_frame_base_sz;
+      fn.Ast.fn_frame.Ast.heavy_frame_out_slot := Some outlocal
+              
+		    
 and resolve_prog cx prog = 
   let items = prog.Ast.prog_mod in
   let cx = extend_ctxt_by_frame cx (linearize_items_for_frame items) in

@@ -11,6 +11,8 @@ type ctxt =
       ctxt_entry_prog: fixup;
       mutable ctxt_path: string list;
       mutable ctxt_data_items: Asm.item list;
+      mutable ctxt_epilogue_jumps: int list;
+      mutable ctxt_frames: Ast.frame list;
       ctxt_text_items: (string, (Il.quads * int)) Hashtbl.t;
     }
 
@@ -23,6 +25,8 @@ let new_ctxt (sess:Session.sess) (abi:Abi.abi) : ctxt =
     ctxt_path = [];
     ctxt_entry_prog = new_fixup "entry prog fixup";
     ctxt_data_items = [];
+    ctxt_epilogue_jumps = [];
+    ctxt_frames = [];
     ctxt_text_items = Hashtbl.create 0
   }
 
@@ -31,6 +35,16 @@ let imm_true = Il.Imm (Asm.IMM 1L);;
 let imm_false = Il.Imm (Asm.IMM 0L);;
 let badlab = Il.Label (-1);;
 
+let find_heavy_frame cx = 
+  let rec search list = 
+    match list with 
+        [] -> raise (Semant_err (None, "Trans.find_heavy_frame: no heavy frame"))
+      | (Ast.FRAME_heavy hf)::_ -> hf
+      | x::xs -> search xs
+  in
+    search cx.ctxt_frames
+;;
+    
 
 let mark (cx:ctxt) : int = 
   cx.ctxt_emit.Il.emit_pc
@@ -40,7 +54,7 @@ let mark (cx:ctxt) : int =
 let patch (cx:ctxt) (i:int) : unit = 
   cx.ctxt_emit.Il.emit_quads.(i) 
   <- { cx.ctxt_emit.Il.emit_quads.(i)
-       with Il.quad_dst = Il.Label (mark cx) }
+       with Il.quad_lhs = Il.Label (mark cx) }
 ;;  
 
 
@@ -201,6 +215,31 @@ let trans_lval_full
 ;;
         
 
+(* FIXME: this is awful. Synthesize a path in resolve? *)
+let trans_out_local (cx:ctxt) (local:Ast.local) (callee:bool) : Il.operand = 
+  if callee
+  then 
+    trans_resolved_path cx 
+      (Ast.RES_member 
+         (local.Ast.local_layout, 
+          (Ast.RES_deref (Ast.RES_pr FP))))
+  else 
+    (* FIXME: hack upon hack *) 
+    let sp_vn = Il.next_vreg_num cx.ctxt_emit in 
+    let sp = Il.Reg (Il.Vreg sp_vn) in
+    let emit = Il.emit cx.ctxt_emit in
+      emit Il.MOV sp cx.ctxt_abi.Abi.abi_sp_operand Il.Nil;
+      emit Il.SUB sp sp (Il.Imm (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)));
+        trans_resolved_path cx
+        (Ast.RES_member (local.Ast.local_layout, (Ast.RES_deref (Ast.RES_vreg (ref (Some sp_vn))))))
+;;
+
+let trans_out_slot (cx:ctxt) (heavy:Ast.heavy_frame) (callee:bool) : Il.operand = 
+  match !(heavy.Ast.heavy_frame_out_slot) with 
+      None -> raise (Semant_err (None, "translating output slot in heavy frame without one"))
+    | Some local -> trans_out_local cx local callee
+;;
+        
 let trans_lval
     (cx:ctxt) 
     (lv:Ast.lval)
@@ -264,7 +303,7 @@ let trans_expr
             emit Il.CMP Il.Nil lhs rhs;
             emit Il.MOV dst imm_true Il.Nil;
             let j = mark cx in
-              emit cjmp badlab Il.Nil Il.Nil;
+              emit cjmp Il.Nil badlab Il.Nil;
               emit Il.MOV dst imm_false Il.Nil;
               patch cx j;
               dst
@@ -372,44 +411,72 @@ let rec trans_stmt
             let v = trans_atom cx head_atom in
               emit Il.CMP Il.Nil v imm_false;
               let fwd_jmp_quad = mark cx in
-                emit Il.JE badlab Il.Nil Il.Nil;
+                emit Il.JE Il.Nil badlab Il.Nil;
                 trans_block cx sw.Ast.while_body;
-                emit Il.JMP (Il.Label back_jmp_target) Il.Nil Il.Nil;
+                emit Il.JMP Il.Nil (Il.Label back_jmp_target) Il.Nil;
                 patch cx fwd_jmp_quad
                   
       | Ast.STMT_if si -> 
           let v = trans_atom cx si.Ast.if_test in 
             emit Il.CMP Il.Nil v imm_true;
             let skip_thn_clause_jmp = mark cx in 
-              emit Il.JE badlab Il.Nil Il.Nil;
+              emit Il.JE Il.Nil badlab Il.Nil;
               trans_block cx si.Ast.if_then;
               begin 
                 match si.Ast.if_else with 
                     None -> patch cx skip_thn_clause_jmp
                   | Some els -> 
                       let skip_els_clause_jmp = mark cx in
-                        emit Il.JE badlab Il.Nil Il.Nil;
+                        emit Il.JE Il.Nil badlab Il.Nil;
                         patch cx skip_thn_clause_jmp;
                         trans_block cx els;
                         patch cx skip_els_clause_jmp                        
               end
 
-      | Ast.STMT_call (dst, fn, args) -> 
+      | Ast.STMT_call (dst, flv, args) -> 
           let abi = cx.ctxt_abi in
+          let fn = 
+            match !(flv.Ast.lval_res.Ast.res_target) with 
+                Some (Ast.RES_item ({node=(Ast.MOD_ITEM_fn fd); span=_})) -> fd.Ast.decl_item
+              | _ -> raise (Invalid_argument "Trans.trans_stmt: call to unexpected lval")
+          in
             (* FIXME: factor out call protocol into ABI bits. *)
             for i = 0 to (Array.length args) - 1 do              
               emit (Il.CPUSH Il.M32) Il.Nil (trans_atom cx args.(i)) Il.Nil
             done;
-            (* Emit arg0: the process pointer. *)
+            (* Emit arg1: the process pointer. *)
             emit (Il.CPUSH Il.M32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
+            (* Emit arg0: the output slot. *)
+            emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
             let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
             let dst = trans_lval cx dst in
-            let fn = (trans_lval_full cx fn abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
-              emit Il.CCALL vr fn Il.Nil;
+            let fv = (trans_lval_full cx flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
+              emit Il.CCALL vr fv Il.Nil;
               emit Il.MOV dst vr Il.Nil;
+              emit Il.MOV dst (trans_out_slot cx fn.Ast.fn_frame false) Il.Nil;
               emit Il.ADD abi.Abi.abi_sp_operand abi.Abi.abi_sp_operand 
-                (Il.Imm (Asm.IMM (Int64.of_int (4 * (1 + (Array.length args))))));
+                (Il.Imm (Asm.IMM (Int64.of_int (4 * (2 + (Array.length args))))));
               
+
+      | Ast.STMT_ret (proto_opt, atom_opt) -> 
+          begin
+          match proto_opt with 
+              None -> 
+                begin 
+                  begin 
+                    match atom_opt with 
+                        None -> ()
+                      | Some at -> 
+                          let heavy = find_heavy_frame cx in 
+                          let ret = trans_out_slot cx heavy true in 
+                            emit Il.MOV ret (trans_atom cx at) Il.Nil
+                  end;
+                  cx.ctxt_epilogue_jumps <- (mark cx) :: cx.ctxt_epilogue_jumps;
+                end;                          
+                emit Il.JMP Il.Nil badlab Il.Nil
+            | Some _ -> ()
+          end
+            
       | _ -> ()
                 
 (* 
@@ -419,7 +486,6 @@ let rec trans_stmt
   | STMT_for of stmt_for
   | STMT_try of stmt_try
   | STMT_put of (proto option * lval option)
-  | STMT_ret of (proto option * lval option)
   | STMT_be of (proto option * lval * (lval array))
   | STMT_alt_tag of stmt_alt_tag
   | STMT_alt_type of stmt_alt_type
@@ -455,12 +521,19 @@ and trans_log_str (cx:ctxt) (a:Ast.atom) : unit =
 and trans_block (cx:ctxt) (block:Ast.block) : unit = 
   Array.iter (trans_stmt cx) block.node.Ast.block_stmts
 
-and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =
-  reset_emitter cx;
-  cx.ctxt_abi.Abi.abi_emit_fn_prologue cx.ctxt_emit fn;
-  trans_block cx fn.Ast.fn_body;
-  cx.ctxt_abi.Abi.abi_emit_fn_epilogue cx.ctxt_emit fn;
-  capture_emitted_quads cx
+and trans_fn (cx:ctxt) (fn:Ast.fn) : unit =  
+  let saved_epilogue_jumps = cx.ctxt_epilogue_jumps in
+  let saved_frames = cx.ctxt_frames in
+    cx.ctxt_frames <- (Ast.FRAME_heavy fn.Ast.fn_frame) :: cx.ctxt_frames;
+    cx.ctxt_epilogue_jumps <- [];
+    reset_emitter cx;
+    cx.ctxt_abi.Abi.abi_emit_fn_prologue cx.ctxt_emit fn;
+    trans_block cx fn.Ast.fn_body;
+    List.iter (patch cx) cx.ctxt_epilogue_jumps;
+    cx.ctxt_abi.Abi.abi_emit_fn_epilogue cx.ctxt_emit fn;      
+    cx.ctxt_epilogue_jumps <- saved_epilogue_jumps;
+    cx.ctxt_frames <- saved_frames;
+    capture_emitted_quads cx
 
 and trans_prog_block (cx:ctxt) (b:Ast.block) (ncomp:string) : fixup = 
   let oldpath = cx.ctxt_path in 

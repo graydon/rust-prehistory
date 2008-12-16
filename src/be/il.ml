@@ -232,6 +232,12 @@ let new_emitter (preallocator:quad -> quad) (is_2addr:bool) =
 ;;
 
 
+let next_vreg_num e = 
+  let i = e.emit_next_vreg in
+    e.emit_next_vreg <- i + 1;
+    i
+;;
+
 let next_vreg e = 
   let i = e.emit_next_vreg in
     e.emit_next_vreg <- i + 1;

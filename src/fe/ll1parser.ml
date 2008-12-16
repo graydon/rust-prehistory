@@ -899,8 +899,7 @@ and new_heavy_frame _ =
   { 
     Ast.heavy_frame_layout = new_layout ();
     Ast.heavy_frame_arg_slots = ref [];
-    Ast.heavy_frame_ret_slot = ref None;
-    Ast.heavy_frame_put_slot = ref None;
+    Ast.heavy_frame_out_slot = ref None;
   }
 
 and new_light_frame _ = 
@@ -1053,7 +1052,7 @@ and parse_stmts ps =
           bump ps;
           let (stmts, e) = 
             match peek ps with
-                SEMI -> (arr [], None)
+                SEMI -> (bump ps; (arr [], None))
               | _ -> 
                   let (stmts, expr) = ctxt "stmts: ret expr" parse_expr ps in 
                     expect ps SEMI;

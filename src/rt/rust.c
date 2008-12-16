@@ -48,8 +48,8 @@ rust_start(rust_prog_t *prog)
   printf("rt: calling main 0x%" PRIxPTR " with arg 0x%" PRIxPTR "...\n", 
          (intptr_t)prog->main_code,
          (intptr_t)proc);
-  prog->main_code(proc);
-  printf("rt: returned from thunk, exiting.\n");
+  prog->main_code(0, proc);
+  printf("rt: returned from main, exiting.\n");
   free(proc->rt);
   free(proc);
   return 37;

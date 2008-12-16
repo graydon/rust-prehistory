@@ -258,8 +258,8 @@ and heavy_frame =
     { 
       heavy_frame_layout: layout;
       heavy_frame_arg_slots: ((ident * local) list) ref;
-      heavy_frame_ret_slot: (local option) ref;
-      heavy_frame_put_slot: (local option) ref;
+      (* FIXME: should these turn into anonymous lvals? *)
+      heavy_frame_out_slot: (local option) ref;
     }
 
 and light_frame = 

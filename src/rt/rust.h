@@ -175,9 +175,9 @@ typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
 
 struct rust_prog { 
-  void __cdecl (*init_code)(rust_proc_t*);
-  void __cdecl (*main_code)(rust_proc_t*);
-  void __cdecl (*fini_code)(rust_proc_t*);
+  void __cdecl (*init_code)(void*, rust_proc_t*);
+  void __cdecl (*main_code)(void*, rust_proc_t*);
+  void __cdecl (*fini_code)(void*, rust_proc_t*);
 };
 
 struct rust_proc { 
