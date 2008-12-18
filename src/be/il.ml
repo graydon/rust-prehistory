@@ -308,7 +308,9 @@ let emit_full e fix op dst lhs rhs =
       end
     else 
       emit_quad quad';
-    if quad'.quad_dst != quad.quad_dst
+    if (quad'.quad_dst != quad.quad_dst)
+      && (quad'.quad_dst != Nil)
+      && (quad.quad_dst != Nil)
     then emit_mov quad.quad_dst quad'.quad_dst 
     else ();
 ;;

@@ -14,19 +14,19 @@ xalloc(size_t sz)
   return p;
 }
 
-static void __cdecl
+static void CDECL
 rust_log_uint32_t(uint32_t i)
 {
   printf("rt: log_uint32(0x%" PRIx32 ")\n", i);
 }
 
-static void __cdecl
+static void CDECL
 rust_log_str(char* c)
 {
   printf("rt: log_str(\"%s\")\n", c);
 }
 
-int __cdecl 
+int CDECL
 rust_start(rust_prog_t *prog)
 {
   rust_proc_t *proc;

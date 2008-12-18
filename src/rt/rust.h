@@ -174,10 +174,16 @@ struct rust_prog;
 typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
 
+#ifdef WIN32
+#define CDECL __cdecl
+#else
+#define CDECL __attribute__((cdecl))
+#endif
+
 struct rust_prog { 
-  void __cdecl (*init_code)(void*, rust_proc_t*);
-  void __cdecl (*main_code)(void*, rust_proc_t*);
-  void __cdecl (*fini_code)(void*, rust_proc_t*);
+  void CDECL (*init_code)(void*, rust_proc_t*);
+  void CDECL (*main_code)(void*, rust_proc_t*);
+  void CDECL (*fini_code)(void*, rust_proc_t*);
 };
 
 struct rust_proc { 
