@@ -1139,7 +1139,13 @@ let elf32_linux_x86_file
 	  |]
 ;;
 
-let emit_file (sess:Session.sess) (code:Asm.item) (data:Asm.item) = 
+let emit_file 
+    (sess:Session.sess) 
+    (code:Asm.item) 
+    (data:Asm.item)
+    (entry_prog_fixup:fixup) 
+    : unit = 
+
   let text_items = Hashtbl.create 4 in
   let rodata_items = Hashtbl.create 4 in
   let data_items = Hashtbl.create 4 in
@@ -1199,8 +1205,11 @@ let emit_file (sess:Session.sess) (code:Asm.item) (data:Asm.item) =
   in
 
   let main_fn = 
+    let ecx = Il.Reg (Il.Hreg X86.ecx) in    
 	let e = Il.new_emitter X86.prealloc_quad true in
+      Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS entry_prog_fixup)) Il.Nil;
 	  Il.emit e Il.CCALL Il.Nil (Il.Pcrel rust_start_fixup) Il.Nil;
+      Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
 	  Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 	  x86_items_of_emitted_quads sess e
   in

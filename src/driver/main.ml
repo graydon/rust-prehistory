@@ -114,7 +114,7 @@ let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
 
 let _ = match sess.Session.sess_targ with 
 	Win32_x86_pe -> Pe.emit_file sess code data entry_prog_fixup
-  | Linux_x86_elf -> Elf.emit_file sess code data
+  | Linux_x86_elf -> Elf.emit_file sess code data entry_prog_fixup
 ;;
 
 (* 
