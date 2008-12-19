@@ -1,18 +1,15 @@
 // -*- C -*-
 
-prog woohoo
+prog basic
 {
-  //  fn f(int x, str y) -> () {
-  //g(x,y);
-  //}
+  fn k(int x) -> int {
+	ret 15;
+  }
   fn g(int x, str y) -> () {
 	log 3;
 	let int z = k(1);
 	log z;
 	ret 1;
-  }
-  fn k(int x) -> int {
-	ret 15;
   }
   main
     {

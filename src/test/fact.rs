@@ -2,20 +2,20 @@
 
 prog fact
 {
-  fn fact(int x) -> int {
-	log "in fact:";
+  fn f(int x) -> int {
+	log "in f:";
 	log x;
    	if (x == 1) {
 	  log "bottoming out";
 	  ret 1;
 	} else {
 	  log "recurring";
-	  ret x * fact(x-1);
+	  ret x * f(x-1);
 	}
   }
   main
     {
-	  log fact(5);
+	  log f(5);
     }
 }
 

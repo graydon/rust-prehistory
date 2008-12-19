@@ -1,8 +1,16 @@
+OSTYPE:=$(shell uname -s)
+CPUTYPE:=$(shell uname -m)
+CONFIGMK:=config/$(OSTYPE)-$(CPUTYPE).mk
+include $(CONFIGMK)
+
+MKFILES:=Makefile $(CONFIGMK)
+
 ML_INCS:=-I fe -I me -I be -I driver -I util
 ML_LIBS=unix.cma nums.cma
 OCAMLC_FLAGS:=-g $(ML_INCS)
 
-# list them in link order, please!
+# List them in link order, please! 
+# Nobody calculates the link-order DAG automatically, sadly.
 UTIL_BOT_MLS:=util/common.ml 
 DRIVER_BOT_MLS:=driver/session.ml 
 BE_MLS:=be/asm.ml be/il.ml be/abi.ml be/bitv.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml
@@ -10,31 +18,23 @@ ME_MLS:=me/semant.ml me/resolve.ml me/trans.ml
 FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml
 DRIVER_TOP_MLS:=driver/main.ml 
 
-COMPILER:=rustc
 COMPILER_MLS:=$(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_TOP_MLS)
-COMPILER_CMOS:=$(patsubst %.ml, %.cmo, $(COMPILER_MLS))
+COMPILER_CMOS:=$(COMPILER_MLS:.ml=.cmo)
+COMPILER_CMIS:=$(COMPILER_MLS:.ml=.cmi)
 
 RUNTIME_CS:=rt/rust.c
+RUNTIME_OBJS:=$(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
 
-OSTYPE:=$(shell uname -s)
-CPUTYPE:=$(shell uname -m)
+all: $(CFG_COMPILER) $(CFG_RUNTIME) $(MKFILES) fe/lexer.ml
 
-CONFIGMK:=config/$(OSTYPE)-$(CPUTYPE).mk
-MKFILES:=Makefile $(CONFIGMK)
+$(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
+	$(call CFG_LINK_C,$@) $(RUNTIME_OBJS)
 
-include $(CONFIGMK)
+%$(CFG_OBJ_SUFFIX): %.c $(MKFILES)
+	$(call CFG_COMPILE_C,$@) $<
 
-$(COMPILER): $(COMPILER_CMOS) $(MKFILES)
+$(CFG_COMPILER): $(COMPILER_CMOS) $(MKFILES)
 	ocamlc -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(COMPILER_CMOS)
-
-.phony: clean
-
-clean:
-	rm -f */*.cmo */*.cmi */*.o *.o
-	rm -f fe/lexer.ml 
-	rm -f $(COMPILER) $(RUNTIME)
-	rm -f .depend
-	rm -f rust_out.exe rust_out
 
 %.cmo: %.cmi $(MKFILES)
 
@@ -47,8 +47,43 @@ clean:
 %.ml: %.mll $(MKFILES)
 	ocamllex -o $@ $<
 
-.depend: $(COMPILER_MLS) $(RUNTIME_CS) $(MKFILES)
-	ocamldep $(ML_INCS) $(COMPILER_MLS) > .depend
-	gcc -MM $(RUNTIME_CS) >>.depend
+# Auto-dependency logic 
 
-include .depend
+ML_DEPFILES:=$(COMPILER_MLS:.ml=.d)
+C_DEPFILES:=$(RUNTIME_CS:.c=.d)
+
+%.d: %.c $(MKFILES)
+	$(call CFG_DEPEND_C,$@ $(patsubst %.c,%$(CFG_OBJ_SUFFIX),$<)) $< >$@
+
+%.d: %.ml $(MKFILES)
+	ocamldep $(ML_INCS) $< >$@
+
+%.d: %.mli $(MKFILES)
+	ocamldep $(ML_INCS) $< >$@
+
+-include $(ML_DEPFILES) $(C_DEPFILES)
+
+# Testing logic
+
+TEST_CRATES:=$(wildcard test/*.rc)
+TEST_EXES:=$(TEST_CRATES:.rc=$(CFG_EXE_SUFFIX))
+TEST_OUTS:=$(TEST_EXES:$(CFG_EXE_SUFFIX)=.out)
+
+check: $(TEST_EXES) $(TEST_OUTS)
+
+test/%.out: test/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME) 
+	$< 2>&1 | tee $@
+
+test/%$(CFG_EXE_SUFFIX): test/%.rc $(CFG_COMPILER) 
+	$(CFG_COMPILER) -o $@ $<
+
+# Cleanup logic
+
+.phony: clean
+
+clean:
+	rm -f $(RUNTIME_OBJS) $(COMPILER_CMOS) $(COMPILER_CMIS)
+	rm -f $(ML_DEPFILES) $(C_DEPFILES)
+	rm -f fe/lexer.ml 
+	rm -f $(CFG_COMPILER) $(CFG_RUNTIME)
+	rm -f $(TEST_EXES) $(TEST_OUTS)

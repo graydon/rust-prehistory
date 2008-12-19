@@ -1,13 +1,11 @@
 # This assumes you're on a linux x86-64 host with enough multilibs. 
 # To cross-compile for x86. We don't presently generate code for x86-64.
 
-RUNTIME_OBJS:=$(patsubst rt/%.c, %.o, $(RUNTIME_CS))
-RUNTIME:=librustrt.so
+CFG_COMPILER:=rustc
+CFG_RUNTIME:=librustrt.so
+CFG_OBJ_SUFFIX:=.o
+CFG_EXE_SUFFIX:=
 
-all: $(COMPILER) $(RUNTIME) Makefile
-
-$(RUNTIME): $(RUNTIME_OBJS) Makefile
-	gcc -shared -o $@ -fPIC -m32 $(RUNTIME_OBJS)
-
-%.o: rt/%.c Makefile
-	gcc -c -o $@ -fPIC -m32 $<
+CFG_COMPILE_C=gcc -Wall -Werror -pedantic -std=c99 -fPIC -m32 -g -c -o $(1)
+CFG_LINK_C=gcc -shared -g -o $(1) -fPIC -m32
+CFG_DEPEND_C=gcc -MT "$(1)" -MM

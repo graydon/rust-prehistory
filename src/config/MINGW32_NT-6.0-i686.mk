@@ -1,12 +1,10 @@
-# This assumes you're on a win32 x86 host. 
+# This assumes you're on a win32 x86 host with gcc.
 
-RUNTIME_OBJS:=$(patsubst rt/%.c, %.o, $(RUNTIME_CS))
-RUNTIME:=rustrt.dll
+CFG_COMPILER:=rustc.exe
+CFG_RUNTIME:=rustrt.dll
+CFG_OBJ_SUFFIX:=.o
+CFG_EXE_SUFFIX:=.exe
 
-all: $(COMPILER) $(RUNTIME) $(MKFILES)
-
-$(RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
-	gcc -shared -g -o $@ -fPIC $(RUNTIME_OBJS)
-
-%.o: rt/%.c $(MKFILES)
-	gcc -Wall -Werror -pedantic -std=c99 -g -c -o $@ $<
+CFG_COMPILE_C=gcc -Wall -Werror -pedantic -std=c99 -g -c -o $(1)
+CFG_LINK_C=gcc -shared -g -o $(1) -fPIC
+CFG_DEPEND_C=gcc -MT "$(1)" -MM

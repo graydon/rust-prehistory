@@ -1,8 +1,8 @@
 
 progress:
- - replace "heavy frames" with arg-frames / local-frames, since
-   they are really categorically different creatures.
-   - probably overhaul frame-layout stuff in general
+ - set up rudimentary system for real tests
+ - change output slot to write alias on target in caller
+ - move frame code to ABI
  - allocate proc stack
  - on activation, switch from C stack to proc stack
  - on back-edges / calls, check timeout, possibly reschedule
@@ -10,6 +10,7 @@ progress:
  - write simple RR scheduler
 
 cleanup:
+ - put logging and error-handling context in elf, pe, x86
  - use a datatype for kernel function codes, not int numbers
  - use a datatype for fields inside each kernel C structure
  - move explicit code gen flags to ABI "pre digester" function
