@@ -31,6 +31,7 @@ type op =
   | IDIV | UDIV
   | IMOD | UMOD
   | MOV | CMP
+  | LEA
   | AND | OR | NOT 
   | LSL | LSR | ASR
   | JE | JNE | JL | JLE | JG | JGE
@@ -124,6 +125,7 @@ let string_of_op op =
     | UMOD -> "UMOD"
     | IMOD -> "IMOD"
     | MOV -> "MOV"
+    | LEA -> "LEA"
     | CMP -> "CMP"
     | AND -> "AND"
     | OR -> "OR"
@@ -175,6 +177,12 @@ let string_of_quad f t =
 	| MOV -> 
 		Printf.sprintf "%s = %s"
 		  (string_of_operand f t.quad_dst)
+		  (string_of_operand f t.quad_lhs)
+
+	| LEA -> 
+		Printf.sprintf "%s = %s(%s)"
+		  (string_of_operand f t.quad_dst)
+          (string_of_op t.quad_op)
 		  (string_of_operand f t.quad_lhs)
 
 	| CMP -> 

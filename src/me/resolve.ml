@@ -345,7 +345,7 @@ and lookup_ident
                       Some local -> 
                         let layout = local.Ast.local_layout in 
                         let slotr = local.Ast.local_slot in                          
-                        let pathopt =                          
+                        let pathopt =
                           try
                             match x with 
                                 Ast.FRAME_light _ -> 
@@ -354,8 +354,9 @@ and lookup_ident
                                   else Some (Ast.RES_vreg local.Ast.local_vreg)
                               | Ast.FRAME_heavy hf -> 
                                   Some (Ast.RES_member 
-                                          (hf.Ast.heavy_frame_layout,
-                                           (Ast.RES_member (layout, (Ast.RES_deref fp)))))
+                                          (layout,
+                                           (Ast.RES_member (hf.Ast.heavy_frame_layout, 
+                                                            (Ast.RES_deref fp)))))
                           with 
                               Auto_slot -> 
                                 begin 
