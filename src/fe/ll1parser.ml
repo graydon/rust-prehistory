@@ -1,9 +1,6 @@
 
 open Common;;
 
-let tmp_nonce = ref 0 
-;;
-
 type token = 
 
     (* Expression operator symbols *)
@@ -301,7 +298,9 @@ type pstate =
       mutable pstate_ctxt         : (string * pos) list;
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
-	  pstate_sess         : Session.sess }
+	  pstate_sess         : Session.sess;
+      pstate_temp_id   : int ref;
+      pstate_node_id   : node_id ref }
 ;;
 
 let log (ps:pstate) = Session.log "parse" 
@@ -320,8 +319,14 @@ let lexpos ps =
      (p.Lexing.pos_cnum) - (p.Lexing.pos_bol))
 ;;
 
-let span apos bpos x = 
-  { node = x; span = { lo = apos; hi = bpos } }
+let plusplus ir = (incr ir; !ir)
+
+let span ps apos bpos x = 
+  let span = { lo = apos; hi = bpos } in 
+  let id = plusplus ps.pstate_node_id in
+    Hashtbl.add ps.pstate_sess.Session.sess_spans id span;
+    { node = x; id = id }
+;;
 
 let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
   (ps.pstate_ctxt <- (n, lexpos ps) :: ps.pstate_ctxt;
@@ -355,7 +360,7 @@ let span_bump ps x =
   let apos = lexpos ps in
   let _ = bump ps in
   let bpos = lexpos ps in
-    span apos bpos x
+    span ps apos bpos x
 ;;
 
 let expect ps t = 
@@ -547,11 +552,11 @@ and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) =
 		  let (stmts', comps) = arj1st (one_or_more DOT parse_lval_component ps) in 
 		  let bpos = lexpos ps in 
 		  let lval' = Array.fold_left (fun x y -> Ast.LVAL_ext (x, y)) base comps in
-          let lval = new_lval (span apos bpos lval') in
+          let lval = new_lval (span ps apos bpos lval') in
 			(stmts', lval)
 	  | _ ->
 		  let bpos = lexpos ps in 
-          let lval = new_lval (span apos bpos base) in
+          let lval = new_lval (span ps apos bpos base) in
 			([||], lval)
   
 
@@ -713,15 +718,15 @@ and parse_expr_list bra ket ps =
 			(ctxt "expr list" parse_expr) ps)
 
 and build_tmp ps slot apos bpos = 
-  let nonce = (tmp_nonce := (!tmp_nonce) + 1; !tmp_nonce) in
+  let nonce = plusplus ps.pstate_temp_id in
     if ps.pstate_sess.Session.sess_log_parse
     then 
 	  Printf.fprintf ps.pstate_sess.Session.sess_log_out "building temporary %d\n%!" nonce
     else 
 	  ();
-    let decl = (Ast.DECL_slot (Ast.KEY_temp nonce, (span apos bpos (ref slot)))) in
-    let declstmt = span apos bpos (Ast.STMT_decl decl) in
-    let tmp = new_lval (span apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce))) in
+    let decl = (Ast.DECL_slot (Ast.KEY_temp nonce, (span ps apos bpos (ref slot)))) in
+    let declstmt = span ps apos bpos (Ast.STMT_decl decl) in
+    let tmp = new_lval (span ps apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce))) in
       add_block_decl ps decl;
 	  (nonce, tmp, declstmt)
 
@@ -730,7 +735,7 @@ and span_bump_lit ps ty lit =
   let apos = lexpos ps in 
   let _ = bump ps in
   let bpos = lexpos ps in
-    Ast.ATOM_literal (span apos bpos lit)
+    Ast.ATOM_literal (span ps apos bpos lit)
 
 
 and parse_atom ps =
@@ -754,7 +759,7 @@ and parse_bottom_expr ps =
         let (stmts, htab) = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
         let bpos = lexpos ps in
         let (_, tmp, decl) = build_tmp ps Ast.SLOT_auto apos bpos in
-        let stmt = span apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_rec htab)) in
+        let stmt = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_rec htab)) in
 		  (Array.append stmts [| decl; stmt |], Ast.ATOM_lval tmp)
             
 	| LBRACKET -> 
@@ -762,7 +767,7 @@ and parse_bottom_expr ps =
 		let (stmts, lvals) = ctxt "vec expr: exprs" (parse_expr_list LBRACKET RBRACKET) ps in
         let bpos = lexpos ps in
         let (_, tmp, decl) = build_tmp ps Ast.SLOT_auto apos bpos in
-        let stmt = span apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_vec lvals)) in
+        let stmt = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_vec lvals)) in
 		  (Array.append stmts [| decl; stmt |], Ast.ATOM_lval tmp)
             
     | IDENT _ -> 
@@ -774,7 +779,7 @@ and parse_bottom_expr ps =
                  let (astmts, args) = ctxt "call: args" (parse_expr_list LPAREN RPAREN) ps in
                  let bpos = lexpos ps in
 				 let (nonce, tmp, tempdecl) = build_tmp ps Ast.SLOT_auto apos bpos in
-				 let call = span apos bpos (Ast.STMT_call (tmp, lval, args)) in
+				 let call = span ps apos bpos (Ast.STMT_call (tmp, lval, args)) in
 				 let cstmts = [| tempdecl; call |] in
 				 let stmts = Array.concat [lstmts; astmts; cstmts] in
 				   (stmts, Ast.ATOM_lval tmp)
@@ -794,7 +799,7 @@ and parse_negation_expr ps =
           let (stmts, atom) = ctxt "negation expr" parse_negation_expr ps in
           let bpos = lexpos ps in
           let (_, tmp, decl) = build_tmp ps Ast.SLOT_auto apos bpos in
-          let copy = span apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_unary (Ast.UNOP_not, atom))) in
+          let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_unary (Ast.UNOP_not, atom))) in
           let stmts = Array.append stmts [| decl; copy |] in
 			(stmts, Ast.ATOM_lval tmp)
     | _ -> parse_bottom_expr ps
@@ -809,7 +814,7 @@ and binop_rhs ps name lhs rhs_parse_fn op =
   let (rstmts, r_atom) = (ctxt (name ^ " rhs") rhs_parse_fn ps) in
   let bpos = lexpos ps in 
   let (_, tmp, decl) = build_tmp ps Ast.SLOT_auto apos bpos in
-  let copy = span apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_binary (op, l_atom, r_atom))) in
+  let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_binary (op, l_atom, r_atom))) in
   let stmts = Array.concat [lstmts; rstmts; [| decl; copy |] ] in
     (stmts, Ast.ATOM_lval tmp)
     
@@ -960,14 +965,14 @@ and parse_block ps =
     in
     let bpos = lexpos ps in 
       ps.pstate_block_frames <- frames;
-      span apos bpos { Ast.block_frame = frame;
+      span ps apos bpos { Ast.block_frame = frame;
 		               Ast.block_stmts = stmts }
 
 and parse_block_stmt ps = 
   let apos = lexpos ps in
   let block = parse_block ps in
   let bpos = lexpos ps in 
-    span apos bpos (Ast.STMT_block block)
+    span ps apos bpos (Ast.STMT_block block)
 
 and parse_init ps = 
   let init = 
@@ -995,7 +1000,7 @@ and parse_slot_and_ident_and_init ps =
  *)
 and parse_stmts ps =
   let spans stmts apos bpos stmt = 
-	Array.append stmts [| (span apos bpos stmt) |]
+	Array.append stmts [| (span ps apos bpos stmt) |]
   in
   let apos = lexpos ps in
     match peek ps with 
@@ -1066,7 +1071,7 @@ and parse_stmts ps =
 		  let (lstmts, lval) = ctxt "be: lval" parse_lval ps in
 		  let (astmts, args) = ctxt "be: args" (parse_expr_list LPAREN RPAREN) ps in
 		  let bpos = lexpos ps in
-		  let be = span apos bpos (Ast.STMT_be (proto, lval, args)) in
+		  let be = span ps apos bpos (Ast.STMT_be (proto, lval, args)) in
 		  Array.concat [ lstmts; astmts; [| be |] ]
               
       | LBRACE -> [| ctxt "stmts: block" parse_block_stmt ps |]
@@ -1104,16 +1109,16 @@ and parse_stmts ps =
 					  | Some _ -> 
 						  let ext = Ast.COMP_named (Ast.COMP_idx i) in
 						  let src_lval' = Ast.LVAL_ext (tmp.Ast.lval_src.node, ext) in
-                          let src_lval = new_lval (span apos bpos src_lval') in
+                          let src_lval = new_lval (span ps apos bpos src_lval') in
                           let src_atom = Ast.ATOM_lval src_lval in 
                           let dst_lval' = Ast.LVAL_base (Ast.BASE_ident idents.(i)) in
-                          let dst_lval = new_lval (span apos bpos dst_lval') in
-                          let copy = span apos bpos (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
+                          let dst_lval = new_lval (span ps apos bpos dst_lval') in
+                          let copy = span ps apos bpos (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
                             copies := copy :: (!copies));                   
-				   let slotr = (span apos bpos (ref slot)) in
+				   let slotr = (span ps apos bpos (ref slot)) in
 				   let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slotr) in
                      add_block_decl ps decl;
-					 span apos bpos (Ast.STMT_decl decl)
+					 span ps apos bpos (Ast.STMT_decl decl)
 				 in
 				 let letdecls = Array.mapi makedecl slots in
                    Array.concat [stmts; [| tempdecl |]; letdecls; arl (!copies)]
@@ -1123,20 +1128,20 @@ and parse_stmts ps =
 				   ctxt "stmt slot" parse_slot_and_ident_and_init ps in
                  let bpos = lexpos ps in 
                  let decl = (Ast.DECL_slot (Ast.KEY_ident ident, 
-                                            (span apos bpos (ref slot))))
+                                            (span ps apos bpos (ref slot))))
                  in
                  let copy = match init with 
                      None -> [| |]
-                   | Some atom -> [| span apos bpos 
+                   | Some atom -> [| span ps apos bpos 
                                        (Ast.STMT_copy 
                                           (new_lval 
-                                             (span apos bpos 
+                                             (span ps apos bpos 
                                                 (Ast.LVAL_base 
                                                    (Ast.BASE_ident ident))),
                                            Ast.EXPR_atom atom)) |]
                  in
                    add_block_decl ps decl;
-                   Array.concat [stmts; [| span apos bpos (Ast.STMT_decl decl) |]; copy])
+                   Array.concat [stmts; [| span ps apos bpos (Ast.STMT_decl decl) |]; copy])
                      
                      
                      
@@ -1172,13 +1177,13 @@ and parse_stmts ps =
 			
 		  let (nonce, tmp, tempdecl) = 
 			build_tmp ps Ast.SLOT_auto apos bpos in
-		  let copy = span apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_atom atom)) in
+		  let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_atom atom)) in
 		  let make_copy i dst = 
 			let ext = Ast.COMP_named (Ast.COMP_idx i) in
 			let src = Ast.LVAL_ext (tmp.Ast.lval_src.node, ext) in
-            let lval = new_lval (span apos bpos src) in
+            let lval = new_lval (span ps apos bpos src) in
 			let e = Ast.EXPR_atom (Ast.ATOM_lval lval) in
-			  span apos bpos (Ast.STMT_copy (dst, e))
+			  span ps apos bpos (Ast.STMT_copy (dst, e))
 		  in
 		    let copies = Array.mapi make_copy lvals in 
 			  Array.concat [ stmts; [| tempdecl; copy |]; copies ]
@@ -1193,7 +1198,7 @@ and parse_stmts ps =
 				   let stmts = Array.append lstmts astmts in
                    let bpos = lexpos ps in
 				   let (nonce, tmp, tempdecl) = build_tmp ps Ast.SLOT_auto apos bpos in	
-				   let call = span apos bpos (Ast.STMT_call (tmp, lval, args)) in
+				   let call = span ps apos bpos (Ast.STMT_call (tmp, lval, args)) in
 					 Array.append stmts [| tempdecl; call |]
 
                | EQ -> 
@@ -1262,7 +1267,7 @@ and parse_sig_and_bind ps =
             let bpos = lexpos ps in  
               for i = 0 to (Array.length slots) - 1
               do
-                let slotr = span apos bpos (ref slots.(i)) in
+                let slotr = span ps apos bpos (ref slots.(i)) in
                 let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slotr) in
                   add_block_decl ps decl;
               done;
@@ -1334,7 +1339,7 @@ and parse_mod_item ps =
               decl = { Ast.decl_params = params;
                        Ast.decl_item =  prog }
           in
-            (ident, stmts, span apos bpos (Ast.MOD_ITEM_prog decl))
+            (ident, stmts, span ps apos bpos (Ast.MOD_ITEM_prog decl))
                        
       | FN proto_opt ->
           bump ps;
@@ -1347,7 +1352,7 @@ and parse_mod_item ps =
           in
           let bpos = lexpos ps in
             (ident, arr [], 
-             span apos bpos 
+             span ps apos bpos 
                (Ast.MOD_ITEM_fn decl))
 
       | TYPE -> 
@@ -1366,7 +1371,7 @@ and parse_mod_item ps =
             then (Ast.MOD_ITEM_public_type decl)
             else (Ast.MOD_ITEM_opaque_type decl)
           in
-            (ident, arr [], span apos bpos item)
+            (ident, arr [], span ps apos bpos item)
               
       | _ -> raise (unexpected ps)
 
@@ -1384,7 +1389,9 @@ let make_parser sess tok fname =
         pstate_block_frames = [];
         pstate_lexfun = tok;
         pstate_lexbuf = lexbuf;
-		pstate_sess = sess }
+		pstate_sess = sess;
+        pstate_temp_id = ref 0;
+        pstate_node_id = ref 0 }
     in
       log ps "made parser for: %s\n%!" fname;
       ps
@@ -1423,7 +1430,7 @@ let rec parse_crate_entry tok prefix htab ps =
       | _ -> raise (unexpected ps)
   in
   let bpos = lexpos ps in
-  let item_mod = span apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
+  let item_mod = span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
                                                     Ast.decl_item = items })
   in
     Hashtbl.add htab name item_mod

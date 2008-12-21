@@ -14,7 +14,7 @@ OCAMLC_FLAGS:=-g $(ML_INCS)
 UTIL_BOT_MLS:=util/common.ml 
 DRIVER_BOT_MLS:=driver/session.ml 
 BE_MLS:=be/asm.ml be/il.ml be/abi.ml be/bitv.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml
-ME_MLS:=me/semant.ml me/resolve.ml me/trans.ml me/walk.ml
+ME_MLS:=me/walk.ml me/semant.ml me/resolve.ml me/trans.ml 
 FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml
 DRIVER_TOP_MLS:=driver/main.ml 
 
@@ -53,13 +53,13 @@ ML_DEPFILES:=$(COMPILER_MLS:.ml=.d)
 C_DEPFILES:=$(RUNTIME_CS:.c=.d)
 
 %.d: %.c $(MKFILES)
-	$(call CFG_DEPEND_C,$@ $(patsubst %.c,%$(CFG_OBJ_SUFFIX),$<)) $< >$@
+	$(call CFG_DEPEND_C,$@ $(patsubst %.c,%$(CFG_OBJ_SUFFIX),$<)) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 %.d: %.ml $(MKFILES)
-	ocamldep $(ML_INCS) $< >$@
+	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 %.d: %.mli $(MKFILES)
-	ocamldep $(ML_INCS) $< >$@
+	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 -include $(ML_DEPFILES) $(C_DEPFILES)
 
@@ -74,7 +74,7 @@ check: $(TEST_EXES) $(TEST_OUTS)
 test/%.out: test/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME) 
 	$< 2>&1 | tee $@
 
-test/%$(CFG_EXE_SUFFIX): test/%.rc $(CFG_COMPILER) 
+test/%$(CFG_EXE_SUFFIX): test/%.rc test/%.rs $(CFG_COMPILER) 
 	$(CFG_COMPILER) -o $@ $<
 
 # Cleanup logic

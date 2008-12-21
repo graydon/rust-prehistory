@@ -11,10 +11,28 @@
 open Semant;;
 open Common;;
 
+let print_ast mod_items = ()
+(* 
+  let print = Printf.printf "resolve: %s\n" in
+  let visitor = 
+    (Walk.mod_item_logging_visitor print Walk.empty_visitor)
+  in
+    Walk.walk_mod_items visitor mod_items
+;;
+*)
+
+
+(*
+ **************************************************************************
+ * Previous resolve pass below this line
+ *************************************************************************
+ *)
+
+
 type ctxt = 
 	{ ctxt_frame_scopes: Ast.frame list;
 	  ctxt_type_scopes: Ast.mod_type_items list;
-	  ctxt_span: span option;
+	  ctxt_id: node_id option;
 	  ctxt_sess: Session.sess;
 	  ctxt_made_progress: bool ref;
 	  ctxt_contains_autos: bool ref;
@@ -26,7 +44,7 @@ type ctxt =
 let	new_ctxt sess abi = 
   { ctxt_frame_scopes = []; 
 	ctxt_type_scopes = [];
-	ctxt_span = None;
+	ctxt_id = None;
 	ctxt_sess = sess;
 	ctxt_made_progress = ref true;
     ctxt_contains_autos = ref false;
@@ -41,7 +59,7 @@ let log cx = Session.log "resolve"
 ;;
 
 let err cx str = 
-  (Semant_err (cx.ctxt_span, (str)))
+  (Semant_err (cx.ctxt_id, (str)))
 ;;
 
 exception Auto_slot;;
@@ -168,11 +186,11 @@ type binding =
  *)
 let apply_ctxt_generic 
     (cx:ctxt)
-    (extend:ctxt -> ((Ast.ident,('a spanned)) Hashtbl.t) -> 'b)
+    (extend:ctxt -> ((Ast.ident,('a identified)) Hashtbl.t) -> 'b)
     (ctor:Ast.ty Ast.decl -> 'a)
     (params:((Ast.ty_limit * Ast.ident) array))
     (args:Ast.ty array)
-    (span:span) = 
+    (id:int) = 
   let nparams = Array.length params in 
   let nargs = Array.length args in 
 	if nargs != nparams 
@@ -195,7 +213,7 @@ let apply_ctxt_generic
 							  Ast.decl_item = ty })
 		  in
 			Hashtbl.add htab ident { node = item'; 
-									 span = span }
+									 id = id }
 		in
 		  Array.iteri addty params;
 		  extend cx htab
@@ -212,7 +230,7 @@ let rec extend_ctxt_by_mod_ty
  * Extend a context with bindings for the type parameters of a
  * module item, mapping each to a new anonymous type.
  *)
-and param_ctxt cx params span =
+and param_ctxt cx params id =
   let nparams = Array.length params in
 	if nparams = 0
 	then cx
@@ -225,7 +243,7 @@ and param_ctxt cx params span =
 											  Ast.LIMITED -> (Ast.TY_lim (Ast.TY_opaque nonce))
 											| Ast.UNLIMITED -> (Ast.TY_opaque nonce))})
 		in
-		  (ident, { node = item'; span = span })
+		  (ident, { node = item'; id = id })
 	  in
 		extend_ctxt_by_frame cx (Array.map bind params)
 
@@ -238,18 +256,18 @@ and linearize_items_for_frame
 		 (Sort.list 
 			(fun (a, _) (b, _) -> a < b) named_items))
 
-and apply_ctxt cx params args span = 
+and apply_ctxt cx params args id = 
   apply_ctxt_generic cx 
 	(fun cx items -> extend_ctxt_by_frame cx (linearize_items_for_frame items))
 	(fun x -> Ast.MOD_ITEM_public_type x)
-	params args span
+	params args id
 
 
-and apply_ctxt_ty cx params args span = 
+and apply_ctxt_ty cx params args id = 
   apply_ctxt_generic cx 
 	extend_ctxt_by_mod_ty
 	(fun x -> Ast.MOD_TYPE_ITEM_public_type x)
-	params args span
+	params args id
 
 (* 
  * Our lookup system integrates notions of the layout of frames, but is presently
@@ -318,7 +336,7 @@ and lookup_ident
 		if Hashtbl.mem x ident
 		then 
 		  let tyitem = Hashtbl.find x ident in 
-			({ cx with ctxt_span = Some tyitem.span }, 
+			({ cx with ctxt_id = Some tyitem.id }, 
 			 BINDING_type_item tyitem)
 		else 
 		  lookup_ident 
@@ -364,7 +382,7 @@ and lookup_ident
                                   None
                                 end
                         in
-					      ({cx with ctxt_span = Some slotr.span}, 
+					      ({cx with ctxt_id = Some slotr.id}, 
 					       BINDING_slot (pathopt, local))
                     | None -> 
                         begin
@@ -379,7 +397,7 @@ and lookup_ident
 				                  then 
 				                    let (layout, item) = Hashtbl.find tab ident in
                                     let pathopt = Some (Ast.RES_member (layout, (Ast.RES_deref fp))) in
-					                  ({cx with ctxt_span = Some item.span}, 
+					                  ({cx with ctxt_id = Some item.id}, 
 					                   BINDING_item (pathopt, item))
                                   else                        
 				                    lookup_ident 
@@ -417,7 +435,7 @@ and lookup_temp (cx:ctxt)
                             end
                     in
                       log cx "found temporary temp %d" temp;
-			          ({ cx with ctxt_span = Some slotr.span }, 
+			          ({ cx with ctxt_id = Some slotr.id }, 
 			           BINDING_slot (pathopt, local))
 		          else 
 		            lookup_temp { cx with ctxt_frame_scopes = xs } fp temp
@@ -485,7 +503,7 @@ and mod_type_item_of_mod_item item =
           let prog_ty = prog_type_of_prog pd.Ast.decl_item in
 	        Ast.MOD_TYPE_ITEM_prog (decl pd.Ast.decl_params prog_ty)
   in
-	{ span = item.span;
+	{ id = item.id;
 	  node = ty }
 
 
@@ -498,7 +516,7 @@ and type_component_of_type_item cx tyitem comp =
 			   let tyitems = md.Ast.decl_item in 				 
 				 if Hashtbl.mem tyitems id
 				 then 
-				   let cx = param_ctxt cx params tyitem.span in
+				   let cx = param_ctxt cx params tyitem.id in
 				   let cx = extend_ctxt_by_mod_ty cx tyitems in
 				   let ty_item = (Hashtbl.find tyitems id) in
 					 (cx, ty_item)
@@ -514,7 +532,7 @@ and type_component_of_type_item cx tyitem comp =
 
 and apply_args_to_item cx item args = 
   let app params = 
-	apply_ctxt cx params args item.span
+	apply_ctxt cx params args item.id
   in
 	match item.node with 
 		Ast.MOD_ITEM_opaque_type td -> 
@@ -544,7 +562,7 @@ and apply_args_to_item cx item args =
 
 and apply_args_to_type_item cx tyitem args = 
   let app params = 
-	apply_ctxt_ty cx params args tyitem.span
+	apply_ctxt_ty cx params args tyitem.id
   in
 	match tyitem.node with 
 		Ast.MOD_TYPE_ITEM_opaque_type td -> 
@@ -887,29 +905,29 @@ and resolve_mod_items cx items =
 		  
 and resolve_mod_item cx id item =
   log cx "resolving mod item %s" id;
-  let span = item.span in
+  let id = item.id in
 	match item.node with 
 		Ast.MOD_ITEM_mod md ->
-		  let cx = param_ctxt cx md.Ast.decl_params span in
+		  let cx = param_ctxt cx md.Ast.decl_params id in
 			resolve_mod_items cx md.Ast.decl_item
 			  
 	  | Ast.MOD_ITEM_prog pd -> 
-		  let cx = param_ctxt cx pd.Ast.decl_params span in
+		  let cx = param_ctxt cx pd.Ast.decl_params id in
 			resolve_prog cx pd.Ast.decl_item
 
 	  | Ast.MOD_ITEM_fn fn -> 
-		  let cx = param_ctxt cx fn.Ast.decl_params span in
-			resolve_fn span cx fn.Ast.decl_item
+		  let cx = param_ctxt cx fn.Ast.decl_params id in
+			resolve_fn id cx fn.Ast.decl_item
 
 	  | _ -> ()
 
-and new_local (slot:(Ast.slot ref) spanned) = 
+and new_local (slot:(Ast.slot ref) identified) = 
   { Ast.local_layout = new_layout();
     Ast.local_slot = slot;
     Ast.local_aliased = ref false;
     Ast.local_vreg = ref None; }
 
-and resolve_fn span cx fn = 
+and resolve_fn id cx fn = 
   let cx = 
 	{ cx with ctxt_frame_scopes = 
 		(Ast.FRAME_heavy fn.Ast.fn_frame) :: cx.ctxt_frame_scopes } 
@@ -920,7 +938,7 @@ and resolve_fn span cx fn =
     let outslot = 
       resolve_slot cx None fn.Ast.fn_ty.Ast.fn_sig.Ast.sig_output_slot        
     in
-    let outslotr = { node=ref outslot; span=span} in
+    let outslotr = { node=ref outslot; id=id} in
     let outlocal = new_local outslotr in 
     let outlayout = outlocal.Ast.local_layout in 
       outlayout.layout_size <- slot_size cx outslot;
@@ -986,7 +1004,7 @@ and resolve_slot
 and resolve_slot_ref 
     (cx:ctxt) 
     (tyo:Ast.ty option) 
-    (slotr:(Ast.slot ref) spanned) 
+    (slotr:(Ast.slot ref) identified) 
     : unit = 
   let slot = !(slotr.node) in
   let newslot = resolve_slot cx tyo slot in
@@ -1128,7 +1146,7 @@ and resolve_stmts cx stmts =
   Array.iter (resolve_stmt cx) stmts
 		
 and resolve_stmt cx stmt = 
-  let cx = { cx with ctxt_span = Some stmt.span } in
+  let cx = { cx with ctxt_id = Some stmt.id } in
   match stmt.node with 
 	  Ast.STMT_log a -> 
 		  resolve_atom cx None a
@@ -1243,8 +1261,12 @@ let resolve_crate
         raise (err cx "progress ceased, but crate incomplete")
       else ()
   with 
-	  Semant_err (spano, str) -> 
+	  Semant_err (ido, str) -> 
         begin
+          let spano = match ido with 
+              None -> None
+            | Some id -> (Session.get_span sess id)
+          in            
 		  match spano with 
 			  None -> 
                 Session.fail sess "Resolve error: %s\n%!" str

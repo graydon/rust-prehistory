@@ -19,7 +19,7 @@ let ty_nonce = ref 0
 let next_ty_nonce _ = (ty_nonce := (!ty_nonce) + 1; !ty_nonce)
 ;;
 
-exception Semant_err of ((span option) * string)
+exception Semant_err of ((node_id option) * string)
 ;;
 
 

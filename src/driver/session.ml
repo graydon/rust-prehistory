@@ -21,9 +21,15 @@ type sess =
   mutable sess_log_obj: bool;
   mutable sess_log_out: out_channel;
   mutable sess_failed: bool;
+  sess_spans: (node_id,span) Hashtbl.t;
 }
 ;;
 
+let get_span sess id = 
+  if Hashtbl.mem sess.sess_spans id
+  then (Some (Hashtbl.find sess.sess_spans id))
+  else None
+;;
 
 let log name flag chan = 
   let k1 s = 

@@ -29,6 +29,7 @@ let (sess:Session.sess) =
 	Session.sess_log_obj = false;   
 	Session.sess_log_out = stderr;
     Session.sess_failed = false;
+    Session.sess_spans = Hashtbl.create 0;
   }
 
 let argspecs = 
@@ -85,6 +86,8 @@ let _ = exit_if_failed ()
 ;;
 
 let (abi:Abi.abi) = X86.abi;;
+
+let _ = Resolve.print_ast crate_items;;
 
 let _ = Resolve.resolve_crate sess abi crate_items;;
 let _ = exit_if_failed ()

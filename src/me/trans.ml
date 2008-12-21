@@ -185,7 +185,7 @@ let trans_lval_full
     : Il.operand = 
   let res = lv.Ast.lval_res in
     match (!(res.Ast.res_path), !(res.Ast.res_target)) with         
-        _, None | None, _ -> raise (Semant_err (Some lv.Ast.lval_src.span, 
+        _, None | None, _ -> raise (Semant_err (Some lv.Ast.lval_src.id, 
                                                 "unresolved lval in trans_lval"))
       | (Some path, Some target)  ->
           begin
@@ -205,7 +205,7 @@ let trans_lval_full
                                   let tmp = (Il.next_vreg cx.ctxt_emit) in 
 		                            Il.emit cx.ctxt_emit Il.MOV (Il.Reg tmp) imm Il.Nil;
                                     (Il.Reg tmp)
-                      | _ -> raise (Semant_err (Some lv.Ast.lval_src.span, 
+                      | _ -> raise (Semant_err (Some lv.Ast.lval_src.id, 
                                                 "unhandled form of mod item in trans_lval"))
                   end
               | _ -> 
@@ -355,8 +355,8 @@ let trans_expr
 
 let atom_type at = 
   match at with 
-      Ast.ATOM_literal {node=(Ast.LIT_str _); span=_} -> Some Ast.TY_str
-    | Ast.ATOM_literal {node=(Ast.LIT_int _); span=_} -> Some Ast.TY_int
+      Ast.ATOM_literal {node=(Ast.LIT_str _); id=_} -> Some Ast.TY_str
+    | Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Some Ast.TY_int
     | Ast.ATOM_lval lv -> 
         begin
           match !(lv.Ast.lval_res.Ast.res_target) with 
@@ -371,12 +371,12 @@ let atom_type at =
                       | Ast.SLOT_write_alias t -> Some t
                       | Ast.SLOT_auto -> 
                           raise (Semant_err 
-                                   (Some lv.Ast.lval_src.span, 
+                                   (Some lv.Ast.lval_src.id, 
                                     "Unresolved auto slot in Trans.atom_type"))
                   end
             | Some _ -> None
             | None -> raise (Semant_err 
-                               (Some lv.Ast.lval_src.span, 
+                               (Some lv.Ast.lval_src.id, 
                                 "Unresolved lval in Trans.atom_type"))
         end
     | _ -> None
@@ -439,7 +439,7 @@ let rec trans_stmt
           let abi = cx.ctxt_abi in
           let fn = 
             match !(flv.Ast.lval_res.Ast.res_target) with 
-                Some (Ast.RES_item ({node=(Ast.MOD_ITEM_fn fd); span=_})) -> fd.Ast.decl_item
+                Some (Ast.RES_item ({node=(Ast.MOD_ITEM_fn fd); id=_})) -> fd.Ast.decl_item
               | _ -> raise (Invalid_argument "Trans.trans_stmt: call to unexpected lval")
           in
             (* FIXME: factor out call protocol into ABI bits. *)
@@ -614,12 +614,16 @@ and trans_crate
 	  trans_mod_items cx crate;
       (cx.ctxt_text_items, cx.ctxt_data_items, cx.ctxt_entry_prog)
   with 
-	  Semant_err (spano, str) -> 
+	  Semant_err (ido, str) -> 
         begin
+          let spano = match ido with 
+              None -> None
+            | Some id -> (Session.get_span sess id)
+          in
 		  match spano with 
 			  None -> 
                 Session.fail sess "Trans error: %s\n%!" str
-		    | Some span -> 			  
+		    | Some span ->
 			    Session.fail sess "%s:E:Trans error: %s\n%!" 
                   (Session.string_of_span span) str
         end;

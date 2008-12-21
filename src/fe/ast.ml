@@ -226,7 +226,7 @@ and stmt' =
   | STMT_decl of stmt_decl 
   | STMT_use of (ty * ident * lval)
       
-and stmt = stmt' spanned
+and stmt = stmt' identified
 
 and stmt_alt_tag = 
     {
@@ -248,7 +248,7 @@ and slot_key =
 
 and local =
     {
-      local_slot: (slot ref) spanned;
+      local_slot: (slot ref) identified;
       local_vreg: (int option) ref;
       local_aliased: bool ref;
       local_layout: layout;
@@ -279,11 +279,11 @@ and block' =
       block_stmts: stmt array;
     }
 
-and block = block' spanned
+and block = block' identified
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
-  | DECL_slot of (slot_key * ((slot ref) spanned))
+  | DECL_slot of (slot_key * ((slot ref) identified))
 
       
 and stmt_alt_port = 
@@ -331,7 +331,7 @@ and stmt_try =
     }
 
 and atom = 
-    ATOM_literal of (lit spanned)
+    ATOM_literal of (lit identified)
   | ATOM_lval of lval
 
 and expr =
@@ -401,7 +401,7 @@ and lval' =
 
 and lval = 
     { 
-      lval_src: lval' spanned;
+      lval_src: lval' identified;
       lval_res: lval_resolved;
     }
       
@@ -512,7 +512,7 @@ and mod_item' =
   | MOD_ITEM_fn of fn decl
   | MOD_ITEM_prog of prog decl
 
-and mod_item = mod_item' spanned   
+and mod_item = mod_item' identified   
 
 and mod_type_item' = 
     MOD_TYPE_ITEM_opaque_type of ty_limit decl
@@ -522,7 +522,7 @@ and mod_type_item' =
   | MOD_TYPE_ITEM_fn of ty_fn decl
   | MOD_TYPE_ITEM_prog of ty_prog decl
 
-and mod_type_item = mod_type_item' spanned
+and mod_type_item = mod_type_item' identified
 
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
 

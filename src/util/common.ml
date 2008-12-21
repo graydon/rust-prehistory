@@ -6,7 +6,9 @@
 type filename = string
 type pos = (filename * int * int) 
 type span = {lo: pos; hi: pos}
-type 'a spanned = { node: 'a; span: span }
+
+type node_id = int
+type 'a identified = { node: 'a; id: node_id }
 
 type target = 
 	Linux_x86_elf
