@@ -294,7 +294,6 @@ let string_of_tok t =
 
 type pstate = 
     { mutable pstate_peek         : token;
-      mutable pstate_block_frames : Ast.frame list;
       mutable pstate_ctxt         : (string * pos) list;
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
@@ -537,11 +536,6 @@ and parse_lval_component (ps:pstate)
           expect ps RPAREN;
           (stmts, Ast.COMP_atom atom)
 	| _ -> ([||], Ast.COMP_named (parse_name_component ps))
-      
-and new_lval src = 
-  { Ast.lval_src = src;
-    Ast.lval_res = { Ast.res_path = ref None;
-                     Ast.res_target = ref None } }
 
 and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) = 
   let apos = lexpos ps in 
@@ -552,11 +546,11 @@ and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) =
 		  let (stmts', comps) = arj1st (one_or_more DOT parse_lval_component ps) in 
 		  let bpos = lexpos ps in 
 		  let lval' = Array.fold_left (fun x y -> Ast.LVAL_ext (x, y)) base comps in
-          let lval = new_lval (span ps apos bpos lval') in
+          let lval = span ps apos bpos lval' in
 			(stmts', lval)
 	  | _ ->
 		  let bpos = lexpos ps in 
-          let lval = new_lval (span ps apos bpos base) in
+          let lval = span ps apos bpos base in
 			([||], lval)
   
 
@@ -677,6 +671,12 @@ and parse_slot param_slot ps =
         let ty = parse_ty ps in 
           Ast.SLOT_interior ty
 
+and parse_identified_slot param_slot ps = 
+  let apos = lexpos ps in 
+  let slot = parse_slot param_slot ps in 
+  let bpos = lexpos ps in 
+    span ps apos bpos slot
+
 and parse_tuple_ty ps = 
   one_or_more COMMA parse_ty ps
             
@@ -724,10 +724,9 @@ and build_tmp ps slot apos bpos =
 	  Printf.fprintf ps.pstate_sess.Session.sess_log_out "building temporary %d\n%!" nonce
     else 
 	  ();
-    let decl = (Ast.DECL_slot (Ast.KEY_temp nonce, (span ps apos bpos (ref slot)))) in
+    let decl = (Ast.DECL_slot (Ast.KEY_temp nonce, (span ps apos bpos slot))) in
     let declstmt = span ps apos bpos (Ast.STMT_decl decl) in
-    let tmp = new_lval (span ps apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce))) in
-      add_block_decl ps decl;
+    let tmp = span ps apos bpos (Ast.LVAL_base (Ast.BASE_temp nonce)) in
 	  (nonce, tmp, declstmt)
 
 
@@ -883,90 +882,31 @@ and parse_slot_and_ident param_slot ps =
   let slot = ctxt "slot and ident: slot" (parse_slot param_slot) ps in
   let ident = ctxt "slot and ident: ident" parse_ident ps in
     (slot, ident)
+
+and parse_identified_slot_and_ident param_slot ps = 
+  let slot = ctxt "identified slot and ident: slot" (parse_identified_slot param_slot) ps in
+  let ident = ctxt "identified slot and ident: ident" parse_ident ps in
+    (slot, ident)
       
-and parse_two_or_more_tup_slots_and_idents param_slot ps = 
+and parse_two_or_more_identified_tup_slots_and_idents param_slot ps = 
   let both = 
     ctxt "two+ tup slots and idents" 
-      (bracketed_two_or_more LPAREN RPAREN (Some COMMA) (parse_slot_and_ident param_slot)) ps
+      (bracketed_two_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident param_slot)) ps
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
 	  
-and parse_one_or_more_tup_slots_and_idents param_slot ps = 
-  let both = 
-    ctxt "one+ tup slots and idents" 
-      (bracketed_one_or_more LPAREN RPAREN (Some COMMA) (parse_slot_and_ident param_slot)) ps
-  in
-  let (slots, idents) = List.split (Array.to_list both) in
-    (arr slots, arr idents)
-
-and new_heavy_frame _ =
-  { 
-    Ast.heavy_frame_layout = new_layout ();
-    Ast.heavy_frame_arg_slots = ref [];
-    Ast.heavy_frame_out_slot = ref None;
-  }
-
-and new_light_frame _ = 
-  { 
-    Ast.light_frame_layout = new_layout ();
-	Ast.light_frame_locals = Hashtbl.create 0;
-	Ast.light_frame_items = Hashtbl.create 0;
-  }
-
-and add_block_decl (ps:pstate) (decl:Ast.stmt_decl) : unit = 
-  let frame = 
-    match ps.pstate_block_frames with 
-        [] -> raise (err "missing block frame in add_block_decl" ps)
-      | (f::_) -> f
-  in
-  let new_local slot = 
-    { Ast.local_layout = new_layout();
-      Ast.local_slot = slot;
-      Ast.local_aliased = ref false;
-      Ast.local_vreg = ref None; }
-  in
-    match frame with 
-        Ast.FRAME_heavy hf -> 
-          begin
-            match decl with 
-	            Ast.DECL_mod_item (id, item) -> 
-                  raise (err "adding mod item to heavy frame" ps)
-	          | Ast.DECL_slot (key, slot) ->
-                  begin
-                    match key with
-                        Ast.KEY_temp _ -> raise (err "adding temp slot to heavy frame" ps)
-                      | Ast.KEY_ident id ->             
-                          hf.Ast.heavy_frame_arg_slots :=
-                            (id, new_local slot) :: (!(hf.Ast.heavy_frame_arg_slots))
-                  end                    
-          end
-      | Ast.FRAME_light lf -> 
-          begin
-            match decl with 
-	            Ast.DECL_mod_item (id, item) -> 
-		          Hashtbl.add lf.Ast.light_frame_items id 
-			        ((new_layout()), item)
-	          | Ast.DECL_slot (key, slot) -> 
-		          Hashtbl.add lf.Ast.light_frame_locals key
-                    { Ast.local_layout = new_layout();
-                      Ast.local_slot = slot;
-                      Ast.local_aliased = ref false;
-                      Ast.local_vreg = ref None; }
-          end
+and parse_one_or_more_identified_slot_ident_pairs param_slot ps = 
+  ctxt "one+ tup slots and idents" 
+    (bracketed_one_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident param_slot)) ps
 
 and parse_block ps = 
   let apos = lexpos ps in
-  let frames = ps.pstate_block_frames in
-  let frame = new_light_frame () in 
-    ps.pstate_block_frames <- (Ast.FRAME_light frame) :: frames; 
-    let stmts = arj (ctxt "block: stmts" 
-					   (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
-    in
-    let bpos = lexpos ps in 
-      ps.pstate_block_frames <- frames;
-      span ps apos bpos { Ast.block_frame = frame;
-		               Ast.block_stmts = stmts }
+  let stmts = arj (ctxt "block: stmts" 
+					 (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
+  in
+  let bpos = lexpos ps in 
+    span ps apos bpos stmts
 
 and parse_block_stmt ps = 
   let apos = lexpos ps in
@@ -1082,7 +1022,7 @@ and parse_stmts ps =
                LPAREN -> 				 
                  let (slots, idents) = 
                    ctxt "stmt tup decl: slots and idents" 
-                     (bracketed LPAREN RPAREN (parse_two_or_more_tup_slots_and_idents false)) ps in
+                     (bracketed LPAREN RPAREN (parse_two_or_more_identified_tup_slots_and_idents false)) ps in
                  let (stmts, init) = ctxt "stmt tup decl: init" parse_init ps in
                  let bpos = lexpos ps in 
 				   (* 
@@ -1098,7 +1038,7 @@ and parse_stmts ps =
 					* 
 					*)
 				 let (nonce, tmp, tempdecl) = 
-				   build_tmp ps (Ast.SLOT_interior (Ast.TY_tup slots)) apos bpos 
+				   build_tmp ps (Ast.SLOT_interior (Ast.TY_tup (Array.map (fun x -> x.node) slots))) apos bpos 
                  in
                    
                  let copies = ref [] in
@@ -1108,16 +1048,14 @@ and parse_stmts ps =
 					    None -> ()
 					  | Some _ -> 
 						  let ext = Ast.COMP_named (Ast.COMP_idx i) in
-						  let src_lval' = Ast.LVAL_ext (tmp.Ast.lval_src.node, ext) in
-                          let src_lval = new_lval (span ps apos bpos src_lval') in
+						  let src_lval' = Ast.LVAL_ext (tmp.node, ext) in
+                          let src_lval = span ps apos bpos src_lval' in
                           let src_atom = Ast.ATOM_lval src_lval in 
                           let dst_lval' = Ast.LVAL_base (Ast.BASE_ident idents.(i)) in
-                          let dst_lval = new_lval (span ps apos bpos dst_lval') in
+                          let dst_lval = span ps apos bpos dst_lval' in
                           let copy = span ps apos bpos (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
                             copies := copy :: (!copies));                   
-				   let slotr = (span ps apos bpos (ref slot)) in
-				   let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slotr) in
-                     add_block_decl ps decl;
+				   let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slot) in
 					 span ps apos bpos (Ast.STMT_decl decl)
 				 in
 				 let letdecls = Array.mapi makedecl slots in
@@ -1127,20 +1065,18 @@ and parse_stmts ps =
                  let (stmts, slot, ident, init) = 
 				   ctxt "stmt slot" parse_slot_and_ident_and_init ps in
                  let bpos = lexpos ps in 
-                 let decl = (Ast.DECL_slot (Ast.KEY_ident ident, 
-                                            (span ps apos bpos (ref slot))))
+                 let decl = Ast.DECL_slot (Ast.KEY_ident ident, 
+                                           (span ps apos bpos slot))
                  in
                  let copy = match init with 
                      None -> [| |]
                    | Some atom -> [| span ps apos bpos 
                                        (Ast.STMT_copy 
-                                          (new_lval 
-                                             (span ps apos bpos 
-                                                (Ast.LVAL_base 
-                                                   (Ast.BASE_ident ident))),
+                                          (span ps apos bpos 
+                                             (Ast.LVAL_base 
+                                                (Ast.BASE_ident ident)),
                                            Ast.EXPR_atom atom)) |]
                  in
-                   add_block_decl ps decl;
                    Array.concat [stmts; [| span ps apos bpos (Ast.STMT_decl decl) |]; copy])
                      
                      
@@ -1149,7 +1085,6 @@ and parse_stmts ps =
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
           let bpos = lexpos ps in 
           let decl = Ast.DECL_mod_item (ident, item) in
-            add_block_decl ps decl;
             spans stmts apos bpos (Ast.STMT_decl decl)
 
       | LPAREN -> 
@@ -1180,8 +1115,8 @@ and parse_stmts ps =
 		  let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_atom atom)) in
 		  let make_copy i dst = 
 			let ext = Ast.COMP_named (Ast.COMP_idx i) in
-			let src = Ast.LVAL_ext (tmp.Ast.lval_src.node, ext) in
-            let lval = new_lval (span ps apos bpos src) in
+			let src = Ast.LVAL_ext (tmp.node, ext) in
+            let lval = span ps apos bpos src in
 			let e = Ast.EXPR_atom (Ast.ATOM_lval lval) in
 			  span ps apos bpos (Ast.STMT_copy (dst, e))
 		  in
@@ -1255,49 +1190,29 @@ and parse_prog ps =
 	(Array.concat (List.rev !stmts_cell), !prog_cell)
         
 
-and parse_sig_and_bind ps = 
-  let (input_slot, idents) = 
-    let apos = lexpos ps in  
-      match peek ps with 
-          NIL -> (Ast.SLOT_interior (Ast.TY_nil), arr [])
-        | LPAREN ->           
-            let (slots, idents) = 
-              ctxt "sig and bind: idents and slots" 
-                (parse_one_or_more_tup_slots_and_idents true) ps in
-            let bpos = lexpos ps in  
-              for i = 0 to (Array.length slots) - 1
-              do
-                let slotr = span ps apos bpos (ref slots.(i)) in
-                let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slotr) in
-                  add_block_decl ps decl;
-              done;
-              if Array.length slots = 1
-              then (slots.(0), idents)
-              else (Ast.SLOT_interior (Ast.TY_tup slots), idents)
-
-        | _ -> raise (unexpected ps)
+and parse_fn_in_and_out ps = 
+  let inputs = 
+    match peek ps with 
+        NIL -> (bump ps; [| |])
+      | LPAREN ->           
+          ctxt "fn in and out: input idents and slots" 
+            (parse_one_or_more_identified_slot_ident_pairs true) ps 
+      | _ -> raise (unexpected ps)
   in
   let _ = expect ps RARROW in
-  let output_slot = ctxt "sig and bind: output" (parse_slot true) ps in
-    ({ Ast.sig_input_slot = input_slot;
-       Ast.sig_output_slot = output_slot }, idents)
-
-
+  let output = ctxt "fn in and out: output slot" (parse_identified_slot true) ps in
+    (inputs, output)
+      
+      
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn proto_opt lim pure ps =
-  let frames = ps.pstate_block_frames in
-  let frame = new_heavy_frame () in 
-    ps.pstate_block_frames <- (Ast.FRAME_heavy frame) :: frames;
-    let (si, bind) = ctxt "fn: sig and bind" parse_sig_and_bind ps in
+    let (inputs, output) = ctxt "fn: fn_in_and_out" parse_fn_in_and_out ps in
     let body = ctxt "fn: body" parse_block ps in
-      ps.pstate_block_frames <- frames;
-      { Ast.fn_fixup = new_fixup "function";
-        Ast.fn_ty = { Ast.fn_pure = pure;
-                      Ast.fn_proto = proto_opt;
-                      Ast.fn_lim = lim; 
-                      Ast.fn_sig = si; };
-        Ast.fn_bind = bind;
-        Ast.fn_frame = frame;
+      { Ast.fn_input_slots = inputs;
+        Ast.fn_output_slot = output;
+        Ast.fn_aux = { Ast.fn_pure = pure;
+                       Ast.fn_proto = proto_opt;
+                       Ast.fn_lim = lim; };        
         Ast.fn_body = body; }
 
 and flag ps tok = 
@@ -1386,7 +1301,6 @@ let make_parser sess tok fname =
     let ps = 
       { pstate_peek = first;
         pstate_ctxt = [];
-        pstate_block_frames = [];
         pstate_lexfun = tok;
         pstate_lexbuf = lexbuf;
 		pstate_sess = sess;

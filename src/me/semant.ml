@@ -22,6 +22,13 @@ let next_ty_nonce _ = (ty_nonce := (!ty_nonce) + 1; !ty_nonce)
 exception Semant_err of ((node_id option) * string)
 ;;
 
+let err (idopt:node_id option) = 
+  let k s = 
+    raise (Semant_err (idopt, s))
+  in
+    Printf.ksprintf k
+;;
+
 
 (* 
  * Local Variables:

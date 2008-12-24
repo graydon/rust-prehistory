@@ -17,9 +17,10 @@ open Common;;
 type ident = string
 ;;
 
-type nonce = int
+type slot_key = 
+    KEY_ident of ident
+  | KEY_temp of temp_id
 ;;
-
 
 (* "names" are statically computable references to particular slots;
    they never involve dynamic indexing (nor even static tuple-indexing;
@@ -33,11 +34,17 @@ type nonce = int
  *)
 
 type ty_mach = 
-    TY_unsigned
-  | TY_signed
-  | TY_ieee_bfp
-  | TY_ieee_dfp
+    TY_u8
+  | TY_u16
+  | TY_u32
+  | TY_u64
+  | TY_s8
+  | TY_s16
+  | TY_s32
+  | TY_s64
+  | TY_b64
 ;;
+
 
 type proto = 
     PROTO_ques  (* fn? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
@@ -48,7 +55,7 @@ type proto =
 
 type name_base = 
     BASE_ident of ident
-  | BASE_temp of nonce
+  | BASE_temp of temp_id
   | BASE_app of (ident * (ty array))
 
 and name_component = 
@@ -69,7 +76,7 @@ and ty =
     TY_any
   | TY_nil
   | TY_bool
-  | TY_mach of (ty_mach * int)
+  | TY_mach of ty_mach
   | TY_int
   | TY_char
   | TY_str
@@ -93,7 +100,7 @@ and ty =
   | TY_mod of (mod_type_items)
   | TY_prog of ty_prog
 
-  | TY_opaque of nonce
+  | TY_opaque of opaque_id
   | TY_named of name
   | TY_type
       
@@ -148,7 +155,7 @@ and constrs = constr array
     
 and prog = 
     {
-      prog_init: init option;
+      prog_init: (init identified) option;
       prog_main: block option;
       prog_fini: block option;
       prog_mod: mod_items;
@@ -180,14 +187,14 @@ and ty_sig =
       sig_output_slot: slot;
     }
 
-and ty_fn = 
+and ty_fn_aux = 
     {
       fn_pure: bool;
       fn_lim: ty_limit;
-      fn_sig: ty_sig;
       fn_proto: proto option;
     }
 
+and ty_fn = (ty_sig * ty_fn_aux)
 
 and ty_prog = 
     {
@@ -241,50 +248,12 @@ and stmt_alt_type =
       alt_type_else: stmt option;
     }
 
-and slot_key = 
-    KEY_ident of ident
-  | KEY_temp of nonce
-
-
-and local =
-    {
-      local_slot: (slot ref) identified;
-      local_vreg: (int option) ref;
-      local_aliased: bool ref;
-      local_layout: layout;
-    }
-
-and heavy_frame =
-    { 
-      heavy_frame_layout: layout;
-      heavy_frame_arg_slots: ((ident * local) list) ref;
-      (* FIXME: should these turn into anonymous lvals? *)
-      heavy_frame_out_slot: (local option) ref;
-    }
-
-and light_frame = 
-    {
-      light_frame_layout: layout;
-      light_frame_locals: (slot_key, local) Hashtbl.t;
-      light_frame_items: (ident, (layout * mod_item)) Hashtbl.t;  
-    }
-
-and frame = 
-    FRAME_heavy of heavy_frame
-  | FRAME_light of light_frame
-
-and block' = 
-    {
-      block_frame: light_frame;
-      block_stmts: stmt array;
-    }
-
+and block' = stmt array
 and block = block' identified
 
 and stmt_decl = 
     DECL_mod_item of (ident * mod_item)
-  | DECL_slot of (slot_key * ((slot ref) identified))
-
+  | DECL_slot of (slot_key * (slot identified))
       
 and stmt_alt_port = 
     { 
@@ -302,14 +271,12 @@ and stmt_while =
 and stmt_foreach = 
     {
       foreach_proto: proto;
-      foreach_frame: light_frame;
       foreach_call: (lval * lval array);
       foreach_body: block;
     }
       
 and stmt_for = 
     {
-      for_frame: light_frame;
       for_init: stmt;
       for_test: ((stmt array) * atom);
       for_step: stmt;
@@ -367,43 +334,11 @@ and lval_component =
   | COMP_atom of atom
     
 
-(* 
- * An lval can resolve to:
- * 
- *   - A local slot that you access through memory operations because it's big, or 
- *     because it is aliased.
- * 
- *   - A module item that you access indirectly through a pointer or some memory structure.
- * 
- *   - A purely local slot that is register sized.
- *)
-      
-and resolved_path = 
-    RES_pr of abi_pseudo_reg
-  | RES_member of (layout * resolved_path)
-  | RES_deref of resolved_path
-  | RES_idx of (resolved_path * resolved_path)
-  | RES_vreg of ((int option) ref)
-
-and resolved_target = 
-    RES_slot of local
-  | RES_item of mod_item
-
-and lval_resolved = 
-    {
-      res_path: (resolved_path option) ref;
-      res_target: (resolved_target option) ref;
-    }
-
 and lval' = 
     LVAL_base of name_base
   | LVAL_ext of (lval' * lval_component)
 
-and lval = 
-    { 
-      lval_src: lval' identified;
-      lval_res: lval_resolved;
-    }
+and lval = lval' identified
       
 and binop =    
     BINOP_or
@@ -435,25 +370,21 @@ and unop =
 
 and fn = 
     {
-      fn_fixup: fixup;
-      fn_ty: ty_fn;
-      fn_bind: ident array;
-      fn_frame: heavy_frame;
+      fn_input_slots: ((slot identified) * ident) array;
+      fn_output_slot: slot identified;
+      fn_aux: ty_fn_aux;
       fn_body: block;
     }
 
 and pred = 
     {
-      pred_ty: ty_sig;
-      pred_bind: ident array;
+      pred_input_slots: ((slot identified) * ident) array;
       pred_body: stmt;
     }
       
 and init = 
     {
-      init_sig: ty_sig;
-      init_bind: ident array;
-      init_frame: heavy_frame;
+      init_input_slots: ((slot identified) * ident) array;
       init_body: block;
     }
 
@@ -525,7 +456,6 @@ and mod_type_item' =
 and mod_type_item = mod_type_item' identified
 
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
-
 
 and mod_items = (ident, mod_item) Hashtbl.t
 ;;

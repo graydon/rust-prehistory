@@ -8,6 +8,9 @@ type pos = (filename * int * int)
 type span = {lo: pos; hi: pos}
 
 type node_id = int
+type temp_id = int
+type opaque_id = int
+
 type 'a identified = { node: 'a; id: node_id }
 
 type target = 
@@ -60,17 +63,45 @@ let new_layout _ =
     layout_done = false}
 ;;
 
-let htab_keys htab = 
+(* 
+ * Auxiliary hashtable functions.
+ *)
+
+let htab_keys (htab:('a,'b) Hashtbl.t) : ('a list) = 
   Hashtbl.fold (fun k _ accum -> k :: accum) htab []
 ;;
 
-let htab_vals htab = 
+let htab_vals (htab:('a,'b) Hashtbl.t) : ('b list)  = 
   Hashtbl.fold (fun _ v accum -> v :: accum) htab []
 ;;
 
-let htab_pairs htab = 
+let htab_pairs (htab:('a,'b) Hashtbl.t) : (('a * 'b) list) = 
   Hashtbl.fold (fun k v accum -> (k,v) :: accum) htab []
 ;;
+
+let htab_search (htab:('a,'b) Hashtbl.t) (k:'a) : ('b option) = 
+  if Hashtbl.mem htab k
+  then Some (Hashtbl.find htab k)
+  else None
+
+(* 
+ * Auxiliary stack functions.
+ *)
+
+let stk_fold (s:'a Stack.t) (f:'a -> 'b -> 'b) (x:'b) : 'b =
+  let r = ref x in 
+    Stack.iter (fun e -> r := f e (!r)) s;
+    !r
+
+let stk_elts_from_bot (s:'a Stack.t) : ('a list) =
+  stk_fold s (fun x y -> x::y) []
+
+let stk_elts_from_top (s:'a Stack.t) : ('a list) =
+  List.rev (stk_elts_from_bot s)
+    
+let stk_search (s:'a Stack.t) (f:'a -> 'b option) : 'b option =
+  stk_fold s (fun e accum -> match accum with None -> (f e) | x -> x) None
+
 
 (* 
  * Local Variables:

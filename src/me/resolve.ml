@@ -11,16 +11,251 @@
 open Semant;;
 open Common;;
 
-let print_ast mod_items = ()
-(* 
-  let print = Printf.printf "resolve: %s\n" in
-  let visitor = 
-    (Walk.mod_item_logging_visitor print Walk.empty_visitor)
-  in
-    Walk.walk_mod_items visitor mod_items
-;;
-*)
 
+
+(* 
+type local =
+    {
+      local_slot: (Ast.slot ref) identified;
+      local_vreg: (int option) ref;
+      local_aliased: bool ref;
+      local_layout: layout;
+    }
+
+and heavy_frame =
+    { 
+      heavy_frame_layout: layout;
+      heavy_frame_arg_slots: ((ident * local) list) ref;
+      (* FIXME: should these turn into anonymous lvals? *)
+      heavy_frame_out_slot: (local option) ref;
+    }
+
+and light_frame = 
+    {
+      light_frame_layout: layout;
+      light_frame_locals: (slot_key, local) Hashtbl.t;
+      light_frame_items: (ident, (layout * mod_item)) Hashtbl.t;  
+    }
+
+and frame = 
+    FRAME_heavy of heavy_frame
+  | FRAME_light of light_frame
+
+(* 
+ * An lval can resolve to:
+ * 
+ *   - A local slot that you access through memory operations because it's big, or 
+ *     because it is aliased.
+ * 
+ *   - A module item that you access indirectly through a pointer or some memory structure.
+ * 
+ *   - A purely local slot that is register sized.
+ *)
+      
+and resolved_path = 
+    RES_pr of abi_pseudo_reg
+  | RES_member of (layout * resolved_path)
+  | RES_deref of resolved_path
+  | RES_idx of (resolved_path * resolved_path)
+  | RES_vreg of ((int option) ref)
+
+and resolved_target = 
+    RES_slot of local
+  | RES_item of mod_item
+
+and lval_resolved = 
+    {
+      res_path: (resolved_path option) ref;
+      res_target: (resolved_target option) ref;
+    }
+*) 
+
+(* 
+ * Resolution passes: 
+ * 
+ *   - build multiple 'scope' hashtables mapping slot_key -> node_id
+ *   - build single 'type inference' hashtable mapping node_id -> slot
+ * 
+ *   (note: not every slot is identified; only those that are declared
+ *    in statements and/or can participate in local type inference.
+ *    Those in function signatures are not, f.e. Also no type values
+ *    are identified, though module items are. ) 
+ * 
+ * 
+ *)
+
+type slots = (Ast.slot_key,(Ast.slot identified)) Hashtbl.t
+type block_slots_table = (node_id,slots) Hashtbl.t
+type block_items_table = (node_id,Ast.mod_items) Hashtbl.t
+
+type scope = 
+    SCOPE_block of node_id
+  | SCOPE_mod_item of Ast.mod_item
+  | SCOPE_mod_type_item of Ast.mod_type_item
+
+type ctxt = 
+	{ ctxt_sess: Session.sess;
+      ctxt_block_slots: block_slots_table;
+      ctxt_block_items: block_items_table;
+	  ctxt_abi: Abi.abi }
+;;
+
+let	new_ctxt sess abi = 
+  { ctxt_sess = sess;
+    ctxt_block_slots = Hashtbl.create 0;
+    ctxt_block_items = Hashtbl.create 0;
+	ctxt_abi = abi }
+;;
+
+let log cx = Session.log "resolve" 
+  cx.ctxt_sess.Session.sess_log_resolve
+  cx.ctxt_sess.Session.sess_log_out
+;;
+
+exception Auto_slot;;
+exception Un_laid_out_frame;;
+
+                 
+let pass_logging_visitor 
+    (cx:ctxt)
+    (passnum:int) 
+    (inner:Walk.visitor) 
+    : Walk.visitor = 
+  let logger = log cx "pass %d: %s" passnum in
+    (Walk.mod_item_logging_visitor logger inner)
+;;
+
+
+let block_scope_forming_visitor 
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+  let visit_block_pre b = 
+    if not (Hashtbl.mem cx.ctxt_block_items b.id)
+    then Hashtbl.add cx.ctxt_block_items b.id (Hashtbl.create 0);
+    if not (Hashtbl.mem cx.ctxt_block_slots b.id)
+    then Hashtbl.add cx.ctxt_block_slots b.id (Hashtbl.create 0);
+    inner.Walk.visit_block_pre b
+  in
+    { inner with Walk.visit_block_pre = visit_block_pre }
+;;
+
+
+let scope_stack_managing_visitor
+    (scopes:scope Stack.t)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+  let visit_block_pre b = 
+    Stack.push (SCOPE_block b.id) scopes;
+    inner.Walk.visit_block_pre b
+  in
+  let visit_block_post b = 
+    inner.Walk.visit_block_post b;
+    ignore (Stack.pop scopes)
+  in
+  let visit_mod_item_pre n p i = 
+    Stack.push (SCOPE_mod_item i) scopes;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+  let visit_mod_item_post n p i = 
+    inner.Walk.visit_mod_item_post n p i;
+    ignore (Stack.pop scopes) 
+  in
+  let visit_mod_type_item_pre n p i = 
+    Stack.push (SCOPE_mod_type_item i) scopes;
+    inner.Walk.visit_mod_type_item_pre n p i
+  in
+  let visit_mod_type_item_post _ _ _ = ignore (Stack.pop scopes) in
+    { inner with 
+        Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_block_post = visit_block_post;
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_mod_type_item_pre = visit_mod_type_item_pre;
+        Walk.visit_mod_type_item_post = visit_mod_type_item_post; }
+;;
+
+
+let decl_stmt_collecting_visitor 
+    (cx:ctxt)
+    (inner:Walk.visitor) 
+    : Walk.visitor = 
+  let block_id = ref None in 
+  let visit_block_pre (b:Ast.block) = 
+    block_id := Some b.id;
+    inner.Walk.visit_block_pre b
+  in
+  let visit_stmt_pre stmt =
+    begin
+      match stmt.node with 
+          Ast.STMT_decl d -> 
+            begin
+              let bid =                 
+                match !block_id with 
+                    None -> err None "STMT_decl in non-block"  
+                  | Some id -> id
+              in
+              let items = Hashtbl.find cx.ctxt_block_items bid in
+              let slots = Hashtbl.find cx.ctxt_block_slots bid in 
+              let check_and_log_ident id ident = 
+                if Hashtbl.mem items ident || 
+                  Hashtbl.mem slots (Ast.KEY_ident ident)
+                then 
+                  err (Some id)
+                    "duplicate declaration '%s' in block" ident
+                else 
+                  log cx "found decl of '%s' in block" ident
+              in
+              let check_and_log_tmp id tmp = 
+                if Hashtbl.mem slots (Ast.KEY_temp tmp)
+                then 
+                  err (Some id)
+                    "duplicate declaration of temp #%d in block" tmp
+                else 
+                  log cx "found decl of temp #%d in block" tmp
+              in
+              let check_and_log_key id key = 
+                match key with 
+                    Ast.KEY_ident i -> check_and_log_ident id i
+                  | Ast.KEY_temp t -> check_and_log_tmp id t 
+              in
+                match d with 
+                    Ast.DECL_mod_item (ident, item) -> 
+                      check_and_log_ident item.id ident;
+                      Hashtbl.add items ident item
+                  | Ast.DECL_slot (key, sid) -> 
+                      check_and_log_key sid.id key;
+                      Hashtbl.add slots key sid
+            end
+        | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre stmt
+  in
+    { inner with 
+        Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_stmt_pre = visit_stmt_pre }
+;;
+
+let resolve_crate 
+    (sess:Session.sess) 
+    (abi:Abi.abi) 
+    (items:Ast.mod_items) 
+    : unit = 
+  let cx = new_ctxt sess abi in 
+  let visitors = 
+    [|
+      (block_scope_forming_visitor cx Walk.empty_visitor);
+      (decl_stmt_collecting_visitor cx Walk.empty_visitor);
+    |]
+  in
+    Array.iteri 
+      (fun i v -> 
+         Walk.walk_mod_items 
+           (pass_logging_visitor cx i v) 
+           items) 
+      visitors
+;;
+            
 
 (*
  **************************************************************************
@@ -28,6 +263,7 @@ let print_ast mod_items = ()
  *************************************************************************
  *)
 
+(*
 
 type ctxt = 
 	{ ctxt_frame_scopes: Ast.frame list;
@@ -53,17 +289,7 @@ let	new_ctxt sess abi =
 	ctxt_abi = abi }
 ;;
 
-let log cx = Session.log "resolve" 
-  cx.ctxt_sess.Session.sess_log_resolve
-  cx.ctxt_sess.Session.sess_log_out
-;;
 
-let err cx str = 
-  (Semant_err (cx.ctxt_id, (str)))
-;;
-
-exception Auto_slot;;
-exception Un_laid_out_frame;;
 
 
 let join_array sep arr = 
@@ -1275,6 +1501,7 @@ let resolve_crate
                   (Session.string_of_span span) str
         end
 ;;
+*)
 
 (* 
  * Local Variables:

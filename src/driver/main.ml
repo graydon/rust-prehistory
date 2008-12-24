@@ -87,8 +87,6 @@ let _ = exit_if_failed ()
 
 let (abi:Abi.abi) = X86.abi;;
 
-let _ = Resolve.print_ast crate_items;;
-
 let _ = Resolve.resolve_crate sess abi crate_items;;
 let _ = exit_if_failed ()
 ;;

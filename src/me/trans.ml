@@ -3,6 +3,7 @@
 open Semant;;
 open Common;;
 
+(* 
 type ctxt = 
     {
       mutable ctxt_emit: Il.emitter;
@@ -602,13 +603,16 @@ and trans_mod_items
     (items:Ast.mod_items)
     : unit = 
   Hashtbl.iter (trans_mod_item cx) items
-
+*)
     
-and trans_crate 
+let trans_crate 
     (sess:Session.sess)
     (abi:Abi.abi)
     (crate:Ast.mod_items) 
     : ((string, (Il.quads * int)) Hashtbl.t * Asm.item list * fixup) = 
+  (Hashtbl.create 0, [], (new_fixup "fixme"))
+;;
+(* 
   try
     let cx = new_ctxt sess abi in 
 	  trans_mod_items cx crate;
@@ -629,6 +633,7 @@ and trans_crate
         end;
         (Hashtbl.create 0, [], new_fixup "entry prog fixup")
 ;;
+*)
 
 (* 
  * Local Variables:
