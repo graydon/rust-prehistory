@@ -94,6 +94,7 @@ and ty =
   | TY_idx of int
 
   | TY_fn of ty_fn
+  | TY_pred of ty_pred
   | TY_chan of ty
   | TY_port of ty
 
@@ -107,13 +108,16 @@ and ty =
   | TY_constrained of (ty * constrs)
   | TY_lim of ty
       
-and slot = 
-    SLOT_exterior of ty
-  | SLOT_interior of ty
-  | SLOT_read_alias of ty
-  | SLOT_write_alias of ty
-  | SLOT_auto
+and mode = 
+    MODE_exterior
+  | MODE_interior
+  | MODE_read_alias
+  | MODE_write_alias
+    
+and slot = { slot_mode: mode;
+             slot_ty: ty option; }
 
+and ty_tup = slot array
 
 (* In closed type terms a constraint may refer to components of the
  * term by anchoring off the "formal symbol" '*', which represents "the
@@ -178,12 +182,9 @@ and ty_iso =
       iso_group: ty_tag array
     }
 
-      
-and ty_tup = slot array
-           
 and ty_sig = 
     { 
-      sig_input_slot: slot;      
+      sig_input_slots: slot array;
       sig_output_slot: slot;
     }
 
@@ -196,10 +197,12 @@ and ty_fn_aux =
 
 and ty_fn = (ty_sig * ty_fn_aux)
 
+and ty_pred = slot array
+
 and ty_prog = 
     {
       prog_mod_ty: mod_type_items;
-      prog_init_ty: ty_sig option;
+      prog_init_ty: (slot array) option;
     }
       
 (* put+ f(a,b) means to call f with current put addr and self as ret
@@ -312,10 +315,7 @@ and expr =
 and lit = 
   | LIT_nil
   | LIT_bool of bool
-  | LIT_unsigned of (int * string)
-  | LIT_signed of (int * string)
-  | LIT_ieee_bfp of (float * string)
-  | LIT_ieee_dfp of ((int * int) * string)
+  | LIT_mach of (ty_mach * string)
   | LIT_int of (Big_int.big_int * string)
   | LIT_char of char
   | LIT_str of string
@@ -334,11 +334,9 @@ and lval_component =
   | COMP_atom of atom
     
 
-and lval' = 
-    LVAL_base of name_base
-  | LVAL_ext of (lval' * lval_component)
-
-and lval = lval' identified
+and lval = 
+    LVAL_base of name_base identified
+  | LVAL_ext of (lval * lval_component)
       
 and binop =    
     BINOP_or
@@ -448,7 +446,7 @@ and mod_item = mod_item' identified
 and mod_type_item' = 
     MOD_TYPE_ITEM_opaque_type of ty_limit decl
   | MOD_TYPE_ITEM_public_type of ty decl
-  | MOD_TYPE_ITEM_pred of ty_sig decl
+  | MOD_TYPE_ITEM_pred of ty_pred decl
   | MOD_TYPE_ITEM_mod of mod_type_items decl
   | MOD_TYPE_ITEM_fn of ty_fn decl
   | MOD_TYPE_ITEM_prog of ty_prog decl

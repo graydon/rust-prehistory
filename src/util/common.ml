@@ -104,6 +104,27 @@ let stk_search (s:'a Stack.t) (f:'a -> 'b option) : 'b option =
 
 
 (* 
+ * Auxiliary array functions.
+ *)
+
+let arr_search (a:'a array) (f:int -> 'a -> 'b option) : 'b option = 
+  let max = Array.length a in
+  let rec iter i = 
+    if i < max 
+    then 
+      let v = a.(i) in 
+      let r = f i v in
+        match r with 
+            Some _ -> r
+          | None -> iter (i+1)
+    else
+      None
+  in
+    iter 0
+;;
+
+
+(* 
  * Local Variables:
  * fill-column: 70; 
  * indent-tabs-mode: nil

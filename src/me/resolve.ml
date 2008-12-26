@@ -84,9 +84,10 @@ and lval_resolved =
  * 
  *)
 
-type slots = (Ast.slot_key,(Ast.slot identified)) Hashtbl.t
-type block_slots_table = (node_id,slots) Hashtbl.t
-type block_items_table = (node_id,Ast.mod_items) Hashtbl.t
+type slots_table = (Ast.slot_key,node_id) Hashtbl.t
+type items_table = (Ast.ident,node_id) Hashtbl.t
+type block_slots_table = (node_id,slots_table) Hashtbl.t
+type block_items_table = (node_id,items_table) Hashtbl.t
 
 type scope = 
     SCOPE_block of node_id
@@ -97,6 +98,9 @@ type ctxt =
 	{ ctxt_sess: Session.sess;
       ctxt_block_slots: block_slots_table;
       ctxt_block_items: block_items_table;
+      ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
+      ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
+      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
 	  ctxt_abi: Abi.abi }
 ;;
 
@@ -104,6 +108,9 @@ let	new_ctxt sess abi =
   { ctxt_sess = sess;
     ctxt_block_slots = Hashtbl.create 0;
     ctxt_block_items = Hashtbl.create 0;
+    ctxt_all_slots = Hashtbl.create 0;
+    ctxt_all_items = Hashtbl.create 0;
+    ctxt_lval_to_referent = Hashtbl.create 0;
 	ctxt_abi = abi }
 ;;
 
@@ -115,13 +122,71 @@ let log cx = Session.log "resolve"
 exception Auto_slot;;
 exception Un_laid_out_frame;;
 
+
+let string_of_key k = 
+  match k with 
+      Ast.KEY_temp i -> "<temp#" ^ (string_of_int i) ^ ">"
+    | Ast.KEY_ident i -> i
+;;
+
+let rec string_of_name_component comp = 
+  match comp with 
+	  Ast.COMP_ident id -> id
+	| Ast.COMP_app (id, tys) -> 
+		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
+	| Ast.COMP_idx i -> 
+		"{" ^ (string_of_int i) ^ "}"
+
+and string_of_name name = 
+  match name with 
+	  Ast.NAME_base (Ast.BASE_ident id) -> id
+	| Ast.NAME_base (Ast.BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
+	| Ast.NAME_base (Ast.BASE_app (id, tys)) -> 
+		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
+	| Ast.NAME_ext (n, c) -> 
+		(string_of_name n) ^ "." ^ (string_of_name_component c)
+
+and string_of_ty ty = 
+  (* FIXME: possibly flesh this out, though it's just diagnostic. *)
+  match ty with 
+      Ast.TY_any -> "any"
+    | Ast.TY_nil -> "nil"
+    | Ast.TY_bool -> "bool"
+    | Ast.TY_mach _ -> "mach"
+    | Ast.TY_int -> "int"
+    | Ast.TY_char -> "char"
+    | Ast.TY_str -> "str"
+
+    | Ast.TY_tup _ -> "tup"
+    | Ast.TY_vec _ -> "vec"
+    | Ast.TY_rec _ -> "rec"
+
+    | Ast.TY_tag _ -> "tag"
+    | Ast.TY_iso _ -> "iso"
+    | Ast.TY_idx _ -> "idx"
+
+    | Ast.TY_fn _ -> "fn"
+    | Ast.TY_pred _ -> "pred"
+    | Ast.TY_chan _ -> "chan"
+    | Ast.TY_port _ -> "port"
+        
+    | Ast.TY_mod _ -> "mod"
+    | Ast.TY_prog _ -> "prog"
+
+    | Ast.TY_opaque _ -> "opaque"
+    | Ast.TY_named name -> "named:" ^ (string_of_name name)
+    | Ast.TY_type -> "ty"
+      
+    | Ast.TY_constrained _ -> "constrained"
+    | Ast.TY_lim _ -> "lim"
+;;
                  
 let pass_logging_visitor 
     (cx:ctxt)
-    (passnum:int) 
+    (pass:int) 
     (inner:Walk.visitor) 
     : Walk.visitor = 
-  let logger = log cx "pass %d: %s" passnum in
+  let logger = log cx "pass %d: %s" pass in
     (Walk.mod_item_logging_visitor logger inner)
 ;;
 
@@ -138,41 +203,6 @@ let block_scope_forming_visitor
     inner.Walk.visit_block_pre b
   in
     { inner with Walk.visit_block_pre = visit_block_pre }
-;;
-
-
-let scope_stack_managing_visitor
-    (scopes:scope Stack.t)
-    (inner:Walk.visitor)
-    : Walk.visitor = 
-  let visit_block_pre b = 
-    Stack.push (SCOPE_block b.id) scopes;
-    inner.Walk.visit_block_pre b
-  in
-  let visit_block_post b = 
-    inner.Walk.visit_block_post b;
-    ignore (Stack.pop scopes)
-  in
-  let visit_mod_item_pre n p i = 
-    Stack.push (SCOPE_mod_item i) scopes;
-    inner.Walk.visit_mod_item_pre n p i
-  in
-  let visit_mod_item_post n p i = 
-    inner.Walk.visit_mod_item_post n p i;
-    ignore (Stack.pop scopes) 
-  in
-  let visit_mod_type_item_pre n p i = 
-    Stack.push (SCOPE_mod_type_item i) scopes;
-    inner.Walk.visit_mod_type_item_pre n p i
-  in
-  let visit_mod_type_item_post _ _ _ = ignore (Stack.pop scopes) in
-    { inner with 
-        Walk.visit_block_pre = visit_block_pre;
-        Walk.visit_block_post = visit_block_post;
-        Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_mod_item_post = visit_mod_item_post;
-        Walk.visit_mod_type_item_pre = visit_mod_type_item_pre;
-        Walk.visit_mod_type_item_post = visit_mod_type_item_post; }
 ;;
 
 
@@ -222,10 +252,10 @@ let decl_stmt_collecting_visitor
                 match d with 
                     Ast.DECL_mod_item (ident, item) -> 
                       check_and_log_ident item.id ident;
-                      Hashtbl.add items ident item
+                      Hashtbl.add items ident item.id
                   | Ast.DECL_slot (key, sid) -> 
                       check_and_log_key sid.id key;
-                      Hashtbl.add slots key sid
+                      Hashtbl.add slots key sid.id
             end
         | _ -> ()
     end;
@@ -236,16 +266,305 @@ let decl_stmt_collecting_visitor
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
+let slot_and_item_collecting_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor) 
+    : Walk.visitor = 
+  let visit_slot_identified_pre slot = 
+    Hashtbl.add cx.ctxt_all_slots slot.id slot.node;
+    log cx "collected slot #%d" slot.id;
+    inner.Walk.visit_slot_identified_pre slot
+  in
+  let visit_mod_item_pre n p i = 
+    Hashtbl.add cx.ctxt_all_items i.id i.node;
+    log cx "collected item #%d" i.id;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+    { inner with 
+        Walk.visit_slot_identified_pre = visit_slot_identified_pre;
+        Walk.visit_mod_item_pre = visit_mod_item_pre }
+;;
+
+let scope_stack_managing_visitor
+    (scopes:scope Stack.t)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+  let visit_block_pre b = 
+    Stack.push (SCOPE_block b.id) scopes;
+    inner.Walk.visit_block_pre b
+  in
+  let visit_block_post b = 
+    inner.Walk.visit_block_post b;
+    ignore (Stack.pop scopes)
+  in
+  let visit_mod_item_pre n p i = 
+    Stack.push (SCOPE_mod_item i) scopes;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+  let visit_mod_item_post n p i = 
+    inner.Walk.visit_mod_item_post n p i;
+    ignore (Stack.pop scopes) 
+  in
+  let visit_mod_type_item_pre n p i = 
+    Stack.push (SCOPE_mod_type_item i) scopes;
+    inner.Walk.visit_mod_type_item_pre n p i
+  in
+  let visit_mod_type_item_post _ _ _ = ignore (Stack.pop scopes) in
+    { inner with 
+        Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_block_post = visit_block_post;
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_mod_type_item_pre = visit_mod_type_item_pre;
+        Walk.visit_mod_type_item_post = visit_mod_type_item_post; }
+;;
+
+
+let lval_base_resolving_visitor 
+    (cx:ctxt)
+    (scopes:scope Stack.t)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+  let lookup_slot_by_ident id ident = 
+    log cx "looking up ident '%s'" ident;
+    let key = Ast.KEY_ident ident in 
+    let check_scope scope = 
+      match scope with 
+          SCOPE_block block_id -> 
+            let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in 
+            let block_items = Hashtbl.find cx.ctxt_block_items block_id in 
+              if Hashtbl.mem block_slots key
+              then Some (Hashtbl.find block_slots key)
+              else 
+                if Hashtbl.mem block_items ident
+                then Some (Hashtbl.find block_items ident)
+                else None
+        | SCOPE_mod_item item -> 
+            begin
+              match item.node with 
+                  Ast.MOD_ITEM_fn f -> 
+                    arr_search 
+                      f.Ast.decl_item.Ast.fn_input_slots
+                      (fun _ (sloti,ident') -> 
+                         if ident = ident' then Some sloti.id else None)
+
+                | Ast.MOD_ITEM_mod m -> 
+                    if Hashtbl.mem m.Ast.decl_item ident
+                    then Some (Hashtbl.find m.Ast.decl_item ident).id
+                    else None
+
+                | Ast.MOD_ITEM_prog p -> 
+                    if Hashtbl.mem p.Ast.decl_item.Ast.prog_mod ident
+                    then Some (Hashtbl.find p.Ast.decl_item.Ast.prog_mod ident).id
+                    else None
+                    
+                | _ -> None
+            end
+        | _ -> None
+            
+    in
+      match stk_search scopes check_scope with 
+          None -> err (Some id) "unresolved identifier '%s'" ident
+        | Some id -> (log cx "resolved to node id #%d" id; id)
+  in
+  let lookup_slot_by_temp id temp =  
+    log cx "looking up temp slot #%d" temp;
+    let key = Ast.KEY_temp temp in 
+    let check_scope scope = 
+      match scope with 
+          SCOPE_block block_id -> 
+            let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in 
+              if Hashtbl.mem block_slots key
+              then Some (Hashtbl.find block_slots key)
+              else None 
+        | _ -> None
+    in
+      match stk_search scopes check_scope with 
+          None -> err (Some id) "unresolved temp node #%d" temp
+        | Some id -> (log cx "resolved to node id #%d" id; id)
+  in
+  let lookup_slot_by_name_base id nb = 
+    match nb with 
+        Ast.BASE_ident ident -> lookup_slot_by_ident id ident
+      | Ast.BASE_temp temp -> lookup_slot_by_temp id temp
+      | Ast.BASE_app _ -> err (Some id) "unhandled name base case BASE_app"
+  in
+
+  let visit_lval_pre lv = 
+    let rec lookup_lval lv = 
+      match lv with 
+          Ast.LVAL_ext (base, _) -> lookup_lval base
+        | Ast.LVAL_base nb ->  
+            let slot_id = lookup_slot_by_name_base nb.id nb.node in 
+              Hashtbl.add cx.ctxt_lval_to_referent nb.id slot_id
+    in
+      lookup_lval lv;
+      inner.Walk.visit_lval_pre lv
+  in
+    { inner with 
+        Walk.visit_lval_pre = visit_lval_pre }
+;;
+
+let auto_inference_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+  let check_ty_eq (t1:Ast.ty) (t2:Ast.ty) : unit = 
+    if not (t1 = t2)
+    then err None "mismatched types: %s vs. %s "
+      (string_of_ty t1) (string_of_ty t2)
+  in
+  let unify_ty (tyo:Ast.ty option) (ty:Ast.ty) : Ast.ty option = 
+    match tyo with 
+        None -> Some ty
+      | Some t -> (check_ty_eq t ty; Some t)
+  in
+  let unify_slot (tyo:Ast.ty option) (id:node_id) (s:Ast.slot) : Ast.ty option = 
+    match (tyo, s.Ast.slot_ty) with 
+        (None, None) -> None
+      | (Some t, None) -> 
+          log cx "setting type of slot #%d to %s" id (string_of_ty t);
+          Hashtbl.replace cx.ctxt_all_slots id { s with Ast.slot_ty = (Some t) };
+          Some t
+      | (tyo, Some t) -> unify_ty tyo t
+  in
+  let unify_lval (tyo:Ast.ty option) (lval:Ast.lval) : Ast.ty option = 
+    match lval with 
+        Ast.LVAL_base nb -> 
+          let referent = Hashtbl.find cx.ctxt_lval_to_referent nb.id in
+            begin
+              match htab_search cx.ctxt_all_slots referent with 
+                  Some s -> unify_slot tyo referent s
+                | None ->
+                    unify_ty tyo 
+                      (ty_of_mod_item 
+                         { node = (Hashtbl.find cx.ctxt_all_items referent);
+                           id = referent })
+            end
+      | _ -> (* FIXME: full-name unification? Oh, that'll be complex... *) None
+  in
+  let unify_lit (tyo:Ast.ty option) (lit:Ast.lit) : Ast.ty option = 
+    match lit with 
+      | Ast.LIT_nil -> unify_ty tyo Ast.TY_nil
+      | Ast.LIT_bool _ -> unify_ty tyo Ast.TY_bool 
+      | Ast.LIT_mach (m, _) -> unify_ty tyo (Ast.TY_mach m)
+      | Ast.LIT_int _ -> unify_ty tyo Ast.TY_int
+      | Ast.LIT_char _ -> unify_ty tyo Ast.TY_char
+      | Ast.LIT_str _ -> unify_ty tyo Ast.TY_str
+      | Ast.LIT_custom _ -> tyo
+  in    
+  let unify_atom (tyo:Ast.ty option) (atom:Ast.atom) : Ast.ty option = 
+    match atom with 
+        Ast.ATOM_literal lit -> unify_lit tyo lit.node
+      | Ast.ATOM_lval lval -> unify_lval tyo lval
+  in    
+  let unify_expr (tyo:Ast.ty option) (expr:Ast.expr) : Ast.ty option = 
+    match expr with 
+        Ast.EXPR_binary (op, a, b) -> 
+          begin
+            match op with 
+                Ast.BINOP_eq | Ast.BINOP_ne
+              | Ast.BINOP_lt | Ast.BINOP_le
+              | Ast.BINOP_gt | Ast.BINOP_ge -> 
+                  begin
+                    ignore (unify_atom (unify_atom None a) b);
+                    ignore (unify_atom (unify_atom None b) a);
+                    unify_ty tyo Ast.TY_bool
+                  end
+              | _ -> 
+                  begin
+                    ignore (unify_atom (unify_atom tyo a) b);
+                    unify_atom (unify_atom tyo b) a
+                  end
+          end
+      | Ast.EXPR_unary (_, atom) -> unify_atom tyo atom
+      | Ast.EXPR_atom atom -> unify_atom tyo atom
+      | _ -> err None "unhandled expression type in expr_ty"
+  in
+  let visit_stmt_pre (s:Ast.stmt) = 
+    begin
+      match s.node with 
+          Ast.STMT_copy (lval,expr) -> 
+            ignore (unify_lval (unify_expr None expr) lval);
+            ignore (unify_expr (unify_lval None lval) expr);
+        | Ast.STMT_call (dst,fn,args) -> 
+            begin
+              match unify_lval None fn with 
+                  None -> ()
+                | Some (Ast.TY_fn (tsig, _)) -> 
+                    begin
+                      ignore (unify_lval tsig.Ast.sig_output_slot.Ast.slot_ty dst);
+                      let islots = tsig.Ast.sig_input_slots in 
+                        if Array.length islots != Array.length args 
+                        then err (Some s.id) "argument count mismatch";
+                        for i = 0 to (Array.length islots) - 1
+                        do
+                          ignore (unify_atom islots.(i).Ast.slot_ty args.(i));
+                        done
+                    end
+                | _ -> err (Some s.id) "STMT_call fn resolved to non-function type"
+            end
+        | Ast.STMT_if i -> 
+            ignore (unify_atom (Some Ast.TY_bool) i.Ast.if_test)
+        | Ast.STMT_while w -> 
+            let (_, atom) = w.Ast.while_lval in 
+              ignore (unify_atom (Some Ast.TY_bool) atom)
+        | _ -> () (* FIXME: plenty more to handle here. *)
+    end;
+    inner.Walk.visit_stmt_pre s
+  in
+    { inner with
+        Walk.visit_stmt_pre = visit_stmt_pre }
+;;
+
+
+let infer_autos (cx:ctxt) (items:Ast.mod_items) : unit = 
+    let auto_queue = Queue.create () in
+    let enqueue_auto_slot id slot = 
+      match slot.Ast.slot_ty with 
+          None -> 
+            log cx "enqueueing auto slot #%d" id; 
+            Queue.add id auto_queue
+        | _ -> ()
+    in
+    let auto_pass = ref 0 in 
+      Hashtbl.iter enqueue_auto_slot cx.ctxt_all_slots;
+      while not (Queue.is_empty auto_queue) do
+        let tmpq = Queue.copy auto_queue in 
+          log cx "auto inference pass %d on %d remaining auto slots" 
+            (!auto_pass)
+            (Queue.length auto_queue);          
+          Queue.clear auto_queue;
+          Walk.walk_mod_items 
+            (Walk.mod_item_logging_visitor 
+               (log cx "auto inference pass %d: %s" (!auto_pass))
+               (auto_inference_visitor cx Walk.empty_visitor)) 
+            items;
+          Queue.iter 
+            (fun id -> enqueue_auto_slot id 
+               (Hashtbl.find cx.ctxt_all_slots id)) 
+            tmpq;
+          incr auto_pass;
+      done
+;;  
+
+
 let resolve_crate 
     (sess:Session.sess) 
     (abi:Abi.abi) 
     (items:Ast.mod_items) 
     : unit = 
   let cx = new_ctxt sess abi in 
+  let (scopes:scope Stack.t) = Stack.create () in 
   let visitors = 
     [|
-      (block_scope_forming_visitor cx Walk.empty_visitor);
-      (decl_stmt_collecting_visitor cx Walk.empty_visitor);
+      (block_scope_forming_visitor cx 
+         (decl_stmt_collecting_visitor cx 
+            (slot_and_item_collecting_visitor cx 
+               Walk.empty_visitor)));
+      (scope_stack_managing_visitor scopes 
+         (lval_base_resolving_visitor cx scopes 
+            Walk.empty_visitor));
     |]
   in
     Array.iteri 
@@ -253,7 +572,9 @@ let resolve_crate
          Walk.walk_mod_items 
            (pass_logging_visitor cx i v) 
            items) 
-      visitors
+      visitors;
+
+    infer_autos cx items;
 ;;
             
 
@@ -852,37 +1173,6 @@ and lookup_type_item cx name =
   in
 	lookup cx basefn extfn name
 
-and type_of_mod_item cx item = 
-  let check_concrete params ty = 
-    if Array.length params = 0 
-    then ty 
-    else raise (err cx "item has parametric type in type_of_mod_item")
-  in
-	match item.node with 
-		Ast.MOD_ITEM_opaque_type td -> 
-          check_concrete td.Ast.decl_params Ast.TY_type
-			  
-	  | Ast.MOD_ITEM_public_type td -> 
-          check_concrete td.Ast.decl_params Ast.TY_type
-			  
-	  | Ast.MOD_ITEM_pred pd -> 
-          check_concrete pd.Ast.decl_params 
-            (Ast.TY_fn { Ast.fn_pure = true;
-                         Ast.fn_lim = Ast.UNLIMITED;
-                         Ast.fn_sig = pd.Ast.decl_item.Ast.pred_ty;
-                         Ast.fn_proto = None })
-			  
-	  | Ast.MOD_ITEM_mod md ->
-          check_concrete md.Ast.decl_params 
-            (Ast.TY_mod (mod_type_of_mod md.Ast.decl_item))
-              
-	  | Ast.MOD_ITEM_fn fd -> 
-          check_concrete fd.Ast.decl_params
-            (Ast.TY_fn fd.Ast.decl_item.Ast.fn_ty)
-            
-	  | Ast.MOD_ITEM_prog pd ->
-          check_concrete pd.Ast.decl_params
-            (Ast.TY_prog (prog_type_of_prog pd.Ast.decl_item))
 
 
 and lookup_type cx name = 
