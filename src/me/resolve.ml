@@ -152,21 +152,21 @@ let decl_stmt_collecting_visitor
     (cx:ctxt)
     (inner:Walk.visitor) 
     : Walk.visitor = 
-  let block_id = ref None in 
-  let visit_block_pre (b:Ast.block) = 
-    block_id := Some b.id;
+  let block_ids = Stack.create () in 
+  let visit_block_pre (b:Ast.block) =
+    Stack.push b.id block_ids;
     inner.Walk.visit_block_pre b
+  in
+  let visit_block_post (b:Ast.block) =
+    ignore (Stack.pop block_ids);
+    inner.Walk.visit_block_post b
   in
   let visit_stmt_pre stmt =
     begin
       match stmt.node with 
           Ast.STMT_decl d -> 
             begin
-              let bid =                 
-                match !block_id with 
-                    None -> err None "STMT_decl in non-block"  
-                  | Some id -> id
-              in
+              let bid = Stack.top block_ids in
               let items = Hashtbl.find cx.ctxt_block_items bid in
               let slots = Hashtbl.find cx.ctxt_block_slots bid in 
               let check_and_log_ident id ident = 
@@ -205,6 +205,7 @@ let decl_stmt_collecting_visitor
   in
     { inner with 
         Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_block_post = visit_block_post;
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
