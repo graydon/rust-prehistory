@@ -83,6 +83,17 @@ let htab_search (htab:('a,'b) Hashtbl.t) (k:'a) : ('b option) =
   if Hashtbl.mem htab k
   then Some (Hashtbl.find htab k)
   else None
+;;
+
+let htab_map (htab:('a,'b) Hashtbl.t) (f:'a -> 'b -> ('c * 'd)) : (('c,'d) Hashtbl.t) = 
+  let ntab = Hashtbl.create (Hashtbl.length htab) in 
+  let g a b = 
+    let (c,d) = f a b in 
+      Hashtbl.add ntab c d
+  in
+    Hashtbl.iter g htab;
+    ntab
+;;
 
 (* 
  * Auxiliary stack functions.

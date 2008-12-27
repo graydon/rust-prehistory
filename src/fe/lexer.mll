@@ -86,8 +86,6 @@ rule token = parse
 | '\n'                         { lexbuf.Lexing.lex_curr_p 
                                      <- (bump_line lexbuf.Lexing.lex_curr_p);
                                  token lexbuf }
-
-(* FIXME: we actually want to preserve comments some day. *)
 | "//" [^'\n']*                { token lexbuf }
 
 | '+'                          { PLUS       }

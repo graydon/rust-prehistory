@@ -459,6 +459,68 @@ and mod_items = (ident, mod_item) Hashtbl.t
 ;;
 
 
+(* Stringification *)
+
+
+let string_of_key k = 
+  match k with 
+      KEY_temp i -> "<temp#" ^ (string_of_int i) ^ ">"
+    | KEY_ident i -> i
+;;
+
+let rec string_of_name_component comp = 
+  match comp with 
+	  COMP_ident id -> id
+	| COMP_app (id, tys) -> 
+		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
+	| COMP_idx i -> 
+		"{" ^ (string_of_int i) ^ "}"
+
+and string_of_name name = 
+  match name with 
+	  NAME_base (BASE_ident id) -> id
+	| NAME_base (BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
+	| NAME_base (BASE_app (id, tys)) -> 
+		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
+	| NAME_ext (n, c) -> 
+		(string_of_name n) ^ "." ^ (string_of_name_component c)
+
+and string_of_ty ty = 
+  (* FIXME: flesh this out; it's currently only diagnostic. *)
+  match ty with 
+      TY_any -> "any"
+    | TY_nil -> "()"
+    | TY_bool -> "bool"
+    | TY_mach _ -> "mach"
+    | TY_int -> "int"
+    | TY_char -> "char"
+    | TY_str -> "str"
+
+    | TY_tup _ -> "tup"
+    | TY_vec _ -> "vec"
+    | TY_rec _ -> "rec"
+
+    | TY_tag _ -> "tag"
+    | TY_iso _ -> "iso"
+    | TY_idx _ -> "idx"
+
+    | TY_fn _ -> "fn"
+    | TY_pred _ -> "pred"
+    | TY_chan _ -> "chan"
+    | TY_port _ -> "port"
+        
+    | TY_mod _ -> "mod"
+    | TY_prog _ -> "prog"
+
+    | TY_opaque _ -> "opaque"
+    | TY_named name -> "<named:" ^ (string_of_name name) ^ ">"
+    | TY_type -> "ty"
+      
+    | TY_constrained _ -> "constrained"
+    | TY_lim _ -> "lim"
+;;
+
+
 (* 
  * Local Variables:
  * fill-column: 70; 

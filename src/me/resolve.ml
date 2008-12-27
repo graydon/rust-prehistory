@@ -122,64 +122,6 @@ let log cx = Session.log "resolve"
 exception Auto_slot;;
 exception Un_laid_out_frame;;
 
-
-let string_of_key k = 
-  match k with 
-      Ast.KEY_temp i -> "<temp#" ^ (string_of_int i) ^ ">"
-    | Ast.KEY_ident i -> i
-;;
-
-let rec string_of_name_component comp = 
-  match comp with 
-	  Ast.COMP_ident id -> id
-	| Ast.COMP_app (id, tys) -> 
-		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
-	| Ast.COMP_idx i -> 
-		"{" ^ (string_of_int i) ^ "}"
-
-and string_of_name name = 
-  match name with 
-	  Ast.NAME_base (Ast.BASE_ident id) -> id
-	| Ast.NAME_base (Ast.BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
-	| Ast.NAME_base (Ast.BASE_app (id, tys)) -> 
-		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
-	| Ast.NAME_ext (n, c) -> 
-		(string_of_name n) ^ "." ^ (string_of_name_component c)
-
-and string_of_ty ty = 
-  (* FIXME: possibly flesh this out, though it's just diagnostic. *)
-  match ty with 
-      Ast.TY_any -> "any"
-    | Ast.TY_nil -> "nil"
-    | Ast.TY_bool -> "bool"
-    | Ast.TY_mach _ -> "mach"
-    | Ast.TY_int -> "int"
-    | Ast.TY_char -> "char"
-    | Ast.TY_str -> "str"
-
-    | Ast.TY_tup _ -> "tup"
-    | Ast.TY_vec _ -> "vec"
-    | Ast.TY_rec _ -> "rec"
-
-    | Ast.TY_tag _ -> "tag"
-    | Ast.TY_iso _ -> "iso"
-    | Ast.TY_idx _ -> "idx"
-
-    | Ast.TY_fn _ -> "fn"
-    | Ast.TY_pred _ -> "pred"
-    | Ast.TY_chan _ -> "chan"
-    | Ast.TY_port _ -> "port"
-        
-    | Ast.TY_mod _ -> "mod"
-    | Ast.TY_prog _ -> "prog"
-
-    | Ast.TY_opaque _ -> "opaque"
-    | Ast.TY_named name -> "named:" ^ (string_of_name name)
-    | Ast.TY_type -> "ty"
-      
-    | Ast.TY_constrained _ -> "constrained"
-    | Ast.TY_lim _ -> "lim"
-;;
                  
 let pass_logging_visitor 
     (cx:ctxt)
@@ -266,24 +208,6 @@ let decl_stmt_collecting_visitor
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
-let slot_and_item_collecting_visitor
-    (cx:ctxt)
-    (inner:Walk.visitor) 
-    : Walk.visitor = 
-  let visit_slot_identified_pre slot = 
-    Hashtbl.add cx.ctxt_all_slots slot.id slot.node;
-    log cx "collected slot #%d" slot.id;
-    inner.Walk.visit_slot_identified_pre slot
-  in
-  let visit_mod_item_pre n p i = 
-    Hashtbl.add cx.ctxt_all_items i.id i.node;
-    log cx "collected item #%d" i.id;
-    inner.Walk.visit_mod_item_pre n p i
-  in
-    { inner with 
-        Walk.visit_slot_identified_pre = visit_slot_identified_pre;
-        Walk.visit_mod_item_pre = visit_mod_item_pre }
-;;
 
 let scope_stack_managing_visitor
     (scopes:scope Stack.t)
@@ -320,13 +244,137 @@ let scope_stack_managing_visitor
 ;;
 
 
+let all_item_collecting_visitor 
+    (cx:ctxt)
+    (inner:Walk.visitor) 
+    : Walk.visitor = 
+  let visit_mod_item_pre n p i = 
+    Hashtbl.add cx.ctxt_all_items i.id i.node;
+    log cx "collected item #%d" i.id;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+    { inner with 
+        Walk.visit_mod_item_pre = visit_mod_item_pre }
+;;
+  
+    
+let slot_resolving_visitor
+    (cx:ctxt)
+    (scopes:scope Stack.t)
+    (inner:Walk.visitor) 
+    : Walk.visitor = 
+  
+  let resolve_slot_identified (s:Ast.slot identified) : (Ast.slot identified) =
+    let lookup_type_by_ident ident = 
+      let check_item (i:Ast.mod_item') : Ast.ty = 
+        match i with 
+            (Ast.MOD_ITEM_opaque_type td) -> td.Ast.decl_item
+          | (Ast.MOD_ITEM_public_type td) -> td.Ast.decl_item
+          | _ -> err (Some s.id) "identifier '%s' resolves to non-type" ident
+      in
+      let check_item_option (iopt:Ast.mod_item option) : Ast.ty option = 
+        match iopt with 
+            Some i -> Some (check_item i.node)
+          | _ -> None
+      in
+      let check_scope (scope:scope) : Ast.ty option = 
+        match scope with 
+            SCOPE_block block_id -> 
+              let block_items = Hashtbl.find cx.ctxt_block_items block_id in 
+              if Hashtbl.mem block_items ident 
+              then
+                Some (check_item
+                        (Hashtbl.find cx.ctxt_all_items 
+                           (Hashtbl.find block_items ident)))
+              else None
+                
+          | SCOPE_mod_item item -> 
+              begin
+                match item.node with 
+                  | Ast.MOD_ITEM_mod m -> 
+                      check_item_option (htab_search m.Ast.decl_item ident)
+                  | _ -> None
+              end
+                (* FIXME: handle looking up types inside mod type scopes. *)
+          | _ -> None            
+      in
+        log cx "looking up type with ident '%s'" ident;
+        match stk_search scopes check_scope with 
+            None -> err (Some s.id) "unresolved identifier '%s'" ident
+          | Some t -> (log cx "resolved to type %s" (Ast.string_of_ty t); t)
+    in
+      
+    let rec resolve_slot (slot:Ast.slot) : Ast.slot = 
+      { slot with 
+          Ast.slot_ty = (match slot.Ast.slot_ty with 
+                             None -> None
+                           | Some t -> Some (resolve_ty t)) }
+        
+    and resolve_ty (t:Ast.ty) : Ast.ty = 
+      match t with 
+          Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_mach _ 
+        | Ast.TY_int | Ast.TY_char | Ast.TY_str | Ast.TY_type  
+        | Ast.TY_idx _ | Ast.TY_opaque _ -> t
+            
+        | Ast.TY_tup tys -> Ast.TY_tup (Array.map resolve_slot tys)
+        | Ast.TY_rec trec -> Ast.TY_rec (htab_map trec (fun n s -> (n, resolve_slot s)))
+            
+        | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i s -> (i, resolve_ty t)))
+        | Ast.TY_iso tiso -> 
+            Ast.TY_iso 
+              { tiso with 
+                  Ast.iso_group = 
+                  Array.map (fun ttag -> htab_map ttag 
+                               (fun i s -> (i, resolve_ty t)))
+                    tiso.Ast.iso_group }
+              
+        | Ast.TY_vec ty -> Ast.TY_vec (resolve_ty ty)
+        | Ast.TY_chan ty -> Ast.TY_chan (resolve_ty ty)
+        | Ast.TY_port ty -> Ast.TY_port (resolve_ty ty)
+        | Ast.TY_lim ty -> Ast.TY_lim (resolve_ty ty)
+            
+        | Ast.TY_constrained (ty, constrs) -> 
+            Ast.TY_constrained ((resolve_ty ty),constrs)
+              
+        | Ast.TY_fn (tsig,taux) -> 
+            Ast.TY_fn 
+              ({ Ast.sig_input_slots = Array.map resolve_slot tsig.Ast.sig_input_slots;
+                 Ast.sig_output_slot = resolve_slot tsig.Ast.sig_output_slot }, taux)
+              
+        | Ast.TY_pred slots -> Ast.TY_pred (Array.map resolve_slot slots)
+            
+        | Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident)) -> 
+            resolve_ty (lookup_type_by_ident ident)
+              
+        | Ast.TY_named _ -> err (Some s.id) "unhandled form of type name"          
+        | Ast.TY_prog tprog -> err (Some s.id) "unhandled resolution of prog types"        
+        | Ast.TY_mod tmod -> err (Some s.id) "unhandled resolution of mod types"
+            
+    in
+      { s with node = resolve_slot s.node }
+  in                      
+    
+  let visit_slot_identified_pre slot = 
+    let slot = resolve_slot_identified slot in
+      Hashtbl.add cx.ctxt_all_slots slot.id slot.node;
+      log cx "collected resolved slot #%d with type %s" slot.id 
+        (match slot.node.Ast.slot_ty with 
+             None -> "??"
+           | Some t -> (Ast.string_of_ty t));
+      inner.Walk.visit_slot_identified_pre slot
+  in
+    { inner with 
+        Walk.visit_slot_identified_pre = visit_slot_identified_pre }
+;;
+
+
 let lval_base_resolving_visitor 
     (cx:ctxt)
     (scopes:scope Stack.t)
     (inner:Walk.visitor)
     : Walk.visitor = 
   let lookup_slot_by_ident id ident = 
-    log cx "looking up ident '%s'" ident;
+    log cx "looking up slot or item with ident '%s'" ident;
     let key = Ast.KEY_ident ident in 
     let check_scope scope = 
       match scope with 
@@ -412,7 +460,7 @@ let auto_inference_visitor
   let check_ty_eq (t1:Ast.ty) (t2:Ast.ty) : unit = 
     if not (t1 = t2)
     then err None "mismatched types: %s vs. %s "
-      (string_of_ty t1) (string_of_ty t2)
+      (Ast.string_of_ty t1) (Ast.string_of_ty t2)
   in
   let unify_ty (tyo:Ast.ty option) (ty:Ast.ty) : Ast.ty option = 
     match tyo with 
@@ -423,7 +471,7 @@ let auto_inference_visitor
     match (tyo, s.Ast.slot_ty) with 
         (None, None) -> None
       | (Some t, None) -> 
-          log cx "setting type of slot #%d to %s" id (string_of_ty t);
+          log cx "setting type of slot #%d to %s" id (Ast.string_of_ty t);
           Hashtbl.replace cx.ctxt_all_slots id { s with Ast.slot_ty = (Some t) };
           Some t
       | (tyo, Some t) -> unify_ty tyo t
@@ -560,11 +608,12 @@ let resolve_crate
     [|
       (block_scope_forming_visitor cx 
          (decl_stmt_collecting_visitor cx 
-            (slot_and_item_collecting_visitor cx 
+            (all_item_collecting_visitor cx
                Walk.empty_visitor)));
       (scope_stack_managing_visitor scopes 
-         (lval_base_resolving_visitor cx scopes 
-            Walk.empty_visitor));
+         (slot_resolving_visitor cx scopes 
+            (lval_base_resolving_visitor cx scopes             
+               Walk.empty_visitor)));
     |]
   in
     Array.iteri 
