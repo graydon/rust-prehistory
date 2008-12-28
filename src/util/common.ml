@@ -54,13 +54,6 @@ type layout =
     }
 ;;
 
-
-let new_layout _ = 
-  { layout_size = 0L; 
-    layout_offset = 0L;
-    layout_align = 0L }
-;;
-
 (* 
  * Auxiliary hashtable functions.
  *)
