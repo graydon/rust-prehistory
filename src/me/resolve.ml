@@ -101,6 +101,10 @@ type ctxt =
       ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
       ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
+      ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
+      ctxt_slot_vregs: (node_id,(int ref)) Hashtbl.t;
+      ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
+      ctxt_frame_layouts: (node_id,layout) Hashtbl.t;
 	  ctxt_abi: Abi.abi }
 ;;
 
@@ -111,6 +115,10 @@ let	new_ctxt sess abi =
     ctxt_all_slots = Hashtbl.create 0;
     ctxt_all_items = Hashtbl.create 0;
     ctxt_lval_to_referent = Hashtbl.create 0;
+    ctxt_slot_aliased = Hashtbl.create 0;
+    ctxt_slot_vregs = Hashtbl.create 0;
+    ctxt_slot_layouts = Hashtbl.create 0;
+    ctxt_frame_layouts = Hashtbl.create 0;
 	ctxt_abi = abi }
 ;;
 
@@ -119,10 +127,7 @@ let log cx = Session.log "resolve"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-exception Auto_slot;;
-exception Un_laid_out_frame;;
 
-                 
 let pass_logging_visitor 
     (cx:ctxt)
     (pass:int) 
@@ -158,8 +163,8 @@ let decl_stmt_collecting_visitor
     inner.Walk.visit_block_pre b
   in
   let visit_block_post (b:Ast.block) =
-    ignore (Stack.pop block_ids);
-    inner.Walk.visit_block_post b
+    inner.Walk.visit_block_post b;
+    ignore (Stack.pop block_ids)
   in
   let visit_stmt_pre stmt =
     begin
@@ -234,7 +239,10 @@ let scope_stack_managing_visitor
     Stack.push (SCOPE_mod_type_item i) scopes;
     inner.Walk.visit_mod_type_item_pre n p i
   in
-  let visit_mod_type_item_post _ _ _ = ignore (Stack.pop scopes) in
+  let visit_mod_type_item_post n p i = 
+    inner.Walk.visit_mod_type_item_post n p i;
+    ignore (Stack.pop scopes) 
+  in
     { inner with 
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post;
@@ -354,7 +362,7 @@ let slot_resolving_visitor
     in
       { s with node = resolve_slot s.node }
   in                      
-    
+
   let visit_slot_identified_pre slot = 
     let slot = resolve_slot_identified slot in
       Hashtbl.add cx.ctxt_all_slots slot.id slot.node;
@@ -454,8 +462,10 @@ let lval_base_resolving_visitor
         Walk.visit_lval_pre = visit_lval_pre }
 ;;
 
+
 let auto_inference_visitor
     (cx:ctxt)
+    (progress:bool ref)
     (inner:Walk.visitor)
     : Walk.visitor = 
   let check_ty_eq (t1:Ast.ty) (t2:Ast.ty) : unit = 
@@ -474,6 +484,7 @@ let auto_inference_visitor
       | (Some t, None) -> 
           log cx "setting type of slot #%d to %s" id (Ast.string_of_ty t);
           Hashtbl.replace cx.ctxt_all_slots id { s with Ast.slot_ty = (Some t) };
+          progress := true;
           Some t
       | (tyo, Some t) -> unify_ty tyo t
   in
@@ -576,18 +587,22 @@ let infer_autos (cx:ctxt) (items:Ast.mod_items) : unit =
             Queue.add id auto_queue
         | _ -> ()
     in
+    let progress = ref true in 
     let auto_pass = ref 0 in 
       Hashtbl.iter enqueue_auto_slot cx.ctxt_all_slots;
       while not (Queue.is_empty auto_queue) do
+        if not (!progress) 
+        then err None "auto inference pass wedged";
         let tmpq = Queue.copy auto_queue in 
           log cx "auto inference pass %d on %d remaining auto slots" 
             (!auto_pass)
-            (Queue.length auto_queue);          
+            (Queue.length auto_queue);    
           Queue.clear auto_queue;
+          progress := false;
           Walk.walk_mod_items 
             (Walk.mod_item_logging_visitor 
                (log cx "auto inference pass %d: %s" (!auto_pass))
-               (auto_inference_visitor cx Walk.empty_visitor)) 
+               (auto_inference_visitor cx progress Walk.empty_visitor)) 
             items;
           Queue.iter 
             (fun id -> enqueue_auto_slot id 
@@ -596,6 +611,157 @@ let infer_autos (cx:ctxt) (items:Ast.mod_items) : unit =
           incr auto_pass;
       done
 ;;  
+
+
+let alias_analysis_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+  let alias lval = 
+    match lval with 
+        Ast.LVAL_base nb -> 
+          let referent = Hashtbl.find cx.ctxt_lval_to_referent nb.id in
+            if Hashtbl.mem cx.ctxt_all_slots referent
+            then 
+              begin
+                log cx "noting slot #%d as aliased" referent;
+                Hashtbl.replace cx.ctxt_slot_aliased referent ()
+              end
+      | _ -> err None "unhandled form of lval in alias analysis"
+  in
+  let visit_stmt_pre s =    
+    begin
+      match s.node with 
+          (* 
+           * FIXME: must expand this analysis to cover alias-forming arg slots, when 
+           * they are supported. 
+           *)
+          Ast.STMT_call (dst, _, _) -> alias dst
+        | _ -> () (* FIXME: plenty more to handle here. *)
+    end;
+    inner.Walk.visit_stmt_pre s
+  in
+    { inner with Walk.visit_stmt_pre = visit_stmt_pre }
+;;
+
+let layout_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+  (* 
+   *   - Frames look, broadly, like this (growing downward):
+   * 
+   *     +----------------------------+ <-- Rewind tail calls to here. If varargs are supported,
+   *     |caller args                 |     must use memmove or similar "overlap-permitting" move,
+   *     |...                         |     if supporting tail-calling. 
+   *     |...                         |
+   *     +----------------------------+ <-- fp + abi_frame_base_sz + abi_implicit_args_sz
+   *     |caller non-reg ABI operands |
+   *     |possibly empty, if fastcall |
+   *     |  - process pointer?        |
+   *     |  - runtime pointer?        |
+   *     |  - yield pc or delta?      |
+   *     |  - yield slot addr?        |
+   *     |  - ret slot addr?          |
+   *     +----------------------------+ <-- fp + abi_frame_base_sz
+   *     |return pc pushed by machine |
+   *     |plus any callee-save stuff  |
+   *     +----------------------------+ <-- fp
+   *     |frame-allocated stuff       |
+   *     |determined in resolve       |
+   *     |...                         |
+   *     |...                         |
+   *     |...                         |
+   *     +----------------------------+ <-- fp - framesz
+   *     |spills determined in ra     |
+   *     |...                         |
+   *     |...                         |
+   *     +----------------------------+ <-- fp - (framesz + spillsz)
+   * 
+   *   - Divide slots into two classes:
+   * 
+   *     #1 Those that are never aliased and fit in a word, so are
+   *        vreg-allocated
+   * 
+   *     #2 All others
+   * 
+   *   - Lay out the frame in post-order, given what we now know wrt
+   *     the slot types and aliasing:
+   * 
+   *     - Non-aliased, word-fitting slots consume no frame space
+   *       *yet*; they are given a generic value that indicates "try a
+   *       vreg". The register allocator may spill them later, if it
+   *       needs to, but that's not our concern.
+   * 
+   *     - Aliased / too-big slots are frame-allocated, need to be
+   *       laid out in the frame at fixed offsets, so need to be
+   *       assigned Common.layout values.  (Is this true of aliased
+   *       word-fitting? Can we not runtime-calculate the position of
+   *       a spill slot? Meh.)
+   * 
+   *   - The frame size is the maximum of all the block sizes contained
+   *     within it. 
+   * 
+   *)
+
+  let layout_slot_ids (offset:int64) (slots:node_id array) : layout = 
+    let layout_slot_id id = 
+      if Hashtbl.mem cx.ctxt_slot_layouts id
+      then Hashtbl.find cx.ctxt_slot_layouts id
+      else 
+        let slot = Hashtbl.find cx.ctxt_all_slots id in
+        let layout = layout_slot cx.ctxt_abi 0L slot in 
+          log cx "laid out slot #%d: sz=%Ld, off=%Ld, align=%Ld" 
+            id layout.layout_size layout.layout_offset layout.layout_align;
+          Hashtbl.add cx.ctxt_slot_layouts id layout;
+          layout
+    in
+    let layouts = Array.map layout_slot_id slots in
+      pack offset layouts
+  in
+    
+  let layout_fn (fn:Ast.fn) : layout = 
+    let offset = 
+      Int64.add 
+        cx.ctxt_abi.Abi.abi_frame_base_sz 
+        cx.ctxt_abi.Abi.abi_implicit_args_sz 
+    in
+      layout_slot_ids offset (Array.map (fun (sid,_) -> sid.id) fn.Ast.fn_input_slots)
+  in
+  let layout_prog (prog:Ast.prog) : layout = 
+    { layout_offset = 0L;
+      layout_size = 0L;
+      layout_align = 0L }
+  in
+  let frame_layouts = Stack.create () in 
+  let visit_mod_item_pre n p i = 
+    begin
+      match i.node with 
+          Ast.MOD_ITEM_fn fd ->
+            let layout = layout_fn fd.Ast.decl_item in
+              Stack.push layout frame_layouts
+        | Ast.MOD_ITEM_prog pd ->
+            let layout = layout_prog pd.Ast.decl_item in
+              Stack.push layout frame_layouts
+        | _ -> ()
+    end;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+  let visit_mod_item_post n p i = 
+    inner.Walk.visit_mod_item_post n p i;
+    begin
+      match i.node with 
+          Ast.MOD_ITEM_fn fd ->
+            ignore (Stack.pop frame_layouts)
+        | Ast.MOD_ITEM_prog pd ->
+            ignore (Stack.pop frame_layouts)
+        | _ -> ()
+    end;
+  in
+    { inner with 
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post }    
+;;
 
 
 let resolve_crate 
@@ -615,6 +781,8 @@ let resolve_crate
          (slot_resolving_visitor cx scopes 
             (lval_base_resolving_visitor cx scopes             
                Walk.empty_visitor)));
+      (alias_analysis_visitor cx
+         Walk.empty_visitor);
     |]
   in
     Array.iteri 
@@ -625,6 +793,20 @@ let resolve_crate
       visitors;
 
     infer_autos cx items;
+
+    let visitors' = 
+      [|
+      (layout_visitor cx
+         Walk.empty_visitor)
+      |]
+    in
+      Array.iteri 
+        (fun i v -> 
+           Walk.walk_mod_items 
+             (pass_logging_visitor cx (i+(Array.length visitors)) v) 
+             items) 
+        visitors';
+
 ;;
             
 
@@ -866,56 +1048,6 @@ and apply_ctxt_ty cx params args id =
 	(fun x -> Ast.MOD_TYPE_ITEM_public_type x)
 	params args id
 
-(* 
- * Our lookup system integrates notions of the layout of frames, but is presently
- * not quite correct. What we want to do is:
- * 
- *   - Frames look, broadly, like this (growing downward):
- * 
- *     +----------------------------+ <-- Rewind tail calls to here. If varargs are supported,
- *     |caller args                 |     must use memmove or similar "overlap-permitting" move,
- *     |...                         |     if supporting tail-calling. 
- *     |...                         |
- *     +----------------------------+ <-- fp + abi_frame_base_sz + abi_implicit_args_sz
- *     |caller non-reg ABI operands |
- *     |possibly empty, if fastcall |
- *     |  - process pointer?        |
- *     |  - runtime pointer?        |
- *     |  - yield pc or delta?      |
- *     |  - yield slot addr?        |
- *     |  - ret slot addr?          |
- *     +----------------------------+ <-- fp + abi_frame_base_sz
- *     |return pc pushed by machine |
- *     |plus any callee-save stuff  |
- *     +----------------------------+ <-- fp
- *     |frame-allocated stuff       |
- *     |determined in resolve       |
- *     |...                         |
- *     |...                         |
- *     |...                         |
- *     +----------------------------+ <-- fp - framesz
- *     |spills determined in ra     |
- *     |...                         |
- *     |...                         |
- *     +----------------------------+ <-- fp - (framesz + spillsz)
- * 
- *   - Divide slots into two classes:
- *     - Those that are never aliased and fit in a word, so are vreg-allocated
- *     - All others
- * 
- *   - Look up entries in the frame *before* layout, type-resolve, and mark as 
- *     aliased when we encounter an aliasing statement.
- * 
- *   - Lay out the frame *on exit* of the resolve pass, given what we now know
- *     wrt the slot types and aliasing:
- *     - Non-aliased, word-fitting slots consume no frame space *yet*; they are
- *       given a generic value that indicates "try a vreg". The register allocator
- *       may spill them later, if it needs to, but that's not our concern.
- *     - Aliased / too-big slots are frame-allocated, need to be laid out in the
- *       frame at fixed offsets, so need to be assigned Common.layout values. 
- *       (Is this true of aliased word-fitting? Can we not runtime-calculate the 
- *       position of a spill slot? Meh.)
- *)
 
 and should_use_vreg (cx:ctxt) (local:Ast.local) : bool = 
   let slotr = local.Ast.local_slot in 

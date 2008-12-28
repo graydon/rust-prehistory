@@ -51,7 +51,6 @@ type layout =
       mutable layout_size: int64;
       mutable layout_offset: int64;
       mutable layout_align: int64; 
-      mutable layout_done: bool; 
     }
 ;;
 
@@ -59,8 +58,7 @@ type layout =
 let new_layout _ = 
   { layout_size = 0L; 
     layout_offset = 0L;
-    layout_align = 0L;
-    layout_done = false}
+    layout_align = 0L }
 ;;
 
 (* 

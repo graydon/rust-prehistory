@@ -122,6 +122,75 @@ and ty_of_mod_item (item:Ast.mod_item) : Ast.ty =
             (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
 
 
+
+(* Layout calculations. *)
+
+let new_layout (off:int64) (sz:int64) (align:int64) : layout = 
+  { layout_offset = off;
+    layout_size = sz;     
+    layout_align = align }
+;;
+
+let align_to (align:int64) (v:int64) : int64 = 
+  if align = 0L || align = 1L
+  then v 
+  else
+    let padding = Int64.sub align (Int64.rem v align) in 
+      Int64.add v padding
+;;
+
+let pack (offset:int64) (layouts:layout array) : layout = 
+  let pack_one (off,align) curr =
+    curr.layout_offset <- 
+      align_to curr.layout_align 
+      (Int64.add off curr.layout_size);
+    ((Int64.add 
+        curr.layout_offset 
+        curr.layout_size),
+     (if (Int64.compare 
+            align curr.layout_align) > 0
+      then align else curr.layout_align))
+  in
+  let (final,align) = Array.fold_left pack_one (0L,0L) layouts in 
+  let sz = Int64.sub final offset in 
+    new_layout offset sz align
+;;
+
+let ty_mach_size (m:Ast.ty_mach) : int64 = 
+  match m with 
+      Ast.TY_u8 -> 1L
+    | Ast.TY_u16 -> 2L
+    | Ast.TY_u32 -> 4L
+    | Ast.TY_u64 -> 8L
+    | Ast.TY_s8 -> 1L
+    | Ast.TY_s16 -> 2L
+    | Ast.TY_s32 -> 4L
+    | Ast.TY_s64 -> 8L
+    | Ast.TY_b64 -> 8L
+;;
+
+let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout = 
+  match t with
+	  Ast.TY_nil -> new_layout off 0L 0L
+	| Ast.TY_bool -> new_layout off 1L 1L
+	| Ast.TY_mach m -> 
+        let sz = ty_mach_size m in 
+          new_layout off sz sz        
+	| Ast.TY_char -> new_layout off 4L 4L
+	| Ast.TY_tup slots -> 
+        let layouts = Array.map (layout_slot abi 0L) slots in
+          pack off layouts
+	| _ -> 
+        new_layout off abi.Abi.abi_ptr_sz abi.Abi.abi_ptr_sz
+
+and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout = 
+  match s.Ast.slot_ty with
+      None -> raise (Semant_err (None, "layout_slot on untyped slot"))
+    | Some t -> layout_ty abi off t
+
+  
+
+
 (* 
  * Local Variables:
  * fill-column: 70; 
