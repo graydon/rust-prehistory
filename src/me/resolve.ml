@@ -704,6 +704,10 @@ let layout_visitor
    * 
    *)
 
+  let string_of_layout (ly:layout) : string = 
+    Printf.sprintf "sz=%Ld, off=%Ld, align=%Ld" 
+      ly.layout_size ly.layout_offset ly.layout_align
+  in
   let layout_slot_ids (offset:int64) (slots:node_id array) : layout = 
     let layout_slot_id id = 
       if Hashtbl.mem cx.ctxt_slot_layouts id
@@ -711,24 +715,29 @@ let layout_visitor
       else 
         let slot = Hashtbl.find cx.ctxt_all_slots id in
         let layout = layout_slot cx.ctxt_abi 0L slot in 
-          log cx "laid out slot #%d: sz=%Ld, off=%Ld, align=%Ld" 
-            id layout.layout_size layout.layout_offset layout.layout_align;
+          log cx "forming layout for slot #%d: %s" id (string_of_layout layout);
           Hashtbl.add cx.ctxt_slot_layouts id layout;
           layout
     in
     let layouts = Array.map layout_slot_id slots in
-      pack offset layouts
+    let group_layout = pack offset layouts in
+      for i = 0 to (Array.length layouts) - 1 do
+        log cx "packed slot #%d layout to: %s" slots.(i) (string_of_layout layouts.(i))
+      done;
+      group_layout
   in
     
-  let layout_fn (fn:Ast.fn) : layout = 
+  let layout_fn (id:node_id) (fn:Ast.fn) : layout = 
     let offset = 
       Int64.add 
         cx.ctxt_abi.Abi.abi_frame_base_sz 
         cx.ctxt_abi.Abi.abi_implicit_args_sz 
     in
-      layout_slot_ids offset (Array.map (fun (sid,_) -> sid.id) fn.Ast.fn_input_slots)
+    let layout = layout_slot_ids offset (Array.map (fun (sid,_) -> sid.id) fn.Ast.fn_input_slots) in
+      log cx "fn #%d total layout: %s" id (string_of_layout layout);
+      layout
   in
-  let layout_prog (prog:Ast.prog) : layout = 
+  let layout_prog (id:node_id) (prog:Ast.prog) : layout = 
     { layout_offset = 0L;
       layout_size = 0L;
       layout_align = 0L }
@@ -738,10 +747,10 @@ let layout_visitor
     begin
       match i.node with 
           Ast.MOD_ITEM_fn fd ->
-            let layout = layout_fn fd.Ast.decl_item in
+            let layout = layout_fn i.id fd.Ast.decl_item in
               Stack.push layout frame_layouts
         | Ast.MOD_ITEM_prog pd ->
-            let layout = layout_prog pd.Ast.decl_item in
+            let layout = layout_prog i.id pd.Ast.decl_item in
               Stack.push layout frame_layouts
         | _ -> ()
     end;
@@ -771,42 +780,36 @@ let resolve_crate
     : unit = 
   let cx = new_ctxt sess abi in 
   let (scopes:scope Stack.t) = Stack.create () in 
+  let passnum = ref 0 in
+  let run_pass p = 
+    Walk.walk_mod_items 
+      (pass_logging_visitor cx (!passnum) p) 
+      items;
+    incr passnum
+  in
   let visitors = 
     [|
-      (block_scope_forming_visitor cx 
-         (decl_stmt_collecting_visitor cx 
-            (all_item_collecting_visitor cx
-               Walk.empty_visitor)));
-      (scope_stack_managing_visitor scopes 
-         (slot_resolving_visitor cx scopes 
-            (lval_base_resolving_visitor cx scopes             
-               Walk.empty_visitor)));
-      (alias_analysis_visitor cx
+      [|
+        (block_scope_forming_visitor cx 
+           (decl_stmt_collecting_visitor cx 
+              (all_item_collecting_visitor cx
+                 Walk.empty_visitor)));
+        (scope_stack_managing_visitor scopes 
+           (slot_resolving_visitor cx scopes 
+              (lval_base_resolving_visitor cx scopes             
+                 Walk.empty_visitor)));
+        (alias_analysis_visitor cx
          Walk.empty_visitor);
+      |];
+      [|
+        (layout_visitor cx
+           Walk.empty_visitor)
+      |];
     |]
   in
-    Array.iteri 
-      (fun i v -> 
-         Walk.walk_mod_items 
-           (pass_logging_visitor cx i v) 
-           items) 
-      visitors;
-
+    Array.iter run_pass visitors.(0);
     infer_autos cx items;
-
-    let visitors' = 
-      [|
-      (layout_visitor cx
-         Walk.empty_visitor)
-      |]
-    in
-      Array.iteri 
-        (fun i v -> 
-           Walk.walk_mod_items 
-             (pass_logging_visitor cx (i+(Array.length visitors)) v) 
-             items) 
-        visitors';
-
+    Array.iter run_pass visitors.(1);
 ;;
             
 

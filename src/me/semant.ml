@@ -151,7 +151,7 @@ let pack (offset:int64) (layouts:layout array) : layout =
             align curr.layout_align) > 0
       then align else curr.layout_align))
   in
-  let (final,align) = Array.fold_left pack_one (0L,0L) layouts in 
+  let (final,align) = Array.fold_left pack_one (offset,0L) layouts in 
   let sz = Int64.sub final offset in 
     new_layout offset sz align
 ;;
