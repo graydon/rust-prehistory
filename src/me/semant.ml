@@ -13,10 +13,39 @@
 
 open Common;;
 
-let ty_nonce = ref 0 
+
+type slots_table = (Ast.slot_key,node_id) Hashtbl.t
+type items_table = (Ast.ident,node_id) Hashtbl.t
+type block_slots_table = (node_id,slots_table) Hashtbl.t
+type block_items_table = (node_id,items_table) Hashtbl.t
 ;;
 
-let next_ty_nonce _ = (ty_nonce := (!ty_nonce) + 1; !ty_nonce)
+type ctxt = 
+	{ ctxt_sess: Session.sess;
+      ctxt_block_slots: block_slots_table;
+      ctxt_block_items: block_items_table;
+      ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
+      ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
+      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
+      ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
+      ctxt_slot_vregs: (node_id,(int ref)) Hashtbl.t;
+      ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
+      ctxt_frame_layouts: (node_id,layout) Hashtbl.t;
+	  ctxt_abi: Abi.abi }
+;;
+
+let	new_ctxt sess abi = 
+  { ctxt_sess = sess;
+    ctxt_block_slots = Hashtbl.create 0;
+    ctxt_block_items = Hashtbl.create 0;
+    ctxt_all_slots = Hashtbl.create 0;
+    ctxt_all_items = Hashtbl.create 0;
+    ctxt_lval_to_referent = Hashtbl.create 0;
+    ctxt_slot_aliased = Hashtbl.create 0;
+    ctxt_slot_vregs = Hashtbl.create 0;
+    ctxt_slot_layouts = Hashtbl.create 0;
+    ctxt_frame_layouts = Hashtbl.create 0;
+	ctxt_abi = abi }
 ;;
 
 exception Semant_err of ((node_id option) * string)
@@ -120,7 +149,7 @@ and ty_of_mod_item (item:Ast.mod_item) : Ast.ty =
 	  | Ast.MOD_ITEM_prog pd ->
           check_concrete pd.Ast.decl_params
             (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
-
+;;
 
 
 (* Layout calculations. *)
@@ -188,6 +217,20 @@ and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
       None -> raise (Semant_err (None, "layout_slot on untyped slot"))
     | Some t -> layout_ty abi off t
 
+
+let run_passes 
+    (cx:ctxt) 
+    (passes:Walk.visitor array) 
+    (log:string->unit)
+    (items:Ast.mod_items) = 
+  let do_pass i p =
+    let logger s = log (Printf.sprintf "pass %d: %s" i s) in
+      Walk.walk_mod_items 
+        (Walk.mod_item_logging_visitor logger p) 
+        items
+  in
+    Array.iteri do_pass passes
+;;
   
 
 

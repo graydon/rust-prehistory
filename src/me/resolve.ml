@@ -11,8 +11,6 @@
 open Semant;;
 open Common;;
 
-
-
 (* 
 type local =
     {
@@ -84,57 +82,15 @@ and lval_resolved =
  * 
  *)
 
-type slots_table = (Ast.slot_key,node_id) Hashtbl.t
-type items_table = (Ast.ident,node_id) Hashtbl.t
-type block_slots_table = (node_id,slots_table) Hashtbl.t
-type block_items_table = (node_id,items_table) Hashtbl.t
-
 type scope = 
     SCOPE_block of node_id
   | SCOPE_mod_item of Ast.mod_item
   | SCOPE_mod_type_item of Ast.mod_type_item
 
-type ctxt = 
-	{ ctxt_sess: Session.sess;
-      ctxt_block_slots: block_slots_table;
-      ctxt_block_items: block_items_table;
-      ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
-      ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
-      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
-      ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
-      ctxt_slot_vregs: (node_id,(int ref)) Hashtbl.t;
-      ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
-      ctxt_frame_layouts: (node_id,layout) Hashtbl.t;
-	  ctxt_abi: Abi.abi }
-;;
-
-let	new_ctxt sess abi = 
-  { ctxt_sess = sess;
-    ctxt_block_slots = Hashtbl.create 0;
-    ctxt_block_items = Hashtbl.create 0;
-    ctxt_all_slots = Hashtbl.create 0;
-    ctxt_all_items = Hashtbl.create 0;
-    ctxt_lval_to_referent = Hashtbl.create 0;
-    ctxt_slot_aliased = Hashtbl.create 0;
-    ctxt_slot_vregs = Hashtbl.create 0;
-    ctxt_slot_layouts = Hashtbl.create 0;
-    ctxt_frame_layouts = Hashtbl.create 0;
-	ctxt_abi = abi }
-;;
 
 let log cx = Session.log "resolve" 
   cx.ctxt_sess.Session.sess_log_resolve
   cx.ctxt_sess.Session.sess_log_out
-;;
-
-
-let pass_logging_visitor 
-    (cx:ctxt)
-    (pass:int) 
-    (inner:Walk.visitor) 
-    : Walk.visitor = 
-  let logger = log cx "pass %d: %s" pass in
-    (Walk.mod_item_logging_visitor logger inner)
 ;;
 
 
@@ -463,383 +419,26 @@ let lval_base_resolving_visitor
 ;;
 
 
-let auto_inference_visitor
+let process_crate 
     (cx:ctxt)
-    (progress:bool ref)
-    (inner:Walk.visitor)
-    : Walk.visitor = 
-  let check_ty_eq (t1:Ast.ty) (t2:Ast.ty) : unit = 
-    if not (t1 = t2)
-    then err None "mismatched types: %s vs. %s "
-      (Ast.string_of_ty t1) (Ast.string_of_ty t2)
-  in
-  let unify_ty (tyo:Ast.ty option) (ty:Ast.ty) : Ast.ty option = 
-    match tyo with 
-        None -> Some ty
-      | Some t -> (check_ty_eq t ty; Some t)
-  in
-  let unify_slot (tyo:Ast.ty option) (id:node_id) (s:Ast.slot) : Ast.ty option = 
-    match (tyo, s.Ast.slot_ty) with 
-        (None, None) -> None
-      | (Some t, None) -> 
-          log cx "setting type of slot #%d to %s" id (Ast.string_of_ty t);
-          Hashtbl.replace cx.ctxt_all_slots id { s with Ast.slot_ty = (Some t) };
-          progress := true;
-          Some t
-      | (tyo, Some t) -> unify_ty tyo t
-  in
-  let unify_lval (tyo:Ast.ty option) (lval:Ast.lval) : Ast.ty option = 
-    match lval with 
-        Ast.LVAL_base nb -> 
-          let referent = Hashtbl.find cx.ctxt_lval_to_referent nb.id in
-            begin
-              match htab_search cx.ctxt_all_slots referent with 
-                  Some s -> unify_slot tyo referent s
-                | None ->
-                    unify_ty tyo 
-                      (ty_of_mod_item 
-                         { node = (Hashtbl.find cx.ctxt_all_items referent);
-                           id = referent })
-            end
-      | _ -> (* FIXME: full-name unification? Oh, that'll be complex... *) None
-  in
-  let unify_lit (tyo:Ast.ty option) (lit:Ast.lit) : Ast.ty option = 
-    match lit with 
-      | Ast.LIT_nil -> unify_ty tyo Ast.TY_nil
-      | Ast.LIT_bool _ -> unify_ty tyo Ast.TY_bool 
-      | Ast.LIT_mach (m, _) -> unify_ty tyo (Ast.TY_mach m)
-      | Ast.LIT_int _ -> unify_ty tyo Ast.TY_int
-      | Ast.LIT_char _ -> unify_ty tyo Ast.TY_char
-      | Ast.LIT_str _ -> unify_ty tyo Ast.TY_str
-      | Ast.LIT_custom _ -> tyo
-  in    
-  let unify_atom (tyo:Ast.ty option) (atom:Ast.atom) : Ast.ty option = 
-    match atom with 
-        Ast.ATOM_literal lit -> unify_lit tyo lit.node
-      | Ast.ATOM_lval lval -> unify_lval tyo lval
-  in    
-  let unify_expr (tyo:Ast.ty option) (expr:Ast.expr) : Ast.ty option = 
-    match expr with 
-        Ast.EXPR_binary (op, a, b) -> 
-          begin
-            match op with 
-                Ast.BINOP_eq | Ast.BINOP_ne
-              | Ast.BINOP_lt | Ast.BINOP_le
-              | Ast.BINOP_gt | Ast.BINOP_ge -> 
-                  begin
-                    ignore (unify_atom (unify_atom None a) b);
-                    ignore (unify_atom (unify_atom None b) a);
-                    unify_ty tyo Ast.TY_bool
-                  end
-              | _ -> 
-                  begin
-                    ignore (unify_atom (unify_atom tyo a) b);
-                    unify_atom (unify_atom tyo b) a
-                  end
-          end
-      | Ast.EXPR_unary (_, atom) -> unify_atom tyo atom
-      | Ast.EXPR_atom atom -> unify_atom tyo atom
-      | _ -> err None "unhandled expression type in expr_ty"
-  in
-  let visit_stmt_pre (s:Ast.stmt) = 
-    begin
-      match s.node with 
-          Ast.STMT_copy (lval,expr) -> 
-            ignore (unify_lval (unify_expr None expr) lval);
-            ignore (unify_expr (unify_lval None lval) expr);
-        | Ast.STMT_call (dst,fn,args) -> 
-            begin
-              match unify_lval None fn with 
-                  None -> ()
-                | Some (Ast.TY_fn (tsig, _)) -> 
-                    begin
-                      ignore (unify_lval tsig.Ast.sig_output_slot.Ast.slot_ty dst);
-                      let islots = tsig.Ast.sig_input_slots in 
-                        if Array.length islots != Array.length args 
-                        then err (Some s.id) "argument count mismatch";
-                        for i = 0 to (Array.length islots) - 1
-                        do
-                          ignore (unify_atom islots.(i).Ast.slot_ty args.(i));
-                        done
-                    end
-                | _ -> err (Some s.id) "STMT_call fn resolved to non-function type"
-            end
-        | Ast.STMT_if i -> 
-            ignore (unify_atom (Some Ast.TY_bool) i.Ast.if_test)
-        | Ast.STMT_while w -> 
-            let (_, atom) = w.Ast.while_lval in 
-              ignore (unify_atom (Some Ast.TY_bool) atom)
-        | _ -> () (* FIXME: plenty more to handle here. *)
-    end;
-    inner.Walk.visit_stmt_pre s
-  in
-    { inner with
-        Walk.visit_stmt_pre = visit_stmt_pre }
-;;
-
-
-let infer_autos (cx:ctxt) (items:Ast.mod_items) : unit = 
-    let auto_queue = Queue.create () in
-    let enqueue_auto_slot id slot = 
-      match slot.Ast.slot_ty with 
-          None -> 
-            log cx "enqueueing auto slot #%d" id; 
-            Queue.add id auto_queue
-        | _ -> ()
-    in
-    let progress = ref true in 
-    let auto_pass = ref 0 in 
-      Hashtbl.iter enqueue_auto_slot cx.ctxt_all_slots;
-      while not (Queue.is_empty auto_queue) do
-        if not (!progress) 
-        then err None "auto inference pass wedged";
-        let tmpq = Queue.copy auto_queue in 
-          log cx "auto inference pass %d on %d remaining auto slots" 
-            (!auto_pass)
-            (Queue.length auto_queue);    
-          Queue.clear auto_queue;
-          progress := false;
-          Walk.walk_mod_items 
-            (Walk.mod_item_logging_visitor 
-               (log cx "auto inference pass %d: %s" (!auto_pass))
-               (auto_inference_visitor cx progress Walk.empty_visitor)) 
-            items;
-          Queue.iter 
-            (fun id -> enqueue_auto_slot id 
-               (Hashtbl.find cx.ctxt_all_slots id)) 
-            tmpq;
-          incr auto_pass;
-      done
-;;  
-
-
-let alias_analysis_visitor
-    (cx:ctxt)
-    (inner:Walk.visitor)
-    : Walk.visitor = 
-  let alias lval = 
-    match lval with 
-        Ast.LVAL_base nb -> 
-          let referent = Hashtbl.find cx.ctxt_lval_to_referent nb.id in
-            if Hashtbl.mem cx.ctxt_all_slots referent
-            then 
-              begin
-                log cx "noting slot #%d as aliased" referent;
-                Hashtbl.replace cx.ctxt_slot_aliased referent ()
-              end
-      | _ -> err None "unhandled form of lval in alias analysis"
-  in
-  let visit_stmt_pre s =    
-    begin
-      match s.node with 
-          (* 
-           * FIXME: must expand this analysis to cover alias-forming arg slots, when 
-           * they are supported. 
-           *)
-          Ast.STMT_call (dst, _, _) -> alias dst
-        | _ -> () (* FIXME: plenty more to handle here. *)
-    end;
-    inner.Walk.visit_stmt_pre s
-  in
-    { inner with Walk.visit_stmt_pre = visit_stmt_pre }
-;;
-
-let layout_visitor
-    (cx:ctxt)
-    (inner:Walk.visitor)
-    : Walk.visitor = 
-  (* 
-   *   - Frames look, broadly, like this (growing downward):
-   * 
-   *     +----------------------------+ <-- Rewind tail calls to here. If varargs are supported,
-   *     |caller args                 |     must use memmove or similar "overlap-permitting" move,
-   *     |...                         |     if supporting tail-calling. 
-   *     |...                         |
-   *     +----------------------------+ <-- fp + abi_frame_base_sz + abi_implicit_args_sz
-   *     |caller non-reg ABI operands |
-   *     |possibly empty, if fastcall |
-   *     |  - process pointer?        |
-   *     |  - runtime pointer?        |
-   *     |  - yield pc or delta?      |
-   *     |  - yield slot addr?        |
-   *     |  - ret slot addr?          |
-   *     +----------------------------+ <-- fp + abi_frame_base_sz
-   *     |return pc pushed by machine |
-   *     |plus any callee-save stuff  |
-   *     +----------------------------+ <-- fp
-   *     |frame-allocated stuff       |
-   *     |determined in resolve       |
-   *     |...                         |
-   *     |...                         |
-   *     |...                         |
-   *     +----------------------------+ <-- fp - framesz
-   *     |spills determined in ra     |
-   *     |...                         |
-   *     |...                         |
-   *     +----------------------------+ <-- fp - (framesz + spillsz)
-   * 
-   *   - Divide slots into two classes:
-   * 
-   *     #1 Those that are never aliased and fit in a word, so are
-   *        vreg-allocated
-   * 
-   *     #2 All others
-   * 
-   *   - Lay out the frame in post-order, given what we now know wrt
-   *     the slot types and aliasing:
-   * 
-   *     - Non-aliased, word-fitting slots consume no frame space
-   *       *yet*; they are given a generic value that indicates "try a
-   *       vreg". The register allocator may spill them later, if it
-   *       needs to, but that's not our concern.
-   * 
-   *     - Aliased / too-big slots are frame-allocated, need to be
-   *       laid out in the frame at fixed offsets, so need to be
-   *       assigned Common.layout values.  (Is this true of aliased
-   *       word-fitting? Can we not runtime-calculate the position of
-   *       a spill slot? Meh.)
-   * 
-   *   - The frame size is the maximum of all the block sizes contained
-   *     within it. 
-   * 
-   *)
-
-  let string_of_layout (ly:layout) : string = 
-    Printf.sprintf "sz=%Ld, off=%Ld, align=%Ld" 
-      ly.layout_size ly.layout_offset ly.layout_align
-  in
-  let layout_slot_ids (offset:int64) (slots:node_id array) : layout = 
-    let layout_slot_id id = 
-      if Hashtbl.mem cx.ctxt_slot_layouts id
-      then Hashtbl.find cx.ctxt_slot_layouts id
-      else 
-        let slot = Hashtbl.find cx.ctxt_all_slots id in
-        let layout = layout_slot cx.ctxt_abi 0L slot in 
-          log cx "forming layout for slot #%d: %s" id (string_of_layout layout);
-          Hashtbl.add cx.ctxt_slot_layouts id layout;
-          layout
-    in
-    let layouts = Array.map layout_slot_id slots in
-    let group_layout = pack offset layouts in
-      for i = 0 to (Array.length layouts) - 1 do
-        log cx "packed slot #%d layout to: %s" slots.(i) (string_of_layout layouts.(i))
-      done;
-      group_layout
-  in
-    
-  let layout_block (offset:int64) (block:Ast.block) : layout = 
-    log cx "laying out block #%d at fp offset %Ld" block.id offset;
-    let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
-	let get_keyed_slot_ids key id accum = ((key, id) :: accum) in
-	let keyed_slot_ids = Hashtbl.fold get_keyed_slot_ids block_slots [] in
-    let sorted_keyed_slot_ids = 
-	  (Array.of_list 
-		 (Sort.list 
-			(fun (a, _) (b, _) -> a < b) keyed_slot_ids))
-    in
-      for i = 0 to (Array.length sorted_keyed_slot_ids) - 1 do
-        let (key,sid) = sorted_keyed_slot_ids.(i) in
-          log cx "block #%d entry %d: '%s' = slot #%d" 
-            block.id i (Ast.string_of_key key) sid
-      done;
-      let sorted_slot_ids = Array.map (fun (_,sid) -> sid) sorted_keyed_slot_ids in
-      let layout = layout_slot_ids offset sorted_slot_ids in
-        log cx "block #%d total layout: %s" block.id (string_of_layout layout);
-        layout
-  in
-  let layout_fn (id:node_id) (fn:Ast.fn) : layout = 
-    let offset = 
-      Int64.add 
-        cx.ctxt_abi.Abi.abi_frame_base_sz 
-        cx.ctxt_abi.Abi.abi_implicit_args_sz 
-    in
-      log cx "laying out fn #%d at fp offset %Ld" id offset;
-      let input_slot_ids = Array.map (fun (sid,_) -> sid.id) fn.Ast.fn_input_slots in
-      let layout = layout_slot_ids offset input_slot_ids in
-        log cx "fn #%d total layout: %s" id (string_of_layout layout);
-        layout
-  in
-    
-  let layout_prog (id:node_id) (prog:Ast.prog) : layout = 
-    let offset = 0L in 
-      log cx "laying out prog #%d at fp offset %Ld" id offset;
-      let layout = 
-        match prog.Ast.prog_main with 
-            Some m -> layout_block offset m 
-          | None -> new_layout offset 0L 0L
-      in
-        layout
-  in
-  let frame_layouts = Stack.create () in 
-  let visit_mod_item_pre n p i = 
-    begin
-      match i.node with 
-          Ast.MOD_ITEM_fn fd ->
-            let layout = layout_fn i.id fd.Ast.decl_item in
-              Stack.push layout frame_layouts
-        | Ast.MOD_ITEM_prog pd ->
-            let layout = layout_prog i.id pd.Ast.decl_item in
-              Stack.push layout frame_layouts
-        | _ -> ()
-    end;
-    inner.Walk.visit_mod_item_pre n p i
-  in
-  let visit_mod_item_post n p i = 
-    inner.Walk.visit_mod_item_post n p i;
-    begin
-      match i.node with 
-          Ast.MOD_ITEM_fn fd ->
-            ignore (Stack.pop frame_layouts)
-        | Ast.MOD_ITEM_prog pd ->
-            ignore (Stack.pop frame_layouts)
-        | _ -> ()
-    end;
-  in
-    { inner with 
-        Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_mod_item_post = visit_mod_item_post }    
-;;
-
-
-let resolve_crate 
-    (sess:Session.sess) 
-    (abi:Abi.abi) 
-    (items:Ast.mod_items) 
+    (items:Ast.mod_items)
     : unit = 
-  let cx = new_ctxt sess abi in 
   let (scopes:scope Stack.t) = Stack.create () in 
-  let passnum = ref 0 in
-  let run_pass p = 
-    Walk.walk_mod_items 
-      (pass_logging_visitor cx (!passnum) p) 
-      items;
-    incr passnum
-  in
-  let visitors = 
+  let passes = 
     [|
-      [|
-        (block_scope_forming_visitor cx 
-           (decl_stmt_collecting_visitor cx 
-              (all_item_collecting_visitor cx
-                 Walk.empty_visitor)));
-        (scope_stack_managing_visitor scopes 
-           (slot_resolving_visitor cx scopes 
-              (lval_base_resolving_visitor cx scopes             
-                 Walk.empty_visitor)));
-        (alias_analysis_visitor cx
-         Walk.empty_visitor);
-      |];
-      [|
-        (layout_visitor cx
-           Walk.empty_visitor)
-      |];
+      (block_scope_forming_visitor cx 
+         (decl_stmt_collecting_visitor cx 
+            (all_item_collecting_visitor cx
+               Walk.empty_visitor)));
+      (scope_stack_managing_visitor scopes 
+         (slot_resolving_visitor cx scopes 
+            (lval_base_resolving_visitor cx scopes             
+               Walk.empty_visitor)));
     |]
   in
-    Array.iter run_pass visitors.(0);
-    infer_autos cx items;
-    Array.iter run_pass visitors.(1);
+    run_passes cx passes (log cx "%s") items
 ;;
-            
+
 
 (*
  **************************************************************************

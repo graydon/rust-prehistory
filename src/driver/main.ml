@@ -21,7 +21,10 @@ let (sess:Session.sess) =
 	Session.sess_log_lex = false;
 	Session.sess_log_parse = false;
 	Session.sess_log_resolve = false;
+	Session.sess_log_alias = false;
+	Session.sess_log_auto = false;
 	Session.sess_log_type = false;
+	Session.sess_log_layout = false;
 	Session.sess_log_trans = false;
 	Session.sess_log_ra = false;
 	Session.sess_log_insn = false;
@@ -47,7 +50,10 @@ let argspecs =
 	("-llex", Arg.Unit (fun _ -> sess.Session.sess_log_lex <- true), "log lexing");
 	("-lparse", Arg.Unit (fun _ -> sess.Session.sess_log_parse <- true), "log parsing");
 	("-lresolve", Arg.Unit (fun _ -> sess.Session.sess_log_resolve <- true), "log resolution");
+	("-lalias", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log alias analysis");
+	("-lauto", Arg.Unit (fun _ -> sess.Session.sess_log_auto <- true), "log auto type-inference");
 	("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
+	("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
 	("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
 	("-lra", Arg.Unit (fun _ -> sess.Session.sess_log_ra <- true), "log register allocation");
 	("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");
@@ -87,8 +93,19 @@ let _ = exit_if_failed ()
 
 let (abi:Abi.abi) = X86.abi;;
 
-let _ = Resolve.resolve_crate sess abi crate_items;;
-let _ = exit_if_failed ()
+(* Semantic passes. *)
+let _ = 
+  begin
+    let sem_cx = Semant.new_ctxt sess abi in
+      Array.iter 
+        (fun proc -> 
+           proc sem_cx crate_items;
+           exit_if_failed ())
+        [| Resolve.process_crate;
+           Alias.process_crate;
+           Auto.process_crate;
+           Layout.process_crate |]
+  end
 ;;
 
 let ((text_items:(string, (Il.quads * int)) Hashtbl.t), 
