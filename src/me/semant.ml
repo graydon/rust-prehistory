@@ -30,6 +30,7 @@ type ctxt =
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
       ctxt_slot_vregs: (node_id,(int ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
+      ctxt_block_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_layouts: (node_id,layout) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
 	  ctxt_abi: Abi.abi;
@@ -49,6 +50,7 @@ let	new_ctxt sess abi =
     ctxt_slot_aliased = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
+    ctxt_block_layouts = Hashtbl.create 0;
     ctxt_frame_layouts = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
 	ctxt_abi = abi;    

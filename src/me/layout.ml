@@ -108,8 +108,10 @@ let layout_visitor
       let sorted_slot_ids = Array.map (fun (_,sid) -> sid) sorted_keyed_slot_ids in
       let layout = layout_slot_ids offset sorted_slot_ids in
         log cx "block #%d total layout: %s" block.id (string_of_layout layout);
+        Hashtbl.replace cx.ctxt_block_layouts block.id layout;
         layout
   in
+
   let layout_fn (id:node_id) (fn:Ast.fn) : layout = 
     let offset = 
       Int64.add 

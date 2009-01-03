@@ -590,6 +590,7 @@ let trans_visitor
     (inner:Walk.visitor)
     : Walk.visitor = 
   let path = Stack.create () in     
+  let block_layouts = Stack.create () in 
   let fn_frame_layouts = Stack.create () in
 
   let emitters = Stack.create () in 
@@ -632,6 +633,12 @@ let trans_visitor
     if Hashtbl.mem cx.ctxt_frame_layouts id
     then Hashtbl.find cx.ctxt_frame_layouts id 
     else err (Some id) "Unknown frame layout"
+  in
+
+  let get_block_layout (id:node_id) : layout = 
+    if Hashtbl.mem cx.ctxt_block_layouts id
+    then Hashtbl.find cx.ctxt_block_layouts id 
+    else err (Some id) "Unknown block layout"
   in
 
   let get_fn_fixup (id:node_id) : fixup = 
@@ -837,7 +844,9 @@ let trans_visitor
   in
 
   let rec trans_block (block:Ast.block) : unit = 
-    Array.iter trans_stmt block.node
+    Stack.push (get_block_layout block.id) block_layouts;
+    Array.iter trans_stmt block.node;
+    ignore (Stack.pop block_layouts)
       
   and trans_stmt (stmt:Ast.stmt) : unit =
     match stmt.node with 
