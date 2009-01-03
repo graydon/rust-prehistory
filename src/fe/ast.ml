@@ -464,7 +464,7 @@ and mod_items = (ident, mod_item) Hashtbl.t
 
 let string_of_key k = 
   match k with 
-      KEY_temp i -> "<temp#" ^ (string_of_int i) ^ ">"
+      KEY_temp i -> "<temp#" ^ (string_of_int (int_of_temp i)) ^ ">"
     | KEY_ident i -> i
 ;;
 
@@ -479,7 +479,7 @@ let rec string_of_name_component comp =
 and string_of_name name = 
   match name with 
 	  NAME_base (BASE_ident id) -> id
-	| NAME_base (BASE_temp n) -> "<temp#" ^ (string_of_int n) ^ ">"
+	| NAME_base (BASE_temp n) -> "<temp#" ^ (string_of_int (int_of_temp n)) ^ ">"
 	| NAME_base (BASE_app (id, tys)) -> 
 		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
 	| NAME_ext (n, c) -> 

@@ -143,9 +143,9 @@ let decl_stmt_collecting_visitor
                 if Hashtbl.mem slots (Ast.KEY_temp tmp)
                 then 
                   err (Some id)
-                    "duplicate declaration of temp #%d in block" tmp
+                    "duplicate declaration of temp #%d in block" (int_of_temp tmp)
                 else 
-                  log cx "found decl of temp #%d in block" tmp
+                  log cx "found decl of temp #%d in block" (int_of_temp tmp)
               in
               let check_and_log_key id key = 
                 match key with 
@@ -215,7 +215,7 @@ let all_item_collecting_visitor
     : Walk.visitor = 
   let visit_mod_item_pre n p i = 
     Hashtbl.add cx.ctxt_all_items i.id i.node;
-    log cx "collected item #%d" i.id;
+    log cx "collected item #%d" (int_of_node i.id);
     inner.Walk.visit_mod_item_pre n p i
   in
     { inner with 
@@ -322,7 +322,7 @@ let slot_resolving_visitor
   let visit_slot_identified_pre slot = 
     let slot = resolve_slot_identified slot in
       Hashtbl.add cx.ctxt_all_slots slot.id slot.node;
-      log cx "collected resolved slot #%d with type %s" slot.id 
+      log cx "collected resolved slot #%d with type %s" (int_of_node slot.id) 
         (match slot.node.Ast.slot_ty with 
              None -> "??"
            | Some t -> (Ast.string_of_ty t));
@@ -378,10 +378,10 @@ let lval_base_resolving_visitor
     in
       match stk_search scopes check_scope with 
           None -> err (Some id) "unresolved identifier '%s'" ident
-        | Some id -> (log cx "resolved to node id #%d" id; id)
+        | Some id -> (log cx "resolved to node id #%d" (int_of_node id); id)
   in
   let lookup_slot_by_temp id temp =  
-    log cx "looking up temp slot #%d" temp;
+    log cx "looking up temp slot #%d" (int_of_temp temp);
     let key = Ast.KEY_temp temp in 
     let check_scope scope = 
       match scope with 
@@ -393,8 +393,8 @@ let lval_base_resolving_visitor
         | _ -> None
     in
       match stk_search scopes check_scope with 
-          None -> err (Some id) "unresolved temp node #%d" temp
-        | Some id -> (log cx "resolved to node id #%d" id; id)
+          None -> err (Some id) "unresolved temp node #%d" (int_of_temp temp)
+        | Some id -> (log cx "resolved to node id #%d" (int_of_node id); id)
   in
   let lookup_slot_by_name_base id nb = 
     match nb with 

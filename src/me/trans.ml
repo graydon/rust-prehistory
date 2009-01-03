@@ -676,7 +676,7 @@ let trans_visitor
                                     let tmp = (Il.next_vreg (emitter())) in 
 		                              emit Il.MOV (Il.Reg tmp) imm Il.Nil;
                                       (Il.Reg tmp)
-                        | _ -> err (Some referent) "unhandled item type in trans_lval_full"
+                        | _ -> err (Some nb.id) "unhandled item type in trans_lval_full, item #%d" (int_of_node referent)
                     end
                 | None -> 
                     begin
@@ -685,7 +685,7 @@ let trans_visitor
                         | None -> 
                             begin
                               match htab_search cx.ctxt_slot_layouts referent with 
-                                  None -> err (Some referent) "slot assigned to neither vreg nor layout"
+                                  None -> err (Some nb.id) "slot assigned to neither vreg nor layout"
                                 | Some layout -> 
                                     Il.Mem (Il.M32, 
                                             (Some cx.ctxt_abi.Abi.abi_fp_reg),

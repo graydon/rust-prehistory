@@ -17,7 +17,7 @@ let alias_analysis_visitor
             if Hashtbl.mem cx.ctxt_all_slots referent
             then 
               begin
-                log cx "noting slot #%d as aliased" referent;
+                log cx "noting slot #%d as aliased" (int_of_node referent);
                 Hashtbl.replace cx.ctxt_slot_aliased referent ()
               end
       | _ -> err None "unhandled form of lval in alias analysis"

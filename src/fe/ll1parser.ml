@@ -298,7 +298,7 @@ type pstate =
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
 	  pstate_sess         : Session.sess;
-      pstate_temp_id   : int ref;
+      pstate_temp_id   : temp_id ref;
       pstate_node_id   : node_id ref }
 ;;
 
@@ -318,11 +318,11 @@ let lexpos ps =
      (p.Lexing.pos_cnum) - (p.Lexing.pos_bol))
 ;;
 
-let plusplus ir = (incr ir; !ir)
-
 let span ps apos bpos x = 
   let span = { lo = apos; hi = bpos } in 
-  let id = plusplus ps.pstate_node_id in
+  let id = !(ps.pstate_node_id) in 
+    log ps "span for node #%d: %s" (int_of_node id) (Session.string_of_span span);
+    ps.pstate_node_id := Node ((int_of_node id)+1);
     Hashtbl.add ps.pstate_sess.Session.sess_spans id span;
     { node = x; id = id }
 ;;
@@ -724,10 +724,11 @@ and slot_auto = { Ast.slot_mode = Ast.MODE_interior;
                   Ast.slot_ty = None }
 
 and build_tmp ps slot apos bpos = 
-  let nonce = plusplus ps.pstate_temp_id in
+  let nonce = !(ps.pstate_temp_id) in
+    ps.pstate_temp_id := Temp ((int_of_temp nonce)+1);
     if ps.pstate_sess.Session.sess_log_parse
     then 
-	  Printf.fprintf ps.pstate_sess.Session.sess_log_out "building temporary %d\n%!" nonce
+	  Printf.fprintf ps.pstate_sess.Session.sess_log_out "building temporary %d\n%!" (int_of_temp nonce)
     else 
 	  ();
     let decl = Ast.DECL_slot (Ast.KEY_temp nonce, (span ps apos bpos slot)) in
@@ -1296,7 +1297,7 @@ and parse_mod_item ps =
       | _ -> raise (unexpected ps)
 
 
-let make_parser sess tok fname = 
+let make_parser tref nref sess tok fname = 
   let lexbuf = Lexing.from_channel (open_in fname) in
   let spos = { lexbuf.Lexing.lex_start_p with Lexing.pos_fname = fname } in
   let cpos = { lexbuf.Lexing.lex_curr_p with Lexing.pos_fname = fname } in
@@ -1309,8 +1310,8 @@ let make_parser sess tok fname =
         pstate_lexfun = tok;
         pstate_lexbuf = lexbuf;
 		pstate_sess = sess;
-        pstate_temp_id = ref 0;
-        pstate_node_id = ref 0 }
+        pstate_temp_id = tref;
+        pstate_node_id = nref }
     in
       log ps "made parser for: %s\n%!" fname;
       ps
@@ -1336,7 +1337,7 @@ let rec parse_crate_entry tok prefix htab ps =
     match peek ps with
         SEMI -> 
           bump ps;
-          let p = make_parser ps.pstate_sess tok (Filename.concat prefix fname) in
+          let p = make_parser ps.pstate_temp_id ps.pstate_node_id ps.pstate_sess tok (Filename.concat prefix fname) in
             parse_raw_mod_items p
               
       | RBRACE -> 
@@ -1380,7 +1381,9 @@ and parse_crate_entries tok fname prefix ps =
 let parse_crate (sess:Session.sess) tok = 
   try 
     let fname = sess.Session.sess_crate in
-    let ps = make_parser sess tok fname in
+    let tref = ref (Temp 0) in
+    let nref = ref (Node 0) in 
+    let ps = make_parser tref nref sess tok fname in
       parse_crate_entries tok fname (Filename.dirname fname) ps
   with 
       Parse_err (ps, str) -> 

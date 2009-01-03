@@ -27,7 +27,7 @@ let auto_inference_visitor
     match (tyo, s.Ast.slot_ty) with 
         (None, None) -> None
       | (Some t, None) -> 
-          log cx "setting type of slot #%d to %s" id (Ast.string_of_ty t);
+          log cx "setting type of slot #%d to %s" (int_of_node id) (Ast.string_of_ty t);
           Hashtbl.replace cx.ctxt_all_slots id { s with Ast.slot_ty = (Some t) };
           progress := true;
           Some t
@@ -131,7 +131,7 @@ let process_crate
   let enqueue_auto_slot id slot = 
     match slot.Ast.slot_ty with 
         None -> 
-          log cx "enqueueing auto slot #%d" id; 
+          log cx "enqueueing auto slot #%d" (int_of_node id); 
           Queue.add id auto_queue
       | _ -> ()
   in

@@ -78,20 +78,20 @@ let layout_visitor
       else 
         let slot = Hashtbl.find cx.ctxt_all_slots id in
         let layout = layout_slot cx.ctxt_abi 0L slot in 
-          log cx "forming layout for slot #%d: %s" id (string_of_layout layout);
+          log cx "forming layout for slot #%d: %s" (int_of_node id) (string_of_layout layout);
           Hashtbl.add cx.ctxt_slot_layouts id layout;
           layout
     in
     let layouts = Array.map layout_slot_id slots in
     let group_layout = pack offset layouts in
       for i = 0 to (Array.length layouts) - 1 do
-        log cx "packed slot #%d layout to: %s" slots.(i) (string_of_layout layouts.(i))
+        log cx "packed slot #%d layout to: %s" (int_of_node slots.(i)) (string_of_layout layouts.(i))
       done;
       group_layout
   in
     
   let layout_block (offset:int64) (block:Ast.block) : layout = 
-    log cx "laying out block #%d at fp offset %Ld" block.id offset;
+    log cx "laying out block #%d at fp offset %Ld" (int_of_node block.id) offset;
     let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
 	let get_keyed_slot_ids key id accum = ((key, id) :: accum) in
 	let keyed_slot_ids = Hashtbl.fold get_keyed_slot_ids block_slots [] in
@@ -103,11 +103,11 @@ let layout_visitor
       for i = 0 to (Array.length sorted_keyed_slot_ids) - 1 do
         let (key,sid) = sorted_keyed_slot_ids.(i) in
           log cx "block #%d entry %d: '%s' = slot #%d" 
-            block.id i (Ast.string_of_key key) sid
+            (int_of_node block.id) i (Ast.string_of_key key) (int_of_node sid)
       done;
       let sorted_slot_ids = Array.map (fun (_,sid) -> sid) sorted_keyed_slot_ids in
       let layout = layout_slot_ids offset sorted_slot_ids in
-        log cx "block #%d total layout: %s" block.id (string_of_layout layout);
+        log cx "block #%d total layout: %s" (int_of_node block.id) (string_of_layout layout);
         Hashtbl.replace cx.ctxt_block_layouts block.id layout;
         layout
   in
@@ -118,16 +118,16 @@ let layout_visitor
         cx.ctxt_abi.Abi.abi_frame_base_sz 
         cx.ctxt_abi.Abi.abi_implicit_args_sz 
     in
-      log cx "laying out fn #%d at fp offset %Ld" id offset;
+      log cx "laying out fn #%d at fp offset %Ld" (int_of_node id) offset;
       let input_slot_ids = Array.map (fun (sid,_) -> sid.id) fn.Ast.fn_input_slots in
       let layout = layout_slot_ids offset input_slot_ids in
-        log cx "fn #%d total layout: %s" id (string_of_layout layout);
+        log cx "fn #%d total layout: %s" (int_of_node id) (string_of_layout layout);
         layout
   in
     
   let layout_prog (id:node_id) (prog:Ast.prog) : layout = 
     let offset = 0L in 
-      log cx "laying out prog #%d at fp offset %Ld" id offset;
+      log cx "laying out prog #%d at fp offset %Ld" (int_of_node id) offset;
       let layout = 
         match prog.Ast.prog_main with 
             Some m -> layout_block offset m 
