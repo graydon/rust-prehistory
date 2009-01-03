@@ -31,7 +31,8 @@ type ctxt =
       ctxt_slot_vregs: (node_id,(int ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
-      ctxt_frame_layouts: (node_id,layout) Hashtbl.t;
+      ctxt_fn_header_layouts: (node_id,layout) Hashtbl.t;
+      ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
 	  ctxt_abi: Abi.abi;
       mutable ctxt_data_items: Asm.item list;
@@ -51,7 +52,8 @@ let	new_ctxt sess abi =
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_block_layouts = Hashtbl.create 0;
-    ctxt_frame_layouts = Hashtbl.create 0;
+    ctxt_fn_header_layouts = Hashtbl.create 0;
+    ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
 	ctxt_abi = abi;    
     ctxt_data_items = [];
@@ -188,9 +190,7 @@ let pack (offset:int64) (layouts:layout array) : layout =
     ((Int64.add 
         curr.layout_offset 
         curr.layout_size),
-     (if (Int64.compare 
-            align curr.layout_align) > 0
-      then align else curr.layout_align))
+     (i64_max align curr.layout_align))
   in
   let (final,align) = Array.fold_left pack_one (offset,0L) layouts in 
   let sz = Int64.sub final offset in 

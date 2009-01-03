@@ -32,7 +32,7 @@ let layout_visitor
    *     +----------------------------+ <-- fp
    *     |frame-allocated stuff       |
    *     |determined in resolve       |
-   *     |...                         |
+   *     |laid out in layout          |
    *     |...                         |
    *     |...                         |
    *     +----------------------------+ <-- fp - framesz
@@ -41,26 +41,28 @@ let layout_visitor
    *     |...                         |
    *     +----------------------------+ <-- fp - (framesz + spillsz)
    * 
-   *   - Divide slots into two classes:
+   *   - the layout of a frame is offset from fp: 
+   *     in other words, frame_layout.layout_offset = -(frame_layout.layout_size)
+   * 
+   *   - the layout of a slot in the function frame is offset from (fp-framesz)
+   * 
+   *   - Slots are split into two classes:
    * 
    *     #1 Those that are never aliased and fit in a word, so are
    *        vreg-allocated
    * 
    *     #2 All others
    * 
-   *   - Lay out the frame in post-order, given what we now know wrt
-   *     the slot types and aliasing:
+   *   - Non-aliased, word-fitting slots consume no frame space
+   *     *yet*; they are given a generic value that indicates "try a
+   *     vreg". The register allocator may spill them later, if it
+   *     needs to, but that's not our concern.
    * 
-   *     - Non-aliased, word-fitting slots consume no frame space
-   *       *yet*; they are given a generic value that indicates "try a
-   *       vreg". The register allocator may spill them later, if it
-   *       needs to, but that's not our concern.
-   * 
-   *     - Aliased / too-big slots are frame-allocated, need to be
-   *       laid out in the frame at fixed offsets, so need to be
-   *       assigned Common.layout values.  (Is this true of aliased
-   *       word-fitting? Can we not runtime-calculate the position of
-   *       a spill slot? Meh.)
+   *   - Aliased / too-big slots are frame-allocated, need to be
+   *     laid out in the frame at fixed offsets, so need to be
+   *     assigned Common.layout values.  (Is this true of aliased
+   *     word-fitting? Can we not runtime-calculate the position of
+   *     a spill slot? Meh.)
    * 
    *   - The frame size is the maximum of all the block sizes contained
    *     within it. 
@@ -107,38 +109,61 @@ let layout_visitor
       done;
       let sorted_slot_ids = Array.map (fun (_,sid) -> sid) sorted_keyed_slot_ids in
       let layout = layout_slot_ids offset sorted_slot_ids in
+        (* 
+         * At this point the layout extends from [off,off+sz] but we need to adjust it
+         * to cover [off-sz,off]. We also have to iterate through all the slot layouts
+         * and adjust them down by sz.
+         *)
+      let sz = layout.layout_size in
+      let sub_sz ly = ly.layout_offset <- Int64.sub ly.layout_offset sz in
+        sub_sz layout;
+        Array.iter (fun sid -> sub_sz (Hashtbl.find cx.ctxt_slot_layouts sid)) sorted_slot_ids;
         log cx "block #%d total layout: %s" (int_of_node block.id) (string_of_layout layout);
         htab_put cx.ctxt_block_layouts block.id layout;
-        layout
+        layout;
   in
 
-  let layout_fn (id:node_id) (fn:Ast.fn) : layout = 
+  let layout_fn_header (id:node_id) (fn:Ast.fn) : unit = 
     let offset = 
       Int64.add 
         cx.ctxt_abi.Abi.abi_frame_base_sz 
         cx.ctxt_abi.Abi.abi_implicit_args_sz 
     in
-      log cx "laying out fn #%d at fp offset %Ld" (int_of_node id) offset;
+      log cx "laying out header of fn #%d at fp offset %Ld" (int_of_node id) offset;
       let input_slot_ids = Array.map (fun (sid,_) -> sid.id) fn.Ast.fn_input_slots in
       let layout = layout_slot_ids offset input_slot_ids in
-        log cx "fn #%d total layout: %s" (int_of_node id) (string_of_layout layout);
-        layout
+        log cx "fn #%d header layout: %s" (int_of_node id) (string_of_layout layout);
+        htab_put cx.ctxt_fn_header_layouts id layout
   in
     
   let (block_stacks:(layout Stack.t) Stack.t) = Stack.create () in 
+  let (item_stack:node_id Stack.t) = Stack.create () in 
+  let update_frame_size _ = 
+    let sz = stk_fold       
+      (Stack.top block_stacks) 
+      (fun layout b -> Int64.add layout.layout_size b) 
+      0L
+    in
+    let item_id = Stack.top item_stack in 
+    let curr = Hashtbl.find cx.ctxt_frame_sizes item_id in 
+      log cx "extending item frame #%d to size %Ld" (int_of_node item_id) (i64_max curr sz);
+      Hashtbl.replace cx.ctxt_frame_sizes item_id (i64_max curr sz)      
+  in
   let visit_mod_item_pre n p i = 
     begin
       Stack.push (Stack.create()) block_stacks;
+      Stack.push i.id item_stack;
+      htab_put cx.ctxt_frame_sizes i.id 0L;
       match i.node with 
           Ast.MOD_ITEM_fn fd ->
-            let layout = layout_fn i.id fd.Ast.decl_item in
-              htab_put cx.ctxt_frame_layouts i.id layout
+            layout_fn_header i.id fd.Ast.decl_item;
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
   in
   let visit_mod_item_post n p i = 
     inner.Walk.visit_mod_item_post n p i;
+    ignore (Stack.pop item_stack);
     ignore (Stack.pop block_stacks)
   in
   let visit_block_pre b = 
@@ -152,6 +177,7 @@ let layout_visitor
     in
     let layout = layout_block off b in
       Stack.push layout stk;
+      update_frame_size ();
       inner.Walk.visit_block_pre b
   in
   let visit_block_post b = 

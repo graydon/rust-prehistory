@@ -591,7 +591,6 @@ let trans_visitor
     : Walk.visitor = 
   let path = Stack.create () in     
   let block_layouts = Stack.create () in 
-  let fn_frame_layouts = Stack.create () in
 
   let emitters = Stack.create () in 
   let push_new_emitter _ = 
@@ -628,12 +627,6 @@ let trans_visitor
       then Hashtbl.find cx.ctxt_all_slots referent
       else err (Some referent) "Unknown slot"
   in
-    
-  let get_frame_layout (id:node_id) : layout = 
-    if Hashtbl.mem cx.ctxt_frame_layouts id
-    then Hashtbl.find cx.ctxt_frame_layouts id 
-    else err (Some id) "Unknown frame layout"
-  in
 
   let get_block_layout (id:node_id) : layout = 
     if Hashtbl.mem cx.ctxt_block_layouts id
@@ -645,6 +638,12 @@ let trans_visitor
     if Hashtbl.mem cx.ctxt_fn_fixups id
     then Hashtbl.find cx.ctxt_fn_fixups id 
     else err (Some id) "Fn without fixup"
+  in
+
+  let get_fn_framesz (id:node_id) : int64 = 
+    if Hashtbl.mem cx.ctxt_frame_sizes id
+    then Hashtbl.find cx.ctxt_frame_sizes id 
+    else err (Some id) "Fn without framesz"
   in
 
   let path_name (_:unit) : string = 
@@ -700,7 +699,7 @@ let trans_visitor
     trans_lval_full lv false false
   in
 
-  let trans_out_slot (frame:layout) (callee:bool) : Il.operand = 
+  let trans_out_slot (callee:bool) : Il.operand = 
     if callee 
     then 
       Il.Mem (Il.M32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
@@ -898,11 +897,6 @@ let trans_visitor
                 
       | Ast.STMT_call (dst, flv, args) -> 
           let abi = cx.ctxt_abi in
-          let fnid = 
-            match flv with 
-                Ast.LVAL_base nb -> lval_to_referent nb.id
-              | _ -> err None "unhandled lval type in trans_stmt"
-          in
             (* FIXME: factor out call protocol into ABI bits. *)
             for i = 0 to (Array.length args) - 1 do              
               emit (Il.CPUSH Il.M32) Il.Nil (trans_atom args.(i)) Il.Nil
@@ -917,7 +911,7 @@ let trans_visitor
             let fv = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
               emit Il.CCALL vr fv Il.Nil;
               emit Il.MOV dst vr Il.Nil;
-              emit Il.MOV dst (trans_out_slot (get_frame_layout fnid) false) Il.Nil;
+              emit Il.MOV dst (trans_out_slot false) Il.Nil;
               emit Il.ADD sp sp 
                 (Il.Imm (Asm.IMM (Int64.of_int (4 * (2 + (Array.length args))))));
               
@@ -931,7 +925,7 @@ let trans_visitor
                     match atom_opt with 
                         None -> ()
                       | Some at -> 
-                          let ret = trans_out_slot (Stack.top fn_frame_layouts) true in 
+                          let ret = trans_out_slot true in 
                             emit Il.MOV ret (trans_atom at) Il.Nil
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
@@ -961,17 +955,16 @@ let trans_visitor
   in
     
   let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =  
-    Stack.push (get_frame_layout fnid) fn_frame_layouts;
+    let fixup = get_fn_fixup fnid in
+    let framesz = get_fn_framesz fnid in
     Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
-      Il.emit_full (emitter()) (Some (get_fn_fixup fnid)) Il.DEAD Il.Nil Il.Nil Il.Nil;
-      cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) fn;
+      cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) fixup framesz;
       trans_block fn.Ast.fn_body;
       Stack.iter patch (Stack.pop epilogue_jumps);
-      cx.ctxt_abi.Abi.abi_emit_fn_epilogue (emitter()) fn;
+      cx.ctxt_abi.Abi.abi_emit_fn_epilogue (emitter());
       capture_emitted_quads ();
-      pop_emitter ();
-      ignore (Stack.pop fn_frame_layouts)
+      pop_emitter ()
   in
 
   let trans_prog_block (b:Ast.block) (ncomp:string) : fixup = 

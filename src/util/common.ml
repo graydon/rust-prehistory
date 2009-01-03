@@ -134,6 +134,12 @@ let arr_search (a:'a array) (f:int -> 'a -> 'b option) : 'b option =
     iter 0
 ;;
 
+(* 
+ * Auxiliary int64 functions
+ *)
+
+let i64_max (a:int64) (b:int64) : int64 = (if (Int64.compare a b) > 0 then a else b)
+let i64_min (a:int64) (b:int64) : int64 = (if (Int64.compare a b) < 0 then a else b)
 
 (* 
  * Local Variables:

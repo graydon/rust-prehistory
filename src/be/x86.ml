@@ -190,19 +190,17 @@ let spill_slot (framesz:int64) (i:int) : Il.operand =
            (Int64.mul 4L (Int64.of_int i)))))
 ;;
 
-let fn_prologue (e:Il.emitter) (f:Ast.fn) : unit =
+let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) : unit =
   let r x = Il.Reg (Il.Hreg x) in
-    (* FIXME: get the frame size, obviously! *)
-  let framesz = Asm.IMM 0L in (* (Asm.IMM f.Ast.fn_frame.Ast.heavy_frame_layout.layout_size) in *)
-    (* Il.emit_full e (Some f.Ast.fn_fixup) (Il.CPUSH Il.M32) (Il.Nil) (r ebp) Il.Nil; *)
+    Il.emit_full e (Some fn_fixup) (Il.CPUSH Il.M32) (Il.Nil) (r ebp) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebx) Il.Nil;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
-    Il.emit e Il.SUB (r esp) (r esp) (Il.Imm framesz)
+    Il.emit e Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM framesz))
 ;;
 
-let fn_epilogue (e:Il.emitter) (f:Ast.fn) : unit = 
+let fn_epilogue (e:Il.emitter) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
     Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
     Il.emit e (Il.CPOP Il.M32) (r ebx) Il.Nil Il.Nil;
