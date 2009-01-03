@@ -34,7 +34,6 @@ type ctxt =
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
 	  ctxt_abi: Abi.abi;
       mutable ctxt_data_items: Asm.item list;
-      mutable ctxt_epilogue_jumps: int list;
       ctxt_text_items: (string, (Il.quads * int)) Hashtbl.t;
       ctxt_entry_prog: fixup;
     }
@@ -54,7 +53,6 @@ let	new_ctxt sess abi =
     ctxt_fn_fixups = Hashtbl.create 0;
 	ctxt_abi = abi;    
     ctxt_data_items = [];
-    ctxt_epilogue_jumps = [];
     ctxt_text_items = Hashtbl.create 0;
     ctxt_entry_prog = new_fixup "entry prog fixup";
   }

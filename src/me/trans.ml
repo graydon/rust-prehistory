@@ -612,6 +612,8 @@ let trans_visitor
     emit Il.DEAD Il.Nil Il.Nil Il.Nil
   in
 
+  let epilogue_jumps = Stack.create() in 
+
 
   let lval_to_referent (id:node_id) : node_id = 
     if Hashtbl.mem cx.ctxt_lval_to_referent id
@@ -923,7 +925,7 @@ let trans_visitor
                           let ret = trans_out_slot (Stack.top fn_frame_layouts) true in 
                             emit Il.MOV ret (trans_atom at) Il.Nil
                   end;
-                  cx.ctxt_epilogue_jumps <- (mark ()) :: cx.ctxt_epilogue_jumps;
+                  Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;                          
                 emit Il.JMP Il.Nil badlab Il.Nil
             | Some _ -> ()
@@ -951,15 +953,13 @@ let trans_visitor
     
   let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =  
     Stack.push (get_frame_layout fnid) fn_frame_layouts;
-    let saved_epilogue_jumps = cx.ctxt_epilogue_jumps in
-      cx.ctxt_epilogue_jumps <- [];
+    Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
       Il.emit_full (emitter()) (Some (get_fn_fixup fnid)) Il.DEAD Il.Nil Il.Nil Il.Nil;
       cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) fn;
       trans_block fn.Ast.fn_body;
-      List.iter patch cx.ctxt_epilogue_jumps;
+      Stack.iter patch (Stack.pop epilogue_jumps);
       cx.ctxt_abi.Abi.abi_emit_fn_epilogue (emitter()) fn;
-      cx.ctxt_epilogue_jumps <- saved_epilogue_jumps;
       capture_emitted_quads ();
       pop_emitter ();
       ignore (Stack.pop fn_frame_layouts)
