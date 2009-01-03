@@ -168,7 +168,6 @@ Complete table of contents
 * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
 * Ref.Stmt.Ret::                Statement for stopping and producing a value.
 * Ref.Stmt.Put::                Statement for pausing and producing a value.
-* Ref.Stmt.Goto::               Statement for local nonnlinear control transfer.
 * Ref.Stmt.Fail::               Statement for nonlocal control transfer during failure.
 * Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
 * Ref.Stmt.While::              Statement for simple conditional looping.

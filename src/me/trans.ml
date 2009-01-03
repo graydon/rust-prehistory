@@ -3,6 +3,40 @@
 open Semant;;
 open Common;;
 
+let log cx = Session.log "trans" 
+  cx.ctxt_sess.Session.sess_log_trans
+  cx.ctxt_sess.Session.sess_log_out
+;;
+
+
+let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
+let imm_true = Il.Imm (Asm.IMM 1L);;
+let imm_false = Il.Imm (Asm.IMM 0L);;
+let badlab = Il.Label (-1);;
+
+
+let mark (cx:ctxt) : int = 
+  cx.ctxt_emit.Il.emit_pc
+;;
+
+
+let patch (cx:ctxt) (i:int) : unit = 
+  cx.ctxt_emit.Il.emit_quads.(i) 
+  <- { cx.ctxt_emit.Il.emit_quads.(i)
+       with Il.quad_lhs = Il.Label (mark cx) };
+  (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
+  Il.emit cx.ctxt_emit Il.DEAD Il.Nil Il.Nil Il.Nil
+;;  
+
+
+let reset_emitter (cx:ctxt) : unit = 
+  cx.ctxt_emit <- 
+    (Il.new_emitter 
+       cx.ctxt_abi.Abi.abi_prealloc_quad 
+       cx.ctxt_abi.Abi.abi_is_2addr_machine)
+;;
+
+
 (* 
 type ctxt = 
     {
@@ -31,11 +65,6 @@ let new_ctxt (sess:Session.sess) (abi:Abi.abi) : ctxt =
     ctxt_text_items = Hashtbl.create 0
   }
 
-let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
-let imm_true = Il.Imm (Asm.IMM 1L);;
-let imm_false = Il.Imm (Asm.IMM 0L);;
-let badlab = Il.Label (-1);;
-
 let find_heavy_frame cx = 
   let rec search list = 
     match list with 
@@ -46,33 +75,6 @@ let find_heavy_frame cx =
     search cx.ctxt_frames
 ;;
     
-
-let mark (cx:ctxt) : int = 
-  cx.ctxt_emit.Il.emit_pc
-;;
-
-
-let patch (cx:ctxt) (i:int) : unit = 
-  cx.ctxt_emit.Il.emit_quads.(i) 
-  <- { cx.ctxt_emit.Il.emit_quads.(i)
-       with Il.quad_lhs = Il.Label (mark cx) };
-  (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
-  Il.emit cx.ctxt_emit Il.DEAD Il.Nil Il.Nil Il.Nil
-;;  
-
-
-let log cx = Session.log "trans" 
-  cx.ctxt_sess.Session.sess_log_trans
-  cx.ctxt_sess.Session.sess_log_out
-;;
-
-
-let reset_emitter (cx:ctxt) : unit = 
-  cx.ctxt_emit <- 
-    (Il.new_emitter 
-       cx.ctxt_abi.Abi.abi_prealloc_quad 
-       cx.ctxt_abi.Abi.abi_is_2addr_machine)
-;;
 
 
 let capture_emitted_quads (cx:ctxt) : unit = 
@@ -604,36 +606,391 @@ and trans_mod_items
     : unit = 
   Hashtbl.iter (trans_mod_item cx) items
 *)
+
+let trans_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+  let path = Stack.create () in     
+  let fn_frame_layouts = Stack.create () in
+  let emit = Il.emit cx.ctxt_emit in
+
+  let lval_to_referent (id:node_id) : node_id = 
+    if Hashtbl.mem cx.ctxt_lval_to_referent id
+    then Hashtbl.find cx.ctxt_lval_to_referent id
+    else err (Some id) "Unresolved lval"
+  in
+
+  let lval_to_slot (id:node_id) : Ast.slot = 
+    let referent = lval_to_referent id in 
+      if Hashtbl.mem cx.ctxt_all_slots referent
+      then Hashtbl.find cx.ctxt_all_slots referent
+      else err (Some referent) "Unknown slot"
+  in
+    
+  let get_frame_layout (id:node_id) : layout = 
+    if Hashtbl.mem cx.ctxt_frame_layouts id
+    then Hashtbl.find cx.ctxt_frame_layouts id 
+    else err (Some id) "Unknown frame layout"
+  in
+
+  let path_name (_:unit) : string = 
+    String.concat "." (stk_elts_from_bot path) 
+  in
+
+  let trans_lval_full
+      (lv:Ast.lval) 
+      (pcrel_ok:bool)
+      (imm_ok:bool)
+      : Il.operand = 
+    Il.Nil
+  in
+
+  let trans_lval (lv:Ast.lval) : Il.operand = 
+    trans_lval_full lv false false
+  in
+
+  let trans_out_slot (frame:layout) (callee:bool) : Il.operand = 
+    Il.Nil
+  in
+
+  let atom_type (at:Ast.atom) : Ast.ty = 
+    match at with 
+        Ast.ATOM_literal {node=(Ast.LIT_str _); id=_} -> Ast.TY_str
+      | Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
+      | Ast.ATOM_lval (Ast.LVAL_base nb) -> 
+          let slot = lval_to_slot nb.id in 
+            begin
+              match slot.Ast.slot_ty with 
+                  None -> err (Some nb.id) "name refers to untyped slot, in atom_type"
+                | Some t -> t
+            end
+      | _ -> err None "unhandled form of atom in atom_type"
+  in
+    
+  let trans_atom (atom:Ast.atom) : Il.operand = 
+    match atom with 
+        Ast.ATOM_lval lv -> 
+          trans_lval lv
+            
+	  | Ast.ATOM_literal lit -> 
+          begin 
+            match lit.node with 
+                Ast.LIT_nil -> 
+		          Il.Nil
+                    
+	          | Ast.LIT_bool false -> 
+		          Il.Imm (Asm.IMM 0L)
+                    
+	          | Ast.LIT_bool true -> 
+		          Il.Imm (Asm.IMM 1L)
+                    
+	          | Ast.LIT_char c -> 
+		          Il.Imm (Asm.IMM (Int64.of_int (Char.code c)))
+                    
+	          | Ast.LIT_int (bi, s) -> 
+		          Il.Imm (Asm.IMM (Int64.of_int (Big_int.int_of_big_int bi)))
+                    
+              | Ast.LIT_str s -> 
+                  let strfix = new_fixup "string fixup" in
+                  let str = Asm.DEF (strfix, Asm.ZSTRING s) in
+                    cx.ctxt_data_items <- str :: cx.ctxt_data_items;
+                    (Il.Imm (Asm.M_POS strfix))
+                      
+	          | _ -> marker
+          end
+  in
+  
+  let trans_expr (expr:Ast.expr) : Il.operand = 
+    match expr with 
+        
+	    Ast.EXPR_binary (binop, a, b) -> 
+	      let lhs = trans_atom a in
+		  let rhs = trans_atom b in
+		  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+          let arith op = 
+			emit op dst lhs rhs;
+			dst
+          in
+          let rela cjmp = 
+            emit Il.CMP Il.Nil lhs rhs;
+            emit Il.MOV dst imm_true Il.Nil;
+            let j = mark cx in
+              emit cjmp Il.Nil badlab Il.Nil;
+              emit Il.MOV dst imm_false Il.Nil;
+              patch cx j;
+              dst
+          in
+            begin 
+		      match binop with
+                  Ast.BINOP_or -> arith Il.OR
+                | Ast.BINOP_and -> arith Il.AND
+                    
+                | Ast.BINOP_lsl -> arith Il.LSL
+                | Ast.BINOP_lsr -> arith Il.LSR
+                | Ast.BINOP_asr -> arith Il.ASR
+                    
+                | Ast.BINOP_add -> arith Il.ADD
+                | Ast.BINOP_sub -> arith Il.SUB
+                    
+                (* FIXME: switch on type of operands, IMUL/IDIV/IMOD etc. *)
+                | Ast.BINOP_mul -> arith Il.UMUL
+                | Ast.BINOP_div -> arith Il.UDIV
+                | Ast.BINOP_mod -> arith Il.UMOD
+                    
+                | Ast.BINOP_eq -> rela Il.JE                
+                | Ast.BINOP_ne -> rela Il.JNE                
+                | Ast.BINOP_lt -> rela Il.JL
+                | Ast.BINOP_le -> rela Il.JLE
+                | Ast.BINOP_ge -> rela Il.JGE
+                | Ast.BINOP_gt -> rela Il.JG
+                    
+	            | _ -> err None "Unhandled binop of expr in trans_expr"
+            end
+              
+	  | Ast.EXPR_unary (unop, a) -> 
+		  let src = trans_atom a in
+		  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+		  let op = match unop with
+			  Ast.UNOP_not -> Il.NOT
+			| Ast.UNOP_neg -> Il.NEG
+		  in
+			emit op dst src Il.Nil;
+			dst
+
+      | Ast.EXPR_atom a -> 
+          trans_atom a
+              
+	  | _ -> err None "Unhandled form of expr in Trans.trans_expr"
+  in
+    
+  let trans_log_int (a:Ast.atom) : unit = 
+    let v = trans_atom a in 
+    let f = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 0 in
+    let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+      emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+      emit Il.CCALL dst (Il.Reg f) Il.Nil;
+      emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
+  in
+    
+  let trans_log_str (a:Ast.atom) : unit = 
+    let v = trans_atom a in
+    let f = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 1 in
+    let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+      emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+      emit Il.CCALL dst (Il.Reg f) Il.Nil;
+      emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
+  in
+
+  let rec trans_block (block:Ast.block) : unit = 
+    Array.iter trans_stmt block.node
+      
+  and trans_stmt (stmt:Ast.stmt) : unit =
+    match stmt.node with 
+        
+        Ast.STMT_log a ->
+          begin
+            match atom_type a with 
+                Ast.TY_str -> trans_log_str a
+              | Ast.TY_int -> trans_log_int a
+              | _ -> err (Some stmt.id) "unimplemented logging type"
+          end
+            
+	  | Ast.STMT_copy (lv_dst, e_src) -> 
+		  let dst = trans_lval lv_dst in
+		  let src = trans_expr e_src in
+		    emit Il.MOV dst src Il.Nil
+              
+	  | Ast.STMT_block block -> 
+          trans_block block		  
+            
+      | Ast.STMT_while sw -> 
+          let back_jmp_target = mark cx in 
+          let (head_stmts, head_atom) = sw.Ast.while_lval in
+		    Array.iter trans_stmt head_stmts;
+            let v = trans_atom head_atom in
+              emit Il.CMP Il.Nil v imm_false;
+              let fwd_jmp_quad = mark cx in
+                emit Il.JE Il.Nil badlab Il.Nil;
+                trans_block sw.Ast.while_body;
+                emit Il.JMP Il.Nil (Il.Label back_jmp_target) Il.Nil;
+                patch cx fwd_jmp_quad
+                  
+      | Ast.STMT_if si -> 
+          let v = trans_atom si.Ast.if_test in 
+            emit Il.CMP Il.Nil v imm_true;
+            let skip_thn_clause_jmp = mark cx in 
+              emit Il.JNE Il.Nil badlab Il.Nil;
+              trans_block si.Ast.if_then;
+              begin 
+                match si.Ast.if_else with 
+                    None -> patch cx skip_thn_clause_jmp
+                  | Some els -> 
+                      let skip_els_clause_jmp = mark cx in
+                        emit Il.JMP Il.Nil badlab Il.Nil;
+                        patch cx skip_thn_clause_jmp;
+                        trans_block els;
+                        patch cx skip_els_clause_jmp                        
+              end
+                
+      | Ast.STMT_call (dst, flv, args) -> 
+          let abi = cx.ctxt_abi in
+          let fnid = 
+            match flv with 
+                Ast.LVAL_base nb -> lval_to_referent nb.id
+              | _ -> err None "unhandled lval type in trans_stmt"
+          in
+            (* FIXME: factor out call protocol into ABI bits. *)
+            for i = 0 to (Array.length args) - 1 do              
+              emit (Il.CPUSH Il.M32) Il.Nil (trans_atom args.(i)) Il.Nil
+            done;
+            (* Emit arg1: the process pointer. *)
+            emit (Il.CPUSH Il.M32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
+            (* Emit arg0: the output slot. *)
+            emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
+            let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+            let dst = trans_lval dst in
+            let fv = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
+              emit Il.CCALL vr fv Il.Nil;
+              emit Il.MOV dst vr Il.Nil;
+              emit Il.MOV dst (trans_out_slot (get_frame_layout fnid) false) Il.Nil;
+              emit Il.ADD abi.Abi.abi_sp_operand abi.Abi.abi_sp_operand 
+                (Il.Imm (Asm.IMM (Int64.of_int (4 * (2 + (Array.length args))))));
+              
+
+      | Ast.STMT_ret (proto_opt, atom_opt) -> 
+          begin
+          match proto_opt with 
+              None -> 
+                begin 
+                  begin 
+                    match atom_opt with 
+                        None -> ()
+                      | Some at -> 
+                          let ret = trans_out_slot (Stack.top fn_frame_layouts) true in 
+                            emit Il.MOV ret (trans_atom at) Il.Nil
+                  end;
+                  cx.ctxt_epilogue_jumps <- (mark cx) :: cx.ctxt_epilogue_jumps;
+                end;                          
+                emit Il.JMP Il.Nil badlab Il.Nil
+            | Some _ -> ()
+          end
+
+      | Ast.STMT_decl _ -> ()
+
+      | _ -> err (Some stmt.id) "unhandled form of statement in trans_stmt"
+  in
+
+  let capture_emitted_quads (_:unit) : unit = 
+    let n_vregs = cx.ctxt_emit.Il.emit_next_vreg in 
+    let quads = cx.ctxt_emit.Il.emit_quads in 
+    let name = String.concat "." (stk_elts_from_bot path) in
+      begin
+        log cx "emitted quads for %s:" name;
+        for i = 0 to (Array.length quads) - 1
+        do 
+          log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
+        done;
+        Hashtbl.add cx.ctxt_text_items name (quads, n_vregs);
+        reset_emitter cx
+      end
+  in
+    
+  let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =  
+    Stack.push (get_frame_layout fnid) fn_frame_layouts;
+    let saved_epilogue_jumps = cx.ctxt_epilogue_jumps in
+      cx.ctxt_epilogue_jumps <- [];
+      reset_emitter cx;
+      cx.ctxt_abi.Abi.abi_emit_fn_prologue cx.ctxt_emit fn;
+      trans_block fn.Ast.fn_body;
+      List.iter (patch cx) cx.ctxt_epilogue_jumps;
+      cx.ctxt_abi.Abi.abi_emit_fn_epilogue cx.ctxt_emit fn;      
+      cx.ctxt_epilogue_jumps <- saved_epilogue_jumps;
+      capture_emitted_quads ();
+      ignore (Stack.pop fn_frame_layouts)
+  in
+
+  let trans_prog_block (b:Ast.block) (ncomp:string) : fixup = 
+    let _ = Stack.push ncomp path in
+    let fix = new_fixup (path_name ()) in
+      reset_emitter cx;
+      Il.emit_full cx.ctxt_emit (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
+      cx.ctxt_abi.Abi.abi_emit_main_prologue cx.ctxt_emit b;      
+      trans_block b;
+      cx.ctxt_abi.Abi.abi_emit_main_epilogue cx.ctxt_emit b;
+      capture_emitted_quads ();
+      ignore (Stack.pop path);
+      fix
+  in
+    
+  let trans_prog (p:Ast.prog) : unit =   
+    let _ = log cx "translating program: %s" (path_name()) in
+    let init = 
+      (* FIXME: translate the init part as well. *)
+      Asm.IMM 0L
+    in
+    let main =     
+      match p.Ast.prog_main with 
+          None -> Asm.IMM 0L
+        | Some main -> Asm.M_POS (trans_prog_block main "main")            
+    in
+    let fini = 
+      match p.Ast.prog_fini with 
+          None -> Asm.IMM 0L
+        | Some main -> Asm.M_POS (trans_prog_block main "fini")
+    in
+    let prog = 
+      (* FIXME: only DEF the entry prog if its name matches a crate param! *)
+      (* FIXME: extract prog layout from ABI. *)    
+      Asm.DEF (cx.ctxt_entry_prog, 
+               Asm.SEQ [| Asm.WORD32 init; 
+                          Asm.WORD32 main; 
+                          Asm.WORD32 fini |]) 
+    in
+      cx.ctxt_data_items <- prog :: cx.ctxt_data_items
+  in
+    
+  let rec trans_mod_item 
+      (item:Ast.mod_item) 
+      : unit = 
+    begin
+      match item.node with 
+	      Ast.MOD_ITEM_fn f -> trans_fn item.id f.Ast.decl_item
+	    | Ast.MOD_ITEM_prog p -> trans_prog p.Ast.decl_item
+	    | _ -> ()
+    end
+  in
+    
+  let visit_mod_item_pre n p i =
+    Stack.push n path;
+    trans_mod_item i;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+  let visit_mod_item_post n p i = 
+    inner.Walk.visit_mod_item_post n p i;
+    ignore (Stack.pop path)
+  in
+    { inner with 
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post
+    }
+;;
+
     
 let trans_crate 
-    (sess:Session.sess)
-    (abi:Abi.abi)
-    (crate:Ast.mod_items) 
+    (cx:ctxt)
+    (items:Ast.mod_items) 
     : ((string, (Il.quads * int)) Hashtbl.t * Asm.item list * fixup) = 
-  (Hashtbl.create 0, [], (new_fixup "fixme"))
+  let passes = 
+	[|
+      (trans_visitor cx
+         Walk.empty_visitor)
+    |];
+  in
+    run_passes cx passes (log cx "%s") items;
+    (cx.ctxt_text_items, cx.ctxt_data_items, cx.ctxt_entry_prog)
 ;;
-(* 
-  try
-    let cx = new_ctxt sess abi in 
-	  trans_mod_items cx crate;
-      (cx.ctxt_text_items, cx.ctxt_data_items, cx.ctxt_entry_prog)
-  with 
-	  Semant_err (ido, str) -> 
-        begin
-          let spano = match ido with 
-              None -> None
-            | Some id -> (Session.get_span sess id)
-          in
-		  match spano with 
-			  None -> 
-                Session.fail sess "Trans error: %s\n%!" str
-		    | Some span ->
-			    Session.fail sess "%s:E:Trans error: %s\n%!" 
-                  (Session.string_of_span span) str
-        end;
-        (Hashtbl.create 0, [], new_fixup "entry prog fixup")
-;;
-*)
+
 
 (* 
  * Local Variables:

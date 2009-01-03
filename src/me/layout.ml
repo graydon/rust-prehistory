@@ -133,37 +133,42 @@ let layout_visitor
       in
         layout
   in
-  let frame_layouts = Stack.create () in 
+  let (block_stacks:(layout Stack.t) Stack.t) = Stack.create () in 
   let visit_mod_item_pre n p i = 
     begin
+      Stack.push (Stack.create()) block_stacks;
       match i.node with 
           Ast.MOD_ITEM_fn fd ->
             let layout = layout_fn i.id fd.Ast.decl_item in
-              Stack.push layout frame_layouts
+              Hashtbl.replace cx.ctxt_frame_layouts i.id layout
         | Ast.MOD_ITEM_prog pd ->
             let layout = layout_prog i.id pd.Ast.decl_item in
-              Stack.push layout frame_layouts
+              Hashtbl.replace cx.ctxt_frame_layouts i.id layout
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
   in
   let visit_mod_item_post n p i = 
     inner.Walk.visit_mod_item_post n p i;
-    begin
-      match i.node with 
-          Ast.MOD_ITEM_fn fd ->
-            ignore (Stack.pop frame_layouts)
-        | Ast.MOD_ITEM_prog pd ->
-            ignore (Stack.pop frame_layouts)
-        | _ -> ()
-    end
+    ignore (Stack.pop block_stacks)
   in
   let visit_block_pre b = 
-    ignore (layout_block 0L b);
-    inner.Walk.visit_block_pre b
+    let stk = Stack.top block_stacks in
+    let off = 
+      if Stack.is_empty stk 
+      then 0L
+      else Int64.add 
+        (Stack.top stk).layout_size 
+        (Stack.top stk).layout_offset
+    in
+    let layout = layout_block off b in
+      Stack.push layout stk;
+      inner.Walk.visit_block_pre b
   in
   let visit_block_post b = 
     inner.Walk.visit_block_post b;
+    let stk = Stack.top block_stacks in
+      ignore (Stack.pop stk)
   in
 
     { inner with 

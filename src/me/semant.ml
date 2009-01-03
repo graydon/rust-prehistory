@@ -31,7 +31,13 @@ type ctxt =
       ctxt_slot_vregs: (node_id,(int ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_layouts: (node_id,layout) Hashtbl.t;
-	  ctxt_abi: Abi.abi }
+	  ctxt_abi: Abi.abi;
+      mutable ctxt_data_items: Asm.item list;
+      mutable ctxt_epilogue_jumps: int list;
+      mutable ctxt_emit: Il.emitter;
+      ctxt_text_items: (string, (Il.quads * int)) Hashtbl.t;
+      ctxt_entry_prog: fixup;
+    }
 ;;
 
 let	new_ctxt sess abi = 
@@ -45,7 +51,15 @@ let	new_ctxt sess abi =
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_frame_layouts = Hashtbl.create 0;
-	ctxt_abi = abi }
+	ctxt_abi = abi;
+    ctxt_data_items = [];
+    ctxt_epilogue_jumps = [];
+    ctxt_emit = (Il.new_emitter 
+                   abi.Abi.abi_prealloc_quad 
+                   abi.Abi.abi_is_2addr_machine);
+    ctxt_text_items = Hashtbl.create 0;
+    ctxt_entry_prog = new_fixup "entry prog fixup";
+  }
 ;;
 
 exception Semant_err of ((node_id option) * string)
@@ -222,14 +236,34 @@ let run_passes
     (cx:ctxt) 
     (passes:Walk.visitor array) 
     (log:string->unit)
-    (items:Ast.mod_items) = 
+    (items:Ast.mod_items) 
+    : unit = 
   let do_pass i p =
     let logger s = log (Printf.sprintf "pass %d: %s" i s) in
       Walk.walk_mod_items 
         (Walk.mod_item_logging_visitor logger p) 
         items
   in
-    Array.iteri do_pass passes
+  let sess = cx.ctxt_sess in
+    if sess.Session.sess_failed
+    then ()
+    else 
+      try
+        Array.iteri do_pass passes
+      with 
+	      Semant_err (ido, str) -> 
+            begin
+              let spano = match ido with 
+                  None -> None
+                | Some id -> (Session.get_span sess id)
+              in
+		        match spano with 
+			        None -> 
+                      Session.fail sess "Error: %s\n%!" str
+		          | Some span ->
+			          Session.fail sess "%s:E:Error: %s\n%!" 
+                        (Session.string_of_span span) str
+            end
 ;;
   
 

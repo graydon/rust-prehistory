@@ -94,9 +94,11 @@ let _ = exit_if_failed ()
 let (abi:Abi.abi) = X86.abi;;
 
 (* Semantic passes. *)
+let sem_cx = Semant.new_ctxt sess abi
+;;
+
 let _ = 
   begin
-    let sem_cx = Semant.new_ctxt sess abi in
       Array.iter 
         (fun proc -> 
            proc sem_cx crate_items;
@@ -110,7 +112,7 @@ let _ =
 
 let ((text_items:(string, (Il.quads * int)) Hashtbl.t), 
      (data_items:Asm.item list),
-     (entry_prog_fixup:fixup)) = Trans.trans_crate sess abi crate_items;;
+     (entry_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate_items;;
 let _ = exit_if_failed ()
 ;;
 
