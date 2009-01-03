@@ -31,10 +31,10 @@ type ctxt =
       ctxt_slot_vregs: (node_id,(int ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_layouts: (node_id,layout) Hashtbl.t;
+      ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
 	  ctxt_abi: Abi.abi;
       mutable ctxt_data_items: Asm.item list;
       mutable ctxt_epilogue_jumps: int list;
-      mutable ctxt_emit: Il.emitter;
       ctxt_text_items: (string, (Il.quads * int)) Hashtbl.t;
       ctxt_entry_prog: fixup;
     }
@@ -51,12 +51,10 @@ let	new_ctxt sess abi =
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_frame_layouts = Hashtbl.create 0;
-	ctxt_abi = abi;
+    ctxt_fn_fixups = Hashtbl.create 0;
+	ctxt_abi = abi;    
     ctxt_data_items = [];
     ctxt_epilogue_jumps = [];
-    ctxt_emit = (Il.new_emitter 
-                   abi.Abi.abi_prealloc_quad 
-                   abi.Abi.abi_is_2addr_machine);
     ctxt_text_items = Hashtbl.create 0;
     ctxt_entry_prog = new_fixup "entry prog fixup";
   }

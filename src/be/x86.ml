@@ -293,8 +293,8 @@ let (abi:Abi.abi) =
     Abi.abi_emit_main_epilogue = main_epilogue;
     Abi.abi_clobbers = clobbers;
 
-    Abi.abi_sp_operand = Il.Reg (Il.Hreg esp);
-    Abi.abi_fp_operand = Il.Reg (Il.Hreg ebp);
+    Abi.abi_sp_reg = (Il.Hreg esp);
+    Abi.abi_fp_reg = (Il.Hreg ebp);
     Abi.abi_pp_operand = proc_ptr;
     Abi.abi_load_kern_fn = load_kern_fn;
     Abi.abi_frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;

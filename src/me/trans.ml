@@ -15,28 +15,6 @@ let imm_false = Il.Imm (Asm.IMM 0L);;
 let badlab = Il.Label (-1);;
 
 
-let mark (cx:ctxt) : int = 
-  cx.ctxt_emit.Il.emit_pc
-;;
-
-
-let patch (cx:ctxt) (i:int) : unit = 
-  cx.ctxt_emit.Il.emit_quads.(i) 
-  <- { cx.ctxt_emit.Il.emit_quads.(i)
-       with Il.quad_lhs = Il.Label (mark cx) };
-  (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
-  Il.emit cx.ctxt_emit Il.DEAD Il.Nil Il.Nil Il.Nil
-;;  
-
-
-let reset_emitter (cx:ctxt) : unit = 
-  cx.ctxt_emit <- 
-    (Il.new_emitter 
-       cx.ctxt_abi.Abi.abi_prealloc_quad 
-       cx.ctxt_abi.Abi.abi_is_2addr_machine)
-;;
-
-
 (* 
 type ctxt = 
     {
@@ -613,7 +591,27 @@ let trans_visitor
     : Walk.visitor = 
   let path = Stack.create () in     
   let fn_frame_layouts = Stack.create () in
-  let emit = Il.emit cx.ctxt_emit in
+
+  let emitters = Stack.create () in 
+  let push_new_emitter _ = 
+    Stack.push 
+      (Il.new_emitter 
+         cx.ctxt_abi.Abi.abi_prealloc_quad 
+         cx.ctxt_abi.Abi.abi_is_2addr_machine) 
+      emitters
+  in
+  let pop_emitter _ = ignore (Stack.pop emitters) in
+  let emitter _ = Stack.top emitters in
+  let emit op dst lhs rhs = Il.emit (emitter()) op dst lhs rhs in
+  let mark _ : int = (emitter()).Il.emit_pc in
+  let patch (i:int) : unit = 
+    (emitter()).Il.emit_quads.(i) 
+    <- { (emitter()).Il.emit_quads.(i)
+         with Il.quad_lhs = Il.Label (mark ()) };  
+    (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
+    emit Il.DEAD Il.Nil Il.Nil Il.Nil
+  in
+
 
   let lval_to_referent (id:node_id) : node_id = 
     if Hashtbl.mem cx.ctxt_lval_to_referent id
@@ -634,6 +632,12 @@ let trans_visitor
     else err (Some id) "Unknown frame layout"
   in
 
+  let get_fn_fixup (id:node_id) : fixup = 
+    if Hashtbl.mem cx.ctxt_fn_fixups id
+    then Hashtbl.find cx.ctxt_fn_fixups id 
+    else err (Some id) "Fn without fixup"
+  in
+
   let path_name (_:unit) : string = 
     String.concat "." (stk_elts_from_bot path) 
   in
@@ -643,15 +647,61 @@ let trans_visitor
       (pcrel_ok:bool)
       (imm_ok:bool)
       : Il.operand = 
-    Il.Nil
+    match lv with 
+        Ast.LVAL_base nb -> 
+          let referent = lval_to_referent nb.id in 
+            begin
+              match htab_search cx.ctxt_all_items referent with
+                  Some item ->
+                    begin
+                      match item with 
+                          Ast.MOD_ITEM_fn fd -> 
+                            let fix = get_fn_fixup referent in
+                              if pcrel_ok
+                              then Il.Pcrel fix
+                              else 
+                                let imm = (Il.Imm (Asm.M_POS fix)) in 
+                                  if imm_ok 
+                                  then imm
+                                  else 
+                                    let tmp = (Il.next_vreg (emitter())) in 
+		                              emit Il.MOV (Il.Reg tmp) imm Il.Nil;
+                                      (Il.Reg tmp)
+                        | _ -> err (Some referent) "unhandled item type in trans_lval_full"
+                    end
+                | None -> 
+                    begin
+                      match htab_search cx.ctxt_slot_vregs referent with
+                          Some vr -> Il.Reg (Il.Vreg (!vr))
+                        | None -> 
+                            begin
+                              match htab_search cx.ctxt_slot_layouts referent with 
+                                  None -> err (Some referent) "slot assigned to neither vreg nor layout"
+                                | Some layout -> 
+                                    Il.Mem (Il.M32, 
+                                            (Some cx.ctxt_abi.Abi.abi_fp_reg),
+                                            Asm.IMM layout.layout_offset)
+                            end
+                    end
+            end
+      | _ -> err None "unhandled form of lval in trans_lval_full"
   in
-
+    
   let trans_lval (lv:Ast.lval) : Il.operand = 
     trans_lval_full lv false false
   in
 
   let trans_out_slot (frame:layout) (callee:bool) : Il.operand = 
-    Il.Nil
+    if callee 
+    then 
+      Il.Mem (Il.M32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
+              (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)))
+    else
+      let sp_vn = Il.next_vreg_num (emitter()) in 
+      let sp = Il.Reg (Il.Vreg sp_vn) in
+        emit Il.MOV sp (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) Il.Nil;
+        emit Il.SUB sp sp (Il.Imm (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)));
+        Il.Mem (Il.M32, (Some (Il.Vreg sp_vn)), (Asm.IMM 0L))
   in
 
   let atom_type (at:Ast.atom) : Ast.ty = 
@@ -707,7 +757,7 @@ let trans_visitor
 	    Ast.EXPR_binary (binop, a, b) -> 
 	      let lhs = trans_atom a in
 		  let rhs = trans_atom b in
-		  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+		  let dst = Il.Reg (Il.next_vreg (emitter())) in 
           let arith op = 
 			emit op dst lhs rhs;
 			dst
@@ -715,10 +765,10 @@ let trans_visitor
           let rela cjmp = 
             emit Il.CMP Il.Nil lhs rhs;
             emit Il.MOV dst imm_true Il.Nil;
-            let j = mark cx in
+            let j = mark () in
               emit cjmp Il.Nil badlab Il.Nil;
               emit Il.MOV dst imm_false Il.Nil;
-              patch cx j;
+              patch j;
               dst
           in
             begin 
@@ -750,7 +800,7 @@ let trans_visitor
               
 	  | Ast.EXPR_unary (unop, a) -> 
 		  let src = trans_atom a in
-		  let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+		  let dst = Il.Reg (Il.next_vreg (emitter())) in 
 		  let op = match unop with
 			  Ast.UNOP_not -> Il.NOT
 			| Ast.UNOP_neg -> Il.NEG
@@ -766,20 +816,22 @@ let trans_visitor
     
   let trans_log_int (a:Ast.atom) : unit = 
     let v = trans_atom a in 
-    let f = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 0 in
-    let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+    let f = cx.ctxt_abi.Abi.abi_load_kern_fn (emitter()) 0 in
+    let dst = Il.Reg (Il.next_vreg (emitter())) in 
+    let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
       emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
       emit Il.CCALL dst (Il.Reg f) Il.Nil;
-      emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
+      emit Il.ADD sp sp (Il.Imm (Asm.IMM 4L));
   in
     
   let trans_log_str (a:Ast.atom) : unit = 
     let v = trans_atom a in
-    let f = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 1 in
-    let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+    let f = cx.ctxt_abi.Abi.abi_load_kern_fn (emitter()) 1 in
+    let dst = Il.Reg (Il.next_vreg (emitter())) in 
+    let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
       emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
       emit Il.CCALL dst (Il.Reg f) Il.Nil;
-      emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
+      emit Il.ADD sp sp (Il.Imm (Asm.IMM 4L));
   in
 
   let rec trans_block (block:Ast.block) : unit = 
@@ -805,32 +857,32 @@ let trans_visitor
           trans_block block		  
             
       | Ast.STMT_while sw -> 
-          let back_jmp_target = mark cx in 
+          let back_jmp_target = mark () in 
           let (head_stmts, head_atom) = sw.Ast.while_lval in
 		    Array.iter trans_stmt head_stmts;
             let v = trans_atom head_atom in
               emit Il.CMP Il.Nil v imm_false;
-              let fwd_jmp_quad = mark cx in
+              let fwd_jmp_quad = mark () in
                 emit Il.JE Il.Nil badlab Il.Nil;
                 trans_block sw.Ast.while_body;
                 emit Il.JMP Il.Nil (Il.Label back_jmp_target) Il.Nil;
-                patch cx fwd_jmp_quad
+                patch fwd_jmp_quad
                   
       | Ast.STMT_if si -> 
           let v = trans_atom si.Ast.if_test in 
             emit Il.CMP Il.Nil v imm_true;
-            let skip_thn_clause_jmp = mark cx in 
+            let skip_thn_clause_jmp = mark () in 
               emit Il.JNE Il.Nil badlab Il.Nil;
               trans_block si.Ast.if_then;
               begin 
                 match si.Ast.if_else with 
-                    None -> patch cx skip_thn_clause_jmp
+                    None -> patch skip_thn_clause_jmp
                   | Some els -> 
-                      let skip_els_clause_jmp = mark cx in
+                      let skip_els_clause_jmp = mark () in
                         emit Il.JMP Il.Nil badlab Il.Nil;
-                        patch cx skip_thn_clause_jmp;
+                        patch skip_thn_clause_jmp;
                         trans_block els;
-                        patch cx skip_els_clause_jmp                        
+                        patch skip_els_clause_jmp                        
               end
                 
       | Ast.STMT_call (dst, flv, args) -> 
@@ -848,13 +900,14 @@ let trans_visitor
             emit (Il.CPUSH Il.M32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
             (* Emit arg0: the output slot. *)
             emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
-            let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
+            let vr = Il.Reg (Il.next_vreg (emitter())) in 
+            let sp = Il.Reg (abi.Abi.abi_sp_reg) in
             let dst = trans_lval dst in
             let fv = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
               emit Il.CCALL vr fv Il.Nil;
               emit Il.MOV dst vr Il.Nil;
               emit Il.MOV dst (trans_out_slot (get_frame_layout fnid) false) Il.Nil;
-              emit Il.ADD abi.Abi.abi_sp_operand abi.Abi.abi_sp_operand 
+              emit Il.ADD sp sp 
                 (Il.Imm (Asm.IMM (Int64.of_int (4 * (2 + (Array.length args))))));
               
 
@@ -870,7 +923,7 @@ let trans_visitor
                           let ret = trans_out_slot (Stack.top fn_frame_layouts) true in 
                             emit Il.MOV ret (trans_atom at) Il.Nil
                   end;
-                  cx.ctxt_epilogue_jumps <- (mark cx) :: cx.ctxt_epilogue_jumps;
+                  cx.ctxt_epilogue_jumps <- (mark ()) :: cx.ctxt_epilogue_jumps;
                 end;                          
                 emit Il.JMP Il.Nil badlab Il.Nil
             | Some _ -> ()
@@ -882,9 +935,10 @@ let trans_visitor
   in
 
   let capture_emitted_quads (_:unit) : unit = 
-    let n_vregs = cx.ctxt_emit.Il.emit_next_vreg in 
-    let quads = cx.ctxt_emit.Il.emit_quads in 
-    let name = String.concat "." (stk_elts_from_bot path) in
+    let e = emitter() in 
+    let n_vregs = e.Il.emit_next_vreg in 
+    let quads = e.Il.emit_quads in 
+    let name = path_name () in
       begin
         log cx "emitted quads for %s:" name;
         for i = 0 to (Array.length quads) - 1
@@ -892,7 +946,6 @@ let trans_visitor
           log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
         done;
         Hashtbl.add cx.ctxt_text_items name (quads, n_vregs);
-        reset_emitter cx
       end
   in
     
@@ -900,25 +953,28 @@ let trans_visitor
     Stack.push (get_frame_layout fnid) fn_frame_layouts;
     let saved_epilogue_jumps = cx.ctxt_epilogue_jumps in
       cx.ctxt_epilogue_jumps <- [];
-      reset_emitter cx;
-      cx.ctxt_abi.Abi.abi_emit_fn_prologue cx.ctxt_emit fn;
+      push_new_emitter ();
+      Il.emit_full (emitter()) (Some (get_fn_fixup fnid)) Il.DEAD Il.Nil Il.Nil Il.Nil;
+      cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) fn;
       trans_block fn.Ast.fn_body;
-      List.iter (patch cx) cx.ctxt_epilogue_jumps;
-      cx.ctxt_abi.Abi.abi_emit_fn_epilogue cx.ctxt_emit fn;      
+      List.iter patch cx.ctxt_epilogue_jumps;
+      cx.ctxt_abi.Abi.abi_emit_fn_epilogue (emitter()) fn;
       cx.ctxt_epilogue_jumps <- saved_epilogue_jumps;
       capture_emitted_quads ();
+      pop_emitter ();
       ignore (Stack.pop fn_frame_layouts)
   in
 
   let trans_prog_block (b:Ast.block) (ncomp:string) : fixup = 
     let _ = Stack.push ncomp path in
     let fix = new_fixup (path_name ()) in
-      reset_emitter cx;
-      Il.emit_full cx.ctxt_emit (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
-      cx.ctxt_abi.Abi.abi_emit_main_prologue cx.ctxt_emit b;      
+      push_new_emitter ();
+      Il.emit_full (emitter()) (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
+      cx.ctxt_abi.Abi.abi_emit_main_prologue (emitter()) b;
       trans_block b;
-      cx.ctxt_abi.Abi.abi_emit_main_epilogue cx.ctxt_emit b;
+      cx.ctxt_abi.Abi.abi_emit_main_epilogue (emitter()) b;
       capture_emitted_quads ();
+      pop_emitter ();
       ignore (Stack.pop path);
       fix
   in
@@ -976,6 +1032,38 @@ let trans_visitor
     }
 ;;
 
+
+let fixup_assigning_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor = 
+
+  let path = Stack.create () in     
+
+  let path_name (_:unit) : string = 
+    String.concat "." (stk_elts_from_bot path) 
+  in
+
+  let visit_mod_item_pre n p i = 
+    Stack.push n path;
+    begin
+      match i.node with 
+          Ast.MOD_ITEM_fn _ -> 
+            Hashtbl.add cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+        | _ -> ()
+    end;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+
+  let visit_mod_item_post n p i = 
+    inner.Walk.visit_mod_item_post n p i;
+    ignore (Stack.pop path)
+  in
+  { inner with 
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post;
+    }
+
     
 let trans_crate 
     (cx:ctxt)
@@ -983,6 +1071,8 @@ let trans_crate
     : ((string, (Il.quads * int)) Hashtbl.t * Asm.item list * fixup) = 
   let passes = 
 	[|
+      (fixup_assigning_visitor cx
+         Walk.empty_visitor);
       (trans_visitor cx
          Walk.empty_visitor)
     |];
