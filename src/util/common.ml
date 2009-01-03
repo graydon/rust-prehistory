@@ -80,11 +80,16 @@ let htab_search (htab:('a,'b) Hashtbl.t) (k:'a) : ('b option) =
   else None
 ;;
 
+let htab_put (htab:('a,'b) Hashtbl.t) (a:'a) (b:'b) : unit =
+  assert (not (Hashtbl.mem htab a));
+  Hashtbl.add htab a b
+;;
+
 let htab_map (htab:('a,'b) Hashtbl.t) (f:'a -> 'b -> ('c * 'd)) : (('c,'d) Hashtbl.t) = 
   let ntab = Hashtbl.create (Hashtbl.length htab) in 
   let g a b = 
     let (c,d) = f a b in 
-      Hashtbl.add ntab c d
+      htab_put ntab c d
   in
     Hashtbl.iter g htab;
     ntab

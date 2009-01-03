@@ -72,7 +72,7 @@ TEST_OUTS:=$(TEST_EXES:$(CFG_EXE_SUFFIX)=.out)
 check: $(TEST_EXES) $(TEST_OUTS)
 
 test/%.out: test/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME) 
-	$< 2>&1 | tee $@
+	OCAMLRUNPARAM="b1" $< 2>&1 | tee $@
 
 test/%$(CFG_EXE_SUFFIX): test/%.rc test/%.rs $(CFG_COMPILER) 
 	$(CFG_COMPILER) -o $@ $<

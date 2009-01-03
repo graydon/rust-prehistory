@@ -323,8 +323,17 @@ let span ps apos bpos x =
   let id = !(ps.pstate_node_id) in 
     log ps "span for node #%d: %s" (int_of_node id) (Session.string_of_span span);
     ps.pstate_node_id := Node ((int_of_node id)+1);
-    Hashtbl.add ps.pstate_sess.Session.sess_spans id span;
+    htab_put ps.pstate_sess.Session.sess_spans id span;
     { node = x; id = id }
+;;
+
+let rec respan ps lval = 
+  match lval with 
+      Ast.LVAL_base nb -> 
+        let s = Hashtbl.find ps.pstate_sess.Session.sess_spans nb.id in
+          Ast.LVAL_base (span ps s.lo s.hi nb.node)
+    | Ast.LVAL_ext (base, ext) -> 
+        Ast.LVAL_ext ((respan ps base), ext)
 ;;
 
 let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
@@ -628,7 +637,7 @@ and parse_atomic_ty ps =
               | NIL -> Ast.TY_nil
               | _ -> Ast.TY_nil
           in
-            Hashtbl.add htab ident ty
+            htab_put htab ident ty
         in
         let _ = one_or_more OR parse_tag_entry ps in
           Ast.TY_tag htab
@@ -637,7 +646,7 @@ and parse_atomic_ty ps =
         let htab = Hashtbl.create 4 in 
         let parse_rec_entry ps = 
           let (slot, ident) = parse_slot_and_ident false ps in 
-            Hashtbl.add htab ident slot
+            htab_put htab ident slot
         in
         let _ = bracketed_zero_or_more LBRACE RBRACE None parse_rec_entry ps in
           Ast.TY_rec htab
@@ -703,7 +712,7 @@ and parse_rec_input htab ps =
         EQ -> 
           bump ps;
           let (stmts, expr) = (ctxt "rec input: expr" parse_expr ps) in
-			Hashtbl.add htab lab expr;
+			htab_put htab lab expr;
 			stmts
       | _ -> raise (unexpected ps)
           
@@ -766,7 +775,7 @@ and parse_bottom_expr ps =
         let bpos = lexpos ps in
         let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
         let stmt = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_rec htab)) in
-		  (Array.append stmts [| decl; stmt |], Ast.ATOM_lval tmp)
+		  (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
             
 	| LBRACKET -> 
         let apos = lexpos ps in
@@ -774,7 +783,7 @@ and parse_bottom_expr ps =
         let bpos = lexpos ps in
         let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
         let stmt = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_vec lvals)) in
-		  (Array.append stmts [| decl; stmt |], Ast.ATOM_lval tmp)
+		  (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
             
     | IDENT _ -> 
         let apos = lexpos ps in 
@@ -788,7 +797,7 @@ and parse_bottom_expr ps =
 				 let call = span ps apos bpos (Ast.STMT_call (tmp, lval, args)) in
 				 let cstmts = [| tempdecl; call |] in
 				 let stmts = Array.concat [lstmts; astmts; cstmts] in
-				   (stmts, Ast.ATOM_lval tmp)
+				   (stmts, Ast.ATOM_lval (respan ps tmp))
 					 
              | _ -> 
 				 (lstmts, Ast.ATOM_lval lval))
@@ -807,7 +816,7 @@ and parse_negation_expr ps =
           let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
           let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_unary (Ast.UNOP_not, atom))) in
           let stmts = Array.append stmts [| decl; copy |] in
-			(stmts, Ast.ATOM_lval tmp)
+			(stmts, Ast.ATOM_lval (respan ps tmp))
     | _ -> parse_bottom_expr ps
         
 		
@@ -822,7 +831,7 @@ and binop_rhs ps name lhs rhs_parse_fn op =
   let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
   let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_binary (op, l_atom, r_atom))) in
   let stmts = Array.concat [lstmts; rstmts; [| decl; copy |] ] in
-    (stmts, Ast.ATOM_lval tmp)
+    (stmts, Ast.ATOM_lval (respan ps tmp))
     
 and parse_factor_expr ps =
   let name = "factor expr" in
@@ -1058,7 +1067,7 @@ and parse_stmts ps =
 					    None -> ()
 					  | Some _ -> 
 						  let ext = Ast.COMP_named (Ast.COMP_idx i) in
-						  let src_lval = Ast.LVAL_ext (tmp, ext) in
+						  let src_lval = Ast.LVAL_ext ((respan ps tmp), ext) in
                           let src_atom = Ast.ATOM_lval src_lval in 
                           let dst_lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident idents.(i))) in
                           let copy = span ps apos bpos (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
@@ -1122,7 +1131,7 @@ and parse_stmts ps =
 		  let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_atom atom)) in
 		  let make_copy i dst = 
 			let ext = Ast.COMP_named (Ast.COMP_idx i) in
-			let lval = Ast.LVAL_ext (tmp, ext) in
+			let lval = Ast.LVAL_ext ((respan ps tmp), ext) in
 			let e = Ast.EXPR_atom (Ast.ATOM_lval lval) in
 			  span ps apos bpos (Ast.STMT_copy (dst, e))
 		  in
@@ -1139,7 +1148,7 @@ and parse_stmts ps =
 				   let stmts = Array.append lstmts astmts in
                    let bpos = lexpos ps in
 				   let (nonce, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in	
-				   let call = span ps apos bpos (Ast.STMT_call (tmp, lval, args)) in
+				   let call = span ps apos bpos (Ast.STMT_call ((respan ps tmp), lval, args)) in
 					 Array.append stmts [| tempdecl; call |]
 
                | EQ -> 
@@ -1179,7 +1188,7 @@ and parse_prog_item prog_cell stmts_cell ps =
 
     | _ -> 
         let (ident, stmts, item) = ctxt "prog_item: mod item" parse_mod_item ps in 
-          Hashtbl.add (!prog_cell).Ast.prog_mod ident item;
+          htab_put (!prog_cell).Ast.prog_mod ident item;
 		  stmts_cell := stmts :: (!stmts_cell)
 
 and parse_prog ps = 
@@ -1353,7 +1362,7 @@ let rec parse_crate_entry tok prefix htab ps =
   let item_mod = span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
                                                     Ast.decl_item = items })
   in
-    Hashtbl.add htab name item_mod
+    htab_put htab name item_mod
       
 and parse_raw_mod_items ps = 
   let htab = Hashtbl.create 4 in
@@ -1362,7 +1371,7 @@ and parse_raw_mod_items ps =
       let (ident, stmts, item) = parse_mod_item ps in
 		if Array.length stmts != 0
 		then raise (Parse_err (ps, "top-level module cannot contain implicit statements"));
-		Hashtbl.add htab ident item
+		htab_put htab ident item
     done;
     expect ps EOF;
     htab

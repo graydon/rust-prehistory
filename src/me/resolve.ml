@@ -100,9 +100,9 @@ let block_scope_forming_visitor
     : Walk.visitor = 
   let visit_block_pre b = 
     if not (Hashtbl.mem cx.ctxt_block_items b.id)
-    then Hashtbl.add cx.ctxt_block_items b.id (Hashtbl.create 0);
+    then htab_put cx.ctxt_block_items b.id (Hashtbl.create 0);
     if not (Hashtbl.mem cx.ctxt_block_slots b.id)
-    then Hashtbl.add cx.ctxt_block_slots b.id (Hashtbl.create 0);
+    then htab_put cx.ctxt_block_slots b.id (Hashtbl.create 0);
     inner.Walk.visit_block_pre b
   in
     { inner with Walk.visit_block_pre = visit_block_pre }
@@ -155,10 +155,10 @@ let decl_stmt_collecting_visitor
                 match d with 
                     Ast.DECL_mod_item (ident, item) -> 
                       check_and_log_ident item.id ident;
-                      Hashtbl.add items ident item.id
+                      htab_put items ident item.id
                   | Ast.DECL_slot (key, sid) -> 
                       check_and_log_key sid.id key;
-                      Hashtbl.add slots key sid.id
+                      htab_put slots key sid.id
             end
         | _ -> ()
     end;
@@ -214,7 +214,7 @@ let all_item_collecting_visitor
     (inner:Walk.visitor) 
     : Walk.visitor = 
   let visit_mod_item_pre n p i = 
-    Hashtbl.add cx.ctxt_all_items i.id i.node;
+    htab_put cx.ctxt_all_items i.id i.node;
     log cx "collected item #%d" (int_of_node i.id);
     inner.Walk.visit_mod_item_pre n p i
   in
@@ -321,7 +321,7 @@ let slot_resolving_visitor
 
   let visit_slot_identified_pre slot = 
     let slot = resolve_slot_identified slot in
-      Hashtbl.add cx.ctxt_all_slots slot.id slot.node;
+      htab_put cx.ctxt_all_slots slot.id slot.node;
       log cx "collected resolved slot #%d with type %s" (int_of_node slot.id) 
         (match slot.node.Ast.slot_ty with 
              None -> "??"
@@ -406,10 +406,11 @@ let lval_base_resolving_visitor
   let visit_lval_pre lv = 
     let rec lookup_lval lv = 
       match lv with 
-          Ast.LVAL_ext (base, _) -> lookup_lval base
+          Ast.LVAL_ext (base, _) -> err None "unhandled form of lval in resolve"
         | Ast.LVAL_base nb ->  
             let slot_id = lookup_slot_by_name_base nb.id nb.node in 
-              Hashtbl.add cx.ctxt_lval_to_referent nb.id slot_id
+              log cx "resolved lval #%d to slot #%d" (int_of_node nb.id) (int_of_node slot_id);
+              htab_put cx.ctxt_lval_to_referent nb.id slot_id
     in
       lookup_lval lv;
       inner.Walk.visit_lval_pre lv
@@ -621,7 +622,7 @@ let apply_ctxt_generic
 		  let item' = (ctor { Ast.decl_params = [| |];
 							  Ast.decl_item = ty })
 		  in
-			Hashtbl.add htab ident { node = item'; 
+			htab_put htab ident { node = item'; 
 									 id = id }
 		in
 		  Array.iteri addty params;
@@ -819,7 +820,7 @@ and string_of_base cx base =
 
 and mod_type_of_mod m = 
   let ty_items = Hashtbl.create 4 in 
-  let add n i = Hashtbl.add ty_items n (mod_type_item_of_mod_item i) in
+  let add n i = htab_put ty_items n (mod_type_item_of_mod_item i) in
 	Hashtbl.iter add m;
 	ty_items
 
@@ -1215,7 +1216,7 @@ and extend_ctxt_by_frame
 	for i = 0 to (Array.length items) - 1
 	do
 	  let (ident, item) = items.(i) in 
-		Hashtbl.add items' ident (new_layout(), item)
+		htab_put items' ident (new_layout(), item)
 	done;
     let light = { Ast.light_frame_layout = new_layout();
 		          Ast.light_frame_locals = Hashtbl.create 0;
@@ -1357,7 +1358,7 @@ and resolve_ty
         Ast.TY_vec (resolve_ty cx t)
 	| Ast.TY_rec tr ->
         let newt = Hashtbl.create (Hashtbl.length tr) in
-          (Hashtbl.iter (fun k s -> Hashtbl.add newt k (resolve_slot cx None s)) tr;
+          (Hashtbl.iter (fun k s -> htab_put newt k (resolve_slot cx None s)) tr;
            Ast.TY_rec newt)
 	| Ast.TY_chan t -> 
         Ast.TY_chan (resolve_ty cx t)

@@ -1223,14 +1223,14 @@ let emit_file
   in
 
   let _ = 
-	Hashtbl.add text_items "_start" start_fn;
-	Hashtbl.add text_items "_init" (DEF (init_fixup, do_nothing_fn));
-	Hashtbl.add text_items "_fini" (DEF (fini_fixup, do_nothing_fn));
-	Hashtbl.add text_items "main" (DEF (main_fixup, main_fn));
-	Hashtbl.add text_items "rust_code" code;
-	Hashtbl.add rodata_items "rust_rodata" data;
-	Hashtbl.add import_fixups "__libc_start_main" libc_start_main_fixup;
-	Hashtbl.add import_fixups "rust_start" rust_start_fixup
+	htab_put text_items "_start" start_fn;
+	htab_put text_items "_init" (DEF (init_fixup, do_nothing_fn));
+	htab_put text_items "_fini" (DEF (fini_fixup, do_nothing_fn));
+	htab_put text_items "main" (DEF (main_fixup, main_fn));
+	htab_put text_items "rust_code" code;
+	htab_put rodata_items "rust_rodata" data;
+	htab_put import_fixups "__libc_start_main" libc_start_main_fixup;
+	htab_put import_fixups "rust_start" rust_start_fixup
   in
   let all_items = 
 	elf32_linux_x86_file

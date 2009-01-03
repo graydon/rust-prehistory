@@ -65,7 +65,7 @@ let capture_emitted_quads (cx:ctxt) : unit =
       do 
         log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
       done;
-      Hashtbl.add cx.ctxt_text_items name (quads, n_vregs);
+      htab_put cx.ctxt_text_items name (quads, n_vregs);
       reset_emitter cx
     end
 ;;
@@ -956,7 +956,7 @@ let trans_visitor
         do 
           log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
         done;
-        Hashtbl.add cx.ctxt_text_items name (quads, n_vregs);
+        htab_put cx.ctxt_text_items name (quads, n_vregs);
       end
   in
     
@@ -1058,7 +1058,7 @@ let fixup_assigning_visitor
     begin
       match i.node with 
           Ast.MOD_ITEM_fn _ -> 
-            Hashtbl.add cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+            htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i

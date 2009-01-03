@@ -9,7 +9,7 @@
 
   let keyword_table = Hashtbl.create 100
   let _ =
-    List.iter (fun (kwd, tok) -> Hashtbl.add keyword_table kwd tok)
+    List.iter (fun (kwd, tok) -> Common.htab_put keyword_table kwd tok)
               [ ("crate", CRATE);
                 ("mod", MOD);
                 ("use", USE);

@@ -79,7 +79,7 @@ let layout_visitor
         let slot = Hashtbl.find cx.ctxt_all_slots id in
         let layout = layout_slot cx.ctxt_abi 0L slot in 
           log cx "forming layout for slot #%d: %s" (int_of_node id) (string_of_layout layout);
-          Hashtbl.add cx.ctxt_slot_layouts id layout;
+          htab_put cx.ctxt_slot_layouts id layout;
           layout
     in
     let layouts = Array.map layout_slot_id slots in
@@ -108,7 +108,7 @@ let layout_visitor
       let sorted_slot_ids = Array.map (fun (_,sid) -> sid) sorted_keyed_slot_ids in
       let layout = layout_slot_ids offset sorted_slot_ids in
         log cx "block #%d total layout: %s" (int_of_node block.id) (string_of_layout layout);
-        Hashtbl.replace cx.ctxt_block_layouts block.id layout;
+        htab_put cx.ctxt_block_layouts block.id layout;
         layout
   in
 
@@ -125,16 +125,6 @@ let layout_visitor
         layout
   in
     
-  let layout_prog (id:node_id) (prog:Ast.prog) : layout = 
-    let offset = 0L in 
-      log cx "laying out prog #%d at fp offset %Ld" (int_of_node id) offset;
-      let layout = 
-        match prog.Ast.prog_main with 
-            Some m -> layout_block offset m 
-          | None -> new_layout offset 0L 0L
-      in
-        layout
-  in
   let (block_stacks:(layout Stack.t) Stack.t) = Stack.create () in 
   let visit_mod_item_pre n p i = 
     begin
@@ -142,10 +132,7 @@ let layout_visitor
       match i.node with 
           Ast.MOD_ITEM_fn fd ->
             let layout = layout_fn i.id fd.Ast.decl_item in
-              Hashtbl.replace cx.ctxt_frame_layouts i.id layout
-        | Ast.MOD_ITEM_prog pd ->
-            let layout = layout_prog i.id pd.Ast.decl_item in
-              Hashtbl.replace cx.ctxt_frame_layouts i.id layout
+              htab_put cx.ctxt_frame_layouts i.id layout
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
