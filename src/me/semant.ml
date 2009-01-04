@@ -178,18 +178,18 @@ let align_to (align:int64) (v:int64) : int64 =
   if align = 0L || align = 1L
   then v 
   else
-    let padding = Int64.sub align (Int64.rem v align) in 
-      Int64.add v padding
+    let rem = Int64.rem v align in
+      if rem = 0L 
+      then v
+      else 
+        let padding = Int64.sub align rem in 
+          Int64.add v padding
 ;;
 
 let pack (offset:int64) (layouts:layout array) : layout = 
   let pack_one (off,align) curr =
-    curr.layout_offset <- 
-      align_to curr.layout_align 
-      (Int64.add off curr.layout_size);
-    ((Int64.add 
-        curr.layout_offset 
-        curr.layout_size),
+    curr.layout_offset <- align_to curr.layout_align off;
+    ((Int64.add curr.layout_offset curr.layout_size),
      (i64_max align curr.layout_align))
   in
   let (final,align) = Array.fold_left pack_one (offset,0L) layouts in 

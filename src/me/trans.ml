@@ -708,7 +708,6 @@ let trans_visitor
       let sp_vn = Il.next_vreg_num (emitter()) in 
       let sp = Il.Reg (Il.Vreg sp_vn) in
         emit Il.MOV sp (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) Il.Nil;
-        emit Il.SUB sp sp (Il.Imm (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)));
         Il.Mem (Il.M32, (Some (Il.Vreg sp_vn)), (Asm.IMM 0L))
   in
 
@@ -898,7 +897,7 @@ let trans_visitor
       | Ast.STMT_call (dst, flv, args) -> 
           let abi = cx.ctxt_abi in
             (* FIXME: factor out call protocol into ABI bits. *)
-            for i = 0 to (Array.length args) - 1 do              
+            for i = (Array.length args) - 1 downto 0 do
               emit (Il.CPUSH Il.M32) Il.Nil (trans_atom args.(i)) Il.Nil
             done;
             (* Emit arg1: the process pointer. *)
