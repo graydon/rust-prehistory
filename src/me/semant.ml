@@ -36,7 +36,7 @@ type ctxt =
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
 	  ctxt_abi: Abi.abi;
       mutable ctxt_data_items: Asm.item list;
-      ctxt_text_items: (string, (Il.quads * int)) Hashtbl.t;
+      ctxt_text_items: (string, (node_id * Il.quads * int)) Hashtbl.t;
       ctxt_entry_prog: fixup;
     }
 ;;
@@ -213,7 +213,8 @@ let ty_mach_size (m:Ast.ty_mach) : int64 =
 let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout = 
   match t with
 	  Ast.TY_nil -> new_layout off 0L 0L
-	| Ast.TY_bool -> new_layout off 1L 1L
+        (* FIXME: bool should be 1L/1L, once we have sub-word-sized moves working. *)
+	| Ast.TY_bool -> new_layout off 4L 4L
 	| Ast.TY_mach m -> 
         let sz = ty_mach_size m in 
           new_layout off sz sz        

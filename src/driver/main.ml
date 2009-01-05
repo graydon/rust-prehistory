@@ -110,18 +110,20 @@ let _ =
   end
 ;;
 
-let ((text_items:(string, (Il.quads * int)) Hashtbl.t), 
+let ((text_items:(string, (node_id * Il.quads * int)) Hashtbl.t), 
      (data_items:Asm.item list),
      (entry_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate_items;;
 let _ = exit_if_failed ()
 ;;
 
 let (text_quads:Il.quads list) = 
-  (* FIXME: get the frame size from the translation. *)
-  let frame_sz = 64L in 
-    Hashtbl.fold 
-      (fun name (quads,n_vregs) accum -> (Ra.reg_alloc sess quads n_vregs abi frame_sz) :: accum) 
-      text_items [];;
+  let ra_quads name (node, quads, n_vregs) accum = 
+    let frame_sz = Hashtbl.find sem_cx.Semant.ctxt_frame_sizes node in
+    let quads' = Ra.reg_alloc sess quads n_vregs abi frame_sz in 
+      quads' :: accum
+  in
+    Hashtbl.fold ra_quads text_items []
+;;
 let _ = exit_if_failed ()
 ;;
 

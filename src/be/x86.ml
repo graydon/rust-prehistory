@@ -185,13 +185,13 @@ let spill_slot (framesz:int64) (i:int) : Il.operand =
   Il.Mem 
     (Il.M32, Some (Il.Hreg ebp), 
      (Asm.IMM 
-        (Int64.add 
-           (Int64.add framesz 12L) 
-           (Int64.mul 4L (Int64.of_int i)))))
+        (Int64.neg (Int64.add framesz (Int64.mul 4L (Int64.of_int i))))))
 ;;
 
 let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) : unit =
   let r x = Il.Reg (Il.Hreg x) in
+    (* FIXME: defer 'actual frame size' calculation to time of last spill slot assignment. *)
+  let framesz = Int64.add framesz 64L in
     Il.emit_full e (Some fn_fixup) (Il.CPUSH Il.M32) (Il.Nil) (r ebp) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
@@ -212,8 +212,8 @@ let fn_epilogue (e:Il.emitter) : unit =
 
 let main_prologue (e:Il.emitter) (block:Ast.block) : unit =
   let r x = Il.Reg (Il.Hreg x) in
-    (* FIXME: get the frame size, obviously! *)
-  let framesz = (Asm.IMM 0L) in (* block.node.Ast.block_frame.Ast.light_frame_layout.layout_size) in *)
+    (* FIXME: defer 'actual frame size' calculation to time of last spill slot assignment. *)
+  let framesz = (Asm.IMM 64L) in
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebp) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
@@ -247,10 +247,10 @@ let word_n reg i =
  *   *ebp+24       = [arg1   ] = proc ptr
  *   *ebp+20       = [arg0   ] = out ptr
  *   *ebp+16       = [retpc  ]
- *   *ebp+12       = [old-ebp]
- *   *ebp+8        = [old-edi]
- *   *ebp+4        = [old-esi]
- *   *ebp          = [old-ebx]
+ *   *ebp+12       = [old_ebp]
+ *   *ebp+8        = [old_edi]
+ *   *ebp+4        = [old_esi]
+ *   *ebp          = [old_ebx]
  * 
  *)
 

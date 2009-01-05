@@ -640,10 +640,10 @@ let trans_visitor
     else err (Some id) "Fn without fixup"
   in
 
-  let get_fn_framesz (id:node_id) : int64 = 
+  let get_framesz (id:node_id) : int64 = 
     if Hashtbl.mem cx.ctxt_frame_sizes id
     then Hashtbl.find cx.ctxt_frame_sizes id 
-    else err (Some id) "Fn without framesz"
+    else err (Some id) "Missing framesz"
   in
 
   let path_name (_:unit) : string = 
@@ -938,7 +938,7 @@ let trans_visitor
       | _ -> err (Some stmt.id) "unhandled form of statement in trans_stmt"
   in
 
-  let capture_emitted_quads (_:unit) : unit = 
+  let capture_emitted_quads (node:node_id) : unit = 
     let e = emitter() in 
     let n_vregs = e.Il.emit_next_vreg in 
     let quads = e.Il.emit_quads in 
@@ -949,24 +949,24 @@ let trans_visitor
         do 
           log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
         done;
-        htab_put cx.ctxt_text_items name (quads, n_vregs);
+        htab_put cx.ctxt_text_items name (node, quads, n_vregs);
       end
   in
     
   let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =  
     let fixup = get_fn_fixup fnid in
-    let framesz = get_fn_framesz fnid in
+    let framesz = get_framesz fnid in
     Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
       cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) fixup framesz;
       trans_block fn.Ast.fn_body;
       Stack.iter patch (Stack.pop epilogue_jumps);
       cx.ctxt_abi.Abi.abi_emit_fn_epilogue (emitter());
-      capture_emitted_quads ();
+      capture_emitted_quads fnid;
       pop_emitter ()
   in
 
-  let trans_prog_block (b:Ast.block) (ncomp:string) : fixup = 
+  let trans_prog_block (progid:node_id) (b:Ast.block) (ncomp:string) : fixup = 
     let _ = Stack.push ncomp path in
     let fix = new_fixup (path_name ()) in
       push_new_emitter ();
@@ -974,13 +974,13 @@ let trans_visitor
       cx.ctxt_abi.Abi.abi_emit_main_prologue (emitter()) b;
       trans_block b;
       cx.ctxt_abi.Abi.abi_emit_main_epilogue (emitter()) b;
-      capture_emitted_quads ();
+      capture_emitted_quads progid;
       pop_emitter ();
       ignore (Stack.pop path);
       fix
   in
     
-  let trans_prog (p:Ast.prog) : unit =   
+  let trans_prog (progid:node_id) (p:Ast.prog) : unit =   
     let _ = log cx "translating program: %s" (path_name()) in
     let init = 
       (* FIXME: translate the init part as well. *)
@@ -989,12 +989,12 @@ let trans_visitor
     let main =     
       match p.Ast.prog_main with 
           None -> Asm.IMM 0L
-        | Some main -> Asm.M_POS (trans_prog_block main "main")            
+        | Some main -> Asm.M_POS (trans_prog_block progid main "main")            
     in
     let fini = 
       match p.Ast.prog_fini with 
           None -> Asm.IMM 0L
-        | Some main -> Asm.M_POS (trans_prog_block main "fini")
+        | Some fini -> Asm.M_POS (trans_prog_block progid fini "fini")
     in
     let prog = 
       (* FIXME: only DEF the entry prog if its name matches a crate param! *)
@@ -1013,7 +1013,7 @@ let trans_visitor
     begin
       match item.node with 
 	      Ast.MOD_ITEM_fn f -> trans_fn item.id f.Ast.decl_item
-	    | Ast.MOD_ITEM_prog p -> trans_prog p.Ast.decl_item
+	    | Ast.MOD_ITEM_prog p -> trans_prog item.id p.Ast.decl_item
 	    | _ -> ()
     end
   in
@@ -1069,7 +1069,7 @@ let fixup_assigning_visitor
 let trans_crate 
     (cx:ctxt)
     (items:Ast.mod_items) 
-    : ((string, (Il.quads * int)) Hashtbl.t * Asm.item list * fixup) = 
+    : ((string, (node_id * Il.quads * int)) Hashtbl.t * Asm.item list * fixup) = 
   let passes = 
 	[|
       (fixup_assigning_visitor cx

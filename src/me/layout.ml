@@ -170,10 +170,12 @@ let layout_visitor
     let stk = Stack.top block_stacks in
     let off = 
       if Stack.is_empty stk 
-      then 0L
-      else Int64.add 
-        (Stack.top stk).layout_size 
-        (Stack.top stk).layout_offset
+      then 0L        
+      else 
+        (* NB: blocks grow down, so inner blocks occur at offset *minus* size. *)
+        Int64.sub 
+          (Stack.top stk).layout_offset
+          (Stack.top stk).layout_size         
     in
     let layout = layout_block off b in
       Stack.push layout stk;
