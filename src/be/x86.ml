@@ -336,8 +336,11 @@ let rm_r (oper:operand) (r:int) : Asm.item =
                    [|
                      Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
                                 Asm.WORD32 disp |];
+                     (* FIXME: relaxations broken! *)
+                     (* 
                      Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
                                 Asm.WORD8 disp|];
+                     *) 
                    |])
       | _ -> raise Unrecognized
 ;;
@@ -368,7 +371,10 @@ let insn_rm_r_imm (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : A
         Asm.new_relaxation
           [| 
             insn_rm_r_imm32 op32 oper r i;
+            (* FIXME: relaxations broken! *)
+            (*
             insn_rm_r_imm8 op8 oper r i 
+            *)
           |]
 ;;
 
@@ -386,7 +392,10 @@ let insn_pcrel_relax
     Asm.new_relaxation 
       [|
         Asm.SEQ [| op32_item; Asm.WORD32 pcrel_expr; def |];
-        Asm.SEQ [| op8_item; Asm.WORD8 pcrel_expr; def |];
+        (* FIXME: relaxations broken! *)
+        (*
+          Asm.SEQ [| op8_item; Asm.WORD8 pcrel_expr; def |];
+        *)
       |]
 ;;
 

@@ -9,7 +9,17 @@ progress:
  - add timer thread to runtime
  - write simple RR scheduler
 
+serious bugs:
+ - relaxations currently fall apart for operands in the range between
+   signed max and unsigned max, because we don't differentiate them
+   in the WORD8 .. WORD64 asm types. Change asm to take ty_mach, along
+   with Il.mem. This currently breaks pcrel jumps in the tests.
+
 cleanup:
+ - nothing aide from emitter-generated temps are in vregs at the moment. 
+   non-aliased subword slots should be. fix this!
+ - the spill segment of a frame is currently just 64 bytes of padding space;
+   make it a fixup that's given an M_SZ defined after the ra pass.
  - put logging and error-handling context in elf, pe, x86
  - use a datatype for kernel function codes, not int numbers
  - use a datatype for fields inside each kernel C structure

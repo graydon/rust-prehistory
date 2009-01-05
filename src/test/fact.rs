@@ -10,12 +10,16 @@ prog fact
 	  ret 1;
 	} else {
 	  log "recurring";
-	  ret x * f(x-1);
+	  let int y = x * f(x-1);
+	  log "returned";
+	  log y;
+	  ret y;
 	}
   }
   main
     {
 	  log f(5);
+	  log "all done";
     }
 }
 
