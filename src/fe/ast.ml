@@ -33,19 +33,6 @@ type slot_key =
    write foo[int,int].bar but not foo.bar.   
  *)
 
-type ty_mach = 
-    TY_u8
-  | TY_u16
-  | TY_u32
-  | TY_u64
-  | TY_s8
-  | TY_s16
-  | TY_s32
-  | TY_s64
-  | TY_b64
-;;
-
-
 type proto = 
     PROTO_ques  (* fn? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
   | PROTO_bang  (* fn! foo(...): yields 1 value. Never resumes.                           *)

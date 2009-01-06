@@ -100,29 +100,29 @@ let elf32_header
 	DEF 
 	  (elf_header_fixup, 
 	   SEQ [| elf_identification ELFCLASS32 ei_data;
-			  WORD16 (IMM (match e_type with 
-							   ET_NONE -> 0L
-							 | ET_REL -> 1L
-							 | ET_EXEC -> 2L
-							 | ET_DYN -> 3L
-							 | ET_CORE -> 4L));
-			  WORD16 (IMM (match e_machine with 
-							   EM_NONE -> 0L
-							 | EM_386 -> 3L
-							 | EM_X86_64 -> 62L));
-			  WORD32 (IMM (match e_version with 
-							   EV_NONE -> 0L
-							 | EV_CURRENT -> 1L));
-			  WORD32 (M_POS e_entry_fixup);
-			  WORD32 (F_POS e_phoff_fixup);
-			  WORD32 (F_POS e_shoff_fixup);
-			  WORD32 (IMM 0L); (* e_flags *)
-			  WORD16 (IMM elf32_ehsize);
-			  WORD16 (IMM elf32_phentsize);
-			  WORD16 (IMM e_phnum);
-			  WORD16 (IMM elf32_shentsize);
-			  WORD16 (IMM e_shnum);
-			  WORD16 (IMM e_shstrndx); 
+			  WORD (TY_u16, (IMM (match e_type with 
+							          ET_NONE -> 0L
+							        | ET_REL -> 1L
+							        | ET_EXEC -> 2L
+							        | ET_DYN -> 3L
+							        | ET_CORE -> 4L)));
+			  WORD (TY_u16, (IMM (match e_machine with 
+							          EM_NONE -> 0L
+							        | EM_386 -> 3L
+							        | EM_X86_64 -> 62L)));
+			  WORD (TY_u32, (IMM (match e_version with 
+							          EV_NONE -> 0L
+							        | EV_CURRENT -> 1L)));
+			  WORD (TY_u32, (M_POS e_entry_fixup));
+			  WORD (TY_u32, (F_POS e_phoff_fixup));
+			  WORD (TY_u32, (F_POS e_shoff_fixup));
+			  WORD (TY_u32, (IMM 0L)); (* e_flags *)
+			  WORD (TY_u16, (IMM elf32_ehsize));
+			  WORD (TY_u16, (IMM elf32_phentsize));
+			  WORD (TY_u16, (IMM e_phnum));
+			  WORD (TY_u16, (IMM elf32_shentsize));
+			  WORD (TY_u16, (IMM e_shnum));
+			  WORD (TY_u16, (IMM e_shstrndx)); 
 		   |])	  
 ;;
 
@@ -162,42 +162,42 @@ let section_header
 	: item = 
   SEQ 
 	[|
-	  WORD32 (SUB 
-				((F_POS shname_string_fixup),
-				 (F_POS shstring_table_fixup)));
-	  WORD32 (IMM (match sh_type with 
-					   SHT_NULL -> 0L
-					 | SHT_PROGBITS -> 1L
-					 | SHT_SYMTAB -> 2L
-					 | SHT_STRTAB -> 3L
-					 | SHT_RELA -> 4L
-					 | SHT_HASH -> 5L
-					 | SHT_DYNAMIC -> 6L
-					 | SHT_NOTE -> 7L
-					 | SHT_NOBITS -> 8L
-					 | SHT_REL -> 9L
-					 | SHT_SHLIB -> 10L
-					 | SHT_DYNSYM -> 11L));
-	  WORD32 (IMM (fold_flags 
-					 (fun f -> match f with 
-						  SHF_WRITE -> 0x1L
-						| SHF_ALLOC -> 0x2L
-						| SHF_EXECINSTR -> 0x3L) sh_flags));
-	  WORD32 (match section_fixup with 
-				  None -> (IMM 0L)
-				| Some s -> (M_POS s));
-	  WORD32 (match section_fixup with 
-				  None -> (IMM 0L)
-				| Some s -> (F_POS s));
-	  WORD32 (match section_fixup with 
-				  None -> (IMM 0L)
-				| Some s -> (F_SZ s));
-	  WORD32 (IMM (match sh_link with 
-					   None -> 0L
-					 | Some i -> i)); 
-	  WORD32 (IMM 0L); (* sh_info *)
-	  WORD32 (IMM sh_addralign);
-	  WORD32 (IMM sh_entsize);
+	  WORD (TY_s32, (SUB 
+				       ((F_POS shname_string_fixup),
+				        (F_POS shstring_table_fixup))));
+	  WORD (TY_u32, (IMM (match sh_type with 
+					          SHT_NULL -> 0L
+					        | SHT_PROGBITS -> 1L
+					        | SHT_SYMTAB -> 2L
+					        | SHT_STRTAB -> 3L
+					        | SHT_RELA -> 4L
+					        | SHT_HASH -> 5L
+					        | SHT_DYNAMIC -> 6L
+					        | SHT_NOTE -> 7L
+					        | SHT_NOBITS -> 8L
+					        | SHT_REL -> 9L
+					        | SHT_SHLIB -> 10L
+					        | SHT_DYNSYM -> 11L)));
+	  WORD (TY_u32, (IMM (fold_flags 
+					        (fun f -> match f with 
+						         SHF_WRITE -> 0x1L
+						       | SHF_ALLOC -> 0x2L
+						       | SHF_EXECINSTR -> 0x3L) sh_flags)));
+	  WORD (TY_u32, (match section_fixup with 
+				         None -> (IMM 0L)
+				       | Some s -> (M_POS s)));
+	  WORD (TY_u32, (match section_fixup with 
+				         None -> (IMM 0L)
+				       | Some s -> (F_POS s)));
+	  WORD (TY_u32, (match section_fixup with 
+				         None -> (IMM 0L)
+				       | Some s -> (F_SZ s)));
+	  WORD (TY_u32, (IMM (match sh_link with 
+					          None -> 0L
+					        | Some i -> i))); 
+	  WORD (TY_u32, (IMM 0L)); (* sh_info *)
+	  WORD (TY_u32, (IMM sh_addralign));
+	  WORD (TY_u32, (IMM sh_entsize));
 	|]
 ;;
 
@@ -228,27 +228,27 @@ let program_header
 	: item = 
   SEQ 
 	[|
-	  WORD32 (IMM (match p_type with 
-					   PT_NULL -> 0L
-					 | PT_LOAD -> 1L 
-					 | PT_DYNAMIC -> 2L
-					 | PT_INTERP -> 3L
-					 | PT_NOTE -> 4L
-					 | PT_SHLIB -> 5L
-					 | PT_PHDR -> 6L));
-	  WORD32 (F_POS segment_fixup);
-	  WORD32 (M_POS segment_fixup);
-	  WORD32 (M_POS segment_fixup); (* IMM 0L); p_paddr, 0 on most archs *)
-	  WORD32 (F_SZ segment_fixup);
-	  WORD32 (M_SZ segment_fixup);
-	  WORD32 (IMM (fold_flags
-					 (fun f -> 
-						match f with 
-							PF_X -> 0x1L
-						| PF_W -> 0x2L
-						| PF_R -> 0x4L)
-					 p_flags));
-	  WORD32 (IMM p_align);
+	  WORD (TY_u32, (IMM (match p_type with 
+					          PT_NULL -> 0L
+					        | PT_LOAD -> 1L 
+					        | PT_DYNAMIC -> 2L
+					        | PT_INTERP -> 3L
+					        | PT_NOTE -> 4L
+					        | PT_SHLIB -> 5L
+					        | PT_PHDR -> 6L)));
+	  WORD (TY_u32, (F_POS segment_fixup));
+	  WORD (TY_u32, (M_POS segment_fixup));
+	  WORD (TY_u32, (M_POS segment_fixup)); (* IMM 0L); p_paddr, 0 on most archs *)
+	  WORD (TY_u32, (F_SZ segment_fixup));
+	  WORD (TY_u32, (M_SZ segment_fixup));
+	  WORD (TY_u32, (IMM (fold_flags
+					        (fun f -> 
+						       match f with 
+							       PF_X -> 0x1L
+						         | PF_W -> 0x2L
+						         | PF_R -> 0x4L)
+					        p_flags)));
+	  WORD (TY_u32, (IMM p_align));
 	|]
 ;;
 
@@ -299,21 +299,21 @@ let symbol
   in
 	SEQ 
 	  [|
-		WORD32 (SUB 
-				  ((F_POS name_string_fixup),
-				   (F_POS string_table_fixup)));
-		WORD32 (match sym_target_fixup with
-					None -> (IMM 0L)
-				  | Some f -> (M_POS f));
-		WORD32 (match sym_target_fixup with 
-					None -> (IMM 0L)
-				  | Some f -> (M_SZ f));
-		WORD8           (* st_info *)
-		  (OR 
-			 ((SLL ((IMM st_bind_num), 4)),
-			  (AND ((IMM st_type_num), (IMM 0xfL)))));
-		WORD8 (IMM 0L); (* st_other *)
-		WORD16 (IMM st_shndx);
+		WORD (TY_u32, (SUB 
+				         ((F_POS name_string_fixup),
+				          (F_POS string_table_fixup))));
+		WORD (TY_u32, (match sym_target_fixup with
+					       None -> (IMM 0L)
+				         | Some f -> (M_POS f)));
+		WORD (TY_u32, (match sym_target_fixup with 
+					       None -> (IMM 0L)
+				         | Some f -> (M_SZ f)));
+		WORD (TY_u8,           (* st_info *)
+		      (OR 
+			     ((SLL ((IMM st_bind_num), 4)),
+			      (AND ((IMM st_type_num), (IMM 0xfL))))));
+		WORD (TY_u8, (IMM 0L)); (* st_other *)
+		WORD (TY_u16, (IMM st_shndx));
 	  |]
 ;;
 
@@ -397,7 +397,7 @@ let elf32_num_of_dyn_tag tag =
 let elf32_dyn_item d = 
   let (tag, expr) = d in
   let tagval = elf32_num_of_dyn_tag tag in
-	SEQ [| WORD32 (IMM tagval); WORD32 expr |]
+	SEQ [| WORD (TY_u32, (IMM tagval)); WORD (TY_u32, expr) |]
 ;;
 
 type elf32_386_reloc_type = 
@@ -438,14 +438,14 @@ let elf32_386_rela_item r =
 	  | R_386_GOTPC -> 10L
   in
   let info_expr = 
-	WORD32 
-	  (OR 
-		 (SLL ((r.elf32_386_rela_sym), 8),
-		  AND ((IMM 0xffL), (IMM type_val))))
+	WORD (TY_u32, 
+	      (OR 
+		     (SLL ((r.elf32_386_rela_sym), 8),
+		      AND ((IMM 0xffL), (IMM type_val)))))
   in
-	SEQ [| WORD32 r.elf32_386_rela_offset;
+	SEQ [| WORD (TY_u32, r.elf32_386_rela_offset);
 		   info_expr;
-		   WORD32 r.elf32_386_rela_addend |]
+		   WORD (TY_u32, r.elf32_386_rela_addend) |]
 ;;
 	
 
@@ -512,14 +512,14 @@ let elf32_linux_x86_file
  	let plt0_fixup = new_fixup "PLT[0]" in
 	let got1_fixup = new_fixup "GOT[1]" in
 	let got2_fixup = new_fixup "GOT[2]" in	  
-	let got_prefix = SEQ [| WORD32 (IMM 0L); 
-							DEF (got1_fixup, WORD32 (IMM 0L)); 
-							DEF (got2_fixup, WORD32 (IMM 0L)); |] 
+	let got_prefix = SEQ [| WORD (TY_u32, (IMM 0L)); 
+							DEF (got1_fixup, WORD (TY_u32, (IMM 0L))); 
+							DEF (got2_fixup, WORD (TY_u32, (IMM 0L))); |] 
 	in
 	let plt0_item = 
 	  let e = Il.new_emitter X86.prealloc_quad true in
-		Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS got1_fixup)) Il.Nil;
-		Il.emit e Il.JMP Il.Nil (Il.Mem (Il.M32, None, (M_POS got2_fixup))) Il.Nil;
+		Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS got1_fixup)) Il.Nil;
+		Il.emit e Il.JMP Il.Nil (Il.Mem (TY_u32, None, (M_POS got2_fixup))) Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil Il.Nil;
 		Il.emit e Il.NOP Il.Nil Il.Nil Il.Nil;
@@ -930,14 +930,14 @@ let elf32_linux_x86_file
 	  new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
  	let plt_item = 	  
 	  Il.emit_full e (Some plt_entry_fixup) 
-		Il.JMP Il.Nil (Il.Mem (Il.M32, None, (M_POS jump_slot_fixup))) Il.Nil;
+		Il.JMP Il.Nil (Il.Mem (TY_u32, None, (M_POS jump_slot_fixup))) Il.Nil;
 	  Il.emit_full e (Some jump_slot_initial_target_fixup)
-		(Il.CPUSH Il.M32)  Il.Nil (Il.Imm (IMM (Int64.of_int i))) Il.Nil;
+		(Il.CPUSH TY_u32)  Il.Nil (Il.Imm (IMM (Int64.of_int i))) Il.Nil;
 	  Il.emit e Il.JMP Il.Nil (Il.Pcrel plt0_fixup) Il.Nil;
 	  x86_items_of_emitted_quads sess e
 	in
 	let got_plt_item = DEF (jump_slot_fixup, 
-							WORD32 (M_POS jump_slot_initial_target_fixup)) in 
+							WORD (TY_u32, (M_POS jump_slot_initial_target_fixup))) in 
 	let rela_plt = 
 	  { elf32_386_rela_type = R_386_JMP_SLOT;
 		elf32_386_rela_offset = (M_POS jump_slot_fixup);
@@ -1186,14 +1186,14 @@ let emit_file
 
   let start_fn = 
 	let e = Il.new_emitter X86.prealloc_quad true in
-	  Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.eax)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.esp)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.edx)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS fini_fixup)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS init_fixup)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.ecx)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.esi)) Il.Nil;
-	  Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS main_fixup)) Il.Nil;
+	  Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Reg (Il.Hreg X86.eax)) Il.Nil;
+	  Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Reg (Il.Hreg X86.esp)) Il.Nil;
+	  Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Reg (Il.Hreg X86.edx)) Il.Nil;
+	  Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS fini_fixup)) Il.Nil;
+	  Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS init_fixup)) Il.Nil;
+	  Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Reg (Il.Hreg X86.ecx)) Il.Nil;
+	  Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Reg (Il.Hreg X86.esi)) Il.Nil;
+	  Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS main_fixup)) Il.Nil;
 	  Il.emit e Il.CCALL Il.Nil (Il.Pcrel libc_start_main_fixup) Il.Nil;
 	  x86_items_of_emitted_quads sess e
   in
@@ -1207,9 +1207,9 @@ let emit_file
   let main_fn = 
     let ecx = Il.Reg (Il.Hreg X86.ecx) in    
 	let e = Il.new_emitter X86.prealloc_quad true in
-      Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS entry_prog_fixup)) Il.Nil;
+      Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS entry_prog_fixup)) Il.Nil;
 	  Il.emit e Il.CCALL Il.Nil (Il.Pcrel rust_start_fixup) Il.Nil;
-      Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
+      Il.emit e (Il.CPOP TY_u32) ecx Il.Nil Il.Nil;
 	  Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 	  x86_items_of_emitted_quads sess e
   in

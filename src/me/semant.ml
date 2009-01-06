@@ -197,27 +197,14 @@ let pack (offset:int64) (layouts:layout array) : layout =
     new_layout offset sz align
 ;;
 
-let ty_mach_size (m:Ast.ty_mach) : int64 = 
-  match m with 
-      Ast.TY_u8 -> 1L
-    | Ast.TY_u16 -> 2L
-    | Ast.TY_u32 -> 4L
-    | Ast.TY_u64 -> 8L
-    | Ast.TY_s8 -> 1L
-    | Ast.TY_s16 -> 2L
-    | Ast.TY_s32 -> 4L
-    | Ast.TY_s64 -> 8L
-    | Ast.TY_b64 -> 8L
-;;
-
 let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout = 
   match t with
 	  Ast.TY_nil -> new_layout off 0L 0L
         (* FIXME: bool should be 1L/1L, once we have sub-word-sized moves working. *)
 	| Ast.TY_bool -> new_layout off 4L 4L
 	| Ast.TY_mach m -> 
-        let sz = ty_mach_size m in 
-          new_layout off sz sz        
+        let sz = Int64.of_int (bytes_of_ty_mach m) in 
+          new_layout off sz sz
 	| Ast.TY_char -> new_layout off 4L 4L
 	| Ast.TY_tup slots -> 
         let layouts = Array.map (layout_slot abi 0L) slots in

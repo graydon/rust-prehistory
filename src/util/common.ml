@@ -22,14 +22,49 @@ type target =
   | Win32_x86_pe
 ;;
 
-
-type abi_pseudo_reg = 
-	FP (* frame pointer *)
-  | PP (* process pointer *)
-  | CP (* crate pointer *)
-  | RP (* runtime pointer *)
+type ty_mach = 
+    TY_u8
+  | TY_u16
+  | TY_u32
+  | TY_u64
+  | TY_s8
+  | TY_s16
+  | TY_s32
+  | TY_s64
+  | TY_b64
 ;;
 
+let string_of_ty_mach (mach:ty_mach) : string = 
+  match mach with 
+    TY_u8 -> "u8"
+  | TY_u16 -> "u16"
+  | TY_u32 -> "u32"
+  | TY_u64 -> "u64"
+  | TY_s8 -> "s8"
+  | TY_s16 -> "s16"
+  | TY_s32 -> "s32"
+  | TY_s64 -> "s64"
+  | TY_b64 -> "b64"
+;;
+
+let bytes_of_ty_mach (mach:ty_mach) : int = 
+  match mach with 
+    TY_u8 -> 1
+  | TY_u16 -> 2
+  | TY_u32 -> 4
+  | TY_u64 -> 8
+  | TY_s8 -> 1
+  | TY_s16 -> 2
+  | TY_s32 -> 4
+  | TY_s64 -> 8
+  | TY_b64 -> 8
+;;
+
+let ty_mach_signed (mach:ty_mach) : bool = 
+  match mach with 
+      TY_s8 | TY_s16 | TY_s32 | TY_s64 -> true
+    | _ -> false
+;;
 
 type fixup = 
 	{ fixup_name: string;

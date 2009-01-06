@@ -182,15 +182,15 @@ let pe_header
 	(8, 
 	 SEQ [|
 	   STRING "PE\x00\x00";
-	   WORD16 (IMM (match machine with 
-						IMAGE_FILE_MACHINE_AMD64 -> 0x8664L
-					  | IMAGE_FILE_MACHINE_I386 -> 0x014cL));
-	   WORD16 (IMM number_of_sections);
-	   WORD32 (IMM (pe_timestamp()));
-	   WORD32 (IMM pointer_to_symbol_table);
-	   WORD32 (IMM number_of_symbols);
-	   WORD16 (F_SZ loader_hdr_fixup);
-	   WORD16 (IMM (fold_flags 
+	   WORD (TY_u16, (IMM (match machine with 
+						       IMAGE_FILE_MACHINE_AMD64 -> 0x8664L
+					         | IMAGE_FILE_MACHINE_I386 -> 0x014cL)));
+	   WORD (TY_u16, (IMM number_of_sections));
+	   WORD (TY_u32, (IMM (pe_timestamp())));
+	   WORD (TY_u32, (IMM pointer_to_symbol_table));
+	   WORD (TY_u32, (IMM number_of_symbols));
+	   WORD (TY_u16, (F_SZ loader_hdr_fixup));
+	   WORD (TY_u16, (IMM (fold_flags 
 					  (fun c -> match c with 
 						   IMAGE_FILE_RELOCS_STRIPPED -> 0x1L
 						 | IMAGE_FILE_EXECUTABLE_IMAGE -> 0x2L
@@ -199,7 +199,7 @@ let pe_header
 						 | IMAGE_FILE_32BIT_MACHINE -> 0x100L
 						 | IMAGE_FILE_DEBUG_STRIPPED -> 0x200L
 						 | IMAGE_FILE_DLL -> 0x2000L)
-					  characteristics))
+					  characteristics)))
 	 |])
 ;;
 
@@ -233,50 +233,50 @@ let pe_loader_header
   DEF 
 	(loader_hdr_fixup, 
 	 SEQ [|
-       WORD16 (IMM 0x10bL);                 (* COFF magic tag for PE32.  *)
+       WORD (TY_u16, (IMM 0x10bL));                 (* COFF magic tag for PE32.  *)
 	   (* Snagged *)
-       WORD8 (IMM 0x2L);                    (* Linker major version.     *)
-       WORD8 (IMM 0x38L);                   (* Linker minor version.     *)
+       WORD (TY_u8, (IMM 0x2L));                    (* Linker major version.     *)
+       WORD (TY_u8, (IMM 0x38L));                   (* Linker minor version.     *)
 	   
-       WORD32 (F_SZ text_fixup);            (* "size of code"            *)
-	   WORD32 (F_SZ init_data_fixup);       (* "size of all init data"   *)
-       WORD32 (IMM size_of_uninit_data);
-       WORD32 (rva entry_point_fixup);    (* "address of entry point"  *)
-       WORD32 (rva text_fixup);           (* "base of code"            *)
-       WORD32 (rva init_data_fixup);      (* "base of data"            *)
-       WORD32 (IMM pe_image_base);
-       WORD32 (IMM (Int64.of_int 
-					  pe_mem_alignment));
-       WORD32 (IMM (Int64.of_int 
-					  pe_file_alignment));
+       WORD (TY_u32, (F_SZ text_fixup));            (* "size of code"            *)
+	   WORD (TY_u32, (F_SZ init_data_fixup));       (* "size of all init data"   *)
+       WORD (TY_u32, (IMM size_of_uninit_data));
+       WORD (TY_u32, (rva entry_point_fixup));      (* "address of entry point"  *)
+       WORD (TY_u32, (rva text_fixup));             (* "base of code"            *)
+       WORD (TY_u32, (rva init_data_fixup));        (* "base of data"            *)
+       WORD (TY_u32, (IMM pe_image_base));
+       WORD (TY_u32, (IMM (Int64.of_int 
+					  pe_mem_alignment)));
+       WORD (TY_u32, (IMM (Int64.of_int 
+					  pe_file_alignment)));
 
-       WORD16 (IMM 4L);                     (* Major OS version: NT4.     *)
-       WORD16 (IMM 0L);                     (* Minor OS version.          *)
-       WORD16 (IMM 1L);                     (* Major image version.       *)
-       WORD16 (IMM 0L);                     (* Minor image version.       *)
-       WORD16 (IMM 4L);                     (* Major subsystem version.   *)
-       WORD16 (IMM 0L);                     (* Minor subsystem version.   *)
+       WORD (TY_u16, (IMM 4L));                     (* Major OS version: NT4.     *)
+       WORD (TY_u16, (IMM 0L));                     (* Minor OS version.          *)
+       WORD (TY_u16, (IMM 1L));                     (* Major image version.       *)
+       WORD (TY_u16, (IMM 0L));                     (* Minor image version.       *)
+       WORD (TY_u16, (IMM 4L));                     (* Major subsystem version.   *)
+       WORD (TY_u16, (IMM 0L));                     (* Minor subsystem version.   *)
 	   
-       WORD32 (IMM 0L);                     (* Reserved.                  *)
+       WORD (TY_u32, (IMM 0L));                     (* Reserved.                  *)
 
-       WORD32 (M_SZ image_fixup);
-       WORD32 (M_SZ all_hdrs_fixup);
+       WORD (TY_u32, (M_SZ image_fixup));
+       WORD (TY_u32, (M_SZ all_hdrs_fixup));
 
-       WORD32 (IMM 0L);                     (* Checksum, but OK if zero.  *)
-       WORD16 (IMM (match subsys with
+       WORD (TY_u32, (IMM 0L));                     (* Checksum, but OK if zero.  *)
+       WORD (TY_u16, (IMM (match subsys with
 						IMAGE_SUBSYSTEM_WINDOWS_GUI -> 2L
-					  | IMAGE_SUBSYSTEM_WINDOWS_CUI -> 3L));
+					  | IMAGE_SUBSYSTEM_WINDOWS_CUI -> 3L)));
 
-       WORD16 (IMM 0L);                     (* DLL characteristics.       *)
+       WORD (TY_u16, (IMM 0L));                     (* DLL characteristics.       *)
 
-       WORD32 (IMM 0x100000L);              (* Size of stack reserve.     *)
-       WORD32 (IMM 0x4000L);                (* Size of stack commit.      *)
+       WORD (TY_u32, (IMM 0x100000L));              (* Size of stack reserve.     *)
+       WORD (TY_u32, (IMM 0x4000L));                (* Size of stack commit.      *)
 
-       WORD32 (IMM 0x100000L);              (* Size of heap reserve.      *)
-       WORD32 (IMM 0x1000L);                (* Size of heap commit.       *)
+       WORD (TY_u32, (IMM 0x100000L));              (* Size of heap reserve.      *)
+       WORD (TY_u32, (IMM 0x1000L));                (* Size of heap commit.       *)
 
-       WORD32 (IMM 0L);                     (* Reserved.                  *)    
-       WORD32 (IMM 16L);                    (* Number of dir references.  *)
+       WORD (TY_u32, (IMM 0L));                     (* Reserved.                  *)    
+       WORD (TY_u32, (IMM 16L));                    (* Number of dir references.  *)
 
        (* Begin directories, variable part of hdr.        *)
 
@@ -291,26 +291,26 @@ let pe_loader_header
        *)
        
        
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Export dir.        *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Export dir.        *) 
 
-       WORD32 (rva import_dir_fixup);
-       WORD32 (M_SZ import_dir_fixup);
+       WORD (TY_u32, (rva import_dir_fixup));
+       WORD (TY_u32, (M_SZ import_dir_fixup));
 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Resource dir.      *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Exception dir.     *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Security dir.      *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Base reloc dir.    *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Debug dir.         *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Image desc dir.    *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Mach spec dir.     *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* TLS dir.           *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Resource dir.      *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Exception dir.     *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Security dir.      *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Base reloc dir.    *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Debug dir.         *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Image desc dir.    *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Mach spec dir.     *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* TLS dir.           *) 
 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Load config.       *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Bound import.      *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* IAT                *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* Delay import.      *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* COM descriptor     *) 
-       WORD32 (IMM 0L); WORD32 (IMM 0L);    (* ????????           *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Load config.       *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Bound import.      *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* IAT                *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Delay import.      *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* COM descriptor     *) 
+       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* ????????           *) 
 	 |])
     
 ;;
@@ -369,17 +369,17 @@ let pe_section_header
 		 file and section alignments differ. This is a stupid emitter
 		 so they're not, no problem. *)
 
-	  WORD32 (M_SZ hdr_fixup);  (* "Virtual size"    *)
-	  WORD32 (rva hdr_fixup); (* "Virtual address" *)
+	  WORD (TY_u32, (M_SZ hdr_fixup));  (* "Virtual size"    *)
+	  WORD (TY_u32, (rva hdr_fixup)); (* "Virtual address" *)
 
-	  WORD32 (F_SZ hdr_fixup);  (* "Size of raw data"    *)
-	  WORD32 (F_POS hdr_fixup); (* "Pointer to raw data" *)
+	  WORD (TY_u32, (F_SZ hdr_fixup));  (* "Size of raw data"    *)
+	  WORD (TY_u32, (F_POS hdr_fixup)); (* "Pointer to raw data" *)
       
-      WORD32 (IMM 0L);      (* Reserved. *)
-      WORD32 (IMM 0L);      (* Reserved. *)
-      WORD32 (IMM 0L);      (* Reserved. *)
+      WORD (TY_u32, (IMM 0L));      (* Reserved. *)
+      WORD (TY_u32, (IMM 0L));      (* Reserved. *)
+      WORD (TY_u32, (IMM 0L));      (* Reserved. *)
       
-      WORD32 (IMM (fold_flags 
+      WORD (TY_u32, (IMM (fold_flags 
 					 (fun c -> match c with 
 						  IMAGE_SCN_CNT_CODE -> 0x20L
 						| IMAGE_SCN_CNT_INITIALIZED_DATA -> 0x40L
@@ -388,7 +388,7 @@ let pe_section_header
 						| IMAGE_SCN_MEM_EXECUTE -> 0x20000000L
 						| IMAGE_SCN_MEM_READ -> 0x40000000L
 						| IMAGE_SCN_MEM_WRITE -> 0x80000000L)
-					 characteristics))
+					 characteristics)))
     |]
 ;;
 
@@ -462,30 +462,30 @@ let pe_import_section
 	     first, last, or both of the slots in one of these rows points
 	     to the RVA of the name/hint used to look the import up. This
 	     table format is a mess!  *)
-	  WORD32 (rva entry.pe_import_dll_ILT_fixup);    (* Import lookup table. *)
-	  WORD32 (IMM 0L);                                 (* Timestamp, unused.   *)
-	  WORD32 (IMM 0x0L);                               (* Forwarder chain, unused. *)
-	  WORD32 (rva entry.pe_import_dll_name_fixup);
-	  WORD32 (rva entry.pe_import_dll_IAT_fixup);    (* Import address table.*)
+	  WORD (TY_u32, (rva entry.pe_import_dll_ILT_fixup));    (* Import lookup table. *)
+	  WORD (TY_u32, (IMM 0L));                               (* Timestamp, unused.   *)
+	  WORD (TY_u32, (IMM 0x0L));                             (* Forwarder chain, unused. *)
+	  WORD (TY_u32, (rva entry.pe_import_dll_name_fixup));
+	  WORD (TY_u32, (rva entry.pe_import_dll_IAT_fixup));    (* Import address table.*)
 	|]
   in
 
   let form_ILT_slot
       (import:pe_import)
       : item = 
-	(WORD32 (rva import.pe_import_name_fixup))
+	(WORD (TY_u32, (rva import.pe_import_name_fixup)))
   in
 
   let form_IAT_slot
       (import:pe_import)
       : item = 
-	(DEF (import.pe_import_address_fixup, (WORD32 (rva import.pe_import_name_fixup))))
+	(DEF (import.pe_import_address_fixup, (WORD (TY_u32, (rva import.pe_import_name_fixup)))))
   in
     
   let form_tables_for_dll
 	  (dll:pe_import_dll_entry)
       : item = 
-	let terminator = WORD32 (IMM 0L) in
+	let terminator = WORD (TY_u32, (IMM 0L)) in
     let ilt = 
 	  SEQ [| 
 		SEQ (Array.map form_ILT_slot dll.pe_import_dll_imports);
@@ -516,7 +516,7 @@ let pe_import_section
 	   SEQ [| 
 		 (* import string entries begin with a 2-byte "hint", but we just
 			set it to zero.  *)
-		 (WORD16 (IMM 0L));
+		 (WORD (TY_u16, (IMM 0L)));
 		 ZSTRING import.pe_import_name;
 		 (if String.length import.pe_import_name mod 2 == 0
 		  then PAD 1
@@ -569,10 +569,10 @@ let pe_text_section
      * and assumed to be stdcall; so we have to clean up our own 
      * stack before returning.
      *)
-	Il.emit e Il.MOV ecx (Il.Mem (Il.M32, None, (M_POS startup_fn_fixup))) Il.Nil;
-	Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS startup_fn_arg_fixup)) Il.Nil;
+	Il.emit e Il.MOV ecx (Il.Mem (TY_u32, None, (M_POS startup_fn_fixup))) Il.Nil;
+	Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS startup_fn_arg_fixup)) Il.Nil;
 	Il.emit e Il.CCALL eax ecx Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) ecx Il.Nil Il.Nil;
 	Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 	def_aligned
 	  text_fixup

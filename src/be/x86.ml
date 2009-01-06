@@ -183,7 +183,7 @@ let clobbers (quad:Il.quad) : Il.hreg list =
 
 let spill_slot (framesz:int64) (i:int) : Il.operand = 
   Il.Mem 
-    (Il.M32, Some (Il.Hreg ebp), 
+    (TY_u32, Some (Il.Hreg ebp), 
      (Asm.IMM 
         (Int64.neg (Int64.add framesz (Int64.mul 4L (Int64.of_int i))))))
 ;;
@@ -192,10 +192,10 @@ let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) : unit =
   let r x = Il.Reg (Il.Hreg x) in
     (* FIXME: defer 'actual frame size' calculation to time of last spill slot assignment. *)
   let framesz = Int64.add framesz 64L in
-    Il.emit_full e (Some fn_fixup) (Il.CPUSH Il.M32) (Il.Nil) (r ebp) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebx) Il.Nil;
+    Il.emit_full e (Some fn_fixup) (Il.CPUSH TY_u32) (Il.Nil) (r ebp) Il.Nil;
+    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r edi) Il.Nil;
+    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r esi) Il.Nil;
+    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebx) Il.Nil;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
     Il.emit e Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM framesz))
 ;;
@@ -203,10 +203,10 @@ let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) : unit =
 let fn_epilogue (e:Il.emitter) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
     Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r ebx) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r esi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r edi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r ebp) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r ebx) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r esi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r edi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r ebp) Il.Nil Il.Nil;
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
 
@@ -214,10 +214,10 @@ let main_prologue (e:Il.emitter) (block:Ast.block) : unit =
   let r x = Il.Reg (Il.Hreg x) in
     (* FIXME: defer 'actual frame size' calculation to time of last spill slot assignment. *)
   let framesz = (Asm.IMM 64L) in
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebp) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r edi) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r esi) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (r ebx) Il.Nil;
+    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebp) Il.Nil;
+    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r edi) Il.Nil;
+    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r esi) Il.Nil;
+    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebx) Il.Nil;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
     Il.emit e Il.SUB (r esp) (r esp) (Il.Imm framesz)
 ;;
@@ -225,10 +225,10 @@ let main_prologue (e:Il.emitter) (block:Ast.block) : unit =
 let main_epilogue (e:Il.emitter) (block:Ast.block) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
     Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r ebx) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r esi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r edi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r ebp) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r ebx) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r esi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r edi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r ebp) Il.Nil Il.Nil;
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
 
@@ -236,7 +236,7 @@ let word_sz = 4L
 ;;
 
 let word_n reg i = 
-  Il.Mem (Il.M32, Some reg, Asm.IMM (Int64.mul (Int64.of_int i) word_sz))
+  Il.Mem (TY_u32, Some reg, Asm.IMM (Int64.mul (Int64.of_int i) word_sz))
 ;;
 
 (* 
@@ -273,7 +273,7 @@ let load_kern_fn (e:Il.emitter) (i:int) : Il.reg =
 let (abi:Abi.abi) = 
   {
     Abi.abi_ptr_sz = word_sz;
-    Abi.abi_ptr_mem = Il.M32;
+    Abi.abi_ptr_ty = TY_u32;
 
     Abi.abi_is_2addr_machine = true;
     Abi.abi_has_pcrel_loads = false;
@@ -320,27 +320,21 @@ let rm_r (oper:operand) (r:int) : Asm.item =
           Asm.BYTE (modrm_reg (reg rm) r)
       | Mem (_, None, disp) -> 
           Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
-                     Asm.WORD32 disp |]
+                     Asm.WORD (TY_s32, disp) |]
       | Mem (_, Some (Hreg rm), disp) when rm != reg_esp -> 
           (match disp with 
                Asm.IMM 0L when rm != reg_ebp -> 
                  Asm.BYTE (modrm_deref_reg (reg rm) r)
              | Asm.IMM n when imm_is_byte n -> 
                  Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
-                            Asm.WORD8 disp|]
-             | Asm.IMM _ -> 
-                 Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
-                            Asm.WORD32 disp |]
+                            Asm.WORD (TY_s8, disp)|]
              | _ -> 
                  Asm.new_relaxation
                    [|
                      Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
-                                Asm.WORD32 disp |];
-                     (* FIXME: relaxations broken! *)
-                     (* 
+                                Asm.WORD (TY_s32, disp) |];
                      Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
-                                Asm.WORD8 disp|];
-                     *) 
+                                Asm.WORD (TY_s8, disp) |];
                    |])
       | _ -> raise Unrecognized
 ;;
@@ -351,30 +345,19 @@ let insn_rm_r (op:int) (oper:operand) (r:int) : Asm.item =
 ;;
 
 
-let insn_rm_r_imm8 (op:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item = 
-  Asm.SEQ [| Asm.BYTE op; rm_r oper r; Asm.WORD8 i |]
+let insn_rm_r_imm (op:int) (oper:operand) (r:int) (ty:ty_mach) (i:Asm.expr64) : Asm.item = 
+  Asm.SEQ [| Asm.BYTE op; rm_r oper r; Asm.WORD (ty, i) |]
 ;;
 
-
-let insn_rm_r_imm32 (op:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item = 
-  Asm.SEQ [| Asm.BYTE op; rm_r oper r; Asm.WORD32 i |]
-;;
-
-
-let insn_rm_r_imm (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item = 
+let insn_rm_r_imm_u8_u32 (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item = 
   match i with 
       Asm.IMM n when imm_is_byte n -> 
-        insn_rm_r_imm8 op8 oper r i
-    | Asm.IMM k -> 
-        insn_rm_r_imm32 op32 oper r i
+        insn_rm_r_imm op8 oper r TY_u8 i
     | _ -> 
         Asm.new_relaxation
           [| 
-            insn_rm_r_imm32 op32 oper r i;
-            (* FIXME: relaxations broken! *)
-            (*
-            insn_rm_r_imm8 op8 oper r i 
-            *)
+            insn_rm_r_imm op32 oper r TY_u32 i;
+            insn_rm_r_imm op8 oper r TY_u8 i 
           |]
 ;;
 
@@ -391,11 +374,8 @@ let insn_pcrel_relax
   in
     Asm.new_relaxation 
       [|
-        Asm.SEQ [| op32_item; Asm.WORD32 pcrel_expr; def |];
-        (* FIXME: relaxations broken! *)
-        (*
-          Asm.SEQ [| op8_item; Asm.WORD8 pcrel_expr; def |];
-        *)
+        Asm.SEQ [| op32_item; Asm.WORD (TY_s32, pcrel_expr); def |];
+        Asm.SEQ [| op8_item; Asm.WORD (TY_s8, pcrel_expr); def |];
       |]
 ;;
 
@@ -405,7 +385,7 @@ let insn_pcrel_simple (op32:int) (fix:fixup) : Asm.item =
   let pcrel_expr = (Asm.SUB (Asm.M_POS fix, 
 						     Asm.M_POS pcrel_mark_fixup))
   in
-    Asm.SEQ [| Asm.BYTE op32; Asm.WORD32 pcrel_expr; def |]
+    Asm.SEQ [| Asm.BYTE op32; Asm.WORD (TY_s32, pcrel_expr); def |]
 ;;
 
 let insn_pcrel (op8:int) (op32:int) (fix:fixup) : Asm.item = 
@@ -419,7 +399,8 @@ let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.it
 
 let is_rm32 (oper:operand) : bool = 
   match oper with 
-      Mem (M32, _, _) -> true
+      Mem (TY_s32, _, _) -> true
+    | Mem (TY_u32, _, _) -> true
     | Reg (Hreg _) -> true
     | _ -> false
 ;;
@@ -431,14 +412,15 @@ let is_rm8 (oper:operand) : bool =
    * because if you do, MOV only writes to the low 8 bit subreg.
    *)
   match oper with 
-      Mem (M8, _, _) -> true
+      Mem (TY_s8, _, _) -> true
+    | Mem (TY_u8, _, _) -> true
     | _ -> false
 ;;
 
 
 let cmp (a:operand) (b:operand) : Asm.item = 
   match (a,b) with 
-      (_, Imm i) when is_rm32 a -> insn_rm_r_imm 0x83 0x81 a slash7 i
+      (_, Imm i) when is_rm32 a -> insn_rm_r_imm_u8_u32 0x83 0x81 a slash7 i
     | (_, Reg (Hreg r)) -> insn_rm_r 0x39 a r
     | (Reg (Hreg r), _) -> insn_rm_r 0x3b b r
     | _ -> raise Unrecognized
@@ -447,25 +429,28 @@ let cmp (a:operand) (b:operand) : Asm.item =
 
 let mov (dst:operand) (src:operand) : Asm.item = 
   match (dst,src) with 
-      (Mem (M8, _, _), Reg (Hreg r)) -> 
+      (_, Reg (Hreg r)) when is_rm8 dst -> 
         insn_rm_r 0x88 dst (reg r)
     | (_, Reg (Hreg r)) when is_rm32 dst -> 
         insn_rm_r 0x89 dst (reg r)
-          (* 
-           * FIXME: this is incorrect; you want either MOVSX or MOVZX;
-           * must redo M8/M16/M32/M64 modes as specifically
-           * signed/unsigned. Probably best to use Ast.ty_mach.
-           *)
-    | (Reg (Hreg r), Mem (M8, _, _)) -> 
-        insn_rm_r 0x8a src (reg r)
-    | (Reg (Hreg r), Mem (M32, _, _)) -> 
+
+    (* MOVZX *)
+    | (Reg (Hreg r), Mem (TY_u8, _, _)) -> 
+        Asm.SEQ [| Asm.BYTE 0x0f; insn_rm_r 0xb6 src (reg r) |]
+
+    (* MOVSX *)
+    | (Reg (Hreg r), Mem (TY_s8, _, _)) -> 
+        Asm.SEQ [| Asm.BYTE 0x0f; insn_rm_r 0xbe src (reg r) |]
+
+    (* MOV *)
+    | (Reg (Hreg r), _) when is_rm32 src -> 
         insn_rm_r 0x8b src (reg r);
         
     | (_, Imm (Asm.IMM n)) when is_rm8 dst && imm_is_byte n -> 
-        insn_rm_r_imm8 0xc6 dst slash0 (Asm.IMM n)
+        insn_rm_r_imm 0xc6 dst slash0 TY_u8 (Asm.IMM n)
           
     | (_, Imm i) when is_rm32 dst -> 
-        insn_rm_r_imm32 0xc7 dst slash0 i
+        insn_rm_r_imm 0xc7 dst slash0 TY_u32 i
           
     | _ -> raise Unrecognized
 ;;
@@ -477,12 +462,17 @@ let select_item_misc (q:quad) : Asm.item =
 	  (CCALL, Reg (Hreg 0), r, _) when is_rm32 r -> insn_rm_r 0xff r slash2
 	| (CCALL, Reg (Hreg 0), Pcrel f, _) -> insn_pcrel_simple 0xe8 f
 
-	| (CPUSH M32, _, Reg (Hreg r), _) -> Asm.BYTE (0x50 + (reg r))
-	| (CPUSH M32, _, r, _) when is_rm32 r -> insn_rm_r 0xff r slash6
-	| (CPUSH M32, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD32 i |]          
-	| (CPUSH M8, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD8 i |]
+	| (CPUSH TY_s32, _, Reg (Hreg r), _) -> Asm.BYTE (0x50 + (reg r))
+	| (CPUSH TY_u32, _, Reg (Hreg r), _) -> Asm.BYTE (0x50 + (reg r))
+	| (CPUSH TY_s32, _, r, _) when is_rm32 r -> insn_rm_r 0xff r slash6
+	| (CPUSH TY_u32, _, r, _) when is_rm32 r -> insn_rm_r 0xff r slash6
+	| (CPUSH TY_s32, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD (TY_s32, i) |]
+	| (CPUSH TY_u32, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD (TY_u32, i) |]
+	| (CPUSH TY_s8, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD (TY_s8, i) |]
+	| (CPUSH TY_u8, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD (TY_u8, i) |]
 
-	| (CPOP M32, r, _, _) when is_rm32 r -> insn_rm_r 0x8f r slash0
+	| (CPOP TY_s32, r, _, _) when is_rm32 r -> insn_rm_r 0x8f r slash0
+	| (CPOP TY_u32, r, _, _) when is_rm32 r -> insn_rm_r 0x8f r slash0
         
 	| (CRET, _, _, _) -> Asm.BYTE 0xc3
 
@@ -513,7 +503,7 @@ let alu_binop dst src immslash rm_dst_op rm_src_op =
   match (dst, src) with 
       (Reg (Hreg r), _) when is_rm32 src -> insn_rm_r rm_src_op src (reg r)
     | (_, Reg (Hreg r)) when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
-    | (Reg (Hreg _), Imm i) -> insn_rm_r_imm 0x83 0x81 dst immslash i 
+    | (Reg (Hreg _), Imm i) -> insn_rm_r_imm_u8_u32 0x83 0x81 dst immslash i 
     | _ -> raise Unrecognized
 ;;
 

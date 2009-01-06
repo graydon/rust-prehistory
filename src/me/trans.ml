@@ -425,12 +425,12 @@ let rec trans_stmt
           in
             (* FIXME: factor out call protocol into ABI bits. *)
             for i = 0 to (Array.length args) - 1 do              
-              emit (Il.CPUSH Il.M32) Il.Nil (trans_atom cx args.(i)) Il.Nil
+              emit (Il.CPUSH TY_u32) Il.Nil (trans_atom cx args.(i)) Il.Nil
             done;
             (* Emit arg1: the process pointer. *)
-            emit (Il.CPUSH Il.M32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
+            emit (Il.CPUSH TY_u32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
             (* Emit arg0: the output slot. *)
-            emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
+            emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
             let vr = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
             let dst = trans_lval cx dst in
             let fv = (trans_lval_full cx flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
@@ -488,7 +488,7 @@ and trans_log_int (cx:ctxt) (a:Ast.atom) : unit =
   let v = trans_atom cx a in 
   let f = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 0 in
   let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
-    Il.emit cx.ctxt_emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+    Il.emit cx.ctxt_emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
     Il.emit cx.ctxt_emit Il.CCALL dst (Il.Reg f) Il.Nil;
     Il.emit cx.ctxt_emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
 
@@ -496,7 +496,7 @@ and trans_log_str (cx:ctxt) (a:Ast.atom) : unit =
   let v = trans_atom cx a in
   let f = cx.ctxt_abi.Abi.abi_load_kern_fn cx.ctxt_emit 1 in
   let dst = Il.Reg (Il.next_vreg cx.ctxt_emit) in 
-    Il.emit cx.ctxt_emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+    Il.emit cx.ctxt_emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
     Il.emit cx.ctxt_emit Il.CCALL dst (Il.Reg f) Il.Nil;
     Il.emit cx.ctxt_emit Il.ADD cx.ctxt_abi.Abi.abi_sp_operand cx.ctxt_abi.Abi.abi_sp_operand (Il.Imm (Asm.IMM 4L));
 
@@ -686,7 +686,7 @@ let trans_visitor
                               match htab_search cx.ctxt_slot_layouts referent with 
                                   None -> err (Some nb.id) "slot assigned to neither vreg nor layout"
                                 | Some layout -> 
-                                    Il.Mem (Il.M32, 
+                                    Il.Mem (TY_u32, 
                                             (Some cx.ctxt_abi.Abi.abi_fp_reg),
                                             Asm.IMM layout.layout_offset)
                             end
@@ -702,13 +702,13 @@ let trans_visitor
   let trans_out_slot (callee:bool) : Il.operand = 
     if callee 
     then 
-      Il.Mem (Il.M32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
+      Il.Mem (TY_u32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
               (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)))
     else
       let sp_vn = Il.next_vreg_num (emitter()) in 
       let sp = Il.Reg (Il.Vreg sp_vn) in
         emit Il.MOV sp (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) Il.Nil;
-        Il.Mem (Il.M32, (Some (Il.Vreg sp_vn)), (Asm.IMM 0L))
+        Il.Mem (TY_u32, (Some (Il.Vreg sp_vn)), (Asm.IMM 0L))
   in
 
   let atom_type (at:Ast.atom) : Ast.ty = 
@@ -826,7 +826,7 @@ let trans_visitor
     let f = cx.ctxt_abi.Abi.abi_load_kern_fn (emitter()) 0 in
     let dst = Il.Reg (Il.next_vreg (emitter())) in 
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
-      emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
       emit Il.CCALL dst (Il.Reg f) Il.Nil;
       emit Il.ADD sp sp (Il.Imm (Asm.IMM 4L));
   in
@@ -836,7 +836,7 @@ let trans_visitor
     let f = cx.ctxt_abi.Abi.abi_load_kern_fn (emitter()) 1 in
     let dst = Il.Reg (Il.next_vreg (emitter())) in 
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
-      emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
       emit Il.CCALL dst (Il.Reg f) Il.Nil;
       emit Il.ADD sp sp (Il.Imm (Asm.IMM 4L));
   in
@@ -898,12 +898,12 @@ let trans_visitor
           let abi = cx.ctxt_abi in
             (* FIXME: factor out call protocol into ABI bits. *)
             for i = (Array.length args) - 1 downto 0 do
-              emit (Il.CPUSH Il.M32) Il.Nil (trans_atom args.(i)) Il.Nil
+              emit (Il.CPUSH TY_u32) Il.Nil (trans_atom args.(i)) Il.Nil
             done;
             (* Emit arg1: the process pointer. *)
-            emit (Il.CPUSH Il.M32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
+            emit (Il.CPUSH TY_u32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
             (* Emit arg0: the output slot. *)
-            emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
+            emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
             let vr = Il.Reg (Il.next_vreg (emitter())) in 
             let sp = Il.Reg (abi.Abi.abi_sp_reg) in
             let dst = trans_lval dst in
@@ -1000,9 +1000,9 @@ let trans_visitor
       (* FIXME: only DEF the entry prog if its name matches a crate param! *)
       (* FIXME: extract prog layout from ABI. *)    
       Asm.DEF (cx.ctxt_entry_prog, 
-               Asm.SEQ [| Asm.WORD32 init; 
-                          Asm.WORD32 main; 
-                          Asm.WORD32 fini |]) 
+               Asm.SEQ [| Asm.WORD (TY_u32, init); 
+                          Asm.WORD (TY_u32, main); 
+                          Asm.WORD (TY_u32, fini) |]) 
     in
       cx.ctxt_data_items <- prog :: cx.ctxt_data_items
   in

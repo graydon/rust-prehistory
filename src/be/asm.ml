@@ -172,10 +172,7 @@ type item =
   | CHAR of char
   | STRING of string
   | ZSTRING of string
-  | WORD8 of expr64
-  | WORD16 of expr64
-  | WORD32 of expr64
-  | WORD64 of expr64
+  | WORD of (ty_mach * expr64)
   | ALIGN_FILE of (int * item)
   | ALIGN_MEM of (int * item)
   | DEF of (fixup * item)
@@ -253,10 +250,7 @@ and resolve_item_full (relaxation_collector:relaxation -> unit) (item:item)
       | CHAR _ -> bump 1
       | STRING s -> bump (String.length s)
       | ZSTRING s -> bump ((String.length s) + 1)
-      | WORD8 e -> bump 1
-      | WORD16 e -> bump 2
-      | WORD32 e -> bump 4
-      | WORD64 e -> bump 8
+      | WORD (mach,_) -> bump (bytes_of_ty_mach mach)
 	  | ALIGN_FILE (n, item) -> 
 		  let spill = (!file_pos) mod n in
 		  let pad = (n - spill) mod n in
@@ -304,34 +298,38 @@ and lower_item
 	  then raise (Bad_fit "byte overflow")
 	  else Buffer.add_char buf (Char.chr i) 
   in
-  let word (nbytes:int) (e:expr64) = 
+  let word (nbytes:int) (signed:bool) (e:expr64) = 
 	let i = eval64 e in 	  
 	  
 	(* 
 	   FIXME:
 
-	   Despite the fact that *incoming* args are signed 64 bit, we are
-	   not sure whether we're emitting a signed or unsigned value. So
-	   we actually compare against the minimum plausible signed and
-	   maximal plausible *unsigned* values for this type.
-	   
-	   Note that when / if you port this to a 64-bit platform, you're
-	   possibly going to get some arithmetic overflows from ocaml
-	   itself, since ocaml doesn't have a 128-bit signed type, and you
-	   may want to emit some 64-bit values in the range between the
-	   largest signed 64-bit number and the largest unsigned one
-	   (i.e. using bit #63).
+       We should really base the entire assembler and memory-position
+       system on Big_int.big_int, but in ocaml the big_int type lacks,
+       oh, just about every useful function (no format string spec, no
+       bitwise ops, blah blah) so it's useless; we're stuck on int64
+       for bootstrapping.
+       
+       For the time being we're just going to require you to represent
+       those few unsigned 64 bit terms you have in mind via their
+       signed bit pattern. Suboptimal but it's the best we can do.
+    *)
 
-	   Hopefully you can either bite the bullet and pre-calculate such
-	   values, or assemble them piecewise and shift-and-OR them
-	   together, or something. 
-
-	*)
-	let signed_bound = (Int64.shift_left 1L ((8 * nbytes) - 1)) in
-	let unsigned_bound = (Int64.shift_left 1L (8 * nbytes)) in
-
-	let bot = Int64.neg signed_bound in
-	let top = unsigned_bound in
+    let (top,bot) = 
+      if nbytes >= 8 
+      then 
+        if signed
+        then (Int64.max_int,Int64.min_int)
+        else (Int64.max_int,0L)
+      else 
+        if signed 
+        then 
+          let bound = (Int64.shift_left 1L ((8 * nbytes) - 1)) in 
+            (Int64.sub bound 1L, Int64.neg bound)
+        else
+          let bound = (Int64.shift_left 1L (8 * nbytes)) in 
+            (Int64.sub bound 1L, 0L)
+    in
 
 	let mask1 = Int64.logand 0xffL in
 	let shift = Int64.shift_right_logical in  
@@ -390,10 +388,7 @@ and lower_item
 		  Buffer.add_string buf s;
 		  byte 0
 
-      | WORD8 e -> word 1 e
-      | WORD16 e -> word 2 e
-      | WORD32 e -> word 4 e
-      | WORD64 e -> word 8 e
+      | WORD (m,e) -> word (bytes_of_ty_mach m) (ty_mach_signed m) e
 
 	  | ALIGN_FILE (n, item) -> 
 		  let spill = (Buffer.length buf) mod n in
@@ -410,13 +405,13 @@ and lower_item
 			lower_item_2 lsb0 buf rel.relax_options.(!(rel.relax_choice))
 		  with 
 			  Bad_fit s -> raise (Relax_more rel)
-							 		 
+				
 (*
-		  (* 
-		   * We need to ensure that if the DEF advanced the file_pos 
-		   * associated with the fixup -- indicative of an aligned MARK
-		   * or similar -- that we pad out to the recorded size. 
-		   *)
+(* 
+  * We need to ensure that if the DEF advanced the file_pos 
+  * associated with the fixup -- indicative of an aligned MARK
+  * or similar -- that we pad out to the recorded size. 
+*)
 		  lower_item_2 lsb0 buf i;
 		  let len = Buffer.length buf in
 		  match (f.fixup_file_pos, f.fixup_file_sz) with

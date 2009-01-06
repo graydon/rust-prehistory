@@ -70,7 +70,7 @@
 type abi =
   {
     abi_ptr_sz: int64;
-    abi_ptr_mem: Il.mem;
+    abi_ptr_ty: Common.ty_mach;
 
     abi_is_2addr_machine: bool;
     abi_has_pcrel_loads: bool;

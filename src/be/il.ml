@@ -1,9 +1,6 @@
 
 open Common;;
 
-type mem = M8 | M16 | M32 | M64 
-;;
-
 type vreg = int
 ;;
 
@@ -12,7 +9,6 @@ type hreg = int
 
 type reg = Vreg of vreg
 		   | Hreg of hreg
-           | Preg of abi_pseudo_reg
 ;;
 
 
@@ -20,7 +16,7 @@ type operand =  Label of int
 			    | Imm of Asm.expr64
 			    | Pcrel of fixup
                 | Reg of reg
-                | Mem of (mem * (reg option) * Asm.expr64)
+                | Mem of (ty_mach * (reg option) * Asm.expr64)
 			    | Nil
 ;;
 
@@ -37,7 +33,7 @@ type op =
   | JE | JNE | JL | JLE | JG | JGE
   | JC | JNC | JO | JNO | JMP 
   | CALL | RET | YIELD | RESUME 
-  | CCALL | CPUSH of mem | CPOP of mem | CRET
+  | CCALL | CPUSH of ty_mach | CPOP of ty_mach | CRET
   | NOP | DEAD | END
 ;;
 
@@ -82,10 +78,6 @@ let string_of_reg (f:int->string) r =
   match r with 
       Vreg i -> "<v" ^ (string_of_int i) ^ ">"
     | Hreg i -> f i
-    | Preg PP -> "<pp>"
-    | Preg FP -> "<fp>"
-    | Preg CP -> "<cp>"
-    | Preg RP -> "<rp>"
 ;;
 
 
@@ -101,15 +93,6 @@ let string_of_operand (f:int->string) operand =
     | Mem (_, None,_) -> "*(??)" 
     | Label i -> "<lab" ^ (string_of_int i) ^ ">"
     | Nil -> "nil"
-;;
-
-
-let string_of_mem m = 
-  match m with 
-	  M8 -> "M8"
-	| M16 -> "M16"
-	| M32 -> "M32"
-	| M64 -> "M64"
 ;;
 
 
@@ -149,8 +132,8 @@ let string_of_op op =
     | NOP -> "NOP"
     | DEAD -> "DEAD"
 	| CCALL -> "CCALL"
-	| CPUSH m -> "CPUSH:" ^ string_of_mem m
-	| CPOP m -> "CPOP:" ^ string_of_mem m
+	| CPUSH m -> "CPUSH:" ^ string_of_ty_mach m
+	| CPOP m -> "CPOP:" ^ string_of_ty_mach m
 	| CRET -> "CRET"
 	| RESUME -> "RESUME"
 	| YIELD -> "YIELD"
