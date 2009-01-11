@@ -131,7 +131,9 @@ let layout_visitor
       else 
         let slot = Hashtbl.find cx.ctxt_all_slots id in
         let layout = layout_slot cx.ctxt_abi 0L slot in 
-          if vregs_ok && (i64_le layout.layout_size cx.ctxt_abi.Abi.abi_ptr_sz)
+          if vregs_ok
+            && (i64_le layout.layout_size cx.ctxt_abi.Abi.abi_ptr_sz) 
+            && (not (Hashtbl.mem cx.ctxt_slot_aliased id))
           then 
             begin
               log cx "assigning slot #%d to vreg" (int_of_node id);
