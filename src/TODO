@@ -10,8 +10,6 @@ progress:
  - write simple RR scheduler
 
 cleanup:
- - the spill segment of a frame is currently just 64 bytes of padding space;
-   make it a fixup that's given an M_SZ defined after the ra pass.
  - put logging and error-handling context in elf, pe, x86
  - use a datatype for kernel function codes, not int numbers
  - use a datatype for fields inside each kernel C structure

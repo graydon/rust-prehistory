@@ -222,6 +222,7 @@ let layout_visitor
       Stack.push (Stack.create()) block_stacks;
       Stack.push i.id item_stack;
       htab_put cx.ctxt_frame_sizes i.id 0L;
+      htab_put cx.ctxt_spill_fixups i.id (new_fixup "frame spill fixup");
       match i.node with 
           Ast.MOD_ITEM_fn fd ->
             layout_fn_header i.id fd.Ast.decl_item;
@@ -234,7 +235,7 @@ let layout_visitor
     ignore (Stack.pop item_stack);
     ignore (Stack.pop block_stacks)
   in
-  let visit_block_pre b = 
+  let visit_block_pre b =     
     let stk = Stack.top block_stacks in
     let off = 
       if Stack.is_empty stk 

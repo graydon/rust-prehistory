@@ -119,7 +119,11 @@ let _ = exit_if_failed ()
 let (text_quads:Il.quads list) = 
   let ra_quads name (node, quads, n_vregs) accum = 
     let frame_sz = Hashtbl.find sem_cx.Semant.ctxt_frame_sizes node in
-    let quads' = Ra.reg_alloc sess quads n_vregs abi frame_sz in 
+    let (quads', n_spills) = Ra.reg_alloc sess quads n_vregs abi frame_sz in 
+      (Hashtbl.find sem_cx.Semant.ctxt_spill_fixups node).fixup_mem_sz <-
+        Some (Int64.mul 
+                (Int64.of_int n_spills) 
+                abi.Abi.abi_ptr_sz);                                                              
       quads' :: accum
   in
     Hashtbl.fold ra_quads text_items []

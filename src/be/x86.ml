@@ -188,16 +188,15 @@ let spill_slot (framesz:int64) (i:int) : Il.operand =
         (Int64.neg (Int64.add framesz (Int64.mul 4L (Int64.of_int i))))))
 ;;
 
-let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) : unit =
+let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) (spill_fixup:fixup) : unit =
   let r x = Il.Reg (Il.Hreg x) in
-    (* FIXME: defer 'actual frame size' calculation to time of last spill slot assignment. *)
-  let framesz = Int64.add framesz 64L in
     Il.emit_full e (Some fn_fixup) (Il.CPUSH TY_u32) (Il.Nil) (r ebp) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r edi) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r esi) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebx) Il.Nil;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
-    Il.emit e Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM framesz))
+    Il.emit e Il.SUB (r esp) (r esp) 
+      (Il.Imm (Asm.ADD ((Asm.IMM framesz), Asm.M_SZ spill_fixup)))
 ;;
 
 let fn_epilogue (e:Il.emitter) : unit = 
@@ -210,16 +209,15 @@ let fn_epilogue (e:Il.emitter) : unit =
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
 
-let main_prologue (e:Il.emitter) (block:Ast.block) : unit =
+let main_prologue (e:Il.emitter) (block:Ast.block) (framesz:int64) (spill_fixup:fixup) : unit =
   let r x = Il.Reg (Il.Hreg x) in
-    (* FIXME: defer 'actual frame size' calculation to time of last spill slot assignment. *)
-  let framesz = (Asm.IMM 64L) in
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebp) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r edi) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r esi) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebx) Il.Nil;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
-    Il.emit e Il.SUB (r esp) (r esp) (Il.Imm framesz)
+    Il.emit e Il.SUB (r esp) (r esp) 
+      (Il.Imm (Asm.ADD ((Asm.IMM framesz), Asm.M_SZ spill_fixup)))
 ;;
 
 let main_epilogue (e:Il.emitter) (block:Ast.block) : unit = 

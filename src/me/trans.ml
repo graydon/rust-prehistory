@@ -969,9 +969,10 @@ let trans_visitor
   let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =  
     let fixup = get_fn_fixup fnid in
     let framesz = get_framesz fnid in
+    let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
     Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
-      cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) fixup framesz;
+      cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) fixup framesz spill_fixup;
       trans_block fn.Ast.fn_body;
       Stack.iter patch (Stack.pop epilogue_jumps);
       cx.ctxt_abi.Abi.abi_emit_fn_epilogue (emitter());
@@ -982,9 +983,11 @@ let trans_visitor
   let trans_prog_block (progid:node_id) (b:Ast.block) (ncomp:string) : fixup = 
     let _ = Stack.push ncomp path in
     let fix = new_fixup (path_name ()) in
+    let framesz = Hashtbl.find cx.ctxt_frame_sizes progid in
+    let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups progid in
       push_new_emitter ();
       Il.emit_full (emitter()) (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
-      cx.ctxt_abi.Abi.abi_emit_main_prologue (emitter()) b;
+      cx.ctxt_abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup;
       trans_block b;
       cx.ctxt_abi.Abi.abi_emit_main_epilogue (emitter()) b;
       capture_emitted_quads progid;

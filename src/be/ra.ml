@@ -470,12 +470,12 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       log cx "register-allocated quads:";
       dump_quads cx;
 
-      cx.ctxt_quads
+      (cx.ctxt_quads, cx.ctxt_next_spill)
 
   with 
       Ra_error s -> 
         Session.fail sess "RA Error: %s" s;
-        quads
+        (quads, 0)
         
 ;;
 
