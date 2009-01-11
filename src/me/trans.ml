@@ -680,7 +680,20 @@ let trans_visitor
                 | None -> 
                     begin
                       match htab_search cx.ctxt_slot_vregs referent with
-                          Some vr -> Il.Reg (Il.Vreg (!vr))
+                          Some vr -> 
+                            begin
+                              let vreg = 
+                                match !vr with 
+                                    None -> 
+                                      begin
+                                        let v = (Il.next_vreg_num (emitter())) in 
+                                          vr := Some v; 
+                                          v
+                                      end
+                                  | Some v -> v
+                              in
+                                Il.Reg (Il.Vreg vreg)
+                            end
                         | None -> 
                             begin
                               match htab_search cx.ctxt_slot_layouts referent with 

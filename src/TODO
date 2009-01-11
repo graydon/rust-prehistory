@@ -10,8 +10,6 @@ progress:
  - write simple RR scheduler
 
 cleanup:
- - nothing aside from emitter-generated temps are in vregs at the moment. 
-   non-aliased subword slots should be. fix this!
  - the spill segment of a frame is currently just 64 bytes of padding space;
    make it a fixup that's given an M_SZ defined after the ra pass.
  - put logging and error-handling context in elf, pe, x86

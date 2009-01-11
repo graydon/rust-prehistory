@@ -6,6 +6,57 @@ let log cx = Session.log "layout"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
+(* Layout calculations. *)
+
+let new_layout (off:int64) (sz:int64) (align:int64) : layout = 
+  { layout_offset = off;
+    layout_size = sz;     
+    layout_align = align }
+;;
+
+let align_to (align:int64) (v:int64) : int64 = 
+  if align = 0L || align = 1L
+  then v 
+  else
+    let rem = Int64.rem v align in
+      if rem = 0L 
+      then v
+      else 
+        let padding = Int64.sub align rem in 
+          Int64.add v padding
+;;
+
+let pack (offset:int64) (layouts:layout array) : layout = 
+  let pack_one (off,align) curr =
+    curr.layout_offset <- align_to curr.layout_align off;
+    ((Int64.add curr.layout_offset curr.layout_size),
+     (i64_max align curr.layout_align))
+  in
+  let (final,align) = Array.fold_left pack_one (offset,0L) layouts in 
+  let sz = Int64.sub final offset in 
+    new_layout offset sz align
+;;
+
+let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout = 
+  match t with
+	  Ast.TY_nil -> new_layout off 0L 0L
+        (* FIXME: bool should be 1L/1L, once we have sub-word-sized moves working. *)
+	| Ast.TY_bool -> new_layout off 4L 4L
+	| Ast.TY_mach m -> 
+        let sz = Int64.of_int (bytes_of_ty_mach m) in 
+          new_layout off sz sz
+	| Ast.TY_char -> new_layout off 4L 4L
+	| Ast.TY_tup slots -> 
+        let layouts = Array.map (layout_slot abi 0L) slots in
+          pack off layouts
+	| _ -> 
+        new_layout off abi.Abi.abi_ptr_sz abi.Abi.abi_ptr_sz
+
+and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout = 
+  match s.Ast.slot_ty with
+      None -> raise (Semant_err (None, "layout_slot on untyped slot"))
+    | Some t -> layout_ty abi off t
+
 
 let layout_visitor
     (cx:ctxt)
@@ -73,18 +124,28 @@ let layout_visitor
     Printf.sprintf "sz=%Ld, off=%Ld, align=%Ld" 
       ly.layout_size ly.layout_offset ly.layout_align
   in
-  let layout_slot_ids (offset:int64) (slots:node_id array) : layout = 
+  let layout_slot_ids (vregs_ok:bool) (offset:int64) (slots:node_id array) : layout = 
     let layout_slot_id id = 
       if Hashtbl.mem cx.ctxt_slot_layouts id
-      then Hashtbl.find cx.ctxt_slot_layouts id
+      then Some (Hashtbl.find cx.ctxt_slot_layouts id)
       else 
         let slot = Hashtbl.find cx.ctxt_all_slots id in
         let layout = layout_slot cx.ctxt_abi 0L slot in 
-          log cx "forming layout for slot #%d: %s" (int_of_node id) (string_of_layout layout);
-          htab_put cx.ctxt_slot_layouts id layout;
-          layout
+          if vregs_ok && (i64_le layout.layout_size cx.ctxt_abi.Abi.abi_ptr_sz)
+          then 
+            begin
+              log cx "assigning slot #%d to vreg" (int_of_node id);
+              htab_put cx.ctxt_slot_vregs id (ref None);
+              None
+            end
+          else
+            begin
+              log cx "forming layout for slot #%d: %s" (int_of_node id) (string_of_layout layout);
+              htab_put cx.ctxt_slot_layouts id layout;
+              Some layout
+            end
     in
-    let layouts = Array.map layout_slot_id slots in
+    let layouts = arr_map_partial slots layout_slot_id  in
     let group_layout = pack offset layouts in
       for i = 0 to (Array.length layouts) - 1 do
         log cx "packed slot #%d layout to: %s" (int_of_node slots.(i)) (string_of_layout layouts.(i))
@@ -108,7 +169,7 @@ let layout_visitor
             (int_of_node block.id) i (Ast.string_of_key key) (int_of_node sid)
       done;
       let sorted_slot_ids = Array.map (fun (_,sid) -> sid) sorted_keyed_slot_ids in
-      let layout = layout_slot_ids offset sorted_slot_ids in
+      let layout = layout_slot_ids true offset sorted_slot_ids in
         (* 
          * At this point the layout extends from [off,off+sz] but we need to adjust it
          * to cover [off-sz,off]. We also have to iterate through all the slot layouts
@@ -117,7 +178,12 @@ let layout_visitor
       let sz = layout.layout_size in
       let sub_sz ly = ly.layout_offset <- Int64.sub ly.layout_offset sz in
         sub_sz layout;
-        Array.iter (fun sid -> sub_sz (Hashtbl.find cx.ctxt_slot_layouts sid)) sorted_slot_ids;
+        Array.iter 
+          (fun sid -> 
+             match htab_search cx.ctxt_slot_layouts sid with 
+                 None -> ()
+               | Some ly -> sub_sz ly)
+          sorted_slot_ids;
         log cx "block #%d total layout: %s" (int_of_node block.id) (string_of_layout layout);
         htab_put cx.ctxt_block_layouts block.id layout;
         layout;
@@ -131,7 +197,7 @@ let layout_visitor
     in
       log cx "laying out header of fn #%d at fp offset %Ld" (int_of_node id) offset;
       let input_slot_ids = Array.map (fun (sid,_) -> sid.id) fn.Ast.fn_input_slots in
-      let layout = layout_slot_ids offset input_slot_ids in
+      let layout = layout_slot_ids false offset input_slot_ids in
         log cx "fn #%d header layout: %s" (int_of_node id) (string_of_layout layout);
         htab_put cx.ctxt_fn_header_layouts id layout
   in

@@ -16,10 +16,9 @@ prog fact
 	  ret y;
 	}
   }
-  main
-    {
-	  log f(5);
-	  log "all done";
-    }
+  main {
+	log f(5);
+	log "all done";
+  }
 }
 

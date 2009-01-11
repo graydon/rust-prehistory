@@ -28,7 +28,7 @@ type ctxt =
       ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
-      ctxt_slot_vregs: (node_id,(int ref)) Hashtbl.t;
+      ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
       ctxt_fn_header_layouts: (node_id,layout) Hashtbl.t;
@@ -164,59 +164,6 @@ and ty_of_mod_item (item:Ast.mod_item) : Ast.ty =
           check_concrete pd.Ast.decl_params
             (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
 ;;
-
-
-(* Layout calculations. *)
-
-let new_layout (off:int64) (sz:int64) (align:int64) : layout = 
-  { layout_offset = off;
-    layout_size = sz;     
-    layout_align = align }
-;;
-
-let align_to (align:int64) (v:int64) : int64 = 
-  if align = 0L || align = 1L
-  then v 
-  else
-    let rem = Int64.rem v align in
-      if rem = 0L 
-      then v
-      else 
-        let padding = Int64.sub align rem in 
-          Int64.add v padding
-;;
-
-let pack (offset:int64) (layouts:layout array) : layout = 
-  let pack_one (off,align) curr =
-    curr.layout_offset <- align_to curr.layout_align off;
-    ((Int64.add curr.layout_offset curr.layout_size),
-     (i64_max align curr.layout_align))
-  in
-  let (final,align) = Array.fold_left pack_one (offset,0L) layouts in 
-  let sz = Int64.sub final offset in 
-    new_layout offset sz align
-;;
-
-let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout = 
-  match t with
-	  Ast.TY_nil -> new_layout off 0L 0L
-        (* FIXME: bool should be 1L/1L, once we have sub-word-sized moves working. *)
-	| Ast.TY_bool -> new_layout off 4L 4L
-	| Ast.TY_mach m -> 
-        let sz = Int64.of_int (bytes_of_ty_mach m) in 
-          new_layout off sz sz
-	| Ast.TY_char -> new_layout off 4L 4L
-	| Ast.TY_tup slots -> 
-        let layouts = Array.map (layout_slot abi 0L) slots in
-          pack off layouts
-	| _ -> 
-        new_layout off abi.Abi.abi_ptr_sz abi.Abi.abi_ptr_sz
-
-and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout = 
-  match s.Ast.slot_ty with
-      None -> raise (Semant_err (None, "layout_slot on untyped slot"))
-    | Some t -> layout_ty abi off t
-
 
 let run_passes 
     (cx:ctxt) 
