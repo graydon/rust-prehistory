@@ -90,6 +90,10 @@ type abi =
     abi_load_kern_fn: (Il.emitter -> int -> Il.reg);
 
     abi_clobbers: (Il.quad -> Il.hreg list); 
+
+    (* Two transitions between stacks. *)
+    abi_C_to_proc: (Il.emitter -> unit);
+    abi_proc_to_C: (Il.emitter -> unit);
     
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;

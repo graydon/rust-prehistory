@@ -838,20 +838,24 @@ let trans_visitor
     let v = trans_atom a in 
     let f = cx.ctxt_abi.Abi.abi_load_kern_fn (emitter()) 0 in
     let dst = Il.Reg (Il.next_vreg (emitter())) in 
+    let pp = cx.ctxt_abi.Abi.abi_pp_operand in
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
       emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
       emit Il.CCALL dst (Il.Reg f) Il.Nil;
-      emit Il.ADD sp sp (Il.Imm (Asm.IMM 4L));
+      emit Il.ADD sp sp (Il.Imm (Asm.IMM 8L));
   in
     
   let trans_log_str (a:Ast.atom) : unit = 
     let v = trans_atom a in
     let f = cx.ctxt_abi.Abi.abi_load_kern_fn (emitter()) 1 in
     let dst = Il.Reg (Il.next_vreg (emitter())) in 
+    let pp = cx.ctxt_abi.Abi.abi_pp_operand in
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
       emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
       emit Il.CCALL dst (Il.Reg f) Il.Nil;
-      emit Il.ADD sp sp (Il.Imm (Asm.IMM 4L));
+      emit Il.ADD sp sp (Il.Imm (Asm.IMM 8L));
   in
 
   let rec trans_block (block:Ast.block) : unit = 

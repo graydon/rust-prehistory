@@ -161,18 +161,21 @@ typedef struct rust_msg_queue {
   uintptr_t x;
 } rust_msg_queue_t;
 
-
-typedef struct rust_rt { 
-  void (*log_uint32_t)(uint32_t);
-  void (*log_str)(char *);
-} rust_rt_t;
-
-
 struct rust_proc;
 struct rust_prog;
 
 typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
+
+typedef struct rust_rt { 
+  uintptr_t c_sp; /* Saved sp from the C runtime. */
+  /* "Kernel functions". */
+  void (*log_uint32_t)(rust_proc_t *, uint32_t);
+  void (*log_str)(rust_proc_t *, char *);
+} rust_rt_t;
+
+
+
 
 #ifdef WIN32
 #define CDECL __cdecl
@@ -194,6 +197,7 @@ struct rust_proc {
   rust_prog_t *prog;
   rust_msg_queue_t *q;
   rust_regs_t regs;       /* CPU regs are saved here when not running.       */
+  size_t refcnt;
 
   /* Proc accounting. */
   uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */

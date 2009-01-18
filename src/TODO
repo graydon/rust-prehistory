@@ -1,13 +1,17 @@
 
 progress:
  - set up rudimentary system for real tests
- - change output slot to write alias on target in caller
  - move frame code to ABI
  - allocate proc stack
  - on activation, switch from C stack to proc stack
  - on back-edges / calls, check timeout, possibly reschedule
  - add timer thread to runtime
  - write simple RR scheduler
+ - change output slot to write alias on target in caller
+ - implement movement of superword values
+ - implement the non-interior slot modes
+ - implement the yielding calling protocols
+ - implement the tail calling protocols
 
 cleanup:
  - put logging and error-handling context in elf, pe, x86

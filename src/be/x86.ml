@@ -179,7 +179,6 @@ let clobbers (quad:Il.quad) : Il.hreg list =
     | Il.CCALL -> [ eax; ecx; edx; ]
     | _ -> []
 ;;
-  
 
 let spill_slot (framesz:int64) (i:int) : Il.operand = 
   Il.Mem 
@@ -261,12 +260,45 @@ let load_proc_word (e:Il.emitter) (i:int) : Il.reg =
     vr
 ;;
 
+let store_proc_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit = 
+  let vr = Il.next_vreg e in 
+    Il.emit e Il.MOV (Il.Reg vr) proc_ptr Il.Nil;
+    Il.emit e Il.MOV (Il.Reg vr) (word_n vr i) Il.Nil
+;;
+
 let load_kern_fn (e:Il.emitter) (i:int) : Il.reg = 
+  let kern_fn_base = 1 in
   let vr = Il.next_vreg e in
   let rt = load_proc_word e 0 in
-    Il.emit e Il.MOV (Il.Reg vr) (word_n rt i) Il.Nil;
+    Il.emit e Il.MOV (Il.Reg vr) (word_n rt (kern_fn_base + i)) Il.Nil;
     vr
 ;;
+
+
+let c_to_proc (emit:Il.emitter) : unit = 
+  (* 
+   * This is a bit of glue-code. It should be emitted once per
+   * compilation unit.
+   * 
+   * We want to call this from C code as a way of storing the C
+   * context and activating the incoming parameter. So when we're
+   * activated, we look like this:
+   * 
+   *   ...    
+   *   *esp+8       = [arg1   ] = proc ptr
+   *   *esp+4       = [arg0   ] = out ptr
+   *   *esp         = [retpc  ]
+   * 
+   * We want to store esp in proc->rt->sp, then load 
+   * sp = proc->regs.sp and jump to proc->regs.pc.
+   *)
+  ()
+;;
+
+let proc_to_c (emit:Il.emitter) : unit = 
+  ()
+;;
+
 
 let (abi:Abi.abi) = 
   {
@@ -288,6 +320,9 @@ let (abi:Abi.abi) =
     Abi.abi_emit_main_prologue = main_prologue;
     Abi.abi_emit_main_epilogue = main_epilogue;
     Abi.abi_clobbers = clobbers;
+
+    Abi.abi_C_to_proc = c_to_proc;
+    Abi.abi_proc_to_C = proc_to_c;
 
     Abi.abi_sp_reg = (Il.Hreg esp);
     Abi.abi_fp_reg = (Il.Hreg ebp);
