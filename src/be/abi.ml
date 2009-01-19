@@ -65,7 +65,7 @@
  *  [1*ptr] link to crate
  *  [2*ptr] link to parent closure
  *  [
- *)
+ *)      
 
 type abi =
   {
@@ -91,7 +91,7 @@ type abi =
 
     abi_clobbers: (Il.quad -> Il.hreg list); 
 
-    (* Two transitions between stacks. *)
+    (* Transitions between runtimes. *)
     abi_C_to_proc: (Il.emitter -> unit);
     abi_proc_to_C: (Il.emitter -> unit);
     

@@ -252,6 +252,7 @@ let word_n reg i =
  *)
 
 let proc_ptr = word_n (Il.Hreg ebp) 6;;
+let out_ptr = word_n (Il.Hreg ebp) 5;;
 
 let load_proc_word (e:Il.emitter) (i:int) : Il.reg = 
   let vr = Il.next_vreg e in 
@@ -263,39 +264,82 @@ let load_proc_word (e:Il.emitter) (i:int) : Il.reg =
 let store_proc_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit = 
   let vr = Il.next_vreg e in 
     Il.emit e Il.MOV (Il.Reg vr) proc_ptr Il.Nil;
-    Il.emit e Il.MOV (Il.Reg vr) (word_n vr i) Il.Nil
+    Il.emit e Il.MOV (word_n vr i) oper Il.Nil
+;;
+
+let load_rt_word (e:Il.emitter) (i:int) : Il.reg = 
+  let rt = load_proc_word e 0 in  
+  let vr = Il.next_vreg e in 
+    Il.emit e Il.MOV (Il.Reg vr) (word_n rt i) Il.Nil;
+    vr
+;;
+
+let store_rt_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit = 
+  let rt = load_proc_word e 0 in  
+    Il.emit e Il.MOV (word_n rt i) oper Il.Nil;
 ;;
 
 let load_kern_fn (e:Il.emitter) (i:int) : Il.reg = 
   let kern_fn_base = 1 in
-  let vr = Il.next_vreg e in
-  let rt = load_proc_word e 0 in
-    Il.emit e Il.MOV (Il.Reg vr) (word_n rt (kern_fn_base + i)) Il.Nil;
-    vr
+    load_rt_word e (kern_fn_base + i)
 ;;
 
-
-let c_to_proc (emit:Il.emitter) : unit = 
+let c_to_proc (e:Il.emitter) : unit = 
   (* 
    * This is a bit of glue-code. It should be emitted once per
    * compilation unit.
    * 
-   * We want to call this from C code as a way of storing the C
-   * context and activating the incoming parameter. So when we're
-   * activated, we look like this:
-   * 
-   *   ...    
-   *   *esp+8       = [arg1   ] = proc ptr
-   *   *esp+4       = [arg0   ] = out ptr
-   *   *esp         = [retpc  ]
-   * 
    * We want to store esp in proc->rt->sp, then load 
-   * sp = proc->regs.sp and jump to proc->regs.pc.
+   * sp = proc->regs.sp and call to proc->regs.pc.
+   * 
+   *   *ebp+8        = [arg1   ] = proc ptr
+   *   *ebp+4        = [arg0   ] = out ptr
+   *   *esp          = [retpc  ]
    *)
+
+  let r x = Il.Reg (Il.Hreg x) in
+  let sp_n = word_n (Il.Hreg esp) in
+  let edx_n = word_n (Il.Hreg edx) in
+  let ecx_n = word_n (Il.Hreg ecx) in
+  let emit = Il.emit e in
+  let mov dst src = emit Il.MOV dst src Il.Nil in
+
+    mov (r edx) (sp_n 2);      (* edx <- proc          *)
+    mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
+    mov (ecx_n 0) (r esp);     (* rt->sp <- esp        *)
+    mov (r ecx) (edx_n 6);     (* ecx <- proc->regs.sp *)
+    mov (ecx_n (0)) (r edx);   (* ecx[0] <- proc       *)
+    mov (r edx) (sp_n 1);      (* edx <- out ptr       *)
+    mov (ecx_n (-1)) (r edx);  (* ecx[-4] <- out_ptr   *) 
+    mov (r edx) (sp_n 2);      (* edx <- proc          *)
+    mov (r edx) (edx_n 5);     (* edx <- proc->regs.pc *)
+    mov (r esp) (r ecx);       (* esp <- proc->regs.sp *) 
+
+    (**** IN PROC STACK ****)
+    emit Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM 8L));
+    emit Il.CCALL (r eax) (r edx) Il.Nil;
+    mov (r edx) (sp_n 1);      (* edx <- proc          *)
+    mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
+    mov (r esp) (ecx_n 0);     (* esp <- rt->sp        *)
+    (***********************)
+    
+    emit Il.CRET Il.Nil Il.Nil Il.Nil;
   ()
 ;;
 
+
 let proc_to_c (emit:Il.emitter) : unit = 
+  (* 
+   * More glue code. Here we've been called from a proc and 
+   * we want to call a C function on the C stack. So:
+   * 
+   *   - save proc stack pointer
+   *   - load C stack pointer
+   *   - copy call args to C stack
+   *   - execute C call, returning to us
+   *   - reload proc stack pointer
+   *   - return to proc
+   *)
   ()
 ;;
 
@@ -354,21 +398,49 @@ let rm_r (oper:operand) (r:int) : Asm.item =
       | Mem (_, None, disp) -> 
           Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
                      Asm.WORD (TY_s32, disp) |]
-      | Mem (_, Some (Hreg rm), disp) when rm != reg_esp -> 
-          (match disp with 
-               Asm.IMM 0L when rm != reg_ebp -> 
-                 Asm.BYTE (modrm_deref_reg (reg rm) r)
-             | Asm.IMM n when imm_is_byte n -> 
-                 Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
-                            Asm.WORD (TY_s8, disp)|]
-             | _ -> 
-                 Asm.new_relaxation
-                   [|
-                     Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r);
-                                Asm.WORD (TY_s32, disp) |];
-                     Asm.SEQ [| Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r);
-                                Asm.WORD (TY_s8, disp) |];
-                   |])
+      | Mem (_, Some (Hreg rm), disp) -> 
+          (* 
+           * We do a little contortion here to accommodate the special
+           * case of being asked to form esp-relative addresses; these 
+           * require SIB bytes on x86. Of course!
+           *)
+          begin
+            let sib_esp_base = Asm.BYTE 0x24 in 
+            let seq1 modrm = 
+              if rm = reg_esp
+              then Asm.SEQ [| modrm; sib_esp_base |]
+              else modrm
+            in
+            let seq2 modrm disp = 
+              if rm = reg_esp
+              then Asm.SEQ [| modrm; sib_esp_base; disp |]
+              else Asm.SEQ [| modrm; disp |]
+            in
+            match disp with 
+                Asm.IMM 0L when rm != reg_ebp -> 
+                  seq1 (Asm.BYTE (modrm_deref_reg (reg rm) r))
+
+              (* The next two are just to save the relaxation system some churn. *)                    
+              | Asm.IMM n when imm_is_byte n -> 
+                  seq2 
+                    (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
+                    (Asm.WORD (TY_s8, disp))
+              | Asm.IMM n -> 
+                  seq2 
+                    (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
+                    (Asm.WORD (TY_s32, disp))
+
+              | _ -> 
+                  Asm.new_relaxation
+                    [|
+                      seq2 
+                        (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
+                        (Asm.WORD (TY_s32, disp));
+                      seq2 
+                        (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
+                        (Asm.WORD (TY_s8, disp))
+                    |]
+          end
       | _ -> raise Unrecognized
 ;;
 
