@@ -46,10 +46,12 @@
  * though:
  * 
  *  - In primary modes 00, 01 and 10, r/m=100 means "use SIB byte". 
- *    There is no way to use ESP as the register in these modes. Weird.
+ *    You can use (unscaled) ESP as the base register in these modes by appending 
+ *    the SIB byte 0x24. We do that in our rm_r operand-encoder function.
  * 
  *  - In primary mode 00, r/m=101 means "just disp32", no register is involved.
- *    There is no way to use EBP in primary mode 00.
+ *    There is no way to use EBP in primary mode 00. If you try, we just 
+ *    decay into a mode 01 with an appended 8-bit immediate displacement.
  * 
  * Some opcodes are written 0xNN +rd. This means "we decided to chew up a whole
  * pile of opcodes here, with each opcode including a hard-wired reference to a
@@ -289,8 +291,17 @@ let c_to_proc (e:Il.emitter) : unit =
    * This is a bit of glue-code. It should be emitted once per
    * compilation unit.
    * 
-   * We want to store esp in proc->rt->sp, then load 
-   * sp = proc->regs.sp and call to proc->regs.pc.
+   *   - save C stack pointer into rt:
+   *     - proc->rt->sp = esp
+   *   - copy args into proc stack:
+   *     - proc->rt->sp[0] = esp[8]
+   *     - proc->rt->sp[-4] = esp[4]
+   *   - switch stacks:
+   *     - esp = proc->regs.sp
+   *   - call proc->regs.pc
+   *   - return
+   * 
+   * Our incoming stack looks like this:
    * 
    *   *ebp+8        = [arg1   ] = proc ptr
    *   *ebp+4        = [arg0   ] = out ptr

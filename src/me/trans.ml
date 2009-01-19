@@ -718,14 +718,12 @@ let trans_visitor
       Il.Mem (TY_u32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
               (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)))
     else
-      let sp_vn = Il.next_vreg_num (emitter()) in 
-      let sp = Il.Reg (Il.Vreg sp_vn) in
-        emit Il.MOV sp (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) Il.Nil;
-        Il.Mem (TY_u32, (Some (Il.Vreg sp_vn)), (Asm.IMM 0L))
+      Il.Mem (TY_u32, (Some cx.ctxt_abi.Abi.abi_sp_reg), 
+              (Asm.IMM 0L))
   in
 
   let atom_type (at:Ast.atom) : Ast.ty = 
-    match at with 
+    match at with
         Ast.ATOM_literal {node=(Ast.LIT_str _); id=_} -> Ast.TY_str
       | Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
       | Ast.ATOM_lval (Ast.LVAL_base nb) -> 
