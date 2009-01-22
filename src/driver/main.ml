@@ -131,7 +131,8 @@ let (text_quads:Il.quads list) =
 let _ = exit_if_failed ()
 ;;
 
-let (code:Asm.item) = Asm.SEQ (Array.of_list (List.map (X86.select_insns sess) text_quads));;
+let (all_quads:Il.quads list) = text_quads @ sem_cx.Semant.ctxt_anon_text_items;;
+let (code:Asm.item) = Asm.SEQ (Array.of_list (List.map (X86.select_insns sess) all_quads));;
 let _ = exit_if_failed ()
 ;;
 
@@ -139,7 +140,7 @@ let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
 ;;
 
 let _ = match sess.Session.sess_targ with 
-	Win32_x86_pe -> Pe.emit_file sess code data entry_prog_fixup
+	Win32_x86_pe -> Pe.emit_file sess code data entry_prog_fixup sem_cx.Semant.ctxt_c_to_proc_fixup
   | Linux_x86_elf -> Elf.emit_file sess code data entry_prog_fixup
 ;;
 

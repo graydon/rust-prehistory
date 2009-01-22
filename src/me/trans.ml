@@ -1083,6 +1083,18 @@ let fixup_assigning_visitor
         Walk.visit_mod_item_post = visit_mod_item_post;
     }
 
+let emit_c_to_proc_glue cx = 
+  let e = Il.new_emitter 
+    cx.ctxt_abi.Abi.abi_prealloc_quad 
+    cx.ctxt_abi.Abi.abi_is_2addr_machine 
+  in
+    cx.ctxt_abi.Abi.abi_c_to_proc e cx.ctxt_c_to_proc_fixup;
+    if e.Il.emit_next_vreg != 0
+    then err None "c-to-proc glue uses nonzero vregs"
+    else cx.ctxt_anon_text_items <- 
+      (e.Il.emit_quads) :: cx.ctxt_anon_text_items
+;;
+
     
 let trans_crate 
     (cx:ctxt)
@@ -1095,8 +1107,9 @@ let trans_crate
       (trans_visitor cx
          Walk.empty_visitor)
     |];
-  in
+  in    
     run_passes cx passes (log cx "%s") items;
+    emit_c_to_proc_glue cx;
     (cx.ctxt_text_items, cx.ctxt_data_items, cx.ctxt_entry_prog)
 ;;
 

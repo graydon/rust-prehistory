@@ -37,7 +37,10 @@ type ctxt =
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
 	  ctxt_abi: Abi.abi;
       mutable ctxt_data_items: Asm.item list;
+      ctxt_c_to_proc_fixup: fixup;
+      ctxt_proc_to_c_fixup: fixup;
       ctxt_text_items: (string, (node_id * Il.quads * int)) Hashtbl.t;
+      mutable ctxt_anon_text_items: Il.quads list;
       ctxt_entry_prog: fixup;
     }
 ;;
@@ -57,9 +60,12 @@ let	new_ctxt sess abi =
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
-	ctxt_abi = abi;    
+	ctxt_abi = abi;
     ctxt_data_items = [];
+    ctxt_c_to_proc_fixup = new_fixup "c-to-proc glue";
+    ctxt_proc_to_c_fixup = new_fixup "proc-to-c glue";
     ctxt_text_items = Hashtbl.create 0;
+    ctxt_anon_text_items = [];
     ctxt_entry_prog = new_fixup "entry prog fixup";
   }
 ;;

@@ -92,8 +92,8 @@ type abi =
     abi_clobbers: (Il.quad -> Il.hreg list); 
 
     (* Transitions between runtimes. *)
-    abi_C_to_proc: (Il.emitter -> unit);
-    abi_proc_to_C: (Il.emitter -> unit);
+    abi_c_to_proc: (Il.emitter -> Common.fixup -> unit);
+    abi_proc_to_c: (Il.emitter -> Common.fixup -> unit);
     
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;

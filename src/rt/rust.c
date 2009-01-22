@@ -105,7 +105,7 @@ rust_del_proc(rust_proc_t *proc)
 
 
 int CDECL
-rust_start(rust_prog_t *prog)
+rust_start(rust_prog_t *prog, void *c_to_proc_glue)
 {
   rust_rt_t *rt;
   rust_proc_t *proc;

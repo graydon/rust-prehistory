@@ -551,17 +551,19 @@ let pe_import_section
 		   strings 
 		 |])
       
-;;
+;;      
 
 let pe_text_section
 	~(startup_fn_fixup:fixup)
 	~(startup_fn_arg_fixup:fixup)
 	~(text_fixup:fixup)
     ~(crate_code:item)
+    ~(c_to_proc_fixup:fixup)
     : item =
-  let
-	  e = Il.new_emitter X86.prealloc_quad true
-  in
+  let e = Il.new_emitter 
+    X86.abi.Abi.abi_prealloc_quad 
+    X86.abi.Abi.abi_is_2addr_machine 
+  in    
   let eax = Il.Reg (Il.Hreg X86.eax) in    
   let ecx = Il.Reg (Il.Hreg X86.ecx) in    
     (* 
@@ -570,13 +572,15 @@ let pe_text_section
      * stack before returning.
      *)
 	Il.emit e Il.MOV ecx (Il.Mem (TY_u32, None, (M_POS startup_fn_fixup))) Il.Nil;
+	Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS c_to_proc_fixup)) Il.Nil;
 	Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS startup_fn_arg_fixup)) Il.Nil;
 	Il.emit e Il.CCALL eax ecx Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) ecx Il.Nil Il.Nil;
     Il.emit e (Il.CPOP TY_u32) ecx Il.Nil Il.Nil;
 	Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 	def_aligned
 	  text_fixup
-      (SEQ [|
+      (SEQ [|         
 	    (SEQ (Array.map X86.select_insn e.Il.emit_quads));
         crate_code
       |])
@@ -623,6 +627,7 @@ let emit_file
     (code:Asm.item) 
     (data:Asm.item) 
     (entry_prog_fixup:fixup) 
+    (c_to_proc_fixup:fixup)
     : unit = 
   
   let all_hdrs_fixup = new_fixup "all headers" in
@@ -665,7 +670,8 @@ let emit_file
 	                    ~startup_fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
                         ~startup_fn_arg_fixup: entry_prog_fixup
 	                    ~text_fixup: text_fixup
-                        ~crate_code: code)
+                        ~crate_code: code
+                        ~c_to_proc_fixup: c_to_proc_fixup)
   in
   let bss_section = def_aligned bss_fixup (BSS 0x10L)
   in

@@ -286,7 +286,7 @@ let load_kern_fn (e:Il.emitter) (i:int) : Il.reg =
     load_rt_word e (kern_fn_base + i)
 ;;
 
-let c_to_proc (e:Il.emitter) : unit = 
+let c_to_proc (e:Il.emitter) (fix:fixup) : unit = 
   (* 
    * This is a bit of glue-code. It should be emitted once per
    * compilation unit.
@@ -315,7 +315,8 @@ let c_to_proc (e:Il.emitter) : unit =
   let emit = Il.emit e in
   let mov dst src = emit Il.MOV dst src Il.Nil in
 
-    mov (r edx) (sp_n 2);      (* edx <- proc          *)
+    Il.emit_full e (Some fix) Il.MOV 
+      (r edx) (sp_n 2) Il.Nil; (* edx <- proc          *)
     mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
     mov (ecx_n 0) (r esp);     (* rt->sp <- esp        *)
     mov (r ecx) (edx_n 6);     (* ecx <- proc->regs.sp *)
@@ -339,7 +340,7 @@ let c_to_proc (e:Il.emitter) : unit =
 ;;
 
 
-let proc_to_c (emit:Il.emitter) : unit = 
+let proc_to_c (emit:Il.emitter) (fix:fixup) : unit = 
   (* 
    * More glue code. Here we've been called from a proc and 
    * we want to call a C function on the C stack. So:
@@ -376,8 +377,8 @@ let (abi:Abi.abi) =
     Abi.abi_emit_main_epilogue = main_epilogue;
     Abi.abi_clobbers = clobbers;
 
-    Abi.abi_C_to_proc = c_to_proc;
-    Abi.abi_proc_to_C = proc_to_c;
+    Abi.abi_c_to_proc = c_to_proc;
+    Abi.abi_proc_to_c = proc_to_c;
 
     Abi.abi_sp_reg = (Il.Hreg esp);
     Abi.abi_fp_reg = (Il.Hreg ebp);
