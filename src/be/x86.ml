@@ -303,8 +303,8 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
    * 
    * Our incoming stack looks like this:
    * 
-   *   *ebp+8        = [arg1   ] = proc ptr
-   *   *ebp+4        = [arg0   ] = out ptr
+   *   *esp+8        = [arg1   ] = proc ptr
+   *   *esp+4        = [arg0   ] = out ptr
    *   *esp          = [retpc  ]
    *)
 
@@ -328,7 +328,7 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
     mov (r esp) (r ecx);       (* esp <- proc->regs.sp *) 
 
     (**** IN PROC STACK ****)
-    emit Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM 8L));
+    emit Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM 4L));
     emit Il.CCALL (r eax) (r edx) Il.Nil;
     mov (r edx) (sp_n 1);      (* edx <- proc          *)
     mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)

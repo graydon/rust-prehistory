@@ -168,7 +168,7 @@ typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
 
 typedef struct rust_rt { 
-  uintptr_t c_sp; /* Saved sp from the C runtime. */
+  uintptr_t c_sp; /* Saved sp from the C runtime. */  
   /* "Kernel functions". */
   void (*log_uint32_t)(rust_proc_t *, uint32_t);
   void (*log_str)(rust_proc_t *, char *);

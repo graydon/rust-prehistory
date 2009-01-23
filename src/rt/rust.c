@@ -103,9 +103,8 @@ rust_del_proc(rust_proc_t *proc)
   free(proc);
 }
 
-
 int CDECL
-rust_start(rust_prog_t *prog, void *c_to_proc_glue)
+rust_start(rust_prog_t *prog, void CDECL (*c_to_proc_glue)(void*, rust_proc_t*))
 {
   rust_rt_t *rt;
   rust_proc_t *proc;
@@ -118,8 +117,15 @@ rust_start(rust_prog_t *prog, void *c_to_proc_glue)
   rt = rust_new_rt();
   proc = rust_new_proc(rt, prog);
   
-  logptr("calling main_code with proc arg", (intptr_t)proc);
-  prog->main_code(0, proc);
+  //logptr("calling main_code with proc arg", (intptr_t)proc);
+  //prog->main_code(0, proc);
+  logptr("root proc is ", (intptr_t)proc);
+  proc->regs.pc = (uintptr_t) prog->main_code;
+  proc->regs.sp = (uintptr_t) &(proc->stk->data[rust_init_stk_bytes]);
+  logptr("proc->regs.pc ", (intptr_t)proc->regs.pc);
+  logptr("proc->regs.sp ", (intptr_t)proc->regs.sp);
+  logptr("calling c_to_proc_glue ", (intptr_t)c_to_proc_glue);
+  c_to_proc_glue(0, proc);
   printf("rt: returned from main, exiting.\n");
   rust_del_proc(proc);
   rust_del_rt(rt);
