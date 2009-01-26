@@ -326,8 +326,8 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
     mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
     mov (ecx_n 0) (r esp);     (* rt->sp <- esp        *)
     mov (r ecx) (edx_n 5);     (* ecx <- proc->sp      *)
-    mov (ecx_n (-1)) (imm 0L); (* ecx[-4] <- 0         *) 
     mov (ecx_n (0)) (r edx);   (* ecx[0] <- proc       *)
+    mov (ecx_n (-1)) (imm 0L); (* ecx[-4] <- 0         *) 
     mov (r edx) (sp_n 1);      (* edx <- pc            *)
     mov (r esp) (r ecx);       (* esp <- proc->sp      *) 
 
