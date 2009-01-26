@@ -104,12 +104,6 @@ typedef struct rust_type {
   
 } rust_type_t;
 
-typedef struct rust_regs {
-  uintptr_t pc;
-  uintptr_t sp;
-} rust_regs_t;
-
-
 /* Runtime closures over lexical environments. */
 typedef struct rust_env {
   uintptr_t x;
@@ -119,26 +113,26 @@ typedef struct rust_env {
 
 typedef struct rust_simple_frame {
   rust_type_t *descriptor;
-  rust_regs_t return_regs;
+  uintptr_t return_sp;
 } rust_simple_frame_t;
 
 typedef struct rust_iter_frame {
   rust_type_t *descriptor;
-  rust_regs_t return_regs;
-  rust_regs_t yield_regs;
+  uintptr_t return_sp;
+  uintptr_t yield_sp;
 } rust_iter_frame_t;
 
 typedef struct rust_closure_frame {
   rust_type_t *descriptor;
-  rust_regs_t return_regs;
+  uintptr_t return_sp;
   rust_env_t *env;
   uint8_t data[];
 } rust_closure_frame_t;
 
 typedef struct rust_iter_closure_frame {
   rust_type_t *descriptor;
-  rust_regs_t return_regs;
-  rust_regs_t yield_regs;
+  uintptr_t return_sp;
+  uintptr_t yield_sp;
   rust_env_t *env;
   uint8_t data[];
 } rust_iter_closure_frame_t;
@@ -163,16 +157,20 @@ typedef struct rust_msg_queue {
 
 struct rust_proc;
 struct rust_prog;
+struct rust_rt;
 
 typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
+typedef struct rust_rt rust_rt_t;
 
-typedef struct rust_rt { 
-  uintptr_t c_sp; /* Saved sp from the C runtime. */  
+struct rust_rt { 
+  uintptr_t c_sp;    /* Saved sp from the C runtime. */  
+  rust_proc_t *proc; /* Currently active proc.       */
+
   /* "Kernel functions". */
-  void (*log_uint32_t)(rust_proc_t *, uint32_t);
-  void (*log_str)(rust_proc_t *, char *);
-} rust_rt_t;
+  void (*log_uint32_t)(rust_rt_t *, uint32_t);
+  void (*log_str)(rust_rt_t *, char *);
+};
 
 
 
@@ -196,7 +194,7 @@ struct rust_proc {
   rust_env_t *env;
   rust_prog_t *prog;
   rust_msg_queue_t *q;
-  rust_regs_t regs;       /* CPU regs are saved here when not running.       */
+  uintptr_t sp;           /* saved sp when not running.                     */
   size_t refcnt;
 
   /* Proc accounting. */

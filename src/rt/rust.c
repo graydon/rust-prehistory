@@ -32,15 +32,15 @@ xcalloc(size_t sz)
 
 
 static void CDECL
-rust_log_uint32_t(rust_proc_t *proc, uint32_t i)
+rust_log_uint32_t(rust_rt_t *rt, uint32_t i)
 {
-  printf("rt: log_uint32(0x%" PRIxPTR ", 0x%" PRIx32 ")\n", (intptr_t)proc, i);
+  printf("rt: log_uint32(0x%" PRIxPTR ", 0x%" PRIx32 ")\n", (intptr_t)rt, i);
 }
 
 static void CDECL
-rust_log_str(rust_proc_t *proc, char *c)
+rust_log_str(rust_rt_t *rt, char *c)
 {
-  printf("rt: log_str(0x%" PRIxPTR ", \"%s\")\n", (intptr_t)proc, c);
+  printf("rt: log_str(0x%" PRIxPTR ", \"%s\")\n", (intptr_t)rt, c);
 }
 
 static rust_rt_t*
@@ -116,16 +116,16 @@ rust_start(rust_prog_t *prog, void CDECL (*c_to_proc_glue)(void*, rust_proc_t*))
 
   rt = rust_new_rt();
   proc = rust_new_proc(rt, prog);
+  rt->proc = proc;
   
   //logptr("calling main_code with proc arg", (intptr_t)proc);
   //prog->main_code(0, proc);
   logptr("root proc is ", (intptr_t)proc);
-  proc->regs.pc = (uintptr_t) prog->main_code;
-  proc->regs.sp = (uintptr_t) &(proc->stk->data[rust_init_stk_bytes]);
-  logptr("proc->regs.pc ", (intptr_t)proc->regs.pc);
-  logptr("proc->regs.sp ", (intptr_t)proc->regs.sp);
+  proc->sp = (intptr_t) &(proc->stk->data[rust_init_stk_bytes]);
+  logptr("proc->sp ", (intptr_t)proc->sp);
   logptr("calling c_to_proc_glue ", (intptr_t)c_to_proc_glue);
-  c_to_proc_glue(0, proc);
+  
+  c_to_proc_glue((void*)((intptr_t)(prog->main_code)), proc);
   printf("rt: returned from main, exiting.\n");
   rust_del_proc(proc);
   rust_del_rt(rt);

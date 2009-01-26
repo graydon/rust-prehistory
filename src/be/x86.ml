@@ -251,6 +251,11 @@ let word_n reg i =
  *   *ebp+4        = [old_esi]
  *   *ebp          = [old_ebx]
  * 
+ * For x86-cdecl:
+ * 
+ *  %eax, %ecx, %edx are "caller save" registers
+ *  %ebp, %ebx, %esi, %edi are "callee save" registers 
+ * 
  *)
 
 let proc_ptr = word_n (Il.Hreg ebp) 6;;
@@ -282,7 +287,7 @@ let store_rt_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
 ;;
 
 let load_kern_fn (e:Il.emitter) (i:int) : Il.reg = 
-  let kern_fn_base = 1 in
+  let kern_fn_base = 2 in
     load_rt_word e (kern_fn_base + i)
 ;;
 
@@ -304,7 +309,7 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
    * Our incoming stack looks like this:
    * 
    *   *esp+8        = [arg1   ] = proc ptr
-   *   *esp+4        = [arg0   ] = out ptr
+   *   *esp+4        = [arg0   ] = block pc to enter
    *   *esp          = [retpc  ]
    *)
 
@@ -314,18 +319,17 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
   let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
   let mov dst src = emit Il.MOV dst src Il.Nil in
+  let imm i = Il.Imm (Asm.IMM i) in
 
     Il.emit_full e (Some fix) Il.MOV 
       (r edx) (sp_n 2) Il.Nil; (* edx <- proc          *)
     mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
     mov (ecx_n 0) (r esp);     (* rt->sp <- esp        *)
-    mov (r ecx) (edx_n 6);     (* ecx <- proc->regs.sp *)
+    mov (r ecx) (edx_n 5);     (* ecx <- proc->sp      *)
+    mov (ecx_n (-1)) (imm 0L); (* ecx[-4] <- 0         *) 
     mov (ecx_n (0)) (r edx);   (* ecx[0] <- proc       *)
-    mov (r edx) (sp_n 1);      (* edx <- out ptr       *)
-    mov (ecx_n (-1)) (r edx);  (* ecx[-4] <- out_ptr   *) 
-    mov (r edx) (sp_n 2);      (* edx <- proc          *)
-    mov (r edx) (edx_n 5);     (* edx <- proc->regs.pc *)
-    mov (r esp) (r ecx);       (* esp <- proc->regs.sp *) 
+    mov (r edx) (sp_n 1);      (* edx <- pc            *)
+    mov (r esp) (r ecx);       (* esp <- proc->sp      *) 
 
     (**** IN PROC STACK ****)
     emit Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM 4L));
@@ -340,18 +344,68 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
 ;;
 
 
-let proc_to_c (emit:Il.emitter) (fix:fixup) : unit = 
+let proc_to_c (e:Il.emitter) (fix:fixup) : unit = 
+
   (* 
    * More glue code. Here we've been called from a proc and 
    * we want to call a C function on the C stack. So:
    * 
-   *   - save proc stack pointer
+   *   - save sp to proc sp
    *   - load C stack pointer
+   *   - push runtime pointer onto C stack
    *   - copy call args to C stack
    *   - execute C call, returning to us
-   *   - reload proc stack pointer
+   *   - reload runtime pointer
+   *   - reload proc from runtime
+   *   - reload proc sp
    *   - return to proc
+   * 
+   * What we're essentially doing is detaching ourself
+   * from one proc and holding on to the runtime pointer
+   * in a C stack slot, while we're on the C stack, calling
+   * up to a C function, then returning to the 
+   * proc that is pointed-to by the runtime when we resume
+   * control ourselves.
+   * 
+   * For now we do something silly and just pass a single
+   * kern-fn-arg along with the call. We might change this 
+   * as the ABI shifts a bit. Also no 'out' arg. This is 
+   * totally arbitrary.
+   * 
+   *   *esp+12       = [arg2   ] = kern-fn-arg
+   *   *esp+8        = [arg1   ] = kern-fn
+   *   *esp+4        = [arg0   ] = proc ptr
+   *   *esp          = [retpc  ]
    *)
+  let r x = Il.Reg (Il.Hreg x) in
+  let sp_n = word_n (Il.Hreg esp) in
+  let edx_n = word_n (Il.Hreg edx) in
+  let ecx_n = word_n (Il.Hreg ecx) in
+  let emit = Il.emit e in
+  let mov dst src = emit Il.MOV dst src Il.Nil in
+
+    Il.emit_full e (Some fix) Il.MOV 
+      (r edx) (sp_n 1) Il.Nil; (* edx <- proc          *)
+    mov (edx_n 5) (r esp);     (* proc->sp <- esp      *)
+    mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
+    mov (r edx) (ecx_n 0);     (* edx <- rt->sp        *)
+    mov (edx_n (-1)) (r ecx);  (* edx[-4] <- rt        *)
+    mov (r ecx) (sp_n 3);      
+    mov (edx_n (-2)) (r ecx);  (* edx[-8] <- arg2      *)
+    mov (r ecx) (sp_n 1);      
+    mov (edx_n (-3)) (r ecx);  (* edx[-12] <- arg0     *)
+    mov (r ecx) (sp_n 2);      (* eax <- arg1          *)
+    mov (r esp) (r edx);       (* esp <- edx           *)
+    
+    (**** IN C STACK ****)
+    emit Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM 12L));
+    emit Il.CCALL (r eax) (r ecx) Il.Nil;
+    mov (r edx) (sp_n 2);      (* edx <- rt            *)
+    mov (r edx) (edx_n 1);     (* edx <- rt->proc      *)
+    mov (r esp) (edx_n 5);     (* esp <- proc->sp      *)
+    (***********************)
+
+    emit Il.CRET Il.Nil Il.Nil Il.Nil;
   ()
 ;;
 

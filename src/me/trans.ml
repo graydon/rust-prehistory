@@ -839,9 +839,10 @@ let trans_visitor
     let pp = cx.ctxt_abi.Abi.abi_pp_operand in
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
       emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil (Il.Reg f) Il.Nil;
       emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
-      emit Il.CCALL dst (Il.Reg f) Il.Nil;
-      emit Il.ADD sp sp (Il.Imm (Asm.IMM 8L));
+      emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
+      emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
   in
     
   let trans_log_str (a:Ast.atom) : unit = 
@@ -851,9 +852,10 @@ let trans_visitor
     let pp = cx.ctxt_abi.Abi.abi_pp_operand in
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
       emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil (Il.Reg f) Il.Nil;
       emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
-      emit Il.CCALL dst (Il.Reg f) Il.Nil;
-      emit Il.ADD sp sp (Il.Imm (Asm.IMM 8L));
+      emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
+      emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
   in
 
   let rec trans_block (block:Ast.block) : unit = 
@@ -1095,6 +1097,19 @@ let emit_c_to_proc_glue cx =
       (e.Il.emit_quads) :: cx.ctxt_anon_text_items
 ;;
 
+
+let emit_proc_to_c_glue cx = 
+  let e = Il.new_emitter 
+    cx.ctxt_abi.Abi.abi_prealloc_quad 
+    cx.ctxt_abi.Abi.abi_is_2addr_machine 
+  in
+    cx.ctxt_abi.Abi.abi_proc_to_c e cx.ctxt_proc_to_c_fixup;
+    if e.Il.emit_next_vreg != 0
+    then err None "proc-to-c glue uses nonzero vregs"
+    else cx.ctxt_anon_text_items <- 
+      (e.Il.emit_quads) :: cx.ctxt_anon_text_items
+;;
+
     
 let trans_crate 
     (cx:ctxt)
@@ -1110,6 +1125,7 @@ let trans_crate
   in    
     run_passes cx passes (log cx "%s") items;
     emit_c_to_proc_glue cx;
+    emit_proc_to_c_glue cx;
     (cx.ctxt_text_items, cx.ctxt_data_items, cx.ctxt_entry_prog)
 ;;
 

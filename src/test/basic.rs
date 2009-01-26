@@ -14,7 +14,6 @@ prog basic
   main {
 	let int n = 2 + 3 * 7;
 	let str s = "hello there";
-	log s;
 	let int x = 10;
 	x = g(n,s);
 	log x;
