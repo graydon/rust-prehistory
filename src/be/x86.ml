@@ -189,12 +189,28 @@ let spill_slot (framesz:int64) (i:int) : Il.operand =
         (Int64.neg (Int64.add framesz (Int64.mul 4L (Int64.of_int i))))))
 ;;
 
-let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) (spill_fixup:fixup) : unit =
+
+let save_callee_saves (e:Il.emitter) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
-    Il.emit_full e (Some fn_fixup) (Il.CPUSH TY_u32) (Il.Nil) (r ebp) Il.Nil;
+    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebp) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r edi) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r esi) Il.Nil;
     Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebx) Il.Nil;
+;;
+
+
+let restore_callee_saves (e:Il.emitter) : unit = 
+  let r x = Il.Reg (Il.Hreg x) in
+    Il.emit e (Il.CPOP TY_u32) (r ebx) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r esi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r edi) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r ebp) Il.Nil Il.Nil;
+;;
+
+let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) (spill_fixup:fixup) : unit =
+  let r x = Il.Reg (Il.Hreg x) in
+    Il.emit_full e (Some fn_fixup) Il.DEAD Il.Nil Il.Nil Il.Nil;
+    save_callee_saves e;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
     Il.emit e Il.SUB (r esp) (r esp) 
       (Il.Imm (Asm.ADD ((Asm.IMM framesz), Asm.M_SZ spill_fixup)))
@@ -203,19 +219,13 @@ let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) (spill_fixup:fix
 let fn_epilogue (e:Il.emitter) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
     Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) (r ebx) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) (r esi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) (r edi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) (r ebp) Il.Nil Il.Nil;
+    restore_callee_saves e;
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
-
+  
 let main_prologue (e:Il.emitter) (block:Ast.block) (framesz:int64) (spill_fixup:fixup) : unit =
   let r x = Il.Reg (Il.Hreg x) in
-    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebp) Il.Nil;
-    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r edi) Il.Nil;
-    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r esi) Il.Nil;
-    Il.emit e (Il.CPUSH TY_u32) Il.Nil (r ebx) Il.Nil;
+    save_callee_saves e;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
     Il.emit e Il.SUB (r esp) (r esp) 
       (Il.Imm (Asm.ADD ((Asm.IMM framesz), Asm.M_SZ spill_fixup)))
@@ -224,11 +234,11 @@ let main_prologue (e:Il.emitter) (block:Ast.block) (framesz:int64) (spill_fixup:
 let main_epilogue (e:Il.emitter) (block:Ast.block) : unit = 
   let r x = Il.Reg (Il.Hreg x) in
     Il.emit e Il.MOV (r esp) (r ebp) Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) (r ebx) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) (r esi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) (r edi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) (r ebp) Il.Nil Il.Nil;
-    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+    restore_callee_saves e;
+    (* Surprise! pop the main frame's null-valued fake retpc 
+       and null-valued fake outptr into a scratch register. *)
+    Il.emit e (Il.CPOP TY_u32) (r eax) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP TY_u32) (r eax) Il.Nil Il.Nil;
 ;;
 
 let word_sz = 4L
@@ -286,9 +296,22 @@ let store_rt_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
     Il.emit e Il.MOV (word_n rt i) oper Il.Nil;
 ;;
 
-let load_kern_fn (e:Il.emitter) (i:int) : Il.reg = 
-  let kern_fn_base = 2 in
-    load_rt_word e (kern_fn_base + i)
+let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit = 
+  let code = 
+    match state with 
+        Abi.STATE_running -> 0L
+      | Abi.STATE_calling_c -> 1L
+      | Abi.STATE_exiting -> 2L
+  in
+  let r x = Il.Reg x in
+  let vr = Il.next_vreg e in 
+  let vr_n = word_n vr in
+  let emit = Il.emit e in
+  let mov dst src = emit Il.MOV dst src Il.Nil in
+  let imm i = Il.Imm (Asm.IMM i) in
+    
+    mov (r vr) proc_ptr;
+    mov (vr_n 5) (imm code);
 ;;
 
 let c_to_proc (e:Il.emitter) (fix:fixup) : unit = 
@@ -296,20 +319,16 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
    * This is a bit of glue-code. It should be emitted once per
    * compilation unit.
    * 
-   *   - save C stack pointer into rt:
-   *     - proc->rt->sp = esp
-   *   - copy args into proc stack:
-   *     - proc->rt->sp[0] = esp[8]
-   *     - proc->rt->sp[-4] = esp[4]
+   *   - save C stack pointer and return address into rt:
+   *     - proc->rt->regs.pc = *esp = retpc
+   *     - proc->rt->regs.sp = esp
    *   - switch stacks:
    *     - esp = proc->regs.sp
-   *   - call proc->regs.pc
-   *   - return
+   *   - jump to proc->regs.pc
    * 
    * Our incoming stack looks like this:
    * 
-   *   *esp+8        = [arg1   ] = proc ptr
-   *   *esp+4        = [arg0   ] = block pc to enter
+   *   *esp+4        = [arg1   ] = proc ptr
    *   *esp          = [retpc  ]
    *)
 
@@ -320,26 +339,25 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
   let emit = Il.emit e in
   let mov dst src = emit Il.MOV dst src Il.Nil in
   let imm i = Il.Imm (Asm.IMM i) in
+  let add dst amt = emit Il.ADD dst dst (imm amt) in 
 
-    Il.emit_full e (Some fix) Il.MOV 
-      (r edx) (sp_n 2) Il.Nil; (* edx <- proc          *)
+    Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
+
+    mov (r edx) (sp_n 1);      (* edx <- proc          *)
     mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
-    mov (ecx_n 0) (r esp);     (* rt->sp <- esp        *)
-    mov (r ecx) (edx_n 5);     (* ecx <- proc->sp      *)
-    mov (ecx_n (0)) (r edx);   (* ecx[0] <- proc       *)
-    mov (ecx_n (-1)) (imm 0L); (* ecx[-4] <- 0         *) 
-    mov (r edx) (sp_n 1);      (* edx <- pc            *)
+    mov (r eax) (sp_n 0);      (* eax <- *esp          *)
+    mov (ecx_n 1) (r eax);     (* rt->regs.pc <- *esp  *)
+    add (r esp) 4L;            (* pop retpc            *)
+    save_callee_saves e;
+    mov (ecx_n 2) (r esp);     (* rt->regs.sp <- esp   *)
+    mov (r ecx) (edx_n 4);     (* ecx <- proc->regs.sp *)
+    mov (r edx) (edx_n 3);     (* edx <- proc->regs.pc *)
     mov (r esp) (r ecx);       (* esp <- proc->sp      *) 
 
     (**** IN PROC STACK ****)
-    emit Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM 4L));
-    emit Il.CCALL (r eax) (r edx) Il.Nil;
-    mov (r edx) (sp_n 1);      (* edx <- proc          *)
-    mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
-    mov (r esp) (ecx_n 0);     (* esp <- rt->sp        *)
-    (***********************)
-    
-    emit Il.CRET Il.Nil Il.Nil Il.Nil;
+    restore_callee_saves e;
+    emit Il.JMP Il.Nil (r edx) Il.Nil;
+    (***********************)    
   ()
 ;;
 
@@ -348,33 +366,13 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
 
   (* 
    * More glue code. Here we've been called from a proc and 
-   * we want to call a C function on the C stack. So:
+   * we want to return to the saved C stack/pce. So:
    * 
-   *   - save sp to proc sp
-   *   - load C stack pointer
-   *   - push runtime pointer onto C stack
-   *   - copy call args to C stack
-   *   - execute C call, returning to us
-   *   - reload runtime pointer
-   *   - reload proc from runtime
-   *   - reload proc sp
-   *   - return to proc
+   *   - save sp and pc to proc.regs
+   *   - load saved C sp
+   *   - jump to saved C pc
    * 
-   * What we're essentially doing is detaching ourself
-   * from one proc and holding on to the runtime pointer
-   * in a C stack slot, while we're on the C stack, calling
-   * up to a C function, then returning to the 
-   * proc that is pointed-to by the runtime when we resume
-   * control ourselves.
-   * 
-   * For now we do something silly and just pass a single
-   * kern-fn-arg along with the call. We might change this 
-   * as the ABI shifts a bit. Also no 'out' arg. This is 
-   * totally arbitrary.
-   * 
-   *   *esp+12       = [arg2   ] = kern-fn-arg
-   *   *esp+8        = [arg1   ] = kern-fn
-   *   *esp+4        = [arg0   ] = proc ptr
+   *   *esp+4        = [arg1   ] = proc ptr
    *   *esp          = [retpc  ]
    *)
   let r x = Il.Reg (Il.Hreg x) in
@@ -383,29 +381,25 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
   let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
   let mov dst src = emit Il.MOV dst src Il.Nil in
+  let imm i = Il.Imm (Asm.IMM i) in
+  let add dst amt = emit Il.ADD dst dst (imm amt) in 
 
-    Il.emit_full e (Some fix) Il.MOV 
-      (r edx) (sp_n 1) Il.Nil; (* edx <- proc          *)
-    mov (edx_n 5) (r esp);     (* proc->sp <- esp      *)
-    mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
-    mov (r edx) (ecx_n 0);     (* edx <- rt->sp        *)
-    mov (edx_n (-1)) (r ecx);  (* edx[-4] <- rt        *)
-    mov (r ecx) (sp_n 3);      
-    mov (edx_n (-2)) (r ecx);  (* edx[-8] <- arg2      *)
-    mov (r ecx) (sp_n 1);      
-    mov (edx_n (-3)) (r ecx);  (* edx[-12] <- arg0     *)
-    mov (r ecx) (sp_n 2);      (* eax <- arg1          *)
-    mov (r esp) (r edx);       (* esp <- edx           *)
-    
+    Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
+
+    mov (r edx) (sp_n 1);      (* edx <- proc            *)
+    mov (r ecx) (edx_n 0);     (* ecx <- proc->rt        *)
+    mov (r eax) (sp_n 0);      (* eax <- *esp            *)
+    mov (edx_n 3) (r eax);     (* proc->regs.pc <- *esp  *)
+    add (r esp) 4L;            (* pop retpc              *)
+    save_callee_saves e;
+    mov (edx_n 4) (r esp);     (* proc->regs.sp <- esp   *)
+    mov (r edx) (ecx_n 1);     (* edx <- rt->regs.pc     *)
+    mov (r esp) (ecx_n 2);     (* esp <- rt->regs.sp     *)
+
     (**** IN C STACK ****)
-    emit Il.SUB (r esp) (r esp) (Il.Imm (Asm.IMM 12L));
-    emit Il.CCALL (r eax) (r ecx) Il.Nil;
-    mov (r edx) (sp_n 2);      (* edx <- rt            *)
-    mov (r edx) (edx_n 1);     (* edx <- rt->proc      *)
-    mov (r esp) (edx_n 5);     (* esp <- proc->sp      *)
+    restore_callee_saves e;
+    emit Il.JMP Il.Nil (r edx) Il.Nil;
     (***********************)
-
-    emit Il.CRET Il.Nil Il.Nil Il.Nil;
   ()
 ;;
 
@@ -431,13 +425,13 @@ let (abi:Abi.abi) =
     Abi.abi_emit_main_epilogue = main_epilogue;
     Abi.abi_clobbers = clobbers;
 
+    Abi.abi_emit_proc_state_change = emit_proc_state_change;
     Abi.abi_c_to_proc = c_to_proc;
     Abi.abi_proc_to_c = proc_to_c;
 
     Abi.abi_sp_reg = (Il.Hreg esp);
     Abi.abi_fp_reg = (Il.Hreg ebp);
     Abi.abi_pp_operand = proc_ptr;
-    Abi.abi_load_kern_fn = load_kern_fn;
     Abi.abi_frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;
     Abi.abi_implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;
     Abi.abi_spill_slot = spill_slot;

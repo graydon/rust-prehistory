@@ -104,38 +104,10 @@ typedef struct rust_type {
   
 } rust_type_t;
 
-/* Runtime closures over lexical environments. */
-typedef struct rust_env {
-  uintptr_t x;
-} rust_env_t;
-
-/* There are 4 frame types, depending on the frame descriptor. */
-
-typedef struct rust_simple_frame {
-  rust_type_t *descriptor;
-  uintptr_t return_sp;
-} rust_simple_frame_t;
-
-typedef struct rust_iter_frame {
-  rust_type_t *descriptor;
-  uintptr_t return_sp;
-  uintptr_t yield_sp;
-} rust_iter_frame_t;
-
-typedef struct rust_closure_frame {
-  rust_type_t *descriptor;
-  uintptr_t return_sp;
-  rust_env_t *env;
-  uint8_t data[];
-} rust_closure_frame_t;
-
-typedef struct rust_iter_closure_frame {
-  rust_type_t *descriptor;
-  uintptr_t return_sp;
-  uintptr_t yield_sp;
-  rust_env_t *env;
-  uint8_t data[];
-} rust_iter_closure_frame_t;
+typedef struct rust_regs {
+  uintptr_t pc;
+  uintptr_t sp;
+} rust_regs_t;
 
 /* Proc stack segments. Heap allocated and chained together. */
 
@@ -147,14 +119,6 @@ typedef struct rust_stk_seg {
   uint8_t data[];
 } rust_stk_seg_t;
 
-typedef struct rust_code {
-  uintptr_t x;
-} rust_code_t;
-
-typedef struct rust_msg_queue {
-  uintptr_t x;
-} rust_msg_queue_t;
-
 struct rust_proc;
 struct rust_prog;
 struct rust_rt;
@@ -163,17 +127,17 @@ typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
 typedef struct rust_rt rust_rt_t;
 
-struct rust_rt { 
-  uintptr_t c_sp;    /* Saved sp from the C runtime. */  
-  rust_proc_t *proc; /* Currently active proc.       */
+/* FIXME: ifdef by platform. */
+size_t rust_n_calee_saves = 4;
 
-  /* "Kernel functions". */
-  void (*log_uint32_t)(rust_rt_t *, uint32_t);
-  void (*log_str)(rust_rt_t *, char *);
+struct rust_rt { 
+  rust_proc_t *proc;     /* Currently active proc.       */
+  rust_regs_t c_regs;    /* Saved sp from the C runtime. */  
 };
 
-
-
+#define RUST_PROC_STATE_RUNNING     0
+#define RUST_PROC_STATE_CALLING_C   1
+#define RUST_PROC_STATE_EXITING     2
 
 #ifdef WIN32
 #define CDECL __cdecl
@@ -190,11 +154,10 @@ struct rust_prog {
 struct rust_proc { 
 
   rust_rt_t *rt;
-  rust_stk_seg_t *stk;    
-  rust_env_t *env;
+  rust_stk_seg_t *stk;
   rust_prog_t *prog;
-  rust_msg_queue_t *q;
-  uintptr_t sp;           /* saved sp when not running.                     */
+  rust_regs_t regs;       /* saved sp when not running.                     */
+  uint32_t state;
   size_t refcnt;
 
   /* Proc accounting. */

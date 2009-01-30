@@ -67,6 +67,13 @@
  *  [
  *)      
 
+
+type proc_state =
+    STATE_running
+  | STATE_calling_c
+  | STATE_exiting
+;;
+
 type abi =
   {
     abi_ptr_sz: int64;
@@ -87,9 +94,9 @@ type abi =
     abi_emit_main_prologue: (Il.emitter -> Ast.block -> int64 -> Common.fixup -> unit);
     abi_emit_main_epilogue: (Il.emitter -> Ast.block -> unit);
 
-    abi_load_kern_fn: (Il.emitter -> int -> Il.reg);
-
     abi_clobbers: (Il.quad -> Il.hreg list); 
+
+    abi_emit_proc_state_change: (Il.emitter -> proc_state -> unit);
 
     (* Transitions between runtimes. *)
     abi_c_to_proc: (Il.emitter -> Common.fixup -> unit);
@@ -102,7 +109,6 @@ type abi =
     abi_frame_base_sz: int64;
     abi_spill_slot: (int64 -> int -> Il.operand);
   }
-
 
 
 (* 

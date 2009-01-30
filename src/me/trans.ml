@@ -834,28 +834,30 @@ let trans_visitor
     
   let trans_log_int (a:Ast.atom) : unit = 
     let v = trans_atom a in 
-    let f = cx.ctxt_abi.Abi.abi_load_kern_fn (emitter()) 0 in
     let dst = Il.Reg (Il.next_vreg (emitter())) in 
     let pp = cx.ctxt_abi.Abi.abi_pp_operand in
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
+      cx.ctxt_abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
       emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
-      emit (Il.CPUSH TY_u32) Il.Nil (Il.Reg f) Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
       emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
       emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
       emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
+      ()
   in
     
   let trans_log_str (a:Ast.atom) : unit = 
-    let v = trans_atom a in
-    let f = cx.ctxt_abi.Abi.abi_load_kern_fn (emitter()) 1 in
     let dst = Il.Reg (Il.next_vreg (emitter())) in 
+    let v = trans_atom a in
     let pp = cx.ctxt_abi.Abi.abi_pp_operand in
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
+      cx.ctxt_abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
       emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
-      emit (Il.CPUSH TY_u32) Il.Nil (Il.Reg f) Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM 1L)) Il.Nil;
       emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
       emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
       emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
+      ()
   in
 
   let rec trans_block (block:Ast.block) : unit = 
@@ -990,14 +992,17 @@ let trans_visitor
     let framesz = Hashtbl.find cx.ctxt_frame_sizes progid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups progid in
       push_new_emitter ();
-      Il.emit_full (emitter()) (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
-      cx.ctxt_abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup;
-      trans_block b;
-      cx.ctxt_abi.Abi.abi_emit_main_epilogue (emitter()) b;
-      capture_emitted_quads progid;
-      pop_emitter ();
-      ignore (Stack.pop path);
-      fix
+      let dst = Il.Reg (Il.next_vreg (emitter())) in 
+        Il.emit_full (emitter()) (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
+        cx.ctxt_abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup;
+        trans_block b;
+        cx.ctxt_abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_exiting;
+        cx.ctxt_abi.Abi.abi_emit_main_epilogue (emitter()) b;
+        emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
+        capture_emitted_quads progid;
+        pop_emitter ();
+        ignore (Stack.pop path);
+        fix
   in
     
   let trans_prog (progid:node_id) (p:Ast.prog) : unit =   
