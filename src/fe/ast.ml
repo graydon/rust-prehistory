@@ -1,7 +1,7 @@
 
-(* 
+(*
  * There are two kinds of rust files:
- * 
+ *
  * .rc files, containing crates.
  * .rs files, containing source.
  *
@@ -9,15 +9,15 @@
 
 open Common;;
 
-(* 
+(*
  * Slot names are given by a dot-separated path within the current
- * module namespace. 
+ * module namespace.
  *)
 
 type ident = string
 ;;
 
-type slot_key = 
+type slot_key =
     KEY_ident of ident
   | KEY_temp of temp_id
 ;;
@@ -25,40 +25,40 @@ type slot_key =
 (* "names" are statically computable references to particular slots;
    they never involve dynamic indexing (nor even static tuple-indexing;
    you could add it but there are few contexts that need names that would
-   benefit from it). 
-   
-   Each component of a name may also be type-parametric; you must 
+   benefit from it).
+
+   Each component of a name may also be type-parametric; you must
    supply type parameters to reference through a type-parametric name
    component. So for example if foo is parametric in 2 types, you can
-   write foo[int,int].bar but not foo.bar.   
+   write foo[int,int].bar but not foo.bar.
  *)
 
-type proto = 
+type proto =
     PROTO_ques  (* fn? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
   | PROTO_bang  (* fn! foo(...): yields 1 value. Never resumes.                           *)
   | PROTO_star  (* fn* foo(...): may yield N >= 0 values, then returns.                   *)
   | PROTO_plus  (* fn+ foo(...): yields N > 0 values then returns.                        *)
 ;;
 
-type name_base = 
+type name_base =
     BASE_ident of ident
   | BASE_temp of temp_id
   | BASE_app of (ident * (ty array))
 
-and name_component = 
+and name_component =
     COMP_ident of ident
   | COMP_app of (ident * (ty array))
   | COMP_idx of int
 
-and name = 
+and name =
     NAME_base of name_base
   | NAME_ext of (name * name_component)
 
-(* 
+(*
  * Type expressions are transparent to type names, their equality is structural.
  * (after normalization)
  *)
-and ty = 
+and ty =
 
     TY_any
   | TY_nil
@@ -72,9 +72,9 @@ and ty =
   | TY_vec of ty
   | TY_rec of ty_rec
 
-  (* 
-   * Note that ty_idx is only valid inside a slot of a ty_iso group, not 
-   * in a general type term. 
+  (*
+   * Note that ty_idx is only valid inside a slot of a ty_iso group, not
+   * in a general type term.
    *)
   | TY_tag of ty_tag
   | TY_iso of ty_iso
@@ -91,16 +91,16 @@ and ty =
   | TY_opaque of opaque_id
   | TY_named of name
   | TY_type
-      
+
   | TY_constrained of (ty * constrs)
   | TY_lim of ty
-      
-and mode = 
+
+and mode =
     MODE_exterior
   | MODE_interior
   | MODE_read_alias
   | MODE_write_alias
-    
+
 and slot = { slot_mode: mode;
              slot_ty: ty option; }
 
@@ -109,53 +109,53 @@ and ty_tup = slot array
 (* In closed type terms a constraint may refer to components of the
  * term by anchoring off the "formal symbol" '*', which represents "the
  * term this constraint is attached to".
- * 
- * 
+ *
+ *
  * For example, if I have a tuple type (int,int), I may wish to enforce
  * the lt predicate on it; I can write this as a constrained type term
  * like:
- * 
+ *
  * (int,int) : lt( *.{0}, *.{1} )
- * 
+ *
  * In fact all tuple types are converted to this form for purpose of
  * type-compatibility testing; the argument tuple in a function
- * 
+ *
  * fn (int x, int y) : lt(x, y) -> int
- * 
+ *
  * desugars to
- * 
+ *
  * fn ((int, int) : lt( *.{0}, *.{1} )) -> int
- * 
+ *
  *)
 
-and carg_base = 
-    BASE_formal 
+and carg_base =
+    BASE_formal
   | BASE_named of name_base
-      
+
 and carg =
     CARG_base of carg_base
   | CARG_ext of (carg * name_component)
 
-and constr = 
-    { 
+and constr =
+    {
       constr_name: name;
       constr_args: carg array;
     }
-      
+
 and constrs = constr array
-    
-and prog = 
+
+and prog =
     {
       prog_init: (init identified) option;
       prog_main: block option;
       prog_fini: block option;
       prog_mod: mod_items;
-    } 
-      
+    }
+
 and ty_rec = (ident, slot) Hashtbl.t
-      
+
 (* ty_tag is a sum type.
- * 
+ *
  * a tag type expression either normalizes to a TY_tag or a TY_iso,
  * which (like in ocaml) is an indexed projection from an iso-recursive
  * group of TY_tags.
@@ -163,19 +163,19 @@ and ty_rec = (ident, slot) Hashtbl.t
 
 and ty_tag = (ident, ty) Hashtbl.t
 
-and ty_iso = 
+and ty_iso =
     {
       iso_index: int;
       iso_group: ty_tag array
     }
 
-and ty_sig = 
-    { 
+and ty_sig =
+    {
       sig_input_slots: slot array;
       sig_output_slot: slot;
     }
 
-and ty_fn_aux = 
+and ty_fn_aux =
     {
       fn_pure: bool;
       fn_lim: ty_limit;
@@ -186,15 +186,15 @@ and ty_fn = (ty_sig * ty_fn_aux)
 
 and ty_pred = slot array
 
-and ty_prog = 
+and ty_prog =
     {
       prog_mod_ty: mod_type_items;
       prog_init_ty: (slot array) option;
     }
-      
+
 (* put+ f(a,b) means to call f with current put addr and self as ret
  * addr. this is a 'tail yield' that bypasses us during f execution.
- * 
+ *
  * ret+ f(a,b) means to call f with current pur addr and current ret
  * addr. this is a 'tail call' that destroys us.
  *)
@@ -220,19 +220,19 @@ and stmt' =
   | STMT_call of (lval * lval * (atom array))
   | STMT_send of (lval * atom)
   | STMT_recv of (lval * lval)
-  | STMT_decl of stmt_decl 
+  | STMT_decl of stmt_decl
   | STMT_use of (ty * ident * lval)
-      
+
 and stmt = stmt' identified
 
-and stmt_alt_tag = 
+and stmt_alt_tag =
     {
       alt_tag_lval: lval;
       alt_tag_arms: (ident, (slot * stmt)) Hashtbl.t;
     }
 
-and stmt_alt_type = 
-    { 
+and stmt_alt_type =
+    {
       alt_type_lval: lval;
       alt_type_arms: (ident * slot * stmt) array;
       alt_type_else: stmt option;
@@ -241,31 +241,31 @@ and stmt_alt_type =
 and block' = stmt array
 and block = block' identified
 
-and stmt_decl = 
+and stmt_decl =
     DECL_mod_item of (ident * mod_item)
   | DECL_slot of (slot_key * (slot identified))
-      
-and stmt_alt_port = 
-    { 
+
+and stmt_alt_port =
+    {
       (* else lval is a timeout value, a b64 count of seconds. *)
       alt_port_arms: (lval * lval) array;
       alt_port_else: (lval * stmt) option;
     }
 
-and stmt_while = 
+and stmt_while =
     {
       while_lval: ((stmt array) * atom);
       while_body: block;
     }
-      
-and stmt_foreach = 
+
+and stmt_foreach =
     {
       foreach_proto: proto;
       foreach_call: (lval * lval array);
       foreach_body: block;
     }
-      
-and stmt_for = 
+
+and stmt_for =
     {
       for_init: stmt;
       for_test: ((stmt array) * atom);
@@ -273,21 +273,21 @@ and stmt_for =
       for_body: stmt;
     }
 
-and stmt_if = 
+and stmt_if =
     {
       if_test: atom;
       if_then: block;
       if_else: block option;
     }
 
-and stmt_try = 
+and stmt_try =
     {
       try_body: block;
       try_fail: block option;
       try_fini: block option;
     }
 
-and atom = 
+and atom =
     ATOM_literal of (lit identified)
   | ATOM_lval of lval
 
@@ -299,7 +299,7 @@ and expr =
   | EXPR_vec of (atom array)
   | EXPR_tup of (atom array)
 
-and lit = 
+and lit =
   | LIT_nil
   | LIT_bool of bool
   | LIT_mach of (ty_mach * string)
@@ -309,7 +309,7 @@ and lit =
   | LIT_custom of lit_custom
 
 
-and lit_custom = 
+and lit_custom =
     {
       lit_expander: lval;
       lit_arg: lval;
@@ -319,13 +319,13 @@ and lit_custom =
 and lval_component =
     COMP_named of name_component
   | COMP_atom of atom
-    
 
-and lval = 
+
+and lval =
     LVAL_base of name_base identified
   | LVAL_ext of (lval * lval_component)
-      
-and binop =    
+
+and binop =
     BINOP_or
   | BINOP_and
 
@@ -353,7 +353,7 @@ and unop =
   | UNOP_neg
 
 
-and fn = 
+and fn =
     {
       fn_input_slots: ((slot identified) * ident) array;
       fn_output_slot: slot identified;
@@ -361,66 +361,66 @@ and fn =
       fn_body: block;
     }
 
-and pred = 
+and pred =
     {
       pred_input_slots: ((slot identified) * ident) array;
       pred_body: stmt;
     }
-      
-and init = 
+
+and init =
     {
       init_input_slots: ((slot identified) * ident) array;
       init_body: block;
     }
 
-(* 
+(*
  * An 'a decl is a sort-of-thing that represents a parametric (generative)
- * declaration. Every reference to one of these involves applying 0 or more 
+ * declaration. Every reference to one of these involves applying 0 or more
  * type arguments, as part of *name resolution*.
- * 
- * Slots are *not* parametric declarations. A slot has a specific type 
+ *
+ * Slots are *not* parametric declarations. A slot has a specific type
  * even if it's a type that's bound by a quantifier in its environment.
  *)
 
 
-and ty_limit = 
+and ty_limit =
     LIMITED
   | UNLIMITED
 
-and 'a decl = 
+and 'a decl =
     {
       decl_params: (ty_limit * ident) array;
       decl_item: 'a;
     }
 
-(* 
- * We have module types and module declarations. A module declaration is 
+(*
+ * We have module types and module declarations. A module declaration is
  * a table of module items. A module type is a table of module-type items.
- * 
- * The latter describe the former, despite the fact that modules can 
+ *
+ * The latter describe the former, despite the fact that modules can
  * contain types: module types are not *equivalent* to module declarations,
  * and every module declaration gives rise to a module value that conforms to
  * a possibly-existential module type.
- * 
+ *
  * Module values of particular module types are 'opened' by a 'use' statement.
  * This converts a module with opaque existential types into a module with
  * a corresponding set of concrete, disjoint opaque (skolem) types. These can
  * be projected out of the module bound by the 'use' statement in subsequent
  * declarations and statements, without risk of collision with other types.
- * 
- * For this reason, the MOD_TYPE_ITEM_opaque_type constructor takes no 
+ *
+ * For this reason, the MOD_TYPE_ITEM_opaque_type constructor takes no
  * arguments -- it simply describes the presence of *some* existential type
- * in a module -- but whatever that existential may be, it is converted  
- * in the bound module to a MOD_ITEM_type (TY_opaque i) for some fresh i, 
+ * in a module -- but whatever that existential may be, it is converted
+ * in the bound module to a MOD_ITEM_type (TY_opaque i) for some fresh i,
  * when 'use'd.
- * 
- * This technique is explained in some depth in section 4.2 of the 
- * paper "first class modules for haskell", by Mark Shields and Simon 
- * Peyton Jones. Hopefully I'm doing it right. It's a little near the 
+ *
+ * This technique is explained in some depth in section 4.2 of the
+ * paper "first class modules for haskell", by Mark Shields and Simon
+ * Peyton Jones. Hopefully I'm doing it right. It's a little near the
  * limit of tricks I understand.
  *)
 
-and mod_item' = 
+and mod_item' =
     MOD_ITEM_opaque_type of ty decl
   | MOD_ITEM_public_type of ty decl
   | MOD_ITEM_pred of pred decl
@@ -428,9 +428,9 @@ and mod_item' =
   | MOD_ITEM_fn of fn decl
   | MOD_ITEM_prog of prog decl
 
-and mod_item = mod_item' identified   
+and mod_item = mod_item' identified
 
-and mod_type_item' = 
+and mod_type_item' =
     MOD_TYPE_ITEM_opaque_type of ty_limit decl
   | MOD_TYPE_ITEM_public_type of ty decl
   | MOD_TYPE_ITEM_pred of ty_pred decl
@@ -443,38 +443,44 @@ and mod_type_item = mod_type_item' identified
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
 and mod_items = (ident, mod_item) Hashtbl.t
+
+and crate =
+    {
+      crate_items: mod_items;
+      crate_main: name;
+    }
 ;;
 
 
 (* Stringification *)
 
 
-let string_of_key k = 
-  match k with 
+let string_of_key k =
+  match k with
       KEY_temp i -> "<temp#" ^ (string_of_int (int_of_temp i)) ^ ">"
     | KEY_ident i -> i
 ;;
 
-let rec string_of_name_component comp = 
-  match comp with 
-	  COMP_ident id -> id
-	| COMP_app (id, tys) -> 
-		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
-	| COMP_idx i -> 
-		"{" ^ (string_of_int i) ^ "}"
+let rec string_of_name_component comp =
+  match comp with
+      COMP_ident id -> id
+    | COMP_app (id, tys) ->
+        id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
+    | COMP_idx i ->
+        "{" ^ (string_of_int i) ^ "}"
 
-and string_of_name name = 
-  match name with 
-	  NAME_base (BASE_ident id) -> id
-	| NAME_base (BASE_temp n) -> "<temp#" ^ (string_of_int (int_of_temp n)) ^ ">"
-	| NAME_base (BASE_app (id, tys)) -> 
-		id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
-	| NAME_ext (n, c) -> 
-		(string_of_name n) ^ "." ^ (string_of_name_component c)
+and string_of_name name =
+  match name with
+      NAME_base (BASE_ident id) -> id
+    | NAME_base (BASE_temp n) -> "<temp#" ^ (string_of_int (int_of_temp n)) ^ ">"
+    | NAME_base (BASE_app (id, tys)) ->
+        id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
+    | NAME_ext (n, c) ->
+        (string_of_name n) ^ "." ^ (string_of_name_component c)
 
-and string_of_ty ty = 
+and string_of_ty ty =
   (* FIXME: flesh this out; it's currently only diagnostic. *)
-  match ty with 
+  match ty with
       TY_any -> "any"
     | TY_nil -> "()"
     | TY_bool -> "bool"
@@ -495,23 +501,23 @@ and string_of_ty ty =
     | TY_pred _ -> "pred"
     | TY_chan _ -> "chan"
     | TY_port _ -> "port"
-        
+
     | TY_mod _ -> "mod"
     | TY_prog _ -> "prog"
 
     | TY_opaque _ -> "opaque"
     | TY_named name -> "<named:" ^ (string_of_name name) ^ ">"
     | TY_type -> "ty"
-      
+
     | TY_constrained _ -> "constrained"
     | TY_lim _ -> "lim"
 ;;
 
 
-(* 
+(*
  * Local Variables:
- * fill-column: 70; 
+ * fill-column: 70;
  * indent-tabs-mode: nil
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)

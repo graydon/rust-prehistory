@@ -1,2 +1,3 @@
 
-mod test = "basic.rs";
+mod basic = "basic.rs";
+main = basic.root;

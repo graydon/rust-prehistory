@@ -9,14 +9,14 @@ ML_INCS:=-I fe -I me -I be -I driver -I util
 ML_LIBS=unix.cma nums.cma
 OCAMLC_FLAGS:=-g $(ML_INCS)
 
-# List them in link order, please! 
+# List them in link order, please!
 # Nobody calculates the link-order DAG automatically, sadly.
-UTIL_BOT_MLS:=util/common.ml 
-DRIVER_BOT_MLS:=driver/session.ml 
+UTIL_BOT_MLS:=util/common.ml
+DRIVER_BOT_MLS:=driver/session.ml
 BE_MLS:=be/asm.ml be/il.ml be/abi.ml be/bitv.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml
-ME_MLS:=me/walk.ml me/semant.ml me/resolve.ml me/alias.ml me/auto.ml me/layout.ml me/trans.ml 
+ME_MLS:=me/walk.ml me/semant.ml me/resolve.ml me/alias.ml me/auto.ml me/layout.ml me/trans.ml
 FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml
-DRIVER_TOP_MLS:=driver/main.ml 
+DRIVER_TOP_MLS:=driver/main.ml
 
 COMPILER_MLS:=$(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_TOP_MLS)
 COMPILER_CMOS:=$(COMPILER_MLS:.ml=.cmo)
@@ -47,7 +47,7 @@ $(CFG_COMPILER): $(COMPILER_CMOS) $(MKFILES)
 %.ml: %.mll $(MKFILES)
 	ocamllex -o $@ $<
 
-# Auto-dependency logic 
+# Auto-dependency logic
 
 ML_DEPFILES:=$(COMPILER_MLS:.ml=.d)
 C_DEPFILES:=$(RUNTIME_CS:.c=.d)
@@ -71,11 +71,11 @@ TEST_OUTS:=$(TEST_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 check: $(TEST_EXES) $(TEST_OUTS)
 
-test/%.out: test/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME) 
-	OCAMLRUNPARAM="b1" $< 2>&1 | tee $@
+test/%.out: test/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
+	$< 2>&1 | tee $@
 
 test/%$(CFG_EXE_SUFFIX): test/%.rc test/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
-	$(CFG_COMPILER) -o $@ $<
+	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
 
 # Cleanup logic
 
@@ -84,6 +84,6 @@ test/%$(CFG_EXE_SUFFIX): test/%.rc test/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
 clean:
 	rm -f $(RUNTIME_OBJS) $(COMPILER_CMOS) $(COMPILER_CMIS)
 	rm -f $(ML_DEPFILES) $(C_DEPFILES)
-	rm -f fe/lexer.ml 
+	rm -f fe/lexer.ml
 	rm -f $(CFG_COMPILER) $(CFG_RUNTIME)
 	rm -f $(TEST_EXES) $(TEST_OUTS)
