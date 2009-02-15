@@ -1,2 +1,0 @@
-
-mod test = "fact.rs";

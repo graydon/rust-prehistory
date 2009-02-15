@@ -11,7 +11,7 @@ let (targ:Common.target) =
 
 let (sess:Session.sess) =
   {
-    Session.sess_crate = "";
+    Session.sess_in = "";
     (* FIXME: need something fancier here for unix sub-flavours. *)
     Session.sess_targ = targ;
     Session.sess_out =
@@ -70,8 +70,8 @@ let exit_if_failed _ =
 
 Arg.parse
   argspecs
-  (fun arg -> sess.Session.sess_crate <- arg)
-  ("usage: " ^ Sys.argv.(0) ^ " [options] CRATE_FILE.rc\n%!")
+  (fun arg -> sess.Session.sess_in <- arg)
+  ("usage: " ^ Sys.argv.(0) ^ " [options] (CRATE_FILE.rc|SOURCE_FILE.rs)\n%!")
 ;;
 
 let _ =
@@ -81,13 +81,26 @@ let _ =
 ;;
 
 let _ =
-  if sess.Session.sess_crate = ""
-  then (Printf.fprintf stderr "Error: empty crate filename\n%!"; exit 1)
+  if sess.Session.sess_in = ""
+  then (Printf.fprintf stderr "Error: empty input filename\n%!"; exit 1)
   else ()
 ;;
 
 
-let (crate:Ast.crate) = Ll1parser.parse_crate sess Lexer.token;;
+let (crate:Ast.crate) =
+  if Filename.check_suffix sess.Session.sess_in ".rc"
+  then Ll1parser.parse_crate sess Lexer.token
+  else
+    if Filename.check_suffix sess.Session.sess_in ".rs"
+    then Ll1parser.parse_srcfile sess Lexer.token
+    else
+      begin
+        Printf.fprintf stderr
+          "Error: unrecognized input file type: %s\n%!"
+          sess.Session.sess_in;
+        exit 1
+      end
+;;
 let _ = exit_if_failed ()
 ;;
 

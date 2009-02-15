@@ -1335,7 +1335,6 @@ and make_parser tref nref sess tok fname =
       ps
 
 and parse_crate_mod_entry
-    tok
     (prefix:string)
     (mod_items:Ast.mod_items)
     (ps:pstate)
@@ -1361,7 +1360,8 @@ and parse_crate_mod_entry
             make_parser
               ps.pstate_temp_id
               ps.pstate_node_id
-              ps.pstate_sess tok
+              ps.pstate_sess
+              ps.pstate_lexfun
               fname
           in
             parse_raw_mod_items p
@@ -1369,7 +1369,9 @@ and parse_crate_mod_entry
       | RBRACE ->
           bump ps;
           let subprefix = Filename.concat prefix fname in
-          let items = parse_crate_mod_entries tok fname subprefix ps LBRACE in
+          let items =
+            parse_crate_mod_entries fname subprefix ps LBRACE
+          in
             items
       | _ -> raise (unexpected ps)
   in
@@ -1396,7 +1398,6 @@ and parse_raw_mod_items
     items
 
 and parse_crate_mod_entries
-    tok
     (fname:string)
     (prefix:string)
     (ps:pstate)
@@ -1405,13 +1406,12 @@ and parse_crate_mod_entries
   let items = Hashtbl.create 4 in
     while peek ps != endtok
     do
-      parse_crate_mod_entry tok prefix items ps
+      parse_crate_mod_entry prefix items ps
     done;
     expect ps endtok;
     items
 
 and parse_root_crate_entries
-    tok
     (fname:string)
     (prefix:string)
     (ps:pstate)
@@ -1432,7 +1432,7 @@ and parse_root_crate_entries
                   | Some _ -> raise (err "multiple explicit main programs given in crate" ps )
             end
         | MOD ->
-            parse_crate_mod_entry tok prefix items ps
+            parse_crate_mod_entry prefix items ps
         | _ -> raise (unexpected ps)
     done;
     expect ps EOF;
@@ -1475,16 +1475,20 @@ and infer_main_prog
       | _ -> raise (err "cannot infer main program: multiple programs found" ps)
 ;;
 
-let parse_crate
+let parse_root_with_parse_fn
+    (suffix:string)
+    fn
     (sess:Session.sess)
     tok
     : Ast.crate =
   try
-    let fname = sess.Session.sess_crate in
+    let fname = sess.Session.sess_in in
     let tref = ref (Temp 0) in
     let nref = ref (Node 0) in
     let ps = make_parser tref nref sess tok fname in
-      parse_root_crate_entries tok fname (Filename.dirname fname) ps
+      if Filename.check_suffix fname suffix
+      then fn fname (Filename.dirname fname) ps
+      else raise (err "parsing wrong kind of file" ps)
   with
       Parse_err (ps, str) ->
         Session.fail sess "Parse error: %s\n%!" str;
@@ -1495,7 +1499,27 @@ let parse_crate
           ps.pstate_ctxt;
         { Ast.crate_items = Hashtbl.create 0;
           Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none") }
+
+let parse_root_srcfile_entries
+    (fname:string)
+    (prefix:string)
+    (ps:pstate)
+    : Ast.crate =
+  let stem = Filename.chop_suffix fname ".rs" in
+  let apos = lexpos ps in
+  let items = parse_raw_mod_items ps in
+  let bpos = lexpos ps in
+  let modi = span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
+                                                   Ast.decl_item = items })
+  in
+  let mitems = Hashtbl.create 0 in
+    htab_put mitems stem modi;
+    { Ast.crate_items = mitems;
+      Ast.crate_main = infer_main_prog ps mitems }
 ;;
+
+let parse_crate = parse_root_with_parse_fn ".rc" parse_root_crate_entries;;
+let parse_srcfile = parse_root_with_parse_fn ".rs" parse_root_srcfile_entries;;
 
 
 (*

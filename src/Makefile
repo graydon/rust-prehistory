@@ -66,7 +66,8 @@ C_DEPFILES:=$(RUNTIME_CS:.c=.d)
 # Testing logic
 
 TEST_CRATES:=$(wildcard test/*.rc)
-TEST_EXES:=$(TEST_CRATES:.rc=$(CFG_EXE_SUFFIX))
+TEST_SOURCES:=$(wildcard test/*.rs)
+TEST_EXES:=$(TEST_CRATES:.rc=$(CFG_EXE_SUFFIX)) $(TEST_SOURCES:.rs=$(CFG_EXE_SUFFIX))
 TEST_OUTS:=$(TEST_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 check: $(TEST_EXES) $(TEST_OUTS)
@@ -74,7 +75,10 @@ check: $(TEST_EXES) $(TEST_OUTS)
 test/%.out: test/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 	$< 2>&1 | tee $@
 
-test/%$(CFG_EXE_SUFFIX): test/%.rc test/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
+test/%$(CFG_EXE_SUFFIX): test/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
+	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+
+test/%$(CFG_EXE_SUFFIX): test/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
 
 # Cleanup logic
