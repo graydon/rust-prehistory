@@ -2,8 +2,8 @@
 
 {
   open Ll1parser;;
-  let bump_line p = { p with 
-              Lexing.pos_lnum = p.Lexing.pos_lnum + 1; 
+  let bump_line p = { p with
+              Lexing.pos_lnum = p.Lexing.pos_lnum + 1;
               Lexing.pos_bol = p.Lexing.pos_cnum }
   ;;
 
@@ -43,9 +43,10 @@
                 ("dyn", DYN);
 
                 ("log", LOG);
+                ("spawn", SPAWN);
 
                 ("bool", BOOL);
-        
+
                 ("int", INT);
 
                 ("char", CHAR);
@@ -66,7 +67,7 @@
 
                 ("true", LIT_BOOL true);
                 ("false", LIT_BOOL false);
-        
+
               ]
 ;;
 }
@@ -83,7 +84,7 @@ let id = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 rule token = parse
   ws+                          { token lexbuf }
-| '\n'                         { lexbuf.Lexing.lex_curr_p 
+| '\n'                         { lexbuf.Lexing.lex_curr_p
                                      <- (bump_line lexbuf.Lexing.lex_curr_p);
                                  token lexbuf }
 | "//" [^'\n']*                { token lexbuf }
@@ -158,11 +159,11 @@ rule token = parse
 | "be*"                        { BE (Some Ast.PROTO_star)  }
 | "be+"                        { BE (Some Ast.PROTO_plus)  }
 
-| id as i                 
+| id as i
                                { try
                                      Hashtbl.find keyword_table i
                                  with
-                                     Not_found -> IDENT (i)  
+                                     Not_found -> IDENT (i)
                                            }
 
 | bin as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }

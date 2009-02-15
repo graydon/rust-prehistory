@@ -640,6 +640,12 @@ let trans_visitor
     else err (Some id) "Fn without fixup"
   in
 
+  let get_prog_fixup (id:node_id) : fixup =
+    if Hashtbl.mem cx.ctxt_prog_fixups id
+    then Hashtbl.find cx.ctxt_prog_fixups id
+    else err (Some id) "Prog without fixup"
+  in
+
   let get_framesz (id:node_id) : int64 =
     if Hashtbl.mem cx.ctxt_frame_sizes id
     then Hashtbl.find cx.ctxt_frame_sizes id
@@ -655,29 +661,36 @@ let trans_visitor
       (pcrel_ok:bool)
       (imm_ok:bool)
       : Il.operand =
-    match lv with
-        Ast.LVAL_base nb ->
-          let referent = lval_to_referent nb.id in
-            begin
-              match htab_search cx.ctxt_all_items referent with
+    let return_fixup fix =
+      if pcrel_ok
+      then Il.Pcrel fix
+      else
+        let imm = (Il.Imm (Asm.M_POS fix)) in
+          if imm_ok
+          then imm
+          else
+            let tmp = (Il.next_vreg (emitter())) in
+              emit Il.MOV (Il.Reg tmp) imm Il.Nil;
+              (Il.Reg tmp)
+    in
+      match lv with
+          Ast.LVAL_base nb ->
+            let referent = lval_to_referent nb.id in
+              begin
+                match htab_search cx.ctxt_all_items referent with
                   Some item ->
                     begin
                       match item with
-                          Ast.MOD_ITEM_fn fd ->
-                            let fix = get_fn_fixup referent in
-                              if pcrel_ok
-                              then Il.Pcrel fix
-                              else
-                                let imm = (Il.Imm (Asm.M_POS fix)) in
-                                  if imm_ok
-                                  then imm
-                                  else
-                                    let tmp = (Il.next_vreg (emitter())) in
-                                      emit Il.MOV (Il.Reg tmp) imm Il.Nil;
-                                      (Il.Reg tmp)
-                        | _ -> err (Some nb.id) "unhandled item type in trans_lval_full, item #%d" (int_of_node referent)
+                          Ast.MOD_ITEM_fn _ ->
+                            return_fixup (get_fn_fixup referent)
+                        | Ast.MOD_ITEM_prog _ ->
+                            return_fixup (get_prog_fixup referent)
+                        | _ ->
+                            err (Some nb.id)
+                              "unhandled item type in trans_lval_full, item #%d"
+                              (int_of_node referent)
                     end
-                | None ->
+                  | None ->
                     begin
                       match htab_search cx.ctxt_slot_vregs referent with
                           Some vr ->
@@ -832,33 +845,23 @@ let trans_visitor
       | _ -> err None "Unhandled form of expr in Trans.trans_expr"
   in
 
-  let trans_log_int (a:Ast.atom) : unit =
+  let trans_1_arg_kern_fn (a:Ast.atom) (fn:int64) : unit =
     let v = trans_atom a in
     let dst = Il.Reg (Il.next_vreg (emitter())) in
     let pp = cx.ctxt_abi.Abi.abi_pp_operand in
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
       cx.ctxt_abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
       emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
-      emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
+      emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM fn)) Il.Nil;
       emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
       emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
       emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
       ()
   in
 
-  let trans_log_str (a:Ast.atom) : unit =
-    let dst = Il.Reg (Il.next_vreg (emitter())) in
-    let v = trans_atom a in
-    let pp = cx.ctxt_abi.Abi.abi_pp_operand in
-    let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
-      cx.ctxt_abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
-      emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
-      emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM 1L)) Il.Nil;
-      emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
-      emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
-      emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
-      ()
-  in
+  let trans_log_int (a:Ast.atom) : unit = trans_1_arg_kern_fn a 0L in
+  let trans_log_str (a:Ast.atom) : unit = trans_1_arg_kern_fn a 1L in
+  let trans_spawn (a:Ast.atom) : unit = trans_1_arg_kern_fn a 2L in
 
   let rec trans_block (block:Ast.block) : unit =
     Stack.push (get_block_layout block.id) block_layouts;
@@ -875,6 +878,8 @@ let trans_visitor
               | Ast.TY_int -> trans_log_int a
               | _ -> err (Some stmt.id) "unimplemented logging type"
           end
+
+      | Ast.STMT_spawn a -> trans_spawn a
 
       | Ast.STMT_copy (lv_dst, e_src) ->
           let dst = trans_lval lv_dst in
@@ -1022,12 +1027,7 @@ let trans_visitor
         | Some fini -> Asm.M_POS (trans_prog_block progid fini "fini")
     in
     let prog =
-      let path = path_name() in
-      let fixup =
-        if path = cx.ctxt_main_name
-        then cx.ctxt_main_prog
-        else (new_fixup path)
-      in
+      let fixup = get_prog_fixup progid in
       (* FIXME: extract prog layout from ABI. *)
       Asm.DEF (fixup,
                Asm.SEQ [| Asm.WORD (TY_u32, init);
@@ -1081,6 +1081,14 @@ let fixup_assigning_visitor
       match i.node with
           Ast.MOD_ITEM_fn _ ->
             htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+        | Ast.MOD_ITEM_prog _ ->
+            let path = path_name() in
+            let fixup =
+              if path = cx.ctxt_main_name
+              then cx.ctxt_main_prog
+              else (new_fixup path)
+            in
+              htab_put cx.ctxt_prog_fixups i.id fixup
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i

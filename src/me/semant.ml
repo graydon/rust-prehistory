@@ -34,6 +34,7 @@ type ctxt =
       ctxt_fn_header_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
+      ctxt_prog_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_abi: Abi.abi;
       mutable ctxt_data_items: Asm.item list;
@@ -60,6 +61,7 @@ let new_ctxt sess abi crate =
     ctxt_fn_header_layouts = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
+    ctxt_prog_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
     ctxt_abi = abi;
     ctxt_data_items = [];

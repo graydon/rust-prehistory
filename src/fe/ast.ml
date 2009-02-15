@@ -200,6 +200,7 @@ and ty_prog =
  *)
 and stmt' =
     STMT_log of atom
+  | STMT_spawn of atom  (* FIXME: should produce a proc. *)
   | STMT_while of stmt_while
   | STMT_do_while of stmt_while
   | STMT_foreach of stmt_foreach
@@ -511,7 +512,6 @@ and string_of_ty ty =
 
     | TY_constrained _ -> "constrained"
     | TY_lim _ -> "lim"
-;;
 
 
 (*

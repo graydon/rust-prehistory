@@ -58,12 +58,12 @@ typedef enum {
 
 } rust_type_tag_t;
 
-/* 
- * We have a variety of pointer-tagging schemes. 
- * 
+/*
+ * We have a variety of pointer-tagging schemes.
+ *
  * For interior slots of the 'int' type, we use a 1-bit tag to switch between fixnum and boxed
  * bignum.
- * 
+ *
  * Exterior subword-sized slots are synonymous with interior subword-sized slots; there is no
  * difference. Subsequently, transplanting a subword-sized datum into an exterior slot is always
  * just a copy. Write aliases can be formed on subword-sized slots; they are just the address of
@@ -72,9 +72,9 @@ typedef enum {
  * Exterior word-or-greater slots are stored as pointers. Size implies alignment, so we have free
  * tag bits. We use one bit to differentiate crate-offset pseudo-pointers from real heap pointers.
  *
- * Slots of 'any' type need to denote both a type and a value. They do this by stealing 3 bits for 
+ * Slots of 'any' type need to denote both a type and a value. They do this by stealing 3 bits for
  * tag and assigning thus (on 32-bit platforms):
- * 
+ *
  *   - 0b000 == mini-fixnum int
  *   - 0b001 == boxed int
  *   - 0b010 == crate-offset pseudo pointer to (type,val) pair
@@ -95,13 +95,13 @@ typedef enum {
  *   - 0b1101 == s32
  *   - 0b1110 == ?? reserved
  *   - 0b1111 == ?? reserved
- * 
+ *
  */
 
-typedef struct rust_type { 
+typedef struct rust_type {
   uintptr_t refs;
   rust_type_tag_t tag;
-  
+
 } rust_type_t;
 
 typedef struct rust_regs {
@@ -111,7 +111,7 @@ typedef struct rust_regs {
 
 /* Proc stack segments. Heap allocated and chained together. */
 
-typedef struct rust_stk_seg { 
+typedef struct rust_stk_seg {
   struct rust_stk_seg *prev;
   struct rust_stk_seg *next;
   size_t size;
@@ -128,11 +128,16 @@ typedef struct rust_prog rust_prog_t;
 typedef struct rust_rt rust_rt_t;
 
 /* FIXME: ifdef by platform. */
-size_t rust_n_calee_saves = 4;
+extern size_t const rust_n_callee_saves;
 
-struct rust_rt { 
-  rust_proc_t *proc;     /* Currently active proc.       */
-  rust_regs_t c_regs;    /* Saved sp from the C runtime. */  
+/* FIXME: dynamically resize proc array. */
+extern size_t const rust_n_procs;
+
+struct rust_rt {
+  rust_regs_t c_regs;    /* Saved sp from the C runtime. */
+  size_t curr_proc;      /* Currently active proc.       */
+  size_t live_procs;     /* Number of live procs.        */
+  rust_proc_t **procs;
 };
 
 #define RUST_PROC_STATE_RUNNING     0
@@ -145,13 +150,13 @@ struct rust_rt {
 #define CDECL __attribute__((cdecl))
 #endif
 
-struct rust_prog { 
+struct rust_prog {
   void CDECL (*init_code)(void*, rust_proc_t*);
   void CDECL (*main_code)(void*, rust_proc_t*);
   void CDECL (*fini_code)(void*, rust_proc_t*);
 };
 
-struct rust_proc { 
+struct rust_proc {
 
   rust_rt_t *rt;
   rust_stk_seg_t *stk;
@@ -174,15 +179,15 @@ struct rust_proc {
 typedef struct rust_active_proc {
   rust_proc_t *proc;
   uint64_t slice_ticks;   /* N ticks remaining before rescheduling.         */
-  
+
 } rust_activation_t;
 
 #endif /* RUST_H__ */
 
-/* 
+/*
  * Local Variables:
- * fill-column: 70; 
+ * fill-column: 70;
  * indent-tabs-mode: nil
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  */

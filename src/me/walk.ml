@@ -311,6 +311,9 @@ and walk_stmt
         Ast.STMT_log a -> 
           walk_atom v a
 
+      | Ast.STMT_spawn a -> 
+          walk_atom v a
+
       | Ast.STMT_while w -> 
           walk_stmt_while w
             

@@ -89,6 +89,7 @@ type token =
 
   (* Magic runtime services *)
   | LOG
+  | SPAWN
 
   (* Literals *)
   | LIT_INT       of (Big_int.big_int * string)
@@ -241,6 +242,7 @@ let string_of_tok t =
 
     (* Magic runtime services *)
     | LOG        -> "log"
+    | SPAWN      -> "spawn"
 
     (* Literals *)
     | LIT_INT (n,s)  -> s
@@ -968,6 +970,13 @@ and parse_stmts ps =
             let bpos = lexpos ps in
               spans stmts apos bpos (Ast.STMT_log atom)
 
+      | SPAWN ->
+          bump ps;
+          let (stmts, atom) = ctxt "stmts: spawn value" parse_expr ps in
+            expect ps SEMI;
+            let bpos = lexpos ps in
+              spans stmts apos bpos (Ast.STMT_spawn atom)
+
       | IF ->
           bump ps;
           let (stmts, atom) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
@@ -1418,7 +1427,9 @@ and parse_root_crate_entries
               expect ps EQ;
               let name = parse_name ps in
                 expect ps SEMI;
-                explicit_main := Some name
+                match !explicit_main with
+                    None -> explicit_main := Some name
+                  | Some _ -> raise (err "multiple explicit main programs given in crate" ps )
             end
         | MOD ->
             parse_crate_mod_entry tok prefix items ps

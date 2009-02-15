@@ -2,6 +2,13 @@
 
 prog a
 {
+  main {
+      log "proc a";
+      log "proc a";
+      log "proc a";
+      log "proc a";
+      log "proc a";
+  }
 }
 
 prog root
@@ -18,6 +25,8 @@ prog root
   main {
     let int n = 2 + 3 * 7;
     let str s = "hello there";
+    spawn a;
+    spawn b;
     let int x = 10;
     x = g(n,s);
     log x;
@@ -26,4 +35,12 @@ prog root
 
 prog b
 {
+  main {
+      log "proc b";
+      log "proc b";
+      log "proc b";
+      log "proc b";
+      log "proc b";
+      log "proc b";
+  }
 }

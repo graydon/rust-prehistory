@@ -4,25 +4,29 @@
 #include <string.h>
 #include <inttypes.h>
 
-static void 
+size_t const rust_n_callee_saves = 4;
+size_t const rust_n_procs = 1024;
+
+
+static void
 logptr(char const *msg, uintptr_t ptrval)
 {
   printf("rt: %s 0x%" PRIxPTR "\n", msg, ptrval);
 }
 
-static void* 
+static void*
 xalloc(size_t sz)
 {
   void *p = malloc(sz);
   if (!p) {
-    printf("rt: allocation of 0x%" PRIxPTR 
+    printf("rt: allocation of 0x%" PRIxPTR
            " bytes failed, exiting\n", sz);
     exit(123);
   }
   return p;
 }
 
-static void* 
+static void*
 xcalloc(size_t sz)
 {
   void *p = xalloc(sz);
@@ -47,6 +51,7 @@ rust_new_rt()
 {
   rust_rt_t *rt = xcalloc(sizeof(rust_rt_t));
   logptr("new rt", (uintptr_t)rt);
+  rt->procs = xcalloc(sizeof(rust_proc_t*) * rust_n_procs);
   return rt;
 }
 
@@ -75,7 +80,7 @@ rust_del_stk(rust_stk_seg_t *stk)
 {
   rust_stk_seg_t *nxt = 0;
   do {
-    nxt = stk->next; 
+    nxt = stk->next;
     logptr("freeing stk segment", (uintptr_t)stk);
     free(stk);
     stk = nxt;
@@ -92,15 +97,15 @@ rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
   proc->stk = rust_new_stk();
   proc->regs.pc = (uintptr_t) prog->main_code;
 
-  /* 
+  /*
      Set sp to last uintptr_t-sized cell of segment
-     then align down to 16 boundary, to be safe-ish? 
+     then align down to 16 boundary, to be safe-ish?
   */
   size_t tos = rust_init_stk_bytes-sizeof(uintptr_t);
   proc->regs.sp = (uintptr_t) &(proc->stk->data[tos]);
   proc->regs.sp &= ~0xf;
 
-  /* "initial args" to the main frame: 
+  /* "initial args" to the main frame:
    *
    *      *sp+N+16   = proc ptr
    *      *sp+N+8    = NULL = fake outptr
@@ -110,11 +115,11 @@ rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
    *      *sp        = NULL = Nth callee-save
    */
   uintptr_t *sp = (uintptr_t*) proc->regs.sp;
-  proc->regs.sp -= (2 + rust_n_calee_saves) * sizeof(uintptr_t);
+  proc->regs.sp -= (2 + rust_n_callee_saves) * sizeof(uintptr_t);
   *sp-- = (uintptr_t) proc;
   *sp-- = (uintptr_t) 0;
   *sp-- = (uintptr_t) 0;
-  for (size_t j = 0; j < rust_n_calee_saves; ++j) {
+  for (size_t j = 0; j < rust_n_callee_saves; ++j) {
     *sp-- = 0;
   }
 
@@ -126,40 +131,76 @@ rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
 static void
 rust_del_proc(rust_proc_t *proc)
 {
+  logptr("del proc", (uintptr_t)proc);
   assert(proc->refcnt == 0);
   rust_del_stk(proc->stk);
-  free(proc->stk);
+}
+
+static void
+rust_spawn_proc(rust_rt_t *rt,
+                rust_prog_t *prog)
+{
+  /* Want there to always be a null on the end. */
+  assert(rt->live_procs + 2 < rust_n_procs);
+  assert(! rt->procs[rt->live_procs]);
+  rt->procs[rt->live_procs] = rust_new_proc(rt, prog);
+  rt->live_procs++;
+}
+
+static void
+rust_exit_curr_proc(rust_rt_t *rt)
+{
+  assert(rt->procs[rt->curr_proc]);
+  rust_del_proc(rt->procs[rt->curr_proc]);
+  for (size_t i = rt->curr_proc; i < rt->live_procs; ++i) {
+    printf("rt: shifting down proc %d=%" PRIxPTR " <- %d=%" PRIxPTR "\n",
+           i, (uintptr_t) rt->procs[i], i+1, (uintptr_t) rt->procs[i+1]);
+    rt->procs[i] = rt->procs[i+1];
+  }
+  assert(!rt->procs[rt->live_procs-1]);
+  rt->live_procs--;
+  printf("rt: rt->live_procs = %d\n", rt->live_procs);
+}
+
+static rust_proc_t*
+rust_sched(rust_rt_t *rt)
+{
+  rt->curr_proc++;
+  rt->curr_proc %= rt->live_procs;
+  assert(rt->procs[rt->curr_proc]);
+  // logptr("rust_sched chose proc", (uintptr_t)rt->procs[rt->curr_proc]);
+  return rt->procs[rt->curr_proc];
 }
 
 int CDECL
-rust_start(rust_prog_t *prog, 
+rust_start(rust_prog_t *prog,
            void CDECL (*c_to_proc_glue)(rust_proc_t*))
 {
   rust_rt_t *rt;
   rust_proc_t *proc;
 
-  printf("rt: control is in rust runtime library\n");  
+  printf("rt: control is in rust runtime library\n");
   logptr("prog->init_code", (uintptr_t)prog->init_code);
   logptr("prog->main_code", (uintptr_t)prog->main_code);
   logptr("prog->fini_code", (uintptr_t)prog->fini_code);
 
   rt = rust_new_rt();
-  proc = rust_new_proc(rt, prog);
-  rt->proc = proc;
-  
-  logptr("root proc is ", (uintptr_t)proc);
-  logptr("proc->regs.pc ", (uintptr_t)proc->regs.pc);
-  logptr("proc->regs.sp ", (uintptr_t)proc->regs.sp);
-  logptr("c_to_proc_glue ", (uintptr_t)c_to_proc_glue);
-  
-  do {
+  rust_spawn_proc(rt, prog);
+  proc = rust_sched(rt);
+
+  logptr("root proc is", (uintptr_t)proc);
+  logptr("proc->regs.pc", (uintptr_t)proc->regs.pc);
+  logptr("proc->regs.sp", (uintptr_t)proc->regs.sp);
+  logptr("c_to_proc_glue", (uintptr_t)c_to_proc_glue);
+
+  while(1) {
     // printf("rt: calling c_proc_glue.\n");
     proc->state = RUST_PROC_STATE_RUNNING;
     c_to_proc_glue(proc);
     // printf("rt: returned from proc in state %d.\n", proc->state);
     if (proc->state == RUST_PROC_STATE_CALLING_C) {
       uintptr_t *sp = (uintptr_t*) proc->regs.sp;
-      sp += rust_n_calee_saves;
+      sp += rust_n_callee_saves;
       sp++;
       // printf("rt: calling fn #%d\n", *sp);
       switch (*sp) {
@@ -169,22 +210,30 @@ rust_start(rust_prog_t *prog,
       case 1:
         rust_log_str((char*)sp[1]);
         break;
+      case 2:
+        rust_spawn_proc(rt, (rust_prog_t*)sp[1]);
+        break;
       }
     }
-  } while (proc->state != RUST_PROC_STATE_EXITING);
+    else if (proc->state == RUST_PROC_STATE_EXITING) {
+      logptr("proc exiting", (uintptr_t)proc);
+      rust_exit_curr_proc(rt);
+    }
+    if (rt->live_procs > 0)
+      proc = rust_sched(rt);
+    else
+      break;
+  }
 
-  printf("rt: proc assumed exiting state.\n");
-  rust_del_proc(proc);
-  printf("rt: freed proc.\n");
   rust_del_rt(rt);
   printf("rt: freed runtime.\n");
   return 37;
 }
 
-/* 
+/*
  * Local Variables:
- * fill-column: 70; 
+ * fill-column: 70;
  * indent-tabs-mode: nil
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  */
