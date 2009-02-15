@@ -94,7 +94,7 @@ let _ = exit_if_failed ()
 let (abi:Abi.abi) = X86.abi;;
 
 (* Semantic passes. *)
-let sem_cx = Semant.new_ctxt sess abi
+let sem_cx = Semant.new_ctxt sess abi crate
 ;;
 
 let _ =

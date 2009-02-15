@@ -1,5 +1,9 @@
 // -*- C -*-
 
+prog a
+{
+}
+
 prog root
 {
   fn k(int x) -> int {
@@ -20,3 +24,6 @@ prog root
   }
 }
 
+prog b
+{
+}

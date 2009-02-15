@@ -1438,25 +1438,22 @@ and infer_main_prog
     (crate_items:Ast.mod_items)
     : Ast.name =
   let progs = ref [] in
+  let extend prefix_name ident =
+    match prefix_name with
+        None -> Ast.NAME_base (Ast.BASE_ident ident)
+      | Some n -> Ast.NAME_ext (n, Ast.COMP_ident ident)
+  in
   let rec dig prefix_name items =
     Hashtbl.iter (extract_prog prefix_name) items
   and extract_prog prefix_name ident item =
     match item.node with
         Ast.MOD_ITEM_mod md ->
           if Array.length md.Ast.decl_params = 0
-          then dig prefix_name md.Ast.decl_item
+          then dig (Some (extend prefix_name ident)) md.Ast.decl_item
           else ()
       | Ast.MOD_ITEM_prog pd ->
           if Array.length pd.Ast.decl_params = 0
-          then
-            begin
-              let name =
-                match prefix_name with
-                    None -> Ast.NAME_base (Ast.BASE_ident ident)
-                  | Some n -> Ast.NAME_ext (n, Ast.COMP_ident ident)
-              in
-                progs := name :: (!progs)
-            end
+          then progs := (extend prefix_name ident) :: (!progs)
           else ()
       | _ -> ()
   in
