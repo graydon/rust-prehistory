@@ -514,6 +514,158 @@ and string_of_ty ty =
     | TY_lim _ -> "lim"
 
 
+
+(***********************************************************************) 
+
+let fmt = Format.fprintf;;
+
+let fmt_ident (ff:Format.formatter) (i:ident) : unit =
+  fmt ff  "%s" i
+
+let fmt_temp (ff:Format.formatter) (t:temp_id) : unit =
+  fmt ff  "t#%d" (int_of_temp t)
+
+let fmt_slot_key ff (s:slot_key) : unit =
+  match s with
+      KEY_ident i -> fmt_ident ff i
+    | KEY_temp t -> fmt_temp ff t
+
+let fmt_proto (ff:Format.formatter) (p:proto) : unit =
+  match p with
+      PROTO_ques -> fmt ff "?"
+    | PROTO_bang -> fmt ff "!"
+    | PROTO_star -> fmt ff "*"
+    | PROTO_plus -> fmt ff "+"
+
+let rec fmt_app (ff:Format.formatter) (i:ident) (tys:ty array) : unit =
+  fmt ff "%s[@[<hv 2>" i;
+  for i = 0 to Array.length tys;
+  do
+    if i != 0
+    then fmt ff ",@;";
+    fmt_ty ff tys.(i);
+  done;
+  fmt ff "@;@]]"
+
+and fmt_name_base (ff:Format.formatter) (nb:name_base) : unit =
+  match nb with
+      BASE_ident i -> fmt_ident ff i
+    | BASE_temp t -> fmt_temp ff t
+    | BASE_app (id, tys) -> fmt_app ff id tys
+
+and fmt_name_component (ff:Format.formatter) (nc:name_component) : unit =
+  match nc with
+      COMP_ident i -> fmt_ident ff i
+    | COMP_app (id, tys) -> fmt_app ff id tys
+    | COMP_idx i -> fmt ff "%d" i
+
+and fmt_name (ff:Format.formatter) (n:name) : unit =
+  match n with
+      NAME_base nb -> fmt_name_base ff nb
+    | NAME_ext (n, nc) ->
+        fmt_name ff n;
+        fmt ff ".";
+        fmt_name_component ff nc
+
+and fmt_slot (ff:Format.formatter) (s:slot) : unit =
+  match s.slot_ty with
+      None -> fmt ff "auto"
+    | Some t ->
+        begin
+          match s.slot_mode with
+              MODE_exterior -> fmt ff "@@"
+            | MODE_interior -> ()
+            | MODE_read_alias -> fmt ff "~"
+            | MODE_write_alias -> fmt ff "^"
+        end;
+        fmt_ty ff t
+
+and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) option) : unit =
+  fmt ff "(@[<hv 2>";
+  for i = 0 to Array.length slots;
+  do
+    if i != 0
+    then fmt ff ",@;";
+    fmt_slot ff slots.(i);
+    begin
+      match idents with
+          None -> ()
+        | Some ids -> fmt_ident ff ids.(i)
+    end;
+  done;
+  fmt ff "@;@])"
+
+and fmt_fn_header (ff:Format.formatter) (tf:ty_fn) (id:ident option) : unit =
+  let (tsig, ta) = tf in
+    if ta.fn_pure
+    then fmt ff "pure@;";
+    if ta.fn_lim = LIMITED
+    then fmt ff "lim@;";
+    fmt ff "fn";
+    begin
+      match ta.fn_proto with
+          None -> ()
+        | Some p -> fmt_proto ff p
+    end;
+    begin
+      match id with
+          None -> ()
+        | Some i -> fmt_ident ff i
+    end;
+    fmt_slots ff tsig.sig_input_slots None;
+    fmt ff "@;->@;";
+    fmt_slot ff tsig.sig_output_slot;
+
+and fmt_ty (ff:Format.formatter) (t:ty) : unit =
+  match t with
+    TY_any -> fmt ff "any"
+  | TY_nil -> fmt ff "()"
+  | TY_bool -> fmt ff "bool"
+  | TY_mach TY_u8 -> fmt ff "u8"
+  | TY_mach TY_u16 -> fmt ff "u16"
+  | TY_mach TY_u32 -> fmt ff "u32"
+  | TY_mach TY_u64 -> fmt ff "u64"
+  | TY_mach TY_s8 -> fmt ff "s8"
+  | TY_mach TY_s16 -> fmt ff "s16"
+  | TY_mach TY_s32 -> fmt ff "s32"
+  | TY_mach TY_s64 -> fmt ff "s64"
+  | TY_mach TY_b64 -> fmt ff "b64"
+  | TY_int -> fmt ff "int"
+  | TY_char -> fmt ff "char"
+  | TY_str -> fmt ff "str"
+
+  | TY_tup slots -> fmt_slots ff slots None
+  | TY_vec t -> (fmt ff "vec["; fmt_ty ff t; fmt ff "]")
+  | TY_chan t -> (fmt ff "chan["; fmt_ty ff t; fmt ff "]")
+  | TY_port t -> (fmt ff "port["; fmt_ty ff t; fmt ff "]")
+
+  | TY_rec htab ->
+      begin
+        (* FIXME: sort struct members. *)
+        fmt ff "rec {@[<hv 2>";
+        Hashtbl.iter (fun id slot -> fmt_slot ff slot; fmt_ident ff id; fmt ff ";@;";) htab;
+        fmt ff "@]}@;"
+      end
+
+  | TY_opaque id -> fmt ff "o#%d" (int_of_opaque id)
+  | TY_named n -> fmt_name ff n
+  | TY_type -> fmt ff "type"
+  | TY_lim t -> (fmt ff "lim@;"; fmt_ty ff t)
+
+  | TY_fn tfn -> fmt_fn_header ff tfn None
+
+  (* FIXME: finish these as needed. *)
+  | TY_mod mti -> fmt ff "?mod?"
+  | TY_prog tp -> fmt ff "?prog?"
+  | TY_tag ttag -> fmt ff "?tag?"
+  | TY_iso tiso -> fmt ff "?iso?"
+  | TY_idx idx -> fmt ff "?idx?"
+  | TY_constrained t -> fmt ff "?constrained?"
+  | TY_pred p -> fmt ff "?pred?"
+
+
+
+
 (*
  * Local Variables:
  * fill-column: 70;
