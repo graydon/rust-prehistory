@@ -151,11 +151,17 @@ static void
 rust_exit_curr_proc(rust_rt_t *rt)
 {
   assert(rt->procs[rt->curr_proc]);
+  assert(rt->live_procs > 0);
   rust_del_proc(rt->procs[rt->curr_proc]);
-  for (size_t i = rt->curr_proc; i < rt->live_procs; ++i) {
-    printf("rt: shifting down proc %d=%" PRIxPTR " <- %d=%" PRIxPTR "\n",
-           i, (uintptr_t) rt->procs[i], i+1, (uintptr_t) rt->procs[i+1]);
-    rt->procs[i] = rt->procs[i+1];
+  if (rt->curr_proc != rt->live_procs-1) {
+    printf("rt: swapping proc %d=%" PRIxPTR " <- %d=%" PRIxPTR "\n",
+           rt->curr_proc, (uintptr_t) rt->procs[rt->curr_proc],
+           rt->live_procs-1, (uintptr_t) rt->procs[rt->live_procs-1]);
+    rt->procs[rt->curr_proc] = rt->procs[rt->live_procs-1];
+    rt->procs[rt->live_procs-1] = NULL;
+  } else {
+    printf("rt: clearing curr_proc %d\n", rt->curr_proc);
+    rt->procs[rt->curr_proc] = NULL;
   }
   assert(!rt->procs[rt->live_procs-1]);
   rt->live_procs--;
