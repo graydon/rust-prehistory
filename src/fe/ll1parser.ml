@@ -1000,10 +1000,10 @@ and parse_stmts ps =
           let (stmts, test) = ctxt "stmts: while cond" (bracketed LPAREN RPAREN parse_expr) ps in
           let body_block = ctxt "stmts: while body" parse_block ps in
           let bpos = lexpos ps in
-            spans stmts apos bpos
-              (Ast.STMT_while
-                 { Ast.while_lval = (stmts, test);
-                   Ast.while_body = body_block; })
+            [| span ps apos bpos
+                 (Ast.STMT_while
+                    { Ast.while_lval = (stmts, test);
+                      Ast.while_body = body_block; }) |]
 
       | PUT proto ->
           bump ps;

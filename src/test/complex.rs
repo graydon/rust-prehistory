@@ -8,26 +8,26 @@ prog woohoo
   fn zerg(int i) -> int { ret i; }
   lim fn foo(int x) -> int
   {
-	let t y = x + 2;
+    let t y = x + 2;
     putstr("hello");
     while (y < 10) {
-	  putint(y);
-	  if (y * 3 == 4) {
-		y = y + 2;
-	  }
-	}
-	let t z;
-	z = z + 0x55;
-	foo(z);
+      putint(y);
+      if (y * 3 == 4) {
+        y = y + 2;
+      }
+    }
+    let t z;
+    z = z + 0x55;
+    foo(z);
   }
-  
+
   main
     {
-	  let int x = 2 + 2;
-	  // for the time being, it seems our register allocation
-	  // is busted and we cannot log 'x' on its own. Sigh.
-	  log "hello, frances";
-	  log 10;
+      let int x = 2 + 2;
+      // for the time being, it seems our register allocation
+      // is busted and we cannot log 'x' on its own. Sigh.
+      log "hello, frances";
+      log 10;
     }
 }
 

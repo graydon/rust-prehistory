@@ -12,6 +12,7 @@ type sess =
   mutable sess_targ: target;
   mutable sess_log_lex: bool;
   mutable sess_log_parse: bool;
+  mutable sess_log_ast: bool;
   mutable sess_log_resolve: bool;
   mutable sess_log_alias: bool;
   mutable sess_log_auto: bool;

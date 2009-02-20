@@ -538,14 +538,14 @@ let fmt_proto (ff:Format.formatter) (p:proto) : unit =
     | PROTO_plus -> fmt ff "+"
 
 let rec fmt_app (ff:Format.formatter) (i:ident) (tys:ty array) : unit =
-  fmt ff "%s[@[<hv 2>" i;
+  fmt ff "%s[@[" i;
   for i = 0 to Array.length tys;
   do
     if i != 0
-    then fmt ff ",@;";
+    then fmt ff ",@ ";
     fmt_ty ff tys.(i);
   done;
-  fmt ff "@;@]]"
+  fmt ff "@]]"
 
 and fmt_name_base (ff:Format.formatter) (nb:name_base) : unit =
   match nb with
@@ -581,11 +581,11 @@ and fmt_slot (ff:Format.formatter) (s:slot) : unit =
         fmt_ty ff t
 
 and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) option) : unit =
-  fmt ff "(@[<hv 2>";
+  fmt ff "(@[";
   for i = 0 to Array.length slots;
   do
     if i != 0
-    then fmt ff ",@;";
+    then fmt ff ",@ ";
     fmt_slot ff slots.(i);
     begin
       match idents with
@@ -593,14 +593,19 @@ and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) opt
         | Some ids -> fmt_ident ff ids.(i)
     end;
   done;
-  fmt ff "@;@])"
+  fmt ff "@])"
 
-and fmt_fn_header (ff:Format.formatter) (tf:ty_fn) (id:ident option) : unit =
+and fmt_limit (ff:Format.formatter) (lim:ty_limit) : unit =
+    if lim = LIMITED
+    then fmt ff "lim@;"
+    else ()
+
+and fmt_fn_header (ff:Format.formatter) (tf:ty_fn) 
+    (id:ident option) (params:((ty_limit * ident) array) option) : unit =
   let (tsig, ta) = tf in
     if ta.fn_pure
-    then fmt ff "pure@;";
-    if ta.fn_lim = LIMITED
-    then fmt ff "lim@;";
+    then fmt ff "pure@ ";
+    fmt_limit ff ta.fn_lim;
     fmt ff "fn";
     begin
       match ta.fn_proto with
@@ -612,8 +617,13 @@ and fmt_fn_header (ff:Format.formatter) (tf:ty_fn) (id:ident option) : unit =
           None -> ()
         | Some i -> fmt_ident ff i
     end;
+    begin
+      match params with
+          None -> ()
+        | Some p -> fmt_decl_params ff p
+    end;
     fmt_slots ff tsig.sig_input_slots None;
-    fmt ff "@;->@;";
+    fmt ff "@ ->@ ";
     fmt_slot ff tsig.sig_output_slot;
 
 and fmt_ty (ff:Format.formatter) (t:ty) : unit =
@@ -642,17 +652,17 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_rec htab ->
       begin
         (* FIXME: sort struct members. *)
-        fmt ff "rec {@[<hv 2>";
-        Hashtbl.iter (fun id slot -> fmt_slot ff slot; fmt_ident ff id; fmt ff ";@;";) htab;
-        fmt ff "@]}@;"
+        fmt ff "@[rec {@[";
+        Hashtbl.iter (fun id slot -> fmt_slot ff slot; fmt_ident ff id; fmt ff ";@ ";) htab;
+        fmt ff "@]}@]"
       end
 
   | TY_opaque id -> fmt ff "o#%d" (int_of_opaque id)
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
-  | TY_lim t -> (fmt ff "lim@;"; fmt_ty ff t)
+  | TY_lim t -> (fmt ff "lim@ "; fmt_ty ff t)
 
-  | TY_fn tfn -> fmt_fn_header ff tfn None
+  | TY_fn tfn -> fmt_fn_header ff tfn None None
 
   (* FIXME: finish these as needed. *)
   | TY_mod mti -> fmt ff "?mod?"
@@ -663,7 +673,222 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_constrained t -> fmt ff "?constrained?"
   | TY_pred p -> fmt ff "?pred?"
 
+and fmt_stmts (ff:Format.formatter) (ss:stmt array) : unit =
+  fmt ff "@[<4>{@\n";
+  Array.iter (fmt_stmt ff) ss;
+  fmt ff "@]@\n}@\n"
 
+and fmt_block (ff:Format.formatter) (b:block) : unit =
+  fmt_stmts ff b.node
+
+and fmt_atom (ff:Format.formatter) (a:atom) : unit = fmt ff "?atom?"
+and fmt_expr (ff:Format.formatter) (e:expr) : unit = fmt ff "?expr?"
+and fmt_lval (ff:Format.formatter) (l:lval) : unit = fmt ff "?lval?"
+
+and fmt_stmt (ff:Format.formatter) (s:stmt) : unit =
+  begin
+  match s.node with
+    STMT_log at ->
+      begin
+        fmt ff "log ";
+        fmt_atom ff at;
+        fmt ff ";@\n"
+      end
+
+  | STMT_spawn at ->
+      begin
+        fmt ff "spawn ";
+        fmt_atom ff at;
+        fmt ff ";@\n"
+      end
+
+  | STMT_while sw ->
+      let (stmts, at) = sw.while_lval in
+        begin
+          fmt ff "while (";
+          if Array.length stmts != 0
+          then fmt_stmts ff stmts;
+          fmt_atom ff at;
+          fmt ff ") ";
+          fmt_block ff sw.while_body
+        end
+
+  | STMT_do_while sw ->
+      let (stmts, at) = sw.while_lval in
+        begin
+          fmt ff "do ";
+          fmt_block ff sw.while_body;
+          fmt ff "while (";
+          if Array.length stmts != 0
+          then fmt_stmts ff stmts;
+          fmt_atom ff at;
+          fmt ff ");@\n"
+        end
+
+  | STMT_if sif ->
+      fmt ff "if (";
+      fmt_atom ff sif.if_test;
+      fmt ff ")";
+      fmt_block ff sif.if_then;
+      begin
+        match sif.if_else with
+            None -> ()
+          | Some e ->
+              begin
+                fmt ff " else ";
+                fmt_block ff e
+              end
+      end
+
+  | STMT_ret (po, ao) ->
+      fmt ff "ret";
+      begin
+      match po with
+          None -> ()
+        | Some proto -> fmt_proto ff proto
+      end;
+      fmt ff " ";
+      begin
+        match ao with
+            None -> ()
+          | Some at -> fmt_atom ff at
+      end;
+      fmt ff ";@\n"
+
+  | STMT_block b ->
+      fmt_block ff b
+
+  | STMT_copy (lv, ex) ->
+      fmt_lval ff lv;
+      fmt ff " = ";
+      fmt_expr ff ex;
+      fmt ff ";@\n"
+
+  | STMT_call (dst, fn, args) ->
+      fmt_lval ff dst;
+      fmt ff " = ";
+      fmt_lval ff fn;
+      fmt ff "(";
+      for i = 0 to (Array.length args) - 1
+      do
+        if i != 0
+        then fmt ff ", ";
+        fmt_atom ff args.(i);
+      done;
+      fmt ff ");@\n";
+
+  | STMT_decl (DECL_slot (skey, sloti)) ->
+      fmt ff "let ";
+      fmt_slot ff sloti.node;
+      fmt ff " ";
+      begin
+        match skey with
+          KEY_ident id -> fmt_ident ff id
+        | KEY_temp tmp -> fmt_temp ff tmp
+      end;
+      fmt ff ";@\n"
+
+  | _ -> fmt ff "?stmt?;@\n"
+  end
+
+(*
+  | STMT_for of stmt_for
+  | STMT_foreach of stmt_foreach
+  | STMT_try of stmt_try
+  | STMT_put of (proto option * atom option)
+  | STMT_be of (proto option * lval * (atom array))
+  | STMT_alt_tag of stmt_alt_tag
+  | STMT_alt_type of stmt_alt_type
+  | STMT_alt_port of stmt_alt_port
+  | STMT_prove of (constrs)
+  | STMT_check of (constrs)
+  | STMT_checkif of (constrs * stmt)
+  | STMT_send of (lval * atom)
+  | STMT_recv of (lval * lval)
+  | STMT_use of (ty * ident * lval)
+*)
+
+and fmt_decl_params (ff:Format.formatter) (params:(ty_limit * ident) array) : unit =
+  if Array.length params = 0
+  then ()
+  else
+    begin
+      fmt ff "[@[";
+      for i = 0 to (Array.length params) - 1
+      do
+        if i = 0
+        then fmt ff ",@ ";
+        let (lim, id) = params.(i) in
+          fmt_limit ff lim;
+          fmt ff "@ ";
+          fmt_ident  ff id
+      done;
+      fmt ff "@]]"
+    end;
+
+and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
+  match item.node with
+    MOD_ITEM_opaque_type td -> fmt ff "?tydecl?@\n"
+  | MOD_ITEM_public_type td -> fmt ff "?tydecl?@\n"
+  | MOD_ITEM_pred pd -> fmt ff "?preddecl?@\n?"
+
+  | MOD_ITEM_mod md ->
+      fmt ff "mod ";
+      fmt_ident ff id;
+      fmt_decl_params ff md.decl_params;
+      fmt ff " {@\n@[<hov 4>";
+      fmt_mod_items ff md.decl_item;
+      fmt ff "@]}@\n"
+
+  | MOD_ITEM_fn fd ->
+      fmt ff "@[";
+      fmt ff "fn ";
+      fmt_ident ff id;
+      fmt ff "(...) -> (...) ";
+      fmt_block ff fd.decl_item.fn_body;
+(* let (tfn = ty_fn_of_fn
+      fmt_fn_header ff fd.decl_item. (Some id) (Some fd.decl_params);
+*)
+      fmt ff "@]";
+
+  | MOD_ITEM_prog pd ->
+      fmt ff "@[";
+      fmt ff "prog ";
+      fmt_ident ff id;
+      fmt_decl_params ff pd.decl_params;
+      fmt ff " {@[";
+      fmt_mod_items ff pd.decl_item.prog_mod;
+      begin
+        match pd.decl_item.prog_init with
+            None -> ()
+          | Some ii -> fmt ff "?init?;@\n"
+      end;
+      begin
+        match pd.decl_item.prog_main with
+            None -> ()
+          | Some b ->
+              begin
+                fmt ff "main ";
+                fmt_block ff b
+              end
+      end;
+      begin
+        match pd.decl_item.prog_fini with
+            None -> ()
+          | Some b ->
+              begin
+                fmt ff "fini ";
+                fmt_block ff b
+              end
+      end;
+      fmt ff "@]}@\n@]"
+
+
+and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
+  Hashtbl.iter (fmt_mod_item ff) mi
+
+and fmt_crate (ff:Format.formatter) (c:crate) : unit =
+    fmt_mod_items ff c.crate_items
 
 
 (*

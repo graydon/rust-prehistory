@@ -20,6 +20,7 @@ let (sess:Session.sess) =
                        | Win32_x86_pe -> ".exe"));
     Session.sess_log_lex = false;
     Session.sess_log_parse = false;
+    Session.sess_log_ast = false;
     Session.sess_log_resolve = false;
     Session.sess_log_alias = false;
     Session.sess_log_auto = false;
@@ -49,6 +50,7 @@ let argspecs =
      "output filename (default: " ^ sess.Session.sess_out ^ ")");
     ("-llex", Arg.Unit (fun _ -> sess.Session.sess_log_lex <- true), "log lexing");
     ("-lparse", Arg.Unit (fun _ -> sess.Session.sess_log_parse <- true), "log parsing");
+    ("-last", Arg.Unit (fun _ -> sess.Session.sess_log_ast <- true), "log post-parse AST");
     ("-lresolve", Arg.Unit (fun _ -> sess.Session.sess_log_resolve <- true), "log resolution");
     ("-lalias", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log alias analysis");
     ("-lauto", Arg.Unit (fun _ -> sess.Session.sess_log_auto <- true), "log auto type-inference");
@@ -103,6 +105,15 @@ let (crate:Ast.crate) =
 ;;
 let _ = exit_if_failed ()
 ;;
+
+if sess.Session.sess_log_ast
+then
+  begin
+    Printf.fprintf stderr "Post-parse AST:\n%!";
+    Format.set_margin 80;
+    Ast.fmt_crate Format.err_formatter crate;
+    Printf.fprintf stderr "n%!";
+  end
 
 let (abi:Abi.abi) = X86.abi;;
 
