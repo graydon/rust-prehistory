@@ -523,7 +523,7 @@ let fmt_ident (ff:Format.formatter) (i:ident) : unit =
   fmt ff  "%s" i
 
 let fmt_temp (ff:Format.formatter) (t:temp_id) : unit =
-  fmt ff  "t#%d" (int_of_temp t)
+  fmt ff  ".t%d" (int_of_temp t)
 
 let fmt_slot_key ff (s:slot_key) : unit =
   match s with
@@ -673,122 +673,232 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_constrained t -> fmt ff "?constrained?"
   | TY_pred p -> fmt ff "?pred?"
 
+
+and fmt_obox ff = Format.pp_open_box ff 4
+and fmt_cbox ff = Format.pp_close_box ff ()
+and fmt_obr ff = fmt ff "{"
+and fmt_cbr ff = fmt ff "@\n}"
+and fmt_cbb ff = (fmt_cbox ff; fmt_cbr ff)
+
 and fmt_stmts (ff:Format.formatter) (ss:stmt array) : unit =
-  fmt ff "@[<4>{@\n";
   Array.iter (fmt_stmt ff) ss;
-  fmt ff "@]@\n}@\n"
 
-and fmt_block (ff:Format.formatter) (b:block) : unit =
-  fmt_stmts ff b.node
+and fmt_block (ff:Format.formatter) (b:stmt array) : unit =
+  fmt_obox ff;
+  fmt_obr ff;
+  fmt_stmts ff b;
+  fmt_cbb ff;
 
-and fmt_atom (ff:Format.formatter) (a:atom) : unit = fmt ff "?atom?"
-and fmt_expr (ff:Format.formatter) (e:expr) : unit = fmt ff "?expr?"
-and fmt_lval (ff:Format.formatter) (l:lval) : unit = fmt ff "?lval?"
+and fmt_binop (ff:Format.formatter) (b:binop) : unit =
+  fmt ff "%s"
+    begin
+      match b with
+          BINOP_or -> "|"
+        | BINOP_and -> "&"
+
+        | BINOP_eq -> "=="
+        | BINOP_ne -> "!="
+
+        | BINOP_lt -> "<"
+        | BINOP_le -> "<="
+        | BINOP_ge -> ">="
+        | BINOP_gt -> ">"
+
+        | BINOP_lsl -> "<<"
+        | BINOP_lsr -> ">>"
+        | BINOP_asr -> ">>>"
+
+        | BINOP_add -> "+"
+        | BINOP_sub -> "-"
+        | BINOP_mul -> "*"
+        | BINOP_div -> "/"
+        | BINOP_mod -> "%"
+        | BINOP_send -> "<|"
+    end
+
+
+and fmt_unop (ff:Format.formatter) (u:unop) : unit =
+  fmt ff "%s"
+    begin
+      match u with
+          UNOP_not -> "!"
+        | UNOP_neg -> "-"
+    end
+
+and fmt_expr (ff:Format.formatter) (e:expr) : unit =
+  match e with
+    EXPR_binary (b,a1,a2) ->
+      begin
+        fmt_atom ff a1;
+        fmt ff " ";
+        fmt_binop ff b;
+        fmt ff " ";
+        fmt_atom ff a2
+      end
+  | EXPR_unary (u,a) ->
+      begin
+        fmt_unop ff u;
+        fmt_atom ff a
+      end
+  | EXPR_atom a -> fmt_atom ff a
+  | _ -> fmt ff "?expr?"
+(*
+  | EXPR_rec of ((ident, atom) Hashtbl.t)
+  | EXPR_vec of (atom array)
+  | EXPR_tup of (atom array)
+*)
+
+and fmt_lit (ff:Format.formatter) (l:lit) : unit =
+  match l with
+  | LIT_nil -> fmt ff "()"
+  | LIT_bool true -> fmt ff "true"
+  | LIT_bool false -> fmt ff "false"
+  | LIT_mach (_, s) -> fmt ff "%s" s
+  | LIT_int (_,s) -> fmt ff "%s" s
+  | LIT_char c -> fmt ff "'%s'" (Char.escaped c)
+  | LIT_str s -> fmt ff "\"%s\"" (String.escaped s)
+  | LIT_custom _ -> fmt ff "?lit?"
+
+and fmt_atom (ff:Format.formatter) (a:atom) : unit =
+  match a with
+      ATOM_literal lit -> fmt_lit ff lit.node
+    | ATOM_lval lval -> fmt_lval ff lval
+
+and fmt_lval_component (ff:Format.formatter) (lvc:lval_component) : unit =
+  match lvc with
+      COMP_named nc -> fmt_name_component ff nc
+    | COMP_atom a ->
+        begin
+          fmt ff "(";
+          fmt_atom ff a;
+          fmt ff ")"
+        end
+
+and fmt_lval (ff:Format.formatter) (l:lval) : unit =
+  match l with
+      LVAL_base nbi -> fmt_name_base ff nbi.node
+    | LVAL_ext (lv, lvc) ->
+        begin
+          fmt_lval ff lv;
+          fmt ff ".";
+          fmt_lval_component ff lvc
+        end
 
 and fmt_stmt (ff:Format.formatter) (s:stmt) : unit =
+  fmt ff "@\n";
   begin
-  match s.node with
-    STMT_log at ->
-      begin
-        fmt ff "log ";
-        fmt_atom ff at;
-        fmt ff ";@\n"
-      end
+    match s.node with
+        STMT_log at ->
+          begin
+            fmt ff "log ";
+            fmt_atom ff at;
+            fmt ff ";"
+          end
 
-  | STMT_spawn at ->
-      begin
-        fmt ff "spawn ";
-        fmt_atom ff at;
-        fmt ff ";@\n"
-      end
+      | STMT_spawn at ->
+          begin
+            fmt ff "spawn ";
+            fmt_atom ff at;
+            fmt ff ";"
+          end
 
-  | STMT_while sw ->
-      let (stmts, at) = sw.while_lval in
-        begin
-          fmt ff "while (";
-          if Array.length stmts != 0
-          then fmt_stmts ff stmts;
-          fmt_atom ff at;
+      | STMT_while sw ->
+          let (stmts, at) = sw.while_lval in
+            begin
+              fmt_obox ff;
+              fmt ff "while (";
+              if Array.length stmts != 0
+              then fmt_block ff stmts;
+              fmt_atom ff at;
+              fmt ff ") ";
+              fmt_obr ff;
+              fmt_stmts ff sw.while_body.node;
+              fmt_cbb ff
+            end
+
+      | STMT_do_while sw ->
+          let (stmts, at) = sw.while_lval in
+            begin
+              fmt_obox ff;
+              fmt ff "do ";
+              fmt_obr ff;
+              fmt_stmts ff sw.while_body.node;
+              fmt ff "while (";
+              if Array.length stmts != 0
+              then fmt_block ff stmts;
+              fmt_atom ff at;
+              fmt ff ");";
+              fmt_cbb ff
+            end
+
+      | STMT_if sif ->
+          fmt_obox ff;
+          fmt ff "if (";
+          fmt_atom ff sif.if_test;
           fmt ff ") ";
-          fmt_block ff sw.while_body
-        end
+          fmt_obr ff;
+          fmt_stmts ff sif.if_then.node;
+          begin
+            match sif.if_else with
+                None -> ()
+              | Some e ->
+                  begin
+                    fmt_cbr ff;
+                    fmt ff " else ";
+                    fmt_obr ff;
+                    fmt_stmts ff e.node
+                  end
+          end;
+          fmt_cbb ff
 
-  | STMT_do_while sw ->
-      let (stmts, at) = sw.while_lval in
-        begin
-          fmt ff "do ";
-          fmt_block ff sw.while_body;
-          fmt ff "while (";
-          if Array.length stmts != 0
-          then fmt_stmts ff stmts;
-          fmt_atom ff at;
-          fmt ff ");@\n"
-        end
+      | STMT_ret (po, ao) ->
+          fmt ff "ret";
+          begin
+            match po with
+                None -> ()
+              | Some proto -> fmt_proto ff proto
+          end;
+          fmt ff " ";
+          begin
+            match ao with
+                None -> ()
+              | Some at -> fmt_atom ff at
+          end;
+          fmt ff ";"
 
-  | STMT_if sif ->
-      fmt ff "if (";
-      fmt_atom ff sif.if_test;
-      fmt ff ")";
-      fmt_block ff sif.if_then;
-      begin
-        match sif.if_else with
-            None -> ()
-          | Some e ->
-              begin
-                fmt ff " else ";
-                fmt_block ff e
-              end
-      end
+      | STMT_block b -> fmt_block ff b.node
 
-  | STMT_ret (po, ao) ->
-      fmt ff "ret";
-      begin
-      match po with
-          None -> ()
-        | Some proto -> fmt_proto ff proto
-      end;
-      fmt ff " ";
-      begin
-        match ao with
-            None -> ()
-          | Some at -> fmt_atom ff at
-      end;
-      fmt ff ";@\n"
+      | STMT_copy (lv, ex) ->
+          fmt_lval ff lv;
+          fmt ff " = ";
+          fmt_expr ff ex;
+          fmt ff ";"
 
-  | STMT_block b ->
-      fmt_block ff b
+      | STMT_call (dst, fn, args) ->
+          fmt_lval ff dst;
+          fmt ff " = ";
+          fmt_lval ff fn;
+          fmt ff "(";
+          for i = 0 to (Array.length args) - 1
+          do
+            if i != 0
+            then fmt ff ", ";
+            fmt_atom ff args.(i);
+          done;
+          fmt ff ");";
 
-  | STMT_copy (lv, ex) ->
-      fmt_lval ff lv;
-      fmt ff " = ";
-      fmt_expr ff ex;
-      fmt ff ";@\n"
+      | STMT_decl (DECL_slot (skey, sloti)) ->
+          fmt ff "let ";
+          fmt_slot ff sloti.node;
+          fmt ff " ";
+          begin
+            match skey with
+                KEY_ident id -> fmt_ident ff id
+              | KEY_temp tmp -> fmt_temp ff tmp
+          end;
+          fmt ff ";"
 
-  | STMT_call (dst, fn, args) ->
-      fmt_lval ff dst;
-      fmt ff " = ";
-      fmt_lval ff fn;
-      fmt ff "(";
-      for i = 0 to (Array.length args) - 1
-      do
-        if i != 0
-        then fmt ff ", ";
-        fmt_atom ff args.(i);
-      done;
-      fmt ff ");@\n";
-
-  | STMT_decl (DECL_slot (skey, sloti)) ->
-      fmt ff "let ";
-      fmt_slot ff sloti.node;
-      fmt ff " ";
-      begin
-        match skey with
-          KEY_ident id -> fmt_ident ff id
-        | KEY_temp tmp -> fmt_temp ff tmp
-      end;
-      fmt ff ";@\n"
-
-  | _ -> fmt ff "?stmt?;@\n"
+      | _ -> fmt ff "?stmt?;"
   end
 
 (*
@@ -813,76 +923,94 @@ and fmt_decl_params (ff:Format.formatter) (params:(ty_limit * ident) array) : un
   then ()
   else
     begin
-      fmt ff "[@[";
+      fmt ff "[";
       for i = 0 to (Array.length params) - 1
       do
         if i = 0
-        then fmt ff ",@ ";
+        then fmt ff ", ";
         let (lim, id) = params.(i) in
           fmt_limit ff lim;
-          fmt ff "@ ";
+          fmt ff " ";
           fmt_ident  ff id
       done;
-      fmt ff "@]]"
+      fmt ff "]"
     end;
 
 and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
-  match item.node with
-    MOD_ITEM_opaque_type td -> fmt ff "?tydecl?@\n"
-  | MOD_ITEM_public_type td -> fmt ff "?tydecl?@\n"
-  | MOD_ITEM_pred pd -> fmt ff "?preddecl?@\n?"
+  fmt ff "@\n";
+  begin
+    match item.node with
+        MOD_ITEM_opaque_type td -> fmt ff "?tydecl?"
+      | MOD_ITEM_public_type td -> fmt ff "?tydecl?"
+      | MOD_ITEM_pred pd -> fmt ff "?preddecl?"
 
-  | MOD_ITEM_mod md ->
-      fmt ff "mod ";
-      fmt_ident ff id;
-      fmt_decl_params ff md.decl_params;
-      fmt ff " {@\n@[<hov 4>";
-      fmt_mod_items ff md.decl_item;
-      fmt ff "@]}@\n"
+      | MOD_ITEM_mod md ->
+          begin
+            fmt_obox ff;
+            fmt ff "mod ";
+            fmt_ident ff id;
+            fmt_decl_params ff md.decl_params;
+            fmt_obr ff;
+            fmt_mod_items ff md.decl_item;
+            fmt_cbb ff
+          end
 
-  | MOD_ITEM_fn fd ->
-      fmt ff "@[";
-      fmt ff "fn ";
-      fmt_ident ff id;
-      fmt ff "(...) -> (...) ";
-      fmt_block ff fd.decl_item.fn_body;
-(* let (tfn = ty_fn_of_fn
-      fmt_fn_header ff fd.decl_item. (Some id) (Some fd.decl_params);
-*)
-      fmt ff "@]";
+      | MOD_ITEM_fn fd ->
+          begin
+            fmt_obox ff;
+            fmt ff "fn ";
+            fmt_ident ff id;
+            fmt ff "(...) -> (...) ";
+            fmt_obr ff;
+            fmt_stmts ff fd.decl_item.fn_body.node;
+            (* let (tfn = ty_fn_of_fn
+               fmt_fn_header ff fd.decl_item. (Some id) (Some fd.decl_params);
+            *)
+            fmt_cbb ff
+          end
 
-  | MOD_ITEM_prog pd ->
-      fmt ff "@[";
-      fmt ff "prog ";
-      fmt_ident ff id;
-      fmt_decl_params ff pd.decl_params;
-      fmt ff " {@[";
-      fmt_mod_items ff pd.decl_item.prog_mod;
-      begin
-        match pd.decl_item.prog_init with
-            None -> ()
-          | Some ii -> fmt ff "?init?;@\n"
-      end;
-      begin
-        match pd.decl_item.prog_main with
-            None -> ()
-          | Some b ->
-              begin
-                fmt ff "main ";
-                fmt_block ff b
-              end
-      end;
-      begin
-        match pd.decl_item.prog_fini with
-            None -> ()
-          | Some b ->
-              begin
-                fmt ff "fini ";
-                fmt_block ff b
-              end
-      end;
-      fmt ff "@]}@\n@]"
-
+      | MOD_ITEM_prog pd ->
+          begin
+            fmt_obox ff;
+            fmt ff "prog ";
+            fmt_ident ff id;
+            fmt_decl_params ff pd.decl_params;
+            fmt_obr ff;
+            fmt_mod_items ff pd.decl_item.prog_mod;
+            begin
+              match pd.decl_item.prog_init with
+                  None -> ()
+                | Some ii -> fmt ff "@\n?init?;"
+            end;
+            begin
+              match pd.decl_item.prog_main with
+                  None -> ()
+                | Some b ->
+                    begin
+                      fmt ff "@\n";
+                      fmt_obox ff;
+                      fmt ff "main ";
+                      fmt_obr ff;
+                      fmt_stmts ff b.node;
+                      fmt_cbb ff
+                    end
+            end;
+            begin
+              match pd.decl_item.prog_fini with
+                  None -> ()
+                | Some b ->
+                    begin
+                      fmt ff "@\n";
+                      fmt_obox ff;
+                      fmt ff "fini ";
+                      fmt_obr ff;
+                      fmt_stmts ff b.node;
+                      fmt_cbb ff
+                    end
+            end;
+            fmt_cbb ff
+          end
+  end
 
 and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
   Hashtbl.iter (fmt_mod_item ff) mi

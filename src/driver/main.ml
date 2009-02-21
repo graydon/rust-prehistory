@@ -112,7 +112,7 @@ then
     Printf.fprintf stderr "Post-parse AST:\n%!";
     Format.set_margin 80;
     Ast.fmt_crate Format.err_formatter crate;
-    Printf.fprintf stderr "n%!";
+    Printf.fprintf stderr "\n%!";
   end
 
 let (abi:Abi.abi) = X86.abi;;
