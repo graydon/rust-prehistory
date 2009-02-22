@@ -16,7 +16,7 @@ let auto_inference_visitor
   let check_ty_eq (t1:Ast.ty) (t2:Ast.ty) : unit =
     if not (t1 = t2)
     then err None "mismatched types: %s vs. %s "
-      (Ast.string_of_ty t1) (Ast.string_of_ty t2)
+      (Ast.fmt_to_str Ast.fmt_ty t1) (Ast.fmt_to_str Ast.fmt_ty t2)
   in
   let unify_ty (tyo:Ast.ty option) (ty:Ast.ty) : Ast.ty option =
     match tyo with
@@ -27,7 +27,7 @@ let auto_inference_visitor
     match (tyo, s.Ast.slot_ty) with
         (None, None) -> None
       | (Some t, None) ->
-          log cx "setting type of slot #%d to %s" (int_of_node id) (Ast.string_of_ty t);
+          log cx "setting type of slot #%d to %s" (int_of_node id) (Ast.fmt_to_str Ast.fmt_ty t);
           Hashtbl.replace cx.ctxt_all_slots id { s with Ast.slot_ty = (Some t) };
           progress := true;
           Some t

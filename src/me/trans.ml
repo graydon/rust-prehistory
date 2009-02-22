@@ -1088,7 +1088,8 @@ let fixup_assigning_visitor
               then cx.ctxt_main_prog
               else (new_fixup path)
             in
-              htab_put cx.ctxt_prog_fixups i.id fixup
+              (log cx "defining '%s' to mod item '%s'" fixup.fixup_name (path_name());
+               htab_put cx.ctxt_prog_fixups i.id fixup)
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i

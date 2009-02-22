@@ -168,7 +168,7 @@ let layout_visitor
       for i = 0 to (Array.length sorted_keyed_slot_ids) - 1 do
         let (key,sid) = sorted_keyed_slot_ids.(i) in
           log cx "block #%d entry %d: '%s' = slot #%d" 
-            (int_of_node block.id) i (Ast.string_of_key key) (int_of_node sid)
+            (int_of_node block.id) i (Ast.fmt_to_str Ast.fmt_slot_key key) (int_of_node sid)
       done;
       let sorted_slot_ids = Array.map (fun (_,sid) -> sid) sorted_keyed_slot_ids in
       let layout = layout_slot_ids true offset sorted_slot_ids in

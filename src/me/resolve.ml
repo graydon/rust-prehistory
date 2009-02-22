@@ -201,7 +201,7 @@ let slot_resolving_visitor
         log cx "looking up type with ident '%s'" ident;
         match stk_search scopes check_scope with
             None -> err (Some s.id) "unresolved identifier '%s'" ident
-          | Some t -> (log cx "resolved to type %s" (Ast.string_of_ty t); t)
+          | Some t -> (log cx "resolved to type %s" (Ast.fmt_to_str Ast.fmt_ty t); t)
     in
 
     let rec resolve_slot (slot:Ast.slot) : Ast.slot =
@@ -260,7 +260,7 @@ let slot_resolving_visitor
       log cx "collected resolved slot #%d with type %s" (int_of_node slot.id)
         (match slot.node.Ast.slot_ty with
              None -> "??"
-           | Some t -> (Ast.string_of_ty t));
+           | Some t -> (Ast.fmt_to_str Ast.fmt_ty t));
       inner.Walk.visit_slot_identified_pre slot
   in
     { inner with

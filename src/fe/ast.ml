@@ -452,69 +452,6 @@ and crate =
     }
 ;;
 
-
-(* Stringification *)
-
-
-let string_of_key k =
-  match k with
-      KEY_temp i -> "<temp#" ^ (string_of_int (int_of_temp i)) ^ ">"
-    | KEY_ident i -> i
-;;
-
-let rec string_of_name_component comp =
-  match comp with
-      COMP_ident id -> id
-    | COMP_app (id, tys) ->
-        id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
-    | COMP_idx i ->
-        "{" ^ (string_of_int i) ^ "}"
-
-and string_of_name name =
-  match name with
-      NAME_base (BASE_ident id) -> id
-    | NAME_base (BASE_temp n) -> "<temp#" ^ (string_of_int (int_of_temp n)) ^ ">"
-    | NAME_base (BASE_app (id, tys)) ->
-        id ^ "[" ^ (String.concat "," (List.map string_of_ty (Array.to_list tys))) ^ "]"
-    | NAME_ext (n, c) ->
-        (string_of_name n) ^ "." ^ (string_of_name_component c)
-
-and string_of_ty ty =
-  (* FIXME: flesh this out; it's currently only diagnostic. *)
-  match ty with
-      TY_any -> "any"
-    | TY_nil -> "()"
-    | TY_bool -> "bool"
-    | TY_mach _ -> "mach"
-    | TY_int -> "int"
-    | TY_char -> "char"
-    | TY_str -> "str"
-
-    | TY_tup _ -> "tup"
-    | TY_vec _ -> "vec"
-    | TY_rec _ -> "rec"
-
-    | TY_tag _ -> "tag"
-    | TY_iso _ -> "iso"
-    | TY_idx _ -> "idx"
-
-    | TY_fn _ -> "fn"
-    | TY_pred _ -> "pred"
-    | TY_chan _ -> "chan"
-    | TY_port _ -> "port"
-
-    | TY_mod _ -> "mod"
-    | TY_prog _ -> "prog"
-
-    | TY_opaque _ -> "opaque"
-    | TY_named name -> "<named:" ^ (string_of_name name) ^ ">"
-    | TY_type -> "ty"
-
-    | TY_constrained _ -> "constrained"
-    | TY_lim _ -> "lim"
-
-
-
 (***********************************************************************) 
 
 let fmt = Format.fprintf;;
@@ -891,11 +828,7 @@ and fmt_stmt (ff:Format.formatter) (s:stmt) : unit =
           fmt ff "let ";
           fmt_slot ff sloti.node;
           fmt ff " ";
-          begin
-            match skey with
-                KEY_ident id -> fmt_ident ff id
-              | KEY_temp tmp -> fmt_temp ff tmp
-          end;
+          fmt_slot_key ff skey;
           fmt ff ";"
 
       | _ -> fmt ff "?stmt?;"
@@ -1017,6 +950,17 @@ and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
 
 and fmt_crate (ff:Format.formatter) (c:crate) : unit =
     fmt_mod_items ff c.crate_items
+
+
+let fmt_to_str (f:Format.formatter -> 'a -> unit) (v:'a) : string =
+  let buf = Buffer.create 16 in
+  let bf = Format.formatter_of_buffer buf in
+    begin
+      f bf v;
+      Format.pp_print_flush bf ();
+      Buffer.contents buf
+    end
+
 
 
 (*

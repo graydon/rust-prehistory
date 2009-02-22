@@ -70,7 +70,7 @@ let new_ctxt sess abi crate =
     ctxt_text_items = Hashtbl.create 0;
     ctxt_anon_text_items = [];
     ctxt_main_prog = new_fixup "main prog fixup";
-    ctxt_main_name = Ast.string_of_name crate.Ast.crate_main
+    ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main
   }
 ;;
 
