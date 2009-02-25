@@ -1,19 +1,35 @@
 
 progress:
- - set up rudimentary system for real tests
- - move frame code to ABI
- - allocate proc stack
- - on activation, switch from C stack to proc stack
- - on back-edges / calls, check timeout, possibly reschedule
- - add timer thread to runtime
- - write simple RR scheduler
+ - explicit FFI / struct descriptors; hard-coding offsets is getting stale
  - change output slot to write alias on target in caller
- - implement movement of superword values
- - implement the non-interior slot modes
- - implement the yielding calling protocols
- - implement the tail calling protocols
+ - make proc stacks into chunk lists, check overflow / extend on frame entry
+ - put timer-counter in proc
+ - translate loop-jumps & calls to do a test/yield (regs already flushed)
+ - make proc pool growable
+ - basic version of type-state algorithm
+ - real type checker, or extend resolve/unify? consult textbooks
+ - movement of superword values
+ - records
+ - vectors
+ - strings
+ - channels and ports
+ - emit typecode structure into crate (dwarf?)
+ - typecode-driven generic copy fn
+ - typecode-driven generic compare fn
+ - typecode-driven generic hash fn
+ - typecode-driven generic delete fn
+ - typecode-driven generic fn 'ensure single ownership'
+ - non-interior slot modes
+ - mod types
+ - alt/iso/idx types
+ - parametric types
+ - yielding calling protocols
+ - tail calling protocols
+ - mach-o format emitter
+ - x64, arm?
 
-cleanup:
+code cleanup:
+ - move frame code to ABI
  - put logging and error-handling context in elf, pe, x86
  - use a datatype for kernel function codes, not int numbers
  - use a datatype for fields inside each kernel C structure
@@ -22,4 +38,4 @@ cleanup:
  - start crate structure real stupid: refcount + 1 function table
  - consolidate formatting functions
  - type-annotate everything
- - make callee-saves in prologue/epilogue depend on reg use
+ - make callee-save in prologue/epilogue depend on reg use
