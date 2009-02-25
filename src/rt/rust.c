@@ -178,6 +178,64 @@ rust_sched(rust_rt_t *rt)
   return rt->procs[rt->curr_proc];
 }
 
+void
+rust_handle_fn(rust_proc_t *proc)
+{
+
+  /*
+   * Incoming proc-stack looks like:
+   *
+   *   *sp+(N+2+K) = [argK          ]
+   *   ...
+   *   *sp+(N+3)   = [arg1          ]  = 'args'
+   *   *sp+(N+2)   = [call code #   ]
+   *   *sp+(N+1)   = [procptr       ]
+   *   *sp+N       = [callee-saveN  ]
+   *   ...
+   *   *sp         = [callee-save1  ]
+   *
+   */
+
+  uintptr_t *sp = (uintptr_t*) proc->regs.sp;
+  uintptr_t *proc_p = sp + rust_n_callee_saves;
+  uintptr_t *callcode_p = proc_p + 1;
+  uintptr_t *args = callcode_p + 1;
+
+  assert(*((rust_proc_t**)(proc_p)) == proc);
+
+  // printf("rt: calling fn #%d\n", *sp);
+  switch (*callcode_p) {
+  case 0:
+    rust_log_uint32_t(args[0]);
+    break;
+  case 1:
+    rust_log_str((char*)args[0]);
+    break;
+  case 2:
+    rust_spawn_proc(proc->rt, (rust_prog_t*)args[0]);
+    break;
+      /*;
+  case 3:
+    rust_kill_proc(proc->rt, (rust_proc_t*)args[0]);
+    break;
+  case 4:
+  **retslot_p = rust_malloc(proc, (size_t)args[0]);
+    break;
+  case 5:
+    rust_free(proc, (void*)args[0]);
+    break;
+  case 6:
+    rust_memmove(proc, (void*)args[0], (const void*)args[1], (size_t)args[2]);
+    break;
+  case 7:
+  **retslot_p = rust_memcmp((const void*)args[0], (const void*)args[1], (size_t)args[2]);
+    break;
+      */
+  default:
+      break;
+  }
+}
+
 int CDECL
 rust_start(rust_prog_t *prog,
            void CDECL (*c_to_proc_glue)(rust_proc_t*))
@@ -205,21 +263,7 @@ rust_start(rust_prog_t *prog,
     c_to_proc_glue(proc);
     // printf("rt: returned from proc in state %d.\n", proc->state);
     if (proc->state == RUST_PROC_STATE_CALLING_C) {
-      uintptr_t *sp = (uintptr_t*) proc->regs.sp;
-      sp += rust_n_callee_saves;
-      sp++;
-      // printf("rt: calling fn #%d\n", *sp);
-      switch (*sp) {
-      case 0:
-        rust_log_uint32_t(sp[1]);
-        break;
-      case 1:
-        rust_log_str((char*)sp[1]);
-        break;
-      case 2:
-        rust_spawn_proc(rt, (rust_prog_t*)sp[1]);
-        break;
-      }
+      rust_handle_fn(proc);
     }
     else if (proc->state == RUST_PROC_STATE_EXITING) {
       logptr("proc exiting", (uintptr_t)proc);

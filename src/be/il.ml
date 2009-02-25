@@ -8,42 +8,42 @@ type hreg = int
 ;;
 
 type reg = Vreg of vreg
-		   | Hreg of hreg
+           | Hreg of hreg
 ;;
 
 
 type operand =  Label of int
-			    | Imm of Asm.expr64
-			    | Pcrel of fixup
+                | Imm of Asm.expr64
+                | Pcrel of fixup
                 | Reg of reg
                 | Mem of (ty_mach * (reg option) * Asm.expr64)
-			    | Nil
+                | Nil
 ;;
 
 
-type op = 
-    ADD | SUB | NEG 
+type op =
+    ADD | SUB | NEG
   | IMUL | UMUL
   | IDIV | UDIV
   | IMOD | UMOD
   | MOV | CMP
   | LEA
-  | AND | OR | NOT 
+  | AND | OR | NOT
   | LSL | LSR | ASR
   | JE | JNE | JL | JLE | JG | JGE
-  | JC | JNC | JO | JNO | JMP 
-  | CALL | RET | YIELD | RESUME 
+  | JC | JNC | JO | JNO | JMP
+  | CALL | RET | YIELD | RESUME
   | CCALL | CPUSH of ty_mach | CPOP of ty_mach | CRET
   | NOP | DEAD | END
 ;;
 
 
 type quad = { quad_op: op;
-			  quad_dst: operand;
-			  quad_lhs: operand;
-			  quad_rhs: operand;
-			  quad_fixup: fixup option;
-			}
+              quad_dst: operand;
+              quad_lhs: operand;
+              quad_rhs: operand;
+              quad_fixup: fixup option;
+            }
 ;;
 
 
@@ -51,15 +51,15 @@ type quads = quad array
 ;;
 
 
-let is_primitive_reg r = 
-  match r with 
+let is_primitive_reg r =
+  match r with
       Hreg _ -> true
     | _ -> false
 ;;
 
 
-let is_primitive_operand op = 
-  match op with 
+let is_primitive_operand op =
+  match op with
       Label _ -> false
     | Reg r -> is_primitive_reg r
     | Mem (_, Some r, _) -> is_primitive_reg r
@@ -67,38 +67,38 @@ let is_primitive_operand op =
 ;;
 
 
-let is_primitive_quad q = 
+let is_primitive_quad q =
   (is_primitive_operand q.quad_dst)
   && (is_primitive_operand q.quad_lhs)
   && (is_primitive_operand q.quad_rhs)
 ;;
 
 
-let string_of_reg (f:int->string) r = 
-  match r with 
+let string_of_reg (f:int->string) r =
+  match r with
       Vreg i -> "<v" ^ (string_of_int i) ^ ">"
     | Hreg i -> f i
 ;;
 
 
-let string_of_operand (f:int->string) operand = 
+let string_of_operand (f:int->string) operand =
   match operand with
       Reg r -> string_of_reg f r
     | Imm (Asm.IMM i) -> Printf.sprintf "0x%Lx" i
-    | Imm _ -> "<imm??>" 
-	| Pcrel f -> "<" ^ f.fixup_name ^ ">"
+    | Imm _ -> "<imm??>"
+    | Pcrel f -> "<" ^ f.fixup_name ^ ">"
     | Mem (_, (Some r),(Asm.IMM n)) -> Printf.sprintf "%s[%Ld]" (string_of_reg f r) n
     | Mem (_, (Some r),_) -> Printf.sprintf "%s[??]" (string_of_reg f r)
     | Mem (_, None,(Asm.IMM n)) -> Printf.sprintf "*(%Ld)" n
-    | Mem (_, None,_) -> "*(??)" 
+    | Mem (_, None,_) -> "*(??)"
     | Label i -> "<lab" ^ (string_of_int i) ^ ">"
     | Nil -> "nil"
 ;;
 
 
-let string_of_op op = 
-  match op with 
-	  ADD -> "ADD"
+let string_of_op op =
+  match op with
+      ADD -> "ADD"
     | SUB -> "SUB"
     | NEG -> "NEG"
     | UMUL -> "UMUL"
@@ -131,89 +131,89 @@ let string_of_op op =
     | RET -> "RET"
     | NOP -> "NOP"
     | DEAD -> "DEAD"
-	| CCALL -> "CCALL"
-	| CPUSH m -> "CPUSH:" ^ string_of_ty_mach m
-	| CPOP m -> "CPOP:" ^ string_of_ty_mach m
-	| CRET -> "CRET"
-	| RESUME -> "RESUME"
-	| YIELD -> "YIELD"
+    | CCALL -> "CCALL"
+    | CPUSH m -> "CPUSH:" ^ string_of_ty_mach m
+    | CPOP m -> "CPOP:" ^ string_of_ty_mach m
+    | CRET -> "CRET"
+    | RESUME -> "RESUME"
+    | YIELD -> "YIELD"
     | END -> "---"
 ;;
 
 
-let string_of_quad f t = 
-  match t.quad_op with 
+let string_of_quad f t =
+  match t.quad_op with
       ADD | SUB | IMUL | UMUL | IDIV | UDIV | IMOD | UMOD
-	| AND | OR | LSL | LSR | ASR -> 
-		Printf.sprintf "%s = %s %s %s"
-		  (string_of_operand f t.quad_dst)
-		  (string_of_operand f t.quad_lhs)
-		  (string_of_op t.quad_op)
-		  (string_of_operand f t.quad_rhs)
-
-	| NOT | NEG -> 
-		Printf.sprintf "%s = %s %s"
-		  (string_of_operand f t.quad_dst)
-		  (string_of_op t.quad_op)
-		  (string_of_operand f t.quad_lhs)
-		  
-	| MOV -> 
-		Printf.sprintf "%s = %s"
-		  (string_of_operand f t.quad_dst)
-		  (string_of_operand f t.quad_lhs)
-
-	| LEA -> 
-		Printf.sprintf "%s = %s(%s)"
-		  (string_of_operand f t.quad_dst)
+    | AND | OR | LSL | LSR | ASR ->
+        Printf.sprintf "%s = %s %s %s"
+          (string_of_operand f t.quad_dst)
+          (string_of_operand f t.quad_lhs)
           (string_of_op t.quad_op)
-		  (string_of_operand f t.quad_lhs)
+          (string_of_operand f t.quad_rhs)
 
-	| CMP -> 
-		Printf.sprintf "%s %s %s"
-		  (string_of_op t.quad_op)
-		  (string_of_operand f t.quad_lhs)
-		  (string_of_operand f t.quad_rhs)
-	      
-	| JMP | JE | JNE | JL | JLE | JG | JGE | JC | JNC | JO | JNO
+    | NOT | NEG ->
+        Printf.sprintf "%s = %s %s"
+          (string_of_operand f t.quad_dst)
+          (string_of_op t.quad_op)
+          (string_of_operand f t.quad_lhs)
+
+    | MOV ->
+        Printf.sprintf "%s = %s"
+          (string_of_operand f t.quad_dst)
+          (string_of_operand f t.quad_lhs)
+
+    | LEA ->
+        Printf.sprintf "%s = %s(%s)"
+          (string_of_operand f t.quad_dst)
+          (string_of_op t.quad_op)
+          (string_of_operand f t.quad_lhs)
+
+    | CMP ->
+        Printf.sprintf "%s %s %s"
+          (string_of_op t.quad_op)
+          (string_of_operand f t.quad_lhs)
+          (string_of_operand f t.quad_rhs)
+
+    | JMP | JE | JNE | JL | JLE | JG | JGE | JC | JNC | JO | JNO
     | CALL | RESUME | CCALL | CPUSH _  ->
-		Printf.sprintf "%s %s"
-		  (string_of_op t.quad_op)
-		  (string_of_operand f t.quad_lhs)
-          
-    | CPOP _ -> 
-		Printf.sprintf "%s %s"
-		  (string_of_op t.quad_op)
-		  (string_of_operand f t.quad_dst)
-          
-	| RET | YIELD | CRET | NOP | DEAD | END -> 
-		(string_of_op t.quad_op)
+        Printf.sprintf "%s %s"
+          (string_of_op t.quad_op)
+          (string_of_operand f t.quad_lhs)
+
+    | CPOP _ ->
+        Printf.sprintf "%s %s"
+          (string_of_op t.quad_op)
+          (string_of_operand f t.quad_dst)
+
+    | RET | YIELD | CRET | NOP | DEAD | END ->
+        (string_of_op t.quad_op)
 ;;
 
 type emitter = { mutable emit_pc: int;
-				 mutable emit_next_vreg: int; 
+                 mutable emit_next_vreg: int;
                  emit_preallocator: (quad -> quad);
                  emit_is_2addr: bool;
-				 mutable emit_quads: quads; }
+                 mutable emit_quads: quads; }
 
 
 let badq = { quad_op = END;
-			 quad_dst = Nil;
-			 quad_lhs = Nil;
-			 quad_rhs = Nil;
-			 quad_fixup = None }
+             quad_dst = Nil;
+             quad_lhs = Nil;
+             quad_rhs = Nil;
+             quad_fixup = None }
 ;;
 
 
 let deadq = { quad_op = DEAD;
-			  quad_dst = Nil;
-			  quad_lhs = Nil;
-			  quad_rhs = Nil;
-			  quad_fixup = None }
+              quad_dst = Nil;
+              quad_lhs = Nil;
+              quad_rhs = Nil;
+              quad_fixup = None }
 ;;
 
 
-let new_emitter (preallocator:quad -> quad) (is_2addr:bool) = 
-  { 
+let new_emitter (preallocator:quad -> quad) (is_2addr:bool) =
+  {
     emit_pc = 0;
     emit_next_vreg = 0;
     emit_preallocator = preallocator;
@@ -223,13 +223,13 @@ let new_emitter (preallocator:quad -> quad) (is_2addr:bool) =
 ;;
 
 
-let next_vreg_num e = 
+let next_vreg_num e =
   let i = e.emit_next_vreg in
     e.emit_next_vreg <- i + 1;
     i
 ;;
 
-let next_vreg e = 
+let next_vreg e =
   let i = e.emit_next_vreg in
     e.emit_next_vreg <- i + 1;
     (Vreg i)
@@ -242,79 +242,79 @@ let grow_if_necessary e =
     then
       let n = Array.create (2 * len) badq in
         Array.blit e.emit_quads 0 n 0 len;
-        e.emit_quads <- n 
+        e.emit_quads <- n
 ;;
 
 
-  
+
 
 let emit_full e fix op dst lhs rhs =
-  let fixup = ref fix in 
-  let emit_quad_bottom q = 
+  let fixup = ref fix in
+  let emit_quad_bottom q =
     grow_if_necessary e;
     e.emit_quads.(e.emit_pc) <- { q with quad_fixup = (!fixup) };
     fixup := None;
     e.emit_pc <- e.emit_pc + 1
   in
 
-  let mq op d l r = { quad_op = op; quad_dst = d; 
+  let mq op d l r = { quad_op = op; quad_dst = d;
                       quad_lhs = l; quad_rhs = r; quad_fixup = None }
   in
 
-  let emit_quad q = 
+  let emit_quad q =
     (* decay mem-mem movs *)
-    match (q.quad_op, q.quad_dst, q.quad_lhs) with 
-        (MOV, Mem _, Mem _) -> 
+    match (q.quad_op, q.quad_dst, q.quad_lhs) with
+        (MOV, Mem _, Mem _) ->
           begin
             let dst = q.quad_dst in
             let src = q.quad_lhs in
-            let v =(Reg (next_vreg e)) in 
+            let v =(Reg (next_vreg e)) in
               emit_quad_bottom (mq MOV v src Nil);
               emit_quad_bottom (mq MOV dst v Nil)
           end
       | _ -> emit_quad_bottom q
   in
 
-  let emit_mov dst src = 
+  let emit_mov dst src =
     emit_quad (mq MOV dst src Nil)
   in
 
   let quad = (mq op dst lhs rhs) in
-  let quad' = e.emit_preallocator quad in 
+  let quad' = e.emit_preallocator quad in
     if quad'.quad_lhs != quad.quad_lhs
     then emit_mov quad'.quad_lhs quad.quad_lhs
     else ();
     if quad'.quad_rhs != quad.quad_rhs
     then emit_mov quad'.quad_rhs quad.quad_rhs
     else ();
-    if e.emit_is_2addr 
+    if e.emit_is_2addr
       && (quad'.quad_lhs != quad'.quad_dst)
       && (quad'.quad_dst != Nil)
       && (quad'.quad_lhs != Nil)
       && (quad'.quad_rhs != Nil)
-    then 
+    then
       begin
         emit_mov quad'.quad_dst quad'.quad_lhs;
         emit_quad { quad' with quad_lhs = quad'.quad_dst }
       end
-    else 
+    else
       emit_quad quad';
     if (quad'.quad_dst != quad.quad_dst)
       && (quad'.quad_dst != Nil)
       && (quad.quad_dst != Nil)
-    then emit_mov quad.quad_dst quad'.quad_dst 
+    then emit_mov quad.quad_dst quad'.quad_dst
     else ();
 ;;
 
-let emit e op dst lhs rhs = 
+let emit e op dst lhs rhs =
   emit_full e None op dst lhs rhs
 ;;
 
 
-(* 
+(*
  * Local Variables:
- * fill-column: 70; 
+ * fill-column: 70;
  * indent-tabs-mode: nil
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)
