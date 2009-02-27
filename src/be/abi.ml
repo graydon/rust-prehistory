@@ -64,8 +64,8 @@
  *  [0] link to runtime system
  *  [1*ptr] link to crate
  *  [2*ptr] link to parent closure
- *  [
- *)      
+ *
+ *)
 
 
 type proc_state =
@@ -73,6 +73,33 @@ type proc_state =
   | STATE_calling_c
   | STATE_exiting
 ;;
+
+let proc_state_to_code (st:proc_state) : int64 =
+  match st with
+      STATE_running -> 0L
+    | STATE_calling_c -> 1L
+    | STATE_exiting -> 2L
+;;
+
+(* Word offsets for structure fields in rust.h. *)
+let regs_field_pc = 0;;
+let regs_field_sp = 1;;
+
+let proc_field_rt = 0;;
+let proc_field_stk = 1;;
+let proc_field_prog = 2;;
+let proc_field_regs = 3;;
+let proc_field_regs_pc = proc_field_regs + regs_field_pc;;
+let proc_field_regs_sp = proc_field_regs + regs_field_sp;;
+let proc_field_state = 5;;
+let proc_field_refcnt = 6;;
+
+let rt_field_c_regs = 0;;
+let rt_field_c_regs_pc = rt_field_c_regs + regs_field_pc;;
+let rt_field_c_regs_sp = rt_field_c_regs + regs_field_sp;;
+let rt_field_curr_proc = 2;;
+let rt_field_live_procs = 3;;
+let rt_field_procs = 4;;
 
 type abi =
   {
@@ -94,14 +121,14 @@ type abi =
     abi_emit_main_prologue: (Il.emitter -> Ast.block -> int64 -> Common.fixup -> unit);
     abi_emit_main_epilogue: (Il.emitter -> Ast.block -> unit);
 
-    abi_clobbers: (Il.quad -> Il.hreg list); 
+    abi_clobbers: (Il.quad -> Il.hreg list);
 
     abi_emit_proc_state_change: (Il.emitter -> proc_state -> unit);
 
     (* Transitions between runtimes. *)
     abi_c_to_proc: (Il.emitter -> Common.fixup -> unit);
     abi_proc_to_c: (Il.emitter -> Common.fixup -> unit);
-    
+
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;
     abi_pp_operand: Il.operand;

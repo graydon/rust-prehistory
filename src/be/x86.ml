@@ -297,12 +297,7 @@ let store_rt_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
 ;;
 
 let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
-  let code =
-    match state with
-        Abi.STATE_running -> 0L
-      | Abi.STATE_calling_c -> 1L
-      | Abi.STATE_exiting -> 2L
-  in
+  let code = Abi.proc_state_to_code state in
   let r x = Il.Reg x in
   let vr = Il.next_vreg e in
   let vr_n = word_n vr in
@@ -311,7 +306,7 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
   let imm i = Il.Imm (Asm.IMM i) in
 
     mov (r vr) proc_ptr;
-    mov (vr_n 5) (imm code);
+    mov (vr_n Abi.proc_field_state) (imm code);
 ;;
 
 let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
@@ -344,15 +339,17 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
     Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
 
     mov (r edx) (sp_n 1);      (* edx <- proc          *)
-    mov (r ecx) (edx_n 0);     (* ecx <- proc->rt      *)
+    mov (r ecx) (edx_n Abi.proc_field_rt);
+                               (* ecx <- proc->rt      *)
     mov (r eax) (sp_n 0);      (* eax <- *esp          *)
-    mov (ecx_n 0) (r eax);     (* rt->regs.pc <- *esp  *)
-    add (r esp) 4L;            (* pop retpc            *)
+    mov (ecx_n Abi.rt_field_c_regs_pc) (r eax);
+                               (* rt->regs.pc <- *esp  *)
+    add (r esp) word_sz;       (* pop retpc            *)
     save_callee_saves e;
-    mov (ecx_n 1) (r esp);     (* rt->regs.sp <- esp   *)
-    mov (r ecx) (edx_n 4);     (* ecx <- proc->regs.sp *)
-    mov (r edx) (edx_n 3);     (* edx <- proc->regs.pc *)
-    mov (r esp) (r ecx);       (* esp <- proc->sp      *)
+    mov (ecx_n Abi.rt_field_c_regs_sp) (r esp);       (* rt->regs.sp <- esp   *)
+    mov (r ecx) (edx_n Abi.proc_field_regs_sp);     (* ecx <- proc->regs.sp *)
+    mov (r edx) (edx_n Abi.proc_field_regs_pc);     (* edx <- proc->regs.pc *)
+    mov (r esp) (r ecx);                            (* esp <- proc->sp      *)
 
     (**** IN PROC STACK ****)
     restore_callee_saves e;
@@ -386,15 +383,15 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
 
     Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
 
-    mov (r edx) (sp_n 1);      (* edx <- proc            *)
-    mov (r ecx) (edx_n 0);     (* ecx <- proc->rt        *)
-    mov (r eax) (sp_n 0);      (* eax <- *esp            *)
-    mov (edx_n 3) (r eax);     (* proc->regs.pc <- *esp  *)
-    add (r esp) 4L;            (* pop retpc              *)
+    mov (r edx) (sp_n 1);                       (* edx <- proc            *)
+    mov (r ecx) (edx_n Abi.proc_field_rt);      (* ecx <- proc->rt        *)
+    mov (r eax) (sp_n 0);                       (* eax <- *esp            *)
+    mov (edx_n Abi.proc_field_regs_pc) (r eax); (* proc->regs.pc <- *esp  *)
+    add (r esp) word_sz;                        (* pop retpc              *)
     save_callee_saves e;
-    mov (edx_n 4) (r esp);     (* proc->regs.sp <- esp   *)
-    mov (r edx) (ecx_n 0);     (* edx <- rt->regs.pc     *)
-    mov (r esp) (ecx_n 1);     (* esp <- rt->regs.sp     *)
+    mov (edx_n Abi.proc_field_regs_sp) (r esp); (* proc->regs.sp <- esp   *)
+    mov (r edx) (ecx_n Abi.rt_field_c_regs_pc);   (* edx <- rt->regs.pc     *)
+    mov (r esp) (ecx_n Abi.rt_field_c_regs_sp);   (* esp <- rt->regs.sp     *)
 
     (**** IN C STACK ****)
     restore_callee_saves e;
@@ -621,6 +618,13 @@ let mov (dst:operand) (src:operand) : Asm.item =
 ;;
 
 
+let lea (dst:operand) (src:operand) : Asm.item =
+  match (dst,src) with
+      (Reg (Hreg r), Mem _) -> insn_rm_r 0x8d src (reg r)
+    | _ -> raise Unrecognized
+;;
+
+
 let select_item_misc (q:quad) : Asm.item =
   match (q.quad_op, q.quad_dst, q.quad_lhs, q.quad_rhs) with
 
@@ -689,6 +693,7 @@ let select_insn (q:quad) : Asm.item =
   let item =
     match q.quad_op with
         MOV -> mov q.quad_dst q.quad_lhs
+      | LEA -> lea q.quad_dst q.quad_lhs
       | CMP -> cmp q.quad_lhs q.quad_rhs
       | _ ->
           begin
