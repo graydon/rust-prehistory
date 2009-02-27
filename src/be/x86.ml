@@ -314,12 +314,11 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
    * This is a bit of glue-code. It should be emitted once per
    * compilation unit.
    *
-   *   - save C stack pointer and return address into rt:
-   *     - proc->rt->regs.pc = *esp = retpc
-   *     - proc->rt->regs.sp = esp
-   *   - switch stacks:
-   *     - esp = proc->regs.sp
-   *   - jump to proc->regs.pc
+   *   - save regs on C stack
+   *   - save sp to rt.sp
+   *   - load saved proc sp (switch stack)
+   *   - restore saved proc regs
+   *   - return to saved proc pc
    *
    * Our incoming stack looks like this:
    *
@@ -333,27 +332,18 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
   let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
   let mov dst src = emit Il.MOV dst src Il.Nil in
-  let imm i = Il.Imm (Asm.IMM i) in
-  let add dst amt = emit Il.ADD dst dst (imm amt) in
 
     Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
 
-    mov (r edx) (sp_n 1);      (* edx <- proc          *)
-    mov (r ecx) (edx_n Abi.proc_field_rt);
-                               (* ecx <- proc->rt      *)
-    mov (r eax) (sp_n 0);      (* eax <- *esp          *)
-    mov (ecx_n Abi.rt_field_c_regs_pc) (r eax);
-                               (* rt->regs.pc <- *esp  *)
-    add (r esp) word_sz;       (* pop retpc            *)
+    mov (r edx) (sp_n 1);                     (* edx <- proc          *)
+    mov (r ecx) (edx_n Abi.proc_field_rt);    (* ecx <- proc->rt      *)
     save_callee_saves e;
-    mov (ecx_n Abi.rt_field_c_regs_sp) (r esp);       (* rt->regs.sp <- esp   *)
-    mov (r ecx) (edx_n Abi.proc_field_regs_sp);     (* ecx <- proc->regs.sp *)
-    mov (r edx) (edx_n Abi.proc_field_regs_pc);     (* edx <- proc->regs.pc *)
-    mov (r esp) (r ecx);                            (* esp <- proc->sp      *)
+    mov (ecx_n Abi.rt_field_sp) (r esp);      (* rt->regs.sp <- esp   *)
+    mov (r esp) (edx_n Abi.proc_field_sp);    (* esp <- proc->regs.sp *)
 
     (**** IN PROC STACK ****)
     restore_callee_saves e;
-    emit Il.JMP Il.Nil (r edx) Il.Nil;
+    emit Il.CRET Il.Nil Il.Nil Il.Nil;
     (***********************)
   ()
 ;;
@@ -363,11 +353,13 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
 
   (*
    * More glue code. Here we've been called from a proc and
-   * we want to return to the saved C stack/pce. So:
+   * we want to return to the saved C stack/pc. So:
    *
-   *   - save sp and pc to proc.regs
-   *   - load saved C sp
-   *   - jump to saved C pc
+   *   - save regs on proc stack
+   *   - save sp to proc.sp
+   *   - load saved C sp (switch stack)
+   *   - restore saved C regs
+   *   - return to saved C pc
    *
    *   *esp+4        = [arg1   ] = proc ptr
    *   *esp          = [retpc  ]
@@ -378,24 +370,18 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
   let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
   let mov dst src = emit Il.MOV dst src Il.Nil in
-  let imm i = Il.Imm (Asm.IMM i) in
-  let add dst amt = emit Il.ADD dst dst (imm amt) in
 
     Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
 
-    mov (r edx) (sp_n 1);                       (* edx <- proc            *)
-    mov (r ecx) (edx_n Abi.proc_field_rt);      (* ecx <- proc->rt        *)
-    mov (r eax) (sp_n 0);                       (* eax <- *esp            *)
-    mov (edx_n Abi.proc_field_regs_pc) (r eax); (* proc->regs.pc <- *esp  *)
-    add (r esp) word_sz;                        (* pop retpc              *)
+    mov (r edx) (sp_n 1);                     (* edx <- proc            *)
+    mov (r ecx) (edx_n Abi.proc_field_rt);    (* ecx <- proc->rt        *)
     save_callee_saves e;
-    mov (edx_n Abi.proc_field_regs_sp) (r esp); (* proc->regs.sp <- esp   *)
-    mov (r edx) (ecx_n Abi.rt_field_c_regs_pc);   (* edx <- rt->regs.pc     *)
-    mov (r esp) (ecx_n Abi.rt_field_c_regs_sp);   (* esp <- rt->regs.sp     *)
+    mov (edx_n Abi.proc_field_sp) (r esp);    (* proc->regs.sp <- esp   *)
+    mov (r esp) (ecx_n Abi.rt_field_sp);      (* esp <- rt->regs.sp     *)
 
     (**** IN C STACK ****)
     restore_callee_saves e;
-    emit Il.JMP Il.Nil (r edx) Il.Nil;
+    emit Il.CRET Il.Nil Il.Nil Il.Nil;
     (***********************)
   ()
 ;;

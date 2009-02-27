@@ -95,30 +95,40 @@ rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
   logptr("new proc", (uintptr_t)proc);
   proc->prog = prog;
   proc->stk = rust_new_stk();
-  proc->regs.pc = (uintptr_t) prog->main_code;
 
   /*
      Set sp to last uintptr_t-sized cell of segment
      then align down to 16 boundary, to be safe-ish?
   */
   size_t tos = rust_init_stk_bytes-sizeof(uintptr_t);
-  proc->regs.sp = (uintptr_t) &(proc->stk->data[tos]);
-  proc->regs.sp &= ~0xf;
+  proc->sp = (uintptr_t) &(proc->stk->data[tos]);
+  proc->sp &= ~0xf;
 
   /* "initial args" to the main frame:
    *
-   *      *sp+N+16   = proc ptr
-   *      *sp+N+8    = NULL = fake outptr
-   *      *sp+N+4    = NULL = fake retpc
+   *      *sp+N+24   = proc ptr
+   *      *sp+N+16   = NULL = fake outptr (spacing)
+   *      *sp+N+8    = NULL = fake retpc (spacing)
+   *      *sp+N+4    = "retpc" to return to
    *      *sp+N      = NULL = 0th callee-save
    *      ...
    *      *sp        = NULL = Nth callee-save
+   *
+   * This is slightly confusing since it looks like we have
+   * two copies of retpc; that's intentional. The notion is
+   * that when we 'return' to this frame in the c-to-proc glue,
+   * we will wind up at the first insn of a rust prog that assumes
+   * for simplicity sake it has a same-as-always-laid-out rust
+   * frame under it. In particular, one with a retpc. Even though
+   * said retpc is bogus -- just spacing -- we place it and a
+   * fake outptr so that the frame we return to is the right shape.
    */
-  uintptr_t *sp = (uintptr_t*) proc->regs.sp;
-  proc->regs.sp -= (2 + rust_n_callee_saves) * sizeof(uintptr_t);
+  uintptr_t *sp = (uintptr_t*) proc->sp;
+  proc->sp -= (3 + rust_n_callee_saves) * sizeof(uintptr_t);
   *sp-- = (uintptr_t) proc;
   *sp-- = (uintptr_t) 0;
-  *sp-- = (uintptr_t) 0;
+  *sp-- = (uintptr_t) (uintptr_t) prog->main_code;
+  *sp-- = (uintptr_t) (uintptr_t) prog->main_code;
   for (size_t j = 0; j < rust_n_callee_saves; ++j) {
     *sp-- = 0;
   }
@@ -185,19 +195,20 @@ rust_handle_fn(rust_proc_t *proc)
   /*
    * Incoming proc-stack looks like:
    *
-   *   *sp+(N+2+K) = [argK          ]
+   *   *sp+(N+3+K) = [argK          ]
    *   ...
-   *   *sp+(N+3)   = [arg1          ]  = 'args'
-   *   *sp+(N+2)   = [call code #   ]
-   *   *sp+(N+1)   = [procptr       ]
+   *   *sp+(N+4)   = [arg1          ]  = 'args'
+   *   *sp+(N+3)   = [call code #   ]
+   *   *sp+(N+2)   = [procptr       ]
+   *   *sp+(N+1)   = [retpc         ]
    *   *sp+N       = [callee-saveN  ]
    *   ...
    *   *sp         = [callee-save1  ]
    *
    */
 
-  uintptr_t *sp = (uintptr_t*) proc->regs.sp;
-  uintptr_t *proc_p = sp + rust_n_callee_saves;
+  uintptr_t *sp = (uintptr_t*) proc->sp;
+  uintptr_t *proc_p = sp + rust_n_callee_saves + 1;
   uintptr_t *callcode_p = proc_p + 1;
   uintptr_t *args = callcode_p + 1;
 
@@ -253,8 +264,7 @@ rust_start(rust_prog_t *prog,
   proc = rust_sched(rt);
 
   logptr("root proc is", (uintptr_t)proc);
-  logptr("proc->regs.pc", (uintptr_t)proc->regs.pc);
-  logptr("proc->regs.sp", (uintptr_t)proc->regs.sp);
+  logptr("proc->sp", (uintptr_t)proc->sp);
   logptr("c_to_proc_glue", (uintptr_t)c_to_proc_glue);
 
   while(1) {

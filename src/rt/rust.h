@@ -104,11 +104,6 @@ typedef struct rust_type {
 
 } rust_type_t;
 
-typedef struct rust_regs {
-  uintptr_t pc;
-  uintptr_t sp;
-} rust_regs_t;
-
 /* Proc stack segments. Heap allocated and chained together. */
 
 typedef struct rust_stk_seg {
@@ -134,7 +129,7 @@ extern size_t const rust_n_callee_saves;
 extern size_t const rust_n_procs;
 
 struct rust_rt {
-  rust_regs_t c_regs;    /* Saved sp from the C runtime. */
+  uintptr_t sp;          /* Saved sp from the C runtime. */
   size_t curr_proc;      /* Currently active proc.       */
   size_t live_procs;     /* Number of live procs.        */
   rust_proc_t **procs;
@@ -161,7 +156,7 @@ struct rust_proc {
   rust_rt_t *rt;
   rust_stk_seg_t *stk;
   rust_prog_t *prog;
-  rust_regs_t regs;       /* saved sp when not running.                     */
+  uintptr_t sp;           /* saved sp when not running.                     */
   uint32_t state;
   size_t refcnt;
 
