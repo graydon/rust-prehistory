@@ -725,16 +725,6 @@ let trans_visitor
     trans_lval_full lv false false
   in
 
-  let trans_out_slot (callee:bool) : Il.operand =
-    if callee
-    then
-      Il.Mem (TY_u32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
-              (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)))
-    else
-      Il.Mem (TY_u32, (Some cx.ctxt_abi.Abi.abi_sp_reg),
-              (Asm.IMM 0L))
-  in
-
   let atom_type (at:Ast.atom) : Ast.ty =
     match at with
         Ast.ATOM_literal {node=(Ast.LIT_str _); id=_} -> Ast.TY_str
@@ -863,6 +853,12 @@ let trans_visitor
   let trans_log_str (a:Ast.atom) : unit = trans_1_arg_kern_fn a 1L in
   let trans_spawn (a:Ast.atom) : unit = trans_1_arg_kern_fn a 2L in
 
+  let lea (dst:Il.operand) (src:Il.operand) : unit =
+    match src with
+        Il.Mem _ -> emit Il.LEA dst src Il.Nil
+      | _ -> err None "LEA on non-memory operand"
+  in
+
   let rec trans_block (block:Ast.block) : unit =
     Stack.push (get_block_layout block.id) block_layouts;
     Array.iter trans_stmt block.node;
@@ -920,6 +916,12 @@ let trans_visitor
 
       | Ast.STMT_call (dst, flv, args) ->
           let abi = cx.ctxt_abi in
+          let vr = Il.Reg (Il.next_vreg (emitter())) in
+          let sp = Il.Reg (abi.Abi.abi_sp_reg) in
+          let outmem = trans_lval dst in
+          let outptr = Il.Reg (Il.next_vreg (emitter())) in
+          let fv = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
+            lea outptr outmem;
             (* FIXME: factor out call protocol into ABI bits. *)
             for i = (Array.length args) - 1 downto 0 do
               emit (Il.CPUSH TY_u32) Il.Nil (trans_atom args.(i)) Il.Nil
@@ -927,16 +929,10 @@ let trans_visitor
             (* Emit arg1: the process pointer. *)
             emit (Il.CPUSH TY_u32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
             (* Emit arg0: the output slot. *)
-            emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM 0L)) Il.Nil;
-            let vr = Il.Reg (Il.next_vreg (emitter())) in
-            let sp = Il.Reg (abi.Abi.abi_sp_reg) in
-            let dst = trans_lval dst in
-            let fv = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
-              emit Il.CCALL vr fv Il.Nil;
-              emit Il.MOV dst vr Il.Nil;
-              emit Il.MOV dst (trans_out_slot false) Il.Nil;
-              emit Il.ADD sp sp
-                (Il.Imm (Asm.IMM (Int64.of_int (4 * (2 + (Array.length args))))));
+            emit (Il.CPUSH TY_u32) Il.Nil outptr Il.Nil;
+            emit Il.CCALL vr fv Il.Nil;
+            emit Il.ADD sp sp
+              (Il.Imm (Asm.IMM (Int64.of_int (4 * (2 + (Array.length args))))));
 
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->
@@ -948,8 +944,14 @@ let trans_visitor
                     match atom_opt with
                         None -> ()
                       | Some at ->
-                          let ret = trans_out_slot true in
-                            emit Il.MOV ret (trans_atom at) Il.Nil
+                          let outmem =
+                            Il.Mem (TY_u32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
+                                    (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)))
+                          in
+                          let outptr_reg = Il.next_vreg (emitter()) in
+                          let deref_outptr = Il.Mem (TY_u32, (Some outptr_reg), Asm.IMM 0L) in
+                            emit Il.MOV (Il.Reg outptr_reg) outmem Il.Nil;
+                            emit Il.MOV deref_outptr (trans_atom at) Il.Nil
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;

@@ -428,7 +428,7 @@ let (abi:Abi.abi) =
 
 
 let imm_is_byte (n:int64) : bool =
-  n = (Int64.logand 0xffL n)
+  (i64_le (-128L) n) && (i64_le n 127L)
 ;;
 
 

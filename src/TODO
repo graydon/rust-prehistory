@@ -1,7 +1,6 @@
 
 progress:
  - explicit FFI / struct descriptors; hard-coding offsets is getting stale
- - change output slot to write alias on target in caller
  - make proc stacks into chunk lists, check overflow / extend on frame entry
  - put timer-counter in proc
  - translate loop-jumps & calls to do a test/yield (regs already flushed)
