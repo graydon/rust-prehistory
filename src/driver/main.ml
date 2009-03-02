@@ -27,6 +27,7 @@ let (sess:Session.sess) =
     Session.sess_log_type = false;
     Session.sess_log_layout = false;
     Session.sess_log_trans = false;
+    Session.sess_log_dwarf = false;
     Session.sess_log_ra = false;
     Session.sess_log_insn = false;
     Session.sess_log_asm = false;
@@ -57,6 +58,7 @@ let argspecs =
     ("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
     ("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
     ("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
+    ("-ldwarf", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log DWARF record generation");
     ("-lra", Arg.Unit (fun _ -> sess.Session.sess_log_ra <- true), "log register allocation");
     ("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");
     ("-lasm", Arg.Unit (fun _ -> sess.Session.sess_log_asm <- true), "log assembly");
@@ -160,11 +162,26 @@ let (code:Asm.item) = Asm.SEQ (Array.of_list (List.map (X86.select_insns sess) a
 let _ = exit_if_failed ()
 ;;
 
+let (dwarf:Asm.item) = Asm.SEQ (Array.of_list
+                                  (Dwarf.process_crate
+                                     sem_cx
+                                     crate.Ast.crate_items))
+let _ = exit_if_failed ()
+;;
+
 let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
 ;;
 
 let _ = match sess.Session.sess_targ with
-    Win32_x86_pe -> Pe.emit_file sess code data entry_prog_fixup sem_cx.Semant.ctxt_c_to_proc_fixup
+    Win32_x86_pe ->
+      Pe.emit_file
+        sess
+        code
+        data
+        dwarf
+        entry_prog_fixup
+        sem_cx.Semant.ctxt_c_to_proc_fixup
+
   | Linux_x86_elf -> Elf.emit_file sess code data entry_prog_fixup
 ;;
 

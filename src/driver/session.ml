@@ -19,6 +19,7 @@ type sess =
   mutable sess_log_type: bool;
   mutable sess_log_layout: bool;
   mutable sess_log_trans: bool;
+  mutable sess_log_dwarf: bool;
   mutable sess_log_ra: bool;
   mutable sess_log_insn: bool;
   mutable sess_log_asm: bool;
