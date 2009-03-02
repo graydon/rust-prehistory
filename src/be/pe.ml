@@ -659,7 +659,7 @@ let emit_file
     (sess:Session.sess)
     (code:Asm.item)
     (data:Asm.item)
-    (dwarf:Asm.item)
+    (dwarf:Dwarf.dwarf_records)
     (entry_prog_fixup:fixup)
     (c_to_proc_fixup:fixup)
     : unit =
@@ -810,12 +810,24 @@ let emit_file
                          all_init_data_fixup
                          (SEQ [| import_section; data_section; |]))
   in
-  let debug_aranges_section = def_aligned debug_aranges_fixup dwarf in
-  let debug_pubnames_section = def_aligned debug_pubnames_fixup dwarf in
-  let debug_info_section = def_aligned debug_info_fixup dwarf in
-  let debug_abbrev_section = def_aligned debug_abbrev_fixup dwarf in
-  let debug_line_section = def_aligned debug_line_fixup dwarf in
-  let debug_frame_section = def_aligned debug_frame_fixup dwarf in
+  let debug_aranges_section =
+    def_aligned debug_aranges_fixup dwarf.Dwarf.dwarf_debug_aranges
+  in
+  let debug_pubnames_section =
+    def_aligned debug_pubnames_fixup dwarf.Dwarf.dwarf_debug_pubnames
+  in
+  let debug_info_section =
+    def_aligned debug_info_fixup dwarf.Dwarf.dwarf_debug_info
+  in
+  let debug_abbrev_section =
+    def_aligned debug_abbrev_fixup dwarf.Dwarf.dwarf_debug_abbrev
+  in
+  let debug_line_section =
+    def_aligned debug_line_fixup dwarf.Dwarf.dwarf_debug_line
+  in
+  let debug_frame_section =
+    def_aligned debug_frame_fixup dwarf.Dwarf.dwarf_debug_frame
+  in
 
   let all_items = SEQ [| MEMPOS pe_image_base;
                          (def_file_aligned image_fixup

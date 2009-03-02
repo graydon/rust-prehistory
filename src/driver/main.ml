@@ -162,10 +162,7 @@ let (code:Asm.item) = Asm.SEQ (Array.of_list (List.map (X86.select_insns sess) a
 let _ = exit_if_failed ()
 ;;
 
-let (dwarf:Asm.item) = Asm.SEQ (Array.of_list
-                                  (Dwarf.process_crate
-                                     sem_cx
-                                     crate.Ast.crate_items))
+let (dwarf:Dwarf.dwarf_records) = (Dwarf.process_crate sem_cx crate.Ast.crate_items)
 let _ = exit_if_failed ()
 ;;
 
