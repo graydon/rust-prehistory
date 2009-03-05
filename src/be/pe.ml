@@ -659,7 +659,7 @@ let emit_file
     (sess:Session.sess)
     (code:Asm.item)
     (data:Asm.item)
-    (dwarf:Dwarf.dwarf_records)
+    (dw:Dwarf.debug_records)
     (entry_prog_fixup:fixup)
     (c_to_proc_fixup:fixup)
     : unit =
@@ -671,12 +671,6 @@ let emit_file
   let text_fixup = new_fixup "text section" in
   let bss_fixup = new_fixup "bss section" in
   let data_fixup = new_fixup "data section" in
-  let debug_aranges_fixup = new_fixup "debug_aranges section" in
-  let debug_pubnames_fixup = new_fixup "debug_pubnames section" in
-  let debug_info_fixup = new_fixup "debug_info section" in
-  let debug_abbrev_fixup = new_fixup "debug_abbrev section" in
-  let debug_line_fixup = new_fixup "debug_line section" in
-  let debug_frame_fixup = new_fixup "debug_frame section" in
   let image_fixup = new_fixup "image fixup" in
   let symtab_fixup = new_fixup "symbol table" in
   let strtab_fixup = new_fixup "string table" in
@@ -752,27 +746,27 @@ let emit_file
   in
   let debug_aranges_header = (pe_section_header
                                 ~id: SECTION_ID_DEBUG_ARANGES
-                                ~hdr_fixup: debug_aranges_fixup)
+                                ~hdr_fixup: dw.Dwarf.debug_aranges_fixup)
   in
   let debug_pubnames_header = (pe_section_header
                                  ~id: SECTION_ID_DEBUG_PUBNAMES
-                                 ~hdr_fixup: debug_pubnames_fixup)
+                                 ~hdr_fixup: dw.Dwarf.debug_pubnames_fixup)
   in
   let debug_info_header = (pe_section_header
                              ~id: SECTION_ID_DEBUG_INFO
-                             ~hdr_fixup: debug_info_fixup)
+                             ~hdr_fixup: dw.Dwarf.debug_info_fixup)
   in
   let debug_abbrev_header = (pe_section_header
                                ~id: SECTION_ID_DEBUG_ABBREV
-                               ~hdr_fixup: debug_abbrev_fixup)
+                               ~hdr_fixup: dw.Dwarf.debug_abbrev_fixup)
   in
   let debug_line_header = (pe_section_header
                              ~id: SECTION_ID_DEBUG_LINE
-                             ~hdr_fixup: debug_line_fixup)
+                             ~hdr_fixup: dw.Dwarf.debug_line_fixup)
   in
   let debug_frame_header = (pe_section_header
                               ~id: SECTION_ID_DEBUG_FRAME
-                              ~hdr_fixup: debug_frame_fixup)
+                              ~hdr_fixup: dw.Dwarf.debug_frame_fixup)
   in
   let all_headers = (def_file_aligned
                        all_hdrs_fixup
@@ -811,22 +805,22 @@ let emit_file
                          (SEQ [| import_section; data_section; |]))
   in
   let debug_aranges_section =
-    def_aligned debug_aranges_fixup dwarf.Dwarf.dwarf_debug_aranges
+    def_aligned dw.Dwarf.debug_aranges_fixup dw.Dwarf.debug_aranges
   in
   let debug_pubnames_section =
-    def_aligned debug_pubnames_fixup dwarf.Dwarf.dwarf_debug_pubnames
+    def_aligned dw.Dwarf.debug_pubnames_fixup dw.Dwarf.debug_pubnames
   in
   let debug_info_section =
-    def_aligned debug_info_fixup dwarf.Dwarf.dwarf_debug_info
+    def_aligned dw.Dwarf.debug_info_fixup dw.Dwarf.debug_info
   in
   let debug_abbrev_section =
-    def_aligned debug_abbrev_fixup dwarf.Dwarf.dwarf_debug_abbrev
+    def_aligned dw.Dwarf.debug_abbrev_fixup dw.Dwarf.debug_abbrev
   in
   let debug_line_section =
-    def_aligned debug_line_fixup dwarf.Dwarf.dwarf_debug_line
+    def_aligned dw.Dwarf.debug_line_fixup dw.Dwarf.debug_line
   in
   let debug_frame_section =
-    def_aligned debug_frame_fixup dwarf.Dwarf.dwarf_debug_frame
+    def_aligned dw.Dwarf.debug_frame_fixup dw.Dwarf.debug_frame
   in
 
   let all_items = SEQ [| MEMPOS pe_image_base;

@@ -30,18 +30,35 @@
  *     a micro-language that you can embed in DWARF records to compute
  *     values algorithmically.
  *
- *   - DWARF is not "officially" supported by any Microsoft tools in PE
- *     files, but the Microsoft debugging information formats are
- *     proprietary and ever-shifting, and not clearly sufficient for our
- *     needs; by comparison DWARF is widely supported, stable, flexible,
- *     and required everywhere *else*. We are using DWARF to support major
- *     components of the rust runtime (reflection, unwinding, profiling) so
- *     it's helpful to not have to span technologies, just focus on DWARF.
- *     Luckily the MINGW/Cygwin communities have worked out a convention
- *     for PE, and taught BFD (thus most tools) how to digest DWARF
- *     sections trailing after the .idata section of a normal PE
- *     file. Seems to work fine.
- *
+ *   - DWARF is not "officially" supported by any Microsoft tools in
+ *     PE files, but the Microsoft debugging information formats are
+ *     proprietary and ever-shifting, and not clearly sufficient for
+ *     our needs; by comparison DWARF is widely supported, stable,
+ *     flexible, and required everywhere *else*. We are using DWARF to
+ *     support major components of the rust runtime (reflection,
+ *     unwinding, profiling) so it's helpful to not have to span
+ *     technologies, just focus on DWARF.  Luckily the MINGW/Cygwin
+ *     communities have worked out a convention for PE, and taught BFD
+ *     (thus most tools) how to digest DWARF sections trailing after
+ *     the .idata section of a normal PE file. Seems to work fine.
+ * 
+ *   - DWARF supports variable-length coding using LEB128, and in the
+ *     cases where these are symbolic or self-contained numbers, we
+ *     support them in the assembler. Inter-DWARF-record references
+ *     can be done via fixed-size DW_FORM_ref{1,2,4,8} or
+ *     DW_FORM_ref_addr; or else via variable-size (LEB128)
+ *     DW_FORM_ref_udata. It is hazardous to use the LEB128 form in
+ *     our implementation of references, since we use a generic 2-pass
+ *     (+ relaxation) fixup mechanism in our assembler which in
+ *     general may present an information-dependency cycle for LEB128
+ *     coding of offsets: you need to know the offset before you can
+ *     work out the LEB128 size, and you may need to know several
+ *     LEB128-sizes before you can work out the offsets of other
+ *     LEB128s (possibly even the one you're currently coding). In
+ *     general the assembler makes no attempt to resolve such
+ *     cycles. It'll just throw if it can't handle what you ask
+ *     for. So it's best to pay a little extra space and use
+ *     DW_FORM_ref_addr or DW_FORM_ref{1,2,4,8} values, in all cases.
  *)
 
 open Semant;;
@@ -426,8 +443,8 @@ let dw_form_to_int (f:dw_form) : int =
     | DW_FORM_indirect -> 0x16
 ;;
 
-let cu_header
-  (cu_fixup:fixup)
+let cu_info_header
+  (cu_info_fixup:fixup)
   (abbrev_section_fixup:fixup)
   (cu_abbrev_fixup:fixup)
   : item =
@@ -435,7 +452,7 @@ let cu_header
       SEQ
         [|
           WORD (TY_u32, (ADD                       (* unit_length            *)
-                           ((F_SZ cu_fixup),       (* including this header, *)
+                           ((F_SZ cu_info_fixup),  (* including this header, *)
                             (F_SZ hdr_fixup))));   (* excluding this word!   *)
           DEF (hdr_fixup,
                (SEQ [|
@@ -449,35 +466,85 @@ let cu_header
         |]
 ;;
 
-type dwarf_records =
+type debug_records =
     {
-      dwarf_debug_aranges: Asm.item;
-      dwarf_debug_pubnames: Asm.item;
-      dwarf_debug_info: Asm.item;
-      dwarf_debug_abbrev: Asm.item;
-      dwarf_debug_line: Asm.item;
-      dwarf_debug_frame: Asm.item;
+      debug_aranges: Asm.item;
+      debug_pubnames: Asm.item;
+      debug_info: Asm.item;
+      debug_abbrev: Asm.item;
+      debug_line: Asm.item;
+      debug_frame: Asm.item;
+
+      debug_aranges_fixup: fixup;
+      debug_pubnames_fixup: fixup;
+      debug_info_fixup: fixup;
+      debug_abbrev_fixup: fixup;
+      debug_line_fixup: fixup;
+      debug_frame_fixup: fixup;
     }
+
+
+let dwarf_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+  let visit_mod_item_pre
+      (id:Ast.ident)
+      (params:(Ast.ty_limit * Ast.ident) array)
+      (item:Ast.mod_item)
+      : unit =
+    if Hashtbl.mem cx.ctxt_item_compilation_units item.id
+    then () (* Emit a CU record, push onto stack... *);
+    inner.Walk.visit_mod_item_pre id params item
+  in
+    { inner with Walk.visit_mod_item_pre = visit_mod_item_pre }
+;;
+
 
 let process_crate
     (cx:ctxt)
     (items:Ast.mod_items)
-    : dwarf_records =
+    : debug_records =
   let passes =
     [|
-      Walk.empty_visitor
+      dwarf_visitor cx Walk.empty_visitor
     |];
   in
+  let debug_aranges_fixup = new_fixup "debug_aranges section" in
+  let debug_pubnames_fixup = new_fixup "debug_pubnames section" in
+  let debug_info_fixup = new_fixup "debug_info section" in
+  let debug_abbrev_fixup = new_fixup "debug_abbrev section" in
+  let debug_line_fixup = new_fixup "debug_line section" in
+  let debug_frame_fixup = new_fixup "debug_frame section" in
+
+  let cu_infos = ref [] in
+  let cu_abbrevs = ref [] in
+  let prepend lref x = lref := x :: (!lref) in
+  let add_cu _ =
+    let cu_info_fixup = new_fixup "CU debug_info fixup" in
+    let cu_abbrev_fixup = new_fixup "CU debug_abbrev fixup" in
+    let cu_header = cu_info_header cu_info_fixup debug_abbrev_fixup cu_abbrev_fixup in
+      prepend cu_infos (DEF (cu_info_fixup, (SEQ [| cu_header; (BYTE 0) |])));
+      prepend cu_abbrevs (DEF (cu_abbrev_fixup, (BYTE 0)))
+  in
+    add_cu ();
     log cx "emitting DWARF records";
     run_passes cx passes (log cx "%s") items;
     {
       (* The PE loader dislikes completely-empty sections. *)
-      dwarf_debug_aranges = (BYTE 0);
-      dwarf_debug_pubnames = (BYTE 0);
-      dwarf_debug_info = (BYTE 0);
-      dwarf_debug_abbrev = (BYTE 0);
-      dwarf_debug_line = (BYTE 0);
-      dwarf_debug_frame = (BYTE 0);
+      debug_aranges = (BYTE 0);
+      debug_pubnames = (BYTE 0);
+      debug_info = SEQ (Array.of_list (!cu_infos));
+      debug_abbrev = SEQ (Array.of_list (!cu_abbrevs));
+      debug_line = (BYTE 0);
+      debug_frame = (BYTE 0);
+
+      debug_aranges_fixup = debug_aranges_fixup;
+      debug_pubnames_fixup = debug_pubnames_fixup;
+      debug_info_fixup = debug_info_fixup;
+      debug_abbrev_fixup = debug_abbrev_fixup;
+      debug_line_fixup = debug_line_fixup;
+      debug_frame_fixup = debug_frame_fixup;
     }
 ;;
 
