@@ -3,7 +3,7 @@ open Common;;
 
 let (targ:Common.target) =
   match Sys.os_type with
-      "Unix" -> 
+      "Unix" ->
         (* FIXME: this is an absurd heuristic. *)
         if Sys.file_exists "/System/Library"
         then MacOS_x86_macho
@@ -66,7 +66,7 @@ let argspecs =
     ("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
     ("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
     ("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
-    ("-ldwarf", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log DWARF record generation");
+    ("-ldwarf", Arg.Unit (fun _ -> sess.Session.sess_log_dwarf <- true), "log DWARF record generation");
     ("-lra", Arg.Unit (fun _ -> sess.Session.sess_log_ra <- true), "log register allocation");
     ("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");
     ("-lasm", Arg.Unit (fun _ -> sess.Session.sess_log_asm <- true), "log assembly");
@@ -177,7 +177,7 @@ let _ = exit_if_failed ()
 let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
 ;;
 
-let emitter = 
+let emitter =
   match sess.Session.sess_targ with
       Win32_x86_pe -> Pe.emit_file
     | MacOS_x86_macho -> Macho.emit_file
@@ -185,7 +185,7 @@ let emitter =
 ;;
 
 emitter sess code data dwarf entry_prog_fixup sem_cx.Semant.ctxt_c_to_proc_fixup;;
-  
+
 (*
  * Local Variables:
  * fill-column: 70;

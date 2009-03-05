@@ -1143,7 +1143,7 @@ let emit_file
     (sess:Session.sess) 
     (code:Asm.item) 
     (data:Asm.item)
-    (dwarf:Dwarf.dwarf_records)
+    (dwarf:Dwarf.debug_records)
     (entry_prog_fixup:fixup) 
     (c_to_proc_fixup:fixup)
     : unit = 

@@ -448,6 +448,7 @@ and mod_items = (ident, mod_item) Hashtbl.t
 and crate =
     {
       crate_items: mod_items;
+      crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;
     }
 ;;

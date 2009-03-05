@@ -1336,6 +1336,7 @@ and make_parser tref nref sess tok fname =
 
 and parse_crate_mod_entry
     (prefix:string)
+    (files:(node_id,filename) Hashtbl.t)
     (mod_items:Ast.mod_items)
     (ps:pstate)
     : unit =
@@ -1351,28 +1352,28 @@ and parse_crate_mod_entry
              | _ -> raise (unexpected ps))
       | _ -> name
   in
-  let items =
+  let full_fname = Filename.concat prefix fname in
+  let (items,is_cu) =
     match peek ps with
         SEMI ->
           bump ps;
-          let fname = Filename.concat prefix fname in
           let p =
             make_parser
               ps.pstate_temp_id
               ps.pstate_node_id
               ps.pstate_sess
               ps.pstate_lexfun
-              fname
+              full_fname
           in
-            parse_raw_mod_items p
+            (parse_raw_mod_items p, true)
 
       | RBRACE ->
           bump ps;
-          let subprefix = Filename.concat prefix fname in
           let items =
-            parse_crate_mod_entries fname subprefix ps LBRACE
+            parse_crate_mod_entries full_fname files ps
           in
-            items
+            (items, false)
+
       | _ -> raise (unexpected ps)
   in
   let bpos = lexpos ps in
@@ -1381,6 +1382,8 @@ and parse_crate_mod_entry
     span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
                                           Ast.decl_item = items })
   in
+    if is_cu
+    then htab_put files item_mod.id full_fname;
     htab_put mod_items name item_mod
 
 and parse_raw_mod_items
@@ -1398,22 +1401,22 @@ and parse_raw_mod_items
     items
 
 and parse_crate_mod_entries
-    (fname:string)
     (prefix:string)
+    (files:(node_id,filename) Hashtbl.t)
     (ps:pstate)
-    (endtok:token)
     : Ast.mod_items =
   let items = Hashtbl.create 4 in
-    while peek ps != endtok
+    while peek ps != LBRACE
     do
-      parse_crate_mod_entry prefix items ps
+      parse_crate_mod_entry prefix files items ps
     done;
-    expect ps endtok;
+    expect ps LBRACE;
     items
 
 and parse_root_crate_entries
     (fname:string)
     (prefix:string)
+    (files:(node_id,filename) Hashtbl.t)
     (ps:pstate)
     : Ast.crate =
   let items = Hashtbl.create 4 in
@@ -1432,7 +1435,7 @@ and parse_root_crate_entries
                   | Some _ -> raise (err "multiple explicit main programs given in crate" ps )
             end
         | MOD ->
-            parse_crate_mod_entry prefix items ps
+            parse_crate_mod_entry prefix files items ps
         | _ -> raise (unexpected ps)
     done;
     expect ps EOF;
@@ -1442,7 +1445,8 @@ and parse_root_crate_entries
         | Some m -> m
     in
       { Ast.crate_items = items;
-        Ast.crate_main = main }
+        Ast.crate_main = main;
+        Ast.crate_files = files }
 
 and infer_main_prog
     (ps:pstate)
@@ -1481,13 +1485,14 @@ let parse_root_with_parse_fn
     (sess:Session.sess)
     tok
     : Ast.crate =
+  let files = Hashtbl.create 0 in
   try
     let fname = sess.Session.sess_in in
     let tref = ref (Temp 0) in
     let nref = ref (Node 0) in
     let ps = make_parser tref nref sess tok fname in
       if Filename.check_suffix fname suffix
-      then fn fname (Filename.dirname fname) ps
+      then fn fname (Filename.dirname fname) files ps
       else raise (err "parsing wrong kind of file" ps)
   with
       Parse_err (ps, str) ->
@@ -1498,14 +1503,16 @@ let parse_root_with_parse_fn
                (Session.string_of_pos pos) cx)
           ps.pstate_ctxt;
         { Ast.crate_items = Hashtbl.create 0;
-          Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none") }
+          Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
+          Ast.crate_files = files }
 
 let parse_root_srcfile_entries
     (fname:string)
     (prefix:string)
+    (files:(node_id,filename) Hashtbl.t)
     (ps:pstate)
     : Ast.crate =
-  let stem = Filename.chop_suffix fname ".rs" in
+  let stem = Filename.chop_suffix (Filename.basename fname) ".rs" in
   let apos = lexpos ps in
   let items = parse_raw_mod_items ps in
   let bpos = lexpos ps in
@@ -1513,9 +1520,11 @@ let parse_root_srcfile_entries
                                                    Ast.decl_item = items })
   in
   let mitems = Hashtbl.create 0 in
+    htab_put files modi.id fname;
     htab_put mitems stem modi;
     { Ast.crate_items = mitems;
-      Ast.crate_main = infer_main_prog ps mitems }
+      Ast.crate_main = infer_main_prog ps mitems;
+      Ast.crate_files = files }
 ;;
 
 let parse_crate = parse_root_with_parse_fn ".rc" parse_root_crate_entries;;

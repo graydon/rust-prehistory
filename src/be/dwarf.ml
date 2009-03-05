@@ -493,8 +493,8 @@ let dwarf_visitor
       (params:(Ast.ty_limit * Ast.ident) array)
       (item:Ast.mod_item)
       : unit =
-    if Hashtbl.mem cx.ctxt_item_compilation_units item.id
-    then () (* Emit a CU record, push onto stack... *);
+    if Hashtbl.mem cx.ctxt_item_files item.id
+    then log cx "walking CU: %s" (Hashtbl.find cx.ctxt_item_files item.id);
     inner.Walk.visit_mod_item_pre id params item
   in
     { inner with Walk.visit_mod_item_pre = visit_mod_item_pre }
