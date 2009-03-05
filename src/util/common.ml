@@ -20,6 +20,7 @@ type 'a identified = { node: 'a; id: node_id }
 type target = 
 	Linux_x86_elf
   | Win32_x86_pe
+  | MacOS_x86_macho
 ;;
 
 type ty_mach = 

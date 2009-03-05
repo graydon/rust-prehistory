@@ -3,7 +3,11 @@ open Common;;
 
 let (targ:Common.target) =
   match Sys.os_type with
-      "Unix" -> Linux_x86_elf
+      "Unix" -> 
+        (* FIXME: this is an absurd heuristic. *)
+        if Sys.file_exists "/System/Library"
+        then MacOS_x86_macho
+        else Linux_x86_elf
     | "Win32" -> Win32_x86_pe
     | "Cygwin" -> Win32_x86_pe
     | _ -> Linux_x86_elf
@@ -17,6 +21,7 @@ let (sess:Session.sess) =
     Session.sess_out =
       ("rust_out" ^ (match targ with
                          Linux_x86_elf -> ""
+                       | MacOS_x86_macho -> ""
                        | Win32_x86_pe -> ".exe"));
     Session.sess_log_lex = false;
     Session.sess_log_parse = false;
@@ -43,10 +48,13 @@ let argspecs =
                        fun s -> (sess.Session.sess_targ <-
                                   (match s with
                                        "win32-x86-pe" -> Win32_x86_pe
+                                     | "macos-x86-macho" -> MacOS_x86_macho
                                      | _ -> Linux_x86_elf))),
      ("target (default: " ^ (match sess.Session.sess_targ with
                                         Win32_x86_pe -> "win32-x86-pe"
-                                      | Linux_x86_elf -> "linux-x86-elf") ^ ")"));
+                                      | Linux_x86_elf -> "linux-x86-elf"
+                                      | MacOS_x86_macho -> "macos-x86-macho"
+                            ) ^ ")"));
     ("-o", Arg.String (fun s -> sess.Session.sess_out <- s),
      "output filename (default: " ^ sess.Session.sess_out ^ ")");
     ("-llex", Arg.Unit (fun _ -> sess.Session.sess_log_lex <- true), "log lexing");
@@ -162,26 +170,22 @@ let (code:Asm.item) = Asm.SEQ (Array.of_list (List.map (X86.select_insns sess) a
 let _ = exit_if_failed ()
 ;;
 
-let (dw:Dwarf.debug_records) = (Dwarf.process_crate sem_cx crate.Ast.crate_items)
+let (dwarf:Dwarf.debug_records) = (Dwarf.process_crate sem_cx crate.Ast.crate_items)
 let _ = exit_if_failed ()
 ;;
 
 let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
 ;;
 
-let _ = match sess.Session.sess_targ with
-    Win32_x86_pe ->
-      Pe.emit_file
-        sess
-        code
-        data
-        dw
-        entry_prog_fixup
-        sem_cx.Semant.ctxt_c_to_proc_fixup
-
-  | Linux_x86_elf -> Elf.emit_file sess code data entry_prog_fixup
+let emitter = 
+  match sess.Session.sess_targ with
+      Win32_x86_pe -> Pe.emit_file
+    | MacOS_x86_macho -> Macho.emit_file
+    | Linux_x86_elf -> Elf.emit_file
 ;;
 
+emitter sess code data dwarf entry_prog_fixup sem_cx.Semant.ctxt_c_to_proc_fixup;;
+  
 (*
  * Local Variables:
  * fill-column: 70;

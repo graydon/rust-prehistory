@@ -13,7 +13,7 @@ OCAMLC_FLAGS:=-g $(ML_INCS)
 # Nobody calculates the link-order DAG automatically, sadly.
 UTIL_BOT_MLS:=util/common.ml
 DRIVER_BOT_MLS:=driver/session.ml
-BE_MLS:=be/asm.ml be/il.ml be/abi.ml be/bitv.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml
+BE_MLS:=be/asm.ml be/il.ml be/abi.ml be/bitv.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml be/macho.ml
 ME_MLS:=me/walk.ml me/semant.ml me/resolve.ml me/alias.ml me/auto.ml me/layout.ml me/trans.ml be/dwarf.ml
 FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml
 DRIVER_TOP_MLS:=driver/main.ml
