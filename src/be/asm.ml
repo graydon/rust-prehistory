@@ -336,7 +336,7 @@ and lower_item
   let uleb (e:expr64) : unit =
     let emit1 k = Buffer.add_char buf (Char.chr (Int64.to_int k)) in
     let rec loop value =
-      let byte = Int64.logand value 0xf7L in
+      let byte = Int64.logand value 0x7fL in
       let value = Int64.shift_right_logical value 7 in
         if value = 0L
         then emit1 byte
@@ -352,7 +352,7 @@ and lower_item
   let sleb (e:expr64) : unit =
     let emit1 k = Buffer.add_char buf (Char.chr (Int64.to_int k)) in
     let rec loop value =
-      let byte = Int64.logand value 0xf7L in
+      let byte = Int64.logand value 0x7fL in
       let value = Int64.shift_right value 7 in
       let signbit = Int64.logand byte 0x40L in
         if (((value = 0L) && (signbit = 0L)) ||

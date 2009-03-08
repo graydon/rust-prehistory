@@ -443,29 +443,6 @@ let dw_form_to_int (f:dw_form) : int =
     | DW_FORM_indirect -> 0x16
 ;;
 
-let cu_info_header
-  (cu_info_fixup:fixup)
-  (abbrev_section_fixup:fixup)
-  (cu_abbrev_fixup:fixup)
-  : item =
-    let hdr_fixup = new_fixup "CU header" in
-      SEQ
-        [|
-          WORD (TY_u32, (ADD                       (* unit_length            *)
-                           ((F_SZ cu_info_fixup),  (* including this header, *)
-                            (F_SZ hdr_fixup))));   (* excluding this word!   *)
-          DEF (hdr_fixup,
-               (SEQ [|
-                  WORD (TY_u16, IMM 3L);                  (* DWARF version *)
-                  WORD (TY_u32,                           (* Offset into the abbrev section *)
-                        (SUB                              (* containing abbrevs for this CU *)
-                           ((F_POS cu_abbrev_fixup),
-                            (F_POS abbrev_section_fixup))));
-                  WORD (TY_u8, IMM 4L);                   (* Size of an address. *)
-                |]))
-        |]
-;;
-
 type debug_records =
     {
       debug_aranges: Asm.item;
@@ -483,21 +460,148 @@ type debug_records =
       debug_frame_fixup: fixup;
     }
 
+type abbrev = (dw_tag * dw_children * ((dw_at * dw_form) array));;
+
+let (abbrev_cu:abbrev) =
+  (DW_TAG_compile_unit, DW_CHILDREN_yes,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_low_pc, DW_FORM_addr);
+     (DW_AT_high_pc, DW_FORM_addr)
+   |])
+;;
+
+let (abbrev_subprogram:abbrev) =
+  (DW_TAG_subprogram, DW_CHILDREN_yes,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_low_pc, DW_FORM_addr);
+     (DW_AT_high_pc, DW_FORM_addr)
+   |])
+;;
+
+let prepend lref x = lref := x :: (!lref)
+;;
+
 
 let dwarf_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
+    (cu_infos:(item list) ref)
+    (cu_abbrevs:(item list) ref)
     : Walk.visitor =
+  let (abbrev_table:(abbrev, int) Hashtbl.t) = Hashtbl.create 0 in
+
+  let leb i = ULEB128 (IMM (Int64.of_int i)) in
+
+  let get_abbrev_code
+      (ab:abbrev)
+      : int =
+    if Hashtbl.mem abbrev_table ab
+    then Hashtbl.find abbrev_table ab
+    else
+      let n = (Hashtbl.length abbrev_table) + 1 in
+      let (tag, children, attrs) = ab in
+      let attr_lebs = Array.create ((Array.length attrs) * 2) MARK in
+        for i = 0 to (Array.length attrs) - 1 do
+          let (attr, form) = attrs.(i) in
+            attr_lebs.(2*i) <- leb (dw_at_to_int attr);
+            attr_lebs.((2*i)+1) <- leb (dw_form_to_int form)
+        done;
+        let ab_item =
+          (SEQ [|
+             leb n;
+             leb (dw_tag_to_int tag);
+             BYTE (dw_children_to_int children);
+             SEQ attr_lebs;
+             leb 0; leb 0;
+           |])
+        in
+          prepend cu_abbrevs ab_item;
+          htab_put abbrev_table ab n;
+          n
+  in
+
+  let (cu_curr_infos:(item list) ref) = ref [] in
+
+  let finish_cu_and_compose_header _ =
+    let cu_info_fixup = new_fixup "CU debug_info fixup" in
+    let header_fixup = new_fixup "CU header" in
+    let header_and_curr_infos =
+      SEQ
+        [|
+          WORD (TY_u32, (ADD                          (* unit_length            *)
+                           ((F_SZ cu_info_fixup),     (* including this header, *)
+                            (F_SZ header_fixup))));   (* excluding this word!   *)
+          DEF (header_fixup,
+               (SEQ [|
+                  WORD (TY_u16, IMM 2L);                  (* DWARF version *)
+                  (* Since we share abbrevs across all CUs, offset is always 0. *)
+                  WORD (TY_u32, IMM 0L);                  (* Nominally: cu-abbrev offset. *)
+                  WORD (TY_u8, IMM 4L);                   (* Size of an address. *)
+                |]));
+          DEF (cu_info_fixup,
+               SEQ (Array.of_list (List.rev (!cu_curr_infos))));
+        |]
+    in
+      prepend cu_infos header_and_curr_infos;
+      cu_curr_infos := []
+  in
+
+  let begin_cu_and_emit_cu_die
+      (name:string)
+      (* (cu_code_fixup:fixup)  *)
+      : unit =
+    let abbrev_code = get_abbrev_code abbrev_cu in
+    let cu_item =
+      (SEQ [|
+         leb abbrev_code;
+         ZSTRING name;
+         WORD (TY_u32, IMM 0L);
+         WORD (TY_u32, IMM 0L);
+
+         (*
+           FIXME: need fixups spanning entire CU!
+           IMM (M_POS cu_code_fixup);
+           IMM (ADD ((M_POS cu_code_fixup),
+           (M_SZ cu_code_fixup)))
+         *)
+       |])
+    in
+      cu_curr_infos := [cu_item]
+  in
+
   let visit_mod_item_pre
       (id:Ast.ident)
       (params:(Ast.ty_limit * Ast.ident) array)
       (item:Ast.mod_item)
       : unit =
     if Hashtbl.mem cx.ctxt_item_files item.id
-    then log cx "walking CU: %s" (Hashtbl.find cx.ctxt_item_files item.id);
+    then
+      begin
+        let filename = (Hashtbl.find cx.ctxt_item_files item.id) in
+        log cx "walking CU: %s" filename;
+        begin_cu_and_emit_cu_die filename;
+      end;
     inner.Walk.visit_mod_item_pre id params item
   in
-    { inner with Walk.visit_mod_item_pre = visit_mod_item_pre }
+
+  let visit_mod_item_post
+      (id:Ast.ident)
+      (params:(Ast.ty_limit * Ast.ident) array)
+      (item:Ast.mod_item)
+      : unit =
+    inner.Walk.visit_mod_item_pre id params item;
+    if Hashtbl.mem cx.ctxt_item_files item.id
+    then
+      begin
+        finish_cu_and_compose_header ()
+      end
+    else ()
+  in
+    { inner with
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post }
 ;;
 
 
@@ -505,9 +609,11 @@ let process_crate
     (cx:ctxt)
     (items:Ast.mod_items)
     : debug_records =
+  let cu_infos = ref [] in
+  let cu_abbrevs = ref [] in
   let passes =
     [|
-      dwarf_visitor cx Walk.empty_visitor
+      dwarf_visitor cx Walk.empty_visitor cu_infos cu_abbrevs
     |];
   in
   let debug_aranges_fixup = new_fixup "debug_aranges section" in
@@ -517,25 +623,14 @@ let process_crate
   let debug_line_fixup = new_fixup "debug_line section" in
   let debug_frame_fixup = new_fixup "debug_frame section" in
 
-  let cu_infos = ref [] in
-  let cu_abbrevs = ref [] in
-  let prepend lref x = lref := x :: (!lref) in
-  let add_cu _ =
-    let cu_info_fixup = new_fixup "CU debug_info fixup" in
-    let cu_abbrev_fixup = new_fixup "CU debug_abbrev fixup" in
-    let cu_header = cu_info_header cu_info_fixup debug_abbrev_fixup cu_abbrev_fixup in
-      prepend cu_infos (DEF (cu_info_fixup, (SEQ [| cu_header; (BYTE 0) |])));
-      prepend cu_abbrevs (DEF (cu_abbrev_fixup, (BYTE 0)))
-  in
-    add_cu ();
     log cx "emitting DWARF records";
     run_passes cx passes (log cx "%s") items;
     {
       (* The PE loader dislikes completely-empty sections. *)
       debug_aranges = (BYTE 0);
       debug_pubnames = (BYTE 0);
-      debug_info = SEQ (Array.of_list (!cu_infos));
-      debug_abbrev = SEQ (Array.of_list (!cu_abbrevs));
+      debug_info = SEQ (Array.of_list (List.rev (!cu_infos)));
+      debug_abbrev = SEQ (Array.of_list (List.rev (!cu_abbrevs)));
       debug_line = (BYTE 0);
       debug_frame = (BYTE 0);
 
