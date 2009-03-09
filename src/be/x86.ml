@@ -207,9 +207,8 @@ let restore_callee_saves (e:Il.emitter) : unit =
     Il.emit e (Il.CPOP TY_u32) (r ebp) Il.Nil Il.Nil;
 ;;
 
-let fn_prologue (e:Il.emitter) (fn_fixup:fixup) (framesz:int64) (spill_fixup:fixup) : unit =
+let fn_prologue (e:Il.emitter) (framesz:int64) (spill_fixup:fixup) : unit =
   let r x = Il.Reg (Il.Hreg x) in
-    Il.emit_full e (Some fn_fixup) Il.DEAD Il.Nil Il.Nil Il.Nil;
     save_callee_saves e;
     Il.emit e Il.MOV (r ebp) (r esp) Il.Nil;
     Il.emit e Il.SUB (r esp) (r esp)

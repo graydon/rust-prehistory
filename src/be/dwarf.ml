@@ -613,15 +613,15 @@ let dwarf_visitor
     let info_header_and_curr_infos =
       SEQ
         [|
-          WORD (TY_u32, (ADD                               (* unit_length            *)
-                           ((F_SZ cu_info_fixup),          (* including this header, *)
-                            (F_SZ info_header_fixup))));   (* excluding this word!   *)
+          WORD (TY_u32, (ADD                                (* unit_length:            *)
+                           ((F_SZ cu_info_fixup),           (* including this header,  *)
+                            (F_SZ info_header_fixup))));    (* excluding this word.    *)
           DEF (info_header_fixup,
                (SEQ [|
-                  WORD (TY_u16, IMM 2L);                  (* DWARF version *)
-                  (* Since we share abbrevs across all CUs, offset is always 0. *)
-                  WORD (TY_u32, IMM 0L);                  (* Nominally: cu-abbrev offset. *)
-                  BYTE 4;                                 (* Size of an address. *)
+                  WORD (TY_u16, IMM 2L);                    (* DWARF version           *)
+                  (* Since we share abbrevs across all CUs, offset is always 0.        *)
+                  WORD (TY_u32, IMM 0L);                    (* CU-abbrev offset.       *)
+                  BYTE 4;                                   (* Size of an address.     *)
                 |]));
           DEF (cu_info_fixup,
                SEQ (Array.of_list (List.rev (!curr_cu_infos))));
@@ -634,28 +634,28 @@ let dwarf_visitor
     let line_header_and_curr_line =
       SEQ
         [|
-          WORD (TY_u32, (ADD                                  (* unit_length            *)
-                           ((F_SZ cu_line_fixup),             (* including this header, *)
-                            (F_SZ cu_line_header_fixup))));   (* excluding this word!   *)
+          WORD (TY_u32, (ADD                                (* unit_length:             *)
+                           ((F_SZ cu_line_fixup),           (* including this header,   *)
+                            (F_SZ cu_line_header_fixup)))); (* excluding this word.     *)
           DEF (cu_line_header_fixup,
                (SEQ [|
-                  WORD (TY_u16, IMM 2L);                    (* DWARF version *)
-                  WORD (TY_u32, (F_SZ line_header_fixup));  (* Another header-length! *)
+                  WORD (TY_u16, IMM 2L);                    (* DWARF version.           *)
+                  WORD (TY_u32, (F_SZ line_header_fixup));  (* Another header-length.   *)
                   DEF (line_header_fixup,
                        SEQ [|
-                         BYTE 1;                            (* Minimum (x86) instruction length. *)
-                         BYTE 1;                            (* default_is_stmt *)
-                         BYTE 0;                            (* line_base *)
-                         BYTE 0;                            (* line_range *)
-                         BYTE (max_dw_lns + 1);             (* opcode_base *)
-                         BYTES                              (* opcode arity array (!) *)
+                         BYTE 1;                            (* Minimum insn length.     *)
+                         BYTE 1;                            (* default_is_stmt          *)
+                         BYTE 0;                            (* line_base                *)
+                         BYTE 0;                            (* line_range               *)
+                         BYTE (max_dw_lns + 1);             (* opcode_base              *)
+                         BYTES                              (* opcode arity array.      *)
                            (Array.init max_dw_lns
                               (fun i ->
                                  (dw_lns_arity
                                     (int_to_dw_lns
                                        (i+1)))));
-                         (BYTE 0);                          (* List of include directories. *)
-                         (BYTE 0);                          (* List of file entries. *)
+                         (BYTE 0);                          (* List of include dirs.    *)
+                         (BYTE 0);                          (* List of file entries.    *)
                        |])|]));
           DEF (cu_line_fixup,
                SEQ (Array.of_list (List.rev (!curr_cu_line))));
@@ -690,14 +690,30 @@ let dwarf_visitor
 
          (*
            FIXME: need fixups spanning entire CU!
-           IMM (M_POS cu_code_fixup);
-           IMM (ADD ((M_POS cu_code_fixup),
-           (M_SZ cu_code_fixup)))
+           M_POS cu_code_fixup;
+           ADD ((M_POS cu_code_fixup),
+           (M_SZ cu_code_fixup))
          *)
        |])
     in
       curr_cu_infos := [cu_info];
       curr_cu_line := []
+  in
+
+  let emit_fn_die
+      (name:string)
+      (fix:fixup)
+      : unit =
+    let abbrev_code = get_abbrev_code abbrev_subprogram in
+    let subprogram_die =
+      (SEQ [|
+         uleb abbrev_code;
+         ZSTRING name;
+         WORD (TY_u32, M_POS fix);
+         WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))))
+       |])
+    in
+      prepend curr_cu_infos subprogram_die
   in
 
   let visit_mod_item_pre
@@ -709,9 +725,20 @@ let dwarf_visitor
     then
       begin
         let filename = (Hashtbl.find cx.ctxt_item_files item.id) in
-        log cx "walking CU: %s" filename;
-        begin_cu_and_emit_cu_die filename;
-      end;
+          log cx "walking CU '%s'" filename;
+          begin_cu_and_emit_cu_die filename;
+      end
+    else
+      ();
+    begin
+      match item.node with
+          Ast.MOD_ITEM_fn _ ->
+            begin
+              log cx "walking function '%s'" id;
+              emit_fn_die id (Hashtbl.find cx.ctxt_fn_fixups item.id)
+            end
+        | _ -> ()
+    end;
     inner.Walk.visit_mod_item_pre id params item
   in
 
@@ -728,6 +755,7 @@ let dwarf_visitor
       end
     else ()
   in
+
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post }

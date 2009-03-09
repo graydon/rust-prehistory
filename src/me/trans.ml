@@ -403,17 +403,16 @@ let trans_visitor
         do
           log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
         done;
-        htab_put cx.ctxt_text_items name (node, quads, n_vregs);
+        htab_put cx.ctxt_text_quads name (node, quads, n_vregs);
       end
   in
 
   let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =
-    let fixup = get_fn_fixup fnid in
     let framesz = get_framesz fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
     Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
-      cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) fixup framesz spill_fixup;
+      cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill_fixup;
       trans_block fn.Ast.fn_body;
       Stack.iter patch (Stack.pop epilogue_jumps);
       cx.ctxt_abi.Abi.abi_emit_fn_epilogue (emitter());
@@ -542,8 +541,8 @@ let emit_c_to_proc_glue cx =
     cx.ctxt_abi.Abi.abi_c_to_proc e cx.ctxt_c_to_proc_fixup;
     if e.Il.emit_next_vreg != 0
     then err None "c-to-proc glue uses nonzero vregs"
-    else cx.ctxt_anon_text_items <-
-      (e.Il.emit_quads) :: cx.ctxt_anon_text_items
+    else cx.ctxt_anon_text_quads <-
+      (e.Il.emit_quads) :: cx.ctxt_anon_text_quads
 ;;
 
 
@@ -555,8 +554,8 @@ let emit_proc_to_c_glue cx =
     cx.ctxt_abi.Abi.abi_proc_to_c e cx.ctxt_proc_to_c_fixup;
     if e.Il.emit_next_vreg != 0
     then err None "proc-to-c glue uses nonzero vregs"
-    else cx.ctxt_anon_text_items <-
-      (e.Il.emit_quads) :: cx.ctxt_anon_text_items
+    else cx.ctxt_anon_text_quads <-
+      (e.Il.emit_quads) :: cx.ctxt_anon_text_quads
 ;;
 
 
@@ -576,7 +575,7 @@ let trans_crate
     run_passes cx passes (log cx "%s") items;
     emit_c_to_proc_glue cx;
     emit_proc_to_c_glue cx;
-    (cx.ctxt_text_items, cx.ctxt_data_items, cx.ctxt_main_prog)
+    (cx.ctxt_text_quads, cx.ctxt_data_items, cx.ctxt_main_prog)
 ;;
 
 

@@ -125,7 +125,9 @@ then
     Printf.fprintf stderr "\n%!";
   end
 
+let list_to_seq ls = Asm.SEQ (Array.of_list ls);;
 let (abi:Abi.abi) = X86.abi;;
+let (select_insns:(Il.quads -> Asm.item)) = X86.select_insns sess;;
 
 (* Semantic passes. *)
 let sem_cx = Semant.new_ctxt sess abi crate
@@ -144,37 +146,55 @@ let _ =
   end
 ;;
 
-let ((text_items:(string, (node_id * Il.quads * int)) Hashtbl.t),
+
+(* Primary translation from AST -> IL quads. *)
+let ((text_quads:(string, (node_id * Il.quads * int)) Hashtbl.t),
      (data_items:Asm.item list),
      (entry_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate.Ast.crate_items;;
 let _ = exit_if_failed ()
 ;;
+let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
+;;
 
-let (text_quads:Il.quads list) =
-  let ra_quads name (node, quads, n_vregs) accum =
+
+(* Tying up various knots, allocating registers and selecting instructions. *)
+let (text_items:Asm.item list) =
+  let ra_and_select_quads name (node, quads, n_vregs) accum =
     let frame_sz = Hashtbl.find sem_cx.Semant.ctxt_frame_sizes node in
     let (quads', n_spills) = Ra.reg_alloc sess quads n_vregs abi frame_sz in
-      (Hashtbl.find sem_cx.Semant.ctxt_spill_fixups node).fixup_mem_sz <-
-        Some (Int64.mul
-                (Int64.of_int n_spills)
-                abi.Abi.abi_ptr_sz);
-      quads' :: accum
+    let insns = select_insns quads' in
+    let item =
+      if Hashtbl.mem sem_cx.Semant.ctxt_fn_fixups node
+      then
+        let fix = Hashtbl.find sem_cx.Semant.ctxt_fn_fixups node in
+        Asm.DEF (fix, insns)
+      else
+        insns
+    in
+      begin
+        (Hashtbl.find sem_cx.Semant.ctxt_spill_fixups node).fixup_mem_sz <-
+          Some (Int64.mul
+                  (Int64.of_int n_spills)
+                  abi.Abi.abi_ptr_sz);
+        item :: accum
+      end
   in
-    Hashtbl.fold ra_quads text_items []
+    Hashtbl.fold ra_and_select_quads text_quads []
 ;;
 let _ = exit_if_failed ()
 ;;
 
-let (all_quads:Il.quads list) = text_quads @ sem_cx.Semant.ctxt_anon_text_items;;
-let (code:Asm.item) = Asm.SEQ (Array.of_list (List.map (X86.select_insns sess) all_quads));;
+
+let (anon_text_item:Asm.item) =
+  list_to_seq (List.map select_insns sem_cx.Semant.ctxt_anon_text_quads);;
+let (code:Asm.item) = Asm.SEQ (Array.of_list (anon_text_item :: text_items));;
 let _ = exit_if_failed ()
 ;;
 
-let (dwarf:Dwarf.debug_records) = (Dwarf.process_crate sem_cx crate.Ast.crate_items)
-let _ = exit_if_failed ()
-;;
 
-let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
+(* Emitting Dwarf and PE/ELF/Macho. *)
+let (dwarf:Dwarf.debug_records) = Dwarf.process_crate sem_cx crate.Ast.crate_items;;
+let _ = exit_if_failed ()
 ;;
 
 let emitter =
@@ -185,6 +205,7 @@ let emitter =
 ;;
 
 emitter sess code data dwarf entry_prog_fixup sem_cx.Semant.ctxt_c_to_proc_fixup;;
+let _ = exit_if_failed ()
 
 (*
  * Local Variables:
