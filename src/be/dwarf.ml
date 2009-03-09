@@ -443,6 +443,72 @@ let dw_form_to_int (f:dw_form) : int =
     | DW_FORM_indirect -> 0x16
 ;;
 
+type dw_lns =
+      DW_LNS_copy
+    | DW_LNS_advance_pc
+    | DW_LNS_advance_line
+    | DW_LNS_set_file
+    | DW_LNS_set_column
+    | DW_LNS_negage_stmt
+    | DW_LNS_set_basic_block
+    | DW_LNS_const_add_pc
+    | DW_LNS_fixed_advance_pc
+    | DW_LNS_set_prologue_end
+    | DW_LNS_set_epilogue_begin
+    | DW_LNS_set_isa
+;;
+
+let int_to_dw_lns i =
+  match i with
+      1 -> DW_LNS_copy
+    | 2 -> DW_LNS_advance_pc
+    | 3 -> DW_LNS_advance_line
+    | 4 -> DW_LNS_set_file
+    | 5 -> DW_LNS_set_column
+    | 6 -> DW_LNS_negage_stmt
+    | 7 -> DW_LNS_set_basic_block
+    | 8 -> DW_LNS_const_add_pc
+    | 9 -> DW_LNS_fixed_advance_pc
+    | 10 -> DW_LNS_set_prologue_end
+    | 11 -> DW_LNS_set_epilogue_begin
+    | 12 -> DW_LNS_set_isa
+    | _ -> failwith ("Internal logic error: (Dwarf.int_to_dw_lns " ^ (string_of_int i) ^ ")")
+;;
+
+let dw_lns_to_int lns =
+  match lns with
+      DW_LNS_copy -> 1
+    | DW_LNS_advance_pc -> 2
+    | DW_LNS_advance_line -> 3
+    | DW_LNS_set_file -> 4
+    | DW_LNS_set_column -> 5
+    | DW_LNS_negage_stmt -> 6
+    | DW_LNS_set_basic_block -> 7
+    | DW_LNS_const_add_pc -> 8
+    | DW_LNS_fixed_advance_pc -> 9
+    | DW_LNS_set_prologue_end -> 10
+    | DW_LNS_set_epilogue_begin -> 11
+    | DW_LNS_set_isa -> 12
+;;
+
+let max_dw_lns = 12;;
+
+let dw_lns_arity lns =
+  match lns with
+      DW_LNS_copy -> 0
+    | DW_LNS_advance_pc -> 1
+    | DW_LNS_advance_line -> 1
+    | DW_LNS_set_file -> 1
+    | DW_LNS_set_column -> 1
+    | DW_LNS_negage_stmt -> 0
+    | DW_LNS_set_basic_block -> 0
+    | DW_LNS_const_add_pc -> 0
+    | DW_LNS_fixed_advance_pc -> 1
+    | DW_LNS_set_prologue_end -> 0
+    | DW_LNS_set_epilogue_begin -> 0
+    | DW_LNS_set_isa -> 1
+;;
+
 type debug_records =
     {
       debug_aranges: Asm.item;
@@ -487,12 +553,16 @@ let prepend lref x = lref := x :: (!lref)
 let dwarf_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
+    (cu_aranges:(item list) ref)
+    (cu_pubnames:(item list) ref)
     (cu_infos:(item list) ref)
     (cu_abbrevs:(item list) ref)
+    (cu_lines:(item list) ref)
+    (cu_frames:(item list) ref)
     : Walk.visitor =
   let (abbrev_table:(abbrev, int) Hashtbl.t) = Hashtbl.create 0 in
 
-  let leb i = ULEB128 (IMM (Int64.of_int i)) in
+  let uleb i = ULEB128 (IMM (Int64.of_int i)) in
 
   let get_abbrev_code
       (ab:abbrev)
@@ -502,19 +572,19 @@ let dwarf_visitor
     else
       let n = (Hashtbl.length abbrev_table) + 1 in
       let (tag, children, attrs) = ab in
-      let attr_lebs = Array.create ((Array.length attrs) * 2) MARK in
+      let attr_ulebs = Array.create ((Array.length attrs) * 2) MARK in
         for i = 0 to (Array.length attrs) - 1 do
           let (attr, form) = attrs.(i) in
-            attr_lebs.(2*i) <- leb (dw_at_to_int attr);
-            attr_lebs.((2*i)+1) <- leb (dw_form_to_int form)
+            attr_ulebs.(2*i) <- uleb (dw_at_to_int attr);
+            attr_ulebs.((2*i)+1) <- uleb (dw_form_to_int form)
         done;
         let ab_item =
           (SEQ [|
-             leb n;
-             leb (dw_tag_to_int tag);
+             uleb n;
+             uleb (dw_tag_to_int tag);
              BYTE (dw_children_to_int children);
-             SEQ attr_lebs;
-             leb 0; leb 0;
+             SEQ attr_ulebs;
+             uleb 0; uleb 0;
            |])
         in
           prepend cu_abbrevs ab_item;
@@ -522,30 +592,88 @@ let dwarf_visitor
           n
   in
 
-  let (cu_curr_infos:(item list) ref) = ref [] in
+  let (curr_cu_aranges:(item list) ref) = ref [] in
+  let (curr_cu_pubnames:(item list) ref) = ref [] in
+  let (curr_cu_infos:(item list) ref) = ref [] in
+  let (curr_cu_line:(item list) ref) = ref [] in
+  let (curr_cu_frame:(item list) ref) = ref [] in
 
-  let finish_cu_and_compose_header _ =
+  let finish_cu_and_compose_headers _ =
+
+    let pubnames_header_and_curr_pubnames =
+      SEQ [| (BYTE 0) |]
+    in
+
+    let aranges_header_and_curr_aranges =
+      SEQ [| (BYTE 0) |]
+    in
+
     let cu_info_fixup = new_fixup "CU debug_info fixup" in
-    let header_fixup = new_fixup "CU header" in
-    let header_and_curr_infos =
+    let info_header_fixup = new_fixup "CU debug_info header" in
+    let info_header_and_curr_infos =
       SEQ
         [|
-          WORD (TY_u32, (ADD                          (* unit_length            *)
-                           ((F_SZ cu_info_fixup),     (* including this header, *)
-                            (F_SZ header_fixup))));   (* excluding this word!   *)
-          DEF (header_fixup,
+          WORD (TY_u32, (ADD                               (* unit_length            *)
+                           ((F_SZ cu_info_fixup),          (* including this header, *)
+                            (F_SZ info_header_fixup))));   (* excluding this word!   *)
+          DEF (info_header_fixup,
                (SEQ [|
                   WORD (TY_u16, IMM 2L);                  (* DWARF version *)
                   (* Since we share abbrevs across all CUs, offset is always 0. *)
                   WORD (TY_u32, IMM 0L);                  (* Nominally: cu-abbrev offset. *)
-                  WORD (TY_u8, IMM 4L);                   (* Size of an address. *)
+                  BYTE 4;                                 (* Size of an address. *)
                 |]));
           DEF (cu_info_fixup,
-               SEQ (Array.of_list (List.rev (!cu_curr_infos))));
+               SEQ (Array.of_list (List.rev (!curr_cu_infos))));
         |]
     in
-      prepend cu_infos header_and_curr_infos;
-      cu_curr_infos := []
+
+    let cu_line_fixup = new_fixup "CU debug_line fixup" in
+    let cu_line_header_fixup = new_fixup "CU debug_line header" in
+    let line_header_fixup = new_fixup "CU debug_line header" in
+    let line_header_and_curr_line =
+      SEQ
+        [|
+          WORD (TY_u32, (ADD                                  (* unit_length            *)
+                           ((F_SZ cu_line_fixup),             (* including this header, *)
+                            (F_SZ cu_line_header_fixup))));   (* excluding this word!   *)
+          DEF (cu_line_header_fixup,
+               (SEQ [|
+                  WORD (TY_u16, IMM 2L);                    (* DWARF version *)
+                  WORD (TY_u32, (F_SZ line_header_fixup));  (* Another header-length! *)
+                  DEF (line_header_fixup,
+                       SEQ [|
+                         BYTE 1;                            (* Minimum (x86) instruction length. *)
+                         BYTE 1;                            (* default_is_stmt *)
+                         BYTE 0;                            (* line_base *)
+                         BYTE 0;                            (* line_range *)
+                         BYTE (max_dw_lns + 1);             (* opcode_base *)
+                         BYTES                              (* opcode arity array (!) *)
+                           (Array.init max_dw_lns
+                              (fun i ->
+                                 (dw_lns_arity
+                                    (int_to_dw_lns
+                                       (i+1)))));
+                         (BYTE 0);                          (* List of include directories. *)
+                         (BYTE 0);                          (* List of file entries. *)
+                       |])|]));
+          DEF (cu_line_fixup,
+               SEQ (Array.of_list (List.rev (!curr_cu_line))));
+        |]
+    in
+    let frame_header_and_curr_frame =
+      SEQ [| (BYTE 0) |]
+    in
+    let prepend_and_reset (curr_ref, accum_ref, header_and_curr) =
+      prepend accum_ref header_and_curr;
+      curr_ref := []
+    in
+      List.iter prepend_and_reset
+        [ (curr_cu_aranges, cu_aranges, aranges_header_and_curr_aranges);
+          (curr_cu_pubnames, cu_pubnames, pubnames_header_and_curr_pubnames);
+          (curr_cu_infos, cu_infos, info_header_and_curr_infos);
+          (curr_cu_line, cu_lines, line_header_and_curr_line);
+          (curr_cu_frame, cu_frames, frame_header_and_curr_frame) ]
   in
 
   let begin_cu_and_emit_cu_die
@@ -553,9 +681,9 @@ let dwarf_visitor
       (* (cu_code_fixup:fixup)  *)
       : unit =
     let abbrev_code = get_abbrev_code abbrev_cu in
-    let cu_item =
+    let cu_info =
       (SEQ [|
-         leb abbrev_code;
+         uleb abbrev_code;
          ZSTRING name;
          WORD (TY_u32, IMM 0L);
          WORD (TY_u32, IMM 0L);
@@ -568,7 +696,8 @@ let dwarf_visitor
          *)
        |])
     in
-      cu_curr_infos := [cu_item]
+      curr_cu_infos := [cu_info];
+      curr_cu_line := []
   in
 
   let visit_mod_item_pre
@@ -595,7 +724,7 @@ let dwarf_visitor
     if Hashtbl.mem cx.ctxt_item_files item.id
     then
       begin
-        finish_cu_and_compose_header ()
+        finish_cu_and_compose_headers ()
       end
     else ()
   in
@@ -609,13 +738,14 @@ let process_crate
     (cx:ctxt)
     (items:Ast.mod_items)
     : debug_records =
+
+  let cu_aranges = ref [] in
+  let cu_pubnames = ref [] in
   let cu_infos = ref [] in
   let cu_abbrevs = ref [] in
-  let passes =
-    [|
-      dwarf_visitor cx Walk.empty_visitor cu_infos cu_abbrevs
-    |];
-  in
+  let cu_lines = ref [] in
+  let cu_frames = ref [] in
+
   let debug_aranges_fixup = new_fixup "debug_aranges section" in
   let debug_pubnames_fixup = new_fixup "debug_pubnames section" in
   let debug_info_fixup = new_fixup "debug_info section" in
@@ -623,16 +753,24 @@ let process_crate
   let debug_line_fixup = new_fixup "debug_line section" in
   let debug_frame_fixup = new_fixup "debug_frame section" in
 
+  let passes =
+    [|
+      dwarf_visitor cx Walk.empty_visitor
+        cu_aranges cu_pubnames
+        cu_infos cu_abbrevs
+        cu_lines cu_frames
+    |];
+  in
+
     log cx "emitting DWARF records";
     run_passes cx passes (log cx "%s") items;
     {
-      (* The PE loader dislikes completely-empty sections. *)
-      debug_aranges = (BYTE 0);
-      debug_pubnames = (BYTE 0);
+      debug_aranges = SEQ (Array.of_list (List.rev (!cu_aranges)));
+      debug_pubnames = SEQ (Array.of_list (List.rev (!cu_pubnames)));
       debug_info = SEQ (Array.of_list (List.rev (!cu_infos)));
       debug_abbrev = SEQ (Array.of_list (List.rev (!cu_abbrevs)));
-      debug_line = (BYTE 0);
-      debug_frame = (BYTE 0);
+      debug_line = SEQ (Array.of_list (List.rev (!cu_lines)));
+      debug_frame = SEQ (Array.of_list (List.rev (!cu_frames)));
 
       debug_aranges_fixup = debug_aranges_fixup;
       debug_pubnames_fixup = debug_pubnames_fixup;
