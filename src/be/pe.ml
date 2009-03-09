@@ -66,18 +66,15 @@ let def_mem_aligned f i =
                     (pe_mem_alignment, MARK) |]) |] )
 ;;
 
+let align_both i =
+  ALIGN_FILE (pe_file_alignment,
+              (ALIGN_MEM (pe_mem_alignment, i)))
+;;
+
 let def_aligned f i =
-  ALIGN_FILE
-    (pe_file_alignment,
-     ALIGN_MEM
-       (pe_mem_alignment,
-        SEQ [|
-          DEF(f,
-              SEQ [| i;
-                     ALIGN_FILE
-                       ( pe_file_alignment,
-                         ALIGN_MEM
-                           (pe_mem_alignment, MARK)) |] )|]))
+  align_both
+    (SEQ [| DEF(f,i);
+            (align_both MARK)|])
 ;;
 
 
