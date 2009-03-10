@@ -19,6 +19,7 @@ let trans_visitor
     : Walk.visitor =
   let path = Stack.create () in
   let block_layouts = Stack.create () in
+  let file = ref None in
 
   let emitters = Stack.create () in
   let push_new_emitter _ =
@@ -397,13 +398,28 @@ let trans_visitor
     let n_vregs = e.Il.emit_next_vreg in
     let quads = e.Il.emit_quads in
     let name = path_name () in
+    let f = match !file with
+        None -> err (Some node) "Missing file scope when capturing quads."
+      | Some f -> f
+    in
+    let file_list =
+      begin
+        if not (Hashtbl.mem cx.ctxt_texts f)
+        then htab_put cx.ctxt_texts f (ref []);
+        Hashtbl.find cx.ctxt_texts f
+      end
+    in
       begin
         log cx "emitted quads for %s:" name;
         for i = 0 to (Array.length quads) - 1
         do
           log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
         done;
-        htab_put cx.ctxt_text_quads name (node, quads, n_vregs);
+        let text = { text_node = node;
+                     text_quads = quads;
+                     text_n_vregs = n_vregs }
+        in
+          file_list := text :: (!file_list)
       end
   in
 
@@ -478,13 +494,25 @@ let trans_visitor
   in
 
   let visit_mod_item_pre n p i =
+    if Hashtbl.mem cx.ctxt_item_files i.id
+    then begin
+      match !file with
+          None -> file := Some i.id
+        | Some _ -> err (Some i.id) "Existing source file on file-scope entry."
+    end;
     Stack.push n path;
     trans_mod_item i;
     inner.Walk.visit_mod_item_pre n p i
   in
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
-    ignore (Stack.pop path)
+    ignore (Stack.pop path);
+    if Hashtbl.mem cx.ctxt_item_files i.id
+    then begin
+      match !file with
+          None -> err (Some i.id) "Missing source file on file-scope exit."
+        | Some _ -> file := None
+    end;
   in
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
@@ -507,19 +535,23 @@ let fixup_assigning_visitor
   let visit_mod_item_pre n p i =
     Stack.push n path;
     begin
-      match i.node with
-          Ast.MOD_ITEM_fn _ ->
-            htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
-        | Ast.MOD_ITEM_prog _ ->
-            let path = path_name() in
-            let fixup =
-              if path = cx.ctxt_main_name
-              then cx.ctxt_main_prog
-              else (new_fixup path)
-            in
-              (log cx "defining '%s' to mod item '%s'" fixup.fixup_name (path_name());
+      if Hashtbl.mem cx.ctxt_item_files i.id
+      then
+        htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()))
+      else
+        match i.node with
+            Ast.MOD_ITEM_fn _ ->
+              htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+          | Ast.MOD_ITEM_prog _ ->
+              let path = path_name() in
+              let fixup =
+                if path = cx.ctxt_main_name
+                then cx.ctxt_main_prog
+                else (new_fixup path)
+              in
+                (log cx "defining '%s' to mod item '%s'" fixup.fixup_name (path_name());
                htab_put cx.ctxt_prog_fixups i.id fixup)
-        | _ -> ()
+          | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
   in
@@ -558,11 +590,10 @@ let emit_proc_to_c_glue cx =
       (e.Il.emit_quads) :: cx.ctxt_anon_text_quads
 ;;
 
-
 let trans_crate
     (cx:ctxt)
     (items:Ast.mod_items)
-    : ((string, (node_id * Il.quads * int)) Hashtbl.t * Asm.item list * fixup) =
+    : (file_grouped_texts * Asm.item list * fixup) =
   let passes =
     [|
       (fixup_assigning_visitor cx
@@ -575,7 +606,7 @@ let trans_crate
     run_passes cx passes (log cx "%s") items;
     emit_c_to_proc_glue cx;
     emit_proc_to_c_glue cx;
-    (cx.ctxt_text_quads, cx.ctxt_data_items, cx.ctxt_main_prog)
+    (cx.ctxt_texts, cx.ctxt_data_items, cx.ctxt_main_prog)
 ;;
 
 

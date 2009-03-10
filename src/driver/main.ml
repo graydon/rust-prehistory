@@ -148,7 +148,7 @@ let _ =
 
 
 (* Primary translation from AST -> IL quads. *)
-let ((text_quads:(string, (node_id * Il.quads * int)) Hashtbl.t),
+let ((file_texts:Semant.file_grouped_texts),
      (data_items:Asm.item list),
      (entry_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate.Ast.crate_items;;
 let _ = exit_if_failed ()
@@ -159,27 +159,44 @@ let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
 
 (* Tying up various knots, allocating registers and selecting instructions. *)
 let (text_items:Asm.item list) =
-  let ra_and_select_quads name (node, quads, n_vregs) accum =
-    let frame_sz = Hashtbl.find sem_cx.Semant.ctxt_frame_sizes node in
-    let (quads', n_spills) = Ra.reg_alloc sess quads n_vregs abi frame_sz in
-    let insns = select_insns quads' in
-    let item =
-      if Hashtbl.mem sem_cx.Semant.ctxt_fn_fixups node
-      then
-        let fix = Hashtbl.find sem_cx.Semant.ctxt_fn_fixups node in
-        Asm.DEF (fix, insns)
-      else
-        insns
+  let accum = ref [] in
+  let process_file file_id texts =
+    let process_text text =
+      let frame_sz =
+        Hashtbl.find
+          sem_cx.Semant.ctxt_frame_sizes
+          text.Semant.text_node
+      in
+      let (quads', n_spills) =
+        Ra.reg_alloc sess
+          text.Semant.text_quads
+          text.Semant.text_n_vregs
+          abi frame_sz
+      in
+      let insns = select_insns quads' in
+        begin
+          let spill_fix = Hashtbl.find
+            sem_cx.Semant.ctxt_spill_fixups
+            text.Semant.text_node
+          in
+            spill_fix.fixup_mem_sz <-
+              Some (Int64.mul
+                      (Int64.of_int n_spills)
+                      abi.Abi.abi_ptr_sz);
+            match htab_search
+              sem_cx.Semant.ctxt_fn_fixups
+              text.Semant.text_node
+            with
+                Some fn_fix -> Asm.DEF (fn_fix, insns)
+              | None -> insns
+        end
     in
-      begin
-        (Hashtbl.find sem_cx.Semant.ctxt_spill_fixups node).fixup_mem_sz <-
-          Some (Int64.mul
-                  (Int64.of_int n_spills)
-                  abi.Abi.abi_ptr_sz);
-        item :: accum
-      end
+    let file_items = List.map process_text (!texts) in
+    let file_fix = Hashtbl.find sem_cx.Semant.ctxt_file_fixups file_id in
+      accum := (Asm.DEF (file_fix, list_to_seq file_items)) :: (!accum)
   in
-    Hashtbl.fold ra_and_select_quads text_quads []
+    Hashtbl.iter process_file file_texts;
+    !accum
 ;;
 let _ = exit_if_failed ()
 ;;
@@ -187,7 +204,7 @@ let _ = exit_if_failed ()
 
 let (anon_text_item:Asm.item) =
   list_to_seq (List.map select_insns sem_cx.Semant.ctxt_anon_text_quads);;
-let (code:Asm.item) = Asm.SEQ (Array.of_list (anon_text_item :: text_items));;
+let (code:Asm.item) = list_to_seq (anon_text_item :: text_items);;
 let _ = exit_if_failed ()
 ;;
 

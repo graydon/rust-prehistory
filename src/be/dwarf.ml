@@ -678,22 +678,16 @@ let dwarf_visitor
 
   let begin_cu_and_emit_cu_die
       (name:string)
-      (* (cu_code_fixup:fixup)  *)
+      (cu_text_fixup:fixup)
       : unit =
     let abbrev_code = get_abbrev_code abbrev_cu in
     let cu_info =
       (SEQ [|
          uleb abbrev_code;
          ZSTRING name;
-         WORD (TY_u32, IMM 0L);
-         WORD (TY_u32, IMM 0L);
-
-         (*
-           FIXME: need fixups spanning entire CU!
-           M_POS cu_code_fixup;
-           ADD ((M_POS cu_code_fixup),
-           (M_SZ cu_code_fixup))
-         *)
+         WORD (TY_u32, M_POS cu_text_fixup);
+         WORD (TY_u32, ADD ((M_POS cu_text_fixup),
+                            (M_SZ cu_text_fixup)))
        |])
     in
       curr_cu_infos := [cu_info];
@@ -726,7 +720,7 @@ let dwarf_visitor
       begin
         let filename = (Hashtbl.find cx.ctxt_item_files item.id) in
           log cx "walking CU '%s'" filename;
-          begin_cu_and_emit_cu_die filename;
+          begin_cu_and_emit_cu_die filename (Hashtbl.find cx.ctxt_file_fixups item.id);
       end
     else
       ();

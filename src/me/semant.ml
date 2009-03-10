@@ -20,6 +20,16 @@ type block_slots_table = (node_id,slots_table) Hashtbl.t
 type block_items_table = (node_id,items_table) Hashtbl.t
 ;;
 
+
+type text = {
+  text_node: node_id;
+  text_quads: Il.quads;
+  text_n_vregs: int;
+}
+;;
+
+type file_grouped_texts = (node_id, ((text list) ref)) Hashtbl.t;;
+
 type ctxt =
     { ctxt_sess: Session.sess;
       ctxt_block_slots: block_slots_table;
@@ -35,13 +45,14 @@ type ctxt =
       ctxt_fn_header_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
+      ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_prog_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_abi: Abi.abi;
       mutable ctxt_data_items: Asm.item list;
       ctxt_c_to_proc_fixup: fixup;
       ctxt_proc_to_c_fixup: fixup;
-      ctxt_text_quads: (string, (node_id * Il.quads * int)) Hashtbl.t;
+      ctxt_texts: file_grouped_texts;
       mutable ctxt_anon_text_quads: Il.quads list;
       ctxt_main_prog: fixup;
       ctxt_main_name: string;
@@ -63,13 +74,14 @@ let new_ctxt sess abi crate =
     ctxt_fn_header_layouts = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
+    ctxt_file_fixups = Hashtbl.create 0;
     ctxt_prog_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
     ctxt_abi = abi;
     ctxt_data_items = [];
     ctxt_c_to_proc_fixup = new_fixup "c-to-proc glue";
     ctxt_proc_to_c_fixup = new_fixup "proc-to-c glue";
-    ctxt_text_quads = Hashtbl.create 0;
+    ctxt_texts = Hashtbl.create 0;
     ctxt_anon_text_quads = [];
     ctxt_main_prog = new_fixup "main prog fixup";
     ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main
