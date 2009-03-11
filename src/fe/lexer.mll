@@ -116,7 +116,6 @@ rule token = parse
 | "@"                          { AT         }
 | "^"                          { CARET      }
 | '.'                          { DOT        }
-| '.' '.'                      { DOTDOT     }
 | ','                          { COMMA      }
 | ';'                          { SEMI       }
 | ':'                          { COLON      }

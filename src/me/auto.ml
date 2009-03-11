@@ -84,6 +84,35 @@ let auto_inference_visitor
           end
       | Ast.EXPR_unary (_, atom) -> unify_atom tyo atom
       | Ast.EXPR_atom atom -> unify_atom tyo atom
+      | Ast.EXPR_rec rexp ->
+          begin
+            match tyo with
+                None ->
+                  begin
+                    let tys = Hashtbl.create (Hashtbl.length rexp) in
+                    let ret = ref (Some (Ast.TY_rec tys)) in
+                    let unify_rec_elt id at =
+                      match unify_atom None at with
+                          None -> ret := None
+                        | Some t -> htab_put tys id { Ast.slot_mode = Ast.MODE_interior;
+                                                      Ast.slot_ty = Some t }
+                    in
+                      Hashtbl.iter unify_rec_elt rexp;
+                      !ret
+                  end
+              | Some (Ast.TY_rec rt) ->
+                  begin
+                    let unify_rec_elt id at =
+                      if Hashtbl.mem rt id
+                      then ignore (unify_atom (Hashtbl.find rt id).Ast.slot_ty at)
+                      else err None "Unexpected record-member '%s'" id
+                    in
+                      Hashtbl.iter unify_rec_elt rexp;
+                      tyo
+                  end
+
+              | Some _ -> err None "Non-record type for record expression"
+          end
       | _ -> err None "unhandled expression type in expr_ty"
   in
   let visit_stmt_pre (s:Ast.stmt) =

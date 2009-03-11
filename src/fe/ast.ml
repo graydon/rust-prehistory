@@ -590,9 +590,18 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_rec htab ->
       begin
         (* FIXME: sort struct members. *)
-        fmt ff "@[rec {@[";
-        Hashtbl.iter (fun id slot -> fmt_slot ff slot; fmt_ident ff id; fmt ff ";@ ";) htab;
-        fmt ff "@]}@]"
+        fmt ff "@[rec(@[";
+        let first = ref true in
+          Hashtbl.iter
+            (fun id slot ->
+               if (!first)
+               then first := false
+               else fmt ff ",@ ";
+               fmt_slot ff slot;
+               fmt ff "@ ";
+               fmt_ident ff id;)
+            htab;
+        fmt ff "@])@]"
       end
 
   | TY_opaque id -> fmt ff "o#%d" (int_of_opaque id)

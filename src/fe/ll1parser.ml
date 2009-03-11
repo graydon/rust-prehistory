@@ -28,7 +28,6 @@ type token =
   | TILDE
   | CARET
   | DOT
-  | DOTDOT
   | COMMA
   | SEMI
   | COLON
@@ -613,13 +612,13 @@ and parse_atomic_ty ps =
         Ast.TY_any
 
     | CHAN ->
-        Ast.TY_chan (bracketed LBRACE RBRACE parse_ty ps)
+        Ast.TY_chan (bracketed LBRACKET RBRACKET parse_ty ps)
 
     | PORT ->
-        Ast.TY_port (bracketed LBRACE RBRACE parse_ty ps)
+        Ast.TY_port (bracketed LBRACKET RBRACKET parse_ty ps)
 
     | VEC ->
-        Ast.TY_vec (bracketed LBRACE RBRACE parse_ty ps)
+        Ast.TY_vec (bracketed LBRACKET RBRACKET parse_ty ps)
 
     | LIM ->
         bump ps;
@@ -644,13 +643,14 @@ and parse_atomic_ty ps =
         let _ = one_or_more OR parse_tag_entry ps in
           Ast.TY_tag htab
 
-    | LBRACE ->
+    | REC ->
+        bump ps;
         let htab = Hashtbl.create 4 in
         let parse_rec_entry ps =
           let (slot, ident) = parse_slot_and_ident false ps in
             htab_put htab ident slot
         in
-        let _ = bracketed_zero_or_more LBRACE RBRACE None parse_rec_entry ps in
+        let _ = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_rec_entry ps in
           Ast.TY_rec htab
 
     | LPAREN -> bracketed LPAREN RPAREN parse_ty ps
@@ -721,7 +721,7 @@ and parse_rec_input htab ps =
 
 and parse_rec_inputs ps =
   let htab = Hashtbl.create 4 in
-  let stmts_s = bracketed_zero_or_more LBRACE RBRACE (Some COMMA)
+  let stmts_s = bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
     (ctxt "rec inputs" (parse_rec_input htab)) ps
   in
     (arj stmts_s, htab)
@@ -771,8 +771,9 @@ and parse_bottom_expr ps =
         let _ = expect ps RPAREN in
           (stmts, atom)
 
-    | LBRACE ->
+    | REC ->
         let apos = lexpos ps in
+        bump ps;
         let (stmts, htab) = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
         let bpos = lexpos ps in
         let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
@@ -1106,7 +1107,7 @@ and parse_stmts ps =
 
 
 
-      | LIM | PORT | PROG | MOD | (FN _) ->
+      | LIM | PORT | PROG | MOD | TYPE | (FN _) ->
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
           let bpos = lexpos ps in
           let decl = Ast.DECL_mod_item (ident, item) in
