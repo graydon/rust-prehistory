@@ -314,6 +314,18 @@ and walk_stmt
       | Ast.STMT_spawn a ->
           walk_atom v a
 
+      | Ast.STMT_init_rec (lv, htab) ->
+          walk_lval v lv;
+          Hashtbl.iter (fun _ a -> walk_atom v a) htab
+
+      | Ast.STMT_init_vec (lv, atoms) ->
+          walk_lval v lv;
+          Array.iter (walk_atom v) atoms
+
+      | Ast.STMT_init_tup (lv, atoms) ->
+          walk_lval v lv;
+          Array.iter (walk_atom v) atoms
+
       | Ast.STMT_while w ->
           walk_stmt_while w
 
@@ -396,12 +408,6 @@ and walk_expr
           walk_atom v a
       | Ast.EXPR_atom a ->
           walk_atom v a
-      | Ast.EXPR_rec r ->
-          Hashtbl.iter (fun _ a -> walk_atom v a) r
-      | Ast.EXPR_vec az ->
-          Array.iter (walk_atom v) az
-      | Ast.EXPR_tup az ->
-          Array.iter (walk_atom v) az
   in
   walk_bracketed
     v.visit_expr_pre

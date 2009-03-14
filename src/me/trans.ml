@@ -260,8 +260,6 @@ let trans_visitor
 
       | Ast.EXPR_atom a ->
           trans_atom a
-
-      | _ -> err None "Unhandled form of expr in Trans.trans_expr"
   in
 
   let trans_1_arg_kern_fn (a:Ast.atom) (fn:int64) : unit =
@@ -310,6 +308,15 @@ let trans_visitor
           let dst = trans_lval lv_dst in
           let src = trans_expr e_src in
             emit Il.MOV dst src Il.Nil
+
+      | Ast.STMT_init_rec (lv_dst, htab) ->
+          let dst = trans_lval lv_dst in
+            Hashtbl.iter
+              (* This is a remarkably incorrect translation. *)
+              (fun k v ->
+                 let src = trans_atom v in
+                   emit Il.MOV dst src Il.Nil)
+              htab
 
       | Ast.STMT_block block ->
           trans_block block

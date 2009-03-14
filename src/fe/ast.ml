@@ -201,6 +201,9 @@ and ty_prog =
 and stmt' =
     STMT_log of atom
   | STMT_spawn of atom  (* FIXME: should produce a proc. *)
+  | STMT_init_rec of (lval * ((ident, atom) Hashtbl.t))
+  | STMT_init_vec of (lval * (atom array))
+  | STMT_init_tup of (lval * (atom array))
   | STMT_while of stmt_while
   | STMT_do_while of stmt_while
   | STMT_foreach of stmt_foreach
@@ -223,6 +226,7 @@ and stmt' =
   | STMT_recv of (lval * lval)
   | STMT_decl of stmt_decl
   | STMT_use of (ty * ident * lval)
+
 
 and stmt = stmt' identified
 
@@ -296,9 +300,6 @@ and expr =
     EXPR_binary of (binop * atom * atom)
   | EXPR_unary of (unop * atom)
   | EXPR_atom of atom
-  | EXPR_rec of ((ident, atom) Hashtbl.t)
-  | EXPR_vec of (atom array)
-  | EXPR_tup of (atom array)
 
 and lit =
   | LIT_nil
@@ -688,12 +689,6 @@ and fmt_expr (ff:Format.formatter) (e:expr) : unit =
         fmt_atom ff a
       end
   | EXPR_atom a -> fmt_atom ff a
-  | _ -> fmt ff "?expr?"
-(*
-  | EXPR_rec of ((ident, atom) Hashtbl.t)
-  | EXPR_vec of (atom array)
-  | EXPR_tup of (atom array)
-*)
 
 and fmt_lit (ff:Format.formatter) (l:lit) : unit =
   match l with

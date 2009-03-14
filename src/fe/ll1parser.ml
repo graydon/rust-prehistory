@@ -160,7 +160,6 @@ let string_of_tok t =
     | TILDE      -> "~"
     | CARET      -> "^"
     | DOT        -> "."
-    | DOTDOT     -> ".."
     | COMMA      -> ","
     | SEMI       -> ";"
     | COLON      -> ":"
@@ -777,15 +776,15 @@ and parse_bottom_expr ps =
         let (stmts, htab) = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
         let bpos = lexpos ps in
         let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-        let stmt = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_rec htab)) in
+        let stmt = span ps apos bpos (Ast.STMT_init_rec (tmp, htab)) in
           (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
 
-    | LBRACKET ->
+    | VEC ->
         let apos = lexpos ps in
-        let (stmts, lvals) = ctxt "vec expr: exprs" (parse_expr_list LBRACKET RBRACKET) ps in
+        let (stmts, lvals) = ctxt "vec expr: exprs" (parse_expr_list LPAREN RPAREN) ps in
         let bpos = lexpos ps in
         let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-        let stmt = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_vec lvals)) in
+        let stmt = span ps apos bpos (Ast.STMT_init_vec (tmp, lvals)) in
           (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
 
     | IDENT _ ->
@@ -1163,10 +1162,31 @@ and parse_stmts ps =
 
                | EQ ->
                    bump ps;
-                   let (stmts, atom) = ctxt "stmt: copy rval" parse_expr ps in
-                   let _ = expect ps SEMI in
-                   let bpos = lexpos ps in
-                     spans stmts apos bpos (Ast.STMT_copy (lval, Ast.EXPR_atom atom))
+                   begin
+                     match peek ps with
+                         REC ->
+                           begin
+                             bump ps;
+                             let (stmts, htab) = ctxt "rec-init stmt: rec inputs" parse_rec_inputs ps in
+                             let bpos = lexpos ps in
+                             let stmts = Array.append lstmts stmts in
+                               spans stmts apos bpos (Ast.STMT_init_rec (lval, htab))
+                           end
+                       | VEC ->
+                           begin
+                             let (stmts, atoms) = ctxt "vec-init stmt: exprs" (parse_expr_list LPAREN RPAREN) ps in
+                             let bpos = lexpos ps in
+                             let stmts = Array.append lstmts stmts in
+                               spans stmts apos bpos (Ast.STMT_init_vec (lval, atoms))
+                           end
+                       | _ ->
+                           begin
+                             let (stmts, atom) = ctxt "stmt: copy rval" parse_expr ps in
+                             let _ = expect ps SEMI in
+                             let bpos = lexpos ps in
+                               spans stmts apos bpos (Ast.STMT_copy (lval, Ast.EXPR_atom atom))
+                           end
+                   end
 
                | LARROW ->
                    let (stmts, rhs) = ctxt "stmt: recv rhs" parse_lval ps in
