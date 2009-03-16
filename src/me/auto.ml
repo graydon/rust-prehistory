@@ -92,30 +92,35 @@ let auto_inference_visitor
             ignore (unify_lval (unify_expr None expr) lval);
             ignore (unify_expr (unify_lval None lval) expr);
 
-        | Ast.STMT_init_rec (lval,htab) ->
+        | Ast.STMT_init_rec (lval,atab) ->
             let unify_init tyo =
               match tyo with
                   None ->
                     begin
-                      let tys = Hashtbl.create (Hashtbl.length htab) in
-                      let ret = ref (Some (Ast.TY_rec tys)) in
-                      let unify_rec_elt id at =
-                        match unify_atom None at with
-                            None -> ret := None
-                          | Some t -> htab_put tys id { Ast.slot_mode = Ast.MODE_interior;
-                                                        Ast.slot_ty = Some t }
+                      let lim = Array.length atab in
+                      let rec step i accum =
+                        if i = lim
+                        then (Some (Ast.TY_rec (Array.of_list (List.rev accum))))
+                        else
+                          let (id, at) = atab.(i) in
+                          match unify_atom None at with
+                              None -> None
+                            | Some t ->
+                                let accum = ltab_put accum id { Ast.slot_mode = Ast.MODE_interior;
+                                                                Ast.slot_ty = Some t }
+                                in
+                                  step (i+1) accum
                       in
-                        Hashtbl.iter unify_rec_elt htab;
-                        !ret
+                        step 0 []
                     end
                 | Some (Ast.TY_rec rt) ->
                     begin
-                      let unify_rec_elt id at =
-                        if Hashtbl.mem rt id
-                        then ignore (unify_atom (Hashtbl.find rt id).Ast.slot_ty at)
-                        else err None "Unexpected record-member '%s'" id
+                      let unify_rec_elt (id, at) =
+                        match atab_search rt id with
+                            Some slot -> ignore (unify_atom slot.Ast.slot_ty at)
+                          | None -> err None "Unexpected record-member '%s'" id
                       in
-                        Hashtbl.iter unify_rec_elt htab;
+                        Array.iter unify_rec_elt atab;
                         tyo
                   end
                 | Some _ -> err None "Non-record type for record initializer"

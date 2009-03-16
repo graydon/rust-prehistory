@@ -309,14 +309,14 @@ let trans_visitor
           let src = trans_expr e_src in
             emit Il.MOV dst src Il.Nil
 
-      | Ast.STMT_init_rec (lv_dst, htab) ->
+      | Ast.STMT_init_rec (lv_dst, atab) ->
           let dst = trans_lval lv_dst in
-            Hashtbl.iter
+            Array.iter
               (* This is a remarkably incorrect translation. *)
-              (fun k v ->
+              (fun (k, v) ->
                  let src = trans_atom v in
                    emit Il.MOV dst src Il.Nil)
-              htab
+              atab
 
       | Ast.STMT_block block ->
           trans_block block

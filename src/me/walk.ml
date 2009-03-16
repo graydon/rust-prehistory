@@ -151,7 +151,7 @@ and walk_ty
     match ty with
         Ast.TY_tup ttup -> Array.iter (walk_slot v) ttup
       | Ast.TY_vec t -> walk_ty v t
-      | Ast.TY_rec trec -> Hashtbl.iter (fun _ s -> walk_slot v s) trec
+      | Ast.TY_rec trec -> Array.iter (fun (_, s) -> walk_slot v s) trec
       | Ast.TY_tag ttag -> walk_ttag ttag
       | Ast.TY_iso tiso -> Array.iter walk_ttag tiso.Ast.iso_group
       | Ast.TY_fn tfn -> walk_ty_fn v tfn
@@ -314,9 +314,9 @@ and walk_stmt
       | Ast.STMT_spawn a ->
           walk_atom v a
 
-      | Ast.STMT_init_rec (lv, htab) ->
+      | Ast.STMT_init_rec (lv, atab) ->
           walk_lval v lv;
-          Hashtbl.iter (fun _ a -> walk_atom v a) htab
+          Array.iter (fun (_, a) -> walk_atom v a) atab
 
       | Ast.STMT_init_vec (lv, atoms) ->
           walk_lval v lv;

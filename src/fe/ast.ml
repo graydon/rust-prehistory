@@ -152,7 +152,7 @@ and prog =
       prog_mod: mod_items;
     }
 
-and ty_rec = (ident, slot) Hashtbl.t
+and ty_rec = (ident * slot) array
 
 (* ty_tag is a sum type.
  *
@@ -201,7 +201,7 @@ and ty_prog =
 and stmt' =
     STMT_log of atom
   | STMT_spawn of atom  (* FIXME: should produce a proc. *)
-  | STMT_init_rec of (lval * ((ident, atom) Hashtbl.t))
+  | STMT_init_rec of (lval * ((ident * atom) array))
   | STMT_init_vec of (lval * (atom array))
   | STMT_init_tup of (lval * (atom array))
   | STMT_while of stmt_while
@@ -588,20 +588,19 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_chan t -> (fmt ff "chan["; fmt_ty ff t; fmt ff "]")
   | TY_port t -> (fmt ff "port["; fmt_ty ff t; fmt ff "]")
 
-  | TY_rec htab ->
+  | TY_rec slots ->
       begin
-        (* FIXME: sort struct members. *)
         fmt ff "@[rec(@[";
         let first = ref true in
-          Hashtbl.iter
-            (fun id slot ->
+          Array.iter
+            (fun (id, slot) ->
                if (!first)
                then first := false
                else fmt ff ",@ ";
                fmt_slot ff slot;
                fmt ff "@ ";
                fmt_ident ff id;)
-            htab;
+            slots;
         fmt ff "@])@]"
       end
 

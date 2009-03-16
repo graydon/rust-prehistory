@@ -644,13 +644,13 @@ and parse_atomic_ty ps =
 
     | REC ->
         bump ps;
-        let htab = Hashtbl.create 4 in
+        let ltab = ref [] in
         let parse_rec_entry ps =
           let (slot, ident) = parse_slot_and_ident false ps in
-            htab_put htab ident slot
+            ltab := ltab_put (!ltab) ident slot
         in
         let _ = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_rec_entry ps in
-          Ast.TY_rec htab
+          Ast.TY_rec (arl (!ltab))
 
     | LPAREN -> bracketed LPAREN RPAREN parse_ty ps
 
@@ -707,23 +707,23 @@ and parse_ty ps =
   parse_constrained_ty ps
 
 
-and parse_rec_input htab ps =
+and parse_rec_input ltab ps =
   let lab = (ctxt "rec input: label" parse_ident ps) in
     match peek ps with
         EQ ->
           bump ps;
           let (stmts, expr) = (ctxt "rec input: expr" parse_expr ps) in
-            htab_put htab lab expr;
+            ltab := ltab_put (!ltab) lab expr;
             stmts
       | _ -> raise (unexpected ps)
 
 
 and parse_rec_inputs ps =
-  let htab = Hashtbl.create 4 in
+  let ltab = ref [] in
   let stmts_s = bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
-    (ctxt "rec inputs" (parse_rec_input htab)) ps
+    (ctxt "rec inputs" (parse_rec_input ltab)) ps
   in
-    (arj stmts_s, htab)
+    (arj stmts_s, arl (!ltab))
 
 
 and parse_expr_list bra ket ps =
@@ -773,10 +773,10 @@ and parse_bottom_expr ps =
     | REC ->
         let apos = lexpos ps in
         bump ps;
-        let (stmts, htab) = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
+        let (stmts, atab) = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
         let bpos = lexpos ps in
         let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-        let stmt = span ps apos bpos (Ast.STMT_init_rec (tmp, htab)) in
+        let stmt = span ps apos bpos (Ast.STMT_init_rec (tmp, atab)) in
           (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
 
     | VEC ->

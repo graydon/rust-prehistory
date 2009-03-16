@@ -217,7 +217,7 @@ let slot_resolving_visitor
         | Ast.TY_idx _ | Ast.TY_opaque _ -> t
 
         | Ast.TY_tup tys -> Ast.TY_tup (Array.map resolve_slot tys)
-        | Ast.TY_rec trec -> Ast.TY_rec (htab_map trec (fun n s -> (n, resolve_slot s)))
+        | Ast.TY_rec trec -> Ast.TY_rec (Array.map (fun (n, s) -> (n, resolve_slot s)) trec)
 
         | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i s -> (i, resolve_ty t)))
         | Ast.TY_iso tiso ->
