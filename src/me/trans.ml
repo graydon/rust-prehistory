@@ -309,14 +309,36 @@ let trans_visitor
           let src = trans_expr e_src in
             emit Il.MOV dst src Il.Nil
 
-      | Ast.STMT_init_rec (lv_dst, atab) ->
-          let dst = trans_lval lv_dst in
-            Array.iter
-              (* This is a remarkably incorrect translation. *)
-              (fun (k, v) ->
-                 let src = trans_atom v in
-                   emit Il.MOV dst src Il.Nil)
-              atab
+      | Ast.STMT_init_rec ((Ast.LVAL_base nb_dst), atab) ->
+          let dst_base = trans_lval (Ast.LVAL_base nb_dst) in
+          let slot = lval_to_slot nb_dst.id in
+          let slots = match slot.Ast.slot_ty with
+              Some (Ast.TY_rec slots) -> slots
+            | Some _ -> err (Some stmt.id) "translating init of incorrectly-typed rec slot"
+            | None -> err (Some stmt.id) "translating init of untyped rec slot"
+          in
+            (* 
+             * This is still a totally incorrect translation. Only does
+             * one-level (non-recursive) copying of records, only initializes
+             * name-base lvals, ignores component types, etc. etc.
+             *)
+            begin
+              match dst_base with
+                  Il.Mem (TY_u32, reg, (Asm.IMM off)) ->
+                    let layouts = Array.map (fun (_,slot) -> layout_slot cx.ctxt_abi 0L slot) slots in
+                      begin
+                        ignore (pack off layouts);
+                        assert ((Array.length layouts) = (Array.length atab));
+                        Array.iteri
+                          (fun i (_, v) ->
+                             let src = trans_atom v in
+                             let off' = Asm.ADD (Asm.IMM off, Asm.IMM layouts.(i).layout_offset) in
+                             let dst = Il.Mem (TY_u32, reg, off') in
+                               emit Il.MOV dst src Il.Nil)
+                          atab
+                      end
+                | _ -> err (Some stmt.id) "translating init of non-memory record operand"
+            end
 
       | Ast.STMT_block block ->
           trans_block block

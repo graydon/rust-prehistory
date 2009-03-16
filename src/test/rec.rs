@@ -3,7 +3,7 @@
 prog a
 {
   main {
-    type rt = rec(int a, int b);
-    let rt rv = rec(a=10, b=12);
+    type rect = rec(int x, int y, int w, int h);
+    let rect rectv = rec(x=10, y=20, w=100, h=200);
   }
 }
