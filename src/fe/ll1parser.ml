@@ -932,25 +932,60 @@ and parse_block_stmt ps =
   let bpos = lexpos ps in
     span ps apos bpos (Ast.STMT_block block)
 
-and parse_init ps =
-  let init =
+and parse_init
+    (lval:Ast.lval)
+    (ps:pstate)
+    : Ast.stmt array =
+  let stmts =
     match peek ps with
         EQ ->
           bump ps;
-          let (stmts, atom) = (ctxt "init: expr" parse_expr ps) in
-            (stmts, Some atom)
-      | _ -> (arr [], None)
+          let apos = lexpos ps in
+          let spans stmts bpos stmt =
+            Array.append stmts [| (span ps apos bpos stmt) |]
+          in
+            begin
+              match peek ps with
+
+                  REC ->
+                    begin
+                      bump ps;
+                      let (stmts, htab) =
+                        ctxt "rec-init stmt: rec inputs" parse_rec_inputs ps in
+                      let bpos = lexpos ps in
+                        spans stmts bpos (Ast.STMT_init_rec (lval, htab))
+                    end
+
+                | VEC ->
+                    begin
+                      let (stmts, atoms) =
+                        ctxt "vec-init stmt: exprs"
+                          (parse_expr_list LPAREN RPAREN) ps in
+                      let bpos = lexpos ps in
+                        spans stmts bpos (Ast.STMT_init_vec (lval, atoms))
+                    end
+
+                | _ ->
+                    let (stmts, atom) = (ctxt "init: expr" parse_expr ps) in
+                    let bpos = lexpos ps in
+                      spans stmts bpos (Ast.STMT_copy (lval, (Ast.EXPR_atom atom)))
+            end
+
+      | _ -> arr []
   in
   let _ = expect ps SEMI in
-    init
+    stmts
 
 and parse_slot_and_ident_and_init ps =
+  let apos = lexpos ps in
   let (slot, ident) =
     ctxt "slot, ident and init: slot and ident"
       (parse_slot_and_ident false) ps
   in
-  let (stmts, init) = ctxt "slot, ident and init: init" parse_init ps in
-    (stmts, slot, ident, init)
+  let bpos = lexpos ps in
+  let lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident ident)) in
+  let stmts = ctxt "slot, ident and init: init" (parse_init lval) ps in
+    (stmts, slot, ident)
 
 (*
  * We have no way to parse a single Ast.stmt; any incoming syntactic statement
@@ -1048,8 +1083,14 @@ and parse_stmts ps =
                  let (slots, idents) =
                    ctxt "stmt tup decl: slots and idents"
                      (bracketed LPAREN RPAREN (parse_two_or_more_identified_tup_slots_and_idents false)) ps in
-                 let (stmts, init) = ctxt "stmt tup decl: init" parse_init ps in
                  let bpos = lexpos ps in
+                 let (nonce, tmp, tempdecl) =
+                   build_tmp ps
+                     { Ast.slot_mode = Ast.MODE_interior;
+                       Ast.slot_ty = Some (Ast.TY_tup (Array.map (fun x -> x.node) slots)) }
+                     apos bpos
+                 in
+                 let stmts = ctxt "stmt tup decl: init" (parse_init tmp) ps in
                    (*
                     * A little destructuring assignment sugar:
                     *
@@ -1062,25 +1103,18 @@ and parse_stmts ps =
                     *   let int b = t_n.{1};
                     *
                     *)
-                 let (nonce, tmp, tempdecl) =
-                   build_tmp ps
-                     { Ast.slot_mode = Ast.MODE_interior;
-                       Ast.slot_ty = Some (Ast.TY_tup (Array.map (fun x -> x.node) slots)) }
-                     apos bpos
-                 in
 
                  let copies = ref [] in
 
                  let makedecl i slot =
-                   (match init with
-                        None -> ()
-                      | Some _ ->
-                          let ext = Ast.COMP_named (Ast.COMP_idx i) in
-                          let src_lval = Ast.LVAL_ext ((respan ps tmp), ext) in
-                          let src_atom = Ast.ATOM_lval src_lval in
-                          let dst_lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident idents.(i))) in
-                          let copy = span ps apos bpos (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
-                            copies := copy :: (!copies));
+                   begin
+                     let ext = Ast.COMP_named (Ast.COMP_idx i) in
+                     let src_lval = Ast.LVAL_ext ((respan ps tmp), ext) in
+                     let src_atom = Ast.ATOM_lval src_lval in
+                     let dst_lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident idents.(i))) in
+                     let copy = span ps apos bpos (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
+                       copies := copy :: (!copies)
+                   end;
                    let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slot) in
                      span ps apos bpos (Ast.STMT_decl decl)
                  in
@@ -1088,21 +1122,13 @@ and parse_stmts ps =
                    Array.concat [stmts; [| tempdecl |]; letdecls; arl (!copies)]
 
              | _ ->
-                 let (stmts, slot, ident, init) =
+                 let (stmts, slot, ident) =
                    ctxt "stmt slot" parse_slot_and_ident_and_init ps in
                  let bpos = lexpos ps in
                  let decl = Ast.DECL_slot (Ast.KEY_ident ident,
                                            (span ps apos bpos slot))
                  in
-                 let copy = match init with
-                     None -> [| |]
-                   | Some atom -> [| span ps apos bpos
-                                       (Ast.STMT_copy
-                                          (Ast.LVAL_base
-                                             (span ps apos bpos (Ast.BASE_ident ident)),
-                                           Ast.EXPR_atom atom)) |]
-                 in
-                   Array.concat [stmts; [| span ps apos bpos (Ast.STMT_decl decl) |]; copy])
+                   Array.concat [[| span ps apos bpos (Ast.STMT_decl decl) |]; stmts])
 
 
 
@@ -1163,29 +1189,10 @@ and parse_stmts ps =
                | EQ ->
                    bump ps;
                    begin
-                     match peek ps with
-                         REC ->
-                           begin
-                             bump ps;
-                             let (stmts, htab) = ctxt "rec-init stmt: rec inputs" parse_rec_inputs ps in
-                             let bpos = lexpos ps in
-                             let stmts = Array.append lstmts stmts in
-                               spans stmts apos bpos (Ast.STMT_init_rec (lval, htab))
-                           end
-                       | VEC ->
-                           begin
-                             let (stmts, atoms) = ctxt "vec-init stmt: exprs" (parse_expr_list LPAREN RPAREN) ps in
-                             let bpos = lexpos ps in
-                             let stmts = Array.append lstmts stmts in
-                               spans stmts apos bpos (Ast.STMT_init_vec (lval, atoms))
-                           end
-                       | _ ->
-                           begin
-                             let (stmts, atom) = ctxt "stmt: copy rval" parse_expr ps in
-                             let _ = expect ps SEMI in
-                             let bpos = lexpos ps in
-                               spans stmts apos bpos (Ast.STMT_copy (lval, Ast.EXPR_atom atom))
-                           end
+                     let (stmts, atom) = ctxt "stmt: copy rval" parse_expr ps in
+                     let _ = expect ps SEMI in
+                     let bpos = lexpos ps in
+                       spans stmts apos bpos (Ast.STMT_copy (lval, Ast.EXPR_atom atom))
                    end
 
                | LARROW ->

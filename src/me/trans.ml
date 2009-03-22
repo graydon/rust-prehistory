@@ -134,7 +134,11 @@ let trans_visitor
               let (base_operand, base_slot, base_id) = trans_lval_full base false true in
               (* Most of the errors in this block shouldn't make it past typechecking. *)
               let bad _ = err (Some base_id) "bad lval extension in trans_lval_full" in
-              let base_reg = force_to_reg base_operand in
+              let (base_reg, base_off) =
+                match base_operand with
+                    Il.Mem (_, Some r, off) -> (r,off)
+                  | _ -> err (Some base_id) "lval-ext of non-mem operand in trans_lval_full"
+              in
               let (operand, slot) =
                 match comp with
                     (Ast.COMP_named (Ast.COMP_ident id)) ->
@@ -147,7 +151,7 @@ let trans_visitor
                                       None -> bad ()
                                     | Some (slot, layout) ->
                                         (Il.Mem (TY_u32, (Some base_reg),
-                                                 Asm.IMM layout.layout_offset),
+                                                 Asm.ADD (base_off, Asm.IMM layout.layout_offset)),
                                          slot)
                                 end
                           | _ -> bad ()
@@ -162,7 +166,7 @@ let trans_visitor
                                 then bad ()
                                 else
                                   (Il.Mem (TY_u32, (Some base_reg),
-                                           Asm.IMM layouts.(i).layout_offset),
+                                           Asm.ADD (base_off, Asm.IMM layouts.(i).layout_offset)),
                                    entries.(i))
                           | _ -> bad ()
                       end
@@ -229,10 +233,14 @@ let trans_visitor
     trans_lval_full lv false false
   in
 
-  let atom_type (at:Ast.atom) : Ast.ty =
+  let rec atom_type (at:Ast.atom) : Ast.ty =
     match at with
         Ast.ATOM_literal {node=(Ast.LIT_str _); id=_} -> Ast.TY_str
       | Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
+      | Ast.ATOM_literal {node=(Ast.LIT_bool _); id=_} -> Ast.TY_bool
+      | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
+      | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
+      | Ast.ATOM_literal _ -> err None "unhandled form of literal in atom_type"
       | Ast.ATOM_lval (Ast.LVAL_base nb) ->
           let slot = lval_to_slot nb.id in
             begin
@@ -240,7 +248,27 @@ let trans_visitor
                   None -> err (Some nb.id) "name refers to untyped slot, in atom_type"
                 | Some t -> t
             end
-      | _ -> err None "unhandled form of atom in atom_type"
+      | Ast.ATOM_lval (Ast.LVAL_ext (base, comp)) ->
+          let base_ty = atom_type (Ast.ATOM_lval base) in
+          let need_ty topt =
+            match topt with
+                None -> err None "missing type in lval-ext"
+              | Some s -> s
+          in
+            match (base_ty, comp) with
+                (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
+                  begin
+                    match atab_search elts id with
+                        Some slot -> need_ty slot.Ast.slot_ty
+                      | None -> err None "unknown record-member '%s'" id
+                  end
+
+              | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
+                  if 0 <= i && i < (Array.length elts)
+                  then need_ty elts.(i).Ast.slot_ty
+                  else err None "out-of-range tuple index %d" i
+
+              | (_,_) -> err None "unhandled form of lval-ext"
   in
 
   let trans_atom (atom:Ast.atom) : Il.operand =
@@ -370,28 +398,26 @@ let trans_visitor
 
 
   and trans_copy_full
-      (src:Il.operand) (src_slot:Ast.slot) (src_id:node_id)
       (dst:Il.operand) (dst_slot:Ast.slot) (dst_id:node_id)
+      (src:Il.operand) (src_slot:Ast.slot) (src_id:node_id)
       : unit =
     assert (src_slot.Ast.slot_ty = dst_slot.Ast.slot_ty);
-    match (src, dst_slot.Ast.slot_ty,
-           dst, dst_slot.Ast.slot_ty) with
-        (Il.Mem (_, (Some src_reg), src_off),
-         Some (Ast.TY_rec dst_slots),
-         Il.Mem (_, (Some dst_reg), dst_off),
-         Some (Ast.TY_rec src_slots)) ->
+    match (dst, dst_slot.Ast.slot_ty,
+           src, src_slot.Ast.slot_ty) with
+        (Il.Mem (_, (Some dst_reg), dst_off), Some (Ast.TY_rec dst_slots),
+         Il.Mem (_, (Some src_reg), src_off), Some (Ast.TY_rec src_slots)) ->
           let layouts = layout_rec src_slots in
             for i = 0 to (Array.length layouts) - 1
             do
               let (_, (_, layout)) = layouts.(i) in
               let off = Asm.IMM layout.layout_offset in
               let sub_src = Il.Mem (TY_u32, (Some src_reg), (Asm.ADD (off, src_off))) in
+              let sub_dst = Il.Mem (TY_u32, (Some dst_reg), (Asm.ADD (off, dst_off))) in
               let (_, sub_src_slot) = src_slots.(i) in
               let (_, sub_dst_slot) = dst_slots.(i) in
-              let sub_dst = Il.Mem (TY_u32, (Some dst_reg), (Asm.ADD (off, dst_off))) in
               trans_copy_full
-                sub_src sub_src_slot src_id
                 sub_dst sub_dst_slot dst_id
+                sub_src sub_src_slot src_id
             done
 
       | _ ->
@@ -415,11 +441,19 @@ let trans_visitor
           let (dst_operand, dst_slot, dst_id) = trans_lval dst in
           let (src_operand, src_slot, src_id) = trans_lval src_lval in
             trans_copy_full
-              src_operand src_slot src_id
               dst_operand dst_slot dst_id
+              src_operand src_slot src_id
 
 
   and trans_stmt (stmt:Ast.stmt) : unit =
+    (* Helper to localize errors by stmt, at minimum. *)
+    try
+      trans_stmt_full stmt
+    with
+        Semant_err (None, msg) -> raise (Semant_err ((Some stmt.id), msg))
+
+
+  and trans_stmt_full (stmt:Ast.stmt) : unit =
     match stmt.node with
 
         Ast.STMT_log a ->
@@ -451,14 +485,14 @@ let trans_visitor
             begin
               match dst_base with
                   Il.Mem (TY_u32, reg, (Asm.IMM off)) ->
-                    let layouts = Array.map (fun (_,slot) -> layout_slot cx.ctxt_abi 0L slot) slots in
+                    let layouts = layout_rec slots in
                       begin
-                        ignore (pack off layouts);
                         assert ((Array.length layouts) = (Array.length atab));
                         Array.iteri
                           (fun i (_, v) ->
+                             let (_, (_, layout)) = layouts.(i) in
                              let src = trans_atom v in
-                             let off' = Asm.ADD (Asm.IMM off, Asm.IMM layouts.(i).layout_offset) in
+                             let off' = Asm.ADD (Asm.IMM off, Asm.IMM layout.layout_offset) in
                              let dst = Il.Mem (TY_u32, reg, off') in
                                emit Il.MOV dst src Il.Nil)
                           atab

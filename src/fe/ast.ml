@@ -835,6 +835,10 @@ and fmt_stmt (ff:Format.formatter) (s:stmt) : unit =
           fmt_slot_key ff skey;
           fmt ff ";"
 
+      | STMT_init_rec (dst, entries) ->
+          fmt_lval ff dst;
+          fmt ff " = init_rec (...);"
+
       | _ -> fmt ff "?stmt?;"
   end
 
