@@ -102,21 +102,21 @@ let trans_visitor
       layouts
   in
 
+  let force_to_reg operand =
+    match operand with
+        Il.Reg r -> r
+      | Il.Imm _ | Il.Mem _ ->
+          let tmp = (Il.next_vreg (emitter())) in
+            emit Il.MOV (Il.Reg tmp) operand Il.Nil;
+            tmp
+      | _ -> err None "unhandled operand type in force_to_reg"
+  in
+
   let rec trans_lval_full
       (lv:Ast.lval)
       (pcrel_ok:bool)
       (imm_ok:bool)
       : (Il.operand * Ast.slot * node_id) =
-
-    let force_to_reg operand =
-      match operand with
-          Il.Reg r -> r
-        | Il.Imm _ | Il.Mem _ ->
-            let tmp = (Il.next_vreg (emitter())) in
-              emit Il.MOV (Il.Reg tmp) operand Il.Nil;
-              tmp
-        | _ -> err None "unhandled operand type in force_to_reg"
-    in
 
     let return_fixup fix =
       if pcrel_ok
@@ -135,7 +135,7 @@ let trans_visitor
               (* Most of the errors in this block shouldn't make it past typechecking. *)
               let bad _ = err (Some base_id) "bad lval extension in trans_lval_full" in
               let base_reg = force_to_reg base_operand in
-              let operand =
+              let (operand, slot) =
                 match comp with
                     (Ast.COMP_named (Ast.COMP_ident id)) ->
                       begin
@@ -146,8 +146,9 @@ let trans_visitor
                                   match atab_search layouts id with
                                       None -> bad ()
                                     | Some (slot, layout) ->
-                                        Il.Mem (TY_u32, (Some base_reg),
-                                                Asm.IMM layout.layout_offset)
+                                        (Il.Mem (TY_u32, (Some base_reg),
+                                                 Asm.IMM layout.layout_offset),
+                                         slot)
                                 end
                           | _ -> bad ()
                       end
@@ -160,13 +161,14 @@ let trans_visitor
                                 if i < 0 || i >= Array.length layouts
                                 then bad ()
                                 else
-                                  Il.Mem (TY_u32, (Some base_reg),
-                                          Asm.IMM layouts.(i).layout_offset)
+                                  (Il.Mem (TY_u32, (Some base_reg),
+                                           Asm.IMM layouts.(i).layout_offset),
+                                   entries.(i))
                           | _ -> bad ()
                       end
                   | _ -> err None "unhandled form of lval_ext in trans_lval_full"
               in
-                (operand, base_slot, base_id)
+                (operand, slot, base_id)
             end
 
         | Ast.LVAL_base nb ->
@@ -367,30 +369,54 @@ let trans_visitor
     ignore (Stack.pop block_layouts)
 
 
+  and trans_copy_full
+      (src:Il.operand) (src_slot:Ast.slot) (src_id:node_id)
+      (dst:Il.operand) (dst_slot:Ast.slot) (dst_id:node_id)
+      : unit =
+    assert (src_slot.Ast.slot_ty = dst_slot.Ast.slot_ty);
+    match (src, dst_slot.Ast.slot_ty,
+           dst, dst_slot.Ast.slot_ty) with
+        (Il.Mem (_, (Some src_reg), src_off),
+         Some (Ast.TY_rec dst_slots),
+         Il.Mem (_, (Some dst_reg), dst_off),
+         Some (Ast.TY_rec src_slots)) ->
+          let layouts = layout_rec src_slots in
+            for i = 0 to (Array.length layouts) - 1
+            do
+              let (_, (_, layout)) = layouts.(i) in
+              let off = Asm.IMM layout.layout_offset in
+              let sub_src = Il.Mem (TY_u32, (Some src_reg), (Asm.ADD (off, src_off))) in
+              let (_, sub_src_slot) = src_slots.(i) in
+              let (_, sub_dst_slot) = dst_slots.(i) in
+              let sub_dst = Il.Mem (TY_u32, (Some dst_reg), (Asm.ADD (off, dst_off))) in
+              trans_copy_full
+                sub_src sub_src_slot src_id
+                sub_dst sub_dst_slot dst_id
+            done
+
+      | _ ->
+          emit Il.MOV dst src Il.Nil
+
+
   and trans_copy
       (dst:Ast.lval)
       (src:Ast.expr) : unit =
     match src with
-        (Ast.EXPR_binary _) | (Ast.EXPR_unary _) ->
+        (Ast.EXPR_binary _) | (Ast.EXPR_unary _)
+      | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
           (* Translations of both these expr types yield vregs, so copy
            * is just MOV into the lval. *)
-          let src_operand = trans_expr src in
           let (dst_operand, _, _) = trans_lval dst in
-            begin
-              match src_operand with
-                  Il.Reg (Il.Vreg _) -> ()
-                | _ -> err None "Non-atom expr translated to non-vreg.";
-            end;
+          let src_operand = trans_expr src in
             emit Il.MOV dst_operand src_operand Il.Nil
 
-      | Ast.EXPR_atom at ->
-          (* Atoms are the harder bit. Expr translates to address of 
-           * the first word of the referent; referent may be arbitrarily
-           * large. *)
-          let src_operand = trans_expr src in
-          let (dst_operand, _, _) = trans_lval dst in
-            (* FIXME: finish this. *)
-            emit Il.MOV dst_operand src_operand Il.Nil
+      | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
+          (* Possibly-large structure copying *)
+          let (dst_operand, dst_slot, dst_id) = trans_lval dst in
+          let (src_operand, src_slot, src_id) = trans_lval src_lval in
+            trans_copy_full
+              src_operand src_slot src_id
+              dst_operand dst_slot dst_id
 
 
   and trans_stmt (stmt:Ast.stmt) : unit =
