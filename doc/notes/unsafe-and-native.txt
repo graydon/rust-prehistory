@@ -1,0 +1,34 @@
+
+
+The 'native' / 'unsafe' system consists of:
+
+  - 'native' modules declared at crate level and statically imported from C/C++/whatever
+  - 'native' functions -- any function declared in a native module
+  - 'native' types, recursively built from:
+      the mach types u8, s32, ...
+      native functions and modules
+      ptr[t] for native type t
+      rec(...) where all the fields are native types
+
+  - 'unsafe' functions are those that:
+    - call native methods
+    - call *un-authorized* unsafe methods
+    - load or store through ptr[t] values
+    - create ptr[t] values from ^t or ~t slots
+    - directly spawn unsafe progs
+
+  - 'unsafe' progs are those that call unsafe functions
+
+  - 'unsafe' procs are those formed via 'spawn' of unsafe progs
+
+  - 'spawn native' that turns an unsafe prog into a safe proc by
+    *putting it in an OS subprocess*
+
+  - the ability to add 'auth' stanzas to crate files:
+
+      use std;
+      auth std.foo;  // consider 'unsafe' parts of std.foo 'safe'
+
+      use auth std;  // short for above
+
+
