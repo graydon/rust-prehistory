@@ -10,10 +10,12 @@ type span = {lo: pos; hi: pos}
 type node_id = Node of int
 type temp_id = Temp of int
 type opaque_id = Opaque of int
+type constr_id = Constr of int
 
 let int_of_node (Node i) = i
 let int_of_temp (Temp i) = i
 let int_of_opaque (Opaque i) = i
+let int_of_constr (Constr i) = i
 
 type 'a identified = { node: 'a; id: node_id }
 

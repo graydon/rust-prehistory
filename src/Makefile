@@ -9,12 +9,12 @@ ML_INCS:=-I fe -I me -I be -I driver -I util
 ML_LIBS=unix.cma nums.cma
 OCAMLC_FLAGS:=-g $(ML_INCS)
 
-# List them in link order, please!
+# List them in link order.
 # Nobody calculates the link-order DAG automatically, sadly.
-UTIL_BOT_MLS:=util/common.ml
+UTIL_BOT_MLS:=util/common.ml util/bitv.ml
 DRIVER_BOT_MLS:=driver/session.ml
-BE_MLS:=be/asm.ml be/il.ml be/abi.ml be/bitv.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml be/macho.ml
-ME_MLS:=me/walk.ml me/semant.ml me/resolve.ml me/alias.ml me/auto.ml me/layout.ml me/trans.ml be/dwarf.ml
+BE_MLS:=be/asm.ml be/il.ml be/abi.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml be/macho.ml
+ME_MLS:=me/walk.ml me/semant.ml me/resolve.ml me/alias.ml me/auto.ml me/type.ml me/typestate.ml me/layout.ml me/trans.ml be/dwarf.ml
 FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml
 DRIVER_TOP_MLS:=driver/main.ml
 

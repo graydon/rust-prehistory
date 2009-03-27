@@ -30,6 +30,7 @@ let (sess:Session.sess) =
     Session.sess_log_alias = false;
     Session.sess_log_auto = false;
     Session.sess_log_type = false;
+    Session.sess_log_typestate = false;
     Session.sess_log_layout = false;
     Session.sess_log_trans = false;
     Session.sess_log_dwarf = false;
@@ -64,6 +65,7 @@ let argspecs =
     ("-lalias", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log alias analysis");
     ("-lauto", Arg.Unit (fun _ -> sess.Session.sess_log_auto <- true), "log auto type-inference");
     ("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
+    ("-ltypestate", Arg.Unit (fun _ -> sess.Session.sess_log_typestate <- true), "log typestate checking");
     ("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
     ("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
     ("-ldwarf", Arg.Unit (fun _ -> sess.Session.sess_log_dwarf <- true), "log DWARF record generation");
@@ -142,6 +144,8 @@ let _ =
         [| Resolve.process_crate;
            Alias.process_crate;
            Auto.process_crate;
+           Type.process_crate;
+           Typestate.process_crate;
            Layout.process_crate |]
   end
 ;;

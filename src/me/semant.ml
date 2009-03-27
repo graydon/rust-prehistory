@@ -39,6 +39,18 @@ type ctxt =
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
+
+      (* 
+         The node_id in the constr table is the innermost block_id of
+         any of the constr's pred name or cargs; this is the
+         *outermost* block_id in which its constr_id can possibly be
+         shared. 
+      *)
+
+      ctxt_constrs: ((Ast.constr * node_id),constr_id) Hashtbl.t;
+      ctxt_prestates: (node_id,Bitv.t) Hashtbl.t;
+      ctxt_poststates: (node_id,Bitv.t) Hashtbl.t;
+
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
@@ -68,6 +80,9 @@ let new_ctxt sess abi crate =
     ctxt_item_files = crate.Ast.crate_files;
     ctxt_lval_to_referent = Hashtbl.create 0;
     ctxt_slot_aliased = Hashtbl.create 0;
+    ctxt_constrs = Hashtbl.create 0;
+    ctxt_prestates = Hashtbl.create 0;
+    ctxt_poststates = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_block_layouts = Hashtbl.create 0;
