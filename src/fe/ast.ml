@@ -132,9 +132,13 @@ and carg_base =
     BASE_formal
   | BASE_named of name_base
 
-and carg =
+and carg_path =
     CARG_base of carg_base
-  | CARG_ext of (carg * name_component)
+  | CARG_ext of (carg_path * name_component)
+
+and carg =
+    CARG_path of carg_path
+  | CARG_lit of lit
 
 and constr =
     {

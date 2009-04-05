@@ -28,7 +28,6 @@ progress:
  - x64, arm?
 
 code cleanup:
- - switch back to signless memory operands, make operations signed
  - move frame code to ABI
  - put logging and error-handling context in elf, pe, x86
  - use a datatype for kernel function codes, not int numbers

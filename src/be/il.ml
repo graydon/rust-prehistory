@@ -11,29 +11,31 @@ type reg = Vreg of vreg
            | Hreg of hreg
 ;;
 
+type mem = M8 | M16 | M32 | M64
+;;
 
 type operand =  Label of int
                 | Imm of Asm.expr64
                 | Pcrel of fixup
                 | Reg of reg
-                | Mem of (ty_mach * (reg option) * Asm.expr64)
+                | Mem of (mem * (reg option) * Asm.expr64)
                 | Nil
 ;;
-
 
 type op =
     ADD | SUB | NEG
   | IMUL | UMUL
   | IDIV | UDIV
   | IMOD | UMOD
-  | MOV | CMP
+  | IMOV | UMOV
+  | CMP
   | LEA
   | AND | OR | NOT
   | LSL | LSR | ASR
   | JE | JNE | JL | JLE | JG | JGE
   | JC | JNC | JO | JNO | JMP
   | CALL | RET | YIELD | RESUME
-  | CCALL | CPUSH of ty_mach | CPOP of ty_mach | CRET
+  | CCALL | CPUSH of mem | CPOP of mem | CRET
   | NOP | DEAD | END
 ;;
 
@@ -95,6 +97,13 @@ let string_of_operand (f:int->string) operand =
     | Nil -> "nil"
 ;;
 
+let string_of_mem m =
+  match m with
+      M8 -> "M8"
+    | M16 -> "M16"
+    | M32 -> "M32"
+    | M64 -> "M64"
+;;
 
 let string_of_op op =
   match op with
@@ -107,7 +116,8 @@ let string_of_op op =
     | IDIV -> "IDIV"
     | UMOD -> "UMOD"
     | IMOD -> "IMOD"
-    | MOV -> "MOV"
+    | UMOV -> "UMOV"
+    | IMOV -> "IMOV"
     | LEA -> "LEA"
     | CMP -> "CMP"
     | AND -> "AND"
@@ -132,8 +142,8 @@ let string_of_op op =
     | NOP -> "NOP"
     | DEAD -> "DEAD"
     | CCALL -> "CCALL"
-    | CPUSH m -> "CPUSH:" ^ string_of_ty_mach m
-    | CPOP m -> "CPOP:" ^ string_of_ty_mach m
+    | CPUSH m -> "CPUSH:" ^ string_of_mem m
+    | CPOP m -> "CPOP:" ^ string_of_mem m
     | CRET -> "CRET"
     | RESUME -> "RESUME"
     | YIELD -> "YIELD"
@@ -157,7 +167,7 @@ let string_of_quad f t =
           (string_of_op t.quad_op)
           (string_of_operand f t.quad_lhs)
 
-    | MOV ->
+    | IMOV | UMOV ->
         Printf.sprintf "%s = %s"
           (string_of_operand f t.quad_dst)
           (string_of_operand f t.quad_lhs)
@@ -264,19 +274,26 @@ let emit_full e fix op dst lhs rhs =
   let emit_quad q =
     (* decay mem-mem movs *)
     match (q.quad_op, q.quad_dst, q.quad_lhs) with
-        (MOV, Mem _, Mem _) ->
+        (UMOV, Mem _, Mem _)
+      | (IMOV, Mem _, Mem _)->
           begin
             let dst = q.quad_dst in
             let src = q.quad_lhs in
             let v =(Reg (next_vreg e)) in
-              emit_quad_bottom (mq MOV v src Nil);
-              emit_quad_bottom (mq MOV dst v Nil)
+              emit_quad_bottom (mq q.quad_op v src Nil);
+              emit_quad_bottom (mq q.quad_op dst v Nil)
           end
       | _ -> emit_quad_bottom q
   in
 
+  let default_mov =
+    match op with
+        IMOV | IDIV | IMUL | IMOD -> IMOV
+      | _ -> UMOV
+  in
+
   let emit_mov dst src =
-    emit_quad (mq MOV dst src Nil)
+    emit_quad (mq default_mov dst src Nil)
   in
 
   let quad = (mq op dst lhs rhs) in

@@ -97,8 +97,8 @@ let rt_field_procs = 3;;
 
 type abi =
   {
-    abi_ptr_sz: int64;
-    abi_ptr_ty: Common.ty_mach;
+    abi_word_sz: int64;
+    abi_word_mem: Il.mem;
 
     abi_is_2addr_machine: bool;
     abi_has_pcrel_loads: bool;

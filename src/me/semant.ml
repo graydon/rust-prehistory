@@ -287,7 +287,7 @@ let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
         let layouts = Array.map (fun (_,slot) -> layout_slot abi 0L slot) slots in
           pack off layouts
     | _ ->
-        new_layout off abi.Abi.abi_ptr_sz abi.Abi.abi_ptr_sz
+        new_layout off abi.Abi.abi_word_sz abi.Abi.abi_word_sz
 
 and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
   match s.Ast.slot_ty with

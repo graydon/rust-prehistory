@@ -186,7 +186,7 @@ let (text_items:Asm.item list) =
             spill_fix.fixup_mem_sz <-
               Some (Int64.mul
                       (Int64.of_int n_spills)
-                      abi.Abi.abi_ptr_sz);
+                      abi.Abi.abi_word_sz);
             match htab_search
               sem_cx.Semant.ctxt_fn_fixups
               text.Semant.text_node

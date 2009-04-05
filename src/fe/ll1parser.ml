@@ -528,13 +528,22 @@ and parse_carg_base ps =
     | _ -> Ast.BASE_named (parse_name_base ps)
 
 and parse_carg ps =
-  let base = Ast.CARG_base (parse_carg_base ps) in
-    match peek ps with
-        DOT ->
-          bump ps;
-          let comps = one_or_more DOT parse_name_component ps in
-            Array.fold_left (fun x y -> Ast.CARG_ext (x, y)) base comps
-      | _ -> base
+  match peek ps with
+      IDENT _ ->
+        begin
+          let base = Ast.CARG_base (parse_carg_base ps) in
+          let path =
+            match peek ps with
+                DOT ->
+                  bump ps;
+                  let comps = one_or_more DOT parse_name_component ps in
+                    Array.fold_left (fun x y -> Ast.CARG_ext (x, y)) base comps
+              | _ -> base
+          in
+            Ast.CARG_path path
+        end
+    | _ ->
+        Ast.CARG_lit (parse_lit ps)
 
 and parse_lval_component (ps:pstate)
     : (Ast.stmt array * Ast.lval_component) =
@@ -746,21 +755,18 @@ and build_tmp ps slot apos bpos =
     let tmp = Ast.LVAL_base (span ps apos bpos (Ast.BASE_temp nonce)) in
       (nonce, tmp, declstmt)
 
-
-and span_bump_lit ps ty lit =
-  let apos = lexpos ps in
-  let _ = bump ps in
-  let bpos = lexpos ps in
-    Ast.ATOM_literal (span ps apos bpos lit)
-
-
-and parse_atom ps =
+and parse_lit ps =
   match peek ps with
-      LIT_INT (n,s) -> span_bump_lit ps Ast.TY_int (Ast.LIT_int (n, s))
-    | LIT_STR str -> span_bump_lit ps Ast.TY_str (Ast.LIT_str str)
-    | LIT_CHAR ch -> span_bump_lit ps Ast.TY_char (Ast.LIT_char ch)
+      LIT_INT (n,s) -> (bump ps; Ast.LIT_int (n,s))
+    | LIT_STR s -> (bump ps; Ast.LIT_str s)
+    | LIT_CHAR c -> (bump ps; Ast.LIT_char c)
     | _ -> raise (unexpected ps)
 
+and parse_atom ps =
+  let apos = lexpos ps in
+  let lit = parse_lit ps in
+  let bpos = lexpos ps in
+    Ast.ATOM_literal (span ps apos bpos lit)
 
 and parse_bottom_expr ps =
   match peek ps with

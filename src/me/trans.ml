@@ -107,7 +107,7 @@ let trans_visitor
         Il.Reg r -> r
       | Il.Imm _ | Il.Mem _ ->
           let tmp = (Il.next_vreg (emitter())) in
-            emit Il.MOV (Il.Reg tmp) operand Il.Nil;
+            emit Il.UMOV (Il.Reg tmp) operand Il.Nil;
             tmp
       | _ -> err None "unhandled operand type in force_to_reg"
   in
@@ -150,7 +150,7 @@ let trans_visitor
                                   match atab_search layouts id with
                                       None -> bad ()
                                     | Some (slot, layout) ->
-                                        (Il.Mem (TY_u32, (Some base_reg),
+                                        (Il.Mem (Il.M32, (Some base_reg),
                                                  Asm.ADD (base_off, Asm.IMM layout.layout_offset)),
                                          slot)
                                 end
@@ -165,7 +165,7 @@ let trans_visitor
                                 if i < 0 || i >= Array.length layouts
                                 then bad ()
                                 else
-                                  (Il.Mem (TY_u32, (Some base_reg),
+                                  (Il.Mem (Il.M32, (Some base_reg),
                                            Asm.ADD (base_off, Asm.IMM layouts.(i).layout_offset)),
                                    entries.(i))
                           | _ -> bad ()
@@ -219,7 +219,7 @@ let trans_visitor
                                   None -> err (Some nb.id) "slot assigned to neither vreg nor layout"
                                 | Some layout ->
                                     let operand =
-                                      Il.Mem (TY_u32,
+                                      Il.Mem (Il.M32,
                                               (Some cx.ctxt_abi.Abi.abi_fp_reg),
                                               Asm.IMM layout.layout_offset)
                                     in
@@ -319,10 +319,10 @@ let trans_visitor
           in
           let rela cjmp =
             emit Il.CMP Il.Nil lhs rhs;
-            emit Il.MOV dst imm_true Il.Nil;
+            emit Il.UMOV dst imm_true Il.Nil;
             let j = mark () in
               emit cjmp Il.Nil badlab Il.Nil;
-              emit Il.MOV dst imm_false Il.Nil;
+              emit Il.UMOV dst imm_false Il.Nil;
               patch j;
               dst
           in
@@ -373,9 +373,9 @@ let trans_visitor
     let pp = cx.ctxt_abi.Abi.abi_pp_operand in
     let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
       cx.ctxt_abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
-      emit (Il.CPUSH TY_u32) Il.Nil v Il.Nil;
-      emit (Il.CPUSH TY_u32) Il.Nil (Il.Imm (Asm.IMM fn)) Il.Nil;
-      emit (Il.CPUSH TY_u32) Il.Nil pp Il.Nil;
+      emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+      emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM fn)) Il.Nil;
+      emit (Il.CPUSH Il.M32) Il.Nil pp Il.Nil;
       emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
       emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
       ()
@@ -411,8 +411,8 @@ let trans_visitor
             do
               let (_, (_, layout)) = layouts.(i) in
               let off = Asm.IMM layout.layout_offset in
-              let sub_src = Il.Mem (TY_u32, (Some src_reg), (Asm.ADD (off, src_off))) in
-              let sub_dst = Il.Mem (TY_u32, (Some dst_reg), (Asm.ADD (off, dst_off))) in
+              let sub_src = Il.Mem (Il.M32, (Some src_reg), (Asm.ADD (off, src_off))) in
+              let sub_dst = Il.Mem (Il.M32, (Some dst_reg), (Asm.ADD (off, dst_off))) in
               let (_, sub_src_slot) = src_slots.(i) in
               let (_, sub_dst_slot) = dst_slots.(i) in
               trans_copy_full
@@ -421,7 +421,7 @@ let trans_visitor
             done
 
       | _ ->
-          emit Il.MOV dst src Il.Nil
+          emit Il.UMOV dst src Il.Nil
 
 
   and trans_copy
@@ -434,7 +434,7 @@ let trans_visitor
            * is just MOV into the lval. *)
           let (dst_operand, _, _) = trans_lval dst in
           let src_operand = trans_expr src in
-            emit Il.MOV dst_operand src_operand Il.Nil
+            emit Il.UMOV dst_operand src_operand Il.Nil
 
       | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
           (* Possibly-large structure copying *)
@@ -484,7 +484,7 @@ let trans_visitor
              *)
             begin
               match dst_base with
-                  Il.Mem (TY_u32, reg, (Asm.IMM off)) ->
+                  Il.Mem (Il.M32, reg, (Asm.IMM off)) ->
                     let layouts = layout_rec slots in
                       begin
                         assert ((Array.length layouts) = (Array.length atab));
@@ -493,8 +493,8 @@ let trans_visitor
                              let (_, (_, layout)) = layouts.(i) in
                              let src = trans_atom v in
                              let off' = Asm.ADD (Asm.IMM off, Asm.IMM layout.layout_offset) in
-                             let dst = Il.Mem (TY_u32, reg, off') in
-                               emit Il.MOV dst src Il.Nil)
+                             let dst = Il.Mem (Il.M32, reg, off') in
+                               emit Il.UMOV dst src Il.Nil)
                           atab
                       end
                 | _ -> err (Some stmt.id) "translating init of non-memory record operand"
@@ -542,12 +542,12 @@ let trans_visitor
             lea outptr outmem;
             (* FIXME: factor out call protocol into ABI bits. *)
             for i = (Array.length args) - 1 downto 0 do
-              emit (Il.CPUSH TY_u32) Il.Nil (trans_atom args.(i)) Il.Nil
+              emit (Il.CPUSH Il.M32) Il.Nil (trans_atom args.(i)) Il.Nil
             done;
             (* Emit arg1: the process pointer. *)
-            emit (Il.CPUSH TY_u32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
+            emit (Il.CPUSH Il.M32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
             (* Emit arg0: the output slot. *)
-            emit (Il.CPUSH TY_u32) Il.Nil outptr Il.Nil;
+            emit (Il.CPUSH Il.M32) Il.Nil outptr Il.Nil;
             emit Il.CCALL vr fv Il.Nil;
             emit Il.ADD sp sp
               (Il.Imm (Asm.IMM (Int64.of_int (4 * (2 + (Array.length args))))));
@@ -563,13 +563,13 @@ let trans_visitor
                         None -> ()
                       | Some at ->
                           let outmem =
-                            Il.Mem (TY_u32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
+                            Il.Mem (Il.M32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
                                     (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)))
                           in
                           let outptr_reg = Il.next_vreg (emitter()) in
-                          let deref_outptr = Il.Mem (TY_u32, (Some outptr_reg), Asm.IMM 0L) in
-                            emit Il.MOV (Il.Reg outptr_reg) outmem Il.Nil;
-                            emit Il.MOV deref_outptr (trans_atom at) Il.Nil
+                          let deref_outptr = Il.Mem (Il.M32, (Some outptr_reg), Asm.IMM 0L) in
+                            emit Il.UMOV (Il.Reg outptr_reg) outmem Il.Nil;
+                            emit Il.UMOV deref_outptr (trans_atom at) Il.Nil
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;

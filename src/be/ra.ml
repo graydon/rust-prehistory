@@ -79,8 +79,8 @@ let kill_redundant_moves cx =
   for i = 0 to (Array.length cx.ctxt_quads) -1
   do
 	let q = cx.ctxt_quads.(i) in
-      match q.quad_op with 
-          MOV -> 
+      match q.quad_op with
+          UMOV | IMOV ->
             if q.quad_dst = q.quad_lhs
             then kill_quad i cx
         | _ -> ()
@@ -190,8 +190,10 @@ let calculate_live_bitvectors cx =
         done;
         for i = 0 to n_quads - 1 do
           let quad = quads.(i) in
-            match (quad.quad_op, quad.quad_dst)  with 
-                (MOV, Reg (Vreg v)) when not (Bitv.get (live_out_vregs.(i)) v) -> 
+            match (quad.quad_op, quad.quad_dst) with
+                (op, Reg (Vreg v))
+                  when (op = UMOV || op = IMOV) &&
+                    not (Bitv.get (live_out_vregs.(i)) v) ->
                   begin
                     kill_quad i cx;
                     outer_changed := true;
@@ -296,7 +298,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     in
     let spill_slot i = abi.Abi.abi_spill_slot framesz i in
     let hr_str = cx.ctxt_abi.Abi.abi_str_of_hardreg in
-    let mov a b = { quad_op = MOV; 
+    let mov a b = { quad_op = UMOV; 
                     quad_dst = a;
                     quad_lhs = b;
                     quad_rhs = Nil;

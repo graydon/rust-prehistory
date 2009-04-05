@@ -601,12 +601,12 @@ let pe_text_section
      * and assumed to be stdcall; so we have to clean up our own
      * stack before returning.
      *)
-    Il.emit e Il.MOV ecx (Il.Mem (TY_u32, None, (M_POS startup_fn_fixup))) Il.Nil;
-    Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS c_to_proc_fixup)) Il.Nil;
-    Il.emit e (Il.CPUSH TY_u32) Il.Nil (Il.Imm (M_POS startup_fn_arg_fixup)) Il.Nil;
+    Il.emit e Il.UMOV ecx (Il.Mem (Il.M32, None, (M_POS startup_fn_fixup))) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS c_to_proc_fixup)) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS startup_fn_arg_fixup)) Il.Nil;
     Il.emit e Il.CCALL eax ecx Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) ecx Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP TY_u32) ecx Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
     def_aligned
       text_fixup
