@@ -482,7 +482,7 @@ let fmt_proto (ff:Format.formatter) (p:proto) : unit =
 
 let rec fmt_app (ff:Format.formatter) (i:ident) (tys:ty array) : unit =
   fmt ff "%s[@[" i;
-  for i = 0 to Array.length tys;
+  for i = 0 to (Array.length tys) - 1;
   do
     if i != 0
     then fmt ff ",@ ";
@@ -525,7 +525,7 @@ and fmt_slot (ff:Format.formatter) (s:slot) : unit =
 
 and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) option) : unit =
   fmt ff "(@[";
-  for i = 0 to Array.length slots;
+  for i = 0 to (Array.length slots) - 1;
   do
     if i != 0
     then fmt ff ",@ ";

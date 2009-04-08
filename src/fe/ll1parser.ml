@@ -661,8 +661,13 @@ and parse_atomic_ty ps =
         let _ = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_rec_entry ps in
           Ast.TY_rec (arl (!ltab))
 
-    | LPAREN -> bracketed LPAREN RPAREN parse_ty ps
-
+    | LPAREN ->
+        let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps in
+          if Array.length slots = 1 && (slots.(0).Ast.slot_mode = Ast.MODE_interior)
+          then match slots.(0).Ast.slot_ty with
+              None -> raise (err "slot without type" ps )
+            | Some t -> t
+          else Ast.TY_tup slots
 
     | _ -> raise (unexpected ps)
 
@@ -698,9 +703,6 @@ and parse_identified_slot param_slot ps =
   let slot = parse_slot param_slot ps in
   let bpos = lexpos ps in
     span ps apos bpos slot
-
-and parse_tuple_ty ps =
-  one_or_more COMMA parse_ty ps
 
 and parse_constrained_ty ps =
   let base = ctxt "ty: base" parse_atomic_ty ps in
@@ -771,27 +773,34 @@ and parse_atom ps =
 and parse_bottom_expr ps =
   match peek ps with
       LPAREN ->
-        let _ = bump ps in
-        let (stmts, atom) = ctxt "paren expr" parse_expr ps in
-        let _ = expect ps RPAREN in
-          (stmts, atom)
+        let apos = lexpos ps in
+        let (stmts, atoms) = ctxt "paren expr(s)" (parse_expr_list LPAREN RPAREN) ps in
+        let bpos = lexpos ps in
+          if Array.length atoms = 1
+          then
+            (stmts, atoms.(0))
+          else
+            let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
+            let stmt = span ps apos bpos (Ast.STMT_init_tup (tmp, atoms)) in
+              (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
 
     | REC ->
         let apos = lexpos ps in
-        bump ps;
-        let (stmts, atab) = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
-        let bpos = lexpos ps in
-        let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-        let stmt = span ps apos bpos (Ast.STMT_init_rec (tmp, atab)) in
-          (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
+          bump ps;
+          let (stmts, atab) = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
+          let bpos = lexpos ps in
+          let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
+          let stmt = span ps apos bpos (Ast.STMT_init_rec (tmp, atab)) in
+            (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
 
     | VEC ->
         let apos = lexpos ps in
-        let (stmts, lvals) = ctxt "vec expr: exprs" (parse_expr_list LPAREN RPAREN) ps in
-        let bpos = lexpos ps in
-        let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-        let stmt = span ps apos bpos (Ast.STMT_init_vec (tmp, lvals)) in
-          (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
+          bump ps;
+          let (stmts, atoms) = ctxt "vec expr: exprs" (parse_expr_list LPAREN RPAREN) ps in
+          let bpos = lexpos ps in
+          let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
+          let stmt = span ps apos bpos (Ast.STMT_init_vec (tmp, atoms)) in
+            (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
 
     | IDENT _ ->
         let apos = lexpos ps in

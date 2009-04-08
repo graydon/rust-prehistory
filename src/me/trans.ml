@@ -443,6 +443,19 @@ let trans_visitor
                 sub_src sub_src_slot
             done
 
+      | (Il.Mem (_, (Some dst_reg), dst_off), Some (Ast.TY_tup dst_slots),
+         Il.Mem (_, (Some src_reg), src_off), Some (Ast.TY_tup src_slots)) ->
+          let layouts = layout_tup src_slots in
+            for i = 0 to (Array.length layouts) - 1
+            do
+              let disp = layouts.(i).layout_offset in
+              let sub_src = word_at_reg_off_imm src_reg src_off disp in
+              let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
+              trans_copy_full
+                sub_dst dst_slots.(i)
+                sub_src src_slots.(i)
+            done
+
       | _ ->
           emit Il.UMOV dst src Il.Nil
 
