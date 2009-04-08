@@ -32,6 +32,7 @@ let trans_visitor
   let pop_emitter _ = ignore (Stack.pop emitters) in
   let emitter _ = Stack.top emitters in
   let emit op dst lhs rhs = Il.emit (emitter()) op dst lhs rhs in
+  let next_vreg _ = Il.next_vreg (emitter()) in
   let mark _ : int = (emitter()).Il.emit_pc in
   let patch (i:int) : unit =
     (emitter()).Il.emit_quads.(i)
@@ -85,6 +86,8 @@ let trans_visitor
     String.concat "." (stk_elts_from_bot path)
   in
 
+  let (word_mem:Il.mem) = cx.ctxt_abi.Abi.abi_word_mem in
+
   let layout_rec (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
     let layouts = Array.map (fun (_,slot) -> layout_slot cx.ctxt_abi 0L slot) atab in
       begin
@@ -102,14 +105,40 @@ let trans_visitor
       layouts
   in
 
-  let force_to_reg operand =
-    match operand with
-        Il.Reg r -> r
-      | Il.Imm _ | Il.Mem _ ->
-          let tmp = (Il.next_vreg (emitter())) in
-            emit Il.UMOV (Il.Reg tmp) operand Il.Nil;
-            tmp
-      | _ -> err None "unhandled operand type in force_to_reg"
+  let word_at_reg_off (reg:Il.reg) (off:Asm.expr64) : Il.operand =
+    Il.Mem (word_mem, Some reg, off)
+  in
+
+  let word_at_fp_off (imm:int64) : Il.operand =
+    word_at_reg_off cx.ctxt_abi.Abi.abi_fp_reg (Asm.IMM imm)
+  in
+
+  let word_at_reg_off_imm
+      (reg:Il.reg)
+      (off:Asm.expr64)
+      (imm:int64)
+      : Il.operand =
+    word_at_reg_off reg (Asm.ADD (off, Asm.IMM imm))
+  in
+
+  let deref (mem:Il.operand) : Il.operand =
+    let reg = next_vreg() in
+    let res = word_at_reg_off reg (Asm.IMM 0L) in
+      emit Il.UMOV (Il.Reg reg) mem Il.Nil;
+      res
+  in
+
+  let force_to_reg (op:Il.operand) : Il.reg =
+    let mov _ =
+      let tmp = next_vreg () in
+        emit Il.UMOV (Il.Reg tmp) op Il.Nil;
+        tmp
+    in
+      match op with
+          Il.Reg r -> r
+        | Il.Imm _ -> mov ()
+        | Il.Mem (mem, _, _) when mem = word_mem -> mov ()
+        | _ -> err None "unhandled operand type in force_to_reg"
   in
 
   let trans_lval_ext
@@ -119,30 +148,26 @@ let trans_visitor
       (comp:Ast.lval_component)
       : (Il.operand * Ast.slot) =
 
-    let bad _ = err None "bad lval extension in trans_lval_ext" in
-
       match (base_slot.Ast.slot_ty, comp) with
           (Some (Ast.TY_rec entries),
            Ast.COMP_named (Ast.COMP_ident id)) ->
             let layouts = layout_rec entries in
-              begin
-                match atab_search layouts id with
-                    None -> bad ()
-                  | Some (slot, layout) ->
-                      (Il.Mem (Il.M32, (Some base_reg),
-                               Asm.ADD (base_off, Asm.IMM layout.layout_offset)),
-                       slot)
-              end
+            let (slot, layout) = atab_find layouts id in
+            let disp = layout.layout_offset in
+            let oper = (word_at_reg_off_imm
+                          base_reg base_off disp)
+            in
+              (oper, slot)
 
         | (Some (Ast.TY_tup entries),
            Ast.COMP_named (Ast.COMP_idx i)) ->
             let layouts = layout_tup entries in
-              if i < 0 || i >= Array.length layouts
-              then bad ()
-              else
-                (Il.Mem (Il.M32, (Some base_reg),
-                         Asm.ADD (base_off, Asm.IMM layouts.(i).layout_offset)),
-                 entries.(i))
+            let slot = entries.(i) in
+            let disp = layouts.(i).layout_offset in
+            let oper = (word_at_reg_off_imm
+                          base_reg base_off disp)
+            in
+              (oper, slot)
 
         | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
   in
@@ -219,12 +244,9 @@ let trans_visitor
                               match htab_search cx.ctxt_slot_layouts referent with
                                   None -> err (Some nb.id) "slot assigned to neither vreg nor layout"
                                 | Some layout ->
-                                    let operand =
-                                      Il.Mem (Il.M32,
-                                              (Some cx.ctxt_abi.Abi.abi_fp_reg),
-                                              Asm.IMM layout.layout_offset)
-                                    in
-                                      (operand, slot)
+                                    let disp = layout.layout_offset in
+                                    let oper = word_at_fp_off disp in
+                                      (oper, slot)
                             end
                     end
             end
@@ -411,9 +433,9 @@ let trans_visitor
             for i = 0 to (Array.length layouts) - 1
             do
               let (_, (_, layout)) = layouts.(i) in
-              let off = Asm.IMM layout.layout_offset in
-              let sub_src = Il.Mem (Il.M32, (Some src_reg), (Asm.ADD (off, src_off))) in
-              let sub_dst = Il.Mem (Il.M32, (Some dst_reg), (Asm.ADD (off, dst_off))) in
+              let disp = layout.layout_offset in
+              let sub_src = word_at_reg_off_imm src_reg src_off disp in
+              let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
               let (_, sub_src_slot) = src_slots.(i) in
               let (_, sub_dst_slot) = dst_slots.(i) in
               trans_copy_full
@@ -563,14 +585,10 @@ let trans_visitor
                     match atom_opt with
                         None -> ()
                       | Some at ->
-                          let outmem =
-                            Il.Mem (Il.M32, (Some cx.ctxt_abi.Abi.abi_fp_reg),
-                                    (Asm.IMM (cx.ctxt_abi.Abi.abi_frame_base_sz)))
-                          in
-                          let outptr_reg = Il.next_vreg (emitter()) in
-                          let deref_outptr = Il.Mem (Il.M32, (Some outptr_reg), Asm.IMM 0L) in
-                            emit Il.UMOV (Il.Reg outptr_reg) outmem Il.Nil;
-                            emit Il.UMOV deref_outptr (trans_atom at) Il.Nil
+                          let disp = cx.ctxt_abi.Abi.abi_frame_base_sz in
+                          let dst = deref (word_at_fp_off disp) in
+                          let src = trans_atom at in
+                            emit Il.UMOV dst src Il.Nil
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;

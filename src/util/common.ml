@@ -149,6 +149,11 @@ let atab_search (atab:('a * 'b) array) (a:'a) : ('b option) =
   in
     step 0
 
+let atab_find (atab:('a * 'b) array) (a:'a) : 'b =
+  match atab_search atab a with
+      None -> failwith "Not found"
+    | Some b -> b
+
 let rec ltab_search (ltab:('a * 'b) list) (a:'a) : ('b option) =
   match ltab with
       [] -> None
