@@ -446,16 +446,17 @@ let trans_visitor
       | (Il.Mem (_, (Some dst_reg), dst_off), Some (Ast.TY_tup dst_slots),
          Il.Mem (_, (Some src_reg), src_off), Some (Ast.TY_tup src_slots)) ->
           let layouts = layout_tup src_slots in
-            for i = 0 to (Array.length layouts) - 1
-            do
-              let disp = layouts.(i).layout_offset in
-              let sub_src = word_at_reg_off_imm src_reg src_off disp in
-              let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
-              trans_copy_full
-                sub_dst dst_slots.(i)
-                sub_src src_slots.(i)
-            done
-
+            Array.iteri
+              begin
+                fun i layout ->
+                  let disp = layout.layout_offset in
+                  let sub_src = word_at_reg_off_imm src_reg src_off disp in
+                  let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
+                    trans_copy_full
+                      sub_dst dst_slots.(i)
+                      sub_src src_slots.(i)
+              end
+              layouts
       | _ ->
           emit Il.UMOV dst src Il.Nil
 
@@ -525,15 +526,50 @@ let trans_visitor
                       begin
                         assert ((Array.length layouts) = (Array.length atab));
                         Array.iteri
-                          (fun i (_, v) ->
-                             let (_, (_, layout)) = layouts.(i) in
-                             let src = trans_atom v in
-                             let off' = Asm.ADD (Asm.IMM off, Asm.IMM layout.layout_offset) in
-                             let dst = Il.Mem (Il.M32, reg, off') in
-                               emit Il.UMOV dst src Il.Nil)
+                          begin
+                            fun i (_, v) ->
+                              let (_, (_, layout)) = layouts.(i) in
+                              let src = trans_atom v in
+                              let off' = Asm.ADD (Asm.IMM off, Asm.IMM layout.layout_offset) in
+                              let dst = Il.Mem (Il.M32, reg, off') in
+                                emit Il.UMOV dst src Il.Nil
+                          end
                           atab
                       end
                 | _ -> err (Some stmt.id) "translating init of non-memory record operand"
+            end
+
+      | Ast.STMT_init_tup ((Ast.LVAL_base nb_dst), atoms) ->
+          let (dst_base, _) = trans_lval (Ast.LVAL_base nb_dst) in
+          let slot = lval_to_slot nb_dst.id in
+          let slots = match slot.Ast.slot_ty with
+              Some (Ast.TY_tup slots) -> slots
+            | Some _ -> err (Some stmt.id) "translating init of incorrectly-typed rec slot"
+            | None -> err (Some stmt.id) "translating init of untyped rec slot"
+          in
+            (* 
+             * This is still a totally incorrect translation. Only does
+             * one-level (non-recursive) copying of tuples, only initializes
+             * name-base lvals, ignores component types, etc. etc.
+             *)
+            begin
+              match dst_base with
+                  Il.Mem (Il.M32, reg, (Asm.IMM off)) ->
+                    let layouts = layout_tup slots in
+                      begin
+                        assert ((Array.length layouts) = (Array.length atoms));
+                        Array.iteri
+                          begin
+                            fun i v ->
+                              let src = trans_atom v in
+                              let disp = layouts.(i).layout_offset in
+                              let off' = Asm.ADD (Asm.IMM off, Asm.IMM disp) in
+                              let dst = Il.Mem (Il.M32, reg, off') in
+                                emit Il.UMOV dst src Il.Nil
+                          end
+                          atoms
+                      end
+                | _ -> err (Some stmt.id) "translating init of non-memory tuple operand"
             end
 
       | Ast.STMT_block block ->
