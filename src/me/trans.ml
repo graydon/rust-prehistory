@@ -442,43 +442,63 @@ let trans_visitor
     ignore (Stack.pop block_layouts)
 
 
-  and trans_copy_full
+  and trans_copy_rec
+      (dst_reg:Il.reg option) (dst_off:Asm.expr64) (dst_entries:Ast.ty_rec)
+      (src_reg:Il.reg option) (src_off:Asm.expr64) (src_entries:Ast.ty_rec)
+      : unit =
+    let layouts = layout_rec dst_entries in
+      Array.iteri
+        begin
+          fun i (_, (_, layout)) ->
+            let disp = layout.layout_offset in
+            let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
+            let sub_src = word_at_reg_off_imm src_reg src_off disp in
+            let (_, sub_dst_slot) = dst_entries.(i) in
+            let (_, sub_src_slot) = src_entries.(i) in
+              trans_copy_slots
+                sub_dst sub_dst_slot
+                sub_src sub_src_slot
+        end
+        layouts
+
+
+  and trans_copy_tup
+      (dst_reg:Il.reg option) (dst_off:Asm.expr64) (dst_slots:Ast.ty_tup)
+      (src_reg:Il.reg option) (src_off:Asm.expr64) (src_slots:Ast.ty_tup)
+      : unit =
+    let layouts = layout_tup dst_slots in
+      Array.iteri
+        begin
+          fun i layout ->
+            let disp = layout.layout_offset in
+            let sub_src = word_at_reg_off_imm src_reg src_off disp in
+            let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
+              trans_copy_slots
+                sub_dst dst_slots.(i)
+                sub_src src_slots.(i)
+        end
+        layouts
+
+
+  and trans_copy_slots
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
-    assert (src_slot.Ast.slot_ty = dst_slot.Ast.slot_ty);
+    assert (slot_ty src_slot = slot_ty dst_slot);
     match (dst, dst_slot.Ast.slot_ty,
            src, src_slot.Ast.slot_ty) with
-        (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_slots),
-         Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_slots)) ->
-          let layouts = layout_rec src_slots in
-            for i = 0 to (Array.length layouts) - 1
-            do
-              let (_, (_, layout)) = layouts.(i) in
-              let disp = layout.layout_offset in
-              let sub_src = word_at_reg_off_imm src_reg src_off disp in
-              let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
-              let (_, sub_src_slot) = src_slots.(i) in
-              let (_, sub_dst_slot) = dst_slots.(i) in
-              trans_copy_full
-                sub_dst sub_dst_slot
-                sub_src sub_src_slot
-            done
+        (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
+         Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_entries)) ->
+          trans_copy_rec
+            dst_reg dst_off dst_entries
+            src_reg src_off src_entries
 
       | (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_tup dst_slots),
          Il.Mem (_, src_reg, src_off), Some (Ast.TY_tup src_slots)) ->
-          let layouts = layout_tup src_slots in
-            Array.iteri
-              begin
-                fun i layout ->
-                  let disp = layout.layout_offset in
-                  let sub_src = word_at_reg_off_imm src_reg src_off disp in
-                  let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
-                    trans_copy_full
-                      sub_dst dst_slots.(i)
-                      sub_src src_slots.(i)
-              end
-              layouts
+          trans_copy_tup
+            dst_reg dst_off dst_slots
+            src_reg src_off src_slots
+
       | _ ->
           emit Il.UMOV dst src Il.Nil
 
@@ -487,10 +507,13 @@ let trans_visitor
       (dst:Ast.lval)
       (src:Ast.expr) : unit =
     match src with
-        (Ast.EXPR_binary _) | (Ast.EXPR_unary _)
+        (Ast.EXPR_binary _)
+      | (Ast.EXPR_unary _)
       | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
-          (* Translations of both these expr types yield vregs, so copy
-           * is just MOV into the lval. *)
+          (* 
+           * Translations of these expr types yield vregs, 
+           * so copy is just MOV into the lval. 
+           *)
           let (dst_operand, _) = trans_lval dst in
           let src_operand = trans_expr src in
             emit Il.UMOV dst_operand src_operand Il.Nil
@@ -499,7 +522,7 @@ let trans_visitor
           (* Possibly-large structure copying *)
           let (dst_operand, dst_slot) = trans_lval dst in
           let (src_operand, src_slot) = trans_lval src_lval in
-            trans_copy_full
+            trans_copy_slots
               dst_operand dst_slot
               src_operand src_slot
 
@@ -528,49 +551,51 @@ let trans_visitor
       | Ast.STMT_copy (lv_dst, e_src) ->
           trans_copy lv_dst e_src
 
-      | Ast.STMT_init_rec ((Ast.LVAL_base nb_dst), atab) ->
-          (* 
-           * This is still a totally incorrect translation. Only does
-           * one-level (non-recursive) copying of records, only initializes
-           * name-base lvals, ignores component types, etc. etc.
-           *)
+      | Ast.STMT_init_rec (dst, atab) ->
           begin
-            let (dst_base, _) = trans_lval (Ast.LVAL_base nb_dst) in
-            let slot = lval_to_slot nb_dst.id in
-            let layouts = layout_rec (rec_slot_entries slot) in
-            let (reg, off) = get_reg_off dst_base in
+            let (dst_operand, dst_slot) = trans_lval dst in
+            let dst_entries = rec_slot_entries dst_slot in
+            let layouts = layout_rec dst_entries in
+            let (reg, off) = get_reg_off dst_operand in
               assert ((Array.length layouts) = (Array.length atab));
               Array.iteri
                 begin
-                  fun i (_, v) ->
-                    let src = trans_atom v in
+                  fun i (_, atom) ->
                     let (_, (_, layout)) = layouts.(i) in
                     let disp = layout.layout_offset in
-                    let dst = word_at_reg_off_imm reg off disp in
-                      emit Il.UMOV dst src Il.Nil
+                    let sub_dst = word_at_reg_off_imm reg off disp in
+                    let sub_src = trans_atom atom in
+                    let (_, sub_dst_slot) = dst_entries.(i) in
+                    let sub_src_slot = { sub_dst_slot with
+                                           Ast.slot_mode = Ast.MODE_interior }
+                    in
+                      trans_copy_slots
+                        sub_dst sub_dst_slot
+                        sub_src sub_src_slot
                 end
                 atab
           end
 
-      | Ast.STMT_init_tup ((Ast.LVAL_base nb_dst), atoms) ->
-          (* 
-           * This is still a totally incorrect translation. Only does
-           * one-level (non-recursive) copying of tuples, only initializes
-           * name-base lvals, ignores component types, etc. etc.
-           *)
+      | Ast.STMT_init_tup (dst, atoms) ->
           begin
-            let (dst_base, _) = trans_lval (Ast.LVAL_base nb_dst) in
-            let slot = lval_to_slot nb_dst.id in
-            let layouts = layout_tup (tup_slot_slots slot) in
-            let (reg, off) = get_reg_off dst_base in
+            let (dst_operand, dst_slot) = trans_lval dst in
+            let dst_slots = tup_slot_slots dst_slot in
+            let layouts = layout_tup dst_slots in
+            let (reg, off) = get_reg_off dst_operand in
               assert ((Array.length layouts) = (Array.length atoms));
               Array.iteri
                 begin
-                  fun i v ->
-                    let src = trans_atom v in
+                  fun i atom ->
                     let disp = layouts.(i).layout_offset in
-                    let dst = word_at_reg_off_imm reg off disp in
-                      emit Il.UMOV dst src Il.Nil
+                    let sub_dst = word_at_reg_off_imm reg off disp in
+                    let sub_src = trans_atom atom in
+                    let sub_dst_slot = dst_slots.(i) in
+                    let sub_src_slot = { sub_dst_slot with
+                                           Ast.slot_mode = Ast.MODE_interior }
+                    in
+                      trans_copy_slots
+                        sub_dst sub_dst_slot
+                        sub_src sub_src_slot
                 end
                 atoms
           end
