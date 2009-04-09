@@ -111,18 +111,6 @@ let trans_visitor
       | None -> err None "untyped slot"
   in
 
-  let tup_slot_slots (s:Ast.slot) : Ast.slot array =
-    match slot_ty s with
-        Ast.TY_tup slots -> slots
-      | _ -> err None "incorrectly-typed tup slot"
-  in
-
-  let rec_slot_entries (s:Ast.slot) : Ast.ty_rec =
-    match slot_ty s with
-        Ast.TY_rec entries -> entries
-      | _ -> err None "incorrectly-typed rec slot"
-  in
-
   let word_at_reg_off (reg:Il.reg option) (off:Asm.expr64) : Il.operand =
     Il.Mem (word_mem, reg, off)
   in
@@ -552,53 +540,24 @@ let trans_visitor
           trans_copy lv_dst e_src
 
       | Ast.STMT_init_rec (dst, atab) ->
-          begin
-            let (dst_operand, dst_slot) = trans_lval dst in
-            let dst_entries = rec_slot_entries dst_slot in
-            let layouts = layout_rec dst_entries in
-            let (reg, off) = get_reg_off dst_operand in
-              assert ((Array.length layouts) = (Array.length atab));
-              Array.iteri
-                begin
-                  fun i (_, atom) ->
-                    let (_, (_, layout)) = layouts.(i) in
-                    let disp = layout.layout_offset in
-                    let sub_dst = word_at_reg_off_imm reg off disp in
-                    let sub_src = trans_atom atom in
-                    let (_, sub_dst_slot) = dst_entries.(i) in
-                    let sub_src_slot = { sub_dst_slot with
-                                           Ast.slot_mode = Ast.MODE_interior }
-                    in
-                      trans_copy_slots
-                        sub_dst sub_dst_slot
-                        sub_src sub_src_slot
-                end
-                atab
-          end
+          Array.iter
+            begin
+              fun (ident, atom) ->
+                let lval = Ast.LVAL_ext (dst, Ast.COMP_named (Ast.COMP_ident ident)) in
+                let expr = Ast.EXPR_atom atom in
+                  trans_copy lval expr
+            end
+            atab
 
       | Ast.STMT_init_tup (dst, atoms) ->
-          begin
-            let (dst_operand, dst_slot) = trans_lval dst in
-            let dst_slots = tup_slot_slots dst_slot in
-            let layouts = layout_tup dst_slots in
-            let (reg, off) = get_reg_off dst_operand in
-              assert ((Array.length layouts) = (Array.length atoms));
-              Array.iteri
-                begin
-                  fun i atom ->
-                    let disp = layouts.(i).layout_offset in
-                    let sub_dst = word_at_reg_off_imm reg off disp in
-                    let sub_src = trans_atom atom in
-                    let sub_dst_slot = dst_slots.(i) in
-                    let sub_src_slot = { sub_dst_slot with
-                                           Ast.slot_mode = Ast.MODE_interior }
-                    in
-                      trans_copy_slots
-                        sub_dst sub_dst_slot
-                        sub_src sub_src_slot
-                end
-                atoms
-          end
+          Array.iteri
+            begin
+              fun i atom ->
+                let lval = Ast.LVAL_ext (dst, Ast.COMP_named (Ast.COMP_idx i)) in
+                let expr = Ast.EXPR_atom atom in
+                  trans_copy lval expr
+            end
+            atoms
 
       | Ast.STMT_block block ->
           trans_block block
