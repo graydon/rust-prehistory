@@ -192,74 +192,75 @@ let trans_visitor
       (imm_ok:bool)
       : (Il.operand * Ast.slot) =
 
-    let return_fixup fix =
+    let return_fixup (fix:fixup) (slot:Ast.slot)
+        : (Il.operand * Ast.slot) =
       if pcrel_ok
-      then Il.Pcrel fix
+      then (Il.Pcrel fix, slot)
       else
         let imm = (Il.Imm (Asm.M_POS fix)) in
           if imm_ok
-          then imm
-          else Il.Reg (force_to_reg imm)
+          then (imm, slot)
+          else (Il.Reg (force_to_reg imm), slot)
+    in
+
+    let return_item (item:Ast.mod_item') (referent:node_id)
+        : (Il.operand * Ast.slot) =
+      let ty = ty_of_mod_item { node=item; id=referent; } in
+      let slot = { Ast.slot_mode = Ast.MODE_read_alias;
+                   Ast.slot_ty = Some ty }
+      in
+        match item with
+            Ast.MOD_ITEM_fn _ ->
+              return_fixup (get_fn_fixup referent) slot
+          | Ast.MOD_ITEM_prog _ ->
+              return_fixup (get_prog_fixup referent) slot
+          | _ ->
+              err (Some referent)
+                "unhandled item type in trans_lval_full"
+    in
+
+    let cell_vreg_num (vr:(int option) ref) : int =
+      match !vr with
+          None ->
+              let v = (Il.next_vreg_num (emitter())) in
+                vr := Some v;
+                v
+        | Some v -> v
+    in
+
+    let return_slot (slot:Ast.slot) (referent:node_id)
+        : (Il.operand * Ast.slot) =
+      match htab_search cx.ctxt_slot_vregs referent with
+          Some vr ->
+            (Il.Reg (Il.Vreg (cell_vreg_num vr)), slot)
+        | None ->
+            begin
+              match htab_search cx.ctxt_slot_layouts referent with
+                  None ->
+                    err (Some referent)
+                      "slot assigned to neither vreg nor layout"
+                | Some layout ->
+                    let disp = layout.layout_offset in
+                    let oper = word_at_fp_off disp in
+                      (oper, slot)
+            end
     in
 
       match lv with
           Ast.LVAL_ext (base, comp) ->
-            begin
-              let (base_operand, base_slot) = trans_lval_full base false true in
-              (* Most of the errors in this block shouldn't make it past typechecking. *)
-              let (base_reg, base_off) = get_reg_off base_operand in
-                trans_lval_ext base_slot base_reg base_off comp
-            end
+            let (base_operand, base_slot) = trans_lval_full base false true in
+            let (base_reg, base_off) = get_reg_off base_operand in
+              trans_lval_ext base_slot base_reg base_off comp
 
         | Ast.LVAL_base nb ->
             let referent = lval_to_referent nb.id in
               begin
                 match htab_search cx.ctxt_all_items referent with
-                  Some item ->
-                    begin
-                      let ty = ty_of_mod_item { node=item; id=referent; } in
-                      let slot = { Ast.slot_mode = Ast.MODE_read_alias;
-                                   Ast.slot_ty = Some ty }
-                      in
-                        match item with
-                            Ast.MOD_ITEM_fn _ ->
-                              (return_fixup (get_fn_fixup referent), slot)
-                          | Ast.MOD_ITEM_prog _ ->
-                              (return_fixup (get_prog_fixup referent), slot)
-                          | _ ->
-                              err (Some nb.id)
-                                "unhandled item type in trans_lval_full, item #%d"
-                                (int_of_node referent)
-                    end
+                    Some item -> return_item item referent
                   | None ->
-                    begin
                       let slot = lval_to_slot nb.id in
-                      match htab_search cx.ctxt_slot_vregs referent with
-                          Some vr ->
-                            begin
-                              let vreg =
-                                match !vr with
-                                    None ->
-                                      begin
-                                        let v = (Il.next_vreg_num (emitter())) in
-                                          vr := Some v;
-                                          v
-                                      end
-                                  | Some v -> v
-                              in
-                                (Il.Reg (Il.Vreg vreg), slot)
-                            end
-                        | None ->
-                            begin
-                              match htab_search cx.ctxt_slot_layouts referent with
-                                  None -> err (Some nb.id) "slot assigned to neither vreg nor layout"
-                                | Some layout ->
-                                    let disp = layout.layout_offset in
-                                    let oper = word_at_fp_off disp in
-                                      (oper, slot)
-                            end
-                    end
-            end
+                        return_slot slot referent
+              end
   in
 
   let trans_lval (lv:Ast.lval) : (Il.operand * Ast.slot) =
@@ -543,7 +544,10 @@ let trans_visitor
           Array.iter
             begin
               fun (ident, atom) ->
-                let lval = Ast.LVAL_ext (dst, Ast.COMP_named (Ast.COMP_ident ident)) in
+                let lval = (Ast.LVAL_ext
+                              (dst, (Ast.COMP_named
+                                       (Ast.COMP_ident ident))))
+                in
                 let expr = Ast.EXPR_atom atom in
                   trans_copy lval expr
             end
@@ -553,7 +557,10 @@ let trans_visitor
           Array.iteri
             begin
               fun i atom ->
-                let lval = Ast.LVAL_ext (dst, Ast.COMP_named (Ast.COMP_idx i)) in
+                let lval = (Ast.LVAL_ext
+                              (dst, (Ast.COMP_named
+                                       (Ast.COMP_idx i))))
+                in
                 let expr = Ast.EXPR_atom atom in
                   trans_copy lval expr
             end
