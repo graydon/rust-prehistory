@@ -34,13 +34,13 @@ xcalloc(size_t sz)
   return p;
 }
 
-static void CDECL
+static void
 rust_log_uint32_t(uint32_t i)
 {
   printf("rt: log_uint32(0x%" PRIx32 ")\n", i);
 }
 
-static void CDECL
+static void
 rust_log_str(char *c)
 {
   printf("rt: log_str(\"%s\")\n", c);
@@ -188,6 +188,16 @@ rust_sched(rust_rt_t *rt)
   return rt->procs[rt->curr_proc];
 }
 
+static void
+rust_check_expr(rust_proc_t *proc, uint32_t i)
+{
+  if (!i) {
+    /* FIXME: throw, don't just exit. */
+    printf("\nrt: *** CHECK FAILED ***\n\n");
+    proc->state = RUST_PROC_STATE_EXITING;
+  }
+}
+
 void
 rust_handle_fn(rust_proc_t *proc)
 {
@@ -224,6 +234,9 @@ rust_handle_fn(rust_proc_t *proc)
     break;
   case 2:
     rust_spawn_proc(proc->rt, (rust_prog_t*)args[0]);
+    break;
+  case 3:
+    rust_check_expr(proc, args[0]);
     break;
       /*;
   case 3:

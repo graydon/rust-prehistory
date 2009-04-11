@@ -418,6 +418,7 @@ let trans_visitor
   let trans_log_int (a:Ast.atom) : unit = trans_1_arg_kern_fn a 0L in
   let trans_log_str (a:Ast.atom) : unit = trans_1_arg_kern_fn a 1L in
   let trans_spawn (a:Ast.atom) : unit = trans_1_arg_kern_fn a 2L in
+  let trans_check_expr (a:Ast.atom) : unit = trans_1_arg_kern_fn a 3L in
 
   let lea (dst:Il.operand) (src:Il.operand) : unit =
     match src with
@@ -533,6 +534,13 @@ let trans_visitor
                 Ast.TY_str -> trans_log_str a
               | Ast.TY_int -> trans_log_int a
               | _ -> err (Some stmt.id) "unimplemented logging type"
+          end
+
+      | Ast.STMT_check_expr a ->
+          begin
+            match atom_type a with
+                Ast.TY_bool -> trans_check_expr a
+              | _ -> err (Some stmt.id) "check expr on non-bool"
           end
 
       | Ast.STMT_spawn a -> trans_spawn a

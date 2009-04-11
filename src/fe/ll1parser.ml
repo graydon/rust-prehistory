@@ -1027,6 +1027,20 @@ and parse_stmts ps =
             let bpos = lexpos ps in
               spans stmts apos bpos (Ast.STMT_spawn atom)
 
+      | CHECK ->
+          bump ps;
+          begin
+            match peek ps with
+                LPAREN ->
+                  bump ps;
+                  let (stmts, atom) = ctxt "stmts: check value" parse_expr ps in
+                    expect ps RPAREN;
+                    expect ps SEMI;
+                    let bpos = lexpos ps in
+                      spans stmts apos bpos (Ast.STMT_check_expr atom)
+              | _ -> raise (unexpected ps)
+          end
+
       | IF ->
           bump ps;
           let (stmts, atom) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
@@ -1190,39 +1204,43 @@ and parse_stmts ps =
 
       | IDENT _ ->
           let (lstmts, lval) = ctxt "stmt: lval" parse_lval ps in
-            (match peek ps with
+            begin
+              match peek ps with
 
-                 LPAREN ->
-                   let (astmts, args) = ctxt "stmt: call args" (parse_expr_list LPAREN RPAREN) ps in
-                   let _ = expect ps SEMI in
-                   let stmts = Array.append lstmts astmts in
-                   let bpos = lexpos ps in
-                   let (nonce, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
-                   let call = span ps apos bpos (Ast.STMT_call ((respan ps tmp), lval, args)) in
-                     Array.append stmts [| tempdecl; call |]
+                  LPAREN ->
+                    let (astmts, args) = ctxt "stmt: call args" (parse_expr_list LPAREN RPAREN) ps in
+                    let _ = expect ps SEMI in
+                    let stmts = Array.append lstmts astmts in
+                    let bpos = lexpos ps in
+                    let (nonce, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
+                    let call = span ps apos bpos (Ast.STMT_call ((respan ps tmp), lval, args)) in
+                      Array.append stmts [| tempdecl; call |]
 
-               | EQ ->
-                   bump ps;
-                   begin
-                     let (stmts, atom) = ctxt "stmt: copy rval" parse_expr ps in
-                     let _ = expect ps SEMI in
-                     let bpos = lexpos ps in
-                       spans stmts apos bpos (Ast.STMT_copy (lval, Ast.EXPR_atom atom))
-                   end
+                | EQ ->
+                    bump ps;
+                    begin
+                      let (stmts, atom) = ctxt "stmt: copy rval" parse_expr ps in
+                      let _ = expect ps SEMI in
+                      let bpos = lexpos ps in
+                        spans stmts apos bpos (Ast.STMT_copy (lval, Ast.EXPR_atom atom))
+                    end
 
-               | LARROW ->
-                   let (stmts, rhs) = ctxt "stmt: recv rhs" parse_lval ps in
-                   let _ = expect ps SEMI in
-                   let bpos = lexpos ps in
-                     spans stmts apos bpos (Ast.STMT_recv (lval, rhs))
+                | LARROW ->
+                    bump ps;
+                    let (stmts, rhs) = ctxt "stmt: recv rhs" parse_lval ps in
+                    let _ = expect ps SEMI in
+                    let bpos = lexpos ps in
+                      spans stmts apos bpos (Ast.STMT_recv (lval, rhs))
 
-               | SEND ->
-                   let (stmts, rhs) = ctxt "stmt: send rhs" parse_expr ps in
-                   let _ = expect ps SEMI in
-                   let bpos = lexpos ps in
-                     spans stmts apos bpos (Ast.STMT_send (lval, rhs))
+                | SEND ->
+                    bump ps;
+                    let (stmts, rhs) = ctxt "stmt: send rhs" parse_expr ps in
+                    let _ = expect ps SEMI in
+                    let bpos = lexpos ps in
+                      spans stmts apos bpos (Ast.STMT_send (lval, rhs))
 
-               | _ -> raise (unexpected ps))
+                | _ -> raise (unexpected ps)
+            end
 
       | _ -> raise (unexpected ps)
 

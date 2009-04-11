@@ -376,6 +376,9 @@ and walk_stmt
           walk_lval v lv;
           Array.iter (walk_atom v) ats
 
+      | Ast.STMT_check_expr at ->
+          walk_atom v at
+
       (* FIXME: finish this as needed. *)
       | Ast.STMT_foreach f -> ()
       | Ast.STMT_for f -> ()

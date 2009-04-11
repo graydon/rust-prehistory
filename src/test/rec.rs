@@ -7,6 +7,6 @@ prog a
     let rect rectv = rec(x=10, y=20, w=100, h=200);
     let rect rect2 = rectv;
     let int y = rect2.x;
-    log y;
+    check (y == 10);
   }
 }

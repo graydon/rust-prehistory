@@ -3,22 +3,22 @@
 prog root
 {
   fn f(int x) -> int {
-    log "in f:";
-    log x;
+    // log "in f:";
+    // log x;
     if (x == 1) {
-      log "bottoming out";
+      // log "bottoming out";
       ret 1;
     } else {
-      log "recurring";
+      // log "recurring";
       let int y = x * f(x-1);
-      log "returned";
-      log y;
+      // log "returned";
+      // log y;
       ret y;
     }
   }
   main {
-    log f(5);
-    log "all done";
+    check (f(5) == 120);
+    // log "all done";
   }
 }
 

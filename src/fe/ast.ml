@@ -222,6 +222,7 @@ and stmt' =
   | STMT_alt_port of stmt_alt_port
   | STMT_prove of (constrs)
   | STMT_check of (constrs)
+  | STMT_check_expr of atom
   | STMT_checkif of (constrs * stmt)
   | STMT_block of block
   | STMT_copy of (lval * expr)
