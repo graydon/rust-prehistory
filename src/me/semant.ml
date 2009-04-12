@@ -118,13 +118,13 @@ let err (idopt:node_id option) =
 
 (* Mappings between mod items and their respective types. *)
 
-let rec ty_mod_of_mod (m:Ast.mod_items) : Ast.mod_type_items =
+let rec ty_mod_of_mod (inside:bool) (m:Ast.mod_items) : Ast.mod_type_items =
   let ty_items = Hashtbl.create (Hashtbl.length m) in
-  let add n i = Hashtbl.add ty_items n (mod_type_item_of_mod_item i) in
+  let add n i = Hashtbl.add ty_items n (mod_type_item_of_mod_item inside i) in
     Hashtbl.iter add m;
     ty_items
 
-and mod_type_item_of_mod_item (item:Ast.mod_item) : Ast.mod_type_item =
+and mod_type_item_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.mod_type_item =
   let decl params item =
     { Ast.decl_params = params;
       Ast.decl_item = item }
@@ -132,13 +132,17 @@ and mod_type_item_of_mod_item (item:Ast.mod_item) : Ast.mod_type_item =
   let ty =
     match item.node with
         Ast.MOD_ITEM_opaque_type td ->
-          (match (td.Ast.decl_params, td.Ast.decl_item) with
-               (params, Ast.TY_lim _) ->
-                 Ast.MOD_TYPE_ITEM_opaque_type
-                   (decl params Ast.LIMITED)
-             | (params, _) ->
-                 Ast.MOD_TYPE_ITEM_opaque_type
-                   (decl params Ast.UNLIMITED))
+          if inside
+          then
+            Ast.MOD_TYPE_ITEM_public_type td
+          else
+            (match (td.Ast.decl_params, td.Ast.decl_item) with
+                 (params, Ast.TY_lim _) ->
+                   Ast.MOD_TYPE_ITEM_opaque_type
+                     (decl params Ast.LIMITED)
+               | (params, _) ->
+                   Ast.MOD_TYPE_ITEM_opaque_type
+                     (decl params Ast.UNLIMITED))
       | Ast.MOD_ITEM_public_type td ->
           Ast.MOD_TYPE_ITEM_public_type td
       | Ast.MOD_ITEM_pred pd ->
@@ -146,7 +150,7 @@ and mod_type_item_of_mod_item (item:Ast.mod_item) : Ast.mod_type_item =
             (decl pd.Ast.decl_params (ty_pred_of_pred pd.Ast.decl_item))
       | Ast.MOD_ITEM_mod md ->
             Ast.MOD_TYPE_ITEM_mod
-              (decl md.Ast.decl_params (ty_mod_of_mod md.Ast.decl_item))
+              (decl md.Ast.decl_params (ty_mod_of_mod true md.Ast.decl_item))
       | Ast.MOD_ITEM_fn fd ->
           Ast.MOD_TYPE_ITEM_fn
             (decl fd.Ast.decl_params (ty_fn_of_fn fd.Ast.decl_item))
@@ -162,9 +166,7 @@ and ty_prog_of_prog (prog:Ast.prog) : Ast.ty_prog =
     match prog.Ast.prog_init with
         None -> None
       | Some init -> Some (arg_slots init.node.Ast.init_input_slots)
-  in
-    { Ast.prog_mod_ty = ty_mod_of_mod prog.Ast.prog_mod;
-      Ast.prog_init_ty = init_ty; }
+  in init_ty
 
 and arg_slots (slots:((Ast.slot identified) * Ast.ident) array) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
@@ -178,7 +180,7 @@ and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
   arg_slots pred.Ast.pred_input_slots
 
 
-and ty_of_mod_item (item:Ast.mod_item) : Ast.ty =
+and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
   let check_concrete params ty =
     if Array.length params = 0
     then ty
@@ -197,7 +199,7 @@ and ty_of_mod_item (item:Ast.mod_item) : Ast.ty =
 
       | Ast.MOD_ITEM_mod md ->
           check_concrete md.Ast.decl_params
-            (Ast.TY_mod (ty_mod_of_mod md.Ast.decl_item))
+            (Ast.TY_mod (ty_mod_of_mod inside md.Ast.decl_item))
 
       | Ast.MOD_ITEM_fn fd ->
           check_concrete fd.Ast.decl_params

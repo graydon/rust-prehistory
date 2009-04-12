@@ -203,8 +203,7 @@ and walk_ty_prog
     (v:visitor)
     (tprog:Ast.ty_prog)
     : unit =
-  walk_mod_type_items v tprog.Ast.prog_mod_ty;
-  walk_option (Array.iter (walk_slot v)) tprog.Ast.prog_init_ty
+  walk_option (Array.iter (walk_slot v)) tprog
 
 
 and walk_mod_type_item

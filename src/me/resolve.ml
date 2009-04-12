@@ -169,9 +169,21 @@ let type_resolving_visitor
         | (Ast.MOD_ITEM_public_type td) -> td.Ast.decl_item
         | _ -> err None "identifier '%s' resolves to non-type" ident
     in
+    let check_type_item (i:Ast.mod_type_item') : Ast.ty =
+      match i with
+          (Ast.MOD_TYPE_ITEM_public_type td) -> td.Ast.decl_item
+        | (Ast.MOD_TYPE_ITEM_opaque_type td) ->
+            err None "identifier '%s' resolves to opaque type" ident
+        | _ -> err None "identifier '%s' resolves to non-type" ident
+    in
     let check_item_option (iopt:Ast.mod_item option) : Ast.ty option =
       match iopt with
           Some i -> Some (check_item i.node)
+        | _ -> None
+    in
+    let check_type_item_option (iopt:Ast.mod_type_item option) : Ast.ty option =
+      match iopt with
+          Some i -> Some (check_type_item i.node)
         | _ -> None
     in
     let check_scope (scope:scope) : Ast.ty option =
@@ -194,8 +206,14 @@ let type_resolving_visitor
                     check_item_option (htab_search p.Ast.decl_item.Ast.prog_mod ident)
                 | _ -> None
             end
-              (* FIXME: handle looking up types inside mod type scopes. *)
-        | _ -> None
+
+        | SCOPE_mod_type_item item ->
+            begin
+              match item.node with
+                | Ast.MOD_TYPE_ITEM_mod m ->
+                    check_type_item_option (htab_search m.Ast.decl_item ident)
+                | _ -> None
+            end
     in
       log cx "looking up type with ident '%s'" ident;
       match stk_search scopes check_scope with
@@ -209,13 +227,66 @@ let type_resolving_visitor
                            None -> None
                          | Some t -> Some (resolve_ty t)) }
 
+  and resolve_ty_fn (f:Ast.ty_fn) : Ast.ty_fn =
+    let (tsig,taux) = f in
+      ({ Ast.sig_input_slots = Array.map resolve_slot tsig.Ast.sig_input_slots;
+         Ast.sig_output_slot = resolve_slot tsig.Ast.sig_output_slot }, taux)
+
+  and resolve_ty_prog (p:Ast.ty_prog) : Ast.ty_prog =
+    match p with
+        None -> None
+      | Some slots -> Some (Array.map resolve_slot slots)
+
+  and resolve_mod_type_item (ident:Ast.ident) (item:Ast.mod_type_item)
+      : (Ast.ident * Ast.mod_type_item) =
+    log cx "resolving mod type item %s" ident;
+    let decl params item =
+      { Ast.decl_params = params;
+        Ast.decl_item = item }
+    in
+      log cx "pushing mod type item %s" ident;
+      Stack.push (SCOPE_mod_type_item item) scopes;
+      let item' =
+        match item.node with
+            Ast.MOD_TYPE_ITEM_opaque_type td ->
+              Ast.MOD_TYPE_ITEM_opaque_type td
+          | Ast.MOD_TYPE_ITEM_public_type td ->
+              Ast.MOD_TYPE_ITEM_public_type
+                (decl
+                   td.Ast.decl_params
+                   (resolve_ty td.Ast.decl_item))
+          | Ast.MOD_TYPE_ITEM_pred pd ->
+              Ast.MOD_TYPE_ITEM_pred
+                (decl pd.Ast.decl_params
+                   (Array.map resolve_slot pd.Ast.decl_item))
+          | Ast.MOD_TYPE_ITEM_mod md ->
+              Ast.MOD_TYPE_ITEM_mod
+                (decl md.Ast.decl_params
+                   (resolve_mod_type_items md.Ast.decl_item))
+          | Ast.MOD_TYPE_ITEM_fn fd ->
+              Ast.MOD_TYPE_ITEM_fn
+                (decl fd.Ast.decl_params
+                   (resolve_ty_fn fd.Ast.decl_item))
+          | Ast.MOD_TYPE_ITEM_prog pd ->
+              Ast.MOD_TYPE_ITEM_prog
+                (decl pd.Ast.decl_params
+                   (resolve_ty_prog pd.Ast.decl_item))
+      in
+        log cx "popping mod type item %s" ident;
+        ignore (Stack.pop scopes);
+        (ident, {item with node=item'})
+
+
+  and resolve_mod_type_items (mtis:Ast.mod_type_items) : Ast.mod_type_items =
+    (htab_map mtis resolve_mod_type_item)
+
   and resolve_ty (t:Ast.ty) : Ast.ty =
     match t with
         Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_mach _
       | Ast.TY_int | Ast.TY_char | Ast.TY_str | Ast.TY_type
       | Ast.TY_idx _ | Ast.TY_opaque _ -> t
 
-      | Ast.TY_tup tys -> Ast.TY_tup (Array.map resolve_slot tys)
+      | Ast.TY_tup slots -> Ast.TY_tup (Array.map resolve_slot slots)
       | Ast.TY_rec trec -> Ast.TY_rec (Array.map (fun (n, s) -> (n, resolve_slot s)) trec)
 
       | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i s -> (i, resolve_ty t)))
@@ -235,28 +306,13 @@ let type_resolving_visitor
       | Ast.TY_constrained (ty, constrs) ->
           Ast.TY_constrained ((resolve_ty ty),constrs)
 
-      | Ast.TY_fn (tsig,taux) ->
-          Ast.TY_fn
-            ({ Ast.sig_input_slots = Array.map resolve_slot tsig.Ast.sig_input_slots;
-               Ast.sig_output_slot = resolve_slot tsig.Ast.sig_output_slot }, taux)
-
+      | Ast.TY_fn tfn -> Ast.TY_fn (resolve_ty_fn tfn)
       | Ast.TY_pred slots -> Ast.TY_pred (Array.map resolve_slot slots)
-
+      | Ast.TY_prog tprog -> Ast.TY_prog (resolve_ty_prog tprog)
+      | Ast.TY_mod mtis -> Ast.TY_mod (resolve_mod_type_items mtis)
       | Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident)) ->
           resolve_ty (lookup_type_by_ident ident)
-
       | Ast.TY_named _ -> err None "unhandled form of type name"
-      | Ast.TY_prog tprog ->
-          begin
-            (* FIXME: need to actually implement this. *)
-            Ast.TY_prog tprog
-          end
-      | Ast.TY_mod tmod ->
-          begin
-            (* FIXME: need to actually implement this. *)
-            Ast.TY_mod tmod
-          end
-
   in
 
   let resolve_slot_identified (s:Ast.slot identified) : (Ast.slot identified) =
@@ -278,7 +334,7 @@ let type_resolving_visitor
 
   let visit_mod_item_pre id params item =
     try
-      let ty = resolve_ty (ty_of_mod_item item) in
+      let ty = resolve_ty (ty_of_mod_item true item) in
         htab_put cx.ctxt_all_item_types item.id ty
     with
         Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))

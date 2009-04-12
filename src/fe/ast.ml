@@ -190,11 +190,7 @@ and ty_fn = (ty_sig * ty_fn_aux)
 
 and ty_pred = slot array
 
-and ty_prog =
-    {
-      prog_mod_ty: mod_type_items;
-      prog_init_ty: (slot array) option;
-    }
+and ty_prog = (slot array) option
 
 (* put+ f(a,b) means to call f with current put addr and self as ret
  * addr. this is a 'tail yield' that bypasses us during f execution.

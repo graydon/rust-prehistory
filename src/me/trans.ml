@@ -205,7 +205,7 @@ let trans_visitor
 
     let return_item (item:Ast.mod_item') (referent:node_id)
         : (Il.operand * Ast.slot) =
-      let ty = ty_of_mod_item { node=item; id=referent; } in
+      let ty = ty_of_mod_item false { node=item; id=referent; } in
       let slot = { Ast.slot_mode = Ast.MODE_read_alias;
                    Ast.slot_ty = Some ty }
       in
