@@ -42,9 +42,7 @@ let auto_inference_visitor
                   Some s -> unify_slot tyo referent s
                 | None ->
                     unify_ty tyo
-                      (ty_of_mod_item
-                         { node = (Hashtbl.find cx.ctxt_all_items referent);
-                           id = referent })
+                      (Hashtbl.find cx.ctxt_all_item_types referent)
             end
       | _ -> (* FIXME: full-name unification? Oh, that'll be complex... *) None
   in
