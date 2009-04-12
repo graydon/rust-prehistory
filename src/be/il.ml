@@ -83,16 +83,42 @@ let string_of_reg (f:int->string) r =
 ;;
 
 
+let rec string_of_expr64 (e64:Asm.expr64) : string =
+  let bin op a b =
+    Printf.sprintf "(%s %s %s)" (string_of_expr64 a) op (string_of_expr64 b)
+  in
+  let bini op a b =
+    Printf.sprintf "(%s %s %d)" (string_of_expr64 a) op b
+  in
+  match e64 with
+      Asm.IMM i -> Printf.sprintf "%Ld" i
+    | Asm.ADD (a,b) -> bin "+" a b
+    | Asm.SUB (a,b) -> bin "-" a b
+    | Asm.MUL (a,b) -> bin "*" a b
+    | Asm.DIV (a,b) -> bin "/" a b
+    | Asm.REM (a,b) -> bin "%" a b
+    | Asm.SLL (a,b) -> bini "<<" a b
+    | Asm.SLR (a,b) -> bini ">>" a b
+    | Asm.SAR (a,b) -> bini ">>>" a b
+    | Asm.AND (a,b) -> bin "&" a b
+    | Asm.XOR (a,b) -> bin "xor" a b
+    | Asm.OR (a,b) -> bin "|" a b
+    | Asm.NOT a -> Printf.sprintf "(not %s)" (string_of_expr64 a)
+    | Asm.F_POS f -> Printf.sprintf "%s.fpos" f.fixup_name
+    | Asm.F_SZ f -> Printf.sprintf "%s.fsz" f.fixup_name
+    | Asm.M_POS f -> Printf.sprintf "%s.mpos" f.fixup_name
+    | Asm.M_SZ f -> Printf.sprintf "%s.msz" f.fixup_name
+    | Asm.EXT e -> "??ext??"
+;;
+
 let string_of_operand (f:int->string) operand =
   match operand with
       Reg r -> string_of_reg f r
     | Imm (Asm.IMM i) -> Printf.sprintf "0x%Lx" i
-    | Imm _ -> "<imm??>"
+    | Imm e -> Printf.sprintf "<imm %s>" (string_of_expr64 e)
     | Pcrel f -> "<" ^ f.fixup_name ^ ">"
-    | Mem (_, (Some r),(Asm.IMM n)) -> Printf.sprintf "%s[%Ld]" (string_of_reg f r) n
-    | Mem (_, (Some r),_) -> Printf.sprintf "%s[??]" (string_of_reg f r)
-    | Mem (_, None,(Asm.IMM n)) -> Printf.sprintf "*(%Ld)" n
-    | Mem (_, None,_) -> "*(??)"
+    | Mem (_, (Some r),e) -> Printf.sprintf "%s[%s]" (string_of_reg f r) (string_of_expr64 e)
+    | Mem (_, None,e) -> Printf.sprintf "*(%s)" (string_of_expr64 e)
     | Label i -> "<lab" ^ (string_of_int i) ^ ">"
     | Nil -> "nil"
 ;;

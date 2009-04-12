@@ -217,12 +217,18 @@ let restore_callee_saves (e:Il.emitter) : unit =
     Il.emit e (Il.CPOP word_mem) (r ebp) Il.Nil Il.Nil;
 ;;
 
-let fn_prologue (e:Il.emitter) (framesz:int64) (spill_fixup:fixup) : unit =
+let fn_prologue
+    (e:Il.emitter)
+    (framesz:int64)
+    (spill_fixup:fixup)
+    (callsz:int64)
+    : unit =
   let r x = Il.Reg (Il.Hreg x) in
+  let ssz = Int64.add framesz callsz in
     save_callee_saves e;
     Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
     Il.emit e Il.SUB (r esp) (r esp)
-      (Il.Imm (Asm.ADD ((Asm.IMM framesz), Asm.M_SZ spill_fixup)))
+      (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
 ;;
 
 let fn_epilogue (e:Il.emitter) : unit =
@@ -232,12 +238,19 @@ let fn_epilogue (e:Il.emitter) : unit =
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
 
-let main_prologue (e:Il.emitter) (block:Ast.block) (framesz:int64) (spill_fixup:fixup) : unit =
+let main_prologue
+    (e:Il.emitter)
+    (block:Ast.block)
+    (framesz:int64)
+    (spill_fixup:fixup)
+    (callsz:int64)
+    : unit =
   let r x = Il.Reg (Il.Hreg x) in
+  let ssz = Int64.add framesz callsz in
     save_callee_saves e;
     Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
     Il.emit e Il.SUB (r esp) (r esp)
-      (Il.Imm (Asm.ADD ((Asm.IMM framesz), Asm.M_SZ spill_fixup)))
+      (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
 ;;
 
 let main_epilogue (e:Il.emitter) (block:Ast.block) : unit =
@@ -576,8 +589,8 @@ let is_rm8 (oper:operand) : bool =
 let cmp (a:operand) (b:operand) : Asm.item =
   match (a,b) with
       (_, Imm i) when is_rm32 a -> insn_rm_r_imm_u8_u32 0x83 0x81 a slash7 i
-    | (_, Reg (Hreg r)) -> insn_rm_r 0x39 a r
-    | (Reg (Hreg r), _) -> insn_rm_r 0x3b b r
+    | (_, Reg (Hreg r)) -> insn_rm_r 0x39 a (reg r)
+    | (Reg (Hreg r), _) -> insn_rm_r 0x3b b (reg r)
     | _ -> raise Unrecognized
 ;;
 

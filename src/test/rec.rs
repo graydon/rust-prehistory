@@ -11,8 +11,8 @@ prog a
   main {
     let rect rectv = rec(x=10, y=20, w=100, h=200);
     let rect rect2 = rectv;
-    let int y = rect2.x;
-    check (y == 10);
+    let int x = rect2.x;
+    check (x == 10);
     f(rectv, 20);
   }
 }

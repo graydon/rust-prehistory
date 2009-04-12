@@ -59,6 +59,10 @@ let trans_visitor
     word_at_reg_off (Some abi.Abi.abi_fp_reg) (Asm.IMM imm)
   in
 
+  let word_at_sp_off (imm:int64) : Il.operand =
+    word_at_reg_off (Some abi.Abi.abi_sp_reg) (Asm.IMM imm)
+  in
+
   let word_at_reg_off_imm
       (reg:Il.reg option)
       (off:Asm.expr64)
@@ -145,7 +149,7 @@ let trans_visitor
 
     let return_item (item:Ast.mod_item') (referent:node_id)
         : (Il.operand * Ast.slot) =
-      let ty = ty_of_mod_item false { node=item; id=referent; } in
+      let ty = Hashtbl.find cx.ctxt_all_item_types referent in
       let slot = { Ast.slot_mode = Ast.MODE_read_alias;
                    Ast.slot_ty = Some ty }
       in
@@ -548,22 +552,47 @@ let trans_visitor
 
       | Ast.STMT_call (dst, flv, args) ->
           let vr = Il.Reg (Il.next_vreg (emitter())) in
-          let sp = Il.Reg (abi.Abi.abi_sp_reg) in
           let (outmem, _) = trans_lval dst in
           let outptr = Il.Reg (Il.next_vreg (emitter())) in
-          let (fv, _) = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
-            lea outptr outmem;
-            (* FIXME: factor out call protocol into ABI bits. *)
-            for i = (Array.length args) - 1 downto 0 do
-              emit (Il.CPUSH Il.M32) Il.Nil (trans_atom args.(i)) Il.Nil
+          let (fv, fslot) = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
+          let tfn =
+            match slot_ty fslot with
+                Ast.TY_fn fty -> fty
+              | _ -> err None "Calling non-function."
+          in
+          let (tsig, _) = tfn in
+          let fslots = tsig.Ast.sig_input_slots in
+          let arg_layouts = layout_call_tup abi tfn in
+          let word_slot = word_slot abi in
+            assert ((Array.length arg_layouts) == ((Array.length args) + 2));
+            for i = 0 to (Array.length arg_layouts) - 1 do
+              let dst_operand = word_at_sp_off arg_layouts.(i).layout_offset in
+              if i == 0
+              then
+                begin
+                  (* Emit arg0: the output slot. *)
+                  lea outptr outmem;
+                  trans_copy_slots
+                    dst_operand word_slot
+                    outptr word_slot
+                end
+              else
+                if i == 1
+                then
+                  (* Emit arg1: the process pointer. *)
+                  trans_copy_slots
+                    dst_operand word_slot
+                    abi.Abi.abi_pp_operand word_slot
+                else
+                  begin
+                    log cx "copying formal arg %d, slot %s"
+                      (i-2) (Ast.fmt_to_str Ast.fmt_slot fslots.(i-2));
+                    trans_copy_slots
+                      dst_operand {fslots.(i-2) with Ast.slot_mode = Ast.MODE_interior}
+                      (trans_atom args.(i-2)) fslots.(i-2)
+                  end
             done;
-            (* Emit arg1: the process pointer. *)
-            emit (Il.CPUSH Il.M32) Il.Nil (abi.Abi.abi_pp_operand) Il.Nil;
-            (* Emit arg0: the output slot. *)
-            emit (Il.CPUSH Il.M32) Il.Nil outptr Il.Nil;
             emit Il.CCALL vr fv Il.Nil;
-            emit Il.ADD sp sp
-              (Il.Imm (Asm.IMM (Int64.of_int (4 * (2 + (Array.length args))))));
 
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->
@@ -623,10 +652,11 @@ let trans_visitor
 
   let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =
     let framesz = get_framesz cx fnid in
+    let callsz = get_callsz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
     Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
-      abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill_fixup;
+      abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill_fixup callsz;
       trans_block fn.Ast.fn_body;
       Stack.iter patch (Stack.pop epilogue_jumps);
       abi.Abi.abi_emit_fn_epilogue (emitter());
@@ -637,12 +667,13 @@ let trans_visitor
   let trans_prog_block (progid:node_id) (b:Ast.block) (ncomp:string) : fixup =
     let _ = Stack.push ncomp path in
     let fix = new_fixup (path_name ()) in
-    let framesz = Hashtbl.find cx.ctxt_frame_sizes progid in
+    let framesz = get_framesz cx progid in
+    let callsz = get_callsz cx progid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups progid in
       push_new_emitter ();
       let dst = Il.Reg (Il.next_vreg (emitter())) in
         Il.emit_full (emitter()) (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
-        abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup;
+        abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup callsz;
         trans_block b;
         abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_exiting;
         abi.Abi.abi_emit_main_epilogue (emitter()) b;

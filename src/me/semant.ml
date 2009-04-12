@@ -57,6 +57,7 @@ type ctxt =
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
       ctxt_fn_header_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
+      ctxt_call_sizes: (node_id,int64) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_prog_fixups: (node_id,fixup) Hashtbl.t;
@@ -90,6 +91,7 @@ let new_ctxt sess abi crate =
     ctxt_block_layouts = Hashtbl.create 0;
     ctxt_fn_header_layouts = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
+    ctxt_call_sizes = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
     ctxt_file_fixups = Hashtbl.create 0;
     ctxt_prog_fixups = Hashtbl.create 0;
@@ -151,6 +153,12 @@ let get_framesz (cx:ctxt) (id:node_id) : int64 =
   if Hashtbl.mem cx.ctxt_frame_sizes id
   then Hashtbl.find cx.ctxt_frame_sizes id
   else err (Some id) "Missing framesz"
+;;
+
+let get_callsz (cx:ctxt) (id:node_id) : int64 =
+  if Hashtbl.mem cx.ctxt_call_sizes id
+  then Hashtbl.find cx.ctxt_call_sizes id
+  else err (Some id) "Missing callsz"
 ;;
 
 let slot_ty (s:Ast.slot) : Ast.ty =
@@ -360,20 +368,17 @@ let layout_tup (abi:Abi.abi) (tup:Ast.ty_tup) : (layout array) =
     layouts
 ;;
 
+let word_slot (abi:Abi.abi) : Ast.slot =
+  { Ast.slot_mode = Ast.MODE_interior;
+    Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
+;;
+
 let layout_call_tup (abi:Abi.abi) (tfn:Ast.ty_fn) : (layout array) =
   let (tsig,taux) = tfn in
   let slots = tsig.Ast.sig_input_slots in
-  let word_slot = { Ast.slot_mode = Ast.MODE_interior;
-                    Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
-  in
-  let proc_ptr = word_slot in
-  let out_ptr = word_slot in
-  let slots' =
-    Array.of_list
-      (List.rev (out_ptr ::
-                   proc_ptr ::
-                   (Array.to_list slots)))
-  in
+  let proc_ptr = word_slot abi in
+  let out_ptr = word_slot abi in
+  let slots' = Array.append [| out_ptr; proc_ptr |] slots in
     layout_tup abi slots'
 ;;
 

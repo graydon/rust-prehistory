@@ -171,7 +171,8 @@ let layout_visitor
     in
     let item_id = Stack.top item_stack in
     let curr = Hashtbl.find cx.ctxt_frame_sizes item_id in
-      log cx "extending item frame #%d to size %Ld" (int_of_node item_id) (i64_max curr sz);
+      log cx "extending item #%d frame to size %Ld"
+        (int_of_node item_id) (i64_max curr sz) ;
       Hashtbl.replace cx.ctxt_frame_sizes item_id (i64_max curr sz)
   in
   let visit_mod_item_pre n p i =
@@ -179,6 +180,7 @@ let layout_visitor
       Stack.push (Stack.create()) block_stacks;
       Stack.push i.id item_stack;
       htab_put cx.ctxt_frame_sizes i.id 0L;
+      htab_put cx.ctxt_call_sizes i.id 0L;
       htab_put cx.ctxt_spill_fixups i.id (new_fixup "frame spill fixup");
       match i.node with
           Ast.MOD_ITEM_fn fd ->
@@ -190,7 +192,7 @@ let layout_visitor
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
     ignore (Stack.pop item_stack);
-    ignore (Stack.pop block_stacks)
+    ignore (Stack.pop block_stacks);
   in
   let visit_block_pre b =
     let stk = Stack.top block_stacks in
@@ -236,8 +238,12 @@ let layout_visitor
               let abi = cx.ctxt_abi in
               let tfn = ty_fn_of_callee nb.id in
               let layout = pack 0L (layout_call_tup abi tfn) in
-                log cx "call to lval #%d consumes %Ld bytes" (int_of_node nb.id) layout.layout_size;
-                ()
+              let sz = layout.layout_size in
+              let item_id = Stack.top item_stack in
+              let curr = Hashtbl.find cx.ctxt_call_sizes item_id in
+                log cx "extending item #%d call size to %Ld"
+                  (int_of_node item_id) (i64_max curr sz);
+                Hashtbl.replace cx.ctxt_call_sizes item_id (i64_max curr sz)
             end
         | _ -> ()
     end;
