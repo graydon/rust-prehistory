@@ -115,6 +115,50 @@ let err (idopt:node_id option) =
     Printf.ksprintf k
 ;;
 
+(* Convenience accessors. *)
+let lval_to_referent (cx:ctxt) (id:node_id) : node_id =
+  if Hashtbl.mem cx.ctxt_lval_to_referent id
+  then Hashtbl.find cx.ctxt_lval_to_referent id
+  else err (Some id) "Unresolved lval"
+;;
+
+let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
+  let referent = lval_to_referent cx id in
+    if Hashtbl.mem cx.ctxt_all_slots referent
+    then Hashtbl.find cx.ctxt_all_slots referent
+    else err (Some referent) "Unknown slot"
+;;
+
+let get_block_layout (cx:ctxt) (id:node_id) : layout =
+  if Hashtbl.mem cx.ctxt_block_layouts id
+  then Hashtbl.find cx.ctxt_block_layouts id
+  else err (Some id) "Unknown block layout"
+;;
+
+let get_fn_fixup (cx:ctxt) (id:node_id) : fixup =
+  if Hashtbl.mem cx.ctxt_fn_fixups id
+  then Hashtbl.find cx.ctxt_fn_fixups id
+  else err (Some id) "Fn without fixup"
+;;
+
+let get_prog_fixup (cx:ctxt) (id:node_id) : fixup =
+  if Hashtbl.mem cx.ctxt_prog_fixups id
+  then Hashtbl.find cx.ctxt_prog_fixups id
+  else err (Some id) "Prog without fixup"
+;;
+
+let get_framesz (cx:ctxt) (id:node_id) : int64 =
+  if Hashtbl.mem cx.ctxt_frame_sizes id
+  then Hashtbl.find cx.ctxt_frame_sizes id
+  else err (Some id) "Missing framesz"
+;;
+
+let slot_ty (s:Ast.slot) : Ast.ty =
+  match s.Ast.slot_ty with
+      Some t -> t
+    | None -> err None "untyped slot"
+;;
+
 
 (* Mappings between mod items and their respective types. *)
 
@@ -297,6 +341,41 @@ and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
   match s.Ast.slot_ty with
       None -> raise (Semant_err (None, "layout_slot on untyped slot"))
     | Some t -> layout_ty abi off t
+;;
+
+let layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
+  let layouts = Array.map (fun (_,slot) -> layout_slot abi 0L slot) atab in
+    begin
+      ignore (pack 0L layouts);
+      assert ((Array.length layouts) = (Array.length atab));
+      Array.mapi (fun i layout ->
+                    let (ident, slot) = atab.(i) in
+                      (ident, (slot, layout))) layouts
+    end
+;;
+
+let layout_tup (abi:Abi.abi) (tup:Ast.ty_tup) : (layout array) =
+  let layouts = Array.map (layout_slot abi 0L) tup in
+    ignore (pack 0L layouts);
+    layouts
+;;
+
+let layout_call_tup (abi:Abi.abi) (tfn:Ast.ty_fn) : (layout array) =
+  let (tsig,taux) = tfn in
+  let slots = tsig.Ast.sig_input_slots in
+  let word_slot = { Ast.slot_mode = Ast.MODE_interior;
+                    Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
+  in
+  let proc_ptr = word_slot in
+  let out_ptr = word_slot in
+  let slots' =
+    Array.of_list
+      (List.rev (out_ptr ::
+                   proc_ptr ::
+                   (Array.to_list slots)))
+  in
+    layout_tup abi slots'
+;;
 
 
 (*

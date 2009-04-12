@@ -40,6 +40,10 @@ let layout_visitor
    *     |...                         |
    *     |...                         |
    *     +----------------------------+ <-- fp - (framesz + spillsz)
+   *     |call space                  |
+   *     |...                         |
+   *     |...                         |
+   *     +----------------------------+ <-- fp - (framesz + spillsz + callsz)
    *
    *   - the layout of a frame is offset from fp:
    *     in other words, frame_layout.layout_offset = -(frame_layout.layout_size)
@@ -66,6 +70,10 @@ let layout_visitor
    *
    *   - The frame size is the maximum of all the block sizes contained
    *     within it.
+   * 
+   *   - Each call is examined and the size of the call tuple required
+   *     for that call is calculated. The call size is the maximum of all
+   *     such call tuples.
    *
    *)
 
@@ -206,9 +214,40 @@ let layout_visitor
       ignore (Stack.pop stk)
   in
 
+  (* Call-size calculation. *)
+
+  let ty_fn_of_callee (id:node_id) : Ast.ty_fn =
+    let referent = lval_to_referent cx id in
+    let ty =
+      if Hashtbl.mem cx.ctxt_all_items referent
+      then Hashtbl.find cx.ctxt_all_item_types referent
+      else slot_ty (Hashtbl.find cx.ctxt_all_slots referent)
+    in
+      match ty with
+          Ast.TY_fn tfn -> tfn
+        | _ -> err (Some id) "Non-function callee in call statement."
+  in
+
+  let visit_stmt_pre (s:Ast.stmt) : unit =
+    begin
+      match s.node with
+          Ast.STMT_call (_, (Ast.LVAL_base nb), _) ->
+            begin
+              let abi = cx.ctxt_abi in
+              let tfn = ty_fn_of_callee nb.id in
+              let layout = pack 0L (layout_call_tup abi tfn) in
+                log cx "call to lval #%d consumes %Ld bytes" (int_of_node nb.id) layout.layout_size;
+                ()
+            end
+        | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre s
+  in
+
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post }
 ;;

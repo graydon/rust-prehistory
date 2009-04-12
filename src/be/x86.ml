@@ -189,6 +189,9 @@ let word_sz = 4L
 let word_mem = Il.M32
 ;;
 
+let word_ty = TY_u32
+;;
+
 let spill_slot (framesz:int64) (i:int) : Il.operand =
   Il.Mem
     (word_mem, Some (Il.Hreg ebp),
@@ -396,6 +399,7 @@ let (abi:Abi.abi) =
   {
     Abi.abi_word_sz = word_sz;
     Abi.abi_word_mem = word_mem;
+    Abi.abi_word_ty = word_ty;
 
     Abi.abi_is_2addr_machine = true;
     Abi.abi_has_pcrel_loads = false;

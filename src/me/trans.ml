@@ -21,12 +21,15 @@ let trans_visitor
   let block_layouts = Stack.create () in
   let file = ref None in
 
+  let (abi:Abi.abi) = cx.ctxt_abi in
+  let (word_mem:Il.mem) = abi.Abi.abi_word_mem in
+
   let emitters = Stack.create () in
   let push_new_emitter _ =
     Stack.push
       (Il.new_emitter
-         cx.ctxt_abi.Abi.abi_prealloc_quad
-         cx.ctxt_abi.Abi.abi_is_2addr_machine)
+         abi.Abi.abi_prealloc_quad
+         abi.Abi.abi_is_2addr_machine)
       emitters
   in
   let pop_emitter _ = ignore (Stack.pop emitters) in
@@ -44,71 +47,8 @@ let trans_visitor
 
   let epilogue_jumps = Stack.create() in
 
-
-  let lval_to_referent (id:node_id) : node_id =
-    if Hashtbl.mem cx.ctxt_lval_to_referent id
-    then Hashtbl.find cx.ctxt_lval_to_referent id
-    else err (Some id) "Unresolved lval"
-  in
-
-  let lval_to_slot (id:node_id) : Ast.slot =
-    let referent = lval_to_referent id in
-      if Hashtbl.mem cx.ctxt_all_slots referent
-      then Hashtbl.find cx.ctxt_all_slots referent
-      else err (Some referent) "Unknown slot"
-  in
-
-  let get_block_layout (id:node_id) : layout =
-    if Hashtbl.mem cx.ctxt_block_layouts id
-    then Hashtbl.find cx.ctxt_block_layouts id
-    else err (Some id) "Unknown block layout"
-  in
-
-  let get_fn_fixup (id:node_id) : fixup =
-    if Hashtbl.mem cx.ctxt_fn_fixups id
-    then Hashtbl.find cx.ctxt_fn_fixups id
-    else err (Some id) "Fn without fixup"
-  in
-
-  let get_prog_fixup (id:node_id) : fixup =
-    if Hashtbl.mem cx.ctxt_prog_fixups id
-    then Hashtbl.find cx.ctxt_prog_fixups id
-    else err (Some id) "Prog without fixup"
-  in
-
-  let get_framesz (id:node_id) : int64 =
-    if Hashtbl.mem cx.ctxt_frame_sizes id
-    then Hashtbl.find cx.ctxt_frame_sizes id
-    else err (Some id) "Missing framesz"
-  in
-
   let path_name (_:unit) : string =
     String.concat "." (stk_elts_from_bot path)
-  in
-
-  let (word_mem:Il.mem) = cx.ctxt_abi.Abi.abi_word_mem in
-
-  let layout_rec (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
-    let layouts = Array.map (fun (_,slot) -> layout_slot cx.ctxt_abi 0L slot) atab in
-      begin
-        ignore (pack 0L layouts);
-        assert ((Array.length layouts) = (Array.length atab));
-        Array.mapi (fun i layout ->
-                      let (ident, slot) = atab.(i) in
-                        (ident, (slot, layout))) layouts
-      end
-  in
-
-  let layout_tup (tup:Ast.ty_tup) : (layout array) =
-    let layouts = Array.map (layout_slot cx.ctxt_abi 0L) tup in
-      ignore (pack 0L layouts);
-      layouts
-  in
-
-  let slot_ty (s:Ast.slot) : Ast.ty =
-    match s.Ast.slot_ty with
-        Some t -> t
-      | None -> err None "untyped slot"
   in
 
   let word_at_reg_off (reg:Il.reg option) (off:Asm.expr64) : Il.operand =
@@ -116,7 +56,7 @@ let trans_visitor
   in
 
   let word_at_fp_off (imm:int64) : Il.operand =
-    word_at_reg_off (Some cx.ctxt_abi.Abi.abi_fp_reg) (Asm.IMM imm)
+    word_at_reg_off (Some abi.Abi.abi_fp_reg) (Asm.IMM imm)
   in
 
   let word_at_reg_off_imm
@@ -165,7 +105,7 @@ let trans_visitor
       match (base_slot.Ast.slot_ty, comp) with
           (Some (Ast.TY_rec entries),
            Ast.COMP_named (Ast.COMP_ident id)) ->
-            let layouts = layout_rec entries in
+            let layouts = layout_rec abi entries in
             let (slot, layout) = atab_find layouts id in
             let disp = layout.layout_offset in
             let oper = (word_at_reg_off_imm
@@ -175,7 +115,7 @@ let trans_visitor
 
         | (Some (Ast.TY_tup entries),
            Ast.COMP_named (Ast.COMP_idx i)) ->
-            let layouts = layout_tup entries in
+            let layouts = layout_tup abi entries in
             let slot = entries.(i) in
             let disp = layouts.(i).layout_offset in
             let oper = (word_at_reg_off_imm
@@ -211,9 +151,9 @@ let trans_visitor
       in
         match item with
             Ast.MOD_ITEM_fn _ ->
-              return_fixup (get_fn_fixup referent) slot
+              return_fixup (get_fn_fixup cx referent) slot
           | Ast.MOD_ITEM_prog _ ->
-              return_fixup (get_prog_fixup referent) slot
+              return_fixup (get_prog_fixup cx referent) slot
           | _ ->
               err (Some referent)
                 "unhandled item type in trans_lval_full"
@@ -253,12 +193,12 @@ let trans_visitor
               trans_lval_ext base_slot base_reg base_off comp
 
         | Ast.LVAL_base nb ->
-            let referent = lval_to_referent nb.id in
+            let referent = lval_to_referent cx nb.id in
               begin
                 match htab_search cx.ctxt_all_items referent with
                     Some item -> return_item item referent
                   | None ->
-                      let slot = lval_to_slot nb.id in
+                      let slot = lval_to_slot cx nb.id in
                         return_slot slot referent
               end
   in
@@ -276,7 +216,7 @@ let trans_visitor
       | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
       | Ast.ATOM_literal _ -> err None "unhandled form of literal in atom_type"
       | Ast.ATOM_lval (Ast.LVAL_base nb) ->
-          let slot = lval_to_slot nb.id in
+          let slot = lval_to_slot cx nb.id in
             begin
               match slot.Ast.slot_ty with
                   None -> err (Some nb.id) "name refers to untyped slot, in atom_type"
@@ -404,9 +344,9 @@ let trans_visitor
   let trans_1_arg_kern_fn (a:Ast.atom) (fn:int64) : unit =
     let v = trans_atom a in
     let dst = Il.Reg (Il.next_vreg (emitter())) in
-    let pp = cx.ctxt_abi.Abi.abi_pp_operand in
-    let sp = (Il.Reg cx.ctxt_abi.Abi.abi_sp_reg) in
-      cx.ctxt_abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
+    let pp = abi.Abi.abi_pp_operand in
+    let sp = (Il.Reg abi.Abi.abi_sp_reg) in
+      abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
       emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
       emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM fn)) Il.Nil;
       emit (Il.CPUSH Il.M32) Il.Nil pp Il.Nil;
@@ -427,7 +367,7 @@ let trans_visitor
   in
 
   let rec trans_block (block:Ast.block) : unit =
-    Stack.push (get_block_layout block.id) block_layouts;
+    Stack.push (get_block_layout cx block.id) block_layouts;
     Array.iter trans_stmt block.node;
     ignore (Stack.pop block_layouts)
 
@@ -436,7 +376,7 @@ let trans_visitor
       (dst_reg:Il.reg option) (dst_off:Asm.expr64) (dst_entries:Ast.ty_rec)
       (src_reg:Il.reg option) (src_off:Asm.expr64) (src_entries:Ast.ty_rec)
       : unit =
-    let layouts = layout_rec dst_entries in
+    let layouts = layout_rec abi dst_entries in
       Array.iteri
         begin
           fun i (_, (_, layout)) ->
@@ -456,7 +396,7 @@ let trans_visitor
       (dst_reg:Il.reg option) (dst_off:Asm.expr64) (dst_slots:Ast.ty_tup)
       (src_reg:Il.reg option) (src_off:Asm.expr64) (src_slots:Ast.ty_tup)
       : unit =
-    let layouts = layout_tup dst_slots in
+    let layouts = layout_tup abi dst_slots in
       Array.iteri
         begin
           fun i layout ->
@@ -607,7 +547,6 @@ let trans_visitor
               end
 
       | Ast.STMT_call (dst, flv, args) ->
-          let abi = cx.ctxt_abi in
           let vr = Il.Reg (Il.next_vreg (emitter())) in
           let sp = Il.Reg (abi.Abi.abi_sp_reg) in
           let (outmem, _) = trans_lval dst in
@@ -636,7 +575,7 @@ let trans_visitor
                     match atom_opt with
                         None -> ()
                       | Some at ->
-                          let disp = cx.ctxt_abi.Abi.abi_frame_base_sz in
+                          let disp = abi.Abi.abi_frame_base_sz in
                           let dst = deref (word_at_fp_off disp) in
                           let src = trans_atom at in
                             emit Il.UMOV dst src Il.Nil
@@ -672,7 +611,7 @@ let trans_visitor
         log cx "emitted quads for %s:" name;
         for i = 0 to (Array.length quads) - 1
         do
-          log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
+          log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
         done;
         let text = { text_node = node;
                      text_quads = quads;
@@ -683,14 +622,14 @@ let trans_visitor
   in
 
   let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =
-    let framesz = get_framesz fnid in
+    let framesz = get_framesz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
     Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
-      cx.ctxt_abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill_fixup;
+      abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill_fixup;
       trans_block fn.Ast.fn_body;
       Stack.iter patch (Stack.pop epilogue_jumps);
-      cx.ctxt_abi.Abi.abi_emit_fn_epilogue (emitter());
+      abi.Abi.abi_emit_fn_epilogue (emitter());
       capture_emitted_quads fnid;
       pop_emitter ()
   in
@@ -703,10 +642,10 @@ let trans_visitor
       push_new_emitter ();
       let dst = Il.Reg (Il.next_vreg (emitter())) in
         Il.emit_full (emitter()) (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
-        cx.ctxt_abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup;
+        abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup;
         trans_block b;
-        cx.ctxt_abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_exiting;
-        cx.ctxt_abi.Abi.abi_emit_main_epilogue (emitter()) b;
+        abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_exiting;
+        abi.Abi.abi_emit_main_epilogue (emitter()) b;
         emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
         capture_emitted_quads progid;
         pop_emitter ();
@@ -731,7 +670,7 @@ let trans_visitor
         | Some fini -> Asm.M_POS (trans_prog_block progid fini "fini")
     in
     let prog =
-      let fixup = get_prog_fixup progid in
+      let fixup = get_prog_fixup cx progid in
       (* FIXME: extract prog layout from ABI. *)
       Asm.DEF (fixup,
                Asm.SEQ [| Asm.WORD (TY_u32, init);
