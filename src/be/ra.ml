@@ -1,20 +1,20 @@
 open Il;;
 open Common;;
 
-type ctxt = 
-	{ 
-      ctxt_sess: Session.sess; 
+type ctxt =
+    {
+      ctxt_sess: Session.sess;
       ctxt_n_vregs: int;
       ctxt_abi: Abi.abi;
       mutable ctxt_quads: Il.quads;
-	  mutable ctxt_next_spill: int;      
-	  mutable ctxt_next_label: int;      
+      mutable ctxt_next_spill: int;
+      mutable ctxt_next_label: int;
       (* More state as necessary. *)
     }
 ;;
 
-let	new_ctxt sess quads vregs abi = 
-  { 
+let new_ctxt sess quads vregs abi =
+  {
     ctxt_sess = sess;
     ctxt_quads = quads;
     ctxt_n_vregs = vregs;
@@ -24,31 +24,31 @@ let	new_ctxt sess quads vregs abi =
   }
 ;;
 
-let log cx = Session.log "ra" 
+let log cx = Session.log "ra"
   cx.ctxt_sess.Session.sess_log_ra
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-let next_spill cx = 
+let next_spill cx =
   let i = cx.ctxt_next_spill in
     cx.ctxt_next_spill <- i + 1;
     i
 ;;
 
-let next_label cx = 
-  let i = cx.ctxt_next_label in 
+let next_label cx =
+  let i = cx.ctxt_next_label in
     cx.ctxt_next_label <- i + 1;
     (".L" ^ (string_of_int i))
 ;;
 
 exception Ra_error of string ;;
 
-let convert_labels cx = 
-  let new_labels = ref [] in 
-  let convert_operand s = 
-    match s with 
-        Label lab -> 
-          let fix = (match cx.ctxt_quads.(lab).quad_fixup with 
+let convert_labels cx =
+  let new_labels = ref [] in
+  let convert_operand s =
+    match s with
+        Label lab ->
+          let fix = (match cx.ctxt_quads.(lab).quad_fixup with
                          None -> ( let fix = new_fixup (next_label cx) in
                                      new_labels := (lab, fix) :: (!new_labels);
                                      fix)
@@ -57,28 +57,28 @@ let convert_labels cx =
             Pcrel fix
       | x -> x
   in
-  let convert_quad q = 
-    { q with 
-		quad_dst = convert_operand q.quad_dst;
-		quad_lhs = convert_operand q.quad_lhs;
-		quad_rhs = convert_operand q.quad_rhs }
+  let convert_quad q =
+    { q with
+        quad_dst = convert_operand q.quad_dst;
+        quad_lhs = convert_operand q.quad_lhs;
+        quad_rhs = convert_operand q.quad_rhs }
   in
     cx.ctxt_quads <- Array.map convert_quad cx.ctxt_quads;
-    List.iter (fun (i, fix) -> 
-                 cx.ctxt_quads.(i) <- { cx.ctxt_quads.(i) 
+    List.iter (fun (i, fix) ->
+                 cx.ctxt_quads.(i) <- { cx.ctxt_quads.(i)
                                         with quad_fixup = Some fix })
       (!new_labels)
 ;;
 
 let kill_quad i cx =
-  cx.ctxt_quads.(i) <- 
+  cx.ctxt_quads.(i) <-
     { deadq with Il.quad_fixup = cx.ctxt_quads.(i).Il.quad_fixup }
 ;;
 
 let kill_redundant_moves cx =
   for i = 0 to (Array.length cx.ctxt_quads) -1
   do
-	let q = cx.ctxt_quads.(i) in
+    let q = cx.ctxt_quads.(i) in
       match q.quad_op with
           UMOV | IMOV ->
             if q.quad_dst = q.quad_lhs
@@ -87,23 +87,23 @@ let kill_redundant_moves cx =
   done
 ;;
 
-let quad_jump_target_labels q = 
-  let operand_jump_target_labels s = 
-    match s with 
-		Label i -> [i]
+let quad_jump_target_labels q =
+  let operand_jump_target_labels s =
+    match s with
+        Label i -> [i]
       | _ -> []
   in
     List.concat (List.map operand_jump_target_labels [q.quad_dst; q.quad_lhs; q.quad_rhs])
 ;;
 
-let quad_used_vregs q = 
-  let operand_directly_used_vregs s = 
-    match s with 
-		Reg (Vreg i) -> [i]
+let quad_used_vregs q =
+  let operand_directly_used_vregs s =
+    match s with
+        Reg (Vreg i) -> [i]
       | _ -> []
   in
-  let operand_mem_used_vregs s = 
-    match s with 
+  let operand_mem_used_vregs s =
+    match s with
         Mem (_, Some (Vreg i), _) -> [i]
       | _ -> []
   in
@@ -111,53 +111,53 @@ let quad_used_vregs q =
                  @ (List.map operand_directly_used_vregs [q.quad_lhs; q.quad_rhs]))
 ;;
 
-let quad_defined_vregs q = 
-  let operand_defined_vregs s = 
-    match s with 
-		Reg (Vreg i) -> [i]
+let quad_defined_vregs q =
+  let operand_defined_vregs s =
+    match s with
+        Reg (Vreg i) -> [i]
       | _ -> []
   in
     List.concat (List.map operand_defined_vregs [q.quad_dst])
 ;;
 
 let quad_is_unconditional_jump q =
-  match q.quad_op with 
+  match q.quad_op with
       JMP | RET | CRET -> true
     | _ -> false
 ;;
- 
-let calculate_live_bitvectors cx = 
 
-  let quads = cx.ctxt_quads in 
+let calculate_live_bitvectors cx =
+
+  let quads = cx.ctxt_quads in
   let n_quads = Array.length quads in
   let n_vregs = cx.ctxt_n_vregs in
   let new_bitv _ = Bitv.create n_vregs false in
   let (live_in_vregs:Bitv.t array) = Array.init n_quads new_bitv in
   let (live_out_vregs:Bitv.t array) = Array.init n_quads new_bitv in
   let bitvs_equal a b = ((Bitv.to_list a) = (Bitv.to_list b)) in
-	
+
   let outer_changed = ref true in
-    while !outer_changed do      
+    while !outer_changed do
       outer_changed := false;
       for i = 0 to n_quads - 1 do
         live_in_vregs.(i) <- new_bitv ();
-        live_out_vregs.(i) <- new_bitv () 
+        live_out_vregs.(i) <- new_bitv ()
       done;
       let inner_changed = ref true in
         while !inner_changed do
           inner_changed := false;
           log cx "iterating live bitvector calculation";
           for i = n_quads - 1 downto 0 do
-		    let quad = quads.(i) in
-		    let live_in = live_in_vregs.(i) in
-		    let live_in_saved = Bitv.copy live_in in 
-		    let live_out = live_out_vregs.(i) in
-		    let live_out_saved = Bitv.copy live_out in 
+            let quad = quads.(i) in
+            let live_in = live_in_vregs.(i) in
+            let live_in_saved = Bitv.copy live_in in
+            let live_out = live_out_vregs.(i) in
+            let live_out_saved = Bitv.copy live_out in
 
-		    let union bv1 bv2 = Bitv.iteri_true (fun i -> Bitv.set bv1 i true) bv2 in
+            let union bv1 bv2 = Bitv.iteri_true (fun i -> Bitv.set bv1 i true) bv2 in
 
-            let defined = new_bitv() in 
-              
+            let defined = new_bitv() in
+
               List.iter (fun i -> Bitv.set live_in i true) (quad_used_vregs quad);
               List.iter (fun i -> Bitv.set defined i true) (quad_defined_vregs quad);
 
@@ -168,24 +168,24 @@ let calculate_live_bitvectors cx =
                 else ()
               done;
 
-		      (* Union in all our jump targets. *)
-		      List.iter (fun i -> union live_out live_in_vregs.(i)) (quad_jump_target_labels quad);
+              (* Union in all our jump targets. *)
+              List.iter (fun i -> union live_out live_in_vregs.(i)) (quad_jump_target_labels quad);
 
-		      (* Union in our block successor if we have one *)
-		      if i < (n_quads - 1) && (not (quad_is_unconditional_jump quad))
-		      then union live_out live_in_vregs.(i+1) 
-		      else ();
-		      
-		      (* Possibly update matters. *)
-		      if bitvs_equal live_in live_in_saved &&
+              (* Union in our block successor if we have one *)
+              if i < (n_quads - 1) && (not (quad_is_unconditional_jump quad))
+              then union live_out live_in_vregs.(i+1)
+              else ();
+
+              (* Possibly update matters. *)
+              if bitvs_equal live_in live_in_saved &&
                 bitvs_equal live_out live_out_saved
-		      then ()
-		      else 
-			    begin 
-			      live_in_vregs.(i) <- live_in;
-			      live_out_vregs.(i) <- live_out;
-			      inner_changed := true
-			    end
+              then ()
+              else
+                begin
+                  live_in_vregs.(i) <- live_in;
+                  live_out_vregs.(i) <- live_out;
+                  inner_changed := true
+                end
           done
         done;
         for i = 0 to n_quads - 1 do
@@ -205,9 +205,9 @@ let calculate_live_bitvectors cx =
     log cx "=========================";
     for q = 0 to n_quads - 1 do
       let buf = Buffer.create 128 in
-      let live_vregs = (Bitv.bw_or 
-                          live_in_vregs.(q) 
-                          live_out_vregs.(q)) 
+      let live_vregs = (Bitv.bw_or
+                          live_in_vregs.(q)
+                          live_out_vregs.(q))
       in
         for v = 0 to (Bitv.length live_vregs) - 1
         do
@@ -222,38 +222,38 @@ let calculate_live_bitvectors cx =
 ;;
 
 
-let is_end_of_basic_block quad = 
-  match quad.quad_op with 
+let is_end_of_basic_block quad =
+  match quad.quad_op with
       JE | JNE | JL | JLE | JG | JGE
     | JC | JNC | JO | JNO | JMP | RET | CRET -> true
     | _ -> false
 ;;
 
-let is_beginning_of_basic_block quad = 
-  match quad.quad_fixup with 
+let is_beginning_of_basic_block quad =
+  match quad.quad_fixup with
       None -> false
     | Some _ -> true
 ;;
 
-let dump_quads cx = 
+let dump_quads cx =
   let f = cx.ctxt_abi.Abi.abi_str_of_hardreg in
   let len = (Array.length cx.ctxt_quads) - 1 in
   let ndigits_of n = (int_of_float (log10 (float_of_int n))) in
-  let padded_num n maxnum = 
+  let padded_num n maxnum =
     let ndigits = ndigits_of n in
-    let maxdigits = ndigits_of maxnum in 
+    let maxdigits = ndigits_of maxnum in
     let pad = String.make (maxdigits - ndigits) ' ' in
       Printf.sprintf "%s%d" pad n
   in
-  let padded_str str maxlen = 
+  let padded_str str maxlen =
     let pad = String.make (maxlen - (String.length str)) ' ' in
       Printf.sprintf "%s%s" pad str
   in
-  let maxlablen = ref 0 in 
+  let maxlablen = ref 0 in
   for i = 0 to len
   do
     let q = cx.ctxt_quads.(i) in
-    match q.quad_fixup with 
+    match q.quad_fixup with
         None -> ()
       | Some f -> maxlablen := max (!maxlablen) ((String.length f.fixup_name) + 1)
   done;
@@ -269,15 +269,15 @@ let dump_quads cx =
   done
 ;;
 
-let list_to_str list eltstr = 
+let list_to_str list eltstr =
   (String.concat "," (List.map eltstr (List.sort compare list)))
 ;;
 
 (* Simple local register allocator. Nothing fancy. *)
 let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (framesz:int64) =
-  try 
-    let cx = new_ctxt sess quads vregs abi in 
-    let _ = 
+  try
+    let cx = new_ctxt sess quads vregs abi in
+    let _ =
       begin
         log cx "un-allocated quads:";
         dump_quads cx
@@ -292,35 +292,35 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let vreg_to_spill = Hashtbl.create 0 in (* vreg -> spill *)
     let newq = ref [] in
     let fixup = ref None in
-    let prepend q = 
+    let prepend q =
       newq := {q with quad_fixup = !fixup} :: (!newq);
       fixup := None
     in
     let spill_slot i = abi.Abi.abi_spill_slot framesz i in
     let hr_str = cx.ctxt_abi.Abi.abi_str_of_hardreg in
-    let mov a b = { quad_op = UMOV; 
+    let mov a b = { quad_op = UMOV;
                     quad_dst = a;
                     quad_lhs = b;
                     quad_rhs = Nil;
                     quad_fixup = None }
     in
-    let clean_hreg i hreg = 
-      if (Hashtbl.mem hreg_to_vreg hreg) && 
-        (hreg < cx.ctxt_abi.Abi.abi_n_hardregs) 
-      then 
+    let clean_hreg i hreg =
+      if (Hashtbl.mem hreg_to_vreg hreg) &&
+        (hreg < cx.ctxt_abi.Abi.abi_n_hardregs)
+      then
         let vreg = Hashtbl.find hreg_to_vreg hreg in
           if Hashtbl.mem dirty_vregs vreg
-          then 
+          then
             begin
               Hashtbl.remove dirty_vregs vreg;
               if (Bitv.get (live_out_vregs.(i)) vreg)
-              then 
+              then
                 let spill =
                   if Hashtbl.mem vreg_to_spill vreg
                   then Hashtbl.find vreg_to_spill vreg
-                  else 
+                  else
                     begin
-                      let s = next_spill cx in 
+                      let s = next_spill cx in
                         Hashtbl.replace vreg_to_spill vreg s;
                         s
                     end
@@ -331,50 +331,50 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
           else ()
       else ()
     in
-    let inactivate_hreg hreg = 
-      if (Hashtbl.mem hreg_to_vreg hreg) && 
-        (hreg < cx.ctxt_abi.Abi.abi_n_hardregs) 
-      then 
+    let inactivate_hreg hreg =
+      if (Hashtbl.mem hreg_to_vreg hreg) &&
+        (hreg < cx.ctxt_abi.Abi.abi_n_hardregs)
+      then
         let vreg = Hashtbl.find hreg_to_vreg hreg in
           Hashtbl.remove vreg_to_hreg vreg;
           Hashtbl.remove hreg_to_vreg hreg;
           active_hregs := List.filter (fun x -> x != hreg) (!active_hregs);
-          inactive_hregs := hreg :: (!inactive_hregs); 
+          inactive_hregs := hreg :: (!inactive_hregs);
       else ()
-    in          
-    let spill_specific_hreg i hreg =       
+    in
+    let spill_specific_hreg i hreg =
       clean_hreg i hreg;
       inactivate_hreg hreg
     in
-    let spill_some_hreg i = 
-      match !active_hregs with 
+    let spill_some_hreg i =
+      match !active_hregs with
           [] -> raise (Ra_error ("spilling with no active hregs"));
-        | h::hs -> 
-            begin 
+        | h::hs ->
+            begin
               spill_specific_hreg i h;
               h
             end
     in
-    let spill_all_regs i = 
+    let spill_all_regs i =
       while (!active_hregs) != []
-      do 
+      do
         let _ = spill_some_hreg i in
           ()
       done
     in
-    let reload vreg hreg = 
+    let reload vreg hreg =
       if Hashtbl.mem vreg_to_spill vreg
-      then 
+      then
         prepend (mov (Reg (Hreg hreg)) (spill_slot (Hashtbl.find vreg_to_spill vreg)))
       else ()
     in
 
-    let use_vreg def i vreg = 
+    let use_vreg def i vreg =
       if Hashtbl.mem vreg_to_hreg vreg
       then Hashtbl.find vreg_to_hreg vreg
-      else 
-        let hreg = 
-          match !inactive_hregs with 
+      else
+        let hreg =
+          match !inactive_hregs with
               [] -> spill_some_hreg i
             | x::_ -> x
         in
@@ -384,22 +384,22 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
           Hashtbl.replace vreg_to_hreg vreg hreg;
           if def
           then ()
-          else 
+          else
             reload vreg hreg;
           hreg
     in
     let use_operand def i oper =
-      match oper with 
+      match oper with
           Reg (Vreg v) -> Reg (Hreg (use_vreg def i v))
         | Mem (a, Some (Vreg v), b) -> Mem (a, Some (Hreg (use_vreg false i v)), b)
-        | Reg (Hreg h) -> 
-            begin 
-              spill_specific_hreg i h; 
+        | Reg (Hreg h) ->
+            begin
+              spill_specific_hreg i h;
               Reg (Hreg h)
             end
-        | Mem (a, Some (Hreg h), b) -> 
+        | Mem (a, Some (Hreg h), b) ->
             begin
-              spill_specific_hreg i h; 
+              spill_specific_hreg i h;
               Mem (a, Some (Hreg h), b)
             end
         | x -> x
@@ -419,14 +419,14 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
             if List.exists (fun def -> List.mem def clobbers) defined
             then raise (Ra_error ("clobber and defined sets overlap"));
             begin
-              let hr (v:int) : string = 
-                if Hashtbl.mem vreg_to_hreg v 
+              let hr (v:int) : string =
+                if Hashtbl.mem vreg_to_hreg v
                 then hr_str (Hashtbl.find vreg_to_hreg v)
-                else "??" 
+                else "??"
               in
               let vr_str (v:int) : string = Printf.sprintf "v%d=%s" v (hr v) in
-              let lstr lab ls fn = 
-                if List.length ls = 0 
+              let lstr lab ls fn =
+                if List.length ls = 0
                 then ()
                 else log cx "\t%s: [%s]" lab (list_to_str ls fn)
               in
@@ -441,16 +441,16 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
             fixup := quad.quad_fixup;
             List.iter (clean_hreg i) clobbers;
             if is_beginning_of_basic_block quad
-            then 
+            then
               begin
                 spill_all_regs i;
-                prepend { quad with 
+                prepend { quad with
                             quad_dst = use_operand true i quad.quad_dst;
                             quad_lhs = use_operand false i quad.quad_lhs;
                             quad_rhs = use_operand false i quad.quad_rhs }
               end
-            else 
-              let newq = { quad with 
+            else
+              let newq = { quad with
                              quad_dst = use_operand true i quad.quad_dst;
                              quad_lhs = use_operand false i quad.quad_lhs;
                              quad_rhs = use_operand false i quad.quad_rhs }
@@ -463,29 +463,29 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                 prepend newq
           end;
           List.iter inactivate_hreg clobbers;
-          List.iter (fun i -> Hashtbl.replace dirty_vregs i ()) 
+          List.iter (fun i -> Hashtbl.replace dirty_vregs i ())
             (quad_defined_vregs quad);
       done;
       cx.ctxt_quads <- Array.of_list (List.rev (!newq));
       kill_redundant_moves cx;
-      
+
       log cx "register-allocated quads:";
       dump_quads cx;
 
       (cx.ctxt_quads, cx.ctxt_next_spill)
 
-  with 
-      Ra_error s -> 
+  with
+      Ra_error s ->
         Session.fail sess "RA Error: %s" s;
         (quads, 0)
-        
+
 ;;
 
 
-(* 
+(*
  * Local Variables:
- * fill-column: 70; 
+ * fill-column: 70;
  * indent-tabs-mode: nil
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'"; 
+ * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)

@@ -296,7 +296,7 @@ let trans_visitor
             dst
           in
           let rela cjmp =
-            emit Il.CMP Il.Nil lhs rhs;
+            emit Il.CMP Il.Nil (Il.Reg (force_to_reg lhs)) rhs;
             emit Il.UMOV dst imm_true Il.Nil;
             let j = mark () in
               emit cjmp Il.Nil badlab Il.Nil;

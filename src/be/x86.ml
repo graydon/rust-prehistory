@@ -196,7 +196,7 @@ let spill_slot (framesz:int64) (i:int) : Il.operand =
   Il.Mem
     (word_mem, Some (Il.Hreg ebp),
      (Asm.IMM
-        (Int64.neg (Int64.add framesz (Int64.mul word_sz (Int64.of_int i))))))
+        (Int64.neg (Int64.add framesz (Int64.mul word_sz (Int64.of_int (i+1)))))))
 ;;
 
 
@@ -519,15 +519,15 @@ let insn_rm_r_imm (op:int) (oper:operand) (r:int) (ty:ty_mach) (i:Asm.expr64) : 
   Asm.SEQ [| Asm.BYTE op; rm_r oper r; Asm.WORD (ty, i) |]
 ;;
 
-let insn_rm_r_imm_u8_u32 (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item =
+let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item =
   match i with
       Asm.IMM n when imm_is_byte n ->
-        insn_rm_r_imm op8 oper r TY_u8 i
+        insn_rm_r_imm op8 oper r TY_s8 i
     | _ ->
         Asm.new_relaxation
           [|
-            insn_rm_r_imm op32 oper r TY_u32 i;
-            insn_rm_r_imm op8 oper r TY_u8 i
+            insn_rm_r_imm op32 oper r TY_s32 i;
+            insn_rm_r_imm op8 oper r TY_s8 i
           |]
 ;;
 
@@ -588,7 +588,7 @@ let is_rm8 (oper:operand) : bool =
 
 let cmp (a:operand) (b:operand) : Asm.item =
   match (a,b) with
-      (_, Imm i) when is_rm32 a -> insn_rm_r_imm_u8_u32 0x83 0x81 a slash7 i
+      (_, Imm i) when is_rm32 a -> insn_rm_r_imm_s8_s32 0x83 0x81 a slash7 i
     | (_, Reg (Hreg r)) -> insn_rm_r 0x39 a (reg r)
     | (Reg (Hreg r), _) -> insn_rm_r 0x3b b (reg r)
     | _ -> raise Unrecognized
@@ -676,7 +676,7 @@ let alu_binop
   match (dst, src) with
       (Reg (Hreg r), _) when is_rm32 src -> insn_rm_r rm_src_op src (reg r)
     | (_, Reg (Hreg r)) when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
-    | (Reg (Hreg _), Imm i) -> insn_rm_r_imm_u8_u32 0x83 0x81 dst immslash i
+    | (Reg (Hreg _), Imm i) -> insn_rm_r_imm_s8_s32 0x83 0x81 dst immslash i
     | _ -> raise Unrecognized
 ;;
 

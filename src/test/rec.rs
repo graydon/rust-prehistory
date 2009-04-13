@@ -3,16 +3,24 @@
 prog a
 {
   type rect = rec(int x, int y, int w, int h);
-  fn f(rect r, int y) -> () {
-    let int y2 = r.y;
-    check (y2 == y);
+
+  fn f(rect r, int x, int y, int w, int h) -> () {
+    check (r.x == x);
+    check (r.y == y);
+    check (r.w == w);
+    check (r.h == h);
   }
 
   main {
-    let rect rectv = rec(x=10, y=20, w=100, h=200);
-    let rect rect2 = rectv;
-    let int x = rect2.x;
+    let rect r = rec(x=10, y=20, w=100, h=200);
+    check (r.x == 10);
+    check (r.y == 20);
+    check (r.w == 100);
+    check (r.h == 200);
+    let rect r2 = r;
+    let int x = r2.x;
     check (x == 10);
-    f(rectv, 20);
+    f(r, 10, 20, 100, 200);
+    f(r2, 10, 20, 100, 200);
   }
 }
