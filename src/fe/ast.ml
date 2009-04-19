@@ -219,7 +219,7 @@ and stmt' =
   | STMT_prove of (constrs)
   | STMT_check of (constrs)
   | STMT_check_expr of atom
-  | STMT_checkif of (constrs * stmt)
+  | STMT_check_if of (constrs * block)
   | STMT_block of block
   | STMT_copy of (lval * expr)
   | STMT_call of (lval * lval * (atom array))
@@ -367,7 +367,7 @@ and fn =
 and pred =
     {
       pred_input_slots: ((slot identified) * ident) array;
-      pred_body: stmt;
+      pred_body: block;
     }
 
 and init =
@@ -522,7 +522,7 @@ and fmt_slot (ff:Format.formatter) (s:slot) : unit =
 
 and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) option) : unit =
   fmt ff "(@[";
-  for i = 0 to (Array.length slots) - 1;
+  for i = 0 to (Array.length slots) - 1
   do
     if i != 0
     then fmt ff ",@ ";
@@ -621,6 +621,33 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_constrained t -> fmt ff "?constrained?"
   | TY_pred p -> fmt ff "?pred?"
 
+and fmt_constrs (ff:Format.formatter) (cc:constr array) : unit =
+  Array.iter (fmt_constr ff) cc
+
+and fmt_constr (ff:Format.formatter) (c:constr) : unit =
+  fmt_name ff c.constr_name;
+  fmt ff "(@[";
+  for i = 0 to (Array.length c.constr_args) - 1
+  do
+    if i != 0
+    then fmt ff ",@ ";
+    fmt_carg ff c.constr_args.(i);
+  done;
+  fmt ff "@])"
+
+and fmt_carg_path (ff:Format.formatter) (cp:carg_path) : unit =
+  match cp with
+      CARG_base BASE_formal -> fmt ff "*"
+    | CARG_base (BASE_named nb) -> fmt_name_base ff nb
+    | CARG_ext (base, nc) ->
+        fmt_carg_path ff base;
+        fmt ff ".";
+        fmt_name_component ff nc
+
+and fmt_carg (ff:Format.formatter) (ca:carg) : unit =
+  match ca with
+      CARG_path cp -> fmt_carg_path ff cp
+    | CARG_lit lit -> fmt_lit ff lit
 
 and fmt_obox ff = Format.pp_open_box ff 4
 and fmt_cbox ff = Format.pp_close_box ff ()

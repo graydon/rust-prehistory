@@ -1,0 +1,72 @@
+
+
+The dynamic *environment* consists of a set of 'dyn' variables.
+
+'dyn' variables are declared at crate-level.
+
+dyn variables can be 'set' or 'not-set'. 
+
+dyn_set[T](d) is a predicate.
+
+loading from a dyn variable requires the dyn_set(d) predicate 
+in the current typestate.
+
+storing directly to (or through) a dyn is illegal. a dyn is 
+implicitly a read-alias slot. dyns can only be "set" via a 
+braced-construct that sets-on-entry and unsets-on-exit: bind.
+
+bind (sys.stdin = null_chan();
+      sys.stderr = out1;
+      sys.stdout = out1) {
+
+  ... some computation ... 
+
+}
+
+bind? or with? hmm
+
+with (sys.stdin = null_chan();
+      sys.stderr = out1;
+      sys.stdout = out1) {
+
+  ... some computation ... 
+
+}
+
+
+What are dyns good for? 
+
+  - Arguments that are so ubiquitous that you would have to thread them
+    through every call in the system to get anything to work.
+
+  - Working around brittle interfaces you can't necessarily change but you
+    need to pass a few more parameters through: put them in the dynamic
+    environment, pull them out inside, fail if you can't.
+
+  - Anything you might use a file descriptor number or an environment
+    variable for in C/unix.
+
+  - Making environment-requirements *known*. The dyn_set(d) predicate can
+    be *exported* in your function's signature if you like, as with any
+    other typestate. This makes it possible to encode (in the public
+    entry-points) that a whole subsystem needs, say, stdio setup, or a
+    database connection or such, without having to *pass* stdio in and out
+    of everything inside the subsystem. They can check() for it as needed.
+
+What are dyns not?
+
+  - They are not global mutable variables. They can only be used to pass
+    information *down* the dynamic environment.
+
+  - You cannot race on them. They are per-proc. There is a spawn variant
+    that copies the dyn environment of the current proc, and one that does
+    not.
+
+  - They are not pure. Accessing a dyn makes a function non-pure. It's an
+    extra implicit argument that can't be statically associated with a
+    particular slot. What winds up in the dyn at runtime may be anything.
+
+  - They are not a way of working around a dedicated effort at
+    encapsulation. If you are a callee, an intermediate caller can clear
+    the dynamic environment you get (via reflection), and/or corrupt your
+    dyn settings, just as easily as they can honor them.

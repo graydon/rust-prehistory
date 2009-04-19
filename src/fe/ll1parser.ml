@@ -578,8 +578,7 @@ and parse_constraint ps =
       (* names but can begin with the 'formal' base anchor '*'.              *)
       IDENT _ ->
         let n = ctxt "constraint: name" parse_name ps in
-        let
-            args = ctxt "constraint: args"
+        let args = ctxt "constraint: args"
           (bracketed_zero_or_more
              LPAREN RPAREN (Some COMMA)
              parse_carg) ps
@@ -1038,7 +1037,20 @@ and parse_stmts ps =
                     expect ps SEMI;
                     let bpos = lexpos ps in
                       spans stmts apos bpos (Ast.STMT_check_expr atom)
-              | _ -> raise (unexpected ps)
+              | IF ->
+                  bump ps;
+                  expect ps LPAREN;
+                  let constrs = parse_constrs ps in
+                  expect ps RPAREN;
+                  let block = parse_block ps in
+                  let bpos = lexpos ps in
+                    [| span ps apos bpos (Ast.STMT_check_if (constrs, block)) |]
+
+              | _ ->
+                  let constrs = parse_constrs ps in
+                    expect ps SEMI;
+                    let bpos = lexpos ps in
+                      [| span ps apos bpos (Ast.STMT_check constrs) |]
           end
 
       | IF ->
@@ -1161,7 +1173,7 @@ and parse_stmts ps =
 
 
 
-      | LIM | PORT | PROG | MOD | TYPE | (FN _) ->
+      | LIM | PORT | PROG | MOD | TYPE | (FN _) | PRED ->
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
           let bpos = lexpos ps in
           let decl = Ast.DECL_mod_item (ident, item) in
@@ -1274,16 +1286,17 @@ and parse_prog ps =
   in
     (Array.concat (List.rev !stmts_cell), !prog_cell)
 
+and parse_inputs ps =
+  match peek ps with
+      NIL -> (bump ps; [| |])
+    | LPAREN ->
+        ctxt "inputs: input idents and slots"
+          (parse_one_or_more_identified_slot_ident_pairs true) ps
+    | _ -> raise (unexpected ps)
+
 
 and parse_fn_in_and_out ps =
-  let inputs =
-    match peek ps with
-        NIL -> (bump ps; [| |])
-      | LPAREN ->
-          ctxt "fn in and out: input idents and slots"
-            (parse_one_or_more_identified_slot_ident_pairs true) ps
-      | _ -> raise (unexpected ps)
-  in
+  let inputs = parse_inputs ps in
   let _ = expect ps RARROW in
   let output = ctxt "fn in and out: output slot" (parse_identified_slot true) ps in
     (inputs, output)
@@ -1299,6 +1312,12 @@ and parse_fn proto_opt lim pure ps =
                        Ast.fn_proto = proto_opt;
                        Ast.fn_lim = lim; };
         Ast.fn_body = body; }
+
+and parse_pred ps =
+  let inputs = ctxt "pred: inputs" parse_inputs ps in
+  let body = ctxt "pred: body" parse_block ps in
+    { Ast.pred_input_slots = inputs;
+      Ast.pred_body = body }
 
 and flag ps tok =
   if peek ps = tok
@@ -1354,6 +1373,20 @@ and parse_mod_item ps =
             (ident, arr [],
              span ps apos bpos
                (Ast.MOD_ITEM_fn decl))
+
+      | PRED ->
+          bump ps;
+          let ident = ctxt "mod pred item: ident" parse_ident ps in
+          let params = ctxt "mod pred item: type params" parse_ty_params ps in
+          let pred = ctxt "mod pred item: pred" parse_pred ps in
+          let
+              decl = { Ast.decl_params = params;
+                       Ast.decl_item = pred }
+          in
+          let bpos = lexpos ps in
+            (ident, arr [],
+             span ps apos bpos
+               (Ast.MOD_ITEM_pred decl))
 
       | TYPE ->
           bump ps;

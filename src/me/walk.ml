@@ -245,7 +245,7 @@ and walk_pred
     (p:Ast.pred)
     : unit =
   Array.iter (fun (s,_) -> walk_slot_identified v s) p.Ast.pred_input_slots;
-  walk_stmt v p.Ast.pred_body
+  walk_block v p.Ast.pred_body
 
 
 and walk_fn
@@ -387,7 +387,7 @@ and walk_stmt
       | Ast.STMT_alt_port sap -> ()
       | Ast.STMT_prove cs -> ()
       | Ast.STMT_check cs -> ()
-      | Ast.STMT_checkif ci -> ()
+      | Ast.STMT_check_if ci -> ()
       | Ast.STMT_use _ -> ()
   in
     walk_bracketed

@@ -30,6 +30,14 @@ type text = {
 
 type file_grouped_texts = (node_id, ((text list) ref)) Hashtbl.t;;
 
+(* 
+   The node_id in the constr_key is the innermost block_id of
+   any of the constr's pred name or cargs; this is the
+   *outermost* block_id in which its constr_id can possibly be
+   shared. 
+*)
+type constr_key = (Ast.constr * node_id)
+
 type ctxt =
     { ctxt_sess: Session.sess;
       ctxt_block_slots: block_slots_table;
@@ -41,14 +49,8 @@ type ctxt =
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
 
-      (* 
-         The node_id in the constr table is the innermost block_id of
-         any of the constr's pred name or cargs; this is the
-         *outermost* block_id in which its constr_id can possibly be
-         shared. 
-      *)
-
-      ctxt_constrs: ((Ast.constr * node_id),constr_id) Hashtbl.t;
+      ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
+      ctxt_constr_ids: (constr_key,constr_id) Hashtbl.t;
       ctxt_prestates: (node_id,Bitv.t) Hashtbl.t;
       ctxt_poststates: (node_id,Bitv.t) Hashtbl.t;
 
@@ -84,6 +86,7 @@ let new_ctxt sess abi crate =
     ctxt_lval_to_referent = Hashtbl.create 0;
     ctxt_slot_aliased = Hashtbl.create 0;
     ctxt_constrs = Hashtbl.create 0;
+    ctxt_constr_ids = Hashtbl.create 0;
     ctxt_prestates = Hashtbl.create 0;
     ctxt_poststates = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;
@@ -261,6 +264,124 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
           check_concrete pd.Ast.decl_params
             (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
 ;;
+
+(* Scopes and the visitor that builds them. *)
+
+type scope =
+    SCOPE_block of node_id
+  | SCOPE_mod_item of Ast.mod_item
+  | SCOPE_mod_type_item of Ast.mod_type_item
+
+let scope_stack_managing_visitor
+    (scopes:scope Stack.t)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+  let visit_block_pre b =
+    Stack.push (SCOPE_block b.id) scopes;
+    inner.Walk.visit_block_pre b
+  in
+  let visit_block_post b =
+    inner.Walk.visit_block_post b;
+    ignore (Stack.pop scopes)
+  in
+  let visit_mod_item_pre n p i =
+    Stack.push (SCOPE_mod_item i) scopes;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+  let visit_mod_item_post n p i =
+    inner.Walk.visit_mod_item_post n p i;
+    ignore (Stack.pop scopes)
+  in
+  let visit_mod_type_item_pre n p i =
+    Stack.push (SCOPE_mod_type_item i) scopes;
+    inner.Walk.visit_mod_type_item_pre n p i
+  in
+  let visit_mod_type_item_post n p i =
+    inner.Walk.visit_mod_type_item_post n p i;
+    ignore (Stack.pop scopes)
+  in
+    { inner with
+        Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_block_post = visit_block_post;
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_mod_type_item_pre = visit_mod_type_item_pre;
+        Walk.visit_mod_type_item_post = visit_mod_type_item_post; }
+;;
+
+(* Generic lookup, used for slots, items, types, etc. *)
+(* 
+ * FIXME: currently doesn't lookup inside type-item scopes
+ * nor return type variables bound by items. 
+ *)
+let lookup
+    (cx:ctxt)
+    (scopes:scope Stack.t)
+    (key:Ast.slot_key)
+    : ((scope * node_id) option) =
+  let check_items scope ident items =
+    if Hashtbl.mem items ident
+    then
+      let item = Hashtbl.find items ident in
+        Some (scope, item.id)
+    else
+      None
+  in
+  let check_scope scope =
+    match scope with
+        SCOPE_block block_id ->
+          let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
+          let block_items = Hashtbl.find cx.ctxt_block_items block_id in
+            if Hashtbl.mem block_slots key
+            then
+              let id = Hashtbl.find block_slots key in
+                Some (scope, id)
+            else
+              begin
+                match key with
+                    Ast.KEY_temp _ -> None
+                  | Ast.KEY_ident ident ->
+                      if Hashtbl.mem block_items ident
+                      then
+                        let id = Hashtbl.find block_items ident in
+                          Some (scope, id)
+                      else
+                        None
+              end
+      | SCOPE_mod_item item ->
+          begin
+            match key with
+                Ast.KEY_temp _ -> None
+              | Ast.KEY_ident ident ->
+                  begin
+                    let match_input_slot islots =
+                      arr_search islots
+                        (fun _ (sloti,ident') ->
+                           if ident = ident'
+                           then Some (scope, sloti.id)
+                           else None)
+                    in
+                    match item.node with
+                        Ast.MOD_ITEM_fn f ->
+                          match_input_slot f.Ast.decl_item.Ast.fn_input_slots
+
+                      | Ast.MOD_ITEM_pred p ->
+                          match_input_slot p.Ast.decl_item.Ast.pred_input_slots
+
+                      | Ast.MOD_ITEM_mod m ->
+                          check_items scope ident m.Ast.decl_item
+
+                      | Ast.MOD_ITEM_prog p ->
+                          check_items scope ident p.Ast.decl_item.Ast.prog_mod
+
+                      | _ -> None
+                  end
+            end
+      | _ -> None
+  in
+    stk_search scopes check_scope
+;;
+
 
 let run_passes
     (cx:ctxt)

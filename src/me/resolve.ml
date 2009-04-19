@@ -15,11 +15,6 @@ open Common;;
  *
  *)
 
-type scope =
-    SCOPE_block of node_id
-  | SCOPE_mod_item of Ast.mod_item
-  | SCOPE_mod_type_item of Ast.mod_type_item
-
 
 let log cx = Session.log "resolve"
   cx.ctxt_sess.Session.sess_log_resolve
@@ -101,44 +96,6 @@ let decl_stmt_collecting_visitor
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post;
         Walk.visit_stmt_pre = visit_stmt_pre }
-;;
-
-
-let scope_stack_managing_visitor
-    (scopes:scope Stack.t)
-    (inner:Walk.visitor)
-    : Walk.visitor =
-  let visit_block_pre b =
-    Stack.push (SCOPE_block b.id) scopes;
-    inner.Walk.visit_block_pre b
-  in
-  let visit_block_post b =
-    inner.Walk.visit_block_post b;
-    ignore (Stack.pop scopes)
-  in
-  let visit_mod_item_pre n p i =
-    Stack.push (SCOPE_mod_item i) scopes;
-    inner.Walk.visit_mod_item_pre n p i
-  in
-  let visit_mod_item_post n p i =
-    inner.Walk.visit_mod_item_post n p i;
-    ignore (Stack.pop scopes)
-  in
-  let visit_mod_type_item_pre n p i =
-    Stack.push (SCOPE_mod_type_item i) scopes;
-    inner.Walk.visit_mod_type_item_pre n p i
-  in
-  let visit_mod_type_item_post n p i =
-    inner.Walk.visit_mod_type_item_post n p i;
-    ignore (Stack.pop scopes)
-  in
-    { inner with
-        Walk.visit_block_pre = visit_block_pre;
-        Walk.visit_block_post = visit_block_post;
-        Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_mod_item_post = visit_mod_item_post;
-        Walk.visit_mod_type_item_pre = visit_mod_type_item_pre;
-        Walk.visit_mod_type_item_post = visit_mod_type_item_post; }
 ;;
 
 
@@ -353,61 +310,16 @@ let lval_base_resolving_visitor
     : Walk.visitor =
   let lookup_slot_by_ident id ident =
     log cx "looking up slot or item with ident '%s'" ident;
-    let key = Ast.KEY_ident ident in
-    let check_scope scope =
-      match scope with
-          SCOPE_block block_id ->
-            let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
-            let block_items = Hashtbl.find cx.ctxt_block_items block_id in
-              if Hashtbl.mem block_slots key
-              then Some (Hashtbl.find block_slots key)
-              else
-                if Hashtbl.mem block_items ident
-                then Some (Hashtbl.find block_items ident)
-                else None
-        | SCOPE_mod_item item ->
-            begin
-              match item.node with
-                  Ast.MOD_ITEM_fn f ->
-                    arr_search
-                      f.Ast.decl_item.Ast.fn_input_slots
-                      (fun _ (sloti,ident') ->
-                         if ident = ident' then Some sloti.id else None)
-
-                | Ast.MOD_ITEM_mod m ->
-                    if Hashtbl.mem m.Ast.decl_item ident
-                    then Some (Hashtbl.find m.Ast.decl_item ident).id
-                    else None
-
-                | Ast.MOD_ITEM_prog p ->
-                    if Hashtbl.mem p.Ast.decl_item.Ast.prog_mod ident
-                    then Some (Hashtbl.find p.Ast.decl_item.Ast.prog_mod ident).id
-                    else None
-
-                | _ -> None
-            end
-        | _ -> None
-
-    in
-      match stk_search scopes check_scope with
-          None -> err (Some id) "unresolved identifier '%s'" ident
-        | Some id -> (log cx "resolved to node id #%d" (int_of_node id); id)
+    match lookup cx scopes (Ast.KEY_ident ident)with
+        None -> err (Some id) "unresolved identifier '%s'" ident
+      | Some (scope, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
   in
   let lookup_slot_by_temp id temp =
     log cx "looking up temp slot #%d" (int_of_temp temp);
-    let key = Ast.KEY_temp temp in
-    let check_scope scope =
-      match scope with
-          SCOPE_block block_id ->
-            let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
-              if Hashtbl.mem block_slots key
-              then Some (Hashtbl.find block_slots key)
-              else None
-        | _ -> None
-    in
-      match stk_search scopes check_scope with
+    let res = lookup cx scopes (Ast.KEY_temp temp) in
+      match res with
           None -> err (Some id) "unresolved temp node #%d" (int_of_temp temp)
-        | Some id -> (log cx "resolved to node id #%d" (int_of_node id); id)
+        | Some (scope, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
   in
   let lookup_slot_by_name_base id nb =
     match nb with
