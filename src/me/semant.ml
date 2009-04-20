@@ -51,6 +51,8 @@ type ctxt =
 
       ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
       ctxt_constr_ids: (constr_key,constr_id) Hashtbl.t;
+      ctxt_preconditions: (node_id,Bitv.t) Hashtbl.t;
+      ctxt_postconditions: (node_id,Bitv.t) Hashtbl.t;
       ctxt_prestates: (node_id,Bitv.t) Hashtbl.t;
       ctxt_poststates: (node_id,Bitv.t) Hashtbl.t;
 
@@ -87,6 +89,8 @@ let new_ctxt sess abi crate =
     ctxt_slot_aliased = Hashtbl.create 0;
     ctxt_constrs = Hashtbl.create 0;
     ctxt_constr_ids = Hashtbl.create 0;
+    ctxt_preconditions = Hashtbl.create 0;
+    ctxt_postconditions = Hashtbl.create 0;
     ctxt_prestates = Hashtbl.create 0;
     ctxt_poststates = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;

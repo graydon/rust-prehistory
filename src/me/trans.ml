@@ -550,6 +550,8 @@ let trans_visitor
                         patch skip_els_clause_jmp
               end
 
+      | Ast.STMT_check _ -> ()
+
       | Ast.STMT_call (dst, flv, args) ->
           let vr = Il.Reg (Il.next_vreg (emitter())) in
           let (outmem, _) = trans_lval dst in
