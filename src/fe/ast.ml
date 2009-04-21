@@ -176,6 +176,7 @@ and ty_iso =
 and ty_sig =
     {
       sig_input_slots: slot array;
+      sig_input_constrs: constrs;
       sig_output_slot: slot;
     }
 
@@ -188,7 +189,7 @@ and ty_fn_aux =
 
 and ty_fn = (ty_sig * ty_fn_aux)
 
-and ty_pred = slot array
+and ty_pred = (slot array * constrs)
 
 and ty_prog = (slot array) option
 
@@ -359,6 +360,7 @@ and unop =
 and fn =
     {
       fn_input_slots: ((slot identified) * ident) array;
+      fn_input_constrs: constrs;
       fn_output_slot: slot identified;
       fn_aux: ty_fn_aux;
       fn_body: block;
@@ -367,6 +369,7 @@ and fn =
 and pred =
     {
       pred_input_slots: ((slot identified) * ident) array;
+      pred_input_constrs: constrs;
       pred_body: block;
     }
 

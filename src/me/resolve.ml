@@ -187,6 +187,7 @@ let type_resolving_visitor
   and resolve_ty_fn (f:Ast.ty_fn) : Ast.ty_fn =
     let (tsig,taux) = f in
       ({ Ast.sig_input_slots = Array.map resolve_slot tsig.Ast.sig_input_slots;
+         Ast.sig_input_constrs = tsig.Ast.sig_input_constrs;
          Ast.sig_output_slot = resolve_slot tsig.Ast.sig_output_slot }, taux)
 
   and resolve_ty_prog (p:Ast.ty_prog) : Ast.ty_prog =
@@ -213,9 +214,10 @@ let type_resolving_visitor
                    td.Ast.decl_params
                    (resolve_ty td.Ast.decl_item))
           | Ast.MOD_TYPE_ITEM_pred pd ->
-              Ast.MOD_TYPE_ITEM_pred
-                (decl pd.Ast.decl_params
-                   (Array.map resolve_slot pd.Ast.decl_item))
+              let (slots, constrs) = pd.Ast.decl_item in
+                Ast.MOD_TYPE_ITEM_pred
+                  (decl pd.Ast.decl_params
+                     ((Array.map resolve_slot slots), constrs))
           | Ast.MOD_TYPE_ITEM_mod md ->
               Ast.MOD_TYPE_ITEM_mod
                 (decl md.Ast.decl_params
@@ -264,7 +266,9 @@ let type_resolving_visitor
           Ast.TY_constrained ((resolve_ty ty),constrs)
 
       | Ast.TY_fn tfn -> Ast.TY_fn (resolve_ty_fn tfn)
-      | Ast.TY_pred slots -> Ast.TY_pred (Array.map resolve_slot slots)
+      | Ast.TY_pred tp ->
+          let (slots, constrs) = tp in
+            Ast.TY_pred ((Array.map resolve_slot slots), constrs)
       | Ast.TY_prog tprog -> Ast.TY_prog (resolve_ty_prog tprog)
       | Ast.TY_mod mtis -> Ast.TY_mod (resolve_mod_type_items mtis)
       | Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident)) ->

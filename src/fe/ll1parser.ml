@@ -1287,26 +1287,34 @@ and parse_prog ps =
     (Array.concat (List.rev !stmts_cell), !prog_cell)
 
 and parse_inputs ps =
-  match peek ps with
-      NIL -> (bump ps; [| |])
-    | LPAREN ->
-        ctxt "inputs: input idents and slots"
+  let slots =
+    match peek ps with
+        NIL -> (bump ps; [| |])
+      | LPAREN -> ctxt "inputs: input idents and slots"
           (parse_one_or_more_identified_slot_ident_pairs true) ps
-    | _ -> raise (unexpected ps)
+      | _ -> raise (unexpected ps)
+  in
+  let constrs =
+    match peek ps with
+        COLON -> (bump ps; ctxt "inputs: constrs" parse_constrs ps)
+      | _ -> [| |]
+  in
+    (slots, constrs)
 
 
 and parse_fn_in_and_out ps =
-  let inputs = parse_inputs ps in
+  let (inputs, constrs) = parse_inputs ps in
   let _ = expect ps RARROW in
   let output = ctxt "fn in and out: output slot" (parse_identified_slot true) ps in
-    (inputs, output)
+    (inputs, constrs, output)
 
 
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn proto_opt lim pure ps =
-    let (inputs, output) = ctxt "fn: fn_in_and_out" parse_fn_in_and_out ps in
+    let (inputs, constrs, output) = ctxt "fn: fn_in_and_out" parse_fn_in_and_out ps in
     let body = ctxt "fn: body" parse_block ps in
       { Ast.fn_input_slots = inputs;
+        Ast.fn_input_constrs = constrs;
         Ast.fn_output_slot = output;
         Ast.fn_aux = { Ast.fn_pure = pure;
                        Ast.fn_proto = proto_opt;
@@ -1314,9 +1322,10 @@ and parse_fn proto_opt lim pure ps =
         Ast.fn_body = body; }
 
 and parse_pred ps =
-  let inputs = ctxt "pred: inputs" parse_inputs ps in
+  let (inputs, constrs) = ctxt "pred: inputs" parse_inputs ps in
   let body = ctxt "pred: body" parse_block ps in
     { Ast.pred_input_slots = inputs;
+      Ast.pred_input_constrs = constrs;
       Ast.pred_body = body }
 
 and flag ps tok =

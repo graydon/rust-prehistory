@@ -138,6 +138,18 @@ let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
     else err (Some referent) "Unknown slot"
 ;;
 
+let lval_ty (cx:ctxt) (id:node_id) : Ast.ty =
+  let referent = lval_to_referent cx id in
+    match htab_search cx.ctxt_all_slots referent with
+        Some s ->
+          begin
+            match s.Ast.slot_ty with
+                Some t -> t
+              | None -> err (Some referent) "Referent has un-inferred type"
+          end
+      | None -> (Hashtbl.find cx.ctxt_all_item_types referent)
+;;
+
 let get_block_layout (cx:ctxt) (id:node_id) : layout =
   if Hashtbl.mem cx.ctxt_block_layouts id
   then Hashtbl.find cx.ctxt_block_layouts id
@@ -232,11 +244,13 @@ and arg_slots (slots:((Ast.slot identified) * Ast.ident) array) : Ast.slot array
 
 and ty_fn_of_fn (fn:Ast.fn) : Ast.ty_fn =
   ({ Ast.sig_input_slots = arg_slots fn.Ast.fn_input_slots;
+     Ast.sig_input_constrs = fn.Ast.fn_input_constrs;
      Ast.sig_output_slot = fn.Ast.fn_output_slot.node },
    fn.Ast.fn_aux )
 
 and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
-  arg_slots pred.Ast.pred_input_slots
+  (arg_slots pred.Ast.pred_input_slots,
+   pred.Ast.pred_input_constrs)
 
 
 and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =

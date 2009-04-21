@@ -72,37 +72,25 @@ let constr_id_assigning_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
   let scope_ids = List.map id_of_scope (stk_elts_from_top scopes) in
-  let visit_one_constr c =
+  let visit_constr_pre c =
     let key = determine_constr_key cx c scopes scope_ids in
-    let cid = Constr (!idref) in
-      log cx "assigning constr id #%d to constr %s"
-        (!idref)  (Ast.fmt_to_str Ast.fmt_constr c);
-      incr idref;
-      htab_put cx.ctxt_constrs cid key;
-      htab_put cx.ctxt_constr_ids key cid
-  in
-  let visit_check constrs =
-    Array.iter visit_one_constr constrs
-  in
-  let visit_check_if constrs _ =
-    Array.iter visit_one_constr constrs
-  in
-  let visit_stmt_pre s =
-    begin
-      match s.node with
-          Ast.STMT_check constrs ->
-            visit_check constrs
-        | Ast.STMT_check_if (constrs, stmt) ->
-            visit_check_if constrs stmt
-        | _ -> ()
-    end;
-    inner.Walk.visit_stmt_pre s
+      if not (Hashtbl.mem cx.ctxt_constr_ids key)
+      then
+        begin
+          let cid = Constr (!idref) in
+            log cx "assigning constr id #%d to constr %s"
+              (!idref)  (Ast.fmt_to_str Ast.fmt_constr c);
+            incr idref;
+            htab_put cx.ctxt_constrs cid key;
+            htab_put cx.ctxt_constr_ids key cid;
+        end;
+      inner.Walk.visit_constr_pre c
   in
     { inner with
-        Walk.visit_stmt_pre = visit_stmt_pre }
+        Walk.visit_constr_pre = visit_constr_pre }
 ;;
 
-let constr_bitmap_assigning_visitor
+let bitmap_assigning_visitor
     (cx:ctxt)
     (idref:int ref)
     (inner:Walk.visitor)
@@ -151,6 +139,19 @@ let condition_assigning_visitor
             log cx "setting postcondition for check stmt %d"
               (int_of_node s.id);
             set_postcondition s.id constrs
+        | Ast.STMT_call (_, (Ast.LVAL_base nb), args) ->
+            let referent_ty = lval_ty cx nb.id in
+              begin
+                match referent_ty with
+                    Ast.TY_fn (tsig,_) ->
+                      let constrs = tsig.Ast.sig_input_constrs in
+                        (* FIXME: have to substitute arg-atoms for
+                         * formal cargs. And have to have abstracted
+                         * named cargs to formal cargs in the first place!
+                         *)
+                      set_precondition s.id constrs
+                  | _ -> ()
+              end
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
@@ -259,6 +260,7 @@ let run_dataflow cx sz graph =
            let i = int_of_node node in
              (* FIXME: these are not the correct propagation rules. *)
              log cx "stmt %d prestate %s" i (fmt_constr_bitv prestate);
+             set_bits prestate precond;
              set_bits poststate prestate;
              set_bits poststate postcond;
              log cx "stmt %d poststate %s" i (fmt_constr_bitv poststate);
@@ -275,14 +277,7 @@ let typestate_verify_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
-  let visit_prove constrs = () in
   let visit_stmt_pre s =
-    begin
-      match s.node with
-          Ast.STMT_prove constrs ->
-            visit_prove constrs
-        | _ -> ()
-    end;
     inner.Walk.visit_stmt_pre s
   in
     { inner with
@@ -301,7 +296,7 @@ let process_crate
       (scope_stack_managing_visitor scopes
          (constr_id_assigning_visitor cx scopes constr_id
             Walk.empty_visitor));
-      (constr_bitmap_assigning_visitor cx constr_id
+      (bitmap_assigning_visitor cx constr_id
          Walk.empty_visitor);
       (scope_stack_managing_visitor scopes
          (condition_assigning_visitor cx scopes

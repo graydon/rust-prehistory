@@ -21,6 +21,8 @@ type visitor =
       visit_expr_post: Ast.expr -> unit;
       visit_ty_pre: Ast.ty -> unit;
       visit_ty_post: Ast.ty -> unit;
+      visit_constr_pre: Ast.constr -> unit;
+      visit_constr_post: Ast.constr -> unit;
       visit_block_pre: Ast.block -> unit;
       visit_block_post: Ast.block -> unit;
       visit_lit_pre: Ast.lit -> unit;
@@ -48,6 +50,8 @@ let empty_visitor =
     visit_expr_post = (fun _ -> ());
     visit_ty_pre = (fun _ -> ());
     visit_ty_post = (fun _ -> ());
+    visit_constr_pre = (fun _ -> ());
+    visit_constr_post = (fun _ -> ());
     visit_block_pre = (fun _ -> ());
     visit_block_post = (fun _ -> ());
     visit_lit_pre = (fun _ -> ());
@@ -155,12 +159,20 @@ and walk_ty
       | Ast.TY_tag ttag -> walk_ttag ttag
       | Ast.TY_iso tiso -> Array.iter walk_ttag tiso.Ast.iso_group
       | Ast.TY_fn tfn -> walk_ty_fn v tfn
-      | Ast.TY_pred p -> Array.iter (walk_slot v) p
+      | Ast.TY_pred (slots, constrs) ->
+          begin
+            Array.iter (walk_slot v) slots;
+            walk_constrs v constrs
+          end
       | Ast.TY_chan t -> walk_ty v t
       | Ast.TY_port t -> walk_ty v t
       | Ast.TY_mod mt -> walk_mod_type_items v mt
       | Ast.TY_prog tp -> walk_ty_prog v tp
-      | Ast.TY_constrained (t,_) -> walk_ty v t
+      | Ast.TY_constrained (t,cs) ->
+          begin
+            walk_ty v t;
+            walk_constrs v cs
+          end
       | Ast.TY_lim t -> walk_ty v t
       | Ast.TY_named _ -> ()
       | Ast.TY_opaque _ -> ()
@@ -180,13 +192,13 @@ and walk_ty
       v.visit_ty_post
       ty
 
-
 and walk_ty_sig
     (v:visitor)
     (s:Ast.ty_sig)
     : unit =
   begin
     Array.iter (walk_slot v) s.Ast.sig_input_slots;
+    walk_constrs v s.Ast.sig_input_constrs;
     walk_slot v s.Ast.sig_output_slot;
   end
 
@@ -218,7 +230,9 @@ and walk_mod_type_item
       | Ast.MOD_TYPE_ITEM_public_type td ->
           (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
       | Ast.MOD_TYPE_ITEM_pred pd ->
-          (pd.Ast.decl_params, (fun _ -> (Array.iter (walk_slot v) pd.Ast.decl_item)))
+          let (slots, constrs) = pd.Ast.decl_item in
+            (pd.Ast.decl_params, (fun _ -> (Array.iter (walk_slot v) slots;
+                                            walk_constrs v constrs)))
       | Ast.MOD_TYPE_ITEM_mod md ->
           (md.Ast.decl_params, (fun _ -> walk_mod_type_items v md.Ast.decl_item))
       | Ast.MOD_TYPE_ITEM_fn fd ->
@@ -240,11 +254,30 @@ and walk_mod_type_items
   Hashtbl.iter (walk_mod_type_item v) items
 
 
+and walk_constrs
+    (v:visitor)
+    (cs:Ast.constrs)
+    : unit =
+  Array.iter (walk_constr v) cs
+
+
+and walk_constr
+    (v:visitor)
+    (c:Ast.constr)
+    : unit =
+  walk_bracketed
+    v.visit_constr_pre
+    (fun _ -> ())
+    v.visit_constr_post
+    c
+
+
 and walk_pred
     (v:visitor)
     (p:Ast.pred)
     : unit =
   Array.iter (fun (s,_) -> walk_slot_identified v s) p.Ast.pred_input_slots;
+  walk_constrs v p.Ast.pred_input_constrs;
   walk_block v p.Ast.pred_body
 
 
@@ -253,6 +286,7 @@ and walk_fn
     (f:Ast.fn)
     : unit =
   Array.iter (fun (s,_) -> walk_slot_identified v s) f.Ast.fn_input_slots;
+  walk_constrs v f.Ast.fn_input_constrs;
   walk_slot_identified v f.Ast.fn_output_slot;
   walk_block v f.Ast.fn_body
 
@@ -378,6 +412,16 @@ and walk_stmt
       | Ast.STMT_check_expr at ->
           walk_atom v at
 
+      | Ast.STMT_check cs ->
+          walk_constrs v cs
+
+      | Ast.STMT_check_if (cs,b) ->
+          walk_constrs v cs;
+          walk_block v b
+
+      | Ast.STMT_prove cs ->
+          walk_constrs v cs
+
       (* FIXME: finish this as needed. *)
       | Ast.STMT_foreach f -> ()
       | Ast.STMT_for f -> ()
@@ -385,9 +429,6 @@ and walk_stmt
       | Ast.STMT_alt_tag sat -> ()
       | Ast.STMT_alt_type sat -> ()
       | Ast.STMT_alt_port sap -> ()
-      | Ast.STMT_prove cs -> ()
-      | Ast.STMT_check cs -> ()
-      | Ast.STMT_check_if ci -> ()
       | Ast.STMT_use _ -> ()
   in
     walk_bracketed
