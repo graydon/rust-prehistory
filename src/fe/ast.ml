@@ -500,7 +500,7 @@ and fmt_name_component (ff:Format.formatter) (nc:name_component) : unit =
   match nc with
       COMP_ident i -> fmt_ident ff i
     | COMP_app (id, tys) -> fmt_app ff id tys
-    | COMP_idx i -> fmt ff "%d" i
+    | COMP_idx i -> fmt ff "{%d}" i
 
 and fmt_name (ff:Format.formatter) (n:name) : unit =
   match n with
@@ -999,8 +999,6 @@ let fmt_to_str (f:Format.formatter -> 'a -> unit) (v:'a) : string =
       Format.pp_print_flush bf ();
       Buffer.contents buf
     end
-
-
 
 (*
  * Local Variables:

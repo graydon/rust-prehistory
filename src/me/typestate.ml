@@ -86,7 +86,30 @@ let constr_id_assigning_visitor
         end;
       inner.Walk.visit_constr_pre c
   in
+    (* 
+     * We also want to generate, for any call site, a variant of 
+     * the callee's entry typestate specialized to the arguments
+     * that the caller passes.
+     *)
+  let visit_stmt_pre s =
+    begin
+      match s.node with
+          Ast.STMT_call (_, (Ast.LVAL_base nb), args) ->
+            let referent_ty = lval_ty cx nb.id in
+              begin
+                match referent_ty with
+                    Ast.TY_fn (tsig,_) ->
+                      let constrs = tsig.Ast.sig_input_constrs in
+                      let constrs' = Array.map (apply_atoms_to_constr args) constrs in
+                        Array.iter visit_constr_pre constrs'
+                  | _ -> ()
+              end
+        | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre s
+  in
     { inner with
+        Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_constr_pre = visit_constr_pre }
 ;;
 
@@ -145,11 +168,8 @@ let condition_assigning_visitor
                 match referent_ty with
                     Ast.TY_fn (tsig,_) ->
                       let constrs = tsig.Ast.sig_input_constrs in
-                        (* FIXME: have to substitute arg-atoms for
-                         * formal cargs. And have to have abstracted
-                         * named cargs to formal cargs in the first place!
-                         *)
-                      set_precondition s.id constrs
+                      let constrs' = Array.map (apply_atoms_to_constr args) constrs in
+                        set_precondition s.id constrs'
                   | _ -> ()
               end
         | _ -> ()

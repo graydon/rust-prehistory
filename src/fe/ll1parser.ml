@@ -1299,6 +1299,41 @@ and parse_inputs ps =
         COLON -> (bump ps; ctxt "inputs: constrs" parse_constrs ps)
       | _ -> [| |]
   in
+  let rec rewrite_carg_path cp =
+    match cp with
+        Ast.CARG_base (Ast.BASE_named (Ast.BASE_ident ident)) ->
+          begin
+            let res = ref cp in
+              for i = 0 to (Array.length slots) - 1
+              do
+                let (_, ident') = slots.(i) in
+                  if ident' = ident
+                  then res := Ast.CARG_ext (Ast.CARG_base Ast.BASE_formal,
+                                            Ast.COMP_idx i)
+                  else ()
+              done;
+              !res
+          end
+      | Ast.CARG_base _ -> cp
+      | Ast.CARG_ext (cp, ext) ->
+          Ast.CARG_ext (rewrite_carg_path cp, ext)
+  in
+    (* Rewrite constrs with input tuple as BASE_formal. *)
+    Array.iter
+      begin
+        fun constr ->
+          let args = constr.Ast.constr_args in
+            Array.iteri
+              begin
+                fun i carg ->
+                  match carg with
+                      Ast.CARG_path cp ->
+                        args.(i) <- Ast.CARG_path (rewrite_carg_path cp)
+                    | _ -> ()
+              end
+              args
+      end
+      constrs;
     (slots, constrs)
 
 

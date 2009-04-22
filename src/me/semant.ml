@@ -187,6 +187,46 @@ let slot_ty (s:Ast.slot) : Ast.ty =
 ;;
 
 
+(* Constraint manipulation. *)
+
+let rec apply_atoms_to_carg_path
+    (atoms:Ast.atom array)
+    (cp:Ast.carg_path)
+    : Ast.carg_path =
+  match cp with
+      Ast.CARG_ext (Ast.CARG_base Ast.BASE_formal,
+                    Ast.COMP_idx i) ->
+        begin
+          match atoms.(i) with
+              Ast.ATOM_lval (Ast.LVAL_base nbi) ->
+                Ast.CARG_base (Ast.BASE_named nbi.node)
+            | _ -> err None "Unhandled form of atom"
+        end
+    | Ast.CARG_ext (cp', e) ->
+        Ast.CARG_ext (apply_atoms_to_carg_path atoms cp', e)
+    | _ -> cp
+;;
+
+let apply_atoms_to_carg
+    (atoms:Ast.atom array)
+    (carg:Ast.carg)
+    : Ast.carg =
+  match carg with
+      Ast.CARG_path cp ->
+        Ast.CARG_path (apply_atoms_to_carg_path atoms cp)
+    | Ast.CARG_lit _ -> carg
+;;
+
+let apply_atoms_to_constr
+    (atoms:Ast.atom array)
+    (constr:Ast.constr)
+    : Ast.constr =
+  { constr with
+      Ast.constr_args =
+      Array.map (apply_atoms_to_carg atoms) constr.Ast.constr_args }
+;;
+
+
 (* Mappings between mod items and their respective types. *)
 
 let rec ty_mod_of_mod (inside:bool) (m:Ast.mod_items) : Ast.mod_type_items =
