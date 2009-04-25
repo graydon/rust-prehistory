@@ -68,21 +68,58 @@ C_DEPFILES:=$(RUNTIME_CS:.c=.d)
 
 # Testing logic
 
-TEST_CRATES:=$(wildcard test/*.rc)
-TEST_SOURCES:=$(wildcard test/*.rs)
-TEST_EXES:=$(TEST_CRATES:.rc=$(CFG_EXE_SUFFIX)) $(TEST_SOURCES:.rs=$(CFG_EXE_SUFFIX))
-TEST_OUTS:=$(TEST_EXES:$(CFG_EXE_SUFFIX)=.out)
+TEST_RUN_PASS_CRATES:=$(wildcard test/run-pass/*.rc)
+TEST_RUN_PASS_SOURCES:=$(wildcard test/run-pass/*.rs)
+TEST_RUN_PASS_EXES:=$(TEST_RUN_PASS_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
+                    $(TEST_RUN_PASS_SOURCES:.rs=$(CFG_EXE_SUFFIX))
+TEST_RUN_PASS_OUTS:=$(TEST_RUN_PASS_EXES:$(CFG_EXE_SUFFIX)=.out)
 
-check: $(TEST_EXES) $(TEST_OUTS)
 
-test/%.out: test/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
+TEST_RUN_FAIL_CRATES:=$(wildcard test/run-fail/*.rc)
+TEST_RUN_FAIL_SOURCES:=$(wildcard test/run-fail/*.rs)
+TEST_RUN_FAIL_EXES:=$(TEST_RUN_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
+                    $(TEST_RUN_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
+TEST_RUN_FAIL_OUTS:=$(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
+
+
+TEST_COMPILE_FAIL_CRATES:=$(wildcard test/compile-fail/*.rc)
+TEST_COMPILE_FAIL_SOURCES:=$(wildcard test/compile-fail/*.rs)
+TEST_COMPILE_FAIL_EXES:=$(TEST_COMPILE_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
+                        $(TEST_COMPILE_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
+TEST_COMPILE_FAIL_OUTS:=$(TEST_COMPILE_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
+
+
+check: $(TEST_RUN_PASS_EXES) $(TEST_RUN_FAIL_EXES) \
+       $(TEST_RUN_PASS_OUTS) $(TEST_RUN_FAIL_OUTS) \
+       $(TEST_COMPILE_FAIL_OUTS)
+
+test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 	$< 2>&1 | tee $@
 
-test/%$(CFG_EXE_SUFFIX): test/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
+test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
+	rm -f $@ ; ($< 2>&1 | tee $@) ; grep -nqi error $@
+
+test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
 
-test/%$(CFG_EXE_SUFFIX): test/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
+test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+
+test/compile-fail/%.out: test/compile-fail/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
+	rm -f $@ ; \
+	(OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< 2>&1 | tee $@) ; \
+	grep -ni error $@
+
+test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
+	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+
+test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
+	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+
+test/compile-fail/%.out: test/compile-fail/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
+	rm -f $@ ; \
+	(OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< 2>&1 | tee $@) ; \
+	grep -nqi error $@
 
 # Cleanup logic
 
@@ -93,4 +130,6 @@ clean:
 	rm -f $(ML_DEPFILES) $(C_DEPFILES)
 	rm -f fe/lexer.ml
 	rm -f $(CFG_COMPILER) $(CFG_RUNTIME)
-	rm -f $(TEST_EXES) $(TEST_OUTS)
+	rm -f $(TEST_RUN_PASS_EXES) $(TEST_RUN_PASS_OUTS)
+	rm -f $(TEST_RUN_FAIL_EXES) $(TEST_RUN_FAIL_OUTS)
+	rm -f $(TEST_COMPILE_FAIL_EXES) $(TEST_COMPILE_FAIL_OUTS)
