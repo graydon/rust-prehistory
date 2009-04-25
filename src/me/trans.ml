@@ -174,20 +174,27 @@ let trans_visitor
 
     let return_slot (slot:Ast.slot) (referent:node_id)
         : (Il.operand * Ast.slot) =
-      match htab_search cx.ctxt_slot_vregs referent with
-          Some vr ->
-            (Il.Reg (Il.Vreg (cell_vreg_num vr)), slot)
-        | None ->
-            begin
-              match htab_search cx.ctxt_slot_layouts referent with
-                  None ->
-                    err (Some referent)
-                      "slot assigned to neither vreg nor layout"
-                | Some layout ->
-                    let disp = layout.layout_offset in
-                    let oper = word_at_fp_off disp in
-                      (oper, slot)
-            end
+      let operand =
+        match htab_search cx.ctxt_slot_vregs referent with
+            Some vr ->
+              Il.Reg (Il.Vreg (cell_vreg_num vr))
+          | None ->
+              begin
+                match htab_search cx.ctxt_slot_layouts referent with
+                    None ->
+                      err (Some referent)
+                        "slot assigned to neither vreg nor layout"
+                  | Some layout ->
+                      let disp = layout.layout_offset in
+                        word_at_fp_off disp
+              end
+      in
+        match slot.Ast.slot_mode with
+            Ast.MODE_interior -> (operand, slot)
+          | Ast.MODE_read_alias -> (deref operand, slot)
+          | Ast.MODE_write_alias -> (deref operand, slot)
+          | Ast.MODE_exterior ->
+              err None "Cannot translate exterior-mode slots."
     in
 
       match lv with
@@ -370,6 +377,12 @@ let trans_visitor
       | _ -> err None "LEA on non-memory operand"
   in
 
+  let alias (src:Il.operand) : Il.operand =
+    let addr = Il.Reg (Il.next_vreg (emitter())) in
+      lea addr src;
+      addr
+  in
+
   let rec trans_block (block:Ast.block) : unit =
     Stack.push (get_block_layout cx block.id) block_layouts;
     Array.iter trans_stmt block.node;
@@ -390,6 +403,7 @@ let trans_visitor
             let (_, sub_dst_slot) = dst_entries.(i) in
             let (_, sub_src_slot) = src_entries.(i) in
               trans_copy_slots
+                false
                 sub_dst sub_dst_slot
                 sub_src sub_src_slot
         end
@@ -408,6 +422,7 @@ let trans_visitor
             let sub_src = word_at_reg_off_imm src_reg src_off disp in
             let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
               trans_copy_slots
+                false
                 sub_dst dst_slots.(i)
                 sub_src src_slots.(i)
         end
@@ -415,26 +430,42 @@ let trans_visitor
 
 
   and trans_copy_slots
+      (init:bool)
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
     assert (slot_ty src_slot = slot_ty dst_slot);
-    match (dst, dst_slot.Ast.slot_ty,
-           src, src_slot.Ast.slot_ty) with
-        (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
-         Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_entries)) ->
-          trans_copy_rec
-            dst_reg dst_off dst_entries
-            src_reg src_off src_entries
+    let deref_if_necessary operand slot =
+      match slot.Ast.slot_mode with
+          Ast.MODE_interior -> operand
+        | Ast.MODE_read_alias -> deref operand
+        | Ast.MODE_write_alias -> deref operand
+        | Ast.MODE_exterior ->
+            err None "Cannot translate exterior-mode slots."
+    in
+    let (dst,src) =
+      match (init,dst_slot.Ast.slot_mode) with
+          (true, Ast.MODE_read_alias)
+        | (true, Ast.MODE_write_alias) -> (dst, alias src)
+        | _ -> (deref_if_necessary dst dst_slot,
+                deref_if_necessary src src_slot)
+    in
+      match (dst, dst_slot.Ast.slot_ty,
+             src, src_slot.Ast.slot_ty) with
+          (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
+           Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_entries)) ->
+            trans_copy_rec
+              dst_reg dst_off dst_entries
+              src_reg src_off src_entries
 
-      | (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_tup dst_slots),
-         Il.Mem (_, src_reg, src_off), Some (Ast.TY_tup src_slots)) ->
-          trans_copy_tup
-            dst_reg dst_off dst_slots
-            src_reg src_off src_slots
+        | (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_tup dst_slots),
+           Il.Mem (_, src_reg, src_off), Some (Ast.TY_tup src_slots)) ->
+            trans_copy_tup
+              dst_reg dst_off dst_slots
+              src_reg src_off src_slots
 
-      | _ ->
-          emit Il.UMOV dst src Il.Nil
+        | _ ->
+            emit Il.UMOV dst src Il.Nil
 
 
   and trans_copy
@@ -457,6 +488,7 @@ let trans_visitor
           let (dst_operand, dst_slot) = trans_lval dst in
           let (src_operand, src_slot) = trans_lval src_lval in
             trans_copy_slots
+              false
               dst_operand dst_slot
               src_operand src_slot
 
@@ -555,7 +587,6 @@ let trans_visitor
       | Ast.STMT_call (dst, flv, args) ->
           let vr = Il.Reg (Il.next_vreg (emitter())) in
           let (outmem, _) = trans_lval dst in
-          let outptr = Il.Reg (Il.next_vreg (emitter())) in
           let (fv, fslot) = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
           let tfn =
             match slot_ty fslot with
@@ -573,16 +604,17 @@ let trans_visitor
               then
                 begin
                   (* Emit arg0: the output slot. *)
-                  lea outptr outmem;
                   trans_copy_slots
+                    false
                     dst_operand word_slot
-                    outptr word_slot
+                    (alias outmem) word_slot
                 end
               else
                 if i == 1
                 then
                   (* Emit arg1: the process pointer. *)
                   trans_copy_slots
+                    false
                     dst_operand word_slot
                     abi.Abi.abi_pp_operand word_slot
                 else
@@ -590,7 +622,8 @@ let trans_visitor
                     log cx "copying formal arg %d, slot %s"
                       (i-2) (Ast.fmt_to_str Ast.fmt_slot fslots.(i-2));
                     trans_copy_slots
-                      dst_operand {fslots.(i-2) with Ast.slot_mode = Ast.MODE_interior}
+                      true
+                      dst_operand fslots.(i-2)
                       (trans_atom args.(i-2)) fslots.(i-2)
                   end
             done;
