@@ -1,0 +1,115 @@
+
+Vector and string iteration are both 'special', in that they need to go *really* fast, and that
+their iterations are almost always numerically bounded and provably safe at entry-time. Constantly
+bounds-checking during iteration sucks and nobody likes it.  You have to bounds-check on random
+access, but iteration on homogeneous bounded containers is a special case.
+
+Ideally we want a variant of the for loop:
+
+// mentioning 'vec' twice here is lame
+
+for vec (^auto elt = vec.elts(v)) {}
+
+// could drive it off the fact that vec.elts is a fn that returns a slice type?
+// possibly, but seems kludgey and non-obvious.
+
+for (^auto elt = vec.elts(v)) {}
+
+// how about an non-for keyword?
+
+step (^auto elt = vec.elts(v)) {}
+walk (^auto elt = vec.elts(v)) {}
+each (^auto elt = vec.elts(v)) {}
+span (^auto elt = vec.elts(v)) {}
+range (^auto elt = vec.elts(v)) {}
+slice (^auto elt = vec.elts(v)) {}
+iter (^auto elt = vec.elts(v)) {}
+
+hmm, that's possible. 'step' is not bad.
+
+Alternative: un-adorned 'for' currently (maybe) means '3-step c-style loop', which is almost always
+for a slice. so use un-adorned 'for'.
+
+for (^auto elt = vec.elts(v)) {}
+
+not bad. do we make slices a general bindable type though? it's tempting. they're useful:
+
+for! (^auto s = vec.slice(v,0,10)) {  s is a slice in here; reads sorta ugly though. }
+for (^auto e = v.(0,10)) {  e is an element in here }
+for (^auto e = permute.next(pstate, v)) {  permute.next returns a slice, bare 'for' iterates it. }
+for (^auto e = v.(0,10,2)) {  start, end, step }
+
+// most common idiom:
+for (^auto e = v.(,)) { 'iterate everything' }
+
+// 2nd-most common idiom (how do we distinguish them?):
+for (^auto (i,e) = v.(,)) { 'iterate everything' }
+
+// perhaps like this? reads *really* awkwardly:
+for (^auto e = v.(,);
+     idx i = range(0,vec.len(v))) { 'iterate everything' }
+
+// how about as such?
+for (^auto (e,i) = vec.iteri(v)) { 'iteri' returns (slice,range) }
+
+Hmm. So there are several design issues at work simultaneously:
+
+  - indexing to a slice, via extended indices: v.(start,end,step) is pretty handy.
+  - pinning a slice -- or a single element for that matter -- using for! (vs what, 'let'?)
+  - automatic iteration of a slice when used in an un-adorned 'for'.
+  - getting the index of during a slice-iteration
+
+Ok, so let's assume we have a type called a range which is a 3-tuple
+(start,end,step) and you have a type called a slice[T] which comes from
+either a vec[T] or a str.
+
+Then we can say that the dot-indexing thing vec.(1,10,2) produces a slice,
+and that an unadorned for-loop does "homogeneous iteration" over any
+combination of same-count slices and ranges.
+
+Examples:
+
+ for (^auto e = v.(,)) { e is walked over v }
+
+ for (^auto i = (1,10)) { i is stepped through the range 1-to-10 }
+
+ fn! iteri[T](^vec[T] v) -> (slice[T],range) { put (v.(,), (0,vec.len(v))); }
+ for ((^T e, idx i) = iteri(v)) { e steps through v, i steps through range }
+
+This might work, it's tricky to get just right though: you want a slice to
+be something you establish through an iterator-fn that pins the vec and
+yields the slice. If a slice can only ever be established through such a
+binding... hm
+
+What does:
+
+  slice[T] s = v.(,);
+
+do? I guess it could produce a CoW subvector that can itself be sliced?
+Well, we face this same dilemma with the general indexer actually. What
+does it mean to put a v.(i) normally? Its meaning is contingent on the
+put-type of the iterator.
+
+I guess the key question is how far a slice can be removed from its
+referent. We permit a v.(i) in put-position to index-into a vec mostly
+because the 'suspended form' v.(i) is a non-value; it's part of a name. The
+value is either a ~T or a ^T or a T, consistent with our memory model.
+A slice screws that up. It's "bound" do its base value in a 'write through'
+way.
+
+No, we can't do this. We can possibly do something close, but not
+a separable, denotable slice type.
+
+ for (^auto (e,i) = (v.(,), vec.range(v))) { } ?
+
+ for (idx i = vec.range(v));
+      ^T e1 = v.(,);
+      ^T e2 = u.(,)) {
+   e2 = e1 * i;
+ }
+
+ for (~auto e = v.(,)) { out <| e <| endl; }
+
+that's actually not *that* bad. Then the slice-type exists but is strictly
+internal to the homogeneous for loop. And any range tuples are stepped along
+with it. All in parallel.
