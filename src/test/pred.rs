@@ -14,7 +14,7 @@ prog p
     let int b = 23;
     let int c = 77;
     check lt(a,b);
-    check lt(b,c);
+    check lt(a,c);
     f(a,b);
     f(a,c);
   }

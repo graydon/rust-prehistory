@@ -180,23 +180,25 @@ let condition_assigning_visitor
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
+let lset_add x xs =
+  if List.mem x xs
+  then xs
+  else x::xs
+;;
+
+let lset_fmt lset =
+  "[" ^
+    (String.concat ", "
+       (List.map
+          (fun n -> string_of_int (int_of_node n)) lset)) ^
+    "]"
+;;
+
 let graph_building_visitor
     (cx:ctxt)
     (graph:(node_id, (node_id list)) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
-  let lset_add x xs =
-    if List.mem x xs
-    then xs
-    else x::xs
-  in
-  let lset_fmt lset =
-    "[" ^
-      (String.concat ", "
-         (List.map
-            (fun n -> string_of_int (int_of_node n)) lset)) ^
-      "]"
-  in
   let visit_stmt_pre s =
     begin
       if not (Hashtbl.mem graph s.id)
@@ -245,8 +247,8 @@ let graph_building_visitor
         Walk.visit_stmt_post = visit_stmt_post }
 ;;
 
-let run_dataflow cx sz graph =
-  let nodes = Array.of_list (htab_keys graph) in
+let run_dataflow cx sz inverse_graph =
+  let nodes = Array.of_list (htab_keys inverse_graph) in
   let progress = ref true in
   let fmt_constr_bitv bitv =
     String.concat ", "
@@ -264,6 +266,15 @@ let run_dataflow cx sz graph =
                          (progress := true;
                           Bitv.set dst i true)) src
   in
+  let intersect_bits dst src =
+    Bitv.iteri (fun i b ->
+                  let curr = Bitv.get dst i in
+                  let comb = curr && b in
+                    if curr != comb
+                    then
+                      (progress := true;
+                       Bitv.set dst i comb)) src
+  in
   let iter = ref 0 in
     Array.sort compare nodes;
     while !progress do
@@ -273,22 +284,27 @@ let run_dataflow cx sz graph =
       Array.iter
         (fun node ->
            let prestate = Hashtbl.find cx.ctxt_prestates node in
-           let precond = Hashtbl.find cx.ctxt_preconditions node in
            let postcond = Hashtbl.find cx.ctxt_postconditions node in
            let poststate = Hashtbl.find cx.ctxt_poststates node in
-           let successors = Hashtbl.find graph node in
+           let predecessors = Hashtbl.find inverse_graph node in
            let i = int_of_node node in
-             (* FIXME: these are not the correct propagation rules. *)
+             log cx "in-edges for %d: %s" i (lset_fmt predecessors);
+             begin
+               match predecessors with
+                   p :: ps ->
+                     set_bits prestate (Hashtbl.find cx.ctxt_poststates p);
+                     List.iter
+                       (fun p ->
+                          let p_poststate = Hashtbl.find cx.ctxt_poststates p in
+                            intersect_bits p_poststate prestate)
+                       ps
+                 | _ -> ()
+             end;
              log cx "stmt %d prestate %s" i (fmt_constr_bitv prestate);
-             set_bits prestate precond;
              set_bits poststate prestate;
              set_bits poststate postcond;
              log cx "stmt %d poststate %s" i (fmt_constr_bitv poststate);
-             List.iter
-               (fun succ ->
-                  let succ_prestate = Hashtbl.find cx.ctxt_prestates succ in
-                    set_bits succ_prestate poststate)
-               successors)
+)
         nodes
     done
 ;;
@@ -298,10 +314,38 @@ let typestate_verify_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
   let visit_stmt_pre s =
-    inner.Walk.visit_stmt_pre s
+    let prestate = Hashtbl.find cx.ctxt_prestates s.id in
+    let precond = Hashtbl.find cx.ctxt_preconditions s.id in
+      Bitv.iteri_true
+        (fun i ->
+           if not (Bitv.get prestate i)
+           then
+             let (constr, _) = Hashtbl.find cx.ctxt_constrs (Constr i) in
+             let constr_str = Ast.fmt_to_str Ast.fmt_constr constr in
+               err (Some s.id) "Unsatisfied precondition constraint: %s " constr_str)
+        precond;
+      inner.Walk.visit_stmt_pre s
   in
     { inner with
         Walk.visit_stmt_pre = visit_stmt_pre }
+;;
+
+let invert_graph
+    (graph:(node_id, (node_id list)) Hashtbl.t)
+    (inverse_graph:(node_id, (node_id list)) Hashtbl.t)
+    : unit =
+  Hashtbl.iter
+    (fun src dsts ->
+       List.iter
+         (fun dst ->
+            let srcs =
+              if Hashtbl.mem inverse_graph dst
+              then Hashtbl.find inverse_graph dst
+              else []
+            in
+              Hashtbl.replace inverse_graph dst (lset_add src srcs))
+         dsts)
+    graph
 ;;
 
 let process_crate
@@ -311,6 +355,7 @@ let process_crate
   let (scopes:scope Stack.t) = Stack.create () in
   let constr_id = ref 0 in
   let (graph:(node_id, (node_id list)) Hashtbl.t) = Hashtbl.create 0 in
+  let (inverse_graph:(node_id, (node_id list)) Hashtbl.t) = Hashtbl.create 0 in
   let setup_passes =
     [|
       (scope_stack_managing_visitor scopes
@@ -333,7 +378,8 @@ let process_crate
     |]
   in
     run_passes cx setup_passes (log cx "%s") items;
-    run_dataflow cx (!constr_id) graph;
+    invert_graph graph inverse_graph;
+    run_dataflow cx (!constr_id) inverse_graph;
     run_passes cx verify_passes (log cx "%s") items
 ;;
 
