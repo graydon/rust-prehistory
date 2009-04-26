@@ -60,6 +60,114 @@ dynamic styles.
 Complete table of contents
 @end ifnottex
 
+@contents
+
+@node    Introduction
+@chapter Introduction
+
+Rust is a ``curly-brace'' block-structured language. It visually resembles
+the Algol / C family, but differs significantly in syntactic and semantic
+details.
+
+@node    Goals
+@section Goals
+
+The language design pursues the following goals:
+
+@itemize
+@item Compile-time error detection and prevention.
+@item Run-time error isolation and containment.
+@item Internet-scale system construction.
+@item Loose coupling.
+@item System analysis and maintainance affordances.
+@item Clarity and precision of expression.
+@item Implementation simplicity.
+@item Run-time efficiency.
+@end itemize
+
+Note that most of these goals are @emph{engineering} goals, not showcases
+for sophisticated language technology. Most of the technology in rust is
+@emph{old} and has been seen decades earlier in other languages.
+
+Also note that ``terseness'' and ``expressiveness'' are absent from the
+list. Rust programs are often larger and more verbose than equivalent
+programs in other languages. The syntax avoids gratuitous chatter where
+possible, and keywords are kept modest, but rust is unlikely to win any
+competitions for ``shortest program to accomplish a given task''.
+
+
+@node    Influences
+@section Influences
+
+@quotation
+  The essential problem that must be solved in making a fault-tolerant
+  software system is therefore that of fault-isolation. Different programmers
+  will write different modules, some modules will be correct, others will have
+  errors. We do not want the errors in one module to adversely affect the
+  behaviour of a module which does not have any errors.
+
+                                   - Joe Armstrong
+@end quotation
+
+@quotation
+  In our approach, all data is private to some process, and processes can
+  only communicate through communications channels. @emph{Security}, as used
+  in this paper, is the property which guarantees that processes in a system
+  cannot affect each other except by explicit communication.
+
+  When security is absent, nothing which can be proven about a single module
+  in isolation can be guaranteed to hold when that module is embedded in a
+  system...
+                                   - Robert Strom and Shaula Yemini
+@end quotation
+
+@quotation
+  Concurrent and applicative programming complement each other. The
+  ability to send messages on channels provides I/O without side effects,
+  while the avoidance of shared data helps keep concurrent pro- cesses from
+  colliding.
+                                   - Rob Pike
+@end quotation
+
+Rust is not a particularly original language, though it may appear as such
+since memory is so short in computer science. Its design elements are drawn
+from a number of ``historical'' languages that have, with a few exceptions,
+fallen out of favour. Four prominent lineages contribute the most:
+
+@itemize
+@item
+The NIL (1981) and Hermes (1990) family. These languages were developed at
+IBM Watson Research Center (Yorktown Heights, NY, USA) by Robert Strom,
+Shaula Yemini, David Bacon and others in their group.
+
+@item
+The Napier (1985) and Napier88 (1988) family. These languages were
+developed at the University of St. Andrews (St. Andrews, Fife, UK) by
+Malcolm Atkinson, Ron Morrison and others in their group.
+
+@item
+The Erlang (1987) language, developed at the Ericsson Computer Science
+Laboratory (Älvsjö, Stockholm, Sweden) by Joe Armstrong, Robert Virding,
+Claes Wikström, Mike Williams and others in their group.
+
+@item
+The Newsqueak (1988), Alef (1995), and Limbo (1996) family. These languages
+were developed at Bell labs Computing Sciences Reserch Center (Murray Hill,
+NJ, USA) by Rob Pike, Phil Winterbottom, Sean Dorward and others in
+their group.
+
+@item
+@end itemize
+
+Additional influences can be seen from SML, Camlp4, and various
+``pre-Object-Orientation'' languages of the 70s (CLU, Ada, Mesa, Alphard,
+Euclid, etc.)
+
+Rust is therefore, in many ways, a selection of language technologies that
+were @emph{alternatives} to the historically dominant ``Object Oriented''
+languages such as Smalltalk, C++, Java and Python.
+
+
 @c ############################################################
 @c begin main body of nodes
 @c ############################################################
@@ -69,7 +177,7 @@ Complete table of contents
 @c ############################################################
 
 @c ############################################################
-@c tutorial 
+@c tutorial
 @c ############################################################
 
 @c ############################################################

@@ -79,23 +79,39 @@ let trans_visitor
       | _ -> err None "Expected reg/off memory operand"
   in
 
+  let mov (dst:Il.operand) (src:Il.operand) : unit =
+    emit Il.UMOV dst src Il.Nil
+  in
+
+  let lea (dst:Il.operand) (src:Il.operand) : unit =
+    match src with
+        Il.Mem _ -> emit Il.LEA dst src Il.Nil
+      | _ -> err None "LEA on non-memory operand"
+  in
+
+  let alias (src:Il.operand) : Il.operand =
+    let addr = Il.Reg (Il.next_vreg (emitter())) in
+      lea addr src;
+      addr
+  in
+
   let deref (mem:Il.operand) : Il.operand =
     let reg = next_vreg() in
     let res = word_at_reg_off (Some reg) (Asm.IMM 0L) in
-      emit Il.UMOV (Il.Reg reg) mem Il.Nil;
+      mov (Il.Reg reg) mem;
       res
   in
 
   let force_to_reg (op:Il.operand) : Il.reg =
-    let mov _ =
+    let do_mov _ =
       let tmp = next_vreg () in
-        emit Il.UMOV (Il.Reg tmp) op Il.Nil;
+        mov (Il.Reg tmp) op;
         tmp
     in
       match op with
           Il.Reg r -> r
-        | Il.Imm _ -> mov ()
-        | Il.Mem (mem, _, _) when mem = word_mem -> mov ()
+        | Il.Imm _ -> do_mov ()
+        | Il.Mem (mem, _, _) when mem = word_mem -> do_mov ()
         | _ -> err None "unhandled operand type in force_to_reg"
   in
 
@@ -304,10 +320,10 @@ let trans_visitor
           in
           let rela cjmp =
             emit Il.CMP Il.Nil (Il.Reg (force_to_reg lhs)) rhs;
-            emit Il.UMOV dst imm_true Il.Nil;
+            mov dst imm_true;
             let j = mark () in
               emit cjmp Il.Nil badlab Il.Nil;
-              emit Il.UMOV dst imm_false Il.Nil;
+              mov dst imm_false;
               patch j;
               dst
           in
@@ -371,17 +387,6 @@ let trans_visitor
   let trans_spawn (a:Ast.atom) : unit = trans_1_arg_kern_fn a 2L in
   let trans_check_expr (a:Ast.atom) : unit = trans_1_arg_kern_fn a 3L in
 
-  let lea (dst:Il.operand) (src:Il.operand) : unit =
-    match src with
-        Il.Mem _ -> emit Il.LEA dst src Il.Nil
-      | _ -> err None "LEA on non-memory operand"
-  in
-
-  let alias (src:Il.operand) : Il.operand =
-    let addr = Il.Reg (Il.next_vreg (emitter())) in
-      lea addr src;
-      addr
-  in
 
   let rec trans_block (block:Ast.block) : unit =
     Stack.push (get_block_layout cx block.id) block_layouts;
@@ -403,7 +408,6 @@ let trans_visitor
             let (_, sub_dst_slot) = dst_entries.(i) in
             let (_, sub_src_slot) = src_entries.(i) in
               trans_copy_slots
-                false
                 sub_dst sub_dst_slot
                 sub_src sub_src_slot
         end
@@ -422,7 +426,6 @@ let trans_visitor
             let sub_src = word_at_reg_off_imm src_reg src_off disp in
             let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
               trans_copy_slots
-                false
                 sub_dst dst_slots.(i)
                 sub_src src_slots.(i)
         end
@@ -430,7 +433,6 @@ let trans_visitor
 
 
   and trans_copy_slots
-      (init:bool)
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
@@ -443,13 +445,8 @@ let trans_visitor
         | Ast.MODE_exterior ->
             err None "Cannot translate exterior-mode slots."
     in
-    let (dst,src) =
-      match (init,dst_slot.Ast.slot_mode) with
-          (true, Ast.MODE_read_alias)
-        | (true, Ast.MODE_write_alias) -> (dst, alias src)
-        | _ -> (deref_if_necessary dst dst_slot,
-                deref_if_necessary src src_slot)
-    in
+    let dst = deref_if_necessary dst dst_slot in
+    let src = deref_if_necessary src src_slot in
       match (dst, dst_slot.Ast.slot_ty,
              src, src_slot.Ast.slot_ty) with
           (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
@@ -465,7 +462,7 @@ let trans_visitor
               src_reg src_off src_slots
 
         | _ ->
-            emit Il.UMOV dst src Il.Nil
+            mov dst src
 
 
   and trans_copy
@@ -481,16 +478,31 @@ let trans_visitor
            *)
           let (dst_operand, _) = trans_lval dst in
           let src_operand = trans_expr src in
-            emit Il.UMOV dst_operand src_operand Il.Nil
+            mov dst_operand src_operand
 
       | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
           (* Possibly-large structure copying *)
           let (dst_operand, dst_slot) = trans_lval dst in
           let (src_operand, src_slot) = trans_lval src_lval in
             trans_copy_slots
-              false
               dst_operand dst_slot
               src_operand src_slot
+
+
+  and trans_init_slots
+      (dst:Il.operand) (dst_slot:Ast.slot)
+      (src:Il.operand) (src_slot:Ast.slot)
+      : unit =
+    assert (slot_ty src_slot = slot_ty dst_slot);
+    match dst_slot.Ast.slot_mode with
+        Ast.MODE_read_alias
+      | Ast.MODE_write_alias -> mov dst (alias src)
+      | Ast.MODE_exterior ->
+            err None "Cannot translate exterior-mode slots."
+      | _ ->
+          trans_copy_slots
+            dst dst_slot
+            src src_slot
 
 
   and trans_stmt (stmt:Ast.stmt) : unit =
@@ -604,25 +616,22 @@ let trans_visitor
               then
                 begin
                   (* Emit arg0: the output slot. *)
-                  trans_copy_slots
-                    false
-                    dst_operand word_slot
-                    (alias outmem) word_slot
+                  trans_init_slots
+                    dst_operand (word_write_alias_slot abi)
+                    outmem word_slot
                 end
               else
                 if i == 1
                 then
                   (* Emit arg1: the process pointer. *)
-                  trans_copy_slots
-                    false
+                  trans_init_slots
                     dst_operand word_slot
                     abi.Abi.abi_pp_operand word_slot
                 else
                   begin
                     log cx "copying formal arg %d, slot %s"
                       (i-2) (Ast.fmt_to_str Ast.fmt_slot fslots.(i-2));
-                    trans_copy_slots
-                      true
+                    trans_init_slots
                       dst_operand fslots.(i-2)
                       (trans_atom args.(i-2)) fslots.(i-2)
                   end
@@ -642,7 +651,7 @@ let trans_visitor
                           let disp = abi.Abi.abi_frame_base_sz in
                           let dst = deref (word_at_fp_off disp) in
                           let src = trans_atom at in
-                            emit Il.UMOV dst src Il.Nil
+                            mov dst src
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;

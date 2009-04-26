@@ -30,7 +30,7 @@ let determine_constr_key
    * unique key for idenfitying a predicate.
    *)
   let cident =
-    (* FIXME: handle other forms of const name. *)
+    (* FIXME: handle other forms of constr name. *)
     match c.Ast.constr_name with
         Ast.NAME_base (Ast.BASE_ident ident) -> ident
       | _ -> err None "unhandled form of constraint-name"
