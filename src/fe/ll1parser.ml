@@ -346,7 +346,7 @@ let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
 
 let peek ps =
   begin
-    log ps "peeking at: %s     // %s\n%!"
+    log ps "peeking at: %s     // %s"
       (string_of_tok ps.pstate_peek)
       (match ps.pstate_ctxt with
            (s, _) :: _ -> s
@@ -358,7 +358,7 @@ let peek ps =
 
 let bump ps =
   begin
-    log ps "bumping past: %s\n%!" (string_of_tok ps.pstate_peek);
+    log ps "bumping past: %s" (string_of_tok ps.pstate_peek);
     ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf
   end
 ;;
@@ -1673,6 +1673,7 @@ let parse_srcfile = parse_root_with_parse_fn ".rs" parse_root_srcfile_entries;;
  * Local Variables:
  * fill-column: 70;
  * indent-tabs-mode: nil
+ * buffer-file-coding-system: utf-8-unix
  * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)

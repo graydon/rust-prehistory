@@ -1,4 +1,4 @@
-# This assumes you're on a linux x86-64 host with enough multilibs. 
+# This assumes you're on a linux x86-64 host with enough multilibs.
 # To cross-compile for x86. We don't presently generate code for x86-64.
 
 CFG_COMPILER:=rustc

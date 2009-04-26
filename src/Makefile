@@ -96,8 +96,10 @@ check: $(TEST_RUN_PASS_EXES) $(TEST_RUN_FAIL_EXES) \
 test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 	$< 2>&1 | tee $@
 
-test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
-	rm -f $@ ; ($< 2>&1 | tee $@) ; grep -nqi error $@
+test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) test/run-fail/%.pat $(CFG_RUNTIME)
+	rm -f $@
+	$< >$@ 2>&1 || true
+	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
@@ -105,10 +107,10 @@ test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_COMPILER) $(CFG_RUNTI
 test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
 
-test/compile-fail/%.out: test/compile-fail/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
-	rm -f $@ ; \
-	(OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< 2>&1 | tee $@) ; \
-	grep -ni error $@
+test/compile-fail/%.out: test/compile-fail/%.rc test/compile-fail/%.pat $(CFG_COMPILER) $(CFG_RUNTIME)
+	rm -f $@
+	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
@@ -116,10 +118,10 @@ test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_COMPILER) $(CFG_RUNTI
 test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
 
-test/compile-fail/%.out: test/compile-fail/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
-	rm -f $@ ; \
-	(OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< 2>&1 | tee $@) ; \
-	grep -nqi error $@
+test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_COMPILER) $(CFG_RUNTIME)
+	rm -f $@
+	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 # Cleanup logic
 

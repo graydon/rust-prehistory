@@ -571,6 +571,7 @@ let layout_call_tup (abi:Abi.abi) (tfn:Ast.ty_fn) : (layout array) =
  * Local Variables:
  * fill-column: 70;
  * indent-tabs-mode: nil
+ * buffer-file-coding-system: utf-8-unix
  * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)

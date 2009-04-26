@@ -1,4 +1,4 @@
-# This assumes you're on an OSX x86 host. 
+# This assumes you're on an OSX x86 host.
 
 CFG_COMPILER:=rustc
 CFG_RUNTIME:=librustrt.dylib
