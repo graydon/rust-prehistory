@@ -30,13 +30,18 @@ type text = {
 
 type file_grouped_texts = (node_id, ((text list) ref)) Hashtbl.t;;
 
-(* 
-   The node_id in the constr_key is the innermost block_id of
-   any of the constr's pred name or cargs; this is the
-   *outermost* block_id in which its constr_id can possibly be
-   shared. 
-*)
-type constr_key = (Ast.constr * node_id)
+(* The node_id in the Constr_pred constr_key is the innermost block_id
+   of any of the constr's pred name or cargs; this is the *outermost*
+   block_id in which its constr_id can possibly be shared. It serves
+   only to uniquely identify the constr.
+   
+   The node_id in the Constr_init constr_key is just a slot id. 
+   Constr_init is the builtin (un-named) constraint that means "slot is
+   initialized". Not every slot is.
+ *)
+type constr_key =
+    Constr_pred of (Ast.constr * node_id)
+  | Constr_init of node_id
 
 type ctxt =
     { ctxt_sess: Session.sess;
