@@ -361,9 +361,12 @@ let run_dataflow cx sz inverse_graph =
          (Bitv.to_list bitv))
   in
   let intersection bitvs =
-    let n = ref (Bitv.create sz false) in
-      List.iter (fun bv -> n := Bitv.bw_and (!n) bv) bitvs;
-      !n
+    match bitvs with
+        b :: bz ->
+          let n = ref (Bitv.copy b) in
+            List.iter (fun bv -> n := Bitv.bw_and (!n) bv) bz;
+            !n
+      | _ -> Bitv.create sz false
   in
   let set_bits dst src =
     Bitv.iteri (fun i b ->
