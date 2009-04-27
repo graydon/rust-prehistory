@@ -194,41 +194,53 @@ let slot_ty (s:Ast.slot) : Ast.ty =
 
 (* Constraint manipulation. *)
 
-let rec apply_atoms_to_carg_path
-    (atoms:Ast.atom array)
+let rec apply_names_to_carg_path
+    (names:(Ast.name_base option) array)
     (cp:Ast.carg_path)
     : Ast.carg_path =
   match cp with
       Ast.CARG_ext (Ast.CARG_base Ast.BASE_formal,
                     Ast.COMP_idx i) ->
         begin
-          match atoms.(i) with
-              Ast.ATOM_lval (Ast.LVAL_base nbi) ->
-                Ast.CARG_base (Ast.BASE_named nbi.node)
-            | _ -> err None "Unhandled form of atom"
+          match names.(i) with
+              Some nb ->
+                Ast.CARG_base (Ast.BASE_named nb)
+            | None -> err None "Indexing off non-named carg"
         end
     | Ast.CARG_ext (cp', e) ->
-        Ast.CARG_ext (apply_atoms_to_carg_path atoms cp', e)
+        Ast.CARG_ext (apply_names_to_carg_path names cp', e)
     | _ -> cp
 ;;
 
-let apply_atoms_to_carg
-    (atoms:Ast.atom array)
+let apply_names_to_carg
+    (names:(Ast.name_base option) array)
     (carg:Ast.carg)
     : Ast.carg =
   match carg with
       Ast.CARG_path cp ->
-        Ast.CARG_path (apply_atoms_to_carg_path atoms cp)
+        Ast.CARG_path (apply_names_to_carg_path names cp)
     | Ast.CARG_lit _ -> carg
 ;;
 
-let apply_atoms_to_constr
-    (atoms:Ast.atom array)
+let apply_names_to_constr
+    (names:(Ast.name_base option) array)
     (constr:Ast.constr)
     : Ast.constr =
   { constr with
       Ast.constr_args =
-      Array.map (apply_atoms_to_carg atoms) constr.Ast.constr_args }
+      Array.map (apply_names_to_carg names) constr.Ast.constr_args }
+;;
+
+let atoms_to_names (atoms:Ast.atom array)
+    : (Ast.name_base option) array =
+  Array.map
+    begin
+      fun atom ->
+        match atom with
+            Ast.ATOM_lval (Ast.LVAL_base nbi) -> Some nbi.node
+          | _ -> None
+    end
+    atoms
 ;;
 
 

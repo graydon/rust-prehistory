@@ -96,13 +96,37 @@ let expr_slots (cx:ctxt) (e:Ast.expr) : node_id array =
       | Ast.EXPR_atom a -> atom_slots cx a
 ;;
 
+let fn_decl_keys fd resolver =
+  let fn = fd.Ast.decl_item in
+  let init_keys =
+    Array.map
+      (fun (sloti, _) -> (Constr_init sloti.id))
+      fn.Ast.fn_input_slots
+  in
+  let names =
+    Array.map
+      (fun (_, ident) -> (Some (Ast.BASE_ident ident)))
+      fn.Ast.fn_input_slots
+  in
+  let input_constrs =
+    Array.map (apply_names_to_constr names) fn.Ast.fn_input_constrs in
+  let input_keys = Array.map resolver input_constrs in
+    (input_keys, init_keys)
+;;
+
+
 let constr_id_assigning_visitor
     (cx:ctxt)
     (scopes:scope Stack.t)
     (idref:int ref)
     (inner:Walk.visitor)
     : Walk.visitor =
-  let scope_ids = List.map id_of_scope (stk_elts_from_top scopes) in
+
+  let scope_ids _ = List.map id_of_scope (stk_elts_from_top scopes) in
+
+  let resolve_constr_to_key (constr:Ast.constr) : constr_key =
+    determine_constr_key cx scopes (scope_ids()) constr
+  in
 
   let note_constr_key key =
     if not (Hashtbl.mem cx.ctxt_constr_ids key)
@@ -117,8 +141,22 @@ let constr_id_assigning_visitor
       end
   in
 
+  let note_keys = Array.iter note_constr_key in
+
+  let visit_mod_item_pre n p i =
+    begin
+    match i.node with
+        Ast.MOD_ITEM_fn fd ->
+          let (input_keys, init_keys) = fn_decl_keys fd resolve_constr_to_key in
+            note_keys input_keys;
+            note_keys init_keys
+      | _ -> ()
+    end;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+
   let visit_constr_pre c =
-    let key = determine_constr_key cx scopes scope_ids c in
+    let key = determine_constr_key cx scopes (scope_ids()) c in
       note_constr_key key;
       inner.Walk.visit_constr_pre c
   in
@@ -140,7 +178,8 @@ let constr_id_assigning_visitor
                 match referent_ty with
                     Ast.TY_fn (tsig,_) ->
                       let constrs = tsig.Ast.sig_input_constrs in
-                      let constrs' = Array.map (apply_atoms_to_constr args) constrs in
+                      let names = atoms_to_names args in
+                      let constrs' = Array.map (apply_names_to_constr names) constrs in
                         Array.iter visit_constr_pre constrs'
                   | _ -> ()
               end
@@ -151,14 +190,15 @@ let constr_id_assigning_visitor
         | Ast.STMT_copy (dst, src) ->
             let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              Array.iter note_constr_key precond;
-              Array.iter note_constr_key postcond
+              note_keys precond;
+              note_keys postcond
 
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
   in
     { inner with
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_constr_pre = visit_constr_pre }
 ;;
@@ -186,7 +226,8 @@ let condition_assigning_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
   let scope_ids _ = List.map id_of_scope (stk_elts_from_top scopes) in
-  let set_condition (bitv:Bitv.t) (keys:constr_key array) : unit =
+
+  let raise_bits (bitv:Bitv.t) (keys:constr_key array) : unit =
     Array.iter
       (fun key ->
          let cid = Hashtbl.find cx.ctxt_constr_ids key in
@@ -196,17 +237,44 @@ let condition_assigning_visitor
            Bitv.set bitv (int_of_constr cid) true)
       keys
   in
-  let set_postcondition (id:node_id) (keys:constr_key array) : unit =
-    let bitv = Hashtbl.find cx.ctxt_postconditions id in
-      set_condition bitv keys
+
+  let raise_prestate (id:node_id) (keys:constr_key array) : unit =
+    let bitv = Hashtbl.find cx.ctxt_prestates id in
+      raise_bits bitv keys
   in
-  let set_precondition (id:node_id) (keys:constr_key array) : unit =
+
+  let raise_postcondition (id:node_id) (keys:constr_key array) : unit =
+    let bitv = Hashtbl.find cx.ctxt_postconditions id in
+      raise_bits bitv keys
+  in
+
+  let raise_precondition (id:node_id) (keys:constr_key array) : unit =
     let bitv = Hashtbl.find cx.ctxt_preconditions id in
-      set_condition bitv keys
+      raise_bits bitv keys
   in
 
   let resolve_constr_to_key (constr:Ast.constr) : constr_key =
     determine_constr_key cx scopes (scope_ids()) constr
+  in
+
+  let visit_mod_item_pre n p i =
+    begin
+    match i.node with
+        Ast.MOD_ITEM_fn fd ->
+          let (input_keys, init_keys) = fn_decl_keys fd resolve_constr_to_key in
+           let block = fd.Ast.decl_item.Ast.fn_body in
+            if (Array.length block.node) != 0
+            then
+              begin
+                log cx "setting fn entry state as stmt %d prestate"
+                  (int_of_node block.node.(0).id);
+                raise_prestate block.node.(0).id input_keys;
+                raise_prestate block.node.(0).id init_keys;
+                log cx "done propagating fn entry state"
+              end
+      | _ -> ()
+    end;
+    inner.Walk.visit_mod_item_pre n p i
   in
 
   let visit_stmt_pre s =
@@ -216,13 +284,13 @@ let condition_assigning_visitor
             log cx "setting postcondition for check stmt %d"
               (int_of_node s.id);
             let keys = Array.map resolve_constr_to_key constrs in
-              set_postcondition s.id keys
+              raise_postcondition s.id keys
 
         | Ast.STMT_copy (dst, src) ->
             let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              set_precondition s.id precond;
-              set_postcondition s.id postcond
+              raise_precondition s.id precond;
+              raise_postcondition s.id postcond
 
         | Ast.STMT_call (_, (Ast.LVAL_base nb), args) ->
             let referent_ty = lval_ty cx nb.id in
@@ -230,9 +298,10 @@ let condition_assigning_visitor
                 match referent_ty with
                     Ast.TY_fn (tsig,_) ->
                       let formal_constrs = tsig.Ast.sig_input_constrs in
-                      let constrs = Array.map (apply_atoms_to_constr args) formal_constrs in
+                      let names = atoms_to_names args in
+                      let constrs = Array.map (apply_names_to_constr names) formal_constrs in
                       let keys = Array.map resolve_constr_to_key constrs in
-                        set_precondition s.id keys
+                        raise_precondition s.id keys
                   | _ -> ()
               end
         | _ -> ()
@@ -240,6 +309,7 @@ let condition_assigning_visitor
     inner.Walk.visit_stmt_pre s
   in
     { inner with
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
@@ -262,20 +332,12 @@ let graph_building_visitor
     (graph:(node_id, (node_id list)) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
-  let visit_stmt_pre s =
-    begin
-      if not (Hashtbl.mem graph s.id)
-      then htab_put graph s.id []
-      else ()
-    end;
-    inner.Walk.visit_stmt_pre s
-  in
 
-  let visit_block_pre b =
-    for i = 0 to (Array.length b.node) - 2
+  let visit_stmts stmts =
+    for i = 0 to (Array.length stmts) - 2
     do
-      let stmt = b.node.(i) in
-      let next = b.node.(i+1) in
+      let stmt = stmts.(i) in
+      let next = stmts.(i+1) in
       let dests =
         if Hashtbl.mem graph stmt.id
         then Hashtbl.find graph stmt.id
@@ -285,8 +347,25 @@ let graph_building_visitor
           (int_of_node stmt.id) (int_of_node next.id);
         Hashtbl.replace graph stmt.id (lset_add next.id dests);
     done;
-    inner.Walk.visit_block_pre b
   in
+
+  let visit_stmt_pre s =
+    begin
+      if not (Hashtbl.mem graph s.id)
+      then htab_put graph s.id []
+      else ()
+    end;
+    begin
+      match s.node with
+          Ast.STMT_while sw ->
+            let (stmts, _) = sw.Ast.while_lval in
+              visit_stmts stmts
+        | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre s
+  in
+
+  let visit_block_pre b = visit_stmts b.node in
 
   let visit_stmt_post s =
     begin
@@ -329,7 +408,7 @@ let graph_building_visitor
                   begin
                     let first = block.(0) in
                     let last = block.(blen - 1) in
-                    let new_dests = first.id :: dests in
+                    let new_dests = s.id :: dests in
                       log cx "while stmt, block entry edge %d -> %d"
                         (int_of_node pre_loop_stmt_id) (int_of_node first.id);
                       log cx "while stmt, block exit edge %d -> %s"
@@ -366,7 +445,7 @@ let run_dataflow cx sz inverse_graph =
           let n = ref (Bitv.copy b) in
             List.iter (fun bv -> n := Bitv.bw_and (!n) bv) bz;
             !n
-      | _ -> Bitv.create sz false
+      | _ -> err None "empty intersection"
   in
   let set_bits dst src =
     Bitv.iteri (fun i b ->
@@ -401,10 +480,15 @@ let run_dataflow cx sz inverse_graph =
             let predecessors = Hashtbl.find inverse_graph node in
             let i = int_of_node node in
               log cx "in-edges for %d: %s" i (lset_fmt predecessors);
-              set_bits prestate
-                (intersection
-                   (List.map
-                      (Hashtbl.find cx.ctxt_poststates) predecessors));
+              begin
+                match predecessors with
+                    [] -> ()
+                  | _ ->
+                      set_bits prestate
+                        (intersection
+                           (List.map
+                              (Hashtbl.find cx.ctxt_poststates) predecessors))
+              end;
               log cx "stmt %d prestate %s" i (fmt_constr_bitv prestate);
               raise_bits poststate prestate;
               raise_bits poststate postcond;
@@ -448,6 +532,9 @@ let invert_graph
               then Hashtbl.find inverse_graph dst
               else []
             in
+              if not (Hashtbl.mem inverse_graph src)
+              then Hashtbl.add inverse_graph src []
+              else ();
               Hashtbl.replace inverse_graph dst (lset_add src srcs))
          dsts)
     graph
