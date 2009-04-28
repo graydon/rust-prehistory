@@ -523,16 +523,6 @@ let run_dataflow cx sz graph =
          (fun i -> fmt_constr_key cx (Hashtbl.find cx.ctxt_constrs (Constr i)))
          (Bitv.to_list bitv))
   in
-(*
-  let intersection bitvs =
-    match bitvs with
-        b :: bz ->
-          let n = ref (Bitv.copy b) in
-            List.iter (fun bv -> n := Bitv.bw_and (!n) bv) bz;
-            !n
-      | _ -> err None "empty intersection"
-  in
-*)
   let set_bits dst src =
     Bitv.iteri (fun i b ->
                   if (Bitv.get dst i) = b
@@ -572,20 +562,19 @@ let run_dataflow cx sz graph =
             let prestate = Hashtbl.find cx.ctxt_prestates node in
             let postcond = Hashtbl.find cx.ctxt_postconditions node in
             let poststate = Hashtbl.find cx.ctxt_poststates node in
-              (* log cx "stmt %d: '%s'"
+              log cx "stmt %d: '%s'"
                 (int_of_node node)
                 (Ast.fmt_to_str Ast.fmt_stmt
                    (Hashtbl.find cx.ctxt_all_stmts node));
               log cx "stmt %d:" (int_of_node node);
               log cx "    prestate %s" (fmt_constr_bitv prestate);
-              *)
               raise_bits poststate prestate;
               raise_bits poststate postcond;
-              (* log cx "    poststate %s" (fmt_constr_bitv poststate); *)
+              log cx "    poststate %s" (fmt_constr_bitv poststate);
               Hashtbl.replace written node ();
             let successors = Hashtbl.find graph node in
             let i = int_of_node node in
-              (* log cx "out-edges for %d: %s" i (lset_fmt successors); *)
+              log cx "out-edges for %d: %s" i (lset_fmt successors);
               List.iter
                 begin
                   fun succ ->
@@ -597,6 +586,7 @@ let run_dataflow cx sz graph =
                       end
                     else
                       begin
+                        progress := true;
                         Queue.push succ nodes;
                         set_bits (Hashtbl.find cx.ctxt_prestates succ) poststate
                       end
