@@ -297,7 +297,7 @@ let condition_assigning_visitor
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
 
-        | Ast.STMT_call (_, (Ast.LVAL_base nb), args) ->
+        | Ast.STMT_call (dst, (Ast.LVAL_base nb), args) ->
             let referent_ty = lval_ty cx nb.id in
               begin
                 match referent_ty with
@@ -308,6 +308,10 @@ let condition_assigning_visitor
                       let keys = Array.map resolve_constr_to_key constrs in
                         raise_precondition s.id keys
                   | _ -> ()
+              end;
+              begin
+                let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+                  raise_postcondition s.id postcond
               end
         | _ -> ()
     end;
