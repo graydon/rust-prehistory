@@ -17,7 +17,7 @@ prog woohoo
       }
     }
     let t z;
-    z = z + 0x55;
+    z = 0x55;
     foo(z);
   }
 

@@ -95,9 +95,22 @@ programs in other languages. The syntax avoids gratuitous chatter where
 possible, and keywords are kept modest, but rust is unlikely to win any
 competitions for ``shortest program to accomplish a given task''.
 
-
 @node    Influences
 @section Influences
+
+@quotation
+  We have to fight chaos, and the most effective way of doing that is
+  to prevent its emergence. We have to learn to avoid all forms of
+  combinatorial complexity generators that, when active, rapidly tax
+  our ability to carry out a case-analysis far beyond the limits of our
+  power of reasoning. [...] A great advantage is that we know at least
+  what we are looking for, and [...] that a terminology is emerging
+  [...] in which we can answer the otherwise frustrating question that so
+  often emerges in the midst of one's struggles in ``What the hell am
+  I really doing?''
+
+                                   - Edsger Dijkstra
+@end quotation
 
 @quotation
   The essential problem that must be solved in making a fault-tolerant
@@ -117,14 +130,14 @@ competitions for ``shortest program to accomplish a given task''.
 
   When security is absent, nothing which can be proven about a single module
   in isolation can be guaranteed to hold when that module is embedded in a
-  system...
+  system [...]
                                    - Robert Strom and Shaula Yemini
 @end quotation
 
 @quotation
   Concurrent and applicative programming complement each other. The
   ability to send messages on channels provides I/O without side effects,
-  while the avoidance of shared data helps keep concurrent pro- cesses from
+  while the avoidance of shared data helps keep concurrent processes from
   colliding.
                                    - Rob Pike
 @end quotation

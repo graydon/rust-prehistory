@@ -65,10 +65,15 @@ let determine_constr_key
     Constr_pred (c, !cid)
 ;;
 
-let fmt_constr_key ckey =
+let fmt_constr_key cx ckey =
   match ckey with
       Constr_pred (constr, _) -> Ast.fmt_to_str Ast.fmt_constr constr
-    | Constr_init n -> Printf.sprintf "<init #%d>" (int_of_node n)
+    | Constr_init n when Hashtbl.mem cx.ctxt_slot_keys n ->
+        Printf.sprintf "<init #%d = %s>"
+          (int_of_node n)
+          (Ast.fmt_to_str Ast.fmt_slot_key (Hashtbl.find cx.ctxt_slot_keys n))
+    | Constr_init n ->
+        Printf.sprintf "<init #%d>" (int_of_node n)
 ;;
 
 
@@ -134,7 +139,7 @@ let constr_id_assigning_visitor
       begin
         let cid = Constr (!idref) in
           log cx "assigning constr id #%d to constr %s"
-            (!idref) (fmt_constr_key key);
+            (!idref) (fmt_constr_key cx key);
           incr idref;
           htab_put cx.ctxt_constrs cid key;
           htab_put cx.ctxt_constr_ids key cid;
@@ -233,7 +238,7 @@ let condition_assigning_visitor
          let cid = Hashtbl.find cx.ctxt_constr_ids key in
          let i = int_of_constr cid in
            log cx "setting bit %d, constraint %s"
-             i (fmt_constr_key key);
+             i (fmt_constr_key cx key);
            Bitv.set bitv (int_of_constr cid) true)
       keys
   in
@@ -367,6 +372,29 @@ let graph_building_visitor
 
   let visit_block_pre b = visit_stmts b.node in
 
+  let rec last_of (stmt:Ast.stmt) =
+    let last_of_stmts (best:Ast.stmt) (stmts:Ast.stmt array) : Ast.stmt =
+      let len = Array.length stmts in
+        if len = 0 then best else last_of (stmts.(len - 1))
+    in
+      match stmt.node with
+          Ast.STMT_block b -> last_of_stmts stmt b.node
+        | Ast.STMT_if sif ->
+            let then_last = last_of_stmts stmt sif.Ast.if_then.node in
+              begin
+                match sif.Ast.if_else with
+                    None -> then_last
+                  | Some b -> last_of_stmts then_last b.node
+              end
+
+        | Ast.STMT_while sw ->
+            let (stmts, at) = sw.Ast.while_lval in
+            let pre_last = last_of_stmts stmt stmts in
+              last_of_stmts pre_last sw.Ast.while_body.node
+
+        | _ -> stmt
+  in
+
   let visit_stmt_post s =
     begin
       (* Rewire blocks, loops and conditionals a bit. *)
@@ -374,13 +402,57 @@ let graph_building_visitor
           Ast.STMT_block b when not ((Array.length b.node) = 0) ->
             let dests = Hashtbl.find graph s.id in
             let first = b.node.(0) in
-            let last = b.node.((Array.length b.node) - 1) in
+            let last = last_of (b.node.((Array.length b.node) - 1)) in
               log cx "block entry edge %d -> %d"
                 (int_of_node s.id) (int_of_node first.id);
               log cx "block exit edge %d -> %s"
                 (int_of_node last.id) (lset_fmt dests);
               Hashtbl.replace graph s.id [first.id];
               Hashtbl.replace graph last.id dests
+
+        | Ast.STMT_if sif ->
+            begin
+              let dests = Hashtbl.find graph s.id in
+              let tlen = Array.length sif.Ast.if_then.node in
+              let nonempty_else =
+                match sif.Ast.if_else with
+                    None -> None
+                  | Some b ->
+                      if Array.length b.node = 0
+                      then None
+                      else Some b.node
+              in
+                match (tlen != 0, nonempty_else) with
+                    (false, None) -> ()
+                  | (true, None) ->
+                      begin
+                        let first = sif.Ast.if_then.node.(0) in
+                        let last = last_of sif.Ast.if_then.node.(tlen - 1) in
+                          log cx "rewiring if stmt %d to enter 'then' block at %d" 
+                            (int_of_node s.id) (int_of_node first.id);
+                          Hashtbl.replace graph s.id [first.id];
+                          Hashtbl.replace graph last.id dests
+                      end
+                  | (false, Some e) ->
+                      begin
+                        let elen = Array.length e in
+                        let first = e.(0) in
+                        let last = last_of e.(elen - 1) in
+                          Hashtbl.replace graph s.id [first.id];
+                          Hashtbl.replace graph last.id dests
+                      end
+                  | (true, Some e) ->
+                      begin
+                        let elen = Array.length e in
+                        let t_first = sif.Ast.if_then.node.(0) in
+                        let t_last = last_of sif.Ast.if_then.node.(tlen - 1) in
+                        let e_first = e.(0) in
+                        let e_last = last_of e.(elen - 1) in
+                          Hashtbl.replace graph s.id [t_first.id; e_first.id];
+                          Hashtbl.replace graph t_last.id dests;
+                          Hashtbl.replace graph e_last.id dests
+                      end
+            end
 
         | Ast.STMT_while sw ->
             begin
@@ -392,7 +464,7 @@ let graph_building_visitor
                   then
                     begin
                       let first = stmts.(0) in
-                      let last = stmts.(slen - 1) in
+                      let last = last_of stmts.(slen - 1) in
                         log cx "while stmt, pre-loop entry edge %d -> %d"
                           (int_of_node s.id) (int_of_node first.id);
                         Hashtbl.replace graph s.id [first.id];
@@ -407,7 +479,7 @@ let graph_building_visitor
                 then
                   begin
                     let first = block.(0) in
-                    let last = block.(blen - 1) in
+                    let last = last_of block.(blen - 1) in
                     let new_dests = s.id :: dests in
                       log cx "while stmt, block entry edge %d -> %d"
                         (int_of_node pre_loop_stmt_id) (int_of_node first.id);
@@ -430,15 +502,28 @@ let graph_building_visitor
         Walk.visit_stmt_post = visit_stmt_post }
 ;;
 
-let run_dataflow cx sz inverse_graph =
-  let nodes = Array.of_list (htab_keys inverse_graph) in
+let find_roots
+    (graph:(node_id, (node_id list)) Hashtbl.t)
+    : (node_id,unit) Hashtbl.t =
+  let roots = Hashtbl.create 0 in
+    Hashtbl.iter (fun src _ -> Hashtbl.replace roots src ()) graph;
+    Hashtbl.iter (fun _ dsts ->
+                    List.iter (fun d -> Hashtbl.remove roots d) dsts) graph;
+    roots
+;;
+
+let run_dataflow cx sz graph =
+  (* let nodes = Array.of_list (htab_keys graph) in *)
+  let roots = find_roots graph in
+  let nodes = Queue.create () in
   let progress = ref true in
   let fmt_constr_bitv bitv =
     String.concat ", "
       (List.map
-         (fun i -> fmt_constr_key (Hashtbl.find cx.ctxt_constrs (Constr i)))
+         (fun i -> fmt_constr_key cx (Hashtbl.find cx.ctxt_constrs (Constr i)))
          (Bitv.to_list bitv))
   in
+(*
   let intersection bitvs =
     match bitvs with
         b :: bz ->
@@ -447,6 +532,7 @@ let run_dataflow cx sz inverse_graph =
             !n
       | _ -> err None "empty intersection"
   in
+*)
   let set_bits dst src =
     Bitv.iteri (fun i b ->
                   if (Bitv.get dst i) = b
@@ -454,6 +540,14 @@ let run_dataflow cx sz inverse_graph =
                   else
                     (progress := true;
                      log cx "made progress setting bit %d" i;
+                     Bitv.set dst i b)) src
+  in
+  let intersect_bits dst src =
+    Bitv.iteri (fun i b ->
+                  if (not b) && (Bitv.get dst i)
+                  then
+                    (progress := true;
+                     log cx "made progress clearing bit %d" i;
                      Bitv.set dst i b)) src
   in
   let raise_bits dst src =
@@ -466,33 +560,48 @@ let run_dataflow cx sz inverse_graph =
                           Bitv.set dst i true)) src
   in
   let iter = ref 0 in
-    Array.sort compare nodes;
+  let written = Hashtbl.create 0 in
+    Hashtbl.iter (fun n _ -> Queue.push n nodes) roots;
     while !progress do
       incr iter;
       progress := false;
       log cx "dataflow pass %d" (!iter);
-      Array.iter
+      Queue.iter
         begin
           fun node ->
             let prestate = Hashtbl.find cx.ctxt_prestates node in
             let postcond = Hashtbl.find cx.ctxt_postconditions node in
             let poststate = Hashtbl.find cx.ctxt_poststates node in
-            let predecessors = Hashtbl.find inverse_graph node in
-            let i = int_of_node node in
-              log cx "in-edges for %d: %s" i (lset_fmt predecessors);
-              begin
-                match predecessors with
-                    [] -> ()
-                  | _ ->
-                      set_bits prestate
-                        (intersection
-                           (List.map
-                              (Hashtbl.find cx.ctxt_poststates) predecessors))
-              end;
-              log cx "stmt %d prestate %s" i (fmt_constr_bitv prestate);
+              (* log cx "stmt %d: '%s'"
+                (int_of_node node)
+                (Ast.fmt_to_str Ast.fmt_stmt
+                   (Hashtbl.find cx.ctxt_all_stmts node));
+              log cx "stmt %d:" (int_of_node node);
+              log cx "    prestate %s" (fmt_constr_bitv prestate);
+              *)
               raise_bits poststate prestate;
               raise_bits poststate postcond;
-              log cx "stmt %d poststate %s" i (fmt_constr_bitv poststate);
+              (* log cx "    poststate %s" (fmt_constr_bitv poststate); *)
+              Hashtbl.replace written node ();
+            let successors = Hashtbl.find graph node in
+            let i = int_of_node node in
+              (* log cx "out-edges for %d: %s" i (lset_fmt successors); *)
+              List.iter
+                begin
+                  fun succ ->
+                    if Hashtbl.mem written succ
+                    then
+                      begin
+                        intersect_bits (Hashtbl.find cx.ctxt_prestates succ) poststate;
+                        Hashtbl.replace written succ ()
+                      end
+                    else
+                      begin
+                        Queue.push succ nodes;
+                        set_bits (Hashtbl.find cx.ctxt_prestates succ) poststate
+                      end
+                end
+                successors
         end
         nodes
     done
@@ -510,34 +619,15 @@ let typestate_verify_visitor
            if not (Bitv.get prestate i)
            then
              let ckey = Hashtbl.find cx.ctxt_constrs (Constr i) in
-             let constr_str = fmt_constr_key ckey in
-               err (Some s.id) "Unsatisfied precondition constraint: %s " constr_str)
+             let constr_str = fmt_constr_key cx ckey in
+               err (Some s.id)
+                 "Unsatisfied precondition constraint at stmt %d: %s "
+                 (int_of_node s.id) constr_str)
         precond;
       inner.Walk.visit_stmt_pre s
   in
     { inner with
         Walk.visit_stmt_pre = visit_stmt_pre }
-;;
-
-let invert_graph
-    (graph:(node_id, (node_id list)) Hashtbl.t)
-    (inverse_graph:(node_id, (node_id list)) Hashtbl.t)
-    : unit =
-  Hashtbl.iter
-    (fun src dsts ->
-       List.iter
-         (fun dst ->
-            let srcs =
-              if Hashtbl.mem inverse_graph dst
-              then Hashtbl.find inverse_graph dst
-              else []
-            in
-              if not (Hashtbl.mem inverse_graph src)
-              then Hashtbl.add inverse_graph src []
-              else ();
-              Hashtbl.replace inverse_graph dst (lset_add src srcs))
-         dsts)
-    graph
 ;;
 
 let process_crate
@@ -547,7 +637,6 @@ let process_crate
   let (scopes:scope Stack.t) = Stack.create () in
   let constr_id = ref 0 in
   let (graph:(node_id, (node_id list)) Hashtbl.t) = Hashtbl.create 0 in
-  let (inverse_graph:(node_id, (node_id list)) Hashtbl.t) = Hashtbl.create 0 in
   let setup_passes =
     [|
       (scope_stack_managing_visitor scopes
@@ -570,8 +659,7 @@ let process_crate
     |]
   in
     run_passes cx setup_passes (log cx "%s") items;
-    invert_graph graph inverse_graph;
-    run_dataflow cx (!constr_id) inverse_graph;
+    run_dataflow cx (!constr_id) graph;
     run_passes cx verify_passes (log cx "%s") items
 ;;
 

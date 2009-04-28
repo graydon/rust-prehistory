@@ -37,7 +37,7 @@ let block_scope_forming_visitor
 ;;
 
 
-let decl_stmt_collecting_visitor
+let stmt_collecting_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
@@ -52,6 +52,7 @@ let decl_stmt_collecting_visitor
   in
   let visit_stmt_pre stmt =
     begin
+      htab_put cx.ctxt_all_stmts stmt.id stmt;
       match stmt.node with
           Ast.STMT_decl d ->
             begin
@@ -86,7 +87,8 @@ let decl_stmt_collecting_visitor
                       htab_put items ident item.id
                   | Ast.DECL_slot (key, sid) ->
                       check_and_log_key sid.id key;
-                      htab_put slots key sid.id
+                      htab_put slots key sid.id;
+                      htab_put cx.ctxt_slot_keys sid.id key
             end
         | _ -> ()
     end;
@@ -105,7 +107,25 @@ let all_item_collecting_visitor
     : Walk.visitor =
   let visit_mod_item_pre n p i =
     htab_put cx.ctxt_all_items i.id i.node;
-    log cx "collected item #%d" (int_of_node i.id);
+    htab_put cx.ctxt_item_names i.id n;
+    log cx "collected item #%d (%s)" (int_of_node i.id) n;
+    begin
+      (* 
+       * Pick up some slot names for error messages.
+       * FIXME: this is incomplete. 
+       *)
+      let note_sloti_ident_pairs =
+        Array.iter
+          (fun (sloti,ident) ->
+             htab_put cx.ctxt_slot_keys sloti.id (Ast.KEY_ident ident))
+      in
+      match i.node with
+          Ast.MOD_ITEM_fn fd -> (note_sloti_ident_pairs
+                                   fd.Ast.decl_item.Ast.fn_input_slots)
+        | Ast.MOD_ITEM_pred pd -> (note_sloti_ident_pairs
+                                     pd.Ast.decl_item.Ast.pred_input_slots)
+        | _ -> ()
+    end;
     inner.Walk.visit_mod_item_pre n p i
   in
     { inner with
@@ -357,7 +377,7 @@ let process_crate
   let passes =
     [|
       (block_scope_forming_visitor cx
-         (decl_stmt_collecting_visitor cx
+         (stmt_collecting_visitor cx
             (all_item_collecting_visitor cx
                Walk.empty_visitor)));
       (scope_stack_managing_visitor scopes

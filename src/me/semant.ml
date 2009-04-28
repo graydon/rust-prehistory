@@ -48,8 +48,13 @@ type ctxt =
       ctxt_block_slots: block_slots_table;
       ctxt_block_items: block_items_table;
       ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
+      (* ctxt_slot_keys is just for error messages. *)
+      ctxt_slot_keys: (node_id,Ast.slot_key) Hashtbl.t;
       ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
+      (* ctxt_item_names is just for error messages. *)
+      ctxt_item_names: (node_id,Ast.ident) Hashtbl.t;
       ctxt_all_item_types: (node_id,Ast.ty) Hashtbl.t;
+      ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
@@ -87,8 +92,11 @@ let new_ctxt sess abi crate =
     ctxt_block_slots = Hashtbl.create 0;
     ctxt_block_items = Hashtbl.create 0;
     ctxt_all_slots = Hashtbl.create 0;
+    ctxt_slot_keys = Hashtbl.create 0;
     ctxt_all_items = Hashtbl.create 0;
+    ctxt_item_names = Hashtbl.create 0;
     ctxt_all_item_types = Hashtbl.create 0;
+    ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
     ctxt_lval_to_referent = Hashtbl.create 0;
     ctxt_slot_aliased = Hashtbl.create 0;
