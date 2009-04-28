@@ -45,14 +45,6 @@ let log name flag chan =
     Printf.ksprintf (if flag then k1 else k2)
 ;;
 
-let loglazy name flag chan thunk =
-  let k1 t =
-    Printf.fprintf chan "%s: %t\n%!" name t
-  in
-  let k2 t = () in
-    if flag then k1 thunk else k2 thunk
-;;
-
 let fail sess =
   sess.sess_failed <- true;
   Printf.fprintf sess.sess_log_out

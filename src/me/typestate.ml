@@ -7,9 +7,10 @@ let log cx = Session.log "typestate"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-let loglazy cx = Session.loglazy "typestate"
-  cx.ctxt_sess.Session.sess_log_typestate
-  cx.ctxt_sess.Session.sess_log_out
+let iflog cx thunk =
+  if cx.ctxt_sess.Session.sess_log_typestate
+  then thunk ()
+  else ()
 ;;
 
 let id_of_scope (sco:scope) : node_id =
@@ -142,8 +143,8 @@ let constr_id_assigning_visitor
     then
       begin
         let cid = Constr (!idref) in
-          loglazy cx
-            (fun chan -> Printf.fprintf chan "assigning constr id #%d to constr %s"
+          iflog cx
+            (fun _ -> log cx "assigning constr id #%d to constr %s"
                (!idref) (fmt_constr_key cx key));
           incr idref;
           htab_put cx.ctxt_constrs cid key;
@@ -219,8 +220,8 @@ let bitmap_assigning_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
   let visit_stmt_pre s =
-    loglazy cx (fun chan -> Printf.fprintf chan
-               "building %d-entry bitmap for node %d" (!idref) (int_of_node s.id));
+    iflog cx (fun _ -> log cx "building %d-entry bitmap for node %d"
+                (!idref) (int_of_node s.id));
     htab_put cx.ctxt_preconditions s.id (Bitv.create (!idref) false);
     htab_put cx.ctxt_postconditions s.id (Bitv.create (!idref) false);
     htab_put cx.ctxt_prestates s.id (Bitv.create (!idref) false);
@@ -243,9 +244,8 @@ let condition_assigning_visitor
       (fun key ->
          let cid = Hashtbl.find cx.ctxt_constr_ids key in
          let i = int_of_constr cid in
-           loglazy cx (fun chan -> Printf.fprintf chan
-                      "setting bit %d, constraint %s"
-                      i (fmt_constr_key cx key));
+           iflog cx (fun _ -> log cx "setting bit %d, constraint %s"
+                       i (fmt_constr_key cx key));
            Bitv.set bitv (int_of_constr cid) true)
       keys
   in
@@ -278,12 +278,12 @@ let condition_assigning_visitor
             if (Array.length block.node) != 0
             then
               begin
-                loglazy cx (fun chan -> Printf.fprintf chan
-                              "setting fn entry state as stmt %d prestate"
-                              (int_of_node block.node.(0).id));
+                iflog cx (fun _ -> log cx
+                            "setting fn entry state as stmt %d prestate"
+                            (int_of_node block.node.(0).id));
                 raise_prestate block.node.(0).id input_keys;
                 raise_prestate block.node.(0).id init_keys;
-                loglazy cx (fun chan -> Printf.fprintf chan "done propagating fn entry state")
+                iflog cx (fun _ -> log cx "done propagating fn entry state")
               end
       | _ -> ()
     end;
@@ -294,9 +294,9 @@ let condition_assigning_visitor
     begin
       match s.node with
           Ast.STMT_check constrs ->
-            loglazy cx (fun chan -> Printf.fprintf chan
-                          "setting postcondition for check stmt %d"
-                          (int_of_node s.id));
+            iflog cx (fun _ -> log cx
+                        "setting postcondition for check stmt %d"
+                        (int_of_node s.id));
             let keys = Array.map resolve_constr_to_key constrs in
               raise_postcondition s.id keys
 
@@ -544,7 +544,7 @@ let run_dataflow cx sz graph =
           then ()
           else
             (progress := true;
-             loglazy cx (fun chan -> Printf.fprintf chan "made progress setting bit %d" i);
+             iflog cx (fun _ -> log cx "made progress setting bit %d" i);
              Bitv.set dst i b)
       end
       src
@@ -556,8 +556,8 @@ let run_dataflow cx sz graph =
           if (not b) && (Bitv.get dst i)
           then
             (progress := true;
-             loglazy cx (fun chan -> Printf.fprintf chan
-                           "made progress clearing bit %d" i);
+             iflog cx (fun _ -> log cx
+                         "made progress clearing bit %d" i);
              Bitv.set dst i b)
       end
       src
@@ -570,8 +570,8 @@ let run_dataflow cx sz graph =
           then ()
           else
             (progress := true;
-             loglazy cx (fun chan -> Printf.fprintf chan
-                           "made progress raising bit %d" i);
+             iflog cx (fun _ -> log cx
+                         "made progress raising bit %d" i);
              Bitv.set dst i true)
       end
       src
@@ -582,30 +582,28 @@ let run_dataflow cx sz graph =
     while !progress do
       incr iter;
       progress := false;
-      loglazy cx (fun chan -> Printf.fprintf chan "dataflow pass %d" (!iter));
+      iflog cx (fun _ -> log cx "dataflow pass %d" (!iter));
       Queue.iter
         begin
           fun node ->
             let prestate = Hashtbl.find cx.ctxt_prestates node in
             let postcond = Hashtbl.find cx.ctxt_postconditions node in
             let poststate = Hashtbl.find cx.ctxt_poststates node in
-              loglazy cx (fun chan -> Printf.fprintf chan
-                            "stmt %d: '%s'" (int_of_node node)
-                            (Ast.fmt_to_str Ast.fmt_stmt
-                               (Hashtbl.find cx.ctxt_all_stmts node)));
-              loglazy cx (fun chan -> Printf.fprintf chan
-                            "stmt %d:" (int_of_node node));
-              loglazy cx (fun chan -> Printf.fprintf chan
-                            "    prestate %s" (fmt_constr_bitv prestate));
+              iflog cx (fun _ -> log cx "stmt %d: '%s'" (int_of_node node)
+                          (Ast.fmt_to_str Ast.fmt_stmt
+                             (Hashtbl.find cx.ctxt_all_stmts node)));
+              iflog cx (fun _ -> log cx "stmt %d:" (int_of_node node));
+              iflog cx (fun _ -> log cx
+                          "    prestate %s" (fmt_constr_bitv prestate));
               raise_bits poststate prestate;
               raise_bits poststate postcond;
-              loglazy cx (fun chan -> Printf.fprintf chan
-                            "    poststate %s" (fmt_constr_bitv poststate));
+              iflog cx (fun _ -> log cx
+                          "    poststate %s" (fmt_constr_bitv poststate));
               Hashtbl.replace written node ();
             let successors = Hashtbl.find graph node in
             let i = int_of_node node in
-              loglazy cx (fun chan -> Printf.fprintf chan
-                            "out-edges for %d: %s" i (lset_fmt successors));
+              iflog cx (fun _ -> log cx
+                          "out-edges for %d: %s" i (lset_fmt successors));
               List.iter
                 begin
                   fun succ ->
