@@ -98,6 +98,17 @@ let atom_slots (cx:ctxt) (a:Ast.atom) : node_id array =
     | Ast.ATOM_lval lv -> lval_slots cx lv
 ;;
 
+let atoms_slots (cx:ctxt) (az:Ast.atom array) : node_id array =
+  Array.concat (List.map (atom_slots cx) (Array.to_list az))
+;;
+
+let entries_slots (cx:ctxt)
+    (entries:(Ast.ident * Ast.atom) array) : node_id array =
+  Array.concat (List.map
+                  (fun (_, atom) -> atom_slots cx atom)
+                  (Array.to_list entries))
+;;
+
 let expr_slots (cx:ctxt) (e:Ast.expr) : node_id array =
     match e with
         Ast.EXPR_binary (_, a, b) ->
@@ -120,6 +131,24 @@ let fn_decl_keys fd resolver =
   in
   let input_constrs =
     Array.map (apply_names_to_constr names) fn.Ast.fn_input_constrs in
+  let input_keys = Array.map resolver input_constrs in
+    (input_keys, init_keys)
+;;
+
+let pred_decl_keys pd resolver =
+  let pred = pd.Ast.decl_item in
+  let init_keys =
+    Array.map
+      (fun (sloti, _) -> (Constr_init sloti.id))
+      pred.Ast.pred_input_slots
+  in
+  let names =
+    Array.map
+      (fun (_, ident) -> (Some (Ast.BASE_ident ident)))
+      pred.Ast.pred_input_slots
+  in
+  let input_constrs =
+    Array.map (apply_names_to_constr names) pred.Ast.pred_input_constrs in
   let input_keys = Array.map resolver input_constrs in
     (input_keys, init_keys)
 ;;
@@ -161,6 +190,10 @@ let constr_id_assigning_visitor
           let (input_keys, init_keys) = fn_decl_keys fd resolve_constr_to_key in
             note_keys input_keys;
             note_keys init_keys
+      | Ast.MOD_ITEM_pred pd ->
+          let (input_keys, init_keys) = pred_decl_keys pd resolve_constr_to_key in
+            note_keys input_keys;
+            note_keys init_keys
       | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -197,6 +230,18 @@ let constr_id_assigning_visitor
 
         | Ast.STMT_decl (Ast.DECL_slot (skey, sloti)) ->
             note_constr_key (Constr_init sloti.id)
+
+        | Ast.STMT_init_rec (dst, entries) ->
+            let precond = Array.map (fun s -> Constr_init s) (entries_slots cx entries) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              note_keys precond;
+              note_keys postcond
+
+        | Ast.STMT_init_tup (dst, atoms) ->
+            let precond = Array.map (fun s -> Constr_init s) (atoms_slots cx atoms) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              note_keys precond;
+              note_keys postcond
 
         | Ast.STMT_copy (dst, src) ->
             let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
@@ -285,6 +330,21 @@ let condition_assigning_visitor
                 raise_prestate block.node.(0).id init_keys;
                 iflog cx (fun _ -> log cx "done propagating fn entry state")
               end
+
+      | Ast.MOD_ITEM_pred pd ->
+          let (input_keys, init_keys) = pred_decl_keys pd resolve_constr_to_key in
+           let block = pd.Ast.decl_item.Ast.pred_body in
+            if (Array.length block.node) != 0
+            then
+              begin
+                iflog cx (fun _ -> log cx
+                            "setting pred entry state as stmt %d prestate"
+                            (int_of_node block.node.(0).id));
+                raise_prestate block.node.(0).id input_keys;
+                raise_prestate block.node.(0).id init_keys;
+                iflog cx (fun _ -> log cx "done propagating pred entry state")
+              end
+
       | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -294,17 +354,28 @@ let condition_assigning_visitor
     begin
       match s.node with
           Ast.STMT_check constrs ->
-            iflog cx (fun _ -> log cx
-                        "setting postcondition for check stmt %d"
-                        (int_of_node s.id));
-            let keys = Array.map resolve_constr_to_key constrs in
-              raise_postcondition s.id keys
+            let postcond = Array.map resolve_constr_to_key constrs in
+              raise_postcondition s.id postcond
 
         | Ast.STMT_copy (dst, src) ->
             let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
+
+
+        | Ast.STMT_init_rec (dst, entries) ->
+            let precond = Array.map (fun s -> Constr_init s) (entries_slots cx entries) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              raise_precondition s.id precond;
+              raise_postcondition s.id postcond
+
+        | Ast.STMT_init_tup (dst, atoms) ->
+            let precond = Array.map (fun s -> Constr_init s) (atoms_slots cx atoms) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              raise_precondition s.id precond;
+              raise_postcondition s.id postcond
+
 
         | Ast.STMT_call (dst, (Ast.LVAL_base nb), args) ->
             let referent_ty = lval_ty cx nb.id in
