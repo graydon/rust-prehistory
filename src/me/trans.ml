@@ -433,7 +433,7 @@ let trans_visitor
             let sub_src = word_at_reg_off_imm src_reg src_off disp in
             let (_, sub_dst_slot) = dst_entries.(i) in
             let (_, sub_src_slot) = src_entries.(i) in
-              trans_copy_slots
+              trans_copy_slot
                 sub_dst sub_dst_slot
                 sub_src sub_src_slot
         end
@@ -451,14 +451,14 @@ let trans_visitor
             let disp = layout.layout_offset in
             let sub_src = word_at_reg_off_imm src_reg src_off disp in
             let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
-              trans_copy_slots
+              trans_copy_slot
                 sub_dst dst_slots.(i)
                 sub_src src_slots.(i)
         end
         layouts
 
 
-  and trans_copy_slots
+  and trans_copy_slot
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
@@ -515,12 +515,12 @@ let trans_visitor
           (* Possibly-large structure copying *)
           let (dst_operand, dst_slot) = trans_lval dst true in
           let (src_operand, src_slot) = trans_lval src_lval false in
-            trans_copy_slots
+            trans_copy_slot
               dst_operand dst_slot
               src_operand src_slot
 
 
-  and trans_init_slots_from_atom
+  and trans_init_slot_from_atom
       (dst:Il.operand) (dst_slot:Ast.slot)
       (atom:Ast.atom)
       : unit =
@@ -530,10 +530,10 @@ let trans_visitor
             mov (deref_slot dst dst_slot true) src
       | Ast.ATOM_lval src_lval ->
           let (src, src_slot) = trans_lval src_lval false in
-            trans_init_slots dst dst_slot src src_slot
+            trans_init_slot dst dst_slot src src_slot
 
 
-  and trans_init_slots
+  and trans_init_slot
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
@@ -542,7 +542,7 @@ let trans_visitor
         Ast.MODE_read_alias
       | Ast.MODE_write_alias -> mov dst (alias src)
       | _ ->
-          trans_copy_slots
+          trans_copy_slot
             dst dst_slot
             src src_slot
 
@@ -661,7 +661,7 @@ let trans_visitor
               then
                 begin
                   (* Emit arg0: the output slot. *)
-                  trans_init_slots
+                  trans_init_slot
                     dst_operand (word_write_alias_slot abi)
                     outmem word_slot
                 end
@@ -669,14 +669,14 @@ let trans_visitor
                 if i == 1
                 then
                   (* Emit arg1: the process pointer. *)
-                  trans_init_slots
+                  trans_init_slot
                     dst_operand word_slot
                     abi.Abi.abi_pp_operand word_slot
                 else
                   begin
                     log cx "copying formal arg %d, slot %s"
                       (i-2) (Ast.fmt_to_str Ast.fmt_slot fslots.(i-2));
-                    trans_init_slots_from_atom
+                    trans_init_slot_from_atom
                       dst_operand fslots.(i-2)
                       args.(i-2)
                   end
