@@ -251,6 +251,41 @@ let atoms_to_names (atoms:Ast.atom array)
     atoms
 ;;
 
+let rec lval_slots (cx:ctxt) (lv:Ast.lval) : node_id array =
+  match lv with
+      Ast.LVAL_base nbi ->
+        let referent = lval_to_referent cx nbi.id in
+          if Hashtbl.mem cx.ctxt_all_slots referent
+          then [| referent |]
+          else [| |]
+    | Ast.LVAL_ext (lv, _) -> lval_slots cx lv
+;;
+
+let atom_slots (cx:ctxt) (a:Ast.atom) : node_id array =
+  match a with
+      Ast.ATOM_literal _ -> [| |]
+    | Ast.ATOM_lval lv -> lval_slots cx lv
+;;
+
+let atoms_slots (cx:ctxt) (az:Ast.atom array) : node_id array =
+  Array.concat (List.map (atom_slots cx) (Array.to_list az))
+;;
+
+let entries_slots (cx:ctxt)
+    (entries:(Ast.ident * Ast.atom) array) : node_id array =
+  Array.concat (List.map
+                  (fun (_, atom) -> atom_slots cx atom)
+                  (Array.to_list entries))
+;;
+
+let expr_slots (cx:ctxt) (e:Ast.expr) : node_id array =
+    match e with
+        Ast.EXPR_binary (_, a, b) ->
+          Array.append (atom_slots cx a) (atom_slots cx b)
+      | Ast.EXPR_unary (_, u) -> atom_slots cx u
+      | Ast.EXPR_atom a -> atom_slots cx a
+;;
+
 
 (* Mappings between mod items and their respective types. *)
 

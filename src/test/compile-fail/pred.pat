@@ -1,1 +1,1 @@
-.*Error: Unsatisfied precondition constraint: lt(a, c).*
+.*Error: Unsatisfied .* lt(a, c).*
