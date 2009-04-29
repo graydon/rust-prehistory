@@ -676,7 +676,7 @@ let alu_binop
   match (dst, src) with
       (Reg (Hreg r), _) when is_rm32 src -> insn_rm_r rm_src_op src (reg r)
     | (_, Reg (Hreg r)) when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
-    | (Reg (Hreg _), Imm i) -> insn_rm_r_imm_s8_s32 0x83 0x81 dst immslash i
+    | (_, Imm i) when is_rm32 dst -> insn_rm_r_imm_s8_s32 0x83 0x81 dst immslash i
     | _ -> raise Unrecognized
 ;;
 

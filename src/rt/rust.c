@@ -198,6 +198,20 @@ rust_check_expr(rust_proc_t *proc, uint32_t i)
   }
 }
 
+static uintptr_t
+rust_malloc(rust_proc_t *proc, size_t nbytes)
+{
+  printf("rt: malloc(%u)\n", nbytes);
+  return (uintptr_t) xalloc(nbytes);
+}
+
+static void
+rust_free(rust_proc_t *proc, void* ptr)
+{
+  free(ptr);
+}
+
+
 void
 rust_handle_fn(rust_proc_t *proc)
 {
@@ -238,15 +252,15 @@ rust_handle_fn(rust_proc_t *proc)
   case 3:
     rust_check_expr(proc, args[0]);
     break;
-      /*;
-  case 3:
-    rust_kill_proc(proc->rt, (rust_proc_t*)args[0]);
-    break;
   case 4:
-  **retslot_p = rust_malloc(proc, (size_t)args[0]);
+    *((uintptr_t*)args[0]) = rust_malloc(proc, (size_t)args[1]);
     break;
   case 5:
     rust_free(proc, (void*)args[0]);
+    break;
+      /*;
+  case 3:
+    rust_kill_proc(proc->rt, (rust_proc_t*)args[0]);
     break;
   case 6:
     rust_memmove(proc, (void*)args[0], (const void*)args[1], (size_t)args[2]);

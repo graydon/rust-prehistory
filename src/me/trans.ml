@@ -23,6 +23,7 @@ let trans_visitor
 
   let (abi:Abi.abi) = cx.ctxt_abi in
   let (word_mem:Il.mem) = abi.Abi.abi_word_mem in
+  let (word_sz:int64) = abi.Abi.abi_word_sz in
 
   let emitters = Stack.create () in
   let push_new_emitter _ =
@@ -102,6 +103,13 @@ let trans_visitor
       res
   in
 
+  let deref_off (mem:Il.operand) (off:int64) : Il.operand =
+    let reg = next_vreg() in
+    let res = word_at_reg_off (Some reg) (Asm.IMM off) in
+      mov (Il.Reg reg) mem;
+      res
+  in
+
   let force_to_reg (op:Il.operand) : Il.reg =
     let do_mov _ =
       let tmp = next_vreg () in
@@ -114,6 +122,45 @@ let trans_visitor
         | Il.Mem (mem, _, _) when mem = word_mem -> do_mov ()
         | _ -> err None "unhandled operand type in force_to_reg"
   in
+
+  let rec atom_type (at:Ast.atom) : Ast.ty =
+    match at with
+        Ast.ATOM_literal {node=(Ast.LIT_str _); id=_} -> Ast.TY_str
+      | Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
+      | Ast.ATOM_literal {node=(Ast.LIT_bool _); id=_} -> Ast.TY_bool
+      | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
+      | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
+      | Ast.ATOM_literal _ -> err None "unhandled form of literal in atom_type"
+      | Ast.ATOM_lval (Ast.LVAL_base nb) ->
+          let slot = lval_to_slot cx nb.id in
+            begin
+              match slot.Ast.slot_ty with
+                  None -> err (Some nb.id) "name refers to untyped slot, in atom_type"
+                | Some t -> t
+            end
+      | Ast.ATOM_lval (Ast.LVAL_ext (base, comp)) ->
+          let base_ty = atom_type (Ast.ATOM_lval base) in
+          let need_ty topt =
+            match topt with
+                None -> err None "missing type in lval-ext"
+              | Some s -> s
+          in
+            match (base_ty, comp) with
+                (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
+                  begin
+                    match atab_search elts id with
+                        Some slot -> need_ty slot.Ast.slot_ty
+                      | None -> err None "unknown record-member '%s'" id
+                  end
+
+              | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
+                  if 0 <= i && i < (Array.length elts)
+                  then need_ty elts.(i).Ast.slot_ty
+                  else err None "out-of-range tuple index %d" i
+
+              | (_,_) -> err None "unhandled form of lval-ext"
+  in
+
 
   let trans_lval_ext
       (base_slot:Ast.slot)
@@ -150,6 +197,7 @@ let trans_visitor
       (lv:Ast.lval)
       (pcrel_ok:bool)
       (imm_ok:bool)
+      (writing:bool)
       : (Il.operand * Ast.slot) =
 
     let return_fixup (fix:fixup) (slot:Ast.slot)
@@ -209,13 +257,12 @@ let trans_visitor
             Ast.MODE_interior -> (operand, slot)
           | Ast.MODE_read_alias -> (deref operand, slot)
           | Ast.MODE_write_alias -> (deref operand, slot)
-          | Ast.MODE_exterior ->
-              err None "Cannot translate exterior-mode slots."
+          | Ast.MODE_exterior -> (deref_exterior writing operand slot, slot)
     in
 
       match lv with
           Ast.LVAL_ext (base, comp) ->
-            let (base_operand, base_slot) = trans_lval_full base false true in
+            let (base_operand, base_slot) = trans_lval_full base false true writing in
             let (base_reg, base_off) = get_reg_off base_operand in
               trans_lval_ext base_slot base_reg base_off comp
 
@@ -228,54 +275,14 @@ let trans_visitor
                       let slot = lval_to_slot cx nb.id in
                         return_slot slot referent
               end
-  in
 
-  let trans_lval (lv:Ast.lval) : (Il.operand * Ast.slot) =
-    trans_lval_full lv false false
-  in
+  and trans_lval (lv:Ast.lval) (writing:bool) : (Il.operand * Ast.slot) =
+    trans_lval_full lv false false writing
 
-  let rec atom_type (at:Ast.atom) : Ast.ty =
-    match at with
-        Ast.ATOM_literal {node=(Ast.LIT_str _); id=_} -> Ast.TY_str
-      | Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
-      | Ast.ATOM_literal {node=(Ast.LIT_bool _); id=_} -> Ast.TY_bool
-      | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
-      | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
-      | Ast.ATOM_literal _ -> err None "unhandled form of literal in atom_type"
-      | Ast.ATOM_lval (Ast.LVAL_base nb) ->
-          let slot = lval_to_slot cx nb.id in
-            begin
-              match slot.Ast.slot_ty with
-                  None -> err (Some nb.id) "name refers to untyped slot, in atom_type"
-                | Some t -> t
-            end
-      | Ast.ATOM_lval (Ast.LVAL_ext (base, comp)) ->
-          let base_ty = atom_type (Ast.ATOM_lval base) in
-          let need_ty topt =
-            match topt with
-                None -> err None "missing type in lval-ext"
-              | Some s -> s
-          in
-            match (base_ty, comp) with
-                (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
-                  begin
-                    match atab_search elts id with
-                        Some slot -> need_ty slot.Ast.slot_ty
-                      | None -> err None "unknown record-member '%s'" id
-                  end
-
-              | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
-                  if 0 <= i && i < (Array.length elts)
-                  then need_ty elts.(i).Ast.slot_ty
-                  else err None "out-of-range tuple index %d" i
-
-              | (_,_) -> err None "unhandled form of lval-ext"
-  in
-
-  let trans_atom (atom:Ast.atom) : Il.operand =
+  and trans_atom (atom:Ast.atom) : Il.operand =
     match atom with
         Ast.ATOM_lval lv ->
-          let (operand, _) = trans_lval lv in
+          let (operand, _) = trans_lval lv false in
             operand
 
       | Ast.ATOM_literal lit ->
@@ -304,9 +311,8 @@ let trans_visitor
 
               | _ -> marker
           end
-  in
 
-  let trans_expr (expr:Ast.expr) : Il.operand =
+  and trans_expr (expr:Ast.expr) : Il.operand =
 
     match expr with
 
@@ -366,32 +372,48 @@ let trans_visitor
 
       | Ast.EXPR_atom a ->
           trans_atom a
-  in
 
-  let trans_1_arg_kern_fn (a:Ast.atom) (fn:int64) : unit =
-    let v = trans_atom a in
+  and trans_block (block:Ast.block) : unit =
+    Stack.push (get_block_layout cx block.id) block_layouts;
+    Array.iter trans_stmt block.node;
+    ignore (Stack.pop block_layouts)
+
+  and trans_kern_fn (fn:int64) (args:Il.operand array) : unit =
     let dst = Il.Reg (Il.next_vreg (emitter())) in
     let pp = abi.Abi.abi_pp_operand in
     let sp = (Il.Reg abi.Abi.abi_sp_reg) in
       abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
-      emit (Il.CPUSH Il.M32) Il.Nil v Il.Nil;
+      for i = (Array.length args) - 1 downto 0
+      do
+        emit (Il.CPUSH Il.M32) Il.Nil args.(i) Il.Nil
+      done;
       emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM fn)) Il.Nil;
       emit (Il.CPUSH Il.M32) Il.Nil pp Il.Nil;
       emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
       emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
       ()
-  in
 
-  let trans_log_int (a:Ast.atom) : unit = trans_1_arg_kern_fn a 0L in
-  let trans_log_str (a:Ast.atom) : unit = trans_1_arg_kern_fn a 1L in
-  let trans_spawn (a:Ast.atom) : unit = trans_1_arg_kern_fn a 2L in
-  let trans_check_expr (a:Ast.atom) : unit = trans_1_arg_kern_fn a 3L in
+  and trans_log_int (a:Ast.atom) : unit = trans_kern_fn 0L [| (trans_atom a) |]
+  and trans_log_str (a:Ast.atom) : unit = trans_kern_fn 1L [| (trans_atom a) |]
+  and trans_spawn (a:Ast.atom) : unit = trans_kern_fn 2L [| (trans_atom a) |]
+  and trans_check_expr (a:Ast.atom) : unit = trans_kern_fn 3L [| (trans_atom a) |]
+  and trans_malloc (dst:Il.operand) (nbytes:int64) : unit =
+    trans_kern_fn 4L [| (alias dst); Il.Imm (Asm.IMM nbytes) |]
 
+  and trans_free (src:Il.operand) : unit = trans_kern_fn 5L [| src |]
 
-  let rec trans_block (block:Ast.block) : unit =
-    Stack.push (get_block_layout cx block.id) block_layouts;
-    Array.iter trans_stmt block.node;
-    ignore (Stack.pop block_layouts)
+  and deref_exterior writing operand slot =
+    if writing
+    then
+      begin
+        let layout = layout_slot cx.ctxt_abi 0L slot in
+          trans_malloc operand layout.layout_size;
+          deref_off operand word_sz
+      end
+    else
+      begin
+        deref_off operand word_sz
+      end
 
 
   and trans_copy_rec
@@ -437,32 +459,44 @@ let trans_visitor
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
     assert (slot_ty src_slot = slot_ty dst_slot);
-    let deref_if_necessary operand slot =
-      match slot.Ast.slot_mode with
-          Ast.MODE_interior -> operand
-        | Ast.MODE_read_alias -> deref operand
-        | Ast.MODE_write_alias -> deref operand
-        | Ast.MODE_exterior ->
-            err None "Cannot translate exterior-mode slots."
-    in
-    let dst = deref_if_necessary dst dst_slot in
-    let src = deref_if_necessary src src_slot in
-      match (dst, dst_slot.Ast.slot_ty,
-             src, src_slot.Ast.slot_ty) with
-          (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
-           Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_entries)) ->
-            trans_copy_rec
-              dst_reg dst_off dst_entries
-              src_reg src_off src_entries
+    if dst_slot.Ast.slot_mode = Ast.MODE_exterior &&
+      src_slot.Ast.slot_mode = Ast.MODE_exterior
+    then
+      (* Shallow copy: move pointer, bump refcount. *)
+      begin
+        mov dst src;
+        let rc = (word_at_reg_off (Some (force_to_reg dst)) (Asm.IMM 0L)) in
+          emit Il.ADD rc rc (Il.Imm (Asm.IMM 1L))
+      end
+    else
+      begin
+        (* Deep copy: recursive copying. *)
+        let deref_if_necessary operand slot writing =
+          match slot.Ast.slot_mode with
+              Ast.MODE_interior -> operand
+            | Ast.MODE_read_alias -> deref operand
+            | Ast.MODE_write_alias -> deref operand
+            | Ast.MODE_exterior -> deref_exterior writing operand slot
+        in
+        let dst = deref_if_necessary dst dst_slot true in
+        let src = deref_if_necessary src src_slot false in
+          match (dst, dst_slot.Ast.slot_ty,
+                 src, src_slot.Ast.slot_ty) with
+              (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
+               Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_entries)) ->
+                trans_copy_rec
+                  dst_reg dst_off dst_entries
+                  src_reg src_off src_entries
 
-        | (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_tup dst_slots),
-           Il.Mem (_, src_reg, src_off), Some (Ast.TY_tup src_slots)) ->
-            trans_copy_tup
-              dst_reg dst_off dst_slots
-              src_reg src_off src_slots
+            | (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_tup dst_slots),
+               Il.Mem (_, src_reg, src_off), Some (Ast.TY_tup src_slots)) ->
+                trans_copy_tup
+                  dst_reg dst_off dst_slots
+                  src_reg src_off src_slots
 
-        | _ ->
-            mov dst src
+            | _ ->
+                mov dst src
+      end
 
 
   and trans_copy
@@ -476,14 +510,14 @@ let trans_visitor
            * Translations of these expr types yield vregs, 
            * so copy is just MOV into the lval. 
            *)
-          let (dst_operand, _) = trans_lval dst in
+          let (dst_operand, _) = trans_lval dst true in
           let src_operand = trans_expr src in
             mov dst_operand src_operand
 
       | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
           (* Possibly-large structure copying *)
-          let (dst_operand, dst_slot) = trans_lval dst in
-          let (src_operand, src_slot) = trans_lval src_lval in
+          let (dst_operand, dst_slot) = trans_lval dst true in
+          let (src_operand, src_slot) = trans_lval src_lval false in
             trans_copy_slots
               dst_operand dst_slot
               src_operand src_slot
@@ -497,8 +531,6 @@ let trans_visitor
     match dst_slot.Ast.slot_mode with
         Ast.MODE_read_alias
       | Ast.MODE_write_alias -> mov dst (alias src)
-      | Ast.MODE_exterior ->
-            err None "Cannot translate exterior-mode slots."
       | _ ->
           trans_copy_slots
             dst dst_slot
@@ -598,8 +630,11 @@ let trans_visitor
 
       | Ast.STMT_call (dst, flv, args) ->
           let vr = Il.Reg (Il.next_vreg (emitter())) in
-          let (outmem, _) = trans_lval dst in
-          let (fv, fslot) = (trans_lval_full flv abi.Abi.abi_has_pcrel_jumps abi.Abi.abi_has_imm_jumps) in
+          let (outmem, _) = trans_lval dst true in
+          let (fv, fslot) = (trans_lval_full flv
+                               abi.Abi.abi_has_pcrel_jumps
+                               abi.Abi.abi_has_imm_jumps
+                               false) in
           let tfn =
             match slot_ty fslot with
                 Ast.TY_fn fty -> fty
