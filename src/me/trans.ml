@@ -214,7 +214,7 @@ let trans_visitor
     let return_item (item:Ast.mod_item') (referent:node_id)
         : (Il.operand * Ast.slot) =
       let ty = Hashtbl.find cx.ctxt_all_item_types referent in
-      let slot = { Ast.slot_mode = Ast.MODE_read_alias;
+      let slot = { Ast.slot_mode = Ast.MODE_interior;
                    Ast.slot_ty = Some ty }
       in
         match item with
@@ -253,17 +253,14 @@ let trans_visitor
                         word_at_fp_off disp
               end
       in
-        match slot.Ast.slot_mode with
-            Ast.MODE_interior -> (operand, slot)
-          | Ast.MODE_read_alias -> (deref operand, slot)
-          | Ast.MODE_write_alias -> (deref operand, slot)
-          | Ast.MODE_exterior -> (deref_exterior writing operand slot, slot)
+        (operand, slot)
     in
 
       match lv with
           Ast.LVAL_ext (base, comp) ->
             let (base_operand, base_slot) = trans_lval_full base false true writing in
-            let (base_reg, base_off) = get_reg_off base_operand in
+            let base_operand' = deref_slot base_operand base_slot writing in
+            let (base_reg, base_off) = get_reg_off base_operand' in
               trans_lval_ext base_slot base_reg base_off comp
 
         | Ast.LVAL_base nb ->
@@ -282,8 +279,8 @@ let trans_visitor
   and trans_atom (atom:Ast.atom) : Il.operand =
     match atom with
         Ast.ATOM_lval lv ->
-          let (operand, _) = trans_lval lv false in
-            operand
+          let (operand, slot) = trans_lval lv false in
+            deref_slot operand slot false
 
       | Ast.ATOM_literal lit ->
           begin
@@ -407,13 +404,20 @@ let trans_visitor
     then
       begin
         let layout = layout_slot cx.ctxt_abi 0L slot in
-          trans_malloc operand layout.layout_size;
+          trans_malloc operand (Int64.add layout.layout_size word_sz);
           deref_off operand word_sz
       end
     else
       begin
         deref_off operand word_sz
       end
+
+  and deref_slot (operand:Il.operand) (slot:Ast.slot) (writing:bool) : Il.operand =
+    match slot.Ast.slot_mode with
+        Ast.MODE_interior -> operand
+      | Ast.MODE_read_alias -> deref operand
+      | Ast.MODE_write_alias -> deref operand
+      | Ast.MODE_exterior -> deref_exterior writing operand slot
 
 
   and trans_copy_rec
@@ -471,15 +475,8 @@ let trans_visitor
     else
       begin
         (* Deep copy: recursive copying. *)
-        let deref_if_necessary operand slot writing =
-          match slot.Ast.slot_mode with
-              Ast.MODE_interior -> operand
-            | Ast.MODE_read_alias -> deref operand
-            | Ast.MODE_write_alias -> deref operand
-            | Ast.MODE_exterior -> deref_exterior writing operand slot
-        in
-        let dst = deref_if_necessary dst dst_slot true in
-        let src = deref_if_necessary src src_slot false in
+        let dst = deref_slot dst dst_slot true in
+        let src = deref_slot src src_slot false in
           match (dst, dst_slot.Ast.slot_ty,
                  src, src_slot.Ast.slot_ty) with
               (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
@@ -510,9 +507,9 @@ let trans_visitor
            * Translations of these expr types yield vregs, 
            * so copy is just MOV into the lval. 
            *)
-          let (dst_operand, _) = trans_lval dst true in
+          let (dst_operand, dst_slot) = trans_lval dst true in
           let src_operand = trans_expr src in
-            mov dst_operand src_operand
+            mov (deref_slot dst_operand dst_slot true) src_operand
 
       | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
           (* Possibly-large structure copying *)
@@ -521,6 +518,19 @@ let trans_visitor
             trans_copy_slots
               dst_operand dst_slot
               src_operand src_slot
+
+
+  and trans_init_slots_from_atom
+      (dst:Il.operand) (dst_slot:Ast.slot)
+      (atom:Ast.atom)
+      : unit =
+    match atom with
+      | (Ast.ATOM_literal _) ->
+          let src = trans_atom atom in
+            mov (deref_slot dst dst_slot true) src
+      | Ast.ATOM_lval src_lval ->
+          let (src, src_slot) = trans_lval src_lval false in
+            trans_init_slots dst dst_slot src src_slot
 
 
   and trans_init_slots
@@ -666,9 +676,9 @@ let trans_visitor
                   begin
                     log cx "copying formal arg %d, slot %s"
                       (i-2) (Ast.fmt_to_str Ast.fmt_slot fslots.(i-2));
-                    trans_init_slots
+                    trans_init_slots_from_atom
                       dst_operand fslots.(i-2)
-                      (trans_atom args.(i-2)) fslots.(i-2)
+                      args.(i-2)
                   end
             done;
             emit Il.CCALL vr fv Il.Nil;

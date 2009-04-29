@@ -566,6 +566,10 @@ let pack (offset:int64) (layouts:layout array) : layout =
     new_layout offset sz align
 ;;
 
+let word_layout (abi:Abi.abi) (off:int64) : layout =
+  new_layout off abi.Abi.abi_word_sz abi.Abi.abi_word_sz
+;;
+
 let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
   match t with
       Ast.TY_nil -> new_layout off 0L 0L
@@ -582,12 +586,22 @@ let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
         let layouts = Array.map (fun (_,slot) -> layout_slot abi 0L slot) slots in
           pack off layouts
     | _ ->
-        new_layout off abi.Abi.abi_word_sz abi.Abi.abi_word_sz
+        word_layout abi off
 
 and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
-  match s.Ast.slot_ty with
-      None -> raise (Semant_err (None, "layout_slot on untyped slot"))
-    | Some t -> layout_ty abi off t
+  match s.Ast.slot_mode with
+      Ast.MODE_interior
+    | _ ->
+        begin
+          match s.Ast.slot_ty with
+              None -> raise (Semant_err (None, "layout_slot on untyped slot"))
+            | Some t -> layout_ty abi off t
+        end
+          (* FIXME: turning this on makes a bunch of slots go into
+           * regs (great!)  except they're not supposed to; the
+           * alias-analysis pass is supposed to catch them. It doesn't
+           * yet, though. *)
+          (* | _ -> word_layout abi off *)
 ;;
 
 let layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
