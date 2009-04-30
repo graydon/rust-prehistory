@@ -399,13 +399,35 @@ let trans_visitor
 
   and trans_free (src:Il.operand) : unit = trans_kern_fn 5L [| src |]
 
+  and exterior_refcount_cell operand =
+    word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM 0L)
+
   and deref_exterior writing operand slot =
     if writing
     then
       begin
         let layout = layout_slot cx.ctxt_abi 0L slot in
-          trans_malloc operand (Int64.add layout.layout_size word_sz);
-          deref_off operand word_sz
+        let rc = exterior_refcount_cell operand in
+        let zero = Il.Imm (Asm.IMM 0L) in
+        let one = Il.Imm (Asm.IMM 1L) in
+          (* FIXME: compare-to-zero is wrong; we should know exactly when
+           * an exterior slot is being initialized vs. re-initialized, and
+           * can generate different code accordingly. Possibly not? Hmm. 
+           * what about loop edges? *)
+          emit Il.CMP Il.Nil operand zero;
+          let j0 = mark () in
+            emit Il.JE Il.Nil badlab Il.Nil;
+            emit Il.CMP Il.Nil rc one;
+            let j1 = mark () in
+              emit Il.JE Il.Nil badlab Il.Nil;
+              emit Il.SUB rc rc one;
+              patch j0;
+              trans_malloc operand (Int64.add layout.layout_size word_sz);
+              (* Reload rc; operand changed underfoot. *)
+              let rc = exterior_refcount_cell operand in
+                mov rc one;
+                patch j1;
+                deref_off operand word_sz
       end
     else
       begin
@@ -468,8 +490,9 @@ let trans_visitor
     then
       (* Shallow copy: move pointer, bump refcount. *)
       begin
+        log cx "shallow-copy of exterior slots";
         mov dst src;
-        let rc = (word_at_reg_off (Some (force_to_reg dst)) (Asm.IMM 0L)) in
+        let rc = exterior_refcount_cell dst in
           emit Il.ADD rc rc (Il.Imm (Asm.IMM 1L))
       end
     else

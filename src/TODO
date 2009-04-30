@@ -1,14 +1,13 @@
 
 progress:
+ - floating point values / registers / instructions
+ - general memcpy-with-inlining-threshold trans function
  - explicit FFI / struct descriptors; hard-coding offsets is getting stale
  - make proc stacks into chunk lists, check overflow / extend on frame entry
  - put timer-counter in proc
  - translate loop-jumps & calls to do a test/yield (regs already flushed)
  - make proc pool growable
- - basic version of type-state algorithm
  - real type checker, or extend resolve/unify? consult textbooks
- - movement of superword values
- - records
  - vectors
  - strings
  - channels and ports
@@ -26,6 +25,8 @@ progress:
  - tail calling protocols
  - mach-o format emitter
  - x64, arm?
+ - import extlib for utf-8, various extras
+ - redo lexer by hand, as unicode
 
 code cleanup:
  - move frame code to ABI
@@ -38,3 +39,15 @@ code cleanup:
  - consolidate formatting functions
  - type-annotate everything
  - make callee-save in prologue/epilogue depend on reg use
+ - once extlib imported, flush out redundancies in common
+ - make all logging (or most) lazy
+ - change ra to do destructive / in-place update of bitsets
+ - change typestate algorithm to reschedule / revisit only downstream nodes
+ - change relaxation code to ... possibly *batch* adjustments? hard to say; maybe
+   have relaxation return a tri-state: "I fit" / "I do not" / "I might", and only
+   batch the "I do not"s?
+
+done:
+ - basic version of type-state algorithm
+ - movement of superword values
+ - records
