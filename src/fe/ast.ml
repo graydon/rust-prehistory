@@ -1000,6 +1000,20 @@ let fmt_to_str (f:Format.formatter -> 'a -> unit) (v:'a) : string =
       Buffer.contents buf
     end
 
+let sprintf_fmt
+    (f:Format.formatter -> 'a -> unit)
+    : (unit -> 'a -> string) =
+  (fun _ -> fmt_to_str f)
+
+
+let sprintf_lval = sprintf_fmt fmt_lval;;
+let sprintf_atom = sprintf_fmt fmt_atom;;
+let sprintf_slot = sprintf_fmt fmt_slot;;
+let sprintf_ty = sprintf_fmt fmt_ty;;
+let sprintf_carg = sprintf_fmt fmt_carg;;
+let sprintf_constr = sprintf_fmt fmt_constr;;
+let sprintf_stmt = sprintf_fmt fmt_stmt;;
+
 (*
  * Local Variables:
  * fill-column: 70;

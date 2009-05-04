@@ -8,6 +8,12 @@ let log cx = Session.log "trans"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
+let iflog cx thunk =
+  if cx.ctxt_sess.Session.sess_log_trans
+  then thunk ()
+  else ()
+;;
+
 let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
 let imm_true = Il.Imm (Asm.IMM 1L);;
 let imm_false = Il.Imm (Asm.IMM 0L);;
@@ -416,7 +422,7 @@ let trans_visitor
       emit Il.SUB rc rc one;
       emit Il.CMP Il.Nil rc zero;
       let j = mark () in
-        emit Il.JE Il.Nil badlab Il.Nil;
+        emit Il.JNE Il.Nil badlab Il.Nil;
         (* FIXME: freeing needs to be recursive over sub-slots. *)
         trans_free operand;
         patch j;
@@ -443,10 +449,12 @@ let trans_visitor
             let j = mark () in
               emit Il.JE Il.Nil badlab Il.Nil;
               let src = Il.Reg (Il.next_vreg (emitter())) in
-                mov src operand;
-                init_exterior_slot operand slot;
-                trans_copy_slot true operand slot src slot;
-                drop_exterior_refcount_and_maybe_free rc src slot;
+                drop_exterior_refcount_and_maybe_free rc operand slot;
+                (* 
+                 * Magical: trans_copy_slot_deep in 'initializing' mode 
+                 * will init the slot for us.
+                 *)
+                trans_copy_slot_deep true operand slot src slot;
                 patch j;
                 deref_off operand word_sz
 
@@ -558,40 +566,49 @@ let trans_visitor
             drop_exterior_refcount_and_maybe_free dst_rc dst dst_slot
         else
           ();
-        log cx "shallow-copy of exterior slots";
-        let src_rc = exterior_refcount_cell dst in
+        log cx "shallow-copy of exterior slots: %a <- %a"
+          Ast.sprintf_slot dst_slot
+          Ast.sprintf_slot src_slot;
+        let src_rc = exterior_refcount_cell src in
           emit Il.ADD src_rc src_rc (Il.Imm (Asm.IMM 1L));
           mov dst src;
       end
     else
-      begin
-        (* Deep copy: recursive copying. *)
-        let dst_intent =
-          if initializing
-          then INTENT_init
-          else INTENT_write
-        in
-        let dst = deref_slot dst dst_slot dst_intent in
-        let src = deref_slot src src_slot INTENT_read in
-          match (dst, dst_slot.Ast.slot_ty,
-                 src, src_slot.Ast.slot_ty) with
-              (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
-               Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_entries)) ->
-                trans_copy_rec
-                  initializing
-                  dst_reg dst_off dst_entries
-                  src_reg src_off src_entries
+      (* Deep copy: recursive copying. *)
+      trans_copy_slot_deep initializing dst dst_slot src src_slot
 
-            | (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_tup dst_slots),
-               Il.Mem (_, src_reg, src_off), Some (Ast.TY_tup src_slots)) ->
-                trans_copy_tup
-                  initializing
-                  dst_reg dst_off dst_slots
-                  src_reg src_off src_slots
 
-            | _ ->
-                mov dst src
-      end
+  and trans_copy_slot_deep
+      (initializing:bool)
+      (dst:Il.operand) (dst_slot:Ast.slot)
+      (src:Il.operand) (src_slot:Ast.slot)
+      : unit =
+    assert (slot_ty src_slot = slot_ty dst_slot);
+    let dst_intent =
+      if initializing
+      then INTENT_init
+      else INTENT_write
+    in
+    let dst = deref_slot dst dst_slot dst_intent in
+    let src = deref_slot src src_slot INTENT_read in
+      match (dst, dst_slot.Ast.slot_ty,
+             src, src_slot.Ast.slot_ty) with
+          (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
+           Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_entries)) ->
+            trans_copy_rec
+              initializing
+              dst_reg dst_off dst_entries
+              src_reg src_off src_entries
+
+        | (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_tup dst_slots),
+           Il.Mem (_, src_reg, src_off), Some (Ast.TY_tup src_slots)) ->
+            trans_copy_tup
+              initializing
+              dst_reg dst_off dst_slots
+              src_reg src_off src_slots
+
+        | _ ->
+            mov dst src
 
 
   and trans_copy
@@ -685,7 +702,10 @@ let trans_visitor
           if Hashtbl.mem cx.ctxt_copy_stmt_is_init stmt.id
           then
             begin
-              log cx "initializing-copy on dst lval %s" (Ast.fmt_to_str Ast.fmt_lval lv_dst);
+              iflog cx
+                (fun _ ->
+                   log cx "initializing-copy on dst lval %a"
+                     Ast.sprintf_lval lv_dst);
               trans_copy true lv_dst e_src
             end
           else

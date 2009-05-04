@@ -201,13 +201,15 @@ rust_check_expr(rust_proc_t *proc, uint32_t i)
 static uintptr_t
 rust_malloc(rust_proc_t *proc, size_t nbytes)
 {
-  printf("rt: malloc(%u)\n", nbytes);
-  return (uintptr_t) xalloc(nbytes);
+  void *p = xalloc(nbytes);
+  printf("rt: malloc(%u) = %p\n", nbytes, p);
+  return (uintptr_t) p;
 }
 
 static void
 rust_free(rust_proc_t *proc, void* ptr)
 {
+  printf("rt: free(%p)\n", ptr);
   free(ptr);
 }
 
