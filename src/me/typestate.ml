@@ -684,6 +684,34 @@ let typestate_verify_visitor
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
+let lifecycle_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+  let visit_stmt_pre s =
+    begin
+      match s.node with
+          Ast.STMT_copy (lv_dst, _) ->
+            let prestate = Hashtbl.find cx.ctxt_prestates s.id in
+            let poststate = Hashtbl.find cx.ctxt_poststates s.id in
+            let dst_slots = lval_slots cx lv_dst in
+            let is_initializing slot =
+              let cid = Hashtbl.find cx.ctxt_constr_ids (Constr_init slot) in
+              let i = int_of_constr cid in
+                (not (Bitv.get prestate i)) && (Bitv.get poststate i)
+            in
+            let initializing = List.exists is_initializing (Array.to_list dst_slots) in
+              if initializing
+              then Hashtbl.add cx.ctxt_copy_stmt_is_init s.id ()
+              else ()
+        | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre s
+  in
+    { inner with
+        Walk.visit_stmt_pre = visit_stmt_pre }
+;;
+
 let process_crate
     (cx:ctxt)
     (items:Ast.mod_items)
@@ -712,9 +740,16 @@ let process_crate
             Walk.empty_visitor))
     |]
   in
+  let aux_passes =
+    [|
+      (lifecycle_visitor cx
+         Walk.empty_visitor)
+    |]
+  in
     run_passes cx setup_passes (log cx "%s") items;
     run_dataflow cx (!constr_id) graph;
-    run_passes cx verify_passes (log cx "%s") items
+    run_passes cx verify_passes (log cx "%s") items;
+    run_passes cx aux_passes (log cx "%s") items
 ;;
 
 

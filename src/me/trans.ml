@@ -13,6 +13,14 @@ let imm_true = Il.Imm (Asm.IMM 1L);;
 let imm_false = Il.Imm (Asm.IMM 0L);;
 let badlab = Il.Label (-1);;
 
+
+type intent =
+    INTENT_init
+  | INTENT_read
+  | INTENT_write
+  | INTENT_drop
+;;
+
 let trans_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
@@ -197,7 +205,7 @@ let trans_visitor
       (lv:Ast.lval)
       (pcrel_ok:bool)
       (imm_ok:bool)
-      (writing:bool)
+      (intent:intent)
       : (Il.operand * Ast.slot) =
 
     let return_fixup (fix:fixup) (slot:Ast.slot)
@@ -258,8 +266,8 @@ let trans_visitor
 
       match lv with
           Ast.LVAL_ext (base, comp) ->
-            let (base_operand, base_slot) = trans_lval_full base false true writing in
-            let base_operand' = deref_slot base_operand base_slot writing in
+            let (base_operand, base_slot) = trans_lval_full base false true intent in
+            let base_operand' = deref_slot base_operand base_slot intent in
             let (base_reg, base_off) = get_reg_off base_operand' in
               trans_lval_ext base_slot base_reg base_off comp
 
@@ -273,14 +281,14 @@ let trans_visitor
                         return_slot slot referent
               end
 
-  and trans_lval (lv:Ast.lval) (writing:bool) : (Il.operand * Ast.slot) =
-    trans_lval_full lv false false writing
+  and trans_lval (lv:Ast.lval) (intent:intent) : (Il.operand * Ast.slot) =
+    trans_lval_full lv false false intent
 
   and trans_atom (atom:Ast.atom) : Il.operand =
     match atom with
         Ast.ATOM_lval lv ->
-          let (operand, slot) = trans_lval lv false in
-            deref_slot operand slot false
+          let (operand, slot) = trans_lval lv INTENT_read in
+            deref_slot operand slot INTENT_read
 
       | Ast.ATOM_literal lit ->
           begin
@@ -402,12 +410,60 @@ let trans_visitor
   and exterior_refcount_cell operand =
     word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM 0L)
 
-  and deref_exterior writing operand slot =
-    if writing
-    then
+  and drop_exterior_refcount_and_maybe_free rc operand slot =
+    let zero = Il.Imm (Asm.IMM 0L) in
+    let one = Il.Imm (Asm.IMM 1L) in
+      emit Il.SUB rc rc one;
+      emit Il.CMP Il.Nil rc zero;
+      let j = mark () in
+        emit Il.JE Il.Nil badlab Il.Nil;
+        (* FIXME: freeing needs to be recursive over sub-slots. *)
+        trans_free operand;
+        patch j;
+
+  and init_exterior_slot operand slot =
+    let layout = layout_slot cx.ctxt_abi 0L slot in
+    let one = Il.Imm (Asm.IMM 1L) in
+      trans_malloc operand (Int64.add layout.layout_size word_sz);
+      (* Reload rc; operand changed underfoot. *)
+      let rc = exterior_refcount_cell operand in
+        mov rc one
+
+
+  and deref_exterior intent operand slot =
+    let one = Il.Imm (Asm.IMM 1L) in
+      match intent with
+          INTENT_init ->
+            init_exterior_slot operand slot;
+            deref_off operand word_sz
+
+        | INTENT_write ->
+            let rc = exterior_refcount_cell operand in
+            emit Il.CMP Il.Nil rc one;
+            let j = mark () in
+              emit Il.JE Il.Nil badlab Il.Nil;
+              let src = Il.Reg (Il.next_vreg (emitter())) in
+                mov src operand;
+                init_exterior_slot operand slot;
+                trans_copy_slot true operand slot src slot;
+                drop_exterior_refcount_and_maybe_free rc src slot;
+                patch j;
+                deref_off operand word_sz
+
+        | INTENT_read ->
+            deref_off operand word_sz
+
+        | INTENT_drop ->
+            let rc = exterior_refcount_cell operand in
+            drop_exterior_refcount_and_maybe_free rc operand slot;
+            Il.Nil
+
+(*
+      if intent = INTENT_write
+      then
+        drop_exterior_refcount_and_maybe_free rc operand slot;
       begin
         let layout = layout_slot cx.ctxt_abi 0L slot in
-        let rc = exterior_refcount_cell operand in
         let zero = Il.Imm (Asm.IMM 0L) in
         let one = Il.Imm (Asm.IMM 1L) in
           (* FIXME: compare-to-zero is wrong; we should know exactly when
@@ -433,16 +489,18 @@ let trans_visitor
       begin
         deref_off operand word_sz
       end
+*)
 
-  and deref_slot (operand:Il.operand) (slot:Ast.slot) (writing:bool) : Il.operand =
+  and deref_slot (operand:Il.operand) (slot:Ast.slot) (intent:intent) : Il.operand =
     match slot.Ast.slot_mode with
         Ast.MODE_interior -> operand
       | Ast.MODE_read_alias -> deref operand
       | Ast.MODE_write_alias -> deref operand
-      | Ast.MODE_exterior -> deref_exterior writing operand slot
+      | Ast.MODE_exterior -> deref_exterior intent operand slot
 
 
   and trans_copy_rec
+      (initializing:bool)
       (dst_reg:Il.reg option) (dst_off:Asm.expr64) (dst_entries:Ast.ty_rec)
       (src_reg:Il.reg option) (src_off:Asm.expr64) (src_entries:Ast.ty_rec)
       : unit =
@@ -456,6 +514,7 @@ let trans_visitor
             let (_, sub_dst_slot) = dst_entries.(i) in
             let (_, sub_src_slot) = src_entries.(i) in
               trans_copy_slot
+                initializing
                 sub_dst sub_dst_slot
                 sub_src sub_src_slot
         end
@@ -463,6 +522,7 @@ let trans_visitor
 
 
   and trans_copy_tup
+      (initializing:bool)
       (dst_reg:Il.reg option) (dst_off:Asm.expr64) (dst_slots:Ast.ty_tup)
       (src_reg:Il.reg option) (src_off:Asm.expr64) (src_slots:Ast.ty_tup)
       : unit =
@@ -474,6 +534,7 @@ let trans_visitor
             let sub_src = word_at_reg_off_imm src_reg src_off disp in
             let sub_dst = word_at_reg_off_imm dst_reg dst_off disp in
               trans_copy_slot
+                initializing
                 sub_dst dst_slots.(i)
                 sub_src src_slots.(i)
         end
@@ -481,6 +542,7 @@ let trans_visitor
 
 
   and trans_copy_slot
+      (initializing:bool)
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
@@ -490,27 +552,40 @@ let trans_visitor
     then
       (* Shallow copy: move pointer, bump refcount. *)
       begin
+        if not initializing
+        then
+          let dst_rc = exterior_refcount_cell dst in
+            drop_exterior_refcount_and_maybe_free dst_rc dst dst_slot
+        else
+          ();
         log cx "shallow-copy of exterior slots";
-        mov dst src;
-        let rc = exterior_refcount_cell dst in
-          emit Il.ADD rc rc (Il.Imm (Asm.IMM 1L))
+        let src_rc = exterior_refcount_cell dst in
+          emit Il.ADD src_rc src_rc (Il.Imm (Asm.IMM 1L));
+          mov dst src;
       end
     else
       begin
         (* Deep copy: recursive copying. *)
-        let dst = deref_slot dst dst_slot true in
-        let src = deref_slot src src_slot false in
+        let dst_intent =
+          if initializing
+          then INTENT_init
+          else INTENT_write
+        in
+        let dst = deref_slot dst dst_slot dst_intent in
+        let src = deref_slot src src_slot INTENT_read in
           match (dst, dst_slot.Ast.slot_ty,
                  src, src_slot.Ast.slot_ty) with
               (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_rec dst_entries),
                Il.Mem (_, src_reg, src_off), Some (Ast.TY_rec src_entries)) ->
                 trans_copy_rec
+                  initializing
                   dst_reg dst_off dst_entries
                   src_reg src_off src_entries
 
             | (Il.Mem (_, dst_reg, dst_off), Some (Ast.TY_tup dst_slots),
                Il.Mem (_, src_reg, src_off), Some (Ast.TY_tup src_slots)) ->
                 trans_copy_tup
+                  initializing
                   dst_reg dst_off dst_slots
                   src_reg src_off src_slots
 
@@ -520,8 +595,14 @@ let trans_visitor
 
 
   and trans_copy
+      (initializing:bool)
       (dst:Ast.lval)
       (src:Ast.expr) : unit =
+    let dst_intent =
+      if initializing
+      then INTENT_init
+      else INTENT_write
+    in
     match src with
         (Ast.EXPR_binary _)
       | (Ast.EXPR_unary _)
@@ -530,15 +611,16 @@ let trans_visitor
            * Translations of these expr types yield vregs, 
            * so copy is just MOV into the lval. 
            *)
-          let (dst_operand, dst_slot) = trans_lval dst true in
+          let (dst_operand, dst_slot) = trans_lval dst dst_intent in
           let src_operand = trans_expr src in
-            mov (deref_slot dst_operand dst_slot true) src_operand
+            mov (deref_slot dst_operand dst_slot INTENT_read) src_operand
 
       | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
           (* Possibly-large structure copying *)
-          let (dst_operand, dst_slot) = trans_lval dst true in
-          let (src_operand, src_slot) = trans_lval src_lval false in
+          let (dst_operand, dst_slot) = trans_lval dst dst_intent in
+          let (src_operand, src_slot) = trans_lval src_lval INTENT_read in
             trans_copy_slot
+              initializing
               dst_operand dst_slot
               src_operand src_slot
 
@@ -550,9 +632,9 @@ let trans_visitor
     match atom with
       | (Ast.ATOM_literal _) ->
           let src = trans_atom atom in
-            mov (deref_slot dst dst_slot true) src
+            mov (deref_slot dst dst_slot INTENT_init) src
       | Ast.ATOM_lval src_lval ->
-          let (src, src_slot) = trans_lval src_lval false in
+          let (src, src_slot) = trans_lval src_lval INTENT_read in
             trans_init_slot dst dst_slot src src_slot
 
 
@@ -566,6 +648,7 @@ let trans_visitor
       | Ast.MODE_write_alias -> mov dst (alias src)
       | _ ->
           trans_copy_slot
+            true
             dst dst_slot
             src src_slot
 
@@ -599,7 +682,14 @@ let trans_visitor
       | Ast.STMT_spawn a -> trans_spawn a
 
       | Ast.STMT_copy (lv_dst, e_src) ->
-          trans_copy lv_dst e_src
+          if Hashtbl.mem cx.ctxt_copy_stmt_is_init stmt.id
+          then
+            begin
+              log cx "initializing-copy on dst lval %s" (Ast.fmt_to_str Ast.fmt_lval lv_dst);
+              trans_copy true lv_dst e_src
+            end
+          else
+              trans_copy false lv_dst e_src
 
       | Ast.STMT_init_rec (dst, atab) ->
           Array.iter
@@ -610,7 +700,7 @@ let trans_visitor
                                        (Ast.COMP_ident ident))))
                 in
                 let expr = Ast.EXPR_atom atom in
-                  trans_copy lval expr
+                  trans_copy true lval expr
             end
             atab
 
@@ -623,7 +713,7 @@ let trans_visitor
                                        (Ast.COMP_idx i))))
                 in
                 let expr = Ast.EXPR_atom atom in
-                  trans_copy lval expr
+                  trans_copy true lval expr
             end
             atoms
 
@@ -663,11 +753,11 @@ let trans_visitor
 
       | Ast.STMT_call (dst, flv, args) ->
           let vr = Il.Reg (Il.next_vreg (emitter())) in
-          let (outmem, _) = trans_lval dst true in
+          let (outmem, _) = trans_lval dst INTENT_write in
           let (fv, fslot) = (trans_lval_full flv
                                abi.Abi.abi_has_pcrel_jumps
                                abi.Abi.abi_has_imm_jumps
-                               false) in
+                               INTENT_read) in
           let tfn =
             match slot_ty fslot with
                 Ast.TY_fn fty -> fty
