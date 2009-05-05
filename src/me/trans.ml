@@ -207,6 +207,31 @@ let trans_visitor
         | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
   in
 
+  let cell_vreg_num (vr:(int option) ref) : int =
+    match !vr with
+        None ->
+          let v = (Il.next_vreg_num (emitter())) in
+            vr := Some v;
+            v
+      | Some v -> v
+  in
+
+  let operand_of_block_slot
+      (slotid:node_id)
+      : Il.operand =
+    match htab_search cx.ctxt_slot_vregs slotid with
+        Some vr ->
+          Il.Reg (Il.Vreg (cell_vreg_num vr))
+      | None ->
+          begin
+            match htab_search cx.ctxt_slot_layouts slotid with
+                None -> err (Some slotid) "slot assigned to neither vreg nor layout"
+              | Some layout ->
+                  let disp = layout.layout_offset in
+                    word_at_fp_off disp
+          end
+  in
+
   let rec trans_lval_full
       (lv:Ast.lval)
       (pcrel_ok:bool)
@@ -241,32 +266,9 @@ let trans_visitor
                 "unhandled item type in trans_lval_full"
     in
 
-    let cell_vreg_num (vr:(int option) ref) : int =
-      match !vr with
-          None ->
-              let v = (Il.next_vreg_num (emitter())) in
-                vr := Some v;
-                v
-        | Some v -> v
-    in
-
     let return_slot (slot:Ast.slot) (referent:node_id)
         : (Il.operand * Ast.slot) =
-      let operand =
-        match htab_search cx.ctxt_slot_vregs referent with
-            Some vr ->
-              Il.Reg (Il.Vreg (cell_vreg_num vr))
-          | None ->
-              begin
-                match htab_search cx.ctxt_slot_layouts referent with
-                    None ->
-                      err (Some referent)
-                        "slot assigned to neither vreg nor layout"
-                  | Some layout ->
-                      let disp = layout.layout_offset in
-                        word_at_fp_off disp
-              end
-      in
+      let operand = operand_of_block_slot referent in
         (operand, slot)
     in
 
@@ -387,7 +389,23 @@ let trans_visitor
   and trans_block (block:Ast.block) : unit =
     Stack.push (get_block_layout cx block.id) block_layouts;
     Array.iter trans_stmt block.node;
-    ignore (Stack.pop block_layouts)
+    let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
+      log cx "end of block, translating slot-frees:";
+      (* 
+       * FIXME: this is not going to free things in the proper order; 
+       * we need to analyze the decl order in an earlier phase and thread
+       * it through to here. 
+       *)
+      Hashtbl.iter
+        begin
+          fun slotkey slotid ->
+            log cx "slot free: %a" Ast.sprintf_slot_key slotkey;
+            let slot = Hashtbl.find cx.ctxt_all_slots slotid in
+            let operand = operand_of_block_slot slotid in
+              trans_drop_slot operand slot
+        end
+        block_slots;
+      ignore (Stack.pop block_layouts)
 
   and trans_kern_fn (fn:int64) (args:Il.operand array) : unit =
     let dst = Il.Reg (Il.next_vreg (emitter())) in
@@ -482,6 +500,30 @@ let trans_visitor
         end;
         trans_free operand;
         patch j;
+
+
+  and trans_drop_slot
+      (operand:Il.operand)
+      (slot:Ast.slot)
+      : unit =
+    match slot.Ast.slot_mode with
+        Ast.MODE_exterior ->
+          let rc = exterior_refcount_cell operand in
+            drop_exterior_refcount_and_maybe_free rc operand slot
+      | _ ->
+          begin
+            (* FIXME: this will require some reworking if we support
+             * rec or tup slots that fit in a vreg. It forces to mem
+             * presently. *)
+            match slot_ty slot with
+                Ast.TY_rec entries ->
+                  let (reg, off) = get_reg_off operand in
+                    drop_rec_entries reg off entries
+              | Ast.TY_tup slots ->
+                  let (reg, off) = get_reg_off operand in
+                    drop_tup_slots reg off slots
+                | _ -> ()
+            end
 
 
   and init_exterior_slot operand slot =
@@ -839,6 +881,10 @@ let trans_visitor
                   end
             done;
             emit Il.CCALL vr fv Il.Nil;
+            for i = 2 to (Array.length arg_layouts) - 1 do
+              let operand = word_at_sp_off arg_layouts.(i).layout_offset in
+                trans_drop_slot operand fslots.(i-2)
+            done
 
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->

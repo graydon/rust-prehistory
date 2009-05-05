@@ -1009,6 +1009,7 @@ let sprintf_fmt
 let sprintf_lval = sprintf_fmt fmt_lval;;
 let sprintf_atom = sprintf_fmt fmt_atom;;
 let sprintf_slot = sprintf_fmt fmt_slot;;
+let sprintf_slot_key = sprintf_fmt fmt_slot_key;;
 let sprintf_ty = sprintf_fmt fmt_ty;;
 let sprintf_carg = sprintf_fmt fmt_carg;;
 let sprintf_constr = sprintf_fmt fmt_constr;;
