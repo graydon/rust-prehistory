@@ -139,6 +139,8 @@ struct rust_rt {
 #define RUST_PROC_STATE_CALLING_C   1
 #define RUST_PROC_STATE_EXITING     2
 
+#define RUST_PROC_MAX_UPCALL_ARGS   8
+
 #ifdef WIN32
 #define CDECL __cdecl
 #else
@@ -157,8 +159,12 @@ struct rust_proc {
   rust_stk_seg_t *stk;
   rust_prog_t *prog;
   uintptr_t sp;           /* saved sp when not running.                     */
-  uint32_t state;
+  uintptr_t state;
   size_t refcnt;
+
+  /* Parameter space for upcalls. */
+  uintptr_t upcall_code;
+  uintptr_t upcall_args[RUST_PROC_MAX_UPCALL_ARGS];
 
   /* Proc accounting. */
   uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */

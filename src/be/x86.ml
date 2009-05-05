@@ -330,6 +330,38 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
     mov (vr_n Abi.proc_field_state) (imm code);
 ;;
 
+let emit_upcall
+    (e:Il.emitter)
+    (u:Abi.upcall)
+    (args:Il.operand array)
+    (proc_to_c_fixup:fixup)
+    : unit =
+  let upcall_code = Abi.upcall_to_code u in
+  let state_code = Abi.upcall_to_code u in
+
+  let r x = Il.Reg x in
+  let vr = Il.next_vreg e in
+  let dst = Il.next_vreg e in
+  let vr_n = word_n vr in
+  let emit = Il.emit e in
+  let mov dst src = emit Il.UMOV dst src Il.Nil in
+  let imm i = Il.Imm (Asm.IMM i) in
+
+    assert ((Array.length args) <= Abi.max_upcall_args);
+
+    mov (r vr) proc_ptr;
+    mov (vr_n Abi.proc_field_state) (imm state_code);
+    mov (vr_n Abi.proc_field_upcall_code) (imm upcall_code);
+
+    Array.iteri
+      begin
+        fun i arg ->
+          mov (vr_n (Abi.proc_field_upcall_args + i)) arg
+      end
+      args;
+    emit Il.CCALL (r dst) (Il.Pcrel proc_to_c_fixup) Il.Nil
+;;
+
 let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
@@ -431,6 +463,7 @@ let (abi:Abi.abi) =
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_proc_state_change = emit_proc_state_change;
+    Abi.abi_emit_upcall = emit_upcall;
     Abi.abi_c_to_proc = c_to_proc;
     Abi.abi_proc_to_c = proc_to_c;
 

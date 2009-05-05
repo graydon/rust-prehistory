@@ -74,6 +74,16 @@ type proc_state =
   | STATE_exiting
 ;;
 
+type upcall =
+    UPCALL_log_int
+  | UPCALL_log_str
+  | UPCALL_spawn
+  | UPCALL_check_expr
+  | UPCALL_malloc
+  | UPCALL_free
+;;
+
+(* NB: all these numbers must be kept in sync with runtime. *)
 let proc_state_to_code (st:proc_state) : int64 =
   match st with
       STATE_running -> 0L
@@ -81,14 +91,27 @@ let proc_state_to_code (st:proc_state) : int64 =
     | STATE_exiting -> 2L
 ;;
 
-(* Word offsets for structure fields in rust.h. *)
+let upcall_to_code (u:upcall) : int64 =
+  match u with
+    UPCALL_log_int -> 0L
+  | UPCALL_log_str -> 1L
+  | UPCALL_spawn -> 2L
+  | UPCALL_check_expr -> 3L
+  | UPCALL_malloc -> 4L
+  | UPCALL_free -> 5L
+;;
 
+(* Word offsets for structure fields in rust.h. *)
 let proc_field_rt = 0;;
 let proc_field_stk = 1;;
 let proc_field_prog = 2;;
 let proc_field_sp = 3;;
 let proc_field_state = 4;;
 let proc_field_refcnt = 5;;
+let proc_field_upcall_code = 6;;
+let proc_field_upcall_args = 7;;
+let max_upcall_args = 8;;
+
 
 let rt_field_sp = 0;;
 let rt_field_curr_proc = 1;;
@@ -119,6 +142,7 @@ type abi =
     abi_clobbers: (Il.quad -> Il.hreg list);
 
     abi_emit_proc_state_change: (Il.emitter -> proc_state -> unit);
+    abi_emit_upcall: (Il.emitter -> upcall -> Il.operand array -> Common.fixup -> unit);
 
     (* Transitions between runtimes. *)
     abi_c_to_proc: (Il.emitter -> Common.fixup -> unit);
