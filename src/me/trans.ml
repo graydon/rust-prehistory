@@ -416,16 +416,73 @@ let trans_visitor
   and exterior_refcount_cell operand =
     word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM 0L)
 
-  and drop_exterior_refcount_and_maybe_free rc operand slot =
+  and drop_rec_entries
+      (reg:Il.reg option)
+      (off:Asm.expr64)
+      (entries:Ast.ty_rec)
+      : unit =
+    let layouts = layout_rec abi entries in
+      Array.iteri
+        begin
+          fun i (_, (_, layout)) ->
+            let (_, sub_slot) = entries.(i) in
+              match sub_slot.Ast.slot_mode with
+                  Ast.MODE_exterior ->
+                    begin
+                      let disp = layout.layout_offset in
+                      let operand = word_at_reg_off_imm reg off disp in
+                      let rc = exterior_refcount_cell operand in
+                      drop_exterior_refcount_and_maybe_free rc operand sub_slot
+                    end
+                | _ -> ()
+        end
+        layouts
+
+  and drop_tup_slots
+      (reg:Il.reg option)
+      (off:Asm.expr64)
+      (slots:Ast.ty_tup)
+      : unit =
+    let layouts = layout_tup abi slots in
+      Array.iteri
+        begin
+          fun i layout ->
+            let sub_slot = slots.(i) in
+              match sub_slot.Ast.slot_mode with
+                  Ast.MODE_exterior ->
+                    begin
+                      let disp = layout.layout_offset in
+                      let operand = word_at_reg_off_imm reg off disp in
+                      let rc = exterior_refcount_cell operand in
+                      drop_exterior_refcount_and_maybe_free rc operand sub_slot
+                    end
+                | _ -> ()
+        end
+        layouts
+
+
+  and drop_exterior_refcount_and_maybe_free
+      (rc:Il.operand)
+      (operand:Il.operand)
+      (slot:Ast.slot)
+      : unit =
     let zero = Il.Imm (Asm.IMM 0L) in
     let one = Il.Imm (Asm.IMM 1L) in
       emit Il.SUB rc rc one;
       emit Il.CMP Il.Nil rc zero;
       let j = mark () in
         emit Il.JNE Il.Nil badlab Il.Nil;
-        (* FIXME: freeing needs to be recursive over sub-slots. *)
+        begin
+          let (reg, off) = get_reg_off operand in
+          let off = Asm.ADD (Asm.IMM word_sz, off) in
+            match slot_ty slot with
+                Ast.TY_rec entries -> drop_rec_entries reg off entries
+              | Ast.TY_tup slots -> drop_tup_slots reg off slots
+              | _ -> ()
+        end;
         trans_free operand;
         patch j;
+
 
   and init_exterior_slot operand slot =
     let layout = layout_slot cx.ctxt_abi 0L slot in
@@ -451,8 +508,8 @@ let trans_visitor
               let src = Il.Reg (Il.next_vreg (emitter())) in
                 drop_exterior_refcount_and_maybe_free rc operand slot;
                 (* 
-                 * Magical: trans_copy_slot_deep in 'initializing' mode 
-                 * will init the slot for us.
+                 * Calling trans_copy_slot_deep in 'initializing' mode 
+                 * will init the slot for us. Don't double-init.
                  *)
                 trans_copy_slot_deep true operand slot src slot;
                 patch j;
@@ -465,39 +522,6 @@ let trans_visitor
             let rc = exterior_refcount_cell operand in
             drop_exterior_refcount_and_maybe_free rc operand slot;
             Il.Nil
-
-(*
-      if intent = INTENT_write
-      then
-        drop_exterior_refcount_and_maybe_free rc operand slot;
-      begin
-        let layout = layout_slot cx.ctxt_abi 0L slot in
-        let zero = Il.Imm (Asm.IMM 0L) in
-        let one = Il.Imm (Asm.IMM 1L) in
-          (* FIXME: compare-to-zero is wrong; we should know exactly when
-           * an exterior slot is being initialized vs. re-initialized, and
-           * can generate different code accordingly. Possibly not? Hmm. 
-           * what about loop edges? *)
-          emit Il.CMP Il.Nil operand zero;
-          let j0 = mark () in
-            emit Il.JE Il.Nil badlab Il.Nil;
-            emit Il.CMP Il.Nil rc one;
-            let j1 = mark () in
-              emit Il.JE Il.Nil badlab Il.Nil;
-              emit Il.SUB rc rc one;
-              patch j0;
-              trans_malloc operand (Int64.add layout.layout_size word_sz);
-              (* Reload rc; operand changed underfoot. *)
-              let rc = exterior_refcount_cell operand in
-                mov rc one;
-                patch j1;
-                deref_off operand word_sz
-      end
-    else
-      begin
-        deref_off operand word_sz
-      end
-*)
 
   and deref_slot (operand:Il.operand) (slot:Ast.slot) (intent:intent) : Il.operand =
     match slot.Ast.slot_mode with

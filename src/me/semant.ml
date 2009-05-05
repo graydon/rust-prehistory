@@ -1,18 +1,5 @@
 
-(*
- * This module performs most of the semantic lowering:
- *
- *   - building frames full of typed slots
- *   - calculating the size of every type
- *   - resolving every name to a slot
- *   - checking type compatibility of every slot
- *   - running the type-state dataflow algorithm
- *   - checking type-states
- *   - inferring points of allocation and deallocation
- *)
-
 open Common;;
-
 
 type slots_table = (Ast.slot_key,node_id) Hashtbl.t
 type items_table = (Ast.ident,node_id) Hashtbl.t
