@@ -137,7 +137,6 @@ type abi =
     abi_emit_fn_prologue: (Il.emitter -> int64 -> Common.fixup -> int64 -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_main_prologue: (Il.emitter -> Ast.block -> int64 -> Common.fixup -> int64 -> unit);
-    abi_emit_main_epilogue: (Il.emitter -> Ast.block -> unit);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 

@@ -253,17 +253,6 @@ let main_prologue
       (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
 ;;
 
-let main_epilogue (e:Il.emitter) (block:Ast.block) : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-    Il.emit e Il.UMOV (r esp) (r ebp) Il.Nil;
-    restore_callee_saves e;
-    (* Surprise! pop the main frame's null-valued fake retpc
-       and null-valued fake outptr into a scratch register. *)
-    Il.emit e (Il.CPOP word_mem) (r eax) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP word_mem) (r eax) Il.Nil Il.Nil;
-;;
-
-
 let word_n reg i =
   Il.Mem (word_mem, Some reg,
           Asm.IMM (Int64.mul (Int64.of_int i) word_sz))
@@ -414,11 +403,9 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
    *   - restore saved C regs
    *   - return to saved C pc
    *
-   *   *esp+4        = [arg1   ] = proc ptr
    *   *esp          = [retpc  ]
    *)
   let r x = Il.Reg (Il.Hreg x) in
-  let sp_n = word_n (Il.Hreg esp) in
   let edx_n = word_n (Il.Hreg edx) in
   let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
@@ -426,7 +413,7 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
 
     Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
 
-    mov (r edx) (sp_n 1);                     (* edx <- proc            *)
+    mov (r edx) proc_ptr;                     (* edx <- proc            *)
     mov (r ecx) (edx_n Abi.proc_field_rt);    (* ecx <- proc->rt        *)
     save_callee_saves e;
     mov (edx_n Abi.proc_field_sp) (r esp);    (* proc->regs.sp <- esp   *)
@@ -459,7 +446,6 @@ let (abi:Abi.abi) =
     Abi.abi_emit_fn_prologue = fn_prologue;
     Abi.abi_emit_fn_epilogue = fn_epilogue;
     Abi.abi_emit_main_prologue = main_prologue;
-    Abi.abi_emit_main_epilogue = main_epilogue;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_proc_state_change = emit_proc_state_change;

@@ -109,19 +109,21 @@ rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
    *      *sp+N+24   = proc ptr
    *      *sp+N+16   = NULL = fake outptr (spacing)
    *      *sp+N+8    = NULL = fake retpc (spacing)
-   *      *sp+N+4    = "retpc" to return to
+   *      *sp+N+4    = "retpc" to return to (activation)
    *      *sp+N      = NULL = 0th callee-save
    *      ...
    *      *sp        = NULL = Nth callee-save
    *
-   * This is slightly confusing since it looks like we have
-   * two copies of retpc; that's intentional. The notion is
-   * that when we 'return' to this frame in the c-to-proc glue,
-   * we will wind up at the first insn of a rust prog that assumes
-   * for simplicity sake it has a same-as-always-laid-out rust
-   * frame under it. In particular, one with a retpc. Even though
-   * said retpc is bogus -- just spacing -- we place it and a
-   * fake outptr so that the frame we return to is the right shape.
+   * This is slightly confusing since it looks like we have two copies
+   * of retpc; that's intentional. The notion is that when we first
+   * activate this frame, we'll be entering via the c-to-proc glue,
+   * and that will restore the fake callee-saves here and then
+   * return-to the "activation" pc.  That PC will be the first insn of a
+   * rust prog that assumes for -- simplicity sake it -- has a
+   * same-as-always-laid-out rust frame under it. In particular, one
+   * with a retpc. Even though said retpc is bogus -- just spacing --
+   * we place it and a fake outptr so that the frame we return to is
+   * the right shape.
    */
   uintptr_t *sp = (uintptr_t*) proc->sp;
   proc->sp -= (3 + rust_n_callee_saves) * sizeof(uintptr_t);

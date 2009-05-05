@@ -968,7 +968,6 @@ let trans_visitor
         abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup callsz;
         trans_block b;
         abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_exiting;
-        abi.Abi.abi_emit_main_epilogue (emitter()) b;
         emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
         capture_emitted_quads progid;
         pop_emitter ();
