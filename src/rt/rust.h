@@ -135,9 +135,23 @@ struct rust_rt {
   rust_proc_t **procs;
 };
 
-#define RUST_PROC_STATE_RUNNING     0
-#define RUST_PROC_STATE_CALLING_C   1
-#define RUST_PROC_STATE_EXITING     2
+typedef enum {
+  /* NB: it's important that 'running' be value 0, as it
+   * lets us get away with using OR rather than MOV to
+   * signal anything-not-running. x86 optimization. */
+  rust_proc_state_running    = 0,
+  rust_proc_state_calling_c  = 1,
+  rust_proc_state_exiting    = 2
+} rust_proc_state_t;
+
+typedef enum {
+  rust_upcall_log_uint32     = 0,
+  rust_upcall_log_str        = 1,
+  rust_upcall_spawn          = 2,
+  rust_upcall_check_expr     = 3,
+  rust_upcall_malloc         = 4,
+  rust_upcall_free           = 5
+} rust_upcall_t;
 
 #define RUST_PROC_MAX_UPCALL_ARGS   8
 

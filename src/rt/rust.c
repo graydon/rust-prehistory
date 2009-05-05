@@ -136,7 +136,7 @@ rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
   }
 
   proc->rt = rt;
-  proc->state = RUST_PROC_STATE_RUNNING;
+  proc->state = (uintptr_t)rust_proc_state_running;
   return proc;
 }
 
@@ -196,7 +196,7 @@ rust_check_expr(rust_proc_t *proc, uint32_t i)
   if (!i) {
     /* FIXME: throw, don't just exit. */
     printf("\nrt: *** CHECK FAILED ***\n\n");
-    proc->state = RUST_PROC_STATE_EXITING;
+    proc->state = (uintptr_t)rust_proc_state_exiting;
   }
 }
 
@@ -204,62 +204,42 @@ static uintptr_t
 rust_malloc(rust_proc_t *proc, size_t nbytes)
 {
   void *p = xalloc(nbytes);
-  printf("rt: malloc(%u) = %p\n", nbytes, p);
+  printf("rt: malloc(%u) = 0x%" PRIxPTR "\n", nbytes, (uintptr_t)p);
+  fflush(stdout);
   return (uintptr_t) p;
 }
 
 static void
 rust_free(rust_proc_t *proc, void* ptr)
 {
-  printf("rt: free(%p)\n", ptr);
+  printf("rt: free(0x%" PRIxPTR ")\n", (uintptr_t)ptr);
   free(ptr);
 }
 
 
 void
-rust_handle_fn(rust_proc_t *proc)
+rust_handle_upcall(rust_proc_t *proc)
 {
+  uintptr_t *args = &(proc->upcall_args[0]);
 
-  /*
-   * Incoming proc-stack looks like:
-   *
-   *   *sp+(N+3+K) = [argK          ]
-   *   ...
-   *   *sp+(N+4)   = [arg1          ]  = 'args'
-   *   *sp+(N+3)   = [call code #   ]
-   *   *sp+(N+2)   = [procptr       ]
-   *   *sp+(N+1)   = [retpc         ]
-   *   *sp+N       = [callee-saveN  ]
-   *   ...
-   *   *sp         = [callee-save1  ]
-   *
-   */
-
-  uintptr_t *sp = (uintptr_t*) proc->sp;
-  uintptr_t *proc_p = sp + rust_n_callee_saves + 1;
-  uintptr_t *callcode_p = proc_p + 1;
-  uintptr_t *args = callcode_p + 1;
-
-  assert(*((rust_proc_t**)(proc_p)) == proc);
-
-  // printf("rt: calling fn #%d\n", *sp);
-  switch (*callcode_p) {
-  case 0:
+  /* printf("rt: calling fn #%d\n", proc->upcall_code); */
+  switch ((rust_upcall_t)proc->upcall_code) {
+  case rust_upcall_log_uint32:
     rust_log_uint32_t(args[0]);
     break;
-  case 1:
+  case rust_upcall_log_str:
     rust_log_str((char*)args[0]);
     break;
-  case 2:
+  case rust_upcall_spawn:
     rust_spawn_proc(proc->rt, (rust_prog_t*)args[0]);
     break;
-  case 3:
+  case rust_upcall_check_expr:
     rust_check_expr(proc, args[0]);
     break;
-  case 4:
+  case rust_upcall_malloc:
     *((uintptr_t*)args[0]) = rust_malloc(proc, (size_t)args[1]);
     break;
-  case 5:
+  case rust_upcall_free:
     rust_free(proc, (void*)args[0]);
     break;
       /*;
@@ -273,9 +253,11 @@ rust_handle_fn(rust_proc_t *proc)
   **retslot_p = rust_memcmp((const void*)args[0], (const void*)args[1], (size_t)args[2]);
     break;
       */
-  default:
-      break;
   }
+  /* Zero the immediates code slot out so the caller doesn't have to
+   * use MOV to update it. x86-ism but harmless on non-x86 platforms that
+   * want to use their own MOVs. */
+  proc->upcall_code = (rust_upcall_t)0;
 }
 
 int CDECL
@@ -299,16 +281,22 @@ rust_start(rust_prog_t *prog,
   logptr("c_to_proc_glue", (uintptr_t)c_to_proc_glue);
 
   while(1) {
-    // printf("rt: calling c_proc_glue.\n");
-    proc->state = RUST_PROC_STATE_RUNNING;
+    /* printf("rt: entering proc 0x%" PRIxPTR "\n", (uintptr_t)proc); */
+    proc->state = (uintptr_t)rust_proc_state_running;
     c_to_proc_glue(proc);
-    // printf("rt: returned from proc in state %d.\n", proc->state);
-    if (proc->state == RUST_PROC_STATE_CALLING_C) {
-      rust_handle_fn(proc);
-    }
-    else if (proc->state == RUST_PROC_STATE_EXITING) {
+    /* printf("rt: returned from proc 0x%" PRIxPTR " in state %d.\n",
+       (uintptr_t)proc, proc->state); */
+    switch ((rust_proc_state_t) proc->state) {
+    case rust_proc_state_running:
+      break;
+    case rust_proc_state_calling_c:
+      rust_handle_upcall(proc);
+      proc->state = rust_proc_state_running;
+      break;
+    case rust_proc_state_exiting:
       logptr("proc exiting", (uintptr_t)proc);
       rust_exit_curr_proc(rt);
+      break;
     }
     if (rt->live_procs > 0)
       proc = rust_sched(rt);

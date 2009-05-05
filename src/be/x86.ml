@@ -326,7 +326,7 @@ let emit_upcall
     (proc_to_c_fixup:fixup)
     : unit =
   let upcall_code = Abi.upcall_to_code u in
-  let state_code = Abi.upcall_to_code u in
+  let state_code = Abi.proc_state_to_code Abi.STATE_calling_c in
 
   let r x = Il.Reg x in
   let vr = Il.next_vreg e in
@@ -335,12 +335,18 @@ let emit_upcall
   let emit = Il.emit e in
   let mov dst src = emit Il.UMOV dst src Il.Nil in
   let imm i = Il.Imm (Asm.IMM i) in
+  (* 
+   * This is an x86-ism, but a significant savings: inclusive-OR rather
+   * than MOV, and we get sign-extension on the immediate for free.
+   * Strangely, the MOV-immediates don't have a r32 <- imm8 mode. 
+   *)
+  let ior dst src = emit Il.OR dst dst src in
 
     assert ((Array.length args) <= Abi.max_upcall_args);
 
     mov (r vr) proc_ptr;
-    mov (vr_n Abi.proc_field_state) (imm state_code);
-    mov (vr_n Abi.proc_field_upcall_code) (imm upcall_code);
+    ior (vr_n Abi.proc_field_state) (imm state_code);
+    ior (vr_n Abi.proc_field_upcall_code) (imm upcall_code);
 
     Array.iteri
       begin

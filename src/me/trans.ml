@@ -407,29 +407,27 @@ let trans_visitor
         block_slots;
       ignore (Stack.pop block_layouts)
 
-  and trans_kern_fn (fn:int64) (args:Il.operand array) : unit =
-    let dst = Il.Reg (Il.next_vreg (emitter())) in
-    let pp = abi.Abi.abi_pp_operand in
-    let sp = (Il.Reg abi.Abi.abi_sp_reg) in
-      abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_calling_c;
-      for i = (Array.length args) - 1 downto 0
-      do
-        emit (Il.CPUSH Il.M32) Il.Nil args.(i) Il.Nil
-      done;
-      emit (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.IMM fn)) Il.Nil;
-      emit (Il.CPUSH Il.M32) Il.Nil pp Il.Nil;
-      emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
-      emit Il.ADD sp sp (Il.Imm (Asm.IMM 12L));
-      ()
 
-  and trans_log_int (a:Ast.atom) : unit = trans_kern_fn 0L [| (trans_atom a) |]
-  and trans_log_str (a:Ast.atom) : unit = trans_kern_fn 1L [| (trans_atom a) |]
-  and trans_spawn (a:Ast.atom) : unit = trans_kern_fn 2L [| (trans_atom a) |]
-  and trans_check_expr (a:Ast.atom) : unit = trans_kern_fn 3L [| (trans_atom a) |]
+  and trans_upcall (u:Abi.upcall) (args:Il.operand array) : unit =
+    abi.Abi.abi_emit_upcall (emitter()) u args cx.ctxt_proc_to_c_fixup;
+
+  and trans_log_int (a:Ast.atom) : unit =
+    trans_upcall Abi.UPCALL_log_int [| (trans_atom a) |]
+
+  and trans_log_str (a:Ast.atom) : unit =
+    trans_upcall Abi.UPCALL_log_str [| (trans_atom a) |]
+
+  and trans_spawn (a:Ast.atom) : unit =
+    trans_upcall Abi.UPCALL_spawn [| (trans_atom a) |]
+
+  and trans_check_expr (a:Ast.atom) : unit =
+    trans_upcall Abi.UPCALL_check_expr [| (trans_atom a) |]
+
   and trans_malloc (dst:Il.operand) (nbytes:int64) : unit =
-    trans_kern_fn 4L [| (alias dst); Il.Imm (Asm.IMM nbytes) |]
+    trans_upcall Abi.UPCALL_malloc [| (alias dst); Il.Imm (Asm.IMM nbytes) |]
 
-  and trans_free (src:Il.operand) : unit = trans_kern_fn 5L [| src |]
+  and trans_free (src:Il.operand) : unit =
+    trans_upcall Abi.UPCALL_free [| src |]
 
   and exterior_refcount_cell operand =
     word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM 0L)
