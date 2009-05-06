@@ -93,7 +93,7 @@ typedef enum {
  *   - 0b1011 == s16
  *   - 0b1100 == u32
  *   - 0b1101 == s32
- *   - 0b1110 == ?? reserved
+ *   - 0b1110 == f64
  *   - 0b1111 == ?? reserved
  *
  */
@@ -116,10 +116,14 @@ typedef struct rust_stk_seg {
 
 struct rust_proc;
 struct rust_prog;
+struct rust_port;
+struct rust_chan;
 struct rust_rt;
 
 typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
+typedef struct rust_port rust_port_t;
+typedef struct rust_chan rust_chan_t;
 typedef struct rust_rt rust_rt_t;
 
 /* FIXME: ifdef by platform. */
@@ -150,7 +154,9 @@ typedef enum {
   rust_upcall_spawn          = 2,
   rust_upcall_check_expr     = 3,
   rust_upcall_malloc         = 4,
-  rust_upcall_free           = 5
+  rust_upcall_free           = 5,
+  rust_upcall_new_port       = 6,
+  rust_upcall_del_port       = 7
 } rust_upcall_t;
 
 #define RUST_PROC_MAX_UPCALL_ARGS   8
@@ -177,8 +183,12 @@ struct rust_proc {
   size_t refcnt;
 
   /* Parameter space for upcalls. */
+  /* FIXME: could probably get away with packing upcall code and state
+   * into 1 byte each. And having fewer max upcall args. */
   uintptr_t upcall_code;
   uintptr_t upcall_args[RUST_PROC_MAX_UPCALL_ARGS];
+
+  rust_port_t *ports;
 
   /* Proc accounting. */
   uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */
@@ -190,12 +200,23 @@ struct rust_proc {
 
 };
 
-/* A proc gets activated */
-typedef struct rust_active_proc {
-  rust_proc_t *proc;
-  uint64_t slice_ticks;   /* N ticks remaining before rescheduling.         */
+struct rust_port {
+  /* Ports are kept in a doubly-linked list owned by a proc. */
+  rust_proc_t *owner;
+  rust_port_t *prev;
+  rust_port_t *next;
 
-} rust_activation_t;
+  size_t refcnt;
+  size_t buf_sz;
+  size_t buf_use;
+  uintptr_t *read;
+  uintptr_t buf[];
+};
+
+struct rust_chan {
+  rust_port_t *port;
+  uintptr_t blocking_p;
+};
 
 #endif /* RUST_H__ */
 

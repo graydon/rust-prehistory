@@ -190,6 +190,46 @@ rust_sched(rust_rt_t *rt)
   return rt->procs[rt->curr_proc];
 }
 
+/* FIXME: use user-controlled buffer size in the future. */
+static size_t const rust_port_bufsz = 64;
+
+static rust_port_t*
+rust_new_port(rust_proc_t *proc)
+{
+  size_t sz = sizeof(rust_port_t) + rust_port_bufsz * sizeof(uintptr_t);
+  rust_port_t *port = xalloc(sz);
+  logptr("new port", (uintptr_t)port);
+  memset(port, 0, sizeof(rust_port_t));
+  port->buf_sz = rust_port_bufsz;
+  port->read = &(port->buf[0]);
+  port->owner = proc;
+  if (proc->ports) {
+    port->next = proc->ports;
+    port->prev = port->next->prev;
+    port->prev->next = port;
+    port->next->prev = port;
+  } else {
+    proc->ports = port;
+    port->next = port->prev = port;
+  }
+  return port;
+}
+
+static void
+rust_del_port(rust_port_t *port)
+{
+  logptr("del port", (uintptr_t)port);
+  assert(port->refcnt == 0);
+  if (port->next != port) {
+    port->next->prev = port->prev;
+    port->prev->next = port->next;
+  }
+  port->next = port->prev = NULL;
+  if (port->owner->ports == port)
+    port->owner->ports = port->next;
+  free(port);
+}
+
 static void
 rust_check_expr(rust_proc_t *proc, uint32_t i)
 {
@@ -241,6 +281,12 @@ rust_handle_upcall(rust_proc_t *proc)
     break;
   case rust_upcall_free:
     rust_free(proc, (void*)args[0]);
+    break;
+  case rust_upcall_new_port:
+    *((rust_port_t**)args[0]) = rust_new_port(proc);
+    break;
+  case rust_upcall_del_port:
+    rust_del_port((rust_port_t*)args[0]);
     break;
       /*;
   case 3:

@@ -140,9 +140,9 @@ let reg r =
     | 1 -> code_ecx
     | 2 -> code_ebx
     | 3 -> code_esi
-        (* Never assigned by the register allocator, but synthetic code uses them *)
     | 4 -> code_edi
     | 5 -> code_edx
+        (* Never assigned by the register allocator, but synthetic code uses them *)
     | 6 -> code_ebp
     | 7 -> code_esp
     | _ -> raise (Invalid_argument "X86.reg")
