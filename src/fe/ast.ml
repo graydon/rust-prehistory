@@ -154,6 +154,7 @@ and prog =
       prog_main: block option;
       prog_fini: block option;
       prog_mod: mod_items;
+      prog_slots: (ident, slot identified) Hashtbl.t;
     }
 
 and ty_rec = (ident * slot) array
@@ -376,6 +377,7 @@ and pred =
 and init =
     {
       init_input_slots: ((slot identified) * ident) array;
+      init_input_constrs: constrs;
       init_body: block;
     }
 

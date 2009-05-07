@@ -235,7 +235,7 @@ let string_of_tok t =
     | PUB        -> "pub"
 
     (* Value / stmt declarators. *)
-    | LET        -> "val"
+    | LET        -> "let"
     | DYN        -> "dyn"
 
     (* Magic runtime services *)
@@ -619,12 +619,15 @@ and parse_atomic_ty ps =
         Ast.TY_any
 
     | CHAN ->
+        bump ps;
         Ast.TY_chan (bracketed LBRACKET RBRACKET parse_ty ps)
 
     | PORT ->
+        bump ps;
         Ast.TY_port (bracketed LBRACKET RBRACKET parse_ty ps)
 
     | VEC ->
+        bump ps;
         Ast.TY_vec (bracketed LBRACKET RBRACKET parse_ty ps)
 
     | LIM ->
@@ -1173,7 +1176,7 @@ and parse_stmts ps =
 
 
 
-      | LIM | PORT | PROG | MOD | TYPE | (FN _) | PRED ->
+      | LIM | PROG | MOD | TYPE | (FN _) | PRED ->
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
           let bpos = lexpos ps in
           let decl = Ast.DECL_mod_item (ident, item) in
@@ -1263,21 +1266,50 @@ and parse_prog_item prog_cell stmts_cell ps =
         let main = ctxt "prog_item: main" parse_block ps in
           prog_cell := { (!prog_cell) with Ast.prog_main = Some main }
 
+    | INIT ->
+          bump ps;
+          let apos = lexpos ps in
+          let (inputs, constrs) = ctxt "prog_item: init inputs" parse_inputs ps in
+          let body = ctxt "prog_item: init body" parse_block ps in
+          let bpos = lexpos ps in
+          let init = span ps apos bpos
+            { Ast.init_input_slots = inputs;
+              Ast.init_input_constrs = constrs;
+              Ast.init_body = body }
+          in
+          prog_cell := { (!prog_cell) with Ast.prog_init = Some init }
+
     | FINI ->
         bump ps;
         let fini = ctxt "prog_item: fini" parse_block ps in
           prog_cell := { (!prog_cell) with Ast.prog_fini = Some fini }
 
-    | _ ->
+    | PUB | PURE | LIM
+    | PROG | MOD | TYPE | (FN _) | PRED ->
         let (ident, stmts, item) = ctxt "prog_item: mod item" parse_mod_item ps in
           htab_put (!prog_cell).Ast.prog_mod ident item;
           stmts_cell := stmts :: (!stmts_cell)
+
+    | LET ->
+        bump ps;
+        let apos = lexpos ps in
+        let (slot, ident) =
+          ctxt "prog_item: slot and ident"
+            (parse_slot_and_ident false) ps
+        in
+        let bpos = lexpos ps in
+          expect ps SEMI;
+          htab_put (!prog_cell).Ast.prog_slots ident (span ps apos bpos slot)
+
+    | _ -> raise (unexpected ps)
+
 
 and parse_prog ps =
   let prog = { Ast.prog_init = None;
                Ast.prog_main = None;
                Ast.prog_fini = None;
-               Ast.prog_mod = Hashtbl.create 4; }
+               Ast.prog_mod = Hashtbl.create 4;
+               Ast.prog_slots = Hashtbl.create 4; }
   in
   let prog_cell = ref prog in
   let stmts_cell = ref [] in
