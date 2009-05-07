@@ -360,6 +360,13 @@ and walk_stmt
           walk_lval v lv;
           Array.iter (walk_atom v) atoms
 
+      | Ast.STMT_init_port lv ->
+          walk_lval v lv
+
+      | Ast.STMT_init_chan (chan,port) ->
+          walk_option (walk_lval v) port;
+          walk_lval v chan;
+
       | Ast.STMT_while w ->
           walk_stmt_while w
 

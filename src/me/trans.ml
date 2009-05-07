@@ -420,13 +420,6 @@ let trans_visitor
   and trans_spawn (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_spawn [| (trans_atom a) |]
 
-  and trans_send (chan:Ast.lval) (src:Ast.atom) : unit =
-    trans_upcall Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan)); (trans_atom src) |]
-
-  and trans_recv (dst:Ast.lval) (chan:Ast.lval) : unit =
-    let (dstop, _) = trans_lval dst INTENT_write in
-      trans_upcall Abi.UPCALL_send [| (alias dstop); (trans_atom (Ast.ATOM_lval chan)) |]
-
   and trans_check_expr (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_check_expr [| (trans_atom a) |]
 
@@ -438,6 +431,33 @@ let trans_visitor
 
   and exterior_refcount_cell operand =
     word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM 0L)
+
+  and trans_send (chan:Ast.lval) (src:Ast.atom) : unit =
+    trans_upcall Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan)); (trans_atom src) |]
+
+  and trans_recv (dst:Ast.lval) (chan:Ast.lval) : unit =
+    let (dstop, _) = trans_lval dst INTENT_write in
+      trans_upcall Abi.UPCALL_send [| (alias dstop); (trans_atom (Ast.ATOM_lval chan)) |]
+
+  and trans_new_port (dst:Ast.lval) : unit =
+    let (dstop, _) = trans_lval dst INTENT_write in
+    trans_upcall Abi.UPCALL_new_port [| (alias dstop) |]
+
+  and trans_del_port (port:Ast.lval) : unit =
+      trans_upcall Abi.UPCALL_del_port [| (trans_atom (Ast.ATOM_lval port)) |]
+
+  and trans_new_chan (dst:Ast.lval) (port:Ast.lval option) : unit =
+    let portop =
+      match port with
+          None -> Il.Imm (Asm.IMM 0L)
+        | Some p -> trans_atom (Ast.ATOM_lval p)
+    in
+    let (dstop, _) = trans_lval dst INTENT_write in
+    trans_upcall Abi.UPCALL_new_port [| (alias dstop); portop |]
+
+  and trans_del_chan (chan:Ast.lval) : unit =
+      trans_upcall Abi.UPCALL_del_chan [| (trans_atom (Ast.ATOM_lval chan)) |]
+
 
   and drop_rec_entries
       (reg:Il.reg option)
@@ -809,6 +829,12 @@ let trans_visitor
                   trans_copy true lval expr
             end
             atoms
+
+      | Ast.STMT_init_port dst ->
+          trans_new_port dst
+
+      | Ast.STMT_init_chan (dst, port) ->
+          trans_new_chan dst port
 
       | Ast.STMT_block block ->
           trans_block block

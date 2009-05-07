@@ -206,6 +206,8 @@ and stmt' =
   | STMT_init_rec of (lval * ((ident * atom) array))
   | STMT_init_vec of (lval * (atom array))
   | STMT_init_tup of (lval * (atom array))
+  | STMT_init_port of lval
+  | STMT_init_chan of (lval * (lval option))
   | STMT_while of stmt_while
   | STMT_do_while of stmt_while
   | STMT_foreach of stmt_foreach
