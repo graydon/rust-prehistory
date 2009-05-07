@@ -3,7 +3,7 @@
 prog a
 {
   let port[int] p;
-  init(int x, ^chan[int] c) {
+  init(int x) {
   }
   main {
     let int y;

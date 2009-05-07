@@ -303,10 +303,11 @@ and walk_prog
     (v:visitor)
     (p:Ast.prog)
     : unit =
+  walk_mod_items v p.Ast.prog_mod;
+  Hashtbl.iter (fun _ s -> walk_slot_identified v s) p.Ast.prog_slots;
   walk_option (walk_init v) p.Ast.prog_init;
   walk_option (walk_block v) p.Ast.prog_main;
-  walk_option (walk_block v) p.Ast.prog_fini;
-  walk_mod_items v p.Ast.prog_mod
+  walk_option (walk_block v) p.Ast.prog_fini
 
 
 and walk_slot_identified

@@ -455,6 +455,7 @@ let lookup
                       else
                         None
               end
+
       | SCOPE_mod_item item ->
           begin
             match key with
@@ -479,7 +480,14 @@ let lookup
                           check_items scope ident m.Ast.decl_item
 
                       | Ast.MOD_ITEM_prog p ->
-                          check_items scope ident p.Ast.decl_item.Ast.prog_mod
+                          let slots = p.Ast.decl_item.Ast.prog_slots in
+                            if Hashtbl.mem slots ident
+                            then
+                              let slot = Hashtbl.find slots ident in
+                                Some (scope, slot.id)
+                            else
+                              check_items scope ident
+                                p.Ast.decl_item.Ast.prog_mod
 
                       | _ -> None
                   end
