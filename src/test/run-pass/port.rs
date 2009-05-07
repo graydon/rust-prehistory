@@ -2,10 +2,10 @@
 
 prog a
 {
-  let port[int] p;
   init(int x) {
   }
   main {
+    let port[int] p;
     let int y;
     y <- p;
   }

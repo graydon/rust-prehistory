@@ -420,6 +420,13 @@ let trans_visitor
   and trans_spawn (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_spawn [| (trans_atom a) |]
 
+  and trans_send (chan:Ast.lval) (src:Ast.atom) : unit =
+    trans_upcall Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan)); (trans_atom src) |]
+
+  and trans_recv (dst:Ast.lval) (chan:Ast.lval) : unit =
+    let (dstop, _) = trans_lval dst INTENT_write in
+      trans_upcall Abi.UPCALL_send [| (alias dstop); (trans_atom (Ast.ATOM_lval chan)) |]
+
   and trans_check_expr (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_check_expr [| (trans_atom a) |]
 
@@ -761,6 +768,8 @@ let trans_visitor
           end
 
       | Ast.STMT_spawn a -> trans_spawn a
+      | Ast.STMT_send (chan,src) -> trans_send chan src
+      | Ast.STMT_recv (dst,chan) -> trans_recv dst chan
 
       | Ast.STMT_copy (lv_dst, e_src) ->
           if Hashtbl.mem cx.ctxt_copy_stmt_is_init stmt.id

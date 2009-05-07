@@ -288,6 +288,14 @@ rust_handle_upcall(rust_proc_t *proc)
   case rust_upcall_del_port:
     rust_del_port((rust_port_t*)args[0]);
     break;
+  case rust_upcall_new_chan:
+    break;
+  case rust_upcall_del_chan:
+    break;
+  case rust_upcall_send:
+    break;
+  case rust_upcall_recv:
+    break;
       /*;
   case 3:
     rust_kill_proc(proc->rt, (rust_proc_t*)args[0]);

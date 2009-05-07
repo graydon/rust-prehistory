@@ -30,6 +30,7 @@ let alias_analysis_visitor
            * they are supported.
            *)
           Ast.STMT_call (dst, _, _) -> alias dst
+        | Ast.STMT_recv (dst, _) -> alias dst
         | _ -> () (* FIXME: plenty more to handle here. *)
     end;
     inner.Walk.visit_stmt_pre s
