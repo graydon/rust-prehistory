@@ -289,6 +289,42 @@ let string_of_tok t =
     | EOF        -> "<EOF>"
 ;;
 
+(* 
+ * NB: sexps are only used transiently during parsing and syntax-expansion.
+ * They're desugared into the general AST. Expressions that can show up in 
+ * source are much hairier than those that are meaningful to the rest of 
+ * the compiler.
+ * 
+ * Desugaring on the fly is unfortunately complicated enough to require
+ * this two-pass routine. 
+ *)
+type sexp = 
+    SEXP_call of (sexp * sexp list)
+  | SEXP_rec of ((Ast.ident * sexp) list)
+  | SEXP_tup of (sexp list)
+  | SEXP_vec of (sexp list)
+  | SEXP_binop of (Ast.binop * sexp * sexp)
+  | SEXP_unop of (Ast.unop * sexp)
+  | SEXP_ext_name of (sexp * Ast.name_component)  (* foo.bar = name   *)
+  | SEXP_ext_sexp of (sexp * sexp)                (* foo.(bar) = lval *)
+  | SEXP_atom of Ast.atom
+;;
+
+(* 
+ * Desugarings depend on context:
+ * 
+ *   - If a sexp is used on the RHS of an assignment, it's turned into
+ *     an initialization statement such as STMT_init_rec or such. This
+ *     removes the possibility of initializing into a temp only to
+ *     copy out. If the topmost sexp in such a desugaring is an atom,
+ *     unop or binop, of course, it will still just emit a STMT_copy
+ *     on a primitive expression.
+ * 
+ *   - If a sexp is used in the context where an atom is required, a 
+ *     statement declaring a temporary and initializing it with the 
+ *     result of the sexp is prepended, and the temporary atom is used.
+ *)
+
 (* Fundamental parser types and actions *)
 
 

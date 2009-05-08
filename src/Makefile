@@ -95,18 +95,20 @@ check: $(TEST_RUN_PASS_EXES) $(TEST_RUN_FAIL_EXES) \
        $(TEST_COMPILE_FAIL_OUTS)
 
 test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
-	$< 2>&1 | tee $@
+	$(call CFG_RUN_TARG,$<) 2>&1 | tee $@
 
 test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) test/run-fail/%.pat $(CFG_RUNTIME)
 	rm -f $@
-	$< >$@ 2>&1 || true
+	$(call CFG_RUN_TARG,$<) >$@ 2>&1 || true
 	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+	chmod 0755 $@
 
 test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rc $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+	chmod 0755 $@
 
 test/compile-fail/%.out: test/compile-fail/%.rc test/compile-fail/%.pat $(CFG_COMPILER) $(CFG_RUNTIME)
 	rm -f $@
@@ -115,9 +117,11 @@ test/compile-fail/%.out: test/compile-fail/%.rc test/compile-fail/%.pat $(CFG_CO
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+	chmod 0755 $@
 
 test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+	chmod 0755 $@
 
 test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_COMPILER) $(CFG_RUNTIME)
 	rm -f $@
