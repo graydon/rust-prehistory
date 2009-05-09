@@ -17,7 +17,6 @@ progress:
  - typecode-driven generic hash fn
  - typecode-driven generic delete fn
  - typecode-driven generic fn 'ensure single ownership'
- - non-interior slot modes
  - mod types
  - alt/iso/idx types
  - parametric types
@@ -31,7 +30,6 @@ progress:
 code cleanup:
  - move frame code to ABI
  - put logging and error-handling context in elf, pe, x86
- - use a datatype for kernel function codes, not int numbers
  - use a datatype for fields inside each kernel C structure
  - move explicit code gen flags to ABI "pre digester" function
  - pass a crate pointer into the runtime rather than root prog
@@ -51,3 +49,6 @@ done:
  - basic version of type-state algorithm
  - movement of superword values
  - records
+ - tuples
+ - non-interior slot modes
+ - use a datatype for kernel function codes, not int numbers
