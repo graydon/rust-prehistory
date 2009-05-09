@@ -596,30 +596,9 @@ and parse_carg ps =
     | _ ->
         Ast.CARG_lit (parse_lit ps)
 
-and parse_lval_component (ps:pstate)
-    : (Ast.stmt array * Ast.lval_component) =
-  match peek ps with
-      LPAREN ->
-        bump ps;
-        let (stmts, atom) = ctxt "lval_component: expr" parse_expr ps in
-          expect ps RPAREN;
-          (stmts, Ast.COMP_atom atom)
-    | _ -> ([||], Ast.COMP_named (parse_name_component ps))
-
 and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) =
-  let apos = lexpos ps in
-  let base' = parse_name_base ps in
-  let bpos = lexpos ps in
-  let base = Ast.LVAL_base (span ps apos bpos base') in
-    match peek ps with
-        DOT ->
-          bump ps;
-          let (stmts', comps) = arj1st (one_or_more DOT parse_lval_component ps) in
-          let lval = Array.fold_left (fun x y -> Ast.LVAL_ext (x, y)) base comps in
-            (stmts', lval)
-      | _ ->
-          ([||], base)
-
+  let pexp = parse_pexp ps in
+    desugar_lval ps pexp
 
 and parse_constraint ps =
   match peek ps with
@@ -1016,14 +995,58 @@ and parse_pexp_list bra ket ps =
 and desugar_exprs ps pexps =
   arj1st (Array.map (desugar_expr ps) pexps)
 
+and atom_lval ps at =
+  match at with
+      Ast.ATOM_lval lv -> lv
+    | Ast.ATOM_literal _ -> raise (err "literal where lval expected" ps)
+
+and desugar_name ps pexp =
+    match pexp.node with
+
+        PEXP_ident ident ->
+          Ast.NAME_base (Ast.BASE_ident ident)
+
+      | PEXP_app (ident, tys) ->
+          Ast.NAME_base (Ast.BASE_app (ident, tys))
+
+      | PEXP_ext_name (base_pexp, comp) ->
+          let base_name = desugar_name ps base_pexp in
+            Ast.NAME_ext (base_name, comp)
+
+      | _ -> raise (err "non-name pexp where name expected" ps)
+
+and desugar_lval ps pexp =
+  let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
+  let (apos, bpos) = (s.lo, s.hi) in
+    match pexp.node with
+
+        PEXP_ident ident ->
+          let nb = span ps apos bpos (Ast.BASE_ident ident) in
+            ([||], Ast.LVAL_base nb)
+
+      | PEXP_app (ident, tys) ->
+          let nb = span ps apos bpos (Ast.BASE_app (ident, tys)) in
+            ([||], Ast.LVAL_base nb)
+
+      | PEXP_ext_name (base_pexp, comp) ->
+          let (base_stmts, base_atom) = desugar_expr ps base_pexp in
+          let base_lval = atom_lval ps base_atom in
+            (base_stmts, Ast.LVAL_ext (base_lval, Ast.COMP_named comp))
+
+      | PEXP_ext_pexp (base_pexp, ext_pexp) ->
+          let (base_stmts, base_atom) = desugar_expr ps base_pexp in
+          let (ext_stmts, ext_atom) = desugar_expr ps base_pexp in
+          let base_lval = atom_lval ps base_atom in
+            (Array.append base_stmts ext_stmts,
+             Ast.LVAL_ext (base_lval, Ast.COMP_atom ext_atom))
+
+      | _ ->
+          let (stmts, atom) = desugar_expr ps pexp in
+            (stmts, atom_lval ps atom)
+
 and desugar_expr ps pexp =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
-  let atom_lval at =
-    match at with
-        Ast.ATOM_lval lv -> lv
-      | Ast.ATOM_literal _ -> raise (err "literal where lval expected" ps)
-  in
     match pexp.node with
 
         PEXP_unop _
@@ -1039,39 +1062,20 @@ and desugar_expr ps pexp =
             (Array.append [| decl_stmt |] stmts,
              Ast.ATOM_lval (clone_lval ps tmp))
 
-      | PEXP_ident ident ->
-          let nb = span ps apos bpos (Ast.BASE_ident ident) in
-            ([||], Ast.ATOM_lval (Ast.LVAL_base nb))
-
       | PEXP_lit lit ->
           ([||], Ast.ATOM_literal (span ps apos bpos lit))
 
-      | PEXP_app (ident, tys) ->
-          let nb = span ps apos bpos (Ast.BASE_app (ident, tys)) in
-          ([||], Ast.ATOM_lval (Ast.LVAL_base nb))
-
-      | PEXP_ext_name (base_pexp, comp) ->
-          let (base_stmts, base_atom) = desugar_expr ps base_pexp in
-          let base_lval = atom_lval base_atom in
-          let lval = Ast.LVAL_ext (base_lval, Ast.COMP_named comp) in
-            (base_stmts, Ast.ATOM_lval lval)
-
-      | PEXP_ext_pexp (base_pexp, ext_pexp) ->
-          let (base_stmts, base_atom) = desugar_expr ps base_pexp in
-          let (ext_stmts, ext_atom) = desugar_expr ps base_pexp in
-          let base_lval = atom_lval base_atom in
-          let lval = Ast.LVAL_ext (base_lval, Ast.COMP_atom ext_atom) in
-            (Array.append base_stmts ext_stmts, Ast.ATOM_lval lval)
+      | PEXP_ident _
+      | PEXP_app _
+      | PEXP_ext_name _
+      | PEXP_ext_pexp _ ->
+          let (stmts, lval) = desugar_lval ps pexp in
+            (stmts, Ast.ATOM_lval lval)
 
 
 and desugar_expr_init ps dst_lval pexp =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
-  let atom_lval at =
-    match at with
-        Ast.ATOM_lval lv -> lv
-      | Ast.ATOM_literal _ -> raise (err "literal where lval expected" ps)
-  in
     match pexp.node with
 
         PEXP_lit _
@@ -1099,7 +1103,7 @@ and desugar_expr_init ps dst_lval pexp =
       | PEXP_call (fn, args) ->
           let (fn_stmts, fn_atom) = desugar_expr ps fn in
           let (arg_stmts, arg_atoms) = desugar_exprs ps args in
-          let fn_lval = atom_lval fn_atom in
+          let fn_lval = atom_lval ps fn_atom in
           let call_stmt = span ps apos bpos (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
             Array.concat [ fn_stmts; arg_stmts; [| call_stmt |] ]
 
@@ -1139,7 +1143,7 @@ and desugar_expr_init ps dst_lval pexp =
               | Some port_pexp ->
                   begin
                     let (port_stmts, port_atom) = desugar_expr ps port_pexp in
-                    let port_lval = atom_lval port_atom in
+                    let port_lval = atom_lval ps port_atom in
                       (port_stmts, Some port_lval)
                   end
           in
@@ -1431,28 +1435,14 @@ and parse_stmts ps =
             let copies = Array.mapi make_copy lvals in
               Array.concat [ stmts; [| tempdecl; copy |]; copies ]
 
-      | IDENT _ ->
+      | _ ->
           let (lstmts, lval) = ctxt "stmt: lval" parse_lval ps in
             begin
               match peek ps with
 
-                  LPAREN ->
-                    let (astmts, args) = ctxt "stmt: call args" (parse_expr_list LPAREN RPAREN) ps in
-                    let _ = expect ps SEMI in
-                    let stmts = Array.append lstmts astmts in
-                    let bpos = lexpos ps in
-                    let (nonce, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
-                    let call = span ps apos bpos (Ast.STMT_call ((clone_lval ps tmp), lval, args)) in
-                      Array.append stmts [| tempdecl; call |]
+                  SEMI -> (bump ps; lstmts)
 
-                | EQ ->
-                    bump ps;
-                    begin
-                      let (stmts, atom) = ctxt "stmt: copy rval" parse_expr ps in
-                      let _ = expect ps SEMI in
-                      let bpos = lexpos ps in
-                        spans stmts apos bpos (Ast.STMT_copy (lval, Ast.EXPR_atom atom))
-                    end
+                | EQ -> parse_init lval ps
 
                 | LARROW ->
                     bump ps;
@@ -1470,8 +1460,6 @@ and parse_stmts ps =
 
                 | _ -> raise (unexpected ps)
             end
-
-      | _ -> raise (unexpected ps)
 
 and parse_prog_item prog_cell stmts_cell ps =
   match peek ps with
