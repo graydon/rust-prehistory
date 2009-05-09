@@ -1019,98 +1019,24 @@ and desugar_exprs ps pexps =
 and desugar_expr ps pexp =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
-  let arg_helper args fn =
-    let (arg_stmts, arg_atoms) = desugar_exprs ps args in
-    let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
-    let stmt = span ps apos bpos (fn tmp arg_atoms) in
-      (arg_stmts, decl_stmt, stmt, tmp)
-  in
   let atom_lval at =
     match at with
         Ast.ATOM_lval lv -> lv
       | Ast.ATOM_literal _ -> raise (err "literal where lval expected" ps)
   in
     match pexp.node with
-        PEXP_binop (op, lhs, rhs) ->
-          let (lhs_stmts, lhs_atom) = desugar_expr ps lhs in
-          let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
+
+        PEXP_unop _
+      | PEXP_binop _
+      | PEXP_rec _
+      | PEXP_tup _
+      | PEXP_vec _
+      | PEXP_port
+      | PEXP_chan _
+      | PEXP_call _ ->
           let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
-          let expr = Ast.EXPR_binary (op, lhs_atom, rhs_atom) in
-          let copy_stmt = span ps apos bpos (Ast.STMT_copy (tmp, expr)) in
-            (Array.concat [ lhs_stmts; rhs_stmts; [| decl_stmt; copy_stmt |] ],
-             Ast.ATOM_lval (clone_lval ps tmp))
-
-      | PEXP_unop (op, rhs) ->
-          let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
-          let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
-          let expr = Ast.EXPR_unary (op, rhs_atom) in
-          let copy_stmt = span ps apos bpos (Ast.STMT_copy (tmp, expr)) in
-            (Array.append rhs_stmts [| decl_stmt; copy_stmt |],
-             Ast.ATOM_lval (clone_lval ps tmp))
-
-      | PEXP_call (fn, args) ->
-          let (fn_stmts, fn_atom) = desugar_expr ps fn in
-          let fn_lval = atom_lval fn_atom in
-          let (arg_stmts, decl_stmt, call_stmt, tmp) =
-            arg_helper args (fun tmp arg_atoms ->
-                               (Ast.STMT_call (tmp, fn_lval, arg_atoms)))
-          in
-            (Array.concat [ fn_stmts; arg_stmts; [| decl_stmt; call_stmt |] ],
-             Ast.ATOM_lval (clone_lval ps tmp))
-
-      | PEXP_rec args ->
-          let (arg_stmts, entries) =
-            arj1st
-              begin
-                Array.map
-                  begin
-                    fun (ident, pexp) ->
-                      let (stmts, atom) = desugar_expr ps pexp in
-                        (stmts, (ident, atom))
-                  end
-                  args
-              end
-          in
-          let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
-          let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (tmp, entries)) in
-            (Array.append arg_stmts [| decl_stmt; rec_stmt |],
-             Ast.ATOM_lval (clone_lval ps tmp))
-
-      | PEXP_tup args ->
-          let (arg_stmts, decl_stmt, tup_stmt, tmp) =
-            arg_helper args (fun tmp arg_atoms ->
-                               (Ast.STMT_init_tup (tmp, arg_atoms)))
-          in
-            (Array.append arg_stmts [| decl_stmt; tup_stmt |],
-             Ast.ATOM_lval (clone_lval ps tmp))
-
-      | PEXP_vec args ->
-          let (arg_stmts, decl_stmt, vec_stmt, tmp) =
-            arg_helper args (fun tmp arg_atoms ->
-                               (Ast.STMT_init_tup (tmp, arg_atoms)))
-          in
-            (Array.append arg_stmts [| decl_stmt; vec_stmt |],
-             Ast.ATOM_lval (clone_lval ps tmp))
-
-      | PEXP_port ->
-          let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
-          let port_stmt = span ps apos bpos (Ast.STMT_init_port tmp) in
-            ([| port_stmt |], Ast.ATOM_lval (clone_lval ps tmp))
-
-      | PEXP_chan pexp_opt ->
-          let (port_stmts, port_opt) =
-            match pexp_opt with
-                None -> ([||], None)
-              | Some port_pexp ->
-                  begin
-                    let (port_stmts, port_atom) = desugar_expr ps port_pexp in
-                    let port_lval = atom_lval port_atom in
-                      (port_stmts, Some port_lval)
-                  end
-          in
-          let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
-          let chan_stmt = span ps apos bpos (Ast.STMT_init_chan (tmp, port_opt)) in
-            (Array.concat [ port_stmts; [| decl_stmt; chan_stmt |] ],
+          let stmts = desugar_expr_init ps tmp pexp in
+            (Array.append [| decl_stmt |] stmts,
              Ast.ATOM_lval (clone_lval ps tmp))
 
       | PEXP_ident ident ->
@@ -1141,13 +1067,28 @@ and desugar_expr ps pexp =
 and desugar_expr_init ps dst_lval pexp =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
+  let atom_lval at =
+    match at with
+        Ast.ATOM_lval lv -> lv
+      | Ast.ATOM_literal _ -> raise (err "literal where lval expected" ps)
+  in
     match pexp.node with
-        PEXP_binop (op, lhs, rhs) ->
+
+        PEXP_lit _
+      | PEXP_ident _
+      | PEXP_app _
+      | PEXP_ext_name _
+      | PEXP_ext_pexp _ ->
+          let (stmts, atom) = desugar_expr ps pexp in
+          let expr = Ast.EXPR_atom atom in
+            [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
+
+      | PEXP_binop (op, lhs, rhs) ->
           let (lhs_stmts, lhs_atom) = desugar_expr ps lhs in
           let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
           let expr = Ast.EXPR_binary (op, lhs_atom, rhs_atom) in
           let copy_stmt = span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) in
-            Array.concat [ rhs_stmts; [| copy_stmt |] ]
+            Array.concat [ lhs_stmts; rhs_stmts; [| copy_stmt |] ]
 
       | PEXP_unop (op, rhs) ->
           let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
@@ -1155,27 +1096,58 @@ and desugar_expr_init ps dst_lval pexp =
           let copy_stmt = span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) in
             Array.append rhs_stmts [| copy_stmt |]
 
-      | PEXP_ident ident ->
-          let nb = span ps apos bpos (Ast.BASE_ident ident) in
-          let expr = Ast.EXPR_atom (Ast.ATOM_lval (Ast.LVAL_base nb)) in
-            [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
-
-      | PEXP_lit lit ->
-          let expr = Ast.EXPR_atom (Ast.ATOM_literal (span ps apos bpos lit)) in
-            [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
-
       | PEXP_call (fn, args) ->
           let (fn_stmts, fn_atom) = desugar_expr ps fn in
           let (arg_stmts, arg_atoms) = desugar_exprs ps args in
-          let fn_lval =
-            match fn_atom with
-                Ast.ATOM_literal _ -> raise (err "calling a literal" ps)
-              | Ast.ATOM_lval lv -> lv
-          in
+          let fn_lval = atom_lval fn_atom in
           let call_stmt = span ps apos bpos (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
             Array.concat [ fn_stmts; arg_stmts; [| call_stmt |] ]
 
-      | _ -> failwith "no"
+      | PEXP_rec args ->
+          let (arg_stmts, entries) =
+            arj1st
+              begin
+                Array.map
+                  begin
+                    fun (ident, pexp) ->
+                      let (stmts, atom) = desugar_expr ps pexp in
+                        (stmts, (ident, atom))
+                  end
+                  args
+              end
+          in
+          let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries)) in
+            Array.append arg_stmts [| rec_stmt |]
+
+      | PEXP_tup args ->
+          let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+          let stmt = span ps apos bpos (Ast.STMT_init_tup (dst_lval, arg_atoms)) in
+            Array.append arg_stmts [| stmt |]
+
+      | PEXP_vec args ->
+          let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+          let stmt = span ps apos bpos (Ast.STMT_init_vec (dst_lval, arg_atoms)) in
+            Array.append arg_stmts [| stmt |]
+
+      | PEXP_port ->
+          [| span ps apos bpos (Ast.STMT_init_port dst_lval) |]
+
+      | PEXP_chan pexp_opt ->
+          let (port_stmts, port_opt) =
+            match pexp_opt with
+                None -> ([||], None)
+              | Some port_pexp ->
+                  begin
+                    let (port_stmts, port_atom) = desugar_expr ps port_pexp in
+                    let port_lval = atom_lval port_atom in
+                      (port_stmts, Some port_lval)
+                  end
+          in
+          let chan_stmt =
+            span ps apos bpos
+              (Ast.STMT_init_chan (dst_lval, port_opt))
+          in
+            Array.append port_stmts [| chan_stmt |]
 
 and parse_expr (ps:pstate) : (Ast.stmt array * Ast.atom) =
   let pexp = ctxt "expr" parse_pexp ps in
