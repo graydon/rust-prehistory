@@ -772,8 +772,10 @@ and parse_expr_list bra ket ps =
   arj1st (bracketed_zero_or_more bra ket (Some COMMA)
             (ctxt "expr list" parse_expr) ps)
 
+
 and slot_auto = { Ast.slot_mode = Ast.MODE_interior;
                   Ast.slot_ty = None }
+
 
 and build_tmp ps slot apos bpos =
   let nonce = !(ps.pstate_temp_id) in
@@ -788,12 +790,14 @@ and build_tmp ps slot apos bpos =
     let tmp = Ast.LVAL_base (span ps apos bpos (Ast.BASE_temp nonce)) in
       (nonce, tmp, declstmt)
 
+
 and parse_lit ps =
   match peek ps with
       LIT_INT (n,s) -> (bump ps; Ast.LIT_int (n,s))
     | LIT_STR s -> (bump ps; Ast.LIT_str s)
     | LIT_CHAR c -> (bump ps; Ast.LIT_char c)
     | _ -> raise (unexpected ps)
+
 
 and parse_bottom_pexp ps : pexp =
   let apos = lexpos ps in
@@ -872,6 +876,7 @@ and parse_bottom_pexp ps : pexp =
         let bpos = lexpos ps in
           span ps apos bpos (PEXP_lit lit)
 
+
 and parse_ext_pexp ps pexp =
   let apos = lexpos ps in
     match peek ps with
@@ -900,6 +905,7 @@ and parse_ext_pexp ps pexp =
 
       | _ -> pexp
 
+
 and parse_negation_pexp ps =
     let apos = lexpos ps in
       match peek ps with
@@ -912,6 +918,7 @@ and parse_negation_pexp ps =
             let lhs = parse_bottom_pexp ps in
               parse_ext_pexp ps lhs
 
+
 (* Binops are all left-associative,                *)
 (* so we factor out some of the parsing code here. *)
 and binop_rhs ps name apos lhs rhs_parse_fn op =
@@ -919,6 +926,7 @@ and binop_rhs ps name apos lhs rhs_parse_fn op =
   let rhs = (ctxt (name ^ " rhs") rhs_parse_fn ps) in
   let bpos = lexpos ps in
     span ps apos bpos (PEXP_binop (op, lhs, rhs))
+
 
 and parse_factor_pexp ps =
   let name = "factor pexp" in
@@ -930,6 +938,7 @@ and parse_factor_pexp ps =
       | PERCENT -> binop_rhs ps name apos lhs parse_factor_pexp Ast.BINOP_mod
       | _       -> lhs
 
+
 and parse_term_pexp ps =
   let name = "term pexp" in
   let apos = lexpos ps in
@@ -938,6 +947,7 @@ and parse_term_pexp ps =
         PLUS  -> binop_rhs ps name apos lhs parse_term_pexp Ast.BINOP_add
       | MINUS -> binop_rhs ps name apos lhs parse_term_pexp Ast.BINOP_sub
       | _     -> lhs
+
 
 and parse_shift_pexp ps =
   let name = "shift pexp" in
@@ -948,6 +958,7 @@ and parse_shift_pexp ps =
       | LSR -> binop_rhs ps name apos lhs parse_shift_pexp Ast.BINOP_lsr
       | ASR -> binop_rhs ps name apos lhs parse_shift_pexp Ast.BINOP_asr
       | _   -> lhs
+
 
 and parse_relational_pexp ps =
   let name = "relational pexp" in
@@ -960,6 +971,7 @@ and parse_relational_pexp ps =
       | GT -> binop_rhs ps name apos lhs parse_relational_pexp Ast.BINOP_gt
       | _  -> lhs
 
+
 and parse_equality_pexp ps =
   let name = "equality pexp" in
   let apos = lexpos ps in
@@ -969,6 +981,7 @@ and parse_equality_pexp ps =
       | NE   -> binop_rhs ps name apos lhs parse_equality_pexp Ast.BINOP_ne
       | _    -> lhs
 
+
 and parse_and_pexp ps =
   let name = "and pexp" in
   let apos = lexpos ps in
@@ -976,6 +989,7 @@ and parse_and_pexp ps =
     match peek ps with
         AND -> binop_rhs ps name apos lhs parse_and_pexp Ast.BINOP_and
       | _   -> lhs
+
 
 and parse_or_pexp ps =
   let name = "or pexp" in
@@ -985,35 +999,21 @@ and parse_or_pexp ps =
         OR -> binop_rhs ps name apos lhs parse_or_pexp Ast.BINOP_or
       | _  -> lhs
 
+
 and parse_pexp ps =
   parse_or_pexp ps
+
 
 and parse_pexp_list bra ket ps =
   bracketed_zero_or_more bra ket (Some COMMA)
     (ctxt "pexp list" parse_pexp) ps
 
-and desugar_exprs ps pexps =
-  arj1st (Array.map (desugar_expr ps) pexps)
 
 and atom_lval ps at =
   match at with
       Ast.ATOM_lval lv -> lv
     | Ast.ATOM_literal _ -> raise (err "literal where lval expected" ps)
 
-and desugar_name ps pexp =
-    match pexp.node with
-
-        PEXP_ident ident ->
-          Ast.NAME_base (Ast.BASE_ident ident)
-
-      | PEXP_app (ident, tys) ->
-          Ast.NAME_base (Ast.BASE_app (ident, tys))
-
-      | PEXP_ext_name (base_pexp, comp) ->
-          let base_name = desugar_name ps base_pexp in
-            Ast.NAME_ext (base_name, comp)
-
-      | _ -> raise (err "non-name pexp where name expected" ps)
 
 and desugar_lval ps pexp =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
@@ -1044,6 +1044,7 @@ and desugar_lval ps pexp =
           let (stmts, atom) = desugar_expr ps pexp in
             (stmts, atom_lval ps atom)
 
+
 and desugar_expr ps pexp =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
@@ -1071,6 +1072,10 @@ and desugar_expr ps pexp =
       | PEXP_ext_pexp _ ->
           let (stmts, lval) = desugar_lval ps pexp in
             (stmts, Ast.ATOM_lval lval)
+
+
+and desugar_exprs ps pexps =
+  arj1st (Array.map (desugar_expr ps) pexps)
 
 
 and desugar_expr_init ps dst_lval pexp =
