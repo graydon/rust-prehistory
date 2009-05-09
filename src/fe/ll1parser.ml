@@ -290,39 +290,47 @@ let string_of_tok t =
 ;;
 
 (* 
- * NB: sexps are only used transiently during parsing and syntax-expansion.
- * They're desugared into the general AST. Expressions that can show up in 
- * source are much hairier than those that are meaningful to the rest of 
- * the compiler.
+ * NB: pexps (parser-expressions) are only used transiently during
+ * parsing and syntax-expansion.  They're desugared into the general
+ * AST. Expressions that can show up in source correspond to this loose
+ * grammar and have a wide-ish flexibility in *theoretical* composition;
+ * only subsets of those compositions are legal in various AST contexts.
  * 
  * Desugaring on the fly is unfortunately complicated enough to require
- * this two-pass routine. 
+ * -- or at least "make much more convenient" -- this two-pass routine. 
  *)
-type sexp = 
-    SEXP_call of (sexp * sexp list)
-  | SEXP_rec of ((Ast.ident * sexp) list)
-  | SEXP_tup of (sexp list)
-  | SEXP_vec of (sexp list)
-  | SEXP_binop of (Ast.binop * sexp * sexp)
-  | SEXP_unop of (Ast.unop * sexp)
-  | SEXP_ext_name of (sexp * Ast.name_component)  (* foo.bar = name   *)
-  | SEXP_ext_sexp of (sexp * sexp)                (* foo.(bar) = lval *)
-  | SEXP_atom of Ast.atom
+
+type pexp' =
+    PEXP_call of (pexp * pexp array)
+  | PEXP_rec of ((Ast.ident * pexp) array)
+  | PEXP_tup of (pexp array)
+  | PEXP_vec of (pexp array)
+  | PEXP_port
+  | PEXP_chan of (pexp option)
+  | PEXP_binop of (Ast.binop * pexp * pexp)
+  | PEXP_unop of (Ast.unop * pexp)
+  | PEXP_ident of Ast.ident
+  | PEXP_app of (Ast.ident * (Ast.ty array))
+  | PEXP_ext_name of (pexp * Ast.name_component)
+  | PEXP_ext_pexp of (pexp * pexp)
+  | PEXP_lit of Ast.lit
+
+and pexp = pexp' identified
 ;;
 
 (* 
  * Desugarings depend on context:
  * 
- *   - If a sexp is used on the RHS of an assignment, it's turned into
+ *   - If a pexp is used on the RHS of an assignment, it's turned into
  *     an initialization statement such as STMT_init_rec or such. This
  *     removes the possibility of initializing into a temp only to
- *     copy out. If the topmost sexp in such a desugaring is an atom,
+ *     copy out. If the topmost pexp in such a desugaring is an atom,
  *     unop or binop, of course, it will still just emit a STMT_copy
  *     on a primitive expression.
  * 
- *   - If a sexp is used in the context where an atom is required, a 
+ *   - If a pexp is used in the context where an atom is required, a 
  *     statement declaring a temporary and initializing it with the 
- *     result of the sexp is prepended, and the temporary atom is used.
+ *     result of the pexp is prepended, and the temporary atom is used.
  *)
 
 (* Fundamental parser types and actions *)
@@ -363,13 +371,20 @@ let span ps apos bpos x =
     { node = x; id = id }
 ;;
 
-let rec respan ps lval =
+(* The point of this is to make a new node_id entry for a node that is a "copy" of
+   an lval returned from somewhere else. For example if you create a temp, the lval
+   it returns can only be used in *one* place, for the node_id denotes the place that
+   lval is first used; subsequent uses of 'the same' reference must clone_lval it 
+   into a new node_id. Otherwise there is trouble. *)
+
+let rec clone_lval ps lval =
   match lval with
       Ast.LVAL_base nb ->
         let s = Hashtbl.find ps.pstate_sess.Session.sess_spans nb.id in
+          (* This call issues a fresh node_id. *)
           Ast.LVAL_base (span ps s.lo s.hi nb.node)
     | Ast.LVAL_ext (base, ext) ->
-        Ast.LVAL_ext ((respan ps base), ext)
+        Ast.LVAL_ext ((clone_lval ps base), ext)
 ;;
 
 let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
@@ -761,18 +776,17 @@ and parse_rec_input ltab ps =
     match peek ps with
         EQ ->
           bump ps;
-          let (stmts, expr) = (ctxt "rec input: expr" parse_expr ps) in
-            ltab := ltab_put (!ltab) lab expr;
-            stmts
+          let pexp = (ctxt "rec input: expr" parse_pexp ps) in
+            ltab := ltab_put (!ltab) lab pexp
       | _ -> raise (unexpected ps)
 
 
 and parse_rec_inputs ps =
   let ltab = ref [] in
-  let stmts_s = bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
+  let _ = bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
     (ctxt "rec inputs" (parse_rec_input ltab)) ps
   in
-    (arj stmts_s, arl (!ltab))
+    arl (!ltab)
 
 
 and parse_expr_list bra ket ps =
@@ -802,152 +816,305 @@ and parse_lit ps =
     | LIT_CHAR c -> (bump ps; Ast.LIT_char c)
     | _ -> raise (unexpected ps)
 
-and parse_atom ps =
+and parse_bottom_pexp ps : pexp =
   let apos = lexpos ps in
-  let lit = parse_lit ps in
-  let bpos = lexpos ps in
-    Ast.ATOM_literal (span ps apos bpos lit)
-
-and parse_bottom_expr ps =
   match peek ps with
       LPAREN ->
-        let apos = lexpos ps in
-        let (stmts, atoms) = ctxt "paren expr(s)" (parse_expr_list LPAREN RPAREN) ps in
+        let pexps = ctxt "paren pexps(s)" (parse_pexp_list LPAREN RPAREN) ps in
         let bpos = lexpos ps in
-          if Array.length atoms = 1
+          if Array.length pexps = 1
           then
-            (stmts, atoms.(0))
+            pexps.(0)
           else
-            let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-            let stmt = span ps apos bpos (Ast.STMT_init_tup (tmp, atoms)) in
-              (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
+            span ps apos bpos (PEXP_tup pexps)
 
     | REC ->
-        let apos = lexpos ps in
           bump ps;
-          let (stmts, atab) = ctxt "rec expr: rec inputs" parse_rec_inputs ps in
+          let inputs = ctxt "rec pexp: rec inputs" parse_rec_inputs ps in
           let bpos = lexpos ps in
-          let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-          let stmt = span ps apos bpos (Ast.STMT_init_rec (tmp, atab)) in
-            (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
+            span ps apos bpos (PEXP_rec inputs)
 
     | VEC ->
-        let apos = lexpos ps in
           bump ps;
-          let (stmts, atoms) = ctxt "vec expr: exprs" (parse_expr_list LPAREN RPAREN) ps in
+          let pexps = ctxt "vec pexp: exprs" (parse_pexp_list LPAREN RPAREN) ps in
           let bpos = lexpos ps in
-          let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-          let stmt = span ps apos bpos (Ast.STMT_init_vec (tmp, atoms)) in
-            (Array.append stmts [| decl; stmt |], Ast.ATOM_lval (respan ps tmp))
+            span ps apos bpos (PEXP_vec pexps)
 
-    | IDENT _ ->
-        let apos = lexpos ps in
-        let (lstmts, lval) = parse_lval ps in
-          (match peek ps with
+    | PORT ->
+        begin
+            bump ps;
+            expect ps NIL;
+            let bpos = lexpos ps in
+              span ps apos bpos (PEXP_port)
+        end
 
-               LPAREN ->
-                 let (astmts, args) = ctxt "call: args" (parse_expr_list LPAREN RPAREN) ps in
-                 let bpos = lexpos ps in
-                 let (nonce, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
-                 let call = span ps apos bpos (Ast.STMT_call (tmp, lval, args)) in
-                 let cstmts = [| tempdecl; call |] in
-                 let stmts = Array.concat [lstmts; astmts; cstmts] in
-                   (stmts, Ast.ATOM_lval (respan ps tmp))
+    | CHAN ->
+        begin
+            bump ps;
+            let port =
+              match peek ps with
+                  NIL -> None
+                | LPAREN ->
+                    begin
+                      bump ps;
+                      let lv = parse_pexp ps in
+                        expect ps RPAREN;
+                        Some lv
+                    end
+                | _ -> raise (unexpected ps)
+            in
+            let bpos = lexpos ps in
+              span ps apos bpos (PEXP_chan port)
+        end
 
-             | _ ->
-                 (lstmts, Ast.ATOM_lval lval))
-
-
-    | _ -> ([| |], parse_atom ps)
-
-
-and parse_negation_expr ps =
-  match peek ps with
-      NOT ->
-        let apos = lexpos ps in
+    | IDENT i ->
+        begin
           bump ps;
-          let (stmts, atom) = ctxt "negation expr" parse_negation_expr ps in
-          let bpos = lexpos ps in
-          let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-          let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_unary (Ast.UNOP_not, atom))) in
-          let stmts = Array.append stmts [| decl; copy |] in
-            (stmts, Ast.ATOM_lval (respan ps tmp))
-    | _ -> parse_bottom_expr ps
+          match peek ps with
+              LBRACKET ->
+                begin
+                  let tys =
+                    ctxt "apply-type expr"
+                      (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
+                  in
+                  let bpos = lexpos ps in
+                    span ps apos bpos (PEXP_app (i, tys))
+                end
 
+            | _ ->
+                begin
+                  let bpos = lexpos ps in
+                    span ps apos bpos (PEXP_ident i)
+                end
+        end
+
+    | _ ->
+        let lit = parse_lit ps in
+        let bpos = lexpos ps in
+          span ps apos bpos (PEXP_lit lit)
+
+and parse_ext_pexp ps pexp =
+  let apos = lexpos ps in
+    match peek ps with
+        LPAREN ->
+          let args = parse_pexp_list LPAREN RPAREN ps in
+          let bpos = lexpos ps in
+          let ext = span ps apos bpos (PEXP_call (pexp, args)) in
+            parse_ext_pexp ps ext
+
+      | DOT ->
+          begin
+            bump ps;
+            let ext =
+              match peek ps with
+                  LPAREN ->
+                    let rhs = parse_pexp ps in
+                    let bpos = lexpos ps in
+                      span ps apos bpos (PEXP_ext_pexp (pexp, rhs))
+                | _ ->
+                    let rhs = parse_name_component ps in
+                    let bpos = lexpos ps in
+                      span ps apos bpos (PEXP_ext_name (pexp, rhs))
+            in
+              parse_ext_pexp ps ext
+          end
+
+      | _ -> pexp
+
+and parse_negation_pexp ps =
+    let apos = lexpos ps in
+      match peek ps with
+          NOT ->
+            let rhs = ctxt "negation pexp" parse_negation_pexp ps in
+            let bpos = lexpos ps in
+              span ps apos bpos (PEXP_unop (Ast.UNOP_not, rhs))
+
+        | _ ->
+            let lhs = parse_bottom_pexp ps in
+              parse_ext_pexp ps lhs
 
 (* Binops are all left-associative,                *)
 (* so we factor out some of the parsing code here. *)
-and binop_rhs ps name lhs rhs_parse_fn op =
+and binop_rhs ps name apos lhs rhs_parse_fn op =
   bump ps;
-  let (lstmts, l_atom) = lhs in
-  let apos = lexpos ps in
-  let (rstmts, r_atom) = (ctxt (name ^ " rhs") rhs_parse_fn ps) in
+  let rhs = (ctxt (name ^ " rhs") rhs_parse_fn ps) in
   let bpos = lexpos ps in
-  let (_, tmp, decl) = build_tmp ps slot_auto apos bpos in
-  let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_binary (op, l_atom, r_atom))) in
-  let stmts = Array.concat [lstmts; rstmts; [| decl; copy |] ] in
-    (stmts, Ast.ATOM_lval (respan ps tmp))
+    span ps apos bpos (PEXP_binop (op, lhs, rhs))
 
-and parse_factor_expr ps =
-  let name = "factor expr" in
-  let lhs = ctxt (name ^ " lhs") parse_negation_expr ps in
+and parse_factor_pexp ps =
+  let name = "factor pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_negation_pexp ps in
     match peek ps with
-        STAR    -> binop_rhs ps name lhs parse_factor_expr Ast.BINOP_mul
-      | SLASH   -> binop_rhs ps name lhs parse_factor_expr Ast.BINOP_div
-      | PERCENT -> binop_rhs ps name lhs parse_factor_expr Ast.BINOP_mod
+        STAR    -> binop_rhs ps name apos lhs parse_factor_pexp Ast.BINOP_mul
+      | SLASH   -> binop_rhs ps name apos lhs parse_factor_pexp Ast.BINOP_div
+      | PERCENT -> binop_rhs ps name apos lhs parse_factor_pexp Ast.BINOP_mod
       | _       -> lhs
 
-and parse_term_expr ps =
-  let name = "term expr" in
-  let lhs = ctxt (name ^ " lhs") parse_factor_expr ps in
+and parse_term_pexp ps =
+  let name = "term pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_factor_pexp ps in
     match peek ps with
-        PLUS  -> binop_rhs ps name lhs parse_term_expr Ast.BINOP_add
-      | MINUS -> binop_rhs ps name lhs parse_term_expr Ast.BINOP_sub
+        PLUS  -> binop_rhs ps name apos lhs parse_term_pexp Ast.BINOP_add
+      | MINUS -> binop_rhs ps name apos lhs parse_term_pexp Ast.BINOP_sub
       | _     -> lhs
 
-and parse_shift_expr ps =
-  let name = "shift expr" in
-  let lhs = ctxt (name ^ " lhs") parse_term_expr ps in
+and parse_shift_pexp ps =
+  let name = "shift pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_term_pexp ps in
     match peek ps with
-        LSL -> binop_rhs ps name lhs parse_shift_expr Ast.BINOP_lsl
-      | LSR -> binop_rhs ps name lhs parse_shift_expr Ast.BINOP_lsr
-      | ASR -> binop_rhs ps name lhs parse_shift_expr Ast.BINOP_asr
+        LSL -> binop_rhs ps name apos lhs parse_shift_pexp Ast.BINOP_lsl
+      | LSR -> binop_rhs ps name apos lhs parse_shift_pexp Ast.BINOP_lsr
+      | ASR -> binop_rhs ps name apos lhs parse_shift_pexp Ast.BINOP_asr
       | _   -> lhs
 
-and parse_relational_expr ps =
-  let name = "relational expr" in
-  let lhs = ctxt (name ^ " lhs") parse_shift_expr ps in
+and parse_relational_pexp ps =
+  let name = "relational pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_shift_pexp ps in
     match peek ps with
-        LT -> binop_rhs ps name lhs parse_relational_expr Ast.BINOP_lt
-      | LE -> binop_rhs ps name lhs parse_relational_expr Ast.BINOP_le
-      | GE -> binop_rhs ps name lhs parse_relational_expr Ast.BINOP_ge
-      | GT -> binop_rhs ps name lhs parse_relational_expr Ast.BINOP_gt
+        LT -> binop_rhs ps name apos lhs parse_relational_pexp Ast.BINOP_lt
+      | LE -> binop_rhs ps name apos lhs parse_relational_pexp Ast.BINOP_le
+      | GE -> binop_rhs ps name apos lhs parse_relational_pexp Ast.BINOP_ge
+      | GT -> binop_rhs ps name apos lhs parse_relational_pexp Ast.BINOP_gt
       | _  -> lhs
 
-and parse_equality_expr ps =
-  let name = "equality expr" in
-  let lhs = ctxt (name ^ " lhs") parse_relational_expr ps in
+and parse_equality_pexp ps =
+  let name = "equality pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_relational_pexp ps in
     match peek ps with
-        EQEQ -> binop_rhs ps name lhs parse_equality_expr Ast.BINOP_eq
-      | NE   -> binop_rhs ps name lhs parse_equality_expr Ast.BINOP_ne
+        EQEQ -> binop_rhs ps name apos lhs parse_equality_pexp Ast.BINOP_eq
+      | NE   -> binop_rhs ps name apos lhs parse_equality_pexp Ast.BINOP_ne
       | _    -> lhs
 
-and parse_and_expr ps =
-  let name = "and expr" in
-  let lhs = ctxt (name ^ " lhs") parse_equality_expr ps in
+and parse_and_pexp ps =
+  let name = "and pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_equality_pexp ps in
     match peek ps with
-        AND -> binop_rhs ps name lhs parse_and_expr Ast.BINOP_and
+        AND -> binop_rhs ps name apos lhs parse_and_pexp Ast.BINOP_and
       | _   -> lhs
 
-and parse_or_expr ps =
-  let name = "or expr" in
-  let lhs = ctxt (name ^ " lhs") parse_and_expr ps in
+and parse_or_pexp ps =
+  let name = "or pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_and_pexp ps in
     match peek ps with
-        OR -> binop_rhs ps name lhs parse_or_expr Ast.BINOP_or
+        OR -> binop_rhs ps name apos lhs parse_or_pexp Ast.BINOP_or
       | _  -> lhs
 
-and parse_expr (ps:pstate) : (Ast.stmt array * Ast.atom)  =
-  ctxt "expr" parse_or_expr ps
+and parse_pexp ps =
+  parse_or_pexp ps
+
+and parse_pexp_list bra ket ps =
+  bracketed_zero_or_more bra ket (Some COMMA)
+    (ctxt "pexp list" parse_pexp) ps
+
+and desugar_exprs ps pexps =
+  arj1st (Array.map (desugar_expr ps) pexps)
+
+and desugar_expr ps pexp =
+  let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
+  let (apos, bpos) = (s.lo, s.hi) in
+    match pexp.node with
+        PEXP_binop (op, lhs, rhs) ->
+          let (lhs_stmts, lhs_atom) = desugar_expr ps lhs in
+          let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
+          let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
+          let expr = Ast.EXPR_binary (op, lhs_atom, rhs_atom) in
+          let copy_stmt = span ps apos bpos (Ast.STMT_copy (tmp, expr)) in
+            (Array.concat [ lhs_stmts; rhs_stmts; [| decl_stmt; copy_stmt |] ],
+             Ast.ATOM_lval (clone_lval ps tmp))
+
+      | PEXP_unop (op, rhs) ->
+          let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
+          let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
+          let expr = Ast.EXPR_unary (op, rhs_atom) in
+          let copy_stmt = span ps apos bpos (Ast.STMT_copy (tmp, expr)) in
+            (Array.append rhs_stmts [| decl_stmt; copy_stmt |],
+             Ast.ATOM_lval (clone_lval ps tmp))
+
+      | PEXP_ident ident ->
+          let nb = span ps apos bpos (Ast.BASE_ident ident) in
+            ([||], Ast.ATOM_lval (Ast.LVAL_base nb))
+
+      | PEXP_lit lit ->
+          ([||], Ast.ATOM_literal (span ps apos bpos lit))
+
+      | PEXP_call (fn, args) ->
+          let (fn_stmts, fn_atom) = desugar_expr ps fn in
+          let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+          let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
+          let fn_lval =
+            match fn_atom with
+                Ast.ATOM_literal _ -> raise (err "calling a literal" ps)
+              | Ast.ATOM_lval lv -> lv
+          in
+          let call_stmt = span ps apos bpos (Ast.STMT_call (tmp, fn_lval, arg_atoms)) in
+            (Array.concat [ fn_stmts; arg_stmts; [| decl_stmt; call_stmt |] ],
+             Ast.ATOM_lval (clone_lval ps tmp))
+
+      | _ -> failwith "no"
+(* 
+  | PEXP_rec of ((Ast.ident * pexp) array)
+  | PEXP_tup of (pexp array)
+  | PEXP_vec of (pexp array)
+  | PEXP_port
+  | PEXP_chan of (pexp option)
+  | PEXP_app of (Ast.ident * (Ast.ty array))
+  | PEXP_ext_name of (pexp * Ast.name_component)
+  | PEXP_ext_pexp of (pexp * pexp)
+*)
+
+and desugar_expr_init ps dst_lval pexp =
+  let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
+  let (apos, bpos) = (s.lo, s.hi) in
+    match pexp.node with
+        PEXP_binop (op, lhs, rhs) ->
+          let (lhs_stmts, lhs_atom) = desugar_expr ps lhs in
+          let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
+          let expr = Ast.EXPR_binary (op, lhs_atom, rhs_atom) in
+          let copy_stmt = span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) in
+            Array.concat [ rhs_stmts; [| copy_stmt |] ]
+
+      | PEXP_unop (op, rhs) ->
+          let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
+          let expr = Ast.EXPR_unary (op, rhs_atom) in
+          let copy_stmt = span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) in
+            Array.append rhs_stmts [| copy_stmt |]
+
+      | PEXP_ident ident ->
+          let nb = span ps apos bpos (Ast.BASE_ident ident) in
+          let expr = Ast.EXPR_atom (Ast.ATOM_lval (Ast.LVAL_base nb)) in
+            [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
+
+      | PEXP_lit lit ->
+          let expr = Ast.EXPR_atom (Ast.ATOM_literal (span ps apos bpos lit)) in
+            [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
+
+      | PEXP_call (fn, args) ->
+          let (fn_stmts, fn_atom) = desugar_expr ps fn in
+          let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+          let fn_lval =
+            match fn_atom with
+                Ast.ATOM_literal _ -> raise (err "calling a literal" ps)
+              | Ast.ATOM_lval lv -> lv
+          in
+          let call_stmt = span ps apos bpos (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
+            Array.concat [ fn_stmts; arg_stmts; [| call_stmt |] ]
+
+      | _ -> failwith "no"
+
+and parse_expr (ps:pstate) : (Ast.stmt array * Ast.atom) =
+  let pexp = ctxt "expr" parse_pexp ps in
+    desugar_expr ps pexp
+
+and parse_expr_init (lv:Ast.lval) (ps:pstate) : (Ast.stmt array) =
+  let pexp = ctxt "expr" parse_pexp ps in
+    desugar_expr_init ps lv pexp
 
 and parse_slot_and_ident param_slot ps =
   let slot = ctxt "slot and ident: slot" (parse_slot param_slot) ps in
@@ -993,37 +1160,7 @@ and parse_init
     match peek ps with
         EQ ->
           bump ps;
-          let apos = lexpos ps in
-          let spans stmts bpos stmt =
-            Array.append stmts [| (span ps apos bpos stmt) |]
-          in
-            begin
-              match peek ps with
-
-                  REC ->
-                    begin
-                      bump ps;
-                      let (stmts, htab) =
-                        ctxt "rec-init stmt: rec inputs" parse_rec_inputs ps in
-                      let bpos = lexpos ps in
-                        spans stmts bpos (Ast.STMT_init_rec (lval, htab))
-                    end
-
-                | VEC ->
-                    begin
-                      let (stmts, atoms) =
-                        ctxt "vec-init stmt: exprs"
-                          (parse_expr_list LPAREN RPAREN) ps in
-                      let bpos = lexpos ps in
-                        spans stmts bpos (Ast.STMT_init_vec (lval, atoms))
-                    end
-
-                | _ ->
-                    let (stmts, atom) = (ctxt "init: expr" parse_expr ps) in
-                    let bpos = lexpos ps in
-                      spans stmts bpos (Ast.STMT_copy (lval, (Ast.EXPR_atom atom)))
-            end
-
+          parse_expr_init lval ps
       | _ -> arr []
   in
   let _ = expect ps SEMI in
@@ -1189,7 +1326,7 @@ and parse_stmts ps =
                  let makedecl i slot =
                    begin
                      let ext = Ast.COMP_named (Ast.COMP_idx i) in
-                     let src_lval = Ast.LVAL_ext ((respan ps tmp), ext) in
+                     let src_lval = Ast.LVAL_ext ((clone_lval ps tmp), ext) in
                      let src_atom = Ast.ATOM_lval src_lval in
                      let dst_lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident idents.(i))) in
                      let copy = span ps apos bpos (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
@@ -1246,7 +1383,7 @@ and parse_stmts ps =
           let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_atom atom)) in
           let make_copy i dst =
             let ext = Ast.COMP_named (Ast.COMP_idx i) in
-            let lval = Ast.LVAL_ext ((respan ps tmp), ext) in
+            let lval = Ast.LVAL_ext ((clone_lval ps tmp), ext) in
             let e = Ast.EXPR_atom (Ast.ATOM_lval lval) in
               span ps apos bpos (Ast.STMT_copy (dst, e))
           in
@@ -1264,7 +1401,7 @@ and parse_stmts ps =
                     let stmts = Array.append lstmts astmts in
                     let bpos = lexpos ps in
                     let (nonce, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
-                    let call = span ps apos bpos (Ast.STMT_call ((respan ps tmp), lval, args)) in
+                    let call = span ps apos bpos (Ast.STMT_call ((clone_lval ps tmp), lval, args)) in
                       Array.append stmts [| tempdecl; call |]
 
                 | EQ ->
