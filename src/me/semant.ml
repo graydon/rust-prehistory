@@ -58,6 +58,7 @@ type ctxt =
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
       ctxt_fn_header_layouts: (node_id,layout) Hashtbl.t;
+      ctxt_prog_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_call_sizes: (node_id,int64) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
@@ -99,6 +100,7 @@ let new_ctxt sess abi crate =
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_block_layouts = Hashtbl.create 0;
     ctxt_fn_header_layouts = Hashtbl.create 0;
+    ctxt_prog_layouts = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
@@ -248,6 +250,12 @@ let rec lval_slots (cx:ctxt) (lv:Ast.lval) : node_id array =
           then [| referent |]
           else [| |]
     | Ast.LVAL_ext (lv, _) -> lval_slots cx lv
+;;
+
+let lval_option_slots (cx:ctxt) (lv:Ast.lval option) : node_id array =
+  match lv with
+      None -> [| |]
+    | Some lv -> lval_slots cx lv
 ;;
 
 let atom_slots (cx:ctxt) (a:Ast.atom) : node_id array =
@@ -434,6 +442,16 @@ let lookup
     else
       None
   in
+  let is_in_block_scope id =
+    let b = ref false in
+      Stack.iter
+        (fun scope ->
+           (match scope with
+                SCOPE_block block_id when block_id = id -> b := true
+              | _ -> ()))
+        scopes;
+      !b
+  in
   let check_scope scope =
     match scope with
         SCOPE_block block_id ->
@@ -480,18 +498,33 @@ let lookup
                           check_items scope ident m.Ast.decl_item
 
                       | Ast.MOD_ITEM_prog p ->
-                          let slots = p.Ast.decl_item.Ast.prog_slots in
-                            if Hashtbl.mem slots ident
-                            then
-                              let slot = Hashtbl.find slots ident in
-                                Some (scope, slot.id)
-                            else
-                              check_items scope ident
-                                p.Ast.decl_item.Ast.prog_mod
-
+                          let check_prog_slots _ =
+                            let slots = p.Ast.decl_item.Ast.prog_slots in
+                              if Hashtbl.mem slots ident
+                              then
+                                let slot = Hashtbl.find slots ident in
+                                  Some (scope, slot.id)
+                              else
+                                check_items scope ident
+                                  p.Ast.decl_item.Ast.prog_mod
+                          in
+                          begin
+                            match p.Ast.decl_item.Ast.prog_init with
+                                Some input when
+                                  is_in_block_scope
+                                    input.node.Ast.init_body.id ->
+                                  begin
+                                    match match_input_slot
+                                      input.node.Ast.init_input_slots
+                                    with
+                                        Some res -> Some res
+                                      | None -> check_prog_slots ()
+                                  end
+                              | _ -> check_prog_slots ()
+                          end
                       | _ -> None
                   end
-            end
+          end
       | _ -> None
   in
     stk_search scopes check_scope

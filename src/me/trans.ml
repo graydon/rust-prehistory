@@ -437,7 +437,7 @@ let trans_visitor
 
   and trans_recv (dst:Ast.lval) (chan:Ast.lval) : unit =
     let (dstop, _) = trans_lval dst INTENT_write in
-      trans_upcall Abi.UPCALL_send [| (alias dstop); (trans_atom (Ast.ATOM_lval chan)) |]
+      trans_upcall Abi.UPCALL_recv [| (alias dstop); (trans_atom (Ast.ATOM_lval chan)) |]
 
   and trans_new_port (dst:Ast.lval) : unit =
     let (dstop, _) = trans_lval dst INTENT_write in

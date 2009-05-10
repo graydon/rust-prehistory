@@ -207,8 +207,24 @@ let constr_id_assigning_visitor
               note_keys precond;
               note_keys postcond
 
+        | Ast.STMT_init_port dst ->
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              note_keys postcond
+
+        | Ast.STMT_init_chan (dst, port) ->
+            let precond = Array.map (fun s -> Constr_init s) (lval_option_slots cx port) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              note_keys precond;
+              note_keys postcond
+
         | Ast.STMT_copy (dst, src) ->
             let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              note_keys precond;
+              note_keys postcond
+
+        | Ast.STMT_recv (dst, src) ->
+            let precond = Array.map (fun s -> Constr_init s) (lval_slots cx src) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               note_keys precond;
               note_keys postcond
@@ -327,6 +343,11 @@ let condition_assigning_visitor
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
 
+        | Ast.STMT_recv (dst, src) ->
+            let precond = Array.map (fun s -> Constr_init s) (lval_slots cx src) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              raise_precondition s.id precond;
+              raise_postcondition s.id postcond
 
         | Ast.STMT_init_rec (dst, entries) ->
             let precond = Array.map (fun s -> Constr_init s) (entries_slots cx entries) in
@@ -340,6 +361,15 @@ let condition_assigning_visitor
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
 
+        | Ast.STMT_init_port dst ->
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              raise_postcondition s.id postcond
+
+        | Ast.STMT_init_chan (dst, port) ->
+            let precond = Array.map (fun s -> Constr_init s) (lval_option_slots cx port) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              raise_precondition s.id precond;
+              raise_postcondition s.id postcond
 
         | Ast.STMT_call (dst, (Ast.LVAL_base nb), args) ->
             let referent_ty = lval_ty cx nb.id in
@@ -675,8 +705,11 @@ let typestate_verify_visitor
              let ckey = Hashtbl.find cx.ctxt_constrs (Constr i) in
              let constr_str = fmt_constr_key cx ckey in
                err (Some s.id)
-                 "Unsatisfied precondition constraint at stmt %d: %s "
-                 (int_of_node s.id) constr_str)
+                 "Unsatisfied precondition constraint %s at stmt %d: %s"
+                 constr_str
+                 (int_of_node s.id)
+                 (Ast.fmt_to_str Ast.fmt_stmt
+                    (Hashtbl.find cx.ctxt_all_stmts s.id)))
         precond;
       inner.Walk.visit_stmt_pre s
   in
@@ -691,7 +724,8 @@ let lifecycle_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-          Ast.STMT_copy (lv_dst, _) ->
+          Ast.STMT_copy (lv_dst, _)
+        | Ast.STMT_recv (lv_dst, _) ->
             let prestate = Hashtbl.find cx.ctxt_prestates s.id in
             let poststate = Hashtbl.find cx.ctxt_poststates s.id in
             let dst_slots = lval_slots cx lv_dst in

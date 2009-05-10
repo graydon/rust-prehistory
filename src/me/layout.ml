@@ -161,6 +161,17 @@ let layout_visitor
         htab_put cx.ctxt_fn_header_layouts id layout
   in
 
+  let layout_prog (id:node_id) (prog:Ast.prog) : unit =
+      log cx "laying out header of prog #%d" (int_of_node id);
+      let slot_ids =
+        Array.of_list (List.map (fun sid -> sid.id)
+                         (htab_vals prog.Ast.prog_slots))
+      in
+      let layout = layout_slot_ids false 0L slot_ids in
+        log cx "prog #%d layout: %s" (int_of_node id) (string_of_layout layout);
+        htab_put cx.ctxt_prog_layouts id layout
+  in
+
   let (block_stacks:(layout Stack.t) Stack.t) = Stack.create () in
   let (item_stack:node_id Stack.t) = Stack.create () in
   let update_frame_size _ =
@@ -184,7 +195,9 @@ let layout_visitor
       htab_put cx.ctxt_spill_fixups i.id (new_fixup "frame spill fixup");
       match i.node with
           Ast.MOD_ITEM_fn fd ->
-            layout_fn_header i.id fd.Ast.decl_item;
+            layout_fn_header i.id fd.Ast.decl_item
+        | Ast.MOD_ITEM_prog pd ->
+            layout_prog i.id pd.Ast.decl_item
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
