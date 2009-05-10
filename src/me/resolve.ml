@@ -261,7 +261,7 @@ let type_resolving_visitor
     match t with
         Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_mach _
       | Ast.TY_int | Ast.TY_char | Ast.TY_str | Ast.TY_type
-      | Ast.TY_idx _ | Ast.TY_opaque _ -> t
+      | Ast.TY_idx _ | Ast.TY_opaque _ | Ast.TY_proc -> t
 
       | Ast.TY_tup slots -> Ast.TY_tup (Array.map resolve_slot slots)
       | Ast.TY_rec trec -> Ast.TY_rec (Array.map (fun (n, s) -> (n, resolve_slot s)) trec)

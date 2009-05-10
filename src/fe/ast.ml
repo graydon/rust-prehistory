@@ -87,6 +87,7 @@ and ty =
 
   | TY_mod of (mod_type_items)
   | TY_prog of ty_sig
+  | TY_proc
 
   | TY_opaque of opaque_id
   | TY_named of name
@@ -617,6 +618,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_lim t -> (fmt ff "lim@ "; fmt_ty ff t)
 
   | TY_fn tfn -> fmt_fn_header ff tfn None None
+  | TY_proc -> fmt ff "proc"
 
   (* FIXME: finish these as needed. *)
   | TY_mod mti -> fmt ff "?mod?"

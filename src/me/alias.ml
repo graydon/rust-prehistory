@@ -30,6 +30,7 @@ let alias_analysis_visitor
            * they are supported.
            *)
           Ast.STMT_call (dst, _, _) -> alias dst
+        | Ast.STMT_spawn (dst, _, _) -> alias dst
         | Ast.STMT_recv (dst, _) -> alias dst
         | Ast.STMT_init_port (dst) -> alias dst
         | Ast.STMT_init_chan (dst, _) -> alias dst

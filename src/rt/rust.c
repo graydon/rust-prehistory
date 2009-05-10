@@ -212,11 +212,18 @@ rust_del_proc(rust_proc_t *proc)
   rust_del_stk(proc->stk);
 }
 
-static void
+static rust_proc_t*
 rust_spawn_proc(rust_rt_t *rt,
-                  rust_prog_t *prog)
+                rust_prog_t *prog)
 {
-  ptr_vec_push(&rt->procs, rust_new_proc(rt, prog));
+  return rust_new_proc(rt, prog);
+}
+
+static void
+rust_sched_proc(rust_rt_t *rt,
+                rust_proc_t *proc)
+{
+  ptr_vec_push(&rt->procs, proc);
 }
 
 static void
@@ -327,7 +334,10 @@ rust_handle_upcall(rust_proc_t *proc)
     upcall_log_str((char*)args[0]);
     break;
   case rust_upcall_spawn:
-    rust_spawn_proc(proc->rt, (rust_prog_t*)args[0]);
+    *((rust_proc_t**)args[0]) = rust_spawn_proc(proc->rt, (rust_prog_t*)args[1]);
+    break;
+  case rust_upcall_sched:
+    rust_sched_proc(proc->rt, (rust_proc_t*)args[0]);
     break;
   case rust_upcall_check_expr:
     upcall_check_expr(proc, args[0]);
@@ -387,7 +397,7 @@ rust_start(rust_prog_t *prog,
   logptr("prog->fini_code", (uintptr_t)prog->fini_code);
 
   rt = rust_new_rt();
-  rust_spawn_proc(rt, prog);
+  rust_sched_proc(rt, rust_spawn_proc(rt, prog));
   proc = rust_sched(rt);
 
   logptr("root proc is", (uintptr_t)proc);

@@ -184,6 +184,7 @@ and walk_ty
       | Ast.TY_int -> ()
       | Ast.TY_bool -> ()
       | Ast.TY_nil -> ()
+      | Ast.TY_proc -> ()
       | Ast.TY_any -> ()
   in
     walk_bracketed

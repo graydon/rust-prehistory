@@ -87,6 +87,7 @@ type upcall =
   | UPCALL_del_chan
   | UPCALL_send
   | UPCALL_recv
+  | UPCALL_sched
 ;;
 
 (* NB: all these numbers must be kept in sync with runtime. *)
@@ -111,6 +112,7 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_del_chan -> 9L
   | UPCALL_send -> 10L
   | UPCALL_recv -> 11L
+  | UPCALL_sched -> 12L
 ;;
 
 (* Word offsets for structure fields in rust.h. *)

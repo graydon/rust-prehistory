@@ -164,7 +164,8 @@ typedef enum {
   rust_upcall_new_chan       = 8,
   rust_upcall_del_chan       = 9,
   rust_upcall_send           = 10,
-  rust_upcall_recv           = 11
+  rust_upcall_recv           = 11,
+  rust_upcall_sched          = 12
 } rust_upcall_t;
 
 #define RUST_PROC_MAX_UPCALL_ARGS   8

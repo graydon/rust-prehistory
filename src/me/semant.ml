@@ -342,9 +342,13 @@ and ty_prog_of_prog (prog:Ast.prog) : Ast.ty_sig =
                       init.node.Ast.init_input_constrs,
                       init.node.Ast.init_output_slot.node)
   in
+  let extended_output =
+    let proc_slot = interior_slot Ast.TY_proc in
+      interior_slot (Ast.TY_tup [| proc_slot; output |])
+  in
     { Ast.sig_input_slots = inputs;
       Ast.sig_input_constrs = constrs;
-      Ast.sig_output_slot = output }
+      Ast.sig_output_slot = extended_output }
 
 and arg_slots (slots:((Ast.slot identified) * Ast.ident) array) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
