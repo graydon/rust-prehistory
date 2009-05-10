@@ -25,8 +25,8 @@ prog root
   main {
     let int n = 2 + 3 * 7;
     let str s = "hello there";
-    spawn a;
-    spawn b;
+    spawn a();
+    spawn b();
     let int x = 10;
     x = g(n,s);
     log x;

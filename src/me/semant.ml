@@ -286,6 +286,11 @@ let expr_slots (cx:ctxt) (e:Ast.expr) : node_id array =
 
 (* Mappings between mod items and their respective types. *)
 
+let interior_slot ty : Ast.slot =
+  { Ast.slot_mode = Ast.MODE_interior;
+    Ast.slot_ty = Some ty }
+;;
+
 let rec ty_mod_of_mod (inside:bool) (m:Ast.mod_items) : Ast.mod_type_items =
   let ty_items = Hashtbl.create (Hashtbl.length m) in
   let add n i = Hashtbl.add ty_items n (mod_type_item_of_mod_item inside i) in
@@ -329,12 +334,17 @@ and mod_type_item_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.mod_type_i
     { id = item.id;
       node = ty }
 
-and ty_prog_of_prog (prog:Ast.prog) : Ast.ty_prog =
-  let init_ty =
+and ty_prog_of_prog (prog:Ast.prog) : Ast.ty_sig =
+  let (inputs, constrs, output)  =
     match prog.Ast.prog_init with
-        None -> None
-      | Some init -> Some (arg_slots init.node.Ast.init_input_slots)
-  in init_ty
+        None -> ([||], [||], interior_slot Ast.TY_nil)
+      | Some init -> (arg_slots init.node.Ast.init_input_slots,
+                      init.node.Ast.init_input_constrs,
+                      init.node.Ast.init_output_slot.node)
+  in
+    { Ast.sig_input_slots = inputs;
+      Ast.sig_input_constrs = constrs;
+      Ast.sig_output_slot = output }
 
 and arg_slots (slots:((Ast.slot identified) * Ast.ident) array) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
@@ -652,8 +662,7 @@ let layout_tup (abi:Abi.abi) (tup:Ast.ty_tup) : (layout array) =
 ;;
 
 let word_slot (abi:Abi.abi) : Ast.slot =
-  { Ast.slot_mode = Ast.MODE_interior;
-    Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
+  interior_slot (Ast.TY_mach abi.Abi.abi_word_ty)
 ;;
 
 let word_write_alias_slot (abi:Abi.abi) : Ast.slot =

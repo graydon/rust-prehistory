@@ -204,16 +204,14 @@ let type_resolving_visitor
                            None -> None
                          | Some t -> Some (resolve_ty t)) }
 
+  and resolve_ty_sig (tsig:Ast.ty_sig) : Ast.ty_sig =
+    { Ast.sig_input_slots = Array.map resolve_slot tsig.Ast.sig_input_slots;
+      Ast.sig_input_constrs = tsig.Ast.sig_input_constrs;
+      Ast.sig_output_slot = resolve_slot tsig.Ast.sig_output_slot }
+
   and resolve_ty_fn (f:Ast.ty_fn) : Ast.ty_fn =
     let (tsig,taux) = f in
-      ({ Ast.sig_input_slots = Array.map resolve_slot tsig.Ast.sig_input_slots;
-         Ast.sig_input_constrs = tsig.Ast.sig_input_constrs;
-         Ast.sig_output_slot = resolve_slot tsig.Ast.sig_output_slot }, taux)
-
-  and resolve_ty_prog (p:Ast.ty_prog) : Ast.ty_prog =
-    match p with
-        None -> None
-      | Some slots -> Some (Array.map resolve_slot slots)
+      (resolve_ty_sig tsig, taux)
 
   and resolve_mod_type_item (ident:Ast.ident) (item:Ast.mod_type_item)
       : (Ast.ident * Ast.mod_type_item) =
@@ -249,7 +247,7 @@ let type_resolving_visitor
           | Ast.MOD_TYPE_ITEM_prog pd ->
               Ast.MOD_TYPE_ITEM_prog
                 (decl pd.Ast.decl_params
-                   (resolve_ty_prog pd.Ast.decl_item))
+                   (resolve_ty_sig pd.Ast.decl_item))
       in
         log cx "popping mod type item %s" ident;
         ignore (Stack.pop scopes);
@@ -289,7 +287,7 @@ let type_resolving_visitor
       | Ast.TY_pred tp ->
           let (slots, constrs) = tp in
             Ast.TY_pred ((Array.map resolve_slot slots), constrs)
-      | Ast.TY_prog tprog -> Ast.TY_prog (resolve_ty_prog tprog)
+      | Ast.TY_prog tprog -> Ast.TY_prog (resolve_ty_sig tprog)
       | Ast.TY_mod mtis -> Ast.TY_mod (resolve_mod_type_items mtis)
       | Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident)) ->
           resolve_ty (lookup_type_by_ident ident)

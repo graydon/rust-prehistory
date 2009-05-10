@@ -86,7 +86,7 @@ and ty =
   | TY_port of ty
 
   | TY_mod of (mod_type_items)
-  | TY_prog of ty_prog
+  | TY_prog of ty_sig
 
   | TY_opaque of opaque_id
   | TY_named of name
@@ -192,8 +192,6 @@ and ty_fn = (ty_sig * ty_fn_aux)
 
 and ty_pred = (slot array * constrs)
 
-and ty_prog = (slot array) option
-
 (* put+ f(a,b) means to call f with current put addr and self as ret
  * addr. this is a 'tail yield' that bypasses us during f execution.
  *
@@ -202,7 +200,7 @@ and ty_prog = (slot array) option
  *)
 and stmt' =
     STMT_log of atom
-  | STMT_spawn of atom  (* FIXME: should produce a proc. *)
+  | STMT_spawn of (lval * lval * (atom array))
   | STMT_init_rec of (lval * ((ident * atom) array))
   | STMT_init_vec of (lval * (atom array))
   | STMT_init_tup of (lval * (atom array))
@@ -380,6 +378,7 @@ and init =
     {
       init_input_slots: ((slot identified) * ident) array;
       init_input_constrs: constrs;
+      init_output_slot: slot identified;
       init_body: block;
     }
 
@@ -446,7 +445,7 @@ and mod_type_item' =
   | MOD_TYPE_ITEM_pred of ty_pred decl
   | MOD_TYPE_ITEM_mod of mod_type_items decl
   | MOD_TYPE_ITEM_fn of ty_fn decl
-  | MOD_TYPE_ITEM_prog of ty_prog decl
+  | MOD_TYPE_ITEM_prog of ty_sig decl
 
 and mod_type_item = mod_type_item' identified
 
@@ -771,12 +770,18 @@ and fmt_stmt (ff:Format.formatter) (s:stmt) : unit =
             fmt ff ";"
           end
 
-      | STMT_spawn at ->
-          begin
-            fmt ff "spawn ";
-            fmt_atom ff at;
-            fmt ff ";"
-          end
+      | STMT_spawn (dst, prog, args) ->
+          fmt_lval ff dst;
+          fmt ff " = spawn ";
+          fmt_lval ff prog;
+          fmt ff "(";
+          for i = 0 to (Array.length args) - 1
+          do
+            if i != 0
+            then fmt ff ", ";
+            fmt_atom ff args.(i);
+          done;
+          fmt ff ");";
 
       | STMT_while sw ->
           let (stmts, at) = sw.while_lval in

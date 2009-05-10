@@ -302,6 +302,7 @@ let string_of_tok t =
 
 type pexp' =
     PEXP_call of (pexp * pexp array)
+  | PEXP_spawn of pexp
   | PEXP_rec of ((Ast.ident * pexp) array)
   | PEXP_tup of (pexp array)
   | PEXP_vec of (pexp array)
@@ -803,7 +804,7 @@ and parse_bottom_pexp ps : pexp =
   let apos = lexpos ps in
   match peek ps with
       LPAREN ->
-        let pexps = ctxt "paren pexps(s)" (parse_pexp_list LPAREN RPAREN) ps in
+        let pexps = ctxt "paren pexps(s)" parse_pexp_list ps in
         let bpos = lexpos ps in
           if Array.length pexps = 1
           then
@@ -819,7 +820,7 @@ and parse_bottom_pexp ps : pexp =
 
     | VEC ->
           bump ps;
-          let pexps = ctxt "vec pexp: exprs" (parse_pexp_list LPAREN RPAREN) ps in
+          let pexps = ctxt "vec pexp: exprs" parse_pexp_list ps in
           let bpos = lexpos ps in
             span ps apos bpos (PEXP_vec pexps)
 
@@ -849,6 +850,12 @@ and parse_bottom_pexp ps : pexp =
             let bpos = lexpos ps in
               span ps apos bpos (PEXP_chan port)
         end
+
+    | SPAWN ->
+          bump ps;
+          let pexp = ctxt "spawn pexp: init call" parse_pexp ps in
+          let bpos = lexpos ps in
+              span ps apos bpos (PEXP_spawn pexp)
 
     | IDENT i ->
         begin
@@ -880,8 +887,8 @@ and parse_bottom_pexp ps : pexp =
 and parse_ext_pexp ps pexp =
   let apos = lexpos ps in
     match peek ps with
-        LPAREN ->
-          let args = parse_pexp_list LPAREN RPAREN ps in
+        NIL | LPAREN ->
+          let args = parse_pexp_list ps in
           let bpos = lexpos ps in
           let ext = span ps apos bpos (PEXP_call (pexp, args)) in
             parse_ext_pexp ps ext
@@ -1004,9 +1011,13 @@ and parse_pexp ps =
   parse_or_pexp ps
 
 
-and parse_pexp_list bra ket ps =
-  bracketed_zero_or_more bra ket (Some COMMA)
-    (ctxt "pexp list" parse_pexp) ps
+and parse_pexp_list ps =
+  match peek ps with
+      LPAREN ->
+        bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
+          (ctxt "pexp list" parse_pexp) ps
+    | NIL -> (bump ps; [| |])
+    | _ -> raise (unexpected ps)
 
 
 and atom_lval ps at =
@@ -1057,7 +1068,8 @@ and desugar_expr ps pexp =
       | PEXP_vec _
       | PEXP_port
       | PEXP_chan _
-      | PEXP_call _ ->
+      | PEXP_call _
+      | PEXP_spawn _ ->
           let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
           let stmts = desugar_expr_init ps tmp pexp in
             (Array.append [| decl_stmt |] stmts,
@@ -1111,6 +1123,18 @@ and desugar_expr_init ps dst_lval pexp =
           let fn_lval = atom_lval ps fn_atom in
           let call_stmt = span ps apos bpos (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
             Array.concat [ fn_stmts; arg_stmts; [| call_stmt |] ]
+
+      | PEXP_spawn sub ->
+          begin
+            match sub.node with
+                PEXP_call (prog, args) ->
+                  let (prog_stmts, prog_atom) = desugar_expr ps prog in
+                  let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+                  let prog_lval = atom_lval ps prog_atom in
+                  let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, prog_lval, arg_atoms)) in
+                    Array.concat [ prog_stmts; arg_stmts; [| spawn_stmt |] ]
+              | _ -> raise (err "non-call spawn" ps)
+          end
 
       | PEXP_rec args ->
           let (arg_stmts, entries) =
@@ -1244,13 +1268,6 @@ and parse_stmts ps =
             expect ps SEMI;
             let bpos = lexpos ps in
               spans stmts apos bpos (Ast.STMT_log atom)
-
-      | SPAWN ->
-          bump ps;
-          let (stmts, atom) = ctxt "stmts: spawn value" parse_expr ps in
-            expect ps SEMI;
-            let bpos = lexpos ps in
-              spans stmts apos bpos (Ast.STMT_spawn atom)
 
       | CHECK ->
           bump ps;
@@ -1476,12 +1493,13 @@ and parse_prog_item prog_cell stmts_cell ps =
     | INIT ->
           bump ps;
           let apos = lexpos ps in
-          let (inputs, constrs) = ctxt "prog_item: init inputs" parse_inputs ps in
+          let (inputs, constrs, output) = ctxt "prog_item: init in_and_out" parse_in_and_out ps in
           let body = ctxt "prog_item: init body" parse_block ps in
           let bpos = lexpos ps in
           let init = span ps apos bpos
             { Ast.init_input_slots = inputs;
               Ast.init_input_constrs = constrs;
+              Ast.init_output_slot = output;
               Ast.init_body = body }
           in
           prog_cell := { (!prog_cell) with Ast.prog_init = Some init }
@@ -1576,7 +1594,7 @@ and parse_inputs ps =
     (slots, constrs)
 
 
-and parse_fn_in_and_out ps =
+and parse_in_and_out ps =
   let (inputs, constrs) = parse_inputs ps in
   let _ = expect ps RARROW in
   let output = ctxt "fn in and out: output slot" (parse_identified_slot true) ps in
@@ -1585,7 +1603,7 @@ and parse_fn_in_and_out ps =
 
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn proto_opt lim pure ps =
-    let (inputs, constrs, output) = ctxt "fn: fn_in_and_out" parse_fn_in_and_out ps in
+    let (inputs, constrs, output) = ctxt "fn: in_and_out" parse_in_and_out ps in
     let body = ctxt "fn: body" parse_block ps in
       { Ast.fn_input_slots = inputs;
         Ast.fn_input_constrs = constrs;

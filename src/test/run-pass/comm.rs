@@ -4,7 +4,7 @@ prog root
 {
   main {
     let port[int] p = port();
-    // child(chan(p));
+    spawn child(chan(p));
     let int y;
     y <- p;
     check (y == 10);
@@ -14,7 +14,7 @@ prog root
 prog child
 {
   let chan[int] c;
-  init (chan[int] c0) {
+  init (chan[int] c0) -> () {
     //c = c0;
   }
   main {

@@ -167,7 +167,7 @@ and walk_ty
       | Ast.TY_chan t -> walk_ty v t
       | Ast.TY_port t -> walk_ty v t
       | Ast.TY_mod mt -> walk_mod_type_items v mt
-      | Ast.TY_prog tp -> walk_ty_prog v tp
+      | Ast.TY_prog tp -> walk_ty_sig v tp
       | Ast.TY_constrained (t,cs) ->
           begin
             walk_ty v t;
@@ -211,13 +211,6 @@ and walk_ty_fn
   walk_ty_sig v tsig
 
 
-and walk_ty_prog
-    (v:visitor)
-    (tprog:Ast.ty_prog)
-    : unit =
-  walk_option (Array.iter (walk_slot v)) tprog
-
-
 and walk_mod_type_item
     (v:visitor)
     (name:Ast.ident)
@@ -238,7 +231,7 @@ and walk_mod_type_item
       | Ast.MOD_TYPE_ITEM_fn fd ->
           (fd.Ast.decl_params, (fun _ -> walk_ty_fn v fd.Ast.decl_item))
       | Ast.MOD_TYPE_ITEM_prog pd ->
-          (pd.Ast.decl_params, (fun _ -> walk_ty_prog v pd.Ast.decl_item))
+          (pd.Ast.decl_params, (fun _ -> walk_ty_sig v pd.Ast.decl_item))
   in
     walk_bracketed
       (v.visit_mod_type_item_pre name params)
@@ -296,6 +289,8 @@ and walk_init
     (i:Ast.init identified)
     : unit =
   Array.iter (fun (s,_) -> walk_slot_identified v s) i.node.Ast.init_input_slots;
+  walk_constrs v i.node.Ast.init_input_constrs;
+  walk_slot_identified v i.node.Ast.init_output_slot;
   walk_block v i.node.Ast.init_body
 
 
@@ -345,9 +340,6 @@ and walk_stmt
         Ast.STMT_log a ->
           walk_atom v a
 
-      | Ast.STMT_spawn a ->
-          walk_atom v a
-
       | Ast.STMT_init_rec (lv, atab) ->
           walk_lval v lv;
           Array.iter (fun (_, a) -> walk_atom v a) atab
@@ -390,6 +382,11 @@ and walk_stmt
       | Ast.STMT_call (dst,f,az) ->
           walk_lval v dst;
           walk_lval v f;
+          Array.iter (walk_atom v) az
+
+      | Ast.STMT_spawn (dst,p,az) ->
+          walk_lval v dst;
+          walk_lval v p;
           Array.iter (walk_atom v) az
 
       | Ast.STMT_ret (_, ao) ->

@@ -34,14 +34,44 @@ with (sys.stdin = null_chan();
 }
 
 
-What are dyns good for? 
+What are dyns good for?
 
   - Arguments that are so ubiquitous that you would have to thread them
     through every call in the system to get anything to work.
 
   - Working around brittle interfaces you can't necessarily change but you
     need to pass a few more parameters through: put them in the dynamic
-    environment, pull them out inside, fail if you can't.
+    environment, pull them out inside, fail if you can't. ***NOTE*** actually
+    this is a bogus reason, see below.
+
+    - does this really make sense? why not just use a closure? what's the
+      example 'interface' through which you can't just close over the
+      extra arguments? it'd be pretty artificial: some kind of combiner
+      that composes 2 user-provided functions f1 and f2 into f1(wrapper(f2));
+      you'd then receive a wrapper as f1 and if you wanted to communicate
+      with f2 you'd be sunk using closures because you and f2 don't share
+      variables environment. Only so sunk though. You could spawn a proc
+      outside and give f1 the port and f2 the chan, and have the
+      communication go that way. Awkward, but I think this is an artificial
+      argument.
+
+    - should dyns be used *in place* of closures? they serve different
+      purposes. closures bundle an environment into a function. doing
+      so would be equivalent to only allowing "downward" closures: callees
+      can see the Nth ancestral call environment, but you can't return
+      a closure capturing a copy of that environment. so ... possibly
+      could weaken closures to dyns; but probably this will annoy people.
+      on the other hand, the idioms of using closures to "encapsulate
+      mutable state" possibly won't work in rust *anyways*, as the envs
+      captured in closures cannot be allowed to share mutable-visibility
+      bindings. final argument in the coffin perhaps: dyns would necessarily
+      require re-checking the environment for a binding if they were used
+      in place of downward closures, because you'd be using them to pass
+      args through an ignorant intermediary fn that doesn't properly
+      set the typestate. This would make them awful and unwieldy. Also it'd
+      require tracking dyn tables at the level of scopes (possibly with
+      closures themselves) rather than at the level of static crate entries.
+      So no. Closures != dyns.
 
   - Anything you might use a file descriptor number or an environment
     variable for in C/unix.
@@ -70,3 +100,68 @@ What are dyns not?
     encapsulation. If you are a callee, an intermediate caller can clear
     the dynamic environment you get (via reflection), and/or corrupt your
     dyn settings, just as easily as they can honor them.
+
+Spawning in a dyn environment?
+
+Clearly the child process' dyn environment differs from the parent's. It has its own types of
+functions and should be isolated from covert channels anyways. I think? Though I suppose in theory
+you could have the program type have dyn(x) constraints and spawn copies the declared portion of the
+environment from spawner to spawnee? that'd require the dyn(x=y) {..} construct to occur in
+expression context though, which ... might already be necessary?
+
+no, it's not. we're going to have the stmt-as-expr form, so we can just make a dyn stmt form.
+
+dyn { ... } means execute ... in a blank environment
+
+dyn (x=y, p=q) { ... } means execute ... in an environment with only an x=y and p=q binding
+
+dyn+ (x=y) { ... } means execute ... in an environment extended with an x=y binding
+
+dyn- (x,y,z) { ... } means execute ... in an environment with the x,y,z bindings unset
+
+This is probably overkill. It's not clear that there are important idioms that would use
+this. In fact, given that channels vs. ports are *half duplex* anyways, it's not clear to me
+that the advantage of tersely saying:
+
+  prog needs_stdio {
+     port[buf] in;
+     init(vec[str] argv) : dyn(sys.stdout), dyn(sys.stderr) -> chan[buf]
+     {
+      in = port();
+      ret chan(port);
+     }
+  }
+
+over more verbosely saying:
+
+  type buf = vec[u8];
+  prog needs_stdio {
+    port[buf] in;
+    chan[buf] out;
+    chan[buf] err;
+    init(vec[str] argv, chan[buf] _out, chan[buf] _err) -> chan[buf]
+    {
+      out = _out;
+      err = _err;
+      in = port();
+      ret chan(port);
+    }
+  }
+
+when you consider that the idiomatic call-side carries some of the (minor) difference
+in typing-burden:
+
+  type buf = vec[u8];
+  let (port[buf] out, port[buf] err) = (port(), port());
+  let chan[buf] in = spawn (sys.stdout=chan(out),
+                            sys.stderr=chan(err)) needs_stdio(args);
+
+vs. w/o any dyn envs:
+
+  type buf = vec[u8];
+  let (port[buf] out, port[buf] err) = (port(), port());
+  let chan[buf] in = spawn needs_stdio(args, chan(out), chan(err));
+
+I think for the sake of simplicity I will actually leave dyn envs out of the first pass
+entirely. we'll see if we eventually need them -- say for error-handler binding or something -- but
+I think they may be over-engineering.

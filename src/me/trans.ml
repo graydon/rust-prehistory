@@ -417,8 +417,8 @@ let trans_visitor
   and trans_log_str (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_log_str [| (trans_atom a) |]
 
-  and trans_spawn (a:Ast.atom) : unit =
-    trans_upcall Abi.UPCALL_spawn [| (trans_atom a) |]
+  and trans_spawn (prog:Ast.lval) : unit =
+    trans_upcall Abi.UPCALL_spawn [| (trans_atom (Ast.ATOM_lval prog)) |]
 
   and trans_check_expr (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_check_expr [| (trans_atom a) |]
@@ -787,7 +787,7 @@ let trans_visitor
               | _ -> err (Some stmt.id) "check expr on non-bool"
           end
 
-      | Ast.STMT_spawn a -> trans_spawn a
+      | Ast.STMT_spawn (_,a,_) -> trans_spawn a
       | Ast.STMT_send (chan,src) -> trans_send chan src
       | Ast.STMT_recv (dst,chan) -> trans_recv dst chan
 

@@ -351,10 +351,10 @@ rust_handle_upcall(rust_proc_t *proc)
     printf("rt: del chan\n");
     break;
   case rust_upcall_send:
-    printf("rt: send\n");
+    logptr("send from", (uintptr_t)proc);
     break;
   case rust_upcall_recv:
-    printf("rt: recv\n");
+    logptr("recv to", (uintptr_t)proc);
     break;
       /*;
   case 3:

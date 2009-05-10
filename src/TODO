@@ -1,5 +1,7 @@
 
 progress:
+ - extend typestate system to handle operation pre/post conditions
+   extracted from implicit-in-type constrs
  - floating point values / registers / instructions
  - general memcpy-with-inlining-threshold trans function
  - explicit FFI / struct descriptors; hard-coding offsets is getting stale

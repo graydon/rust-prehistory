@@ -83,6 +83,16 @@ let auto_inference_visitor
       | Ast.EXPR_unary (_, atom) -> unify_atom tyo atom
       | Ast.EXPR_atom atom -> unify_atom tyo atom
   in
+  let unify_tsig id tsig dst args =
+    ignore (unify_lval tsig.Ast.sig_output_slot.Ast.slot_ty dst);
+    let islots = tsig.Ast.sig_input_slots in
+      if Array.length islots != Array.length args
+      then err (Some id) "argument count mismatch";
+      for i = 0 to (Array.length islots) - 1
+      do
+        ignore (unify_atom islots.(i).Ast.slot_ty args.(i));
+      done
+  in
   let visit_stmt_pre (s:Ast.stmt) =
     begin
       match s.node with
@@ -130,24 +140,14 @@ let auto_inference_visitor
             begin
               match unify_lval None fn with
                   None -> ()
-                | Some (Ast.TY_fn (tsig, _)) ->
-                    begin
-                      ignore (unify_lval tsig.Ast.sig_output_slot.Ast.slot_ty dst);
-                      let islots = tsig.Ast.sig_input_slots in
-                        if Array.length islots != Array.length args
-                        then err (Some s.id) "argument count mismatch";
-                        for i = 0 to (Array.length islots) - 1
-                        do
-                          ignore (unify_atom islots.(i).Ast.slot_ty args.(i));
-                        done
-                    end
+                | Some (Ast.TY_fn (tsig, _)) -> unify_tsig s.id tsig dst args
                 | _ -> err (Some s.id) "STMT_call fn resolved to non-function type"
             end
-        | Ast.STMT_spawn prog ->
+        | Ast.STMT_spawn (dst,prog,args) ->
             begin
-              match unify_atom None prog with
+              match unify_lval None prog with
                   None -> ()
-                | Some (Ast.TY_prog _) -> ()
+                | Some (Ast.TY_prog tsig) -> unify_tsig s.id tsig dst args
                 | Some _ -> err (Some s.id) "STMT_spawn prog resolved to non-program type"
             end
         | Ast.STMT_if i ->
