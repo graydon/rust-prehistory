@@ -119,24 +119,28 @@ struct rust_prog;
 struct rust_port;
 struct rust_chan;
 struct rust_rt;
+struct rust_ptr_vec;
 
 typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
 typedef struct rust_port rust_port_t;
 typedef struct rust_chan rust_chan_t;
 typedef struct rust_rt rust_rt_t;
+typedef struct rust_ptr_vec rust_ptr_vec_t;
 
 /* FIXME: ifdef by platform. */
 extern size_t const rust_n_callee_saves;
 
-/* FIXME: dynamically resize proc array. */
-extern size_t const rust_n_procs;
+struct rust_ptr_vec {
+  size_t alloc;
+  size_t init;
+  void **data;
+};
 
 struct rust_rt {
   uintptr_t sp;          /* Saved sp from the C runtime. */
-  size_t curr_proc;      /* Currently active proc.       */
-  size_t live_procs;     /* Number of live procs.        */
-  rust_proc_t **procs;
+  size_t curr_proc;
+  rust_ptr_vec_t procs;
 };
 
 typedef enum {
@@ -192,7 +196,7 @@ struct rust_proc {
   uintptr_t upcall_code;
   uintptr_t upcall_args[RUST_PROC_MAX_UPCALL_ARGS];
 
-  rust_port_t *ports;
+  rust_ptr_vec_t ports;
 
   /* Proc accounting. */
   uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */
@@ -205,21 +209,12 @@ struct rust_proc {
 };
 
 struct rust_port {
-  /* Ports are kept in a doubly-linked list owned by a proc. */
-  rust_proc_t *owner;
-  rust_port_t *prev;
-  rust_port_t *next;
-
   size_t refcnt;
-  size_t buf_sz;
-  size_t buf_use;
-  uintptr_t *read;
-  uintptr_t buf[];
+  rust_ptr_vec_t writers;
 };
 
 struct rust_chan {
   rust_port_t *port;
-  uintptr_t blocking_p;
 };
 
 #endif /* RUST_H__ */

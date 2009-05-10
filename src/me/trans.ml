@@ -453,7 +453,7 @@ let trans_visitor
         | Some p -> trans_atom (Ast.ATOM_lval p)
     in
     let (dstop, _) = trans_lval dst INTENT_write in
-    trans_upcall Abi.UPCALL_new_port [| (alias dstop); portop |]
+    trans_upcall Abi.UPCALL_new_chan [| (alias dstop); portop |]
 
   and trans_del_chan (chan:Ast.lval) : unit =
       trans_upcall Abi.UPCALL_del_chan [| (trans_atom (Ast.ATOM_lval chan)) |]

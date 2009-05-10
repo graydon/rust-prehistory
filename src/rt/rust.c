@@ -5,8 +5,6 @@
 #include <inttypes.h>
 
 size_t const rust_n_callee_saves = 4;
-size_t const rust_n_procs = 1024;
-
 
 static void
 logptr(char const *msg, uintptr_t ptrval)
@@ -34,32 +32,96 @@ xcalloc(size_t sz)
   return p;
 }
 
-static void
-rust_log_uint32_t(uint32_t i)
+static void*
+xrealloc(void *p, size_t sz)
 {
-  printf("rt: log_uint32(0x%" PRIx32 ")\n", i);
+  p = realloc(p, sz);
+  if (!p) {
+    printf("rt: reallocation of 0x%" PRIxPTR
+           " bytes failed, exiting\n", sz);
+    exit(123);
+  }
+  return p;
+}
+
+/* Utility type: pointer-vector. */
+
+#define INIT_PTR_VEC_SZ 8
+
+static void
+init_ptr_vec(rust_ptr_vec_t *v)
+{
+  v->alloc = INIT_PTR_VEC_SZ;
+  v->init = 0;
+  v->data = xalloc(v->alloc);
 }
 
 static void
-rust_log_str(char *c)
+fini_ptr_vec(rust_ptr_vec_t *v)
 {
-  printf("rt: log_str(\"%s\")\n", c);
-}
-
-static rust_rt_t*
-rust_new_rt()
-{
-  rust_rt_t *rt = xcalloc(sizeof(rust_rt_t));
-  logptr("new rt", (uintptr_t)rt);
-  rt->procs = xcalloc(sizeof(rust_proc_t*) * rust_n_procs);
-  return rt;
+  assert(v->init == 0);
+  if (v->data)
+    free(v->data);
 }
 
 static void
-rust_del_rt(rust_rt_t *rt)
+ptr_vec_push(rust_ptr_vec_t *v, void *p)
 {
-  free(rt);
+  if (v->init == v->alloc) {
+    v->alloc *= 2;
+    v->data = xrealloc(v->data, v->alloc);
+  }
+  v->data[v->init++] = p;
 }
+
+static void
+ptr_vec_swapdel(rust_ptr_vec_t *v, size_t i)
+{
+  /* Swap the endpoint into i and decr init. */
+  assert(v->init > 0);
+  assert(i < v->init);
+  if (v->init > 1)
+    v->data[i] = v->data[v->init-1];
+  v->init--;
+  if (v->init == (v->alloc / 4) &&
+      (v->alloc / 2) >= INIT_PTR_VEC_SZ) {
+    v->alloc /= 2;
+    v->data = xrealloc(v->data, v->alloc);
+  }
+}
+
+
+/*
+static rust_ptr_vec_t*
+new_ptr_vec()
+{
+  rust_ptr_vec_t *v = xalloc(sizeof(rust_ptr_vec_t));
+  init_ptr_vec(v);
+  return v;
+}
+static void
+del_ptr_vec(rust_ptr_vec_t *v)
+{
+  fini_ptr_vec(v);
+  free(v);
+}
+static void
+ptr_vec_del(rust_ptr_vec_t *v, size_t i)
+{
+  assert(v->init > 0);
+  assert(i < v->init);
+  v->init--;
+  if (v->init > 0)
+    memmove(v->data + i, v->data + i + 1, v->init - i);
+  if (v->init == (v->alloc / 2) && (v->alloc / 2) >= 4) {
+    v->alloc /= 2;
+    v->data = xrealloc(v->data, v->alloc);
+  }
+}
+*/
+
+
+/* Stacks */
 
 /* Get around to using linked-lists of size-doubling stacks, eventually. */
 static size_t const rust_init_stk_bytes = 65536;
@@ -88,6 +150,8 @@ rust_del_stk(rust_stk_seg_t *stk)
   printf("rt: freed stacks.\n");
 }
 
+/* Processes */
+
 static rust_proc_t*
 rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
 {
@@ -101,7 +165,7 @@ rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
      then align down to 16 boundary, to be safe-ish?
   */
   size_t tos = rust_init_stk_bytes-sizeof(uintptr_t);
-  proc->sp = (uintptr_t) &(proc->stk->data[tos]);
+  proc->sp = (uintptr_t) &proc->stk->data[tos];
   proc->sp &= ~0xf;
 
   /* "initial args" to the main frame:
@@ -150,88 +214,82 @@ rust_del_proc(rust_proc_t *proc)
 
 static void
 rust_spawn_proc(rust_rt_t *rt,
-                rust_prog_t *prog)
+                  rust_prog_t *prog)
 {
-  /* Want there to always be a null on the end. */
-  assert(rt->live_procs + 2 < rust_n_procs);
-  assert(! rt->procs[rt->live_procs]);
-  rt->procs[rt->live_procs] = rust_new_proc(rt, prog);
-  rt->live_procs++;
+  ptr_vec_push(&rt->procs, rust_new_proc(rt, prog));
 }
 
 static void
 rust_exit_curr_proc(rust_rt_t *rt)
 {
-  assert(rt->procs[rt->curr_proc]);
-  assert(rt->live_procs > 0);
-  rust_del_proc(rt->procs[rt->curr_proc]);
-  if (rt->curr_proc != rt->live_procs-1) {
-    printf("rt: swapping proc %d=%" PRIxPTR " <- %d=%" PRIxPTR "\n",
-           rt->curr_proc, (uintptr_t) rt->procs[rt->curr_proc],
-           rt->live_procs-1, (uintptr_t) rt->procs[rt->live_procs-1]);
-    rt->procs[rt->curr_proc] = rt->procs[rt->live_procs-1];
-    rt->procs[rt->live_procs-1] = NULL;
-  } else {
-    printf("rt: clearing curr_proc %d\n", rt->curr_proc);
-    rt->procs[rt->curr_proc] = NULL;
-  }
-  assert(!rt->procs[rt->live_procs-1]);
-  rt->live_procs--;
-  printf("rt: rt->live_procs = %d\n", rt->live_procs);
+  assert(rt->procs.init > 0);
+  rust_del_proc((rust_proc_t*) rt->procs.data[rt->curr_proc]);
+  ptr_vec_swapdel(&rt->procs, rt->curr_proc);
 }
 
 static rust_proc_t*
 rust_sched(rust_rt_t *rt)
 {
   rt->curr_proc++;
-  rt->curr_proc %= rt->live_procs;
-  assert(rt->procs[rt->curr_proc]);
-  // logptr("rust_sched chose proc", (uintptr_t)rt->procs[rt->curr_proc]);
-  return rt->procs[rt->curr_proc];
+  rt->curr_proc %= rt->procs.init;
+  /* logptr("rust_sched chose proc ", (uintptr_t)rt->procs.data[rt->curr_proc]); */
+  return (rust_proc_t*) rt->procs.data[rt->curr_proc];
 }
 
-/* FIXME: use user-controlled buffer size in the future. */
-static size_t const rust_port_bufsz = 64;
+/* Runtime */
+
+static rust_rt_t*
+rust_new_rt()
+{
+  rust_rt_t *rt = xcalloc(sizeof(rust_rt_t));
+  logptr("new rt", (uintptr_t)rt);
+  init_ptr_vec(&rt->procs);
+  return rt;
+}
+
+static void
+rust_del_rt(rust_rt_t *rt)
+{
+  while (rt->procs.init) {
+    rust_del_proc((rust_proc_t*) rt->procs.data[rt->procs.init--]);
+  }
+  fini_ptr_vec(&rt->procs);
+  free(rt);
+}
+
+/* Upcalls */
+
+static void
+upcall_log_uint32_t(uint32_t i)
+{
+  printf("rt: log_uint32(0x%" PRIx32 ")\n", i);
+}
+
+static void
+upcall_log_str(char *c)
+{
+  printf("rt: log_str(\"%s\")\n", c);
+}
 
 static rust_port_t*
-rust_new_port(rust_proc_t *proc)
+upcall_new_port(rust_proc_t *proc)
 {
-  size_t sz = sizeof(rust_port_t) + rust_port_bufsz * sizeof(uintptr_t);
-  rust_port_t *port = xalloc(sz);
+  rust_port_t *port = xcalloc(sizeof(rust_port_t));
   logptr("new port", (uintptr_t)port);
-  memset(port, 0, sizeof(rust_port_t));
-  port->buf_sz = rust_port_bufsz;
-  port->read = &(port->buf[0]);
-  port->owner = proc;
-  if (proc->ports) {
-    port->next = proc->ports;
-    port->prev = port->next->prev;
-    port->prev->next = port;
-    port->next->prev = port;
-  } else {
-    proc->ports = port;
-    port->next = port->prev = port;
-  }
   return port;
 }
 
 static void
-rust_del_port(rust_port_t *port)
+upcall_del_port(rust_port_t *port)
 {
   logptr("del port", (uintptr_t)port);
   assert(port->refcnt == 0);
-  if (port->next != port) {
-    port->next->prev = port->prev;
-    port->prev->next = port->next;
-  }
-  port->next = port->prev = NULL;
-  if (port->owner->ports == port)
-    port->owner->ports = port->next;
+  fini_ptr_vec(&port->writers);
   free(port);
 }
 
 static void
-rust_check_expr(rust_proc_t *proc, uint32_t i)
+upcall_check_expr(rust_proc_t *proc, uint32_t i)
 {
   if (!i) {
     /* FIXME: throw, don't just exit. */
@@ -241,60 +299,62 @@ rust_check_expr(rust_proc_t *proc, uint32_t i)
 }
 
 static uintptr_t
-rust_malloc(rust_proc_t *proc, size_t nbytes)
+upcall_malloc(rust_proc_t *proc, size_t nbytes)
 {
   void *p = xalloc(nbytes);
   printf("rt: malloc(%u) = 0x%" PRIxPTR "\n", nbytes, (uintptr_t)p);
-  fflush(stdout);
   return (uintptr_t) p;
 }
 
 static void
-rust_free(rust_proc_t *proc, void* ptr)
+upcall_free(rust_proc_t *proc, void* ptr)
 {
   printf("rt: free(0x%" PRIxPTR ")\n", (uintptr_t)ptr);
   free(ptr);
 }
 
-
-void
+static void
 rust_handle_upcall(rust_proc_t *proc)
 {
-  uintptr_t *args = &(proc->upcall_args[0]);
+  uintptr_t *args = &proc->upcall_args[0];
 
   /* printf("rt: calling fn #%d\n", proc->upcall_code); */
   switch ((rust_upcall_t)proc->upcall_code) {
   case rust_upcall_log_uint32:
-    rust_log_uint32_t(args[0]);
+    upcall_log_uint32_t(args[0]);
     break;
   case rust_upcall_log_str:
-    rust_log_str((char*)args[0]);
+    upcall_log_str((char*)args[0]);
     break;
   case rust_upcall_spawn:
     rust_spawn_proc(proc->rt, (rust_prog_t*)args[0]);
     break;
   case rust_upcall_check_expr:
-    rust_check_expr(proc, args[0]);
+    upcall_check_expr(proc, args[0]);
     break;
   case rust_upcall_malloc:
-    *((uintptr_t*)args[0]) = rust_malloc(proc, (size_t)args[1]);
+    *((uintptr_t*)args[0]) = upcall_malloc(proc, (size_t)args[1]);
     break;
   case rust_upcall_free:
-    rust_free(proc, (void*)args[0]);
+    upcall_free(proc, (void*)args[0]);
     break;
   case rust_upcall_new_port:
-    *((rust_port_t**)args[0]) = rust_new_port(proc);
+    *((rust_port_t**)args[0]) = upcall_new_port(proc);
     break;
   case rust_upcall_del_port:
-    rust_del_port((rust_port_t*)args[0]);
+    upcall_del_port((rust_port_t*)args[0]);
     break;
   case rust_upcall_new_chan:
+    printf("rt: new chan\n");
     break;
   case rust_upcall_del_chan:
+    printf("rt: del chan\n");
     break;
   case rust_upcall_send:
+    printf("rt: send\n");
     break;
   case rust_upcall_recv:
+    printf("rt: recv\n");
     break;
       /*;
   case 3:
@@ -352,7 +412,7 @@ rust_start(rust_prog_t *prog,
       rust_exit_curr_proc(rt);
       break;
     }
-    if (rt->live_procs > 0)
+    if (rt->procs.init > 0)
       proc = rust_sched(rt);
     else
       break;

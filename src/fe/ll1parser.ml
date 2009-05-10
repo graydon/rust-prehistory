@@ -836,7 +836,7 @@ and parse_bottom_pexp ps : pexp =
             bump ps;
             let port =
               match peek ps with
-                  NIL -> None
+                  NIL -> (bump ps; None)
                 | LPAREN ->
                     begin
                       bump ps;
