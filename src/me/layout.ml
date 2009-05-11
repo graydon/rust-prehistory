@@ -6,6 +6,45 @@ let log cx = Session.log "layout"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
+(* 
+ * Not clear this classification is best done here;
+ * it has to be done somewhere. Maybe trans? 
+ *)
+let lval_in_init_visitor
+    (cx:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+  let (init_context:bool Stack.t) = Stack.create () in
+  let visit_init_pre init =
+    Stack.push true init_context;
+    inner.Walk.visit_init_pre init
+  in
+  let visit_init_post init =
+    inner.Walk.visit_init_post init;
+    ignore (Stack.pop init_context)
+  in
+  let visit_mod_item_pre n p i =
+    Stack.push false init_context;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+  let visit_mod_item_post n p i =
+    inner.Walk.visit_mod_item_post n p i;
+    ignore (Stack.pop init_context);
+  in
+  let visit_lval_pre lv =
+    let id = lval_base_id lv in
+      if Stack.top init_context
+      then htab_put cx.ctxt_lval_is_in_proc_init id ()
+      else ();
+      inner.Walk.visit_lval_pre lv
+  in
+    { inner with
+        Walk.visit_init_pre = visit_init_pre;
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_lval_pre = visit_lval_pre;
+        Walk.visit_init_post = visit_init_post;
+        Walk.visit_mod_item_post = visit_mod_item_post }
+;;
 
 let layout_visitor
     (cx:ctxt)
@@ -318,6 +357,8 @@ let process_crate
     : unit =
   let passes =
     [|
+      (lval_in_init_visitor cx
+         Walk.empty_visitor);
       (layout_visitor cx
          Walk.empty_visitor)
     |];

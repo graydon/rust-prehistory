@@ -35,6 +35,7 @@ type ctxt =
       ctxt_block_slots: block_slots_table;
       ctxt_block_items: block_items_table;
       ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
+      ctxt_slot_owner: (node_id,node_id) Hashtbl.t;
       (* ctxt_slot_keys is just for error messages. *)
       ctxt_slot_keys: (node_id,Ast.slot_key) Hashtbl.t;
       ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
@@ -53,8 +54,6 @@ type ctxt =
       ctxt_prestates: (node_id,Bitv.t) Hashtbl.t;
       ctxt_poststates: (node_id,Bitv.t) Hashtbl.t;
       ctxt_copy_stmt_is_init: (node_id,unit) Hashtbl.t;
-
-      ctxt_slot_is_in_proc: (node_id,node_id) Hashtbl.t;
       ctxt_lval_is_in_proc_init: (node_id,unit) Hashtbl.t;
 
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
@@ -84,6 +83,7 @@ let new_ctxt sess abi crate =
     ctxt_block_slots = Hashtbl.create 0;
     ctxt_block_items = Hashtbl.create 0;
     ctxt_all_slots = Hashtbl.create 0;
+    ctxt_slot_owner = Hashtbl.create 0;
     ctxt_slot_keys = Hashtbl.create 0;
     ctxt_all_items = Hashtbl.create 0;
     ctxt_item_names = Hashtbl.create 0;
@@ -99,8 +99,6 @@ let new_ctxt sess abi crate =
     ctxt_prestates = Hashtbl.create 0;
     ctxt_poststates = Hashtbl.create 0;
     ctxt_copy_stmt_is_init = Hashtbl.create 0;
-
-    ctxt_slot_is_in_proc = Hashtbl.create 0;
     ctxt_lval_is_in_proc_init = Hashtbl.create 0;
 
     ctxt_slot_vregs = Hashtbl.create 0;
@@ -161,6 +159,12 @@ let lval_ty (cx:ctxt) (id:node_id) : Ast.ty =
       | None -> (Hashtbl.find cx.ctxt_all_item_types referent)
 ;;
 
+let get_slot_owner (cx:ctxt) (id:node_id) : node_id =
+  match htab_search cx.ctxt_slot_owner id with
+      None -> err (Some id) "Slot has no defined owner"
+    | Some owner -> owner
+;;
+
 let get_prog (cx:ctxt) (id:node_id) : Ast.prog =
   match Hashtbl.find cx.ctxt_all_items id with
       Ast.MOD_ITEM_prog p -> p.Ast.decl_item
@@ -168,11 +172,13 @@ let get_prog (cx:ctxt) (id:node_id) : Ast.prog =
 ;;
 
 let get_prog_owning_slot (cx:ctxt) (id:node_id) : Ast.prog =
-  if Hashtbl.mem cx.ctxt_slot_is_in_proc id
-  then
-    let prog_node = Hashtbl.find cx.ctxt_slot_is_in_proc id in
-      get_prog cx prog_node
-  else err (Some id) "Slot is not a member of prog"
+  get_prog cx (get_slot_owner cx id)
+;;
+
+let slot_is_owned_by_prog (cx:ctxt) (id:node_id) : bool =
+  match htab_search cx.ctxt_all_items (get_slot_owner cx id) with
+      Some (Ast.MOD_ITEM_prog _) -> true
+    | _ -> false
 ;;
 
 let get_block_layout (cx:ctxt) (id:node_id) : layout =
@@ -263,6 +269,17 @@ let atoms_to_names (atoms:Ast.atom array)
     atoms
 ;;
 
+let rec lval_base_id (lv:Ast.lval) : node_id =
+  match lv with
+      Ast.LVAL_base nbi -> nbi.id
+    | Ast.LVAL_ext (lv, _) -> lval_base_id lv
+;;
+
+(* 
+ * FIXME: rename this "lval_base_slots" and make a variant that
+ * calculates the slots required-but-not-written-to when used in 
+ * LHS atom-indexed lvals, because we have those too.
+ *)
 let rec lval_slots (cx:ctxt) (lv:Ast.lval) : node_id array =
   match lv with
       Ast.LVAL_base nbi ->

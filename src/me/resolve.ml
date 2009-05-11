@@ -88,6 +88,7 @@ let stmt_collecting_visitor
                   | Ast.DECL_slot (key, sid) ->
                       check_and_log_key sid.id key;
                       htab_put slots key sid.id;
+                      htab_put cx.ctxt_slot_owner sid.id bid;
                       htab_put cx.ctxt_slot_keys sid.id key
             end
         | _ -> ()
@@ -114,16 +115,38 @@ let all_item_collecting_visitor
        * Pick up some slot names for error messages.
        * FIXME: this is incomplete. 
        *)
-      let note_sloti_ident_pairs =
+      let owned owner sloti =
+        htab_put cx.ctxt_slot_owner sloti owner
+      in
+      let note_header owner =
         Array.iter
           (fun (sloti,ident) ->
+             owned owner sloti.id;
              htab_put cx.ctxt_slot_keys sloti.id (Ast.KEY_ident ident))
       in
       match i.node with
-          Ast.MOD_ITEM_fn fd -> (note_sloti_ident_pairs
-                                   fd.Ast.decl_item.Ast.fn_input_slots)
-        | Ast.MOD_ITEM_pred pd -> (note_sloti_ident_pairs
-                                     pd.Ast.decl_item.Ast.pred_input_slots)
+          Ast.MOD_ITEM_fn fd ->
+            begin
+              note_header i.id fd.Ast.decl_item.Ast.fn_input_slots;
+              owned i.id fd.Ast.decl_item.Ast.fn_output_slot.id
+            end
+        | Ast.MOD_ITEM_pred pd ->
+            begin
+              note_header i.id pd.Ast.decl_item.Ast.pred_input_slots
+            end
+        | Ast.MOD_ITEM_prog pd ->
+            begin
+              Hashtbl.iter (fun _ sloti -> owned i.id sloti.id)
+                pd.Ast.decl_item.Ast.prog_slots;
+              match pd.Ast.decl_item.Ast.prog_init with
+                  None -> ()
+                | Some init ->
+                    begin
+                      note_header init.id init.node.Ast.init_input_slots;
+                      owned init.id init.node.Ast.init_proc_input.id;
+                      owned init.id init.node.Ast.init_output_slot.id
+                    end
+            end
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i

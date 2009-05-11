@@ -287,7 +287,7 @@ let trans_visitor
     let return_slot (lval_id:node_id) (slot:Ast.slot) (slot_id:node_id)
         : (Il.operand * Ast.slot) =
       let operand =
-        if Hashtbl.mem cx.ctxt_slot_is_in_proc slot_id
+        if slot_is_owned_by_prog cx slot_id
         then operand_of_proc_slot lval_id slot_id
         else operand_of_block_slot slot_id
       in
