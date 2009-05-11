@@ -379,6 +379,7 @@ and pred =
 
 and init =
     {
+      (* FIXME: Possibly shift init_proc_input into a semant table. *)
       init_proc_input: slot identified;
       init_input_slots: header_slots;
       init_input_constrs: constrs;

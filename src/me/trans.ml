@@ -232,6 +232,24 @@ let trans_visitor
           end
   in
 
+  let operand_of_proc_slot (lval_id:node_id) (slot_id:node_id)  =
+    let pp =
+      if Hashtbl.mem cx.ctxt_lval_is_in_proc_init lval_id
+      then
+        let prog = get_prog_owning_slot cx slot_id in
+        let init_slot_layout = match prog.Ast.prog_init with
+            None -> err (Some lval_id) "Lval in nonexistent prog init"
+          | Some init -> Hashtbl.find cx.ctxt_slot_layouts init.id
+        in
+          word_at_sp_off init_slot_layout.layout_offset
+      else
+        abi.Abi.abi_pp_operand
+    in
+    let layout = Hashtbl.find cx.ctxt_slot_layouts slot_id in
+    let disp = layout.layout_offset in
+      word_at_reg_off (Some (force_to_reg pp)) (Asm.IMM disp)
+  in
+
   let rec trans_lval_full
       (lv:Ast.lval)
       (pcrel_ok:bool)
@@ -266,9 +284,13 @@ let trans_visitor
                 "unhandled item type in trans_lval_full"
     in
 
-    let return_slot (slot:Ast.slot) (referent:node_id)
+    let return_slot (lval_id:node_id) (slot:Ast.slot) (slot_id:node_id)
         : (Il.operand * Ast.slot) =
-      let operand = operand_of_block_slot referent in
+      let operand =
+        if Hashtbl.mem cx.ctxt_slot_is_in_proc slot_id
+        then operand_of_proc_slot lval_id slot_id
+        else operand_of_block_slot slot_id
+      in
         (operand, slot)
     in
 
@@ -286,7 +308,7 @@ let trans_visitor
                     Some item -> return_item item referent
                   | None ->
                       let slot = lval_to_slot cx nb.id in
-                        return_slot slot referent
+                        return_slot nb.id slot referent
               end
 
   and trans_lval (lv:Ast.lval) (intent:intent) : (Il.operand * Ast.slot) =

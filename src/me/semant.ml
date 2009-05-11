@@ -54,6 +54,9 @@ type ctxt =
       ctxt_poststates: (node_id,Bitv.t) Hashtbl.t;
       ctxt_copy_stmt_is_init: (node_id,unit) Hashtbl.t;
 
+      ctxt_slot_is_in_proc: (node_id,node_id) Hashtbl.t;
+      ctxt_lval_is_in_proc_init: (node_id,unit) Hashtbl.t;
+
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
@@ -96,6 +99,10 @@ let new_ctxt sess abi crate =
     ctxt_prestates = Hashtbl.create 0;
     ctxt_poststates = Hashtbl.create 0;
     ctxt_copy_stmt_is_init = Hashtbl.create 0;
+
+    ctxt_slot_is_in_proc = Hashtbl.create 0;
+    ctxt_lval_is_in_proc_init = Hashtbl.create 0;
+
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_block_layouts = Hashtbl.create 0;
@@ -152,6 +159,20 @@ let lval_ty (cx:ctxt) (id:node_id) : Ast.ty =
               | None -> err (Some referent) "Referent has un-inferred type"
           end
       | None -> (Hashtbl.find cx.ctxt_all_item_types referent)
+;;
+
+let get_prog (cx:ctxt) (id:node_id) : Ast.prog =
+  match Hashtbl.find cx.ctxt_all_items id with
+      Ast.MOD_ITEM_prog p -> p.Ast.decl_item
+    | _ -> err (Some id) "Node did not map to a program"
+;;
+
+let get_prog_owning_slot (cx:ctxt) (id:node_id) : Ast.prog =
+  if Hashtbl.mem cx.ctxt_slot_is_in_proc id
+  then
+    let prog_node = Hashtbl.find cx.ctxt_slot_is_in_proc id in
+      get_prog cx prog_node
+  else err (Some id) "Slot is not a member of prog"
 ;;
 
 let get_block_layout (cx:ctxt) (id:node_id) : layout =
