@@ -25,6 +25,14 @@ type visitor =
       visit_constr_post: Ast.constr -> unit;
       visit_block_pre: Ast.block -> unit;
       visit_block_post: Ast.block -> unit;
+
+      visit_init_pre: Ast.init identified -> unit;
+      visit_init_post: Ast.init identified -> unit;
+      visit_main_pre: Ast.block -> unit;
+      visit_main_post: Ast.block -> unit;
+      visit_fini_pre: Ast.block -> unit;
+      visit_fini_post: Ast.block -> unit;
+
       visit_lit_pre: Ast.lit -> unit;
       visit_lit_post: Ast.lit -> unit;
       visit_lval_pre: Ast.lval -> unit;
@@ -54,6 +62,12 @@ let empty_visitor =
     visit_constr_post = (fun _ -> ());
     visit_block_pre = (fun _ -> ());
     visit_block_post = (fun _ -> ());
+    visit_init_pre = (fun _ -> ());
+    visit_init_post = (fun _ -> ());
+    visit_main_pre = (fun _ -> ());
+    visit_main_post = (fun _ -> ());
+    visit_fini_pre = (fun _ -> ());
+    visit_fini_post = (fun _ -> ());
     visit_lit_pre = (fun _ -> ());
     visit_lit_post = (fun _ -> ());
     visit_lval_pre = (fun _ -> ());
@@ -289,10 +303,18 @@ and walk_init
     (v:visitor)
     (i:Ast.init identified)
     : unit =
-  Array.iter (fun (s,_) -> walk_slot_identified v s) i.node.Ast.init_input_slots;
-  walk_constrs v i.node.Ast.init_input_constrs;
-  walk_slot_identified v i.node.Ast.init_output_slot;
-  walk_block v i.node.Ast.init_body
+  walk_bracketed
+    v.visit_init_pre
+    begin
+      fun _ ->
+        Array.iter (fun (s,_) -> walk_slot_identified v s) i.node.Ast.init_input_slots;
+        walk_constrs v i.node.Ast.init_input_constrs;
+        walk_slot_identified v i.node.Ast.init_output_slot;
+        walk_block v i.node.Ast.init_body
+    end
+    v.visit_init_post
+    i
+
 
 
 and walk_prog
@@ -302,8 +324,22 @@ and walk_prog
   walk_mod_items v p.Ast.prog_mod;
   Hashtbl.iter (fun _ s -> walk_slot_identified v s) p.Ast.prog_slots;
   walk_option (walk_init v) p.Ast.prog_init;
-  walk_option (walk_block v) p.Ast.prog_main;
-  walk_option (walk_block v) p.Ast.prog_fini
+  walk_option
+    (fun main ->
+       walk_bracketed
+         v.visit_main_pre
+         (fun _ -> walk_block v main)
+         v.visit_main_post
+         main)
+    p.Ast.prog_main;
+  walk_option
+    (fun fini ->
+       walk_bracketed
+         v.visit_fini_pre
+         (fun _ -> walk_block v fini)
+         v.visit_fini_post
+         fini)
+    p.Ast.prog_fini
 
 
 and walk_slot_identified

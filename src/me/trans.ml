@@ -988,26 +988,26 @@ let trans_visitor
       end
   in
 
-  let trans_fn (fnid:node_id) (fn:Ast.fn) : unit =
+  let trans_fn (fnid:node_id) (body:Ast.block) : unit =
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
     Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
       abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill_fixup callsz;
-      trans_block fn.Ast.fn_body;
+      trans_block body;
       Stack.iter patch (Stack.pop epilogue_jumps);
       abi.Abi.abi_emit_fn_epilogue (emitter());
       capture_emitted_quads fnid;
       pop_emitter ()
   in
 
-  let trans_prog_block (progid:node_id) (b:Ast.block) (ncomp:string) : fixup =
+  let trans_prog_block (b:Ast.block) (ncomp:string) : fixup =
     let _ = Stack.push ncomp path in
     let fix = new_fixup (path_name ()) in
-    let framesz = get_framesz cx progid in
-    let callsz = get_callsz cx progid in
-    let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups progid in
+    let framesz = get_framesz cx b.id in
+    let callsz = get_callsz cx b.id in
+    let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups b.id in
       push_new_emitter ();
       let dst = Il.Reg (Il.next_vreg (emitter())) in
         Il.emit_full (emitter()) (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
@@ -1015,7 +1015,7 @@ let trans_visitor
         trans_block b;
         abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_exiting;
         emit Il.CCALL dst (Il.Pcrel cx.ctxt_proc_to_c_fixup) Il.Nil;
-        capture_emitted_quads progid;
+        capture_emitted_quads b.id;
         pop_emitter ();
         ignore (Stack.pop path);
         fix
@@ -1024,18 +1024,23 @@ let trans_visitor
   let trans_prog (progid:node_id) (p:Ast.prog) : unit =
     let _ = log cx "translating program: %s" (path_name()) in
     let init =
-      (* FIXME: translate the init part as well. *)
-      Asm.IMM 0L
+      match p.Ast.prog_init with
+          None -> Asm.IMM 0L
+        | Some init ->
+            begin
+              trans_fn init.id init.node.Ast.init_body;
+              Asm.M_POS (get_fn_fixup cx init.id)
+            end
     in
     let main =
       match p.Ast.prog_main with
           None -> Asm.IMM 0L
-        | Some main -> Asm.M_POS (trans_prog_block progid main "main")
+        | Some main -> Asm.M_POS (trans_prog_block main "main")
     in
     let fini =
       match p.Ast.prog_fini with
           None -> Asm.IMM 0L
-        | Some fini -> Asm.M_POS (trans_prog_block progid fini "fini")
+        | Some fini -> Asm.M_POS (trans_prog_block fini "fini")
     in
     let prog =
       let fixup = get_prog_fixup cx progid in
@@ -1053,7 +1058,7 @@ let trans_visitor
       : unit =
     begin
       match item.node with
-          Ast.MOD_ITEM_fn f -> trans_fn item.id f.Ast.decl_item
+          Ast.MOD_ITEM_fn f -> trans_fn item.id f.Ast.decl_item.Ast.fn_body
         | Ast.MOD_ITEM_prog p -> trans_prog item.id p.Ast.decl_item
         | _ -> ()
     end
@@ -1108,15 +1113,25 @@ let fixup_assigning_visitor
         match i.node with
             Ast.MOD_ITEM_fn _ ->
               htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
-          | Ast.MOD_ITEM_prog _ ->
-              let path = path_name() in
-              let fixup =
-                if path = cx.ctxt_main_name
-                then cx.ctxt_main_prog
-                else (new_fixup path)
-              in
-                (log cx "defining '%s' to mod item '%s'" fixup.fixup_name (path_name());
-               htab_put cx.ctxt_prog_fixups i.id fixup)
+          | Ast.MOD_ITEM_prog prog ->
+              begin
+                let path = path_name() in
+                let prog_fixup =
+                  if path = cx.ctxt_main_name
+                  then cx.ctxt_main_prog
+                  else (new_fixup path)
+                in
+                  log cx "defining '%s' to mod item '%s'" prog_fixup.fixup_name (path_name());
+                  htab_put cx.ctxt_prog_fixups i.id prog_fixup;
+                  match prog.Ast.decl_item.Ast.prog_init with
+                      None -> ()
+                    | Some init ->
+                        begin
+                          (* Treat an init like a fn for purposes of code generation. *)
+                          htab_put cx.ctxt_fn_fixups init.id
+                            (new_fixup ((path_name()) ^ ".init"))
+                        end
+              end
           | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i

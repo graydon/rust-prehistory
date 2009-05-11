@@ -148,64 +148,91 @@ let layout_visitor
         layout;
   in
 
-  let layout_fn_header (id:node_id) (fn:Ast.fn) : unit =
+  let layout_header (id:node_id) (slots:Ast.header_slots) : unit =
     let offset =
       Int64.add
         cx.ctxt_abi.Abi.abi_frame_base_sz
         cx.ctxt_abi.Abi.abi_implicit_args_sz
     in
-      log cx "laying out header of fn #%d at fp offset %Ld" (int_of_node id) offset;
-      let input_slot_ids = Array.map (fun (sid,_) -> sid.id) fn.Ast.fn_input_slots in
+      log cx "laying out header for node #%d at fp offset %Ld" (int_of_node id) offset;
+      let input_slot_ids = Array.map (fun (sid,_) -> sid.id) slots in
       let layout = layout_slot_ids false offset input_slot_ids in
-        log cx "fn #%d header layout: %s" (int_of_node id) (string_of_layout layout);
-        htab_put cx.ctxt_fn_header_layouts id layout
+        log cx "node #%d header layout: %s" (int_of_node id) (string_of_layout layout);
+        htab_put cx.ctxt_header_layouts id layout
   in
 
   let layout_prog (id:node_id) (prog:Ast.prog) : unit =
-      log cx "laying out header of prog #%d" (int_of_node id);
-      let slot_ids =
-        Array.of_list (List.map (fun sid -> sid.id)
-                         (htab_vals prog.Ast.prog_slots))
-      in
-      let layout = layout_slot_ids false 0L slot_ids in
-        log cx "prog #%d layout: %s" (int_of_node id) (string_of_layout layout);
-        htab_put cx.ctxt_prog_layouts id layout
+    log cx "laying out slots of prog #%d" (int_of_node id);
+    let slot_ids =
+      Array.of_list (List.map (fun sid -> sid.id)
+                       (htab_vals prog.Ast.prog_slots))
+    in
+    let layout = layout_slot_ids false 0L slot_ids in
+      log cx "prog #%d layout: %s" (int_of_node id) (string_of_layout layout);
+      htab_put cx.ctxt_prog_layouts id layout
   in
 
   let (block_stacks:(layout Stack.t) Stack.t) = Stack.create () in
-  let (item_stack:node_id Stack.t) = Stack.create () in
+  let (frame_stack:node_id Stack.t) = Stack.create () in
   let update_frame_size _ =
     let sz = stk_fold
       (Stack.top block_stacks)
       (fun layout b -> Int64.add layout.layout_size b)
       0L
     in
-    let item_id = Stack.top item_stack in
-    let curr = Hashtbl.find cx.ctxt_frame_sizes item_id in
-      log cx "extending item #%d frame to size %Ld"
-        (int_of_node item_id) (i64_max curr sz) ;
-      Hashtbl.replace cx.ctxt_frame_sizes item_id (i64_max curr sz)
+    let frame_id = Stack.top frame_stack in
+    let curr = Hashtbl.find cx.ctxt_frame_sizes frame_id in
+      log cx "extending frame #%d frame to size %Ld"
+        (int_of_node frame_id) (i64_max curr sz) ;
+      Hashtbl.replace cx.ctxt_frame_sizes frame_id (i64_max curr sz)
   in
+
+  let enter_frame id =
+      Stack.push (Stack.create()) block_stacks;
+      Stack.push id frame_stack;
+      htab_put cx.ctxt_frame_sizes id 0L;
+      htab_put cx.ctxt_call_sizes id 0L;
+      htab_put cx.ctxt_spill_fixups id (new_fixup "frame spill fixup");
+  in
+
+  let leave_frame _ =
+    ignore (Stack.pop frame_stack);
+    ignore (Stack.pop block_stacks);
+  in
+
+  let visit_main_pre main = enter_frame main.id in
+  let visit_fini_pre fini = enter_frame fini.id in
+  let visit_init_pre init =
+    layout_header init.id init.node.Ast.init_input_slots;
+    enter_frame init.id
+  in
+
+  let visit_main_post main = leave_frame() in
+  let visit_init_post init = leave_frame() in
+  let visit_fini_post fini = leave_frame() in
+
   let visit_mod_item_pre n p i =
     begin
-      Stack.push (Stack.create()) block_stacks;
-      Stack.push i.id item_stack;
-      htab_put cx.ctxt_frame_sizes i.id 0L;
-      htab_put cx.ctxt_call_sizes i.id 0L;
-      htab_put cx.ctxt_spill_fixups i.id (new_fixup "frame spill fixup");
       match i.node with
           Ast.MOD_ITEM_fn fd ->
-            layout_fn_header i.id fd.Ast.decl_item
+            enter_frame i.id;
+            layout_header i.id fd.Ast.decl_item.Ast.fn_input_slots
         | Ast.MOD_ITEM_prog pd ->
             layout_prog i.id pd.Ast.decl_item
+        | Ast.MOD_ITEM_pred _ ->
+            enter_frame i.id
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
   in
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
-    ignore (Stack.pop item_stack);
-    ignore (Stack.pop block_stacks);
+    begin
+      match i.node with
+          Ast.MOD_ITEM_fn _ -> leave_frame ()
+        | Ast.MOD_ITEM_pred _ -> leave_frame ()
+        | _ -> ()
+    end
   in
   let visit_block_pre b =
     let stk = Stack.top block_stacks in
@@ -252,11 +279,11 @@ let layout_visitor
               let tfn = ty_fn_of_callee nb.id in
               let layout = pack 0L (layout_call_tup abi tfn) in
               let sz = layout.layout_size in
-              let item_id = Stack.top item_stack in
-              let curr = Hashtbl.find cx.ctxt_call_sizes item_id in
-                log cx "extending item #%d call size to %Ld"
-                  (int_of_node item_id) (i64_max curr sz);
-                Hashtbl.replace cx.ctxt_call_sizes item_id (i64_max curr sz)
+              let frame_id = Stack.top frame_stack in
+              let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in
+                log cx "extending frame #%d call size to %Ld"
+                  (int_of_node frame_id) (i64_max curr sz);
+                Hashtbl.replace cx.ctxt_call_sizes frame_id (i64_max curr sz)
             end
         | _ -> ()
     end;
@@ -266,6 +293,15 @@ let layout_visitor
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
+
+        Walk.visit_init_pre = visit_init_pre;
+        Walk.visit_main_pre = visit_main_pre;
+        Walk.visit_fini_pre = visit_fini_pre;
+
+        Walk.visit_init_post = visit_init_post;
+        Walk.visit_main_post = visit_main_post;
+        Walk.visit_fini_post = visit_fini_post;
+
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post }

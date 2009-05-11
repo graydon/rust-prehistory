@@ -359,9 +359,11 @@ and unop =
   | UNOP_neg
 
 
+and header_slots = ((slot identified) * ident) array
+
 and fn =
     {
-      fn_input_slots: ((slot identified) * ident) array;
+      fn_input_slots: header_slots;
       fn_input_constrs: constrs;
       fn_output_slot: slot identified;
       fn_aux: ty_fn_aux;
@@ -370,14 +372,14 @@ and fn =
 
 and pred =
     {
-      pred_input_slots: ((slot identified) * ident) array;
+      pred_input_slots: header_slots;
       pred_input_constrs: constrs;
       pred_body: block;
     }
 
 and init =
     {
-      init_input_slots: ((slot identified) * ident) array;
+      init_input_slots: header_slots;
       init_input_constrs: constrs;
       init_output_slot: slot identified;
       init_body: block;

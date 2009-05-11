@@ -116,6 +116,10 @@ let upcall_to_code (u:upcall) : int64 =
 ;;
 
 (* Word offsets for structure fields in rust.h. *)
+let prog_field_init = 0;;
+let prog_field_main = 1;;
+let prog_field_fini = 2;;
+
 let proc_field_rt = 0;;
 let proc_field_stk = 1;;
 let proc_field_prog = 2;;
