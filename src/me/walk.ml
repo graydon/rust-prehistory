@@ -307,6 +307,7 @@ and walk_init
     v.visit_init_pre
     begin
       fun _ ->
+        walk_slot_identified v i.node.Ast.init_proc_input;
         Array.iter (fun (s,_) -> walk_slot_identified v s) i.node.Ast.init_input_slots;
         walk_constrs v i.node.Ast.init_input_constrs;
         walk_slot_identified v i.node.Ast.init_output_slot;

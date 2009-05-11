@@ -379,6 +379,7 @@ and pred =
 
 and init =
     {
+      init_proc_input: slot identified;
       init_input_slots: header_slots;
       init_input_constrs: constrs;
       init_output_slot: slot identified;

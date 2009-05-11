@@ -148,14 +148,13 @@ let layout_visitor
         layout;
   in
 
-  let layout_header (id:node_id) (slots:Ast.header_slots) : unit =
+  let layout_header (id:node_id) (input_slot_ids:node_id array) : unit =
     let offset =
       Int64.add
         cx.ctxt_abi.Abi.abi_frame_base_sz
         cx.ctxt_abi.Abi.abi_implicit_args_sz
     in
       log cx "laying out header for node #%d at fp offset %Ld" (int_of_node id) offset;
-      let input_slot_ids = Array.map (fun (sid,_) -> sid.id) slots in
       let layout = layout_slot_ids false offset input_slot_ids in
         log cx "node #%d header layout: %s" (int_of_node id) (string_of_layout layout);
         htab_put cx.ctxt_header_layouts id layout
@@ -203,8 +202,12 @@ let layout_visitor
   let visit_main_pre main = enter_frame main.id in
   let visit_fini_pre fini = enter_frame fini.id in
   let visit_init_pre init =
-    layout_header init.id init.node.Ast.init_input_slots;
-    enter_frame init.id
+    let extended_input_slot_ids =
+      Array.append [| init.node.Ast.init_proc_input.id |]
+        (Array.map (fun (sid,_) -> sid.id) init.node.Ast.init_input_slots)
+    in
+      layout_header init.id extended_input_slot_ids;
+      enter_frame init.id
   in
 
   let visit_main_post main = leave_frame() in
@@ -216,7 +219,9 @@ let layout_visitor
       match i.node with
           Ast.MOD_ITEM_fn fd ->
             enter_frame i.id;
-            layout_header i.id fd.Ast.decl_item.Ast.fn_input_slots
+            layout_header i.id
+              (Array.map (fun (sid,_) -> sid.id)
+                 fd.Ast.decl_item.Ast.fn_input_slots)
         | Ast.MOD_ITEM_prog pd ->
             layout_prog i.id pd.Ast.decl_item
         | Ast.MOD_ITEM_pred _ ->

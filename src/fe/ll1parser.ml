@@ -1496,8 +1496,12 @@ and parse_prog_item prog_cell stmts_cell ps =
           let (inputs, constrs, output) = ctxt "prog_item: init in_and_out" parse_in_and_out ps in
           let body = ctxt "prog_item: init body" parse_block ps in
           let bpos = lexpos ps in
+          let proc_input_slot = { Ast.slot_mode = Ast.MODE_interior;
+                                  Ast.slot_ty = Some Ast.TY_proc }
+          in
           let init = span ps apos bpos
-            { Ast.init_input_slots = inputs;
+            { Ast.init_proc_input = span ps apos bpos proc_input_slot;
+              Ast.init_input_slots = inputs;
               Ast.init_input_constrs = constrs;
               Ast.init_output_slot = output;
               Ast.init_body = body }
