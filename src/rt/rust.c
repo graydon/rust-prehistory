@@ -157,6 +157,10 @@ rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
 {
   rust_proc_t *proc = xcalloc(sizeof(rust_proc_t));
   logptr("new proc", (uintptr_t)proc);
+  logptr("from prog", (uintptr_t)prog);
+  logptr("init:", (uintptr_t)prog->init_code);
+  logptr("main:", (uintptr_t)prog->main_code);
+  logptr("fini:", (uintptr_t)prog->fini_code);
   proc->prog = prog;
   proc->stk = rust_new_stk();
 
@@ -337,6 +341,7 @@ rust_handle_upcall(rust_proc_t *proc)
     *((rust_proc_t**)args[0]) = rust_spawn_proc(proc->rt, (rust_prog_t*)args[1]);
     break;
   case rust_upcall_sched:
+    logptr("scheduling new proc", args[0]);
     rust_sched_proc(proc->rt, (rust_proc_t*)args[0]);
     break;
   case rust_upcall_check_expr:

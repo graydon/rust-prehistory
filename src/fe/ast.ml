@@ -767,6 +767,9 @@ and fmt_lval (ff:Format.formatter) (l:lval) : unit =
 
 and fmt_stmt (ff:Format.formatter) (s:stmt) : unit =
   fmt ff "@\n";
+  fmt_stmt_body ff s
+
+and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
   begin
     match s.node with
         STMT_log at ->

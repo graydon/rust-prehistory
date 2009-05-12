@@ -302,7 +302,7 @@ let layout_visitor
 
   (* Call-size calculation. *)
 
-  let ty_fn_of_callee (id:node_id) : Ast.ty_fn =
+  let ty_sig_of_callee (id:node_id) : Ast.ty_sig =
     let referent = lval_to_referent cx id in
     let ty =
       if Hashtbl.mem cx.ctxt_all_items referent
@@ -310,19 +310,25 @@ let layout_visitor
       else slot_ty (Hashtbl.find cx.ctxt_all_slots referent)
     in
       match ty with
-          Ast.TY_fn tfn -> tfn
+          Ast.TY_fn (tsig, _) -> tsig
+        | Ast.TY_prog tsig -> tsig
         | _ -> err (Some id) "Non-function callee in call statement."
   in
 
   let visit_stmt_pre (s:Ast.stmt) : unit =
     begin
       match s.node with
-          Ast.STMT_call (_, (Ast.LVAL_base nb), _) ->
+          Ast.STMT_call (_, (Ast.LVAL_base nb), _)
+        | Ast.STMT_spawn (_, (Ast.LVAL_base nb), _) ->
             begin
               let abi = cx.ctxt_abi in
-              let tfn = ty_fn_of_callee nb.id in
-              let (tsig, _) = tfn in
-              let layout = pack 0L (layout_fn_call_tup abi tsig) in
+              let tsig = ty_sig_of_callee nb.id in
+              let layout =
+                pack 0L
+                  (match s.node with
+                       Ast.STMT_call _ -> layout_fn_call_tup abi tsig
+                     | Ast.STMT_spawn _ -> layout_init_call_tup abi tsig)
+              in
               let sz = layout.layout_size in
               let frame_id = Stack.top frame_stack in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in

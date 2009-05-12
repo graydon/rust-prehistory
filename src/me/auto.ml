@@ -168,37 +168,40 @@ let process_crate
     (cx:ctxt)
     (items:Ast.mod_items)
     : unit =
-  let auto_queue = Queue.create () in
-  let enqueue_auto_slot id slot =
-    match slot.Ast.slot_ty with
-        None ->
-          log cx "enqueueing auto slot #%d" (int_of_node id);
-          Queue.add id auto_queue
-      | _ -> ()
-  in
-  let progress = ref true in
-  let auto_pass = ref 0 in
-    Hashtbl.iter enqueue_auto_slot cx.ctxt_all_slots;
-    while not (Queue.is_empty auto_queue) do
-      if not (!progress)
-      then err None "auto inference pass wedged";
-      let tmpq = Queue.copy auto_queue in
-        log cx "auto inference pass %d on %d remaining auto slots"
-          (!auto_pass)
-          (Queue.length auto_queue);
-        Queue.clear auto_queue;
-        progress := false;
-        Walk.walk_mod_items
-          (Walk.mod_item_logging_visitor
-             (log cx "auto inference pass %d: %s" (!auto_pass))
-             (auto_inference_visitor cx progress Walk.empty_visitor))
-          items;
-        Queue.iter
-          (fun id -> enqueue_auto_slot id
-             (Hashtbl.find cx.ctxt_all_slots id))
-          tmpq;
-        incr auto_pass;
-    done
+  try
+    let auto_queue = Queue.create () in
+    let enqueue_auto_slot id slot =
+      match slot.Ast.slot_ty with
+          None ->
+            log cx "enqueueing auto slot #%d" (int_of_node id);
+            Queue.add id auto_queue
+        | _ -> ()
+    in
+    let progress = ref true in
+    let auto_pass = ref 0 in
+      Hashtbl.iter enqueue_auto_slot cx.ctxt_all_slots;
+      while not (Queue.is_empty auto_queue) do
+        if not (!progress)
+        then err None "auto inference pass wedged";
+        let tmpq = Queue.copy auto_queue in
+          log cx "auto inference pass %d on %d remaining auto slots"
+            (!auto_pass)
+            (Queue.length auto_queue);
+          Queue.clear auto_queue;
+          progress := false;
+          Walk.walk_mod_items
+            (Walk.mod_item_logging_visitor
+               (log cx "auto inference pass %d: %s" (!auto_pass))
+               (auto_inference_visitor cx progress Walk.empty_visitor))
+            items;
+          Queue.iter
+            (fun id -> enqueue_auto_slot id
+               (Hashtbl.find cx.ctxt_all_slots id))
+            tmpq;
+          incr auto_pass;
+      done
+  with
+      Semant_err (ido, str) -> report_err cx ido str
 ;;
 
 (*

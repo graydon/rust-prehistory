@@ -32,6 +32,7 @@ let trans_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
   let path = Stack.create () in
+  let annotations = Hashtbl.create 0 in
   let block_layouts = Stack.create () in
   let file = ref None in
 
@@ -456,10 +457,7 @@ let trans_visitor
        * it's the 0th slot of the dst tuple though. 
        *)
       trans_upcall Abi.UPCALL_spawn [| (alias proc_operand); prog_operand |];
-      let in_slots = (Array.append
-                        [| interior_slot Ast.TY_proc |]
-                        tsig.Ast.sig_input_slots)
-      in
+      let in_slots = tsig.Ast.sig_input_slots in
       (* FIXME: this is a ghastly mess. *)
       let arg_layouts = layout_init_call_tup abi tsig in
       let init_operand =
@@ -848,7 +846,7 @@ let trans_visitor
       abi.Abi.abi_pp_operand (word_slot abi)
 
   and trans_argN n param_operand slots args =
-    log cx "copying param %d, slot %s"
+    log cx "copying formal param %d, slot %s"
       n (Ast.fmt_to_str Ast.fmt_slot slots.(n));
     trans_init_slot_from_atom
       param_operand slots.(n)
@@ -862,43 +860,56 @@ let trans_visitor
       (arg2:Il.operand option)
       (args:Ast.atom array)
       : unit =
-    begin
+    (* FIXME: there's got to be a nicer factoring than this. *)
+    let implicit_args =
       match arg2 with
           None ->
             begin
-              assert ((Array.length arg_layouts) == ((Array.length args) + 2));
-              for i = 0 to (Array.length arg_layouts) - 1 do
-                let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
-                  match i with
-                      0 -> trans_arg0 param_operand output_operand
-                    | 1 -> trans_arg1 param_operand
-                    | _ -> trans_argN (i-2) param_operand in_slots args
-              done
+              let n_layouts = Array.length arg_layouts in
+                assert (n_layouts == ((Array.length args) + 2));
+                for i = 0 to n_layouts - 1 do
+                  log cx "translating fn-call arg %d of %d" i n_layouts;
+                  let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
+                    match i with
+                        0 -> trans_arg0 param_operand output_operand
+                      | 1 -> trans_arg1 param_operand
+                      | _ -> trans_argN (i-2) param_operand in_slots args
+                done;
+                2;
             end
         | Some arg2_operand ->
             begin
-              assert ((Array.length arg_layouts) == ((Array.length args) + 3));
-              for i = 0 to (Array.length arg_layouts) - 1 do
-                let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
-                  match i with
-                      0 -> trans_arg0 param_operand output_operand
-                    | 1 -> trans_arg1 param_operand
-                    | 2 -> mov param_operand arg2_operand
-                    | _ -> trans_argN (i-3) param_operand in_slots args
-              done
-            end
-    end;
+              let n_layouts = Array.length arg_layouts in
+                assert (n_layouts == ((Array.length args) + 3));
+                for i = 0 to n_layouts - 1 do
+                  log cx "translating init-call arg %d of %d" i n_layouts;
+                  let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
+                    match i with
+                        0 -> trans_arg0 param_operand output_operand
+                      | 1 -> trans_arg1 param_operand
+                      | 2 -> mov param_operand arg2_operand
+                      | _ -> trans_argN (i-3) param_operand in_slots args
+                done
+            end;
+            3
+    in
     let vr = Il.Reg (Il.next_vreg (emitter())) in
       emit Il.CCALL vr callee_operand Il.Nil;
-      for i = 2 to (Array.length arg_layouts) - 1 do
+      for i = implicit_args to (Array.length arg_layouts) - 1 do
         let operand = word_at_sp_off arg_layouts.(i).layout_offset in
-          trans_drop_slot operand in_slots.(i-2)
+          trans_drop_slot operand in_slots.(i-implicit_args)
       done
 
 
   and trans_stmt (stmt:Ast.stmt) : unit =
     (* Helper to localize errors by stmt, at minimum. *)
     try
+      iflog cx
+        begin
+          fun _ ->
+            Hashtbl.replace annotations
+              (emitter()).Il.emit_pc (Ast.fmt_to_str Ast.fmt_stmt_body stmt)
+        end;
       trans_stmt_full stmt
     with
         Semant_err (None, msg) -> raise (Semant_err ((Some stmt.id), msg))
@@ -1050,17 +1061,25 @@ let trans_visitor
       end
     in
       begin
-        log cx "emitted quads for %s:" name;
-        for i = 0 to (Array.length quads) - 1
-        do
-          log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
-        done;
+        iflog cx
+          begin
+            fun _ ->
+              log cx "emitted quads for %s:" name;
+              for i = 0 to (Array.length quads) - 1
+              do
+                if Hashtbl.mem annotations i
+                then
+                  log cx "// %s" (Hashtbl.find annotations i);
+                log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
+                done;
+          end;
         let text = { text_node = node;
                      text_quads = quads;
                      text_n_vregs = n_vregs }
         in
           file_list := text :: (!file_list)
-      end
+      end;
+      Hashtbl.clear annotations
   in
 
   let trans_fn (fnid:node_id) (body:Ast.block) : unit =
@@ -1103,8 +1122,10 @@ let trans_visitor
           None -> Asm.IMM 0L
         | Some init ->
             begin
-              trans_fn init.id init.node.Ast.init_body;
-              Asm.M_POS (get_fn_fixup cx init.id)
+              let _ = Stack.push "init" path in
+                trans_fn init.id init.node.Ast.init_body;
+                ignore (Stack.pop path);
+                Asm.M_POS (get_fn_fixup cx init.id)
             end
     in
     let main =
