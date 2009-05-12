@@ -9,7 +9,7 @@ ML_INCS:=-I fe -I me -I be -I driver -I util
 ML_LIBS=unix.cma nums.cma
 ML_NATIVE_LIBS=unix.cmxa nums.cmxa
 OCAMLC_FLAGS:=-g $(ML_INCS)
-OCAMLOPT_FLAGS:=-p $(ML_INCS)
+OCAMLOPT_FLAGS:=$(ML_INCS)
 
 # List them in link order.
 # Nobody calculates the link-order DAG automatically, sadly.
@@ -28,8 +28,6 @@ COMPILER_CMIS:=$(COMPILER_MLS:.ml=.cmi)
 
 RUNTIME_CS:=rt/rust.c
 RUNTIME_OBJS:=$(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
-
-NATIVE=1
 
 all: $(CFG_COMPILER) $(CFG_RUNTIME) $(MKFILES) fe/lexer.ml
 
@@ -73,10 +71,10 @@ C_DEPFILES:=$(RUNTIME_CS:.c=.d)
 	$(call CFG_DEPEND_C,$@ $(patsubst %.c,%$(CFG_OBJ_SUFFIX),$<)) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 %.d: %.ml $(MKFILES)
-	ocamldep.opt $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
+	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 %.d: %.mli $(MKFILES)
-	ocamldep.opt $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
+	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 -include $(ML_DEPFILES) $(C_DEPFILES)
 
