@@ -321,7 +321,8 @@ let layout_visitor
             begin
               let abi = cx.ctxt_abi in
               let tfn = ty_fn_of_callee nb.id in
-              let layout = pack 0L (layout_call_tup abi tfn) in
+              let (tsig, _) = tfn in
+              let layout = pack 0L (layout_call_tup abi tsig) in
               let sz = layout.layout_size in
               let frame_id = Stack.top frame_stack in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in

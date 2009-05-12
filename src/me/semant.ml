@@ -712,8 +712,7 @@ let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
     Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
 ;;
 
-let layout_call_tup (abi:Abi.abi) (tfn:Ast.ty_fn) : (layout array) =
-  let (tsig,taux) = tfn in
+let layout_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
   let slots = tsig.Ast.sig_input_slots in
   let proc_ptr = word_slot abi in
   let out_ptr = word_slot abi in

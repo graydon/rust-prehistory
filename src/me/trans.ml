@@ -794,52 +794,53 @@ let trans_visitor
         (flv:Ast.lval)
         (args:Ast.atom array)
         : unit =
-      let vr = Il.Reg (Il.next_vreg (emitter())) in
-      let (outmem, _) = trans_lval dst INTENT_write in
-      let (fv, fslot) = (trans_lval_full flv
-                           abi.Abi.abi_has_pcrel_jumps
-                           abi.Abi.abi_has_imm_jumps
-                           INTENT_read) in
-      let tfn =
-        match slot_ty fslot with
-            Ast.TY_fn fty -> fty
-          | _ -> err None "Calling non-function."
-      in
-      let (tsig, _) = tfn in
-      let fslots = tsig.Ast.sig_input_slots in
-      let arg_layouts = layout_call_tup abi tfn in
-      let word_slot = word_slot abi in
-        assert ((Array.length arg_layouts) == ((Array.length args) + 2));
-        for i = 0 to (Array.length arg_layouts) - 1 do
-          let dst_operand = word_at_sp_off arg_layouts.(i).layout_offset in
-            if i == 0
+    let (fv, fslot) = (trans_lval_full flv
+                         abi.Abi.abi_has_pcrel_jumps
+                         abi.Abi.abi_has_imm_jumps
+                         INTENT_read) in
+    let tfn =
+      match slot_ty fslot with
+          Ast.TY_fn fty -> fty
+        | _ -> err None "Calling non-function."
+    in
+    let (tsig, _) = tfn in
+
+    let (outmem, _) = trans_lval dst INTENT_write in
+    let in_slots = tsig.Ast.sig_input_slots in
+    let arg_layouts = layout_call_tup abi tsig in
+    let word_slot = word_slot abi in
+      assert ((Array.length arg_layouts) == ((Array.length args) + 2));
+      for i = 0 to (Array.length arg_layouts) - 1 do
+        let dst_operand = word_at_sp_off arg_layouts.(i).layout_offset in
+          if i == 0
+          then
+            begin
+              (* Emit arg0: the output slot. *)
+              trans_init_slot
+                dst_operand (word_write_alias_slot abi)
+                outmem word_slot
+            end
+          else
+            if i == 1
             then
-              begin
-                (* Emit arg0: the output slot. *)
-                trans_init_slot
-                  dst_operand (word_write_alias_slot abi)
-                  outmem word_slot
-              end
+              (* Emit arg1: the process pointer. *)
+              trans_init_slot
+                dst_operand word_slot
+                abi.Abi.abi_pp_operand word_slot
             else
-              if i == 1
-              then
-                (* Emit arg1: the process pointer. *)
-                trans_init_slot
-                  dst_operand word_slot
-                  abi.Abi.abi_pp_operand word_slot
-              else
-                begin
-                  log cx "copying formal arg %d, slot %s"
-                    (i-2) (Ast.fmt_to_str Ast.fmt_slot fslots.(i-2));
-                  trans_init_slot_from_atom
-                    dst_operand fslots.(i-2)
-                    args.(i-2)
-                end
-        done;
+              begin
+                log cx "copying formal arg %d, slot %s"
+                  (i-2) (Ast.fmt_to_str Ast.fmt_slot in_slots.(i-2));
+                trans_init_slot_from_atom
+                  dst_operand in_slots.(i-2)
+                  args.(i-2)
+              end
+      done;
+      let vr = Il.Reg (Il.next_vreg (emitter())) in
         emit Il.CCALL vr fv Il.Nil;
         for i = 2 to (Array.length arg_layouts) - 1 do
           let operand = word_at_sp_off arg_layouts.(i).layout_offset in
-            trans_drop_slot operand fslots.(i-2)
+            trans_drop_slot operand in_slots.(i-2)
         done
 
 
