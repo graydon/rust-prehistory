@@ -29,6 +29,12 @@ let log cx = Session.log "ra"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
+let iflog cx thunk =
+  if cx.ctxt_sess.Session.sess_log_ra
+  then thunk ()
+  else ()
+;;
+
 let next_spill cx =
   let i = cx.ctxt_next_spill in
     cx.ctxt_next_spill <- i + 1;
@@ -146,7 +152,7 @@ let calculate_live_bitvectors cx =
       let inner_changed = ref true in
         while !inner_changed do
           inner_changed := false;
-          log cx "iterating live bitvector calculation";
+          iflog cx (fun _ -> log cx "iterating live bitvector calculation");
           for i = n_quads - 1 downto 0 do
             let quad = quads.(i) in
             let live_in = live_in_vregs.(i) in
@@ -201,23 +207,27 @@ let calculate_live_bitvectors cx =
               | _ -> ()
         done
     done;
-    log cx "finished calculating live bitvectors";
-    log cx "=========================";
-    for q = 0 to n_quads - 1 do
-      let buf = Buffer.create 128 in
-      let live_vregs = (Bitv.bw_or
-                          live_in_vregs.(q)
-                          live_out_vregs.(q))
-      in
-        for v = 0 to (Bitv.length live_vregs) - 1
-        do
-          if Bitv.get live_vregs v
-          then Printf.bprintf buf " %-2d" v
-          else Buffer.add_string buf "   "
-        done;
-        log cx "[%6d] live vregs: %s" q (Buffer.contents buf)
-    done;
-    log cx "=========================";
+    iflog cx
+      begin
+        fun _ ->
+          log cx "finished calculating live bitvectors";
+          log cx "=========================";
+          for q = 0 to n_quads - 1 do
+            let buf = Buffer.create 128 in
+            let live_vregs = (Bitv.bw_or
+                                live_in_vregs.(q)
+                                live_out_vregs.(q))
+            in
+              for v = 0 to (Bitv.length live_vregs) - 1
+              do
+                if Bitv.get live_vregs v
+                then Printf.bprintf buf " %-2d" v
+                else Buffer.add_string buf "   "
+              done;
+              log cx "[%6d] live vregs: %s" q (Buffer.contents buf)
+          done;
+          log cx "========================="
+      end;
     (live_in_vregs, live_out_vregs)
 ;;
 
@@ -278,10 +288,12 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
   try
     let cx = new_ctxt sess quads vregs abi in
     let _ =
-      begin
-        log cx "un-allocated quads:";
-        dump_quads cx
-      end
+      iflog cx
+        begin
+          fun _ ->
+            log cx "un-allocated quads:";
+            dump_quads cx
+        end
     in
     let (live_in_vregs, live_out_vregs) = calculate_live_bitvectors cx in
     let inactive_hregs = ref [] in (* [hreg] *)
@@ -418,26 +430,28 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
           begin
             if List.exists (fun def -> List.mem def clobbers) defined
             then raise (Ra_error ("clobber and defined sets overlap"));
-            begin
-              let hr (v:int) : string =
-                if Hashtbl.mem vreg_to_hreg v
-                then hr_str (Hashtbl.find vreg_to_hreg v)
-                else "??"
-              in
-              let vr_str (v:int) : string = Printf.sprintf "v%d=%s" v (hr v) in
-              let lstr lab ls fn =
-                if List.length ls = 0
-                then ()
-                else log cx "\t%s: [%s]" lab (list_to_str ls fn)
-              in
-                log cx "processing quad %d = %s" i (string_of_quad hr_str quad);
-                (lstr "dirt" (htab_keys dirty_vregs) vr_str);
-                (lstr "clob" clobbers hr_str);
-                (lstr "in" (Bitv.to_list live_in_vregs.(i)) vr_str);
-                (lstr "out" (Bitv.to_list live_out_vregs.(i)) vr_str);
-                (lstr "use" used vr_str);
-                (lstr "def" defined vr_str);
-            end;
+            iflog cx
+              begin
+                fun _ ->
+                  let hr (v:int) : string =
+                    if Hashtbl.mem vreg_to_hreg v
+                    then hr_str (Hashtbl.find vreg_to_hreg v)
+                    else "??"
+                  in
+                  let vr_str (v:int) : string = Printf.sprintf "v%d=%s" v (hr v) in
+                  let lstr lab ls fn =
+                    if List.length ls = 0
+                    then ()
+                    else log cx "\t%s: [%s]" lab (list_to_str ls fn)
+                  in
+                    log cx "processing quad %d = %s" i (string_of_quad hr_str quad);
+                    (lstr "dirt" (htab_keys dirty_vregs) vr_str);
+                    (lstr "clob" clobbers hr_str);
+                    (lstr "in" (Bitv.to_list live_in_vregs.(i)) vr_str);
+                    (lstr "out" (Bitv.to_list live_out_vregs.(i)) vr_str);
+                    (lstr "use" used vr_str);
+                    (lstr "def" defined vr_str);
+              end;
             fixup := quad.quad_fixup;
             List.iter (clean_hreg i) clobbers;
             if is_beginning_of_basic_block quad
@@ -469,9 +483,13 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       cx.ctxt_quads <- Array.of_list (List.rev (!newq));
       kill_redundant_moves cx;
 
-      log cx "register-allocated quads:";
-      dump_quads cx;
-
+      iflog cx
+        begin
+          fun _ ->
+            log cx "register-allocated quads:";
+            dump_quads cx
+        end;
+      
       (cx.ctxt_quads, cx.ctxt_next_spill)
 
   with

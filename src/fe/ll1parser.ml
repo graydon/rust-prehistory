@@ -352,6 +352,12 @@ let log (ps:pstate) = Session.log "parse"
   ps.pstate_sess.Session.sess_log_out
 ;;
 
+let iflog ps thunk =
+  if ps.pstate_sess.Session.sess_log_parse
+  then thunk ()
+  else ()
+;;
+
 exception Parse_err of (pstate * string)
 ;;
 
@@ -366,7 +372,8 @@ let lexpos ps =
 let span ps apos bpos x =
   let span = { lo = apos; hi = bpos } in
   let id = !(ps.pstate_node_id) in
-    log ps "span for node #%d: %s" (int_of_node id) (Session.string_of_span span);
+    iflog ps (fun _ -> log ps "span for node #%d: %s"
+                (int_of_node id) (Session.string_of_span span));
     ps.pstate_node_id := Node ((int_of_node id)+1);
     htab_put ps.pstate_sess.Session.sess_spans id span;
     { node = x; id = id }
@@ -398,11 +405,11 @@ let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
 
 let peek ps =
   begin
-    log ps "peeking at: %s     // %s"
-      (string_of_tok ps.pstate_peek)
-      (match ps.pstate_ctxt with
-           (s, _) :: _ -> s
-         | _ -> "<empty>");
+    iflog ps (fun _ -> log ps "peeking at: %s     // %s"
+                (string_of_tok ps.pstate_peek)
+                (match ps.pstate_ctxt with
+                     (s, _) :: _ -> s
+                   | _ -> "<empty>"));
     ps.pstate_peek
   end
 ;;
@@ -410,7 +417,7 @@ let peek ps =
 
 let bump ps =
   begin
-    log ps "bumping past: %s" (string_of_tok ps.pstate_peek);
+    iflog ps (fun _ -> log ps "bumping past: %s" (string_of_tok ps.pstate_peek));
     ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf
   end
 ;;
@@ -1730,7 +1737,7 @@ and make_parser tref nref sess tok fname =
         pstate_temp_id = tref;
         pstate_node_id = nref }
     in
-      log ps "made parser for: %s\n%!" fname;
+      iflog ps (fun _ -> log ps "made parser for: %s\n%!" fname);
       ps
 
 and parse_crate_mod_entry

@@ -7,7 +7,9 @@ MKFILES:=Makefile $(CONFIGMK)
 
 ML_INCS:=-I fe -I me -I be -I driver -I util
 ML_LIBS=unix.cma nums.cma
+ML_NATIVE_LIBS=unix.cmxa nums.cmxa
 OCAMLC_FLAGS:=-g $(ML_INCS)
+OCAMLOPT_FLAGS:=-p $(ML_INCS)
 
 # List them in link order.
 # Nobody calculates the link-order DAG automatically, sadly.
@@ -21,10 +23,13 @@ DRIVER_TOP_MLS:=driver/main.ml
 
 COMPILER_MLS:=$(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_TOP_MLS)
 COMPILER_CMOS:=$(COMPILER_MLS:.ml=.cmo)
+COMPILER_CMXS:=$(COMPILER_MLS:.ml=.cmx)
 COMPILER_CMIS:=$(COMPILER_MLS:.ml=.cmi)
 
 RUNTIME_CS:=rt/rust.c
 RUNTIME_OBJS:=$(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
+
+NATIVE=1
 
 all: $(CFG_COMPILER) $(CFG_RUNTIME) $(MKFILES) fe/lexer.ml
 
@@ -37,19 +42,27 @@ $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
 %$(CFG_OBJ_SUFFIX): %.c $(MKFILES)
 	$(call CFG_COMPILE_C,$@) $<
 
+ifdef NATIVE
+$(CFG_COMPILER): $(COMPILER_CMXS) $(MKFILES)
+	ocamlopt.opt -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(COMPILER_CMXS)
+else
 $(CFG_COMPILER): $(COMPILER_CMOS) $(MKFILES)
-	ocamlc -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(COMPILER_CMOS)
+	ocamlc.opt -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(COMPILER_CMOS)
+endif
 
 %.cmo: %.cmi $(MKFILES)
 
 %.cmi: %.mli $(MKFILES)
-	ocamlc -c -o $@ $(OCAMLC_FLAGS) $<
+	ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
 
 %.cmo: %.ml $(MKFILES)
-	ocamlc -c -o $@ $(OCAMLC_FLAGS) $<
+	ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
+
+%.cmx: %.ml $(MKFILES)
+	ocamlopt.opt -c -o $@ $(OCAMLOPT_FLAGS) $<
 
 %.ml: %.mll $(MKFILES)
-	ocamllex -o $@ $<
+	ocamllex.opt -o $@ $<
 
 # Auto-dependency logic
 
@@ -60,10 +73,10 @@ C_DEPFILES:=$(RUNTIME_CS:.c=.d)
 	$(call CFG_DEPEND_C,$@ $(patsubst %.c,%$(CFG_OBJ_SUFFIX),$<)) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 %.d: %.ml $(MKFILES)
-	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
+	ocamldep.opt $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 %.d: %.mli $(MKFILES)
-	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
+	ocamldep.opt $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 -include $(ML_DEPFILES) $(C_DEPFILES)
 
@@ -133,7 +146,7 @@ test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_CO
 .phony: clean
 
 clean:
-	rm -f $(RUNTIME_OBJS) $(COMPILER_CMOS) $(COMPILER_CMIS)
+	rm -f $(RUNTIME_OBJS) $(COMPILER_CMOS) $(COMPILER_CMIS) $(COMPILER_CMXS)
 	rm -f $(ML_DEPFILES) $(C_DEPFILES)
 	rm -f fe/lexer.ml
 	rm -f $(CFG_COMPILER) $(CFG_RUNTIME)
