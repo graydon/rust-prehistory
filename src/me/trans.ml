@@ -441,13 +441,33 @@ let trans_visitor
 
   and trans_spawn
       (dst:Ast.lval)
-      (plv:Ast.lval)
+      (prog_lval:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (dstop, _) = trans_lval dst INTENT_write in
-      trans_upcall Abi.UPCALL_spawn [|  (alias dstop); (trans_atom (Ast.ATOM_lval plv)) |];
-      (* FIXME: call the init here. *)
-      trans_upcall Abi.UPCALL_sched [| dstop |]
+    let (proc_operand, proc_slot) = trans_lval dst INTENT_write in
+    let (prog_operand, prog_slot) = trans_lval prog_lval INTENT_read in
+    let tsig =
+      match prog_slot.Ast.slot_ty with
+          Some (Ast.TY_prog tsig) -> tsig
+        | _ -> err None "prog pseudo-slot has wrong type"
+    in
+      (* 
+       * We're fudging here; the proc operand isn't really the dst operand, 
+       * it's the 0th slot of the dst tuple though. 
+       *)
+      trans_upcall Abi.UPCALL_spawn [| (alias proc_operand); prog_operand |];
+      let in_slots = (Array.append
+                        [| interior_slot Ast.TY_proc |]
+                        tsig.Ast.sig_input_slots)
+      in
+      (* FIXME: this is a ghastly mess. *)
+      let arg_layouts = layout_init_call_tup abi tsig in
+      let init_operand =
+        deref_off prog_operand
+          (Int64.mul word_sz (Int64.of_int Abi.prog_field_init))
+      in
+        trans_call proc_operand init_operand in_slots arg_layouts (Some proc_operand) args;
+        trans_upcall Abi.UPCALL_sched [| proc_operand |]
 
   and trans_check_expr (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_check_expr [| (trans_atom a) |]
@@ -789,59 +809,87 @@ let trans_visitor
             dst dst_slot
             src src_slot
 
-  and trans_call
+  and trans_call_fn
         (dst:Ast.lval)
         (flv:Ast.lval)
         (args:Ast.atom array)
         : unit =
-    let (fv, fslot) = (trans_lval_full flv
-                         abi.Abi.abi_has_pcrel_jumps
-                         abi.Abi.abi_has_imm_jumps
-                         INTENT_read) in
+    let (dst_operand, _) = trans_lval dst INTENT_write in
+    let (fn_operand, fn_slot) =
+      trans_lval_full flv
+        abi.Abi.abi_has_pcrel_jumps
+        abi.Abi.abi_has_imm_jumps
+        INTENT_read
+    in
     let tfn =
-      match slot_ty fslot with
+      match slot_ty fn_slot with
           Ast.TY_fn fty -> fty
         | _ -> err None "Calling non-function."
     in
     let (tsig, _) = tfn in
-
-    let (outmem, _) = trans_lval dst INTENT_write in
     let in_slots = tsig.Ast.sig_input_slots in
-    let arg_layouts = layout_call_tup abi tsig in
-    let word_slot = word_slot abi in
-      assert ((Array.length arg_layouts) == ((Array.length args) + 2));
-      for i = 0 to (Array.length arg_layouts) - 1 do
-        let dst_operand = word_at_sp_off arg_layouts.(i).layout_offset in
-          if i == 0
-          then
+    let arg_layouts = layout_fn_call_tup abi tsig in
+      trans_call dst_operand fn_operand in_slots arg_layouts None args
+
+  and trans_arg0 param_operand output_operand =
+    (* Emit arg0 of any call: the output slot. *)
+    trans_init_slot
+      param_operand (word_write_alias_slot abi)
+      output_operand (word_slot abi)
+
+  and trans_arg1 param_operand =
+    (* Emit arg1 or any call: the process pointer. *)
+    trans_init_slot
+      param_operand (word_slot abi)
+      abi.Abi.abi_pp_operand (word_slot abi)
+
+  and trans_argN n param_operand slots args =
+    log cx "copying param %d, slot %s"
+      n (Ast.fmt_to_str Ast.fmt_slot slots.(n));
+    trans_init_slot_from_atom
+      param_operand slots.(n)
+      args.(n)
+
+  and trans_call
+      (output_operand:Il.operand)
+      (callee_operand:Il.operand)
+      (in_slots:Ast.slot array)
+      (arg_layouts:layout array)
+      (arg2:Il.operand option)
+      (args:Ast.atom array)
+      : unit =
+    begin
+      match arg2 with
+          None ->
             begin
-              (* Emit arg0: the output slot. *)
-              trans_init_slot
-                dst_operand (word_write_alias_slot abi)
-                outmem word_slot
+              assert ((Array.length arg_layouts) == ((Array.length args) + 2));
+              for i = 0 to (Array.length arg_layouts) - 1 do
+                let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
+                  match i with
+                      0 -> trans_arg0 param_operand output_operand
+                    | 1 -> trans_arg1 param_operand
+                    | _ -> trans_argN (i-2) param_operand in_slots args
+              done
             end
-          else
-            if i == 1
-            then
-              (* Emit arg1: the process pointer. *)
-              trans_init_slot
-                dst_operand word_slot
-                abi.Abi.abi_pp_operand word_slot
-            else
-              begin
-                log cx "copying formal arg %d, slot %s"
-                  (i-2) (Ast.fmt_to_str Ast.fmt_slot in_slots.(i-2));
-                trans_init_slot_from_atom
-                  dst_operand in_slots.(i-2)
-                  args.(i-2)
-              end
-      done;
-      let vr = Il.Reg (Il.next_vreg (emitter())) in
-        emit Il.CCALL vr fv Il.Nil;
-        for i = 2 to (Array.length arg_layouts) - 1 do
-          let operand = word_at_sp_off arg_layouts.(i).layout_offset in
-            trans_drop_slot operand in_slots.(i-2)
-        done
+        | Some arg2_operand ->
+            begin
+              assert ((Array.length arg_layouts) == ((Array.length args) + 3));
+              for i = 0 to (Array.length arg_layouts) - 1 do
+                let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
+                  match i with
+                      0 -> trans_arg0 param_operand output_operand
+                    | 1 -> trans_arg1 param_operand
+                    | 2 -> mov param_operand arg2_operand
+                    | _ -> trans_argN (i-3) param_operand in_slots args
+              done
+            end
+    end;
+    let vr = Il.Reg (Il.next_vreg (emitter())) in
+      emit Il.CCALL vr callee_operand Il.Nil;
+      for i = 2 to (Array.length arg_layouts) - 1 do
+        let operand = word_at_sp_off arg_layouts.(i).layout_offset in
+          trans_drop_slot operand in_slots.(i-2)
+      done
 
 
   and trans_stmt (stmt:Ast.stmt) : unit =
@@ -953,7 +1001,7 @@ let trans_visitor
 
       | Ast.STMT_check _ -> ()
 
-      | Ast.STMT_call (dst, flv, args) -> trans_call dst flv args
+      | Ast.STMT_call (dst, flv, args) -> trans_call_fn dst flv args
 
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->

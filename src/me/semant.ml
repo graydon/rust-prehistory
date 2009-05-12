@@ -712,11 +712,20 @@ let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
     Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
 ;;
 
-let layout_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
+let layout_fn_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
   let slots = tsig.Ast.sig_input_slots in
   let proc_ptr = word_slot abi in
   let out_ptr = word_slot abi in
   let slots' = Array.append [| out_ptr; proc_ptr |] slots in
+    layout_tup abi slots'
+;;
+
+let layout_init_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
+  let slots = tsig.Ast.sig_input_slots in
+  let init_proc_ptr = word_slot abi in
+  let proc_ptr = word_slot abi in
+  let out_ptr = word_slot abi in
+  let slots' = Array.append [| out_ptr; proc_ptr; init_proc_ptr |] slots in
     layout_tup abi slots'
 ;;
 
