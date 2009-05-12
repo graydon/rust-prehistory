@@ -466,8 +466,12 @@ let trans_visitor
         deref_off prog_operand
           (Int64.mul word_sz (Int64.of_int Abi.prog_field_init))
       in
-        trans_call proc_operand init_operand in_slots arg_layouts (Some proc_operand) args;
-        trans_upcall Abi.UPCALL_sched [| proc_operand |]
+        emit Il.CMP Il.Nil init_operand imm_false;
+        let fwd_jmp = mark () in
+          emit Il.JE Il.Nil badlab Il.Nil;
+          trans_call proc_operand init_operand in_slots arg_layouts (Some proc_operand) args;
+          patch fwd_jmp;
+          trans_upcall Abi.UPCALL_sched [| proc_operand |]
 
   and trans_check_expr (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_check_expr [| (trans_atom a) |]
