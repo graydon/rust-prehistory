@@ -238,16 +238,19 @@ let trans_visitor
       if Hashtbl.mem cx.ctxt_lval_is_in_proc_init lval_id
       then
         let prog = get_prog_owning_slot cx slot_id in
-        let init_slot_layout = match prog.Ast.prog_init with
+        let init_proc_slot_layout = match prog.Ast.prog_init with
             None -> err (Some lval_id) "Lval in nonexistent prog init"
-          | Some init -> Hashtbl.find cx.ctxt_slot_layouts init.id
+          | Some init -> Hashtbl.find cx.ctxt_slot_layouts init.node.Ast.init_proc_input.id
         in
-          word_at_sp_off init_slot_layout.layout_offset
+          word_at_sp_off init_proc_slot_layout.layout_offset
       else
         abi.Abi.abi_pp_operand
     in
     let layout = Hashtbl.find cx.ctxt_slot_layouts slot_id in
-    let disp = layout.layout_offset in
+    let disp = (Int64.add
+                  layout.layout_offset
+                  (Int64.mul word_sz (Int64.of_int Abi.proc_field_data)))
+    in
       word_at_reg_off (Some (force_to_reg pp)) (Asm.IMM disp)
   in
 

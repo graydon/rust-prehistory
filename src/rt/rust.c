@@ -155,7 +155,8 @@ rust_del_stk(rust_stk_seg_t *stk)
 static rust_proc_t*
 rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
 {
-  rust_proc_t *proc = xcalloc(sizeof(rust_proc_t));
+  /* FIXME: need to actually convey the proc internal-slots size to here. */
+  rust_proc_t *proc = xcalloc(sizeof(rust_proc_t) + 1024);
   logptr("new proc", (uintptr_t)proc);
   logptr("from prog", (uintptr_t)prog);
   logptr("init:", (uintptr_t)prog->init_code);

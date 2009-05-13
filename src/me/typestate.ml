@@ -81,40 +81,38 @@ let fmt_constr_key cx ckey =
         Printf.sprintf "<init #%d>" (int_of_node n)
 ;;
 
-let fn_decl_keys fd resolver =
-  let fn = fd.Ast.decl_item in
+let entry_keys header constrs resolver =
   let init_keys =
     Array.map
       (fun (sloti, _) -> (Constr_init sloti.id))
-      fn.Ast.fn_input_slots
+      header
   in
   let names =
     Array.map
       (fun (_, ident) -> (Some (Ast.BASE_ident ident)))
-      fn.Ast.fn_input_slots
+      header
   in
   let input_constrs =
-    Array.map (apply_names_to_constr names) fn.Ast.fn_input_constrs in
+    Array.map (apply_names_to_constr names) constrs in
   let input_keys = Array.map resolver input_constrs in
     (input_keys, init_keys)
 ;;
 
+
+let fn_decl_keys fd resolver =
+  let fn = fd.Ast.decl_item in
+    entry_keys fn.Ast.fn_input_slots fn.Ast.fn_input_constrs resolver
+;;
+
 let pred_decl_keys pd resolver =
   let pred = pd.Ast.decl_item in
-  let init_keys =
-    Array.map
-      (fun (sloti, _) -> (Constr_init sloti.id))
-      pred.Ast.pred_input_slots
-  in
-  let names =
-    Array.map
-      (fun (_, ident) -> (Some (Ast.BASE_ident ident)))
-      pred.Ast.pred_input_slots
-  in
-  let input_constrs =
-    Array.map (apply_names_to_constr names) pred.Ast.pred_input_constrs in
-  let input_keys = Array.map resolver input_constrs in
-    (input_keys, init_keys)
+    entry_keys pred.Ast.pred_input_slots pred.Ast.pred_input_constrs resolver
+
+let prog_decl_init_keys prog resolver =
+  match prog.Ast.decl_item.Ast.prog_init with
+      None -> ([||], [||])
+    | Some i ->
+        entry_keys i.node.Ast.init_input_slots i.node.Ast.init_input_constrs resolver
 ;;
 
 
@@ -156,6 +154,10 @@ let constr_id_assigning_visitor
             note_keys init_keys
       | Ast.MOD_ITEM_pred pd ->
           let (input_keys, init_keys) = pred_decl_keys pd resolve_constr_to_key in
+            note_keys input_keys;
+            note_keys init_keys
+      | Ast.MOD_ITEM_prog pd ->
+          let (input_keys, init_keys) = prog_decl_init_keys pd resolve_constr_to_key in
             note_keys input_keys;
             note_keys init_keys
       | _ -> ()
@@ -295,36 +297,36 @@ let condition_assigning_visitor
   in
 
   let visit_mod_item_pre n p i =
+    let raise_entry_state input_keys init_keys block =
+      if (Array.length block.node) != 0
+      then
+        begin
+          iflog cx (fun _ -> log cx
+                      "setting entry state as stmt %d prestate"
+                      (int_of_node block.node.(0).id));
+          raise_prestate block.node.(0).id input_keys;
+          raise_prestate block.node.(0).id init_keys;
+          iflog cx (fun _ -> log cx "done propagating fn entry state")
+        end
+    in
     begin
     match i.node with
         Ast.MOD_ITEM_fn fd ->
           let (input_keys, init_keys) = fn_decl_keys fd resolve_constr_to_key in
-           let block = fd.Ast.decl_item.Ast.fn_body in
-            if (Array.length block.node) != 0
-            then
-              begin
-                iflog cx (fun _ -> log cx
-                            "setting fn entry state as stmt %d prestate"
-                            (int_of_node block.node.(0).id));
-                raise_prestate block.node.(0).id input_keys;
-                raise_prestate block.node.(0).id init_keys;
-                iflog cx (fun _ -> log cx "done propagating fn entry state")
-              end
+            raise_entry_state input_keys init_keys fd.Ast.decl_item.Ast.fn_body
 
       | Ast.MOD_ITEM_pred pd ->
           let (input_keys, init_keys) = pred_decl_keys pd resolve_constr_to_key in
-           let block = pd.Ast.decl_item.Ast.pred_body in
-            if (Array.length block.node) != 0
-            then
-              begin
-                iflog cx (fun _ -> log cx
-                            "setting pred entry state as stmt %d prestate"
-                            (int_of_node block.node.(0).id));
-                raise_prestate block.node.(0).id input_keys;
-                raise_prestate block.node.(0).id init_keys;
-                iflog cx (fun _ -> log cx "done propagating pred entry state")
-              end
+            raise_entry_state input_keys init_keys pd.Ast.decl_item.Ast.pred_body
 
+      | Ast.MOD_ITEM_prog pd ->
+          begin
+            match pd.Ast.decl_item.Ast.prog_init with
+                None -> ()
+              | Some i ->
+                  let (input_keys, init_keys) = prog_decl_init_keys pd resolve_constr_to_key in
+                    raise_entry_state input_keys init_keys i.node.Ast.init_body
+          end
       | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i

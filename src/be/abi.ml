@@ -128,7 +128,11 @@ let proc_field_state = 4;;
 let proc_field_refcnt = 5;;
 let proc_field_upcall_code = 6;;
 let proc_field_upcall_args = 7;;
+
 let max_upcall_args = 8;;
+
+(* The "end of the proc" where proc-slots get allocated. *)
+let proc_field_data = 20;;
 
 
 let rt_field_sp = 0;;

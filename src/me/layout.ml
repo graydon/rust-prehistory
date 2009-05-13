@@ -327,7 +327,8 @@ let layout_visitor
                 pack 0L
                   (match s.node with
                        Ast.STMT_call _ -> layout_fn_call_tup abi tsig
-                     | Ast.STMT_spawn _ -> layout_init_call_tup abi tsig)
+                     | Ast.STMT_spawn _ -> layout_init_call_tup abi tsig
+                     | _ -> err (Some s.id) "call/spawn changed type")
               in
               let sz = layout.layout_size in
               let frame_id = Stack.top frame_stack in

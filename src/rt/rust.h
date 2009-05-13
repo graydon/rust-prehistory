@@ -202,8 +202,8 @@ struct rust_proc {
   /* Proc accounting. */
   uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */
   uintptr_t curr_mem;     /* N bytes currently owned.                       */
-  uint64_t tick_budget;   /* N ticks in proc lifetime. 0 = unlimited.       */
-  uint64_t curr_ticks;    /* N ticks currently consumed.                    */
+  uintptr_t tick_budget;  /* N ticks in proc lifetime. 0 = unlimited.       */
+  uintptr_t curr_ticks;   /* N ticks currently consumed.                    */
 
   uint8_t data[];         /* Official-style C99 "flexible array" element.    */
 
