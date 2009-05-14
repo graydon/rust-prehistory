@@ -93,7 +93,13 @@ let auto_inference_visitor
         ignore (unify_atom islots.(i).Ast.slot_ty args.(i));
       done
   in
-  let visit_stmt_pre (s:Ast.stmt) =
+  let rec visit_stmt_pre (s:Ast.stmt) =
+    try
+      visit_stmt_pre_full s
+    with
+        Semant_err (None, msg) -> raise (Semant_err ((Some s.id), msg))
+
+  and visit_stmt_pre_full (s:Ast.stmt) =
     begin
       match s.node with
           Ast.STMT_copy (lval,expr) ->
