@@ -1,0 +1,64 @@
+Automated tests for uthash
+==============================================================================
+Run "make" in this directory to build the tests and run them.
+
+test1:  make 10-item hash, iterate and print each one
+test2:  make 10-item hash, lookup items with even keys, print
+test3:  make 10-item hash, delete items with even keys, print others 
+test4:  10 structs have dual hash handles, separate keys
+test5:  10 structs have dual hash handles, lookup evens by alt key
+test6:  test alt malloc macros
+test7:  test alt malloc macros with 1000 structs so bucket expansion occurs
+test8:  test num_items counter in UT_hash_handle
+test9:  test "find" after bucket expansion
+test10: dual-hash handle test, bucket expansion on one and not the other
+test11: read dat file of names into hash, sort them and print
+test12: create hash with string keys, add 10 items, lookup each item
+test13: make 10-item hash, delete items with even keys, reverse print others
+test14: read dat file of names into hash, read file again and lookup each one
+test15: build string-keyed hash of 3 items, lookup one item 
+test16: hash on aggregate key, iterate, lookup, using generalized macros
+test17: sort, add more items, sort again
+test18: test pathological HASH_DEL(a,a) scenario (single head,deletee variable)
+test19: sort two hash tables with shared elements using HASH_SRT
+test20: test a 5-byte "binary" key
+test21: test a "double" (floating point) key (userguide)
+test22: test multi-field key using flexible array member (userguide utf32)
+test23: test whether delete in iteration works
+test24: make 10-item hash and confirm item count (HASH_COUNT)
+test25: CDL / DL / LL tests
+test26: test the linked list sort macros in utlist.h
+test27: LL_APPEND, SORT
+test28: CDL / DL / LL tests  
+test29: DL_APPEND, SORT
+test30: CDL_PREPEND, SORT
+test31: CDL_PREPEND, SORT
+test32: DL_PREPEND
+test33: LL_PREPEND
+test34: CDL_PREPEND
+test35: CDL_PREPEND
+test36: HASH_SELECT
+test37: HASH_CLEAR
+test38: find-or-add test on integer keys in short loop
+test39: HASH_ADD_KEYPTR then HASH_FIND using array element as key pointer
+
+Other Make targets
+================================================================================
+pedantic:  makes the tests with extra CFLAGS for pedantic compiling
+cplusplus: compiles all the C tests using the C++ compiler to test compatibility
+debug:     makes the tests with debugging symbols and no optimization
+example:   builds the 'example' program from the user guide
+================================================================================
+
+Other files
+================================================================================
+keystats:  key statistics analyzer. See the User Guide (http://uthash.sf.net)
+emit_keys: reads a data file of unique strings, emits as keys w/HASH_EMIT_KEYS=1
+all_funcs: a script which executes the test suite with every hash function
+
+Manual performance testing
+================================================================================
+  # test performance characteristics on keys that are English dictionary words
+  emit_keys /usr/share/dict/words > words.keys
+  ./keystats words.keys
+

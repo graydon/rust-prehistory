@@ -1,0 +1,184 @@
+'utlist': linked list macros for C structures
+=============================================
+Troy D. Hanson <thanson@users.sourceforge.net>
+v1.0, May 2009
+
+include::sflogo.txt[]
+include::topnav_utlist.txt[]
+
+Introduction
+------------
+include::toc.txt[]
+
+A set of general-purpose 'linked list' macros for C structures are included with
+uthash in `src/utlist.h`.  To use these macros in your own C program, just
+copy `utlist.h` into your source directory and use it in your programs.
+
+  #include "utlist.h"
+
+These macros support the basic linked list operations: adding and deleting
+elements, sorting them and iterating over them.
+
+Download
+~~~~~~~~
+To download the `utlist.h` header file, follow the link to download on the
+http://uthash.sourceforge.net[uthash home page]. Untar the package, and
+look in the `src/` directory for `utlist.h`.
+
+  tar -xjf uthash-1.6.tar.bz2
+  cd uthash-1.6/src
+  cp utlist.h <destdir>
+
+BSD licensed
+~~~~~~~~~~~~
+This software is made available under the 
+link:license.html[revised BSD license]. 
+It is free and open source. 
+
+Platforms
+~~~~~~~~~
+The 'utlist' macros have been tested on:
+
+ * Linux, 
+ * Mac OS X, and 
+ * Windows, using Cygwin or MinGW.
+
+Using utlist
+------------
+
+Types of lists
+~~~~~~~~~~~~~~
+Three types of linked lists are supported:
+
+- *singly-linked* lists,
+- *doubly-linked* lists, and
+- *circular, doubly-linked* lists
+
+Efficiency
+^^^^^^^^^^
+For all types of lists, prepending elements and deleting elements are
+constant-time operations. Appending to a singly-linked list is an 'O(n)'
+operation but appending to a doubly-linked list is constant time using these
+macros.  (This is because, in the utlist implementation of the doubly-linked
+list, the head element's `prev` member points back to the list tail, even when
+the list is non-circular). Sorting is an 'O(n log(n))' operation.
+
+List elements
+~~~~~~~~~~~~~
+You can use any structure with these macros, as long as the structure 
+contains a `next` pointer. If you want to make a doubly-linked list, 
+the element also needs to have a `prev` pointer.
+
+  typedef struct {
+      char *name;
+      struct element *prev; /* needed for a doubly-linked list only */
+      struct element *next; /* needed for singly- or doubly-linked lists */
+  } element;
+
+You can name your structure anything. In the example above it is called `element`.
+Within a particular list, all elements must be of the same type. 
+
+List head
+~~~~~~~~~
+The list head is simply a pointer to your element structure. You can name it
+anything. *It must be initialized to `NULL`*.
+
+  element *head = NULL;
+
+List operations
+~~~~~~~~~~~~~~~
+The lists support inserting or deleting elements, sorting the elements and 
+iterating over them.
+
+[width="90%",cols="10^m,10^m,10^m",grid="cols",options="header"]
+|===============================================================================
+|Singly-linked             | Doubly-linked              | Circular, doubly-linked
+|LL_PREPEND(head,add);     | DL_PREPEND(head,add);      | CDL_PREPEND(head,add;
+|LL_APPEND(head,add);      | DL_APPEND(head,add);       | 
+|LL_DELETE(head,del);      | DL_DELETE(head,del);       | CDL_DELETE(head,del);
+|LL_SORT(head,cmp);        | DL_SORT(head,cmp);         | CDL_SORT(head,cmp);
+|LL_FOREACH(head,elt) {...}| DL_FOREACH(head,elt) {...} | CDL_FOREACH(head,elt) {...}
+|===============================================================================
+
+'Prepend' means to insert an element in front of the existing list head (if any),
+changing the list head to the new element. 'Append' means to add an element at the
+end of the list, so it becomes the new tail element.  
+
+The 'sort' operation never moves the elements in memory; rather it only adjusts
+the list order by altering the `prev` and `next` pointers in each element. Also
+the sort operation can change the list head to point to a new element.
+
+The 'foreach' operation is for easy iteration over the list from the head to the
+tail. A usage example is shown below. You can of course just use the `prev` and
+`next` pointers directly instead of using the 'foreach' macros.
+
+The parameters shown in the table above are explained here:
+
+head::
+  The list head (a pointer to your list element structure).
+add::
+  A pointer to the list element structure you are adding to the list.
+del::
+  A pointer to the list element structure you are deleting from the list.
+elt::
+  A pointer that will be assigned to each list element in succession (see
+  example).
+cmp::
+  pointer to comparison function which accepts two arguments-- these are
+  pointers to two element structures to be compared. The comparison function
+  must return an `int` that is negative, zero, or positive, which specifies
+  whether the first item should sort before, equal to, or after the second item,
+  respectively. (In other words, the same convention that is used by `strcmp`).
+
+Example
+~~~~~~~
+This example program reads names from a text file (one name per line), and
+appends each name to a doubly-linked list. Then it sorts and prints them.
+
+.A doubly-linked list
+--------------------------------------------------------------------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "utlist.h"
+
+#define BUFLEN 20
+
+typedef struct el {
+    char bname[BUFLEN];
+    struct el *next, *prev;
+} el;
+
+int namecmp(el *a, el *b) {
+    return strcmp(a->bname,b->bname);
+}
+
+el *head = NULL; /* important- initialize to NULL! */
+
+int main(int argc, char *argv[]) {
+    el *name, *tmp;
+
+    char linebuf[BUFLEN];
+    FILE *file;
+
+    if ( (file = fopen( "test11.dat", "r" )) == NULL ) {
+        perror("can't open: "); 
+        exit(-1);
+    }
+
+    while (fgets(linebuf,BUFLEN,file) != NULL) {
+        if ( (name = (el*)malloc(sizeof(el))) == NULL) exit(-1);
+        strncpy(name->bname,linebuf,BUFLEN);
+        DL_APPEND(head, name);
+    }
+    DL_SORT(head, namecmp);
+    DL_FOREACH(head,tmp) printf("%s", tmp->bname);
+
+    fclose(file);
+
+    return 0;
+}
+--------------------------------------------------------------------------------
+
+// vim: set tw=80 wm=2 syntax=asciidoc: 
+

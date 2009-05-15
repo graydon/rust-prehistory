@@ -1,0 +1,37 @@
+uthash: a hash in C                                   
+==============================================================================
+
+
+DOCUMENTATION
+=============
+Documentation for uthash is available in the doc/ directory or at:
+
+    http://uthash.sourceforge.net
+
+
+USAGE
+============
+The only file you need to use uthash in your own application is
+
+    src/uthash.h
+
+
+SELF-TESTS
+============
+The automated self-test can be run by doing:
+
+    cd tests
+    make
+
+
+LICENSE
+============
+The BSD license applies to this software. The text is in the LICENSE file.
+You can use or modify this code in your software, commercial or otherwise.
+
+CONTACT 
+============
+Feel free to send me questions, comments, ideas for improvements or bug reports.
+
+Troy D. Hanson, May 8, 2009
+thanson@users.sourceforge.net

@@ -1,0 +1,1599 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+    "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta name="generator" content="AsciiDoc 8.3.4" />
+<title>uthash User Guide</title>
+<link rel="stylesheet" href="./tdh.css" type="text/css" />
+<link rel="stylesheet" href="./tdh-quirks.css" type="text/css" />
+</head>
+<body>
+<div id="header">
+<h1>uthash User Guide</h1>
+<span id="author">Troy D. Hanson</span><br />
+<span id="email"><tt>&lt;<a href="mailto:thanson@users.sourceforge.net">thanson@users.sourceforge.net</a>&gt;</tt></span><br />
+<span id="revision">version 1.6,</span>
+May 2009
+</div>
+<div id="preamble">
+<div class="sectionbody">
+<a style="float: right; padding-right: 50px" href="http://sourceforge.net/projects/uthash"><img style="border: 0" src="http://sflogo.sourceforge.net/sflogo.php?group_id=163879&amp;type=13" width="120" height="30" alt="uthash at SourceForge.net" /></a>
+  <div id="topnav" style="font-size: 9pt; font-family: sans-serif;">
+  <a style="padding-right: 8px;" href="http://sourceforge.net/projects/uthash/">sf.net summary page</a>
+  >> <a style="padding: 8px;" href="index.html">uthash home</a>
+  >>  User Guide
+  <a style="padding: 8px;" href="userguide.pdf">[View PDF]</a>
+  </div>
+</div>
+</div>
+<h2 id="_a_hash_in_c">A hash in C</h2>
+<div class="sectionbody">
+<div id="toc"></div>
+<script>
+window.onload=generate_TOC
+
+/* Author: Mihai Bazon, September 2002
+ * <a href="http://students.infoiasi.ro/~mishoo">http://students.infoiasi.ro/~mishoo</a>
+ *
+ * Table Of Content generator
+ * Version: 0.4
+ *
+ * Feel free to use this script under the terms of the GNU General Public
+ * License, as long as you do not remove or alter this notice.
+ */
+
+ /* modified by Troy D. Hanson, September 2006. License: GPL */
+
+function H_getText(el) {
+  var text = "";
+  for (var i = el.firstChild; i != null; i = i.nextSibling) {
+    if (i.nodeType == 3 /* Node.TEXT_NODE, IE doesn't speak constants */)
+      text += i.data;
+    else if (i.firstChild != null)
+      text += H_getText(i);
+  }
+  return text;
+}
+
+function TOC_EL(el, text, level) {
+  this.element = el;
+  this.text = text;
+  this.level = level;
+}
+
+function getHeadlines(el) {
+  var l = new Array;
+  var rx = /[hH]([2-3])/;
+  // internal recursive function that scans the DOM tree
+  var rec = function (el) {
+    for (var i = el.firstChild; i != null; i = i.nextSibling) {
+      if (i.nodeType == 1 /* Node.ELEMENT_NODE */) {
+        if (rx.exec(i.tagName))
+          l[l.length] = new TOC_EL(i, H_getText(i), parseInt(RegExp.$1));
+        rec(i);
+      }
+    }
+  }
+  rec(el);
+  return l;
+}
+
+function generate_TOC() {
+  var parent = document.getElementById("toc");
+  var toc_hdr = document.createElement("div");
+  var toc_hdr_txt = document.createTextNode("CONTENTS");
+  toc_hdr.appendChild(toc_hdr_txt);
+  /* toc_hdr.setAttribute("id","hdr"); */
+  toc_hdr.id = "hdr";
+  parent.appendChild(toc_hdr);
+  var hs = getHeadlines(document.getElementsByTagName("body")[0]);
+  for (var i = 0; i < hs.length; ++i) {
+    var hi = hs[i];
+    var d = document.createElement("div");
+    if (hi.element.id == "") hi.element.id = "gen" + i;
+    var a = document.createElement("a");
+    a.href = "#" + hi.element.id;
+    a.appendChild(document.createTextNode(hi.text));
+    d.appendChild(a);
+    d.className = "level" + hi.level;
+    parent.appendChild(d);
+    /*
+    if (hi.level == 3) {
+        var dvtop = document.createElement("div");
+        dvtop.className = "toplink";
+        dvtop.appendChild(document.createTextNode("^top^"));
+        dvtop.onclick=function(){scrollTo(0,0);};
+        hi.element.appendChild(dvtop);
+    }
+    */
+  }
+}
+</script>
+<div class="paragraph"><p>This document is written for C programmers. Since you&#8217;re reading this, chances
+are that you know a hash is used for looking up items using a key. In scripting
+languages like Perl, hashes are used all the time.  In C, hashes don&#8217;t exist in
+the language itself. This software provides a hash table for C structures.</p></div>
+<h3 id="_what_can_it_do">What can it do?</h3><div style="clear:left"></div>
+<div class="paragraph"><p>This software supports these operations on items in a hash table:</p></div>
+<div class="olist arabic"><ol class="arabic">
+<li>
+<p>
+add
+</p>
+</li>
+<li>
+<p>
+find
+</p>
+</li>
+<li>
+<p>
+delete
+</p>
+</li>
+<li>
+<p>
+count
+</p>
+</li>
+<li>
+<p>
+iterate
+</p>
+</li>
+<li>
+<p>
+sort
+</p>
+</li>
+<li>
+<p>
+select (explained later)
+</p>
+</li>
+</ol></div>
+<h3 id="_is_it_fast">Is it fast?</h3><div style="clear:left"></div>
+<div class="paragraph"><p>Add, find and delete are normally constant-time operations. This is influenced
+by your key domain and the hash function.</p></div>
+<div class="paragraph"><p>This hash aims to be minimalistic and efficient. It&#8217;s around 600 lines of C.
+It inlines automatically because it&#8217;s implemented as macros. It&#8217;s fast as long
+as the hash function is suited to your keys. You can use the default hash
+function, or easily compare performance and choose from among several other
+<a href="#Appendix_A">built-in hash functions</a>.</p></div>
+<h3 id="_is_it_a_library">Is it a library?</h3><div style="clear:left"></div>
+<div class="paragraph"><p>No, it&#8217;s just a single header file: <tt>uthash.h</tt>.  All you need to do is copy
+the header file into your project, and:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>#include "uthash.h"</tt></pre>
+</div></div>
+<div class="paragraph"><p>Since uthash is a header file only, there is no library code to link against.</p></div>
+<h3 id="_c_c_and_platforms">C/C++ and platforms</h3><div style="clear:left"></div>
+<div class="paragraph"><p>This software can be used in C and C++ programs.  It has been tested on:</p></div>
+<div class="ulist"><ul>
+<li>
+<p>
+Linux
+</p>
+</li>
+<li>
+<p>
+Mac OS X
+</p>
+</li>
+<li>
+<p>
+Solaris
+</p>
+</li>
+<li>
+<p>
+OpenBSD
+</p>
+</li>
+<li>
+<p>
+Cygwin
+</p>
+</li>
+<li>
+<p>
+MinGW
+</p>
+</li>
+</ul></div>
+<h4 id="_non_gnu_c_compilers">Non-GNU C++ compilers</h4>
+<div class="paragraph"><p>When compiling C++ code it may be necessary to use the GNU compiler, g++, which
+supports the <tt>typeof</tt> extension. Alternatively some users of non-GNU C++
+compilers simply hardcode the <tt>TYPEOF</tt> macro in <tt>uthash.h</tt> to the data type they
+want to use.</p></div>
+<h4 id="_test_suite">Test suite</h4>
+<div class="paragraph"><p>You can run the test suite on these platforms, or any prospective Unix-like
+platform, in this way:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>cd tests/
+make</tt></pre>
+</div></div>
+<h3 id="_bsd_licensed">BSD licensed</h3><div style="clear:left"></div>
+<div class="paragraph"><p>This software is made available under the
+<a href="license.html">revised BSD license</a>.
+It is free and open source.</p></div>
+<h3 id="_obtaining_uthash">Obtaining uthash</h3><div style="clear:left"></div>
+<div class="paragraph"><p>Please follow the link to download on the
+<a href="http://uthash.sourceforge.net">uthash website</a> at <a href="http://uthash.sourceforge.net">http://uthash.sourceforge.net</a>.</p></div>
+<h3 id="_getting_help">Getting help</h3><div style="clear:left"></div>
+<div class="paragraph"><p>Feel free to <a href="mailto:thanson@users.sourceforge.net">email the author</a> at
+thanson@users.sourceforge.net.</p></div>
+<h3 id="_resources">Resources</h3><div style="clear:left"></div>
+<div class="dlist"><dl>
+<dt class="hdlist1">
+News
+</dt>
+<dd>
+<p>
+ The author has a news feed for <a href="http://troydhanson.wordpress.com/feed/">software updates</a> <span class="image">
+<img src="img/rss.png" alt="(RSS)" title="(RSS)" />
+</span>.
+</p>
+</dd>
+<dt class="hdlist1">
+Linked list macros
+</dt>
+<dd>
+<p>
+ uthash includes a separate, standalone header called <a href="utlist.html">utlist.h</a>
+ which has <em>linked list macros</em> for C structures, similar in style to the
+ hash macros
+</p>
+</dd>
+</dl></div>
+<h3 id="_who_8217_s_using_it">Who&#8217;s using it?</h3><div style="clear:left"></div>
+<div class="paragraph"><p>Since releasing uthash in 2006, it has been downloaded thousands of times,
+incorporated into commerical software, academic research, and into other
+open-source software.</p></div>
+</div>
+<h2 id="_your_structure">Your structure</h2>
+<div class="sectionbody">
+<div class="paragraph"><p>In uthash, a hash table is comprised of structures. Each structure represents a
+key-value association. One or more of the structure fields constitute the key;
+the structure itself is the value.</p></div>
+<div class="listingblock">
+<div class="title">Defining a structure that can be hashed</div>
+<div class="content">
+<pre><tt>#include "uthash.h"
+
+struct my_struct {
+    int id;                    /* key */
+    char name[10];
+    UT_hash_handle hh;         /* makes this structure hashable */
+};</tt></pre>
+</div></div>
+<h3 id="_the_key">The key</h3><div style="clear:left"></div>
+<div class="paragraph"><p>There are no restrictions on the data type or name of the key field. The key
+can also comprise multiple contiguous fields, having any names and data types.</p></div>
+<div class="sidebarblock">
+<div class="sidebar-content">
+<div class="sidebar-title">Any data type&#8230; really?</div>
+<div class="paragraph"><p>Yes, your key and structure can have any data type. Unlike function calls with
+fixed prototypes, uthash consists of macros-- whose arguments are untyped-- and
+thus able to work with any type of structure or key.</p></div>
+</div></div>
+<h4 id="_unique_keys">Unique keys</h4>
+<div class="paragraph"><p>As with any hash, every item must have a unique key.  Your application must
+enforce key uniqueness. Before you add an item to the hash table, you must
+first know (if in doubt, check!) that the key is not already in use.  You
+can check whether a key already exists in the hash table using <tt>HASH_FIND</tt>.</p></div>
+<h3 id="_the_hash_handle">The hash handle</h3><div style="clear:left"></div>
+<div class="paragraph"><p>The <tt>UT_hash_handle</tt> field must be present in your structure.  It is used for
+the internal bookkeeping that makes the hash work.  It does not require
+initialization. It can be named anything, but you can simplify matters by
+naming it <tt>hh</tt>. This allows you to use the easier "convenience" macros to add,
+find and delete items.</p></div>
+</div>
+<h2 id="_hash_operations">Hash operations</h2>
+<div class="sectionbody">
+<div class="paragraph"><p>This section introduces the uthash macros by example. For a more succinct
+listing, see <a href="#Appendix_F">Appendix F: Macro Reference</a>.</p></div>
+<div class="sidebarblock">
+<div class="sidebar-content">
+<div class="sidebar-title">Convenience vs. general macros:</div>
+<div class="paragraph"><p>The uthash macros fall into two categories. The <em>convenience</em> macros can be used
+with integer or string keys (and require that you chose the conventional
+name <tt>hh</tt> for the <tt>UT_hash_handle</tt> field).  The convenience macros take fewer
+arguments than the general macros, making their usage a bit simpler for these
+common types of keys.</p></div>
+<div class="paragraph"><p>The <em>general</em> macros can be used for any types of keys, or for multi-field keys,
+or when the <tt>UT_hash_handle</tt> has been named something other than <tt>hh</tt>. These
+macros take more arguments and offer greater flexibility in return. But if the
+convenience macros suit your needs, use them-- your code will be more readable.</p></div>
+</div></div>
+<h3 id="_declare_the_hash">Declare the hash</h3><div style="clear:left"></div>
+<div class="paragraph"><p>Your hash must be declared as a <tt>NULL</tt>-initialized pointer to your structure.</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>struct my_struct *users = NULL;    /* important! initialize to NULL */</tt></pre>
+</div></div>
+<h3 id="_add_item">Add item</h3><div style="clear:left"></div>
+<div class="paragraph"><p>Allocate and initialize your structure as you see fit. The only aspect
+of this that matters to uthash is that your key must be initialized to
+a unique value. Then call <tt>HASH_ADD</tt>. (Here we use the convenience macro
+<tt>HASH_ADD_INT</tt>, which offers simplified usage for keys of type <tt>int</tt>).</p></div>
+<div class="listingblock">
+<div class="title">Add an item to a hash</div>
+<div class="content">
+<pre><tt>int add_user(int user_id, char *name) {
+    struct my_struct *s;
+
+    s = malloc(sizeof(struct my_struct));
+    s-&gt;id = user_id;
+    strcpy(s-&gt;name, name);
+    HASH_ADD_INT( users, id, s );  /* id: name of key field */
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>The first parameter to <tt>HASH_ADD_INT</tt> is the hash table, and the
+second parameter is the <em>name</em> of the key field. Here, this is <tt>id</tt>. The
+last parameter is a pointer to the structure being added.</p></div>
+<div class="sidebarblock" id="validc">
+<div class="sidebar-content">
+<div class="sidebar-title">Wait.. the field name is a parameter?</div>
+<div class="paragraph"><p>If you find it strange that <tt>id</tt>, which is the <em>name of a field</em> in the
+structure, can be passed as a parameter, welcome to the world of macros. Don&#8217;t
+worry- the C preprocessor expands this to valid C code.</p></div>
+</div></div>
+<h4 id="_key_must_not_be_modified_while_in_use">Key must not be modified while in-use</h4>
+<div class="paragraph"><p>Once a structure has been added to the hash, do not change the value of its key.
+Instead, delete the item from the hash, change the key, and then re-add it.</p></div>
+<h3 id="_find_item">Find item</h3><div style="clear:left"></div>
+<div class="paragraph"><p>To look up a structure in a hash, you need its key.  Then call <tt>HASH_FIND</tt>.
+(Here we use the convenience macro <tt>HASH_FIND_INT</tt> for keys of type <tt>int</tt>).</p></div>
+<div class="listingblock">
+<div class="title">Find a structure using its key</div>
+<div class="content">
+<pre><tt>struct my_struct *find_user(int user_id) {
+    struct my_struct *s;
+
+    HASH_FIND_INT( users, &amp;user_id, s );  /* s: output pointer */
+    return s;
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>Here, the hash table is <tt>users</tt>, and <tt>&amp;user_id</tt> points to the key (an integer
+in this case).  Last, <tt>s</tt> is the <em>output</em> variable of <tt>HASH_FIND_INT</tt>. The
+final result is that <tt>s</tt> points to the structure with the given key, or
+is <tt>NULL</tt> if the key wasn&#8217;t found in the hash.</p></div>
+<div class="admonitionblock">
+<table><tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">The middle argument is a <em>pointer</em> to the key. You can&#8217;t pass a literal key
+value to <tt>HASH_FIND</tt>. Instead assign the literal value to a variable, and pass
+a pointer to the variable.</td>
+</tr></table>
+</div>
+<h3 id="_delete_item">Delete item</h3><div style="clear:left"></div>
+<div class="paragraph"><p>To delete a structure from a hash, you must have a pointer to it. (If you only
+have the key, first do a <tt>HASH_FIND</tt> to get the structure pointer).</p></div>
+<div class="listingblock">
+<div class="title">Delete an item from a hash</div>
+<div class="content">
+<pre><tt>void delete_user(struct my_struct *user) {
+    HASH_DEL( users, user);  /* user: pointer to deletee */
+    free(user);              /* optional; it's up to you! */
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>Here again, <tt>users</tt> is the hash table, and <tt>user</tt> is a pointer to the
+structure we want to remove from the hash.</p></div>
+<h4 id="_uthash_never_frees_your_structure">uthash never frees your structure</h4>
+<div class="paragraph"><p>Deleting a structure just removes it from the hash table-- it doesn&#8217;t <tt>free</tt>
+it.  The choice of when to free your structure is entirely up to you; uthash
+will never free your structure.</p></div>
+<h4 id="_delete_can_change_the_pointer">Delete can change the pointer</h4>
+<div class="paragraph"><p>The hash table pointer (which initially points to the first item added to the
+hash) can change in response to <tt>HASH_DEL</tt> (i.e. if you delete the first item
+in the hash table).</p></div>
+<h3 id="_delete_all_items">Delete all items</h3><div style="clear:left"></div>
+<div class="paragraph"><p>To delete all the structures in a hash table, you can either iteratively delete
+the items (if you plan to free each one or need to other per-element work), or
+you can delete all the items in a single operation.</p></div>
+<h4 id="_iterative_deletion">Iterative deletion</h4>
+<div class="paragraph"><p>It&#8217;s easy: just keep deleting the first item. If you plan to free it, copy the
+pointer beforehand since the delete will advance the "first item" to the next.</p></div>
+<div class="listingblock">
+<div class="title">Delete all items from a hash</div>
+<div class="content">
+<pre><tt>void delete_all() {
+  user_struct *current_user;
+
+  while(users) {
+    current_user = users;          /* copy pointer to first item     */
+    HASH_DEL(users,current_user);  /* delete; users advances to next */
+    free(current_user);            /* optional- if you want to free  */
+  }
+}</tt></pre>
+</div></div>
+<h4 id="_all_at_once_deletion">All-at-once deletion</h4>
+<div class="paragraph"><p>If you only want to delete all the items, but not free them or do any
+per-element clean up, you can do this more efficiently in a single operation:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>HASH_CLEAR(hh,users);</tt></pre>
+</div></div>
+<div class="paragraph"><p>Afterward, the list head (here, <tt>users</tt>) will be set to <tt>NULL</tt>.</p></div>
+<h3 id="_count_items">Count items</h3><div style="clear:left"></div>
+<div class="paragraph"><p>The number of items in the hash table can be obtained using <tt>HASH_COUNT</tt>:</p></div>
+<div class="listingblock">
+<div class="title">Count of items in the hash table</div>
+<div class="content">
+<pre><tt>unsigned int num_users;
+num_users = HASH_COUNT(users);
+printf("there are %u users\n", num_users);</tt></pre>
+</div></div>
+<div class="paragraph"><p>Incidentally, this works even the list (<tt>users</tt>, here) is <tt>NULL</tt>, in
+which case the count is 0.</p></div>
+<h3 id="_iterating_and_sorting">Iterating and sorting</h3><div style="clear:left"></div>
+<div class="paragraph"><p>You can loop over the items in the hash by starting from the beginning and
+following the <tt>hh.next</tt> pointer.</p></div>
+<div class="listingblock">
+<div class="title">Iterating over all the items in a hash</div>
+<div class="content">
+<pre><tt>void print_users() {
+    struct my_struct *s;
+
+    for(s=users; s != NULL; s=s-&gt;hh.next) {
+        printf("user id %d: name %s\n", s-&gt;id, s-&gt;name);
+    }
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>There is also an <tt>hh.prev</tt> pointer you could use to iterate backwards through
+the hash, starting from any known item.</p></div>
+<div class="sidebarblock">
+<div class="sidebar-content">
+<div class="sidebar-title">A hash is also a doubly-linked list.</div>
+<div class="paragraph"><p>Iterating backward and forward through the items in the hash is possible
+because of the <tt>hh.prev</tt> and <tt>hh.next</tt> fields. All the items in the hash can
+be reached by repeatedly following these pointers, thus the hash is also a
+doubly-linked list.</p></div>
+</div></div>
+<div class="paragraph"><p>If you&#8217;re using uthash in a C++ program, you need an extra cast on the <tt>for</tt>
+iterator, e.g., <tt>s=(struct my_struct*)s&#8594;hh.next</tt>.</p></div>
+<h4 id="_sorted_iteration">Sorted iteration</h4>
+<div class="paragraph"><p>The items in the hash are, by default, traversed in the order they were added
+("insertion order") when you follow the <tt>hh.next</tt> pointer. But you can sort
+the items into a new order using <tt>HASH_SORT</tt>. E.g.,</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>HASH_SORT( users, name_sort );</tt></pre>
+</div></div>
+<div class="paragraph"><p>The second argument is a pointer to a comparison function. It must accept two
+arguments which are pointers to two items to compare. Its return value should
+be less than zero, zero, or greater than zero, if the first item sorts before,
+equal to, or after the second item, respectively. (Just like <tt>strcmp</tt>).</p></div>
+<div class="listingblock">
+<div class="title">Sorting the items in the hash</div>
+<div class="content">
+<pre><tt>int name_sort(struct my_struct *a, struct my_struct *b) {
+    return strcmp(a-&gt;name,b-&gt;name);
+}
+
+int id_sort(struct my_struct *a, struct my_struct *b) {
+    return (a-&gt;id - b-&gt;id);
+}
+
+void sort_by_name() {
+    HASH_SORT(users, name_sort);
+}
+
+void sort_by_id() {
+    HASH_SORT(users, id_sort);
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>When the items in the hash are sorted, the first item may change position.  In
+the example above, <tt>users</tt> may point to a different structure after calling
+<tt>HASH_SORT</tt>.</p></div>
+<h3 id="_select">Select</h3><div style="clear:left"></div>
+<div class="paragraph"><p>A special <em>select</em> operation is provided that inserts those items from a source
+hash that satisfy a given condition into a destination hash. This insertion is
+done with somewhat more efficiency than if this were using <tt>HASH_ADD</tt>, namely
+because the hash function is not recalculated for keys of the selected items.
+This operation does not remove any items from the source hash. Rather the
+selected items obtain dual presence in both hashes.  The destination hash may
+already have items in it; the selected items are added to it. In order for a
+structure to be usable with <tt>HASH_SELECT</tt>, it must have two or more hash
+handles. (As described <a href="#multihash">here</a>, a structure can exist in many
+hash tables at the same time, but it must have a separate hash handle for each
+one).</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>user_t *users=NULL, *admins=NULL; /* two hash tables */</tt></pre>
+</div></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>typedef struct {
+    int id;
+    UT_hash_handle hh;  /* handle for users hash */
+    UT_hash_handle ah;  /* handle for admins hash */
+} user_t;</tt></pre>
+</div></div>
+<div class="paragraph"><p>Now suppose we have added some users, and want to select just the administrator
+users who have id&#8217;s less than 1024.</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>#define is_admin(x) (((user_t*)x)-&gt;id &lt; 1024)
+HASH_SELECT(ah,admins,hh,users,is_admin);</tt></pre>
+</div></div>
+<div class="paragraph"><p>The first two parameters are the <em>destination</em> hash handle and hash table, the
+second two parameters are the <em>source</em> hash handle and hash table, and the last
+parameter is the <em>select condition</em>. Here we used a macro <tt>is_admin()</tt> but we
+could just as well have used a function.</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>int is_admin(void *userv) {
+  user_t *user = (user_t*)userv;
+  return (user-&gt;id &lt; 1024) ? 1 : 0;
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>If the select condition always evaluates to true, this operation is
+essentially a <em>merge</em> of the source hash into the destination hash. Of course,
+the source hash remains unchanged under any use of <tt>HASH_SELECT</tt>. It only adds
+items to the destination hash selectively.</p></div>
+<div class="paragraph"><p>The two hash handles must differ. An example of using <tt>HASH_SELECT</tt> is included
+in <tt>tests/test36.c</tt>.</p></div>
+<h3 id="_a_complete_example">A complete example</h3><div style="clear:left"></div>
+<div class="paragraph"><p>We&#8217;ll repeat all the code and embellish it with a <tt>main()</tt> function to form a
+working example.</p></div>
+<div class="paragraph"><p>If this code was placed in a file called <tt>example.c</tt> in the same directory as
+<tt>uthash.h</tt>, it could be compiled and run like this:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>cc -o example example.c
+./example</tt></pre>
+</div></div>
+<div class="paragraph"><p>Follow the prompts to try the program, and type <tt>Ctrl-C</tt> when done.</p></div>
+<div class="listingblock">
+<div class="title">A complete program (part 1 of 2)</div>
+<div class="content">
+<pre><tt>#include &lt;stdio.h&gt;   /* gets */
+#include &lt;stdlib.h&gt;  /* atoi, malloc */
+#include &lt;string.h&gt;  /* strcpy */
+#include "uthash.h"
+
+struct my_struct {
+    int id;                    /* key */
+    char name[10];
+    UT_hash_handle hh;         /* makes this structure hashable */
+};
+
+struct my_struct *users = NULL;
+
+int add_user(int user_id, char *name) {
+    struct my_struct *s;
+
+    s = malloc(sizeof(struct my_struct));
+    s-&gt;id = user_id;
+    strcpy(s-&gt;name, name);
+    HASH_ADD_INT( users, id, s );  /* id: name of key field */
+}
+
+struct my_struct *find_user(int user_id) {
+    struct my_struct *s;
+
+    HASH_FIND_INT( users, &amp;user_id, s );  /* s: output pointer */
+    return s;
+}
+
+void delete_user(struct my_struct *user) {
+    HASH_DEL( users, user);  /* user: pointer to deletee */
+    free(user);
+}
+
+void delete_all() {
+  struct my_struct *current_user;
+
+  while(users) {
+    current_user = users;          /* grab pointer to first item */
+    HASH_DEL(users,current_user);  /* delete it (users advances to next) */
+    free(current_user);            /* free it */
+  }
+}
+
+void print_users() {
+    struct my_struct *s;
+
+    for(s=users; s != NULL; s=s-&gt;hh.next) {
+        printf("user id %d: name %s\n", s-&gt;id, s-&gt;name);
+    }
+}
+
+int name_sort(struct my_struct *a, struct my_struct *b) {
+    return strcmp(a-&gt;name,b-&gt;name);
+}
+
+int id_sort(struct my_struct *a, struct my_struct *b) {
+    return (a-&gt;id - b-&gt;id);
+}</tt></pre>
+</div></div>
+<div class="listingblock">
+<div class="title">A complete program (part 2 of 2)</div>
+<div class="content">
+<pre><tt>void sort_by_name() {
+    HASH_SORT(users, name_sort);
+}
+
+void sort_by_id() {
+    HASH_SORT(users, id_sort);
+}
+
+int main(int argc, char *argv[]) {
+    char in[10];
+    int id=1;
+    struct my_struct *s;
+    unsigned num_users;
+
+    while (1) {
+        printf("1. add user\n");
+        printf("2. find user\n");
+        printf("3. delete user\n");
+        printf("4. delete all users\n");
+        printf("5. sort items by name\n");
+        printf("6. sort items by id\n");
+        printf("7. print users\n");
+        printf("8. count users\n");
+        gets(in);
+        switch(atoi(in)) {
+            case 1:
+                printf("name?\n");
+                add_user(id++, gets(in));
+                break;
+            case 2:
+                printf("id?\n");
+                s = find_user(atoi(gets(in)));
+                printf("user: %s\n", s ? s-&gt;name : "unknown");
+                break;
+            case 3:
+                printf("id?\n");
+                s = find_user(atoi(gets(in)));
+                if (s) delete_user(s);
+                else printf("id unknown\n");
+                break;
+            case 4:
+                delete_all();
+                break;
+            case 5:
+                sort_by_name();
+                break;
+            case 6:
+                sort_by_id();
+                break;
+            case 7:
+                print_users();
+                break;
+            case 8:
+                num_users=HASH_COUNT(users);
+                printf("there are %u users\n", num_users);
+                break;
+        }
+    }
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>This program is included in the distribution in <tt>tests/example.c</tt>. You can run
+<tt>make example</tt> in that directory to compile it easily.</p></div>
+</div>
+<h2 id="_kinds_of_keys">Kinds of keys</h2>
+<div class="sectionbody">
+<h3 id="_integer_keys">Integer keys</h3><div style="clear:left"></div>
+<div class="paragraph"><p>The preceding examples demonstrated use of integer keys. To recap, use the
+convenience macros <tt>HASH_ADD_INT</tt> and <tt>HASH_FIND_INT</tt> for structures with
+integer keys. (The other operations such as <tt>HASH_DELETE</tt> and <tt>HASH_SORT</tt> are
+the same for all types of keys).</p></div>
+<h3 id="_string_keys">String keys</h3><div style="clear:left"></div>
+<div class="paragraph"><p>String keys are handled almost the same as integer keys. The convenience macros
+for dealing with string keys are called <tt>HASH_ADD_STR</tt> and <tt>HASH_FIND_STR</tt>.</p></div>
+<div class="admonitionblock">
+<table><tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+<div class="title">char[ ] vs. char*</div>
+<div class="paragraph"><p>The string is <em>within</em> the structure in the next example-- <tt>name</tt> is a
+<tt>char[10]</tt> field.  If instead our structure merely <em>pointed</em> to the key (i.e.,
+<tt>name</tt> was declared <tt>char *</tt>), we&#8217;d use <tt>HASH_ADD_KEYPTR</tt>, described in
+<a href="#Appendix_F">Appendix F</a>.</p></div>
+</td>
+</tr></table>
+</div>
+<div class="listingblock">
+<div class="title">A string-keyed hash</div>
+<div class="content">
+<pre><tt>#include &lt;string.h&gt;  /* strcpy */
+#include &lt;stdlib.h&gt;  /* malloc */
+#include &lt;stdio.h&gt;   /* printf */
+#include "uthash.h"
+
+struct my_struct {
+    char name[10];             /* key */
+    int id;
+    UT_hash_handle hh;         /* makes this structure hashable */
+};
+
+
+int main(int argc, char *argv[]) {
+    char **n, *names[] = { "joe", "bob", "betty", NULL };
+    struct my_struct *s, *users = NULL;
+    int i=0;
+
+    for (n = names; *n != NULL; n++) {
+        s = malloc(sizeof(struct my_struct));
+        strcpy(s-&gt;name, *n);
+        s-&gt;id = i++;
+        HASH_ADD_STR( users, name, s );
+    }
+
+    HASH_FIND_STR( users, "betty", s);
+    if (s) printf("betty's id is %d\n", s-&gt;id);
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>This example is included in the distribution in <tt>tests/test15.c</tt>. It prints:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>betty's id is 2</tt></pre>
+</div></div>
+<h3 id="_binary_keys">Binary keys</h3><div style="clear:left"></div>
+<div class="paragraph"><p>We&#8217;re using the term "binary" here to simply mean an arbitrary byte sequence.
+Your key field can have any data type. To uthash, it is just a sequence of
+bytes.  We&#8217;ll use the general macros <tt>HASH_ADD</tt> and <tt>HASH_FIND</tt> to demonstrate
+usage of a floating point key of type <tt>double</tt>.</p></div>
+<div class="listingblock">
+<div class="title">A key of type double</div>
+<div class="content">
+<pre><tt>#include &lt;stdlib.h&gt;
+#include &lt;stdio.h&gt;
+#include "uthash.h"
+
+typedef struct {
+    double veloc;
+    /* ... other data ... */
+    UT_hash_handle hh;
+} veloc_t;
+
+int main(int argc, char *argv[]) {
+    veloc_t *v, *v2, *veloc_table = NULL;
+    double x = 1/3.0;
+
+    v = malloc( sizeof(*v) );
+    v-&gt;veloc = x;
+    HASH_ADD(hh, veloc_table, veloc, sizeof(double), v);
+    HASH_FIND(hh, veloc_table, &amp;x, sizeof(double), v2 );
+
+    if (v2) printf("found (%.2f)\n", v2-&gt;veloc);
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>Note that the general macros require the name of the <tt>UT_hash_handle</tt> to be
+passed as the first argument (here, this is <tt>hh</tt>). The general macros are
+documented in <a href="#Appendix_F">Appendix F: Macro Reference</a>.</p></div>
+<h3 id="_multi_field_keys">Multi-field keys</h3><div style="clear:left"></div>
+<div class="paragraph"><p>Your key can even comprise multiple contiguous fields.</p></div>
+<div class="listingblock">
+<div class="title">A multi-field key</div>
+<div class="content">
+<pre><tt>#include &lt;stdlib.h&gt;    /* malloc       */
+#include &lt;stddef.h&gt;    /* offsetof     */
+#include &lt;stdio.h&gt;     /* printf       */
+#include &lt;string.h&gt;    /* memset       */
+#include "uthash.h"
+
+#define UTF32 1
+
+typedef struct {
+  UT_hash_handle hh;
+  int len;
+  char encoding;      /* these two fields */
+  int text[];         /* comprise the key */
+} msg_t;
+
+int main(int argc, char *argv[]) {
+    int keylen;
+    msg_t *msg, *msgs = NULL;
+    struct { char encoding; int text[]; } *lookup_key;
+
+    int beijing[] = {0x5317, 0x4eac};   /* UTF-32LE for 北京 */
+
+    /* allocate and initialize our structure */
+    msg = malloc( sizeof(msg_t) + sizeof(beijing) );
+    memset(msg, 0, sizeof(msg_t)+sizeof(beijing)); /* zero fill */
+    msg-&gt;len = sizeof(beijing);
+    msg-&gt;encoding = UTF32;
+    memcpy(msg-&gt;text, beijing, sizeof(beijing));
+
+    /* calculate the key length including padding, using formula */
+    keylen =   offsetof(msg_t, text)       /* offset of last key field */
+             + sizeof(beijing)             /* size of last key field */
+             - offsetof(msg_t, encoding);  /* offset of first key field */
+
+    /* add our structure to the hash table */
+    HASH_ADD( hh, msgs, encoding, keylen, msg);
+
+    /* look it up to prove that it worked :-) */
+    msg=NULL;
+
+    lookup_key = malloc(sizeof(*lookup_key) + sizeof(beijing));
+    memset(lookup_key, 0, sizeof(*lookup_key) + sizeof(beijing));
+    lookup_key-&gt;encoding = UTF32;
+    memcpy(lookup_key-&gt;text, beijing, sizeof(beijing));
+    HASH_FIND( hh, msgs, &amp;lookup_key-&gt;encoding, keylen, msg );
+    if (msg) printf("found \n");
+    free(lookup_key);
+}</tt></pre>
+</div></div>
+<div class="paragraph"><p>This example is included in the distribution in <tt>tests/test22.c</tt>.</p></div>
+<div class="paragraph"><p>If you use multi-field keys, recognize that the compiler pads adjacent fields
+(by inserting unused space between them) in order to fulfill the alignment
+requirement of each field. For example a structure containing a <tt>char</tt> followed
+by an <tt>int</tt> will normally have 3 "wasted" bytes of padding after the char, in
+order to make the <tt>int</tt> field start on a multiple-of-4 address (4 is the length
+of the int).</p></div>
+<div class="sidebarblock">
+<div class="sidebar-content">
+<div class="sidebar-title">Calculating the length of a multi-field key:</div>
+<div class="paragraph"><p>To determine the key length when using a multi-field key, you must include any
+intervening structure padding the compiler adds for alignment purposes.</p></div>
+<div class="paragraph"><p>An easy way to calculate the key length is to use the <tt>offsetof</tt> macro from
+<tt>&lt;stddef.h&gt;</tt>.  The formula is:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>key length =   offsetof(last_key_field)
+             + sizeof(last_key_field)
+             - offsetof(first_key_field)</tt></pre>
+</div></div>
+<div class="paragraph"><p>In the example above, the <tt>keylen</tt> variable is set using this formula.</p></div>
+</div></div>
+<div class="paragraph"><p>When dealing with a multi-field key, you must zero-fill your structure before
+<tt>HASH_ADD</tt>'ing it to a hash table, or using its fields in a <tt>HASH_FIND</tt> key.</p></div>
+<div class="paragraph"><p>In the previous example, <tt>memset</tt> is used to initialize the structure by
+zero-filling it. This zeroes out any padding between the key fields. If we
+didn&#8217;t zero-fill the structure, this padding would contain random values.  The
+random values would lead to <tt>HASH_FIND</tt> failures; as two "identical" keys will
+appear to mismatch if there are any differences within their padding.</p></div>
+</div>
+<h2 id="multihash">Structures in multiple hash tables</h2>
+<div class="sectionbody">
+<div class="paragraph"><p>A structure can be added to multiple hash tables. A few reasons you might do
+this include:</p></div>
+<div class="ulist"><ul>
+<li>
+<p>
+each hash table may use an alternative key;
+</p>
+</li>
+<li>
+<p>
+each hash table may have its own sort order;
+</p>
+</li>
+<li>
+<p>
+or you might simply use multiple hash tables for grouping purposes.  E.g.,
+  you could have users in an <tt>admin_users</tt> and a <tt>users</tt> hash table.
+</p>
+</li>
+</ul></div>
+<div class="paragraph"><p>Your structure needs to have a <tt>UT_hash_handle</tt> field for each hash table to
+which it might be added. You can name them anything. E.g.,</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>UT_hash_handle hh1, hh2;</tt></pre>
+</div></div>
+<h3 id="_alternative_keys_on_the_same_structure">Alternative keys on the same structure</h3><div style="clear:left"></div>
+<div class="paragraph"><p>You might create a hash table keyed on an ID field, and another hash table
+keyed on username (if they are unique). You can add the same user structure to
+both hash tables, then look up a user by either their unique ID or username.</p></div>
+<div class="listingblock">
+<div class="title">A structure with two alternative keys</div>
+<div class="content">
+<pre><tt>struct my_struct {
+    int id;                    /* key 1 */
+    char username[10];         /* key 2 */
+    UT_hash_handle hh1,hh2;    /* makes this structure hashable */
+};</tt></pre>
+</div></div>
+<div class="paragraph"><p>In the example above, the structure can now be added to two separate hash
+tables. In one hash, <tt>id</tt> is its key, while in the other hash, <tt>username</tt> is
+its key.  (There is no requirement that the two hashes have different key
+fields. They could both use the same key, such as <tt>id</tt>).</p></div>
+<div class="paragraph"><p>Notice the structure has two hash handles (<tt>hh1</tt> and <tt>hh2</tt>).  In the code
+below, notice that each hash handle is used exclusively with a particular hash
+table.  (<tt>hh1</tt> is always used with the <tt>users_by_id</tt> hash, while <tt>hh2</tt> is
+always used with the <tt>users_by_name</tt> hash table).</p></div>
+<div class="listingblock">
+<div class="title">Two keys on a structure</div>
+<div class="content">
+<pre><tt>    struct my_struct *users_by_id = NULL, *users_by_name = NULL, *s;
+    int i;
+    char *name;
+
+    s = malloc(sizeof(struct my_struct));
+    s-&gt;id = 1;
+    strcpy(s-&gt;username, "thanson");
+
+    /* add the structure to both hash tables */
+    HASH_ADD(hh1, users_by_id, id, sizeof(int), s);
+    HASH_ADD(hh2, users_by_name, username, strlen(s-&gt;username), s);
+
+    /* lookup user by ID in the "users_by_id" hash table */
+    i=1;
+    HASH_FIND(hh1, users_by_id, &amp;i, sizeof(int), s);
+    if (s) printf("found id %d: %s\n", i, s-&gt;username);
+
+    /* lookup user by username in the "users_by_name" hash table */
+    name = "thanson";
+    HASH_FIND(hh2, users_by_name, name, strlen(name), s);
+    if (s) printf("found user %s: %d\n", name, s-&gt;id);</tt></pre>
+</div></div>
+<h3 id="_multiple_sort_orders">Multiple sort orders</h3><div style="clear:left"></div>
+<div class="paragraph"><p>Extending the previous example, suppose we have many users in our <tt>users_by_id</tt>
+and our <tt>users_by_name</tt> hash, and that we want to sort each hash so that we can
+print the keys in order. We&#8217;d define two sort functions, then use <tt>HASH_SRT</tt>:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>int sort_by_id(struct my_struct *a, struct my_struct *b) {
+  if (a-&gt;id == b-&gt;id) return 0;
+  return (a-&gt;id &lt; b-&gt;id) ? -1 : 1;
+}</tt></pre>
+</div></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>int sort_by_name(struct my_struct *a, struct my_struct *b) {
+  return strcmp(a-&gt;username,b-&gt;username);
+}</tt></pre>
+</div></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>HASH_SRT(hh1, users_by_id, sort_by_id);
+HASH_SRT(hh2, users_by_name, sort_by_name);</tt></pre>
+</div></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>/* now iterate over users_by_id and users_by_name in sorted order */</tt></pre>
+</div></div>
+</div>
+<h2 id="Appendix_A">Appendix A: Built-in hash functions</h2>
+<div class="sectionbody">
+<div class="paragraph"><p>Internally, a hash function transforms a key into a bucket number.  You don&#8217;t
+have to take any action to use the default hash function, MurmurHash.</p></div>
+<div class="paragraph"><p>Some programs may benefit from using another of the built-in hash functions.
+There is a simple analysis utility included with uthash to help you determine
+if another hash function will give you better performance.</p></div>
+<div class="paragraph"><p>You can use a different hash function by compiling your program with
+<tt>-DHASH_FUNCTION=HASH_xyz</tt> where <tt>xyz</tt> is one of the symbolic names listed
+below. E.g.,</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>cc -DHASH_FUNCTION=HASH_BER -o program program.c</tt></pre>
+</div></div>
+<div class="tableblock">
+<table rules="none"
+width="50%"
+frame="border"
+cellspacing="0" cellpadding="4">
+<caption class="title">Built-in hash functions</caption>
+<col width="20%" />
+<col width="80%" />
+<thead valign="top">
+<tr>
+<th align="center">Symbol </th>
+<th align="left">   Name</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr>
+<td align="center"><p class="table"><tt>JEN</tt></p></td>
+<td align="left"><p class="table">Jenkins</p></td>
+</tr>
+<tr>
+<td align="center"><p class="table"><tt>BER</tt></p></td>
+<td align="left"><p class="table">Bernstein</p></td>
+</tr>
+<tr>
+<td align="center"><p class="table"><tt>SAX</tt></p></td>
+<td align="left"><p class="table">Shift-Add-Xor</p></td>
+</tr>
+<tr>
+<td align="center"><p class="table"><tt>OAT</tt></p></td>
+<td align="left"><p class="table">One-at-a-time</p></td>
+</tr>
+<tr>
+<td align="center"><p class="table"><tt>FNV</tt></p></td>
+<td align="left"><p class="table">Fowler/Noll/Vo</p></td>
+</tr>
+<tr>
+<td align="center"><p class="table"><tt>SFH</tt></p></td>
+<td align="left"><p class="table">Paul Hsieh</p></td>
+</tr>
+<tr>
+<td align="center"><p class="table"><tt>MUR</tt></p></td>
+<td align="left"><p class="table">Austin Appleby&#8217;s MurmurHash (default)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3 id="_which_hash_function_is_best">Which hash function is best?</h3><div style="clear:left"></div>
+<div class="paragraph"><p>You can easily determine the best hash function for your key domain. To do so,
+you&#8217;ll need to run your program once in a data-collection pass, and then run
+the collected data through an included analysis utility.</p></div>
+<div class="paragraph"><p>First you must build the analysis utility. From the top-level directory,</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>cd tests/
+make</tt></pre>
+</div></div>
+<div class="paragraph"><p>We&#8217;ll use <tt>test14.c</tt> to demonstrate the data-collection and analysis steps
+(here using <tt>sh</tt> syntax to redirect file descriptor 3 to a file):</p></div>
+<div class="listingblock">
+<div class="title">Using keystats</div>
+<div class="content">
+<pre><tt>% cc -DHASH_EMIT_KEYS=3 -I../src -o test14 test14.c
+% ./test14 3&gt;test14.keys
+% ./keystats test14.keys
+fcn  ideal%     #items   #buckets  dup%  fl   add_usec  find_usec  del-all usec
+---  ------ ---------- ---------- -----  -- ---------- ----------  ------------
+MUR   93.0%       1219        256    0%  ok         77        118            25
+SFH   91.6%       1219        256    0%  ok         92        131            25
+FNV   90.3%       1219        512    0%  ok        107         97            31
+SAX   88.7%       1219        512    0%  ok        111        109            32
+OAT   87.2%       1219        256    0%  ok         99        138            26
+JEN   86.7%       1219        256    0%  ok         87        130            27
+BER   86.2%       1219        256    0%  ok        121        129            27</tt></pre>
+</div></div>
+<div class="admonitionblock">
+<table><tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">The number 3 in <tt>-DHASH_EMIT_KEYS=3</tt> is a file descriptor. Any file descriptor
+that your program doesn&#8217;t use for its own purposes can be used instead of 3.
+The data-collection mode enabled by <tt>-DHASH_EMIT_KEYS=x</tt> should not be used in
+production code.</td>
+</tr></table>
+</div>
+<div class="paragraph"><p>Usually, you should just pick the first hash function that is listed. Here, this
+is <tt>MUR</tt>.  This is the function that provides the most even distribution for
+your keys. If several have the same <tt>ideal%</tt>, then choose the fastest one
+according to the <tt>find_usec</tt> column.</p></div>
+<h3 id="_keystats_column_reference">keystats column reference</h3><div style="clear:left"></div>
+<div class="dlist"><dl>
+<dt class="hdlist1">
+fcn
+</dt>
+<dd>
+<p>
+    symbolic name of hash function
+</p>
+</dd>
+<dt class="hdlist1">
+ideal%
+</dt>
+<dd>
+<p>
+    The percentage of items in the hash table which can be looked up within an
+    ideal number of steps. (Further explained below).
+</p>
+</dd>
+<dt class="hdlist1">
+#items
+</dt>
+<dd>
+<p>
+    the number of keys that were read in from the emitted key file
+</p>
+</dd>
+<dt class="hdlist1">
+#buckets
+</dt>
+<dd>
+<p>
+    the number of buckets in the hash after all the keys were added
+</p>
+</dd>
+<dt class="hdlist1">
+dup%
+</dt>
+<dd>
+<p>
+    the percent of duplicate keys encountered in the emitted key file.
+    Duplicates keys are filtered out to maintain key uniqueness. (Duplicates
+    are normal.  For example, if the application adds an item to a hash,
+    deletes it, then re-adds it, the key is written twice to the emitted file.)
+</p>
+</dd>
+<dt class="hdlist1">
+flags
+</dt>
+<dd>
+<p>
+    this is either <tt>ok</tt>, or <tt>nx</tt> (noexpand) if the expansion inhibited flag is
+    set, described in Appendix B.  It is not recommended to use a hash function
+    that has the <tt>noexpand</tt> flag set.
+</p>
+</dd>
+<dt class="hdlist1">
+add_usec
+</dt>
+<dd>
+<p>
+    the clock time in microseconds required to add all the keys to a hash
+</p>
+</dd>
+<dt class="hdlist1">
+find_usec
+</dt>
+<dd>
+<p>
+    the clock time in microseconds required to look up every key in the hash
+</p>
+</dd>
+<dt class="hdlist1">
+del-all usec
+</dt>
+<dd>
+<p>
+    the clock time in microseconds required to delete every item in the hash
+</p>
+</dd>
+</dl></div>
+<h3 id="_ideal">ideal%</h3><div style="clear:left"></div>
+<div class="sidebarblock">
+<div class="sidebar-content">
+<div class="sidebar-title">What is ideal%?</div>
+<div class="paragraph"><p>The <em>n</em> items in a hash are distributed into <em>k</em> buckets. Ideally each bucket
+would contain an equal share <em>(n/k)</em> of the items. In other words, the maximum
+linear position of any item in a bucket chain would be <em>n/k</em> if every bucket is
+equally used. If some buckets are overused and others are underused, the
+overused buckets will contain items whose linear position surpasses <em>n/k</em>.
+Such items are considered non-ideal.</p></div>
+<div class="paragraph"><p>As you might guess, <tt>ideal%</tt> is the percentage of ideal items in the hash. These
+items have favorable linear positions in their bucket chains.  As <tt>ideal%</tt>
+approaches 100%, the hash table approaches constant-time lookup performance.</p></div>
+</div></div>
+</div>
+<h2 id="Appendix_B">Appendix B: Expansion internals</h2>
+<div class="sectionbody">
+<div class="paragraph"><p>Internally this hash manages the number of buckets, with the goal of having
+enough buckets so that each one contains only a small number of items.</p></div>
+<div class="sidebarblock">
+<div class="sidebar-content">
+<div class="sidebar-title">Why does the number of buckets matter?</div>
+<div class="paragraph"><p>When looking up an item by its key, this hash scans linearly through the items
+in the appropriate bucket. In order for the linear scan to run in constant
+time, the number of items in each bucket must be bounded. This is accomplished
+by increasing the number of buckets as needed.</p></div>
+</div></div>
+<h3 id="_normal_expansion">Normal expansion</h3><div style="clear:left"></div>
+<div class="paragraph"><p>This hash attempts to keep fewer than 10 items in each bucket. When an item is
+added that would cause a bucket to exceed this number, the number of buckets in
+the hash is doubled and the items are redistributed into the new buckets. In an
+ideal world, each bucket will then contain half as many items as it did before.</p></div>
+<div class="paragraph"><p>Bucket expansion occurs automatically and invisibly as needed. There is
+no need for the application to know when it occurs.</p></div>
+<h4 id="_per_bucket_expansion_threshold">Per-bucket expansion threshold</h4>
+<div class="paragraph"><p>Normally all buckets share the same threshold (10 items) at which point bucket
+expansion is triggered. During the process of bucket expansion, uthash can
+adjust this expansion-trigger threshold on a per-bucket basis if it sees that
+certain buckets are over-utilized.</p></div>
+<div class="paragraph"><p>When this threshold is adjusted, it goes from 10 to a multiple of 10 (for that
+particular bucket).  The multiple is based on how many times greater the actual
+chain length is than the ideal length. It is a practical measure to reduce
+excess bucket expansion in the case where a hash function over-utilizes a few
+buckets but has good overall distribution. However, if the overall distribution
+gets too bad, uthash changes tactics.</p></div>
+<h3 id="_inhibited_expansion">Inhibited expansion</h3><div style="clear:left"></div>
+<div class="paragraph"><p>You usually don&#8217;t need to know or worry about this, particularly if you used
+the <tt>keystats</tt> utility during development to select a good hash for your keys.</p></div>
+<div class="paragraph"><p>A hash function may yield an uneven distribution of items across the buckets.
+In moderation this is not a problem. Normal bucket expansion takes place as
+the chain lengths grow. But when significant imbalance occurs (because the hash
+function is not well suited to the key domain), bucket expansion may be
+ineffective at reducing the chain lengths.</p></div>
+<div class="paragraph"><p>Imagine a very bad hash function which always puts every item in bucket 0. No
+matter how many times the number of buckets is doubled, the chain length of
+bucket 0 stays the same. In a situation like this, the best behavior is to
+stop expanding, and accept O(n) lookup performance. This is what uthash
+does. It degrades gracefully if the hash function is ill-suited to the keys.</p></div>
+<div class="paragraph"><p>If two consecutive bucket expansions yield <tt>ideal%</tt> values below 50%, uthash
+inhibits expansion for that hash table.  Once set, the <em>bucket expansion
+inhibited</em> flag remains in effect as long as the hash has items in it.
+Inhibited expansion may cause <tt>HASH_FIND</tt> to exhibit worse than constant-time
+performance.</p></div>
+</div>
+<h2 id="_appendix_c_hooks">Appendix C: Hooks</h2>
+<div class="sectionbody">
+<div class="paragraph"><p>You don&#8217;t need to use these hooks- they are only here if you want to modify
+the behavior of uthash.  Hooks can be used to change how uthash allocates
+memory, and to run code in response to certain internal events.</p></div>
+<h3 id="_malloc_free">malloc/free</h3><div style="clear:left"></div>
+<div class="paragraph"><p>By default this hash implementation uses <tt>malloc</tt> and <tt>free</tt> to manage memory.
+If your application uses its own custom allocator, this hash can use them too.</p></div>
+<div class="listingblock">
+<div class="title">Specifying alternate memory management functions</div>
+<div class="content">
+<pre><tt>#include "uthash.h"
+
+
+/* undefine the defaults */
+#undef uthash_bkt_malloc
+#undef uthash_bkt_free
+#undef uthash_tbl_malloc
+#undef uthash_tbl_free
+
+/* re-define, specifying alternate functions */
+#define uthash_bkt_malloc(sz) my_malloc(sz)  /* for UT_hash_bucket */
+#define uthash_bkt_free(ptr) my_free(ptr)
+#define uthash_tbl_malloc(sz) my_malloc(sz)  /* for UT_hash_table  */
+#define uthash_tbl_free(ptr) my_free(ptr)
+
+...</tt></pre>
+</div></div>
+<h4 id="_why_are_there_two_pairs_of_malloc_free_functions">Why are there two pairs of malloc/free functions?</h4>
+<div class="paragraph"><p>One deals with <tt>UT_hash_bucket</tt> structures, the other with <tt>UT_hash_table</tt>
+structures.  While the two structures don&#8217;t <em>need</em> to have their own allocation
+and free functions (indeed, the default is just to use <tt>malloc</tt> and <tt>free</tt> for
+both), they exist separately for each structure for convenient integration with
+pool or "slab" type allocators. This type of allocator provides a separate pool
+for each structure.</p></div>
+<h3 id="_out_of_memory">Out of memory</h3><div style="clear:left"></div>
+<div class="paragraph"><p>If memory allocation fails (i.e., the malloc function returned <tt>NULL</tt>), the
+default behavior is to terminate the process by calling <tt>exit(-1)</tt>. This can
+be modified by re-defining the <tt>uthash_fatal</tt> macro.</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>#undef uthash_fatal
+#define uthash_fatal(msg) my_fatal_function(msg);</tt></pre>
+</div></div>
+<div class="paragraph"><p>The fatal function should terminate the process; uthash does not support
+"returning a failure" if memory cannot be allocated.</p></div>
+<h3 id="_internal_events">Internal events</h3><div style="clear:left"></div>
+<div class="paragraph"><p>There is no need for the application to set these hooks or take action in
+response to these events. They are mainly for diagnostic purposes.</p></div>
+<div class="paragraph"><p>These two hooks are "notification" hooks which get executed if uthash is
+expanding buckets, or setting the <em>bucket expansion inhibited</em> flag. Normally
+both of these hooks are undefined and thus compile away to nothing.</p></div>
+<h4 id="_expansion_notification">Expansion notification</h4>
+<div class="paragraph"><p>There is a hook for the bucket expansion event.</p></div>
+<div class="listingblock">
+<div class="title">Bucket expansion hook</div>
+<div class="content">
+<pre><tt>#include "uthash.h"
+
+#undef uthash_expand_fyi
+#define uthash_expand_fyi(tbl) printf("expanded to %d buckets\n", tbl-&gt;num_buckets)
+
+...</tt></pre>
+</div></div>
+<h4 id="_expansion_inhibited_notification">Expansion-inhibited notification</h4>
+<div class="paragraph"><p>This hook can be defined to code to execute in the event that uthash decides to
+set the <em>bucket expansion inhibited</em> flag.</p></div>
+<div class="listingblock">
+<div class="title">Bucket expansion inhibited hook</div>
+<div class="content">
+<pre><tt>#include "uthash.h"
+
+#undef uthash_noexpand_fyi
+#define uthash_noexpand_fyi printf("warning: bucket expansion inhibited\n");
+
+...</tt></pre>
+</div></div>
+</div>
+<h2 id="_appendix_d_debug_mode">Appendix D: Debug mode</h2>
+<div class="sectionbody">
+<div class="paragraph"><p>If a program that uses this hash is compiled with <tt>-DHASH_DEBUG=1</tt>, a special
+internal consistency-checking mode is activated.  In this mode, the integrity
+of the whole hash is checked following every add or delete operation.  This is
+for debugging the uthash software only, not for use in production code.</p></div>
+<div class="paragraph"><p>In the <tt>tests/</tt> directory, running <tt>make debug</tt> will run all the tests in
+this mode.</p></div>
+<div class="paragraph"><p>In this mode, any internal errors in the hash data structure will cause a
+message to be printed to <tt>stderr</tt> and the program to exit.</p></div>
+<div class="paragraph"><p>The <tt>UT_hash_handle</tt> data structure includes <tt>next</tt>, <tt>prev</tt>, <tt>hh_next</tt> and
+<tt>hh_prev</tt> fields.  The former two fields determine the "application" ordering
+(that is, insertion order-- the order the items were added).  The latter two
+fields determine the "bucket chain" order.  These link the <tt>UT_hash_handles</tt>
+together in a doubly-linked list that is a bucket chain.</p></div>
+<div class="paragraph"><p>Checks performed in <tt>-DHASH_DEBUG=1</tt> mode:</p></div>
+<div class="ulist"><ul>
+<li>
+<p>
+the hash is walked in its entirety twice: once in <em>bucket</em> order and a
+  second time in <em>application</em> order
+</p>
+</li>
+<li>
+<p>
+the total number of items encountered in both walks is checked against the
+  stored number
+</p>
+</li>
+<li>
+<p>
+during the walk in <em>bucket</em> order, each item&#8217;s <tt>hh_prev</tt> pointer is compared
+  for equality with the last visited item
+</p>
+</li>
+<li>
+<p>
+during the walk in <em>application</em> order, each item&#8217;s <tt>prev</tt> pointer is compared
+  for equality with the last visited item
+</p>
+</li>
+</ul></div>
+<div class="sidebarblock">
+<div class="sidebar-content">
+<div class="sidebar-title">Macro debugging:</div>
+<div class="paragraph"><p>Sometimes it&#8217;s difficult to interpret a compiler warning on a line which
+contains a macro call.  In the case of uthash, one macro can expand to dozens of
+lines. In this case, it is helpful to expand the macros and then recompile.
+By doing so, the warning message will refer to the exact line within the macro.</p></div>
+<div class="paragraph"><p>Here is an example of how to expand the macros and then recompile. This uses the
+<tt>test1.c</tt> program in the <tt>tests/</tt> subdirectory.</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>gcc -E -I../src test1.c &gt; /tmp/a.c
+egrep -v '^#' /tmp/a.c &gt; /tmp/b.c
+indent /tmp/b.c
+gcc -o /tmp/b /tmp/b.c</tt></pre>
+</div></div>
+<div class="paragraph"><p>The last line compiles the original program (test1.c) with all macros expanded.
+If there was a warning, the referenced line number can be checked in <tt>/tmp/b.c</tt>.</p></div>
+</div></div>
+</div>
+<h2 id="_appendix_e_thread_safety">Appendix E: Thread safety</h2>
+<div class="sectionbody">
+<div class="paragraph"><p>You can use uthash in a threaded program. But you must do the locking. Use a
+read-write lock to protect against concurrent writes. It is ok to have
+concurrent readers (since uthash 1.5).</p></div>
+<div class="paragraph"><p>For example using pthreads you can create an rwlock like this:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>pthread_rwlock_t lock;
+if (pthread_rwlock_init(&amp;lock,NULL) != 0) fatal("can't create rwlock");</tt></pre>
+</div></div>
+<div class="paragraph"><p>Then, readers must acquire the read lock before doing any <tt>HASH_FIND</tt> calls or
+before iterating over the hash elements:</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>if (pthread_rwlock_rdlock(&amp;lock) != 0) fatal("can't get rdlock");
+HASH_FIND_INT(elts, &amp;i, e);
+pthread_rwlock_unlock(&amp;lock);</tt></pre>
+</div></div>
+<div class="paragraph"><p>Writers must acquire the exclusive write lock before doing any update. Add,
+delete, and sort are all updates that must be locked.</p></div>
+<div class="literalblock">
+<div class="content">
+<pre><tt>if (pthread_rwlock_wrlock(&amp;lock) != 0) fatal("can't get wrlock");
+HASH_DEL(elts, e);
+pthread_rwlock_unlock(&amp;lock);</tt></pre>
+</div></div>
+<div class="paragraph"><p>If you prefer, you can use a mutex instead of a read-write lock, but this will
+reduce reader concurrency to a single thread at a time.</p></div>
+<div class="paragraph"><p>An example program using uthash with a read-write lock is included in
+<tt>tests/threads/test1.c</tt>.</p></div>
+</div>
+<h2 id="Appendix_F">Appendix F: Macro reference</h2>
+<div class="sectionbody">
+<h3 id="_convenience_macros">Convenience macros</h3><div style="clear:left"></div>
+<div class="paragraph"><p>The convenience macros do the same thing as the generalized macros, but
+require fewer arguments.</p></div>
+<div class="paragraph"><p>In order to use the convenience macros,</p></div>
+<div class="olist arabic"><ol class="arabic">
+<li>
+<p>
+the structure&#8217;s <tt>UT_hash_handle</tt> field must be named <tt>hh</tt>, and
+</p>
+</li>
+<li>
+<p>
+for add or find, the key field must be of type <tt>int</tt> or <tt>char[]</tt>
+</p>
+</li>
+</ol></div>
+<div class="tableblock">
+<table rules="none"
+width="90%"
+frame="border"
+cellspacing="0" cellpadding="4">
+<caption class="title">Convenience macros</caption>
+<col width="25%" />
+<col width="75%" />
+<thead valign="top">
+<tr>
+<th align="left">macro         </th>
+<th align="left"> arguments</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr>
+<td align="left"><p class="table"><tt>HASH_ADD_INT</tt></p></td>
+<td align="left"><p class="table"><tt>(head, keyfield_name, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_FIND_INT</tt></p></td>
+<td align="left"><p class="table"><tt>(head, key_ptr, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_ADD_STR</tt></p></td>
+<td align="left"><p class="table"><tt>(head, keyfield_name, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_FIND_STR</tt></p></td>
+<td align="left"><p class="table"><tt>(head, key_ptr, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_DEL</tt></p></td>
+<td align="left"><p class="table"><tt>(head, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_SORT</tt></p></td>
+<td align="left"><p class="table"><tt>(head, cmp)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_COUNT</tt></p></td>
+<td align="left"><p class="table"><tt>(head)</tt></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3 id="_general_macros">General macros</h3><div style="clear:left"></div>
+<div class="paragraph"><p>These macros add, find, delete and sort the items in a hash.  You need to
+use the general macros if your <tt>UT_hash_handle</tt> is named something other
+than <tt>hh</tt>, or if your key&#8217;s data type isn&#8217;t <tt>int</tt> or <tt>char[]</tt>.</p></div>
+<div class="tableblock">
+<table rules="none"
+width="90%"
+frame="border"
+cellspacing="0" cellpadding="4">
+<caption class="title">General macros</caption>
+<col width="25%" />
+<col width="75%" />
+<thead valign="top">
+<tr>
+<th align="left">macro          </th>
+<th align="left"> arguments</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr>
+<td align="left"><p class="table"><tt>HASH_ADD</tt></p></td>
+<td align="left"><p class="table"><tt>(hh_name, head, keyfield_name, key_len, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_ADD_KEYPTR</tt></p></td>
+<td align="left"><p class="table"><tt>(hh_name, head, key_ptr, key_len, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_FIND</tt></p></td>
+<td align="left"><p class="table"><tt>(hh_name, head, key_ptr, key_len, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_DELETE</tt></p></td>
+<td align="left"><p class="table"><tt>(hh_name, head, item_ptr)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_SRT</tt></p></td>
+<td align="left"><p class="table"><tt>(hh_name, head, cmp)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_CNT</tt></p></td>
+<td align="left"><p class="table"><tt>(hh_name, head)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_CLEAR</tt></p></td>
+<td align="left"><p class="table"><tt>(hh_name, head)</tt></p></td>
+</tr>
+<tr>
+<td align="left"><p class="table"><tt>HASH_SELECT</tt></p></td>
+<td align="left"><p class="table"><tt>(dst_hh_name, dst_head, src_hh_name, src_head, condition)</tt></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="admonitionblock">
+<table><tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content"><tt>HASH_ADD_KEYPTR</tt> is used when the structure contains a pointer to the
+key, rather than the key itself.</td>
+</tr></table>
+</div>
+<h4 id="_argument_descriptions">Argument descriptions</h4>
+<div class="dlist"><dl>
+<dt class="hdlist1">
+hh_name
+</dt>
+<dd>
+<p>
+    name of the <tt>UT_hash_handle</tt> field in the structure. Conventionally called
+    <tt>hh</tt>.
+</p>
+</dd>
+<dt class="hdlist1">
+head
+</dt>
+<dd>
+<p>
+    the structure pointer variable which acts as the "head" of the hash. So
+    named because it initially points to the first item that is added to the hash.
+</p>
+</dd>
+<dt class="hdlist1">
+keyfield_name
+</dt>
+<dd>
+<p>
+    the name of the key field in the structure. (In the case of a multi-field
+    key, this is the first field of the key). If you&#8217;re new to macros, it
+    might seem strange to pass the name of a field as a parameter. See
+    <a href="#validc">note</a>.
+</p>
+</dd>
+<dt class="hdlist1">
+key_len
+</dt>
+<dd>
+<p>
+    the length of the key field in bytes. E.g. for an integer key, this is
+    <tt>sizeof(int)</tt>, while for a string key it&#8217;s <tt>strlen(key)</tt>. (For a
+    multi-field key, see the notes in this guide on calculating key length).
+</p>
+</dd>
+<dt class="hdlist1">
+key_ptr
+</dt>
+<dd>
+<p>
+    for <tt>HASH_FIND</tt>, this is a pointer to the key to look up in the hash
+    (since it&#8217;s a pointer, you can&#8217;t directly pass a literal value here). For
+    <tt>HASH_ADD_KEYPTR</tt>, this is the address of the key of the item being added.
+</p>
+</dd>
+<dt class="hdlist1">
+item_ptr
+</dt>
+<dd>
+<p>
+    pointer to the structure being added, deleted or looked up. This is an
+    input parameter for HASH_ADD and HASH_DELETE macros, and an output
+    parameter for HASH_FIND.
+</p>
+</dd>
+<dt class="hdlist1">
+cmp
+</dt>
+<dd>
+<p>
+    pointer to comparison function which accepts two arguments (pointers to
+    items to compare) and returns an int specifying whether the first item
+    should sort before, equal to, or after the second item (like <tt>strcmp</tt>).
+</p>
+</dd>
+<dt class="hdlist1">
+condition
+</dt>
+<dd>
+<p>
+    a function or macro which accepts a single argument-- a void pointer to a
+    structure, which needs to be cast to the appropriate structure type. The
+    function or macro should return (or evaluate to) a non-zero value if the
+    structure should be "selected" for addition to the destination hash.
+</p>
+</dd>
+</dl></div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Version 1.6<br />
+Last updated 2009-05-08 23:57:45 EDT
+</div>
+</div>
+</body>
+</html>
