@@ -26,7 +26,8 @@ COMPILER_CMOS:=$(COMPILER_MLS:.ml=.cmo)
 COMPILER_CMXS:=$(COMPILER_MLS:.ml=.cmx)
 COMPILER_CMIS:=$(COMPILER_MLS:.ml=.cmi)
 
-RUNTIME_CS:=rt/rust.c
+RUNTIME_CS:=rt/rust.c rt/isaac/randport.c
+RUNTIME_INCS:=-Irt/uthash-1.6/src -Irt/isaac
 RUNTIME_OBJS:=$(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
 
 all: $(CFG_COMPILER) $(CFG_RUNTIME) $(MKFILES) fe/lexer.ml
@@ -38,7 +39,7 @@ $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
 	$(call CFG_LINK_C,$@) $(RUNTIME_OBJS)
 
 %$(CFG_OBJ_SUFFIX): %.c $(MKFILES)
-	$(call CFG_COMPILE_C,$@) $<
+	$(call CFG_COMPILE_C,$@,$(RUNTIME_INCS)) $<
 
 ifdef NATIVE
 $(CFG_COMPILER): $(COMPILER_CMXS) $(MKFILES)
@@ -68,7 +69,7 @@ ML_DEPFILES:=$(COMPILER_MLS:.ml=.d)
 C_DEPFILES:=$(RUNTIME_CS:.c=.d)
 
 %.d: %.c $(MKFILES)
-	$(call CFG_DEPEND_C,$@ $(patsubst %.c,%$(CFG_OBJ_SUFFIX),$<)) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
+	$(call CFG_DEPEND_C,$@ $(patsubst %.c,%$(CFG_OBJ_SUFFIX),$<),$(RUNTIME_INCS)) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
 
 %.d: %.ml $(MKFILES)
 	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@

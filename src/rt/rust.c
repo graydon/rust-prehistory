@@ -1,10 +1,201 @@
-#include "rust.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
 
-size_t const rust_n_callee_saves = 4;
+#include "rust.h"
+#include "rand.h"
+
+/*
+  static void really_free(void*x) { free(x); }
+  #define free(x) do { printf("** FREE(%" PRIxPTR ")\n", (uintptr_t)x); really_free(x); } while(0)
+*/
+
+typedef enum {
+  rust_type_any = 0,
+  rust_type_nil = 1,
+  rust_type_bool = 2,
+  rust_type_int = 3,
+
+  rust_type_char = 4,
+  rust_type_str = 5,
+
+  rust_type_tup = 6,
+  rust_type_vec = 7,
+  rust_type_rec = 8,
+
+  rust_type_tag = 9,
+  rust_type_iso = 10,
+  rust_type_idx = 11,
+
+  rust_type_fn = 12,
+  rust_type_chan = 13,
+  rust_type_port = 14,
+
+  rust_type_mod = 15,
+  rust_type_prog = 16,
+
+  rust_type_opaque = 17,
+
+  rust_type_constrained = 18,
+  rust_type_lim = 19,
+
+
+  rust_type_u8 = 20,
+  rust_type_s8 = 21,
+  rust_type_u16 = 22,
+  rust_type_s16 = 23,
+  rust_type_u32 = 24,
+  rust_type_s32 = 25,
+  rust_type_u64 = 26,
+  rust_type_s64 = 27,
+
+  rust_type_b64 = 28,
+  rust_type_b128 = 29
+
+} rust_type_tag_t;
+
+/*
+ * We have a variety of pointer-tagging schemes.
+ *
+ * For interior slots of the 'int' type, we use a 1-bit tag to switch between fixnum and boxed
+ * bignum.
+ *
+ * Exterior subword-sized slots are synonymous with interior subword-sized slots; there is no
+ * difference. Subsequently, transplanting a subword-sized datum into an exterior slot is always
+ * just a copy. Write aliases can be formed on subword-sized slots; they are just the address of
+ * the slot itself, aligned or not.
+ *
+ * Exterior word-or-greater slots are stored as pointers. Size implies alignment, so we have free
+ * tag bits. We use one bit to differentiate crate-offset pseudo-pointers from real heap pointers.
+ *
+ * Slots of 'any' type need to denote both a type and a value. They do this by stealing 3 bits for
+ * tag and assigning thus (on 32-bit platforms):
+ *
+ *   - 0b000 == mini-fixnum int
+ *   - 0b001 == boxed int
+ *   - 0b010 == crate-offset pseudo pointer to (type,val) pair
+ *   - 0b011 == pure pointer to (type,val) pair
+ *   - 0b100 == nil
+ *   - 0b101 == bool
+ *   - 0b110 == char
+ *   - 0b111 == boxed str (strs are always 3 words at least: refs, len, buf)
+ *
+ * On 64-bit platforms, we have 4 bits to play with since 2 words is 128 bits. So we extend the
+ * "stored inline" variants to cover:
+ *
+ *   - 0b1000 == u8
+ *   - 0b1001 == s8
+ *   - 0b1010 == u16
+ *   - 0b1011 == s16
+ *   - 0b1100 == u32
+ *   - 0b1101 == s32
+ *   - 0b1110 == f64
+ *   - 0b1111 == ?? reserved
+ *
+ */
+
+typedef struct rust_type {
+  uintptr_t refs;
+  rust_type_tag_t tag;
+
+} rust_type_t;
+
+/* Proc stack segments. Heap allocated and chained together. */
+
+typedef struct rust_stk_seg {
+  struct rust_stk_seg *prev;
+  struct rust_stk_seg *next;
+  size_t size;
+  size_t live;
+  uint8_t data[];
+} rust_stk_seg_t;
+
+
+typedef enum {
+  /* NB: it's important that 'running' be value 0, as it
+   * lets us get away with using OR rather than MOV to
+   * signal anything-not-running. x86 optimization. */
+  rust_proc_state_running    = 0,
+  rust_proc_state_calling_c  = 1,
+  rust_proc_state_exiting    = 2,
+  rust_proc_state_blocked_reading  = 3,
+  rust_proc_state_blocked_writing  = 4
+} rust_proc_state_t;
+
+typedef enum {
+  rust_upcall_log_uint32     = 0,
+  rust_upcall_log_str        = 1,
+  rust_upcall_spawn          = 2,
+  rust_upcall_check_expr     = 3,
+  rust_upcall_malloc         = 4,
+  rust_upcall_free           = 5,
+  rust_upcall_new_port       = 6,
+  rust_upcall_del_port       = 7,
+  rust_upcall_new_chan       = 8,
+  rust_upcall_del_chan       = 9,
+  rust_upcall_send           = 10,
+  rust_upcall_recv           = 11,
+  rust_upcall_sched          = 12
+} rust_upcall_t;
+
+#define RUST_PROC_MAX_UPCALL_ARGS   8
+
+struct rust_ptr_vec {
+  size_t alloc;
+  size_t init;
+  void **data;
+};
+
+struct rust_rt {
+  uintptr_t sp;          /* Saved sp from the C runtime. */
+  rust_ptr_vec_t running_procs;
+  rust_ptr_vec_t blocked_procs;
+  randctx rctx;
+};
+
+struct rust_prog {
+  void CDECL (*init_code)(void*, rust_proc_t*);
+  void CDECL (*main_code)(void*, rust_proc_t*);
+  void CDECL (*fini_code)(void*, rust_proc_t*);
+};
+
+struct rust_proc {
+
+  rust_rt_t *rt;
+  rust_stk_seg_t *stk;
+  rust_prog_t *prog;
+  uintptr_t sp;           /* saved sp when not running.                     */
+  uintptr_t state;
+  size_t idx;
+  size_t refcnt;
+
+  /* Parameter space for upcalls. */
+  /* FIXME: could probably get away with packing upcall code and state
+   * into 1 byte each. And having fewer max upcall args. */
+  uintptr_t upcall_code;
+  uintptr_t upcall_args[RUST_PROC_MAX_UPCALL_ARGS];
+
+  /* Proc accounting. */
+  uintptr_t mem_budget;   /* N bytes ownable by this proc.                  */
+  uintptr_t curr_mem;     /* N bytes currently owned.                       */
+  uintptr_t tick_budget;  /* N ticks in proc lifetime. 0 = unlimited.       */
+  uintptr_t curr_ticks;   /* N ticks currently consumed.                    */
+
+  uint8_t data[];         /* Official-style C99 "flexible array" element.    */
+
+};
+
+struct rust_port {
+  size_t refcnt;
+  uintptr_t blocked_reading;
+  rust_ptr_vec_t writers;
+};
+
+struct rust_chan {
+  rust_port_t *port;
+};
+
 
 static void
 logptr(char const *msg, uintptr_t ptrval)
@@ -54,19 +245,27 @@ init_ptr_vec(rust_ptr_vec_t *v)
   v->alloc = INIT_PTR_VEC_SZ;
   v->init = 0;
   v->data = xalloc(v->alloc);
+  assert(v->data);
+  printf("rt: init ptr vec %" PRIxPTR ", data=%" PRIxPTR "\n",
+         (uintptr_t)v, (uintptr_t)v->data);
 }
 
 static void
 fini_ptr_vec(rust_ptr_vec_t *v)
 {
+  assert(v);
+  assert(v->data);
+  printf("rt: fini ptr vec %" PRIxPTR ", data=%" PRIxPTR "\n",
+         (uintptr_t)v, (uintptr_t)v->data);
   assert(v->init == 0);
-  if (v->data)
-    free(v->data);
+  free(v->data);
 }
 
 static void
 ptr_vec_push(rust_ptr_vec_t *v, void *p)
 {
+  assert(v);
+  assert(v->data);
   if (v->init == v->alloc) {
     v->alloc *= 2;
     v->data = xrealloc(v->data, v->alloc);
@@ -75,19 +274,30 @@ ptr_vec_push(rust_ptr_vec_t *v, void *p)
 }
 
 static void
+ptr_vec_trim(rust_ptr_vec_t *v, size_t init)
+{
+  assert(v);
+  assert(v->data);
+  if (init <= (v->alloc / 4) &&
+      (v->alloc / 2) >= INIT_PTR_VEC_SZ) {
+    v->alloc /= 2;
+    assert(v->alloc >= v->init);
+    v->data = xrealloc(v->data, v->alloc);
+    assert(v->data);
+  }
+}
+
+static void
 ptr_vec_swapdel(rust_ptr_vec_t *v, size_t i)
 {
   /* Swap the endpoint into i and decr init. */
+  assert(v);
+  assert(v->data);
   assert(v->init > 0);
   assert(i < v->init);
-  if (v->init > 1)
-    v->data[i] = v->data[v->init-1];
   v->init--;
-  if (v->init == (v->alloc / 4) &&
-      (v->alloc / 2) >= INIT_PTR_VEC_SZ) {
-    v->alloc /= 2;
-    v->data = xrealloc(v->data, v->alloc);
-  }
+  if (v->init > 0)
+    v->data[i] = v->data[v->init];
 }
 
 
@@ -120,7 +330,6 @@ ptr_vec_del(rust_ptr_vec_t *v, size_t i)
 }
 */
 
-
 /* Stacks */
 
 /* Get around to using linked-lists of size-doubling stacks, eventually. */
@@ -151,6 +360,9 @@ rust_del_stk(rust_stk_seg_t *stk)
 }
 
 /* Processes */
+
+/* FIXME: ifdef by platform. */
+size_t const rust_n_callee_saves = 4;
 
 static rust_proc_t*
 rust_new_proc(rust_rt_t *rt, rust_prog_t *prog)
@@ -215,6 +427,7 @@ rust_del_proc(rust_proc_t *proc)
   logptr("del proc", (uintptr_t)proc);
   assert(proc->refcnt == 0);
   rust_del_stk(proc->stk);
+  free(proc);
 }
 
 static rust_proc_t*
@@ -228,24 +441,62 @@ static void
 rust_sched_proc(rust_rt_t *rt,
                 rust_proc_t *proc)
 {
-  ptr_vec_push(&rt->procs, proc);
+  proc->idx = rt->running_procs.init;
+  ptr_vec_push(&rt->running_procs, proc);
+}
+
+static rust_ptr_vec_t*
+rust_get_proc_vec(rust_proc_t *proc)
+{
+  rust_rt_t *rt = proc->rt;
+  switch (proc->state) {
+  case rust_proc_state_running:
+  case rust_proc_state_calling_c:
+  case rust_proc_state_exiting:
+    return &rt->running_procs;
+
+  case rust_proc_state_blocked_reading:
+  case rust_proc_state_blocked_writing:
+    return &rt->blocked_procs;
+  }
+  assert(0);
+  return NULL;
+}
+
+static size_t
+n_live_procs(rust_rt_t *rt)
+{
+  return rt->running_procs.init + rt->blocked_procs.init;
 }
 
 static void
-rust_exit_curr_proc(rust_rt_t *rt)
+rust_exit_proc(rust_proc_t *proc)
 {
-  assert(rt->procs.init > 0);
-  rust_del_proc((rust_proc_t*) rt->procs.data[rt->curr_proc]);
-  ptr_vec_swapdel(&rt->procs, rt->curr_proc);
+  assert(proc);
+  assert(proc->rt);
+  rust_rt_t *rt = proc->rt;
+  assert(n_live_procs(rt) > 0);
+  rust_ptr_vec_t *v = rust_get_proc_vec(proc);
+  assert(v);
+  ptr_vec_swapdel(v, proc->idx);
+  if (v->init > 0)
+    ((rust_proc_t*)v->data[proc->idx])->idx = proc->idx;
+  rust_del_proc(proc);
+  ptr_vec_trim(v, n_live_procs(rt));
 }
 
 static rust_proc_t*
 rust_sched(rust_rt_t *rt)
 {
-  rt->curr_proc++;
-  rt->curr_proc %= rt->procs.init;
-  /* logptr("rust_sched chose proc ", (uintptr_t)rt->procs.data[rt->curr_proc]); */
-  return (rust_proc_t*) rt->procs.data[rt->curr_proc];
+  assert(rt);
+  assert(n_live_procs(rt) > 0);
+  if (rt->running_procs.init > 0) {
+    size_t i = rand(&rt->rctx);
+    i %= rt->running_procs.init;
+    return rt->running_procs.data[i];
+  }
+  printf("rt: no schedulable processes.\n");
+  exit(1);
 }
 
 /* Runtime */
@@ -255,17 +506,27 @@ rust_new_rt()
 {
   rust_rt_t *rt = xcalloc(sizeof(rust_rt_t));
   logptr("new rt", (uintptr_t)rt);
-  init_ptr_vec(&rt->procs);
+  init_ptr_vec(&rt->running_procs);
+  init_ptr_vec(&rt->blocked_procs);
+  randinit(&rt->rctx);
   return rt;
+}
+
+static void
+rust_del_all_procs(rust_ptr_vec_t *v) {
+  assert(v);
+  while (v->init) {
+    rust_del_proc((rust_proc_t*) v->data[v->init--]);
+  }
 }
 
 static void
 rust_del_rt(rust_rt_t *rt)
 {
-  while (rt->procs.init) {
-    rust_del_proc((rust_proc_t*) rt->procs.data[rt->procs.init--]);
-  }
-  fini_ptr_vec(&rt->procs);
+  rust_del_all_procs(&rt->running_procs);
+  rust_del_all_procs(&rt->blocked_procs);
+  fini_ptr_vec(&rt->running_procs);
+  fini_ptr_vec(&rt->blocked_procs);
   free(rt);
 }
 
@@ -330,7 +591,7 @@ rust_handle_upcall(rust_proc_t *proc)
 {
   uintptr_t *args = &proc->upcall_args[0];
 
-  /* printf("rt: calling fn #%d\n", proc->upcall_code); */
+  printf("rt: calling fn #%d\n", proc->upcall_code);
   switch ((rust_upcall_t)proc->upcall_code) {
   case rust_upcall_log_uint32:
     upcall_log_uint32_t(args[0]);
@@ -410,7 +671,7 @@ rust_start(rust_prog_t *prog,
   logptr("proc->sp", (uintptr_t)proc->sp);
   logptr("c_to_proc_glue", (uintptr_t)c_to_proc_glue);
 
-  while(1) {
+  while (1) {
     /* printf("rt: entering proc 0x%" PRIxPTR "\n", (uintptr_t)proc); */
     proc->state = (uintptr_t)rust_proc_state_running;
     c_to_proc_glue(proc);
@@ -425,15 +686,20 @@ rust_start(rust_prog_t *prog,
       break;
     case rust_proc_state_exiting:
       logptr("proc exiting", (uintptr_t)proc);
-      rust_exit_curr_proc(rt);
+      rust_exit_proc(proc);
+      break;
+    case rust_proc_state_blocked_reading:
+    case rust_proc_state_blocked_writing:
+      assert(0);
       break;
     }
-    if (rt->procs.init > 0)
+    if (n_live_procs(rt) > 0)
       proc = rust_sched(rt);
     else
       break;
   }
 
+  printf("rt: finished main loop.\n");
   rust_del_rt(rt);
   printf("rt: freed runtime.\n");
   return 37;

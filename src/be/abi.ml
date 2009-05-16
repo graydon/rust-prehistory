@@ -121,24 +121,26 @@ let prog_field_main = 1;;
 let prog_field_fini = 2;;
 
 let proc_field_rt = 0;;
-let proc_field_stk = 1;;
-let proc_field_prog = 2;;
-let proc_field_sp = 3;;
-let proc_field_state = 4;;
-let proc_field_refcnt = 5;;
-let proc_field_upcall_code = 6;;
-let proc_field_upcall_args = 7;;
+let proc_field_stk = proc_field_rt + 1;;
+let proc_field_prog = proc_field_stk + 1;;
+let proc_field_sp = proc_field_prog + 1;;
+let proc_field_state = proc_field_sp + 1;;
+let proc_field_idx = proc_field_state + 1;;
+let proc_field_refcnt = proc_field_idx + 1;;
+let proc_field_upcall_code = proc_field_refcnt + 1;;
+let proc_field_upcall_args = proc_field_upcall_code + 1;;
 
 let max_upcall_args = 8;;
 
-(* The "end of the proc" where proc-slots get allocated. *)
-let proc_field_data = 20;;
+let proc_field_mem_budget = proc_field_upcall_args + max_upcall_args + 1;;
+let proc_field_curr_mem = proc_field_mem_budget + 1;;
+let proc_field_tick_budget = proc_field_curr_mem + 1;;
+let proc_field_curr_ticks = proc_field_tick_budget + 1;;
 
+(* The "end of the proc" where proc-slots get allocated. *)
+let proc_field_data = proc_field_curr_ticks + 1;;
 
 let rt_field_sp = 0;;
-let rt_field_curr_proc = 1;;
-let rt_field_live_procs = 2;;
-let rt_field_procs = 3;;
 
 type abi =
   {
