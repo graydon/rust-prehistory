@@ -253,6 +253,32 @@ let main_prologue
       (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
 ;;
 
+let objfile_main
+    (e:Il.emitter)
+    ~(main_fixup:fixup)
+    ~(rust_start_fixup:fixup)
+    ~(root_prog_fixup:fixup)
+    ~(c_to_proc_fixup:fixup)
+    ~(indirect_start:bool)
+    : unit =
+  let eax = Il.Reg (Il.Hreg eax) in
+  let ecx = Il.Reg (Il.Hreg ecx) in
+    Il.emit_full e (Some main_fixup) Il.DEAD Il.Nil Il.Nil Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS c_to_proc_fixup)) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS root_prog_fixup)) Il.Nil;
+    if indirect_start
+    then 
+      begin
+        Il.emit e Il.UMOV ecx (Il.Mem (Il.M32, None, (Asm.M_POS rust_start_fixup))) Il.Nil;
+        Il.emit e Il.CCALL eax ecx Il.Nil;
+      end
+    else
+      Il.emit e Il.CCALL Il.Nil (Il.Pcrel rust_start_fixup) Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
+    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+;;
+
 let word_n reg i =
   Il.Mem (word_mem, Some reg,
           Asm.IMM (Int64.mul (Int64.of_int i) word_sz))
@@ -760,6 +786,13 @@ let select_insn (q:quad) : Asm.item =
       | Some f -> Asm.DEF (f, item)
 ;;
 
+
+let new_emitter _ : Il.emitter =
+  Il.new_emitter
+    abi.Abi.abi_prealloc_quad
+    abi.Abi.abi_is_2addr_machine
+;;
+
 let select_insns (sess:Session.sess) (q:Il.quads) : Asm.item =
   let sel q =
     try
@@ -772,6 +805,13 @@ let select_insns (sess:Session.sess) (q:Il.quads) : Asm.item =
           Asm.MARK
   in
     Asm.SEQ (Array.map sel q)
+;;
+
+let items_of_emitted_quads (sess:Session.sess) (e:Il.emitter) : Asm.item =
+  let item = select_insns sess e.Il.emit_quads in
+    if sess.Session.sess_failed
+    then raise Unrecognized
+    else item
 ;;
 
 

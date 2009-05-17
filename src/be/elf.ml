@@ -448,16 +448,6 @@ let elf32_386_rela_item r =
            WORD (TY_u32, r.elf32_386_rela_addend) |]
 ;;
 
-
-let x86_items_of_emitted_quads sess e =
-  (* FIXME: need an emitter context, proper error reporting, etc. *)
-  let item = X86.select_insns sess e.Il.emit_quads in
-    if sess.Session.sess_failed
-    then raise X86.Unrecognized
-    else item
-;;
-
-
 let elf32_linux_x86_file
     ~(sess:Session.sess)
     ~(entry_name:string)
@@ -524,7 +514,7 @@ let elf32_linux_x86_file
         Il.emit e Il.NOP Il.Nil Il.Nil Il.Nil;
         Il.emit e Il.NOP Il.Nil Il.Nil Il.Nil;
         Il.emit e Il.NOP Il.Nil Il.Nil Il.Nil;
-        DEF (plt0_fixup, (x86_items_of_emitted_quads sess e))
+        DEF (plt0_fixup, (X86.items_of_emitted_quads sess e))
     in
 
 
@@ -934,7 +924,7 @@ let elf32_linux_x86_file
       Il.emit_full e (Some jump_slot_initial_target_fixup)
         (Il.CPUSH Il.M32)  Il.Nil (Il.Imm (IMM (Int64.of_int i))) Il.Nil;
       Il.emit e Il.JMP Il.Nil (Il.Pcrel plt0_fixup) Il.Nil;
-      x86_items_of_emitted_quads sess e
+      X86.items_of_emitted_quads sess e
     in
     let got_plt_item = DEF (jump_slot_fixup,
                             WORD (TY_u32, (M_POS jump_slot_initial_target_fixup))) in
@@ -1144,7 +1134,7 @@ let emit_file
     (code:Asm.item)
     (data:Asm.item)
     (dwarf:Dwarf.debug_records)
-    (entry_prog_fixup:fixup)
+    (root_prog_fixup:fixup)
     (c_to_proc_fixup:fixup)
     : unit =
 
@@ -1187,7 +1177,7 @@ let emit_file
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
   let start_fn =
-    let e = Il.new_emitter X86.prealloc_quad true in
+    let e = X86.new_emitter () in
       Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.eax)) Il.Nil;
       Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.esp)) Il.Nil;
       Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.edx)) Il.Nil;
@@ -1197,23 +1187,22 @@ let emit_file
       Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Reg (Il.Hreg X86.esi)) Il.Nil;
       Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS main_fixup)) Il.Nil;
       Il.emit e Il.CCALL Il.Nil (Il.Pcrel libc_start_main_fixup) Il.Nil;
-      x86_items_of_emitted_quads sess e
+      X86.items_of_emitted_quads sess e
   in
 
   let do_nothing_fn =
     let e = Il.new_emitter X86.prealloc_quad true in
       Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
-      x86_items_of_emitted_quads sess e
+      X86.items_of_emitted_quads sess e
   in
 
   let main_fn =
-    let ecx = Il.Reg (Il.Hreg X86.ecx) in
-    let e = Il.new_emitter X86.prealloc_quad true in
-      Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS entry_prog_fixup)) Il.Nil;
-      Il.emit e Il.CCALL Il.Nil (Il.Pcrel rust_start_fixup) Il.Nil;
-      Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
-      Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
-      x86_items_of_emitted_quads sess e
+    let e = X86.new_emitter() in
+      X86.objfile_main e 
+        ~main_fixup ~rust_start_fixup 
+        ~root_prog_fixup ~c_to_proc_fixup
+        ~indirect_start: false;
+      X86.items_of_emitted_quads sess e
   in
 
   let needed_libs =
@@ -1228,7 +1217,7 @@ let emit_file
     htab_put text_items "_start" start_fn;
     htab_put text_items "_init" (DEF (init_fixup, do_nothing_fn));
     htab_put text_items "_fini" (DEF (fini_fixup, do_nothing_fn));
-    htab_put text_items "main" (DEF (main_fixup, main_fn));
+    htab_put text_items "main" main_fn;
     htab_put text_items "rust_code" code;
     htab_put rodata_items "rust_rodata" data;
     htab_put import_fixups "__libc_start_main" libc_start_main_fixup;

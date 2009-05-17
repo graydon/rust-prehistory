@@ -157,7 +157,7 @@ let _ =
 (* Primary translation from AST -> IL quads. *)
 let ((file_texts:Semant.file_grouped_texts),
      (data_items:Asm.item list),
-     (entry_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate.Ast.crate_items;;
+     (root_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate.Ast.crate_items;;
 let _ = exit_if_failed ()
 ;;
 let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
@@ -228,7 +228,7 @@ let emitter =
     | Linux_x86_elf -> Elf.emit_file
 ;;
 
-emitter sess code data dwarf entry_prog_fixup sem_cx.Semant.ctxt_c_to_proc_fixup;;
+emitter sess code data dwarf root_prog_fixup sem_cx.Semant.ctxt_c_to_proc_fixup;;
 let _ = exit_if_failed ()
 
 (*

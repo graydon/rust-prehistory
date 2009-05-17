@@ -113,7 +113,7 @@ let pe_msdos_header_and_padding
         (* 00000030 *)
         0x00; 0x00; 0x00; 0x00; 0x00; 0x00; 0x00; 0x00;
         0x00; 0x00; 0x00; 0x00; 0x00; 0x01; 0x00; 0x00;
-        (* ^PE HDR offset^  *)
+        (*                      ^^^^PE HDR offset^^^^^ *)
 
         (* 00000040 *)
         0xba; 0x10; 0x00; 0x0e; 0x1f; 0xb4; 0x09; 0xcd;
@@ -584,58 +584,34 @@ let pe_import_section
 ;;
 
 let pe_text_section
-    ~(startup_fn_fixup:fixup)
-    ~(startup_fn_arg_fixup:fixup)
+    ~(sess:Session.sess)
+    ~(main_fixup:fixup)
+    ~(rust_start_fixup:fixup)
+    ~(root_prog_fixup:fixup)
     ~(text_fixup:fixup)
     ~(crate_code:item)
     ~(c_to_proc_fixup:fixup)
     : item =
-  let e = Il.new_emitter
-    X86.abi.Abi.abi_prealloc_quad
-    X86.abi.Abi.abi_is_2addr_machine
-  in
-  let eax = Il.Reg (Il.Hreg X86.eax) in
-  let ecx = Il.Reg (Il.Hreg X86.ecx) in
+  let e = X86.new_emitter () in 
     (*
      * We are called from the Microsoft C library startup routine,
      * and assumed to be stdcall; so we have to clean up our own
      * stack before returning.
      *)
-    Il.emit e Il.UMOV ecx (Il.Mem (Il.M32, None, (M_POS startup_fn_fixup))) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS c_to_proc_fixup)) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (M_POS startup_fn_arg_fixup)) Il.Nil;
-    Il.emit e Il.CCALL eax ecx Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
-    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+    X86.objfile_main e 
+      ~main_fixup ~rust_start_fixup ~root_prog_fixup 
+      ~c_to_proc_fixup ~indirect_start: true;
     def_aligned
       text_fixup
       (SEQ [|
-        (SEQ (Array.map X86.select_insn e.Il.emit_quads));
-        crate_code
-      |])
+         X86.items_of_emitted_quads sess e;
+         crate_code
+       |])
 ;;
 
 (*********************************************************************************)
 
-let test_imports0 =
-  {
-    pe_import_dll_name_fixup = new_fixup "dll name";
-    pe_import_dll_name = "KERNEL32.dll";
-    pe_import_dll_ILT_fixup = new_fixup "dll ILT";
-    pe_import_dll_IAT_fixup = new_fixup "dll IAT";
-    pe_import_dll_imports =
-      [|
-        {
-          pe_import_name_fixup = new_fixup "import name";
-          pe_import_name = "ExitProcess";
-          pe_import_address_fixup = new_fixup "import address";
-        }
-      |];
-  }
-;;
-
-let test_imports =
+let rustrt_imports =
   {
     pe_import_dll_name_fixup = new_fixup "dll name";
     pe_import_dll_name = "rustrt.dll";
@@ -657,7 +633,7 @@ let emit_file
     (code:Asm.item)
     (data:Asm.item)
     (dw:Dwarf.debug_records)
-    (entry_prog_fixup:fixup)
+    (root_prog_fixup:fixup)
     (c_to_proc_fixup:fixup)
     : unit =
 
@@ -666,6 +642,7 @@ let emit_file
   let loader_hdr_fixup = new_fixup "loader header" in
   let import_dir_fixup = new_fixup "import directory" in
   let text_fixup = new_fixup "text section" in
+  let main_fixup = new_fixup "main" in
   let bss_fixup = new_fixup "bss section" in
   let data_fixup = new_fixup "data section" in
   let image_fixup = new_fixup "image fixup" in
@@ -711,7 +688,7 @@ let emit_file
                          ~text_fixup: text_fixup
                          ~init_data_fixup: all_init_data_fixup
                          ~size_of_uninit_data: 0L
-                         ~entry_point_fixup: text_fixup
+                         ~entry_point_fixup: main_fixup
                          ~base_of_code: 0L
                          ~base_of_data: 0L
                          ~image_fixup: image_fixup
@@ -731,7 +708,7 @@ let emit_file
   in
   let import_section = (pe_import_section
                           ~section_fixup: import_dir_fixup
-                          ~dlls: [| test_imports |])
+                          ~dlls: [| rustrt_imports |])
   in
   let import_header = (pe_section_header
                          ~id: SECTION_ID_IMPORTS
@@ -786,11 +763,13 @@ let emit_file
   in
 
   let text_section = (pe_text_section
-                        ~startup_fn_fixup: test_imports.pe_import_dll_imports.(0).pe_import_address_fixup
-                        ~startup_fn_arg_fixup: entry_prog_fixup
-                        ~text_fixup: text_fixup
+                        ~sess
+                        ~main_fixup
+                        ~rust_start_fixup: rustrt_imports.pe_import_dll_imports.(0).pe_import_address_fixup
+                        ~root_prog_fixup
+                        ~text_fixup
                         ~crate_code: code
-                        ~c_to_proc_fixup: c_to_proc_fixup)
+                        ~c_to_proc_fixup)
   in
   let bss_section = def_aligned bss_fixup (BSS 0x10L)
   in
