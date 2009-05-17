@@ -5,6 +5,7 @@
 
 #include "rust.h"
 #include "rand.h"
+#include "valgrind.h"
 
 /*
   static void really_free(void*x) { free(x); }
@@ -106,6 +107,7 @@ typedef struct rust_type {
 typedef struct rust_stk_seg {
   struct rust_stk_seg *prev;
   struct rust_stk_seg *next;
+  unsigned int valgrind_id;
   size_t size;
   size_t live;
   uint8_t data[];
@@ -342,7 +344,12 @@ rust_new_stk()
   rust_stk_seg_t *stk = xalloc(sz);
   logptr("new stk", (uintptr_t)stk);
   memset(stk, 0, sizeof(rust_stk_seg_t));
+  stk->valgrind_id = VALGRIND_STACK_REGISTER(&stk->data[0], &stk->data[stk->size]);
   stk->size = sz;
+  /*
+  printf("new stk range: [%" PRIxPTR ", %" PRIxPTR "]\n",
+         (uintptr_t)&stk->data[0], (uintptr_t)&stk->data[stk->size]);
+  */
   return stk;
 }
 
@@ -353,6 +360,11 @@ rust_del_stk(rust_stk_seg_t *stk)
   do {
     nxt = stk->next;
     logptr("freeing stk segment", (uintptr_t)stk);
+    /*
+      printf("end stk range: [%" PRIxPTR ", %" PRIxPTR "]\n",
+      (uintptr_t)&stk->data[0], (uintptr_t)&stk->data[stk->size]);
+    */
+    VALGRIND_STACK_DEREGISTER(stk->valgrind_id);
     free(stk);
     stk = nxt;
   } while (stk);
@@ -483,6 +495,7 @@ rust_exit_proc(rust_proc_t *proc)
     ((rust_proc_t*)v->data[proc->idx])->idx = proc->idx;
   rust_del_proc(proc);
   ptr_vec_trim(v, n_live_procs(rt));
+  printf("rt: proc %" PRIxPTR " exited (and deleted)\n", (uintptr_t)proc);
 }
 
 static rust_proc_t*

@@ -693,6 +693,7 @@ let select_item_misc (q:quad) : Asm.item =
     | (CPUSH M32, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD (TY_u32, i) |]
     | (CPUSH M8, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD (TY_u8, i) |]
 
+    | (CPOP M32, Reg (Hreg r), _, _) -> Asm.BYTE (0x58 + (reg r))
     | (CPOP M32, r, _, _) when is_rm32 r -> insn_rm_r 0x8f r slash0
 
     | (CRET, _, _, _) -> Asm.BYTE 0xc3
