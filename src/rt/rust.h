@@ -19,14 +19,12 @@ struct rust_prog;
 struct rust_port;
 struct rust_chan;
 struct rust_rt;
-struct rust_ptr_vec;
 
 typedef struct rust_proc rust_proc_t;
 typedef struct rust_prog rust_prog_t;
 typedef struct rust_port rust_port_t;
 typedef struct rust_chan rust_chan_t;
 typedef struct rust_rt rust_rt_t;
-typedef struct rust_ptr_vec rust_ptr_vec_t;
 
 
 #ifdef WIN32

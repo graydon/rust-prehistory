@@ -7,6 +7,8 @@ prog root
     spawn child(chan(p));
     let int y;
     y <- p;
+    log "received";
+    log y;
     check (y == 10);
   }
 }
