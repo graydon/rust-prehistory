@@ -344,8 +344,8 @@ rust_new_stk()
   rust_stk_seg_t *stk = xalloc(sz);
   logptr("new stk", (uintptr_t)stk);
   memset(stk, 0, sizeof(rust_stk_seg_t));
+  stk->size = rust_init_stk_bytes;
   stk->valgrind_id = VALGRIND_STACK_REGISTER(&stk->data[0], &stk->data[stk->size]);
-  stk->size = sz;
   /*
   printf("new stk range: [%" PRIxPTR ", %" PRIxPTR "]\n",
          (uintptr_t)&stk->data[0], (uintptr_t)&stk->data[stk->size]);
@@ -715,7 +715,7 @@ rust_start(rust_prog_t *prog,
   printf("rt: finished main loop.\n");
   rust_del_rt(rt);
   printf("rt: freed runtime.\n");
-  return 37;
+  return 0;
 }
 
 /*

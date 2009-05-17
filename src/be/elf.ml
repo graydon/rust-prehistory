@@ -1207,7 +1207,6 @@ let emit_file
 
   let needed_libs =
     [|
-      "ld-linux.so.2";
       "libc.so.6";
       "librustrt.so"
     |]
@@ -1221,6 +1220,7 @@ let emit_file
     htab_put text_items "rust_code" code;
     htab_put rodata_items "rust_rodata" data;
     htab_put import_fixups "__libc_start_main" libc_start_main_fixup;
+
     htab_put import_fixups "rust_start" rust_start_fixup
   in
   let all_items =

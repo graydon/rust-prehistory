@@ -261,21 +261,24 @@ let objfile_main
     ~(c_to_proc_fixup:fixup)
     ~(indirect_start:bool)
     : unit =
-  let eax = Il.Reg (Il.Hreg eax) in
-  let ecx = Il.Reg (Il.Hreg ecx) in
+  let r x = Il.Reg (Il.Hreg x) in
     Il.emit_full e (Some main_fixup) Il.DEAD Il.Nil Il.Nil Il.Nil;
+    save_callee_saves e;
+    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS c_to_proc_fixup)) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS root_prog_fixup)) Il.Nil;
     if indirect_start
     then 
       begin
-        Il.emit e Il.UMOV ecx (Il.Mem (Il.M32, None, (Asm.M_POS rust_start_fixup))) Il.Nil;
-        Il.emit e Il.CCALL eax ecx Il.Nil;
+        Il.emit e Il.UMOV (r ecx) (Il.Mem (Il.M32, None, (Asm.M_POS rust_start_fixup))) Il.Nil;
+        Il.emit e Il.CCALL (r eax) (r ecx) Il.Nil;
       end
     else
       Il.emit e Il.CCALL Il.Nil (Il.Pcrel rust_start_fixup) Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) ecx Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r ecx) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r ecx) Il.Nil Il.Nil;
+    Il.emit e Il.UMOV (r esp) (r ebp) Il.Nil;
+    restore_callee_saves e;
     Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
 ;;
 
