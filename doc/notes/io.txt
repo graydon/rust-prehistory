@@ -1,0 +1,69 @@
+
+run vec and blocked vec
+
+both trimmed to sum-of-both-sizes
+
+proc is in one or the other
+
+maybe circular doubly-linked lists rather than vecs? possible. more convenient for many things. but
+a distraction for now.
+
+Initially we had a non-buffered channel scheme. This was appealing (writer writes directly into slot
+address provided from reader) but subtly wrong:
+
+  - reader and writer become *too temporally coupled* in this model.
+  - in particular, assume (as is likely normal) that both reader and writer wish to do some i/o
+    but do *not* wish to block for "the other guy". IOW they always want to be able to check if
+    communication has become possible and if not, *do useful work* rather than block. if the
+    channel is unbuffered, they're sunk: one of them has to block. Either reader commits to
+    reading and then blocks until a writer shows up, or vice-versa. If neither commits to a
+    blocking i/o operation, the "ready to communicate" bit of information is never passed, and
+    they will never decide to communicate. neither can signal their intent-to-communicate passively.
+  - one can think of a channel has *really* being bidirectional: one direction sends 1-bit signals
+    of communication-readyness and the other direction sends data. the problem with an unbuffered
+    channel is that the sender/receiver roles are *not defined* for the comm-ready signal. it's not
+    clear from looking at an idle channel whether it's waiting for a reader or a writer (as it can
+    be waiting for *both*).
+  - if we insist that a channel always have a buffer of at least 1 entry, we avoid this:
+      - if the buffer 'has room', it's waiting for a writer.
+      - if the buffer 'has data', it's waiting for a reader.
+      - if the buffer 'has both', it's waiting for both.
+      - 'having room' is a soft condition, as we permit writers to *always* attempt insertion
+        by expanding their send buffer. possibly crashing OOM, but still.
+      - key point: it always has either room or data (or both). there is no state of having
+        neither room nor data. so both sides can always determine what the appropriate next
+        action for them is. if a writer polls and sees room, it can go do work and be sure that
+        it has somewhere to put it with zero delay. if a reader polls and sees data, it can
+        read it and do work with zero delay.
+  - as a sort of mental-model and implementation-simplicity issue, this is also important in that
+    buffering (of not-entirely-clear size) is the correct assumption for nearly every physical
+    communication system. synchronicity is always an illusion engineered at some cost on top of
+    buffered / asynchronous communication. arguably the real physical world of physics consists of
+    the same assumption: sender of a bit is temporally (and spatially) decoupled from receiver of a
+    bit. so it is better to provide an honest primitive and let people build higher level systems
+    when and if they want them.
+
+--- NOTE: BUSTED NON-BUFFERED PROTOCOL FOLLOWS ---
+
+writing into a chan:
+  - note that the chan *belongs to* the proc; it represents "everything this proc has buffered to send to a port"
+  - check port to see if blocked-reading-on is set:
+    - if so, perform rendezvous
+  - else
+    - set blocked-writing-on bit on chan, add the chan to the port's queued-writer set if not already so
+    - set proc state to blocked-writing (if blocking-write), remove from runnable queue
+
+reading from a *single* port:
+  - if port writer set is nonempty:
+    - randomly select writer from writers
+    - perform rendezvous
+  - else
+    - set blocked-reading-on bit on port
+    - set proc state to blocked-reading, remove from runnable queue
+
+rendezvous(reader, writer):
+  - switch writer to runnable, remove writer from writer-set
+  - return 'go' to writer; writer now has addr of dst in reader. reader still suspended.
+  - writer checks return code, conditionally branches do either do nothing or copy-to-reader and continue
+  - writer upcalls "write complete". important? maybe. depends if copy is an involved thing that might reschedule. for now yes.
+  - on write complete, reader unblocked.
