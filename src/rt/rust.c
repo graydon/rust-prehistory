@@ -5,6 +5,7 @@
 
 #include "rust.h"
 #include "rand.h"
+#include "uthash-1.6/src/uthash.h"
 #include "valgrind.h"
 
 /*
@@ -14,6 +15,9 @@
 
 struct ptr_vec;
 typedef struct ptr_vec ptr_vec_t;
+
+struct circ_buf;
+typedef struct circ_buf circ_buf_t;
 
 typedef enum {
   rust_type_any = 0,
@@ -137,11 +141,9 @@ typedef enum {
   upcall_code_free           = 5,
   upcall_code_new_port       = 6,
   upcall_code_del_port       = 7,
-  upcall_code_new_chan       = 8,
-  upcall_code_del_chan       = 9,
-  upcall_code_send           = 10,
-  upcall_code_recv           = 11,
-  upcall_code_sched          = 12
+  upcall_code_send           = 8,
+  upcall_code_recv           = 9,
+  upcall_code_sched          = 10
 } upcall_t;
 
 #define PROC_MAX_UPCALL_ARGS   8
@@ -149,6 +151,14 @@ typedef enum {
 struct ptr_vec {
   size_t alloc;
   size_t init;
+  void **data;
+};
+
+struct circ_buf {
+  size_t alloc;
+  size_t unit_sz;
+  size_t next;
+  size_t unread;
   void **data;
 };
 
@@ -174,6 +184,7 @@ struct rust_proc {
   uintptr_t state;
   size_t idx;
   size_t refcnt;
+  rust_chan_t *chans;
 
   /* Parameter space for upcalls. */
   /* FIXME: could probably get away with packing upcall code and state
@@ -195,15 +206,27 @@ struct rust_port {
   size_t live_refcnt;
   size_t weak_refcnt;
   rust_proc_t *proc;
+  size_t unit_sz;
   ptr_vec_t writers;
 };
 
+/*
+ * The value held in a rust 'chan' slot is actually a rust_port_t*,
+ * with liveness of the chan indicated by weak_refcnt.
+ *
+ * Inside each proc, there is a uthash hashtable that maps ports to
+ * rust_chan_t* values, below. The table enforces uniqueness of the
+ * channel: one proc has exactly one outgoing channel (buffer) for
+ * each port.
+ */
+
 struct rust_chan {
+  UT_hash_handle hh;
   rust_port_t *port;
-  rust_proc_t *proc;
-  uintptr_t queued;
-  size_t idx;
-  ptr_vec_t buf;
+  uintptr_t queued;     /* Whether we're in a port->writers vec. */
+  size_t idx;           /* Index in the port->writers vec. */
+  rust_proc_t *blocked; /* Proc to wake on flush, NULL if nonblocking. */
+  circ_buf_t buf;
 };
 
 
@@ -369,6 +392,97 @@ ptr_vec_del(ptr_vec_t *v, size_t i)
 }
 */
 
+
+/* Utility type: circular buffer. */
+
+#define INIT_CIRC_BUF_UNITS 8
+#define MAX_CIRC_BUF_SIZE (1 << 24)
+
+static void
+init_circ_buf(circ_buf_t *c, size_t unit_sz)
+{
+  assert(c);
+  c->unit_sz = unit_sz;
+  c->alloc = INIT_CIRC_BUF_UNITS * unit_sz;
+  c->next = 0;
+  c->unread = 0;
+  c->data = xcalloc(c->alloc);
+  assert(c->data);
+}
+
+static void
+fini_circ_buf(circ_buf_t *c)
+{
+  assert(c);
+  assert(c->data);
+  assert(c->unread == 0);
+  free(c->data);
+}
+
+static void
+circ_buf_transfer(circ_buf_t *c, void *dst)
+{
+  size_t i;
+  uint8_t *d = dst;
+  for (i = 0; i < c->unread; i += c->unit_sz)
+    memcpy(&d[i], c->data[c->next + i % c->alloc], c->unit_sz);
+}
+
+static void
+circ_buf_push(circ_buf_t *c, void *src)
+{
+  size_t i;
+  void *tmp;
+
+  assert(c);
+  assert(src);
+  assert(c->unread <= c->alloc);
+  /* Grow if necessary. */
+  if (c->unread == c->alloc) {
+    assert(c->alloc <= MAX_CIRC_BUF_SIZE);
+    tmp = xalloc(c->alloc << 1);
+    circ_buf_transfer(c, tmp);
+    c->alloc <<= 1;
+    free(c->data);
+    c->data = tmp;
+  }
+  assert(c->unread < c->alloc);
+  i = (c->next + c->unread) % c->alloc;
+  memcpy(&c->data[i], src, c->unit_sz);
+  c->unread += c->unit_sz;
+}
+
+static void
+circ_buf_shift(circ_buf_t *c, void *dst)
+{
+  size_t i;
+  void *tmp;
+
+  assert(c);
+  assert(dst);
+  assert(c->unit_sz > 0);
+  assert(c->unread >= c->unit_sz);
+  assert(c->unread <= c->alloc);
+  assert(c->data);
+  i = (c->next + c->unread) % c->alloc;
+  memcpy(dst, &c->data[i], c->unit_sz);
+  c->unread -= c->unit_sz;
+  c->next += c->unit_sz;
+  assert(c->next <= c->alloc);
+  if (c->next == c->alloc)
+    c->next = 0;
+  /* Shrink if necessary. */
+  if (c->alloc >= INIT_CIRC_BUF_UNITS * c->unit_sz &&
+      c->unread <= c->alloc >> 2) {
+    tmp = xalloc(c->alloc >> 1);
+    circ_buf_transfer(c, tmp);
+    c->alloc >>= 1;
+    free(c->data);
+    c->data = tmp;
+  }
+}
+
+
 /* Stacks */
 
 /* Get around to using linked-lists of size-doubling stacks, eventually. */
@@ -476,6 +590,12 @@ del_proc(rust_proc_t *proc)
   logptr("del proc", (uintptr_t)proc);
   assert(proc->refcnt == 0);
   del_stk(proc->stk);
+  while (proc->chans) {
+    rust_chan_t *c = proc->chans;
+    HASH_DEL(proc->chans,c);
+    fini_circ_buf(&c->buf);
+    free(c);
+  }
   free(proc);
 }
 
@@ -643,78 +763,82 @@ upcall_del_port(rust_port_t *port)
   free(port);
 }
 
-static rust_chan_t*
-upcall_new_chan(rust_proc_t *proc, rust_port_t *port)
-{
-  assert(port);
-  rust_chan_t *chan = xcalloc(sizeof(rust_chan_t));
-  logptr("new chan", (uintptr_t)chan);
-  chan->proc = proc;
-  chan->port = port;
-  init_ptr_vec(&chan->buf);
-  return chan;
-}
-
-static void
-upcall_del_chan(rust_chan_t *chan)
-{
-  logptr("del chan", (uintptr_t)chan);
-  assert(chan);
-  fini_ptr_vec(&chan->buf);
-  free(chan);
-}
+/*
+ * Buffering protocol:
+ *
+ *   - Reader attempts to read:
+ *     - Set reader to blocked-reading state.
+ *     - If buf with data exists:
+ *       - Attempt transmission.
+ *
+ *  - Writer attempts to write:
+ *     - Set writer to blocked-writing state.
+ *     - Copy data into chan.
+ *     - Attempt transmission.
+ *
+ *  - Transmission:
+ *       - Copy data from buf to reader
+ *       - Decr buf
+ *       - Set reader to running
+ *       - If buf now empty and blocked writer:
+ *         - Set blocked writer to running
+ *
+ */
 
 static int
-attempt_rendezvous(rust_proc_t *src,
-                   rust_proc_t *dst)
+attempt_transmission(rust_chan_t *src,
+                     rust_proc_t *dst)
 {
   assert(src);
   assert(dst);
-  if (src->state == proc_state_blocked_writing &&
-      dst->state == proc_state_blocked_reading) {
-    /* Note: totally unable to handle structured vals at the moment. */
-    uintptr_t sval = src->upcall_args[1];
-    uintptr_t *dptr = (uintptr_t*)dst->upcall_args[0];
-    printf("rt: rendezvous successful, copying val %" PRIxPTR " to dst %" PRIxPTR "\n", 
-           sval, (uintptr_t)dptr);
-    *dptr = sval;
-    proc_state_transition(src,
-                          proc_state_blocked_writing, 
+  assert(dst->state == proc_state_blocked_reading);
+  if (src->blocked)
+    assert(src->blocked->state == proc_state_blocked_writing);
+  if (src->buf.unread == 0)
+    return 0;
+  uintptr_t *dptr = (uintptr_t*)dst->upcall_args[0];
+  circ_buf_shift(&src->buf, dptr);
+  if (src->blocked) {
+    proc_state_transition(src->blocked,
+                          proc_state_blocked_writing,
                           proc_state_running);
-    proc_state_transition(dst,
-                          proc_state_blocked_reading, 
-                          proc_state_running);
-    return 1;
-  } 
-  printf("rt: rendezvous failed: src state %d vs. dst state %d\n", 
-         src->state, dst->state);
-  return 0;
+    src->blocked = NULL;
+  }
+  return 1;
 }
 
 static void
-upcall_send(rust_proc_t *src, rust_chan_t *chan)
+upcall_send(rust_proc_t *src, rust_port_t *port, void *sptr)
 {
-  logptr("send to chan", (uintptr_t)chan);
+  rust_chan_t *chan = NULL;
+  assert(src);
+  assert(port);
+  assert(sptr);
+  HASH_FIND(hh,src->chans,port,sizeof(rust_port_t*),chan);
+  if (!chan) {
+    chan = xcalloc(sizeof(rust_chan_t));
+    chan->port = port;
+    init_circ_buf(&chan->buf, port->unit_sz);
+    HASH_ADD(hh,src->chans,port,sizeof(rust_port_t*),chan);
+  }
   assert(chan);
+  assert(chan->blocked == src || !chan->blocked);
   assert(chan->port);
-  /*
-   * FIXME: this is an outrageous kludge. 
-   *
-   * channels *really* have to be per-process, via a hashtable or something.
-   * possibly a channel should be nothing more than a weakref on a port and 
-   * the proc is what gets queued. That's the simplest interpretation.
-   */
-  chan->proc = src;
-  if (chan->port->proc) {
-    rust_port_t *port = chan->port;
+  assert(chan->port == port);
+
+  logptr("send to chan", (uintptr_t)chan);
+
+  if (port->proc) {
+    chan->blocked = src;
+    circ_buf_push(&chan->buf, sptr);
     proc_state_transition(src,
-                          proc_state_calling_c, 
+                          proc_state_calling_c,
                           proc_state_blocked_writing);
-    if (!(attempt_rendezvous(src, port->proc) || 
-          chan->queued)) {
+    attempt_transmission(chan, port->proc);
+    if (chan->buf.unread && !chan->queued) {
+      chan->queued = 1;
       chan->idx = port->writers.init;
       ptr_vec_push(&port->writers, chan);
-      chan->queued = 1;
     }
   } else {
     printf("rt: *** DEAD SEND *** (possibly throw?)\n");
@@ -730,7 +854,7 @@ upcall_recv(rust_proc_t *dst, rust_port_t *port)
   assert(dst);
   assert(port->proc == dst);
   proc_state_transition(dst,
-                        proc_state_calling_c, 
+                        proc_state_calling_c,
                         proc_state_blocked_reading);
   if (port->writers.init > 0) {
     assert(dst->rt);
@@ -738,8 +862,7 @@ upcall_recv(rust_proc_t *dst, rust_port_t *port)
     i %= port->writers.init;
     rust_chan_t *schan = (rust_chan_t*)port->writers.data[i];
     assert(schan->idx == i);
-    rust_proc_t *src = schan->proc;
-    if (attempt_rendezvous(src, dst)) {
+    if (attempt_transmission(schan, dst)) {
       chan_vec_swapdel(&port->writers, schan);
       ptr_vec_trim(&port->writers, port->writers.init);
       schan->queued = 0;
@@ -808,14 +931,8 @@ handle_upcall(rust_proc_t *proc)
   case upcall_code_del_port:
     upcall_del_port((rust_port_t*)args[0]);
     break;
-  case upcall_code_new_chan:
-    *((rust_chan_t**)args[0]) = upcall_new_chan(proc, (rust_port_t*)args[1]);
-    break;
-  case upcall_code_del_chan:
-    upcall_del_chan((rust_chan_t*)args[1]);
-    break;
   case upcall_code_send:
-    upcall_send(proc, (rust_chan_t*)args[0]);
+    upcall_send(proc, (rust_port_t*)args[0], (void*)args[1]);
     break;
   case upcall_code_recv:
     upcall_recv(proc, (rust_port_t*)args[1]);

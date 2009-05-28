@@ -83,8 +83,6 @@ type upcall =
   | UPCALL_free
   | UPCALL_new_port
   | UPCALL_del_port
-  | UPCALL_new_chan
-  | UPCALL_del_chan
   | UPCALL_send
   | UPCALL_recv
   | UPCALL_sched
@@ -108,11 +106,9 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_free -> 5L
   | UPCALL_new_port -> 6L
   | UPCALL_del_port -> 7L
-  | UPCALL_new_chan -> 8L
-  | UPCALL_del_chan -> 9L
-  | UPCALL_send -> 10L
-  | UPCALL_recv -> 11L
-  | UPCALL_sched -> 12L
+  | UPCALL_send -> 8L
+  | UPCALL_recv -> 9L
+  | UPCALL_sched -> 10L
 ;;
 
 (* Word offsets for structure fields in rust.h. *)
@@ -127,7 +123,8 @@ let proc_field_sp = proc_field_prog + 1;;
 let proc_field_state = proc_field_sp + 1;;
 let proc_field_idx = proc_field_state + 1;;
 let proc_field_refcnt = proc_field_idx + 1;;
-let proc_field_upcall_code = proc_field_refcnt + 1;;
+let proc_field_chans = proc_field_refcnt + 1;;
+let proc_field_upcall_code = proc_field_chans + 1;;
 let proc_field_upcall_args = proc_field_upcall_code + 1;;
 
 let max_upcall_args = 8;;

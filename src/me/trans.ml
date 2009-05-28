@@ -500,19 +500,6 @@ let trans_visitor
   and trans_del_port (port:Ast.lval) : unit =
       trans_upcall Abi.UPCALL_del_port [| (trans_atom (Ast.ATOM_lval port)) |]
 
-  and trans_new_chan (dst:Ast.lval) (port:Ast.lval option) : unit =
-    let portop =
-      match port with
-          None -> Il.Imm (Asm.IMM 0L)
-        | Some p -> trans_atom (Ast.ATOM_lval p)
-    in
-    let (dstop, _) = trans_lval dst INTENT_write in
-    trans_upcall Abi.UPCALL_new_chan [| (alias dstop); portop |]
-
-  and trans_del_chan (chan:Ast.lval) : unit =
-      trans_upcall Abi.UPCALL_del_chan [| (trans_atom (Ast.ATOM_lval chan)) |]
-
-
   and drop_rec_entries
       (reg:Il.reg option)
       (off:Asm.expr64)
@@ -982,8 +969,7 @@ let trans_visitor
       | Ast.STMT_init_port dst ->
           trans_new_port dst
 
-      | Ast.STMT_init_chan (dst, port) ->
-          trans_new_chan dst port
+      | Ast.STMT_init_chan (dst, port) -> ()
 
       | Ast.STMT_block block ->
           trans_block block
