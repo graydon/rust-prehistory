@@ -688,6 +688,11 @@ and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
           (* | _ -> word_layout abi off *)
 ;;
 
+let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
+  let slot = interior_slot t in
+    (layout_slot abi 0L slot).layout_size
+;;
+
 let layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
   let layouts = Array.map (fun (_,slot) -> layout_slot abi 0L slot) atab in
     begin

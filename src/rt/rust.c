@@ -159,7 +159,7 @@ struct circ_buf {
   size_t unit_sz;
   size_t next;
   size_t unread;
-  void **data;
+  uint8_t *data;
 };
 
 struct rust_rt {
@@ -402,11 +402,13 @@ static void
 init_circ_buf(circ_buf_t *c, size_t unit_sz)
 {
   assert(c);
+  assert(unit_sz);
   c->unit_sz = unit_sz;
   c->alloc = INIT_CIRC_BUF_UNITS * unit_sz;
   c->next = 0;
   c->unread = 0;
   c->data = xcalloc(c->alloc);
+  /* printf("rt: circ buf initialized, alloc=%d, unread=%d\n", c->alloc, c->unread); */
   assert(c->data);
 }
 
@@ -425,7 +427,7 @@ circ_buf_transfer(circ_buf_t *c, void *dst)
   size_t i;
   uint8_t *d = dst;
   for (i = 0; i < c->unread; i += c->unit_sz)
-    memcpy(&d[i], c->data[c->next + i % c->alloc], c->unit_sz);
+    memcpy(&d[i], &c->data[c->next + i % c->alloc], c->unit_sz);
 }
 
 static void
@@ -446,9 +448,14 @@ circ_buf_push(circ_buf_t *c, void *src)
     free(c->data);
     c->data = tmp;
   }
+  /* printf("rt: pushing at: unread %d, alloc %d\n", c->unread, c->alloc); */
   assert(c->unread < c->alloc);
   i = (c->next + c->unread) % c->alloc;
+  /*   logptr("dst addr", (uintptr_t)&c->data[i]); */
+  /*   logptr("src addr", (uintptr_t)src); */
+  /*   logptr("sz", (uintptr_t)c->unit_sz); */
   memcpy(&c->data[i], src, c->unit_sz);
+  /* printf("rt: pushed data at index %d = '%d'\n",  i, (uintptr_t)(c->data[i])); */
   c->unread += c->unit_sz;
 }
 
@@ -464,8 +471,9 @@ circ_buf_shift(circ_buf_t *c, void *dst)
   assert(c->unread >= c->unit_sz);
   assert(c->unread <= c->alloc);
   assert(c->data);
-  i = (c->next + c->unread) % c->alloc;
+  i = c->next;
   memcpy(dst, &c->data[i], c->unit_sz);
+  /* printf("rt: shifted data from index %d = '%d'\n", i, ((uintptr_t*)dst)[0]); */
   c->unread -= c->unit_sz;
   c->next += c->unit_sz;
   assert(c->next <= c->alloc);
@@ -744,10 +752,11 @@ upcall_log_str(char *c)
 }
 
 static rust_port_t*
-upcall_new_port(rust_proc_t *proc)
+upcall_new_port(rust_proc_t *proc, size_t unit_sz)
 {
   rust_port_t *port = xcalloc(sizeof(rust_port_t));
   port->proc = proc;
+  port->unit_sz = unit_sz;
   init_ptr_vec(&port->writers);
   logptr("new port", (uintptr_t)port);
   return port;
@@ -791,11 +800,16 @@ attempt_transmission(rust_chan_t *src,
 {
   assert(src);
   assert(dst);
-  assert(dst->state == proc_state_blocked_reading);
+  if (dst->state != proc_state_blocked_reading) {
+    printf("rt: dst in non-reading state, transmission incomplete\n");
+    return 0;
+  }
   if (src->blocked)
     assert(src->blocked->state == proc_state_blocked_writing);
-  if (src->buf.unread == 0)
+  if (src->buf.unread == 0) {
+    printf("rt: buffer empty, transmission incomplete\n");
     return 0;
+  }
   uintptr_t *dptr = (uintptr_t*)dst->upcall_args[0];
   circ_buf_shift(&src->buf, dptr);
   if (src->blocked) {
@@ -804,6 +818,10 @@ attempt_transmission(rust_chan_t *src,
                           proc_state_running);
     src->blocked = NULL;
   }
+  proc_state_transition(dst,
+                        proc_state_blocked_reading,
+                        proc_state_running);
+  printf("rt: transmission complete\n");
   return 1;
 }
 
@@ -811,11 +829,20 @@ static void
 upcall_send(rust_proc_t *src, rust_port_t *port, void *sptr)
 {
   rust_chan_t *chan = NULL;
+
+  if (!port) {
+    printf("rt: send to NULL port (possibly throw?)");
+    return;
+  }
+
+  logptr("send to port", (uintptr_t)port);
+
   assert(src);
   assert(port);
   assert(sptr);
   HASH_FIND(hh,src->chans,port,sizeof(rust_port_t*),chan);
   if (!chan) {
+    /* printf("rt: building new chan to buffer send\n"); */
     chan = xcalloc(sizeof(rust_chan_t));
     chan->port = port;
     init_circ_buf(&chan->buf, port->unit_sz);
@@ -826,7 +853,7 @@ upcall_send(rust_proc_t *src, rust_port_t *port, void *sptr)
   assert(chan->port);
   assert(chan->port == port);
 
-  logptr("send to chan", (uintptr_t)chan);
+  /* logptr("sending via chan", (uintptr_t)chan); */
 
   if (port->proc) {
     chan->blocked = src;
@@ -841,7 +868,7 @@ upcall_send(rust_proc_t *src, rust_port_t *port, void *sptr)
       ptr_vec_push(&port->writers, chan);
     }
   } else {
-    printf("rt: *** DEAD SEND *** (possibly throw?)\n");
+    printf("rt: port has no proc (possibly throw?)\n");
   }
 }
 
@@ -867,6 +894,8 @@ upcall_recv(rust_proc_t *dst, rust_port_t *port)
       ptr_vec_trim(&port->writers, port->writers.init);
       schan->queued = 0;
     }
+  } else {
+    logptr("no writers sending to port", (uintptr_t)port);
   }
 }
 
@@ -926,7 +955,7 @@ handle_upcall(rust_proc_t *proc)
     upcall_free(proc, (void*)args[0]);
     break;
   case upcall_code_new_port:
-    *((rust_port_t**)args[0]) = upcall_new_port(proc);
+    *((rust_port_t**)args[0]) = upcall_new_port(proc, (size_t)args[1]);
     break;
   case upcall_code_del_port:
     upcall_del_port((rust_port_t*)args[0]);

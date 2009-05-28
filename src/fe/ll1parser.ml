@@ -1485,7 +1485,15 @@ and parse_stmts ps =
                     let (stmts, rhs) = ctxt "stmt: send rhs" parse_expr ps in
                     let _ = expect ps SEMI in
                     let bpos = lexpos ps in
-                      spans stmts apos bpos (Ast.STMT_send (lval, rhs))
+                    let (src, copy) = match rhs with
+                        Ast.ATOM_lval lv -> (lv, [| |])
+                      | _ ->
+                          let (nonce, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
+                          let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_atom rhs)) in
+                            ((clone_lval ps tmp), [| tempdecl; copy |])
+                    in
+                    let send = span ps apos bpos (Ast.STMT_send (lval, src)) in
+                      Array.concat [ stmts; copy; [| send |] ]
 
                 | _ -> raise (unexpected ps)
             end

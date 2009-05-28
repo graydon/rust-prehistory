@@ -440,9 +440,9 @@ and walk_stmt
       | Ast.STMT_decl (Ast.DECL_slot (_, slot)) ->
           walk_slot_identified v slot
 
-      | Ast.STMT_send (lv,at) ->
-          walk_lval v lv;
-          walk_atom v at
+      | Ast.STMT_send (dst,src) ->
+          walk_lval v dst;
+          walk_lval v src
 
       | Ast.STMT_recv (dst,src) ->
           walk_lval v dst;

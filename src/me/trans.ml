@@ -486,16 +486,22 @@ let trans_visitor
   and exterior_refcount_cell operand =
     word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM 0L)
 
-  and trans_send (chan:Ast.lval) (src:Ast.atom) : unit =
-    trans_upcall Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan)); (trans_atom src) |]
+  and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
+    let (srcop, _) = trans_lval src INTENT_read in
+      trans_upcall Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan)); (alias srcop) |]
 
   and trans_recv (dst:Ast.lval) (chan:Ast.lval) : unit =
     let (dstop, _) = trans_lval dst INTENT_write in
       trans_upcall Abi.UPCALL_recv [| (alias dstop); (trans_atom (Ast.ATOM_lval chan)) |]
 
   and trans_new_port (dst:Ast.lval) : unit =
-    let (dstop, _) = trans_lval dst INTENT_write in
-    trans_upcall Abi.UPCALL_new_port [| (alias dstop) |]
+    let (dstop, dst_slot) = trans_lval dst INTENT_write in
+    let unit_ty = match slot_ty dst_slot with
+        Ast.TY_port t -> t
+      | _ -> err None "init dst of port-init has non-port type"
+    in
+    let unit_sz = ty_sz abi unit_ty in
+      trans_upcall Abi.UPCALL_new_port [| (alias dstop); Il.Imm (Asm.IMM unit_sz) |]
 
   and trans_del_port (port:Ast.lval) : unit =
       trans_upcall Abi.UPCALL_del_port [| (trans_atom (Ast.ATOM_lval port)) |]
@@ -969,7 +975,21 @@ let trans_visitor
       | Ast.STMT_init_port dst ->
           trans_new_port dst
 
-      | Ast.STMT_init_chan (dst, port) -> ()
+      | Ast.STMT_init_chan (dst, port) ->
+          let (dst_operand, dst_slot) =
+            trans_lval dst INTENT_init
+          in
+          let src_operand =
+            match port with
+                None -> imm_false
+              | Some p ->
+                  let (oper, _) = trans_lval p INTENT_read in
+                    oper
+          in
+          let src_slot = interior_slot (slot_ty dst_slot) in
+            trans_copy_slot true
+              dst_operand dst_slot
+              src_operand src_slot
 
       | Ast.STMT_block block ->
           trans_block block

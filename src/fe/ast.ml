@@ -226,7 +226,7 @@ and stmt' =
   | STMT_block of block
   | STMT_copy of (lval * expr)
   | STMT_call of (lval * lval * (atom array))
-  | STMT_send of (lval * atom)
+  | STMT_send of (lval * lval)
   | STMT_recv of (lval * lval)
   | STMT_decl of stmt_decl
   | STMT_use of (ty * ident * lval)
@@ -903,7 +903,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
   | STMT_prove of (constrs)
   | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
-  | STMT_send of (lval * atom)
+  | STMT_send of (lval * lval)
   | STMT_recv of (lval * lval)
   | STMT_use of (ty * ident * lval)
 *)
