@@ -275,7 +275,7 @@ xrealloc(void *p, size_t sz)
 static void
 init_ptr_vec(ptr_vec_t *v)
 {
-  v->alloc = INIT_PTR_VEC_SZ;
+  v->alloc = INIT_PTR_VEC_SZ * sizeof(void*);
   v->init = 0;
   v->data = xalloc(v->alloc);
   assert(v->data);
@@ -307,6 +307,7 @@ ptr_vec_push(ptr_vec_t *v, void *p)
     v->alloc *= 2;
     v->data = xrealloc(v->data, v->alloc);
   }
+  assert(v->init < v->alloc);
   v->data[v->init++] = p;
 }
 
