@@ -8,6 +8,28 @@
 #include "uthash-1.6/src/uthash.h"
 #include "valgrind.h"
 
+#ifdef __WIN32__
+#include <windows.h>
+#include <wincrypt.h>
+
+static void
+win32_require(LPTSTR fn, BOOL ok) {
+  if (!ok) {
+    LPTSTR buf;
+    DWORD err = GetLastError();
+    FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                  FORMAT_MESSAGE_FROM_SYSTEM |
+                  FORMAT_MESSAGE_IGNORE_INSERTS,
+                  NULL, err,
+                  MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                  (LPTSTR) &buf, 0, NULL );
+    printf("rt: %s failed with error %ld: %s\n", fn, err, buf);
+    LocalFree((HLOCAL)buf);
+    exit(1);
+  }
+}
+#endif
+
 /*
   static void really_free(void*x) { free(x); }
   #define free(x) do { printf("** FREE(%" PRIxPTR ")\n", (uintptr_t)x); really_free(x); } while(0)
@@ -716,7 +738,29 @@ new_rt()
   logptr("new rt", (uintptr_t)rt);
   init_ptr_vec(&rt->running_procs);
   init_ptr_vec(&rt->blocked_procs);
-  randinit(&rt->rctx);
+
+  rt->rctx.randa = 0;
+  rt->rctx.randb = 0;
+
+#ifdef __WIN32__
+  {
+    HCRYPTPROV hProv;
+    win32_require
+      ("CryptAcquireContext",
+       CryptAcquireContext(&hProv, NULL, NULL, PROV_DSS,
+                           CRYPT_VERIFYCONTEXT|CRYPT_SILENT));
+    win32_require
+      ("CryptGenRandom",
+       CryptGenRandom(hProv, sizeof(rt->rctx.randrsl),
+                      (BYTE*)(&rt->rctx.randrsl)));
+    win32_require
+      ("CryptReleaseContext",
+       CryptReleaseContext(hProv, 0));
+  }
+#else
+#endif
+
+  randinit(&rt->rctx, 1);
   return rt;
 }
 
@@ -805,8 +849,9 @@ attempt_transmission(rust_chan_t *src,
     printf("rt: dst in non-reading state, transmission incomplete\n");
     return 0;
   }
-  if (src->blocked)
+  if (src->blocked) {
     assert(src->blocked->state == proc_state_blocked_writing);
+  }
   if (src->buf.unread == 0) {
     printf("rt: buffer empty, transmission incomplete\n");
     return 0;
