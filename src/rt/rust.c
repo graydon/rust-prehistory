@@ -158,14 +158,15 @@ typedef enum {
   upcall_code_log_uint32     = 0,
   upcall_code_log_str        = 1,
   upcall_code_spawn          = 2,
-  upcall_code_check_expr     = 3,
-  upcall_code_malloc         = 4,
-  upcall_code_free           = 5,
-  upcall_code_new_port       = 6,
-  upcall_code_del_port       = 7,
-  upcall_code_send           = 8,
-  upcall_code_recv           = 9,
-  upcall_code_sched          = 10
+  upcall_code_kill           = 3,
+  upcall_code_check_expr     = 4,
+  upcall_code_malloc         = 5,
+  upcall_code_free           = 6,
+  upcall_code_new_port       = 7,
+  upcall_code_del_port       = 8,
+  upcall_code_send           = 9,
+  upcall_code_recv           = 10,
+  upcall_code_sched          = 11
 } upcall_t;
 
 #define PROC_MAX_UPCALL_ARGS   8
@@ -619,6 +620,7 @@ static void
 del_proc(rust_proc_t *proc)
 {
   logptr("del proc", (uintptr_t)proc);
+  printf("rt: proc refcnt: %d\n", proc->refcnt);
   assert(proc->refcnt == 0);
   del_stk(proc->stk);
   while (proc->chans) {
@@ -634,7 +636,9 @@ static rust_proc_t*
 spawn_proc(rust_rt_t *rt,
                 rust_prog_t *prog)
 {
-  return new_proc(rt, prog);
+  rust_proc_t *proc = new_proc(rt, prog);
+  proc->refcnt = 1;
+  return proc;
 }
 
 static ptr_vec_t*
@@ -710,7 +714,7 @@ exit_proc(rust_proc_t *proc)
   ptr_vec_t *v = get_proc_vec(proc);
   assert(v);
   proc_vec_swapdel(v, proc);
-  del_proc(proc);
+  //del_proc(proc);
   ptr_vec_trim(v, n_live_procs(rt));
   printf("rt: proc %" PRIxPTR " exited (and deleted)\n", (uintptr_t)proc);
 }
@@ -976,8 +980,10 @@ handle_upcall(rust_proc_t *proc)
 {
   uintptr_t *args = &proc->upcall_args[0];
 
+  /*
   printf("rt: proc %" PRIxPTR " calling fn #%d\n",
          (uintptr_t)proc, proc->upcall_code);
+  */
   switch ((upcall_t)proc->upcall_code) {
   case upcall_code_log_uint32:
     upcall_log_uint32_t(args[0]);
@@ -987,6 +993,9 @@ handle_upcall(rust_proc_t *proc)
     break;
   case upcall_code_spawn:
     *((rust_proc_t**)args[0]) = spawn_proc(proc->rt, (rust_prog_t*)args[1]);
+    break;
+  case upcall_code_kill:
+    printf("rt: kill proc with refcnt %d\n", ((rust_proc_t*)args[0])->refcnt);
     break;
   case upcall_code_sched:
     add_proc_to_state_vec((rust_proc_t*)args[0]);

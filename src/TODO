@@ -1,5 +1,6 @@
 
 progress:
+ - implement refcounts on procs, chans, ports
  - extend typestate system to handle operation pre/post conditions
    extracted from implicit-in-type constrs
  - floating point values / registers / instructions
@@ -8,11 +9,9 @@ progress:
  - make proc stacks into chunk lists, check overflow / extend on frame entry
  - put timer-counter in proc
  - translate loop-jumps & calls to do a test/yield (regs already flushed)
- - make proc pool growable
  - real type checker, or extend resolve/unify? consult textbooks
  - vectors
  - strings
- - channels and ports
  - emit typecode structure into crate (dwarf?)
  - typecode-driven generic copy fn
  - typecode-driven generic compare fn
@@ -48,9 +47,11 @@ code cleanup:
    batch the "I do not"s?
 
 done:
+ - channels and ports
  - basic version of type-state algorithm
  - movement of superword values
  - records
  - tuples
  - non-interior slot modes
  - use a datatype for kernel function codes, not int numbers
+ - make proc pool growable

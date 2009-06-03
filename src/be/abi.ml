@@ -78,6 +78,7 @@ type upcall =
     UPCALL_log_int
   | UPCALL_log_str
   | UPCALL_spawn
+  | UPCALL_kill
   | UPCALL_check_expr
   | UPCALL_malloc
   | UPCALL_free
@@ -101,14 +102,15 @@ let upcall_to_code (u:upcall) : int64 =
     UPCALL_log_int -> 0L
   | UPCALL_log_str -> 1L
   | UPCALL_spawn -> 2L
-  | UPCALL_check_expr -> 3L
-  | UPCALL_malloc -> 4L
-  | UPCALL_free -> 5L
-  | UPCALL_new_port -> 6L
-  | UPCALL_del_port -> 7L
-  | UPCALL_send -> 8L
-  | UPCALL_recv -> 9L
-  | UPCALL_sched -> 10L
+  | UPCALL_kill -> 3L
+  | UPCALL_check_expr -> 4L
+  | UPCALL_malloc -> 5L
+  | UPCALL_free -> 6L
+  | UPCALL_new_port -> 7L
+  | UPCALL_del_port -> 8L
+  | UPCALL_send -> 9L
+  | UPCALL_recv -> 10L
+  | UPCALL_sched -> 11L
 ;;
 
 (* Word offsets for structure fields in rust.h. *)
@@ -133,6 +135,12 @@ let proc_field_mem_budget = proc_field_upcall_args + max_upcall_args + 1;;
 let proc_field_curr_mem = proc_field_mem_budget + 1;;
 let proc_field_tick_budget = proc_field_curr_mem + 1;;
 let proc_field_curr_ticks = proc_field_tick_budget + 1;;
+
+let exterior_slot_field_refcnt = 0;;
+let exterior_slot_field_body = 1;;
+let port_field_refcnt = 0;;
+let chan_field_refcnt = 1;;
+
 
 (* The "end of the proc" where proc-slots get allocated. *)
 let proc_field_data = proc_field_curr_ticks + 1;;

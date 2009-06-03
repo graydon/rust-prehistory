@@ -31,6 +31,7 @@ let trans_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
+
   let path = Stack.create () in
   let annotations = Hashtbl.create 0 in
   let block_layouts = Stack.create () in
@@ -39,6 +40,7 @@ let trans_visitor
   let (abi:Abi.abi) = cx.ctxt_abi in
   let (word_mem:Il.mem) = abi.Abi.abi_word_mem in
   let (word_sz:int64) = abi.Abi.abi_word_sz in
+  let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
   let emitters = Stack.create () in
   let push_new_emitter _ =
@@ -247,9 +249,7 @@ let trans_visitor
         abi.Abi.abi_pp_operand
     in
     let layout = Hashtbl.find cx.ctxt_slot_layouts slot_id in
-    let disp = (Int64.add
-                  layout.layout_offset
-                  (Int64.mul word_sz (Int64.of_int Abi.proc_field_data)))
+    let disp = (Int64.add layout.layout_offset (word_n Abi.proc_field_data))
     in
       word_at_reg_off (Some (force_to_reg pp)) (Asm.IMM disp)
   in
@@ -425,7 +425,8 @@ let trans_visitor
       Hashtbl.iter
         begin
           fun slotkey slotid ->
-            log cx "slot free: %a" Ast.sprintf_slot_key slotkey;
+            Hashtbl.replace annotations
+              (emitter()).Il.emit_pc ("slot free: " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
             let slot = Hashtbl.find cx.ctxt_all_slots slotid in
             let operand = operand_of_block_slot slotid in
               trans_drop_slot operand slot
@@ -463,9 +464,7 @@ let trans_visitor
       let in_slots = tsig.Ast.sig_input_slots in
       (* FIXME: this is a ghastly mess. *)
       let arg_layouts = layout_init_call_tup abi tsig in
-      let init_operand =
-        deref_off prog_operand
-          (Int64.mul word_sz (Int64.of_int Abi.prog_field_init))
+      let init_operand = deref_off prog_operand (word_n Abi.prog_field_init)
       in
         emit Il.CMP Il.Nil init_operand imm_false;
         let fwd_jmp = mark () in
@@ -483,8 +482,8 @@ let trans_visitor
   and trans_free (src:Il.operand) : unit =
     trans_upcall Abi.UPCALL_free [| src |]
 
-  and exterior_refcount_cell operand =
-    word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM 0L)
+  and refcount_cell (n:int) (operand:Il.operand) : Il.operand =
+    word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM (word_n n))
 
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
     let (srcop, _) = trans_lval src INTENT_read in
@@ -503,8 +502,31 @@ let trans_visitor
     let unit_sz = ty_sz abi unit_ty in
       trans_upcall Abi.UPCALL_new_port [| (alias dstop); Il.Imm (Asm.IMM unit_sz) |]
 
-  and trans_del_port (port:Ast.lval) : unit =
-      trans_upcall Abi.UPCALL_del_port [| (trans_atom (Ast.ATOM_lval port)) |]
+  and trans_del_port (port:Il.operand) : unit =
+      trans_upcall Abi.UPCALL_del_port [| port |]
+
+  and trans_kill (proc:Il.operand) : unit =
+    (* FIXME: this needs to run the fini block and all that. *)
+    trans_upcall Abi.UPCALL_kill [| proc |]
+
+  and exterior_refcount_cell (operand:Il.operand) : Il.operand =
+    refcount_cell Abi.exterior_slot_field_refcnt operand
+
+  and exterior_body_off = word_n Abi.exterior_slot_field_body
+
+  and exterior_allocation_size (slot:Ast.slot) : int64 =
+    let layout = layout_slot abi 0L slot in
+      (Int64.add layout.layout_size exterior_body_off)
+
+  and slot_refcount_cell (operand:Il.operand) (slot:Ast.slot) : (Il.operand option) =
+    match slot_ty slot with
+        Ast.TY_port _ -> Some (refcount_cell Abi.port_field_refcnt operand)
+      | Ast.TY_chan _ -> Some (refcount_cell Abi.chan_field_refcnt operand)
+      | Ast.TY_proc -> Some (refcount_cell Abi.proc_field_refcnt operand)
+      | _ ->
+            if slot.Ast.slot_mode = Ast.MODE_exterior
+            then Some (exterior_refcount_cell operand)
+            else None
 
   and drop_rec_entries
       (reg:Il.reg option)
@@ -516,15 +538,12 @@ let trans_visitor
         begin
           fun i (_, (_, layout)) ->
             let (_, sub_slot) = entries.(i) in
-              match sub_slot.Ast.slot_mode with
-                  Ast.MODE_exterior ->
-                    begin
-                      let disp = layout.layout_offset in
-                      let operand = word_at_reg_off_imm reg off disp in
-                      let rc = exterior_refcount_cell operand in
-                      drop_exterior_refcount_and_maybe_free rc operand sub_slot
-                    end
-                | _ -> ()
+            let disp = layout.layout_offset in
+            let operand = word_at_reg_off_imm reg off disp in
+              match slot_refcount_cell operand sub_slot with
+                  None -> ()
+                | Some rc ->
+                    drop_refcount_and_maybe_free rc operand sub_slot
         end
         layouts
 
@@ -538,20 +557,17 @@ let trans_visitor
         begin
           fun i layout ->
             let sub_slot = slots.(i) in
-              match sub_slot.Ast.slot_mode with
-                  Ast.MODE_exterior ->
-                    begin
-                      let disp = layout.layout_offset in
-                      let operand = word_at_reg_off_imm reg off disp in
-                      let rc = exterior_refcount_cell operand in
-                      drop_exterior_refcount_and_maybe_free rc operand sub_slot
-                    end
-                | _ -> ()
+            let disp = layout.layout_offset in
+            let operand = word_at_reg_off_imm reg off disp in
+              match slot_refcount_cell operand sub_slot with
+                  None -> ()
+                | Some rc ->
+                    drop_refcount_and_maybe_free rc operand sub_slot
         end
         layouts
 
 
-  and drop_exterior_refcount_and_maybe_free
+  and drop_refcount_and_maybe_free
       (rc:Il.operand)
       (operand:Il.operand)
       (slot:Ast.slot)
@@ -564,13 +580,19 @@ let trans_visitor
         emit Il.JNE Il.Nil badlab Il.Nil;
         begin
           let (reg, off) = get_reg_off operand in
-          let off = Asm.ADD (Asm.IMM word_sz, off) in
+          let ext_body_off = Asm.ADD (Asm.IMM exterior_body_off, off) in
             match slot_ty slot with
-                Ast.TY_rec entries -> drop_rec_entries reg off entries
-              | Ast.TY_tup slots -> drop_tup_slots reg off slots
-              | _ -> ()
+                Ast.TY_rec entries ->
+                  drop_rec_entries reg ext_body_off entries;
+                  trans_free operand
+              | Ast.TY_tup slots ->
+                  drop_tup_slots reg ext_body_off slots;
+                  trans_free operand
+              | Ast.TY_port _ -> trans_del_port operand;
+              | Ast.TY_chan _ -> trans_del_port operand;
+              | Ast.TY_proc -> trans_kill operand;
+              | _ -> trans_free operand
         end;
-        trans_free operand;
         patch j;
 
 
@@ -578,10 +600,9 @@ let trans_visitor
       (operand:Il.operand)
       (slot:Ast.slot)
       : unit =
-    match slot.Ast.slot_mode with
-        Ast.MODE_exterior ->
-          let rc = exterior_refcount_cell operand in
-            drop_exterior_refcount_and_maybe_free rc operand slot
+    match slot_refcount_cell operand slot with
+        Some rc ->
+          drop_refcount_and_maybe_free rc operand slot
       | _ ->
           begin
             (* FIXME: this will require some reworking if we support
@@ -599,9 +620,9 @@ let trans_visitor
 
 
   and init_exterior_slot operand slot =
-    let layout = layout_slot cx.ctxt_abi 0L slot in
+    let sz = exterior_allocation_size slot in
     let one = Il.Imm (Asm.IMM 1L) in
-      trans_malloc operand (Int64.add layout.layout_size word_sz);
+      trans_malloc operand sz;
       (* Reload rc; operand changed underfoot. *)
       let rc = exterior_refcount_cell operand in
         mov rc one
@@ -612,7 +633,7 @@ let trans_visitor
       match intent with
           INTENT_init ->
             init_exterior_slot operand slot;
-            deref_off operand word_sz
+            deref_off operand exterior_body_off
 
         | INTENT_write ->
             let rc = exterior_refcount_cell operand in
@@ -620,21 +641,21 @@ let trans_visitor
             let j = mark () in
               emit Il.JE Il.Nil badlab Il.Nil;
               let src = Il.Reg (Il.next_vreg (emitter())) in
-                drop_exterior_refcount_and_maybe_free rc operand slot;
+                drop_refcount_and_maybe_free rc operand slot;
                 (* 
-                 * Calling trans_copy_slot_deep in 'initializing' mode 
+                 * Calling trans_copy_slot_heavy in 'initializing' mode 
                  * will init the slot for us. Don't double-init.
                  *)
-                trans_copy_slot_deep true operand slot src slot;
+                trans_copy_slot_heavy true operand slot src slot;
                 patch j;
-                deref_off operand word_sz
+                deref_off operand exterior_body_off
 
         | INTENT_read ->
-            deref_off operand word_sz
+            deref_off operand exterior_body_off
 
         | INTENT_drop ->
             let rc = exterior_refcount_cell operand in
-            drop_exterior_refcount_and_maybe_free rc operand slot;
+            drop_refcount_and_maybe_free rc operand slot;
             Il.Nil
 
   and deref_slot (operand:Il.operand) (slot:Ast.slot) (intent:intent) : Il.operand =
@@ -686,37 +707,69 @@ let trans_visitor
         end
         layouts
 
-
   and trans_copy_slot
       (initializing:bool)
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
     assert (slot_ty src_slot = slot_ty dst_slot);
-    if dst_slot.Ast.slot_mode = Ast.MODE_exterior &&
-      src_slot.Ast.slot_mode = Ast.MODE_exterior
-    then
-      (* Shallow copy: move pointer, bump refcount. *)
-      begin
-        if not initializing
-        then
-          let dst_rc = exterior_refcount_cell dst in
-            drop_exterior_refcount_and_maybe_free dst_rc dst dst_slot
-        else
-          ();
-        log cx "shallow-copy of exterior slots: %a <- %a"
-          Ast.sprintf_slot dst_slot
-          Ast.sprintf_slot src_slot;
-        let src_rc = exterior_refcount_cell src in
+    match (slot_refcount_cell src src_slot,
+           slot_refcount_cell dst dst_slot) with
+      | (Some src_rc, Some dst_rc)  ->
+          (* Lightweight copy: twiddle refcounts, move pointer. *)
+          log cx "lightweight copy: %a <- %a"
+            Ast.sprintf_slot dst_slot
+            Ast.sprintf_slot src_slot;
           emit Il.ADD src_rc src_rc (Il.Imm (Asm.IMM 1L));
-          mov dst src;
-      end
-    else
-      (* Deep copy: recursive copying. *)
-      trans_copy_slot_deep initializing dst dst_slot src src_slot
+          if not initializing
+          then
+            drop_refcount_and_maybe_free dst_rc dst dst_slot;
+          mov dst src
 
+      | _ ->
+          (* Heavyweight copy: duplicate the referent. *)
+          log cx "heavyweight copy: %a -> %a"
+            Ast.sprintf_slot dst_slot
+            Ast.sprintf_slot src_slot;
+          trans_copy_slot_heavy initializing dst dst_slot src src_slot
 
-  and trans_copy_slot_deep
+  (* NB: heavyweight copying here does not mean "producing a deep
+   * clone of the entire data tree rooted at the src operand". It means
+   * "replicating a single level of the tree". You usually only need to
+   * heavyweight copy if you're preparing to write to a sub-component
+   * of an lval.
+   * 
+   * If you're dereferencing a path x.y.z in order to write to the z
+   * component, you may have to make 0..2 heavyweight copies:
+   * 
+   *   - let x' = if x.rc > 1 then heavy_copy(x) else x
+   *   - let y' = if x'.y.rc > 1 then heavy_copy(x'.y) else x'.y
+   *   - let z' = if y'.z.rc > 1 then heavy_copy(y'.z) else y'.z
+   * 
+   * There is no general-recursion entailed in performing a heavy
+   * copy. There is only "one level" to each heavy copy call.
+   * 
+   * In other words, this is a lightweight copy:
+   * 
+   *    [dstptr]  <-copy-  [srcptr]
+   *         \              |
+   *          \             |
+   *        [some record.rc++]
+   *             |
+   *           [some other record]
+   * 
+   * Whereas this is a heavyweight copy:
+   * 
+   *    [dstptr]  <-copy-  [srcptr]
+   *       |                  |
+   *       |                  |
+   *  [some record]       [some record]
+   *             |          |
+   *           [some other record]
+   * 
+   *)
+
+  and trans_copy_slot_heavy
       (initializing:bool)
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
