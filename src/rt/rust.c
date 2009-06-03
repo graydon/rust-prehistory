@@ -619,8 +619,8 @@ new_proc(rust_rt_t *rt, rust_prog_t *prog)
 static void
 del_proc(rust_proc_t *proc)
 {
-  logptr("del proc", (uintptr_t)proc);
-  printf("rt: proc refcnt: %d\n", proc->refcnt);
+  printf("rt: del proc %" PRIxPTR " (refcnt: %d)\n",
+         (uintptr_t)proc, proc->refcnt);
   assert(proc->refcnt == 0);
   del_stk(proc->stk);
   while (proc->chans) {
@@ -806,6 +806,7 @@ upcall_new_port(rust_proc_t *proc, size_t unit_sz)
   rust_port_t *port = xcalloc(sizeof(rust_port_t));
   port->proc = proc;
   port->unit_sz = unit_sz;
+  port->live_refcnt = 1;
   init_ptr_vec(&port->writers);
   logptr("new port", (uintptr_t)port);
   return port;
@@ -814,11 +815,16 @@ upcall_new_port(rust_proc_t *proc, size_t unit_sz)
 static void
 upcall_del_port(rust_port_t *port)
 {
-  logptr("del port", (uintptr_t)port);
-  assert(port->live_refcnt == 0);
-  /* FIXME: need to force-fail all the queued writers. */
-  fini_ptr_vec(&port->writers);
-  free(port);
+  printf("rt: del port %" PRIxPTR " (live refcnt: %d, weak refcnt %d)\n",
+         (uintptr_t)port, port->live_refcnt, port->weak_refcnt);
+  assert(port->live_refcnt == 0 || port->weak_refcnt == 0);
+  if (port->live_refcnt == 0 &&
+      port->weak_refcnt == 0) {
+    printf("rt: finalizing and freeing port\n");
+    /* FIXME: need to force-fail all the queued writers. */
+    fini_ptr_vec(&port->writers);
+    free(port);
+  }
 }
 
 /*

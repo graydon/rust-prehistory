@@ -8,12 +8,6 @@ let log cx = Session.log "trans"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-let iflog cx thunk =
-  if cx.ctxt_sess.Session.sess_log_trans
-  then thunk ()
-  else ()
-;;
-
 let marker = Il.Imm (Asm.IMM 0xdeadbeefL);;
 let imm_true = Il.Imm (Asm.IMM 1L);;
 let imm_false = Il.Imm (Asm.IMM 0L);;
@@ -31,6 +25,12 @@ let trans_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
+
+  let iflog thunk =
+    if cx.ctxt_sess.Session.sess_log_trans
+    then thunk ()
+    else ()
+  in
 
   let path = Stack.create () in
   let annotations = Hashtbl.create 0 in
@@ -61,6 +61,10 @@ let trans_visitor
          with Il.quad_lhs = Il.Label (mark ()) };
     (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
     emit Il.DEAD Il.Nil Il.Nil Il.Nil
+  in
+
+  let annotate (str:string) =
+    Hashtbl.add annotations (emitter()).Il.emit_pc str
   in
 
   let epilogue_jumps = Stack.create() in
@@ -416,7 +420,6 @@ let trans_visitor
     Stack.push (get_block_layout cx block.id) block_layouts;
     Array.iter trans_stmt block.node;
     let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
-      log cx "end of block, translating slot-frees:";
       (* 
        * FIXME: this is not going to free things in the proper order; 
        * we need to analyze the decl order in an earlier phase and thread
@@ -425,8 +428,13 @@ let trans_visitor
       Hashtbl.iter
         begin
           fun slotkey slotid ->
-            Hashtbl.replace annotations
-              (emitter()).Il.emit_pc ("slot free: " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
+            iflog
+              begin
+                fun _ ->
+                  annotate
+                    ("drop slot: " ^
+                       (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
+              end;
             let slot = Hashtbl.find cx.ctxt_all_slots slotid in
             let operand = operand_of_block_slot slotid in
               trans_drop_slot operand slot
@@ -469,8 +477,10 @@ let trans_visitor
         emit Il.CMP Il.Nil init_operand imm_false;
         let fwd_jmp = mark () in
           emit Il.JE Il.Nil badlab Il.Nil;
-          trans_call proc_operand init_operand in_slots arg_layouts (Some proc_operand) args;
+          trans_call (fun _ -> "spawn-init") proc_operand init_operand
+            in_slots arg_layouts (Some proc_operand) args;
           patch fwd_jmp;
+          iflog (fun _ -> annotate "sched proc");
           trans_upcall Abi.UPCALL_sched [| proc_operand |]
 
   and trans_check_expr (a:Ast.atom) : unit =
@@ -712,32 +722,41 @@ let trans_visitor
       (dst:Il.operand) (dst_slot:Ast.slot)
       (src:Il.operand) (src_slot:Ast.slot)
       : unit =
+    let anno (weight:string) : unit =
+      iflog
+        begin
+          fun _ ->
+            annotate
+              (Printf.sprintf "%sweight copy: %a <- %a"
+                 weight
+                 Ast.sprintf_slot dst_slot
+                 Ast.sprintf_slot src_slot)
+        end;
+    in
     assert (slot_ty src_slot = slot_ty dst_slot);
     match (slot_refcount_cell src src_slot,
            slot_refcount_cell dst dst_slot) with
       | (Some src_rc, Some dst_rc)  ->
           (* Lightweight copy: twiddle refcounts, move pointer. *)
-          log cx "lightweight copy: %a <- %a"
-            Ast.sprintf_slot dst_slot
-            Ast.sprintf_slot src_slot;
+          anno "light";
           emit Il.ADD src_rc src_rc (Il.Imm (Asm.IMM 1L));
           if not initializing
           then
-            drop_refcount_and_maybe_free dst_rc dst dst_slot;
+            drop_refcount_and_maybe_free
+              dst_rc dst dst_slot;
           mov dst src
 
       | _ ->
           (* Heavyweight copy: duplicate the referent. *)
-          log cx "heavyweight copy: %a -> %a"
-            Ast.sprintf_slot dst_slot
-            Ast.sprintf_slot src_slot;
-          trans_copy_slot_heavy initializing dst dst_slot src src_slot
+          anno "heavy";
+          trans_copy_slot_heavy initializing
+            dst dst_slot src src_slot
 
   (* NB: heavyweight copying here does not mean "producing a deep
    * clone of the entire data tree rooted at the src operand". It means
    * "replicating a single level of the tree". You usually only need to
    * heavyweight copy if you're preparing to write to a sub-component
-   * of an lval.
+   * of an lval with refcount > 1.
    * 
    * If you're dereferencing a path x.y.z in order to write to the z
    * component, you may have to make 0..2 heavyweight copies:
@@ -880,7 +899,8 @@ let trans_visitor
     let (tsig, _) = tfn in
     let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
-      trans_call dst_operand fn_operand in_slots arg_layouts None args
+      trans_call (fun _ -> Ast.sprintf_lval () flv)
+        dst_operand fn_operand in_slots arg_layouts None args
 
   and trans_arg0 param_operand output_operand =
     (* Emit arg0 of any call: the output slot. *)
@@ -895,13 +915,12 @@ let trans_visitor
       abi.Abi.abi_pp_operand (word_slot abi)
 
   and trans_argN n param_operand slots args =
-    log cx "copying formal param %d, slot %s"
-      n (Ast.fmt_to_str Ast.fmt_slot slots.(n));
     trans_init_slot_from_atom
       param_operand slots.(n)
       args.(n)
 
   and trans_call
+      (logname:(unit -> string))
       (output_operand:Il.operand)
       (callee_operand:Il.operand)
       (in_slots:Ast.slot array)
@@ -917,7 +936,9 @@ let trans_visitor
               let n_layouts = Array.length arg_layouts in
                 assert (n_layouts == ((Array.length args) + 2));
                 for i = 0 to n_layouts - 1 do
-                  log cx "translating fn-call arg %d of %d" i n_layouts;
+                  iflog (fun _ ->
+                           annotate (Printf.sprintf "fn-call arg %d of %d"
+                                       i n_layouts));
                   let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
                     match i with
                         0 -> trans_arg0 param_operand output_operand
@@ -931,7 +952,9 @@ let trans_visitor
               let n_layouts = Array.length arg_layouts in
                 assert (n_layouts == ((Array.length args) + 3));
                 for i = 0 to n_layouts - 1 do
-                  log cx "translating init-call arg %d of %d" i n_layouts;
+                  iflog (fun _ ->
+                           annotate (Printf.sprintf "init-call arg %d of %d"
+                                       i n_layouts));
                   let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
                     match i with
                         0 -> trans_arg0 param_operand output_operand
@@ -942,22 +965,23 @@ let trans_visitor
             end;
             3
     in
-    let vr = Il.Reg (Il.next_vreg (emitter())) in
-      emit Il.CCALL vr callee_operand Il.Nil;
-      for i = implicit_args to (Array.length arg_layouts) - 1 do
-        let operand = word_at_sp_off arg_layouts.(i).layout_offset in
-          trans_drop_slot operand in_slots.(i-implicit_args)
-      done
+      iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
+      let vr = Il.Reg (Il.next_vreg (emitter())) in
+        emit Il.CCALL vr callee_operand Il.Nil;
+        for i = implicit_args to (Array.length arg_layouts) - 1 do
+          let operand = word_at_sp_off arg_layouts.(i).layout_offset in
+            iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
+            trans_drop_slot operand in_slots.(i-implicit_args)
+        done
 
 
   and trans_stmt (stmt:Ast.stmt) : unit =
     (* Helper to localize errors by stmt, at minimum. *)
     try
-      iflog cx
+      iflog
         begin
           fun _ ->
-            Hashtbl.replace annotations
-              (emitter()).Il.emit_pc (Ast.fmt_to_str Ast.fmt_stmt_body stmt)
+            annotate (Ast.fmt_to_str Ast.fmt_stmt_body stmt)
         end;
       trans_stmt_full stmt
     with
@@ -990,10 +1014,11 @@ let trans_visitor
           if Hashtbl.mem cx.ctxt_copy_stmt_is_init stmt.id
           then
             begin
-              iflog cx
+              iflog
                 (fun _ ->
-                   log cx "initializing-copy on dst lval %a"
-                     Ast.sprintf_lval lv_dst);
+                   annotate
+                     (Printf.sprintf "initializing-copy on dst lval %a"
+                        Ast.sprintf_lval lv_dst));
               trans_copy true lv_dst e_src
             end
           else
@@ -1123,7 +1148,7 @@ let trans_visitor
       end
     in
       begin
-        iflog cx
+        iflog
           begin
             fun _ ->
               log cx "emitted quads for %s:" name;
@@ -1131,7 +1156,9 @@ let trans_visitor
               do
                 if Hashtbl.mem annotations i
                 then
-                  log cx "// %s" (Hashtbl.find annotations i);
+                  List.iter
+                    (fun a -> log cx "// %s" a)
+                    (List.rev (Hashtbl.find_all annotations i));
                 log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
                 done;
           end;
