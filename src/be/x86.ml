@@ -148,6 +148,28 @@ let reg r =
     | _ -> raise (Invalid_argument "X86.reg")
 ;;
 
+
+let dwarf_eax = 0;;
+let dwarf_ecx = 1;;
+let dwarf_edx = 2;;
+let dwarf_ebx = 3;;
+let dwarf_esp = 4;;
+let dwarf_ebp = 5;;
+let dwarf_esi = 6;;
+let dwarf_edi = 7;;
+
+let dwarf_reg r =
+  match r with
+      0 -> dwarf_eax
+    | 1 -> dwarf_ecx
+    | 2 -> dwarf_ebx
+    | 3 -> dwarf_esi
+    | 4 -> dwarf_edi
+    | 5 -> dwarf_edx
+    | 6 -> dwarf_ebp
+    | 7 -> dwarf_esp
+    | _ -> raise (Invalid_argument "X86.dwarf_reg")
+
 let reg_str r =
   match r with
       0 -> "eax"
@@ -490,6 +512,7 @@ let (abi:Abi.abi) =
 
     Abi.abi_sp_reg = (Il.Hreg esp);
     Abi.abi_fp_reg = (Il.Hreg ebp);
+    Abi.abi_dwarf_fp_reg = dwarf_ebp;
     Abi.abi_pp_operand = proc_ptr;
     Abi.abi_frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;
     Abi.abi_implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;

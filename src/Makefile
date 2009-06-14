@@ -27,7 +27,7 @@ COMPILER_CMXS:=$(COMPILER_MLS:.ml=.cmx)
 COMPILER_CMIS:=$(COMPILER_MLS:.ml=.cmi)
 
 RUNTIME_CS:=rt/rust.c rt/isaac/randport.c
-RUNTIME_INCS:=-Irt/uthash-1.6/src -Irt/isaac
+RUNTIME_INCS:=-Irt/uthash-1.6/src -Irt/isaac -Irt/uthash
 RUNTIME_OBJS:=$(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
 
 all: $(CFG_COMPILER) $(CFG_RUNTIME) $(MKFILES) fe/lexer.ml

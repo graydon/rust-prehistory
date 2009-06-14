@@ -53,7 +53,6 @@ dynamic styles.
 * Introduction::               Background, intentions, relationships to other languages
 * Tutorial::                   Gentle introduction to reading Rust code
 * Reference::                  Systematic reference of language elements
-* Rationale::                  Detailed discussion of design motivations and reasoning
 @end menu
 
 @ifnottex
@@ -243,43 +242,27 @@ languages such as Smalltalk, C++, Java and Python.
 * Ref.Run.Comp::                Runtime dynamic compilation service.
 * Ref.Run.Load::                Runtime component loading service.
 * Ref.Run.Comm::                Runtime communication multiplexing service.
+* Ref.Run.Refl::                Runtime reflection system.
 * Ref.Run.Fault::               Runtime fault handler.
 
-* Ref.Form::                    The forms of values held in memory.
-* Ref.Form.Any::                An open sum of every possible form.
-* Ref.Form.Prim::               Primitive machine-level forms.
-* Ref.Form.Arith::              High-precision numeric forms.
-* Ref.Form.Text::               Strings and characters.
-* Ref.Form.Rec::                Fixed products of heterogeneous forms.
-* Ref.Form.Vec::                Open products of homogeneous forms.
-* Ref.Form.Alt::                Closed sums of heterogeneous forms.
-* Ref.Form.Fn::                 Subroutines and scoped coroutine forms.
+* Ref.Type::                    The types of values held in memory.
+* Ref.Type.Any::                An open sum of every possible type.
+* Ref.Type.Prim::               Primitive machine-level types.
+* Ref.Type.Int::                The arbitrary-precision integer type.
+* Ref.Type.Text::               Strings and characters.
+* Ref.Type.Rec::                Fixed products of heterogeneous types.
+* Ref.Type.Vec::                Open products of homogeneous types.
+* Ref.Type.Alt::                Closed sums of heterogeneous types.
+* Ref.Type.Fn::                 Subroutines and scoped coroutine types.
+* Ref.Type.Port::               Unique inter-process message-receipt endpoints.
+* Ref.Type.Chan::               Copyable inter-process message-sending capabilities.
+* Ref.Type.Proc::               General coroutine-instance types.
+* Ref.Type.Prog::               General coroutine-description types.
+* Ref.Type.Mod::                Units of information hiding.
+* Ref.Type.Type::               Types describing types.
+* Ref.Type.Quote::              Types describing source code.
 
-* Ref.Form.Port::               Unique inter-process message-receive queues.
-* Ref.Form.Chan::               Copyable inter-process message-sending capabilities.
-* Ref.Form.Proc::               General coroutine-instance forms.
-* Ref.Form.Prog::               General coroutine-description forms.
-
-@c curious: if we make channels and ports dynamic, the only thing that
-@c makes a prog different from a fun(T)->nil is that it can have a
-@c destructor. Those are definitely important, but is there anything
-@c else? Most of the below-the-surface machinery of a proc is
-@c implicit.  On the other hand, perhaps a prog gives rise to an
-@c implicit module type covering a chan for each of its public ports?
-@c That module would be the the return type of a spawn expression, and
-@c would probably be quite useful. This makes prog a sort of derived form,
-@c even if it's a ubquitous one, it is going to cover for class types.
-@c
-@c We can even make it such that a prog is the only spawnable form, but 
-@c there are several standard ones that wrap various fns. That is probably
-@c best, actually.
-
-* Ref.Form.Mod::                Units of information hiding.
-
-* Ref.Form.Type::               Forms describing types.
-* Ref.Form.Quote::              Forms describing source code.
-
-* Ref.Stat::                    Static analysis of programs.
+* Ref.Stat::                    Static structure of programs.
 * Ref.Stat.Pred::               Static predicates covering dynamic judgments.
 * Ref.Stat.Slot::               Components of structures and control frames.
 * Ref.Stat.Slot.Constr::        A set of predicates holding over a set of slots.
@@ -330,7 +313,7 @@ languages such as Smalltalk, C++, Java and Python.
 @c surely the typestate system can check the inputs to the static
 @c predicate p(...) and chain backwards into the existing prestate?
 @c This should not be a problem.
-@c  
+@c
 @c I suppose the key to 'prove' is error reporting: you can 'prove'
 @c something at a particular point in the program even if you are not
 @c sure how you're intending to use it. Might otherwise find it hard
@@ -342,9 +325,228 @@ languages such as Smalltalk, C++, Java and Python.
 
 @end menu
 
-@c ############################################################
-@c rationale
-@c ############################################################
+
+@node    Reference
+@chapter Reference
+
+@node    Ref.Type
+@section Ref.Type
+
+Every slot and value in a Rust program has a type. The @dfn{type} of a
+@emph{value} defines the interpretation of the memory holding it. The
+type of a @emph{slot} may also include constraints, @xref{Ref.Constr}.
+
+
+@node    Ref.Type.Any
+@section Ref.Type.Any
+
+The type @code{any} is the union of all possible Rust types. A value
+of type @code{any} is represented in memory as a pair consisting of an
+exterior value of some non-@code{any} type @var{T} and a reflection
+of the type @var{T}.
+
+Values of type @code{any} can used in an @code{alt type} statement, in
+which the reflection is used to select a block corresponding to a
+particular type extraction. @xref{Ref.Stmt.Alt}.
+
+
+@node    Ref.Type.Prim
+@section Ref.Type.Prim
+
+The primitive types are the following:
+
+@itemize
+@item
+The type @code{nil}, having the single value @code{nil}.
+@item
+The boolean type @code{bool} with values @code{true} and @code{false}.
+@item
+The unsigned two's complement word types @code{u8}, @code{u16},
+@code{u32} and @code{u64}, with values drawn from the integer
+intervals @math{[0,(2^8)-1)]}, @math{[0,(2^16)-1)]},
+@math{[0,(2^32)-1)]} and @math{[0,(2^64)-1)]} respectively.
+@item
+The signed two's complement word types @code{s8}, @code{s16}, @code{s32} and @code{s64},
+with values drawn from the integer
+intervals @math{[-(2^7),(2^7)-1)]}, @math{[-(2^15),(2^15)-1)]},
+@math{[-(2^31),(2^31)-1)]} and @math{[-(2^63),(2^63)-1)]} respectively.
+@item
+The IEEE 754 double-precision floating point type @code{f64}.
+@end itemize
+
+In addition to these types, any symbols consisting of a single
+lowercase letter in the ASCII range @code{a-z} followed by a sequence
+of 1 or more decimal digits is reserved as a future primitive type in
+a later version of the Rust language.
+
+@node    Ref.Type.Int
+@section Ref.Type.Int
+
+Unlike many C-family languages, in Rust the type @code{int} is not
+defined as a fixed-size machine word type. Instead, it is an arbitrary
+precision type that fits in a machine word @emph{when possible} and
+transparently expands to a boxed ``big integer'' allocated in the
+runtime heap when it overflows or underflows outside of the range of a
+machine word.
+
+A rust @code{int} grows to accommodate extra binary digits as they are
+needed, by taking extra memory from the dynamic memory pool available
+to each rust process, and should only exhaust its range due to memory
+exhaustion.
+
+@node    Ref.Type.Text
+@section Ref.Type.Text
+
+The types @code{char} and @code{str} hold textual data.
+
+A value of type @code{char} is a Unicode character, represented as a
+32-bit unsigned word holding a UCS-4 codepoint.
+
+A value of type @code{str} is a Unicode string, represented as a
+vector of 8-bit unsigned words holding a UTF-8 codepoints.
+
+@node    Ref.Type.Rec
+@section Ref.Type.Rec
+
+The record type-constructor @code{rec} forms new heterogeneous product
+types. It is analogous to the @code{struct} type-constructor in
+C. Fields of a @code{rec} type are accessed by name and are arranged
+in memory in the order specified by the @code{rec} type.
+
+An example of a @code{rec} type and its use:
+@example
+type point = rec(int x, int y);
+let point p = rec(x=10, y=11);
+let int px = p.x;
+@end example
+
+@node    Ref.Type.Vec
+@section Ref.Type.Vec
+
+The vector type-constructor @code{vec} represents a homogeneous,
+variable-size array of values. Vectors automatically resize to
+accommodate the addition or removal of elements. Elements can be
+accessed by numeric index, but can be appended or removed only at the
+ends: the range of initialized values in a vector is continuous from
+index 0 to the maximum indexable element.
+
+And example of a @code{vec} type and its use:
+@example
+let vec[int] v = vec(7, 5, 3);
+let int i = v.(2);
+@end example
+
+@node    Ref.Type.Alt
+@section Ref.Type.Alt
+
+The @code{alt} type-constructor forms new heterogeneous
+disjoint sum types. It is analogous to the @code{data} type-constructor
+in ML. An @code{alt} consists of a number of @code{variants}, each of
+which is independently named and takes an optional tuple of arguments.
+
+An example of an @code{alt} type and its use:
+@example
+type animal = alt(dog, cat);
+let animal a = dog;
+a = cat;
+@end example
+
+An example of a @emph{recursive} @code{alt} type and its use:
+@example
+type list[T] = alt[T](empty,
+                      cons(T, @list[T]));
+let list[int] a = cons(7, cons(13, empty));
+@end example
+
+
+@node    Ref.Type.Fn
+@section Ref.Type.Fn
+
+The function type-constructor @code{fn} forms new function types. A
+function type consists of an optional protocol, an input type, an
+output type, and a set of flags indicating special characteristics of
+the function.
+
+If a function type has no protocol, it describes functions that only
+return a value, and do not put any value. @xref{Ref.Stmt.Put}.
+
+If a function type has a protocol, it describes functions that put
+some number of values before returning. The protocol describes the
+@emph{number} of values that the function will put during its
+execution. Protocols are indicated by a variant of the @code{fn}
+keyword, as follows:
+
+@itemize
+@item
+@code{fn?} indicates a function that will put either 0 or 1 value, then return.
+@item
+@code{fn!} indicates a function that will put exactly 1 value, then return.
+@item
+@code{fn*} indicates a function that will put 0 or more values, then return.
+@item
+@code{fn+} indicates a function that will put 1 or more values, then return.
+@end itemize
+
+If a function has a protocol, the output type is the type of value
+that the function will put. If a function has no protocol, the output
+type is the type of value the function will return.
+
+An example of a simple @code{fn} type:
+@example
+fn add(int x, int y) -> int {
+  ret x + y;
+}
+
+let int x = add(5,7);
+
+type binop = fn(int,int) -> int;
+let binop bo = add;
+x = bo(5,7);
+@end example
+
+A function with a protocol can only be called in the header of a
+matching @code{for} loop, for example a @code{fn+} function can only
+be called from a @code{for+} loop header.
+
+An example of a @code{fn} type with a protocol:
+@example
+fn* range(int lo, int hi) -> int {
+  let int i = lo;
+  while (i < hi) {
+    put i;
+    i = i + 1;
+  }
+}
+
+let int sum = 0;
+for* (int x = range(0,100)) {
+    sum = sum + x;
+}
+@end example
+
+A complex example of protocols, local functions and closures:
+@example
+type expand[A,B] = fn*(A) -> B;
+fn compose[A,B,C](expand[A,B] ab, expand[B,C] bc) -> expand[A,C] {
+   fn* composed(A a) -> C {
+     for* (B b = ab(a)) {
+       put* bc(b);
+     }
+   }
+   ret composed;
+}
+@end example
+
+
+
+* Ref.Type.Fn::                 Subroutines and scoped coroutine types.
+* Ref.Type.Port::               Unique inter-process message-receipt endpoints.
+* Ref.Type.Chan::               Copyable inter-process message-sending capabilities.
+* Ref.Type.Proc::               General coroutine-instance types.
+* Ref.Type.Prog::               General coroutine-description types.
+* Ref.Type.Mod::                Units of information hiding.
+* Ref.Type.Type::               Types describing types.
+* Ref.Type.Quote::              Types describing source code.
 
 
 @c ############################################################

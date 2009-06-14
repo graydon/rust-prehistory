@@ -418,6 +418,7 @@ type dw_form =
   | DW_FORM_indirect
 ;;
 
+
 let dw_form_to_int (f:dw_form) : int =
   match f with
     | DW_FORM_addr -> 0x01
@@ -441,6 +442,149 @@ let dw_form_to_int (f:dw_form) : int =
     | DW_FORM_ref8 -> 0x14
     | DW_FORM_ref_udata -> 0x15
     | DW_FORM_indirect -> 0x16
+;;
+
+type dw_op =
+    DW_OP_lit of int
+  | DW_OP_addr of Asm.expr64
+  | DW_OP_const1u of Asm.expr64
+  | DW_OP_const1s of Asm.expr64
+  | DW_OP_const2u of Asm.expr64
+  | DW_OP_const2s of Asm.expr64
+  | DW_OP_const4u of Asm.expr64
+  | DW_OP_const4s of Asm.expr64
+  | DW_OP_const8u of Asm.expr64
+  | DW_OP_const8s of Asm.expr64
+  | DW_OP_constu of Asm.expr64
+  | DW_OP_consts of Asm.expr64
+  | DW_OP_fbreg of Asm.expr64
+  | DW_OP_reg of int
+  | DW_OP_regx of Asm.expr64
+  | DW_OP_breg of (int * Asm.expr64)
+  | DW_OP_bregx of (Asm.expr64 * Asm.expr64)
+  | DW_OP_dup
+  | DW_OP_drop
+  | DW_OP_pick of Asm.expr64
+  | DW_OP_over
+  | DW_OP_swap
+  | DW_OP_rot
+  | DW_OP_piece of Asm.expr64
+  | DW_OP_bit_piece of (Asm.expr64 * Asm.expr64)
+  | DW_OP_deref
+  | DW_OP_deref_size of Asm.expr64
+  | DW_OP_xderef
+  | DW_OP_xderef_size of Asm.expr64
+  | DW_OP_push_object_address
+  | DW_OP_form_tls_address
+  | DW_OP_call_frame_cfa
+  | DW_OP_abs
+  | DW_OP_and
+  | DW_OP_div
+  | DW_OP_minus
+  | DW_OP_mod
+  | DW_OP_mul
+  | DW_OP_neg
+  | DW_OP_not
+  | DW_OP_or
+  | DW_OP_plus
+  | DW_OP_plus_uconst of Asm.expr64
+  | DW_OP_shl
+  | DW_OP_shr
+  | DW_OP_shra
+  | DW_OP_xor
+  | DW_OP_le
+  | DW_OP_ge
+  | DW_OP_eq
+  | DW_OP_lt
+  | DW_OP_gt
+  | DW_OP_ne
+  | DW_OP_skip of Asm.expr64
+  | DW_OP_bra of Asm.expr64
+  | DW_OP_call2 of Asm.expr64
+  | DW_OP_call4 of Asm.expr64
+  | DW_OP_call_ref of Asm.expr64
+  | DW_OP_nop
+;;
+
+let dw_op_to_item (abi:Abi.abi) (op:dw_op) : Asm.item =
+  match op with
+
+      DW_OP_addr e -> SEQ [| BYTE 0x03; WORD (abi.Abi.abi_word_ty, e) |]
+    | DW_OP_deref -> BYTE 0x06
+    | DW_OP_const1u e -> SEQ [| BYTE 0x08; WORD (TY_u8, e) |]
+    | DW_OP_const1s e -> SEQ [| BYTE 0x09; WORD (TY_s8, e) |]
+    | DW_OP_const2u e -> SEQ [| BYTE 0x0a; WORD (TY_u16, e) |]
+    | DW_OP_const2s e -> SEQ [| BYTE 0x0b; WORD (TY_s16, e) |]
+    | DW_OP_const4u e -> SEQ [| BYTE 0x0c; WORD (TY_u32, e) |]
+    | DW_OP_const4s e -> SEQ [| BYTE 0x0d; WORD (TY_s32, e) |]
+    | DW_OP_const8u e -> SEQ [| BYTE 0x0e; WORD (TY_u64, e) |]
+    | DW_OP_const8s e -> SEQ [| BYTE 0x0f; WORD (TY_s64, e) |]
+    | DW_OP_constu e -> SEQ [| BYTE 0x10; ULEB128 e |]
+    | DW_OP_consts e -> SEQ [| BYTE 0x11; SLEB128 e |]
+    | DW_OP_dup -> BYTE 0x12
+    | DW_OP_drop -> BYTE 0x13
+    | DW_OP_over -> BYTE 0x14
+    | DW_OP_pick e -> SEQ [| BYTE 0x15; WORD (TY_u8, e) |]
+    | DW_OP_swap -> BYTE 0x16
+    | DW_OP_rot -> BYTE 0x17
+    | DW_OP_xderef -> BYTE 0x18
+    | DW_OP_abs -> BYTE 0x19
+    | DW_OP_and -> BYTE 0x1a
+    | DW_OP_div -> BYTE 0x1b
+    | DW_OP_minus -> BYTE 0x1c
+    | DW_OP_mod -> BYTE 0x1d
+    | DW_OP_mul -> BYTE 0x1e
+    | DW_OP_neg -> BYTE 0x1f
+    | DW_OP_not -> BYTE 0x20
+    | DW_OP_or -> BYTE 0x21
+    | DW_OP_plus -> BYTE 0x22
+    | DW_OP_plus_uconst e -> SEQ [| BYTE 0x23; ULEB128 e |]
+    | DW_OP_shl -> BYTE 0x24
+    | DW_OP_shr -> BYTE 0x25
+    | DW_OP_shra -> BYTE 0x26
+    | DW_OP_xor -> BYTE 0x27
+    | DW_OP_skip e -> SEQ [| BYTE 0x2f; WORD (TY_s16, e) |]
+    | DW_OP_bra e -> SEQ [| BYTE 0x28; WORD (TY_s16, e) |]
+    | DW_OP_eq -> BYTE 0x29
+    | DW_OP_ge -> BYTE 0x2a
+    | DW_OP_gt -> BYTE 0x2b
+    | DW_OP_le -> BYTE 0x2c
+    | DW_OP_lt -> BYTE 0x2d
+    | DW_OP_ne -> BYTE 0x2e
+
+    | DW_OP_lit i ->
+        assert (0 <= i && i < 32);
+        BYTE (i + 0x30)
+
+    | DW_OP_reg i ->
+        assert (0 <= i && i < 32);
+        BYTE (i + 0x50)
+
+    | DW_OP_breg (i, e) ->
+        assert (0 <= i && i < 32);
+        SEQ [| BYTE (i + 0x70); SLEB128 e |]
+
+    | DW_OP_regx e -> SEQ [| BYTE 0x90; ULEB128 e|]
+    | DW_OP_fbreg e -> SEQ [| BYTE 0x91; SLEB128 e |]
+    | DW_OP_bregx (r, off) -> SEQ [| BYTE 0x92; ULEB128 r; SLEB128 off |]
+    | DW_OP_piece e -> SEQ [| BYTE 0x93; ULEB128 e |]
+    | DW_OP_deref_size e -> SEQ [| BYTE 0x94; WORD (TY_u8, e) |]
+    | DW_OP_xderef_size e -> SEQ [| BYTE 0x95; WORD (TY_u8, e) |]
+    | DW_OP_nop -> BYTE 0x96
+    | DW_OP_push_object_address -> BYTE 0x97
+    | DW_OP_call2 e -> SEQ [| BYTE 0x98; WORD (TY_u16, e) |]
+    | DW_OP_call4 e -> SEQ [| BYTE 0x99; WORD (TY_u32, e) |]
+    | DW_OP_call_ref e -> SEQ [| BYTE 0x9a; WORD (abi.Abi.abi_word_ty, e) |]
+    | DW_OP_form_tls_address -> BYTE 0x9b
+    | DW_OP_call_frame_cfa -> BYTE 0x9c
+    | DW_OP_bit_piece (sz, off) -> SEQ [| BYTE 0x9d; ULEB128 sz; ULEB128 off |]
+;;
+
+let dw_block1 (abi:Abi.abi) (ops:dw_op array) : Asm.item =
+  let item = SEQ (Array.map (dw_op_to_item abi) ops) in
+  let block_fixup = new_fixup "DW_FORM_block1 fixup" in
+    SEQ [| WORD (TY_u8, F_SZ block_fixup);
+           DEF (block_fixup, item) |]
 ;;
 
 type dw_lns =
@@ -542,7 +686,8 @@ let (abbrev_subprogram:abbrev) =
    [|
      (DW_AT_name, DW_FORM_string);
      (DW_AT_low_pc, DW_FORM_addr);
-     (DW_AT_high_pc, DW_FORM_addr)
+     (DW_AT_high_pc, DW_FORM_addr);
+     (DW_AT_frame_base, DW_FORM_block1)
    |])
 ;;
 
@@ -704,7 +849,8 @@ let dwarf_visitor
          uleb abbrev_code;
          ZSTRING name;
          WORD (TY_u32, M_POS fix);
-         WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))))
+         WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))));
+         dw_block1 cx.ctxt_abi [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |]
        |])
     in
       prepend curr_cu_infos subprogram_die
