@@ -393,6 +393,46 @@ let dw_at_to_int (a:dw_at) : int =
     | DW_AT_hi_user -> 0x3fff
 ;;
 
+type dw_ate =
+      DW_ATE_address
+    | DW_ATE_boolean
+    | DW_ATE_complex_float
+    | DW_ATE_float
+    | DW_ATE_signed
+    | DW_ATE_signed_char
+    | DW_ATE_unsigned
+    | DW_ATE_unsigned_char
+    | DW_ATE_imaginary_float
+    | DW_ATE_packed_decimal
+    | DW_ATE_numeric_string
+    | DW_ATE_edited
+    | DW_ATE_signed_fixed
+    | DW_ATE_unsigned_fixed
+    | DW_ATE_decimal_float
+    | DW_ATE_lo_user
+    | DW_ATE_hi_user
+;;
+
+let dw_ate_to_int (ate:dw_ate) : int =
+  match ate with
+      DW_ATE_address -> 0x01
+    | DW_ATE_boolean -> 0x02
+    | DW_ATE_complex_float -> 0x03
+    | DW_ATE_float -> 0x04
+    | DW_ATE_signed -> 0x05
+    | DW_ATE_signed_char -> 0x06
+    | DW_ATE_unsigned -> 0x07
+    | DW_ATE_unsigned_char -> 0x08
+    | DW_ATE_imaginary_float -> 0x09
+    | DW_ATE_packed_decimal -> 0x0a
+    | DW_ATE_numeric_string -> 0x0b
+    | DW_ATE_edited -> 0x0c
+    | DW_ATE_signed_fixed -> 0x0d
+    | DW_ATE_unsigned_fixed -> 0x0e
+    | DW_ATE_decimal_float -> 0x0f
+    | DW_ATE_lo_user -> 0x80
+    | DW_ATE_hi_user -> 0xff
+;;
 
 type dw_form =
   | DW_FORM_addr
@@ -687,7 +727,26 @@ let (abbrev_subprogram:abbrev) =
      (DW_AT_name, DW_FORM_string);
      (DW_AT_low_pc, DW_FORM_addr);
      (DW_AT_high_pc, DW_FORM_addr);
-     (DW_AT_frame_base, DW_FORM_block1)
+     (DW_AT_frame_base, DW_FORM_block1);
+     (DW_AT_return_addr, DW_FORM_block1);
+   |])
+;;
+
+let (abbrev_variable:abbrev) =
+  (DW_TAG_variable, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_location, DW_FORM_block1);
+     (DW_AT_type, DW_FORM_ref_addr)
+   |])
+;;
+
+let (abbrev_base_type:abbrev) =
+  (DW_TAG_variable, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_encoding, DW_FORM_data1);
+     (DW_AT_byte_size, DW_FORM_ref_addr)
    |])
 ;;
 
@@ -839,6 +898,10 @@ let dwarf_visitor
       curr_cu_line := []
   in
 
+  let emit_null_die _ =
+      prepend curr_cu_infos (BYTE 0)
+  in
+
   let emit_fn_die
       (name:string)
       (fix:fixup)
@@ -847,10 +910,20 @@ let dwarf_visitor
     let subprogram_die =
       (SEQ [|
          uleb abbrev_code;
+         (* DW_AT_name *)
          ZSTRING name;
+         (* DW_AT_low_pc *)
          WORD (TY_u32, M_POS fix);
+         (* DW_AT_high_pc *)
          WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))));
-         dw_block1 cx.ctxt_abi [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |]
+         (* DW_AT_frame_base *)
+         dw_block1 cx.ctxt_abi [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |];
+         (* DW_AT_return_addr *)
+         (* 
+          * NB: we are fixing fp[0] as the return address here; as in frame.ml,
+          * it's not considered 'part of the per-arch ABI'. This might be wrong. 
+          *)
+         dw_block1 cx.ctxt_abi [| DW_OP_fbreg (Asm.IMM 0L); |]
        |])
     in
       prepend curr_cu_infos subprogram_die
@@ -893,12 +966,28 @@ let dwarf_visitor
       begin
         finish_cu_and_compose_headers ()
       end
-    else ()
+    else ();
+    begin
+      match item.node with
+          Ast.MOD_ITEM_fn _ -> emit_null_die ()
+        | _ -> ()
+    end;
+  in
+
+  let visit_block_pre (b:Ast.block) : unit =
+    ()
+  in
+
+  let visit_slot_identified_pre (s:Ast.slot identified) : unit =
+    ()
   in
 
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_mod_item_post = visit_mod_item_post }
+        Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_slot_identified_pre = visit_slot_identified_pre
+    }
 ;;
 
 
