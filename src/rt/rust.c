@@ -1063,6 +1063,8 @@ upcall_recv(rust_rt_t *rt, rust_proc_t *dst, rust_port_t *port)
 static void
 upcall_check_expr(rust_rt_t *rt, rust_proc_t *proc, uint32_t i)
 {
+    xlog(rt, LOG_UPCALL|LOG_MEM,
+         "upcall check(0x%" PRIx32 ")", i);
     if (!i) {
         /* FIXME: throw, don't just exit. */
         xlog(rt, LOG_UPCALL|LOG_ERR, "*** CHECK FAILED ***");

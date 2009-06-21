@@ -41,6 +41,7 @@ let trans_visitor
   let (word_mem:Il.mem) = abi.Abi.abi_word_mem in
   let (word_sz:int64) = abi.Abi.abi_word_sz in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
+  let imm i = Il.Imm (Asm.IMM i) in
 
   let emitters = Stack.create () in
   let push_new_emitter _ =
@@ -188,55 +189,6 @@ let trans_visitor
               | (_,_) -> err None "unhandled form of lval-ext"
   in
 
-
-  let trans_lval_ext
-      (base_slot:Ast.slot)
-      (base_reg:Il.reg option)
-      (base_off:Asm.expr64)
-      (comp:Ast.lval_component)
-      : (Il.operand * Ast.slot) =
-
-      match (base_slot.Ast.slot_ty, comp) with
-          (Some (Ast.TY_rec entries),
-           Ast.COMP_named (Ast.COMP_ident id)) ->
-            let layouts = layout_rec abi entries in
-            let (slot, layout) = atab_find layouts id in
-            let disp = layout.layout_offset in
-            let oper = (word_at_reg_off_imm
-                          base_reg base_off disp)
-            in
-              (oper, slot)
-
-        | (Some (Ast.TY_tup entries),
-           Ast.COMP_named (Ast.COMP_idx i)) ->
-            let layouts = layout_tup abi entries in
-            let slot = entries.(i) in
-            let disp = layouts.(i).layout_offset in
-            let oper = (word_at_reg_off_imm
-                          base_reg base_off disp)
-            in
-              (oper, slot)
-
-        | (Some (Ast.TY_vec ety),
-           Ast.COMP_named (Ast.COMP_idx i)) ->
-            let unit_sz = ty_sz abi ety in
-            let disp = (Int64.add 
-                         (word_n 3)
-                         (Int64.mul unit_sz (Int64.of_int i))) in
-
-            (* 
-             * (base_reg, base_off) points to the memory cell holding the 
-             * pointer to the vector. We want to dereference that and form
-             * a new operand pointing to a slot within the vector. 
-             *)
-            let oper = deref_off (word_at_reg_off base_reg base_off) disp in
-            let slot = interior_slot ety in
-              (oper, slot)
-
-
-        | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
-  in
-
   let cell_vreg_num (vr:(int option) ref) : int =
     match !vr with
         None ->
@@ -281,7 +233,68 @@ let trans_visitor
       word_at_reg_off (Some (force_to_reg pp)) (Asm.IMM disp)
   in
 
-  let rec trans_lval_full
+  let rec trans_lval_ext
+      (base_slot:Ast.slot)
+      (base_reg:Il.reg option)
+      (base_off:Asm.expr64)
+      (comp:Ast.lval_component)
+      : (Il.operand * Ast.slot) =
+
+      match (base_slot.Ast.slot_ty, comp) with
+          (Some (Ast.TY_rec entries),
+           Ast.COMP_named (Ast.COMP_ident id)) ->
+            let layouts = layout_rec abi entries in
+            let (slot, layout) = atab_find layouts id in
+            let disp = layout.layout_offset in
+            let oper = (word_at_reg_off_imm
+                          base_reg base_off disp)
+            in
+              (oper, slot)
+
+        | (Some (Ast.TY_tup entries),
+           Ast.COMP_named (Ast.COMP_idx i)) ->
+            let layouts = layout_tup abi entries in
+            let slot = entries.(i) in
+            let disp = layouts.(i).layout_offset in
+            let oper = (word_at_reg_off_imm
+                          base_reg base_off disp)
+            in
+              (oper, slot)
+
+        | (Some (Ast.TY_vec ety),
+           Ast.COMP_named (Ast.COMP_idx i)) ->
+            let unit_sz = ty_sz abi ety in
+            let disp = (Int64.add 
+                         (word_n 3)
+                         (Int64.mul unit_sz (Int64.of_int i))) in
+
+            (* 
+             * (base_reg, base_off) points to the memory cell holding the 
+             * pointer to the vector. We want to dereference that and form
+             * a new operand pointing to a slot within the vector. 
+             *)
+            let oper = deref_off (word_at_reg_off base_reg base_off) disp in
+            let slot = interior_slot ety in
+              (oper, slot)
+
+
+        (* FIXME: bounds checking please! *)
+        | (Some (Ast.TY_vec ety),
+           Ast.COMP_atom at) ->
+            let atop = trans_atom at in
+            let unit_sz = ty_sz abi ety in
+            let slot = interior_slot ety in
+            let reg = next_vreg () in
+            let t = Il.Reg reg in
+              emit Il.UMUL t atop (imm unit_sz);
+              emit Il.ADD t t (word_at_reg_off base_reg base_off);
+              emit Il.ADD t t (imm (word_n 3));
+              let oper = word_at_reg_off (Some reg) (Asm.IMM 0L) in
+                (oper, slot)
+
+        | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
+
+  and trans_lval_full
       (lv:Ast.lval)
       (pcrel_ok:bool)
       (imm_ok:bool)

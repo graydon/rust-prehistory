@@ -886,7 +886,20 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
 
       | STMT_init_rec (dst, entries) ->
           fmt_lval ff dst;
-          fmt ff " = init_rec (...);"
+          fmt ff " = rec (...);"
+
+      | STMT_init_vec (dst, atoms) ->
+          fmt_lval ff dst;
+          fmt ff " = vec (...);"
+
+      | STMT_init_tup (dst, atoms) ->
+          fmt_lval ff dst;
+          fmt ff " = (...);"
+
+      | STMT_check_expr atom ->
+          fmt ff "check (";
+          fmt_atom ff atom;
+          fmt ff ");"
 
       | _ -> fmt ff "?stmt?;"
   end

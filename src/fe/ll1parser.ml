@@ -395,6 +395,12 @@ let rec clone_lval ps lval =
         Ast.LVAL_ext ((clone_lval ps base), ext)
 ;;
 
+let clone_atom ps atom = 
+  match atom with 
+      Ast.ATOM_literal _ -> atom
+    | Ast.ATOM_lval lv -> Ast.ATOM_lval (clone_lval ps lv)
+;;
+
 let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
   (ps.pstate_ctxt <- (n, lexpos ps) :: ps.pstate_ctxt;
    let res = f ps in
@@ -906,9 +912,11 @@ and parse_ext_pexp ps pexp =
             let ext =
               match peek ps with
                   LPAREN ->
+                    bump ps;
                     let rhs = parse_pexp ps in
-                    let bpos = lexpos ps in
-                      span ps apos bpos (PEXP_ext_pexp (pexp, rhs))
+                      expect ps RPAREN;
+                      let bpos = lexpos ps in
+                        span ps apos bpos (PEXP_ext_pexp (pexp, rhs))
                 | _ ->
                     let rhs = parse_name_component ps in
                     let bpos = lexpos ps in
@@ -1053,10 +1061,10 @@ and desugar_lval ps pexp =
 
       | PEXP_ext_pexp (base_pexp, ext_pexp) ->
           let (base_stmts, base_atom) = desugar_expr ps base_pexp in
-          let (ext_stmts, ext_atom) = desugar_expr ps base_pexp in
+          let (ext_stmts, ext_atom) = desugar_expr ps ext_pexp in
           let base_lval = atom_lval ps base_atom in
             (Array.append base_stmts ext_stmts,
-             Ast.LVAL_ext (base_lval, Ast.COMP_atom ext_atom))
+             Ast.LVAL_ext (base_lval, Ast.COMP_atom (clone_atom ps ext_atom)))
 
       | _ ->
           let (stmts, atom) = desugar_expr ps pexp in

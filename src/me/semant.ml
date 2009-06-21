@@ -137,7 +137,7 @@ let err (idopt:node_id option) =
 let lval_to_referent (cx:ctxt) (id:node_id) : node_id =
   if Hashtbl.mem cx.ctxt_lval_to_referent id
   then Hashtbl.find cx.ctxt_lval_to_referent id
-  else err (Some id) "Unresolved lval"
+  else failwith "Unresolved lval"
 ;;
 
 let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =

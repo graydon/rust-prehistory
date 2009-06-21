@@ -375,7 +375,13 @@ let lval_base_resolving_visitor
   let visit_lval_pre lv =
     let rec lookup_lval lv =
       match lv with
-          Ast.LVAL_ext (base, _) -> lookup_lval base
+          Ast.LVAL_ext (base, ext) ->
+            begin
+              lookup_lval base;
+              match ext with
+                  Ast.COMP_atom (Ast.ATOM_lval lv') -> lookup_lval lv'
+                | _ -> ()
+            end
         | Ast.LVAL_base nb ->
             let slot_id = lookup_slot_by_name_base nb.id nb.node in
               log cx "resolved lval #%d to slot #%d" (int_of_node nb.id) (int_of_node slot_id);
