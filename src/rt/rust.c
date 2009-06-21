@@ -1206,7 +1206,6 @@ rust_main_loop(rust_prog_t *prog,
 
     xlog(rt, LOG_RT, "finished main loop");
     del_rt(rt);
-    xlog(rt, LOG_RT, "freed runtime");
 }
 
 static void

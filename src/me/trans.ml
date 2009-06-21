@@ -179,6 +179,12 @@ let trans_visitor
                   then need_ty elts.(i).Ast.slot_ty
                   else err None "out-of-range tuple index %d" i
 
+              | (Ast.TY_vec ety, Ast.COMP_named (Ast.COMP_idx _)) -> 
+                  ety
+
+              | (Ast.TY_vec ety, Ast.COMP_atom _) -> 
+                  ety
+
               | (_,_) -> err None "unhandled form of lval-ext"
   in
 
@@ -210,6 +216,23 @@ let trans_visitor
                           base_reg base_off disp)
             in
               (oper, slot)
+
+        | (Some (Ast.TY_vec ety),
+           Ast.COMP_named (Ast.COMP_idx i)) ->
+            let unit_sz = ty_sz abi ety in
+            let disp = (Int64.add 
+                         (word_n 3)
+                         (Int64.mul unit_sz (Int64.of_int i))) in
+
+            (* 
+             * (base_reg, base_off) points to the memory cell holding the 
+             * pointer to the vector. We want to dereference that and form
+             * a new operand pointing to a slot within the vector. 
+             *)
+            let oper = deref_off (word_at_reg_off base_reg base_off) disp in
+            let slot = interior_slot ety in
+              (oper, slot)
+
 
         | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
   in
@@ -457,7 +480,7 @@ let trans_visitor
       (prog_lval:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (proc_operand, proc_slot) = trans_lval dst INTENT_write in
+    let (proc_operand, proc_slot) = trans_lval dst INTENT_init in
     let (prog_operand, prog_slot) = trans_lval prog_lval INTENT_read in
     let tsig =
       match prog_slot.Ast.slot_ty with
@@ -503,8 +526,8 @@ let trans_visitor
     let (dstop, _) = trans_lval dst INTENT_write in
       trans_upcall Abi.UPCALL_recv [| (alias dstop); (trans_atom (Ast.ATOM_lval chan)) |]
 
-  and trans_new_port (dst:Ast.lval) : unit =
-    let (dstop, dst_slot) = trans_lval dst INTENT_write in
+  and trans_init_port (dst:Ast.lval) : unit =
+    let (dstop, dst_slot) = trans_lval dst INTENT_init in
     let unit_ty = match slot_ty dst_slot with
         Ast.TY_port t -> t
       | _ -> err None "init dst of port-init has non-port type"
@@ -518,6 +541,53 @@ let trans_visitor
   and trans_kill (proc:Il.operand) : unit =
     (* FIXME: this needs to run the fini block and all that. *)
     trans_upcall Abi.UPCALL_kill [| proc |]
+
+    (*
+     * A vec is implicitly exterior: every slot vec[T] is 1 word and
+     * points to a refcounted structure. That structure has 3 words with
+     * defined meaning at the beginning; data follows the header.
+     *
+     *   word 0: refcount
+     *   word 1: allocated size of data
+     *   word 2: initialized size of data
+     *   word 3...N: data
+     *)
+
+  and trans_init_vec (dst:Ast.lval) (atoms:Ast.atom array) : unit =
+      let (dstop, dst_slot) = trans_lval dst INTENT_init in
+      let unit_ty = match slot_ty dst_slot with
+          Ast.TY_vec t -> t
+        | _ -> err None "init dst of vec-init has non-port type"
+      in
+      let unit_sz = ty_sz abi unit_ty in
+      let n_inits = Array.length atoms in
+      let init_sz = Int64.mul unit_sz (Int64.of_int n_inits) in
+      let padded_sz = Int64.add init_sz (word_n 3) in
+      let alloc_sz = next_power_of_two padded_sz in
+        trans_upcall Abi.UPCALL_malloc [| (alias dstop); Il.Imm (Asm.IMM alloc_sz) |];
+        mov (deref_off dstop (word_n 0)) (Il.Imm (Asm.IMM 1L));
+        mov (deref_off dstop (word_n 1)) (Il.Imm (Asm.IMM alloc_sz));
+        mov (deref_off dstop (word_n 2)) (Il.Imm (Asm.IMM init_sz));
+        Array.iteri
+          begin
+            fun i atom ->
+              let lval = (Ast.LVAL_ext
+                            (dst, (Ast.COMP_named (Ast.COMP_idx i))))
+              in
+              let expr = Ast.EXPR_atom atom in
+                trans_copy true lval expr
+          end
+          atoms
+
+  and next_power_of_two (x:int64) : int64 =
+    let xr = ref (Int64.sub x 1L) in
+      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 1);
+      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 2);
+      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 4);
+      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 8);
+      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 16);
+      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 32);
+      Int64.add 1L (!xr)
 
   and exterior_refcount_cell (operand:Il.operand) : Il.operand =
     refcount_cell Abi.exterior_slot_field_refcnt operand
@@ -533,6 +603,8 @@ let trans_visitor
         Ast.TY_port _ -> Some (refcount_cell Abi.port_field_refcnt operand)
       | Ast.TY_chan _ -> Some (refcount_cell Abi.chan_field_refcnt operand)
       | Ast.TY_proc -> Some (refcount_cell Abi.proc_field_refcnt operand)
+      (* Vecs are pseudo-exterior. *)
+      | Ast.TY_vec _ -> Some (exterior_refcount_cell operand)
       | _ ->
             if slot.Ast.slot_mode = Ast.MODE_exterior
             then Some (exterior_refcount_cell operand)
@@ -1050,8 +1122,11 @@ let trans_visitor
             end
             atoms
 
+      | Ast.STMT_init_vec (dst, atoms) ->
+          trans_init_vec dst atoms
+
       | Ast.STMT_init_port dst ->
-          trans_new_port dst
+          trans_init_port dst
 
       | Ast.STMT_init_chan (dst, port) ->
           let (dst_operand, dst_slot) =

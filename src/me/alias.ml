@@ -35,6 +35,7 @@ let alias_analysis_visitor
         | Ast.STMT_recv (dst, _) -> alias dst
         | Ast.STMT_init_port (dst) -> alias dst
         | Ast.STMT_init_chan (dst, _) -> alias dst
+        | Ast.STMT_init_vec (dst, _) -> alias dst
         | _ -> () (* FIXME: plenty more to handle here. *)
     end;
     inner.Walk.visit_stmt_pre s

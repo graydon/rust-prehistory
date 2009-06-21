@@ -125,8 +125,7 @@ then
   begin
     Printf.fprintf stderr "Post-parse AST:\n%!";
     Format.set_margin 80;
-    Ast.fmt_crate Format.err_formatter crate;
-    Printf.fprintf stderr "\n%!";
+    Printf.fprintf stderr "%s\n!" (Ast.fmt_to_str Ast.fmt_crate crate)
   end
 
 let list_to_seq ls = Asm.SEQ (Array.of_list ls);;
