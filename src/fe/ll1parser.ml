@@ -45,6 +45,7 @@ type token =
   | CRATE
   | MOD
   | USE
+  | NATIVE
 
   (* Metaprogramming keywords *)
   | SYNTAX
@@ -177,6 +178,7 @@ let string_of_tok t =
     | CRATE      -> "crate"
     | MOD        -> "mod"
     | USE        -> "use"
+    | NATIVE     -> "native"
 
     (* Metaprogramming keywords *)
     | SYNTAX     -> "syntax"
@@ -284,7 +286,7 @@ let string_of_tok t =
 
     (* Process/program declarator types *)
     | PROG         -> "prog"
-    | PROC       -> "proc"
+    | PROC         -> "proc"
 
     | EOF        -> "<EOF>"
 ;;
@@ -635,6 +637,23 @@ and parse_constraint ps =
 and parse_constrs ps =
   ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps
 
+and parse_ty_mach ps =
+  let m =
+    match peek ps with
+        UNSIGNED 8 -> TY_u8
+      | UNSIGNED 16 -> TY_u16
+      | UNSIGNED 32 -> TY_u32
+      | UNSIGNED 64 -> TY_u64
+      | SIGNED 8 -> TY_s8
+      | SIGNED 16 -> TY_s16
+      | SIGNED 32 -> TY_s32
+      | SIGNED 64 -> TY_s64
+      | BFP 64 -> TY_b64
+      | _ -> raise (unexpected ps)
+  in
+    bump ps;
+    m
+
 and parse_atomic_ty ps =
   match peek ps with
 
@@ -715,7 +734,7 @@ and parse_atomic_ty ps =
             | Some t -> t
           else Ast.TY_tup slots
 
-    | _ -> raise (unexpected ps)
+    | _ -> Ast.TY_mach (parse_ty_mach ps)
 
 
 and parse_slot param_slot ps =
@@ -1668,6 +1687,58 @@ and parse_ty_params ps =
         bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) parse_ty_param ps
     | _ -> arr []
 
+and parse_native_mod_item ps =
+  let apos = lexpos ps in
+  let (ident, item) =
+    match peek ps with
+        FN None ->
+          begin
+            bump ps;
+            let ident = ctxt "native fn: ident" parse_ident ps in
+            let (inputs, constrs, output) = ctxt "native fn: in_and_out" parse_in_and_out ps in
+              expect ps SEMI;
+              let inslots = Array.map (fun (sloti,_) -> sloti.node) inputs in
+              let tsig =
+                {
+                  Ast.sig_input_slots = inslots;
+                  Ast.sig_input_constrs = constrs;
+                  Ast.sig_output_slot = output.node;
+                }
+              in
+                (ident, Ast.NATIVE_fn tsig)
+          end
+
+      | TYPE ->
+          begin
+            bump ps;
+            let ident = ctxt "native ty: ident" parse_ident ps in
+            let tymach = ctxt "native ty: representation" parse_ty_mach ps in
+              expect ps SEMI;
+                (ident, Ast.NATIVE_type tymach)
+          end
+
+      | MOD ->
+          begin
+            bump ps;
+            let ident = ctxt "native mod: ident" parse_ident ps in
+            let items = (bracketed_zero_or_more LBRACE RBRACE None
+                           parse_native_mod_item ps)
+            in
+            let htab = Hashtbl.create 4 in
+              Array.iter
+                begin
+                  fun (ident, item) ->
+                    htab_put htab ident item
+                end
+                items;
+              (ident, Ast.NATIVE_mod htab)
+          end
+
+      | _ -> raise (unexpected ps)
+  in
+  let bpos = lexpos ps in
+    (ident, (span ps apos bpos item))
+
 
 and parse_mod_item ps =
   let apos = lexpos ps in
@@ -1760,55 +1831,65 @@ and parse_crate_mod_entry
     (prefix:string)
     (files:(node_id,filename) Hashtbl.t)
     (mod_items:Ast.mod_items)
+    (native_mod_items:Ast.native_mod_items)
     (ps:pstate)
     : unit =
-  expect ps MOD;
-  let apos = lexpos ps in
-  let name = ctxt "mod: name" parse_ident ps in
-  let fname =
-    match peek ps with
-        EQ ->
-          bump ps;
-          (match peek ps with
-               LIT_STR s -> bump ps; s
-             | _ -> raise (unexpected ps))
-      | _ -> name
-  in
-  let full_fname = Filename.concat prefix fname in
-  let (items,is_cu) =
-    match peek ps with
-        SEMI ->
-          bump ps;
-          let p =
-            make_parser
-              ps.pstate_temp_id
-              ps.pstate_node_id
-              ps.pstate_sess
-              ps.pstate_lexfun
-              full_fname
+  match peek ps with
+      NATIVE ->
+        begin
+            bump ps;
+            let (ident, item) = parse_native_mod_item ps in
+              htab_put native_mod_items ident item
+        end
+    | _ ->
+        begin
+          expect ps MOD;
+          let apos = lexpos ps in
+          let name = ctxt "mod: name" parse_ident ps in
+          let fname =
+            match peek ps with
+                EQ ->
+                  bump ps;
+                  (match peek ps with
+                       LIT_STR s -> bump ps; s
+                     | _ -> raise (unexpected ps))
+              | _ -> name
           in
-            (parse_raw_mod_items p, true)
+          let full_fname = Filename.concat prefix fname in
+          let (items,is_cu) =
+            match peek ps with
+                SEMI ->
+                  bump ps;
+                  let p =
+                    make_parser
+                      ps.pstate_temp_id
+                      ps.pstate_node_id
+                      ps.pstate_sess
+                      ps.pstate_lexfun
+                      full_fname
+                  in
+                    (parse_file_mod_items p, true)
+              | RBRACE ->
+                  bump ps;
+                  let items =
+                    parse_crate_mod_entries full_fname files ps
+                  in
+                    (items, false)
 
-      | RBRACE ->
-          bump ps;
-          let items =
-            parse_crate_mod_entries full_fname files ps
+              | _ -> raise (unexpected ps)
           in
-            (items, false)
+          let bpos = lexpos ps in
+          let item_mod =
+            (* FIXME: permit type-parametric top-level modules. *)
+            span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
+                                                  Ast.decl_item = items })
+          in
+            if is_cu
+            then htab_put files item_mod.id full_fname;
+            htab_put mod_items name item_mod
+        end
 
-      | _ -> raise (unexpected ps)
-  in
-  let bpos = lexpos ps in
-  let item_mod =
-    (* FIXME: permit type-parametric top-level modules. *)
-    span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
-                                          Ast.decl_item = items })
-  in
-    if is_cu
-    then htab_put files item_mod.id full_fname;
-    htab_put mod_items name item_mod
-
-and parse_raw_mod_items
+and parse_file_mod_items
     (ps:pstate)
     : Ast.mod_items =
   let items = Hashtbl.create 4 in
@@ -1828,9 +1909,10 @@ and parse_crate_mod_entries
     (ps:pstate)
     : Ast.mod_items =
   let items = Hashtbl.create 4 in
+  let nitems = Hashtbl.create 4 in
     while peek ps != LBRACE
     do
-      parse_crate_mod_entry prefix files items ps
+      parse_crate_mod_entry prefix files items nitems ps
     done;
     expect ps LBRACE;
     items
@@ -1842,6 +1924,7 @@ and parse_root_crate_entries
     (ps:pstate)
     : Ast.crate =
   let items = Hashtbl.create 4 in
+  let nitems = Hashtbl.create 4 in
   let explicit_main = ref None in
     while peek ps != EOF
     do
@@ -1856,8 +1939,8 @@ and parse_root_crate_entries
                     None -> explicit_main := Some name
                   | Some _ -> raise (err "multiple explicit main programs given in crate" ps )
             end
-        | MOD ->
-            parse_crate_mod_entry prefix files items ps
+        | NATIVE | MOD ->
+            parse_crate_mod_entry prefix files items nitems ps
         | _ -> raise (unexpected ps)
     done;
     expect ps EOF;
@@ -1867,6 +1950,7 @@ and parse_root_crate_entries
         | Some m -> m
     in
       { Ast.crate_items = items;
+        Ast.crate_native_items = nitems;
         Ast.crate_main = main;
         Ast.crate_files = files }
 
@@ -1925,6 +2009,7 @@ let parse_root_with_parse_fn
                (Session.string_of_pos pos) cx)
           ps.pstate_ctxt;
         { Ast.crate_items = Hashtbl.create 0;
+          Ast.crate_native_items = Hashtbl.create 0;
           Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
           Ast.crate_files = files }
 
@@ -1936,7 +2021,7 @@ let parse_root_srcfile_entries
     : Ast.crate =
   let stem = Filename.chop_suffix (Filename.basename fname) ".rs" in
   let apos = lexpos ps in
-  let items = parse_raw_mod_items ps in
+  let items = parse_file_mod_items ps in
   let bpos = lexpos ps in
   let modi = span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
                                                    Ast.decl_item = items })
@@ -1945,6 +2030,7 @@ let parse_root_srcfile_entries
     htab_put files modi.id fname;
     htab_put mitems stem modi;
     { Ast.crate_items = mitems;
+      Ast.crate_native_items = Hashtbl.create 0;
       Ast.crate_main = infer_main_prog ps mitems;
       Ast.crate_files = files }
 ;;

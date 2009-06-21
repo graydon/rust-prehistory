@@ -14,6 +14,7 @@
                 ("mod", MOD);
                 ("use", USE);
 
+                ("native", NATIVE);
                 ("syntax", SYNTAX);
                 ("meta", META);
 
@@ -127,6 +128,11 @@ rule token = parse
 | ')'                          { RPAREN     }
 | '['                          { LBRACKET   }
 | ']'                          { RBRACKET   }
+
+| 'u' (dec as n)               { UNSIGNED (int_of_string n) }
+| 's' (dec as n)               { SIGNED (int_of_string n)   }
+| 'b' (dec as n)               { BFP (int_of_string n)      }
+| 'd' (dec as n)               { DFP (int_of_string n)      }
 
 | "fn"                         { FN None                }
 | "fn?"                        { FN (Some Ast.PROTO_ques)   }

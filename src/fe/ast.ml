@@ -185,6 +185,9 @@ and ty_sig =
 and ty_fn_aux =
     {
       fn_pure: bool;
+      (* NB: limited-ness of a function only makes sense if functions
+       * have closures, and we're talking about the limited-ness of
+       * values held in its captured environment. *)
       fn_lim: ty_limit;
       fn_proto: proto option;
     }
@@ -443,6 +446,7 @@ and mod_item' =
   | MOD_ITEM_prog of prog decl
 
 and mod_item = mod_item' identified
+and mod_items = (ident, mod_item) Hashtbl.t
 
 and mod_type_item' =
     MOD_TYPE_ITEM_opaque_type of ty_limit decl
@@ -453,14 +457,22 @@ and mod_type_item' =
   | MOD_TYPE_ITEM_prog of ty_sig decl
 
 and mod_type_item = mod_type_item' identified
-
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
-and mod_items = (ident, mod_item) Hashtbl.t
+
+and native_mod_item' =
+    NATIVE_fn of ty_sig
+  | NATIVE_type of ty_mach
+  | NATIVE_mod of native_mod_items
+
+and native_mod_item = native_mod_item' identified
+and native_mod_items = (ident, native_mod_item) Hashtbl.t
+
 
 and crate =
     {
       crate_items: mod_items;
+      crate_native_items: native_mod_items;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;
     }
