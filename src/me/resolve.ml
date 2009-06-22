@@ -196,6 +196,8 @@ let type_resolving_visitor
                            (Hashtbl.find block_items ident)))
               else None
 
+        | SCOPE_crate _ -> None
+
         | SCOPE_mod_item item ->
             begin
               match item.node with
@@ -397,7 +399,7 @@ let lval_base_resolving_visitor
 
 let process_crate
     (cx:ctxt)
-    (items:Ast.mod_items)
+    (crate:Ast.crate)
     : unit =
   let (scopes:scope Stack.t) = Stack.create () in
   let passes =
@@ -412,7 +414,7 @@ let process_crate
                Walk.empty_visitor)));
     |]
   in
-    run_passes cx passes (log cx "%s") items
+    run_passes cx passes (log cx "%s") crate
 ;;
 
 (* ***********************************

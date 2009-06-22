@@ -361,7 +361,7 @@ let layout_visitor
 
 let process_crate
     (cx:ctxt)
-    (items:Ast.mod_items)
+    (crate:Ast.crate)
     : unit =
   let passes =
     [|
@@ -371,7 +371,7 @@ let process_crate
          Walk.empty_visitor)
     |];
   in
-    run_passes cx passes (log cx "%s") items
+    run_passes cx passes (log cx "%s") crate
 ;;
 
 

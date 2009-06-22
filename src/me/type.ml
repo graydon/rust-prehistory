@@ -10,7 +10,7 @@ let log cx = Session.log "type"
 
 let process_crate
     (cx:ctxt)
-    (items:Ast.mod_items)
+    (crate:Ast.crate)
     : unit =
 ()
 ;;

@@ -469,13 +469,14 @@ and native_mod_item = native_mod_item' identified
 and native_mod_items = (ident, native_mod_item) Hashtbl.t
 
 
-and crate =
+and crate' =
     {
       crate_items: mod_items;
       crate_native_items: native_mod_items;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;
     }
+and crate = crate' identified
 ;;
 
 (***********************************************************************) 
@@ -1031,7 +1032,7 @@ and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
   Hashtbl.iter (fmt_mod_item ff) mi
 
 and fmt_crate (ff:Format.formatter) (c:crate) : unit =
-    fmt_mod_items ff c.crate_items
+    fmt_mod_items ff c.node.crate_items
 
 
 let fmt_to_str (f:Format.formatter -> 'a -> unit) (v:'a) : string =

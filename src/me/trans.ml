@@ -1446,7 +1446,7 @@ let emit_proc_to_c_glue cx =
 
 let trans_crate
     (cx:ctxt)
-    (items:Ast.mod_items)
+    (crate:Ast.crate)
     : (file_grouped_texts * Asm.item list * fixup) =
   let passes =
     [|
@@ -1457,7 +1457,7 @@ let trans_crate
     |];
   in
     log cx "translating crate with main program %s" cx.ctxt_main_name;
-    run_passes cx passes (log cx "%s") items;
+    run_passes cx passes (log cx "%s") crate;
     emit_c_to_proc_glue cx;
     emit_proc_to_c_glue cx;
     (cx.ctxt_texts, cx.ctxt_data_items, cx.ctxt_main_prog)

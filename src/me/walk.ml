@@ -45,6 +45,8 @@ type visitor =
         Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_type_item -> unit;
       visit_mod_type_item_post:
         Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_type_item -> unit;
+      visit_crate_pre: Ast.crate -> unit;
+      visit_crate_post: Ast.crate -> unit;
     }
 ;;
 
@@ -75,7 +77,9 @@ let empty_visitor =
     visit_mod_item_pre = (fun _ _ _ -> ());
     visit_mod_item_post = (fun _ _ _ -> ());
     visit_mod_type_item_pre = (fun _ _ _ -> ());
-    visit_mod_type_item_post = (fun _ _ _ -> ()); }
+    visit_mod_type_item_post = (fun _ _ _ -> ());
+    visit_crate_pre = (fun _ -> ());
+    visit_crate_post = (fun _ -> ()); }
 ;;
 
 
@@ -124,7 +128,26 @@ let walk_option
 ;;
 
 
-let rec walk_mod_items
+let rec walk_crate
+    (v:visitor)
+    (crate:Ast.crate)
+    : unit =
+    walk_bracketed
+      v.visit_crate_pre
+      (fun _ ->
+         walk_mod_items v crate.node.Ast.crate_items;
+         walk_native_mod_items v crate.node.Ast.crate_native_items)
+      v.visit_crate_post
+      crate
+
+and walk_native_mod_items
+    (v:visitor)
+    (items:Ast.native_mod_items)
+    : unit =
+  (* FIXME: possibly flesh this out if necessary. *)
+()
+
+and walk_mod_items
     (v:visitor)
     (items:Ast.mod_items)
     : unit =

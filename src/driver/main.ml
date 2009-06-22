@@ -133,14 +133,14 @@ let (abi:Abi.abi) = X86.abi;;
 let (select_insns:(Il.quads -> Asm.item)) = X86.select_insns sess;;
 
 (* Semantic passes. *)
-let sem_cx = Semant.new_ctxt sess abi crate
+let sem_cx = Semant.new_ctxt sess abi crate.node
 ;;
 
 let _ =
   begin
       Array.iter
         (fun proc ->
-           proc sem_cx crate.Ast.crate_items;
+           proc sem_cx crate;
            exit_if_failed ())
         [| Resolve.process_crate;
            Alias.process_crate;
@@ -156,7 +156,7 @@ let _ =
 (* Primary translation from AST -> IL quads. *)
 let ((file_texts:Semant.file_grouped_texts),
      (data_items:Asm.item list),
-     (root_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate.Ast.crate_items;;
+     (root_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate;;
 let _ = exit_if_failed ()
 ;;
 let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
@@ -216,7 +216,7 @@ let _ = exit_if_failed ()
 
 
 (* Emitting Dwarf and PE/ELF/Macho. *)
-let (dwarf:Dwarf.debug_records) = Dwarf.process_crate sem_cx crate.Ast.crate_items;;
+let (dwarf:Dwarf.debug_records) = Dwarf.process_crate sem_cx crate;;
 let _ = exit_if_failed ()
 ;;
 

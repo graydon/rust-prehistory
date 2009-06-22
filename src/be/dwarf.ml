@@ -993,7 +993,7 @@ let dwarf_visitor
 
 let process_crate
     (cx:ctxt)
-    (items:Ast.mod_items)
+    (crate:Ast.crate)
     : debug_records =
 
   let cu_aranges = ref [] in
@@ -1020,7 +1020,7 @@ let process_crate
   in
 
     log cx "emitting DWARF records";
-    run_passes cx passes (log cx "%s") items;
+    run_passes cx passes (log cx "%s") crate;
     {
       debug_aranges = SEQ (Array.of_list (List.rev (!cu_aranges)));
       debug_pubnames = SEQ (Array.of_list (List.rev (!cu_pubnames)));

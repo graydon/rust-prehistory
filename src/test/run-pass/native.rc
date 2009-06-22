@@ -1,5 +1,5 @@
 native mod sys {
-  fn puts(str s) -> nil;
+  fn puts(~str s) -> nil;
 }
 
 mod user = "native.rs";

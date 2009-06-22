@@ -172,7 +172,7 @@ let auto_inference_visitor
 
 let process_crate
     (cx:ctxt)
-    (items:Ast.mod_items)
+    (crate:Ast.crate)
     : unit =
   try
     let auto_queue = Queue.create () in
@@ -195,11 +195,11 @@ let process_crate
             (Queue.length auto_queue);
           Queue.clear auto_queue;
           progress := false;
-          Walk.walk_mod_items
+          Walk.walk_crate
             (Walk.mod_item_logging_visitor
                (log cx "auto inference pass %d: %s" (!auto_pass))
                (auto_inference_visitor cx progress Walk.empty_visitor))
-            items;
+            crate;
           Queue.iter
             (fun id -> enqueue_auto_slot id
                (Hashtbl.find cx.ctxt_all_slots id))

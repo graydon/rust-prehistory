@@ -1926,6 +1926,7 @@ and parse_root_crate_entries
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
   let explicit_main = ref None in
+  let apos = lexpos ps in
     while peek ps != EOF
     do
       match peek ps with
@@ -1949,10 +1950,12 @@ and parse_root_crate_entries
           None -> infer_main_prog ps items
         | Some m -> m
     in
-      { Ast.crate_items = items;
-        Ast.crate_native_items = nitems;
-        Ast.crate_main = main;
-        Ast.crate_files = files }
+    let bpos = lexpos ps in
+      span ps apos bpos
+        { Ast.crate_items = items;
+          Ast.crate_native_items = nitems;
+          Ast.crate_main = main;
+          Ast.crate_files = files }
 
 and infer_main_prog
     (ps:pstate)
@@ -1992,26 +1995,28 @@ let parse_root_with_parse_fn
     tok
     : Ast.crate =
   let files = Hashtbl.create 0 in
-  try
-    let fname = sess.Session.sess_in in
-    let tref = ref (Temp 0) in
-    let nref = ref (Node 0) in
-    let ps = make_parser tref nref sess tok fname in
+  let fname = sess.Session.sess_in in
+  let tref = ref (Temp 0) in
+  let nref = ref (Node 0) in
+  let ps = make_parser tref nref sess tok fname in
+  let apos = lexpos ps in
+    try
       if Filename.check_suffix fname suffix
       then fn fname (Filename.dirname fname) files ps
       else raise (err "parsing wrong kind of file" ps)
-  with
-      Parse_err (ps, str) ->
-        Session.fail sess "Parse error: %s\n%!" str;
-        List.iter
-          (fun (cx,pos) ->
-             Session.fail sess "%s:E (parse context): %s\n%!"
-               (Session.string_of_pos pos) cx)
-          ps.pstate_ctxt;
-        { Ast.crate_items = Hashtbl.create 0;
-          Ast.crate_native_items = Hashtbl.create 0;
-          Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
-          Ast.crate_files = files }
+    with
+        Parse_err (ps, str) ->
+          Session.fail sess "Parse error: %s\n%!" str;
+          List.iter
+            (fun (cx,pos) ->
+               Session.fail sess "%s:E (parse context): %s\n%!"
+                 (Session.string_of_pos pos) cx)
+            ps.pstate_ctxt;
+          span ps apos apos
+            { Ast.crate_items = Hashtbl.create 0;
+              Ast.crate_native_items = Hashtbl.create 0;
+              Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
+              Ast.crate_files = files }
 
 let parse_root_srcfile_entries
     (fname:string)
@@ -2029,10 +2034,10 @@ let parse_root_srcfile_entries
   let mitems = Hashtbl.create 0 in
     htab_put files modi.id fname;
     htab_put mitems stem modi;
-    { Ast.crate_items = mitems;
-      Ast.crate_native_items = Hashtbl.create 0;
-      Ast.crate_main = infer_main_prog ps mitems;
-      Ast.crate_files = files }
+    span ps apos bpos { Ast.crate_items = mitems;
+                        Ast.crate_native_items = Hashtbl.create 0;
+                        Ast.crate_main = infer_main_prog ps mitems;
+                        Ast.crate_files = files }
 ;;
 
 let parse_crate = parse_root_with_parse_fn ".rc" parse_root_crate_entries;;

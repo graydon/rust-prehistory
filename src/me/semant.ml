@@ -438,6 +438,7 @@ type scope =
     SCOPE_block of node_id
   | SCOPE_mod_item of Ast.mod_item
   | SCOPE_mod_type_item of Ast.mod_type_item
+  | SCOPE_crate of Ast.crate
 
 let scope_stack_managing_visitor
     (scopes:scope Stack.t)
@@ -467,13 +468,23 @@ let scope_stack_managing_visitor
     inner.Walk.visit_mod_type_item_post n p i;
     ignore (Stack.pop scopes)
   in
+  let visit_crate_pre c =
+    Stack.push (SCOPE_crate c) scopes;
+    inner.Walk.visit_crate_pre c
+  in
+  let visit_crate_post c =
+    inner.Walk.visit_crate_post c;
+    ignore (Stack.pop scopes)
+  in
     { inner with
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_mod_type_item_pre = visit_mod_type_item_pre;
-        Walk.visit_mod_type_item_post = visit_mod_type_item_post; }
+        Walk.visit_mod_type_item_post = visit_mod_type_item_post;
+        Walk.visit_crate_pre = visit_crate_pre;
+        Walk.visit_crate_post = visit_crate_post; }
 ;;
 
 (* Generic lookup, used for slots, items, types, etc. *)
@@ -525,6 +536,14 @@ let lookup
                       else
                         None
               end
+
+      | SCOPE_crate crate ->
+          begin
+            match key with
+                Ast.KEY_temp _ -> None
+              | Ast.KEY_ident ident ->
+                  check_items scope ident crate.node.Ast.crate_items
+          end
 
       | SCOPE_mod_item item ->
           begin
@@ -601,13 +620,13 @@ let run_passes
     (cx:ctxt)
     (passes:Walk.visitor array)
     (log:string->unit)
-    (items:Ast.mod_items)
+    (crate:Ast.crate)
     : unit =
   let do_pass i p =
     let logger s = log (Printf.sprintf "pass %d: %s" i s) in
-      Walk.walk_mod_items
+      Walk.walk_crate
         (Walk.mod_item_logging_visitor logger p)
-        items
+        crate
   in
   let sess = cx.ctxt_sess in
     if sess.Session.sess_failed

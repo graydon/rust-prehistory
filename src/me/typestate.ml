@@ -18,6 +18,7 @@ let id_of_scope (sco:scope) : node_id =
       SCOPE_block id -> id
     | SCOPE_mod_item i -> i.id
     | SCOPE_mod_type_item ti -> ti.id
+    | SCOPE_crate c -> c.id
 ;;
 
 
@@ -762,7 +763,7 @@ let lifecycle_visitor
 
 let process_crate
     (cx:ctxt)
-    (items:Ast.mod_items)
+    (crate:Ast.crate)
     : unit =
   let (scopes:scope Stack.t) = Stack.create () in
   let constr_id = ref 0 in
@@ -794,10 +795,10 @@ let process_crate
          Walk.empty_visitor)
     |]
   in
-    run_passes cx setup_passes (log cx "%s") items;
+    run_passes cx setup_passes (log cx "%s") crate;
     run_dataflow cx (!constr_id) graph;
-    run_passes cx verify_passes (log cx "%s") items;
-    run_passes cx aux_passes (log cx "%s") items
+    run_passes cx verify_passes (log cx "%s") crate;
+    run_passes cx aux_passes (log cx "%s") crate
 ;;
 
 
