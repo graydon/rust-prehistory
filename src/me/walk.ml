@@ -41,6 +41,10 @@ type visitor =
         Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_item -> unit;
       visit_mod_item_post:
         Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_item -> unit;
+      visit_native_mod_item_pre:
+        Ast.ident -> Ast.native_mod_item -> unit;
+      visit_native_mod_item_post:
+        Ast.ident -> Ast.native_mod_item -> unit;
       visit_mod_type_item_pre:
         Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_type_item -> unit;
       visit_mod_type_item_post:
@@ -76,6 +80,8 @@ let empty_visitor =
     visit_lval_post = (fun _ -> ());
     visit_mod_item_pre = (fun _ _ _ -> ());
     visit_mod_item_post = (fun _ _ _ -> ());
+    visit_native_mod_item_pre = (fun _ _ -> ());
+    visit_native_mod_item_post = (fun _ _ -> ());
     visit_mod_type_item_pre = (fun _ _ _ -> ());
     visit_mod_type_item_post = (fun _ _ _ -> ());
     visit_crate_pre = (fun _ -> ());
@@ -98,9 +104,21 @@ let mod_item_logging_visitor
     inner.visit_mod_item_post name params item;
     ignore (Stack.pop names)
   in
+  let visit_native_mod_item_pre name item =
+    Stack.push name names;
+    logfn (Printf.sprintf "entering %s (native)" (String.concat "." (stk_elts_from_bot names)));
+    inner.visit_native_mod_item_pre name item
+  in
+  let visit_native_mod_item_post name item =
+    logfn (Printf.sprintf "leaving %s (native)" (String.concat "." (stk_elts_from_bot names)));
+    inner.visit_native_mod_item_post name item;
+    ignore (Stack.pop names)
+  in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;
-        visit_mod_item_post = visit_mod_item_post }
+        visit_mod_item_post = visit_mod_item_post;
+        visit_native_mod_item_pre = visit_native_mod_item_pre;
+        visit_native_mod_item_post = visit_native_mod_item_post }
 ;;
 
 
@@ -140,13 +158,6 @@ let rec walk_crate
       v.visit_crate_post
       crate
 
-and walk_native_mod_items
-    (v:visitor)
-    (items:Ast.native_mod_items)
-    : unit =
-  (* FIXME: possibly flesh this out if necessary. *)
-()
-
 and walk_mod_items
     (v:visitor)
     (items:Ast.mod_items)
@@ -178,6 +189,31 @@ and walk_mod_item
       (v.visit_mod_item_pre name params)
       children
       (v.visit_mod_item_post name params)
+      item
+
+
+and walk_native_mod_items
+    (v:visitor)
+    (items:Ast.native_mod_items)
+    : unit =
+  Hashtbl.iter (walk_native_mod_item v) items
+
+
+and walk_native_mod_item
+    (v:visitor)
+    (name:Ast.ident)
+    (item:Ast.native_mod_item)
+    : unit =
+  let children =
+    match item.node with
+        Ast.NATIVE_fn tsig -> (fun _ -> ())
+      | Ast.NATIVE_type tmach -> (fun _ -> walk_ty v (Ast.TY_mach tmach))
+      | Ast.NATIVE_mod items -> (fun _ -> walk_native_mod_items v items)
+  in
+    walk_bracketed
+      (v.visit_native_mod_item_pre name)
+      children
+      (v.visit_native_mod_item_post name)
       item
 
 
@@ -229,6 +265,7 @@ and walk_ty
       children
       v.visit_ty_post
       ty
+
 
 and walk_ty_sig
     (v:visitor)

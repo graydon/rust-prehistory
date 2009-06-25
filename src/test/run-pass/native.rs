@@ -3,6 +3,6 @@
 prog a
 {
   main {
-    // sys.puts("hello, native world\n");
+    puts("hello, native world\n");
   }
 }

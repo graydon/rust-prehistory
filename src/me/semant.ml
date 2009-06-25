@@ -542,7 +542,12 @@ let lookup
             match key with
                 Ast.KEY_temp _ -> None
               | Ast.KEY_ident ident ->
-                  check_items scope ident crate.node.Ast.crate_items
+                  match
+                    check_items scope ident crate.node.Ast.crate_items
+                  with
+                      None ->
+                        check_items scope ident crate.node.Ast.crate_native_items
+                    | x -> x
           end
 
       | SCOPE_mod_item item ->

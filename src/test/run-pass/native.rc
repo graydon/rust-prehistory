@@ -1,5 +1,3 @@
-native mod sys {
-  fn puts(~str s) -> nil;
-}
+native fn puts(~str s) -> nil;
 
 mod user = "native.rs";
