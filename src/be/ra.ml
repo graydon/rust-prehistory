@@ -76,6 +76,26 @@ let convert_labels cx =
       (!new_labels)
 ;;
 
+let convert_pre_spills cx mkspill =
+  let n = ref 0 in
+  let convert_operand op =
+    match op with
+        Spill i -> (if i > (!n) then n := i;
+                    mkspill i)
+      | _ -> op
+  in
+  for i = 0 to (Array.length cx.ctxt_quads) -1
+  do
+    let q = cx.ctxt_quads.(i) in
+      cx.ctxt_quads.(i) <-
+        { q with
+            quad_dst = convert_operand q.quad_dst;
+            quad_lhs = convert_operand q.quad_lhs;
+            quad_rhs = convert_operand q.quad_rhs }
+  done;
+    !n
+;;
+
 let kill_quad i cx =
   cx.ctxt_quads.(i) <-
     { deadq with Il.quad_fixup = cx.ctxt_quads.(i).Il.quad_fixup }
@@ -295,6 +315,12 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
             dump_quads cx
         end
     in
+
+    (* Work out pre-spilled slots and allocate 'em. *)
+    let spill_slot i = abi.Abi.abi_spill_slot framesz i in
+    let n_pre_spills = convert_pre_spills cx spill_slot in
+    let spill_slot i = abi.Abi.abi_spill_slot framesz (n_pre_spills + i) in
+
     let (live_in_vregs, live_out_vregs) = calculate_live_bitvectors cx in
     let inactive_hregs = ref [] in (* [hreg] *)
     let active_hregs = ref [] in (* [hreg] *)
@@ -308,7 +334,6 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       newq := {q with quad_fixup = !fixup} :: (!newq);
       fixup := None
     in
-    let spill_slot i = abi.Abi.abi_spill_slot framesz i in
     let hr_str = cx.ctxt_abi.Abi.abi_str_of_hardreg in
     let mov a b = { quad_op = UMOV;
                     quad_dst = a;

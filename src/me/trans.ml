@@ -13,7 +13,6 @@ let imm_true = Il.Imm (Asm.IMM 1L);;
 let imm_false = Il.Imm (Asm.IMM 0L);;
 let badlab = Il.Label (-1);;
 
-
 type intent =
     INTENT_init
   | INTENT_read
@@ -108,7 +107,8 @@ let trans_visitor
 
   let lea (dst:Il.operand) (src:Il.operand) : unit =
     match src with
-        Il.Mem _ -> emit Il.LEA dst src Il.Nil
+        Il.Mem _ | Il.Spill _ ->
+          emit Il.LEA dst src Il.Nil
       | _ -> err None "LEA on non-memory operand"
   in
 
@@ -116,6 +116,15 @@ let trans_visitor
     let addr = Il.Reg (Il.next_vreg (emitter())) in
       lea addr src;
       addr
+  in
+
+  let force_to_mem (src:Il.operand) : Il.operand =
+    match src with
+        Il.Mem _ | Il.Spill _ -> src
+      | Il.Reg _ | Il.Imm _ ->
+          let s = (Il.next_spill (emitter())) in
+            mov s src; s
+      | _ -> err None "force_to_mem on illegal operand"
   in
 
   let deref (mem:Il.operand) : Il.operand =
@@ -773,9 +782,12 @@ let trans_visitor
   and deref_slot (operand:Il.operand) (slot:Ast.slot) (intent:intent) : Il.operand =
     match slot.Ast.slot_mode with
         Ast.MODE_interior -> operand
-      | Ast.MODE_read_alias -> deref operand
-      | Ast.MODE_write_alias -> deref operand
       | Ast.MODE_exterior -> deref_exterior intent operand slot
+      | Ast.MODE_read_alias
+      | Ast.MODE_write_alias ->
+          match intent with
+              INTENT_init -> operand
+            | _ -> deref operand
 
 
   and trans_copy_rec
@@ -961,7 +973,12 @@ let trans_visitor
     match atom with
       | (Ast.ATOM_literal _) ->
           let src = trans_atom atom in
-            mov (deref_slot dst dst_slot INTENT_init) src
+            begin
+              match dst_slot.Ast.slot_mode with
+                  Ast.MODE_read_alias
+                | Ast.MODE_write_alias -> mov dst (alias (force_to_mem src))
+                | _ -> mov (deref_slot dst dst_slot INTENT_init) src
+            end
       | Ast.ATOM_lval src_lval ->
           let (src, src_slot) = trans_lval src_lval INTENT_read in
             trans_init_slot dst dst_slot src src_slot
