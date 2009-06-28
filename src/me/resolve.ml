@@ -105,53 +105,60 @@ let all_item_collecting_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
-  let visit_mod_item_pre n p i =
-    htab_put cx.ctxt_all_items i.id i.node;
+
+  let visit_native_mod_item_pre n i =
+    htab_put cx.ctxt_all_native_items i.id i.node;
     htab_put cx.ctxt_item_names i.id n;
-    log cx "collected item #%d (%s)" (int_of_node i.id) n;
-    begin
-      (* 
-       * Pick up some slot names for error messages.
-       * FIXME: this is incomplete. 
-       *)
-      let owned owner sloti =
-        htab_put cx.ctxt_slot_owner sloti owner
-      in
-      let note_header owner =
-        Array.iter
-          (fun (sloti,ident) ->
-             owned owner sloti.id;
-             htab_put cx.ctxt_slot_keys sloti.id (Ast.KEY_ident ident))
-      in
-      match i.node with
-          Ast.MOD_ITEM_fn fd ->
-            begin
-              note_header i.id fd.Ast.decl_item.Ast.fn_input_slots;
-              owned i.id fd.Ast.decl_item.Ast.fn_output_slot.id
-            end
-        | Ast.MOD_ITEM_pred pd ->
-            begin
-              note_header i.id pd.Ast.decl_item.Ast.pred_input_slots
-            end
-        | Ast.MOD_ITEM_prog pd ->
-            begin
-              Hashtbl.iter (fun _ sloti -> owned i.id sloti.id)
-                pd.Ast.decl_item.Ast.prog_slots;
-              match pd.Ast.decl_item.Ast.prog_init with
-                  None -> ()
-                | Some init ->
-                    begin
-                      note_header init.id init.node.Ast.init_input_slots;
-                      owned init.id init.node.Ast.init_proc_input.id;
-                      owned init.id init.node.Ast.init_output_slot.id
-                    end
-            end
-        | _ -> ()
-    end;
-    inner.Walk.visit_mod_item_pre n p i
+    log cx "collected native item #%d (%s)" (int_of_node i.id) n;
+    inner.Walk.visit_native_mod_item_pre n i
+  in
+
+  let visit_mod_item_pre n p i =
+    let owned owner sloti =
+      htab_put cx.ctxt_slot_owner sloti owner
+    in
+    let note_header owner =
+      Array.iter
+        (fun (sloti,ident) ->
+           owned owner sloti.id;
+           htab_put cx.ctxt_slot_keys sloti.id (Ast.KEY_ident ident))
+    in
+      htab_put cx.ctxt_all_items i.id i.node;
+      htab_put cx.ctxt_item_names i.id n;
+      log cx "collected item #%d (%s)" (int_of_node i.id) n;
+      begin
+        (* FIXME: this is incomplete. *)
+        match i.node with
+            Ast.MOD_ITEM_fn fd ->
+              begin
+                note_header i.id fd.Ast.decl_item.Ast.fn_input_slots;
+                owned i.id fd.Ast.decl_item.Ast.fn_output_slot.id
+              end
+          | Ast.MOD_ITEM_pred pd ->
+              begin
+                note_header i.id pd.Ast.decl_item.Ast.pred_input_slots
+              end
+          | Ast.MOD_ITEM_prog pd ->
+              begin
+                Hashtbl.iter (fun _ sloti -> owned i.id sloti.id)
+                  pd.Ast.decl_item.Ast.prog_slots;
+                match pd.Ast.decl_item.Ast.prog_init with
+                    None -> ()
+                  | Some init ->
+                      begin
+                        note_header init.id init.node.Ast.init_input_slots;
+                        owned init.id init.node.Ast.init_proc_input.id;
+                        owned init.id init.node.Ast.init_output_slot.id
+                      end
+              end
+          | _ -> ()
+      end;
+      inner.Walk.visit_mod_item_pre n p i
   in
     { inner with
-        Walk.visit_mod_item_pre = visit_mod_item_pre }
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
+    }
 ;;
 
 
@@ -336,16 +343,40 @@ let type_resolving_visitor
   in
 
   let visit_mod_item_pre id params item =
-    try
-      let ty = resolve_ty (ty_of_mod_item true item) in
-        htab_put cx.ctxt_all_item_types item.id ty
-    with
-        Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
+    begin
+      try
+        let ty = resolve_ty (ty_of_mod_item true item) in
+          htab_put cx.ctxt_all_item_types item.id ty
+      with
+          Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
+    end;
+    inner.Walk.visit_mod_item_pre id params item
+  in
 
+  let visit_native_mod_item_pre id item =
+    begin
+      match item.node with
+          (* FIXME: this is incomplete. *)
+          Ast.NATIVE_fn tsig ->
+            begin
+              let taux = { Ast.fn_pure = false;
+                           Ast.fn_lim = Ast.UNLIMITED;
+                           Ast.fn_proto = None }
+              in
+                try
+                  let ty = resolve_ty (Ast.TY_fn (tsig, taux)) in
+                    htab_put cx.ctxt_all_item_types item.id ty
+              with
+                  Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
+            end
+        | _ -> ()
+    end;
+    inner.Walk.visit_native_mod_item_pre id item
   in
     { inner with
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;
-        Walk.visit_mod_item_pre = visit_mod_item_pre }
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
 ;;
 
 

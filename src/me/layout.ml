@@ -278,6 +278,23 @@ let layout_visitor
         | _ -> ()
     end
   in
+  let visit_native_mod_item_pre n i =
+    begin
+      match i.node with
+          Ast.NATIVE_fn tsig ->
+            enter_frame i.id;
+        | _ -> ()
+    end;
+    inner.Walk.visit_native_mod_item_pre n i
+  in
+  let visit_native_mod_item_post n i =
+    inner.Walk.visit_native_mod_item_post n i;
+    begin
+      match i.node with
+          Ast.NATIVE_fn _ -> leave_frame ()
+        | _ -> ()
+    end
+  in
   let visit_block_pre b =
     let stk = Stack.top block_stacks in
     let off =
@@ -305,7 +322,8 @@ let layout_visitor
   let ty_sig_of_callee (id:node_id) : Ast.ty_sig =
     let referent = lval_to_referent cx id in
     let ty =
-      if Hashtbl.mem cx.ctxt_all_items referent
+      if (Hashtbl.mem cx.ctxt_all_items referent or
+            Hashtbl.mem cx.ctxt_all_native_items referent)
       then Hashtbl.find cx.ctxt_all_item_types referent
       else slot_ty (Hashtbl.find cx.ctxt_all_slots referent)
     in
@@ -345,6 +363,8 @@ let layout_visitor
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
+        Walk.visit_native_mod_item_post = visit_native_mod_item_post;
 
         Walk.visit_init_pre = visit_init_pre;
         Walk.visit_main_pre = visit_main_pre;

@@ -344,6 +344,7 @@ type pstate =
       mutable pstate_ctxt         : (string * pos) list;
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
+      pstate_file         : filename;
       pstate_sess         : Session.sess;
       pstate_temp_id   : temp_id ref;
       pstate_node_id   : node_id ref }
@@ -1820,6 +1821,7 @@ and make_parser tref nref sess tok fname =
         pstate_ctxt = [];
         pstate_lexfun = tok;
         pstate_lexbuf = lexbuf;
+        pstate_file = fname;
         pstate_sess = sess;
         pstate_temp_id = tref;
         pstate_node_id = nref }
@@ -1839,7 +1841,8 @@ and parse_crate_mod_entry
         begin
             bump ps;
             let (ident, item) = parse_native_mod_item ps in
-              htab_put native_mod_items ident item
+              htab_put native_mod_items ident item;
+              htab_put files item.id ps.pstate_file
         end
     | _ ->
         begin

@@ -290,7 +290,7 @@ let objfile_main
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS c_to_proc_fixup)) Il.Nil;
     Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS root_prog_fixup)) Il.Nil;
     if indirect_start
-    then 
+    then
       begin
         Il.emit e Il.UMOV (r ecx) (Il.Mem (Il.M32, None, (Asm.M_POS rust_start_fixup))) Il.Nil;
         Il.emit e Il.CCALL (r eax) (r ecx) Il.Nil;

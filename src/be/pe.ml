@@ -592,14 +592,14 @@ let pe_text_section
     ~(crate_code:item)
     ~(c_to_proc_fixup:fixup)
     : item =
-  let e = X86.new_emitter () in 
+  let e = X86.new_emitter () in
     (*
      * We are called from the Microsoft C library startup routine,
      * and assumed to be stdcall; so we have to clean up our own
      * stack before returning.
      *)
-    X86.objfile_main e 
-      ~main_fixup ~rust_start_fixup ~root_prog_fixup 
+    X86.objfile_main e
+      ~main_fixup ~rust_start_fixup ~root_prog_fixup
       ~c_to_proc_fixup ~indirect_start: true;
     def_aligned
       text_fixup

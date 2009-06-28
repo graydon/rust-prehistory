@@ -328,6 +328,20 @@ let trans_visitor
                 "unhandled item type in trans_lval_full"
     in
 
+    let return_native_item (item:Ast.native_mod_item') (referent:node_id)
+        : (Il.operand * Ast.slot) =
+      let ty = Hashtbl.find cx.ctxt_all_item_types referent in
+      let slot = { Ast.slot_mode = Ast.MODE_interior;
+                   Ast.slot_ty = Some ty }
+      in
+        match item with
+            Ast.NATIVE_fn _ ->
+              return_fixup (get_fn_fixup cx referent) slot
+          | _ ->
+              err (Some referent)
+                "unhandled native item type in trans_lval_full"
+    in
+
     let return_slot (lval_id:node_id) (slot:Ast.slot) (slot_id:node_id)
         : (Il.operand * Ast.slot) =
       let operand =
@@ -351,8 +365,11 @@ let trans_visitor
                 match htab_search cx.ctxt_all_items referent with
                     Some item -> return_item item referent
                   | None ->
-                      let slot = lval_to_slot cx nb.id in
-                        return_slot nb.id slot referent
+                      match htab_search cx.ctxt_all_native_items referent with
+                          Some item -> return_native_item item referent
+                        | None ->
+                            let slot = lval_to_slot cx nb.id in
+                              return_slot nb.id slot referent
               end
 
   and trans_lval (lv:Ast.lval) (intent:intent) : (Il.operand * Ast.slot) =
@@ -1259,18 +1276,32 @@ let trans_visitor
       Hashtbl.clear annotations
   in
 
-  let trans_fn (fnid:node_id) (body:Ast.block) : unit =
+  let trans_frame_entry (fnid:node_id) : unit =
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
-    Stack.push (Stack.create()) epilogue_jumps;
+      Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
       abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill_fixup callsz;
-      trans_block body;
-      Stack.iter patch (Stack.pop epilogue_jumps);
-      abi.Abi.abi_emit_fn_epilogue (emitter());
-      capture_emitted_quads fnid;
-      pop_emitter ()
+  in
+
+  let trans_frame_exit (fnid:node_id) : unit =
+    Stack.iter patch (Stack.pop epilogue_jumps);
+    abi.Abi.abi_emit_fn_epilogue (emitter());
+    capture_emitted_quads fnid;
+    pop_emitter ()
+  in
+
+  let trans_fn (fnid:node_id) (body:Ast.block) : unit =
+    trans_frame_entry fnid;
+    trans_block body;
+    trans_frame_exit fnid;
+  in
+
+  let trans_native_fn (fnid:node_id) (tsig:Ast.ty_sig) : unit =
+    trans_frame_entry fnid;
+    (* FIXME: "native" upcall to runtime here. *)
+    trans_frame_exit fnid;
   in
 
   let trans_prog_block (b:Ast.block) (ncomp:string) : fixup =
@@ -1337,13 +1368,36 @@ let trans_visitor
     end
   in
 
-  let visit_mod_item_pre n p i =
+  let rec trans_native_mod_item
+      (item:Ast.native_mod_item)
+      : unit =
+    begin
+      match item.node with
+          Ast.NATIVE_fn tsig -> trans_native_fn item.id tsig
+        | _ -> ()
+    end
+  in
+
+  let enter_file_for i =
     if Hashtbl.mem cx.ctxt_item_files i.id
     then begin
       match !file with
           None -> file := Some i.id
         | Some _ -> err (Some i.id) "Existing source file on file-scope entry."
-    end;
+    end
+  in
+
+  let leave_file_for i =
+    if Hashtbl.mem cx.ctxt_item_files i.id
+    then begin
+      match !file with
+          None -> err (Some i.id) "Missing source file on file-scope exit."
+        | Some _ -> file := None
+    end
+  in
+
+  let visit_mod_item_pre n p i =
+    enter_file_for i;
     Stack.push n path;
     trans_mod_item i;
     inner.Walk.visit_mod_item_pre n p i
@@ -1351,16 +1405,27 @@ let trans_visitor
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
     ignore (Stack.pop path);
-    if Hashtbl.mem cx.ctxt_item_files i.id
-    then begin
-      match !file with
-          None -> err (Some i.id) "Missing source file on file-scope exit."
-        | Some _ -> file := None
-    end;
+    leave_file_for i
   in
+
+  let visit_native_mod_item_pre n i =
+    enter_file_for i;
+    Stack.push n path;
+    trans_native_mod_item i;
+    inner.Walk.visit_native_mod_item_pre n i
+  in
+
+  let visit_native_mod_item_post n i =
+    inner.Walk.visit_native_mod_item_post n i;
+    ignore (Stack.pop path);
+    leave_file_for i
+  in
+
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_mod_item_post = visit_mod_item_post
+        Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
+        Walk.visit_native_mod_item_post = visit_native_mod_item_post
     }
 ;;
 
@@ -1381,43 +1446,62 @@ let fixup_assigning_visitor
     begin
       if Hashtbl.mem cx.ctxt_item_files i.id
       then
-        htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()))
-      else
-        match i.node with
-            Ast.MOD_ITEM_fn _ ->
-              htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
-          | Ast.MOD_ITEM_prog prog ->
-              begin
-                let path = path_name() in
-                let prog_fixup =
-                  if path = cx.ctxt_main_name
-                  then cx.ctxt_main_prog
-                  else (new_fixup path)
-                in
-                  log cx "defining '%s' to mod item '%s'" prog_fixup.fixup_name (path_name());
-                  htab_put cx.ctxt_prog_fixups i.id prog_fixup;
-                  match prog.Ast.decl_item.Ast.prog_init with
-                      None -> ()
-                    | Some init ->
-                        begin
-                          (* Treat an init like a fn for purposes of code generation. *)
-                          htab_put cx.ctxt_fn_fixups init.id
-                            (new_fixup ((path_name()) ^ ".init"))
-                        end
-              end
-          | _ -> ()
+        htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()));
+      match i.node with
+          Ast.MOD_ITEM_fn _ ->
+            htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+        | Ast.MOD_ITEM_prog prog ->
+            begin
+              let path = path_name() in
+              let prog_fixup =
+                if path = cx.ctxt_main_name
+                then cx.ctxt_main_prog
+                else (new_fixup path)
+              in
+                log cx "defining '%s' to mod item '%s'" prog_fixup.fixup_name (path_name());
+                htab_put cx.ctxt_prog_fixups i.id prog_fixup;
+                match prog.Ast.decl_item.Ast.prog_init with
+                    None -> ()
+                  | Some init ->
+                      begin
+                        (* Treat an init like a fn for purposes of code generation. *)
+                        htab_put cx.ctxt_fn_fixups init.id
+                          (new_fixup ((path_name()) ^ ".init"))
+                      end
+            end
+        | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
+  in
+
+  let visit_native_mod_item_pre n i =
+    Stack.push n path;
+    begin
+      if Hashtbl.mem cx.ctxt_item_files i.id
+      then
+        htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()));
+      match i.node with
+          Ast.NATIVE_fn _ ->
+            htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+        | _ -> ()
+    end;
+    inner.Walk.visit_native_mod_item_pre n i
   in
 
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
     ignore (Stack.pop path)
   in
+
+  let visit_native_mod_item_post n i =
+    inner.Walk.visit_native_mod_item_post n i;
+    ignore (Stack.pop path)
+  in
   { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
-    }
+        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
+        Walk.visit_native_mod_item_post = visit_native_mod_item_post }
 
 let emit_c_to_proc_glue cx =
   let e = Il.new_emitter
