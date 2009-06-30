@@ -17,6 +17,8 @@
 #ifdef __WIN32__
 #include <windows.h>
 #include <wincrypt.h>
+#else
+#include <dlfcn.h>
 #endif
 
 #define PROC_MAX_UPCALL_ARGS 8
@@ -24,7 +26,7 @@
 #define INIT_CIRC_BUF_UNITS 8
 #define MAX_CIRC_BUF_SIZE (1 << 24)
 #define I(rt, e) ((e) ? (void)0 :                           \
-                  (rt)->srv->fatal((rt)->srv->user,         \
+                  (rt)->srv->fatal((rt)->srv,               \
                                    #e, __FILE__, __LINE__))
 
 struct ptr_vec;
@@ -210,7 +212,8 @@ typedef enum {
     upcall_code_del_port       = 8,
     upcall_code_send           = 9,
     upcall_code_recv           = 10,
-    upcall_code_sched          = 11
+    upcall_code_sched          = 11,
+    upcall_code_native         = 12
 } upcall_t;
 
 struct ptr_vec {
@@ -307,7 +310,7 @@ xlog(rust_rt_t *rt, uint32_t logbit, char const *fmt, ...)
         va_list args;
         va_start(args, fmt);
         vsnprintf(buf, sizeof(buf), fmt, args);
-        rt->srv->log(rt->srv->user, buf);
+        rt->srv->log(rt->srv, buf);
         va_end(args);
     }
 }
@@ -322,13 +325,13 @@ static void
 xfree(rust_rt_t *rt, void *p)
 {
     I(rt, p);
-    rt->srv->free(rt->srv->user, p);
+    rt->srv->free(rt->srv, p);
 }
 
 static void*
 xalloc(rust_rt_t *rt, size_t sz)
 {
-    void *p = rt->srv->malloc(rt->srv->user, sz);
+    void *p = rt->srv->malloc(rt->srv, sz);
     I(rt, p);
     return p;
 }
@@ -344,7 +347,7 @@ xcalloc(rust_rt_t *rt, size_t sz)
 static void*
 xrealloc(rust_rt_t *rt, void *p, size_t sz)
 {
-    p = rt->srv->realloc(rt->srv->user, p, sz);
+    p = rt->srv->realloc(rt->srv, p, sz);
     I(rt, p);
     return p;
 }
@@ -797,7 +800,7 @@ win32_require(rust_rt_t *rt, LPTSTR fn, BOOL ok) {
 static rust_rt_t*
 new_rt(rust_srv_t *srv)
 {
-    rust_rt_t *rt = srv->malloc(srv->user, sizeof(rust_rt_t));
+    rust_rt_t *rt = srv->malloc(srv, sizeof(rust_rt_t));
     memset(rt, 0, sizeof(rust_rt_t));
     rt->srv = srv;
     rt->logbits = get_logbits();
@@ -1091,6 +1094,43 @@ upcall_free(rust_rt_t *rt, void* ptr)
     xfree(rt, ptr);
 }
 
+typedef uintptr_t (CDECL *native_0)();
+typedef uintptr_t (CDECL *native_1)(uintptr_t);
+typedef uintptr_t (CDECL *native_2)(uintptr_t, uintptr_t);
+typedef uintptr_t (CDECL *native_3)(uintptr_t, uintptr_t, uintptr_t);
+typedef uintptr_t (CDECL *native_4)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+
+static void
+upcall_native(rust_rt_t *rt,
+              char const *sym, uintptr_t *retptr,
+              uintptr_t *argv, uintptr_t nargs)
+{
+    /* FIXME: cache lookups. */
+    uintptr_t fn = rt->srv->lookup(rt->srv, sym);
+    I(rt, fn);
+    /* FIXME: nargs becomes argstr, incorporate libffi, etc. */
+    switch (nargs) {
+    case 0:
+        *retptr = ((native_0)fn)();
+        break;
+    case 1:
+        *retptr = ((native_1)fn)(argv[0]);
+        break;
+    case 2:
+        *retptr = ((native_2)fn)(argv[0], argv[1]);
+        break;
+    case 3:
+        *retptr = ((native_3)fn)(argv[0], argv[1], argv[2]);
+        break;
+    case 4:
+        *retptr = ((native_4)fn)(argv[0], argv[1], argv[2], argv[3]);
+        break;
+    default:
+        I(rt, 0);
+        break;
+    }
+}
+
 static void
 handle_upcall(rust_proc_t *proc)
 {
@@ -1137,6 +1177,12 @@ handle_upcall(rust_proc_t *proc)
         break;
     case upcall_code_recv:
         upcall_recv(proc->rt, proc, (rust_port_t*)args[1]);
+        break;
+    case upcall_code_native:
+        upcall_native(proc->rt, (char const *)args[0],
+                      (uintptr_t*)args[1],
+                      (uintptr_t*)args[2],
+                      (uintptr_t)args[3]);
         break;
     }
     /* Zero the immediates code slot out so the caller doesn't have to
@@ -1211,35 +1257,58 @@ rust_main_loop(rust_prog_t *prog,
 }
 
 static void
-srv_log(void *user, char const *str)
+srv_log(rust_srv_t *srv, char const *str)
 {
     printf("rt: %s\n", str);
 }
 
 static void*
-srv_malloc(void *user, size_t sz)
+srv_malloc(rust_srv_t *srv, size_t sz)
 {
     return malloc(sz);
 }
 
 static void*
-srv_realloc(void *user, void *p, size_t sz)
+srv_realloc(rust_srv_t *srv, void *p, size_t sz)
 {
     return realloc(p, sz);
 }
 
 static void
-srv_free(void *user, void *p)
+srv_free(rust_srv_t *srv, void *p)
 {
     free(p);
 }
 
 static void
-srv_fatal(void *user, char const *expr,
+srv_fatal(rust_srv_t *srv, char const *expr,
           char const *file, size_t line)
 {
-    printf("rt: fatal, '%s' failed, %s:%d\n", expr, file, line);
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "fatal, '%s' failed, %s:%d", expr, file, line);
+    srv->log(srv, buf);
     abort();
+}
+
+static uintptr_t
+srv_lookup(rust_srv_t *srv, char const *sym)
+{
+    uintptr_t res;
+#ifdef __WIN32__
+    /* FIXME: pass library name in as well. And use LoadLibrary not
+     * GetModuleHandle, manually refcount. Oh, so much to do
+     * differently. */
+    HMODULE lib = GetModuleHandle("kernel32.dll");
+    if (!lib)
+        srv->fatal(srv, "GetModuleHandle", __FILE__, __LINE__);
+    res = (uintptr_t)GetProcAddress(lib, sym);
+#else
+    /* FIXME: dlopen, as above. */
+    res = (uintptr_t)dlsym(RTLD_DEFAULT, sym);
+#endif
+    if (!res)
+        srv->fatal(srv, "srv->lookup", __FILE__, __LINE__);
+    return res;
 }
 
 int CDECL
@@ -1252,6 +1321,7 @@ rust_start(rust_prog_t *prog,
     srv.realloc = srv_realloc;
     srv.free = srv_free;
     srv.fatal = srv_fatal;
+    srv.lookup = srv_lookup;
     srv.user = NULL;
     rust_main_loop(prog, c_to_proc_glue, &srv);
     return 0;

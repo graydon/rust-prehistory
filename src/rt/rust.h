@@ -37,11 +37,12 @@ typedef struct rust_rt rust_rt_t;
 
 struct rust_srv {
     void *user;
-    void (*log)(void *, char const *);
-    void (*fatal)(void*, char const *, char const *, size_t);
-    void* (*malloc)(void*, size_t);
-    void* (*realloc)(void*, void*, size_t);
-    void (*free)(void*, void*);
+    void (*log)(rust_srv_t *, char const *);
+    void (*fatal)(rust_srv_t *, char const *, char const *, size_t);
+    void* (*malloc)(rust_srv_t *, size_t);
+    void* (*realloc)(rust_srv_t *, void*, size_t);
+    void (*free)(rust_srv_t *, void*);
+    uintptr_t (*lookup)(rust_srv_t *, char const *);
 };
 
 #ifdef __WIN32__
