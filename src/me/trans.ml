@@ -52,6 +52,7 @@ let trans_visitor
   in
   let pop_emitter _ = ignore (Stack.pop emitters) in
   let emitter _ = Stack.top emitters in
+  let name _ = Stack.top path in
   let emit op dst lhs rhs = Il.emit (emitter()) op dst lhs rhs in
   let next_vreg _ = Il.next_vreg (emitter()) in
   let mark _ : int = (emitter()).Il.emit_pc in
@@ -384,6 +385,12 @@ let trans_visitor
   and trans_lval (lv:Ast.lval) (intent:intent) : (Il.operand * Ast.slot) =
     trans_lval_full lv false false intent
 
+  and trans_string_lit (s:string) : Il.operand =
+    let strfix = new_fixup "string fixup" in
+    let str = Asm.DEF (strfix, Asm.ZSTRING s) in
+      cx.ctxt_data_items <- str :: cx.ctxt_data_items;
+      (Il.Imm (Asm.M_POS strfix))
+
   and trans_atom (atom:Ast.atom) : Il.operand =
     match atom with
         Ast.ATOM_lval lv ->
@@ -409,10 +416,7 @@ let trans_visitor
                   Il.Imm (Asm.IMM (Int64.of_int (Big_int.int_of_big_int bi)))
 
               | Ast.LIT_str s ->
-                  let strfix = new_fixup "string fixup" in
-                  let str = Asm.DEF (strfix, Asm.ZSTRING s) in
-                    cx.ctxt_data_items <- str :: cx.ctxt_data_items;
-                    (Il.Imm (Asm.M_POS strfix))
+                  trans_string_lit s
 
               | _ -> marker
           end
@@ -1316,8 +1320,25 @@ let trans_visitor
   in
 
   let trans_native_fn (fnid:node_id) (tsig:Ast.ty_sig) : unit =
+    let ret_addr_disp = abi.Abi.abi_frame_base_sz in
+    let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
+
     trans_frame_entry fnid;
-    (* FIXME: "native" upcall to runtime here. *)
+    (* 
+     * Native upcall encoding:
+     * 
+     * arg0 = symbol name
+     * arg1 = return pointer (dereferenced return-address slot)
+     * arg2 = address of 0th non-implicit arg slot
+     * arg3 = arg count
+     *)
+    trans_upcall Abi.UPCALL_native
+      [| 
+        (trans_string_lit (name()));
+        (word_at_fp_off ret_addr_disp);
+        (alias (word_at_fp_off arg0_disp));
+        Il.Imm (Asm.IMM (Int64.of_int (Array.length tsig.Ast.sig_input_slots)))
+      |];
     trans_frame_exit fnid;
   in
 

@@ -119,6 +119,8 @@ get_logbits()
             bits |= LOG_RT;
         if (strstr(c, "ulog"))
             bits |= LOG_ULOG;
+        if (strstr(c, "all"))
+            bits = 0xffffffff;
     }
     return bits;
 }
@@ -1113,30 +1115,41 @@ upcall_native(rust_rt_t *rt,
               char const *sym, uintptr_t *retptr,
               uintptr_t *argv, uintptr_t nargs)
 {
+    xlog(rt, LOG_UPCALL|LOG_MEM,
+         "upcall native('%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
+         sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
+
+    uintptr_t retval;
     /* FIXME: cache lookups. */
     uintptr_t fn = rt->srv->lookup(rt->srv, sym);
+    xlog(rt, LOG_UPCALL|LOG_MEM,
+         "native '%s' resolved to 0x%" PRIxPTR,
+         sym, fn);
+
     I(rt, fn);
     /* FIXME: nargs becomes argstr, incorporate libffi, etc. */
     switch (nargs) {
     case 0:
-        *retptr = ((native_0)fn)();
+        retval = ((native_0)fn)();
         break;
     case 1:
-        *retptr = ((native_1)fn)(argv[0]);
+        retval = ((native_1)fn)(argv[0]);
         break;
     case 2:
-        *retptr = ((native_2)fn)(argv[0], argv[1]);
+        retval = ((native_2)fn)(argv[0], argv[1]);
         break;
     case 3:
-        *retptr = ((native_3)fn)(argv[0], argv[1], argv[2]);
+        retval = ((native_3)fn)(argv[0], argv[1], argv[2]);
         break;
     case 4:
-        *retptr = ((native_4)fn)(argv[0], argv[1], argv[2], argv[3]);
+        retval = ((native_4)fn)(argv[0], argv[1], argv[2], argv[3]);
         break;
     default:
         I(rt, 0);
         break;
     }
+    if (retptr)
+        *retptr = retval;
 }
 
 static void
