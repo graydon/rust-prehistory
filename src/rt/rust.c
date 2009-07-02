@@ -5,6 +5,12 @@
  * See file COPYING for details.
  */
 
+ /* 
+  * Only for RTLD_DEFAULT, remove _GNU_SOURCE when that dies. We want
+  * to be non-GNU-dependent.
+  */
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
@@ -14,11 +20,13 @@
 #include "uthash.h"
 #include "valgrind.h"
 
-#ifdef __WIN32__
+#if defined(__WIN32__)
 #include <windows.h>
 #include <wincrypt.h>
-#else
+#elif defined(__GNUC__)
 #include <dlfcn.h>
+#else
+#error "Do not know how to load dynamic symbols on this platform."
 #endif
 
 #define PROC_MAX_UPCALL_ARGS 8

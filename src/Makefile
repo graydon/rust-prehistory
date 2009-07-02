@@ -1,34 +1,91 @@
-OSTYPE:=$(shell uname -s)
-CPUTYPE:=$(shell uname -m)
-CONFIGMK:=config/$(OSTYPE)-$(CPUTYPE).mk
-include $(CONFIGMK)
+######################################################################
+# Auto-configuration
+######################################################################
 
-MKFILES:=Makefile $(CONFIGMK)
+CFG_OSTYPE := $(shell uname -s)
+CFG_CPUTYPE := $(shell uname -m)
 
-ML_INCS:=-I fe -I me -I be -I driver -I util
-ML_LIBS=unix.cma nums.cma
-ML_NATIVE_LIBS=unix.cmxa nums.cmxa
-OCAMLC_FLAGS:=-g $(ML_INCS)
-OCAMLOPT_FLAGS:=$(ML_INCS)
+CFG_GCC_COMPILE_FLAGS :=
+CFG_GCC_LINK_FLAGS :=
+
+ifeq ($(CFG_OSTYPE), Linux)
+  CFG_RUNTIME := librustrt.so
+  CFG_GCC_COMPILE_FLAGS += -fPIC
+  CFG_GCC_LINK_FLAGS += -fPIC -ldl
+  ifeq ($(CFG_CPUTYPE), x86_64)
+    CFG_GCC_COMPILE_FLAGS += -m32
+    CFG_GCC_LINK_FLAGS += -m32
+  endif
+  CFG_NATIVE := 1
+  CFG_UNIXY := 1
+endif
+
+ifeq ($(CFG_OSTYPE), Darwin)
+  CFG_RUNTIME := librustrt.dylib
+  CFG_UNIXY := 1
+endif
+
+ifneq ($(findstring, MINGW, $(CFG_OSTYPE)), )
+  CFG_WINDOWSY := 1
+endif
+
+ifdef CFG_WINDOWSY
+  CFG_PATH_MUNGE := | sed -e 's/\\\(.\)/\/\1/g'
+  CFG_RUNTIME := rustrt.dll
+  CFG_OBJ_SUFFIX := .o
+  CFG_EXE_SUFFIX := .exe
+  CFG_GCC_LINK_FLAGS += -fPIC
+  CFG_RUN_TARG = $(1)
+  # FIXME: support msvc at some point
+  CFG_GCC := 1
+endif
+
+ifdef CFG_UNIXY
+  CFG_COMPILER := ./rustc
+  CFG_OBJ_SUFFIX := .o
+  CFG_RUN_TARG = LD_LIBRARY_PATH=. $(1)
+  CFG_GCC := 1
+endif
+
+ifdef CFG_GCC
+  CFG_GCC_COMPILE_FLAGS += -Wall -Werror -pedantic -std=c99 -g
+  CFG_GCC_LINK_FLAGS += -shared -g
+  CFG_COMPILE_C = gcc $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
+  CFG_LINK_C = gcc $(CFG_GCC_LINK_FLAGS) -o $(1)
+  CFG_DEPEND_C = gcc -MT "$(1)" -MM $(2)
+endif
+
+
+######################################################################
+# Basic build targets and rules
+######################################################################
+
+MKFILES := Makefile
+ML_INCS := -I fe -I me -I be -I driver -I util
+ML_LIBS := unix.cma nums.cma
+ML_NATIVE_LIBS := unix.cmxa nums.cmxa
+OCAMLC_FLAGS := -g $(ML_INCS)
+OCAMLOPT_FLAGS := $(ML_INCS)
 
 # List them in link order.
 # Nobody calculates the link-order DAG automatically, sadly.
-UTIL_BOT_MLS:=util/common.ml util/bitv.ml
-DRIVER_BOT_MLS:=driver/session.ml
-BE_MLS:=be/asm.ml be/il.ml be/abi.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml be/macho.ml
-ME_MLS:=me/walk.ml me/semant.ml me/resolve.ml me/alias.ml me/auto.ml \
-        me/type.ml me/mode.ml me/typestate.ml me/layout.ml me/trans.ml be/dwarf.ml
-FE_MLS:=fe/ast.ml fe/ll1parser.ml fe/lexer.ml
-DRIVER_TOP_MLS:=driver/main.ml
+UTIL_BOT_MLS := util/common.ml util/bitv.ml
+DRIVER_BOT_MLS := driver/session.ml
+BE_MLS := be/asm.ml be/il.ml be/abi.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml be/macho.ml
+ME_MLS := me/walk.ml me/semant.ml me/resolve.ml me/alias.ml me/auto.ml \
+          me/type.ml me/mode.ml me/typestate.ml me/layout.ml me/trans.ml be/dwarf.ml
+FE_MLS := fe/ast.ml fe/ll1parser.ml fe/lexer.ml
+DRIVER_TOP_MLS := driver/main.ml
 
-COMPILER_MLS:=$(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_TOP_MLS)
-COMPILER_CMOS:=$(COMPILER_MLS:.ml=.cmo)
-COMPILER_CMXS:=$(COMPILER_MLS:.ml=.cmx)
-COMPILER_CMIS:=$(COMPILER_MLS:.ml=.cmi)
+COMPILER_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_TOP_MLS)
+COMPILER_CMOS := $(COMPILER_MLS:.ml=.cmo)
+COMPILER_CMXS := $(COMPILER_MLS:.ml=.cmx)
+COMPILER_CMIS := $(COMPILER_MLS:.ml=.cmi)
 
-RUNTIME_CS:=rt/rust.c rt/isaac/randport.c
-RUNTIME_INCS:=-Irt/uthash-1.6/src -Irt/isaac -Irt/uthash
-RUNTIME_OBJS:=$(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
+RUNTIME_CS := rt/rust.c rt/isaac/randport.c
+RUNTIME_INCS := -Irt/uthash-1.6/src -Irt/isaac -Irt/uthash
+RUNTIME_OBJS := $(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
+RUNTIME_LIBS := $(CFG_RUNTIME_LIBS)
 
 all: $(CFG_COMPILER) $(CFG_RUNTIME) $(MKFILES) fe/lexer.ml
 
@@ -36,12 +93,12 @@ loc:
 	wc -l $(COMPILER_MLS) $(RUNTIME_CS)
 
 $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
-	$(call CFG_LINK_C,$@) $(RUNTIME_OBJS)
+	$(call CFG_LINK_C, $@) $(RUNTIME_OBJS)
 
 %$(CFG_OBJ_SUFFIX): %.c $(MKFILES)
-	$(call CFG_COMPILE_C,$@,$(RUNTIME_INCS)) $<
+	$(call CFG_COMPILE_C, $@, $(RUNTIME_INCS)) $<
 
-ifdef NATIVE
+ifdef CFG_NATIVE
 $(CFG_COMPILER): $(COMPILER_CMXS) $(MKFILES)
 	ocamlopt.opt -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(COMPILER_CMXS)
 else
@@ -63,23 +120,29 @@ endif
 %.ml: %.mll $(MKFILES)
 	ocamllex.opt -o $@ $<
 
-# Auto-dependency logic
+
+######################################################################
+# Auto-dependency
+######################################################################
 
 ML_DEPFILES:=$(COMPILER_MLS:.ml=.d)
 C_DEPFILES:=$(RUNTIME_CS:.c=.d)
 
 %.d: %.c $(MKFILES)
-	$(call CFG_DEPEND_C,$@ $(patsubst %.c,%$(CFG_OBJ_SUFFIX),$<),$(RUNTIME_INCS)) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
+	$(call CFG_DEPEND_C, $@ $(patsubst %.c, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.ml $(MKFILES)
-	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
+	ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.mli $(MKFILES)
-	ocamldep $(ML_INCS) $< | sed -e 's/\\\(.\)/\/\1/g' >$@
+	ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
 
 -include $(ML_DEPFILES) $(C_DEPFILES)
 
-# Testing logic
+
+######################################################################
+# Testing
+######################################################################
 
 TEST_RUN_PASS_CRATES:=$(wildcard test/run-pass/*.rc)
 TEST_RUN_PASS_SOURCES:=$(wildcard test/run-pass/*.rs)
@@ -107,11 +170,11 @@ check: $(TEST_RUN_PASS_EXES) $(TEST_RUN_FAIL_EXES) \
        $(TEST_COMPILE_FAIL_OUTS)
 
 test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
-	$(call CFG_RUN_TARG,$<) 2>&1 | tee $@
+	$(call CFG_RUN_TARG, $<) 2>&1 | tee $@
 
 test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) test/run-fail/%.pat $(CFG_RUNTIME)
 	rm -f $@
-	$(call CFG_RUN_TARG,$<) >$@ 2>&1 || true
+	$(call CFG_RUN_TARG, $<) >$@ 2>&1 || true
 	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc test/run-pass/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
@@ -140,7 +203,10 @@ test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_CO
 	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
 	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
-# Cleanup logic
+
+######################################################################
+# Cleanup
+######################################################################
 
 .phony: clean
 
