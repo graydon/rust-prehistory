@@ -455,6 +455,7 @@ let elf32_linux_x86_file
     ~(data_items:(string, item) Hashtbl.t)
     ~(rodata_items:(string, item) Hashtbl.t)
     ~(import_fixups:(string, fixup) Hashtbl.t)
+    ~(dwarf:Dwarf.debug_records)
     ~(needed_libs:string array)
     : item =
 
@@ -573,6 +574,12 @@ let elf32_linux_x86_file
   let bss_section_name_fixup = new_fixup "string name of '.bss' section" in
   let dynamic_section_name_fixup = new_fixup "string name of '.dynamic' section" in
   let shstrtab_section_name_fixup = new_fixup "string name of '.shstrtab' section" in
+  let debug_aranges_section_name_fixup = new_fixup "string name of '.debug_aranges' section" in
+  let debug_pubnames_section_name_fixup = new_fixup "string name of '.debug_pubnames' section" in
+  let debug_info_section_name_fixup = new_fixup "string name of '.debug_info' section" in
+  let debug_abbrev_section_name_fixup = new_fixup "string name of '.debug_abbrev' section" in
+  let debug_line_section_name_fixup = new_fixup "string name of '.debug_line' section" in
+  let debug_frame_section_name_fixup = new_fixup "string name of '.debug_frame' section" in
 
   (* let interpndx      = 1L in *)  (* Section index of .interp *)
   let textndx        = 2L in  (* Section index of .text *)
@@ -604,19 +611,25 @@ let elf32_linux_x86_file
   let shstrtab_section =
     SEQ
       [|
-        DEF(null_section_name_fixup, ZSTRING "");
-        DEF(interp_section_name_fixup, ZSTRING ".interp");
-        DEF(text_section_name_fixup, ZSTRING ".text");
-        DEF(rodata_section_name_fixup, ZSTRING ".rodata");
-        DEF(dynsym_section_name_fixup, ZSTRING ".dynsym");
-        DEF(dynstr_section_name_fixup, ZSTRING ".dynstr");
-        DEF(plt_section_name_fixup, ZSTRING ".plt");
-        DEF(got_plt_section_name_fixup, ZSTRING ".got.plt");
-        DEF(rela_plt_section_name_fixup, ZSTRING ".rela.plt");
-        DEF(data_section_name_fixup, ZSTRING ".data");
-        DEF(bss_section_name_fixup, ZSTRING ".bss");
-        DEF(dynamic_section_name_fixup, ZSTRING ".dynamic");
-        DEF(shstrtab_section_name_fixup, ZSTRING ".shstrtab");
+        DEF (null_section_name_fixup, ZSTRING "");
+        DEF (interp_section_name_fixup, ZSTRING ".interp");
+        DEF (text_section_name_fixup, ZSTRING ".text");
+        DEF (rodata_section_name_fixup, ZSTRING ".rodata");
+        DEF (dynsym_section_name_fixup, ZSTRING ".dynsym");
+        DEF (dynstr_section_name_fixup, ZSTRING ".dynstr");
+        DEF (plt_section_name_fixup, ZSTRING ".plt");
+        DEF (got_plt_section_name_fixup, ZSTRING ".got.plt");
+        DEF (rela_plt_section_name_fixup, ZSTRING ".rela.plt");
+        DEF (data_section_name_fixup, ZSTRING ".data");
+        DEF (bss_section_name_fixup, ZSTRING ".bss");
+        DEF (dynamic_section_name_fixup, ZSTRING ".dynamic");
+        DEF (shstrtab_section_name_fixup, ZSTRING ".shstrtab");
+        DEF (debug_aranges_section_name_fixup, ZSTRING ".debug_aranges");
+        DEF (debug_pubnames_section_name_fixup, ZSTRING ".debug_pubnames");
+        DEF (debug_info_section_name_fixup, ZSTRING ".debug_info");
+        DEF (debug_abbrev_section_name_fixup, ZSTRING ".debug_abbrev");
+        DEF (debug_line_section_name_fixup, ZSTRING ".debug_line");
+        DEF (debug_frame_section_name_fixup, ZSTRING ".debug_frame");
       |]
   in
 
@@ -764,6 +777,86 @@ let elf32_linux_x86_file
            ~sh_addralign: 1L
            ~sh_entsize: 0L
            ~sh_link: None);
+
+(* 
+   FIXME: uncomment the dwarf section headers as you make use of them;
+   recent gdb versions have got fussier about parsing dwarf and don't
+   like seeing junk there. 
+*)
+
+        (* .debug_aranges *)
+(*
+
+        (section_header
+           ~shstring_table_fixup: shstrtab_section_fixup
+           ~shname_string_fixup: debug_aranges_section_name_fixup
+           ~sh_type: SHT_PROGBITS
+           ~sh_flags: []
+           ~section_fixup: (Some dwarf.Dwarf.debug_aranges_fixup)
+           ~sh_addralign: 8L
+           ~sh_entsize: 0L
+           ~sh_link: None);
+*)
+        (* .debug_pubnames *)
+(*
+        (section_header
+           ~shstring_table_fixup: shstrtab_section_fixup
+           ~shname_string_fixup: debug_pubnames_section_name_fixup
+           ~sh_type: SHT_PROGBITS
+           ~sh_flags: []
+           ~section_fixup: (Some dwarf.Dwarf.debug_pubnames_fixup)
+           ~sh_addralign: 1L
+           ~sh_entsize: 0L
+           ~sh_link: None);
+*)
+
+        (* .debug_info *)
+        (section_header
+           ~shstring_table_fixup: shstrtab_section_fixup
+           ~shname_string_fixup: debug_info_section_name_fixup
+           ~sh_type: SHT_PROGBITS
+           ~sh_flags: []
+           ~section_fixup: (Some dwarf.Dwarf.debug_info_fixup)
+           ~sh_addralign: 1L
+           ~sh_entsize: 0L
+           ~sh_link: None);
+
+        (* .debug_abbrev *)
+        (section_header
+           ~shstring_table_fixup: shstrtab_section_fixup
+           ~shname_string_fixup: debug_abbrev_section_name_fixup
+           ~sh_type: SHT_PROGBITS
+           ~sh_flags: []
+           ~section_fixup: (Some dwarf.Dwarf.debug_abbrev_fixup)
+           ~sh_addralign: 1L
+           ~sh_entsize: 0L
+           ~sh_link: None);
+        (* .debug_line *)
+(*
+        (section_header
+           ~shstring_table_fixup: shstrtab_section_fixup
+           ~shname_string_fixup: debug_line_section_name_fixup
+           ~sh_type: SHT_PROGBITS
+           ~sh_flags: []
+           ~section_fixup: (Some dwarf.Dwarf.debug_line_fixup)
+           ~sh_addralign: 1L
+           ~sh_entsize: 0L
+           ~sh_link: None);
+*)
+
+        (* .debug_frame *)
+(*
+        (section_header
+           ~shstring_table_fixup: shstrtab_section_fixup
+           ~shname_string_fixup: debug_frame_section_name_fixup
+           ~sh_type: SHT_PROGBITS
+           ~sh_flags: []
+           ~section_fixup: (Some dwarf.Dwarf.debug_frame_fixup)
+           ~sh_addralign: 4L
+           ~sh_entsize: 0L
+           ~sh_link: None);
+*)
+
       |]
   in
   let section_header_table = SEQ section_headers in
@@ -1077,6 +1170,38 @@ let elf32_linux_x86_file
   in
 
 
+  let page_alignment = 0x1000 in
+
+  let align_both i =
+    ALIGN_FILE (page_alignment,
+                (ALIGN_MEM (page_alignment, i)))
+  in
+
+  let def_aligned f i =
+    align_both
+      (SEQ [| DEF(f,i);
+              (align_both MARK)|])
+  in
+
+  let debug_aranges_section =
+    def_aligned dwarf.Dwarf.debug_aranges_fixup dwarf.Dwarf.debug_aranges
+  in
+  let debug_pubnames_section =
+    def_aligned dwarf.Dwarf.debug_pubnames_fixup dwarf.Dwarf.debug_pubnames
+  in
+  let debug_info_section =
+    def_aligned dwarf.Dwarf.debug_info_fixup dwarf.Dwarf.debug_info
+  in
+  let debug_abbrev_section =
+    def_aligned dwarf.Dwarf.debug_abbrev_fixup dwarf.Dwarf.debug_abbrev
+  in
+  let debug_line_section =
+    def_aligned dwarf.Dwarf.debug_line_fixup dwarf.Dwarf.debug_line
+  in
+  let debug_frame_section =
+    def_aligned dwarf.Dwarf.debug_frame_fixup dwarf.Dwarf.debug_frame
+  in
+
   let load_address = 0x0804_8000L in
 
     SEQ
@@ -1107,6 +1232,12 @@ let elf32_linux_x86_file
                   dynstr_section;
                   plt_section;
                   rela_plt_section;
+                  debug_aranges_section;
+                  debug_pubnames_section;
+                  debug_info_section;
+                  debug_abbrev_section;
+                  debug_line_section;
+                  debug_frame_section;
                 |]));
         ALIGN_FILE
           (segment_3_align,
@@ -1229,6 +1360,7 @@ let emit_file
       ~entry_name: "_start"
       ~text_items: text_items
       ~data_items: data_items
+      ~dwarf: dwarf
       ~rodata_items: rodata_items
       ~import_fixups: import_fixups
       ~needed_libs: needed_libs
@@ -1247,6 +1379,6 @@ let emit_file
  * fill-column: 70;
  * indent-tabs-mode: nil
  * buffer-file-coding-system: utf-8-unix
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
+ * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)

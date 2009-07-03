@@ -1266,13 +1266,7 @@ let trans_visitor
         None -> err (Some node) "Missing file scope when capturing quads."
       | Some f -> f
     in
-    let file_list =
-      begin
-        if not (Hashtbl.mem cx.ctxt_texts f)
-        then htab_put cx.ctxt_texts f (ref []);
-        Hashtbl.find cx.ctxt_texts f
-      end
-    in
+    let file_list = Hashtbl.find cx.ctxt_texts f in
       begin
         iflog
           begin
@@ -1479,12 +1473,20 @@ let fixup_assigning_visitor
     String.concat "." (stk_elts_from_bot path)
   in
 
+  let enter_file_for i =
+    if Hashtbl.mem cx.ctxt_item_files i.id
+    then
+      begin
+        htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()));
+        if not (Hashtbl.mem cx.ctxt_texts i.id)
+        then htab_put cx.ctxt_texts i.id (ref []);
+      end
+  in
+
   let visit_mod_item_pre n p i =
     Stack.push n path;
+    enter_file_for i;
     begin
-      if Hashtbl.mem cx.ctxt_item_files i.id
-      then
-        htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()));
       match i.node with
           Ast.MOD_ITEM_fn _ ->
             htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
@@ -1514,10 +1516,8 @@ let fixup_assigning_visitor
 
   let visit_native_mod_item_pre n i =
     Stack.push n path;
+    enter_file_for i;
     begin
-      if Hashtbl.mem cx.ctxt_item_files i.id
-      then
-        htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()));
       match i.node with
           Ast.NATIVE_fn _ ->
             htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
@@ -1590,6 +1590,6 @@ let trans_crate
  * fill-column: 70;
  * indent-tabs-mode: nil
  * buffer-file-coding-system: utf-8-unix
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
+ * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)

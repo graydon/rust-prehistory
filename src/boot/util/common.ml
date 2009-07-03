@@ -227,6 +227,6 @@ let i64_min (a:int64) (b:int64) : int64 = (if (Int64.compare a b) < 0 then a els
  * Local Variables:
  * fill-column: 70;
  * indent-tabs-mode: nil
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
+ * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)

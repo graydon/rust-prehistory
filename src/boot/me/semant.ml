@@ -768,6 +768,6 @@ let layout_init_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
  * fill-column: 70;
  * indent-tabs-mode: nil
  * buffer-file-coding-system: utf-8-unix
- * compile-command: "make -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
+ * compile-command: "make -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)
