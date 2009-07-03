@@ -1,0 +1,23 @@
+
+native fn fopen(str path, str mode) -> int;
+native fn fgetc(int file) -> int;
+native fn fclose(int file) -> ();
+native fn puts(str s) -> ();
+
+mod fe {
+    mod lexer;
+    mod parser;
+}
+
+mod driver {
+    mod rustc;
+}
+
+main = driver.rustc.rustc;
+
+// Local Variables:
+// fill-column: 70;
+// indent-tabs-mode: nil
+// buffer-file-coding-system: utf-8-unix
+// compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
+// End:

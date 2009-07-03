@@ -34,6 +34,8 @@ ifdef CFG_WINDOWSY
   CFG_RUNTIME := rustrt.dll
   CFG_OBJ_SUFFIX := .o
   CFG_EXE_SUFFIX := .exe
+  CFG_BOOT := ./rustboot.exe
+  CFG_COMPILER := ./rustc.exe
   CFG_GCC_LINK_FLAGS += -fPIC
   CFG_RUN_TARG = $(1)
   # FIXME: support msvc at some point
@@ -42,6 +44,7 @@ endif
 
 ifdef CFG_UNIXY
   CFG_BOOT := ./rustboot
+  CFG_COMPILER := ./rustc
   CFG_OBJ_SUFFIX := .o
   CFG_RUN_TARG = LD_LIBRARY_PATH=. $(1)
   CFG_GCC := 1
@@ -56,11 +59,13 @@ ifdef CFG_GCC
 endif
 
 
+MKFILES := Makefile
+
+
 ######################################################################
-# Basic build targets and rules
+# Boot targets and rules
 ######################################################################
 
-MKFILES := Makefile
 ML_INCS := -I boot/fe -I boot/me -I boot/be -I boot/driver -I boot/util
 ML_LIBS := unix.cma nums.cma
 ML_NATIVE_LIBS := unix.cmxa nums.cmxa
@@ -79,7 +84,8 @@ ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml auto.ml \
 FE_MLS := $(addprefix boot/fe/, ast.ml ll1parser.ml lexer.ml)
 DRIVER_TOP_MLS := $(addprefix boot/driver/, main.ml)
 
-BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_TOP_MLS)
+BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) \
+            $(DRIVER_TOP_MLS)
 BOOT_CMOS := $(BOOT_MLS:.ml=.cmo)
 BOOT_CMXS := $(BOOT_MLS:.ml=.cmx)
 BOOT_OBJS := $(BOOT_MLS:.ml=.o)
@@ -90,7 +96,7 @@ RUNTIME_INCS := -Irt/uthash-1.6/src -Irt/isaac -Irt/uthash
 RUNTIME_OBJS := $(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
 RUNTIME_LIBS := $(CFG_RUNTIME_LIBS)
 
-all: $(CFG_BOOT) $(CFG_RUNTIME) $(MKFILES) boot/fe/lexer.ml
+all: $(CFG_COMPILER) $(MKFILES) boot/fe/lexer.ml
 
 loc:
 	wc -l $(BOOT_MLS) $(RUNTIME_CS)
@@ -122,6 +128,30 @@ endif
 
 %.ml: %.mll $(MKFILES)
 	ocamllex.opt -o $@ $<
+
+
+######################################################################
+# Main compiler targets and rules
+######################################################################
+
+UTIL_BOT_RSS := $(addprefix comp/util/, common.rs bitv.rs)
+DRIVER_BOT_RSS := $(addprefix comp/driver/, session.rs)
+BE_RSS := $(addprefix comp/be/, asm.rs il.rs abi.rs x86.rs ra.rs pe.rs elf.rs \
+          macho.rs)
+ME_RSS := $(addprefix comp/me/, walk.rs semant.rs resolve.rs alias.rs auto.rs \
+          type.rs mode.rs typestate.rs layout.rs trans.rs dwarf.rs)
+FE_RSS := $(addprefix comp/fe/, ast.rs ll1parser.rs lexer.rs)
+DRIVER_TOP_RSS := $(addprefix comp/driver/, rustc.rs)
+
+COMPILER_RSS := $(wildcard $(UTIL_BOT_RSS) $(DRIVER_BOT_RSS) $(BE_RSS) $(FE_RSS) $(ME_RSS) $(DRIVER_TOP_RSS))
+
+$(CFG_COMPILER): comp/rustc.rc $(COMPILER_RSS) $(CFG_BOOT) $(CFG_RUNTIME)
+	echo $(COMPILER_RSS)
+	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	chmod 0755 $@
+
+self: $(CFG_COMPILER)
+	$(call CFG_RUN_TARG, $(CFG_COMPILER)) comp/rustc.rc
 
 
 ######################################################################

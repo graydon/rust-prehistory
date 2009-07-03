@@ -1856,7 +1856,13 @@ and parse_crate_mod_entry
                   (match peek ps with
                        LIT_STR s -> bump ps; s
                      | _ -> raise (unexpected ps))
-              | _ -> name
+              | _ ->
+                  begin
+                    match peek ps with 
+                        LBRACE -> name
+                      | SEMI -> name ^ ".rs"
+                      | _ -> raise (unexpected ps)
+                  end
           in
           let full_fname = Filename.concat prefix fname in
           let (items,is_cu) =
@@ -1872,7 +1878,7 @@ and parse_crate_mod_entry
                       full_fname
                   in
                     (parse_file_mod_items p, true)
-              | RBRACE ->
+              | LBRACE ->
                   bump ps;
                   let items =
                     parse_crate_mod_entries full_fname files ps
@@ -1913,11 +1919,11 @@ and parse_crate_mod_entries
     : Ast.mod_items =
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
-    while peek ps != LBRACE
+    while peek ps != RBRACE
     do
       parse_crate_mod_entry prefix files items nitems ps
     done;
-    expect ps LBRACE;
+    expect ps RBRACE;
     items
 
 and parse_root_crate_entries
@@ -2052,6 +2058,6 @@ let parse_srcfile = parse_root_with_parse_fn ".rs" parse_root_srcfile_entries;;
  * fill-column: 70;
  * indent-tabs-mode: nil
  * buffer-file-coding-system: utf-8-unix
- * compile-command: "make -k -C .. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
+ * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)

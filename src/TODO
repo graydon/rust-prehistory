@@ -1,6 +1,6 @@
 
 progress:
- - implement refcounts on procs, chans, ports
+ - vector bounds checking
  - extend typestate system to handle operation pre/post conditions
    extracted from implicit-in-type constrs
  - floating point values / registers / instructions
@@ -10,7 +10,6 @@ progress:
  - put timer-counter in proc
  - translate loop-jumps & calls to do a test/yield (regs already flushed)
  - real type checker, or extend resolve/unify? consult textbooks
- - vectors
  - strings
  - emit typecode structure into crate (dwarf?)
  - typecode-driven generic copy fn
@@ -47,6 +46,8 @@ code cleanup:
    batch the "I do not"s?
 
 done:
+ - vectors
+ - implement refcounts on procs, chans, ports
  - channels and ports
  - basic version of type-state algorithm
  - movement of superword values
