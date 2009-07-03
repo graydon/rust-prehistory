@@ -41,7 +41,7 @@ ifdef CFG_WINDOWSY
 endif
 
 ifdef CFG_UNIXY
-  CFG_COMPILER := ./rustc
+  CFG_BOOT := ./rustboot
   CFG_OBJ_SUFFIX := .o
   CFG_RUN_TARG = LD_LIBRARY_PATH=. $(1)
   CFG_GCC := 1
@@ -61,7 +61,7 @@ endif
 ######################################################################
 
 MKFILES := Makefile
-ML_INCS := -I fe -I me -I be -I driver -I util
+ML_INCS := -I boot/fe -I boot/me -I boot/be -I boot/driver -I boot/util
 ML_LIBS := unix.cma nums.cma
 ML_NATIVE_LIBS := unix.cmxa nums.cmxa
 OCAMLC_FLAGS := -g $(ML_INCS)
@@ -69,28 +69,31 @@ OCAMLOPT_FLAGS := $(ML_INCS)
 
 # List them in link order.
 # Nobody calculates the link-order DAG automatically, sadly.
-UTIL_BOT_MLS := util/common.ml util/bitv.ml
-DRIVER_BOT_MLS := driver/session.ml
-BE_MLS := be/asm.ml be/il.ml be/abi.ml be/x86.ml be/ra.ml be/pe.ml be/elf.ml be/macho.ml
-ME_MLS := me/walk.ml me/semant.ml me/resolve.ml me/alias.ml me/auto.ml \
-          me/type.ml me/mode.ml me/typestate.ml me/layout.ml me/trans.ml be/dwarf.ml
-FE_MLS := fe/ast.ml fe/ll1parser.ml fe/lexer.ml
-DRIVER_TOP_MLS := driver/main.ml
 
-COMPILER_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_TOP_MLS)
-COMPILER_CMOS := $(COMPILER_MLS:.ml=.cmo)
-COMPILER_CMXS := $(COMPILER_MLS:.ml=.cmx)
-COMPILER_CMIS := $(COMPILER_MLS:.ml=.cmi)
+UTIL_BOT_MLS := $(addprefix boot/util/, common.ml bitv.ml)
+DRIVER_BOT_MLS := $(addprefix boot/driver/, session.ml)
+BE_MLS := $(addprefix boot/be/, asm.ml il.ml abi.ml x86.ml ra.ml pe.ml elf.ml \
+          macho.ml)
+ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml auto.ml \
+          type.ml mode.ml typestate.ml layout.ml trans.ml dwarf.ml)
+FE_MLS := $(addprefix boot/fe/, ast.ml ll1parser.ml lexer.ml)
+DRIVER_TOP_MLS := $(addprefix boot/driver/, main.ml)
+
+BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) $(DRIVER_TOP_MLS)
+BOOT_CMOS := $(BOOT_MLS:.ml=.cmo)
+BOOT_CMXS := $(BOOT_MLS:.ml=.cmx)
+BOOT_OBJS := $(BOOT_MLS:.ml=.o)
+BOOT_CMIS := $(BOOT_MLS:.ml=.cmi)
 
 RUNTIME_CS := rt/rust.c rt/isaac/randport.c
 RUNTIME_INCS := -Irt/uthash-1.6/src -Irt/isaac -Irt/uthash
 RUNTIME_OBJS := $(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
 RUNTIME_LIBS := $(CFG_RUNTIME_LIBS)
 
-all: $(CFG_COMPILER) $(CFG_RUNTIME) $(MKFILES) fe/lexer.ml
+all: $(CFG_BOOT) $(CFG_RUNTIME) $(MKFILES) boot/fe/lexer.ml
 
 loc:
-	wc -l $(COMPILER_MLS) $(RUNTIME_CS)
+	wc -l $(BOOT_MLS) $(RUNTIME_CS)
 
 $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
 	$(call CFG_LINK_C, $@) $(RUNTIME_OBJS)
@@ -99,11 +102,11 @@ $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
 	$(call CFG_COMPILE_C, $@, $(RUNTIME_INCS)) $<
 
 ifdef CFG_NATIVE
-$(CFG_COMPILER): $(COMPILER_CMXS) $(MKFILES)
-	ocamlopt.opt -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(COMPILER_CMXS)
+$(CFG_BOOT): $(BOOT_CMXS) $(MKFILES)
+	ocamlopt.opt -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(BOOT_CMXS)
 else
-$(CFG_COMPILER): $(COMPILER_CMOS) $(MKFILES)
-	ocamlc.opt -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(COMPILER_CMOS)
+$(CFG_BOOT): $(BOOT_CMOS) $(MKFILES)
+	ocamlc.opt -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(BOOT_CMOS)
 endif
 
 %.cmo: %.cmi $(MKFILES)
@@ -114,7 +117,7 @@ endif
 %.cmo: %.ml $(MKFILES)
 	ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
 
-%.cmx: %.ml $(MKFILES)
+%.cmx %.o: %.ml $(MKFILES)
 	ocamlopt.opt -c -o $@ $(OCAMLOPT_FLAGS) $<
 
 %.ml: %.mll $(MKFILES)
@@ -125,8 +128,8 @@ endif
 # Auto-dependency
 ######################################################################
 
-ML_DEPFILES:=$(COMPILER_MLS:.ml=.d)
-C_DEPFILES:=$(RUNTIME_CS:.c=.d)
+ML_DEPFILES:=$(BOOT_MLS:%.ml=%.d)
+C_DEPFILES:=$(RUNTIME_CS:%.c=%.d)
 
 %.d: %.c $(MKFILES)
 	$(call CFG_DEPEND_C, $@ $(patsubst %.c, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
@@ -177,30 +180,30 @@ test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) test/run-fail/%.pat $(CFG_
 	$(call CFG_RUN_TARG, $<) >$@ 2>&1 || true
 	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
-test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc test/run-pass/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
-	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
+	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	chmod 0755 $@
 
-test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rc test/run-pass/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
-	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rc test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
+	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	chmod 0755 $@
 
-test/compile-fail/%.out: test/compile-fail/%.rc test/run-pass/%.rs test/compile-fail/%.pat $(CFG_COMPILER) $(CFG_RUNTIME)
+test/compile-fail/%.out: test/compile-fail/%.rc test/run-pass/%.rs test/compile-fail/%.pat $(CFG_BOOT) $(CFG_RUNTIME)
 	rm -f $@
-	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
 	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
-test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
-	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
+	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	chmod 0755 $@
 
-test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_COMPILER) $(CFG_RUNTIME)
-	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $@ $<
+test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
+	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	chmod 0755 $@
 
-test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_COMPILER) $(CFG_RUNTIME)
+test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_BOOT) $(CFG_RUNTIME)
 	rm -f $@
-	OCAMLRUNPARAM="b1" $(CFG_COMPILER) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
 	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 
@@ -211,10 +214,10 @@ test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_CO
 .phony: clean
 
 clean:
-	rm -f $(RUNTIME_OBJS) $(COMPILER_CMOS) $(COMPILER_CMIS) $(COMPILER_CMXS)
+	rm -f $(RUNTIME_OBJS) $(BOOT_CMOS) $(BOOT_CMIS) $(BOOT_CMXS) $(BOOT_OBJS)
 	rm -f $(ML_DEPFILES) $(C_DEPFILES)
-	rm -f fe/lexer.ml
-	rm -f $(CFG_COMPILER) $(CFG_RUNTIME)
+	rm -f boot/fe/lexer.ml
+	rm -f $(CFG_BOOT) $(CFG_RUNTIME)
 	rm -f $(TEST_RUN_PASS_EXES) $(TEST_RUN_PASS_OUTS)
 	rm -f $(TEST_RUN_FAIL_EXES) $(TEST_RUN_FAIL_OUTS)
 	rm -f $(TEST_COMPILE_FAIL_EXES) $(TEST_COMPILE_FAIL_OUTS)

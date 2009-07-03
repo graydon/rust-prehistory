@@ -24,9 +24,8 @@ prog woohoo
   main
     {
       let int x = 2 + 2;
-      // for the time being, it seems our register allocation
-      // is busted and we cannot log 'x' on its own. Sigh.
-      log "hello, frances";
+      log x;
+      log "hello, world";
       log 10;
     }
 }
