@@ -177,10 +177,15 @@ let layout_visitor
       let sub_sz ly = ly.layout_offset <- Int64.sub ly.layout_offset sz in
         sub_sz layout;
         Array.iter
-          (fun sid ->
-             match htab_search cx.ctxt_slot_layouts sid with
-                 None -> ()
-               | Some ly -> sub_sz ly)
+          begin
+            fun sid ->
+              match htab_search cx.ctxt_slot_layouts sid with
+                  None -> ()
+                | Some layout -> 
+                    sub_sz layout;
+                    log cx "shifted slot #%d down to final frame offset %Ld"
+                      (int_of_node sid) layout.layout_offset
+          end
           sorted_slot_ids;
         log cx "block #%d total layout: %s" (int_of_node block.id) (string_of_layout layout);
         htab_put cx.ctxt_block_layouts block.id layout;
@@ -300,11 +305,7 @@ let layout_visitor
     let off =
       if Stack.is_empty stk
       then 0L
-      else
-        (* NB: blocks grow down, so inner blocks occur at offset *minus* size. *)
-        Int64.sub
-          (Stack.top stk).layout_offset
-          (Stack.top stk).layout_size
+      else (Stack.top stk).layout_offset
     in
     let layout = layout_block off b in
       Stack.push layout stk;

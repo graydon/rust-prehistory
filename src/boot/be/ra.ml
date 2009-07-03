@@ -362,6 +362,8 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                         s
                     end
                 in
+                  log cx "spilling <%d> from %s to %s"
+                    vreg (hr_str hreg) (string_of_operand hr_str (spill_slot spill));
                   prepend (mov (spill_slot spill) (Reg (Hreg hreg)))
               else ()
             end
@@ -477,29 +479,32 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                     (lstr "use" used vr_str);
                     (lstr "def" defined vr_str);
               end;
-            fixup := quad.quad_fixup;
             List.iter (clean_hreg i) clobbers;
             if is_beginning_of_basic_block quad
             then
               begin
                 spill_all_regs i;
+                fixup := quad.quad_fixup;
                 prepend { quad with
                             quad_dst = use_operand true i quad.quad_dst;
                             quad_lhs = use_operand false i quad.quad_lhs;
                             quad_rhs = use_operand false i quad.quad_rhs }
               end
             else
-              let newq = { quad with
-                             quad_dst = use_operand true i quad.quad_dst;
-                             quad_lhs = use_operand false i quad.quad_lhs;
-                             quad_rhs = use_operand false i quad.quad_rhs }
-              in
-                begin
-                  if is_end_of_basic_block quad
-                  then spill_all_regs i
-                  else ()
-                end;
-                prepend newq
+              begin
+                fixup := quad.quad_fixup;
+                let newq = { quad with
+                               quad_dst = use_operand true i quad.quad_dst;
+                               quad_lhs = use_operand false i quad.quad_lhs;
+                               quad_rhs = use_operand false i quad.quad_rhs }
+                in
+                  begin
+                    if is_end_of_basic_block quad
+                    then spill_all_regs i
+                    else ()
+                  end;
+                  prepend newq
+              end
           end;
           List.iter inactivate_hreg clobbers;
           List.iter (fun i -> Hashtbl.replace dirty_vregs i ())
@@ -511,11 +516,13 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       iflog cx
         begin
           fun _ ->
+            log cx "frame size: %Ld" framesz;
+            log cx "spills: %d pre-spilled, %d synthetic" n_pre_spills cx.ctxt_next_spill;
             log cx "register-allocated quads:";
-            dump_quads cx
+            dump_quads cx;
         end;
       
-      (cx.ctxt_quads, cx.ctxt_next_spill)
+      (cx.ctxt_quads, cx.ctxt_next_spill + n_pre_spills)
 
   with
       Ra_error s ->

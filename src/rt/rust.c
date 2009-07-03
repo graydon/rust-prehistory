@@ -867,8 +867,8 @@ static void
 upcall_log_uint32_t(rust_rt_t *rt, uint32_t i)
 {
     xlog(rt, LOG_UPCALL|LOG_ULOG,
-         "upcall log_uint32(0x%" PRIx32 ")",
-         i);
+         "upcall log_uint32(0x%" PRIx32 " = %" PRId32 " = '%c')",
+         i, i, (char)i);
 }
 
 static void
