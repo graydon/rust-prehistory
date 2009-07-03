@@ -5,6 +5,8 @@
 CFG_OSTYPE := $(shell uname -s)
 CFG_CPUTYPE := $(shell uname -m)
 
+CFG_INFO := $(info building on $(CFG_OSTYPE) $(CFG_CPUTYPE))
+
 CFG_GCC_COMPILE_FLAGS :=
 CFG_GCC_LINK_FLAGS :=
 
@@ -25,11 +27,12 @@ ifeq ($(CFG_OSTYPE), Darwin)
   CFG_UNIXY := 1
 endif
 
-ifneq ($(findstring, MINGW, $(CFG_OSTYPE)), )
+ifneq ($(findstring MINGW,$(CFG_OSTYPE)),)
   CFG_WINDOWSY := 1
 endif
 
 ifdef CFG_WINDOWSY
+  CFG_INFO := $(info windows-y environment)
   CFG_PATH_MUNGE := | sed -e 's/\\\(.\)/\/\1/g'
   CFG_RUNTIME := rustrt.dll
   CFG_OBJ_SUFFIX := .o
@@ -43,6 +46,7 @@ ifdef CFG_WINDOWSY
 endif
 
 ifdef CFG_UNIXY
+  CFG_INFO := $(info unix-y environment)
   CFG_BOOT := ./rustboot
   CFG_COMPILER := ./rustc
   CFG_OBJ_SUFFIX := .o
@@ -51,11 +55,14 @@ ifdef CFG_UNIXY
 endif
 
 ifdef CFG_GCC
+  CFG_INFO := $(info using gcc)
   CFG_GCC_COMPILE_FLAGS += -Wall -Werror -pedantic -std=c99 -g
   CFG_GCC_LINK_FLAGS += -shared -g
   CFG_COMPILE_C = gcc $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
   CFG_LINK_C = gcc $(CFG_GCC_LINK_FLAGS) -o $(1)
   CFG_DEPEND_C = gcc -MT "$(1)" -MM $(2)
+else
+  CFG_ERR := $(error please try on a system with gcc)
 endif
 
 
