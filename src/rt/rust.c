@@ -1318,7 +1318,7 @@ srv_lookup(rust_srv_t *srv, char const *sym)
     /* FIXME: pass library name in as well. And use LoadLibrary not
      * GetModuleHandle, manually refcount. Oh, so much to do
      * differently. */
-    HMODULE lib = GetModuleHandle("kernel32.dll");
+    HMODULE lib = GetModuleHandle("msvcrt.dll");
     if (!lib)
         srv->fatal(srv, "GetModuleHandle", __FILE__, __LINE__);
     res = (uintptr_t)GetProcAddress(lib, sym);
