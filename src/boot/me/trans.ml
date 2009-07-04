@@ -56,6 +56,11 @@ let trans_visitor
   let emit op dst lhs rhs = Il.emit (emitter()) op dst lhs rhs in
   let next_vreg _ = Il.next_vreg (emitter()) in
   let mark _ : int = (emitter()).Il.emit_pc in
+  let patch_existing (jmp:int) (targ:int) : unit =
+    (emitter()).Il.emit_quads.(jmp)
+    <- { (emitter()).Il.emit_quads.(jmp)
+         with Il.quad_lhs = Il.Label (targ) };
+  in
   let patch (i:int) : unit =
     (emitter()).Il.emit_quads.(i)
     <- { (emitter()).Il.emit_quads.(i)
@@ -1233,17 +1238,15 @@ let trans_visitor
           trans_block block
 
       | Ast.STMT_while sw ->
-          let back_jmp_target = mark () in
           let (head_stmts, head_expr) = sw.Ast.while_lval in
-            Array.iter trans_stmt head_stmts;
-
-            let v = trans_expr head_expr in
-              emit Il.CMP Il.Nil v imm_false;
-              let fwd_jmp_quad = mark () in
-                emit Il.JE Il.Nil badlab Il.Nil;
-                trans_block sw.Ast.while_body;
-                emit Il.JMP Il.Nil (Il.Label back_jmp_target) Il.Nil;
-                patch fwd_jmp_quad
+          let fwd_jmp = mark () in
+            emit Il.JMP Il.Nil badlab Il.Nil;
+            let block_begin = mark () in
+              trans_block sw.Ast.while_body;
+              patch fwd_jmp;
+              Array.iter trans_stmt head_stmts;
+              let back_jmp = trans_cond head_expr in
+                patch_existing back_jmp block_begin;
 
       | Ast.STMT_if si ->
           let v = trans_atom si.Ast.if_test in
