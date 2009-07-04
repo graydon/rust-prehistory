@@ -79,7 +79,7 @@ type upcall =
   | UPCALL_log_str
   | UPCALL_spawn
   | UPCALL_kill
-  | UPCALL_check_expr
+  | UPCALL_fail
   | UPCALL_malloc
   | UPCALL_free
   | UPCALL_new_port
@@ -104,7 +104,7 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_log_str -> 1L
   | UPCALL_spawn -> 2L
   | UPCALL_kill -> 3L
-  | UPCALL_check_expr -> 4L
+  | UPCALL_fail -> 4L
   | UPCALL_malloc -> 5L
   | UPCALL_free -> 6L
   | UPCALL_new_port -> 7L

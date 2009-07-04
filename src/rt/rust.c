@@ -215,7 +215,7 @@ typedef enum {
     upcall_code_log_str        = 1,
     upcall_code_spawn          = 2,
     upcall_code_kill           = 3,
-    upcall_code_check_expr     = 4,
+    upcall_code_fail           = 4,
     upcall_code_malloc         = 5,
     upcall_code_free           = 6,
     upcall_code_new_port       = 7,
@@ -1074,15 +1074,13 @@ upcall_recv(rust_rt_t *rt, rust_proc_t *dst, rust_port_t *port)
 
 
 static void
-upcall_check_expr(rust_rt_t *rt, rust_proc_t *proc, uint32_t i)
+upcall_fail(rust_rt_t *rt, char const *expr, char const *file,
+            size_t line)
 {
-    xlog(rt, LOG_UPCALL|LOG_MEM,
-         "upcall check(0x%" PRIx32 ")", i);
-    if (!i) {
-        /* FIXME: throw, don't just exit. */
-        xlog(rt, LOG_UPCALL|LOG_ERR, "*** CHECK FAILED ***");
-        proc->state = (uintptr_t)proc_state_exiting;
-    }
+    /* FIXME: throw, don't just exit. */
+    xlog(rt, LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
+         expr, file, line);
+    rt->srv->fatal(rt->srv, expr, file, line);
 }
 
 static uintptr_t
@@ -1176,8 +1174,9 @@ handle_upcall(rust_proc_t *proc)
     case upcall_code_sched:
         add_proc_to_state_vec(proc->rt, (rust_proc_t*)args[0]);
         break;
-    case upcall_code_check_expr:
-        upcall_check_expr(proc->rt, proc, args[0]);
+    case upcall_code_fail:
+        upcall_fail(proc->rt, (char const *)args[0],
+                    (char const *)args[1], (size_t)args[2]);
         break;
     case upcall_code_malloc:
         *((uintptr_t*)args[0]) =

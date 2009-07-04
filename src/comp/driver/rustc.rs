@@ -2,14 +2,19 @@
 
 prog rustc
 {
+  let str filename;
+  init () -> () { 
+    filename = "comp/rustc.rc";
+  }
   main { 
     puts("beginnings of self-hosting");
-    let int file = fopen("comp/rustc.rc", "r");
+    auto file = fopen(filename, "r");
+    check (file != 0);
     log "opened file";
     log file;
-    let int i = 0;
+    auto i = 0;
     while (i < 100) {
-      let int ch = fgetc(file);
+      auto ch = fgetc(file);
       log ch;
       i = i + 1;
     }

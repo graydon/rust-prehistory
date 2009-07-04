@@ -736,7 +736,7 @@ and parse_atomic_ty ps =
           else Ast.TY_tup slots
 
     | _ -> Ast.TY_mach (parse_ty_mach ps)
-
+      
 
 and parse_slot param_slot ps =
   match (peek ps, param_slot) with
@@ -809,6 +809,14 @@ and parse_expr_list bra ket ps =
 
 and slot_auto = { Ast.slot_mode = Ast.MODE_interior;
                   Ast.slot_ty = None }
+
+and parse_auto_slot_and_init ps =
+  let apos = lexpos ps in
+  let ident = parse_ident ps in
+  let bpos = lexpos ps in
+  let lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident ident)) in
+  let stmts = ctxt "slot, ident and init: init" (parse_init lval) ps in
+    (stmts, slot_auto, ident)
 
 
 and build_tmp ps slot apos bpos =
@@ -1397,7 +1405,8 @@ and parse_stmts ps =
 
       | LET ->
           bump ps;
-          (match peek ps with
+          begin
+            match peek ps with
                LPAREN ->
                  let (slots, idents) =
                    ctxt "stmt tup decl: slots and idents"
@@ -1447,8 +1456,18 @@ and parse_stmts ps =
                  let decl = Ast.DECL_slot (Ast.KEY_ident ident,
                                            (span ps apos bpos slot))
                  in
-                   Array.concat [[| span ps apos bpos (Ast.STMT_decl decl) |]; stmts])
+                   Array.concat [[| span ps apos bpos (Ast.STMT_decl decl) |]; stmts]
+          end
 
+      | AUTO ->
+          bump ps;
+          let (stmts, slot, ident) =
+            ctxt "stmt slot" parse_auto_slot_and_init ps in
+          let bpos = lexpos ps in
+          let decl = Ast.DECL_slot (Ast.KEY_ident ident,
+                                    (span ps apos bpos slot))
+          in
+            Array.concat [[| span ps apos bpos (Ast.STMT_decl decl) |]; stmts]
 
 
       | LIM | PROG | MOD | TYPE | (FN _) | PRED ->
@@ -1474,7 +1493,7 @@ and parse_stmts ps =
              *
              * desugars to:
              *
-             *   temp auto t_n = foo();
+             *   auto t_n = foo();
              *   a = t_n.{0};
              *   b = t_n.{1};
              *

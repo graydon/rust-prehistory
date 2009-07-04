@@ -549,8 +549,23 @@ let trans_visitor
           iflog (fun _ -> annotate "sched proc");
           trans_upcall Abi.UPCALL_sched [| proc_operand |]
 
-  and trans_check_expr (a:Ast.atom) : unit =
-    trans_upcall Abi.UPCALL_check_expr [| (trans_atom a) |]
+  and trans_check_expr (stmt_id:node_id) (a:Ast.atom) : unit =
+    let oper = trans_atom a in
+      emit Il.CMP Il.Nil (Il.Reg (force_to_reg oper)) imm_false;
+      let fwd_jmp = mark () in
+        emit Il.JNE Il.Nil badlab Il.Nil;
+        let (filename, line, _) =
+          match (Session.get_span cx.ctxt_sess stmt_id) with
+              None -> ("<none>", 0, 0)
+            | Some sp -> sp.lo
+        in
+          trans_upcall Abi.UPCALL_fail
+            [| 
+              trans_string_lit (Ast.fmt_to_str Ast.fmt_atom a);
+              trans_string_lit filename;
+              Il.Imm (Asm.IMM (Int64.of_int line))
+            |];
+          patch fwd_jmp
 
   and trans_malloc (dst:Il.operand) (nbytes:int64) : unit =
     trans_upcall Abi.UPCALL_malloc [| (alias dst); Il.Imm (Asm.IMM nbytes) |]
@@ -1125,7 +1140,7 @@ let trans_visitor
       | Ast.STMT_check_expr a ->
           begin
             match atom_type a with
-                Ast.TY_bool -> trans_check_expr a
+                Ast.TY_bool -> trans_check_expr stmt.id a
               | _ -> err (Some stmt.id) "check expr on non-bool"
           end
 

@@ -891,7 +891,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt ff ");";
 
       | STMT_decl (DECL_slot (skey, sloti)) ->
-          fmt ff "let ";
+          if sloti.node.slot_ty != None then fmt ff "let ";
           fmt_slot ff sloti.node;
           fmt ff " ";
           fmt_slot_key ff skey;
