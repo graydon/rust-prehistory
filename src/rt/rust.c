@@ -334,6 +334,7 @@ logptr(rust_rt_t *rt, char const *msg, uintptr_t ptrval)
 static void
 xfree(rust_rt_t *rt, void *p)
 {
+    logptr(rt, "xfree", (uintptr_t)p);
     I(rt, p);
     rt->srv->free(rt->srv, p);
 }

@@ -157,7 +157,7 @@ let auto_inference_visitor
                 | Some _ -> err (Some s.id) "STMT_spawn prog resolved to non-program type"
             end
         | Ast.STMT_if i ->
-            ignore (unify_atom (Some Ast.TY_bool) i.Ast.if_test)
+            ignore (unify_expr (Some Ast.TY_bool) i.Ast.if_test)
         | Ast.STMT_while w ->
             let (_, e) = w.Ast.while_lval in
               ignore (unify_expr (Some Ast.TY_bool) e)

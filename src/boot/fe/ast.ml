@@ -224,7 +224,7 @@ and stmt' =
   | STMT_alt_port of stmt_alt_port
   | STMT_prove of (constrs)
   | STMT_check of (constrs)
-  | STMT_check_expr of atom
+  | STMT_check_expr of expr
   | STMT_check_if of (constrs * block)
   | STMT_block of block
   | STMT_copy of (lval * expr)
@@ -287,7 +287,7 @@ and stmt_for =
 
 and stmt_if =
     {
-      if_test: atom;
+      if_test: expr;
       if_then: block;
       if_else: block option;
     }
@@ -837,7 +837,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_if sif ->
           fmt_obox ff;
           fmt ff "if (";
-          fmt_atom ff sif.if_test;
+          fmt_expr ff sif.if_test;
           fmt ff ") ";
           fmt_obr ff;
           fmt_stmts ff sif.if_then.node;
@@ -909,9 +909,9 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_lval ff dst;
           fmt ff " = (...);"
 
-      | STMT_check_expr atom ->
+      | STMT_check_expr expr ->
           fmt ff "check (";
-          fmt_atom ff atom;
+          fmt_expr ff expr;
           fmt ff ");"
 
       | _ -> fmt ff "?stmt?;"

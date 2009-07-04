@@ -124,6 +124,12 @@ let trans_visitor
       addr
   in
 
+  let is_mem op =
+    match op with
+        Il.Mem _ | Il.Spill _ -> true
+      | _ -> false
+  in
+
   let force_to_mem (src:Il.operand) : Il.operand =
     match src with
         Il.Mem _ | Il.Spill _ -> src
@@ -195,13 +201,27 @@ let trans_visitor
                   then need_ty elts.(i).Ast.slot_ty
                   else err None "out-of-range tuple index %d" i
 
-              | (Ast.TY_vec ety, Ast.COMP_named (Ast.COMP_idx _)) -> 
+              | (Ast.TY_vec ety, Ast.COMP_named (Ast.COMP_idx _)) ->
                   ety
 
-              | (Ast.TY_vec ety, Ast.COMP_atom _) -> 
+              | (Ast.TY_vec ety, Ast.COMP_atom _) ->
                   ety
 
               | (_,_) -> err None "unhandled form of lval-ext"
+  in
+
+  let expr_type e =
+    match e with
+        Ast.EXPR_binary (op, a, _) ->
+          begin
+            match op with
+                Ast.BINOP_eq | Ast.BINOP_ne | Ast.BINOP_lt  | Ast.BINOP_le
+              | Ast.BINOP_ge | Ast.BINOP_gt -> Ast.TY_bool
+              | _ -> atom_type a
+          end
+      | Ast.EXPR_unary (Ast.UNOP_not, _) -> Ast.TY_bool
+      | Ast.EXPR_unary (_, a) -> atom_type a
+      | Ast.EXPR_atom a -> atom_type a
   in
 
   let cell_vreg_num (vr:(int option) ref) : int =
@@ -255,59 +275,59 @@ let trans_visitor
       (comp:Ast.lval_component)
       : (Il.operand * Ast.slot) =
 
-      match (base_slot.Ast.slot_ty, comp) with
-          (Some (Ast.TY_rec entries),
-           Ast.COMP_named (Ast.COMP_ident id)) ->
-            let layouts = layout_rec abi entries in
-            let (slot, layout) = atab_find layouts id in
-            let disp = layout.layout_offset in
-            let oper = (word_at_reg_off_imm
-                          base_reg base_off disp)
-            in
+    match (base_slot.Ast.slot_ty, comp) with
+        (Some (Ast.TY_rec entries),
+         Ast.COMP_named (Ast.COMP_ident id)) ->
+          let layouts = layout_rec abi entries in
+          let (slot, layout) = atab_find layouts id in
+          let disp = layout.layout_offset in
+          let oper = (word_at_reg_off_imm
+                        base_reg base_off disp)
+          in
+            (oper, slot)
+
+      | (Some (Ast.TY_tup entries),
+         Ast.COMP_named (Ast.COMP_idx i)) ->
+          let layouts = layout_tup abi entries in
+          let slot = entries.(i) in
+          let disp = layouts.(i).layout_offset in
+          let oper = (word_at_reg_off_imm
+                        base_reg base_off disp)
+          in
+            (oper, slot)
+
+      | (Some (Ast.TY_vec ety),
+         Ast.COMP_named (Ast.COMP_idx i)) ->
+          let unit_sz = ty_sz abi ety in
+          let disp = (Int64.add 
+                        (word_n 3)
+                        (Int64.mul unit_sz (Int64.of_int i))) in
+
+          (* 
+           * (base_reg, base_off) points to the memory cell holding the 
+           * pointer to the vector. We want to dereference that and form
+           * a new operand pointing to a slot within the vector. 
+           *)
+          let oper = deref_off (word_at_reg_off base_reg base_off) disp in
+          let slot = interior_slot ety in
+            (oper, slot)
+
+
+      (* FIXME: bounds checking please! *)
+      | (Some (Ast.TY_vec ety),
+         Ast.COMP_atom at) ->
+          let atop = trans_atom at in
+          let unit_sz = ty_sz abi ety in
+          let slot = interior_slot ety in
+          let reg = next_vreg () in
+          let t = Il.Reg reg in
+            emit Il.UMUL t atop (imm unit_sz);
+            emit Il.ADD t t (word_at_reg_off base_reg base_off);
+            emit Il.ADD t t (imm (word_n 3));
+            let oper = word_at_reg_off (Some reg) (Asm.IMM 0L) in
               (oper, slot)
 
-        | (Some (Ast.TY_tup entries),
-           Ast.COMP_named (Ast.COMP_idx i)) ->
-            let layouts = layout_tup abi entries in
-            let slot = entries.(i) in
-            let disp = layouts.(i).layout_offset in
-            let oper = (word_at_reg_off_imm
-                          base_reg base_off disp)
-            in
-              (oper, slot)
-
-        | (Some (Ast.TY_vec ety),
-           Ast.COMP_named (Ast.COMP_idx i)) ->
-            let unit_sz = ty_sz abi ety in
-            let disp = (Int64.add 
-                         (word_n 3)
-                         (Int64.mul unit_sz (Int64.of_int i))) in
-
-            (* 
-             * (base_reg, base_off) points to the memory cell holding the 
-             * pointer to the vector. We want to dereference that and form
-             * a new operand pointing to a slot within the vector. 
-             *)
-            let oper = deref_off (word_at_reg_off base_reg base_off) disp in
-            let slot = interior_slot ety in
-              (oper, slot)
-
-
-        (* FIXME: bounds checking please! *)
-        | (Some (Ast.TY_vec ety),
-           Ast.COMP_atom at) ->
-            let atop = trans_atom at in
-            let unit_sz = ty_sz abi ety in
-            let slot = interior_slot ety in
-            let reg = next_vreg () in
-            let t = Il.Reg reg in
-              emit Il.UMUL t atop (imm unit_sz);
-              emit Il.ADD t t (word_at_reg_off base_reg base_off);
-              emit Il.ADD t t (imm (word_n 3));
-              let oper = word_at_reg_off (Some reg) (Asm.IMM 0L) in
-                (oper, slot)
-
-        | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
+      | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
 
   and trans_lval_full
       (lv:Ast.lval)
@@ -435,13 +455,13 @@ let trans_visitor
       jmp
 
 
-  and trans_cond expr : int =
+  and trans_cond invert expr : int =
     match expr with
         Ast.EXPR_binary (binop, a, b) ->
           let lhs = trans_atom a in
           let rhs = trans_atom b in
           let cjmp =
-            match binop with 
+            match binop with
                 Ast.BINOP_eq -> Il.JE
               | Ast.BINOP_ne -> Il.JNE
               | Ast.BINOP_lt -> Il.JL
@@ -450,23 +470,36 @@ let trans_visitor
               | Ast.BINOP_gt -> Il.JG
               | _ -> err None "Unhandled binop of expr in trans_cond"
           in
-            trans_compare cjmp lhs rhs
+          let cjmp' =
+            if invert then
+              match cjmp with
+                  Il.JE -> Il.JNE
+                | Il.JNE -> Il.JE
+                | Il.JL -> Il.JGE
+                | Il.JLE -> Il.JG
+                | Il.JGE -> Il.JL
+                | Il.JG -> Il.JLE
+                | _ -> err None "Unhandled inverse binop in trans_cond"
+            else
+              cjmp
+          in
+            trans_compare cjmp' lhs rhs
 
       | _ ->
-          trans_compare Il.JNE (trans_expr expr) imm_false
-          
+          trans_compare Il.JNE (trans_expr expr)
+            (if invert then imm_true else imm_false)
 
   and trans_expr (expr:Ast.expr) : Il.operand =
 
     match expr with
 
         Ast.EXPR_binary (binop, a, b) ->
-          let dst = Il.Reg (Il.next_vreg (emitter())) in
           let arith op =
+            let dst = Il.Reg (Il.next_vreg (emitter())) in
             let lhs = trans_atom a in
             let rhs = trans_atom b in
               emit op dst lhs rhs;
-            dst
+              dst
           in
             begin
               match binop with
@@ -485,14 +518,17 @@ let trans_visitor
                 | Ast.BINOP_div -> arith Il.UDIV
                 | Ast.BINOP_mod -> arith Il.UMOD
 
-                | _ -> 
-                    mov dst imm_true;
-                    let jmp = trans_cond expr in
-                      mov dst imm_false;
-                      patch jmp;
-                      dst
+                | _ ->
+                    let dst = Il.Reg (Il.next_vreg (emitter())) in
+                      begin
+                        mov dst imm_true;
+                        let jmp = trans_cond false expr in
+                          mov dst imm_false;
+                          patch jmp;
+                          dst
+                      end
             end
-              
+
       | Ast.EXPR_unary (unop, a) ->
           let src = trans_atom a in
           let dst = Il.Reg (Il.next_vreg (emitter())) in
@@ -560,7 +596,7 @@ let trans_visitor
        *)
       trans_upcall Abi.UPCALL_spawn [| (alias proc_operand); prog_operand |];
       let in_slots = tsig.Ast.sig_input_slots in
-      (* FIXME: this is a ghastly mess. *)
+        (* FIXME: this is a ghastly mess. *)
       let arg_layouts = layout_init_call_tup abi tsig in
       let init_operand = deref_off prog_operand (word_n Abi.prog_field_init)
       in
@@ -573,26 +609,32 @@ let trans_visitor
           iflog (fun _ -> annotate "sched proc");
           trans_upcall Abi.UPCALL_sched [| proc_operand |]
 
-  and trans_check_expr (stmt_id:node_id) (a:Ast.atom) : unit =
-    let oper = trans_atom a in
-      emit Il.CMP Il.Nil (Il.Reg (force_to_reg oper)) imm_false;
-      let fwd_jmp = mark () in
-        emit Il.JNE Il.Nil badlab Il.Nil;
-        let (filename, line, _) =
-          match (Session.get_span cx.ctxt_sess stmt_id) with
-              None -> ("<none>", 0, 0)
-            | Some sp -> sp.lo
-        in
-          trans_upcall Abi.UPCALL_fail
-            [| 
-              trans_string_lit (Ast.fmt_to_str Ast.fmt_atom a);
-              trans_string_lit filename;
-              Il.Imm (Asm.IMM (Int64.of_int line))
-            |];
-          patch fwd_jmp
+  and trans_check_expr (stmt_id:node_id) (e:Ast.expr) : unit =
+    let fwd_jmp = trans_cond false e in
+    let (filename, line, _) =
+      match (Session.get_span cx.ctxt_sess stmt_id) with
+          None -> ("<none>", 0, 0)
+        | Some sp -> sp.lo
+    in
+      trans_upcall Abi.UPCALL_fail
+        [|
+          trans_string_lit (Ast.fmt_to_str Ast.fmt_expr e);
+          trans_string_lit filename;
+          Il.Imm (Asm.IMM (Int64.of_int line))
+        |];
+      patch fwd_jmp
 
   and trans_malloc (dst:Il.operand) (nbytes:int64) : unit =
-    trans_upcall Abi.UPCALL_malloc [| (alias dst); Il.Imm (Asm.IMM nbytes) |]
+    if is_mem dst
+    then
+      trans_upcall Abi.UPCALL_malloc [| (alias dst); Il.Imm (Asm.IMM nbytes) |]
+    else
+      let s = Il.next_spill (emitter()) in
+        begin
+          mov s (Il.Imm (Asm.IMM 0L));
+          trans_upcall Abi.UPCALL_malloc [| (alias s); Il.Imm (Asm.IMM nbytes) |];
+          mov dst s
+        end
 
   and trans_free (src:Il.operand) : unit =
     trans_upcall Abi.UPCALL_free [| src |]
@@ -618,48 +660,48 @@ let trans_visitor
       trans_upcall Abi.UPCALL_new_port [| (alias dstop); Il.Imm (Asm.IMM unit_sz) |]
 
   and trans_del_port (port:Il.operand) : unit =
-      trans_upcall Abi.UPCALL_del_port [| port |]
+    trans_upcall Abi.UPCALL_del_port [| port |]
 
   and trans_kill (proc:Il.operand) : unit =
     (* FIXME: this needs to run the fini block and all that. *)
     trans_upcall Abi.UPCALL_kill [| proc |]
 
-    (*
-     * A vec is implicitly exterior: every slot vec[T] is 1 word and
-     * points to a refcounted structure. That structure has 3 words with
-     * defined meaning at the beginning; data follows the header.
-     *
-     *   word 0: refcount
-     *   word 1: allocated size of data
-     *   word 2: initialized size of data
-     *   word 3...N: data
-     *)
+  (*
+   * A vec is implicitly exterior: every slot vec[T] is 1 word and
+   * points to a refcounted structure. That structure has 3 words with
+   * defined meaning at the beginning; data follows the header.
+   *
+   *   word 0: refcount
+   *   word 1: allocated size of data
+   *   word 2: initialized size of data
+   *   word 3...N: data
+   *)
 
   and trans_init_vec (dst:Ast.lval) (atoms:Ast.atom array) : unit =
-      let (dstop, dst_slot) = trans_lval dst INTENT_init in
-      let unit_ty = match slot_ty dst_slot with
-          Ast.TY_vec t -> t
-        | _ -> err None "init dst of vec-init has non-port type"
-      in
-      let unit_sz = ty_sz abi unit_ty in
-      let n_inits = Array.length atoms in
-      let init_sz = Int64.mul unit_sz (Int64.of_int n_inits) in
-      let padded_sz = Int64.add init_sz (word_n 3) in
-      let alloc_sz = next_power_of_two padded_sz in
-        trans_upcall Abi.UPCALL_malloc [| (alias dstop); Il.Imm (Asm.IMM alloc_sz) |];
-        mov (deref_off dstop (word_n 0)) (Il.Imm (Asm.IMM 1L));
-        mov (deref_off dstop (word_n 1)) (Il.Imm (Asm.IMM alloc_sz));
-        mov (deref_off dstop (word_n 2)) (Il.Imm (Asm.IMM init_sz));
-        Array.iteri
-          begin
-            fun i atom ->
-              let lval = (Ast.LVAL_ext
-                            (dst, (Ast.COMP_named (Ast.COMP_idx i))))
-              in
-              let expr = Ast.EXPR_atom atom in
-                trans_copy true lval expr
-          end
-          atoms
+    let (dstop, dst_slot) = trans_lval dst INTENT_init in
+    let unit_ty = match slot_ty dst_slot with
+        Ast.TY_vec t -> t
+      | _ -> err None "init dst of vec-init has non-port type"
+    in
+    let unit_sz = ty_sz abi unit_ty in
+    let n_inits = Array.length atoms in
+    let init_sz = Int64.mul unit_sz (Int64.of_int n_inits) in
+    let padded_sz = Int64.add init_sz (word_n 3) in
+    let alloc_sz = next_power_of_two padded_sz in
+      trans_upcall Abi.UPCALL_malloc [| (alias dstop); Il.Imm (Asm.IMM alloc_sz) |];
+      mov (deref_off dstop (word_n 0)) (Il.Imm (Asm.IMM 1L));
+      mov (deref_off dstop (word_n 1)) (Il.Imm (Asm.IMM alloc_sz));
+      mov (deref_off dstop (word_n 2)) (Il.Imm (Asm.IMM init_sz));
+      Array.iteri
+        begin
+          fun i atom ->
+            let lval = (Ast.LVAL_ext
+                          (dst, (Ast.COMP_named (Ast.COMP_idx i))))
+            in
+            let expr = Ast.EXPR_atom atom in
+              trans_copy true lval expr
+        end
+        atoms
 
   and next_power_of_two (x:int64) : int64 =
     let xr = ref (Int64.sub x 1L) in
@@ -784,15 +826,24 @@ let trans_visitor
 
 
   and init_exterior_slot operand slot =
+    iflog (fun _ -> annotate "init exterior: malloc");
     let sz = exterior_allocation_size slot in
     let one = Il.Imm (Asm.IMM 1L) in
       trans_malloc operand sz;
       (* Reload rc; operand changed underfoot. *)
+      iflog (fun _ -> annotate "init exterior: reload refcount");
       let rc = exterior_refcount_cell operand in
         mov rc one
 
+  and intent_str i =
+    match i with
+        INTENT_init -> "init"
+      | INTENT_write -> "write"
+      | INTENT_read -> "read"
+      | INTENT_drop -> "drop"
 
   and deref_exterior intent operand slot =
+    iflog (fun _ -> annotate ("deref exterior: " ^ (intent_str intent)));
     let one = Il.Imm (Asm.IMM 1L) in
       match intent with
           INTENT_init ->
@@ -801,18 +852,20 @@ let trans_visitor
 
         | INTENT_write ->
             let rc = exterior_refcount_cell operand in
-            emit Il.CMP Il.Nil rc one;
-            let j = mark () in
-              emit Il.JE Il.Nil badlab Il.Nil;
-              let src = Il.Reg (Il.next_vreg (emitter())) in
-                drop_refcount_and_maybe_free rc operand slot;
+              emit Il.CMP Il.Nil rc one;
+              let j = mark () in
+                emit Il.JE Il.Nil badlab Il.Nil;
                 (* 
                  * Calling trans_copy_slot_heavy in 'initializing' mode 
                  * will init the slot for us. Don't double-init.
                  *)
-                trans_copy_slot_heavy true operand slot src slot;
-                patch j;
-                deref_off operand exterior_body_off
+                iflog (fun _ -> annotate ("deref exterior: write: heavy-copy referent"));
+                let tmp = Il.Reg (Il.next_vreg (emitter())) in
+                  trans_copy_slot_heavy true tmp slot operand slot;
+                  drop_refcount_and_maybe_free rc operand slot;
+                  mov operand tmp;
+                  patch j;
+                  deref_off operand exterior_body_off
 
         | INTENT_read ->
             deref_off operand exterior_body_off
@@ -1161,10 +1214,10 @@ let trans_visitor
               | _ -> err (Some stmt.id) "unimplemented logging type"
           end
 
-      | Ast.STMT_check_expr a ->
+      | Ast.STMT_check_expr e ->
           begin
-            match atom_type a with
-                Ast.TY_bool -> trans_check_expr stmt.id a
+            match expr_type e with
+                Ast.TY_bool -> trans_check_expr stmt.id e
               | _ -> err (Some stmt.id) "check expr on non-bool"
           end
 
@@ -1245,30 +1298,28 @@ let trans_visitor
               trans_block sw.Ast.while_body;
               patch fwd_jmp;
               Array.iter trans_stmt head_stmts;
-              let back_jmp = trans_cond head_expr in
+              let back_jmp = trans_cond false head_expr in
                 patch_existing back_jmp block_begin;
 
       | Ast.STMT_if si ->
-          let v = trans_atom si.Ast.if_test in
-            emit Il.CMP Il.Nil v imm_true;
-            let skip_thn_clause_jmp = mark () in
-              emit Il.JNE Il.Nil badlab Il.Nil;
-              trans_block si.Ast.if_then;
-              begin
-                match si.Ast.if_else with
-                    None -> patch skip_thn_clause_jmp
-                  | Some els ->
-                      let skip_els_clause_jmp = mark () in
+          let skip_thn_jmp = trans_cond true si.Ast.if_test in
+            trans_block si.Ast.if_then;
+            begin
+              match si.Ast.if_else with
+                  None -> patch skip_thn_jmp
+                | Some els ->
+                    let skip_els_jmp = mark () in
+                      begin
                         emit Il.JMP Il.Nil badlab Il.Nil;
-                        patch skip_thn_clause_jmp;
+                        patch skip_thn_jmp;
                         trans_block els;
-                        patch skip_els_clause_jmp
-              end
+                        patch skip_els_jmp
+                      end
+            end
 
       | Ast.STMT_check _ -> ()
 
       | Ast.STMT_call (dst, flv, args) -> trans_call_fn dst flv args
-
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->
           begin

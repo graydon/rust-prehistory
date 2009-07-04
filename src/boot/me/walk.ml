@@ -465,7 +465,7 @@ and walk_stmt
 
       | Ast.STMT_if i ->
           begin
-            walk_atom v i.Ast.if_test;
+            walk_expr v i.Ast.if_test;
             walk_block v i.Ast.if_then;
             walk_option (walk_block v) i.Ast.if_else
           end
@@ -512,8 +512,8 @@ and walk_stmt
           walk_lval v lv;
           Array.iter (walk_atom v) ats
 
-      | Ast.STMT_check_expr at ->
-          walk_atom v at
+      | Ast.STMT_check_expr e ->
+          walk_expr v e
 
       | Ast.STMT_check cs ->
           walk_constrs v cs

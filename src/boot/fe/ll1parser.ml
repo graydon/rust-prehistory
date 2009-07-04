@@ -1340,11 +1340,11 @@ and parse_stmts ps =
             match peek ps with
                 LPAREN ->
                   bump ps;
-                  let (stmts, atom) = ctxt "stmts: check value" parse_expr_atom ps in
+                  let (stmts, expr) = ctxt "stmts: check value" parse_expr ps in
                     expect ps RPAREN;
                     expect ps SEMI;
                     let bpos = lexpos ps in
-                      spans stmts apos bpos (Ast.STMT_check_expr atom)
+                      spans stmts apos bpos (Ast.STMT_check_expr expr)
               | IF ->
                   bump ps;
                   expect ps LPAREN;
@@ -1363,7 +1363,7 @@ and parse_stmts ps =
 
       | IF ->
           bump ps;
-          let (stmts, atom) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr_atom) ps in
+          let (stmts, expr) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
           let then_block = ctxt "stmts: if-then" parse_block ps in
           let else_block =
             (match peek ps with
@@ -1375,7 +1375,7 @@ and parse_stmts ps =
           let bpos = lexpos ps in
             spans stmts apos bpos
               (Ast.STMT_if
-                 { Ast.if_test = atom;
+                 { Ast.if_test = expr;
                    Ast.if_then = then_block;
                    Ast.if_else = else_block; })
 
