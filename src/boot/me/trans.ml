@@ -421,6 +421,14 @@ let trans_visitor
               | _ -> marker
           end
 
+  (* trans_compare returns a quad number of the cjmp, which the caller
+     patches to the cjmp destination.  *)
+  and trans_compare cjmp lhs rhs : int =
+    emit Il.CMP Il.Nil (Il.Reg (force_to_reg lhs)) rhs;
+    let jmp = mark() in
+      emit cjmp Il.Nil badlab Il.Nil;
+      jmp
+
   and trans_expr (expr:Ast.expr) : Il.operand =
 
     match expr with
@@ -434,12 +442,10 @@ let trans_visitor
             dst
           in
           let rela cjmp =
-            emit Il.CMP Il.Nil (Il.Reg (force_to_reg lhs)) rhs;
             mov dst imm_true;
-            let j = mark () in
-              emit cjmp Il.Nil badlab Il.Nil;
+            let jmp = trans_compare cjmp lhs rhs in
               mov dst imm_false;
-              patch j;
+              patch jmp;
               dst
           in
             begin
