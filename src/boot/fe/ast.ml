@@ -266,7 +266,7 @@ and stmt_alt_port =
 
 and stmt_while =
     {
-      while_lval: ((stmt array) * atom);
+      while_lval: ((stmt array) * expr);
       while_body: block;
     }
 
@@ -806,13 +806,13 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt ff ");";
 
       | STMT_while sw ->
-          let (stmts, at) = sw.while_lval in
+          let (stmts, e) = sw.while_lval in
             begin
               fmt_obox ff;
               fmt ff "while (";
               if Array.length stmts != 0
               then fmt_block ff stmts;
-              fmt_atom ff at;
+              fmt_expr ff e;
               fmt ff ") ";
               fmt_obr ff;
               fmt_stmts ff sw.while_body.node;
@@ -820,7 +820,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
             end
 
       | STMT_do_while sw ->
-          let (stmts, at) = sw.while_lval in
+          let (stmts, e) = sw.while_lval in
             begin
               fmt_obox ff;
               fmt ff "do ";
@@ -829,7 +829,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
               fmt ff "while (";
               if Array.length stmts != 0
               then fmt_block ff stmts;
-              fmt_atom ff at;
+              fmt_expr ff e;
               fmt ff ");";
               fmt_cbb ff
             end

@@ -428,9 +428,9 @@ and walk_stmt
   let walk_stmt_while
       (s:Ast.stmt_while)
       : unit =
-    let (ss,a) = s.Ast.while_lval in
+    let (ss,e) = s.Ast.while_lval in
       Array.iter (walk_stmt v) ss;
-      walk_atom v a;
+      walk_expr v e;
       walk_block v s.Ast.while_body
   in
   let children _ =

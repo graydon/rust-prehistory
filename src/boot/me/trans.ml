@@ -429,24 +429,39 @@ let trans_visitor
       emit cjmp Il.Nil badlab Il.Nil;
       jmp
 
+
+  and trans_cond expr : int =
+    match expr with
+        Ast.EXPR_binary (binop, a, b) ->
+          let lhs = trans_atom a in
+          let rhs = trans_atom b in
+          let cjmp =
+            match binop with 
+                Ast.BINOP_eq -> Il.JE
+              | Ast.BINOP_ne -> Il.JNE
+              | Ast.BINOP_lt -> Il.JL
+              | Ast.BINOP_le -> Il.JLE
+              | Ast.BINOP_ge -> Il.JGE
+              | Ast.BINOP_gt -> Il.JG
+              | _ -> err None "Unhandled binop of expr in trans_cond"
+          in
+            trans_compare cjmp lhs rhs
+
+      | _ ->
+          trans_compare Il.JNE (trans_expr expr) imm_false
+          
+
   and trans_expr (expr:Ast.expr) : Il.operand =
 
     match expr with
 
         Ast.EXPR_binary (binop, a, b) ->
-          let lhs = trans_atom a in
-          let rhs = trans_atom b in
           let dst = Il.Reg (Il.next_vreg (emitter())) in
           let arith op =
-            emit op dst lhs rhs;
+            let lhs = trans_atom a in
+            let rhs = trans_atom b in
+              emit op dst lhs rhs;
             dst
-          in
-          let rela cjmp =
-            mov dst imm_true;
-            let jmp = trans_compare cjmp lhs rhs in
-              mov dst imm_false;
-              patch jmp;
-              dst
           in
             begin
               match binop with
@@ -465,16 +480,14 @@ let trans_visitor
                 | Ast.BINOP_div -> arith Il.UDIV
                 | Ast.BINOP_mod -> arith Il.UMOD
 
-                | Ast.BINOP_eq -> rela Il.JE
-                | Ast.BINOP_ne -> rela Il.JNE
-                | Ast.BINOP_lt -> rela Il.JL
-                | Ast.BINOP_le -> rela Il.JLE
-                | Ast.BINOP_ge -> rela Il.JGE
-                | Ast.BINOP_gt -> rela Il.JG
-
-                | _ -> err None "Unhandled binop of expr in trans_expr"
+                | _ -> 
+                    mov dst imm_true;
+                    let jmp = trans_cond expr in
+                      mov dst imm_false;
+                      patch jmp;
+                      dst
             end
-
+              
       | Ast.EXPR_unary (unop, a) ->
           let src = trans_atom a in
           let dst = Il.Reg (Il.next_vreg (emitter())) in
@@ -1221,9 +1234,10 @@ let trans_visitor
 
       | Ast.STMT_while sw ->
           let back_jmp_target = mark () in
-          let (head_stmts, head_atom) = sw.Ast.while_lval in
+          let (head_stmts, head_expr) = sw.Ast.while_lval in
             Array.iter trans_stmt head_stmts;
-            let v = trans_atom head_atom in
+
+            let v = trans_expr head_expr in
               emit Il.CMP Il.Nil v imm_false;
               let fwd_jmp_quad = mark () in
                 emit Il.JE Il.Nil badlab Il.Nil;

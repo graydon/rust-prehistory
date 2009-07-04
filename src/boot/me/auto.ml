@@ -159,8 +159,8 @@ let auto_inference_visitor
         | Ast.STMT_if i ->
             ignore (unify_atom (Some Ast.TY_bool) i.Ast.if_test)
         | Ast.STMT_while w ->
-            let (_, atom) = w.Ast.while_lval in
-              ignore (unify_atom (Some Ast.TY_bool) atom)
+            let (_, e) = w.Ast.while_lval in
+              ignore (unify_expr (Some Ast.TY_bool) e)
         | _ -> () (* FIXME: plenty more to handle here. *)
     end;
     inner.Walk.visit_stmt_pre s

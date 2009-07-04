@@ -802,9 +802,9 @@ and parse_rec_inputs ps =
     arl (!ltab)
 
 
-and parse_expr_list bra ket ps =
+and parse_expr_atom_list bra ket ps =
   arj1st (bracketed_zero_or_more bra ket (Some COMMA)
-            (ctxt "expr list" parse_expr) ps)
+            (ctxt "expr-atom list" parse_expr_atom) ps)
 
 
 and slot_auto = { Ast.slot_mode = Ast.MODE_interior;
@@ -1083,23 +1083,41 @@ and desugar_lval ps pexp =
             ([||], Ast.LVAL_base nb)
 
       | PEXP_ext_name (base_pexp, comp) ->
-          let (base_stmts, base_atom) = desugar_expr ps base_pexp in
+          let (base_stmts, base_atom) = desugar_expr_atom ps base_pexp in
           let base_lval = atom_lval ps base_atom in
             (base_stmts, Ast.LVAL_ext (base_lval, Ast.COMP_named comp))
 
       | PEXP_ext_pexp (base_pexp, ext_pexp) ->
-          let (base_stmts, base_atom) = desugar_expr ps base_pexp in
-          let (ext_stmts, ext_atom) = desugar_expr ps ext_pexp in
+          let (base_stmts, base_atom) = desugar_expr_atom ps base_pexp in
+          let (ext_stmts, ext_atom) = desugar_expr_atom ps ext_pexp in
           let base_lval = atom_lval ps base_atom in
             (Array.append base_stmts ext_stmts,
              Ast.LVAL_ext (base_lval, Ast.COMP_atom (clone_atom ps ext_atom)))
 
       | _ ->
-          let (stmts, atom) = desugar_expr ps pexp in
+          let (stmts, atom) = desugar_expr_atom ps pexp in
             (stmts, atom_lval ps atom)
 
 
-and desugar_expr ps pexp =
+and desugar_expr ps pexp : (Ast.stmt array * Ast.expr) =
+  match pexp.node with
+
+      PEXP_unop (op, pe) ->
+        let (stmts, at) = desugar_expr_atom ps pe in
+          (stmts, Ast.EXPR_unary (op, at))
+
+    | PEXP_binop (op, lhs, rhs) ->
+          let (lhs_stmts, lhs_atom) = desugar_expr_atom ps lhs in
+          let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
+            (Array.append lhs_stmts rhs_stmts,
+             Ast.EXPR_binary (op, lhs_atom, rhs_atom))
+
+    | _ ->
+        let (stmts, at) = desugar_expr_atom ps pexp in
+          (stmts, Ast.EXPR_atom at)
+
+
+and desugar_expr_atom ps pexp : (Ast.stmt array * Ast.atom) =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
     match pexp.node with
@@ -1129,11 +1147,11 @@ and desugar_expr ps pexp =
             (stmts, Ast.ATOM_lval lval)
 
 
-and desugar_exprs ps pexps =
-  arj1st (Array.map (desugar_expr ps) pexps)
+and desugar_expr_atoms ps pexps : (Ast.stmt array * Ast.atom array) =
+  arj1st (Array.map (desugar_expr_atom ps) pexps)
 
 
-and desugar_expr_init ps dst_lval pexp =
+and desugar_expr_init ps dst_lval pexp : (Ast.stmt array) =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
     match pexp.node with
@@ -1143,26 +1161,26 @@ and desugar_expr_init ps dst_lval pexp =
       | PEXP_app _
       | PEXP_ext_name _
       | PEXP_ext_pexp _ ->
-          let (stmts, atom) = desugar_expr ps pexp in
+          let (stmts, atom) = desugar_expr_atom ps pexp in
           let expr = Ast.EXPR_atom atom in
             [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
 
       | PEXP_binop (op, lhs, rhs) ->
-          let (lhs_stmts, lhs_atom) = desugar_expr ps lhs in
-          let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
+          let (lhs_stmts, lhs_atom) = desugar_expr_atom ps lhs in
+          let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
           let expr = Ast.EXPR_binary (op, lhs_atom, rhs_atom) in
           let copy_stmt = span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) in
             Array.concat [ lhs_stmts; rhs_stmts; [| copy_stmt |] ]
 
       | PEXP_unop (op, rhs) ->
-          let (rhs_stmts, rhs_atom) = desugar_expr ps rhs in
+          let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
           let expr = Ast.EXPR_unary (op, rhs_atom) in
           let copy_stmt = span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) in
             Array.append rhs_stmts [| copy_stmt |]
 
       | PEXP_call (fn, args) ->
-          let (fn_stmts, fn_atom) = desugar_expr ps fn in
-          let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+          let (fn_stmts, fn_atom) = desugar_expr_atom ps fn in
+          let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
           let fn_lval = atom_lval ps fn_atom in
           let call_stmt = span ps apos bpos (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
             Array.concat [ fn_stmts; arg_stmts; [| call_stmt |] ]
@@ -1171,8 +1189,8 @@ and desugar_expr_init ps dst_lval pexp =
           begin
             match sub.node with
                 PEXP_call (prog, args) ->
-                  let (prog_stmts, prog_atom) = desugar_expr ps prog in
-                  let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+                  let (prog_stmts, prog_atom) = desugar_expr_atom ps prog in
+                  let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
                   let prog_lval = atom_lval ps prog_atom in
                   let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, prog_lval, arg_atoms)) in
                     Array.concat [ prog_stmts; arg_stmts; [| spawn_stmt |] ]
@@ -1186,7 +1204,7 @@ and desugar_expr_init ps dst_lval pexp =
                 Array.map
                   begin
                     fun (ident, pexp) ->
-                      let (stmts, atom) = desugar_expr ps pexp in
+                      let (stmts, atom) = desugar_expr_atom ps pexp in
                         (stmts, (ident, atom))
                   end
                   args
@@ -1196,12 +1214,12 @@ and desugar_expr_init ps dst_lval pexp =
             Array.append arg_stmts [| rec_stmt |]
 
       | PEXP_tup args ->
-          let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+          let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
           let stmt = span ps apos bpos (Ast.STMT_init_tup (dst_lval, arg_atoms)) in
             Array.append arg_stmts [| stmt |]
 
       | PEXP_vec args ->
-          let (arg_stmts, arg_atoms) = desugar_exprs ps args in
+          let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
           let stmt = span ps apos bpos (Ast.STMT_init_vec (dst_lval, arg_atoms)) in
             Array.append arg_stmts [| stmt |]
 
@@ -1214,7 +1232,7 @@ and desugar_expr_init ps dst_lval pexp =
                 None -> ([||], None)
               | Some port_pexp ->
                   begin
-                    let (port_stmts, port_atom) = desugar_expr ps port_pexp in
+                    let (port_stmts, port_atom) = desugar_expr_atom ps port_pexp in
                     let port_lval = atom_lval ps port_atom in
                       (port_stmts, Some port_lval)
                   end
@@ -1225,9 +1243,13 @@ and desugar_expr_init ps dst_lval pexp =
           in
             Array.append port_stmts [| chan_stmt |]
 
-and parse_expr (ps:pstate) : (Ast.stmt array * Ast.atom) =
+and parse_expr (ps:pstate) : (Ast.stmt array * Ast.expr) =
   let pexp = ctxt "expr" parse_pexp ps in
     desugar_expr ps pexp
+
+and parse_expr_atom (ps:pstate) : (Ast.stmt array * Ast.atom) =
+  let pexp = ctxt "expr" parse_pexp ps in
+    desugar_expr_atom ps pexp
 
 and parse_expr_init (lv:Ast.lval) (ps:pstate) : (Ast.stmt array) =
   let pexp = ctxt "expr" parse_pexp ps in
@@ -1307,7 +1329,7 @@ and parse_stmts ps =
 
         LOG ->
           bump ps;
-          let (stmts, atom) = ctxt "stmts: log value" parse_expr ps in
+          let (stmts, atom) = ctxt "stmts: log value" parse_expr_atom ps in
             expect ps SEMI;
             let bpos = lexpos ps in
               spans stmts apos bpos (Ast.STMT_log atom)
@@ -1318,7 +1340,7 @@ and parse_stmts ps =
             match peek ps with
                 LPAREN ->
                   bump ps;
-                  let (stmts, atom) = ctxt "stmts: check value" parse_expr ps in
+                  let (stmts, atom) = ctxt "stmts: check value" parse_expr_atom ps in
                     expect ps RPAREN;
                     expect ps SEMI;
                     let bpos = lexpos ps in
@@ -1341,7 +1363,7 @@ and parse_stmts ps =
 
       | IF ->
           bump ps;
-          let (stmts, atom) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
+          let (stmts, atom) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr_atom) ps in
           let then_block = ctxt "stmts: if-then" parse_block ps in
           let else_block =
             (match peek ps with
@@ -1373,7 +1395,7 @@ and parse_stmts ps =
             match peek ps with
                 SEMI -> (arr [], None)
               | _ ->
-                  let (stmts, expr) = ctxt "stmts: put expr" parse_expr ps in
+                  let (stmts, expr) = ctxt "stmts: put expr" parse_expr_atom ps in
                     expect ps SEMI;
                     (stmts, Some expr)
           in
@@ -1386,7 +1408,7 @@ and parse_stmts ps =
             match peek ps with
                 SEMI -> (bump ps; (arr [], None))
               | _ ->
-                  let (stmts, expr) = ctxt "stmts: ret expr" parse_expr ps in
+                  let (stmts, expr) = ctxt "stmts: ret expr" parse_expr_atom ps in
                     expect ps SEMI;
                     (stmts, Some expr)
           in
@@ -1396,7 +1418,7 @@ and parse_stmts ps =
       | BE proto ->
           bump ps;
           let (lstmts, lval) = ctxt "be: lval" parse_lval ps in
-          let (astmts, args) = ctxt "be: args" (parse_expr_list LPAREN RPAREN) ps in
+          let (astmts, args) = ctxt "be: args" (parse_expr_atom_list LPAREN RPAREN) ps in
           let bpos = lexpos ps in
           let be = span ps apos bpos (Ast.STMT_be (proto, lval, args)) in
           Array.concat [ lstmts; astmts; [| be |] ]
@@ -1482,7 +1504,7 @@ and parse_stmts ps =
                       (bracketed_one_or_more LPAREN RPAREN (Some COMMA) parse_lval) ps)
           in
           let _ = expect ps EQ in
-          let (estmts, atom) = ctxt "stmt: paren_copy_to_tup rval" parse_expr ps in
+          let (estmts, atom) = ctxt "stmt: paren_copy_to_tup rval" parse_expr_atom ps in
           let _ = expect ps SEMI in
           let stmts = Array.append lstmts estmts in
           let bpos = lexpos ps in
@@ -1529,7 +1551,7 @@ and parse_stmts ps =
 
                 | SEND ->
                     bump ps;
-                    let (stmts, rhs) = ctxt "stmt: send rhs" parse_expr ps in
+                    let (stmts, rhs) = ctxt "stmt: send rhs" parse_expr_atom ps in
                     let _ = expect ps SEMI in
                     let bpos = lexpos ps in
                     let (src, copy) = match rhs with

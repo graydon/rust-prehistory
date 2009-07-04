@@ -7,6 +7,7 @@ prog rustc
     filename = "comp/rustc.rc";
   }
   main { 
+    filename = "comp/rustc.rc";
     puts("beginnings of self-hosting");
     auto file = fopen(filename, "r");
     check (file != 0);
