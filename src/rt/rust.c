@@ -246,6 +246,7 @@ struct rust_rt {
     ptr_vec_t blocked_procs;
     randctx rctx;
     uint32_t logbits;
+    rust_proc_t *root_proc;
     rust_srv_t *srv;
 };
 
@@ -666,7 +667,9 @@ del_proc(rust_rt_t *rt, rust_proc_t *proc)
          "del proc 0x%" PRIxPTR ", refcnt=%d",
          (uintptr_t)proc, proc->refcnt);
 
-    I(rt, proc->refcnt == 0);
+    I(rt, proc->refcnt == 0 || 
+      (proc->refcnt == 1 && proc == rt->root_proc));
+
     del_stk(rt, proc->stk);
 
     while (proc->chans) {
@@ -765,7 +768,7 @@ exit_proc(rust_rt_t *rt, rust_proc_t *proc)
     ptr_vec_t *v = get_proc_vec(rt, proc);
     I(rt, v);
     proc_vec_swapdel(rt, v, proc);
-    // del_proc(proc);
+    del_proc(rt, proc);
     ptr_vec_trim(rt, v, n_live_procs(rt));
     xlog(rt, LOG_MEM|LOG_PROC,
          "proc 0x%" PRIxPTR " exited (and deleted)",
@@ -1227,7 +1230,8 @@ rust_main_loop(rust_prog_t *prog,
     logptr(rt, "prog->main_code", (uintptr_t)prog->main_code);
     logptr(rt, "prog->fini_code", (uintptr_t)prog->fini_code);
 
-    add_proc_to_state_vec(rt, spawn_proc(rt, prog));
+    rt->root_proc = spawn_proc(rt, prog);
+    add_proc_to_state_vec(rt, rt->root_proc);
     proc = sched(rt);
 
     logptr(rt, "root proc", (uintptr_t)proc);
