@@ -778,6 +778,8 @@ let trans_visitor
       (operand:Il.operand)
       (slot:Ast.slot)
       : unit =
+    (iflog (fun _ -> annotate ("drop refcount and maybe free " ^
+                                 (Ast.fmt_to_str Ast.fmt_slot slot))));
     let zero = Il.Imm (Asm.IMM 0L) in
     let one = Il.Imm (Asm.IMM 1L) in
       emit Il.SUB rc rc one;
@@ -843,7 +845,10 @@ let trans_visitor
       | INTENT_drop -> "drop"
 
   and deref_exterior intent operand slot =
-    iflog (fun _ -> annotate ("deref exterior: " ^ (intent_str intent)));
+    iflog (fun _ -> annotate ("deref exterior: " ^ 
+                                (intent_str intent) ^ ", " ^
+                                (Il.string_of_operand
+                                   abi.Abi.abi_str_of_hardreg operand)));
     let one = Il.Imm (Asm.IMM 1L) in
       match intent with
           INTENT_init ->

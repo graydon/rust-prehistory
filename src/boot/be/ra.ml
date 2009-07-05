@@ -80,11 +80,11 @@ let convert_pre_spills cx mkspill =
   let n = ref 0 in
   let convert_operand op =
     match op with
-        Spill i -> (if i > (!n) then n := i;
+        Spill i -> (if i+1 > (!n) then n := i+1;
                     mkspill i)
       | _ -> op
   in
-  for i = 0 to (Array.length cx.ctxt_quads) -1
+  for i = 0 to (Array.length cx.ctxt_quads) - 1
   do
     let q = cx.ctxt_quads.(i) in
       cx.ctxt_quads.(i) <-
@@ -319,7 +319,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     (* Work out pre-spilled slots and allocate 'em. *)
     let spill_slot i = abi.Abi.abi_spill_slot framesz i in
     let n_pre_spills = convert_pre_spills cx spill_slot in
-    let spill_slot i = abi.Abi.abi_spill_slot framesz (n_pre_spills + i) in
+    let spill_slot i = abi.Abi.abi_spill_slot framesz i in
 
     let (live_in_vregs, live_out_vregs) = calculate_live_bitvectors cx in
     let inactive_hregs = ref [] in (* [hreg] *)
@@ -443,6 +443,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
             end
         | x -> x
     in
+      cx.ctxt_next_spill <- n_pre_spills;
       convert_labels cx;
       for i = 0 to cx.ctxt_abi.Abi.abi_n_hardregs - 1
       do
@@ -517,12 +518,12 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
         begin
           fun _ ->
             log cx "frame size: %Ld" framesz;
-            log cx "spills: %d pre-spilled, %d synthetic" n_pre_spills cx.ctxt_next_spill;
+            log cx "spills: %d pre-spilled, %d total" n_pre_spills cx.ctxt_next_spill;
             log cx "register-allocated quads:";
             dump_quads cx;
         end;
       
-      (cx.ctxt_quads, cx.ctxt_next_spill + n_pre_spills)
+      (cx.ctxt_quads, cx.ctxt_next_spill)
 
   with
       Ra_error s ->
