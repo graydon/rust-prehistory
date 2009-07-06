@@ -42,6 +42,8 @@ let trans_visitor
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
   let imm i = Il.Imm (Asm.IMM i) in
 
+  let (strings:(string,fixup) Hashtbl.t) = Hashtbl.create 0 in
+
   let emitters = Stack.create () in
   let push_new_emitter _ =
     Stack.push
@@ -411,10 +413,17 @@ let trans_visitor
     trans_lval_full lv false false intent
 
   and trans_string_lit (s:string) : Il.operand =
-    let strfix = new_fixup "string fixup" in
-    let str = Asm.DEF (strfix, Asm.ZSTRING s) in
-      cx.ctxt_data_items <- str :: cx.ctxt_data_items;
-      (Il.Imm (Asm.M_POS strfix))
+    let fix =
+      if Hashtbl.mem strings s
+      then Hashtbl.find strings s
+      else
+        let strfix = new_fixup "string fixup" in
+        let str = Asm.DEF (strfix, Asm.ZSTRING s) in
+          htab_put strings s strfix;
+          cx.ctxt_data_items <- str :: cx.ctxt_data_items;
+          strfix
+    in
+      (Il.Imm (Asm.M_POS fix))
 
   and trans_atom (atom:Ast.atom) : Il.operand =
     match atom with
@@ -1416,7 +1425,7 @@ let trans_visitor
      * arg3 = arg count
      *)
     trans_upcall Abi.UPCALL_native
-      [| 
+      [|
         (trans_string_lit (name()));
         (word_at_fp_off ret_addr_disp);
         (alias (word_at_fp_off arg0_disp));
