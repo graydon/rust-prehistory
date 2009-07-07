@@ -196,7 +196,7 @@ typedef enum {
      */
     proc_state_running    = 0,
     proc_state_calling_c  = 1,
-    proc_state_exiting    = 2,
+    proc_state_blocked_exited   = 2,
     proc_state_blocked_reading  = 3,
     proc_state_blocked_writing  = 4
 } proc_state_t;
@@ -205,7 +205,7 @@ static char const * const state_names[] =
     {
         "running",
         "calling_c",
-        "exiting",
+        "exited",
         "blocked_reading",
         "blocked_writing"
     };
@@ -667,8 +667,9 @@ del_proc(rust_rt_t *rt, rust_proc_t *proc)
          "del proc 0x%" PRIxPTR ", refcnt=%d",
          (uintptr_t)proc, proc->refcnt);
 
-    I(rt, proc->refcnt == 0 || 
-      (proc->refcnt == 1 && proc == rt->root_proc));
+    /* FIXME: tighten this up, there are some more
+       assertions that hold at proc-lifecycle events. */
+    I(rt, proc->refcnt == 0 || proc->refcnt == 1);
 
     del_stk(rt, proc->stk);
 
@@ -696,9 +697,9 @@ get_state_vec(rust_rt_t *rt, proc_state_t state)
     switch (state) {
     case proc_state_running:
     case proc_state_calling_c:
-    case proc_state_exiting:
         return &rt->running_procs;
 
+    case proc_state_blocked_exited:
     case proc_state_blocked_reading:
     case proc_state_blocked_writing:
         return &rt->blocked_procs;
@@ -728,7 +729,9 @@ add_proc_to_state_vec(rust_rt_t *rt, rust_proc_t *proc)
 static size_t
 n_live_procs(rust_rt_t *rt)
 {
-    return rt->running_procs.init + rt->blocked_procs.init;
+    uintptr_t n = rt->running_procs.init + rt->blocked_procs.init;
+    xlog(rt, LOG_PROC, "%" PRIdPTR " live procs", n);
+    return n;
 }
 
 static void
@@ -762,16 +765,15 @@ proc_state_transition(rust_rt_t *rt,
 }
 
 static void
-exit_proc(rust_rt_t *rt, rust_proc_t *proc)
+kill_proc(rust_rt_t *rt, rust_proc_t *proc)
 {
     I(rt, n_live_procs(rt) > 0);
-    ptr_vec_t *v = get_proc_vec(rt, proc);
-    I(rt, v);
-    proc_vec_swapdel(rt, v, proc);
+    /* FIXME: when we have dtors, this might force-execute the dtor
+     * synchronously? Hmm. */
+    remove_proc_from_state_vec(rt, proc);
     del_proc(rt, proc);
-    ptr_vec_trim(rt, v, n_live_procs(rt));
     xlog(rt, LOG_MEM|LOG_PROC,
-         "proc 0x%" PRIxPTR " exited (and deleted)",
+         "proc 0x%" PRIxPTR " killed (and deleted)",
          (uintptr_t)proc);
 }
 
@@ -851,14 +853,17 @@ static void
 del_all_procs(rust_rt_t *rt, ptr_vec_t *v) {
     I(rt, v);
     while (v->init) {
-        del_proc(rt, (rust_proc_t*) v->data[v->init--]);
+        xlog(rt, LOG_PROC, "deleting live proc %" PRIdPTR, v->init-1);
+        del_proc(rt, (rust_proc_t*) v->data[--(v->init)]);
     }
 }
 
 static void
 del_rt(rust_rt_t *rt)
 {
+    xlog(rt, LOG_PROC, "deleting all running procs");
     del_all_procs(rt, &rt->running_procs);
+    xlog(rt, LOG_PROC, "deleting all blocked procs");
     del_all_procs(rt, &rt->blocked_procs);
     fini_ptr_vec(rt, &rt->running_procs);
     fini_ptr_vec(rt, &rt->blocked_procs);
@@ -1174,6 +1179,7 @@ handle_upcall(rust_proc_t *proc)
              "upcall kill_proc(0x%" PRIxPTR "), refcnt=%d",
              (rust_proc_t*)args[0],
              ((rust_proc_t*)args[0])->refcnt);
+        kill_proc(proc->rt, (rust_proc_t*)args[0]);
         break;
     case upcall_code_sched:
         add_proc_to_state_vec(proc->rt, (rust_proc_t*)args[0]);
@@ -1261,8 +1267,14 @@ rust_main_loop(rust_prog_t *prog,
                 proc->state = proc_state_running;
             break;
 
-        case proc_state_exiting:
-            exit_proc(rt, proc);
+        case proc_state_blocked_exited:
+            /* When a proc exits *itself* we do not yet kill it; for
+             * the time being we let it linger in the blocked-exiting
+             * state, as someone else still "owns" it. */
+            proc->state = (uintptr_t)proc_state_running;
+            proc_state_transition(rt, proc,
+                                  proc_state_running,
+                                  proc_state_blocked_exited);
             break;
 
         case proc_state_blocked_reading:
@@ -1271,10 +1283,7 @@ rust_main_loop(rust_prog_t *prog,
             break;
         }
 
-        if (n_live_procs(rt) > 0)
-            proc = sched(rt);
-        else
-            break;
+        proc = sched(rt);
     }
 
     xlog(rt, LOG_RT, "finished main loop");

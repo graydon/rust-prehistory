@@ -71,7 +71,7 @@
 type proc_state =
     STATE_running
   | STATE_calling_c
-  | STATE_exiting
+  | STATE_blocked_exited
 ;;
 
 type upcall =
@@ -95,7 +95,7 @@ let proc_state_to_code (st:proc_state) : int64 =
   match st with
       STATE_running -> 0L
     | STATE_calling_c -> 1L
-    | STATE_exiting -> 2L
+    | STATE_blocked_exited -> 2L
 ;;
 
 let upcall_to_code (u:upcall) : int64 =
