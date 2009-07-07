@@ -43,6 +43,13 @@ type operand =  Label of int
                 | Nil
 ;;
 
+let is_mem op =
+  match op with
+      Mem _ | Spill _ | Pcrel _ -> true
+    | _ -> false
+;;
+
+
 type op =
     ADD | SUB | NEG
   | IMUL | UMUL
@@ -327,19 +334,22 @@ let emit_full e fix op dst lhs rhs =
                       quad_lhs = l; quad_rhs = r; quad_fixup = None }
   in
 
+  let is_mov q = q.quad_op = UMOV or q.quad_op = IMOV in
   let emit_quad q =
     (* decay mem-mem movs *)
-    match (q.quad_op, q.quad_dst, q.quad_lhs) with
-        (UMOV, Mem _, Mem _)
-      | (IMOV, Mem _, Mem _)->
-          begin
-            let dst = q.quad_dst in
-            let src = q.quad_lhs in
-            let v =(Reg (next_vreg e)) in
-              emit_quad_bottom (mq q.quad_op v src Nil);
-              emit_quad_bottom (mq q.quad_op dst v Nil)
-          end
-      | _ -> emit_quad_bottom q
+    if ((is_mov q) &&
+          (is_mem q.quad_dst) &&
+          (is_mem q.quad_lhs))
+    then
+      begin
+        let dst = q.quad_dst in
+        let src = q.quad_lhs in
+        let v = (Reg (next_vreg e)) in
+          emit_quad_bottom (mq q.quad_op v src Nil);
+          emit_quad_bottom (mq q.quad_op dst v Nil)
+      end
+    else
+      emit_quad_bottom q
   in
 
   let default_mov =

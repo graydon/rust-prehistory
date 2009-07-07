@@ -77,8 +77,8 @@ type proc_state =
 type upcall =
     UPCALL_log_int
   | UPCALL_log_str
-  | UPCALL_spawn
-  | UPCALL_kill
+  | UPCALL_new_proc
+  | UPCALL_del_proc
   | UPCALL_fail
   | UPCALL_malloc
   | UPCALL_free
@@ -88,6 +88,7 @@ type upcall =
   | UPCALL_recv
   | UPCALL_sched
   | UPCALL_native
+  | UPCALL_new_str
 ;;
 
 (* NB: all these numbers must be kept in sync with runtime. *)
@@ -102,8 +103,8 @@ let upcall_to_code (u:upcall) : int64 =
   match u with
     UPCALL_log_int -> 0L
   | UPCALL_log_str -> 1L
-  | UPCALL_spawn -> 2L
-  | UPCALL_kill -> 3L
+  | UPCALL_new_proc -> 2L
+  | UPCALL_del_proc -> 3L
   | UPCALL_fail -> 4L
   | UPCALL_malloc -> 5L
   | UPCALL_free -> 6L
@@ -113,6 +114,7 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_recv -> 10L
   | UPCALL_sched -> 11L
   | UPCALL_native -> 12L
+  | UPCALL_new_str -> 13L
 ;;
 
 (* Word offsets for structure fields in rust.h. *)

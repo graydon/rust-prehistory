@@ -43,6 +43,9 @@ typedef struct ptr_vec ptr_vec_t;
 struct circ_buf;
 typedef struct circ_buf circ_buf_t;
 
+struct str;
+typedef struct str str_t;
+
 typedef enum {
     rust_type_any = 0,
     rust_type_nil = 1,
@@ -213,8 +216,8 @@ static char const * const state_names[] =
 typedef enum {
     upcall_code_log_uint32     = 0,
     upcall_code_log_str        = 1,
-    upcall_code_spawn          = 2,
-    upcall_code_kill           = 3,
+    upcall_code_new_proc       = 2,
+    upcall_code_del_proc       = 3,
     upcall_code_fail           = 4,
     upcall_code_malloc         = 5,
     upcall_code_free           = 6,
@@ -223,8 +226,12 @@ typedef enum {
     upcall_code_send           = 9,
     upcall_code_recv           = 10,
     upcall_code_sched          = 11,
-    upcall_code_native         = 12
+    upcall_code_native         = 12,
+    upcall_code_new_str        = 13
 } upcall_t;
+
+/* FIXME: change ptr_vec and circ_buf to use flexible-array element
+   rather than pointer-to-buf-at-end. */
 
 struct ptr_vec {
     size_t alloc;
@@ -238,6 +245,13 @@ struct circ_buf {
     size_t next;
     size_t unread;
     uint8_t *data;
+};
+
+struct str {
+    size_t refcnt;
+    size_t alloc;
+    size_t init;
+    uint8_t data[];         /* C99 "flexible array" element. */
 };
 
 struct rust_rt {
@@ -657,6 +671,7 @@ new_proc(rust_rt_t *rt, rust_prog_t *prog)
 
     proc->rt = rt;
     proc->state = (uintptr_t)proc_state_running;
+    proc->refcnt = 1;
     return proc;
 }
 
@@ -669,7 +684,8 @@ del_proc(rust_rt_t *rt, rust_proc_t *proc)
 
     /* FIXME: tighten this up, there are some more
        assertions that hold at proc-lifecycle events. */
-    I(rt, proc->refcnt == 0 || proc->refcnt == 1);
+    I(rt, proc->refcnt == 0 ||
+      (proc->refcnt == 1 && proc == rt->root_proc));
 
     del_stk(rt, proc->stk);
 
@@ -682,14 +698,6 @@ del_proc(rust_rt_t *rt, rust_proc_t *proc)
     xfree(rt, proc);
 }
 
-static rust_proc_t*
-spawn_proc(rust_rt_t *rt,
-           rust_prog_t *prog)
-{
-    rust_proc_t *proc = new_proc(rt, prog);
-    proc->refcnt = 1;
-    return proc;
-}
 
 static ptr_vec_t*
 get_state_vec(rust_rt_t *rt, proc_state_t state)
@@ -765,8 +773,11 @@ proc_state_transition(rust_rt_t *rt,
 }
 
 static void
-kill_proc(rust_rt_t *rt, rust_proc_t *proc)
+upcall_del_proc(rust_rt_t *rt, rust_proc_t *proc)
 {
+    xlog(proc->rt, LOG_PROC,
+         "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
+         proc, proc->refcnt);
     I(rt, n_live_procs(rt) > 0);
     /* FIXME: when we have dtors, this might force-execute the dtor
      * synchronously? Hmm. */
@@ -881,7 +892,7 @@ upcall_log_uint32_t(rust_rt_t *rt, uint32_t i)
 }
 
 static void
-upcall_log_str(rust_rt_t *rt, char *c)
+upcall_log_str(rust_rt_t *rt, char const *c)
 {
     xlog(rt, LOG_UPCALL|LOG_ULOG,
          "upcall log_str(\"%s\")",
@@ -1159,6 +1170,41 @@ upcall_native(rust_rt_t *rt,
         *retptr = retval;
 }
 
+static size_t
+next_power_of_two(size_t s)
+{
+    size_t tmp = s - 1;
+    tmp |= tmp >> 1;
+    tmp |= tmp >> 2;
+    tmp |= tmp >> 4;
+    tmp |= tmp >> 8;
+    tmp |= tmp >> 16;
+#if SIZE_MAX == UINT64_MAX
+    tmp |= tmp >> 32;
+#endif
+    return tmp + 1;
+}
+
+
+static str_t*
+upcall_new_str(rust_rt_t *rt, char const *c, size_t init)
+{
+    size_t alloc = next_power_of_two(init);
+    str_t *s = (str_t*) xalloc(rt, sizeof(str_t) + alloc);
+    s->refcnt = 1;
+    s->init = init;
+    s->alloc = alloc;
+    memcpy(&s->data[0], c, init);
+    return s;
+}
+
+
+static char const *
+get_chars(str_t *s)
+{
+    return (char const *)&s->data[0];
+}
+
 static void
 handle_upcall(rust_proc_t *proc)
 {
@@ -1169,24 +1215,20 @@ handle_upcall(rust_proc_t *proc)
         upcall_log_uint32_t(proc->rt, args[0]);
         break;
     case upcall_code_log_str:
-        upcall_log_str(proc->rt, (char*)args[0]);
+        upcall_log_str(proc->rt, get_chars((str_t*)args[0]));
         break;
-    case upcall_code_spawn:
-        *((rust_proc_t**)args[0]) = spawn_proc(proc->rt, (rust_prog_t*)args[1]);
+    case upcall_code_new_proc:
+        *((rust_proc_t**)args[0]) = new_proc(proc->rt, (rust_prog_t*)args[1]);
         break;
-    case upcall_code_kill:
-        xlog(proc->rt, LOG_PROC,
-             "upcall kill_proc(0x%" PRIxPTR "), refcnt=%d",
-             (rust_proc_t*)args[0],
-             ((rust_proc_t*)args[0])->refcnt);
-        kill_proc(proc->rt, (rust_proc_t*)args[0]);
+    case upcall_code_del_proc:
+        upcall_del_proc(proc->rt, (rust_proc_t*)args[0]);
         break;
     case upcall_code_sched:
         add_proc_to_state_vec(proc->rt, (rust_proc_t*)args[0]);
         break;
     case upcall_code_fail:
-        upcall_fail(proc->rt, (char const *)args[0],
-                    (char const *)args[1], (size_t)args[2]);
+        upcall_fail(proc->rt, get_chars((str_t*)args[0]),
+                    get_chars((str_t*)args[1]), (size_t)args[2]);
         break;
     case upcall_code_malloc:
         *((uintptr_t*)args[0]) =
@@ -1209,10 +1251,15 @@ handle_upcall(rust_proc_t *proc)
         upcall_recv(proc->rt, proc, (rust_port_t*)args[1]);
         break;
     case upcall_code_native:
-        upcall_native(proc->rt, (char const *)args[0],
+        upcall_native(proc->rt, get_chars((str_t*)args[0]),
                       (uintptr_t*)args[1],
                       (uintptr_t*)args[2],
                       (uintptr_t)args[3]);
+        break;
+    case upcall_code_new_str:
+        *((str_t**)args[0]) = upcall_new_str(proc->rt,
+                                             (char const *)args[1],
+                                             (size_t)args[2]);
         break;
     }
     /* Zero the immediates code slot out so the caller doesn't have to
@@ -1236,7 +1283,7 @@ rust_main_loop(rust_prog_t *prog,
     logptr(rt, "prog->main_code", (uintptr_t)prog->main_code);
     logptr(rt, "prog->fini_code", (uintptr_t)prog->fini_code);
 
-    rt->root_proc = spawn_proc(rt, prog);
+    rt->root_proc = new_proc(rt, prog);
     add_proc_to_state_vec(rt, rt->root_proc);
     proc = sched(rt);
 
