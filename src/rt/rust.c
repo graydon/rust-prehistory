@@ -484,7 +484,7 @@ init_circ_buf(rust_rt_t *rt, circ_buf_t *c, size_t unit_sz)
     c->unread = 0;
     c->data = xcalloc(rt, c->alloc);
     xlog(rt, LOG_MEM|LOG_COMM,
-         "init circ buf 0x" PRIxPTR ", alloc=%d, unread=%d",
+         "init circ buf 0x%" PRIxPTR ", alloc=%d, unread=%d",
          c, c->alloc, c->unread);
     I(rt, c->data);
 }
@@ -923,7 +923,7 @@ upcall_del_port(rust_rt_t *rt, rust_port_t *port)
     if (port->live_refcnt == 0 &&
         port->weak_refcnt == 0) {
         xlog(rt, LOG_UPCALL|LOG_COMM|LOG_MEM,
-             "finalizing and freeing port 0x" PRIxPTR,
+             "finalizing and freeing port 0x%" PRIxPTR,
              (uintptr_t)port);
         /* FIXME: need to force-fail all the queued writers. */
         fini_ptr_vec(rt, &port->writers);
