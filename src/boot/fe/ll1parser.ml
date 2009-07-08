@@ -317,6 +317,7 @@ type pexp' =
   | PEXP_ext_name of (pexp * Ast.name_component)
   | PEXP_ext_pexp of (pexp * pexp)
   | PEXP_lit of Ast.lit
+  | PEXP_str of string
 
 and pexp = pexp' identified
 ;;
@@ -836,8 +837,9 @@ and build_tmp ps slot apos bpos =
 and parse_lit ps =
   match peek ps with
       LIT_INT (n,s) -> (bump ps; Ast.LIT_int (n,s))
-    | LIT_STR s -> (bump ps; Ast.LIT_str s)
     | LIT_CHAR c -> (bump ps; Ast.LIT_char c)
+    | LIT_BOOL b -> (bump ps; Ast.LIT_bool b)
+    | NIL -> (bump ps; Ast.LIT_nil)
     | _ -> raise (unexpected ps)
 
 
@@ -864,6 +866,12 @@ and parse_bottom_pexp ps : pexp =
           let pexps = ctxt "vec pexp: exprs" parse_pexp_list ps in
           let bpos = lexpos ps in
             span ps apos bpos (PEXP_vec pexps)
+
+
+    | LIT_STR s ->
+        bump ps;
+        let bpos = lexpos ps in
+          span ps apos bpos (PEXP_str s)
 
     | PORT ->
         begin
@@ -1126,6 +1134,7 @@ and desugar_expr_atom ps pexp : (Ast.stmt array * Ast.atom) =
       | PEXP_binop _
       | PEXP_rec _
       | PEXP_tup _
+      | PEXP_str _
       | PEXP_vec _
       | PEXP_port
       | PEXP_chan _
@@ -1217,6 +1226,10 @@ and desugar_expr_init ps dst_lval pexp : (Ast.stmt array) =
           let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
           let stmt = span ps apos bpos (Ast.STMT_init_tup (dst_lval, arg_atoms)) in
             Array.append arg_stmts [| stmt |]
+
+      | PEXP_str s ->
+          let stmt = span ps apos bpos (Ast.STMT_init_str (dst_lval, s)) in
+            [| stmt |]
 
       | PEXP_vec args ->
           let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in

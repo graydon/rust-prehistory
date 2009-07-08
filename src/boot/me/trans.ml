@@ -171,8 +171,7 @@ let trans_visitor
 
   let rec atom_type (at:Ast.atom) : Ast.ty =
     match at with
-        Ast.ATOM_literal {node=(Ast.LIT_str _); id=_} -> Ast.TY_str
-      | Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
+        Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
       | Ast.ATOM_literal {node=(Ast.LIT_bool _); id=_} -> Ast.TY_bool
       | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
       | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
@@ -413,9 +412,7 @@ let trans_visitor
   and trans_lval (lv:Ast.lval) (intent:intent) : (Il.operand * Ast.slot) =
     trans_lval_full lv false false intent
 
-  and trans_string_lit (s:string) : Il.operand =
-    (* Include null byte. *)
-    let init_sz = Int64.of_int ((String.length s) + 1) in
+  and trans_static_string (s:string) : Il.operand =
     let fix =
       if Hashtbl.mem strings s
       then Hashtbl.find strings s
@@ -426,15 +423,19 @@ let trans_visitor
           cx.ctxt_data_items <- str :: cx.ctxt_data_items;
           strfix
     in
-    let dstop = Il.next_spill (emitter()) in
+      (Il.Imm (Asm.M_POS fix))
+
+  and trans_init_str (dst:Ast.lval) (s:string) : unit =
+    (* Include null byte. *)
+    let init_sz = Int64.of_int ((String.length s) + 1) in
+    let static = trans_static_string s in
+    let (dstop, _) = trans_lval dst INTENT_init in
       trans_upcall Abi.UPCALL_new_str
         [|
           (alias dstop);
-          (Il.Imm (Asm.M_POS fix));
+          static;
           imm init_sz
-        |];
-      dstop
-
+        |]
 
   and trans_atom (atom:Ast.atom) : Il.operand =
     match atom with
@@ -451,9 +452,6 @@ let trans_visitor
               | Ast.LIT_char c -> imm (Int64.of_int (Char.code c))
               | Ast.LIT_int (bi, s) ->
                   imm (Int64.of_int (Big_int.int_of_big_int bi))
-
-              | Ast.LIT_str s ->
-                  trans_string_lit s
 
               | _ -> marker
           end
@@ -630,8 +628,8 @@ let trans_visitor
     in
       trans_upcall Abi.UPCALL_fail
         [|
-          trans_string_lit (Ast.fmt_to_str Ast.fmt_expr e);
-          trans_string_lit filename;
+          trans_static_string (Ast.fmt_to_str Ast.fmt_expr e);
+          trans_static_string filename;
           imm (Int64.of_int line)
         |];
       patch fwd_jmp
@@ -728,7 +726,7 @@ let trans_visitor
     let init_sz = Int64.mul unit_sz (Int64.of_int n_inits) in
     let padded_sz = Int64.add init_sz (word_n 3) in
     let alloc_sz = next_power_of_two padded_sz in
-      trans_upcall Abi.UPCALL_malloc [| (alias dstop); imm alloc_sz |];
+      trans_malloc dstop alloc_sz;
       mov (deref_off dstop (word_n 0)) one;
       mov (deref_off dstop (word_n 1)) (imm alloc_sz);
       mov (deref_off dstop (word_n 2)) (imm init_sz);
@@ -1309,6 +1307,9 @@ let trans_visitor
             end
             atoms
 
+      | Ast.STMT_init_str (dst, s) ->
+          trans_init_str dst s
+
       | Ast.STMT_init_vec (dst, atoms) ->
           trans_init_vec dst atoms
 
@@ -1461,7 +1462,7 @@ let trans_visitor
      *)
     trans_upcall Abi.UPCALL_native
       [|
-        (trans_string_lit (name()));
+        (trans_static_string (name()));
         (word_at_fp_off ret_addr_disp);
         (alias (word_at_fp_off arg0_disp));
         imm (Int64.of_int (Array.length tsig.Ast.sig_input_slots))

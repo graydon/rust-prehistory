@@ -1,8 +1,9 @@
 
-native fn fopen(str path, str mode) -> int;
+native fn str_buf(str s) -> int;
+native fn fopen(int path, int mode) -> int;
 native fn fgetc(int file) -> int;
 native fn fclose(int file) -> ();
-native fn puts(str s) -> ();
+native fn puts(int s) -> ();
 
 mod fe {
     mod lexer;

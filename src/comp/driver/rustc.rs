@@ -3,13 +3,13 @@
 prog rustc
 {
   let str filename;
-  init () -> () { 
+  init () -> () {
     filename = "comp/rustc.rc";
   }
-  main { 
+  main {
     filename = "comp/rustc.rc";
-    puts("beginnings of self-hosting");
-    auto file = fopen(filename, "r");
+    puts(str_buf("beginnings of self-hosting"));
+    let int file = fopen(str_buf(filename), str_buf("r"));
     check (file != 0);
     log "opened file";
     log file;

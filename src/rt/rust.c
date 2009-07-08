@@ -737,9 +737,7 @@ add_proc_to_state_vec(rust_rt_t *rt, rust_proc_t *proc)
 static size_t
 n_live_procs(rust_rt_t *rt)
 {
-    uintptr_t n = rt->running_procs.init + rt->blocked_procs.init;
-    xlog(rt, LOG_PROC, "%" PRIdPTR " live procs", n);
-    return n;
+    return rt->running_procs.init + rt->blocked_procs.init;
 }
 
 static void
@@ -1187,20 +1185,23 @@ next_power_of_two(size_t s)
 
 
 static str_t*
-upcall_new_str(rust_rt_t *rt, char const *c, size_t init)
+upcall_new_str(rust_rt_t *rt, char const *s, size_t init)
 {
     size_t alloc = next_power_of_two(init);
-    str_t *s = (str_t*) xalloc(rt, sizeof(str_t) + alloc);
-    s->refcnt = 1;
-    s->init = init;
-    s->alloc = alloc;
-    memcpy(&s->data[0], c, init);
-    return s;
+    str_t *st = (str_t*) xalloc(rt, sizeof(str_t) + alloc);
+    st->refcnt = 1;
+    st->init = init;
+    st->alloc = alloc;
+    memcpy(&st->data[0], s, init);
+    xlog(rt, LOG_UPCALL|LOG_MEM,
+         "upcall new_str('%s', %" PRIdPTR ") -> 0x%" PRIxPTR,
+         s, init, st);
+    return st;
 }
 
 
 static char const *
-get_chars(str_t *s)
+str_buf(str_t *s)
 {
     return (char const *)&s->data[0];
 }
@@ -1215,7 +1216,7 @@ handle_upcall(rust_proc_t *proc)
         upcall_log_uint32_t(proc->rt, args[0]);
         break;
     case upcall_code_log_str:
-        upcall_log_str(proc->rt, get_chars((str_t*)args[0]));
+        upcall_log_str(proc->rt, str_buf((str_t*)args[0]));
         break;
     case upcall_code_new_proc:
         *((rust_proc_t**)args[0]) = new_proc(proc->rt, (rust_prog_t*)args[1]);
@@ -1227,8 +1228,10 @@ handle_upcall(rust_proc_t *proc)
         add_proc_to_state_vec(proc->rt, (rust_proc_t*)args[0]);
         break;
     case upcall_code_fail:
-        upcall_fail(proc->rt, get_chars((str_t*)args[0]),
-                    get_chars((str_t*)args[1]), (size_t)args[2]);
+        upcall_fail(proc->rt,
+                    (char const *)args[0],
+                    (char const *)args[1],
+                    (size_t)args[2]);
         break;
     case upcall_code_malloc:
         *((uintptr_t*)args[0]) =
@@ -1251,7 +1254,7 @@ handle_upcall(rust_proc_t *proc)
         upcall_recv(proc->rt, proc, (rust_port_t*)args[1]);
         break;
     case upcall_code_native:
-        upcall_native(proc->rt, get_chars((str_t*)args[0]),
+        upcall_native(proc->rt, (char const *)args[0],
                       (uintptr_t*)args[1],
                       (uintptr_t*)args[2],
                       (uintptr_t)args[3]);
@@ -1371,22 +1374,38 @@ srv_fatal(rust_srv_t *srv, char const *expr,
     abort();
 }
 
+static CDECL uintptr_t
+fopen_like(char const *fp, char const *mode)
+{
+    printf("calling fopen('%s','%s')\n", fp, mode);
+    uintptr_t res = (uintptr_t) fopen(fp, mode);
+    printf("got %d\n", res);
+    return res;
+}
+
 static uintptr_t
 srv_lookup(rust_srv_t *srv, char const *sym)
 {
     uintptr_t res;
+
+    if (strcmp(sym, "str_buf") == 0) {
+        res = (uintptr_t) &str_buf;
+    } else if (strcmp(sym, "fopen") == 0) {
+        res = (uintptr_t) &fopen_like;
+    } else {
 #ifdef __WIN32__
-    /* FIXME: pass library name in as well. And use LoadLibrary not
-     * GetModuleHandle, manually refcount. Oh, so much to do
-     * differently. */
-    HMODULE lib = GetModuleHandle("msvcrt.dll");
-    if (!lib)
-        srv->fatal(srv, "GetModuleHandle", __FILE__, __LINE__);
-    res = (uintptr_t)GetProcAddress(lib, sym);
+        /* FIXME: pass library name in as well. And use LoadLibrary not
+         * GetModuleHandle, manually refcount. Oh, so much to do
+         * differently. */
+        HMODULE lib = GetModuleHandle("msvcrt.dll");
+        if (!lib)
+            srv->fatal(srv, "GetModuleHandle", __FILE__, __LINE__);
+        res = (uintptr_t)GetProcAddress(lib, sym);
 #else
-    /* FIXME: dlopen, as above. */
-    res = (uintptr_t)dlsym(RTLD_DEFAULT, sym);
+        /* FIXME: dlopen, as above. */
+        res = (uintptr_t)dlsym(RTLD_DEFAULT, sym);
 #endif
+    }
     if (!res)
         srv->fatal(srv, "srv->lookup", __FILE__, __LINE__);
     return res;

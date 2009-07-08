@@ -3,8 +3,8 @@
 prog a
 {
   main {
-    puts("hello, native world 1");
-    puts("hello, native world 2");
-    puts("hello, native world 3");
+    puts(str_buf("hello, native world 1"));
+    puts(str_buf("hello, native world 2"));
+    puts(str_buf("hello, native world 3"));
   }
 }

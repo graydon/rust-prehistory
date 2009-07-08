@@ -206,6 +206,7 @@ and stmt' =
     STMT_log of atom
   | STMT_spawn of (lval * lval * (atom array))
   | STMT_init_rec of (lval * ((ident * atom) array))
+  | STMT_init_str of (lval * string)
   | STMT_init_vec of (lval * (atom array))
   | STMT_init_tup of (lval * (atom array))
   | STMT_init_port of lval
@@ -314,7 +315,6 @@ and lit =
   | LIT_mach of (ty_mach * string)
   | LIT_int of (Big_int.big_int * string)
   | LIT_char of char
-  | LIT_str of string
   | LIT_custom of lit_custom
 
 
@@ -750,7 +750,6 @@ and fmt_lit (ff:Format.formatter) (l:lit) : unit =
   | LIT_mach (_, s) -> fmt ff "%s" s
   | LIT_int (_,s) -> fmt ff "%s" s
   | LIT_char c -> fmt ff "'%s'" (Char.escaped c)
-  | LIT_str s -> fmt ff "\"%s\"" (String.escaped s)
   | LIT_custom _ -> fmt ff "?lit?"
 
 and fmt_atom (ff:Format.formatter) (a:atom) : unit =
@@ -908,6 +907,10 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_init_tup (dst, atoms) ->
           fmt_lval ff dst;
           fmt ff " = (...);"
+
+      | STMT_init_str (dst, s) ->
+          fmt_lval ff dst;
+          fmt ff " = \"%s\"" (String.escaped s)
 
       | STMT_check_expr expr ->
           fmt ff "check (";

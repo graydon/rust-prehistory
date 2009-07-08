@@ -450,6 +450,9 @@ and walk_stmt
           walk_lval v lv;
           Array.iter (walk_atom v) atoms
 
+      | Ast.STMT_init_str (lv, s) ->
+          walk_lval v lv
+
       | Ast.STMT_init_port lv ->
           walk_lval v lv
 

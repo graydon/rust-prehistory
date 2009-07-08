@@ -53,7 +53,6 @@ let auto_inference_visitor
       | Ast.LIT_mach (m, _) -> unify_ty tyo (Ast.TY_mach m)
       | Ast.LIT_int _ -> unify_ty tyo Ast.TY_int
       | Ast.LIT_char _ -> unify_ty tyo Ast.TY_char
-      | Ast.LIT_str _ -> unify_ty tyo Ast.TY_str
       | Ast.LIT_custom _ -> tyo
   in
   let unify_atom (tyo:Ast.ty option) (atom:Ast.atom) : Ast.ty option =
@@ -105,6 +104,9 @@ let auto_inference_visitor
           Ast.STMT_copy (lval,expr) ->
             ignore (unify_lval (unify_expr None expr) lval);
             ignore (unify_expr (unify_lval None lval) expr);
+
+        | Ast.STMT_init_str (lval, _) ->
+            ignore (unify_lval (Some Ast.TY_str) lval)
 
         | Ast.STMT_init_rec (lval,atab) ->
             let unify_init tyo =
