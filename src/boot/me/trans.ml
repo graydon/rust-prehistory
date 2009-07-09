@@ -37,7 +37,8 @@ let trans_visitor
   let path = Stack.create () in
   let annotations = Hashtbl.create 0 in
   let block_layouts = Stack.create () in
-  let file = ref None in
+  let curr_file = ref None in
+  let curr_stmt = ref None in
 
   let (abi:Abi.abi) = cx.ctxt_abi in
   let (word_mem:Il.mem) = abi.Abi.abi_word_mem in
@@ -301,7 +302,7 @@ let trans_visitor
       | (Some (Ast.TY_vec ety),
          Ast.COMP_named (Ast.COMP_idx i)) ->
           let unit_sz = ty_sz abi ety in
-          let disp = (Int64.add 
+          let disp = (Int64.add
                         (word_n 3)
                         (Int64.mul unit_sz (Int64.of_int i))) in
 
@@ -314,8 +315,6 @@ let trans_visitor
           let slot = interior_slot ety in
             (oper, slot)
 
-
-      (* FIXME: bounds checking please! *)
       | (Some (Ast.TY_vec ety),
          Ast.COMP_atom at) ->
           let atop = trans_atom at in
@@ -323,13 +322,29 @@ let trans_visitor
           let slot = interior_slot ety in
           let reg = next_vreg () in
           let t = Il.Reg reg in
+          let vec = word_at_reg_off base_reg base_off in
             emit Il.UMUL t atop (imm unit_sz);
-            emit Il.ADD t t (word_at_reg_off base_reg base_off);
-            emit Il.ADD t t (imm (word_n 3));
-            let oper = word_at_reg_off (Some reg) (Asm.IMM 0L) in
-              (oper, slot)
+            let elt = trans_bounds_check vec t in
+              (elt, slot)
 
       | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
+
+  (* 
+   * vec: operand holding ptr to vec.
+   * mul_idx: index value * unit size.
+   * return: ptr to element.
+  *)
+  and trans_bounds_check (vec:Il.operand) (mul_idx:Il.operand) : Il.operand =
+    let len = deref_off vec (word_n 2) in
+    let base = Il.Reg (next_vreg()) in
+    let elt = Il.Reg (next_vreg ()) in
+    let diff = Il.Reg (next_vreg ()) in
+      lea base (deref_off vec (word_n 3));
+      emit Il.ADD elt base mul_idx;
+      emit Il.SUB diff elt base;
+      let jmp = trans_compare Il.JL diff len in
+        trans_cond_fail "bounds check" jmp;
+        deref elt
 
   and trans_lval_full
       (lv:Ast.lval)
@@ -619,20 +634,26 @@ let trans_visitor
           iflog (fun _ -> annotate "sched proc");
           trans_upcall Abi.UPCALL_sched [| proc_operand |]
 
-  and trans_check_expr (stmt_id:node_id) (e:Ast.expr) : unit =
-    let fwd_jmp = trans_cond false e in
+  and trans_cond_fail (str:string) (fwd_jmp:int) : unit =
     let (filename, line, _) =
-      match (Session.get_span cx.ctxt_sess stmt_id) with
+      match !curr_stmt with
           None -> ("<none>", 0, 0)
-        | Some sp -> sp.lo
+        | Some stmt_id ->
+            match (Session.get_span cx.ctxt_sess stmt_id) with
+                None -> ("<none>", 0, 0)
+              | Some sp -> sp.lo
     in
       trans_upcall Abi.UPCALL_fail
         [|
-          trans_static_string (Ast.fmt_to_str Ast.fmt_expr e);
+          trans_static_string str;
           trans_static_string filename;
           imm (Int64.of_int line)
         |];
       patch fwd_jmp
+
+  and trans_check_expr (e:Ast.expr) : unit =
+    let fwd_jmp = trans_cond false e in
+      trans_cond_fail (Ast.fmt_to_str Ast.fmt_expr e) fwd_jmp
 
   and trans_malloc (dst:Il.operand) (nbytes:int64) : unit =
     if Il.is_mem dst
@@ -1240,7 +1261,9 @@ let trans_visitor
           fun _ ->
             annotate (Ast.fmt_to_str Ast.fmt_stmt_body stmt)
         end;
-      trans_stmt_full stmt
+      curr_stmt := Some stmt.id;
+      trans_stmt_full stmt;
+      curr_stmt := None
     with
         Semant_err (None, msg) -> raise (Semant_err ((Some stmt.id), msg))
 
@@ -1259,7 +1282,7 @@ let trans_visitor
       | Ast.STMT_check_expr e ->
           begin
             match expr_type e with
-                Ast.TY_bool -> trans_check_expr stmt.id e
+                Ast.TY_bool -> trans_check_expr e
               | _ -> err (Some stmt.id) "check expr on non-bool"
           end
 
@@ -1396,7 +1419,7 @@ let trans_visitor
     let n_vregs = e.Il.emit_next_vreg in
     let quads = e.Il.emit_quads in
     let name = path_name () in
-    let f = match !file with
+    let f = match !curr_file with
         None -> err (Some node) "Missing file scope when capturing quads."
       | Some f -> f
     in
@@ -1547,8 +1570,8 @@ let trans_visitor
   let enter_file_for i =
     if Hashtbl.mem cx.ctxt_item_files i.id
     then begin
-      match !file with
-          None -> file := Some i.id
+      match !curr_file with
+          None -> curr_file := Some i.id
         | Some _ -> err (Some i.id) "Existing source file on file-scope entry."
     end
   in
@@ -1556,9 +1579,9 @@ let trans_visitor
   let leave_file_for i =
     if Hashtbl.mem cx.ctxt_item_files i.id
     then begin
-      match !file with
+      match !curr_file with
           None -> err (Some i.id) "Missing source file on file-scope exit."
-        | Some _ -> file := None
+        | Some _ -> curr_file := None
     end
   in
 
