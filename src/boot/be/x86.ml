@@ -730,10 +730,16 @@ let select_item_misc (q:quad) : Asm.item =
     | (JNO, _, Pcrel f, _) -> insn_pcrel_prefix32 0x71 0x0f 0x81 f
     | (JE,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x74 0x0f 0x84 f
     | (JNE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x75 0x0f 0x85 f
+
     | (JL,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x7c 0x0f 0x8c f
     | (JLE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x7e 0x0f 0x8e f
     | (JG,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x7f 0x0f 0x8f f
     | (JGE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x7d 0x0f 0x8d f
+
+    | (JB,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x72 0x0f 0x82 f
+    | (JBE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x76 0x0f 0x86 f
+    | (JA,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x77 0x0f 0x87 f
+    | (JAE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x73 0x0f 0x83 f
 
     | (JMP, _, r, _) when is_rm32 r -> insn_rm_r 0xff r slash4
     | (JMP, _, Pcrel f, _) -> insn_pcrel 0xeb 0xe9 f

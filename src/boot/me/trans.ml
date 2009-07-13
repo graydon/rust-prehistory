@@ -302,18 +302,11 @@ let trans_visitor
       | (Some (Ast.TY_vec ety),
          Ast.COMP_named (Ast.COMP_idx i)) ->
           let unit_sz = ty_sz abi ety in
-          let disp = (Int64.add
-                        (word_n 3)
-                        (Int64.mul unit_sz (Int64.of_int i))) in
-
-          (* 
-           * (base_reg, base_off) points to the memory cell holding the 
-           * pointer to the vector. We want to dereference that and form
-           * a new operand pointing to a slot within the vector. 
-           *)
-          let oper = deref_off (word_at_reg_off base_reg base_off) disp in
           let slot = interior_slot ety in
-            (oper, slot)
+          let disp = Int64.mul unit_sz (Int64.of_int i) in
+          let vec = word_at_reg_off base_reg base_off in
+          let elt = trans_bounds_check vec (imm disp) in
+            (elt, slot)
 
       | (Some (Ast.TY_vec ety),
          Ast.COMP_atom at) ->
@@ -333,16 +326,17 @@ let trans_visitor
    * vec: operand holding ptr to vec.
    * mul_idx: index value * unit size.
    * return: ptr to element.
-  *)
+   *)
   and trans_bounds_check (vec:Il.operand) (mul_idx:Il.operand) : Il.operand =
     let len = deref_off vec (word_n 2) in
     let base = Il.Reg (next_vreg()) in
     let elt = Il.Reg (next_vreg ()) in
     let diff = Il.Reg (next_vreg ()) in
+      annotate "bounds check";
       lea base (deref_off vec (word_n 3));
       emit Il.ADD elt base mul_idx;
       emit Il.SUB diff elt base;
-      let jmp = trans_compare Il.JL diff len in
+      let jmp = trans_compare Il.JB diff len in
         trans_cond_fail "bounds check" jmp;
         deref elt
 
@@ -453,6 +447,12 @@ let trans_visitor
         |]
 
   and trans_atom (atom:Ast.atom) : Il.operand =
+    iflog
+      begin
+        fun _ ->
+          annotate (Ast.fmt_to_str Ast.fmt_atom atom)
+      end;
+
     match atom with
         Ast.ATOM_lval lv ->
           let (operand, slot) = trans_lval lv INTENT_read in
@@ -481,6 +481,16 @@ let trans_visitor
 
 
   and trans_cond invert expr : int =
+
+    let anno _ =
+      iflog
+        begin
+          fun _ ->
+            annotate ((Ast.fmt_to_str Ast.fmt_expr expr) ^
+                        ": cond, finale")
+        end
+    in
+
     match expr with
         Ast.EXPR_binary (binop, a, b) ->
           let lhs = trans_atom a in
@@ -508,13 +518,25 @@ let trans_visitor
             else
               cjmp
           in
+            anno ();
             trans_compare cjmp' lhs rhs
 
       | _ ->
-          trans_compare Il.JNE (trans_expr expr)
+          let e = trans_expr expr in
+            anno ();
+            trans_compare Il.JNE e
             (if invert then imm_true else imm_false)
 
   and trans_expr (expr:Ast.expr) : Il.operand =
+
+    let anno _ =
+      iflog
+        begin
+          fun _ ->
+            annotate ((Ast.fmt_to_str Ast.fmt_expr expr) ^
+                        ": plain exit, finale")
+        end
+    in
 
     match expr with
 
@@ -523,6 +545,7 @@ let trans_visitor
             let dst = Il.Reg (Il.next_vreg (emitter())) in
             let lhs = trans_atom a in
             let rhs = trans_atom b in
+              anno ();
               emit op dst lhs rhs;
               dst
           in
@@ -561,6 +584,7 @@ let trans_visitor
               Ast.UNOP_not -> Il.NOT
             | Ast.UNOP_neg -> Il.NEG
           in
+            anno ();
             emit op dst src Il.Nil;
             dst
 

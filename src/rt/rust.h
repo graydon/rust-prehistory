@@ -42,7 +42,7 @@ struct rust_srv {
     void* (*malloc)(rust_srv_t *, size_t);
     void* (*realloc)(rust_srv_t *, void*, size_t);
     void (*free)(rust_srv_t *, void*);
-    uintptr_t (*lookup)(rust_srv_t *, char const *);
+    uintptr_t (*lookup)(rust_srv_t *, char const *, uint8_t *takes_proc);
 };
 
 #ifdef __WIN32__

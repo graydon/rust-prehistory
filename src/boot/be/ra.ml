@@ -254,7 +254,9 @@ let calculate_live_bitvectors cx =
 
 let is_end_of_basic_block quad =
   match quad.quad_op with
-      JE | JNE | JL | JLE | JG | JGE
+      JE | JNE
+    | JL | JLE | JG | JGE
+    | JB | JBE | JA | JAE
     | JC | JNC | JO | JNO | JMP | RET | CRET -> true
     | _ -> false
 ;;

@@ -60,7 +60,8 @@ type op =
   | LEA
   | AND | OR | NOT
   | LSL | LSR | ASR
-  | JE | JNE | JL | JLE | JG | JGE
+  | JE | JNE | JL | JLE | JG | JGE (* Signed.   *)
+             | JB | JBE | JA | JAE (* Unsigned. *)
   | JC | JNC | JO | JNO | JMP
   | CALL | RET | YIELD | RESUME
   | CCALL | CPUSH of mem | CPOP of mem | CRET
@@ -191,6 +192,10 @@ let string_of_op op =
     | JLE -> "JLE"
     | JG -> "JG"
     | JGE -> "JGE"
+    | JB -> "JB"
+    | JBE -> "JBE"
+    | JA -> "JA"
+    | JAE -> "JAE"
     | JMP -> "JMP"
     | CALL -> "CALL"
     | RET -> "RET"
@@ -239,7 +244,8 @@ let string_of_quad f t =
           (string_of_operand f t.quad_lhs)
           (string_of_operand f t.quad_rhs)
 
-    | JMP | JE | JNE | JL | JLE | JG | JGE | JC | JNC | JO | JNO
+    | JMP | JE | JNE | JL | JLE | JG | JGE
+    | JB | JBE | JA | JAE | JC | JNC | JO | JNO
     | CALL | RESUME | CCALL | CPUSH _  ->
         Printf.sprintf "%s %s"
           (string_of_op t.quad_op)

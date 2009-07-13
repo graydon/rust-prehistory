@@ -46,6 +46,9 @@ typedef struct circ_buf circ_buf_t;
 struct str;
 typedef struct str str_t;
 
+struct vec;
+typedef struct vec vec_t;
+
 static uint32_t const LOG_ALL = 0xffffffff;
 static uint32_t const LOG_ERR =        0x1;
 static uint32_t const LOG_MEM =        0x2;
@@ -149,6 +152,16 @@ struct circ_buf {
     size_t next;
     size_t unread;
     uint8_t *data;
+};
+
+
+/* Rust types vec and str look identical from our perspective. */
+
+struct vec {
+    size_t refcount;
+    size_t alloc;
+    size_t init;
+    uint8_t data[];
 };
 
 struct str {
@@ -1032,18 +1045,29 @@ typedef uintptr_t (CDECL *native_3)(uintptr_t, uintptr_t, uintptr_t);
 typedef uintptr_t (CDECL *native_4)(uintptr_t, uintptr_t, uintptr_t,
                                     uintptr_t);
 
+typedef uintptr_t (CDECL *native_proc_0)(rust_proc_t *);
+typedef uintptr_t (CDECL *native_proc_1)(rust_proc_t *, uintptr_t);
+typedef uintptr_t (CDECL *native_proc_2)(rust_proc_t *, uintptr_t,
+                                         uintptr_t);
+typedef uintptr_t (CDECL *native_proc_3)(rust_proc_t *, uintptr_t,
+                                         uintptr_t, uintptr_t);
+typedef uintptr_t (CDECL *native_proc_4)(rust_proc_t *, uintptr_t,
+                                         uintptr_t, uintptr_t, uintptr_t);
+
 static void
-upcall_native(rust_rt_t *rt,
+upcall_native(rust_proc_t *proc,
               char const *sym, uintptr_t *retptr,
               uintptr_t *argv, uintptr_t nargs)
 {
+    rust_rt_t *rt = proc->rt;
     xlog(rt, LOG_UPCALL|LOG_MEM,
          "upcall native('%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
          sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
 
     uintptr_t retval;
+    uint8_t takes_proc = 0;
     /* FIXME: cache lookups. */
-    uintptr_t fn = rt->srv->lookup(rt->srv, sym);
+    uintptr_t fn = rt->srv->lookup(rt->srv, sym, &takes_proc);
     xlog(rt, LOG_UPCALL|LOG_MEM,
          "native '%s' resolved to 0x%" PRIxPTR,
          sym, fn);
@@ -1052,19 +1076,34 @@ upcall_native(rust_rt_t *rt,
     /* FIXME: nargs becomes argstr, incorporate libffi, etc. */
     switch (nargs) {
     case 0:
-        retval = ((native_0)fn)();
+        if (takes_proc)
+            retval = ((native_proc_0)fn)(proc);
+        else
+            retval = ((native_0)fn)();
         break;
     case 1:
-        retval = ((native_1)fn)(argv[0]);
+        if (takes_proc)
+            retval = ((native_proc_1)fn)(proc, argv[0]);
+        else
+            retval = ((native_1)fn)(argv[0]);
         break;
     case 2:
-        retval = ((native_2)fn)(argv[0], argv[1]);
+        if (takes_proc)
+            retval = ((native_proc_2)fn)(proc, argv[0], argv[1]);
+        else
+            retval = ((native_2)fn)(argv[0], argv[1]);
         break;
     case 3:
-        retval = ((native_3)fn)(argv[0], argv[1], argv[2]);
+        if (takes_proc)
+            retval = ((native_proc_3)fn)(proc, argv[0], argv[1], argv[2]);
+        else
+            retval = ((native_3)fn)(argv[0], argv[1], argv[2]);
         break;
     case 4:
-        retval = ((native_4)fn)(argv[0], argv[1], argv[2], argv[3]);
+        if (takes_proc)
+            retval = ((native_proc_4)fn)(proc, argv[0], argv[1], argv[2], argv[3]);
+        else
+            retval = ((native_4)fn)(argv[0], argv[1], argv[2], argv[3]);
         break;
     default:
         I(rt, 0);
@@ -1098,7 +1137,8 @@ upcall_new_str(rust_rt_t *rt, char const *s, size_t init)
     st->refcnt = 1;
     st->init = init;
     st->alloc = alloc;
-    memcpy(&st->data[0], s, init);
+    if (s)
+        memcpy(&st->data[0], s, init);
     xlog(rt, LOG_UPCALL|LOG_MEM,
          "upcall new_str('%s', %" PRIdPTR ") -> 0x%" PRIxPTR,
          s, init, st);
@@ -1106,11 +1146,7 @@ upcall_new_str(rust_rt_t *rt, char const *s, size_t init)
 }
 
 
-static char const *
-str_buf(str_t *s)
-{
-    return (char const *)&s->data[0];
-}
+static CDECL char const *str_buf(str_t *s);
 
 static void
 handle_upcall(rust_proc_t *proc)
@@ -1160,7 +1196,7 @@ handle_upcall(rust_proc_t *proc)
         upcall_recv(proc->rt, proc, (rust_port_t*)args[1]);
         break;
     case upcall_code_native:
-        upcall_native(proc->rt, (char const *)args[0],
+        upcall_native(proc, (char const *)args[0],
                       (uintptr_t*)args[1],
                       (uintptr_t*)args[2],
                       (uintptr_t)args[3]);
@@ -1278,27 +1314,52 @@ srv_fatal(rust_srv_t *srv, char const *expr,
     snprintf(buf, sizeof(buf), "fatal, '%s' failed, %s:%d",
              expr, file, line);
     srv->log(srv, buf);
-    abort();
+    exit(1);
 }
 
-static CDECL uintptr_t
-fopen_like(char const *fp, char const *mode)
+/* Native builtins. */
+
+static CDECL char const *
+str_buf(str_t *s)
 {
-    printf("calling fopen('%s','%s')\n", fp, mode);
-    uintptr_t res = (uintptr_t) fopen(fp, mode);
-    printf("got %d\n", res);
-    return res;
+    return (char const *)&s->data[0];
 }
+
+static CDECL str_t*
+implode(rust_proc_t *proc, vec_t *v)
+{
+    /*
+     * We received a vec of u32 unichars. Implode to a string.
+     * FIXME: this needs to do a proper utf-8 encoding.
+     */
+    size_t i;
+    str_t *s;
+
+    size_t init = v->init >> 2;
+    s = upcall_new_str(proc->rt, NULL, init);
+
+    uint32_t *src = (uint32_t*) &v->data[0];
+    uint8_t *dst = &s->data[0];
+
+    for (i = 0; i < init; ++i)
+        *dst++ = *src;
+
+    return s;
+}
+
 
 static uintptr_t
-srv_lookup(rust_srv_t *srv, char const *sym)
+srv_lookup(rust_srv_t *srv, char const *sym, uint8_t *takes_proc)
 {
     uintptr_t res;
 
+    *takes_proc = 0;
+
     if (strcmp(sym, "str_buf") == 0) {
         res = (uintptr_t) &str_buf;
-    } else if (strcmp(sym, "fopen") == 0) {
-        res = (uintptr_t) &fopen_like;
+    } else if (strcmp(sym, "implode") == 0) {
+        *takes_proc = 1;
+        res = (uintptr_t) &implode;
     } else {
 #ifdef __WIN32__
         /* FIXME: pass library name in as well. And use LoadLibrary not
