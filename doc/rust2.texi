@@ -61,6 +61,10 @@ Complete table of contents
 
 @contents
 
+@c ############################################################
+@c introduction
+@c ############################################################
+
 @node    Introduction
 @chapter Introduction
 
@@ -217,9 +221,10 @@ C++.
 
 Copying data between slots of different modes may cause either a
 simple address assignment or reference-count adjustment, or may cause
-a value to be ``transplanted'': fully copied from the interior of one
-memory structure to another, or between stack and heap. Transplanting,
-when necessary, is predictable and automatic.
+a value to be ``transplanted'': copied by value from the interior of
+one memory structure to another, or between stack and
+heap. Transplanting, when necessary, is predictable and automatic, as
+part of the definition of the assignment operator (=).
 
 In addition, slots have a static initialisation state that is
 calculated by the type-state system. This permits late initialisation
@@ -409,15 +414,6 @@ Euclid, etc.)
 Rust is therefore, in many ways, a selection of language technologies that
 were @emph{alternatives} to the historically dominant ``Object Oriented''
 languages such as Smalltalk, C++, Java and Python.
-
-
-@c ############################################################
-@c begin main body of nodes
-@c ############################################################
-
-@c ############################################################
-@c introduction
-@c ############################################################
 
 @c ############################################################
 @c tutorial

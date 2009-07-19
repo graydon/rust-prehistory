@@ -46,17 +46,10 @@ type ctxt =
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
+      ctxt_tag_ctors: (node_id,(Ast.ident,Ast.ty) Hashtbl.t) Hashtbl.t;
+
+      (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
-
-      ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
-      ctxt_constr_ids: (constr_key,constr_id) Hashtbl.t;
-      ctxt_preconditions: (node_id,Bitv.t) Hashtbl.t;
-      ctxt_postconditions: (node_id,Bitv.t) Hashtbl.t;
-      ctxt_prestates: (node_id,Bitv.t) Hashtbl.t;
-      ctxt_poststates: (node_id,Bitv.t) Hashtbl.t;
-      ctxt_copy_stmt_is_init: (node_id,unit) Hashtbl.t;
-      ctxt_lval_is_in_proc_init: (node_id,unit) Hashtbl.t;
-
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
@@ -64,6 +57,18 @@ type ctxt =
       ctxt_prog_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_call_sizes: (node_id,int64) Hashtbl.t;
+
+      (* Typestate-y stuff. *)
+      ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
+      ctxt_constr_ids: (constr_key,constr_id) Hashtbl.t;
+      ctxt_preconditions: (node_id,Bitv.t) Hashtbl.t;
+      ctxt_postconditions: (node_id,Bitv.t) Hashtbl.t;
+      ctxt_prestates: (node_id,Bitv.t) Hashtbl.t;
+      ctxt_poststates: (node_id,Bitv.t) Hashtbl.t;
+      ctxt_copy_stmt_is_init: (node_id,unit) Hashtbl.t;
+
+      (* Translation-y stuff. *)
+      ctxt_lval_is_in_proc_init: (node_id,unit) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_prog_fixups: (node_id,fixup) Hashtbl.t;
@@ -93,7 +98,8 @@ let new_ctxt sess abi crate =
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
     ctxt_lval_to_referent = Hashtbl.create 0;
-    ctxt_slot_aliased = Hashtbl.create 0;
+    ctxt_tag_ctors = Hashtbl.create 0;
+
     ctxt_constrs = Hashtbl.create 0;
     ctxt_constr_ids = Hashtbl.create 0;
     ctxt_preconditions = Hashtbl.create 0;
@@ -101,8 +107,8 @@ let new_ctxt sess abi crate =
     ctxt_prestates = Hashtbl.create 0;
     ctxt_poststates = Hashtbl.create 0;
     ctxt_copy_stmt_is_init = Hashtbl.create 0;
-    ctxt_lval_is_in_proc_init = Hashtbl.create 0;
 
+    ctxt_slot_aliased = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_block_layouts = Hashtbl.create 0;
@@ -110,6 +116,8 @@ let new_ctxt sess abi crate =
     ctxt_prog_layouts = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
+
+    ctxt_lval_is_in_proc_init = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
     ctxt_file_fixups = Hashtbl.create 0;
     ctxt_prog_fixups = Hashtbl.create 0;
@@ -441,6 +449,15 @@ type scope =
   | SCOPE_mod_item of Ast.mod_item
   | SCOPE_mod_type_item of Ast.mod_type_item
   | SCOPE_crate of Ast.crate
+;;
+
+let id_of_scope (sco:scope) : node_id =
+  match sco with
+      SCOPE_block id -> id
+    | SCOPE_mod_item i -> i.id
+    | SCOPE_mod_type_item ti -> ti.id
+    | SCOPE_crate c -> c.id
+;;
 
 let scope_stack_managing_visitor
     (scopes:scope Stack.t)

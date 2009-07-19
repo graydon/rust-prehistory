@@ -13,14 +13,6 @@ let iflog cx thunk =
   else ()
 ;;
 
-let id_of_scope (sco:scope) : node_id =
-  match sco with
-      SCOPE_block id -> id
-    | SCOPE_mod_item i -> i.id
-    | SCOPE_mod_type_item ti -> ti.id
-    | SCOPE_crate c -> c.id
-;;
-
 
 let determine_constr_key
     (cx:ctxt)

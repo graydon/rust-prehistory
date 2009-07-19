@@ -100,7 +100,6 @@ let stmt_collecting_visitor
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
-
 let all_item_collecting_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
@@ -161,6 +160,55 @@ let all_item_collecting_visitor
     }
 ;;
 
+let tag_collecting_visitor
+    (cx:ctxt)
+    (scopes:scope Stack.t)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+  let process_ty n p id ty =
+    match ty with
+        Ast.TY_tag ttag ->
+          begin
+            let scope = Stack.top scopes in
+            let sid = id_of_scope scope in
+            let tag_tab =
+              if Hashtbl.mem cx.ctxt_tag_ctors sid
+              then Hashtbl.find cx.ctxt_tag_ctors sid
+              else
+                let tab = Hashtbl.create 0 in
+                  htab_put cx.ctxt_tag_ctors sid tab;
+                  tab
+            in
+              Hashtbl.iter
+                begin
+                  fun ident ty ->
+                    if Hashtbl.mem tag_tab ident
+                    then err (Some id) "duplicate constructor '%s'" ident
+                    else
+                      (* 
+                       * FIXME: lookup here and check for collision 
+                       * against other scope items.
+                       *)
+                      htab_put tag_tab ident ty
+                end
+                ttag
+          end
+      | _ -> ()
+  in
+  let visit_mod_item_pre n p i =
+    begin
+      match i.node with
+          Ast.MOD_ITEM_opaque_type tyd ->
+            process_ty n p i.id tyd.Ast.decl_item
+        | Ast.MOD_ITEM_public_type tyd ->
+            process_ty n p i.id tyd.Ast.decl_item
+        | _ -> ()
+    end;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+    { inner with
+        Walk.visit_mod_item_pre = visit_mod_item_pre }
+;;
 
 let type_resolving_visitor
     (cx:ctxt)
@@ -169,64 +217,21 @@ let type_resolving_visitor
     : Walk.visitor =
 
   let lookup_type_by_ident ident =
-    let check_item (i:Ast.mod_item') : Ast.ty =
-      match i with
-          (Ast.MOD_ITEM_opaque_type td) -> td.Ast.decl_item
-        | (Ast.MOD_ITEM_public_type td) -> td.Ast.decl_item
-        | _ -> err None "identifier '%s' resolves to non-type" ident
-    in
-    let check_type_item (i:Ast.mod_type_item') : Ast.ty =
-      match i with
-          (Ast.MOD_TYPE_ITEM_public_type td) -> td.Ast.decl_item
-        | (Ast.MOD_TYPE_ITEM_opaque_type td) ->
-            err None "identifier '%s' resolves to opaque type" ident
-        | _ -> err None "identifier '%s' resolves to non-type" ident
-    in
-    let check_item_option (iopt:Ast.mod_item option) : Ast.ty option =
-      match iopt with
-          Some i -> Some (check_item i.node)
-        | _ -> None
-    in
-    let check_type_item_option (iopt:Ast.mod_type_item option) : Ast.ty option =
-      match iopt with
-          Some i -> Some (check_type_item i.node)
-        | _ -> None
-    in
-    let check_scope (scope:scope) : Ast.ty option =
-      match scope with
-          SCOPE_block block_id ->
-            let block_items = Hashtbl.find cx.ctxt_block_items block_id in
-              if Hashtbl.mem block_items ident
+    let res = lookup cx scopes (Ast.KEY_ident ident) in
+      match res with
+          None -> err None "identifier '%s' does not resolve to a type" ident
+        | Some (scope, id) ->
+            begin
+              if Hashtbl.mem cx.ctxt_all_items id
               then
-                Some (check_item
-                        (Hashtbl.find cx.ctxt_all_items
-                           (Hashtbl.find block_items ident)))
-              else None
-
-        | SCOPE_crate _ -> None
-
-        | SCOPE_mod_item item ->
-            begin
-              match item.node with
-                | Ast.MOD_ITEM_mod m ->
-                    check_item_option (htab_search m.Ast.decl_item ident)
-                | Ast.MOD_ITEM_prog p ->
-                    check_item_option (htab_search p.Ast.decl_item.Ast.prog_mod ident)
-                | _ -> None
+                begin
+                  match Hashtbl.find cx.ctxt_all_items id with
+                      Ast.MOD_ITEM_opaque_type td -> td.Ast.decl_item
+                    | Ast.MOD_ITEM_public_type td -> td.Ast.decl_item
+                    | _ -> err None "identifier '%s' resolves to non-type" ident
+                end
+              else err None "identifier '%s' resolves to a non-type" ident
             end
-
-        | SCOPE_mod_type_item item ->
-            begin
-              match item.node with
-                | Ast.MOD_TYPE_ITEM_mod m ->
-                    check_type_item_option (htab_search m.Ast.decl_item ident)
-                | _ -> None
-            end
-    in
-      log cx "looking up type with ident '%s'" ident;
-      match stk_search scopes check_scope with
-          None -> err None "unresolved identifier '%s'" ident
-        | Some t -> (log cx "resolved to type %s" (Ast.fmt_to_str Ast.fmt_ty t); t)
   in
 
   let rec resolve_slot (slot:Ast.slot) : Ast.slot =
@@ -297,7 +302,7 @@ let type_resolving_visitor
       | Ast.TY_tup slots -> Ast.TY_tup (Array.map resolve_slot slots)
       | Ast.TY_rec trec -> Ast.TY_rec (Array.map (fun (n, s) -> (n, resolve_slot s)) trec)
 
-      | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i s -> (i, resolve_ty t)))
+      | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i s -> (i, resolve_ty s)))
       | Ast.TY_iso tiso ->
           Ast.TY_iso
             { tiso with
@@ -439,6 +444,9 @@ let process_crate
          (stmt_collecting_visitor cx
             (all_item_collecting_visitor cx
                Walk.empty_visitor)));
+      (scope_stack_managing_visitor scopes
+         (tag_collecting_visitor cx scopes
+            (Walk.empty_visitor)));
       (scope_stack_managing_visitor scopes
          (type_resolving_visitor cx scopes
             (lval_base_resolving_visitor cx scopes

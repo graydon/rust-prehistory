@@ -715,7 +715,7 @@ and parse_atomic_ty ps =
           in
             htab_put htab ident ty
         in
-        let _ = one_or_more OR parse_tag_entry ps in
+        let _ = bracketed_one_or_more LPAREN RPAREN (Some COMMA) parse_tag_entry ps in
           Ast.TY_tag htab
 
     | REC ->
@@ -737,7 +737,7 @@ and parse_atomic_ty ps =
           else Ast.TY_tup slots
 
     | _ -> Ast.TY_mach (parse_ty_mach ps)
-      
+
 
 and parse_slot param_slot ps =
   match (peek ps, param_slot) with
