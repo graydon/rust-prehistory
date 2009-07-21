@@ -160,56 +160,6 @@ let all_item_collecting_visitor
     }
 ;;
 
-let tag_collecting_visitor
-    (cx:ctxt)
-    (scopes:scope Stack.t)
-    (inner:Walk.visitor)
-    : Walk.visitor =
-  let process_ty n p id ty =
-    match ty with
-        Ast.TY_tag ttag ->
-          begin
-            let scope = Stack.top scopes in
-            let sid = id_of_scope scope in
-            let tag_tab =
-              if Hashtbl.mem cx.ctxt_tag_ctors sid
-              then Hashtbl.find cx.ctxt_tag_ctors sid
-              else
-                let tab = Hashtbl.create 0 in
-                  htab_put cx.ctxt_tag_ctors sid tab;
-                  tab
-            in
-              Hashtbl.iter
-                begin
-                  fun ident ty ->
-                    if Hashtbl.mem tag_tab ident
-                    then err (Some id) "duplicate constructor '%s'" ident
-                    else
-                      (* 
-                       * FIXME: lookup here and check for collision 
-                       * against other scope items.
-                       *)
-                      htab_put tag_tab ident ty
-                end
-                ttag
-          end
-      | _ -> ()
-  in
-  let visit_mod_item_pre n p i =
-    begin
-      match i.node with
-          Ast.MOD_ITEM_opaque_type tyd ->
-            process_ty n p i.id tyd.Ast.decl_item
-        | Ast.MOD_ITEM_public_type tyd ->
-            process_ty n p i.id tyd.Ast.decl_item
-        | _ -> ()
-    end;
-    inner.Walk.visit_mod_item_pre n p i
-  in
-    { inner with
-        Walk.visit_mod_item_pre = visit_mod_item_pre }
-;;
-
 let type_resolving_visitor
     (cx:ctxt)
     (scopes:scope Stack.t)
@@ -444,9 +394,6 @@ let process_crate
          (stmt_collecting_visitor cx
             (all_item_collecting_visitor cx
                Walk.empty_visitor)));
-      (scope_stack_managing_visitor scopes
-         (tag_collecting_visitor cx scopes
-            (Walk.empty_visitor)));
       (scope_stack_managing_visitor scopes
          (type_resolving_visitor cx scopes
             (lval_base_resolving_visitor cx scopes

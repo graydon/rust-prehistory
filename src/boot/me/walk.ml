@@ -176,6 +176,11 @@ and walk_mod_item
           (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
       | Ast.MOD_ITEM_public_type td ->
           (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
+      | Ast.MOD_ITEM_tag td ->
+          (td.Ast.decl_params, (fun _ ->
+                                  let (ttup, ty) = td.Ast.decl_item in
+                                    Array.iter (walk_slot v) ttup;
+                                    walk_ty v ty))
       | Ast.MOD_ITEM_pred pd ->
           (pd.Ast.decl_params, (fun _ -> walk_pred v pd.Ast.decl_item))
       | Ast.MOD_ITEM_mod md ->

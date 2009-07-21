@@ -440,6 +440,7 @@ and 'a decl =
 and mod_item' =
     MOD_ITEM_opaque_type of ty decl
   | MOD_ITEM_public_type of ty decl
+  | MOD_ITEM_tag of (ty_tup * ty) decl
   | MOD_ITEM_pred of pred decl
   | MOD_ITEM_mod of mod_items decl
   | MOD_ITEM_fn of fn decl
@@ -961,6 +962,7 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
     match item.node with
         MOD_ITEM_opaque_type td -> fmt ff "?tydecl?"
       | MOD_ITEM_public_type td -> fmt ff "?tydecl?"
+      | MOD_ITEM_tag td -> fmt ff "?tagdecl?"
       | MOD_ITEM_pred pd -> fmt ff "?preddecl?"
 
       | MOD_ITEM_mod md ->

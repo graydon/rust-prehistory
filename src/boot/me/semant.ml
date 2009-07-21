@@ -46,7 +46,6 @@ type ctxt =
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
-      ctxt_tag_ctors: (node_id,(Ast.ident,Ast.ty) Hashtbl.t) Hashtbl.t;
 
       (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
@@ -98,7 +97,6 @@ let new_ctxt sess abi crate =
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
     ctxt_lval_to_referent = Hashtbl.create 0;
-    ctxt_tag_ctors = Hashtbl.create 0;
 
     ctxt_constrs = Hashtbl.create 0;
     ctxt_constr_ids = Hashtbl.create 0;
@@ -341,46 +339,57 @@ let interior_slot ty : Ast.slot =
 
 let rec ty_mod_of_mod (inside:bool) (m:Ast.mod_items) : Ast.mod_type_items =
   let ty_items = Hashtbl.create (Hashtbl.length m) in
-  let add n i = Hashtbl.add ty_items n (mod_type_item_of_mod_item inside i) in
+  let add n i =
+    match mod_type_item_of_mod_item inside i with
+        None -> ()
+      | Some mty -> Hashtbl.add ty_items n mty
+  in
     Hashtbl.iter add m;
     ty_items
 
-and mod_type_item_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.mod_type_item =
+and mod_type_item_of_mod_item
+    (inside:bool)
+    (item:Ast.mod_item)
+    : Ast.mod_type_item option =
   let decl params item =
     { Ast.decl_params = params;
       Ast.decl_item = item }
   in
-  let ty =
+  let tyo =
     match item.node with
         Ast.MOD_ITEM_opaque_type td ->
           if inside
           then
-            Ast.MOD_TYPE_ITEM_public_type td
+            Some (Ast.MOD_TYPE_ITEM_public_type td)
           else
             (match (td.Ast.decl_params, td.Ast.decl_item) with
                  (params, Ast.TY_lim _) ->
-                   Ast.MOD_TYPE_ITEM_opaque_type
-                     (decl params Ast.LIMITED)
+                   Some (Ast.MOD_TYPE_ITEM_opaque_type
+                           (decl params Ast.LIMITED))
                | (params, _) ->
-                   Ast.MOD_TYPE_ITEM_opaque_type
-                     (decl params Ast.UNLIMITED))
+                   Some (Ast.MOD_TYPE_ITEM_opaque_type
+                           (decl params Ast.UNLIMITED)))
       | Ast.MOD_ITEM_public_type td ->
-          Ast.MOD_TYPE_ITEM_public_type td
+          Some (Ast.MOD_TYPE_ITEM_public_type td)
       | Ast.MOD_ITEM_pred pd ->
-          Ast.MOD_TYPE_ITEM_pred
-            (decl pd.Ast.decl_params (ty_pred_of_pred pd.Ast.decl_item))
+          Some (Ast.MOD_TYPE_ITEM_pred
+                  (decl pd.Ast.decl_params (ty_pred_of_pred pd.Ast.decl_item)))
       | Ast.MOD_ITEM_mod md ->
-            Ast.MOD_TYPE_ITEM_mod
-              (decl md.Ast.decl_params (ty_mod_of_mod true md.Ast.decl_item))
+          Some (Ast.MOD_TYPE_ITEM_mod
+                  (decl md.Ast.decl_params (ty_mod_of_mod true md.Ast.decl_item)))
       | Ast.MOD_ITEM_fn fd ->
-          Ast.MOD_TYPE_ITEM_fn
-            (decl fd.Ast.decl_params (ty_fn_of_fn fd.Ast.decl_item))
+          Some (Ast.MOD_TYPE_ITEM_fn
+                  (decl fd.Ast.decl_params (ty_fn_of_fn fd.Ast.decl_item)))
       | Ast.MOD_ITEM_prog pd ->
-          Ast.MOD_TYPE_ITEM_prog
-            (decl pd.Ast.decl_params (ty_prog_of_prog pd.Ast.decl_item))
+          Some (Ast.MOD_TYPE_ITEM_prog
+                  (decl pd.Ast.decl_params (ty_prog_of_prog pd.Ast.decl_item)))
+      | Ast.MOD_ITEM_tag _ -> None
   in
-    { id = item.id;
-      node = ty }
+    match tyo with
+        None -> None
+      | Some ty ->
+          Some { id = item.id;
+                 node = ty }
 
 and ty_prog_of_prog (prog:Ast.prog) : Ast.ty_sig =
   let (inputs, constrs, output)  =
@@ -440,6 +449,19 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
       | Ast.MOD_ITEM_prog pd ->
           check_concrete pd.Ast.decl_params
             (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
+
+      | Ast.MOD_ITEM_tag td ->
+          let (ttup, ty) = td.Ast.decl_item in
+          let taux = { Ast.fn_pure = true;
+                       Ast.fn_lim = Ast.UNLIMITED;
+                       Ast.fn_proto = None }
+          in
+          let tsig = { Ast.sig_input_slots = ttup;
+                       Ast.sig_input_constrs = [| |];
+                       Ast.sig_output_slot = interior_slot ty }
+          in
+            check_concrete td.Ast.decl_params
+              (Ast.TY_fn (tsig, taux))
 ;;
 
 (* Scopes and the visitor that builds them. *)
