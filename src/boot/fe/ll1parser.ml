@@ -389,18 +389,23 @@ let span ps apos bpos x =
    lval is first used; subsequent uses of 'the same' reference must clone_lval it 
    into a new node_id. Otherwise there is trouble. *)
 
+let clone_span ps oldnode newthing =
+  let s = Hashtbl.find ps.pstate_sess.Session.sess_spans oldnode.id in
+    span ps s.lo s.hi newthing
+;;
+
+
 let rec clone_lval ps lval =
   match lval with
       Ast.LVAL_base nb ->
-        let s = Hashtbl.find ps.pstate_sess.Session.sess_spans nb.id in
-          (* This call issues a fresh node_id. *)
-          Ast.LVAL_base (span ps s.lo s.hi nb.node)
+        let nnb = clone_span ps nb nb.node in
+          Ast.LVAL_base nnb
     | Ast.LVAL_ext (base, ext) ->
         Ast.LVAL_ext ((clone_lval ps base), ext)
 ;;
 
-let clone_atom ps atom = 
-  match atom with 
+let clone_atom ps atom =
+  match atom with
       Ast.ATOM_literal _ -> atom
     | Ast.ATOM_lval lv -> Ast.ATOM_lval (clone_lval ps lv)
 ;;
@@ -707,13 +712,13 @@ and parse_atomic_ty ps =
         let htab = Hashtbl.create 4 in
         let parse_tag_entry ps =
           let ident = parse_ident ps in
-          let ty =
+          let tup =
             match peek ps with
-                LPAREN -> bracketed LPAREN RPAREN parse_ty ps
-              | NIL -> Ast.TY_nil
-              | _ -> Ast.TY_nil
+                LPAREN -> bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps
+              | NIL -> [| |]
+              | _ -> [| |]
           in
-            htab_put htab ident ty
+            htab_put htab ident tup
         in
         let _ = bracketed_one_or_more LPAREN RPAREN (Some COMMA) parse_tag_entry ps in
           Ast.TY_tag htab
@@ -1509,6 +1514,7 @@ and parse_stmts ps =
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
           let bpos = lexpos ps in
           let decl = Ast.DECL_mod_item (ident, item) in
+          let stmts = expand_tags_to_stmts ps item stmts in
             spans stmts apos bpos (Ast.STMT_decl decl)
 
       | LPAREN ->
@@ -1613,7 +1619,9 @@ and parse_prog_item prog_cell stmts_cell ps =
     | PUB | PURE | LIM
     | PROG | MOD | TYPE | (FN _) | PRED ->
         let (ident, stmts, item) = ctxt "prog_item: mod item" parse_mod_item ps in
-          htab_put (!prog_cell).Ast.prog_mod ident item;
+        let mod_items = (!prog_cell).Ast.prog_mod in
+          htab_put mod_items ident item;
+          expand_tags_to_items ps item mod_items;
           stmts_cell := stmts :: (!stmts_cell)
 
     | LET ->
@@ -1858,9 +1866,56 @@ and parse_mod_item ps =
             then (Ast.MOD_ITEM_public_type decl)
             else (Ast.MOD_ITEM_opaque_type decl)
           in
-            (ident, arr [], span ps apos bpos item)
+            (ident, [| |], span ps apos bpos item)
 
       | _ -> raise (unexpected ps)
+
+
+and expand_tags ps item : (Ast.ident * Ast.mod_item) array =
+  let handle_ty_tag params ttag =
+    let tags = ref [] in
+      Hashtbl.iter
+        begin
+          fun ident tup ->
+            let decl = { Ast.decl_params = params;
+                         Ast.decl_item = (tup, ttag) }
+            in
+            let tag_item' = Ast.MOD_ITEM_tag decl in
+            let tag_item = clone_span ps item tag_item' in
+              tags := (ident, tag_item) :: (!tags)
+        end
+        ttag;
+      arr (!tags)
+  in
+  let handle_ty_decl tyd =
+    match tyd.Ast.decl_item with
+        Ast.TY_tag ttag -> handle_ty_tag tyd.Ast.decl_params ttag
+      | _ -> [| |]
+  in
+    match item.node with
+        Ast.MOD_ITEM_public_type tyd -> handle_ty_decl tyd
+      | Ast.MOD_ITEM_opaque_type tyd -> handle_ty_decl tyd
+      | _ -> [| |]
+
+
+and expand_tags_to_stmts ps item stmts : Ast.stmt array =
+  let id_items = expand_tags ps item in
+  let stmts' =
+    Array.map
+      (fun (ident, tag_item) ->
+         clone_span ps item
+           (Ast.STMT_decl
+              (Ast.DECL_mod_item (ident, tag_item))))
+      id_items
+  in
+    Array.append stmts stmts'
+
+
+and expand_tags_to_items ps item (items:Ast.mod_items) : unit =
+  let id_items = expand_tags ps item in
+    Array.iter
+      (fun (ident, item) -> htab_put items ident item)
+      id_items
 
 
 and make_parser tref nref sess tok fname =
@@ -1961,7 +2016,8 @@ and parse_file_mod_items
       let (ident, stmts, item) = parse_mod_item ps in
         if Array.length stmts != 0
         then raise (Parse_err (ps, "top-level module cannot contain implicit statements"));
-        htab_put items ident item
+        htab_put items ident item;
+        expand_tags_to_items ps item items;
     done;
     expect ps EOF;
     items

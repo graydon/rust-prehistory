@@ -167,7 +167,7 @@ and ty_rec = (ident * slot) array
  * group of TY_tags.
  *)
 
-and ty_tag = (ident, ty) Hashtbl.t
+and ty_tag = (ident, ty_tup) Hashtbl.t
 
 and ty_iso =
     {
@@ -440,7 +440,7 @@ and 'a decl =
 and mod_item' =
     MOD_ITEM_opaque_type of ty decl
   | MOD_ITEM_public_type of ty decl
-  | MOD_ITEM_tag of (ty_tup * ty) decl
+  | MOD_ITEM_tag of (ty_tup * ty_tag) decl
   | MOD_ITEM_pred of pred decl
   | MOD_ITEM_mod of mod_items decl
   | MOD_ITEM_fn of fn decl

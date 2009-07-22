@@ -243,22 +243,24 @@ let type_resolving_visitor
   and resolve_mod_type_items (mtis:Ast.mod_type_items) : Ast.mod_type_items =
     (htab_map mtis resolve_mod_type_item)
 
+  and resolve_ty_tup ttup = Array.map resolve_slot ttup
+
   and resolve_ty (t:Ast.ty) : Ast.ty =
     match t with
         Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_mach _
       | Ast.TY_int | Ast.TY_char | Ast.TY_str | Ast.TY_type
       | Ast.TY_idx _ | Ast.TY_opaque _ | Ast.TY_proc -> t
 
-      | Ast.TY_tup slots -> Ast.TY_tup (Array.map resolve_slot slots)
+      | Ast.TY_tup ttup -> Ast.TY_tup (resolve_ty_tup ttup)
       | Ast.TY_rec trec -> Ast.TY_rec (Array.map (fun (n, s) -> (n, resolve_slot s)) trec)
 
-      | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i s -> (i, resolve_ty s)))
+      | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i ttup -> (i, resolve_ty_tup ttup)))
       | Ast.TY_iso tiso ->
           Ast.TY_iso
             { tiso with
                 Ast.iso_group =
                 Array.map (fun ttag -> htab_map ttag
-                             (fun i s -> (i, resolve_ty t)))
+                             (fun i ttup -> (i, resolve_ty_tup ttup)))
                   tiso.Ast.iso_group }
 
       | Ast.TY_vec ty -> Ast.TY_vec (resolve_ty ty)

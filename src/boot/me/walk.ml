@@ -178,9 +178,9 @@ and walk_mod_item
           (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
       | Ast.MOD_ITEM_tag td ->
           (td.Ast.decl_params, (fun _ ->
-                                  let (ttup, ty) = td.Ast.decl_item in
-                                    Array.iter (walk_slot v) ttup;
-                                    walk_ty v ty))
+                                  let (ttup, ttag) = td.Ast.decl_item in
+                                    walk_ty_tup v ttup;
+                                    walk_ty_tag v ttag))
       | Ast.MOD_ITEM_pred pd ->
           (pd.Ast.decl_params, (fun _ -> walk_pred v pd.Ast.decl_item))
       | Ast.MOD_ITEM_mod md ->
@@ -222,20 +222,21 @@ and walk_native_mod_item
       item
 
 
+and walk_ty_tup v ttup = Array.iter (walk_slot v) ttup
+
+and walk_ty_tag v ttag = Hashtbl.iter (fun _ t -> walk_ty_tup v t) ttag
+
 and walk_ty
     (v:visitor)
     (ty:Ast.ty)
     : unit =
-  let walk_ttag ttag =
-    Hashtbl.iter (fun _ t -> walk_ty v t) ttag
-  in
   let children _ =
     match ty with
-        Ast.TY_tup ttup -> Array.iter (walk_slot v) ttup
+        Ast.TY_tup ttup -> walk_ty_tup v ttup
       | Ast.TY_vec t -> walk_ty v t
       | Ast.TY_rec trec -> Array.iter (fun (_, s) -> walk_slot v s) trec
-      | Ast.TY_tag ttag -> walk_ttag ttag
-      | Ast.TY_iso tiso -> Array.iter walk_ttag tiso.Ast.iso_group
+      | Ast.TY_tag ttag -> walk_ty_tag v ttag
+      | Ast.TY_iso tiso -> Array.iter (walk_ty_tag v) tiso.Ast.iso_group
       | Ast.TY_fn tfn -> walk_ty_fn v tfn
       | Ast.TY_pred (slots, constrs) ->
           begin

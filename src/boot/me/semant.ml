@@ -451,14 +451,14 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
             (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
 
       | Ast.MOD_ITEM_tag td ->
-          let (ttup, ty) = td.Ast.decl_item in
+          let (ttup, ttag) = td.Ast.decl_item in
           let taux = { Ast.fn_pure = true;
                        Ast.fn_lim = Ast.UNLIMITED;
                        Ast.fn_proto = None }
           in
           let tsig = { Ast.sig_input_slots = ttup;
                        Ast.sig_input_constrs = [| |];
-                       Ast.sig_output_slot = interior_slot ty }
+                       Ast.sig_output_slot = interior_slot (Ast.TY_tag ttag) }
           in
             check_concrete td.Ast.decl_params
               (Ast.TY_fn (tsig, taux))

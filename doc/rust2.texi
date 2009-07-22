@@ -116,7 +116,7 @@ Also note that ``terseness'' and ``expressiveness'' are absent from
 the list. Rust programs are often larger and more verbose than
 equivalent programs in other languages. The syntax avoids gratuitous
 chatter where possible, and keywords are kept short and punchy, but
-rust is unlikely to win any competitions for ``shortest program to
+Rust is unlikely to win any competitions for ``shortest program to
 accomplish a given task''. The most understandable and maintainable
 program is not usually the shortest.
 
@@ -138,10 +138,11 @@ intended to be easy to model for the reader. The code should not
 Rust is designed to be compiled to mostly-static native code, with
 relatively large compilation units and plenty of room for whole-unit
 optimisation. The output of a rust compilation is a standard loadable
-object of machine code (ELF, PE, Mach-O), containing standard DWARF
-metadata, and works with existing debuggers and profilers. Such object
-files can be dynamically loaded, via the standard operating-system
-loader, into other processes, and executed cooperatively.
+object of machine code (ELF, PE, Mach-O), containing standard metadata
+(DWARF), and works with existing disassemblers, analysis tools,
+debuggers and profilers. Such object files can be dynamically loaded,
+via the standard operating-system loader, into other processes, and
+executed cooperatively.
 
 The rust runtime is relatively small and provides some memory
 management, process scheduling, internal communication buffering and
@@ -165,7 +166,7 @@ Unlike many languages, individual modules do @emph{not} carry all the
 mechanisms or restrictions of crates. Modules and crates serve
 different roles.
 
-@item Lightweight cooperative process model
+@item Lightweight cooperative processes
 
 Like many @emph{actor} languages, Rust provides an isolation (and
 concurrency) model based on lightweight processes scheduled by the
@@ -176,7 +177,21 @@ isolation is only possible by calling legacy (C) code.
 Inter-process communication is single-duplex, based on ports and
 channels. Communication can be buffered or unbuffered: an unbuffered
 send is modeled as a buffered send followed by a flush. Communication
-is fair and randomised..
+is fair and randomised.
+
+@item Stack-based iterator functions
+
+Between asynchronous concurrent processes and synchronous
+single-invocation functions, Rust also supports a form of
+multiple-invocation iterator function, modeled after the same facility
+in @code{CLU}. Iterator functions can @emph{temporarily} suspend
+execution and return a value to their caller, resuming execution at
+the point of suspension when they are re-invoked.
+
+The iterator function facility is tightly integrated into the
+@code{for} loop construct. Only loop headers can invoke iterator
+functions, and iterator frames live on the same call stack as normal
+function frames, so cannot escape the invoking loop.
 
 @item Direct interface to C code
 
@@ -478,7 +493,7 @@ languages such as Smalltalk, C++, Java and Python.
 * Ref.Stat.Stmt.Cfg::           The control flow graph formed by statements.
 * Ref.Stat.Stmt.Typestate::     Constraints that hold at points.
 * Ref.Stat.Stmt.Cond::          Constraints required and implied by a statement.
-* Ref.Stat.Stmt.Assert::        Explicit manipulation of typestate.
+* Ref.Stat.Stmt.Check::         Relating dynamic state to static typestate.
 
 @c nb: language needs ``be'' (become) to explicitly say when you want
 @c local dtors to run.  ``ret'' (return) means ``after expr'', ``be''
