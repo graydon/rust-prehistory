@@ -30,7 +30,7 @@ See the file COPYING for details
 
 @page
 @vskip 0pt plus 1filll
-Copyright @copyright{} 2005-2008 Graydon Hoare
+Copyright @copyright{} 2005-2009 Graydon Hoare
 All rights reserved
 Licensed to the public under the terms of the GNU GPL (>= 3.0).
 See the file COPYING for details
@@ -205,16 +205,16 @@ must be explicitly marked as audited and authorised in the crate file.
 @item Typestate system
 
 Every variable in Rust participates in not only a static type system,
-describing the value held in the slot, but also a @emph{type-state}
-system. The static type-states of a program describe the set of
+describing the value held in the slot, but also a @emph{typestate}
+system. The static typestates of a program describe the set of
 @emph{pure, dynamic predicates} that provably hold over some set of
 slots at, at various points in the program, runtime. The static
-calculation of the type-states of a program is a dataflow problem, and
+calculation of the typestates of a program is a dataflow problem, and
 handles user-defined predicates in a similar fashion to the way the
 type system permits user-defined types.
 
 A short way of thinking of this is: types statically model values held
-in slots, type-states statically model @emph{assertions that hold} at
+in slots, typestates statically model @emph{assertions that hold} at
 statements.
 
 @item Safe control over memory allocation, packing and aliasing.
@@ -242,7 +242,7 @@ heap. Transplanting, when necessary, is predictable and automatic, as
 part of the definition of the assignment operator (=).
 
 In addition, slots have a static initialisation state that is
-calculated by the type-state system. This permits late initialisation
+calculated by the typestate system. This permits late initialisation
 of variables in functions with complex control-flow, while still
 guaranteeing that every use of a slot occurs after it has been
 initialised.
@@ -258,7 +258,7 @@ automatically duplicated, and the now-private copy is written to.
 Having an acyclic ownership graph supports a ``semi-functional'' view
 of values, in which memory structures are mutable, but always
 @emph{effectively private} to the variable ``owning'' them. This
-assumption is required by the type-state system, the communication
+assumption is required by the typestate system, the communication
 system and the slot transplanting system.
 
 @item Structural algebraic data types
@@ -290,8 +290,8 @@ function.
 Rust's module system is based on existential types with local
 opening. It permits higher-order modules, module composition,
 projection and indirection. Modules are both static binding constructs
-and also first class values, but have (mostly) nothing to do with
-compilation units.
+and also first class values, but are (mostly) orthogonal to
+compilation units..
 
 @item Dynamic type
 
@@ -527,7 +527,7 @@ languages such as Smalltalk, C++, Java and Python.
 * Ref.Stmt.IfCheck::            Statement for dynamic testing of typestate.
 
 @c note that ``prove'' is probably un-necessary. If you are going to
-@c *need* to acquire a type-state p(X,Y,Z) in order to verify a
+@c *need* to acquire a typestate p(X,Y,Z) in order to verify a
 @c statement, and it can be acquired purely using static predicates,
 @c surely the typestate system can check the inputs to the static
 @c predicate p(...) and chain backwards into the existing prestate?
@@ -547,6 +547,342 @@ languages such as Smalltalk, C++, Java and Python.
 
 @node    Reference
 @chapter Reference
+
+@c * Ref.Comp::                    Compilation and component model.
+@c * Ref.Comp.Crate::              Units of compilation, versioning, distribution and loading.
+@c * Ref.Comp.Meta.Syntax::        Simple metaprogramming through syntax extension.
+@c * Ref.Comp.Meta.General::       General-purpose staged compilation.
+
+@node    Ref.Mem
+@section Ref.Mem
+@c * Ref.Mem::                     Semantic model of memory.
+
+A Rust program's memory consists of a static set of @emph{items}, a
+set of processes each with its own @emph{stack}, and a @emph{heap}
+shared by all processes.
+
+Allocations in the stack and the heap consist of @emph{slots}.
+
+@node    Ref.Mem.Alloc
+@section Ref.Mem.Alloc
+@c * Ref.Mem.Alloc::               Memory allocation model.
+
+The @dfn{items} of a program are those functions, modules, types, and
+other artifacts that have their value calculated at compile time and
+stored uniquely in the memory image of the rust process. Items are
+neither dynamically allocated nor freed.
+
+The @dfn{stack} consists of activation frames automatically allocated
+on entry to each function as the program executes. A stack allocation
+is reclaimed when control leaves the frame containing it.
+
+The @dfn{heap} consists of an acyclic reference graph of
+reference-counted, copy-on-write allocations made explicitly by
+memory-allocating statements. A heap allocation lives until the last
+reference to it drops, at which point it is automatically reclaimed.
+
+@node    Ref.Mem.Own
+@section Ref.Mem.Own
+@c * Ref.Mem.Own::                 Memory ownership model.
+
+A process @emph{directly owns} all the dynamic allocations in its
+stack and @emph{lazily owns} all the dynamic allocations in the heap
+reachable through references originating in its stack. A process does
+not own any items.
+
+@dfn{Direct ownership} of an allocation means that the owning process
+is the only process that can access the allocation.
+
+@dfn{Lazy ownership} of an allocation means that the owning process
+is the only process that can @emph{observe its own modifications} to the
+allocation.
+
+When a process dies, its directly owned (stack) allocations are all
+released, and its references to lazily owned (heap) allocations are
+dropped, decrementing their reference counts.
+
+@node    Ref.Mem.Slot
+@section Ref.Mem.Slot
+@c * Ref.Mem.Slot::                Memory containment and reference model.
+
+A @dfn{slot} is a component of an allocation. A slot either holds a
+value or the address of another allocation. Every slot has one of four
+possible @emph{modes}.
+
+The possible @dfn{modes} of a slot are:
+@itemize
+@item interior mode
+The slot holds the value of the slot.
+
+@item exterior mode
+The slot holds the address of a reference-counted, copy-on-write heap
+allocation that holds the value of the slot.
+
+@item write-alias mode
+The slot holds the address of a value. The referenced value may reside
+within a stack allocation or a heap allocation. If the referenced
+value resides within a heap allocation, the heap allocation is
+necessarily unshared: it has reference count equal to 1.
+
+@item read-alias mode
+The meaning of the slot is the same as if it were in write-alias mode,
+but the value can only be read from the slot, not written to.
+@end itemize
+
+A slot may be either initialised or un-initialised. The typestate
+system ensures that an un-initialised slot cannot be read, but can be
+written to. A slot becomes initialised in any statement that writes to
+it, and remains initialised until explicitly destroyed or until its
+enclosing allocation is destroyed.
+
+
+@c * Ref.Proc::                    Semantic model of processes.
+@c * Ref.Proc.Comm::               Inter-process communication.
+@c * Ref.Proc.Life::               Process lifecycle and state transitions.
+@c * Ref.Proc.Sched::              Process scheduling model.
+
+@c * Ref.Run::                     Organization of runtime services.
+@c * Ref.Run.Mem::                 Runtime memory management service.
+@c * Ref.Run.Comp::                Runtime dynamic compilation service.
+@c * Ref.Run.Load::                Runtime component loading service.
+@c * Ref.Run.Comm::                Runtime communication multiplexing service.
+@c * Ref.Run.Refl::                Runtime reflection system.
+@c * Ref.Run.Fault::               Runtime fault handler.
+
+
+@node    Ref.Stmt.Be
+@section Ref.Stmt.Be
+@c * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
+
+Executing a @code{be} statement destroys the current function
+activation frame and replaces it with an activation frame for the
+called function. In other words, @code{be} executes a tail-call.
+
+A @code{be} statement in Rust is analogous to a @code{become}
+statement in the Newsqueak language.
+
+An example of a @code{be} statement:
+@example
+fn print_loop(int n) -> nil {
+  if (n <= 0) {
+    ret;
+  } else {
+    print_int(n);
+    be print_loop(n-1);
+  }
+}
+@end example
+
+The above example executes in constant space, replacing each frame
+with a new copy of itself.
+
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.Ret::                Statement for stopping and producing a value.
+
+Executing a @code{ret} statement copies a value into the return slot
+of the current function, destroys the current function activation
+frame, and transfers control to the caller frame.
+
+A @code{ret} statement in Rust is analogous to a @code{return}
+statement in many C-family languages.
+
+An example of a @code{ret} statement:
+@example
+fn max(int a, int b) -> int {
+   if (a > b) {
+      ret a;
+   }
+   ret b;
+}
+@end example
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.Put::                Statement for pausing and producing a value.
+
+Executing a @code{put} statement copies a value into the put slot of
+the current iterator function, suspends execution of the current
+iterator function, and transfers control to the current put-recipient
+frame. The current put-recipient will eventually resume the suspended
+iterator function containing the @code{put} statement, either
+continuing execution after the @code{put} statement, or terminating
+its execution and destroying the iterator function frame.
+
+A @code{put} statement is analogous to a @code{yield} statement in the
+CLU language, or in more recent languages providing a ``generator''
+facility, such as Python, Javascript or C#. Like the generators of
+CLU, and unlike these later languages, Rust's iterator functions
+reside on the stack and obey a strict stack discipline.
+
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.Fail::               Statement for nonlocal control transfer during failure.
+
+Executing a @code{fail} statement initiates exception handling.
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
+
+Executing a @code{log} statement may, depending on system
+configuration, cause a value to be appended to an internal diagnostic
+logging buffer provided by the Rust runtime. Log statements are
+enabled or disabled dynamically at runtime on a per-process,
+per-module and per-function basis.
+
+Appending to the logging buffer is not considered a ``side effect''
+for the purposes of differentiating pure and impure functions. In
+other words, a pure function remains pure even if it contains a log
+statement.
+
+@example
+@end example
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.While::              Statement for simple conditional looping.
+
+A @code{while} statement is a loop construct. The loop begins with an
+evaluation of the boolean loop-head expression. If the loop-head
+expression evaluates to @code{true}, the loop-body block executes and
+control returns to the loop-head expression. If the loop-head
+expression evaluates to @code{false}, the @code{while} statement
+completes.
+
+An example of a @code{while} statement:
+@example
+while (i < 10) {
+  print("hello\n");
+  i = i + 1;
+}
+@end example
+
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.For::                Statement for complex conditional looping.
+
+A @code{for} statement is a loop construct. There are two types of
+@code{for} statement: range for-loops and iterator for-loops.
+
+A @emph{range} for-loop is controlled by a range tuple, either a
+2-tuple or a 3-tuple describing a bounded arithmetic sequence of
+indices to be selected from a vector or string. The range for-loop
+bounds-checks the sequence @emph{once} when initiating the loop, then
+repeatedly assigns the index variable and/or element variable of the
+loop each value in the sequence (and/or its selected element),
+executing the loop body once per assignment.
+
+@example
+let vec[foo] v = vec(a, b, c);
+for (~foo e = v.(0, vec.len(v))) {
+  bar(e);
+}
+@end example
+
+An @emph{iterator} for-loop is controlled by an iterator function. The
+for loop executes once for each value @code{put} by the iterator
+function.  When the iterator function returns or fails, the loop
+terminates.
+
+@example
+str txt;
+vec[str] lines;
+for (~str s = str.split(txt, "\n")) {
+  vec.push(lines, s);
+}
+@end example
+
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.If::                 Statement for simple conditional branching.
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.Alt::                Statement for complex conditional branching.
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.Prove::              Statement for static assertion of typestate.
+
+A @code{prove} statement has no runtime effect. Its purpose is to
+check, statically, that its argument typestate holds at its statement
+entry point. If its argument typestate does not hold, under the
+typestate algorithm, the program containing it will fail to compile.
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.Check::              Statement for dynamic assertion of typestate.
+
+A @code{check} statement connects dynamic assertions made at runtime
+to the static typestate system. A @code{check} statement takes a
+condition to check at runtime. If the condition holds at runtime,
+control passes through the @code{check} and on to the next statement
+in the enclosing block. If the condition fails to hold at runtime, the
+@code{check} statement behaves as a @code{fail} statement, raising an
+exception.
+
+The typestate algorithm is built around @code{check} statements, and
+in particular the fact that control @emph{will not pass} a check
+statement with a condition that fails to hold. The typestate algorithm
+can therefore assume that the (static) postcondition of a @code{check}
+statement includes the checked condition itself. From there, the
+typestate algorithm can perform dataflow calculations on subsequent
+statements, propagating conditions forward and statically comparing
+implied states and their specifications.
+
+@example
+pred even(~int x) {
+    ret x & 1 == 0;
+}
+
+fn print_even(int x) : even(x) -> () {
+    print(x);
+}
+
+fn test() {
+    let int y = 8;
+
+    // Could not call print_even(y) here.
+
+    check even(y);
+
+    // can call print_even(y) here, since even(y) now holds.
+    print_even(y);
+}
+@end example
+
+@node    Ref.Stmt.
+@section Ref.Stmt.
+@c * Ref.Stmt.IfCheck::            Statement for dynamic testing of typestate.
+
+An @code{if check} statement combines a @code{if} statement and a
+@code{check} statement in a unique pair that can be used to build more
+complex conditional control flow than the @code{check} statement
+affords.
+
+In fact, @code{if check} is a ``more primitive'' statement
+@code{check}; instances of the latter can be rewritten as instances of
+the former. The following two examples are equivalent:
+
+@example
+check even(x);
+print_even(x);
+@end example
+
+@example
+if check(even(x)) {
+    print_even(x);
+} else {
+    fail;
+}
+@end example
+
+A @code
 
 @node    Ref.Type
 @section Ref.Type
@@ -664,7 +1000,7 @@ let int px = p.x;
 @node    Ref.Type.Tup
 @section Ref.Type.Tup
 
-The tuple type-constructor is a parenthesized, comma-separated list of
+The tuple type-constructor is a parenthesised, comma-separated list of
 two or more slots. It exactly mirrors the tuple value-constructor,
 itself a comma-separated list of two or more values.
 
