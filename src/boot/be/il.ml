@@ -399,6 +399,13 @@ let emit e op dst lhs rhs =
   emit_full e None op dst lhs rhs
 ;;
 
+let badlab = Label (-1);;
+
+let patch_jump (e:emitter) (jmp:int) (targ:int) : unit =
+  e.emit_quads.(jmp)
+  <- { e.emit_quads.(jmp)
+       with quad_lhs = Label targ }
+;;
 
 (*
  * Local Variables:

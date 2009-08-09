@@ -14,7 +14,7 @@ let one = imm 1L;;
 let zero = imm 0L;;
 let imm_true = one;;
 let imm_false = zero;;
-let badlab = Il.Label (-1);;
+let badlab = Il.badlab;;
 
 type intent =
     INTENT_init
@@ -62,14 +62,10 @@ let trans_visitor
   let next_vreg _ = Il.next_vreg (emitter()) in
   let mark _ : int = (emitter()).Il.emit_pc in
   let patch_existing (jmp:int) (targ:int) : unit =
-    (emitter()).Il.emit_quads.(jmp)
-    <- { (emitter()).Il.emit_quads.(jmp)
-         with Il.quad_lhs = Il.Label (targ) };
+    Il.patch_jump (emitter()) jmp targ
   in
   let patch (i:int) : unit =
-    (emitter()).Il.emit_quads.(i)
-    <- { (emitter()).Il.emit_quads.(i)
-         with Il.quad_lhs = Il.Label (mark ()) };
+    Il.patch_jump (emitter()) i (mark());
     (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
     emit Il.DEAD Il.Nil Il.Nil Il.Nil
   in
@@ -1473,12 +1469,13 @@ let trans_visitor
   in
 
   let trans_frame_entry (fnid:node_id) : unit =
+    let argsz = 0L in
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
-      abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill_fixup callsz;
+      abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill_fixup callsz;
   in
 
   let trans_frame_exit (fnid:node_id) : unit =

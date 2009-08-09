@@ -89,6 +89,7 @@ type upcall =
   | UPCALL_sched
   | UPCALL_native
   | UPCALL_new_str
+  | UPCALL_grow_proc
 ;;
 
 (* NB: all these numbers must be kept in sync with runtime. *)
@@ -115,6 +116,7 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_sched -> 11L
   | UPCALL_native -> 12L
   | UPCALL_new_str -> 13L
+  | UPCALL_grow_proc -> 14L
 ;;
 
 (* Word offsets for structure fields in rust.h. *)
@@ -145,6 +147,11 @@ let exterior_slot_field_body = 1;;
 let port_field_refcnt = 0;;
 let chan_field_refcnt = 1;;
 
+let stk_field_prev = 0;;
+let stk_field_next = stk_field_prev + 1;;
+let stk_field_valgrind_id = stk_field_next + 1;;
+let stk_field_limit = stk_field_valgrind_id + 1;;
+
 
 (* The "end of the proc" where proc-slots get allocated. *)
 let proc_field_data = proc_field_curr_ticks + 1;;
@@ -167,7 +174,7 @@ type abi =
     abi_str_of_hardreg: (int -> string);
 
     abi_prealloc_quad: (Il.quad -> Il.quad);
-    abi_emit_fn_prologue: (Il.emitter -> int64 -> Common.fixup -> int64 -> unit);
+    abi_emit_fn_prologue: (Il.emitter -> int64 -> int64 -> Common.fixup -> int64 -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_main_prologue: (Il.emitter -> Ast.block -> int64 -> Common.fixup -> int64 -> unit);
 

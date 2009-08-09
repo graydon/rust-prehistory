@@ -145,8 +145,8 @@ via the standard operating-system loader, into other processes, and
 executed cooperatively.
 
 The rust runtime is relatively small and provides some memory
-management, process scheduling, internal communication buffering and
-reflection services, but these are all implemented in a
+management, lightweight process scheduling, internal communication
+buffering and reflection services, but these are all implemented in a
 straightforward and obvious fashion, in standard C, with a low-level
 service provider interface available to embeddings. No research-level
 virtual machine, JIT or garbage collection technology is required.
@@ -172,7 +172,7 @@ Like many @emph{actor} languages, Rust provides an isolation (and
 concurrency) model based on lightweight processes scheduled by the
 language runtime. These processes are inexpensive and @emph{mostly}
 statically secure from one another; bending the rule of process
-isolation is only possible by calling legacy (C) code.
+isolation is only possible by calling external (C) code.
 
 Inter-process communication is single-duplex, based on ports and
 channels. Communication can be buffered or unbuffered: an unbuffered
@@ -205,23 +205,23 @@ must be explicitly marked as audited and authorised in the crate file.
 @item Typestate system
 
 Every variable in Rust participates in not only a static type system,
-describing the value held in the slot, but also a @emph{typestate}
-system. The static typestates of a program describe the set of
-@emph{pure, dynamic predicates} that provably hold over some set of
-slots at, at various points in the program, runtime. The static
-calculation of the typestates of a program is a dataflow problem, and
-handles user-defined predicates in a similar fashion to the way the
-type system permits user-defined types.
+describing the interpretation of memory in the slot, but also a
+@emph{typestate} system. The static typestates of a program describe
+the set of @emph{pure, dynamic predicates} that provably hold over
+some set of slots, at various points in the program's runtime. The
+static calculation of the typestates of a program is a dataflow
+problem, and handles user-defined predicates in a similar fashion to
+the way the type system permits user-defined types.
 
-A short way of thinking of this is: types statically model values held
-in slots, typestates statically model @emph{assertions that hold} at
-statements.
+A short way of thinking of this is: types statically model the kinds
+of values held in slots, typestates statically model @emph{assertions
+that hold} at statements.
 
 @item Safe control over memory allocation, packing and aliasing.
 
-Every variable in Rust is a combination of a type and a mode; this
-combination is called a @emph{slot}. There are 4 kinds of slot mode,
-denoting 4 ways of referring to a value:
+Every variable or field in Rust is a combination of a type and a mode;
+this combination is called a @emph{slot}. There are 4 kinds of slot
+mode, denoting 4 ways of referring to a value:
 
 @itemize
 @item ``interior'' (by value)
@@ -422,7 +422,7 @@ NJ, USA).
 @end itemize
 
 @sp
-Additional influences can be seen from SML, Camlp4, and various
+Additional influences can be seen from the ML family, Camlp4, and various
 ``pre-Object-Orientation'' languages of the 70s (CLU, Ada, Mesa, Alphard,
 Euclid, etc.)
 
@@ -454,7 +454,7 @@ languages such as Smalltalk, C++, Java and Python.
 * Ref.Proc.Life::               Process lifecycle and state transitions.
 * Ref.Proc.Sched::              Process scheduling model.
 
-* Ref.Run::                     Organization of runtime services.
+* Ref.Run::                     Organisation of runtime services.
 * Ref.Run.Mem::                 Runtime memory management service.
 * Ref.Run.Comp::                Runtime dynamic compilation service.
 * Ref.Run.Load::                Runtime component loading service.
@@ -641,7 +641,7 @@ enclosing allocation is destroyed.
 @c * Ref.Proc.Life::               Process lifecycle and state transitions.
 @c * Ref.Proc.Sched::              Process scheduling model.
 
-@c * Ref.Run::                     Organization of runtime services.
+@c * Ref.Run::                     Organisation of runtime services.
 @c * Ref.Run.Mem::                 Runtime memory management service.
 @c * Ref.Run.Comp::                Runtime dynamic compilation service.
 @c * Ref.Run.Load::                Runtime component loading service.

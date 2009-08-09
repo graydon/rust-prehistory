@@ -92,8 +92,7 @@ typedef struct stk_seg {
     struct stk_seg *prev;
     struct stk_seg *next;
     unsigned int valgrind_id;
-    size_t size;
-    size_t live;
+    uintptr_t limit;
     uint8_t data[];
 } stk_seg_t;
 
@@ -134,7 +133,8 @@ typedef enum {
     upcall_code_recv           = 10,
     upcall_code_sched          = 11,
     upcall_code_native         = 12,
-    upcall_code_new_str        = 13
+    upcall_code_new_str        = 13,
+    upcall_code_grow_proc      = 14
 } upcall_t;
 
 /* FIXME: change ptr_vec and circ_buf to use flexible-array element
@@ -495,23 +495,19 @@ circ_buf_shift(rust_rt_t *rt, circ_buf_t *c, void *dst)
 
 /* Stacks */
 
-/*
- * Get around to using linked-lists of size-doubling stacks,
- * eventually.
- */
-static size_t const init_stk_bytes = 65536;
+static size_t const min_stk_bytes = 65536;
 
 static stk_seg_t*
 new_stk(rust_rt_t *rt)
 {
-    size_t sz = sizeof(stk_seg_t) + init_stk_bytes;
+    size_t sz = sizeof(stk_seg_t) + min_stk_bytes;
     stk_seg_t *stk = xalloc(rt, sz);
     logptr(rt, "new stk", (uintptr_t)stk);
     memset(stk, 0, sizeof(stk_seg_t));
-    stk->size = init_stk_bytes;
+    stk->limit = (uintptr_t) &stk->data[min_stk_bytes];
     stk->valgrind_id =
         VALGRIND_STACK_REGISTER(&stk->data[0],
-                                &stk->data[stk->size]);
+                                &stk->data[min_stk_bytes]);
     return stk;
 }
 
@@ -534,6 +530,65 @@ del_stk(rust_rt_t *rt, stk_seg_t *stk)
 /* FIXME: ifdef by platform. */
 size_t const n_callee_saves = 4;
 
+static void
+upcall_grow_proc(rust_proc_t *proc, size_t n_call_bytes, size_t n_frame_bytes)
+{
+    /*
+     *  We have a stack like this:
+     *
+     *  | higher frame  |
+     *  +---------------+ <-- top of call region
+     *  | caller args   |
+     *  | ...           |
+     *  | ABI operands  |   <-- top of fixed-size call region
+     *  | ...           |
+     *  | retpc         |
+     *  | callee save 1 |
+     *  | ...           |
+     *  | callee save N |
+     *  +---------------+ <-- fp, base of call region
+     *  |               |
+     *
+     * And we were hoping to move fp down by n_frame_bytes to allocate
+     * an n_frame_bytes frame for the current function, but we ran out
+     * of stack. So rather than subtract fp, we called into this
+     * function.
+     *
+     * This function's job is:
+     *
+     *  - Check to see if we have an existing stack segment chained on
+     *    the end of the stack chain. If so, check to see that it's
+     *    big enough for K. If not, or if we lack an existing stack
+     *    segment altogether, allocate a new one of size K and chain
+     *    it into the stack segments list for this proc.
+     *
+     *  - Transition to the new segment. This means memcopying the
+     *    call region [fp, fp+n_call_bytes) into the new segment and
+     *    adjusting the process' fp to point to the new base of the
+     *    (transplanted) call region.
+     *
+     *
+     *  K = max(min_stk_bytes, n_call_bytes + n_frame_bytes)
+     *
+     *  n_call_bytes = (arg_sz + abi_frame_base_sz)
+     *
+     *  n_frame_bytes = (new_frame_sz +
+     *                   new_spill_sz +
+     *                   new_call_sz +
+     *                   abi_frame_base_sz +
+     *                   proc_to_c_glue_sz)
+     *
+     *  proc_to_c_glue_sz = abi_frame_base_sz
+     *
+     * Note: there's a lot of stuff in K! You have to reserve enough
+     * space for the new frame, enough space for the transplanted call,
+     * enough space to *make* an outgoing call out of the new frame,
+     * and enough space to perform a proc-to-C glue call to get back to
+     * this function when you find you're out of stack again, mid-call.
+     *
+     */
+}
+
 static rust_proc_t*
 new_proc(rust_rt_t *rt, rust_prog_t *prog)
 {
@@ -549,10 +604,16 @@ new_proc(rust_rt_t *rt, rust_prog_t *prog)
     proc->stk = new_stk(rt);
 
     /*
-      Set sp to last uintptr_t-sized cell of segment
-      then align down to 16 boundary, to be safe-ish?
-    */
-    size_t tos = init_stk_bytes-sizeof(uintptr_t);
+     * Set sp to last uintptr_t-sized cell of segment
+     * then align down to 16 boundary, to be safe-ish for
+     * alignment (?)
+     *
+     * FIXME: actually convey alignment constraint here so
+     * we're not just being conservative. I don't *think*
+     * there are any platforms alive at the moment with
+     * >16 byte alignment constraints, but this is sloppy.
+     */
+    size_t tos = min_stk_bytes-sizeof(uintptr_t);
     proc->sp = (uintptr_t) &proc->stk->data[tos];
     proc->sp &= ~0xf;
 
@@ -567,7 +628,7 @@ new_proc(rust_rt_t *rt, rust_prog_t *prog)
      *      *sp        = NULL = Nth callee-save
      *
      * This is slightly confusing since it looks like we have two copies
-     * of retpc; that's intentional. The notion is that when we first
+     * of retpc; that's intentional. The notion is that when we *first*
      * activate this frame, we'll be entering via the c-to-proc glue,
      * and that will restore the fake callee-saves here and then
      * return-to the "activation" pc. That PC will be the first insn of a
@@ -1205,6 +1266,9 @@ handle_upcall(rust_proc_t *proc)
         *((str_t**)args[0]) = upcall_new_str(proc->rt,
                                              (char const *)args[1],
                                              (size_t)args[2]);
+        break;
+    case upcall_code_grow_proc:
+        upcall_grow_proc(proc, (size_t)args[0], (size_t)args[1]);
         break;
     }
     /* Zero the immediates code slot out so the caller doesn't have to

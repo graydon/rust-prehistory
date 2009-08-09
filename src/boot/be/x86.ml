@@ -239,75 +239,11 @@ let restore_callee_saves (e:Il.emitter) : unit =
     Il.emit e (Il.CPOP word_mem) (r ebp) Il.Nil Il.Nil;
 ;;
 
-let fn_prologue
-    (e:Il.emitter)
-    (framesz:int64)
-    (spill_fixup:fixup)
-    (callsz:int64)
-    : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-  let ssz = Int64.add framesz callsz in
-    save_callee_saves e;
-    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
-    Il.emit e Il.SUB (r esp) (r esp)
-      (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
-;;
-
-let fn_epilogue (e:Il.emitter) : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-    Il.emit e Il.UMOV (r esp) (r ebp) Il.Nil;
-    restore_callee_saves e;
-    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
-;;
-
-let main_prologue
-    (e:Il.emitter)
-    (block:Ast.block)
-    (framesz:int64)
-    (spill_fixup:fixup)
-    (callsz:int64)
-    : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-  let ssz = Int64.add framesz callsz in
-    save_callee_saves e;
-    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
-    Il.emit e Il.SUB (r esp) (r esp)
-      (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
-;;
-
-let objfile_main
-    (e:Il.emitter)
-    ~(main_fixup:fixup)
-    ~(rust_start_fixup:fixup)
-    ~(root_prog_fixup:fixup)
-    ~(c_to_proc_fixup:fixup)
-    ~(indirect_start:bool)
-    : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-    Il.emit_full e (Some main_fixup) Il.DEAD Il.Nil Il.Nil Il.Nil;
-    save_callee_saves e;
-    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS c_to_proc_fixup)) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS root_prog_fixup)) Il.Nil;
-    if indirect_start
-    then
-      begin
-        Il.emit e Il.UMOV (r ecx) (Il.Mem (Il.M32, None, (Asm.M_POS rust_start_fixup))) Il.Nil;
-        Il.emit e Il.CCALL (r eax) (r ecx) Il.Nil;
-      end
-    else
-      Il.emit e Il.CCALL Il.Nil (Il.Pcrel rust_start_fixup) Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r ecx) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r ecx) Il.Nil Il.Nil;
-    Il.emit e Il.UMOV (r esp) (r ebp) Il.Nil;
-    restore_callee_saves e;
-    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
-;;
-
 let word_n reg i =
   Il.Mem (word_mem, Some reg,
           Asm.IMM (Int64.mul (Int64.of_int i) word_sz))
 ;;
+
 
 (*
  * Our arrangement on x86 is this:
@@ -331,6 +267,9 @@ let word_n reg i =
 
 let proc_ptr = word_n (Il.Hreg ebp) 6;;
 let out_ptr = word_n (Il.Hreg ebp) 5;;
+let frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;;
+let implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;;
+let proc_to_c_glue_sz = frame_base_sz;;
 
 let load_proc_word (e:Il.emitter) (i:int) : Il.reg =
   let vr = Il.next_vreg e in
@@ -407,6 +346,125 @@ let emit_upcall
       args;
     emit Il.CCALL (r dst) (Il.Pcrel proc_to_c_fixup) Il.Nil
 ;;
+
+let emit_frame_setup
+    (e:Il.emitter)
+    (argsz:int64)
+    (framesz:int64)
+    (spill_fixup:fixup)
+    (callsz:int64)
+    (proc_to_c_fixup:fixup)
+    : unit =
+  (*
+   *  - save esp to ebp
+   *  - subtract sz from esp
+   *  - load proc->stk->limit
+   *  - compare esp to limit
+   *  - fwd jump if esp < limit
+   *  - emit upcall grow_proc
+   *  - fwd jump target
+   *)
+  let r x = Il.Reg (Il.Hreg x) in
+  let ecx_n = word_n (Il.Hreg ecx) in
+  let emit = Il.emit e in
+  let mov dst src = emit Il.UMOV dst src Il.Nil in
+  let add = Int64.add in
+  let imm x = Il.Imm x in
+
+  let n_call_bytes = Asm.IMM (add argsz frame_base_sz) in
+  let subtrahend = (Asm.ADD ((Asm.IMM (add framesz callsz)),
+                             Asm.M_SZ spill_fixup))
+  in
+  let n_frame_bytes = (Asm.ADD
+                         (subtrahend,
+                          (Asm.IMM (add frame_base_sz proc_to_c_glue_sz))))
+  in
+    save_callee_saves e;
+    mov (r ebp) (r esp);                          (* ebp <- esp              *)
+    emit Il.SUB (r esp) (r esp) (imm subtrahend); (* esp <- esp - subtrahend *)
+    mov (r ecx) proc_ptr;                         (* ecx <- proc             *)
+    mov (r ecx) (ecx_n Abi.proc_field_stk);       (* ecx <- proc->stk        *)
+    mov (r ecx) (ecx_n Abi.stk_field_limit);      (* ecx <- proc->stk->limit *)
+    emit Il.CMP Il.Nil (r esp) (r ecx);
+    let jmp_pc = e.Il.emit_pc in
+      emit Il.JL Il.Nil Il.badlab Il.Nil;
+      emit_upcall
+        e Abi.UPCALL_grow_proc
+        [| (imm n_call_bytes);
+           (imm n_frame_bytes) |]
+        proc_to_c_fixup;
+      Il.patch_jump e e.Il.emit_pc jmp_pc;
+      emit Il.DEAD Il.Nil Il.Nil Il.Nil;
+;;
+
+
+let fn_prologue
+    (e:Il.emitter)
+    (argsz:int64)
+    (framesz:int64)
+    (spill_fixup:fixup)
+    (callsz:int64)
+    : unit =
+  let r x = Il.Reg (Il.Hreg x) in
+  let ssz = Int64.add framesz callsz in
+    save_callee_saves e;
+    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
+    Il.emit e Il.SUB (r esp) (r esp)
+      (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
+;;
+
+let fn_epilogue (e:Il.emitter) : unit =
+  let r x = Il.Reg (Il.Hreg x) in
+    Il.emit e Il.UMOV (r esp) (r ebp) Il.Nil;
+    restore_callee_saves e;
+    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+;;
+
+let main_prologue
+    (e:Il.emitter)
+    (block:Ast.block)
+    (framesz:int64)
+    (spill_fixup:fixup)
+    (callsz:int64)
+    : unit =
+  let r x = Il.Reg (Il.Hreg x) in
+  let ssz = Int64.add framesz callsz in
+    save_callee_saves e;
+    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
+    Il.emit e Il.SUB (r esp) (r esp)
+      (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
+;;
+
+let objfile_main
+    (e:Il.emitter)
+    ~(main_fixup:fixup)
+    ~(rust_start_fixup:fixup)
+    ~(root_prog_fixup:fixup)
+    ~(c_to_proc_fixup:fixup)
+    ~(indirect_start:bool)
+    : unit =
+  let r x = Il.Reg (Il.Hreg x) in
+    Il.emit_full e (Some main_fixup) Il.DEAD Il.Nil Il.Nil Il.Nil;
+    save_callee_saves e;
+    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS c_to_proc_fixup)) Il.Nil;
+    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS root_prog_fixup)) Il.Nil;
+    if indirect_start
+    then
+      begin
+        Il.emit e Il.UMOV (r ecx) (Il.Mem (Il.M32, None, (Asm.M_POS rust_start_fixup))) Il.Nil;
+        Il.emit e Il.CCALL (r eax) (r ecx) Il.Nil;
+      end
+    else
+      Il.emit e Il.CCALL Il.Nil (Il.Pcrel rust_start_fixup) Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r ecx) Il.Nil Il.Nil;
+    Il.emit e (Il.CPOP Il.M32) (r ecx) Il.Nil Il.Nil;
+    Il.emit e Il.UMOV (r esp) (r ebp) Il.Nil;
+    restore_callee_saves e;
+    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+;;
+
+
 
 let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
   (*
@@ -514,8 +572,8 @@ let (abi:Abi.abi) =
     Abi.abi_fp_reg = (Il.Hreg ebp);
     Abi.abi_dwarf_fp_reg = dwarf_ebp;
     Abi.abi_pp_operand = proc_ptr;
-    Abi.abi_frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;
-    Abi.abi_implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;
+    Abi.abi_frame_base_sz = frame_base_sz;
+    Abi.abi_implicit_args_sz = implicit_args_sz;
     Abi.abi_spill_slot = spill_slot;
   }
 
