@@ -69,8 +69,9 @@ type ctxt =
       (* Translation-y stuff. *)
       ctxt_lval_is_in_proc_init: (node_id,unit) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
-      ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_prog_fixups: (node_id,fixup) Hashtbl.t;
+      ctxt_tag_fixups: (node_id,fixup) Hashtbl.t;
+      ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_abi: Abi.abi;
       mutable ctxt_data_items: Asm.item list;
@@ -117,8 +118,9 @@ let new_ctxt sess abi crate =
 
     ctxt_lval_is_in_proc_init = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
-    ctxt_file_fixups = Hashtbl.create 0;
     ctxt_prog_fixups = Hashtbl.create 0;
+    ctxt_tag_fixups = Hashtbl.create 0;
+    ctxt_file_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
     ctxt_abi = abi;
     ctxt_data_items = [];
@@ -205,6 +207,12 @@ let get_prog_fixup (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_prog_fixups id
   then Hashtbl.find cx.ctxt_prog_fixups id
   else err (Some id) "Prog without fixup"
+;;
+
+let get_tag_fixup (cx:ctxt) (id:node_id) : fixup =
+  if Hashtbl.mem cx.ctxt_tag_fixups id
+  then Hashtbl.find cx.ctxt_tag_fixups id
+  else err (Some id) "Tag without fixup"
 ;;
 
 let get_framesz (cx:ctxt) (id:node_id) : int64 =

@@ -232,7 +232,11 @@ mode, denoting 4 ways of referring to a value:
 
 Interior slots declared as variables in a function are allocated very
 quickly on the stack, as part of a local activation frame, as in C or
-C++.
+C++. Read-alias slots permit efficient by-reference parameter passing
+without adjusting heap reference counts, as alias lifetimes outlive
+callee lifetimes. Write-alias slots additionally permit controlled
+mutation of a parameter by a callee, effectively providing ``out
+parameters''.
 
 Copying data between slots of different modes may cause either a
 simple address assignment or reference-count adjustment, or may cause
@@ -319,13 +323,17 @@ the bracketed ``extension text''.
 @item Exception and termination handling
 
 Processes can fail at any time, due to internal or external sources of
-error. A failure generates an exception of type @code{any} that, if
-not explicitly handled, propagages to the enclosing process' top level
-and terminates the process. Process termination due to an unhandled
-exception, in turn, causes the Rust runtime to notify any
-@emph{linked} process via a registered channel. This mechanism can be
-used to independently arrange supervision and failure-recovery modes
-for groups of related processes.
+error. A failure generates an exception value of type @code{any} that
+causes a process to unwind its control stack, propagating the
+exception outward from the failing frame until a handler is
+located. If an exception propagates to a top level frame in a process,
+the process will terminate.
+
+Process termination due to an unhandled exception, in turn, causes the
+Rust runtime to notify any @emph{linked} process via a registered
+channel. This mechanism can be used to independently arrange
+supervision and failure-recovery modes for groups of related
+processes.
 
 @item Deterministic destruction
 
@@ -334,8 +342,8 @@ bottom-up ownership order, when a process is terminated.
 
 Similarly, the rules for releasing memory are deterministic: on
 scope-exit, interior slots are released immediately, exterior slots
-have their reference count decreased and are released if it drops to
-zero, and alias slots are not owned, so not affected.
+have their reference count decreased and are released if the count
+drops to zero. Alias slots are not affected by scope exit.
 
 @end itemize
 
@@ -448,6 +456,7 @@ languages such as Smalltalk, C++, Java and Python.
 * Ref.Mem.Alloc::               Memory allocation model.
 * Ref.Mem.Own::                 Memory ownership model.
 * Ref.Mem.Slot::                Memory containment and reference model.
+* Ref.Mem.Init::                Initialisation state of memory.
 
 * Ref.Proc::                    Semantic model of processes.
 * Ref.Proc.Comm::               Inter-process communication.
@@ -477,12 +486,17 @@ languages such as Smalltalk, C++, Java and Python.
 * Ref.Type.Chan::               Copyable inter-process message-sending capabilities.
 * Ref.Type.Proc::               General coroutine-instance types.
 * Ref.Type.Prog::               General coroutine-description types.
-* Ref.Type.Mod::                Units of information hiding.
+* Ref.Type.Mod::                Collections of items.
 * Ref.Type.Type::               Types describing types.
 * Ref.Type.Quote::              Types describing source code.
 
-* Ref.Stat::                    Static structure of programs.
-* Ref.Stat.Pred::               Static predicates covering dynamic judgments.
+* Ref.Stat::                    Static structure of modules.
+* Ref.Stat.Item::               The contents of a module.
+* Ref.Stat.Item.Type::          Items defining the types of values and slots.
+* Ref.Stat.Item.Fn::            Items defining functions.
+* Ref.Stat.Item.Pred::          Items defining typestate predicates.
+* Ref.Stat.Item.Mod::           Items defining sub-modules.
+* Ref.Stat.Item.Prog::          Items defining programs.
 * Ref.Stat.Slot::               Components of structures and control frames.
 * Ref.Stat.Slot.Constr::        A set of predicates holding over a set of slots.
 * Ref.Stat.Slot.Type::          Static types of slots.
@@ -629,16 +643,92 @@ The meaning of the slot is the same as if it were in write-alias mode,
 but the value can only be read from the slot, not written to.
 @end itemize
 
-A slot may be either initialised or un-initialised. The typestate
-system ensures that an un-initialised slot cannot be read, but can be
-written to. A slot becomes initialised in any statement that writes to
-it, and remains initialised until explicitly destroyed or until its
-enclosing allocation is destroyed.
+@node    Ref.Mem.Init
+@section Ref.Mem.Init
+@c * Ref.Mem.Init::                Initialisation state of memory.
+
+A slot is either initialised or uninitialised at every point in a
+program. An @dfn{initialised} slot is one that holds a value. An
+@dfn{uninitialised} slot is one that has not yet had a value copied
+into it, or has had its value deleted, and so holds undefined
+memory. The typestate system ensures that an uninitialised slot cannot
+be read, but can be written to. A slot becomes initialised in any
+statement that writes to it, and remains initialised until explicitly
+destroyed or until its enclosing allocation is destroyed.
 
 
+@node    Ref.Proc
+@section Ref.Proc
 @c * Ref.Proc::                    Semantic model of processes.
+
+A executing Rust program is called a @dfn{process}. Each Rust process
+has an identity, a stack, a set of outgoing communication channels and
+incoming communication ports, and lazy ownership of some portion of
+the heap of a single operating-system process.
+
+Multiple Rust processes may coexist in a single operating-system
+process. Execution of multiple Rust processes in a single
+operating-system process may be either truly concurrent or interleaved
+by the Rust runtime scheduler. Rust processes are lightweight: each
+consumes less memory than an operating-system process, and switching
+between Rust processes is faster than switching between
+operating-system processes.
+
+@node    Ref.Proc.Comm
+@section Ref.Proc.Comm
 @c * Ref.Proc.Comm::               Inter-process communication.
+
+With the exception of @emph{unsafe} constructs, Rust processes are
+isolated from interfering with one another's memory directly. Instead
+of manipulating shared storage, Rust processes communicate with one
+another using an explicit, typed, asynchronous, half-duplex
+message-passing system.
+
+A @dfn{port} is a communication endpoint that can @emph{receive}
+messages. Ports receive messages from channels.
+
+A @dfn{channel} is a communication endpoint that can @emph{send}
+messages. Channels send messages to ports.
+
+Each port has a unique identity and cannot be replicated. New ports
+can be constructed at any time. Each channel is bound to a port when
+it is constructed, so the destination port for a channel must exist before
+the channel itself. A channels cannot be rebound to a different port than
+the one it was constructed with.
+
+Many channels can be bound to the same port, but each channel is bound
+to a single port. In other words, channels and ports exist in an N:1
+relationship, N channels to 1 port.
+
+Each port and channel can carry only one type of message. The message type
+is encoded as a parameter of the channel or port type. The message type
+of a channel is equal to the message type of the port it is bound to.
+
+Messages are sent asynchronously or semi-synchronously. A channel
+contains a message queue and asynchronously sending a message merely
+inserts it into the channel's queue; message receipt is the
+responsibility of the receiving process.
+
+Queued messages in channels are considered part of the memory budget
+of the sending process. If too many messages are queued for
+transmission from a single sending process, without being received by
+a receiving process, the sending process may exceed its memory budget
+and be terminated. To help control this possibility, a
+semi-synchronous send operation is possible, which performs an
+asynchronous send operation and then blocks execution of the sending
+process until the queue for the channel being sent to
+empties. Semi-synchronous sending does @emph{not} guarantee that a
+message has been @emph{received} when the sending process is
+unblocked; merely that the message @emph{has been sent} and is no
+longer in the queue owned by the sending process.
+
+
+@node    Ref.Proc.Life
+@section Ref.Proc.Life
 @c * Ref.Proc.Life::               Process lifecycle and state transitions.
+
+@node    Ref.Proc.Sched
+@section Ref.Proc.Sched
 @c * Ref.Proc.Sched::              Process scheduling model.
 
 @c * Ref.Run::                     Organisation of runtime services.
@@ -648,6 +738,323 @@ enclosing allocation is destroyed.
 @c * Ref.Run.Comm::                Runtime communication multiplexing service.
 @c * Ref.Run.Refl::                Runtime reflection system.
 @c * Ref.Run.Fault::               Runtime fault handler.
+
+
+@Node    Ref.Type
+@section Ref.Type
+
+Every slot and value in a Rust program has a type. The @dfn{type} of a
+@emph{value} defines the interpretation of the memory holding it. The
+type of a @emph{slot} may also include constraints, @xref{Ref.Constr}.
+
+Some types and type-constructors are @dfn{built-in}, meaning that
+their value constructors are defined in this manual. Other types or
+type-constructors are @dfn{user-defined}, meaning that their value
+constructors depend on portions of user programs.
+
+Built-in types and type-constructors are tightly integrated into the
+language, in nontrivial ways that are not possible to emulate in
+user-defined types. User-defined types have limited capabilities. In
+addition, every built-in type or type-constructor name is reserved as
+a @emph{keyword} in Rust; they cannot be used as user-defined
+identifiers in any context.
+
+
+@node    Ref.Type.Any
+@section Ref.Type.Any
+
+The type @code{any} is the union of all possible Rust types. A value
+of type @code{any} is represented in memory as a pair consisting of an
+exterior value of some non-@code{any} type @var{T} and a reflection
+of the type @var{T}.
+
+Values of type @code{any} can used in an @code{alt type} statement, in
+which the reflection is used to select a block corresponding to a
+particular type extraction. @xref{Ref.Stmt.Alt}.
+
+@node    Ref.Type.Mach
+@section Ref.Type.Mach
+
+The machine types are the following:
+
+@itemize
+@item
+The unsigned two's complement word types @code{u8}, @code{u16},
+@code{u32} and @code{u64}, with values drawn from the integer
+intervals @math{[0,(2^8)-1)]}, @math{[0,(2^16)-1)]},
+@math{[0,(2^32)-1)]} and @math{[0,(2^64)-1)]} respectively.
+@item
+The signed two's complement word types @code{s8}, @code{s16}, @code{s32} and @code{s64},
+with values drawn from the integer
+intervals @math{[-(2^7),(2^7)-1)]}, @math{[-(2^15),(2^15)-1)]},
+@math{[-(2^31),(2^31)-1)]} and @math{[-(2^63),(2^63)-1)]} respectively.
+@item
+The IEEE 754 double-precision floating point type @code{f64}.
+@end itemize
+
+In addition to these types, any symbols consisting of a single
+lowercase letter in the ASCII range @code{a-z} followed by a sequence
+of 1 or more decimal digits is reserved as a future machine type in
+a later version of the Rust language.
+
+
+@node    Ref.Type.Prim
+@section Ref.Type.Prim
+
+The primitive types are the following:
+
+@itemize
+@item
+The type @code{nil}, having the single value @code{nil}.
+@item
+The boolean type @code{bool} with values @code{true} and @code{false}.
+@item
+The machine types.
+@end itemize
+
+@node    Ref.Type.Int
+@section Ref.Type.Int
+
+Unlike many C-family languages, in Rust the type @code{int} is not
+defined as a fixed-size machine word type. Instead, it is an arbitrary
+precision type that fits in a machine word @emph{when possible} and
+transparently expands to a boxed ``big integer'' allocated in the
+runtime heap when it overflows or underflows outside of the range of a
+machine word.
+
+A Rust @code{int} grows to accommodate extra binary digits as they are
+needed, by taking extra memory from the dynamic memory pool available
+to each Rust process, and should only exhaust its range due to memory
+exhaustion.
+
+@node    Ref.Type.Text
+@section Ref.Type.Text
+
+The types @code{char} and @code{str} hold textual data.
+
+A value of type @code{char} is a Unicode character, represented as a
+32-bit unsigned word holding a UCS-4 codepoint.
+
+A value of type @code{str} is a Unicode string, represented as a
+vector of 8-bit unsigned words holding a UTF-8 codepoints.
+
+@node    Ref.Type.Rec
+@section Ref.Type.Rec
+
+The record type-constructor @code{rec} forms new heterogeneous product
+of slots. It is analogous to the @code{struct} type-constructor in
+C. Fields of a @code{rec} type are accessed by name and are arranged
+in memory in the order specified by the @code{rec} type.
+
+An example of a @code{rec} type and its use:
+@example
+type point = rec(int x, int y);
+let point p = rec(x=10, y=11);
+let int px = p.x;
+@end example
+
+@node    Ref.Type.Tup
+@section Ref.Type.Tup
+
+The tuple type-constructor is a parenthesised, comma-separated list of
+two or more slots. It exactly mirrors the tuple value-constructor,
+itself a comma-separated list of two or more values.
+
+Tuples are equivalent to records labeled by ascending integers
+starting from 0: their fields are laid out in memory contiguously, in
+order specified by the tuple type. Tuples can only be indexed by
+static numeric labels enclosed in braces. Tuples can also be
+``destructured'' into named constituents, in various syntactic
+contexts, such as in a tuple initialisation statement or a function
+parameter list.
+
+An example of a tuple type and its use:
+@example
+type pair = (int,str);
+let pair p = (10,"hello");
+check (p.{0} == 10);
+p.{1} = "world";
+let (int x, str s) = p;
+check (s == p.{1} & p.{1} == "world");
+@end example
+
+
+@node    Ref.Type.Vec
+@section Ref.Type.Vec
+
+The vector type-constructor @code{vec} represents a homogeneous,
+variable-size array of slots. Vectors automatically resize to
+accommodate the addition or removal of elements. Elements can be
+accessed by numeric index, but as with records and tuples, all
+accessible elements are always initialised.
+
+And example of a @code{vec} type and its use:
+@example
+let vec[int] v = vec(7, 5, 3);
+let int i = v.(2);
+@end example
+
+@node    Ref.Type.Tag
+@section Ref.Type.Tag
+
+The @code{tag} type-constructor forms new heterogeneous
+disjoint sum types. It is analogous to the @code{data} type-constructor
+in ML. A @code{tag} type consists of a number of @code{variants}, each of
+which is independently named and takes an optional tuple of arguments.
+
+The variants of a @code{tag} type may be recursive: that is, the
+definition of a @code{tag} type may refer to type definitions that
+include the defined @code{tag} type itself. Such recursion can only be
+introduced using @code{tag} type definitions. Every recursive
+@code{tag} type must have at least one non-recursive variant, serving
+as a base case for the recursion.
+
+An example of a @code{tag} type and its use:
+@example
+type animal = tag(dog, cat);
+let animal a = dog;
+a = cat;
+@end example
+
+An example of a @emph{recursive} @code{tag} type and its use:
+@example
+type list[T] = tag[T](empty,
+                      cons(T, @list[T]));
+let list[int] a = cons(7, cons(13, empty));
+@end example
+
+
+@node    Ref.Type.Fn
+@section Ref.Type.Fn
+
+The function type-constructor @code{fn} forms new function types. A
+function type consists of an optional protocol, an input type, an
+output type, and a set of flags indicating special characteristics of
+the function (@code{pure} or @code{lim}).
+
+An example of a simple @code{fn} type:
+@example
+fn add(int x, int y) -> int {
+  ret x + y;
+}
+
+let int x = add(5,7);
+
+type binop = fn(int,int) -> int;
+let binop bo = add;
+x = bo(5,7);
+@end example
+
+
+@node    Ref.Type.Port
+@section Ref.Type.Port
+
+The port type-constructor @code{port} forms types that describe
+ports. A port is the @emph{receiving end} of a single-duplex
+inter-process communication facility. @xref{Ref.Proc.Comm}. A
+@code{port} type takes a single type parameter, denoting the type of
+value that can be received from a @code{port} value of that type.
+
+Ports are @emph{limited}: they cannot be transmitted through channels,
+and can only be passed between processes during process
+initialisation.
+
+An example of a @code{port} type:
+@example
+type port[vec[str]] svp;
+let svp p = get_port();
+let vec[str] v;
+v <- p;
+@end example
+
+@node    Ref.Type.Chan
+@section Ref.Type.Chan
+
+The channel type-constructor @code{chan} forms types that describe
+channels. A channel is the @emph{sending end} of a single-duplex
+inter-process communication facility. @xref{Ref.Proc.Comm}. A
+@code{chan} type takes a single type parameter, denoting the type of
+value that can be sent to a channel of that type.
+
+Channels are general @emph{unlimited} values: they can be transmitted
+between processes through channels. They are also @emph{weak}: a
+channel is directly coupled to a particular destination port, but does
+not keep that port @emph{alive}, and may therefore fail to operate at
+any moment.
+
+An example of a @code{chan} type:
+@example
+type chan[vec[str]] svc;
+let svc c = get_chan();
+let vec[str] v = vec("hello", "world");
+c <| v;
+@end example
+
+@node    Ref.Type.Proc
+@section Ref.Type.Proc
+
+The process type @code{proc} describes values that are @emph{live
+processes}.  Process values are opaque and @emph{limited}: they cannot
+be directly inspected and they cannot be passed between processes,
+over channels.
+
+Processes form an @emph{ownership tree} in which each process (except
+the root process) is directly owned by exactly one parent process. The
+purpose of a variable of @code{proc} type is to manage the lifecycle
+of the associated process. Communication is carried out solely using
+channels and ports.
+
+
+@node    Ref.Type.Prog
+@section Ref.Type.Prog
+
+The program type-constructor @code{prog} forms new program types. A
+program type consists of a signature, similar to a function type with
+no protocol, describing the inputs and outputs of the initialisation
+routine for programs of that type.
+
+When a program is called in a @emph{spawn expression}, the Rust
+runtime creates a new process, then the spawning process runs the
+program initialisation routine in the scope of the new process. The
+value produced by the expression, in the spawning process, is a
+2-tuple consisting of the new process value and the value returned
+from the program initialisation routine. The spawned process then
+begins running.
+
+An example of a @code{prog} type:
+@example
+type stdio = rec(port[u8] stdin,
+                 chan[u8] stdout,
+                 chan[u8] stderr);
+prog byte_copy {
+     let stdio io;
+     init (chan[u8] out, chan[u8] err) -> chan {
+          io.stdin = port();
+          io.stdout = out;
+          io.stderr = err;
+          ret chan(io.stdin);
+     }
+     main {
+       u8 tmp;
+       while (tmp <- io.in) {
+             io.out <| tmp;
+       }
+     }
+}
+
+type stdio_prog = proc(chan[u8], chan[u8]) -> chan;
+
+let stdio_prog cat = byte_copy;
+let port[u8] out = port();
+let port[u8] err = port();
+
+let (proc p, chan[u8] in) = spawn cat(chan(out), chan(err));
+@end example
+
+
+@c * Ref.Type.Mod::                Units of information hiding.
+@c * Ref.Type.Type::               Types describing types.
+@c * Ref.Type.Quote::              Types describing source code.
 
 
 @node    Ref.Stmt.Be
@@ -856,8 +1263,8 @@ fn test() {
 }
 @end example
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.IfCheck
+@section Ref.Stmt.IfCheck
 @c * Ref.Stmt.IfCheck::            Statement for dynamic testing of typestate.
 
 An @code{if check} statement combines a @code{if} statement and a
@@ -882,208 +1289,63 @@ if check(even(x)) {
 }
 @end example
 
-A @code
+@node    Ref.Stat
+@section Ref.Stat
+@c * Ref.Stat::                    Static structure of modules.
 
-@node    Ref.Type
-@section Ref.Type
+A Rust module contains declarations of @emph{items}. Items may include
+functions, or sub-modules, or type and typestate declarations used
+during the static analysis phase of compilation.
 
-Every slot and value in a Rust program has a type. The @dfn{type} of a
-@emph{value} defines the interpretation of the memory holding it. The
-type of a @emph{slot} may also include constraints, @xref{Ref.Constr}.
+The static structure of a module is analysed during compilation to
+ensure a variety of rules are obeyed, as well as to determine the
+static information required to produce the compiled form of the
+module. The static rules include those defining slot visibility and
+value ownership, type inference and checking, and typestate inference
+and checking.
 
-Some types and type-constructors are @dfn{built-in}, meaning that
-their value constructors are defined in this manual. Other types or
-type-constructors are @dfn{user-defined}, meaning that their value
-constructors depend on portions of user programs.
+@node    Ref.Stat.Item
+@section Ref.Stat.Item
+@c * Ref.Stat.Item::               The contents of a module.
 
-Built-in types and type-constructors are tightly integrated into the
-language, in nontrivial ways that are not possible to emulate in
-user-defined types. User-defined types have limited capabilities. In
-addition, every built-in type or type-constructor name is reserved as
-a @emph{keyword} in Rust; they cannot be used as user-defined
-identifiers in any context.
+An @dfn{item} is a component of a module. Items are entirely
+determined at compile time, remain constant during execution, and may
+reside in read-only memory.
 
+There are 5 primary kinds of item: types, functions, predicates,
+modules, and programs.
 
-@node    Ref.Type.Any
-@section Ref.Type.Any
+@node    Ref.Stat.Item.Type
+@section Ref.Stat.Item.Type
+@c * Ref.Stat.Item.Type::          Items defining the types of values and slots.
 
-The type @code{any} is the union of all possible Rust types. A value
-of type @code{any} is represented in memory as a pair consisting of an
-exterior value of some non-@code{any} type @var{T} and a reflection
-of the type @var{T}.
-
-Values of type @code{any} can used in an @code{alt type} statement, in
-which the reflection is used to select a block corresponding to a
-particular type extraction. @xref{Ref.Stmt.Alt}.
-
-@node    Ref.Type.Mach
-@section Ref.Type.Mach
-
-The machine types are the following:
+A @dfn{type} defines an @emph{interpretation} of a value in memory. A
+type's interpretation is used for the values held in any slot with
+that type. The interpretation of a value includes:
 
 @itemize
-@item
-The unsigned two's complement word types @code{u8}, @code{u16},
-@code{u32} and @code{u64}, with values drawn from the integer
-intervals @math{[0,(2^8)-1)]}, @math{[0,(2^16)-1)]},
-@math{[0,(2^32)-1)]} and @math{[0,(2^64)-1)]} respectively.
-@item
-The signed two's complement word types @code{s8}, @code{s16}, @code{s32} and @code{s64},
-with values drawn from the integer
-intervals @math{[-(2^7),(2^7)-1)]}, @math{[-(2^15),(2^15)-1)]},
-@math{[-(2^31),(2^31)-1)]} and @math{[-(2^63),(2^63)-1)]} respectively.
-@item
-The IEEE 754 double-precision floating point type @code{f64}.
+@item Whether the value represents a memory address or not
+@item Whether the value represents textual or numerical information
+@item Whether the value represents integral or floating-point information
+@item The sequence of memory operations required to access the value
 @end itemize
 
-In addition to these types, any symbols consisting of a single
-lowercase letter in the ASCII range @code{a-z} followed by a sequence
-of 1 or more decimal digits is reserved as a future machine type in
-a later version of the Rust language.
+For example, the type @code{u8} defines the interpretation of values
+that are unsigned two's complement immediate integers.
 
+@node    Ref.Stat.Item.Fn
+@section Ref.Stat.Item.Fn
+@c * Ref.Stat.Item.Fn::            Items defining functions.
 
-@node    Ref.Type.Prim
-@section Ref.Type.Prim
+A @dfn{function} defines a sequence of statements. Functions are
+declared with the keyword @code{fn}.
 
-The primitive types are the following:
-
-@itemize
-@item
-The type @code{nil}, having the single value @code{nil}.
-@item
-The boolean type @code{bool} with values @code{true} and @code{false}.
-@item
-The machine types.
-@end itemize
-
-@node    Ref.Type.Int
-@section Ref.Type.Int
-
-Unlike many C-family languages, in Rust the type @code{int} is not
-defined as a fixed-size machine word type. Instead, it is an arbitrary
-precision type that fits in a machine word @emph{when possible} and
-transparently expands to a boxed ``big integer'' allocated in the
-runtime heap when it overflows or underflows outside of the range of a
-machine word.
-
-A Rust @code{int} grows to accommodate extra binary digits as they are
-needed, by taking extra memory from the dynamic memory pool available
-to each Rust process, and should only exhaust its range due to memory
-exhaustion.
-
-@node    Ref.Type.Text
-@section Ref.Type.Text
-
-The types @code{char} and @code{str} hold textual data.
-
-A value of type @code{char} is a Unicode character, represented as a
-32-bit unsigned word holding a UCS-4 codepoint.
-
-A value of type @code{str} is a Unicode string, represented as a
-vector of 8-bit unsigned words holding a UTF-8 codepoints.
-
-@node    Ref.Type.Rec
-@section Ref.Type.Rec
-
-The record type-constructor @code{rec} forms new heterogeneous product
-of slots. It is analogous to the @code{struct} type-constructor in
-C. Fields of a @code{rec} type are accessed by name and are arranged
-in memory in the order specified by the @code{rec} type.
-
-An example of a @code{rec} type and its use:
-@example
-type point = rec(int x, int y);
-let point p = rec(x=10, y=11);
-let int px = p.x;
-@end example
-
-@node    Ref.Type.Tup
-@section Ref.Type.Tup
-
-The tuple type-constructor is a parenthesised, comma-separated list of
-two or more slots. It exactly mirrors the tuple value-constructor,
-itself a comma-separated list of two or more values.
-
-Tuples are equivalent to records labeled by ascending integers
-starting from 0: their fields are laid out in memory contiguously, in
-order specified by the tuple type. Tuples can only be indexed by
-static numeric labels enclosed in braces. Tuples can also be
-``destructured'' into named constituents, in various syntactic
-contexts, such as in a tuple initialisation statement or a function
-parameter list.
-
-An example of a tuple type and its use:
-@example
-type pair = (int,str);
-let pair p = (10,"hello");
-check (p.{0} == 10);
-p.{1} = "world";
-let (int x, str s) = p;
-check (s == p.{1} & p.{1} == "world");
-@end example
-
-
-@node    Ref.Type.Vec
-@section Ref.Type.Vec
-
-The vector type-constructor @code{vec} represents a homogeneous,
-variable-size array of slots. Vectors automatically resize to
-accommodate the addition or removal of elements. Elements can be
-accessed by numeric index, but as with records and tuples, all
-accessible elements are always initialised.
-
-And example of a @code{vec} type and its use:
-@example
-let vec[int] v = vec(7, 5, 3);
-let int i = v.(2);
-@end example
-
-@node    Ref.Type.Tag
-@section Ref.Type.Tag
-
-The @code{tag} type-constructor forms new heterogeneous
-disjoint sum types. It is analogous to the @code{data} type-constructor
-in ML. A @code{tag} type consists of a number of @code{variants}, each of
-which is independently named and takes an optional tuple of arguments.
-
-The variants of a @code{tag} type may be recursive: that is, the
-definition of a @code{tag} type may refer to type definitions that
-include the defined @code{tag} type itself. Such recursion can only be
-introduced using @code{tag} type definitions. Every recursive
-@code{tag} type must have at least one non-recursive variant, serving
-as a base case for the recursion.
-
-An example of a @code{tag} type and its use:
-@example
-type animal = tag(dog, cat);
-let animal a = dog;
-a = cat;
-@end example
-
-An example of a @emph{recursive} @code{tag} type and its use:
-@example
-type list[T] = tag[T](empty,
-                      cons(T, @list[T]));
-let list[int] a = cons(7, cons(13, empty));
-@end example
-
-
-@node    Ref.Type.Fn
-@section Ref.Type.Fn
-
-The function type-constructor @code{fn} forms new function types. A
-function type consists of an optional protocol, an input type, an
-output type, and a set of flags indicating special characteristics of
-the function.
-
-If a function type has no protocol, it describes functions that only
-return a value, and do not put any value. @xref{Ref.Stmt.Put}.
-
-If a function type has a protocol, it describes functions that put
-some number of values before returning. The protocol describes the
-@emph{number} of values that the function will put during its
-execution. Protocols are indicated by a variant of the @code{fn}
-keyword, as follows:
+There are two primary kinds of functions: plain functions and iterator
+functions. Iterator functions are those that are said to have a
+@emph{protocol}. A protocol defines how many values (in a
+``zero-one-infinity'' counting sense) the iterator function will
+@code{put} before it executes a @code{ret} statement. Protocols are
+indicated by a variant of the @code{fn} keyword, as follows:
 
 @itemize
 @item
@@ -1097,27 +1359,21 @@ keyword, as follows:
 @end itemize
 
 If a function has a protocol, the output type is the type of value
-that the function will put. If a function has no protocol, the output
-type is the type of value the function will return.
+that the function will @code{put}. If a function has no protocol, the
+output type is the type of value the function will @code{ret}.
 
-An example of a simple @code{fn} type:
+An example of a plain @code{fn} (with no protocol):
 @example
 fn add(int x, int y) -> int {
   ret x + y;
 }
-
-let int x = add(5,7);
-
-type binop = fn(int,int) -> int;
-let binop bo = add;
-x = bo(5,7);
 @end example
 
 A function with a protocol can only be called in the loop header of a
-matching @code{for} loop, for example a @code{fn+} function can only
+matching @code{for} loop. For example a @code{fn+} function can only
 be called from a @code{for+} loop header.
 
-An example of a @code{fn} type with a protocol:
+An example of a @code{fn} with a protocol:
 @example
 fn* range(int lo, int hi) -> int {
   let int i = lo;
@@ -1133,116 +1389,36 @@ for* (int x = range(0,100)) {
 }
 @end example
 
-
-@node    Ref.Type.Port
-@section Ref.Type.Port
-
-The port type-constructor @code{port} forms types that describe
-ports. A port is the @emph{receiving end} of a single-duplex
-inter-process communication facility. @xref{Ref.Proc.Comm}. A
-@code{port} type takes a single type parameter, denoting the type of
-value that can be received from a @code{port} value of that type.
-
-Ports are @emph{limited}: they cannot be transmitted through channels,
-and can only be passed between processes during process
-initialisation.
-
-An example of a @code{port} type:
-@example
-type port[vec[str]] svp;
-let svp p = get_port();
-let vec[str] v;
-v <- p;
-@end example
-
-@node    Ref.Type.Chan
-@section Ref.Type.Chan
-
-The channel type-constructor @code{chan} forms types that describe
-channels. A channel is the @emph{sending end} of a single-duplex
-inter-process communication facility. @xref{Ref.Proc.Comm}. A
-@code{chan} type takes a single type parameter, denoting the type of
-value that can be sent to a channel of that type.
-
-Channels are general @emph{unlimited} values: they can be transmitted
-between processes through channels. They are also @emph{weak}: a
-channel is directly coupled to a particular destination port, but does
-not keep that port @emph{alive}, and may therefore fail to operate at
-any moment.
-
-An example of a @code{chan} type:
-@example
-type chan[vec[str]] svc;
-let svc c = get_chan();
-let vec[str] v = vec("hello", "world");
-c <| v;
-@end example
-
-@node    Ref.Type.Proc
-@section Ref.Type.Proc
-
-The process type @code{proc} describes values that are @emph{live
-processes}.  Process values are opaque and @emph{limited}: they cannot
-be directly inspected and they cannot be passed between processes,
-over channels.
-
-Processes form an @emph{ownership tree} in which each process (except
-the root process) is directly owned by exactly one parent process. The
-purpose of a variable of @code{proc} type is to manage the lifecycle
-of the associated process. Communication is carried out solely using
-channels and ports.
+A function type may be @emph{pure} or @emph{impure}, depending on the
+presence or absence of the keyword prefix @code{pure}. If pure, the
+function type describes those functions that have no side effects. If
+impure, the function type describes both functions with and without
+side effects. @xref{Ref.Stat.Item.Fn}.
 
 
-@node    Ref.Type.Prog
-@section Ref.Type.Prog
+@node    Ref.Stat.Item.Pred
+@section Ref.Stat.Item.Pred
+@c * Ref.Stat.Item.Pred::          Items defining typestate predicates.
 
-The program type-constructor @code{prog} forms new program types. A
-program type consists of a signature, similar to a function type with
-no protocol, describing the inputs and outputs of the initialisation
-routine for programs of that type.
+@node    Ref.Stat.Item.Mod
+@section Ref.Stat.Item.Mod
+@c * Ref.Stat.Item.Mod::           Items defining sub-modules.
 
-When a program is called in a @emph{spawn expression}, the Rust
-runtime creates a new process, then the spawning process runs the
-program initialisation routine in the scope of the new process. The
-value produced by the expression, in the spawning process, is a
-2-tuple consisting of the new process value and the value returned
-from the program initialisation routine. The spawned process then
-begins running.
+@node    Ref.Stat.Item.Prog
+@section Ref.Stat.Item.Prog
+@c * Ref.Stat.Item.Prog::          Items defining programs.
 
-An example of a @code{prog} type:
-@example
-type stdio = rec(port[u8] stdin,
-                 chan[u8] stdout,
-                 chan[u8] stderr);
-prog byte_copy {
-     let stdio io;
-     init (chan[u8] out, chan[u8] err) -> chan {
-          io.stdin = port();
-          io.stdout = out;
-          io.stderr = err;
-          ret chan(io.stdin);
-     }
-     main {
-       u8 tmp;
-       while (tmp <- io.in) {
-             io.out <| tmp;
-       }
-     }
-}
-
-type stdio_prog = proc(chan[u8], chan[u8]) -> chan;
-
-let stdio_prog cat = byte_copy;
-let port[u8] out = port();
-let port[u8] err = port();
-
-let (proc p, chan[u8] in) = spawn cat(chan(out), chan(err));
-@end example
-
-
-@c * Ref.Type.Mod::                Units of information hiding.
-@c * Ref.Type.Type::               Types describing types.
-@c * Ref.Type.Quote::              Types describing source code.
+@c * Ref.Stat.Slot::               Components of structures and control frames.
+@c * Ref.Stat.Slot.Constr::        A set of predicates holding over a set of slots.
+@c * Ref.Stat.Slot.Type::          Static types of slots.
+@c * Ref.Stat.Slot.Type.Form::     Interpretation of a slot's memory.
+@c * Ref.Stat.Slot.Type.Constr::   Constraints implied by a slot's type.
+@c * Ref.Stat.Stmt::               Program execution as sequences of statements.
+@c * Ref.Stat.Stmt.Point::         Inter-statement positions of logical judgments.
+@c * Ref.Stat.Stmt.Cfg::           The control flow graph formed by statements.
+@c * Ref.Stat.Stmt.Typestate::     Constraints that hold at points.
+@c * Ref.Stat.Stmt.Cond::          Constraints required and implied by a statement.
+@c * Ref.Stat.Stmt.Check::         Relating dynamic state to static typestate.
 
 
 @c ############################################################

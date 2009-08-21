@@ -365,6 +365,8 @@ let trans_visitor
               return_fixup (get_fn_fixup cx referent) slot
           | Ast.MOD_ITEM_prog _ ->
               return_fixup (get_prog_fixup cx referent) slot
+          | Ast.MOD_ITEM_tag t ->
+              return_fixup (get_tag_fixup cx referent) slot
           | _ ->
               err (Some referent)
                 "unhandled item type in trans_lval_full"
@@ -1491,6 +1493,10 @@ let trans_visitor
     trans_frame_exit fnid;
   in
 
+  let trans_tag (tagid:node_id) (tag:(Ast.ty_tup * Ast.ty_tag)) : unit =
+    ()
+  in
+
   let trans_native_fn (fnid:node_id) (tsig:Ast.ty_sig) : unit =
     let ret_addr_disp = abi.Abi.abi_frame_base_sz in
     let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
@@ -1574,6 +1580,7 @@ let trans_visitor
       match item.node with
           Ast.MOD_ITEM_fn f -> trans_fn item.id f.Ast.decl_item.Ast.fn_body
         | Ast.MOD_ITEM_prog p -> trans_prog item.id p.Ast.decl_item
+        | Ast.MOD_ITEM_tag t -> trans_tag item.id t.Ast.decl_item
         | _ -> ()
     end
   in
@@ -1668,6 +1675,8 @@ let fixup_assigning_visitor
       match i.node with
           Ast.MOD_ITEM_fn _ ->
             htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+        | Ast.MOD_ITEM_tag tag ->
+            htab_put cx.ctxt_tag_fixups i.id (new_fixup (path_name()))
         | Ast.MOD_ITEM_prog prog ->
             begin
               let path = path_name() in
