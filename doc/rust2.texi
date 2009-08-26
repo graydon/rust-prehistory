@@ -10,7 +10,7 @@
 @ifinfo
 This manual is for the ``Rust'' programming language.
 
-Copyright 2005-2008 Graydon Hoare
+Copyright 2006-2009 Graydon Hoare
 
 All rights reserved
 
@@ -30,7 +30,7 @@ See the file COPYING for details
 
 @page
 @vskip 0pt plus 1filll
-Copyright @copyright{} 2005-2009 Graydon Hoare
+Copyright @copyright{} 2006-2009 Graydon Hoare
 All rights reserved
 Licensed to the public under the terms of the GNU GPL (>= 3.0).
 See the file COPYING for details
@@ -137,14 +137,14 @@ intended to be easy to model for the reader. The code should not
 
 Rust is designed to be compiled to mostly-static native code, with
 relatively large compilation units and plenty of room for whole-unit
-optimisation. The output of a rust compilation is a standard loadable
+optimisation. The output of a Rust compilation is a standard loadable
 object of machine code (ELF, PE, Mach-O), containing standard metadata
 (DWARF), and works with existing disassemblers, analysis tools,
 debuggers and profilers. Such object files can be dynamically loaded,
 via the standard operating-system loader, into other processes, and
 executed cooperatively.
 
-The rust runtime is relatively small and provides some memory
+The Rust runtime is relatively small and provides some memory
 management, lightweight process scheduling, internal communication
 buffering and reflection services, but these are all implemented in a
 straightforward and obvious fashion, in standard C, with a low-level
@@ -153,7 +153,7 @@ virtual machine, JIT or garbage collection technology is required.
 
 @item Integrated system-construction facility
 
-The units of compilation of rust are multi-file amalgamations called
+The units of compilation of Rust are multi-file amalgamations called
 @emph{crates}. A crate is described by a separate, declarative type of
 source file that guides both the compilation of the crate, its
 packaging, its versioning, and its external dependencies. Crates are
@@ -176,17 +176,17 @@ isolation is only possible by calling external (C) code.
 
 Inter-process communication is single-duplex, based on ports and
 channels. Communication can be buffered or unbuffered: an unbuffered
-send is modeled as a buffered send followed by a flush. Communication
-is fair and randomised.
+send is modeled as a buffered send followed by a synchronous buffer
+flush. Communication is fair and randomised on the receiver side.
 
 @item Stack-based iterator functions
 
-Between asynchronous concurrent processes and synchronous
-single-invocation functions, Rust also supports a form of
-multiple-invocation iterator function, modeled after the same facility
-in @code{CLU}. Iterator functions can @emph{temporarily} suspend
-execution and return a value to their caller, resuming execution at
-the point of suspension when they are re-invoked.
+Between the extremes of ``asynchronous concurrent processes'' and
+``synchronous single-invocation functions'', Rust also supports a form
+of multiple-invocation iterator function, modeled after the same
+facility in @code{CLU}. Iterator functions can @emph{temporarily}
+suspend execution and return a value to their caller, resuming
+execution at the point of suspension when they are re-invoked.
 
 The iterator function facility is tightly integrated into the
 @code{for} loop construct. Only loop headers can invoke iterator
@@ -199,23 +199,24 @@ Rust can load and call many C library functions simply by declaring
 them in the enclosing crate file. Calling a C function statically
 marks a process as ``unsafe'', unless the unsafe process is further
 isolated within an external ``heavyweight'' operating-system
-subprocess. Every other ``unsafe'' process in a Rust compilation unit
-must be explicitly marked as audited and authorised in the crate file.
+subprocess. Every ``unsafe'' process in a Rust compilation unit must
+be explicitly marked as audited and authorised in the crate file.
 
 @item Typestate system
 
-Every variable in Rust participates in not only a static type system,
-describing the interpretation of memory in the slot, but also a
-@emph{typestate} system. The static typestates of a program describe
-the set of @emph{pure, dynamic predicates} that provably hold over
-some set of slots, at various points in the program's runtime. The
-static calculation of the typestates of a program is a dataflow
-problem, and handles user-defined predicates in a similar fashion to
-the way the type system permits user-defined types.
+Every storage slot in Rust participates in not only a conventional
+structural static type system, describing the interpretation of memory
+in the slot, but also a @emph{typestate} system. The static typestates
+of a program describe the set of @emph{pure, dynamic predicates} that
+provably hold over some set of slots, at various points in the
+program's runtime. The static calculation of the typestates of a
+program is a dataflow problem, and handles user-defined predicates in
+a similar fashion to the way the type system permits user-defined
+types.
 
 A short way of thinking of this is: types statically model the kinds
 of values held in slots, typestates statically model @emph{assertions
-that hold} at statements.
+that hold} before and after statements.
 
 @item Safe control over memory allocation, packing and aliasing.
 
@@ -302,7 +303,7 @@ compilation units..
 Rust includes support for slots of a top type, @code{any}, that can
 hold any type of value whatsoever. An @code{any} slot is simply a pair
 of a type code and an exterior value of that type. Injection into an
-@code{any} and projection by case-selection is integrated into the
+@code{any} and projection by type-case-selection is integrated into the
 language.
 
 @item Reflection
@@ -504,7 +505,7 @@ languages such as Smalltalk, C++, Java and Python.
 * Ref.Stat.Slot.Type.Constr::   Constraints implied by a slot's type.
 * Ref.Stat.Stmt::               Program execution as sequences of statements.
 * Ref.Stat.Stmt.Point::         Inter-statement positions of logical judgments.
-* Ref.Stat.Stmt.Cfg::           The control flow graph formed by statements.
+* Ref.Stat.Stmt.CFG::           The control flow graph formed by statements.
 * Ref.Stat.Stmt.Typestate::     Constraints that hold at points.
 * Ref.Stat.Stmt.Cond::          Constraints required and implied by a statement.
 * Ref.Stat.Stmt.Check::         Relating dynamic state to static typestate.
@@ -698,7 +699,7 @@ the one it was constructed with.
 
 Many channels can be bound to the same port, but each channel is bound
 to a single port. In other words, channels and ports exist in an N:1
-relationship, N channels to 1 port.
+relationship, N channels to 1 port, where N is a non-negative integer.
 
 Each port and channel can carry only one type of message. The message type
 is encoded as a parameter of the channel or port type. The message type
@@ -718,9 +719,9 @@ semi-synchronous send operation is possible, which performs an
 asynchronous send operation and then blocks execution of the sending
 process until the queue for the channel being sent to
 empties. Semi-synchronous sending does @emph{not} guarantee that a
-message has been @emph{received} when the sending process is
-unblocked; merely that the message @emph{has been sent} and is no
-longer in the queue owned by the sending process.
+message has been @emph{received} by any particular recipient when the
+sending process is unblocked; merely that the message @emph{has been
+sent} and is no longer in the queue owned by the sending process.
 
 
 @node    Ref.Proc.Life
@@ -740,12 +741,12 @@ longer in the queue owned by the sending process.
 @c * Ref.Run.Fault::               Runtime fault handler.
 
 
-@Node    Ref.Type
+@node    Ref.Type
 @section Ref.Type
 
 Every slot and value in a Rust program has a type. The @dfn{type} of a
 @emph{value} defines the interpretation of the memory holding it. The
-type of a @emph{slot} may also include constraints, @xref{Ref.Constr}.
+type of a @emph{slot} may also include constraints, @xref{Ref.Stat.Slot.Type.Constr}.
 
 Some types and type-constructors are @dfn{built-in}, meaning that
 their value constructors are defined in this manual. Other types or
@@ -872,10 +873,10 @@ An example of a tuple type and its use:
 @example
 type pair = (int,str);
 let pair p = (10,"hello");
-check (p.{0} == 10);
-p.{1} = "world";
+check (p.@{0@} == 10);
+p.@{1@} = "world";
 let (int x, str s) = p;
-check (s == p.{1} & p.{1} == "world");
+check (s == p.@{1@} & p.@{1@} == "world");
 @end example
 
 
@@ -919,7 +920,7 @@ a = cat;
 An example of a @emph{recursive} @code{tag} type and its use:
 @example
 type list[T] = tag[T](empty,
-                      cons(T, @list[T]));
+                      cons(T, @@list[T]));
 let list[int] a = cons(7, cons(13, empty));
 @end example
 
@@ -934,9 +935,9 @@ the function (@code{pure} or @code{lim}).
 
 An example of a simple @code{fn} type:
 @example
-fn add(int x, int y) -> int {
+fn add(int x, int y) -> int @{
   ret x + y;
-}
+@}
 
 let int x = add(5,7);
 
@@ -1026,21 +1027,21 @@ An example of a @code{prog} type:
 type stdio = rec(port[u8] stdin,
                  chan[u8] stdout,
                  chan[u8] stderr);
-prog byte_copy {
+prog byte_copy @{
      let stdio io;
-     init (chan[u8] out, chan[u8] err) -> chan {
+     init (chan[u8] out, chan[u8] err) -> chan @{
           io.stdin = port();
           io.stdout = out;
           io.stderr = err;
           ret chan(io.stdin);
-     }
-     main {
+     @}
+     main @{
        u8 tmp;
-       while (tmp <- io.in) {
+       while (tmp <- io.in) @{
              io.out <| tmp;
-       }
-     }
-}
+       @}
+     @}
+@}
 
 type stdio_prog = proc(chan[u8], chan[u8]) -> chan;
 
@@ -1070,14 +1071,14 @@ statement in the Newsqueak language.
 
 An example of a @code{be} statement:
 @example
-fn print_loop(int n) -> nil {
-  if (n <= 0) {
+fn print_loop(int n) -> nil @{
+  if (n <= 0) @{
     ret;
-  } else {
+  @} else @{
     print_int(n);
     be print_loop(n-1);
-  }
-}
+  @}
+@}
 @end example
 
 The above example executes in constant space, replacing each frame
@@ -1097,16 +1098,16 @@ statement in many C-family languages.
 
 An example of a @code{ret} statement:
 @example
-fn max(int a, int b) -> int {
-   if (a > b) {
+fn max(int a, int b) -> int @{
+   if (a > b) @{
       ret a;
-   }
+   @}
    ret b;
-}
+@}
 @end example
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.Put
+@section Ref.Stmt.Put
 @c * Ref.Stmt.Put::                Statement for pausing and producing a value.
 
 Executing a @code{put} statement copies a value into the put slot of
@@ -1124,14 +1125,14 @@ CLU, and unlike these later languages, Rust's iterator functions
 reside on the stack and obey a strict stack discipline.
 
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.Fail
+@section Ref.Stmt.Fail
 @c * Ref.Stmt.Fail::               Statement for nonlocal control transfer during failure.
 
 Executing a @code{fail} statement initiates exception handling.
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.Log
+@section Ref.Stmt.Log
 @c * Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
 
 Executing a @code{log} statement may, depending on system
@@ -1148,8 +1149,8 @@ statement.
 @example
 @end example
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.While
+@section Ref.Stmt.While
 @c * Ref.Stmt.While::              Statement for simple conditional looping.
 
 A @code{while} statement is a loop construct. The loop begins with an
@@ -1161,15 +1162,15 @@ completes.
 
 An example of a @code{while} statement:
 @example
-while (i < 10) {
+while (i < 10) @{
   print("hello\n");
   i = i + 1;
-}
+@}
 @end example
 
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.For
+@section Ref.Stmt.For
 @c * Ref.Stmt.For::                Statement for complex conditional looping.
 
 A @code{for} statement is a loop construct. There are two types of
@@ -1185,9 +1186,9 @@ executing the loop body once per assignment.
 
 @example
 let vec[foo] v = vec(a, b, c);
-for (~foo e = v.(0, vec.len(v))) {
+for (~foo e = v.(0, vec.len(v))) @{
   bar(e);
-}
+@}
 @end example
 
 An @emph{iterator} for-loop is controlled by an iterator function. The
@@ -1198,22 +1199,22 @@ terminates.
 @example
 str txt;
 vec[str] lines;
-for (~str s = str.split(txt, "\n")) {
+for (~str s = str.split(txt, "\n")) @{
   vec.push(lines, s);
-}
+@}
 @end example
 
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.If
+@section Ref.Stmt.If
 @c * Ref.Stmt.If::                 Statement for simple conditional branching.
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.Alt
+@section Ref.Stmt.Alt
 @c * Ref.Stmt.Alt::                Statement for complex conditional branching.
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.Prove
+@section Ref.Stmt.Prove
 @c * Ref.Stmt.Prove::              Statement for static assertion of typestate.
 
 A @code{prove} statement has no runtime effect. Its purpose is to
@@ -1221,8 +1222,8 @@ check, statically, that its argument typestate holds at its statement
 entry point. If its argument typestate does not hold, under the
 typestate algorithm, the program containing it will fail to compile.
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.Check
+@section Ref.Stmt.Check
 @c * Ref.Stmt.Check::              Statement for dynamic assertion of typestate.
 
 A @code{check} statement connects dynamic assertions made at runtime
@@ -1243,15 +1244,15 @@ statements, propagating conditions forward and statically comparing
 implied states and their specifications.
 
 @example
-pred even(~int x) {
+pred even(~int x) @{
     ret x & 1 == 0;
-}
+@}
 
-fn print_even(int x) : even(x) -> () {
+fn print_even(int x) : even(x) -> () @{
     print(x);
-}
+@}
 
-fn test() {
+fn test() @{
     let int y = 8;
 
     // Could not call print_even(y) here.
@@ -1260,7 +1261,7 @@ fn test() {
 
     // can call print_even(y) here, since even(y) now holds.
     print_even(y);
-}
+@}
 @end example
 
 @node    Ref.Stmt.IfCheck
@@ -1282,11 +1283,11 @@ print_even(x);
 @end example
 
 @example
-if check(even(x)) {
+if check(even(x)) @{
     print_even(x);
-} else {
+@} else @{
     fail;
-}
+@}
 @end example
 
 @node    Ref.Stat
@@ -1294,8 +1295,8 @@ if check(even(x)) {
 @c * Ref.Stat::                    Static structure of modules.
 
 A Rust module contains declarations of @emph{items}. Items may include
-functions, or sub-modules, or type and typestate declarations used
-during the static analysis phase of compilation.
+functions, programs, sub-modules, or type and typestate declarations
+used during the static analysis phase of compilation.
 
 The static structure of a module is analysed during compilation to
 ensure a variety of rules are obeyed, as well as to determine the
@@ -1324,14 +1325,17 @@ type's interpretation is used for the values held in any slot with
 that type. The interpretation of a value includes:
 
 @itemize
-@item Whether the value represents a memory address or not
+@item Whether the value is composed of sub-values or is indivisible
 @item Whether the value represents textual or numerical information
 @item Whether the value represents integral or floating-point information
 @item The sequence of memory operations required to access the value
 @end itemize
 
-For example, the type @code{u8} defines the interpretation of values
-that are unsigned two's complement immediate integers.
+For example, the type @code{rec(u8 x, u8 y)} defines the
+interpretation of values that are composite records, each containing
+two unsigned two's complement 8-bit integers accessed through the
+components @code{x} and @code{y}, and laid out in memory with the
+@code{x} component preceding the @code{y} component.
 
 @node    Ref.Stat.Item.Fn
 @section Ref.Stat.Item.Fn
@@ -1364,9 +1368,9 @@ output type is the type of value the function will @code{ret}.
 
 An example of a plain @code{fn} (with no protocol):
 @example
-fn add(int x, int y) -> int {
+fn add(int x, int y) -> int @{
   ret x + y;
-}
+@}
 @end example
 
 A function with a protocol can only be called in the loop header of a
@@ -1375,30 +1379,36 @@ be called from a @code{for+} loop header.
 
 An example of a @code{fn} with a protocol:
 @example
-fn* range(int lo, int hi) -> int {
+fn* range(int lo, int hi) -> int @{
   let int i = lo;
-  while (i < hi) {
+  while (i < hi) @{
     put i;
     i = i + 1;
-  }
-}
+  @}
+@}
 
 let int sum = 0;
-for* (int x = range(0,100)) {
+for* (int x = range(0,100)) @{
     sum = sum + x;
-}
+@}
 @end example
 
 A function type may be @emph{pure} or @emph{impure}, depending on the
-presence or absence of the keyword prefix @code{pure}. If pure, the
-function type describes those functions that have no side effects. If
-impure, the function type describes both functions with and without
-side effects. @xref{Ref.Stat.Item.Fn}.
+presence or absence of the keyword prefix @code{pure}. A @dfn{pure}
+function is one that has no side effects, calls no impure functions,
+and is declared with the @code{pure} keyword. A function lacking any
+of these characteristics is @dfn{impure}. @xref{Ref.Stat.Item.Fn}.
 
 
 @node    Ref.Stat.Item.Pred
 @section Ref.Stat.Item.Pred
 @c * Ref.Stat.Item.Pred::          Items defining typestate predicates.
+
+A predicate is a pure function returning @code{bool}, that also
+carries special meaning to the typestate system. Specifically, a
+predicate can be used as part of a @emph{condition}; introducing a new
+predicate into a program enlarges the set of conditions that
+can be statically checked. @xref{Ref.Stat.Stmt.Typestate}.
 
 @node    Ref.Stat.Item.Mod
 @section Ref.Stat.Item.Mod
@@ -1409,15 +1419,138 @@ side effects. @xref{Ref.Stat.Item.Fn}.
 @c * Ref.Stat.Item.Prog::          Items defining programs.
 
 @c * Ref.Stat.Slot::               Components of structures and control frames.
+
 @c * Ref.Stat.Slot.Constr::        A set of predicates holding over a set of slots.
+@node    Ref.Stat.Stmt.Constr
+@section Ref.Stat.Stmt.Constr
+
+A @dfn{constraint} is a predicate applied to specific slots.
+
+For example, consider the following code:
+
+@example
+pred is_less_than(int a, int b) @{
+     ret a < b;
+@}
+
+fn test() @{
+   int x = 10;
+   int y = 20;
+   check(is_less_than(x,y));
+@}
+@end example
+
+This example defines the predicate @code{is_less_than}, and applies it
+to the slots @code{x} and @code{y}. The constraint being checked on
+the third line of the function is @code{is_less_than(x,y)}.
+
 @c * Ref.Stat.Slot.Type::          Static types of slots.
 @c * Ref.Stat.Slot.Type.Form::     Interpretation of a slot's memory.
 @c * Ref.Stat.Slot.Type.Constr::   Constraints implied by a slot's type.
 @c * Ref.Stat.Stmt::               Program execution as sequences of statements.
+
+
+@node    Ref.Stat.Stmt.Point
+@section Ref.Stat.Stmt.Point
 @c * Ref.Stat.Stmt.Point::         Inter-statement positions of logical judgments.
-@c * Ref.Stat.Stmt.Cfg::           The control flow graph formed by statements.
-@c * Ref.Stat.Stmt.Typestate::     Constraints that hold at points.
+
+A @dfn{point} exists before and after any statement in a Rust program.
+For example, this code:
+
+@example
+ s = "hello, world";
+ print(s);
+@end example
+
+Consists of two statements and three points:
+
+@itemize
+@item the point before the first statement
+@item the point between the two statements
+@item the point after the second statement
+@end itemize
+
+The typestate system reasons over points, rather than statements. This
+may seem counterintuitive, but points are the more primitive
+concept. Another way of thinking about a point is as a set of
+@emph{instants in time} at which the state of the machine is fixed. By
+contrast, a statement represents a @emph{duration in time}, during
+which the state of the machine changes. The typestate system is
+concerned with constraining the possible states of a machine's memory
+at @emph{instants}; it is meaningless to speak of the state of a
+machine's memory ``at'' a statement, as each statement is likely to
+change the contents of memory.
+
+@node    Ref.Stat.Stmt.CFG
+@section Ref.Stat.Stmt.CFG
+@c * Ref.Stat.Stmt.CFG::           The control flow graph formed by statements.
+
+Each @emph{point} can be considered a vertex in a directed
+@emph{graph}. Each kind of statement implies a single edge in this
+graph between the point before the statement and the point after it,
+as well as a set of zero or more edges from the points of the
+statement to points before other statements. The edges between points
+represent @emph{possible} indivisible control transfers that might
+occur during execution.
+
+This implicit graph is called the @dfn{control flow graph}, or @dfn{CFG}.
+
+@node    Ref.Stat.Stmt.Cond
+@section Ref.Stat.Stmt.Cond
 @c * Ref.Stat.Stmt.Cond::          Constraints required and implied by a statement.
+
+A @dfn{condition} is a set of zero or more constraints.
+
+Each @emph{point} has an associated @emph{condition}:
+
+@itemize
+@item The @dfn{precondition} of a statement is the condition the statement requires in the point before the condition.
+@item The @dfn{postcondition} of a statement is the condition the statement enforces in the point after the statement.
+@end itemize
+
+Any constraint present in the precondition and @emph{absent} in the
+postcondition is considered to be @emph{dropped} by the statement.
+
+@node    Ref.Stat.Stmt.Typestate
+@section Ref.Stat.Stmt.Typestate
+@c * Ref.Stat.Stmt.Typestate::     Constraints that hold at points.
+
+The typestate checking system @emph{calculates} an additional
+condition for each point called its typestate. For a given statement,
+we call the two typestates associated with its two points the prestate
+and a poststate.
+
+@itemize
+@item The @dfn{prestate} of a statement is the typestate of the point before the statement.
+@item The @dfn{poststate} of a statement is the typestate of the point after the statement.
+@end itemize
+
+A @dfn{typestate} is a condition that has @emph{been determined by the
+typestate algorithm} to hold at a point. This is a subtle but
+important point to understand: preconditions and postconditions are
+@emph{inputs} to the typestate algorithm; prestates and poststates are
+@emph{outputs} from the typestate algorithm.
+
+The typestate algorithm analyses the preconditions and postconditions
+of every statement in a block, and attempts to compute a condition for
+each typestate. Specifically:
+
+@itemize
+@item Initially, every typestate is empty.
+@item Each statement's poststate is given the union of the statement's prestate, precondition, and postcondition.
+@item Each statement's poststate has the difference between the statement's precondition and postcondition removed.
+@item Each statement's prestate is given the intersection of the poststates of every parent statement in the CFG.
+@item The previous three steps are repeated until no typestates in the block change.
+@end itemize
+
+The typestate algorithm is a very conventional dataflow calculation.
+
+After the typestates of a block are computed, the typestate algorithm
+checks that every constraint in the precondition of a statement is
+satisfied by its prestate. If any preconditions are not satisfied and
+no automatic assertions exist, the mismatch is considered an error.
+
+
 @c * Ref.Stat.Stmt.Check::         Relating dynamic state to static typestate.
 
 

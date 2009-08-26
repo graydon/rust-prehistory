@@ -62,3 +62,36 @@ possible picture (from hermes?):
     - if port overflows, is disconnected or times out, throws "failed(signal-delivery)"
     - if unwinding exceeds budget, stops pc and signals owner/group
     - open question: what if env races with our delivery? can it be made to not do so?
+
+simpler picture:
+
+  - type handler[ARG,ERR,OUT] = (fn(ARG,ERR) -> OUT, ARG)
+  - crate has dynamic-scoped handler list called an "err", per proc-in-that-crate (null initially):
+
+     err foo(IN) -> OUT;
+
+  - push a handler on this list, dynamically scoped, via "trap":
+    (this can be a "virtual" list provided by DWARF CFI, or via a real list, doesn't matter)
+
+      trap (foo = (handler, thingy)) { ... }
+
+  - when you hit an exceptional circumstance, you raise it:
+
+      if (... ) {
+        x = foo();
+      } else {
+        // "uh oh, call a handler"
+        x = raise foo(gurgle);
+      }
+
+   what happens?
+
+   - If handler list is empty, fail
+   - Else call head of handler list and return result
+   - Handler may return something
+   - Handler may fail, unwinding
+   - Once you're failing, proc can't stop; no "catch"
+   - Termination model of processes, plus linkage
+   - If you *really* want to catch "everything", put it in a
+     separate process and wait on its termination
+
