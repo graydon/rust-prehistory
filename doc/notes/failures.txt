@@ -65,10 +65,9 @@ possible picture (from hermes?):
 
 simpler picture:
 
-  - type handler[ARG,ERR,OUT] = (fn(ARG,ERR) -> OUT, ARG)
-  - crate has dynamic-scoped handler list called an "err", per proc-in-that-crate (null initially):
+  - crate has dynamic-scoped handler list called an "fault", per proc-in-that-crate (null initially):
 
-     err foo(IN) -> OUT;
+     fault foo(IN) -> OUT;
 
   - push a handler on this list, dynamically scoped, via "trap":
     (this can be a "virtual" list provided by DWARF CFI, or via a real list, doesn't matter)
@@ -95,3 +94,43 @@ simpler picture:
    - If you *really* want to catch "everything", put it in a
      separate process and wait on its termination
 
+simpler still:
+
+   - declare fault types as above:
+
+     fault foo(int x) -> int;
+
+   - static fault-trapping blocks, like catch blocks:
+
+     try {
+       ...
+     } trap foo(x) {
+       fix x + 10;
+     } trap bar(y) {
+       log "got a bar";
+       fail;
+     }
+
+  - when you hit an exceptional circumstance, you raise it:
+
+      if (... ) {
+        x = foo();
+      } else {
+        // "uh oh, call innermost foo trap for help"
+        x = raise foo(gurgle);
+      }
+
+   - fault-trapping block is invoked *like a fn*,
+     located dynamically using a CFI/.eh_frame-like thing.
+     zero cost in the not-taken case.
+
+   - trapping block has outer slots in scope, can fix or fail,
+     no closure weirdness required, no exceptions-as-values
+     nonsense, no lazy stacktrace complexity.
+
+   - "fix" passes a value back down to the fault and continues
+
+   - if fault-trapping block "fail"s, termination model starts
+
+   - this is similar to a subset of the mesa signal system or
+     the CL / dylan condition system

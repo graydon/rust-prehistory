@@ -149,11 +149,84 @@ of the machinery of crates. And plugs. Bleah.
 Maybe a plug should be an existential? Well sure. But let's call it a
 module.
 
-assoc_map = mod[T] { type C[T]; 
+assoc_map = mod[T] { type C[T];
                      fun* each(C[T])->T;
                      fun* has(C[T],T)->bool; }
 
 
 Here is the key point: a module is not a functor, is not recursive,
 and does not imply independent compilation. A crate, a record *or* a
-process can be used to implement a module type. 
+process can be used to implement a module type.
+
+--- aug 2009 ---
+
+
+
+a worked-out container module example
+
+
+
+type map[k,v] = mod { type t;
+                      fn new(fn compare(~k a,~k b)->bool) -> t;
+                      fn set(^t m, ~k key, ~v val) -> ();
+                      fn? find(~t m, ~k key) -> ~v; };
+
+mod treemap[k,v] {
+    type t = rec(...);
+    fn new() -> t {
+        ...
+    }
+    fn set(^t m, ~k key, ~v val) -> () {
+        ...
+    }
+    fn? find(~t m, ~k key) -> ~v {
+        ...
+    }
+}
+
+fn get_a_map_impl[k,v]() -> map[k,v] {
+    typecase (k) { 
+       ... 
+    }
+}
+
+fn compare(~int a, ~int b) -> bool { ... }
+let map[int,str] mv = get_a_map_impl[int,str]();
+mod m = mapv;
+
+// or ...
+
+
+mod m = get_a_map_impl[int,str]();
+
+auto t = m.new(compare);
+m.set(t, 10, "hello");
+m.set(t, 12, "there");
+
+
+// Note that from a semantics level, ophel suggests can treat generic
+// items as modules with an opaque type:
+
+type modt = mod { type t; fn f(~t) -> (); } 
+
+~=
+
+fn[t] f(~t) -> () {...}
+
+at least for the purposes of passing them around. I think this is a possible de-sugaring if you're
+doing a proof in coq, but I don't want to force users to write this way. The "throwaway module whose
+only purpose is to parameterize its contained item" idiom seems clunky at best. Also it has a 
+weird falling-apart-ness when it comes to generic *types*:
+
+eg: how would you do the map case?
+
+fn mk_map(mod {type k; type v; } params) -> 
+   mod { type t; 
+         fn new() -> t;
+         fn add(~params.k, ~params.v) -> ();
+         fn? find(~params.k) -> ~params.v; };
+
+now we run into the sticky question of the type of the return value of mk_map.  I think it's not
+denotable in this language; or if it is it involves nutty things like existentials and higher-kinds.
+even ophel defers here and says "let's have a separate binding form map[T]" for a type constructor.
+

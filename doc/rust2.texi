@@ -70,15 +70,7 @@ Complete table of contents
 
 @quotation
   We have to fight chaos, and the most effective way of doing that is
-  to prevent its emergence. We have to learn to avoid all forms of
-  combinatorial complexity generators that, when active, rapidly tax
-  our ability to carry out a case-analysis far beyond the limits of our
-  power of reasoning. [...] A great advantage is that we know at least
-  what we are looking for, and [...] that a terminology is emerging
-  [...] in which we can answer the otherwise frustrating question that so
-  often emerges in the midst of one's struggles in ``What the hell am
-  I really doing?''
-
+  to prevent its emergence.
 @flushright
                                    - Edsger Dijkstra
 @end flushright
@@ -171,7 +163,7 @@ different roles.
 Like many @emph{actor} languages, Rust provides an isolation (and
 concurrency) model based on lightweight processes scheduled by the
 language runtime. These processes are inexpensive and @emph{mostly}
-statically secure from one another; bending the rule of process
+statically secure from one another; breaking the rule of process
 isolation is only possible by calling external (C) code.
 
 Inter-process communication is single-duplex, based on ports and
@@ -565,7 +557,11 @@ languages such as Smalltalk, C++, Java and Python.
 
 @c * Ref.Comp::                    Compilation and component model.
 @c * Ref.Comp.Crate::              Units of compilation, versioning, distribution and loading.
+@c NOTE influences: SML CM, Mesa Configurations, owens/flatt "units"
+
 @c * Ref.Comp.Meta.Syntax::        Simple metaprogramming through syntax extension.
+@c NOTE influences: camlp4
+
 @c * Ref.Comp.Meta.General::       General-purpose staged compilation.
 
 @node    Ref.Mem
