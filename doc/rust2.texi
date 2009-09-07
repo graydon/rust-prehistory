@@ -313,30 +313,50 @@ using a special form of bracketing, such that a reader unfamiliar with
 the extension can still parse the surrounding text by skipping over
 the bracketed ``extension text''.
 
-@item Exception and termination handling
+@item Fault management
 
-Processes can fail at any time, due to internal or external sources of
-error. A failure generates an exception value of type @code{any} that
-causes a process to unwind its control stack, propagating the
-exception outward from the failing frame until a handler is
-located. If an exception propagates to a top level frame in a process,
-the process will terminate.
+Like many languages, Rust provides a system for managing abnormal or
+erroneous circumstances that may arise during execution. Such a
+circumstance is called a @code{fault}, and is declared like a
+function. Code can @code{raise} a fault, which causes the runtime to
+search the control stack for a @code{trap} block and transfer control
+to it. Trapping a fault does @emph{not} cause the process' stack to
+unwind; the trap block is invoked while the raising context is
+suspended, awaiting a fix.
 
-Process termination due to an unhandled exception, in turn, causes the
-Rust runtime to notify any @emph{linked} process via a registered
-channel. This mechanism can be used to independently arrange
-supervision and failure-recovery modes for groups of related
-processes.
+A trap block may choose to @code{fix} a fault, to @code{raise} a new
+fault, or to @code{fail}. If the fault is fixed -- returning some
+value to the raising context -- execution resumes at the raising
+context. If a new fault is raised, the runtime commences a nested
+search for a trap handler, searching outward from the dynamic context
+of the initial trap.
+
+@item Failure and finishing
+
+If a raised fault is not trapped, or a @code{fail} statement is
+executed in any context -- trap or otherwise -- the process enters a
+@emph{failing} state. A failing process unwinds its control stack,
+frees all of its owned resources and enters the @emph{finished}
+state. Failure is idempotent and non-recoverable.
+
+If a process finishes due to failure, the runtime notifies any
+@emph{linked} process via a registered channel. This can be used to
+independently arrange supervision and failure-propagation modes for
+groups of related processes.
 
 @item Deterministic destruction
 
-Processes have destructors, which are executed deterministically in
-bottom-up ownership order, when a process is terminated.
+Processes have destructors -- called @code{fini} blocks -- which are
+executed deterministically in bottom-up ownership order, as control
+frames are exited. The same destructors are run in the same order
+whether the enclosing frame is exited due to failure or normal
+execution.
 
-Similarly, the rules for releasing memory are deterministic: on
-scope-exit, interior slots are released immediately, exterior slots
-have their reference count decreased and are released if the count
-drops to zero. Alias slots are not affected by scope exit.
+Similarly, the rules for releasing memory are deterministic and
+predictable: on scope-exit, interior slots are released immediately,
+exterior slots have their reference count decreased and are released
+if the count drops to zero. Alias slots are not affected by scope
+exit.
 
 @end itemize
 
@@ -523,7 +543,11 @@ languages such as Smalltalk, C++, Java and Python.
 * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
 * Ref.Stmt.Ret::                Statement for stopping and producing a value.
 * Ref.Stmt.Put::                Statement for pausing and producing a value.
-* Ref.Stmt.Fail::               Statement for nonlocal control transfer during failure.
+* Ref.Stmt.Try::                Statement for extablishing a fault trapping context.
+* Ref.Stmt.Raise::              Statement for transferring control to a fault trap.
+* Ref.Stmt.Trap::               Statement for trapping a fault.
+* Ref.Stmt.Fix::                Statement for recovering from a fault.
+* Ref.Stmt.Fail::               Statement for causing process failure.
 * Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
 * Ref.Stmt.While::              Statement for simple conditional looping.
 * Ref.Stmt.For::                Statement for complex conditional looping.
@@ -724,6 +748,37 @@ sent} and is no longer in the queue owned by the sending process.
 @section Ref.Proc.Life
 @c * Ref.Proc.Life::               Process lifecycle and state transitions.
 
+The @dfn{lifecycle} of a process consists of a finite set of states
+and events that cause transitions between the states. The lifecycle states
+of a process are:
+
+@itemize
+@item initialising
+@item running
+@item calling C
+@item blocked reading
+@item blocked writing
+@item failing
+@item finished
+@end itemize
+
+A process can transition to the @emph{failing} state at any time, due
+to an un-trapped fault or the execution of a @code{fail}
+statement. Once @emph{failing}, a process unwinds its stack and
+transitions to the @emph{finished} state. No other state
+transitions out of the @emph{failing} state are permitted.
+
+A process begins its existence in the @emph{initialising} state. It
+remains in this state until its @code{init} block completes
+successfully or fails.
+
+A process may transition to the @code{blocked reading} state any time
+it executes a receive statement (@code{<-}) on a port that does not have
+any processes waiting to send. When another process eventually sends on
+a channel connected to the receiving port, the receiving process will 
+transition out of @code{blocked reading} state, back to @code{running}.
+
+
 @node    Ref.Proc.Sched
 @section Ref.Proc.Sched
 @c * Ref.Proc.Sched::              Process scheduling model.
@@ -894,10 +949,11 @@ let int i = v.(2);
 @node    Ref.Type.Tag
 @section Ref.Type.Tag
 
-The @code{tag} type-constructor forms new heterogeneous
-disjoint sum types. It is analogous to the @code{data} type-constructor
-in ML. A @code{tag} type consists of a number of @code{variants}, each of
-which is independently named and takes an optional tuple of arguments.
+The @code{tag} type-constructor forms new heterogeneous disjoint sum
+types.@footnote{The Rust @code{tag} type is analogous to a
+@code{data} constructor declaration in ML}. A @code{tag} type consists of a
+number of @code{variants}, each of which is independently named and
+takes an optional tuple of arguments.
 
 The variants of a @code{tag} type may be recursive: that is, the
 definition of a @code{tag} type may refer to type definitions that
@@ -1025,7 +1081,7 @@ type stdio = rec(port[u8] stdin,
                  chan[u8] stderr);
 prog byte_copy @{
      let stdio io;
-     init (chan[u8] out, chan[u8] err) -> chan @{
+     init (chan[u8] out, chan[u8] err) -> chan[u8] @{
           io.stdin = port();
           io.stdout = out;
           io.stderr = err;
@@ -1058,12 +1114,13 @@ let (proc p, chan[u8] in) = spawn cat(chan(out), chan(err));
 @section Ref.Stmt.Be
 @c * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
 
-Executing a @code{be} statement destroys the current function
-activation frame and replaces it with an activation frame for the
-called function. In other words, @code{be} executes a tail-call.
+Executing a @code{be} statement @footnote{A @code{be} statement in
+Rust is analogous to a @code{become} statement in the Newsqueak
+language.} destroys the current function activation frame and replaces
+it with an activation frame for the called function. In other words,
+@code{be} executes a tail-call.
 
-A @code{be} statement in Rust is analogous to a @code{become}
-statement in the Newsqueak language.
+
 
 An example of a @code{be} statement:
 @example
@@ -1081,16 +1138,17 @@ The above example executes in constant space, replacing each frame
 with a new copy of itself.
 
 
-@node    Ref.Stmt.
-@section Ref.Stmt.
+@node    Ref.Stmt.Ret
+@section Ref.Stmt.Ret
 @c * Ref.Stmt.Ret::                Statement for stopping and producing a value.
 
-Executing a @code{ret} statement copies a value into the return slot
-of the current function, destroys the current function activation
-frame, and transfers control to the caller frame.
+Executing a @code{ret} statement@footnote{A @code{ret} statement in
+Rust is analogous to a @code{return} statement in many C-family
+languages.} copies a value into the return slot of the current
+function, destroys the current function activation frame, and
+transfers control to the caller frame.
 
-A @code{ret} statement in Rust is analogous to a @code{return}
-statement in many C-family languages.
+
 
 An example of a @code{ret} statement:
 @example
@@ -1125,7 +1183,8 @@ reside on the stack and obey a strict stack discipline.
 @section Ref.Stmt.Fail
 @c * Ref.Stmt.Fail::               Statement for nonlocal control transfer during failure.
 
-Executing a @code{fail} statement initiates exception handling.
+Executing a @code{fail} statement causes a process to enter the
+@emph{failing} state.
 
 @node    Ref.Stmt.Log
 @section Ref.Stmt.Log
