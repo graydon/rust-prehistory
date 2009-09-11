@@ -556,6 +556,32 @@ Rust provides some static metaprogramming facilities at compile-time.
 @c * Ref.Comp.Meta.Syntax::        Simple metaprogramming through syntax extension.
 @c NOTE influences: camlp4
 
+Rust supports a simple ``inline'' notation for invoking static
+metaprograms. A @dfn{syntax extension} is a marked syntactic form that
+can appear as an expression, statement or item in the body of a Rust
+program, and which causes the text enclosed within the marked form to
+be translated through a compile-time metaprogram. The compile-time
+metaprogram must return a value of the corresponding Rust AST type,
+either an expression node, a statement node or an item
+node. @footnote{The Rust syntax-extension system is analogous to
+the extensible reader system provided by Lisp @emph{readtables}, or
+the Camlp4 system of Objective Caml.}
+
+Syntactic extensions are marked with the @emph{pound} symbol @code{#},
+followed by a qualified name of a compile-time imported module, an
+optional parenthesized list of Rust @emph{tokens}, and an optional
+brace-enclosed region of free-form text (with brace-matching and
+brace-escaping used to determine the limit of the region).
+
+For example, this extension might provide a syntax for regular
+expression literals:
+
+@example
+let str s = get_string();
+let regex pattern = #re.pat@{ aa+b? @};
+let bool matched = re.match(pattern, s);
+@end example
+
 @node          Ref.Comp.Meta.General
 @subsubsection Ref.Comp.Meta.General
 @c * Ref.Comp.Meta.General::       General-purpose staged compilation.
@@ -763,20 +789,38 @@ A process begins its existence in the @emph{initialising} state. It
 remains in this state until its @code{init} block completes
 successfully or fails.
 
-A process may transition to the @code{blocked reading} state any time
+A process may transition to the @emph{blocked reading} state any time
 it executes a receive statement (@code{<-}) on a port that does not have
 any processes waiting to send. When another process eventually sends on
 a channel connected to the receiving port, the receiving process will 
-transition out of @code{blocked reading} state, back to @code{running}.
+transition out of @emph{blocked reading} state, back to @emph{running}.
 
 
 @node       Ref.Proc.Sched
 @subsection Ref.Proc.Sched
 @c * Ref.Proc.Sched::              Process scheduling model.
 
+Every process is equipped with a @emph{time slice counter}, a hidden numeric
+slot that is decremented on each loop back-edge and function
+call. The Rust runtime repeatedly selects a process in the @emph{running} state,
+via fair pseudo-random choice, and activates it. If the time slice counter on
+a process reaches zero, the process yields control to the Rust runtime. The
+process has its time slice counter reset to the configured initial time slice
+value for the runtime, and it is once again made available as a choice for the
+scheduler to randomly select.
+
+If a process enters a non-running state -- for example, if it blocks
+on reading or writing -- it is not available for activation by the
+scheduler, but its time slice counter is unaffected.
+
 @node    Ref.Run
 @section Ref.Run
 @c * Ref.Run::                     Organisation of runtime services.
+
+The Rust runtime is smaller and simpler than many modern language
+runtimes. Nonetheless it provides a small set of services to support
+language abstractions such as slots, processes, programs,
+communication, reflection and fault handling.
 
 @menu
 * Ref.Run.Mem::                 Runtime memory management service.
@@ -806,6 +850,10 @@ transition out of @code{blocked reading} state, back to @code{running}.
 @node       Ref.Run.Refl
 @subsection Ref.Run.Refl
 @c * Ref.Run.Refl::                Runtime reflection system.
+
+The reflection system is driven by the DWARF tables emitted into a
+crate at compile time. Reflecting on a slot or type allocates a Rust
+data structure corresponding to the DWARF DIE for that slot or type.
 
 @node       Ref.Run.Fault
 @subsection Ref.Run.Fault
