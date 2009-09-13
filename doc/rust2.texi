@@ -781,7 +781,7 @@ The special symbols are:
 @item @code{+}
 @tab @code{-}
 @tab @code{*}
-@tab @code{*}
+@tab @code{/}
 @tab @code{%}
 @tab @code{}
 @item @code{=}
@@ -814,7 +814,7 @@ The special symbols are:
 @section Ref.Gram
 @c * Ref.Gram::                    Grammar.
 
-@emph{TODO: LL(1), it reads like C, Aleph and Napier; formalise here}.
+@emph{TODO: LL(1), it reads like C, Alef and Napier; formalise here}.
 
 @page
 @node    Ref.Comp
@@ -2377,7 +2377,7 @@ fn max(int a, int b) -> int @{
 @c * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
 
 Executing a @code{be} statement @footnote{A @code{be} statement in is
-analogous to a @code{become} statement in Newsqueak or Aleph.}
+analogous to a @code{become} statement in Newsqueak or Alef.}
 destroys the current function activation frame and replaces it with an
 activation frame for the called function. In other words,
 @code{be} executes a tail-call.
