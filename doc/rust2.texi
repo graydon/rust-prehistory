@@ -231,12 +231,12 @@ virtual machine, JIT or garbage collection technology is required.
 
 The units of compilation of Rust are multi-file amalgamations called
 @emph{crates}. A crate is described by a separate, declarative type of
-source file that guides both the compilation of the crate, its
-packaging, its versioning, and its external dependencies. Crates are
-also the units of distribution and loading. Significantly: the
-dependency graph of crates is @emph{acyclic} and @emph{anonymous}:
-there is no global namespace for crates, and module-level recursion
-cannot cross crate barriers.
+source file that guides the compilation of the crate, its packaging,
+its versioning, and its external dependencies. Crates are also the
+units of distribution and loading. Significantly: the dependency graph
+of crates is @emph{acyclic} and @emph{anonymous}: there is no global
+namespace for crates, and module-level recursion cannot cross crate
+barriers.
 
 Unlike many languages, individual modules do @emph{not} carry all the
 mechanisms or restrictions of crates. Modules and crates serve
@@ -253,8 +253,8 @@ isolation is only possible by calling external (C) code.
 
 Inter-process communication is typed, asynchronous and simplex, based
 on passing messages over channels to ports. Transmission can be
-rate-limited or rate-unlimited. Communication is fair and randomised
-on the receiver side.
+rate-limited or rate-unlimited. Communication is fair and
+pseudo-randomised on the receiver side.
 
 @sp 1
 @item Stack-based iterator functions
@@ -325,7 +325,7 @@ simple address assignment or reference-count adjustment, or may cause
 a value to be ``transplanted'': copied by value from the interior of
 one memory structure to another, or between stack and
 heap. Transplanting, when necessary, is predictable and automatic, as
-part of the definition of the assignment operator (@code{=}).
+part of the definition of the copy operator (@code{=}).
 
 In addition, slots have a static initialisation state that is
 calculated by the typestate system. This permits late initialisation
@@ -564,12 +564,14 @@ Euclid, etc.)
 
 @menu
 * Ref.Lex::                     Lexical structure.
+* Ref.Path::                    References to slots and items.
 * Ref.Gram::                    Grammar.
 * Ref.Comp::                    Compilation and component model.
 * Ref.Mem::                     Semantic model of memory.
 * Ref.Proc::                    Semantic model of processes.
 * Ref.Item::                    The components of a module.
 * Ref.Type::                    The types of values held in memory.
+* Ref.Expr::                    Parsed and primitive expressions.
 * Ref.Stmt::                    Program execution as sequences of statements.
 * Ref.Run::                     Organisation of runtime services.
 @end menu
@@ -808,6 +810,75 @@ The special symbols are:
 @end multitable
 
 
+@node    Ref.Path
+@section Ref.Path
+@c * Ref.Path::               References to slots and items.
+
+A @dfn{path} is a ubiquitous syntactic form in Rust that deserves
+special attention. A path denotes a slot or an
+item. @xref{Ref.Mem.Slot}. @xref{Ref.Item}. Every slot and item in a
+Rust crate has a @emph{canonical path} that refers to it from the
+crate top-level, as well as a number of shorter @emph{relative paths}
+that may also denote it in inner scopes of the crate. There is no way
+to define a slot or item without a canonical path within its crate
+(with the exception of the crate's implicit top-level module). Paths
+have meaning only within a specific crate. @xref{Ref.Comp.Crate}.
+
+Paths consist of period-separated components. In the simplest
+form, path components are identifiers. @xref{Ref.Lex.Ident}.
+
+Two examples of simple paths consisting of only identifier components:
+@example
+x;
+x.y.z;
+@end example
+
+Paths fall into two important categories: @emph{names} and
+@emph{lvals}.
+
+A @dfn{name} denotes an item, and is statically resolved to its
+referent at compile time.
+
+An @dfn{lval} denotes a slot, and is statically resolved to a sequence
+of memory operations and primitive (arithmetic) expressions required
+to load or store to the slot at compile time.
+
+In some contexts, the Rust grammar accepts a general @emph{path}, but
+a subsequent syntactic restriction requires the path to be an lval or
+a name. In other words: in some contexts an lval is required (for
+example, on the left hand side of the copy operator,
+@pxref{Ref.Stmt.Copy}) and in other contexts a name is required (for
+example, as a type parameter, @pxref{Ref.Item}). In no case is the
+grammar made ambiguous by accepting a general path and restricting
+allowed paths to names or lvals after parsing. These restrictions are
+noted in the grammar. @xref{Ref.Gram}.
+
+A name component may include type parameters. Type parameters are
+denoted by square brackets. Square brackets are used @emph{only} to
+denote type parameters in Rust. If a name component includes a type
+parameter, the type parameter must also resolve statically to a type
+in the environment of the name. Type parameters are only part of the
+names of items. @xref{Ref.Item}.
+
+An example of a name with type parameters:
+@example
+m.map[int,str].key;
+@end example
+
+An lval component may include an indexing operator. These in turn may
+be @emph{static} or @emph{dynamic} indexing operators. @dfn{Static
+indexing operators} are enclosed in curly braces and can only include
+number literals. @dfn{Dynamic indexing operators} are enclosed in
+parentheses and can include any integral expression. Indexing
+operators applied to vectors or strings imply a run-time
+bounds-check. @xref{Ref.Type.Vec}.
+
+An example of one lval with a static indexing operator, and a second
+lval with a dynamic indexing opertor:
+@example
+x.y.@{3@}.z;
+x.y.(1 + v).z;
+@end example
 
 @page
 @node    Ref.Gram
@@ -872,9 +943,54 @@ transform a single crate source file, and its referenced contents,
 into a single compiled crate. Crate source files and compiled crates
 have a 1:1 relationship.
 
+The syntactic form of a crate is a sequence of @emph{directives}, some
+of which have nested sub-directives.
+
+A crate defines an implicit top-level anonymous module: within this
+module, all members of the crate have canonical path
+names. @xref{Ref.Path}. The @code{mod} directives within a crate file
+specify sub-modules to include in the crate: these are either
+directory modules, corresponding to directories in the filesystem of
+the compilation environment, or file modules, corresponding to Rust
+source files. The names given to such modules in @code{mod} directives
+become prefixes of the paths of items and slots defined within any
+included Rust source files.
+
+The @code{use} directives within the crate specify @emph{other crates}
+to import into the crate's namesapce; these directives may specify
+loose or tight ``matching criteria'' for imported crates, depending on
+the preferences of the crate developer. In the simplest case, a
+@code{use} directive may only specify a symbolic name and leave the
+task of locating and binding an appropriate crate to a compile-time
+heuristic. In a more controlled case, a @code{use} directive may
+specify any metadata as matching criteria, such as a URI, an author
+name or version number, a checksum or even a cryptographic signature,
+in order to select an an appropriate imported crate. @xref{Ref.Comp.Meta}.
+
 The compiled form of a crate is a loadable and executable object file
 full of machine code, in a standard loadable operating-system format
-such as ELF, PE or Mach-O.
+such as ELF, PE or Mach-O. The loadable object contains extensive
+DWARF metadata, describing:
+@itemize
+@item Metadata required for type reflection.
+@item Metadata required for fault handling.
+@item The publicly exported module structure of the crate.
+@item Any free-form metadata about the crate, defined by @code{meta} directives.
+@item The crates to dynamically link with at run-time, with matching criteria
+derived from the same @code{use} directives that guided compile-time imports.
+@end itemize
+
+The @code{syntax} directives of a crate are similar to the @code{use}
+directives, except they govern the syntax extension namespace
+(accessed through the syntax-extension sigil @code{#},
+@pxref{Ref.Comp.Syntax}) available only at compile time. A
+@code{syntax} directive also makes its extension available to all
+subsequent directives in the crate file.
+
+The @code{native} and @code{fault} directives of a crate declare
+top-level ``special'' items that are not available to nested
+modules. This restriction simplifies the treatment of first-class
+modules elsewhere in the language.
 
 An example of a crate:
 
@@ -912,7 +1028,7 @@ documentation.
 
 @page
 @node          Ref.Comp.Syntax
-@subsubsection Ref.Comp.Syntax
+@subsection    Ref.Comp.Syntax
 @c * Ref.Comp.Syntax::        Syntax extension.
 
 Rust provides a notation for @dfn{syntax extension}. The notation is a
@@ -1120,8 +1236,9 @@ destroyed or until its enclosing allocation is destroyed.
 @section Ref.Proc
 @c * Ref.Proc::                    Semantic model of processes.
 
-A executing Rust program is called a @dfn{process}. Each Rust process
-has an identity, a stack, a set of outgoing communication channels and
+A executing Rust program is called a
+@dfn{process}. @xref{Ref.Item.Prog}. Each Rust process has a program,
+an identity, a stack, a set of outgoing communication channels and
 incoming communication ports, and lazy ownership of some portion of
 the heap of a single operating-system process.
 
@@ -1163,7 +1280,7 @@ data structures.
 
 Each channel is bound to a port when the channel is constructed, so
 the destination port for a channel must exist before the channel
-itself. A channel cannot be rebound to a different port than the one
+itself. A channel cannot be rebound to a different port from the one
 it was constructed with.
 
 Many channels can be bound to the same port, but each channel is bound
@@ -1190,13 +1307,14 @@ which causes a run-time fault. To help control this possibility, a
 semi-synchronous send operation is possible, which blocks until there
 is room in the existing queue and then executes an asynchronous
 send. A full @code{flush} operation is also available, which blocks
-until a channel's queue is @emph{empty}. A @code{flush}
-does @emph{not} guarantee that a message has been @emph{received} by
-any particular recipient when the sending process is unblocked.
+until a channel's queue is @emph{empty}. A @code{flush} does
+@emph{not} guarantee that a message has been @emph{received} by any
+particular recipient when the sending process is
+unblocked. @xref{Ref.Stmt.Flush}.
 
 The asynchronous message-send operator is @code{<+}. The
-semi-synchronous message-send operator is @code{<|}. The
-message-receive operator is @code{<-}.
+semi-synchronous message-send operator is @code{<|}. @xref{Ref.Stmt.Send}. The
+message-receive operator is @code{<-}. @xref{Ref.Stmt.Recv}.
 
 @page
 @node       Ref.Proc.Life
@@ -1218,23 +1336,30 @@ of a process are:
 @item finished
 @end itemize
 
-A process begins its existence -- when it is spawned -- in
-the @emph{initialising} state. It remains in this state until
-its @code{init} block completes successfully or fails. The @code{init}
-block is executed in the @emph{execution context} of the spawning
-process, but in the @emph{scope} of the spawned process. If a fault
-occurs in the spawned process' @code{init} block, the fault-handling
-system begins its search in the @emph{spawning} context. The spawning
-context is suspended during execution of the spawned
-process' @code{init} block, much like a normal function call.
+A process begins its existence -- when it is spawned -- in the
+@emph{initialising} state. It remains in this state until its parent
+completes its @code{init} block successfully or fails. The
+@emph{parent} is responsible for running the @code{init} block -- the
+code executes in the stack and budget of the parent -- but the
+@code{init} block can access only the @emph{scope} of the child (its
+member slots and items). If a fault occurs while the parent is
+executing the child's @code{init} block, the fault-handling system
+begins its search in the @emph{parent} context. The parent context is
+suspended during execution of the child's @code{init} block, analogous
+to the parent making a normal function call.
 
-When the @code{init} block completes, a newly-spawned process
-transitions to the @emph{running} state. In this state, its control
-executes the contents of its @code{main} block. Code in
-the @code{main} block has access to any @emph{member slots} of the
-process, as does code in the @code{init} and @code{fini} blocks of the
-process. No other items in the process' implicit module have access to
-the member slots of the process.
+When the parent completes the @code{init} block, the child transitions
+from the @emph{spawning} state to the @emph{running} state. In this
+state, its control executes the contents of its @code{main}
+block. Code in the @code{main} block has access to any @emph{member
+slots} of the process, as does code in the @code{init} and @code{fini}
+blocks of the program. @xref{Ref.Item.Prog}.
+
+If a fault occurs while the child is executing the @code{main} block
+-- after a child process transitions from the @emph{initialising}
+state to the @emph{running} state -- only the child is directly
+affected; the parent is isolated from the fault (though it may receive
+linked notification, should the child fail).
 
 If a process makes a native call, it is temporarily suspended from
 the @emph{running} state and enters the @emph{native call} state. A
@@ -1273,14 +1398,14 @@ out of the @emph{failing} state are permitted.
 @subsection Ref.Proc.Sched
 @c * Ref.Proc.Sched::              Process scheduling model.
 
-Every process is equipped with a @emph{time slice counter}, a hidden numeric
-slot that is decremented on each loop back-edge and function
-call. The runtime repeatedly selects a process in the @emph{running} state,
-via fair pseudo-random choice, and activates it. If the time slice counter on
-a process reaches zero, the process yields control to the runtime. The
-process has its time slice counter reset to the configured initial time slice
-value for the runtime, and it is once again made available as a choice for the
-scheduler to randomly select.
+Every process has a @dfn{time slice counter}, which is a hidden
+numeric slot that is decremented on each loop back-edge and function
+call. The runtime repeatedly selects a process in the @emph{running}
+state, via fair pseudo-random choice, and activates it. If the time
+slice counter on a process reaches zero, the process yields control to
+the runtime. The process has its time slice counter reset to the
+configured initial time slice value for the runtime, and it is once
+again made available as a choice for the scheduler to pseudo-randomly select.
 
 If a process enters a non-running state -- for example, if it blocks
 on reading or writing -- it is not available for activation by the
@@ -1297,6 +1422,16 @@ reside in read-only memory.
 
 There are 5 primary kinds of item: types, functions, predicates,
 modules, and programs.
+
+All items form an implicit scope for the declaration of sub-items. In
+other words, within a function, predicate, type or program body,
+declarations of items can (in many cases) be mixed with the
+statements, control blocks, and similar artifacts that otherwise
+compose the item body. The meaning of these scoped items is the same
+as if the item was declared outside the scope, except that the item's
+@emph{path name} within the module namespace is qualified by the name
+of the enclosing item. The exact locations in which sub-items may be
+declared is given by the grammar.  @xref{Ref.Gram}.
 
 Items may be @emph{parameterised} by type. Type parameters are given
 as a comma-separated list of identifiers enclosed in square brackets
@@ -1323,8 +1458,10 @@ context). There are no general parametric types.
 
 A @dfn{module item} contains declarations of @emph{items}. Items may
 include functions, programs, modules, types and predicate
-declarations.  These declarations have both static and dynamic
-interpretation.
+declarations. These declarations have both static and dynamic
+interpretation. The purpose of a module is to organise @emph{names}
+and control @emph{visibility}. Modules are declared with the keyword
+@code{mod}.
 
 An example of a module:
 @example
@@ -1378,9 +1515,11 @@ map.add(m, 10, "hello");
 @subsection Ref.Item.Type
 @c * Ref.Item.Type::          Items defining the types of values and slots.
 
-A @dfn{type} defines an @emph{interpretation} of a value in memory. A
-type's interpretation is used for the values held in any slot with
-that type. The interpretation of a value includes:
+A @dfn{type} defines an @emph{interpretation} of a value in
+memory. @xref{Ref.Type}. Types are declared with the keyword
+@code{type}. A type's interpretation is used for the values held in
+any slot with that type. @xref{Ref.Mem.Slot}. The interpretation of a
+value includes:
 
 @itemize
 @item Whether the value is composed of sub-values or is indivisible.
@@ -1394,6 +1533,11 @@ interpretation of values that are composite records, each containing
 two unsigned two's complement 8-bit integers accessed through the
 components @code{x} and @code{y}, and laid out in memory with the
 @code{x} component preceding the @code{y} component.
+
+Some types are @emph{recursive}. A recursive type is one that includes
+its own definition as a component, by named reference. Recursive types
+are restricted to occur only within a single crate, and only through a
+restricted form of @code{tag} type. @xref{Ref.Type.Tag}.
 
 @page
 @node       Ref.Item.Fn
@@ -1510,16 +1654,30 @@ A predicate is a pure function returning @code{bool}, that also
 carries special meaning to the typestate system. Specifically, a
 predicate can be used as part of a @emph{constraint}; introducing a new
 predicate into a program enlarges the set of constraints that
-can be statically checked. @xref{Ref.Stmt.Stat.Constr}.
+can be statically checked. @xref{Ref.Stmt.Stat.Constr}. Predicates
+are declared with the keyword @code{pred}.
+
+Since predicates are implicitly @code{pure} and implicitly return
+@code{bool}, the signature of a @code{pred} cannot include a
+@code{pure} modifier, nor specify an output slot.
+
+An example of a predicate:
+@example
+pred divides(int d, int i) @{
+    ret d % i == 0;
+@}
+@end example
 
 @page
 @node       Ref.Item.Prog
 @subsection Ref.Item.Prog
 @c * Ref.Item.Prog::          Items defining programs.
 
-A program is the inert form of a process. Programs are @emph{spawned}
-in order to produce processes. @xref{Ref.Stmt.Spawn}. Each process
-executes a program. @xref{Ref.Type.Proc}.
+A program is the inert form of a process. @xref{Ref.Proc}. Programs
+are @emph{spawned} in order to produce
+processes. @xref{Ref.Stmt.Spawn}. Each process executes a
+program. @xref{Ref.Type.Proc}. Programs are declared with the keyword
+@code{prog}.
 
 A @code{prog} carries an implicit module, three optional blocks marked
 with the keywords @code{init}, @code{main} and @code{fini}, and a set
@@ -1600,8 +1758,8 @@ of type @code{any} is represented in memory as a pair consisting of an
 exterior value of some non-@code{any} type @var{T} and a reflection
 of the type @var{T}.
 
-Values of type @code{any} can used in an @code{alt type} statement, in
-which the reflection is used to select a block corresponding to a
+Values of type @code{any} can be used in an @code{alt type} statement,
+in which the reflection is used to select a block corresponding to a
 particular type extraction. @xref{Ref.Stmt.Alt}.
 
 @page
@@ -1745,10 +1903,17 @@ arguments.
 
 The variants of a @code{tag} type may be recursive: that is, the
 definition of a @code{tag} type may refer to type definitions that
-include the defined @code{tag} type itself. Such recursion can only be
-introduced using @code{tag} type definitions. Every recursive
-@code{tag} type must have at least one non-recursive variant, serving
-as a base case for the recursion.
+include the defined @code{tag} type itself. Such recursion has restrictions:
+@itemize
+@item Recursive types can only be introduced through @code{tag} type definitions.
+@item A recursive @code{tag} type must have at least one non-recursive
+variant (in order to give the recursion a basis case).
+@item The recursive slots of recursive variants must be @emph{exterior}
+slots (in order to bound the in-memory size of the variant).
+@item Recursive type definitions can cross module boundaries, but not module
+@emph{visibility} boundaries, nor crate boundaries (in order to simplify the
+module system).
+@end itemize
 
 An example of a @code{tag} type and its use:
 @example
@@ -1801,7 +1966,7 @@ simplex inter-process communication facility. @xref{Ref.Proc.Comm}. A
 value that can be received from a @code{port} value of that type.
 
 Ports are @emph{limited}: they cannot be transmitted through channels,
-and can only be passed between processes during process
+and can be passed between processes only during process
 initialisation.
 
 An example of a @code{port} type:
@@ -1900,7 +2065,7 @@ symbol} @emph{*}.
 When a constrained type is instantiated in a particular slot
 declaration, the formal symbol in the constraint is replaced with the
 name of the declared slot and the resulting constraint is checked
-immediately after the slot is declared.
+immediately after the slot is declared. @xref{Ref.Stmt.Check}.
 
 An example of a constrained type with two separate instantiations:
 @example
@@ -1928,8 +2093,8 @@ let ordered_range rng2 = rec(low=15, high=17);
 Rust has two kinds of expressions: @emph{parsed expressions} and
 @emph{primitive expressions}.  The former are syntactic sugar and are
 eliminated during parsing. The latter are very minimal, consisting
-only of references to slots, possibly combined via a single level
-(non-recursive) unary or binary machine-level operation (ALU or FPU).
+only of paths, possibly combined via a single level (non-recursive)
+unary or binary machine-level operation (ALU or FPU). @xref{Ref.Path}.
 
 For the most part, Rust semantics are defined in terms of
 @emph{statements}, which parsed expressions are desugared to. The
@@ -1952,8 +2117,6 @@ actions.
 @menu
 * Ref.Stmt.Stat::               The static typestate system of statement analysis.
 * Ref.Stmt.Decl::               Statement declaring an item or slot.
-* Ref.Stmt.Decl.Item::          Statement declaring an item.
-* Ref.Stmt.Decl.Slot::          Statement declaring an slot.
 * Ref.Stmt.Copy::               Statement for copying a value between two slots.
 * Ref.Stmt.Spawn::              Statements for creating new processes.
 * Ref.Stmt.Send::               Statements for sending a value into a channel.
@@ -1989,7 +2152,7 @@ statement has on its environment, as well the @emph{legality} of the
 statement in its environment.
 
 The legality of a statement is partly governed by syntactic rules,
-partly by its conformance to the types of slots it effects, and partly
+partly by its conformance to the types of slots it affects, and partly
 by a purely statement-oriented static analysis. This section describes
 the statement-oriented static analysis, also called the
 @emph{typestate} system.
@@ -2170,6 +2333,11 @@ into the enclosing statement block. The declared name may denote a new
 slot or a new item. The scope of the name extends to the entire
 containing block, both before and after the declaration.
 
+@menu
+* Ref.Stmt.Decl.Item::              Statement declaring an item.
+* Ref.Stmt.Decl.Slot::              Statement declaring a slot.
+@end menu
+
 @page
 @node          Ref.Stmt.Decl.Item
 @subsubsection Ref.Stmt.Decl.Item
@@ -2200,7 +2368,7 @@ Where @var{mode-and-type} is a slot mode and type expression,
 (@code{=}) followed by a primitive expression.
 
 Both forms introduce a new slot into the containing block scope. The
-new slot is visible across the entire scope, but is only initialised
+new slot is visible across the entire scope, but is initialised only
 at the point following the declaration statement.
 
 The latter (@code{auto}) form of slot declaration causes the compiler
@@ -2216,9 +2384,9 @@ mode. @xref{Ref.Mem.Slot}.
 @subsection Ref.Stmt.Copy
 @c * Ref.Stmt.Copy::                Statement for copying a value between two slots.
 
-A @dfn{copy statement} consists of an @emph{lval} -- a syntactic term
-denoting a slot -- followed by an equals-sign (@code{=}) and a
-primitive expression. @xref{Ref.Expr}.
+A @dfn{copy statement} consists of an @emph{lval} -- a name denoting a
+slot -- followed by an equals-sign (@code{=}) and a primitive
+expression. @xref{Ref.Expr}.
 
 Executing a copy statement causes the value denoted by the expression
 -- either a value in a slot or a primitive combination of values held
@@ -2379,8 +2547,10 @@ fn max(int a, int b) -> int @{
 Executing a @code{be} statement @footnote{A @code{be} statement in is
 analogous to a @code{become} statement in Newsqueak or Alef.}
 destroys the current function activation frame and replaces it with an
-activation frame for the called function. In other words,
-@code{be} executes a tail-call.
+activation frame for the called function. In other words, @code{be}
+executes a tail-call. The syntactic form of a @code{be} statement is
+therefore limited to @emph{tail position}: its argument must be a
+@emph{call expression}, and it must be the last statement in a block.
 
 An example of a @code{be} statement:
 @example
@@ -2462,9 +2632,9 @@ end in a @code{fix} statement, a @code{raise} statement or
 a @code{fail} statement.
 
 A @code{trap} statement is syntactically a combination of a
-fault-header and a block, and can only exist immediately after
-a @code{try} statement block. The @code{trap} statement will only
-handle @code{fault} occurrences within the dynamic control extent of
+fault-header and a block, and can exist only immediately after a
+@code{try} statement block. The @code{trap} statement will handle only
+those @code{fault} occurrences within the dynamic control extent of
 the @code{try} block and of the indicated @code{fault} type.
 
 Example of a @code{trap} statement:
@@ -2495,8 +2665,8 @@ fn outer() -> int @{
 @subsection Ref.Stmt.Fix
 @c * Ref.Stmt.Fix::                Statement for recovering from a fault.
 
-A @code{fix} statement can only occur inside a @code{trap} block,
-which means that it can only execute during a trapped fault. Executing
+A @code{fix} statement can occur only inside a @code{trap} block,
+which means that it can execute only during a trapped fault. Executing
 a @code{fix} statement causes the trapped fault to be @emph{fixed},
 which means that control returns to the site at which the fault was
 raised and normal execution continues.
@@ -2585,9 +2755,10 @@ syntactic form of a normal vector indexing expression, except the
 index is either a 2-tuple or a 3-tuple describing a bounded linear
 arithmetic sequence of indices to be selected from a vector or
 string. The linear for-loop bounds-checks the sequence @emph{once}
-when initiating the loop, then repeatedly assigns the index variable
-and/or element variable of the loop each value in the sequence (and/or
-its selected element), executing the loop body once per assignment.
+when initiating the loop, then repeatedly copies into the index
+variable and/or into the element variable of the loop each value in
+the sequence (and/or its selected element), executing the loop body
+once per copy.
 
 Example of a linear for-loop:
 @example
