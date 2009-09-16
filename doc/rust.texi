@@ -10,12 +10,9 @@
 @ifinfo
 This manual is for the ``Rust'' programming language.
 
-Copyright 2006, 2007 Graydon Hoare
+Copyright 2006-2009 Graydon Hoare
 
-All rights reserved
-
-Licensed to the public under the terms of the GNU GPL (>= 2.0).
-See the file COPYING for details
+All rights reserved (for the time being).
 @end ifinfo
 
 @dircategory Programming
@@ -30,10 +27,9 @@ See the file COPYING for details
 
 @page
 @vskip 0pt plus 1filll
-Copyright @copyright{} 2006 Graydon Hoare
-All rights reserved
-Licensed to the public under the terms of the GNU GPL (>= 2.0).
-See the file COPYING for details
+Copyright @copyright{} 2006-2009 Graydon Hoare
+
+All rights reserved (for the time being).
 @end titlepage
 
 @ifnottex
@@ -45,14 +41,16 @@ Rust Documentation
 Rust is a general-purpose programming language. It supports imperative
 procedural, concurrent actor and pure functional styles. Rust also
 supports generic programming and metaprogramming, in both static and
-dynamic forms.
+dynamic styles.
 
 @end ifnottex
 
 @menu
-* Introduction::               Background, intentions, relationships to other languages
-* Lexicon::                    The basic terms used when discussing Rust
-* Artifacts::                  A catalogue of the syntactic forms and their meanings
+* Disclaimer::                 Notes on a work in progress.
+* Introduction::               Background, intentions, relationships to other languages.
+* Tutorial::                   Gentle introduction to reading Rust code.
+* Reference::                  Systematic reference of language elements.
+* Index::                      Index
 @end menu
 
 @ifnottex
@@ -61,261 +59,2127 @@ Complete table of contents
 
 @contents
 
+@c ############################################################
+@c Disclaimer
+@c ############################################################
+
+@page
+@node    Disclaimer
+@chapter Disclaimer
+
+Gentle reader,
+
+You are looking at a work in progress. This is a @emph{non-public} and
+decidedly @emph{unfinished} document describing an even-less-finished
+language that has been stewing in my unconscious for a very long time,
+working its way out through successive sketches and prototypes,
+background reading, and eventually a spare-time ``full''
+implementation starting a little less than 4 years ago. I am sending
+it to you in order to get focused review on the material presented
+within. If you have a moment, I'd like to present some caveats and
+requests:
+
+@itemize
+@item
+I have written this document entirely in the present tense, despite a
+majority of the features described within only existing in a very
+sketchy, partial, or entirely absent form in the @emph{bootstrap}
+compiler. Moreover, work on the ``real'' @emph{self-hosting} compiler
+is only just beginning, and for the most part if something sounds
+not-yet-implemented, it may well not be. Switching writing tenses
+and/or constantly updating the document to track implementation
+progress seemed too tedious to bother with, so I haven't. If you want
+to know about progress on a particular feature, please ask me.
+
+@item
+At the time of this writing, the bootstrap compiler is about 20,000
+lines of Ocaml -- including its own backend -- and emits small but
+otherwise very inefficient native x86 code in PE and ELF
+executables. It handles the memory, process and communication model,
+including all slot modes, lifecycle and transplantation, and can
+define and call functions (including simple C functions), spawn
+processes, and manipulate basic structural types such as vectors,
+tuples and records. But it is still very much in development.
+
+@item
+Please keep this document, the existence of this work and my
+engagement in it, completely to yourself. I've selected a group of
+people to review this work but I am not at all interested in
+publishing before the language is at a ``suitably demonstrable''
+stage. Writing languages is delicate work and actually doesn't benefit
+all that much in early stages from ``release early, release
+often''. It benefits a lot in later stages, and I have every intention
+to release it publicly under a nice friendly MIT license once it's
+condensed and contracted to the point that it's worth playing with.
+
+@item
+Regarding ``contraction'': the language @emph{shrinks} the more I work
+on it. This is a good thing: parsimony is a virtue in languages. Most
+of the time I've spent on this language has involved convincing ideas
+that didn't quite seem like they could be merged to merge, so that I
+could discard one or another of them. Therefore, while the version you
+are seeing in this document is ``being filled in'', the scope is
+progressing @emph{inward} as the pieces solidify, from more features
+to fewer. Therefore I ask that @emph{if} you provide feedback that
+suggests feature @emph{additions}, you think long and hard about
+whether they would work in a library, whether they might be deferrable
+to a later version of the language, or whether they might be omitted
+altogether while still providing something of use.  I will be
+absolutely thrilled if I manage to ship all the pieces described here,
+but I expect I'll need to throw a few more out before I'm done. Adding
+is not my goal in requesting feedback.
+@end itemize
+
+Thanks for your time.
+@flushright
+                                   - Graydon Hoare
+                                     Sept 2009
+@end flushright
+
+
+
+@c ############################################################
+@c Introduction
+@c ############################################################
+
+@page
 @node    Introduction
 @chapter Introduction
 
 @quotation
-  It should be easy to say what you want to happen, and just as easy
-  to say what you want to @emph{not happen}.
+  We have to fight chaos, and the most effective way of doing that is
+  to prevent its emergence.
+@flushright
+                                   - Edsger Dijkstra
+@end flushright
 @end quotation
+@sp 2
 
-Rust is a ``curly-brace'' block-structured language; it visually
-resembles the Algol / C family, but differs significantly in syntactic
-and semantic details.
+Rust is a ``curly-brace'' block-structured statement language. It
+visually resembles the C language family, but differs significantly in
+syntactic and semantic details. It is strongly oriented towards
+concerns of ``programming in the large'', that is, of creating and
+maintaining @emph{boundaries} -- both abstract and operational -- that
+preserve large-system integrity and availability.
 
-Rust's semantics are a mixture of elements found in Ada, Mesa, ML, CLU
-and Hermes. It can most readily be considered a descendent of Hermes,
-though there is no formal relationship.
+@menu
+* Goals::                      Intentions, motivations.
+* Sales Pitch::                A summary for the impatient.
+* Influences::                 Relationship to past languages.
+@end menu
+
+
+@node    Goals
+@section Goals
 
 The language design pursues the following goals:
 
+@sp 1
 @itemize
-@item Error isolation, detection and prevention.
+@item Compile-time error detection and prevention.
+@item Run-time fault tolerance and containment.
+@item System building, analysis and maintenance affordances.
 @item Clarity and precision of expression.
 @item Implementation simplicity.
-@item Runtime efficiency.
+@item Run-time efficiency.
 @end itemize
+@sp 1
 
-In pursuit of these goals, some common language features were
-rejected. While not unique in rejecting these features -- some similar
-rejections are made in the ancestral languages noted above -- the
-informed reader should keep in mind that such rejections are usually
-@emph{intentional}. An uncommon technique does not necessariliy arise
-from ignorance of the alternative. This manual may provide discussion
-or footnotes for additional rationale, when notable cases arise.
+Note that most of these goals are @emph{engineering} goals, not
+showcases for sophisticated language technology. Most of the
+technology in Rust is @emph{old} and has been seen decades earlier in
+other languages.
 
-Four characteristics of Rust's design motivate most of the rejected
-features.
+Also note that ``terseness'' and ``expressiveness'' are absent from
+the list. Rust programs are often larger and more verbose than
+equivalent programs in other languages. 
 
-First, Rust occasionally strays from the standard language-design
-principles of @i{minimality} and @i{orthogonality}. Rust is
-unapologetically a medium-sized language; there are many languages
-smaller and simpler. Some Rust constructs are only useful in
-particular ``safe'' or ``efficient'' combinations. Other constructs
-are conspicuously duplicated -- with important specializations for
-different cases -- due to concerns for safety, clarity or speed. 
+@page
+@node    Sales Pitch
+@section Sales Pitch
 
-Second, while Rust can probably be classified as a ``static language''
--- owing to the presence of a strong static type system and a certain
-amount of static reasoning about storage and lifecycle -- it also
-resists the habit many ``static languages'' have of throwing out all
-information and language-tool functionality after compile time. Rust's
-dynamic semantics are intended to support many of the useful features
-of ``dynamic language'' environments such as reflective debugging,
-live code generation, ``hot'' code replacement, heterogeneous
-collections and latent-typed generic functions.
-
-Third, Rust rejects a family of features that stem from a particular
-interpretation of the Object Orientation paradigm, and that have come
-to be ``canonical'' in mainstream (non-academic) language
-designs. Features such as code-inheritence, ubiquitous dynamic
-binding, cyclical memory graphs, pointer-rich data structures, and
-shared-visibility concurrency are all avoided in Rust. The legitimate
-motivations for these features are addressed via other means.
-
-Fourth, Rust rejects models of computation that require expensive
-runtime mechanisms to support, or appear to be ``hiding'' important
-aspects of real computing machinery behind too much abstraction. Of
-course this distinction is aesthetic and subjective.  To be specific:
-Rust intentionally omits lazy or implicit evaluation, implicit data
-parallelism, software transactional memory and tracing garbage
-collection. Rust presents a model of computation deemed ``most
-obvious'' on Von Neumann machines: linear memory segments with
-explicit owners, explicit co-routines and communication primitives,
-and strict, sequential execution within primary routines. Parallelism
-is supported -- indeed it is ubiquitous in Rust's abstractions -- but
-only in explicit terms.
-
-
-@node    Lexicon
-@chapter Lexicon
-
-Rust is defined in terms that may be familiar to readers experienced
-with other programming languages. Nevertheless it is important to
-clarify the meaning of certain terms which are used in precise, and
-occasionally unusual ways within the language definition.
-
-In the following sections, some terms are used but not defined. In
-some cases example code is given with portions unexplained. The
-purpose of the following sections is to provide suggestive intuitions
-about major concepts in Rust. Precise definitions are provided in
-later chapters.
-
-
-@node    Programs and Processes
-@section Programs and Processes
-
-Rust borrows operating system terminology in order to differentiate
-two important artifacts: @i{programs} and @i{processes}. A program is
-the inert, non-executing form of rust code. A process is the
-instantiated, ``live'', possibly-executing form of rust code. A
-program can be executed, a process @emph{is an executing instance} of
-a program; every process has a program that it is currently executing.
-We will use these terms precisely and non-interchangeably.
-
-Programs and processes are Rust's fundamental units of encapsulation,
-state, behavior and concurrency. A collection of rust code may define
-many distinct programs, and each program can be instantiated into many
-distinct processes. Processes execute functions, exchange messages
-with other processes, and may spawn further sub-processes. Processes
-may execute concurrently, or may have their execution interleaved.
-
-There is some similarity between the OOP terms ``class'' and
-``object'' and the Rust terms ``program'' and ``process''. In OOP,
-classes are instantiated into objects; in Rust, programs are
-instantiated into processes. This similarity may help your intuition,
-but it is not enough to motivate us to adopt the OOP terminology:
-there are sufficient differences between Rust's process model and OOP
-that such terminology would cause confusion. Rust does not define
-anything called a ``class'' or an ``object''.
-
-When we wish to speak of operating system processes we will use the
-term ``operating system processes'' or ``OS processes''; otherwise the
-word ``process'' refers to a rust process. Rust processes are
-considerably smaller and more lightweight than operating system
-processes: a single OS process running Rust code may contain thousands
-or millions of Rust processes.
-
-We may sometimes speak of ``a program doing something''. This is a
-short-hand way of saying that ``a process that is an instance of the
-program would do something''. Programs themselves do not @emph{do}
-anything; they are inert values, pieces of text. The difference is
-important to maintain in your mind, as Rust defines very different
-operations on programs and processes. Programs may be parsed, printed,
-copied, transmitted, compiled, typechecked or executed. Processes may
-be started, paused, resumed, stopped, or queried for various execution
-parameters.
-
-@node    Values and Slots
-@section Values and Slots
-
-Rust programs manipulate values. A Rust @i{value} is any information
-that can be denoted by a Rust term. Values occupy memory: every value
-consumes a certain number of bits. Numbers are values, as are strings,
-records, vectors, programs, processes, and many other things
-besides.
-
-Some values have slots. A @i{slot} is a named set of bits
-@emph{inside} a value that can @emph{refer to} another value, either
-directly by containing the referent, or indirectly by storing a memory
-address of the referent. Variables within a module or stack frame are
-slots, as are the fields within records or the components of vectors.
-
-@node    Types, Forms, Predicates, Constraints and Conditions
-@section Types, Forms, Predicates, Constraints and Conditions
-
-Every Rust slot has a type. A @i{type} is a static description of a
-subset of all the possible values. A type has two parts: 
+The following comprises a brief ``sales pitch'' overview of the
+salient features of Rust, relative to other languages.
 
 @itemize
-@item the @i{form} of the type
-@item the @i{condition} of the type
+
+@sp 1
+@item Predictable native code, simple runtime
+
+The meaning and cost of every operation within a Rust program is
+intended to be easy to model for the reader. The code should not
+``surprise'' the programmer once it has been compiled.
+
+Rust is designed to be compiled to mostly-static native code, with
+relatively large compilation units and plenty of room for whole-unit
+optimisation. The output of a Rust compilation is a standard loadable
+object of machine code (ELF, PE, Mach-O), containing standard metadata
+(DWARF), and works with existing disassemblers, analysis tools,
+debuggers and profilers. Such object files can be dynamically loaded,
+via the standard operating-system loader, into other processes, and
+executed cooperatively.
+
+The runtime is relatively small and provides some memory management,
+lightweight process scheduling, internal communication queueing and
+reflection services, but these are all implemented in a
+straightforward and obvious fashion, in standard C, with a low-level
+service provider interface available to embeddings. No research-level
+virtual machine, JIT or garbage collection technology is required.
+
+@sp 1
+@item Integrated system-construction facility
+
+The units of compilation of Rust are multi-file amalgamations called
+@emph{crates}. A crate is described by a separate, declarative type of
+source file that guides the compilation of the crate, its packaging,
+its versioning, and its external dependencies. Crates are also the
+units of distribution and loading. Significantly: the dependency graph
+of crates is @emph{acyclic} and @emph{anonymous}: there is no global
+namespace for crates, and module-level recursion cannot cross crate
+barriers.
+
+Unlike many languages, individual modules do @emph{not} carry all the
+mechanisms or restrictions of crates. Modules and crates serve
+different roles.
+
+@sp 1
+@item Lightweight cooperative processes
+
+Like many @emph{actor} languages, Rust provides an isolation (and
+concurrency) model based on lightweight processes scheduled by the
+language runtime. These processes are inexpensive and @emph{mostly}
+statically secure from one another; breaking the rule of process
+isolation is only possible by calling external (C) code.
+
+Inter-process communication is typed, asynchronous and simplex, based
+on passing messages over channels to ports. Transmission can be
+rate-limited or rate-unlimited. Communication is fair and
+pseudo-randomised on the receiver side.
+
+@sp 1
+@item Stack-based iterator functions
+
+Between the extremes of ``asynchronous concurrent processes'' and
+``synchronous single-invocation functions'', Rust also provides a form
+of multiple-invocation iterator function, modeled after the same
+facility in @code{CLU}. Iterator functions can @emph{temporarily}
+suspend execution and return a value to their caller, resuming
+execution at the point of suspension when they are re-invoked.
+
+The iterator function facility is tightly integrated into the
+@code{for} loop construct. Only @code{for} loop headers can invoke
+iterator functions, and iterator frames live on the same call stack as
+normal function frames, so cannot escape the invoking loop.
+
+@sp 1
+@item Direct interface to C code
+
+Rust can load and call many C library functions simply by declaring
+them in the enclosing crate file. Calling a C function statically
+marks a process as ``unsafe'', unless the unsafe process is further
+isolated within an external ``heavyweight'' operating-system
+subprocess. Every ``unsafe'' process in a Rust compilation unit must
+be explicitly marked as audited and authorised in the crate file.
+
+@sp 1
+@item Typestate system
+
+Every storage slot in Rust participates in not only a conventional
+structural static type system, describing the interpretation of memory
+in the slot, but also a @emph{typestate} system. The static typestates
+of a program describe the set of @emph{pure, dynamic predicates} that
+provably hold over some set of slots, at each point in the program's
+control flow graph. The static calculation of the typestates of a
+program is a dataflow problem, and handles user-defined predicates in
+a similar fashion to the way the type system permits user-defined
+types.
+
+A short way of thinking of this is: types statically model the kinds
+of values held in slots, typestates statically model @emph{assertions
+that hold} before and after statements.
+
+@sp 1
+@item Safe control over memory allocation, packing and aliasing.
+
+Every variable or field in Rust is a combination of a type and a mode;
+this combination is called a @emph{slot}. There are 4 kinds of slot
+mode, denoting 4 ways of referring to a value:
+
+@itemize
+@item ``interior'' (by value)
+@item ``exterior'' (by reference-counted heap allocation)
+@item ``read-alias'' (by provably-owned direct address)
+@item ``write-alias'' (as with read-alias, but permitting writes)
 @end itemize
 
-The form of a type describes how many bits the type occupies in
-memory, and how to interpret those bits. Forms are built from a set of
-fundamental ``machine-level'', and can be combined in two ways. First,
-code may declare new forms by making ``data'' declarations. These
-introduce new forms of record or disjoint union, with specific field
-names and a unique constructor name. Second, code may combine existing
-types in transparent structural combinations: functions and
-vectors. For example, this code:
+Interior slots declared as variables in a function are allocated very
+quickly on the stack, as part of a local activation frame, as in C or
+C++. Read-alias slots permit efficient by-reference parameter passing
+without adjusting heap reference counts, as alias lifetimes outlive
+callee lifetimes. Write-alias slots additionally permit controlled
+mutation of a parameter by a callee, effectively providing ``out
+parameters''.
 
+Copying data between slots of different modes may cause either a
+simple address assignment or reference-count adjustment, or may cause
+a value to be ``transplanted'': copied by value from the interior of
+one memory structure to another, or between stack and
+heap. Transplanting, when necessary, is predictable and automatic, as
+part of the definition of the copy operator (@code{=}).
+
+In addition, slots have a static initialisation state that is
+calculated by the typestate system. This permits late initialisation
+of variables in functions with complex control-flow, while still
+guaranteeing that every use of a slot occurs after it has been
+initialised.
+
+@sp 1
+@item Acyclic ownership graph, copy-on-write memory semantics.
+
+Three of the four slot modes in Rust are mutable, but writing through
+a slot requires that the writer is the sole owner of the memory
+structure being written to. When a structure is shared by an exterior
+slot with a reference count greater than one, the structure is
+automatically duplicated, and the now-private copy is written to.
+
+Having an acyclic ownership graph supports a ``semi-functional'' view
+of values, in which memory structures are mutable, but always
+@emph{effectively private} to the variable ``owning'' them. This
+assumption is required by the typestate system, the communication
+system and the slot transplanting system.
+
+@sp 1
+@item Structural algebraic data types
+
+The Rust type system is structural rather than nominal (with the
+exception of opaque module types), and contains the standard
+assortment of useful ``algebraic'' type constructors from functional
+languages, such as function types, tuples, record types, vectors, and
+tagged disjoint unions.
+
+@sp 1
+@item Generic code
+
+Rust supports a simple form of parametric polymorphism: functions,
+types and modules can be parameterised by other types. Only one
+constraint is modeled on type parameters: whether or not the parameter
+type is @emph{limited} (non-transmittable over a channel). Beyond this,
+type parameters are treated as opaque within the parameterised code.
+
+@sp 1
+@item Local type inference
+
+To save some quantity of programmer key-pressing, Rust supports local
+type inference: signatures of functions and programs always require
+type annotation, but within the body of a function many types can be
+declared @code{auto} and Rust will infer the type from its use in the
+function.
+
+@sp 1
+@item Existential module system
+
+Rust's module system is based on existential types with local
+opening. It permits higher-order modules, module composition,
+projection and indirection. Modules are both static binding constructs
+and also first class values, but are (mostly) orthogonal to
+compilation units.
+
+@sp 1
+@item Dynamic type
+
+Rust includes support for slots of a top type, @code{any}, that can
+hold any type of value whatsoever. An @code{any} slot is simply a pair
+of a type code and an exterior value of that type. Injection into an
+@code{any} and projection by type-case-selection is integrated into the
+language.
+
+@sp 1
+@item Dynamic metaprogramming (reflection)
+
+Rust supports run-time reflection on the structure of a crate, using
+the same DWARF tables used to support the @code{any} type and various
+other runtime services.
+
+@sp 1
+@item Static metaprogramming (syntactic extension)
+
+Rust supports a system for syntactic extension that can be loaded into
+the compiler, to implement user-defined notations, macros,
+program-generators and the like. These notations are @emph{marked}
+using a special form of bracketing, such that a reader unfamiliar with
+the extension can still parse the surrounding text by skipping over
+the bracketed ``extension text''.
+
+@sp 1
+@item Fault management
+
+Like many languages, Rust provides a system for managing abnormal or
+erroneous circumstances that may arise during execution. Such a
+circumstance is called a @code{fault}, and is declared like a
+function. Code can @code{raise} a fault, which causes the runtime to
+search the control stack for a @code{trap} block and transfer control
+to it. Trapping a fault does @emph{not} cause the process' stack to
+unwind; the trap block is invoked while the raising context is
+suspended, awaiting a fix.
+
+A trap block may choose to @code{fix} a fault, to @code{raise} a new
+fault, or to @code{fail}. If the fault is fixed -- returning some
+value to the raising context -- execution resumes at the raising
+context. If a new fault is raised, the runtime commences a nested
+search for a trap handler, searching outward from the dynamic context
+of the initial trap.
+
+@sp 1
+@item Failure and finishing
+
+If a raised fault is not trapped or a @code{fail} statement is
+executed in any context -- trap or otherwise -- the process enters a
+@emph{failing} state. A failing process unwinds its control stack,
+frees all of its owned resources and enters the @emph{finished}
+state. Failure is idempotent and non-recoverable.
+
+If a process finishes due to failure, the runtime notifies any
+@emph{linked} process via a registered channel. This can be used to
+independently arrange supervision and failure-propagation modes for
+groups of related processes.
+
+@sp 1
+@item Deterministic destruction
+
+Processes have destructors -- called @code{fini} blocks -- which are
+executed deterministically in bottom-up ownership order, as control
+frames are exited and/or owned processes are otherwise freed from data
+structures holding them. The same destructors are run in the same
+order whether the process finishes due to failure or normal execution.
+
+Similarly, the rules for freeing non-process memory are deterministic
+and predictable: on scope-exit or structure-release, interior slots
+are released immediately, exterior slots have their reference count
+decreased and are released if the count drops to zero. Alias slots are
+not affected by scope exit.
+
+@end itemize
+
+
+@page
+@node    Influences
+@section Influences
+@sp 2
+
+@quotation
+  The essential problem that must be solved in making a fault-tolerant
+  software system is therefore that of fault-isolation. Different programmers
+  will write different modules, some modules will be correct, others will have
+  errors. We do not want the errors in one module to adversely affect the
+  behaviour of a module which does not have any errors.
+
+@flushright
+                                   - Joe Armstrong
+@end flushright
+@end quotation
+@sp 2
+
+@quotation
+  In our approach, all data is private to some process, and processes can
+  only communicate through communications channels. @emph{Security}, as used
+  in this paper, is the property which guarantees that processes in a system
+  cannot affect each other except by explicit communication.
+
+  When security is absent, nothing which can be proven about a single module
+  in isolation can be guaranteed to hold when that module is embedded in a
+  system [...]
+@flushright
+                                   - Robert Strom and Shaula Yemini
+@end flushright
+@end quotation
+@sp 2
+
+@quotation
+  Concurrent and applicative programming complement each other. The
+  ability to send messages on channels provides I/O without side effects,
+  while the avoidance of shared data helps keep concurrent processes from
+  colliding.
+@flushright
+                                   - Rob Pike
+@end flushright
+@end quotation
+@sp 2
+
+@page
+Rust is not a particularly original language. It may however appear
+unusual by contemporary standards, as its design elements are drawn
+from a number of ``historical'' languages that have, with a few
+exceptions, fallen out of favour. Four prominent lineages contribute
+the most:
+
+@itemize
+@sp 1
+@item
+The NIL (1981) and Hermes (1990) family. These languages were
+developed by Robert Strom, Shaula Yemini, David Bacon and others in
+their group at IBM Watson Research Center (Yorktown Heights, NY, USA).
+
+@sp 1
+@item
+The Napier (1985) and Napier88 (1988) family. These languages were
+developed by Malcolm Atkinson, Ron Morrison and others in their group
+at the University of St. Andrews (St. Andrews, Fife, UK).
+
+@sp 1
+@item
+The Erlang (1987) language, developed by Joe Armstrong, Robert
+Virding, Claes Wikstr@"om, Mike Williams and others in their group at
+the Ericsson Computer Science Laboratory (@"Alvsj@"o, Stockholm, Sweden) .
+
+@sp 1
+@item
+The Newsqueak (1988), Alef (1995), and Limbo (1996) family. These languages
+were developed by Rob Pike, Phil Winterbottom, Sean Dorward and others in
+their group at Bell labs Computing Sciences Reserch Center (Murray Hill,
+NJ, USA).
+@end itemize
+
+@sp 1
+Additional influences can be seen from the ML family, Camlp4, and various
+``pre-Object-Orientation'' languages of the 70s (CLU, Ada, Mesa, Alphard,
+Euclid, etc.)
+
+@c ############################################################
+@c Tutorial
+@c ############################################################
+
+@page
+@node    Tutorial
+@chapter Tutorial
+
+@emph{TODO}.
+
+@c ############################################################
+@c Reference
+@c ############################################################
+
+@page
+@node    Reference
+@chapter Reference
+
+@menu
+* Ref.Lex::                     Lexical structure.
+* Ref.Path::                    References to slots and items.
+* Ref.Gram::                    Grammar.
+* Ref.Comp::                    Compilation and component model.
+* Ref.Mem::                     Semantic model of memory.
+* Ref.Proc::                    Semantic model of processes.
+* Ref.Item::                    The components of a module.
+* Ref.Type::                    The types of values held in memory.
+* Ref.Expr::                    Parsed and primitive expressions.
+* Ref.Stmt::                    Program execution as sequences of statements.
+* Ref.Run::                     Organisation of runtime services.
+@end menu
+
+@page
+@node    Ref.Lex
+@section Ref.Lex
+@c * Ref.Lex::                     Lexical structure.
+
+The lexical structure of a Rust source file or crate file is defined
+in terms of Unicode character codes and character properties.
+
+Groups of Unicode character codes and characters drawn from particular
+property classes are organised into @emph{tokens}. Tokens are defined
+as the longest contiguous sequence of characters within the same token
+type (identifier, keyword, literal, symbol), or interrupted by ignored
+characters.
+
+Most tokens in Rust follow rules similar to the C and Java family.
+
+@emph{TODO: formalise this section much more}.
+
+@menu
+* Ref.Lex.Ignore::       Ignored characters.
+* Ref.Lex.Ident::        Identifier tokens.
+* Ref.Lex.Key::          Keyword tokens.
+* Ref.Lex.Num::          Numeric tokens.
+* Ref.Lex.Text::         String and character tokens.
+* Ref.Lex.Syntax::       Syntactic extension tokens.
+* Ref.Lex.Sym::          Special symbol tokens.
+@end menu
+
+@page
+@node       Ref.Lex.Ignore
+@subsection Ref.Lex.Ignore
+@c * Ref.Lex.Ignore::            Ignored tokens.
+
+The classes of @emph{whitespace} and @emph{comment} is ignored, and
+are not considered as tokens.
+
+@dfn{Whitespace} is any sequence of Unicode characters with the
+@emph{General Category} property @code{Zs}, @code{Zl}, or @code{Zp}.
+
+@dfn{Comments} are any sequence of Unicode characters beginning with
+U+002f U+002f (@code{//}) and extending to the end of a line (a
+Unicode character with @emph{General Category}
+property @code{Zl}), @emph{excluding} cases in which such a sequence
+occurs within a string literal token or a syntactic extension token.
+
+
+@page
+@node       Ref.Lex.Ident
+@subsection Ref.Lex.Ident
+@c * Ref.Lex.Ident::             Identifier tokens.
+
+Identifiers follow the pattern of C and Java identifiers: they must
+begin with a @emph{letter} and continue with any combination
+of @emph{letters} and @emph{digits} and the underscore
+character @code{_} (Unicode character U+005f), and must not be equal
+to any keyword. @xref{Ref.Lex.Key}.
+
+A @emph{letter} is a Unicode character with the @emph{General
+Category} property @code{Lu}, @code{Ll}, @code{Lt}, @code{Lm},
+or @code{Lo}.
+
+A @emph{digit} is a Unicode character with the @emph{General Category}
+property @code{Nd}.
+
+@page
+@node       Ref.Lex.Key
+@subsection Ref.Lex.Key
+@c * Ref.Lex.Key::                Keyword tokens.
+
+The keywords are:
+
+@sp 2
+
+@multitable @columnfractions .15 .15 .15 .15 .15
+@item @code{mod}
+@tab @code{use}
+@tab @code{meta}
+@tab @code{syntax}
+@item @code{pure}
+@tab @code{pub}
+@tab @code{lim}
+@tab @code{auto}
+@tab @code{native}
+@item @code{while}
+@tab @code{if}
+@tab @code{else}
+@tab @code{alt}
+@tab @code{do}
+@item @code{fault}
+@tab @code{try}
+@tab @code{raise}
+@tab @code{trap}
+@tab @code{fix}
+@item @code{spawn}
+@tab @code{init}
+@tab @code{main}
+@tab @code{fail}
+@tab @code{fini}
+@item @code{let}
+@tab @code{any}
+@tab @code{check}
+@tab @code{prove}
+@tab @code{log}
+@item @code{type}
+@tab @code{bool}
+@tab @code{true}
+@tab @code{false}
+@tab @code{int}
+@item @code{u8}
+@tab @code{u16}
+@tab @code{u32}
+@tab @code{u64}
+@tab @code{f64}
+@item @code{s8}
+@tab @code{s16}
+@tab @code{s32}
+@tab @code{s64}
+@item @code{rec}
+@tab @code{tag}
+@tab @code{vec}
+@tab @code{char}
+@tab @code{str}
+@item @code{prog}
+@tab @code{proc}
+@tab @code{port}
+@tab @code{chan}
+@tab @code{flush}
+@item @code{fn}
+@tab @code{fn?}
+@tab @code{fn!}
+@tab @code{fn*}
+@tab @code{fn+}
+@item @code{for}
+@tab @code{for?}
+@tab @code{for!}
+@tab @code{for*}
+@tab @code{for+}
+@item @code{ret}
+@tab @code{ret?}
+@tab @code{ret!}
+@tab @code{ret*}
+@tab @code{ret+}
+@item @code{put}
+@tab @code{put?}
+@tab @code{put!}
+@tab @code{put*}
+@tab @code{put+}
+@item @code{be}
+@tab @code{be?}
+@tab @code{be!}
+@tab @code{be*}
+@tab @code{be+}
+@end multitable
+
+@sp 2
+In addition to these names, any symbols consisting of a single
+lowercase letter in the ASCII range @code{a-z} followed by a sequence
+of 1 or more decimal digits is reserved as a future machine type in
+a later version of the language. @xref{Ref.Type.Mach}.
+
+@page
+@node       Ref.Lex.Num
+@subsection Ref.Lex.Num
+@c * Ref.Lex.Num::                 Numeric tokens.
+
+@emph{TODO: describe numeric literals}.
+
+@page
+@node       Ref.Lex.Text
+@subsection Ref.Lex.Text
+@c * Ref.Lex.Key::                 String and character tokens.
+
+@emph{TODO: describe string and character literals}.
+
+@page
+@node       Ref.Lex.Syntax
+@subsection Ref.Lex.Syntax
+@c * Ref.Lex.Syntax::              Syntactic extension tokens.
+
+Syntactic extensions are marked with the @emph{pound} sigil @code{#}
+(U+0023), followed by a qualified name of a compile-time imported
+module, an optional parenthesized list of @emph{tokens}, and an
+optional brace-enclosed region of free-form text (with brace-matching
+and brace-escaping used to determine the limit of the
+region). @xref{Ref.Comp.Syntax}.
+
+@emph{TODO: formalise those terms more}.
+
+@page
+@node       Ref.Lex.Sym
+@subsection Ref.Lex.Sym
+@c * Ref.Lex.Sym::                 Special symbol tokens.
+
+The special symbols are:
+
+@sp 2
+
+@multitable @columnfractions .1 .1 .1 .1 .1 .1
+@item @code{@@}
+@tab @code{^}
+@tab @code{~}
+@tab @code{:}
+@tab @code{;}
+@tab @code{->}
+@item @code{+}
+@tab @code{-}
+@tab @code{*}
+@tab @code{/}
+@tab @code{%}
+@tab @code{}
+@item @code{=}
+@tab @code{<-}
+@tab @code{<|}
+@tab @code{<+}
+@tab @code{}
+@item @code{[}
+@tab @code{]}
+@tab @code{@{}
+@tab @code{@}}
+@tab @code{(}
+@tab @code{)}
+@item @code{&}
+@tab @code{|}
+@tab @code{!}
+@tab @code{,}
+@tab @code{.}
+@item @code{<}
+@tab @code{<=}
+@tab @code{>=}
+@tab @code{>}
+@tab @code{}
+@end multitable
+
+
+@node    Ref.Path
+@section Ref.Path
+@c * Ref.Path::               References to slots and items.
+
+A @dfn{path} is a ubiquitous syntactic form in Rust that deserves
+special attention. A path denotes a slot or an
+item. @xref{Ref.Mem.Slot}. @xref{Ref.Item}. Every slot and item in a
+Rust crate has a @emph{canonical path} that refers to it from the
+crate top-level, as well as a number of shorter @emph{relative paths}
+that may also denote it in inner scopes of the crate. There is no way
+to define a slot or item without a canonical path within its crate
+(with the exception of the crate's implicit top-level module). Paths
+have meaning only within a specific crate. @xref{Ref.Comp.Crate}.
+
+Paths consist of period-separated components. In the simplest
+form, path components are identifiers. @xref{Ref.Lex.Ident}.
+
+Two examples of simple paths consisting of only identifier components:
 @example
-data employee = rec @{ 
-                      string name; 
-                      dec salary; 
-                    @};
-
-type byte = u8;
-type buf = vec[byte];
+x;
+x.y.z;
 @end example
 
-introduces 3 new types. The first is a record data type with two named
-fields; values of this record type are only form-compatible with slots
-declard as type @code{employee}. The second and third present
-transparent type abbreviations for unsigned 8-bit values and vectors
-thereof; values of the vector type are form-compatible with slots
-declared as any other abbreviation for the same type, or indeed merely
-declared as the normalized type name @code{vec[u8]}.
+Paths fall into two important categories: @emph{names} and
+@emph{lvals}.
 
-The @i{condition} of a type is a set of zero or more constraints. 
+A @dfn{name} denotes an item, and is statically resolved to its
+referent at compile time.
 
-A @i{constraint} is a predicate applied to some arguments. Arguments
-to a constraint may either be visible slots, or else the implicit
-``formal slot'' named @code{*}.
+An @dfn{lval} denotes a slot, and is statically resolved to a sequence
+of memory operations and primitive (arithmetic) expressions required
+to load or store to the slot at compile time.
 
-A @i{predicate} is a pure boolean function. We say that a predicate
-``holds'' over a value if the predicate returns @code{true} when
-applied to the value, otherwise we say that the predicate ``does not
-hold'' over the value. We may also generalize this to speak of a
-constraint ``holding'' if its predicate holds over the constraint's
-arguments, or of a condition ``holding'' when @emph{all} the
-constraints in the condition hold.
+In some contexts, the Rust grammar accepts a general @emph{path}, but
+a subsequent syntactic restriction requires the path to be an lval or
+a name. In other words: in some contexts an lval is required (for
+example, on the left hand side of the copy operator,
+@pxref{Ref.Stmt.Copy}) and in other contexts a name is required (for
+example, as a type parameter, @pxref{Ref.Item}). In no case is the
+grammar made ambiguous by accepting a general path and restricting
+allowed paths to names or lvals after parsing. These restrictions are
+noted in the grammar. @xref{Ref.Gram}.
 
+A name component may include type parameters. Type parameters are
+denoted by square brackets. Square brackets are used @emph{only} to
+denote type parameters in Rust. If a name component includes a type
+parameter, the type parameter must also resolve statically to a type
+in the environment of the name. Type parameters are only part of the
+names of items. @xref{Ref.Item}.
+
+An example of a name with type parameters:
+@example
+m.map[int,str].key;
+@end example
+
+An lval component may include an indexing operator. These in turn may
+be @emph{static} or @emph{dynamic} indexing operators. @dfn{Static
+indexing operators} are enclosed in curly braces and can only include
+number literals. @dfn{Dynamic indexing operators} are enclosed in
+parentheses and can include any integral expression. Indexing
+operators applied to vectors or strings imply a run-time
+bounds-check. @xref{Ref.Type.Vec}.
+
+An example of one lval with a static indexing operator, and a second
+lval with a dynamic indexing opertor:
+@example
+x.y.@{3@}.z;
+x.y.(1 + v).z;
+@end example
+
+@page
+@node    Ref.Gram
+@section Ref.Gram
+@c * Ref.Gram::                    Grammar.
+
+@emph{TODO: LL(1), it reads like C, Alef and Napier; formalise here}.
+
+@page
+@node    Ref.Comp
+@section Ref.Comp
+@c * Ref.Comp::                    Compilation and component model.
+
+Rust is a @emph{compiled} language. Its semantics are divided along
+a @emph{phase distinction} between compile-time and run-time. Those
+semantic rules that have a @emph{static interpretation} govern the
+success or failure of compilation. A program that fails to compile due
+to violation of a compile-time rule has no defined semantics at
+run-time; the compiler should halt with an error report, and produce
+no executable artifact.
+
+The compilation model centers on artifacts called @emph{crates}. Each
+compilation is directed towards a single crate in source form, and if
+successful produces a single crate in executable form.
+
+@menu
+* Ref.Comp.Crate::              Units of compilation, versioning, distribution and loading.
+* Ref.Comp.Meta::               Metadata about a crate.
+* Ref.Comp.Syntax::             Syntax extensions.
+@end menu
+
+@page
+@node       Ref.Comp.Crate
+@subsection Ref.Comp.Crate
+@c * Ref.Comp.Crate::              Units of compilation, versioning, distribution and loading.
+@c NOTE influences: SML CM, Mesa Configurations, owens/flatt "units"
+
+A @dfn{crate} is a unit of compilation, versioning, distribution and
+loading. Crates are defined by @emph{crate source files}, which are a
+type of source file written in a special declarative
+language: @emph{crate language}.@footnote{A crate is somewhat
+analogous to an @emph{assembly} in the ECMA-335 CLI model, a
+@emph{library} in the SML/NJ Compilation Manager, a @emph{unit}
+in the Owens and Flatt module system, or a @emph{configuration} in
+Mesa.} A crate source file describes:
+
+@itemize
+@item Metadata about the crate, such as author, name, version, and copyright.
+@item The contents of the crate, a set of Rust modules in other Rust source files.
+@item The set of syntax extensions to make available during compilation of the crate.
+@item The set of possible faults that the crate defines.
+@item The set of native functions that the crate imports.
+@item The set of @emph{other} crates that the crate depends on.
+@item The organisation of the crate's internal namespace.
+@item The set of names exported from the crate.
+@end itemize
+
+A single crate source file may describe the compilation of a large
+number of Rust source files; it is compiled in its entirety, as a
+single indivisible unit. The compilation phase attempts to
+transform a single crate source file, and its referenced contents,
+into a single compiled crate. Crate source files and compiled crates
+have a 1:1 relationship.
+
+The syntactic form of a crate is a sequence of @emph{directives}, some
+of which have nested sub-directives.
+
+A crate defines an implicit top-level anonymous module: within this
+module, all members of the crate have canonical path
+names. @xref{Ref.Path}. The @code{mod} directives within a crate file
+specify sub-modules to include in the crate: these are either
+directory modules, corresponding to directories in the filesystem of
+the compilation environment, or file modules, corresponding to Rust
+source files. The names given to such modules in @code{mod} directives
+become prefixes of the paths of items and slots defined within any
+included Rust source files.
+
+The @code{use} directives within the crate specify @emph{other crates}
+to import into the crate's namesapce; these directives may specify
+loose or tight ``matching criteria'' for imported crates, depending on
+the preferences of the crate developer. In the simplest case, a
+@code{use} directive may only specify a symbolic name and leave the
+task of locating and binding an appropriate crate to a compile-time
+heuristic. In a more controlled case, a @code{use} directive may
+specify any metadata as matching criteria, such as a URI, an author
+name or version number, a checksum or even a cryptographic signature,
+in order to select an an appropriate imported crate. @xref{Ref.Comp.Meta}.
+
+The compiled form of a crate is a loadable and executable object file
+full of machine code, in a standard loadable operating-system format
+such as ELF, PE or Mach-O. The loadable object contains extensive
+DWARF metadata, describing:
+@itemize
+@item Metadata required for type reflection.
+@item Metadata required for fault handling.
+@item The publicly exported module structure of the crate.
+@item Any free-form metadata about the crate, defined by @code{meta} directives.
+@item The crates to dynamically link with at run-time, with matching criteria
+derived from the same @code{use} directives that guided compile-time imports.
+@end itemize
+
+The @code{syntax} directives of a crate are similar to the @code{use}
+directives, except they govern the syntax extension namespace
+(accessed through the syntax-extension sigil @code{#},
+@pxref{Ref.Comp.Syntax}) available only at compile time. A
+@code{syntax} directive also makes its extension available to all
+subsequent directives in the crate file.
+
+The @code{native} and @code{fault} directives of a crate declare
+top-level ``special'' items that are not available to nested
+modules. This restriction simplifies the treatment of first-class
+modules elsewhere in the language.
+
+An example of a crate:
+
+@example
+// Metadata about this crate
+meta author = "Jane Doe";
+meta name = "Project X";
+meta version = "2.5";
+
+// Import a module.
+use std (version = "1.0");
+
+// Activate a syntax-extension.
+syntax re;
+
+// Define some modules.
+pub mod foo = "foo.rs";
+mod bar @{
+    mod quux = "quux.rs";
+@}
+@end example
+
+@page
+@node       Ref.Comp.Meta
+@subsection Ref.Comp.Meta
+
+In a crate, a @code{meta} directive associates free form key-value
+metadata with the crate. This metadata can, in turn, be used in
+providing partial matching parameters to syntax-extension loading and
+crate importing directives, denoted by @code{syntax} and @code{use}
+keywords respectively.
+
+Alternatively, metadata can serve as a light-weight form of
+documentation.
+
+@page
+@node          Ref.Comp.Syntax
+@subsection    Ref.Comp.Syntax
+@c * Ref.Comp.Syntax::        Syntax extension.
+
+Rust provides a notation for @dfn{syntax extension}. The notation is a
+marked syntactic form that can appear as an expression, statement or
+item in the body of a Rust program, or as a directive in a Rust crate,
+and which causes the text enclosed within the marked form to be
+translated through a named extension function loaded into the compiler
+at compile-time.
+
+The compile-time extension function must return a value of the
+corresponding Rust AST type, either an expression node, a statement
+node or an item node. @footnote{The syntax-extension system is
+analogous to the extensible reader system provided by Lisp
+@emph{readtables}, or the Camlp4 system of Objective Caml.}
+@xref{Ref.Lex.Syntax}.
+
+A syntax extension is enabled by a @code{syntax} directive, which must
+occur in a crate file. When the Rust compiler encounters a
+@code{syntax} directive in a crate file, it immediately loads the
+named syntax extension, and makes it available for all subsequent
+crate directives within the enclosing block scope of the crate file,
+and all Rust source files referenced as modules from the enclosing
+block scope of the crate file.
+
+For example, this extension might provide a syntax for regular
+expression literals:
+
+@example
+// In a crate file:
+
+// Requests the 're' syntax extension from the compilation environment.
+syntax re; 
+
+// Also declares an import dependency on the module 're'.
+use re;
+
+// Reference to a Rust source file as a module in the crate.
+mod foo = "foo.rs";
+
+@dots{}
+
+// In the source file "foo.rs", use the #re syntax extension and
+// the re module at run-time.
+let str s = get_string();
+let regex pattern = #re.pat@{ aa+b? @};
+let bool matched = re.match(pattern, s);
+@end example
+
+@page
+@node    Ref.Mem
+@section Ref.Mem
+@c * Ref.Mem::                     Semantic model of memory.
+
+A Rust process' memory consists of a static set of @emph{items}, a set
+of processes each with its own @emph{stack}, and a @emph{heap} shared
+by all processes.
+
+Allocations in the stack and the heap consist of @emph{slots}.
+
+@menu
+* Ref.Mem.Alloc::               Memory allocation model.
+* Ref.Mem.Own::                 Memory ownership model.
+* Ref.Mem.Slot::                Memory containment and reference model.
+* Ref.Mem.Init::                Initialisation state of memory.
+@end menu
+
+@page
+@node       Ref.Mem.Alloc
+@subsection Ref.Mem.Alloc
+@c * Ref.Mem.Alloc::               Memory allocation model.
+
+The @dfn{items} of a program are those functions, modules, types, and
+other artifacts that have their value calculated at compile-time and
+stored uniquely in the memory image of the rust process. Items are
+neither dynamically allocated nor freed.
+
+A process' @dfn{stack} consists of activation frames automatically
+allocated on entry to each function as the process executes. A stack
+allocation is reclaimed when control leaves the frame containing it.
+
+The @dfn{heap} consists of an acyclic reference graph of
+reference-counted, copy-on-write allocations made explicitly by
+memory-allocating statements. A heap allocation lives until the last
+reference to it drops, at which point it is automatically reclaimed.
+
+@page
+@node       Ref.Mem.Own
+@subsection Ref.Mem.Own
+@c * Ref.Mem.Own::                 Memory ownership model.
+
+A process @emph{directly owns} all the dynamic allocations in its
+stack and @emph{lazily owns} all the dynamic allocations in the heap
+reachable through references originating in its stack. A process does
+not own any items.
+
+@dfn{Direct ownership} of an allocation means that the owning process
+is the only process that can access the allocation.
+
+@dfn{Lazy ownership} of an allocation means that the owning process
+is the only process that can @emph{observe its own modifications} to the
+allocation.
+
+When a stack frame is exited, its directly owned (stack) allocations are all
+released, and its references to lazily owned (heap) allocations are
+dropped, decrementing their reference counts.
+
+When a process finishes, its stack is necessarily empty. The process'
+interior slots are released as the process itself is released, and its
+references to lazily owned (heap) allocations are dropped,
+decrementing their reference counts.
+
+@page
+@node       Ref.Mem.Slot
+@subsection Ref.Mem.Slot
+@c * Ref.Mem.Slot::                Memory containment and reference model.
+
+A @dfn{slot} is a component of an allocation. A slot either holds a
+value or the address of another allocation. Every slot has one of four
+possible @emph{modes}.
+
+The possible @dfn{modes} of a slot are:
+
+@itemize
+@sp 1
+@item @dfn{Interior mode}
+
+The slot holds the value of the slot.
+
+@sp 1
+@item @dfn{Exterior mode}
+
+The slot holds the address of a reference-counted, copy-on-write heap
+allocation that holds the value of the slot.
+
+Exterior slots are indicated by the @emph{at} sigil @code{@@}.
+
+For example, the following code allocates an exterior record, copies
+it by counted-reference to a second exterior slot, then modifies the
+record through the second exterior slot, causing the record to be
+replicated in the heap.
+@example
+type point3d = rec(int x, int y, int z);
+let @@point3d pt1 = rec(x=1, y=2, z=3);
+let @@point3d pt2 = pt1;
+pt2.z = 4;
+@end example
+
+@sp 1
+@item @dfn{Write-alias mode}
+
+The slot holds the address of a value. The referenced value may reside
+within a stack allocation or a heap allocation. If the referenced
+value resides within a heap allocation, the heap allocation is
+necessarily unshared: it has reference count equal to 1. Write-alias
+slots can only be declared as members of a function signature.
+
+Write-alias slots are indicated by the @emph{caret} sigil @code{^}.
+
+For example, the following function accepts a single write-alias
+parameter:
+@example
+fn incr(^int i) -> () @{
+    i = i + 1;
+@}
+@end example
+
+@sp 1
+@item @dfn{Read-alias mode}
+
+The meaning of the slot is the same as if it were in write-alias mode,
+but the value can only be read from the slot, not written to. Read-alias
+slots can only be declared as members of a function signature.
+
+Read-alias slots are indicated by the @emph{tilde} sigil @code{~}.
+
+For example, the following function accepts a single read-alias
+parameter:
+@example
+type point3d = rec(int x, int y, int z);
+
+fn extract_z(~point3d p) -> int @{
+    ret p.z;
+@}
+@end example
+
+@end itemize
+
+@page
+@node       Ref.Mem.Init
+@subsection Ref.Mem.Init
+@c * Ref.Mem.Init::                Initialisation state of memory.
+
+A slot is either initialised or uninitialised at every point in a
+program. An @dfn{initialised} slot is one that holds a value. An
+@dfn{uninitialised} slot is one that has not yet had a value written
+into it, or has had its value deleted, and so holds undefined
+memory. The typestate system ensures that an uninitialised slot cannot
+be read, but can be written to. A slot becomes initialised in any
+statement that writes to it, and remains initialised until explicitly
+destroyed or until its enclosing allocation is destroyed.
+
+
+@page
+@node    Ref.Proc
+@section Ref.Proc
+@c * Ref.Proc::                    Semantic model of processes.
+
+A executing Rust program is called a
+@dfn{process}. @xref{Ref.Item.Prog}. Each Rust process has a program,
+an identity, a stack, a set of outgoing communication channels and
+incoming communication ports, and lazy ownership of some portion of
+the heap of a single operating-system process.
+
+Multiple Rust processes may coexist in a single operating-system
+process. Execution of multiple Rust processes in a single
+operating-system process may be either truly concurrent or interleaved
+by the runtime scheduler. Rust processes are lightweight: each
+consumes less memory than an operating-system process, and switching
+between Rust processes is faster than switching between
+operating-system processes.
+
+@menu
+* Ref.Proc.Comm::               Inter-process communication.
+* Ref.Proc.Life::               Process lifecycle and state transitions.
+* Ref.Proc.Sched::              Process scheduling model.
+@end menu
+
+@page
+@node       Ref.Proc.Comm
+@subsection Ref.Proc.Comm
+@c * Ref.Proc.Comm::               Inter-process communication.
+
+With the exception of @emph{unsafe} constructs, Rust processes are
+isolated from interfering with one another's memory directly. Instead
+of manipulating shared storage, Rust processes communicate with one
+another using a typed, asynchronous, simplex message-passing system.
+
+A @dfn{port} is a communication endpoint that can @emph{receive}
+messages. Ports receive messages from channels.
+
+A @dfn{channel} is a communication endpoint that can @emph{send}
+messages. Channels send messages to ports.
+
+Each port has a unique identity and cannot be replicated. If a port
+value is copied from one slot to another, both slots refer to
+the @emph{same} port, even if the slots are declared as
+interior-mode. New ports can be constructed dynamically and stored in
+data structures.
+
+Each channel is bound to a port when the channel is constructed, so
+the destination port for a channel must exist before the channel
+itself. A channel cannot be rebound to a different port from the one
+it was constructed with.
+
+Many channels can be bound to the same port, but each channel is bound
+to a single port. In other words, channels and ports exist in an N:1
+relationship, N channels to 1 port, where N is a non-negative
+integer. @footnote{It may help to remember nautical terminology when
+differentiating channels from ports.  Many different waterways --
+channels -- may lead to the same port.}
+
+Each port and channel can carry only one type of message. The message type
+is encoded as a parameter of the channel or port type. The message type
+of a channel is equal to the message type of the port it is bound to.
+
+Messages are sent asynchronously or semi-synchronously. A channel
+contains a message queue and asynchronously sending a message merely
+inserts it into the channel's queue; message receipt is the
+responsibility of the receiving process.
+
+Queued messages in channels are considered part of the memory budget
+of the @emph{sending} process. If too many messages are queued for
+transmission from a single sending process, without being received by
+a receiving process, the sending process may exceed its memory budget,
+which causes a run-time fault. To help control this possibility, a
+semi-synchronous send operation is possible, which blocks until there
+is room in the existing queue and then executes an asynchronous
+send. A full @code{flush} operation is also available, which blocks
+until a channel's queue is @emph{empty}. A @code{flush} does
+@emph{not} guarantee that a message has been @emph{received} by any
+particular recipient when the sending process is
+unblocked. @xref{Ref.Stmt.Flush}.
+
+The asynchronous message-send operator is @code{<+}. The
+semi-synchronous message-send operator is @code{<|}. @xref{Ref.Stmt.Send}. The
+message-receive operator is @code{<-}. @xref{Ref.Stmt.Recv}.
+
+@page
+@node       Ref.Proc.Life
+@subsection Ref.Proc.Life
+@c * Ref.Proc.Life::               Process lifecycle and state transitions.
+
+The @dfn{lifecycle} of a process consists of a finite set of states
+and events that cause transitions between the states. The lifecycle states
+of a process are:
+
+@itemize
+@item initialising
+@item running
+@item native call
+@item blocked reading
+@item blocked writing
+@item blocked flushing
+@item failing
+@item finished
+@end itemize
+
+A process begins its existence -- when it is spawned -- in the
+@emph{initialising} state. It remains in this state until its parent
+completes its @code{init} block successfully or fails. The
+@emph{parent} is responsible for running the @code{init} block -- the
+code executes in the stack and budget of the parent -- but the
+@code{init} block can access only the @emph{scope} of the child (its
+member slots and items). If a fault occurs while the parent is
+executing the child's @code{init} block, the fault-handling system
+begins its search in the @emph{parent} context. The parent context is
+suspended during execution of the child's @code{init} block, analogous
+to the parent making a normal function call.
+
+When the parent completes the @code{init} block, the child transitions
+from the @emph{spawning} state to the @emph{running} state. In this
+state, its control executes the contents of its @code{main}
+block. Code in the @code{main} block has access to any @emph{member
+slots} of the process, as does code in the @code{init} and @code{fini}
+blocks of the program. @xref{Ref.Item.Prog}.
+
+If a fault occurs while the child is executing the @code{main} block
+-- after a child process transitions from the @emph{initialising}
+state to the @emph{running} state -- only the child is directly
+affected; the parent is isolated from the fault (though it may receive
+linked notification, should the child fail).
+
+If a process makes a native call, it is temporarily suspended from
+the @emph{running} state and enters the @emph{native call} state. A
+process returns from the @emph{native call} state to
+either @emph{running} or @emph{failing}, depending on the execution of
+the native code.
+
+A process may transition from the @emph{running} state to
+the @emph{blocked reading} state any time it executes a receive
+statement (@code{<-}) on a port that does not have any processes
+waiting to send. When another process eventually sends on a channel
+connected to the receiving port, the receiving process will transition
+out of @emph{blocked reading} state, back to @emph{running}.
+
+A process may transition from the @emph{running} state to
+the @emph{blocked writing} any time it executes a semi-synchronous
+send (@code{<|}) on a channel with a full queue. When the queue has
+room, the sending process will unblock and transition out
+of @emph{blocked writing} state, back to @emph{running}.
+
+A process may transition from the @emph{running} state to
+the @emph{blocked flushing} any time it executes a @code{flush} on a
+channel with a nonempty queue. When the queue is empty, the flushing
+process will unblock and transition out of @emph{blocked flushing}
+state, back to @emph{running}.
+
+A process may transition to the @emph{failing} state at any time, due
+to an un-trapped fault or the execution of a @code{fail}
+statement. Once @emph{failing}, a process unwinds its stack and
+transitions to the @emph{finished} state. No other state transitions
+out of the @emph{failing} state are permitted.
+
+
+@page
+@node       Ref.Proc.Sched
+@subsection Ref.Proc.Sched
+@c * Ref.Proc.Sched::              Process scheduling model.
+
+Every process has a @dfn{time slice counter}, which is a hidden
+numeric slot that is decremented on each loop back-edge and function
+call. The runtime repeatedly selects a process in the @emph{running}
+state, via fair pseudo-random choice, and activates it. If the time
+slice counter on a process reaches zero, the process yields control to
+the runtime. The process has its time slice counter reset to the
+configured initial time slice value for the runtime, and it is once
+again made available as a choice for the scheduler to pseudo-randomly select.
+
+If a process enters a non-running state -- for example, if it blocks
+on reading or writing -- it is not available for activation by the
+scheduler, but its time slice counter is unaffected.
+
+@page
+@node    Ref.Item
+@section Ref.Item
+@c * Ref.Item::               The components of a module.
+
+An @dfn{item} is a component of a module. Items are entirely
+determined at compile-time, remain constant during execution, and may
+reside in read-only memory.
+
+There are 5 primary kinds of item: types, functions, predicates,
+modules, and programs.
+
+All items form an implicit scope for the declaration of sub-items. In
+other words, within a function, predicate, type or program body,
+declarations of items can (in many cases) be mixed with the
+statements, control blocks, and similar artifacts that otherwise
+compose the item body. The meaning of these scoped items is the same
+as if the item was declared outside the scope, except that the item's
+@emph{path name} within the module namespace is qualified by the name
+of the enclosing item. The exact locations in which sub-items may be
+declared is given by the grammar.  @xref{Ref.Gram}.
+
+Items may be @emph{parameterised} by type. Type parameters are given
+as a comma-separated list of identifiers enclosed in square brackets
+(@code{[]}), after the name of the item and before its definition.
+The type parameters of an item are part of the name, not the type of
+the item; in order to refer to the type-parameterised item, a
+referencing name must in general provide type arguments as a list of
+comma-separated types enclosed within square brackets (though the
+type-inference system can often infer such argument types from
+context). There are no general parametric types.
+
+@menu
+* Ref.Item.Mod::                Items defining modules.
+* Ref.Item.Type::               Items defining the types of values and slots.
+* Ref.Item.Fn::                 Items defining functions.
+* Ref.Item.Pred::               Items defining typestate predicates.
+* Ref.Item.Prog::               Items defining programs.
+@end menu
+
+@page
+@node       Ref.Item.Mod
+@subsection Ref.Item.Mod
+@c * Ref.Item.Mod::           Items defining sub-modules.
+
+A @dfn{module item} contains declarations of @emph{items}. Items may
+include functions, programs, modules, types and predicate
+declarations. These declarations have both static and dynamic
+interpretation. The purpose of a module is to organise @emph{names}
+and control @emph{visibility}. Modules are declared with the keyword
+@code{mod}.
+
+An example of a module:
+@example
+mod map[K,V] @{
+    type t = vec[(K,V)];
+    fn new() -> t @{
+        ret vec();
+    @}
+
+    fn add(^t, ~K k, ~V v) -> () @{
+        @dots{}
+    @}
+
+    fn? get(~t, ~K k) -> ~V @{
+        @dots{}
+    @}
+@}
+@end example
+
+A module may also be stored as a first class @emph{value}. Such a
+value has a @emph{module type}, which complicates the type system
+since modules may themselves declare types. @xref{Ref.Type.Mod}. As a result
+of the type rules governing modules, a module @emph{value}, if passed
+as a first-class entity in a slot, must be @emph{opened} as a declared
+@emph{module item} before it can be used in a scope.
+
+Example of opening a module:
+@example
+// Declare the type of map-modules
+type map_ty[K,V] = mod @{
+                       type t;
+                       fn new() -> t;
+                       fn add(^t, ~K k, ~V v) -> ();
+                       fn? get(~t, ~K k) -> ~V;
+                   @};
+
+// Dynamically acquire a particular map-module implementation                                
+let map_ty[int,str] map_v = get_map_impl[int,str]();
+
+// Open the map-implementation module value as a module item.
+mod map = map_v;
+
+// Use the module item.
+let map.t m = map.new();
+map.add(m, 10, "hello");
+@end example
+
+
+@page
+@node       Ref.Item.Type
+@subsection Ref.Item.Type
+@c * Ref.Item.Type::          Items defining the types of values and slots.
+
+A @dfn{type} defines an @emph{interpretation} of a value in
+memory. @xref{Ref.Type}. Types are declared with the keyword
+@code{type}. A type's interpretation is used for the values held in
+any slot with that type. @xref{Ref.Mem.Slot}. The interpretation of a
+value includes:
+
+@itemize
+@item Whether the value is composed of sub-values or is indivisible.
+@item Whether the value represents textual or numerical information.
+@item Whether the value represents integral or floating-point information.
+@item The sequence of memory operations required to access the value and its components.
+@end itemize
+
+For example, the type @code{rec(u8 x, u8 y)} defines the
+interpretation of values that are composite records, each containing
+two unsigned two's complement 8-bit integers accessed through the
+components @code{x} and @code{y}, and laid out in memory with the
+@code{x} component preceding the @code{y} component.
+
+Some types are @emph{recursive}. A recursive type is one that includes
+its own definition as a component, by named reference. Recursive types
+are restricted to occur only within a single crate, and only through a
+restricted form of @code{tag} type. @xref{Ref.Type.Tag}.
+
+@page
+@node       Ref.Item.Fn
+@subsection Ref.Item.Fn
+@c * Ref.Item.Fn::            Items defining functions.
+
+A @dfn{function item} defines a sequence of statements associated with
+a name and a set of parameters. Functions are declared with the
+keyword @code{fn}. Functions declare a set of @emph{input slots} as
+parameters, through which the caller passes arguments into the
+function, and an @emph{output slot} through which the function passes
+results back to the caller.
+
+A function may also be copied into a first class @emph{value}, in
+which case the value has the corresponding @emph{function type}, and
+can be used otherwise exactly as a function item (with a minor
+additional cost of calling the function, as such a call is
+indirect). @xref{Ref.Type.Fn}.
+
+Every control path in a function ends with either a @code{ret} or
+@code{be} statement. If a control path lacks a @code{ret} statement in
+source code, an implicit @code{ret} statement is appended to the end
+of the control path during compilation, returning the implicit
+@code{()} value.
+
+A function may be @emph{pure} or @emph{impure}, depending on the
+presence or absence of the keyword prefix @code{pure}. A @dfn{pure}
+function is one that has no side effects, calls no impure functions,
+and is declared with the @code{pure} keyword. A function lacking any
+of these characteristics is @dfn{impure}.
+
+There are two primary kinds of functions: @emph{solo functions}
+and @emph{iterator functions}.
+
+@menu
+* Ref.Item.Fn.Solo::            Items defining solo functions.
+* Ref.Item.Fn.Iter::            Items defining iterator functions.
+@end menu
+
+@page
+@node          Ref.Item.Fn.Solo
+@subsubsection Ref.Item.Fn.Solo
+@c * Ref.Item.Fn.Solo::     Items defining solo functions.
+
+Solo functions are those that return a single value. The output slot
+of a solo function is the type of value that will be provided when the
+function executes a @code{ret} or @code{be} statement and completes
+its execution.
+
+A @code{put} statement cannot occur in the statements of a solo
+function.
+
+An example of a solo function:
+@example
+fn add(int x, int y) -> int @{
+    ret x + y;
+@}
+@end example
+
+@page
+@node          Ref.Item.Fn.Iter
+@subsubsection Ref.Item.Fn.Iter
+@c * Ref.Item.Fn.Iter::     Items defining iterator functions.
+
+Iterator functions are those that have a @emph{protocol}. The protocol
+of an iterator function defines how many values (in a
+``zero-one-infinity'' counting sense) the iterator function will
+@code{put} before it executes a @code{ret} or @code{be} statement and
+completes its execution. Protocols are indicated by a variant of the
+@code{fn} keyword, as follows:
+
+@itemize
+@item
+@code{fn?} indicates a function that will put either 0 or 1 value, then complete.
+@item
+@code{fn!} indicates a function that will put exactly 1 value, then complete.
+@item
+@code{fn*} indicates a function that will put 0 or more values, then complete.
+@item
+@code{fn+} indicates a function that will put 1 or more values, then complete.
+@end itemize
+
+The output type of an iterator function is the type of value that the
+function will @code{put}, before it eventually executes a @code{ret}
+or @code{be} statement of type @code{()} and completes its execution.
+
+An iterator function can only be called in the loop header of a
+matching @code{for} loop. For example a @code{fn+} iterator function
+can only be called from a @code{for+} loop header. @xref{Ref.Stmt.For.Iter}.
+
+An example of an iterator function:
+@example
+fn* range(int lo, int hi) -> int @{
+    let int i = lo;
+    while (i < hi) @{
+        put i;
+        i = i + 1;
+    @}
+@}
+
+let int sum = 0;
+for* (int x = range(0,100)) @{
+    sum = sum + x;
+@}
+@end example
+
+
+@page
+@node       Ref.Item.Pred
+@subsection Ref.Item.Pred
+@c * Ref.Item.Pred::          Items defining typestate predicates.
+
+A predicate is a pure function returning @code{bool}, that also
+carries special meaning to the typestate system. Specifically, a
+predicate can be used as part of a @emph{constraint}; introducing a new
+predicate into a program enlarges the set of constraints that
+can be statically checked. @xref{Ref.Stmt.Stat.Constr}. Predicates
+are declared with the keyword @code{pred}.
+
+Since predicates are implicitly @code{pure} and implicitly return
+@code{bool}, the signature of a @code{pred} cannot include a
+@code{pure} modifier, nor specify an output slot.
+
+An example of a predicate:
+@example
+pred divides(int d, int i) @{
+    ret d % i == 0;
+@}
+@end example
+
+@page
+@node       Ref.Item.Prog
+@subsection Ref.Item.Prog
+@c * Ref.Item.Prog::          Items defining programs.
+
+A program is the inert form of a process. @xref{Ref.Proc}. Programs
+are @emph{spawned} in order to produce
+processes. @xref{Ref.Stmt.Spawn}. Each process executes a
+program. @xref{Ref.Type.Proc}. Programs are declared with the keyword
+@code{prog}.
+
+A @code{prog} carries an implicit module, three optional blocks marked
+with the keywords @code{init}, @code{main} and @code{fini}, and a set
+of @emph{member slots} that are shared between the @code{init},
+@code{main} and @code{fini} blocks alone. Significantly: items
+declared in the implicit module of a @code{prog} do @emph{not} share
+access to the member slots of the @code{prog}.
+
+An example of a @code{prog}:
+@example
+type stdio = rec(port[u8] stdin,
+                 chan[u8] stdout,
+                 chan[u8] stderr);
+prog byte_copy @{
+     let stdio io;
+     init (chan[u8] out, chan[u8] err) -> chan[u8] @{
+          io.stdin = port();
+          io.stdout = out;
+          io.stderr = err;
+          ret chan(io.stdin);
+     @}
+     main @{
+       u8 tmp;
+       while (tmp <- io.in) @{
+             io.out <| tmp;
+       @}
+     @}
+@}
+@end example
+
+
+@page
+@node    Ref.Type
+@section Ref.Type
+
+Every slot and value in a Rust program has a type. The @dfn{type} of a
+@emph{value} defines the interpretation of the memory holding it. The
+type of a @emph{slot} may also include constraints. @xref{Ref.Type.Constr}.
+
+Some types and type-constructors are @dfn{built-in}, meaning that
+their value constructors are defined in this manual. Other types or
+type-constructors are @dfn{user-defined}, meaning that their value
+constructors depend on portions of user programs.
+
+Built-in types and type-constructors are tightly integrated into the
+language, in nontrivial ways that are not possible to emulate in
+user-defined types. User-defined types have limited capabilities. In
+addition, every built-in type or type-constructor name is reserved as
+a @emph{keyword} in Rust; they cannot be used as user-defined
+identifiers in any context.
+
+@menu
+* Ref.Type.Any::                An open sum of every possible type.
+* Ref.Type.Mach::               Machine-level types.
+* Ref.Type.Prim::               Primitive types.
+* Ref.Type.Int::                The arbitrary-precision integer type.
+* Ref.Type.Text::               Strings and characters.
+* Ref.Type.Rec::                Fixed products of heterogeneous types.
+* Ref.Type.Tup::                Fixed products of homogeneous types.
+* Ref.Type.Vec::                Open products of homogeneous types.
+* Ref.Type.Tag::                Closed sums of heterogeneous types.
+* Ref.Type.Fn::                 Subroutines and scoped coroutine types.
+* Ref.Type.Port::               Unique inter-process message-receipt endpoints.
+* Ref.Type.Chan::               Copyable inter-process message-sending capabilities.
+* Ref.Type.Proc::               General coroutine-instance types.
+* Ref.Type.Prog::               General coroutine-description types.
+* Ref.Type.Mod::                Collections of items.
+* Ref.Type.Constr::             Constrained types.
+* Ref.Type.Type::               Types describing types.
+@end menu
+
+@page
+@node       Ref.Type.Any
+@subsection Ref.Type.Any
+
+The type @code{any} is the union of all possible Rust types. A value
+of type @code{any} is represented in memory as a pair consisting of an
+exterior value of some non-@code{any} type @var{T} and a reflection
+of the type @var{T}.
+
+Values of type @code{any} can be used in an @code{alt type} statement,
+in which the reflection is used to select a block corresponding to a
+particular type extraction. @xref{Ref.Stmt.Alt}.
+
+@page
+@node       Ref.Type.Mach
+@subsection Ref.Type.Mach
+
+The machine types are the following:
+
+@itemize
+@item
+The unsigned two's complement word types @code{u8}, @code{u16},
+@code{u32} and @code{u64}, with values drawn from the integer
+intervals @math{[0,(2^8)-1)]}, @math{[0,(2^{16})-1)]},
+@math{[0,(2^{32})-1)]} and @math{[0,(2^{64})-1)]} respectively.
+@item
+The signed two's complement word types @code{s8}, @code{s16}, @code{s32} and @code{s64},
+with values drawn from the integer
+intervals @math{[-(2^7),(2^7)-1)]}, @math{[-(2^{15}),(2^{15})-1)]},
+@math{[-(2^{31}),(2^{31})-1)]} and @math{[-(2^{63}),(2^{63})-1)]}
+respectively.
+@item
+The IEEE 754 double-precision floating point type @code{f64}.
+@end itemize
+
+
+@page
+@node       Ref.Type.Prim
+@subsection Ref.Type.Prim
+
+The primitive types are the following:
+
+@itemize
+@item
+The unary type @code{()}, having the single value @code{()} (both the
+type and the value are pronounced ``nil'').
+@item
+The boolean type @code{bool} with values @code{true} and @code{false}.
+@item
+The machine types.
+@end itemize
+
+@page
+@node       Ref.Type.Int
+@subsection Ref.Type.Int
+
+The Rust type @code{int}@footnote{A Rust @code{int} is similar to a
+Lisp bignum or a Python long integer, @emph{not} a C @code{int}.} is
+an arbitrary precision integer type that fits in a machine
+word @emph{when possible} and transparently expands to a boxed ``big
+integer'' allocated in the run-time heap when it overflows or
+underflows outside of the range of a machine word.
+
+A Rust @code{int} grows to accommodate extra binary digits as they are
+needed, by taking extra memory from the memory budget available to
+each Rust process, and should only exhaust its range due to memory
+exhaustion.
+
+@page
+@node       Ref.Type.Text
+@subsection Ref.Type.Text
+
+The types @code{char} and @code{str} hold textual data.
+
+A value of type @code{char} is a Unicode character, represented as a
+32-bit unsigned word holding a UCS-4 codepoint.
+
+A value of type @code{str} is a Unicode string, represented as a
+vector of 8-bit unsigned words holding a UTF-8 codepoints.
+
+@page
+@node       Ref.Type.Rec
+@subsection Ref.Type.Rec
+
+The record type-constructor @code{rec} forms new heterogeneous product
+of slots.@footnote{The @code{rec} type-constructor is analogous to
+the @code{struct} type-constructor in the Algol/C family, the
+@emph{record} types of the ML family, or the @emph{structure} types of
+the Lisp family}. Fields of a @code{rec} type are accessed by name and
+are arranged in memory in the order specified by the @code{rec} type.
+
+An example of a @code{rec} type and its use:
+@example
+type point = rec(int x, int y);
+let point p = rec(x=10, y=11);
+let int px = p.x;
+@end example
+
+@page
+@node       Ref.Type.Tup
+@subsection Ref.Type.Tup
+
+The tuple type-constructor is a parenthesised, comma-separated list of
+two or more slots. It exactly mirrors the tuple value-constructor,
+itself a comma-separated list of two or more values.
+
+Tuples are equivalent to records labeled by ascending integers
+starting from 0: their fields are laid out in memory contiguously, in
+order specified by the tuple type. Tuples can only be indexed by
+static numeric labels enclosed in braces. Tuples can also be
+``destructured'' into named constituents, in various syntactic
+contexts, such as in a tuple initialisation statement or a function
+parameter list.
+
+An example of a tuple type and its use:
+@example
+type pair = (int,str);
+let pair p = (10,"hello");
+check (p.@{0@} == 10);
+p.@{1@} = "world";
+let (int x, str s) = p;
+check (s == p.@{1@} & p.@{1@} == "world");
+@end example
+
+
+@page
+@node       Ref.Type.Vec
+@subsection Ref.Type.Vec
+
+The vector type-constructor @code{vec} represents a homogeneous,
+variable-size array of slots. Vectors automatically resize to
+accommodate the addition or removal of elements. Elements can be
+accessed by numeric index, but as with records and tuples, all
+accessible elements are always initialised.
+
+And example of a @code{vec} type and its use:
+@example
+let vec[int] v = vec(7, 5, 3);
+let int i = v.(2);
+@end example
+
+@page
+@node       Ref.Type.Tag
+@subsection Ref.Type.Tag
+
+The @code{tag} type-constructor forms new heterogeneous disjoint sum
+types.@footnote{The @code{tag} type is analogous to a
+@code{data} constructor declaration in ML or a @emph{pick ADT} in
+Limbo}. A @code{tag} type consists of a number of @emph{variants},
+each of which is independently named and takes an optional tuple of
+arguments.
+
+The variants of a @code{tag} type may be recursive: that is, the
+definition of a @code{tag} type may refer to type definitions that
+include the defined @code{tag} type itself. Such recursion has restrictions:
+@itemize
+@item Recursive types can only be introduced through @code{tag} type definitions.
+@item A recursive @code{tag} type must have at least one non-recursive
+variant (in order to give the recursion a basis case).
+@item The recursive slots of recursive variants must be @emph{exterior}
+slots (in order to bound the in-memory size of the variant).
+@item Recursive type definitions can cross module boundaries, but not module
+@emph{visibility} boundaries, nor crate boundaries (in order to simplify the
+module system).
+@end itemize
+
+An example of a @code{tag} type and its use:
+@example
+type animal = tag(dog, cat);
+let animal a = dog;
+a = cat;
+@end example
+
+An example of a @emph{recursive} @code{tag} type and its use:
+@example
+type list[T] = tag[T](empty,
+                      cons(T, @@list[T]));
+let list[int] a = cons(7, cons(13, empty));
+@end example
+
+
+@page
+@node       Ref.Type.Fn
+@subsection Ref.Type.Fn
+
+The function type-constructor @code{fn} forms new function types. A
+function type consists of an optional protocol, an input type, an
+output type, and a set of flags indicating special characteristics of
+the function (@code{pure} or @code{lim}). Like all functions, values
+of function type may be @emph{solo functions} or @emph{iterator
+functions}. @xref{Ref.Item.Fn}.
+
+An example of a solo @code{fn} type:
+@example
+fn add(int x, int y) -> int @{
+  ret x + y;
+@}
+
+let int x = add(5,7);
+
+type binop = fn(int,int) -> int;
+let binop bo = add;
+x = bo(5,7);
+@end example
+
+
+@page
+@node       Ref.Type.Port
+@subsection Ref.Type.Port
+
+The port type-constructor @code{port} forms types that describe
+ports. A port is the @emph{receiving end} of a typed, asynchronous,
+simplex inter-process communication facility. @xref{Ref.Proc.Comm}. A
+@code{port} type takes a single type parameter, denoting the type of
+value that can be received from a @code{port} value of that type.
+
+Ports are @emph{limited}: they cannot be transmitted through channels,
+and can be passed between processes only during process
+initialisation.
+
+An example of a @code{port} type:
+@example
+type port[vec[str]] svp;
+let svp p = get_port();
+let vec[str] v;
+v <- p;
+@end example
+
+@page
+@node       Ref.Type.Chan
+@subsection Ref.Type.Chan
+
+The channel type-constructor @code{chan} forms types that describe
+channels. A channel is the @emph{sending end} of a typed,
+asynchronous, simplex inter-process communication
+facility. @xref{Ref.Proc.Comm}. A @code{chan} type takes a single type
+parameter, denoting the type of value that can be sent to a channel of
+that type.
+
+Channels are general @emph{unlimited} values: they can be transmitted
+between processes through channels. They are also @emph{weak}: a
+channel is directly coupled to a particular destination port, but does
+not keep that port @emph{alive}, and may therefore fail to operate at
+any moment. Sending to a channel that is connected to a nonexistent
+port causes a fault.
+
+An example of a @code{chan} type:
+@example
+type chan[vec[str]] svc;
+let svc c = get_chan();
+let vec[str] v = vec("hello", "world");
+c <| v;
+@end example
+
+@page
+@node       Ref.Type.Proc
+@subsection Ref.Type.Proc
+
+The process type @code{proc} describes values that are @emph{live
+processes}.  Process values are opaque and @emph{limited}: they cannot
+be directly inspected and they cannot be passed between processes,
+over channels.
+
+Processes form an @emph{ownership tree} in which each process (except
+the root process) is directly owned by exactly one parent process. The
+purpose of a variable of @code{proc} type is to manage the lifecycle
+of the associated process. Communication is carried out solely using
+channels and ports.
+
+Processes cannot be replicated. If a copy of a slot of
+type @code{proc} is copied to another slot, both slots refer to
+the @emph{same} process value.
+
+If all references to a process are dropped (due to the release of any
+slots holding those references), the released process immediately fails.
+@xref{Ref.Proc.Life}.
+
+@page
+@node       Ref.Type.Prog
+@subsection Ref.Type.Prog
+
+The program type-constructor @code{prog} forms new program types. A
+program type consists of a signature, similar to a function type with
+no protocol, describing the inputs and outputs of the initialisation
+routine for programs of that type.
+
+An example of a @code{prog} type:
+@example
+type stdio_prog = prog(chan[u8], chan[u8]) -> chan;
+let stdio_prog cat = get_byte_copy();
+let port[u8] out = port();
+let port[u8] err = port();
+let (proc p, chan[u8] in) = spawn cat(chan(out), chan(err));
+@end example
+
+@page
+@node       Ref.Type.Mod
+@subsection Ref.Type.Mod
+@c * Ref.Type.Mod::                Units of information hiding.
+
+@emph{TODO: first-class existential module types}.
+
+@page
+@node       Ref.Type.Constr
+@subsection Ref.Type.Constr
+@c * Ref.Type.Constr::             Constrained types.
+
+A @dfn{constrained type} is a type that carries a @emph{formal
+constraint} (@pxref{Ref.Stmt.Stat.Constr}), which is similar to a
+normal constraint except that the @emph{base name} of any slots
+mentioned in the constraint must be the special @emph{formal
+symbol} @emph{*}.
+
+When a constrained type is instantiated in a particular slot
+declaration, the formal symbol in the constraint is replaced with the
+name of the declared slot and the resulting constraint is checked
+immediately after the slot is declared. @xref{Ref.Stmt.Check}.
+
+An example of a constrained type with two separate instantiations:
+@example
+type ordered_range = rec(int low, int high) : less_than(*.low, *.high);
+
+let ordered_range rng1 = rec(low=5, high=7);
+// implicit: 'check less_than(rng1.low, rng1.high);'
+
+let ordered_range rng2 = rec(low=15, high=17);
+// implicit: 'check less_than(rng2.low, rng2.high);'
+@end example
+
+@page
+@node       Ref.Type.Type
+@subsection Ref.Type.Type
+@c * Ref.Type.Type::               Types describing types.
+
+@emph{TODO}.
+
+@page
+@node    Ref.Expr
+@section Ref.Expr
+@c * Ref.Expr::               Parsed and primitive expressions.
+
+Rust has two kinds of expressions: @emph{parsed expressions} and
+@emph{primitive expressions}.  The former are syntactic sugar and are
+eliminated during parsing. The latter are very minimal, consisting
+only of paths, possibly combined via a single level (non-recursive)
+unary or binary machine-level operation (ALU or FPU). @xref{Ref.Path}.
+
+For the most part, Rust semantics are defined in terms of
+@emph{statements}, which parsed expressions are desugared to. The
+desugaring is defined in the grammar. @xref{Ref.Gram}. The residual
+primitive statements appear only in the right hand side of copy
+statements, @xref{Ref.Stmt.Copy}.
+
+@page
+@node    Ref.Stmt
+@section Ref.Stmt
+@c * Ref.Stmt::               Program execution as sequences of statements.
+
+A @dfn{statement} is a component of a function, or a predicate, or a
+program's @code{init}, @code{main} or @code{fini} blocks. When a
+program is instantiated into a process, the process @emph{executes}
+statements in an order determined by the body of the enclosing
+structure. Each statement causes the process to perform certain
+actions.
+
+@menu
+* Ref.Stmt.Stat::               The static typestate system of statement analysis.
+* Ref.Stmt.Decl::               Statement declaring an item or slot.
+* Ref.Stmt.Copy::               Statement for copying a value between two slots.
+* Ref.Stmt.Spawn::              Statements for creating new processes.
+* Ref.Stmt.Send::               Statements for sending a value into a channel.
+* Ref.Stmt.Flush::              Statement for flushing a channel queue.
+* Ref.Stmt.Recv::               Statement for receiving a value from a channel.
+* Ref.Stmt.Call::               Statement for calling a solo function.
+* Ref.Stmt.Ret::                Statement for stopping and producing a value.
+* Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
+* Ref.Stmt.Put::                Statement for pausing and producing a value.
+* Ref.Stmt.Try::                Statement for extablishing a fault trapping context.
+* Ref.Stmt.Raise::              Statement for transferring control to a fault trap.
+* Ref.Stmt.Trap::               Statement for trapping a fault.
+* Ref.Stmt.Fix::                Statement for recovering from a fault.
+* Ref.Stmt.Fail::               Statement for causing process failure.
+* Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
+* Ref.Stmt.While::              Statement for simple conditional looping.
+* Ref.Stmt.For::                Statement for complex conditional looping.
+* Ref.Stmt.If::                 Statement for simple conditional branching.
+* Ref.Stmt.Alt::                Statement for complex conditional branching.
+* Ref.Stmt.Prove::              Statement for static assertion of typestate.
+* Ref.Stmt.Check::              Statement for dynamic assertion of typestate.
+* Ref.Stmt.IfCheck::            Statement for dynamic testing of typestate.
+@end menu
+
+@page
+@node       Ref.Stmt.Stat
+@subsection Ref.Stmt.Stat
+@c * Ref.Stmt.Stat::         The static typestate system of statement analysis.
+
+Statements have a detailed static semantics. The static semantics
+determine, on a statement-by-statement basis, the @emph{effects} the
+statement has on its environment, as well the @emph{legality} of the
+statement in its environment.
+
+The legality of a statement is partly governed by syntactic rules,
+partly by its conformance to the types of slots it affects, and partly
+by a purely statement-oriented static analysis. This section describes
+the statement-oriented static analysis, also called the
+@emph{typestate} system.
+
+@menu
+* Ref.Stmt.Stat.Point::         Inter-statement positions of logical judgments.
+* Ref.Stmt.Stat.CFG::           The control flow graph formed by statements.
+* Ref.Stmt.Stat.Constr::        Predicates applied to slots.
+* Ref.Stmt.Stat.Cond::          Constraints required and implied by a statement.
+* Ref.Stmt.Stat.Typestate::     Constraints that hold at points.
+* Ref.Stmt.Stat.Check::         Relating dynamic state to static typestate.
+@end menu
+
+@page
+@node          Ref.Stmt.Stat.Point
+@subsubsection Ref.Stmt.Stat.Point
+@c * Ref.Stmt.Stat.Point::         Inter-statement positions of logical judgments.
+
+A @dfn{point} exists before and after any statement in a Rust program.
 For example, this code:
-
-@example
-pred is_even(int x) @{
-  return x % 2 == 0;
-@}
-
-pred is_nonzero(int x) @{
-  return x != 0;
-@}
-@end example
-
-defines 2 new predicates: one that tests for even-ness and one that
-tests for nonzero-ness. Predicates and types can be bundled together
-into a type definition. For example, this code:
-
-@example
-type even_nonzero_int = int : is_even(*), is_nonzero(*);
-@end example
-
-defines a new name for the type of integers that are even and nonzero.
-
-A slot can refer to a value if and only if the value has the same form
-as the slot's type, and the condition in the slot's type holds. For
-example, this code:
-
-@example
-int foo : is_even(*), is_nonzero(*);
-@end example
-
-introduces an integer slot that is constrained to be even and
-nonzero. Using our earlier definition, it could be equivalently
-written as this code:
-
-@example
-even_nonzero_int foo;
-@end example
-
-@node    Points, Typestates and Assertions
-@section Points, Typestates and Assertions
-
-Rust borrows terminology from the Hermes programming language to
-describe a particular static error-checking technique. This technique
-is called @i{typestate checking}. To define typestates, we must define
-points: a @i{point} exists before or after any statement in a Rust
-program. For example, this code:
 
 @example
  s = "hello, world";
  print(s);
 @end example
 
-Consists of two statements and three points: 
+Consists of two statements and three points:
 
 @itemize
 @item the point before the first statement
@@ -323,575 +2187,65 @@ Consists of two statements and three points:
 @item the point after the second statement
 @end itemize
 
-Just as every slot in a Rust program has a dynamic value that conforms
-to a static type, every @emph{point} in a Rust program has a dynamic
-state that conforms to a static @i{typestate}.  The @i{typestate} of a
-point is just a condition -- a set of constraints -- associated with
-the point. The typestate of a point is a condition that is statically
-guaranteed to hold at that point. The constraints in a typestate can
-refer to @emph{any slots} visible at the typestate's point. The static
-@i{typestate checking algorithm} ensures that when the program runs,
-the dynamic state of the process at a given point @emph{will} conform
-to the point's typestate.
+The typestate system reasons over points, rather than statements. This
+may seem counterintuitive, but points are the more primitive
+concept. Another way of thinking about a point is as a set of
+@emph{instants in time} at which the state of a process is fixed. By
+contrast, a statement represents a @emph{duration in time}, during
+which the state of the process changes. The typestate system is
+concerned with constraining the possible states of a process' memory
+at @emph{instants}; it is meaningless to speak of the state of a
+process' memory ``at'' a statement, as each statement is likely to
+change the contents of memory.
 
-Because many predicates are not computable statically -- they depend
-on the dynamic state of values -- programmers must occasionally insert
-assertions. An @i{assertion} is a statement that calls a predicate
-with the built-in operator @code{assert}; this operator prevents
-execution from proceeding if the predicate does not hold over the
-provided arguments. Failed assertions generate runtime exceptions,
-preventing control from proceeding past the assertion. Statically, an
-assertion add its constraint into the typestate of the point after the
-assertion. For example, this code:
+@page
+@node          Ref.Stmt.Stat.CFG
+@subsubsection Ref.Stmt.Stat.CFG
+@c * Ref.Stmt.Stat.CFG::           The control flow graph formed by statements.
+
+Each @emph{point} can be considered a vertex in a directed
+@emph{graph}. Each kind of statement implies a single edge in this
+graph between the point before the statement and the point after it,
+as well as a set of zero or more edges from the points of the
+statement to points before other statements. The edges between points
+represent @emph{possible} indivisible control transfers that might
+occur during execution.
+
+This implicit graph is called the @dfn{control flow graph}, or @dfn{CFG}.
+
+@page
+@node          Ref.Stmt.Stat.Constr
+@subsubsection Ref.Stmt.Stat.Constr
+@c * Ref.Stmt.Stat.Constr::          Predicates applied to slots.
+
+A @dfn{constraint} is a predicate applied to specific slots. @xref{Ref.Item.Pred}.
+
+For example, consider the following code:
 
 @example
-int x;
-int y : is_even(*);
-x = foo();
-y = x;
+pred is_less_than(int a, int b) @{
+     ret a < b;
+@}
+
+fn test() @{
+   int x = 10;
+   int y = 20;
+   check is_less_than(x,y);
+@}
 @end example
 
-consists of two slots -- @code{x} and @code{y} -- and two statements,
-thus three points. The first statement calls @code{foo} and assigns
-its result to @code{x}. The second statement assigns @code{x} to
-@code{y}. This code is @emph{erroneous} according to the typestate
-checking algorithm: the point before the second statement does not
-contain the @code{is_even(x)} constraint, so the assignment would
-violate the condition of @code{y}.
-
-The code can be corrected using an assertion. This corrected code:
-
-@example
-int x;
-int y : is_even(*);
-x = foo();
-assert is_even(x);
-y = x;
-@end example
-
-Consists of three statements and four points. At the first two points,
-the typestate does not contain the @code{is_even(x)} constraint. At
-the third point -- the point @emph{after} the assertion -- the
-typestate @emph{does} contain the @code{is_even(x)} constraint. So the
-third statement is now legal: if the third statement ever executes, it
-will assign a value @emph{statically} known to satisfy the condition
-of @code{y}.
-
-It is crucial to understand that the typestate of the third point is a
-@emph{static} fact about @emph{static} entities -- slots, points and
-predicates -- even though the runtime behavior will vary depending on
-the runtime value of @code{x}. If the predicate fails at runtime,
-control will not proceed past the @code{assert} statement, and the
-assignment will never be made.
-
-To reiterate: the typestate checking algorithm is not responsible for
-statically evaluating constraints. It simply calculates the
-constraints that are @emph{known to hold} at each point -- if control
-ever reaches the point -- and reports on mismatches between the
-constraints known to hold at a point and the constraints
-@emph{required} by statements.
-
-Typestates encode requirements for complicated dynamic assertions in
-the language's static checking system. This makes it easier to rule
-out erroneous inputs to functions and programs that you write:
-function parameters and return values are slots just like variables,
-and can be annotated with conditions. In this respect typestates are
-similar to a form of ``design by contract'', except that the typestate
-checking algorithm examines the static control-flow graph and
-minimizes the number of times an expensive assertion must be
-(re-)checked.
-
-
-@node    Artifacts
-@chapter Artifacts
+This example defines the predicate @code{is_less_than}, and applies it
+to the slots @code{x} and @code{y}. The constraint being checked on
+the third line of the function is @code{is_less_than(x,y)}.
 
 @page
-@node    Structural artifacts
-@section Structural artifacts
+@node          Ref.Stmt.Stat.Cond
+@subsubsection Ref.Stmt.Stat.Cond
+@c * Ref.Stmt.Stat.Cond::          Constraints required and implied by a statement.
 
-A collection of Rust source code can be thought of @emph{structurally}
-as a set of artifacts that logically @i{contain} one another. There
-are four kinds of artifacts in this view: @i{crates}, @i{modules},
-@i{slots} and @i{values}.
+A @dfn{condition} is a set of zero or more constraints.
 
-@subsection Crate
-
-A @dfn{crate} is a unit of configuration, linkage and distribution
-for Rust code. Crates logically contain modules. Crates have
-``unfriendly'' names -- names that look like ugly and meaningless
-numbers -- but these names are ``universally unique''.
-
-The source form of a crate is a @dfn{crate file}, which is a
-text file ending in @code{.rc}. The compiled form of a crate is a
-binary dynamic-link library, such as an ELF or PE library (ending in
-@code{.so} or @code{.dll} respectively).
-
-Crate files contain a description of a tree of modules, and
-instructions about how to compile the crate. The Rust compiler
-operates on crate files. Crate files may reference other
-crates, in order to import qualified module names from them, but
-the reference graph of crate files is a DAG.
-
-@subsection Modules
-
-A @dfn{module} is a unit of @emph{name organization} within a
-crate. The tree of modules in a crate corresponds 1:1 with a tree of
-directories and files in a filesystem. Thus there are two kinds of
-modules: @dfn{directory modules} and @dfn{source modules}. A directory
-module contains sub-modules. A source module contains values.
-
-Source modules, also called @dfn{source files}, are files ending
-in @code{.rs}. These files contain code that defines slots.
-
-Modules are arranged in a human-friendly namespace within a crate.
-It is the responsibility of a team of programmers working on a
-crate to ensure that their module names to not collide, inside the
-crate. Module names can be reused in different crates,
-however; the names in one crate are unrelated to the names in
-another crate.
-
-Modules contain slots, and some of those slots point to values. There
-are many types of value; the complete list is provided in the next
-section. For now it is sufficient to note that most Rust code is
-concerned with manipulating values. Much more than the portion of Rust
-code that relates to modules and crates.
-
-@subsection Slots
-
-Finally, within modules there are @i{slots}. A @dfn{slot} is a named
-memory location that can refer to a value. Some values will contain
-more slots, that in turn may refer to more values. Each source module
-defines a set of slots that are the ``top level'' slots of the
-module. Further slots exist in many contexts:
-
-@itemize
-@item Variables within functions, ports and predicates.
-@item Fields within records, alternatives and programs.
-@item Components of vectors.
-@end itemize
-
-
-@page
-@node    Values
-@section Values
-
-Rust defines a wide variety of types and type constructors.
-
-@menu
-* Primitive types::           Machine-level values.
-* Dynamic types::             Latently-typed values.
-* Arithmetic types::          High-precision numbers.
-* Textual types::             Strings and characters.
-* Records::                   Fixed products of heterogeneous types.
-* Vectors::                   Dynamic products of homogeneous types.
-* Alternatives::              Sums of heterogeneous types.
-* Functions::                 Subroutines and scoped coroutines.
-* Predicates::                Pure functions involved in typestates.
-* Programs::                  General coroutines.
-* Processes::                 Instances of programs.
-* Ports::                     Inter-process message inputs.
-* Channels::                  Weak capabilities to send messages to ports.
-* Types::                     Values representing types.
-* Quotations::                Values representing source code.
-@end menu
-
-@node       Primitive values
-@subsection Primitive values
-
-@node       Dynamic values
-@subsection Dynamic values
-
-@node       Arithmetic values
-@subsection Arithmetic values
-
-The types of arithmetic value are:
-
-@itemize
-@item @code{nat}, the type of arbitrary-precision naturals.
-@item @code{int}, the type of arbitrary-precision integers.
-@item @code{rat}, the type of arbitrary-precision rationals.
-@end itemize
-
-All these types are represented internally as alternatives; on N-bit
-systems, typically, N-1-bit integral values of any of these types are
-stored as single machine words.
-
-@node       Textual values
-@subsection Textual values
-
-The types of textual value are:
-
-@itemize
-@item @code{char}, the type of unicode codepoints, as @code{u32} values.
-@item @code{str}, the type of unicode strings, equal to @code{vec[char]}.
-@item @code{strenc.utf8}, a @code{vec[u8] : strenc.is_utf8(*)}, the type of unicode strings encoded into UTF-8.
-@item @code{strenc.*}, various other character encodings.
-@end itemize
-
-It should be emphasized that the primary string type should not be
-blindly memory-copied into an external buffer, as it will produce a
-sequence of numbers in the host byte order, and not necessarily equal
-to a particular UTF-8 or UCS-4 encoding. When externalizing a string,
-care should be taken to select an appropriate encoding from the
-standard @code{enc.*} module.
-
-@node       Records
-@subsection Records
-
-The @code{rec} type introduces new record types that have named fields,
-similar to the @code{struct} types of C.
-
-Anonymous record literals and record types are denoted with the
-keyword @code{rec}. The fields of a record are defined, as a sequence
-of slot declarations within braces, similar to the slot declarations
-in a stack frame.
-
-Record fields can carry ``inline'' conditions, similar to slots in a
-stack frame. Complete record types can also carry conditions relating
-to the record as a whole, or to some combination of its fields.
-
-@node       Vectors
-@subsection Vectors
-
-Vectors are variable size, homogeneous, 1-dimensional containers. 
-
-Vectors are parametric types, denoted with the keyword
-@code{vec}. Anonymous vector literals and vector types containing type
-@code{T} are denoted as @code{vec[T]}.
-
-A vector has two associated sizes: one representing the vector's
-allocated size, and one representing a bound on the initialized range
-of the vector. Within the initialized-range bound, all elements carry
-the @code{init} predicate. 
-
-Vectors dynamically resize using doubling and halving operations that
-amortize byte-copying costs to a constant factor per element.
-
-Because the @code{init} predicate is managed homogeneously over the
-initialized range of the vector, not per-element, vectors cannot have
-individual elements deinitialized. Instead, the following operations
-are defined:
-
-@itemize
-@item Elements can be swapped inside the vector.
-@item An element of the appropriate type can be appended to the vector.
-@item A vector of the same element type can be appended to the vector.
-@item The vector can be truncated to any size smaller than its current size.
-@item An element of the vector can be swapped with an external, initialized value.
-@end itemize
-
-Vector types can have an associated condition that applies to every
-element in the vector, or to the vector as a whole.
-
-@node       Alternatives
-@subsection Alternatives
-
-Alternatives are structures that contain, at any given point, exactly
-one of an explicitly enumerated set of possible values.  They are
-similar to the disjoint sum types of ML, and can be seen as a ``safe''
-version of @code{union} types in C.
-
-Alternatives are denoted with the @code{alt} keyword. The possible
-values of the alternative are called @i{cases}, and the cases are
-denoted with unique identifiers, that act as labels.
-
-The space consumed by an N-alternative has two components:
-
-@itemize
-@item The space for the cases, which is the maximum space required 
-for any of the cases. This space is used regardless of case.
-@item The space for the discriminant field, which is @code{ceil(log_2(N))}
-bits.
-@end itemize
-
-If the space consumed by an alternative can fit inside a single word,
-Rust is obliged to store it this way. In particular, on a machine that
-effectively ``does not use'' K low bits of its pointers (due to
-alignment restrictions), those K low bits can be used to encode a
-@code{2^K}-case alternative. Every implementation of Rust must perform
-this optimization.
-
-@node       Functions and Channels
-@subsection Functions and Channels
-
-Functions and channels model control transfer abstractions. Functions
-model synchronous subroutines as well as 4 limited, stack-scoped forms
-of synchronous coroutine. Channels are effectively weak pointers to
-synchronously-invoked functions that may execute in different
-processes.
-
-Function and channel calls provide arguments, as well as either one or
-two points in their caller's frame to return and/or yield to. A call
-@i{returns} a value if it moves a value into the caller-allocated
-return slot, deallocates its frame and signals caller control to jump
-to the return point. A call @i{yields} a value if it moves a value
-into the caller-allocated yield slot, moves a ``resume point'' and a
-``terminate point'' into the caller-allocated resume/terminate slots,
-signals caller control to jump to the yield point, and @emph{does not}
-deallocate the callee frame. If a call yields, the caller may
-@i{resume} the call and permit it to return of its own accord, or may
-@i{terminate} the call, causing the execution of callee's epilogue and
-deallocating its frame. Every call eventually executes its epilogue,
-either caused by a return, an exception, or caller termination. 
-
-The callee of a channel call is a port, and ports may asynchronously
-and independently be terminated on the callee side at any point during
-the call, since they are controlled by an owning process of their
-own. The callee of a function call is a function body, which trades
-control back and forth with its caller synchronously. In both channel
-and function calls, caller control suspends when callee control is
-active. 
-
-The arguments to a function or channel implicitly occupy an ``argument
-record'', though it is a special record declared and managed
-automatically by the language. In the case of a function, the argument
-record may be coincident in memory with the slots of the
-callee. Arguments flow through the argument record transparently, most
-of the time. The only time it is relevant to know about is when
-aplying an unknown function or channel type to an unknown
-argument-record type. In that case, the argument-record type
-associated with the function must be compatible with the function it
-is being combined with. For a function type @var{T}, the argument
-record type is a nested type called @code{T.args}.
-
-An un-annotated parameter implies that the associated argument is
-copied into the argument record during a call, then copied into the
-caller's frame.  A parameter slot of type @code{T} can be annotated in
-three additional ways:
-
-@itemize
-@item @code{T>}, which means ``move in''
-@item @code{T<}, which means ``move out''
-@item @code{T=}, which means ``move in and out''
-@end itemize
-
-A ``move in'' parameter is moved from the caller frame into the
-argument record and then into the callee frame: the caller's slot loses
-its @code{init} predicate at the point of the call, and the callee
-gains it. The mnemonic is that @code{T>} parameters ``consume'' values
-of type @code{T} from their caller.
-
-A ``move out'' parameter is moved from the callee frame into the
-argument record and then back to the caller frame when the call
-returns. The callee slot loses the @code{init} predicate at the return
-point, and the caller slot gains it.  The mnemonic is that @code{T<}
-parameters ``produce'' values of type @code{T} for their caller.
-
-A ``move in and out'' slot does both of the above.
-
-Yields do not move values into ``move out'' or ``move in and out''
-parameter slots; only returns.
-
-Un-annotated yield and return slots use copy semantics. They can be
-annotated with the @code{>} suffix to imply ``move out'' semantics. 
-
-Parameter types, return types and yield types can all be annotated as
-exterior using the @code{^} prefix, just like all slot
-declarations. Parameter types and yield types can also be annotated as
-aliases using the @code{@@} prefix. See @ref{Slot modes}.
-
-Functions are required to support proper tail-calls.
-
-Functions may be pure. A pure function performs no communication
-tasks: it does not send on any channel, nor does it spawn or otherwise
-interact with a process type. See @ref{Purity}.
-
-In addition to the basic call/return protocol for functions, which is
-declared with the @code{func} keyword, 4 types of scoped coroutine are
-supported, that may yield before they return:
-
-@itemize
-@item @code{func!} denotes a function that yields exactly once.
-@item @code{func?} denotes a function that yields 0 or 1 times.
-@item @code{func*} denotes a function that yields 0 or more times.
-@item @code{func+} denotes a function that yields 1 or more times.
-@end itemize
-
-These protocols are also supported by channels and ports, with the
-channel keywords @code{chan!}, @code{chan?}, @code{chan*} and
-@code{chan+} and the port keywords @code{port!}, @code{port?},
-@code{port*} and @code{port+}.
-
-Scoped coroutines are also required to support proper
-tail-@emph{yields}. A tail-yield occurs when a primary coroutine
-invokes a sub-coroutine with a construct that yields every value
-yielded by the sub-coroutine. Then the primary coroutine passes its
-caller's yield address to the sub-coroutine, for direct yielding
-between the sub-coroutine and caller. When such a tail-yield happens
-in tail-call position (the last statement of a coroutine before a
-return), the coroutine is requried to replace its stack frame with the
-frame of the sub-coroutine, as with a return-based tail call.
-
-The 4 types of coroutine combine with 4 specific caller-side control
-structures (@code{for!}, @code{for?}, @code{for*} and @code{@for+}) to
-support 4 important calling patterns. Each is useful, and interacts in
-a precise manner with the typestate checking algorithm. One way to
-picture the differences is to picture the control-flow graph in the
-caller: when binding a yielded value inside a temporary control block,
-the caller's control graph has either none, one, or both of a ``bypass
-edge'' (if no yield occurs) and a ``back edge'' (if more than one
-yield occurs). Combining these possibilities produces 4 possible
-scenarios: neither (@code{func!}), bypass-no-back (@code{func?}),
-back-no-bypass (@code{func+}) and both (@code{func*}).
-
-A function declaration also defines an associated @i{call record} that
-represents the parameter-passing requirements of the function in a way
-that is accessible to introspection or polymorphic invocation. This
-record contains an @i{arguments record}, and either a @i{return value
-slot} or @i{yield value slot}. Given a call record, there are 5
-polymorphic @i{apply} operators that will invoke a function of
-compatible type. Invocation involves forming a callee frame full of
-slots for each value in the call record's argument record, copying or
-moving values into those slots, then running the callee. Yields and
-returns from the function are tail-yielded or tail-returned back to
-the caller of the apply operator. This permits writing polymorphic
-call-proxying code while keeping the standard case efficient.
-
-
-@node       Predicates
-@subsection Predicates
-
-Predicates are boolean pure functions that connect runtime values to
-the typestate system. The typestate system statically assigns a
-condition to each point in a program, and checks that conditions
-required by statements are met at every point. A condition is a set of
-constraints. A constraint is a predicate applied to slots. Thus,
-introducing a new predicate enlarges the set of possible constraints
-and conditions. See @ref{Typestates}.
-
-Predicates are declared with @code{pred}, and have names and
-signatures similar to functions. The body of a predicate is
-syntactically a pure boolean function. The signature of a predicate
-cannot include the keyword @code{pure} or the @code{bool} return type;
-these are implied and non-optional.
-
-Conditions can be asserted with the keyword @code{assert}. The
-postcondition of a statement @code{assert p(q,r), x(y,z)} is the union
-of the precondition with the condition @code{p(q,r), x(y,z)}.
-
-@node       Programs
-@subsection Programs
-
-@node       Processes
-@subsection Processes
-
-@node       Ports
-@subsection Ports
-
-@node       Channels
-@subsection Channels
-
-@node       Types
-@subsection Types
-
-@node       Quotations
-@subsection Quotations
-
-
-@page
-@node    Type system
-@section Type system
-
-
-@node       Value and slot types
-@subsection Value and slot types
-
-Every value has a unique form.
-
-Every slot has a unique type.
-
-If a slot @var{S} references a value @var{V}, type of @var{S} has a
-form that is identical to the form of @var{V}, and the type of @var{S}
-has a condition that holds when @var{V} is substituted for the formal
-slot @code{*} in the condition. Of course @var{S} may be further
-constrained by other constraints at its point of declaration, but
-those constraints @emph{add} to the condition in the type of
-@var{S}. They do not replace it.
-
-
-@node       Limitation
-@subsection Limitation
-
-Some types are @i{limited}. A type @var{T} is @dfn{limited} iff any of
-these constraints hold:
-
-@itemize
-@item The type @var{T} contains a limited slot.
-@item The type @var{T} is @code{proc}.
-@item The type @var{T} is @code{addr}.
-@end itemize
-
-Limited values cannot be copied or transmitted, only moved. See
-@ref{Memory model} for the definitions of copying and transmission.
-
-Limitation ``infects'' the structure that contains it; any type that
-is indirectly limited must be declared as such with the keyword
-@code{lim}.
-
-@node       Addresses and memory safety
-@subsection Addresses and memory safety
-
-Values of the @code{addr} type are memory addresses of blocks of
-memory acquired from the operating system or libraries written in
-other languages. To differentiate types of address, use the @code{new}
-type operator in an @code{addr} type expression. Address types also
-carry a finalizer that cleans up after them. Use of an address type
-marks a program as ``memory unsafe'', which makes any process that
-runs the program ``memory unsafe''. To regain memory safety, a process
-must be run inside a separate operating system process with hardware
-memory protection. Dividing your programs up into independend
-operating system processes to localize memory unsafety is part of
-normal Rust program design.
-
-@node       Purity
-@subsection Purity
-
-Functions may be @i{pure} or @i{impure}. A
-function @var{S} is @dfn{impure} iff any of these constraints hold:
-
-@itemize
-@item The function @var{S} is @emph{not} declared as @code{pure}
-@item The function @var{S} calls any impure functions.
-@item The function @var{S} calls any channels.
-@end itemize
-
-Purity exists as a concept in Rust for two reasons:
-
-@itemize
-@item As a basic aid to code comprehension. Pure functions are easier
-to reason about, so programmers may wish to ensure that portions of
-their work are pure.
-@item Predicates are effectively pure boolean functions. Predicates
-are @emph{required} to be pure for the typestate system to function
-correctly. Since purity is required for predicates, extending the
-concept of purity to functions and iterators permits predicates to
-call them safely. Otherwise predicates would have to be
-self-contained.
-@end itemize
-    
-
-@page
-@node    Typestates
-@section Typestates
-
-Every block of statements containing expressions decomposes to a block
-of primitive statements in a normal form. In this form, every
-statement is logically one of:
-
-@itemize 
-@item A statement declaring a slot.
-@item A conditional or unconditional jump to another statement.
-@item A load statement on one slot.
-@item A copy or move statement on two slots.
-@item An ALU statement on three slots.
-@item A heap allocation or deallocation statement.
-@item Invocation of a function or channel.
-@item A return or yield.
-@end itemize
-
-Every normalized statement has two associated @dfn{points}: one before
-the statement and one after the statement. Each point has an associated
-@emph{condition}:
+Each @emph{point} has an associated @emph{condition}:
 
 @itemize
 @item The @dfn{precondition} of a statement is the condition the statement requires in the point before the condition.
@@ -901,10 +2255,15 @@ the statement and one after the statement. Each point has an associated
 Any constraint present in the precondition and @emph{absent} in the
 postcondition is considered to be @emph{dropped} by the statement.
 
-The typestate checking system analyzes the preconditions and
-postconditions of each statement, and calculates a condition for each
-point called a typestate. For a given statement, we call these
-typestates the prestate and a poststate.
+@page
+@node          Ref.Stmt.Stat.Typestate
+@subsubsection Ref.Stmt.Stat.Typestate
+@c * Ref.Stmt.Stat.Typestate::     Constraints that hold at points.
+
+The typestate checking system @emph{calculates} an additional
+condition for each point called its typestate. For a given statement,
+we call the two typestates associated with its two points the prestate
+and a poststate.
 
 @itemize
 @item The @dfn{prestate} of a statement is the typestate of the point before the statement.
@@ -912,11 +2271,12 @@ typestates the prestate and a poststate.
 @end itemize
 
 A @dfn{typestate} is a condition that has @emph{been determined by the
-typestate algorithm} to hold at a point. This is a subtle but important point to 
-understand: preconditions and postconditions are @emph{inputs} to the typestate
-algorithm; prestates and poststates are @emph{outputs} from the typestate algorithm.
+typestate algorithm} to hold at a point. This is a subtle but
+important point to understand: preconditions and postconditions are
+@emph{inputs} to the typestate algorithm; prestates and poststates are
+@emph{outputs} from the typestate algorithm.
 
-The typestate algorithm analyzes the preconditions and postconditions
+The typestate algorithm analyses the preconditions and postconditions
 of every statement in a block, and attempts to compute a condition for
 each typestate. Specifically:
 
@@ -924,379 +2284,763 @@ each typestate. Specifically:
 @item Initially, every typestate is empty.
 @item Each statement's poststate is given the union of the statement's prestate, precondition, and postcondition.
 @item Each statement's poststate has the difference between the statement's precondition and postcondition removed.
-@item Each statement's prestate is given the intersection of the poststates of every statement that jumps to it.
-@item The previous three steps are repeated until no typestates change.
+@item Each statement's prestate is given the intersection of the poststates of every parent statement in the CFG.
+@item The previous three steps are repeated until no typestates in the block change.
 @end itemize
+
+The typestate algorithm is a very conventional dataflow calculation,
+and can be performed using bit-set operations, with one bit per
+predicate and one bit-set per condition.
 
 After the typestates of a block are computed, the typestate algorithm
 checks that every constraint in the precondition of a statement is
-satisfied by its prestate. If any preconditions are not satisfied and
-no automatic assertions exist, the mismatch is considered an error.
+satisfied by its prestate. If any preconditions are not satisfied, the
+mismatch is considered a static (compile-time) error.
 
-@node       Asserting conditions
-@subsection Asserting conditions
-
-The @code{assert} statement adds the constraints in the asserted
-condition to its postcondition. At runtime, if the assertion succeeds
-it has no effect, and if it fails it raises an exception. If a
-predicate is declared as @code{auto}, assertions are inserted
-automatically some contexts.
-
-Specifically: When checking whether a statement's precondition is
-satisfied by its prestate, if the precondition names a predicate that
-is not present in the prestate, one of two cases occurs:
-
-@itemize
-@item If the missing predicates are all @code{auto} and all the 
-preconditions of the missing @code{auto}-predicates are met, the
-compiler may insert assertions for each missing predicate (and restart
-the typestate algorithm).
-@item Otherwise the condition is a compile-time error.
-@end itemize
-
-@node       Dropping constraints
-@subsection Dropping constraints
-
-All constraints in a typestate can be @i{dropped}. To @dfn{drop} a
-constraint is to remove it from the typestate at the associated
-point. For a slot @var{S}, dropping the @code{init(S)} constraint may
-cause memory to be released or finalizer to be run. See @ref{Memory
-model} for discussion. All other constraints can be dropped without
-side-effect.
-
-
-@node       Constraints on moved values
-@subsection Constraints on moved values
-
-When a statement moves a value from a slot @var{A} to a slot @var{B}: 
-
-@itemize
-@item Every constraint involving @var{B} is dropped.
-@item Every remaining constraint involving @var{A} has @var{B} 
-substituted for @var{A}.
-@end itemize
-
-
-@node       Constraints on copied values
-@subsection Constraints on copied values
-
-When a statement copies a value from a slot @var{A} to a slot @var{B}: 
-
-@itemize
-@item Every constraint involving @var{B} is dropped.
-@item For every remaining constraint @var{P} involving @var{A}, 
-a copy of @var{P} is added to the typestate with @var{B} substituted
-for @var{A}.
-@end itemize
-
-
-@node          Slot conditions
-@subsubsection Slot conditions
-
-When a slot @var{S} has a type @var{T} with condition @var{C}, it
-means that all the constraints in @var{C} will be present, with
-@var{S} substituted for the formal slot @code{*}, in the typestate of
-every point to which @var{S} is @i{visible}.
-
-A slot becomes @dfn{visible} at the point immediately following the
-statement containing its declaration, and remains visible through to
-the point after the last statement in the block containing the slot's
-declaration.
-
-
-@node       Reflection
-@subsection Reflection
-
-Types and constraints are reflected into runtime values. Runtime values
-can always be converted to type @code{dyn} or @code{lim dyn}, which
-carries the type of its value and type (both form and state) along
-with it.
-
-The runtime representation of a type can be compared to the runtime
-representation of another type.
-
-To connect runtime and compile-time values, a type-switch statement
-exists over @code{dyn} values; each arm of the type-switch
-temporarily moves the @code{dyn}'s value into a typed slot.
-
-
-@node       Type system comparison with other languages
-@subsection Type system comparison with other languages
-
-We borrow structure (but not terminology) from Ada and Hermes when
-organizing the type system. In particular:
-
-@itemize
-@item All rust types carry conditions, similar to an Ada "subtype". Conditions are formulated using Hermes-style 
-predicates rather than Ada's fixed set of constraints.
-@item There is no general subtype lattice (as in OO languages). There is only
-one type for each value. This is common between Rust and Hermes.
-@end itemize
-
-
-@node       Pragmatic notes
-@subsection Pragmatic notes
-
-Type conditions do not participate in function overload resolution,
-because predicates can always be dropped. Only type forms are
-considered in when resolving overloaded function names.
-
-If you wish to produce a new type that wraps an old type and
-@emph{does} participate in overload resolution (and is
-assignment-incompatible with the old type), you can use the @code{new}
-type operator. This operator produces a disjoint form that shares the
-same structure as its operand, but compares unequal for purposes of
-assignment compatibility. Disjoint forms with the same bitwise
-structure can be coerced to one another, but only explicitly, and only
-when the definitions of both types are visible (i.e. when neither is
-an opaque export from another module).
-
-It would be pointless to prohibit such coercion on the grounds of
-safety, since programmers can always write their own coercion
-functions by analyzing one form bit-by-bit and building the other
-bit-by-bit. Use coercion lightly and tastefully.
 
 @page
-@node    Memory model
-@section Memory model
+@node          Ref.Stmt.Stat.Check
+@subsubsection Ref.Stmt.Stat.Check
+@c * Ref.Stmt.Stat.Check::         Relating dynamic state to static typestate.
 
+The key mechanism that connects run-time semantics and compile-time
+analysis of typestates is the use of @code{check}
+statements. @xref{Ref.Stmt.Check}. A @code{check} statement guarantees
+that @emph{if} control were to proceed past it, the predicate associated with the
+@code{check} would have succeeded, so the constraint being
+checked @emph{statically} holds in subsequent
+statements.@footnote{A @code{check} statement is similar to
+an @code{assert} call in a C program, with the significant difference
+that the Rust compiler @emph{tracks} the constraint that
+each @code{check} statement enforces. Naturally, @code{check}
+statements cannot be omitted from a ``production build'' of a Rust
+program the same way @code{asserts} are frequently disabled in
+deployed C programs.}
 
-@node       Semantic model
-@subsection Semantic model
+From this building block, constraints can be propagated to function
+signatures and constrained types, and the responsibility
+to @code{check} a constraint pushed further and further away from the
+site at which the program requires it to hold in order to execute
+properly.
 
-Rust's memory model logically consists of a set of values, arranged in
-a logical tree, and physical DAG. Values have 1:1 type relationship so
-values may be said to be limited or not, just like types. See
-@ref{Limited types} for details.
+@page
+@node       Ref.Stmt.Decl
+@subsection Ref.Stmt.Decl
+@c * Ref.Stmt.Decl::                Statement declaring an item or slot.
 
-The relationships between slots and values are the edges in the memory
-DAG.
+A @dfn{declaration statement} is one that introduces a @emph{name}
+into the enclosing statement block. The declared name may denote a new
+slot or a new item. The scope of the name extends to the entire
+containing block, both before and after the declaration.
 
+@menu
+* Ref.Stmt.Decl.Item::              Statement declaring an item.
+* Ref.Stmt.Decl.Slot::              Statement declaring a slot.
+@end menu
 
-@node       Initialization 
-@subsection Initialization 
+@page
+@node          Ref.Stmt.Decl.Item
+@subsubsection Ref.Stmt.Decl.Item
+@c * Ref.Stmt.Decl.Item::                Statement declaring an item.
 
-Every slot is either @i{initialized} or @i{empty}.
+An @dfn{item declaration statement} has a syntactic form identical to
+an item declaration within a module. Declaring an item -- a function,
+type, module, predicate or program -- locally within a statement block
+is simply a way of restricting its scope to a narrow region containing
+all of its uses; it is otherwise identical in meaning to declaring the
+item outside the statement block.
 
-A slot @var{S} is @dfn{initialized} iff it refers to a value in the
-memory DAG, otherwise @var{S} is @dfn{empty}. When the slot
-@var{S} is initialized, the predicate @code{init(S)} is added to the
-typestate. If the predicate @code{init(S)} is dropped, the slot
-@var{S} becomes empty.
+@page
+@node          Ref.Stmt.Decl.Slot
+@subsubsection Ref.Stmt.Decl.Slot
+@c * Ref.Stmt.Decl.Slot::                Statement declaring an slot.
 
-
-@node       Sharing
-@subsection Sharing
-
-Semantically, every slot holds a unique subtree that is not
-shared. This is why we say that memory is arranged into a logical
-tree.
-
-In physical memory, some number of memory subtrees may be shared
-copy-on-write (CoW). This is why we say that memory is a DAG. The
-amount of sharing is specified and obligatory: exterior allocations
-have reference counts stored at the beginning of their allocation, and
-are reclaimed when the reference count drops to zero. Interior
-allocations are reclaimed when the slot containing the allocation
-becomes empty (loses the @code{init} predicate). See @ref{Allocation
-modes}.
-
-
-@node       Assignment
-@subsection Assignment
-
-Rust has two built-in notions of assignment. 
-
-First, one can @dfn{move} a value between slots. Movement is
-written with the operator @code{<-}; an example is @code{B <- A;}
-which means "move A to B". All values can be moved. 
-
-Second, one can @dfn{copy} a value between slots. Copying is
-written with the operator @code{=}; an example is @code{B = A;}
-which means "copy A to B". Limited values cannot be copied.
-
-In both move and copy assignments, the left slot is called the
-@dfn{destination} and the right slot is called the @dfn{source}.
-
-The affect of copying and movement on typestates is described in
-@ref{Predicates and assignment}. In short, predicates associated with
-the destination slot are dropped, and predicates associated with the
-source slot are either replaced or duplicated to refer to the
-destination slot.
-
-The @code{init} predicate models the initialization state of a slot,
-and thus the presence or absence of a slot's reference to a
-value. When an @code{init} predicate is dropped during an assignment,
-it may thereby drop a reference to a value. This in turn may cause
-either finalization -- if the value is limited and contains processes
-with finalizers -- and/or storage reclamation, if the unreferenced
-value was exterior-allocated (see @ref{Allocation modes}).
-
-The behavior of a move or copy is completely defined by the typestate
-transition rules in @ref{Predicates and assignment}, as well as one
-additional rule: that in either @code{B = A;} or @code{B <- A}, if the
-prestate has @code{init(A)} and slot @var{A} refers to value @var{V}
-before the assignment, then slot @var{B} refers to value @var{V} after
-the assignment.
-
-
-@node       Allocation modes
-@subsection Allocation modes
-
-Values can be allocated in either an @i{exterior} or @i{interior}
-mode. @dfn{Exterior allocation} typically means ``allocated on the
-heap''. @dfn{Interior allocation} means that the value is allocated
-within a contiguous block of memory owned by some other
-value. Interior allocations are commonly made for slots in @code{rec}
-and @code{vec} values, as well as slots in function and port frames.
-
-Slots also have modes, each of which may imply that the slot's
-referent has a particular allocation mode. See @ref{Slot modes}.
-
-
-@node       Value transplanting
-@subsection Value transplanting
-
-When a value is moved or copied into a slot that requires an
-allocation mode different from the allocation mode of the value, the
-value may be @i{transplanted} during the move or
-copy. @dfn{Transplanting} a value means moving or copying the value by
-byte-copying it into a new location in memory. Transplanting may also
-involve allocating fresh memory from the heap, if the transplant
-destination is exterior.
-
-Rust's memory model strives to minimize four things simultaneously: 
+A @code{slot declaration statement} has one one of two forms:
 
 @itemize
-@item Ambiguity of notation.
-@item The amount of value transplanting.
-@item The amount of exterior allocation.
-@item Cognitive load for programmers.
+@item @code{let} @var{mode-and-type} @var{slot} @var{optional-init};
+@item @code{auto} @var{slot} @var{optional-init};
 @end itemize
 
+Where @var{mode-and-type} is a slot mode and type expression,
+@var{slot} is the name of the slot being declared, and
+@var{optional-init} is either the empty string or an equals sign
+(@code{=}) followed by a primitive expression.
 
-@node       Type size
-@subsection Type size
+Both forms introduce a new slot into the containing block scope. The
+new slot is visible across the entire scope, but is initialised only
+at the point following the declaration statement.
 
-Any visible slot consumes a fixed amount of memory: either to store a
-value directly or to store the address of a value elsewhere in
-memory. The amount of memory required for a slot may only become known
-at runtime, and the value the slot refers to may change the amount of
-memory it consumes, but once elaborated the slot itself does not
-change size during its life.
+The latter (@code{auto}) form of slot declaration causes the compiler
+to infer the static type of the slot through unification with the
+types of values assigned to the slot in the the remaining code in the
+block scope. Inferred slots always have @emph{interior}
+mode. @xref{Ref.Mem.Slot}.
 
-Some slots refer to values -- vectors and processes -- that may
-themselves consume dynamic amounts of memory, but the slots referring
-to those vectors and processes are fixed-size descriptors synthesized
-by the compiler. A programmer may not independently refer to the
-dynamic portion of a vector or process.
 
-Slots may have their size determined at compile time. Such slots are
-said to have @dfn{static size}, and are subject to precomputing and
-inlining of various allocation, copy and move operations.
 
-Other slots -- those referring to parametric types -- may only have
-their size determined at elaboration time. Such slots are said to have
-@dfn{deferred size}, and must calculate sizes for most memory
-operations dynamically, using type descriptors present at elaboration
-time.
+@page
+@node       Ref.Stmt.Copy
+@subsection Ref.Stmt.Copy
+@c * Ref.Stmt.Copy::                Statement for copying a value between two slots.
 
-Types that fit inside a single machine word are called
-@dfn{subword}. Types that do not fit inside a single machine word are
-called @dfn{superword}.
+A @dfn{copy statement} consists of an @emph{lval} -- a name denoting a
+slot -- followed by an equals-sign (@code{=}) and a primitive
+expression. @xref{Ref.Expr}.
 
-@node       Slot modes
-@subsection Slot modes
+Executing a copy statement causes the value denoted by the expression
+-- either a value in a slot or a primitive combination of values held
+in slots -- to be copied into the slot denoted by the @emph{lval}.
 
-Slots have modes. A slot's mode determines how the slot relates to its
-referent. There are three slot modes:
+A copy may entail the formation of references, the adjustment of
+reference counts, partially replicating the referent of the
+@emph{lval} in order to prepare it for writing, or similar adjustments
+in order to respect the @code{lval} slot mode. All such adjustment is
+automatic and implied by the @code{=} operator.
+
+An example of three different copy statements:
+@example
+x = y;
+x.y = z;
+x.y = z + 2;
+@end example
+
+@page
+@node       Ref.Stmt.Spawn
+@subsection Ref.Stmt.Spawn
+@c * Ref.Stmt.Spawn::               Statements creating new processes.
+
+A @code{spawn} statement takes a program (@pxref{Ref.Item.Prog}), a
+set of initialiser arguments for the program, and an @emph{lval}
+denoting a 2-tuple of a @code{proc} slot and the output type of a
+program. The @code{spawn} statement causes the runtime to construct a
+new process running the program. @xref{Ref.Proc.Life}.
+
+The newly spawned process runs its @code{init} block in the execution
+context of the spawning process. When the @code{init} block completes it
+returns a value to the spawning process. The returned value, as well as
+a @code{proc} value holding the new process, are copied into the @emph{lval}
+on the left hand side of the spawn statement's equals sign (@code{=}). 
+
+An example of a @code{spawn} statement:
+@example
+let port[u8] out = port();
+let port[u8] err = port();
+let (proc p, chan[u8] in) = spawn byte_copy(chan(out), chan(err));
+@end example
+
+@page
+@node       Ref.Stmt.Send
+@subsection Ref.Stmt.Send
+@c * Ref.Stmt.Send::               Statements for sending a value into a channel.
+
+Sending a value through a channel can be done via two different
+statements.  Both statements take an @emph{lval}, denoting a
+channel, and apply a send operator to it and a value to send.
+
+The @emph{asynchronous send} operator @code{<+} adds a value to the
+channel's queue, without blocking. If the queue is full, it is
+extended, taking memory from the process' memory budget. If the
+process memory budget is exhausted, a fault occurs.
+
+The @emph{semi-synchronous send} operator @code{<|} adds a value to
+the channel's queue @emph{only if} the queue has room; if the queue is
+full, the operation @emph{blocks} the sender until the queue has room.
+
+An example of an asynchronous send:
+@example
+chan[str] c = @dots{};
+c <+ "hello, world";
+@end example
+
+An example of a semi-synchronous send:
+@example
+chan[str] c = @dots{};
+c <| "hello, world";
+@end example
+
+@page
+@node       Ref.Stmt.Flush
+@subsection Ref.Stmt.Flush
+@c * Ref.Stmt.Flush::              Statement for flushing a channel queue.
+
+A @code{flush} statement takes a channel and blocks the flushing
+process until the channel's queue has emptied. It can be used to
+implement a more precise form of flow-control than with the send
+operators alone.
+
+An example of the @code{flush} statement:
+@example
+chan[str] c = @dots{};
+c <| "hello, world";
+flush c;
+@end example
+
+
+@page
+@node       Ref.Stmt.Recv
+@subsection Ref.Stmt.Recv
+@c * Ref.Stmt.Recv::               Statement for receiving a value from a channel.
+
+The @dfn{receive statement} takes an @code{lval} to receive into and
+an @emph{lval} denoting a port, and applies the @emph{receive
+operator} @code{<-} to the port. The statement causes the receiving
+process to enter the @emph{blocked reading} state until a process is
+sending a value to the port, at which point the runtime fairly and
+pseudo-randomly selects a sending process and moves a value from the
+head of one of the process queues to the receiving slot, and un-blocks
+the receiving process. @xref{Ref.Run.Comm}.
+
+An example of a @emph{receive}:
+@example
+port[str] p = @dots{};
+let str s <- p;
+@end example
+
+@page
+@node       Ref.Stmt.Call
+@subsection Ref.Stmt.Call
+@c * Ref.Stmt.Call::               Statement for calling a solo function.
+
+A @dfn{call statement} invokes a solo function, providing a tuple of
+input slots and a reference to an output slot. If the solo function
+eventually returns -- it must either eventually return or else fail --
+then the statement completes.
+
+A call statement statically requires that the precondtion declared in
+the callee's signature is satisfied by the statement prestate. In this
+way, typestates propagate through function
+boundaries. @xref{Ref.Stmt.Stat}.
+
+An example of a call statement:
+@example
+let int x = add(1, 2);
+@end example
+
+
+@page
+@node       Ref.Stmt.Ret
+@subsection Ref.Stmt.Ret
+@c * Ref.Stmt.Ret::                Statement for stopping and producing a value.
+
+Executing a @code{ret} statement@footnote{A @code{ret} statement is
+analogous to a @code{return} statement in the C family.}  copies a
+value into the return slot of the current function, destroys the
+current function activation frame, and transfers control to the caller
+frame.
+
+An example of a @code{ret} statement:
+@example
+fn max(int a, int b) -> int @{
+   if (a > b) @{
+      ret a;
+   @}
+   ret b;
+@}
+@end example
+
+@page
+@node       Ref.Stmt.Be
+@subsection Ref.Stmt.Be
+@c * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
+
+Executing a @code{be} statement @footnote{A @code{be} statement in is
+analogous to a @code{become} statement in Newsqueak or Alef.}
+destroys the current function activation frame and replaces it with an
+activation frame for the called function. In other words, @code{be}
+executes a tail-call. The syntactic form of a @code{be} statement is
+therefore limited to @emph{tail position}: its argument must be a
+@emph{call expression}, and it must be the last statement in a block.
+
+An example of a @code{be} statement:
+@example
+fn print_loop(int n) -> () @{
+  if (n <= 0) @{
+    ret;
+  @} else @{
+    print_int(n);
+    be print_loop(n-1);
+  @}
+@}
+@end example
+
+The above example executes in constant space, replacing each frame
+with a new copy of itself.
+
+
+
+@page
+@node       Ref.Stmt.Put
+@subsection Ref.Stmt.Put
+@c * Ref.Stmt.Put::                Statement for pausing and producing a value.
+
+Executing a @code{put} statement copies a value into the put slot of
+the current iterator function, suspends execution of the current
+iterator function, and transfers control to the current put-recipient
+frame.@footnote{A @code{put} statement is analogous to a @code{yield}
+statement in the CLU language, or in more recent languages providing a
+``generator'' facility, such as Python, Javascript or C#. Like the
+generators of CLU, but @emph{unlike} these later languages, Rust's
+iterator functions reside on the stack and obey a strict stack
+discipline.} The current put-recipient will eventually resume the
+suspended iterator function containing the @code{put} statement,
+either continuing execution after the @code{put} statement, or
+terminating its execution and destroying the iterator function frame.
+
+@page
+@node       Ref.Stmt.Try
+@subsection Ref.Stmt.Try
+@c * Ref.Stmt.Try::                Statement for extablishing a fault trapping context.
+
+A @code{try} statement establishes a context for handling faults. The
+syntactic form of a @code{try} statement is a block followed by zero
+or more optional @code{trap} statements, themselves blocks. If a fault
+occurs within the dynamic control extent of the @code{try} block, the
+fault-handling system will include the associated @code{trap} blocks
+in its search for an innermost trap, when handling a fault.
+
+@page
+@node       Ref.Stmt.Raise
+@subsection Ref.Stmt.Raise
+@c * Ref.Stmt.Raise::              Statement for transferring control to a fault trap.
+
+A @code{raise} statement initiates fault-handling. A @code{raise}
+statement has the appearance of a call, but the callee must be a
+fault. The @code{raise} statement may assign an output slot into which
+any possible @code{fix} provided by a matching @code{trap} will be
+stored.
+
+Executing a @code{raise} statement causes the runtime system to search
+the dynamic control stack of the faulting process for a @code{trap}
+block that traps the raised fault. The trap search order proceeds from
+the inner (most recent) dynamic context outward through every
+enclosing @code{try} block and execution frame until a trap is
+found. If no trap is found, the process enters the @emph{failing}
+state and begins unwinding the stack. If a trap is found, execution
+transfers to the trap and may, depending on the execution of the trap
+body, either return to the site of the @code{raise} with a value
+provided by a @code{fix} statement, or raise a new fault, or fail.
+
+@page
+@node       Ref.Stmt.Trap
+@subsection Ref.Stmt.Trap
+@c * Ref.Stmt.Trap::               Statement for trapping a fault.
+
+A @code{trap} statement indicates a block of code that may be used to
+handle a fault at run-time. Every control path in a @code{trap} must
+end in a @code{fix} statement, a @code{raise} statement or
+a @code{fail} statement.
+
+A @code{trap} statement is syntactically a combination of a
+fault-header and a block, and can exist only immediately after a
+@code{try} statement block. The @code{trap} statement will handle only
+those @code{fault} occurrences within the dynamic control extent of
+the @code{try} block and of the indicated @code{fault} type.
+
+Example of a @code{trap} statement:
+@example
+
+fault too_big(int x) -> int;
+
+fn inner(int x) -> int @{
+    if (x > 8) @{
+        x = raise too_big(x);
+    @}
+    ret x;
+@}
+
+fn outer() -> int @{
+    let y = 10;
+    try @{
+        y = y + inner(x);
+    @} trap too_big(int x) @{
+        fix 5;
+    @}
+    ret y;
+@}
+@end example
+
+@page
+@node       Ref.Stmt.Fix
+@subsection Ref.Stmt.Fix
+@c * Ref.Stmt.Fix::                Statement for recovering from a fault.
+
+A @code{fix} statement can occur only inside a @code{trap} block,
+which means that it can execute only during a trapped fault. Executing
+a @code{fix} statement causes the trapped fault to be @emph{fixed},
+which means that control returns to the site at which the fault was
+raised and normal execution continues.
+
+A @code{fix} statement may, like a @code{ret} statement, provide a
+value. The provided value is copied into the output slot denoted by
+the @code{raise} statement that initiated the fault. In other words,
+the @code{fix} value is ``passed back'' to the raising context, to be
+used at the site of the fault, to be used in correcting or otherwise
+adapting to the exceptional circumstances represented by the fault. If
+no value is provided in a @code{fix} statement, the implicit nil
+value @code{()} is provided.
+
+@page
+@node       Ref.Stmt.Fail
+@subsection Ref.Stmt.Fail
+@c * Ref.Stmt.Fail::               Statement for nonlocal control transfer during failure.
+
+Executing a @code{fail} statement causes a process to enter the
+@emph{failing} state. In the @emph{failing} state, a process unwinds
+its stack, destroying all frames and freeing all resources until it
+reaches its @code{main} frame, at which point it runts its @code{fini}
+block and enters the @emph{finished} state.
+
+@page
+@node       Ref.Stmt.Log
+@subsection Ref.Stmt.Log
+@c * Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
+
+Executing a @code{log} statement may, depending on runtime
+configuration, cause a value to be appended to an internal diagnostic
+logging buffer provided by the runtime or emitted to a system
+console. Log statements are enabled or disabled dynamically at
+run-time on a per-process and per-item basis. @xref{Ref.Run.Log}.
+
+Executing a @code{log} statement not considered a ``side effect'' for
+the purposes of differentiating pure and impure functions. In other
+words, a pure function remains pure even if it contains a log
+statement.
+
+@example
+@end example
+
+@page
+@node       Ref.Stmt.While
+@subsection Ref.Stmt.While
+@c * Ref.Stmt.While::              Statement for simple conditional looping.
+
+A @code{while} statement is a loop construct. The loop begins with an
+evaluation of the boolean loop-head expression. If the loop-head
+expression evaluates to @code{true}, the loop-body block executes and
+control returns to the loop-head expression. If the loop-head
+expression evaluates to @code{false}, the @code{while} statement
+completes.
+
+An example of a @code{while} statement:
+@example
+while (i < 10) @{
+    print("hello\n");
+    i = i + 1;
+@}
+@end example
+
+
+@page
+@node       Ref.Stmt.For
+@subsection Ref.Stmt.For
+@c * Ref.Stmt.For::                Statement for complex conditional looping.
+
+A @code{for} statement is a loop construct. There are two types of
+@code{for} statement: @emph{linear} for-loops and @emph{iterator}
+for-loops.
+
+@menu
+* Ref.Stmt.For.Linear::         Statement for looping over vectors.
+* Ref.Stmt.For.Iter::           Statement for general conditional looping.
+@end menu
+
+@page
+@node          Ref.Stmt.For.Linear
+@subsubsection Ref.Stmt.For.Linear
+@c * Ref.Stmt.For.Linear::         Statement for looping over vectors.
+
+A @dfn{linear for-loop} is controlled by a @emph{slice}, which has the
+syntactic form of a normal vector indexing expression, except the
+index is either a 2-tuple or a 3-tuple describing a bounded linear
+arithmetic sequence of indices to be selected from a vector or
+string. The linear for-loop bounds-checks the sequence @emph{once}
+when initiating the loop, then repeatedly copies into the index
+variable and/or into the element variable of the loop each value in
+the sequence (and/or its selected element), executing the loop body
+once per copy.
+
+Example of a linear for-loop:
+@example
+let vec[foo] v = vec(a, b, c);
+for (~foo e = v.(0, vec.len(v))) @{
+    bar(e);
+@}
+@end example
+
+@page
+@node          Ref.Stmt.For.Iter
+@subsubsection Ref.Stmt.For.Iter
+@c * Ref.Stmt.For.Iter::           Statement for general conditional looping.
+
+An @dfn{iterator} for-loop is controlled by an iterator function. The
+for loop executes once for each value @code{put} by the iterator
+function.  When the iterator function returns or fails, the loop
+terminates.
+
+The protocol of an iterator for-loop must match the protocol of the iterator
+function it is calling. @xref{Ref.Item.Fn.Iter}.
+
+Example of an iterator for-loop:
+@example
+str txt;
+vec[str] lines;
+for* (~str s = str.split(txt, "\n")) @{
+    vec.push(lines, s);
+@}
+@end example
+
+
+@page
+@node       Ref.Stmt.If
+@subsection Ref.Stmt.If
+@c * Ref.Stmt.If::                 Statement for simple conditional branching.
+
+An @code{if} statement is a conditional-branch in program control. The
+form of an @code{if} statement is a parenthesised condition
+expression, followed by a consequent block, and an optional trailing
+@code{else} block. The condition expression must have type
+@code{bool}. If the condition expression evaluates to @code{true}, the
+consequent block is executed and any @code{else} block is skipped. If
+the condition expression evaluates to @code{false}, the consequent
+block is skipped and any @code{else} block is executed.
+
+@page
+@node       Ref.Stmt.Alt
+@subsection Ref.Stmt.Alt
+@c * Ref.Stmt.Alt::                Statement for complex conditional branching.
+
+@emph{TODO}.
+
+@page
+@node       Ref.Stmt.Prove
+@subsection Ref.Stmt.Prove
+@c * Ref.Stmt.Prove::              Statement for static assertion of typestate.
+
+A @code{prove} statement has no run-time effect. Its purpose is to
+statically check (and document) that its argument constraint holds at
+its statement entry point. If its argument typestate does not hold,
+under the typestate algorithm, the program containing it will fail to
+compile.
+
+@page
+@node       Ref.Stmt.Check
+@subsection Ref.Stmt.Check
+@c * Ref.Stmt.Check::              Statement for dynamic assertion of typestate.
+
+A @code{check} statement connects dynamic assertions made at run-time
+to the static typestate system. A @code{check} statement takes a
+constraint to check at run-time. If the constraint holds at run-time,
+control passes through the @code{check} and on to the next statement
+in the enclosing block. If the condition fails to hold at run-time, the
+@code{check} statement behaves as a @code{fail} statement, raising an
+exception.
+
+The typestate algorithm is built around @code{check} statements, and
+in particular the fact that control @emph{will not pass} a check
+statement with a condition that fails to hold. The typestate algorithm
+can therefore assume that the (static) postcondition of a @code{check}
+statement includes the checked constraint itself. From there, the
+typestate algorithm can perform dataflow calculations on subsequent
+statements, propagating conditions forward and statically comparing
+implied states and their specifications. @xref{Ref.Stmt.Stat}.
+
+@example
+pred even(~int x) @{
+    ret x & 1 == 0;
+@}
+
+fn print_even(int x) : even(x) -> () @{
+    print(x);
+@}
+
+fn test() @{
+    let int y = 8;
+
+    // Cannot call print_even(y) here.
+
+    check even(y);
+
+    // Can call print_even(y) here, since even(y) now holds.
+    print_even(y);
+@}
+@end example
+
+@page
+@node       Ref.Stmt.IfCheck
+@subsection Ref.Stmt.IfCheck
+@c * Ref.Stmt.IfCheck::            Statement for dynamic testing of typestate.
+
+An @code{if check} statement combines a @code{if} statement and a
+@code{check} statement in an indivisible unit that can be used to
+build more complex conditional control flow than the @code{check}
+statement affords.
+
+In fact, @code{if check} is a ``more primitive'' statement
+@code{check}; instances of the latter can be rewritten as instances of
+the former. The following two examples are equivalent:
+
+@sp 1
+Example using @code{check}:
+@example
+check even(x);
+print_even(x);
+@end example
+
+@sp 1
+Example using @code{if check}:
+@example
+if check even(x) @{
+    print_even(x);
+@} else @{
+    fail;
+@}
+@end example
+
+@page
+@node    Ref.Run
+@section Ref.Run
+@c * Ref.Run::                     Organisation of runtime services.
+
+The Rust @dfn{runtime}@footnote{The @emph{runtime} (un-hyphenated) is
+a piece of code; it provides a variety of services @emph{at
+run-time}.} is a relatively compact collection of C and Rust code that
+provides fundamental services and datatypes to all Rust processes at
+run-time. It is smaller and simpler than many modern language
+runtimes. It is tightly integrated into the language's execution model
+of slots, processes, programs, communication, reflection, logging and
+fault handling.
+
+@menu
+* Ref.Run.Mem::                 Runtime memory management service.
+* Ref.Run.Type::                Runtime built-in type services.
+* Ref.Run.Comm::                Runtime communication service.
+* Ref.Run.Refl::                Runtime reflection system.
+* Ref.Run.Log::                 Runtime logging system.
+* Ref.Run.Fault::               Runtime fault handler.
+@end menu
+
+@page
+@node       Ref.Run.Mem
+@subsection Ref.Run.Mem
+@c * Ref.Run.Mem::                 Runtime memory management service.
+
+The runtime memory-management system is based on
+a @emph{service-provider interface}, through which the runtime
+requests blocks of memory from its environment and releases them back
+to its environment when they are no longer in use. The default
+implementation of the service-provider interface consists of the C
+runtime functions @code{malloc} and @code{free}.
+
+The runtime memory-management system in turn supplies Rust
+processes with facilities for allocating, extending and releasing
+stacks, as well as allocating and freeing exterior values.
+
+@page
+@node       Ref.Run.Type
+@subsection Ref.Run.Type
+@c * Ref.Run.Mem::                 Runtime built-in type services.
+
+The runtime provides C and Rust code to manage several built-in types:
+@itemize
+@item @code{vec}, the type of vectors.
+@item @code{str}, the type of UTF-8 strings.
+@item @code{int}, the type of arbitrary-precision integers.
+@item @code{chan}, the type of communication channels.
+@item @code{port}, the type of communication ports.
+@item @code{proc}, the type of processes.
+@end itemize
+Support for other built-in types such as simple types, tuples,
+records, vectors and tags is open-coded by the Rust compiler.
+
+Built-in type support code is a @emph{mandatory} component of the runtime.
+
+@page
+@node       Ref.Run.Comm
+@subsection Ref.Run.Comm
+@c * Ref.Run.Comm::                Runtime communication service.
+
+The runtime provides code to manage inter-process communication.
+This includes the system of process-lifecycle state transitions
+depending on the contents of queues, as well as code to copy values
+between queues and their recipients and to serialize values for
+transmission over operating-system inter-process communication
+facilities.
+
+Communication is a @emph{mandatory} component of the runtime,
+though the portion that invokes operating-system communication
+facilities is @emph{optional}.
+
+@page
+@node       Ref.Run.Refl
+@subsection Ref.Run.Refl
+@c * Ref.Run.Refl::                Runtime reflection system.
+
+The runtime reflection system is driven by the DWARF tables
+emitted into a crate at compile-time. Reflecting on a slot or type
+allocates a Rust data structure corresponding to the DWARF DIE for
+that slot or type.
+
+Reflection is a @emph{mandatory} component of the runtime.
+
+@page
+@node       Ref.Run.Log
+@subsection Ref.Run.Log
+@c * Ref.Run.Log::                 Runtime logging system.
+
+The runtime contains a system for directing logging statements to a
+logging console and/or internal logging
+buffers. @xref{Ref.Stmt.Log}. Logging statements can be enabled or
+disabled via a two-dimensional filtering process:
 
 @itemize
-@item Exterior
-@item Alias
-@item Interior
+
+@sp 1
+@item
+By Item
+
+Each @emph{item} (module, function, predicate, etc.) in Rust has
+a static name-path within its crate module, and can have logging enabled
+or disabled on a name-path-prefix basis.
+
+@sp 1
+@item
+By Process
+
+Each @emph{process} in a running Rust program has a unique ownership-path
+through the process ownership tree, and can have logging enabled or
+disabled on an ownership-path-prefix basis.
 @end itemize
 
-A slot is exterior iff it is @emph{marked} with the ``exterior'' slot
-prefix @code{^}. By writing @code{^T} for a slot with type @code{T},
-the programmer states that the slot will always refer to an exterior
-allocation. Exterior slots are always exactly 1 word in size, so by
-marking parts of a data structure as exterior, they permit programmers
-to control the ``shape'' of the data structure in memory, and trade 
-speed of copying for speed of access. 
+Logging is integrated into the language for efficiency reasons, as
+well as the need to filter logs based on these two built-in
+dimensions, and finally due to the need to consider logging as
+a @emph{pure} (non-side-effect-producing) operation for the purposes
+of the typestate algorithm.
 
-Exterior slots also permit defining recursive types: it is a static
-(compile-time) error to denote a type that contains instances of
-itself transitively, without passing through an exterior slot, simply
-because such types would have infinite elaboration-time size. All such
-cases can be detected statically: types cannot be @emph{created} after
-compile time, even if some size calculations are deferred until
-elaboration time. The point of deferred sizes is merely to avoid
-having to duplicate code that only differs in slot-size calculations.
+Logging is an @emph{optional} component of the runtime.
 
-If an exterior slot has deferred size, it may happen that the
-elaboration-time size of the slot is subword. If so, no @emph{actual}
-exterior allocation will occur: it is just as efficient to pass an
-immediate value around in place of an exterior address, and
-semantically indistinguishable. Rust implementations are required to
-perform this elaboration-time optimization.
+@page
+@node       Ref.Run.Fault
+@subsection Ref.Run.Fault
+@c * Ref.Run.Fault::               Runtime fault handler.
 
-It should be emphasized that the @code{^} qualifier does @emph{not}
-produce an separately denotable concept of ``address'': there is no
-mechanism for denoting or manipulating the address stored in an
-exterior slot, and all the type-state rules are identical for all slot
-modes.
+Similar to the reflection system, the runtime fault-handling
+system is driven by the DWARF tables emitted into a crate at
+compile-time, in particular the CFI DIEs. Each process' control frames
+are described by FDEs that have extensions to describe their
+fault-handling roles, both the location and types of any traps and
+their requirements during failure and unwinding.
 
-Exterior slots manipulate reference counts of exterior allocations, in
-order to enforce copy-on-write sharing of the exterior memory graph.
-The performance penalty of exterior allocation and reference counting
-may be eliminated in some cases by using alias slots.
+Fault management is a @emph{mandatory} component of the runtime.
 
-A slot is an alias iff it is @emph{marked} with the ``alias'' type
-prefix @code{@@}. By writing @code{@@T} for a slot with type @code{T},
-the programmer states that the slot has the following properties:
+@c ############################################################
+@c end main body of nodes
+@c ############################################################
 
-@itemize 
-@item The slot has the @code{init} predicate everywhere it is visible
-@item The slot is not written to anywhere it is visible
-@end itemize
-
-The only cases where aliases are legal are function and port parameter
-slots, yield slots, and the arms of @code{alt} statements. Read
-operations such as copying from an alias, or performing ALU operations
-that read from an alias, are permitted. This extends to any names
-formed "through" a alias. So long as the alias remains visible and is
-not written to. It is a static error to write to (or through) an
-alias. Reading through an alias into any other type of slot produces a
-copy. These restrictions are required to prevent aliases from being
-used to defeat the DAG nature of the memory graph: if you could write
-through an alias, you could construct a node and pass ownership of the
-node to itself through an alias, creating an ownership cycle.
-
-Aliases may hold addresses of either interior or exterior values, but
-do @emph{not} manipulate exterior reference counts, deinitialize or
-deallocate values. It is a static error to mark a slot as an alias if
-the alias-ness properties cannot be statically proven, so only
-specific syntactic contexts permit alias slot declarations.
-
-Like exterior slots, alias slots are always 1 word in size. Also
-like exterior slots, alias slots with deferred size are required
-to optimize away any address indirection that might result from
-elaboration on a subword-size type, and copy the referent
-itself. Essentially both exterior slots and aliases will behave as
-interior slots if their referent type fits in a word.
-
-A slot is interior if it is neither exterior nor an alias. Every
-copy or move is a transplant, every value allocation is inline with
-the slot container.
-
-Implementations may issue warnings about exterior or alias slots
-with static subword size: such declarations are meaningless -- the
-slot will always behave as interior -- and thus detract from program
-comprehension.
-
-
-@node Index
+@page
+@node    Index
+@chapter Index
 
 @printindex cp
 
