@@ -1349,8 +1349,8 @@ suspended during execution of the child's @code{init} block, analogous
 to the parent making a normal function call.
 
 When the parent completes the @code{init} block, the child transitions
-from the @emph{spawning} state to the @emph{running} state. In this
-state, its control executes the contents of its @code{main}
+from the @emph{initialising} state to the @emph{running} state. In
+this state, its control executes the contents of its @code{main}
 block. Code in the @code{main} block has access to any @emph{member
 slots} of the process, as does code in the @code{init} and @code{fini}
 blocks of the program. @xref{Ref.Item.Prog}.
@@ -2504,8 +2504,7 @@ let str s <- p;
 
 A @dfn{call statement} invokes a solo function, providing a tuple of
 input slots and a reference to an output slot. If the solo function
-eventually returns -- it must either eventually return or else fail --
-then the statement completes.
+eventually returns, then the statement completes.
 
 A call statement statically requires that the precondtion declared in
 the callee's signature is satisfied by the statement prestate. In this
