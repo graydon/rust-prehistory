@@ -182,7 +182,7 @@ let section_header
                             (fun f -> match f with
                                  SHF_WRITE -> 0x1L
                                | SHF_ALLOC -> 0x2L
-                               | SHF_EXECINSTR -> 0x3L) sh_flags)));
+                               | SHF_EXECINSTR -> 0x4L) sh_flags)));
       WORD (TY_u32, (match section_fixup with
                          None -> (IMM 0L)
                        | Some s -> (M_POS s)));
