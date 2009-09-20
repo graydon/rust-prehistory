@@ -34,7 +34,7 @@ let trans_visitor
     else ()
   in
 
-  let path = Stack.create () in
+  let (path:Ast.ident Stack.t) = Stack.create () in
   let annotations = Hashtbl.create 0 in
   let block_layouts = Stack.create () in
   let curr_file = ref None in
@@ -1493,11 +1493,33 @@ let trans_visitor
     trans_frame_exit fnid;
   in
 
-  let trans_tag (tagid:node_id) (tag:(Ast.ty_tup * Ast.ty_tag)) : unit =
+  let trans_tag
+      (n:Ast.ident) 
+      (tagid:node_id)
+      (tag:(Ast.ty_tup * Ast.ty_tag))
+      : unit =
     trans_frame_entry tagid;
-    (* A clever compiler will inline this. We are not clever. *)
-    (* FIXME: copy tag number + tuple contents into return slot. *)
-    trans_frame_exit tagid;
+    let (ttup, ttag) = tag in
+    let tag_keys = Array.make (Hashtbl.length ttag) "" in
+    let i = ref 0 in
+      begin
+        Hashtbl.iter (fun k _ -> tag_keys.(!i) <- k; incr i) ttag;
+        i := -1;
+        Array.sort compare tag_keys;
+        for j = 0 to (Array.length tag_keys) - 1 do
+          if tag_keys.(j) = n
+          then i := j
+        done;
+        if (!i) = -1
+        then err (Some tagid) "error sorting tag";
+      end;
+      let _ = log cx "tag variant: %s -> tag value #%d" n (!i) in
+      let disp = abi.Abi.abi_frame_base_sz in
+      let dst = deref (word_at_fp_off disp) in
+        (* A clever compiler will inline this. We are not clever. *)
+        mov dst (imm (Int64.of_int (!i)));
+        (* FIXME: tuple contents after tag number. *)
+        trans_frame_exit tagid;
   in
 
   let trans_native_fn (fnid:node_id) (tsig:Ast.ty_sig) : unit =
@@ -1577,13 +1599,14 @@ let trans_visitor
   in
 
   let rec trans_mod_item
+      (n:Ast.ident)
       (item:Ast.mod_item)
       : unit =
     begin
       match item.node with
           Ast.MOD_ITEM_fn f -> trans_fn item.id f.Ast.decl_item.Ast.fn_body
         | Ast.MOD_ITEM_prog p -> trans_prog item.id p.Ast.decl_item
-        | Ast.MOD_ITEM_tag t -> trans_tag item.id t.Ast.decl_item
+        | Ast.MOD_ITEM_tag t -> trans_tag n item.id t.Ast.decl_item
         | _ -> ()
     end
   in
@@ -1619,7 +1642,7 @@ let trans_visitor
   let visit_mod_item_pre n p i =
     enter_file_for i;
     Stack.push n path;
-    trans_mod_item i;
+    trans_mod_item n i;
     inner.Walk.visit_mod_item_pre n p i
   in
   let visit_mod_item_post n p i =

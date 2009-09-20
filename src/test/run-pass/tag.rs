@@ -7,6 +7,7 @@ prog a
 
   fn f() -> () {
   	   auto x = red(1,2);
+  	   auto y = green();
   }
 
   main {
