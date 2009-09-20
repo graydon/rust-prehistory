@@ -746,7 +746,7 @@ let (abbrev_base_type:abbrev) =
    [|
      (DW_AT_name, DW_FORM_string);
      (DW_AT_encoding, DW_FORM_data1);
-     (DW_AT_byte_size, DW_FORM_ref_addr)
+     (DW_AT_byte_size, DW_FORM_data1)
    |])
 ;;
 
@@ -960,7 +960,7 @@ let dwarf_visitor
       (params:(Ast.ty_limit * Ast.ident) array)
       (item:Ast.mod_item)
       : unit =
-    inner.Walk.visit_mod_item_pre id params item;
+    inner.Walk.visit_mod_item_post id params item;
     if Hashtbl.mem cx.ctxt_item_files item.id
     then
       begin
@@ -975,18 +975,53 @@ let dwarf_visitor
   in
 
   let visit_block_pre (b:Ast.block) : unit =
-    ()
+    inner.Walk.visit_block_pre b
   in
 
   let visit_slot_identified_pre (s:Ast.slot identified) : unit =
-    ()
+    inner.Walk.visit_slot_identified_pre s
+  in
+
+
+  let visit_ty_pre (ty:Ast.ty) : unit =
+    let base (name, encoding, byte_size) = 
+      let abbrev_code = get_abbrev_code abbrev_base_type in
+      let type_die =
+        (SEQ [|
+           uleb abbrev_code;
+           (* DW_AT_name: DW_FORM_string *)
+           ZSTRING name;
+           (* DW_AT_encoding: DW_FORM_data1 *)
+           BYTE (dw_ate_to_int encoding);
+           (* DW_AT_byte_size: DW_FORM_data1 *)
+           BYTE byte_size
+         |])
+      in
+        prepend curr_cu_infos type_die
+    in
+      begin
+        match ty with
+            Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
+          | Ast.TY_mach (TY_u8)  -> base ("u8",  DW_ATE_unsigned, 1)
+          | Ast.TY_mach (TY_u16) -> base ("u16", DW_ATE_unsigned, 2)
+          | Ast.TY_mach (TY_u32) -> base ("u32", DW_ATE_unsigned, 4)
+          | Ast.TY_mach (TY_u64) -> base ("u64", DW_ATE_unsigned, 8)
+          | Ast.TY_mach (TY_s8)  -> base ("s8",  DW_ATE_signed, 1)
+          | Ast.TY_mach (TY_s16) -> base ("s16", DW_ATE_signed, 2)
+          | Ast.TY_mach (TY_s32) -> base ("s32", DW_ATE_signed, 4)
+          | Ast.TY_mach (TY_s64) -> base ("s64", DW_ATE_signed, 8)
+          | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
+          | _ -> ()
+      end;
+      inner.Walk.visit_ty_pre ty
   in
 
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_block_pre = visit_block_pre;
-        Walk.visit_slot_identified_pre = visit_slot_identified_pre
+        Walk.visit_slot_identified_pre = visit_slot_identified_pre;
+        Walk.visit_ty_pre = visit_ty_pre
     }
 ;;
 
