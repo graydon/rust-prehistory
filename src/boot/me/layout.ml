@@ -270,6 +270,8 @@ let layout_visitor
             layout_prog i.id pd.Ast.decl_item
         | Ast.MOD_ITEM_pred _ ->
             enter_frame i.id
+        | Ast.MOD_ITEM_tag _ ->
+            enter_frame i.id
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -280,6 +282,7 @@ let layout_visitor
       match i.node with
           Ast.MOD_ITEM_fn _ -> leave_frame ()
         | Ast.MOD_ITEM_pred _ -> leave_frame ()
+        | Ast.MOD_ITEM_tag _ -> leave_frame ()
         | _ -> ()
     end
   in

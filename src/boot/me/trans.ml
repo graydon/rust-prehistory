@@ -1494,7 +1494,10 @@ let trans_visitor
   in
 
   let trans_tag (tagid:node_id) (tag:(Ast.ty_tup * Ast.ty_tag)) : unit =
-    ()
+    trans_frame_entry tagid;
+    (* A clever compiler will inline this. We are not clever. *)
+    (* FIXME: copy tag number + tuple contents into return slot. *)
+    trans_frame_exit tagid;
   in
 
   let trans_native_fn (fnid:node_id) (tsig:Ast.ty_sig) : unit =
