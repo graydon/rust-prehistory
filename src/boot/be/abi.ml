@@ -161,7 +161,7 @@ let rt_field_sp = 0;;
 type abi =
   {
     abi_word_sz: int64;
-    abi_word_mem: Il.mem;
+    abi_word_bits: Il.bits;
     abi_word_ty: Common.ty_mach;
 
     abi_is_2addr_machine: bool;
