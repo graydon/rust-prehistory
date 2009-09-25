@@ -134,3 +134,54 @@ simpler still:
 
    - this is similar to a subset of the mesa signal system or
      the CL / dylan condition system
+
+
+or much, much simpler:
+
+   - mesa guys say "resumable never happens in practice"
+
+   - that isn't completely true for a few async trappables
+     (sigchild, sighup, sigpipe), presumably they forgot those!
+
+   - maybe be conservative and copy unix process model with
+     erlang 'linked failure' support. do the whole thing in
+     library functions.
+
+1. assume we support closures, only via currying, with a built-in expression type
+   'bind' that does something a little magic:
+
+   fn f(int x, int y) -> () { ... }
+
+   type thunk1 = fn f(int x) -> ();
+   type thunk0 = fn f() -> ();
+
+   let thunk1 t1 = bind f(10,_);
+   let thunk1 t2 = bind f(_,10);
+   let thunk0 t0 = bind f(10,12);
+
+   in other words, a 'bind' expression forms a fn closure *at the moment it's evaluated*, and no
+   other ways of forming closures exist. we can't "capture the environment" in which the function is
+   declared. that interacts poorly with the ownership system.
+
+   this abuses the _ notation which we'll need for pattern-matching anyway, to permit binding an odd
+   subset of the argument tuple, but that's probably useful enough to support.
+
+   how does it work? produces an exterior tuple of (gluefn,boundargs...) where gluefn does a
+   tailcall to f with boundargs components copied into specified arg slots. utility of this: doesn't
+   require you to declare Yet Another Funciton for every possible variant of binding. Also more
+   flexible than left-to-right-only currying. Steal low bit from function pointers, and 2-align all
+   function pointers to differentiate bound-function-pointers from non-bound-function-pointers.
+
+
+2. then:
+
+type failcode = tag(sigfail, sigquit, sigfpe, sigbus, sigsegv, sigill, sigabort, siglinked ...);
+type trapcode = tag( sigchild(pid), sigterm, sigalrm, sighup, sigchan(chanid), siguser(any) )
+type signal = tag( failure(failcode), trappable(trapcode) );
+type trap = fn(trapcode) -> ();
+
+lib.link(proc, proc);            // erlang-like "link failure-in-A -> failure-in-B
+lib.get_trap(trapcode) -> trap;  // gets existing handler
+lib.set_trap(trapcode, trap);    // installs a new trap
+lib.sig(proc, signal);           // sends a signal, pushing signal value onto queue for proc,
+                                 // fails the proc if its signal queue is overfull.

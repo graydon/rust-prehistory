@@ -137,7 +137,6 @@ Thanks for your time.
 @end flushright
 
 
-
 @c ############################################################
 @c Introduction
 @c ############################################################
@@ -355,16 +354,25 @@ The Rust type system is structural rather than nominal (with the
 exception of opaque module types), and contains the standard
 assortment of useful ``algebraic'' type constructors from functional
 languages, such as function types, tuples, record types, vectors, and
-tagged disjoint unions.
+tagged disjoint unions. Structural types may be @emph{pattern-matched}
+in an @code{alt} statement.
 
 @sp 1
 @item Generic code
 
 Rust supports a simple form of parametric polymorphism: functions,
-types and modules can be parameterised by other types. Only one
-constraint is modeled on type parameters: whether or not the parameter
-type is @emph{limited} (non-transmittable over a channel). Beyond this,
-type parameters are treated as opaque within the parameterised code.
+types and modules can be parameterised by other types. Type parameters
+are treated as opaque within the parameterised code.
+
+@sp 1
+@item Argument binding
+
+Rust lacks a general facility for capturing lexical environments in
+first class @emph{closures}, but instead supports a form of partial
+function-argument application via the @code{bind} operator. Binding
+arguments in Rust is similar to the feature of @emph{function
+currying} in other languages, but may bind @emph{any} members of an
+argument tuple, not just the leftmost.
 
 @sp 1
 @item Local type inference
@@ -411,37 +419,34 @@ the extension can still parse the surrounding text by skipping over
 the bracketed ``extension text''.
 
 @sp 1
-@item Fault management
+@item Signal handling
 
-Like many languages, Rust provides a system for managing abnormal or
-erroneous circumstances that may arise during execution. Such a
-circumstance is called a @code{fault}, and is declared like a
-function. Code can @code{raise} a fault, which causes the runtime to
-search the control stack for a @code{trap} block and transfer control
-to it. Trapping a fault does @emph{not} cause the process' stack to
-unwind; the trap block is invoked while the raising context is
-suspended, awaiting a fix.
+The Rust runtime includes a system for sending @emph{signals} to
+processes.  A signal is similar to a normal message sent on a normal
+channel, with two differences: signals are usually
+sent @emph{spontaneously} by the runtime, due to external events; and
+they are sent @emph{to a process}, rather than a particular port. The
+types of value that can be sent as a signal are pre-defined for all
+processes, as part of the standard library.
 
-A trap block may choose to @code{fix} a fault, to @code{raise} a new
-fault, or to @code{fail}. If the fault is fixed -- returning some
-value to the raising context -- execution resumes at the raising
-context. If a new fault is raised, the runtime commences a nested
-search for a trap handler, searching outward from the dynamic context
-of the initial trap.
+Some signals can be trapped, others cannot. If a signal cannot be
+trapped, a process receiving it immediately @emph{fails}. If a signal
+can be trapped, a process receiving it can specify whether to ignore
+the signal, route it to a channel, or fail.
 
 @sp 1
 @item Failure and finishing
 
-If a raised fault is not trapped or a @code{fail} statement is
-executed in any context -- trap or otherwise -- the process enters a
-@emph{failing} state. A failing process unwinds its control stack,
-frees all of its owned resources and enters the @emph{finished}
-state. Failure is idempotent and non-recoverable.
+If a process fails due to a signal, or if it executes the
+special @code{fail} statement, it enters the @emph{failing} state. A
+failing process unwinds its control stack, frees all of its owned
+resources and enters the @emph{finished} state. Failure is idempotent
+and non-recoverable.
 
-If a process finishes due to failure, the runtime notifies any
-@emph{linked} process via a registered channel. This can be used to
-independently arrange supervision and failure-propagation modes for
-groups of related processes.
+If a process finishes due to failure, it may cause the runtime to
+signal any @emph{linked} processes. This can be used to independently
+arrange supervision and failure-propagation modes for groups of
+related processes.
 
 @sp 1
 @item Deterministic destruction
@@ -651,39 +656,20 @@ The keywords are:
 
 @multitable @columnfractions .15 .15 .15 .15 .15
 @item @code{mod}
+@tab @code{pub}
 @tab @code{use}
 @tab @code{meta}
 @tab @code{syntax}
-@item @code{pure}
-@tab @code{pub}
-@tab @code{lim}
-@tab @code{auto}
-@tab @code{native}
-@item @code{while}
-@tab @code{if}
-@tab @code{else}
-@tab @code{alt}
-@tab @code{do}
-@item @code{fault}
-@tab @code{try}
-@tab @code{raise}
-@tab @code{trap}
-@tab @code{fix}
-@item @code{spawn}
-@tab @code{init}
-@tab @code{main}
-@tab @code{fail}
-@tab @code{fini}
 @item @code{let}
-@tab @code{any}
-@tab @code{check}
-@tab @code{prove}
-@tab @code{log}
-@item @code{type}
+@tab @code{auto}
+@tab @code{type}
+@tab @code{pure}
+@tab @code{native}
+@item @code{int}
+@tab @code{char}
 @tab @code{bool}
 @tab @code{true}
 @tab @code{false}
-@tab @code{int}
 @item @code{u8}
 @tab @code{u16}
 @tab @code{u32}
@@ -696,13 +682,28 @@ The keywords are:
 @item @code{rec}
 @tab @code{tag}
 @tab @code{vec}
-@tab @code{char}
 @tab @code{str}
+@tab @code{any}
 @item @code{prog}
 @tab @code{proc}
 @tab @code{port}
 @tab @code{chan}
 @tab @code{flush}
+@item @code{do}
+@tab @code{if}
+@tab @code{else}
+@tab @code{alt}
+@tab @code{while}
+@item @code{init}
+@tab @code{main}
+@tab @code{fail}
+@tab @code{fini}
+@tab @code{spawn}
+@item @code{log}
+@tab @code{note}
+@tab @code{bind}
+@tab @code{check}
+@tab @code{prove}
 @item @code{fn}
 @tab @code{fn?}
 @tab @code{fn!}
@@ -810,6 +811,7 @@ The special symbols are:
 @end multitable
 
 
+@page
 @node    Ref.Path
 @section Ref.Path
 @c * Ref.Path::               References to slots and items.
@@ -929,7 +931,6 @@ Mesa.} A crate source file describes:
 @item Metadata about the crate, such as author, name, version, and copyright.
 @item The contents of the crate, a set of Rust modules in other Rust source files.
 @item The set of syntax extensions to make available during compilation of the crate.
-@item The set of possible faults that the crate defines.
 @item The set of native functions that the crate imports.
 @item The set of @emph{other} crates that the crate depends on.
 @item The organisation of the crate's internal namespace.
@@ -973,7 +974,6 @@ such as ELF, PE or Mach-O. The loadable object contains extensive
 DWARF metadata, describing:
 @itemize
 @item Metadata required for type reflection.
-@item Metadata required for fault handling.
 @item The publicly exported module structure of the crate.
 @item Any free-form metadata about the crate, defined by @code{meta} directives.
 @item The crates to dynamically link with at run-time, with matching criteria
@@ -987,10 +987,10 @@ directives, except they govern the syntax extension namespace
 @code{syntax} directive also makes its extension available to all
 subsequent directives in the crate file.
 
-The @code{native} and @code{fault} directives of a crate declare
-top-level ``special'' items that are not available to nested
-modules. This restriction simplifies the treatment of first-class
-modules elsewhere in the language.
+The @code{native} directives of a crate declare top-level ``special''
+items that are not available to nested modules. This restriction
+simplifies the treatment of first-class modules elsewhere in the
+language.
 
 An example of a crate:
 
@@ -1303,7 +1303,7 @@ Queued messages in channels are considered part of the memory budget
 of the @emph{sending} process. If too many messages are queued for
 transmission from a single sending process, without being received by
 a receiving process, the sending process may exceed its memory budget,
-which causes a run-time fault. To help control this possibility, a
+which causes a run-time signal. To help control this possibility, a
 semi-synchronous send operation is possible, which blocks until there
 is room in the existing queue and then executes an asynchronous
 send. A full @code{flush} operation is also available, which blocks
@@ -1342,11 +1342,11 @@ completes its @code{init} block successfully or fails. The
 @emph{parent} is responsible for running the @code{init} block -- the
 code executes in the stack and budget of the parent -- but the
 @code{init} block can access only the @emph{scope} of the child (its
-member slots and items). If a fault occurs while the parent is
-executing the child's @code{init} block, the fault-handling system
-begins its search in the @emph{parent} context. The parent context is
-suspended during execution of the child's @code{init} block, analogous
-to the parent making a normal function call.
+member slots and items). If a signal is generated while the parent is
+executing the child's @code{init} block, it is delivered to
+the @emph{parent} process. The parent process is suspended during
+execution of the child's @code{init} block, analogous to the parent
+making a normal function call.
 
 When the parent completes the @code{init} block, the child transitions
 from the @emph{initialising} state to the @emph{running} state. In
@@ -1355,11 +1355,11 @@ block. Code in the @code{main} block has access to any @emph{member
 slots} of the process, as does code in the @code{init} and @code{fini}
 blocks of the program. @xref{Ref.Item.Prog}.
 
-If a fault occurs while the child is executing the @code{main} block
--- after a child process transitions from the @emph{initialising}
-state to the @emph{running} state -- only the child is directly
-affected; the parent is isolated from the fault (though it may receive
-linked notification, should the child fail).
+If a signal is generated while the child is executing the @code{main}
+block -- after a child process transitions from
+the @emph{initialising} state to the @emph{running} state -- it is
+delivered to the child; the parent is isolated from the signal (though
+it may receive a linked signal, should the child fail).
 
 If a process makes a native call, it is temporarily suspended from
 the @emph{running} state and enters the @emph{native call} state. A
@@ -1387,7 +1387,7 @@ process will unblock and transition out of @emph{blocked flushing}
 state, back to @emph{running}.
 
 A process may transition to the @emph{failing} state at any time, due
-to an un-trapped fault or the execution of a @code{fail}
+to an un-trapped signal or the execution of a @code{fail}
 statement. Once @emph{failing}, a process unwinds its stack and
 transitions to the @emph{finished} state. No other state transitions
 out of the @emph{failing} state are permitted.
@@ -1471,11 +1471,11 @@ mod map[K,V] @{
         ret vec();
     @}
 
-    fn add(^t, ~K k, ~V v) -> () @{
+    fn add(^t map, ~K key, ~V val) -> () @{
         @dots{}
     @}
 
-    fn? get(~t, ~K k) -> ~V @{
+    fn? get(~t map, ~K key) -> ~V @{
         @dots{}
     @}
 @}
@@ -1494,8 +1494,8 @@ Example of opening a module:
 type map_ty[K,V] = mod @{
                        type t;
                        fn new() -> t;
-                       fn add(^t, ~K k, ~V v) -> ();
-                       fn? get(~t, ~K k) -> ~V;
+                       fn add(^t map, ~K k, ~V v) -> ();
+                       fn? get(~t map, ~K k) -> ~V;
                    @};
 
 // Dynamically acquire a particular map-module implementation                                
@@ -1965,9 +1965,13 @@ simplex inter-process communication facility. @xref{Ref.Proc.Comm}. A
 @code{port} type takes a single type parameter, denoting the type of
 value that can be received from a @code{port} value of that type.
 
-Ports are @emph{limited}: they cannot be transmitted through channels,
-and can be passed between processes only during process
-initialisation.
+Values of type @code{port}, like those of type @code{proc}, have
+purely @emph{local} meaning: they denote communication endpoints
+only @emph{within} a single process. A port is therefore best thought
+of as a @emph{private handle} that a process can use to refer to its
+own ports, but that cannot be used by other processes. If a process
+attempts to use a @code{port} value it received over a channel, it
+receives a signal.
 
 An example of a @code{port} type:
 @example
@@ -1988,12 +1992,11 @@ facility. @xref{Ref.Proc.Comm}. A @code{chan} type takes a single type
 parameter, denoting the type of value that can be sent to a channel of
 that type.
 
-Channels are general @emph{unlimited} values: they can be transmitted
-between processes through channels. They are also @emph{weak}: a
-channel is directly coupled to a particular destination port, but does
-not keep that port @emph{alive}, and may therefore fail to operate at
-any moment. Sending to a channel that is connected to a nonexistent
-port causes a fault.
+Channels are also @emph{weak}: a channel is directly coupled to a
+particular destination port on a particular process, but does not keep
+that port or process @emph{alive}. A channel may therefore fail to
+operate at any moment. If a process sends to a channel that is
+connected to a nonexistent port, it receives a signal.
 
 An example of a @code{chan} type:
 @example
@@ -2008,9 +2011,7 @@ c <| v;
 @subsection Ref.Type.Proc
 
 The process type @code{proc} describes values that are @emph{live
-processes}.  Process values are opaque and @emph{limited}: they cannot
-be directly inspected and they cannot be passed between processes,
-over channels.
+processes}.
 
 Processes form an @emph{ownership tree} in which each process (except
 the root process) is directly owned by exactly one parent process. The
@@ -2021,6 +2022,16 @@ channels and ports.
 Processes cannot be replicated. If a copy of a slot of
 type @code{proc} is copied to another slot, both slots refer to
 the @emph{same} process value.
+
+Values of type @code{proc}, like those of type @code{port}, have
+purely @emph{local} meaning: they denote processes only @emph{within}
+a single process, their parent. A @code{proc} value is best thought of
+as a @emph{private handle} that a parent can use to refer to its own
+children, but that cannot be used by other processes; it can be
+compared for equality and copied around, but does
+@emph{not} refer to a process when used outside its owning (parent)
+process. If a process attempts to use a @code{proc} value it received
+over a channel, it receives a signal.
 
 If all references to a process are dropped (due to the release of any
 slots holding those references), the released process immediately fails.
@@ -2126,10 +2137,6 @@ actions.
 * Ref.Stmt.Ret::                Statement for stopping and producing a value.
 * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
 * Ref.Stmt.Put::                Statement for pausing and producing a value.
-* Ref.Stmt.Try::                Statement for extablishing a fault trapping context.
-* Ref.Stmt.Raise::              Statement for transferring control to a fault trap.
-* Ref.Stmt.Trap::               Statement for trapping a fault.
-* Ref.Stmt.Fix::                Statement for recovering from a fault.
 * Ref.Stmt.Fail::               Statement for causing process failure.
 * Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
 * Ref.Stmt.While::              Statement for simple conditional looping.
@@ -2441,7 +2448,7 @@ channel, and apply a send operator to it and a value to send.
 The @emph{asynchronous send} operator @code{<+} adds a value to the
 channel's queue, without blocking. If the queue is full, it is
 extended, taking memory from the process' memory budget. If the
-process memory budget is exhausted, a fault occurs.
+process memory budget is exhausted, a signal is sent to the process.
 
 The @emph{semi-synchronous send} operator @code{<|} adds a value to
 the channel's queue @emph{only if} the queue has room; if the queue is
@@ -2586,98 +2593,6 @@ suspended iterator function containing the @code{put} statement,
 either continuing execution after the @code{put} statement, or
 terminating its execution and destroying the iterator function frame.
 
-@page
-@node       Ref.Stmt.Try
-@subsection Ref.Stmt.Try
-@c * Ref.Stmt.Try::                Statement for extablishing a fault trapping context.
-
-A @code{try} statement establishes a context for handling faults. The
-syntactic form of a @code{try} statement is a block followed by zero
-or more optional @code{trap} statements, themselves blocks. If a fault
-occurs within the dynamic control extent of the @code{try} block, the
-fault-handling system will include the associated @code{trap} blocks
-in its search for an innermost trap, when handling a fault.
-
-@page
-@node       Ref.Stmt.Raise
-@subsection Ref.Stmt.Raise
-@c * Ref.Stmt.Raise::              Statement for transferring control to a fault trap.
-
-A @code{raise} statement initiates fault-handling. A @code{raise}
-statement has the appearance of a call, but the callee must be a
-fault. The @code{raise} statement may assign an output slot into which
-any possible @code{fix} provided by a matching @code{trap} will be
-stored.
-
-Executing a @code{raise} statement causes the runtime system to search
-the dynamic control stack of the faulting process for a @code{trap}
-block that traps the raised fault. The trap search order proceeds from
-the inner (most recent) dynamic context outward through every
-enclosing @code{try} block and execution frame until a trap is
-found. If no trap is found, the process enters the @emph{failing}
-state and begins unwinding the stack. If a trap is found, execution
-transfers to the trap and may, depending on the execution of the trap
-body, either return to the site of the @code{raise} with a value
-provided by a @code{fix} statement, or raise a new fault, or fail.
-
-@page
-@node       Ref.Stmt.Trap
-@subsection Ref.Stmt.Trap
-@c * Ref.Stmt.Trap::               Statement for trapping a fault.
-
-A @code{trap} statement indicates a block of code that may be used to
-handle a fault at run-time. Every control path in a @code{trap} must
-end in a @code{fix} statement, a @code{raise} statement or
-a @code{fail} statement.
-
-A @code{trap} statement is syntactically a combination of a
-fault-header and a block, and can exist only immediately after a
-@code{try} statement block. The @code{trap} statement will handle only
-those @code{fault} occurrences within the dynamic control extent of
-the @code{try} block and of the indicated @code{fault} type.
-
-Example of a @code{trap} statement:
-@example
-
-fault too_big(int x) -> int;
-
-fn inner(int x) -> int @{
-    if (x > 8) @{
-        x = raise too_big(x);
-    @}
-    ret x;
-@}
-
-fn outer() -> int @{
-    let y = 10;
-    try @{
-        y = y + inner(x);
-    @} trap too_big(int x) @{
-        fix 5;
-    @}
-    ret y;
-@}
-@end example
-
-@page
-@node       Ref.Stmt.Fix
-@subsection Ref.Stmt.Fix
-@c * Ref.Stmt.Fix::                Statement for recovering from a fault.
-
-A @code{fix} statement can occur only inside a @code{trap} block,
-which means that it can execute only during a trapped fault. Executing
-a @code{fix} statement causes the trapped fault to be @emph{fixed},
-which means that control returns to the site at which the fault was
-raised and normal execution continues.
-
-A @code{fix} statement may, like a @code{ret} statement, provide a
-value. The provided value is copied into the output slot denoted by
-the @code{raise} statement that initiated the fault. In other words,
-the @code{fix} value is ``passed back'' to the raising context, to be
-used at the site of the fault, to be used in correcting or otherwise
-adapting to the exceptional circumstances represented by the fault. If
-no value is provided in a @code{fix} statement, the implicit nil
-value @code{()} is provided.
 
 @page
 @node       Ref.Stmt.Fail
@@ -2687,7 +2602,7 @@ value @code{()} is provided.
 Executing a @code{fail} statement causes a process to enter the
 @emph{failing} state. In the @emph{failing} state, a process unwinds
 its stack, destroying all frames and freeing all resources until it
-reaches its @code{main} frame, at which point it runts its @code{fini}
+reaches its @code{main} frame, at which point it runs its @code{fini}
 block and enters the @emph{finished} state.
 
 @page
@@ -2908,7 +2823,7 @@ provides fundamental services and datatypes to all Rust processes at
 run-time. It is smaller and simpler than many modern language
 runtimes. It is tightly integrated into the language's execution model
 of slots, processes, programs, communication, reflection, logging and
-fault handling.
+signal handling.
 
 @menu
 * Ref.Run.Mem::                 Runtime memory management service.
@@ -2916,7 +2831,7 @@ fault handling.
 * Ref.Run.Comm::                Runtime communication service.
 * Ref.Run.Refl::                Runtime reflection system.
 * Ref.Run.Log::                 Runtime logging system.
-* Ref.Run.Fault::               Runtime fault handler.
+* Ref.Run.Sig::                 Runtime signal handler.
 @end menu
 
 @page
@@ -3020,18 +2935,20 @@ of the typestate algorithm.
 Logging is an @emph{optional} component of the runtime.
 
 @page
-@node       Ref.Run.Fault
-@subsection Ref.Run.Fault
-@c * Ref.Run.Fault::               Runtime fault handler.
+@node       Ref.Run.Sig
+@subsection Ref.Run.Sig
+@c * Ref.Run.Sig::               Runtime signal handler.
 
-Similar to the reflection system, the runtime fault-handling
-system is driven by the DWARF tables emitted into a crate at
-compile-time, in particular the CFI DIEs. Each process' control frames
-are described by FDEs that have extensions to describe their
-fault-handling roles, both the location and types of any traps and
-their requirements during failure and unwinding.
+The runtime signal-handling system is driven by a signal-dispatch
+table and a signal queue associated with each process. Sending a
+signal to a process inserts the signal into the process' signal queue
+and marks the process as having a pending signal. At the next
+scheduling opportunity, the runtime processes signals in the process'
+queue using its dispatch table. The signal queue memory is accounted
+for from the process' memory budget; if the queue grows too big, the
+process will fail.
 
-Fault management is a @emph{mandatory} component of the runtime.
+Signal handling is a @emph{mandatory} component of the runtime.
 
 @c ############################################################
 @c end main body of nodes
