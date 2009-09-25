@@ -163,6 +163,15 @@ let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
 ;;
 
 
+let text_fixups = Hashtbl.create 0;;
+let add_text_fixup_table t = 
+  Hashtbl.iter (fun k v -> htab_put text_fixups k v) t
+in
+  add_text_fixup_table sem_cx.Semant.ctxt_fn_fixups;
+  add_text_fixup_table sem_cx.Semant.ctxt_tag_fixups
+;;
+  
+
 (* Tying up various knots, allocating registers and selecting instructions. *)
 let (text_items:Asm.item list) =
   let accum = ref [] in
@@ -190,10 +199,10 @@ let (text_items:Asm.item list) =
                       (Int64.of_int n_spills)
                       abi.Abi.abi_word_sz);
             match htab_search
-              sem_cx.Semant.ctxt_fn_fixups
+              text_fixups
               text.Semant.text_node
             with
-                Some fn_fix -> Asm.DEF (fn_fix, insns)
+                Some fix -> Asm.DEF (fix, insns)
               | None -> insns
         end
     in

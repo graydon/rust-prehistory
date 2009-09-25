@@ -63,7 +63,6 @@ Complete table of contents
 @c Disclaimer
 @c ############################################################
 
-@page
 @node    Disclaimer
 @chapter Disclaimer
 
@@ -141,7 +140,6 @@ Thanks for your time.
 @c Introduction
 @c ############################################################
 
-@page
 @node    Introduction
 @chapter Introduction
 
@@ -553,7 +551,6 @@ Euclid, etc.)
 @c Tutorial
 @c ############################################################
 
-@page
 @node    Tutorial
 @chapter Tutorial
 
@@ -563,7 +560,6 @@ Euclid, etc.)
 @c Reference
 @c ############################################################
 
-@page
 @node    Reference
 @chapter Reference
 
@@ -810,7 +806,7 @@ The special symbols are:
 @tab @code{}
 @end multitable
 
-
+@page
 @page
 @node    Ref.Path
 @section Ref.Path
@@ -2186,11 +2182,12 @@ For example, this code:
  print(s);
 @end example
 
-Consists of two statements and three points:
+Consists of two statements and four points:
 
 @itemize
 @item the point before the first statement
-@item the point between the two statements
+@item the point after the first statement
+@item the point before the second statement
 @item the point after the second statement
 @end itemize
 
@@ -2747,8 +2744,7 @@ to the static typestate system. A @code{check} statement takes a
 constraint to check at run-time. If the constraint holds at run-time,
 control passes through the @code{check} and on to the next statement
 in the enclosing block. If the condition fails to hold at run-time, the
-@code{check} statement behaves as a @code{fail} statement, raising an
-exception.
+@code{check} statement behaves as a @code{fail} statement.
 
 The typestate algorithm is built around @code{check} statements, and
 in particular the fact that control @emph{will not pass} a check

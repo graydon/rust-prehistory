@@ -16,11 +16,16 @@ let imm_true = one;;
 let imm_false = zero;;
 let badlab = Il.badlab;;
 
+let arr_max a = (Array.length a) - 1;;
+
 type intent =
     INTENT_init
   | INTENT_read
   | INTENT_write
   | INTENT_drop
+;;
+
+type quad_idx = int
 ;;
 
 let trans_visitor
@@ -34,7 +39,7 @@ let trans_visitor
     else ()
   in
 
-  let path = Stack.create () in
+  let (path:Ast.ident Stack.t) = Stack.create () in
   let annotations = Hashtbl.create 0 in
   let block_layouts = Stack.create () in
   let curr_file = ref None in
@@ -60,11 +65,11 @@ let trans_visitor
   let name _ = Stack.top path in
   let emit op dst lhs rhs = Il.emit (emitter()) op dst lhs rhs in
   let next_vreg _ = Il.next_vreg (emitter()) in
-  let mark _ : int = (emitter()).Il.emit_pc in
-  let patch_existing (jmp:int) (targ:int) : unit =
+  let mark _ : quad_idx = (emitter()).Il.emit_pc in
+  let patch_existing (jmp:quad_idx) (targ:quad_idx) : unit =
     Il.patch_jump (emitter()) jmp targ
   in
-  let patch (i:int) : unit =
+  let patch (i:quad_idx) : unit =
     Il.patch_jump (emitter()) i (mark());
     (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
     emit Il.DEAD Il.Nil Il.Nil Il.Nil
@@ -469,16 +474,48 @@ let trans_visitor
               | _ -> marker
           end
 
+
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
-  and trans_compare cjmp lhs rhs : int =
+  and trans_compare
+      (cjmp:Il.op)
+      (lhs:Il.operand)
+      (rhs:Il.operand)
+      : quad_idx list =
     emit Il.CMP Il.Nil (Il.Reg (force_to_reg lhs)) rhs;
     let jmp = mark() in
       emit cjmp Il.Nil badlab Il.Nil;
-      jmp
+      [jmp]
 
+  and trans_structural_compare 
+      (cjmp:Il.op)
+      (lhs:Il.operand) (* read alias *)
+      (rhs:Il.operand) (* read alias *)
+      (ty:Ast.ty)
+      : quad_idx list =
+    let lhs_reg = force_to_reg lhs in
+    let rhs_reg = force_to_reg rhs in
+    let jmps = ref [] in
+    let sub_compare slot off =
+      let load x =
+        (* FIXME: this is simply incorrect. Time for a typed IL? *)
+        deref_slot (word_at_reg_off (Some x) (Asm.IMM off)) slot INTENT_read
+      in
+      let new_jmps =
+        trans_structural_compare cjmp 
+          (load lhs_reg) (load rhs_reg) (slot_ty slot)
+      in
+        jmps := new_jmps :: (!jmps)
+    in
+    let trans_compare_tup (lhs:Il.operand) (rhs:Il.operand) (ttup:Ast.ty_tup) : unit =
+      let offset = ref 0L in
+      for i = 0 to arr_max ttup do
+        sub_compare ttup.(i) (!offset)
+      done
+    in
+      []
 
-  and trans_cond invert expr : int =
+  and trans_cond (invert:bool) (expr:Ast.expr) : quad_idx list =
 
     let anno _ =
       iflog
@@ -520,10 +557,10 @@ let trans_visitor
             trans_compare cjmp' lhs rhs
 
       | _ ->
-          let e = trans_expr expr in
+          let bool_operand = trans_expr expr in
             anno ();
-            trans_compare Il.JNE e
-            (if invert then imm_true else imm_false)
+            trans_compare Il.JNE bool_operand
+              (if invert then imm_true else imm_false)
 
   and trans_expr (expr:Ast.expr) : Il.operand =
 
@@ -568,9 +605,9 @@ let trans_visitor
                     let dst = Il.Reg (Il.next_vreg (emitter())) in
                       begin
                         mov dst imm_true;
-                        let jmp = trans_cond false expr in
+                        let jmps = trans_cond false expr in
                           mov dst imm_false;
-                          patch jmp;
+                          List.iter patch jmps;
                           dst
                       end
             end
@@ -656,7 +693,7 @@ let trans_visitor
           iflog (fun _ -> annotate "sched proc");
           trans_upcall Abi.UPCALL_sched [| proc_operand |]
 
-  and trans_cond_fail (str:string) (fwd_jmp:int) : unit =
+  and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
     let (filename, line, _) =
       match !curr_stmt with
           None -> ("<none>", 0, 0)
@@ -671,11 +708,11 @@ let trans_visitor
           trans_static_string filename;
           imm (Int64.of_int line)
         |];
-      patch fwd_jmp
+      List.iter patch fwd_jmps
 
   and trans_check_expr (e:Ast.expr) : unit =
-    let fwd_jmp = trans_cond false e in
-      trans_cond_fail (Ast.fmt_to_str Ast.fmt_expr e) fwd_jmp
+    let fwd_jmps = trans_cond false e in
+      trans_cond_fail (Ast.fmt_to_str Ast.fmt_expr e) fwd_jmps
 
   and trans_malloc (dst:Il.operand) (nbytes:int64) : unit =
     if Il.is_mem dst
@@ -1268,7 +1305,7 @@ let trans_visitor
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       let vr = Il.Reg (Il.next_vreg (emitter())) in
         emit Il.CCALL vr callee_operand Il.Nil;
-        for i = implicit_args to (Array.length arg_layouts) - 1 do
+        for i = implicit_args to arr_max arg_layouts do
           let operand = word_at_sp_off arg_layouts.(i).layout_offset in
             iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
             trans_drop_slot operand in_slots.(i-implicit_args)
@@ -1388,20 +1425,20 @@ let trans_visitor
               trans_block sw.Ast.while_body;
               patch fwd_jmp;
               Array.iter trans_stmt head_stmts;
-              let back_jmp = trans_cond false head_expr in
-                patch_existing back_jmp block_begin;
+              let back_jmps = trans_cond false head_expr in
+                List.iter (fun j -> patch_existing j block_begin) back_jmps;
 
       | Ast.STMT_if si ->
-          let skip_thn_jmp = trans_cond true si.Ast.if_test in
+          let skip_thn_jmps = trans_cond true si.Ast.if_test in
             trans_block si.Ast.if_then;
             begin
               match si.Ast.if_else with
-                  None -> patch skip_thn_jmp
+                  None -> List.iter patch skip_thn_jmps
                 | Some els ->
                     let skip_els_jmp = mark () in
                       begin
                         emit Il.JMP Il.Nil badlab Il.Nil;
-                        patch skip_thn_jmp;
+                        List.iter patch skip_thn_jmps;
                         trans_block els;
                         patch skip_els_jmp
                       end
@@ -1451,7 +1488,7 @@ let trans_visitor
           begin
             fun _ ->
               log cx "emitted quads for %s:" name;
-              for i = 0 to (Array.length quads) - 1
+              for i = 0 to arr_max quads
               do
                 if Hashtbl.mem annotations i
                 then
@@ -1493,8 +1530,33 @@ let trans_visitor
     trans_frame_exit fnid;
   in
 
-  let trans_tag (tagid:node_id) (tag:(Ast.ty_tup * Ast.ty_tag)) : unit =
-    ()
+  let trans_tag
+      (n:Ast.ident) 
+      (tagid:node_id)
+      (tag:(Ast.ty_tup * Ast.ty_tag))
+      : unit =
+    trans_frame_entry tagid;
+    let (ttup, ttag) = tag in
+    let tag_keys = Array.make (Hashtbl.length ttag) "" in
+    let i = ref 0 in
+      begin
+        Hashtbl.iter (fun k _ -> tag_keys.(!i) <- k; incr i) ttag;
+        i := -1;
+        Array.sort compare tag_keys;
+        for j = 0 to arr_max tag_keys do
+          if tag_keys.(j) = n
+          then i := j
+        done;
+        if (!i) = -1
+        then err (Some tagid) "error sorting tag";
+      end;
+      let _ = log cx "tag variant: %s -> tag value #%d" n (!i) in
+      let disp = abi.Abi.abi_frame_base_sz in
+      let dst = deref (word_at_fp_off disp) in
+        (* A clever compiler will inline this. We are not clever. *)
+        mov dst (imm (Int64.of_int (!i)));
+        (* FIXME: tuple contents after tag number. *)
+        trans_frame_exit tagid;
   in
 
   let trans_native_fn (fnid:node_id) (tsig:Ast.ty_sig) : unit =
@@ -1574,13 +1636,14 @@ let trans_visitor
   in
 
   let rec trans_mod_item
+      (n:Ast.ident)
       (item:Ast.mod_item)
       : unit =
     begin
       match item.node with
           Ast.MOD_ITEM_fn f -> trans_fn item.id f.Ast.decl_item.Ast.fn_body
         | Ast.MOD_ITEM_prog p -> trans_prog item.id p.Ast.decl_item
-        | Ast.MOD_ITEM_tag t -> trans_tag item.id t.Ast.decl_item
+        | Ast.MOD_ITEM_tag t -> trans_tag n item.id t.Ast.decl_item
         | _ -> ()
     end
   in
@@ -1616,7 +1679,7 @@ let trans_visitor
   let visit_mod_item_pre n p i =
     enter_file_for i;
     Stack.push n path;
-    trans_mod_item i;
+    trans_mod_item n i;
     inner.Walk.visit_mod_item_pre n p i
   in
   let visit_mod_item_post n p i =

@@ -715,12 +715,12 @@ and parse_atomic_ty ps =
           let tup =
             match peek ps with
                 LPAREN -> bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps
-              | NIL -> [| |]
-              | _ -> [| |]
+              | NIL -> (bump ps; [| |])
+              | _ -> raise (err "tag variant missing argument list" ps)
           in
             htab_put htab ident tup
         in
-        let _ = bracketed_one_or_more LPAREN RPAREN (Some COMMA) parse_tag_entry ps in
+        let _ = bracketed_one_or_more LPAREN RPAREN (Some COMMA) (ctxt "tag: variant" parse_tag_entry) ps in
           Ast.TY_tag htab
 
     | REC ->
