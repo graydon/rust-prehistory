@@ -628,10 +628,10 @@ occurs within a string literal token or a syntactic extension token.
 @subsection Ref.Lex.Ident
 @c * Ref.Lex.Ident::             Identifier tokens.
 
-Identifiers follow the pattern of C and Java identifiers: they must
-begin with a @emph{letter} and continue with any combination
-of @emph{letters} and @emph{digits} and the underscore
-character @code{_} (Unicode character U+005f), and must not be equal
+Identifiers follow the pattern of C and Java identifiers: they begin
+with a @emph{letter} or underscore character @code{_} (Unicode
+character U+005f), and continue with any combination of
+@emph{letters}, @emph{digits} and underscores, and must not be equal
 to any keyword. @xref{Ref.Lex.Key}.
 
 A @emph{letter} is a Unicode character with the @emph{General
@@ -771,39 +771,70 @@ The special symbols are:
 @sp 2
 
 @multitable @columnfractions .1 .1 .1 .1 .1 .1
-@item @code{@@}
-@tab @code{^}
+
+@tab @code{@@}
 @tab @code{~}
+@tab @code{^}
+
+@item @code{#}
 @tab @code{:}
+@tab @code{.}
 @tab @code{;}
-@tab @code{->}
-@item @code{+}
-@tab @code{-}
-@tab @code{*}
-@tab @code{/}
-@tab @code{%}
-@tab @code{}
-@item @code{=}
-@tab @code{<-}
-@tab @code{<|}
-@tab @code{<+}
-@tab @code{}
+@tab @code{,}
+
 @item @code{[}
 @tab @code{]}
 @tab @code{@{}
 @tab @code{@}}
 @tab @code{(}
 @tab @code{)}
+
+@item @code{=}
+@tab @code{<-}
+@tab @code{<|}
+@tab @code{<+}
+@tab @code{->}
+
+@item @code{+}
+@tab @code{++}
+@tab @code{+=}
+@tab @code{-}
+@tab @code{--}
+@tab @code{-=}
+
+@item @code{*}
+@tab @code{/}
+@tab @code{%}
+@tab @code{*=}
+@tab @code{/=}
+@tab @code{%=}
+
 @item @code{&}
 @tab @code{|}
 @tab @code{!}
-@tab @code{,}
-@tab @code{.}
+@tab @code{&=}
+@tab @code{|=}
+@tab @code{!=}
+
+@item @code{>>}
+@tab @code{>>>}
+@tab @code{<<}
+@tab @code{<<=}
+@tab @code{>>=}
+@tab @code{>>>=}
+
 @item @code{<}
 @tab @code{<=}
+@tab @code{==}
 @tab @code{>=}
 @tab @code{>}
-@tab @code{}
+
+@item @code{&&}
+@tab @code{||}
+@tab @code{&&=}
+@tab @code{||=}
+
+
 @end multitable
 
 @page
