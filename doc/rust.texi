@@ -685,11 +685,14 @@ The keywords are:
 @tab @code{port}
 @tab @code{chan}
 @tab @code{flush}
-@item @code{do}
-@tab @code{if}
+@item @code{if}
 @tab @code{else}
 @tab @code{alt}
+@tab @code{case}
+@item @code{do}
 @tab @code{while}
+@tab @code{break}
+@tab @code{cont}
 @item @code{init}
 @tab @code{main}
 @tab @code{fail}
@@ -775,66 +778,56 @@ The special symbols are:
 @tab @code{@@}
 @tab @code{~}
 @tab @code{^}
-
+@tab @code{_}
 @item @code{#}
 @tab @code{:}
 @tab @code{.}
 @tab @code{;}
 @tab @code{,}
-
 @item @code{[}
 @tab @code{]}
 @tab @code{@{}
 @tab @code{@}}
 @tab @code{(}
 @tab @code{)}
-
 @item @code{=}
 @tab @code{<-}
 @tab @code{<|}
 @tab @code{<+}
 @tab @code{->}
-
 @item @code{+}
 @tab @code{++}
 @tab @code{+=}
 @tab @code{-}
 @tab @code{--}
 @tab @code{-=}
-
 @item @code{*}
 @tab @code{/}
 @tab @code{%}
 @tab @code{*=}
 @tab @code{/=}
 @tab @code{%=}
-
 @item @code{&}
 @tab @code{|}
 @tab @code{!}
 @tab @code{&=}
 @tab @code{|=}
 @tab @code{!=}
-
 @item @code{>>}
 @tab @code{>>>}
 @tab @code{<<}
 @tab @code{<<=}
 @tab @code{>>=}
 @tab @code{>>>=}
-
 @item @code{<}
 @tab @code{<=}
 @tab @code{==}
 @tab @code{>=}
 @tab @code{>}
-
 @item @code{&&}
 @tab @code{||}
 @tab @code{&&=}
 @tab @code{||=}
-
-
 @end multitable
 
 @page
@@ -894,18 +887,13 @@ An example of a name with type parameters:
 m.map[int,str].key;
 @end example
 
-An lval component may include an indexing operator. These in turn may
-be @emph{static} or @emph{dynamic} indexing operators. @dfn{Static
-indexing operators} are enclosed in curly braces and can only include
-number literals. @dfn{Dynamic indexing operators} are enclosed in
-parentheses and can include any integral expression. Indexing
-operators applied to vectors or strings imply a run-time
-bounds-check. @xref{Ref.Type.Vec}.
+An lval component may include an indexing operator. Index operators
+are enclosed in parentheses and can include any integral
+expression. Indexing operators can only be applied to vectors or
+strings, and imply a run-time bounds-check. @xref{Ref.Type.Vec}.
 
-An example of one lval with a static indexing operator, and a second
-lval with a dynamic indexing opertor:
+An example of an lval with a dynamic indexing opertor:
 @example
-x.y.@{3@}.z;
 x.y.(1 + v).z;
 @end example
 
@@ -1727,10 +1715,13 @@ prog byte_copy @{
           ret chan(io.stdin);
      @}
      main @{
-       u8 tmp;
-       while (tmp <- io.in) @{
-             io.out <| tmp;
-       @}
+         u8 tmp;
+         while (true) @{
+             alt @{
+                 case (tmp <- io.in) @{@}
+                 case (io.out <| tmp) @{@}
+             @}
+         @}
      @}
 @}
 @end example
@@ -1882,22 +1873,22 @@ The tuple type-constructor is a parenthesised, comma-separated list of
 two or more slots. It exactly mirrors the tuple value-constructor,
 itself a comma-separated list of two or more values.
 
-Tuples are equivalent to records labeled by ascending integers
-starting from 0: their fields are laid out in memory contiguously, in
-order specified by the tuple type. Tuples can only be indexed by
-static numeric labels enclosed in braces. Tuples can also be
-``destructured'' into named constituents, in various syntactic
-contexts, such as in a tuple initialisation statement or a function
-parameter list.
+Tuples are equivalent to records labeled by ascending integer-like
+names prefixed by the underscore character: @code{_0}, @code{_1},
+@code{_2}, etc. The fields of a tuple are laid out in memory
+contiguously, like a record, in order specified by the tuple type. In
+addition to named field access, tuples can be be ``destructured'' into
+named constituents, in various syntactic contexts, such as in a tuple
+initialisation statement or a function parameter list.
 
 An example of a tuple type and its use:
 @example
 type pair = (int,str);
 let pair p = (10,"hello");
-check (p.@{0@} == 10);
-p.@{1@} = "world";
+check (p._0 == 10);
+p._1 = "world";
 let (int x, str s) = p;
-check (s == p.@{1@} & p.@{1@} == "world");
+check (s == p._1 & p._1 == "world");
 @end example
 
 
@@ -1951,9 +1942,9 @@ a = cat;
 
 An example of a @emph{recursive} @code{tag} type and its use:
 @example
-type list[T] = tag[T](empty,
+type list[T] = tag[T](nil,
                       cons(T, @@list[T]));
-let list[int] a = cons(7, cons(13, empty));
+let list[int] a = cons(7, cons(13, nil));
 @end example
 
 
@@ -2161,12 +2152,16 @@ actions.
 * Ref.Stmt.Flush::              Statement for flushing a channel queue.
 * Ref.Stmt.Recv::               Statement for receiving a value from a channel.
 * Ref.Stmt.Call::               Statement for calling a solo function.
+* Ref.Stmt.Bind::               Statement for binding arguments to functions.
 * Ref.Stmt.Ret::                Statement for stopping and producing a value.
 * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
 * Ref.Stmt.Put::                Statement for pausing and producing a value.
 * Ref.Stmt.Fail::               Statement for causing process failure.
 * Ref.Stmt.Log::                Statement for logging values to diagnostic buffers.
+* Ref.Stmt.Note::               Statement for logging values during failure.
 * Ref.Stmt.While::              Statement for simple conditional looping.
+* Ref.Stmt.Break::              Statement for terminating a loop.
+* Ref.Stmt.Cont::               Statement for terminating a single loop iteration.
 * Ref.Stmt.For::                Statement for complex conditional looping.
 * Ref.Stmt.If::                 Statement for simple conditional branching.
 * Ref.Stmt.Alt::                Statement for complex conditional branching.
@@ -2551,6 +2546,54 @@ An example of a call statement:
 let int x = add(1, 2);
 @end example
 
+@page
+@node       Ref.Stmt.Bind
+@subsection Ref.Stmt.Bind
+@c * Ref.Stmt.Bind::               Statement for binding arguments to functions.
+
+A @dfn{bind statement} constructs a new function from an existing
+function. The new function has zero or more of its arguments
+@emph{bound} into a new, hidden exterior tuple that holds the
+bindings. For each concrete argument passed in the @code{bind}
+statement, the corresponding parameter in the existing function is
+@emph{omitted} as a parameter of the new function. For each argument
+passed the placeholder symbol @code{_} in the @code{bind} statement,
+the corresponding parameter of the existing function is
+@emph{retained} as a parameter of the new function.
+
+Any subsequent invocation of the new function with residual arguments
+causes invocation of the existing function with the combination of
+bound arguments and residual arguments that was specified during the
+binding.
+
+An example of a @code{bind} statement:
+@example
+fn add(int x, int y) -> int @{
+    ret x + y;
+@}
+type single_param_fn = fn(int) -> int;
+
+let single_param_fn add4 = bind add(4, _);
+
+let single_param_fn add5 = bind add(_, 5);
+
+check (add(4,5) == add4(5));
+check (add(4,5) == add5(4));
+
+@end example
+
+In all cases, a @code{bind} statement makes a @emph{copy} of the bound
+arguments when it is executed. Subsequent modification to the values
+passed as bound arguments will have no affect on the bound values; the
+bound values are private to the new function.
+
+Binding a write-alias parameter is prohibited.
+
+The @code{bind} statement is a lightweight mechanism for simulating
+the more elaborate construct of @emph{lexical closures} that exist in
+other languages. Rust has no support for lexical closures, but many
+realistic uses of them can be achileved with @code{bind} statements.
+
 
 @page
 @node       Ref.Stmt.Ret
@@ -2653,24 +2696,110 @@ statement.
 @end example
 
 @page
+@node       Ref.Stmt.Note
+@subsection Ref.Stmt.Note
+@c * Ref.Stmt.Note::                Statement for logging values during failure.
+
+A @code{note} statement has no effect during normal execution. The
+purpose of a @code{note} statement is to provide additional diagnostic
+information to the logging subsystem during process failure. Using
+@code{note} statements, normal diagnostic logging can be kept
+relatively sparse, while still providing verbose diagnostic
+``backtraces'' when a process fails.
+
+When a process is failing, control frames @emph{unwind} from the
+innermost frame to the outermost, and from the innermost lexical block
+within an unwinding frame to the outermost. When unwinding a lexical
+block, the runtime processes all the @code{note} statements in the block
+sequentially, from the first statement of the block to the last.
+During processing, a @code{note} statement has equivalent meaning to a
+@code{log} statement: it causes the runtime to append the argument of
+the @code{note} to the internal logging diagnostic buffer.
+
+An example of a @code{note} statement:
+@example
+fn read_file_lines(~str path) -> vec[str] @{
+    note path;
+    vec[str] r;
+    file f = open_read(path);
+    for* (str ~s = lines(f)) @{
+        vec.append(r,s);
+    @}
+    ret r;
+@}
+@end example
+
+In this example, if the process fails while attempting to open or read
+a file, the runtime will log the path name that was being read. If the
+function completes normally, the runtime will not log the path.
+
+A slot that is marked by a @code{note} statement does @emph{not} have
+its value copied aside when control passes through the @code{note}. In
+other words, if a @code{note} statement notes a particular slot, and
+code after the @code{note} that slot, and then a subsequent failure
+occurs, the @emph{mutated} value will be logged during unwinding,
+@emph{not} the original value that was held in the slot at the moment
+control passed through the @code{note} statement.
+
+@page
 @node       Ref.Stmt.While
 @subsection Ref.Stmt.While
 @c * Ref.Stmt.While::              Statement for simple conditional looping.
 
-A @code{while} statement is a loop construct. The loop begins with an
-evaluation of the boolean loop-head expression. If the loop-head
-expression evaluates to @code{true}, the loop-body block executes and
-control returns to the loop-head expression. If the loop-head
-expression evaluates to @code{false}, the @code{while} statement
-completes.
+A @code{while} statement is a loop construct. A @code{while} loop
+may be either a simple @code{while} or a @code{do}-@code{while} loop.
 
-An example of a @code{while} statement:
+In the case of a simple @code{while}, the loop begins by evaluating
+the boolean loop conditional expression. If the loop conditional
+expression evaluates to @code{true}, the loop body block executes and
+control returns to the loop conditional expression. If the loop
+conditional expression evaluates to @code{false}, the @code{while}
+statement completes.
+
+In the case of a @code{do}-@code{while}, the loop begins with an
+execution of the loop body. After the loop body executes, it evaluates
+the loop conditional expression. If it evaluates to @code{true},
+control returns to the beginning of the loop body. If it evaluates to
+@code{false}, control exits the loop.
+
+An example of a simple @code{while} statement:
 @example
 while (i < 10) @{
     print("hello\n");
     i = i + 1;
 @}
 @end example
+
+An example of a @code{do}-@code{while} statement:
+@example
+do @{
+    print("hello\n");
+    i = i + 1;
+@} while (i < 10);
+@end example
+
+@page
+@node       Ref.Stmt.Break
+@subsection Ref.Stmt.Break
+@c * Ref.Stmt.For::                Statement for terminating a loop.
+
+Executing a @code{break} statement immediately terminates the
+innermost loop enclosing it. It is only permitted in the body of a
+loop.
+
+@page
+@node       Ref.Stmt.Cont
+@subsection Ref.Stmt.Cont
+@c * Ref.Stmt.For::                Statement for terminating a single loop iteration.
+
+Executing a @code{cont} statement immediately terminates the current
+iteration of the innermost loop enclosing it, returning control to the
+loop @emph{head}. In the case of a @code{while} loop, the head is the
+conditional expression controlling the loop. In the case of a
+@code{for} loop, the head is the iterator or vector-slice increment
+controlling the loop.
+
+A @code{cont} statement is only permitted in the body of a loop.
 
 
 @page
@@ -2693,19 +2822,51 @@ for-loops.
 @c * Ref.Stmt.For.Linear::         Statement for looping over vectors.
 
 A @dfn{linear for-loop} is controlled by a @emph{slice}, which has the
-syntactic form of a normal vector indexing expression, except the
-index is either a 2-tuple or a 3-tuple describing a bounded linear
-arithmetic sequence of indices to be selected from a vector or
-string. The linear for-loop bounds-checks the sequence @emph{once}
-when initiating the loop, then repeatedly copies into the index
-variable and/or into the element variable of the loop each value in
-the sequence (and/or its selected element), executing the loop body
-once per copy.
+syntactic form of a normal vector or string indexing expression,
+except the index is either a 2-tuple or a 3-tuple describing a bounded
+linear arithmetic sequence of indices to be selected from the vector
+or string. The linear for-loop bounds-checks the sequence @emph{once}
+when initiating the loop, then repeatedly copies each value in the
+sequence into the element variable, executing the loop body once per
+copy.
 
-Example of a linear for-loop:
+Within the loop body, the vector or string is only accessible as a
+read alias.
+
+The 3-tuple form of slice provides an initial index @var{i}, a
+bounding index @var{b}, and a step value @var{s}. The associated
+linear loop executes once for each index @var{x = i + n * s} such that
+@code{@var{x} < @var{b}} if @var{s} is positive, or @code{@var{x} >
+@var{b}} if @var{s} is negative, and where @var{n} ranges over
+successive integers @code{0}, @code{1}, @dots{}
+
+If @var{s} is @code{0}, a signal is generated.
+
+If the initial index of a slice is omitted, it is implicitly @code{0}.
+If the bounding index of a slice if omtited, it is implicitly the length
+of the indexed vector or string. If the step value of a slice if ommited,
+it is implicitly @code{1}.
+
+The 2-tuple form of slice is equivalent to ommitting the step value in
+the 3-tuple form.
+
+Example of a 4 linear for-loops, all identical:
 @example
 let vec[foo] v = vec(a, b, c);
+
+for (~foo e = v.(0, vec.len(v), 1)) @{
+    bar(e);
+@}
+
 for (~foo e = v.(0, vec.len(v))) @{
+    bar(e);
+@}
+
+for (~foo e = v.(0,)) @{
+    bar(e);
+@}
+
+for (~foo e = v.(,)) @{
     bar(e);
 @}
 @end example
@@ -2725,8 +2886,8 @@ function it is calling. @xref{Ref.Item.Fn.Iter}.
 
 Example of an iterator for-loop:
 @example
-str txt;
-vec[str] lines;
+let str txt;
+let vec[str] lines;
 for* (~str s = str.split(txt, "\n")) @{
     vec.push(lines, s);
 @}
@@ -2738,7 +2899,7 @@ for* (~str s = str.split(txt, "\n")) @{
 @subsection Ref.Stmt.If
 @c * Ref.Stmt.If::                 Statement for simple conditional branching.
 
-An @code{if} statement is a conditional-branch in program control. The
+An @code{if} statement is a conditional branch in program control. The
 form of an @code{if} statement is a parenthesised condition
 expression, followed by a consequent block, and an optional trailing
 @code{else} block. The condition expression must have type
@@ -2752,7 +2913,136 @@ block is skipped and any @code{else} block is executed.
 @subsection Ref.Stmt.Alt
 @c * Ref.Stmt.Alt::                Statement for complex conditional branching.
 
-@emph{TODO}.
+An @code{alt} statement is a multi-directional branch in program control.
+There are three kinds of @code{alt} statement: communication @code{alt}
+statements, @code{alt tag} statements, and @code{alt type} statements.
+
+The form of each kind of @code{alt} is similar: an initial @emph{head}
+that describes the criteria for branching, followed by a sequence of
+zero or more labaled @emph{arms}, each of which describes a
+@emph{case} and provides a @emph{block} of statements associated with
+the case. When an @code{alt} is executed, control enters the head,
+determines which of the cases to branch to, branches to the block
+associated with the chosen case, and then proceeds to the statement
+following the @code{alt} when the case block completes.
+
+@menu
+* Ref.Stmt.Alt.Comm::         Statement for branching on communication events.
+* Ref.Stmt.Alt.Pat::          Statement for branching on pattern matches.
+* Ref.Stmt.Alt.Type::         Statement for branching on types.
+@end menu
+
+@page
+@node          Ref.Stmt.Alt.Comm
+@subsubsection Ref.Stmt.Alt.Comm
+@c * Ref.Stmt.Alt.Comm::           Statement for branching on communication events.
+
+The simplest form of @code{alt} statement is the a
+@emph{communication} @code{alt}. The cases of a communication
+@code{alt}'s arms are send, receive and flush
+statements. @xref{Ref.Proc.Comm}.
+
+To execute a communication @code{alt}, the runtime checks all of the
+ports and channels involved in the arms of the statement to see if any
+@code{case} can execute without blocking.  If no @code{case} can
+execute, the process blocks, and the runtime unblocks the process when
+a @code{case} @emph{can} execute. The runtime then makes a
+pseudorandom choice from among the set of @code{case} statements that
+can execute, executes the statement of the @code{case} and branches to
+the block of that arm.
+
+An example of a communication @code{alt} statement:
+@example
+let chan c[int] = foo();
+let port p[str] = bar();
+let int x = 0;
+let vec[str] strs;
+
+alt @{
+    case (str s <- p) @{
+        vec.append(strs, s);
+    @}
+    case (c <| x) @{
+        x++;
+    @}
+@}
+@end example
+
+@page
+@node          Ref.Stmt.Alt.Pat
+@subsubsection Ref.Stmt.Alt.Pat
+@c * Ref.Stmt.Alt.Pat::            Statement for branching on pattern matches.
+
+A pattern @code{alt} statement branches on a @emph{pattern}. The exact
+form of matching that occurs depends on the pattern. Patterns consist
+of some combination of literals, tag constructors, variable binding
+specifications and placeholders (@code{_}). A pattern @code{alt} has a
+parenthesized @emph{head expression}, which is the value to compare to
+the patterns. The type of the patterns must equal the type of the head
+expression.
+
+To execute a pattern @code{alt} statement, first the head expression
+is evaluated, then its value is sequentially compared to the patterns
+in the arms until a match is found. The first arm with a matching
+@code{case} pattern is chosen as the branch target of the @code{alt},
+any variables bound by the pattern are assigned to local @emph{auto}
+slots in the arm's block, and control enters the block.
+
+An example of a pattern @code{alt} statement:
+
+@example
+type list[X] = tag(nil, cons(X, @@list[X]));
+
+let list[int] x = cons(10, cons(11, nil));
+
+alt (x) @{
+    case (cons(a, cons(b, _))) @{
+        process_pair(a,b);
+    @}
+    case (cons(v=10, _)) @{
+        process_ten(v);
+    @}
+    case (_) @{
+        fail;
+    @}
+@}
+@end example
+
+
+@page
+@node          Ref.Stmt.Alt.Type
+@subsubsection Ref.Stmt.Alt.Type
+@c * Ref.Stmt.Alt.Type::           Statement for branching on type.
+
+An @code{alt type} statement is similar to a pattern @code{alt}, but
+branches on the @emph{type} of its head expression, rather than the
+value. The head expression of an @code{alt type} statement must be of
+type @code{any}, and the arms of the statement are slot patterns
+rather than value patterns. Control branches to the arm with a
+@code{case} that matches the @emph{actual type} of the value in the
+@code{any}.
+
+An example of an @code{alt type} statement:
+
+@example
+let any x = foo();
+
+alt type (x) @{
+    case (int i) @{
+        ret i;
+    @}
+    case (list[int] li) @{
+        ret int_list_sum(li);
+    @}
+    case (list[X] lx) @{
+        ret list_len(lx);
+    @}
+    case (_) @{
+        ret 0;
+    @}
+@}
+@end example
+
 
 @page
 @node       Ref.Stmt.Prove
@@ -2829,7 +3119,7 @@ print_even(x);
 @end example
 
 @sp 1
-Example using @code{if check}:
+Equivalent example using @code{if check}:
 @example
 if check even(x) @{
     print_even(x);
