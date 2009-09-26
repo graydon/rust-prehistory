@@ -2702,10 +2702,10 @@ statement.
 
 A @code{note} statement has no effect during normal execution. The
 purpose of a @code{note} statement is to provide additional diagnostic
-information to the logging subsystem during process failure. Using
-@code{note} statements, normal diagnostic logging can be kept
-relatively sparse, while still providing verbose diagnostic
-``backtraces'' when a process fails.
+information to the logging subsystem during process
+failure. @xref{Ref.Stmt.Log}. Using @code{note} statements, normal
+diagnostic logging can be kept relatively sparse, while still
+providing verbose diagnostic ``backtraces'' when a process fails.
 
 When a process is failing, control frames @emph{unwind} from the
 innermost frame to the outermost, and from the innermost lexical block
