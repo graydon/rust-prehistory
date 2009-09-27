@@ -221,7 +221,9 @@ lightweight process scheduling, internal communication queueing and
 reflection services, but these are all implemented in a
 straightforward and obvious fashion, in standard C, with a low-level
 service provider interface available to embeddings. No research-level
-virtual machine, JIT or garbage collection technology is required.
+virtual machine, JIT or garbage collection technology is required. It
+should be relatively easy to adapt a Rust front-end on to many
+existing native toolchains.
 
 @sp 1
 @item Integrated system-construction facility
@@ -1252,7 +1254,7 @@ destroyed or until its enclosing allocation is destroyed.
 @c * Ref.Mem.Acct::                Memory accounting model.
 
 Every process is associated with a memory account. An @dfn{account} is
-a counter -- possibly shared between multiple processes -- indicating
+a counter -- possibly shared between multiple processes -- measuring
 all memory that has been allocated and not released by processes
 sharing the account. Each account has a budget. The @dfn{budget} of an
 account is the maximum amount of memory that can be simultaneously
