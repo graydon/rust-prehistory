@@ -1108,6 +1108,7 @@ Allocations in the stack and the heap consist of @emph{slots}.
 * Ref.Mem.Own::                 Memory ownership model.
 * Ref.Mem.Slot::                Memory containment and reference model.
 * Ref.Mem.Init::                Initialisation state of memory.
+* Ref.Mem.Acct::                Memory accounting model.
 @end menu
 
 @page
@@ -1146,9 +1147,9 @@ is the only process that can access the allocation.
 is the only process that can @emph{observe its own modifications} to the
 allocation.
 
-When a stack frame is exited, its directly owned (stack) allocations are all
-released, and its references to lazily owned (heap) allocations are
-dropped, decrementing their reference counts.
+When a stack frame is exited, its directly owned (stack) allocations
+are all released, and its references to lazily owned (heap)
+allocations are dropped, decrementing their reference counts.
 
 When a process finishes, its stack is necessarily empty. The process'
 interior slots are released as the process itself is released, and its
@@ -1245,6 +1246,32 @@ be read, but can be written to. A slot becomes initialised in any
 statement that writes to it, and remains initialised until explicitly
 destroyed or until its enclosing allocation is destroyed.
 
+@page
+@node       Ref.Mem.Acct
+@subsection Ref.Mem.Acct
+@c * Ref.Mem.Acct::                Memory accounting model.
+
+Every process is associated with a memory account. An @dfn{account} is
+a counter -- possibly shared between multiple processes -- indicating
+all memory that has been allocated and not released by processes
+sharing the account. Each account has a budget. The @dfn{budget} of an
+account is the maximum amount of memory that can be simultaneously
+allocated in the account before the runtime generates a signal for the
+allocating process.
+
+Initially a process has the same account as its parent, but a process
+may choose to allocate a sub-account of a fixed size from within its
+account and assign some number of its child processes to the
+sub-account. Within a process, accounting is strictly enforced: all
+memory allocated through the runtime, both user data, sub-accounts and
+runtime-support structures such as channel and signal queues, are
+charged to a process' account.
+
+When a communication channel crosses from one account to another, any
+value sent over the channel is @emph{deeply copied} during
+transmission. That is: any exterior slots reachable from the value
+have their heap allocation copied, and charged to the new account.
+
 
 @page
 @node    Ref.Proc
@@ -1314,8 +1341,8 @@ contains a message queue and asynchronously sending a message merely
 inserts it into the channel's queue; message receipt is the
 responsibility of the receiving process.
 
-Queued messages in channels are considered part of the memory budget
-of the @emph{sending} process. If too many messages are queued for
+Queued messages in channels are charged to the memory account of the
+@emph{sending} process. If too many messages are queued for
 transmission from a single sending process, without being received by
 a receiving process, the sending process may exceed its memory budget,
 which causes a run-time signal. To help control this possibility, a
@@ -1355,7 +1382,7 @@ A process begins its existence -- when it is spawned -- in the
 @emph{initialising} state. It remains in this state until its parent
 completes its @code{init} block successfully or fails. The
 @emph{parent} is responsible for running the @code{init} block -- the
-code executes in the stack and budget of the parent -- but the
+code executes in the stack and account of the parent -- but the
 @code{init} block can access only the @emph{scope} of the child (its
 member slots and items). If a signal is generated while the parent is
 executing the child's @code{init} block, it is delivered to
@@ -2347,6 +2374,17 @@ statements cannot be omitted from a ``production build'' of a Rust
 program the same way @code{asserts} are frequently disabled in
 deployed C programs.}
 
+It is important to understand that the typestate system has @emph{no
+insight} into the meaning of a particular predicate. Predicates and
+constraints are not evaluated in any way at compile time. Predicates
+are treated as specific (but unknown) functions applied to specific
+(also unknown) slots. All the typestate system does is track which of
+those predicates -- whatever they do -- @emph{must hold} in order for
+program control to reach a particular point in the CFG. The
+fundamental building block, therefore, is the @code{check} statement,
+which tells the typestate system ``if control passes this statement,
+the checked predicate holds''.
+
 From this building block, constraints can be propagated to function
 signatures and constrained types, and the responsibility
 to @code{check} a constraint pushed further and further away from the
@@ -2470,7 +2508,7 @@ channel, and apply a send operator to it and a value to send.
 
 The @emph{asynchronous send} operator @code{<+} adds a value to the
 channel's queue, without blocking. If the queue is full, it is
-extended, taking memory from the process' memory budget. If the
+extended, taking memory from the process' memory account. If the
 process memory budget is exhausted, a signal is sent to the process.
 
 The @emph{semi-synchronous send} operator @code{<|} adds a value to
@@ -2512,14 +2550,15 @@ flush c;
 @subsection Ref.Stmt.Recv
 @c * Ref.Stmt.Recv::               Statement for receiving a value from a channel.
 
-The @dfn{receive statement} takes an @code{lval} to receive into and
-an @emph{lval} denoting a port, and applies the @emph{receive
-operator} @code{<-} to the port. The statement causes the receiving
-process to enter the @emph{blocked reading} state until a process is
-sending a value to the port, at which point the runtime fairly and
-pseudo-randomly selects a sending process and moves a value from the
-head of one of the process queues to the receiving slot, and un-blocks
-the receiving process. @xref{Ref.Run.Comm}.
+The @dfn{receive statement} takes an @var{lval} to receive into and an
+expression denoting a port, and applies the @emph{receive operator}
+(@code{<-}) to the pair, copying a value out of the port and into the
+@var{lval}. The statement causes the receiving process to enter the
+@emph{blocked reading} state until a process is sending a value to the
+port, at which point the runtime fairly and pseudo-randomly selects a
+sending process and copies a value from the head of one of the process
+queues to the receiving slot, and un-blocks the receiving
+process. @xref{Ref.Run.Comm}.
 
 An example of a @emph{receive}:
 @example
@@ -3261,9 +3300,9 @@ table and a signal queue associated with each process. Sending a
 signal to a process inserts the signal into the process' signal queue
 and marks the process as having a pending signal. At the next
 scheduling opportunity, the runtime processes signals in the process'
-queue using its dispatch table. The signal queue memory is accounted
-for from the process' memory budget; if the queue grows too big, the
-process will fail.
+queue using its dispatch table. The signal queue memory is charged to
+the process' memory account; if the queue grows too big, the process
+will fail.
 
 Signal handling is a @emph{mandatory} component of the runtime.
 
