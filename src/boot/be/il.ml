@@ -23,6 +23,7 @@ type addr =
     Abs of Asm.expr64
   | Deref of reg
   | Idx of (reg * Asm.expr64)
+  | Pcrel of fixup
 ;;
 
 type code =
@@ -31,10 +32,14 @@ type code =
   | CodeNone
 ;;
 
+type regbits = (reg * bits) ;;
+type membits = (addr * bits) ;;
+type spillbits = (spill * bits) ;;
+
 type cell =
-    Reg of (reg * bits)
-  | Mem of (addr * bits)
-  | Spill of (spill * bits)
+    Reg of regbits
+  | Mem of membits
+  | Spill of spillbits
 ;;
 
 type operand =
@@ -177,6 +182,7 @@ let string_of_addr (f:hreg_formatter) (a:addr) : string =
     | Abs e -> "[" ^ (string_of_expr64 e) ^ "]"
     | Idx (r,e) -> ("[" ^  (string_of_reg f r) ^
                       " + " ^ (string_of_expr64 e) ^ "]")
+    | Pcrel f -> ("[<fixup " ^ f.fixup_name ^  ">]")
 ;;
 
 let string_of_code (f:hreg_formatter) (c:code) : string =
@@ -291,6 +297,16 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
 
 (* Query functions. *)
 
+let cell_bits (c:cell) : bits =
+  match c with
+    Reg (_,b) -> b
+  | Mem (_,b) -> b
+  | Spill (_,b) -> b
+;;
+
+
+(* Emitters. *)
+
 
 type emitter = { mutable emit_pc: int;
                  mutable emit_next_vreg: int;
@@ -368,6 +384,16 @@ let unary (op:unop) (dst:cell) (src:operand) : quad' =
   Unary { unary_op = op;
           unary_dst = dst;
           unary_src = src }
+
+let jmp (op:jmpop) (targ:code) : quad' =
+  Jmp { jmp_op = op;
+        jmp_targ = targ; }
+;;
+
+let call (dst:cell) (targ:code) : quad' =
+  Call { call_dst = dst;
+         call_targ = targ; }
+;;
 
 let emit_full (e:emitter) (fix:fixup option) (q':quad') =
   let fixup = ref fix in

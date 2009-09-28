@@ -188,9 +188,9 @@ let (n_hardregs:int) = 6;;
 
 let prealloc_quad (quad':Il.quad') : Il.quad' =
   let target_bin_to_hreg bin hreg =
-    let (name, cell) = bin.Il.binary_dst in
+    let bits = Il.cell_bits bin.Il.binary_dst in
       { bin with
-          Il.binary_dst = (name, Il.Reg (Il.Hreg hreg)) }
+          Il.binary_dst = Il.Reg ((Il.Hreg hreg), bits) }
   in
     match quad' with
         Il.Binary bin ->
@@ -205,9 +205,9 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
               end
           end
       | Il.Call c ->
-          let (name, cell) = c.Il.call_dst in
+          let bits = Il.cell_bits c.call_dst in
             Il.Call { c with
-                        Il.call_dst = (name, Il.Reg (Il.Hreg eax)) }
+                        Il.call_dst = Il.Reg ((Il.Hreg eax), bits) }
       | x -> x
 ;;
 
@@ -235,37 +235,47 @@ let word_bits = Il.Bits32
 let word_ty = TY_u32
 ;;
 
-let spill_slot (framesz:int64) (i:int) : Il.cell =
-  Mem (Il.Idx
-         ((Il.Hreg ebp),
-          (Asm.IMM
-             (Int64.neg
-                (Int64.add framesz
-                   (Int64.mul word_sz
-                      (Int64.of_int (i+1))))))))
+let spill_slot (framesz:int64) (sb:spillbits) : Il.cell =
+  let (i,bits) = sb in
+  let imm = (Asm.IMM
+               (Int64.neg
+                  (Int64.add framesz
+                     (Int64.mul word_sz
+                        (Int64.of_int (i+1))))))
+  in
+  let addr = Il.Idx ((Il.Hreg ebp), imm) in
+    Mem (addr, bits)
 ;;
 
+let c (c:cell) : Il.operand = Il.Cell c ;;
+let r (r:Il.reg) : Il.cell = Il.Reg ( r, word_bits ) ;;
+let h (x:Il.hreg) : Il.reg = Il.Hreg x ;;
+let rc (x:Il.hreg) : Il.cell = r (h x) ;;
+let ro (x:Il.hreg) : Il.operand = c (rc x) ;;
+let vreg (e:Il.emitter) : (Il.reg * Il.cell) =
+  let vr = Il.next_vreg e in
+    (vr, (Il.Reg (vr, word_bits)))
+;;
 
 let save_callee_saves (e:Il.emitter) : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-    Il.emit e (Il.CPUSH word_mem) Il.Nil (r ebp) Il.Nil;
-    Il.emit e (Il.CPUSH word_mem) Il.Nil (r edi) Il.Nil;
-    Il.emit e (Il.CPUSH word_mem) Il.Nil (r esi) Il.Nil;
-    Il.emit e (Il.CPUSH word_mem) Il.Nil (r ebx) Il.Nil;
+    Il.emit e (Il.Push (ro ebp));
+    Il.emit e (Il.Push (ro edi));
+    Il.emit e (Il.Push (ro esi));
+    Il.emit e (Il.Push (ro ebx));
 ;;
 
 
 let restore_callee_saves (e:Il.emitter) : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-    Il.emit e (Il.CPOP word_mem) (r ebx) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP word_mem) (r esi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP word_mem) (r edi) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP word_mem) (r ebp) Il.Nil Il.Nil;
+    Il.emit e (Il.Pop (rc ebx));
+    Il.emit e (Il.Pop (rc esi));
+    Il.emit e (Il.Pop (rc edi));
+    Il.emit e (Il.Pop (rc ebp));
 ;;
 
-let word_n reg i =
-  Il.Mem (word_mem, Some reg,
-          Asm.IMM (Int64.mul (Int64.of_int i) word_sz))
+let word_n (reg:Il.reg) (i:int) : Il.cell =
+  let imm = Asm.IMM (Int64.mul (Int64.of_int i) word_sz) in
+  let addr = Il.Idx (reg, imm) in
+    Il.Mem (addr, word_bits)
 ;;
 
 
@@ -296,40 +306,38 @@ let implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;;
 let proc_to_c_glue_sz = frame_base_sz;;
 
 let load_proc_word (e:Il.emitter) (i:int) : Il.reg =
-  let vr = Il.next_vreg e in
-    Il.emit e Il.UMOV (Il.Reg vr) proc_ptr Il.Nil;
-    Il.emit e Il.UMOV (Il.Reg vr) (word_n vr i) Il.Nil;
+  let (vr, vc) = vreg e in
+    Il.emit e (Il.unary Il.UMOV vc (c proc_ptr));
+    Il.emit e (Il.unary Il.UMOV vc (c (word_n vr i)));
     vr
 ;;
 
 let store_proc_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
-  let vr = Il.next_vreg e in
-    Il.emit e Il.UMOV (Il.Reg vr) proc_ptr Il.Nil;
-    Il.emit e Il.UMOV (word_n vr i) oper Il.Nil
+  let (vr, vc) = vreg e in
+    Il.emit e (Il.unary Il.UMOV vc (c proc_ptr));
+    Il.emit e (Il.unary Il.UMOV (word_n vr i) oper)
 ;;
 
 let load_rt_word (e:Il.emitter) (i:int) : Il.reg =
   let rt = load_proc_word e 0 in
-  let vr = Il.next_vreg e in
-    Il.emit e Il.UMOV (Il.Reg vr) (word_n rt i) Il.Nil;
+  let (vr, vc) = vreg e in
+    Il.emit e (Il.unary Il.UMOV vc (c (word_n rt i)));
     vr
 ;;
 
 let store_rt_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
   let rt = load_proc_word e 0 in
-    Il.emit e Il.UMOV (word_n rt i) oper Il.Nil;
+    Il.emit e (Il.unary Il.UMOV (word_n rt i) oper);
 ;;
 
 let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
   let code = Abi.proc_state_to_code state in
-  let r x = Il.Reg x in
-  let vr = Il.next_vreg e in
+  let (vr,vc) = vreg e in
   let vr_n = word_n vr in
   let emit = Il.emit e in
-  let mov dst src = emit Il.UMOV dst src Il.Nil in
+  let mov dst src = emit (Il.unary Il.UMOV dst src) in
   let imm i = Il.Imm (Asm.IMM i) in
-
-    mov (r vr) proc_ptr;
+    mov (r vr)(c proc_ptr);
     mov (vr_n Abi.proc_field_state) (imm code);
 ;;
 
@@ -342,23 +350,23 @@ let emit_upcall
   let upcall_code = Abi.upcall_to_code u in
   let state_code = Abi.proc_state_to_code Abi.STATE_calling_c in
 
-  let r x = Il.Reg x in
-  let vr = Il.next_vreg e in
-  let dst = Il.next_vreg e in
+  let (vr,vc) = vreg e in
   let vr_n = word_n vr in
+  let (_, dst_c) = vreg e in
   let emit = Il.emit e in
-  let mov dst src = emit Il.UMOV dst src Il.Nil in
+  let mov dst src = emit (Il.unary Il.UMOV dst src) in
   let imm i = Il.Imm (Asm.IMM i) in
   (* 
    * This is an x86-ism, but a significant savings: inclusive-OR rather
    * than MOV, and we get sign-extension on the immediate for free.
    * Strangely, the MOV-immediates don't have a r32 <- imm8 mode. 
    *)
-  let ior dst src = emit Il.OR dst dst src in
+  let ior dst src = emit (Il.binary Il.OR dst (c dst) src) in
+  let pcrel f = Il.CodeAddr (Il.Pcrel f) in
 
     assert ((Array.length args) <= Abi.max_upcall_args);
 
-    mov (r vr) proc_ptr;
+    mov vc (c proc_ptr);
     ior (vr_n Abi.proc_field_state) (imm state_code);
     ior (vr_n Abi.proc_field_upcall_code) (imm upcall_code);
 
@@ -368,7 +376,7 @@ let emit_upcall
           mov (vr_n (Abi.proc_field_upcall_args + i)) arg
       end
       args;
-    emit Il.CCALL (r dst) (Il.Pcrel proc_to_c_fixup) Il.Nil
+    emit (Il.call dst_c (pcrel proc_to_c_fixup))
 ;;
 
 let emit_frame_setup
