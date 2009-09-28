@@ -186,21 +186,42 @@ let reg_str r =
 (* This is a basic ABI. You might need to customize it by platform. *)
 let (n_hardregs:int) = 6;;
 
-let prealloc_quad (quad:Il.quad) : Il.quad =
-  match quad.Il.quad_op with
-      Il.IMUL | Il.UMUL -> { quad with Il.quad_dst = Il.Reg (Il.Hreg eax) }
-    | Il.IDIV | Il.UDIV -> { quad with Il.quad_dst = Il.Reg (Il.Hreg eax) }
-    | Il.IMOD | Il.UMOD -> { quad with Il.quad_dst = Il.Reg (Il.Hreg edx) }
-    | Il.CCALL -> { quad with Il.quad_dst = Il.Reg (Il.Hreg eax) }
-    | _ -> quad
+let prealloc_quad (quad':Il.quad') : Il.quad' =
+  let target_bin_to_hreg bin hreg =
+    let (name, cell) = bin.Il.binary_dst in
+      { bin with
+          Il.binary_dst = (name, Il.Reg (Il.Hreg hreg)) }
+  in
+    match quad' with
+        Il.Binary bin ->
+          begin
+            Il.Binary
+              begin
+                match bin.Il.binary_op with
+                    Il.IMUL | Il.UMUL
+                  | Il.IDIV | Il.UDIV -> target_bin_to_hreg bin eax
+                  | Il.IMOD | Il.UMOD -> target_bin_to_hreg bin edx
+                  | _ -> bin
+              end
+          end
+      | Il.Call c ->
+          let (name, cell) = c.Il.call_dst in
+            Il.Call { c with
+                        Il.call_dst = (name, Il.Reg (Il.Hreg eax)) }
+      | x -> x
 ;;
 
 let clobbers (quad:Il.quad) : Il.hreg list =
-  match quad.Il.quad_op with
-      Il.IMUL | Il.UMUL -> [ edx ]
-    | Il.IDIV | Il.UDIV -> [ edx ]
-    | Il.IMOD | Il.UMOD -> [ eax ]
-    | Il.CCALL -> [ eax; ecx; edx; ]
+  match quad.Il.quad_body with
+      Il.Binary bin ->
+        begin
+          match bin.Il.binary_op with
+              Il.IMUL | Il.UMUL
+            | Il.IDIV | Il.UDIV -> [ edx ]
+            | Il.IMOD | Il.UMOD -> [ eax ]
+            | _ -> []
+        end
+    | Il.Call _ -> [ eax; ecx; edx; ]
     | _ -> []
 ;;
 
@@ -208,17 +229,20 @@ let clobbers (quad:Il.quad) : Il.hreg list =
 let word_sz = 4L
 ;;
 
-let word_mem = Il.M32
+let word_bits = Il.Bits32
 ;;
 
 let word_ty = TY_u32
 ;;
 
-let spill_slot (framesz:int64) (i:int) : Il.operand =
-  Il.Mem
-    (word_mem, Some (Il.Hreg ebp),
-     (Asm.IMM
-        (Int64.neg (Int64.add framesz (Int64.mul word_sz (Int64.of_int (i+1)))))))
+let spill_slot (framesz:int64) (i:int) : Il.cell =
+  Mem (Il.Idx
+         ((Il.Hreg ebp),
+          (Asm.IMM
+             (Int64.neg
+                (Int64.add framesz
+                   (Int64.mul word_sz
+                      (Int64.of_int (i+1))))))))
 ;;
 
 

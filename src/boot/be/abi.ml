@@ -173,7 +173,7 @@ type abi =
     abi_n_hardregs: int;
     abi_str_of_hardreg: (int -> string);
 
-    abi_prealloc_quad: (Il.quad -> Il.quad);
+    abi_prealloc_quad: (Il.quad' -> Il.quad');
     abi_emit_fn_prologue: (Il.emitter -> int64 -> int64 -> Common.fixup -> int64 -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_main_prologue: (Il.emitter -> Ast.block -> int64 -> Common.fixup -> int64 -> unit);

@@ -2,10 +2,6 @@ open Common;;
 
 (* Operands. *)
 
-type name = Base of string
-            | Ext of name * string
-;;
-
 type vreg = int ;;
 type hreg = int ;;
 type label = int ;;
@@ -17,24 +13,10 @@ type reg =
 ;;
 
 type bits =
-    Bits8 
+    Bits8
   | Bits16
   | Bits32
   | Bits64
-;;
-
-type regbits =
-    {
-      reg_val: reg;
-      reg_bits: bits
-    }
-;;
-
-type immbits =
-    {
-      imm_val: Asm.expr64;
-      imm_bits: bits
-    }
 ;;
 
 type addr =
@@ -43,39 +25,21 @@ type addr =
   | Idx of (reg * Asm.expr64)
 ;;
 
-type 'targ ptr =
-    {
-      ptr_addr: addr;
-      ptr_targ: 'targ
-    } 
-;;
-
 type code =
     CodeLabel of label (* Index into current quad block. *)
   | CodeAddr of addr
+  | CodeNone
 ;;
 
-type cell = 
-    Reg of regbits
-  | Spill of spill
-;;
-
-type scalar =
-    Cell of cell
-  | Imm of immbits
-;;
-
-type referent =
-    Record of (name * layout) array
-  | Opaque
-;;
-
-type pointer = referent ptr
+type cell =
+    Reg of (reg * bits)
+  | Mem of (addr * bits)
+  | Spill of (spill * bits)
 ;;
 
 type operand =
-    Scalar of (name * scalar)
-  | Pointer of (name * pointer)
+    Cell of cell
+  | Imm of Asm.expr64
 ;;
 
 (* NB: for the most part, we let the register allocator assign spills
@@ -101,7 +65,7 @@ type operand =
 
 (* Quads. *)
 
-type binop = 
+type binop =
     ADD | SUB
   | IMUL | UMUL
   | IDIV | UDIV
@@ -114,27 +78,26 @@ type unop =
     NEG | NOT
   | UMOV | IMOV
   | LEA
-;;    
+;;
 
-type jmpop = 
+type jmpop =
     JE | JNE
   | JL | JLE | JG | JGE (* Signed.   *)
   | JB | JBE | JA | JAE (* Unsigned. *)
   | JC | JNC | JO | JNO
   | JMP
-  | CALL
 ;;
 
 type binary =
     {
       binary_op: binop;
-      binary_dst: (name * cell);
+      binary_dst: cell;
       binary_lhs: operand;
       binary_rhs: operand }
 ;;
 
 type unary = { unary_op: unop;
-               unary_dst: (name * cell);
+               unary_dst: cell;
                unary_src: operand }
 ;;
 
@@ -143,9 +106,12 @@ type cmp = { cmp_lhs: operand;
 ;;
 
 
-type jmp = { jmp_op: jmpop; 
-             jmp_targ: (name * code); }
+type jmp = { jmp_op: jmpop;
+             jmp_targ: code; }
 ;;
+
+type call = { call_dst: cell;
+              call_targ: code }
 
 type quad' =
     Binary of binary
@@ -153,7 +119,8 @@ type quad' =
   | Cmp of cmp
   | Jmp of jmp
   | Push of operand
-  | Pop of operand
+  | Pop of cell
+  | Call of call
   | Ret  (* Return to caller. *)
   | Nop  (* Keep this quad here, emit CPU nop, will patch / trampoline later. *)
   | Dead (* Keep this quad but emit nothing. *)
@@ -208,7 +175,7 @@ let string_of_addr (f:hreg_formatter) (a:addr) : string =
   match a with
       Deref r -> "[" ^ (string_of_reg f r) ^ "]"
     | Abs e -> "[" ^ (string_of_expr64 e) ^ "]"
-    | Idx (r,e) -> ("[" ^  (string_of_reg f r) ^ 
+    | Idx (r,e) -> ("[" ^  (string_of_reg f r) ^
                       " + " ^ (string_of_expr64 e) ^ "]")
 ;;
 
@@ -216,28 +183,20 @@ let string_of_code (f:hreg_formatter) (c:code) : string =
   match c with
       CodeLabel lab -> Printf.sprintf "<label %d>" lab
     | CodeAddr a -> string_of_addr f a
+    | CodeNone -> "<none>"
 ;;
 
 let string_of_cell (f:hreg_formatter) (c:cell) : string =
   match c with
-      Reg r -> string_of_reg f r.reg_val
-    | Spill i -> Printf.sprintf "<spill %d>" i
-;;
-
-let string_of_scalar (f:hreg_formatter) (s:scalar) : string =
-  match s with
-      Cell c -> string_of_cell f c
-    | Imm i -> string_of_expr64 i.imm_val
-;;  
-
-let string_of_ptr (f:hreg_formatter) (p:'targ ptr) : string =
-  string_of_addr f p.ptr_addr
+      Reg (r,_) -> string_of_reg f r
+    | Mem (a,_) -> string_of_addr f a
+    | Spill (i,_) -> Printf.sprintf "<spill %d>" i
 ;;
 
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
   match op with
-      Scalar (_,s) -> string_of_scalar f s
-    | Pointer (_,p) -> string_of_ptr f p
+      Cell c -> string_of_cell f c
+    | Imm i -> string_of_expr64 i
 ;;
 
 let string_of_binop (op:binop) : string =
@@ -283,21 +242,20 @@ let string_of_jmpop (op:jmpop) : string =
     | JO -> "jo"
     | JNO -> "jno"
     | JMP -> "jmp"
-    | CALL -> "call"
 ;;
 
 let string_of_quad (f:hreg_formatter) (q:quad) : string =
   match q.quad_body with
-      Binary b -> 
+      Binary b ->
         Printf.sprintf "%s = %s %s %s"
-          (string_of_cell f (snd b.binary_dst))
+          (string_of_cell f b.binary_dst)
           (string_of_operand f b.binary_lhs)
           (string_of_binop b.binary_op)
           (string_of_operand f b.binary_rhs)
 
     | Unary u ->
         Printf.sprintf "%s = %s %s"
-          (string_of_cell f (snd u.unary_dst))
+          (string_of_cell f u.unary_dst)
           (string_of_unop u.unary_op)
           (string_of_operand f u.unary_src)
 
@@ -305,20 +263,25 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
         Printf.sprintf "cmp %s %s"
           (string_of_operand f c.cmp_lhs)
           (string_of_operand f c.cmp_rhs)
-        
+
     | Jmp j ->
         Printf.sprintf "%s %s"
           (string_of_jmpop j.jmp_op)
-          (string_of_code f (snd j.jmp_targ))
-        
+          (string_of_code f j.jmp_targ)
+
     | Push op ->
         Printf.sprintf "push %s"
           (string_of_operand f op)
 
-    | Pop op ->
+    | Pop c ->
         Printf.sprintf "%s = pop"
-          (string_of_operand f op)
-        
+          (string_of_cell f c)
+
+    | Call c ->
+        Printf.sprintf "%s = call %s"
+          (string_of_cell f c.call_dst)
+          (string_of_code f c.call_targ)
+
     | Ret -> "ret"
     | Nop -> "nop"
     | Dead -> "dead"
@@ -326,222 +289,13 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
 ;;
 
 
-
-
-(************************************)
-(*           OLD CODE               *)
-(************************************)
-
-(* 
-type vreg = int
-;;
-
-type hreg = int
-;;
-
-type reg = Vreg of vreg
-           | Hreg of hreg
-;;
-
-type mem = M8 | M16 | M32 | M64
-;;
-
-type operand =  Label of int
-                | Imm of Asm.expr64
-                | Pcrel of fixup
-                | Reg of reg
-                | Spill of int
-                | Mem of (mem * (reg option) * Asm.expr64)
-                | Nil
-;;
-
-let is_mem op =
-  match op with
-      Mem _ | Spill _ | Pcrel _ -> true
-    | _ -> false
-;;
-
-
-type op =
-    ADD | SUB | NEG
-  | IMUL | UMUL
-  | IDIV | UDIV
-  | IMOD | UMOD
-  | IMOV | UMOV
-  | CMP
-  | LEA
-  | AND | OR | NOT
-  | LSL | LSR | ASR
-  | JE | JNE | JL | JLE | JG | JGE (* Signed.   *)
-             | JB | JBE | JA | JAE (* Unsigned. *)
-  | JC | JNC | JO | JNO | JMP
-  | CALL | RET | YIELD | RESUME
-  | CCALL | CPUSH of mem | CPOP of mem | CRET
-  | NOP | DEAD | END
-;;
-
-
-type quad = { quad_op: op;
-              quad_dst: operand;
-              quad_lhs: operand;
-              quad_rhs: operand;
-              quad_fixup: fixup option;
-            }
-;;
-
-
-type quads = quad array
-;;
-
-let is_primitive_reg r =
-  match r with
-      Hreg _ -> true
-    | _ -> false
-;;
-
-
-let is_primitive_operand op =
-  match op with
-      Label _ -> false
-    | Reg r -> is_primitive_reg r
-    | Mem (_, Some r, _) -> is_primitive_reg r
-    | _ -> true
-;;
-
-
-let is_primitive_quad q =
-  (is_primitive_operand q.quad_dst)
-  && (is_primitive_operand q.quad_lhs)
-  && (is_primitive_operand q.quad_rhs)
-;;
-
-let string_of_operand (f:int->string) operand =
-  match operand with
-      Reg r -> string_of_reg f r
-    | Imm (Asm.IMM i) -> Printf.sprintf "0x%Lx" i
-    | Imm e -> Printf.sprintf "<imm %s>" (string_of_expr64 e)
-    | Pcrel f -> "<" ^ f.fixup_name ^ ">"
-    | Mem (_, (Some r),e) -> Printf.sprintf "%s[%s]" (string_of_reg f r) (string_of_expr64 e)
-    | Mem (_, None,e) -> Printf.sprintf "*(%s)" (string_of_expr64 e)
-    | Label i -> "<lab" ^ (string_of_int i) ^ ">"
-    | Nil -> "nil"
-    | Spill i -> Printf.sprintf "<spill %d>" i
-;;
-
-let string_of_mem m =
-  match m with
-      M8 -> "M8"
-    | M16 -> "M16"
-    | M32 -> "M32"
-    | M64 -> "M64"
-;;
-
-let string_of_op op =
-  match op with
-      ADD -> "ADD"
-    | SUB -> "SUB"
-    | NEG -> "NEG"
-    | UMUL -> "UMUL"
-    | IMUL -> "IMUL"
-    | UDIV -> "UDIV"
-    | IDIV -> "IDIV"
-    | UMOD -> "UMOD"
-    | IMOD -> "IMOD"
-    | UMOV -> "UMOV"
-    | IMOV -> "IMOV"
-    | LEA -> "LEA"
-    | CMP -> "CMP"
-    | AND -> "AND"
-    | OR -> "OR"
-    | NOT -> "NOT"
-    | LSL -> "LSL"
-    | LSR -> "LSR"
-    | ASR -> "ASR"
-    | JC -> "JC"
-    | JNC ->"JNC"
-    | JO -> "JO"
-    | JNO -> "JNO"
-    | JE -> "JE"
-    | JNE -> "JNE"
-    | JL -> "JL"
-    | JLE -> "JLE"
-    | JG -> "JG"
-    | JGE -> "JGE"
-    | JB -> "JB"
-    | JBE -> "JBE"
-    | JA -> "JA"
-    | JAE -> "JAE"
-    | JMP -> "JMP"
-    | CALL -> "CALL"
-    | RET -> "RET"
-    | NOP -> "NOP"
-    | DEAD -> "DEAD"
-    | CCALL -> "CCALL"
-    | CPUSH m -> "CPUSH:" ^ string_of_mem m
-    | CPOP m -> "CPOP:" ^ string_of_mem m
-    | CRET -> "CRET"
-    | RESUME -> "RESUME"
-    | YIELD -> "YIELD"
-    | END -> "---"
-;;
-
-
-let string_of_quad f t =
-  match t.quad_op with
-      ADD | SUB | IMUL | UMUL | IDIV | UDIV | IMOD | UMOD
-    | AND | OR | LSL | LSR | ASR ->
-        Printf.sprintf "%s = %s %s %s"
-          (string_of_operand f t.quad_dst)
-          (string_of_operand f t.quad_lhs)
-          (string_of_op t.quad_op)
-          (string_of_operand f t.quad_rhs)
-
-    | NOT | NEG ->
-        Printf.sprintf "%s = %s %s"
-          (string_of_operand f t.quad_dst)
-          (string_of_op t.quad_op)
-          (string_of_operand f t.quad_lhs)
-
-    | IMOV | UMOV ->
-        Printf.sprintf "%s = %s"
-          (string_of_operand f t.quad_dst)
-          (string_of_operand f t.quad_lhs)
-
-    | LEA ->
-        Printf.sprintf "%s = %s(%s)"
-          (string_of_operand f t.quad_dst)
-          (string_of_op t.quad_op)
-          (string_of_operand f t.quad_lhs)
-
-    | CMP ->
-        Printf.sprintf "%s %s %s"
-          (string_of_op t.quad_op)
-          (string_of_operand f t.quad_lhs)
-          (string_of_operand f t.quad_rhs)
-
-    | JMP | JE | JNE | JL | JLE | JG | JGE
-    | JB | JBE | JA | JAE | JC | JNC | JO | JNO
-    | CALL | RESUME | CCALL | CPUSH _  ->
-        Printf.sprintf "%s %s"
-          (string_of_op t.quad_op)
-          (string_of_operand f t.quad_lhs)
-
-    | CPOP _ ->
-        Printf.sprintf "%s %s"
-          (string_of_op t.quad_op)
-          (string_of_operand f t.quad_dst)
-
-    | RET | YIELD | CRET | NOP | DEAD | END ->
-        (string_of_op t.quad_op)
-;;
-
-*)
+(* Query functions. *)
 
 
 type emitter = { mutable emit_pc: int;
                  mutable emit_next_vreg: int;
                  mutable emit_next_spill: int;
-                 emit_preallocator: (quad -> quad);
+                 emit_preallocator: (quad' -> quad');
                  emit_is_2addr: bool;
                  mutable emit_quads: quads; }
 
@@ -556,7 +310,7 @@ let deadq = { quad_fixup = None;
 ;;
 
 
-let new_emitter (preallocator:quad -> quad) (is_2addr:bool) =
+let new_emitter (preallocator:quad' -> quad') (is_2addr:bool) =
   {
     emit_pc = 0;
     emit_next_vreg = 0;
@@ -568,22 +322,28 @@ let new_emitter (preallocator:quad -> quad) (is_2addr:bool) =
 ;;
 
 
-let next_vreg_num e =
+let next_vreg_num (e:emitter) : vreg =
   let i = e.emit_next_vreg in
     e.emit_next_vreg <- i + 1;
     i
 ;;
 
-let next_vreg e =
-  let i = e.emit_next_vreg in
-    e.emit_next_vreg <- i + 1;
-    (Vreg i)
+let next_vreg (e:emitter) : reg =
+  Vreg (next_vreg_num e)
 ;;
 
-let next_spill e =
+let next_vreg_cell (e:emitter) (b:bits) : cell =
+  Reg ((next_vreg e), b)
+;;
+
+let next_spill (e:emitter) : spill =
   let i = e.emit_next_spill in
     e.emit_next_spill <- i + 1;
-    (Spill i)
+    i
+;;
+
+let next_spill_cell (e:emitter) (b:bits) : cell =
+  Spill ((next_spill e), b);
 ;;
 
 
@@ -597,88 +357,141 @@ let grow_if_necessary e =
 ;;
 
 
+let binary (op:binop) (dst:cell) (lhs:operand) (rhs:operand) : quad' =
+  Binary { binary_op = op;
+           binary_dst = dst;
+           binary_lhs = lhs;
+           binary_rhs = rhs }
+;;
 
-(* 
-let emit_full e fix op dst lhs rhs =
+let unary (op:unop) (dst:cell) (src:operand) : quad' =
+  Unary { unary_op = op;
+          unary_dst = dst;
+          unary_src = src }
+
+let emit_full (e:emitter) (fix:fixup option) (q':quad') =
   let fixup = ref fix in
-  let emit_quad_bottom q =
+  let emit_quad_bottom q' =
     grow_if_necessary e;
-    e.emit_quads.(e.emit_pc) <- { q with quad_fixup = (!fixup) };
+    e.emit_quads.(e.emit_pc) <- { quad_body = q';
+                                  quad_fixup = (!fixup) };
     fixup := None;
     e.emit_pc <- e.emit_pc + 1
   in
 
-  let mq op d l r = { quad_op = op; quad_dst = d;
-                      quad_lhs = l; quad_rhs = r; quad_fixup = None }
+  let is_mov op =
+    match op with
+        UMOV | IMOV -> true
+      | _ -> false
   in
 
-  let is_mov q = q.quad_op = UMOV or q.quad_op = IMOV in
-  let emit_quad q =
+  let emit_quad (q':quad') : unit =
     (* decay mem-mem movs *)
-    if ((is_mov q) &&
-          (is_mem q.quad_dst) &&
-          (is_mem q.quad_lhs))
-    then
-      begin
-        let dst = q.quad_dst in
-        let src = q.quad_lhs in
-        let v = (Reg (next_vreg e)) in
-          emit_quad_bottom (mq q.quad_op v src Nil);
-          emit_quad_bottom (mq q.quad_op dst v Nil)
-      end
-    else
-      emit_quad_bottom q
+    match q' with
+        Unary { unary_dst = Mem (dst_addr, dst_bits);
+                unary_src = Cell (Mem (src_addr, src_bits));
+                unary_op = op }
+          when is_mov op ->
+            begin
+              let v = next_vreg_cell e dst_bits in
+                emit_quad_bottom (unary op v (Cell (Mem (src_addr, src_bits))));
+                emit_quad_bottom (unary op (Mem (dst_addr, dst_bits)) (Cell v))
+            end
+      | _ -> emit_quad_bottom q'
   in
 
   let default_mov =
-    match op with
-        IMOV | IDIV | IMUL | IMOD -> IMOV
+    match q' with
+        Binary b ->
+          begin
+            match b.binary_op with
+                IDIV | IMUL | IMOD -> IMOV
+              | _ -> UMOV
+          end
+      | Unary u ->
+          begin
+            match u.unary_op with
+                IMOV -> IMOV
+              | _ -> UMOV
+          end
       | _ -> UMOV
   in
 
-  let emit_mov dst src =
-    emit_quad (mq default_mov dst src Nil)
+  let emit_mov (dst:cell) (src:operand) : unit =
+    emit_quad (unary default_mov dst src)
   in
 
-  let quad = (mq op dst lhs rhs) in
-  let quad' = e.emit_preallocator quad in
-    if quad'.quad_lhs != quad.quad_lhs
-    then emit_mov quad'.quad_lhs quad.quad_lhs
-    else ();
-    if quad'.quad_rhs != quad.quad_rhs
-    then emit_mov quad'.quad_rhs quad.quad_rhs
-    else ();
-    if e.emit_is_2addr
-      && (quad'.quad_lhs != quad'.quad_dst)
-      && (quad'.quad_dst != Nil)
-      && (quad'.quad_lhs != Nil)
-      && (quad'.quad_rhs != Nil)
+  let mov_if_operands_differ (old_op:operand) (new_op:operand) : unit =
+    if new_op != old_op
     then
-      begin
-        emit_mov quad'.quad_dst quad'.quad_lhs;
-        emit_quad { quad' with quad_lhs = quad'.quad_dst }
-      end
-    else
-      emit_quad quad';
-    if (quad'.quad_dst != quad.quad_dst)
-      && (quad'.quad_dst != Nil)
-      && (quad.quad_dst != Nil)
-    then emit_mov quad.quad_dst quad'.quad_dst
-    else ();
+      match new_op with
+          Cell new_cell -> emit_mov new_cell old_op
+        | _ -> ()
+  in
+
+  let mov_if_cells_differ (old_cell:cell) (new_cell:cell) : unit =
+    if new_cell != old_cell
+    then
+      emit_mov new_cell (Cell old_cell)
+  in
+
+    match (q', e.emit_preallocator q') with
+        (Binary b, Binary b') ->
+          begin
+            mov_if_operands_differ b.binary_lhs b'.binary_lhs;
+            mov_if_operands_differ b.binary_rhs b'.binary_rhs;
+            if e.emit_is_2addr &&
+              (b'.binary_lhs != (Cell b'.binary_dst))
+            then
+              begin
+                emit_mov b'.binary_dst b'.binary_lhs;
+                emit_quad (Binary { b' with binary_lhs = (Cell b'.binary_dst) })
+              end
+            else
+              emit_quad q';
+            mov_if_cells_differ b.binary_dst b'.binary_dst
+          end
+
+      | (Unary u, Unary u') ->
+          emit_quad (Unary u');
+          mov_if_cells_differ u.unary_dst u'.unary_dst
+
+      | (Cmp c, Cmp c') ->
+          mov_if_operands_differ c.cmp_lhs c'.cmp_lhs;
+          mov_if_operands_differ c.cmp_rhs c'.cmp_rhs;
+          emit_quad (Cmp c');
+
+      | (Push op, Push op') ->
+          mov_if_operands_differ op op';
+          emit_quad (Push op');
+
+      | (Pop c, Pop c') ->
+          emit_quad (Pop c');
+          mov_if_cells_differ c c'
+
+      | (Call c, Call c') ->
+          emit_quad (Call c');
+          mov_if_cells_differ c.call_dst c'.call_dst
+
+      | (x, y) ->
+          assert (x = y);
+          emit_quad x
 ;;
 
-let emit e op dst lhs rhs =
-  emit_full e None op dst lhs rhs
+let emit (e:emitter) (q':quad') : unit =
+  emit_full e None q'
 ;;
-
-let badlab = Label (-1);;
 
 let patch_jump (e:emitter) (jmp:int) (targ:int) : unit =
-  e.emit_quads.(jmp)
-  <- { e.emit_quads.(jmp)
-       with quad_lhs = Label targ }
+  let q = e.emit_quads.(jmp) in
+    match q.quad_body with
+        Jmp j ->
+          assert (j.jmp_targ = CodeNone);
+          e.emit_quads.(jmp) <-
+            { q with quad_body =
+                Jmp { j with jmp_targ = CodeLabel targ } }
+      | _ -> ()
 ;;
-*)
 
 (*
  * Local Variables:
