@@ -122,13 +122,13 @@ $(CFG_BOOT): $(BOOT_CMOS) $(MKFILES)
 	ocamlc.opt -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(BOOT_CMOS)
 endif
 
-%.cmo: %.cmi $(MKFILES)
-
 %.cmi: %.mli $(MKFILES)
 	ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
 
 %.cmo: %.ml $(MKFILES)
 	ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
+
+%.cmo: %.cmi $(MKFILES)
 
 %.cmx %.o: %.ml $(MKFILES)
 	ocamlopt.opt -c -o $@ $(OCAMLOPT_FLAGS) $<

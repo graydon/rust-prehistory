@@ -390,9 +390,18 @@ let jmp (op:jmpop) (targ:code) : quad' =
         jmp_targ = targ; }
 ;;
 
+let cmp (lhs:operand) (rhs:operand) : quad' =
+  Cmp { cmp_lhs = lhs;
+        cmp_rhs = rhs; }
+;;
+
 let call (dst:cell) (targ:code) : quad' =
   Call { call_dst = dst;
          call_targ = targ; }
+;;
+
+let umov (dst:cell) (src:operand) : quad' =
+  unary UMOV dst src
 ;;
 
 let emit_full (e:emitter) (fix:fixup option) (q':quad') =

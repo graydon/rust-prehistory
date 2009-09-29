@@ -190,10 +190,10 @@ type abi =
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;
     abi_dwarf_fp_reg: int;
-    abi_pp_operand: Il.operand;
+    abi_pp_cell: Il.cell;
     abi_implicit_args_sz: int64;
     abi_frame_base_sz: int64;
-    abi_spill_slot: (int64 -> int -> Il.operand);
+    abi_spill_slot: (int64 -> Il.spillbits -> Il.cell);
   }
 
 

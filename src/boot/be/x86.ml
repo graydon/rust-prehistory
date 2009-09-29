@@ -247,7 +247,7 @@ let spill_slot (framesz:int64) (sb:spillbits) : Il.cell =
     Mem (addr, bits)
 ;;
 
-let c (c:cell) : Il.operand = Il.Cell c ;;
+let c (c:Il.cell) : Il.operand = Il.Cell c ;;
 let r (r:Il.reg) : Il.cell = Il.Reg ( r, word_bits ) ;;
 let h (x:Il.hreg) : Il.reg = Il.Hreg x ;;
 let rc (x:Il.hreg) : Il.cell = r (h x) ;;
@@ -256,6 +256,8 @@ let vreg (e:Il.emitter) : (Il.reg * Il.cell) =
   let vr = Il.next_vreg e in
     (vr, (Il.Reg (vr, word_bits)))
 ;;
+let imm (x:Asm.expr64) : Il.operand = Il.Imm x ;;
+
 
 let save_callee_saves (e:Il.emitter) : unit =
     Il.emit e (Il.Push (ro ebp));
@@ -307,27 +309,27 @@ let proc_to_c_glue_sz = frame_base_sz;;
 
 let load_proc_word (e:Il.emitter) (i:int) : Il.reg =
   let (vr, vc) = vreg e in
-    Il.emit e (Il.unary Il.UMOV vc (c proc_ptr));
-    Il.emit e (Il.unary Il.UMOV vc (c (word_n vr i)));
+    Il.emit e (Il.umov vc (c proc_ptr));
+    Il.emit e (Il.umov vc (c (word_n vr i)));
     vr
 ;;
 
 let store_proc_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
   let (vr, vc) = vreg e in
-    Il.emit e (Il.unary Il.UMOV vc (c proc_ptr));
-    Il.emit e (Il.unary Il.UMOV (word_n vr i) oper)
+    Il.emit e (Il.umov vc (c proc_ptr));
+    Il.emit e (Il.umov (word_n vr i) oper)
 ;;
 
 let load_rt_word (e:Il.emitter) (i:int) : Il.reg =
   let rt = load_proc_word e 0 in
   let (vr, vc) = vreg e in
-    Il.emit e (Il.unary Il.UMOV vc (c (word_n rt i)));
+    Il.emit e (Il.umov vc (c (word_n rt i)));
     vr
 ;;
 
 let store_rt_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
   let rt = load_proc_word e 0 in
-    Il.emit e (Il.unary Il.UMOV (word_n rt i) oper);
+    Il.emit e (Il.umov (word_n rt i) oper);
 ;;
 
 let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
@@ -335,7 +337,7 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
   let (vr,vc) = vreg e in
   let vr_n = word_n vr in
   let emit = Il.emit e in
-  let mov dst src = emit (Il.unary Il.UMOV dst src) in
+  let mov dst src = emit (Il.umov dst src) in
   let imm i = Il.Imm (Asm.IMM i) in
     mov (r vr)(c proc_ptr);
     mov (vr_n Abi.proc_field_state) (imm code);
@@ -354,7 +356,7 @@ let emit_upcall
   let vr_n = word_n vr in
   let (_, dst_c) = vreg e in
   let emit = Il.emit e in
-  let mov dst src = emit (Il.unary Il.UMOV dst src) in
+  let mov dst src = emit (Il.umov dst src) in
   let imm i = Il.Imm (Asm.IMM i) in
   (* 
    * This is an x86-ism, but a significant savings: inclusive-OR rather
@@ -396,12 +398,10 @@ let emit_frame_setup
    *  - emit upcall grow_proc
    *  - fwd jump target
    *)
-  let r x = Il.Reg (Il.Hreg x) in
-  let ecx_n = word_n (Il.Hreg ecx) in
+  let ecx_n = word_n (h ecx) in
   let emit = Il.emit e in
-  let mov dst src = emit Il.UMOV dst src Il.Nil in
+  let mov dst src = emit (Il.umov dst src) in
   let add = Int64.add in
-  let imm x = Il.Imm x in
 
   let n_call_bytes = Asm.IMM (add argsz frame_base_sz) in
   let subtrahend = (Asm.ADD ((Asm.IMM (add framesz callsz)),
@@ -412,21 +412,22 @@ let emit_frame_setup
                           (Asm.IMM (add frame_base_sz proc_to_c_glue_sz))))
   in
     save_callee_saves e;
-    mov (r ebp) (r esp);                          (* ebp <- esp              *)
-    emit Il.SUB (r esp) (r esp) (imm subtrahend); (* esp <- esp - subtrahend *)
-    mov (r ecx) proc_ptr;                         (* ecx <- proc             *)
-    mov (r ecx) (ecx_n Abi.proc_field_stk);       (* ecx <- proc->stk        *)
-    mov (r ecx) (ecx_n Abi.stk_field_limit);      (* ecx <- proc->stk->limit *)
-    emit Il.CMP Il.Nil (r esp) (r ecx);
+    mov (rc ebp) (ro esp);                        (* ebp <- esp              *)
+    emit (Il.binary Il.SUB
+            (rc esp) (ro esp) (imm subtrahend));  (* esp <- esp - subtrahend *)
+    mov (rc ecx) (c proc_ptr);                    (* ecx <- proc             *)
+    mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx <- proc->stk        *)
+    mov (rc ecx) (c (ecx_n Abi.stk_field_limit)); (* ecx <- proc->stk->limit *)
+    emit (Il.cmp (ro esp) (ro ecx));
     let jmp_pc = e.Il.emit_pc in
-      emit Il.JL Il.Nil Il.badlab Il.Nil;
+      emit (Il.jmp Il.JL Il.CodeNone);
       emit_upcall
         e Abi.UPCALL_grow_proc
         [| (imm n_call_bytes);
            (imm n_frame_bytes) |]
         proc_to_c_fixup;
       Il.patch_jump e e.Il.emit_pc jmp_pc;
-      emit Il.DEAD Il.Nil Il.Nil Il.Nil;
+      emit Il.Dead;
 ;;
 
 
@@ -437,19 +438,17 @@ let fn_prologue
     (spill_fixup:fixup)
     (callsz:int64)
     : unit =
-  let r x = Il.Reg (Il.Hreg x) in
   let ssz = Int64.add framesz callsz in
     save_callee_saves e;
-    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
-    Il.emit e Il.SUB (r esp) (r esp)
-      (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
+    Il.emit e (Il.umov (rc ebp) (ro esp));
+    Il.emit e (Il.binary Il.SUB (rc esp) (ro esp)
+                 (imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup))))
 ;;
 
 let fn_epilogue (e:Il.emitter) : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-    Il.emit e Il.UMOV (r esp) (r ebp) Il.Nil;
+    Il.emit e (Il.umov (rc esp) (ro ebp));
     restore_callee_saves e;
-    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+    Il.emit e Il.Ret;
 ;;
 
 let main_prologue
@@ -459,12 +458,11 @@ let main_prologue
     (spill_fixup:fixup)
     (callsz:int64)
     : unit =
-  let r x = Il.Reg (Il.Hreg x) in
   let ssz = Int64.add framesz callsz in
     save_callee_saves e;
-    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
-    Il.emit e Il.SUB (r esp) (r esp)
-      (Il.Imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup)))
+    Il.emit e (Il.umov (rc ebp) (ro esp));
+    Il.emit e (Il.binary Il.SUB (rc esp) (ro esp)
+                 (imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup))))
 ;;
 
 let objfile_main
@@ -475,25 +473,25 @@ let objfile_main
     ~(c_to_proc_fixup:fixup)
     ~(indirect_start:bool)
     : unit =
-  let r x = Il.Reg (Il.Hreg x) in
-    Il.emit_full e (Some main_fixup) Il.DEAD Il.Nil Il.Nil Il.Nil;
-    save_callee_saves e;
-    Il.emit e Il.UMOV (r ebp) (r esp) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS c_to_proc_fixup)) Il.Nil;
-    Il.emit e (Il.CPUSH Il.M32) Il.Nil (Il.Imm (Asm.M_POS root_prog_fixup)) Il.Nil;
-    if indirect_start
-    then
-      begin
-        Il.emit e Il.UMOV (r ecx) (Il.Mem (Il.M32, None, (Asm.M_POS rust_start_fixup))) Il.Nil;
-        Il.emit e Il.CCALL (r eax) (r ecx) Il.Nil;
-      end
-    else
-      Il.emit e Il.CCALL Il.Nil (Il.Pcrel rust_start_fixup) Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r ecx) Il.Nil Il.Nil;
-    Il.emit e (Il.CPOP Il.M32) (r ecx) Il.Nil Il.Nil;
-    Il.emit e Il.UMOV (r esp) (r ebp) Il.Nil;
-    restore_callee_saves e;
-    Il.emit e Il.CRET Il.Nil Il.Nil Il.Nil;
+  Il.emit_full e (Some main_fixup) Il.Dead;
+  save_callee_saves e;
+  Il.emit e (Il.umov (rc ebp) (ro esp));
+  Il.emit e (Il.Push (imm (Asm.M_POS c_to_proc_fixup)));
+  Il.emit e (Il.Push (imm (Asm.M_POS root_prog_fixup)));
+  if indirect_start
+  then
+    begin
+      let addr = Il.Abs (Asm.M_POS rust_start_fixup) in
+        Il.emit e (Il.umov (rc ecx) (c (Il.Mem (addr, Il.Bits32))));
+        Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Deref (h ecx))));
+    end
+  else
+    Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Pcrel rust_start_fixup)));
+  Il.emit e (Il.Pop (rc ecx));
+  Il.emit e (Il.Pop (rc ecx));
+  Il.emit e (Il.umov (rc esp) (ro ebp));
+  restore_callee_saves e;
+  Il.emit e Il.Ret;
 ;;
 
 
@@ -515,24 +513,23 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
    *   *esp          = [retpc  ]
    *)
 
-  let r x = Il.Reg (Il.Hreg x) in
   let sp_n = word_n (Il.Hreg esp) in
   let edx_n = word_n (Il.Hreg edx) in
   let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
-  let mov dst src = emit Il.UMOV dst src Il.Nil in
+  let mov dst src = emit (Il.umov dst src) in
 
-    Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
+    Il.emit_full e (Some fix) Il.Dead;
 
-    mov (r edx) (sp_n 1);                     (* edx <- proc          *)
-    mov (r ecx) (edx_n Abi.proc_field_rt);    (* ecx <- proc->rt      *)
+    mov (rc edx) (c (sp_n 1));                     (* edx <- proc          *)
+    mov (rc ecx) (c (edx_n Abi.proc_field_rt));    (* ecx <- proc->rt      *)
     save_callee_saves e;
-    mov (ecx_n Abi.rt_field_sp) (r esp);      (* rt->regs.sp <- esp   *)
-    mov (r esp) (edx_n Abi.proc_field_sp);    (* esp <- proc->regs.sp *)
+    mov (ecx_n Abi.rt_field_sp) (ro esp);          (* rt->regs.sp <- esp   *)
+    mov (rc esp) (c (edx_n Abi.proc_field_sp));    (* esp <- proc->regs.sp *)
 
     (**** IN PROC STACK ****)
     restore_callee_saves e;
-    emit Il.CRET Il.Nil Il.Nil Il.Nil;
+    emit Il.Ret;
     (***********************)
   ()
 ;;
@@ -552,23 +549,22 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
    *
    *   *esp          = [retpc  ]
    *)
-  let r x = Il.Reg (Il.Hreg x) in
   let edx_n = word_n (Il.Hreg edx) in
   let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
-  let mov dst src = emit Il.UMOV dst src Il.Nil in
+  let mov dst src = emit (Il.umov dst src) in
 
-    Il.emit_full e (Some fix) Il.DEAD Il.Nil Il.Nil Il.Nil;
+    Il.emit_full e (Some fix) Il.Dead;
 
-    mov (r edx) proc_ptr;                     (* edx <- proc            *)
-    mov (r ecx) (edx_n Abi.proc_field_rt);    (* ecx <- proc->rt        *)
+    mov (rc edx) (c proc_ptr);                     (* edx <- proc            *)
+    mov (rc ecx) (c (edx_n Abi.proc_field_rt));    (* ecx <- proc->rt        *)
     save_callee_saves e;
-    mov (edx_n Abi.proc_field_sp) (r esp);    (* proc->regs.sp <- esp   *)
-    mov (r esp) (ecx_n Abi.rt_field_sp);      (* esp <- rt->regs.sp     *)
+    mov (edx_n Abi.proc_field_sp) (ro esp);        (* proc->regs.sp <- esp   *)
+    mov (rc esp) (c (ecx_n Abi.rt_field_sp));      (* esp <- rt->regs.sp     *)
 
     (**** IN C STACK ****)
     restore_callee_saves e;
-    emit Il.CRET Il.Nil Il.Nil Il.Nil;
+    emit Il.Ret;
     (***********************)
   ()
 ;;
@@ -577,7 +573,7 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
 let (abi:Abi.abi) =
   {
     Abi.abi_word_sz = word_sz;
-    Abi.abi_word_mem = word_mem;
+    Abi.abi_word_bits = word_bits;
     Abi.abi_word_ty = word_ty;
 
     Abi.abi_is_2addr_machine = true;
@@ -603,7 +599,7 @@ let (abi:Abi.abi) =
     Abi.abi_sp_reg = (Il.Hreg esp);
     Abi.abi_fp_reg = (Il.Hreg ebp);
     Abi.abi_dwarf_fp_reg = dwarf_ebp;
-    Abi.abi_pp_operand = proc_ptr;
+    Abi.abi_pp_cell = proc_ptr;
     Abi.abi_frame_base_sz = frame_base_sz;
     Abi.abi_implicit_args_sz = implicit_args_sz;
     Abi.abi_spill_slot = spill_slot;
@@ -621,80 +617,88 @@ let imm_is_byte (n:int64) : bool =
 ;;
 
 
-let rm_r (oper:operand) (r:int) : Asm.item =
+let rm_r (c:Il.cell) (r:int) : Asm.item =
   let reg_ebp = 6 in
   let reg_esp = 7 in
-    match oper with
-        Reg (Hreg rm) ->
+
+  (* 
+   * We do a little contortion here to accommodate the special case of
+   * being asked to form esp-relative addresses; these require SIB
+   * bytes on x86. Of course!
+   *)
+  let sib_esp_base = Asm.BYTE 0x24 in
+  let seq1 rm modrm =
+    if rm = reg_esp
+    then Asm.SEQ [| modrm; sib_esp_base |]
+    else modrm
+  in
+  let seq2 rm modrm disp =
+    if rm = reg_esp
+    then Asm.SEQ [| modrm; sib_esp_base; disp |]
+    else Asm.SEQ [| modrm; disp |]
+  in
+
+    match c with
+        Il.Reg ((Il.Hreg rm), _) ->
           Asm.BYTE (modrm_reg (reg rm) r)
-      | Mem (_, None, disp) ->
-          Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
-                     Asm.WORD (TY_s32, disp) |]
-      | Mem (_, Some (Hreg rm), disp) ->
-          (*
-           * We do a little contortion here to accommodate the special
-           * case of being asked to form esp-relative addresses; these
-           * require SIB bytes on x86. Of course!
-           *)
+      | Il.Mem (m, _) ->
           begin
-            let sib_esp_base = Asm.BYTE 0x24 in
-            let seq1 modrm =
-              if rm = reg_esp
-              then Asm.SEQ [| modrm; sib_esp_base |]
-              else modrm
-            in
-            let seq2 modrm disp =
-              if rm = reg_esp
-              then Asm.SEQ [| modrm; sib_esp_base; disp |]
-              else Asm.SEQ [| modrm; disp |]
-            in
-            match disp with
-                Asm.IMM 0L when rm != reg_ebp ->
-                  seq1 (Asm.BYTE (modrm_deref_reg (reg rm) r))
+            match m with
+                Il.Abs disp ->
+                  Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
+                             Asm.WORD (TY_s32, disp) |]
+
+              | Il.Deref (Il.Hreg rm) when rm != reg_ebp ->
+                  seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
+
+              | Il.Idx ((Il.Hreg rm), (Asm.IMM 0L)) when rm != reg_ebp ->
+                  seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
 
               (* The next two are just to save the relaxation system some churn. *)
-              | Asm.IMM n when imm_is_byte n ->
-                  seq2
+              | Il.Idx ((Il.Hreg rm), Asm.IMM n) when imm_is_byte n ->
+                  seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
-                    (Asm.WORD (TY_s8, disp))
-              | Asm.IMM n ->
-                  seq2
-                    (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
-                    (Asm.WORD (TY_s32, disp))
+                    (Asm.WORD (TY_s8, Asm.IMM n))
 
-              | _ ->
+              | Il.Idx ((Il.Hreg rm), Asm.IMM n) ->
+                  seq2 rm
+                    (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
+                    (Asm.WORD (TY_s32, Asm.IMM n))
+
+              | Il.Idx ((Il.Hreg rm), disp) ->
                   Asm.new_relaxation
                     [|
-                      seq2
+                      seq2 rm
                         (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
                         (Asm.WORD (TY_s32, disp));
-                      seq2
+                      seq2 rm
                         (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
                         (Asm.WORD (TY_s8, disp))
                     |]
+              | _ -> raise Unrecognized
           end
       | _ -> raise Unrecognized
 ;;
 
 
-let insn_rm_r (op:int) (oper:operand) (r:int) : Asm.item =
-  Asm.SEQ [| Asm.BYTE op; rm_r oper r |]
+let insn_rm_r (op:int) (c:Il.cell) (r:int) : Asm.item =
+  Asm.SEQ [| Asm.BYTE op; rm_r c r |]
 ;;
 
 
-let insn_rm_r_imm (op:int) (oper:operand) (r:int) (ty:ty_mach) (i:Asm.expr64) : Asm.item =
-  Asm.SEQ [| Asm.BYTE op; rm_r oper r; Asm.WORD (ty, i) |]
+let insn_rm_r_imm (op:int) (c:Il.cell) (r:int) (ty:ty_mach) (i:Asm.expr64) : Asm.item =
+  Asm.SEQ [| Asm.BYTE op; rm_r c r; Asm.WORD (ty, i) |]
 ;;
 
-let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (oper:operand) (r:int) (i:Asm.expr64) : Asm.item =
+let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64) : Asm.item =
   match i with
       Asm.IMM n when imm_is_byte n ->
-        insn_rm_r_imm op8 oper r TY_s8 i
+        insn_rm_r_imm op8 c r TY_s8 i
     | _ ->
         Asm.new_relaxation
           [|
-            insn_rm_r_imm op32 oper r TY_s32 i;
-            insn_rm_r_imm op8 oper r TY_s8 i
+            insn_rm_r_imm op32 c r TY_s32 i;
+            insn_rm_r_imm op8 c r TY_s8 i
           |]
 ;;
 
@@ -734,66 +738,75 @@ let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.it
 ;;
 
 
-let is_rm32 (oper:operand) : bool =
-  match oper with
-      Mem (M32, _, _) -> true
-    | Reg (Hreg _) -> true
+let is_rm32 (c:Il.cell) : bool =
+  match c with
+      Il.Mem (_, Il.Bits32) -> true
+    | Il.Reg (_, Il.Bits32) -> true
     | _ -> false
 ;;
 
 
-let is_rm8 (oper:operand) : bool =
-  (*
-   * NB: you can't refer to the Hregs in question as rm8 values
-   * because if you do, MOV only writes to the low 8 bit subreg.
-   *)
-  match oper with
-      Mem (M8, _, _) -> true
+let is_rm8 (c:Il.cell) : bool =
+  match c with
+      Il.Mem (_, Il.Bits8) -> true
+    | Il.Reg (_, Il.Bits8) -> true
     | _ -> false
 ;;
 
 
-let cmp (a:operand) (b:operand) : Asm.item =
+let cmp (a:Il.operand) (b:Il.operand) : Asm.item =
   match (a,b) with
-      (_, Imm i) when is_rm32 a -> insn_rm_r_imm_s8_s32 0x83 0x81 a slash7 i
-    | (_, Reg (Hreg r)) -> insn_rm_r 0x39 a (reg r)
-    | (Reg (Hreg r), _) -> insn_rm_r 0x3b b (reg r)
+      (Il.Cell c, Il.Imm i) when is_rm32 c -> insn_rm_r_imm_s8_s32 0x83 0x81 c slash7 i
+    | (Il.Cell c, Il.Cell (Il.Reg (Il.Hreg r, _))) -> insn_rm_r 0x39 c (reg r)
+    | (Il.Cell (Il.Reg (Il.Hreg r, _)), Il.Cell c) -> insn_rm_r 0x3b c (reg r)
     | _ -> raise Unrecognized
 ;;
 
 
-let mov (signed:bool) (dst:operand) (src:operand) : Asm.item =
+let mov (signed:bool) (dst:cell) (src:operand) : Asm.item =
   match (signed, dst, src) with
-      (_, _, Reg (Hreg r)) when is_rm8 dst ->
-        insn_rm_r 0x88 dst (reg r)
-    | (_, _, Reg (Hreg r)) when is_rm32 dst ->
-        insn_rm_r 0x89 dst (reg r)
+
+      (_, _, Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits8)))
+        when is_rm8 dst -> insn_rm_r 0x88 dst (reg r)
+
+    | (_, _, Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits32)))
+        when is_rm32 dst -> insn_rm_r 0x89 dst (reg r)
 
     (* MOVZX *)
-    | (false, Reg (Hreg r), Mem (M8, _, _)) ->
-        Asm.SEQ [| Asm.BYTE 0x0f; insn_rm_r 0xb6 src (reg r) |]
+    | (false,
+       Il.Reg ((Il.Hreg r, Il.Bits8)),
+       Il.Cell (Il.Mem (addr, Il.Bits8))) ->
+        Asm.SEQ [| Asm.BYTE 0x0f;
+                   insn_rm_r 0xb6 (Il.Mem (addr, Bits8)) (reg r) |]
 
     (* MOVSX *)
-    | (true, Reg (Hreg r), Mem (M8, _, _)) ->
-        Asm.SEQ [| Asm.BYTE 0x0f; insn_rm_r 0xbe src (reg r) |]
+    | (true,
+       Il.Reg ((Il.Hreg r), Il.Bits8),
+       Il.Cell (Il.Mem (addr, Il.Bits8))) ->
+        Asm.SEQ [| Asm.BYTE 0x0f;
+                   insn_rm_r 0xbe (Il.Mem (addr, Bits8)) (reg r) |]
 
     (* MOV *)
-    | (_, Reg (Hreg r), _) when is_rm32 src ->
-        insn_rm_r 0x8b src (reg r);
+    | (_, Il.Reg ((Il.Hreg r), Il.Bits32), Il.Cell s)
+        when is_rm32 s -> insn_rm_r 0x8b s (reg r);
 
-    | (_, _, Imm (Asm.IMM n)) when is_rm8 dst && imm_is_byte n ->
+    | (_, _, Il.Imm (Asm.IMM n))
+        when is_rm8 dst && imm_is_byte n ->
         insn_rm_r_imm 0xc6 dst slash0 TY_u8 (Asm.IMM n)
 
-    | (_, _, Imm i) when is_rm32 dst ->
+    | (_, _, Il.Imm i) when is_rm32 dst ->
         insn_rm_r_imm 0xc7 dst slash0 TY_u32 i
 
     | _ -> raise Unrecognized
 ;;
 
 
-let lea (dst:operand) (src:operand) : Asm.item =
-  match (dst,src) with
-      (Reg (Hreg r), Mem _) -> insn_rm_r 0x8d src (reg r)
+let lea (dst:cell) (src:operand) : Asm.item =
+  match (dst, src) with
+      (Il.Reg ((Il.Hreg r), Il.Bits32),
+       Il.Cell (Il.Mem addr)) ->
+        insn_rm_r 0x8d (Il.Mem addr) (reg r)
+
     | _ -> raise Unrecognized
 ;;
 
@@ -936,121 +949,6 @@ let items_of_emitted_quads (sess:Session.sess) (e:Il.emitter) : Asm.item =
     then raise Unrecognized
     else item
 ;;
-
-
-(* Somewhat obsolete stuff follows to EOF ... salvaging *)
-
-(*
- * Note: our calling convention here is like everywhere else: "cdecl"
- *
- * that is to say, the caller of f(a,b,c,d,e) emits:
- *
- * push e
- * push d
- * push c
- * push b
- * push a
- * call f
- * push EAX  -- return val was in EAX
- *
- * With "SYSCALL5 i" the only difference is that "call f" takes the form of
- * popping args off the stack and into registers, loading an immediate syscall
- * number into EAX, and invoking int 0x80.
- *
- * pop EBX
- * pop ECX
- * pop EDX
- * pop ESI
- * pop EDI
- * mov EAX i
- * int 0x80
- *
- *)
-(*
-let op_SYSCALL0 i = [| mov_EAX_imm8; ub i 0; 0xCD; 0x80; push_EAX |];;
-let op_SYSCALL1 i = [| mov_EAX_imm8; ub i 0; pop_EBX; 0xCD; 0x80; push_EAX |];;
-let op_SYSCALL2 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; 0xCD; 0x80; push_EAX |];;
-let op_SYSCALL3 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; pop_EDX; 0xCD; 0x80; push_EAX |];;
-let op_SYSCALL4 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; pop_EDX; pop_ESI; 0xCD; 0x80; push_EAX |];;
-let op_SYSCALL5 i = [| mov_EAX_imm8; ub i 0; pop_EBX; pop_ECX; pop_EDX; pop_ESI; pop_EDI; 0xCD; 0x80; push_EAX |];;
-
-let op_SYS_EXIT  = op_SYSCALL1 1;;    (* sys_exit(int status)                         *)
-let op_SYS_FORK  = op_SYSCALL0 2;;    (* sys_fork()                                   *)
-let op_SYS_READ  = op_SYSCALL3 3;;    (* sys_read(int fd, char* buf, size_t count)    *)
-let op_SYS_WRITE = op_SYSCALL3 4;;    (* sys_write(int fd, char* buf, size_t count)   *)
-let op_SYS_OPEN  = op_SYSCALL3 4;;    (* sys_open(const char *f, int flags, int mode) *)
-let op_SYS_CLOSE = op_SYSCALL1 4;;    (* sys_close(unsigned int fd)                   *)
-*)
-
-
-
-(*
- * Frames look like this, as in C (stack grows down):
- *
- *    [arg0     ]
- *    ...
- *    [argN     ]
- *    [env ptr  ]
- *    [desc ptr ]
- *    [yield sp ]
- *    [yield pc ]
- *    [return sp]
- *    [return pc]  <-- sp for this frame.
- *    [local 0  ]
- *    ...
- *    [local N  ]
- *    [spill 0  ]
- *    ...
- *    [spill N  ]
- *
- * All you have to work with is sp. At sp there is a return
- * pc, at sp+4 there is a saved sp of the frame under us,
- * which we reload before jumping back to pc=*sp. Note that
- * the values of sps do not need to be anything remotely
- * like linear. Stack segments may go all over the heap.
- *
- * At sp+8 there is a descriptor that tells you what
- * sort of frame you're in. You should not look at anything
- * aside from sp, sp+4 and sp+8 "generically"; you have
- * to use the descriptor to do anything else.
- *
- * If the descriptor says you're in a function that can yield,
- * you will then have a yield pc and yield sp above it. If the
- * descriptor says you're in a closure, you will have an
- * environment pointer above that. Above these optional parts
- * you'll have the args.
- *
- * The caller must know at least the following when it makes
- * a call:
- *
- *   - if it's calling into a yielding function
- *   - if it's calling into a closure
- *   - if it's tail-calling
- *   - if it's tail-yielding
- *
- * It needs to know these things for the following reasons:
- *
- *   - When entering a yielding function, two extra words need
- *     to be reserved. Nothing needs to be put in them unless
- *     it's a tail-yield; the prologue of the callee will set
- *     it up normally.
- *
- *   - When entering a closure, the environment needs to be
- *     set.
- *
- *   - When tail-calling, the current frame is taken apart
- *     and a new frame built in its place before jumping to
- *     the target.
- *
- *   - When tail-yielding, the current frame remains but the
- *     caller copies its yield sp and pc to the callee. It does
- *     this by calling to an address a few words inside the callee,
- *     past the callee prologue that would *normally* set up the
- *     default yield sp and yield pc from the incoming return sp
- *     and return pc.
- *
- *
- *)
 
 
 (*
