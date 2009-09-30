@@ -98,25 +98,38 @@ type binary =
       binary_op: binop;
       binary_dst: cell;
       binary_lhs: operand;
-      binary_rhs: operand }
+      binary_rhs: operand
+    }
 ;;
 
-type unary = { unary_op: unop;
-               unary_dst: cell;
-               unary_src: operand }
+type unary =
+    {
+      unary_op: unop;
+      unary_dst: cell;
+      unary_src: operand
+    }
 ;;
 
-type cmp = { cmp_lhs: operand;
-             cmp_rhs: operand }
+type cmp =
+    {
+      cmp_lhs: operand;
+      cmp_rhs: operand
+    }
 ;;
 
 
-type jmp = { jmp_op: jmpop;
-             jmp_targ: code; }
+type jmp =
+    {
+      jmp_op: jmpop;
+      jmp_targ: code;
+    }
 ;;
 
-type call = { call_dst: cell;
-              call_targ: code }
+type call =
+    {
+      call_dst: cell;
+      call_targ: code
+    }
 
 type quad' =
     Binary of binary

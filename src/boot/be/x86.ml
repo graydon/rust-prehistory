@@ -74,7 +74,6 @@
  *)
 
 open Common;;
-open Il;;
 
 exception Unrecognized
 ;;
@@ -205,7 +204,7 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
               end
           end
       | Il.Call c ->
-          let bits = Il.cell_bits c.call_dst in
+          let bits = Il.cell_bits c.Il.call_dst in
             Il.Call { c with
                         Il.call_dst = Il.Reg ((Il.Hreg eax), bits) }
       | x -> x
@@ -235,7 +234,7 @@ let word_bits = Il.Bits32
 let word_ty = TY_u32
 ;;
 
-let spill_slot (framesz:int64) (sb:spillbits) : Il.cell =
+let spill_slot (framesz:int64) (sb:Il.spillbits) : Il.cell =
   let (i,bits) = sb in
   let imm = (Asm.IMM
                (Int64.neg
@@ -244,7 +243,7 @@ let spill_slot (framesz:int64) (sb:spillbits) : Il.cell =
                         (Int64.of_int (i+1))))))
   in
   let addr = Il.Idx ((Il.Hreg ebp), imm) in
-    Mem (addr, bits)
+    Il.Mem (addr, bits)
 ;;
 
 let c (c:Il.cell) : Il.operand = Il.Cell c ;;
@@ -763,7 +762,7 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.item =
 ;;
 
 
-let mov (signed:bool) (dst:cell) (src:operand) : Asm.item =
+let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.item =
   match (signed, dst, src) with
 
       (_, _, Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits8)))
@@ -777,14 +776,14 @@ let mov (signed:bool) (dst:cell) (src:operand) : Asm.item =
        Il.Reg ((Il.Hreg r, Il.Bits8)),
        Il.Cell (Il.Mem (addr, Il.Bits8))) ->
         Asm.SEQ [| Asm.BYTE 0x0f;
-                   insn_rm_r 0xb6 (Il.Mem (addr, Bits8)) (reg r) |]
+                   insn_rm_r 0xb6 (Il.Mem (addr, Il.Bits8)) (reg r) |]
 
     (* MOVSX *)
     | (true,
        Il.Reg ((Il.Hreg r), Il.Bits8),
        Il.Cell (Il.Mem (addr, Il.Bits8))) ->
         Asm.SEQ [| Asm.BYTE 0x0f;
-                   insn_rm_r 0xbe (Il.Mem (addr, Bits8)) (reg r) |]
+                   insn_rm_r 0xbe (Il.Mem (addr, Il.Bits8)) (reg r) |]
 
     (* MOV *)
     | (_, Il.Reg ((Il.Hreg r), Il.Bits32), Il.Cell s)
@@ -801,7 +800,7 @@ let mov (signed:bool) (dst:cell) (src:operand) : Asm.item =
 ;;
 
 
-let lea (dst:cell) (src:operand) : Asm.item =
+let lea (dst:Il.cell) (src:Il.operand) : Asm.item =
   match (dst, src) with
       (Il.Reg ((Il.Hreg r), Il.Bits32),
        Il.Cell (Il.Mem addr)) ->
@@ -811,113 +810,175 @@ let lea (dst:cell) (src:operand) : Asm.item =
 ;;
 
 
-let select_item_misc (q:quad) : Asm.item =
-  match (q.quad_op, q.quad_dst, q.quad_lhs, q.quad_rhs) with
+let select_insn_misc (q:Il.quad') : Asm.item =
 
-      (CCALL, Reg (Hreg 0), r, _) when is_rm32 r -> insn_rm_r 0xff r slash2
-    | (CCALL, Reg (Hreg 0), Pcrel f, _) -> insn_pcrel_simple 0xe8 f
+  match q with
+      Il.Call c ->
+        begin
+          match c.Il.call_dst with
+              Il.Reg ((Il.Hreg dst), _) when dst = eax ->
+                begin
+                  match c.Il.call_targ with
+                      Il.CodeAddr (Il.Deref c) ->
+                        insn_rm_r 0xff (Il.Reg (c, Il.Bits32)) slash2
+                    | Il.CodeAddr (Il.Pcrel f) ->
+                        insn_pcrel_simple 0xe8 f
+                    | _ -> raise Unrecognized
+                end
+            | _ -> raise Unrecognized
+        end
 
-    | (CPUSH M32, _, Reg (Hreg r), _) -> Asm.BYTE (0x50 + (reg r))
-    | (CPUSH M32, _, r, _) when is_rm32 r -> insn_rm_r 0xff r slash6
-    | (CPUSH M32, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD (TY_u32, i) |]
-    | (CPUSH M8, _, Imm i, _) -> Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD (TY_u8, i) |]
+    | Il.Push (Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits32))) ->
+        Asm.BYTE (0x50 + (reg r))
 
-    | (CPOP M32, Reg (Hreg r), _, _) -> Asm.BYTE (0x58 + (reg r))
-    | (CPOP M32, r, _, _) when is_rm32 r -> insn_rm_r 0x8f r slash0
+    | Il.Push (Il.Cell c) when is_rm32 c ->
+        insn_rm_r 0xff c slash6
 
-    | (CRET, _, _, _) -> Asm.BYTE 0xc3
+    | Il.Push (Il.Imm (Asm.IMM i)) when imm_is_byte i ->
+        Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD (TY_u8, (Asm.IMM i)) |]
 
-    | (JC,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x72 0x0f 0x82 f
-    | (JNC, _, Pcrel f, _) -> insn_pcrel_prefix32 0x73 0x0f 0x83 f
-    | (JO,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x70 0x0f 0x80 f
-    | (JNO, _, Pcrel f, _) -> insn_pcrel_prefix32 0x71 0x0f 0x81 f
-    | (JE,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x74 0x0f 0x84 f
-    | (JNE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x75 0x0f 0x85 f
+    | Il.Push (Il.Imm i) ->
+        Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD (TY_u32, i) |]
 
-    | (JL,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x7c 0x0f 0x8c f
-    | (JLE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x7e 0x0f 0x8e f
-    | (JG,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x7f 0x0f 0x8f f
-    | (JGE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x7d 0x0f 0x8d f
+    | Il.Pop (Il.Reg ((Il.Hreg r), Il.Bits32)) ->
+        Asm.BYTE (0x58 + (reg r))
 
-    | (JB,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x72 0x0f 0x82 f
-    | (JBE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x76 0x0f 0x86 f
-    | (JA,  _, Pcrel f, _) -> insn_pcrel_prefix32 0x77 0x0f 0x87 f
-    | (JAE, _, Pcrel f, _) -> insn_pcrel_prefix32 0x73 0x0f 0x83 f
+    | Il.Pop c when is_rm32 c ->
+        insn_rm_r 0x8f c slash0
 
-    | (JMP, _, r, _) when is_rm32 r -> insn_rm_r 0xff r slash4
-    | (JMP, _, Pcrel f, _) -> insn_pcrel 0xeb 0xe9 f
+    | Il.Ret -> Asm.BYTE 0xc3
 
-    | (DEAD, _, _, _) -> Asm.MARK
-    | (END, _, _, _) -> Asm.BYTES [| 0x90 |]
-    | (NOP, _, _, _) -> Asm.BYTES [| 0x90 |]
+    | Il.Jmp j ->
+        begin
+          match (j.Il.jmp_op, j.Il.jmp_targ) with
+              (Il.JMP, Il.CodeAddr r)
+                when is_rm32 (Il.Mem (r, Il.Bits32)) ->
+                insn_rm_r 0xff (Il.Mem (r, Il.Bits32)) slash4
 
-    | _ ->
-        raise Unrecognized
-;;
+            | (Il.JMP, Il.CodeAddr (Il.Pcrel f)) ->
+                insn_pcrel 0xeb 0xe9 f
 
+            | (_, Il.CodeAddr (Il.Pcrel f)) ->
+                let (op8, op32) =
+                  match j.Il.jmp_op with
+                    | Il.JC  -> (0x72, 0x82)
+                    | Il.JNC -> (0x73, 0x83)
+                    | Il.JO  -> (0x70, 0x80)
+                    | Il.JNO -> (0x71, 0x81)
+                    | Il.JE  -> (0x74, 0x84)
+                    | Il.JNE -> (0x75, 0x85)
 
-let alu_binop
-    (dst:operand) (src:operand) (immslash:int)
-    (rm_dst_op:int) (rm_src_op:int)
-    : Asm.item =
-  match (dst, src) with
-      (Reg (Hreg r), _) when is_rm32 src -> insn_rm_r rm_src_op src (reg r)
-    | (_, Reg (Hreg r)) when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
-    | (_, Imm i) when is_rm32 dst -> insn_rm_r_imm_s8_s32 0x83 0x81 dst immslash i
+                    | Il.JL  -> (0x7c, 0x8c)
+                    | Il.JLE -> (0x7e, 0x8e)
+                    | Il.JG  -> (0x7f, 0x8f)
+                    | Il.JGE -> (0x7d, 0x8d)
+
+                    | Il.JB  -> (0x72, 0x82)
+                    | Il.JBE -> (0x76, 0x86)
+                    | Il.JA  -> (0x77, 0x87)
+                    | Il.JAE -> (0x73, 0x83)
+                    | _ -> raise Unrecognized
+                in
+                let prefix32 = 0x0f in
+                  insn_pcrel_prefix32 op8 prefix32 op32 f
+
+            | _ -> raise Unrecognized
+        end
+
+    | Il.Dead -> Asm.MARK
+    | Il.End -> Asm.BYTES [| 0x90 |]
+    | Il.Nop -> Asm.BYTES [| 0x90 |]
     | _ -> raise Unrecognized
 ;;
 
 
-let mul_like (src:operand) (signed:bool) (slash:int)
+let alu_binop
+    (dst:Il.cell) (src:Il.operand) (immslash:int)
+    (rm_dst_op:int) (rm_src_op:int)
     : Asm.item =
-  if is_rm32 src
-  then insn_rm_r 0xf7 src slash
-  else
-    match src with
-        Imm i ->
-          Asm.SEQ [| mov signed (Reg (Hreg edx)) src;
-                     insn_rm_r 0xf7 (Reg (Hreg edx)) slash |]
-      | _ -> raise Unrecognized
+  match (dst, src) with
+      (Il.Reg ((Il.Hreg r), Il.Bits32), Il.Cell c)
+        when is_rm32 c -> insn_rm_r rm_src_op c (reg r)
+
+    | (_, Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits32)))
+        when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
+
+    | (_, Il.Imm i) when is_rm32 dst
+        -> insn_rm_r_imm_s8_s32 0x83 0x81 dst immslash i
+
+    | _ -> raise Unrecognized
 ;;
 
 
-let select_insn (q:quad) : Asm.item =
+let mul_like (src:Il.operand) (signed:bool) (slash:int)
+    : Asm.item =
+  match src with
+      Il.Cell src when is_rm32 src ->
+        insn_rm_r 0xf7 src slash
+
+    | Il.Imm i ->
+        Asm.SEQ [| mov signed (Il.Reg ((Il.Hreg edx), Il.Bits32)) src;
+                   insn_rm_r 0xf7 (Il.Reg ((Il.Hreg edx), Il.Bits32)) slash |]
+
+    | _ -> raise Unrecognized
+;;
+
+
+let select_insn (q:Il.quad) : Asm.item =
   let item =
-    match q.quad_op with
-        UMOV -> mov false q.quad_dst q.quad_lhs
-      | IMOV -> mov true q.quad_dst q.quad_lhs
-      | LEA -> lea q.quad_dst q.quad_lhs
-      | CMP -> cmp q.quad_lhs q.quad_rhs
-      | _ ->
+    match q.Il.quad_body with
+        Il.Unary u ->
+          let unop s =
+            if u.Il.unary_src = Il.Cell u.Il.unary_dst
+            then insn_rm_r 0xf7 u.Il.unary_dst s
+            else raise Unrecognized
+          in
+            begin
+              match u.Il.unary_op with
+                  Il.UMOV -> mov false u.Il.unary_dst u.Il.unary_src
+                | Il.IMOV -> mov true u.Il.unary_dst u.Il.unary_src
+                | Il.LEA -> lea u.Il.unary_dst u.Il.unary_src
+                | Il.NEG -> unop slash3
+                | Il.NOT -> unop slash2
+            end
+
+      | Il.Cmp c -> cmp c.Il.cmp_lhs c.Il.cmp_rhs
+      | Il.Binary b ->
           begin
-            if q.quad_dst = q.quad_lhs
+            if Il.Cell b.Il.binary_dst = b.Il.binary_lhs
             then
-              let binop = alu_binop q.quad_lhs q.quad_rhs in
-              let unop = insn_rm_r 0xf7 q.quad_lhs in
-              let mulop = mul_like q.quad_rhs in
-                match (q.quad_dst, q.quad_op) with
-                    (_, ADD) -> binop slash0 0x1 0x3
-                  | (_, SUB) -> binop slash5 0x29 0x2b
-                  | (_, AND) -> binop slash4 0x21 0x23
-                  | (_, OR) -> binop slash1 0x09 0x0b
+              let binop = alu_binop b.Il.binary_dst b.Il.binary_rhs in
+              let mulop = mul_like b.Il.binary_rhs in
+                match (b.Il.binary_dst, b.Il.binary_op) with
+                    (_, Il.ADD) -> binop slash0 0x1 0x3
+                  | (_, Il.SUB) -> binop slash5 0x29 0x2b
+                  | (_, Il.AND) -> binop slash4 0x21 0x23
+                  | (_, Il.OR) -> binop slash1 0x09 0x0b
 
-                  | (Reg (Hreg 0), UMUL) -> mulop false slash4
-                  | (Reg (Hreg 0), IMUL) -> mulop true slash5
-                  | (Reg (Hreg 0), UDIV) -> mulop false slash6
-                  | (Reg (Hreg 0), IDIV) -> mulop true slash7
+                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.UMUL)
+                      when r = eax -> mulop false slash4
 
-                  | (Reg (Hreg 0), UMOD) -> mulop false slash6
-                  | (Reg (Hreg 0), IMOD) -> mulop true slash7
+                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.IMUL)
+                      when r = eax -> mulop true slash5
 
-                  | (_, NEG) -> unop slash3
-                  | (_, NOT) -> unop slash2
+                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.UDIV)
+                      when r = eax -> mulop false slash6
 
-                  | _ -> select_item_misc q
-            else
-              select_item_misc q
+                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.IDIV)
+                      when r = eax -> mulop true slash7
+
+                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.UMOD)
+                      when r = edx -> mulop false slash6
+
+                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.IMOD)
+                      when r = edx -> mulop true slash7
+
+                  | _ -> raise Unrecognized
+            else raise Unrecognized
           end
+      | _ -> select_insn_misc q.Il.quad_body
   in
-    match q.quad_fixup with
+    match q.Il.quad_fixup with
         None -> item
       | Some f -> Asm.DEF (f, item)
 ;;
