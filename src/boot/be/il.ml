@@ -151,6 +151,90 @@ type quad =
 
 type quads = quad array ;;
 
+(* Processor. *)
+
+type quad_processor =
+    { qp_reg:  (quad_processor -> reg -> reg);
+      qp_addr:  (quad_processor -> addr -> addr);
+      qp_cell_read: (quad_processor -> cell -> cell);
+      qp_cell_write: (quad_processor -> cell -> cell);
+      qp_code: (quad_processor -> code -> code);
+      qp_op: (quad_processor -> operand -> operand); }
+;;
+
+let identity_processor =
+  let qp_cell = (fun qp c -> match c with
+                     Reg (r, b) -> Reg (qp.qp_reg qp r, b)
+                   | Mem (a, b) -> Mem (qp.qp_addr qp a, b)
+                   | Spill _ -> c)
+  in
+    { qp_reg = (fun qp r -> r);
+      qp_addr = (fun qp a -> match a with
+                     Deref r -> Deref (qp.qp_reg qp r)
+                   | Idx (r, i) -> Idx (qp.qp_reg qp r, i)
+                   | Abs _
+                   | Pcrel _ -> a);
+      qp_cell_read = qp_cell;
+      qp_cell_write = qp_cell;
+      qp_code = (fun qp c -> match c with
+                     CodeAddr a -> CodeAddr (qp.qp_addr qp a)
+                   | CodeLabel _
+                   | CodeNone -> c);
+      qp_op = (fun qp op -> match op with
+                   Cell c -> Cell (qp.qp_cell_read qp c)
+                 | Imm _ -> op) }
+;;
+
+let process_quad (qp:quad_processor) (q:quad) : quad =
+  { q with
+      quad_body = match q.quad_body with
+          Binary b ->
+            Binary { b with
+                       binary_dst = qp.qp_cell_write qp b.binary_dst;
+                       binary_lhs = qp.qp_op qp b.binary_lhs;
+                       binary_rhs = qp.qp_op qp b.binary_rhs }
+        | Unary u ->
+            Unary { u with
+                      unary_dst = qp.qp_cell_write qp u.unary_dst;
+                      unary_src = qp.qp_op qp u.unary_src }
+        | Cmp c ->
+            Cmp { cmp_lhs = qp.qp_op qp c.cmp_lhs;
+                  cmp_rhs = qp.qp_op qp c.cmp_rhs }
+
+        | Jmp j ->
+            Jmp { j with
+                    jmp_targ = qp.qp_code qp j.jmp_targ }
+
+        | Push op ->
+            Push (qp.qp_op qp op)
+
+        | Pop c ->
+            Pop (qp.qp_cell_write qp c)
+
+        | Call c ->
+            Call { call_dst = qp.qp_cell_write qp c.call_dst;
+                   call_targ = qp.qp_code qp c.call_targ }
+
+        | Ret -> Ret
+        | Nop -> Nop
+        | Dead -> Dead
+        | End -> End }
+;;
+
+let visit_quads (qp:quad_processor) (qs:quads) : unit =
+  Array.iter (fun x ->ignore ( process_quad qp x); ()) qs
+;;
+
+let process_quads (qp:quad_processor) (qs:quads) : quads =
+  Array.map (process_quad qp) qs
+;;
+
+let rewrite_quads (qp:quad_processor) (qs:quads) : unit =
+  for i = 0 to ((Array.length qs) - 1) do
+    qs.(i) <- process_quad qp qs.(i)
+  done
+;;
+
 (* Formatters. *)
 
 type hreg_formatter = hreg -> string;;
@@ -417,6 +501,17 @@ let umov (dst:cell) (src:operand) : quad' =
   unary UMOV dst src
 ;;
 
+let is_mov uop =
+  match uop with
+      UMOV | IMOV -> true
+    | _ -> false
+;;
+
+let mk_quad (q':quad') : quad =
+  { quad_body = q';
+    quad_fixup = None }
+;;
+
 let emit_full (e:emitter) (fix:fixup option) (q':quad') =
   let fixup = ref fix in
   let emit_quad_bottom q' =
@@ -427,11 +522,6 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
     e.emit_pc <- e.emit_pc + 1
   in
 
-  let is_mov op =
-    match op with
-        UMOV | IMOV -> true
-      | _ -> false
-  in
 
   let emit_quad (q':quad') : unit =
     (* decay mem-mem movs *)

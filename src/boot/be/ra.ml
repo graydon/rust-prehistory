@@ -13,7 +13,12 @@ type ctxt =
     }
 ;;
 
-let new_ctxt sess quads vregs abi =
+let new_ctxt
+    (sess:Session.sess)
+    (quads:Il.quads)
+    (vregs:int)
+    (abi:Abi.abi)
+    : ctxt =
   {
     ctxt_sess = sess;
     ctxt_quads = quads;
@@ -24,24 +29,25 @@ let new_ctxt sess quads vregs abi =
   }
 ;;
 
-let log cx = Session.log "ra"
-  cx.ctxt_sess.Session.sess_log_ra
-  cx.ctxt_sess.Session.sess_log_out
+let log (cx:ctxt) =
+  Session.log "ra"
+    cx.ctxt_sess.Session.sess_log_ra
+    cx.ctxt_sess.Session.sess_log_out
 ;;
 
-let iflog cx thunk =
+let iflog (cx:ctxt) (thunk:(unit -> unit)) : unit =
   if cx.ctxt_sess.Session.sess_log_ra
   then thunk ()
   else ()
 ;;
 
-let next_spill cx =
+let next_spill (cx:ctxt) : int =
   let i = cx.ctxt_next_spill in
     cx.ctxt_next_spill <- i + 1;
     i
 ;;
 
-let next_label cx =
+let next_label (cx:ctxt) : string =
   let i = cx.ctxt_next_label in
     cx.ctxt_next_label <- i + 1;
     (".L" ^ (string_of_int i))
@@ -49,110 +55,130 @@ let next_label cx =
 
 exception Ra_error of string ;;
 
-let convert_labels cx =
+let convert_labels (cx:ctxt) : unit =
   let new_labels = ref [] in
-  let convert_operand s =
-    match s with
-        Label lab ->
-          let fix = (match cx.ctxt_quads.(lab).quad_fixup with
-                         None -> ( let fix = new_fixup (next_label cx) in
-                                     new_labels := (lab, fix) :: (!new_labels);
-                                     fix)
-                       | Some f -> f)
+  let qp_code (qp:Il.quad_processor) (c:Il.code) : Il.code =
+    match c with
+        Il.CodeLabel lab ->
+          let fix =
+            match cx.ctxt_quads.(lab).quad_fixup with
+                None ->
+                  let fix = new_fixup (next_label cx) in
+                    begin
+                      new_labels := (lab, fix) :: (!new_labels);
+                      fix
+                    end
+              | Some f -> f
           in
-            Pcrel fix
-      | x -> x
+            Il.CodeAddr (Il.Pcrel fix)
+      | _ -> c
   in
-  let convert_quad q =
-    { q with
-        quad_dst = convert_operand q.quad_dst;
-        quad_lhs = convert_operand q.quad_lhs;
-        quad_rhs = convert_operand q.quad_rhs }
+  let qp = { Il.identity_processor
+             with Il.qp_code = qp_code }
   in
-    cx.ctxt_quads <- Array.map convert_quad cx.ctxt_quads;
+    Il.rewrite_quads qp cx.ctxt_quads;
     List.iter (fun (i, fix) ->
                  cx.ctxt_quads.(i) <- { cx.ctxt_quads.(i)
-                                        with quad_fixup = Some fix })
+                                        with Il.quad_fixup = Some fix })
       (!new_labels)
 ;;
 
-let convert_pre_spills cx mkspill =
+let convert_pre_spills
+    (cx:ctxt)
+    (mkspill:(Il.spillbits -> Il.cell))
+    : int =
   let n = ref 0 in
-  let convert_operand op =
-    match op with
-        Spill i -> (if i+1 > (!n) then n := i+1;
-                    mkspill i)
-      | _ -> op
+  let qp_cell inner (qp:Il.quad_processor) (c:Il.cell) : Il.cell =
+    match c with
+        Il.Spill (i, b) ->
+          begin
+            if i+1 > (!n)
+            then n := i+1;
+            mkspill (i, b)
+          end
+      | _ -> inner qp c
   in
-  for i = 0 to (Array.length cx.ctxt_quads) - 1
-  do
-    let q = cx.ctxt_quads.(i) in
-      cx.ctxt_quads.(i) <-
-        { q with
-            quad_dst = convert_operand q.quad_dst;
-            quad_lhs = convert_operand q.quad_lhs;
-            quad_rhs = convert_operand q.quad_rhs }
-  done;
-    !n
+  let qp = Il.identity_processor in
+  let qp = { qp with
+               Il.qp_cell_read = qp_cell qp.Il.qp_cell_read;
+               Il.qp_cell_write = qp_cell qp.Il.qp_cell_write  }
+  in
+    begin
+      Il.rewrite_quads qp cx.ctxt_quads;
+      !n
+    end
 ;;
 
-let kill_quad i cx =
+let kill_quad (i:int) (cx:ctxt) : unit =
   cx.ctxt_quads.(i) <-
-    { deadq with Il.quad_fixup = cx.ctxt_quads.(i).Il.quad_fixup }
+    { Il.deadq with
+        Il.quad_fixup = cx.ctxt_quads.(i).Il.quad_fixup }
 ;;
 
-let kill_redundant_moves cx =
-  for i = 0 to (Array.length cx.ctxt_quads) -1
-  do
-    let q = cx.ctxt_quads.(i) in
-      match q.quad_op with
-          UMOV | IMOV ->
-            if q.quad_dst = q.quad_lhs
-            then kill_quad i cx
-        | _ -> ()
-  done
-;;
-
-let quad_jump_target_labels q =
-  let operand_jump_target_labels s =
-    match s with
-        Label i -> [i]
-      | _ -> []
+let kill_redundant_moves (cx:ctxt) : unit =
+  let process_quad i q =
+    match q.Il.quad_body with
+        Il.Unary u when
+          ((Il.is_mov u.Il.unary_op) &&
+             (Il.Cell u.Il.unary_dst) = u.Il.unary_src) ->
+            kill_quad i cx
+      | _ -> ()
   in
-    List.concat (List.map operand_jump_target_labels [q.quad_dst; q.quad_lhs; q.quad_rhs])
+    Array.iteri process_quad cx.ctxt_quads
 ;;
 
-let quad_used_vregs q =
-  let operand_directly_used_vregs s =
-    match s with
-        Reg (Vreg i) -> [i]
-      | _ -> []
-  in
-  let operand_mem_used_vregs s =
-    match s with
-        Mem (_, Some (Vreg i), _) -> [i]
-      | _ -> []
-  in
-    List.concat ((List.map operand_mem_used_vregs [q.quad_dst; q.quad_lhs; q.quad_rhs])
-                 @ (List.map operand_directly_used_vregs [q.quad_lhs; q.quad_rhs]))
+let quad_jump_target_labels (q:quad) : Il.label list =
+  match q.Il.quad_body with
+      Il.Call { Il.call_targ = Il.CodeLabel lab } -> [ lab ]
+    | Il.Jmp { Il.jmp_targ = Il.CodeLabel lab } -> [ lab ]
+    | _ -> []
 ;;
 
-let quad_defined_vregs q =
-  let operand_defined_vregs s =
-    match s with
-        Reg (Vreg i) -> [i]
-      | _ -> []
+let quad_used_vregs (q:quad) : Il.vreg list =
+  let vregs = ref [] in
+  let qp_reg qp r =
+    match r with
+        Il.Vreg v -> (vregs := (v :: (!vregs)); r)
+      | _ -> r
   in
-    List.concat (List.map operand_defined_vregs [q.quad_dst])
+  let qp_cell_write qp c =
+    match c with
+        Il.Reg _ -> c
+      | Il.Mem (a, b) -> Il.Mem (qp.qp_addr qp a, b)
+      | Il.Spill _ -> c
+  in
+  let qp = { Il.identity_processor with
+               Il.qp_reg = qp_reg;
+               Il.qp_cell_write = qp_cell_write }
+  in
+    ignore (Il.process_quad qp q);
+    !vregs
 ;;
 
-let quad_is_unconditional_jump q =
-  match q.quad_op with
-      JMP | RET | CRET -> true
+let quad_defined_vregs (q:quad) : Il.vreg list =
+  let vregs = ref [] in
+  let qp_cell_write qp c =
+    match c with
+        Il.Reg (Il.Vreg v, _) -> (vregs := (v :: (!vregs)); c)
+      | _ -> c
+  in
+  let qp = { Il.identity_processor with
+               Il.qp_cell_write = qp_cell_write }
+  in
+    ignore (Il.process_quad qp q);
+    !vregs
+;;
+
+let quad_is_unconditional_jump (q:quad) : bool =
+  match q.Il.quad_body with
+      Il.Jmp { jmp_op = Il.JMP } -> true
+    | Il.Ret -> true
     | _ -> false
 ;;
 
-let calculate_live_bitvectors cx =
+let calculate_live_bitvectors
+    (cx:ctxt)
+    : ((Bitv.t array) * (Bitv.t array)) =
 
   let quads = cx.ctxt_quads in
   let n_quads = Array.length quads in
@@ -214,18 +240,20 @@ let calculate_live_bitvectors cx =
                 end
           done
         done;
-        for i = 0 to n_quads - 1 do
-          let quad = quads.(i) in
-            match (quad.quad_op, quad.quad_dst) with
-                (op, Reg (Vreg v))
-                  when (op = UMOV || op = IMOV) &&
-                    not (Bitv.get (live_out_vregs.(i)) v) ->
+        let kill_mov_to_dead_target i q =
+          match q.Il.quad_body with
+              Il.Unary { Il.unary_op=uop;
+                         Il.unary_dst=Il.Reg (Il.Vreg v, _) }
+                when
+                  ((Il.is_mov uop) &&
+                     not (Bitv.get live_out_vregs.(i) v)) ->
                   begin
                     kill_quad i cx;
                     outer_changed := true;
                   end
-              | _ -> ()
-        done
+            | _ -> ()
+        in
+          Array.iteri kill_mov_to_dead_target quads
     done;
     iflog cx
       begin
@@ -252,17 +280,15 @@ let calculate_live_bitvectors cx =
 ;;
 
 
-let is_end_of_basic_block quad =
-  match quad.quad_op with
-      JE | JNE
-    | JL | JLE | JG | JGE
-    | JB | JBE | JA | JAE
-    | JC | JNC | JO | JNO | JMP | RET | CRET -> true
+let is_end_of_basic_block (q:quad) : bool =
+  match q.Il.quad_body with
+      Il.Jmp _ -> true
+    | Il.Ret -> true
     | _ -> false
 ;;
 
-let is_beginning_of_basic_block quad =
-  match quad.quad_fixup with
+let is_beginning_of_basic_block (q:quad) : bool =
+  match q.Il.quad_fixup with
       None -> false
     | Some _ -> true
 ;;
@@ -305,6 +331,32 @@ let list_to_str list eltstr =
   (String.concat "," (List.map eltstr (List.sort compare list)))
 ;;
 
+
+let collect_vreg_bits
+    (cx:ctxt)
+    (vreg_to_bits:(Il.vreg,Il.bits) Hashtbl.t)
+    : unit =
+  let qp_cell qp c =
+    match c with
+        Reg (Vreg v, b) ->
+          begin
+            if Hashtbl.mem vreg_to_bits v
+            then
+              let bits = Hashtbl.find vreg_to_bits v in
+                assert (bits = b)
+            else
+              Hashtbl.replace vreg_to_bits v b;
+            c
+          end
+      | _ -> c
+  in
+  let qp = { Il.identity_processor with
+               Il.qp_cell_read = qp_cell;
+               Il.qp_cell_write = qp_cell }
+  in
+    Il.visit_quads qp cx.ctxt_quads
+;;
+
 (* Simple local register allocator. Nothing fancy. *)
 let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (framesz:int64) =
   try
@@ -319,9 +371,8 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     in
 
     (* Work out pre-spilled slots and allocate 'em. *)
-    let spill_slot i = abi.Abi.abi_spill_slot framesz i in
+    let spill_slot (sb:Il.spillbits) = abi.Abi.abi_spill_slot framesz sb in
     let n_pre_spills = convert_pre_spills cx spill_slot in
-    let spill_slot i = abi.Abi.abi_spill_slot framesz i in
 
     let (live_in_vregs, live_out_vregs) = calculate_live_bitvectors cx in
     let inactive_hregs = ref [] in (* [hreg] *)
@@ -329,20 +380,21 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let dirty_vregs = Hashtbl.create 0 in (* vreg -> () *)
     let hreg_to_vreg = Hashtbl.create 0 in  (* hreg -> vreg *)
     let vreg_to_hreg = Hashtbl.create 0 in (* vreg -> hreg *)
-    let vreg_to_spill = Hashtbl.create 0 in (* vreg -> spill *)
+    let vreg_to_bits = Hashtbl.create 0 in (* vreg -> Bits *)
+    let vreg_to_spill = Hashtbl.create 0 in (* vreg -> spillbits *)
+    let vreg_bits v =
+      if Hashtbl.mem vreg_to_bits v
+      then Hashtbl.find vreg_to_bits v
+      else abi.Abi.abi_word_bits
+    in
     let newq = ref [] in
     let fixup = ref None in
     let prepend q =
       newq := {q with quad_fixup = !fixup} :: (!newq);
       fixup := None
     in
+    let hr h = Il.Reg (Il.Hreg h, abi.Abi.abi_word_bits) in
     let hr_str = cx.ctxt_abi.Abi.abi_str_of_hardreg in
-    let mov a b = { quad_op = UMOV;
-                    quad_dst = a;
-                    quad_lhs = b;
-                    quad_rhs = Nil;
-                    quad_fixup = None }
-    in
     let clean_hreg i hreg =
       if (Hashtbl.mem hreg_to_vreg hreg) &&
         (hreg < cx.ctxt_abi.Abi.abi_n_hardregs)
@@ -354,7 +406,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
               Hashtbl.remove dirty_vregs vreg;
               if (Bitv.get (live_out_vregs.(i)) vreg)
               then
-                let spill =
+                let spill_idx =
                   if Hashtbl.mem vreg_to_spill vreg
                   then Hashtbl.find vreg_to_spill vreg
                   else
@@ -364,9 +416,10 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                         s
                     end
                 in
+                let spill = (spill_idx, vreg_bits vreg) in
                   log cx "spilling <%d> from %s to %s"
-                    vreg (hr_str hreg) (string_of_operand hr_str (spill_slot spill));
-                  prepend (mov (spill_slot spill) (Reg (Hreg hreg)))
+                    vreg (hr_str hreg) (string_of_cell hr_str (spill_slot spill));
+                  prepend (Il.mk_quad (Il.umov (spill_slot spill) (Il.Cell (hr hreg))));
               else ()
             end
           else ()
@@ -406,7 +459,11 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let reload vreg hreg =
       if Hashtbl.mem vreg_to_spill vreg
       then
-        prepend (mov (Reg (Hreg hreg)) (spill_slot (Hashtbl.find vreg_to_spill vreg)))
+        prepend (Il.mk_quad
+                   (Il.umov
+                      (hr hreg)
+                      (Il.Cell (spill_slot ((Hashtbl.find vreg_to_spill vreg),
+                                            (vreg_bits vreg))))))
       else ()
     in
 
@@ -429,24 +486,26 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
             reload vreg hreg;
           hreg
     in
-    let use_operand def i oper =
-      match oper with
-          Reg (Vreg v) -> Reg (Hreg (use_vreg def i v))
-        | Mem (a, Some (Vreg v), b) -> Mem (a, Some (Hreg (use_vreg false i v)), b)
-        | Reg (Hreg h) ->
-            begin
-              spill_specific_hreg i h;
-              Reg (Hreg h)
-            end
-        | Mem (a, Some (Hreg h), b) ->
-            begin
-              spill_specific_hreg i h;
-              Mem (a, Some (Hreg h), b)
-            end
-        | x -> x
+    let qp_reg def i qp r =
+      match r with
+          Il.Hreg h -> (spill_specific_hreg i h; r)
+        | Il.Vreg v -> (Il.Hreg (use_vreg def i v))
+    in
+    let qp_cell def i qp c =
+      match c with
+          Il.Reg (r, b) -> Il.Reg (qp_reg def i qp r, b)
+        | Il.Mem  (a, b) ->
+            let qp = { qp with Il.qp_reg = qp_reg false i } in
+              Il.Mem (qp.qp_addr qp a, b)
+        | Il.Spill _ -> c
+    in
+    let qp i = { Il.identity_processor with
+                   Il.qp_cell_read = qp_cell false i;
+                   Il.qp_cell_write = qp_cell true i }
     in
       cx.ctxt_next_spill <- n_pre_spills;
       convert_labels cx;
+      collect_vreg_bits cx vreg_to_bits;
       for i = 0 to cx.ctxt_abi.Abi.abi_n_hardregs - 1
       do
         inactive_hregs := i :: (!inactive_hregs)
@@ -488,19 +547,12 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
               begin
                 spill_all_regs i;
                 fixup := quad.quad_fixup;
-                prepend { quad with
-                            quad_dst = use_operand true i quad.quad_dst;
-                            quad_lhs = use_operand false i quad.quad_lhs;
-                            quad_rhs = use_operand false i quad.quad_rhs }
+                prepend (Il.process_quad (qp i) quad)
               end
             else
               begin
                 fixup := quad.quad_fixup;
-                let newq = { quad with
-                               quad_dst = use_operand true i quad.quad_dst;
-                               quad_lhs = use_operand false i quad.quad_lhs;
-                               quad_rhs = use_operand false i quad.quad_rhs }
-                in
+                let newq = (Il.process_quad (qp i) quad) in
                   begin
                     if is_end_of_basic_block quad
                     then spill_all_regs i
@@ -524,7 +576,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
             log cx "register-allocated quads:";
             dump_quads cx;
         end;
-      
+
       (cx.ctxt_quads, cx.ctxt_next_spill)
 
   with
