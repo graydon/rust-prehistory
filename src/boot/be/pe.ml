@@ -368,38 +368,41 @@ let pe_section_header
       | SECTION_ID_DEBUG_FRAME -> [ IMAGE_SCN_MEM_DISCARDABLE ]
   in
     SEQ [|
-      STRING (match id with
-                  SECTION_ID_TEXT -> ".text\x00\x00\x00"
-                | SECTION_ID_DATA -> ".data\x00\x00\x00"
-                | SECTION_ID_RDATA -> ".rdata\x00\x00"
-                | SECTION_ID_BSS -> ".bss\x00\x00\x00\x00"
-                | SECTION_ID_IMPORTS -> ".idata\x00\x00"
+      STRING
+        begin
+          match id with
+              SECTION_ID_TEXT -> ".text\x00\x00\x00"
+            | SECTION_ID_DATA -> ".data\x00\x00\x00"
+            | SECTION_ID_RDATA -> ".rdata\x00\x00"
+            | SECTION_ID_BSS -> ".bss\x00\x00\x00\x00"
+            | SECTION_ID_IMPORTS -> ".idata\x00\x00"
 
-                (* There is a bizarre Microsoft COFF extension to account
-                 * for longer-than-8-char section names: you emit a
-                 * single '/' character then the ASCII-numeric encoding
-                 * of the offset within the file's string table of the
-                 * full name.  So we put all our extended section names
-                 * at the beginning of the string table in a very
-                 * specific order and hard-wire the offsets as "names"
-                 * here. You could theoretically extend this to a "new
-                 * kind" of fixup reference (ASCII_POS or such), if you
-                 * feel this is something you want to twiddle with.  
-                 *)
-                | SECTION_ID_DEBUG_ARANGES  -> "/4\x00\x00\x00\x00\x00\x00"
-                | SECTION_ID_DEBUG_PUBNAMES -> "/19\x00\x00\x00\x00\x00"
-                | SECTION_ID_DEBUG_INFO     -> "/35\x00\x00\x00\x00\x00"
-                | SECTION_ID_DEBUG_ABBREV   -> "/47\x00\x00\x00\x00\x00"
-                | SECTION_ID_DEBUG_LINE     -> "/61\x00\x00\x00\x00\x00"
-                | SECTION_ID_DEBUG_FRAME    -> "/73\x00\x00\x00\x00\x00"
-);
+            (* There is a bizarre Microsoft COFF extension to account
+             * for longer-than-8-char section names: you emit a single
+             * '/' character then the ASCII-numeric encoding of the
+             * offset within the file's string table of the full name.
+             * So we put all our extended section names at the
+             * beginning of the string table in a very specific order
+             * and hard-wire the offsets as "names" here. You could
+             * theoretically extend this to a "new kind" of fixup
+             * reference (ASCII_POS or such), if you feel this is
+             * something you want to twiddle with.
+             *)
+
+            | SECTION_ID_DEBUG_ARANGES  -> "/4\x00\x00\x00\x00\x00\x00"
+            | SECTION_ID_DEBUG_PUBNAMES -> "/19\x00\x00\x00\x00\x00"
+            | SECTION_ID_DEBUG_INFO     -> "/35\x00\x00\x00\x00\x00"
+            | SECTION_ID_DEBUG_ABBREV   -> "/47\x00\x00\x00\x00\x00"
+            | SECTION_ID_DEBUG_LINE     -> "/61\x00\x00\x00\x00\x00"
+            | SECTION_ID_DEBUG_FRAME    -> "/73\x00\x00\x00\x00\x00"
+        end;
 
       (* The next two pairs are only supposed to be different if the
          file and section alignments differ. This is a stupid emitter
          so they're not, no problem. *)
 
       WORD (TY_u32, (M_SZ hdr_fixup));  (* "Virtual size"    *)
-      WORD (TY_u32, (rva hdr_fixup)); (* "Virtual address" *)
+      WORD (TY_u32, (rva hdr_fixup));   (* "Virtual address" *)
 
       WORD (TY_u32, (F_SZ hdr_fixup));  (* "Size of raw data"    *)
       WORD (TY_u32, (F_POS hdr_fixup)); (* "Pointer to raw data" *)
