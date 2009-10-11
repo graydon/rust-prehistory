@@ -193,7 +193,7 @@ type abi =
     abi_pp_cell: Il.cell;
     abi_implicit_args_sz: int64;
     abi_frame_base_sz: int64;
-    abi_spill_slot: (int64 -> Il.spillbits -> Il.cell);
+    abi_spill_slot: (int64 -> Il.spill -> Il.addr);
   }
 
 

@@ -21,9 +21,9 @@ type bits =
 
 type addr =
     Abs of Asm.expr64
-  | Deref of reg
-  | Idx of (reg * Asm.expr64)
-  | Pcrel of fixup
+  | Based of (reg * (Asm.expr64 option))
+  | Pcrel of (fixup * (Asm.expr64 option))
+  | Spill of spill
 ;;
 
 type code =
@@ -34,12 +34,10 @@ type code =
 
 type regbits = (reg * bits) ;;
 type membits = (addr * bits) ;;
-type spillbits = (spill * bits) ;;
 
 type cell =
     Reg of regbits
   | Mem of membits
-  | Spill of spillbits
 ;;
 
 type operand =
@@ -82,7 +80,6 @@ type binop =
 type unop =
     NEG | NOT
   | UMOV | IMOV
-  | LEA
 ;;
 
 type jmpop =
@@ -117,6 +114,12 @@ type cmp =
     }
 ;;
 
+type lea =
+    {
+      lea_dst: cell;
+      lea_src: addr
+    }
+;;
 
 type jmp =
     {
@@ -134,6 +137,7 @@ type call =
 type quad' =
     Binary of binary
   | Unary of unary
+  | Lea of lea
   | Cmp of cmp
   | Jmp of jmp
   | Push of operand
@@ -165,15 +169,14 @@ type quad_processor =
 let identity_processor =
   let qp_cell = (fun qp c -> match c with
                      Reg (r, b) -> Reg (qp.qp_reg qp r, b)
-                   | Mem (a, b) -> Mem (qp.qp_addr qp a, b)
-                   | Spill _ -> c)
+                   | Mem (a, b) -> Mem (qp.qp_addr qp a, b))
   in
     { qp_reg = (fun qp r -> r);
       qp_addr = (fun qp a -> match a with
-                     Deref r -> Deref (qp.qp_reg qp r)
-                   | Idx (r, i) -> Idx (qp.qp_reg qp r, i)
+                     Based (r, o) -> Based (qp.qp_reg qp r, o)
                    | Abs _
-                   | Pcrel _ -> a);
+                   | Pcrel _
+                   | Spill _ -> a);
       qp_cell_read = qp_cell;
       qp_cell_write = qp_cell;
       qp_code = (fun qp c -> match c with
@@ -197,6 +200,11 @@ let process_quad (qp:quad_processor) (q:quad) : quad =
             Unary { u with
                       unary_dst = qp.qp_cell_write qp u.unary_dst;
                       unary_src = qp.qp_op qp u.unary_src }
+
+        | Lea le ->
+            Lea { lea_dst = qp.qp_cell_write qp le.lea_dst;
+                  lea_src = qp.qp_addr qp le.lea_src }
+
         | Cmp c ->
             Cmp { cmp_lhs = qp.qp_op qp c.cmp_lhs;
                   cmp_rhs = qp.qp_op qp c.cmp_rhs }
@@ -273,13 +281,22 @@ let rec string_of_expr64 (e64:Asm.expr64) : string =
       | Asm.EXT e -> "??ext??"
 ;;
 
+let string_of_off (e:Asm.expr64 option) : string =
+  match e with
+      None -> ""
+    | Some e' -> " + " ^ (string_of_expr64 e')
+;;
+
 let string_of_addr (f:hreg_formatter) (a:addr) : string =
   match a with
-      Deref r -> "[" ^ (string_of_reg f r) ^ "]"
-    | Abs e -> "[" ^ (string_of_expr64 e) ^ "]"
-    | Idx (r,e) -> ("[" ^  (string_of_reg f r) ^
-                      " + " ^ (string_of_expr64 e) ^ "]")
-    | Pcrel f -> ("[<fixup " ^ f.fixup_name ^  ">]")
+      Abs e -> 
+        Printf.sprintf "[%s]" (string_of_expr64 e)
+    | Based (r, off) ->
+        Printf.sprintf "[%s%s]" (string_of_reg f r) (string_of_off off)
+    | Pcrel (f, off) ->
+        Printf.sprintf "[<fixup %s>%s]" f.fixup_name (string_of_off off)
+    | Spill i ->
+        Printf.sprintf "[<spill %d>]" i
 ;;
 
 let string_of_code (f:hreg_formatter) (c:code) : string =
@@ -293,7 +310,6 @@ let string_of_cell (f:hreg_formatter) (c:cell) : string =
   match c with
       Reg (r,_) -> string_of_reg f r
     | Mem (a,_) -> string_of_addr f a
-    | Spill (i,_) -> Printf.sprintf "<spill %d>" i
 ;;
 
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
@@ -325,7 +341,6 @@ let string_of_unop (op:unop) : string =
     | NOT -> "not"
     | UMOV -> "umov"
     | IMOV -> "imov"
-    | LEA -> "lea"
 ;;
 
 let string_of_jmpop (op:jmpop) : string =
@@ -367,6 +382,11 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
           (string_of_operand f c.cmp_lhs)
           (string_of_operand f c.cmp_rhs)
 
+    | Lea le ->
+        Printf.sprintf "lea %s %s"
+          (string_of_cell f le.lea_dst)
+          (string_of_addr f le.lea_src)
+
     | Jmp j ->
         Printf.sprintf "%s %s"
           (string_of_jmpop j.jmp_op)
@@ -398,7 +418,6 @@ let cell_bits (c:cell) : bits =
   match c with
     Reg (_,b) -> b
   | Mem (_,b) -> b
-  | Spill (_,b) -> b
 ;;
 
 
@@ -456,7 +475,7 @@ let next_spill (e:emitter) : spill =
 ;;
 
 let next_spill_cell (e:emitter) (b:bits) : cell =
-  Spill ((next_spill e), b);
+  Mem (Spill (next_spill e), b);
 ;;
 
 

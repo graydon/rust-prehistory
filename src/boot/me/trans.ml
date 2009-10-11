@@ -14,7 +14,6 @@ let one = imm 1L;;
 let zero = imm 0L;;
 let imm_true = one;;
 let imm_false = zero;;
-let badlab = Il.badlab;;
 
 let arr_max a = (Array.length a) - 1;;
 
@@ -46,8 +45,9 @@ let trans_visitor
   let curr_stmt = ref None in
 
   let (abi:Abi.abi) = cx.ctxt_abi in
-  let (word_mem:Il.mem) = abi.Abi.abi_word_mem in
   let (word_sz:int64) = abi.Abi.abi_word_sz in
+  let (word_bits:Il.bits) = abi.Abi.abi_word_bits in
+  let (word_ty:Common.ty_mach) = abi.Abi.abi_word_ty in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
   let (strings:(string,fixup) Hashtbl.t) = Hashtbl.create 0 in
@@ -63,7 +63,7 @@ let trans_visitor
   let pop_emitter _ = ignore (Stack.pop emitters) in
   let emitter _ = Stack.top emitters in
   let name _ = Stack.top path in
-  let emit op dst lhs rhs = Il.emit (emitter()) op dst lhs rhs in
+  let emit q = Il.emit (emitter()) q in
   let next_vreg _ = Il.next_vreg (emitter()) in
   let mark _ : quad_idx = (emitter()).Il.emit_pc in
   let patch_existing (jmp:quad_idx) (targ:quad_idx) : unit =
@@ -72,7 +72,7 @@ let trans_visitor
   let patch (i:quad_idx) : unit =
     Il.patch_jump (emitter()) i (mark());
     (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
-    emit Il.DEAD Il.Nil Il.Nil Il.Nil
+    emit Il.Dead
   in
 
   let annotate (str:string) =
@@ -85,54 +85,61 @@ let trans_visitor
     String.concat "." (stk_elts_from_bot path)
   in
 
-  let word_at_reg_off (reg:Il.reg option) (off:Asm.expr64) : Il.operand =
-    Il.Mem (word_mem, reg, off)
-  in
-(*
-  let byte_at_reg_off (reg:Il.reg option) (off:Asm.expr64) : Il.operand =
-    Il.Mem (Il.M8, reg, off)
-  in
-*)
-
-  let word_at_fp_off (imm:int64) : Il.operand =
-    word_at_reg_off (Some abi.Abi.abi_fp_reg) (Asm.IMM imm)
+  let deref (reg:Il.reg) : Il.addr =
+    Il.Based (reg, None)
   in
 
-  let word_at_sp_off (imm:int64) : Il.operand =
-    word_at_reg_off (Some abi.Abi.abi_sp_reg) (Asm.IMM imm)
+  let based (reg:Il.reg) (off:Asm.expr64) : Il.addr =
+    Il.Based (reg, Some off)
   in
 
-  let word_at_reg_off_imm
-      (reg:Il.reg option)
-      (off:Asm.expr64)
-      (imm:int64)
-      : Il.operand =
-    word_at_reg_off reg (Asm.ADD (off, Asm.IMM imm))
+  let fp_off (imm:int64) : Il.addr =
+    based abi.Abi.abi_fp_reg (Asm.IMM imm)
   in
 
-  let get_reg_off
-      (op:Il.operand)
-      : (Il.reg option * Asm.expr64) =
-    match op with
-        Il.Mem (_, reg, op) -> (reg, op)
-      | _ -> err None "Expected reg/off memory operand"
+  let sp_off (imm:int64) : Il.addr =
+    based abi.Abi.abi_sp_reg (Asm.IMM imm)
   in
 
-  let mov (dst:Il.operand) (src:Il.operand) : unit =
-    emit Il.UMOV dst src Il.Nil
+  let bits_at (addr:Il.addr) (bits:Il.bits) : Il.cell =
+    Il.Mem (addr, bits)
   in
 
-  let lea (dst:Il.operand) (src:Il.operand) : unit =
-    match src with
-        Il.Mem _ | Il.Spill _ ->
-          emit Il.LEA dst src Il.Nil
-      | _ -> err None "LEA on non-memory operand"
+  let word_at (addr:Il.addr) : Il.cell =
+    bits_at addr word_bits
   in
 
-  let alias (src:Il.operand) : Il.operand =
-    let addr = Il.Reg (Il.next_vreg (emitter())) in
-      lea addr src;
-      addr
+  let byte_at (addr:Il.addr) : Il.cell =
+    bits_at addr Il.Bits8
+  in
+
+  let addr_add (addr:Il.addr) (off:Asm.expr64) : Il.addr =
+    let addto e = Asm.ADD (off, e) in
+    match add with
+        Il.Abs e -> Il.Abs (addto e)
+      | Il.Based (r, None) -> Il.Based (r, off)
+      | Il.Based (r, Some e) -> Il.Based (r, Some (addto e))
+      | Il.Pcrel (f, None) -> Il.Pcrel (f, off)
+      | Il.Pcrel (f, Some e) -> Il.Pcrel (f, Some (addto e))
+      | Il.Spill _ -> err None "Adding offset to spill slot"
+  in
+
+  let addr_add_imm (addr:Il.addr) (imm:Asm.expr64) : Il.addr =
+    addr_add addr (Asm.IMM imm)
+  in
+
+  let mov (dst:Il.cell) (src:Il.operand) : unit =
+    emit (Il.umov dst src)
+  in
+
+  let lea (dst:Il.cell) (src:Il.addr) : unit =
+    emit (Il.lea dst src)
+  in
+
+  let alias (addr:Il.addr) : Il.operand =
+    let vreg_cell = Il.next_vreg_cell (emitter()) word_bits in
+      lea vreg_cell addr;
+      Il.Cell vreg_cell
   in
 
   let force_to_mem (src:Il.operand) : Il.operand =

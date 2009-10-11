@@ -1016,7 +1016,7 @@ let elf32_linux_x86_file
         (Il.jmp Il.JMP (Il.CodeAddr (Il.Abs (M_POS jump_slot_fixup))));
       Il.emit_full e (Some jump_slot_initial_target_fixup)
         (Il.Push (Il.Imm (IMM (Int64.of_int i))));
-      Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Pcrel plt0_fixup)));
+      Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Pcrel (plt0_fixup, None))));
       X86.items_of_emitted_quads sess e
     in
     let got_plt_item = DEF (jump_slot_fixup,
@@ -1325,7 +1325,7 @@ let emit_file
       push_pos32 main_fixup;
       Il.emit e (Il.call
                    (Il.Reg (Il.Hreg X86.eax, Il.Bits32))
-                   (Il.CodeAddr (Il.Pcrel libc_start_main_fixup)));
+                   (Il.CodeAddr (Il.Pcrel (libc_start_main_fixup, None))));
       X86.items_of_emitted_quads sess e
   in
 

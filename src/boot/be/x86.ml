@@ -234,16 +234,14 @@ let word_bits = Il.Bits32
 let word_ty = TY_u32
 ;;
 
-let spill_slot (framesz:int64) (sb:Il.spillbits) : Il.cell =
-  let (i,bits) = sb in
+let spill_slot (framesz:int64) (i:Il.spill) : Il.addr =
   let imm = (Asm.IMM
                (Int64.neg
                   (Int64.add framesz
                      (Int64.mul word_sz
                         (Int64.of_int (i+1))))))
   in
-  let addr = Il.Idx ((Il.Hreg ebp), imm) in
-    Il.Mem (addr, bits)
+    Il.Based ((Il.Hreg ebp), Some imm)
 ;;
 
 let c (c:Il.cell) : Il.operand = Il.Cell c ;;
@@ -275,7 +273,7 @@ let restore_callee_saves (e:Il.emitter) : unit =
 
 let word_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = Asm.IMM (Int64.mul (Int64.of_int i) word_sz) in
-  let addr = Il.Idx (reg, imm) in
+  let addr = Il.Based (reg, Some imm) in
     Il.Mem (addr, word_bits)
 ;;
 
@@ -363,7 +361,7 @@ let emit_upcall
    * Strangely, the MOV-immediates don't have a r32 <- imm8 mode. 
    *)
   let ior dst src = emit (Il.binary Il.OR dst (c dst) src) in
-  let pcrel f = Il.CodeAddr (Il.Pcrel f) in
+  let pcrel f = Il.CodeAddr (Il.Pcrel (f, None)) in
 
     assert ((Array.length args) <= Abi.max_upcall_args);
 
@@ -482,10 +480,10 @@ let objfile_main
     begin
       let addr = Il.Abs (Asm.M_POS rust_start_fixup) in
         Il.emit e (Il.umov (rc ecx) (c (Il.Mem (addr, Il.Bits32))));
-        Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Deref (h ecx))));
+        Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Based ((h ecx), None))));
     end
   else
-    Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Pcrel rust_start_fixup)));
+    Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Pcrel (rust_start_fixup, None))));
   Il.emit e (Il.Pop (rc ecx));
   Il.emit e (Il.Pop (rc ecx));
   Il.emit e (Il.umov (rc esp) (ro ebp));
@@ -647,24 +645,24 @@ let rm_r (c:Il.cell) (r:int) : Asm.item =
                   Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
                              Asm.WORD (TY_s32, disp) |]
 
-              | Il.Deref (Il.Hreg rm) when rm != reg_ebp ->
+              | Il.Based ((Il.Hreg rm), None) when rm != reg_ebp ->
                   seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
 
-              | Il.Idx ((Il.Hreg rm), (Asm.IMM 0L)) when rm != reg_ebp ->
+              | Il.Based ((Il.Hreg rm), Some (Asm.IMM 0L)) when rm != reg_ebp ->
                   seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
 
               (* The next two are just to save the relaxation system some churn. *)
-              | Il.Idx ((Il.Hreg rm), Asm.IMM n) when imm_is_byte n ->
+              | Il.Based ((Il.Hreg rm), Some (Asm.IMM n)) when imm_is_byte n ->
                   seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
                     (Asm.WORD (TY_s8, Asm.IMM n))
 
-              | Il.Idx ((Il.Hreg rm), Asm.IMM n) ->
+              | Il.Based ((Il.Hreg rm), Some (Asm.IMM n)) ->
                   seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
                     (Asm.WORD (TY_s32, Asm.IMM n))
 
-              | Il.Idx ((Il.Hreg rm), disp) ->
+              | Il.Based ((Il.Hreg rm), Some disp) ->
                   Asm.new_relaxation
                     [|
                       seq2 rm
@@ -800,11 +798,10 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.item =
 ;;
 
 
-let lea (dst:Il.cell) (src:Il.operand) : Asm.item =
-  match (dst, src) with
-      (Il.Reg ((Il.Hreg r), Il.Bits32),
-       Il.Cell (Il.Mem addr)) ->
-        insn_rm_r 0x8d (Il.Mem addr) (reg r)
+let lea (dst:Il.cell) (addr:Il.addr) : Asm.item =
+  match dst with
+      Il.Reg ((Il.Hreg r), Il.Bits32) ->
+        insn_rm_r 0x8d (Il.Mem (addr, word_bits)) (reg r)
 
     | _ -> raise Unrecognized
 ;;
@@ -819,9 +816,9 @@ let select_insn_misc (q:Il.quad') : Asm.item =
               Il.Reg ((Il.Hreg dst), _) when dst = eax ->
                 begin
                   match c.Il.call_targ with
-                      Il.CodeAddr (Il.Deref c) ->
+                      Il.CodeAddr (Il.Based (c, None)) ->
                         insn_rm_r 0xff (Il.Reg (c, Il.Bits32)) slash2
-                    | Il.CodeAddr (Il.Pcrel f) ->
+                    | Il.CodeAddr (Il.Pcrel (f, None)) ->
                         insn_pcrel_simple 0xe8 f
                     | _ -> raise Unrecognized
                 end
@@ -855,10 +852,10 @@ let select_insn_misc (q:Il.quad') : Asm.item =
                 when is_rm32 (Il.Mem (r, Il.Bits32)) ->
                 insn_rm_r 0xff (Il.Mem (r, Il.Bits32)) slash4
 
-            | (Il.JMP, Il.CodeAddr (Il.Pcrel f)) ->
+            | (Il.JMP, Il.CodeAddr (Il.Pcrel (f, None))) ->
                 insn_pcrel 0xeb 0xe9 f
 
-            | (_, Il.CodeAddr (Il.Pcrel f)) ->
+            | (_, Il.CodeAddr (Il.Pcrel (f, None))) ->
                 let (op8, op32) =
                   match j.Il.jmp_op with
                     | Il.JC  -> (0x72, 0x82)
@@ -937,10 +934,11 @@ let select_insn (q:Il.quad) : Asm.item =
               match u.Il.unary_op with
                   Il.UMOV -> mov false u.Il.unary_dst u.Il.unary_src
                 | Il.IMOV -> mov true u.Il.unary_dst u.Il.unary_src
-                | Il.LEA -> lea u.Il.unary_dst u.Il.unary_src
                 | Il.NEG -> unop slash3
                 | Il.NOT -> unop slash2
             end
+
+      | Il.Lea le -> lea le.Il.lea_dst le.Il.lea_src
 
       | Il.Cmp c -> cmp c.Il.cmp_lhs c.Il.cmp_rhs
       | Il.Binary b ->

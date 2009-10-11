@@ -70,7 +70,7 @@ let convert_labels (cx:ctxt) : unit =
                     end
               | Some f -> f
           in
-            Il.CodeAddr (Il.Pcrel fix)
+            Il.CodeAddr (Il.Pcrel (fix, None))
       | _ -> c
   in
   let qp = { Il.identity_processor
@@ -85,23 +85,22 @@ let convert_labels (cx:ctxt) : unit =
 
 let convert_pre_spills
     (cx:ctxt)
-    (mkspill:(Il.spillbits -> Il.cell))
+    (mkspill:(Il.spill -> Il.addr))
     : int =
   let n = ref 0 in
-  let qp_cell inner (qp:Il.quad_processor) (c:Il.cell) : Il.cell =
-    match c with
-        Il.Spill (i, b) ->
+  let qp_addr (qp:Il.quad_processor) (a:Il.addr) : Il.addr =
+    match a with
+        Il.Spill i ->
           begin
             if i+1 > (!n)
             then n := i+1;
-            mkspill (i, b)
+            mkspill i
           end
-      | _ -> inner qp c
+      | _ -> qp.Il.qp_addr qp a
   in
   let qp = Il.identity_processor in
   let qp = { qp with
-               Il.qp_cell_read = qp_cell qp.Il.qp_cell_read;
-               Il.qp_cell_write = qp_cell qp.Il.qp_cell_write  }
+               Il.qp_addr = qp_addr  }
   in
     begin
       Il.rewrite_quads qp cx.ctxt_quads;
@@ -145,7 +144,6 @@ let quad_used_vregs (q:quad) : Il.vreg list =
     match c with
         Il.Reg _ -> c
       | Il.Mem (a, b) -> Il.Mem (qp.qp_addr qp a, b)
-      | Il.Spill _ -> c
   in
   let qp = { Il.identity_processor with
                Il.qp_reg = qp_reg;
@@ -371,7 +369,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     in
 
     (* Work out pre-spilled slots and allocate 'em. *)
-    let spill_slot (sb:Il.spillbits) = abi.Abi.abi_spill_slot framesz sb in
+    let spill_slot (s:Il.spill) = abi.Abi.abi_spill_slot framesz s in
     let n_pre_spills = convert_pre_spills cx spill_slot in
 
     let (live_in_vregs, live_out_vregs) = calculate_live_bitvectors cx in
@@ -381,11 +379,15 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let hreg_to_vreg = Hashtbl.create 0 in  (* hreg -> vreg *)
     let vreg_to_hreg = Hashtbl.create 0 in (* vreg -> hreg *)
     let vreg_to_bits = Hashtbl.create 0 in (* vreg -> Bits *)
-    let vreg_to_spill = Hashtbl.create 0 in (* vreg -> spillbits *)
+    let vreg_to_spill = Hashtbl.create 0 in (* vreg -> spill *)
     let vreg_bits v =
       if Hashtbl.mem vreg_to_bits v
       then Hashtbl.find vreg_to_bits v
       else abi.Abi.abi_word_bits
+    in
+    let vreg_spill_cell v =
+      Il.Mem ((spill_slot (Hashtbl.find vreg_to_spill v)),
+              (vreg_bits v))
     in
     let newq = ref [] in
     let fixup = ref None in
@@ -416,10 +418,11 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                         s
                     end
                 in
-                let spill = (spill_idx, vreg_bits vreg) in
+                let spill_addr = spill_slot spill_idx in
+                let spill_cell = Il.Mem (spill_addr, (vreg_bits vreg)) in
                   log cx "spilling <%d> from %s to %s"
-                    vreg (hr_str hreg) (string_of_cell hr_str (spill_slot spill));
-                  prepend (Il.mk_quad (Il.umov (spill_slot spill) (Il.Cell (hr hreg))));
+                    vreg (hr_str hreg) (string_of_addr hr_str spill_addr);
+                  prepend (Il.mk_quad (Il.umov spill_cell (Il.Cell (hr hreg))));
               else ()
             end
           else ()
@@ -462,8 +465,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
         prepend (Il.mk_quad
                    (Il.umov
                       (hr hreg)
-                      (Il.Cell (spill_slot ((Hashtbl.find vreg_to_spill vreg),
-                                            (vreg_bits vreg))))))
+                      (Il.Cell (vreg_spill_cell vreg))))
       else ()
     in
 
@@ -497,7 +499,6 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
         | Il.Mem  (a, b) ->
             let qp = { qp with Il.qp_reg = qp_reg false i } in
               Il.Mem (qp.qp_addr qp a, b)
-        | Il.Spill _ -> c
     in
     let qp i = { Il.identity_processor with
                    Il.qp_cell_read = qp_cell false i;
