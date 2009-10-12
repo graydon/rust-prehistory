@@ -187,9 +187,9 @@ let (n_hardregs:int) = 6;;
 
 let prealloc_quad (quad':Il.quad') : Il.quad' =
   let target_bin_to_hreg bin hreg =
-    let bits = Il.cell_bits bin.Il.binary_dst in
+    let ty = Il.cell_ty bin.Il.binary_dst in
       { bin with
-          Il.binary_dst = Il.Reg ((Il.Hreg hreg), bits) }
+          Il.binary_dst = Il.Reg ((Il.Hreg hreg), ty) }
   in
     match quad' with
         Il.Binary bin ->
@@ -204,9 +204,9 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
               end
           end
       | Il.Call c ->
-          let bits = Il.cell_bits c.Il.call_dst in
+          let ty = Il.cell_ty c.Il.call_dst in
             Il.Call { c with
-                        Il.call_dst = Il.Reg ((Il.Hreg eax), bits) }
+                        Il.call_dst = Il.Reg ((Il.Hreg eax), ty) }
       | x -> x
 ;;
 
@@ -245,13 +245,13 @@ let spill_slot (framesz:int64) (i:Il.spill) : Il.addr =
 ;;
 
 let c (c:Il.cell) : Il.operand = Il.Cell c ;;
-let r (r:Il.reg) : Il.cell = Il.Reg ( r, word_bits ) ;;
+let r (r:Il.reg) : Il.cell = Il.Reg ( r, (Il.ValTy word_bits) ) ;;
 let h (x:Il.hreg) : Il.reg = Il.Hreg x ;;
 let rc (x:Il.hreg) : Il.cell = r (h x) ;;
 let ro (x:Il.hreg) : Il.operand = c (rc x) ;;
 let vreg (e:Il.emitter) : (Il.reg * Il.cell) =
   let vr = Il.next_vreg e in
-    (vr, (Il.Reg (vr, word_bits)))
+    (vr, (Il.Reg (vr, (Il.ValTy word_bits))))
 ;;
 let imm (x:Asm.expr64) : Il.operand = Il.Imm x ;;
 
@@ -274,7 +274,7 @@ let restore_callee_saves (e:Il.emitter) : unit =
 let word_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = Asm.IMM (Int64.mul (Int64.of_int i) word_sz) in
   let addr = Il.Based (reg, Some imm) in
-    Il.Mem (addr, word_bits)
+    Il.Addr (addr, Il.OpaqueTy)
 ;;
 
 
@@ -479,7 +479,7 @@ let objfile_main
   then
     begin
       let addr = Il.Abs (Asm.M_POS rust_start_fixup) in
-        Il.emit e (Il.umov (rc ecx) (c (Il.Mem (addr, Il.Bits32))));
+        Il.emit e (Il.umov (rc ecx) (c (Il.Addr (addr, Il.OpaqueTy))));
         Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Based ((h ecx), None))));
     end
   else
@@ -638,7 +638,7 @@ let rm_r (c:Il.cell) (r:int) : Asm.item =
     match c with
         Il.Reg ((Il.Hreg rm), _) ->
           Asm.BYTE (modrm_reg (reg rm) r)
-      | Il.Mem (m, _) ->
+      | Il.Addr (m, _) ->
           begin
             match m with
                 Il.Abs disp ->
@@ -734,20 +734,24 @@ let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.it
   insn_pcrel_relax (Asm.BYTE op8) (Asm.BYTES [| prefix32; op32 |]) fix
 ;;
 
+let is_ty32 (ty:Il.scalar_ty) : bool =
+  match ty with
+      Il.ValTy (Il.Bits32) -> true
+    | Il.AddrTy _ -> true
+    | _ -> false
 
 let is_rm32 (c:Il.cell) : bool =
-  match c with
-      Il.Mem (_, Il.Bits32) -> true
-    | Il.Reg (_, Il.Bits32) -> true
+  is_ty32 (Il.cell_ty c)
+;;
+
+let is_ty8 (ty:Il.scalar_ty) : bool =
+  match ty with
+      Il.ValTy (Il.Bits8) -> true
     | _ -> false
 ;;
 
-
 let is_rm8 (c:Il.cell) : bool =
-  match c with
-      Il.Mem (_, Il.Bits8) -> true
-    | Il.Reg (_, Il.Bits8) -> true
-    | _ -> false
+  is_ty8 (Il.cell_ty c)
 ;;
 
 
@@ -761,36 +765,48 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.item =
 
 
 let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.item =
+
   match (signed, dst, src) with
 
-      (_, _, Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits8)))
-        when is_rm8 dst -> insn_rm_r 0x88 dst (reg r)
+      (* rm8 <- r8 *)
+      (_,  _, Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
+        when is_rm8 dst && is_ty8 src_ty ->
+          insn_rm_r 0x88 dst (reg r)
 
-    | (_, _, Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits32)))
-        when is_rm32 dst -> insn_rm_r 0x89 dst (reg r)
+    (* rm32 <- r32 *)
+    | (_,  _, Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
+        when is_rm32 dst && is_ty32 src_ty ->
+        insn_rm_r 0x89 dst (reg r)
 
-    (* MOVZX *)
-    | (false,
-       Il.Reg ((Il.Hreg r, Il.Bits8)),
-       Il.Cell (Il.Mem (addr, Il.Bits8))) ->
+    (* r8 <- rm8 *)
+    | (_,  Il.Reg ((Il.Hreg r), dst_ty), Il.Cell src_cell)
+        when is_ty8 dst_ty && is_rm8 src_cell ->
+          insn_rm_r 0x8a dst (reg r)
+
+    (* r32 <- rm32 *)
+    | (_,  (Il.Reg ((Il.Hreg r), dst_ty)), Il.Cell src_cell)
+        when is_ty32 dst_ty && is_rm32 src_cell ->
+          insn_rm_r 0x8b dst (reg r)
+
+
+    (* MOVZX: r32 <- zx(rm8) *)
+    | (false, Il.Reg ((Il.Hreg r, dst_ty)), Il.Cell src_cell)
+        when is_ty32 dst_ty && is_rm8 src_cell ->
         Asm.SEQ [| Asm.BYTE 0x0f;
-                   insn_rm_r 0xb6 (Il.Mem (addr, Il.Bits8)) (reg r) |]
+                   insn_rm_r 0xb6 src_cell (reg r) |]
 
-    (* MOVSX *)
-    | (true,
-       Il.Reg ((Il.Hreg r), Il.Bits8),
-       Il.Cell (Il.Mem (addr, Il.Bits8))) ->
+    (* MOVSX: r32 <- sx(rm8) *)
+    | (true, Il.Reg ((Il.Hreg r), dst_ty), Il.Cell src_cell)
+        when is_ty32 dst_ty && is_rm8 src_cell ->
         Asm.SEQ [| Asm.BYTE 0x0f;
-                   insn_rm_r 0xbe (Il.Mem (addr, Il.Bits8)) (reg r) |]
+                   insn_rm_r 0xbe src_cell (reg r) |]
 
-    (* MOV *)
-    | (_, Il.Reg ((Il.Hreg r), Il.Bits32), Il.Cell s)
-        when is_rm32 s -> insn_rm_r 0x8b s (reg r);
-
+    (* rm8 <- imm8 *)
     | (_, _, Il.Imm (Asm.IMM n))
         when is_rm8 dst && imm_is_byte n ->
         insn_rm_r_imm 0xc6 dst slash0 TY_u8 (Asm.IMM n)
 
+    (* rm32 <- imm32 *)
     | (_, _, Il.Imm i) when is_rm32 dst ->
         insn_rm_r_imm 0xc7 dst slash0 TY_u32 i
 
@@ -800,8 +816,8 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.item =
 
 let lea (dst:Il.cell) (addr:Il.addr) : Asm.item =
   match dst with
-      Il.Reg ((Il.Hreg r), Il.Bits32) ->
-        insn_rm_r 0x8d (Il.Mem (addr, word_bits)) (reg r)
+      Il.Reg ((Il.Hreg r), dst_ty) when is_ty32 dst_ty ->
+        insn_rm_r 0x8d (Il.Addr (addr, Il.OpaqueTy)) (reg r)
 
     | _ -> raise Unrecognized
 ;;
@@ -817,7 +833,7 @@ let select_insn_misc (q:Il.quad') : Asm.item =
                 begin
                   match c.Il.call_targ with
                       Il.CodeAddr (Il.Based (c, None)) ->
-                        insn_rm_r 0xff (Il.Reg (c, Il.Bits32)) slash2
+                        insn_rm_r 0xff (Il.Reg (c, Il.voidptr_t)) slash2
                     | Il.CodeAddr (Il.Pcrel (f, None)) ->
                         insn_pcrel_simple 0xe8 f
                     | _ -> raise Unrecognized
@@ -825,7 +841,7 @@ let select_insn_misc (q:Il.quad') : Asm.item =
             | _ -> raise Unrecognized
         end
 
-    | Il.Push (Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits32))) ->
+    | Il.Push (Il.Cell (Il.Reg ((Il.Hreg r), t))) when is_ty32 t ->
         Asm.BYTE (0x50 + (reg r))
 
     | Il.Push (Il.Cell c) when is_rm32 c ->
@@ -837,7 +853,7 @@ let select_insn_misc (q:Il.quad') : Asm.item =
     | Il.Push (Il.Imm i) ->
         Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD (TY_u32, i) |]
 
-    | Il.Pop (Il.Reg ((Il.Hreg r), Il.Bits32)) ->
+    | Il.Pop (Il.Reg ((Il.Hreg r), t)) when is_ty32 t ->
         Asm.BYTE (0x58 + (reg r))
 
     | Il.Pop c when is_rm32 c ->
@@ -848,12 +864,13 @@ let select_insn_misc (q:Il.quad') : Asm.item =
     | Il.Jmp j ->
         begin
           match (j.Il.jmp_op, j.Il.jmp_targ) with
-              (Il.JMP, Il.CodeAddr r)
-                when is_rm32 (Il.Mem (r, Il.Bits32)) ->
-                insn_rm_r 0xff (Il.Mem (r, Il.Bits32)) slash4
 
-            | (Il.JMP, Il.CodeAddr (Il.Pcrel (f, None))) ->
+              (Il.JMP, Il.CodeAddr (Il.Pcrel (f, None))) ->
                 insn_pcrel 0xeb 0xe9 f
+
+            | (Il.JMP, Il.CodeAddr r) ->
+                insn_rm_r 0xff (Il.Addr (r, Il.OpaqueTy)) slash4
+
 
             | (_, Il.CodeAddr (Il.Pcrel (f, None))) ->
                 let (op8, op32) =
@@ -894,11 +911,13 @@ let alu_binop
     (rm_dst_op:int) (rm_src_op:int)
     : Asm.item =
   match (dst, src) with
-      (Il.Reg ((Il.Hreg r), Il.Bits32), Il.Cell c)
-        when is_rm32 c -> insn_rm_r rm_src_op c (reg r)
+      (Il.Reg ((Il.Hreg r), dst_ty), Il.Cell c)
+        when is_ty32 dst_ty && is_rm32 c ->
+          insn_rm_r rm_src_op c (reg r)
 
-    | (_, Il.Cell (Il.Reg ((Il.Hreg r), Il.Bits32)))
-        when is_rm32 dst -> insn_rm_r rm_dst_op dst (reg r)
+    | (_, Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
+        when is_rm32 dst && is_ty32 src_ty ->
+        insn_rm_r rm_dst_op dst (reg r)
 
     | (_, Il.Imm i) when is_rm32 dst
         -> insn_rm_r_imm_s8_s32 0x83 0x81 dst immslash i
@@ -914,8 +933,9 @@ let mul_like (src:Il.operand) (signed:bool) (slash:int)
         insn_rm_r 0xf7 src slash
 
     | Il.Imm i ->
-        Asm.SEQ [| mov signed (Il.Reg ((Il.Hreg edx), Il.Bits32)) src;
-                   insn_rm_r 0xf7 (Il.Reg ((Il.Hreg edx), Il.Bits32)) slash |]
+        let tmp = Il.Reg ((Il.Hreg edx), Il.ValTy Il.Bits32) in
+        Asm.SEQ [| mov signed tmp src;
+                   insn_rm_r 0xf7 tmp slash |]
 
     | _ -> raise Unrecognized
 ;;
@@ -941,6 +961,7 @@ let select_insn (q:Il.quad) : Asm.item =
       | Il.Lea le -> lea le.Il.lea_dst le.Il.lea_src
 
       | Il.Cmp c -> cmp c.Il.cmp_lhs c.Il.cmp_rhs
+
       | Il.Binary b ->
           begin
             if Il.Cell b.Il.binary_dst = b.Il.binary_lhs
@@ -953,23 +974,23 @@ let select_insn (q:Il.quad) : Asm.item =
                   | (_, Il.AND) -> binop slash4 0x21 0x23
                   | (_, Il.OR) -> binop slash1 0x09 0x0b
 
-                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.UMUL)
-                      when r = eax -> mulop false slash4
+                  | (Il.Reg (Il.Hreg r, t), Il.UMUL)
+                      when is_ty32 t && r = eax -> mulop false slash4
 
-                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.IMUL)
-                      when r = eax -> mulop true slash5
+                  | (Il.Reg (Il.Hreg r, t), Il.IMUL)
+                      when is_ty32 t && r = eax -> mulop true slash5
 
-                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.UDIV)
-                      when r = eax -> mulop false slash6
+                  | (Il.Reg (Il.Hreg r, t), Il.UDIV)
+                      when is_ty32 t && r = eax -> mulop false slash6
 
-                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.IDIV)
-                      when r = eax -> mulop true slash7
+                  | (Il.Reg (Il.Hreg r, t), Il.IDIV)
+                      when is_ty32 t && r = eax -> mulop true slash7
 
-                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.UMOD)
-                      when r = edx -> mulop false slash6
+                  | (Il.Reg (Il.Hreg r, t), Il.UMOD)
+                      when is_ty32 t && r = edx -> mulop false slash6
 
-                  | (Il.Reg (Il.Hreg r, Il.Bits32), Il.IMOD)
-                      when r = edx -> mulop true slash7
+                  | (Il.Reg (Il.Hreg r, t), Il.IMOD)
+                      when is_ty32 t && r = edx -> mulop true slash7
 
                   | _ -> raise Unrecognized
             else raise Unrecognized

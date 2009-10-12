@@ -47,7 +47,6 @@ let trans_visitor
   let (abi:Abi.abi) = cx.ctxt_abi in
   let (word_sz:int64) = abi.Abi.abi_word_sz in
   let (word_bits:Il.bits) = abi.Abi.abi_word_bits in
-  let (word_ty:Common.ty_mach) = abi.Abi.abi_word_ty in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
   let (strings:(string,fixup) Hashtbl.t) = Hashtbl.create 0 in
@@ -85,46 +84,46 @@ let trans_visitor
     String.concat "." (stk_elts_from_bot path)
   in
 
-  let deref (reg:Il.reg) : Il.addr =
+  let based (reg:Il.reg) : Il.addr =
     Il.Based (reg, None)
   in
 
-  let based (reg:Il.reg) (off:Asm.expr64) : Il.addr =
+  let based_off (reg:Il.reg) (off:Asm.expr64) : Il.addr =
     Il.Based (reg, Some off)
   in
 
-  let fp_off (imm:int64) : Il.addr =
-    based abi.Abi.abi_fp_reg (Asm.IMM imm)
+  let based_imm (reg:Il.reg) (imm:int64) : Il.addr =
+    based_off reg (Asm.IMM imm)
   in
 
-  let sp_off (imm:int64) : Il.addr =
-    based abi.Abi.abi_sp_reg (Asm.IMM imm)
+  let fp_imm (imm:int64) : Il.addr =
+    based_imm abi.Abi.abi_fp_reg imm
   in
 
-  let bits_at (addr:Il.addr) (bits:Il.bits) : Il.cell =
-    Il.Mem (addr, bits)
+  let sp_imm (imm:int64) : Il.addr =
+    based_imm abi.Abi.abi_sp_reg imm
   in
 
   let word_at (addr:Il.addr) : Il.cell =
-    bits_at addr word_bits
+    Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
   in
 
   let byte_at (addr:Il.addr) : Il.cell =
-    bits_at addr Il.Bits8
+    Il.Addr (addr, Il.ScalarTy (Il.ValTy Il.Bits8))
   in
 
   let addr_add (addr:Il.addr) (off:Asm.expr64) : Il.addr =
     let addto e = Asm.ADD (off, e) in
-    match add with
-        Il.Abs e -> Il.Abs (addto e)
-      | Il.Based (r, None) -> Il.Based (r, off)
-      | Il.Based (r, Some e) -> Il.Based (r, Some (addto e))
-      | Il.Pcrel (f, None) -> Il.Pcrel (f, off)
-      | Il.Pcrel (f, Some e) -> Il.Pcrel (f, Some (addto e))
-      | Il.Spill _ -> err None "Adding offset to spill slot"
+      match addr with
+          Il.Abs e -> Il.Abs (addto e)
+        | Il.Based (r, None) -> Il.Based (r, Some off)
+        | Il.Based (r, Some e) -> Il.Based (r, Some (addto e))
+        | Il.Pcrel (f, None) -> Il.Pcrel (f, Some off)
+        | Il.Pcrel (f, Some e) -> Il.Pcrel (f, Some (addto e))
+        | Il.Spill _ -> err None "Adding offset to spill slot"
   in
 
-  let addr_add_imm (addr:Il.addr) (imm:Asm.expr64) : Il.addr =
+  let addr_add_imm (addr:Il.addr) (imm:int64) : Il.addr =
     addr_add addr (Asm.IMM imm)
   in
 
@@ -136,46 +135,57 @@ let trans_visitor
     emit (Il.lea dst src)
   in
 
-  let alias (addr:Il.addr) : Il.operand =
-    let vreg_cell = Il.next_vreg_cell (emitter()) word_bits in
+
+  let alias (ta:Il.typed_addr) : Il.operand =
+    let addr, ty = ta in
+    let vreg_cell = Il.next_vreg_cell (emitter()) (Il.AddrTy ty) in
       lea vreg_cell addr;
       Il.Cell vreg_cell
   in
 
-  let force_to_mem (src:Il.operand) : Il.operand =
+  let force_to_mem (src:Il.operand) : Il.typed_addr =
+    let do_spill (t:Il.scalar_ty) =
+      let s = (Il.next_spill (emitter())) in
+      let spill_addr = Il.Spill s in
+      let spill_ta = (spill_addr, Il.ScalarTy t) in
+        mov (Il.Addr spill_ta) src;
+        spill_ta
+    in
     match src with
-        Il.Mem _ | Il.Spill _ -> src
-      | Il.Reg _ | Il.Imm _ ->
-          let s = (Il.next_spill (emitter())) in
-            mov s src; s
-      | _ -> err None "force_to_mem on illegal operand"
+        Il.Cell (Il.Addr ta) -> ta
+      | Il.Cell (Il.Reg (_, t)) -> do_spill t
+      | Il.Imm _ -> do_spill (Il.ValTy word_bits)
   in
 
-  let deref (mem:Il.operand) : Il.operand =
-    let reg = next_vreg() in
-    let res = word_at_reg_off (Some reg) (Asm.IMM 0L) in
-      mov (Il.Reg reg) mem;
-      res
-  in
-
-  let deref_off (mem:Il.operand) (off:int64) : Il.operand =
-    let reg = next_vreg() in
-    let res = word_at_reg_off (Some reg) (Asm.IMM off) in
-      mov (Il.Reg reg) mem;
-      res
-  in
-
-  let force_to_reg (op:Il.operand) : Il.reg =
-    let do_mov _ =
+  let force_to_reg (op:Il.operand) : Il.typed_reg =
+    let do_mov st =
       let tmp = next_vreg () in
-        mov (Il.Reg tmp) op;
-        tmp
+      let regty = (tmp, st) in
+        mov (Il.Reg regty) op;
+        regty
     in
       match op with
-          Il.Reg r -> r
-        | Il.Imm _ | Il.Spill _ -> do_mov ()
-        | Il.Mem (mem, _, _) when mem = word_mem -> do_mov ()
-        | _ -> err None "unhandled operand type in force_to_reg"
+          Il.Cell (Il.Reg rt) -> rt
+        | Il.Cell (Il.Addr (_, refty)) -> do_mov (Il.AddrTy refty)
+        | Il.Imm _ -> do_mov (Il.ValTy word_bits)
+  in
+
+  let deref (ptr:Il.operand) : Il.typed_addr =
+    let (reg, ty) = force_to_reg ptr in
+      match ty with
+          Il.AddrTy t -> (based reg, t)
+        | Il.ValTy _ -> err None "dereferencing value-typed operand"
+  in
+
+  let deref_off (ptr:Il.operand) (off:Asm.expr64) : Il.typed_addr =
+    let (reg, ty) = force_to_reg ptr in
+      match ty with
+          Il.AddrTy t -> (based_off reg off, t)
+        | Il.ValTy _ -> err None "dereferencing value-typed operand"
+  in
+
+  let deref_imm (ptr:Il.operand) (imm:int64) : Il.typed_addr =
+    deref_off ptr (Asm.IMM imm)
   in
 
   let rec atom_type (at:Ast.atom) : Ast.ty =
@@ -244,24 +254,75 @@ let trans_visitor
       | Some v -> v
   in
 
+  let rec slot_referent_type (s:Ast.slot) : Il.referent_ty =
+    let bw = Il.ScalarTy (Il.ValTy word_bits) in
+    let ptr = Il.ScalarTy (Il.voidptr_t) in
+    let op = Il.OpaqueTy in
+    let rec referent_ty t =
+      match t with
+          Ast.TY_any -> Il.StructTy [| bw;  ptr |]
+        | Ast.TY_nil -> bw
+        | Ast.TY_int -> bw
+        | Ast.TY_mach (TY_u8) -> Il.ScalarTy (Il.ValTy Il.Bits8)
+        | Ast.TY_mach (TY_s8) -> Il.ScalarTy (Il.ValTy Il.Bits8)
+        | Ast.TY_mach (TY_u16) -> Il.ScalarTy (Il.ValTy Il.Bits16)
+        | Ast.TY_mach (TY_s16) -> Il.ScalarTy (Il.ValTy Il.Bits16)
+        | Ast.TY_mach (TY_u32) -> Il.ScalarTy (Il.ValTy Il.Bits32)
+        | Ast.TY_mach (TY_s32) -> Il.ScalarTy (Il.ValTy Il.Bits32)
+        | Ast.TY_mach (TY_u64) -> Il.ScalarTy (Il.ValTy Il.Bits64)
+        | Ast.TY_mach (TY_s64) -> Il.ScalarTy (Il.ValTy Il.Bits64)
+        | Ast.TY_char -> Il.ScalarTy (Il.ValTy Il.Bits32)
+        | Ast.TY_str -> Il.StructTy [| bw; bw; bw; ptr |]
+        | Ast.TY_vec _ -> Il.StructTy [| bw; bw; bw; ptr |]
+        | Ast.TY_tup tt ->
+            Il.StructTy (Array.map slot_referent_type tt)
+        | Ast.TY_rec tr ->
+            Il.StructTy
+              (Array.map (fun (ident, slot) ->
+                            slot_referent_type slot) tr)
+        | Ast.TY_tag _ -> op
+        | Ast.TY_iso _ -> op
+        | Ast.TY_idx _ -> op
+
+        | Ast.TY_fn _ -> op
+        | Ast.TY_pred _ -> op
+        | Ast.TY_chan _ -> op
+        | Ast.TY_port _ -> op
+
+        | Ast.TY_mod _ -> op
+        | Ast.TY_prog _ -> Il.StructTy [| ptr; ptr; ptr |]
+        | Ast.TY_proc -> op
+        | Ast.TY_opaque _ -> op
+        | Ast.TY_named _ -> err None "named type"
+        | Ast.TY_type -> op
+        | Ast.TY_constrained (t, _) -> slot_referent_type t
+        | Ast.TY_lim t -> referent_type t
+    in
+      referent_ty (slot_ty s)
+  in
+
+  let slot_id_referent_type (slotit:node_id) : Il.referent_ty =
+    slot_referent_type (Hashtbl.find cx.ctxt_all_slots slotid)
+  in
+
   let operand_of_block_slot
       (slotid:node_id)
       : Il.operand =
     match htab_search cx.ctxt_slot_vregs slotid with
         Some vr ->
-          Il.Reg (Il.Vreg (cell_vreg_num vr))
+          Il.Reg (Il.Vreg (cell_vreg_num vr, slot_id_referent_type slotid))
       | None ->
           begin
             match htab_search cx.ctxt_slot_layouts slotid with
                 None -> err (Some slotid) "slot assigned to neither vreg nor layout"
               | Some layout ->
                   let disp = layout.layout_offset in
-                    word_at_fp_off disp
+                    fp_imm disp
           end
   in
 
   let operand_of_proc_slot (lval_id:node_id) (slot_id:node_id)  =
-    let pp =
+    let pp_cell =
       if Hashtbl.mem cx.ctxt_lval_is_in_proc_init lval_id
       then
         let prog = get_prog_owning_slot cx slot_id in
@@ -269,14 +330,14 @@ let trans_visitor
             None -> err (Some lval_id) "Lval in nonexistent prog init"
           | Some init -> Hashtbl.find cx.ctxt_slot_layouts init.node.Ast.init_proc_input.id
         in
-          word_at_sp_off init_proc_slot_layout.layout_offset
+          word_at (sp_imm init_proc_slot_layout.layout_offset)
       else
-        abi.Abi.abi_pp_operand
+        abi.Abi.abi_pp_cell
     in
     let layout = Hashtbl.find cx.ctxt_slot_layouts slot_id in
     let disp = (Int64.add layout.layout_offset (word_n Abi.proc_field_data))
     in
-      word_at_reg_off (Some (force_to_reg pp)) (Asm.IMM disp)
+      word_at (deref_imm (Il.Cell pp_cell) disp)
   in
 
   let rec trans_lval_ext
@@ -336,12 +397,12 @@ let trans_visitor
    * return: ptr to element.
    *)
   and trans_bounds_check (vec:Il.operand) (mul_idx:Il.operand) : Il.operand =
-    let len = deref_off vec (word_n 2) in
+    let len = deref_imm vec (word_n 2) in
     let base = Il.Reg (next_vreg()) in
     let elt = Il.Reg (next_vreg ()) in
     let diff = Il.Reg (next_vreg ()) in
       annotate "bounds check";
-      lea base (deref_off vec (word_n 3));
+      lea base (deref_imm vec (word_n 3));
       emit Il.ADD elt base mul_idx;
       emit Il.SUB diff elt base;
       let jmp = trans_compare Il.JB diff len in
@@ -494,7 +555,7 @@ let trans_visitor
       emit cjmp Il.Nil badlab Il.Nil;
       [jmp]
 
-  and trans_structural_compare 
+  and trans_structural_compare
       (cjmp:Il.op)
       (lhs:Il.operand) (* read alias *)
       (rhs:Il.operand) (* read alias *)
@@ -509,7 +570,7 @@ let trans_visitor
         deref_slot (word_at_reg_off (Some x) (Asm.IMM off)) slot INTENT_read
       in
       let new_jmps =
-        trans_structural_compare cjmp 
+        trans_structural_compare cjmp
           (load lhs_reg) (load rhs_reg) (slot_ty slot)
       in
         jmps := new_jmps :: (!jmps)
@@ -689,7 +750,7 @@ let trans_visitor
       let in_slots = tsig.Ast.sig_input_slots in
         (* FIXME: this is a ghastly mess. *)
       let arg_layouts = layout_init_call_tup abi tsig in
-      let init_operand = deref_off prog_operand (word_n Abi.prog_field_init)
+      let init_operand = deref_imm prog_operand (word_n Abi.prog_field_init)
       in
         emit Il.CMP Il.Nil init_operand imm_false;
         let fwd_jmp = mark () in
@@ -814,9 +875,9 @@ let trans_visitor
     let padded_sz = Int64.add init_sz (word_n 3) in
     let alloc_sz = next_power_of_two padded_sz in
       trans_malloc dstop alloc_sz;
-      mov (deref_off dstop (word_n 0)) one;
-      mov (deref_off dstop (word_n 1)) (imm alloc_sz);
-      mov (deref_off dstop (word_n 2)) (imm init_sz);
+      mov (deref_imm dstop (word_n 0)) one;
+      mov (deref_imm dstop (word_n 1)) (imm alloc_sz);
+      mov (deref_imm dstop (word_n 2)) (imm init_sz);
       Array.iteri
         begin
           fun i atom ->
@@ -977,7 +1038,7 @@ let trans_visitor
       match intent with
           INTENT_init ->
             init_exterior_slot operand slot;
-            deref_off operand exterior_body_off
+            deref_imm operand exterior_body_off
 
         | INTENT_write ->
             let rc = exterior_refcount_cell operand in
@@ -994,10 +1055,10 @@ let trans_visitor
                   drop_refcount_and_maybe_free rc operand slot;
                   mov operand tmp;
                   patch j;
-                  deref_off operand exterior_body_off
+                  deref_imm operand exterior_body_off
 
         | INTENT_read ->
-            deref_off operand exterior_body_off
+            deref_imm operand exterior_body_off
 
         | INTENT_drop ->
             let rc = exterior_refcount_cell operand in
@@ -1283,7 +1344,7 @@ let trans_visitor
                   iflog (fun _ ->
                            annotate (Printf.sprintf "fn-call arg %d of %d"
                                        i n_layouts));
-                  let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
+                  let param_operand = sp_imm arg_layouts.(i).layout_offset in
                     match i with
                         0 -> trans_arg0 param_operand output_operand
                       | 1 -> trans_arg1 param_operand
@@ -1299,7 +1360,7 @@ let trans_visitor
                   iflog (fun _ ->
                            annotate (Printf.sprintf "init-call arg %d of %d"
                                        i n_layouts));
-                  let param_operand = word_at_sp_off arg_layouts.(i).layout_offset in
+                  let param_operand = sp_imm arg_layouts.(i).layout_offset in
                     match i with
                         0 -> trans_arg0 param_operand output_operand
                       | 1 -> trans_arg1 param_operand
@@ -1313,7 +1374,7 @@ let trans_visitor
       let vr = Il.Reg (Il.next_vreg (emitter())) in
         emit Il.CCALL vr callee_operand Il.Nil;
         for i = implicit_args to arr_max arg_layouts do
-          let operand = word_at_sp_off arg_layouts.(i).layout_offset in
+          let operand = sp_imm arg_layouts.(i).layout_offset in
             iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
             trans_drop_slot operand in_slots.(i-implicit_args)
         done
@@ -1465,7 +1526,7 @@ let trans_visitor
                         None -> ()
                       | Some at ->
                           let disp = abi.Abi.abi_frame_base_sz in
-                          let dst = deref (word_at_fp_off disp) in
+                          let dst = deref (fp_imm disp) in
                           let src = trans_atom at in
                             mov dst src
                   end;
@@ -1559,7 +1620,7 @@ let trans_visitor
       end;
       let _ = log cx "tag variant: %s -> tag value #%d" n (!i) in
       let disp = abi.Abi.abi_frame_base_sz in
-      let dst = deref (word_at_fp_off disp) in
+      let dst = deref (fp_imm disp) in
         (* A clever compiler will inline this. We are not clever. *)
         mov dst (imm (Int64.of_int (!i)));
         (* FIXME: tuple contents after tag number. *)
@@ -1582,8 +1643,8 @@ let trans_visitor
     trans_upcall Abi.UPCALL_native
       [|
         (trans_static_string (name()));
-        (word_at_fp_off ret_addr_disp);
-        (alias (word_at_fp_off arg0_disp));
+        (fp_imm ret_addr_disp);
+        (alias (fp_imm arg0_disp));
         imm (Int64.of_int (Array.length tsig.Ast.sig_input_slots))
       |];
     trans_frame_exit fnid;

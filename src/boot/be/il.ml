@@ -1,5 +1,26 @@
 open Common;;
 
+(* IL type system, very rudimentary. *)
+
+type bits =
+    Bits8
+  | Bits16
+  | Bits32
+  | Bits64
+;;
+
+type scalar_ty =
+    ValTy of bits
+  | AddrTy of referent_ty
+
+and referent_ty =
+    ScalarTy of scalar_ty
+  | StructTy of referent_ty array
+  | OpaqueTy (* Unknown memory-resident thing. *)
+;;
+
+let (voidptr_t:scalar_ty) = AddrTy OpaqueTy;;
+
 (* Operands. *)
 
 type vreg = int ;;
@@ -10,13 +31,6 @@ type spill = int ;;
 type reg =
     Vreg of vreg
   | Hreg of hreg
-;;
-
-type bits =
-    Bits8
-  | Bits16
-  | Bits32
-  | Bits64
 ;;
 
 type addr =
@@ -32,12 +46,12 @@ type code =
   | CodeNone
 ;;
 
-type regbits = (reg * bits) ;;
-type membits = (addr * bits) ;;
+type typed_reg = (reg * scalar_ty);;
+type typed_addr = (addr * referent_ty);;
 
 type cell =
-    Reg of regbits
-  | Mem of membits
+    Reg of typed_reg
+  | Addr of typed_addr
 ;;
 
 type operand =
@@ -155,6 +169,14 @@ type quad =
 
 type quads = quad array ;;
 
+(* Query functions. *)
+
+let cell_ty (c:cell) : scalar_ty =
+  match c with
+      Reg (_, st) -> st
+    | Addr (_, rt) -> AddrTy rt
+;;
+
 (* Processor. *)
 
 type quad_processor =
@@ -169,7 +191,7 @@ type quad_processor =
 let identity_processor =
   let qp_cell = (fun qp c -> match c with
                      Reg (r, b) -> Reg (qp.qp_reg qp r, b)
-                   | Mem (a, b) -> Mem (qp.qp_addr qp a, b))
+                   | Addr (a, b) -> Addr (qp.qp_addr qp a, b))
   in
     { qp_reg = (fun qp r -> r);
       qp_addr = (fun qp a -> match a with
@@ -289,7 +311,7 @@ let string_of_off (e:Asm.expr64 option) : string =
 
 let string_of_addr (f:hreg_formatter) (a:addr) : string =
   match a with
-      Abs e -> 
+      Abs e ->
         Printf.sprintf "[%s]" (string_of_expr64 e)
     | Based (r, off) ->
         Printf.sprintf "[%s%s]" (string_of_reg f r) (string_of_off off)
@@ -309,7 +331,7 @@ let string_of_code (f:hreg_formatter) (c:code) : string =
 let string_of_cell (f:hreg_formatter) (c:cell) : string =
   match c with
       Reg (r,_) -> string_of_reg f r
-    | Mem (a,_) -> string_of_addr f a
+    | Addr (a,_) -> string_of_addr f a
 ;;
 
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
@@ -412,14 +434,6 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
 ;;
 
 
-(* Query functions. *)
-
-let cell_bits (c:cell) : bits =
-  match c with
-    Reg (_,b) -> b
-  | Mem (_,b) -> b
-;;
-
 
 (* Emitters. *)
 
@@ -464,8 +478,8 @@ let next_vreg (e:emitter) : reg =
   Vreg (next_vreg_num e)
 ;;
 
-let next_vreg_cell (e:emitter) (b:bits) : cell =
-  Reg ((next_vreg e), b)
+let next_vreg_cell (e:emitter) (s:scalar_ty) : cell =
+  Reg ((next_vreg e), s)
 ;;
 
 let next_spill (e:emitter) : spill =
@@ -474,8 +488,8 @@ let next_spill (e:emitter) : spill =
     i
 ;;
 
-let next_spill_cell (e:emitter) (b:bits) : cell =
-  Mem (Spill (next_spill e), b);
+let next_spill_slot (e:emitter) (r:referent_ty) : typed_addr =
+  (Spill (next_spill e), r);
 ;;
 
 
@@ -504,6 +518,11 @@ let unary (op:unop) (dst:cell) (src:operand) : quad' =
 let jmp (op:jmpop) (targ:code) : quad' =
   Jmp { jmp_op = op;
         jmp_targ = targ; }
+;;
+
+let lea (dst:cell) (src:addr) : quad' =
+  Lea { lea_dst = dst;
+        lea_src = src; }
 ;;
 
 let cmp (lhs:operand) (rhs:operand) : quad' =
@@ -543,16 +562,16 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
 
 
   let emit_quad (q':quad') : unit =
-    (* decay mem-mem movs *)
+    (* decay addr-addr movs *)
     match q' with
-        Unary { unary_dst = Mem (dst_addr, dst_bits);
-                unary_src = Cell (Mem (src_addr, src_bits));
+        Unary { unary_dst = Addr (dst_addr, dst_ty);
+                unary_src = Cell (Addr (src_addr, src_ty));
                 unary_op = op }
           when is_mov op ->
             begin
-              let v = next_vreg_cell e dst_bits in
-                emit_quad_bottom (unary op v (Cell (Mem (src_addr, src_bits))));
-                emit_quad_bottom (unary op (Mem (dst_addr, dst_bits)) (Cell v))
+              let v = next_vreg_cell e (AddrTy dst_ty) in
+                emit_quad_bottom (unary op v (Cell (Addr (src_addr, src_ty))));
+                emit_quad_bottom (unary op (Addr (dst_addr, dst_ty)) (Cell v))
             end
       | _ -> emit_quad_bottom q'
   in

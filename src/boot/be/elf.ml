@@ -1310,7 +1310,7 @@ let emit_file
   let start_fn =
     let e = X86.new_emitter () in
     let push_r32 r = Il.emit e
-      (Il.Push (Il.Cell (Il.Reg (Il.Hreg r, Il.Bits32))))
+      (Il.Push (Il.Cell (Il.Reg (Il.Hreg r, Il.ValTy Il.Bits32))))
     in
     let push_pos32 fix = Il.emit e
       (Il.Push (Il.Imm (M_POS fix)))
@@ -1324,7 +1324,7 @@ let emit_file
       push_r32 X86.esi;
       push_pos32 main_fixup;
       Il.emit e (Il.call
-                   (Il.Reg (Il.Hreg X86.eax, Il.Bits32))
+                   (Il.Reg (Il.Hreg X86.eax, Il.ValTy Il.Bits32))
                    (Il.CodeAddr (Il.Pcrel (libc_start_main_fixup, None))));
       X86.items_of_emitted_quads sess e
   in

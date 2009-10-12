@@ -143,7 +143,7 @@ let quad_used_vregs (q:quad) : Il.vreg list =
   let qp_cell_write qp c =
     match c with
         Il.Reg _ -> c
-      | Il.Mem (a, b) -> Il.Mem (qp.qp_addr qp a, b)
+      | Il.Addr (a, b) -> Il.Addr (qp.qp_addr qp a, b)
   in
   let qp = { Il.identity_processor with
                Il.qp_reg = qp_reg;
@@ -330,20 +330,20 @@ let list_to_str list eltstr =
 ;;
 
 
-let collect_vreg_bits
+let collect_vreg_tys
     (cx:ctxt)
-    (vreg_to_bits:(Il.vreg,Il.bits) Hashtbl.t)
+    (vreg_to_ty:(Il.vreg,Il.scalar_ty) Hashtbl.t)
     : unit =
   let qp_cell qp c =
     match c with
-        Reg (Vreg v, b) ->
+        Reg (Vreg v, t) ->
           begin
-            if Hashtbl.mem vreg_to_bits v
+            if Hashtbl.mem vreg_to_ty v
             then
-              let bits = Hashtbl.find vreg_to_bits v in
-                assert (bits = b)
+              let ty = Hashtbl.find vreg_to_ty v in
+                assert (ty = t)
             else
-              Hashtbl.replace vreg_to_bits v b;
+              Hashtbl.replace vreg_to_ty v t;
             c
           end
       | _ -> c
@@ -378,16 +378,16 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let dirty_vregs = Hashtbl.create 0 in (* vreg -> () *)
     let hreg_to_vreg = Hashtbl.create 0 in  (* hreg -> vreg *)
     let vreg_to_hreg = Hashtbl.create 0 in (* vreg -> hreg *)
-    let vreg_to_bits = Hashtbl.create 0 in (* vreg -> Bits *)
+    let vreg_to_ty = Hashtbl.create 0 in (* vreg -> scalar_ty *)
     let vreg_to_spill = Hashtbl.create 0 in (* vreg -> spill *)
-    let vreg_bits v =
-      if Hashtbl.mem vreg_to_bits v
-      then Hashtbl.find vreg_to_bits v
-      else abi.Abi.abi_word_bits
+    let vreg_ty v =
+      if Hashtbl.mem vreg_to_ty v
+      then Hashtbl.find vreg_to_ty v
+      else Il.voidptr_t
     in
     let vreg_spill_cell v =
-      Il.Mem ((spill_slot (Hashtbl.find vreg_to_spill v)),
-              (vreg_bits v))
+      Il.Addr ((spill_slot (Hashtbl.find vreg_to_spill v)),
+               Il.ScalarTy (vreg_ty v))
     in
     let newq = ref [] in
     let fixup = ref None in
@@ -395,7 +395,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       newq := {q with quad_fixup = !fixup} :: (!newq);
       fixup := None
     in
-    let hr h = Il.Reg (Il.Hreg h, abi.Abi.abi_word_bits) in
+    let hr h = Il.Reg (Il.Hreg h, Il.voidptr_t) in
     let hr_str = cx.ctxt_abi.Abi.abi_str_of_hardreg in
     let clean_hreg i hreg =
       if (Hashtbl.mem hreg_to_vreg hreg) &&
@@ -419,7 +419,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                     end
                 in
                 let spill_addr = spill_slot spill_idx in
-                let spill_cell = Il.Mem (spill_addr, (vreg_bits vreg)) in
+                let spill_cell = Il.Addr (spill_addr, Il.ScalarTy (vreg_ty vreg)) in
                   log cx "spilling <%d> from %s to %s"
                     vreg (hr_str hreg) (string_of_addr hr_str spill_addr);
                   prepend (Il.mk_quad (Il.umov spill_cell (Il.Cell (hr hreg))));
@@ -496,9 +496,9 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let qp_cell def i qp c =
       match c with
           Il.Reg (r, b) -> Il.Reg (qp_reg def i qp r, b)
-        | Il.Mem  (a, b) ->
+        | Il.Addr  (a, b) ->
             let qp = { qp with Il.qp_reg = qp_reg false i } in
-              Il.Mem (qp.qp_addr qp a, b)
+              Il.Addr (qp.qp_addr qp a, b)
     in
     let qp i = { Il.identity_processor with
                    Il.qp_cell_read = qp_cell false i;
@@ -506,7 +506,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     in
       cx.ctxt_next_spill <- n_pre_spills;
       convert_labels cx;
-      collect_vreg_bits cx vreg_to_bits;
+      collect_vreg_tys cx vreg_to_ty;
       for i = 0 to cx.ctxt_abi.Abi.abi_n_hardregs - 1
       do
         inactive_hregs := i :: (!inactive_hregs)
