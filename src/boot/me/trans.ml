@@ -175,6 +175,7 @@ let trans_visitor
       match ty with
           Il.AddrTy t -> (based reg, t)
         | Il.ValTy _ -> err None "dereferencing value-typed operand"
+        | Il.NilTy ->  err None "dereferencing nil-typed operand"
   in
 
   let deref_off (ptr:Il.operand) (off:Asm.expr64) : Il.typed_addr =
@@ -182,6 +183,7 @@ let trans_visitor
       match ty with
           Il.AddrTy t -> (based_off reg off, t)
         | Il.ValTy _ -> err None "dereferencing value-typed operand"
+        | Il.NilTy ->  err None "dereferencing nil-typed operand"
   in
 
   let deref_imm (ptr:Il.operand) (imm:int64) : Il.typed_addr =
@@ -254,74 +256,38 @@ let trans_visitor
       | Some v -> v
   in
 
-  let rec slot_referent_type (s:Ast.slot) : Il.referent_ty =
-    let bw = Il.ScalarTy (Il.ValTy word_bits) in
-    let ptr = Il.ScalarTy (Il.voidptr_t) in
-    let op = Il.OpaqueTy in
-    let rec referent_ty t =
-      match t with
-          Ast.TY_any -> Il.StructTy [| bw;  ptr |]
-        | Ast.TY_nil -> bw
-        | Ast.TY_int -> bw
-        | Ast.TY_mach (TY_u8) -> Il.ScalarTy (Il.ValTy Il.Bits8)
-        | Ast.TY_mach (TY_s8) -> Il.ScalarTy (Il.ValTy Il.Bits8)
-        | Ast.TY_mach (TY_u16) -> Il.ScalarTy (Il.ValTy Il.Bits16)
-        | Ast.TY_mach (TY_s16) -> Il.ScalarTy (Il.ValTy Il.Bits16)
-        | Ast.TY_mach (TY_u32) -> Il.ScalarTy (Il.ValTy Il.Bits32)
-        | Ast.TY_mach (TY_s32) -> Il.ScalarTy (Il.ValTy Il.Bits32)
-        | Ast.TY_mach (TY_u64) -> Il.ScalarTy (Il.ValTy Il.Bits64)
-        | Ast.TY_mach (TY_s64) -> Il.ScalarTy (Il.ValTy Il.Bits64)
-        | Ast.TY_char -> Il.ScalarTy (Il.ValTy Il.Bits32)
-        | Ast.TY_str -> Il.StructTy [| bw; bw; bw; ptr |]
-        | Ast.TY_vec _ -> Il.StructTy [| bw; bw; bw; ptr |]
-        | Ast.TY_tup tt ->
-            Il.StructTy (Array.map slot_referent_type tt)
-        | Ast.TY_rec tr ->
-            Il.StructTy
-              (Array.map (fun (ident, slot) ->
-                            slot_referent_type slot) tr)
-        | Ast.TY_tag _ -> op
-        | Ast.TY_iso _ -> op
-        | Ast.TY_idx _ -> op
-
-        | Ast.TY_fn _ -> op
-        | Ast.TY_pred _ -> op
-        | Ast.TY_chan _ -> op
-        | Ast.TY_port _ -> op
-
-        | Ast.TY_mod _ -> op
-        | Ast.TY_prog _ -> Il.StructTy [| ptr; ptr; ptr |]
-        | Ast.TY_proc -> op
-        | Ast.TY_opaque _ -> op
-        | Ast.TY_named _ -> err None "named type"
-        | Ast.TY_type -> op
-        | Ast.TY_constrained (t, _) -> slot_referent_type t
-        | Ast.TY_lim t -> referent_type t
-    in
-      referent_ty (slot_ty s)
+  let slot_id_referent_type (slot_id:node_id) : Il.referent_ty =
+    slot_referent_type abi (Hashtbl.find cx.ctxt_all_slots slot_id)
   in
 
-  let slot_id_referent_type (slotit:node_id) : Il.referent_ty =
-    slot_referent_type (Hashtbl.find cx.ctxt_all_slots slotid)
+  let cell_of_block_slot
+      (slot_id:node_id)
+      : Il.cell =
+    let referent_type = slot_id_referent_type slot_id in
+      match htab_search cx.ctxt_slot_vregs slot_id with
+          Some vr ->
+            let scalar_type =
+              match referent_type with
+                  Il.ScalarTy st -> st
+                | Il.StructTy _ -> err (Some slot_id) "cannot treat structured referent as single operand"
+                | Il.OpaqueTy -> err (Some slot_id) "cannot treat opaque referent as single operand"
+            in
+              Il.Reg (Il.Vreg (cell_vreg_num vr), scalar_type)
+        | None ->
+            begin
+              match htab_search cx.ctxt_slot_layouts slot_id with
+                  None -> err (Some slot_id) "slot assigned to neither vreg nor layout"
+                | Some layout ->
+                    let disp = layout.layout_offset in
+                      Il.Addr (fp_imm disp, referent_type)
+            end
   in
 
-  let operand_of_block_slot
-      (slotid:node_id)
-      : Il.operand =
-    match htab_search cx.ctxt_slot_vregs slotid with
-        Some vr ->
-          Il.Reg (Il.Vreg (cell_vreg_num vr, slot_id_referent_type slotid))
-      | None ->
-          begin
-            match htab_search cx.ctxt_slot_layouts slotid with
-                None -> err (Some slotid) "slot assigned to neither vreg nor layout"
-              | Some layout ->
-                  let disp = layout.layout_offset in
-                    fp_imm disp
-          end
+  let operand_of_block_slot (slot_id:node_id) : Il.operand =
+    Il.Cell (cell_of_block_slot slot_id)
   in
 
-  let operand_of_proc_slot (lval_id:node_id) (slot_id:node_id)  =
+  let cell_of_proc_slot (lval_id:node_id) (slot_id:node_id) : Il.cell =
     let pp_cell =
       if Hashtbl.mem cx.ctxt_lval_is_in_proc_init lval_id
       then
@@ -334,10 +300,15 @@ let trans_visitor
       else
         abi.Abi.abi_pp_cell
     in
-    let layout = Hashtbl.find cx.ctxt_slot_layouts slot_id in
-    let disp = (Int64.add layout.layout_offset (word_n Abi.proc_field_data))
-    in
-      word_at (deref_imm (Il.Cell pp_cell) disp)
+    let (proc_addr, _) = deref (Il.Cell pp_cell) in
+    let slot_layout = Hashtbl.find cx.ctxt_slot_layouts slot_id in
+    let proc_slots_addr = addr_add_imm proc_addr (word_n Abi.proc_field_data) in
+    let slot_addr = addr_add_imm proc_slots_addr slot_layout.layout_offset in
+      Il.Addr (slot_addr, slot_id_referent_type slot_id)
+  in
+
+  let operand_of_proc_slot (lval_id:node_id) (slot_id:node_id) : Il.operand =
+    Il.Cell (cell_of_proc_slot lval_id slot_id)
   in
 
   let rec trans_lval_ext
@@ -705,7 +676,7 @@ let trans_visitor
        *)
       Hashtbl.iter
         begin
-          fun slotkey slotid ->
+          fun slotkey slot_id ->
             iflog
               begin
                 fun _ ->
@@ -713,8 +684,8 @@ let trans_visitor
                     ("drop slot: " ^
                        (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
               end;
-            let slot = Hashtbl.find cx.ctxt_all_slots slotid in
-            let operand = operand_of_block_slot slotid in
+            let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
+            let operand = operand_of_block_slot slot_id in
               trans_drop_slot operand slot
         end
         block_slots;

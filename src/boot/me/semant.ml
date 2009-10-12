@@ -692,6 +692,82 @@ let run_passes
           Semant_err (ido, str) -> report_err cx ido str
 ;;
 
+(* Rust type -> IL type conversion. *)
+
+let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
+  let s t = Il.ScalarTy t in
+  let v b = Il.ValTy b in
+  let p t = Il.AddrTy t in
+  let sv b = s (v b) in
+  let sp t = s (p t) in
+
+  let word = sv abi.Abi.abi_word_bits in
+  let ptr = sp Il.OpaqueTy in
+
+    match t with
+        Ast.TY_any -> Il.StructTy [| word;  ptr |]
+      | Ast.TY_nil -> s Il.NilTy
+      | Ast.TY_int -> word
+          (* FIXME: bool should be 8 bit, not word-sized. *)
+      | Ast.TY_bool -> word
+
+      | Ast.TY_mach (TY_u8)
+      | Ast.TY_mach (TY_s8) -> sv Il.Bits8
+
+      | Ast.TY_mach (TY_u16)
+      | Ast.TY_mach (TY_s16) -> sv Il.Bits16
+
+      | Ast.TY_mach (TY_u32)
+      | Ast.TY_mach (TY_s32)
+      | Ast.TY_char -> sv Il.Bits32
+
+      | Ast.TY_mach (TY_u64)
+      | Ast.TY_mach (TY_s64)
+      | Ast.TY_mach (TY_b64) -> sv Il.Bits64
+
+      | Ast.TY_str -> Il.StructTy [| word; word; word; ptr |]
+      | Ast.TY_vec _ -> sp (Il.StructTy [| word; word; word; ptr |])
+      | Ast.TY_tup tt ->
+          Il.StructTy (Array.map (slot_referent_type abi) tt)
+      | Ast.TY_rec tr ->
+          Il.StructTy
+            (Array.map (fun (ident, slot) ->
+                          slot_referent_type abi slot) tr)
+
+      | Ast.TY_tag _
+      | Ast.TY_iso _
+      | Ast.TY_idx _
+      | Ast.TY_fn _
+      | Ast.TY_pred _
+      | Ast.TY_chan _
+      | Ast.TY_port _
+      | Ast.TY_mod _
+      | Ast.TY_proc
+      | Ast.TY_opaque _
+      | Ast.TY_type -> ptr
+
+      | Ast.TY_prog _ -> sp (Il.StructTy [| ptr; ptr; ptr |])
+      | Ast.TY_named _ -> err None "named type in referent_type"
+      | Ast.TY_constrained (t, _) -> referent_type abi t
+      | Ast.TY_lim t -> referent_type abi t
+
+and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
+  let s t = Il.ScalarTy t in
+  let v b = Il.ValTy b in
+  let p t = Il.AddrTy t in
+  let sv b = s (v b) in
+  let sp t = s (p t) in
+
+  let word = sv abi.Abi.abi_word_bits in
+
+  let rty = referent_type abi (slot_ty sl) in
+  match sl.Ast.slot_mode with
+      Ast.MODE_exterior -> sp (Il.StructTy [| word; rty |])
+    | Ast.MODE_interior -> rty
+    | Ast.MODE_read_alias -> sp rty
+    | Ast.MODE_write_alias -> sp rty
+;;
+
 (* Layout calculations. *)
 
 let new_layout (off:int64) (sz:int64) (align:int64) : layout =
@@ -727,25 +803,31 @@ let word_layout (abi:Abi.abi) (off:int64) : layout =
   new_layout off abi.Abi.abi_word_sz abi.Abi.abi_word_sz
 ;;
 
-let rec layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
-  match t with
-      Ast.TY_nil -> new_layout off 0L 0L
-        (* FIXME: bool should be 1L/1L, once we have sub-word-sized moves working. *)
-    | Ast.TY_bool -> new_layout off 4L 4L
-    | Ast.TY_mach m ->
-        let sz = Int64.of_int (bytes_of_ty_mach m) in
-          new_layout off sz sz
-    | Ast.TY_char -> new_layout off 4L 4L
-    | Ast.TY_tup slots ->
-        let layouts = Array.map (layout_slot abi 0L) slots in
+let rec layout_referent (abi:Abi.abi) (off:int64) (rty:Il.referent_ty) : layout =
+  match rty with
+      Il.ScalarTy sty ->
+        begin
+          match sty with
+              Il.NilTy -> new_layout off 0L 0L
+            | Il.ValTy Il.Bits8 -> new_layout off 1L 1L
+            | Il.ValTy Il.Bits16 -> new_layout off 2L 2L
+            | Il.ValTy Il.Bits32 -> new_layout off 4L 4L
+            | Il.ValTy Il.Bits64 -> new_layout off 8L 8L
+            | Il.AddrTy _ -> word_layout abi off
+        end
+    | Il.StructTy rtys ->
+        let layouts = Array.map (layout_referent abi 0L) rtys in
           pack off layouts
-    | Ast.TY_rec slots ->
-        let layouts = Array.map (fun (_,slot) -> layout_slot abi 0L slot) slots in
-          pack off layouts
-    | _ ->
-        word_layout abi off
+    | Il.OpaqueTy -> err None "laying out opaque IL type in layout_referent"
+;;
 
-and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
+
+let layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
+  layout_referent abi off (referent_type abi t)
+;;
+
+(* FIXME: redirect this to slot_referent_type *)
+let layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
   match s.Ast.slot_mode with
       Ast.MODE_interior
     | _ ->

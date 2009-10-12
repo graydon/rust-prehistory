@@ -12,6 +12,7 @@ type bits =
 type scalar_ty =
     ValTy of bits
   | AddrTy of referent_ty
+  | NilTy (* 0 bits of space. *)
 
 and referent_ty =
     ScalarTy of scalar_ty
