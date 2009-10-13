@@ -8,13 +8,6 @@ let log cx = Session.log "trans"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-let imm (i:int64) = Il.Imm (Asm.IMM i);;
-let marker = imm 0xdeadbeefL;;
-let one = imm 1L;;
-let zero = imm 0L;;
-let imm_true = one;;
-let imm_false = zero;;
-
 let arr_max a = (Array.length a) - 1;;
 
 type intent =
@@ -47,7 +40,15 @@ let trans_visitor
   let (abi:Abi.abi) = cx.ctxt_abi in
   let (word_sz:int64) = abi.Abi.abi_word_sz in
   let (word_bits:Il.bits) = abi.Abi.abi_word_bits in
+  let (word_ty:Il.scalar_ty) = Il.ValTy word_bits in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
+
+  let imm (i:int64) = Il.Imm (Asm.IMM i, word_ty) in
+  let marker = imm 0xdeadbeefL in
+  let one = imm 1L in
+  let zero = imm 0L in
+  let imm_true = one in
+  let imm_false = zero in
 
   let (strings:(string,fixup) Hashtbl.t) = Hashtbl.create 0 in
 
@@ -136,11 +137,27 @@ let trans_visitor
   in
 
 
+  let need_addr_cell (cell:Il.cell) : Il.typed_addr =
+    match cell with
+        Il.Addr a -> a
+      | Il.Reg _ -> err None "expected address cell, got non-address register cell"
+  in
+
+  let need_addr_operand (op:Il.operand) : Il.typed_addr =
+    match op with
+        Il.Imm _ -> err None "expected address operand, got immediate"
+      | Il.Cell c -> need_addr_cell c
+  in
+
   let alias (ta:Il.typed_addr) : Il.operand =
     let addr, ty = ta in
     let vreg_cell = Il.next_vreg_cell (emitter()) (Il.AddrTy ty) in
       lea vreg_cell addr;
       Il.Cell vreg_cell
+  in
+
+  let alias_cell (c:Il.cell) : Il.operand =
+    alias (need_addr_cell c)
   in
 
   let force_to_mem (src:Il.operand) : Il.typed_addr =
@@ -165,25 +182,38 @@ let trans_visitor
         regty
     in
       match op with
-          Il.Cell (Il.Reg rt) -> rt
-        | Il.Cell (Il.Addr (_, refty)) -> do_mov (Il.AddrTy refty)
-        | Il.Imm _ -> do_mov (Il.ValTy word_bits)
+          Il.Imm  (_, st) -> do_mov st
+        | Il.Cell (Il.Reg rt) -> rt
+        | Il.Cell (Il.Addr (addr, Il.ScalarTy st)) -> do_mov st
+        | Il.Cell (Il.Addr _) ->
+            err None "forcing non-scalar referent to register"
+  in
+
+  let aliasing (writeback:bool) (c:Il.cell) (thunk:Il.operand -> unit) : unit =
+    match c with
+        Il.Addr ta -> thunk (alias ta)
+      | Il.Reg r ->
+          let ta = force_to_mem (Il.Cell c) in
+            begin
+              thunk (alias ta);
+              if writeback
+              then
+                mov c (Il.Cell (Il.Addr ta))
+            end
   in
 
   let deref (ptr:Il.operand) : Il.typed_addr =
-    let (reg, ty) = force_to_reg ptr in
-      match ty with
-          Il.AddrTy t -> (based reg, t)
-        | Il.ValTy _ -> err None "dereferencing value-typed operand"
-        | Il.NilTy ->  err None "dereferencing nil-typed operand"
+    let (r, st) = force_to_reg ptr in
+      match st with
+          Il.AddrTy rt -> (based r, rt)
+        | _ -> err None "dereferencing non-address operand"
   in
 
   let deref_off (ptr:Il.operand) (off:Asm.expr64) : Il.typed_addr =
-    let (reg, ty) = force_to_reg ptr in
-      match ty with
-          Il.AddrTy t -> (based_off reg off, t)
-        | Il.ValTy _ -> err None "dereferencing value-typed operand"
-        | Il.NilTy ->  err None "dereferencing nil-typed operand"
+    let (r, st) = force_to_reg ptr in
+      match st with
+          Il.AddrTy rt -> (based_off r off, rt)
+        | _ -> err None "dereferencing non-address operand"
   in
 
   let deref_imm (ptr:Il.operand) (imm:int64) : Il.typed_addr =
@@ -311,54 +341,51 @@ let trans_visitor
     Il.Cell (cell_of_proc_slot lval_id slot_id)
   in
 
-  let rec trans_lval_ext
-      (base_slot:Ast.slot)
-      (base_reg:Il.reg option)
-      (base_off:Asm.expr64)
-      (comp:Ast.lval_component)
-      : (Il.operand * Ast.slot) =
 
-    match (base_slot.Ast.slot_ty, comp) with
-        (Some (Ast.TY_rec entries),
+  let rec trans_lval_ext
+      (base_ty:Ast.ty)
+      (base_addr:Il.addr)
+      (comp:Ast.lval_component)
+      : (Il.cell * Ast.slot) =
+
+    let displaced slot disp =
+      Il.Addr (addr_add_imm base_addr disp,
+               slot_referent_type abi slot)
+    in
+
+    match (base_ty, comp) with
+        (Ast.TY_rec entries,
          Ast.COMP_named (Ast.COMP_ident id)) ->
           let layouts = layout_rec abi entries in
           let (slot, layout) = atab_find layouts id in
-          let disp = layout.layout_offset in
-          let oper = (word_at_reg_off_imm
-                        base_reg base_off disp)
-          in
-            (oper, slot)
+          let cell = displaced slot layout.layout_offset in
+            (cell, slot)
 
-      | (Some (Ast.TY_tup entries),
+      | (Ast.TY_tup entries,
          Ast.COMP_named (Ast.COMP_idx i)) ->
           let layouts = layout_tup abi entries in
           let slot = entries.(i) in
-          let disp = layouts.(i).layout_offset in
-          let oper = (word_at_reg_off_imm
-                        base_reg base_off disp)
-          in
-            (oper, slot)
+          let cell = displaced slot layouts.(i).layout_offset in
+            (cell, slot)
 
-      | (Some (Ast.TY_vec ety),
+      | (Ast.TY_vec ety,
          Ast.COMP_named (Ast.COMP_idx i)) ->
           let unit_sz = ty_sz abi ety in
           let slot = interior_slot ety in
           let disp = Int64.mul unit_sz (Int64.of_int i) in
-          let vec = word_at_reg_off base_reg base_off in
-          let elt = trans_bounds_check vec (imm disp) in
-            (elt, slot)
+          let addr = trans_bounds_check base_addr (imm disp) in
+            (Il.Addr (addr, slot_referent_type abi slot), slot)
 
-      | (Some (Ast.TY_vec ety),
+      | (Ast.TY_vec ety,
          Ast.COMP_atom at) ->
           let atop = trans_atom at in
           let unit_sz = ty_sz abi ety in
           let slot = interior_slot ety in
           let reg = next_vreg () in
-          let t = Il.Reg reg in
-          let vec = word_at_reg_off base_reg base_off in
-            emit Il.UMUL t atop (imm unit_sz);
-            let elt = trans_bounds_check vec t in
-              (elt, slot)
+          let t = Il.Reg (reg, Il.ValTy word_bits) in
+            emit (Il.binary Il.UMUL t atop (imm unit_sz));
+            let addr = trans_bounds_check base_addr (Il.Cell t) in
+              (Il.Addr (addr, slot_referent_type abi slot), slot)
 
       | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
 
@@ -367,39 +394,45 @@ let trans_visitor
    * mul_idx: index value * unit size.
    * return: ptr to element.
    *)
-  and trans_bounds_check (vec:Il.operand) (mul_idx:Il.operand) : Il.operand =
-    let len = deref_imm vec (word_n 2) in
-    let base = Il.Reg (next_vreg()) in
-    let elt = Il.Reg (next_vreg ()) in
-    let diff = Il.Reg (next_vreg ()) in
+  and trans_bounds_check (vec:Il.addr) (mul_idx:Il.operand) : Il.addr =
+    let (len:Il.cell) = word_at (addr_add_imm vec (word_n 2)) in
+    let (base:Il.cell) = Il.Reg (next_vreg(), Il.voidptr_t) in
+    let (elt_reg:Il.reg) = next_vreg () in
+    let (elt:Il.cell) = Il.Reg (elt_reg, Il.voidptr_t) in
+    let (diff:Il.cell) = Il.Reg (next_vreg (), Il.ValTy word_bits) in
       annotate "bounds check";
-      lea base (deref_imm vec (word_n 3));
-      emit Il.ADD elt base mul_idx;
-      emit Il.SUB diff elt base;
-      let jmp = trans_compare Il.JB diff len in
+      lea base (addr_add_imm vec (word_n 3));
+      emit (Il.binary Il.ADD elt (Il.Cell base) mul_idx);
+      emit (Il.binary Il.SUB diff (Il.Cell elt) (Il.Cell base));
+      let jmp = trans_compare Il.JB (Il.Cell diff) (Il.Cell len) in
         trans_cond_fail "bounds check" jmp;
-        deref elt
+        based elt_reg
 
   and trans_lval_full
       (lv:Ast.lval)
       (pcrel_ok:bool)
-      (imm_ok:bool)
+      (abs_ok:bool)
       (intent:intent)
-      : (Il.operand * Ast.slot) =
+      : (Il.cell * Ast.slot) =
 
     let return_fixup (fix:fixup) (slot:Ast.slot)
-        : (Il.operand * Ast.slot) =
-      if pcrel_ok
-      then (Il.Pcrel fix, slot)
-      else
-        let imm = (Il.Imm (Asm.M_POS fix)) in
-          if imm_ok
-          then (imm, slot)
-          else (Il.Reg (force_to_reg imm), slot)
+        : (Il.cell * Ast.slot) =
+      let addr =
+        if pcrel_ok
+        then Il.Pcrel (fix, None)
+        else
+          let i = Asm.M_POS fix in
+            if abs_ok
+            then Il.Abs i
+            else
+              let (reg, _) = force_to_reg (Il.Imm (i, word_ty)) in
+                Il.Based (reg, None)
+      in
+        (Il.Addr (addr, (slot_referent_type abi slot)), slot)
     in
 
     let return_item (item:Ast.mod_item') (referent:node_id)
-        : (Il.operand * Ast.slot) =
+        : (Il.cell * Ast.slot) =
       let ty = Hashtbl.find cx.ctxt_all_item_types referent in
       let slot = { Ast.slot_mode = Ast.MODE_interior;
                    Ast.slot_ty = Some ty }
@@ -417,7 +450,7 @@ let trans_visitor
     in
 
     let return_native_item (item:Ast.native_mod_item') (referent:node_id)
-        : (Il.operand * Ast.slot) =
+        : (Il.cell * Ast.slot) =
       let ty = Hashtbl.find cx.ctxt_all_item_types referent in
       let slot = { Ast.slot_mode = Ast.MODE_interior;
                    Ast.slot_ty = Some ty }
@@ -431,21 +464,21 @@ let trans_visitor
     in
 
     let return_slot (lval_id:node_id) (slot:Ast.slot) (slot_id:node_id)
-        : (Il.operand * Ast.slot) =
-      let operand =
+        : (Il.cell * Ast.slot) =
+      let cell =
         if slot_is_owned_by_prog cx slot_id
-        then operand_of_proc_slot lval_id slot_id
-        else operand_of_block_slot slot_id
+        then cell_of_proc_slot lval_id slot_id
+        else cell_of_block_slot slot_id
       in
-        (operand, slot)
+        (cell, slot)
     in
 
       match lv with
           Ast.LVAL_ext (base, comp) ->
-            let (base_operand, base_slot) = trans_lval_full base false true intent in
-            let base_operand' = deref_slot base_operand base_slot intent in
-            let (base_reg, base_off) = get_reg_off base_operand' in
-              trans_lval_ext base_slot base_reg base_off comp
+            let (base_cell, base_slot) = trans_lval_full base false true intent in
+            let base_cell' = deref_slot base_cell base_slot intent in
+            let (addr, _) = need_addr_cell base_cell' in
+              trans_lval_ext (slot_ty base_slot) addr comp
 
         | Ast.LVAL_base nb ->
             let referent = lval_to_referent cx nb.id in
@@ -460,8 +493,8 @@ let trans_visitor
                               return_slot nb.id slot referent
               end
 
-  and trans_lval (lv:Ast.lval) (intent:intent) : (Il.operand * Ast.slot) =
-    trans_lval_full lv false false intent
+  and trans_lval (lv:Ast.lval) (intent:intent) : (Il.cell * Ast.slot) =
+    trans_lval_full lv abi.Abi.abi_has_pcrel_data abi.Abi.abi_has_abs_data intent
 
   and trans_static_string (s:string) : Il.operand =
     let fix =
@@ -474,16 +507,17 @@ let trans_visitor
           cx.ctxt_data_items <- str :: cx.ctxt_data_items;
           strfix
     in
-      (Il.Imm (Asm.M_POS fix))
+      (* FIXME: wrong immediate type. *)
+      Il.Imm (Asm.M_POS fix, word_ty)
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
     (* Include null byte. *)
     let init_sz = Int64.of_int ((String.length s) + 1) in
     let static = trans_static_string s in
-    let (dstop, _) = trans_lval dst INTENT_init in
+    let (dst, _) = trans_lval dst INTENT_init in
       trans_upcall Abi.UPCALL_new_str
         [|
-          (alias dstop);
+          (alias_cell dst);
           static;
           imm init_sz
         |]
@@ -497,13 +531,13 @@ let trans_visitor
 
     match atom with
         Ast.ATOM_lval lv ->
-          let (operand, slot) = trans_lval lv INTENT_read in
-            deref_slot operand slot INTENT_read
+          let (cell, slot) = trans_lval lv INTENT_read in
+            Il.Cell (deref_slot cell slot INTENT_read)
 
       | Ast.ATOM_literal lit ->
           begin
             match lit.node with
-                Ast.LIT_nil -> Il.Nil
+                Ast.LIT_nil -> imm_false (* FIXME: make an Il.Nil operand constructor? *)
               | Ast.LIT_bool false -> imm_false
               | Ast.LIT_bool true -> imm_true
               | Ast.LIT_char c -> imm (Int64.of_int (Char.code c))
@@ -517,17 +551,21 @@ let trans_visitor
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
   and trans_compare
-      (cjmp:Il.op)
+      (cjmp:Il.jmpop)
       (lhs:Il.operand)
       (rhs:Il.operand)
       : quad_idx list =
-    emit Il.CMP Il.Nil (Il.Reg (force_to_reg lhs)) rhs;
+    (* FIXME: this is an x86-ism; abstract via ABI. *)
+    emit (Il.cmp (Il.Cell (Il.Reg (force_to_reg lhs))) rhs);
     let jmp = mark() in
-      emit cjmp Il.Nil badlab Il.Nil;
+      emit (Il.jmp cjmp Il.CodeNone);
       [jmp]
 
+(* FIXME: patch up this detritus, we have said typed IL now. *)
+(* 
+           
   and trans_structural_compare
-      (cjmp:Il.op)
+      (cjmp:Il.jmpop)
       (lhs:Il.operand) (* read alias *)
       (rhs:Il.operand) (* read alias *)
       (ty:Ast.ty)
@@ -553,6 +591,7 @@ let trans_visitor
       done
     in
       []
+*)
 
   and trans_cond (invert:bool) (expr:Ast.expr) : quad_idx list =
 
@@ -616,12 +655,13 @@ let trans_visitor
 
         Ast.EXPR_binary (binop, a, b) ->
           let arith op =
-            let dst = Il.Reg (Il.next_vreg (emitter())) in
+            (* FIXME: this has to change when we support other mach types. *)
+            let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
             let lhs = trans_atom a in
             let rhs = trans_atom b in
               anno ();
-              emit op dst lhs rhs;
-              dst
+              emit (Il.binary op dst lhs rhs);
+              Il.Cell dst
           in
             begin
               match binop with
@@ -641,26 +681,28 @@ let trans_visitor
                 | Ast.BINOP_mod -> arith Il.UMOD
 
                 | _ ->
-                    let dst = Il.Reg (Il.next_vreg (emitter())) in
+                    (* FIXME: this has to change when we support other mach types. *)
+                    let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
                       begin
                         mov dst imm_true;
                         let jmps = trans_cond false expr in
                           mov dst imm_false;
                           List.iter patch jmps;
-                          dst
+                          Il.Cell dst
                       end
             end
 
       | Ast.EXPR_unary (unop, a) ->
           let src = trans_atom a in
-          let dst = Il.Reg (Il.next_vreg (emitter())) in
+            (* FIXME: this has to change when we support other mach types. *)
+          let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
           let op = match unop with
               Ast.UNOP_not -> Il.NOT
             | Ast.UNOP_neg -> Il.NEG
           in
             anno ();
-            emit op dst src Il.Nil;
-            dst
+            emit (Il.unary op dst src);
+            Il.Cell dst
 
       | Ast.EXPR_atom a ->
           trans_atom a
@@ -706,8 +748,8 @@ let trans_visitor
       (prog_lval:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (proc_operand, proc_slot) = trans_lval dst INTENT_init in
-    let (prog_operand, prog_slot) = trans_lval prog_lval INTENT_read in
+    let (proc_cell, proc_slot) = trans_lval dst INTENT_init in
+    let (prog_cell, prog_slot) = trans_lval prog_lval INTENT_read in
     let tsig =
       match prog_slot.Ast.slot_ty with
           Some (Ast.TY_prog tsig) -> tsig
@@ -717,20 +759,22 @@ let trans_visitor
        * We're fudging here; the proc operand isn't really the dst operand, 
        * it's the 0th slot of the dst tuple though. 
        *)
-      trans_upcall Abi.UPCALL_new_proc [| (alias proc_operand); prog_operand |];
+      trans_upcall Abi.UPCALL_new_proc [| (alias_cell proc_cell);
+                                          Il.Cell prog_cell |];
       let in_slots = tsig.Ast.sig_input_slots in
         (* FIXME: this is a ghastly mess. *)
       let arg_layouts = layout_init_call_tup abi tsig in
-      let init_operand = deref_imm prog_operand (word_n Abi.prog_field_init)
+      let init_cell = Il.Addr (deref_imm (Il.Cell prog_cell)
+                                 (word_n Abi.prog_field_init))
       in
-        emit Il.CMP Il.Nil init_operand imm_false;
+        emit (Il.cmp (Il.Cell init_cell) imm_false);
         let fwd_jmp = mark () in
-          emit Il.JE Il.Nil badlab Il.Nil;
-          trans_call (fun _ -> "spawn-init") proc_operand init_operand
-            in_slots arg_layouts (Some proc_operand) args;
+          emit (Il.jmp Il.JE Il.CodeNone);
+          trans_call (fun _ -> "spawn-init") proc_cell init_cell
+            in_slots arg_layouts (Some (Il.Cell proc_cell)) args;
           patch fwd_jmp;
           iflog (fun _ -> annotate "sched proc");
-          trans_upcall Abi.UPCALL_sched [| proc_operand |]
+          trans_upcall Abi.UPCALL_sched [| Il.Cell proc_cell |]
 
   and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
     let (filename, line, _) =
@@ -753,40 +797,38 @@ let trans_visitor
     let fwd_jmps = trans_cond false e in
       trans_cond_fail (Ast.fmt_to_str Ast.fmt_expr e) fwd_jmps
 
-  and trans_malloc (dst:Il.operand) (nbytes:int64) : unit =
-    if Il.is_mem dst
-    then
-      trans_upcall Abi.UPCALL_malloc [| (alias dst); imm nbytes |]
-    else
-      let s = Il.next_spill (emitter()) in
-        begin
-          mov s zero;
-          trans_upcall Abi.UPCALL_malloc [| (alias s); imm nbytes |];
-          mov dst s
-        end
+  and trans_malloc (dst:Il.cell) (nbytes:int64) : unit =
+    aliasing true dst
+      begin
+        fun dst_alias ->
+          trans_upcall Abi.UPCALL_malloc [| dst_alias; imm nbytes |]
+      end
 
   and trans_free (src:Il.operand) : unit =
     trans_upcall Abi.UPCALL_free [| src |]
 
-  and refcount_cell (n:int) (operand:Il.operand) : Il.operand =
-    word_at_reg_off (Some (force_to_reg operand)) (Asm.IMM (word_n n))
+  and refcount_cell (n:int) (operand:Il.operand) : Il.cell =
+    Il.Addr (deref_imm operand (word_n n))
 
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
-    let (srcop, _) = trans_lval src INTENT_read in
-      trans_upcall Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan)); (alias srcop) |]
+    let (srccell, _) = trans_lval src INTENT_read in
+      trans_upcall Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan));
+                                      (alias_cell srccell) |]
 
   and trans_recv (dst:Ast.lval) (chan:Ast.lval) : unit =
-    let (dstop, _) = trans_lval dst INTENT_write in
-      trans_upcall Abi.UPCALL_recv [| (alias dstop); (trans_atom (Ast.ATOM_lval chan)) |]
+    let (dstcell, _) = trans_lval dst INTENT_write in
+      trans_upcall Abi.UPCALL_recv [| (alias_cell dstcell);
+                                      (trans_atom (Ast.ATOM_lval chan)) |]
 
   and trans_init_port (dst:Ast.lval) : unit =
-    let (dstop, dst_slot) = trans_lval dst INTENT_init in
+    let (dstcell, dst_slot) = trans_lval dst INTENT_init in
     let unit_ty = match slot_ty dst_slot with
         Ast.TY_port t -> t
       | _ -> err None "init dst of port-init has non-port type"
     in
     let unit_sz = ty_sz abi unit_ty in
-      trans_upcall Abi.UPCALL_new_port [| (alias dstop); imm unit_sz |]
+      trans_upcall Abi.UPCALL_new_port [| (alias_cell dstcell);
+                                          imm unit_sz |]
 
   and trans_del_port (port:Il.operand) : unit =
     trans_upcall Abi.UPCALL_del_port [| port |]
@@ -835,7 +877,7 @@ let trans_visitor
    *)
 
   and trans_init_vec (dst:Ast.lval) (atoms:Ast.atom array) : unit =
-    let (dstop, dst_slot) = trans_lval dst INTENT_init in
+    let (dstcell, dst_slot) = trans_lval dst INTENT_init in
     let unit_ty = match slot_ty dst_slot with
         Ast.TY_vec t -> t
       | _ -> err None "init dst of vec-init has non-port type"
@@ -845,10 +887,11 @@ let trans_visitor
     let init_sz = Int64.mul unit_sz (Int64.of_int n_inits) in
     let padded_sz = Int64.add init_sz (word_n 3) in
     let alloc_sz = next_power_of_two padded_sz in
-      trans_malloc dstop alloc_sz;
-      mov (deref_imm dstop (word_n 0)) one;
-      mov (deref_imm dstop (word_n 1)) (imm alloc_sz);
-      mov (deref_imm dstop (word_n 2)) (imm init_sz);
+    let dstop = Il.Cell dstcell in
+      trans_malloc dstcell alloc_sz;
+      mov (Il.Addr (deref_imm dstop (word_n 0))) one;
+      mov (Il.Addr (deref_imm dstop (word_n 1))) (imm alloc_sz);
+      mov (Il.Addr (deref_imm dstop (word_n 2))) (imm init_sz);
       Array.iteri
         begin
           fun i atom ->
@@ -870,7 +913,7 @@ let trans_visitor
       xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 32);
       Int64.add 1L (!xr)
 
-  and exterior_refcount_cell (operand:Il.operand) : Il.operand =
+  and exterior_refcount_cell (operand:Il.operand) : Il.cell =
     refcount_cell Abi.exterior_slot_field_refcnt operand
 
   and exterior_body_off = word_n Abi.exterior_slot_field_body
@@ -879,7 +922,7 @@ let trans_visitor
     let layout = layout_slot abi 0L slot in
       (Int64.add layout.layout_size exterior_body_off)
 
-  and slot_refcount_cell (operand:Il.operand) (slot:Ast.slot) : (Il.operand option) =
+  and slot_refcount_cell (operand:Il.operand) (slot:Ast.slot) : (Il.cell option) =
     match slot_ty slot with
         Ast.TY_port _ -> Some (refcount_cell Abi.port_field_refcnt operand)
       | Ast.TY_chan _ -> Some (refcount_cell Abi.chan_field_refcnt operand)
@@ -1036,15 +1079,15 @@ let trans_visitor
             drop_refcount_and_maybe_free rc operand slot;
             Il.Nil
 
-  and deref_slot (operand:Il.operand) (slot:Ast.slot) (intent:intent) : Il.operand =
+  and deref_slot (cell:Il.cell) (slot:Ast.slot) (intent:intent) : Il.cell =
     match slot.Ast.slot_mode with
-        Ast.MODE_interior -> operand
-      | Ast.MODE_exterior -> deref_exterior intent operand slot
+        Ast.MODE_interior -> cell
+      | Ast.MODE_exterior -> deref_exterior intent cell slot
       | Ast.MODE_read_alias
       | Ast.MODE_write_alias ->
           match intent with
-              INTENT_init -> operand
-            | _ -> deref operand
+              INTENT_init -> cell
+            | _ -> deref (need_addr_cell cell)
 
 
   and trans_copy_rec
@@ -1260,11 +1303,11 @@ let trans_visitor
         (flv:Ast.lval)
         (args:Ast.atom array)
         : unit =
-    let (dst_operand, _) = trans_lval dst INTENT_write in
-    let (fn_operand, fn_slot) =
+    let (dst_cell, _) = trans_lval dst INTENT_write in
+    let (fn_cell, fn_slot) =
       trans_lval_full flv
-        abi.Abi.abi_has_pcrel_jumps
-        abi.Abi.abi_has_imm_jumps
+        abi.Abi.abi_has_pcrel_code
+        abi.Abi.abi_has_abs_code
         INTENT_read
     in
     let tfn =
@@ -1276,7 +1319,7 @@ let trans_visitor
     let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
       trans_call (fun _ -> Ast.sprintf_lval () flv)
-        dst_operand fn_operand in_slots arg_layouts None args
+        dst_cell fn_operand in_slots arg_layouts None args
 
   and trans_arg0 param_operand output_operand =
     (* Emit arg0 of any call: the output slot. *)

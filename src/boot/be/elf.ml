@@ -509,7 +509,7 @@ let elf32_linux_x86_file
     in
     let plt0_item =
       let e = Il.new_emitter X86.prealloc_quad true in
-        Il.emit e (Il.Push (Il.Imm (M_POS got1_fixup)));
+        Il.emit e (Il.Push (X86.imm (M_POS got1_fixup)));
         Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Abs (M_POS got2_fixup))));
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
@@ -1015,7 +1015,7 @@ let elf32_linux_x86_file
       Il.emit_full e (Some plt_entry_fixup)
         (Il.jmp Il.JMP (Il.CodeAddr (Il.Abs (M_POS jump_slot_fixup))));
       Il.emit_full e (Some jump_slot_initial_target_fixup)
-        (Il.Push (Il.Imm (IMM (Int64.of_int i))));
+        (Il.Push (X86.immi (Int64.of_int i)));
       Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Pcrel (plt0_fixup, None))));
       X86.items_of_emitted_quads sess e
     in
@@ -1313,7 +1313,7 @@ let emit_file
       (Il.Push (Il.Cell (Il.Reg (Il.Hreg r, Il.ValTy Il.Bits32))))
     in
     let push_pos32 fix = Il.emit e
-      (Il.Push (Il.Imm (M_POS fix)))
+      (Il.Push (X86.imm (M_POS fix)))
     in
       push_r32 X86.eax;
       push_r32 X86.esp;

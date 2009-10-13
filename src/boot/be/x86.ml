@@ -253,7 +253,12 @@ let vreg (e:Il.emitter) : (Il.reg * Il.cell) =
   let vr = Il.next_vreg e in
     (vr, (Il.Reg (vr, (Il.ValTy word_bits))))
 ;;
-let imm (x:Asm.expr64) : Il.operand = Il.Imm x ;;
+let imm (x:Asm.expr64) : Il.operand =
+  Il.Imm (x, Il.ValTy word_bits)
+;;
+let immi (x:int64) : Il.operand =
+  imm (Asm.IMM x)
+;;
 
 
 let save_callee_saves (e:Il.emitter) : unit =
@@ -335,9 +340,8 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
   let vr_n = word_n vr in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let imm i = Il.Imm (Asm.IMM i) in
     mov (r vr)(c proc_ptr);
-    mov (vr_n Abi.proc_field_state) (imm code);
+    mov (vr_n Abi.proc_field_state) (immi code);
 ;;
 
 let emit_upcall
@@ -354,7 +358,6 @@ let emit_upcall
   let (_, dst_c) = vreg e in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let imm i = Il.Imm (Asm.IMM i) in
   (* 
    * This is an x86-ism, but a significant savings: inclusive-OR rather
    * than MOV, and we get sign-extension on the immediate for free.
@@ -366,8 +369,8 @@ let emit_upcall
     assert ((Array.length args) <= Abi.max_upcall_args);
 
     mov vc (c proc_ptr);
-    ior (vr_n Abi.proc_field_state) (imm state_code);
-    ior (vr_n Abi.proc_field_upcall_code) (imm upcall_code);
+    ior (vr_n Abi.proc_field_state) (immi state_code);
+    ior (vr_n Abi.proc_field_upcall_code) (immi upcall_code);
 
     Array.iteri
       begin
@@ -574,10 +577,10 @@ let (abi:Abi.abi) =
     Abi.abi_word_ty = word_ty;
 
     Abi.abi_is_2addr_machine = true;
-    Abi.abi_has_pcrel_loads = false;
-    Abi.abi_has_pcrel_jumps = true;
-    Abi.abi_has_imm_loads = false;
-    Abi.abi_has_imm_jumps = false;
+    Abi.abi_has_pcrel_data = false;
+    Abi.abi_has_pcrel_code = true;
+    Abi.abi_has_abs_data = false;
+    Abi.abi_has_abs_code = false;
 
     Abi.abi_n_hardregs = n_hardregs;
     Abi.abi_str_of_hardreg = reg_str;
@@ -754,12 +757,15 @@ let is_rm8 (c:Il.cell) : bool =
   is_ty8 (Il.cell_ty c)
 ;;
 
-
+(* FIXME: tighten imm-based dispatch by imm type. *)
 let cmp (a:Il.operand) (b:Il.operand) : Asm.item =
   match (a,b) with
-      (Il.Cell c, Il.Imm i) when is_rm32 c -> insn_rm_r_imm_s8_s32 0x83 0x81 c slash7 i
-    | (Il.Cell c, Il.Cell (Il.Reg (Il.Hreg r, _))) -> insn_rm_r 0x39 c (reg r)
-    | (Il.Cell (Il.Reg (Il.Hreg r, _)), Il.Cell c) -> insn_rm_r 0x3b c (reg r)
+      (Il.Cell c, Il.Imm (i, _)) when is_rm32 c ->
+        insn_rm_r_imm_s8_s32 0x83 0x81 c slash7 i
+    | (Il.Cell c, Il.Cell (Il.Reg (Il.Hreg r, _))) ->
+        insn_rm_r 0x39 c (reg r)
+    | (Il.Cell (Il.Reg (Il.Hreg r, _)), Il.Cell c) ->
+        insn_rm_r 0x3b c (reg r)
     | _ -> raise Unrecognized
 ;;
 
@@ -802,12 +808,12 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.item =
                    insn_rm_r 0xbe src_cell (reg r) |]
 
     (* rm8 <- imm8 *)
-    | (_, _, Il.Imm (Asm.IMM n))
+    | (_, _, Il.Imm ((Asm.IMM n), _))
         when is_rm8 dst && imm_is_byte n ->
         insn_rm_r_imm 0xc6 dst slash0 TY_u8 (Asm.IMM n)
 
     (* rm32 <- imm32 *)
-    | (_, _, Il.Imm i) when is_rm32 dst ->
+    | (_, _, Il.Imm (i, _)) when is_rm32 dst ->
         insn_rm_r_imm 0xc7 dst slash0 TY_u32 i
 
     | _ -> raise Unrecognized
@@ -847,10 +853,10 @@ let select_insn_misc (q:Il.quad') : Asm.item =
     | Il.Push (Il.Cell c) when is_rm32 c ->
         insn_rm_r 0xff c slash6
 
-    | Il.Push (Il.Imm (Asm.IMM i)) when imm_is_byte i ->
+    | Il.Push (Il.Imm (Asm.IMM i, _)) when imm_is_byte i ->
         Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD (TY_u8, (Asm.IMM i)) |]
 
-    | Il.Push (Il.Imm i) ->
+    | Il.Push (Il.Imm (i, _)) ->
         Asm.SEQ [| Asm.BYTE 0x68; Asm.WORD (TY_u32, i) |]
 
     | Il.Pop (Il.Reg ((Il.Hreg r), t)) when is_ty32 t ->
@@ -919,7 +925,7 @@ let alu_binop
         when is_rm32 dst && is_ty32 src_ty ->
         insn_rm_r rm_dst_op dst (reg r)
 
-    | (_, Il.Imm i) when is_rm32 dst
+    | (_, Il.Imm (i, _)) when is_rm32 dst
         -> insn_rm_r_imm_s8_s32 0x83 0x81 dst immslash i
 
     | _ -> raise Unrecognized

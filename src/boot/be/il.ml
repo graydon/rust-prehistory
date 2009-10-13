@@ -49,6 +49,7 @@ type code =
 
 type typed_reg = (reg * scalar_ty);;
 type typed_addr = (addr * referent_ty);;
+type typed_imm = (Asm.expr64 * scalar_ty);;
 
 type cell =
     Reg of typed_reg
@@ -57,7 +58,7 @@ type cell =
 
 type operand =
     Cell of cell
-  | Imm of Asm.expr64
+  | Imm of typed_imm
 ;;
 
 (* NB: for the most part, we let the register allocator assign spills
@@ -338,7 +339,7 @@ let string_of_cell (f:hreg_formatter) (c:cell) : string =
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
   match op with
       Cell c -> string_of_cell f c
-    | Imm i -> string_of_expr64 i
+    | Imm (i, _) -> string_of_expr64 i
 ;;
 
 let string_of_binop (op:binop) : string =
