@@ -29,6 +29,13 @@ let alias_analysis_visitor
            * FIXME: must expand this analysis to cover alias-forming arg slots, when
            * they are supported.
            *)
+
+          (*
+           * FIXME: actually all these *existing* cases can probably go now that we're
+           * using Trans.aliasing to form short-term spill-based aliases. Only 
+           * aliases that survive 'into' a sub-block (those formed during iteration)
+           * need to be handled in this module.
+           *)
           Ast.STMT_call (dst, _, _) -> alias dst
         | Ast.STMT_spawn (dst, _, _) -> alias dst
         | Ast.STMT_send (_, src) -> alias src
