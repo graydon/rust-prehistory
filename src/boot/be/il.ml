@@ -273,7 +273,7 @@ type hreg_formatter = hreg -> string;;
 
 let string_of_reg (f:hreg_formatter) (r:reg) : string =
   match r with
-      Vreg i -> Printf.sprintf "<v %d>" i
+      Vreg i -> Printf.sprintf "<v%d>" i
     | Hreg i -> f i
 ;;
 
@@ -298,16 +298,17 @@ let rec string_of_expr64 (e64:Asm.expr64) : string =
       | Asm.XOR (a,b) -> bin "xor" a b
       | Asm.OR (a,b) -> bin "|" a b
       | Asm.NOT a -> Printf.sprintf "(not %s)" (string_of_expr64 a)
-      | Asm.F_POS f -> Printf.sprintf "%s.fpos" f.fixup_name
-      | Asm.F_SZ f -> Printf.sprintf "%s.fsz" f.fixup_name
-      | Asm.M_POS f -> Printf.sprintf "%s.mpos" f.fixup_name
-      | Asm.M_SZ f -> Printf.sprintf "%s.msz" f.fixup_name
+      | Asm.F_POS f -> Printf.sprintf "<%s>.fpos" f.fixup_name
+      | Asm.F_SZ f -> Printf.sprintf "<%s>.fsz" f.fixup_name
+      | Asm.M_POS f -> Printf.sprintf "<%s>.mpos" f.fixup_name
+      | Asm.M_SZ f -> Printf.sprintf "<%s>.msz" f.fixup_name
       | Asm.EXT e -> "??ext??"
 ;;
 
 let string_of_off (e:Asm.expr64 option) : string =
   match e with
       None -> ""
+    | Some (Asm.IMM i) when (i64_lt i 0L) -> Printf.sprintf " - 0x%Lx" (Int64.neg i)
     | Some e' -> " + " ^ (string_of_expr64 e')
 ;;
 

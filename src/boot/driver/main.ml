@@ -223,7 +223,6 @@ let (code:Asm.item) = list_to_seq (anon_text_item :: text_items);;
 let _ = exit_if_failed ()
 ;;
 
-
 (* Emitting Dwarf and PE/ELF/Macho. *)
 let (dwarf:Dwarf.debug_records) = Dwarf.process_crate sem_cx crate;;
 let _ = exit_if_failed ()

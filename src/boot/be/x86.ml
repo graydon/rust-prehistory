@@ -279,7 +279,13 @@ let restore_callee_saves (e:Il.emitter) : unit =
 let word_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = Asm.IMM (Int64.mul (Int64.of_int i) word_sz) in
   let addr = Il.Based (reg, Some imm) in
-    Il.Addr (addr, Il.OpaqueTy)
+    Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
+;;
+
+let wordptr_n (reg:Il.reg) (i:int) : Il.cell =
+  let imm = Asm.IMM (Int64.mul (Int64.of_int i) word_sz) in
+  let addr = Il.Based (reg, Some imm) in
+    Il.Addr (addr, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
 ;;
 
 
@@ -303,8 +309,8 @@ let word_n (reg:Il.reg) (i:int) : Il.cell =
  *
  *)
 
-let proc_ptr = word_n (Il.Hreg ebp) 6;;
-let out_ptr = word_n (Il.Hreg ebp) 5;;
+let proc_ptr = wordptr_n (Il.Hreg ebp) 6;;
+let out_ptr = wordptr_n (Il.Hreg ebp) 5;;
 let frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;;
 let implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;;
 let proc_to_c_glue_sz = frame_base_sz;;
@@ -641,9 +647,9 @@ let rm_r (c:Il.cell) (r:int) : Asm.item =
     match c with
         Il.Reg ((Il.Hreg rm), _) ->
           Asm.BYTE (modrm_reg (reg rm) r)
-      | Il.Addr (m, _) ->
+      | Il.Addr (a, _) ->
           begin
-            match m with
+            match a with
                 Il.Abs disp ->
                   Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
                              Asm.WORD (TY_s32, disp) |]

@@ -725,7 +725,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_mach (TY_s64)
       | Ast.TY_mach (TY_b64) -> sv Il.Bits64
 
-      | Ast.TY_str -> Il.StructTy [| word; word; word; ptr |]
+      | Ast.TY_str -> sp (Il.StructTy [| word; word; word; ptr |])
       | Ast.TY_vec _ -> sp (Il.StructTy [| word; word; word; ptr |])
       | Ast.TY_tup tt ->
           Il.StructTy (Array.map (slot_referent_type abi) tt)

@@ -111,6 +111,10 @@ let trans_visitor
     Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
   in
 
+  let wordptr_at (addr:Il.addr) : Il.cell =
+    Il.Addr (addr, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
+  in
+
   let addr_add (addr:Il.addr) (off:Asm.expr64) : Il.addr =
     let addto e = Asm.ADD (off, e) in
       match addr with
@@ -324,7 +328,7 @@ let trans_visitor
             None -> err (Some lval_id) "Lval in nonexistent prog init"
           | Some init -> Hashtbl.find cx.ctxt_slot_layouts init.node.Ast.init_proc_input.id
         in
-          word_at (sp_imm init_proc_slot_layout.layout_offset)
+          wordptr_at (sp_imm init_proc_slot_layout.layout_offset)
       else
         abi.Abi.abi_pp_cell
     in
@@ -1388,10 +1392,13 @@ let trans_visitor
       (arg2:Il.cell option)
       (args:Ast.atom array)
       : unit =
-    let param_cell i =
-      let param_addr = sp_imm arg_layouts.(i).layout_offset in
+    let param_cell layout input_opt =
+      let param_addr = sp_imm arg_layouts.(layout).layout_offset in
       let param_referent_ty =
-        slot_referent_type abi callee_sig.Ast.sig_input_slots.(i)
+        match input_opt with
+            None -> Il.ScalarTy (Il.voidptr_t)
+          | Some i ->
+              slot_referent_type abi callee_sig.Ast.sig_input_slots.(i)
       in
         Il.Addr (param_addr, param_referent_ty)
     in
@@ -1407,9 +1414,9 @@ let trans_visitor
                            annotate (Printf.sprintf "fn-call arg %d of %d"
                                        i n_layouts));
                     match i with
-                        0 -> trans_arg0 (param_cell i) output_cell
-                      | 1 -> trans_arg1 (param_cell i)
-                      | _ -> trans_argN (i-2) (param_cell i) in_slots args
+                        0 -> trans_arg0 (param_cell i None) output_cell
+                      | 1 -> trans_arg1 (param_cell i None)
+                      | _ -> trans_argN (i-2) (param_cell i (Some (i-2))) in_slots args
                 done;
                 2;
             end
@@ -1422,10 +1429,10 @@ let trans_visitor
                            annotate (Printf.sprintf "init-call arg %d of %d"
                                        i n_layouts));
                     match i with
-                        0 -> trans_arg0 (param_cell i) output_cell
-                      | 1 -> trans_arg1 (param_cell i)
-                      | 2 -> mov (param_cell i) (Il.Cell arg2_cell)
-                      | _ -> trans_argN (i-3) (param_cell i) in_slots args
+                        0 -> trans_arg0 (param_cell i None) output_cell
+                      | 1 -> trans_arg1 (param_cell i None)
+                      | 2 -> mov (param_cell i None) (Il.Cell arg2_cell)
+                      | _ -> trans_argN (i-3) (param_cell i (Some (i-3))) in_slots args
                 done
             end;
             3
@@ -1435,7 +1442,7 @@ let trans_visitor
         emit (Il.call vr (code_of_cell callee_cell));
         for i = implicit_args to arr_max arg_layouts do
           iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
-          trans_drop_slot (param_cell i) in_slots.(i-implicit_args)
+          trans_drop_slot (param_cell i (Some (i-implicit_args))) in_slots.(i-implicit_args)
         done
 
 
@@ -1584,7 +1591,7 @@ let trans_visitor
                     match atom_opt with
                         None -> ()
                       | Some at ->
-                          let (dst_addr, _) = deref (word_at (fp_imm ret_addr_disp)) in
+                          let (dst_addr, _) = deref (wordptr_at (fp_imm ret_addr_disp)) in
                           let atom_ty = atom_type at in
                           let dst_slot = interior_slot atom_ty in
                           let dst_ty = referent_type abi atom_ty in
@@ -1680,7 +1687,7 @@ let trans_visitor
         then err (Some tagid) "error sorting tag";
       end;
       let _ = log cx "tag variant: %s -> tag value #%d" n (!i) in
-      let (ret_addr, _) = deref (word_at (fp_imm ret_addr_disp)) in
+      let (ret_addr, _) = deref (wordptr_at (fp_imm ret_addr_disp)) in
       let dst = word_at ret_addr in
         (* A clever compiler will inline this. We are not clever. *)
         mov dst (imm (Int64.of_int (!i)));
