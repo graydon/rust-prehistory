@@ -259,12 +259,6 @@ let calculate_live_bitvectors
               then ()
               else
                 begin
-                  if bitvs_equal live_in live_in_saved
-                  then
-                    log cx "live-in bit-vector changed at quad %d" i;
-                  if bitvs_equal live_out live_out_saved
-                  then
-                    log cx "live-out bit-vector changed at quad %d" i;
                   copy live_in_vregs.(i) live_in;
                   copy live_out_vregs.(i) live_out;
                   inner_changed := true

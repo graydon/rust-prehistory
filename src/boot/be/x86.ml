@@ -793,12 +793,12 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.item =
     (* r8 <- rm8 *)
     | (_,  Il.Reg ((Il.Hreg r), dst_ty), Il.Cell src_cell)
         when is_ty8 dst_ty && is_rm8 src_cell ->
-          insn_rm_r 0x8a dst (reg r)
+          insn_rm_r 0x8a src_cell (reg r)
 
     (* r32 <- rm32 *)
     | (_,  (Il.Reg ((Il.Hreg r), dst_ty)), Il.Cell src_cell)
         when is_ty32 dst_ty && is_rm32 src_cell ->
-          insn_rm_r 0x8b dst (reg r)
+          insn_rm_r 0x8b src_cell (reg r)
 
 
     (* MOVZX: r32 <- zx(rm8) *)
