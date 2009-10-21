@@ -269,6 +269,40 @@ let rewrite_quads (qp:quad_processor) (qs:quads) : unit =
 
 (* Formatters. *)
 
+
+
+
+let string_of_bits (b:bits) : string =
+  match b with
+      Bits8 -> "b8"
+    | Bits16 -> "b16"
+    | Bits32 -> "b32"
+    | Bits64 -> "b64"
+;;
+
+let rec string_of_scalar_ty (s:scalar_ty) : string =
+  match s with
+      ValTy b -> (string_of_bits b) (* Printf.sprintf "(val %s)" (string_of_bits b) *)
+    | AddrTy r -> (string_of_referent_ty r) ^ "*" (* Printf.sprintf "(addr %s)" (string_of_referent_ty r) *)
+    | NilTy -> "()"
+
+and string_of_referent_ty (r:referent_ty) : string =
+  match r with
+      ScalarTy s ->  (string_of_scalar_ty s)
+        (* Printf.sprintf "(scalar %s)" (string_of_scalar_ty s) *)
+    | StructTy rs ->
+        Printf.sprintf "[%s]"
+          (String.concat "|"
+             (Array.to_list (Array.map string_of_referent_ty rs)))
+          (*
+            Printf.sprintf "(struct [%s])"
+            (String.concat ", "
+            (Array.to_list (Array.map string_of_referent_ty rs)))
+          *)
+    | OpaqueTy -> "?"
+;;
+
+
 type hreg_formatter = hreg -> string;;
 
 let string_of_reg (f:hreg_formatter) (r:reg) : string =
@@ -333,14 +367,14 @@ let string_of_code (f:hreg_formatter) (c:code) : string =
 
 let string_of_cell (f:hreg_formatter) (c:cell) : string =
   match c with
-      Reg (r,_) -> string_of_reg f r
-    | Addr (a,_) -> string_of_addr f a
+      Reg (r,ty) -> Printf.sprintf "%s:%s" (string_of_reg f r) (string_of_scalar_ty ty)
+    | Addr (a,ty) -> Printf.sprintf "%s:%s" (string_of_addr f a) (string_of_referent_ty ty)
 ;;
 
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
   match op with
       Cell c -> string_of_cell f c
-    | Imm (i, _) -> string_of_expr64 i
+    | Imm (i, ty) -> Printf.sprintf "%s:%s" (string_of_expr64 i) (string_of_scalar_ty ty)
 ;;
 
 let string_of_binop (op:binop) : string =

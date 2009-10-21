@@ -1271,10 +1271,6 @@ handle_upcall(rust_proc_t *proc)
         upcall_grow_proc(proc, (size_t)args[0], (size_t)args[1]);
         break;
     }
-    /* Zero the immediates code slot out so the caller doesn't have to
-     * use MOV to update it. x86-ism but harmless on non-x86 platforms
-     * that want to use their own MOVs. */
-    proc->upcall_code = (upcall_t)0;
 }
 
 static void

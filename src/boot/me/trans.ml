@@ -187,8 +187,9 @@ let trans_visitor
           Il.Imm  (_, st) -> do_mov st
         | Il.Cell (Il.Reg rt) -> rt
         | Il.Cell (Il.Addr (addr, Il.ScalarTy st)) -> do_mov st
-        | Il.Cell (Il.Addr _) ->
-            err None "forcing non-scalar referent to register"
+        | Il.Cell (Il.Addr (_, rt)) ->
+            err None "forcing non-scalar referent of type %s to register"
+              (Il.string_of_referent_ty rt)
   in
 
   let via_memory (writeback:bool) (c:Il.cell) (thunk:Il.typed_addr -> unit) : unit =
@@ -212,14 +213,16 @@ let trans_visitor
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
           Il.AddrTy rt -> (based r, rt)
-        | _ -> err None "dereferencing non-address operand"
+        | _ -> err None "dereferencing non-address cell of type %s "
+            (Il.string_of_scalar_ty st)
   in
 
   let deref_off (ptr:Il.cell) (off:Asm.expr64) : Il.typed_addr =
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
           Il.AddrTy rt -> (based_off r off, rt)
-        | _ -> err None "dereferencing non-address operand"
+        | _ -> err None "offset-dereferencing non-address cell of type %s "
+            (Il.string_of_scalar_ty st)
   in
 
   let deref_imm (ptr:Il.cell) (imm:int64) : Il.typed_addr =
@@ -423,7 +426,8 @@ let trans_visitor
             if abs_ok
             then Il.Abs i
             else
-              let (reg, _) = force_to_reg (Il.Imm (i, word_ty)) in
+              let ta = (Il.Abs i, slot_referent_type abi slot) in
+              let (reg, _) = force_to_reg (alias ta) in
                 Il.Based (reg, None)
       in
         (Il.Addr (addr, (slot_referent_type abi slot)), slot)
@@ -765,14 +769,15 @@ let trans_visitor
         begin
           fun proc_cell_alias ->
             trans_upcall Abi.UPCALL_new_proc [| proc_cell_alias;
-                                                Il.Cell prog_cell |];
+                                                (alias_cell prog_cell) |];
         end;
       let in_slots = tsig.Ast.sig_input_slots in
         (* FIXME: this is a ghastly mess. *)
       let arg_layouts = layout_init_call_tup abi tsig in
-      let init_cell = Il.Addr (deref_imm prog_cell
-                                 (word_n Abi.prog_field_init))
+      let (init_addr, _) = (deref_imm prog_cell
+                              (word_n Abi.prog_field_init))
       in
+      let init_cell = Il.Addr (init_addr, Il.ScalarTy (Il.voidptr_t)) in
         emit (Il.cmp (Il.Cell init_cell) imm_false);
         let fwd_jmp = mark () in
           emit (Il.jmp Il.JE Il.CodeNone);
@@ -962,7 +967,7 @@ let trans_visitor
           fun i (_, (_, layout)) ->
             let (_, sub_slot) = entries.(i) in
             let disp = layout.layout_offset in
-            let cell = word_at (addr_add_imm addr disp) in
+            let cell = wordptr_at (addr_add_imm addr disp) in
               match slot_refcount_cell cell sub_slot with
                   None -> ()
                 | Some rc ->
@@ -980,7 +985,7 @@ let trans_visitor
           fun i layout ->
             let sub_slot = slots.(i) in
             let disp = layout.layout_offset in
-            let cell = word_at (addr_add_imm addr disp) in
+            let cell = wordptr_at (addr_add_imm addr disp) in
               match slot_refcount_cell cell sub_slot with
                   None -> ()
                 | Some rc ->
@@ -1379,8 +1384,9 @@ let trans_visitor
       args.(n)
 
   and code_of_cell (cell:Il.cell) : Il.code =
-    let (addr, _) = force_to_mem (Il.Cell cell) in
-      Il.CodeAddr addr
+    match cell with
+        Il.Addr (a, _) -> Il.CodeAddr a
+      | _ -> err None "loading code from register"
 
   and trans_call
       (logname:(unit -> string))

@@ -260,6 +260,13 @@ let immi (x:int64) : Il.operand =
   imm (Asm.IMM x)
 ;;
 
+let imm_byte (x:Asm.expr64) : Il.operand =
+  Il.Imm (x, Il.ValTy Il.Bits8)
+;;
+let immi_byte (x:int64) : Il.operand =
+  imm_byte (Asm.IMM x)
+;;
+
 
 let save_callee_saves (e:Il.emitter) : unit =
     Il.emit e (Il.Push (ro ebp));
@@ -280,6 +287,12 @@ let word_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = Asm.IMM (Int64.mul (Int64.of_int i) word_sz) in
   let addr = Il.Based (reg, Some imm) in
     Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
+;;
+
+let word_n_low_byte (reg:Il.reg) (i:int) : Il.cell =
+  let imm = Asm.IMM (Int64.mul (Int64.of_int i) word_sz) in
+  let addr = Il.Based (reg, Some imm) in
+    Il.Addr (addr, Il.ScalarTy (Il.ValTy Il.Bits8))
 ;;
 
 let wordptr_n (reg:Il.reg) (i:int) : Il.cell =
@@ -361,6 +374,7 @@ let emit_upcall
 
   let (vr,vc) = vreg e in
   let vr_n = word_n vr in
+  let vr_n_low_byte = word_n_low_byte vr in
   let (_, dst_c) = vreg e in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
@@ -369,14 +383,13 @@ let emit_upcall
    * than MOV, and we get sign-extension on the immediate for free.
    * Strangely, the MOV-immediates don't have a r32 <- imm8 mode. 
    *)
-  let ior dst src = emit (Il.binary Il.OR dst (c dst) src) in
   let pcrel f = Il.CodeAddr (Il.Pcrel (f, None)) in
 
     assert ((Array.length args) <= Abi.max_upcall_args);
 
     mov vc (c proc_ptr);
-    ior (vr_n Abi.proc_field_state) (immi state_code);
-    ior (vr_n Abi.proc_field_upcall_code) (immi upcall_code);
+    mov (vr_n_low_byte Abi.proc_field_state) (immi_byte state_code);
+    mov (vr_n_low_byte Abi.proc_field_upcall_code) (immi_byte upcall_code);
 
     Array.iteri
       begin
@@ -488,8 +501,11 @@ let objfile_main
   then
     begin
       let addr = Il.Abs (Asm.M_POS rust_start_fixup) in
+        Il.emit e (Il.call (rc eax) (Il.CodeAddr addr));
+(*
         Il.emit e (Il.umov (rc ecx) (c (Il.Addr (addr, Il.OpaqueTy))));
         Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Based ((h ecx), None))));
+*)
     end
   else
     Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Pcrel (rust_start_fixup, None))));
@@ -750,7 +766,10 @@ let is_ty32 (ty:Il.scalar_ty) : bool =
     | _ -> false
 
 let is_rm32 (c:Il.cell) : bool =
-  is_ty32 (Il.cell_ty c)
+  match c with
+      (* FIXME: tighten this up. Currently it's willing to accept *any* address as rm32. *)
+      Il.Addr (_, _) -> true
+    | Il.Reg (_, st) -> is_ty32 st
 ;;
 
 let is_ty8 (ty:Il.scalar_ty) : bool =
@@ -760,7 +779,10 @@ let is_ty8 (ty:Il.scalar_ty) : bool =
 ;;
 
 let is_rm8 (c:Il.cell) : bool =
-  is_ty8 (Il.cell_ty c)
+  match c with
+      Il.Addr (_, Il.ScalarTy st) -> is_ty8 st
+    | Il.Reg (_, st) -> is_ty8 st
+    | _ -> false
 ;;
 
 (* FIXME: tighten imm-based dispatch by imm type. *)
@@ -844,8 +866,10 @@ let select_insn_misc (q:Il.quad') : Asm.item =
               Il.Reg ((Il.Hreg dst), _) when dst = eax ->
                 begin
                   match c.Il.call_targ with
-                      Il.CodeAddr (Il.Based (c, None)) ->
-                        insn_rm_r 0xff (Il.Reg (c, Il.voidptr_t)) slash2
+                      Il.CodeAddr (Il.Based b) ->
+                        insn_rm_r 0xff (Il.Addr (Il.Based b, Il.OpaqueTy)) slash2
+                    | Il.CodeAddr (Il.Abs a) ->
+                        insn_rm_r 0xff (Il.Addr (Il.Abs a, Il.OpaqueTy)) slash2
                     | Il.CodeAddr (Il.Pcrel (f, None)) ->
                         insn_pcrel_simple 0xe8 f
                     | _ -> raise Unrecognized
