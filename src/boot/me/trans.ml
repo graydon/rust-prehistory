@@ -209,6 +209,15 @@ let trans_visitor
     via_memory writeback c (fun ta -> thunk (alias ta))
   in
 
+  let pointee_type (ptr:Il.cell) : Il.referent_ty =
+    match ptr with
+        Il.Reg (_, (Il.AddrTy rt)) -> rt
+      | Il.Addr (_, Il.ScalarTy (Il.AddrTy rt)) -> rt
+      | _ ->
+          err None "taking pointee-type of non-address cell %s "
+            (Il.string_of_cell abi.Abi.abi_str_of_hardreg ptr)
+  in
+
   let deref (ptr:Il.cell) : Il.typed_addr =
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
@@ -818,7 +827,8 @@ let trans_visitor
     trans_upcall Abi.UPCALL_free [| Il.Cell src |]
 
   and refcount_cell (n:int) (cell:Il.cell) : Il.cell =
-    Il.Addr (deref_imm cell (word_n n))
+    let (addr, _) = deref_imm cell (word_n n) in
+      Il.Addr (addr, Il.ScalarTy word_ty)
 
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
     let (srccell, _) = trans_lval src INTENT_read in
@@ -1063,41 +1073,52 @@ let trans_visitor
       | INTENT_read -> "read"
 
   and deref_exterior (intent:intent) (cell:Il.cell) (slot:Ast.slot) : Il.typed_addr =
-    iflog (fun _ -> annotate ("deref exterior: " ^
-                                (intent_str intent) ^ ", " ^
-                                (Il.string_of_cell
-                                   abi.Abi.abi_str_of_hardreg cell)));
-      match intent with
-          INTENT_init ->
-            init_exterior_slot cell slot;
-            deref_imm cell exterior_body_off
+    let body_ty =
+      match pointee_type cell with
+          Il.StructTy parts
+            when (Array.length parts == 2) &&
+              (parts.(0) = Il.ScalarTy word_ty) -> parts.(1)
+        | ty -> err None "Dereferencing exterior cell with bad IL type: %s"
+            (Il.string_of_referent_ty ty)
+    in
+      iflog (fun _ -> annotate ("deref exterior: " ^
+                                  (intent_str intent) ^ ", " ^
+                                  (Il.string_of_cell
+                                     abi.Abi.abi_str_of_hardreg cell)));
+      let (addr, _) =
+        match intent with
+            INTENT_init ->
+              init_exterior_slot cell slot;
+              deref_imm cell exterior_body_off
 
-        | INTENT_write ->
-            let rc = exterior_refcount_cell cell in
-              emit (Il.cmp (Il.Cell rc) one);
-              let j = mark () in
-                emit (Il.jmp Il.JE Il.CodeNone);
-                (* 
-                 * Calling trans_copy_slot_heavy in 'initialising' mode 
-                 * will init the slot for us. Don't double-init.
-                 *)
-                iflog (fun _ -> annotate ("deref exterior: write: heavy-copy referent"));
-                let tmp = Il.Reg (Il.next_vreg (emitter()), Il.cell_ty cell) in
-                  trans_copy_slot_heavy true tmp slot cell slot;
-                  drop_refcount_and_maybe_free rc cell slot;
+          | INTENT_write ->
+              let rc = exterior_refcount_cell cell in
+                emit (Il.cmp (Il.Cell rc) one);
+                let j = mark () in
+                  emit (Il.jmp Il.JE Il.CodeNone);
                   (* 
-                   * FIXME: here we write back the new CoW'ed memory
-                   * address to the src cell; possibly this needs
-                   * extension to write all the way back to the
-                   * underlying "home" of the cell, not just its
-                   * current vreg.
+                   * Calling trans_copy_slot_heavy in 'initialising' mode 
+                   * will init the slot for us. Don't double-init.
                    *)
-                  mov cell (Il.Cell tmp);
-                  patch j;
-                  deref_imm cell exterior_body_off
+                  iflog (fun _ -> annotate ("deref exterior: write: heavy-copy referent"));
+                  let tmp = Il.Reg (Il.next_vreg (emitter()), Il.AddrTy (pointee_type cell)) in
+                    trans_copy_slot_heavy true tmp slot cell slot;
+                    drop_refcount_and_maybe_free rc cell slot;
+                    (* 
+                     * FIXME: here we write back the new CoW'ed memory
+                     * address to the src cell; possibly this needs
+                     * extension to write all the way back to the
+                     * underlying "home" of the cell, not just its
+                     * current vreg.
+                     *)
+                    mov cell (Il.Cell tmp);
+                    patch j;
+                    deref_imm cell exterior_body_off
 
-        | INTENT_read ->
-            deref_imm cell exterior_body_off
+          | INTENT_read ->
+              deref_imm cell exterior_body_off
+      in
+        (addr, body_ty)
 
 
   and deref_slot (cell:Il.cell) (slot:Ast.slot) (intent:intent) : Il.cell =

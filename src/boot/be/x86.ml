@@ -187,7 +187,7 @@ let (n_hardregs:int) = 6;;
 
 let prealloc_quad (quad':Il.quad') : Il.quad' =
   let target_bin_to_hreg bin hreg =
-    let ty = Il.cell_ty bin.Il.binary_dst in
+    let ty = Il.cell_scalar_ty bin.Il.binary_dst in
       { bin with
           Il.binary_dst = Il.Reg ((Il.Hreg hreg), ty) }
   in
@@ -204,7 +204,7 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
               end
           end
       | Il.Call c ->
-          let ty = Il.cell_ty c.Il.call_dst in
+          let ty = Il.cell_scalar_ty c.Il.call_dst in
             Il.Call { c with
                         Il.call_dst = Il.Reg ((Il.Hreg eax), ty) }
       | x -> x

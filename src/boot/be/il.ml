@@ -173,7 +173,7 @@ type quads = quad array ;;
 
 (* Query functions. *)
 
-let cell_ty (c:cell) : scalar_ty =
+let cell_scalar_ty (c:cell) : scalar_ty =
   match c with
       Reg (_, st) -> st
     | Addr (_, rt) -> AddrTy rt
