@@ -255,7 +255,7 @@ test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_BO
 ######################################################################
 
 PKG_NAME := rust
-PKG_VER  := 2009-10-22-snap
+PKG_VER  := $(shell date +"%Y-%m-%d")-snap
 PKG_DIR := $(PKG_NAME)-$(PKG_VER)
 PKG_TAR := $(PKG_DIR).tar.gz
 PKG_3RDPARTY := rt/valgrind.h \
