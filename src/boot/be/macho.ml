@@ -1,6 +1,7 @@
 open Asm;;
 open Common;;
 
+(* Mach-O writer. *)
 
 let (cpu_arch_abi64:int64) = 0x01000000L
 ;;

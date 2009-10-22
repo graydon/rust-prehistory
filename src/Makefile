@@ -88,7 +88,7 @@ BE_MLS := $(addprefix boot/be/, asm.ml il.ml abi.ml x86.ml ra.ml pe.ml elf.ml \
           macho.ml)
 ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml auto.ml \
           type.ml mode.ml typestate.ml layout.ml trans.ml dwarf.ml)
-FE_MLS := $(addprefix boot/fe/, ast.ml ll1parser.ml lexer.ml)
+FE_MLS := $(addprefix boot/fe/, ast.ml parser.ml lexer.ml)
 DRIVER_TOP_MLS := $(addprefix boot/driver/, main.ml)
 
 BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) \
@@ -99,16 +99,16 @@ BOOT_OBJS := $(BOOT_MLS:.ml=.o)
 BOOT_CMIS := $(BOOT_MLS:.ml=.cmi)
 
 RUNTIME_CS := rt/rust.c rt/isaac/randport.c
-RUNTIME_INCS := -Irt/uthash-1.6/src -Irt/isaac -Irt/uthash
+RUNTIME_INCS := -Irt/isaac -Irt/uthash
 RUNTIME_OBJS := $(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
 RUNTIME_LIBS := $(CFG_RUNTIME_LIBS)
 
 all: $(CFG_COMPILER) $(MKFILES) boot/fe/lexer.ml
 
 loc:
-	wc -l $(BOOT_MLS) $(RUNTIME_CS)
+	wc -l $(BOOT_MLS) $(RUNTIME_CS) rt/rust.h
 
-$(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES)
+$(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) rt/rust.h
 	$(call CFG_LINK_C, $@) $(RUNTIME_OBJS)
 
 %$(CFG_OBJ_SUFFIX): %.c $(MKFILES)
@@ -147,7 +147,7 @@ BE_RSS := $(addprefix comp/be/, asm.rs il.rs abi.rs x86.rs ra.rs pe.rs elf.rs \
           macho.rs)
 ME_RSS := $(addprefix comp/me/, walk.rs semant.rs resolve.rs alias.rs auto.rs \
           type.rs mode.rs typestate.rs layout.rs trans.rs dwarf.rs)
-FE_RSS := $(addprefix comp/fe/, ast.rs ll1parser.rs lexer.rs)
+FE_RSS := $(addprefix comp/fe/, ast.rs parser.rs lexer.rs)
 DRIVER_TOP_RSS := $(addprefix comp/driver/, rustc.rs)
 
 COMPILER_RSS := $(wildcard $(UTIL_BOT_RSS) $(DRIVER_BOT_RSS) $(BE_RSS) $(FE_RSS) $(ME_RSS) $(DRIVER_TOP_RSS))
@@ -193,6 +193,7 @@ TEST_RUN_PASS_OUTS:=$(TEST_RUN_PASS_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 TEST_RUN_FAIL_CRATES:=$(wildcard test/run-fail/*.rc)
 TEST_RUN_FAIL_SOURCES:=$(wildcard test/run-fail/*.rs)
+TEST_RUN_FAIL_PATS:=$(wildcard test/run-fail/*.pat)
 TEST_RUN_FAIL_EXES:=$(TEST_RUN_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
                     $(TEST_RUN_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
 TEST_RUN_FAIL_OUTS:=$(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
@@ -200,6 +201,7 @@ TEST_RUN_FAIL_OUTS:=$(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 TEST_COMPILE_FAIL_CRATES:=$(wildcard test/compile-fail/*.rc)
 TEST_COMPILE_FAIL_SOURCES:=$(wildcard test/compile-fail/*.rs)
+TEST_COMPILE_FAIL_PATS:=$(wildcard test/compile-fail/*.pat)
 TEST_COMPILE_FAIL_EXES:=$(TEST_COMPILE_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
                         $(TEST_COMPILE_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
 TEST_COMPILE_FAIL_OUTS:=$(TEST_COMPILE_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
@@ -245,6 +247,40 @@ test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_BO
 
 
 ######################################################################
+# Distribution
+######################################################################
+
+PKG_NAME := rust
+PKG_VER  := 0.1
+PKG_DIR := $(PKG_NAME)-$(PKG_VER)
+PKG_TAR := $(PKG_DIR).tar.gz
+PKG_3RDPARTY := rt/valgrind.h \
+                rt/isaac/rand.h rt/isaac/standard.h \
+                rt/uthash/uthash.h rt/uthash/utlist.h \
+                rt/bigint/bigint.h rt/bigint/bigint_int.c \
+                rt/bigint/bigint_ext.c rt/bigint/low_primes.h
+PKG_FILES := README TODO COPYING\
+             $(MKFILES) $(BOOT_MLS) boot/fe/lexer.mll \
+             comp/rustc.rc $(COMPILER_RSS) \
+             $(RUNTIME_CS) rt/rust.h $(PKG_3RDPARTY) \
+             $(TEST_RUN_PASS_CRATES) $(TEST_RUN_PASS_SOURCES) \
+             $(TEST_RUN_FAIL_CRATES) $(TEST_RUN_FAIL_SOURCES) $(TEST_RUN_FAIL_PATS) \
+             $(TEST_COMPILE_FAIL_CRATES) $(TEST_COMPILE_FAIL_SOURCES) $(TEST_COMPILE_FAIL_PATS)
+
+distcheck:
+	rm -Rf $(PKG_TAR) dist/$(PKG_DIR)
+	mkdir -p dist/$(PKG_DIR)
+	tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
+	make -C dist/$(PKG_DIR) check
+	make -C dist/$(PKG_DIR) clean
+	tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
+	@echo
+	@echo -----------------------------------------------
+	@echo $(PKG_TAR) ready for distribution
+	@echo -----------------------------------------------
+
+
+######################################################################
 # Cleanup
 ######################################################################
 
@@ -252,9 +288,11 @@ test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_BO
 
 clean:
 	rm -f $(RUNTIME_OBJS) $(BOOT_CMOS) $(BOOT_CMIS) $(BOOT_CMXS) $(BOOT_OBJS)
+	rm -f $(CFG_COMPILER)
 	rm -f $(ML_DEPFILES) $(C_DEPFILES)
 	rm -f boot/fe/lexer.ml
 	rm -f $(CFG_BOOT) $(CFG_RUNTIME)
 	rm -f $(TEST_RUN_PASS_EXES) $(TEST_RUN_PASS_OUTS)
 	rm -f $(TEST_RUN_FAIL_EXES) $(TEST_RUN_FAIL_OUTS)
 	rm -f $(TEST_COMPILE_FAIL_EXES) $(TEST_COMPILE_FAIL_OUTS)
+	rm -Rf $(PKG_TAR) dist

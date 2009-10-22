@@ -105,10 +105,10 @@ let _ =
 
 let (crate:Ast.crate) =
   if Filename.check_suffix sess.Session.sess_in ".rc"
-  then Ll1parser.parse_crate sess Lexer.token
+  then Parser.parse_crate sess Lexer.token
   else
     if Filename.check_suffix sess.Session.sess_in ".rs"
-    then Ll1parser.parse_srcfile sess Lexer.token
+    then Parser.parse_srcfile sess Lexer.token
     else
       begin
         Printf.fprintf stderr

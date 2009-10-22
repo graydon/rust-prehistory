@@ -2,6 +2,13 @@
 progress:
  - remove limited type
  - remove COMP_idx
+ - mach-o format emitter
+ - tag/iso/idx types
+ - more string work
+ - machine types (or at least byte-sized bool, u32 and u8)
+ - arbitrary-precision int type
+ - alt statements
+ - homogeneous for loops
  - build signal system
  - extend typestate system to handle operation pre/post conditions
    extracted from implicit-in-type constrs
@@ -9,24 +16,19 @@ progress:
  - general memcpy-with-inlining-threshold trans function
  - explicit FFI / struct descriptors; hard-coding offsets is getting stale
    (use IL.referent_ty and friends)
+ - combine layout and Il.referent_ty (give members of StructTy offsets and alignments)
  - make proc stacks into chunk lists, check overflow / extend on frame entry
  - put timer-counter in proc
  - translate loop-jumps & calls to do a test/yield (regs already flushed)
  - implement memory budget / accounting scheme
  - real type checker, or extend resolve/unify? consult textbooks
- - strings
  - emit typecode structure into crate (dwarf?)
- - typecode-driven generic copy fn
- - typecode-driven generic compare fn
- - typecode-driven generic hash fn
- - typecode-driven generic delete fn
- - typecode-driven generic fn 'ensure single ownership'
+ - type-driven glue functions: copy, compare, hash, delete
  - mod types
- - alt/iso/idx types
  - parametric types
  - yielding calling protocols
+ - iterator for-loops
  - tail calling protocols
- - mach-o format emitter
  - x64, arm?
  - import extlib for utf-8, various extras
  - redo lexer by hand, as unicode
@@ -35,15 +37,13 @@ code cleanup:
  - move frame code to ABI
  - put logging and error-handling context in elf, pe, x86
  - use a datatype for fields inside each kernel C structure
- - move explicit code gen flags to ABI "pre digester" function
+ - move explicit code gen flags (pcrel_ok / abs_ok) to ABI "pre digester" function
  - pass a crate pointer into the runtime rather than root prog
  - start crate structure real stupid: refcount + 1 function table
  - consolidate formatting functions
  - type-annotate everything
  - make callee-save in prologue/epilogue depend on reg use
  - once extlib imported, flush out redundancies in common
- - make all logging (or most) lazy
- - change ra to do destructive / in-place update of bitsets
  - change typestate algorithm to reschedule / revisit only downstream nodes
  - change relaxation code to ... possibly *batch* adjustments? hard to say; maybe
    have relaxation return a tri-state: "I fit" / "I do not" / "I might", and only
@@ -52,6 +52,7 @@ code cleanup:
 done:
  - vectors
  - vector bounds checking
+ - basic strings
  - implement refcounts on procs, chans, ports
  - channels and ports
  - basic version of type-state algorithm
@@ -61,3 +62,5 @@ done:
  - non-interior slot modes
  - use a datatype for kernel function codes, not int numbers
  - make proc pool growable
+ - change ra to do destructive / in-place update of bitsets
+ - make all logging (or most) lazy

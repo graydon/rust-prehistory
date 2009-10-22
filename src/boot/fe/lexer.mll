@@ -1,7 +1,7 @@
 
 
 {
-  open Ll1parser;;
+  open Parser;;
   let bump_line p = { p with
               Lexing.pos_lnum = p.Lexing.pos_lnum + 1;
               Lexing.pos_bol = p.Lexing.pos_cnum }
