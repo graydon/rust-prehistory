@@ -1372,7 +1372,7 @@ srv_fatal(rust_srv_t *srv, char const *expr,
 {
     char buf[1024];
     snprintf(buf, sizeof(buf), "fatal, '%s' failed, %s:%d",
-             expr, file, line);
+             expr, file, (int)line);
     srv->log(srv, buf);
     exit(1);
 }

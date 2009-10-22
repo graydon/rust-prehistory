@@ -57,7 +57,11 @@ endif
 ifdef CFG_GCC
   CFG_INFO := $(info using gcc)
   CFG_GCC_COMPILE_FLAGS += -Wall -Werror -pedantic -std=c99 -g
+ifeq ($(CFG_OSTYPE), Darwin)
+  CFG_GCC_LINK_FLAGS += -dynamiclib -g
+else
   CFG_GCC_LINK_FLAGS += -shared -g
+endif
   CFG_COMPILE_C = gcc $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
   CFG_LINK_C = gcc $(CFG_GCC_LINK_FLAGS) -o $(1)
   CFG_DEPEND_C = gcc -MT "$(1)" -MM $(2)
@@ -251,7 +255,7 @@ test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_BO
 ######################################################################
 
 PKG_NAME := rust
-PKG_VER  := 0.1
+PKG_VER  := 2009-10-22-snap
 PKG_DIR := $(PKG_NAME)-$(PKG_VER)
 PKG_TAR := $(PKG_DIR).tar.gz
 PKG_3RDPARTY := rt/valgrind.h \
@@ -268,7 +272,7 @@ PKG_FILES := README TODO COPYING\
              $(TEST_COMPILE_FAIL_CRATES) $(TEST_COMPILE_FAIL_SOURCES) $(TEST_COMPILE_FAIL_PATS)
 
 distcheck:
-	rm -Rf $(PKG_TAR) dist/$(PKG_DIR)
+	rm -Rf $(PKG_NAME)-*.tar.gz dist
 	mkdir -p dist/$(PKG_DIR)
 	tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
 	make -C dist/$(PKG_DIR) check
