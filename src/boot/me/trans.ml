@@ -774,9 +774,8 @@ let trans_visitor
       let in_slots = tsig.Ast.sig_input_slots in
         (* FIXME: this is a ghastly mess. *)
       let arg_layouts = layout_init_call_tup abi tsig in
-      let (init_addr, _) = (deref_imm prog_cell
-                              (word_n Abi.prog_field_init))
-      in
+      let (prog_addr, _) = need_addr_cell prog_cell in
+      let init_addr = addr_add_imm prog_addr (word_n Abi.prog_field_init) in
       let init_cell = Il.Addr (init_addr, Il.ScalarTy (Il.voidptr_t)) in
         emit (Il.cmp (Il.Cell init_cell) imm_false);
         let fwd_jmp = mark () in
