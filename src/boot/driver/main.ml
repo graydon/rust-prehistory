@@ -33,6 +33,7 @@ let (sess:Session.sess) =
     Session.sess_log_mode = false;
     Session.sess_log_typestate = false;
     Session.sess_log_layout = false;
+    Session.sess_log_itype = false;
     Session.sess_log_trans = false;
     Session.sess_log_dwarf = false;
     Session.sess_log_ra = false;
@@ -70,6 +71,8 @@ let argspecs =
     ("-ltypestate", Arg.Unit (fun _ -> sess.Session.sess_log_typestate <- true), "log typestate checking");
     ("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
     ("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
+    ("-litype", Arg.Unit (fun _ -> sess.Session.sess_log_itype <- true;
+                            Il.log_iltypes := true), "log IL types");
     ("-ldwarf", Arg.Unit (fun _ -> sess.Session.sess_log_dwarf <- true), "log DWARF record generation");
     ("-lra", Arg.Unit (fun _ -> sess.Session.sess_log_ra <- true), "log register allocation");
     ("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");

@@ -189,6 +189,7 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
   let target_bin_to_hreg bin hreg =
     let ty = Il.cell_scalar_ty bin.Il.binary_dst in
       { bin with
+          Il.binary_lhs = Il.Cell (Il.Reg ((Il.Hreg hreg), ty));
           Il.binary_dst = Il.Reg ((Il.Hreg hreg), ty) }
   in
     match quad' with

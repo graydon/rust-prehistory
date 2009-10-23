@@ -383,8 +383,9 @@ let trans_visitor
           let unit_sz = ty_sz abi ety in
           let slot = interior_slot ety in
           let disp = Int64.mul unit_sz (Int64.of_int i) in
-          let addr = trans_bounds_check base_addr (imm disp) in
-            (Il.Addr (addr, slot_referent_type abi slot), slot)
+          let (addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
+          let elt_addr = trans_bounds_check addr (imm disp) in
+            (Il.Addr (elt_addr, slot_referent_type abi slot), slot)
 
       | (Ast.TY_vec ety,
          Ast.COMP_atom at) ->
@@ -394,8 +395,9 @@ let trans_visitor
           let reg = next_vreg () in
           let t = Il.Reg (reg, Il.ValTy word_bits) in
             emit (Il.binary Il.UMUL t atop (imm unit_sz));
-            let addr = trans_bounds_check base_addr (Il.Cell t) in
-              (Il.Addr (addr, slot_referent_type abi slot), slot)
+            let (addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
+            let elt_addr = trans_bounds_check addr (Il.Cell t) in
+              (Il.Addr (elt_addr, slot_referent_type abi slot), slot)
 
       | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
 
@@ -804,6 +806,7 @@ let trans_visitor
                 None -> ("<none>", 0, 0)
               | Some sp -> sp.lo
     in
+      iflog (fun _ -> annotate ("condition-fail: " ^ str));
       trans_upcall Abi.UPCALL_fail
         [|
           trans_static_string str;

@@ -41,6 +41,10 @@ let iflog (cx:ctxt) (thunk:(unit -> unit)) : unit =
   else ()
 ;;
 
+let list_to_str list eltstr =
+  (String.concat "," (List.map eltstr (List.sort compare list)))
+;;
+
 let next_spill (cx:ctxt) : int =
   let i = cx.ctxt_next_spill in
     cx.ctxt_next_spill <- i + 1;
@@ -128,8 +132,7 @@ let kill_redundant_moves (cx:ctxt) : unit =
 
 let quad_jump_target_labels (q:quad) : Il.label list =
   match q.Il.quad_body with
-      Il.Call { Il.call_targ = Il.CodeLabel lab } -> [ lab ]
-    | Il.Jmp { Il.jmp_targ = Il.CodeLabel lab } -> [ lab ]
+      Il.Jmp { Il.jmp_targ = Il.CodeLabel lab } -> [ lab ]
     | _ -> []
 ;;
 
@@ -187,15 +190,14 @@ let calculate_live_bitvectors
   let (live_in_vregs:Bitv.t array) = Array.init n_quads new_bitv in
   let (live_out_vregs:Bitv.t array) = Array.init n_quads new_bitv in
 
-  let (quad_used_vrs:(int list) array) = Array.make n_quads [] in
-  let (quad_defined_vrs:(int list) array) = Array.make n_quads [] in
+  let (quad_used_vrs:Bitv.t array) = Array.init n_quads new_bitv in
+  let (quad_defined_vrs:Bitv.t array) = Array.init n_quads new_bitv in
   let (quad_uncond_jmp:bool array) = Array.make n_quads false in
   let (quad_jmp_targs:(Il.label list) array) = Array.make n_quads [] in
 
   let outer_changed = ref true in
 
   (* Working bit-vectors. *)
-  let defined = new_bitv() in
   let live_in_saved = new_bitv() in
   let live_out_saved = new_bitv() in
   let bitvs_equal a b = ((Bitv.to_list a) = (Bitv.to_list b)) in
@@ -208,10 +210,10 @@ let calculate_live_bitvectors
     (* Setup pass. *)
     for i = 0 to n_quads - 1 do
       let q = quads.(i) in
-        quad_used_vrs.(i) <- quad_used_vregs q;
-        quad_defined_vrs.(i) <- quad_defined_vregs q;
         quad_uncond_jmp.(i) <- quad_is_unconditional_jump q;
-        quad_jmp_targs.(i) <- quad_jump_target_labels q
+        quad_jmp_targs.(i) <- quad_jump_target_labels q;
+        List.iter (fun v -> Bitv.set quad_used_vrs.(i) v true) (quad_used_vregs q);
+        List.iter (fun v -> Bitv.set quad_defined_vrs.(i) v true) (quad_defined_vregs q)
     done;
 
     while !outer_changed do
@@ -224,18 +226,19 @@ let calculate_live_bitvectors
       let inner_changed = ref true in
         while !inner_changed do
           inner_changed := false;
-          clear defined;
           iflog cx (fun _ -> log cx "iterating inner bitvector calculation over %d quads" n_quads);
           for i = n_quads - 1 downto 0 do
 
             let live_in = live_in_vregs.(i) in
             let live_out = live_out_vregs.(i) in
+            let used = quad_used_vrs.(i) in
+            let defined = quad_defined_vrs.(i) in
 
               copy live_in_saved live_in;
               copy live_out_saved live_out;
 
-              List.iter (fun i -> Bitv.set live_in i true) quad_used_vrs.(i);
-              List.iter (fun i -> Bitv.set defined i true) quad_defined_vrs.(i);
+              (* Union in the vregs we use. *)
+              union live_in used;
 
               (* Union in all our jump targets. *)
               List.iter (fun i -> union live_out live_in_vregs.(i)) (quad_jmp_targs.(i));
@@ -262,7 +265,7 @@ let calculate_live_bitvectors
                   copy live_in_vregs.(i) live_in;
                   copy live_out_vregs.(i) live_out;
                   inner_changed := true
-                end
+                end;
           done
         done;
         let kill_mov_to_dead_target i q =
@@ -350,10 +353,6 @@ let dump_quads cx =
     in
       log cx "[%s] %s %s" (padded_num i len) (padded_str lab (!maxlablen)) qs
   done
-;;
-
-let list_to_str list eltstr =
-  (String.concat "," (List.map eltstr (List.sort compare list)))
 ;;
 
 

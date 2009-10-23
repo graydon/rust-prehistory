@@ -21,6 +21,7 @@ type sess =
   mutable sess_log_typestate: bool;
   mutable sess_log_layout: bool;
   mutable sess_log_trans: bool;
+  mutable sess_log_itype: bool;
   mutable sess_log_dwarf: bool;
   mutable sess_log_ra: bool;
   mutable sess_log_insn: bool;

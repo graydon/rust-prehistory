@@ -1,5 +1,8 @@
 open Common;;
 
+(* FIXME: thread a session object through this eventually. *)
+let log_iltypes = ref false;;
+
 (* IL type system, very rudimentary. *)
 
 type bits =
@@ -282,23 +285,17 @@ let string_of_bits (b:bits) : string =
 
 let rec string_of_scalar_ty (s:scalar_ty) : string =
   match s with
-      ValTy b -> (string_of_bits b) (* Printf.sprintf "(val %s)" (string_of_bits b) *)
-    | AddrTy r -> (string_of_referent_ty r) ^ "*" (* Printf.sprintf "(addr %s)" (string_of_referent_ty r) *)
+      ValTy b -> (string_of_bits b)
+    | AddrTy r -> (string_of_referent_ty r) ^ "*"
     | NilTy -> "()"
 
 and string_of_referent_ty (r:referent_ty) : string =
   match r with
       ScalarTy s ->  (string_of_scalar_ty s)
-        (* Printf.sprintf "(scalar %s)" (string_of_scalar_ty s) *)
     | StructTy rs ->
         Printf.sprintf "[%s]"
           (String.concat "|"
              (Array.to_list (Array.map string_of_referent_ty rs)))
-          (*
-            Printf.sprintf "(struct [%s])"
-            (String.concat ", "
-            (Array.to_list (Array.map string_of_referent_ty rs)))
-          *)
     | OpaqueTy -> "?"
 ;;
 
@@ -319,7 +316,8 @@ let rec string_of_expr64 (e64:Asm.expr64) : string =
     Printf.sprintf "(%s %s %d)" (string_of_expr64 a) op b
   in
     match e64 with
-        Asm.IMM i -> Printf.sprintf "0x%Lx" i
+        Asm.IMM i when (i64_lt i 0L) -> Printf.sprintf "-0x%Lx" (Int64.neg i)
+      | Asm.IMM i -> Printf.sprintf "0x%Lx" i
       | Asm.ADD (a,b) -> bin "+" a b
       | Asm.SUB (a,b) -> bin "-" a b
       | Asm.MUL (a,b) -> bin "*" a b
@@ -367,14 +365,29 @@ let string_of_code (f:hreg_formatter) (c:code) : string =
 
 let string_of_cell (f:hreg_formatter) (c:cell) : string =
   match c with
-      Reg (r,ty) -> Printf.sprintf "%s:%s" (string_of_reg f r) (string_of_scalar_ty ty)
-    | Addr (a,ty) -> Printf.sprintf "%s:%s" (string_of_addr f a) (string_of_referent_ty ty)
+      Reg (r,ty) ->
+        if !log_iltypes
+        then
+          Printf.sprintf "%s:%s" (string_of_reg f r) (string_of_scalar_ty ty)
+        else
+          Printf.sprintf "%s" (string_of_reg f r)
+    | Addr (a,ty) ->
+        if !log_iltypes
+        then
+          Printf.sprintf "%s:%s" (string_of_addr f a) (string_of_referent_ty ty)
+        else
+          Printf.sprintf "%s" (string_of_addr f a)
 ;;
 
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
   match op with
       Cell c -> string_of_cell f c
-    | Imm (i, ty) -> Printf.sprintf "%s:%s" (string_of_expr64 i) (string_of_scalar_ty ty)
+    | Imm (i, ty) ->
+        if !log_iltypes
+        then
+          Printf.sprintf "%s:%s" (string_of_expr64 i) (string_of_scalar_ty ty)
+        else
+          Printf.sprintf "%s" (string_of_expr64 i)
 ;;
 
 let string_of_binop (op:binop) : string =
@@ -645,7 +658,7 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
   let mov_if_cells_differ (old_cell:cell) (new_cell:cell) : unit =
     if new_cell != old_cell
     then
-      emit_mov new_cell (Cell old_cell)
+      emit_mov old_cell (Cell new_cell)
   in
 
     match (q', e.emit_preallocator q') with
