@@ -272,9 +272,6 @@ let trans_visitor
                   then need_ty elts.(i).Ast.slot_ty
                   else err None "out-of-range tuple index %d" i
 
-              | (Ast.TY_vec ety, Ast.COMP_named (Ast.COMP_idx _)) ->
-                  ety
-
               | (Ast.TY_vec ety, Ast.COMP_atom _) ->
                   ety
 
@@ -377,15 +374,6 @@ let trans_visitor
           let slot = entries.(i) in
           let cell = displaced slot layouts.(i).layout_offset in
             (cell, slot)
-
-      | (Ast.TY_vec ety,
-         Ast.COMP_named (Ast.COMP_idx i)) ->
-          let unit_sz = ty_sz abi ety in
-          let slot = interior_slot ety in
-          let disp = Int64.mul unit_sz (Int64.of_int i) in
-          let (addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
-          let elt_addr = trans_bounds_check addr (imm disp) in
-            (Il.Addr (elt_addr, slot_referent_type abi slot), slot)
 
       | (Ast.TY_vec ety,
          Ast.COMP_atom at) ->
@@ -917,6 +905,7 @@ let trans_visitor
         Ast.TY_vec t -> t
       | _ -> err None "init dst of vec-init has non-port type"
     in
+    let unit_slot = interior_slot unit_ty in
     let unit_sz = ty_sz abi unit_ty in
     let n_inits = Array.length atoms in
     let init_sz = Int64.mul unit_sz (Int64.of_int n_inits) in
@@ -929,11 +918,9 @@ let trans_visitor
       Array.iteri
         begin
           fun i atom ->
-            let lval = (Ast.LVAL_ext
-                          (dst, (Ast.COMP_named (Ast.COMP_idx i))))
-            in
-            let expr = Ast.EXPR_atom atom in
-              trans_copy true lval expr
+            let off = Int64.add (word_n 3) (Int64.mul (Int64.of_int i) unit_sz) in
+            let cell = Il.Addr (deref_imm dstcell off) in
+              trans_init_slot_from_atom cell unit_slot atom
         end
         atoms
 

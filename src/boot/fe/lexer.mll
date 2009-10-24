@@ -108,7 +108,7 @@ rule token = parse
 | ">>>"                        { ASR        }
 | '~'                          { TILDE      }
 | '{'                          { LBRACE     }
-| '{' (dec as n) '}'           { IDX (int_of_string n) }
+| '_' (dec as n)               { IDX (int_of_string n) }
 | '}'                          { RBRACE     }
 
 | '#'                          { POUND      }

@@ -252,7 +252,7 @@ let string_of_tok t =
 
     (* Name components *)
     | IDENT s    -> s
-    | IDX i      -> ("{" ^ (string_of_int i) ^ "}")
+    | IDX i      -> ("_" ^ (string_of_int i))
 
     (* Reserved type names *)
     | NIL        -> "nil"
@@ -550,6 +550,8 @@ let bracketed bra ket prule ps =
 let parse_ident ps =
   match peek ps with
       IDENT id -> (bump ps; id)
+    (* Decay IDX tokens to identifiers if they occur ousdide name paths. *)
+    | IDX i -> (bump ps; string_of_tok (IDX i))
     | _ -> raise (unexpected ps)
 ;;
 

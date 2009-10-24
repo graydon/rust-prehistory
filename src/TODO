@@ -1,6 +1,5 @@
 
 progress:
- - remove COMP_idx
  - mach-o format emitter
  - tag/iso/idx types
  - more string work
@@ -50,6 +49,7 @@ code cleanup:
 
 done:
  - remove limited type
+ - change COMP_idx {} syntax, to _n
  - vectors
  - vector bounds checking
  - basic strings
