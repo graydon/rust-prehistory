@@ -6,7 +6,7 @@ prog woohoo
   fn putstr(str s) -> () {}
   fn putint(int i) -> () { let int i = 33; while (i < 36) { putstr("hi"); i = i + 1; } }
   fn zerg(int i) -> int { ret i; }
-  lim fn foo(int x) -> int
+  fn foo(int x) -> int
   {
     let t y = x + 2;
     putstr("hello");

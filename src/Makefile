@@ -13,7 +13,7 @@ CFG_GCC_LINK_FLAGS :=
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
   CFG_GCC_COMPILE_FLAGS += -fPIC
-  CFG_GCC_LINK_FLAGS += -fPIC -ldl
+  CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl
   ifeq ($(CFG_CPUTYPE), x86_64)
     CFG_GCC_COMPILE_FLAGS += -m32
     CFG_GCC_LINK_FLAGS += -m32
@@ -25,6 +25,7 @@ endif
 ifeq ($(CFG_OSTYPE), Darwin)
   CFG_RUNTIME := librustrt.dylib
   CFG_UNIXY := 1
+  CFG_GCC_LINK_FLAGS += -dynamiclib
 endif
 
 ifneq ($(findstring MINGW,$(CFG_OSTYPE)),)
@@ -39,7 +40,7 @@ ifdef CFG_WINDOWSY
   CFG_EXE_SUFFIX := .exe
   CFG_BOOT := ./rustboot.exe
   CFG_COMPILER := ./rustc.exe
-  CFG_GCC_LINK_FLAGS += -fPIC
+  CFG_GCC_LINK_FLAGS += -shared -fPIC
   CFG_RUN_TARG = $(1)
   # FIXME: support msvc at some point
   CFG_GCC := 1
@@ -57,11 +58,7 @@ endif
 ifdef CFG_GCC
   CFG_INFO := $(info using gcc)
   CFG_GCC_COMPILE_FLAGS += -Wall -Werror -pedantic -std=c99 -g
-ifeq ($(CFG_OSTYPE), Darwin)
-  CFG_GCC_LINK_FLAGS += -dynamiclib -g
-else
-  CFG_GCC_LINK_FLAGS += -shared -g
-endif
+  CFG_GCC_LINK_FLAGS += -g
   CFG_COMPILE_C = gcc $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
   CFG_LINK_C = gcc $(CFG_GCC_LINK_FLAGS) -o $(1)
   CFG_DEPEND_C = gcc -MT "$(1)" -MM $(2)
@@ -299,4 +296,4 @@ clean:
 	rm -f $(TEST_RUN_PASS_EXES) $(TEST_RUN_PASS_OUTS)
 	rm -f $(TEST_RUN_FAIL_EXES) $(TEST_RUN_FAIL_OUTS)
 	rm -f $(TEST_COMPILE_FAIL_EXES) $(TEST_COMPILE_FAIL_OUTS)
-	rm -Rf $(PKG_TAR) dist
+	rm -Rf $(PKG_NAME)-*.tar.gz dist

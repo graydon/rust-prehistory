@@ -370,13 +370,7 @@ and mod_type_item_of_mod_item
           then
             Some (Ast.MOD_TYPE_ITEM_public_type td)
           else
-            (match (td.Ast.decl_params, td.Ast.decl_item) with
-                 (params, Ast.TY_lim _) ->
-                   Some (Ast.MOD_TYPE_ITEM_opaque_type
-                           (decl params Ast.LIMITED))
-               | (params, _) ->
-                   Some (Ast.MOD_TYPE_ITEM_opaque_type
-                           (decl params Ast.UNLIMITED)))
+            Some (Ast.MOD_TYPE_ITEM_opaque_type (decl td.Ast.decl_params ()))
       | Ast.MOD_ITEM_public_type td ->
           Some (Ast.MOD_TYPE_ITEM_public_type td)
       | Ast.MOD_ITEM_pred pd ->
@@ -461,7 +455,6 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
       | Ast.MOD_ITEM_tag td ->
           let (ttup, ttag) = td.Ast.decl_item in
           let taux = { Ast.fn_pure = true;
-                       Ast.fn_lim = Ast.UNLIMITED;
                        Ast.fn_proto = None }
           in
           let tsig = { Ast.sig_input_slots = ttup;
@@ -749,7 +742,6 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_prog _ -> sp (Il.StructTy [| ptr; ptr; ptr |])
       | Ast.TY_named _ -> err None "named type in referent_type"
       | Ast.TY_constrained (t, _) -> referent_type abi t
-      | Ast.TY_lim t -> referent_type abi t
 
 and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
   let s t = Il.ScalarTy t in

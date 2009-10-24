@@ -266,7 +266,6 @@ let type_resolving_visitor
       | Ast.TY_vec ty -> Ast.TY_vec (resolve_ty ty)
       | Ast.TY_chan ty -> Ast.TY_chan (resolve_ty ty)
       | Ast.TY_port ty -> Ast.TY_port (resolve_ty ty)
-      | Ast.TY_lim ty -> Ast.TY_lim (resolve_ty ty)
 
       | Ast.TY_constrained (ty, constrs) ->
           Ast.TY_constrained ((resolve_ty ty),constrs)
@@ -317,7 +316,6 @@ let type_resolving_visitor
           Ast.NATIVE_fn tsig ->
             begin
               let taux = { Ast.fn_pure = false;
-                           Ast.fn_lim = Ast.UNLIMITED;
                            Ast.fn_proto = None }
               in
                 try

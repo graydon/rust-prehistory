@@ -118,7 +118,6 @@ type token =
   | TAG
   | VEC
   | ANY
-  | LIM
 
   (* Callable type constructors *)
   | FN of Ast.proto option
@@ -271,7 +270,6 @@ let string_of_tok t =
     | TAG        -> "tag"
     | VEC        -> "vec"
     | ANY        -> "any"
-    | LIM        -> "lim"
 
     (* Function type constructors *)
     | FN None   -> "fn"
@@ -699,10 +697,6 @@ and parse_atomic_ty ps =
     | VEC ->
         bump ps;
         Ast.TY_vec (bracketed LBRACKET RBRACKET parse_ty ps)
-
-    | LIM ->
-        bump ps;
-        Ast.TY_lim (parse_atomic_ty ps)
 
     | IDENT _ -> Ast.TY_named (parse_name ps)
 
@@ -1510,7 +1504,7 @@ and parse_stmts ps =
             Array.concat [[| span ps apos bpos (Ast.STMT_decl decl) |]; stmts]
 
 
-      | LIM | PROG | MOD | TYPE | (FN _) | PRED ->
+      | PROG | MOD | TYPE | (FN _) | PRED ->
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
           let bpos = lexpos ps in
           let decl = Ast.DECL_mod_item (ident, item) in
@@ -1616,7 +1610,7 @@ and parse_prog_item prog_cell stmts_cell ps =
         let fini = ctxt "prog_item: fini" parse_block ps in
           prog_cell := { (!prog_cell) with Ast.prog_fini = Some fini }
 
-    | PUB | PURE | LIM
+    | PUB | PURE
     | PROG | MOD | TYPE | (FN _) | PRED ->
         let (ident, stmts, item) = ctxt "prog_item: mod item" parse_mod_item ps in
         let mod_items = (!prog_cell).Ast.prog_mod in
@@ -1711,15 +1705,14 @@ and parse_in_and_out ps =
 
 
 (* parse_fn starts at the first lparen of the sig. *)
-and parse_fn proto_opt lim pure ps =
+and parse_fn proto_opt pure ps =
     let (inputs, constrs, output) = ctxt "fn: in_and_out" parse_in_and_out ps in
     let body = ctxt "fn: body" parse_block ps in
       { Ast.fn_input_slots = inputs;
         Ast.fn_input_constrs = constrs;
         Ast.fn_output_slot = output;
         Ast.fn_aux = { Ast.fn_pure = pure;
-                       Ast.fn_proto = proto_opt;
-                       Ast.fn_lim = lim; };
+                       Ast.fn_proto = proto_opt; };
         Ast.fn_body = body; }
 
 and parse_pred ps =
@@ -1734,15 +1727,7 @@ and flag ps tok =
   then (bump ps; true)
   else false
 
-and parse_lim ps =
-  if flag ps LIM
-  then Ast.LIMITED
-  else Ast.UNLIMITED
-
-and parse_ty_param ps =
-  let lim = parse_lim ps in
-  let id = parse_ident ps in
-    (lim, id)
+and parse_ty_param ps = parse_ident ps
 
 and parse_ty_params ps =
   match peek ps with
@@ -1807,7 +1792,6 @@ and parse_mod_item ps =
   let apos = lexpos ps in
   let public = flag ps PUB in
   let pure = flag ps PURE in
-  let lim = parse_lim ps in
 
     match peek ps with
         PROG ->
@@ -1826,7 +1810,7 @@ and parse_mod_item ps =
           bump ps;
           let ident = ctxt "mod fn item: ident" parse_ident ps in
           let params = ctxt "mod fn item: type params" parse_ty_params ps in
-          let fn = ctxt "mod fn item: fn" (parse_fn proto_opt lim pure) ps in
+          let fn = ctxt "mod fn item: fn" (parse_fn proto_opt pure) ps in
           let
               decl = { Ast.decl_params = params;
                        Ast.decl_item = fn }

@@ -94,7 +94,6 @@ and ty =
   | TY_type
 
   | TY_constrained of (ty * constrs)
-  | TY_lim of ty
 
 and mode =
     MODE_exterior
@@ -185,10 +184,6 @@ and ty_sig =
 and ty_fn_aux =
     {
       fn_pure: bool;
-      (* NB: limited-ness of a function only makes sense if functions
-       * have closures, and we're talking about the limited-ness of
-       * values held in its captured environment. *)
-      fn_lim: ty_limit;
       fn_proto: proto option;
     }
 
@@ -400,13 +395,9 @@ and init =
  *)
 
 
-and ty_limit =
-    LIMITED
-  | UNLIMITED
-
 and 'a decl =
     {
-      decl_params: (ty_limit * ident) array;
+      decl_params: ident array;
       decl_item: 'a;
     }
 
@@ -450,7 +441,7 @@ and mod_item = mod_item' identified
 and mod_items = (ident, mod_item) Hashtbl.t
 
 and mod_type_item' =
-    MOD_TYPE_ITEM_opaque_type of ty_limit decl
+    MOD_TYPE_ITEM_opaque_type of unit decl
   | MOD_TYPE_ITEM_public_type of ty decl
   | MOD_TYPE_ITEM_pred of ty_pred decl
   | MOD_TYPE_ITEM_mod of mod_type_items decl
@@ -560,17 +551,11 @@ and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) opt
   done;
   fmt ff "@])"
 
-and fmt_limit (ff:Format.formatter) (lim:ty_limit) : unit =
-    if lim = LIMITED
-    then fmt ff "lim@;"
-    else ()
-
 and fmt_fn_header (ff:Format.formatter) (tf:ty_fn) 
-    (id:ident option) (params:((ty_limit * ident) array) option) : unit =
+    (id:ident option) (params:(ident array) option) : unit =
   let (tsig, ta) = tf in
     if ta.fn_pure
     then fmt ff "pure@ ";
-    fmt_limit ff ta.fn_lim;
     fmt ff "fn";
     begin
       match ta.fn_proto with
@@ -633,7 +618,6 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_opaque id -> fmt ff "o#%d" (int_of_opaque id)
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
-  | TY_lim t -> (fmt ff "lim@ "; fmt_ty ff t)
 
   | TY_fn tfn -> fmt_fn_header ff tfn None None
   | TY_proc -> fmt ff "proc"
@@ -938,7 +922,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
   | STMT_use of (ty * ident * lval)
 *)
 
-and fmt_decl_params (ff:Format.formatter) (params:(ty_limit * ident) array) : unit =
+and fmt_decl_params (ff:Format.formatter) (params:ident array) : unit =
   if Array.length params = 0
   then ()
   else
@@ -948,10 +932,7 @@ and fmt_decl_params (ff:Format.formatter) (params:(ty_limit * ident) array) : un
       do
         if i = 0
         then fmt ff ", ";
-        let (lim, id) = params.(i) in
-          fmt_limit ff lim;
-          fmt ff " ";
-          fmt_ident  ff id
+        fmt_ident ff params.(i)
       done;
       fmt ff "]"
     end;

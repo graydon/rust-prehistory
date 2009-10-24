@@ -1,6 +1,5 @@
 
 progress:
- - remove limited type
  - remove COMP_idx
  - mach-o format emitter
  - tag/iso/idx types
@@ -50,6 +49,7 @@ code cleanup:
    batch the "I do not"s?
 
 done:
+ - remove limited type
  - vectors
  - vector bounds checking
  - basic strings

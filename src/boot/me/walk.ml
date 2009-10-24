@@ -38,17 +38,17 @@ type visitor =
       visit_lval_pre: Ast.lval -> unit;
       visit_lval_post: Ast.lval -> unit;
       visit_mod_item_pre:
-        Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_item -> unit;
+        Ast.ident -> (Ast.ident array) -> Ast.mod_item -> unit;
       visit_mod_item_post:
-        Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_item -> unit;
+        Ast.ident -> (Ast.ident array) -> Ast.mod_item -> unit;
       visit_native_mod_item_pre:
         Ast.ident -> Ast.native_mod_item -> unit;
       visit_native_mod_item_post:
         Ast.ident -> Ast.native_mod_item -> unit;
       visit_mod_type_item_pre:
-        Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_type_item -> unit;
+        Ast.ident -> (Ast.ident array) -> Ast.mod_type_item -> unit;
       visit_mod_type_item_post:
-        Ast.ident -> ((Ast.ty_limit * Ast.ident) array) -> Ast.mod_type_item -> unit;
+        Ast.ident -> (Ast.ident array) -> Ast.mod_type_item -> unit;
       visit_crate_pre: Ast.crate -> unit;
       visit_crate_post: Ast.crate -> unit;
     }
@@ -252,7 +252,6 @@ and walk_ty
             walk_ty v t;
             walk_constrs v cs
           end
-      | Ast.TY_lim t -> walk_ty v t
       | Ast.TY_named _ -> ()
       | Ast.TY_opaque _ -> ()
       | Ast.TY_idx _ -> ()

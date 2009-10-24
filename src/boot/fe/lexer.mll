@@ -57,8 +57,6 @@
                 ("tag", TAG);
                 ("vec", VEC);
                 ("any", ANY);
-                ("lim", LIM);
-
 
                 ("port", PORT);
                 ("chan", CHAN);
