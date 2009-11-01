@@ -8,14 +8,35 @@ type block_items_table = (node_id,items_table) Hashtbl.t
 ;;
 
 
-type text = {
-  text_node: node_id;
-  text_quads: Il.quads;
-  text_n_vregs: int;
+type code = {
+  code_fixup: fixup;
+  code_quads: Il.quads;
+  code_vregs_and_spill: (int * fixup) option;
 }
 ;;
 
-type file_grouped_texts = (node_id, ((text list) ref)) Hashtbl.t;;
+type glue =
+    GLUE_proc_to_C
+  | GLUE_C_to_proc
+  | GLUE_upcall of int
+  | GLUE_shallow_copy of Ast.ty
+  | GLUE_deep_copy of Ast.ty
+  | GLUE_compare of Ast.ty
+  | GLUE_hash of Ast.ty
+  | GLUE_write of Ast.ty
+  | GLUE_read of Ast.ty
+;;
+
+type data =
+    DATA_str of string
+  | DATA_prog of node_id
+  | DATA_typeinfo of Ast.ty
+;;
+
+type glue_code = (glue, code) Hashtbl.t;;
+type item_code = (node_id, code) Hashtbl.t;;
+type file_code = (node_id, item_code) Hashtbl.t;;
+type data_items = (data, (fixup * Asm.item)) Hashtbl.t;;
 
 (* The node_id in the Constr_pred constr_key is the innermost block_id
    of any of the constr's pred name or cargs; this is the *outermost*
@@ -70,15 +91,14 @@ type ctxt =
       ctxt_lval_is_in_proc_init: (node_id,unit) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_prog_fixups: (node_id,fixup) Hashtbl.t;
-      ctxt_tag_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_abi: Abi.abi;
-      mutable ctxt_data_items: Asm.item list;
       ctxt_c_to_proc_fixup: fixup;
       ctxt_proc_to_c_fixup: fixup;
-      ctxt_texts: file_grouped_texts;
-      mutable ctxt_anon_text_quads: Il.quads list;
+      ctxt_file_code: file_code;
+      ctxt_glue_code: glue_code;
+      ctxt_data: data_items;
       ctxt_main_prog: fixup;
       ctxt_main_name: string;
     }
@@ -119,15 +139,14 @@ let new_ctxt sess abi crate =
     ctxt_lval_is_in_proc_init = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
     ctxt_prog_fixups = Hashtbl.create 0;
-    ctxt_tag_fixups = Hashtbl.create 0;
     ctxt_file_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
     ctxt_abi = abi;
-    ctxt_data_items = [];
     ctxt_c_to_proc_fixup = new_fixup "c-to-proc glue";
     ctxt_proc_to_c_fixup = new_fixup "proc-to-c glue";
-    ctxt_texts = Hashtbl.create 0;
-    ctxt_anon_text_quads = [];
+    ctxt_file_code = Hashtbl.create 0;
+    ctxt_glue_code = Hashtbl.create 0;
+    ctxt_data = Hashtbl.create 0;
     ctxt_main_prog = new_fixup "main prog fixup";
     ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main
   }
@@ -209,12 +228,6 @@ let get_prog_fixup (cx:ctxt) (id:node_id) : fixup =
   else err (Some id) "Prog without fixup"
 ;;
 
-let get_tag_fixup (cx:ctxt) (id:node_id) : fixup =
-  if Hashtbl.mem cx.ctxt_tag_fixups id
-  then Hashtbl.find cx.ctxt_tag_fixups id
-  else err (Some id) "Tag without fixup"
-;;
-
 let get_framesz (cx:ctxt) (id:node_id) : int64 =
   if Hashtbl.mem cx.ctxt_frame_sizes id
   then Hashtbl.find cx.ctxt_frame_sizes id
@@ -225,6 +238,12 @@ let get_callsz (cx:ctxt) (id:node_id) : int64 =
   if Hashtbl.mem cx.ctxt_call_sizes id
   then Hashtbl.find cx.ctxt_call_sizes id
   else err (Some id) "Missing callsz"
+;;
+
+let get_spill (cx:ctxt) (id:node_id) : fixup =
+  if Hashtbl.mem cx.ctxt_spill_fixups id
+  then Hashtbl.find cx.ctxt_spill_fixups id
+  else err (Some id) "Missing spill fixup"
 ;;
 
 let slot_ty (s:Ast.slot) : Ast.ty =

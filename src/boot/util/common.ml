@@ -133,6 +133,14 @@ let htab_map (htab:('a,'b) Hashtbl.t) (f:'a -> 'b -> ('c * 'd)) : (('c,'d) Hasht
     ntab
 ;;
 
+
+let reduce_hash_to_list (fn:'a -> 'b -> 'c)  (h:('a, 'b) Hashtbl.t) : ('c list) =
+  let accum = ref [] in
+  let f a b = accum := (fn a b) :: (!accum) in
+    Hashtbl.iter f h;
+    !accum
+;;
+
 (* 
  * Auxiliary association-array and association-list operations.
  *)

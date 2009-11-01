@@ -52,8 +52,6 @@ let trans_visitor
   let ret_addr_disp = abi.Abi.abi_frame_base_sz in
   let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
 
-  let (strings:(string,fixup) Hashtbl.t) = Hashtbl.create 0 in
-
   let emitters = Stack.create () in
   let push_new_emitter _ =
     Stack.push
@@ -73,7 +71,7 @@ let trans_visitor
   in
   let patch (i:quad_idx) : unit =
     Il.patch_jump (emitter()) i (mark());
-    (* Insert a dead quad to ensure there's an otherwise-unused patch target here. *)
+    (* Insert a dead quad to ensure there's an otherwise-unused jump-target here. *)
     emit Il.Dead
   in
 
@@ -444,7 +442,7 @@ let trans_visitor
           | Ast.MOD_ITEM_prog _ ->
               return_fixup (get_prog_fixup cx referent) slot
           | Ast.MOD_ITEM_tag t ->
-              return_fixup (get_tag_fixup cx referent) slot
+              return_fixup (get_fn_fixup cx referent) slot
           | _ ->
               err (Some referent)
                 "unhandled item type in trans_lval_full"
@@ -497,19 +495,23 @@ let trans_visitor
   and trans_lval (lv:Ast.lval) (intent:intent) : (Il.cell * Ast.slot) =
     trans_lval_full lv abi.Abi.abi_has_pcrel_data abi.Abi.abi_has_abs_data intent
 
-  and trans_static_string (s:string) : Il.operand =
+  and trans_data_item (d:data) (thunk:unit -> Asm.item) : Il.operand =
     let fix =
-      if Hashtbl.mem strings s
-      then Hashtbl.find strings s
+      if Hashtbl.mem cx.ctxt_data d
+      then
+        let (fix, _) = Hashtbl.find cx.ctxt_data d in
+          fix
       else
-        let strfix = new_fixup "string fixup" in
-        let str = Asm.DEF (strfix, Asm.ZSTRING s) in
-          htab_put strings s strfix;
-          cx.ctxt_data_items <- str :: cx.ctxt_data_items;
-          strfix
+        let fix = new_fixup "data item fixup" in
+        let item = Asm.DEF (fix, thunk ()) in
+          htab_put cx.ctxt_data d (fix, item);
+          fix
     in
-      (* FIXME: wrong immediate type. *)
+      (* FIXME: wrong operand type. *)
       Il.Imm (Asm.M_POS fix, word_ty)
+
+  and trans_static_string (s:string) : Il.operand =
+    trans_data_item (DATA_str s) (fun _ -> Asm.ZSTRING s)
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
     (* Include null byte. *)
@@ -1625,7 +1627,7 @@ let trans_visitor
       | _ -> err (Some stmt.id) "unhandled form of statement in trans_stmt"
   in
 
-  let capture_emitted_quads (node:node_id) : unit =
+  let capture_emitted_quads (fix:fixup) (node:node_id) : unit =
     let e = emitter() in
     let n_vregs = e.Il.emit_next_vreg in
     let quads = e.Il.emit_quads in
@@ -1634,7 +1636,7 @@ let trans_visitor
         None -> err (Some node) "Missing file scope when capturing quads."
       | Some f -> f
     in
-    let file_list = Hashtbl.find cx.ctxt_texts f in
+    let item_code = Hashtbl.find cx.ctxt_file_code f in
       begin
         iflog
           begin
@@ -1650,11 +1652,16 @@ let trans_visitor
                 log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
                 done;
           end;
-        let text = { text_node = node;
-                     text_quads = quads;
-                     text_n_vregs = n_vregs }
+        let vr_s =
+          match htab_search cx.ctxt_spill_fixups node with
+              None -> (assert (n_vregs = 0); None)
+            | Some spill -> Some (n_vregs, spill)
         in
-          file_list := text :: (!file_list)
+        let code = { code_fixup = fix;
+                     code_quads = quads;
+                     code_vregs_and_spill = vr_s }
+        in
+          htab_put item_code node code
       end;
       Hashtbl.clear annotations
   in
@@ -1672,7 +1679,7 @@ let trans_visitor
   let trans_frame_exit (fnid:node_id) : unit =
     Stack.iter patch (Stack.pop epilogue_jumps);
     abi.Abi.abi_emit_fn_epilogue (emitter());
-    capture_emitted_quads fnid;
+    capture_emitted_quads (get_fn_fixup cx fnid) fnid;
     pop_emitter ()
   in
 
@@ -1683,7 +1690,7 @@ let trans_visitor
   in
 
   let trans_tag
-      (n:Ast.ident) 
+      (n:Ast.ident)
       (tagid:node_id)
       (tag:(Ast.ty_tup * Ast.ty_tag))
       : unit =
@@ -1744,12 +1751,11 @@ let trans_visitor
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups b.id in
       push_new_emitter ();
       let dst = Il.next_vreg_cell (emitter()) Il.voidptr_t in
-        Il.emit_full (emitter()) (Some fix) Il.Dead;
         abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup callsz;
         trans_block b;
         abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
         emit (Il.call dst (Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None))));
-        capture_emitted_quads b.id;
+        capture_emitted_quads fix b.id;
         pop_emitter ();
         ignore (Stack.pop path);
         fix
@@ -1778,15 +1784,15 @@ let trans_visitor
           None -> Asm.IMM 0L
         | Some fini -> Asm.M_POS (trans_prog_block fini "fini")
     in
+    let fixup = get_prog_fixup cx progid in
     let prog =
-      let fixup = get_prog_fixup cx progid in
       (* FIXME: extract prog layout from ABI. *)
       Asm.DEF (fixup,
                Asm.SEQ [| Asm.WORD (TY_u32, init);
                           Asm.WORD (TY_u32, main);
                           Asm.WORD (TY_u32, fini) |])
     in
-      cx.ctxt_data_items <- prog :: cx.ctxt_data_items
+      htab_put cx.ctxt_data (DATA_prog progid) (fixup, prog)
   in
 
   let rec trans_mod_item
@@ -1880,8 +1886,8 @@ let fixup_assigning_visitor
     then
       begin
         htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()));
-        if not (Hashtbl.mem cx.ctxt_texts i.id)
-        then htab_put cx.ctxt_texts i.id (ref []);
+        if not (Hashtbl.mem cx.ctxt_file_code i.id)
+        then htab_put cx.ctxt_file_code i.id (Hashtbl.create 0);
       end
   in
 
@@ -1893,7 +1899,7 @@ let fixup_assigning_visitor
           Ast.MOD_ITEM_fn _ ->
             htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
         | Ast.MOD_ITEM_tag tag ->
-            htab_put cx.ctxt_tag_fixups i.id (new_fixup (path_name()))
+            htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
         | Ast.MOD_ITEM_prog prog ->
             begin
               let path = path_name() in
@@ -1950,11 +1956,16 @@ let emit_c_to_proc_glue cx =
     cx.ctxt_abi.Abi.abi_prealloc_quad
     cx.ctxt_abi.Abi.abi_is_2addr_machine
   in
-    cx.ctxt_abi.Abi.abi_c_to_proc e cx.ctxt_c_to_proc_fixup;
+    cx.ctxt_abi.Abi.abi_c_to_proc e;
     if e.Il.emit_next_vreg != 0
     then err None "c-to-proc glue uses nonzero vregs"
-    else cx.ctxt_anon_text_quads <-
-      (e.Il.emit_quads) :: cx.ctxt_anon_text_quads
+    else
+      let code =
+        { code_fixup = cx.ctxt_c_to_proc_fixup;
+          code_quads = e.Il.emit_quads;
+          code_vregs_and_spill = None }
+      in
+        htab_put cx.ctxt_glue_code GLUE_C_to_proc code
 ;;
 
 
@@ -1963,17 +1974,22 @@ let emit_proc_to_c_glue cx =
     cx.ctxt_abi.Abi.abi_prealloc_quad
     cx.ctxt_abi.Abi.abi_is_2addr_machine
   in
-    cx.ctxt_abi.Abi.abi_proc_to_c e cx.ctxt_proc_to_c_fixup;
+    cx.ctxt_abi.Abi.abi_proc_to_c e;
     if e.Il.emit_next_vreg != 0
     then err None "proc-to-c glue uses nonzero vregs"
-    else cx.ctxt_anon_text_quads <-
-      (e.Il.emit_quads) :: cx.ctxt_anon_text_quads
+    else
+      let code =
+        { code_fixup = cx.ctxt_proc_to_c_fixup;
+          code_quads = e.Il.emit_quads;
+          code_vregs_and_spill = None }
+      in
+        htab_put cx.ctxt_glue_code GLUE_proc_to_C code
 ;;
 
-let trans_crate
+let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
-    : (file_grouped_texts * Asm.item list * fixup) =
+    : unit =
   let passes =
     [|
       (fixup_assigning_visitor cx
@@ -1985,8 +2001,7 @@ let trans_crate
     log cx "translating crate with main program %s" cx.ctxt_main_name;
     run_passes cx passes (log cx "%s") crate;
     emit_c_to_proc_glue cx;
-    emit_proc_to_c_glue cx;
-    (cx.ctxt_texts, cx.ctxt_data_items, cx.ctxt_main_prog)
+    emit_proc_to_c_glue cx
 ;;
 
 (*

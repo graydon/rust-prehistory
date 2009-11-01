@@ -121,8 +121,8 @@ type abi =
     abi_emit_upcall: (Il.emitter -> upcall -> Il.operand array -> Common.fixup -> unit);
 
     (* Transitions between runtimes. *)
-    abi_c_to_proc: (Il.emitter -> Common.fixup -> unit);
-    abi_proc_to_c: (Il.emitter -> Common.fixup -> unit);
+    abi_c_to_proc: (Il.emitter -> unit);
+    abi_proc_to_c: (Il.emitter -> unit);
 
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;

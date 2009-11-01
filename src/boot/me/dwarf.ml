@@ -984,7 +984,7 @@ let dwarf_visitor
 
 
   let visit_ty_pre (ty:Ast.ty) : unit =
-    let base (name, encoding, byte_size) = 
+    let base (name, encoding, byte_size) =
       let abbrev_code = get_abbrev_code abbrev_base_type in
       let type_die =
         (SEQ [|

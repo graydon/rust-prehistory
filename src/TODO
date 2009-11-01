@@ -1,6 +1,8 @@
 
 progress:
+ - rename 'asm.item' to something less confusable with module-item
  - mach-o format emitter
+ - reorganize glue code
  - tag/iso/idx types
  - more string work
  - machine types (or at least byte-sized bool, u32 and u8)

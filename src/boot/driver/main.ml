@@ -120,7 +120,8 @@ let (crate:Ast.crate) =
         exit 1
       end
 ;;
-let _ = exit_if_failed ()
+
+exit_if_failed ()
 ;;
 
 if sess.Session.sess_log_ast
@@ -151,84 +152,68 @@ let _ =
            Type.process_crate;
            Mode.process_crate;
            Typestate.process_crate;
-           Layout.process_crate |]
+           Layout.process_crate;
+           Trans.process_crate |]
   end
 ;;
 
 
-(* Primary translation from AST -> IL quads. *)
-let ((file_texts:Semant.file_grouped_texts),
-     (data_items:Asm.item list),
-     (root_prog_fixup:fixup)) = Trans.trans_crate sem_cx crate;;
-let _ = exit_if_failed ()
-;;
-let (data:Asm.item) = Asm.SEQ (Array.of_list data_items)
-;;
-
-
-let text_fixups = Hashtbl.create 0;;
-let add_text_fixup_table t = 
-  Hashtbl.iter (fun k v -> htab_put text_fixups k v) t
-in
-  add_text_fixup_table sem_cx.Semant.ctxt_fn_fixups;
-  add_text_fixup_table sem_cx.Semant.ctxt_tag_fixups
-;;
-  
-
 (* Tying up various knots, allocating registers and selecting instructions. *)
-let (text_items:Asm.item list) =
-  let accum = ref [] in
-  let process_file file_id texts =
-    let process_text text =
-      let frame_sz =
-        Hashtbl.find
-          sem_cx.Semant.ctxt_frame_sizes
-          text.Semant.text_node
-      in
-      let (quads', n_spills) =
-        Ra.reg_alloc sess
-          text.Semant.text_quads
-          text.Semant.text_n_vregs
-          abi frame_sz
-      in
-      let insns = select_insns quads' in
-        begin
-          let spill_fix = Hashtbl.find
-            sem_cx.Semant.ctxt_spill_fixups
-            text.Semant.text_node
+let process_code (frame_sz:int64) (code:Semant.code) : Asm.item =
+  let item =
+    match code.Semant.code_vregs_and_spill with
+        None -> select_insns code.Semant.code_quads
+      | Some (n_vregs, spill_fix) ->
+          let (quads', n_spills) =
+            Ra.reg_alloc sess
+              code.Semant.code_quads
+              n_vregs abi frame_sz
           in
-            spill_fix.fixup_mem_sz <-
-              Some (Int64.mul
-                      (Int64.of_int n_spills)
-                      abi.Abi.abi_word_sz);
-            match htab_search
-              text_fixups
-              text.Semant.text_node
-            with
-                Some fix -> Asm.DEF (fix, insns)
-              | None -> insns
-        end
-    in
-    let file_items = List.map process_text (!texts) in
-    let file_fix = Hashtbl.find sem_cx.Semant.ctxt_file_fixups file_id in
-      accum := (Asm.DEF (file_fix, list_to_seq file_items)) :: (!accum)
+          let insns = select_insns quads' in
+            begin
+              spill_fix.fixup_mem_sz <-
+                Some (Int64.mul
+                        (Int64.of_int n_spills)
+                        abi.Abi.abi_word_sz);
+              insns
+            end
   in
-    Hashtbl.iter process_file file_texts;
-    !accum
+    Asm.DEF (code.Semant.code_fixup, item)
 ;;
-let _ = exit_if_failed ()
+
+let process_node_code (node:node_id) (code:Semant.code) : Asm.item =
+  let frame_sz =
+    Hashtbl.find
+      sem_cx.Semant.ctxt_frame_sizes
+      node
+  in
+    process_code frame_sz code
+;;
+
+let (file_items:Asm.item) =
+  let process_file file_id item_code =
+    let file_fix = Hashtbl.find sem_cx.Semant.ctxt_file_fixups file_id in
+      Asm.DEF (file_fix, list_to_seq (reduce_hash_to_list process_node_code item_code))
+  in
+    list_to_seq (reduce_hash_to_list process_file sem_cx.Semant.ctxt_file_code)
+;;
+exit_if_failed ()
 ;;
 
 
-let (anon_text_item:Asm.item) =
-  list_to_seq (List.map select_insns sem_cx.Semant.ctxt_anon_text_quads);;
-let (code:Asm.item) = list_to_seq (anon_text_item :: text_items);;
-let _ = exit_if_failed ()
+let (glue_items:Asm.item) =
+  let process_glue glue code = process_code 0L code in
+    list_to_seq (reduce_hash_to_list process_glue sem_cx.Semant.ctxt_glue_code)
 ;;
+exit_if_failed ()
+;;
+
+let code = Asm.SEQ [| file_items; glue_items |];;
+let data = list_to_seq (reduce_hash_to_list (fun _ (_, i) -> i) sem_cx.Semant.ctxt_data);;
 
 (* Emitting Dwarf and PE/ELF/Macho. *)
 let (dwarf:Dwarf.debug_records) = Dwarf.process_crate sem_cx crate;;
-let _ = exit_if_failed ()
+exit_if_failed ()
 ;;
 
 let emitter =
@@ -238,8 +223,12 @@ let emitter =
     | Linux_x86_elf -> Elf.emit_file
 ;;
 
-emitter sess code data dwarf root_prog_fixup sem_cx.Semant.ctxt_c_to_proc_fixup;;
-let _ = exit_if_failed ()
+emitter
+  sess code data dwarf
+  sem_cx.Semant.ctxt_main_prog
+  sem_cx.Semant.ctxt_c_to_proc_fixup;;
+
+exit_if_failed ()
 
 (*
  * Local Variables:

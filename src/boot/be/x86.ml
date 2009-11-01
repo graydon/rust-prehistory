@@ -519,7 +519,7 @@ let objfile_main
 
 
 
-let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
+let c_to_proc (e:Il.emitter) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
    * compilation unit.
@@ -542,8 +542,6 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    Il.emit_full e (Some fix) Il.Dead;
-
     mov (rc edx) (c (sp_n 1));                     (* edx <- proc          *)
     mov (rc ecx) (c (edx_n Abi.proc_field_rt));    (* ecx <- proc->rt      *)
     save_callee_saves e;
@@ -558,7 +556,7 @@ let c_to_proc (e:Il.emitter) (fix:fixup) : unit =
 ;;
 
 
-let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
+let proc_to_c (e:Il.emitter) : unit =
 
   (*
    * More glue code. Here we've been called from a proc and
@@ -576,8 +574,6 @@ let proc_to_c (e:Il.emitter) (fix:fixup) : unit =
   let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-
-    Il.emit_full e (Some fix) Il.Dead;
 
     mov (rc edx) (c proc_ptr);                     (* edx <- proc            *)
     mov (rc ecx) (c (edx_n Abi.proc_field_rt));    (* ecx <- proc->rt        *)
