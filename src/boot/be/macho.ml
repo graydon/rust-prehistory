@@ -56,7 +56,59 @@ let file_type_code (ft:file_type) : int64 =
     | MH_DSYM -> 0xaL       (* debuginfo only *)
 ;;
 
-type vm_prot = 
+type file_flag =
+    MH_NOUNDEFS
+  | MH_INCRLINK
+  | MH_DYLDLINK
+  | MH_BINDATLOAD
+  | MH_PREBOUND
+  | MH_SPLIT_SEGS
+  | MH_LAZY_INIT
+  | MH_TWOLEVEL
+  | MH_FORCE_FLAT
+  | MH_NOMULTIDEFS
+  | MH_NOFIXPREBINDING
+  | MH_PREBINDABLE
+  | MH_ALLMODSBOUND
+  | MH_SUBSECTIONS_VIA_SYMBOLS
+  | MH_CANONICAL
+  | MH_WEAK_DEFINES
+  | MH_BINDS_TO_WEAK
+  | MH_ALLOW_STACK_EXECUTION
+  | MH_ROOT_SAFE
+  | MH_SETUID_SAFE
+  | MH_NO_REEXPORTED_DYLIBS
+  | MH_PIE
+;;
+
+let file_flag_code (ff:file_flag) : int64 =
+  match ff with
+      MH_NOUNDEFS -> 0x1L
+    | MH_INCRLINK -> 0x2L
+    | MH_DYLDLINK -> 0x4L
+    | MH_BINDATLOAD -> 0x8L
+    | MH_PREBOUND -> 0x10L
+    | MH_SPLIT_SEGS -> 0x20L
+    | MH_LAZY_INIT -> 0x40L
+    | MH_TWOLEVEL -> 0x80L
+    | MH_FORCE_FLAT -> 0x100L
+    | MH_NOMULTIDEFS -> 0x200L
+    | MH_NOFIXPREBINDING -> 0x400L
+    | MH_PREBINDABLE -> 0x800L
+    | MH_ALLMODSBOUND -> 0x1000L
+    | MH_SUBSECTIONS_VIA_SYMBOLS -> 0x2000L
+    | MH_CANONICAL -> 0x4000L
+    | MH_WEAK_DEFINES -> 0x8000L
+    | MH_BINDS_TO_WEAK -> 0x10000L
+    | MH_ALLOW_STACK_EXECUTION -> 0x20000L
+    | MH_ROOT_SAFE -> 0x40000L
+    | MH_SETUID_SAFE -> 0x80000L
+    | MH_NO_REEXPORTED_DYLIBS -> 0x100000L
+    | MH_PIE -> 0x200000L
+;;
+
+
+type vm_prot =
     VM_PROT_NONE
   | VM_PROT_READ
   | VM_PROT_WRITE
@@ -129,7 +181,7 @@ let vm_prot_code (vmp:vm_prot) : int64 =
 
 let lc_req_dyld = 0x80000000L;;
 
-let load_command_code (lc:load_command) = 
+let load_command_code (lc:load_command) =
   match lc with
     | LC_SEGMENT -> 0x1L
     | LC_SYMTAB -> 0x2L
@@ -167,29 +219,13 @@ let load_command_code (lc:load_command) =
 ;;
 
 
-let macho_header_32 (cpu:cpu_type) (sub:cpu_subtype) =
-  SEQ
-    [|
-      WORD (TY_u32, IMM mh_magic);
-      WORD (TY_u32, IMM (cpu_type_code cpu));
-      WORD (TY_u32, IMM (cpu_subtype_code sub));
-    |]
-
-let macho_section name item = 
-  SEQ [| |]
-;;
-
-let macho_segment name sections = 
-  SEQ [| |]
-;;
-
 let fixed_sz_string (sz:int) (str:string) : item =
   if String.length str > sz
   then STRING (String.sub str 0 sz)
   else SEQ [| STRING str; PAD (sz - (String.length str)) |]
 ;;
 
-let macho_section
+let macho_section_command
     (seg_name:string)
     (sect:(string * int * fixup))
     : item =
@@ -198,7 +234,7 @@ let macho_section
       fixed_sz_string 16 sect_name;
       fixed_sz_string 16 seg_name;
       WORD (TY_u32, M_POS sect_fixup);
-      WORD (TY_u32, F_SZ sect_fixup);
+      WORD (TY_u32, M_SZ sect_fixup);
       WORD (TY_u32, F_POS sect_fixup);
       WORD (TY_u32, IMM (Int64.of_int sect_align));
       WORD (TY_u32, IMM 0L); (* reloff *)
@@ -218,25 +254,104 @@ let macho_segment_command
     : item =
 
   let cmd_fixup = new_fixup "segment command" in
-  let cmd = 
-    DEF (cmd_fixup,
-         SEQ [| 
-           WORD (TY_u32, IMM (load_command_code LC_SEGMENT));
-           WORD (TY_u32, F_SZ cmd_fixup);
-           fixed_sz_string 16 seg_name;
-           WORD (TY_u32, M_POS seg_fixup);
-           WORD (TY_u32, M_SZ seg_fixup);
-           WORD (TY_u32, F_POS seg_fixup);
-           WORD (TY_u32, F_SZ seg_fixup);
-           WORD (TY_u32, IMM (fold_flags vm_prot_code maxprot));
-           WORD (TY_u32, IMM (fold_flags vm_prot_code initprot));
-           WORD (TY_u32, IMM (Int64.of_int (Array.length sects)));
-           WORD (TY_u32, IMM 0L); (* Flags? *)
-         |])
-  in
+  let cmd =
     SEQ [|
-      cmd;
-      SEQ (Array.map (macho_section seg_name) sects);
+      WORD (TY_u32, IMM (load_command_code LC_SEGMENT));
+      WORD (TY_u32, F_SZ cmd_fixup);
+      fixed_sz_string 16 seg_name;
+      WORD (TY_u32, M_POS seg_fixup);
+      WORD (TY_u32, M_SZ seg_fixup);
+      WORD (TY_u32, F_POS seg_fixup);
+      WORD (TY_u32, F_SZ seg_fixup);
+      WORD (TY_u32, IMM (fold_flags vm_prot_code maxprot));
+      WORD (TY_u32, IMM (fold_flags vm_prot_code initprot));
+      WORD (TY_u32, IMM (Int64.of_int (Array.length sects)));
+      WORD (TY_u32, IMM 0L); (* Flags? *)
+    |]
+  in
+    DEF (cmd_fixup,
+         SEQ [|
+           cmd;
+           SEQ (Array.map (macho_section_command seg_name) sects);
+         |])
+;;
+
+let macho_thread_command
+    (entry:fixup)
+    : item =
+  let cmd_fixup = new_fixup "thread command" in
+  let x86_THREAD_STATE32 = 1L in
+  let regs =
+    [|
+      WORD (TY_u32, IMM 0x0L); (* eax *)
+      WORD (TY_u32, IMM 0x0L); (* ebx *)
+      WORD (TY_u32, IMM 0x0L); (* ecx *)
+      WORD (TY_u32, IMM 0x0L); (* edx *)
+
+      WORD (TY_u32, IMM 0x0L); (* edi *)
+      WORD (TY_u32, IMM 0x0L); (* esi *)
+      WORD (TY_u32, IMM 0x0L); (* ebp *)
+      WORD (TY_u32, IMM 0x0L); (* esp *)
+
+      WORD (TY_u32, IMM 0x0L); (* ss *)
+      WORD (TY_u32, IMM 0x0L); (* eflags *)
+      WORD (TY_u32, M_POS entry); (* eip *)
+      WORD (TY_u32, IMM 0x0L); (* cs *)
+
+      WORD (TY_u32, IMM 0x0L); (* ds *)
+      WORD (TY_u32, IMM 0x0L); (* es *)
+      WORD (TY_u32, IMM 0x0L); (* fs *)
+      WORD (TY_u32, IMM 0x0L); (* gs *)
+    |]
+  in
+  let cmd =
+    SEQ [|
+      WORD (TY_u32, IMM (load_command_code LC_UNIXTHREAD));
+      WORD (TY_u32, F_SZ cmd_fixup);
+      WORD (TY_u32, IMM x86_THREAD_STATE32); (* "flavour" *)
+      WORD (TY_u32, IMM (Int64.of_int (Array.length regs)));
+      SEQ regs
+    |]
+  in
+    DEF (cmd_fixup, cmd)
+;;
+
+let macho_dylinker_command : item =
+  let cmd_fixup = new_fixup "dylinker command" in
+  let str_fixup = new_fixup "dylinker lc_str fixup" in
+  let cmd =
+    SEQ
+      [|
+        WORD (TY_u32, IMM (load_command_code LC_LOAD_DYLINKER));
+        WORD (TY_u32, F_SZ cmd_fixup);
+
+        (* see definition of lc_str; these things are weird. *)
+        WORD (TY_u32, SUB (F_POS (str_fixup), F_POS (cmd_fixup)));
+        DEF (str_fixup, ZSTRING "/usr/lib/dyld");
+        ALIGN_FILE (4, MARK);
+      |]
+  in
+    DEF (cmd_fixup, cmd);
+;;
+
+let macho_header_32
+    (cpu:cpu_type)
+    (sub:cpu_subtype)
+    (ftype:file_type)
+    (flags:file_flag list)
+    (loadcmds:item array) : item =
+  let load_commands_fixup = new_fixup "load commands" in
+  let cmds = DEF (load_commands_fixup, SEQ loadcmds) in
+    SEQ
+    [|
+      WORD (TY_u32, IMM mh_magic);
+      WORD (TY_u32, IMM (cpu_type_code cpu));
+      WORD (TY_u32, IMM (cpu_subtype_code sub));
+      WORD (TY_u32, IMM (file_type_code ftype));
+      WORD (TY_u32, IMM (Int64.of_int (Array.length loadcmds)));
+      WORD (TY_u32, F_SZ load_commands_fixup);
+      WORD (TY_u32, IMM (fold_flags file_flag_code flags));
+      cmds
     |]
 ;;
 
@@ -249,72 +364,133 @@ let emit_file
     (c_to_proc_fixup:fixup)
     : unit =
 
+  (* FIXME: alignment? *)
+
+  let text_sect_align_log2 = 2 in
+  let data_sect_align_log2 = 2 in
+  let jump_table_sect_align_log2 = 6 in
+  let dyld_sect_align_log2 = 2 in
+
+  let seg_align = 0x1000 in
+  let text_sect_align = 2 lsl text_sect_align_log2 in
+  let data_sect_align = 2 lsl data_sect_align_log2 in
+  let jump_table_sect_align = 2 lsl jump_table_sect_align_log2 in
+  let dyld_sect_align = 2 lsl dyld_sect_align_log2 in
+
+  let align_both align i =
+    ALIGN_FILE (align,
+                (ALIGN_MEM (align, i)))
+  in
+
+  let def_aligned a f i =
+    align_both a
+      (SEQ [| DEF(f, i);
+              (align_both a MARK)|])
+  in
+
   (* Sections in the text segment. *)
   let text_section_fixup = new_fixup "__text section" in
-  let text_section = DEF (text_section_fixup, code) in
+  let text_section = def_aligned text_sect_align text_section_fixup code in
 
   (* Sections in the data segment. *)
   let data_section_fixup = new_fixup "__data section" in
   let const_section_fixup = new_fixup "__const section" in
   let bss_section_fixup = new_fixup "__bss section" in
-  let data_section = DEF (data_section_fixup, data) in
-  let const_section = DEF (const_section_fixup, SEQ [| |]) in
-  let bss_section = DEF (bss_section_fixup, SEQ [| |]) in
+  let data_section = def_aligned data_sect_align data_section_fixup data in
+  let const_section = def_aligned data_sect_align const_section_fixup (SEQ [| |]) in
+  let bss_section = def_aligned data_sect_align bss_section_fixup (SEQ [| |]) in
 
   (* Sections in the import segment. *)
   let jump_table_section_fixup = new_fixup "__jump_table section" in
-  let jump_table_section = DEF (jump_table_section_fixup, SEQ [| |]) in
+  let jump_table_section =
+    def_aligned jump_table_sect_align
+      jump_table_section_fixup (SEQ [| |])
+  in
 
   (* Segments. *)
+  let zero_segment_fixup = new_fixup "__PAGEZERO segment" in
+  let zero_segment = align_both seg_align
+    (SEQ [| MEMPOS 0L; DEF (zero_segment_fixup, PAD 0x1000) |])
+  in
+
   let text_segment_fixup = new_fixup "__TEXT segment" in
-  let text_segment = DEF (text_segment_fixup, SEQ [| text_section |]) in
+  let text_segment = def_aligned seg_align text_segment_fixup
+    (SEQ [|
+       text_section
+     |])
+  in
 
   let data_segment_fixup = new_fixup "__DATA segment" in
-  let data_segment = DEF (data_segment_fixup, 
-                          SEQ [| 
-                            data_section; 
-                            const_section;
-                            bss_section;
-                          |]) 
+  let data_segment = def_aligned seg_align data_segment_fixup
+    (SEQ [|
+       data_section;
+       const_section;
+       bss_section;
+     |])
   in
 
   let import_segment_fixup = new_fixup "__IMPORT segment" in
-  let import_segment = DEF (import_segment_fixup, SEQ [| jump_table_section |]) in
-
-  let header = macho_header_32 CPU_TYPE_X86 CPU_SUBTYPE_X86_ALL in
-
-  (* FIXME: Alignment? *)
-  let sect_align = 4096 in
-
-  let load_commands = 
-    SEQ [| 
-      macho_segment_command "__TEXT" text_segment_fixup 
-        [VM_PROT_READ; VM_PROT_EXECUTE]
-        [VM_PROT_READ; VM_PROT_EXECUTE]
-        [|
-          ("__text", sect_align, text_section_fixup)
-        |];
-
-      macho_segment_command "__DATA" data_segment_fixup 
-        [VM_PROT_READ; VM_PROT_WRITE]
-        [VM_PROT_READ; VM_PROT_WRITE]
-        [|
-          ("__data", sect_align, data_section_fixup);
-          ("__const", sect_align, const_section_fixup);
-          ("__bss", sect_align, bss_section_fixup)
-        |];
-
-      macho_segment_command "__IMPORT" text_segment_fixup 
-        [VM_PROT_READ; VM_PROT_WRITE]
-        [VM_PROT_READ; VM_PROT_WRITE]
-        [|
-          ("__jump_table", sect_align, jump_table_section_fixup)
-        |];
-    |] 
+  let import_segment = def_aligned seg_align import_segment_fixup
+    (SEQ [|
+       jump_table_section
+     |])
   in
 
-  let segments = SEQ [| text_segment; data_segment; import_segment |] in
-  let all_items = SEQ [| header; load_commands; segments |] in
+  let load_commands =
+    [|
+      macho_segment_command "__PAGEZERO" zero_segment_fixup
+        [] [] [||];
+
+      macho_segment_command "__TEXT" text_segment_fixup
+        [VM_PROT_READ; VM_PROT_EXECUTE]
+        [VM_PROT_READ; VM_PROT_EXECUTE]
+        [|
+          ("__text", text_sect_align_log2, text_section_fixup)
+        |];
+
+      macho_segment_command "__DATA" data_segment_fixup
+        [VM_PROT_READ; VM_PROT_WRITE]
+        [VM_PROT_READ; VM_PROT_WRITE]
+        [|
+          ("__data", data_sect_align_log2, data_section_fixup);
+          ("__const", data_sect_align_log2, const_section_fixup);
+          ("__bss", data_sect_align_log2, bss_section_fixup)
+        |];
+
+      macho_segment_command "__IMPORT" text_segment_fixup
+        [VM_PROT_READ; VM_PROT_WRITE]
+        [VM_PROT_READ; VM_PROT_WRITE]
+        [|
+          ("__jump_table", jump_table_sect_align_log2, jump_table_section_fixup)
+        |];
+
+      macho_dylinker_command;
+
+      (* FIXME: the thread command should point eip to the glue code
+         entrypoint, not the entry-prog fixup. That's a *prog*, it's
+         in the data section. This is not right at all! *)
+      macho_thread_command entry_prog_fixup
+    |]
+  in
+
+  let header_and_commands =
+    macho_header_32
+      CPU_TYPE_X86
+      CPU_SUBTYPE_X86_ALL
+      MH_EXECUTE
+      []
+      load_commands
+  in
+
+  let segments =
+    SEQ [|
+      zero_segment;
+      text_segment;
+      data_segment;
+      import_segment
+    |]
+  in
+  let all_items = SEQ [| header_and_commands; segments |] in
 
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in
