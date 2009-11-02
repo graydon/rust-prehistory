@@ -636,7 +636,7 @@ let imm_is_byte (n:int64) : bool =
 ;;
 
 
-let rm_r (c:Il.cell) (r:int) : Asm.item =
+let rm_r (c:Il.cell) (r:int) : Asm.frag =
   let reg_ebp = 6 in
   let reg_esp = 7 in
 
@@ -700,16 +700,16 @@ let rm_r (c:Il.cell) (r:int) : Asm.item =
 ;;
 
 
-let insn_rm_r (op:int) (c:Il.cell) (r:int) : Asm.item =
+let insn_rm_r (op:int) (c:Il.cell) (r:int) : Asm.frag =
   Asm.SEQ [| Asm.BYTE op; rm_r c r |]
 ;;
 
 
-let insn_rm_r_imm (op:int) (c:Il.cell) (r:int) (ty:ty_mach) (i:Asm.expr64) : Asm.item =
+let insn_rm_r_imm (op:int) (c:Il.cell) (r:int) (ty:ty_mach) (i:Asm.expr64) : Asm.frag =
   Asm.SEQ [| Asm.BYTE op; rm_r c r; Asm.WORD (ty, i) |]
 ;;
 
-let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64) : Asm.item =
+let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64) : Asm.frag =
   match i with
       Asm.IMM n when imm_is_byte n ->
         insn_rm_r_imm op8 c r TY_s8 i
@@ -723,10 +723,10 @@ let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64)
 
 
 let insn_pcrel_relax
-    (op8_item:Asm.item)
-    (op32_item:Asm.item)
+    (op8_frag:Asm.frag)
+    (op32_frag:Asm.frag)
     (fix:fixup)
-    : Asm.item =
+    : Asm.frag =
   let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in
   let def = Asm.DEF (pcrel_mark_fixup, Asm.MARK) in
   let pcrel_expr = (Asm.SUB (Asm.M_POS fix,
@@ -734,12 +734,12 @@ let insn_pcrel_relax
   in
     Asm.new_relaxation
       [|
-        Asm.SEQ [| op32_item; Asm.WORD (TY_s32, pcrel_expr); def |];
-        Asm.SEQ [| op8_item; Asm.WORD (TY_s8, pcrel_expr); def |];
+        Asm.SEQ [| op32_frag; Asm.WORD (TY_s32, pcrel_expr); def |];
+        Asm.SEQ [| op8_frag; Asm.WORD (TY_s8, pcrel_expr); def |];
       |]
 ;;
 
-let insn_pcrel_simple (op32:int) (fix:fixup) : Asm.item =
+let insn_pcrel_simple (op32:int) (fix:fixup) : Asm.frag =
   let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in
   let def = Asm.DEF (pcrel_mark_fixup, Asm.MARK) in
   let pcrel_expr = (Asm.SUB (Asm.M_POS fix,
@@ -748,11 +748,11 @@ let insn_pcrel_simple (op32:int) (fix:fixup) : Asm.item =
     Asm.SEQ [| Asm.BYTE op32; Asm.WORD (TY_s32, pcrel_expr); def |]
 ;;
 
-let insn_pcrel (op8:int) (op32:int) (fix:fixup) : Asm.item =
+let insn_pcrel (op8:int) (op32:int) (fix:fixup) : Asm.frag =
   insn_pcrel_relax (Asm.BYTE op8) (Asm.BYTE op32) fix
 ;;
 
-let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.item =
+let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.frag =
   insn_pcrel_relax (Asm.BYTE op8) (Asm.BYTES [| prefix32; op32 |]) fix
 ;;
 
@@ -783,7 +783,7 @@ let is_rm8 (c:Il.cell) : bool =
 ;;
 
 (* FIXME: tighten imm-based dispatch by imm type. *)
-let cmp (a:Il.operand) (b:Il.operand) : Asm.item =
+let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
   match (a,b) with
       (Il.Cell c, Il.Imm (i, _)) when is_rm32 c ->
         insn_rm_r_imm_s8_s32 0x83 0x81 c slash7 i
@@ -795,7 +795,7 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.item =
 ;;
 
 
-let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.item =
+let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
 
   match (signed, dst, src) with
 
@@ -845,7 +845,7 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.item =
 ;;
 
 
-let lea (dst:Il.cell) (addr:Il.addr) : Asm.item =
+let lea (dst:Il.cell) (addr:Il.addr) : Asm.frag =
   match dst with
       Il.Reg ((Il.Hreg r), dst_ty) when is_ty32 dst_ty ->
         insn_rm_r 0x8d (Il.Addr (addr, Il.OpaqueTy)) (reg r)
@@ -854,7 +854,7 @@ let lea (dst:Il.cell) (addr:Il.addr) : Asm.item =
 ;;
 
 
-let select_insn_misc (q:Il.quad') : Asm.item =
+let select_insn_misc (q:Il.quad') : Asm.frag =
 
   match q with
       Il.Call c ->
@@ -942,7 +942,7 @@ let select_insn_misc (q:Il.quad') : Asm.item =
 let alu_binop
     (dst:Il.cell) (src:Il.operand) (immslash:int)
     (rm_dst_op:int) (rm_src_op:int)
-    : Asm.item =
+    : Asm.frag =
   match (dst, src) with
       (Il.Reg ((Il.Hreg r), dst_ty), Il.Cell c)
         when is_ty32 dst_ty && is_rm32 c ->
@@ -960,7 +960,7 @@ let alu_binop
 
 
 let mul_like (src:Il.operand) (signed:bool) (slash:int)
-    : Asm.item =
+    : Asm.frag =
   match src with
       Il.Cell src when is_rm32 src ->
         insn_rm_r 0xf7 src slash
@@ -974,8 +974,8 @@ let mul_like (src:Il.operand) (signed:bool) (slash:int)
 ;;
 
 
-let select_insn (q:Il.quad) : Asm.item =
-  let item =
+let select_insn (q:Il.quad) : Asm.frag =
+  let frag =
     match q.Il.quad_body with
         Il.Unary u ->
           let unop s =
@@ -1031,8 +1031,8 @@ let select_insn (q:Il.quad) : Asm.item =
       | _ -> select_insn_misc q.Il.quad_body
   in
     match q.Il.quad_fixup with
-        None -> item
-      | Some f -> Asm.DEF (f, item)
+        None -> frag
+      | Some f -> Asm.DEF (f, frag)
 ;;
 
 
@@ -1042,7 +1042,7 @@ let new_emitter _ : Il.emitter =
     abi.Abi.abi_is_2addr_machine
 ;;
 
-let select_insns (sess:Session.sess) (q:Il.quads) : Asm.item =
+let select_insns (sess:Session.sess) (q:Il.quads) : Asm.frag =
   let sel q =
     try
       select_insn q
@@ -1056,11 +1056,11 @@ let select_insns (sess:Session.sess) (q:Il.quads) : Asm.item =
     Asm.SEQ (Array.map sel q)
 ;;
 
-let items_of_emitted_quads (sess:Session.sess) (e:Il.emitter) : Asm.item =
-  let item = select_insns sess e.Il.emit_quads in
+let frags_of_emitted_quads (sess:Session.sess) (e:Il.emitter) : Asm.frag =
+  let frag = select_insns sess e.Il.emit_quads in
     if sess.Session.sess_failed
     then raise Unrecognized
-    else item
+    else frag
 ;;
 
 

@@ -219,7 +219,7 @@ let load_command_code (lc:load_command) =
 ;;
 
 
-let fixed_sz_string (sz:int) (str:string) : item =
+let fixed_sz_string (sz:int) (str:string) : frag =
   if String.length str > sz
   then STRING (String.sub str 0 sz)
   else SEQ [| STRING str; PAD (sz - (String.length str)) |]
@@ -228,7 +228,7 @@ let fixed_sz_string (sz:int) (str:string) : item =
 let macho_section_command
     (seg_name:string)
     (sect:(string * int * fixup))
-    : item =
+    : frag =
   let (sect_name, sect_align, sect_fixup) = sect in
     SEQ [|
       fixed_sz_string 16 sect_name;
@@ -251,7 +251,7 @@ let macho_segment_command
     (maxprot:vm_prot list)
     (initprot:vm_prot list)
     (sects:(string * int * fixup) array)
-    : item =
+    : frag =
 
   let cmd_fixup = new_fixup "segment command" in
   let cmd =
@@ -278,7 +278,7 @@ let macho_segment_command
 
 let macho_thread_command
     (entry:fixup)
-    : item =
+    : frag =
   let cmd_fixup = new_fixup "thread command" in
   let x86_THREAD_STATE32 = 1L in
   let regs =
@@ -316,7 +316,7 @@ let macho_thread_command
     DEF (cmd_fixup, cmd)
 ;;
 
-let macho_dylinker_command : item =
+let macho_dylinker_command : frag =
   let cmd_fixup = new_fixup "dylinker command" in
   let str_fixup = new_fixup "dylinker lc_str fixup" in
   let cmd =
@@ -339,7 +339,7 @@ let macho_header_32
     (sub:cpu_subtype)
     (ftype:file_type)
     (flags:file_flag list)
-    (loadcmds:item array) : item =
+    (loadcmds:frag array) : frag =
   let load_commands_fixup = new_fixup "load commands" in
   let cmds = DEF (load_commands_fixup, SEQ loadcmds) in
     SEQ
@@ -357,8 +357,8 @@ let macho_header_32
 
 let emit_file
     (sess:Session.sess)
-    (code:Asm.item)
-    (data:Asm.item)
+    (code:Asm.frag)
+    (data:Asm.frag)
     (dwarf:Dwarf.debug_records)
     (entry_prog_fixup:fixup)
     (c_to_proc_fixup:fixup)
@@ -490,12 +490,12 @@ let emit_file
       import_segment
     |]
   in
-  let all_items = SEQ [| header_and_commands; segments |] in
+  let all_frags = SEQ [| header_and_commands; segments |] in
 
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in
-    resolve_item sess all_items;
-    lower_item ~lsb0: true ~buf ~it: all_items;
+    resolve_frag sess all_frags;
+    lower_frag ~lsb0: true ~buf ~it: all_frags;
     Buffer.output_buffer out buf;
     flush out;
     close_out out

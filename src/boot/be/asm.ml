@@ -4,18 +4,18 @@
    minded. I have 1gb of memory on my laptop: I don't expect to ever
    emit a program that large with this code.
 
-   It is based on the 'item' type, which has a variant for every major
+   It is based on the 'frag' type, which has a variant for every major
    type of machine-blob we know how to write (bytes, zstrings, BSS
    blocks, words of various sorts).
 
-   An item can contain symbolic references between the sub-parts of
+   A frag can contain symbolic references between the sub-parts of
    it. These are accomplished through ref cells we call fixups, and a
    2-pass (resolution and writing) process defined recursively over
-   the item structure.
+   the frag structure.
 
-   Fixups are defined by wrapping an item in a DEF pseudo-item with
+   Fixups are defined by wrapping a frag in a DEF pseudo-frag with
    a fixup attached. This will record information about the wrapped
-   item -- positions and sizes -- in the fixup during resolution.
+   frag -- positions and sizes -- in the fixup during resolution.
 
    We say "positions" and "sizes" there, in plural, because both a
    file number and a memory number is recorded for each concept.
@@ -28,17 +28,17 @@
    with 64-bit positions (ocaml limitation!)
 
    Memory numbers are 64 bit, always, and refer to sizes and positions
-   of items when they are loaded into memory in the target. When
+   of frags when they are loaded into memory in the target. When
    you're generating code for a 32-bit target, or using a memory
    number in a context that's less than 64 bits, the value is
    range-checked and truncated. But in all other respects, we imagine
    a 32-bit address space is just the prefix of the continuing 64-bit
    address space. If you need to pin an object at a particular place
    from the point 2^32-1, say, you will need to do arithmetic and use
-   the MEMPOS pseudo-item, that sets the current memory position as
+   the MEMPOS pseudo-frag, that sets the current memory position as
    it's being processed.
 
-   Fixups can be *used* anywhere else in the item tree, as many times
+   Fixups can be *used* anywhere else in the frag tree, as many times
    as you like. If you try to write an unresolved fixup, the emitter
    faults. When you specify the use of a fixup, you need to specify
    whether you want to use its file size, file position, memory size,
@@ -160,9 +160,9 @@ let rec eval64 (e:expr64)
     | EXT e -> Int64.of_int32 (eval32 e)
 ;;
 
-type item =
+type frag =
     MARK  (* MARK == 'PAD (IMM 0L)' *)
-  | SEQ of item array
+  | SEQ of frag array
   | PAD of int
   | BSS of int64
   | MEMPOS of int64
@@ -174,20 +174,20 @@ type item =
   | ULEB128 of expr64
   | SLEB128 of expr64
   | WORD of (ty_mach * expr64)
-  | ALIGN_FILE of (int * item)
-  | ALIGN_MEM of (int * item)
-  | DEF of (fixup * item)
+  | ALIGN_FILE of (int * frag)
+  | ALIGN_MEM of (int * frag)
+  | DEF of (fixup * frag)
   | RELAX of relaxation
 
 and relaxation =
-    { relax_options: item array;
+    { relax_options: frag array;
       relax_choice: int ref; }
 ;;
 
 exception Relax_more of relaxation;;
 
-let new_relaxation (items:item array) =
-  RELAX { relax_options = items;
+let new_relaxation (frags:frag array) =
+  RELAX { relax_options = frags;
           relax_choice = ref 0; }
 ;;
 
@@ -198,7 +198,7 @@ let log sess = Session.log "asm"
 ;;
 
 
-let rec resolve_item (sess:Session.sess) (item:item) : unit =
+let rec resolve_frag (sess:Session.sess) (frag:frag) : unit =
   let relaxations = ref [] in
   let reset_relaxation rel =
     rel.relax_choice := ((Array.length rel.relax_options) - 1);
@@ -208,16 +208,16 @@ let rec resolve_item (sess:Session.sess) (item:item) : unit =
     relaxations := rel :: (!relaxations)
   in
   let dummy_collector _ = () in
-  let _ = resolve_item_full real_collector item in
+  let _ = resolve_frag_full real_collector frag in
   let dummy_buffer = Buffer.create 0xffff in
   let relax r =
     r.relax_choice := (!(r.relax_choice)) - 1
   in
-  let still_relaxing item =
+  let still_relaxing frag =
     try
       Buffer.reset dummy_buffer;
-      resolve_item_full dummy_collector item;
-      lower_item true dummy_buffer item;
+      resolve_frag_full dummy_collector frag;
+      lower_frag true dummy_buffer frag;
       false
     with
         Relax_more r ->
@@ -226,12 +226,12 @@ let rec resolve_item (sess:Session.sess) (item:item) : unit =
             true
           end
   in
-    while still_relaxing item do
+    while still_relaxing frag do
       log sess "relaxing";
     done;
-    resolve_item_full dummy_collector item
+    resolve_frag_full dummy_collector frag
 
-and resolve_item_full (relaxation_collector:relaxation -> unit) (item:item)
+and resolve_frag_full (relaxation_collector:relaxation -> unit) (frag:frag)
     : unit =
   let file_pos = ref 0 in
   let mem_pos = ref 0L in
@@ -270,10 +270,10 @@ and resolve_item_full (relaxation_collector:relaxation -> unit) (item:item)
     in
       loop (eval64 e)
   in
-  let rec resolve_item it =
+  let rec resolve_frag it =
     match it with
       | MARK -> ()
-      | SEQ items -> Array.iter resolve_item items
+      | SEQ frags -> Array.iter resolve_frag frags
       | PAD i -> bump i
       | BSS i -> mem_pos := Int64.add (!mem_pos) i
       | MEMPOS i -> mem_pos := i
@@ -285,7 +285,7 @@ and resolve_item_full (relaxation_collector:relaxation -> unit) (item:item)
       | ULEB128 e -> uleb e
       | SLEB128 e -> sleb e
       | WORD (mach,_) -> bump (bytes_of_ty_mach mach)
-      | ALIGN_FILE (n, item) ->
+      | ALIGN_FILE (n, frag) ->
           let spill = (!file_pos) mod n in
           let pad = (n - spill) mod n in
             file_pos := (!file_pos) + pad;
@@ -295,19 +295,19 @@ and resolve_item_full (relaxation_collector:relaxation -> unit) (item:item)
              * padding!
              *)
             mem_pos := Int64.add (!mem_pos) (Int64.of_int pad);
-            resolve_item item
+            resolve_frag frag
 
-      | ALIGN_MEM (n, item) ->
+      | ALIGN_MEM (n, frag) ->
           let n64 = Int64.of_int n in
           let spill = Int64.rem (!mem_pos) n64 in
           let pad = Int64.rem (Int64.sub n64 spill) n64 in
             mem_pos := Int64.add (!mem_pos) pad;
-            resolve_item item
+            resolve_frag frag
 
       | DEF (f, i) ->
           let fpos1 = !file_pos in
           let mpos1 = !mem_pos in
-            resolve_item i;
+            resolve_frag i;
             f.fixup_file_pos <- Some fpos1;
             f.fixup_mem_pos <- Some mpos1;
             f.fixup_file_sz <- Some ((!file_pos) - fpos1);
@@ -315,14 +315,14 @@ and resolve_item_full (relaxation_collector:relaxation -> unit) (item:item)
 
       | RELAX rel ->
           (relaxation_collector rel;
-           resolve_item rel.relax_options.(!(rel.relax_choice)))
+           resolve_frag rel.relax_options.(!(rel.relax_choice)))
   in
-    resolve_item item
+    resolve_frag frag
 
-and lower_item
+and lower_frag
     ~(lsb0:bool)
     ~(buf:Buffer.t)
-    ~(it:item)
+    ~(it:frag)
     : unit =
   let byte (i:int) =
     if i < 0
@@ -430,8 +430,8 @@ and lower_item
     match it with
         MARK -> ()
 
-      | SEQ items ->
-          Array.iter (lower_item_2 lsb0 buf) items
+      | SEQ frags ->
+          Array.iter (lower_frag_2 lsb0 buf) frags
 
       | PAD c ->
           for i = 1 to c do
@@ -462,19 +462,19 @@ and lower_item
 
       | WORD (m,e) -> word (bytes_of_ty_mach m) (ty_mach_signed m) e
 
-      | ALIGN_FILE (n, item) ->
+      | ALIGN_FILE (n, frag) ->
           let spill = (Buffer.length buf) mod n in
           let pad = (n - spill) mod n in
             for i = 1 to pad do
               Buffer.add_char buf '\x00'
             done;
-            lower_item_2 lsb0 buf item
+            lower_frag_2 lsb0 buf frag
 
-      | ALIGN_MEM (_, i) -> lower_item_2 lsb0 buf i
-      | DEF (f, i) ->  lower_item_2 lsb0 buf i;
+      | ALIGN_MEM (_, i) -> lower_frag_2 lsb0 buf i
+      | DEF (f, i) ->  lower_frag_2 lsb0 buf i;
       | RELAX rel ->
           try
-            lower_item_2 lsb0 buf rel.relax_options.(!(rel.relax_choice))
+            lower_frag_2 lsb0 buf rel.relax_options.(!(rel.relax_choice))
           with
               Bad_fit s -> raise (Relax_more rel)
 
@@ -484,7 +484,7 @@ and lower_item
   * associated with the fixup -- indicative of an aligned MARK
   * or similar -- that we pad out to the recorded size.
 *)
-          lower_item_2 lsb0 buf i;
+          lower_frag_2 lsb0 buf i;
           let len = Buffer.length buf in
           match (f.fixup_file_pos, f.fixup_file_sz) with
               (Some fp, Some fs) ->
@@ -497,7 +497,7 @@ and lower_item
 *)
 and
     (* Some odd recursion bug? Unifier gets sad without this indirection. *)
-    lower_item_2 lsb0 buf i = lower_item lsb0 buf i
+    lower_frag_2 lsb0 buf i = lower_frag lsb0 buf i
 ;;
 
 

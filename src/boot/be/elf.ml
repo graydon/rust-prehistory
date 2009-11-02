@@ -95,7 +95,7 @@ let elf32_header
     ~(e_phnum:int64)
     ~(e_shnum:int64)
     ~(e_shstrndx:int64)
-    : item =
+    : frag =
   let elf_header_fixup = new_fixup "elf header" in
     DEF
       (elf_header_fixup,
@@ -159,7 +159,7 @@ let section_header
     ~(sh_addralign:int64)
     ~(sh_entsize:int64)
     ~(sh_link:int64 option)
-    : item =
+    : frag =
   SEQ
     [|
       WORD (TY_s32, (SUB
@@ -225,7 +225,7 @@ let program_header
     ~(segment_fixup:fixup)
     ~(p_flags:p_flag list)
     ~(p_align:int64)
-    : item =
+    : frag =
   SEQ
     [|
       WORD (TY_u32, (IMM (match p_type with
@@ -282,7 +282,7 @@ let symbol
     ~(st_bind:st_bind)
     ~(st_type:st_type)
     ~(st_shndx:int64)
-    : item =
+    : frag =
   let st_bind_num =
     match st_bind with
         STB_LOCAL -> 0L
@@ -394,7 +394,7 @@ let elf32_num_of_dyn_tag tag =
     | DT_PREINIT_ARRAYSZ -> 33L
 ;;
 
-let elf32_dyn_item d =
+let elf32_dyn_frag d =
   let (tag, expr) = d in
   let tagval = elf32_num_of_dyn_tag tag in
     SEQ [| WORD (TY_u32, (IMM tagval)); WORD (TY_u32, expr) |]
@@ -422,7 +422,7 @@ type elf32_386_rela =
       elf32_386_rela_addend: expr64 }
 ;;
 
-let elf32_386_rela_item r =
+let elf32_386_rela_frag r =
   let type_val =
     match r.elf32_386_rela_type with
         R_386_NONE -> 0L
@@ -451,13 +451,13 @@ let elf32_386_rela_item r =
 let elf32_linux_x86_file
     ~(sess:Session.sess)
     ~(entry_name:string)
-    ~(text_items:(string, item) Hashtbl.t)
-    ~(data_items:(string, item) Hashtbl.t)
-    ~(rodata_items:(string, item) Hashtbl.t)
+    ~(text_frags:(string, frag) Hashtbl.t)
+    ~(data_frags:(string, frag) Hashtbl.t)
+    ~(rodata_frags:(string, frag) Hashtbl.t)
     ~(import_fixups:(string, fixup) Hashtbl.t)
     ~(dwarf:Dwarf.debug_records)
     ~(needed_libs:string array)
-    : item =
+    : frag =
 
   (* Procedure Linkage Tables (PLTs), Global Offset Tables
    * (GOTs), and the relocations that set them up:
@@ -507,7 +507,7 @@ let elf32_linux_x86_file
                             DEF (got1_fixup, WORD (TY_u32, (IMM 0L)));
                             DEF (got2_fixup, WORD (TY_u32, (IMM 0L))); |]
     in
-    let plt0_item =
+    let plt0_frag =
       let e = Il.new_emitter X86.prealloc_quad true in
         Il.emit e (Il.Push (X86.imm (M_POS got1_fixup)));
         Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Abs (M_POS got2_fixup))));
@@ -515,7 +515,7 @@ let elf32_linux_x86_file
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
-        DEF (plt0_fixup, (X86.items_of_emitted_quads sess e))
+        DEF (plt0_fixup, (X86.frags_of_emitted_quads sess e))
     in
 
 
@@ -961,8 +961,8 @@ let elf32_linux_x86_file
 
   let text_sym name st_bind fixup =
     let name_fixup = new_fixup ("text symbol name fixup: '" ^ name ^ "'") in
-    let strtab_item = DEF (name_fixup, ZSTRING name) in
-    let symtab_item =
+    let strtab_frag = DEF (name_fixup, ZSTRING name) in
+    let symtab_frag =
       symbol
         ~string_table_fixup: dynstr_section_fixup
         ~name_string_fixup: name_fixup
@@ -971,13 +971,13 @@ let elf32_linux_x86_file
         ~st_type: STT_FUNC
         ~st_shndx: textndx
     in
-      (strtab_item, symtab_item)
+      (strtab_frag, symtab_frag)
   in
 
   let import_sym name st_bind fixup =
     let name_fixup = new_fixup ("import symbol name fixup: '" ^ name ^ "'") in
-    let strtab_item = DEF (name_fixup, ZSTRING name) in
-    let symtab_item =
+    let strtab_frag = DEF (name_fixup, ZSTRING name) in
+    let symtab_frag =
       symbol
         ~string_table_fixup: dynstr_section_fixup
         ~name_string_fixup: name_fixup
@@ -986,40 +986,40 @@ let elf32_linux_x86_file
         ~st_type: STT_FUNC
         ~st_shndx: shn_UNDEF
     in
-      (strtab_item, symtab_item)
+      (strtab_frag, symtab_frag)
   in
 
-  let items_of_symbol sym_emitter st_bind symname symbody x =
-    let (strtab_items, symtab_items, body_items) = x in
+  let frags_of_symbol sym_emitter st_bind symname symbody x =
+    let (strtab_frags, symtab_frags, body_frags) = x in
     let body_fixup = new_fixup ("symbol body fixup: '" ^ symname ^ "'") in
-    let body_item =
+    let body_frag =
       if symname = entry_name
       then DEF (e_entry_fixup, DEF (body_fixup, symbody))
       else DEF (body_fixup, symbody)
     in
-    let (strtab_item, symtab_item) = sym_emitter symname st_bind body_fixup in
-      ((strtab_item :: strtab_items),
-       (symtab_item :: symtab_items),
-       (body_item :: body_items))
+    let (strtab_frag, symtab_frag) = sym_emitter symname st_bind body_fixup in
+      ((strtab_frag :: strtab_frags),
+       (symtab_frag :: symtab_frags),
+       (body_frag :: body_frags))
   in
 
-  let items_of_import_symbol sym_emitter st_bind symname plt_entry_fixup x =
-    let (i, strtab_items, symtab_items,
-         plt_items, got_plt_items, rela_plt_items) = x in
-    let (strtab_item, symtab_item) = sym_emitter symname st_bind None in
+  let frags_of_import_symbol sym_emitter st_bind symname plt_entry_fixup x =
+    let (i, strtab_frags, symtab_frags,
+         plt_frags, got_plt_frags, rela_plt_frags) = x in
+    let (strtab_frag, symtab_frag) = sym_emitter symname st_bind None in
     let e = Il.new_emitter X86.prealloc_quad true in
     let jump_slot_fixup = new_fixup ("jump slot #" ^ string_of_int i) in
     let jump_slot_initial_target_fixup =
       new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
-    let plt_item =
+    let plt_frag =
       Il.emit_full e (Some plt_entry_fixup)
         (Il.jmp Il.JMP (Il.CodeAddr (Il.Abs (M_POS jump_slot_fixup))));
       Il.emit_full e (Some jump_slot_initial_target_fixup)
         (Il.Push (X86.immi (Int64.of_int i)));
       Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Pcrel (plt0_fixup, None))));
-      X86.items_of_emitted_quads sess e
+      X86.frags_of_emitted_quads sess e
     in
-    let got_plt_item = DEF (jump_slot_fixup,
+    let got_plt_frag = DEF (jump_slot_fixup,
                             WORD (TY_u32, (M_POS jump_slot_initial_target_fixup))) in
     let rela_plt =
       { elf32_386_rela_type = R_386_JMP_SLOT;
@@ -1027,78 +1027,78 @@ let elf32_linux_x86_file
         elf32_386_rela_sym = (IMM (Int64.of_int i));
         elf32_386_rela_addend = (IMM 0L) }
     in
-    let rela_plt_item = elf32_386_rela_item rela_plt in
+    let rela_plt_frag = elf32_386_rela_frag rela_plt in
       (i+1,
-       (strtab_item :: strtab_items),
-       (symtab_item :: symtab_items),
-       (plt_item :: plt_items),
-       (got_plt_item :: got_plt_items),
-       (rela_plt_item :: rela_plt_items))
+       (strtab_frag :: strtab_frags),
+       (symtab_frag :: symtab_frags),
+       (plt_frag :: plt_frags),
+       (got_plt_frag :: got_plt_frags),
+       (rela_plt_frag :: rela_plt_frags))
   in
 
-  let (text_strtab_items,
-       text_symtab_items,
-       text_body_items) =
-    Hashtbl.fold (items_of_symbol text_sym STB_GLOBAL) text_items ([],[],[])
+  let (text_strtab_frags,
+       text_symtab_frags,
+       text_body_frags) =
+    Hashtbl.fold (frags_of_symbol text_sym STB_GLOBAL) text_frags ([],[],[])
   in
 
-  let (rodata_strtab_items,
-       rodata_symtab_items,
-       rodata_body_items) =
-    Hashtbl.fold (items_of_symbol rodata_sym STB_GLOBAL) rodata_items ([],[],[])
+  let (rodata_strtab_frags,
+       rodata_symtab_frags,
+       rodata_body_frags) =
+    Hashtbl.fold (frags_of_symbol rodata_sym STB_GLOBAL) rodata_frags ([],[],[])
   in
 
-  let (data_strtab_items,
-       data_symtab_items,
-       data_body_items) =
-    Hashtbl.fold (items_of_symbol data_sym STB_GLOBAL) data_items ([],[],[])
+  let (data_strtab_frags,
+       data_symtab_frags,
+       data_body_frags) =
+    Hashtbl.fold (frags_of_symbol data_sym STB_GLOBAL) data_frags ([],[],[])
   in
 
   let (_,
-       import_strtab_items,
-       import_symtab_items,
-       plt_items,
-       got_plt_items,
-       rela_plt_items) =
-    Hashtbl.fold (items_of_import_symbol import_sym STB_GLOBAL) import_fixups
-      (1,[],[],[plt0_item],[got_prefix],[])
+       import_strtab_frags,
+       import_symtab_frags,
+       plt_frags,
+       got_plt_frags,
+       rela_plt_frags) =
+    Hashtbl.fold (frags_of_import_symbol import_sym STB_GLOBAL) import_fixups
+      (1,[],[],[plt0_frag],[got_prefix],[])
   in
-  let import_symtab_items = List.rev import_symtab_items in
-  let plt_items = List.rev plt_items in
-  let got_plt_items = List.rev got_plt_items in
-  let rela_plt_items = List.rev rela_plt_items in
+  let import_symtab_frags = List.rev import_symtab_frags in
+  let plt_frags = List.rev plt_frags in
+  let got_plt_frags = List.rev got_plt_frags in
+  let rela_plt_frags = List.rev rela_plt_frags in
 
-  let dynamic_needed_strtab_items = Array.make (Array.length needed_libs) MARK in
+  let dynamic_needed_strtab_frags = Array.make (Array.length needed_libs) MARK in
 
-  let dynamic_items =
-    let dynamic_needed_items = Array.make (Array.length needed_libs) MARK in
+  let dynamic_frags =
+    let dynamic_needed_frags = Array.make (Array.length needed_libs) MARK in
       for i = 0 to (Array.length needed_libs) - 1 do
         let fixup = new_fixup ("needed library name fixup: " ^ needed_libs.(i)) in
-          dynamic_needed_items.(i) <- elf32_dyn_item (DT_NEEDED, SUB (M_POS fixup,
+          dynamic_needed_frags.(i) <- elf32_dyn_frag (DT_NEEDED, SUB (M_POS fixup,
                                                                       M_POS dynstr_section_fixup));
-          dynamic_needed_strtab_items.(i) <- DEF (fixup, ZSTRING needed_libs.(i))
+          dynamic_needed_strtab_frags.(i) <- DEF (fixup, ZSTRING needed_libs.(i))
       done;
       (SEQ [|
-         SEQ dynamic_needed_items;
-         elf32_dyn_item (DT_STRTAB, M_POS dynstr_section_fixup);
-         elf32_dyn_item (DT_STRSZ, M_SZ dynstr_section_fixup);
+         SEQ dynamic_needed_frags;
+         elf32_dyn_frag (DT_STRTAB, M_POS dynstr_section_fixup);
+         elf32_dyn_frag (DT_STRSZ, M_SZ dynstr_section_fixup);
 
-         elf32_dyn_item (DT_SYMTAB, M_POS dynsym_section_fixup);
-         elf32_dyn_item (DT_SYMENT, IMM elf32_symsize);
+         elf32_dyn_frag (DT_SYMTAB, M_POS dynsym_section_fixup);
+         elf32_dyn_frag (DT_SYMENT, IMM elf32_symsize);
 
-         elf32_dyn_item (DT_PLTGOT, M_POS got_plt_section_fixup);
+         elf32_dyn_frag (DT_PLTGOT, M_POS got_plt_section_fixup);
 
-         elf32_dyn_item (DT_PLTREL, IMM (elf32_num_of_dyn_tag DT_RELA));
-         elf32_dyn_item (DT_PLTRELSZ, M_SZ rela_plt_section_fixup);
-         elf32_dyn_item (DT_JMPREL, M_POS rela_plt_section_fixup);
+         elf32_dyn_frag (DT_PLTREL, IMM (elf32_num_of_dyn_tag DT_RELA));
+         elf32_dyn_frag (DT_PLTRELSZ, M_SZ rela_plt_section_fixup);
+         elf32_dyn_frag (DT_JMPREL, M_POS rela_plt_section_fixup);
 
-         elf32_dyn_item (DT_NULL, IMM 0L)
+         elf32_dyn_frag (DT_NULL, IMM 0L)
        |])
   in
 
   let null_strtab_fixup = new_fixup "null dynstrtab entry" in
-  let null_strtab_item = DEF (null_strtab_fixup, ZSTRING "") in
-  let null_symtab_item = (symbol
+  let null_strtab_frag = DEF (null_strtab_fixup, ZSTRING "") in
+  let null_symtab_frag = (symbol
                             ~string_table_fixup: dynstr_section_fixup
                             ~name_string_fixup: null_strtab_fixup
                             ~sym_target_fixup: None
@@ -1106,19 +1106,19 @@ let elf32_linux_x86_file
                             ~st_type: STT_NOTYPE
                             ~st_shndx: 0L) in
 
-  let dynsym_items = (null_symtab_item ::
-                        (import_symtab_items @
-                           text_symtab_items @
-                           rodata_symtab_items @
-                           data_symtab_items))
+  let dynsym_frags = (null_symtab_frag ::
+                        (import_symtab_frags @
+                           text_symtab_frags @
+                           rodata_symtab_frags @
+                           data_symtab_frags))
   in
 
-  let dynstr_items = (null_strtab_item ::
-                        (import_strtab_items @
-                           text_strtab_items @
-                           rodata_strtab_items @
-                           data_strtab_items @
-                           (Array.to_list dynamic_needed_strtab_items)))
+  let dynstr_frags = (null_strtab_frag ::
+                        (import_strtab_frags @
+                           text_strtab_frags @
+                           rodata_strtab_frags @
+                           data_strtab_frags @
+                           (Array.to_list dynamic_needed_strtab_frags)))
   in
 
   let interp_section =
@@ -1127,15 +1127,15 @@ let elf32_linux_x86_file
 
   let text_section =
     DEF (text_section_fixup,
-         SEQ (Array.of_list text_body_items))
+         SEQ (Array.of_list text_body_frags))
   in
   let rodata_section =
     DEF (rodata_section_fixup,
-         SEQ (Array.of_list rodata_body_items))
+         SEQ (Array.of_list rodata_body_frags))
   in
   let data_section =
     DEF (data_section_fixup,
-         SEQ (Array.of_list data_body_items))
+         SEQ (Array.of_list data_body_frags))
   in
   let bss_section =
     DEF (bss_section_fixup,
@@ -1143,30 +1143,30 @@ let elf32_linux_x86_file
   in
   let dynsym_section =
     DEF (dynsym_section_fixup,
-         SEQ (Array.of_list dynsym_items))
+         SEQ (Array.of_list dynsym_frags))
   in
   let dynstr_section =
     DEF (dynstr_section_fixup,
-         SEQ (Array.of_list dynstr_items))
+         SEQ (Array.of_list dynstr_frags))
   in
 
   let plt_section =
     DEF (plt_section_fixup,
-         SEQ (Array.of_list plt_items))
+         SEQ (Array.of_list plt_frags))
   in
 
   let got_plt_section =
     DEF (got_plt_section_fixup,
-         SEQ (Array.of_list got_plt_items))
+         SEQ (Array.of_list got_plt_frags))
   in
 
   let rela_plt_section =
     DEF (rela_plt_section_fixup,
-         SEQ (Array.of_list rela_plt_items))
+         SEQ (Array.of_list rela_plt_frags))
   in
 
   let dynamic_section =
-    DEF (dynamic_section_fixup, dynamic_items)
+    DEF (dynamic_section_fixup, dynamic_frags)
   in
 
 
@@ -1262,16 +1262,16 @@ let elf32_linux_x86_file
 
 let emit_file
     (sess:Session.sess)
-    (code:Asm.item)
-    (data:Asm.item)
+    (code:Asm.frag)
+    (data:Asm.frag)
     (dwarf:Dwarf.debug_records)
     (root_prog_fixup:fixup)
     (c_to_proc_fixup:fixup)
     : unit =
 
-  let text_items = Hashtbl.create 4 in
-  let rodata_items = Hashtbl.create 4 in
-  let data_items = Hashtbl.create 4 in
+  let text_frags = Hashtbl.create 4 in
+  let rodata_frags = Hashtbl.create 4 in
+  let data_frags = Hashtbl.create 4 in
   let import_fixups = Hashtbl.create 4 in
 
   (*
@@ -1326,13 +1326,13 @@ let emit_file
       Il.emit e (Il.call
                    (Il.Reg (Il.Hreg X86.eax, Il.ValTy Il.Bits32))
                    (Il.CodeAddr (Il.Pcrel (libc_start_main_fixup, None))));
-      X86.items_of_emitted_quads sess e
+      X86.frags_of_emitted_quads sess e
   in
 
   let do_nothing_fn =
     let e = Il.new_emitter X86.prealloc_quad true in
       Il.emit e Il.Ret;
-      X86.items_of_emitted_quads sess e
+      X86.frags_of_emitted_quads sess e
   in
 
   let main_fn =
@@ -1341,7 +1341,7 @@ let emit_file
         ~main_fixup ~rust_start_fixup
         ~root_prog_fixup ~c_to_proc_fixup
         ~indirect_start: false;
-      X86.items_of_emitted_quads sess e
+      X86.frags_of_emitted_quads sess e
   in
 
   let needed_libs =
@@ -1352,31 +1352,31 @@ let emit_file
   in
 
   let _ =
-    htab_put text_items "_start" start_fn;
-    htab_put text_items "_init" (DEF (init_fixup, do_nothing_fn));
-    htab_put text_items "_fini" (DEF (fini_fixup, do_nothing_fn));
-    htab_put text_items "main" main_fn;
-    htab_put text_items "rust_code" code;
-    htab_put rodata_items "rust_rodata" data;
+    htab_put text_frags "_start" start_fn;
+    htab_put text_frags "_init" (DEF (init_fixup, do_nothing_fn));
+    htab_put text_frags "_fini" (DEF (fini_fixup, do_nothing_fn));
+    htab_put text_frags "main" main_fn;
+    htab_put text_frags "rust_code" code;
+    htab_put rodata_frags "rust_rodata" data;
     htab_put import_fixups "__libc_start_main" libc_start_main_fixup;
 
     htab_put import_fixups "rust_start" rust_start_fixup
   in
-  let all_items =
+  let all_frags =
     elf32_linux_x86_file
       ~sess
       ~entry_name: "_start"
-      ~text_items: text_items
-      ~data_items: data_items
+      ~text_frags: text_frags
+      ~data_frags: data_frags
       ~dwarf: dwarf
-      ~rodata_items: rodata_items
+      ~rodata_frags: rodata_frags
       ~import_fixups: import_fixups
       ~needed_libs: needed_libs
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in
-    resolve_item sess all_items;
-    lower_item ~lsb0: true ~buf: buf ~it: all_items;
+    resolve_frag sess all_frags;
+    lower_frag ~lsb0: true ~buf: buf ~it: all_frags;
     Buffer.output_buffer out buf;
     flush out;
     close_out out

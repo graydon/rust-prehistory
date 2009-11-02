@@ -94,7 +94,7 @@ let def_aligned f i =
 *)
 
 let pe_msdos_header_and_padding
-    : item =
+    : frag =
   SEQ [|
     BYTES
       [|
@@ -174,7 +174,7 @@ let pe_header
     ~(number_of_symbols:int64)
     ~(loader_hdr_fixup:fixup)
     ~(characteristics:pe_characteristics list)
-    : item =
+    : frag =
   ALIGN_FILE
     (8,
      SEQ [|
@@ -226,7 +226,7 @@ let pe_loader_header
     ~(subsys:pe_subsystem)
     ~(loader_hdr_fixup:fixup)
     ~(import_dir_fixup:fixup)
-    : item =
+    : frag =
   DEF
     (loader_hdr_fixup,
      SEQ [|
@@ -342,7 +342,7 @@ type pe_section_characteristics =
 let pe_section_header
     ~(id:pe_section_id)
     ~(hdr_fixup:fixup)
-    : item =
+    : frag =
   let
       characteristics =
     match id with
@@ -485,11 +485,11 @@ type pe_import_dll_entry =
 let pe_import_section
     ~(section_fixup:fixup)
     ~(dlls:pe_import_dll_entry array)
-    : item =
+    : frag =
 
   let form_dir_entry
       (entry:pe_import_dll_entry)
-      : item =
+      : frag =
     SEQ [|
       (* Note: documented opinions vary greatly about whether the
          first, last, or both of the slots in one of these rows points
@@ -505,19 +505,19 @@ let pe_import_section
 
   let form_ILT_slot
       (import:pe_import)
-      : item =
+      : frag =
     (WORD (TY_u32, (rva import.pe_import_name_fixup)))
   in
 
   let form_IAT_slot
       (import:pe_import)
-      : item =
+      : frag =
     (DEF (import.pe_import_address_fixup, (WORD (TY_u32, (rva import.pe_import_name_fixup)))))
   in
 
   let form_tables_for_dll
       (dll:pe_import_dll_entry)
-      : item =
+      : frag =
     let terminator = WORD (TY_u32, (IMM 0L)) in
     let ilt =
       SEQ [|
@@ -543,7 +543,7 @@ let pe_import_section
 
   let form_import_string
       (import:pe_import)
-      : item =
+      : frag =
     DEF
       (import.pe_import_name_fixup,
        SEQ [|
@@ -559,7 +559,7 @@ let pe_import_section
 
   let form_dir_entry_string
       (dll:pe_import_dll_entry)
-      : item =
+      : frag =
     DEF
       (dll.pe_import_dll_name_fixup,
        SEQ [| ZSTRING dll.pe_import_dll_name;
@@ -592,9 +592,9 @@ let pe_text_section
     ~(rust_start_fixup:fixup)
     ~(root_prog_fixup:fixup)
     ~(text_fixup:fixup)
-    ~(crate_code:item)
+    ~(crate_code:frag)
     ~(c_to_proc_fixup:fixup)
-    : item =
+    : frag =
   let e = X86.new_emitter () in
     (*
      * We are called from the Microsoft C library startup routine,
@@ -607,7 +607,7 @@ let pe_text_section
     def_aligned
       text_fixup
       (SEQ [|
-         X86.items_of_emitted_quads sess e;
+         X86.frags_of_emitted_quads sess e;
          crate_code
        |])
 ;;
@@ -633,8 +633,8 @@ let rustrt_imports =
 
 let emit_file
     (sess:Session.sess)
-    (code:Asm.item)
-    (data:Asm.item)
+    (code:Asm.frag)
+    (data:Asm.frag)
     (dw:Dwarf.debug_records)
     (root_prog_fixup:fixup)
     (c_to_proc_fixup:fixup)
@@ -802,7 +802,7 @@ let emit_file
     def_aligned dw.Dwarf.debug_frame_fixup dw.Dwarf.debug_frame
   in
 
-  let all_items = SEQ [| MEMPOS pe_image_base;
+  let all_frags = SEQ [| MEMPOS pe_image_base;
                          (def_file_aligned image_fixup
                             (SEQ [| all_headers;
                                     text_section;
@@ -818,8 +818,8 @@ let emit_file
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in
-    resolve_item sess all_items;
-    lower_item ~lsb0: true ~buf ~it: all_items;
+    resolve_frag sess all_frags;
+    lower_frag ~lsb0: true ~buf ~it: all_frags;
     Buffer.output_buffer out buf;
     flush out;
     close_out out

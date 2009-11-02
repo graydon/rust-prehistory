@@ -36,7 +36,7 @@ type data =
 type glue_code = (glue, code) Hashtbl.t;;
 type item_code = (node_id, code) Hashtbl.t;;
 type file_code = (node_id, item_code) Hashtbl.t;;
-type data_items = (data, (fixup * Asm.item)) Hashtbl.t;;
+type data_frags = (data, (fixup * Asm.frag)) Hashtbl.t;;
 
 (* The node_id in the Constr_pred constr_key is the innermost block_id
    of any of the constr's pred name or cargs; this is the *outermost*
@@ -98,7 +98,7 @@ type ctxt =
       ctxt_proc_to_c_fixup: fixup;
       ctxt_file_code: file_code;
       ctxt_glue_code: glue_code;
-      ctxt_data: data_items;
+      ctxt_data: data_frags;
       ctxt_main_prog: fixup;
       ctxt_main_name: string;
     }

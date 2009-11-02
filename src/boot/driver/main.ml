@@ -134,7 +134,7 @@ then
 
 let list_to_seq ls = Asm.SEQ (Array.of_list ls);;
 let (abi:Abi.abi) = X86.abi;;
-let (select_insns:(Il.quads -> Asm.item)) = X86.select_insns sess;;
+let (select_insns:(Il.quads -> Asm.frag)) = X86.select_insns sess;;
 
 (* Semantic passes. *)
 let sem_cx = Semant.new_ctxt sess abi crate.node
@@ -159,8 +159,8 @@ let _ =
 
 
 (* Tying up various knots, allocating registers and selecting instructions. *)
-let process_code (frame_sz:int64) (code:Semant.code) : Asm.item =
-  let item =
+let process_code (frame_sz:int64) (code:Semant.code) : Asm.frag =
+  let frag =
     match code.Semant.code_vregs_and_spill with
         None -> select_insns code.Semant.code_quads
       | Some (n_vregs, spill_fix) ->
@@ -178,10 +178,10 @@ let process_code (frame_sz:int64) (code:Semant.code) : Asm.item =
               insns
             end
   in
-    Asm.DEF (code.Semant.code_fixup, item)
+    Asm.DEF (code.Semant.code_fixup, frag)
 ;;
 
-let process_node_code (node:node_id) (code:Semant.code) : Asm.item =
+let process_node_code (node:node_id) (code:Semant.code) : Asm.frag =
   let frame_sz =
     Hashtbl.find
       sem_cx.Semant.ctxt_frame_sizes
@@ -190,10 +190,10 @@ let process_node_code (node:node_id) (code:Semant.code) : Asm.item =
     process_code frame_sz code
 ;;
 
-let (file_items:Asm.item) =
-  let process_file file_id item_code =
+let (file_frags:Asm.frag) =
+  let process_file file_id frag_code =
     let file_fix = Hashtbl.find sem_cx.Semant.ctxt_file_fixups file_id in
-      Asm.DEF (file_fix, list_to_seq (reduce_hash_to_list process_node_code item_code))
+      Asm.DEF (file_fix, list_to_seq (reduce_hash_to_list process_node_code frag_code))
   in
     list_to_seq (reduce_hash_to_list process_file sem_cx.Semant.ctxt_file_code)
 ;;
@@ -201,14 +201,14 @@ exit_if_failed ()
 ;;
 
 
-let (glue_items:Asm.item) =
+let (glue_frags:Asm.frag) =
   let process_glue glue code = process_code 0L code in
     list_to_seq (reduce_hash_to_list process_glue sem_cx.Semant.ctxt_glue_code)
 ;;
 exit_if_failed ()
 ;;
 
-let code = Asm.SEQ [| file_items; glue_items |];;
+let code = Asm.SEQ [| file_frags; glue_frags |];;
 let data = list_to_seq (reduce_hash_to_list (fun _ (_, i) -> i) sem_cx.Semant.ctxt_data);;
 
 (* Emitting Dwarf and PE/ELF/Macho. *)

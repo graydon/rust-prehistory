@@ -1,8 +1,7 @@
 
 progress:
- - rename 'asm.item' to something less confusable with module-item
+ - make proc stacks into chunk lists, check overflow / extend on frame entry
  - mach-o format emitter
- - reorganize glue code
  - tag/iso/idx types
  - more string work
  - machine types (or at least byte-sized bool, u32 and u8)
@@ -17,7 +16,6 @@ progress:
  - explicit FFI / struct descriptors; hard-coding offsets is getting stale
    (use IL.referent_ty and friends)
  - combine layout and Il.referent_ty (give members of StructTy offsets and alignments)
- - make proc stacks into chunk lists, check overflow / extend on frame entry
  - put timer-counter in proc
  - translate loop-jumps & calls to do a test/yield (regs already flushed)
  - implement memory budget / accounting scheme
@@ -50,6 +48,8 @@ code cleanup:
    batch the "I do not"s?
 
 done:
+ - rename 'Asm.item' to something less confusable with module-item
+ - reorganize glue code
  - remove limited type
  - change COMP_idx {} syntax, to _n
  - vectors

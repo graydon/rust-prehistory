@@ -495,7 +495,7 @@ let trans_visitor
   and trans_lval (lv:Ast.lval) (intent:intent) : (Il.cell * Ast.slot) =
     trans_lval_full lv abi.Abi.abi_has_pcrel_data abi.Abi.abi_has_abs_data intent
 
-  and trans_data_item (d:data) (thunk:unit -> Asm.item) : Il.operand =
+  and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Il.operand =
     let fix =
       if Hashtbl.mem cx.ctxt_data d
       then
@@ -511,7 +511,7 @@ let trans_visitor
       Il.Imm (Asm.M_POS fix, word_ty)
 
   and trans_static_string (s:string) : Il.operand =
-    trans_data_item (DATA_str s) (fun _ -> Asm.ZSTRING s)
+    trans_data_frag (DATA_str s) (fun _ -> Asm.ZSTRING s)
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
     (* Include null byte. *)

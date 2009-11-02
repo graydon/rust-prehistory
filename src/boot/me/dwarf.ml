@@ -546,7 +546,7 @@ type dw_op =
   | DW_OP_nop
 ;;
 
-let dw_op_to_item (abi:Abi.abi) (op:dw_op) : Asm.item =
+let dw_op_to_frag (abi:Abi.abi) (op:dw_op) : Asm.frag =
   match op with
 
       DW_OP_addr e -> SEQ [| BYTE 0x03; WORD (abi.Abi.abi_word_ty, e) |]
@@ -620,11 +620,11 @@ let dw_op_to_item (abi:Abi.abi) (op:dw_op) : Asm.item =
     | DW_OP_bit_piece (sz, off) -> SEQ [| BYTE 0x9d; ULEB128 sz; ULEB128 off |]
 ;;
 
-let dw_block1 (abi:Abi.abi) (ops:dw_op array) : Asm.item =
-  let item = SEQ (Array.map (dw_op_to_item abi) ops) in
+let dw_block1 (abi:Abi.abi) (ops:dw_op array) : Asm.frag =
+  let frag = SEQ (Array.map (dw_op_to_frag abi) ops) in
   let block_fixup = new_fixup "DW_FORM_block1 fixup" in
     SEQ [| WORD (TY_u8, F_SZ block_fixup);
-           DEF (block_fixup, item) |]
+           DEF (block_fixup, frag) |]
 ;;
 
 type dw_lns =
@@ -695,12 +695,12 @@ let dw_lns_arity lns =
 
 type debug_records =
     {
-      debug_aranges: Asm.item;
-      debug_pubnames: Asm.item;
-      debug_info: Asm.item;
-      debug_abbrev: Asm.item;
-      debug_line: Asm.item;
-      debug_frame: Asm.item;
+      debug_aranges: Asm.frag;
+      debug_pubnames: Asm.frag;
+      debug_info: Asm.frag;
+      debug_abbrev: Asm.frag;
+      debug_line: Asm.frag;
+      debug_frame: Asm.frag;
 
       debug_aranges_fixup: fixup;
       debug_pubnames_fixup: fixup;
@@ -757,12 +757,12 @@ let prepend lref x = lref := x :: (!lref)
 let dwarf_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
-    (cu_aranges:(item list) ref)
-    (cu_pubnames:(item list) ref)
-    (cu_infos:(item list) ref)
-    (cu_abbrevs:(item list) ref)
-    (cu_lines:(item list) ref)
-    (cu_frames:(item list) ref)
+    (cu_aranges:(frag list) ref)
+    (cu_pubnames:(frag list) ref)
+    (cu_infos:(frag list) ref)
+    (cu_abbrevs:(frag list) ref)
+    (cu_lines:(frag list) ref)
+    (cu_frames:(frag list) ref)
     : Walk.visitor =
   let (abbrev_table:(abbrev, int) Hashtbl.t) = Hashtbl.create 0 in
 
@@ -782,7 +782,7 @@ let dwarf_visitor
             attr_ulebs.(2*i) <- uleb (dw_at_to_int attr);
             attr_ulebs.((2*i)+1) <- uleb (dw_form_to_int form)
         done;
-        let ab_item =
+        let ab_frag =
           (SEQ [|
              uleb n;
              uleb (dw_tag_to_int tag);
@@ -791,16 +791,16 @@ let dwarf_visitor
              uleb 0; uleb 0;
            |])
         in
-          prepend cu_abbrevs ab_item;
+          prepend cu_abbrevs ab_frag;
           htab_put abbrev_table ab n;
           n
   in
 
-  let (curr_cu_aranges:(item list) ref) = ref [] in
-  let (curr_cu_pubnames:(item list) ref) = ref [] in
-  let (curr_cu_infos:(item list) ref) = ref [] in
-  let (curr_cu_line:(item list) ref) = ref [] in
-  let (curr_cu_frame:(item list) ref) = ref [] in
+  let (curr_cu_aranges:(frag list) ref) = ref [] in
+  let (curr_cu_pubnames:(frag list) ref) = ref [] in
+  let (curr_cu_infos:(frag list) ref) = ref [] in
+  let (curr_cu_line:(frag list) ref) = ref [] in
+  let (curr_cu_frame:(frag list) ref) = ref [] in
 
   let finish_cu_and_compose_headers _ =
 
