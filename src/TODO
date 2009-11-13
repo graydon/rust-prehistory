@@ -8,6 +8,9 @@ progress:
  - arbitrary-precision int type
  - alt statements
  - homogeneous for loops
+ - yielding calling protocols
+ - iterator for-loops
+ - tail calling protocols
  - build signal system
  - extend typestate system to handle operation pre/post conditions
    extracted from implicit-in-type constrs
@@ -24,9 +27,6 @@ progress:
  - type-driven glue functions: copy, compare, hash, delete
  - mod types
  - parametric types
- - yielding calling protocols
- - iterator for-loops
- - tail calling protocols
  - x64, arm?
  - import extlib for utf-8, various extras
  - redo lexer by hand, as unicode

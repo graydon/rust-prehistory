@@ -1673,7 +1673,7 @@ let trans_visitor
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
-      abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill_fixup callsz;
+      abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill_fixup callsz cx.ctxt_proc_to_c_fixup;
   in
 
   let trans_frame_exit (fnid:node_id) : unit =

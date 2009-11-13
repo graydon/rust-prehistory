@@ -777,7 +777,7 @@ The special symbols are:
 
 @multitable @columnfractions .1 .1 .1 .1 .1 .1
 
-@tab @code{@@}
+@item @code{@@}
 @tab @code{~}
 @tab @code{^}
 @tab @code{_}

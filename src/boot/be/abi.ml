@@ -87,7 +87,10 @@ let chan_field_refcnt = 1;;
 let stk_field_prev = 0;;
 let stk_field_next = stk_field_prev + 1;;
 let stk_field_valgrind_id = stk_field_next + 1;;
-let stk_field_limit = stk_field_valgrind_id + 1;;
+let stk_field_prev_fp = stk_field_valgrind_id + 1;;
+let stk_field_prev_sp = stk_field_prev_fp + 1;;
+let stk_field_limit = stk_field_prev_sp + 1;;
+let stk_field_data = stk_field_limit + 1;;
 
 
 (* The "end of the proc" where proc-slots get allocated. *)
@@ -111,7 +114,7 @@ type abi =
     abi_str_of_hardreg: (int -> string);
 
     abi_prealloc_quad: (Il.quad' -> Il.quad');
-    abi_emit_fn_prologue: (Il.emitter -> int64 -> int64 -> Common.fixup -> int64 -> unit);
+    abi_emit_fn_prologue: (Il.emitter -> int64 -> int64 -> Common.fixup -> int64 -> Common.fixup -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_main_prologue: (Il.emitter -> Ast.block -> int64 -> Common.fixup -> int64 -> unit);
 
