@@ -500,17 +500,19 @@ circ_buf_shift(rust_rt_t *rt, circ_buf_t *c, void *dst)
 static size_t const min_stk_bytes = 0x300;
 
 static stk_seg_t*
-new_stk(rust_rt_t *rt)
+new_stk(rust_rt_t *rt, size_t minsz)
 {
-    size_t sz = sizeof(stk_seg_t) + min_stk_bytes;
+    if (minsz < min_stk_bytes)
+        minsz = min_stk_bytes;
+    size_t sz = sizeof(stk_seg_t) + minsz;
     stk_seg_t *stk = xalloc(rt, sz);
     logptr(rt, "new stk", (uintptr_t)stk);
     memset(stk, 0, sizeof(stk_seg_t));
-    stk->limit = (uintptr_t) &stk->data[min_stk_bytes];
+    stk->limit = (uintptr_t) &stk->data[minsz];
     logptr(rt, "stk limit", stk->limit);
     stk->valgrind_id =
         VALGRIND_STACK_REGISTER(&stk->data[0],
-                                &stk->data[min_stk_bytes]);
+                                &stk->data[minsz]);
     return stk;
 }
 
@@ -592,18 +594,25 @@ upcall_grow_proc(rust_proc_t *proc, size_t n_call_bytes, size_t n_frame_bytes)
      */
     rust_rt_t *rt = proc->rt;
     stk_seg_t *nstk = proc->stk->next;
+    /* FIXME: Handle case of allocating when there's a stack chunk
+     * there already but it's too small. */
     if (!nstk) {
-        nstk = proc->stk->next = new_stk(rt);
+        nstk = proc->stk->next = new_stk(rt, n_frame_bytes);
         nstk->prev = proc->stk;
     }
     I(rt, nstk);
-    /* FIXME: redo the arithmetic here. */
-    uintptr_t transplant_amt = 100;
-    uintptr_t transplant_target = nstk->limit - transplant_amt;
-
-    memcpy((void*)transplant_target, (void*)proc->sp, transplant_amt);
+    /*
+    uintptr_t i;
+    for (i = proc->sp + n_call_bytes; i >= proc->sp; i -= sizeof(uintptr_t)) {
+        uintptr_t val = *((uintptr_t*)i);
+        printf("stk[0x%" PRIxPTR "] = 0x%" PRIxPTR "\n", i, val);
+    }
+    printf("transplant: n_call_bytes %d, n_frame_bytes %d\n", n_call_bytes, n_frame_bytes);
+    */
+    uintptr_t target = nstk->limit - n_call_bytes;
+    memcpy((void*)target, (void*)proc->sp, n_call_bytes);
     proc->stk = nstk;
-    proc->sp = transplant_target;
+    proc->sp = target;
 }
 
 static rust_proc_t*
@@ -618,7 +627,7 @@ new_proc(rust_rt_t *rt, rust_prog_t *prog)
     logptr(rt, "main", (uintptr_t)prog->main_code);
     logptr(rt, "fini", (uintptr_t)prog->fini_code);
     proc->prog = prog;
-    proc->stk = new_stk(rt);
+    proc->stk = new_stk(rt, 0);
 
     /*
      * Set sp to last uintptr_t-sized cell of segment
@@ -1324,13 +1333,14 @@ rust_main_loop(rust_prog_t *prog,
         xlog(rt, LOG_PROC,
              "returned from proc 0x%" PRIxPTR " in state '%s'",
              (uintptr_t)proc, state_names[proc->state]);
-
-        xlog(rt, LOG_PROC,
+        /*
+        xlog(rt, LOG_MEM,
              "sp:0x%" PRIxPTR ", "
              "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
              "prev_sp:0x%" PRIxPTR ", " "prev_fp:0x%" PRIxPTR,
              proc->sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
              proc->stk->prev_sp, proc->stk->prev_fp);
+        */
         I(rt, proc->sp >= (uintptr_t) &proc->stk->data[0]);
         I(rt, proc->sp < proc->stk->limit);
 

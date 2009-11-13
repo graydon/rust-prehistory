@@ -373,7 +373,8 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
     mov (vr_n Abi.proc_field_state) (immi code);
 ;;
 
-let emit_upcall
+let emit_upcall_full
+    (scratch:Il.reg)
     (e:Il.emitter)
     (u:Abi.upcall)
     (args:Il.operand array)
@@ -382,108 +383,38 @@ let emit_upcall
   let upcall_code = Abi.upcall_to_code u in
   let state_code = Abi.proc_state_to_code Abi.STATE_calling_c in
 
-  let (vr,vc) = vreg e in
-  let vr_n = word_n vr in
-  let vr_n_low_byte = word_n_low_byte vr in
-  let (_, dst_c) = vreg e in
+  let r_n = word_n scratch in
+  let r_n_low_byte = word_n_low_byte scratch in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  (* 
-   * This is an x86-ism, but a significant savings: inclusive-OR rather
-   * than MOV, and we get sign-extension on the immediate for free.
-   * Strangely, the MOV-immediates don't have a r32 <- imm8 mode. 
-   *)
+
   let pcrel f = Il.CodeAddr (Il.Pcrel (f, None)) in
 
     assert ((Array.length args) <= Abi.max_upcall_args);
 
-    mov vc (c proc_ptr);
-    mov (vr_n_low_byte Abi.proc_field_state) (immi_byte state_code);
-    mov (vr_n_low_byte Abi.proc_field_upcall_code) (immi_byte upcall_code);
+    mov (r scratch) (c proc_ptr);
+    mov (r_n_low_byte Abi.proc_field_state) (immi_byte state_code);
+    mov (r_n_low_byte Abi.proc_field_upcall_code) (immi_byte upcall_code);
 
     Array.iteri
       begin
         fun i arg ->
-          mov (vr_n (Abi.proc_field_upcall_args + i)) arg
+          mov (r_n (Abi.proc_field_upcall_args + i)) arg
       end
       args;
-    emit (Il.call dst_c (pcrel proc_to_c_fixup))
+    emit (Il.call (r scratch) (pcrel proc_to_c_fixup))
 ;;
 
-let emit_frame_setup
+
+let emit_upcall
     (e:Il.emitter)
-    (argsz:int64)
-    (framesz:int64)
-    (spill_fixup:fixup)
-    (callsz:int64)
+    (u:Abi.upcall)
+    (args:Il.operand array)
     (proc_to_c_fixup:fixup)
     : unit =
-  (*
-   *  - save esp to ebp
-   *  - subtract sz from esp
-   *  - load bot = proc->stk->data (bottom of stack chunk)
-   *  - add upcall gap to bot
-   *  - compare bot to esp
-   *  - fwd jump if bot <= esp
-   *  - emit upcall grow_proc
-   *  - fwd jump target
-   *)
-  let ecx_n = word_n (h ecx) in
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-  let add = Int64.add in
 
-  let n_call_bytes = Asm.IMM (add argsz frame_base_sz) in
-  let subtrahend = (Asm.ADD ((Asm.IMM (add framesz callsz)),
-                             Asm.M_SZ spill_fixup))
-  in
-    (* We need to notice when we're this close to the end of our
-     * chunk, so that we avoid overflowing it when we upcall. 
-     *)
-  let upcall_gap = Asm.IMM (add frame_base_sz proc_to_c_glue_sz) in
-  let n_frame_bytes = (Asm.ADD (subtrahend, upcall_gap))
-  in
-    (* We must have room to save regs on entry. *)
-    save_callee_saves e;
-
-    (* Note: we're in the region of 'no callee-saves saved yet', so can
-     * only work with caller-saves: eax, ecx and edx. That's enough.
-     *)
-    mov (rc eax) (ro esp);                        (* eax = esp               *)
-    emit (Il.binary Il.SUB (rc eax)
-            (ro eax) (imm subtrahend));
-    mov (rc ecx) (c proc_ptr);                    (* ecx = proc              *)
-    mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk         *)
-    emit (Il.binary Il.ADD (rc ecx) (ro ecx)      (* ecx = &proc->stk->data[0]   *)
-            (imm (word_off_n Abi.stk_field_data)));
-    emit (Il.binary Il.ADD (rc ecx) (ro ecx)      (* ecx += upcall_gap       *)
-            (imm (Asm.ADD (Asm.IMM 64L, upcall_gap))));
-
-    (* Compare and possibly upcall to 'grow'. *)
-    (* The case we *want* to jump for is the 'not underflowing' case,
-     * which is when ecx (the bottom) is less than or equal to
-     * eax (the proposed new sp) 
-     *)
-    emit (Il.cmp (ro ecx) (ro eax));
-    let jmp_pc = e.Il.emit_pc in
-
-      emit (Il.jmp Il.JBE Il.CodeNone);
-      mov (rc ebx) (ro esp);                        (* ebx = esp                *)
-      emit_upcall
-        e Abi.UPCALL_grow_proc
-        [| (imm n_call_bytes);
-           (imm n_frame_bytes) |]
-        proc_to_c_fixup;
-      mov (rc ecx) (c proc_ptr);                    (* ecx = proc               *)
-      mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk          *)
-      mov (ecx_n Abi.stk_field_prev_sp) (ro ebx);   (* proc->stk->prev_fp = saved esp *)
-      mov (ecx_n Abi.stk_field_prev_fp) (ro ebp);   (* proc->stk->prev_fp = ebp *)
-      Il.patch_jump e jmp_pc e.Il.emit_pc;
-
-      (* Now set up a frame, wherever we landed. *)
-      mov (rc ebp) (ro esp);
-      emit (Il.binary Il.SUB (rc esp) (ro esp) (imm subtrahend))
-
+  let (vr,_) = vreg e in
+    emit_upcall_full vr e u args proc_to_c_fixup
 ;;
 
 
@@ -513,31 +444,77 @@ let fn_prologue
   let mov dst src = emit (Il.umov dst src) in
   let add = Int64.add in
 
-  let n_call_bytes = Asm.IMM (add argsz frame_base_sz) in
-  let subtrahend = (Asm.ADD ((Asm.IMM (add framesz callsz)),
-                             Asm.M_SZ spill_fixup))
+  (*
+   *  After we save callee-saves, We have a stack like this:
+   *
+   *  | ...           |
+   *  | caller frame  |
+   *  | + spill       |
+   *  +---------------+ <-- top of call region
+   *  | caller arg K  |
+   *  | ...           |
+   *  | caller arg 0  | 
+   *  | retpc         | <-- sp we receive, top of frame-base
+   *  | callee save 1 |
+   *  | ...           |
+   *  | callee save N |
+   *  +---------------+ <-- base of call region, soon-to-be ebp
+   *  | callee frame  |     and sp value by the time we call 'grow'
+   *  | + spill       |
+   *  | callee arg J  |
+   *  | ...           |
+   *  | callee arg 0  |
+   *  +---------------+ <-- callee frame sz
+   *  | next retpc    |
+   *  | next save 1   |
+   *  | ...           |
+   *  | next save N   | <-- bottom of region we must reserve
+   *  | ...           |
+   * 
+   * A "call region" consists of a "frame base" and a set of caller args.
+   * It's the region we have to *transplant* when we run out of stack.
+   * 
+   * A "frame base" is the retpc and set of callee-saves.
+   * 
+   * We need to reserve room for our frame *and* the next frame-base,
+   * because we're going to be blindly entering the next frame-base
+   * (pushing eip and callee-saves) before we perform the next check.
+   *)
+
+  let callee_frame_sz = (Asm.ADD ((Asm.IMM (add framesz callsz)),
+                                  Asm.M_SZ spill_fixup))
   in
-    (* We need to notice when we're this close to the end of our
-     * chunk, so that we avoid overflowing it when we upcall. 
-     *)
-  let upcall_gap = Asm.IMM (add frame_base_sz proc_to_c_glue_sz) in
-  let n_frame_bytes = (Asm.ADD (subtrahend, upcall_gap))
+
+  (* Amount of memory we need to *have* in this chunk, beneath sp
+   * (after saving), to not-grow. Add in one more term of frame_base_sz
+   * worth to permit a 'grow' upcall to occur!
+   *)
+  let reserve_current_sz =
+    (Asm.ADD (callee_frame_sz, (Asm.IMM (add frame_base_sz frame_base_sz))))
   in
+
+  (* Amount of memory to copy, starting from sp, if we grow. Add in
+   * one more term of frame_base_sz to handle the 'grow' upcall in
+   * progress that'll exist when we memcpy.
+   *)
+  let call_region_sz = Asm.IMM (add argsz (add frame_base_sz frame_base_sz)) in
+
+  (* Amount we'll need in a new chunk, minimum, if we grow. *)
+  let reserve_new_sz =
+    (Asm.ADD (call_region_sz,
+              Asm.ADD (callee_frame_sz, call_region_sz)))
+  in
+
     (* We must have room to save regs on entry. *)
     save_callee_saves e;
 
-    (* Note: we're in the region of 'no callee-saves saved yet', so can
-     * only work with caller-saves: eax, ecx and edx. That's enough.
-     *)
     mov (rc eax) (ro esp);                        (* eax = esp               *)
     emit (Il.binary Il.SUB (rc eax)
-            (ro eax) (imm subtrahend));
+            (ro eax) (imm reserve_current_sz));
     mov (rc ecx) (c proc_ptr);                    (* ecx = proc              *)
     mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk         *)
     emit (Il.binary Il.ADD (rc ecx) (ro ecx)      (* ecx = &proc->stk->data[0]   *)
             (imm (word_off_n Abi.stk_field_data)));
-    emit (Il.binary Il.ADD (rc ecx) (ro ecx)      (* ecx += upcall_gap       *)
-            (imm (Asm.ADD (Asm.IMM 64L, upcall_gap))));
 
     (* Compare and possibly upcall to 'grow'. *)
     (* The case we *want* to jump for is the 'not underflowing' case,
@@ -549,10 +526,11 @@ let fn_prologue
 
       emit (Il.jmp Il.JBE Il.CodeNone);
       mov (rc ebx) (ro esp);                        (* ebx = esp                *)
-      emit_upcall
+      emit_upcall_full
+        (h eax)
         e Abi.UPCALL_grow_proc
-        [| (imm n_call_bytes);
-           (imm n_frame_bytes) |]
+        [| (imm call_region_sz);
+           (imm reserve_new_sz) |]
         proc_to_c_fixup;
       mov (rc ecx) (c proc_ptr);                    (* ecx = proc               *)
       mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk          *)
@@ -562,7 +540,7 @@ let fn_prologue
 
       (* Now set up a frame, wherever we landed. *)
       mov (rc ebp) (ro esp);
-      emit (Il.binary Il.SUB (rc esp) (ro esp) (imm subtrahend))
+      emit (Il.binary Il.SUB (rc esp) (ro esp) (imm callee_frame_sz))
 ;;
 
 

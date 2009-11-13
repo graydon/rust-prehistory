@@ -1667,7 +1667,8 @@ let trans_visitor
   in
 
   let trans_frame_entry (fnid:node_id) : unit =
-    let argsz = 0L in
+    let header = Hashtbl.find cx.ctxt_header_layouts fnid in
+    let argsz = Int64.add cx.ctxt_abi.Abi.abi_implicit_args_sz header.layout_size in
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
@@ -1692,10 +1693,10 @@ let trans_visitor
   let trans_tag
       (n:Ast.ident)
       (tagid:node_id)
-      (tag:(Ast.ty_tup * Ast.ty_tag))
+      (tag:(Ast.header_tup * Ast.ty_tag))
       : unit =
     trans_frame_entry tagid;
-    let (ttup, ttag) = tag in
+    let (_, ttag) = tag in
     let tag_keys = Array.make (Hashtbl.length ttag) "" in
     let i = ref 0 in
       begin
@@ -1718,7 +1719,7 @@ let trans_visitor
         trans_frame_exit tagid;
   in
 
-  let trans_native_fn (fnid:node_id) (tsig:Ast.ty_sig) : unit =
+  let trans_native_fn (fnid:node_id) (nfn:Ast.native_fn) : unit =
 
     trans_frame_entry fnid;
     (* 
@@ -1737,7 +1738,7 @@ let trans_visitor
               (trans_static_string (name()));
               (Il.Cell (word_at (fp_imm ret_addr_disp)));
               arg0_alias;
-              imm (Int64.of_int (Array.length tsig.Ast.sig_input_slots))
+              imm (Int64.of_int (Array.length nfn.Ast.native_fn_input_slots))
             |];
           trans_frame_exit fnid;
       end
@@ -1813,7 +1814,7 @@ let trans_visitor
       : unit =
     begin
       match item.node with
-          Ast.NATIVE_fn tsig -> trans_native_fn item.id tsig
+          Ast.NATIVE_fn nfn -> trans_native_fn item.id nfn
         | _ -> ()
     end
   in

@@ -412,6 +412,33 @@ and mod_type_item_of_mod_item
           Some { id = item.id;
                  node = ty }
 
+
+and ty_mod_of_native_mod (m:Ast.native_mod_items) : Ast.mod_type_items =
+  let ty_items = Hashtbl.create (Hashtbl.length m) in
+  let add n i = Hashtbl.add ty_items n (mod_type_item_of_native_mod_item i)
+  in
+    Hashtbl.iter add m;
+    ty_items
+
+and mod_type_item_of_native_mod_item
+    (item:Ast.native_mod_item)
+    : Ast.mod_type_item =
+  let decl inner = { Ast.decl_params = [| |];
+                     Ast.decl_item = inner }
+  in
+  let mti =
+    match item.node with
+        Ast.NATIVE_fn fn ->
+          Ast.MOD_TYPE_ITEM_fn (decl (ty_fn_of_native_fn fn))
+      | Ast.NATIVE_type mty ->
+          Ast.MOD_TYPE_ITEM_public_type (decl (Ast.TY_mach mty))
+      | Ast.NATIVE_mod m ->
+          Ast.MOD_TYPE_ITEM_mod (decl (ty_mod_of_native_mod m))
+  in
+    { id = item.id;
+      node = mti }
+
+
 and ty_prog_of_prog (prog:Ast.prog) : Ast.ty_sig =
   let (inputs, constrs, output)  =
     match prog.Ast.prog_init with
@@ -428,8 +455,11 @@ and ty_prog_of_prog (prog:Ast.prog) : Ast.ty_sig =
       Ast.sig_input_constrs = constrs;
       Ast.sig_output_slot = extended_output }
 
-and arg_slots (slots:((Ast.slot identified) * Ast.ident) array) : Ast.slot array =
+and arg_slots (slots:Ast.header_slots) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
+
+and tup_slots (slots:Ast.header_tup) : Ast.slot array =
+  Array.map (fun sid -> sid.node) slots
 
 and ty_fn_of_fn (fn:Ast.fn) : Ast.ty_fn =
   ({ Ast.sig_input_slots = arg_slots fn.Ast.fn_input_slots;
@@ -437,10 +467,23 @@ and ty_fn_of_fn (fn:Ast.fn) : Ast.ty_fn =
      Ast.sig_output_slot = fn.Ast.fn_output_slot.node },
    fn.Ast.fn_aux )
 
+and ty_fn_of_native_fn (fn:Ast.native_fn) : Ast.ty_fn =
+  ({ Ast.sig_input_slots = arg_slots fn.Ast.native_fn_input_slots;
+     Ast.sig_input_constrs = fn.Ast.native_fn_input_constrs;
+     Ast.sig_output_slot = fn.Ast.native_fn_output_slot.node },
+   { Ast.fn_pure = false;
+     Ast.fn_proto = None })
+
 and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
   (arg_slots pred.Ast.pred_input_slots,
    pred.Ast.pred_input_constrs)
 
+
+and ty_of_native_mod_item (item:Ast.native_mod_item) : Ast.ty =
+    match item.node with
+      | Ast.NATIVE_type _ -> Ast.TY_type
+      | Ast.NATIVE_mod items -> Ast.TY_mod (ty_mod_of_native_mod items)
+      | Ast.NATIVE_fn nfn -> Ast.TY_fn (ty_fn_of_native_fn nfn)
 
 and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
   let check_concrete params ty =
@@ -472,11 +515,11 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
             (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
 
       | Ast.MOD_ITEM_tag td ->
-          let (ttup, ttag) = td.Ast.decl_item in
+          let (htup, ttag) = td.Ast.decl_item in
           let taux = { Ast.fn_pure = true;
                        Ast.fn_proto = None }
           in
-          let tsig = { Ast.sig_input_slots = ttup;
+          let tsig = { Ast.sig_input_slots = tup_slots htup;
                        Ast.sig_input_constrs = [| |];
                        Ast.sig_output_slot = interior_slot (Ast.TY_tag ttag) }
           in

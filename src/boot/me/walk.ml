@@ -178,8 +178,8 @@ and walk_mod_item
           (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
       | Ast.MOD_ITEM_tag td ->
           (td.Ast.decl_params, (fun _ ->
-                                  let (ttup, ttag) = td.Ast.decl_item in
-                                    walk_ty_tup v ttup;
+                                  let (htup, ttag) = td.Ast.decl_item in
+                                    walk_header_tup v htup;
                                     walk_ty_tag v ttag))
       | Ast.MOD_ITEM_pred pd ->
           (pd.Ast.decl_params, (fun _ -> walk_pred v pd.Ast.decl_item))
@@ -209,11 +209,11 @@ and walk_native_mod_item
     (name:Ast.ident)
     (item:Ast.native_mod_item)
     : unit =
-  let children =
+  let children _ =
     match item.node with
-        Ast.NATIVE_fn tsig -> (fun _ -> ())
-      | Ast.NATIVE_type tmach -> (fun _ -> walk_ty v (Ast.TY_mach tmach))
-      | Ast.NATIVE_mod items -> (fun _ -> walk_native_mod_items v items)
+        Ast.NATIVE_fn nfn -> walk_native_fn v nfn
+      | Ast.NATIVE_type tmach -> walk_ty v (Ast.TY_mach tmach)
+      | Ast.NATIVE_mod items -> walk_native_mod_items v items
   in
     walk_bracketed
       (v.visit_native_mod_item_pre name)
@@ -344,12 +344,23 @@ and walk_constr
     v.visit_constr_post
     c
 
+and walk_header_slots
+    (v:visitor)
+    (hslots:Ast.header_slots)
+    : unit =
+  Array.iter (fun (s,_) -> walk_slot_identified v s) hslots
+
+and walk_header_tup
+    (v:visitor)
+    (htup:Ast.header_tup)
+    : unit =
+  Array.iter (walk_slot_identified v) htup
 
 and walk_pred
     (v:visitor)
     (p:Ast.pred)
     : unit =
-  Array.iter (fun (s,_) -> walk_slot_identified v s) p.Ast.pred_input_slots;
+  walk_header_slots v p.Ast.pred_input_slots;
   walk_constrs v p.Ast.pred_input_constrs;
   walk_block v p.Ast.pred_body
 
@@ -358,10 +369,18 @@ and walk_fn
     (v:visitor)
     (f:Ast.fn)
     : unit =
-  Array.iter (fun (s,_) -> walk_slot_identified v s) f.Ast.fn_input_slots;
+  walk_header_slots v f.Ast.fn_input_slots;
   walk_constrs v f.Ast.fn_input_constrs;
   walk_slot_identified v f.Ast.fn_output_slot;
   walk_block v f.Ast.fn_body
+
+and walk_native_fn
+    (v:visitor)
+    (f:Ast.native_fn)
+    : unit =
+  walk_header_slots v f.Ast.native_fn_input_slots;
+  walk_constrs v f.Ast.native_fn_input_constrs;
+  walk_slot_identified v f.Ast.native_fn_output_slot;
 
 
 and walk_init
@@ -373,7 +392,7 @@ and walk_init
     begin
       fun _ ->
         walk_slot_identified v i.node.Ast.init_proc_input;
-        Array.iter (fun (s,_) -> walk_slot_identified v s) i.node.Ast.init_input_slots;
+        walk_header_slots v i.node.Ast.init_input_slots;
         walk_constrs v i.node.Ast.init_input_constrs;
         walk_slot_identified v i.node.Ast.init_output_slot;
         walk_block v i.node.Ast.init_body

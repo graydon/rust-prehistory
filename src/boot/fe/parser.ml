@@ -1747,15 +1747,14 @@ and parse_native_mod_item ps =
             let ident = ctxt "native fn: ident" parse_ident ps in
             let (inputs, constrs, output) = ctxt "native fn: in_and_out" parse_in_and_out ps in
               expect ps SEMI;
-              let inslots = Array.map (fun (sloti,_) -> sloti.node) inputs in
-              let tsig =
+              let nfn =
                 {
-                  Ast.sig_input_slots = inslots;
-                  Ast.sig_input_constrs = constrs;
-                  Ast.sig_output_slot = output.node;
+                  Ast.native_fn_input_slots = inputs;
+                  Ast.native_fn_input_constrs = constrs;
+                  Ast.native_fn_output_slot = output;
                 }
               in
-                (ident, Ast.NATIVE_fn tsig)
+                (ident, Ast.NATIVE_fn nfn)
           end
 
       | TYPE ->
@@ -1863,8 +1862,9 @@ and expand_tags ps item : (Ast.ident * Ast.mod_item) array =
       Hashtbl.iter
         begin
           fun ident tup ->
+            let header = Array.map (fun slot -> (clone_span ps item slot)) tup in
             let decl = { Ast.decl_params = params;
-                         Ast.decl_item = (tup, ttag) }
+                         Ast.decl_item = (header, ttag) }
             in
             let tag_item' = Ast.MOD_ITEM_tag decl in
             let tag_item = clone_span ps item tag_item' in

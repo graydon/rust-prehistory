@@ -311,20 +311,8 @@ let type_resolving_visitor
 
   let visit_native_mod_item_pre id item =
     begin
-      match item.node with
-          (* FIXME: this is incomplete. *)
-          Ast.NATIVE_fn tsig ->
-            begin
-              let taux = { Ast.fn_pure = false;
-                           Ast.fn_proto = None }
-              in
-                try
-                  let ty = resolve_ty (Ast.TY_fn (tsig, taux)) in
-                    htab_put cx.ctxt_all_item_types item.id ty
-              with
-                  Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
-            end
-        | _ -> ()
+      let ty = resolve_ty (ty_of_native_mod_item item) in
+        htab_put cx.ctxt_all_item_types item.id ty
     end;
     inner.Walk.visit_native_mod_item_pre id item
   in

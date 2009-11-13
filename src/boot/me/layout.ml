@@ -270,8 +270,13 @@ let layout_visitor
             layout_prog i.id pd.Ast.decl_item
         | Ast.MOD_ITEM_pred _ ->
             enter_frame i.id
-        | Ast.MOD_ITEM_tag _ ->
-            enter_frame i.id
+        | Ast.MOD_ITEM_tag td ->
+            let (header_slots, _) = td.Ast.decl_item in
+              enter_frame i.id;
+              layout_header i.id
+                (Array.map (fun sid -> sid.id)
+                   header_slots)
+
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -289,8 +294,11 @@ let layout_visitor
   let visit_native_mod_item_pre n i =
     begin
       match i.node with
-          Ast.NATIVE_fn tsig ->
+          Ast.NATIVE_fn nfn ->
             enter_frame i.id;
+            layout_header i.id
+              (Array.map (fun (sid,_) -> sid.id)
+                 nfn.Ast.native_fn_input_slots)
         | _ -> ()
     end;
     inner.Walk.visit_native_mod_item_pre n i

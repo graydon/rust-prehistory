@@ -359,6 +359,8 @@ and unop =
 
 and header_slots = ((slot identified) * ident) array
 
+and header_tup = (slot identified) array
+
 and fn =
     {
       fn_input_slots: header_slots;
@@ -366,6 +368,13 @@ and fn =
       fn_output_slot: slot identified;
       fn_aux: ty_fn_aux;
       fn_body: block;
+    }
+
+and native_fn =
+    {
+      native_fn_input_slots: header_slots;
+      native_fn_input_constrs: constrs;
+      native_fn_output_slot: slot identified;
     }
 
 and pred =
@@ -431,7 +440,7 @@ and 'a decl =
 and mod_item' =
     MOD_ITEM_opaque_type of ty decl
   | MOD_ITEM_public_type of ty decl
-  | MOD_ITEM_tag of (ty_tup * ty_tag) decl
+  | MOD_ITEM_tag of (header_tup * ty_tag) decl
   | MOD_ITEM_pred of pred decl
   | MOD_ITEM_mod of mod_items decl
   | MOD_ITEM_fn of fn decl
@@ -453,7 +462,7 @@ and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
 
 and native_mod_item' =
-    NATIVE_fn of ty_sig
+    NATIVE_fn of native_fn
   | NATIVE_type of ty_mach
   | NATIVE_mod of native_mod_items
 
