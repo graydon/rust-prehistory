@@ -594,13 +594,21 @@ upcall_grow_proc(rust_proc_t *proc, size_t n_call_bytes, size_t n_frame_bytes)
      */
     rust_rt_t *rt = proc->rt;
     stk_seg_t *nstk = proc->stk->next;
-    /* FIXME: Handle case of allocating when there's a stack chunk
-     * there already but it's too small. */
-    if (!nstk) {
-        nstk = proc->stk->next = new_stk(rt, n_frame_bytes);
-        nstk->prev = proc->stk;
+    if (nstk) {
+        /* Figure out if the existing chunk is big enough. */
+        size_t sz = nstk->limit - ((uintptr_t) &proc->stk->data[0]);
+        if (sz < n_frame_bytes) {
+            nstk = new_stk(rt, n_frame_bytes);
+            nstk->next = proc->stk->next;
+            nstk->next->prev = nstk;
+        }
+    } else {
+        /* There is no existing next stack segment, grow. */
+        nstk = new_stk(rt, n_frame_bytes);
     }
     I(rt, nstk);
+    proc->stk->next = nstk;
+    nstk->prev = proc->stk;
     /*
     uintptr_t i;
     for (i = proc->sp + n_call_bytes; i >= proc->sp; i -= sizeof(uintptr_t)) {
