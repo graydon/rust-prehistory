@@ -79,7 +79,7 @@ let flo = (dec '.' dec (exp?)) | (dec exp)
 
 let ws = [ ' ' '\t' '\r' ]
 
-let id = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
+let id = ['a'-'z' 'A'-'Z' '_']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 rule token = parse
   ws+                          { token lexbuf }

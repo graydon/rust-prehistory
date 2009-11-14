@@ -1,6 +1,5 @@
 
 progress:
- - make proc stacks into chunk lists, check overflow / extend on frame entry
  - mach-o format emitter
  - tag/iso/idx types
  - more string work
@@ -48,6 +47,7 @@ code cleanup:
    batch the "I do not"s?
 
 done:
+ - make proc stacks into chunk lists, check overflow / extend on frame entry
  - rename 'Asm.item' to something less confusable with module-item
  - reorganize glue code
  - remove limited type

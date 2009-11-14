@@ -91,6 +91,16 @@ let entry_keys header constrs resolver =
     (input_keys, init_keys)
 ;;
 
+let prog_slot_keys prog =
+  Array.of_list
+    (reduce_hash_to_list
+       begin
+         fun ident sloti ->
+           Constr_init sloti.id
+       end
+       prog.Ast.decl_item.Ast.prog_slots)
+;;
+
 
 let fn_decl_keys fd resolver =
   let fn = fd.Ast.decl_item in
@@ -151,8 +161,10 @@ let constr_id_assigning_visitor
             note_keys init_keys
       | Ast.MOD_ITEM_prog pd ->
           let (input_keys, init_keys) = prog_decl_init_keys pd resolve_constr_to_key in
+          let slot_init_keys = prog_slot_keys pd in
             note_keys input_keys;
-            note_keys init_keys
+            note_keys init_keys;
+            note_keys slot_init_keys;
       | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -319,13 +331,20 @@ let condition_assigning_visitor
             raise_entry_state input_keys init_keys pd.Ast.decl_item.Ast.pred_body
 
       | Ast.MOD_ITEM_prog pd ->
-          begin
-            match pd.Ast.decl_item.Ast.prog_init with
-                None -> ()
-              | Some i ->
-                  let (input_keys, init_keys) = prog_decl_init_keys pd resolve_constr_to_key in
-                    raise_entry_state input_keys init_keys i.node.Ast.init_body
-          end
+          (* FIXME: need to enforce prog slot init keys on exit edges from init() *)
+          let slot_init_keys = prog_slot_keys pd in
+            begin
+              match pd.Ast.decl_item.Ast.prog_init with
+                  None -> ()
+                | Some i ->
+                    let (input_keys, init_keys) = prog_decl_init_keys pd resolve_constr_to_key in
+                      raise_entry_state input_keys init_keys i.node.Ast.init_body;
+            end;
+            begin
+              match pd.Ast.decl_item.Ast.prog_main with
+                  None -> ()
+                | Some i -> raise_entry_state [||] slot_init_keys i
+            end
       | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i

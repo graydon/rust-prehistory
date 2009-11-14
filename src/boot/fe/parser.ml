@@ -688,6 +688,10 @@ and parse_atomic_ty ps =
         bump ps;
         Ast.TY_any
 
+    | PROC ->
+        bump ps;
+        Ast.TY_proc
+
     | CHAN ->
         bump ps;
         Ast.TY_chan (bracketed LBRACKET RBRACKET parse_ty ps)
@@ -1309,11 +1313,18 @@ and parse_init
     (lval:Ast.lval)
     (ps:pstate)
     : Ast.stmt array =
+  let apos = lexpos ps in
   let stmts =
     match peek ps with
         EQ ->
           bump ps;
           parse_expr_init lval ps
+      | LARROW ->
+          bump ps;
+          let (stmts, rhs) = ctxt "init: port" parse_lval ps in
+          let bpos = lexpos ps in
+          let stmt = Ast.STMT_recv (lval, rhs) in
+            Array.append stmts [| (span ps apos bpos stmt) |]
       | _ -> arr []
   in
   let _ = expect ps SEMI in
