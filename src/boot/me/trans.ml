@@ -433,8 +433,7 @@ let trans_visitor
     let return_item (item:Ast.mod_item') (referent:node_id)
         : (Il.cell * Ast.slot) =
       let ty = Hashtbl.find cx.ctxt_all_item_types referent in
-      let slot = { Ast.slot_mode = Ast.MODE_interior;
-                   Ast.slot_ty = Some ty }
+      let slot = interior_slot ty
       in
         match item with
             Ast.MOD_ITEM_fn _ ->
@@ -451,9 +450,7 @@ let trans_visitor
     let return_native_item (item:Ast.native_mod_item') (referent:node_id)
         : (Il.cell * Ast.slot) =
       let ty = Hashtbl.find cx.ctxt_all_item_types referent in
-      let slot = { Ast.slot_mode = Ast.MODE_interior;
-                   Ast.slot_ty = Some ty }
-      in
+      let slot = interior_slot ty in
         match item with
             Ast.NATIVE_fn _ ->
               return_fixup (get_fn_fixup cx referent) slot
@@ -954,7 +951,7 @@ let trans_visitor
       | Ast.TY_vec _ -> Some (exterior_refcount_cell cell)
       | Ast.TY_str -> Some (exterior_refcount_cell cell)
       | _ ->
-            if slot.Ast.slot_mode = Ast.MODE_exterior
+            if slot.Ast.slot_mode = Ast.MODE_exterior Ast.IMMUTABLE
             then Some (exterior_refcount_cell cell)
             else None
 
@@ -1115,8 +1112,8 @@ let trans_visitor
 
   and deref_slot (cell:Il.cell) (slot:Ast.slot) (intent:intent) : Il.cell =
     match slot.Ast.slot_mode with
-        Ast.MODE_interior -> cell
-      | Ast.MODE_exterior -> Il.Addr (deref_exterior intent cell slot)
+        Ast.MODE_interior _ -> cell
+      | Ast.MODE_exterior _ -> Il.Addr (deref_exterior intent cell slot)
       | Ast.MODE_read_alias
       | Ast.MODE_write_alias ->
           match intent with

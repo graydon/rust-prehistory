@@ -34,7 +34,8 @@ type ty_mach =
   | TY_s16
   | TY_s32
   | TY_s64
-  | TY_b64
+  | TY_f32
+  | TY_f64
 ;;
 
 let string_of_ty_mach (mach:ty_mach) : string =
@@ -47,7 +48,8 @@ let string_of_ty_mach (mach:ty_mach) : string =
   | TY_s16 -> "s16"
   | TY_s32 -> "s32"
   | TY_s64 -> "s64"
-  | TY_b64 -> "b64"
+  | TY_f32 -> "f32"
+  | TY_f64 -> "f64"
 ;;
 
 let bytes_of_ty_mach (mach:ty_mach) : int =
@@ -60,7 +62,8 @@ let bytes_of_ty_mach (mach:ty_mach) : int =
   | TY_s16 -> 2
   | TY_s32 -> 4
   | TY_s64 -> 8
-  | TY_b64 -> 8
+  | TY_f32 -> 4
+  | TY_f64 -> 8
 ;;
 
 let ty_mach_signed (mach:ty_mach) : bool =

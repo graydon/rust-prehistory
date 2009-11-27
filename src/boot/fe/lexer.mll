@@ -2,6 +2,7 @@
 
 {
   open Parser;;
+  open Common;;
   let bump_line p = { p with
               Lexing.pos_lnum = p.Lexing.pos_lnum + 1;
               Lexing.pos_bol = p.Lexing.pos_cnum }
@@ -36,12 +37,12 @@
                 ("prove", PROVE);
 
                 ("pure", PURE);
+                ("mutable", MUTABLE);
                 ("auto", AUTO);
 
                 ("pub", PUB);
 
                 ("let", LET);
-                ("dyn", DYN);
 
                 ("log", LOG);
                 ("spawn", SPAWN);
@@ -127,10 +128,16 @@ rule token = parse
 | '['                          { LBRACKET   }
 | ']'                          { RBRACKET   }
 
-| 'u' (dec as n)               { UNSIGNED (int_of_string n) }
-| 's' (dec as n)               { SIGNED (int_of_string n)   }
-| 'b' (dec as n)               { BFP (int_of_string n)      }
-| 'd' (dec as n)               { DFP (int_of_string n)      }
+| "u8"                         { MACH TY_u8 }
+| "u16"                        { MACH TY_u16 }
+| "u32"                        { MACH TY_u32 }
+| "u64"                        { MACH TY_u64 }
+| "s8"                         { MACH TY_s8 }
+| "s16"                        { MACH TY_s16 }
+| "s32"                        { MACH TY_s32 }
+| "s64"                        { MACH TY_s64 }
+| "f32"                        { MACH TY_f32 }
+| "f64"                        { MACH TY_f64 }
 
 | "fn"                         { FN None                }
 | "fn?"                        { FN (Some Ast.PROTO_ques)   }

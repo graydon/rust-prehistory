@@ -360,7 +360,7 @@ let expr_slots (cx:ctxt) (e:Ast.expr) : node_id array =
 (* Mappings between mod items and their respective types. *)
 
 let interior_slot ty : Ast.slot =
-  { Ast.slot_mode = Ast.MODE_interior;
+  { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
     Ast.slot_ty = Some ty }
 ;;
 
@@ -774,11 +774,12 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
       | Ast.TY_mach (TY_u32)
       | Ast.TY_mach (TY_s32)
+      | Ast.TY_mach (TY_f32)
       | Ast.TY_char -> sv Il.Bits32
 
       | Ast.TY_mach (TY_u64)
       | Ast.TY_mach (TY_s64)
-      | Ast.TY_mach (TY_b64) -> sv Il.Bits64
+      | Ast.TY_mach (TY_f64) -> sv Il.Bits64
 
       | Ast.TY_str -> sp (Il.StructTy [| word; word; word; ptr |])
       | Ast.TY_vec _ -> sp (Il.StructTy [| word; word; word; ptr |])
@@ -816,8 +817,8 @@ and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
 
   let rty = referent_type abi (slot_ty sl) in
   match sl.Ast.slot_mode with
-      Ast.MODE_exterior -> sp (Il.StructTy [| word; rty |])
-    | Ast.MODE_interior -> rty
+      Ast.MODE_exterior _ -> sp (Il.StructTy [| word; rty |])
+    | Ast.MODE_interior _ -> rty
     | Ast.MODE_read_alias -> sp rty
     | Ast.MODE_write_alias -> sp rty
 ;;
@@ -883,7 +884,7 @@ let layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
 (* FIXME: redirect this to slot_referent_type *)
 let layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
   match s.Ast.slot_mode with
-      Ast.MODE_interior
+      Ast.MODE_interior _
     | _ ->
         begin
           match s.Ast.slot_ty with

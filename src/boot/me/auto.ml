@@ -122,8 +122,7 @@ let auto_inference_visitor
                           match unify_atom None at with
                               None -> None
                             | Some t ->
-                                let accum = ltab_put accum id { Ast.slot_mode = Ast.MODE_interior;
-                                                                Ast.slot_ty = Some t }
+                                let accum = ltab_put accum id (interior_slot t)
                                 in
                                   step (i+1) accum
                       in

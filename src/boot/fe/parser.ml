@@ -79,13 +79,13 @@ type token =
   (* Type qualifiers *)
   | PURE
   | AUTO
+  | MUTABLE
 
   (* Module-item qualifiers *)
   | PUB
 
   (* Value / stmt declarators. *)
   | LET
-  | DYN
 
   (* Magic runtime services *)
   | LOG
@@ -93,14 +93,14 @@ type token =
 
   (* Literals *)
   | LIT_INT       of (Big_int.big_int * string)
-  | LIT_FLO       of (string)
-  | LIT_STR       of (string)
-  | LIT_CHAR      of (char)
-  | LIT_BOOL      of (bool)
+  | LIT_FLO       of string
+  | LIT_STR       of string
+  | LIT_CHAR      of char
+  | LIT_BOOL      of bool
 
   (* Name components *)
-  | IDENT         of (string)
-  | IDX           of (int)
+  | IDENT         of string
+  | IDX           of int
 
   (* Reserved type names *)
   | NIL
@@ -108,10 +108,7 @@ type token =
   | INT
   | CHAR
   | STR
-  | BFP           of int
-  | DFP           of int
-  | SIGNED        of int
-  | UNSIGNED      of int
+  | MACH          of ty_mach
 
   (* Algebraic type constructors *)
   | REC
@@ -231,13 +228,13 @@ let string_of_tok t =
     (* Type qualifiers *)
     | PURE       -> "pure"
     | AUTO       -> "auto"
+    | MUTABLE    -> "mutable"
 
     (* Declarator qualifiers *)
     | PUB        -> "pub"
 
     (* Value / stmt declarators. *)
     | LET        -> "let"
-    | DYN        -> "dyn"
 
     (* Magic runtime services *)
     | LOG        -> "log"
@@ -260,10 +257,7 @@ let string_of_tok t =
     | INT        -> "int"
     | CHAR       -> "char"
     | STR        -> "str"
-    | BFP i      -> ("b" ^ (string_of_int i))
-    | DFP i      -> ("d" ^ (string_of_int i))
-    | SIGNED i   -> ("s" ^ (string_of_int i))
-    | UNSIGNED i -> ("u" ^ (string_of_int i))
+    | MACH m     -> string_of_ty_mach m
 
     (* Algebraic type constructors *)
     | REC        -> "rec"
@@ -644,23 +638,6 @@ and parse_constraint ps =
 and parse_constrs ps =
   ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps
 
-and parse_ty_mach ps =
-  let m =
-    match peek ps with
-        UNSIGNED 8 -> TY_u8
-      | UNSIGNED 16 -> TY_u16
-      | UNSIGNED 32 -> TY_u32
-      | UNSIGNED 64 -> TY_u64
-      | SIGNED 8 -> TY_s8
-      | SIGNED 16 -> TY_s16
-      | SIGNED 32 -> TY_s32
-      | SIGNED 64 -> TY_s64
-      | BFP 64 -> TY_b64
-      | _ -> raise (unexpected ps)
-  in
-    bump ps;
-    m
-
 and parse_atomic_ty ps =
   match peek ps with
 
@@ -735,38 +712,52 @@ and parse_atomic_ty ps =
 
     | LPAREN ->
         let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps in
-          if Array.length slots = 1 && (slots.(0).Ast.slot_mode = Ast.MODE_interior)
+          if Array.length slots = 1 && (match slots.(0).Ast.slot_mode with
+                                            Ast.MODE_interior _ -> true
+                                          | _ -> false)
           then match slots.(0).Ast.slot_ty with
               None -> raise (err "slot without type" ps )
             | Some t -> t
           else Ast.TY_tup slots
 
-    | _ -> Ast.TY_mach (parse_ty_mach ps)
+    | MACH m -> Ast.TY_mach m
+
+    (* FIXME: parse mod types. *)
+
+    | _ -> raise (unexpected ps)
 
 
 and parse_slot param_slot ps =
+  let mut = if flag ps MUTABLE
+  then Ast.MUTABLE
+  else Ast.IMMUTABLE
+  in
   match (peek ps, param_slot) with
       (AT, _) ->
         bump ps;
         let ty = parse_ty ps in
-          { Ast.slot_mode = Ast.MODE_exterior;
+          { Ast.slot_mode = Ast.MODE_exterior mut;
             Ast.slot_ty = Some ty }
 
     | (CARET, true) ->
         bump ps;
+        if mut = Ast.MUTABLE
+        then raise (err "mutable qualifier on write-alias" ps);
         let ty = parse_ty ps in
           { Ast.slot_mode = Ast.MODE_write_alias;
             Ast.slot_ty = Some ty }
 
     | (TILDE, true) ->
         bump ps;
+        if mut = Ast.MUTABLE
+        then raise (err "mutable qualifier on read-alias" ps);
         let ty = parse_ty ps in
           { Ast.slot_mode = Ast.MODE_read_alias;
             Ast.slot_ty = Some ty }
 
     | _ ->
         let ty = parse_ty ps in
-          { Ast.slot_mode = Ast.MODE_interior;
+          { Ast.slot_mode = Ast.MODE_interior mut;
             Ast.slot_ty = Some ty }
 
 
@@ -813,7 +804,7 @@ and parse_expr_atom_list bra ket ps =
             (ctxt "expr-atom list" parse_expr_atom) ps)
 
 
-and slot_auto = { Ast.slot_mode = Ast.MODE_interior;
+and slot_auto = { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
                   Ast.slot_ty = None }
 
 and parse_auto_slot_and_init ps =
@@ -1461,7 +1452,7 @@ and parse_stmts ps =
                  let bpos = lexpos ps in
                  let (nonce, tmp, tempdecl) =
                    build_tmp ps
-                     { Ast.slot_mode = Ast.MODE_interior;
+                     { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
                        Ast.slot_ty = Some (Ast.TY_tup (Array.map (fun x -> x.node) slots)) }
                      apos bpos
                  in
@@ -1606,7 +1597,7 @@ and parse_prog_item prog_cell stmts_cell ps =
           let (inputs, constrs, output) = ctxt "prog_item: init in_and_out" parse_in_and_out ps in
           let body = ctxt "prog_item: init body" parse_block ps in
           let bpos = lexpos ps in
-          let proc_input_slot = { Ast.slot_mode = Ast.MODE_interior;
+          let proc_input_slot = { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
                                   Ast.slot_ty = Some Ast.TY_proc }
           in
           let init = span ps apos bpos
@@ -1772,7 +1763,10 @@ and parse_native_mod_item ps =
           begin
             bump ps;
             let ident = ctxt "native ty: ident" parse_ident ps in
-            let tymach = ctxt "native ty: representation" parse_ty_mach ps in
+            let tymach = match peek ps with
+                MACH m -> m
+              | _ -> raise (unexpected ps)
+            in
               expect ps SEMI;
                 (ident, Ast.NATIVE_type tymach)
           end

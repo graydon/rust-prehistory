@@ -40,6 +40,11 @@ type proto =
   | PROTO_plus  (* fn+ foo(...): yields N > 0 values then returns.                        *)
 ;;
 
+type mutability =
+    IMMUTABLE
+  | MUTABLE
+;;
+
 type name_base =
     BASE_ident of ident
   | BASE_temp of temp_id
@@ -89,15 +94,15 @@ and ty =
   | TY_prog of ty_sig
   | TY_proc
 
-  | TY_opaque of opaque_id
+  | TY_opaque of (opaque_id * mutability)
   | TY_named of name
   | TY_type
 
   | TY_constrained of (ty * constrs)
 
 and mode =
-    MODE_exterior
-  | MODE_interior
+    MODE_exterior of mutability
+  | MODE_interior of mutability
   | MODE_read_alias
   | MODE_write_alias
 
@@ -532,14 +537,19 @@ and fmt_name (ff:Format.formatter) (n:name) : unit =
         fmt ff ".";
         fmt_name_component ff nc
 
+and fmt_mutable (ff:Format.formatter) (m:mutability) : unit =
+  match m with
+      MUTABLE -> fmt ff "mutable@ "
+    | IMMUTABLE -> ()
+
 and fmt_slot (ff:Format.formatter) (s:slot) : unit =
   match s.slot_ty with
       None -> fmt ff "auto"
     | Some t ->
         begin
           match s.slot_mode with
-              MODE_exterior -> fmt ff "@@"
-            | MODE_interior -> ()
+              MODE_exterior m -> (fmt_mutable ff m; fmt ff "@@")
+            | MODE_interior m-> fmt_mutable ff m
             | MODE_read_alias -> fmt ff "~"
             | MODE_write_alias -> fmt ff "^"
         end;
@@ -598,7 +608,8 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_mach TY_s16 -> fmt ff "s16"
   | TY_mach TY_s32 -> fmt ff "s32"
   | TY_mach TY_s64 -> fmt ff "s64"
-  | TY_mach TY_b64 -> fmt ff "b64"
+  | TY_mach TY_f32 -> fmt ff "f32"
+  | TY_mach TY_f64 -> fmt ff "b64"
   | TY_int -> fmt ff "int"
   | TY_char -> fmt ff "char"
   | TY_str -> fmt ff "str"
@@ -624,7 +635,8 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
         fmt ff "@])@]"
       end
 
-  | TY_opaque id -> fmt ff "o#%d" (int_of_opaque id)
+  | TY_opaque (id, m) -> (fmt_mutable ff m;
+                          fmt ff "o#%d" (int_of_opaque id))
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
 

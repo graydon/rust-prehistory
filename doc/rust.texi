@@ -662,6 +662,7 @@ The keywords are:
 @tab @code{auto}
 @tab @code{type}
 @tab @code{pure}
+@tab @code{mutable}
 @tab @code{native}
 @item @code{int}
 @tab @code{char}
@@ -672,11 +673,12 @@ The keywords are:
 @tab @code{u16}
 @tab @code{u32}
 @tab @code{u64}
-@tab @code{f64}
 @item @code{s8}
 @tab @code{s16}
 @tab @code{s32}
 @tab @code{s64}
+@item @code{f32}
+@tab @code{f64}
 @item @code{rec}
 @tab @code{tag}
 @tab @code{vec}
@@ -1983,10 +1985,9 @@ let list[int] a = cons(7, cons(13, nil));
 
 The function type-constructor @code{fn} forms new function types. A
 function type consists of an optional protocol, an input type, an
-output type, and a set of flags indicating special characteristics of
-the function (@code{pure} or @code{lim}). Like all functions, values
-of function type may be @emph{solo functions} or @emph{iterator
-functions}. @xref{Ref.Item.Fn}.
+output type, and a set of flag indicating whether the function is
+@code{pure}. Like all functions, first-class values of function type
+may be @emph{solo functions} or @emph{iterator functions}. @xref{Ref.Item.Fn}.
 
 An example of a solo @code{fn} type:
 @example
