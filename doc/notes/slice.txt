@@ -113,3 +113,19 @@ a separable, denotable slice type.
 that's actually not *that* bad. Then the slice-type exists but is strictly
 internal to the homogeneous for loop. And any range tuples are stepped along
 with it. All in parallel.
+
+nov 2009 thoughts:
+
+why not have CoW subvectors? don't worry about the use of an iterator-fn, just
+use the basic rule that any vec or str can have a new derived one formed that
+is a dependent (cheap) one.
+
+vec[int] v1 = vec(1, 2, 3, 4, 5, 6)
+vec[int] v2 = v1.(3,4)
+
+for (int i in v1) { ... stuff ... }
+for (int i in v2) { ... stuff ... }
+for (~int i in v2) { ... stuff ... }
+for (^int i in v2) { this one copies v2 out of v1 before running,
+                     *just like any multiply-referenced vec would* }
+
