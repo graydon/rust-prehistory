@@ -1715,7 +1715,7 @@ and parse_fn proto_opt pure ps =
       { Ast.fn_input_slots = inputs;
         Ast.fn_input_constrs = constrs;
         Ast.fn_output_slot = output;
-        Ast.fn_aux = { Ast.fn_pure = pure;
+        Ast.fn_aux = { Ast.fn_purity = pure;
                        Ast.fn_proto = proto_opt; };
         Ast.fn_body = body; }
 
@@ -1797,7 +1797,12 @@ and parse_native_mod_item ps =
 and parse_mod_item ps =
   let apos = lexpos ps in
   let public = flag ps PUB in
-  let pure = flag ps PURE in
+  let pure =
+    match peek ps with
+        PURE -> Ast.PURE
+      | MUTABLE -> Ast.IMPURE Ast.MUTABLE
+      | _ -> Ast.IMPURE Ast.IMMUTABLE
+  in
 
     match peek ps with
         PROG ->

@@ -236,60 +236,6 @@ let trans_visitor
     deref_off ptr (Asm.IMM imm)
   in
 
-  let rec atom_type (at:Ast.atom) : Ast.ty =
-    match at with
-        Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
-      | Ast.ATOM_literal {node=(Ast.LIT_bool _); id=_} -> Ast.TY_bool
-      | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
-      | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
-      | Ast.ATOM_literal _ -> err None "unhandled form of literal in atom_type"
-      | Ast.ATOM_lval (Ast.LVAL_base nb) ->
-          let slot = lval_to_slot cx nb.id in
-            begin
-              match slot.Ast.slot_ty with
-                  None -> err (Some nb.id) "name refers to untyped slot, in atom_type"
-                | Some t -> t
-            end
-      | Ast.ATOM_lval (Ast.LVAL_ext (base, comp)) ->
-          let base_ty = atom_type (Ast.ATOM_lval base) in
-          let need_ty topt =
-            match topt with
-                None -> err None "missing type in lval-ext"
-              | Some s -> s
-          in
-            match (base_ty, comp) with
-                (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
-                  begin
-                    match atab_search elts id with
-                        Some slot -> need_ty slot.Ast.slot_ty
-                      | None -> err None "unknown record-member '%s'" id
-                  end
-
-              | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
-                  if 0 <= i && i < (Array.length elts)
-                  then need_ty elts.(i).Ast.slot_ty
-                  else err None "out-of-range tuple index %d" i
-
-              | (Ast.TY_vec ety, Ast.COMP_atom _) ->
-                  ety
-
-              | (_,_) -> err None "unhandled form of lval-ext"
-  in
-
-  let expr_type e =
-    match e with
-        Ast.EXPR_binary (op, a, _) ->
-          begin
-            match op with
-                Ast.BINOP_eq | Ast.BINOP_ne | Ast.BINOP_lt  | Ast.BINOP_le
-              | Ast.BINOP_ge | Ast.BINOP_gt -> Ast.TY_bool
-              | _ -> atom_type a
-          end
-      | Ast.EXPR_unary (Ast.UNOP_not, _) -> Ast.TY_bool
-      | Ast.EXPR_unary (_, a) -> atom_type a
-      | Ast.EXPR_atom a -> atom_type a
-  in
-
   let cell_vreg_num (vr:(int option) ref) : int =
     match !vr with
         None ->
@@ -1481,7 +1427,7 @@ let trans_visitor
 
         Ast.STMT_log a ->
           begin
-            match atom_type a with
+            match atom_type cx a with
                 Ast.TY_str -> trans_log_str a
               | Ast.TY_int -> trans_log_int a
               | _ -> err (Some stmt.id) "unimplemented logging type"
@@ -1489,7 +1435,7 @@ let trans_visitor
 
       | Ast.STMT_check_expr e ->
           begin
-            match expr_type e with
+            match expr_type cx e with
                 Ast.TY_bool -> trans_check_expr e
               | _ -> err (Some stmt.id) "check expr on non-bool"
           end
@@ -1607,7 +1553,7 @@ let trans_visitor
                         None -> ()
                       | Some at ->
                           let (dst_addr, _) = deref (wordptr_at (fp_imm ret_addr_disp)) in
-                          let atom_ty = atom_type at in
+                          let atom_ty = atom_type cx at in
                           let dst_slot = interior_slot atom_ty in
                           let dst_ty = referent_type abi atom_ty in
                           let dst_cell = Il.Addr (dst_addr, dst_ty) in

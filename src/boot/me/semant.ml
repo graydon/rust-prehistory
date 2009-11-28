@@ -19,6 +19,9 @@ type glue =
     GLUE_proc_to_C
   | GLUE_C_to_proc
   | GLUE_upcall of int
+  | GLUE_mark of Ast.ty
+  | GLUE_mark_frame of node_id
+  | GLUE_sweep of Ast.ty
   | GLUE_shallow_copy of Ast.ty
   | GLUE_deep_copy of Ast.ty
   | GLUE_compare of Ast.ty
@@ -78,6 +81,9 @@ type ctxt =
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_call_sizes: (node_id,int64) Hashtbl.t;
 
+      (* Mutability and GC stuff. *)
+      ctxt_mutable_slot_referent: (node_id,unit) Hashtbl.t;
+
       (* Typestate-y stuff. *)
       ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
       ctxt_constr_ids: (constr_key,constr_id) Hashtbl.t;
@@ -118,6 +124,8 @@ let new_ctxt sess abi crate =
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
     ctxt_lval_to_referent = Hashtbl.create 0;
+
+    ctxt_mutable_slot_referent = Hashtbl.create 0;
 
     ctxt_constrs = Hashtbl.create 0;
     ctxt_constr_ids = Hashtbl.create 0;
@@ -310,11 +318,16 @@ let rec lval_base_id (lv:Ast.lval) : node_id =
     | Ast.LVAL_ext (lv, _) -> lval_base_id lv
 ;;
 
-(* 
- * FIXME: rename this "lval_base_slots" and make a variant that
- * calculates the slots required-but-not-written-to when used in 
- * LHS atom-indexed lvals, because we have those too.
- *)
+let rec lval_base_slot (cx:ctxt) (lv:Ast.lval) : node_id option =
+  match lv with
+      Ast.LVAL_base nbi ->
+        let referent = lval_to_referent cx nbi.id in
+          if Hashtbl.mem cx.ctxt_all_slots referent
+          then Some referent
+          else None
+    | Ast.LVAL_ext (lv, _) -> lval_base_slot cx lv
+;;
+
 let rec lval_slots (cx:ctxt) (lv:Ast.lval) : node_id array =
   match lv with
       Ast.LVAL_base nbi ->
@@ -322,7 +335,14 @@ let rec lval_slots (cx:ctxt) (lv:Ast.lval) : node_id array =
           if Hashtbl.mem cx.ctxt_all_slots referent
           then [| referent |]
           else [| |]
-    | Ast.LVAL_ext (lv, _) -> lval_slots cx lv
+    | Ast.LVAL_ext (lv, Ast.COMP_named _) -> lval_slots cx lv
+    | Ast.LVAL_ext (lv, Ast.COMP_atom a) ->
+        Array.append (lval_slots cx lv) (atom_slots cx a)
+
+and atom_slots (cx:ctxt) (a:Ast.atom) : node_id array =
+  match a with
+      Ast.ATOM_literal _ -> [| |]
+    | Ast.ATOM_lval lv -> lval_slots cx lv
 ;;
 
 let lval_option_slots (cx:ctxt) (lv:Ast.lval option) : node_id array =
@@ -331,11 +351,6 @@ let lval_option_slots (cx:ctxt) (lv:Ast.lval option) : node_id array =
     | Some lv -> lval_slots cx lv
 ;;
 
-let atom_slots (cx:ctxt) (a:Ast.atom) : node_id array =
-  match a with
-      Ast.ATOM_literal _ -> [| |]
-    | Ast.ATOM_lval lv -> lval_slots cx lv
-;;
 
 let atoms_slots (cx:ctxt) (az:Ast.atom array) : node_id array =
   Array.concat (List.map (atom_slots cx) (Array.to_list az))
@@ -357,12 +372,70 @@ let expr_slots (cx:ctxt) (e:Ast.expr) : node_id array =
 ;;
 
 
-(* Mappings between mod items and their respective types. *)
+(* Type extraction. *)
 
 let interior_slot ty : Ast.slot =
   { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
     Ast.slot_ty = Some ty }
 ;;
+
+(* NB: this will fail if lval resolves to an item not a slot! *)
+let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
+  match lval with
+      Ast.LVAL_base nb -> lval_to_slot cx nb.id
+    | Ast.LVAL_ext (base, comp) ->
+        let base_ty = slot_ty (lval_slot cx base) in
+          match (base_ty, comp) with
+              (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
+                begin
+                  match atab_search elts id with
+                      Some slot -> slot
+                    | None -> err None "unknown record-member '%s'" id
+                end
+
+            | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
+                if 0 <= i && i < (Array.length elts)
+                then elts.(i)
+                else err None "out-of-range tuple index %d" i
+
+            | (Ast.TY_vec ety, Ast.COMP_atom _) ->
+                (* FIXME: perhaps vecs should be over slots, rather
+                   than implicitly interior? *)
+                interior_slot ety
+
+            | (_,_) -> err None "unhandled form of lval-ext"
+;;
+
+let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
+  match at with
+      Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
+    | Ast.ATOM_literal {node=(Ast.LIT_bool _); id=_} -> Ast.TY_bool
+    | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
+    | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
+    | Ast.ATOM_literal _ -> err None "unhandled form of literal '%a', in atom_type" Ast.sprintf_atom at
+    | Ast.ATOM_lval lv ->
+        let slot = lval_slot cx lv in
+          match slot.Ast.slot_ty with
+              None -> err None "lval '%a' refers to untyped slot, in atom_type" Ast.sprintf_lval lv
+            | Some t -> t
+;;
+
+let expr_type (cx:ctxt) (e:Ast.expr) : Ast.ty =
+  match e with
+      Ast.EXPR_binary (op, a, _) ->
+        begin
+          match op with
+              Ast.BINOP_eq | Ast.BINOP_ne | Ast.BINOP_lt  | Ast.BINOP_le
+            | Ast.BINOP_ge | Ast.BINOP_gt -> Ast.TY_bool
+            | _ -> atom_type cx a
+        end
+    | Ast.EXPR_unary (Ast.UNOP_not, _) -> Ast.TY_bool
+    | Ast.EXPR_unary (_, a) -> atom_type cx a
+    | Ast.EXPR_atom a -> atom_type cx a
+;;
+
+
+(* Mappings between mod items and their respective types. *)
 
 let rec ty_mod_of_mod (inside:bool) (m:Ast.mod_items) : Ast.mod_type_items =
   let ty_items = Hashtbl.create (Hashtbl.length m) in
@@ -471,7 +544,7 @@ and ty_fn_of_native_fn (fn:Ast.native_fn) : Ast.ty_fn =
   ({ Ast.sig_input_slots = arg_slots fn.Ast.native_fn_input_slots;
      Ast.sig_input_constrs = fn.Ast.native_fn_input_constrs;
      Ast.sig_output_slot = fn.Ast.native_fn_output_slot.node },
-   { Ast.fn_pure = false;
+   { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
      Ast.fn_proto = None })
 
 and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
@@ -516,7 +589,7 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
 
       | Ast.MOD_ITEM_tag td ->
           let (htup, ttag) = td.Ast.decl_item in
-          let taux = { Ast.fn_pure = true;
+          let taux = { Ast.fn_purity = Ast.PURE;
                        Ast.fn_proto = None }
           in
           let tsig = { Ast.sig_input_slots = tup_slots htup;

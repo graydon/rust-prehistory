@@ -100,11 +100,6 @@ typedef struct stk_seg {
 
 
 typedef enum {
-    /*
-     * NB: it's important that 'running' be value 0, as it
-     * lets us get away with using OR rather than MOV to
-     * signal anything-not-running. x86 optimization.
-     */
     proc_state_running    = 0,
     proc_state_calling_c  = 1,
     proc_state_blocked_exited   = 2,
@@ -188,6 +183,45 @@ struct rust_prog {
     void CDECL (*main_code)(void*, rust_proc_t*);
     void CDECL (*fini_code)(void*, rust_proc_t*);
 };
+
+/*
+ * "Simple" precise, mark-sweep, single-generation GC.
+ *
+ *  - Every value (transitively) containing to a mutable slot
+ *    is a gc_val.
+ *  - gc_vals come from the same simple allocator as all other
+ *    values but undergo different storage management.
+ *  - When a gc_val is allocated, a pointer to it is pushed on
+ *    the per-proc gc_heap vector.
+ *  - Like rc_vals, gc_vals have an extra word at their head.
+ *  - The word at the head of a gc_val is not used as a refcount;
+ *    instead it is a pointer to a gc_fns struct, with the low bit
+ *    of that pointer used as a mark bit.
+ *  - In addition to the per-proc gc_heap vector, there is a per-proc
+ *    gc_frames vector. This vector stores gc_frame values, each of
+ *    which is a (fp, mark_fn) pair that represent those frames on the
+ *    stack that actually have pointers to gc_vals in local slots.
+ *    Most frames, we assume, do not have any gc_val pointers.
+ *
+ *  - GC proceeds as follows:
+ *    - The proc asks its runtime for its gc_frames.
+ *    - The proc iterates over the gc_frame values, calling the
+ *      function in the mark function with the fp value as argument.
+ *    - The proc asks its runtime for its gc_heap. This recursively
+ *      (depth-first) marks the reachable portion of the heap. There
+ *      is no "special gc state" at work here; the proc looks like it's
+ *      running normal code that happens to not perform any gc_val
+ *      allocation or mutation. Mark-bit twiddling is open-coded into
+ *      all the (recursive) mark functions.
+ *    - The proc iterates over the gc_heap entries; for each entry
+ *      entry it checks the mark bit and, if unmarked, it calls the
+ *      gc_fn to sweep the cell (if this is nonempty). Sweeping a gc_val
+ *      involves dropping refcounts on all its rc_val pointers, and if
+ *      *their* refcount hits zero, recurring into their sweep fn
+ *      (which is statically known in the reference-holder, no need to
+ *      to indirect through a gc_fn table).
+ *
+ */
 
 struct rust_proc {
 

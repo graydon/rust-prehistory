@@ -45,6 +45,11 @@ type mutability =
   | MUTABLE
 ;;
 
+type purity =
+    PURE
+  | IMPURE of mutability
+;;
+
 type name_base =
     BASE_ident of ident
   | BASE_temp of temp_id
@@ -188,7 +193,7 @@ and ty_sig =
 
 and ty_fn_aux =
     {
-      fn_pure: bool;
+      fn_purity: purity;
       fn_proto: proto option;
     }
 
@@ -570,11 +575,14 @@ and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) opt
   done;
   fmt ff "@])"
 
-and fmt_fn_header (ff:Format.formatter) (tf:ty_fn) 
+and fmt_fn_header (ff:Format.formatter) (tf:ty_fn)
     (id:ident option) (params:(ident array) option) : unit =
   let (tsig, ta) = tf in
-    if ta.fn_pure
-    then fmt ff "pure@ ";
+    begin
+      match ta.fn_purity with
+          PURE -> fmt ff "pure@ "
+        | IMPURE mut -> fmt_mutable ff mut
+    end;
     fmt ff "fn";
     begin
       match ta.fn_proto with

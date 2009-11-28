@@ -30,8 +30,10 @@ let (sess:Session.sess) =
     Session.sess_log_alias = false;
     Session.sess_log_auto = false;
     Session.sess_log_type = false;
-    Session.sess_log_mode = false;
     Session.sess_log_typestate = false;
+    Session.sess_log_mode = false;
+    Session.sess_log_mutable = false;
+    Session.sess_log_gc = false;
     Session.sess_log_layout = false;
     Session.sess_log_itype = false;
     Session.sess_log_trans = false;
@@ -67,8 +69,10 @@ let argspecs =
     ("-lalias", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log alias analysis");
     ("-lauto", Arg.Unit (fun _ -> sess.Session.sess_log_auto <- true), "log auto type-inference");
     ("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
-    ("-lmode", Arg.Unit (fun _ -> sess.Session.sess_log_mode <- true), "log mode checking");
     ("-ltypestate", Arg.Unit (fun _ -> sess.Session.sess_log_typestate <- true), "log typestate checking");
+    ("-lmode", Arg.Unit (fun _ -> sess.Session.sess_log_mode <- true), "log mode checking");
+    ("-lmutable", Arg.Unit (fun _ -> sess.Session.sess_log_mutable <- true), "log mutability checking");
+    ("-lgc", Arg.Unit (fun _ -> sess.Session.sess_log_gc <- true), "log gc pointer analysis");
     ("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
     ("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
     ("-litype", Arg.Unit (fun _ -> sess.Session.sess_log_itype <- true;
@@ -150,8 +154,10 @@ let _ =
            Alias.process_crate;
            Auto.process_crate;
            Type.process_crate;
-           Mode.process_crate;
            Typestate.process_crate;
+           Mode.process_crate;
+           Mutable.process_crate;
+           Gc.process_crate;
            Layout.process_crate;
            Trans.process_crate |]
   end
