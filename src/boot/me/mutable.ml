@@ -138,19 +138,14 @@ let mutability_checking_visitor
 
   let check_write id dst =
     let dst_slot = lval_slot cx dst in
-      if slot_is_mutable dst_slot
+      if ((slot_is_mutable dst_slot) or
+            (Hashtbl.mem cx.ctxt_copy_stmt_is_init id))
       then ()
       else err (Some id) "writing to non-mutable slot"
   in
   let visit_stmt_pre s =
     begin
       match s.node with
-          (* 
-           * FIXME: need to predicate these on whether the write
-           * is initializing.  possibly move mutability analysis to
-           * post typestate and mark the initializing statements as we
-           * go in that analysis.
-           *)
           Ast.STMT_copy (dst, _) -> check_write s.id dst
         | Ast.STMT_call (dst, _, _) -> check_write s.id dst
         | Ast.STMT_recv (dst, _) -> check_write s.id dst

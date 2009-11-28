@@ -751,6 +751,7 @@ let lifecycle_visitor
     begin
       match s.node with
           Ast.STMT_copy (lv_dst, _)
+        | Ast.STMT_call (lv_dst, _, _)
         | Ast.STMT_recv (lv_dst, _) ->
             let prestate = Hashtbl.find cx.ctxt_prestates s.id in
             let poststate = Hashtbl.find cx.ctxt_poststates s.id in

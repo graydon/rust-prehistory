@@ -2,7 +2,7 @@
 
 prog a
 {
-  type point = rec(int x, int y, int z);
+  type point = rec(int x, int y, mutable int z);
   fn f(@point p) -> () {
     check (p.z == 12);
     p.z = 13;

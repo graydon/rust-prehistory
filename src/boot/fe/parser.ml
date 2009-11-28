@@ -704,8 +704,9 @@ and parse_atomic_ty ps =
         bump ps;
         let ltab = ref [] in
         let parse_rec_entry ps =
+          let mut = parse_mutability ps in
           let (slot, ident) = parse_slot_and_ident false ps in
-            ltab := ltab_put (!ltab) ident slot
+            ltab := ltab_put (!ltab) ident (apply_mutability ps slot mut)
         in
         let _ = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_rec_entry ps in
           Ast.TY_rec (arl (!ltab))
@@ -726,12 +727,25 @@ and parse_atomic_ty ps =
 
     | _ -> raise (unexpected ps)
 
-
-and parse_slot param_slot ps =
-  let mut = if flag ps MUTABLE
+and parse_mutability ps =
+  if flag ps MUTABLE
   then Ast.MUTABLE
   else Ast.IMMUTABLE
+
+and apply_mutability ps slot mut =
+  let mode =
+    match (slot.Ast.slot_mode, mut) with
+        (Ast.MODE_exterior _, mut) -> Ast.MODE_exterior mut
+      | (Ast.MODE_interior _, mut) -> Ast.MODE_interior mut
+      | (Ast.MODE_read_alias, Ast.MUTABLE)
+      | (Ast.MODE_write_alias, Ast.MUTABLE) ->
+          raise (err "mutable alias slot" ps)
+      | (m, _) -> m
   in
+    { slot with Ast.slot_mode = mode }
+
+and parse_slot param_slot ps =
+  let mut = parse_mutability ps in
   match (peek ps, param_slot) with
       (AT, _) ->
         bump ps;
@@ -804,7 +818,7 @@ and parse_expr_atom_list bra ket ps =
             (ctxt "expr-atom list" parse_expr_atom) ps)
 
 
-and slot_auto = { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
+and slot_auto = { Ast.slot_mode = Ast.MODE_interior Ast.MUTABLE;
                   Ast.slot_ty = None }
 
 and parse_auto_slot_and_init ps =
@@ -1481,6 +1495,7 @@ and parse_stmts ps =
                      let copy = span ps apos bpos (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
                        copies := copy :: (!copies)
                    end;
+                   let slot = {slot with node = apply_mutability ps slot.node Ast.MUTABLE} in
                    let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slot) in
                      span ps apos bpos (Ast.STMT_decl decl)
                  in
@@ -1490,6 +1505,7 @@ and parse_stmts ps =
              | _ ->
                  let (stmts, slot, ident) =
                    ctxt "stmt slot" parse_slot_and_ident_and_init ps in
+                 let slot = apply_mutability ps slot Ast.MUTABLE in
                  let bpos = lexpos ps in
                  let decl = Ast.DECL_slot (Ast.KEY_ident ident,
                                            (span ps apos bpos slot))
@@ -1501,6 +1517,7 @@ and parse_stmts ps =
           bump ps;
           let (stmts, slot, ident) =
             ctxt "stmt slot" parse_auto_slot_and_init ps in
+          let slot = apply_mutability ps slot Ast.MUTABLE in
           let bpos = lexpos ps in
           let decl = Ast.DECL_slot (Ast.KEY_ident ident,
                                     (span ps apos bpos slot))
