@@ -1633,8 +1633,14 @@ let trans_visitor
       (tag:(Ast.header_tup * Ast.ty_tag))
       : unit =
     trans_frame_entry tagid;
-    let (header_tup, ttag) = tag in
-    let slots = Array.map (fun sloti -> sloti.node) header_tup in
+    let (header_tup, _) = tag in
+    let ctor_ty = Hashtbl.find cx.ctxt_all_item_types tagid in
+    let ttag =
+      match ctor_ty with
+          Ast.TY_fn ({Ast.sig_output_slot={Ast.slot_ty=Some (Ast.TY_tag ttag)}}, _) -> ttag
+        | _ -> err (Some tagid) "unexpected type for tag constructor"
+    in
+    let slots = Array.map (fun sloti -> Hashtbl.find cx.ctxt_all_slots sloti.id) header_tup in
     let tag_keys = Array.make (Hashtbl.length ttag) "" in
     let i = ref 0 in
       begin

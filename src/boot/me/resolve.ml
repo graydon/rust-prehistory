@@ -203,7 +203,7 @@ let type_resolving_visitor
     in
       match slot with
           { Ast.slot_mode = Ast.MODE_exterior _;
-            (* FIXME: as with the other case, recognize multiple forms of name here. *)
+            (* FIXME: as in resolve_ty, recognize multiple forms of name here. *)
             Ast.slot_ty = Some (Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident))) } ->
             let (id, ty) = lookup_type_by_ident ident in
               begin

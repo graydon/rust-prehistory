@@ -415,8 +415,7 @@ let rec type_is_mutable (t:Ast.ty) : bool =
           false trec
 
     | Ast.TY_tag ttag -> ty_tag_is_mutable ttag
-    | Ast.TY_idx idx ->
-        err None "unimiplemented idx-type in type_is_mutable"
+    | Ast.TY_idx idx -> false
 
     | Ast.TY_iso tiso ->
         Array.fold_left
@@ -470,6 +469,11 @@ and ty_tup_is_mutable (ttup:Ast.ty_tup) : bool =
 (* GC analysis. *)
 
 (* A type has to be cyclic in order to live in GC memory. *)
+(* FIXME: I'm not sure, by this stage, that the exteriors-list can
+ * ever actually collide; I think we might have tied everything into
+ * iso groups by now. If so, a simpler predicate just checking for 
+ * exterior mutable iso or idx types may suffice.
+ *)
 let rec type_is_cyclic (exteriors:Ast.ty list) (t:Ast.ty) : bool =
 
   match t with
@@ -525,8 +529,10 @@ let rec type_is_cyclic (exteriors:Ast.ty list) (t:Ast.ty) : bool =
 
 and slot_is_cyclic (exteriors:Ast.ty list) (s:Ast.slot) : bool =
   let ty = slot_ty s in
-  match s.Ast.slot_mode with
-      Ast.MODE_exterior Ast.MUTABLE when List.mem ty exteriors -> true
+  match (s.Ast.slot_mode, ty) with
+      (Ast.MODE_exterior Ast.MUTABLE, _) when List.mem ty exteriors -> true
+    | (Ast.MODE_exterior Ast.MUTABLE, Ast.TY_iso _) -> true
+    | (Ast.MODE_exterior Ast.MUTABLE, Ast.TY_idx _) -> true
     | _ ->
         let exteriors' =
           match s.Ast.slot_mode with
