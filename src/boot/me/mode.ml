@@ -27,7 +27,7 @@ let mode_check_visitor
         | Ast.STMT_call (dst, _, _) -> check_write s.id dst
         | Ast.STMT_init_tup (dst, _) -> check_write s.id dst
         | Ast.STMT_init_rec (dst, _) -> check_write s.id dst
-        | Ast.STMT_init_vec (dst, _) -> check_write s.id dst
+        | Ast.STMT_init_vec (dst, _, _) -> check_write s.id dst
         | Ast.STMT_init_str (dst, _) -> check_write s.id dst
         | Ast.STMT_recv (dst, _) -> check_write s.id dst
         | _ -> ()

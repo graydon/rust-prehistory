@@ -79,7 +79,7 @@ and ty =
   | TY_str
 
   | TY_tup of ty_tup
-  | TY_vec of ty
+  | TY_vec of slot
   | TY_rec of ty_rec
 
   (*
@@ -210,10 +210,10 @@ and ty_pred = (slot array * constrs)
 and stmt' =
     STMT_log of atom
   | STMT_spawn of (lval * lval * (atom array))
-  | STMT_init_rec of (lval * ((ident * atom) array))
+  | STMT_init_rec of (lval * ((ident * mode * atom) array))
+  | STMT_init_tup of (lval * ((mode * atom) array))
+  | STMT_init_vec of (lval * slot * (atom array))
   | STMT_init_str of (lval * string)
-  | STMT_init_vec of (lval * (atom array))
-  | STMT_init_tup of (lval * (atom array))
   | STMT_init_port of lval
   | STMT_init_chan of (lval * (lval option))
   | STMT_while of stmt_while
@@ -623,7 +623,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_str -> fmt ff "str"
 
   | TY_tup slots -> fmt_slots ff slots None
-  | TY_vec t -> (fmt ff "vec["; fmt_ty ff t; fmt ff "]")
+  | TY_vec s -> (fmt ff "vec["; fmt_slot ff s; fmt ff "]")
   | TY_chan t -> (fmt ff "chan["; fmt_ty ff t; fmt ff "]")
   | TY_port t -> (fmt ff "port["; fmt_ty ff t; fmt ff "]")
 
@@ -914,11 +914,11 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_lval ff dst;
           fmt ff " = rec (...);"
 
-      | STMT_init_vec (dst, atoms) ->
+      | STMT_init_vec (dst, _, atoms) ->
           fmt_lval ff dst;
           fmt ff " = vec (...);"
 
-      | STMT_init_tup (dst, atoms) ->
+      | STMT_init_tup (dst, entries) ->
           fmt_lval ff dst;
           fmt ff " = (...);"
 

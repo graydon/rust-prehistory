@@ -319,11 +319,10 @@ let trans_visitor
           let cell = displaced slot layouts.(i).layout_offset in
             (cell, slot)
 
-      | (Ast.TY_vec ety,
+      | (Ast.TY_vec slot,
          Ast.COMP_atom at) ->
           let atop = trans_atom at in
-          let unit_sz = ty_sz abi ety in
-          let slot = interior_slot ety in
+          let unit_sz = slot_sz abi slot in
           let reg = next_vreg () in
           let t = Il.Reg (reg, Il.ValTy word_bits) in
             emit (Il.binary Il.UMUL t atop (imm unit_sz));
@@ -846,12 +845,11 @@ let trans_visitor
 
   and trans_init_vec (dst:Ast.lval) (atoms:Ast.atom array) : unit =
     let (dstcell, dst_slot) = trans_lval dst INTENT_init in
-    let unit_ty = match slot_ty dst_slot with
+    let unit_slot = match slot_ty dst_slot with
         Ast.TY_vec t -> t
       | _ -> err None "init dst of vec-init has non-port type"
     in
-    let unit_slot = interior_slot unit_ty in
-    let unit_sz = ty_sz abi unit_ty in
+    let unit_sz = slot_sz abi unit_slot in
     let n_inits = Array.length atoms in
     let init_sz = Int64.mul unit_sz (Int64.of_int n_inits) in
     let padded_sz = Int64.add init_sz (word_n 3) in
@@ -1461,7 +1459,7 @@ let trans_visitor
       | Ast.STMT_init_rec (dst, atab) ->
           Array.iter
             begin
-              fun (ident, atom) ->
+              fun (ident, _, atom) ->
                 let lval = (Ast.LVAL_ext
                               (dst, (Ast.COMP_named
                                        (Ast.COMP_ident ident))))
@@ -1474,7 +1472,7 @@ let trans_visitor
       | Ast.STMT_init_tup (dst, atoms) ->
           Array.iteri
             begin
-              fun i atom ->
+              fun i (_, atom) ->
                 let lval = (Ast.LVAL_ext
                               (dst, (Ast.COMP_named
                                        (Ast.COMP_idx i))))
@@ -1487,7 +1485,7 @@ let trans_visitor
       | Ast.STMT_init_str (dst, s) ->
           trans_init_str dst s
 
-      | Ast.STMT_init_vec (dst, atoms) ->
+      | Ast.STMT_init_vec (dst, _, atoms) ->
           trans_init_vec dst atoms
 
       | Ast.STMT_init_port dst ->

@@ -113,8 +113,8 @@ rule token = parse
 | '}'                          { RBRACE     }
 
 | '#'                          { POUND      }
-| "@"                          { AT         }
-| "^"                          { CARET      }
+| '@'                          { AT         }
+| '^'                          { CARET      }
 | '.'                          { DOT        }
 | ','                          { COMMA      }
 | ';'                          { SEMI       }

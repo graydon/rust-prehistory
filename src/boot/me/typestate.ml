@@ -208,13 +208,13 @@ let constr_id_assigning_visitor
               note_keys precond;
               note_keys postcond
 
-        | Ast.STMT_init_tup (dst, atoms) ->
-            let precond = Array.map (fun s -> Constr_init s) (atoms_slots cx atoms) in
+        | Ast.STMT_init_tup (dst, modes_atoms) ->
+            let precond = Array.map (fun s -> Constr_init s) (modes_and_atoms_slots cx modes_atoms) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               note_keys precond;
               note_keys postcond
 
-        | Ast.STMT_init_vec (dst, atoms) ->
+        | Ast.STMT_init_vec (dst, _, atoms) ->
             let precond = Array.map (fun s -> Constr_init s) (atoms_slots cx atoms) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               note_keys precond;
@@ -375,13 +375,13 @@ let condition_assigning_visitor
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
 
-        | Ast.STMT_init_tup (dst, atoms) ->
-            let precond = Array.map (fun s -> Constr_init s) (atoms_slots cx atoms) in
+        | Ast.STMT_init_tup (dst, modes_atoms) ->
+            let precond = Array.map (fun s -> Constr_init s) (modes_and_atoms_slots cx modes_atoms) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
 
-        | Ast.STMT_init_vec (dst, atoms) ->
+        | Ast.STMT_init_vec (dst, _, atoms) ->
             let precond = Array.map (fun s -> Constr_init s) (atoms_slots cx atoms) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               raise_precondition s.id precond;

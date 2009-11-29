@@ -233,7 +233,7 @@ and walk_ty
   let children _ =
     match ty with
         Ast.TY_tup ttup -> walk_ty_tup v ttup
-      | Ast.TY_vec t -> walk_ty v t
+      | Ast.TY_vec s -> walk_slot v s
       | Ast.TY_rec trec -> Array.iter (fun (_, s) -> walk_slot v s) trec
       | Ast.TY_tag ttag -> walk_ty_tag v ttag
       | Ast.TY_iso tiso -> Array.iter (walk_ty_tag v) tiso.Ast.iso_group
@@ -464,15 +464,15 @@ and walk_stmt
 
       | Ast.STMT_init_rec (lv, atab) ->
           walk_lval v lv;
-          Array.iter (fun (_, a) -> walk_atom v a) atab
+          Array.iter (fun (_, _, a) -> walk_atom v a) atab
 
-      | Ast.STMT_init_vec (lv, atoms) ->
+      | Ast.STMT_init_vec (lv, _, atoms) ->
           walk_lval v lv;
           Array.iter (walk_atom v) atoms
 
-      | Ast.STMT_init_tup (lv, atoms) ->
+      | Ast.STMT_init_tup (lv, mut_atoms) ->
           walk_lval v lv;
-          Array.iter (walk_atom v) atoms
+          Array.iter (fun (_, a) -> walk_atom v a) mut_atoms
 
       | Ast.STMT_init_str (lv, s) ->
           walk_lval v lv

@@ -24,7 +24,7 @@ let rec type_is_mutable (t:Ast.ty) : bool =
     | Ast.TY_str -> false
 
     | Ast.TY_tup ttup -> ty_tup_is_mutable ttup
-    | Ast.TY_vec t' -> type_is_mutable t'
+    | Ast.TY_vec s -> slot_or_type_is_mutable s
     | Ast.TY_rec trec ->
         Array.fold_left
           (fun b (_, s) ->

@@ -299,7 +299,7 @@ type pexp' =
   | PEXP_spawn of pexp
   | PEXP_rec of ((Ast.ident * pexp) array)
   | PEXP_tup of (pexp array)
-  | PEXP_vec of (pexp array)
+  | PEXP_vec of (Ast.slot * (pexp array))
   | PEXP_port
   | PEXP_chan of (pexp option)
   | PEXP_binop of (Ast.binop * pexp * pexp)
@@ -310,6 +310,8 @@ type pexp' =
   | PEXP_ext_pexp of (pexp * pexp)
   | PEXP_lit of Ast.lit
   | PEXP_str of string
+  | PEXP_mutable of pexp
+  | PEXP_exterior of pexp
 
 and pexp = pexp' identified
 ;;
@@ -679,7 +681,7 @@ and parse_atomic_ty ps =
 
     | VEC ->
         bump ps;
-        Ast.TY_vec (bracketed LBRACKET RBRACKET parse_ty ps)
+        Ast.TY_vec (bracketed LBRACKET RBRACKET (parse_slot false) ps)
 
     | IDENT _ -> Ast.TY_named (parse_name ps)
 
@@ -817,7 +819,6 @@ and parse_expr_atom_list bra ket ps =
   arj1st (bracketed_zero_or_more bra ket (Some COMMA)
             (ctxt "expr-atom list" parse_expr_atom) ps)
 
-
 and slot_auto = { Ast.slot_mode = Ast.MODE_interior Ast.MUTABLE;
                   Ast.slot_ty = None }
 
@@ -865,6 +866,18 @@ and parse_bottom_pexp ps : pexp =
           else
             span ps apos bpos (PEXP_tup pexps)
 
+    | MUTABLE ->
+        bump ps;
+        let inner = parse_pexp ps in
+        let bpos = lexpos ps in
+          span ps apos bpos (PEXP_mutable inner)
+
+    | AT ->
+        bump ps;
+        let inner = parse_pexp ps in
+        let bpos = lexpos ps in
+          span ps apos bpos (PEXP_exterior inner)
+
     | REC ->
           bump ps;
           let inputs = ctxt "rec pexp: rec inputs" parse_rec_inputs ps in
@@ -872,10 +885,18 @@ and parse_bottom_pexp ps : pexp =
             span ps apos bpos (PEXP_rec inputs)
 
     | VEC ->
-          bump ps;
+        bump ps;
+        begin
+          let slot =
+            match peek ps with
+                RPAREN -> bracketed LBRACKET RBRACKET (parse_slot false) ps
+              | _ -> { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
+                       Ast.slot_ty = None }
+          in
           let pexps = ctxt "vec pexp: exprs" parse_pexp_list ps in
           let bpos = lexpos ps in
-            span ps apos bpos (PEXP_vec pexps)
+            span ps apos bpos (PEXP_vec (slot, pexps))
+        end
 
 
     | LIT_STR s ->
@@ -1135,7 +1156,10 @@ and desugar_expr ps pexp : (Ast.stmt array * Ast.expr) =
           (stmts, Ast.EXPR_atom at)
 
 
-and desugar_expr_atom ps pexp : (Ast.stmt array * Ast.atom) =
+and desugar_expr_atom
+    (ps:pstate)
+    (pexp:pexp)
+    : (Ast.stmt array * Ast.atom) =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
     match pexp.node with
@@ -1165,14 +1189,36 @@ and desugar_expr_atom ps pexp : (Ast.stmt array * Ast.atom) =
           let (stmts, lval) = desugar_lval ps pexp in
             (stmts, Ast.ATOM_lval lval)
 
+      | PEXP_exterior inner ->
+          raise (err "exterior symbol in atom context" ps)
+
+      | PEXP_mutable _ ->
+          raise (err "mutable keyword in atom context" ps)
+
+
+and desugar_expr_mode_atom ps pexp : (Ast.stmt array * (Ast.mode * Ast.atom)) =
+  let desugar_inner mut e =
+    let (stmts, atom) = desugar_expr_atom ps e in
+      (stmts, (mut, atom))
+  in
+    match pexp.node with
+        PEXP_mutable {node=(PEXP_exterior e); id=_} ->
+          desugar_inner (Ast.MODE_exterior Ast.MUTABLE) e
+      | PEXP_mutable e ->
+          desugar_inner (Ast.MODE_interior Ast.MUTABLE) e
+      | _ ->
+          desugar_inner (Ast.MODE_interior Ast.IMMUTABLE) pexp
 
 and desugar_expr_atoms ps pexps : (Ast.stmt array * Ast.atom array) =
   arj1st (Array.map (desugar_expr_atom ps) pexps)
 
+and desugar_expr_mode_atoms ps pexps : (Ast.stmt array * (Ast.mode * Ast.atom) array) =
+  arj1st (Array.map (desugar_expr_mode_atom ps) pexps)
 
 and desugar_expr_init ps dst_lval pexp : (Ast.stmt array) =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
+
     match pexp.node with
 
         PEXP_lit _
@@ -1216,15 +1262,15 @@ and desugar_expr_init ps dst_lval pexp : (Ast.stmt array) =
               | _ -> raise (err "non-call spawn" ps)
           end
 
-      | PEXP_rec args ->
+          | PEXP_rec args ->
           let (arg_stmts, entries) =
             arj1st
               begin
                 Array.map
                   begin
                     fun (ident, pexp) ->
-                      let (stmts, atom) = desugar_expr_atom ps pexp in
-                        (stmts, (ident, atom))
+                      let (stmts, (mut, atom)) = desugar_expr_mode_atom ps pexp in
+                        (stmts, (ident, mut, atom))
                   end
                   args
               end
@@ -1233,17 +1279,17 @@ and desugar_expr_init ps dst_lval pexp : (Ast.stmt array) =
             Array.append arg_stmts [| rec_stmt |]
 
       | PEXP_tup args ->
-          let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
-          let stmt = span ps apos bpos (Ast.STMT_init_tup (dst_lval, arg_atoms)) in
+          let (arg_stmts, arg_mode_atoms) = desugar_expr_mode_atoms ps args in
+          let stmt = span ps apos bpos (Ast.STMT_init_tup (dst_lval, arg_mode_atoms)) in
             Array.append arg_stmts [| stmt |]
 
       | PEXP_str s ->
           let stmt = span ps apos bpos (Ast.STMT_init_str (dst_lval, s)) in
             [| stmt |]
 
-      | PEXP_vec args ->
+      | PEXP_vec (slot, args) ->
           let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
-          let stmt = span ps apos bpos (Ast.STMT_init_vec (dst_lval, arg_atoms)) in
+          let stmt = span ps apos bpos (Ast.STMT_init_vec (dst_lval, slot, arg_atoms)) in
             Array.append arg_stmts [| stmt |]
 
       | PEXP_port ->
@@ -1265,6 +1311,14 @@ and desugar_expr_init ps dst_lval pexp : (Ast.stmt array) =
               (Ast.STMT_init_chan (dst_lval, port_opt))
           in
             Array.append port_stmts [| chan_stmt |]
+
+      | PEXP_exterior inner ->
+          raise (err "exterior symbol in initialiser context" ps)
+
+      | PEXP_mutable _ ->
+          raise (err "mutable keyword in initialiser context" ps)
+
+
 
 and parse_expr (ps:pstate) : (Ast.stmt array * Ast.expr) =
   let pexp = ctxt "expr" parse_pexp ps in

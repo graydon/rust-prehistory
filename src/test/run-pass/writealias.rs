@@ -7,7 +7,7 @@ prog a
     p.z = 13;
   }
   main {
-    let point x = rec(x=10, y=11, mutable z=12);
+    let point x = rec(x=10, y=11, z=mutable 12);
     f(x);
     check (x.z == 13);
   }

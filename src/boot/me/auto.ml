@@ -7,12 +7,25 @@ let log cx = Session.log "auto"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-
 let auto_inference_visitor
     (cx:ctxt)
     (progress:bool ref)
     (inner:Walk.visitor)
     : Walk.visitor =
+  let fmt_mode m =
+    match m with
+        Ast.MODE_interior Ast.MUTABLE -> "interior-mutable"
+      | Ast.MODE_interior Ast.IMMUTABLE -> "interior-immutable"
+      | Ast.MODE_exterior Ast.MUTABLE -> "exterior-mutable"
+      | Ast.MODE_exterior Ast.IMMUTABLE -> "exterior-immutable"
+      | Ast.MODE_read_alias -> "read-alias"
+      | Ast.MODE_write_alias -> "write-alias"
+  in
+  let check_mode_eq (m1:Ast.mode) (m2:Ast.mode) : unit =
+    if not (m1 = m2)
+    then err None "mismatched mode: %s vs. %s "
+      (fmt_mode m1) (fmt_mode m2)
+  in
   let check_ty_eq (t1:Ast.ty) (t2:Ast.ty) : unit =
     if not (t1 = t2)
     then err None "mismatched types: %s vs. %s "
@@ -108,6 +121,42 @@ let auto_inference_visitor
         | Ast.STMT_init_str (lval, _) ->
             ignore (unify_lval (Some Ast.TY_str) lval)
 
+        | Ast.STMT_init_tup (lval, atoms) ->
+            let unify_init tyo =
+              match tyo with
+                  None ->
+                    begin
+                      let lim = Array.length atoms in
+                      let rec step i accum =
+                        if i = lim
+                        then (Some (Ast.TY_tup (Array.of_list (List.rev accum))))
+                        else
+                          let (mode, at) = atoms.(i) in
+                          match unify_atom None at with
+                              None -> None
+                            | Some t ->
+                                step (i+1) ({Ast.slot_mode=mode;
+                                             Ast.slot_ty=Some t} :: accum)
+                      in
+                        step 0 []
+                    end
+                | Some (Ast.TY_tup tt) ->
+                    if Array.length atoms != Array.length tt
+                    then err None "mismatched tuple length"
+                    else
+                      for i = 0 to (Array.length atoms) - 1
+                      do
+                        let (mode, at) = atoms.(i) in
+                        let slot = tt.(i) in
+                          check_mode_eq slot.Ast.slot_mode mode;
+                          ignore (unify_atom slot.Ast.slot_ty at)
+                      done;
+                    tyo
+                | Some _ -> err None "Non-tuple type for tuple initializer"
+            in
+              ignore (unify_lval (unify_init None) lval);
+              ignore (unify_init (unify_lval None lval))
+
         | Ast.STMT_init_rec (lval,atab) ->
             let unify_init tyo =
               match tyo with
@@ -118,11 +167,12 @@ let auto_inference_visitor
                         if i = lim
                         then (Some (Ast.TY_rec (Array.of_list (List.rev accum))))
                         else
-                          let (id, at) = atab.(i) in
+                          let (id, mode, at) = atab.(i) in
                           match unify_atom None at with
                               None -> None
                             | Some t ->
-                                let accum = ltab_put accum id (interior_slot t)
+                                let accum = ltab_put accum id {Ast.slot_mode=mode;
+                                                               Ast.slot_ty=Some t}
                                 in
                                   step (i+1) accum
                       in
@@ -130,9 +180,11 @@ let auto_inference_visitor
                     end
                 | Some (Ast.TY_rec rt) ->
                     begin
-                      let unify_rec_elt (id, at) =
+                      let unify_rec_elt (id, mode, at) =
                         match atab_search rt id with
-                            Some slot -> ignore (unify_atom slot.Ast.slot_ty at)
+                            Some slot ->
+                              check_mode_eq slot.Ast.slot_mode mode;
+                              ignore (unify_atom slot.Ast.slot_ty at)
                           | None -> err None "Unexpected record-member '%s'" id
                       in
                         Array.iter unify_rec_elt atab;

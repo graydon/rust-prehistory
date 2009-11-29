@@ -356,10 +356,14 @@ let atoms_slots (cx:ctxt) (az:Ast.atom array) : node_id array =
   Array.concat (List.map (atom_slots cx) (Array.to_list az))
 ;;
 
+let modes_and_atoms_slots (cx:ctxt) (az:(Ast.mode * Ast.atom) array) : node_id array =
+  Array.concat (List.map (fun (_,a) -> atom_slots cx a) (Array.to_list az))
+;;
+
 let entries_slots (cx:ctxt)
-    (entries:(Ast.ident * Ast.atom) array) : node_id array =
+    (entries:(Ast.ident * Ast.mode * Ast.atom) array) : node_id array =
   Array.concat (List.map
-                  (fun (_, atom) -> atom_slots cx atom)
+                  (fun (_, _, atom) -> atom_slots cx atom)
                   (Array.to_list entries))
 ;;
 
@@ -374,9 +378,12 @@ let expr_slots (cx:ctxt) (e:Ast.expr) : node_id array =
 
 (* Type extraction. *)
 
-let interior_slot ty : Ast.slot =
-  { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
+let interior_slot_full mut ty : Ast.slot =
+  { Ast.slot_mode = Ast.MODE_interior mut;
     Ast.slot_ty = Some ty }
+;;
+
+let interior_slot ty : Ast.slot = interior_slot_full Ast.IMMUTABLE ty
 ;;
 
 (* NB: this will fail if lval resolves to an item not a slot! *)
@@ -398,10 +405,8 @@ let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
                 then elts.(i)
                 else err None "out-of-range tuple index %d" i
 
-            | (Ast.TY_vec ety, Ast.COMP_atom _) ->
-                (* FIXME: perhaps vecs should be over slots, rather
-                   than implicitly interior? *)
-                interior_slot ety
+            | (Ast.TY_vec slot, Ast.COMP_atom _) ->
+                slot
 
             | (_,_) -> err None "unhandled form of lval-ext"
 ;;
@@ -974,6 +979,10 @@ let layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
 let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
   let slot = interior_slot t in
     (layout_slot abi 0L slot).layout_size
+;;
+
+let slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
+  (layout_slot abi 0L s).layout_size
 ;;
 
 let layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =

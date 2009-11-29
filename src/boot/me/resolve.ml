@@ -263,7 +263,7 @@ let type_resolving_visitor
                              (fun i ttup -> (i, resolve_ty_tup ttup)))
                   tiso.Ast.iso_group }
 
-      | Ast.TY_vec ty -> Ast.TY_vec (resolve_ty ty)
+      | Ast.TY_vec slot -> Ast.TY_vec (resolve_slot slot)
       | Ast.TY_chan ty -> Ast.TY_chan (resolve_ty ty)
       | Ast.TY_port ty -> Ast.TY_port (resolve_ty ty)
 
