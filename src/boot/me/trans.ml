@@ -49,7 +49,7 @@ let trans_visitor
   let imm_true = one in
   let imm_false = zero in
 
-  let ret_addr_disp = abi.Abi.abi_frame_base_sz in
+  let out_addr_disp = abi.Abi.abi_frame_base_sz in
   let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
 
   let emitters = Stack.create () in
@@ -1061,6 +1061,10 @@ let trans_visitor
       | Il.OpaqueTy -> failwith "expected structural referent type, got opaque"
 
 
+  (* FIXME: this should permit f.e. copying (foo,bar) <- (@foo,@bar), but 
+   * presently it walks through both structures via the layouts for the
+   * destination slots.
+   *)
   and trans_copy_structural
       (initialising:bool)
       (layouts:layout array)
@@ -1539,7 +1543,7 @@ let trans_visitor
                     match atom_opt with
                         None -> ()
                       | Some at ->
-                          let (dst_addr, _) = deref (wordptr_at (fp_imm ret_addr_disp)) in
+                          let (dst_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
                           let atom_ty = atom_type cx at in
                           let dst_slot = interior_slot atom_ty in
                           let dst_ty = referent_type abi atom_ty in
@@ -1604,12 +1608,14 @@ let trans_visitor
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
+      iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill_fixup callsz cx.ctxt_proc_to_c_fixup;
-      
+      iflog (fun _ -> annotate "finished prologue");
   in
 
   let trans_frame_exit (fnid:node_id) : unit =
     Stack.iter patch (Stack.pop epilogue_jumps);
+    iflog (fun _ -> annotate "epilogue");
     abi.Abi.abi_emit_fn_epilogue (emitter());
     capture_emitted_quads (get_fn_fixup cx fnid) fnid;
     pop_emitter ()
@@ -1627,7 +1633,8 @@ let trans_visitor
       (tag:(Ast.header_tup * Ast.ty_tag))
       : unit =
     trans_frame_entry tagid;
-    let (_, ttag) = tag in
+    let (header_tup, ttag) = tag in
+    let slots = Array.map (fun sloti -> sloti.node) header_tup in
     let tag_keys = Array.make (Hashtbl.length ttag) "" in
     let i = ref 0 in
       begin
@@ -1642,11 +1649,18 @@ let trans_visitor
         then err (Some tagid) "error sorting tag";
       end;
       let _ = log cx "tag variant: %s -> tag value #%d" n (!i) in
-      let (ret_addr, _) = deref (wordptr_at (fp_imm ret_addr_disp)) in
-      let dst = word_at ret_addr in
+      let (out_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
+      let tag_cell = word_at out_addr in
+      let rty = referent_type abi (Ast.TY_tup slots) in
+      let src_ta = (fp_imm arg0_disp, rty) in
+      let dst_ta = ((addr_add_imm out_addr word_sz), rty) in
         (* A clever compiler will inline this. We are not clever. *)
-        mov dst (imm (Int64.of_int (!i)));
-        (* FIXME: tuple contents after tag number. *)
+        iflog (fun _ -> annotate (Printf.sprintf "write tag #%d" (!i)));
+        mov tag_cell (imm (Int64.of_int (!i)));
+        iflog (fun _ -> annotate "copy tag-content tuple");
+        trans_copy_tup true
+          dst_ta slots
+          src_ta slots;
         trans_frame_exit tagid;
   in
 
@@ -1667,7 +1681,7 @@ let trans_visitor
           trans_upcall Abi.UPCALL_native
             [|
               (trans_static_string (name()));
-              (Il.Cell (word_at (fp_imm ret_addr_disp)));
+              (Il.Cell (word_at (fp_imm out_addr_disp)));
               arg0_alias;
               imm (Int64.of_int (Array.length nfn.Ast.native_fn_input_slots))
             |];
