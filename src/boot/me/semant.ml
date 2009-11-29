@@ -386,6 +386,169 @@ let interior_slot_full mut ty : Ast.slot =
 let interior_slot ty : Ast.slot = interior_slot_full Ast.IMMUTABLE ty
 ;;
 
+(* Mutability analysis. *)
+
+
+let slot_is_mutable (s:Ast.slot) : bool =
+  match s.Ast.slot_mode with
+      Ast.MODE_exterior Ast.MUTABLE
+    | Ast.MODE_interior Ast.MUTABLE -> true
+    | _ -> false
+;;
+
+let rec type_is_mutable (t:Ast.ty) : bool =
+  match t with
+      Ast.TY_any
+    | Ast.TY_nil
+    | Ast.TY_bool
+    | Ast.TY_mach _
+    | Ast.TY_int
+    | Ast.TY_char
+    | Ast.TY_str -> false
+
+    | Ast.TY_tup ttup -> ty_tup_is_mutable ttup
+    | Ast.TY_vec s -> slot_or_type_is_mutable s
+    | Ast.TY_rec trec ->
+        Array.fold_left
+          (fun b (_, s) ->
+             if b then b else slot_or_type_is_mutable s)
+          false trec
+
+    | Ast.TY_tag ttag -> ty_tag_is_mutable ttag
+    | Ast.TY_idx idx ->
+        err None "unimiplemented idx-type in type_is_mutable"
+
+    | Ast.TY_iso tiso ->
+        Array.fold_left
+          (fun b t' ->
+             if b then b else ty_tag_is_mutable t')
+          false tiso.Ast.iso_group
+
+    | Ast.TY_fn (_, taux) ->
+        (match taux.Ast.fn_purity with
+             Ast.PURE -> false
+           | Ast.IMPURE Ast.MUTABLE -> true
+           | Ast.IMPURE Ast.IMMUTABLE -> false)
+
+    | Ast.TY_pred _
+    | Ast.TY_chan _
+    | Ast.TY_prog _
+    | Ast.TY_type -> false
+
+    | Ast.TY_port _
+    | Ast.TY_proc -> true
+
+    | Ast.TY_constrained (t', _) -> type_is_mutable t'
+    | Ast.TY_opaque (_, Ast.MUTABLE) -> true
+    | Ast.TY_opaque (_, Ast.IMMUTABLE) -> false
+
+    | Ast.TY_named _ ->
+        err None "unresolved named type in type_is_mutable"
+
+    | Ast.TY_mod mtis ->
+        err None "unimplemented mod-type in type_is_mutable"
+
+and slot_or_type_is_mutable (s:Ast.slot) : bool =
+  if slot_is_mutable s
+  then true
+  else type_is_mutable (slot_ty s)
+
+and ty_tag_is_mutable (ttag:Ast.ty_tag) : bool =
+  htab_fold
+    (fun _ t' b ->
+       if b then b else ty_tup_is_mutable t')
+    false ttag
+
+and ty_tup_is_mutable (ttup:Ast.ty_tup) : bool =
+  Array.fold_left
+    (fun b s ->
+       if b then b else slot_or_type_is_mutable s)
+    false ttup
+;;
+
+
+(* GC analysis. *)
+
+(* A type has to be cyclic in order to live in GC memory. *)
+let rec type_is_cyclic (exteriors:Ast.ty list) (t:Ast.ty) : bool =
+
+  match t with
+      Ast.TY_any
+    | Ast.TY_nil
+    | Ast.TY_bool
+    | Ast.TY_mach _
+    | Ast.TY_int
+    | Ast.TY_char
+    | Ast.TY_str -> false
+
+    | Ast.TY_tup ttup -> ty_tup_is_cyclic exteriors ttup
+    | Ast.TY_vec s -> slot_is_cyclic (t :: exteriors) s
+    | Ast.TY_rec trec ->
+        Array.fold_left
+          (fun b (_, s) ->
+             if b then b else slot_is_cyclic exteriors s)
+          false trec
+
+    | Ast.TY_tag ttag -> ty_tag_is_cyclic exteriors ttag
+    | Ast.TY_idx idx ->
+        err None "unimiplemented idx-type in type_is_cyclic"
+
+    | Ast.TY_iso tiso ->
+        Array.fold_left
+          (fun b t' ->
+             if b then b else ty_tag_is_cyclic exteriors t')
+          false tiso.Ast.iso_group
+
+    | Ast.TY_fn (_, taux) ->
+        (match taux.Ast.fn_purity with
+             Ast.PURE -> false
+           | Ast.IMPURE Ast.MUTABLE -> true
+           | Ast.IMPURE Ast.IMMUTABLE -> false)
+
+    | Ast.TY_pred _
+    | Ast.TY_chan _
+    | Ast.TY_prog _
+    | Ast.TY_type -> false
+
+    | Ast.TY_port _
+    | Ast.TY_proc -> false
+
+    | Ast.TY_constrained (t', _) -> type_is_cyclic exteriors t'
+    | Ast.TY_opaque (_, Ast.MUTABLE) -> true
+    | Ast.TY_opaque (_, Ast.IMMUTABLE) -> false
+
+    | Ast.TY_named _ ->
+        err None "unresolved named type in type_is_cyclic"
+
+    | Ast.TY_mod mtis ->
+        err None "unimplemented mod-type in type_is_cyclic"
+
+and slot_is_cyclic (exteriors:Ast.ty list) (s:Ast.slot) : bool =
+  let ty = slot_ty s in
+  match s.Ast.slot_mode with
+      Ast.MODE_exterior Ast.MUTABLE when List.mem ty exteriors -> true
+    | _ ->
+        let exteriors' =
+          match s.Ast.slot_mode with
+              Ast.MODE_exterior _ -> ty :: exteriors
+            | _ -> exteriors
+        in
+          type_is_cyclic exteriors' ty
+
+and ty_tag_is_cyclic (exteriors:Ast.ty list) (ttag:Ast.ty_tag) : bool =
+  htab_fold
+    (fun _ t' b ->
+       if b then b else ty_tup_is_cyclic exteriors t')
+    false ttag
+
+and ty_tup_is_cyclic (exteriors:Ast.ty list) (ttup:Ast.ty_tup) : bool =
+  Array.fold_left
+    (fun b s ->
+       if b then b else slot_is_cyclic exteriors s)
+    false ttup
+;;
+
+
 (* NB: this will fail if lval resolves to an item not a slot! *)
 let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
   match lval with

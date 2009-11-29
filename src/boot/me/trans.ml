@@ -834,7 +834,7 @@ let trans_visitor
    * points to a refcounted structure. That structure has 3 words with
    * defined meaning at the beginning; data follows the header.
    *
-   *   word 0: refcount
+   *   word 0: refcount or gc control word
    *   word 1: allocated size of data
    *   word 2: initialised size of data
    *   word 3...N: data
@@ -846,8 +846,8 @@ let trans_visitor
   and trans_init_vec (dst:Ast.lval) (atoms:Ast.atom array) : unit =
     let (dstcell, dst_slot) = trans_lval dst INTENT_init in
     let unit_slot = match slot_ty dst_slot with
-        Ast.TY_vec t -> t
-      | _ -> err None "init dst of vec-init has non-port type"
+        Ast.TY_vec s -> s
+      | _ -> err None "init dst of vec-init has non-vec type"
     in
     let unit_sz = slot_sz abi unit_slot in
     let n_inits = Array.length atoms in
@@ -994,10 +994,20 @@ let trans_visitor
     iflog (fun _ -> annotate "init exterior: malloc");
     let sz = exterior_allocation_size slot in
       trans_malloc cell sz;
-      (* Reload rc; operand changed underfoot. *)
-      iflog (fun _ -> annotate "init exterior: reload refcount");
-      let rc = exterior_refcount_cell cell in
-        mov rc one
+      if slot_is_cyclic [] slot
+      then
+        begin
+          iflog (fun _ -> annotate "init exterior: load GC sweep-function pointer");
+          let rc = exterior_refcount_cell cell in
+          let fix = new_fixup ("GC sweep: " ^ (Ast.fmt_to_str Ast.fmt_slot slot)) in
+            lea rc (Il.Abs (Asm.M_POS fix))
+        end
+      else
+        begin
+          iflog (fun _ -> annotate "init exterior: load refcount");
+          let rc = exterior_refcount_cell cell in
+            mov rc one
+        end
 
   and intent_str i =
     match i with
@@ -1595,6 +1605,7 @@ let trans_visitor
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
       abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill_fixup callsz cx.ctxt_proc_to_c_fixup;
+      
   in
 
   let trans_frame_exit (fnid:node_id) : unit =

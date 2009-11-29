@@ -6,6 +6,7 @@ let log cx = Session.log "gc"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
+
 let gc_analysis_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
@@ -15,21 +16,12 @@ let gc_analysis_visitor
    * 
    * - Mutability alone doesn't necessitate living in GC memory. If you
    * declare a record full of mutable ints, it can live outside GC
-   * memory because it's not scanned. Likewise frames.
+   * memory because it's not cyclic. Likewise frames.
    * 
-   * - We do not know *values* at compile-time though, so we don't
-   * analyze them; we analyze slots. Each slot is classified as
-   * pointing-to-GC-memory or not.
-   * 
-   * - A slot points into GC memory if it is exterior and "of mutable
-   * type". We have marked all the points-to-mutable-type
-   * identified slots in the mutability pass, which means we can
-   * just use a semant query on the slot identity to tell when an init
-   * is a "from GC" allocation.
-   * 
-   * The point of this pass is to work out the set of slots that need
-   * to be marked as part of each GC-slot-pointing frame.
+   * - A cyclic value can point to an acyclic value, but not vice-versa
+   *   (since it would never be collected).
    *)
+
   inner
 ;;
 
