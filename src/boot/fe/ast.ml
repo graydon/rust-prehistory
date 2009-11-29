@@ -603,6 +603,33 @@ and fmt_fn_header (ff:Format.formatter) (tf:ty_fn)
     fmt ff "@ ->@ ";
     fmt_slot ff tsig.sig_output_slot;
 
+and fmt_tag (ff:Format.formatter) (ttag:ty_tag) : unit =
+  fmt ff "@[tag(@[";
+  let first = ref true in
+    Hashtbl.iter
+      begin
+        fun ident ttup ->
+          (if !first
+           then first := false
+           else fmt ff ",@ ");
+          fmt_ident ff ident;
+          fmt_slots ff ttup None
+      end
+      ttag;
+    fmt ff "@])@]"
+
+and fmt_iso (ff:Format.formatter) (tiso:ty_iso) : unit =
+  fmt ff "@[iso{@ idx: #%d;@ group:@ " tiso.iso_index;
+  fmt ff "[@[";
+  for i = 0 to (Array.length tiso.iso_group) - 1
+  do
+    if i != 0
+    then fmt ff ",@ ";
+    fmt ff "%d: " i;
+    fmt_tag ff tiso.iso_group.(i);
+  done;
+  fmt ff "@]]}@]"
+
 and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   match t with
     TY_any -> fmt ff "any"
@@ -628,35 +655,28 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_port t -> (fmt ff "port["; fmt_ty ff t; fmt ff "]")
 
   | TY_rec slots ->
-      begin
-        fmt ff "@[rec(@[";
-        let first = ref true in
-          Array.iter
-            (fun (id, slot) ->
-               if (!first)
-               then first := false
-               else fmt ff ",@ ";
-               fmt_slot ff slot;
-               fmt ff "@ ";
-               fmt_ident ff id;)
-            slots;
-        fmt ff "@])@]"
-      end
+      let (idents, slots) =
+        let (idents, slots) = List.split (Array.to_list slots) in
+          (Array.of_list idents, Array.of_list slots)
+      in
+        fmt ff "@[rec";
+        fmt_slots ff slots (Some idents);
+        fmt ff "@]"
 
   | TY_opaque (id, m) -> (fmt_mutable ff m;
-                          fmt ff "o#%d" (int_of_opaque id))
+                          fmt ff "opaque#%d" (int_of_opaque id))
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
 
   | TY_fn tfn -> fmt_fn_header ff tfn None None
   | TY_proc -> fmt ff "proc"
+  | TY_tag ttag -> fmt_tag ff ttag
+  | TY_iso tiso -> fmt_iso ff tiso
+  | TY_idx idx -> fmt ff "idx#%d" idx
 
   (* FIXME: finish these as needed. *)
   | TY_mod mti -> fmt ff "?mod?"
   | TY_prog tp -> fmt ff "?prog?"
-  | TY_tag ttag -> fmt ff "?tag?"
-  | TY_iso tiso -> fmt ff "?iso?"
-  | TY_idx idx -> fmt ff "?idx?"
   | TY_constrained t -> fmt ff "?constrained?"
   | TY_pred p -> fmt ff "?pred?"
 

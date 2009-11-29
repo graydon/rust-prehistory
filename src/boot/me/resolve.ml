@@ -160,7 +160,11 @@ let all_item_collecting_visitor
     }
 ;;
 
-type outer_names = (Ast.ident * scope) list
+type recur_info = { recur_names: (node_id, int option) Hashtbl.t;
+                    recur_iso: (int, Ast.ty_tag) Hashtbl.t; }
+
+let mk_recur_info _ = { recur_names = Hashtbl.create 0;
+                        recur_iso = Hashtbl.create 0; }
 ;;
 
 let type_resolving_visitor
@@ -169,7 +173,7 @@ let type_resolving_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
 
-  let lookup_type_by_ident (ident:Ast.ident) : (scope * Ast.ty) =
+  let lookup_type_by_ident (ident:Ast.ident) : (node_id * Ast.ty) =
     let res = lookup cx scopes (Ast.KEY_ident ident) in
       match res with
           None -> err None "identifier '%s' does not resolve to a type" ident
@@ -184,28 +188,42 @@ let type_resolving_visitor
                       | Ast.MOD_ITEM_public_type td -> td.Ast.decl_item
                       | _ -> err None "identifier '%s' resolves to non-type" ident
                   in
-                    (scope, ty)
+                    (id, ty)
                 end
               else err None "identifier '%s' resolves to a non-type" ident
             end
   in
 
-  let rec resolve_slot (names:outer_names) (slot:Ast.slot) : Ast.slot =
-    { slot with
-        Ast.slot_ty = (match slot.Ast.slot_ty with
-                           None -> None
-                         | Some t -> Some (resolve_ty names t)) }
+  let rec resolve_slot (recur:recur_info) (slot:Ast.slot) : Ast.slot =
+    let default _ =
+      { slot with
+          Ast.slot_ty = (match slot.Ast.slot_ty with
+                             None -> None
+                           | Some t -> Some (resolve_ty recur t)) }
+    in
+      match slot with
+          { Ast.slot_mode = Ast.MODE_exterior _;
+            (* FIXME: as with the other case, recognize multiple forms of name here. *)
+            Ast.slot_ty = Some (Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident))) } ->
+            let (id, ty) = lookup_type_by_ident ident in
+              begin
+                match htab_search recur.recur_names id with
+                    Some (Some idx) ->
+                      { slot with Ast.slot_ty = Some (Ast.TY_idx idx) }
+                  | _ -> default()
+              end
+        | _ -> default()
 
-  and resolve_ty_sig (names:outer_names) (tsig:Ast.ty_sig) : Ast.ty_sig =
-    { Ast.sig_input_slots = Array.map (resolve_slot names) tsig.Ast.sig_input_slots;
+  and resolve_ty_sig (recur:recur_info) (tsig:Ast.ty_sig) : Ast.ty_sig =
+    { Ast.sig_input_slots = Array.map (resolve_slot recur) tsig.Ast.sig_input_slots;
       Ast.sig_input_constrs = tsig.Ast.sig_input_constrs;
-      Ast.sig_output_slot = resolve_slot names tsig.Ast.sig_output_slot }
+      Ast.sig_output_slot = resolve_slot recur tsig.Ast.sig_output_slot }
 
-  and resolve_ty_fn (names:outer_names) (f:Ast.ty_fn) : Ast.ty_fn =
+  and resolve_ty_fn (recur:recur_info) (f:Ast.ty_fn) : Ast.ty_fn =
     let (tsig,taux) = f in
-      (resolve_ty_sig names tsig, taux)
+      (resolve_ty_sig recur tsig, taux)
 
-  and resolve_mod_type_item (names:outer_names) (ident:Ast.ident) (item:Ast.mod_type_item)
+  and resolve_mod_type_item (recur:recur_info) (ident:Ast.ident) (item:Ast.mod_type_item)
       : (Ast.ident * Ast.mod_type_item) =
     log cx "resolving mod type item %s" ident;
     let decl params item =
@@ -222,77 +240,97 @@ let type_resolving_visitor
               Ast.MOD_TYPE_ITEM_public_type
                 (decl
                    td.Ast.decl_params
-                   (resolve_ty names td.Ast.decl_item))
+                   (resolve_ty recur td.Ast.decl_item))
           | Ast.MOD_TYPE_ITEM_pred pd ->
               let (slots, constrs) = pd.Ast.decl_item in
                 Ast.MOD_TYPE_ITEM_pred
                   (decl pd.Ast.decl_params
-                     ((Array.map (resolve_slot names) slots), constrs))
+                     ((Array.map (resolve_slot recur) slots), constrs))
           | Ast.MOD_TYPE_ITEM_mod md ->
               Ast.MOD_TYPE_ITEM_mod
                 (decl md.Ast.decl_params
-                   (resolve_mod_type_items names md.Ast.decl_item))
+                   (resolve_mod_type_items recur md.Ast.decl_item))
           | Ast.MOD_TYPE_ITEM_fn fd ->
               Ast.MOD_TYPE_ITEM_fn
                 (decl fd.Ast.decl_params
-                   (resolve_ty_fn names fd.Ast.decl_item))
+                   (resolve_ty_fn recur fd.Ast.decl_item))
           | Ast.MOD_TYPE_ITEM_prog pd ->
               Ast.MOD_TYPE_ITEM_prog
                 (decl pd.Ast.decl_params
-                   (resolve_ty_sig names pd.Ast.decl_item))
+                   (resolve_ty_sig recur pd.Ast.decl_item))
       in
         log cx "popping mod type item %s" ident;
         ignore (Stack.pop scopes);
         (ident, {item with node=item'})
 
 
-  and resolve_mod_type_items (names:outer_names) (mtis:Ast.mod_type_items) : Ast.mod_type_items =
-    (htab_map mtis (resolve_mod_type_item names))
+  and resolve_mod_type_items (recur:recur_info) (mtis:Ast.mod_type_items) : Ast.mod_type_items =
+    (htab_map mtis (resolve_mod_type_item recur))
 
-  and resolve_ty_tup names ttup = Array.map (resolve_slot names) ttup
+  and resolve_ty_tup recur ttup = Array.map (resolve_slot recur) ttup
 
-  and resolve_ty (names:outer_names) (t:Ast.ty) : Ast.ty =
+  and resolve_ty (recur:recur_info) (t:Ast.ty) : Ast.ty =
     match t with
         Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_mach _
       | Ast.TY_int | Ast.TY_char | Ast.TY_str | Ast.TY_type
       | Ast.TY_idx _ | Ast.TY_opaque _ | Ast.TY_proc -> t
 
-      | Ast.TY_tup ttup -> Ast.TY_tup (resolve_ty_tup names ttup)
-      | Ast.TY_rec trec -> Ast.TY_rec (Array.map (fun (n, s) -> (n, resolve_slot names s)) trec)
+      | Ast.TY_tup ttup -> Ast.TY_tup (resolve_ty_tup recur ttup)
+      | Ast.TY_rec trec -> Ast.TY_rec (Array.map (fun (n, s) -> (n, resolve_slot recur s)) trec)
 
-      | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i ttup -> (i, resolve_ty_tup names ttup)))
+      | Ast.TY_tag ttag -> Ast.TY_tag (htab_map ttag (fun i ttup -> (i, resolve_ty_tup recur ttup)))
       | Ast.TY_iso tiso ->
           Ast.TY_iso
             { tiso with
                 Ast.iso_group =
                 Array.map (fun ttag -> htab_map ttag
-                             (fun i ttup -> (i, resolve_ty_tup names ttup)))
+                             (fun i ttup -> (i, resolve_ty_tup recur ttup)))
                   tiso.Ast.iso_group }
 
-      | Ast.TY_vec slot -> Ast.TY_vec (resolve_slot names slot)
-      | Ast.TY_chan ty -> Ast.TY_chan (resolve_ty names ty)
-      | Ast.TY_port ty -> Ast.TY_port (resolve_ty names ty)
+      | Ast.TY_vec slot -> Ast.TY_vec (resolve_slot recur slot)
+      | Ast.TY_chan ty -> Ast.TY_chan (resolve_ty recur ty)
+      | Ast.TY_port ty -> Ast.TY_port (resolve_ty recur ty)
 
       | Ast.TY_constrained (ty, constrs) ->
-          Ast.TY_constrained ((resolve_ty names ty),constrs)
+          Ast.TY_constrained ((resolve_ty recur ty),constrs)
 
-      | Ast.TY_fn tfn -> Ast.TY_fn (resolve_ty_fn names tfn)
+      | Ast.TY_fn tfn -> Ast.TY_fn (resolve_ty_fn recur tfn)
       | Ast.TY_pred tp ->
           let (slots, constrs) = tp in
-            Ast.TY_pred ((Array.map (resolve_slot names) slots), constrs)
-      | Ast.TY_prog tprog -> Ast.TY_prog (resolve_ty_sig names tprog)
-      | Ast.TY_mod mtis -> Ast.TY_mod (resolve_mod_type_items names mtis)
+            Ast.TY_pred ((Array.map (resolve_slot recur) slots), constrs)
+      | Ast.TY_prog tprog -> Ast.TY_prog (resolve_ty_sig recur tprog)
+      | Ast.TY_mod mtis -> Ast.TY_mod (resolve_mod_type_items recur mtis)
       | Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident)) ->
-          let (scope, ty) = lookup_type_by_ident ident in
-            if List.mem (ident, scope) names
+          let (id, ty) = lookup_type_by_ident ident in
+            if Hashtbl.mem recur.recur_names id
             then err None "Infinite type recursion on %s" ident
-            else resolve_ty ((ident,scope)::names) ty
+            else
+              begin
+                let named = match ty with
+                    Ast.TY_tag ttag ->
+                      begin
+                        let i = Hashtbl.length recur.recur_iso in
+                          Hashtbl.add recur.recur_iso i ttag;
+                          Some i
+                      end
+                  | _ -> None
+                in
+                  Hashtbl.add recur.recur_names id named;
+                  let r = resolve_ty recur ty in
+                    Hashtbl.remove recur.recur_names id;
+                    begin
+                      match named with
+                          None -> ()
+                        | Some i -> Hashtbl.remove recur.recur_iso i
+                    end;
+                    r
+              end
       | Ast.TY_named _ -> err None "unhandled form of type name"
   in
 
   let resolve_slot_identified (s:Ast.slot identified) : (Ast.slot identified) =
     try
-      { s with node = resolve_slot [] s.node }
+      { s with node = resolve_slot (mk_recur_info()) s.node }
     with
         Semant_err (None, e) -> raise (Semant_err ((Some s.id), e))
   in
@@ -310,7 +348,7 @@ let type_resolving_visitor
   let visit_mod_item_pre id params item =
     begin
       try
-        let ty = resolve_ty [] (ty_of_mod_item true item) in
+        let ty = resolve_ty (mk_recur_info()) (ty_of_mod_item true item) in
           htab_put cx.ctxt_all_item_types item.id ty
       with
           Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
@@ -320,7 +358,7 @@ let type_resolving_visitor
 
   let visit_native_mod_item_pre id item =
     begin
-      let ty = resolve_ty [] (ty_of_native_mod_item item) in
+      let ty = resolve_ty (mk_recur_info()) (ty_of_native_mod_item item) in
         htab_put cx.ctxt_all_item_types item.id ty
     end;
     inner.Walk.visit_native_mod_item_pre id item
