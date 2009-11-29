@@ -895,9 +895,9 @@ let trans_visitor
       | Ast.TY_vec _ -> Some (exterior_refcount_cell cell)
       | Ast.TY_str -> Some (exterior_refcount_cell cell)
       | _ ->
-            if slot.Ast.slot_mode = Ast.MODE_exterior Ast.IMMUTABLE
-            then Some (exterior_refcount_cell cell)
-            else None
+          match slot.Ast.slot_mode with
+              Ast.MODE_exterior _ -> Some (exterior_refcount_cell cell)
+            | _ -> None
 
   and drop_rec_entries
       (addr:Il.addr)
@@ -1025,28 +1025,7 @@ let trans_visitor
               deref_imm cell exterior_body_off
 
           | INTENT_write ->
-              let rc = exterior_refcount_cell cell in
-                emit (Il.cmp (Il.Cell rc) one);
-                let j = mark () in
-                  emit (Il.jmp Il.JE Il.CodeNone);
-                  (* 
-                   * Calling trans_copy_slot_heavy in 'initialising' mode 
-                   * will init the slot for us. Don't double-init.
-                   *)
-                  iflog (fun _ -> annotate ("deref exterior: write: heavy-copy referent"));
-                  let tmp = Il.Reg (Il.next_vreg (emitter()), Il.AddrTy (pointee_type cell)) in
-                    trans_copy_slot_heavy true tmp slot cell slot;
-                    drop_refcount_and_maybe_free rc cell slot;
-                    (* 
-                     * FIXME: here we write back the new CoW'ed memory
-                     * address to the src cell; possibly this needs
-                     * extension to write all the way back to the
-                     * underlying "home" of the cell, not just its
-                     * current vreg.
-                     *)
-                    mov cell (Il.Cell tmp);
-                    patch j;
-                    deref_imm cell exterior_body_off
+              deref_imm cell exterior_body_off
 
           | INTENT_read ->
               deref_imm cell exterior_body_off

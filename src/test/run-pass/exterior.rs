@@ -13,6 +13,7 @@ prog a
     let @point b = a;
     check (b.z == 12);
     f(b);
-    check (b.z == 12);
+    check (a.z == 12);
+    check (b.z == 13);
   }
 }
