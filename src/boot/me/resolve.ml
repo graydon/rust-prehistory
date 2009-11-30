@@ -345,10 +345,24 @@ let type_resolving_visitor
       inner.Walk.visit_slot_identified_pre slot
   in
 
+  let fold_iso_tag_type ident ty =
+    Printf.printf "fold_iso_tag_type: %s output type: %s\n" ident (Ast.fmt_to_str Ast.fmt_ty ty);
+    ty
+  in
+
   let visit_mod_item_pre id params item =
     begin
       try
         let ty = resolve_ty (mk_recur_info()) (ty_of_mod_item true item) in
+        let ty = match (item.node, ty) with
+            (Ast.MOD_ITEM_tag _, Ast.TY_fn (tfn,taux)) ->
+              Ast.TY_fn ({tfn with Ast.sig_output_slot =
+                             { tfn.Ast.sig_output_slot with
+                                 Ast.slot_ty =
+                                 let ty = (slot_ty tfn.Ast.sig_output_slot) in
+                                   Some (fold_iso_tag_type id ty) }}, taux)
+          | _ -> ty
+        in
           htab_put cx.ctxt_all_item_types item.id ty
       with
           Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
