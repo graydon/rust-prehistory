@@ -184,18 +184,6 @@ let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
     else err (Some referent) "Unknown slot"
 ;;
 
-let lval_ty (cx:ctxt) (id:node_id) : Ast.ty =
-  let referent = lval_to_referent cx id in
-    match htab_search cx.ctxt_all_slots referent with
-        Some s ->
-          begin
-            match s.Ast.slot_ty with
-                Some t -> t
-              | None -> err (Some referent) "Referent has un-inferred type"
-          end
-      | None -> (Hashtbl.find cx.ctxt_all_item_types referent)
-;;
-
 let get_slot_owner (cx:ctxt) (id:node_id) : node_id =
   match htab_search cx.ctxt_slot_owner id with
       None -> err (Some id) "Slot has no defined owner"
@@ -580,6 +568,28 @@ let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
             | (_,_) -> err None "unhandled form of lval-ext"
 ;;
 
+
+let lval_is_slot (cx:ctxt) (lval:Ast.lval) : bool =
+  let base_id = lval_base_id lval in
+  let referent = lval_to_referent cx base_id in
+    Hashtbl.mem cx.ctxt_all_slots referent
+;;
+
+let lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
+  let base_id = lval_base_id lval in
+  let referent = lval_to_referent cx base_id in
+  if Hashtbl.mem cx.ctxt_all_slots referent
+  then
+    match (lval_slot cx lval).Ast.slot_ty with
+        Some t -> t
+      | None -> err (Some referent) "Referent has un-inferred type"
+  else
+    match lval with
+        Ast.LVAL_base _ ->
+          (Hashtbl.find cx.ctxt_all_item_types referent)
+      | _ -> err (Some base_id) "Unimplemented structured item-reference"
+;;
+
 let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
   match at with
       Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
@@ -587,11 +597,7 @@ let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
     | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
     | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
     | Ast.ATOM_literal _ -> err None "unhandled form of literal '%a', in atom_type" Ast.sprintf_atom at
-    | Ast.ATOM_lval lv ->
-        let slot = lval_slot cx lv in
-          match slot.Ast.slot_ty with
-              None -> err None "lval '%a' refers to untyped slot, in atom_type" Ast.sprintf_lval lv
-            | Some t -> t
+    | Ast.ATOM_lval lv -> lval_ty cx lv
 ;;
 
 let expr_type (cx:ctxt) (e:Ast.expr) : Ast.ty =
@@ -736,7 +742,7 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
   let check_concrete params ty =
     if Array.length params = 0
     then ty
-    else err (Some item.id) "item has parametric type in type_of_mod_item"
+    else err (Some item.id) "item has parametric type in ty_of_mod_item"
   in
     match item.node with
         Ast.MOD_ITEM_opaque_type td ->

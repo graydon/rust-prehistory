@@ -544,7 +544,7 @@ and fmt_name (ff:Format.formatter) (n:name) : unit =
 
 and fmt_mutable (ff:Format.formatter) (m:mutability) : unit =
   match m with
-      MUTABLE -> fmt ff "mutable@ "
+      MUTABLE -> fmt ff "mutable "
     | IMMUTABLE -> ()
 
 and fmt_slot (ff:Format.formatter) (s:slot) : unit =

@@ -187,8 +187,8 @@ let constr_id_assigning_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-          Ast.STMT_call (_, (Ast.LVAL_base nb), args) ->
-            let referent_ty = lval_ty cx nb.id in
+          Ast.STMT_call (_, lv, args) ->
+            let referent_ty = lval_ty cx lv in
               begin
                 match referent_ty with
                     Ast.TY_fn (tsig,_) ->
@@ -397,8 +397,8 @@ let condition_assigning_visitor
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
 
-        | Ast.STMT_call (dst, (Ast.LVAL_base nb), args) ->
-            let referent_ty = lval_ty cx nb.id in
+        | Ast.STMT_call (dst, lv, args) ->
+            let referent_ty = lval_ty cx lv in
               begin
                 match referent_ty with
                     Ast.TY_fn (tsig,_) ->
