@@ -16,7 +16,7 @@ let iflog cx thunk =
 
 let determine_constr_key
     (cx:ctxt)
-    (scopes:scope Stack.t)
+    (scopes:(scope list))
     (scope_ids:node_id list)
     (c:Ast.constr)
     : constr_key =
@@ -35,8 +35,8 @@ let determine_constr_key
   in
   let cid =
     ref (match lookup cx scopes (Ast.KEY_ident cident) with
-             Some (scope, _) -> id_of_scope scope
-           | None -> err None "unresolved constraint '%s'" cident)
+             Some (scope::_, _) -> id_of_scope scope
+           | _ -> err None "unresolved constraint '%s'" cident)
   in
   let rec tighten_to id sids =
     match sids with
@@ -54,8 +54,8 @@ let determine_constr_key
       | Ast.CARG_path (Ast.CARG_base (Ast.BASE_named (Ast.BASE_ident argident))) ->
           begin
             match lookup cx scopes (Ast.KEY_ident argident) with
-                Some (scope, _) -> tighten_to (id_of_scope scope) scope_ids
-              | None -> err None "unresolved constraint-arg '%s'" argident
+                Some (scope::_, _) -> tighten_to (id_of_scope scope) scope_ids
+              | _ -> err None "unresolved constraint-arg '%s'" argident
           end
       | _ -> err None "unhandled form of constraint-arg name"
   in
@@ -121,15 +121,15 @@ let prog_decl_init_keys prog resolver =
 
 let constr_id_assigning_visitor
     (cx:ctxt)
-    (scopes:scope Stack.t)
+    (scopes:(scope list) ref)
     (idref:int ref)
     (inner:Walk.visitor)
     : Walk.visitor =
 
-  let scope_ids _ = List.map id_of_scope (stk_elts_from_top scopes) in
+  let scope_ids _ = List.map id_of_scope (!scopes) in
 
   let resolve_constr_to_key (constr:Ast.constr) : constr_key =
-    determine_constr_key cx scopes (scope_ids()) constr
+    determine_constr_key cx (!scopes) (scope_ids()) constr
   in
 
   let note_constr_key key =
@@ -171,7 +171,7 @@ let constr_id_assigning_visitor
   in
 
   let visit_constr_pre c =
-    let key = determine_constr_key cx scopes (scope_ids()) c in
+    let key = determine_constr_key cx (!scopes) (scope_ids()) c in
       note_constr_key key;
       inner.Walk.visit_constr_pre c
   in
@@ -272,10 +272,10 @@ let bitmap_assigning_visitor
 
 let condition_assigning_visitor
     (cx:ctxt)
-    (scopes:scope Stack.t)
+    (scopes:(scope list) ref)
     (inner:Walk.visitor)
     : Walk.visitor =
-  let scope_ids _ = List.map id_of_scope (stk_elts_from_top scopes) in
+  let scope_ids _ = List.map id_of_scope (!scopes) in
 
   let raise_bits (bitv:Bitv.t) (keys:constr_key array) : unit =
     Array.iter
@@ -304,7 +304,7 @@ let condition_assigning_visitor
   in
 
   let resolve_constr_to_key (constr:Ast.constr) : constr_key =
-    determine_constr_key cx scopes (scope_ids()) constr
+    determine_constr_key cx (!scopes) (scope_ids()) constr
   in
 
   let visit_mod_item_pre n p i =
@@ -777,7 +777,7 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
-  let (scopes:scope Stack.t) = Stack.create () in
+  let (scopes:(scope list) ref) = ref [] in
   let constr_id = ref 0 in
   let (graph:(node_id, (node_id list)) Hashtbl.t) = Hashtbl.create 0 in
   let setup_passes =

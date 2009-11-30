@@ -181,6 +181,29 @@ let ltab_put (ltab:('a * 'b) list) (a:'a) (b:'b) : (('a * 'b) list) =
   (a,b)::ltab
 
 (*
+ * Auxiliary list functions.
+ *)
+
+let rec list_search (list:'a list) (f:'a -> 'b option) : ('b option) =
+  match list with
+      [] -> None
+    | a::az ->
+        match f a with
+            Some b -> Some b
+          | None -> list_search az f
+
+let rec list_search_ctxt
+    (list:'a list)
+    (f:'a -> 'b option)
+    : ((('a list) * 'b) option) =
+  match list with
+      [] -> None
+    | a::az ->
+        match f a with
+            Some b -> Some (list, b)
+          | None -> list_search_ctxt az f
+
+(*
  * Auxiliary stack functions.
  *)
 

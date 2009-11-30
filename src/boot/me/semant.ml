@@ -798,40 +798,46 @@ let id_of_scope (sco:scope) : node_id =
 ;;
 
 let scope_stack_managing_visitor
-    (scopes:scope Stack.t)
+    (scopes:(scope list) ref)
     (inner:Walk.visitor)
     : Walk.visitor =
+  let push s =
+    scopes := s :: (!scopes)
+  in
+  let pop _ =
+    scopes := List.tl (!scopes)
+  in
   let visit_block_pre b =
-    Stack.push (SCOPE_block b.id) scopes;
+    push (SCOPE_block b.id);
     inner.Walk.visit_block_pre b
   in
   let visit_block_post b =
     inner.Walk.visit_block_post b;
-    ignore (Stack.pop scopes)
+    pop();
   in
   let visit_mod_item_pre n p i =
-    Stack.push (SCOPE_mod_item i) scopes;
+    push (SCOPE_mod_item i);
     inner.Walk.visit_mod_item_pre n p i
   in
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
-    ignore (Stack.pop scopes)
+    pop();
   in
   let visit_mod_type_item_pre n p i =
-    Stack.push (SCOPE_mod_type_item i) scopes;
+    push (SCOPE_mod_type_item i);
     inner.Walk.visit_mod_type_item_pre n p i
   in
   let visit_mod_type_item_post n p i =
     inner.Walk.visit_mod_type_item_post n p i;
-    ignore (Stack.pop scopes)
+    pop();
   in
   let visit_crate_pre c =
-    Stack.push (SCOPE_crate c) scopes;
+    push (SCOPE_crate c);
     inner.Walk.visit_crate_pre c
   in
   let visit_crate_post c =
     inner.Walk.visit_crate_post c;
-    ignore (Stack.pop scopes)
+    pop()
   in
     { inner with
         Walk.visit_block_pre = visit_block_pre;
@@ -851,20 +857,20 @@ let scope_stack_managing_visitor
  *)
 let lookup
     (cx:ctxt)
-    (scopes:scope Stack.t)
+    (scopes:scope list)
     (key:Ast.slot_key)
-    : ((scope * node_id) option) =
+    : ((scope list * node_id) option) =
   let check_items scope ident items =
     if Hashtbl.mem items ident
     then
       let item = Hashtbl.find items ident in
-        Some (scope, item.id)
+        Some item.id
     else
       None
   in
   let is_in_block_scope id =
     let b = ref false in
-      Stack.iter
+      List.iter
         (fun scope ->
            (match scope with
                 SCOPE_block block_id when block_id = id -> b := true
@@ -880,7 +886,7 @@ let lookup
             if Hashtbl.mem block_slots key
             then
               let id = Hashtbl.find block_slots key in
-                Some (scope, id)
+                Some id
             else
               begin
                 match key with
@@ -889,7 +895,7 @@ let lookup
                       if Hashtbl.mem block_items ident
                       then
                         let id = Hashtbl.find block_items ident in
-                          Some (scope, id)
+                          Some id
                       else
                         None
               end
@@ -917,7 +923,7 @@ let lookup
                       arr_search islots
                         (fun _ (sloti,ident') ->
                            if ident = ident'
-                           then Some (scope, sloti.id)
+                           then Some sloti.id
                            else None)
                     in
                     match item.node with
@@ -936,7 +942,7 @@ let lookup
                               if Hashtbl.mem slots ident
                               then
                                 let slot = Hashtbl.find slots ident in
-                                  Some (scope, slot.id)
+                                  Some slot.id
                               else
                                 check_items scope ident
                                   p.Ast.decl_item.Ast.prog_mod
@@ -960,7 +966,7 @@ let lookup
           end
       | _ -> None
   in
-    stk_search scopes check_scope
+    list_search_ctxt scopes check_scope
 ;;
 
 
