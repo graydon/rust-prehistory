@@ -1938,14 +1938,14 @@ and parse_mod_item ps =
 
 
 and expand_tags ps item : (Ast.ident * Ast.mod_item) array =
-  let handle_ty_tag params ttag =
+  let handle_ty_tag id params ttag =
     let tags = ref [] in
       Hashtbl.iter
         begin
           fun ident tup ->
             let header = Array.map (fun slot -> (clone_span ps item slot)) tup in
             let decl = { Ast.decl_params = params;
-                         Ast.decl_item = (header, ttag) }
+                         Ast.decl_item = (header, ttag, id) }
             in
             let tag_item' = Ast.MOD_ITEM_tag decl in
             let tag_item = clone_span ps item tag_item' in
@@ -1954,14 +1954,14 @@ and expand_tags ps item : (Ast.ident * Ast.mod_item) array =
         ttag;
       arr (!tags)
   in
-  let handle_ty_decl tyd =
+  let handle_ty_decl id tyd =
     match tyd.Ast.decl_item with
-        Ast.TY_tag ttag -> handle_ty_tag tyd.Ast.decl_params ttag
+        Ast.TY_tag ttag -> handle_ty_tag id tyd.Ast.decl_params ttag
       | _ -> [| |]
   in
     match item.node with
-        Ast.MOD_ITEM_public_type tyd -> handle_ty_decl tyd
-      | Ast.MOD_ITEM_opaque_type tyd -> handle_ty_decl tyd
+        Ast.MOD_ITEM_public_type tyd -> handle_ty_decl item.id tyd
+      | Ast.MOD_ITEM_opaque_type tyd -> handle_ty_decl item.id tyd
       | _ -> [| |]
 
 

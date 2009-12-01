@@ -768,7 +768,7 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
             (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
 
       | Ast.MOD_ITEM_tag td ->
-          let (htup, ttag) = td.Ast.decl_item in
+          let (htup, ttag, node) = td.Ast.decl_item in
           let taux = { Ast.fn_purity = Ast.PURE;
                        Ast.fn_proto = None }
           in

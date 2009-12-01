@@ -160,16 +160,103 @@ let all_item_collecting_visitor
     }
 ;;
 
-type recur_info = { recur_names: (node_id, int option) Hashtbl.t;
-                    recur_iso: (int, Ast.ty_tag) Hashtbl.t; }
-
-let mk_recur_info _ = { recur_names = Hashtbl.create 0;
-                        recur_iso = Hashtbl.create 0; }
+type recur_info = node_id list
 ;;
+
+let tag_collecting_visitor
+    (cx:ctxt)
+    (tag_node_to_idx:(node_id,int) Hashtbl.t)
+    (idx_to_tag_node:(int,node_id) Hashtbl.t)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+
+  let note_tag_type nid tt =
+    log cx "collected tag type %s = node #%d" (Ast.fmt_to_str Ast.fmt_tag tt) (int_of_node nid);
+    if Hashtbl.mem tag_node_to_idx nid
+    then ()
+    else
+      let num = (Hashtbl.length tag_node_to_idx) in
+        htab_put tag_node_to_idx nid num;
+        htab_put idx_to_tag_node num nid
+  in
+
+  let visit_mod_item_pre id params item =
+    begin
+      match item.node with
+          Ast.MOD_ITEM_opaque_type {Ast.decl_item=Ast.TY_tag ttag} ->
+            note_tag_type item.id ttag
+        | Ast.MOD_ITEM_public_type {Ast.decl_item=Ast.TY_tag ttag} ->
+            note_tag_type item.id ttag
+        | _ -> ()
+    end;
+    inner.Walk.visit_mod_item_pre id params item
+  in
+    { inner with
+        Walk.visit_mod_item_pre = visit_mod_item_pre }
+;;
+
+
+let rec get_type_idxs (h:(int,unit)Hashtbl.t) (t:Ast.ty) : unit =
+
+  match t with
+      Ast.TY_any
+    | Ast.TY_nil
+    | Ast.TY_bool
+    | Ast.TY_mach _
+    | Ast.TY_int
+    | Ast.TY_char
+    | Ast.TY_type
+    | Ast.TY_proc
+    | Ast.TY_opaque _
+    | Ast.TY_str -> ()
+
+    | Ast.TY_tup ttup -> get_ty_tup_idxs h ttup
+    | Ast.TY_vec s -> get_slot_idxs h s
+    | Ast.TY_rec trec ->
+        Array.iter (fun (_, s) -> get_slot_idxs h s) trec
+
+    | Ast.TY_tag ttag -> get_ty_tag_idxs h ttag
+    | Ast.TY_idx i ->
+        Hashtbl.replace h i ()
+    | Ast.TY_iso tiso ->
+        Array.iter (get_ty_tag_idxs h) tiso.Ast.iso_group
+
+    | Ast.TY_fn (tsig, _)
+    | Ast.TY_prog tsig -> get_sig_idxs h tsig
+    | Ast.TY_pred (slots, _) ->
+        Array.iter (get_slot_idxs h) slots
+
+    | Ast.TY_chan t
+    | Ast.TY_port t
+    | Ast.TY_constrained (t, _)  -> get_type_idxs h t
+
+    | Ast.TY_named _ ->
+        err None "unresolved named type in get_type_idxs"
+
+    | Ast.TY_mod mtis ->
+        err None "unimplemented mod-type in get_type_idxs"
+
+and get_sig_idxs (h:(int,unit)Hashtbl.t) (tsig:Ast.ty_sig) : unit =
+  Array.iter (get_slot_idxs h) tsig.Ast.sig_input_slots;
+  get_slot_idxs h tsig.Ast.sig_output_slot
+
+and get_slot_idxs (h:(int,unit)Hashtbl.t) (s:Ast.slot) : unit =
+  match s.Ast.slot_ty with
+      None -> ()
+    | Some t -> get_type_idxs h t
+
+and get_ty_tag_idxs (h:(int,unit)Hashtbl.t) (ttag:Ast.ty_tag) : unit =
+  Hashtbl.iter (fun _ ttup -> get_ty_tup_idxs h ttup) ttag
+
+and get_ty_tup_idxs (h:(int,unit)Hashtbl.t) (ttup:Ast.ty_tup) : unit =
+  Array.iter (get_slot_idxs h) ttup
+;;
+
 
 let type_resolving_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
+    (tag_node_to_idx:(node_id,int) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
@@ -214,10 +301,9 @@ let type_resolving_visitor
             Ast.slot_ty = Some (Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident))) } ->
             let (scopes, id, ty) = lookup_type_by_ident scopes ident in
               begin
-                match htab_search recur.recur_names id with
-                    Some (Some idx) ->
-                      { slot with Ast.slot_ty = Some (Ast.TY_idx idx) }
-                  | _ -> default()
+                match htab_search tag_node_to_idx id with
+                    None -> default()
+                  | Some idx -> { slot with Ast.slot_ty = Some (Ast.TY_idx idx) }
               end
         | _ -> default()
 
@@ -313,9 +399,16 @@ let type_resolving_visitor
                trec)
 
       | Ast.TY_tag ttag ->
-          Ast.TY_tag
+          let ttag =
             (htab_map ttag
                (fun i ttup -> (i, resolve_ty_tup recur scopes ttup)))
+          in
+          let h = Hashtbl.create 0 in
+            get_ty_tag_idxs h ttag;
+            if Hashtbl.length h = 0
+            then Ast.TY_tag ttag
+              (* FIXME: need join-an-iso combiner function. *)
+            else Ast.TY_iso { Ast.iso_index = 0; Ast.iso_group = [| ttag |] }
 
       | Ast.TY_iso tiso ->
           Ast.TY_iso
@@ -340,35 +433,15 @@ let type_resolving_visitor
       | Ast.TY_mod mtis -> Ast.TY_mod (resolve_mod_type_items recur scopes mtis)
       | Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident)) ->
           let (scopes, id, ty) = lookup_type_by_ident scopes ident in
-            if Hashtbl.mem recur.recur_names id
-            then err None "Infinite type recursion on %s" ident
-            else
-              begin
-                let named = match ty with
-                    Ast.TY_tag ttag ->
-                      begin
-                        let i = Hashtbl.length recur.recur_iso in
-                          Hashtbl.add recur.recur_iso i ttag;
-                          Some i
-                      end
-                  | _ -> None
-                in
-                  Hashtbl.add recur.recur_names id named;
-                  let r = resolve_ty recur scopes ty in
-                    Hashtbl.remove recur.recur_names id;
-                    begin
-                      match named with
-                          None -> ()
-                        | Some i -> Hashtbl.remove recur.recur_iso i
-                    end;
-                    r
-              end
+            if List.mem id recur
+            then err (Some id) "Infinite type recursion"
+            else resolve_ty (id :: recur) scopes ty
       | Ast.TY_named _ -> err None "unhandled form of type name"
   in
 
   let resolve_slot_identified (s:Ast.slot identified) : (Ast.slot identified) =
     try
-      { s with node = resolve_slot (mk_recur_info()) (!scopes) s.node }
+      { s with node = resolve_slot [] (!scopes) s.node }
     with
         Semant_err (None, e) -> raise (Semant_err ((Some s.id), e))
   in
@@ -383,24 +456,17 @@ let type_resolving_visitor
       inner.Walk.visit_slot_identified_pre slot
   in
 
-  let fold_iso_tag_type ident ty =
-    Printf.printf "fold_iso_tag_type: %s output type: %s\n" ident (Ast.fmt_to_str Ast.fmt_ty ty);
-    ty
-  in
 
   let visit_mod_item_pre id params item =
     begin
       try
-        let ty = resolve_ty (mk_recur_info()) (!scopes) (ty_of_mod_item true item) in
-        let ty = match (item.node, ty) with
-            (Ast.MOD_ITEM_tag _, Ast.TY_fn (tfn,taux)) ->
-              Ast.TY_fn ({tfn with Ast.sig_output_slot =
-                             { tfn.Ast.sig_output_slot with
-                                 Ast.slot_ty =
-                                 let ty = (slot_ty tfn.Ast.sig_output_slot) in
-                                   Some (fold_iso_tag_type id ty) }}, taux)
-          | _ -> ty
+        let ty = match (item.node, (ty_of_mod_item true item)) with
+            (Ast.MOD_ITEM_tag {Ast.decl_item=(_, ttag, nid)}, t) ->
+              resolve_ty [nid] (!scopes) t
+          | (_, t) ->
+              resolve_ty [] (!scopes) t
         in
+          log cx "resolved item %s, type %s" id (Ast.fmt_to_str Ast.fmt_ty ty);
           htab_put cx.ctxt_all_item_types item.id ty
       with
           Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
@@ -410,7 +476,7 @@ let type_resolving_visitor
 
   let visit_native_mod_item_pre id item =
     begin
-      let ty = resolve_ty (mk_recur_info()) (!scopes) (ty_of_native_mod_item item) in
+      let ty = resolve_ty [] (!scopes) (ty_of_native_mod_item item) in
         htab_put cx.ctxt_all_item_types item.id ty
     end;
     inner.Walk.visit_native_mod_item_pre id item
@@ -475,14 +541,20 @@ let process_crate
     (crate:Ast.crate)
     : unit =
   let (scopes:(scope list) ref) = ref [] in
+  let tag_to_idx = Hashtbl.create 0 in
+  let idx_to_tag = Hashtbl.create 0 in
   let passes =
     [|
       (block_scope_forming_visitor cx
          (stmt_collecting_visitor cx
             (all_item_collecting_visitor cx
                Walk.empty_visitor)));
+      (tag_collecting_visitor cx
+         tag_to_idx
+         idx_to_tag
+         Walk.empty_visitor);
       (scope_stack_managing_visitor scopes
-         (type_resolving_visitor cx scopes
+         (type_resolving_visitor cx scopes tag_to_idx
             (lval_base_resolving_visitor cx scopes
                Walk.empty_visitor)));
     |]

@@ -1630,10 +1630,10 @@ let trans_visitor
   let trans_tag
       (n:Ast.ident)
       (tagid:node_id)
-      (tag:(Ast.header_tup * Ast.ty_tag))
+      (tag:(Ast.header_tup * Ast.ty_tag * node_id))
       : unit =
     trans_frame_entry tagid;
-    let (header_tup, _) = tag in
+    let (header_tup, _, _) = tag in
     let ctor_ty = Hashtbl.find cx.ctxt_all_item_types tagid in
     let ttag =
       match ctor_ty with

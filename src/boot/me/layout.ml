@@ -271,7 +271,7 @@ let layout_visitor
         | Ast.MOD_ITEM_pred _ ->
             enter_frame i.id
         | Ast.MOD_ITEM_tag td ->
-            let (header_slots, _) = td.Ast.decl_item in
+            let (header_slots, _, _) = td.Ast.decl_item in
               enter_frame i.id;
               layout_header i.id
                 (Array.map (fun sid -> sid.id)

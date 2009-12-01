@@ -178,7 +178,7 @@ and walk_mod_item
           (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
       | Ast.MOD_ITEM_tag td ->
           (td.Ast.decl_params, (fun _ ->
-                                  let (htup, ttag) = td.Ast.decl_item in
+                                  let (htup, ttag, _) = td.Ast.decl_item in
                                     walk_header_tup v htup;
                                     walk_ty_tag v ttag))
       | Ast.MOD_ITEM_pred pd ->

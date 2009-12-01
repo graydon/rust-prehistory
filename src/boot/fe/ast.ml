@@ -450,7 +450,7 @@ and 'a decl =
 and mod_item' =
     MOD_ITEM_opaque_type of ty decl
   | MOD_ITEM_public_type of ty decl
-  | MOD_ITEM_tag of (header_tup * ty_tag) decl
+  | MOD_ITEM_tag of (header_tup * ty_tag * node_id) decl
   | MOD_ITEM_pred of pred decl
   | MOD_ITEM_mod of mod_items decl
   | MOD_ITEM_fn of fn decl
@@ -580,7 +580,7 @@ and fmt_fn_header (ff:Format.formatter) (tf:ty_fn)
   let (tsig, ta) = tf in
     begin
       match ta.fn_purity with
-          PURE -> fmt ff "pure@ "
+          PURE -> fmt ff "pure "
         | IMPURE mut -> fmt_mutable ff mut
     end;
     fmt ff "fn";
@@ -600,7 +600,7 @@ and fmt_fn_header (ff:Format.formatter) (tf:ty_fn)
         | Some p -> fmt_decl_params ff p
     end;
     fmt_slots ff tsig.sig_input_slots None;
-    fmt ff "@ ->@ ";
+    fmt ff " -> ";
     fmt_slot ff tsig.sig_output_slot;
 
 and fmt_tag (ff:Format.formatter) (ttag:ty_tag) : unit =
