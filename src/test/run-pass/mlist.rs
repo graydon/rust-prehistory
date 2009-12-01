@@ -7,5 +7,6 @@ prog a
   main {
     auto x = nil();
     x = cons(10, x);
+    x = cons(10, cons(11, cons(12, nil())));
   }
 }

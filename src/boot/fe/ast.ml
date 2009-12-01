@@ -619,16 +619,17 @@ and fmt_tag (ff:Format.formatter) (ttag:ty_tag) : unit =
     fmt ff "@])@]"
 
 and fmt_iso (ff:Format.formatter) (tiso:ty_iso) : unit =
-  fmt ff "@[iso{@ idx: #%d;@ group:@ " tiso.iso_index;
-  fmt ff "[@[";
+  fmt ff "@[iso [@[";
   for i = 0 to (Array.length tiso.iso_group) - 1
   do
     if i != 0
     then fmt ff ",@ ";
-    fmt ff "%d: " i;
+    if i == tiso.iso_index
+    then fmt ff "<%d>: " i
+    else fmt ff "%d: " i;
     fmt_tag ff tiso.iso_group.(i);
   done;
-  fmt ff "@]]}@]"
+  fmt ff "@]]@]"
 
 and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   match t with
