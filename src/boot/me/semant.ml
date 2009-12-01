@@ -482,7 +482,7 @@ let rec type_is_cyclic (exteriors:Ast.ty list) (t:Ast.ty) : bool =
           false trec
 
     | Ast.TY_tag ttag -> ty_tag_is_cyclic exteriors ttag
-    | Ast.TY_idx idx -> true
+    | Ast.TY_idx idx -> false
 
     | Ast.TY_iso tiso ->
         Array.fold_left
