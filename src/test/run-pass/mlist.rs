@@ -6,6 +6,6 @@ prog a
 
   main {
     auto x = nil();
-    // x = cons(10, cons(11, nil()));
+    x = cons(10, x);
   }
 }

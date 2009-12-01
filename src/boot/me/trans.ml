@@ -1638,6 +1638,8 @@ let trans_visitor
     let ttag =
       match ctor_ty with
           Ast.TY_fn ({Ast.sig_output_slot={Ast.slot_ty=Some (Ast.TY_tag ttag)}}, _) -> ttag
+        | Ast.TY_fn ({Ast.sig_output_slot={Ast.slot_ty=Some (Ast.TY_iso tiso)}}, _) ->
+            tiso.Ast.iso_group.(tiso.Ast.iso_index)
         | _ -> err (Some tagid) "unexpected type for tag constructor"
     in
     let slots = Array.map (fun sloti -> Hashtbl.find cx.ctxt_all_slots sloti.id) header_tup in

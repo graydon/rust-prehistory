@@ -208,6 +208,7 @@ let rec get_type_idxs (h:(int,unit)Hashtbl.t) (t:Ast.ty) : unit =
     | Ast.TY_type
     | Ast.TY_proc
     | Ast.TY_opaque _
+    | Ast.TY_iso _        (* NB: stop at iso binder. *)
     | Ast.TY_str -> ()
 
     | Ast.TY_tup ttup -> get_ty_tup_idxs h ttup
@@ -218,8 +219,6 @@ let rec get_type_idxs (h:(int,unit)Hashtbl.t) (t:Ast.ty) : unit =
     | Ast.TY_tag ttag -> get_ty_tag_idxs h ttag
     | Ast.TY_idx i ->
         Hashtbl.replace h i ()
-    | Ast.TY_iso tiso ->
-        Array.iter (get_ty_tag_idxs h) tiso.Ast.iso_group
 
     | Ast.TY_fn (tsig, _)
     | Ast.TY_prog tsig -> get_sig_idxs h tsig
@@ -300,11 +299,13 @@ let type_resolving_visitor
             (* FIXME: as in resolve_ty, recognize multiple forms of name here. *)
             Ast.slot_ty = Some (Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident))) } ->
             let (scopes, id, ty) = lookup_type_by_ident scopes ident in
-              begin
+              if List.mem id recur
+              then
                 match htab_search tag_node_to_idx id with
                     None -> default()
                   | Some idx -> { slot with Ast.slot_ty = Some (Ast.TY_idx idx) }
-              end
+              else
+                default()
         | _ -> default()
 
   and resolve_ty_sig
@@ -405,10 +406,12 @@ let type_resolving_visitor
           in
           let h = Hashtbl.create 0 in
             get_ty_tag_idxs h ttag;
-            if Hashtbl.length h = 0
-            then Ast.TY_tag ttag
-              (* FIXME: need join-an-iso combiner function. *)
-            else Ast.TY_iso { Ast.iso_index = 0; Ast.iso_group = [| ttag |] }
+            begin
+              match Hashtbl.length h with
+                  0 -> Ast.TY_tag ttag
+                | 1 -> Ast.TY_iso { Ast.iso_index = 0; Ast.iso_group = [| ttag |] }
+                | _ -> err None "Unimplemented mutually-recursive tag group"
+            end
 
       | Ast.TY_iso tiso ->
           Ast.TY_iso
@@ -461,8 +464,13 @@ let type_resolving_visitor
     begin
       try
         let ty = match (item.node, (ty_of_mod_item true item)) with
-            (Ast.MOD_ITEM_tag {Ast.decl_item=(_, ttag, nid)}, t) ->
-              resolve_ty [nid] (!scopes) t
+            (Ast.MOD_ITEM_tag {Ast.decl_item=(_, ttag, nid)},
+             Ast.TY_fn (tsig, taux)) ->
+              let input_slots = Array.map (resolve_slot [] (!scopes)) tsig.Ast.sig_input_slots in
+              let output_slot = resolve_slot [nid] (!scopes) tsig.Ast.sig_output_slot in
+                Ast.TY_fn ({tsig with
+                              Ast.sig_input_slots = input_slots;
+                              Ast.sig_output_slot = output_slot }, taux)
           | (_, t) ->
               resolve_ty [] (!scopes) t
         in
