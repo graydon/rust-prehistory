@@ -19,6 +19,12 @@ type intent =
 type quad_idx = int
 ;;
 
+type mem_ctrl =
+    MEM_rc_opaque of int
+  | MEM_rc_struct
+  | MEM_gc
+  | MEM_interior
+
 let trans_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
@@ -31,7 +37,6 @@ let trans_visitor
   in
 
   let (path:Ast.ident Stack.t) = Stack.create () in
-  let annotations = Hashtbl.create 0 in
   let block_layouts = Stack.create () in
   let curr_file = ref None in
   let curr_stmt = ref None in
@@ -75,8 +80,13 @@ let trans_visitor
     emit Il.Dead
   in
 
+  let annotations _ =
+    (emitter()).Il.emit_annotations
+  in
+
   let annotate (str:string) =
-    Hashtbl.add annotations (emitter()).Il.emit_pc str
+    let e = emitter() in
+      Hashtbl.add e.Il.emit_annotations e.Il.emit_pc str
   in
 
   let epilogue_jumps = Stack.create() in
@@ -136,6 +146,9 @@ let trans_visitor
     emit (Il.lea dst src)
   in
 
+  let ptr_at (addr:Il.addr) (pointee_ty:Ast.ty) : Il.typed_addr =
+    (addr, Il.ScalarTy (Il.AddrTy (referent_type abi pointee_ty)))
+  in
 
   let need_addr_cell (cell:Il.cell) : Il.typed_addr =
     match cell with
@@ -360,17 +373,8 @@ let trans_visitor
 
     let return_fixup (fix:fixup) (slot:Ast.slot)
         : (Il.cell * Ast.slot) =
-      let addr =
-        if pcrel_ok
-        then Il.Pcrel (fix, None)
-        else
-          let i = Asm.M_POS fix in
-            if abs_ok
-            then Il.Abs i
-            else
-              let ta = (Il.Abs i, slot_referent_type abi slot) in
-              let (reg, _) = force_to_reg (alias ta) in
-                Il.Based (reg, None)
+      let addr = (fixup_to_addr pcrel_ok abs_ok fix
+                    (slot_referent_type abi slot))
       in
         (Il.Addr (addr, (slot_referent_type abi slot)), slot)
     in
@@ -496,6 +500,96 @@ let trans_visitor
               | _ -> marker
           end
 
+  and fixup_to_addr
+      (pcrel_ok:bool)
+      (abs_ok:bool)
+      (fix:fixup)
+      (referent_ty:Il.referent_ty)
+      : Il.addr =
+    if pcrel_ok
+    then Il.Pcrel (fix, None)
+    else
+      let i = Asm.M_POS fix in
+        if abs_ok
+        then Il.Abs i
+        else
+          let ta = (Il.Abs i, referent_ty) in
+          let (reg, _) = force_to_reg (alias ta) in
+            Il.Based (reg, None)
+
+  and annotate_quads (name:string) : unit =
+    let e = emitter() in
+    let quads = e.Il.emit_quads in
+    let annotations = annotations() in
+    log cx "emitted quads for %s:" name;
+    for i = 0 to arr_max quads
+    do
+      if Hashtbl.mem annotations i
+      then
+        List.iter
+          (fun a -> log cx "// %s" a)
+          (List.rev (Hashtbl.find_all annotations i));
+      log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
+    done
+
+  and trans_glue_frame_entry (n_incoming_args:int) (n_outgoing_args:int) (spill:fixup) : unit =
+    let argsz = Int64.add cx.ctxt_abi.Abi.abi_implicit_args_sz (word_n n_incoming_args) in
+    let framesz = 0L in
+    let callsz = (word_n n_outgoing_args) in
+      push_new_emitter ();
+      iflog (fun _ -> annotate "prologue");
+      abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill callsz cx.ctxt_proc_to_c_fixup;
+      iflog (fun _ -> annotate "finished prologue");
+
+  and capture_emitted_glue (name:string) (fix:fixup) (spill:fixup) (g:glue) : unit =
+    let e = emitter() in
+      iflog (fun _ -> annotate_quads name);
+      let code = { code_fixup = fix;
+                   code_quads = e.Il.emit_quads;
+                   code_vregs_and_spill = Some (e.Il.emit_next_vreg, spill) }
+      in
+        htab_put cx.ctxt_glue_code g code
+
+  and trans_glue_frame_exit (name:string) (fix:fixup) (spill:fixup) (g:glue) : unit =
+    iflog (fun _ -> annotate "epilogue");
+    abi.Abi.abi_emit_fn_epilogue (emitter());
+    capture_emitted_glue name fix spill g;
+    pop_emitter ()
+
+  and get_drop_glue (ty:Ast.ty)
+      : fixup =
+    let g = GLUE_drop ty in
+      match htab_search cx.ctxt_glue_code g with
+          Some code -> code.code_fixup
+        | None ->
+            begin
+              let tyname = (Ast.fmt_to_str Ast.fmt_ty ty) in
+              let fix = new_fixup ("drop-glue: " ^ tyname) in
+              let spill = new_fixup ("drop-glue spill: " ^ tyname) in
+                trans_glue_frame_entry 1 1 spill;
+                let arg = ptr_at (fp_imm arg0_disp) ty in
+                  drop_ty ty (deref (Il.Addr arg));
+                  trans_glue_frame_exit ("drop-glue: " ^ tyname) fix spill g;
+                  fix
+            end
+
+  (* Mem-glue functions are either 'mark' or 'free', they take one pointer arg and
+   * reutrn nothing. *)
+  and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
+    let code = Il.CodeAddr (fixup_to_addr
+                              abi.Abi.abi_has_pcrel_code
+                              abi.Abi.abi_has_abs_code
+                              fix Il.OpaqueTy)
+    in
+    let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+      (* Arg0 is omitted as there's no output-slot for gc glue. *)
+      (* Arg1 is process-pointer, as usual. *)
+    let arg1_cell = Il.Addr (sp_imm (word_n 1), Il.ScalarTy (Il.voidptr_t)) in
+      (* Arg2 is the sole pointer we pass in. Hard-wire its address here. *)
+    let arg2_cell = Il.Addr (sp_imm (word_n 2), Il.ScalarTy (Il.voidptr_t)) in
+      mov arg1_cell (Il.Cell abi.Abi.abi_pp_cell);
+      mov arg2_cell (Il.Cell arg);
+      emit (Il.call vr code);
 
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
@@ -677,7 +771,7 @@ let trans_visitor
               end;
             let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
             let cell = cell_of_block_slot slot_id in
-              trans_drop_slot cell slot
+              drop_slot cell slot
         end
         block_slots;
       ignore (Stack.pop block_layouts)
@@ -760,10 +854,6 @@ let trans_visitor
 
   and trans_free (src:Il.cell) : unit =
     trans_upcall Abi.UPCALL_free [| Il.Cell src |]
-
-  and refcount_cell (n:int) (cell:Il.cell) : Il.cell =
-    let (addr, _) = deref_imm cell (word_n n) in
-      Il.Addr (addr, Il.ScalarTy word_ty)
 
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
     let (srccell, _) = trans_lval src INTENT_read in
@@ -877,137 +967,201 @@ let trans_visitor
       xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 32);
       Int64.add 1L (!xr)
 
-  and exterior_refcount_cell (cell:Il.cell) : Il.cell =
-    refcount_cell Abi.exterior_slot_field_refcnt cell
+  and exterior_body_off : int64 = word_n Abi.exterior_slot_field_body
 
-  and exterior_body_off = word_n Abi.exterior_slot_field_body
+  and refcount_cell (cell:Il.cell) (rc_off:int) : Il.cell =
+    let (rc_addr, _) = deref_imm cell (word_n rc_off) in
+    word_at rc_addr
+
+  and exterior_refcount_cell (cell:Il.cell) : Il.cell =
+    refcount_cell cell Abi.exterior_slot_field_refcnt
 
   and exterior_allocation_size (slot:Ast.slot) : int64 =
-    let layout = layout_slot abi 0L slot in
+    let layout = layout_ty abi 0L (slot_ty slot) in
       (Int64.add layout.layout_size exterior_body_off)
 
-  and slot_refcount_cell (cell:Il.cell) (slot:Ast.slot) : (Il.cell option) =
-    match slot_ty slot with
-        Ast.TY_port _ -> Some (refcount_cell Abi.port_field_refcnt cell)
-      | Ast.TY_chan _ -> Some (refcount_cell Abi.chan_field_refcnt cell)
-      | Ast.TY_proc -> Some (refcount_cell Abi.proc_field_refcnt cell)
-      (* Vecs and strs are pseudo-exterior. *)
-      | Ast.TY_vec _ -> Some (exterior_refcount_cell cell)
-      | Ast.TY_str -> Some (exterior_refcount_cell cell)
-      | _ ->
-          match slot.Ast.slot_mode with
-              Ast.MODE_exterior _ -> Some (exterior_refcount_cell cell)
-            | _ -> None
+  (* FIXME: this should really only return true when there's an exterior
+   * slot to be found somewhere in the guts of the object. 
+   *)
+  and ty_is_structured (t:Ast.ty) : bool =
+    match t with
+        Ast.TY_tup _
+      | Ast.TY_vec _
+      | Ast.TY_rec _
+      | Ast.TY_tag _
+      | Ast.TY_iso _
+      | Ast.TY_idx _ -> true
+      | _ -> false
+
+  and slot_mem_ctrl (cell:Il.cell) (slot:Ast.slot) : mem_ctrl =
+    if slot_is_cyclic [] slot
+    then MEM_gc
+    else
+      match slot_ty slot with
+          Ast.TY_port _ -> MEM_rc_opaque Abi.port_field_refcnt
+        | Ast.TY_chan _ -> MEM_rc_opaque Abi.chan_field_refcnt
+        | Ast.TY_proc -> MEM_rc_opaque Abi.proc_field_refcnt
+            (* Vecs and strs are pseudo-exterior. *)
+        | Ast.TY_vec _ -> MEM_rc_struct
+        | Ast.TY_str -> MEM_rc_opaque Abi.exterior_slot_field_refcnt
+        | _ ->
+            match slot.Ast.slot_mode with
+                Ast.MODE_exterior _ when ty_is_structured (slot_ty slot) ->
+                  MEM_rc_struct
+              | Ast.MODE_exterior _ ->
+                  MEM_rc_opaque Abi.exterior_slot_field_refcnt
+              | _ ->
+                  MEM_interior
 
   and drop_rec_entries
-      (addr:Il.addr)
+      (ta:Il.typed_addr)
       (entries:Ast.ty_rec)
       : unit =
+    let (addr, t) = ta in
     let layouts = layout_rec abi entries in
+      begin
+        match t with
+            Il.StructTy elts ->
+              assert (Array.length layouts = Array.length elts)
+          | _ -> assert false
+      end;
       Array.iteri
         begin
           fun i (_, (_, layout)) ->
             let (_, sub_slot) = entries.(i) in
             let disp = layout.layout_offset in
             let cell = wordptr_at (addr_add_imm addr disp) in
-              match slot_refcount_cell cell sub_slot with
-                  None -> ()
-                | Some rc ->
-                    drop_refcount_and_maybe_free rc cell sub_slot
+              drop_slot cell sub_slot
         end
         layouts
 
   and drop_tup_slots
-      (addr:Il.addr)
+      (ta:Il.typed_addr)
       (slots:Ast.ty_tup)
       : unit =
+    let (addr, t) = ta in
     let layouts = layout_tup abi slots in
+      begin
+        match t with
+            Il.StructTy elts ->
+              assert (Array.length layouts = Array.length elts)
+          | _ -> assert false
+      end;
       Array.iteri
         begin
           fun i layout ->
             let sub_slot = slots.(i) in
             let disp = layout.layout_offset in
             let cell = wordptr_at (addr_add_imm addr disp) in
-              match slot_refcount_cell cell sub_slot with
-                  None -> ()
-                | Some rc ->
-                    drop_refcount_and_maybe_free rc cell sub_slot
+              drop_slot cell sub_slot
         end
         layouts
 
+  and drop_tag
+        (ta:Il.typed_addr)
+        (tag:Ast.ty_tag)
+        : unit =
+      ()
 
-  and drop_refcount_and_maybe_free
-      (rc:Il.cell)
+  and drop_ty
+        (ty:Ast.ty)
+        (addr:Il.typed_addr)
+        : unit =
+        (* 
+         * FIXME: this will require some reworking if we support
+         * rec, tag or tup slots that fit in a vreg. It requires 
+         * addrs presently.
+         *)
+        match ty with
+            Ast.TY_rec entries -> drop_rec_entries addr entries;
+          | Ast.TY_tup slots -> drop_tup_slots addr slots
+          | Ast.TY_tag tag -> drop_tag addr tag;
+          | _ -> ()
+
+  and free_ty
+        (ty:Ast.ty)
+        (cell:Il.cell)
+        : unit =
+    match ty with
+        Ast.TY_port _ -> trans_del_port cell
+      | Ast.TY_chan _ -> trans_del_port cell
+      | Ast.TY_proc -> trans_del_proc cell
+      | _ -> trans_free cell
+
+
+  and drop_slot
       (cell:Il.cell)
       (slot:Ast.slot)
       : unit =
-    (iflog (fun _ -> annotate ("drop refcount and maybe free " ^
-                                 (Ast.fmt_to_str Ast.fmt_slot slot))));
+    let drop_refcount_then_mark_and_cjmp rc =
+      (iflog (fun _ -> annotate ("drop refcount and maybe free slot " ^
+                                   (Ast.fmt_to_str Ast.fmt_slot slot))));
       emit (Il.binary Il.SUB rc (Il.Cell rc) one);
       emit (Il.cmp (Il.Cell rc) zero);
       let j = mark () in
         emit (Il.jmp Il.JNE Il.CodeNone);
-        begin
-            match slot_ty slot with
-                Ast.TY_rec entries ->
-                  let (addr, _) = need_addr_cell cell in
-                  let ext_body_addr = addr_add_imm addr exterior_body_off in
-                    drop_rec_entries ext_body_addr entries;
-                    trans_free cell
-              | Ast.TY_tup slots ->
-                  let (addr, _) = need_addr_cell cell in
-                  let ext_body_addr = addr_add_imm addr exterior_body_off in
-                    drop_tup_slots ext_body_addr slots;
-                    trans_free cell
-              | Ast.TY_port _ -> trans_del_port cell;
-              | Ast.TY_chan _ -> trans_del_port cell;
-              | Ast.TY_proc -> trans_del_proc cell;
-              | _ -> trans_free cell
-        end;
-        patch j;
+        j
+    in
+    let ty = slot_ty slot in
+      match slot_mem_ctrl cell slot with
+          MEM_rc_opaque rc_off ->
+            (* Refcounted opaque objects we handle without glue functions. *)
+            let (rc_addr, _) = deref_imm cell (word_n rc_off) in
+            let rc = word_at rc_addr in
+            let j = drop_refcount_then_mark_and_cjmp rc in
+              free_ty ty cell;
+              patch j
 
+        | MEM_rc_struct ->
+            (* Refcounted "structured exterior" objects we handle via glue functions. *)
+            let rc = exterior_refcount_cell cell in
+            let j = drop_refcount_then_mark_and_cjmp rc in
+              let exterior_body = deref_imm cell exterior_body_off in
+                trans_call_mem_glue (get_drop_glue ty) (Il.Addr exterior_body);
+                trans_free cell;
+                patch j
 
-  and trans_drop_slot
-      (cell:Il.cell)
-      (slot:Ast.slot)
-      : unit =
-    match slot_refcount_cell cell slot with
-        Some rc ->
-          drop_refcount_and_maybe_free rc cell slot
-      | _ ->
-          begin
-            (* FIXME: this will require some reworking if we support
-             * rec or tup slots that fit in a vreg. It requires addrs
-             * presently. *)
-            match slot_ty slot with
-                Ast.TY_rec entries ->
-                  let (addr, _) = need_addr_cell cell in
-                    drop_rec_entries addr entries
-              | Ast.TY_tup slots ->
-                  let (addr, _) = need_addr_cell cell in
-                    drop_tup_slots addr slots
-              | _ -> ()
-            end
+        | MEM_interior when ty_is_structured ty ->
+            (iflog (fun _ -> annotate ("drop interior slot " ^
+                                         (Ast.fmt_to_str Ast.fmt_slot slot))));
+            let (addr, _) = need_addr_cell cell in
+            let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+              lea vr addr;
+              trans_call_mem_glue (get_drop_glue ty) vr
 
+        | MEM_interior ->
+            (* Interior allocation of all-interior value: nothing to do. *)
+            ()
+
+        | MEM_gc ->
+            (* The general sweep-phase will clean it up if dead. *)
+            (* FIXME: unroot. *)
+            ()
 
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
     iflog (fun _ -> annotate "init exterior: malloc");
     let sz = exterior_allocation_size slot in
       trans_malloc cell sz;
-      if slot_is_cyclic [] slot
-      then
-        begin
-          iflog (fun _ -> annotate "init exterior: load GC sweep-function pointer");
-          let rc = exterior_refcount_cell cell in
-          let fix = new_fixup ("GC sweep: " ^ (Ast.fmt_to_str Ast.fmt_slot slot)) in
-            lea rc (Il.Abs (Asm.M_POS fix))
-        end
-      else
-        begin
-          iflog (fun _ -> annotate "init exterior: load refcount");
-          let rc = exterior_refcount_cell cell in
-            mov rc one
-        end
+      match slot_mem_ctrl cell slot with
+          MEM_gc ->
+            begin
+              iflog (fun _ -> annotate "init exterior: load GC control word");
+              let rc = exterior_refcount_cell cell in
+              let fix = get_drop_glue (slot_ty slot) in
+                lea rc (Il.Abs (Asm.M_POS fix))
+            end
+
+        | MEM_rc_opaque rc_off ->
+              iflog (fun _ -> annotate "init exterior: load refcount");
+              let rc = refcount_cell cell rc_off in
+                mov rc one
+
+        | MEM_rc_struct ->
+            iflog (fun _ -> annotate "init exterior: load refcount");
+            let rc = exterior_refcount_cell cell in
+              mov rc one
+
+        | MEM_interior -> assert false
 
   and intent_str i =
     match i with
@@ -1137,18 +1291,28 @@ let trans_visitor
                  Ast.sprintf_slot src_slot)
         end;
     in
+    let lightweight_rc src_rc =
+      (* Lightweight copy: twiddle refcounts, move pointer. *)
+      anno "refcounted light";
+      emit (Il.binary Il.ADD src_rc (Il.Cell src_rc) one);
+      if not initialising
+      then
+        drop_slot dst dst_slot;
+      mov dst (Il.Cell src)
+    in
+
       assert (slot_ty src_slot = slot_ty dst_slot);
-      match (slot_refcount_cell src src_slot,
-             slot_refcount_cell dst dst_slot) with
-        | (Some src_rc, Some dst_rc)  ->
-            (* Lightweight copy: twiddle refcounts, move pointer. *)
-          anno "light";
-          emit (Il.binary Il.ADD src_rc (Il.Cell src_rc) one);
-          if not initialising
-          then
-            drop_refcount_and_maybe_free
-              dst_rc dst dst_slot;
-          mov dst (Il.Cell src)
+      match (slot_mem_ctrl src src_slot,
+             slot_mem_ctrl dst dst_slot) with
+        | (MEM_rc_opaque src_rc_off, MEM_rc_opaque _) ->
+            lightweight_rc (refcount_cell src src_rc_off)
+
+        | (MEM_rc_struct, MEM_rc_struct) ->
+            lightweight_rc (exterior_refcount_cell src)
+
+        | (MEM_gc, MEM_gc) ->
+            anno "gc light";
+            mov dst (Il.Cell src)
 
       | _ ->
           (* Heavyweight copy: duplicate the referent. *)
@@ -1312,19 +1476,19 @@ let trans_visitor
       trans_call (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell tsig in_slots arg_layouts None args
 
-  and trans_arg0 param_cell output_cell =
+  and trans_arg0 (param_cell:Il.cell) (output_cell:Il.cell) =
     (* Emit arg0 of any call: the output slot. *)
     trans_init_slot_from_cell
       param_cell (word_write_alias_slot abi)
       output_cell (word_slot abi)
 
-  and trans_arg1 param_cell =
+  and trans_arg1 (param_cell:Il.cell) =
     (* Emit arg1 or any call: the process pointer. *)
     trans_init_slot_from_cell
       param_cell (word_slot abi)
       abi.Abi.abi_pp_cell (word_slot abi)
 
-  and trans_argN n param_cell slots args =
+  and trans_argN n (param_cell:Il.cell) slots args =
     trans_init_slot_from_atom
       param_cell slots.(n)
       args.(n)
@@ -1344,7 +1508,7 @@ let trans_visitor
       (arg2:Il.cell option)
       (args:Ast.atom array)
       : unit =
-    let param_cell layout input_opt =
+    let param_cell layout input_opt : Il.cell =
       let param_addr = sp_imm arg_layouts.(layout).layout_offset in
       let param_referent_ty =
         match input_opt with
@@ -1394,7 +1558,7 @@ let trans_visitor
         emit (Il.call vr (code_of_cell callee_cell));
         for i = implicit_args to arr_max arg_layouts do
           iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
-          trans_drop_slot (param_cell i (Some (i-implicit_args))) in_slots.(i-implicit_args)
+          drop_slot (param_cell i (Some (i-implicit_args))) in_slots.(i-implicit_args)
         done
 
 
@@ -1572,20 +1736,7 @@ let trans_visitor
     in
     let item_code = Hashtbl.find cx.ctxt_file_code f in
       begin
-        iflog
-          begin
-            fun _ ->
-              log cx "emitted quads for %s:" name;
-              for i = 0 to arr_max quads
-              do
-                if Hashtbl.mem annotations i
-                then
-                  List.iter
-                    (fun a -> log cx "// %s" a)
-                    (List.rev (Hashtbl.find_all annotations i));
-                log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
-                done;
-          end;
+        iflog (fun _ -> annotate_quads name);
         let vr_s =
           match htab_search cx.ctxt_spill_fixups node with
               None -> (assert (n_vregs = 0); None)
@@ -1596,8 +1747,7 @@ let trans_visitor
                      code_vregs_and_spill = vr_s }
         in
           htab_put item_code node code
-      end;
-      Hashtbl.clear annotations
+      end
   in
 
   let trans_frame_entry (fnid:node_id) : unit =
