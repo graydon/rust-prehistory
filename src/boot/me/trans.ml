@@ -587,12 +587,18 @@ let trans_visitor
           Some code -> code.code_fixup
         | None ->
             begin
+              (* 
+               * Free-glue assumes we're looking at a pointer to an 
+               * exterior allocation with normal exterior layout. It's
+               * just a way to move drop+free out of leaf code. 
+               *)
               let tyname = (Ast.fmt_to_str Ast.fmt_ty ty) in
               let fix = new_fixup ("free-glue: " ^ tyname) in
               let spill = new_fixup ("free-glue spill: " ^ tyname) in
                 trans_glue_frame_entry 1 1 spill;
                 let (arg:Il.cell) = Il.Addr (ptr_at (fp_imm arg0_disp) ty) in
-                  trans_call_mem_glue (get_drop_glue ty) arg;
+                let exterior_body = deref_imm arg exterior_body_off in
+                  trans_call_mem_glue (get_drop_glue ty) (Il.Addr exterior_body);
                   trans_free arg;
                   trans_glue_frame_exit ("free-glue: " ^ tyname) fix spill g;
                   fix
@@ -1152,8 +1158,7 @@ let trans_visitor
             (* Refcounted "structured exterior" objects we handle via glue functions. *)
             let rc = exterior_refcount_cell cell in
             let j = drop_refcount_then_mark_and_cjmp rc in
-              let exterior_body = deref_imm cell exterior_body_off in
-                trans_call_mem_glue (get_free_glue ty) (Il.Addr exterior_body);
+                trans_call_mem_glue (get_free_glue ty) cell;
                 patch j
 
         | MEM_interior when ty_is_structured ty ->
