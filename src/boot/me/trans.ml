@@ -45,6 +45,13 @@ let trans_visitor
   let (word_sz:int64) = abi.Abi.abi_word_sz in
   let (word_bits:Il.bits) = abi.Abi.abi_word_bits in
   let (word_ty:Il.scalar_ty) = Il.ValTy word_bits in
+  let (word_ty_mach:ty_mach) =
+    match word_bits with
+        Il.Bits8 -> TY_u8
+      | Il.Bits16 -> TY_u16
+      | Il.Bits32 -> TY_u32
+      | Il.Bits64 -> TY_u64
+  in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
   let imm (i:int64) = Il.Imm (Asm.IMM i, word_ty) in
@@ -573,22 +580,51 @@ let trans_visitor
                   fix
             end
 
-  (* Mem-glue functions are either 'mark' or 'free', they take one pointer arg and
-   * reutrn nothing. *)
+  and get_free_glue (ty:Ast.ty)
+      : fixup =
+    let g = GLUE_free ty in
+      match htab_search cx.ctxt_glue_code g with
+          Some code -> code.code_fixup
+        | None ->
+            begin
+              let tyname = (Ast.fmt_to_str Ast.fmt_ty ty) in
+              let fix = new_fixup ("free-glue: " ^ tyname) in
+              let spill = new_fixup ("free-glue spill: " ^ tyname) in
+                trans_glue_frame_entry 1 1 spill;
+                let (arg:Il.cell) = Il.Addr (ptr_at (fp_imm arg0_disp) ty) in
+                  trans_call_mem_glue (get_drop_glue ty) arg;
+                  trans_free arg;
+                  trans_glue_frame_exit ("free-glue: " ^ tyname) fix spill g;
+                  fix
+            end
+
+  (* 
+   * Mem-glue functions are either 'mark', 'drop' or 'free', they take
+   * one pointer arg and reutrn nothing.
+   *)
+
+
+
+
   and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
     let code = Il.CodeAddr (fixup_to_addr
                               abi.Abi.abi_has_pcrel_code
                               abi.Abi.abi_has_abs_code
                               fix Il.OpaqueTy)
     in
+    let tsig = { Ast.sig_input_slots = [| interior_slot (Ast.TY_mach word_ty_mach) |];
+                 Ast.sig_input_constrs = [| |];
+                 Ast.sig_output_slot = interior_slot Ast.TY_nil }
+    in
+    let arg_layouts = layout_fn_call_tup abi tsig in
+    let arg_n n = sp_imm arg_layouts.(n).layout_offset in
+    let arg_n_cell n = Il.Addr (arg_n n, Il.OpaqueTy) in
     let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
       (* Arg0 is omitted as there's no output-slot for gc glue. *)
       (* Arg1 is process-pointer, as usual. *)
-    let arg1_cell = Il.Addr (sp_imm (word_n 1), Il.ScalarTy (Il.voidptr_t)) in
       (* Arg2 is the sole pointer we pass in. Hard-wire its address here. *)
-    let arg2_cell = Il.Addr (sp_imm (word_n 2), Il.ScalarTy (Il.voidptr_t)) in
-      mov arg1_cell (Il.Cell abi.Abi.abi_pp_cell);
-      mov arg2_cell (Il.Cell arg);
+      mov (arg_n_cell 1) (Il.Cell abi.Abi.abi_pp_cell);
+      mov (arg_n_cell 2) (Il.Cell arg);
       emit (Il.call vr code);
 
   (* trans_compare returns a quad number of the cjmp, which the caller
@@ -1117,8 +1153,7 @@ let trans_visitor
             let rc = exterior_refcount_cell cell in
             let j = drop_refcount_then_mark_and_cjmp rc in
               let exterior_body = deref_imm cell exterior_body_off in
-                trans_call_mem_glue (get_drop_glue ty) (Il.Addr exterior_body);
-                trans_free cell;
+                trans_call_mem_glue (get_free_glue ty) (Il.Addr exterior_body);
                 patch j
 
         | MEM_interior when ty_is_structured ty ->
@@ -1420,6 +1455,26 @@ let trans_visitor
               src_cell src_slot
 
 
+  and trans_init_structural_from_atoms
+      (dst:Il.cell) (dst_slots:Ast.slot array)
+      (atoms:Ast.atom array)
+      : unit =
+    let layouts = layout_tup abi dst_slots in
+    assert (Array.length layouts == Array.length atoms);
+    let (dst_addr, _) = need_addr_cell dst in
+    Array.iteri
+      begin
+        fun i layout ->
+          let disp = layout.layout_offset in
+          let sub_dst = addr_add_imm dst_addr disp in
+          let sub_slot = dst_slots.(i) in
+          let sub_rtype = slot_referent_type abi sub_slot in
+          let sub_dst_cell = Il.Addr (sub_dst, sub_rtype) in
+            trans_init_slot_from_atom sub_dst_cell sub_slot atoms.(i)
+      end
+      layouts
+
+
   and trans_init_slot_from_atom
       (dst:Il.cell) (dst_slot:Ast.slot)
       (atom:Ast.atom)
@@ -1613,31 +1668,30 @@ let trans_visitor
           else
               trans_copy false lv_dst e_src
 
-      | Ast.STMT_init_rec (dst, atab) ->
-          Array.iter
-            begin
-              fun (ident, _, atom) ->
-                let lval = (Ast.LVAL_ext
-                              (dst, (Ast.COMP_named
-                                       (Ast.COMP_ident ident))))
-                in
-                let expr = Ast.EXPR_atom atom in
-                  trans_copy true lval expr
-            end
-            atab
 
-      | Ast.STMT_init_tup (dst, atoms) ->
-          Array.iteri
-            begin
-              fun i (_, atom) ->
-                let lval = (Ast.LVAL_ext
-                              (dst, (Ast.COMP_named
-                                       (Ast.COMP_idx i))))
-                in
-                let expr = Ast.EXPR_atom atom in
-                  trans_copy true lval expr
-            end
-            atoms
+      | Ast.STMT_init_rec (dst, atab) ->
+          let (slot_cell, slot) = trans_lval dst INTENT_init in
+          let dst_slots =
+            match slot_ty slot with
+                Ast.TY_rec trec -> (Array.map (fun (_, slot) -> slot) trec)
+              | _ -> err (Some stmt.id) "non-rec destination type in stmt_init_rec"
+          in
+          let atoms = Array.map (fun (_, _, atom) -> atom) atab in
+          let dst_cell = deref_slot slot_cell slot INTENT_init in
+            trans_init_structural_from_atoms dst_cell dst_slots atoms
+
+
+      | Ast.STMT_init_tup (dst, mode_atoms) ->
+          let (slot_cell, slot) = trans_lval dst INTENT_init in
+          let dst_slots =
+            match slot_ty slot with
+                Ast.TY_tup ttup -> ttup
+              | _ -> err (Some stmt.id) "non-tup destination type in stmt_init_tup"
+          in
+          let atoms = Array.map (fun (_, atom) -> atom) mode_atoms in
+          let dst_cell = deref_slot slot_cell slot INTENT_init in
+            trans_init_structural_from_atoms dst_cell dst_slots atoms
+
 
       | Ast.STMT_init_str (dst, s) ->
           trans_init_str dst s

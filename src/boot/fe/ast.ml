@@ -570,7 +570,7 @@ and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) opt
     begin
       match idents with
           None -> ()
-        | Some ids -> fmt_ident ff ids.(i)
+        | Some ids -> (fmt ff " "; fmt_ident ff ids.(i))
     end;
   done;
   fmt ff "@])"

@@ -74,7 +74,7 @@ get_logbits()
             bits |= LOG_COMM;
         if (strstr(c, "proc"))
             bits |= LOG_PROC;
-        if (strstr(c, "upcall"))
+        if (strstr(c, "up"))
             bits |= LOG_UPCALL;
         if (strstr(c, "rt"))
             bits |= LOG_RT;

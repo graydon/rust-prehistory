@@ -22,6 +22,7 @@ type glue =
   | GLUE_mark of Ast.ty
   | GLUE_mark_frame of node_id
   | GLUE_drop of Ast.ty
+  | GLUE_free of Ast.ty
   | GLUE_shallow_copy of Ast.ty
   | GLUE_deep_copy of Ast.ty
   | GLUE_compare of Ast.ty
