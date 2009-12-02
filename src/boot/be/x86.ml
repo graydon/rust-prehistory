@@ -1024,6 +1024,8 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
                   match j.Il.jmp_op with
                     | Il.JC  -> (0x72, 0x82)
                     | Il.JNC -> (0x73, 0x83)
+                    | Il.JZ  -> (0x74, 0x84)
+                    | Il.JNZ -> (0x75, 0x85)
                     | Il.JO  -> (0x70, 0x80)
                     | Il.JNO -> (0x71, 0x81)
                     | Il.JE  -> (0x74, 0x84)

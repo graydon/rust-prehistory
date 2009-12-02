@@ -103,6 +103,7 @@ type unop =
 
 type jmpop =
     JE | JNE
+  | JZ | JNZ (* FIXME: Synonyms with JE/JNE in x86, others? *)
   | JL | JLE | JG | JGE (* Signed.   *)
   | JB | JBE | JA | JAE (* Unsigned. *)
   | JC | JNC | JO | JNO
@@ -433,6 +434,8 @@ let string_of_jmpop (op:jmpop) : string =
     | JNC ->"jnc"
     | JO -> "jo"
     | JNO -> "jno"
+    | JZ -> "jz"
+    | JNZ ->"jnz"
     | JMP -> "jmp"
 ;;
 

@@ -563,53 +563,55 @@ let trans_visitor
     capture_emitted_glue name fix spill g;
     pop_emitter ()
 
-  and get_drop_glue (ty:Ast.ty)
-      : fixup =
-    let g = GLUE_drop ty in
-      match htab_search cx.ctxt_glue_code g with
-          Some code -> code.code_fixup
-        | None ->
-            begin
-              let tyname = (Ast.fmt_to_str Ast.fmt_ty ty) in
-              let fix = new_fixup ("drop-glue: " ^ tyname) in
-              let spill = new_fixup ("drop-glue spill: " ^ tyname) in
-                trans_glue_frame_entry 1 1 spill;
-                let arg = ptr_at (fp_imm arg0_disp) ty in
-                  drop_ty ty (deref (Il.Addr arg));
-                  trans_glue_frame_exit ("drop-glue: " ^ tyname) fix spill g;
-                  fix
-            end
-
-  and get_free_glue (ty:Ast.ty)
-      : fixup =
-    let g = GLUE_free ty in
-      match htab_search cx.ctxt_glue_code g with
-          Some code -> code.code_fixup
-        | None ->
-            begin
-              (* 
-               * Free-glue assumes we're looking at a pointer to an 
-               * exterior allocation with normal exterior layout. It's
-               * just a way to move drop+free out of leaf code. 
-               *)
-              let tyname = (Ast.fmt_to_str Ast.fmt_ty ty) in
-              let fix = new_fixup ("free-glue: " ^ tyname) in
-              let spill = new_fixup ("free-glue spill: " ^ tyname) in
-                trans_glue_frame_entry 1 1 spill;
-                let (arg:Il.cell) = Il.Addr (ptr_at (fp_imm arg0_disp) ty) in
-                let exterior_body = deref_imm arg exterior_body_off in
-                  trans_call_mem_glue (get_drop_glue ty) (Il.Addr exterior_body);
-                  trans_free arg;
-                  trans_glue_frame_exit ("free-glue: " ^ tyname) fix spill g;
-                  fix
-            end
-
   (* 
    * Mem-glue functions are either 'mark', 'drop' or 'free', they take
    * one pointer arg and reutrn nothing.
    *)
 
+  and get_mem_glue (g:glue) (ty:Ast.ty) (prefix:unit -> string) (inner:Il.cell -> unit) : fixup =
+    match htab_search cx.ctxt_glue_code g with
+        Some code -> code.code_fixup
+      | None ->
+          begin
+            let prefix = prefix () in
+            let fix = new_fixup ("glue: " ^ prefix) in
+            let spill = new_fixup ("glue spill: " ^ prefix) in
+                trans_glue_frame_entry 1 1 spill;
+                let arg = Il.Addr (ptr_at (fp_imm arg0_disp) ty) in
+                  inner arg;
+                  trans_glue_frame_exit ("glue: " ^ prefix) fix spill g;
+                  fix
+            end
 
+  and get_drop_glue (ty:Ast.ty)
+      : fixup =
+    let g = GLUE_drop ty in
+    let prefix _ = "drop " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
+    let inner arg = drop_ty ty (deref arg) in
+      get_mem_glue g ty prefix inner
+
+  and get_free_glue (ty:Ast.ty)
+      : fixup =
+    let g = GLUE_free ty in
+    let prefix _ = "free " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
+    let inner arg =
+      (* 
+       * Free-glue assumes we're looking at a pointer to an 
+       * exterior allocation with normal exterior layout. It's
+       * just a way to move drop+free out of leaf code. 
+       *)
+      let exterior_body = deref_imm arg exterior_body_off in
+        trans_call_mem_glue (get_drop_glue ty) (Il.Addr exterior_body);
+        trans_free arg;
+    in
+      get_mem_glue g ty prefix inner
+
+  and get_mark_glue (ty:Ast.ty)
+      : fixup =
+    let g = GLUE_mark ty in
+    let prefix _ = "mark " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
+    let inner arg = mark_ty ty (deref arg) in
+      get_mem_glue g ty prefix inner
 
 
   and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
@@ -1055,9 +1057,10 @@ let trans_visitor
               | _ ->
                   MEM_interior
 
-  and drop_rec_entries
+  and iter_rec_slots
       (ta:Il.typed_addr)
       (entries:Ast.ty_rec)
+      (f:Il.cell -> Ast.slot -> unit)
       : unit =
     let (addr, t) = ta in
     let layouts = layout_rec abi entries in
@@ -1073,13 +1076,14 @@ let trans_visitor
             let (_, sub_slot) = entries.(i) in
             let disp = layout.layout_offset in
             let cell = wordptr_at (addr_add_imm addr disp) in
-              drop_slot cell sub_slot
+              f cell sub_slot
         end
         layouts
 
-  and drop_tup_slots
+  and iter_tup_slots
       (ta:Il.typed_addr)
       (slots:Ast.ty_tup)
+      (f:Il.cell -> Ast.slot -> unit)
       : unit =
     let (addr, t) = ta in
     let layouts = layout_tup abi slots in
@@ -1095,19 +1099,21 @@ let trans_visitor
             let sub_slot = slots.(i) in
             let disp = layout.layout_offset in
             let cell = wordptr_at (addr_add_imm addr disp) in
-              drop_slot cell sub_slot
+              f cell sub_slot
         end
         layouts
 
-  and drop_tag
+  and iter_tag_slots
         (ta:Il.typed_addr)
         (tag:Ast.ty_tag)
+        (f:Il.cell -> Ast.slot -> unit)
         : unit =
       ()
 
-  and drop_ty
+  and iter_ty_slots
         (ty:Ast.ty)
         (addr:Il.typed_addr)
+        (f:Il.cell -> Ast.slot -> unit)
         : unit =
         (* 
          * FIXME: this will require some reworking if we support
@@ -1115,10 +1121,22 @@ let trans_visitor
          * addrs presently.
          *)
         match ty with
-            Ast.TY_rec entries -> drop_rec_entries addr entries;
-          | Ast.TY_tup slots -> drop_tup_slots addr slots
-          | Ast.TY_tag tag -> drop_tag addr tag;
+            Ast.TY_rec entries -> iter_rec_slots addr entries f
+          | Ast.TY_tup slots -> iter_tup_slots addr slots f
+          | Ast.TY_tag tag -> iter_tag_slots addr tag f
           | _ -> ()
+
+  and drop_ty
+      (ty:Ast.ty)
+      (addr:Il.typed_addr)
+      : unit =
+      iter_ty_slots ty addr drop_slot
+
+  and mark_ty
+      (ty:Ast.ty)
+      (addr:Il.typed_addr)
+      : unit =
+    iter_ty_slots ty addr mark_slot
 
   and free_ty
         (ty:Ast.ty)
@@ -1130,6 +1148,37 @@ let trans_visitor
       | Ast.TY_proc -> trans_del_proc cell
       | _ -> trans_free cell
 
+  and mark_slot
+      (cell:Il.cell)
+      (slot:Ast.slot)
+      : unit =
+    let ty = slot_ty slot in
+      match slot_mem_ctrl cell slot with
+          MEM_gc ->
+            (iflog (fun _ -> annotate ("mark GC slot " ^
+                                         (Ast.fmt_to_str Ast.fmt_slot slot))));
+            let gc_word = exterior_refcount_cell cell in
+            let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+              (* if this has been marked already, jump to exit.*)
+              emit (Il.binary Il.AND vr (Il.Cell gc_word) one);
+              let j = mark () in
+                emit (Il.jmp Il.JNZ Il.CodeNone);
+                (* Set mark bit in allocation header. *)
+                emit (Il.binary Il.OR gc_word (Il.Cell gc_word) one);
+                (* Iterate over exterior slots marking outgoing links. *)
+                let exterior_body = deref_imm cell exterior_body_off in
+                  trans_call_mem_glue (get_mark_glue ty) (Il.Addr exterior_body);
+                  patch j
+
+        | MEM_interior when ty_is_structured ty ->
+            (iflog (fun _ -> annotate ("mark interior slot " ^
+                                         (Ast.fmt_to_str Ast.fmt_slot slot))));
+            let (addr, _) = need_addr_cell cell in
+            let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+              lea vr addr;
+              trans_call_mem_glue (get_mark_glue ty) cell
+
+        | _ -> ()
 
   and drop_slot
       (cell:Il.cell)
