@@ -2,12 +2,17 @@
 
 prog a
 {
+  let chan[int] c;
+  init(port[int] p) -> (){
+    c = chan(p);
+  }
   main {
       log "proc a";
       log "proc a";
       log "proc a";
       log "proc a";
       log "proc a";
+      c <| 10;
   }
 }
 
@@ -25,16 +30,25 @@ prog root
   main {
     let int n = 2 + 3 * 7;
     let str s = "hello there";
-    spawn a();
-    spawn b();
+    let port[int] p = port();
+    spawn a(p);
+    spawn b(p);
     let int x = 10;
     x = g(n,s);
     log x;
+    n <- p;
+    n <- p;
+    // FIXME: use signal-channel for this.
+    log "children finished, root finishing";
   }
 }
 
 prog b
 {
+  let chan[int] c;
+  init(port[int] p) -> (){
+    c = chan(p);
+  }
   main {
       log "proc b";
       log "proc b";
@@ -42,5 +56,6 @@ prog b
       log "proc b";
       log "proc b";
       log "proc b";
+      c <| 10;
   }
 }
