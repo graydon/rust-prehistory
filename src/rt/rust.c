@@ -610,6 +610,12 @@ static void
 del_stk(rust_rt_t *rt, stk_seg_t *stk)
 {
     stk_seg_t *nxt = 0;
+
+    /* Rewind to bottom-most stk segment. */
+    while (stk->prev)
+        stk = stk->prev;
+
+    /* Then free forwards. */
     do {
         nxt = stk->next;
         logptr(rt, "freeing stk segment", (uintptr_t)stk);
@@ -1445,8 +1451,10 @@ rust_main_loop(rust_prog_t *prog,
         xlog(rt, LOG_MEM,
              "sp:0x%" PRIxPTR ", "
              "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
+             "stk->prev:0x%" PRIxPTR ", stk->next=0x%" PRIxPTR ", "
              "prev_sp:0x%" PRIxPTR ", " "prev_fp:0x%" PRIxPTR,
              proc->sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
+             proc->stk->prev, proc->stk->next,
              proc->stk->prev_sp, proc->stk->prev_fp);
         */
         I(rt, proc->sp >= (uintptr_t) &proc->stk->data[0]);

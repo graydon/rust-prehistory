@@ -506,6 +506,11 @@ let fn_prologue
   in
     (* We must have room to save regs on entry. *)
     save_callee_saves e;
+
+    (* Save pre-grow esp and ebp to esi and edi, for use after-the-grow.      *)
+    mov (rc esi) (ro esp);                        (* esi = esp                *)
+    mov (rc edi) (ro ebp);                        (* edi = ebp                *)
+
     mov (rc ebp) (ro esp);                        (* Need an fp to do anything   *)
 
     mov (rc eax) (ro esp);                        (* eax = esp               *)
@@ -525,10 +530,6 @@ let fn_prologue
     let jmp_pc = e.Il.emit_pc in
 
       emit (Il.jmp Il.JBE Il.CodeNone);
-
-      (* Save pre-grow esp and ebp to esi and edi, for use after-the-grow.      *)
-      mov (rc esi) (ro esp);                        (* esi = esp                *)
-      mov (rc edi) (ro esp);                        (* edi = ebp                *)
 
       emit_upcall_full
         (h eax)
