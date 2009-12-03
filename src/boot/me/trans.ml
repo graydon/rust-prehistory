@@ -256,6 +256,10 @@ let trans_visitor
     deref_off ptr (Asm.IMM imm)
   in
 
+  let pp_imm (imm:int64) : Il.typed_addr =
+    deref_imm abi.Abi.abi_pp_cell imm
+  in
+
   let cell_vreg_num (vr:(int option) ref) : int =
     match !vr with
         None ->
@@ -600,7 +604,7 @@ let trans_visitor
        * exterior allocation with normal exterior layout. It's
        * just a way to move drop+free out of leaf code. 
        *)
-      let exterior_body = deref_imm arg exterior_body_off in
+      let exterior_body = deref_imm arg exterior_rc_body_off in
         trans_call_mem_glue (get_drop_glue ty) (Il.Addr exterior_body);
         trans_free arg;
     in
@@ -1011,18 +1015,29 @@ let trans_visitor
       xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 32);
       Int64.add 1L (!xr)
 
-  and exterior_body_off : int64 = word_n Abi.exterior_slot_field_body
+  and exterior_rc_body_off : int64 = word_n Abi.exterior_rc_slot_field_body
+  and exterior_gc_body_off : int64 = word_n Abi.exterior_gc_slot_field_body
 
-  and refcount_cell (cell:Il.cell) (rc_off:int) : Il.cell =
-    let (rc_addr, _) = deref_imm cell (word_n rc_off) in
+  and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =
+    let (rc_addr, _) = deref_imm cell (word_n off) in
     word_at rc_addr
 
-  and exterior_refcount_cell (cell:Il.cell) : Il.cell =
-    refcount_cell cell Abi.exterior_slot_field_refcnt
+  and exterior_rc_cell (cell:Il.cell) : Il.cell =
+    exterior_ctrl_cell cell Abi.exterior_rc_slot_field_refcnt
 
-  and exterior_allocation_size (slot:Ast.slot) : int64 =
+  and exterior_gc_ctrl_cell (cell:Il.cell) : Il.cell =
+    exterior_ctrl_cell cell Abi.exterior_gc_slot_field_ctrl
+
+  and exterior_gc_next_cell (cell:Il.cell) : Il.cell =
+    exterior_ctrl_cell cell Abi.exterior_gc_slot_field_next
+
+  and exterior_gc_allocation_size (slot:Ast.slot) : int64 =
     let layout = layout_ty abi 0L (slot_ty slot) in
-      (Int64.add layout.layout_size exterior_body_off)
+      (Int64.add layout.layout_size exterior_gc_body_off)
+
+  and exterior_rc_allocation_size (slot:Ast.slot) : int64 =
+    let layout = layout_ty abi 0L (slot_ty slot) in
+      (Int64.add layout.layout_size exterior_rc_body_off)
 
   (* FIXME: this should really only return true when there's an exterior
    * slot to be found somewhere in the guts of the object. 
@@ -1047,13 +1062,13 @@ let trans_visitor
         | Ast.TY_proc -> MEM_rc_opaque Abi.proc_field_refcnt
             (* Vecs and strs are pseudo-exterior. *)
         | Ast.TY_vec _ -> MEM_rc_struct
-        | Ast.TY_str -> MEM_rc_opaque Abi.exterior_slot_field_refcnt
+        | Ast.TY_str -> MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
         | _ ->
             match slot.Ast.slot_mode with
                 Ast.MODE_exterior _ when ty_is_structured (slot_ty slot) ->
                   MEM_rc_struct
               | Ast.MODE_exterior _ ->
-                  MEM_rc_opaque Abi.exterior_slot_field_refcnt
+                  MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
               | _ ->
                   MEM_interior
 
@@ -1157,7 +1172,7 @@ let trans_visitor
           MEM_gc ->
             (iflog (fun _ -> annotate ("mark GC slot " ^
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
-            let gc_word = exterior_refcount_cell cell in
+            let gc_word = exterior_gc_ctrl_cell cell in
             let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
               (* if this has been marked already, jump to exit.*)
               emit (Il.binary Il.AND vr (Il.Cell gc_word) one);
@@ -1166,7 +1181,7 @@ let trans_visitor
                 (* Set mark bit in allocation header. *)
                 emit (Il.binary Il.OR gc_word (Il.Cell gc_word) one);
                 (* Iterate over exterior slots marking outgoing links. *)
-                let exterior_body = deref_imm cell exterior_body_off in
+                let exterior_body = deref_imm cell exterior_gc_body_off in
                   trans_call_mem_glue (get_mark_glue ty) (Il.Addr exterior_body);
                   patch j
 
@@ -1205,7 +1220,7 @@ let trans_visitor
 
         | MEM_rc_struct ->
             (* Refcounted "structured exterior" objects we handle via glue functions. *)
-            let rc = exterior_refcount_cell cell in
+            let rc = exterior_rc_cell cell in
             let j = drop_refcount_then_mark_and_cjmp rc in
                 trans_call_mem_glue (get_free_glue ty) cell;
                 patch j
@@ -1227,28 +1242,43 @@ let trans_visitor
             (* FIXME: unroot. *)
             ()
 
+  and exterior_body_off (cell:Il.cell) (slot:Ast.slot) : int64 =
+      match slot_mem_ctrl cell slot with
+          MEM_gc -> exterior_gc_body_off
+        | MEM_rc_struct -> exterior_rc_body_off
+        | MEM_rc_opaque _
+        | MEM_interior -> assert false
+
+  (* Returns the offset of the slot-body in the initialized allocation. *)
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
-    iflog (fun _ -> annotate "init exterior: malloc");
-    let sz = exterior_allocation_size slot in
-      trans_malloc cell sz;
       match slot_mem_ctrl cell slot with
           MEM_gc ->
-            begin
-              iflog (fun _ -> annotate "init exterior: load GC control word");
-              let rc = exterior_refcount_cell cell in
+            iflog (fun _ -> annotate "init GC exterior: malloc");
+            let sz = exterior_gc_allocation_size slot in
+              trans_malloc cell sz;
+              iflog (fun _ -> annotate "init GC exterior: load control word");
+              let ctrl = exterior_gc_ctrl_cell cell in
               let fix = get_drop_glue (slot_ty slot) in
-                lea rc (Il.Abs (Asm.M_POS fix))
-            end
+                lea ctrl (Il.Abs (Asm.M_POS fix));
+                iflog (fun _ -> annotate "init GC exterior: load next-pointer");
+                let next = exterior_gc_next_cell cell in
+                  mov next (Il.Cell (Il.Addr (pp_imm (word_n Abi.proc_field_gc_alloc_chain))))
 
         | MEM_rc_opaque rc_off ->
-              iflog (fun _ -> annotate "init exterior: load refcount");
-              let rc = refcount_cell cell rc_off in
+            iflog (fun _ -> annotate "init RC exterior: malloc");
+            let sz = exterior_rc_allocation_size slot in
+              trans_malloc cell sz;
+              iflog (fun _ -> annotate "init RC exterior: load refcount");
+              let rc = exterior_ctrl_cell cell rc_off in
                 mov rc one
 
         | MEM_rc_struct ->
-            iflog (fun _ -> annotate "init exterior: load refcount");
-            let rc = exterior_refcount_cell cell in
-              mov rc one
+            iflog (fun _ -> annotate "init RC exterior: malloc");
+            let sz = exterior_rc_allocation_size slot in
+              trans_malloc cell sz;
+              iflog (fun _ -> annotate "init RC exterior: load refcount");
+              let rc = exterior_rc_cell cell in
+                mov rc one
 
         | MEM_interior -> assert false
 
@@ -1275,13 +1305,13 @@ let trans_visitor
         match intent with
             INTENT_init ->
               init_exterior_slot cell slot;
-              deref_imm cell exterior_body_off
+              deref_imm cell (exterior_body_off cell slot)
 
           | INTENT_write ->
-              deref_imm cell exterior_body_off
+              deref_imm cell (exterior_body_off cell slot)
 
           | INTENT_read ->
-              deref_imm cell exterior_body_off
+              deref_imm cell (exterior_body_off cell slot)
       in
         (addr, body_ty)
 
@@ -1394,10 +1424,10 @@ let trans_visitor
       match (slot_mem_ctrl src src_slot,
              slot_mem_ctrl dst dst_slot) with
         | (MEM_rc_opaque src_rc_off, MEM_rc_opaque _) ->
-            lightweight_rc (refcount_cell src src_rc_off)
+            lightweight_rc (exterior_ctrl_cell src src_rc_off)
 
         | (MEM_rc_struct, MEM_rc_struct) ->
-            lightweight_rc (exterior_refcount_cell src)
+            lightweight_rc (exterior_rc_cell src)
 
         | (MEM_gc, MEM_gc) ->
             anno "gc light";

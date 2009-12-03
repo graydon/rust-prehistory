@@ -84,6 +84,7 @@ type ctxt =
 
       (* Mutability and GC stuff. *)
       ctxt_mutable_slot_referent: (node_id,unit) Hashtbl.t;
+      ctxt_frame_has_gc_roots: (node_id,unit) Hashtbl.t;
 
       (* Typestate-y stuff. *)
       ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
@@ -127,6 +128,7 @@ let new_ctxt sess abi crate =
     ctxt_lval_to_referent = Hashtbl.create 0;
 
     ctxt_mutable_slot_referent = Hashtbl.create 0;
+    ctxt_frame_has_gc_roots = Hashtbl.create 0;
 
     ctxt_constrs = Hashtbl.create 0;
     ctxt_constr_ids = Hashtbl.create 0;

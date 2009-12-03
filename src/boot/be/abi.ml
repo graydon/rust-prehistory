@@ -69,7 +69,9 @@ let proc_field_state = proc_field_sp + 1;;
 let proc_field_idx = proc_field_state + 1;;
 let proc_field_refcnt = proc_field_idx + 1;;
 let proc_field_chans = proc_field_refcnt + 1;;
-let proc_field_upcall_code = proc_field_chans + 1;;
+let proc_field_gc_frame_chain = proc_field_chans + 1;;
+let proc_field_gc_alloc_chain = proc_field_gc_frame_chain + 1;;
+let proc_field_upcall_code = proc_field_gc_alloc_chain + 1;;
 let proc_field_upcall_args = proc_field_upcall_code + 1;;
 
 let max_upcall_args = 8;;
@@ -79,8 +81,13 @@ let proc_field_curr_mem = proc_field_mem_budget + 1;;
 let proc_field_tick_budget = proc_field_curr_mem + 1;;
 let proc_field_curr_ticks = proc_field_tick_budget + 1;;
 
-let exterior_slot_field_refcnt = 0;;
-let exterior_slot_field_body = 1;;
+let exterior_rc_slot_field_refcnt = 0;;
+let exterior_rc_slot_field_body = 1;;
+
+let exterior_gc_slot_field_ctrl = 0;;
+let exterior_gc_slot_field_next = 1;;
+let exterior_gc_slot_field_body = 2;;
+
 let port_field_refcnt = 0;;
 let chan_field_refcnt = 1;;
 
@@ -97,6 +104,10 @@ let stk_field_data = stk_field_limit + 1;;
 let proc_field_data = proc_field_curr_ticks + 1;;
 
 let rt_field_sp = 0;;
+
+let gc_info_field_prev = -0;;
+let gc_info_field_mark_frame = -1;;
+let gc_info_size = 2;;
 
 type abi =
   {

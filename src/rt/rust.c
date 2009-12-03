@@ -189,37 +189,63 @@ struct rust_prog {
  *
  *  - Every value (transitively) containing to a mutable slot
  *    is a gc_val.
+ *
  *  - gc_vals come from the same simple allocator as all other
  *    values but undergo different storage management.
- *  - When a gc_val is allocated, a pointer to it is pushed on
- *    the per-proc gc_heap vector.
- *  - Like rc_vals, gc_vals have an extra word at their head.
- *  - The word at the head of a gc_val is not used as a refcount;
- *    instead it is a pointer to a gc_fns struct, with the low bit
+ *
+ *  - Any frame that has pointers to gc_vals in its slots (IOW
+ *    "has GC roots") has 2 frame-slots initialized on entry:
+ *
+ *     fp[-1] = mark-frame-chain function
+ *     fp[-2] = previous-GC-fp
+ *
+ *  - The proc has a gc_frame_chain field pointing to the topmost GC fp.
+ *    This means that you can quickly walk the list of all frames;
+ *    with GC roots. The topmost mark or sweep function will, in fact,
+ *    automatically chase through this list; all you have to do is
+ *    call the top one.
+ *
+ *  - Like gc_vals have *two* extra words at their head, not one.
+ *
+ *  - The first word at the head of a gc_val is not used as a refcount;
+ *    instead it is a pointer to a sweep function, with the low bit
  *    of that pointer used as a mark bit.
- *  - In addition to the per-proc gc_heap vector, there is a per-proc
- *    gc_frames vector. This vector stores gc_frame values, each of
- *    which is a (fp, mark_fn) pair that represent those frames on the
- *    stack that actually have pointers to gc_vals in local slots.
- *    Most frames, we assume, do not have any gc_val pointers.
+ *
+ *  - The second word at the head of a gc_val is a linked-list pointer
+ *    to the gc_val that was allocated just before it. Following this
+ *    list traces through all the currently active gc_vals in a proc.
+ *
+ *  - The proc has a gc_alloc_chain field that points to the most-recent
+ *    gc_val allocated.
  *
  *  - GC proceeds as follows:
- *    - The proc asks its runtime for its gc_frames.
- *    - The proc iterates over the gc_frame values, calling the
- *      function in the mark function with the fp value as argument.
- *    - The proc asks its runtime for its gc_heap. This recursively
- *      (depth-first) marks the reachable portion of the heap. There
- *      is no "special gc state" at work here; the proc looks like it's
- *      running normal code that happens to not perform any gc_val
- *      allocation or mutation. Mark-bit twiddling is open-coded into
- *      all the (recursive) mark functions.
- *    - The proc iterates over the gc_heap entries; for each entry
- *      entry it checks the mark bit and, if unmarked, it calls the
- *      gc_fn to sweep the cell (if this is nonempty). Sweeping a gc_val
- *      involves dropping refcounts on all its rc_val pointers, and if
- *      *their* refcount hits zero, recurring into their sweep fn
- *      (which is statically known in the reference-holder, no need to
- *      to indirect through a gc_fn table).
+ *
+ *    - The proc asks its runtime for its gc_frame_chain.
+ *
+ *    - The proc calls gc_frame_chain[-1](fp=gc_frame_chain) which
+ *      marks the frame and then tail-calls to fp[-2][-1](fp=fp[-2]),
+ *      recursively.  this marks all the frames with GC roots (each of
+ *      those functions in turn may recursively call into the GC
+ *      graph, that's for the mark glue to decide).
+ *
+ *    - The proc then asks its runtime for its gc_alloc_chain.
+ *
+ *    - The proc calls gc_alloc_chain[0](gc_ptr=&gc_alloc_chain),
+ *      which sweeps the allocation. Sweeping involves checking to see
+ *      if the gc_val at *gc_ptr was marked. If not, it loads
+ *      (*gc_ptr)[1] into tmp, calls drop_ty(*gc_ptr) then
+ *      free(*gc_ptr), then *gc_ptr=tmp and recurs. If marked, it
+ *      loads gc_ptr[1] and recurs. The key point is that it has to
+ *      drop outgoing links into the refcount graph.
+ *
+ *    - Note that there is no "special gc state" at work here; the
+ *      proc looks like it's running normal code that happens to not
+ *      perform any gc_val allocation. Mark-bit twiddling is
+ *      open-coded into all the (recursive) mark functions, which know
+ *      their contents; we only have to do O(gc-frames) indirect calls
+ *      to mark, the rest are static. Sweeping costs O(gc-heap)
+ *      indirect calls, unfortunately, because the set of sweep
+ *      functions to call is arbitrary based on allocation order.
  *
  */
 
@@ -233,6 +259,9 @@ struct rust_proc {
     size_t idx;
     size_t refcnt;
     rust_chan_t *chans;
+
+    uintptr_t gc_frame_chain;  /* linked list of GC frames.        */
+    uintptr_t gc_alloc_chain;  /* linked list of GC allocations.   */
 
     /* Parameter space for upcalls. */
     /*

@@ -69,6 +69,8 @@ let layout_visitor
    *     |return pc pushed by machine |
    *     |plus any callee-save stuff  |
    *     +----------------------------+ <-- fp
+   *     |(optional gc info)          |
+   *     |...                         |
    *     |frame-allocated stuff       |
    *     |determined in resolve       |
    *     |laid out in layout          |
@@ -315,7 +317,17 @@ let layout_visitor
     let stk = Stack.top block_stacks in
     let off =
       if Stack.is_empty stk
-      then 0L
+      then
+        (*
+         * Work out the effective frame bottom, which may be 
+         * 0 (relative to fp) or may be a few words beneath
+         * that if we're in a frame that has gc info buried 
+         * at its base.
+         *)
+        let frame_id = Stack.top frame_stack in
+          if Hashtbl.mem cx.ctxt_frame_has_gc_roots frame_id
+          then Int64.mul (Int64.of_int Abi.gc_info_size) cx.ctxt_abi.Abi.abi_word_sz
+          else 0L
       else (Stack.top stk).layout_offset
     in
     let layout = layout_block off b in
