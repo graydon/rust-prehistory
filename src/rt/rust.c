@@ -176,6 +176,7 @@ struct rust_rt {
     uint32_t logbits;
     rust_proc_t *root_proc;
     rust_srv_t *srv;
+    rust_port_t *ports;
 };
 
 struct rust_prog {
@@ -285,6 +286,12 @@ struct rust_port {
     size_t live_refcnt;
     size_t weak_refcnt;
     rust_proc_t *proc;
+    /* FIXME: 'next' and 'prev' fields are only used for collecting
+     * dangling ports on abrupt process termination; can remove this
+     * when we have unwinding / finishing working.
+     */
+    rust_port_t *next;
+    rust_port_t *prev;
     size_t unit_sz;
     ptr_vec_t writers;
 };
@@ -557,6 +564,26 @@ circ_buf_shift(rust_rt_t *rt, circ_buf_t *c, void *dst)
     }
 }
 
+/* Ports */
+static void
+del_port(rust_rt_t *rt, rust_port_t *port)
+{
+    xlog(rt, LOG_UPCALL|LOG_COMM|LOG_MEM,
+         "finalizing and freeing port 0x%" PRIxPTR,
+         (uintptr_t)port);
+    /* FIXME: need to force-fail all the queued writers. */
+    fini_ptr_vec(rt, &port->writers);
+    /* FIXME: can remove the chaining-of-ports-to-rt when we have
+     * unwinding / finishing working. */
+    if (port->prev)
+        port->prev->next = port->next;
+    else if (rt->ports == port)
+        rt->ports = port->next;
+    if (port->next)
+        port->next->prev = port->prev;
+    xfree(rt, port);
+}
+
 
 /* Stacks */
 
@@ -771,6 +798,7 @@ del_proc(rust_rt_t *rt, rust_proc_t *proc)
         fini_circ_buf(rt, &c->buf);
         xfree(rt, c);
     }
+
     xfree(rt, proc);
 }
 
@@ -950,6 +978,12 @@ del_rt(rust_rt_t *rt)
     del_all_procs(rt, &rt->running_procs);
     xlog(rt, LOG_PROC, "deleting all blocked procs");
     del_all_procs(rt, &rt->blocked_procs);
+
+    xlog(rt, LOG_PROC, "deleting all dangling ports");
+    /* FIXME: remove when port <-> proc linkage is obsolete. */
+    while (rt->ports)
+        del_port(rt, rt->ports);
+
     fini_ptr_vec(rt, &rt->running_procs);
     fini_ptr_vec(rt, &rt->blocked_procs);
     xfree(rt, rt);
@@ -981,6 +1015,14 @@ upcall_new_port(rust_rt_t *rt, rust_proc_t *proc, size_t unit_sz)
          "upcall new_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
          PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)port);
     port->proc = proc;
+
+    /* FIXME: can remove the chaining-of-ports-to-rt when we have
+     * unwinding / finishing working. */
+    if (rt->ports)
+        rt->ports->prev = port;
+    port->next = rt->ports;
+    rt->ports = port;
+
     port->unit_sz = unit_sz;
     port->live_refcnt = 1;
     init_ptr_vec(rt, &port->writers);
@@ -998,12 +1040,7 @@ upcall_del_port(rust_rt_t *rt, rust_port_t *port)
 
     if (port->live_refcnt == 0 &&
         port->weak_refcnt == 0) {
-        xlog(rt, LOG_UPCALL|LOG_COMM|LOG_MEM,
-             "finalizing and freeing port 0x%" PRIxPTR,
-             (uintptr_t)port);
-        /* FIXME: need to force-fail all the queued writers. */
-        fini_ptr_vec(rt, &port->writers);
-        xfree(rt, port);
+        del_port(rt, port);
     }
 }
 
