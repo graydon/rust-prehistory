@@ -366,9 +366,9 @@ static void
 init_ptr_vec(rust_rt_t *rt, ptr_vec_t *v)
 {
     I(rt, v);
-    v->alloc = INIT_PTR_VEC_SZ * sizeof(void*);
+    v->alloc = INIT_PTR_VEC_SZ;
     v->init = 0;
-    v->data = xalloc(rt, v->alloc);
+    v->data = xalloc(rt, v->alloc * sizeof(void*));
     I(rt, v->data);
     xlog(rt, LOG_MEM,
          "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,

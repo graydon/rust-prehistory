@@ -504,9 +504,9 @@ let fn_prologue
     (Asm.ADD (call_region_sz,
               Asm.ADD (callee_frame_sz, call_region_sz)))
   in
-
     (* We must have room to save regs on entry. *)
     save_callee_saves e;
+    mov (rc ebp) (ro esp);                        (* Need an fp to do anything   *)
 
     mov (rc eax) (ro esp);                        (* eax = esp               *)
     emit (Il.binary Il.SUB (rc eax)
@@ -525,21 +525,27 @@ let fn_prologue
     let jmp_pc = e.Il.emit_pc in
 
       emit (Il.jmp Il.JBE Il.CodeNone);
-      mov (rc ebx) (ro esp);                        (* ebx = esp                *)
+
+      (* Save pre-grow esp and ebp to esi and edi, for use after-the-grow.      *)
+      mov (rc esi) (ro esp);                        (* esi = esp                *)
+      mov (rc edi) (ro esp);                        (* edi = ebp                *)
+
       emit_upcall_full
         (h eax)
         e Abi.UPCALL_grow_proc
         [| (imm call_region_sz);
            (imm reserve_new_sz) |]
         proc_to_c_fixup;
+
       mov (rc ecx) (c proc_ptr);                    (* ecx = proc               *)
       mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk          *)
-      mov (ecx_n Abi.stk_field_prev_sp) (ro ebx);   (* proc->stk->prev_fp = saved esp *)
-      mov (ecx_n Abi.stk_field_prev_fp) (ro ebp);   (* proc->stk->prev_fp = ebp *)
+
+      mov (ecx_n Abi.stk_field_prev_sp) (ro esi);   (* proc->stk->prev_sp = saved esp *)
+      mov (ecx_n Abi.stk_field_prev_fp) (ro edi);   (* proc->stk->prev_fp = saved ebp *)
+      mov (rc ebp) (ro esp);                        (* grow moved esp; re-clobber ebp *)
       Il.patch_jump e jmp_pc e.Il.emit_pc;
 
       (* Now set up a frame, wherever we landed. *)
-      mov (rc ebp) (ro esp);
       emit (Il.binary Il.SUB (rc esp) (ro esp) (imm callee_frame_sz))
 ;;
 
@@ -575,7 +581,7 @@ let fn_epilogue (e:Il.emitter) : unit =
     let jmp_pc = e.Il.emit_pc in
       emit (Il.jmp Il.JNE Il.CodeNone);
       (* We can't use 'ret' here at all, must indirect-jump while swapping stack pointer. *)
-      mov (rc edx) (ro esp);                          (* edx <- load return address       *)
+      mov (rc edx) (ro esp);                          (* edx <- ptr-to-return-address     *)
       mov (rc esp) (c (eax_n Abi.stk_field_prev_sp)); (* esp = proc->stk->prev_sp         *)
       mov (rc eax) (c (eax_n Abi.stk_field_prev));    (* eax = proc->stk->prev            *)
       mov (ecx_n Abi.proc_field_stk) (ro eax);        (* proc->stk = proc->stk->prev      *)

@@ -9,6 +9,7 @@ CFG_INFO := $(info building on $(CFG_OSTYPE) $(CFG_CPUTYPE))
 
 CFG_GCC_COMPILE_FLAGS :=
 CFG_GCC_LINK_FLAGS :=
+CFG_VALGRIND :=
 
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
@@ -20,6 +21,10 @@ ifeq ($(CFG_OSTYPE), Linux)
   endif
   CFG_NATIVE := 1
   CFG_UNIXY := 1
+  CFG_VALGRIND := $(shell which valgrind)
+  ifdef CFG_VALGRIND
+    CFG_VALGRIND += --run-libc-freeres=no --leak-check=full --quiet
+  endif
 endif
 
 ifeq ($(CFG_OSTYPE), Darwin)
@@ -51,7 +56,7 @@ ifdef CFG_UNIXY
   CFG_BOOT := ./rustboot
   CFG_COMPILER := ./rustc
   CFG_OBJ_SUFFIX := .o
-  CFG_RUN_TARG = LD_LIBRARY_PATH=. $(1)
+  CFG_RUN_TARG = LD_LIBRARY_PATH=. $(CFG_VALGRIND) $(1)
   CFG_GCC := 1
 endif
 

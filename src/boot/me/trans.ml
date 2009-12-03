@@ -544,9 +544,10 @@ let trans_visitor
     done
 
   and trans_glue_frame_entry (n_incoming_args:int) (n_outgoing_args:int) (spill:fixup) : unit =
-    let argsz = Int64.add cx.ctxt_abi.Abi.abi_implicit_args_sz (word_n n_incoming_args) in
+    let isz = cx.ctxt_abi.Abi.abi_implicit_args_sz in
+    let argsz = Int64.add isz (word_n n_incoming_args) in
     let framesz = 0L in
-    let callsz = (word_n n_outgoing_args) in
+    let callsz = Int64.add isz (word_n n_outgoing_args) in
       push_new_emitter ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill callsz cx.ctxt_proc_to_c_fixup;
@@ -1191,7 +1192,7 @@ let trans_visitor
             let (addr, _) = need_addr_cell cell in
             let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
               lea vr addr;
-              trans_call_mem_glue (get_mark_glue ty) cell
+              trans_call_mem_glue (get_mark_glue ty) vr
 
         | _ -> ()
 
