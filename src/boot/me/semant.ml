@@ -173,30 +173,56 @@ let err (idopt:node_id option) =
     Printf.ksprintf k
 ;;
 
+let bug _ =
+  let k s = failwith s
+  in Printf.ksprintf k
+;;
+
+let report_err cx ido str =
+  let sess = cx.ctxt_sess in
+  let spano = match ido with
+      None -> None
+    | Some id -> (Session.get_span sess id)
+  in
+    match spano with
+        None ->
+          Session.fail sess "Error: %s\n%!" str
+      | Some span ->
+          Session.fail sess "%s:E:Error: %s\n%!"
+            (Session.string_of_span span) str
+;;
+
+let bugi (cx:ctxt) (i:node_id) =
+  let k s =
+    report_err cx (Some i) s;
+    failwith s
+  in Printf.ksprintf k
+;;
+
 (* Convenience accessors. *)
 let lval_to_referent (cx:ctxt) (id:node_id) : node_id =
   if Hashtbl.mem cx.ctxt_lval_to_referent id
   then Hashtbl.find cx.ctxt_lval_to_referent id
-  else failwith "Unresolved lval"
+  else bug () "Unresolved lval"
 ;;
 
 let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
   let referent = lval_to_referent cx id in
     if Hashtbl.mem cx.ctxt_all_slots referent
     then Hashtbl.find cx.ctxt_all_slots referent
-    else err (Some referent) "Unknown slot"
+    else bugi cx referent "Unknown slot"
 ;;
 
 let get_slot_owner (cx:ctxt) (id:node_id) : node_id =
   match htab_search cx.ctxt_slot_owner id with
-      None -> err (Some id) "Slot has no defined owner"
+      None -> bugi cx id "Slot has no defined owner"
     | Some owner -> owner
 ;;
 
 let get_prog (cx:ctxt) (id:node_id) : Ast.prog =
   match Hashtbl.find cx.ctxt_all_items id with
       Ast.MOD_ITEM_prog p -> p.Ast.decl_item
-    | _ -> err (Some id) "Node did not map to a program"
+    | _ -> bugi cx id "Node did not map to a program"
 ;;
 
 let get_prog_owning_slot (cx:ctxt) (id:node_id) : Ast.prog =
@@ -212,43 +238,43 @@ let slot_is_owned_by_prog (cx:ctxt) (id:node_id) : bool =
 let get_block_layout (cx:ctxt) (id:node_id) : layout =
   if Hashtbl.mem cx.ctxt_block_layouts id
   then Hashtbl.find cx.ctxt_block_layouts id
-  else err (Some id) "Unknown block layout"
+  else bugi cx id "Unknown block layout"
 ;;
 
 let get_fn_fixup (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_fn_fixups id
   then Hashtbl.find cx.ctxt_fn_fixups id
-  else err (Some id) "Fn without fixup"
+  else bugi cx id "Fn without fixup"
 ;;
 
 let get_prog_fixup (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_prog_fixups id
   then Hashtbl.find cx.ctxt_prog_fixups id
-  else err (Some id) "Prog without fixup"
+  else bugi cx id "Prog without fixup"
 ;;
 
 let get_framesz (cx:ctxt) (id:node_id) : int64 =
   if Hashtbl.mem cx.ctxt_frame_sizes id
   then Hashtbl.find cx.ctxt_frame_sizes id
-  else err (Some id) "Missing framesz"
+  else bugi cx id "Missing framesz"
 ;;
 
 let get_callsz (cx:ctxt) (id:node_id) : int64 =
   if Hashtbl.mem cx.ctxt_call_sizes id
   then Hashtbl.find cx.ctxt_call_sizes id
-  else err (Some id) "Missing callsz"
+  else bugi cx id "Missing callsz"
 ;;
 
 let get_spill (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_spill_fixups id
   then Hashtbl.find cx.ctxt_spill_fixups id
-  else err (Some id) "Missing spill fixup"
+  else bugi cx id "Missing spill fixup"
 ;;
 
 let slot_ty (s:Ast.slot) : Ast.ty =
   match s.Ast.slot_ty with
       Some t -> t
-    | None -> err None "untyped slot"
+    | None -> bug () "untyped slot"
 ;;
 
 
@@ -265,7 +291,7 @@ let rec apply_names_to_carg_path
           match names.(i) with
               Some nb ->
                 Ast.CARG_base (Ast.BASE_named nb)
-            | None -> err None "Indexing off non-named carg"
+            | None -> bug () "Indexing off non-named carg"
         end
     | Ast.CARG_ext (cp', e) ->
         Ast.CARG_ext (apply_names_to_carg_path names cp', e)
@@ -441,10 +467,10 @@ let rec type_is_mutable (t:Ast.ty) : bool =
     | Ast.TY_opaque (_, Ast.IMMUTABLE) -> false
 
     | Ast.TY_named _ ->
-        err None "unresolved named type in type_is_mutable"
+        bug () "unresolved named type in type_is_mutable"
 
     | Ast.TY_mod mtis ->
-        err None "unimplemented mod-type in type_is_mutable"
+        bug () "unimplemented mod-type in type_is_mutable"
 
 and slot_or_type_is_mutable (s:Ast.slot) : bool =
   if slot_is_mutable s
@@ -520,10 +546,10 @@ let rec type_is_cyclic (exteriors:Ast.ty list) (t:Ast.ty) : bool =
     | Ast.TY_opaque (_, Ast.IMMUTABLE) -> false
 
     | Ast.TY_named _ ->
-        err None "unresolved named type in type_is_cyclic"
+        bug () "unresolved named type in type_is_cyclic"
 
     | Ast.TY_mod mtis ->
-        err None "unimplemented mod-type in type_is_cyclic"
+        bug () "unimplemented mod-type in type_is_cyclic"
 
 and slot_is_cyclic (exteriors:Ast.ty list) (s:Ast.slot) : bool =
   let ty = slot_ty s in
@@ -564,18 +590,18 @@ let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
                 begin
                   match atab_search elts id with
                       Some slot -> slot
-                    | None -> err None "unknown record-member '%s'" id
+                    | None -> bug () "unknown record-member '%s'" id
                 end
 
             | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
                 if 0 <= i && i < (Array.length elts)
                 then elts.(i)
-                else err None "out-of-range tuple index %d" i
+                else bug () "out-of-range tuple index %d" i
 
             | (Ast.TY_vec slot, Ast.COMP_atom _) ->
                 slot
 
-            | (_,_) -> err None "unhandled form of lval-ext"
+            | (_,_) -> bug () "unhandled form of lval-ext"
 ;;
 
 
@@ -592,12 +618,12 @@ let lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
   then
     match (lval_slot cx lval).Ast.slot_ty with
         Some t -> t
-      | None -> err (Some referent) "Referent has un-inferred type"
+      | None -> bugi cx referent "Referent has un-inferred type"
   else
     match lval with
         Ast.LVAL_base _ ->
           (Hashtbl.find cx.ctxt_all_item_types referent)
-      | _ -> err (Some base_id) "Unimplemented structured item-reference"
+      | _ -> bugi cx base_id "Unimplemented structured item-reference"
 ;;
 
 let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
@@ -606,7 +632,7 @@ let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
     | Ast.ATOM_literal {node=(Ast.LIT_bool _); id=_} -> Ast.TY_bool
     | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
     | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
-    | Ast.ATOM_literal _ -> err None "unhandled form of literal '%a', in atom_type" Ast.sprintf_atom at
+    | Ast.ATOM_literal _ -> bug () "unhandled form of literal '%a', in atom_type" Ast.sprintf_atom at
     | Ast.ATOM_lval lv -> lval_ty cx lv
 ;;
 
@@ -752,7 +778,7 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
   let check_concrete params ty =
     if Array.length params = 0
     then ty
-    else err (Some item.id) "item has parametric type in ty_of_mod_item"
+    else bug () "item has parametric type in ty_of_mod_item"
   in
     match item.node with
         Ast.MOD_ITEM_opaque_type td ->
@@ -980,20 +1006,6 @@ let lookup
 ;;
 
 
-let report_err cx ido str =
-  let sess = cx.ctxt_sess in
-  let spano = match ido with
-      None -> None
-    | Some id -> (Session.get_span sess id)
-  in
-    match spano with
-        None ->
-          Session.fail sess "Error: %s\n%!" str
-      | Some span ->
-          Session.fail sess "%s:E:Error: %s\n%!"
-            (Session.string_of_span span) str
-
-
 let run_passes
     (cx:ctxt)
     (passes:Walk.visitor array)
@@ -1072,7 +1084,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_type -> ptr
 
       | Ast.TY_prog _ -> sp (Il.StructTy [| ptr; ptr; ptr |])
-      | Ast.TY_named _ -> err None "named type in referent_type"
+      | Ast.TY_named _ -> bug () "named type in referent_type"
       | Ast.TY_constrained (t, _) -> referent_type abi t
 
 and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
@@ -1142,7 +1154,7 @@ let rec layout_referent (abi:Abi.abi) (off:int64) (rty:Il.referent_ty) : layout 
     | Il.StructTy rtys ->
         let layouts = Array.map (layout_referent abi 0L) rtys in
           pack off layouts
-    | Il.OpaqueTy -> err None "laying out opaque IL type in layout_referent"
+    | Il.OpaqueTy -> bug () "laying out opaque IL type in layout_referent"
 ;;
 
 let rec layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
@@ -1184,7 +1196,7 @@ and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
     | _ ->
         begin
           match s.Ast.slot_ty with
-              None -> raise (Semant_err (None, "layout_slot on untyped slot"))
+              None -> bug () "layout_slot on untyped slot"
             | Some t -> layout_ty abi off t
         end
           (* FIXME: turning this on makes a bunch of slots go into

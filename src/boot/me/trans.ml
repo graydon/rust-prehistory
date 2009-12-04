@@ -138,7 +138,7 @@ let trans_visitor
         | Il.Based (r, Some e) -> Il.Based (r, Some (addto e))
         | Il.Pcrel (f, None) -> Il.Pcrel (f, Some off)
         | Il.Pcrel (f, Some e) -> Il.Pcrel (f, Some (addto e))
-        | Il.Spill _ -> err None "Adding offset to spill slot"
+        | Il.Spill _ -> bug () "Adding offset to spill slot"
   in
 
   let addr_add_imm (addr:Il.addr) (imm:int64) : Il.addr =
@@ -160,7 +160,7 @@ let trans_visitor
   let need_addr_cell (cell:Il.cell) : Il.typed_addr =
     match cell with
         Il.Addr a -> a
-      | Il.Reg _ -> err None "expected address cell, got non-address register cell"
+      | Il.Reg _ -> bug () "expected address cell, got non-address register cell"
   in
 
   let alias (ta:Il.typed_addr) : Il.operand =
@@ -206,7 +206,7 @@ let trans_visitor
         | Il.Cell (Il.Reg rt) -> rt
         | Il.Cell (Il.Addr (addr, Il.ScalarTy st)) -> do_mov st
         | Il.Cell (Il.Addr (_, rt)) ->
-            err None "forcing non-scalar referent of type %s to register"
+            bug () "forcing non-scalar referent of type %s to register"
               (Il.string_of_referent_ty rt)
   in
 
@@ -232,7 +232,7 @@ let trans_visitor
         Il.Reg (_, (Il.AddrTy rt)) -> rt
       | Il.Addr (_, Il.ScalarTy (Il.AddrTy rt)) -> rt
       | _ ->
-          err None "taking pointee-type of non-address cell %s "
+          bug () "taking pointee-type of non-address cell %s "
             (Il.string_of_cell abi.Abi.abi_str_of_hardreg ptr)
   in
 
@@ -240,7 +240,7 @@ let trans_visitor
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
           Il.AddrTy rt -> (based r, rt)
-        | _ -> err None "dereferencing non-address cell of type %s "
+        | _ -> bug () "dereferencing non-address cell of type %s "
             (Il.string_of_scalar_ty st)
   in
 
@@ -248,7 +248,7 @@ let trans_visitor
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
           Il.AddrTy rt -> (based_off r off, rt)
-        | _ -> err None "offset-dereferencing non-address cell of type %s "
+        | _ -> bug () "offset-dereferencing non-address cell of type %s "
             (Il.string_of_scalar_ty st)
   in
 
@@ -282,14 +282,14 @@ let trans_visitor
             let scalar_type =
               match referent_type with
                   Il.ScalarTy st -> st
-                | Il.StructTy _ -> err (Some slot_id) "cannot treat structured referent as single operand"
-                | Il.OpaqueTy -> err (Some slot_id) "cannot treat opaque referent as single operand"
+                | Il.StructTy _ -> bugi cx slot_id "cannot treat structured referent as single operand"
+                | Il.OpaqueTy -> bugi cx slot_id "cannot treat opaque referent as single operand"
             in
               Il.Reg (Il.Vreg (cell_vreg_num vr), scalar_type)
         | None ->
             begin
               match htab_search cx.ctxt_slot_layouts slot_id with
-                  None -> err (Some slot_id) "slot assigned to neither vreg nor layout"
+                  None -> bugi cx slot_id "slot assigned to neither vreg nor layout"
                 | Some layout ->
                     let disp = layout.layout_offset in
                       Il.Addr (fp_imm disp, referent_type)
@@ -302,7 +302,7 @@ let trans_visitor
       then
         let prog = get_prog_owning_slot cx slot_id in
         let init_proc_slot_layout = match prog.Ast.prog_init with
-            None -> err (Some lval_id) "Lval in nonexistent prog init"
+            None -> bugi cx lval_id "Lval in nonexistent prog init"
           | Some init -> Hashtbl.find cx.ctxt_slot_layouts init.node.Ast.init_proc_input.id
         in
           wordptr_at (sp_imm init_proc_slot_layout.layout_offset)
@@ -354,7 +354,7 @@ let trans_visitor
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, slot_referent_type abi slot), slot)
 
-      | _ -> err None "unhandled form of lval_ext in trans_lval_ext"
+      | _ -> bug () "unhandled form of lval_ext in trans_lval_ext"
 
   (* 
    * vec: operand holding ptr to vec.
@@ -403,7 +403,7 @@ let trans_visitor
           | Ast.MOD_ITEM_tag t ->
               return_fixup (get_fn_fixup cx referent) slot
           | _ ->
-              err (Some referent)
+              bugi cx referent
                 "unhandled item type in trans_lval_full"
     in
 
@@ -415,7 +415,7 @@ let trans_visitor
             Ast.NATIVE_fn _ ->
               return_fixup (get_fn_fixup cx referent) slot
           | _ ->
-              err (Some referent)
+              bugi cx referent
                 "unhandled native item type in trans_lval_full"
     in
 
@@ -720,7 +720,7 @@ let trans_visitor
               | Ast.BINOP_le -> Il.JLE
               | Ast.BINOP_ge -> Il.JGE
               | Ast.BINOP_gt -> Il.JG
-              | _ -> err None "Unhandled binop of expr in trans_cond"
+              | _ -> bug () "Unhandled binop of expr in trans_cond"
           in
           let cjmp' =
             if invert then
@@ -731,7 +731,7 @@ let trans_visitor
                 | Il.JLE -> Il.JG
                 | Il.JGE -> Il.JL
                 | Il.JG -> Il.JLE
-                | _ -> err None "Unhandled inverse binop in trans_cond"
+                | _ -> bug () "Unhandled inverse binop in trans_cond"
             else
               cjmp
           in
@@ -857,7 +857,7 @@ let trans_visitor
     let tsig =
       match prog_slot.Ast.slot_ty with
           Some (Ast.TY_prog tsig) -> tsig
-        | _ -> err None "prog pseudo-slot has wrong type"
+        | _ -> bug () "prog pseudo-slot has wrong type"
     in
       (* 
        * We're fudging here; the proc operand isn't really the dst operand, 
@@ -938,7 +938,7 @@ let trans_visitor
     let (dstcell, dst_slot) = trans_lval dst INTENT_init in
     let unit_ty = match slot_ty dst_slot with
         Ast.TY_port t -> t
-      | _ -> err None "init dst of port-init has non-port type"
+      | _ -> bug () "init dst of port-init has non-port type"
     in
     let unit_sz = ty_sz abi unit_ty in
       aliasing true dstcell
@@ -998,7 +998,7 @@ let trans_visitor
     let (dstcell, dst_slot) = trans_lval dst INTENT_init in
     let unit_slot = match slot_ty dst_slot with
         Ast.TY_vec s -> s
-      | _ -> err None "init dst of vec-init has non-vec type"
+      | _ -> bug () "init dst of vec-init has non-vec type"
     in
     let unit_sz = slot_sz abi unit_slot in
     let n_inits = Array.length atoms in
@@ -1097,7 +1097,7 @@ let trans_visitor
         match t with
             Il.StructTy elts ->
               assert (Array.length layouts = Array.length elts)
-          | _ -> err None "iter_rec_slots of non-struct referent ty"
+          | _ -> bug () "iter_rec_slots of non-struct referent ty"
       end;
       Array.iteri
         begin
@@ -1121,7 +1121,7 @@ let trans_visitor
         match t with
             Il.StructTy elts ->
               assert (Array.length layouts = Array.length elts)
-          | _ -> err None "iter_tup_slots of non-struct referent ty"
+          | _ -> bug () "iter_tup_slots of non-struct referent ty"
       end;
       Array.iteri
         begin
@@ -1203,7 +1203,7 @@ let trans_visitor
         (Some iso, Ast.TY_idx n) ->
           Ast.TY_iso { iso with Ast.iso_index = n }
       | (None, Ast.TY_idx n) ->
-          err None "TY_idx outside TY_iso"
+          bug () "TY_idx outside TY_iso"
       | _ -> t
 
   and mark_slot
@@ -1298,7 +1298,7 @@ let trans_visitor
           MEM_gc -> exterior_gc_body_off
         | MEM_rc_struct -> exterior_rc_body_off
         | MEM_rc_opaque _
-        | MEM_interior -> err None "exterior_body_off of MEM_interior"
+        | MEM_interior -> bug () "exterior_body_off of MEM_interior"
 
   (* Returns the offset of the slot-body in the initialized allocation. *)
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
@@ -1331,7 +1331,7 @@ let trans_visitor
               let rc = exterior_rc_cell cell in
                 mov rc one
 
-        | MEM_interior -> err None "init_exterior_slot of MEM_interior"
+        | MEM_interior -> bug () "init_exterior_slot of MEM_interior"
 
   and intent_str i =
     match i with
@@ -1345,7 +1345,7 @@ let trans_visitor
           Il.StructTy parts
             when (Array.length parts == 2) &&
               (parts.(0) = Il.ScalarTy word_ty) -> parts.(1)
-        | ty -> err None "Dereferencing exterior cell with bad IL type: %s"
+        | ty -> bug () "Dereferencing exterior cell with bad IL type: %s"
             (Il.string_of_referent_ty ty)
     in
       iflog (fun _ -> annotate ("deref exterior: " ^
@@ -1658,7 +1658,7 @@ let trans_visitor
     let tfn =
       match slot_ty fn_slot with
           Ast.TY_fn fty -> fty
-        | _ -> err None "Calling non-function."
+        | _ -> bug () "Calling non-function."
     in
     let (tsig, _) = tfn in
     let in_slots = tsig.Ast.sig_input_slots in
@@ -1686,7 +1686,7 @@ let trans_visitor
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
         Il.Addr (a, _) -> Il.CodeAddr a
-      | _ -> err None "loading code from register"
+      | _ -> bug () "loading code from register"
 
   and trans_call
       (logname:(unit -> string))
@@ -1775,14 +1775,14 @@ let trans_visitor
             match atom_type cx a with
                 Ast.TY_str -> trans_log_str a
               | Ast.TY_int -> trans_log_int a
-              | _ -> err (Some stmt.id) "unimplemented logging type"
+              | _ -> bugi cx stmt.id "unimplemented logging type"
           end
 
       | Ast.STMT_check_expr e ->
           begin
             match expr_type cx e with
                 Ast.TY_bool -> trans_check_expr e
-              | _ -> err (Some stmt.id) "check expr on non-bool"
+              | _ -> bugi cx stmt.id "check expr on non-bool"
           end
 
       | Ast.STMT_spawn (dst, plv, args) -> trans_spawn dst plv args
@@ -1809,7 +1809,7 @@ let trans_visitor
           let dst_slots =
             match slot_ty slot with
                 Ast.TY_rec trec -> (Array.map (fun (_, slot) -> slot) trec)
-              | _ -> err (Some stmt.id) "non-rec destination type in stmt_init_rec"
+              | _ -> bugi cx stmt.id "non-rec destination type in stmt_init_rec"
           in
           let atoms = Array.map (fun (_, _, atom) -> atom) atab in
           let dst_cell = deref_slot slot_cell slot INTENT_init in
@@ -1821,7 +1821,7 @@ let trans_visitor
           let dst_slots =
             match slot_ty slot with
                 Ast.TY_tup ttup -> ttup
-              | _ -> err (Some stmt.id) "non-tup destination type in stmt_init_tup"
+              | _ -> bugi cx stmt.id "non-tup destination type in stmt_init_tup"
           in
           let atoms = Array.map (fun (_, atom) -> atom) mode_atoms in
           let dst_cell = deref_slot slot_cell slot INTENT_init in
@@ -1911,7 +1911,7 @@ let trans_visitor
 
       | Ast.STMT_decl _ -> ()
 
-      | _ -> err (Some stmt.id) "unhandled form of statement in trans_stmt"
+      | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt"
   in
 
   let capture_emitted_quads (fix:fixup) (node:node_id) : unit =
@@ -1920,7 +1920,7 @@ let trans_visitor
     let quads = e.Il.emit_quads in
     let name = path_name () in
     let f = match !curr_file with
-        None -> err (Some node) "Missing file scope when capturing quads."
+        None -> bugi cx node "Missing file scope when capturing quads."
       | Some f -> f
     in
     let item_code = Hashtbl.find cx.ctxt_file_code f in
@@ -1979,7 +1979,7 @@ let trans_visitor
           Ast.TY_fn ({Ast.sig_output_slot={Ast.slot_ty=Some (Ast.TY_tag ttag)}}, _) -> ttag
         | Ast.TY_fn ({Ast.sig_output_slot={Ast.slot_ty=Some (Ast.TY_iso tiso)}}, _) ->
             tiso.Ast.iso_group.(tiso.Ast.iso_index)
-        | _ -> err (Some tagid) "unexpected type for tag constructor"
+        | _ -> bugi cx tagid "unexpected type for tag constructor"
     in
     let slots = Array.map (fun sloti -> Hashtbl.find cx.ctxt_all_slots sloti.id) header_tup in
     let tag_keys = sorted_tag_keys ttag in
@@ -1990,7 +1990,7 @@ let trans_visitor
           then i := j
         done;
         if (!i) = -1
-        then err (Some tagid) "error sorting tag";
+        then bugi cx tagid "error sorting tag";
       end;
       let _ = log cx "tag variant: %s -> tag value #%d" n (!i) in
       let (out_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
@@ -2113,7 +2113,7 @@ let trans_visitor
     then begin
       match !curr_file with
           None -> curr_file := Some i.id
-        | Some _ -> err (Some i.id) "Existing source file on file-scope entry."
+        | Some _ -> bugi cx i.id "Existing source file on file-scope entry."
     end
   in
 
@@ -2121,7 +2121,7 @@ let trans_visitor
     if Hashtbl.mem cx.ctxt_item_files i.id
     then begin
       match !curr_file with
-          None -> err (Some i.id) "Missing source file on file-scope exit."
+          None -> bugi cx i.id "Missing source file on file-scope exit."
         | Some _ -> curr_file := None
     end
   in
@@ -2248,7 +2248,7 @@ let emit_c_to_proc_glue cx =
   in
     cx.ctxt_abi.Abi.abi_c_to_proc e;
     if e.Il.emit_next_vreg != 0
-    then err None "c-to-proc glue uses nonzero vregs"
+    then bug () "c-to-proc glue uses nonzero vregs"
     else
       let code =
         { code_fixup = cx.ctxt_c_to_proc_fixup;
@@ -2266,7 +2266,7 @@ let emit_proc_to_c_glue cx =
   in
     cx.ctxt_abi.Abi.abi_proc_to_c e;
     if e.Il.emit_next_vreg != 0
-    then err None "proc-to-c glue uses nonzero vregs"
+    then bug () "proc-to-c glue uses nonzero vregs"
     else
       let code =
         { code_fixup = cx.ctxt_proc_to_c_fixup;
