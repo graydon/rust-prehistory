@@ -573,41 +573,53 @@ let trans_visitor
    * one pointer arg and reutrn nothing.
    *)
 
-  and get_mem_glue (g:glue) (ty:Ast.ty) (prefix:unit -> string) (inner:Il.cell -> unit) : fixup =
+  and get_mem_glue (g:glue) (ty:Ast.ty) (prefix:unit -> string) (inner:Il.typed_addr -> unit) : fixup =
     match htab_search cx.ctxt_glue_code g with
         Some code -> code.code_fixup
       | None ->
           begin
             let prefix = prefix () in
             let fix = new_fixup ("glue: " ^ prefix) in
+              (* 
+               * Put a temporary code entry in the table to handle
+               * recursive emit calls during the generation of the glue
+               * function.
+               *)
+            let tmp_code = { code_fixup = fix;
+                             code_quads = [| |];
+                             code_vregs_and_spill = None } in
             let spill = new_fixup ("glue spill: " ^ prefix) in
-                trans_glue_frame_entry 1 1 spill;
-                let arg = Il.Addr (ptr_at (fp_imm arg0_disp) ty) in
-                  inner arg;
-                  trans_glue_frame_exit ("glue: " ^ prefix) fix spill g;
-                  fix
-            end
+              htab_put cx.ctxt_glue_code g tmp_code;
+              trans_glue_frame_entry 1 1 spill;
+              let (arg:Il.typed_addr) = ptr_at (fp_imm arg0_disp) ty in
+                inner arg;
+                Hashtbl.remove cx.ctxt_glue_code g;
+                trans_glue_frame_exit ("glue: " ^ prefix) fix spill g;
+                fix
+          end
 
   and get_drop_glue (ty:Ast.ty)
       : fixup =
     let g = GLUE_drop ty in
     let prefix _ = "drop " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner arg = drop_ty ty (deref arg) in
+    let inner (arg:Il.typed_addr) = drop_ty ty (deref (Il.Addr arg)) in
       get_mem_glue g ty prefix inner
 
   and get_free_glue (ty:Ast.ty)
       : fixup =
     let g = GLUE_free ty in
     let prefix _ = "free " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner arg =
+    let inner (arg:Il.typed_addr) =
       (* 
        * Free-glue assumes we're looking at a pointer to an 
        * exterior allocation with normal exterior layout. It's
        * just a way to move drop+free out of leaf code. 
        *)
-      let exterior_body = deref_imm arg exterior_rc_body_off in
-        trans_call_mem_glue (get_drop_glue ty) (Il.Addr exterior_body);
-        trans_free arg;
+      let (body_addr, _) = deref_imm (Il.Addr arg) exterior_rc_body_off in
+      let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+        lea vr body_addr;
+        trans_call_mem_glue (get_drop_glue ty) vr;
+        trans_free (Il.Addr arg);
     in
       get_mem_glue g ty prefix inner
 
@@ -615,7 +627,7 @@ let trans_visitor
       : fixup =
     let g = GLUE_mark ty in
     let prefix _ = "mark " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner arg = mark_ty ty (deref arg) in
+    let inner (arg:Il.typed_addr) = mark_ty ty (deref (Il.Addr arg)) in
       get_mem_glue g ty prefix inner
 
 
@@ -820,7 +832,7 @@ let trans_visitor
               end;
             let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
             let cell = cell_of_block_slot slot_id in
-              drop_slot cell slot
+              drop_slot cell slot None
         end
         block_slots;
       ignore (Stack.pop block_layouts)
@@ -1076,7 +1088,8 @@ let trans_visitor
   and iter_rec_slots
       (ta:Il.typed_addr)
       (entries:Ast.ty_rec)
-      (f:Il.cell -> Ast.slot -> unit)
+      (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (curr_iso:Ast.ty_iso option)
       : unit =
     let (addr, t) = ta in
     let layouts = layout_rec abi entries in
@@ -1084,7 +1097,7 @@ let trans_visitor
         match t with
             Il.StructTy elts ->
               assert (Array.length layouts = Array.length elts)
-          | _ -> assert false
+          | _ -> err None "iter_rec_slots of non-struct referent ty"
       end;
       Array.iteri
         begin
@@ -1092,14 +1105,15 @@ let trans_visitor
             let (_, sub_slot) = entries.(i) in
             let disp = layout.layout_offset in
             let cell = wordptr_at (addr_add_imm addr disp) in
-              f cell sub_slot
+              f cell sub_slot curr_iso
         end
         layouts
 
   and iter_tup_slots
       (ta:Il.typed_addr)
       (slots:Ast.ty_tup)
-      (f:Il.cell -> Ast.slot -> unit)
+      (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (curr_iso:Ast.ty_iso option)
       : unit =
     let (addr, t) = ta in
     let layouts = layout_tup abi slots in
@@ -1107,7 +1121,7 @@ let trans_visitor
         match t with
             Il.StructTy elts ->
               assert (Array.length layouts = Array.length elts)
-          | _ -> assert false
+          | _ -> err None "iter_tup_slots of non-struct referent ty"
       end;
       Array.iteri
         begin
@@ -1115,21 +1129,35 @@ let trans_visitor
             let sub_slot = slots.(i) in
             let disp = layout.layout_offset in
             let cell = wordptr_at (addr_add_imm addr disp) in
-              f cell sub_slot
+              f cell sub_slot curr_iso
         end
         layouts
 
   and iter_tag_slots
         (ta:Il.typed_addr)
-        (tag:Ast.ty_tag)
-        (f:Il.cell -> Ast.slot -> unit)
+        (ttag:Ast.ty_tag)
+        (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+        (curr_iso:Ast.ty_iso option)
         : unit =
-      ()
+    let tag_keys = sorted_tag_keys ttag in
+    let (tag:Il.cell) = Il.Reg (next_vreg(), word_ty) in
+    let (addr, _) = ta in
+    let tup_addr = addr_add_imm addr word_sz in
+      mov tag (Il.Cell (word_at addr));
+      for i = 0 to arr_max tag_keys do
+        (* FIXME: A table-switch would be better. *)
+        (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
+        let jmps = trans_compare Il.JNE (Il.Cell tag) (imm (Int64.of_int i)) in
+        let ttup = Hashtbl.find ttag tag_keys.(i) in
+          iter_tup_slots (tup_addr, referent_type abi (Ast.TY_tup ttup)) ttup f curr_iso;
+          List.iter patch jmps
+      done
 
   and iter_ty_slots
         (ty:Ast.ty)
         (addr:Il.typed_addr)
-        (f:Il.cell -> Ast.slot -> unit)
+        (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+        (curr_iso:Ast.ty_iso option)
         : unit =
         (* 
          * FIXME: this will require some reworking if we support
@@ -1137,22 +1165,25 @@ let trans_visitor
          * addrs presently.
          *)
         match ty with
-            Ast.TY_rec entries -> iter_rec_slots addr entries f
-          | Ast.TY_tup slots -> iter_tup_slots addr slots f
-          | Ast.TY_tag tag -> iter_tag_slots addr tag f
+            Ast.TY_rec entries -> iter_rec_slots addr entries f None
+          | Ast.TY_tup slots -> iter_tup_slots addr slots f None
+          | Ast.TY_tag tag -> iter_tag_slots addr tag f None
+          | Ast.TY_iso tiso ->
+              let ttag = tiso.Ast.iso_group.(tiso.Ast.iso_index) in
+                iter_tag_slots addr ttag f (Some tiso)
           | _ -> ()
 
   and drop_ty
       (ty:Ast.ty)
       (addr:Il.typed_addr)
       : unit =
-      iter_ty_slots ty addr drop_slot
+      iter_ty_slots ty addr drop_slot None
 
   and mark_ty
       (ty:Ast.ty)
       (addr:Il.typed_addr)
       : unit =
-    iter_ty_slots ty addr mark_slot
+    iter_ty_slots ty addr mark_slot None
 
   and free_ty
         (ty:Ast.ty)
@@ -1164,9 +1195,21 @@ let trans_visitor
       | Ast.TY_proc -> trans_del_proc cell
       | _ -> trans_free cell
 
+  and maybe_iso
+      (curr_iso:Ast.ty_iso option)
+      (t:Ast.ty)
+      : Ast.ty =
+    match (curr_iso, t) with
+        (Some iso, Ast.TY_idx n) ->
+          Ast.TY_iso { iso with Ast.iso_index = n }
+      | (None, Ast.TY_idx n) ->
+          err None "TY_idx outside TY_iso"
+      | _ -> t
+
   and mark_slot
       (cell:Il.cell)
       (slot:Ast.slot)
+      (curr_iso:Ast.ty_iso option)
       : unit =
     let ty = slot_ty slot in
       match slot_mem_ctrl cell slot with
@@ -1182,8 +1225,11 @@ let trans_visitor
                 (* Set mark bit in allocation header. *)
                 emit (Il.binary Il.OR gc_word (Il.Cell gc_word) one);
                 (* Iterate over exterior slots marking outgoing links. *)
-                let exterior_body = deref_imm cell exterior_gc_body_off in
-                  trans_call_mem_glue (get_mark_glue ty) (Il.Addr exterior_body);
+                let (body_addr, _) = deref_imm cell exterior_gc_body_off in
+                let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+                let ty = maybe_iso curr_iso ty in
+                  lea vr body_addr;
+                  trans_call_mem_glue (get_mark_glue ty) vr;
                   patch j
 
         | MEM_interior when ty_is_structured ty ->
@@ -1191,6 +1237,7 @@ let trans_visitor
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
             let (addr, _) = need_addr_cell cell in
             let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+            let ty = maybe_iso curr_iso ty in
               lea vr addr;
               trans_call_mem_glue (get_mark_glue ty) vr
 
@@ -1199,6 +1246,7 @@ let trans_visitor
   and drop_slot
       (cell:Il.cell)
       (slot:Ast.slot)
+      (curr_iso:Ast.ty_iso option)
       : unit =
     let drop_refcount_then_mark_and_cjmp rc =
       (iflog (fun _ -> annotate ("drop refcount and maybe free slot " ^
@@ -1223,6 +1271,7 @@ let trans_visitor
             (* Refcounted "structured exterior" objects we handle via glue functions. *)
             let rc = exterior_rc_cell cell in
             let j = drop_refcount_then_mark_and_cjmp rc in
+            let ty = maybe_iso curr_iso ty in
                 trans_call_mem_glue (get_free_glue ty) cell;
                 patch j
 
@@ -1231,6 +1280,7 @@ let trans_visitor
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
             let (addr, _) = need_addr_cell cell in
             let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+            let ty = maybe_iso curr_iso ty in
               lea vr addr;
               trans_call_mem_glue (get_drop_glue ty) vr
 
@@ -1248,7 +1298,7 @@ let trans_visitor
           MEM_gc -> exterior_gc_body_off
         | MEM_rc_struct -> exterior_rc_body_off
         | MEM_rc_opaque _
-        | MEM_interior -> assert false
+        | MEM_interior -> err None "exterior_body_off of MEM_interior"
 
   (* Returns the offset of the slot-body in the initialized allocation. *)
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
@@ -1281,7 +1331,7 @@ let trans_visitor
               let rc = exterior_rc_cell cell in
                 mov rc one
 
-        | MEM_interior -> assert false
+        | MEM_interior -> err None "init_exterior_slot of MEM_interior"
 
   and intent_str i =
     match i with
@@ -1417,7 +1467,7 @@ let trans_visitor
       emit (Il.binary Il.ADD src_rc (Il.Cell src_rc) one);
       if not initialising
       then
-        drop_slot dst dst_slot;
+        drop_slot dst dst_slot None;
       mov dst (Il.Cell src)
     in
 
@@ -1698,7 +1748,7 @@ let trans_visitor
         emit (Il.call vr (code_of_cell callee_cell));
         for i = implicit_args to arr_max arg_layouts do
           iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
-          drop_slot (param_cell i (Some (i-implicit_args))) in_slots.(i-implicit_args)
+          drop_slot (param_cell i (Some (i-implicit_args))) in_slots.(i-implicit_args) None
         done
 
 
@@ -1932,12 +1982,9 @@ let trans_visitor
         | _ -> err (Some tagid) "unexpected type for tag constructor"
     in
     let slots = Array.map (fun sloti -> Hashtbl.find cx.ctxt_all_slots sloti.id) header_tup in
-    let tag_keys = Array.make (Hashtbl.length ttag) "" in
-    let i = ref 0 in
+    let tag_keys = sorted_tag_keys ttag in
+    let i = ref (-1) in
       begin
-        Hashtbl.iter (fun k _ -> tag_keys.(!i) <- k; incr i) ttag;
-        i := -1;
-        Array.sort compare tag_keys;
         for j = 0 to arr_max tag_keys do
           if tag_keys.(j) = n
           then i := j

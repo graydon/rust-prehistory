@@ -377,6 +377,14 @@ let interior_slot_full mut ty : Ast.slot =
 let interior_slot ty : Ast.slot = interior_slot_full Ast.IMMUTABLE ty
 ;;
 
+let sorted_tag_keys (ttag:Ast.ty_tag) : Ast.ident array =
+  let tag_keys = Array.make (Hashtbl.length ttag) "" in
+  let i = ref 0 in
+    Hashtbl.iter (fun k _ -> tag_keys.(!i) <- k; incr i) ttag;
+    Array.sort compare tag_keys;
+    tag_keys
+;;
+
 (* Mutability analysis. *)
 
 
@@ -1051,7 +1059,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
             (Array.map (fun (ident, slot) ->
                           slot_referent_type abi slot) tr)
 
-      | Ast.TY_tag _
+      | Ast.TY_tag ttag -> Il.OpaqueTy
       | Ast.TY_iso _
       | Ast.TY_idx _
       | Ast.TY_fn _
@@ -1137,13 +1145,40 @@ let rec layout_referent (abi:Abi.abi) (off:int64) (rty:Il.referent_ty) : layout 
     | Il.OpaqueTy -> err None "laying out opaque IL type in layout_referent"
 ;;
 
+let rec layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
+  let layouts = Array.map (fun (_,slot) -> layout_slot abi 0L slot) atab in
+    begin
+      ignore (pack 0L layouts);
+      assert ((Array.length layouts) = (Array.length atab));
+      Array.mapi (fun i layout ->
+                    let (ident, slot) = atab.(i) in
+                      (ident, (slot, layout))) layouts
+    end
 
-let layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
-  layout_referent abi off (referent_type abi t)
-;;
+and layout_tup (abi:Abi.abi) (tup:Ast.ty_tup) : (layout array) =
+  let layouts = Array.map (layout_slot abi 0L) tup in
+    ignore (pack 0L layouts);
+    layouts
+
+and layout_tag (abi:Abi.abi) (ttag:Ast.ty_tag) : layout =
+  let tag_layout = word_layout abi 0L in
+  let body_layout = new_layout 0L 0L 0L in
+  Hashtbl.iter (fun _ ttup ->
+                  let tup_layout = pack 0L (layout_tup abi ttup) in
+                    body_layout.layout_size <- i64_max body_layout.layout_size tup_layout.layout_size;
+                    body_layout.layout_align <- i64_max body_layout.layout_align tup_layout.layout_align)
+    ttag;
+    pack 0L [| tag_layout; body_layout |]
+
+and layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
+  (* FIXME: tag types may need to be represented in the IL type system? *)
+  match t with
+      Ast.TY_tag ttag -> layout_tag abi ttag
+    | Ast.TY_iso tiso -> layout_tag abi tiso.Ast.iso_group.(tiso.Ast.iso_index)
+    | _ -> layout_referent abi off (referent_type abi t)
 
 (* FIXME: redirect this to slot_referent_type *)
-let layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
+and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
   match s.Ast.slot_mode with
       Ast.MODE_interior _
     | _ ->
@@ -1157,32 +1192,13 @@ let layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
            * alias-analysis pass is supposed to catch them. It doesn't
            * yet, though. *)
           (* | _ -> word_layout abi off *)
-;;
 
-let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
+and ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
   let slot = interior_slot t in
     (layout_slot abi 0L slot).layout_size
-;;
 
-let slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
+and slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
   (layout_slot abi 0L s).layout_size
-;;
-
-let layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
-  let layouts = Array.map (fun (_,slot) -> layout_slot abi 0L slot) atab in
-    begin
-      ignore (pack 0L layouts);
-      assert ((Array.length layouts) = (Array.length atab));
-      Array.mapi (fun i layout ->
-                    let (ident, slot) = atab.(i) in
-                      (ident, (slot, layout))) layouts
-    end
-;;
-
-let layout_tup (abi:Abi.abi) (tup:Ast.ty_tup) : (layout array) =
-  let layouts = Array.map (layout_slot abi 0L) tup in
-    ignore (pack 0L layouts);
-    layouts
 ;;
 
 let word_slot (abi:Abi.abi) : Ast.slot =
