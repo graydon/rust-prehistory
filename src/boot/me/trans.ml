@@ -1153,6 +1153,9 @@ let trans_visitor
           List.iter patch jmps
       done
 
+  and get_iso_tag tiso =
+    tiso.Ast.iso_group.(tiso.Ast.iso_index)
+
   and iter_ty_slots
         (ty:Ast.ty)
         (addr:Il.typed_addr)
@@ -1169,7 +1172,7 @@ let trans_visitor
           | Ast.TY_tup slots -> iter_tup_slots addr slots f None
           | Ast.TY_tag tag -> iter_tag_slots addr tag f None
           | Ast.TY_iso tiso ->
-              let ttag = tiso.Ast.iso_group.(tiso.Ast.iso_index) in
+              let ttag = get_iso_tag tiso in
                 iter_tag_slots addr ttag f (Some tiso)
           | _ -> ()
 
@@ -1445,6 +1448,34 @@ let trans_visitor
         src_ta src_slots
 
 
+  and trans_copy_tag
+      (initialising:bool)
+      (dst_ta:Il.typed_addr) (dst_tag:Ast.ty_tag)
+      (src_ta:Il.typed_addr) (src_tag:Ast.ty_tag)
+      : unit =
+    let tag_keys = sorted_tag_keys dst_tag in
+    let (src_tag_val:Il.cell) = Il.Reg (next_vreg(), word_ty) in
+    let (dst_addr, _) = dst_ta in
+    let (src_addr, _) = src_ta in
+    let dst_tup_addr = addr_add_imm dst_addr word_sz in
+    let src_tup_addr = addr_add_imm src_addr word_sz in
+      mov src_tag_val (Il.Cell (word_at src_addr));
+      for i = 0 to arr_max tag_keys do
+        (* FIXME: A table-switch would be better. *)
+        (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
+        let jmps = trans_compare Il.JNE (Il.Cell src_tag_val) (imm (Int64.of_int i)) in
+        let dst_ttup = Hashtbl.find dst_tag tag_keys.(i) in
+        let src_ttup = Hashtbl.find src_tag tag_keys.(i) in
+        let dst_rty = referent_type abi (Ast.TY_tup dst_ttup) in
+        let src_rty = referent_type abi (Ast.TY_tup src_ttup) in
+          trans_copy_tup
+            initialising
+            (dst_tup_addr, dst_rty) dst_ttup
+            (src_tup_addr, src_rty) src_ttup;
+          List.iter patch jmps
+      done
+
+
   and trans_copy_slot
       (initialising:bool)
       (dst:Il.cell) (dst_slot:Ast.slot)
@@ -1537,26 +1568,50 @@ let trans_visitor
       then INTENT_init
       else INTENT_write
     in
-    let dst = deref_slot dst dst_slot dst_intent in
-    let src = deref_slot src src_slot INTENT_read in
-      match (dst, slot_ty dst_slot,
-             src, slot_ty src_slot) with
-          (Il.Addr dst_ta, Ast.TY_rec dst_entries,
-           Il.Addr src_ta, Ast.TY_rec src_entries) ->
-            trans_copy_rec
-              initialising
-              dst_ta dst_entries
-              src_ta src_entries
+      iflog (fun _ ->
+               annotate ("heavy copy: slot preparation"));
+      let dst = deref_slot dst dst_slot dst_intent in
+      let src = deref_slot src src_slot INTENT_read in
+        iflog (fun _ ->
+                 annotate ("heavy copy: referent data"));
 
-        | (Il.Addr dst_ta, Ast.TY_tup dst_slots,
-           Il.Addr src_ta, Ast.TY_tup src_slots) ->
-            trans_copy_tup
-              initialising
-              dst_ta dst_slots
-              src_ta src_slots
+        match (dst, slot_ty dst_slot,
+               src, slot_ty src_slot) with
+            (Il.Addr dst_ta, Ast.TY_rec dst_entries,
+             Il.Addr src_ta, Ast.TY_rec src_entries) ->
+              trans_copy_rec
+                initialising
+                dst_ta dst_entries
+                src_ta src_entries
 
-        | _ ->
-            mov dst (Il.Cell src)
+          | (Il.Addr dst_ta, Ast.TY_tup dst_slots,
+             Il.Addr src_ta, Ast.TY_tup src_slots) ->
+              trans_copy_tup
+                initialising
+                dst_ta dst_slots
+                src_ta src_slots
+
+          | (Il.Addr dst_ta, Ast.TY_tag dst_tag,
+             Il.Addr src_ta, Ast.TY_tag src_tag) ->
+              trans_copy_tag
+                initialising
+                dst_ta dst_tag
+                src_ta src_tag
+
+          | (Il.Addr dst_ta, Ast.TY_iso dst_iso,
+             Il.Addr src_ta, Ast.TY_iso src_iso) ->
+              let src_tag = get_iso_tag src_iso in
+              let dst_tag = get_iso_tag dst_iso in
+                trans_copy_tag
+                  initialising
+                  dst_ta dst_tag
+                  src_ta src_tag
+
+          | (_, t, _, _) when (i64_le (ty_sz abi t) word_sz) ->
+              mov dst (Il.Cell src)
+
+          | (_, t, _, _) ->
+              bug () "unhandled form of heavyweight copy: %s" (Ast.fmt_to_str Ast.fmt_ty t)
 
 
   and trans_copy
@@ -1978,7 +2033,7 @@ let trans_visitor
       match ctor_ty with
           Ast.TY_fn ({Ast.sig_output_slot={Ast.slot_ty=Some (Ast.TY_tag ttag)}}, _) -> ttag
         | Ast.TY_fn ({Ast.sig_output_slot={Ast.slot_ty=Some (Ast.TY_iso tiso)}}, _) ->
-            tiso.Ast.iso_group.(tiso.Ast.iso_index)
+            get_iso_tag tiso
         | _ -> bugi cx tagid "unexpected type for tag constructor"
     in
     let slots = Array.map (fun sloti -> Hashtbl.find cx.ctxt_all_slots sloti.id) header_tup in
