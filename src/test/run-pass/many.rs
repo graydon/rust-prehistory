@@ -24,8 +24,8 @@ prog root
   }
   main {
     let port[int] p = port();
-    auto child = spawn sub(chan(p), 1);
+    auto child = spawn sub(chan(p), 5);
     let int y <- p;
-    check (y == 1);
+    check (y == 5);
   }
 }

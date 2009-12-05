@@ -7,12 +7,14 @@ prog a
     c = chan(p);
   }
   main {
+    if (true) {
       log "proc a";
       log "proc a";
       log "proc a";
       log "proc a";
       log "proc a";
-      c <| 10;
+    }
+    c <| 10;
   }
 }
 
@@ -50,12 +52,14 @@ prog b
     c = chan(p);
   }
   main {
+    if (true) {
       log "proc b";
       log "proc b";
       log "proc b";
       log "proc b";
       log "proc b";
       log "proc b";
-      c <| 10;
+    }
+    c <| 10;
   }
 }

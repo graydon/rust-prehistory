@@ -5,9 +5,11 @@ prog a
   type mlist = tag(cons(int,@mlist), nil());
 
   main {
+    // FIXME: at the moment we can't handle x = conx(10, x)
+    // because it'll leak x._1 during the initializing-call.
+    // Yuck!
     auto x = nil();
-    x = cons(10, x);
-    x = cons(10, x);
-    // x = cons(10, cons(11, cons(12, nil())));
+    auto x1 = cons(10, x);
+    auto x2 = cons(10, cons(11, cons(12, x1)));
   }
 }

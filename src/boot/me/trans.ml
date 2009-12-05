@@ -598,11 +598,24 @@ let trans_visitor
                 fix
           end
 
+
+  and trace_str s =
+    let static = trans_static_string s in
+      trans_upcall Abi.UPCALL_trace_str [| static |]
+
+  and trace_word w =
+      trans_upcall Abi.UPCALL_trace_word [| Il.Cell w |]
+
   and get_drop_glue (ty:Ast.ty)
       : fixup =
     let g = GLUE_drop ty in
     let prefix _ = "drop " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner (arg:Il.typed_addr) = drop_ty ty (deref (Il.Addr arg)) in
+    let inner (arg:Il.typed_addr) =
+      trace_str "in drop-glue, dropping";
+      trace_word (Il.Addr arg);
+      drop_ty ty (deref (Il.Addr arg));
+      trace_str "drop-glue complete";
+    in
       get_mem_glue g ty prefix inner
 
   and get_free_glue (ty:Ast.ty)
@@ -618,8 +631,12 @@ let trans_visitor
       let (body_addr, _) = deref_imm (Il.Addr arg) exterior_rc_body_off in
       let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
         lea vr body_addr;
+        trace_str "in free-glue, calling drop-glue";
+        trace_word vr;
         trans_call_mem_glue (get_drop_glue ty) vr;
+        trace_str "back in free-glue, calling free";
         trans_free (Il.Addr arg);
+        trace_str "free-glue complete";
     in
       get_mem_glue g ty prefix inner
 
@@ -664,38 +681,6 @@ let trans_visitor
     let jmp = mark() in
       emit (Il.jmp cjmp Il.CodeNone);
       [jmp]
-
-(* FIXME: patch up this detritus, we have said typed IL now. *)
-(* 
-           
-  and trans_structural_compare
-      (cjmp:Il.jmpop)
-      (lhs:Il.operand) (* read alias *)
-      (rhs:Il.operand) (* read alias *)
-      (ty:Ast.ty)
-      : quad_idx list =
-    let lhs_reg = force_to_reg lhs in
-    let rhs_reg = force_to_reg rhs in
-    let jmps = ref [] in
-    let sub_compare slot off =
-      let load x =
-        (* FIXME: this is simply incorrect. Time for a typed IL? *)
-        deref_slot (word_at_reg_off (Some x) (Asm.IMM off)) slot INTENT_read
-      in
-      let new_jmps =
-        trans_structural_compare cjmp
-          (load lhs_reg) (load rhs_reg) (slot_ty slot)
-      in
-        jmps := new_jmps :: (!jmps)
-    in
-    let trans_compare_tup (lhs:Il.operand) (rhs:Il.operand) (ttup:Ast.ty_tup) : unit =
-      let offset = ref 0L in
-      for i = 0 to arr_max ttup do
-        sub_compare ttup.(i) (!offset)
-      done
-    in
-      []
-*)
 
   and trans_cond (invert:bool) (expr:Ast.expr) : quad_idx list =
 
@@ -813,7 +798,9 @@ let trans_visitor
 
   and trans_block (block:Ast.block) : unit =
     Stack.push (get_block_layout cx block.id) block_layouts;
+    trace_str ("entering block");
     Array.iter trans_stmt block.node;
+    trace_str ("exiting block");
     let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
       (* 
        * FIXME: this is not going to free things in the proper order; 
@@ -830,12 +817,14 @@ let trans_visitor
                     ("drop slot: " ^
                        (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
               end;
+            trace_str ("dropping slot " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
             let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
             let cell = cell_of_block_slot slot_id in
               drop_slot cell slot None
         end
         block_slots;
-      ignore (Stack.pop block_layouts)
+      ignore (Stack.pop block_layouts);
+      trace_str ("exited block");
 
 
   and trans_upcall (u:Abi.upcall) (args:Il.operand array) : unit =
@@ -848,6 +837,7 @@ let trans_visitor
     trans_upcall Abi.UPCALL_log_str [| (trans_atom a) |]
 
   and trans_spawn
+      (initialising:bool)
       (dst:Ast.lval)
       (prog_lval:Ast.lval)
       (args:Ast.atom array)
@@ -878,7 +868,7 @@ let trans_visitor
         emit (Il.cmp (Il.Cell init_cell) imm_false);
         let fwd_jmp = mark () in
           emit (Il.jmp Il.JE Il.CodeNone);
-          trans_call (fun _ -> "spawn-init") proc_cell init_cell tsig
+          trans_call initialising (fun _ -> "spawn-init") proc_cell init_cell tsig
             in_slots arg_layouts (Some proc_cell) args;
           patch fwd_jmp;
           iflog (fun _ -> annotate "sched proc");
@@ -925,8 +915,9 @@ let trans_visitor
                                             src_alias |]
         end
 
-  and trans_recv (dst:Ast.lval) (chan:Ast.lval) : unit =
-    let (dstcell, _) = trans_lval dst INTENT_write in
+  and trans_recv (initialising:bool) (dst:Ast.lval) (chan:Ast.lval) : unit =
+    let intent = if initialising then INTENT_init else INTENT_write in
+    let (dstcell, _) = trans_lval dst intent in
       aliasing true dstcell
         begin
           fun dst_alias ->
@@ -1460,6 +1451,7 @@ let trans_visitor
     let dst_tup_addr = addr_add_imm dst_addr word_sz in
     let src_tup_addr = addr_add_imm src_addr word_sz in
       mov src_tag_val (Il.Cell (word_at src_addr));
+      mov (word_at dst_addr) (Il.Cell src_tag_val);
       for i = 0 to arr_max tag_keys do
         (* FIXME: A table-switch would be better. *)
         (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
@@ -1699,11 +1691,12 @@ let trans_visitor
             src src_slot
 
   and trans_call_fn
-        (dst:Ast.lval)
-        (flv:Ast.lval)
-        (args:Ast.atom array)
-        : unit =
-    let (dst_cell, _) = trans_lval dst INTENT_write in
+      (initialising:bool)
+      (dst:Ast.lval)
+      (flv:Ast.lval)
+      (args:Ast.atom array)
+      : unit =
+    let (dst_cell, _) = trans_lval dst INTENT_init in
     let (fn_cell, fn_slot) =
       trans_lval_full flv
         abi.Abi.abi_has_pcrel_code
@@ -1718,7 +1711,7 @@ let trans_visitor
     let (tsig, _) = tfn in
     let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
-      trans_call (fun _ -> Ast.sprintf_lval () flv)
+      trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell tsig in_slots arg_layouts None args
 
   and trans_arg0 (param_cell:Il.cell) (output_cell:Il.cell) =
@@ -1744,6 +1737,7 @@ let trans_visitor
       | _ -> bug () "loading code from register"
 
   and trans_call
+      (initialising:bool)
       (logname:(unit -> string))
       (output_cell:Il.cell)
       (callee_cell:Il.cell)
@@ -1799,6 +1793,11 @@ let trans_visitor
             3
     in
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
+      (* 
+       * FIXME: we need to actually handle writing to an already-initialised slot. Currently
+       * we blindly assume we're initialising, overwrite the slot; this is ok if we're 
+       * writing to an interior output slot, but we'll leak any exteriors as we do that. 
+       *)
       let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
         emit (Il.call vr (code_of_cell callee_cell));
         for i = implicit_args to arr_max arg_layouts do
@@ -1822,6 +1821,14 @@ let trans_visitor
         Semant_err (None, msg) -> raise (Semant_err ((Some stmt.id), msg))
 
 
+  and maybe_init (id:node_id) (action:string) (dst:Ast.lval) : bool =
+    let b = Hashtbl.mem cx.ctxt_copy_stmt_is_init id in
+    let act = if b then ("initialising-" ^ action) else action in
+      iflog
+        (fun _ ->
+           annotate (Printf.sprintf "%s on dst lval %a" act Ast.sprintf_lval dst));
+      b
+
   and trans_stmt_full (stmt:Ast.stmt) : unit =
     match stmt.node with
 
@@ -1840,24 +1847,17 @@ let trans_visitor
               | _ -> bugi cx stmt.id "check expr on non-bool"
           end
 
-      | Ast.STMT_spawn (dst, plv, args) -> trans_spawn dst plv args
-      | Ast.STMT_send (chan,src) -> trans_send chan src
-      | Ast.STMT_recv (dst,chan) -> trans_recv dst chan
+      | Ast.STMT_send (chan,src) ->
+          trans_send chan src
 
-      | Ast.STMT_copy (lv_dst, e_src) ->
-          if Hashtbl.mem cx.ctxt_copy_stmt_is_init stmt.id
-          then
-            begin
-              iflog
-                (fun _ ->
-                   annotate
-                     (Printf.sprintf "initialising-copy on dst lval %a"
-                        Ast.sprintf_lval lv_dst));
-              trans_copy true lv_dst e_src
-            end
-          else
-              trans_copy false lv_dst e_src
-
+      | Ast.STMT_spawn (dst, plv, args) ->
+          trans_spawn (maybe_init stmt.id "spawn" dst) dst plv args
+      | Ast.STMT_recv (dst, chan) ->
+          trans_recv (maybe_init stmt.id "recv" dst) dst chan
+      | Ast.STMT_copy (dst, e_src) ->
+          trans_copy (maybe_init stmt.id "copy" dst) dst e_src
+      | Ast.STMT_call (dst, flv, args) ->
+          trans_call_fn (maybe_init stmt.id "call" dst) dst flv args
 
       | Ast.STMT_init_rec (dst, atab) ->
           let (slot_cell, slot) = trans_lval dst INTENT_init in
@@ -1939,8 +1939,6 @@ let trans_visitor
             end
 
       | Ast.STMT_check _ -> ()
-
-      | Ast.STMT_call (dst, flv, args) -> trans_call_fn dst flv args
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->
           begin
@@ -2027,6 +2025,7 @@ let trans_visitor
       (tag:(Ast.header_tup * Ast.ty_tag * node_id))
       : unit =
     trans_frame_entry tagid;
+    trace_str ("in tag constructor " ^ n);
     let (header_tup, _, _) = tag in
     let ctor_ty = Hashtbl.find cx.ctxt_all_item_types tagid in
     let ttag =
@@ -2060,6 +2059,7 @@ let trans_visitor
         trans_copy_tup true
           dst_ta slots
           src_ta slots;
+        trace_str ("finished tag constructor " ^ n);
         trans_frame_exit tagid;
   in
 

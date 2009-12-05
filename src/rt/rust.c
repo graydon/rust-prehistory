@@ -57,6 +57,7 @@ static uint32_t const LOG_PROC =       0x8;
 static uint32_t const LOG_UPCALL =    0x10;
 static uint32_t const LOG_RT =        0x20;
 static uint32_t const LOG_ULOG =      0x40;
+static uint32_t const LOG_TRACE =     0x80;
 
 
 static uint32_t
@@ -80,6 +81,8 @@ get_logbits()
             bits |= LOG_RT;
         if (strstr(c, "ulog"))
             bits |= LOG_ULOG;
+        if (strstr(c, "trace"))
+            bits |= LOG_TRACE;
         if (strstr(c, "all"))
             bits = 0xffffffff;
     }
@@ -131,7 +134,9 @@ typedef enum {
     upcall_code_sched          = 11,
     upcall_code_native         = 12,
     upcall_code_new_str        = 13,
-    upcall_code_grow_proc      = 14
+    upcall_code_grow_proc      = 14,
+    upcall_code_trace_word     = 15,
+    upcall_code_trace_str      = 16
 } upcall_t;
 
 /* FIXME: change ptr_vec and circ_buf to use flexible-array element
@@ -1013,6 +1018,22 @@ upcall_log_str(rust_rt_t *rt, char const *c)
          c);
 }
 
+static void
+upcall_trace_word(rust_rt_t *rt, uintptr_t i)
+{
+    xlog(rt, LOG_UPCALL|LOG_TRACE,
+         "trace: 0x%" PRIxPTR "",
+         i, i, (char)i);
+}
+
+static void
+upcall_trace_str(rust_rt_t *rt, char const *c)
+{
+    xlog(rt, LOG_UPCALL|LOG_TRACE,
+         "trace: %s",
+         c);
+}
+
 static rust_port_t*
 upcall_new_port(rust_rt_t *rt, rust_proc_t *proc, size_t unit_sz)
 {
@@ -1409,6 +1430,12 @@ handle_upcall(rust_proc_t *proc)
         break;
     case upcall_code_grow_proc:
         upcall_grow_proc(proc, (size_t)args[0], (size_t)args[1]);
+        break;
+    case upcall_code_trace_word:
+        upcall_trace_word(proc->rt, args[0]);
+        break;
+    case upcall_code_trace_str:
+        upcall_trace_str(proc->rt, (char const *)args[0]);
         break;
     }
 }
