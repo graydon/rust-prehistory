@@ -907,7 +907,7 @@ let dwarf_visitor
       prepend curr_cu_infos (BYTE 0)
   in
 
-  let emit_fn_die
+  let emit_subprogram_die
       (fix:fixup)
       : unit =
     let abbrev_code = get_abbrev_code abbrev_subprogram in
@@ -953,30 +953,61 @@ let dwarf_visitor
           Ast.MOD_ITEM_fn _ ->
             begin
               log cx "walking function '%s'" (path_name());
-              emit_fn_die (Hashtbl.find cx.ctxt_fn_fixups item.id)
-            end
-        | Ast.MOD_ITEM_prog p ->
-            let process_prog_part part name =
-              match part with
-                  None -> ()
-                | Some p ->
-                    ignore (Stack.push name path);
-                    emit_fn_die (Hashtbl.find cx.ctxt_all_item_code p.id).code_fixup;
-                    ignore (Stack.pop path);
-            in
-            begin
-              log cx "walking prog '%s'" (path_name());
-              process_prog_part p.Ast.decl_item.Ast.prog_init "init";
-              emit_null_die ();
-              process_prog_part p.Ast.decl_item.Ast.prog_main "main";
-              emit_null_die ();
-              process_prog_part p.Ast.decl_item.Ast.prog_fini "fini";
-              emit_null_die ()
+              emit_subprogram_die (Hashtbl.find cx.ctxt_fn_fixups item.id)
             end
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre id params item
   in
+
+  let visit_init_pre
+      (i:Ast.init identified)
+      : unit =
+    ignore (Stack.push "init" path);
+    emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code i.id).code_fixup;
+    inner.Walk.visit_init_pre i;
+  in
+
+  let visit_init_post
+      (i:Ast.init identified)
+      : unit =
+    inner.Walk.visit_init_post i;
+    emit_null_die ();
+    ignore (Stack.pop path);
+  in
+
+  let visit_main_pre
+      (block:Ast.block)
+      : unit =
+    ignore (Stack.push "main" path);
+    emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code block.id).code_fixup;
+    inner.Walk.visit_main_pre block;
+  in
+
+  let visit_main_post
+      (block:Ast.block)
+      : unit =
+    inner.Walk.visit_main_post block;
+    emit_null_die ();
+    ignore (Stack.pop path);
+  in
+
+  let visit_fini_pre
+      (block:Ast.block)
+      : unit =
+    ignore (Stack.push "fini" path);
+    emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code block.id).code_fixup;
+    inner.Walk.visit_fini_pre block;
+  in
+
+  let visit_fini_post
+      (block:Ast.block)
+      : unit =
+    inner.Walk.visit_fini_post block;
+    emit_null_die ();
+    ignore (Stack.pop path);
+  in
+
 
   let visit_mod_item_post
       (id:Ast.ident)
@@ -987,8 +1018,7 @@ let dwarf_visitor
     if Hashtbl.mem cx.ctxt_item_files item.id
     then
       begin
-        finish_cu_and_compose_headers ();
-        emit_null_die ()
+        finish_cu_and_compose_headers ()
       end
     else ();
     begin
@@ -1001,6 +1031,10 @@ let dwarf_visitor
 
   let visit_block_pre (b:Ast.block) : unit =
     inner.Walk.visit_block_pre b
+  in
+
+  let visit_block_post (b:Ast.block) : unit =
+    inner.Walk.visit_block_post b
   in
 
   let visit_slot_identified_pre (s:Ast.slot identified) : unit =
@@ -1044,7 +1078,14 @@ let dwarf_visitor
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_init_pre = visit_init_pre;
+        Walk.visit_init_post = visit_init_post;
+        Walk.visit_main_pre = visit_main_pre;
+        Walk.visit_main_post = visit_main_post;
+        Walk.visit_fini_pre = visit_fini_pre;
+        Walk.visit_fini_post = visit_fini_post;
         Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_block_post = visit_block_post;
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;
         Walk.visit_ty_pre = visit_ty_pre
     }
