@@ -1167,17 +1167,36 @@ let new_emitter _ : Il.emitter =
 ;;
 
 let select_insns (sess:Session.sess) (q:Il.quads) : Asm.frag =
-  let sel q =
-    try
-      select_insn q
-    with
-        Unrecognized ->
-          Session.fail sess
-            "E:Assembly error: unrecognized quad: %s\n%!"
-            (Il.string_of_quad reg_str q);
-          Asm.MARK
+  let scopes = Stack.create () in
+  let fixups = Stack.create () in
+  let pop_frags _ =
+    Asm.SEQ (Array.of_list
+               (List.rev
+                  (!(Stack.pop scopes))))
   in
-    Asm.SEQ (Array.map sel q)
+    ignore (Stack.push (ref []) scopes);
+    for i = 0 to (Array.length q) - 1 do
+      let append frag =
+        let frags = Stack.top scopes in
+          frags := frag :: (!frags)
+      in
+        match q.(i).Il.quad_body with
+            Il.Enter f ->
+              Stack.push f fixups;
+              Stack.push (ref []) scopes;
+          | Il.Leave ->
+              append (Asm.DEF (Stack.pop fixups, pop_frags ()))
+          | _ ->
+              try
+                append (select_insn q.(i))
+              with
+                  Unrecognized ->
+                    Session.fail sess
+                      "E:Assembly error: unrecognized quad: %s\n%!"
+                      (Il.string_of_quad reg_str q.(i));
+                    ()
+    done;
+    pop_frags()
 ;;
 
 let frags_of_emitted_quads (sess:Session.sess) (e:Il.emitter) : Asm.frag =

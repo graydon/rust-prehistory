@@ -1988,7 +1988,8 @@ let trans_visitor
                      code_quads = quads;
                      code_vregs_and_spill = vr_s }
         in
-          htab_put item_code node code
+          htab_put item_code node code;
+          htab_put cx.ctxt_all_item_code node code
       end
   in
 

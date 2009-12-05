@@ -766,6 +766,11 @@ let dwarf_visitor
     : Walk.visitor =
   let (abbrev_table:(abbrev, int) Hashtbl.t) = Hashtbl.create 0 in
 
+  let (path:Ast.ident Stack.t) = Stack.create () in
+  let path_name (_:unit) : string =
+    String.concat "." (stk_elts_from_bot path)
+  in
+
   let uleb i = ULEB128 (IMM (Int64.of_int i)) in
 
   let get_abbrev_code
@@ -903,7 +908,6 @@ let dwarf_visitor
   in
 
   let emit_fn_die
-      (name:string)
       (fix:fixup)
       : unit =
     let abbrev_code = get_abbrev_code abbrev_subprogram in
@@ -911,7 +915,7 @@ let dwarf_visitor
       (SEQ [|
          uleb abbrev_code;
          (* DW_AT_name *)
-         ZSTRING name;
+         ZSTRING (path_name());
          (* DW_AT_low_pc *)
          WORD (TY_u32, M_POS fix);
          (* DW_AT_high_pc *)
@@ -934,6 +938,7 @@ let dwarf_visitor
       (params:Ast.ident array)
       (item:Ast.mod_item)
       : unit =
+    ignore (Stack.push id path);
     if Hashtbl.mem cx.ctxt_item_files item.id
     then
       begin
@@ -947,8 +952,26 @@ let dwarf_visitor
       match item.node with
           Ast.MOD_ITEM_fn _ ->
             begin
-              log cx "walking function '%s'" id;
-              emit_fn_die id (Hashtbl.find cx.ctxt_fn_fixups item.id)
+              log cx "walking function '%s'" (path_name());
+              emit_fn_die (Hashtbl.find cx.ctxt_fn_fixups item.id)
+            end
+        | Ast.MOD_ITEM_prog p ->
+            let process_prog_part part name =
+              match part with
+                  None -> ()
+                | Some p ->
+                    ignore (Stack.push name path);
+                    emit_fn_die (Hashtbl.find cx.ctxt_all_item_code p.id).code_fixup;
+                    ignore (Stack.pop path);
+            in
+            begin
+              log cx "walking prog '%s'" (path_name());
+              process_prog_part p.Ast.decl_item.Ast.prog_init "init";
+              emit_null_die ();
+              process_prog_part p.Ast.decl_item.Ast.prog_main "main";
+              emit_null_die ();
+              process_prog_part p.Ast.decl_item.Ast.prog_fini "fini";
+              emit_null_die ()
             end
         | _ -> ()
     end;
@@ -964,7 +987,8 @@ let dwarf_visitor
     if Hashtbl.mem cx.ctxt_item_files item.id
     then
       begin
-        finish_cu_and_compose_headers ()
+        finish_cu_and_compose_headers ();
+        emit_null_die ()
       end
     else ();
     begin
@@ -972,6 +996,7 @@ let dwarf_visitor
           Ast.MOD_ITEM_fn _ -> emit_null_die ()
         | _ -> ()
     end;
+    ignore (Stack.pop path);
   in
 
   let visit_block_pre (b:Ast.block) : unit =

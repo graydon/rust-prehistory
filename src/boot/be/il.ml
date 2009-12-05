@@ -164,6 +164,8 @@ type quad' =
   | Pop of cell
   | Call of call
   | Debug (* Debug-break pseudo-instruction. *)
+  | Enter of fixup (* Enter-fixup-block pseudo-instruction. *)
+  | Leave          (* Leave-fixup-block pseudo-instruction. *)
   | Ret  (* Return to caller. *)
   | Nop  (* Keep this quad here, emit CPU nop, will patch / trampoline later. *)
   | Dead (* Keep this quad but emit nothing. *)
@@ -255,6 +257,8 @@ let process_quad (qp:quad_processor) (q:quad) : quad =
         | Ret -> Ret
         | Nop -> Nop
         | Debug -> Debug
+        | Enter f -> Enter f
+        | Leave -> Leave
         | Dead -> Dead
         | End -> End }
 ;;
@@ -486,6 +490,8 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
     | Nop -> "nop"
     | Dead -> "dead"
     | Debug -> "debug"
+    | Enter f -> "enter " ^ f.fixup_name
+    | Leave -> "leave"
     | End -> "---"
 ;;
 
