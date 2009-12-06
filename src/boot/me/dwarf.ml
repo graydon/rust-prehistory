@@ -732,6 +732,14 @@ let (abbrev_subprogram:abbrev) =
    |])
 ;;
 
+let (abbrev_lexical_block:abbrev) =
+  (DW_TAG_lexical_block, DW_CHILDREN_yes,
+   [|
+     (DW_AT_low_pc, DW_FORM_addr);
+     (DW_AT_high_pc, DW_FORM_addr);
+   |])
+;;
+
 let (abbrev_variable:abbrev) =
   (DW_TAG_variable, DW_CHILDREN_no,
    [|
@@ -742,13 +750,14 @@ let (abbrev_variable:abbrev) =
 ;;
 
 let (abbrev_base_type:abbrev) =
-  (DW_TAG_variable, DW_CHILDREN_no,
+  (DW_TAG_base_type, DW_CHILDREN_no,
    [|
      (DW_AT_name, DW_FORM_string);
      (DW_AT_encoding, DW_FORM_data1);
      (DW_AT_byte_size, DW_FORM_data1)
    |])
 ;;
+
 
 let prepend lref x = lref := x :: (!lref)
 ;;
@@ -1030,11 +1039,24 @@ let dwarf_visitor
   in
 
   let visit_block_pre (b:Ast.block) : unit =
-    inner.Walk.visit_block_pre b
+    let fix = Hashtbl.find cx.ctxt_block_fixups b.id in
+    let abbrev_code = get_abbrev_code abbrev_lexical_block in
+    let block_die =
+      SEQ [|
+        uleb abbrev_code;
+         (* DW_AT_low_pc *)
+         WORD (TY_u32, M_POS fix);
+         (* DW_AT_high_pc *)
+         WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))));
+      |]
+    in
+      prepend curr_cu_infos block_die;
+      inner.Walk.visit_block_pre b
   in
 
   let visit_block_post (b:Ast.block) : unit =
-    inner.Walk.visit_block_post b
+    inner.Walk.visit_block_post b;
+    emit_null_die ()
   in
 
   let visit_slot_identified_pre (s:Ast.slot identified) : unit =
@@ -1046,15 +1068,15 @@ let dwarf_visitor
     let base (name, encoding, byte_size) =
       let abbrev_code = get_abbrev_code abbrev_base_type in
       let type_die =
-        (SEQ [|
-           uleb abbrev_code;
-           (* DW_AT_name: DW_FORM_string *)
-           ZSTRING name;
-           (* DW_AT_encoding: DW_FORM_data1 *)
-           BYTE (dw_ate_to_int encoding);
-           (* DW_AT_byte_size: DW_FORM_data1 *)
-           BYTE byte_size
-         |])
+        SEQ [|
+          uleb abbrev_code;
+          (* DW_AT_name: DW_FORM_string *)
+          ZSTRING name;
+          (* DW_AT_encoding: DW_FORM_data1 *)
+          BYTE (dw_ate_to_int encoding);
+          (* DW_AT_byte_size: DW_FORM_data1 *)
+          BYTE byte_size
+        |]
       in
         prepend curr_cu_infos type_die
     in

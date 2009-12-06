@@ -99,6 +99,7 @@ type ctxt =
       ctxt_lval_is_in_proc_init: (node_id,unit) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_prog_fixups: (node_id,fixup) Hashtbl.t;
+      ctxt_block_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_abi: Abi.abi;
@@ -151,6 +152,7 @@ let new_ctxt sess abi crate =
     ctxt_lval_is_in_proc_init = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
     ctxt_prog_fixups = Hashtbl.create 0;
+    ctxt_block_fixups = Hashtbl.create 0;
     ctxt_file_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
     ctxt_abi = abi;

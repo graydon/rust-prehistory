@@ -799,6 +799,7 @@ let trans_visitor
   and trans_block (block:Ast.block) : unit =
     Stack.push (get_block_layout cx block.id) block_layouts;
     trace_str ("entering block");
+    emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups block.id));
     Array.iter trans_stmt block.node;
     trace_str ("exiting block");
     let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
@@ -823,6 +824,7 @@ let trans_visitor
               drop_slot cell slot None
         end
         block_slots;
+      emit Il.Leave;
       ignore (Stack.pop block_layouts);
       trace_str ("exited block");
 
@@ -2282,6 +2284,11 @@ let fixup_assigning_visitor
     inner.Walk.visit_native_mod_item_pre n i
   in
 
+  let visit_block_pre b =
+    htab_put cx.ctxt_block_fixups b.id (new_fixup "lexical block");
+    inner.Walk.visit_block_pre b
+  in
+
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
     ignore (Stack.pop path)
@@ -2294,6 +2301,7 @@ let fixup_assigning_visitor
   { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_block_pre = visit_block_pre;
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
         Walk.visit_native_mod_item_post = visit_native_mod_item_post }
 
