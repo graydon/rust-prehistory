@@ -201,6 +201,8 @@ and ty_fn = (ty_sig * ty_fn_aux)
 
 and ty_pred = (slot array * constrs)
 
+and check_calls = (lval * (atom array)) array
+
 (* put+ f(a,b) means to call f with current put addr and self as ret
  * addr. this is a 'tail yield' that bypasses us during f execution.
  *
@@ -229,9 +231,9 @@ and stmt' =
   | STMT_alt_type of stmt_alt_type
   | STMT_alt_port of stmt_alt_port
   | STMT_prove of (constrs)
-  | STMT_check of (constrs)
+  | STMT_check of (constrs * check_calls)
   | STMT_check_expr of expr
-  | STMT_check_if of (constrs * block)
+  | STMT_check_if of (constrs * check_calls * block)
   | STMT_block of block
   | STMT_copy of (lval * expr)
   | STMT_call of (lval * lval * (atom array))

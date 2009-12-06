@@ -1236,6 +1236,14 @@ let layout_fn_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
     layout_tup abi slots'
 ;;
 
+let layout_pred_call_tup (abi:Abi.abi) (tpred:Ast.ty_pred) : (layout array) =
+  let (slots,_) = tpred in
+  let proc_ptr = word_slot abi in
+  let out_ptr = word_slot abi in
+  let slots' = Array.append [| out_ptr; proc_ptr |] slots in
+    layout_tup abi slots'
+;;
+
 let layout_init_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
   let slots = tsig.Ast.sig_input_slots in
   let init_proc_ptr = word_slot abi in

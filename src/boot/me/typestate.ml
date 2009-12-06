@@ -353,7 +353,7 @@ let condition_assigning_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-          Ast.STMT_check constrs ->
+          Ast.STMT_check (constrs, _) ->
             let postcond = Array.map resolve_constr_to_key constrs in
               raise_postcondition s.id postcond
 

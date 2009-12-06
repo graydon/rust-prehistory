@@ -870,7 +870,7 @@ let trans_visitor
         emit (Il.cmp (Il.Cell init_cell) imm_false);
         let fwd_jmp = mark () in
           emit (Il.jmp Il.JE Il.CodeNone);
-          trans_call initialising (fun _ -> "spawn-init") proc_cell init_cell tsig
+          trans_call initialising (fun _ -> "spawn-init") proc_cell init_cell
             in_slots arg_layouts (Some proc_cell) args;
           patch fwd_jmp;
           iflog (fun _ -> annotate "sched proc");
@@ -1689,7 +1689,31 @@ let trans_visitor
     let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
       trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell tsig in_slots arg_layouts None args
+        dst_cell fn_cell in_slots arg_layouts None args
+
+  and trans_call_pred
+      (flv:Ast.lval)
+      (args:Ast.atom array)
+      : unit =
+    let dst_cell = Il.Addr (force_to_mem imm_false) in
+    let (fn_cell, fn_slot) =
+      trans_lval_full flv
+        abi.Abi.abi_has_pcrel_code
+        abi.Abi.abi_has_abs_code
+        INTENT_read
+    in
+    let tpred =
+      match slot_ty fn_slot with
+          Ast.TY_pred tpred -> tpred
+        | _ -> bug () "Calling non-predicate."
+    in
+    let (in_slots, _) = tpred in
+    let arg_layouts = layout_pred_call_tup abi tpred in
+      trans_call true (fun _ -> Ast.sprintf_lval () flv)
+        dst_cell fn_cell in_slots arg_layouts None args;
+      let jmp = trans_compare Il.JNE (Il.Cell dst_cell) imm_true in
+        trans_cond_fail "predicate check" jmp
+
 
   and trans_arg0 (param_cell:Il.cell) (output_cell:Il.cell) =
     (* Emit arg0 of any call: the output slot. *)
@@ -1718,7 +1742,6 @@ let trans_visitor
       (logname:(unit -> string))
       (output_cell:Il.cell)
       (callee_cell:Il.cell)
-      (callee_sig:Ast.ty_sig)
       (in_slots:Ast.slot array)
       (arg_layouts:layout array)
       (arg2:Il.cell option)
@@ -1729,8 +1752,7 @@ let trans_visitor
       let param_referent_ty =
         match input_opt with
             None -> Il.ScalarTy (Il.voidptr_t)
-          | Some i ->
-              slot_referent_type abi callee_sig.Ast.sig_input_slots.(i)
+          | Some i -> slot_referent_type abi in_slots.(i)
       in
         Il.Addr (param_addr, param_referent_ty)
     in
@@ -1915,8 +1937,10 @@ let trans_visitor
                       end
             end
 
-      | Ast.STMT_check _ -> ()
-          (* FIXME: actually translate predicate checks! Yikes! *)
+      | Ast.STMT_check (_, calls) ->
+          Array.iter
+            (fun (fn, args) -> trans_call_pred fn args)
+            calls
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->
           begin

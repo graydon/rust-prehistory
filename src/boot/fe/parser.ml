@@ -1436,13 +1436,13 @@ and parse_stmts ps =
                   expect ps RPAREN;
                   let block = parse_block ps in
                   let bpos = lexpos ps in
-                    [| span ps apos bpos (Ast.STMT_check_if (constrs, block)) |]
+                    [| span ps apos bpos (Ast.STMT_check_if (constrs, [| |], block)) |]
 
               | _ ->
                   let constrs = parse_constrs ps in
                     expect ps SEMI;
                     let bpos = lexpos ps in
-                      [| span ps apos bpos (Ast.STMT_check constrs) |]
+                      [| span ps apos bpos (Ast.STMT_check (constrs, [| |])) |]
           end
 
       | IF ->

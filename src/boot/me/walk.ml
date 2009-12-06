@@ -387,6 +387,18 @@ and walk_constrs
     : unit =
   Array.iter (walk_constr v) cs
 
+and walk_check_calls
+    (v:visitor)
+    (calls:Ast.check_calls)
+    : unit =
+  Array.iter
+    begin
+      fun (f, args) ->
+        walk_lval v f;
+        Array.iter (walk_atom v) args
+    end
+    calls
+
 
 and walk_constr
     (v:visitor)
@@ -596,11 +608,13 @@ and walk_stmt
       | Ast.STMT_check_expr e ->
           walk_expr v e
 
-      | Ast.STMT_check cs ->
-          walk_constrs v cs
-
-      | Ast.STMT_check_if (cs,b) ->
+      | Ast.STMT_check (cs, calls) ->
           walk_constrs v cs;
+          walk_check_calls v calls
+
+      | Ast.STMT_check_if (cs,calls,b) ->
+          walk_constrs v cs;
+          walk_check_calls v calls;
           walk_block v b
 
       | Ast.STMT_prove cs ->
