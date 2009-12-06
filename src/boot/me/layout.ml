@@ -270,8 +270,11 @@ let layout_visitor
                  fd.Ast.decl_item.Ast.fn_input_slots)
         | Ast.MOD_ITEM_prog pd ->
             layout_prog i.id pd.Ast.decl_item
-        | Ast.MOD_ITEM_pred _ ->
-            enter_frame i.id
+        | Ast.MOD_ITEM_pred pd ->
+            enter_frame i.id;
+            layout_header i.id
+              (Array.map (fun (sid,_) -> sid.id)
+                 pd.Ast.decl_item.Ast.pred_input_slots)
         | Ast.MOD_ITEM_tag td ->
             let (header_slots, _, _) = td.Ast.decl_item in
               enter_frame i.id;
@@ -407,6 +410,7 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
+  let path = Stack.create () in
   let passes =
     [|
       (lval_in_init_visitor cx
@@ -415,7 +419,7 @@ let process_crate
          Walk.empty_visitor)
     |];
   in
-    run_passes cx passes (log cx "%s") crate
+    run_passes cx path passes (log cx "%s") crate
 ;;
 
 

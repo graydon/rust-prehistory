@@ -88,31 +88,85 @@ let empty_visitor =
     visit_crate_post = (fun _ -> ()); }
 ;;
 
-
-let mod_item_logging_visitor
-    (logfn:string->unit)
+let path_managing_visitor
+    (path:Ast.ident Stack.t)
     (inner:visitor)
     : visitor =
-  let names = Stack.create () in
   let visit_mod_item_pre name params item =
-    Stack.push name names;
-    logfn (Printf.sprintf "entering %s" (String.concat "." (stk_elts_from_bot names)));
+    Stack.push name path;
     inner.visit_mod_item_pre name params item
   in
   let visit_mod_item_post name params item =
-    logfn (Printf.sprintf "leaving %s" (String.concat "." (stk_elts_from_bot names)));
     inner.visit_mod_item_post name params item;
-    ignore (Stack.pop names)
+    ignore (Stack.pop path)
   in
   let visit_native_mod_item_pre name item =
-    Stack.push name names;
-    logfn (Printf.sprintf "entering %s (native)" (String.concat "." (stk_elts_from_bot names)));
+    Stack.push name path;
     inner.visit_native_mod_item_pre name item
   in
   let visit_native_mod_item_post name item =
-    logfn (Printf.sprintf "leaving %s (native)" (String.concat "." (stk_elts_from_bot names)));
     inner.visit_native_mod_item_post name item;
-    ignore (Stack.pop names)
+    ignore (Stack.pop path)
+  in
+  let visit_init_pre i =
+    Stack.push "init" path;
+    inner.visit_init_pre i
+  in
+  let visit_init_post i =
+    inner.visit_init_post i;
+    ignore (Stack.pop path)
+  in
+  let visit_main_pre b =
+    Stack.push "main" path;
+    inner.visit_main_pre b
+  in
+  let visit_main_post b =
+    inner.visit_main_post b;
+    ignore (Stack.pop path)
+  in
+  let visit_fini_pre b =
+    Stack.push "fini" path;
+    inner.visit_fini_pre b
+  in
+  let visit_fini_post b =
+    inner.visit_fini_post b;
+    ignore (Stack.pop path)
+  in
+    { inner with
+        visit_mod_item_pre = visit_mod_item_pre;
+        visit_mod_item_post = visit_mod_item_post;
+        visit_native_mod_item_pre = visit_native_mod_item_pre;
+        visit_native_mod_item_post = visit_native_mod_item_post;
+        visit_init_pre = visit_init_pre;
+        visit_init_post = visit_init_post;
+        visit_main_pre = visit_main_pre;
+        visit_main_post = visit_main_post;
+        visit_fini_pre = visit_fini_pre;
+        visit_fini_post = visit_fini_post;
+    }
+;;
+
+let mod_item_logging_visitor
+    (logfn:string->unit)
+    (path:Ast.ident Stack.t)
+    (inner:visitor)
+    : visitor =
+  let path_name _ = String.concat "." (stk_elts_from_bot path) in
+  let visit_mod_item_pre name params item =
+    logfn (Printf.sprintf "entering %s" (path_name()));
+    inner.visit_mod_item_pre name params item
+  in
+  let visit_mod_item_post name params item =
+    logfn (Printf.sprintf "leaving %s" (path_name()));
+    inner.visit_mod_item_post name params item;
+  in
+  let visit_native_mod_item_pre name item =
+    logfn (Printf.sprintf "entering %s (native)" (path_name()));
+    inner.visit_native_mod_item_pre name item
+  in
+  let visit_native_mod_item_post name item =
+    logfn (Printf.sprintf "leaving %s (native)" (path_name()));
+    inner.visit_native_mod_item_post name item;
   in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;

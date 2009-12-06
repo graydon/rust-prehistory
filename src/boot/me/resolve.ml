@@ -551,6 +551,7 @@ let process_crate
   let (scopes:(scope list) ref) = ref [] in
   let tag_to_idx = Hashtbl.create 0 in
   let idx_to_tag = Hashtbl.create 0 in
+  let path = Stack.create () in
   let passes =
     [|
       (block_scope_forming_visitor cx
@@ -567,7 +568,7 @@ let process_crate
                Walk.empty_visitor)));
     |]
   in
-    run_passes cx passes (log cx "%s") crate
+    run_passes cx path passes (log cx "%s") crate
 ;;
 
 (*

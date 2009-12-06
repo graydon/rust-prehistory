@@ -1012,14 +1012,16 @@ let lookup
 
 let run_passes
     (cx:ctxt)
+    (path:Ast.ident Stack.t)
     (passes:Walk.visitor array)
     (log:string->unit)
     (crate:Ast.crate)
     : unit =
-  let do_pass i p =
+  let do_pass i pass =
     let logger s = log (Printf.sprintf "pass %d: %s" i s) in
       Walk.walk_crate
-        (Walk.mod_item_logging_visitor logger p)
+        (Walk.path_managing_visitor path
+           (Walk.mod_item_logging_visitor logger path pass))
         crate
   in
   let sess = cx.ctxt_sess in

@@ -228,6 +228,7 @@ let process_crate
     (crate:Ast.crate)
     : unit =
   try
+    let path = Stack.create () in
     let auto_queue = Queue.create () in
     let enqueue_auto_slot id slot =
       match slot.Ast.slot_ty with
@@ -251,6 +252,7 @@ let process_crate
           Walk.walk_crate
             (Walk.mod_item_logging_visitor
                (log cx "auto inference pass %d: %s" (!auto_pass))
+               path
                (auto_inference_visitor cx progress Walk.empty_visitor))
             crate;
           Queue.iter

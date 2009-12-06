@@ -777,6 +777,7 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
+  let path = Stack.create () in 
   let (scopes:(scope list) ref) = ref [] in
   let constr_id = ref 0 in
   let (graph:(node_id, (node_id list)) Hashtbl.t) = Hashtbl.create 0 in
@@ -807,10 +808,10 @@ let process_crate
          Walk.empty_visitor)
     |]
   in
-    run_passes cx setup_passes (log cx "%s") crate;
+    run_passes cx path setup_passes (log cx "%s") crate;
     run_dataflow cx (!constr_id) graph;
-    run_passes cx verify_passes (log cx "%s") crate;
-    run_passes cx aux_passes (log cx "%s") crate
+    run_passes cx path verify_passes (log cx "%s") crate;
+    run_passes cx path aux_passes (log cx "%s") crate
 ;;
 
 

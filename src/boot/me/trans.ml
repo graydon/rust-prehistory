@@ -27,6 +27,7 @@ type mem_ctrl =
 
 let trans_visitor
     (cx:ctxt)
+    (path:Ast.ident Stack.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
@@ -36,7 +37,6 @@ let trans_visitor
     else ()
   in
 
-  let (path:Ast.ident Stack.t) = Stack.create () in
   let block_layouts = Stack.create () in
   let curr_file = ref None in
   let curr_stmt = ref None in
@@ -945,33 +945,8 @@ let trans_visitor
     trans_upcall Abi.UPCALL_del_port [| Il.Cell port |]
 
   and trans_del_proc (proc:Il.cell) : unit =
-    (* FIXME: this needs to run the fini block and all that. *)
+    (* FIXME: this needs to unwind the target, run the fini block, and all that. *)
     trans_upcall Abi.UPCALL_del_proc [| Il.Cell proc |]
-
-(*
-  and trans_inline_memcpy (dst_addr:Il.operand) (src_addr:Il.operand) (nbytes:int64) : unit =
-    let dst_reg = force_to_reg dst_addr in
-    let src_reg = force_to_reg src_addr in
-    let dst = Il.Reg src_reg in
-    let src = Il.Reg dst_reg in
-    let src_end = Il.Reg (Il.next_vreg (emitter())) in
-    let tmp = Il.Reg (Il.next_vreg (emitter())) in
-      mov src_end src_addr;
-      emit Il.ADD src_end src_end (imm nbytes);
-      let fwd_jmp = mark() in
-        emit Il.JMP Il.Nil badlab Il.Nil;
-        let loop_begin = mark () in
-          begin
-            emit Il.UMOV tmp (byte_at_reg_off (Some src_reg) (Asm.IMM 0L)) Il.Nil;
-            emit Il.UMOV (byte_at_reg_off (Some dst_reg) (Asm.IMM 0L)) tmp Il.Nil;
-            emit Il.ADD src src one;
-            emit Il.ADD dst dst one;
-            emit Il.ADD dst dst one;
-            patch fwd_jmp;
-            emit Il.CMP Il.Nil src src_end;
-            emit Il.JNE Il.Nil (Il.Label loop_begin) Il.Nil
-          end
-*)
 
   (*
    * A vec is implicitly exterior: every slot vec[T] is 1 word and
@@ -1941,6 +1916,7 @@ let trans_visitor
             end
 
       | Ast.STMT_check _ -> ()
+          (* FIXME: actually translate predicate checks! Yikes! *)
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->
           begin
@@ -2091,8 +2067,7 @@ let trans_visitor
       end
   in
 
-  let trans_prog_block (b:Ast.block) (ncomp:string) : fixup =
-    let _ = Stack.push ncomp path in
+  let trans_prog_block (b:Ast.block) : unit =
     let fix = new_fixup (path_name ()) in
     let framesz = get_framesz cx b.id in
     let callsz = get_callsz cx b.id in
@@ -2104,34 +2079,21 @@ let trans_visitor
         abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
         emit (Il.call dst (Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None))));
         capture_emitted_quads fix b.id;
-        pop_emitter ();
-        ignore (Stack.pop path);
-        fix
+        pop_emitter ()
   in
 
   let trans_prog (progid:node_id) (p:Ast.prog) : unit =
     let _ = log cx "translating program: %s" (path_name()) in
-    let init =
-      match p.Ast.prog_init with
+    let ptr_of thing_opt =
+      match thing_opt with
           None -> Asm.IMM 0L
-        | Some init ->
-            begin
-              let _ = Stack.push "init" path in
-                trans_fn init.id init.node.Ast.init_body;
-                ignore (Stack.pop path);
-                Asm.M_POS (get_fn_fixup cx init.id)
-            end
+        | Some thing ->
+            let code = Hashtbl.find cx.ctxt_all_item_code thing.id in
+              Asm.M_POS code.code_fixup
     in
-    let main =
-      match p.Ast.prog_main with
-          None -> Asm.IMM 0L
-        | Some main -> Asm.M_POS (trans_prog_block main "main")
-    in
-    let fini =
-      match p.Ast.prog_fini with
-          None -> Asm.IMM 0L
-        | Some fini -> Asm.M_POS (trans_prog_block fini "fini")
-    in
+    let init = ptr_of p.Ast.prog_init in
+    let main = ptr_of p.Ast.prog_main in
+    let fini = ptr_of p.Ast.prog_fini in
     let fixup = get_prog_fixup cx progid in
     let prog =
       (* FIXME: extract prog layout from ABI. *)
@@ -2141,29 +2103,6 @@ let trans_visitor
                           Asm.WORD (TY_u32, fini) |])
     in
       htab_put cx.ctxt_data (DATA_prog progid) (fixup, prog)
-  in
-
-  let rec trans_mod_item
-      (n:Ast.ident)
-      (item:Ast.mod_item)
-      : unit =
-    begin
-      match item.node with
-          Ast.MOD_ITEM_fn f -> trans_fn item.id f.Ast.decl_item.Ast.fn_body
-        | Ast.MOD_ITEM_prog p -> trans_prog item.id p.Ast.decl_item
-        | Ast.MOD_ITEM_tag t -> trans_tag n item.id t.Ast.decl_item
-        | _ -> ()
-    end
-  in
-
-  let rec trans_native_mod_item
-      (item:Ast.native_mod_item)
-      : unit =
-    begin
-      match item.node with
-          Ast.NATIVE_fn nfn -> trans_native_fn item.id nfn
-        | _ -> ()
-    end
   in
 
   let enter_file_for i =
@@ -2186,44 +2125,74 @@ let trans_visitor
 
   let visit_mod_item_pre n p i =
     enter_file_for i;
-    Stack.push n path;
-    trans_mod_item n i;
+    begin
+      match i.node with
+          Ast.MOD_ITEM_fn f -> trans_fn i.id f.Ast.decl_item.Ast.fn_body
+        | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.decl_item.Ast.pred_body
+        | Ast.MOD_ITEM_tag t -> trans_tag n i.id t.Ast.decl_item
+        | _ -> ()
+    end;
     inner.Walk.visit_mod_item_pre n p i
   in
+
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
-    ignore (Stack.pop path);
+    begin
+      match i.node with
+          (* Programs have to be translated after their pointees. *)
+        | Ast.MOD_ITEM_prog p -> trans_prog i.id p.Ast.decl_item
+        | _ -> ()
+    end;
     leave_file_for i
   in
 
   let visit_native_mod_item_pre n i =
     enter_file_for i;
-    Stack.push n path;
-    trans_native_mod_item i;
+    begin
+      match i.node with
+          Ast.NATIVE_fn nfn -> trans_native_fn i.id nfn
+        | _ -> ()
+    end;
     inner.Walk.visit_native_mod_item_pre n i
   in
 
   let visit_native_mod_item_post n i =
     inner.Walk.visit_native_mod_item_post n i;
-    ignore (Stack.pop path);
     leave_file_for i
+  in
+
+  let visit_init_pre (i:Ast.init identified) : unit =
+    trans_fn i.id i.node.Ast.init_body;
+    inner.Walk.visit_init_pre i
+  in
+
+  let visit_main_pre (b:Ast.block) : unit =
+    trans_prog_block b;
+    inner.Walk.visit_main_pre b
+  in
+
+  let visit_fini_pre (b:Ast.block) : unit =
+    trans_prog_block b;
+    inner.Walk.visit_fini_pre b
   in
 
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
-        Walk.visit_native_mod_item_post = visit_native_mod_item_post
+        Walk.visit_native_mod_item_post = visit_native_mod_item_post;
+        Walk.visit_init_pre = visit_init_pre;
+        Walk.visit_main_pre = visit_main_pre;
+        Walk.visit_fini_pre = visit_fini_pre;
     }
 ;;
 
 
 let fixup_assigning_visitor
     (cx:ctxt)
+    (path:Ast.ident Stack.t)
     (inner:Walk.visitor)
     : Walk.visitor =
-
-  let path = Stack.create () in
 
   let path_name (_:unit) : string =
     String.concat "." (stk_elts_from_bot path)
@@ -2239,33 +2208,31 @@ let fixup_assigning_visitor
       end
   in
 
+  let add_fn_fixup_for id =
+    htab_put cx.ctxt_fn_fixups id (new_fixup (path_name()));
+  in
+
+  let visit_init_pre i =
+    add_fn_fixup_for i.id;
+    inner.Walk.visit_init_pre i
+  in
+
   let visit_mod_item_pre n p i =
-    Stack.push n path;
     enter_file_for i;
     begin
       match i.node with
-          Ast.MOD_ITEM_fn _ ->
-            htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
-        | Ast.MOD_ITEM_tag tag ->
-            htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+          Ast.MOD_ITEM_fn _
+        | Ast.MOD_ITEM_pred _
+        | Ast.MOD_ITEM_tag _ -> add_fn_fixup_for i.id
         | Ast.MOD_ITEM_prog prog ->
             begin
-              let path = path_name() in
-              let prog_fixup =
+              let path = path_name () in
+              let fixup =
                 if path = cx.ctxt_main_name
                 then cx.ctxt_main_prog
-                else (new_fixup path)
+                else new_fixup path
               in
-                log cx "defining '%s' to mod item '%s'" prog_fixup.fixup_name (path_name());
-                htab_put cx.ctxt_prog_fixups i.id prog_fixup;
-                match prog.Ast.decl_item.Ast.prog_init with
-                    None -> ()
-                  | Some init ->
-                      begin
-                        (* Treat an init like a fn for purposes of code generation. *)
-                        htab_put cx.ctxt_fn_fixups init.id
-                          (new_fixup ((path_name()) ^ ".init"))
-                      end
+                htab_put cx.ctxt_prog_fixups i.id fixup;
             end
         | _ -> ()
     end;
@@ -2273,12 +2240,10 @@ let fixup_assigning_visitor
   in
 
   let visit_native_mod_item_pre n i =
-    Stack.push n path;
     enter_file_for i;
     begin
       match i.node with
-          Ast.NATIVE_fn _ ->
-            htab_put cx.ctxt_fn_fixups i.id (new_fixup (path_name()))
+          Ast.NATIVE_fn _ -> add_fn_fixup_for i.id
         | _ -> ()
     end;
     inner.Walk.visit_native_mod_item_pre n i
@@ -2289,21 +2254,11 @@ let fixup_assigning_visitor
     inner.Walk.visit_block_pre b
   in
 
-  let visit_mod_item_post n p i =
-    inner.Walk.visit_mod_item_post n p i;
-    ignore (Stack.pop path)
-  in
-
-  let visit_native_mod_item_post n i =
-    inner.Walk.visit_native_mod_item_post n i;
-    ignore (Stack.pop path)
-  in
   { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_block_pre = visit_block_pre;
-        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
-        Walk.visit_native_mod_item_post = visit_native_mod_item_post }
+        Walk.visit_init_pre = visit_init_pre;
+        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
 
 let emit_c_to_proc_glue cx =
   let e = Il.new_emitter
@@ -2344,16 +2299,17 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
+  let path = Stack.create () in
   let passes =
     [|
-      (fixup_assigning_visitor cx
+      (fixup_assigning_visitor cx path
          Walk.empty_visitor);
-      (trans_visitor cx
+      (trans_visitor cx path
          Walk.empty_visitor)
     |];
   in
     log cx "translating crate with main program %s" cx.ctxt_main_name;
-    run_passes cx passes (log cx "%s") crate;
+    run_passes cx path passes (log cx "%s") crate;
     emit_c_to_proc_glue cx;
     emit_proc_to_c_glue cx
 ;;

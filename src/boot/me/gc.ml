@@ -30,13 +30,14 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
+  let path = Stack.create () in
   let passes =
     [|
       (gc_analysis_visitor cx
          Walk.empty_visitor);
     |]
   in
-    run_passes cx passes (log cx "%s") crate
+    run_passes cx path passes (log cx "%s") crate
 ;;
 
 (*

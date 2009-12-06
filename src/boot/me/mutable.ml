@@ -86,6 +86,7 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
+  let path = Stack.create () in
   let passes =
     [|
       (mutability_checking_visitor cx
@@ -93,7 +94,7 @@ let process_crate
             Walk.empty_visitor));
     |]
   in
-    run_passes cx passes (log cx "%s") crate
+    run_passes cx path passes (log cx "%s") crate
 ;;
 
 (*

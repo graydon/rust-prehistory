@@ -766,6 +766,7 @@ let prepend lref x = lref := x :: (!lref)
 let dwarf_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
+    (path:Ast.ident Stack.t)
     (cu_aranges:(frag list) ref)
     (cu_pubnames:(frag list) ref)
     (cu_infos:(frag list) ref)
@@ -773,12 +774,12 @@ let dwarf_visitor
     (cu_lines:(frag list) ref)
     (cu_frames:(frag list) ref)
     : Walk.visitor =
-  let (abbrev_table:(abbrev, int) Hashtbl.t) = Hashtbl.create 0 in
 
-  let (path:Ast.ident Stack.t) = Stack.create () in
   let path_name (_:unit) : string =
     String.concat "." (stk_elts_from_bot path)
   in
+
+  let (abbrev_table:(abbrev, int) Hashtbl.t) = Hashtbl.create 0 in
 
   let uleb i = ULEB128 (IMM (Int64.of_int i)) in
 
@@ -947,7 +948,6 @@ let dwarf_visitor
       (params:Ast.ident array)
       (item:Ast.mod_item)
       : unit =
-    ignore (Stack.push id path);
     if Hashtbl.mem cx.ctxt_item_files item.id
     then
       begin
@@ -972,7 +972,6 @@ let dwarf_visitor
   let visit_init_pre
       (i:Ast.init identified)
       : unit =
-    ignore (Stack.push "init" path);
     emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code i.id).code_fixup;
     inner.Walk.visit_init_pre i;
   in
@@ -982,13 +981,11 @@ let dwarf_visitor
       : unit =
     inner.Walk.visit_init_post i;
     emit_null_die ();
-    ignore (Stack.pop path);
   in
 
   let visit_main_pre
       (block:Ast.block)
       : unit =
-    ignore (Stack.push "main" path);
     emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code block.id).code_fixup;
     inner.Walk.visit_main_pre block;
   in
@@ -998,13 +995,11 @@ let dwarf_visitor
       : unit =
     inner.Walk.visit_main_post block;
     emit_null_die ();
-    ignore (Stack.pop path);
   in
 
   let visit_fini_pre
       (block:Ast.block)
       : unit =
-    ignore (Stack.push "fini" path);
     emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code block.id).code_fixup;
     inner.Walk.visit_fini_pre block;
   in
@@ -1014,7 +1009,6 @@ let dwarf_visitor
       : unit =
     inner.Walk.visit_fini_post block;
     emit_null_die ();
-    ignore (Stack.pop path);
   in
 
 
@@ -1035,7 +1029,6 @@ let dwarf_visitor
           Ast.MOD_ITEM_fn _ -> emit_null_die ()
         | _ -> ()
     end;
-    ignore (Stack.pop path);
   in
 
   let visit_block_pre (b:Ast.block) : unit =
@@ -1132,10 +1125,11 @@ let process_crate
   let debug_abbrev_fixup = new_fixup "debug_abbrev section" in
   let debug_line_fixup = new_fixup "debug_line section" in
   let debug_frame_fixup = new_fixup "debug_frame section" in
+  let path = Stack.create () in
 
   let passes =
     [|
-      dwarf_visitor cx Walk.empty_visitor
+      dwarf_visitor cx Walk.empty_visitor path
         cu_aranges cu_pubnames
         cu_infos cu_abbrevs
         cu_lines cu_frames
@@ -1143,7 +1137,7 @@ let process_crate
   in
 
     log cx "emitting DWARF records";
-    run_passes cx passes (log cx "%s") crate;
+    run_passes cx path passes (log cx "%s") crate;
     {
       debug_aranges = SEQ (Array.of_list (List.rev (!cu_aranges)));
       debug_pubnames = SEQ (Array.of_list (List.rev (!cu_pubnames)));
