@@ -1368,6 +1368,62 @@ and parse_block_stmt ps =
   let bpos = lexpos ps in
     span ps apos bpos (Ast.STMT_block block)
 
+and name_to_lval
+    (ps:pstate)
+    (apos:pos)
+    (bpos:pos)
+    (name:Ast.name)
+    : Ast.lval =
+  match name with
+      Ast.NAME_base nb ->
+        Ast.LVAL_base (span ps apos bpos nb)
+    | Ast.NAME_ext (n, nc) ->
+        Ast.LVAL_ext (name_to_lval ps apos bpos n, Ast.COMP_named nc)
+
+and carg_path_to_lval
+    (ps:pstate)
+    (apos:pos)
+    (bpos:pos)
+    (path:Ast.carg_path)
+    : Ast.lval =
+  match path with
+      Ast.CARG_base Ast.BASE_formal ->
+        raise (err "converting formal constraint-arg to atom" ps)
+    | Ast.CARG_base (Ast.BASE_named nb) ->
+        Ast.LVAL_base (span ps apos bpos nb)
+    | Ast.CARG_ext (pth, nc) ->
+        Ast.LVAL_ext (carg_path_to_lval ps apos bpos pth, Ast.COMP_named nc)
+
+and carg_to_atom
+    (ps:pstate)
+    (apos:pos)
+    (bpos:pos)
+    (carg:Ast.carg)
+    : Ast.atom =
+  match carg with
+      Ast.CARG_lit lit ->
+        Ast.ATOM_literal (span ps apos bpos lit)
+    | Ast.CARG_path pth ->
+        Ast.ATOM_lval (carg_path_to_lval ps apos bpos pth)
+
+and synthesise_check_call
+    (ps:pstate)
+    (apos:pos)
+    (bpos:pos)
+    (constr:Ast.constr)
+    : (Ast.lval * (Ast.atom array)) =
+  let lval = name_to_lval ps apos bpos constr.Ast.constr_name in
+  let args = Array.map (carg_to_atom ps apos bpos) constr.Ast.constr_args in
+    (lval, args)
+
+and synthesise_check_calls
+    (ps:pstate)
+    (apos:pos)
+    (bpos:pos)
+    (constrs:Ast.constrs)
+    : Ast.check_calls =
+  Array.map (synthesise_check_call ps apos bpos) constrs
+
 and parse_init
     (lval:Ast.lval)
     (ps:pstate)
@@ -1436,13 +1492,15 @@ and parse_stmts ps =
                   expect ps RPAREN;
                   let block = parse_block ps in
                   let bpos = lexpos ps in
-                    [| span ps apos bpos (Ast.STMT_check_if (constrs, [| |], block)) |]
+                  let calls = synthesise_check_calls ps apos bpos constrs in
+                    [| span ps apos bpos (Ast.STMT_check_if (constrs, calls, block)) |]
 
               | _ ->
                   let constrs = parse_constrs ps in
                     expect ps SEMI;
                     let bpos = lexpos ps in
-                      [| span ps apos bpos (Ast.STMT_check (constrs, [| |])) |]
+                    let calls = synthesise_check_calls ps apos bpos constrs in
+                      [| span ps apos bpos (Ast.STMT_check (constrs, calls)) |]
           end
 
       | IF ->

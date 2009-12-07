@@ -398,6 +398,8 @@ let trans_visitor
         match item with
             Ast.MOD_ITEM_fn _ ->
               return_fixup (get_fn_fixup cx referent) slot
+          | Ast.MOD_ITEM_pred _ ->
+              return_fixup (get_fn_fixup cx referent) slot
           | Ast.MOD_ITEM_prog _ ->
               return_fixup (get_prog_fixup cx referent) slot
           | Ast.MOD_ITEM_tag t ->
@@ -1692,6 +1694,7 @@ let trans_visitor
         dst_cell fn_cell in_slots arg_layouts None args
 
   and trans_call_pred
+      (constr:Ast.constr)
       (flv:Ast.lval)
       (args:Ast.atom array)
       : unit =
@@ -1709,10 +1712,15 @@ let trans_visitor
     in
     let (in_slots, _) = tpred in
     let arg_layouts = layout_pred_call_tup abi tpred in
+      iflog (fun _ -> annotate "predicate call");
       trans_call true (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots arg_layouts None args;
-      let jmp = trans_compare Il.JNE (Il.Cell dst_cell) imm_true in
-        trans_cond_fail "predicate check" jmp
+      iflog (fun _ -> annotate "predicate check/fail");
+      let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
+      let errstr = Printf.sprintf "predicate check: %a"
+        Ast.sprintf_constr constr
+      in
+        trans_cond_fail errstr jmp
 
 
   and trans_arg0 (param_cell:Il.cell) (output_cell:Il.cell) =
@@ -1937,9 +1945,9 @@ let trans_visitor
                       end
             end
 
-      | Ast.STMT_check (_, calls) ->
-          Array.iter
-            (fun (fn, args) -> trans_call_pred fn args)
+      | Ast.STMT_check (preds, calls) ->
+          Array.iteri
+            (fun i (fn, args) -> trans_call_pred preds.(i) fn args)
             calls
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->
