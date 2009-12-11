@@ -697,7 +697,7 @@ and walk_block
     (fun _ -> (Array.iter (walk_stmt v) b.node))
     v.visit_block_post
     b
-
+;;
 
 (*
  * Local Variables:

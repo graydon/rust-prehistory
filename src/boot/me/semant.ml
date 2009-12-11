@@ -415,8 +415,132 @@ let sorted_tag_keys (ttag:Ast.ty_tag) : Ast.ident array =
     tag_keys
 ;;
 
-(* Mutability analysis. *)
 
+(* Generalised type analysis. *)
+
+
+type 'a ty_fold =
+    { ty_fold_slot : (Ast.mode * 'a) -> 'a;
+      ty_fold_any: unit -> 'a;
+      ty_fold_nil : unit -> 'a;
+      ty_fold_bool : unit -> 'a;
+      ty_fold_mach : ty_mach -> 'a;
+      ty_fold_int : unit -> 'a;
+      ty_fold_char : unit -> 'a;
+      ty_fold_str : unit -> 'a;
+      ty_fold_tup : ('a array) -> 'a;
+      ty_fold_vec : 'a -> 'a;
+      ty_fold_rec : (Ast.ident * 'a) array -> 'a;
+      ty_fold_tag : (Ast.ident, 'a) Hashtbl.t -> 'a;
+      ty_fold_iso : (int * 'a array) -> 'a;
+      ty_fold_idx : int -> 'a;
+      ty_fold_fn : (('a * Ast.constrs * 'a) * Ast.ty_fn_aux) -> 'a;
+      ty_fold_pred : ('a * Ast.constrs) -> 'a;
+      ty_fold_chan : 'a -> 'a;
+      ty_fold_port : 'a -> 'a;
+      ty_fold_mod : Ast.mod_type_items -> 'a;
+      ty_fold_prog : ('a * Ast.constrs * 'a) -> 'a;
+      ty_fold_proc : unit -> 'a;
+      ty_fold_opaque : (opaque_id * Ast.mutability) -> 'a;
+      ty_fold_named : Ast.name -> 'a;
+      ty_fold_type : unit -> 'a;
+      ty_fold_constrained : ('a * Ast.constrs) -> 'a }
+;;
+
+let rec fold_ty (f:'a ty_fold) (ty:Ast.ty) : 'a =
+  let fold_slot s = f.ty_fold_slot (s.Ast.slot_mode, fold_ty f (slot_ty s)) in
+  let fold_ttup ttup = f.ty_fold_tup (Array.map fold_slot ttup) in
+  let fold_ttag ttag = f.ty_fold_tag (htab_map ttag (fun k v -> (k, fold_ttup v))) in
+  let fold_sig tsig =
+    (fold_ttup tsig.Ast.sig_input_slots,
+     tsig.Ast.sig_input_constrs,
+     fold_slot tsig.Ast.sig_output_slot)
+  in
+    match ty with
+    Ast.TY_any -> f.ty_fold_any ()
+  | Ast.TY_nil -> f.ty_fold_nil ()
+  | Ast.TY_bool -> f.ty_fold_bool ()
+  | Ast.TY_mach m -> f.ty_fold_mach m
+  | Ast.TY_int -> f.ty_fold_int ()
+  | Ast.TY_char -> f.ty_fold_char ()
+  | Ast.TY_str -> f.ty_fold_str ()
+
+  | Ast.TY_tup t -> fold_ttup t
+  | Ast.TY_vec s -> f.ty_fold_vec (fold_slot s)
+  | Ast.TY_rec r -> f.ty_fold_rec (Array.map (fun (k,v) -> (k,fold_slot v)) r)
+
+  | Ast.TY_tag tt -> fold_ttag tt
+  | Ast.TY_iso ti -> f.ty_fold_iso (ti.Ast.iso_index,
+                                    (Array.map fold_ttag ti.Ast.iso_group))
+  | Ast.TY_idx i -> f.ty_fold_idx i
+
+  | Ast.TY_fn (tsig,taux) -> f.ty_fold_fn (fold_sig tsig, taux)
+  | Ast.TY_pred (slots, constrs) -> f.ty_fold_pred (fold_ttup slots, constrs)
+  | Ast.TY_chan t -> f.ty_fold_chan (fold_ty f t)
+  | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
+
+  | Ast.TY_mod mtis -> f.ty_fold_mod mtis
+  | Ast.TY_prog tsig -> f.ty_fold_prog (fold_sig tsig)
+  | Ast.TY_proc -> f.ty_fold_proc ()
+
+  | Ast.TY_opaque x -> f.ty_fold_opaque x
+  | Ast.TY_named n -> f.ty_fold_named n
+  | Ast.TY_type -> f.ty_fold_type ()
+
+  | Ast.TY_constrained (t, constrs) ->
+      f.ty_fold_constrained (fold_ty f t, constrs)
+
+;;
+
+
+let ty_fold_default (default:'a) : 'a ty_fold =
+    { ty_fold_slot = (fun _ -> default);
+      ty_fold_any = (fun _ -> default);
+      ty_fold_nil = (fun _ -> default);
+      ty_fold_bool = (fun _ -> default);
+      ty_fold_mach = (fun _ -> default);
+      ty_fold_int = (fun _ -> default);
+      ty_fold_char = (fun _ -> default);
+      ty_fold_str = (fun _ -> default);
+      ty_fold_tup = (fun _ -> default);
+      ty_fold_vec = (fun _ -> default);
+      ty_fold_rec = (fun _ -> default);
+      ty_fold_tag = (fun _ -> default);
+      ty_fold_iso = (fun _ -> default);
+      ty_fold_idx = (fun _ -> default);
+      ty_fold_fn = (fun _ -> default);
+      ty_fold_pred = (fun _ -> default);
+      ty_fold_chan = (fun _ -> default);
+      ty_fold_port = (fun _ -> default);
+      ty_fold_mod = (fun _ -> default);
+      ty_fold_prog = (fun _ -> default);
+      ty_fold_proc = (fun _ -> default);
+      ty_fold_opaque = (fun _ -> default);
+      ty_fold_named = (fun _ -> default);
+      ty_fold_type = (fun _ -> default);
+      ty_fold_constrained = (fun _ -> default) }
+;;
+
+let ty_fold_bool_and (default:bool) : bool ty_fold =
+  let base = ty_fold_default default in
+    { base with
+        ty_fold_tup = (Array.fold_left (fun a b -> a & b) default) }
+;;
+
+let ty_fold_bool_or (default:bool) : bool ty_fold =
+  let base = ty_fold_default default in
+    { base with
+        ty_fold_tup = (Array.fold_left (fun a b -> a || b) default) }
+;;
+
+let ty_fold_list_concat _ : ('a list) ty_fold =
+  let base = ty_fold_default [] in
+    { base with
+        ty_fold_tup = (Array.fold_left (fun a b -> a @ b) []) }
+;;
+
+
+(* Mutability analysis. *)
 
 let slot_is_mutable (s:Ast.slot) : bool =
   match s.Ast.slot_mode with
@@ -425,161 +549,38 @@ let slot_is_mutable (s:Ast.slot) : bool =
     | _ -> false
 ;;
 
-let rec type_is_mutable (t:Ast.ty) : bool =
-  match t with
-      Ast.TY_any
-    | Ast.TY_nil
-    | Ast.TY_bool
-    | Ast.TY_mach _
-    | Ast.TY_int
-    | Ast.TY_char
-    | Ast.TY_str -> false
-
-    | Ast.TY_tup ttup -> ty_tup_is_mutable ttup
-    | Ast.TY_vec s -> slot_or_type_is_mutable s
-    | Ast.TY_rec trec ->
-        Array.fold_left
-          (fun b (_, s) ->
-             if b then b else slot_or_type_is_mutable s)
-          false trec
-
-    | Ast.TY_tag ttag -> ty_tag_is_mutable ttag
-    | Ast.TY_idx idx -> false
-
-    | Ast.TY_iso tiso ->
-        Array.fold_left
-          (fun b t' ->
-             if b then b else ty_tag_is_mutable t')
-          false tiso.Ast.iso_group
-
-    | Ast.TY_fn (_, taux) ->
-        (match taux.Ast.fn_purity with
-             Ast.PURE -> false
-           | Ast.IMPURE Ast.MUTABLE -> true
-           | Ast.IMPURE Ast.IMMUTABLE -> false)
-
-    | Ast.TY_pred _
-    | Ast.TY_chan _
-    | Ast.TY_prog _
-    | Ast.TY_type -> false
-
-    | Ast.TY_port _
-    | Ast.TY_proc -> true
-
-    | Ast.TY_constrained (t', _) -> type_is_mutable t'
-    | Ast.TY_opaque (_, Ast.MUTABLE) -> true
-    | Ast.TY_opaque (_, Ast.IMMUTABLE) -> false
-
-    | Ast.TY_named _ ->
-        bug () "unresolved named type in type_is_mutable"
-
-    | Ast.TY_mod mtis ->
-        bug () "unimplemented mod-type in type_is_mutable"
-
-and slot_or_type_is_mutable (s:Ast.slot) : bool =
-  if slot_is_mutable s
-  then true
-  else type_is_mutable (slot_ty s)
-
-and ty_tag_is_mutable (ttag:Ast.ty_tag) : bool =
-  htab_fold
-    (fun _ t' b ->
-       if b then b else ty_tup_is_mutable t')
-    false ttag
-
-and ty_tup_is_mutable (ttup:Ast.ty_tup) : bool =
-  Array.fold_left
-    (fun b s ->
-       if b then b else slot_or_type_is_mutable s)
-    false ttup
+let type_is_mutable (t:Ast.ty) : bool =
+  let fold_slot (mode, b) =
+    if b
+    then true
+    else match mode with
+        Ast.MODE_exterior Ast.MUTABLE
+      | Ast.MODE_interior Ast.MUTABLE -> true
+      | _ -> false
+  in
+  let fold = ty_fold_bool_or false in
+  let fold = { fold with ty_fold_slot = fold_slot } in
+    fold_ty fold t
 ;;
-
 
 (* GC analysis. *)
 
-(* A type has to be cyclic in order to live in GC memory. *)
-(* FIXME: I'm not sure, by this stage, that the exteriors-list can
- * ever actually collide; I think we might have tied everything into
- * iso groups by now. If so, a simpler predicate just checking for 
- * exterior mutable iso or idx types may suffice.
+(* If a type is cyclic, it is managed by mark-sweep GC, not refcounting.
+ * 
+ * For now we'll call a type cyclic if it is mutable and contains an
+ * iso. This can be tightened up -- I think cyclic types can be more
+ * strictly defined -- but for the sake of language users it will make
+ * no difference. 
  *)
-let rec type_is_cyclic (exteriors:Ast.ty list) (t:Ast.ty) : bool =
 
-  match t with
-      Ast.TY_any
-    | Ast.TY_nil
-    | Ast.TY_bool
-    | Ast.TY_mach _
-    | Ast.TY_int
-    | Ast.TY_char
-    | Ast.TY_str -> false
-
-    | Ast.TY_tup ttup -> ty_tup_is_cyclic exteriors ttup
-    | Ast.TY_vec s -> slot_is_cyclic (t :: exteriors) s
-    | Ast.TY_rec trec ->
-        Array.fold_left
-          (fun b (_, s) ->
-             if b then b else slot_is_cyclic exteriors s)
-          false trec
-
-    | Ast.TY_tag ttag -> ty_tag_is_cyclic exteriors ttag
-    | Ast.TY_idx idx -> false
-
-    | Ast.TY_iso tiso ->
-        Array.fold_left
-          (fun b t' ->
-             if b then b else ty_tag_is_cyclic exteriors t')
-          false tiso.Ast.iso_group
-
-    | Ast.TY_fn (_, taux) ->
-        (match taux.Ast.fn_purity with
-             Ast.PURE -> false
-           | Ast.IMPURE Ast.MUTABLE -> true
-           | Ast.IMPURE Ast.IMMUTABLE -> false)
-
-    | Ast.TY_pred _
-    | Ast.TY_chan _
-    | Ast.TY_prog _
-    | Ast.TY_type -> false
-
-    | Ast.TY_port _
-    | Ast.TY_proc -> false
-
-    | Ast.TY_constrained (t', _) -> type_is_cyclic exteriors t'
-    | Ast.TY_opaque (_, Ast.MUTABLE) -> true
-    | Ast.TY_opaque (_, Ast.IMMUTABLE) -> false
-
-    | Ast.TY_named _ ->
-        bug () "unresolved named type in type_is_cyclic"
-
-    | Ast.TY_mod mtis ->
-        bug () "unimplemented mod-type in type_is_cyclic"
-
-and slot_is_cyclic (exteriors:Ast.ty list) (s:Ast.slot) : bool =
-  let ty = slot_ty s in
-  match (s.Ast.slot_mode, ty) with
-      (Ast.MODE_exterior Ast.MUTABLE, _) when List.mem ty exteriors -> true
-    | (Ast.MODE_exterior Ast.MUTABLE, Ast.TY_iso _) -> true
-    | (Ast.MODE_exterior Ast.MUTABLE, Ast.TY_idx _) -> true
-    | _ ->
-        let exteriors' =
-          match s.Ast.slot_mode with
-              Ast.MODE_exterior _ -> ty :: exteriors
-            | _ -> exteriors
-        in
-          type_is_cyclic exteriors' ty
-
-and ty_tag_is_cyclic (exteriors:Ast.ty list) (ttag:Ast.ty_tag) : bool =
-  htab_fold
-    (fun _ t' b ->
-       if b then b else ty_tup_is_cyclic exteriors t')
-    false ttag
-
-and ty_tup_is_cyclic (exteriors:Ast.ty list) (ttup:Ast.ty_tup) : bool =
-  Array.fold_left
-    (fun b s ->
-       if b then b else slot_is_cyclic exteriors s)
-    false ttup
+let type_is_cyclic (t:Ast.ty) : bool =
+  if not (type_is_mutable t)
+  then false
+  else
+    let fold_iso = fun _ -> true in
+    let fold = ty_fold_bool_or false in
+    let fold = { fold with ty_fold_iso = fold_iso } in
+      fold_ty fold t
 ;;
 
 

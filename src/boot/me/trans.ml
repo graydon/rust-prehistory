@@ -1022,38 +1022,40 @@ let trans_visitor
     let layout = layout_ty abi 0L (slot_ty slot) in
       (Int64.add layout.layout_size exterior_rc_body_off)
 
-  (* FIXME: this should really only return true when there's an exterior
-   * slot to be found somewhere in the guts of the object. 
-   *)
+
   and ty_is_structured (t:Ast.ty) : bool =
-    match t with
-        Ast.TY_tup _
-      | Ast.TY_vec _
-      | Ast.TY_rec _
-      | Ast.TY_tag _
-      | Ast.TY_iso _
-      | Ast.TY_idx _ -> true
-      | _ -> false
+    let fold = ty_fold_bool_or false in
+    let fold = { fold with
+                   ty_fold_tup = (fun _ -> true);
+                   ty_fold_vec = (fun _ -> true);
+                   ty_fold_rec = (fun _ -> true);
+                   ty_fold_tag = (fun _ -> true);
+                   ty_fold_iso = (fun _ -> true);
+                   ty_fold_idx = (fun _ -> true) }
+    in
+      fold_ty fold t
+
 
   and slot_mem_ctrl (cell:Il.cell) (slot:Ast.slot) : mem_ctrl =
-    if slot_is_cyclic [] slot
-    then MEM_gc
-    else
-      match slot_ty slot with
-          Ast.TY_port _ -> MEM_rc_opaque Abi.port_field_refcnt
-        | Ast.TY_chan _ -> MEM_rc_opaque Abi.chan_field_refcnt
-        | Ast.TY_proc -> MEM_rc_opaque Abi.proc_field_refcnt
-            (* Vecs and strs are pseudo-exterior. *)
-        | Ast.TY_vec _ -> MEM_rc_struct
-        | Ast.TY_str -> MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
-        | _ ->
-            match slot.Ast.slot_mode with
-                Ast.MODE_exterior _ when ty_is_structured (slot_ty slot) ->
-                  MEM_rc_struct
-              | Ast.MODE_exterior _ ->
-                  MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
-              | _ ->
-                  MEM_interior
+    let ty = slot_ty slot in
+      if type_is_cyclic ty
+      then MEM_gc
+      else
+        match ty with
+            Ast.TY_port _ -> MEM_rc_opaque Abi.port_field_refcnt
+          | Ast.TY_chan _ -> MEM_rc_opaque Abi.chan_field_refcnt
+          | Ast.TY_proc -> MEM_rc_opaque Abi.proc_field_refcnt
+              (* Vecs and strs are pseudo-exterior. *)
+          | Ast.TY_vec _ -> MEM_rc_struct
+          | Ast.TY_str -> MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
+          | _ ->
+              match slot.Ast.slot_mode with
+                  Ast.MODE_exterior _ when ty_is_structured (slot_ty slot) ->
+                    MEM_rc_struct
+                | Ast.MODE_exterior _ ->
+                    MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
+                | _ ->
+                    MEM_interior
 
   and iter_rec_slots
       (ta:Il.typed_addr)
