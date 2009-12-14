@@ -416,43 +416,54 @@ let sorted_tag_keys (ttag:Ast.ty_tag) : Ast.ident array =
 ;;
 
 
-(* Generalised type analysis. *)
+(* General folds of Ast.ty. *)
 
+type ('ty, 'slot, 'slots, 'tag) ty_fold =
+    {
+      (* Functions that correspond to interior nodes in Ast.ty. *)
+      ty_fold_slot : (Ast.mode * 'ty) -> 'slot;
+      ty_fold_slots : ('slot array) -> 'slots;
+      ty_fold_tags : (Ast.ident, 'slots) Hashtbl.t -> 'tag;
 
-type 'a ty_fold =
-    { ty_fold_slot : (Ast.mode * 'a) -> 'a;
-      ty_fold_any: unit -> 'a;
-      ty_fold_nil : unit -> 'a;
-      ty_fold_bool : unit -> 'a;
-      ty_fold_mach : ty_mach -> 'a;
-      ty_fold_int : unit -> 'a;
-      ty_fold_char : unit -> 'a;
-      ty_fold_str : unit -> 'a;
-      ty_fold_tup : ('a array) -> 'a;
-      ty_fold_vec : 'a -> 'a;
-      ty_fold_rec : (Ast.ident * 'a) array -> 'a;
-      ty_fold_tag : (Ast.ident, 'a) Hashtbl.t -> 'a;
-      ty_fold_iso : (int * 'a array) -> 'a;
-      ty_fold_idx : int -> 'a;
-      ty_fold_fn : (('a * Ast.constrs * 'a) * Ast.ty_fn_aux) -> 'a;
-      ty_fold_pred : ('a * Ast.constrs) -> 'a;
-      ty_fold_chan : 'a -> 'a;
-      ty_fold_port : 'a -> 'a;
-      ty_fold_mod : Ast.mod_type_items -> 'a;
-      ty_fold_prog : ('a * Ast.constrs * 'a) -> 'a;
-      ty_fold_proc : unit -> 'a;
-      ty_fold_opaque : (opaque_id * Ast.mutability) -> 'a;
-      ty_fold_named : Ast.name -> 'a;
-      ty_fold_type : unit -> 'a;
-      ty_fold_constrained : ('a * Ast.constrs) -> 'a }
+      (* Functions that correspond to the Ast.ty constructors. *)
+      ty_fold_any: unit -> 'ty;
+      ty_fold_nil : unit -> 'ty;
+      ty_fold_bool : unit -> 'ty;
+      ty_fold_mach : ty_mach -> 'ty;
+      ty_fold_int : unit -> 'ty;
+      ty_fold_char : unit -> 'ty;
+      ty_fold_str : unit -> 'ty;
+      ty_fold_tup : 'slots -> 'ty;
+      ty_fold_vec : 'slot -> 'ty;
+      ty_fold_rec : (Ast.ident * 'slot) array -> 'ty;
+      ty_fold_tag : 'tag -> 'ty;
+      ty_fold_iso : (int * 'tag array) -> 'ty;
+      ty_fold_idx : int -> 'ty;
+      ty_fold_fn : (('slots * Ast.constrs * 'slot) * Ast.ty_fn_aux) -> 'ty;
+      ty_fold_pred : ('slots * Ast.constrs) -> 'ty;
+      ty_fold_chan : 'ty -> 'ty;
+      ty_fold_port : 'ty -> 'ty;
+      ty_fold_mod : Ast.mod_type_items -> 'ty;
+      ty_fold_prog : ('slots * Ast.constrs * 'slot) -> 'ty;
+      ty_fold_proc : unit -> 'ty;
+      ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
+      ty_fold_named : Ast.name -> 'ty;
+      ty_fold_type : unit -> 'ty;
+      ty_fold_constrained : ('ty * Ast.constrs) -> 'ty }
 ;;
 
-let rec fold_ty (f:'a ty_fold) (ty:Ast.ty) : 'a =
-  let fold_slot s = f.ty_fold_slot (s.Ast.slot_mode, fold_ty f (slot_ty s)) in
-  let fold_ttup ttup = f.ty_fold_tup (Array.map fold_slot ttup) in
-  let fold_ttag ttag = f.ty_fold_tag (htab_map ttag (fun k v -> (k, fold_ttup v))) in
+let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
+  let fold_slot (s:Ast.slot) : 'slot =
+    f.ty_fold_slot (s.Ast.slot_mode, fold_ty f (slot_ty s))
+  in
+  let fold_slots (slots:Ast.slot array) : 'slots =
+    f.ty_fold_slots (Array.map fold_slot slots)
+  in
+  let fold_tags (ttag:Ast.ty_tag) : 'tag =
+    f.ty_fold_tags (htab_map ttag (fun k v -> (k, fold_slots v)))
+  in
   let fold_sig tsig =
-    (fold_ttup tsig.Ast.sig_input_slots,
+    (fold_slots tsig.Ast.sig_input_slots,
      tsig.Ast.sig_input_constrs,
      fold_slot tsig.Ast.sig_output_slot)
   in
@@ -465,17 +476,17 @@ let rec fold_ty (f:'a ty_fold) (ty:Ast.ty) : 'a =
   | Ast.TY_char -> f.ty_fold_char ()
   | Ast.TY_str -> f.ty_fold_str ()
 
-  | Ast.TY_tup t -> fold_ttup t
+  | Ast.TY_tup t -> f.ty_fold_tup (fold_slots t)
   | Ast.TY_vec s -> f.ty_fold_vec (fold_slot s)
   | Ast.TY_rec r -> f.ty_fold_rec (Array.map (fun (k,v) -> (k,fold_slot v)) r)
 
-  | Ast.TY_tag tt -> fold_ttag tt
+  | Ast.TY_tag tt -> f.ty_fold_tag (fold_tags tt)
   | Ast.TY_iso ti -> f.ty_fold_iso (ti.Ast.iso_index,
-                                    (Array.map fold_ttag ti.Ast.iso_group))
+                                    (Array.map fold_tags ti.Ast.iso_group))
   | Ast.TY_idx i -> f.ty_fold_idx i
 
   | Ast.TY_fn (tsig,taux) -> f.ty_fold_fn (fold_sig tsig, taux)
-  | Ast.TY_pred (slots, constrs) -> f.ty_fold_pred (fold_ttup slots, constrs)
+  | Ast.TY_pred (slots, constrs) -> f.ty_fold_pred (fold_slots slots, constrs)
   | Ast.TY_chan t -> f.ty_fold_chan (fold_ty f t)
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
@@ -492,9 +503,13 @@ let rec fold_ty (f:'a ty_fold) (ty:Ast.ty) : 'a =
 
 ;;
 
+type 'a simple_ty_fold = ('a, 'a, 'a, 'a) ty_fold
+;;
 
-let ty_fold_default (default:'a) : 'a ty_fold =
+let ty_fold_default (default:'a) : 'a simple_ty_fold =
     { ty_fold_slot = (fun _ -> default);
+      ty_fold_slots = (fun _ -> default);
+      ty_fold_tags = (fun _ -> default);
       ty_fold_any = (fun _ -> default);
       ty_fold_nil = (fun _ -> default);
       ty_fold_bool = (fun _ -> default);
@@ -521,22 +536,62 @@ let ty_fold_default (default:'a) : 'a ty_fold =
       ty_fold_constrained = (fun _ -> default) }
 ;;
 
-let ty_fold_bool_and (default:bool) : bool ty_fold =
-  let base = ty_fold_default default in
-    { base with
-        ty_fold_tup = (Array.fold_left (fun a b -> a & b) default) }
+let ty_fold_rebuild : (Ast.ty, Ast.slot, Ast.slot array, Ast.ty_tag) ty_fold =
+  { ty_fold_slot = (fun (mode, t) -> { Ast.slot_mode = mode;
+                                       Ast.slot_ty = Some t });
+    ty_fold_slots = (fun slots -> slots);
+    ty_fold_tags = (fun htab -> htab);
+    ty_fold_any = (fun _ -> Ast.TY_any);
+    ty_fold_nil = (fun _ -> Ast.TY_nil);
+    ty_fold_bool = (fun _ -> Ast.TY_bool);
+    ty_fold_mach = (fun m -> Ast.TY_mach m);
+    ty_fold_int = (fun _ -> Ast.TY_int);
+    ty_fold_char = (fun _ -> Ast.TY_char);
+    ty_fold_str = (fun _ -> Ast.TY_str);
+    ty_fold_tup =  (fun slots -> Ast.TY_tup slots);
+    ty_fold_vec = (fun slot -> Ast.TY_vec slot);
+    ty_fold_rec = (fun entries -> Ast.TY_rec entries);
+    ty_fold_tag = (fun tag -> Ast.TY_tag tag);
+    ty_fold_iso = (fun (i, tags) -> Ast.TY_iso { Ast.iso_index = i;
+                                                 Ast.iso_group = tags });
+    ty_fold_idx = (fun i -> Ast.TY_idx i);
+    ty_fold_fn = (fun ((islots, constrs, oslot), aux) ->
+                    Ast.TY_fn ({ Ast.sig_input_slots = islots;
+                                 Ast.sig_input_constrs = constrs;
+                                 Ast.sig_output_slot = oslot }, aux));
+    ty_fold_pred = (fun (islots, constrs) ->
+                      Ast.TY_pred (islots, constrs));
+    ty_fold_chan = (fun t -> Ast.TY_chan t);
+    ty_fold_port = (fun t -> Ast.TY_port t);
+    ty_fold_mod = (fun mti -> Ast.TY_mod mti);
+    ty_fold_prog = (fun (islots, constrs, oslots) ->
+                      Ast.TY_prog { Ast.sig_input_slots = islots;
+                                    Ast.sig_input_constrs = constrs;
+                                    Ast.sig_output_slot = oslots });
+    ty_fold_proc = (fun _ -> Ast.TY_proc);
+    ty_fold_opaque = (fun (opa, mut) -> Ast.TY_opaque (opa, mut));
+    ty_fold_named = (fun n -> Ast.TY_named n);
+    ty_fold_type = (fun _ -> Ast.TY_type);
+    ty_fold_constrained = (fun (t, constrs) -> Ast.TY_constrained (t, constrs)) }
 ;;
 
-let ty_fold_bool_or (default:bool) : bool ty_fold =
+
+let ty_fold_bool_and (default:bool) : bool simple_ty_fold =
   let base = ty_fold_default default in
     { base with
-        ty_fold_tup = (Array.fold_left (fun a b -> a || b) default) }
+        ty_fold_slots = (Array.fold_left (fun a b -> a & b) default) }
 ;;
 
-let ty_fold_list_concat _ : ('a list) ty_fold =
+let ty_fold_bool_or (default:bool) : bool simple_ty_fold =
+  let base = ty_fold_default default in
+    { base with
+        ty_fold_slots = (Array.fold_left (fun a b -> a || b) default) }
+;;
+
+let ty_fold_list_concat _ : ('a list) simple_ty_fold =
   let base = ty_fold_default [] in
     { base with
-        ty_fold_tup = (Array.fold_left (fun a b -> a @ b) []) }
+        ty_fold_slots = (Array.fold_left (fun a b -> a @ b) []) }
 ;;
 
 
