@@ -697,7 +697,7 @@ and parse_atomic_ty ps =
               | NIL -> (bump ps; [| |])
               | _ -> raise (err "tag variant missing argument list" ps)
           in
-            htab_put htab ident tup
+            htab_put htab (Ast.NAME_base (Ast.BASE_ident ident)) tup
         in
         let _ = bracketed_one_or_more LPAREN RPAREN (Some COMMA) (ctxt "tag: variant" parse_tag_entry) ps in
           Ast.TY_tag htab
@@ -2000,7 +2000,11 @@ and expand_tags ps item : (Ast.ident * Ast.mod_item) array =
     let tags = ref [] in
       Hashtbl.iter
         begin
-          fun ident tup ->
+          fun name tup ->
+            let ident = match name with
+                Ast.NAME_base (Ast.BASE_ident ident) -> ident
+              | _ -> raise (Parse_err (ps, "unexpected name type while expanding tag"))
+            in
             let header = Array.map (fun slot -> (clone_span ps item slot)) tup in
             let decl = { Ast.decl_params = params;
                          Ast.decl_item = (header, ttag, id) }

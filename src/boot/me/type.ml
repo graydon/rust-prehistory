@@ -87,7 +87,7 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
-  let path = Stack.create () in 
+  let path = Stack.create () in
   let passes =
     [|
       (type_check_visitor cx

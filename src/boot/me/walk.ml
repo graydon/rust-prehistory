@@ -89,27 +89,27 @@ let empty_visitor =
 ;;
 
 let path_managing_visitor
-    (path:Ast.ident Stack.t)
+    (path:Ast.name_component Stack.t)
     (inner:visitor)
     : visitor =
-  let visit_mod_item_pre name params item =
-    Stack.push name path;
-    inner.visit_mod_item_pre name params item
+  let visit_mod_item_pre ident params item =
+    Stack.push (Ast.COMP_ident ident) path;
+    inner.visit_mod_item_pre ident params item
   in
-  let visit_mod_item_post name params item =
-    inner.visit_mod_item_post name params item;
+  let visit_mod_item_post ident params item =
+    inner.visit_mod_item_post ident params item;
     ignore (Stack.pop path)
   in
-  let visit_native_mod_item_pre name item =
-    Stack.push name path;
-    inner.visit_native_mod_item_pre name item
+  let visit_native_mod_item_pre ident item =
+    Stack.push (Ast.COMP_ident ident) path;
+    inner.visit_native_mod_item_pre ident item
   in
-  let visit_native_mod_item_post name item =
-    inner.visit_native_mod_item_post name item;
+  let visit_native_mod_item_post ident item =
+    inner.visit_native_mod_item_post ident item;
     ignore (Stack.pop path)
   in
   let visit_init_pre i =
-    Stack.push "init" path;
+    Stack.push (Ast.COMP_ident "init") path;
     inner.visit_init_pre i
   in
   let visit_init_post i =
@@ -117,7 +117,7 @@ let path_managing_visitor
     ignore (Stack.pop path)
   in
   let visit_main_pre b =
-    Stack.push "main" path;
+    Stack.push (Ast.COMP_ident "main") path;
     inner.visit_main_pre b
   in
   let visit_main_post b =
@@ -125,7 +125,7 @@ let path_managing_visitor
     ignore (Stack.pop path)
   in
   let visit_fini_pre b =
-    Stack.push "fini" path;
+    Stack.push (Ast.COMP_ident "fini") path;
     inner.visit_fini_pre b
   in
   let visit_fini_post b =
@@ -146,12 +146,27 @@ let path_managing_visitor
     }
 ;;
 
+let path_to_name
+    (path:Ast.name_component Stack.t)
+    : Ast.name =
+  let rec name_of ncs =
+    match ncs with
+        [] -> failwith "empty path"
+      | [(Ast.COMP_ident i)] -> Ast.NAME_base (Ast.BASE_ident i)
+      | [(Ast.COMP_app x)] -> Ast.NAME_base (Ast.BASE_app x)
+      | [(Ast.COMP_idx x)] -> failwith "path-name contains COMP_idx"
+      | nc::ncs -> Ast.NAME_ext (name_of ncs, nc)
+  in
+    name_of (stk_elts_from_top path)
+;;
+
+
 let mod_item_logging_visitor
     (logfn:string->unit)
-    (path:Ast.ident Stack.t)
+    (path:Ast.name_component Stack.t)
     (inner:visitor)
     : visitor =
-  let path_name _ = String.concat "." (stk_elts_from_bot path) in
+  let path_name _ = Ast.fmt_to_str Ast.fmt_name (path_to_name path) in
   let visit_mod_item_pre name params item =
     logfn (Printf.sprintf "entering %s" (path_name()));
     inner.visit_mod_item_pre name params item

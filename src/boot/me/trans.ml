@@ -27,7 +27,7 @@ type mem_ctrl =
 
 let trans_visitor
     (cx:ctxt)
-    (path:Ast.ident Stack.t)
+    (path:Ast.name_component Stack.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
@@ -74,7 +74,6 @@ let trans_visitor
   in
   let pop_emitter _ = ignore (Stack.pop emitters) in
   let emitter _ = Stack.top emitters in
-  let name _ = Stack.top path in
   let emit q = Il.emit (emitter()) q in
   let next_vreg _ = Il.next_vreg (emitter()) in
   let mark _ : quad_idx = (emitter()).Il.emit_pc in
@@ -99,7 +98,7 @@ let trans_visitor
   let epilogue_jumps = Stack.create() in
 
   let path_name (_:unit) : string =
-    String.concat "." (stk_elts_from_bot path)
+    Ast.fmt_to_str Ast.fmt_name (Walk.path_to_name path)
   in
 
   let based (reg:Il.reg) : Il.addr =
@@ -2053,7 +2052,7 @@ let trans_visitor
     let i = ref (-1) in
       begin
         for j = 0 to arr_max tag_keys do
-          if tag_keys.(j) = n
+          if tag_keys.(j) = (Ast.NAME_base (Ast.BASE_ident n))
           then i := j
         done;
         if (!i) = -1
@@ -2092,7 +2091,7 @@ let trans_visitor
         fun arg0_alias ->
           trans_upcall Abi.UPCALL_native
             [|
-              (trans_static_string (name()));
+              (trans_static_string (path_name()));
               (Il.Cell (word_at (fp_imm out_addr_disp)));
               arg0_alias;
               imm (Int64.of_int (Array.length nfn.Ast.native_fn_input_slots))
@@ -2224,12 +2223,12 @@ let trans_visitor
 
 let fixup_assigning_visitor
     (cx:ctxt)
-    (path:Ast.ident Stack.t)
+    (path:Ast.name_component Stack.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
   let path_name (_:unit) : string =
-    String.concat "." (stk_elts_from_bot path)
+    Ast.fmt_to_str Ast.fmt_name (Walk.path_to_name path)
   in
 
   let enter_file_for i =

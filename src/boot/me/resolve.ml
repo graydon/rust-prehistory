@@ -102,12 +102,13 @@ let stmt_collecting_visitor
 
 let all_item_collecting_visitor
     (cx:ctxt)
+    (path:Ast.name_component Stack.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
   let visit_native_mod_item_pre n i =
     htab_put cx.ctxt_all_native_items i.id i.node;
-    htab_put cx.ctxt_item_names i.id n;
+    htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
     log cx "collected native item #%d: %s" (int_of_node i.id) n;
     inner.Walk.visit_native_mod_item_pre n i
   in
@@ -123,7 +124,7 @@ let all_item_collecting_visitor
            htab_put cx.ctxt_slot_keys sloti.id (Ast.KEY_ident ident))
     in
       htab_put cx.ctxt_all_items i.id i.node;
-      htab_put cx.ctxt_item_names i.id n;
+      htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
       log cx "collected item #%d: %s" (int_of_node i.id) n;
       begin
         (* FIXME: this is incomplete. *)
@@ -259,7 +260,7 @@ let get_ty_references
 ;;
 
 
-let tag_reference_extracting_visitor
+let type_reference_extracting_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
     (node_to_references:(node_id,node_id list) Hashtbl.t)
@@ -289,21 +290,19 @@ let tag_reference_extracting_visitor
 ;;
 
 
-let group_array_of
+let iso_group_of
     (cx:ctxt)
-    (node_to_group:(node_id,iso_group) Hashtbl.t)
-    (group_to_nodes:(iso_group, (node_id,unit) Hashtbl.t) Hashtbl.t)
+    (recursive_tag_groups:(node_id,(node_id,unit) Hashtbl.t) Hashtbl.t)
     (n:node_id)
     : node_id array =
-  let group = Hashtbl.find node_to_group n in
-  let group_table = Hashtbl.find group_to_nodes group in
+  let group_table = Hashtbl.find recursive_tag_groups n in
   let group_array = Array.of_list (htab_keys group_table) in
-  let compare_types a_id b_id =
-    let a_ty = Hashtbl.find cx.ctxt_all_items a_id in
-    let b_ty = Hashtbl.find cx.ctxt_all_items b_id in
-      compare a_ty b_ty
+  let compare_nodes a_id b_id =
+    let a_name = Hashtbl.find cx.ctxt_all_item_names a_id in
+    let b_name = Hashtbl.find cx.ctxt_all_item_names b_id in
+      compare a_name b_name
   in
-    Array.sort compare_types group_array;
+    Array.sort compare_nodes group_array;
     group_array
 ;;
 
@@ -330,7 +329,7 @@ let rec resolve_type
 let type_resolving_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
-    (node_to_references:(node_id,node_id list) Hashtbl.t)
+    (recursive_tag_groups:(node_id,(node_id,unit) Hashtbl.t) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
@@ -372,7 +371,7 @@ let type_resolving_visitor
             *)
           | (_e, t) -> resolve_type cx (!scopes) empty_recur_info t
         in
-          log cx "resolved item %s, type %s" id (Ast.fmt_to_str Ast.fmt_ty ty);
+          log cx "resolved item %s, type as %a" id Ast.sprintf_ty ty;
           htab_put cx.ctxt_all_item_types item.id ty
       with
           Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
@@ -494,10 +493,10 @@ let lval_base_resolving_visitor
 let resolve_recursion
     (cx:ctxt)
     (node_to_references:(node_id,node_id list) Hashtbl.t)
+    (recursive_tag_groups:(node_id,(node_id,unit) Hashtbl.t) Hashtbl.t)
     : unit =
 
   let recursive_tag_types = Hashtbl.create 0 in
-  let recursive_tag_groups = Hashtbl.create 0 in
 
   let rec can_reach (target:node_id) (visited:node_id list) (curr:node_id) : bool =
     if List.mem curr visited
@@ -539,6 +538,7 @@ let resolve_recursion
         then ()
         else
           begin
+            htab_put recursive_tag_groups node group;
             if Hashtbl.mem recursive_tag_types node
             then
               begin
@@ -553,7 +553,6 @@ let resolve_recursion
           end
       in
         walk [] root;
-        htab_put recursive_tag_groups root group
     done
   in
 
@@ -574,15 +573,16 @@ let process_crate
   let path = Stack.create () in
 
   let node_to_references = Hashtbl.create 0 in
+  let recursive_tag_groups = Hashtbl.create 0 in
 
   let passes_0 =
     [|
       (block_scope_forming_visitor cx
          (stmt_collecting_visitor cx
-            (all_item_collecting_visitor cx
+            (all_item_collecting_visitor cx path
                Walk.empty_visitor)));
       (scope_stack_managing_visitor scopes
-         (tag_reference_extracting_visitor
+         (type_reference_extracting_visitor
             cx scopes node_to_references
             Walk.empty_visitor))
     |]
@@ -591,14 +591,14 @@ let process_crate
     [|
       (scope_stack_managing_visitor scopes
          (type_resolving_visitor cx scopes
-            node_to_references
+            recursive_tag_groups
             (lval_base_resolving_visitor cx scopes
                Walk.empty_visitor)));
     |]
   in
     log cx "running primary resolve passes";
     run_passes cx path passes_0 (log cx "%s") crate;
-    resolve_recursion cx node_to_references;
+    resolve_recursion cx node_to_references recursive_tag_groups;
     log cx "running secondary resolve passes";
     run_passes cx path passes_1 (log cx "%s") crate
 ;;

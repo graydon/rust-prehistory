@@ -275,6 +275,11 @@ PKG_FILES := README TODO COPYING\
              $(TEST_RUN_FAIL_CRATES) $(TEST_RUN_FAIL_SOURCES) $(TEST_RUN_FAIL_PATS) \
              $(TEST_COMPILE_FAIL_CRATES) $(TEST_COMPILE_FAIL_SOURCES) $(TEST_COMPILE_FAIL_PATS)
 
+dist:
+	mkdir -p dist/$(PKG_DIR)
+	tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
+	tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
+
 distcheck:
 	rm -Rf $(PKG_NAME)-*.tar.gz dist
 	mkdir -p dist/$(PKG_DIR)

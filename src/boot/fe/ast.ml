@@ -176,7 +176,7 @@ and ty_rec = (ident * slot) array
  * group of TY_tags.
  *)
 
-and ty_tag = (ident, ty_tup) Hashtbl.t
+and ty_tag = (name, ty_tup) Hashtbl.t
 
 and ty_iso =
     {
@@ -610,11 +610,11 @@ and fmt_tag (ff:Format.formatter) (ttag:ty_tag) : unit =
   let first = ref true in
     Hashtbl.iter
       begin
-        fun ident ttup ->
+        fun name ttup ->
           (if !first
            then first := false
            else fmt ff ",@ ");
-          fmt_ident ff ident;
+          fmt_name ff name;
           fmt_slots ff ttup None
       end
       ttag;

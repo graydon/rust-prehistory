@@ -65,8 +65,7 @@ type ctxt =
       ctxt_slot_keys: (node_id,Ast.slot_key) Hashtbl.t;
       ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
       ctxt_all_native_items: (node_id,Ast.native_mod_item') Hashtbl.t;
-      (* ctxt_item_names is just for error messages. *)
-      ctxt_item_names: (node_id,Ast.ident) Hashtbl.t;
+      ctxt_all_item_names: (node_id,Ast.name) Hashtbl.t;
       ctxt_all_item_types: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
@@ -123,7 +122,7 @@ let new_ctxt sess abi crate =
     ctxt_slot_keys = Hashtbl.create 0;
     ctxt_all_items = Hashtbl.create 0;
     ctxt_all_native_items = Hashtbl.create 0;
-    ctxt_item_names = Hashtbl.create 0;
+    ctxt_all_item_names = Hashtbl.create 0;
     ctxt_all_item_types = Hashtbl.create 0;
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
@@ -407,10 +406,8 @@ let interior_slot_full mut ty : Ast.slot =
 let interior_slot ty : Ast.slot = interior_slot_full Ast.IMMUTABLE ty
 ;;
 
-let sorted_tag_keys (ttag:Ast.ty_tag) : Ast.ident array =
-  let tag_keys = Array.make (Hashtbl.length ttag) "" in
-  let i = ref 0 in
-    Hashtbl.iter (fun k _ -> tag_keys.(!i) <- k; incr i) ttag;
+let sorted_tag_keys (ttag:Ast.ty_tag) : Ast.name array =
+  let tag_keys = Array.of_list (htab_keys ttag) in
     Array.sort compare tag_keys;
     tag_keys
 ;;
@@ -423,7 +420,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       (* Functions that correspond to interior nodes in Ast.ty. *)
       ty_fold_slot : (Ast.mode * 'ty) -> 'slot;
       ty_fold_slots : ('slot array) -> 'slots;
-      ty_fold_tags : (Ast.ident, 'slots) Hashtbl.t -> 'tag;
+      ty_fold_tags : (Ast.name, 'slots) Hashtbl.t -> 'tag;
 
       (* Functions that correspond to the Ast.ty constructors. *)
       ty_fold_any: unit -> 'ty;
@@ -1087,7 +1084,7 @@ let lookup
 
 let run_passes
     (cx:ctxt)
-    (path:Ast.ident Stack.t)
+    (path:Ast.name_component Stack.t)
     (passes:Walk.visitor array)
     (log:string->unit)
     (crate:Ast.crate)

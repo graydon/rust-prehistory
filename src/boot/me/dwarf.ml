@@ -766,7 +766,7 @@ let prepend lref x = lref := x :: (!lref)
 let dwarf_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
-    (path:Ast.ident Stack.t)
+    (path:Ast.name_component Stack.t)
     (cu_aranges:(frag list) ref)
     (cu_pubnames:(frag list) ref)
     (cu_infos:(frag list) ref)
@@ -775,9 +775,7 @@ let dwarf_visitor
     (cu_frames:(frag list) ref)
     : Walk.visitor =
 
-  let path_name (_:unit) : string =
-    String.concat "." (stk_elts_from_bot path)
-  in
+  let path_name _ = Ast.fmt_to_str Ast.fmt_name (Walk.path_to_name path) in
 
   let (abbrev_table:(abbrev, int) Hashtbl.t) = Hashtbl.create 0 in
 
