@@ -407,6 +407,12 @@ let emit_file
       jump_table_section_fixup (SEQ [| |])
   in
 
+  let dyld_section_fixup = new_fixup "__dyld section" in
+  let dyld_section =
+    def_aligned dyld_sect_align
+      dyld_section_fixup (SEQ [| |])
+  in
+
   (* Segments. *)
   let zero_segment_fixup = new_fixup "__PAGEZERO segment" in
   let zero_segment = align_both seg_align
@@ -432,7 +438,8 @@ let emit_file
   let import_segment_fixup = new_fixup "__IMPORT segment" in
   let import_segment = def_aligned seg_align import_segment_fixup
     (SEQ [|
-       jump_table_section
+       jump_table_section;
+       dyld_section
      |])
   in
 
