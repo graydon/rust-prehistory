@@ -2,7 +2,11 @@
 
 prog a
 {
-  type mlist = tag(cons(int,@mlist), nil());
+  type visual = tag(shade(int),hue(pix));
+  type pix = (colour,colour,colour);
+  type colour = tag(red(),green(),blue());
+  type mlist = tag(cons(int,@next), nil());
+  type next = rec(mlist val);
 
   main {
     // FIXME: at the moment we can't handle x = conx(10, x)

@@ -197,54 +197,6 @@ let set_iso r i =
 ;;
 
 
-(*
- * iso-recursion groups are very complicated.
- * 
- *   - iso groups are always rooted at *named* ty_tag nodes
- * 
- *   - consider: 
- * 
- *    type colour = tag(red, green, blue);
- *    type list = tag(cons(colour, @list), nil())
- * 
- *    this should include list as an iso but not colour,
- *    should result in:
- * 
- *    type list = iso[<0>:tag(cons(tag(red,green,blue),@#1))]
- * 
- *   - consider:
- * 
- *    type colour = tag(red, green, blue);
- *    type tree = tag(children(@list), leaf(colour))
- *    type list = tag(cons(@tree, @list), nil())
- * 
- *    this should result in:
- * 
- *    type list = iso[<0>:tag(cons(@#2, @#1),nil());
- *                    1: tag(children(@#1),leaf(tag(red,green,blue)))]
- * 
- *  - how can you calculate these?
- * 
- *    - start by making a map from named-tag-node-id -> referenced-other-nodes
- *    - for each member in the set, if you can get from itself to itself, keep it,
- *      otherwise it's non-recursive => non-interesting, delete it.
- *    - group the members (now all recursive) by dependency
- *    - assign index-number to each elt of group
- *    - fully resolve each elt of group, turning names into numbers or chasing through to
- *      fully-resolving targets as necessary
- *    - place group in iso, store differently-indexed value in table for each
- * 
- * 
- *  - what are the illegal forms?
- *    - recursion that takes indefinite storage to form a tag, eg.
- * 
- *      type t = tag(foo(t));
- *
- *    - recursion that makes a tag unconstructable, eg:
- * 
- *      type t = tag(foo(@t));
- *)
-
 let get_ty_idxs (h:(int,unit)Hashtbl.t) (t:Ast.ty) : unit =
   let base = ty_fold_default () in
   let fold = { base with
@@ -310,7 +262,7 @@ let get_ty_references
 let tag_reference_extracting_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
-    (tag_node_to_referenced_nodes:(node_id,node_id list) Hashtbl.t)
+    (node_to_references:(node_id,node_id list) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
@@ -322,14 +274,11 @@ let tag_reference_extracting_visitor
           ->
             begin
               let ty = td.Ast.decl_item in
-                match ty with
-                    Ast.TY_tag _ ->
-                      log cx "extracting references for tag node %d" (int_of_node item.id);
-                      let referenced = get_ty_references ty cx (!scopes) in
-                        List.iter (fun i -> log cx "tag node %d references sub-tag %d"
-                                     (int_of_node item.id) (int_of_node i)) referenced;
-                        htab_put tag_node_to_referenced_nodes item.id referenced
-                  | _ -> ()
+                log cx "extracting references for type node %d" (int_of_node item.id);
+                let referenced = get_ty_references ty cx (!scopes) in
+                  List.iter (fun i -> log cx "type %d references type %d"
+                               (int_of_node item.id) (int_of_node i)) referenced;
+                  htab_put node_to_references item.id referenced
             end
         | _ -> ()
     end;
@@ -381,7 +330,7 @@ let rec resolve_type
 let type_resolving_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
-    (tag_node_to_referenced_nodes:(node_id,node_id list) Hashtbl.t)
+    (node_to_references:(node_id,node_id list) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
@@ -493,6 +442,130 @@ let lval_base_resolving_visitor
 ;;
 
 
+
+(*
+ * iso-recursion groups are very complicated.
+ * 
+ *   - iso groups are always rooted at *named* ty_tag nodes
+ * 
+ *   - consider: 
+ * 
+ *    type colour = tag(red, green, blue);
+ *    type list = tag(cons(colour, @list), nil())
+ * 
+ *    this should include list as an iso but not colour,
+ *    should result in:
+ * 
+ *    type list = iso[<0>:tag(cons(tag(red,green,blue),@#1))]
+ * 
+ *   - consider:
+ * 
+ *    type colour = tag(red, green, blue);
+ *    type tree = tag(children(@list), leaf(colour))
+ *    type list = tag(cons(@tree, @list), nil())
+ * 
+ *    this should result in:
+ * 
+ *    type list = iso[<0>:tag(cons(@#2, @#1),nil());
+ *                    1: tag(children(@#1),leaf(tag(red,green,blue)))]
+ * 
+ *  - how can you calculate these?
+ * 
+ *    - start by making a map from named-tag-node-id -> referenced-other-nodes
+ *    - for each member in the set, if you can get from itself to itself, keep it,
+ *      otherwise it's non-recursive => non-interesting, delete it.
+ *    - group the members (now all recursive) by dependency
+ *    - assign index-number to each elt of group
+ *    - fully resolve each elt of group, turning names into numbers or chasing through to
+ *      fully-resolving targets as necessary
+ *    - place group in iso, store differently-indexed value in table for each
+ * 
+ * 
+ *  - what are the illegal forms?
+ *    - recursion that takes indefinite storage to form a tag, eg.
+ * 
+ *      type t = tag(foo(t));
+ *
+ *    - recursion that makes a tag unconstructable, eg:
+ * 
+ *      type t = tag(foo(@t));
+ *)
+
+let resolve_recursion
+    (cx:ctxt)
+    (node_to_references:(node_id,node_id list) Hashtbl.t)
+    : unit =
+
+  let recursive_tag_types = Hashtbl.create 0 in
+  let recursive_tag_groups = Hashtbl.create 0 in
+
+  let rec can_reach (target:node_id) (visited:node_id list) (curr:node_id) : bool =
+    if List.mem curr visited
+    then false
+    else
+      match htab_search node_to_references curr with
+          None -> false
+        | Some referenced ->
+            if List.mem target referenced
+            then true
+            else List.exists (can_reach target (curr :: visited)) referenced
+  in
+
+  let extract_recursive_tags _ =
+    Hashtbl.iter
+      begin fun id _ ->
+        if can_reach id [] id
+        then begin
+          match Hashtbl.find cx.ctxt_all_items id with
+              Ast.MOD_ITEM_public_type { Ast.decl_item = Ast.TY_tag _ }
+            | Ast.MOD_ITEM_opaque_type { Ast.decl_item = Ast.TY_tag _ } ->
+                log cx "type %d is a recursive tag" (int_of_node id);
+                Hashtbl.replace recursive_tag_types id ()
+            | _ ->
+                log cx "type %d is recursive, but not a tag" (int_of_node id);
+        end
+        else log cx "type %d is non-recursive" (int_of_node id);
+      end
+      node_to_references
+  in
+
+  let group_recursive_tags _ =
+    while (Hashtbl.length recursive_tag_types) != 0 do
+      let keys = htab_keys recursive_tag_types in
+      let root = List.hd keys in
+      let group = Hashtbl.create 0 in
+      let rec walk visited node =
+        if List.mem node visited
+        then ()
+        else
+          begin
+            if Hashtbl.mem recursive_tag_types node
+            then
+              begin
+                Hashtbl.remove recursive_tag_types node;
+                htab_put group node ();
+                log cx "recursion group rooted at tag %d contains tag %d"
+                  (int_of_node root) (int_of_node node);
+              end;
+            match htab_search node_to_references node with
+                None -> ()
+              | Some referenced -> List.iter (walk (node :: visited)) referenced
+          end
+      in
+        walk [] root;
+        htab_put recursive_tag_groups root group
+    done
+  in
+
+    begin
+      extract_recursive_tags ();
+      group_recursive_tags ();
+      log cx "found %d independent type-recursion groups"
+        (Hashtbl.length recursive_tag_groups);
+    end
+;;
+
+
 let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
@@ -502,7 +575,7 @@ let process_crate
 
   let node_to_references = Hashtbl.create 0 in
 
-  let passes =
+  let passes_0 =
     [|
       (block_scope_forming_visitor cx
          (stmt_collecting_visitor cx
@@ -511,7 +584,11 @@ let process_crate
       (scope_stack_managing_visitor scopes
          (tag_reference_extracting_visitor
             cx scopes node_to_references
-            Walk.empty_visitor));
+            Walk.empty_visitor))
+    |]
+  in
+  let passes_1 =
+    [|
       (scope_stack_managing_visitor scopes
          (type_resolving_visitor cx scopes
             node_to_references
@@ -519,7 +596,11 @@ let process_crate
                Walk.empty_visitor)));
     |]
   in
-    run_passes cx path passes (log cx "%s") crate
+    log cx "running primary resolve passes";
+    run_passes cx path passes_0 (log cx "%s") crate;
+    resolve_recursion cx node_to_references;
+    log cx "running secondary resolve passes";
+    run_passes cx path passes_1 (log cx "%s") crate
 ;;
 
 (*
