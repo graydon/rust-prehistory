@@ -200,7 +200,7 @@ let set_iso r i =
 (*
  * iso-recursion groups are very complicated.
  * 
- *   - iso groups are always rooted at ty_tag nodes
+ *   - iso groups are always rooted at *named* ty_tag nodes
  * 
  *   - consider: 
  * 
@@ -224,6 +224,16 @@ let set_iso r i =
  *                    1: tag(children(@#1),leaf(tag(red,green,blue)))]
  * 
  *  - how can you calculate these?
+ * 
+ *    - start by making a map from named-tag-node-id -> referenced-other-nodes
+ *    - for each member in the set, if you can get from itself to itself, keep it,
+ *      otherwise it's non-recursive => non-interesting, delete it.
+ *    - group the members (now all recursive) by dependency
+ *    - assign index-number to each elt of group
+ *    - fully resolve each elt of group, turning names into numbers or chasing through to
+ *      fully-resolving targets as necessary
+ *    - place group in iso, store differently-indexed value in table for each
+ * 
  * 
  *  - what are the illegal forms?
  *    - recursion that takes indefinite storage to form a tag, eg.
@@ -269,144 +279,40 @@ let lookup_type_by_ident
           end
 ;;
 
-let iso_grouping_visitor
+
+let lookup_type_by_name
+    (cx:ctxt)
+    (scopes:scope list)
+    (name:Ast.name)
+    : ((scope list) * node_id * Ast.ty) =
+    match name with
+        (Ast.NAME_base (Ast.BASE_ident ident)) ->
+          lookup_type_by_ident cx scopes ident
+      | _ -> err None "unhandled form of name in Resolve.lookup_type_by_name"
+;;
+
+
+let get_ty_references
+    (t:Ast.ty)
+    (cx:ctxt)
+    (scopes:scope list)
+    : node_id list =
+  let base = ty_fold_list_concat () in
+  let ty_fold_named n =
+    let (_, node, _) = lookup_type_by_name cx scopes n in
+      [ node ]
+  in
+  let fold = { base with ty_fold_named = ty_fold_named } in
+    fold_ty fold t
+;;
+
+
+let tag_reference_extracting_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
-    (node_to_group:(node_id,iso_group) Hashtbl.t)
-    (group_joins:(iso_group,(iso_group option)) Hashtbl.t)
+    (tag_node_to_referenced_nodes:(node_id,node_id list) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
-
-  let iso_group_of (n:node_id) : iso_group =
-    match htab_search node_to_group n with
-        Some g -> g
-      | None ->
-          let group = IsoGroup (Hashtbl.length node_to_group) in
-            Hashtbl.add node_to_group n group;
-            group
-  in
-
-  let rec join_groups (i:iso_group) (j:iso_group) : unit =
-    if (int_of_iso_group j) < (int_of_iso_group i)
-    then join_groups j i
-    else
-      begin
-        let i_rep = get_representative group_joins i in
-        let j_rep = get_representative group_joins j in
-          if i_rep != j_rep
-          then Hashtbl.replace group_joins j_rep (Some i_rep)
-      end
-  in
-
-  let rec group_slot
-      (recur:recur_info)
-      (scopes:scope list)
-      (slot:Ast.slot)
-      : unit =
-    match slot.Ast.slot_ty with
-        Some t -> group_ty recur scopes t
-      | None -> ()
-
-  and group_ty_sig
-      (recur:recur_info)
-      (scopes:scope list)
-      (tsig:Ast.ty_sig)
-      : unit =
-    Array.iter (group_slot recur scopes) tsig.Ast.sig_input_slots;
-    group_slot recur scopes tsig.Ast.sig_output_slot
-
-  and group_ty_fn
-      (recur:recur_info)
-      (scopes:scope list)
-      (f:Ast.ty_fn)
-      : unit =
-    let (tsig,_) = f in
-      group_ty_sig recur scopes tsig
-
-  and group_mod_type_item
-      (recur:recur_info)
-      (scopes:scope list)
-      (ident:Ast.ident)
-      (item:Ast.mod_type_item)
-      : unit =
-    let scopes = (SCOPE_mod_type_item item) :: scopes in
-      match item.node with
-          Ast.MOD_TYPE_ITEM_opaque_type _ -> ()
-        | Ast.MOD_TYPE_ITEM_public_type td ->
-            (group_ty recur scopes td.Ast.decl_item)
-        | Ast.MOD_TYPE_ITEM_pred pd ->
-            let (slots, _) = pd.Ast.decl_item in
-              Array.iter (group_slot recur scopes) slots
-        | Ast.MOD_TYPE_ITEM_mod md ->
-            group_mod_type_items recur scopes md.Ast.decl_item
-        | Ast.MOD_TYPE_ITEM_fn fd ->
-            group_ty_fn recur scopes fd.Ast.decl_item
-        | Ast.MOD_TYPE_ITEM_prog pd ->
-            group_ty_sig recur scopes pd.Ast.decl_item
-
-  and group_mod_type_items
-      (recur:recur_info)
-      (scopes:scope list)
-      (mtis:Ast.mod_type_items)
-      : unit =
-    Hashtbl.iter (group_mod_type_item recur scopes) mtis
-
-  and group_ty_tup
-      (recur:recur_info)
-      (scopes:scope list)
-      (ttup:Ast.ty_tup)
-      : unit =
-    Array.iter (group_slot recur scopes) ttup
-
-  and group_ty
-      (recur:recur_info)
-      (scopes:scope list)
-      (t:Ast.ty)
-      : unit =
-    match t with
-        Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_mach _
-      | Ast.TY_int | Ast.TY_char | Ast.TY_str | Ast.TY_type
-      | Ast.TY_idx _ | Ast.TY_opaque _ | Ast.TY_proc -> ()
-
-      | Ast.TY_tup ttup ->
-          group_ty_tup recur scopes ttup
-
-      | Ast.TY_rec trec ->
-          Array.iter
-            (fun (_, s) -> group_slot recur scopes s)
-            trec
-
-      | Ast.TY_tag ttag ->
-          Hashtbl.iter
-            (fun _ ttup -> group_ty_tup recur scopes ttup)
-            ttag
-
-      | Ast.TY_iso tiso ->
-          Array.iter
-            begin
-              fun ttag -> Hashtbl.iter
-                (fun _ ttup -> group_ty_tup recur scopes ttup)
-                ttag
-            end
-            tiso.Ast.iso_group
-
-      | Ast.TY_vec slot -> group_slot recur scopes slot
-      | Ast.TY_chan ty -> group_ty recur scopes ty
-      | Ast.TY_port ty -> group_ty recur scopes ty
-      | Ast.TY_constrained (ty, _) -> group_ty recur scopes ty
-      | Ast.TY_fn tfn -> group_ty_fn recur scopes tfn
-      | Ast.TY_pred tp ->
-          let (slots, _) = tp in
-            Array.iter (group_slot recur scopes) slots
-      | Ast.TY_prog tprog -> group_ty_sig recur scopes tprog
-      | Ast.TY_mod mtis -> group_mod_type_items recur scopes mtis
-      | Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident)) ->
-          let (scopes, id, ty) = lookup_type_by_ident cx scopes ident in
-            if List.mem id recur.recur_all_nodes
-            then () (* join_groups group other_group *)
-            else group_ty (push_node recur id) scopes ty
-      | Ast.TY_named _ -> err None "unhandled form of type name"
-  in
 
   let visit_mod_item_pre id params item =
     begin
@@ -416,54 +322,15 @@ let iso_grouping_visitor
           ->
             begin
               let ty = td.Ast.decl_item in
-              (* let group = iso_group_of item.id in *)
-                group_ty (push_node empty_recur_info item.id) (!scopes) ty;
-            end
-        | _ -> ()
-    end;
-    inner.Walk.visit_mod_item_pre id params item
-  in
-    { inner with
-        Walk.visit_mod_item_pre = visit_mod_item_pre }
-;;
-
-
-let iso_group_rewriting_visitor
-    (cx:ctxt)
-    (node_to_group:(node_id,iso_group) Hashtbl.t)
-    (group_joins:(iso_group,(iso_group option)) Hashtbl.t)
-    (group_to_nodes:(iso_group, (node_id,unit) Hashtbl.t) Hashtbl.t)
-    (inner:Walk.visitor)
-    : Walk.visitor =
-  let visit_mod_item_pre id params item =
-    begin
-      match item.node with
-          Ast.MOD_ITEM_public_type td
-        | Ast.MOD_ITEM_opaque_type td
-          -> ()
-            (*
-            begin
-              let group = Hashtbl.find node_to_group item.id in
-              let rep = get_representative group_joins group in
-              let ty = td.Ast.decl_item in
-                Hashtbl.replace node_to_group item.id rep;
-                log cx "type %s placed in iso-recursion group %d"
-                  id (int_of_iso_group rep);
                 match ty with
-                    Ast.TY_tag ttag ->
-                      begin
-                        let group_table =
-                          match htab_search group_to_nodes rep with
-                              None ->
-                                let tab = Hashtbl.create 0 in
-                                  Hashtbl.add group_to_nodes rep tab;
-                                  tab
-                            | Some t -> t
-                        in
-                          Hashtbl.replace group_table item.id ()
-                      end
+                    Ast.TY_tag _ ->
+                      log cx "extracting references for tag node %d" (int_of_node item.id);
+                      let referenced = get_ty_references ty cx (!scopes) in
+                        List.iter (fun i -> log cx "tag node %d references sub-tag %d"
+                                     (int_of_node item.id) (int_of_node i)) referenced;
+                        htab_put tag_node_to_referenced_nodes item.id referenced
                   | _ -> ()
-            end *)
+            end
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre id params item
@@ -492,228 +359,40 @@ let group_array_of
 ;;
 
 
-let tag_collecting_visitor
+let rec resolve_type
     (cx:ctxt)
-    (node_to_group:(node_id,iso_group) Hashtbl.t)
-    (group_to_nodes:(iso_group, (node_id,unit) Hashtbl.t) Hashtbl.t)
-    (tag_node_to_idx:(node_id,int) Hashtbl.t)
-    (inner:Walk.visitor)
-    : Walk.visitor =
-
-  let note_tag_type nid ty =
-    match ty with
-        Ast.TY_tag tt ->
-          log cx "collected tag type %s = node #%d" (Ast.fmt_to_str Ast.fmt_tag tt) (int_of_node nid);
-          let group_array = group_array_of cx node_to_group group_to_nodes nid in
-          let n = ref (-1) in
-            for i = 0 to (Array.length group_array) - 1
-            do
-              if group_array.(i) = nid
-              then n := i
-              else ()
-            done;
-            assert ((!n) != -1);
-            log cx "tag type %a (node #%d) is idx#%d in iso group #%d"
-              Ast.sprintf_tag tt
-              (int_of_node nid) (!n) (int_of_iso_group (Hashtbl.find node_to_group nid));
-            Hashtbl.replace tag_node_to_idx nid (!n)
-      | _ -> ()
+    (scopes:(scope list))
+    (recur:recur_info)
+    (t:Ast.ty)
+    : Ast.ty =
+  let base = ty_fold_rebuild in
+  let ty_fold_named name =
+    let (scopes, node, t) = lookup_type_by_name cx scopes name in
+      if List.mem node recur.recur_all_nodes
+      then (err (Some node) "infinite recursive type definition: '%a'"
+              Ast.sprintf_name name)
+      else resolve_type cx scopes (push_node recur node) t
   in
-
-  let visit_mod_item_pre id params item =
-    begin
-      match item.node with
-          Ast.MOD_ITEM_opaque_type td
-        | Ast.MOD_ITEM_public_type td ->
-            note_tag_type item.id td.Ast.decl_item
-        | _ -> ()
-    end;
-    inner.Walk.visit_mod_item_pre id params item
-  in
-    { inner with
-        Walk.visit_mod_item_pre = visit_mod_item_pre }
+  let fold = { base with ty_fold_named = ty_fold_named } in
+    fold_ty fold t
 ;;
 
 
 let type_resolving_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
-    (node_to_group:(node_id,iso_group) Hashtbl.t)
-    (group_to_nodes:(iso_group, (node_id,unit) Hashtbl.t) Hashtbl.t)
-    (tag_node_to_idx:(node_id,int) Hashtbl.t)
+    (tag_node_to_referenced_nodes:(node_id,node_id list) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
-  let rec resolve_slot
-      (recur:recur_info)
-      (scopes:scope list)
-      (slot:Ast.slot)
-      : Ast.slot =
-    { slot with
-        Ast.slot_ty = (match slot.Ast.slot_ty with
-                           None -> None
-                         | Some t -> Some (resolve_ty recur scopes t)) }
-
-  and resolve_ty_sig
-      (recur:recur_info)
-      (scopes:scope list)
-      (tsig:Ast.ty_sig)
-      : Ast.ty_sig =
-    { Ast.sig_input_slots = Array.map (resolve_slot recur scopes) tsig.Ast.sig_input_slots;
-      Ast.sig_input_constrs = tsig.Ast.sig_input_constrs;
-      Ast.sig_output_slot = resolve_slot recur scopes tsig.Ast.sig_output_slot }
-
-  and resolve_ty_fn
-      (recur:recur_info)
-      (scopes:scope list)
-      (f:Ast.ty_fn) : Ast.ty_fn =
-    let (tsig,taux) = f in
-      (resolve_ty_sig recur scopes tsig, taux)
-
-  and resolve_mod_type_item
-      (recur:recur_info)
-      (scopes:scope list)
-      (ident:Ast.ident)
-      (item:Ast.mod_type_item)
-      : (Ast.ident * Ast.mod_type_item) =
-    log cx "resolving mod type item %s" ident;
-    let decl params item =
-      { Ast.decl_params = params;
-        Ast.decl_item = item }
-    in
-    let scopes = (SCOPE_mod_type_item item) :: scopes in
-      let item' =
-        match item.node with
-            Ast.MOD_TYPE_ITEM_opaque_type td ->
-              Ast.MOD_TYPE_ITEM_opaque_type td
-          | Ast.MOD_TYPE_ITEM_public_type td ->
-              Ast.MOD_TYPE_ITEM_public_type
-                (decl
-                   td.Ast.decl_params
-                   (resolve_ty recur scopes td.Ast.decl_item))
-          | Ast.MOD_TYPE_ITEM_pred pd ->
-              let (slots, constrs) = pd.Ast.decl_item in
-                Ast.MOD_TYPE_ITEM_pred
-                  (decl pd.Ast.decl_params
-                     ((Array.map (resolve_slot recur scopes) slots), constrs))
-          | Ast.MOD_TYPE_ITEM_mod md ->
-              Ast.MOD_TYPE_ITEM_mod
-                (decl md.Ast.decl_params
-                   (resolve_mod_type_items recur scopes md.Ast.decl_item))
-          | Ast.MOD_TYPE_ITEM_fn fd ->
-              Ast.MOD_TYPE_ITEM_fn
-                (decl fd.Ast.decl_params
-                   (resolve_ty_fn recur scopes fd.Ast.decl_item))
-          | Ast.MOD_TYPE_ITEM_prog pd ->
-              Ast.MOD_TYPE_ITEM_prog
-                (decl pd.Ast.decl_params
-                   (resolve_ty_sig recur scopes pd.Ast.decl_item))
-      in
-        (ident, {item with node=item'})
-
-
-  and resolve_mod_type_items
-      (recur:recur_info)
-      (scopes:scope list)
-      (mtis:Ast.mod_type_items)
-      : Ast.mod_type_items =
-    (htab_map mtis (resolve_mod_type_item recur scopes))
-
-  and resolve_ty_tup
-      (recur:recur_info)
-      (scopes:scope list)
-      (ttup:Ast.ty_tup)
-      : Ast.ty_tup =
-    Array.map (resolve_slot recur scopes) ttup
-
-  and resolve_ttag
-      (recur:recur_info)
-      (scopes:scope list)
-      (ttag:Ast.ty_tag)
-      : Ast.ty_tag =
-    htab_map ttag
-      (fun i ttup -> (i,resolve_ty_tup recur scopes ttup))
-
-  and resolve_ty
-      (recur:recur_info)
-      (scopes:scope list)
-      (t:Ast.ty)
-      : Ast.ty =
-    match t with
-        Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_mach _
-      | Ast.TY_int | Ast.TY_char | Ast.TY_str | Ast.TY_type
-      | Ast.TY_idx _ | Ast.TY_opaque _ | Ast.TY_proc -> t
-
-      | Ast.TY_tup ttup ->
-          Ast.TY_tup (resolve_ty_tup recur scopes ttup)
-
-      | Ast.TY_rec trec ->
-          Ast.TY_rec
-            (Array.map
-               (fun (n, s) -> (n, resolve_slot recur scopes s))
-               trec)
-
-      | Ast.TY_tag ttag ->
-          (* If we get here we're *not* in an iso group. *)
-          Ast.TY_tag (resolve_ttag recur scopes ttag)
-
-      | Ast.TY_iso tiso ->
-          Ast.TY_iso
-            { tiso with
-                Ast.iso_group =
-                Array.map (fun ttag -> (resolve_ttag recur scopes ttag))
-                  tiso.Ast.iso_group }
-
-      | Ast.TY_vec slot -> Ast.TY_vec (resolve_slot recur scopes slot)
-      | Ast.TY_chan ty -> Ast.TY_chan (resolve_ty recur scopes ty)
-      | Ast.TY_port ty -> Ast.TY_port (resolve_ty recur scopes ty)
-
-      | Ast.TY_constrained (ty, constrs) ->
-          Ast.TY_constrained ((resolve_ty recur scopes ty),constrs)
-
-      | Ast.TY_fn tfn -> Ast.TY_fn (resolve_ty_fn recur scopes tfn)
-      | Ast.TY_pred tp ->
-          let (slots, constrs) = tp in
-            Ast.TY_pred ((Array.map (resolve_slot recur scopes) slots), constrs)
-      | Ast.TY_prog tprog -> Ast.TY_prog (resolve_ty_sig recur scopes tprog)
-      | Ast.TY_mod mtis -> Ast.TY_mod (resolve_mod_type_items recur scopes mtis)
-      | Ast.TY_named (Ast.NAME_base (Ast.BASE_ident ident)) ->
-          let (scopes, id, ty) = lookup_type_by_ident cx scopes ident in
-            (* We have to decide whether to replace a name with an idx or its expansion. 
-             * An idx is appropriate iff:
-             * 
-             *   - the id we've resolved is in an iso group
-             *   - we're currently in an iso group
-             *   - those two iso groups are the same
-             * 
-             * Along the way we're going to decide whether we're in an infinite-recursion
-             * case or not.
-             *   
-             *)
-            begin
-              match htab_search node_to_group id with
-                  None ->
-                    if List.mem id recur.recur_all_nodes
-                    then (err (Some id) "Infinite type recursion on type node #%d, %a"
-                            (int_of_node id) Ast.sprintf_ty ty)
-                    else
-                      resolve_ty (push_node recur id) scopes ty
-                | Some other_iso ->
-                    begin
-                      match recur.recur_curr_iso with
-                          Some curr_iso when curr_iso = other_iso ->
-                            let idx = Hashtbl.find tag_node_to_idx id in
-                              Ast.TY_idx idx
-                        | _  ->
-                            resolve_ty (set_iso recur other_iso) scopes ty
-                    end
-            end
-      | Ast.TY_named _ -> err None "unhandled form of type name"
-  in
-
   let resolve_slot_identified (s:Ast.slot identified) : (Ast.slot identified) =
     try
-      { s with node = resolve_slot empty_recur_info (!scopes) s.node }
+      match s.node.Ast.slot_ty with
+          None -> s
+        | Some ty ->
+            let ty = resolve_type cx (!scopes) empty_recur_info ty in
+            let node = { s.node with Ast.slot_ty = Some ty } in
+              { s with node = node }
     with
         Semant_err (None, e) -> raise (Semant_err ((Some s.id), e))
   in
@@ -728,29 +407,11 @@ let type_resolving_visitor
       inner.Walk.visit_slot_identified_pre slot
   in
 
-  let iso_visit_mod_item_pre id params item =
-    begin
-      try
-        match item.node with
-            Ast.MOD_ITEM_public_type td
-          | Ast.MOD_ITEM_opaque_type td ->
-              begin
-                let ty = td.Ast.decl_item in
-                let group_array = group_array_of cx node_to_group group_to_nodes item.id in
-                  ()
-              end
-          | _ -> ()
-      with
-          Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
-    end;
-    inner.Walk.visit_mod_item_pre id params item
-  in
-
-
   let visit_mod_item_pre id params item =
     begin
       try
         let ty = match (item.node, (ty_of_mod_item true item)) with
+            (*
             (Ast.MOD_ITEM_tag {Ast.decl_item=(_, ttag, nid)},
              Ast.TY_fn (tsig, taux)) ->
               let r = empty_recur_info in
@@ -759,8 +420,8 @@ let type_resolving_visitor
                 Ast.TY_fn ({tsig with
                               Ast.sig_input_slots = input_slots;
                               Ast.sig_output_slot = output_slot }, taux)
-          | (_, t) ->
-              resolve_ty empty_recur_info (!scopes) t
+            *)
+          | (_e, t) -> resolve_type cx (!scopes) empty_recur_info t
         in
           log cx "resolved item %s, type %s" id (Ast.fmt_to_str Ast.fmt_ty ty);
           htab_put cx.ctxt_all_item_types item.id ty
@@ -772,7 +433,7 @@ let type_resolving_visitor
 
   let visit_native_mod_item_pre id item =
     begin
-      let ty = resolve_ty empty_recur_info (!scopes) (ty_of_native_mod_item item) in
+      let ty = resolve_type cx (!scopes) empty_recur_info (ty_of_native_mod_item item) in
         htab_put cx.ctxt_all_item_types item.id ty
     end;
     inner.Walk.visit_native_mod_item_pre id item
@@ -839,11 +500,7 @@ let process_crate
   let (scopes:(scope list) ref) = ref [] in
   let path = Stack.create () in
 
-  let node_to_group = Hashtbl.create 0 in
-  let group_joins = Hashtbl.create 0 in
-  let group_to_nodes = Hashtbl.create 0 in
-
-  let tag_to_idx = Hashtbl.create 0 in
+  let node_to_references = Hashtbl.create 0 in
 
   let passes =
     [|
@@ -852,18 +509,12 @@ let process_crate
             (all_item_collecting_visitor cx
                Walk.empty_visitor)));
       (scope_stack_managing_visitor scopes
-         (iso_grouping_visitor
-            cx scopes node_to_group group_joins
+         (tag_reference_extracting_visitor
+            cx scopes node_to_references
             Walk.empty_visitor));
-      (iso_group_rewriting_visitor cx
-         node_to_group group_joins group_to_nodes
-         Walk.empty_visitor);
-      (tag_collecting_visitor cx
-         node_to_group group_to_nodes tag_to_idx
-         Walk.empty_visitor);
       (scope_stack_managing_visitor scopes
          (type_resolving_visitor cx scopes
-            node_to_group group_to_nodes tag_to_idx
+            node_to_references
             (lval_base_resolving_visitor cx scopes
                Walk.empty_visitor)));
     |]
@@ -879,3 +530,4 @@ let process_crate
  * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)
+

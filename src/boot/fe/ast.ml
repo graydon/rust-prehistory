@@ -1089,6 +1089,7 @@ let sprintf_fmt
 
 
 let sprintf_expr = sprintf_fmt fmt_expr;;
+let sprintf_name = sprintf_fmt fmt_name;;
 let sprintf_lval = sprintf_fmt fmt_lval;;
 let sprintf_atom = sprintf_fmt fmt_atom;;
 let sprintf_slot = sprintf_fmt fmt_slot;;

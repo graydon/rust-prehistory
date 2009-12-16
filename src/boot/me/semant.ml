@@ -575,23 +575,42 @@ let ty_fold_rebuild : (Ast.ty, Ast.slot, Ast.slot array, Ast.ty_tag) ty_fold =
     ty_fold_constrained = (fun (t, constrs) -> Ast.TY_constrained (t, constrs)) }
 ;;
 
+let associative_binary_op_ty_fold
+    (default:'a)
+    (fn:'a -> 'a -> 'a)
+    : 'a simple_ty_fold =
+  let base = ty_fold_default default in
+  let reduce ls =
+    match ls with
+        [] -> default
+      | x::xs -> List.fold_left fn x xs
+  in
+    { base with
+        ty_fold_slots = (fun slots -> reduce (Array.to_list slots));
+        ty_fold_slot = (fun (_, a) -> a);
+        ty_fold_tags = (fun tab -> reduce (htab_vals tab));
+        ty_fold_tup = (fun a -> a);
+        ty_fold_vec = (fun a -> a);
+        ty_fold_rec = (fun sz -> reduce (Array.to_list (Array.map (fun (_, s) -> s) sz)));
+        ty_fold_tag = (fun a -> a);
+        ty_fold_iso = (fun (_,iso) -> reduce (Array.to_list iso));
+        ty_fold_fn = (fun ((islots, _, oslot), _) -> fn islots oslot);
+        ty_fold_pred = (fun (islots, _) -> islots);
+        ty_fold_chan = (fun a -> a);
+        ty_fold_port = (fun a -> a);
+        ty_fold_prog = (fun (islots, _, oslot) -> fn islots oslot);
+        ty_fold_constrained = (fun (a, _) -> a) }
 
 let ty_fold_bool_and (default:bool) : bool simple_ty_fold =
-  let base = ty_fold_default default in
-    { base with
-        ty_fold_slots = (Array.fold_left (fun a b -> a & b) default) }
+  associative_binary_op_ty_fold default (fun a b -> a & b)
 ;;
 
 let ty_fold_bool_or (default:bool) : bool simple_ty_fold =
-  let base = ty_fold_default default in
-    { base with
-        ty_fold_slots = (Array.fold_left (fun a b -> a || b) default) }
+  associative_binary_op_ty_fold default (fun a b -> a || b)
 ;;
 
 let ty_fold_list_concat _ : ('a list) simple_ty_fold =
-  let base = ty_fold_default [] in
-    { base with
-        ty_fold_slots = (Array.fold_left (fun a b -> a @ b) []) }
+  associative_binary_op_ty_fold [] (fun a b -> a @ b)
 ;;
 
 

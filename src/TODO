@@ -1,34 +1,42 @@
 
 progress:
- - mach-o format emitter
  - tag/iso/idx types
+ - mutually-recursive tag/iso/idx types
+ - GC glue / frame-info pointers
+ - build signal system
+ - build failure / unwind system
+ - add flush / child-wait states
+ - copy glue
+ - hash glue
+ - compare glue
  - more string work
+ - more guts of type checker
+ - more guts of mode checker
  - machine types (or at least byte-sized bool, u32 and u8)
- - arbitrary-precision int type
  - alt statements
  - homogeneous for loops
+ - vec slicing
  - yielding calling protocols
  - iterator for-loops
  - tail calling protocols
- - build signal system
+ - arbitrary-precision int type
+ - mach-o format emitter
  - extend typestate system to handle operation pre/post conditions
    extracted from implicit-in-type constrs
- - floating point values / registers / instructions
- - general memcpy-with-inlining-threshold trans function
+ - put timeout-flag in proc
+ - implement memory budget / accounting scheme
  - explicit FFI / struct descriptors; hard-coding offsets is getting stale
    (use IL.referent_ty and friends)
  - combine layout and Il.referent_ty (give members of StructTy offsets and alignments)
- - put timer-counter in proc
  - translate loop-jumps & calls to do a test/yield (regs already flushed)
- - implement memory budget / accounting scheme
- - real type checker, or extend resolve/unify? consult textbooks
- - emit typecode structure into crate (dwarf?)
- - type-driven glue functions: copy, compare, hash, delete
  - mod types
  - parametric types
- - x64, arm?
- - import extlib for utf-8, various extras
+
+possibly only in self-hosted:
+ - floating point values / registers / instructions
  - redo lexer by hand, as unicode
+ - x64, arm?
+ - make callee-save in prologue/epilogue depend on reg use
 
 code cleanup:
  - move frame code to ABI
@@ -36,17 +44,17 @@ code cleanup:
  - use a datatype for fields inside each kernel C structure
  - move explicit code gen flags (pcrel_ok / abs_ok) to ABI "pre digester" function
  - pass a crate pointer into the runtime rather than root prog
- - start crate structure real stupid: refcount + 1 function table
  - consolidate formatting functions
  - type-annotate everything
- - make callee-save in prologue/epilogue depend on reg use
- - once extlib imported, flush out redundancies in common
  - change typestate algorithm to reschedule / revisit only downstream nodes
  - change relaxation code to ... possibly *batch* adjustments? hard to say; maybe
    have relaxation return a tri-state: "I fit" / "I do not" / "I might", and only
    batch the "I do not"s?
 
 done:
+ - drop glue
+ - free glue
+ - real type checker, or extend resolve/unify? consult textbooks
  - make proc stacks into chunk lists, check overflow / extend on frame entry
  - rename 'Asm.item' to something less confusable with module-item
  - reorganize glue code
