@@ -162,51 +162,6 @@ let all_item_collecting_visitor
 ;;
 
 
-type iso_group = IsoGroup of int;;
-let int_of_iso_group ig =
-  match ig with
-      IsoGroup i -> i
-;;
-
-
-let rec get_representative
-    (joins:(iso_group,(iso_group option)) Hashtbl.t)
-    (i:iso_group)
-    : iso_group =
-  match htab_search joins i with
-      None -> (htab_put joins i None; i)
-    | Some None -> i
-    | Some (Some other) -> get_representative joins other
-;;
-
-type recur_info =
-    { recur_all_nodes: node_id list;
-      recur_curr_iso: iso_group option; }
-;;
-
-let empty_recur_info =
-  { recur_all_nodes = [];
-    recur_curr_iso = None }
-;;
-
-let push_node r n =
-  { r with recur_all_nodes = n :: r.recur_all_nodes }
-;;
-
-let set_iso r i =
-  { r with recur_curr_iso = Some i }
-;;
-
-
-let get_ty_idxs (h:(int,unit)Hashtbl.t) (t:Ast.ty) : unit =
-  let base = ty_fold_default () in
-  let fold = { base with
-                 ty_fold_idx = (fun i -> Hashtbl.replace h i ()) }
-  in
-    fold_ty fold t
-;;
-
-
 let lookup_type_by_ident
     (cx:ctxt)
     (scopes:scope list)
@@ -260,13 +215,13 @@ let get_ty_references
 ;;
 
 
-let type_reference_extracting_visitor
+let type_reference_and_tag_extracting_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
     (node_to_references:(node_id,node_id list) Hashtbl.t)
+    (all_tags:(node_id,(Ast.ty_tag * (scope list))) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
-
   let visit_mod_item_pre id params item =
     begin
       match item.node with
@@ -279,7 +234,10 @@ let type_reference_extracting_visitor
                 let referenced = get_ty_references ty cx (!scopes) in
                   List.iter (fun i -> log cx "type %d references type %d"
                                (int_of_node item.id) (int_of_node i)) referenced;
-                  htab_put node_to_references item.id referenced
+                  htab_put node_to_references item.id referenced;
+                  match ty with
+                      Ast.TY_tag ttag -> htab_put all_tags item.id (ttag, (!scopes))
+                    | _ -> ()
             end
         | _ -> ()
     end;
@@ -290,36 +248,104 @@ let type_reference_extracting_visitor
 ;;
 
 
-let iso_group_of
+
+type recur_info =
+    { recur_all_nodes: node_id list;
+      recur_curr_iso: (node_id array) option; }
+;;
+
+let index_in_curr_iso (recur:recur_info) (node:node_id) : int option =
+  match recur.recur_curr_iso with
+      None -> None
+    | Some iso ->
+        let rec search i =
+          if i >= (Array.length iso)
+          then None
+          else
+            if iso.(i) = node
+            then Some i
+            else search (i+1)
+        in
+          search 0
+;;
+
+let empty_recur_info =
+  { recur_all_nodes = [];
+    recur_curr_iso = None }
+;;
+
+let push_node r n =
+  { r with recur_all_nodes = n :: r.recur_all_nodes }
+;;
+
+let set_iso r i =
+  { r with recur_curr_iso = Some i }
+;;
+
+
+let rec ty_iso_of
     (cx:ctxt)
     (recursive_tag_groups:(node_id,(node_id,unit) Hashtbl.t) Hashtbl.t)
+    (all_tags:(node_id,(Ast.ty_tag * (scope list))) Hashtbl.t)
     (n:node_id)
-    : node_id array =
+    : Ast.ty =
   let group_table = Hashtbl.find recursive_tag_groups n in
   let group_array = Array.of_list (htab_keys group_table) in
   let compare_nodes a_id b_id =
+    (* FIXME: this should sort by the sorted name-lists of the
+     *constructors* of the tag, not the tag type name. *)
     let a_name = Hashtbl.find cx.ctxt_all_item_names a_id in
     let b_name = Hashtbl.find cx.ctxt_all_item_names b_id in
       compare a_name b_name
   in
+  let recur = set_iso (push_node empty_recur_info n) group_array in
+  let resolve_member member =
+    let (tag, scopes) = Hashtbl.find all_tags member in
+    let ty = Ast.TY_tag tag in
+      match resolve_type cx scopes recursive_tag_groups all_tags recur ty with
+          (* FIXME: this is a bit of a hack, though honest. *)
+          Ast.TY_tag ttag -> ttag
+        | _ -> err None "resolving iso group, tag changed to non-tag"
+  in
     Array.sort compare_nodes group_array;
-    group_array
-;;
+    log cx "resolving node %d, %d-member iso group" (int_of_node n) (Array.length group_array);
+    Array.iteri (fun i n -> log cx "member %d: %d" i (int_of_node n)) group_array;
+    let group = Array.map resolve_member group_array in
+    let rec search i =
+      if i >= (Array.length group_array)
+      then err None "node is not a member of its own iso group"
+      else
+        if group_array.(i) = n
+        then i
+        else search (i+1)
+    in
+      Ast.TY_iso { Ast.iso_index = (search 0);
+                   Ast.iso_group = group }
 
-
-let rec resolve_type
+and resolve_type
     (cx:ctxt)
     (scopes:(scope list))
+    (recursive_tag_groups:(node_id,(node_id,unit) Hashtbl.t) Hashtbl.t)
+    (all_tags:(node_id,(Ast.ty_tag * (scope list))) Hashtbl.t)
     (recur:recur_info)
     (t:Ast.ty)
     : Ast.ty =
   let base = ty_fold_rebuild in
   let ty_fold_named name =
     let (scopes, node, t) = lookup_type_by_name cx scopes name in
-      if List.mem node recur.recur_all_nodes
-      then (err (Some node) "infinite recursive type definition: '%a'"
-              Ast.sprintf_name name)
-      else resolve_type cx scopes (push_node recur node) t
+      log cx "resolved type name '%a' to item %d" Ast.sprintf_name name (int_of_node node);
+      match index_in_curr_iso recur node with
+          Some i -> Ast.TY_idx i
+        | None ->
+            if Hashtbl.mem recursive_tag_groups node
+            then ty_iso_of cx recursive_tag_groups all_tags node
+            else
+              if List.mem node recur.recur_all_nodes
+              then (err (Some node) "infinite recursive type definition: '%a'"
+                      Ast.sprintf_name name)
+              else
+                let recur = push_node recur node in
+                  resolve_type cx scopes recursive_tag_groups all_tags recur t
   in
   let fold = { base with ty_fold_named = ty_fold_named } in
     fold_ty fold t
@@ -330,17 +356,22 @@ let type_resolving_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
     (recursive_tag_groups:(node_id,(node_id,unit) Hashtbl.t) Hashtbl.t)
+    (all_tags:(node_id,(Ast.ty_tag * (scope list))) Hashtbl.t)
     (inner:Walk.visitor)
     : Walk.visitor =
 
+  let resolve_slot (s:Ast.slot) : Ast.slot =
+    match s.Ast.slot_ty with
+        None -> s
+      | Some ty ->
+          let ty = resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info ty in
+            { s with Ast.slot_ty = Some ty }
+  in
+
   let resolve_slot_identified (s:Ast.slot identified) : (Ast.slot identified) =
     try
-      match s.node.Ast.slot_ty with
-          None -> s
-        | Some ty ->
-            let ty = resolve_type cx (!scopes) empty_recur_info ty in
-            let node = { s.node with Ast.slot_ty = Some ty } in
-              { s with node = node }
+      let slot = resolve_slot s.node in
+        { s with node = slot }
     with
         Semant_err (None, e) -> raise (Semant_err ((Some s.id), e))
   in
@@ -359,17 +390,15 @@ let type_resolving_visitor
     begin
       try
         let ty = match (item.node, (ty_of_mod_item true item)) with
-            (*
-            (Ast.MOD_ITEM_tag {Ast.decl_item=(_, ttag, nid)},
-             Ast.TY_fn (tsig, taux)) ->
-              let r = empty_recur_info in
-              let input_slots = Array.map (resolve_slot r (!scopes)) tsig.Ast.sig_input_slots in
-              let output_slot = resolve_slot r (!scopes) tsig.Ast.sig_output_slot in
+            (Ast.MOD_ITEM_tag {Ast.decl_item=(header_slots, ttag, nid)},
+             Ast.TY_fn (tsig, taux)) when Hashtbl.mem recursive_tag_groups nid ->
+              let input_slots = Array.map (fun sloti -> resolve_slot sloti.node) header_slots in
+              let output_slot = interior_slot (ty_iso_of cx recursive_tag_groups all_tags nid) in
                 Ast.TY_fn ({tsig with
                               Ast.sig_input_slots = input_slots;
                               Ast.sig_output_slot = output_slot }, taux)
-            *)
-          | (_e, t) -> resolve_type cx (!scopes) empty_recur_info t
+          | (_e, t) ->
+              resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info t
         in
           log cx "resolved item %s, type as %a" id Ast.sprintf_ty ty;
           htab_put cx.ctxt_all_item_types item.id ty
@@ -381,7 +410,7 @@ let type_resolving_visitor
 
   let visit_native_mod_item_pre id item =
     begin
-      let ty = resolve_type cx (!scopes) empty_recur_info (ty_of_native_mod_item item) in
+      let ty = resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info (ty_of_native_mod_item item) in
         htab_put cx.ctxt_all_item_types item.id ty
     end;
     inner.Walk.visit_native_mod_item_pre id item
@@ -538,11 +567,11 @@ let resolve_recursion
         then ()
         else
           begin
-            htab_put recursive_tag_groups node group;
             if Hashtbl.mem recursive_tag_types node
             then
               begin
                 Hashtbl.remove recursive_tag_types node;
+                htab_put recursive_tag_groups node group;
                 htab_put group node ();
                 log cx "recursion group rooted at tag %d contains tag %d"
                   (int_of_node root) (int_of_node node);
@@ -573,6 +602,7 @@ let process_crate
   let path = Stack.create () in
 
   let node_to_references = Hashtbl.create 0 in
+  let all_tags = Hashtbl.create 0 in
   let recursive_tag_groups = Hashtbl.create 0 in
 
   let passes_0 =
@@ -582,8 +612,8 @@ let process_crate
             (all_item_collecting_visitor cx path
                Walk.empty_visitor)));
       (scope_stack_managing_visitor scopes
-         (type_reference_extracting_visitor
-            cx scopes node_to_references
+         (type_reference_and_tag_extracting_visitor
+            cx scopes node_to_references all_tags
             Walk.empty_visitor))
     |]
   in
@@ -591,7 +621,7 @@ let process_crate
     [|
       (scope_stack_managing_visitor scopes
          (type_resolving_visitor cx scopes
-            recursive_tag_groups
+            recursive_tag_groups all_tags
             (lval_base_resolving_visitor cx scopes
                Walk.empty_visitor)));
     |]

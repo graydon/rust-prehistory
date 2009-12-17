@@ -13,7 +13,7 @@ prog a
     // because it'll leak x._1 during the initializing-call.
     // Yuck!
     auto x = nil();
-    auto x1 = cons(10, x);
-    auto x2 = cons(10, cons(11, cons(12, x1)));
+    auto x1 = cons(10, rec(val=x));
+    auto x2 = cons(10, rec(val=cons(11, rec(val=cons(12, rec(val=x1))))));
   }
 }
