@@ -45,12 +45,16 @@ struct rust_srv {
     uintptr_t (*lookup)(rust_srv_t *, char const *, uint8_t *takes_proc);
 };
 
+#ifdef __i386__
+// 'cdecl' ABI only means anything on i386
 #ifdef __WIN32__
 #define CDECL __cdecl
 #else
 #define CDECL __attribute__((cdecl))
 #endif
-
+#else
+#define CDECL
+#endif
 /*
  * Local Variables:
  * fill-column: 70;
