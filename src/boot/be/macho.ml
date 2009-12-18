@@ -334,6 +334,94 @@ let macho_dylinker_command : frag =
     DEF (cmd_fixup, cmd);
 ;;
 
+let macho_dylib_command (dylib:string) : frag =
+
+  let cmd_fixup = new_fixup "dylib command" in
+  let str_fixup = new_fixup "dylib lc_str fixup" in
+  let cmd =
+    SEQ
+      [|
+        WORD (TY_u32, IMM (load_command_code LC_LOAD_DYLIB));
+        WORD (TY_u32, F_SZ cmd_fixup);
+
+        (* see definition of lc_str; these things are weird. *)
+        WORD (TY_u32, SUB (F_POS (str_fixup), F_POS (cmd_fixup)));
+
+        WORD (TY_u32, IMM 0L); (* timestamp *)
+        WORD (TY_u32, IMM 0L); (* current_version *)
+        WORD (TY_u32, IMM 0L); (* compatibility_version *)
+
+        (* Payload-and-alignment of an lc_str goes at end of command. *)
+        DEF (str_fixup, ZSTRING dylib);
+        ALIGN_FILE (4, MARK);
+
+      |]
+  in
+    DEF (cmd_fixup, cmd)
+;;
+
+
+let macho_symtab_command
+    (symtab_fixup:fixup)
+    (nsyms:int64)
+    (strtab_fixup:fixup)
+    : frag =
+  let cmd_fixup = new_fixup "symtab command" in
+  let cmd =
+    SEQ
+      [|
+        WORD (TY_u32, IMM (load_command_code LC_SYMTAB));
+        WORD (TY_u32, F_SZ cmd_fixup);
+        
+        WORD (TY_u32, F_POS symtab_fixup); (* symoff *)
+        WORD (TY_u32, IMM nsyms);          (* nsyms *)
+
+        WORD (TY_u32, F_POS strtab_fixup); (* stroff *)
+        WORD (TY_u32, F_SZ strtab_fixup);  (* strsz *)
+      |]
+  in
+    DEF (cmd_fixup, cmd)
+;;
+
+let macho_dysymtab_command : frag =
+  let cmd_fixup = new_fixup "dysymtab command" in
+  let cmd =
+    SEQ
+      [|
+        WORD (TY_u32, IMM (load_command_code LC_DYSYMTAB));
+        WORD (TY_u32, F_SZ cmd_fixup);
+        
+        WORD (TY_u32, IMM 0L); (* ilocalsym *)
+        WORD (TY_u32, IMM 0L); (* nlocalsym *)
+
+        WORD (TY_u32, IMM 0L); (* iextdefsym *)
+        WORD (TY_u32, IMM 0L); (* nextdefsym *)
+
+        WORD (TY_u32, IMM 0L); (* iundefsym *)
+        WORD (TY_u32, IMM 0L); (* nextdefsym *)
+
+        WORD (TY_u32, IMM 0L); (* tocoff *)
+        WORD (TY_u32, IMM 0L); (* ntoc *)
+
+        WORD (TY_u32, IMM 0L); (* modtaboff *)
+        WORD (TY_u32, IMM 0L); (* nmodtab *)
+
+        WORD (TY_u32, IMM 0L); (* extrefsymoff *)
+        WORD (TY_u32, IMM 0L); (* nextrefsyms *)
+
+        WORD (TY_u32, IMM 0L); (* indirectsymoff *)
+        WORD (TY_u32, IMM 0L); (* nindirectsyms *)
+
+        WORD (TY_u32, IMM 0L); (* extreloff *)
+        WORD (TY_u32, IMM 0L); (* nextrel *)
+
+        WORD (TY_u32, IMM 0L); (* locreloff *)
+        WORD (TY_u32, IMM 0L); (* nlocrel *)
+      |]
+  in
+    DEF (cmd_fixup, cmd)
+;;
+
 let macho_header_32
     (cpu:cpu_type)
     (sub:cpu_subtype)
@@ -360,22 +448,21 @@ let emit_file
     (code:Asm.frag)
     (data:Asm.frag)
     (dwarf:Dwarf.debug_records)
-    (entry_prog_fixup:fixup)
+    (root_prog_fixup:fixup)
     (c_to_proc_fixup:fixup)
     : unit =
 
   (* FIXME: alignment? *)
 
+  let start_fixup = new_fixup "start function entry" in
+  let rust_start_fixup = new_fixup "rust_start" in
+
   let text_sect_align_log2 = 2 in
   let data_sect_align_log2 = 2 in
-  let jump_table_sect_align_log2 = 6 in
-  let dyld_sect_align_log2 = 2 in
 
   let seg_align = 0x1000 in
   let text_sect_align = 2 lsl text_sect_align_log2 in
   let data_sect_align = 2 lsl data_sect_align_log2 in
-  let jump_table_sect_align = 2 lsl jump_table_sect_align_log2 in
-  let dyld_sect_align = 2 lsl dyld_sect_align_log2 in
 
   let align_both align i =
     ALIGN_FILE (align,
@@ -396,22 +483,46 @@ let emit_file
   let data_section_fixup = new_fixup "__data section" in
   let const_section_fixup = new_fixup "__const section" in
   let bss_section_fixup = new_fixup "__bss section" in
+  let nl_symbol_ptr_section_fixup = new_fixup "__nl_symbol_ptr section" in
+
   let data_section = def_aligned data_sect_align data_section_fixup data in
   let const_section = def_aligned data_sect_align const_section_fixup (SEQ [| |]) in
   let bss_section = def_aligned data_sect_align bss_section_fixup (SEQ [| |]) in
 
-  (* Sections in the import segment. *)
-  let jump_table_section_fixup = new_fixup "__jump_table section" in
-  let jump_table_section =
-    def_aligned jump_table_sect_align
-      jump_table_section_fixup (SEQ [| |])
+
+  (* String, symbol and parallel "nonlazy-pointer" tables. *)
+  let symtab_fixup = new_fixup "symtab" in
+  let strtab_fixup = new_fixup "strtab" in
+  let indirect_symbols = 
+    [| 
+      ("rust_start", rust_start_fixup, new_fixup "strtab entry")
+    |]
+  in
+  let nl_symbol_ptr_section =
+    def_aligned data_sect_align nl_symbol_ptr_section_fixup
+      (SEQ (Array.map
+              (fun (_, fix, _) -> DEF(fix, WORD(TY_u32, IMM 0L)))
+              indirect_symbols))
+  in
+  let strtab = DEF (strtab_fixup,
+                    SEQ (Array.map
+                           (fun (name, _, fix) -> DEF(fix, ZSTRING name))
+                           indirect_symbols))
+  in
+  let nlist (_, fixup_to_define, strtab_entry_fixup) =
+    SEQ
+      [|
+        WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
+        BYTE 0;                (* n_type == N_UNDEF *)
+        BYTE 0;                (* n_sect == NO_SECT *)
+        WORD (TY_u16, IMM 0L); (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
+        WORD (TY_u32, IMM 0L); (* n_value == unused *)
+      |]
+  in
+  let symtab = DEF (symtab_fixup,
+                    SEQ (Array.map nlist indirect_symbols))
   in
 
-  let dyld_section_fixup = new_fixup "__dyld section" in
-  let dyld_section =
-    def_aligned dyld_sect_align
-      dyld_section_fixup (SEQ [| |])
-  in
 
   (* Segments. *)
   let zero_segment_fixup = new_fixup "__PAGEZERO segment" in
@@ -420,10 +531,16 @@ let emit_file
   in
 
   let text_segment_fixup = new_fixup "__TEXT segment" in
-  let text_segment = def_aligned seg_align text_segment_fixup
-    (SEQ [|
-       text_section
-     |])
+  let text_segment =
+  let e = X86.new_emitter () in
+    X86.objfile_start e
+      ~start_fixup ~rust_start_fixup ~root_prog_fixup
+      ~c_to_proc_fixup ~indirect_start: true;
+    def_aligned seg_align text_segment_fixup
+      (SEQ [|
+         X86.frags_of_emitted_quads sess e;
+         text_section;
+       |]);    
   in
 
   let data_segment_fixup = new_fixup "__DATA segment" in
@@ -432,14 +549,15 @@ let emit_file
        data_section;
        const_section;
        bss_section;
+       nl_symbol_ptr_section
      |])
   in
 
-  let import_segment_fixup = new_fixup "__IMPORT segment" in
-  let import_segment = def_aligned seg_align import_segment_fixup
+  let linkedit_segment_fixup = new_fixup "__LINKEDIT segment" in
+  let linkedit_segment = def_aligned seg_align linkedit_segment_fixup
     (SEQ [|
-       jump_table_section;
-       dyld_section
+       symtab;
+       strtab;
      |])
   in
 
@@ -461,22 +579,26 @@ let emit_file
         [|
           ("__data", data_sect_align_log2, data_section_fixup);
           ("__const", data_sect_align_log2, const_section_fixup);
-          ("__bss", data_sect_align_log2, bss_section_fixup)
+          ("__bss", data_sect_align_log2, bss_section_fixup);
+          ("__nl_symbol_ptr", data_sect_align_log2, nl_symbol_ptr_section_fixup)
         |];
 
-      macho_segment_command "__IMPORT" text_segment_fixup
-        [VM_PROT_READ; VM_PROT_WRITE]
-        [VM_PROT_READ; VM_PROT_WRITE]
+      macho_segment_command "__LINKEDIT" linkedit_segment_fixup
+        [VM_PROT_READ]
+        [VM_PROT_READ]
         [|
-          ("__jump_table", jump_table_sect_align_log2, jump_table_section_fixup)
         |];
+
+      macho_symtab_command
+        symtab_fixup (Int64.of_int (Array.length indirect_symbols)) strtab_fixup;
+
+      macho_dysymtab_command;
 
       macho_dylinker_command;
 
-      (* FIXME: the thread command should point eip to the glue code
-         entrypoint, not the entry-prog fixup. That's a *prog*, it's
-         in the data section. This is not right at all! *)
-      macho_thread_command entry_prog_fixup
+      macho_dylib_command "librustrt.dylib";
+
+      macho_thread_command start_fixup
     |]
   in
 
@@ -494,7 +616,7 @@ let emit_file
       zero_segment;
       text_segment;
       data_segment;
-      import_segment
+      linkedit_segment;
     |]
   in
   let all_frags = SEQ [| header_and_commands; segments |] in

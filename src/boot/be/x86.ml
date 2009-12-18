@@ -606,15 +606,15 @@ let main_prologue
                  (imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup))))
 ;;
 
-let objfile_main
+let objfile_start
     (e:Il.emitter)
-    ~(main_fixup:fixup)
+    ~(start_fixup:fixup)
     ~(rust_start_fixup:fixup)
     ~(root_prog_fixup:fixup)
     ~(c_to_proc_fixup:fixup)
     ~(indirect_start:bool)
     : unit =
-  Il.emit_full e (Some main_fixup) Il.Dead;
+  Il.emit_full e (Some start_fixup) Il.Dead;
   save_callee_saves e;
   Il.emit e (Il.umov (rc ebp) (ro esp));
   Il.emit e (Il.Push (imm (Asm.M_POS c_to_proc_fixup)));

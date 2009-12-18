@@ -1303,7 +1303,7 @@ let emit_file
 
   let init_fixup = new_fixup "_init function entry" in
   let fini_fixup = new_fixup "_fini function entry" in
-  let main_fixup = new_fixup "main function entry" in
+  let start_fixup = new_fixup "start function entry" in
   let rust_start_fixup = new_fixup "rust_start" in
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
@@ -1322,7 +1322,7 @@ let emit_file
       push_pos32 init_fixup;
       push_r32 X86.ecx;
       push_r32 X86.esi;
-      push_pos32 main_fixup;
+      push_pos32 start_fixup;
       Il.emit e (Il.call
                    (Il.Reg (Il.Hreg X86.eax, Il.ValTy Il.Bits32))
                    (Il.CodeAddr (Il.Pcrel (libc_start_main_fixup, None))));
@@ -1337,8 +1337,8 @@ let emit_file
 
   let main_fn =
     let e = X86.new_emitter() in
-      X86.objfile_main e
-        ~main_fixup ~rust_start_fixup
+      X86.objfile_start e
+        ~start_fixup ~rust_start_fixup
         ~root_prog_fixup ~c_to_proc_fixup
         ~indirect_start: false;
       X86.frags_of_emitted_quads sess e

@@ -588,7 +588,7 @@ let pe_import_section
 
 let pe_text_section
     ~(sess:Session.sess)
-    ~(main_fixup:fixup)
+    ~(start_fixup:fixup)
     ~(rust_start_fixup:fixup)
     ~(root_prog_fixup:fixup)
     ~(text_fixup:fixup)
@@ -601,8 +601,8 @@ let pe_text_section
      * and assumed to be stdcall; so we have to clean up our own
      * stack before returning.
      *)
-    X86.objfile_main e
-      ~main_fixup ~rust_start_fixup ~root_prog_fixup
+    X86.objfile_start e
+      ~start_fixup ~rust_start_fixup ~root_prog_fixup
       ~c_to_proc_fixup ~indirect_start: true;
     def_aligned
       text_fixup
@@ -645,7 +645,7 @@ let emit_file
   let loader_hdr_fixup = new_fixup "loader header" in
   let import_dir_fixup = new_fixup "import directory" in
   let text_fixup = new_fixup "text section" in
-  let main_fixup = new_fixup "main" in
+  let start_fixup = new_fixup "start" in
   let bss_fixup = new_fixup "bss section" in
   let data_fixup = new_fixup "data section" in
   let image_fixup = new_fixup "image fixup" in
@@ -691,7 +691,7 @@ let emit_file
                          ~text_fixup: text_fixup
                          ~init_data_fixup: all_init_data_fixup
                          ~size_of_uninit_data: 0L
-                         ~entry_point_fixup: main_fixup
+                         ~entry_point_fixup: start_fixup
                          ~base_of_code: 0L
                          ~base_of_data: 0L
                          ~image_fixup: image_fixup
@@ -767,7 +767,7 @@ let emit_file
 
   let text_section = (pe_text_section
                         ~sess
-                        ~main_fixup
+                        ~start_fixup
                         ~rust_start_fixup: rustrt_imports.pe_import_dll_imports.(0).pe_import_address_fixup
                         ~root_prog_fixup
                         ~text_fixup
