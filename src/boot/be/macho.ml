@@ -538,19 +538,20 @@ let emit_file
   let strtab_fixup = new_fixup "strtab" in
 
 
-  let indirect_symbol_nlist_entry _ =
+  let indirect_symbol_nlist_entry (dylib_index:int) : (frag * fixup) =
     let strtab_entry_fixup = new_fixup "strtab entry" in
       (SEQ
          [|
            WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
            BYTE 1;                (* n_type == N_UNDEF | N_EXT *)
            BYTE 0;                (* n_sect == NO_SECT *)
-           WORD (TY_u16, IMM 0x100L); (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
+           WORD (TY_u16, IMM (Int64.of_int (dylib_index lsl 8))); 
+           (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
            WORD (TY_u32, IMM 0L); (* n_value == unused *)
          |], strtab_entry_fixup)
   in
 
-  let absolute_symbol_nlist_entry fixup_to_use =
+  let absolute_symbol_nlist_entry (fixup_to_use:fixup) : (frag * fixup) =
     let strtab_entry_fixup = new_fixup "strtab entry" in
       (SEQ
          [|
@@ -564,7 +565,7 @@ let emit_file
 
   let (symbols:(string * (frag * fixup)) array) = 
     [| 
-      ("rust_start", indirect_symbol_nlist_entry ());
+      ("_rust_start", indirect_symbol_nlist_entry 1);
       ("__mh_execute_header", absolute_symbol_nlist_entry mh_execute_header_fixup);
     |]
   in
