@@ -225,11 +225,53 @@ let fixed_sz_string (sz:int) (str:string) : frag =
   else SEQ [| STRING str; PAD (sz - (String.length str)) |]
 ;;
 
+type sect_type =
+    S_REGULAR
+  | S_ZEROFILL
+  | S_CSTRING_LITERALS
+  | S_4BYTE_LITERALS
+  | S_8BYTE_LITERALS
+  | S_LITERAL_POINTERS
+  | S_NON_LAZY_SYMBOL_POINTERS
+  | S_LAZY_SYMBOL_POINTERS
+  | S_SYMBOL_STUBS
+  | S_MOD_INIT_FUNC_POINTERS
+  | S_MOD_TERM_FUNC_POINTERS
+  | S_COALESCED
+  | S_GB_ZEROFILL
+  | S_INTERPOSING
+  | S_16BYTE_LITERALS
+  | S_DTRACE_DOF
+  | S_LAZY_DYLIB_SYMBOL_POINTERS
+;;
+
+let sect_type_code (s:sect_type) : int64 =
+  match s with
+    S_REGULAR -> 0x0L
+  | S_ZEROFILL -> 0x1L
+  | S_CSTRING_LITERALS -> 0x2L
+  | S_4BYTE_LITERALS -> 0x3L
+  | S_8BYTE_LITERALS -> 0x4L
+  | S_LITERAL_POINTERS -> 0x5L
+  | S_NON_LAZY_SYMBOL_POINTERS -> 0x6L
+  | S_LAZY_SYMBOL_POINTERS -> 0x7L
+  | S_SYMBOL_STUBS -> 0x8L
+  | S_MOD_INIT_FUNC_POINTERS -> 0x9L
+  | S_MOD_TERM_FUNC_POINTERS -> 0xaL
+  | S_COALESCED -> 0xbL
+  | S_GB_ZEROFILL -> 0xcL
+  | S_INTERPOSING -> 0xdL
+  | S_16BYTE_LITERALS -> 0xeL
+  | S_DTRACE_DOF -> 0xfL
+  | S_LAZY_DYLIB_SYMBOL_POINTERS -> 0x10L
+;;
+
+
 let macho_section_command
     (seg_name:string)
-    (sect:(string * int * fixup))
+    (sect:(string * int * sect_type * fixup))
     : frag =
-  let (sect_name, sect_align, sect_fixup) = sect in
+  let (sect_name, sect_align, sect_type, sect_fixup) = sect in
     SEQ [|
       fixed_sz_string 16 sect_name;
       fixed_sz_string 16 seg_name;
@@ -239,7 +281,7 @@ let macho_section_command
       WORD (TY_u32, IMM (Int64.of_int sect_align));
       WORD (TY_u32, IMM 0L); (* reloff *)
       WORD (TY_u32, IMM 0L); (* nreloc *)
-      WORD (TY_u32, IMM 0L); (* flags *)
+      WORD (TY_u32, IMM (sect_type_code sect_type)); (* flags *)
       WORD (TY_u32, IMM 0L); (* reserved1 *)
       WORD (TY_u32, IMM 0L); (* reserved2 *)
   |]
@@ -250,7 +292,7 @@ let macho_segment_command
     (seg_fixup:fixup)
     (maxprot:vm_prot list)
     (initprot:vm_prot list)
-    (sects:(string * int * fixup) array)
+    (sects:(string * int * sect_type * fixup) array)
     : frag =
 
   let cmd_fixup = new_fixup "segment command" in
@@ -383,7 +425,7 @@ let macho_symtab_command
     DEF (cmd_fixup, cmd)
 ;;
 
-let macho_dysymtab_command : frag =
+let macho_dysymtab_command indirect_symtab_fixup n_indirect_syms : frag =
   let cmd_fixup = new_fixup "dysymtab command" in
   let cmd =
     SEQ
@@ -397,8 +439,8 @@ let macho_dysymtab_command : frag =
         WORD (TY_u32, IMM 0L); (* iextdefsym *)
         WORD (TY_u32, IMM 0L); (* nextdefsym *)
 
-        WORD (TY_u32, IMM 0L); (* iundefsym *)
-        WORD (TY_u32, IMM 0L); (* nextdefsym *)
+        WORD (TY_u32, IMM 0L);              (* iundefsym *)
+        WORD (TY_u32, IMM n_indirect_syms); (* nundefsym *)
 
         WORD (TY_u32, IMM 0L); (* tocoff *)
         WORD (TY_u32, IMM 0L); (* ntoc *)
@@ -409,8 +451,8 @@ let macho_dysymtab_command : frag =
         WORD (TY_u32, IMM 0L); (* extrefsymoff *)
         WORD (TY_u32, IMM 0L); (* nextrefsyms *)
 
-        WORD (TY_u32, IMM 0L); (* indirectsymoff *)
-        WORD (TY_u32, IMM 0L); (* nindirectsyms *)
+        WORD (TY_u32, F_POS indirect_symtab_fixup); (* indirectsymoff *)
+        WORD (TY_u32, IMM n_indirect_syms);         (* nindirectsyms *)
 
         WORD (TY_u32, IMM 0L); (* extreloff *)
         WORD (TY_u32, IMM 0L); (* nextrel *)
@@ -503,7 +545,7 @@ let emit_file
            WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
            BYTE 1;                (* n_type == N_UNDEF | N_EXT *)
            BYTE 0;                (* n_sect == NO_SECT *)
-           WORD (TY_u16, IMM 0L); (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
+           WORD (TY_u16, IMM 0x100L); (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
            WORD (TY_u32, IMM 0L); (* n_value == unused *)
          |], strtab_entry_fixup)
   in
@@ -562,17 +604,18 @@ let emit_file
         [VM_PROT_READ; VM_PROT_EXECUTE]
         [VM_PROT_READ; VM_PROT_EXECUTE]
         [|
-          ("__text", text_sect_align_log2, text_section_fixup)
+          ("__text", text_sect_align_log2, S_REGULAR, text_section_fixup)
         |];
 
       macho_segment_command "__DATA" data_segment_fixup
         [VM_PROT_READ; VM_PROT_WRITE]
         [VM_PROT_READ; VM_PROT_WRITE]
         [|
-          ("__data", data_sect_align_log2, data_section_fixup);
-          ("__const", data_sect_align_log2, const_section_fixup);
-          ("__bss", data_sect_align_log2, bss_section_fixup);
-          ("__nl_symbol_ptr", data_sect_align_log2, nl_symbol_ptr_section_fixup)
+          ("__data", data_sect_align_log2, S_REGULAR, data_section_fixup);
+          ("__const", data_sect_align_log2, S_REGULAR, const_section_fixup);
+          ("__bss", data_sect_align_log2, S_REGULAR, bss_section_fixup);
+          ("__nl_symbol_ptr", data_sect_align_log2,
+           S_NON_LAZY_SYMBOL_POINTERS, nl_symbol_ptr_section_fixup)
         |];
 
       macho_segment_command "__LINKEDIT" linkedit_segment_fixup
@@ -584,7 +627,7 @@ let emit_file
       macho_symtab_command
         symtab_fixup (Int64.of_int (Array.length indirect_symbols)) strtab_fixup;
 
-      macho_dysymtab_command;
+      macho_dysymtab_command symtab_fixup 1L;
 
       macho_dylinker_command;
 
@@ -599,7 +642,7 @@ let emit_file
       CPU_TYPE_X86
       CPU_SUBTYPE_X86_ALL
       MH_EXECUTE
-      [MH_BINDATLOAD; MH_DYLDLINK ]
+      [ MH_BINDATLOAD; MH_DYLDLINK; MH_TWOLEVEL ]
       load_commands
   in
 
