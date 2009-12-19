@@ -454,6 +454,7 @@ let emit_file
 
   (* FIXME: alignment? *)
 
+  let mh_execute_header_fixup = new_fixup "__mh_execute header" in
   let start_fixup = new_fixup "start function entry" in
   let rust_start_fixup = new_fixup "rust_start" in
 
@@ -493,73 +494,64 @@ let emit_file
   (* String, symbol and parallel "nonlazy-pointer" tables. *)
   let symtab_fixup = new_fixup "symtab" in
   let strtab_fixup = new_fixup "strtab" in
-  let indirect_symbols = 
+
+
+  let indirect_symbol_nlist_entry _ =
+    let strtab_entry_fixup = new_fixup "strtab entry" in
+      (SEQ
+         [|
+           WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
+           BYTE 1;                (* n_type == N_UNDEF | N_EXT *)
+           BYTE 0;                (* n_sect == NO_SECT *)
+           WORD (TY_u16, IMM 0L); (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
+           WORD (TY_u32, IMM 0L); (* n_value == unused *)
+         |], strtab_entry_fixup)
+  in
+
+  let absolute_symbol_nlist_entry fixup_to_use =
+    let strtab_entry_fixup = new_fixup "strtab entry" in
+      (SEQ
+         [|
+           WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
+           BYTE 1;                (* n_type == N_ABS | N_EXT *)
+           BYTE 0;                (* n_sect == NO_SECT *)
+           WORD (TY_u16, IMM 2L); (* n_desc == REFERENCE_FLAG_DEFINED *)
+           WORD (TY_u32, M_POS fixup_to_use);
+         |], strtab_entry_fixup)
+  in
+
+  let (symbols:(string * (frag * fixup)) array) = 
     [| 
-      ("rust_start", rust_start_fixup, new_fixup "strtab entry")
+      ("rust_start", indirect_symbol_nlist_entry ());
+      ("__mh_execute_header", absolute_symbol_nlist_entry mh_execute_header_fixup);
+    |]
+  in
+  let indirect_symbols = 
+    [|
+      rust_start_fixup
     |]
   in
   let nl_symbol_ptr_section =
     def_aligned data_sect_align nl_symbol_ptr_section_fixup
       (SEQ (Array.map
-              (fun (_, fix, _) -> DEF(fix, WORD(TY_u32, IMM 0L)))
+              (fun fix -> DEF(fix, WORD(TY_u32, IMM 0L)))
               indirect_symbols))
   in
   let strtab = DEF (strtab_fixup,
                     SEQ (Array.map
-                           (fun (name, _, fix) -> DEF(fix, ZSTRING name))
-                           indirect_symbols))
-  in
-  let nlist (_, fixup_to_define, strtab_entry_fixup) =
-    SEQ
-      [|
-        WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
-        BYTE 0;                (* n_type == N_UNDEF *)
-        BYTE 0;                (* n_sect == NO_SECT *)
-        WORD (TY_u16, IMM 0L); (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
-        WORD (TY_u32, IMM 0L); (* n_value == unused *)
-      |]
+                           (fun (name, (_, fix)) -> DEF(fix, ZSTRING name))
+                           symbols))
   in
   let symtab = DEF (symtab_fixup,
-                    SEQ (Array.map nlist indirect_symbols))
+                    SEQ (Array.map (fun (_, (frag, _)) -> frag) symbols))
   in
 
 
   (* Segments. *)
   let zero_segment_fixup = new_fixup "__PAGEZERO segment" in
-  let zero_segment = align_both seg_align
-    (SEQ [| MEMPOS 0L; DEF (zero_segment_fixup, PAD 0x1000) |])
-  in
-
   let text_segment_fixup = new_fixup "__TEXT segment" in
-  let text_segment =
-  let e = X86.new_emitter () in
-    X86.objfile_start e
-      ~start_fixup ~rust_start_fixup ~root_prog_fixup
-      ~c_to_proc_fixup ~indirect_start: true;
-    def_aligned seg_align text_segment_fixup
-      (SEQ [|
-         X86.frags_of_emitted_quads sess e;
-         text_section;
-       |]);    
-  in
-
   let data_segment_fixup = new_fixup "__DATA segment" in
-  let data_segment = def_aligned seg_align data_segment_fixup
-    (SEQ [|
-       data_section;
-       const_section;
-       bss_section;
-       nl_symbol_ptr_section
-     |])
-  in
-
   let linkedit_segment_fixup = new_fixup "__LINKEDIT segment" in
-  let linkedit_segment = def_aligned seg_align linkedit_segment_fixup
-    (SEQ [|
-       symtab;
-       strtab;
-     |])
-  in
 
   let load_commands =
     [|
@@ -607,8 +599,42 @@ let emit_file
       CPU_TYPE_X86
       CPU_SUBTYPE_X86_ALL
       MH_EXECUTE
-      []
+      [MH_BINDATLOAD; MH_DYLDLINK ]
       load_commands
+  in
+
+  let text_segment =
+    let e = X86.new_emitter () in
+      X86.objfile_start e
+        ~start_fixup ~rust_start_fixup ~root_prog_fixup
+        ~c_to_proc_fixup ~indirect_start: true;
+      def_aligned seg_align text_segment_fixup
+        (SEQ [|
+           DEF (mh_execute_header_fixup, header_and_commands);
+           X86.frags_of_emitted_quads sess e;
+           text_section;
+           align_both seg_align MARK;
+         |]);
+  in
+
+  let zero_segment = align_both seg_align
+    (SEQ [| MEMPOS 0L; DEF (zero_segment_fixup, SEQ [| MEMPOS 0x1000L; MARK |] ) |])
+  in
+
+  let data_segment = def_aligned seg_align data_segment_fixup
+    (SEQ [|
+       data_section;
+       const_section;
+       bss_section;
+       nl_symbol_ptr_section
+     |])
+  in
+
+  let linkedit_segment = def_aligned seg_align linkedit_segment_fixup
+    (SEQ [|
+       symtab;
+       strtab;
+     |])
   in
 
   let segments =
@@ -619,12 +645,11 @@ let emit_file
       linkedit_segment;
     |]
   in
-  let all_frags = SEQ [| header_and_commands; segments |] in
 
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in
-    resolve_frag sess all_frags;
-    lower_frag ~lsb0: true ~buf ~it: all_frags;
+    resolve_frag sess segments;
+    lower_frag ~lsb0: true ~buf ~it: segments;
     Buffer.output_buffer out buf;
     flush out;
     close_out out
