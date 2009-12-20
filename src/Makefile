@@ -273,7 +273,7 @@ PKG_3RDPARTY := rt/valgrind.h \
                 rt/uthash/uthash.h rt/uthash/utlist.h \
                 rt/bigint/bigint.h rt/bigint/bigint_int.c \
                 rt/bigint/bigint_ext.c rt/bigint/low_primes.h
-PKG_FILES := README TODO COPYING\
+PKG_FILES := README COPYING\
              $(MKFILES) $(BOOT_MLS) boot/fe/lexer.mll \
              comp/rustc.rc $(COMPILER_RSS) \
              $(RUNTIME_CS) rt/rust.h $(PKG_3RDPARTY) \
