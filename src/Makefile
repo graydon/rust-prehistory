@@ -285,6 +285,7 @@ dist:
 	mkdir -p dist/$(PKG_DIR)
 	tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
 	tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
+	rm -Rf dist
 
 distcheck:
 	rm -Rf $(PKG_NAME)-*.tar.gz dist
@@ -293,6 +294,7 @@ distcheck:
 	make -C dist/$(PKG_DIR) check
 	make -C dist/$(PKG_DIR) clean
 	tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
+	rm -Rf dist
 	@echo
 	@echo -----------------------------------------------
 	@echo $(PKG_TAR) ready for distribution
