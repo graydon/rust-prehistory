@@ -425,7 +425,12 @@ let macho_symtab_command
     DEF (cmd_fixup, cmd)
 ;;
 
-let macho_dysymtab_command indirect_symtab_fixup n_indirect_syms : frag =
+let macho_dysymtab_command
+    (defined_syms_index:int64)
+    (defined_syms_count:int64)
+    (undefined_syms_index:int64)
+    (undefined_syms_count:int64)
+    (indirect_symtab_fixup:fixup)  : frag =
   let cmd_fixup = new_fixup "dysymtab command" in
   let cmd =
     SEQ
@@ -436,11 +441,11 @@ let macho_dysymtab_command indirect_symtab_fixup n_indirect_syms : frag =
         WORD (TY_u32, IMM 0L); (* ilocalsym *)
         WORD (TY_u32, IMM 0L); (* nlocalsym *)
 
-        WORD (TY_u32, IMM 0L); (* iextdefsym *)
-        WORD (TY_u32, IMM 0L); (* nextdefsym *)
+        WORD (TY_u32, IMM defined_syms_index); (* iextdefsym *)
+        WORD (TY_u32, IMM defined_syms_count); (* nextdefsym *)
 
-        WORD (TY_u32, IMM 0L);              (* iundefsym *)
-        WORD (TY_u32, IMM n_indirect_syms); (* nundefsym *)
+        WORD (TY_u32, IMM undefined_syms_index); (* iundefsym *)
+        WORD (TY_u32, IMM undefined_syms_count); (* nundefsym *)
 
         WORD (TY_u32, IMM 0L); (* tocoff *)
         WORD (TY_u32, IMM 0L); (* ntoc *)
@@ -452,7 +457,7 @@ let macho_dysymtab_command indirect_symtab_fixup n_indirect_syms : frag =
         WORD (TY_u32, IMM 0L); (* nextrefsyms *)
 
         WORD (TY_u32, F_POS indirect_symtab_fixup); (* indirectsymoff *)
-        WORD (TY_u32, IMM n_indirect_syms);         (* nindirectsyms *)
+        WORD (TY_u32, IMM undefined_syms_count);    (* nindirectsyms *)
 
         WORD (TY_u32, IMM 0L); (* extreloff *)
         WORD (TY_u32, IMM 0L); (* nextrel *)
@@ -497,8 +502,15 @@ let emit_file
   (* FIXME: alignment? *)
 
   let mh_execute_header_fixup = new_fixup "__mh_execute header" in
+
+  let nxargc_fixup = new_fixup "_NXArgc" in
+  let nxargv_fixup = new_fixup "_NXArgv" in
+  let progname_fixup = new_fixup "___progname" in
+  let environ_fixup = new_fixup "_environ" in
+  let exit_fixup = new_fixup "_exit" in
+  let rust_start_fixup = new_fixup "_rust_start" in
+
   let start_fixup = new_fixup "start function entry" in
-  let rust_start_fixup = new_fixup "rust_start" in
 
   let text_sect_align_log2 = 2 in
   let data_sect_align_log2 = 2 in
@@ -538,6 +550,18 @@ let emit_file
   let strtab_fixup = new_fixup "strtab" in
 
 
+  let sect_symbol_nlist_entry (sect_index:int) (fixup_to_use:fixup) : (frag * fixup) =
+    let strtab_entry_fixup = new_fixup "strtab entry" in
+      (SEQ
+         [|
+           WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
+           BYTE 0xf;              (* n_type == N_SECT | N_EXT *)
+           BYTE sect_index;       (* n_sect == NO_SECT *)
+           WORD (TY_u16, IMM 0L); (* n_desc == unused *)
+           WORD (TY_u32, M_POS (fixup_to_use));
+         |], strtab_entry_fixup)
+  in
+
   let indirect_symbol_nlist_entry (dylib_index:int) : (frag * fixup) =
     let strtab_entry_fixup = new_fixup "strtab entry" in
       (SEQ
@@ -566,14 +590,29 @@ let emit_file
   let (symbols:(string * (frag * fixup)) array) = 
     [| 
       ("_rust_start", indirect_symbol_nlist_entry 1);
+      ("_exit", indirect_symbol_nlist_entry 2);
+      ("_NXArgc", sect_symbol_nlist_entry 2 nxargc_fixup);
+      ("_NXArgv", sect_symbol_nlist_entry 2 nxargv_fixup);
+      ("_environ", sect_symbol_nlist_entry 2 environ_fixup);
+      ("___progname", sect_symbol_nlist_entry 2 progname_fixup);
       ("__mh_execute_header", absolute_symbol_nlist_entry mh_execute_header_fixup);
     |]
   in
+
   let indirect_symbols = 
     [|
-      rust_start_fixup
+      rust_start_fixup;
+      exit_fixup
     |]
   in
+  let indirect_symtab_fixup = new_fixup "indirect symbol table" in
+  let indirect_symtab = 
+    DEF (indirect_symtab_fixup,
+         SEQ (Array.mapi
+                (fun i _ -> WORD(TY_u32, IMM (Int64.of_int i)))
+                indirect_symbols))
+  in
+
   let nl_symbol_ptr_section =
     def_aligned data_sect_align nl_symbol_ptr_section_fixup
       (SEQ (Array.map
@@ -626,13 +665,16 @@ let emit_file
         |];
 
       macho_symtab_command
-        symtab_fixup (Int64.of_int (Array.length indirect_symbols)) strtab_fixup;
+        symtab_fixup (Int64.of_int (Array.length symbols)) strtab_fixup;
 
-      macho_dysymtab_command symtab_fixup 1L;
+      (* These index-and-count numbers must match the 'symbols' table above.*)
+      macho_dysymtab_command 2L 5L 0L 2L indirect_symtab_fixup;
 
       macho_dylinker_command;
 
       macho_dylib_command "librustrt.dylib";
+
+      macho_dylib_command "/usr/lib/libSystem.B.dylib";
 
       macho_thread_command start_fixup
     |]
@@ -647,11 +689,45 @@ let emit_file
       load_commands
   in
 
+  let objfile_start e =
+    Il.emit_full e (Some start_fixup) Il.Dead;
+
+    (* zero marks the bottom of the frame chain. *)
+    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+    Il.emit e (Il.umov (X86.rc X86.ebp) (X86.ro X86.esp));
+
+    (* 16-byte align stack for SSE. *)
+    Il.emit e (Il.binary Il.AND (X86.rc X86.esp) (X86.ro X86.esp)
+                 (X86.imm (Asm.IMM 0xfffffffffffffff0L)));
+
+    (* Store argc. *)
+    Il.emit e (Il.umov (X86.rc X86.ebx) (X86.c (X86.word_n (Il.Hreg X86.ebp) 1)));
+    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargc_fixup)) (X86.ro X86.ebx));
+
+    (* Store argv. *)
+    Il.emit e (Il.lea (X86.rc X86.ecx) (Il.Based (Il.Hreg X86.ebp, Some (X86.word_off_n 2))));
+    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargv_fixup)) (X86.ro X86.ebx));
+
+    (* Calculte and store envp. *)
+    Il.emit e (Il.binary Il.ADD (X86.rc X86.ebx) (X86.ro X86.ebx) (X86.imm (Asm.IMM 1L)));
+    Il.emit e (Il.binary Il.UMUL (X86.rc X86.ebx) (X86.ro X86.ebx) (X86.imm (Asm.IMM X86.word_sz)));
+    Il.emit e (Il.binary Il.ADD (X86.rc X86.ebx) (X86.ro X86.ebx) (X86.ro X86.ecx));
+    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS environ_fixup)) (X86.ro X86.ebx));
+
+    (* Push 16 bytes to preserve SSE alignment. *)
+    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS c_to_proc_fixup)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS root_prog_fixup)));
+    Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS rust_start_fixup))));
+    Il.emit e (Il.Push (X86.ro X86.eax));
+    Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS exit_fixup))));
+    Il.emit e Il.Ret;
+  in
+
   let text_segment =
     let e = X86.new_emitter () in
-      X86.objfile_start e
-        ~start_fixup ~rust_start_fixup ~root_prog_fixup
-        ~c_to_proc_fixup ~indirect_start: true;
+      objfile_start e;
       def_aligned seg_align text_segment_fixup
         (SEQ [|
            DEF (mh_execute_header_fixup, header_and_commands);
@@ -667,6 +743,10 @@ let emit_file
 
   let data_segment = def_aligned seg_align data_segment_fixup
     (SEQ [|
+       DEF(nxargc_fixup, WORD (TY_u32, IMM 0L));
+       DEF(nxargv_fixup, WORD (TY_u32, IMM 0L));
+       DEF(environ_fixup, WORD (TY_u32, IMM 0L));
+       DEF(progname_fixup, WORD (TY_u32, IMM 0L));
        data_section;
        const_section;
        bss_section;
@@ -678,6 +758,7 @@ let emit_file
     (SEQ [|
        symtab;
        strtab;
+       indirect_symtab;
      |])
   in
 

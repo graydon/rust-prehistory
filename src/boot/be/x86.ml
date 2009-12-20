@@ -293,6 +293,11 @@ let word_at (reg:Il.reg) : Il.cell =
     Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
+let word_at_abs (abs:Asm.expr64) : Il.cell =
+  let addr = Il.Abs abs in
+    Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
+;;
+
 let word_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
   let addr = Il.Based (reg, Some imm) in
