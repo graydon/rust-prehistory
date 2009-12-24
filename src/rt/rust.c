@@ -1440,10 +1440,10 @@ handle_upcall(rust_proc_t *proc)
     }
 }
 
+static CDECL void (*c_to_proc_glue)(rust_proc_t*) = NULL;
+
 static void
-rust_main_loop(rust_prog_t *prog,
-               void CDECL (*c_to_proc_glue)(rust_proc_t*),
-               rust_srv_t *srv)
+rust_main_loop(rust_prog_t *prog, rust_srv_t *srv)
 {
     rust_rt_t *rt;
     rust_proc_t *proc;
@@ -1619,8 +1619,7 @@ srv_lookup(rust_srv_t *srv, char const *sym, uint8_t *takes_proc)
 }
 
 int CDECL
-rust_start(rust_prog_t *prog,
-           void CDECL (*c_to_proc_glue)(rust_proc_t*))
+rust_start(rust_prog_t *prog, void CDECL (*c_to_proc_glue_)(rust_proc_t*))
 {
     rust_srv_t srv;
     srv.log = srv_log;
@@ -1630,7 +1629,8 @@ rust_start(rust_prog_t *prog,
     srv.fatal = srv_fatal;
     srv.lookup = srv_lookup;
     srv.user = NULL;
-    rust_main_loop(prog, c_to_proc_glue, &srv);
+    c_to_proc_glue = c_to_proc_glue_;
+    rust_main_loop(prog, &srv);
     return 0;
 }
 
