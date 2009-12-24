@@ -68,11 +68,11 @@ endif
 
 ifdef CFG_GCC
   CFG_INFO := $(info using gcc)
-  CFG_GCC_COMPILE_FLAGS += -Wall -Werror -pedantic -std=c99 -g
+  CFG_GCC_COMPILE_FLAGS += -Wall -D__STDC_FORMAT_MACROS -fno-rtti -fno-exceptions -g
   CFG_GCC_LINK_FLAGS += -g
-  CFG_COMPILE_C = gcc $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
-  CFG_LINK_C = gcc $(CFG_GCC_LINK_FLAGS) -o $(1)
-  CFG_DEPEND_C = gcc -MT "$(1)" -MM $(2)
+  CFG_COMPILE_C = g++ $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
+  CFG_LINK_C = g++ $(CFG_GCC_LINK_FLAGS) -o $(1)
+  CFG_DEPEND_C = g++ -MT "$(1)" -MM $(2)
 else
   CFG_ERR := $(error please try on a system with gcc)
 endif
@@ -110,9 +110,9 @@ BOOT_CMXS := $(BOOT_MLS:.ml=.cmx)
 BOOT_OBJS := $(BOOT_MLS:.ml=.o)
 BOOT_CMIS := $(BOOT_MLS:.ml=.cmi)
 
-RUNTIME_CS := rt/rust.c rt/isaac/randport.c
+RUNTIME_CS := rt/rust.cpp rt/isaac/randport.cpp
 RUNTIME_INCS := -Irt/isaac -Irt/uthash
-RUNTIME_OBJS := $(RUNTIME_CS:.c=$(CFG_OBJ_SUFFIX))
+RUNTIME_OBJS := $(RUNTIME_CS:.cpp=$(CFG_OBJ_SUFFIX))
 RUNTIME_LIBS := $(CFG_RUNTIME_LIBS)
 
 all: $(CFG_COMPILER) $(MKFILES) boot/fe/lexer.ml
@@ -123,7 +123,7 @@ loc:
 $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) rt/rust.h
 	$(call CFG_LINK_C, $@) $(RUNTIME_OBJS)
 
-%$(CFG_OBJ_SUFFIX): %.c $(MKFILES)
+%$(CFG_OBJ_SUFFIX): %.cpp $(MKFILES)
 	$(call CFG_COMPILE_C, $@, $(RUNTIME_INCS)) $<
 
 ifdef CFG_NATIVE
@@ -178,10 +178,10 @@ self: $(CFG_COMPILER)
 ######################################################################
 
 ML_DEPFILES:=$(BOOT_MLS:%.ml=%.d)
-C_DEPFILES:=$(RUNTIME_CS:%.c=%.d)
+C_DEPFILES:=$(RUNTIME_CS:%.cpp=%.d)
 
-%.d: %.c $(MKFILES)
-	$(call CFG_DEPEND_C, $@ $(patsubst %.c, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
+%.d: %.cpp $(MKFILES)
+	$(call CFG_DEPEND_C, $@ $(patsubst %.cpp, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.ml $(MKFILES)
 	ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
@@ -271,8 +271,8 @@ PKG_TAR := $(PKG_DIR).tar.gz
 PKG_3RDPARTY := rt/valgrind.h \
                 rt/isaac/rand.h rt/isaac/standard.h \
                 rt/uthash/uthash.h rt/uthash/utlist.h \
-                rt/bigint/bigint.h rt/bigint/bigint_int.c \
-                rt/bigint/bigint_ext.c rt/bigint/low_primes.h
+                rt/bigint/bigint.h rt/bigint/bigint_int.cpp \
+                rt/bigint/bigint_ext.cpp rt/bigint/low_primes.h
 PKG_FILES := README COPYING\
              $(MKFILES) $(BOOT_MLS) boot/fe/lexer.mll \
              comp/rustc.rc $(COMPILER_RSS) \
