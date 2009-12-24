@@ -68,7 +68,7 @@ endif
 
 ifdef CFG_GCC
   CFG_INFO := $(info using gcc)
-  CFG_GCC_COMPILE_FLAGS += -Wall -D__STDC_FORMAT_MACROS -fno-rtti -fno-exceptions -g
+  CFG_GCC_COMPILE_FLAGS += -Wall -fno-rtti -fno-exceptions -g
   CFG_GCC_LINK_FLAGS += -g
   CFG_COMPILE_C = g++ $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
   CFG_LINK_C = g++ $(CFG_GCC_LINK_FLAGS) -o $(1)

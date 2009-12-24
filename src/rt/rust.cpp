@@ -5,15 +5,16 @@
  * See file COPYING for details.
  */
 
- /*
-  * Only for RTLD_DEFAULT, remove _GNU_SOURCE when that dies. We want
-  * to be non-GNU-dependent.
-  */
-#define _GNU_SOURCE
+#define __STDC_LIMIT_MACROS 1
+#define __STDC_CONSTANT_MACROS 1
+#define __STDC_FORMAT_MACROS 1
+
+#include <stdlib.h>
+#include <stdint.h>
+#include <inttypes.h>
 
 #include <stdio.h>
 #include <string.h>
-#include <inttypes.h>
 
 #include "rust.h"
 #include "rand.h"
@@ -21,9 +22,16 @@
 #include "valgrind.h"
 
 #if defined(__WIN32__)
+extern "C" {
 #include <windows.h>
 #include <wincrypt.h>
+}
 #elif defined(__GNUC__)
+ /*
+  * Only for RTLD_DEFAULT, remove _GNU_SOURCE when that dies. We want
+  * to be non-GNU-dependent.
+  */
+#define _GNU_SOURCE
 #include <dlfcn.h>
 #else
 #error "Do not know how to load dynamic symbols on this platform."

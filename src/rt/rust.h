@@ -8,18 +8,10 @@
  * See file COPYING for details.
  */
 
-#include <stdlib.h>
-#include <stdint.h>
-
-/* Basic scalar types we will use. */
-
-#ifndef UINT64_MAX
-#error "need uint64_t support in compiler"
-#endif
-
-#ifndef PTRDIFF_MAX
-#error "need uintptr_t / ptrdiff_t support in compiler"
-#endif
+/*
+ * Include this file after you've defined the ISO C9x stdint
+ * types (size_t, uint8_t, uintptr_t, etc.)
+ */
 
 struct rust_proc;
 struct rust_prog;
@@ -45,16 +37,6 @@ struct rust_srv {
     uintptr_t (*lookup)(rust_srv_t *, char const *, uint8_t *takes_proc);
 };
 
-#ifdef __i386__
-// 'cdecl' ABI only means anything on i386
-#ifdef __WIN32__
-#define CDECL __cdecl
-#else
-#define CDECL __attribute__((cdecl))
-#endif
-#else
-#define CDECL
-#endif
 /*
  * Local Variables:
  * fill-column: 70;
