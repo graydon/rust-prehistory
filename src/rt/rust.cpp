@@ -1448,8 +1448,6 @@ handle_upcall(rust_proc_t *proc)
     }
 }
 
-static CDECL void (*c_to_proc_glue)(rust_proc_t*) = NULL;
-
 static void
 rust_main_loop(rust_prog_t *prog, rust_srv_t *srv)
 {
@@ -1469,7 +1467,7 @@ rust_main_loop(rust_prog_t *prog, rust_srv_t *srv)
 
     logptr(rt, "root proc", (uintptr_t)proc);
     logptr(rt, "proc->sp", (uintptr_t)proc->sp);
-    logptr(rt, "c_to_proc_glue", (uintptr_t)c_to_proc_glue);
+    logptr(rt, "c_to_proc_glue", (uintptr_t)srv->c_to_proc_glue);
 
     while (proc) {
 
@@ -1477,7 +1475,7 @@ rust_main_loop(rust_prog_t *prog, rust_srv_t *srv)
              (uintptr_t)proc);
 
         proc->state = proc_state_running;
-        c_to_proc_glue(proc);
+        srv->c_to_proc_glue(proc);
 
         xlog(rt, LOG_PROC,
              "returned from proc 0x%" PRIxPTR " in state '%s'",
@@ -1628,7 +1626,7 @@ srv_lookup(rust_srv_t *srv, char const *sym, uint8_t *takes_proc)
 
 extern "C"
 int CDECL
-rust_start(rust_prog_t *prog, void CDECL (*c_to_proc_glue_)(rust_proc_t*))
+rust_start(rust_prog_t *prog, void CDECL (*c_to_proc_glue)(rust_proc_t*))
 {
     rust_srv_t srv;
     srv.log = srv_log;
@@ -1637,8 +1635,8 @@ rust_start(rust_prog_t *prog, void CDECL (*c_to_proc_glue_)(rust_proc_t*))
     srv.free = srv_free;
     srv.fatal = srv_fatal;
     srv.lookup = srv_lookup;
+    srv.c_to_proc_glue = c_to_proc_glue;
     srv.user = NULL;
-    c_to_proc_glue = c_to_proc_glue_;
     rust_main_loop(prog, &srv);
     return 0;
 }

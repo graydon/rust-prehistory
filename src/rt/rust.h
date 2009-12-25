@@ -27,16 +27,6 @@ typedef struct rust_chan rust_chan_t;
 typedef struct rust_srv rust_srv_t;
 typedef struct rust_rt rust_rt_t;
 
-struct rust_srv {
-    void *user;
-    void (*log)(rust_srv_t *, char const *);
-    void (*fatal)(rust_srv_t *, char const *, char const *, size_t);
-    void* (*malloc)(rust_srv_t *, size_t);
-    void* (*realloc)(rust_srv_t *, void*, size_t);
-    void (*free)(rust_srv_t *, void*);
-    uintptr_t (*lookup)(rust_srv_t *, char const *, uint8_t *takes_proc);
-};
-
 #ifdef __i386__
 // 'cdecl' ABI only means anything on i386
 #ifdef __WIN32__
@@ -47,6 +37,18 @@ struct rust_srv {
 #else
 #define CDECL
 #endif
+
+struct rust_srv {
+    void *user;
+    void (*log)(rust_srv_t *, char const *);
+    void (*fatal)(rust_srv_t *, char const *, char const *, size_t);
+    void* (*malloc)(rust_srv_t *, size_t);
+    void* (*realloc)(rust_srv_t *, void*, size_t);
+    void (*free)(rust_srv_t *, void*);
+    uintptr_t (*lookup)(rust_srv_t *, char const *, uint8_t *takes_proc);
+
+    void CDECL (*c_to_proc_glue)(rust_proc_t*);
+};
 
 /*
  * Local Variables:
