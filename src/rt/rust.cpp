@@ -39,7 +39,6 @@ extern "C" {
 #endif
 
 #define PROC_MAX_UPCALL_ARGS 8
-#define INIT_PTR_VEC_SZ 8
 #define INIT_CIRC_BUF_UNITS 8
 #define MAX_CIRC_BUF_SIZE (1 << 24)
 #define I(rt, e) ((e) ? (void)0 :                           \
@@ -144,6 +143,8 @@ typedef enum {
 
 template <typename T>
 struct ptr_vec {
+    static const size_t INIT_PTR_VEC_SZ = 8;
+
     size_t alloc;
     size_t fill;
     T **data;
