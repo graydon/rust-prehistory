@@ -47,16 +47,9 @@ extern "C" {
                                    #e, __FILE__, __LINE__))
 
 struct ptr_vec;
-typedef struct ptr_vec ptr_vec_t;
-
 struct circ_buf;
-typedef struct circ_buf circ_buf_t;
-
-struct str;
-typedef struct str str_t;
-
-struct vec;
-typedef struct vec vec_t;
+struct rust_str;
+struct rust_vec;
 
 static uint32_t const LOG_ALL = 0xffffffff;
 static uint32_t const LOG_ERR =        0x1;
@@ -100,7 +93,7 @@ get_logbits()
 
 /* Proc stack segments. Heap allocated and chained together. */
 
-typedef struct stk_seg {
+struct stk_seg {
     struct stk_seg *prev;
     struct stk_seg *next;
     unsigned int valgrind_id;
@@ -108,8 +101,7 @@ typedef struct stk_seg {
     uintptr_t prev_sp;
     uintptr_t limit;
     uint8_t data[];
-} stk_seg_t;
-
+};
 
 typedef enum {
     proc_state_running    = 0,
@@ -168,14 +160,14 @@ struct circ_buf {
 
 /* Rust types vec and str look identical from our perspective. */
 
-struct vec {
+struct rust_vec {
     size_t refcount;
     size_t alloc;
     size_t init;
     uint8_t data[];
 };
 
-struct str {
+struct rust_str {
     size_t refcnt;
     size_t alloc;
     size_t init;
@@ -184,19 +176,19 @@ struct str {
 
 struct rust_rt {
     uintptr_t sp;          /* Saved sp from the C runtime. */
-    ptr_vec_t running_procs;
-    ptr_vec_t blocked_procs;
+    ptr_vec running_procs;
+    ptr_vec blocked_procs;
     randctx rctx;
     uint32_t logbits;
-    rust_proc_t *root_proc;
-    rust_srv_t *srv;
-    rust_port_t *ports;
+    rust_proc *root_proc;
+    rust_srv *srv;
+    rust_port *ports;
 };
 
 struct rust_prog {
-    void CDECL (*init_code)(void*, rust_proc_t*);
-    void CDECL (*main_code)(void*, rust_proc_t*);
-    void CDECL (*fini_code)(void*, rust_proc_t*);
+    void CDECL (*init_code)(void*, rust_proc*);
+    void CDECL (*main_code)(void*, rust_proc*);
+    void CDECL (*fini_code)(void*, rust_proc*);
 };
 
 /*
@@ -266,14 +258,14 @@ struct rust_prog {
 
 struct rust_proc {
 
-    rust_rt_t *rt;
-    stk_seg_t *stk;
-    rust_prog_t *prog;
+    rust_rt *rt;
+    stk_seg *stk;
+    rust_prog *prog;
     uintptr_t sp;           /* saved sp when not running. */
     proc_state_t state;
     size_t idx;
     size_t refcnt;
-    rust_chan_t *chans;
+    rust_chan *chans;
 
     uintptr_t gc_frame_chain;  /* linked list of GC frames.        */
     uintptr_t gc_alloc_chain;  /* linked list of GC allocations.   */
@@ -285,44 +277,46 @@ struct rust_proc {
      */
     uintptr_t upcall_code;
     uintptr_t upcall_args[PROC_MAX_UPCALL_ARGS];
+
+    uint8_t data[];         /* C99 "flexible array" element. */
 };
 
 struct rust_port {
     size_t live_refcnt;
     size_t weak_refcnt;
-    rust_proc_t *proc;
+    rust_proc *proc;
     /* FIXME: 'next' and 'prev' fields are only used for collecting
      * dangling ports on abrupt process termination; can remove this
      * when we have unwinding / finishing working.
      */
-    rust_port_t *next;
-    rust_port_t *prev;
+    rust_port *next;
+    rust_port *prev;
     size_t unit_sz;
-    ptr_vec_t writers;
+    ptr_vec writers;
 };
 
 /*
- * The value held in a rust 'chan' slot is actually a rust_port_t*,
+ * The value held in a rust 'chan' slot is actually a rust_port*,
  * with liveness of the chan indicated by weak_refcnt.
  *
  * Inside each proc, there is a uthash hashtable that maps ports to
- * rust_chan_t* values, below. The table enforces uniqueness of the
+ * rust_chan* values, below. The table enforces uniqueness of the
  * channel: one proc has exactly one outgoing channel (buffer) for
  * each port.
  */
 
 struct rust_chan {
     UT_hash_handle hh;
-    rust_port_t *port;
+    rust_port *port;
     uintptr_t queued;     /* Whether we're in a port->writers vec. */
     size_t idx;           /* Index in the port->writers vec. */
-    rust_proc_t *blocked; /* Proc to wake on flush,
+    rust_proc *blocked; /* Proc to wake on flush,
                              NULL if nonblocking. */
-    circ_buf_t buf;
+    circ_buf buf;
 };
 
 static void
-xlog(rust_rt_t *rt, uint32_t logbit, char const *fmt, ...)
+xlog(rust_rt *rt, uint32_t logbit, char const *fmt, ...)
 {
     char buf[256];
     if (rt->logbits & logbit) {
@@ -335,13 +329,13 @@ xlog(rust_rt_t *rt, uint32_t logbit, char const *fmt, ...)
 }
 
 static void
-logptr(rust_rt_t *rt, char const *msg, uintptr_t ptrval)
+logptr(rust_rt *rt, char const *msg, uintptr_t ptrval)
 {
     xlog(rt, LOG_MEM, "%s 0x%" PRIxPTR, msg, ptrval);
 }
 
 static void
-xfree(rust_rt_t *rt, void *p)
+xfree(rust_rt *rt, void *p)
 {
     logptr(rt, "xfree", (uintptr_t)p);
     I(rt, p);
@@ -349,7 +343,7 @@ xfree(rust_rt_t *rt, void *p)
 }
 
 static void*
-xalloc(rust_rt_t *rt, size_t sz)
+xalloc(rust_rt *rt, size_t sz)
 {
     void *p = rt->srv->malloc(rt->srv, sz);
     I(rt, p);
@@ -357,7 +351,7 @@ xalloc(rust_rt_t *rt, size_t sz)
 }
 
 static void*
-xcalloc(rust_rt_t *rt, size_t sz)
+xcalloc(rust_rt *rt, size_t sz)
 {
     void *p = xalloc(rt, sz);
     memset(p, 0, sz);
@@ -365,7 +359,7 @@ xcalloc(rust_rt_t *rt, size_t sz)
 }
 
 static void*
-xrealloc(rust_rt_t *rt, void *p, size_t sz)
+xrealloc(rust_rt *rt, void *p, size_t sz)
 {
     p = rt->srv->realloc(rt->srv, p, sz);
     I(rt, p);
@@ -375,7 +369,7 @@ xrealloc(rust_rt_t *rt, void *p, size_t sz)
 /* Utility type: pointer-vector. */
 
 static void
-init_ptr_vec(rust_rt_t *rt, ptr_vec_t *v)
+init_ptr_vec(rust_rt *rt, ptr_vec *v)
 {
     I(rt, v);
     v->alloc = INIT_PTR_VEC_SZ;
@@ -388,7 +382,7 @@ init_ptr_vec(rust_rt_t *rt, ptr_vec_t *v)
 }
 
 static void
-fini_ptr_vec(rust_rt_t *rt, ptr_vec_t *v)
+fini_ptr_vec(rust_rt *rt, ptr_vec *v)
 {
     I(rt, v);
     I(rt, v->data);
@@ -400,7 +394,7 @@ fini_ptr_vec(rust_rt_t *rt, ptr_vec_t *v)
 }
 
 static void
-ptr_vec_push(rust_rt_t *rt, ptr_vec_t *v, void *p)
+ptr_vec_push(rust_rt *rt, ptr_vec *v, void *p)
 {
     I(rt, v);
     I(rt, v->data);
@@ -413,7 +407,7 @@ ptr_vec_push(rust_rt_t *rt, ptr_vec_t *v, void *p)
 }
 
 static void
-ptr_vec_trim(rust_rt_t *rt, ptr_vec_t *v, size_t init)
+ptr_vec_trim(rust_rt *rt, ptr_vec *v, size_t init)
 {
     I(rt, v);
     I(rt, v->data);
@@ -427,7 +421,7 @@ ptr_vec_trim(rust_rt_t *rt, ptr_vec_t *v, size_t init)
 }
 
 static void
-ptr_vec_swapdel(rust_rt_t *rt, ptr_vec_t *v, size_t i)
+ptr_vec_swapdel(rust_rt *rt, ptr_vec *v, size_t i)
 {
     /* Swap the endpoint into i and decr init. */
     I(rt, v);
@@ -440,27 +434,27 @@ ptr_vec_swapdel(rust_rt_t *rt, ptr_vec_t *v, size_t i)
 }
 
 static void
-proc_vec_swapdel(rust_rt_t *rt, ptr_vec_t *v, rust_proc_t *proc)
+proc_vec_swapdel(rust_rt *rt, ptr_vec *v, rust_proc *proc)
 {
     I(rt, proc);
     I(rt, v);
     I(rt, v->data[proc->idx] == proc);
     ptr_vec_swapdel(rt, v, proc->idx);
     if (v->init > 0) {
-        rust_proc_t *pnew = (rust_proc_t*)v->data[proc->idx];
+        rust_proc *pnew = (rust_proc*)v->data[proc->idx];
         pnew->idx = proc->idx;
     }
 }
 
 static void
-chan_vec_swapdel(rust_rt_t *rt, ptr_vec_t *v, rust_chan_t *chan)
+chan_vec_swapdel(rust_rt *rt, ptr_vec *v, rust_chan *chan)
 {
     I(rt, v);
     I(rt, chan);
     I(rt, v->data[chan->idx] == chan);
     ptr_vec_swapdel(rt, v, chan->idx);
     if (v->init > 0) {
-        rust_chan_t *cnew = (rust_chan_t*)v->data[chan->idx];
+        rust_chan *cnew = (rust_chan*)v->data[chan->idx];
         cnew->idx = chan->idx;
     }
 }
@@ -468,7 +462,7 @@ chan_vec_swapdel(rust_rt_t *rt, ptr_vec_t *v, rust_chan_t *chan)
 /* Utility type: circular buffer. */
 
 static void
-init_circ_buf(rust_rt_t *rt, circ_buf_t *c, size_t unit_sz)
+init_circ_buf(rust_rt *rt, circ_buf *c, size_t unit_sz)
 {
     I(rt, c);
     I(rt, unit_sz);
@@ -484,7 +478,7 @@ init_circ_buf(rust_rt_t *rt, circ_buf_t *c, size_t unit_sz)
 }
 
 static void
-fini_circ_buf(rust_rt_t *rt, circ_buf_t *c)
+fini_circ_buf(rust_rt *rt, circ_buf *c)
 {
     I(rt, c);
     I(rt, c->data);
@@ -493,7 +487,7 @@ fini_circ_buf(rust_rt_t *rt, circ_buf_t *c)
 }
 
 static void
-circ_buf_transfer(rust_rt_t *rt, circ_buf_t *c, void *dst)
+circ_buf_transfer(rust_rt *rt, circ_buf *c, void *dst)
 {
     size_t i;
     uint8_t *d = (uint8_t *)dst;
@@ -504,7 +498,7 @@ circ_buf_transfer(rust_rt_t *rt, circ_buf_t *c, void *dst)
 }
 
 static void
-circ_buf_push(rust_rt_t *rt, circ_buf_t *c, void *src)
+circ_buf_push(rust_rt *rt, circ_buf *c, void *src)
 {
     size_t i;
     void *tmp;
@@ -538,7 +532,7 @@ circ_buf_push(rust_rt_t *rt, circ_buf_t *c, void *src)
 }
 
 static void
-circ_buf_shift(rust_rt_t *rt, circ_buf_t *c, void *dst)
+circ_buf_shift(rust_rt *rt, circ_buf *c, void *dst)
 {
     size_t i;
     void *tmp;
@@ -571,7 +565,7 @@ circ_buf_shift(rust_rt_t *rt, circ_buf_t *c, void *dst)
 
 /* Ports */
 static void
-del_port(rust_rt_t *rt, rust_port_t *port)
+del_port(rust_rt *rt, rust_port *port)
 {
     xlog(rt, LOG_UPCALL|LOG_COMM|LOG_MEM,
          "finalizing and freeing port 0x%" PRIxPTR,
@@ -594,15 +588,15 @@ del_port(rust_rt_t *rt, rust_port_t *port)
 
 static size_t const min_stk_bytes = 0x300;
 
-static stk_seg_t*
-new_stk(rust_rt_t *rt, size_t minsz)
+static stk_seg*
+new_stk(rust_rt *rt, size_t minsz)
 {
     if (minsz < min_stk_bytes)
         minsz = min_stk_bytes;
-    size_t sz = sizeof(stk_seg_t) + minsz;
-    stk_seg_t *stk = (stk_seg_t *)xalloc(rt, sz);
+    size_t sz = sizeof(stk_seg) + minsz;
+    stk_seg *stk = (stk_seg *)xalloc(rt, sz);
     logptr(rt, "new stk", (uintptr_t)stk);
-    memset(stk, 0, sizeof(stk_seg_t));
+    memset(stk, 0, sizeof(stk_seg));
     stk->limit = (uintptr_t) &stk->data[minsz];
     logptr(rt, "stk limit", stk->limit);
     stk->valgrind_id =
@@ -612,9 +606,9 @@ new_stk(rust_rt_t *rt, size_t minsz)
 }
 
 static void
-del_stk(rust_rt_t *rt, stk_seg_t *stk)
+del_stk(rust_rt *rt, stk_seg *stk)
 {
-    stk_seg_t *nxt = 0;
+    stk_seg *nxt = 0;
 
     /* Rewind to bottom-most stk segment. */
     while (stk->prev)
@@ -637,7 +631,7 @@ del_stk(rust_rt_t *rt, stk_seg_t *stk)
 size_t const n_callee_saves = 4;
 
 static void
-upcall_grow_proc(rust_proc_t *proc, size_t n_call_bytes, size_t n_frame_bytes)
+upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
 {
     /*
      *  We have a stack like this:
@@ -682,9 +676,9 @@ upcall_grow_proc(rust_proc_t *proc, size_t n_call_bytes, size_t n_frame_bytes)
      *                   new_spill_sz +
      *                   new_call_sz +
      *                   abi_frame_base_sz +
-     *                   proc_to_c_glue_sz)
+     *                   proco_c_glue_sz)
      *
-     *  proc_to_c_glue_sz = abi_frame_base_sz
+     *  proco_c_glue_sz = abi_frame_base_sz
      *
      * Note: there's a lot of stuff in K! You have to reserve enough
      * space for the new frame, enough space for the transplanted call,
@@ -693,8 +687,8 @@ upcall_grow_proc(rust_proc_t *proc, size_t n_call_bytes, size_t n_frame_bytes)
      * this function when you find you're out of stack again, mid-call.
      *
      */
-    rust_rt_t *rt = proc->rt;
-    stk_seg_t *nstk = proc->stk->next;
+    rust_rt *rt = proc->rt;
+    stk_seg *nstk = proc->stk->next;
     if (nstk) {
         /* Figure out if the existing chunk is big enough. */
         size_t sz = nstk->limit - ((uintptr_t) &proc->stk->data[0]);
@@ -724,12 +718,12 @@ upcall_grow_proc(rust_proc_t *proc, size_t n_call_bytes, size_t n_frame_bytes)
     proc->sp = target;
 }
 
-static rust_proc_t*
-new_proc(rust_rt_t *rt, rust_prog_t *prog)
+static rust_proc*
+new_proc(rust_rt *rt, rust_prog *prog)
 {
     /* FIXME: need to actually convey the proc internal-slots size to
        here. */
-    rust_proc_t *proc = (rust_proc_t *)xcalloc(rt, sizeof(rust_proc_t) + 1024);
+    rust_proc *proc = (rust_proc *)xcalloc(rt, sizeof(rust_proc) + 1024);
     logptr(rt, "new proc", (uintptr_t)proc);
     logptr(rt, "from prog", (uintptr_t)prog);
     logptr(rt, "init", (uintptr_t)prog->init_code);
@@ -790,7 +784,7 @@ new_proc(rust_rt_t *rt, rust_prog_t *prog)
 }
 
 static void
-del_proc(rust_rt_t *rt, rust_proc_t *proc)
+del_proc(rust_rt *rt, rust_proc *proc)
 {
     xlog(rt, LOG_MEM|LOG_PROC,
          "del proc 0x%" PRIxPTR ", refcnt=%d",
@@ -804,7 +798,7 @@ del_proc(rust_rt_t *rt, rust_proc_t *proc)
     del_stk(rt, proc->stk);
 
     while (proc->chans) {
-        rust_chan_t *c = proc->chans;
+        rust_chan *c = proc->chans;
         HASH_DEL(proc->chans,c);
         fini_circ_buf(rt, &c->buf);
         xfree(rt, c);
@@ -814,8 +808,8 @@ del_proc(rust_rt_t *rt, rust_proc_t *proc)
 }
 
 
-static ptr_vec_t*
-get_state_vec(rust_rt_t *rt, proc_state_t state)
+static ptr_vec*
+get_state_vec(rust_rt *rt, proc_state_t state)
 {
     switch (state) {
     case proc_state_running:
@@ -831,16 +825,16 @@ get_state_vec(rust_rt_t *rt, proc_state_t state)
     return NULL;
 }
 
-static ptr_vec_t*
-get_proc_vec(rust_rt_t *rt, rust_proc_t *proc)
+static ptr_vec*
+get_proc_vec(rust_rt *rt, rust_proc *proc)
 {
     return get_state_vec(rt, proc->state);
 }
 
 static void
-add_proc_to_state_vec(rust_rt_t *rt, rust_proc_t *proc)
+add_proco_state_vec(rust_rt *rt, rust_proc *proc)
 {
-    ptr_vec_t *v = get_proc_vec(rt, proc);
+    ptr_vec *v = get_proc_vec(rt, proc);
     proc->idx = v->init;
     xlog(rt, LOG_MEM|LOG_PROC,
          "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
@@ -850,27 +844,27 @@ add_proc_to_state_vec(rust_rt_t *rt, rust_proc_t *proc)
 
 
 static size_t
-n_live_procs(rust_rt_t *rt)
+n_live_procs(rust_rt *rt)
 {
     return rt->running_procs.init + rt->blocked_procs.init;
 }
 
 static void
-remove_proc_from_state_vec(rust_rt_t *rt, rust_proc_t *proc)
+remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
 {
-    ptr_vec_t *v = get_proc_vec(rt, proc);
+    ptr_vec *v = get_proc_vec(rt, proc);
     xlog(rt, LOG_MEM|LOG_PROC,
          "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
-    I(rt, (rust_proc_t *) v->data[proc->idx] == proc);
+    I(rt, (rust_proc *) v->data[proc->idx] == proc);
     proc_vec_swapdel(rt, v, proc);
     ptr_vec_trim(rt, v, n_live_procs(rt));
 }
 
 
 static void
-proc_state_transition(rust_rt_t *rt,
-                      rust_proc_t *proc,
+proc_state_transition(rust_rt *rt,
+                      rust_proc *proc,
                       proc_state_t src,
                       proc_state_t dst)
 {
@@ -882,11 +876,11 @@ proc_state_transition(rust_rt_t *rt,
     I(rt, proc->state == src);
     remove_proc_from_state_vec(rt, proc);
     proc->state = dst;
-    add_proc_to_state_vec(rt, proc);
+    add_proco_state_vec(rt, proc);
 }
 
 static void
-upcall_del_proc(rust_rt_t *rt, rust_proc_t *proc)
+upcall_del_proc(rust_rt *rt, rust_proc *proc)
 {
     xlog(proc->rt, LOG_PROC,
          "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
@@ -901,15 +895,15 @@ upcall_del_proc(rust_rt_t *rt, rust_proc_t *proc)
          (uintptr_t)proc);
 }
 
-static rust_proc_t*
-sched(rust_rt_t *rt)
+static rust_proc*
+sched(rust_rt *rt)
 {
     I(rt, rt);
     I(rt, n_live_procs(rt) > 0);
     if (rt->running_procs.init > 0) {
         size_t i = rand(&rt->rctx);
         i %= rt->running_procs.init;
-        return (rust_proc_t *)rt->running_procs.data[i];
+        return (rust_proc *)rt->running_procs.data[i];
     }
     xlog(rt, LOG_RT|LOG_PROC,
          "no schedulable processes");
@@ -920,7 +914,7 @@ sched(rust_rt_t *rt)
 
 #ifdef __WIN32__
 static void
-win32_require(rust_rt_t *rt, LPTSTR fn, BOOL ok) {
+win32_require(rust_rt *rt, LPTSTR fn, BOOL ok) {
     if (!ok) {
         LPTSTR buf;
         DWORD err = GetLastError();
@@ -937,11 +931,11 @@ win32_require(rust_rt_t *rt, LPTSTR fn, BOOL ok) {
 }
 #endif
 
-static rust_rt_t*
-new_rt(rust_srv_t *srv)
+static rust_rt*
+new_rt(rust_srv *srv)
 {
-    rust_rt_t *rt = (rust_rt_t *)srv->malloc(srv, sizeof(rust_rt_t));
-    memset(rt, 0, sizeof(rust_rt_t));
+    rust_rt *rt = (rust_rt *)srv->malloc(srv, sizeof(rust_rt));
+    memset(rt, 0, sizeof(rust_rt));
     rt->srv = srv;
     rt->logbits = get_logbits();
     logptr(rt, "new rt", (uintptr_t)rt);
@@ -974,16 +968,16 @@ new_rt(rust_srv_t *srv)
 }
 
 static void
-del_all_procs(rust_rt_t *rt, ptr_vec_t *v) {
+del_all_procs(rust_rt *rt, ptr_vec *v) {
     I(rt, v);
     while (v->init) {
         xlog(rt, LOG_PROC, "deleting live proc %" PRIdPTR, v->init-1);
-        del_proc(rt, (rust_proc_t*) v->data[--(v->init)]);
+        del_proc(rt, (rust_proc*) v->data[--(v->init)]);
     }
 }
 
 static void
-del_rt(rust_rt_t *rt)
+del_rt(rust_rt *rt)
 {
     xlog(rt, LOG_PROC, "deleting all running procs");
     del_all_procs(rt, &rt->running_procs);
@@ -1003,7 +997,7 @@ del_rt(rust_rt_t *rt)
 /* Upcalls */
 
 static void
-upcall_log_uint32_t(rust_rt_t *rt, uint32_t i)
+upcall_log_uint32_t(rust_rt *rt, uint32_t i)
 {
     xlog(rt, LOG_UPCALL|LOG_ULOG,
          "upcall log_uint32(0x%" PRIx32 " = %" PRId32 " = '%c')",
@@ -1011,7 +1005,7 @@ upcall_log_uint32_t(rust_rt_t *rt, uint32_t i)
 }
 
 static void
-upcall_log_str(rust_rt_t *rt, char const *c)
+upcall_log_str(rust_rt *rt, char const *c)
 {
     xlog(rt, LOG_UPCALL|LOG_ULOG,
          "upcall log_str(\"%s\")",
@@ -1019,7 +1013,7 @@ upcall_log_str(rust_rt_t *rt, char const *c)
 }
 
 static void
-upcall_trace_word(rust_rt_t *rt, uintptr_t i)
+upcall_trace_word(rust_rt *rt, uintptr_t i)
 {
     xlog(rt, LOG_UPCALL|LOG_TRACE,
          "trace: 0x%" PRIxPTR "",
@@ -1027,17 +1021,17 @@ upcall_trace_word(rust_rt_t *rt, uintptr_t i)
 }
 
 static void
-upcall_trace_str(rust_rt_t *rt, char const *c)
+upcall_trace_str(rust_rt *rt, char const *c)
 {
     xlog(rt, LOG_UPCALL|LOG_TRACE,
          "trace: %s",
          c);
 }
 
-static rust_port_t*
-upcall_new_port(rust_rt_t *rt, rust_proc_t *proc, size_t unit_sz)
+static rust_port*
+upcall_new_port(rust_rt *rt, rust_proc *proc, size_t unit_sz)
 {
-    rust_port_t *port = (rust_port_t *)xcalloc(rt, sizeof(rust_port_t));
+    rust_port *port = (rust_port *)xcalloc(rt, sizeof(rust_port));
     xlog(rt, LOG_UPCALL|LOG_MEM|LOG_COMM,
          "upcall new_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
          PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)port);
@@ -1057,7 +1051,7 @@ upcall_new_port(rust_rt_t *rt, rust_proc_t *proc, size_t unit_sz)
 }
 
 static void
-upcall_del_port(rust_rt_t *rt, rust_port_t *port)
+upcall_del_port(rust_rt *rt, rust_port *port)
 {
     xlog(rt, LOG_UPCALL|LOG_MEM|LOG_COMM,
          "upcall del_port(0x%" PRIxPTR "), live refcnt=%d, weak refcnt=%d",
@@ -1094,9 +1088,9 @@ upcall_del_port(rust_rt_t *rt, rust_port_t *port)
  */
 
 static int
-attempt_transmission(rust_rt_t *rt,
-                     rust_chan_t *src,
-                     rust_proc_t *dst)
+attempt_transmission(rust_rt *rt,
+                     rust_chan *src,
+                     rust_proc *dst)
 {
     I(rt, src);
     I(rt, dst);
@@ -1138,15 +1132,15 @@ attempt_transmission(rust_rt_t *rt,
 }
 
 static void
-upcall_send(rust_rt_t *rt, rust_proc_t *src,
-            rust_port_t *port, void *sptr)
+upcall_send(rust_rt *rt, rust_proc *src,
+            rust_port *port, void *sptr)
 {
     xlog(rt, LOG_UPCALL|LOG_COMM,
          "upcall send(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
          (uintptr_t)src,
          (uintptr_t)port);
 
-    rust_chan_t *chan = NULL;
+    rust_chan *chan = NULL;
 
     if (!port) {
         xlog(rt, LOG_COMM|LOG_ERR,
@@ -1160,14 +1154,14 @@ upcall_send(rust_rt_t *rt, rust_proc_t *src,
     I(rt, src);
     I(rt, port);
     I(rt, sptr);
-    HASH_FIND(hh,src->chans,port,sizeof(rust_port_t*),chan);
+    HASH_FIND(hh,src->chans,port,sizeof(rust_port*),chan);
     if (!chan) {
-        chan = (rust_chan_t *)xcalloc(rt, sizeof(rust_chan_t));
+        chan = (rust_chan *)xcalloc(rt, sizeof(rust_chan));
         xlog(rt, LOG_MEM|LOG_COMM,
              "new chan 0x%" PRIxPTR, (uintptr_t)chan);
         chan->port = port;
         init_circ_buf(rt, &chan->buf, port->unit_sz);
-        HASH_ADD(hh,src->chans,port,sizeof(rust_port_t*),chan);
+        HASH_ADD(hh,src->chans,port,sizeof(rust_port*),chan);
     }
     I(rt, chan);
     I(rt, chan->blocked == src || !chan->blocked);
@@ -1197,7 +1191,7 @@ upcall_send(rust_rt_t *rt, rust_proc_t *src,
 }
 
 static void
-upcall_recv(rust_rt_t *rt, rust_proc_t *dst, rust_port_t *port)
+upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
 {
     xlog(rt, LOG_UPCALL|LOG_COMM,
          "upcall recv(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
@@ -1217,7 +1211,7 @@ upcall_recv(rust_rt_t *rt, rust_proc_t *dst, rust_port_t *port)
         I(rt, dst->rt);
         size_t i = rand(&dst->rt->rctx);
         i %= port->writers.init;
-        rust_chan_t *schan = (rust_chan_t*)port->writers.data[i];
+        rust_chan *schan = (rust_chan*)port->writers.data[i];
         I(rt, schan->idx == i);
         if (attempt_transmission(rt, schan, dst)) {
             chan_vec_swapdel(rt, &port->writers, schan);
@@ -1232,7 +1226,7 @@ upcall_recv(rust_rt_t *rt, rust_proc_t *dst, rust_port_t *port)
 
 
 static void
-upcall_fail(rust_rt_t *rt, char const *expr, char const *file,
+upcall_fail(rust_rt *rt, char const *expr, char const *file,
             size_t line)
 {
     /* FIXME: throw, don't just exit. */
@@ -1242,7 +1236,7 @@ upcall_fail(rust_rt_t *rt, char const *expr, char const *file,
 }
 
 static uintptr_t
-upcall_malloc(rust_rt_t *rt, rust_proc_t *proc, size_t nbytes)
+upcall_malloc(rust_rt *rt, rust_proc *proc, size_t nbytes)
 {
     void *p = xalloc(rt, nbytes);
     xlog(rt, LOG_UPCALL|LOG_MEM,
@@ -1252,7 +1246,7 @@ upcall_malloc(rust_rt_t *rt, rust_proc_t *proc, size_t nbytes)
 }
 
 static void
-upcall_free(rust_rt_t *rt, void* ptr)
+upcall_free(rust_rt *rt, void* ptr)
 {
     xlog(rt, LOG_UPCALL|LOG_MEM,
          "upcall free(0x%" PRIxPTR ")",
@@ -1267,21 +1261,21 @@ typedef uintptr_t (CDECL *native_3)(uintptr_t, uintptr_t, uintptr_t);
 typedef uintptr_t (CDECL *native_4)(uintptr_t, uintptr_t, uintptr_t,
                                     uintptr_t);
 
-typedef uintptr_t (CDECL *native_proc_0)(rust_proc_t *);
-typedef uintptr_t (CDECL *native_proc_1)(rust_proc_t *, uintptr_t);
-typedef uintptr_t (CDECL *native_proc_2)(rust_proc_t *, uintptr_t,
+typedef uintptr_t (CDECL *native_proc_0)(rust_proc *);
+typedef uintptr_t (CDECL *native_proc_1)(rust_proc *, uintptr_t);
+typedef uintptr_t (CDECL *native_proc_2)(rust_proc *, uintptr_t,
                                          uintptr_t);
-typedef uintptr_t (CDECL *native_proc_3)(rust_proc_t *, uintptr_t,
+typedef uintptr_t (CDECL *native_proc_3)(rust_proc *, uintptr_t,
                                          uintptr_t, uintptr_t);
-typedef uintptr_t (CDECL *native_proc_4)(rust_proc_t *, uintptr_t,
+typedef uintptr_t (CDECL *native_proc_4)(rust_proc *, uintptr_t,
                                          uintptr_t, uintptr_t, uintptr_t);
 
 static void
-upcall_native(rust_proc_t *proc,
+upcall_native(rust_proc *proc,
               char const *sym, uintptr_t *retptr,
               uintptr_t *argv, uintptr_t nargs)
 {
-    rust_rt_t *rt = proc->rt;
+    rust_rt *rt = proc->rt;
     xlog(rt, LOG_UPCALL|LOG_MEM,
          "upcall native('%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
          sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
@@ -1351,11 +1345,11 @@ next_power_of_two(size_t s)
 }
 
 
-static str_t*
-upcall_new_str(rust_rt_t *rt, char const *s, size_t init)
+static rust_str*
+upcall_new_str(rust_rt *rt, char const *s, size_t init)
 {
     size_t alloc = next_power_of_two(init);
-    str_t *st = (str_t*) xalloc(rt, sizeof(str_t) + alloc);
+    rust_str *st = (rust_str*) xalloc(rt, sizeof(rust_str) + alloc);
     st->refcnt = 1;
     st->init = init;
     st->alloc = alloc;
@@ -1368,16 +1362,16 @@ upcall_new_str(rust_rt_t *rt, char const *s, size_t init)
 }
 
 
-static CDECL char const *str_buf(str_t *s);
+static CDECL char const *str_buf(rust_str *s);
 
 static void
-rust_main_loop(rust_prog_t *prog, rust_srv_t *srv);
+rust_main_loop(rust_prog *prog, rust_srv *srv);
 
 struct rust_ticket {
-    rust_prog_t *prog;
-    rust_srv_t *srv;
+    rust_prog *prog;
+    rust_srv *srv;
 
-    explicit rust_ticket(rust_prog_t *prog, rust_srv_t *srv) : prog(prog), srv(srv)
+    explicit rust_ticket(rust_prog *prog, rust_srv *srv) : prog(prog), srv(srv)
     {}
 
     ~rust_ticket()
@@ -1385,7 +1379,7 @@ struct rust_ticket {
 
     void operator delete(void *ptr)
     {
-        rust_srv_t *srv = ((rust_ticket *)ptr)->srv;
+        rust_srv *srv = ((rust_ticket *)ptr)->srv;
         srv->free(srv, ptr);
     }
 };
@@ -1399,8 +1393,8 @@ static void *rust_thread_start(void *ptr)
      * thread can't do this for us.
      */
     rust_ticket *ticket = (rust_ticket *)ptr;
-    rust_prog_t *prog = ticket->prog;
-    rust_srv_t *srv = ticket->srv;
+    rust_prog *prog = ticket->prog;
+    rust_srv *srv = ticket->srv;
     delete ticket;
 
     /*
@@ -1412,10 +1406,10 @@ static void *rust_thread_start(void *ptr)
 }
 #endif
 
-static rust_proc_t *
-upcall_new_thread(rust_rt_t *rt, rust_prog_t *prog)
+static rust_proc *
+upcall_new_thread(rust_rt *rt, rust_prog *prog)
 {
-    rust_srv_t *srv = rt->srv;
+    rust_srv *srv = rt->srv;
     /*
      * The ticket is not bound to the current runtime, so allocate directly from the
      * service.
@@ -1432,7 +1426,7 @@ upcall_new_thread(rust_rt_t *rt, rust_prog_t *prog)
 }
 
 static void
-handle_upcall(rust_proc_t *proc)
+handle_upcall(rust_proc *proc)
 {
     uintptr_t *args = &proc->upcall_args[0];
 
@@ -1441,16 +1435,16 @@ handle_upcall(rust_proc_t *proc)
         upcall_log_uint32_t(proc->rt, args[0]);
         break;
     case upcall_code_log_str:
-        upcall_log_str(proc->rt, str_buf((str_t*)args[0]));
+        upcall_log_str(proc->rt, str_buf((rust_str*)args[0]));
         break;
     case upcall_code_new_proc:
-        *((rust_proc_t**)args[0]) = new_proc(proc->rt, (rust_prog_t*)args[1]);
+        *((rust_proc**)args[0]) = new_proc(proc->rt, (rust_prog*)args[1]);
         break;
     case upcall_code_del_proc:
-        upcall_del_proc(proc->rt, (rust_proc_t*)args[0]);
+        upcall_del_proc(proc->rt, (rust_proc*)args[0]);
         break;
     case upcall_code_sched:
-        add_proc_to_state_vec(proc->rt, (rust_proc_t*)args[0]);
+        add_proco_state_vec(proc->rt, (rust_proc*)args[0]);
         break;
     case upcall_code_fail:
         upcall_fail(proc->rt,
@@ -1466,17 +1460,17 @@ handle_upcall(rust_proc_t *proc)
         upcall_free(proc->rt, (void*)args[0]);
         break;
     case upcall_code_new_port:
-        *((rust_port_t**)args[0]) =
+        *((rust_port**)args[0]) =
             upcall_new_port(proc->rt, proc, (size_t)args[1]);
         break;
     case upcall_code_del_port:
-        upcall_del_port(proc->rt, (rust_port_t*)args[0]);
+        upcall_del_port(proc->rt, (rust_port*)args[0]);
         break;
     case upcall_code_send:
-        upcall_send(proc->rt, proc, (rust_port_t*)args[0], (void*)args[1]);
+        upcall_send(proc->rt, proc, (rust_port*)args[0], (void*)args[1]);
         break;
     case upcall_code_recv:
-        upcall_recv(proc->rt, proc, (rust_port_t*)args[1]);
+        upcall_recv(proc->rt, proc, (rust_port*)args[1]);
         break;
     case upcall_code_native:
         upcall_native(proc, (char const *)args[0],
@@ -1485,7 +1479,7 @@ handle_upcall(rust_proc_t *proc)
                       (uintptr_t)args[3]);
         break;
     case upcall_code_new_str:
-        *((str_t**)args[0]) = upcall_new_str(proc->rt,
+        *((rust_str**)args[0]) = upcall_new_str(proc->rt,
                                              (char const *)args[1],
                                              (size_t)args[2]);
         break;
@@ -1502,10 +1496,10 @@ handle_upcall(rust_proc_t *proc)
 }
 
 static void
-rust_main_loop(rust_prog_t *prog, rust_srv_t *srv)
+rust_main_loop(rust_prog *prog, rust_srv *srv)
 {
-    rust_rt_t *rt;
-    rust_proc_t *proc;
+    rust_rt *rt;
+    rust_proc *proc;
     rt = new_rt(srv);
 
     xlog(rt, LOG_RT, "control is in rust runtime library");
@@ -1515,7 +1509,7 @@ rust_main_loop(rust_prog_t *prog, rust_srv_t *srv)
     logptr(rt, "prog->fini_code", (uintptr_t)prog->fini_code);
 
     rt->root_proc = new_proc(rt, prog);
-    add_proc_to_state_vec(rt, rt->root_proc);
+    add_proco_state_vec(rt, rt->root_proc);
     proc = sched(rt);
 
     logptr(rt, "root proc", (uintptr_t)proc);
@@ -1581,31 +1575,31 @@ rust_main_loop(rust_prog_t *prog, rust_srv_t *srv)
 }
 
 static void
-srv_log(rust_srv_t *srv, char const *str)
+srv_log(rust_srv *srv, char const *str)
 {
     printf("rt: %s\n", str);
 }
 
 static void*
-srv_malloc(rust_srv_t *srv, size_t sz)
+srv_malloc(rust_srv *srv, size_t sz)
 {
     return malloc(sz);
 }
 
 static void*
-srv_realloc(rust_srv_t *srv, void *p, size_t sz)
+srv_realloc(rust_srv *srv, void *p, size_t sz)
 {
     return realloc(p, sz);
 }
 
 static void
-srv_free(rust_srv_t *srv, void *p)
+srv_free(rust_srv *srv, void *p)
 {
     free(p);
 }
 
 static void
-srv_fatal(rust_srv_t *srv, char const *expr,
+srv_fatal(rust_srv *srv, char const *expr,
           char const *file, size_t line)
 {
     char buf[1024];
@@ -1618,20 +1612,20 @@ srv_fatal(rust_srv_t *srv, char const *expr,
 /* Native builtins. */
 
 static CDECL char const *
-str_buf(str_t *s)
+str_buf(rust_str *s)
 {
     return (char const *)&s->data[0];
 }
 
-static CDECL str_t*
-implode(rust_proc_t *proc, vec_t *v)
+static CDECL rust_str*
+implode(rust_proc *proc, rust_vec *v)
 {
     /*
      * We received a vec of u32 unichars. Implode to a string.
      * FIXME: this needs to do a proper utf-8 encoding.
      */
     size_t i;
-    str_t *s;
+    rust_str *s;
 
     size_t init = v->init >> 2;
     s = upcall_new_str(proc->rt, NULL, init);
@@ -1647,7 +1641,7 @@ implode(rust_proc_t *proc, vec_t *v)
 
 
 static uintptr_t
-srv_lookup(rust_srv_t *srv, char const *sym, uint8_t *takes_proc)
+srv_lookup(rust_srv *srv, char const *sym, uint8_t *takes_proc)
 {
     uintptr_t res;
 
@@ -1679,9 +1673,9 @@ srv_lookup(rust_srv_t *srv, char const *sym, uint8_t *takes_proc)
 
 extern "C"
 int CDECL
-rust_start(rust_prog_t *prog, void CDECL (*c_to_proc_glue)(rust_proc_t*))
+rust_start(rust_prog *prog, void CDECL (*c_to_proc_glue)(rust_proc*))
 {
-    rust_srv_t srv;
+    rust_srv srv;
     srv.log = srv_log;
     srv.malloc = srv_malloc;
     srv.realloc = srv_realloc;

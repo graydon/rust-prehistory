@@ -10,7 +10,7 @@
 
 /*
  * Include this file after you've defined the ISO C9x stdint
- * types (size_t, uint8_t, uintptr_t, etc.)
+ * types (size, uint8, uintptr, etc.)
  */
 
 struct rust_proc;
@@ -20,12 +20,11 @@ struct rust_chan;
 struct rust_srv;
 struct rust_rt;
 
-typedef struct rust_proc rust_proc_t;
-typedef struct rust_prog rust_prog_t;
-typedef struct rust_port rust_port_t;
-typedef struct rust_chan rust_chan_t;
-typedef struct rust_srv rust_srv_t;
-typedef struct rust_rt rust_rt_t;
+typedef struct rust_proc rust_proc;
+typedef struct rust_port rust_port;
+typedef struct rust_chan rust_chan;
+typedef struct rust_srv rust_srv;
+typedef struct rust_rt rust_rt;
 
 #ifdef __i386__
 // 'cdecl' ABI only means anything on i386
@@ -40,14 +39,14 @@ typedef struct rust_rt rust_rt_t;
 
 struct rust_srv {
     void *user;
-    void (*log)(rust_srv_t *, char const *);
-    void (*fatal)(rust_srv_t *, char const *, char const *, size_t);
-    void* (*malloc)(rust_srv_t *, size_t);
-    void* (*realloc)(rust_srv_t *, void*, size_t);
-    void (*free)(rust_srv_t *, void*);
-    uintptr_t (*lookup)(rust_srv_t *, char const *, uint8_t *takes_proc);
+    void (*log)(rust_srv *, char const *);
+    void (*fatal)(rust_srv *, char const *, char const *, size_t);
+    void* (*malloc)(rust_srv *, size_t);
+    void* (*realloc)(rust_srv *, void*, size_t);
+    void (*free)(rust_srv *, void*);
+    uintptr_t (*lookup)(rust_srv *, char const *, uint8_t *takes_proc);
 
-    void CDECL (*c_to_proc_glue)(rust_proc_t*);
+    void CDECL (*c_to_proc_glue)(rust_proc*);
 };
 
 inline void *operator new(size_t size, rust_srv *srv)
