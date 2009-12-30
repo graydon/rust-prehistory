@@ -1373,19 +1373,19 @@ static CDECL char const *str_buf(str_t *s);
 static void
 rust_main_loop(rust_prog_t *prog, rust_srv_t *srv);
 
-struct Ticket {
+struct rust_ticket {
     rust_prog_t *prog;
     rust_srv_t *srv;
 
-    explicit Ticket(rust_prog_t *prog, rust_srv_t *srv) : prog(prog), srv(srv)
+    explicit rust_ticket(rust_prog_t *prog, rust_srv_t *srv) : prog(prog), srv(srv)
     {}
 
-    ~Ticket()
+    ~rust_ticket()
     {}
 
     void operator delete(void *ptr)
     {
-        rust_srv_t *srv = ((Ticket *)ptr)->srv;
+        rust_srv_t *srv = ((rust_ticket *)ptr)->srv;
         srv->free(srv, ptr);
     }
 };
@@ -1398,7 +1398,7 @@ static void *rust_thread_start(void *ptr)
      * and then deallocate it. Since thread creation is asynchronous, the other
      * thread can't do this for us.
      */
-    Ticket *ticket = (Ticket *)ptr;
+    rust_ticket *ticket = (rust_ticket *)ptr;
     rust_prog_t *prog = ticket->prog;
     rust_srv_t *srv = ticket->srv;
     delete ticket;
@@ -1420,7 +1420,7 @@ upcall_new_thread(rust_rt_t *rt, rust_prog_t *prog)
      * The ticket is not bound to the current runtime, so allocate directly from the
      * service.
      */
-    Ticket *ticket = new (srv) Ticket(prog, srv);
+    rust_ticket *ticket = new (srv) rust_ticket(prog, srv);
     pthread_t thread;
     pthread_create(&thread, NULL, rust_thread_start, (void *)ticket);
 
