@@ -150,6 +150,10 @@ struct ptr_vec {
 
     void init(rust_rt *rt);
     void fini(rust_rt *rt);
+
+    void push(rust_rt *rt, void *p);
+    void trim(rust_rt *rt, size_t fill);
+    void swapdel(rust_rt *rt, size_t i);
 };
 
 struct circ_buf {
@@ -396,44 +400,44 @@ ptr_vec::fini(rust_rt *rt)
     free(this->data);
 }
 
-static void
-ptr_vec_push(rust_rt *rt, ptr_vec *v, void *p)
+void
+ptr_vec::push(rust_rt *rt, void *p)
 {
-    I(rt, v);
-    I(rt, v->data);
-    if (v->fill == v->alloc) {
-        v->alloc *= 2;
-        v->data = (void **)xrealloc(rt, v->data, v->alloc);
+    I(rt, this);
+    I(rt, this->data);
+    if (this->fill == this->alloc) {
+        this->alloc *= 2;
+        this->data = (void **)xrealloc(rt, this->data, this->alloc);
     }
-    I(rt, v->fill < v->alloc);
-    v->data[v->fill++] = p;
+    I(rt, this->fill < this->alloc);
+    this->data[this->fill++] = p;
 }
 
-static void
-ptr_vec_trim(rust_rt *rt, ptr_vec *v, size_t init)
+void
+ptr_vec::trim(rust_rt *rt, size_t sz)
 {
-    I(rt, v);
-    I(rt, v->data);
-    if (init <= (v->alloc / 4) &&
-        (v->alloc / 2) >= INIT_PTR_VEC_SZ) {
-        v->alloc /= 2;
-        I(rt, v->alloc >= v->fill);
-        v->data = (void **)xrealloc(rt, v->data, v->alloc);
-        I(rt, v->data);
+    I(rt, this);
+    I(rt, this->data);
+    if (sz <= (this->alloc / 4) &&
+        (this->alloc / 2) >= INIT_PTR_VEC_SZ) {
+        this->alloc /= 2;
+        I(rt, this->alloc >= this->fill);
+        this->data = (void **)xrealloc(rt, this->data, this->alloc);
+        I(rt, this->data);
     }
 }
 
-static void
-ptr_vec_swapdel(rust_rt *rt, ptr_vec *v, size_t i)
+void
+ptr_vec::swapdel(rust_rt *rt, size_t i)
 {
     /* Swap the endpoint into i and decr init. */
-    I(rt, v);
-    I(rt, v->data);
-    I(rt, v->fill > 0);
-    I(rt, i < v->fill);
-    v->fill--;
-    if (v->fill > 0)
-        v->data[i] = v->data[v->fill];
+    I(rt, this);
+    I(rt, this->data);
+    I(rt, this->fill > 0);
+    I(rt, i < this->fill);
+    this->fill--;
+    if (this->fill > 0)
+        this->data[i] = this->data[this->fill];
 }
 
 static void
@@ -442,7 +446,7 @@ proc_vec_swapdel(rust_rt *rt, ptr_vec *v, rust_proc *proc)
     I(rt, proc);
     I(rt, v);
     I(rt, v->data[proc->idx] == proc);
-    ptr_vec_swapdel(rt, v, proc->idx);
+    v->swapdel(rt, proc->idx);
     if (v->fill > 0) {
         rust_proc *pnew = (rust_proc*)v->data[proc->idx];
         pnew->idx = proc->idx;
@@ -455,7 +459,7 @@ chan_vec_swapdel(rust_rt *rt, ptr_vec *v, rust_chan *chan)
     I(rt, v);
     I(rt, chan);
     I(rt, v->data[chan->idx] == chan);
-    ptr_vec_swapdel(rt, v, chan->idx);
+    v->swapdel(rt, chan->idx);
     if (v->fill > 0) {
         rust_chan *cnew = (rust_chan*)v->data[chan->idx];
         cnew->idx = chan->idx;
@@ -842,7 +846,7 @@ add_proco_state_vec(rust_rt *rt, rust_proc *proc)
     xlog(rt, LOG_MEM|LOG_PROC,
          "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
-    ptr_vec_push(rt, v, proc);
+    v->push(rt, proc);
 }
 
 
@@ -861,7 +865,7 @@ remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
     I(rt, (rust_proc *) v->data[proc->idx] == proc);
     proc_vec_swapdel(rt, v, proc);
-    ptr_vec_trim(rt, v, n_live_procs(rt));
+    v->trim(rt, n_live_procs(rt));
 }
 
 
@@ -1185,7 +1189,7 @@ upcall_send(rust_rt *rt, rust_proc *src,
         if (chan->buf.unread && !chan->queued) {
             chan->queued = 1;
             chan->idx = port->writers.fill;
-            ptr_vec_push(rt, &port->writers, chan);
+            port->writers.push(rt, chan);
         }
     } else {
         xlog(rt, LOG_COMM|LOG_ERR,
@@ -1218,7 +1222,7 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
         I(rt, schan->idx == i);
         if (attempt_transmission(rt, schan, dst)) {
             chan_vec_swapdel(rt, &port->writers, schan);
-            ptr_vec_trim(rt, &port->writers, port->writers.fill);
+            port->writers.trim(rt, port->writers.fill);
             schan->queued = 0;
         }
     } else {
