@@ -145,8 +145,11 @@ typedef enum {
 
 struct ptr_vec {
     size_t alloc;
-    size_t init;
+    size_t fill;
     void **data;
+
+    void init(rust_rt *rt);
+    void fini(rust_rt *rt);
 };
 
 struct circ_buf {
@@ -163,14 +166,14 @@ struct circ_buf {
 struct rust_vec {
     size_t refcount;
     size_t alloc;
-    size_t init;
+    size_t fill;
     uint8_t data[];
 };
 
 struct rust_str {
     size_t refcnt;
     size_t alloc;
-    size_t init;
+    size_t fill;
     uint8_t data[];         /* C99 "flexible array" element. */
 };
 
@@ -368,29 +371,29 @@ xrealloc(rust_rt *rt, void *p, size_t sz)
 
 /* Utility type: pointer-vector. */
 
-static void
-init_ptr_vec(rust_rt *rt, ptr_vec *v)
+void
+ptr_vec::init(rust_rt *rt)
 {
-    I(rt, v);
-    v->alloc = INIT_PTR_VEC_SZ;
-    v->init = 0;
-    v->data = (void **)xalloc(rt, v->alloc * sizeof(void*));
-    I(rt, v->data);
+    I(rt, this);
+    this->alloc = INIT_PTR_VEC_SZ;
+    this->fill = 0;
+    this->data = (void **)xalloc(rt, this->alloc * sizeof(void*));
+    I(rt, this->data);
     xlog(rt, LOG_MEM,
          "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
-         (uintptr_t)v, (uintptr_t)v->data);
+         (uintptr_t)this, (uintptr_t)this->data);
 }
 
-static void
-fini_ptr_vec(rust_rt *rt, ptr_vec *v)
+void
+ptr_vec::fini(rust_rt *rt)
 {
-    I(rt, v);
-    I(rt, v->data);
+    I(rt, this);
+    I(rt, this->data);
     xlog(rt, LOG_MEM,
          "fini ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
-         (uintptr_t)v, (uintptr_t)v->data);
-    I(rt, v->init == 0);
-    free(v->data);
+         (uintptr_t)this, (uintptr_t)this->data);
+    I(rt, this->fill == 0);
+    free(this->data);
 }
 
 static void
@@ -398,12 +401,12 @@ ptr_vec_push(rust_rt *rt, ptr_vec *v, void *p)
 {
     I(rt, v);
     I(rt, v->data);
-    if (v->init == v->alloc) {
+    if (v->fill == v->alloc) {
         v->alloc *= 2;
         v->data = (void **)xrealloc(rt, v->data, v->alloc);
     }
-    I(rt, v->init < v->alloc);
-    v->data[v->init++] = p;
+    I(rt, v->fill < v->alloc);
+    v->data[v->fill++] = p;
 }
 
 static void
@@ -414,7 +417,7 @@ ptr_vec_trim(rust_rt *rt, ptr_vec *v, size_t init)
     if (init <= (v->alloc / 4) &&
         (v->alloc / 2) >= INIT_PTR_VEC_SZ) {
         v->alloc /= 2;
-        I(rt, v->alloc >= v->init);
+        I(rt, v->alloc >= v->fill);
         v->data = (void **)xrealloc(rt, v->data, v->alloc);
         I(rt, v->data);
     }
@@ -426,11 +429,11 @@ ptr_vec_swapdel(rust_rt *rt, ptr_vec *v, size_t i)
     /* Swap the endpoint into i and decr init. */
     I(rt, v);
     I(rt, v->data);
-    I(rt, v->init > 0);
-    I(rt, i < v->init);
-    v->init--;
-    if (v->init > 0)
-        v->data[i] = v->data[v->init];
+    I(rt, v->fill > 0);
+    I(rt, i < v->fill);
+    v->fill--;
+    if (v->fill > 0)
+        v->data[i] = v->data[v->fill];
 }
 
 static void
@@ -440,7 +443,7 @@ proc_vec_swapdel(rust_rt *rt, ptr_vec *v, rust_proc *proc)
     I(rt, v);
     I(rt, v->data[proc->idx] == proc);
     ptr_vec_swapdel(rt, v, proc->idx);
-    if (v->init > 0) {
+    if (v->fill > 0) {
         rust_proc *pnew = (rust_proc*)v->data[proc->idx];
         pnew->idx = proc->idx;
     }
@@ -453,7 +456,7 @@ chan_vec_swapdel(rust_rt *rt, ptr_vec *v, rust_chan *chan)
     I(rt, chan);
     I(rt, v->data[chan->idx] == chan);
     ptr_vec_swapdel(rt, v, chan->idx);
-    if (v->init > 0) {
+    if (v->fill > 0) {
         rust_chan *cnew = (rust_chan*)v->data[chan->idx];
         cnew->idx = chan->idx;
     }
@@ -571,7 +574,7 @@ del_port(rust_rt *rt, rust_port *port)
          "finalizing and freeing port 0x%" PRIxPTR,
          (uintptr_t)port);
     /* FIXME: need to force-fail all the queued writers. */
-    fini_ptr_vec(rt, &port->writers);
+    port->writers.fini(rt);
     /* FIXME: can remove the chaining-of-ports-to-rt when we have
      * unwinding / finishing working. */
     if (port->prev)
@@ -835,7 +838,7 @@ static void
 add_proco_state_vec(rust_rt *rt, rust_proc *proc)
 {
     ptr_vec *v = get_proc_vec(rt, proc);
-    proc->idx = v->init;
+    proc->idx = v->fill;
     xlog(rt, LOG_MEM|LOG_PROC,
          "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
@@ -846,7 +849,7 @@ add_proco_state_vec(rust_rt *rt, rust_proc *proc)
 static size_t
 n_live_procs(rust_rt *rt)
 {
-    return rt->running_procs.init + rt->blocked_procs.init;
+    return rt->running_procs.fill + rt->blocked_procs.fill;
 }
 
 static void
@@ -900,9 +903,9 @@ sched(rust_rt *rt)
 {
     I(rt, rt);
     I(rt, n_live_procs(rt) > 0);
-    if (rt->running_procs.init > 0) {
+    if (rt->running_procs.fill > 0) {
         size_t i = rand(&rt->rctx);
-        i %= rt->running_procs.init;
+        i %= rt->running_procs.fill;
         return (rust_proc *)rt->running_procs.data[i];
     }
     xlog(rt, LOG_RT|LOG_PROC,
@@ -939,8 +942,8 @@ new_rt(rust_srv *srv)
     rt->srv = srv;
     rt->logbits = get_logbits();
     logptr(rt, "new rt", (uintptr_t)rt);
-    init_ptr_vec(rt, &rt->running_procs);
-    init_ptr_vec(rt, &rt->blocked_procs);
+    rt->running_procs.init(rt);
+    rt->blocked_procs.init(rt);
 
     rt->rctx.randa = 0;
     rt->rctx.randb = 0;
@@ -970,9 +973,9 @@ new_rt(rust_srv *srv)
 static void
 del_all_procs(rust_rt *rt, ptr_vec *v) {
     I(rt, v);
-    while (v->init) {
-        xlog(rt, LOG_PROC, "deleting live proc %" PRIdPTR, v->init-1);
-        del_proc(rt, (rust_proc*) v->data[--(v->init)]);
+    while (v->fill) {
+        xlog(rt, LOG_PROC, "deleting live proc %" PRIdPTR, v->fill-1);
+        del_proc(rt, (rust_proc*) v->data[--(v->fill)]);
     }
 }
 
@@ -989,8 +992,8 @@ del_rt(rust_rt *rt)
     while (rt->ports)
         del_port(rt, rt->ports);
 
-    fini_ptr_vec(rt, &rt->running_procs);
-    fini_ptr_vec(rt, &rt->blocked_procs);
+    rt->running_procs.fini(rt);
+    rt->blocked_procs.fini(rt);
     xfree(rt, rt);
 }
 
@@ -1046,7 +1049,7 @@ upcall_new_port(rust_rt *rt, rust_proc *proc, size_t unit_sz)
 
     port->unit_sz = unit_sz;
     port->live_refcnt = 1;
-    init_ptr_vec(rt, &port->writers);
+    port->writers.init(rt);
     return port;
 }
 
@@ -1181,7 +1184,7 @@ upcall_send(rust_rt *rt, rust_proc *src,
         attempt_transmission(rt, chan, port->proc);
         if (chan->buf.unread && !chan->queued) {
             chan->queued = 1;
-            chan->idx = port->writers.init;
+            chan->idx = port->writers.fill;
             ptr_vec_push(rt, &port->writers, chan);
         }
     } else {
@@ -1207,15 +1210,15 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
                           proc_state_calling_c,
                           proc_state_blocked_reading);
 
-    if (port->writers.init > 0) {
+    if (port->writers.fill > 0) {
         I(rt, dst->rt);
         size_t i = rand(&dst->rt->rctx);
-        i %= port->writers.init;
+        i %= port->writers.fill;
         rust_chan *schan = (rust_chan*)port->writers.data[i];
         I(rt, schan->idx == i);
         if (attempt_transmission(rt, schan, dst)) {
             chan_vec_swapdel(rt, &port->writers, schan);
-            ptr_vec_trim(rt, &port->writers, port->writers.init);
+            ptr_vec_trim(rt, &port->writers, port->writers.fill);
             schan->queued = 0;
         }
     } else {
@@ -1346,18 +1349,18 @@ next_power_of_two(size_t s)
 
 
 static rust_str*
-upcall_new_str(rust_rt *rt, char const *s, size_t init)
+upcall_new_str(rust_rt *rt, char const *s, size_t fill)
 {
-    size_t alloc = next_power_of_two(init);
+    size_t alloc = next_power_of_two(fill);
     rust_str *st = (rust_str*) xalloc(rt, sizeof(rust_str) + alloc);
     st->refcnt = 1;
-    st->init = init;
+    st->fill = fill;
     st->alloc = alloc;
     if (s)
-        memcpy(&st->data[0], s, init);
+        memcpy(&st->data[0], s, fill);
     xlog(rt, LOG_UPCALL|LOG_MEM,
          "upcall new_str('%s', %" PRIdPTR ") -> 0x%" PRIxPTR,
-         s, init, st);
+         s, fill, st);
     return st;
 }
 
@@ -1627,13 +1630,13 @@ implode(rust_proc *proc, rust_vec *v)
     size_t i;
     rust_str *s;
 
-    size_t init = v->init >> 2;
-    s = upcall_new_str(proc->rt, NULL, init);
+    size_t fill = v->fill >> 2;
+    s = upcall_new_str(proc->rt, NULL, fill);
 
     uint32_t *src = (uint32_t*) &v->data[0];
     uint8_t *dst = &s->data[0];
 
-    for (i = 0; i < init; ++i)
+    for (i = 0; i < fill; ++i)
         *dst++ = *src;
 
     return s;
