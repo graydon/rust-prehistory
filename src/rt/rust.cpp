@@ -39,13 +39,10 @@ extern "C" {
 #endif
 
 #define PROC_MAX_UPCALL_ARGS 8
-#define INIT_CIRC_BUF_UNITS 8
-#define MAX_CIRC_BUF_SIZE (1 << 24)
 #define I(rt, e) ((e) ? (void)0 :                           \
                   (rt)->srv->fatal((rt)->srv,               \
                                    #e, __FILE__, __LINE__))
 
-struct circ_buf;
 struct rust_str;
 struct rust_vec;
 
@@ -160,11 +157,21 @@ struct ptr_vec {
 };
 
 struct circ_buf {
+    static const size_t INIT_CIRC_BUF_UNITS = 8;
+    static const size_t MAX_CIRC_BUF_SIZE = 1 << 24;
+
     size_t alloc;
     size_t unit_sz;
     size_t next;
     size_t unread;
     uint8_t *data;
+
+    void init(rust_rt *rt, size_t unit_sz);
+    void fini(rust_rt *rt);
+
+    void transfer(rust_rt *rt, void *dst);
+    void push(rust_rt *rt, void *src);
+    void shift(rust_rt *rt, void *dst);
 };
 
 
@@ -478,105 +485,105 @@ ptr_vec<rust_chan>::swapdel(rust_rt *rt, rust_chan *chan)
 
 /* Utility type: circular buffer. */
 
-static void
-init_circ_buf(rust_rt *rt, circ_buf *c, size_t unit_sz)
+void
+circ_buf::init(rust_rt *rt, size_t unit_sz)
 {
-    I(rt, c);
+    I(rt, this);
     I(rt, unit_sz);
-    c->unit_sz = unit_sz;
-    c->alloc = INIT_CIRC_BUF_UNITS * unit_sz;
-    c->next = 0;
-    c->unread = 0;
-    c->data = (uint8_t *)xcalloc(rt, c->alloc);
+    this->unit_sz = unit_sz;
+    this->alloc = INIT_CIRC_BUF_UNITS * unit_sz;
+    this->next = 0;
+    this->unread = 0;
+    this->data = (uint8_t *)xcalloc(rt, this->alloc);
     xlog(rt, LOG_MEM|LOG_COMM,
          "init circ buf 0x%" PRIxPTR ", alloc=%d, unread=%d",
-         c, c->alloc, c->unread);
-    I(rt, c->data);
+         this, this->alloc, this->unread);
+    I(rt, this->data);
 }
 
-static void
-fini_circ_buf(rust_rt *rt, circ_buf *c)
+void
+circ_buf::fini(rust_rt *rt)
 {
-    I(rt, c);
-    I(rt, c->data);
-    I(rt, c->unread == 0);
-    xfree(rt, c->data);
+    I(rt, this);
+    I(rt, this->data);
+    I(rt, this->unread == 0);
+    xfree(rt, this->data);
 }
 
-static void
-circ_buf_transfer(rust_rt *rt, circ_buf *c, void *dst)
+void
+circ_buf::transfer(rust_rt *rt, void *dst)
 {
     size_t i;
     uint8_t *d = (uint8_t *)dst;
-    I(rt, c);
+    I(rt, this);
     I(rt, dst);
-    for (i = 0; i < c->unread; i += c->unit_sz)
-        memcpy(&d[i], &c->data[c->next + i % c->alloc], c->unit_sz);
+    for (i = 0; i < this->unread; i += this->unit_sz)
+        memcpy(&d[i], &this->data[this->next + i % this->alloc], this->unit_sz);
 }
 
-static void
-circ_buf_push(rust_rt *rt, circ_buf *c, void *src)
+void
+circ_buf::push(rust_rt *rt, void *src)
 {
     size_t i;
     void *tmp;
 
-    I(rt, c);
+    I(rt, this);
     I(rt, src);
-    I(rt, c->unread <= c->alloc);
+    I(rt, this->unread <= this->alloc);
 
     /* Grow if necessary. */
-    if (c->unread == c->alloc) {
-        I(rt, c->alloc <= MAX_CIRC_BUF_SIZE);
-        tmp = xalloc(rt, c->alloc << 1);
-        circ_buf_transfer(rt, c, tmp);
-        c->alloc <<= 1;
-        xfree(rt, c->data);
-        c->data = (uint8_t *)tmp;
+    if (this->unread == this->alloc) {
+        I(rt, this->alloc <= MAX_CIRC_BUF_SIZE);
+        tmp = xalloc(rt, this->alloc << 1);
+        transfer(rt, tmp);
+        this->alloc <<= 1;
+        xfree(rt, this->data);
+        this->data = (uint8_t *)tmp;
     }
 
     xlog(rt, LOG_MEM|LOG_COMM,
          "circ buf push, unread=%d, alloc=%d, unit_sz=%d",
-         c->unread, c->alloc, c->unit_sz);
+         this->unread, this->alloc, this->unit_sz);
 
-    I(rt, c->unread < c->alloc);
-    I(rt, c->unread + c->unit_sz <= c->alloc);
+    I(rt, this->unread < this->alloc);
+    I(rt, this->unread + this->unit_sz <= this->alloc);
 
-    i = (c->next + c->unread) % c->alloc;
-    memcpy(&c->data[i], src, c->unit_sz);
+    i = (this->next + this->unread) % this->alloc;
+    memcpy(&this->data[i], src, this->unit_sz);
 
     xlog(rt, LOG_MEM|LOG_COMM, "pushed data at index %d", i);
-    c->unread += c->unit_sz;
+    this->unread += this->unit_sz;
 }
 
-static void
-circ_buf_shift(rust_rt *rt, circ_buf *c, void *dst)
+void
+circ_buf::shift(rust_rt *rt, void *dst)
 {
     size_t i;
     void *tmp;
 
-    I(rt, c);
+    I(rt, this);
     I(rt, dst);
-    I(rt, c->unit_sz > 0);
-    I(rt, c->unread >= c->unit_sz);
-    I(rt, c->unread <= c->alloc);
-    I(rt, c->data);
-    i = c->next;
-    memcpy(dst, &c->data[i], c->unit_sz);
+    I(rt, this->unit_sz > 0);
+    I(rt, this->unread >= this->unit_sz);
+    I(rt, this->unread <= this->alloc);
+    I(rt, this->data);
+    i = this->next;
+    memcpy(dst, &this->data[i], this->unit_sz);
     xlog(rt, LOG_MEM|LOG_COMM, "shifted data from index %d", i);
-    c->unread -= c->unit_sz;
-    c->next += c->unit_sz;
-    I(rt, c->next <= c->alloc);
-    if (c->next == c->alloc)
-        c->next = 0;
+    this->unread -= this->unit_sz;
+    this->next += this->unit_sz;
+    I(rt, this->next <= this->alloc);
+    if (this->next == this->alloc)
+        this->next = 0;
 
     /* Shrink if necessary. */
-    if (c->alloc >= INIT_CIRC_BUF_UNITS * c->unit_sz &&
-        c->unread <= c->alloc / 4) {
-        tmp = xalloc(rt, c->alloc / 2);
-        circ_buf_transfer(rt, c, tmp);
-        c->alloc >>= 1;
-        xfree(rt, c->data);
-        c->data = (uint8_t *)tmp;
+    if (this->alloc >= INIT_CIRC_BUF_UNITS * this->unit_sz &&
+        this->unread <= this->alloc / 4) {
+        tmp = xalloc(rt, this->alloc / 2);
+        transfer(rt, tmp);
+        this->alloc >>= 1;
+        xfree(rt, this->data);
+        this->data = (uint8_t *)tmp;
     }
 }
 
@@ -817,7 +824,7 @@ del_proc(rust_rt *rt, rust_proc *proc)
     while (proc->chans) {
         rust_chan *c = proc->chans;
         HASH_DEL(proc->chans,c);
-        fini_circ_buf(rt, &c->buf);
+        c->buf.fini(rt);
         xfree(rt, c);
     }
 
@@ -1130,7 +1137,7 @@ attempt_transmission(rust_rt *rt,
     }
 
     uintptr_t *dptr = (uintptr_t*)dst->upcall_args[0];
-    circ_buf_shift(rt, &src->buf, dptr);
+    src->buf.shift(rt, dptr);
 
     if (src->blocked) {
         proc_state_transition(rt, src->blocked,
@@ -1176,7 +1183,7 @@ upcall_send(rust_rt *rt, rust_proc *src,
         xlog(rt, LOG_MEM|LOG_COMM,
              "new chan 0x%" PRIxPTR, (uintptr_t)chan);
         chan->port = port;
-        init_circ_buf(rt, &chan->buf, port->unit_sz);
+        chan->buf.init(rt, port->unit_sz);
         HASH_ADD(hh,src->chans,port,sizeof(rust_port*),chan);
     }
     I(rt, chan);
@@ -1190,7 +1197,7 @@ upcall_send(rust_rt *rt, rust_proc *src,
 
     if (port->proc) {
         chan->blocked = src;
-        circ_buf_push(rt, &chan->buf, sptr);
+        chan->buf.push(rt, sptr);
         proc_state_transition(rt, src,
                               proc_state_calling_c,
                               proc_state_blocked_writing);
