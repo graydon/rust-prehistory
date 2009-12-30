@@ -50,6 +50,11 @@ struct rust_srv {
     void CDECL (*c_to_proc_glue)(rust_proc_t*);
 };
 
+inline void *operator new(size_t size, rust_srv *srv)
+{
+    return srv->malloc(srv, size);
+}
+
 /*
  * Local Variables:
  * fill-column: 70;

@@ -33,8 +33,9 @@ extern "C" {
   */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <pthread.h>
 #else
-#error "Do not know how to load dynamic symbols on this platform."
+#error "Platform not supported."
 #endif
 
 #define PROC_MAX_UPCALL_ARGS 8
@@ -1377,6 +1378,67 @@ upcall_new_str(rust_rt_t *rt, char const *s, size_t init)
 
 
 static CDECL char const *str_buf(str_t *s);
+
+static void
+rust_main_loop(rust_prog_t *prog, rust_srv_t *srv);
+
+struct Ticket {
+    rust_prog_t *prog;
+    rust_srv_t *srv;
+
+    explicit Ticket(rust_prog_t *prog, rust_srv_t *srv) : prog(prog), srv(srv)
+    {}
+
+    ~Ticket()
+    {}
+
+    void operator delete(void *ptr)
+    {
+        rust_srv_t *srv = ((Ticket *)ptr)->srv;
+        srv->free(srv, ptr);
+    }
+};
+
+#ifdef __GNUC__
+static void *rust_thread_start(void *ptr)
+{
+    /*
+     * The thread that spawn us handed us a ticket. Read the ticket's content
+     * and then deallocate it. Since thread creation is asynchronous, the other
+     * thread can't do this for us.
+     */
+    Ticket *ticket = (Ticket *)ptr;
+    rust_prog_t *prog = ticket->prog;
+    rust_srv_t *srv = ticket->srv;
+    delete ticket;
+
+    /*
+     * Start a new rust main loop for this thread.
+     */
+    rust_main_loop(prog, srv);
+
+    return NULL;
+}
+#endif
+
+static rust_proc_t *
+upcall_new_thread(rust_rt_t *rt, rust_prog_t *prog)
+{
+    rust_srv_t *srv = rt->srv;
+    /*
+     * The ticket is not bound to the current runtime, so allocate directly from the
+     * service.
+     */
+    Ticket *ticket = new (srv) Ticket(prog, srv);
+    pthread_t thread;
+    pthread_create(&thread, NULL, rust_thread_start, (void *)ticket);
+
+    /*
+     * Create a proxy proc that will represent the newly created thread in this runtime.
+     * All communication will go through this proxy proc.
+     */
+    return NULL;
+}
 
 static void
 handle_upcall(rust_proc_t *proc)
