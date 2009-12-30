@@ -46,7 +46,6 @@ extern "C" {
                   (rt)->srv->fatal((rt)->srv,               \
                                    #e, __FILE__, __LINE__))
 
-struct ptr_vec;
 struct circ_buf;
 struct rust_str;
 struct rust_vec;
@@ -143,17 +142,20 @@ typedef enum {
 /* FIXME: change ptr_vec and circ_buf to use flexible-array element
    rather than pointer-to-buf-at-end. */
 
+template <typename T>
 struct ptr_vec {
     size_t alloc;
     size_t fill;
-    void **data;
+    T **data;
 
     void init(rust_rt *rt);
     void fini(rust_rt *rt);
 
-    void push(rust_rt *rt, void *p);
+    void push(rust_rt *rt, T *p);
     void trim(rust_rt *rt, size_t fill);
     void swapdel(rust_rt *rt, size_t i);
+
+    void swapdel(rust_rt *rt, T* p);
 };
 
 struct circ_buf {
@@ -183,8 +185,8 @@ struct rust_str {
 
 struct rust_rt {
     uintptr_t sp;          /* Saved sp from the C runtime. */
-    ptr_vec running_procs;
-    ptr_vec blocked_procs;
+    ptr_vec<rust_proc> running_procs;
+    ptr_vec<rust_proc> blocked_procs;
     randctx rctx;
     uint32_t logbits;
     rust_proc *root_proc;
@@ -299,7 +301,7 @@ struct rust_port {
     rust_port *next;
     rust_port *prev;
     size_t unit_sz;
-    ptr_vec writers;
+    ptr_vec<rust_chan> writers;
 };
 
 /*
@@ -375,21 +377,23 @@ xrealloc(rust_rt *rt, void *p, size_t sz)
 
 /* Utility type: pointer-vector. */
 
+template <typename T>
 void
-ptr_vec::init(rust_rt *rt)
+ptr_vec<T>::init(rust_rt *rt)
 {
     I(rt, this);
     this->alloc = INIT_PTR_VEC_SZ;
     this->fill = 0;
-    this->data = (void **)xalloc(rt, this->alloc * sizeof(void*));
+    this->data = (T **)xalloc(rt, this->alloc * sizeof(T*));
     I(rt, this->data);
     xlog(rt, LOG_MEM,
          "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
          (uintptr_t)this, (uintptr_t)this->data);
 }
 
+template <typename T>
 void
-ptr_vec::fini(rust_rt *rt)
+ptr_vec<T>::fini(rust_rt *rt)
 {
     I(rt, this);
     I(rt, this->data);
@@ -400,21 +404,23 @@ ptr_vec::fini(rust_rt *rt)
     free(this->data);
 }
 
+template <typename T>
 void
-ptr_vec::push(rust_rt *rt, void *p)
+ptr_vec<T>::push(rust_rt *rt, T *p)
 {
     I(rt, this);
     I(rt, this->data);
     if (this->fill == this->alloc) {
         this->alloc *= 2;
-        this->data = (void **)xrealloc(rt, this->data, this->alloc);
+        this->data = (T **)xrealloc(rt, this->data, this->alloc);
     }
     I(rt, this->fill < this->alloc);
     this->data[this->fill++] = p;
 }
 
+template <typename T>
 void
-ptr_vec::trim(rust_rt *rt, size_t sz)
+ptr_vec<T>::trim(rust_rt *rt, size_t sz)
 {
     I(rt, this);
     I(rt, this->data);
@@ -422,13 +428,14 @@ ptr_vec::trim(rust_rt *rt, size_t sz)
         (this->alloc / 2) >= INIT_PTR_VEC_SZ) {
         this->alloc /= 2;
         I(rt, this->alloc >= this->fill);
-        this->data = (void **)xrealloc(rt, this->data, this->alloc);
+        this->data = (T **)xrealloc(rt, this->data, this->alloc);
         I(rt, this->data);
     }
 }
 
+template <typename T>
 void
-ptr_vec::swapdel(rust_rt *rt, size_t i)
+ptr_vec<T>::swapdel(rust_rt *rt, size_t i)
 {
     /* Swap the endpoint into i and decr init. */
     I(rt, this);
@@ -440,28 +447,30 @@ ptr_vec::swapdel(rust_rt *rt, size_t i)
         this->data[i] = this->data[this->fill];
 }
 
-static void
-proc_vec_swapdel(rust_rt *rt, ptr_vec *v, rust_proc *proc)
+template < >
+void
+ptr_vec<rust_proc>::swapdel(rust_rt *rt, rust_proc *proc)
 {
     I(rt, proc);
-    I(rt, v);
-    I(rt, v->data[proc->idx] == proc);
-    v->swapdel(rt, proc->idx);
-    if (v->fill > 0) {
-        rust_proc *pnew = (rust_proc*)v->data[proc->idx];
+    I(rt, this);
+    I(rt, this->data[proc->idx] == proc);
+    swapdel(rt, proc->idx);
+    if (this->fill > 0) {
+        rust_proc *pnew = this->data[proc->idx];
         pnew->idx = proc->idx;
     }
 }
 
-static void
-chan_vec_swapdel(rust_rt *rt, ptr_vec *v, rust_chan *chan)
+template < >
+void
+ptr_vec<rust_chan>::swapdel(rust_rt *rt, rust_chan *chan)
 {
-    I(rt, v);
     I(rt, chan);
-    I(rt, v->data[chan->idx] == chan);
-    v->swapdel(rt, chan->idx);
-    if (v->fill > 0) {
-        rust_chan *cnew = (rust_chan*)v->data[chan->idx];
+    I(rt, this);
+    I(rt, this->data[chan->idx] == chan);
+    swapdel(rt, chan->idx);
+    if (this->fill > 0) {
+        rust_chan *cnew = this->data[chan->idx];
         cnew->idx = chan->idx;
     }
 }
@@ -815,7 +824,7 @@ del_proc(rust_rt *rt, rust_proc *proc)
 }
 
 
-static ptr_vec*
+static ptr_vec<rust_proc>*
 get_state_vec(rust_rt *rt, proc_state_t state)
 {
     switch (state) {
@@ -832,7 +841,7 @@ get_state_vec(rust_rt *rt, proc_state_t state)
     return NULL;
 }
 
-static ptr_vec*
+static ptr_vec<rust_proc>*
 get_proc_vec(rust_rt *rt, rust_proc *proc)
 {
     return get_state_vec(rt, proc->state);
@@ -841,7 +850,7 @@ get_proc_vec(rust_rt *rt, rust_proc *proc)
 static void
 add_proco_state_vec(rust_rt *rt, rust_proc *proc)
 {
-    ptr_vec *v = get_proc_vec(rt, proc);
+    ptr_vec<rust_proc> *v = get_proc_vec(rt, proc);
     proc->idx = v->fill;
     xlog(rt, LOG_MEM|LOG_PROC,
          "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
@@ -859,15 +868,14 @@ n_live_procs(rust_rt *rt)
 static void
 remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
 {
-    ptr_vec *v = get_proc_vec(rt, proc);
+    ptr_vec<rust_proc> *v = get_proc_vec(rt, proc);
     xlog(rt, LOG_MEM|LOG_PROC,
          "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
-    I(rt, (rust_proc *) v->data[proc->idx] == proc);
-    proc_vec_swapdel(rt, v, proc);
+    I(rt, v->data[proc->idx] == proc);
+    v->swapdel(rt, proc);
     v->trim(rt, n_live_procs(rt));
 }
-
 
 static void
 proc_state_transition(rust_rt *rt,
@@ -975,11 +983,11 @@ new_rt(rust_srv *srv)
 }
 
 static void
-del_all_procs(rust_rt *rt, ptr_vec *v) {
+del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     I(rt, v);
     while (v->fill) {
         xlog(rt, LOG_PROC, "deleting live proc %" PRIdPTR, v->fill-1);
-        del_proc(rt, (rust_proc*) v->data[--(v->fill)]);
+        del_proc(rt, v->data[--(v->fill)]);
     }
 }
 
@@ -1221,7 +1229,7 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
         rust_chan *schan = (rust_chan*)port->writers.data[i];
         I(rt, schan->idx == i);
         if (attempt_transmission(rt, schan, dst)) {
-            chan_vec_swapdel(rt, &port->writers, schan);
+            port->writers.swapdel(rt, schan);
             port->writers.trim(rt, port->writers.fill);
             schan->queued = 0;
         }
