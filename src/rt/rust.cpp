@@ -1396,7 +1396,7 @@ upcall_new_str(rust_rt *rt, char const *s, size_t fill)
 }
 
 
-static CDECL char const *str_buf(rust_str *s);
+extern "C" CDECL char const *str_buf(rust_str *s);
 
 static void
 rust_main_loop(rust_prog *prog, rust_srv *srv);
@@ -1661,7 +1661,7 @@ srv_fatal(rust_srv *srv, char const *expr,
 
 /* Native builtins. */
 
-static CDECL char const *
+extern "C" CDECL char const *
 str_buf(rust_str *s)
 {
     return (char const *)&s->data[0];
@@ -1697,9 +1697,7 @@ srv_lookup(rust_srv *srv, char const *sym, uint8_t *takes_proc)
 
     *takes_proc = 0;
 
-    if (strcmp(sym, "str_buf") == 0) {
-        res = (uintptr_t) &str_buf;
-    } else if (strcmp(sym, "implode") == 0) {
+    if (strcmp(sym, "implode") == 0) {
         *takes_proc = 1;
         res = (uintptr_t) &implode;
     } else {
