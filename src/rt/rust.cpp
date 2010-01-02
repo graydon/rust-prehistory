@@ -1407,8 +1407,13 @@ struct rust_ticket {
     }
 };
 
-#ifdef __GNUC__
+#if defined(__WIN32__)
+static DWORD WINAPI rust_thread_start(void *ptr)
+#elif defined(__GNUC__)
 static void *rust_thread_start(void *ptr)
+#else
+#error "Platform not supported"
+#endif
 {
     /*
      * The thread that spawn us handed us a ticket. Read the ticket's content
@@ -1425,9 +1430,8 @@ static void *rust_thread_start(void *ptr)
      */
     rust_main_loop(prog, srv);
 
-    return NULL;
+    return 0;
 }
-#endif
 
 static rust_proc *
 upcall_new_thread(rust_rt *rt, rust_prog *prog)
@@ -1438,8 +1442,16 @@ upcall_new_thread(rust_rt *rt, rust_prog *prog)
      * service.
      */
     rust_ticket *ticket = new (srv) rust_ticket(prog, srv);
+
+#if defined(__WIN32__)
+    DWORD thread;
+    CreateThread(NULL, 0, rust_thread_start, (void *)ticket, 0, &thread);
+#elif defined(__GNUC__)
     pthread_t thread;
     pthread_create(&thread, NULL, rust_thread_start, (void *)ticket);
+#else
+#error "Platform not supported"
+#endif
 
     /*
      * Create a proxy proc that will represent the newly created thread in this runtime.
