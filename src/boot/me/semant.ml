@@ -533,43 +533,44 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_constrained = (fun _ -> default) }
 ;;
 
-let ty_fold_rebuild : (Ast.ty, Ast.slot, Ast.slot array, Ast.ty_tag) ty_fold =
+let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
+    : (Ast.ty, Ast.slot, Ast.slot array, Ast.ty_tag) ty_fold =
   { ty_fold_slot = (fun (mode, t) -> { Ast.slot_mode = mode;
                                        Ast.slot_ty = Some t });
     ty_fold_slots = (fun slots -> slots);
     ty_fold_tags = (fun htab -> htab);
-    ty_fold_any = (fun _ -> Ast.TY_any);
-    ty_fold_nil = (fun _ -> Ast.TY_nil);
-    ty_fold_bool = (fun _ -> Ast.TY_bool);
-    ty_fold_mach = (fun m -> Ast.TY_mach m);
-    ty_fold_int = (fun _ -> Ast.TY_int);
-    ty_fold_char = (fun _ -> Ast.TY_char);
-    ty_fold_str = (fun _ -> Ast.TY_str);
-    ty_fold_tup =  (fun slots -> Ast.TY_tup slots);
-    ty_fold_vec = (fun slot -> Ast.TY_vec slot);
-    ty_fold_rec = (fun entries -> Ast.TY_rec entries);
-    ty_fold_tag = (fun tag -> Ast.TY_tag tag);
-    ty_fold_iso = (fun (i, tags) -> Ast.TY_iso { Ast.iso_index = i;
-                                                 Ast.iso_group = tags });
-    ty_fold_idx = (fun i -> Ast.TY_idx i);
+    ty_fold_any = (fun _ -> id Ast.TY_any);
+    ty_fold_nil = (fun _ -> id Ast.TY_nil);
+    ty_fold_bool = (fun _ -> id Ast.TY_bool);
+    ty_fold_mach = (fun m -> id (Ast.TY_mach m));
+    ty_fold_int = (fun _ -> id Ast.TY_int);
+    ty_fold_char = (fun _ -> id Ast.TY_char);
+    ty_fold_str = (fun _ -> id Ast.TY_str);
+    ty_fold_tup =  (fun slots -> id (Ast.TY_tup slots));
+    ty_fold_vec = (fun slot -> id (Ast.TY_vec slot));
+    ty_fold_rec = (fun entries -> id (Ast.TY_rec entries));
+    ty_fold_tag = (fun tag -> id (Ast.TY_tag tag));
+    ty_fold_iso = (fun (i, tags) -> id (Ast.TY_iso { Ast.iso_index = i;
+                                                     Ast.iso_group = tags }));
+    ty_fold_idx = (fun i -> id (Ast.TY_idx i));
     ty_fold_fn = (fun ((islots, constrs, oslot), aux) ->
-                    Ast.TY_fn ({ Ast.sig_input_slots = islots;
-                                 Ast.sig_input_constrs = constrs;
-                                 Ast.sig_output_slot = oslot }, aux));
+                    id (Ast.TY_fn ({ Ast.sig_input_slots = islots;
+                                     Ast.sig_input_constrs = constrs;
+                                     Ast.sig_output_slot = oslot }, aux)));
     ty_fold_pred = (fun (islots, constrs) ->
-                      Ast.TY_pred (islots, constrs));
-    ty_fold_chan = (fun t -> Ast.TY_chan t);
-    ty_fold_port = (fun t -> Ast.TY_port t);
-    ty_fold_mod = (fun mti -> Ast.TY_mod mti);
+                      id (Ast.TY_pred (islots, constrs)));
+    ty_fold_chan = (fun t -> id (Ast.TY_chan t));
+    ty_fold_port = (fun t -> id (Ast.TY_port t));
+    ty_fold_mod = (fun mti -> id (Ast.TY_mod mti));
     ty_fold_prog = (fun (islots, constrs, oslots) ->
-                      Ast.TY_prog { Ast.sig_input_slots = islots;
-                                    Ast.sig_input_constrs = constrs;
-                                    Ast.sig_output_slot = oslots });
-    ty_fold_proc = (fun _ -> Ast.TY_proc);
-    ty_fold_opaque = (fun (opa, mut) -> Ast.TY_opaque (opa, mut));
-    ty_fold_named = (fun n -> Ast.TY_named n);
-    ty_fold_type = (fun _ -> Ast.TY_type);
-    ty_fold_constrained = (fun (t, constrs) -> Ast.TY_constrained (t, constrs)) }
+                      id (Ast.TY_prog { Ast.sig_input_slots = islots;
+                                        Ast.sig_input_constrs = constrs;
+                                        Ast.sig_output_slot = oslots }));
+    ty_fold_proc = (fun _ -> id Ast.TY_proc);
+    ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
+    ty_fold_named = (fun n -> id (Ast.TY_named n));
+    ty_fold_type = (fun _ -> id (Ast.TY_type));
+    ty_fold_constrained = (fun (t, constrs) -> id (Ast.TY_constrained (t, constrs))) }
 ;;
 
 let associative_binary_op_ty_fold
@@ -613,21 +614,22 @@ let ty_fold_list_concat _ : ('a list) simple_ty_fold =
 
 (* Mutability analysis. *)
 
-let slot_is_mutable (s:Ast.slot) : bool =
-  match s.Ast.slot_mode with
+let mode_is_mutable (m:Ast.mode) : bool =
+  match m with 
       Ast.MODE_exterior Ast.MUTABLE
     | Ast.MODE_interior Ast.MUTABLE -> true
     | _ -> false
+;;      
+
+let slot_is_mutable (s:Ast.slot) : bool =
+  mode_is_mutable s.Ast.slot_mode
 ;;
 
 let type_is_mutable (t:Ast.ty) : bool =
   let fold_slot (mode, b) =
     if b
     then true
-    else match mode with
-        Ast.MODE_exterior Ast.MUTABLE
-      | Ast.MODE_interior Ast.MUTABLE -> true
-      | _ -> false
+    else mode_is_mutable mode
   in
   let fold = ty_fold_bool_or false in
   let fold = { fold with ty_fold_slot = fold_slot } in
@@ -636,22 +638,40 @@ let type_is_mutable (t:Ast.ty) : bool =
 
 (* GC analysis. *)
 
-(* If a type is cyclic, it is managed by mark-sweep GC, not refcounting.
+(* If a type is cyclic, it is managed by mark-sweep GC, not
+ * refcounting.
  * 
- * For now we'll call a type cyclic if it is mutable and contains an
- * iso. This can be tightened up -- I think cyclic types can be more
- * strictly defined -- but for the sake of language users it will make
- * no difference. 
+ * A type T is "cyclic" iff it contains a mutable slot that contains an
+ * un-captured TY_idx (that is, there is a 'mutability point' between
+ * the TY_idx and its enclosing TY_iso).
+ * 
  *)
 
 let type_is_cyclic (t:Ast.ty) : bool =
-  if not (type_is_mutable t)
-  then false
-  else
-    let fold_iso = fun _ -> true in
+
+  let contains_uncaptured_idx t = 
+    let fold_idx _ = true in
+    let fold_iso _ = false in
     let fold = ty_fold_bool_or false in
-    let fold = { fold with ty_fold_iso = fold_iso } in
+    let fold = { fold with
+                   ty_fold_idx = fold_idx;
+                   ty_fold_iso = fold_iso }
+    in
       fold_ty fold t
+  in
+
+  let is_cyclic = ref false in
+  let fold_slot (mode, ty) =
+    if mode_is_mutable mode && contains_uncaptured_idx ty
+    then is_cyclic := true;
+    { Ast.slot_mode = mode;
+      Ast.slot_ty = Some t }
+  in
+  let fold = ty_fold_rebuild (fun t -> t) in
+  let fold = { fold with ty_fold_slot = fold_slot } in
+  let _ = fold_ty fold t in
+    
+    !is_cyclic
 ;;
 
 

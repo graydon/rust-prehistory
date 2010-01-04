@@ -330,7 +330,7 @@ and resolve_type
     (recur:recur_info)
     (t:Ast.ty)
     : Ast.ty =
-  let base = ty_fold_rebuild in
+  let base = ty_fold_rebuild (fun t -> t) in
   let ty_fold_named name =
     let (scopes, node, t) = lookup_type_by_name cx scopes name in
       log cx "resolved type name '%a' to item %d" Ast.sprintf_name name (int_of_node node);
