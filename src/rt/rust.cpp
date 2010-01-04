@@ -297,8 +297,6 @@ struct rust_proc {
      */
     uintptr_t upcall_code;
     uintptr_t upcall_args[PROC_MAX_UPCALL_ARGS];
-
-    uint8_t data[];         /* C99 "flexible array" element. */
 };
 
 struct rust_port {
