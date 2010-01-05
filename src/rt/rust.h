@@ -37,21 +37,21 @@ typedef struct rust_rt rust_rt;
 #define CDECL
 #endif
 
-struct rust_srv {
-    void *user;
-    void (*log)(rust_srv *, char const *);
-    void (*fatal)(rust_srv *, char const *, char const *, size_t);
-    void* (*malloc)(rust_srv *, size_t);
-    void* (*realloc)(rust_srv *, void*, size_t);
-    void (*free)(rust_srv *, void*);
-    uintptr_t (*lookup)(rust_srv *, char const *, uint8_t *takes_proc);
+class rust_srv {
+public:
+    virtual void log(char const *);
+    virtual void fatal(char const *, char const *, size_t);
+    virtual void *malloc(size_t);
+    virtual void *realloc(void *, size_t);
+    virtual void free(void *);
+    virtual uintptr_t lookup(char const *, uint8_t *takes_proc);
 
-    void CDECL (*c_to_proc_glue)(rust_proc*);
+    void CDECL (*c_to_proc_glue)(rust_proc *);
 };
 
 inline void *operator new(size_t size, rust_srv *srv)
 {
-    return srv->malloc(srv, size);
+    return srv->malloc(size);
 }
 
 /*
