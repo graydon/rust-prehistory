@@ -29,6 +29,7 @@ type upcall =
   | UPCALL_grow_proc
   | UPCALL_trace_word
   | UPCALL_trace_str
+  | UPCALL_spawn
 ;;
 
 (* NB: all these numbers must be kept in sync with runtime. *)
@@ -58,6 +59,7 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_grow_proc -> 14L
   | UPCALL_trace_word -> 15L
   | UPCALL_trace_str -> 16L
+  | UPCALL_spawn -> 17L
 ;;
 
 (* Word offsets for structure fields in rust.h. *)

@@ -544,11 +544,8 @@ let trans_visitor
       log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
     done
 
-  and trans_glue_frame_entry (n_incoming_args:int) (n_outgoing_args:int) (spill:fixup) : unit =
-    let isz = cx.ctxt_abi.Abi.abi_implicit_args_sz in
-    let argsz = Int64.add isz (word_n n_incoming_args) in
+  and trans_glue_frame_entry (argsz:int64) (callsz:int64) (spill:fixup) : unit =
     let framesz = 0L in
-    let callsz = Int64.add isz (word_n n_outgoing_args) in
       push_new_emitter ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill callsz cx.ctxt_proc_to_c_fixup;
@@ -569,10 +566,42 @@ let trans_visitor
     capture_emitted_glue name fix spill g;
     pop_emitter ()
 
+  and get_proc_glue (tsig:Ast.ty_sig) (callsz:int64) : fixup =
+    let g = GLUE_proc tsig in
+      match htab_search cx.ctxt_glue_code g with
+          Some code -> code.code_fixup
+        | None ->
+            begin
+              let fix = new_fixup "proc glue" in
+              let spill = new_fixup "proc glue spill" in
+              let isz = cx.ctxt_abi.Abi.abi_implicit_args_sz in
+              let argsz = Int64.add isz (word_n 1) in
+                (* 
+                 * Proc glue has 1 incoming arg beyond the implicit ones: the the function to invoke.
+                 * Outgoing args to that function are already on its stack when it's constructed, as
+                 * is the output slot. Callsz needs to include them in its sp adjustment, but nothing
+                 * else.
+                 *)
+                trans_glue_frame_entry argsz callsz spill;
+                let dst = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+                  emit (Il.call dst (code_of_cell (word_at (fp_imm arg0_disp))));
+                (* FIXME: need to drop copied args. *)
+                  abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
+                  emit (Il.call dst (Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None))));
+                  trans_glue_frame_exit "proc glue" fix spill g;
+                  fix
+            end
+
   (* 
    * Mem-glue functions are either 'mark', 'drop' or 'free', they take
    * one pointer arg and reutrn nothing.
    *)
+
+  and trans_mem_glue_frame_entry (n_incoming_args:int) (n_outgoing_args:int) (spill:fixup) : unit =
+    let isz = cx.ctxt_abi.Abi.abi_implicit_args_sz in
+    let argsz = Int64.add isz (word_n n_incoming_args) in
+    let callsz = Int64.add isz (word_n n_outgoing_args) in
+      trans_glue_frame_entry argsz callsz spill
 
   and get_mem_glue (g:glue) (ty:Ast.ty) (prefix:unit -> string) (inner:Il.typed_addr -> unit) : fixup =
     match htab_search cx.ctxt_glue_code g with
@@ -591,7 +620,7 @@ let trans_visitor
                              code_vregs_and_spill = None } in
             let spill = new_fixup ("glue spill: " ^ prefix) in
               htab_put cx.ctxt_glue_code g tmp_code;
-              trans_glue_frame_entry 1 1 spill;
+              trans_mem_glue_frame_entry 1 1 spill;
               let (arg:Il.typed_addr) = ptr_at (fp_imm arg0_disp) ty in
                 inner arg;
                 Hashtbl.remove cx.ctxt_glue_code g;
@@ -838,6 +867,42 @@ let trans_visitor
 
   and trans_log_str (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_log_str [| (trans_atom a) |]
+
+  and trans_spawn_fn
+      (initialising:bool)
+      (dst:Ast.lval)
+      (fn_lval:Ast.lval)
+      (args:Ast.atom array)
+      : unit =
+    let (proc_cell, proc_slot) = trans_lval dst INTENT_init in
+    let (fn_cell, fn_slot) = trans_lval fn_lval INTENT_read in
+    let tsig =
+      match fn_slot.Ast.slot_ty with
+          Some (Ast.TY_fn (tsig, _)) -> tsig
+        | _ -> bug () "spawned-function slot has wrong type"
+    in
+    let arg_layouts = layout_fn_call_tup abi tsig in
+    let callsz = (pack 0L arg_layouts).layout_size in
+    let proc_glue_fixup = get_proc_glue tsig callsz in
+    let proc_glue_addr = (fixup_to_addr
+                            abi.Abi.abi_has_pcrel_code
+                            abi.Abi.abi_has_abs_code
+                            proc_glue_fixup Il.OpaqueTy) in
+    let proc_glue_cell = Il.Addr (proc_glue_addr, Il.OpaqueTy) in
+      iflog (fun _ -> annotate "spawn proc");
+      aliasing true proc_cell
+        begin
+          fun proc_cell_alias ->
+            trans_upcall Abi.UPCALL_spawn
+              [|
+                proc_cell_alias;
+                Il.Cell proc_glue_cell;
+                Il.Cell fn_cell;
+                imm callsz
+              |]
+        end;
+      ()
+
 
   and trans_spawn
       (initialising:bool)

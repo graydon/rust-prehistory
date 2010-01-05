@@ -31,7 +31,9 @@ extern "C" {
   * Only for RTLD_DEFAULT, remove _GNU_SOURCE when that dies. We want
   * to be non-GNU-dependent.
   */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <dlfcn.h>
 #include <pthread.h>
 #else
@@ -132,7 +134,8 @@ typedef enum {
     upcall_code_new_str        = 13,
     upcall_code_grow_proc      = 14,
     upcall_code_trace_word     = 15,
-    upcall_code_trace_str      = 16
+    upcall_code_trace_str      = 16,
+    upcall_code_spawn          = 17
 } upcall_t;
 
 /* FIXME: change ptr_vec and circ_buf to use flexible-array element
@@ -806,6 +809,14 @@ new_proc(rust_rt *rt, rust_prog *prog)
     proc->refcnt = 1;
     return proc;
 }
+
+
+static rust_proc*
+upcall_spawn(rust_rt *rt, uintptr_t proc_glue, uintptr_t spawnee_fn, size_t callsz)
+{
+    return NULL;
+}
+
 
 static void
 del_proc(rust_rt *rt, rust_proc *proc)
@@ -1526,6 +1537,10 @@ handle_upcall(rust_proc *proc)
         break;
     case upcall_code_trace_str:
         upcall_trace_str(proc->rt, (char const *)args[0]);
+        break;
+    case upcall_code_spawn:
+        *((rust_proc**)args[0]) = upcall_spawn(proc->rt, args[1], args[2],
+                                               (size_t)args[3]);
         break;
     }
 }

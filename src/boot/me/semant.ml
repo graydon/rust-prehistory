@@ -18,6 +18,7 @@ type code = {
 type glue =
     GLUE_proc_to_C
   | GLUE_C_to_proc
+  | GLUE_proc of Ast.ty_sig
   | GLUE_upcall of int
   | GLUE_mark of Ast.ty
   | GLUE_mark_frame of node_id

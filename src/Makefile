@@ -177,8 +177,8 @@ self: $(CFG_COMPILER)
 # Auto-dependency
 ######################################################################
 
-ML_DEPFILES:=$(BOOT_MLS:%.ml=%.d)
-C_DEPFILES:=$(RUNTIME_CS:%.cpp=%.d)
+ML_DEPFILES := $(BOOT_MLS:%.ml=%.d)
+C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 
 %.d: %.cpp $(MKFILES)
 	$(call CFG_DEPEND_C, $@ $(patsubst %.cpp, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
@@ -196,27 +196,30 @@ C_DEPFILES:=$(RUNTIME_CS:%.cpp=%.d)
 # Testing
 ######################################################################
 
-TEST_RUN_PASS_CRATES:=$(wildcard test/run-pass/*.rc)
-TEST_RUN_PASS_SOURCES:=$(wildcard test/run-pass/*.rs)
-TEST_RUN_PASS_EXES:=$(TEST_RUN_PASS_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
-                    $(TEST_RUN_PASS_SOURCES:.rs=$(CFG_EXE_SUFFIX))
-TEST_RUN_PASS_OUTS:=$(TEST_RUN_PASS_EXES:$(CFG_EXE_SUFFIX)=.out)
+TEST_XFAILS := test/run-pass/spawn-fn.rs \
+               test/compile-fail/infinite-tag-type-recursion.rs
+
+TEST_RUN_PASS_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rc))
+TEST_RUN_PASS_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rs))
+TEST_RUN_PASS_EXES := $(TEST_RUN_PASS_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
+                      $(TEST_RUN_PASS_SOURCES:.rs=$(CFG_EXE_SUFFIX))
+TEST_RUN_PASS_OUTS := $(TEST_RUN_PASS_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 
-TEST_RUN_FAIL_CRATES:=$(wildcard test/run-fail/*.rc)
-TEST_RUN_FAIL_SOURCES:=$(wildcard test/run-fail/*.rs)
-TEST_RUN_FAIL_PATS:=$(wildcard test/run-fail/*.pat)
-TEST_RUN_FAIL_EXES:=$(TEST_RUN_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
-                    $(TEST_RUN_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
-TEST_RUN_FAIL_OUTS:=$(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
+TEST_RUN_FAIL_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-fail/*.rc))
+TEST_RUN_FAIL_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-fail/*.rs))
+TEST_RUN_FAIL_PATS := $(wildcard test/run-fail/*.pat)
+TEST_RUN_FAIL_EXES := $(TEST_RUN_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
+                      $(TEST_RUN_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
+TEST_RUN_FAIL_OUTS := $(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 
-TEST_COMPILE_FAIL_CRATES:=$(wildcard test/compile-fail/*.rc)
-TEST_COMPILE_FAIL_SOURCES:=$(wildcard test/compile-fail/*.rs)
-TEST_COMPILE_FAIL_PATS:=$(wildcard test/compile-fail/*.pat)
-TEST_COMPILE_FAIL_EXES:=$(TEST_COMPILE_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
-                        $(TEST_COMPILE_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
-TEST_COMPILE_FAIL_OUTS:=$(TEST_COMPILE_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
+TEST_COMPILE_FAIL_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/compile-fail/*.rc))
+TEST_COMPILE_FAIL_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/compile-fail/*.rs))
+TEST_COMPILE_FAIL_PATS := $(wildcard test/compile-fail/*.pat)
+TEST_COMPILE_FAIL_EXES := $(TEST_COMPILE_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
+                          $(TEST_COMPILE_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
+TEST_COMPILE_FAIL_OUTS := $(TEST_COMPILE_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 
 check_nocompile: $(TEST_COMPILE_FAIL_OUTS)

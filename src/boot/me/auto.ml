@@ -207,7 +207,8 @@ let auto_inference_visitor
               match unify_lval None prog with
                   None -> ()
                 | Some (Ast.TY_prog tsig) -> unify_tsig s.id tsig dst args
-                | Some _ -> err (Some s.id) "STMT_spawn prog resolved to non-program type"
+                | Some (Ast.TY_fn (fsig, faux)) -> unify_tsig s.id fsig dst args
+                | Some _ -> err (Some s.id) "STMT_spawn prog resolved to non-program, non-function type"
             end
         | Ast.STMT_if i ->
             ignore (unify_expr (Some Ast.TY_bool) i.Ast.if_test)
