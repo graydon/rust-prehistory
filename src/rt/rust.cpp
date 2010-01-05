@@ -311,6 +311,15 @@ struct rust_proc {
      */
     uintptr_t upcall_code;
     uintptr_t upcall_args[PROC_MAX_UPCALL_ARGS];
+
+    /* Proc accounting. */
+    uintptr_t mem_budget;   /* N bytes ownable by this proc.       */
+    uintptr_t curr_mem;     /* N bytes currently owned.            */
+    uintptr_t tick_budget;  /* N ticks in lifetime. 0 = unlimited. */
+    uintptr_t curr_ticks;   /* N ticks currently consumed.         */
+
+    uint8_t data[];         /* C99 "flexible array" element.       */
+
 };
 
 struct rust_port {
