@@ -154,8 +154,6 @@ struct ptr_vec {
 
     void push(rust_rt *rt, T *p);
     void trim(rust_rt *rt, size_t fill);
-    void swapdel(rust_rt *rt, size_t i);
-
     void swapdel(rust_rt *rt, T* p);
 };
 
@@ -440,41 +438,15 @@ ptr_vec<T>::trim(rust_rt *rt, size_t sz)
 
 template <typename T>
 void
-ptr_vec<T>::swapdel(rust_rt *rt, size_t i)
+ptr_vec<T>::swapdel(rust_rt *rt, T *item)
 {
     /* Swap the endpoint into i and decr fill. */
     I(rt, this->data);
     I(rt, this->fill > 0);
-    I(rt, i < this->fill);
+    I(rt, item->idx < this->fill);
     this->fill--;
     if (this->fill > 0)
-        this->data[i] = this->data[this->fill];
-}
-
-template < >
-void
-ptr_vec<rust_proc>::swapdel(rust_rt *rt, rust_proc *proc)
-{
-    I(rt, proc);
-    I(rt, this->data[proc->idx] == proc);
-    swapdel(rt, proc->idx);
-    if (this->fill > 0) {
-        rust_proc *pnew = this->data[proc->idx];
-        pnew->idx = proc->idx;
-    }
-}
-
-template < >
-void
-ptr_vec<rust_chan>::swapdel(rust_rt *rt, rust_chan *chan)
-{
-    I(rt, chan);
-    I(rt, this->data[chan->idx] == chan);
-    swapdel(rt, chan->idx);
-    if (this->fill > 0) {
-        rust_chan *cnew = this->data[chan->idx];
-        cnew->idx = chan->idx;
-    }
+        this->data[item->idx] = this->data[this->fill];
 }
 
 /* Utility type: circular buffer. */
