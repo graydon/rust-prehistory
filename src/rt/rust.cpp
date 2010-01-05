@@ -150,22 +150,24 @@ template <typename T>
 struct ptr_vec {
     static const size_t INIT_PTR_VEC_SZ = 8;
 
+    rust_rt *rt;
     size_t alloc;
     size_t fill;
     T **data;
 
     void init(rust_rt *rt);
-    void fini(rust_rt *rt);
+    void fini();
 
-    void push(rust_rt *rt, T *p);
-    void trim(rust_rt *rt, size_t fill);
-    void swapdel(rust_rt *rt, T* p);
+    void push(T *p);
+    void trim(size_t fill);
+    void swapdel(T* p);
 };
 
 struct circ_buf {
     static const size_t INIT_CIRC_BUF_UNITS = 8;
     static const size_t MAX_CIRC_BUF_SIZE = 1 << 24;
 
+    rust_rt *rt;
     size_t alloc;
     size_t unit_sz;
     size_t next;
@@ -173,11 +175,11 @@ struct circ_buf {
     uint8_t *data;
 
     void init(rust_rt *rt, size_t unit_sz);
-    void fini(rust_rt *rt);
+    void fini();
 
-    void transfer(rust_rt *rt, void *dst);
-    void push(rust_rt *rt, void *src);
-    void shift(rust_rt *rt, void *dst);
+    void transfer(void *dst);
+    void push(void *src);
+    void shift(void *dst);
 };
 
 
@@ -392,65 +394,66 @@ template <typename T>
 void
 ptr_vec<T>::init(rust_rt *rt)
 {
-    this->alloc = INIT_PTR_VEC_SZ;
-    this->fill = 0;
-    this->data = (T **)xalloc(rt, this->alloc * sizeof(T*));
+    this->rt = rt;
+    alloc = INIT_PTR_VEC_SZ;
+    fill = 0;
+    data = (T **)xalloc(rt, alloc * sizeof(T*));
     I(rt, this->data);
     xlog(rt, LOG_MEM,
          "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
-         (uintptr_t)this, (uintptr_t)this->data);
+         (uintptr_t)this, (uintptr_t)data);
 }
 
 template <typename T>
 void
-ptr_vec<T>::fini(rust_rt *rt)
+ptr_vec<T>::fini()
 {
     I(rt, this->data);
     xlog(rt, LOG_MEM,
          "fini ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
-         (uintptr_t)this, (uintptr_t)this->data);
-    I(rt, this->fill == 0);
-    free(this->data);
+         (uintptr_t)this, (uintptr_t)data);
+    I(rt, fill == 0);
+    free(data);
 }
 
 template <typename T>
 void
-ptr_vec<T>::push(rust_rt *rt, T *p)
+ptr_vec<T>::push(T *p)
 {
-    I(rt, this->data);
-    if (this->fill == this->alloc) {
-        this->alloc *= 2;
-        this->data = (T **)xrealloc(rt, this->data, this->alloc);
+    I(rt, data);
+    if (fill == alloc) {
+        alloc *= 2;
+        data = (T **)xrealloc(rt, data, alloc);
     }
-    I(rt, this->fill < this->alloc);
-    this->data[this->fill++] = p;
+    I(rt, fill < alloc);
+    data[fill++] = p;
 }
 
 template <typename T>
 void
-ptr_vec<T>::trim(rust_rt *rt, size_t sz)
+ptr_vec<T>::trim(size_t sz)
 {
-    I(rt, this->data);
-    if (sz <= (this->alloc / 4) &&
-        (this->alloc / 2) >= INIT_PTR_VEC_SZ) {
-        this->alloc /= 2;
-        I(rt, this->alloc >= this->fill);
-        this->data = (T **)xrealloc(rt, this->data, this->alloc);
-        I(rt, this->data);
+    I(rt, data);
+    if (sz <= (alloc / 4) &&
+        (alloc / 2) >= INIT_PTR_VEC_SZ) {
+        alloc /= 2;
+        I(rt, alloc >= fill);
+        data = (T **)xrealloc(rt, data, alloc);
+        I(rt, data);
     }
 }
 
 template <typename T>
 void
-ptr_vec<T>::swapdel(rust_rt *rt, T *item)
+ptr_vec<T>::swapdel(T *item)
 {
     /* Swap the endpoint into i and decr fill. */
-    I(rt, this->data);
-    I(rt, this->fill > 0);
-    I(rt, item->idx < this->fill);
-    this->fill--;
-    if (this->fill > 0)
-        this->data[item->idx] = this->data[this->fill];
+    I(rt, data);
+    I(rt, fill > 0);
+    I(rt, item->idx < fill);
+    fill--;
+    if (fill > 0)
+        data[item->idx] = data[fill];
 }
 
 /* Utility type: circular buffer. */
@@ -459,96 +462,97 @@ void
 circ_buf::init(rust_rt *rt, size_t unit_sz)
 {
     I(rt, unit_sz);
+    this->rt = rt;
     this->unit_sz = unit_sz;
-    this->alloc = INIT_CIRC_BUF_UNITS * unit_sz;
-    this->next = 0;
-    this->unread = 0;
-    this->data = (uint8_t *)xcalloc(rt, this->alloc);
+    alloc = INIT_CIRC_BUF_UNITS * unit_sz;
+    next = 0;
+    unread = 0;
+    data = (uint8_t *)xcalloc(rt, alloc);
     xlog(rt, LOG_MEM|LOG_COMM,
          "init circ buf 0x%" PRIxPTR ", alloc=%d, unread=%d",
-         this, this->alloc, this->unread);
-    I(rt, this->data);
+         this, alloc, unread);
+    I(rt, data);
 }
 
 void
-circ_buf::fini(rust_rt *rt)
+circ_buf::fini()
 {
-    I(rt, this->data);
-    I(rt, this->unread == 0);
-    xfree(rt, this->data);
+    I(rt, data);
+    I(rt, unread == 0);
+    xfree(rt, data);
 }
 
 void
-circ_buf::transfer(rust_rt *rt, void *dst)
+circ_buf::transfer(void *dst)
 {
     size_t i;
     uint8_t *d = (uint8_t *)dst;
     I(rt, dst);
-    for (i = 0; i < this->unread; i += this->unit_sz)
-        memcpy(&d[i], &this->data[this->next + i % this->alloc], this->unit_sz);
+    for (i = 0; i < unread; i += unit_sz)
+        memcpy(&d[i], &data[next + i % alloc], unit_sz);
 }
 
 void
-circ_buf::push(rust_rt *rt, void *src)
+circ_buf::push(void *src)
 {
     size_t i;
     void *tmp;
 
     I(rt, src);
-    I(rt, this->unread <= this->alloc);
+    I(rt, unread <= alloc);
 
     /* Grow if necessary. */
-    if (this->unread == this->alloc) {
-        I(rt, this->alloc <= MAX_CIRC_BUF_SIZE);
-        tmp = xalloc(rt, this->alloc << 1);
-        transfer(rt, tmp);
-        this->alloc <<= 1;
-        xfree(rt, this->data);
-        this->data = (uint8_t *)tmp;
+    if (unread == alloc) {
+        I(rt, alloc <= MAX_CIRC_BUF_SIZE);
+        tmp = xalloc(rt, alloc << 1);
+        transfer(tmp);
+        alloc <<= 1;
+        xfree(rt, data);
+        data = (uint8_t *)tmp;
     }
 
     xlog(rt, LOG_MEM|LOG_COMM,
          "circ buf push, unread=%d, alloc=%d, unit_sz=%d",
-         this->unread, this->alloc, this->unit_sz);
+         unread, alloc, unit_sz);
 
-    I(rt, this->unread < this->alloc);
-    I(rt, this->unread + this->unit_sz <= this->alloc);
+    I(rt, unread < alloc);
+    I(rt, unread + unit_sz <= alloc);
 
-    i = (this->next + this->unread) % this->alloc;
-    memcpy(&this->data[i], src, this->unit_sz);
+    i = (next + unread) % alloc;
+    memcpy(&data[i], src, unit_sz);
 
     xlog(rt, LOG_MEM|LOG_COMM, "pushed data at index %d", i);
-    this->unread += this->unit_sz;
+    unread += unit_sz;
 }
 
 void
-circ_buf::shift(rust_rt *rt, void *dst)
+circ_buf::shift(void *dst)
 {
     size_t i;
     void *tmp;
 
     I(rt, dst);
-    I(rt, this->unit_sz > 0);
-    I(rt, this->unread >= this->unit_sz);
-    I(rt, this->unread <= this->alloc);
-    I(rt, this->data);
-    i = this->next;
-    memcpy(dst, &this->data[i], this->unit_sz);
+    I(rt, unit_sz > 0);
+    I(rt, unread >= unit_sz);
+    I(rt, unread <= alloc);
+    I(rt, data);
+    i = next;
+    memcpy(dst, &data[i], unit_sz);
     xlog(rt, LOG_MEM|LOG_COMM, "shifted data from index %d", i);
-    this->unread -= this->unit_sz;
-    this->next += this->unit_sz;
-    I(rt, this->next <= this->alloc);
-    if (this->next == this->alloc)
-        this->next = 0;
+    unread -= unit_sz;
+    next += unit_sz;
+    I(rt, next <= alloc);
+    if (next == alloc)
+        next = 0;
 
     /* Shrink if necessary. */
-    if (this->alloc >= INIT_CIRC_BUF_UNITS * this->unit_sz &&
-        this->unread <= this->alloc / 4) {
-        tmp = xalloc(rt, this->alloc / 2);
-        transfer(rt, tmp);
-        this->alloc >>= 1;
-        xfree(rt, this->data);
-        this->data = (uint8_t *)tmp;
+    if (alloc >= INIT_CIRC_BUF_UNITS * unit_sz &&
+        unread <= alloc / 4) {
+        tmp = xalloc(rt, alloc / 2);
+        transfer(tmp);
+        alloc >>= 1;
+        xfree(rt, data);
+        data = (uint8_t *)tmp;
     }
 }
 
@@ -560,7 +564,7 @@ del_port(rust_rt *rt, rust_port *port)
          "finalizing and freeing port 0x%" PRIxPTR,
          (uintptr_t)port);
     /* FIXME: need to force-fail all the queued writers. */
-    port->writers.fini(rt);
+    port->writers.fini();
     /* FIXME: can remove the chaining-of-ports-to-rt when we have
      * unwinding / finishing working. */
     if (port->prev)
@@ -797,7 +801,7 @@ del_proc(rust_rt *rt, rust_proc *proc)
     while (proc->chans) {
         rust_chan *c = proc->chans;
         HASH_DEL(proc->chans,c);
-        c->buf.fini(rt);
+        c->buf.fini();
         xfree(rt, c);
     }
 
@@ -836,7 +840,7 @@ add_proco_state_vec(rust_rt *rt, rust_proc *proc)
     xlog(rt, LOG_MEM|LOG_PROC,
          "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
-    v->push(rt, proc);
+    v->push(proc);
 }
 
 
@@ -854,8 +858,8 @@ remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
          "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
     I(rt, v->data[proc->idx] == proc);
-    v->swapdel(rt, proc);
-    v->trim(rt, n_live_procs(rt));
+    v->swapdel(proc);
+    v->trim(n_live_procs(rt));
 }
 
 static void
@@ -985,8 +989,8 @@ del_rt(rust_rt *rt)
     while (rt->ports)
         del_port(rt, rt->ports);
 
-    rt->running_procs.fini(rt);
-    rt->blocked_procs.fini(rt);
+    rt->running_procs.fini();
+    rt->blocked_procs.fini();
     xfree(rt, rt);
 }
 
@@ -1110,7 +1114,7 @@ attempt_transmission(rust_rt *rt,
     }
 
     uintptr_t *dptr = (uintptr_t*)dst->upcall_args[0];
-    src->buf.shift(rt, dptr);
+    src->buf.shift(dptr);
 
     if (src->blocked) {
         proc_state_transition(rt, src->blocked,
@@ -1170,7 +1174,7 @@ upcall_send(rust_rt *rt, rust_proc *src,
 
     if (port->proc) {
         chan->blocked = src;
-        chan->buf.push(rt, sptr);
+        chan->buf.push(sptr);
         proc_state_transition(rt, src,
                               proc_state_calling_c,
                               proc_state_blocked_writing);
@@ -1178,7 +1182,7 @@ upcall_send(rust_rt *rt, rust_proc *src,
         if (chan->buf.unread && !chan->queued) {
             chan->queued = 1;
             chan->idx = port->writers.fill;
-            port->writers.push(rt, chan);
+            port->writers.push(chan);
         }
     } else {
         xlog(rt, LOG_COMM|LOG_ERR,
@@ -1210,8 +1214,8 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
         rust_chan *schan = (rust_chan*)port->writers.data[i];
         I(rt, schan->idx == i);
         if (attempt_transmission(rt, schan, dst)) {
-            port->writers.swapdel(rt, schan);
-            port->writers.trim(rt, port->writers.fill);
+            port->writers.swapdel(schan);
+            port->writers.trim(port->writers.fill);
             schan->queued = 0;
         }
     } else {
