@@ -156,17 +156,16 @@ class ptr_vec {
     T **data;
 
 public:
-    class queueable {
-        size_t idx;
-
-        friend class ptr_vec;
-    };
-
     void init(rust_rt *rt);
     void fini();
 
-    size_t length();
-    T *& operator[](size_t offset);
+    size_t length() {
+        return fill;
+    }
+
+    T *& operator[](ssize_t offset) {
+        return data[offset];
+    }
 
     void push(T *p);
     T *pop();
@@ -292,12 +291,13 @@ struct rust_prog {
  *
  */
 
-struct rust_proc : ptr_vec<rust_proc>::queueable {
+struct rust_proc {
     rust_rt *rt;
     stk_seg *stk;
     rust_prog *prog;
     uintptr_t sp;           /* saved sp when not running. */
     proc_state_t state;
+    size_t idx;
     size_t refcnt;
     rust_chan *chans;
 
@@ -337,10 +337,11 @@ struct rust_port {
  * each port.
  */
 
-struct rust_chan : ptr_vec<rust_chan>::queueable {
+struct rust_chan {
     UT_hash_handle hh;
     rust_port *port;
     uintptr_t queued;     /* Whether we're in a port->writers vec. */
+    size_t idx;           /* Index in the port->writers vec. */
     rust_proc *blocked; /* Proc to wake on flush,
                              NULL if nonblocking. */
     circ_buf buf;
@@ -426,21 +427,6 @@ ptr_vec<T>::fini()
 }
 
 template <typename T>
-size_t
-ptr_vec<T>::length()
-{
-    return fill;
-}
-
-template <typename T>
-T *&
-ptr_vec<T>::operator[](size_t offset) {
-    I(rt, data);
-    I(rt, static_cast<queueable *>(data[offset])->idx == offset);
-    return data[offset];
-}
-
-template <typename T>
 void
 ptr_vec<T>::push(T *p)
 {
@@ -450,7 +436,7 @@ ptr_vec<T>::push(T *p)
         data = (T **)xrealloc(rt, data, alloc);
     }
     I(rt, fill < alloc);
-    static_cast<queueable *>(p)->idx = fill;
+    p->idx = fill;
     data[fill++] = p;
 }
 
@@ -482,14 +468,13 @@ ptr_vec<T>::swapdel(T *item)
     /* Swap the endpoint into i and decr fill. */
     I(rt, data);
     I(rt, fill > 0);
-    I(rt, static_cast<queueable *>(item)->idx < fill);
-    I(rt, data[static_cast<queueable *>(item)->idx] == item);
-    --fill;
+    I(rt, item->idx < fill);
+    fill--;
     if (fill > 0) {
         T *subst = data[fill];
-        size_t idx = static_cast<queueable *>(item)->idx;
+        size_t idx = item->idx;
         data[idx] = subst;
-        static_cast<queueable *>(subst)->idx = idx;
+        subst->idx = idx;
     }
 }
 
@@ -893,6 +878,7 @@ remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
     xlog(rt, LOG_MEM|LOG_PROC,
          "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
+    I(rt, (*v)[proc->idx] == proc);
     v->swapdel(proc);
     v->trim(n_live_procs(rt));
 }
@@ -930,7 +916,7 @@ upcall_del_proc(rust_rt *rt, rust_proc *proc)
          (uintptr_t)proc);
 }
 
-static rust_proc *
+static rust_proc*
 sched(rust_rt *rt)
 {
     I(rt, rt);
@@ -938,7 +924,7 @@ sched(rust_rt *rt)
     if (rt->running_procs.length() > 0) {
         size_t i = rand(&rt->rctx);
         i %= rt->running_procs.length();
-        return rt->running_procs[i];
+        return (rust_proc *)rt->running_procs[i];
     }
     xlog(rt, LOG_RT|LOG_PROC,
          "no schedulable processes");
@@ -1246,6 +1232,7 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
         size_t i = rand(&dst->rt->rctx);
         i %= port->writers.length();
         rust_chan *schan = port->writers[i];
+        I(rt, schan->idx == i);
         if (attempt_transmission(rt, schan, dst)) {
             port->writers.swapdel(schan);
             port->writers.trim(port->writers.length());
