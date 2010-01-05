@@ -147,18 +147,28 @@ typedef enum {
    rather than pointer-to-buf-at-end. */
 
 template <typename T>
-struct ptr_vec {
-    static const size_t INIT_PTR_VEC_SZ = 8;
+class ptr_vec {
+    static const size_t INIT_SIZE = 8;
 
     rust_rt *rt;
     size_t alloc;
     size_t fill;
     T **data;
 
+public:
     void init(rust_rt *rt);
     void fini();
 
+    size_t length() {
+        return fill;
+    }
+
+    T *& operator[](ssize_t offset) {
+        return data[offset];
+    }
+
     void push(T *p);
+    T *pop();
     void trim(size_t fill);
     void swapdel(T* p);
 };
@@ -395,10 +405,10 @@ void
 ptr_vec<T>::init(rust_rt *rt)
 {
     this->rt = rt;
-    alloc = INIT_PTR_VEC_SZ;
+    alloc = INIT_SIZE;
     fill = 0;
     data = (T **)xalloc(rt, alloc * sizeof(T*));
-    I(rt, this->data);
+    I(rt, data);
     xlog(rt, LOG_MEM,
          "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
          (uintptr_t)this, (uintptr_t)data);
@@ -408,7 +418,7 @@ template <typename T>
 void
 ptr_vec<T>::fini()
 {
-    I(rt, this->data);
+    I(rt, data);
     xlog(rt, LOG_MEM,
          "fini ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
          (uintptr_t)this, (uintptr_t)data);
@@ -426,7 +436,15 @@ ptr_vec<T>::push(T *p)
         data = (T **)xrealloc(rt, data, alloc);
     }
     I(rt, fill < alloc);
+    p->idx = fill;
     data[fill++] = p;
+}
+
+template <typename T>
+T *
+ptr_vec<T>::pop()
+{
+    return data[--fill];
 }
 
 template <typename T>
@@ -435,7 +453,7 @@ ptr_vec<T>::trim(size_t sz)
 {
     I(rt, data);
     if (sz <= (alloc / 4) &&
-        (alloc / 2) >= INIT_PTR_VEC_SZ) {
+        (alloc / 2) >= INIT_SIZE) {
         alloc /= 2;
         I(rt, alloc >= fill);
         data = (T **)xrealloc(rt, data, alloc);
@@ -840,7 +858,6 @@ static void
 add_proco_state_vec(rust_rt *rt, rust_proc *proc)
 {
     ptr_vec<rust_proc> *v = get_proc_vec(rt, proc);
-    proc->idx = v->fill;
     xlog(rt, LOG_MEM|LOG_PROC,
          "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
@@ -851,7 +868,7 @@ add_proco_state_vec(rust_rt *rt, rust_proc *proc)
 static size_t
 n_live_procs(rust_rt *rt)
 {
-    return rt->running_procs.fill + rt->blocked_procs.fill;
+    return rt->running_procs.length() + rt->blocked_procs.length();
 }
 
 static void
@@ -861,7 +878,7 @@ remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
     xlog(rt, LOG_MEM|LOG_PROC,
          "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
          (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
-    I(rt, v->data[proc->idx] == proc);
+    I(rt, (*v)[proc->idx] == proc);
     v->swapdel(proc);
     v->trim(n_live_procs(rt));
 }
@@ -904,10 +921,10 @@ sched(rust_rt *rt)
 {
     I(rt, rt);
     I(rt, n_live_procs(rt) > 0);
-    if (rt->running_procs.fill > 0) {
+    if (rt->running_procs.length() > 0) {
         size_t i = rand(&rt->rctx);
-        i %= rt->running_procs.fill;
-        return (rust_proc *)rt->running_procs.data[i];
+        i %= rt->running_procs.length();
+        return (rust_proc *)rt->running_procs[i];
     }
     xlog(rt, LOG_RT|LOG_PROC,
          "no schedulable processes");
@@ -974,9 +991,9 @@ new_rt(rust_srv *srv)
 static void
 del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     I(rt, v);
-    while (v->fill) {
-        xlog(rt, LOG_PROC, "deleting live proc %" PRIdPTR, v->fill-1);
-        del_proc(rt, v->data[--(v->fill)]);
+    while (v->length()) {
+        xlog(rt, LOG_PROC, "deleting live proc %" PRIdPTR, v->length() - 1);
+        del_proc(rt, v->pop());
     }
 }
 
@@ -1185,7 +1202,6 @@ upcall_send(rust_rt *rt, rust_proc *src,
         attempt_transmission(rt, chan, port->proc);
         if (chan->buf.unread && !chan->queued) {
             chan->queued = 1;
-            chan->idx = port->writers.fill;
             port->writers.push(chan);
         }
     } else {
@@ -1211,15 +1227,15 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
                           proc_state_calling_c,
                           proc_state_blocked_reading);
 
-    if (port->writers.fill > 0) {
+    if (port->writers.length() > 0) {
         I(rt, dst->rt);
         size_t i = rand(&dst->rt->rctx);
-        i %= port->writers.fill;
-        rust_chan *schan = (rust_chan*)port->writers.data[i];
+        i %= port->writers.length();
+        rust_chan *schan = port->writers[i];
         I(rt, schan->idx == i);
         if (attempt_transmission(rt, schan, dst)) {
             port->writers.swapdel(schan);
-            port->writers.trim(port->writers.fill);
+            port->writers.trim(port->writers.length());
             schan->queued = 0;
         }
     } else {
