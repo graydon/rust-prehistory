@@ -390,7 +390,6 @@ template <typename T>
 void
 ptr_vec<T>::init(rust_rt *rt)
 {
-    I(rt, this);
     this->alloc = INIT_PTR_VEC_SZ;
     this->fill = 0;
     this->data = (T **)xalloc(rt, this->alloc * sizeof(T*));
@@ -404,7 +403,6 @@ template <typename T>
 void
 ptr_vec<T>::fini(rust_rt *rt)
 {
-    I(rt, this);
     I(rt, this->data);
     xlog(rt, LOG_MEM,
          "fini ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
@@ -417,7 +415,6 @@ template <typename T>
 void
 ptr_vec<T>::push(rust_rt *rt, T *p)
 {
-    I(rt, this);
     I(rt, this->data);
     if (this->fill == this->alloc) {
         this->alloc *= 2;
@@ -431,7 +428,6 @@ template <typename T>
 void
 ptr_vec<T>::trim(rust_rt *rt, size_t sz)
 {
-    I(rt, this);
     I(rt, this->data);
     if (sz <= (this->alloc / 4) &&
         (this->alloc / 2) >= INIT_PTR_VEC_SZ) {
@@ -446,8 +442,7 @@ template <typename T>
 void
 ptr_vec<T>::swapdel(rust_rt *rt, size_t i)
 {
-    /* Swap the endpoint into i and decr init. */
-    I(rt, this);
+    /* Swap the endpoint into i and decr fill. */
     I(rt, this->data);
     I(rt, this->fill > 0);
     I(rt, i < this->fill);
@@ -461,7 +456,6 @@ void
 ptr_vec<rust_proc>::swapdel(rust_rt *rt, rust_proc *proc)
 {
     I(rt, proc);
-    I(rt, this);
     I(rt, this->data[proc->idx] == proc);
     swapdel(rt, proc->idx);
     if (this->fill > 0) {
@@ -475,7 +469,6 @@ void
 ptr_vec<rust_chan>::swapdel(rust_rt *rt, rust_chan *chan)
 {
     I(rt, chan);
-    I(rt, this);
     I(rt, this->data[chan->idx] == chan);
     swapdel(rt, chan->idx);
     if (this->fill > 0) {
@@ -489,7 +482,6 @@ ptr_vec<rust_chan>::swapdel(rust_rt *rt, rust_chan *chan)
 void
 circ_buf::init(rust_rt *rt, size_t unit_sz)
 {
-    I(rt, this);
     I(rt, unit_sz);
     this->unit_sz = unit_sz;
     this->alloc = INIT_CIRC_BUF_UNITS * unit_sz;
@@ -505,7 +497,6 @@ circ_buf::init(rust_rt *rt, size_t unit_sz)
 void
 circ_buf::fini(rust_rt *rt)
 {
-    I(rt, this);
     I(rt, this->data);
     I(rt, this->unread == 0);
     xfree(rt, this->data);
@@ -516,7 +507,6 @@ circ_buf::transfer(rust_rt *rt, void *dst)
 {
     size_t i;
     uint8_t *d = (uint8_t *)dst;
-    I(rt, this);
     I(rt, dst);
     for (i = 0; i < this->unread; i += this->unit_sz)
         memcpy(&d[i], &this->data[this->next + i % this->alloc], this->unit_sz);
@@ -528,7 +518,6 @@ circ_buf::push(rust_rt *rt, void *src)
     size_t i;
     void *tmp;
 
-    I(rt, this);
     I(rt, src);
     I(rt, this->unread <= this->alloc);
 
@@ -562,7 +551,6 @@ circ_buf::shift(rust_rt *rt, void *dst)
     size_t i;
     void *tmp;
 
-    I(rt, this);
     I(rt, dst);
     I(rt, this->unit_sz > 0);
     I(rt, this->unread >= this->unit_sz);
