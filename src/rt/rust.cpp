@@ -1521,7 +1521,6 @@ rust_main_loop(rust_prog *prog, rust_srv *srv)
 
     logptr(rt, "root proc", (uintptr_t)proc);
     logptr(rt, "proc->sp", (uintptr_t)proc->sp);
-    logptr(rt, "c_to_proc_glue", (uintptr_t)srv->c_to_proc_glue);
 
     while (proc) {
 
@@ -1529,7 +1528,7 @@ rust_main_loop(rust_prog *prog, rust_srv *srv)
              (uintptr_t)proc);
 
         proc->state = proc_state_running;
-        srv->c_to_proc_glue(proc);
+        srv->activate(proc);
 
         xlog(rt, LOG_PROC,
              "returned from proc 0x%" PRIxPTR " in state '%s'",
@@ -1679,8 +1678,7 @@ extern "C"
 int CDECL
 rust_start(rust_prog *prog, void CDECL (*c_to_proc_glue)(rust_proc*))
 {
-    rust_srv srv;
-    srv.c_to_proc_glue = c_to_proc_glue;
+    rust_srv srv(c_to_proc_glue);
     rust_main_loop(prog, &srv);
     return 0;
 }

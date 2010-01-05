@@ -31,7 +31,14 @@ struct rust_rt;
 #endif
 
 class rust_srv {
+    void CDECL (*c_to_proc_glue)(rust_proc *);
+
 public:
+    rust_srv(void CDECL (*c_to_proc_glue)(rust_proc *)) :
+        c_to_proc_glue(c_to_proc_glue)
+    {
+    }
+
     virtual void log(char const *);
     virtual void fatal(char const *, char const *, size_t);
     virtual void *malloc(size_t);
@@ -39,7 +46,9 @@ public:
     virtual void free(void *);
     virtual uintptr_t lookup(char const *, uint8_t *takes_proc);
 
-    void CDECL (*c_to_proc_glue)(rust_proc *);
+    void activate(rust_proc *proc) {
+        c_to_proc_glue(proc);
+    }
 };
 
 inline void *operator new(size_t size, rust_srv *srv)
