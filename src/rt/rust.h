@@ -17,14 +17,7 @@ struct rust_proc;
 struct rust_prog;
 struct rust_port;
 struct rust_chan;
-struct rust_srv;
 struct rust_rt;
-
-typedef struct rust_proc rust_proc;
-typedef struct rust_port rust_port;
-typedef struct rust_chan rust_chan;
-typedef struct rust_srv rust_srv;
-typedef struct rust_rt rust_rt;
 
 #ifdef __i386__
 // 'cdecl' ABI only means anything on i386
