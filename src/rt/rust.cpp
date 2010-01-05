@@ -452,8 +452,12 @@ ptr_vec<T>::swapdel(T *item)
     I(rt, fill > 0);
     I(rt, item->idx < fill);
     fill--;
-    if (fill > 0)
-        data[item->idx] = data[fill];
+    if (fill > 0) {
+        T *subst = data[fill];
+        size_t idx = item->idx;
+        data[idx] = subst;
+        subst->idx = idx;
+    }
 }
 
 /* Utility type: circular buffer. */
