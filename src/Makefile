@@ -197,7 +197,9 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 ######################################################################
 
 TEST_XFAILS := test/run-pass/spawn-fn.rs \
-               test/compile-fail/infinite-tag-type-recursion.rs
+               test/run-pass/many.rs \
+               test/compile-fail/infinite-tag-type-recursion.rs \
+               test/compile-fail/infinite-vec-type-recursion.rs
 
 TEST_RUN_PASS_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rc))
 TEST_RUN_PASS_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rs))
