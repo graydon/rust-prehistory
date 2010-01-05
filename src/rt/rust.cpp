@@ -44,6 +44,12 @@ extern "C" {
 #define I(rt, e) ((e) ? (void)0 :                           \
                   (rt)->srv->fatal(#e, __FILE__, __LINE__))
 
+struct rust_proc;
+struct rust_prog;
+struct rust_port;
+struct rust_chan;
+struct rust_rt;
+
 struct rust_str;
 struct rust_vec;
 
@@ -274,7 +280,6 @@ struct rust_prog {
  */
 
 struct rust_proc {
-
     rust_rt *rt;
     stk_seg *stk;
     rust_prog *prog;

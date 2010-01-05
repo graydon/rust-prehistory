@@ -13,12 +13,6 @@
  * types (size, uint8, uintptr, etc.)
  */
 
-struct rust_proc;
-struct rust_prog;
-struct rust_port;
-struct rust_chan;
-struct rust_rt;
-
 #ifdef __i386__
 // 'cdecl' ABI only means anything on i386
 #ifdef __WIN32__
@@ -29,6 +23,8 @@ struct rust_rt;
 #else
 #define CDECL
 #endif
+
+struct rust_proc;
 
 class rust_srv {
     void CDECL (*c_to_proc_glue)(rust_proc *);
