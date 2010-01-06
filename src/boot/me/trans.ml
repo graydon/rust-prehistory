@@ -283,6 +283,7 @@ let trans_visitor
                   Il.ScalarTy st -> st
                 | Il.StructTy _ -> bugi cx slot_id "cannot treat structured referent as single operand"
                 | Il.OpaqueTy -> bugi cx slot_id "cannot treat opaque referent as single operand"
+                | Il.CodeTy ->  bugi cx slot_id "cannot treat code referent as single operand"
             in
               Il.Reg (Il.Vreg (cell_vreg_num vr), scalar_type)
         | None ->
@@ -1422,6 +1423,7 @@ let trans_visitor
         Il.StructTy tys -> tys
       | Il.ScalarTy _ -> failwith "expected structural referent type, got scalar"
       | Il.OpaqueTy -> failwith "expected structural referent type, got opaque"
+      | Il.CodeTy -> failwith "expected structural referent type, got code"
 
 
   (* FIXME: this should permit f.e. copying (foo,bar) <- (@foo,@bar), but 

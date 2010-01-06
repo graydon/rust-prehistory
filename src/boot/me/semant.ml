@@ -1254,6 +1254,7 @@ let rec layout_referent (abi:Abi.abi) (off:int64) (rty:Il.referent_ty) : layout 
         let layouts = Array.map (layout_referent abi 0L) rtys in
           pack off layouts
     | Il.OpaqueTy -> bug () "laying out opaque IL type in layout_referent"
+    | Il.CodeTy -> bug () "laying out code IL type in layout_referent"
 ;;
 
 let rec layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =

@@ -21,6 +21,7 @@ and referent_ty =
     ScalarTy of scalar_ty
   | StructTy of referent_ty array
   | OpaqueTy (* Unknown memory-resident thing. *)
+  | CodeTy   (* Executable machine code. *)
 ;;
 
 let (voidptr_t:scalar_ty) = AddrTy OpaqueTy;;
@@ -304,6 +305,7 @@ and string_of_referent_ty (r:referent_ty) : string =
           (String.concat "|"
              (Array.to_list (Array.map string_of_referent_ty rs)))
     | OpaqueTy -> "?"
+    | CodeTy -> "!"
 ;;
 
 
