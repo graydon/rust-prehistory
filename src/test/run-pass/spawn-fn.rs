@@ -7,5 +7,10 @@ prog a
   }
   main {
     spawn x();
+    let int i = 4;
+    while (i > 0) {
+      i = i - 1;
+      log "parent sleeping";
+    }
   }
 }

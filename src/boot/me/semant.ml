@@ -650,7 +650,7 @@ let type_is_mutable (t:Ast.ty) : bool =
 
 let type_is_cyclic (t:Ast.ty) : bool =
 
-  let contains_uncaptured_idx t = 
+  let contains_uncaptured_idx t =
     let fold_idx _ = true in
     let fold_iso _ = false in
     let fold = ty_fold_bool_or false in
@@ -671,7 +671,6 @@ let type_is_cyclic (t:Ast.ty) : bool =
   let fold = ty_fold_rebuild (fun t -> t) in
   let fold = { fold with ty_fold_slot = fold_slot } in
   let _ = fold_ty fold t in
-    
     !is_cyclic
 ;;
 
