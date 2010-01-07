@@ -2354,15 +2354,28 @@ let fixup_assigning_visitor
     enter_file_for i;
     begin
       match i.node with
-          Ast.MOD_ITEM_fn _
-        | Ast.MOD_ITEM_pred _
-        | Ast.MOD_ITEM_tag _ -> add_fn_fixup_for i.id
-        | Ast.MOD_ITEM_prog prog ->
+
+          Ast.MOD_ITEM_pred _
+        | Ast.MOD_ITEM_tag _ ->
+            add_fn_fixup_for i.id
+
+        | Ast.MOD_ITEM_fn _ ->
             begin
               let path = path_name () in
               let fixup =
                 if path = cx.ctxt_main_name
-                then cx.ctxt_main_prog
+                then cx.ctxt_main_fn
+                else new_fixup path
+              in
+                htab_put cx.ctxt_fn_fixups i.id fixup;
+            end
+
+        | Ast.MOD_ITEM_prog _ ->
+            begin
+              let path = path_name () in
+              let fixup =
+                if path = cx.ctxt_main_name
+                then cx.ctxt_main_fn
                 else new_fixup path
               in
                 htab_put cx.ctxt_prog_fixups i.id fixup;

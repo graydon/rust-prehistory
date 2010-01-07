@@ -109,7 +109,7 @@ type ctxt =
       ctxt_all_item_code: item_code;
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
-      ctxt_main_prog: fixup;
+      ctxt_main_fn: fixup;
       ctxt_main_name: string;
     }
 ;;
@@ -162,7 +162,7 @@ let new_ctxt sess abi crate =
     ctxt_all_item_code = Hashtbl.create 0;
     ctxt_glue_code = Hashtbl.create 0;
     ctxt_data = Hashtbl.create 0;
-    ctxt_main_prog = new_fixup "main prog fixup";
+    ctxt_main_fn = new_fixup "main fn fixup";
     ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main
   }
 ;;

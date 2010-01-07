@@ -2217,7 +2217,7 @@ and parse_root_crate_entries
     expect ps EOF;
     let main =
       match !explicit_main with
-          None -> infer_main_prog ps items
+          None -> infer_main_fn ps items
         | Some m -> m
     in
     let bpos = lexpos ps in
@@ -2227,7 +2227,7 @@ and parse_root_crate_entries
           Ast.crate_main = main;
           Ast.crate_files = files }
 
-and infer_main_prog
+and infer_main_fn
     (ps:pstate)
     (crate_items:Ast.mod_items)
     : Ast.name =
@@ -2249,13 +2249,17 @@ and infer_main_prog
           if Array.length pd.Ast.decl_params = 0
           then progs := (extend prefix_name ident) :: (!progs)
           else ()
+      | Ast.MOD_ITEM_fn fd ->
+          if Array.length fd.Ast.decl_params = 0
+          then progs := (extend prefix_name ident) :: (!progs)
+          else ()
       | _ -> ()
   in
     dig None crate_items;
     match !progs with
-        [] -> raise (err "cannot infer main program: no programs found" ps)
+        [] -> raise (err "cannot infer main function: no programs found" ps)
       | [x] -> x
-      | _ -> raise (err "cannot infer main program: multiple programs found" ps)
+      | _ -> raise (err "cannot infer main function: multiple functions found" ps)
 ;;
 
 let parse_root_with_parse_fn
@@ -2306,7 +2310,7 @@ let parse_root_srcfile_entries
     htab_put mitems stem modi;
     span ps apos bpos { Ast.crate_items = mitems;
                         Ast.crate_native_items = Hashtbl.create 0;
-                        Ast.crate_main = infer_main_prog ps mitems;
+                        Ast.crate_main = infer_main_fn ps mitems;
                         Ast.crate_files = files }
 ;;
 
