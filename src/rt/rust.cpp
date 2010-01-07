@@ -852,6 +852,9 @@ spawn_proc(rust_rt *rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t c
     *sp-- = (uintptr_t) proc;       // proc
     *sp-- = (uintptr_t) 0;          // output
     *sp-- = (uintptr_t) 0;          // retpc
+    for (size_t j = 0; j < n_callee_saves; ++j) {
+        *sp-- = 0;
+    }
 
     // We want 'frame_base' to point to the last callee-save in this
     // (exit-proc) frame, because we're going to spray this
@@ -859,19 +862,14 @@ spawn_proc(rust_rt *rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t c
     // frame. A cheap trick, but this means the spawnee frame will
     // restore the proper frame pointer of the glue frame as it
     // runs its epilogue.
-
-    uintptr_t frame_base = (uintptr_t) sp;
-    for (size_t j = 0; j < n_callee_saves; ++j) {
-        frame_base = (uintptr_t) sp;
-        *sp-- = 0;
-    }
+    uintptr_t frame_base = (uintptr_t) (sp+1);
 
     // The incoming args to the spawnee frame we're activating:
     *sp-- = (uintptr_t) proc;            // proc
     *sp-- = (uintptr_t) 0;               // output
     *sp-- = (uintptr_t) exit_proc_glue;  // retpc
 
-    /* The context the c_to_proc_glue needs to switch stack. */
+    // The context the c_to_proc_glue needs to switch stack.
     *sp-- = (uintptr_t) spawnee_fn;      // instruction to start at
     for (size_t j = 0; j < n_callee_saves; ++j) {
         *sp-- = frame_base;              // callee-saves to carry in
