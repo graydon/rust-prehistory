@@ -810,13 +810,13 @@ new_proc(rust_rt *rt, rust_prog *prog)
 
 
 static rust_proc*
-spawn_proc(rust_rt *rt, uintptr_t proc_glue, uintptr_t spawnee_fn, size_t callsz)
+spawn_proc(rust_rt *rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     /* FIXME: need to actually convey the proc internal-slots size to
        here. */
     rust_proc *proc = (rust_proc *)xcalloc(rt, sizeof(rust_proc) + 1024);
     logptr(rt, "new proc", (uintptr_t)proc);
-    logptr(rt, "proc glue", proc_glue);
+    logptr(rt, "exit-proc glue", exit_proc_glue);
     logptr(rt, "from spawnee", spawnee_fn);
     proc->fn = spawnee_fn;
     proc->stk = new_stk(rt, 0);
@@ -835,37 +835,46 @@ spawn_proc(rust_rt *rt, uintptr_t proc_glue, uintptr_t spawnee_fn, size_t callsz
     proc->sp -= sizeof(uintptr_t);
     proc->sp &= ~0xf;
 
-    /* "initial args" to the main frame:
-     *
-     *      *sp+N+20   = arg0, spawnee function
-     *      *sp+N+16   = proc ptr
-     *      *sp+N+12   = NULL = fake outptr (spacing)
-     *      *sp+N+8    = duplicate retpc (fake)
-     *      *sp+N+4    = "retpc" to return to (activation)
-     *      *sp+N      = NULL = 0th callee-save
-     *      ...
-     *      *sp        = NULL = Nth callee-save
-     *
-     * This is slightly confusing since it looks like we have two copies
-     * of retpc; that's intentional. The notion is that when we *first*
-     * activate this frame, we'll be entering via the c-to-proc glue,
-     * and that will restore the fake callee-saves here and then
-     * return-to the "activation" pc. That PC will be the first insn of a
-     * rust prog that assumes for -- simplicity sake it -- has a
-     * same-as-always-laid-out rust frame under it. In particular, one
-     * with a retpc. Even though said retpc is bogus -- just spacing --
-     * we place it and a fake outptr so that the frame we return to is
-     * the right shape.
-     */
+    // Begin synthesizing frames. There are two: a "fully formed"
+    // exit-proc frame at the top of the stack -- that pretends to be
+    // mid-execution -- and a just-starting frame beneath it that
+    // starts executing the first instruction of the spawnee. The
+    // spawnee *thinks* it was called by the exit-proc frame above
+    // it. It wasn't; we put that fake frame in place here, but the
+    // illusion is enough for the spawnee to return to the exit-proc
+    // frame when it's done, and exit.
+
     uintptr_t *sp = (uintptr_t*) proc->sp;
-    proc->sp -= (4 + n_callee_saves) * sizeof(uintptr_t);
-    *sp-- = (uintptr_t) spawnee_fn;
-    *sp-- = (uintptr_t) proc;
-    *sp-- = (uintptr_t) 0;
-    *sp-- = (uintptr_t) proc_glue;
-    *sp-- = (uintptr_t) proc_glue;
+    proc->sp -= 2 * (3 + n_callee_saves) * sizeof(uintptr_t);
+
+    // The exit_proc_glue frame we synthesize above the frame we activate:
+
+    *sp-- = (uintptr_t) proc;       // proc
+    *sp-- = (uintptr_t) 0;          // output
+    *sp-- = (uintptr_t) 0;          // retpc
+
+    // We want 'frame_base' to point to the last callee-save in this
+    // (exit-proc) frame, because we're going to spray this
+    // frame-pointer into *every* callee-save in the *next* (spawnee)
+    // frame. A cheap trick, but this means the spawnee frame will
+    // restore the proper frame pointer of the glue frame as it
+    // runs its epilogue.
+
+    uintptr_t frame_base = (uintptr_t) sp;
     for (size_t j = 0; j < n_callee_saves; ++j) {
+        frame_base = (uintptr_t) sp;
         *sp-- = 0;
+    }
+
+    // The incoming args to the spawnee frame we're activating:
+    *sp-- = (uintptr_t) proc;            // proc
+    *sp-- = (uintptr_t) 0;               // output
+    *sp-- = (uintptr_t) exit_proc_glue;  // retpc
+
+    /* The context the c_to_proc_glue needs to switch stack. */
+    *sp-- = (uintptr_t) spawnee_fn;      // instruction to start at
+    for (size_t j = 0; j < n_callee_saves; ++j) {
+        *sp-- = frame_base;              // callee-saves to carry in
     }
 
     proc->rt = rt;
@@ -1500,12 +1509,14 @@ static void *rust_thread_start(void *ptr)
 }
 
 static rust_proc*
-upcall_spawn(rust_rt *rt, uintptr_t proc_glue, uintptr_t spawnee_fn, size_t callsz)
+upcall_spawn(rust_rt *rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
+    // FIXME: there's only one exit-proc glue across the crate, make it a constant
+    // a la the C-to-proc and proc-to-C glues.
     xlog(rt, LOG_UPCALL|LOG_MEM|LOG_PROC,
-         "spawn fn: proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
-         proc_glue, spawnee_fn, callsz);
-    rust_proc *proc = spawn_proc(rt, proc_glue, spawnee_fn, callsz);
+         "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
+         exit_proc_glue, spawnee_fn, callsz);
+    rust_proc *proc = spawn_proc(rt, exit_proc_glue, spawnee_fn, callsz);
     add_proc_state_vec(rt, proc);
     return proc;
 }

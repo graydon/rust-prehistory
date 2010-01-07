@@ -567,34 +567,20 @@ let trans_visitor
     capture_emitted_glue name fix spill g;
     pop_emitter ()
 
-  and get_proc_glue (tsig:Ast.ty_sig) (callsz:int64) (arg_layouts:layout array) : fixup =
-    let g = GLUE_proc tsig in
+  and get_exit_proc_glue _ : fixup =
+    let g = GLUE_exit_proc in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
             begin
               let fix = new_fixup "proc glue" in
               let spill = new_fixup "proc glue spill" in
-              let isz = cx.ctxt_abi.Abi.abi_implicit_args_sz in
-              let argsz = Int64.add isz (word_n 1) in
-              let arg_n n = sp_imm arg_layouts.(n).layout_offset in
-              let arg_n_cell n = Il.Addr (arg_n n, Il.OpaqueTy) in
-
-                (* 
-                 * Proc glue has 1 incoming arg beyond the implicit ones: the the function to invoke.
-                 * Outgoing args to that function are already on its stack when it's constructed, as
-                 * is the output slot. Callsz needs to include them in its sp adjustment, but nothing
-                 * else.
-                 *)
-                trans_glue_frame_entry argsz callsz spill;
+                push_new_emitter ();
                 let dst = Il.next_vreg_cell (emitter()) Il.voidptr_t in
-                  mov (arg_n_cell 1) (Il.Cell abi.Abi.abi_pp_cell);
-                  mov (arg_n_cell 0) (imm 0L);
-                  emit (Il.call dst (code_of_cell (word_at (fp_imm arg0_disp))));
-                  (* FIXME: need to drop copied args. *)
                   abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
                   emit (Il.call dst (Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None))));
-                  trans_glue_frame_exit "proc glue" fix spill g;
+                  capture_emitted_glue "proc glue" fix spill g;
+                  pop_emitter ();
                   fix
             end
 
@@ -889,12 +875,12 @@ let trans_visitor
     in
     let arg_layouts = layout_fn_call_tup abi tsig in
     let callsz = (pack 0L arg_layouts).layout_size in
-    let proc_glue_fixup = get_proc_glue tsig callsz arg_layouts in
-    let proc_glue_addr = (fixup_to_addr
-                            abi.Abi.abi_has_pcrel_data
-                            abi.Abi.abi_has_abs_data
-                            proc_glue_fixup Il.OpaqueTy) in
-    let proc_glue_cell = Il.Addr (proc_glue_addr, Il.OpaqueTy) in
+    let exit_proc_glue_fixup = get_exit_proc_glue () in
+    let exit_proc_glue_addr = (fixup_to_addr
+                                 abi.Abi.abi_has_pcrel_data
+                                 abi.Abi.abi_has_abs_data
+                                 exit_proc_glue_fixup Il.CodeTy) in
+    let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
       iflog (fun _ -> annotate "spawn proc");
       aliasing true proc_cell
         begin
@@ -902,7 +888,7 @@ let trans_visitor
             trans_upcall Abi.UPCALL_spawn
               [|
                 proc_cell_alias;
-                (alias_cell proc_glue_cell);
+                (alias_cell exit_proc_glue_cell);
                 (alias_cell fn_cell);
                 imm callsz
               |]

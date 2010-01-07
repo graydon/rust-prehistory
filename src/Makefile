@@ -196,8 +196,7 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 # Testing
 ######################################################################
 
-TEST_XFAILS := test/run-pass/spawn-fn.rs \
-               test/run-pass/many.rs \
+TEST_XFAILS := test/run-pass/many.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
