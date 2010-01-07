@@ -576,7 +576,6 @@ let trans_visitor
               let fix = new_fixup "proc glue" in
               let spill = new_fixup "proc glue spill" in
                 push_new_emitter ();
-                let dst = Il.next_vreg_cell (emitter()) Il.voidptr_t in
                   (* 
                    * We return-to-here in a synthetic frame we did not build; our job is
                    * to drop the slots associated with tsig, which are already on the stack
@@ -585,10 +584,12 @@ let trans_visitor
                 let arg_layouts = layout_fn_call_tup abi tsig in
                 let in_slots = tsig.Ast.sig_input_slots in
                 let implicit_args = 2 in
+                let code = Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None)) in
                   drop_arg_slots in_slots arg_layouts implicit_args;
 
+                  iflog (fun _ -> annotate "assume 'exited' state");
                   abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
-                  emit (Il.call dst (Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None))));
+                  call_code code;
                   capture_emitted_glue "proc glue" fix spill g;
                   pop_emitter ();
                   fix
@@ -693,13 +694,12 @@ let trans_visitor
     let arg_layouts = layout_fn_call_tup abi tsig in
     let arg_n n = sp_imm arg_layouts.(n).layout_offset in
     let arg_n_cell n = Il.Addr (arg_n n, Il.OpaqueTy) in
-    let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
       (* Arg0 is omitted as there's no output-slot for gc glue. *)
       (* Arg1 is process-pointer, as usual. *)
       (* Arg2 is the sole pointer we pass in. Hard-wire its address here. *)
       mov (arg_n_cell 1) (Il.Cell abi.Abi.abi_pp_cell);
       mov (arg_n_cell 2) (Il.Cell arg);
-      emit (Il.call vr code);
+      call_code code;
 
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
@@ -883,6 +883,7 @@ let trans_visitor
           Some (Ast.TY_fn (tsig, _)) -> tsig
         | _ -> bug () "spawned-function slot has wrong type"
     in
+    let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
     let callsz = (pack 0L arg_layouts).layout_size in
     let exit_proc_glue_fixup = get_exit_proc_glue tsig in
@@ -891,7 +892,9 @@ let trans_visitor
                                  abi.Abi.abi_has_abs_data
                                  exit_proc_glue_fixup Il.CodeTy) in
     let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
-      iflog (fun _ -> annotate "spawn proc");
+      iflog (fun _ -> annotate "spawn proc: copy args");
+      ignore (copy_fn_args proc_cell in_slots arg_layouts args);
+      iflog (fun _ -> annotate "spawn proc: upcall");
       aliasing true proc_cell
         begin
           fun proc_cell_alias ->
@@ -1814,6 +1817,41 @@ let trans_visitor
         Il.Addr (a, _) -> Il.CodeAddr a
       | _ -> bug () "loading code from register"
 
+  and copy_fn_args output_cell in_slots arg_layouts args =
+    let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
+    let n_layouts = Array.length arg_layouts in
+      assert (n_layouts == ((Array.length args) + 2));
+      for i = 0 to n_layouts - 1 do
+        iflog (fun _ ->
+                 annotate (Printf.sprintf "fn-call arg %d of %d"
+                             i n_layouts));
+        match i with
+            0 -> trans_arg0 (param_cell i None) output_cell
+          | 1 -> trans_arg1 (param_cell i None)
+          | _ -> trans_argN (i-2) (param_cell i (Some (i-2))) in_slots args
+      done;
+      2
+
+  and copy_init_args output_cell in_slots arg_layouts args arg2_cell =
+    let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
+    let n_layouts = Array.length arg_layouts in
+      assert (n_layouts == ((Array.length args) + 3));
+      for i = 0 to n_layouts - 1 do
+        iflog (fun _ ->
+                 annotate (Printf.sprintf "init-call arg %d of %d"
+                             i n_layouts));
+        match i with
+            0 -> trans_arg0 (param_cell i None) output_cell
+          | 1 -> trans_arg1 (param_cell i None)
+          | 2 -> mov (param_cell i None) (Il.Cell arg2_cell)
+          | _ -> trans_argN (i-3) (param_cell i (Some (i-3))) in_slots args
+      done;
+      3
+
+  and call_code (code:Il.code) : unit =
+    let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+      emit (Il.call vr code);
+
   and trans_call
       (initialising:bool)
       (logname:(unit -> string))
@@ -1824,41 +1862,13 @@ let trans_visitor
       (arg2:Il.cell option)
       (args:Ast.atom array)
       : unit =
-    let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
     (* FIXME: there's got to be a nicer factoring than this. *)
     let implicit_args =
       match arg2 with
           None ->
-            begin
-              let n_layouts = Array.length arg_layouts in
-                assert (n_layouts == ((Array.length args) + 2));
-                for i = 0 to n_layouts - 1 do
-                  iflog (fun _ ->
-                           annotate (Printf.sprintf "fn-call arg %d of %d"
-                                       i n_layouts));
-                    match i with
-                        0 -> trans_arg0 (param_cell i None) output_cell
-                      | 1 -> trans_arg1 (param_cell i None)
-                      | _ -> trans_argN (i-2) (param_cell i (Some (i-2))) in_slots args
-                done;
-                2;
-            end
+            copy_fn_args output_cell in_slots arg_layouts args
         | Some arg2_cell ->
-            begin
-              let n_layouts = Array.length arg_layouts in
-                assert (n_layouts == ((Array.length args) + 3));
-                for i = 0 to n_layouts - 1 do
-                  iflog (fun _ ->
-                           annotate (Printf.sprintf "init-call arg %d of %d"
-                                       i n_layouts));
-                    match i with
-                        0 -> trans_arg0 (param_cell i None) output_cell
-                      | 1 -> trans_arg1 (param_cell i None)
-                      | 2 -> mov (param_cell i None) (Il.Cell arg2_cell)
-                      | _ -> trans_argN (i-3) (param_cell i (Some (i-3))) in_slots args
-                done
-            end;
-            3
+            copy_init_args output_cell in_slots arg_layouts args arg2_cell
     in
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* 
@@ -1866,9 +1876,8 @@ let trans_visitor
        * we blindly assume we're initialising, overwrite the slot; this is ok if we're 
        * writing to an interior output slot, but we'll leak any exteriors as we do that. 
        *)
-      let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
-        emit (Il.call vr (code_of_cell callee_cell));
-        drop_arg_slots in_slots arg_layouts implicit_args
+      call_code (code_of_cell callee_cell);
+      drop_arg_slots in_slots arg_layouts implicit_args
 
   and param_cell_full
       (in_slots:Ast.slot array)
@@ -2197,11 +2206,11 @@ let trans_visitor
     let callsz = get_callsz cx b.id in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups b.id in
       push_new_emitter ();
-      let dst = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+      let code = Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None)) in
         abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup callsz;
         trans_block b;
         abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
-        emit (Il.call dst (Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None))));
+        call_code code;
         capture_emitted_quads fix b.id;
         pop_emitter ()
   in
