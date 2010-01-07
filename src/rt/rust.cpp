@@ -813,25 +813,22 @@ static rust_proc*
 spawn_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
            uintptr_t spawnee_fn, size_t callsz)
 {
-    /* FIXME: need to actually convey the proc internal-slots size to
-       here. */
-    rust_proc *proc = (rust_proc *)xcalloc(rt, sizeof(rust_proc) + 1024);
+    rust_proc *proc = (rust_proc *)xcalloc(rt, sizeof(rust_proc));
     logptr(rt, "new proc", (uintptr_t)proc);
     logptr(rt, "exit-proc glue", exit_proc_glue);
     logptr(rt, "from spawnee", spawnee_fn);
     proc->fn = spawnee_fn;
     proc->stk = new_stk(rt, 0);
 
-    /*
-     * Set sp to last uintptr_t-sized cell of segment
-     * then align down to 16 boundary, to be safe-ish for
-     * alignment (?)
-     *
-     * FIXME: actually convey alignment constraint here so
-     * we're not just being conservative. I don't *think*
-     * there are any platforms alive at the moment with
-     * >16 byte alignment constraints, but this is sloppy.
-     */
+    // Set sp to last uintptr_t-sized cell of segment
+    // then align down to 16 boundary, to be safe-ish for
+    // alignment (?)
+    //
+    // FIXME: actually convey alignment constraint here so
+    // we're not just being conservative. I don't *think*
+    // there are any platforms alive at the moment with
+    // >16 byte alignment constraints, but this is sloppy.
+
     proc->sp = proc->stk->limit;
     proc->sp -= sizeof(uintptr_t);
     proc->sp &= ~0xf;
@@ -877,8 +874,10 @@ spawn_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
     sp--;
 
     // The *implicit* incoming args to the spawnee frame we're activating:
+    // FIXME: wire up output-address properly so spawnee can write a return
+    // value.
     *sp-- = (uintptr_t) proc;            // proc
-    *sp-- = (uintptr_t) 0;               // output
+    *sp-- = (uintptr_t) 0;               // output addr
     *sp-- = (uintptr_t) exit_proc_glue;  // retpc
 
     // The context the c_to_proc_glue needs to switch stack.
