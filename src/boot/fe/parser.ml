@@ -960,6 +960,26 @@ and parse_bottom_pexp ps : pexp =
                 end
         end
 
+    | MACH m ->
+        begin
+          bump ps;
+          match peek ps with
+              LPAREN ->
+                begin
+                  bump ps;
+                  match peek ps with
+                      LIT_INT (n,s) ->
+                        begin
+                          bump ps;
+                          expect ps RPAREN;
+                          let bpos = lexpos ps in
+                            span ps apos bpos (PEXP_lit (Ast.LIT_mach (m,s)))
+                        end
+                    | _ -> raise (unexpected ps)
+                end
+            | _ -> raise (unexpected ps)
+        end
+
     | _ ->
         let lit = parse_lit ps in
         let bpos = lexpos ps in
