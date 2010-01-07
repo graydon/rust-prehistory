@@ -864,14 +864,19 @@ spawn_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
 
     // Copy args from spawner to spawnee.
     uintptr_t *src = (uintptr_t*) spawner->sp;
-    src += 1;                  // upcall-retpc
-    src += n_callee_saves;     // upcall-saves
+    src += 1;                  // was at upcall-retpc
+    src += n_callee_saves;     // proc_to_c_glue-saves
     src += 1;                  // spawn-call output slot
     src += 1;                  // spawn-call proc slot
     // Memcpy all but the proc and output pointers
-    memcpy(sp, src, callsz - (2 * sizeof(uintptr_t)));
+    callsz -= (2 * sizeof(uintptr_t));
+    sp = (uintptr_t*) (((uintptr_t)sp) - callsz);
+    memcpy(sp, src, callsz);
 
-    // The incoming args to the spawnee frame we're activating:
+    // Move sp down to point to proc cell.
+    sp--;
+
+    // The *implicit* incoming args to the spawnee frame we're activating:
     *sp-- = (uintptr_t) proc;            // proc
     *sp-- = (uintptr_t) 0;               // output
     *sp-- = (uintptr_t) exit_proc_glue;  // retpc

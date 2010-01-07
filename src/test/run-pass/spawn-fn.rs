@@ -2,14 +2,14 @@
 
 prog a
 {
-  fn x(int n) -> () {
-    log "hello from spawned function";
+  fn x(str s, int n) -> () {
+    log s;
     log n;
   }
   main {
-    spawn x(1);
-    spawn x(2);
-    spawn x(3);
+    spawn x("hello from first spawned fn", 65);
+    spawn x("hello from second spawned fn", 66);
+    spawn x("hello from third spawned fn", 67);
     let int i = 10;
     while (i > 0) {
       i = i - 1;
