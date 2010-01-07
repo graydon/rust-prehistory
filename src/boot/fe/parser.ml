@@ -723,7 +723,9 @@ and parse_atomic_ty ps =
             | Some t -> t
           else Ast.TY_tup slots
 
-    | MACH m -> Ast.TY_mach m
+    | MACH m ->
+        bump ps;
+        Ast.TY_mach m
 
     (* FIXME: parse mod types. *)
 
