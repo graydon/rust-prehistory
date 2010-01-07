@@ -295,6 +295,7 @@ struct rust_proc {
     rust_rt *rt;
     stk_seg *stk;
     rust_prog *prog;
+    uintptr_t fn;
     uintptr_t sp;           /* saved sp when not running. */
     proc_state_t state;
     size_t idx;
@@ -772,9 +773,9 @@ new_proc(rust_rt *rt, rust_prog *prog)
 
     /* "initial args" to the main frame:
      *
-     *      *sp+N+24   = proc ptr
-     *      *sp+N+16   = NULL = fake outptr (spacing)
-     *      *sp+N+8    = NULL = fake retpc (spacing)
+     *      *sp+N+16   = proc ptr
+     *      *sp+N+12   = NULL = fake outptr (spacing)
+     *      *sp+N+8    = duplicate retpc (fake)
      *      *sp+N+4    = "retpc" to return to (activation)
      *      *sp+N      = NULL = 0th callee-save
      *      ...
@@ -809,9 +810,68 @@ new_proc(rust_rt *rt, rust_prog *prog)
 
 
 static rust_proc*
-upcall_spawn(rust_rt *rt, uintptr_t proc_glue, uintptr_t spawnee_fn, size_t callsz)
+spawn_proc(rust_rt *rt, uintptr_t proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
-    return NULL;
+    /* FIXME: need to actually convey the proc internal-slots size to
+       here. */
+    rust_proc *proc = (rust_proc *)xcalloc(rt, sizeof(rust_proc) + 1024);
+    logptr(rt, "new proc", (uintptr_t)proc);
+    logptr(rt, "proc glue", proc_glue);
+    logptr(rt, "from spawnee", spawnee_fn);
+    proc->fn = spawnee_fn;
+    proc->stk = new_stk(rt, 0);
+
+    /*
+     * Set sp to last uintptr_t-sized cell of segment
+     * then align down to 16 boundary, to be safe-ish for
+     * alignment (?)
+     *
+     * FIXME: actually convey alignment constraint here so
+     * we're not just being conservative. I don't *think*
+     * there are any platforms alive at the moment with
+     * >16 byte alignment constraints, but this is sloppy.
+     */
+    proc->sp = proc->stk->limit;
+    proc->sp -= sizeof(uintptr_t);
+    proc->sp &= ~0xf;
+
+    /* "initial args" to the main frame:
+     *
+     *      *sp+N+20   = arg0, spawnee function
+     *      *sp+N+16   = proc ptr
+     *      *sp+N+12   = NULL = fake outptr (spacing)
+     *      *sp+N+8    = duplicate retpc (fake)
+     *      *sp+N+4    = "retpc" to return to (activation)
+     *      *sp+N      = NULL = 0th callee-save
+     *      ...
+     *      *sp        = NULL = Nth callee-save
+     *
+     * This is slightly confusing since it looks like we have two copies
+     * of retpc; that's intentional. The notion is that when we *first*
+     * activate this frame, we'll be entering via the c-to-proc glue,
+     * and that will restore the fake callee-saves here and then
+     * return-to the "activation" pc. That PC will be the first insn of a
+     * rust prog that assumes for -- simplicity sake it -- has a
+     * same-as-always-laid-out rust frame under it. In particular, one
+     * with a retpc. Even though said retpc is bogus -- just spacing --
+     * we place it and a fake outptr so that the frame we return to is
+     * the right shape.
+     */
+    uintptr_t *sp = (uintptr_t*) proc->sp;
+    proc->sp -= (4 + n_callee_saves) * sizeof(uintptr_t);
+    *sp-- = (uintptr_t) spawnee_fn;
+    *sp-- = (uintptr_t) proc;
+    *sp-- = (uintptr_t) 0;
+    *sp-- = (uintptr_t) proc_glue;
+    *sp-- = (uintptr_t) proc_glue;
+    for (size_t j = 0; j < n_callee_saves; ++j) {
+        *sp-- = 0;
+    }
+
+    proc->rt = rt;
+    proc->state = proc_state_running;
+    proc->refcnt = 1;
+    return proc;
 }
 
 
@@ -864,7 +924,7 @@ get_proc_vec(rust_rt *rt, rust_proc *proc)
 }
 
 static void
-add_proco_state_vec(rust_rt *rt, rust_proc *proc)
+add_proc_state_vec(rust_rt *rt, rust_proc *proc)
 {
     ptr_vec<rust_proc> *v = get_proc_vec(rt, proc);
     xlog(rt, LOG_MEM|LOG_PROC,
@@ -906,7 +966,7 @@ proc_state_transition(rust_rt *rt,
     I(rt, proc->state == src);
     remove_proc_from_state_vec(rt, proc);
     proc->state = dst;
-    add_proco_state_vec(rt, proc);
+    add_proc_state_vec(rt, proc);
 }
 
 static void
@@ -1439,6 +1499,17 @@ static void *rust_thread_start(void *ptr)
     return 0;
 }
 
+static rust_proc*
+upcall_spawn(rust_rt *rt, uintptr_t proc_glue, uintptr_t spawnee_fn, size_t callsz)
+{
+    xlog(rt, LOG_UPCALL|LOG_MEM|LOG_PROC,
+         "spawn fn: proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
+         proc_glue, spawnee_fn, callsz);
+    rust_proc *proc = spawn_proc(rt, proc_glue, spawnee_fn, callsz);
+    add_proc_state_vec(rt, proc);
+    return proc;
+}
+
 static rust_proc *
 upcall_new_thread(rust_rt *rt, rust_prog *prog)
 {
@@ -1485,7 +1556,7 @@ handle_upcall(rust_proc *proc)
         upcall_del_proc(proc->rt, (rust_proc*)args[0]);
         break;
     case upcall_code_sched:
-        add_proco_state_vec(proc->rt, (rust_proc*)args[0]);
+        add_proc_state_vec(proc->rt, (rust_proc*)args[0]);
         break;
     case upcall_code_fail:
         upcall_fail(proc->rt,
@@ -1554,7 +1625,7 @@ rust_main_loop(rust_prog *prog, rust_srv *srv)
     logptr(rt, "prog->fini_code", (uintptr_t)prog->fini_code);
 
     rt->root_proc = new_proc(rt, prog);
-    add_proco_state_vec(rt, rt->root_proc);
+    add_proc_state_vec(rt, rt->root_proc);
     proc = sched(rt);
 
     logptr(rt, "root proc", (uintptr_t)proc);
