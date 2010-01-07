@@ -864,6 +864,8 @@ spawn_proc(rust_rt *rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t c
     // runs its epilogue.
     uintptr_t frame_base = (uintptr_t) (sp+1);
 
+    // Copy args from spawner to spawnee.
+
     // The incoming args to the spawnee frame we're activating:
     *sp-- = (uintptr_t) proc;            // proc
     *sp-- = (uintptr_t) 0;               // output

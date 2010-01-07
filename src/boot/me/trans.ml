@@ -567,8 +567,8 @@ let trans_visitor
     capture_emitted_glue name fix spill g;
     pop_emitter ()
 
-  and get_exit_proc_glue _ : fixup =
-    let g = GLUE_exit_proc in
+  and get_exit_proc_glue tsig : fixup =
+    let g = GLUE_exit_proc tsig in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
@@ -577,6 +577,16 @@ let trans_visitor
               let spill = new_fixup "proc glue spill" in
                 push_new_emitter ();
                 let dst = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+                  (* 
+                   * We return-to-here in a synthetic frame we did not build; our job is
+                   * to drop the slots associated with tsig, which are already on the stack
+                   * as though we put them there in a call, then assume the 'exited' state.
+                   *)
+                let arg_layouts = layout_fn_call_tup abi tsig in
+                let in_slots = tsig.Ast.sig_input_slots in
+                let implicit_args = 2 in
+                  drop_arg_slots in_slots arg_layouts implicit_args;
+
                   abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
                   emit (Il.call dst (Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None))));
                   capture_emitted_glue "proc glue" fix spill g;
@@ -875,7 +885,7 @@ let trans_visitor
     in
     let arg_layouts = layout_fn_call_tup abi tsig in
     let callsz = (pack 0L arg_layouts).layout_size in
-    let exit_proc_glue_fixup = get_exit_proc_glue () in
+    let exit_proc_glue_fixup = get_exit_proc_glue tsig in
     let exit_proc_glue_addr = (fixup_to_addr
                                  abi.Abi.abi_has_pcrel_data
                                  abi.Abi.abi_has_abs_data
@@ -1814,15 +1824,7 @@ let trans_visitor
       (arg2:Il.cell option)
       (args:Ast.atom array)
       : unit =
-    let param_cell layout input_opt : Il.cell =
-      let param_addr = sp_imm arg_layouts.(layout).layout_offset in
-      let param_referent_ty =
-        match input_opt with
-            None -> Il.ScalarTy (Il.voidptr_t)
-          | Some i -> slot_referent_type abi in_slots.(i)
-      in
-        Il.Addr (param_addr, param_referent_ty)
-    in
+    let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
     (* FIXME: there's got to be a nicer factoring than this. *)
     let implicit_args =
       match arg2 with
@@ -1866,10 +1868,32 @@ let trans_visitor
        *)
       let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
         emit (Il.call vr (code_of_cell callee_cell));
-        for i = implicit_args to arr_max arg_layouts do
-          iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
-          drop_slot (param_cell i (Some (i-implicit_args))) in_slots.(i-implicit_args) None
-        done
+        drop_arg_slots in_slots arg_layouts implicit_args
+
+  and param_cell_full
+      (in_slots:Ast.slot array)
+      (arg_layouts:layout array)
+      (layout:int)
+      (input_opt:int option)
+      : Il.cell =
+    let param_addr = sp_imm arg_layouts.(layout).layout_offset in
+    let param_referent_ty =
+      match input_opt with
+          None -> Il.ScalarTy (Il.voidptr_t)
+        | Some i -> slot_referent_type abi in_slots.(i)
+    in
+      Il.Addr (param_addr, param_referent_ty)
+
+  and drop_arg_slots
+      (in_slots:Ast.slot array)
+      (arg_layouts:layout array)
+      (implicit_args:int)
+      : unit =
+    let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
+    for i = implicit_args to arr_max arg_layouts do
+      iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
+      drop_slot (param_cell i (Some (i-implicit_args))) in_slots.(i-implicit_args) None
+    done
 
 
   and trans_stmt (stmt:Ast.stmt) : unit =
