@@ -606,11 +606,17 @@ let trans_visitor
           end
 
 
-  and trace_str s =
-    let static = trans_static_string s in
-      trans_upcall Abi.UPCALL_trace_str [| static |]
+  and trace_str b s =
+    if b
+    then
+      begin
+        let static = trans_static_string s in
+          trans_upcall Abi.UPCALL_trace_str [| static |]
+      end
 
-  and trace_word w =
+  and trace_word b w =
+    if b
+    then
       trans_upcall Abi.UPCALL_trace_word [| Il.Cell w |]
 
   and get_drop_glue (ty:Ast.ty)
@@ -618,10 +624,12 @@ let trans_visitor
     let g = GLUE_drop ty in
     let prefix _ = "drop " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
     let inner (arg:Il.typed_addr) =
-      trace_str "in drop-glue, dropping";
-      trace_word (Il.Addr arg);
+      trace_str cx.ctxt_sess.Session.sess_trace_drop
+        "in drop-glue, dropping";
+      trace_word cx.ctxt_sess.Session.sess_trace_drop (Il.Addr arg);
       drop_ty ty (deref (Il.Addr arg));
-      trace_str "drop-glue complete";
+      trace_str cx.ctxt_sess.Session.sess_trace_drop
+        "drop-glue complete";
     in
       get_mem_glue g ty prefix inner
 
@@ -638,12 +646,15 @@ let trans_visitor
       let (body_addr, _) = deref_imm (Il.Addr arg) exterior_rc_body_off in
       let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
         lea vr body_addr;
-        trace_str "in free-glue, calling drop-glue";
-        trace_word vr;
+        trace_str cx.ctxt_sess.Session.sess_trace_drop
+          "in free-glue, calling drop-glue";
+        trace_word cx.ctxt_sess.Session.sess_trace_drop vr;
         trans_call_mem_glue (get_drop_glue ty) vr;
-        trace_str "back in free-glue, calling free";
+        trace_str cx.ctxt_sess.Session.sess_trace_drop
+          "back in free-glue, calling free";
         trans_free (Il.Addr arg);
-        trace_str "free-glue complete";
+        trace_str cx.ctxt_sess.Session.sess_trace_drop
+          "free-glue complete";
     in
       get_mem_glue g ty prefix inner
 
@@ -804,10 +815,12 @@ let trans_visitor
 
   and trans_block (block:Ast.block) : unit =
     Stack.push (get_block_layout cx block.id) block_layouts;
-    trace_str ("entering block");
+    trace_str cx.ctxt_sess.Session.sess_trace_block
+      "entering block";
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups block.id));
     Array.iter trans_stmt block.node;
-    trace_str ("exiting block");
+    trace_str cx.ctxt_sess.Session.sess_trace_block
+      "exiting block";
     let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
       (* 
        * FIXME: this is not going to free things in the proper order; 
@@ -824,7 +837,8 @@ let trans_visitor
                     ("drop slot: " ^
                        (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
               end;
-            trace_str ("dropping slot " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
+            trace_str cx.ctxt_sess.Session.sess_trace_drop
+              ("dropping slot " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
             let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
             let cell = cell_of_block_slot slot_id in
               drop_slot cell slot None
@@ -832,7 +846,8 @@ let trans_visitor
         block_slots;
       emit Il.Leave;
       ignore (Stack.pop block_layouts);
-      trace_str ("exited block");
+      trace_str cx.ctxt_sess.Session.sess_trace_block
+        "exited block";
 
 
   and trans_upcall (u:Abi.upcall) (args:Il.operand array) : unit =
@@ -2043,7 +2058,8 @@ let trans_visitor
       (tag:(Ast.header_tup * Ast.ty_tag * node_id))
       : unit =
     trans_frame_entry tagid;
-    trace_str ("in tag constructor " ^ n);
+    trace_str cx.ctxt_sess.Session.sess_trace_tag
+      ("in tag constructor " ^ n);
     let (header_tup, _, _) = tag in
     let ctor_ty = Hashtbl.find cx.ctxt_all_item_types tagid in
     let ttag =
@@ -2077,7 +2093,8 @@ let trans_visitor
         trans_copy_tup true
           dst_ta slots
           src_ta slots;
-        trace_str ("finished tag constructor " ^ n);
+        trace_str cx.ctxt_sess.Session.sess_trace_tag
+          ("finished tag constructor " ^ n);
         trans_frame_exit tagid;
   in
 

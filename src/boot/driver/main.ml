@@ -43,6 +43,9 @@ let (sess:Session.sess) =
     Session.sess_log_asm = false;
     Session.sess_log_obj = false;
     Session.sess_log_out = stderr;
+    Session.sess_trace_block = false;
+    Session.sess_trace_drop = false;
+    Session.sess_trace_tag = false;
     Session.sess_failed = false;
     Session.sess_spans = Hashtbl.create 0;
   }
@@ -81,7 +84,15 @@ let argspecs =
     ("-lra", Arg.Unit (fun _ -> sess.Session.sess_log_ra <- true), "log register allocation");
     ("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");
     ("-lasm", Arg.Unit (fun _ -> sess.Session.sess_log_asm <- true), "log assembly");
-    ("-lobj", Arg.Unit (fun _ -> sess.Session.sess_log_obj <- true), "log object file generation")
+    ("-lobj", Arg.Unit (fun _ -> sess.Session.sess_log_obj <- true), "log object file generation");
+    ("-tblock", Arg.Unit (fun _ -> sess.Session.sess_trace_block <- true), "emit block-boundary tracing code");
+    ("-tdrop", Arg.Unit (fun _ -> sess.Session.sess_trace_drop <- true), "emit slot-drop tracing code");
+    ("-ttag", Arg.Unit (fun _ -> sess.Session.sess_trace_tag <- true), "emit tag-construction tracing code");
+    ("-tall", Arg.Unit (fun _ ->
+                          sess.Session.sess_trace_block <- true;
+                          sess.Session.sess_trace_drop <- true;
+                          sess.Session.sess_trace_tag <- true ),
+     "emit all tracing code");
   ]
 ;;
 

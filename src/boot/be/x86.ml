@@ -1106,64 +1106,59 @@ let mul_like (src:Il.operand) (signed:bool) (slash:int)
 
 
 let select_insn (q:Il.quad) : Asm.frag =
-  let frag =
-    match q.Il.quad_body with
-        Il.Unary u ->
-          let unop s =
-            if u.Il.unary_src = Il.Cell u.Il.unary_dst
-            then insn_rm_r 0xf7 u.Il.unary_dst s
-            else raise Unrecognized
-          in
-            begin
-              match u.Il.unary_op with
-                  Il.UMOV -> mov false u.Il.unary_dst u.Il.unary_src
-                | Il.IMOV -> mov true u.Il.unary_dst u.Il.unary_src
-                | Il.NEG -> unop slash3
-                | Il.NOT -> unop slash2
-            end
-
-      | Il.Lea le -> lea le.Il.lea_dst le.Il.lea_src
-
-      | Il.Cmp c -> cmp c.Il.cmp_lhs c.Il.cmp_rhs
-
-      | Il.Binary b ->
+  match q.Il.quad_body with
+      Il.Unary u ->
+        let unop s =
+          if u.Il.unary_src = Il.Cell u.Il.unary_dst
+          then insn_rm_r 0xf7 u.Il.unary_dst s
+          else raise Unrecognized
+        in
           begin
-            if Il.Cell b.Il.binary_dst = b.Il.binary_lhs
-            then
-              let binop = alu_binop b.Il.binary_dst b.Il.binary_rhs in
-              let mulop = mul_like b.Il.binary_rhs in
-                match (b.Il.binary_dst, b.Il.binary_op) with
-                    (_, Il.ADD) -> binop slash0 0x1 0x3
-                  | (_, Il.SUB) -> binop slash5 0x29 0x2b
-                  | (_, Il.AND) -> binop slash4 0x21 0x23
-                  | (_, Il.OR) -> binop slash1 0x09 0x0b
-
-                  | (Il.Reg (Il.Hreg r, t), Il.UMUL)
-                      when is_ty32 t && r = eax -> mulop false slash4
-
-                  | (Il.Reg (Il.Hreg r, t), Il.IMUL)
-                      when is_ty32 t && r = eax -> mulop true slash5
-
-                  | (Il.Reg (Il.Hreg r, t), Il.UDIV)
-                      when is_ty32 t && r = eax -> mulop false slash6
-
-                  | (Il.Reg (Il.Hreg r, t), Il.IDIV)
-                      when is_ty32 t && r = eax -> mulop true slash7
-
-                  | (Il.Reg (Il.Hreg r, t), Il.UMOD)
-                      when is_ty32 t && r = edx -> mulop false slash6
-
-                  | (Il.Reg (Il.Hreg r, t), Il.IMOD)
-                      when is_ty32 t && r = edx -> mulop true slash7
-
-                  | _ -> raise Unrecognized
-            else raise Unrecognized
+            match u.Il.unary_op with
+                Il.UMOV -> mov false u.Il.unary_dst u.Il.unary_src
+              | Il.IMOV -> mov true u.Il.unary_dst u.Il.unary_src
+              | Il.NEG -> unop slash3
+              | Il.NOT -> unop slash2
           end
-      | _ -> select_insn_misc q.Il.quad_body
-  in
-    match q.Il.quad_fixup with
-        None -> frag
-      | Some f -> Asm.DEF (f, frag)
+
+    | Il.Lea le -> lea le.Il.lea_dst le.Il.lea_src
+
+    | Il.Cmp c -> cmp c.Il.cmp_lhs c.Il.cmp_rhs
+
+    | Il.Binary b ->
+        begin
+          if Il.Cell b.Il.binary_dst = b.Il.binary_lhs
+          then
+            let binop = alu_binop b.Il.binary_dst b.Il.binary_rhs in
+            let mulop = mul_like b.Il.binary_rhs in
+              match (b.Il.binary_dst, b.Il.binary_op) with
+                  (_, Il.ADD) -> binop slash0 0x1 0x3
+                | (_, Il.SUB) -> binop slash5 0x29 0x2b
+                | (_, Il.AND) -> binop slash4 0x21 0x23
+                | (_, Il.OR) -> binop slash1 0x09 0x0b
+
+                | (Il.Reg (Il.Hreg r, t), Il.UMUL)
+                    when is_ty32 t && r = eax -> mulop false slash4
+
+                | (Il.Reg (Il.Hreg r, t), Il.IMUL)
+                    when is_ty32 t && r = eax -> mulop true slash5
+
+                | (Il.Reg (Il.Hreg r, t), Il.UDIV)
+                    when is_ty32 t && r = eax -> mulop false slash6
+
+                | (Il.Reg (Il.Hreg r, t), Il.IDIV)
+                    when is_ty32 t && r = eax -> mulop true slash7
+
+                | (Il.Reg (Il.Hreg r, t), Il.UMOD)
+                    when is_ty32 t && r = edx -> mulop false slash6
+
+                | (Il.Reg (Il.Hreg r, t), Il.IMOD)
+                    when is_ty32 t && r = edx -> mulop true slash7
+
+                | _ -> raise Unrecognized
+          else raise Unrecognized
+        end
+    | _ -> select_insn_misc q.Il.quad_body
 ;;
 
 
@@ -1187,21 +1182,28 @@ let select_insns (sess:Session.sess) (q:Il.quads) : Asm.frag =
         let frags = Stack.top scopes in
           frags := frag :: (!frags)
       in
-        match q.(i).Il.quad_body with
-            Il.Enter f ->
-              Stack.push f fixups;
-              Stack.push (ref []) scopes;
-          | Il.Leave ->
-              append (Asm.DEF (Stack.pop fixups, pop_frags ()))
-          | _ ->
-              try
-                append (select_insn q.(i))
-              with
-                  Unrecognized ->
-                    Session.fail sess
-                      "E:Assembly error: unrecognized quad: %s\n%!"
-                      (Il.string_of_quad reg_str q.(i));
-                    ()
+        begin
+          match q.(i).Il.quad_fixup with
+              None -> ()
+            | Some f -> append (Asm.DEF (f, Asm.MARK))
+        end;
+        begin
+          match q.(i).Il.quad_body with
+              Il.Enter f ->
+                Stack.push f fixups;
+                Stack.push (ref []) scopes;
+            | Il.Leave ->
+                append (Asm.DEF (Stack.pop fixups, pop_frags ()))
+            | _ ->
+                try
+                  append (select_insn q.(i))
+                with
+                    Unrecognized ->
+                      Session.fail sess
+                        "E:Assembly error: unrecognized quad: %s\n%!"
+                        (Il.string_of_quad reg_str q.(i));
+                      ()
+        end
     done;
     pop_frags()
 ;;

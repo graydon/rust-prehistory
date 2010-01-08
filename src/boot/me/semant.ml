@@ -575,11 +575,11 @@ let ty_fold_list_concat _ : ('a list) simple_ty_fold =
 (* Mutability analysis. *)
 
 let mode_is_mutable (m:Ast.mode) : bool =
-  match m with 
+  match m with
       Ast.MODE_exterior Ast.MUTABLE
     | Ast.MODE_interior Ast.MUTABLE -> true
     | _ -> false
-;;      
+;;
 
 let slot_is_mutable (s:Ast.slot) : bool =
   mode_is_mutable s.Ast.slot_mode

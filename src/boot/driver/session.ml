@@ -30,6 +30,9 @@ type sess =
   mutable sess_log_asm: bool;
   mutable sess_log_obj: bool;
   mutable sess_log_out: out_channel;
+  mutable sess_trace_block: bool;
+  mutable sess_trace_drop: bool;
+  mutable sess_trace_tag: bool;
   mutable sess_failed: bool;
   sess_spans: (node_id,span) Hashtbl.t;
 }
