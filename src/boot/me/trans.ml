@@ -1779,7 +1779,6 @@ let trans_visitor
       (arg_layouts:layout array)
       (args:Ast.atom array)
       : unit =
-    (* FIXME: there's got to be a nicer factoring than this. *)
     let implicit_args = 2 in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args output_cell in_slots arg_layouts args;

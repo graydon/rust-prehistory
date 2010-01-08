@@ -257,7 +257,7 @@ and stmt_decl =
 
 and stmt_alt_port =
     {
-      (* else lval is a timeout value, a b64 count of seconds. *)
+      (* else lval is a timeout value, an f64 count of seconds. *)
       alt_port_arms: (lval * lval) array;
       alt_port_else: (lval * stmt) option;
     }
@@ -480,7 +480,7 @@ and crate' =
 and crate = crate' identified
 ;;
 
-(***********************************************************************) 
+(***********************************************************************)
 
 let fmt = Format.fprintf;;
 
@@ -537,17 +537,18 @@ and fmt_mutable (ff:Format.formatter) (m:mutability) : unit =
       MUTABLE -> fmt ff "mutable "
     | IMMUTABLE -> ()
 
+and fmt_mode (ff:Format.formatter) (m:mode) : unit =
+  match m with
+      MODE_exterior m -> (fmt_mutable ff m; fmt ff "@@")
+    | MODE_interior m -> fmt_mutable ff m
+    | MODE_read_alias -> fmt ff "~"
+    | MODE_write_alias -> fmt ff "^"
+
 and fmt_slot (ff:Format.formatter) (s:slot) : unit =
   match s.slot_ty with
       None -> fmt ff "auto"
     | Some t ->
-        begin
-          match s.slot_mode with
-              MODE_exterior m -> (fmt_mutable ff m; fmt ff "@@")
-            | MODE_interior m-> fmt_mutable ff m
-            | MODE_read_alias -> fmt ff "~"
-            | MODE_write_alias -> fmt ff "^"
-        end;
+        fmt_mode ff s.slot_mode;
         fmt_ty ff t
 
 and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) option) : unit =
@@ -565,8 +566,7 @@ and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) opt
   done;
   fmt ff "@])"
 
-and fmt_fn_header (ff:Format.formatter) (tf:ty_fn)
-    (id:ident option) (params:(ident array) option) : unit =
+and fmt_ty_fn (ff:Format.formatter) (tf:ty_fn) : unit =
   let (tsig, ta) = tf in
     begin
       match ta.fn_purity with
@@ -578,16 +578,6 @@ and fmt_fn_header (ff:Format.formatter) (tf:ty_fn)
       match ta.fn_proto with
           None -> ()
         | Some p -> fmt_proto ff p
-    end;
-    begin
-      match id with
-          None -> ()
-        | Some i -> fmt_ident ff i
-    end;
-    begin
-      match params with
-          None -> ()
-        | Some p -> fmt_decl_params ff p
     end;
     fmt_slots ff tsig.sig_input_slots None;
     fmt ff " -> ";
@@ -650,7 +640,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
 
-  | TY_fn tfn -> fmt_fn_header ff tfn None None
+  | TY_fn tfn -> fmt_ty_fn ff tfn
   | TY_proc -> fmt ff "proc"
   | TY_tag ttag -> fmt_tag ff ttag
   | TY_iso tiso -> fmt_iso ff tiso
@@ -663,6 +653,15 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
 
 and fmt_constrs (ff:Format.formatter) (cc:constr array) : unit =
   Array.iter (fmt_constr ff) cc
+
+and fmt_decl_constrs (ff:Format.formatter) (cc:constr array) : unit =
+  if Array.length cc = 0
+  then ()
+  else
+    begin
+      fmt ff " : ";
+      fmt_constrs ff cc
+    end
 
 and fmt_constr (ff:Format.formatter) (c:constr) : unit =
   fmt_name ff c.constr_name;
@@ -690,6 +689,7 @@ and fmt_carg (ff:Format.formatter) (ca:carg) : unit =
     | CARG_lit lit -> fmt_lit ff lit
 
 and fmt_obox ff = Format.pp_open_box ff 4
+and fmt_obox_3 ff = Format.pp_open_box ff 3
 and fmt_cbox ff = Format.pp_close_box ff ()
 and fmt_obr ff = fmt ff "{"
 and fmt_cbr ff = fmt ff "@\n}"
@@ -768,8 +768,8 @@ and fmt_mach (ff:Format.formatter) (m:ty_mach) : unit =
   | TY_s32 -> fmt ff "s32"
   | TY_s64 -> fmt ff "s64"
   | TY_f32 -> fmt ff "f32"
-  | TY_f64 -> fmt ff "b64"
-      
+  | TY_f64 -> fmt ff "f64"
+
 and fmt_lit (ff:Format.formatter) (l:lit) : unit =
   match l with
   | LIT_nil -> fmt ff "()"
@@ -877,7 +877,8 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
                 None -> ()
               | Some e ->
                   begin
-                    fmt_cbr ff;
+                    fmt_cbb ff;
+                    fmt_obox_3 ff;
                     fmt ff " else ";
                     fmt_obr ff;
                     fmt_stmts ff e.node
@@ -930,15 +931,42 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
 
       | STMT_init_rec (dst, entries) ->
           fmt_lval ff dst;
-          fmt ff " = rec (...);"
+          fmt ff " = rec(";
+          for i = 0 to (Array.length entries) - 1
+          do
+            if i != 0
+            then fmt ff ", ";
+            let (ident, mode, atom) = entries.(i) in
+              fmt_ident ff ident;
+              fmt ff " = ";
+              fmt_mode ff mode;
+              fmt_atom ff atom;
+          done;
+          fmt ff ");"
 
       | STMT_init_vec (dst, _, atoms) ->
           fmt_lval ff dst;
-          fmt ff " = vec (...);"
+          fmt ff " = vec(";
+          for i = 0 to (Array.length atoms) - 1
+          do
+            if i != 0
+            then fmt ff ", ";
+            fmt_atom ff atoms.(i);
+          done;
+          fmt ff ");"
 
       | STMT_init_tup (dst, entries) ->
           fmt_lval ff dst;
-          fmt ff " = (...);"
+          fmt ff " = (";
+          for i = 0 to (Array.length entries) - 1
+          do
+            if i != 0
+            then fmt ff ", ";
+            let (mode, atom) = entries.(i) in
+              fmt_mode ff mode;
+              fmt_atom ff atom;
+          done;
+          fmt ff ");";
 
       | STMT_init_str (dst, s) ->
           fmt_lval ff dst;
@@ -948,6 +976,11 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt ff "check (";
           fmt_expr ff expr;
           fmt ff ");"
+
+      | STMT_check (constrs, _) ->
+          fmt ff "check ";
+          fmt_constrs ff constrs;
+          fmt ff ";"
 
       | _ -> fmt ff "?stmt?;"
   end
@@ -962,7 +995,6 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
   | STMT_alt_type of stmt_alt_type
   | STMT_alt_port of stmt_alt_port
   | STMT_prove of (constrs)
-  | STMT_check of (constrs)
   | STMT_checkif of (constrs * stmt)
   | STMT_send of (lval * lval)
   | STMT_recv of (lval * lval)
@@ -984,39 +1016,83 @@ and fmt_decl_params (ff:Format.formatter) (params:ident array) : unit =
       fmt ff "]"
     end;
 
+and fmt_header_slots (ff:Format.formatter) (hslots:header_slots) : unit =
+  fmt_slots ff
+    (Array.map (fun (s,_) -> s.node) hslots)
+    (Some (Array.map (fun (_, i) -> i) hslots))
+
+and fmt_ident_and_params (ff:Format.formatter) (id:ident) (params:ident array) : unit =
+  fmt_ident ff id;
+  fmt_decl_params ff params
+
+and fmt_fn (ff:Format.formatter) (id:ident) (params:ident array) (f:fn) : unit =
+  fmt_obox ff;
+  begin
+    match f.fn_aux.fn_purity with
+        PURE -> fmt ff "pure "
+      | IMPURE mut -> fmt_mutable ff mut
+  end;
+  fmt ff "fn";
+  begin
+    match f.fn_aux.fn_proto with
+        None -> ()
+      | Some p -> fmt_proto ff p
+  end;
+  fmt ff " ";
+  fmt_ident_and_params ff id params;
+  fmt_header_slots ff f.fn_input_slots;
+  fmt_decl_constrs ff f.fn_input_constrs;
+  fmt ff " -> ";
+  fmt_slot ff f.fn_output_slot.node;
+  fmt ff " ";
+  fmt_obr ff;
+  fmt_stmts ff f.fn_body.node;
+  fmt_cbb ff
+
+
 and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
   fmt ff "@\n";
   begin
     match item.node with
-        MOD_ITEM_opaque_type td -> fmt ff "?tydecl?"
-      | MOD_ITEM_public_type td -> fmt ff "?tydecl?"
-      | MOD_ITEM_tag td -> fmt ff "?tagdecl?"
-      | MOD_ITEM_pred pd -> fmt ff "?preddecl?"
+        MOD_ITEM_opaque_type td ->
+          fmt ff "type ";
+          fmt_ident_and_params ff id td.decl_params;
+          fmt ff " = ";
+          fmt_ty ff td.decl_item;
+          fmt ff ";";
+
+      | MOD_ITEM_public_type td ->
+          fmt ff "pub type ";
+          fmt_ident_and_params ff id td.decl_params;
+          fmt ff " = ";
+          fmt_ty ff td.decl_item;
+          fmt ff ";";
+
+      | MOD_ITEM_tag td ->
+          fmt ff "?tagdecl?"
+
+      | MOD_ITEM_pred pd ->
+          fmt_obox ff;
+          fmt ff "pred ";
+          fmt_ident_and_params ff id pd.decl_params;
+          fmt_header_slots ff pd.decl_item.pred_input_slots;
+          fmt_decl_constrs ff pd.decl_item.pred_input_constrs;
+          fmt ff " ";
+          fmt_obr ff;
+          fmt_stmts ff pd.decl_item.pred_body.node;
+          fmt_cbb ff
 
       | MOD_ITEM_mod md ->
-          begin
-            fmt_obox ff;
-            fmt ff "mod ";
-            fmt_ident ff id;
-            fmt_decl_params ff md.decl_params;
-            fmt_obr ff;
-            fmt_mod_items ff md.decl_item;
-            fmt_cbb ff
-          end
+          fmt_obox ff;
+          fmt ff "mod ";
+          fmt_ident_and_params ff id md.decl_params;
+          fmt ff " ";
+          fmt_obr ff;
+          fmt_mod_items ff md.decl_item;
+          fmt_cbb ff
 
       | MOD_ITEM_fn fd ->
-          begin
-            fmt_obox ff;
-            fmt ff "fn ";
-            fmt_ident ff id;
-            fmt ff "(...) -> (...) ";
-            fmt_obr ff;
-            fmt_stmts ff fd.decl_item.fn_body.node;
-            (* let (tfn = ty_fn_of_fn
-               fmt_fn_header ff fd.decl_item. (Some id) (Some fd.decl_params);
-            *)
-            fmt_cbb ff
-          end
+          fmt_fn ff id fd.decl_params fd.decl_item
   end
 
 and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
