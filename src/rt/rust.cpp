@@ -1468,8 +1468,6 @@ static rust_proc*
 upcall_new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
                 uintptr_t spawnee_fn, size_t callsz)
 {
-    // FIXME: there's only one exit-proc glue across the crate, make it a constant
-    // a la the C-to-proc and proc-to-C glues.
     xlog(rt, LOG_UPCALL|LOG_MEM|LOG_PROC,
          "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
          exit_proc_glue, spawnee_fn, callsz);
