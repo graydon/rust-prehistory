@@ -14,8 +14,6 @@ mod driver {
     mod rustc;
 }
 
-main = driver.rustc.rustc;
-
 // Local Variables:
 // fill-column: 70;
 // indent-tabs-mode: nil
