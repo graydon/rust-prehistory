@@ -1,3 +1,0 @@
-
-mod basic = "basic.rs";
-main = basic.root;

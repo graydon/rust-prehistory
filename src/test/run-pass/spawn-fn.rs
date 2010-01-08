@@ -5,7 +5,7 @@ fn x(str s, int n) -> () {
   log n;
 }
 
-fn parent() -> () {
+fn main() -> () {
   spawn x("hello from first spawned fn", 65);
   spawn x("hello from second spawned fn", 66);
   spawn x("hello from third spawned fn", 67);

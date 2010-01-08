@@ -495,7 +495,8 @@ let emit_file
     (code:Asm.frag)
     (data:Asm.frag)
     (dwarf:Dwarf.debug_records)
-    (root_prog_fixup:fixup)
+    (main_fn_fixup:fixup)
+    (main_exit_proc_glue_fixup:fixup)
     (c_to_proc_fixup:fixup)
     : unit =
 
@@ -716,9 +717,9 @@ let emit_file
 
     (* Push 16 bytes to preserve SSE alignment. *)
     Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
-    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
     Il.emit e (Il.Push (X86.imm (Asm.M_POS c_to_proc_fixup)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS root_prog_fixup)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS main_exit_proc_glue_fixup)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS main_fn_fixup)));
     Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS rust_start_fixup))));
     Il.emit e (Il.Push (X86.ro X86.eax));
     Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS exit_fixup))));

@@ -1970,7 +1970,12 @@ and parse_mod_item ps =
 
       | FN proto_opt ->
           bump ps;
-          let ident = ctxt "mod fn item: ident" parse_ident ps in
+          let ident =
+            (* FIXME: may un-keyword 'main' eventually. *)
+            match peek ps with
+                MAIN -> (bump ps; "main")
+              | _ -> ctxt "mod fn item: ident" parse_ident ps
+          in
           let params = ctxt "mod fn item: type params" parse_ty_params ps in
           let fn = ctxt "mod fn item: fn" (parse_fn proto_opt pure) ps in
           let
@@ -2231,35 +2236,31 @@ and infer_main_fn
     (ps:pstate)
     (crate_items:Ast.mod_items)
     : Ast.name =
-  let progs = ref [] in
+  let fns = ref [] in
   let extend prefix_name ident =
     match prefix_name with
         None -> Ast.NAME_base (Ast.BASE_ident ident)
       | Some n -> Ast.NAME_ext (n, Ast.COMP_ident ident)
   in
   let rec dig prefix_name items =
-    Hashtbl.iter (extract_prog prefix_name) items
-  and extract_prog prefix_name ident item =
+    Hashtbl.iter (extract_fn prefix_name) items
+  and extract_fn prefix_name ident item =
     match item.node with
         Ast.MOD_ITEM_mod md ->
           if Array.length md.Ast.decl_params = 0
           then dig (Some (extend prefix_name ident)) md.Ast.decl_item
           else ()
-      | Ast.MOD_ITEM_prog pd ->
-          if Array.length pd.Ast.decl_params = 0
-          then progs := (extend prefix_name ident) :: (!progs)
-          else ()
       | Ast.MOD_ITEM_fn fd ->
-          if Array.length fd.Ast.decl_params = 0
-          then progs := (extend prefix_name ident) :: (!progs)
+          if Array.length fd.Ast.decl_params = 0 && ident = "main"
+          then fns := (extend prefix_name ident) :: (!fns)
           else ()
       | _ -> ()
   in
     dig None crate_items;
-    match !progs with
-        [] -> raise (err "cannot infer main function: no programs found" ps)
+    match !fns with
+        [] -> raise (err "cannot infer main function: no 'main' function found" ps)
       | [x] -> x
-      | _ -> raise (err "cannot infer main function: multiple functions found" ps)
+      | _ -> raise (err "cannot infer main function: multiple 'main' functions found" ps)
 ;;
 
 let parse_root_with_parse_fn

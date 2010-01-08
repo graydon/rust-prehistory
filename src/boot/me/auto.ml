@@ -121,6 +121,15 @@ let auto_inference_visitor
         | Ast.STMT_init_str (lval, _) ->
             ignore (unify_lval (Some Ast.TY_str) lval)
 
+        | Ast.STMT_init_chan (chan, Some port) ->
+            begin
+              match unify_lval None port with
+                  Some (Ast.TY_port t) ->
+                    ignore (unify_lval (Some (Ast.TY_chan t)) chan)
+                | Some _ -> err (Some s.id) "non-port type passed to channel"
+                | None -> ()
+            end
+
         | Ast.STMT_init_tup (lval, atoms) ->
             let unify_init tyo =
               match tyo with

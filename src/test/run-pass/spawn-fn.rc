@@ -1,2 +1,0 @@
-mod sp = "spawn-fn.rs";
-main = sp.parent;

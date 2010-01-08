@@ -567,33 +567,34 @@ let trans_visitor
     capture_emitted_glue name fix spill g;
     pop_emitter ()
 
-  and get_exit_proc_glue tsig : fixup =
+  and emit_exit_proc_glue (tsig:Ast.ty_sig) (fix:fixup) (g:glue) : unit =
+    let spill = new_fixup "proc glue spill" in
+      push_new_emitter ();
+      (* 
+       * We return-to-here in a synthetic frame we did not build; our job is
+       * to drop the slots associated with tsig, which are already on the stack
+       * as though we put them there in a call, then assume the 'exited' state.
+       *)
+      let arg_layouts = layout_fn_call_tup abi tsig in
+      let in_slots = tsig.Ast.sig_input_slots in
+      let implicit_args = 2 in
+      let code = Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None)) in
+        drop_arg_slots in_slots arg_layouts implicit_args;
+
+        iflog (fun _ -> annotate "assume 'exited' state");
+        abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
+        call_code code;
+        capture_emitted_glue "proc glue" fix spill g;
+        pop_emitter ()
+
+  and get_exit_proc_glue (tsig:Ast.ty_sig) : fixup =
     let g = GLUE_exit_proc tsig in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
-            begin
-              let fix = new_fixup "proc glue" in
-              let spill = new_fixup "proc glue spill" in
-                push_new_emitter ();
-                  (* 
-                   * We return-to-here in a synthetic frame we did not build; our job is
-                   * to drop the slots associated with tsig, which are already on the stack
-                   * as though we put them there in a call, then assume the 'exited' state.
-                   *)
-                let arg_layouts = layout_fn_call_tup abi tsig in
-                let in_slots = tsig.Ast.sig_input_slots in
-                let implicit_args = 2 in
-                let code = Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None)) in
-                  drop_arg_slots in_slots arg_layouts implicit_args;
-
-                  iflog (fun _ -> annotate "assume 'exited' state");
-                  abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
-                  call_code code;
-                  capture_emitted_glue "proc glue" fix spill g;
-                  pop_emitter ();
-                  fix
-            end
+            let fix = new_fixup "proc glue" in
+              emit_exit_proc_glue tsig fix g;
+              fix
 
   (* 
    * Mem-glue functions are either 'mark', 'drop' or 'free', they take
@@ -2259,8 +2260,26 @@ let trans_visitor
   let visit_mod_item_pre n p i =
     enter_file_for i;
     begin
+      log cx "emitting main exit-proc glue for %s" cx.ctxt_main_name;
       match i.node with
-          Ast.MOD_ITEM_fn f -> trans_fn i.id f.Ast.decl_item.Ast.fn_body
+          Ast.MOD_ITEM_fn f ->
+            if path_name() = cx.ctxt_main_name
+            then
+              begin
+                let main_tsig =
+                  {
+                    Ast.sig_input_slots = [| |];
+                    Ast.sig_input_constrs = [| |];
+                    Ast.sig_output_slot = interior_slot Ast.TY_nil;
+                  }
+                in
+                  emit_exit_proc_glue
+                    main_tsig
+                    cx.ctxt_main_exit_proc_glue_fixup
+                    GLUE_exit_main_proc;
+              end;
+            trans_fn i.id f.Ast.decl_item.Ast.fn_body
+
         | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.decl_item.Ast.pred_body
         | Ast.MOD_ITEM_tag t -> trans_tag n i.id t.Ast.decl_item
         | _ -> ()
@@ -2440,6 +2459,7 @@ let emit_proc_to_c_glue cx =
       in
         htab_put cx.ctxt_glue_code GLUE_proc_to_C code
 ;;
+
 
 let process_crate
     (cx:ctxt)

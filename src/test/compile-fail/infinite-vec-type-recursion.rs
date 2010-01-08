@@ -1,10 +1,7 @@
 // -*- C -*-
 
-prog a
-{
-  type x = vec[x];
+type x = vec[x];
 
-  main {
-    let x b = vec();
-  }
+fn main() -> () {
+  let x b = vec();
 }

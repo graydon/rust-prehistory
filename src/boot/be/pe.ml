@@ -590,7 +590,8 @@ let pe_text_section
     ~(sess:Session.sess)
     ~(start_fixup:fixup)
     ~(rust_start_fixup:fixup)
-    ~(root_prog_fixup:fixup)
+    ~(main_fn_fixup:fixup)
+    ~(main_exit_proc_glue_fixup:fixup)
     ~(text_fixup:fixup)
     ~(crate_code:frag)
     ~(c_to_proc_fixup:fixup)
@@ -602,8 +603,12 @@ let pe_text_section
      * stack before returning.
      *)
     X86.objfile_start e
-      ~start_fixup ~rust_start_fixup ~root_prog_fixup
-      ~c_to_proc_fixup ~indirect_start: true;
+      ~start_fixup
+      ~rust_start_fixup
+      ~main_fn_fixup
+      ~main_exit_proc_glue_fixup
+      ~c_to_proc_fixup
+      ~indirect_start: true;
     def_aligned
       text_fixup
       (SEQ [|
@@ -636,7 +641,8 @@ let emit_file
     (code:Asm.frag)
     (data:Asm.frag)
     (dw:Dwarf.debug_records)
-    (root_prog_fixup:fixup)
+    (main_fn_fixup:fixup)
+    (main_exit_proc_glue_fixup:fixup)
     (c_to_proc_fixup:fixup)
     : unit =
 
@@ -769,7 +775,8 @@ let emit_file
                         ~sess
                         ~start_fixup
                         ~rust_start_fixup: rustrt_imports.pe_import_dll_imports.(0).pe_import_address_fixup
-                        ~root_prog_fixup
+                        ~main_fn_fixup
+                        ~main_exit_proc_glue_fixup
                         ~text_fixup
                         ~crate_code: code
                         ~c_to_proc_fixup)

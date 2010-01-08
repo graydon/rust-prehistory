@@ -232,6 +232,7 @@ let emitter =
 emitter
   sess code data dwarf
   sem_cx.Semant.ctxt_main_fn
+  sem_cx.Semant.ctxt_main_exit_proc_glue_fixup
   sem_cx.Semant.ctxt_c_to_proc_fixup;;
 
 exit_if_failed ()

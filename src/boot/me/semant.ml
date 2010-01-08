@@ -18,6 +18,7 @@ type code = {
 type glue =
     GLUE_proc_to_C
   | GLUE_C_to_proc
+  | GLUE_exit_main_proc
   | GLUE_exit_proc of Ast.ty_sig
   | GLUE_upcall of int
   | GLUE_mark of Ast.ty
@@ -109,8 +110,10 @@ type ctxt =
       ctxt_all_item_code: item_code;
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
+
       ctxt_main_fn: fixup;
       ctxt_main_name: string;
+      ctxt_main_exit_proc_glue_fixup: fixup;
     }
 ;;
 
@@ -163,7 +166,8 @@ let new_ctxt sess abi crate =
     ctxt_glue_code = Hashtbl.create 0;
     ctxt_data = Hashtbl.create 0;
     ctxt_main_fn = new_fixup "main fn fixup";
-    ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main
+    ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main;
+    ctxt_main_exit_proc_glue_fixup = new_fixup "main exit_proc glue"
   }
 ;;
 

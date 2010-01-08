@@ -34,6 +34,10 @@ extern "C" {
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #else
@@ -860,18 +864,23 @@ spawn_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
     uintptr_t frame_base = (uintptr_t) (sp+1);
 
     // Copy args from spawner to spawnee.
-    uintptr_t *src = (uintptr_t*) spawner->sp;
-    src += 1;                  // was at upcall-retpc
-    src += n_callee_saves;     // proc_to_c_glue-saves
-    src += 1;                  // spawn-call output slot
-    src += 1;                  // spawn-call proc slot
-    // Memcpy all but the proc and output pointers
-    callsz -= (2 * sizeof(uintptr_t));
-    sp = (uintptr_t*) (((uintptr_t)sp) - callsz);
-    memcpy(sp, src, callsz);
+    if (spawner)  {
+        uintptr_t *src = (uintptr_t*) spawner->sp;
+        src += 1;                  // was at upcall-retpc
+        src += n_callee_saves;     // proc_to_c_glue-saves
+        src += 1;                  // spawn-call output slot
+        src += 1;                  // spawn-call proc slot
+        // Memcpy all but the proc and output pointers
+        callsz -= (2 * sizeof(uintptr_t));
+        sp = (uintptr_t*) (((uintptr_t)sp) - callsz);
+        memcpy(sp, src, callsz);
 
-    // Move sp down to point to proc cell.
-    sp--;
+        // Move sp down to point to proc cell.
+        sp--;
+    } else {
+        // We're at root, starting up.
+        I(rt, callsz==0);
+    }
 
     // The *implicit* incoming args to the spawnee frame we're activating:
     // FIXME: wire up output-address properly so spawnee can write a return
@@ -1071,6 +1080,11 @@ new_rt(rust_srv *srv)
              CryptReleaseContext(hProv, 0));
     }
 #else
+    int fd = open("/dev/urandom", O_RDONLY);
+    I(rt, fd > 0);
+    I(rt, read(fd, (void*) &rt->rctx.randrsl, sizeof(rt->rctx.randrsl))
+      == sizeof(rt->rctx.randrsl));
+    I(rt, close(fd) == 0);
 #endif
 
     randinit(&rt->rctx, 1);
@@ -1474,13 +1488,19 @@ upcall_new_str(rust_rt *rt, char const *s, size_t fill)
 extern "C" CDECL char const *str_buf(rust_str *s);
 
 static void
-rust_main_loop(rust_prog *prog, rust_srv *srv);
+rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv);
 
 struct rust_ticket {
-    rust_prog *prog;
+    uintptr_t main_fn;
+    uintptr_t main_exit_proc_glue;
     rust_srv *srv;
 
-    explicit rust_ticket(rust_prog *prog, rust_srv *srv) : prog(prog), srv(srv)
+    explicit rust_ticket(uintptr_t main_fn,
+                         uintptr_t main_exit_proc_glue,
+                         rust_srv *srv)
+        : main_fn(main_fn),
+          main_exit_proc_glue(main_exit_proc_glue),
+          srv(srv)
     {}
 
     ~rust_ticket()
@@ -1507,14 +1527,15 @@ static void *rust_thread_start(void *ptr)
      * thread can't do this for us.
      */
     rust_ticket *ticket = (rust_ticket *)ptr;
-    rust_prog *prog = ticket->prog;
+    uintptr_t main_fn = ticket->main_fn;
+    uintptr_t main_exit_proc_glue = ticket->main_exit_proc_glue;
     rust_srv *srv = ticket->srv;
     delete ticket;
 
     /*
      * Start a new rust main loop for this thread.
      */
-    rust_main_loop(prog, srv);
+    rust_main_loop(main_fn, main_exit_proc_glue, srv);
 
     return 0;
 }
@@ -1534,14 +1555,14 @@ upcall_spawn(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
 }
 
 static rust_proc *
-upcall_new_thread(rust_rt *rt, rust_prog *prog)
+upcall_new_thread(rust_rt *rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn)
 {
     rust_srv *srv = rt->srv;
     /*
      * The ticket is not bound to the current runtime, so allocate directly from the
      * service.
      */
-    rust_ticket *ticket = new (srv) rust_ticket(prog, srv);
+    rust_ticket *ticket = new (srv) rust_ticket(spawnee_fn, exit_proc_glue, srv);
 
 #if defined(__WIN32__)
     DWORD thread;
@@ -1635,19 +1656,17 @@ handle_upcall(rust_proc *proc)
 }
 
 static void
-rust_main_loop(rust_prog *prog, rust_srv *srv)
+rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
 {
     rust_rt *rt;
     rust_proc *proc;
     rt = new_rt(srv);
 
     xlog(rt, LOG_RT, "control is in rust runtime library");
-    logptr(rt, "root prog", (uintptr_t)prog);
-    logptr(rt, "prog->init_code", (uintptr_t)prog->init_code);
-    logptr(rt, "prog->main_code", (uintptr_t)prog->main_code);
-    logptr(rt, "prog->fini_code", (uintptr_t)prog->fini_code);
+    logptr(rt, "main fn", main_fn);
+    logptr(rt, "main exit-proc glue", main_exit_proc_glue);
 
-    rt->root_proc = new_proc(rt, prog);
+    rt->root_proc = spawn_proc(rt, NULL, main_exit_proc_glue, main_fn, 0);
     add_proc_state_vec(rt, rt->root_proc);
     proc = sched(rt);
 
@@ -1808,15 +1827,18 @@ implode(rust_proc *proc, rust_vec *v)
 
 extern "C"
 int CDECL
-rust_start(rust_prog *prog, void CDECL (*c_to_proc_glue)(rust_proc*))
+rust_start(uintptr_t main_fn,
+           uintptr_t main_exit_proc_glue,
+           void CDECL (*c_to_proc_glue)(rust_proc*))
 {
     rust_srv srv(c_to_proc_glue);
-    rust_main_loop(prog, &srv);
+    rust_main_loop(main_fn, main_exit_proc_glue, &srv);
     return 0;
 }
 
 /*
  * Local Variables:
+ * mode: C++
  * fill-column: 70;
  * indent-tabs-mode: nil
  * c-basic-offset: 4
