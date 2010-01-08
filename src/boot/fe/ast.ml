@@ -386,16 +386,6 @@ and pred =
       pred_body: block;
     }
 
-and init =
-    {
-      (* FIXME: Possibly shift init_proc_input into a semant table. *)
-      init_proc_input: slot identified;
-      init_input_slots: header_slots;
-      init_input_constrs: constrs;
-      init_output_slot: slot identified;
-      init_body: block;
-    }
-
 (*
  * An 'a decl is a sort-of-thing that represents a parametric (generative)
  * declaration. Every reference to one of these involves applying 0 or more
