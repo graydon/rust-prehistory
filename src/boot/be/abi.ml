@@ -23,13 +23,11 @@ type upcall =
   | UPCALL_del_port
   | UPCALL_send
   | UPCALL_recv
-  | UPCALL_sched
   | UPCALL_native
   | UPCALL_new_str
   | UPCALL_grow_proc
   | UPCALL_trace_word
   | UPCALL_trace_str
-  | UPCALL_spawn
 ;;
 
 (* NB: all these numbers must be kept in sync with runtime. *)
@@ -53,24 +51,18 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_del_port -> 8L
   | UPCALL_send -> 9L
   | UPCALL_recv -> 10L
-  | UPCALL_sched -> 11L
-  | UPCALL_native -> 12L
-  | UPCALL_new_str -> 13L
-  | UPCALL_grow_proc -> 14L
-  | UPCALL_trace_word -> 15L
-  | UPCALL_trace_str -> 16L
-  | UPCALL_spawn -> 17L
+  | UPCALL_native -> 11L
+  | UPCALL_new_str -> 12L
+  | UPCALL_grow_proc -> 13L
+  | UPCALL_trace_word -> 14L
+  | UPCALL_trace_str -> 15L
 ;;
 
 (* Word offsets for structure fields in rust.h. *)
-let prog_field_init = 0;;
-let prog_field_main = 1;;
-let prog_field_fini = 2;;
 
 let proc_field_rt = 0;;
 let proc_field_stk = proc_field_rt + 1;;
-let proc_field_prog = proc_field_stk + 1;;
-let proc_field_fn = proc_field_prog + 1;;
+let proc_field_fn = proc_field_stk + 1;;
 let proc_field_sp = proc_field_fn + 1;;
 let proc_field_state = proc_field_sp + 1;;
 let proc_field_idx = proc_field_state + 1;;

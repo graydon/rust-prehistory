@@ -25,10 +25,7 @@
                 ("do", DO);
                 ("alt", ALT);
 
-                ("try", TRY);
                 ("fail", FAIL);
-                ("init", INIT);
-                ("main", MAIN);
                 ("fini", FINI);
 
                 ("type", TYPE);
@@ -62,7 +59,6 @@
                 ("port", PORT);
                 ("chan", CHAN);
 
-                ("prog", PROG);
                 ("proc", PROC);
 
                 ("true", LIT_BOOL true);

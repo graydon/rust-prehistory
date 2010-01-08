@@ -967,49 +967,6 @@ let dwarf_visitor
     inner.Walk.visit_mod_item_pre id params item
   in
 
-  let visit_init_pre
-      (i:Ast.init identified)
-      : unit =
-    emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code i.id).code_fixup;
-    inner.Walk.visit_init_pre i;
-  in
-
-  let visit_init_post
-      (i:Ast.init identified)
-      : unit =
-    inner.Walk.visit_init_post i;
-    emit_null_die ();
-  in
-
-  let visit_main_pre
-      (block:Ast.block)
-      : unit =
-    emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code block.id).code_fixup;
-    inner.Walk.visit_main_pre block;
-  in
-
-  let visit_main_post
-      (block:Ast.block)
-      : unit =
-    inner.Walk.visit_main_post block;
-    emit_null_die ();
-  in
-
-  let visit_fini_pre
-      (block:Ast.block)
-      : unit =
-    emit_subprogram_die (Hashtbl.find cx.ctxt_all_item_code block.id).code_fixup;
-    inner.Walk.visit_fini_pre block;
-  in
-
-  let visit_fini_post
-      (block:Ast.block)
-      : unit =
-    inner.Walk.visit_fini_post block;
-    emit_null_die ();
-  in
-
-
   let visit_mod_item_post
       (id:Ast.ident)
       (params:Ast.ident array)
@@ -1091,12 +1048,6 @@ let dwarf_visitor
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
-        Walk.visit_init_pre = visit_init_pre;
-        Walk.visit_init_post = visit_init_post;
-        Walk.visit_main_pre = visit_main_pre;
-        Walk.visit_main_post = visit_main_post;
-        Walk.visit_fini_pre = visit_fini_pre;
-        Walk.visit_fini_post = visit_fini_post;
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post;
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;

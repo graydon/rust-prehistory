@@ -6,46 +6,6 @@ let log cx = Session.log "layout"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-(* 
- * Not clear this classification is best done here;
- * it has to be done somewhere. Maybe trans? 
- *)
-let lval_in_init_visitor
-    (cx:ctxt)
-    (inner:Walk.visitor)
-    : Walk.visitor =
-  let (init_context:bool Stack.t) = Stack.create () in
-  let visit_init_pre init =
-    Stack.push true init_context;
-    inner.Walk.visit_init_pre init
-  in
-  let visit_init_post init =
-    inner.Walk.visit_init_post init;
-    ignore (Stack.pop init_context)
-  in
-  let visit_mod_item_pre n p i =
-    Stack.push false init_context;
-    inner.Walk.visit_mod_item_pre n p i
-  in
-  let visit_mod_item_post n p i =
-    inner.Walk.visit_mod_item_post n p i;
-    ignore (Stack.pop init_context);
-  in
-  let visit_lval_pre lv =
-    let id = lval_base_id lv in
-      if Stack.top init_context
-      then htab_put cx.ctxt_lval_is_in_proc_init id ()
-      else ();
-      inner.Walk.visit_lval_pre lv
-  in
-    { inner with
-        Walk.visit_init_pre = visit_init_pre;
-        Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_lval_pre = visit_lval_pre;
-        Walk.visit_init_post = visit_init_post;
-        Walk.visit_mod_item_post = visit_mod_item_post }
-;;
-
 let layout_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
@@ -206,17 +166,6 @@ let layout_visitor
         htab_put cx.ctxt_header_layouts id layout
   in
 
-  let layout_prog (id:node_id) (prog:Ast.prog) : unit =
-    log cx "laying out slots of prog #%d" (int_of_node id);
-    let slot_ids =
-      Array.of_list (List.map (fun sid -> sid.id)
-                       (htab_vals prog.Ast.prog_slots))
-    in
-    let layout = layout_slot_ids false 0L slot_ids in
-      log cx "prog #%d layout: %s" (int_of_node id) (string_of_layout layout);
-      htab_put cx.ctxt_prog_layouts id layout
-  in
-
   let (block_stacks:(layout Stack.t) Stack.t) = Stack.create () in
   let (frame_stack:node_id Stack.t) = Stack.create () in
   let update_frame_size _ =
@@ -245,21 +194,6 @@ let layout_visitor
     ignore (Stack.pop block_stacks);
   in
 
-  let visit_main_pre main = enter_frame main.id in
-  let visit_fini_pre fini = enter_frame fini.id in
-  let visit_init_pre init =
-    let extended_input_slot_ids =
-      Array.append [| init.node.Ast.init_proc_input.id |]
-        (Array.map (fun (sid,_) -> sid.id) init.node.Ast.init_input_slots)
-    in
-      layout_header init.id extended_input_slot_ids;
-      enter_frame init.id
-  in
-
-  let visit_main_post main = leave_frame() in
-  let visit_init_post init = leave_frame() in
-  let visit_fini_post fini = leave_frame() in
-
   let visit_mod_item_pre n p i =
     begin
       match i.node with
@@ -268,8 +202,6 @@ let layout_visitor
             layout_header i.id
               (Array.map (fun (sid,_) -> sid.id)
                  fd.Ast.decl_item.Ast.fn_input_slots)
-        | Ast.MOD_ITEM_prog pd ->
-            layout_prog i.id pd.Ast.decl_item
         | Ast.MOD_ITEM_pred pd ->
             enter_frame i.id;
             layout_header i.id
@@ -364,7 +296,6 @@ let layout_visitor
                 pack 0L
                   (match lv_ty with
                        Ast.TY_fn (tsig, _) -> layout_fn_call_tup abi tsig
-                     | Ast.TY_prog tsig -> layout_init_call_tup abi tsig
                      | Ast.TY_pred tpred -> layout_pred_call_tup abi tpred
                      | _ -> err (Some s.id) "unexpected callee type")
               in
@@ -386,14 +317,6 @@ let layout_visitor
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
         Walk.visit_native_mod_item_post = visit_native_mod_item_post;
 
-        Walk.visit_init_pre = visit_init_pre;
-        Walk.visit_main_pre = visit_main_pre;
-        Walk.visit_fini_pre = visit_fini_pre;
-
-        Walk.visit_init_post = visit_init_post;
-        Walk.visit_main_post = visit_main_post;
-        Walk.visit_fini_post = visit_fini_post;
-
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post }
@@ -406,8 +329,6 @@ let process_crate
   let path = Stack.create () in
   let passes =
     [|
-      (lval_in_init_visitor cx
-         Walk.empty_visitor);
       (layout_visitor cx
          Walk.empty_visitor)
     |];

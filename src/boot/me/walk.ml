@@ -26,13 +26,6 @@ type visitor =
       visit_block_pre: Ast.block -> unit;
       visit_block_post: Ast.block -> unit;
 
-      visit_init_pre: Ast.init identified -> unit;
-      visit_init_post: Ast.init identified -> unit;
-      visit_main_pre: Ast.block -> unit;
-      visit_main_post: Ast.block -> unit;
-      visit_fini_pre: Ast.block -> unit;
-      visit_fini_post: Ast.block -> unit;
-
       visit_lit_pre: Ast.lit -> unit;
       visit_lit_post: Ast.lit -> unit;
       visit_lval_pre: Ast.lval -> unit;
@@ -68,12 +61,6 @@ let empty_visitor =
     visit_constr_post = (fun _ -> ());
     visit_block_pre = (fun _ -> ());
     visit_block_post = (fun _ -> ());
-    visit_init_pre = (fun _ -> ());
-    visit_init_post = (fun _ -> ());
-    visit_main_pre = (fun _ -> ());
-    visit_main_post = (fun _ -> ());
-    visit_fini_pre = (fun _ -> ());
-    visit_fini_post = (fun _ -> ());
     visit_lit_pre = (fun _ -> ());
     visit_lit_post = (fun _ -> ());
     visit_lval_pre = (fun _ -> ());
@@ -108,41 +95,11 @@ let path_managing_visitor
     inner.visit_native_mod_item_post ident item;
     ignore (Stack.pop path)
   in
-  let visit_init_pre i =
-    Stack.push (Ast.COMP_ident "init") path;
-    inner.visit_init_pre i
-  in
-  let visit_init_post i =
-    inner.visit_init_post i;
-    ignore (Stack.pop path)
-  in
-  let visit_main_pre b =
-    Stack.push (Ast.COMP_ident "main") path;
-    inner.visit_main_pre b
-  in
-  let visit_main_post b =
-    inner.visit_main_post b;
-    ignore (Stack.pop path)
-  in
-  let visit_fini_pre b =
-    Stack.push (Ast.COMP_ident "fini") path;
-    inner.visit_fini_pre b
-  in
-  let visit_fini_post b =
-    inner.visit_fini_post b;
-    ignore (Stack.pop path)
-  in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;
         visit_mod_item_post = visit_mod_item_post;
         visit_native_mod_item_pre = visit_native_mod_item_pre;
         visit_native_mod_item_post = visit_native_mod_item_post;
-        visit_init_pre = visit_init_pre;
-        visit_init_post = visit_init_post;
-        visit_main_pre = visit_main_pre;
-        visit_main_post = visit_main_post;
-        visit_fini_pre = visit_fini_pre;
-        visit_fini_post = visit_fini_post;
     }
 ;;
 
@@ -256,8 +213,6 @@ and walk_mod_item
           (md.Ast.decl_params, (fun _ -> walk_mod_items v md.Ast.decl_item))
       | Ast.MOD_ITEM_fn fd ->
           (fd.Ast.decl_params, (fun _ -> walk_fn v fd.Ast.decl_item))
-      | Ast.MOD_ITEM_prog pd ->
-          (pd.Ast.decl_params, (fun _ -> walk_prog v pd.Ast.decl_item))
   in
     walk_bracketed
       (v.visit_mod_item_pre name params)
@@ -315,7 +270,6 @@ and walk_ty
       | Ast.TY_chan t -> walk_ty v t
       | Ast.TY_port t -> walk_ty v t
       | Ast.TY_mod mt -> walk_mod_type_items v mt
-      | Ast.TY_prog tp -> walk_ty_sig v tp
       | Ast.TY_constrained (t,cs) ->
           begin
             walk_ty v t;
@@ -379,8 +333,6 @@ and walk_mod_type_item
           (md.Ast.decl_params, (fun _ -> walk_mod_type_items v md.Ast.decl_item))
       | Ast.MOD_TYPE_ITEM_fn fd ->
           (fd.Ast.decl_params, (fun _ -> walk_ty_fn v fd.Ast.decl_item))
-      | Ast.MOD_TYPE_ITEM_prog pd ->
-          (pd.Ast.decl_params, (fun _ -> walk_ty_sig v pd.Ast.decl_item))
   in
     walk_bracketed
       (v.visit_mod_type_item_pre name params)
@@ -462,50 +414,6 @@ and walk_native_fn
   walk_header_slots v f.Ast.native_fn_input_slots;
   walk_constrs v f.Ast.native_fn_input_constrs;
   walk_slot_identified v f.Ast.native_fn_output_slot;
-
-
-and walk_init
-    (v:visitor)
-    (i:Ast.init identified)
-    : unit =
-  walk_bracketed
-    v.visit_init_pre
-    begin
-      fun _ ->
-        walk_slot_identified v i.node.Ast.init_proc_input;
-        walk_header_slots v i.node.Ast.init_input_slots;
-        walk_constrs v i.node.Ast.init_input_constrs;
-        walk_slot_identified v i.node.Ast.init_output_slot;
-        walk_block v i.node.Ast.init_body
-    end
-    v.visit_init_post
-    i
-
-
-
-and walk_prog
-    (v:visitor)
-    (p:Ast.prog)
-    : unit =
-  walk_mod_items v p.Ast.prog_mod;
-  Hashtbl.iter (fun _ s -> walk_slot_identified v s) p.Ast.prog_slots;
-  walk_option (walk_init v) p.Ast.prog_init;
-  walk_option
-    (fun main ->
-       walk_bracketed
-         v.visit_main_pre
-         (fun _ -> walk_block v main)
-         v.visit_main_post
-         main)
-    p.Ast.prog_main;
-  walk_option
-    (fun fini ->
-       walk_bracketed
-         v.visit_fini_pre
-         (fun _ -> walk_block v fini)
-         v.visit_fini_post
-         fini)
-    p.Ast.prog_fini
 
 
 and walk_slot_identified

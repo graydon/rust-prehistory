@@ -296,27 +296,6 @@ let trans_visitor
             end
   in
 
-  let cell_of_proc_slot (lval_id:node_id) (slot_id:node_id) : Il.cell =
-    let pp_cell =
-      if Hashtbl.mem cx.ctxt_lval_is_in_proc_init lval_id
-      then
-        let prog = get_prog_owning_slot cx slot_id in
-        let init_proc_slot_layout = match prog.Ast.prog_init with
-            None -> bugi cx lval_id "Lval in nonexistent prog init"
-          | Some init -> Hashtbl.find cx.ctxt_slot_layouts init.node.Ast.init_proc_input.id
-        in
-          wordptr_at (sp_imm init_proc_slot_layout.layout_offset)
-      else
-        abi.Abi.abi_pp_cell
-    in
-    let (proc_addr, _) = deref pp_cell in
-    let slot_layout = Hashtbl.find cx.ctxt_slot_layouts slot_id in
-    let proc_slots_addr = addr_add_imm proc_addr (word_n Abi.proc_field_data) in
-    let slot_addr = addr_add_imm proc_slots_addr slot_layout.layout_offset in
-      Il.Addr (slot_addr, slot_id_referent_type slot_id)
-  in
-
-
   let rec trans_lval_ext
       (base_ty:Ast.ty)
       (base_addr:Il.addr)
@@ -400,8 +379,6 @@ let trans_visitor
               return_fixup (get_fn_fixup cx referent) slot
           | Ast.MOD_ITEM_pred _ ->
               return_fixup (get_fn_fixup cx referent) slot
-          | Ast.MOD_ITEM_prog _ ->
-              return_fixup (get_prog_fixup cx referent) slot
           | Ast.MOD_ITEM_tag t ->
               return_fixup (get_fn_fixup cx referent) slot
           | _ ->
@@ -423,11 +400,7 @@ let trans_visitor
 
     let return_slot (lval_id:node_id) (slot:Ast.slot) (slot_id:node_id)
         : (Il.cell * Ast.slot) =
-      let cell =
-        if slot_is_owned_by_prog cx slot_id
-        then cell_of_proc_slot lval_id slot_id
-        else cell_of_block_slot slot_id
-      in
+      let cell = cell_of_block_slot slot_id in
         (cell, slot)
     in
 
@@ -871,7 +844,7 @@ let trans_visitor
   and trans_log_str (a:Ast.atom) : unit =
     trans_upcall Abi.UPCALL_log_str [| (trans_atom a) |]
 
-  and trans_spawn_fn
+  and trans_spawn
       (initialising:bool)
       (dst:Ast.lval)
       (fn_lval:Ast.lval)
@@ -894,12 +867,12 @@ let trans_visitor
                                  exit_proc_glue_fixup Il.CodeTy) in
     let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
       iflog (fun _ -> annotate "spawn proc: copy args");
-      ignore (copy_fn_args proc_cell in_slots arg_layouts args);
+      copy_fn_args proc_cell in_slots arg_layouts args;
       iflog (fun _ -> annotate "spawn proc: upcall");
       aliasing true proc_cell
         begin
           fun proc_cell_alias ->
-            trans_upcall Abi.UPCALL_spawn
+            trans_upcall Abi.UPCALL_new_proc
               [|
                 proc_cell_alias;
                 (alias_cell exit_proc_glue_cell);
@@ -908,45 +881,6 @@ let trans_visitor
               |]
         end;
       ()
-
-
-  and trans_spawn
-      (initialising:bool)
-      (dst:Ast.lval)
-      (prog_lval:Ast.lval)
-      (args:Ast.atom array)
-      : unit =
-    let (proc_cell, proc_slot) = trans_lval dst INTENT_init in
-    let (prog_cell, prog_slot) = trans_lval prog_lval INTENT_read in
-    let tsig =
-      match prog_slot.Ast.slot_ty with
-          Some (Ast.TY_prog tsig) -> tsig
-        | _ -> bug () "prog pseudo-slot has wrong type"
-    in
-      (* 
-       * We're fudging here; the proc operand isn't really the dst operand, 
-       * it's the 0th slot of the dst tuple though. 
-       *)
-      aliasing true proc_cell
-        begin
-          fun proc_cell_alias ->
-            trans_upcall Abi.UPCALL_new_proc [| proc_cell_alias;
-                                                (alias_cell prog_cell) |];
-        end;
-      let in_slots = tsig.Ast.sig_input_slots in
-        (* FIXME: this is a ghastly mess. *)
-      let arg_layouts = layout_init_call_tup abi tsig in
-      let (prog_addr, _) = need_addr_cell prog_cell in
-      let init_addr = addr_add_imm prog_addr (word_n Abi.prog_field_init) in
-      let init_cell = Il.Addr (init_addr, Il.ScalarTy (Il.voidptr_t)) in
-        emit (Il.cmp (Il.Cell init_cell) imm_false);
-        let fwd_jmp = mark () in
-          emit (Il.jmp Il.JE Il.CodeNone);
-          trans_call initialising (fun _ -> "spawn-init") proc_cell init_cell
-            in_slots arg_layouts (Some proc_cell) args;
-          patch fwd_jmp;
-          iflog (fun _ -> annotate "sched proc");
-          trans_upcall Abi.UPCALL_sched [| Il.Cell proc_cell |]
 
   and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
     let (filename, line, _) =
@@ -1764,9 +1698,9 @@ let trans_visitor
     let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
       trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots arg_layouts None args
+        dst_cell fn_cell in_slots arg_layouts args
 
-  and trans_call_pred
+  and trans_call_pred_and_check
       (constr:Ast.constr)
       (flv:Ast.lval)
       (args:Ast.atom array)
@@ -1787,7 +1721,7 @@ let trans_visitor
     let arg_layouts = layout_pred_call_tup abi tpred in
       iflog (fun _ -> annotate "predicate call");
       trans_call true (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots arg_layouts None args;
+        dst_cell fn_cell in_slots arg_layouts args;
       iflog (fun _ -> annotate "predicate check/fail");
       let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
       let errstr = Printf.sprintf "predicate check: %a"
@@ -1830,24 +1764,7 @@ let trans_visitor
             0 -> trans_arg0 (param_cell i None) output_cell
           | 1 -> trans_arg1 (param_cell i None)
           | _ -> trans_argN (i-2) (param_cell i (Some (i-2))) in_slots args
-      done;
-      2
-
-  and copy_init_args output_cell in_slots arg_layouts args arg2_cell =
-    let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
-    let n_layouts = Array.length arg_layouts in
-      assert (n_layouts == ((Array.length args) + 3));
-      for i = 0 to n_layouts - 1 do
-        iflog (fun _ ->
-                 annotate (Printf.sprintf "init-call arg %d of %d"
-                             i n_layouts));
-        match i with
-            0 -> trans_arg0 (param_cell i None) output_cell
-          | 1 -> trans_arg1 (param_cell i None)
-          | 2 -> mov (param_cell i None) (Il.Cell arg2_cell)
-          | _ -> trans_argN (i-3) (param_cell i (Some (i-3))) in_slots args
-      done;
-      3
+      done
 
   and call_code (code:Il.code) : unit =
     let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
@@ -1860,17 +1777,12 @@ let trans_visitor
       (callee_cell:Il.cell)
       (in_slots:Ast.slot array)
       (arg_layouts:layout array)
-      (arg2:Il.cell option)
       (args:Ast.atom array)
       : unit =
     (* FIXME: there's got to be a nicer factoring than this. *)
-    let implicit_args =
-      match arg2 with
-          None ->
-            copy_fn_args output_cell in_slots arg_layouts args
-        | Some arg2_cell ->
-            copy_init_args output_cell in_slots arg_layouts args arg2_cell
-    in
+    let implicit_args = 2 in
+      iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
+      copy_fn_args output_cell in_slots arg_layouts args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* 
        * FIXME: we need to actually handle writing to an already-initialised slot. Currently
@@ -1951,20 +1863,14 @@ let trans_visitor
           trans_send chan src
 
       | Ast.STMT_spawn (dst, plv, args) ->
-          begin
-            match lval_ty cx plv with
-                Ast.TY_prog _ ->
-                  trans_spawn (maybe_init stmt.id "spawn" dst) dst plv args
-              | Ast.TY_fn _ ->
-                  trans_spawn_fn (maybe_init stmt.id "spawn" dst) dst plv args
-              | _ -> bugi cx stmt.id "unexpected type to spawn"
-          end
-
+          trans_spawn (maybe_init stmt.id "spawn" dst) dst plv args
 
       | Ast.STMT_recv (dst, chan) ->
           trans_recv (maybe_init stmt.id "recv" dst) dst chan
+
       | Ast.STMT_copy (dst, e_src) ->
           trans_copy (maybe_init stmt.id "copy" dst) dst e_src
+
       | Ast.STMT_call (dst, flv, args) ->
           trans_call_fn (maybe_init stmt.id "call" dst) dst flv args
 
@@ -2049,7 +1955,7 @@ let trans_visitor
 
       | Ast.STMT_check (preds, calls) ->
           Array.iteri
-            (fun i (fn, args) -> trans_call_pred preds.(i) fn args)
+            (fun i (fn, args) -> trans_call_pred_and_check preds.(i) fn args)
             calls
 
       | Ast.STMT_ret (proto_opt, atom_opt) ->
@@ -2201,44 +2107,6 @@ let trans_visitor
       end
   in
 
-  let trans_prog_block (b:Ast.block) : unit =
-    let fix = new_fixup (path_name ()) in
-    let framesz = get_framesz cx b.id in
-    let callsz = get_callsz cx b.id in
-    let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups b.id in
-      push_new_emitter ();
-      let code = Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None)) in
-        abi.Abi.abi_emit_main_prologue (emitter()) b framesz spill_fixup callsz;
-        trans_block b;
-        abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
-        call_code code;
-        capture_emitted_quads fix b.id;
-        pop_emitter ()
-  in
-
-  let trans_prog (progid:node_id) (p:Ast.prog) : unit =
-    let _ = log cx "translating program: %s" (path_name()) in
-    let ptr_of thing_opt =
-      match thing_opt with
-          None -> Asm.IMM 0L
-        | Some thing ->
-            let code = Hashtbl.find cx.ctxt_all_item_code thing.id in
-              Asm.M_POS code.code_fixup
-    in
-    let init = ptr_of p.Ast.prog_init in
-    let main = ptr_of p.Ast.prog_main in
-    let fini = ptr_of p.Ast.prog_fini in
-    let fixup = get_prog_fixup cx progid in
-    let prog =
-      (* FIXME: extract prog layout from ABI. *)
-      Asm.DEF (fixup,
-               Asm.SEQ [| Asm.WORD (TY_u32, init);
-                          Asm.WORD (TY_u32, main);
-                          Asm.WORD (TY_u32, fini) |])
-    in
-      htab_put cx.ctxt_data (DATA_prog progid) (fixup, prog)
-  in
-
   let enter_file_for i =
     if Hashtbl.mem cx.ctxt_item_files i.id
     then begin
@@ -2260,12 +2128,12 @@ let trans_visitor
   let visit_mod_item_pre n p i =
     enter_file_for i;
     begin
-      log cx "emitting main exit-proc glue for %s" cx.ctxt_main_name;
       match i.node with
           Ast.MOD_ITEM_fn f ->
             if path_name() = cx.ctxt_main_name
             then
               begin
+                log cx "emitting main exit-proc glue for %s" cx.ctxt_main_name;
                 let main_tsig =
                   {
                     Ast.sig_input_slots = [| |];
@@ -2289,12 +2157,6 @@ let trans_visitor
 
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
-    begin
-      match i.node with
-          (* Programs have to be translated after their pointees. *)
-        | Ast.MOD_ITEM_prog p -> trans_prog i.id p.Ast.decl_item
-        | _ -> ()
-    end;
     leave_file_for i
   in
 
@@ -2313,29 +2175,11 @@ let trans_visitor
     leave_file_for i
   in
 
-  let visit_init_pre (i:Ast.init identified) : unit =
-    trans_fn i.id i.node.Ast.init_body;
-    inner.Walk.visit_init_pre i
-  in
-
-  let visit_main_pre (b:Ast.block) : unit =
-    trans_prog_block b;
-    inner.Walk.visit_main_pre b
-  in
-
-  let visit_fini_pre (b:Ast.block) : unit =
-    trans_prog_block b;
-    inner.Walk.visit_fini_pre b
-  in
-
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
         Walk.visit_native_mod_item_post = visit_native_mod_item_post;
-        Walk.visit_init_pre = visit_init_pre;
-        Walk.visit_main_pre = visit_main_pre;
-        Walk.visit_fini_pre = visit_fini_pre;
     }
 ;;
 
@@ -2364,11 +2208,6 @@ let fixup_assigning_visitor
     htab_put cx.ctxt_fn_fixups id (new_fixup (path_name()));
   in
 
-  let visit_init_pre i =
-    add_fn_fixup_for i.id;
-    inner.Walk.visit_init_pre i
-  in
-
   let visit_mod_item_pre n p i =
     enter_file_for i;
     begin
@@ -2389,16 +2228,6 @@ let fixup_assigning_visitor
                 htab_put cx.ctxt_fn_fixups i.id fixup;
             end
 
-        | Ast.MOD_ITEM_prog _ ->
-            begin
-              let path = path_name () in
-              let fixup =
-                if path = cx.ctxt_main_name
-                then cx.ctxt_main_fn
-                else new_fixup path
-              in
-                htab_put cx.ctxt_prog_fixups i.id fixup;
-            end
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -2422,7 +2251,6 @@ let fixup_assigning_visitor
   { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_block_pre = visit_block_pre;
-        Walk.visit_init_pre = visit_init_pre;
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
 
 let emit_c_to_proc_glue cx =
@@ -2474,7 +2302,7 @@ let process_crate
          Walk.empty_visitor)
     |];
   in
-    log cx "translating crate with main program %s" cx.ctxt_main_name;
+    log cx "translating crate with main function %s" cx.ctxt_main_name;
     run_passes cx path passes (log cx "%s") crate;
     emit_c_to_proc_glue cx;
     emit_proc_to_c_glue cx

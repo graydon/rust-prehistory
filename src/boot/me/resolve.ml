@@ -87,7 +87,6 @@ let stmt_collecting_visitor
                   | Ast.DECL_slot (key, sid) ->
                       check_and_log_key sid.id key;
                       htab_put slots key sid.id;
-                      htab_put cx.ctxt_slot_owner sid.id bid;
                       htab_put cx.ctxt_slot_keys sid.id key
             end
         | _ -> ()
@@ -114,13 +113,9 @@ let all_item_collecting_visitor
   in
 
   let visit_mod_item_pre n p i =
-    let owned owner sloti =
-      htab_put cx.ctxt_slot_owner sloti owner
-    in
-    let note_header owner =
+    let note_header =
       Array.iter
         (fun (sloti,ident) ->
-           owned owner sloti.id;
            htab_put cx.ctxt_slot_keys sloti.id (Ast.KEY_ident ident))
     in
       htab_put cx.ctxt_all_items i.id i.node;
@@ -131,25 +126,11 @@ let all_item_collecting_visitor
         match i.node with
             Ast.MOD_ITEM_fn fd ->
               begin
-                note_header i.id fd.Ast.decl_item.Ast.fn_input_slots;
-                owned i.id fd.Ast.decl_item.Ast.fn_output_slot.id
+                note_header fd.Ast.decl_item.Ast.fn_input_slots;
               end
           | Ast.MOD_ITEM_pred pd ->
               begin
-                note_header i.id pd.Ast.decl_item.Ast.pred_input_slots
-              end
-          | Ast.MOD_ITEM_prog pd ->
-              begin
-                Hashtbl.iter (fun _ sloti -> owned i.id sloti.id)
-                  pd.Ast.decl_item.Ast.prog_slots;
-                match pd.Ast.decl_item.Ast.prog_init with
-                    None -> ()
-                  | Some init ->
-                      begin
-                        note_header init.id init.node.Ast.init_input_slots;
-                        owned init.id init.node.Ast.init_proc_input.id;
-                        owned init.id init.node.Ast.init_output_slot.id
-                      end
+                note_header pd.Ast.decl_item.Ast.pred_input_slots
               end
           | _ -> ()
       end;

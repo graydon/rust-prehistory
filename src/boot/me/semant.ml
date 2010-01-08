@@ -35,7 +35,6 @@ type glue =
 
 type data =
     DATA_str of string
-  | DATA_prog of node_id
   | DATA_typeinfo of Ast.ty
 ;;
 
@@ -62,7 +61,6 @@ type ctxt =
       ctxt_block_slots: block_slots_table;
       ctxt_block_items: block_items_table;
       ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
-      ctxt_slot_owner: (node_id,node_id) Hashtbl.t;
       (* ctxt_slot_keys is just for error messages. *)
       ctxt_slot_keys: (node_id,Ast.slot_key) Hashtbl.t;
       ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
@@ -79,7 +77,6 @@ type ctxt =
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
       ctxt_header_layouts: (node_id,layout) Hashtbl.t;
-      ctxt_prog_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_call_sizes: (node_id,int64) Hashtbl.t;
 
@@ -97,9 +94,7 @@ type ctxt =
       ctxt_copy_stmt_is_init: (node_id,unit) Hashtbl.t;
 
       (* Translation-y stuff. *)
-      ctxt_lval_is_in_proc_init: (node_id,unit) Hashtbl.t;
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
-      ctxt_prog_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_block_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
@@ -122,7 +117,6 @@ let new_ctxt sess abi crate =
     ctxt_block_slots = Hashtbl.create 0;
     ctxt_block_items = Hashtbl.create 0;
     ctxt_all_slots = Hashtbl.create 0;
-    ctxt_slot_owner = Hashtbl.create 0;
     ctxt_slot_keys = Hashtbl.create 0;
     ctxt_all_items = Hashtbl.create 0;
     ctxt_all_native_items = Hashtbl.create 0;
@@ -148,13 +142,10 @@ let new_ctxt sess abi crate =
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_block_layouts = Hashtbl.create 0;
     ctxt_header_layouts = Hashtbl.create 0;
-    ctxt_prog_layouts = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
 
-    ctxt_lval_is_in_proc_init = Hashtbl.create 0;
     ctxt_fn_fixups = Hashtbl.create 0;
-    ctxt_prog_fixups = Hashtbl.create 0;
     ctxt_block_fixups = Hashtbl.create 0;
     ctxt_file_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
@@ -221,28 +212,6 @@ let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
     else bugi cx referent "Unknown slot"
 ;;
 
-let get_slot_owner (cx:ctxt) (id:node_id) : node_id =
-  match htab_search cx.ctxt_slot_owner id with
-      None -> bugi cx id "Slot has no defined owner"
-    | Some owner -> owner
-;;
-
-let get_prog (cx:ctxt) (id:node_id) : Ast.prog =
-  match Hashtbl.find cx.ctxt_all_items id with
-      Ast.MOD_ITEM_prog p -> p.Ast.decl_item
-    | _ -> bugi cx id "Node did not map to a program"
-;;
-
-let get_prog_owning_slot (cx:ctxt) (id:node_id) : Ast.prog =
-  get_prog cx (get_slot_owner cx id)
-;;
-
-let slot_is_owned_by_prog (cx:ctxt) (id:node_id) : bool =
-  match htab_search cx.ctxt_all_items (get_slot_owner cx id) with
-      Some (Ast.MOD_ITEM_prog _) -> true
-    | _ -> false
-;;
-
 let get_block_layout (cx:ctxt) (id:node_id) : layout =
   if Hashtbl.mem cx.ctxt_block_layouts id
   then Hashtbl.find cx.ctxt_block_layouts id
@@ -253,12 +222,6 @@ let get_fn_fixup (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_fn_fixups id
   then Hashtbl.find cx.ctxt_fn_fixups id
   else bugi cx id "Fn without fixup"
-;;
-
-let get_prog_fixup (cx:ctxt) (id:node_id) : fixup =
-  if Hashtbl.mem cx.ctxt_prog_fixups id
-  then Hashtbl.find cx.ctxt_prog_fixups id
-  else bugi cx id "Prog without fixup"
 ;;
 
 let get_framesz (cx:ctxt) (id:node_id) : int64 =
@@ -446,7 +409,6 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
       ty_fold_mod : Ast.mod_type_items -> 'ty;
-      ty_fold_prog : ('slots * Ast.constrs * 'slot) -> 'ty;
       ty_fold_proc : unit -> 'ty;
       ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
       ty_fold_named : Ast.name -> 'ty;
@@ -493,7 +455,6 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
   | Ast.TY_mod mtis -> f.ty_fold_mod mtis
-  | Ast.TY_prog tsig -> f.ty_fold_prog (fold_sig tsig)
   | Ast.TY_proc -> f.ty_fold_proc ()
 
   | Ast.TY_opaque x -> f.ty_fold_opaque x
@@ -530,7 +491,6 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_chan = (fun _ -> default);
       ty_fold_port = (fun _ -> default);
       ty_fold_mod = (fun _ -> default);
-      ty_fold_prog = (fun _ -> default);
       ty_fold_proc = (fun _ -> default);
       ty_fold_opaque = (fun _ -> default);
       ty_fold_named = (fun _ -> default);
@@ -567,10 +527,6 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
     ty_fold_port = (fun t -> id (Ast.TY_port t));
     ty_fold_mod = (fun mti -> id (Ast.TY_mod mti));
-    ty_fold_prog = (fun (islots, constrs, oslots) ->
-                      id (Ast.TY_prog { Ast.sig_input_slots = islots;
-                                        Ast.sig_input_constrs = constrs;
-                                        Ast.sig_output_slot = oslots }));
     ty_fold_proc = (fun _ -> id Ast.TY_proc);
     ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
@@ -601,7 +557,6 @@ let associative_binary_op_ty_fold
         ty_fold_pred = (fun (islots, _) -> islots);
         ty_fold_chan = (fun a -> a);
         ty_fold_port = (fun a -> a);
-        ty_fold_prog = (fun (islots, _, oslot) -> fn islots oslot);
         ty_fold_constrained = (fun (a, _) -> a) }
 
 let ty_fold_bool_and (default:bool) : bool simple_ty_fold =
@@ -791,9 +746,6 @@ and mod_type_item_of_mod_item
       | Ast.MOD_ITEM_fn fd ->
           Some (Ast.MOD_TYPE_ITEM_fn
                   (decl fd.Ast.decl_params (ty_fn_of_fn fd.Ast.decl_item)))
-      | Ast.MOD_ITEM_prog pd ->
-          Some (Ast.MOD_TYPE_ITEM_prog
-                  (decl pd.Ast.decl_params (ty_prog_of_prog pd.Ast.decl_item)))
       | Ast.MOD_ITEM_tag _ -> None
   in
     match tyo with
@@ -827,23 +779,6 @@ and mod_type_item_of_native_mod_item
   in
     { id = item.id;
       node = mti }
-
-
-and ty_prog_of_prog (prog:Ast.prog) : Ast.ty_sig =
-  let (inputs, constrs, output)  =
-    match prog.Ast.prog_init with
-        None -> ([||], [||], interior_slot Ast.TY_nil)
-      | Some init -> (arg_slots init.node.Ast.init_input_slots,
-                      init.node.Ast.init_input_constrs,
-                      init.node.Ast.init_output_slot.node)
-  in
-  let extended_output =
-    let proc_slot = interior_slot Ast.TY_proc in
-      interior_slot (Ast.TY_tup [| proc_slot; output |])
-  in
-    { Ast.sig_input_slots = inputs;
-      Ast.sig_input_constrs = constrs;
-      Ast.sig_output_slot = extended_output }
 
 and arg_slots (slots:Ast.header_slots) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
@@ -899,10 +834,6 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
       | Ast.MOD_ITEM_fn fd ->
           check_concrete fd.Ast.decl_params
             (Ast.TY_fn (ty_fn_of_fn fd.Ast.decl_item))
-
-      | Ast.MOD_ITEM_prog pd ->
-          check_concrete pd.Ast.decl_params
-            (Ast.TY_prog (ty_prog_of_prog pd.Ast.decl_item))
 
       | Ast.MOD_ITEM_tag td ->
           let (htup, ttag, node) = td.Ast.decl_item in
@@ -1005,16 +936,6 @@ let lookup
     else
       None
   in
-  let is_in_block_scope id =
-    let b = ref false in
-      List.iter
-        (fun scope ->
-           (match scope with
-                SCOPE_block block_id when block_id = id -> b := true
-              | _ -> ()))
-        scopes;
-      !b
-  in
   let check_scope scope =
     match scope with
         SCOPE_block block_id ->
@@ -1073,31 +994,6 @@ let lookup
                       | Ast.MOD_ITEM_mod m ->
                           check_items scope ident m.Ast.decl_item
 
-                      | Ast.MOD_ITEM_prog p ->
-                          let check_prog_slots _ =
-                            let slots = p.Ast.decl_item.Ast.prog_slots in
-                              if Hashtbl.mem slots ident
-                              then
-                                let slot = Hashtbl.find slots ident in
-                                  Some slot.id
-                              else
-                                check_items scope ident
-                                  p.Ast.decl_item.Ast.prog_mod
-                          in
-                          begin
-                            match p.Ast.decl_item.Ast.prog_init with
-                                Some input when
-                                  is_in_block_scope
-                                    input.node.Ast.init_body.id ->
-                                  begin
-                                    match match_input_slot
-                                      input.node.Ast.init_input_slots
-                                    with
-                                        Some res -> Some res
-                                      | None -> check_prog_slots ()
-                                  end
-                              | _ -> check_prog_slots ()
-                          end
                       | _ -> None
                   end
           end
@@ -1186,7 +1082,6 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_opaque _
       | Ast.TY_type -> ptr
 
-      | Ast.TY_prog _ -> sp (Il.StructTy [| ptr; ptr; ptr |])
       | Ast.TY_named _ -> bug () "named type in referent_type"
       | Ast.TY_constrained (t, _) -> referent_type abi t
 
@@ -1341,16 +1236,6 @@ let layout_pred_call_tup (abi:Abi.abi) (tpred:Ast.ty_pred) : (layout array) =
   let slots' = Array.append [| out_ptr; proc_ptr |] slots in
     layout_tup abi slots'
 ;;
-
-let layout_init_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
-  let slots = tsig.Ast.sig_input_slots in
-  let init_proc_ptr = word_slot abi in
-  let proc_ptr = word_slot abi in
-  let out_ptr = word_slot abi in
-  let slots' = Array.append [| out_ptr; proc_ptr; init_proc_ptr |] slots in
-    layout_tup abi slots'
-;;
-
 
 (*
  * Local Variables:

@@ -59,10 +59,7 @@ type token =
   | WHILE
   | ALT
 
-  | TRY
   | FAIL
-  | INIT
-  | MAIN
   | FINI
 
   | FOR of Ast.proto option
@@ -123,7 +120,6 @@ type token =
   | PORT
 
   (* Process types *)
-  | PROG
   | PROC
 
   | EOF
@@ -188,10 +184,7 @@ let string_of_tok t =
     | WHILE      -> "while"
     | ALT        -> "alt"
 
-    | TRY        -> "try"
     | FAIL       -> "fail"
-    | INIT       -> "init"
-    | MAIN       -> "main"
     | FINI       -> "fini"
 
     | FOR None   -> "for"
@@ -276,8 +269,7 @@ let string_of_tok t =
     | CHAN          -> "chan"
     | PORT          -> "port"
 
-    (* Process/program declarator types *)
-    | PROG         -> "prog"
+    (* Process types *)
     | PROC         -> "proc"
 
     | EOF        -> "<EOF>"
@@ -1275,12 +1267,12 @@ and desugar_expr_init ps dst_lval pexp : (Ast.stmt array) =
       | PEXP_spawn sub ->
           begin
             match sub.node with
-                PEXP_call (prog, args) ->
-                  let (prog_stmts, prog_atom) = desugar_expr_atom ps prog in
+                PEXP_call (fn, args) ->
+                  let (fn_stmts, fn_atom) = desugar_expr_atom ps fn in
                   let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
-                  let prog_lval = atom_lval ps prog_atom in
-                  let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, prog_lval, arg_atoms)) in
-                    Array.concat [ prog_stmts; arg_stmts; [| spawn_stmt |] ]
+                  let fn_lval = atom_lval ps fn_atom in
+                  let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, fn_lval, arg_atoms)) in
+                    Array.concat [ fn_stmts; arg_stmts; [| spawn_stmt |] ]
               | _ -> raise (err "non-call spawn" ps)
           end
 
@@ -1659,7 +1651,7 @@ and parse_stmts ps =
             Array.concat [[| span ps apos bpos (Ast.STMT_decl decl) |]; stmts]
 
 
-      | PROG | MOD | TYPE | (FN _) | PRED ->
+      | MOD | TYPE | (FN _) | PRED ->
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
           let bpos = lexpos ps in
           let decl = Ast.DECL_mod_item (ident, item) in
@@ -1735,71 +1727,6 @@ and parse_stmts ps =
                 | _ -> raise (unexpected ps)
             end
 
-and parse_prog_item prog_cell stmts_cell ps =
-  match peek ps with
-      MAIN ->
-        bump ps;
-        let main = ctxt "prog_item: main" parse_block ps in
-          prog_cell := { (!prog_cell) with Ast.prog_main = Some main }
-
-    | INIT ->
-          bump ps;
-          let apos = lexpos ps in
-          let (inputs, constrs, output) = ctxt "prog_item: init in_and_out" parse_in_and_out ps in
-          let body = ctxt "prog_item: init body" parse_block ps in
-          let bpos = lexpos ps in
-          let proc_input_slot = { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
-                                  Ast.slot_ty = Some Ast.TY_proc }
-          in
-          let init = span ps apos bpos
-            { Ast.init_proc_input = span ps apos bpos proc_input_slot;
-              Ast.init_input_slots = inputs;
-              Ast.init_input_constrs = constrs;
-              Ast.init_output_slot = output;
-              Ast.init_body = body }
-          in
-          prog_cell := { (!prog_cell) with Ast.prog_init = Some init }
-
-    | FINI ->
-        bump ps;
-        let fini = ctxt "prog_item: fini" parse_block ps in
-          prog_cell := { (!prog_cell) with Ast.prog_fini = Some fini }
-
-    | PUB | PURE
-    | PROG | MOD | TYPE | (FN _) | PRED ->
-        let (ident, stmts, item) = ctxt "prog_item: mod item" parse_mod_item ps in
-        let mod_items = (!prog_cell).Ast.prog_mod in
-          htab_put mod_items ident item;
-          expand_tags_to_items ps item mod_items;
-          stmts_cell := stmts :: (!stmts_cell)
-
-    | LET ->
-        bump ps;
-        let apos = lexpos ps in
-        let (slot, ident) =
-          ctxt "prog_item: slot and ident"
-            (parse_slot_and_ident false) ps
-        in
-        let bpos = lexpos ps in
-          expect ps SEMI;
-          htab_put (!prog_cell).Ast.prog_slots ident (span ps apos bpos slot)
-
-    | _ -> raise (unexpected ps)
-
-
-and parse_prog ps =
-  let prog = { Ast.prog_init = None;
-               Ast.prog_main = None;
-               Ast.prog_fini = None;
-               Ast.prog_mod = Hashtbl.create 4;
-               Ast.prog_slots = Hashtbl.create 4; }
-  in
-  let prog_cell = ref prog in
-  let stmts_cell = ref [] in
-  let _ = ctxt "prog" (bracketed_zero_or_more LBRACE RBRACE None
-                         (parse_prog_item prog_cell stmts_cell)) ps
-  in
-    (Array.concat (List.rev !stmts_cell), !prog_cell)
 
 and parse_inputs ps =
   let slots =
@@ -1956,26 +1883,10 @@ and parse_mod_item ps =
   in
 
     match peek ps with
-        PROG ->
-          bump ps;
-          let ident = ctxt "mod prog item: ident" parse_ident ps in
-          let params = ctxt "mod prog item: type params" parse_ty_params ps in
-          let (stmts, prog) = ctxt "mod prog item: prog body" parse_prog ps in
-          let bpos = lexpos ps in
-          let
-              decl = { Ast.decl_params = params;
-                       Ast.decl_item =  prog }
-          in
-            (ident, stmts, span ps apos bpos (Ast.MOD_ITEM_prog decl))
 
-      | FN proto_opt ->
+        FN proto_opt ->
           bump ps;
-          let ident =
-            (* FIXME: may un-keyword 'main' eventually. *)
-            match peek ps with
-                MAIN -> (bump ps; "main")
-              | _ -> ctxt "mod fn item: ident" parse_ident ps
-          in
+          let ident = ctxt "mod fn item: ident" parse_ident ps in
           let params = ctxt "mod fn item: type params" parse_ty_params ps in
           let fn = ctxt "mod fn item: fn" (parse_fn proto_opt pure) ps in
           let
@@ -2200,31 +2111,16 @@ and parse_root_crate_entries
     : Ast.crate =
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
-  let explicit_main = ref None in
   let apos = lexpos ps in
     while peek ps != EOF
     do
       match peek ps with
-          MAIN ->
-            begin
-              bump ps;
-              expect ps EQ;
-              let name = parse_name ps in
-                expect ps SEMI;
-                match !explicit_main with
-                    None -> explicit_main := Some name
-                  | Some _ -> raise (err "multiple explicit main programs given in crate" ps )
-            end
-        | NATIVE | MOD ->
+          NATIVE | MOD ->
             parse_crate_mod_entry prefix files items nitems ps
         | _ -> raise (unexpected ps)
     done;
     expect ps EOF;
-    let main =
-      match !explicit_main with
-          None -> infer_main_fn ps items
-        | Some m -> m
-    in
+    let main = find_main_fn ps items in
     let bpos = lexpos ps in
       span ps apos bpos
         { Ast.crate_items = items;
@@ -2232,7 +2128,7 @@ and parse_root_crate_entries
           Ast.crate_main = main;
           Ast.crate_files = files }
 
-and infer_main_fn
+and find_main_fn
     (ps:pstate)
     (crate_items:Ast.mod_items)
     : Ast.name =
@@ -2258,9 +2154,9 @@ and infer_main_fn
   in
     dig None crate_items;
     match !fns with
-        [] -> raise (err "cannot infer main function: no 'main' function found" ps)
+        [] -> raise (err "no 'main' function found" ps)
       | [x] -> x
-      | _ -> raise (err "cannot infer main function: multiple 'main' functions found" ps)
+      | _ -> raise (err "multiple 'main' functions found" ps)
 ;;
 
 let parse_root_with_parse_fn
@@ -2311,7 +2207,7 @@ let parse_root_srcfile_entries
     htab_put mitems stem modi;
     span ps apos bpos { Ast.crate_items = mitems;
                         Ast.crate_native_items = Hashtbl.create 0;
-                        Ast.crate_main = infer_main_fn ps mitems;
+                        Ast.crate_main = find_main_fn ps mitems;
                         Ast.crate_files = files }
 ;;
 

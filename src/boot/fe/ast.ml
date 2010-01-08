@@ -96,7 +96,6 @@ and ty =
   | TY_port of ty
 
   | TY_mod of (mod_type_items)
-  | TY_prog of ty_sig
   | TY_proc
 
   | TY_opaque of (opaque_id * mutability)
@@ -157,15 +156,6 @@ and constr =
     }
 
 and constrs = constr array
-
-and prog =
-    {
-      prog_init: (init identified) option;
-      prog_main: block option;
-      prog_fini: block option;
-      prog_mod: mod_items;
-      prog_slots: (ident, slot identified) Hashtbl.t;
-    }
 
 and ty_rec = (ident * slot) array
 
@@ -456,7 +446,6 @@ and mod_item' =
   | MOD_ITEM_pred of pred decl
   | MOD_ITEM_mod of mod_items decl
   | MOD_ITEM_fn of fn decl
-  | MOD_ITEM_prog of prog decl
 
 and mod_item = mod_item' identified
 and mod_items = (ident, mod_item) Hashtbl.t
@@ -467,7 +456,6 @@ and mod_type_item' =
   | MOD_TYPE_ITEM_pred of ty_pred decl
   | MOD_TYPE_ITEM_mod of mod_type_items decl
   | MOD_TYPE_ITEM_fn of ty_fn decl
-  | MOD_TYPE_ITEM_prog of ty_sig decl
 
 and mod_type_item = mod_type_item' identified
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
@@ -670,7 +658,6 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
 
   (* FIXME: finish these as needed. *)
   | TY_mod mti -> fmt ff "?mod?"
-  | TY_prog tp -> fmt ff "?prog?"
   | TY_constrained t -> fmt ff "?constrained?"
   | TY_pred p -> fmt ff "?pred?"
 
@@ -836,10 +823,10 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
             fmt ff ";"
           end
 
-      | STMT_spawn (dst, prog, args) ->
+      | STMT_spawn (dst, fn, args) ->
           fmt_lval ff dst;
           fmt ff " = spawn ";
-          fmt_lval ff prog;
+          fmt_lval ff fn;
           fmt ff "(";
           for i = 0 to (Array.length args) - 1
           do
@@ -1028,48 +1015,6 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
             (* let (tfn = ty_fn_of_fn
                fmt_fn_header ff fd.decl_item. (Some id) (Some fd.decl_params);
             *)
-            fmt_cbb ff
-          end
-
-      | MOD_ITEM_prog pd ->
-          begin
-            fmt_obox ff;
-            fmt ff "prog ";
-            fmt_ident ff id;
-            fmt_decl_params ff pd.decl_params;
-            fmt_obr ff;
-            fmt_mod_items ff pd.decl_item.prog_mod;
-            begin
-              match pd.decl_item.prog_init with
-                  None -> ()
-                | Some ii -> fmt ff "@\n?init?;"
-            end;
-            begin
-              match pd.decl_item.prog_main with
-                  None -> ()
-                | Some b ->
-                    begin
-                      fmt ff "@\n";
-                      fmt_obox ff;
-                      fmt ff "main ";
-                      fmt_obr ff;
-                      fmt_stmts ff b.node;
-                      fmt_cbb ff
-                    end
-            end;
-            begin
-              match pd.decl_item.prog_fini with
-                  None -> ()
-                | Some b ->
-                    begin
-                      fmt ff "@\n";
-                      fmt_obox ff;
-                      fmt ff "fini ";
-                      fmt_obr ff;
-                      fmt_stmts ff b.node;
-                      fmt_cbb ff
-                    end
-            end;
             fmt_cbb ff
           end
   end
