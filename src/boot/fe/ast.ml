@@ -638,16 +638,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
     TY_any -> fmt ff "any"
   | TY_nil -> fmt ff "()"
   | TY_bool -> fmt ff "bool"
-  | TY_mach TY_u8 -> fmt ff "u8"
-  | TY_mach TY_u16 -> fmt ff "u16"
-  | TY_mach TY_u32 -> fmt ff "u32"
-  | TY_mach TY_u64 -> fmt ff "u64"
-  | TY_mach TY_s8 -> fmt ff "s8"
-  | TY_mach TY_s16 -> fmt ff "s16"
-  | TY_mach TY_s32 -> fmt ff "s32"
-  | TY_mach TY_s64 -> fmt ff "s64"
-  | TY_mach TY_f32 -> fmt ff "f32"
-  | TY_mach TY_f64 -> fmt ff "b64"
+  | TY_mach m -> fmt_mach ff m
   | TY_int -> fmt ff "int"
   | TY_char -> fmt ff "char"
   | TY_str -> fmt ff "str"
@@ -779,12 +770,29 @@ and fmt_expr (ff:Format.formatter) (e:expr) : unit =
       end
   | EXPR_atom a -> fmt_atom ff a
 
+and fmt_mach (ff:Format.formatter) (m:ty_mach) : unit =
+  match m with
+    TY_u8 -> fmt ff "u8"
+  | TY_u16 -> fmt ff "u16"
+  | TY_u32 -> fmt ff "u32"
+  | TY_u64 -> fmt ff "u64"
+  | TY_s8 -> fmt ff "s8"
+  | TY_s16 -> fmt ff "s16"
+  | TY_s32 -> fmt ff "s32"
+  | TY_s64 -> fmt ff "s64"
+  | TY_f32 -> fmt ff "f32"
+  | TY_f64 -> fmt ff "b64"
+      
 and fmt_lit (ff:Format.formatter) (l:lit) : unit =
   match l with
   | LIT_nil -> fmt ff "()"
   | LIT_bool true -> fmt ff "true"
   | LIT_bool false -> fmt ff "false"
-  | LIT_mach (_, s) -> fmt ff "%s" s
+  | LIT_mach (m, s) ->
+      begin
+        fmt_mach ff m;
+        fmt ff "(%s)" s
+      end
   | LIT_int (_,s) -> fmt ff "%s" s
   | LIT_char c -> fmt ff "'%s'" (Char.escaped c)
   | LIT_custom _ -> fmt ff "?lit?"
@@ -1094,6 +1102,7 @@ let sprintf_lval = sprintf_fmt fmt_lval;;
 let sprintf_atom = sprintf_fmt fmt_atom;;
 let sprintf_slot = sprintf_fmt fmt_slot;;
 let sprintf_slot_key = sprintf_fmt fmt_slot_key;;
+let sprintf_mutable = sprintf_fmt fmt_mutable;;
 let sprintf_ty = sprintf_fmt fmt_ty;;
 let sprintf_tag = sprintf_fmt fmt_tag;;
 let sprintf_carg = sprintf_fmt fmt_carg;;
