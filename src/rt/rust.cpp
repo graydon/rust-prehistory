@@ -221,6 +221,12 @@ struct rust_rt {
     rust_port *ports;
 };
 
+struct frame_glue_fns {
+    uintptr_t mark_glue;
+    uintptr_t drop_glue;
+    uintptr_t reloc_glue;
+};
+
 /*
  * "Simple" precise, mark-sweep, single-generation GC.
  *
@@ -230,17 +236,8 @@ struct rust_rt {
  *  - gc_vals come from the same simple allocator as all other
  *    values but undergo different storage management.
  *
- *  - Any frame that has pointers to gc_vals in its slots (IOW
- *    "has GC roots") has 2 frame-slots initialized on entry:
- *
- *     fp[-1] = mark-frame-chain function
- *     fp[-2] = previous-GC-fp
- *
- *  - The proc has a gc_frame_chain field pointing to the topmost GC fp.
- *    This means that you can quickly walk the list of all frames;
- *    with GC roots. The topmost mark or sweep function will, in fact,
- *    automatically chase through this list; all you have to do is
- *    call the top one.
+ *  - Every frame has a frame_glue_fns pointer in its fp[-1] slot,
+ *    written on function-entry.
  *
  *  - Like gc_vals have *two* extra words at their head, not one.
  *
@@ -259,8 +256,8 @@ struct rust_rt {
  *
  *    - The proc asks its runtime for its gc_frame_chain.
  *
- *    - The proc calls gc_frame_chain[-1](fp=gc_frame_chain) which
- *      marks the frame and then tail-calls to fp[-2][-1](fp=fp[-2]),
+ *    - The proc calls frame_glue_fns.mark_glue(fp) which
+ *      marks the frame and then tail-calls down the frame chain,
  *      recursively.  this marks all the frames with GC roots (each of
  *      those functions in turn may recursively call into the GC
  *      graph, that's for the mark glue to decide).

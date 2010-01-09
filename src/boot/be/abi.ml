@@ -104,10 +104,6 @@ let proc_field_data = proc_field_curr_ticks + 1;;
 
 let rt_field_sp = 0;;
 
-let gc_info_field_prev = -0;;
-let gc_info_field_mark_frame = -1;;
-let gc_info_size = 2;;
-
 type abi =
   {
     abi_word_sz: int64;

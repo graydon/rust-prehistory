@@ -36,6 +36,7 @@ type glue =
 type data =
     DATA_str of string
   | DATA_typeinfo of Ast.ty
+  | DATA_frame_glue_fns of node_id
 ;;
 
 type glue_code = (glue, code) Hashtbl.t;;
@@ -58,6 +59,7 @@ type constr_key =
 
 type ctxt =
     { ctxt_sess: Session.sess;
+      ctxt_frame_blocks: (node_id,node_id list) Hashtbl.t;
       ctxt_block_slots: block_slots_table;
       ctxt_block_items: block_items_table;
       ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
@@ -82,7 +84,6 @@ type ctxt =
 
       (* Mutability and GC stuff. *)
       ctxt_mutable_slot_referent: (node_id,unit) Hashtbl.t;
-      ctxt_frame_has_gc_roots: (node_id,unit) Hashtbl.t;
 
       (* Typestate-y stuff. *)
       ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
@@ -114,6 +115,7 @@ type ctxt =
 
 let new_ctxt sess abi crate =
   { ctxt_sess = sess;
+    ctxt_frame_blocks = Hashtbl.create 0;
     ctxt_block_slots = Hashtbl.create 0;
     ctxt_block_items = Hashtbl.create 0;
     ctxt_all_slots = Hashtbl.create 0;
@@ -127,7 +129,6 @@ let new_ctxt sess abi crate =
     ctxt_lval_to_referent = Hashtbl.create 0;
 
     ctxt_mutable_slot_referent = Hashtbl.create 0;
-    ctxt_frame_has_gc_roots = Hashtbl.create 0;
 
     ctxt_constrs = Hashtbl.create 0;
     ctxt_constr_ids = Hashtbl.create 0;

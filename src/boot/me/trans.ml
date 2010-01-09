@@ -2031,7 +2031,20 @@ let trans_visitor
       end
   in
 
+  let get_frame_glue_fns (fnid:node_id) : fixup =
+    (*
+      let mark_frame
+      (frame_ptr:Il.cell)
+      (frame_id:node_id)
+      : unit =
+      ()
+      in
+    *)
+    new_fixup "frame glue fns"
+  in
+
   let trans_frame_entry (fnid:node_id) : unit =
+    let _ = get_frame_glue_fns fnid in
     let header = Hashtbl.find cx.ctxt_header_layouts fnid in
     let argsz = Int64.add cx.ctxt_abi.Abi.abi_implicit_args_sz header.layout_size in
     let framesz = get_framesz cx fnid in

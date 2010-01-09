@@ -143,7 +143,7 @@ let layout_visitor
             fun sid ->
               match htab_search cx.ctxt_slot_layouts sid with
                   None -> ()
-                | Some layout -> 
+                | Some layout ->
                     sub_sz layout;
                     log cx "shifted slot #%d down to final frame offset %Ld"
                       (int_of_node sid) layout.layout_offset
@@ -250,22 +250,24 @@ let layout_visitor
   in
   let visit_block_pre b =
     let stk = Stack.top block_stacks in
+    let frame_id = Stack.top frame_stack in
     let off =
       if Stack.is_empty stk
       then
         (*
-         * Work out the effective frame bottom, which may be 
-         * 0 (relative to fp) or may be a few words beneath
-         * that if we're in a frame that has gc info buried 
-         * at its base.
+         * The "frame-bottom" is 1 word greater than 0, because we
+         * store a frame_glue_fns* at the bottom of each frame.
          *)
-        let frame_id = Stack.top frame_stack in
-          if Hashtbl.mem cx.ctxt_frame_has_gc_roots frame_id
-          then Int64.mul (Int64.of_int Abi.gc_info_size) cx.ctxt_abi.Abi.abi_word_sz
-          else 0L
+        cx.ctxt_abi.Abi.abi_word_sz
       else (Stack.top stk).layout_offset
     in
     let layout = layout_block off b in
+    let frame_blocks =
+      match htab_search cx.ctxt_frame_blocks frame_id with
+          None -> []
+        | Some blocks -> blocks
+    in
+      Hashtbl.replace cx.ctxt_frame_blocks frame_id (b.id :: frame_blocks);
       Stack.push layout stk;
       update_frame_size ();
       inner.Walk.visit_block_pre b
