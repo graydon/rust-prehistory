@@ -1342,6 +1342,11 @@ let trans_visitor
 
         | MEM_rc_struct ->
             (* Refcounted "structured exterior" objects we handle via glue functions. *)
+            (* 
+             * FIXME: check to see that the exterior has further
+             * exterior members; if it doesn't we can elide the call to
+             * the glue function.
+             *)
             let rc = exterior_rc_cell cell in
             let j = drop_refcount_and_cmp rc in
             let ty = maybe_iso curr_iso ty in
@@ -2118,16 +2123,15 @@ let trans_visitor
               iter_frame_slots fnid
                 begin
                   fun key slot_id slot ->
-                    let referent_type = slot_id_referent_type slot_id in
-                      match htab_search cx.ctxt_slot_layouts slot_id with
-                          None -> ()
-                        | Some layout ->
-                            let disp = layout.layout_offset in
-                            let slot_cell = Il.Addr (addr_add_imm addr disp,
-                                                     referent_type)
-                            in
-                            let mem_ctrl = slot_mem_ctrl slot_cell slot in
-                              inner key slot_id slot slot_cell mem_ctrl
+                    match htab_search cx.ctxt_slot_layouts slot_id with
+                        None -> ()
+                      | Some layout ->
+                          let referent_type = slot_id_referent_type slot_id in
+                          let disp = layout.layout_offset in
+                          let fp_cell = Il.Addr (addr, (Il.ScalarTy (Il.AddrTy referent_type))) in
+                          let slot_cell = Il.Addr (deref_imm fp_cell disp) in
+                          let mem_ctrl = slot_mem_ctrl slot_cell slot in
+                            inner key slot_id slot slot_cell mem_ctrl
                 end
           end
     in
@@ -2145,7 +2149,7 @@ let trans_visitor
             get_frame_glue (GLUE_drop_frame fnid) "drop"
               begin
                 fun key slot_id slot slot_cell mem_ctrl ->
-                  ()
+                  drop_slot slot_cell slot None
               end
           in
           let reloc_frame_glue_fixup =
