@@ -63,6 +63,7 @@ let trans_visitor
 
   let out_addr_disp = abi.Abi.abi_frame_base_sz in
   let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
+  let frame_fns_disp = word_n (-1) in
 
   let emitters = Stack.create () in
   let push_new_emitter _ =
@@ -347,6 +348,28 @@ let trans_visitor
 *)
 
       | _ -> 0xbadbeefL
+  in
+
+  let iter_block_slots
+      (block_id:node_id)
+      (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
+      : unit =
+    let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
+      Hashtbl.iter
+        begin
+          fun key slot_id ->
+            let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
+              fn key slot_id slot
+        end
+        block_slots
+  in
+
+  let iter_frame_slots
+      (fn_id:node_id)
+      (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
+      : unit =
+    let blocks = Hashtbl.find cx.ctxt_frame_blocks fn_id in
+      List.iter (fun block -> iter_block_slots block fn) blocks
   in
 
   let rec trans_lval_ext
@@ -878,29 +901,26 @@ let trans_visitor
     Array.iter trans_stmt block.node;
     trace_str cx.ctxt_sess.Session.sess_trace_block
       "exiting block";
-    let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
-      (* 
-       * FIXME: this is not going to free things in the proper order; 
-       * we need to analyze the decl order in an earlier phase and thread
-       * it through to here. 
-       *)
-      Hashtbl.iter
-        begin
-          fun slotkey slot_id ->
-            iflog
-              begin
-                fun _ ->
-                  annotate
-                    ("drop slot: " ^
-                       (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
-              end;
-            trace_str cx.ctxt_sess.Session.sess_trace_drop
-              ("dropping slot " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
-            let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
-            let cell = cell_of_block_slot slot_id in
-              drop_slot cell slot None
-        end
-        block_slots;
+    iter_block_slots block.id
+      begin
+        fun slotkey slot_id slot ->
+          (* 
+           * FIXME: this is not going to free things in the proper order; 
+           * we need to analyze the decl order in an earlier phase and thread
+           * it through to here. 
+           *)
+          iflog
+            begin
+              fun _ ->
+                annotate
+                  ("drop slot: " ^
+                     (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
+            end;
+          trace_str cx.ctxt_sess.Session.sess_trace_drop
+            ("dropping slot " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
+          let cell = cell_of_block_slot slot_id in
+            drop_slot cell slot None
+      end;
       emit Il.Leave;
       ignore (Stack.pop block_layouts);
       trace_str cx.ctxt_sess.Session.sess_trace_block
@@ -2089,24 +2109,51 @@ let trans_visitor
   in
 
   let get_frame_glue_fns (fnid:node_id) : Il.operand =
+    let get_frame_glue glue prefix inner =
+      let path = path_name() in
+        get_mem_glue glue
+          (fun _ -> prefix ^ " frame: " ^ path)
+          begin
+            fun addr ->
+              iter_frame_slots fnid
+                begin
+                  fun key slot_id slot ->
+                    let referent_type = slot_id_referent_type slot_id in
+                      match htab_search cx.ctxt_slot_layouts slot_id with
+                          None -> ()
+                        | Some layout ->
+                            let disp = layout.layout_offset in
+                            let slot_cell = Il.Addr (addr_add_imm addr disp,
+                                                     referent_type)
+                            in
+                            let mem_ctrl = slot_mem_ctrl slot_cell slot in
+                              inner key slot_id slot slot_cell mem_ctrl
+                end
+          end
+    in
     trans_data_frag (DATA_frame_glue_fns fnid)
       begin
         fun _ ->
-          let path = path_name() in
           let mark_frame_glue_fixup =
-            get_mem_glue (GLUE_mark_frame fnid)
-              (fun _ -> "mark frame: " ^ path)
-              (fun a -> ())
+            get_frame_glue (GLUE_mark_frame fnid) "mark"
+              begin
+                fun key slot_id slot slot_cell mem_ctrl ->
+                  ()
+              end
           in
           let drop_frame_glue_fixup =
-            get_mem_glue (GLUE_drop_frame fnid)
-              (fun _ -> "drop frame: " ^ path)
-              (fun a -> ())
+            get_frame_glue (GLUE_drop_frame fnid) "drop"
+              begin
+                fun key slot_id slot slot_cell mem_ctrl ->
+                  ()
+              end
           in
           let reloc_frame_glue_fixup =
-            get_mem_glue (GLUE_reloc_frame fnid)
-              (fun _ -> "reloc frame: " ^ path)
-              (fun a -> ())
+            get_frame_glue (GLUE_reloc_frame fnid) "reloc"
+              begin
+                fun key slot_id slot slot_cell mem_ctrl ->
+                  ()
+              end
           in
             Asm.SEQ
               [|
@@ -2118,7 +2165,7 @@ let trans_visitor
   in
 
   let trans_frame_entry (fnid:node_id) : unit =
-    let _ = get_frame_glue_fns fnid in
+    let frame_fns = get_frame_glue_fns fnid in
     let header = Hashtbl.find cx.ctxt_header_layouts fnid in
     let argsz = Int64.add cx.ctxt_abi.Abi.abi_implicit_args_sz header.layout_size in
     let framesz = get_framesz cx fnid in
@@ -2128,6 +2175,7 @@ let trans_visitor
       push_new_emitter ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill_fixup callsz cx.ctxt_proc_to_c_fixup;
+      mov (word_at (fp_imm frame_fns_disp)) frame_fns;
       iflog (fun _ -> annotate "finished prologue");
   in
 
