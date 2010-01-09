@@ -635,7 +635,7 @@ let trans_visitor
     let callsz = Int64.add isz (word_n n_outgoing_args) in
       trans_glue_frame_entry argsz callsz spill
 
-  and get_mem_glue (g:glue) (ty:Ast.ty) (prefix:unit -> string) (inner:Il.typed_addr -> unit) : fixup =
+  and get_mem_glue (g:glue) (prefix:unit -> string) (inner:Il.addr -> unit) : fixup =
     match htab_search cx.ctxt_glue_code g with
         Some code -> code.code_fixup
       | None ->
@@ -653,13 +653,15 @@ let trans_visitor
             let spill = new_fixup ("glue spill: " ^ prefix) in
               htab_put cx.ctxt_glue_code g tmp_code;
               trans_mem_glue_frame_entry 1 1 spill;
-              let (arg:Il.typed_addr) = ptr_at (fp_imm arg0_disp) ty in
+              let (arg:Il.addr) = fp_imm arg0_disp in
                 inner arg;
                 Hashtbl.remove cx.ctxt_glue_code g;
                 trans_glue_frame_exit ("glue: " ^ prefix) fix spill g;
                 fix
           end
 
+  and get_typed_mem_glue (g:glue) (ty:Ast.ty) (prefix:unit -> string) (inner:Il.typed_addr -> unit) : fixup =
+    get_mem_glue g prefix (fun addr -> inner (ptr_at addr ty))
 
   and trace_str b s =
     if b
@@ -686,7 +688,7 @@ let trans_visitor
       trace_str cx.ctxt_sess.Session.sess_trace_drop
         "drop-glue complete";
     in
-      get_mem_glue g ty prefix inner
+      get_typed_mem_glue g ty prefix inner
 
   and get_free_glue (ty:Ast.ty)
       : fixup =
@@ -711,14 +713,14 @@ let trans_visitor
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "free-glue complete";
     in
-      get_mem_glue g ty prefix inner
+      get_typed_mem_glue g ty prefix inner
 
   and get_mark_glue (ty:Ast.ty)
       : fixup =
     let g = GLUE_mark ty in
     let prefix _ = "mark " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
     let inner (arg:Il.typed_addr) = mark_ty ty (deref (Il.Addr arg)) in
-      get_mem_glue g ty prefix inner
+      get_typed_mem_glue g ty prefix inner
 
 
   and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
@@ -2086,16 +2088,33 @@ let trans_visitor
       end
   in
 
-  let get_frame_glue_fns (fnid:node_id) : fixup =
-    (*
-      let mark_frame
-      (frame_ptr:Il.cell)
-      (frame_id:node_id)
-      : unit =
-      ()
-      in
-    *)
-    new_fixup "frame glue fns"
+  let get_frame_glue_fns (fnid:node_id) : Il.operand =
+    trans_data_frag (DATA_frame_glue_fns fnid)
+      begin
+        fun _ ->
+          let path = path_name() in
+          let mark_frame_glue_fixup =
+            get_mem_glue (GLUE_mark_frame fnid)
+              (fun _ -> "mark frame: " ^ path)
+              (fun a -> ())
+          in
+          let drop_frame_glue_fixup =
+            get_mem_glue (GLUE_drop_frame fnid)
+              (fun _ -> "drop frame: " ^ path)
+              (fun a -> ())
+          in
+          let reloc_frame_glue_fixup =
+            get_mem_glue (GLUE_reloc_frame fnid)
+              (fun _ -> "reloc frame: " ^ path)
+              (fun a -> ())
+          in
+            Asm.SEQ
+              [|
+                Asm.WORD (word_ty_mach, Asm.M_POS mark_frame_glue_fixup);
+                Asm.WORD (word_ty_mach, Asm.M_POS drop_frame_glue_fixup);
+                Asm.WORD (word_ty_mach, Asm.M_POS reloc_frame_glue_fixup);
+              |]
+      end
   in
 
   let trans_frame_entry (fnid:node_id) : unit =
