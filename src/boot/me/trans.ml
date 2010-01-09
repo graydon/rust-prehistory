@@ -1242,7 +1242,7 @@ let trans_visitor
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    let drop_refcount_then_mark_and_cjmp rc =
+    let drop_refcount_and_cmp rc =
       (iflog (fun _ -> annotate ("drop refcount and maybe free slot " ^
                                    (Ast.fmt_to_str Ast.fmt_slot slot))));
       emit (Il.binary Il.SUB rc (Il.Cell rc) one);
@@ -1257,17 +1257,21 @@ let trans_visitor
             (* Refcounted opaque objects we handle without glue functions. *)
             let (rc_addr, _) = deref_imm cell (word_n rc_off) in
             let rc = word_at rc_addr in
-            let j = drop_refcount_then_mark_and_cjmp rc in
+            let j = drop_refcount_and_cmp rc in
               free_ty ty cell;
+              (* Null the slot out to prevent double-free if the frame unwinds. *)
+              mov cell zero;
               patch j
 
         | MEM_rc_struct ->
             (* Refcounted "structured exterior" objects we handle via glue functions. *)
             let rc = exterior_rc_cell cell in
-            let j = drop_refcount_then_mark_and_cjmp rc in
+            let j = drop_refcount_and_cmp rc in
             let ty = maybe_iso curr_iso ty in
-                trans_call_mem_glue (get_free_glue ty) cell;
-                patch j
+              trans_call_mem_glue (get_free_glue ty) cell;
+              (* Null the slot out to prevent double-free if the frame unwinds. *)
+              mov cell zero;
+              patch j
 
         | MEM_interior when ty_is_structured ty ->
             (iflog (fun _ -> annotate ("drop interior slot " ^
@@ -1283,9 +1287,11 @@ let trans_visitor
             ()
 
         | MEM_gc ->
-            (* The general sweep-phase will clean it up if dead. *)
-            (* FIXME: unroot. *)
-            ()
+            (* 
+             * Null the slot out so the mark-phase will not traverse it; 
+             * The general sweep-phase will free the referent if it's unreachable.
+             *)
+            mov cell zero
 
   and exterior_body_off (cell:Il.cell) (slot:Ast.slot) : int64 =
       match slot_mem_ctrl cell slot with
