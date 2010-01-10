@@ -393,25 +393,6 @@ struct rust_chan {
 };
 
 static void
-xlog(rust_rt *rt, uint32_t logbit, char const *fmt, ...)
-{
-    char buf[256];
-    if (rt->logbits & logbit) {
-        va_list args;
-        va_start(args, fmt);
-        vsnprintf(buf, sizeof(buf), fmt, args);
-        rt->srv->log(buf);
-        va_end(args);
-    }
-}
-
-static void
-logptr(rust_rt *rt, char const *msg, uintptr_t ptrval)
-{
-    rt->logptr(msg, ptrval);
-}
-
-static void
 xfree(rust_rt *rt, void *p)
 {
     rt->free(p);
@@ -449,18 +430,18 @@ ptr_vec<T>::ptr_vec(rust_rt *rt) :
     data(new (rt) T*[alloc])
 {
     I(rt, data);
-    xlog(rt, LOG_MEM,
-         "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
-         (uintptr_t)this, (uintptr_t)data);
+    rt->log(LOG_MEM,
+            "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
+            (uintptr_t)this, (uintptr_t)data);
 }
 
 template <typename T>
 ptr_vec<T>::~ptr_vec()
 {
     I(rt, data);
-    xlog(rt, LOG_MEM,
-         "fini ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
-         (uintptr_t)this, (uintptr_t)data);
+    rt->log(LOG_MEM,
+            "fini ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
+            (uintptr_t)this, (uintptr_t)data);
     I(rt, fill == 0);
     rt->free(data);
 }
@@ -529,9 +510,9 @@ circ_buf::init(rust_rt *rt, size_t unit_sz)
     next = 0;
     unread = 0;
     data = (uint8_t *)xcalloc(rt, alloc);
-    xlog(rt, LOG_MEM|LOG_COMM,
-         "init circ buf 0x%" PRIxPTR ", alloc=%d, unread=%d",
-         this, alloc, unread);
+    rt->log(LOG_MEM|LOG_COMM,
+            "init circ buf 0x%" PRIxPTR ", alloc=%d, unread=%d",
+            this, alloc, unread);
     I(rt, data);
 }
 
@@ -572,9 +553,9 @@ circ_buf::push(void *src)
         data = (uint8_t *)tmp;
     }
 
-    xlog(rt, LOG_MEM|LOG_COMM,
-         "circ buf push, unread=%d, alloc=%d, unit_sz=%d",
-         unread, alloc, unit_sz);
+    rt->log(LOG_MEM|LOG_COMM,
+            "circ buf push, unread=%d, alloc=%d, unit_sz=%d",
+            unread, alloc, unit_sz);
 
     I(rt, unread < alloc);
     I(rt, unread + unit_sz <= alloc);
@@ -582,7 +563,7 @@ circ_buf::push(void *src)
     i = (next + unread) % alloc;
     memcpy(&data[i], src, unit_sz);
 
-    xlog(rt, LOG_MEM|LOG_COMM, "pushed data at index %d", i);
+    rt->log(LOG_MEM|LOG_COMM, "pushed data at index %d", i);
     unread += unit_sz;
 }
 
@@ -599,7 +580,7 @@ circ_buf::shift(void *dst)
     I(rt, data);
     i = next;
     memcpy(dst, &data[i], unit_sz);
-    xlog(rt, LOG_MEM|LOG_COMM, "shifted data from index %d", i);
+    rt->log(LOG_MEM|LOG_COMM, "shifted data from index %d", i);
     unread -= unit_sz;
     next += unit_sz;
     I(rt, next <= alloc);
@@ -669,10 +650,10 @@ new_stk(rust_rt *rt, size_t minsz)
         minsz = min_stk_bytes;
     size_t sz = sizeof(stk_seg) + minsz;
     stk_seg *stk = (stk_seg *)xalloc(rt, sz);
-    logptr(rt, "new stk", (uintptr_t)stk);
+    rt->logptr("new stk", (uintptr_t)stk);
     memset(stk, 0, sizeof(stk_seg));
     stk->limit = (uintptr_t) &stk->data[minsz];
-    logptr(rt, "stk limit", stk->limit);
+    rt->logptr("stk limit", stk->limit);
     stk->valgrind_id =
         VALGRIND_STACK_REGISTER(&stk->data[0],
                                 &stk->data[minsz]);
@@ -691,12 +672,12 @@ del_stk(rust_rt *rt, stk_seg *stk)
     /* Then free forwards. */
     do {
         nxt = stk->next;
-        logptr(rt, "freeing stk segment", (uintptr_t)stk);
+        rt->logptr("freeing stk segment", (uintptr_t)stk);
         VALGRIND_STACK_DEREGISTER(stk->valgrind_id);
         xfree(rt, stk);
         stk = nxt;
     } while (stk);
-    xlog(rt, LOG_MEM, "freed stacks");
+    rt->log(LOG_MEM, "freed stacks");
 }
 
 /* Processes */
@@ -797,9 +778,9 @@ new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
          uintptr_t spawnee_fn, size_t callsz)
 {
     rust_proc *proc = (rust_proc *)xcalloc(rt, sizeof(rust_proc));
-    logptr(rt, "new proc", (uintptr_t)proc);
-    logptr(rt, "exit-proc glue", exit_proc_glue);
-    logptr(rt, "from spawnee", spawnee_fn);
+    rt->logptr("new proc", (uintptr_t)proc);
+    rt->logptr("exit-proc glue", exit_proc_glue);
+    rt->logptr("from spawnee", spawnee_fn);
     proc->fn = spawnee_fn;
     proc->stk = new_stk(rt, 0);
 
@@ -886,9 +867,9 @@ new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
 static void
 del_proc(rust_rt *rt, rust_proc *proc)
 {
-    xlog(rt, LOG_MEM|LOG_PROC,
-         "del proc 0x%" PRIxPTR ", refcnt=%d",
-         (uintptr_t)proc, proc->refcnt);
+    rt->log(LOG_MEM|LOG_PROC,
+            "del proc 0x%" PRIxPTR ", refcnt=%d",
+            (uintptr_t)proc, proc->refcnt);
 
     /* FIXME: tighten this up, there are some more
        assertions that hold at proc-lifecycle events. */
@@ -935,9 +916,9 @@ static void
 add_proc_state_vec(rust_rt *rt, rust_proc *proc)
 {
     ptr_vec<rust_proc> *v = get_proc_vec(rt, proc);
-    xlog(rt, LOG_MEM|LOG_PROC,
-         "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
-         (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
+    rt->log(LOG_MEM|LOG_PROC,
+            "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
+            (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
     v->push(proc);
 }
 
@@ -952,9 +933,9 @@ static void
 remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
 {
     ptr_vec<rust_proc> *v = get_proc_vec(rt, proc);
-    xlog(rt, LOG_MEM|LOG_PROC,
-         "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
-         (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
+    rt->log(LOG_MEM|LOG_PROC,
+            "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
+            (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
     I(rt, (*v)[proc->idx] == proc);
     v->swapdel(proc);
     v->trim(n_live_procs(rt));
@@ -966,11 +947,11 @@ proc_state_transition(rust_rt *rt,
                       proc_state_t src,
                       proc_state_t dst)
 {
-    xlog(rt, LOG_PROC,
-         "proc 0x%" PRIxPTR " state change '%s' -> '%s'",
-         (uintptr_t)proc,
-         state_names[(size_t)src],
-         state_names[(size_t)dst]);
+    rt->log(LOG_PROC,
+            "proc 0x%" PRIxPTR " state change '%s' -> '%s'",
+            (uintptr_t)proc,
+            state_names[(size_t)src],
+            state_names[(size_t)dst]);
     I(rt, proc->state == src);
     remove_proc_from_state_vec(rt, proc);
     proc->state = dst;
@@ -980,17 +961,17 @@ proc_state_transition(rust_rt *rt,
 static void
 upcall_del_proc(rust_rt *rt, rust_proc *proc)
 {
-    xlog(proc->rt, LOG_PROC,
-         "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
-         proc, proc->refcnt);
+    rt->log(LOG_PROC,
+            "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
+            proc, proc->refcnt);
     I(rt, n_live_procs(rt) > 0);
     /* FIXME: when we have dtors, this might force-execute the dtor
      * synchronously? Hmm. */
     remove_proc_from_state_vec(rt, proc);
     del_proc(rt, proc);
-    xlog(rt, LOG_MEM|LOG_PROC,
-         "proc 0x%" PRIxPTR " killed (and deleted)",
-         (uintptr_t)proc);
+    rt->log(LOG_MEM|LOG_PROC,
+            "proc 0x%" PRIxPTR " killed (and deleted)",
+            (uintptr_t)proc);
 }
 
 static rust_proc*
@@ -1003,8 +984,8 @@ sched(rust_rt *rt)
         i %= rt->running_procs.length();
         return (rust_proc *)rt->running_procs[i];
     }
-    xlog(rt, LOG_RT|LOG_PROC,
-         "no schedulable processes");
+    rt->log(LOG_RT|LOG_PROC,
+            "no schedulable processes");
     return NULL;
 }
 
@@ -1014,7 +995,7 @@ static void
 del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     I(rt, v);
     while (v->length()) {
-        xlog(rt, LOG_PROC, "deleting live proc %" PRIdPTR, v->length() - 1);
+        rt->log(LOG_PROC, "deleting live proc %" PRIdPTR, v->length() - 1);
         del_proc(rt, v->pop());
     }
 }
@@ -1220,9 +1201,9 @@ attempt_transmission(rust_rt *rt,
     I(rt, dst);
 
     if (dst->state != proc_state_blocked_reading) {
-        xlog(rt, LOG_COMM,
-             "dst in non-reading state, "
-             "transmission incomplete");
+        rt->log(LOG_COMM,
+                "dst in non-reading state, "
+                "transmission incomplete");
         return 0;
     }
 
@@ -1231,9 +1212,9 @@ attempt_transmission(rust_rt *rt,
     }
 
     if (src->buf.unread == 0) {
-        xlog(rt, LOG_COMM,
-             "buffer empty, "
-             "transmission incomplete");
+        rt->log(LOG_COMM,
+                "buffer empty, "
+                "transmission incomplete");
         return 0;
     }
 
@@ -1251,7 +1232,7 @@ attempt_transmission(rust_rt *rt,
                           proc_state_blocked_reading,
                           proc_state_running);
 
-    xlog(rt, LOG_COMM, "transmission complete");
+    rt->log(LOG_COMM, "transmission complete");
     return 1;
 }
 
@@ -1259,21 +1240,21 @@ static void
 upcall_send(rust_rt *rt, rust_proc *src,
             rust_port *port, void *sptr)
 {
-    xlog(rt, LOG_UPCALL|LOG_COMM,
-         "upcall send(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
-         (uintptr_t)src,
-         (uintptr_t)port);
+    rt->log(LOG_UPCALL|LOG_COMM,
+            "upcall send(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
+            (uintptr_t)src,
+            (uintptr_t)port);
 
     rust_chan *chan = NULL;
 
     if (!port) {
-        xlog(rt, LOG_COMM|LOG_ERR,
-             "send to NULL port (possibly throw?)");
+        rt->log(LOG_COMM|LOG_ERR,
+                "send to NULL port (possibly throw?)");
         return;
     }
 
-    xlog(rt, LOG_MEM|LOG_COMM,
-         "send to port", (uintptr_t)port);
+    rt->log(LOG_MEM|LOG_COMM,
+            "send to port", (uintptr_t)port);
 
     I(rt, src);
     I(rt, port);
@@ -1281,8 +1262,8 @@ upcall_send(rust_rt *rt, rust_proc *src,
     HASH_FIND(hh,src->chans,port,sizeof(rust_port*),chan);
     if (!chan) {
         chan = (rust_chan *)xcalloc(rt, sizeof(rust_chan));
-        xlog(rt, LOG_MEM|LOG_COMM,
-             "new chan 0x%" PRIxPTR, (uintptr_t)chan);
+        rt->log(LOG_MEM|LOG_COMM,
+                "new chan 0x%" PRIxPTR, (uintptr_t)chan);
         chan->port = port;
         chan->buf.init(rt, port->unit_sz);
         HASH_ADD(hh,src->chans,port,sizeof(rust_port*),chan);
@@ -1292,9 +1273,9 @@ upcall_send(rust_rt *rt, rust_proc *src,
     I(rt, chan->port);
     I(rt, chan->port == port);
 
-    xlog(rt, LOG_MEM|LOG_COMM,
-         "sending via chan 0x%" PRIxPTR,
-         (uintptr_t)chan);
+    rt->log(LOG_MEM|LOG_COMM,
+            "sending via chan 0x%" PRIxPTR,
+            (uintptr_t)chan);
 
     if (port->proc) {
         chan->blocked = src;
@@ -1308,18 +1289,18 @@ upcall_send(rust_rt *rt, rust_proc *src,
             port->writers.push(chan);
         }
     } else {
-        xlog(rt, LOG_COMM|LOG_ERR,
-             "port has no proc (possibly throw?)");
+        rt->log(LOG_COMM|LOG_ERR,
+                "port has no proc (possibly throw?)");
     }
 }
 
 static void
 upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
 {
-    xlog(rt, LOG_UPCALL|LOG_COMM,
-         "upcall recv(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
-         (uintptr_t)dst,
-         (uintptr_t)port);
+    rt->log(LOG_UPCALL|LOG_COMM,
+            "upcall recv(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
+            (uintptr_t)dst,
+            (uintptr_t)port);
 
     I(rt, port);
     I(rt, port->proc);
@@ -1342,8 +1323,8 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
             schan->queued = 0;
         }
     } else {
-        xlog(rt, LOG_COMM,
-             "no writers sending to port", (uintptr_t)port);
+        rt->log(LOG_COMM,
+                "no writers sending to port", (uintptr_t)port);
     }
 }
 
@@ -1353,8 +1334,8 @@ upcall_fail(rust_rt *rt, char const *expr, char const *file,
             size_t line)
 {
     /* FIXME: throw, don't just exit. */
-    xlog(rt, LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
-         expr, file, line);
+    rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
+            expr, file, line);
     rt->srv->fatal(expr, file, line);
 }
 
@@ -1362,18 +1343,18 @@ static uintptr_t
 upcall_malloc(rust_rt *rt, rust_proc *proc, size_t nbytes)
 {
     void *p = xalloc(rt, nbytes);
-    xlog(rt, LOG_UPCALL|LOG_MEM,
-         "upcall malloc(%u) = 0x%" PRIxPTR,
-         nbytes, (uintptr_t)p);
+    rt->log(LOG_UPCALL|LOG_MEM,
+            "upcall malloc(%u) = 0x%" PRIxPTR,
+            nbytes, (uintptr_t)p);
     return (uintptr_t) p;
 }
 
 static void
 upcall_free(rust_rt *rt, void* ptr)
 {
-    xlog(rt, LOG_UPCALL|LOG_MEM,
-         "upcall free(0x%" PRIxPTR ")",
-         (uintptr_t)ptr);
+    rt->log(LOG_UPCALL|LOG_MEM,
+            "upcall free(0x%" PRIxPTR ")",
+            (uintptr_t)ptr);
     xfree(rt, ptr);
 }
 
@@ -1399,17 +1380,17 @@ upcall_native(rust_proc *proc,
               uintptr_t *argv, uintptr_t nargs)
 {
     rust_rt *rt = proc->rt;
-    xlog(rt, LOG_UPCALL|LOG_MEM,
-         "upcall native('%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
-         sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
+    rt->log(LOG_UPCALL|LOG_MEM,
+            "upcall native('%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
+            sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
 
     uintptr_t retval;
     uint8_t takes_proc = 0;
     /* FIXME: cache lookups. */
     uintptr_t fn = rt->srv->lookup(sym, &takes_proc);
-    xlog(rt, LOG_UPCALL|LOG_MEM,
-         "native '%s' resolved to 0x%" PRIxPTR,
-         sym, fn);
+    rt->log(LOG_UPCALL|LOG_MEM,
+            "native '%s' resolved to 0x%" PRIxPTR,
+            sym, fn);
 
     I(rt, fn);
     /* FIXME: nargs becomes argstr, incorporate libffi, etc. */
@@ -1478,9 +1459,9 @@ upcall_new_str(rust_rt *rt, char const *s, size_t fill)
     st->alloc = alloc;
     if (s)
         memcpy(&st->data[0], s, fill);
-    xlog(rt, LOG_UPCALL|LOG_MEM,
-         "upcall new_str('%s', %" PRIdPTR ") -> 0x%" PRIxPTR,
-         s, fill, st);
+    rt->log(LOG_UPCALL|LOG_MEM,
+            "upcall new_str('%s', %" PRIdPTR ") -> 0x%" PRIxPTR,
+            s, fill, st);
     return st;
 }
 
@@ -1544,7 +1525,7 @@ static rust_proc*
 upcall_new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
                 uintptr_t spawnee_fn, size_t callsz)
 {
-    xlog(rt, LOG_UPCALL|LOG_MEM|LOG_PROC,
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
          "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
          exit_proc_glue, spawnee_fn, callsz);
     rust_proc *proc = new_proc(rt, spawner, exit_proc_glue, spawnee_fn, callsz);
@@ -1679,7 +1660,7 @@ rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
                    "returned from proc 0x%" PRIxPTR " in state '%s'",
                    (uintptr_t)proc, state_names[proc->state]);
             /*
-              xlog(rt, LOG_MEM,
+              rt->log(LOG_MEM,
               "sp:0x%" PRIxPTR ", "
               "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
               "stk->prev:0x%" PRIxPTR ", stk->next=0x%" PRIxPTR ", "
