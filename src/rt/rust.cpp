@@ -323,6 +323,15 @@ struct frame_glue_fns {
  */
 
 struct rust_proc {
+
+    rust_proc(rust_rt *rt,
+              rust_proc *spawner,
+              uintptr_t exit_proc_glue,
+              uintptr_t spawnee_fn,
+              size_t callsz);
+    ~rust_proc();
+    void operator delete(void *ptr);
+
     rust_rt *rt;
     stk_seg *stk;
     uintptr_t fn;
@@ -342,15 +351,6 @@ struct rust_proc {
      */
     uintptr_t upcall_code;
     uintptr_t upcall_args[PROC_MAX_UPCALL_ARGS];
-
-    /* Proc accounting. */
-    uintptr_t mem_budget;   /* N bytes ownable by this proc.       */
-    uintptr_t curr_mem;     /* N bytes currently owned.            */
-    uintptr_t tick_budget;  /* N ticks in lifetime. 0 = unlimited. */
-    uintptr_t curr_ticks;   /* N ticks currently consumed.         */
-
-    uint8_t data[];         /* C99 "flexible array" element.       */
-
 };
 
 struct rust_port {
@@ -792,16 +792,27 @@ upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
     proc->sp = target;
 }
 
-static rust_proc*
-new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
-         uintptr_t spawnee_fn, size_t callsz)
+rust_proc::rust_proc(rust_rt *rt,
+                     rust_proc *spawner,
+                     uintptr_t exit_proc_glue,
+                     uintptr_t spawnee_fn,
+                     size_t callsz)
+    :
+      rt(rt),
+      stk(new_stk(rt, 0)),
+      fn(spawnee_fn),
+      sp(stk->limit),
+      state(proc_state_running),
+      idx(0),
+      refcnt(1),
+      chans(NULL),
+      gc_frame_chain(0),
+      gc_alloc_chain(0),
+      upcall_code(0)
 {
-    rust_proc *proc = (rust_proc *)rt->calloc(sizeof(rust_proc));
-    rt->logptr("new proc", (uintptr_t)proc);
+    rt->logptr("new proc", (uintptr_t)this);
     rt->logptr("exit-proc glue", exit_proc_glue);
     rt->logptr("from spawnee", spawnee_fn);
-    proc->fn = spawnee_fn;
-    proc->stk = new_stk(rt, 0);
 
     // Set sp to last uintptr_t-sized cell of segment
     // then align down to 16 boundary, to be safe-ish for
@@ -812,9 +823,8 @@ new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
     // there are any platforms alive at the moment with
     // >16 byte alignment constraints, but this is sloppy.
 
-    proc->sp = proc->stk->limit;
-    proc->sp -= sizeof(uintptr_t);
-    proc->sp &= ~0xf;
+    sp -= sizeof(uintptr_t);
+    sp &= ~0xf;
 
     // Begin synthesizing frames. There are two: a "fully formed"
     // exit-proc frame at the top of the stack -- that pretends to be
@@ -824,14 +834,14 @@ new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
     // it. It wasn't; we put that fake frame in place here, but the
     // illusion is enough for the spawnee to return to the exit-proc
     // frame when it's done, and exit.
-    uintptr_t *sp = (uintptr_t *)proc->sp;
+    uintptr_t *spp = (uintptr_t *)sp;
 
     // The exit_proc_glue frame we synthesize above the frame we activate:
-    *sp-- = (uintptr_t) proc;       // proc
-    *sp-- = (uintptr_t) 0;          // output
-    *sp-- = (uintptr_t) 0;          // retpc
+    *spp-- = (uintptr_t) this;       // proc
+    *spp-- = (uintptr_t) 0;          // output
+    *spp-- = (uintptr_t) 0;          // retpc
     for (size_t j = 0; j < n_callee_saves; ++j) {
-        *sp-- = 0;
+        *spp-- = 0;
     }
 
     // We want 'frame_base' to point to the last callee-save in this
@@ -840,7 +850,7 @@ new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
     // frame. A cheap trick, but this means the spawnee frame will
     // restore the proper frame pointer of the glue frame as it
     // runs its epilogue.
-    uintptr_t frame_base = (uintptr_t) (sp+1);
+    uintptr_t frame_base = (uintptr_t) (spp+1);
 
     // Copy args from spawner to spawnee.
     if (spawner)  {
@@ -851,11 +861,11 @@ new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
         src += 1;                  // spawn-call proc slot
         // Memcpy all but the proc and output pointers
         callsz -= (2 * sizeof(uintptr_t));
-        sp = (uintptr_t*) (((uintptr_t)sp) - callsz);
-        memcpy(sp, src, callsz);
+        spp = (uintptr_t*) (((uintptr_t)spp) - callsz);
+        memcpy(spp, src, callsz);
 
         // Move sp down to point to proc cell.
-        sp--;
+        spp--;
     } else {
         // We're at root, starting up.
         I(rt, callsz==0);
@@ -864,46 +874,47 @@ new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
     // The *implicit* incoming args to the spawnee frame we're activating:
     // FIXME: wire up output-address properly so spawnee can write a return
     // value.
-    *sp-- = (uintptr_t) proc;            // proc
-    *sp-- = (uintptr_t) 0;               // output addr
-    *sp-- = (uintptr_t) exit_proc_glue;  // retpc
+    *spp-- = (uintptr_t) this;            // proc
+    *spp-- = (uintptr_t) 0;               // output addr
+    *spp-- = (uintptr_t) exit_proc_glue;  // retpc
 
     // The context the c_to_proc_glue needs to switch stack.
-    *sp-- = (uintptr_t) spawnee_fn;      // instruction to start at
+    *spp-- = (uintptr_t) spawnee_fn;      // instruction to start at
     for (size_t j = 0; j < n_callee_saves; ++j) {
-        *sp-- = frame_base;              // callee-saves to carry in
+        *spp-- = frame_base;              // callee-saves to carry in
     }
 
     // Back up one, we overshot where sp should be.
-    proc->sp = (uintptr_t) (sp+1);
-    proc->rt = rt;
-    proc->state = proc_state_running;
-    proc->refcnt = 1;
-    return proc;
+    sp = (uintptr_t) (spp+1);
 }
 
 
-static void
-del_proc(rust_rt *rt, rust_proc *proc)
+rust_proc::~rust_proc()
 {
     rt->log(LOG_MEM|LOG_PROC,
-            "del proc 0x%" PRIxPTR ", refcnt=%d",
-            (uintptr_t)proc, proc->refcnt);
+            "~rust_proc 0x%" PRIxPTR ", refcnt=%d",
+            (uintptr_t)this, refcnt);
 
     /* FIXME: tighten this up, there are some more
        assertions that hold at proc-lifecycle events. */
-    I(rt, proc->refcnt == 0 ||
-      (proc->refcnt == 1 && proc == rt->root_proc));
+    I(rt, refcnt == 0 ||
+      (refcnt == 1 && this == rt->root_proc));
 
-    del_stk(rt, proc->stk);
+    del_stk(rt, stk);
 
-    while (proc->chans) {
-        rust_chan *c = proc->chans;
-        HASH_DEL(proc->chans,c);
+    while (chans) {
+        rust_chan *c = chans;
+        HASH_DEL(chans, c);
         delete c;
     }
+}
 
-    rt->free(proc);
+
+void
+rust_proc::operator delete(void *ptr)
+{
+    rust_rt *rt = ((rust_proc *)ptr)->rt;
+    rt->free(ptr);
 }
 
 
@@ -980,7 +991,7 @@ upcall_del_proc(rust_rt *rt, rust_proc *proc)
     /* FIXME: when we have dtors, this might force-execute the dtor
      * synchronously? Hmm. */
     remove_proc_from_state_vec(rt, proc);
-    del_proc(rt, proc);
+    delete proc;
     rt->log(LOG_MEM|LOG_PROC,
             "proc 0x%" PRIxPTR " killed (and deleted)",
             (uintptr_t)proc);
@@ -993,7 +1004,7 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     I(rt, v);
     while (v->length()) {
         rt->log(LOG_PROC, "deleting live proc %" PRIdPTR, v->length() - 1);
-        del_proc(rt, v->pop());
+        delete v->pop();
     }
 }
 
@@ -1560,7 +1571,7 @@ upcall_new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
          "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
          exit_proc_glue, spawnee_fn, callsz);
-    rust_proc *proc = new_proc(rt, spawner, exit_proc_glue, spawnee_fn, callsz);
+    rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, callsz);
     add_proc_state_vec(rt, proc);
     return proc;
 }
@@ -1673,7 +1684,7 @@ rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
         rt.logptr("main fn", main_fn);
         rt.logptr("main exit-proc glue", main_exit_proc_glue);
 
-        rt.root_proc = new_proc(&rt, NULL, main_exit_proc_glue, main_fn, 0);
+        rt.root_proc = new (rt) rust_proc(&rt, NULL, main_exit_proc_glue, main_fn, 0);
         add_proc_state_vec(&rt, rt.root_proc);
         proc = rt.sched();
 
