@@ -157,8 +157,8 @@ class ptr_vec {
     T **data;
 
 public:
-    void init(rust_rt *rt);
-    void fini();
+    ptr_vec(rust_rt *rt);
+    ~ptr_vec();
 
     size_t length() {
         return fill;
@@ -211,15 +211,49 @@ struct rust_str {
 };
 
 struct rust_rt {
+
+    rust_rt(rust_srv *srv, size_t &live_allocs);
+    ~rust_rt();
+
     uintptr_t sp;          /* Saved sp from the C runtime. */
+    rust_srv *srv;
+    size_t &live_allocs;
+    uint32_t logbits;
     ptr_vec<rust_proc> running_procs;
     ptr_vec<rust_proc> blocked_procs;
     randctx rctx;
-    uint32_t logbits;
     rust_proc *root_proc;
-    rust_srv *srv;
     rust_port *ports;
+
+    void log(uint32_t logbit, char const *fmt, ...);
+    void logptr(char const *msg, uintptr_t ptrval);
+    template<typename T>
+    void logptr(char const *msg, T* ptrval);
+    void *malloc(size_t sz);
+    void free(void *p);
+
+#ifdef __WIN32__
+    void win32_require(LPTSTR fn, BOOL ok);
+#endif
+
 };
+
+inline void *operator new(size_t sz, rust_rt *rt) {
+    return rt->malloc(sz);
+}
+
+inline void *operator new[](size_t sz, rust_rt *rt) {
+    return rt->malloc(sz);
+}
+
+inline void *operator new(size_t sz, rust_rt &rt) {
+    return rt.malloc(sz);
+}
+
+inline void *operator new[](size_t sz, rust_rt &rt) {
+    return rt.malloc(sz);
+}
+
 
 struct frame_glue_fns {
     uintptr_t mark_glue;
@@ -315,6 +349,10 @@ struct rust_proc {
 };
 
 struct rust_port {
+
+    rust_port(rust_proc *proc, size_t unit_sz);
+    ~rust_port();
+
     size_t live_refcnt;
     size_t weak_refcnt;
     rust_proc *proc;
@@ -326,6 +364,12 @@ struct rust_port {
     rust_port *prev;
     size_t unit_sz;
     ptr_vec<rust_chan> writers;
+
+    void operator delete(void *ptr)
+    {
+        rust_rt *rt = ((rust_port *)ptr)->proc->rt;
+        rt->free(ptr);
+    }
 };
 
 /*
@@ -364,23 +408,19 @@ xlog(rust_rt *rt, uint32_t logbit, char const *fmt, ...)
 static void
 logptr(rust_rt *rt, char const *msg, uintptr_t ptrval)
 {
-    xlog(rt, LOG_MEM, "%s 0x%" PRIxPTR, msg, ptrval);
+    rt->logptr(msg, ptrval);
 }
 
 static void
 xfree(rust_rt *rt, void *p)
 {
-    logptr(rt, "xfree", (uintptr_t)p);
-    I(rt, p);
-    rt->srv->free(p);
+    rt->free(p);
 }
 
 static void*
 xalloc(rust_rt *rt, size_t sz)
 {
-    void *p = rt->srv->malloc(sz);
-    I(rt, p);
-    return p;
+    return rt->malloc(sz);
 }
 
 static void*
@@ -402,13 +442,12 @@ xrealloc(rust_rt *rt, void *p, size_t sz)
 /* Utility type: pointer-vector. */
 
 template <typename T>
-void
-ptr_vec<T>::init(rust_rt *rt)
+ptr_vec<T>::ptr_vec(rust_rt *rt) :
+    rt(rt),
+    alloc(INIT_SIZE),
+    fill(0),
+    data(new (rt) T*[alloc])
 {
-    this->rt = rt;
-    alloc = INIT_SIZE;
-    fill = 0;
-    data = (T **)xalloc(rt, alloc * sizeof(T*));
     I(rt, data);
     xlog(rt, LOG_MEM,
          "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
@@ -416,15 +455,14 @@ ptr_vec<T>::init(rust_rt *rt)
 }
 
 template <typename T>
-void
-ptr_vec<T>::fini()
+ptr_vec<T>::~ptr_vec()
 {
     I(rt, data);
     xlog(rt, LOG_MEM,
          "fini ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
          (uintptr_t)this, (uintptr_t)data);
     I(rt, fill == 0);
-    free(data);
+    rt->free(data);
 }
 
 template <typename T>
@@ -580,23 +618,43 @@ circ_buf::shift(void *dst)
 }
 
 /* Ports */
-static void
-del_port(rust_rt *rt, rust_port *port)
+
+rust_port::rust_port(rust_proc *proc, size_t unit_sz)
+    : live_refcnt(0),
+      weak_refcnt(0),
+      proc(proc),
+      next(NULL),
+      prev(NULL),
+      unit_sz(unit_sz),
+      writers(proc->rt)
 {
-    xlog(rt, LOG_UPCALL|LOG_COMM|LOG_MEM,
-         "finalizing and freeing port 0x%" PRIxPTR,
-         (uintptr_t)port);
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_MEM|LOG_COMM,
+            "rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
+            PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)this);
+    if (rt->ports)
+        rt->ports->prev = this;
+    next = rt->ports;
+    rt->ports = this;
+}
+
+rust_port::~rust_port()
+{
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_COMM|LOG_MEM,
+            "~rust_port 0x%" PRIxPTR,
+            (uintptr_t)this);
     /* FIXME: need to force-fail all the queued writers. */
-    port->writers.fini();
+    for (size_t i = 0; i < writers.length(); ++i)
+        delete writers[i];
     /* FIXME: can remove the chaining-of-ports-to-rt when we have
      * unwinding / finishing working. */
-    if (port->prev)
-        port->prev->next = port->next;
-    else if (rt->ports == port)
-        rt->ports = port->next;
-    if (port->next)
-        port->next->prev = port->prev;
-    xfree(rt, port);
+    if (prev)
+        prev->next = next;
+    else if (this == rt->ports)
+        rt->ports = next;
+    if (next)
+        next->prev = prev;
 }
 
 
@@ -952,66 +1010,6 @@ sched(rust_rt *rt)
 
 /* Runtime */
 
-#ifdef __WIN32__
-static void
-win32_require(rust_rt *rt, LPTSTR fn, BOOL ok) {
-    if (!ok) {
-        LPTSTR buf;
-        DWORD err = GetLastError();
-        FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                      FORMAT_MESSAGE_FROM_SYSTEM |
-                      FORMAT_MESSAGE_IGNORE_INSERTS,
-                      NULL, err,
-                      MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                      (LPTSTR) &buf, 0, NULL );
-        xlog(rt, LOG_ERR, "%s failed with error %ld: %s", fn, err, buf);
-        LocalFree((HLOCAL)buf);
-        I(rt, ok);
-    }
-}
-#endif
-
-static rust_rt*
-new_rt(rust_srv *srv)
-{
-    rust_rt *rt = (rust_rt *)srv->malloc(sizeof(rust_rt));
-    memset(rt, 0, sizeof(rust_rt));
-    rt->srv = srv;
-    rt->logbits = get_logbits();
-    logptr(rt, "new rt", (uintptr_t)rt);
-    rt->running_procs.init(rt);
-    rt->blocked_procs.init(rt);
-
-    rt->rctx.randa = 0;
-    rt->rctx.randb = 0;
-
-#ifdef __WIN32__
-    {
-        HCRYPTPROV hProv;
-        win32_require
-            (rt, "CryptAcquireContext",
-             CryptAcquireContext(&hProv, NULL, NULL, PROV_DSS,
-                                 CRYPT_VERIFYCONTEXT|CRYPT_SILENT));
-        win32_require
-            (rt, "CryptGenRandom",
-             CryptGenRandom(hProv, sizeof(rt->rctx.randrsl),
-                            (BYTE*)(&rt->rctx.randrsl)));
-        win32_require
-            (rt, "CryptReleaseContext",
-             CryptReleaseContext(hProv, 0));
-    }
-#else
-    int fd = open("/dev/urandom", O_RDONLY);
-    I(rt, fd > 0);
-    I(rt, read(fd, (void*) &rt->rctx.randrsl, sizeof(rt->rctx.randrsl))
-      == sizeof(rt->rctx.randrsl));
-    I(rt, close(fd) == 0);
-#endif
-
-    randinit(&rt->rctx, 1);
-    return rt;
-}
-
 static void
 del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     I(rt, v);
@@ -1021,92 +1019,173 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     }
 }
 
-static void
-del_rt(rust_rt *rt)
+rust_rt::rust_rt(rust_srv *srv, size_t &live_allocs) :
+    sp(0),
+    srv(srv),
+    live_allocs(live_allocs),
+    logbits(get_logbits()),
+    running_procs(this),
+    blocked_procs(this),
+    root_proc(NULL),
+    ports(NULL)
 {
-    xlog(rt, LOG_PROC, "deleting all running procs");
-    del_all_procs(rt, &rt->running_procs);
-    xlog(rt, LOG_PROC, "deleting all blocked procs");
-    del_all_procs(rt, &rt->blocked_procs);
+    logptr("new rt", (uintptr_t)this);
+    memset(&rctx, 0, sizeof(rctx));
 
-    xlog(rt, LOG_PROC, "deleting all dangling ports");
-    /* FIXME: remove when port <-> proc linkage is obsolete. */
-    while (rt->ports)
-        del_port(rt, rt->ports);
-
-    rt->running_procs.fini();
-    rt->blocked_procs.fini();
-    xfree(rt, rt);
+#ifdef __WIN32__
+    {
+        HCRYPTPROV hProv;
+        win32_require
+            ("CryptAcquireContext",
+             CryptAcquireContext(&hProv, NULL, NULL, PROV_DSS,
+                                 CRYPT_VERIFYCONTEXT|CRYPT_SILENT));
+        win32_require
+            ("CryptGenRandom",
+             CryptGenRandom(hProv, sizeof(rctx.randrsl),
+                            (BYTE*)(&rctx.randrsl)));
+        win32_require
+            ("CryptReleaseContext",
+             CryptReleaseContext(hProv, 0));
+    }
+#else
+    int fd = open("/dev/urandom", O_RDONLY);
+    I(this, fd > 0);
+    I(this, read(fd, (void*) &rctx.randrsl, sizeof(rctx.randrsl))
+      == sizeof(rctx.randrsl));
+    I(this, close(fd) == 0);
+#endif
+    randinit(&rctx, 1);
 }
+
+rust_rt::~rust_rt() {
+    log(LOG_PROC, "deleting all running procs");
+    del_all_procs(this, &running_procs);
+    log(LOG_PROC, "deleting all blocked procs");
+    del_all_procs(this, &blocked_procs);
+
+    log(LOG_PROC, "deleting all dangling ports");
+    /* FIXME: remove when port <-> proc linkage is obsolete. */
+    while (ports)
+        delete ports;
+}
+
+void
+rust_rt::log(uint32_t logbit, char const *fmt, ...) {
+    char buf[256];
+    if (logbits & logbit) {
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buf, sizeof(buf), fmt, args);
+        srv->log(buf);
+        va_end(args);
+    }
+}
+
+void
+rust_rt::logptr(char const *msg, uintptr_t ptrval) {
+    log(LOG_MEM, "%s 0x%" PRIxPTR, msg, ptrval);
+}
+
+template<typename T> void
+rust_rt::logptr(char const *msg, T* ptrval) {
+    log(LOG_MEM, "%s 0x%" PRIxPTR, msg, (uintptr_t)ptrval);
+}
+
+void *
+rust_rt::malloc(size_t sz) {
+    void *p = srv->malloc(sz);
+    I(this, p);
+    live_allocs++;
+    log(LOG_MEM, "rust_rt::malloc %d bytes -> 0x%" PRIxPTR,
+        sz, p);
+    return p;
+}
+
+void
+rust_rt::free(void *p) {
+    log(LOG_MEM, "rust_rt::free 0x%" PRIxPTR, p);
+    I(this, p);
+    srv->free(p);
+    I(this, live_allocs > 0);
+    live_allocs--;
+}
+
+#ifdef __WIN32__
+void
+rust_rt::win32_require(LPTSTR fn, BOOL ok) {
+    if (!ok) {
+        LPTSTR buf;
+        DWORD err = GetLastError();
+        FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                      FORMAT_MESSAGE_FROM_SYSTEM |
+                      FORMAT_MESSAGE_IGNORE_INSERTS,
+                      NULL, err,
+                      MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                      (LPTSTR) &buf, 0, NULL );
+        log(LOG_ERR, "%s failed with error %ld: %s", fn, err, buf);
+        LocalFree((HLOCAL)buf);
+        I(this, ok);
+    }
+}
+#endif
 
 /* Upcalls */
 
 static void
 upcall_log_uint32_t(rust_rt *rt, uint32_t i)
 {
-    xlog(rt, LOG_UPCALL|LOG_ULOG,
-         "upcall log_uint32(0x%" PRIx32 " = %" PRId32 " = '%c')",
-         i, i, (char)i);
+    rt->log(LOG_UPCALL|LOG_ULOG,
+            "upcall log_uint32(0x%" PRIx32 " = %" PRId32 " = '%c')",
+            i, i, (char)i);
 }
 
 static void
 upcall_log_str(rust_rt *rt, char const *c)
 {
-    xlog(rt, LOG_UPCALL|LOG_ULOG,
-         "upcall log_str(\"%s\")",
-         c);
+    rt->log(LOG_UPCALL|LOG_ULOG,
+            "upcall log_str(\"%s\")",
+            c);
 }
 
 static void
 upcall_trace_word(rust_rt *rt, uintptr_t i)
 {
-    xlog(rt, LOG_UPCALL|LOG_TRACE,
-         "trace: 0x%" PRIxPTR "",
-         i, i, (char)i);
+    rt->log(LOG_UPCALL|LOG_TRACE,
+            "trace: 0x%" PRIxPTR "",
+            i, i, (char)i);
 }
 
 static void
 upcall_trace_str(rust_rt *rt, char const *c)
 {
-    xlog(rt, LOG_UPCALL|LOG_TRACE,
-         "trace: %s",
-         c);
+    rt->log(LOG_UPCALL|LOG_TRACE,
+            "trace: %s",
+            c);
 }
 
 static rust_port*
 upcall_new_port(rust_rt *rt, rust_proc *proc, size_t unit_sz)
 {
-    rust_port *port = (rust_port *)xcalloc(rt, sizeof(rust_port));
-    xlog(rt, LOG_UPCALL|LOG_MEM|LOG_COMM,
-         "upcall new_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
-         PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)port);
-    port->proc = proc;
-
-    /* FIXME: can remove the chaining-of-ports-to-rt when we have
-     * unwinding / finishing working. */
-    if (rt->ports)
-        rt->ports->prev = port;
-    port->next = rt->ports;
-    rt->ports = port;
-
-    port->unit_sz = unit_sz;
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+            "upcall_new_port(proc=0x%" PRIxPTR ", unit_sz=%d)",
+            (uintptr_t)proc, unit_sz);
+    rust_port *port = new (rt) rust_port(proc, unit_sz);
     port->live_refcnt = 1;
-    port->writers.init(rt);
     return port;
 }
 
 static void
 upcall_del_port(rust_rt *rt, rust_port *port)
 {
-    xlog(rt, LOG_UPCALL|LOG_MEM|LOG_COMM,
-         "upcall del_port(0x%" PRIxPTR "), live refcnt=%d, weak refcnt=%d",
-         (uintptr_t)port, port->live_refcnt, port->weak_refcnt);
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+            "upcall del_port(0x%" PRIxPTR "), live refcnt=%d, weak refcnt=%d",
+            (uintptr_t)port, port->live_refcnt, port->weak_refcnt);
 
     I(rt, port->live_refcnt == 0 || port->weak_refcnt == 0);
 
     if (port->live_refcnt == 0 &&
         port->weak_refcnt == 0) {
-        del_port(rt, port);
+        delete port;
     }
 }
 
@@ -1568,80 +1647,85 @@ handle_upcall(rust_proc *proc)
     }
 }
 
+
 static void
 rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
 {
-    rust_rt *rt;
-    rust_proc *proc;
-    rt = new_rt(srv);
+    size_t live_allocs = 0;
+    {
+        rust_proc *proc;
+        rust_rt rt(srv, live_allocs);
 
-    xlog(rt, LOG_RT, "control is in rust runtime library");
-    logptr(rt, "main fn", main_fn);
-    logptr(rt, "main exit-proc glue", main_exit_proc_glue);
+        rt.log(LOG_RT, "control is in rust runtime library");
+        rt.logptr("main fn", main_fn);
+        rt.logptr("main exit-proc glue", main_exit_proc_glue);
 
-    rt->root_proc = new_proc(rt, NULL, main_exit_proc_glue, main_fn, 0);
-    add_proc_state_vec(rt, rt->root_proc);
-    proc = sched(rt);
+        rt.root_proc = new_proc(&rt, NULL, main_exit_proc_glue, main_fn, 0);
+        add_proc_state_vec(&rt, rt.root_proc);
+        proc = sched(&rt);
 
-    logptr(rt, "root proc", (uintptr_t)proc);
-    logptr(rt, "proc->sp", (uintptr_t)proc->sp);
+        rt.logptr("root proc", (uintptr_t)proc);
+        rt.logptr("proc->sp", (uintptr_t)proc->sp);
 
-    while (proc) {
+        while (proc) {
 
-        xlog(rt, LOG_PROC, "activating proc 0x%" PRIxPTR,
-             (uintptr_t)proc);
+            rt.log(LOG_PROC, "activating proc 0x%" PRIxPTR,
+                   (uintptr_t)proc);
 
-        proc->state = proc_state_running;
-        srv->activate(proc);
-
-        xlog(rt, LOG_PROC,
-             "returned from proc 0x%" PRIxPTR " in state '%s'",
-             (uintptr_t)proc, state_names[proc->state]);
-        /*
-        xlog(rt, LOG_MEM,
-             "sp:0x%" PRIxPTR ", "
-             "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
-             "stk->prev:0x%" PRIxPTR ", stk->next=0x%" PRIxPTR ", "
-             "prev_sp:0x%" PRIxPTR ", " "prev_fp:0x%" PRIxPTR,
-             proc->sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
-             proc->stk->prev, proc->stk->next,
-             proc->stk->prev_sp, proc->stk->prev_fp);
-        */
-        I(rt, proc->sp >= (uintptr_t) &proc->stk->data[0]);
-        I(rt, proc->sp < proc->stk->limit);
-
-        switch ((proc_state_t) proc->state) {
-
-        case proc_state_running:
-            break;
-
-        case proc_state_calling_c:
-            handle_upcall(proc);
-            if (proc->state == proc_state_calling_c)
-                proc->state = proc_state_running;
-            break;
-
-        case proc_state_blocked_exited:
-            /* When a proc exits *itself* we do not yet kill it; for
-             * the time being we let it linger in the blocked-exiting
-             * state, as someone else still "owns" it. */
             proc->state = proc_state_running;
-            proc_state_transition(rt, proc,
-                                  proc_state_running,
-                                  proc_state_blocked_exited);
-            break;
+            srv->activate(proc);
 
-        case proc_state_blocked_reading:
-        case proc_state_blocked_writing:
-            I(rt, 0);
-            break;
+            rt.log(LOG_PROC,
+                   "returned from proc 0x%" PRIxPTR " in state '%s'",
+                   (uintptr_t)proc, state_names[proc->state]);
+            /*
+              xlog(rt, LOG_MEM,
+              "sp:0x%" PRIxPTR ", "
+              "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
+              "stk->prev:0x%" PRIxPTR ", stk->next=0x%" PRIxPTR ", "
+              "prev_sp:0x%" PRIxPTR ", " "prev_fp:0x%" PRIxPTR,
+              proc->sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
+              proc->stk->prev, proc->stk->next,
+              proc->stk->prev_sp, proc->stk->prev_fp);
+            */
+            I(&rt, proc->sp >= (uintptr_t) &proc->stk->data[0]);
+            I(&rt, proc->sp < proc->stk->limit);
+
+            switch ((proc_state_t) proc->state) {
+
+            case proc_state_running:
+                break;
+
+            case proc_state_calling_c:
+                handle_upcall(proc);
+                if (proc->state == proc_state_calling_c)
+                    proc->state = proc_state_running;
+                break;
+
+            case proc_state_blocked_exited:
+                /* When a proc exits *itself* we do not yet kill it; for
+                 * the time being we let it linger in the blocked-exiting
+                 * state, as someone else still "owns" it. */
+                proc->state = proc_state_running;
+                proc_state_transition(&rt, proc,
+                                      proc_state_running,
+                                      proc_state_blocked_exited);
+                break;
+
+            case proc_state_blocked_reading:
+            case proc_state_blocked_writing:
+                I(&rt, 0);
+                break;
+            }
+
+            proc = sched(&rt);
         }
 
-        proc = sched(rt);
+        rt.log(LOG_RT, "finished main loop");
     }
-
-    xlog(rt, LOG_RT, "finished main loop");
-    del_rt(rt);
+    if (live_allocs != 0) {
+        srv->fatal("leaked memory in rust main loop", __FILE__, __LINE__);
+    }
 }
 
 void
@@ -1694,10 +1778,15 @@ rust_srv::lookup(char const *sym, uint8_t *takes_proc)
         /* FIXME: pass library name in as well. And use LoadLibrary not
          * GetModuleHandle, manually refcount. Oh, so much to do
          * differently. */
-        HMODULE lib = GetModuleHandle("msvcrt.dll");
-        if (!lib)
-            fatal("GetModuleHandle", __FILE__, __LINE__);
-        res = (uintptr_t)GetProcAddress(lib, sym);
+        const char *modules[2] = { "rustrt.dll", "msvcrt.dll" };
+        for (size_t i = 0; i < sizeof(modules) / sizeof(const char *); ++i) {
+            HMODULE lib = GetModuleHandle(modules[i]);
+            if (!lib)
+                fatal("GetModuleHandle", __FILE__, __LINE__);
+            res = (uintptr_t)GetProcAddress(lib, sym);
+            if (res)
+                break;
+        }
 #else
         /* FIXME: dlopen, as above. */
         res = (uintptr_t)dlsym(RTLD_DEFAULT, sym);
