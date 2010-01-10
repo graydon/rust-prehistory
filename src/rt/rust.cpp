@@ -369,10 +369,11 @@ struct rust_port {
     rust_port *prev;
     size_t unit_sz;
     ptr_vec<rust_chan> writers;
+    rust_rt *rt;
 
     void operator delete(void *ptr)
     {
-        rust_rt *rt = ((rust_port *)ptr)->proc->rt;
+        rust_rt *rt = ((rust_port *)ptr)->rt;
         rt->free(ptr);
     }
 };
@@ -597,9 +598,9 @@ rust_port::rust_port(rust_proc *proc, size_t unit_sz)
       next(NULL),
       prev(NULL),
       unit_sz(unit_sz),
-      writers(proc->rt)
+      writers(proc->rt),
+      rt(proc->rt)
 {
-    rust_rt *rt = proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
             PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)this);
@@ -611,7 +612,6 @@ rust_port::rust_port(rust_proc *proc, size_t unit_sz)
 
 rust_port::~rust_port()
 {
-    rust_rt *rt = proc->rt;
     rt->log(LOG_COMM|LOG_MEM,
             "~rust_port 0x%" PRIxPTR,
             (uintptr_t)this);
