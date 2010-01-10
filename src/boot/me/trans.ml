@@ -699,7 +699,9 @@ let trans_visitor
     then
       trans_upcall Abi.UPCALL_trace_word [| Il.Cell w |]
 
-  and get_drop_glue (ty:Ast.ty)
+  and get_drop_glue
+      (ty:Ast.ty)
+      (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_drop ty in
     let prefix _ = "drop " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
@@ -707,13 +709,15 @@ let trans_visitor
       trace_str cx.ctxt_sess.Session.sess_trace_drop
         "in drop-glue, dropping";
       trace_word cx.ctxt_sess.Session.sess_trace_drop (Il.Addr arg);
-      drop_ty ty (deref (Il.Addr arg));
+      drop_ty ty (deref (Il.Addr arg)) curr_iso;
       trace_str cx.ctxt_sess.Session.sess_trace_drop
         "drop-glue complete";
     in
       get_typed_mem_glue g ty prefix inner
 
-  and get_free_glue (ty:Ast.ty)
+  and get_free_glue
+      (ty:Ast.ty)
+      (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_free ty in
     let prefix _ = "free " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
@@ -729,7 +733,7 @@ let trans_visitor
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "in free-glue, calling drop-glue";
         trace_word cx.ctxt_sess.Session.sess_trace_drop vr;
-        trans_call_mem_glue (get_drop_glue ty) vr;
+        trans_call_mem_glue (get_drop_glue ty curr_iso) vr;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "back in free-glue, calling free";
         trans_free (Il.Addr arg);
@@ -738,12 +742,16 @@ let trans_visitor
     in
       get_typed_mem_glue g ty prefix inner
 
-  and get_mark_glue (ty:Ast.ty)
+
+  and get_mark_glue
+      (ty:Ast.ty)
+      (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_mark ty in
     let prefix _ = "mark " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner (arg:Il.typed_addr) = mark_ty ty (deref (Il.Addr arg)) in
-      get_typed_mem_glue g ty prefix inner
+    let inner (arg:Il.typed_addr) = mark_ty ty (deref (Il.Addr arg)) curr_iso in
+    let fix = get_typed_mem_glue g ty prefix inner in
+      fix
 
 
   and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
@@ -1135,7 +1143,10 @@ let trans_visitor
   and slot_mem_ctrl (cell:Il.cell) (slot:Ast.slot) : mem_ctrl =
     let ty = slot_ty slot in
       if type_is_cyclic ty
-      then MEM_gc
+      then
+        match slot.Ast.slot_mode with
+            Ast.MODE_exterior _ -> MEM_gc
+          | _ -> MEM_interior
       else
         match ty with
             Ast.TY_port _ -> MEM_rc_opaque Abi.port_field_refcnt
@@ -1236,9 +1247,9 @@ let trans_visitor
          * addrs presently.
          *)
         match ty with
-            Ast.TY_rec entries -> iter_rec_slots addr entries f None
-          | Ast.TY_tup slots -> iter_tup_slots addr slots f None
-          | Ast.TY_tag tag -> iter_tag_slots addr tag f None
+            Ast.TY_rec entries -> iter_rec_slots addr entries f curr_iso
+          | Ast.TY_tup slots -> iter_tup_slots addr slots f curr_iso
+          | Ast.TY_tag tag -> iter_tag_slots addr tag f curr_iso
           | Ast.TY_iso tiso ->
               let ttag = get_iso_tag tiso in
                 iter_tag_slots addr ttag f (Some tiso)
@@ -1247,14 +1258,16 @@ let trans_visitor
   and drop_ty
       (ty:Ast.ty)
       (addr:Il.typed_addr)
+      (curr_iso:Ast.ty_iso option)
       : unit =
-      iter_ty_slots ty addr drop_slot None
+      iter_ty_slots ty addr drop_slot curr_iso
 
   and mark_ty
       (ty:Ast.ty)
       (addr:Il.typed_addr)
+      (curr_iso:Ast.ty_iso option)
       : unit =
-    iter_ty_slots ty addr mark_slot None
+    iter_ty_slots ty addr mark_slot curr_iso
 
   and free_ty
         (ty:Ast.ty)
@@ -1277,6 +1290,14 @@ let trans_visitor
           bug () "TY_idx outside TY_iso"
       | _ -> t
 
+  and maybe_enter_iso
+      (t:Ast.ty)
+      (curr_iso:Ast.ty_iso option)
+      : Ast.ty_iso option =
+    match t with
+        Ast.TY_iso tiso -> Some tiso
+      | _ -> curr_iso
+
   and mark_slot
       (cell:Il.cell)
       (slot:Ast.slot)
@@ -1287,30 +1308,36 @@ let trans_visitor
           MEM_gc ->
             (iflog (fun _ -> annotate ("mark GC slot " ^
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
-            let gc_word = exterior_gc_ctrl_cell cell in
-            let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
-              (* if this has been marked already, jump to exit.*)
-              emit (Il.binary Il.AND vr (Il.Cell gc_word) one);
-              let j = mark () in
-                emit (Il.jmp Il.JNZ Il.CodeNone);
-                (* Set mark bit in allocation header. *)
-                emit (Il.binary Il.OR gc_word (Il.Cell gc_word) one);
-                (* Iterate over exterior slots marking outgoing links. *)
-                let (body_addr, _) = deref_imm cell exterior_gc_body_off in
-                let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
-                let ty = maybe_iso curr_iso ty in
-                  lea vr body_addr;
-                  trans_call_mem_glue (get_mark_glue ty) vr;
-                  patch j
+            log cx "marking MEM_gc slot: %a" Ast.sprintf_slot slot;
+            emit (Il.cmp (Il.Cell cell) zero);
+            let null_cell_jump = mark () in
+              emit (Il.jmp Il.JE Il.CodeNone);
+              let gc_word = exterior_gc_ctrl_cell cell in
+              let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+                (* if this has been marked already, jump to exit.*)
+                emit (Il.binary Il.AND tmp (Il.Cell gc_word) one);
+                let already_marked_jump = mark () in
+                  emit (Il.jmp Il.JNZ Il.CodeNone);
+                  (* Set mark bit in allocation header. *)
+                  emit (Il.binary Il.OR gc_word (Il.Cell gc_word) one);
+                  (* Iterate over exterior slots marking outgoing links. *)
+                  let (body_addr, _) = deref_imm cell exterior_gc_body_off in
+                  let ty = maybe_iso curr_iso ty in
+                  let curr_iso = maybe_enter_iso ty curr_iso in
+                    lea tmp body_addr;
+                    trans_call_mem_glue (get_mark_glue ty curr_iso) tmp;
+                    patch null_cell_jump;
+                    patch already_marked_jump
 
         | MEM_interior when ty_is_structured ty ->
             (iflog (fun _ -> annotate ("mark interior slot " ^
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
             let (addr, _) = need_addr_cell cell in
-            let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+            let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
             let ty = maybe_iso curr_iso ty in
-              lea vr addr;
-              trans_call_mem_glue (get_mark_glue ty) vr
+            let curr_iso = maybe_enter_iso ty curr_iso in
+              lea tmp addr;
+              trans_call_mem_glue (get_mark_glue ty curr_iso) tmp
 
         | _ -> ()
 
@@ -1350,7 +1377,8 @@ let trans_visitor
             let rc = exterior_rc_cell cell in
             let j = drop_refcount_and_cmp rc in
             let ty = maybe_iso curr_iso ty in
-              trans_call_mem_glue (get_free_glue ty) cell;
+            let curr_iso = maybe_enter_iso ty curr_iso in
+              trans_call_mem_glue (get_free_glue ty curr_iso) cell;
               (* Null the slot out to prevent double-free if the frame unwinds. *)
               mov cell zero;
               patch j
@@ -1361,8 +1389,9 @@ let trans_visitor
             let (addr, _) = need_addr_cell cell in
             let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
             let ty = maybe_iso curr_iso ty in
+            let curr_iso = maybe_enter_iso ty curr_iso in
               lea vr addr;
-              trans_call_mem_glue (get_drop_glue ty) vr
+              trans_call_mem_glue (get_drop_glue ty curr_iso) vr
 
         | MEM_interior ->
             (* Interior allocation of all-interior value: nothing to do. *)
@@ -1391,8 +1420,10 @@ let trans_visitor
               trans_malloc cell sz;
               iflog (fun _ -> annotate "init GC exterior: load control word");
               let ctrl = exterior_gc_ctrl_cell cell in
-              let fix = get_drop_glue (slot_ty slot) in
-                lea ctrl (Il.Abs (Asm.M_POS fix));
+              let fix = get_drop_glue (slot_ty slot) None in
+              let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+                lea tmp (Il.Abs (Asm.M_POS fix));
+                mov ctrl (Il.Cell tmp);
                 iflog (fun _ -> annotate "init GC exterior: load next-pointer");
                 let next = exterior_gc_next_cell cell in
                   mov next (Il.Cell (Il.Addr (pp_imm (word_n Abi.proc_field_gc_alloc_chain))))
@@ -2130,8 +2161,7 @@ let trans_visitor
                           let disp = layout.layout_offset in
                           let fp_cell = Il.Addr (addr, (Il.ScalarTy (Il.AddrTy referent_type))) in
                           let slot_cell = Il.Addr (deref_imm fp_cell disp) in
-                          let mem_ctrl = slot_mem_ctrl slot_cell slot in
-                            inner key slot_id slot slot_cell mem_ctrl
+                            inner key slot_id slot slot_cell
                 end
           end
     in
@@ -2141,21 +2171,21 @@ let trans_visitor
           let mark_frame_glue_fixup =
             get_frame_glue (GLUE_mark_frame fnid) "mark"
               begin
-                fun key slot_id slot slot_cell mem_ctrl ->
-                  ()
+                fun key slot_id slot slot_cell ->
+                  mark_slot slot_cell slot None
               end
           in
           let drop_frame_glue_fixup =
             get_frame_glue (GLUE_drop_frame fnid) "drop"
               begin
-                fun key slot_id slot slot_cell mem_ctrl ->
+                fun key slot_id slot slot_cell ->
                   drop_slot slot_cell slot None
               end
           in
           let reloc_frame_glue_fixup =
             get_frame_glue (GLUE_reloc_frame fnid) "reloc"
               begin
-                fun key slot_id slot slot_cell mem_ctrl ->
+                fun key slot_id slot slot_cell ->
                   ()
               end
           in
