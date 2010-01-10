@@ -185,8 +185,9 @@ struct circ_buf {
     size_t unread;
     uint8_t *data;
 
-    void init(rust_rt *rt, size_t unit_sz);
-    void fini();
+    circ_buf(rust_rt *rt, size_t unit_sz);
+    ~circ_buf();
+    void operator delete(void *ptr);
 
     void transfer(void *dst);
     void push(void *src);
@@ -230,6 +231,8 @@ struct rust_rt {
     template<typename T>
     void logptr(char const *msg, T* ptrval);
     void *malloc(size_t sz);
+    void *calloc(size_t sz);
+    void *realloc(void *data, size_t sz);
     void free(void *p);
 
 #ifdef __WIN32__
@@ -385,6 +388,11 @@ struct rust_port {
  */
 
 struct rust_chan {
+
+    rust_chan(rust_port *port);
+    ~rust_chan();
+    void operator delete(void *ptr);
+
     UT_hash_handle hh;
     rust_port *port;
     uintptr_t queued;     /* Whether we're in a port->writers vec. */
@@ -393,34 +401,6 @@ struct rust_chan {
                              NULL if nonblocking. */
     circ_buf buf;
 };
-
-static void
-xfree(rust_rt *rt, void *p)
-{
-    rt->free(p);
-}
-
-static void*
-xalloc(rust_rt *rt, size_t sz)
-{
-    return rt->malloc(sz);
-}
-
-static void*
-xcalloc(rust_rt *rt, size_t sz)
-{
-    void *p = xalloc(rt, sz);
-    memset(p, 0, sz);
-    return p;
-}
-
-static void*
-xrealloc(rust_rt *rt, void *p, size_t sz)
-{
-    p = rt->srv->realloc(p, sz);
-    I(rt, p);
-    return p;
-}
 
 /* Utility type: pointer-vector. */
 
@@ -433,8 +413,8 @@ ptr_vec<T>::ptr_vec(rust_rt *rt) :
 {
     I(rt, data);
     rt->log(LOG_MEM,
-            "init ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
-            (uintptr_t)this, (uintptr_t)data);
+            "new ptr_vec(data=0x%" PRIxPTR ") -> ptr_vec==0x%" PRIxPTR,
+            (uintptr_t)data, (uintptr_t)this);
 }
 
 template <typename T>
@@ -442,7 +422,7 @@ ptr_vec<T>::~ptr_vec()
 {
     I(rt, data);
     rt->log(LOG_MEM,
-            "fini ptr vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
+            "~ptr_vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
             (uintptr_t)this, (uintptr_t)data);
     I(rt, fill == 0);
     rt->free(data);
@@ -455,7 +435,7 @@ ptr_vec<T>::push(T *p)
     I(rt, data);
     if (fill == alloc) {
         alloc *= 2;
-        data = (T **)xrealloc(rt, data, alloc);
+        data = (T **)rt->realloc(data, alloc);
     }
     I(rt, fill < alloc);
     p->idx = fill;
@@ -478,7 +458,7 @@ ptr_vec<T>::trim(size_t sz)
         (alloc / 2) >= INIT_SIZE) {
         alloc /= 2;
         I(rt, alloc >= fill);
-        data = (T **)xrealloc(rt, data, alloc);
+        data = (T **)rt->realloc(data, alloc);
         I(rt, data);
     }
 }
@@ -502,28 +482,36 @@ ptr_vec<T>::swapdel(T *item)
 
 /* Utility type: circular buffer. */
 
-void
-circ_buf::init(rust_rt *rt, size_t unit_sz)
+circ_buf::circ_buf(rust_rt *rt, size_t unit_sz) :
+    rt(rt),
+    alloc(INIT_CIRC_BUF_UNITS * unit_sz),
+    unit_sz(unit_sz),
+    next(0),
+    unread(0),
+    data((uint8_t *)rt->calloc(alloc))
 {
     I(rt, unit_sz);
-    this->rt = rt;
-    this->unit_sz = unit_sz;
-    alloc = INIT_CIRC_BUF_UNITS * unit_sz;
-    next = 0;
-    unread = 0;
-    data = (uint8_t *)xcalloc(rt, alloc);
     rt->log(LOG_MEM|LOG_COMM,
-            "init circ buf 0x%" PRIxPTR ", alloc=%d, unread=%d",
-            this, alloc, unread);
+            "new circ_buf(alloc=%d, unread=%d) -> circ_buf=0x%" PRIxPTR,
+            alloc, unread, this);
     I(rt, data);
 }
 
-void
-circ_buf::fini()
+circ_buf::~circ_buf()
 {
+    rt->log(LOG_MEM|LOG_COMM,
+            "~circ_buf 0x%" PRIxPTR,
+            this);
     I(rt, data);
     I(rt, unread == 0);
-    xfree(rt, data);
+    rt->free(data);
+}
+
+void
+circ_buf::operator delete(void *ptr)
+{
+    rust_rt *rt = ((circ_buf *)ptr)->rt;
+    rt->free(ptr);
 }
 
 void
@@ -548,10 +536,10 @@ circ_buf::push(void *src)
     /* Grow if necessary. */
     if (unread == alloc) {
         I(rt, alloc <= MAX_CIRC_BUF_SIZE);
-        tmp = xalloc(rt, alloc << 1);
+        tmp = rt->malloc(alloc << 1);
         transfer(tmp);
         alloc <<= 1;
-        xfree(rt, data);
+        rt->free(data);
         data = (uint8_t *)tmp;
     }
 
@@ -592,10 +580,10 @@ circ_buf::shift(void *dst)
     /* Shrink if necessary. */
     if (alloc >= INIT_CIRC_BUF_UNITS * unit_sz &&
         unread <= alloc / 4) {
-        tmp = xalloc(rt, alloc / 2);
+        tmp = rt->malloc(alloc / 2);
         transfer(tmp);
         alloc >>= 1;
-        xfree(rt, data);
+        rt->free(data);
         data = (uint8_t *)tmp;
     }
 }
@@ -613,7 +601,7 @@ rust_port::rust_port(rust_proc *proc, size_t unit_sz)
 {
     rust_rt *rt = proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
-            "rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
+            "new rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
             PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)this);
     if (rt->ports)
         rt->ports->prev = this;
@@ -640,6 +628,35 @@ rust_port::~rust_port()
         next->prev = prev;
 }
 
+/* Channels */
+
+rust_chan::rust_chan(rust_port *port)
+    : port(port),
+      queued(0),
+      idx(0),
+      blocked(NULL),
+      buf(port->proc->rt, port->unit_sz)
+{
+    rust_rt *rt = port->proc->rt;
+    rt->log(LOG_MEM|LOG_COMM,
+            "new rust_chan(port=0x%" PRIxPTR ") -> chan=0x%" PRIxPTR,
+            port, (uintptr_t)this);
+}
+
+rust_chan::~rust_chan()
+{
+    rust_rt *rt = port->proc->rt;
+    rt->log(LOG_MEM|LOG_COMM,
+            "~rust_chan 0x%" PRIxPTR, (uintptr_t)this);
+}
+
+void
+rust_chan::operator delete(void *ptr)
+{
+    rust_rt *rt = ((rust_chan *)ptr)->port->proc->rt;
+    rt->free(ptr);
+}
+
 
 /* Stacks */
 
@@ -651,7 +668,7 @@ new_stk(rust_rt *rt, size_t minsz)
     if (minsz < min_stk_bytes)
         minsz = min_stk_bytes;
     size_t sz = sizeof(stk_seg) + minsz;
-    stk_seg *stk = (stk_seg *)xalloc(rt, sz);
+    stk_seg *stk = (stk_seg *)rt->malloc(sz);
     rt->logptr("new stk", (uintptr_t)stk);
     memset(stk, 0, sizeof(stk_seg));
     stk->limit = (uintptr_t) &stk->data[minsz];
@@ -676,7 +693,7 @@ del_stk(rust_rt *rt, stk_seg *stk)
         nxt = stk->next;
         rt->logptr("freeing stk segment", (uintptr_t)stk);
         VALGRIND_STACK_DEREGISTER(stk->valgrind_id);
-        xfree(rt, stk);
+        rt->free(stk);
         stk = nxt;
     } while (stk);
     rt->log(LOG_MEM, "freed stacks");
@@ -779,7 +796,7 @@ static rust_proc*
 new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
          uintptr_t spawnee_fn, size_t callsz)
 {
-    rust_proc *proc = (rust_proc *)xcalloc(rt, sizeof(rust_proc));
+    rust_proc *proc = (rust_proc *)rt->calloc(sizeof(rust_proc));
     rt->logptr("new proc", (uintptr_t)proc);
     rt->logptr("exit-proc glue", exit_proc_glue);
     rt->logptr("from spawnee", spawnee_fn);
@@ -883,11 +900,10 @@ del_proc(rust_rt *rt, rust_proc *proc)
     while (proc->chans) {
         rust_chan *c = proc->chans;
         HASH_DEL(proc->chans,c);
-        c->buf.fini();
-        xfree(rt, c);
+        delete c;
     }
 
-    xfree(rt, proc);
+    rt->free(proc);
 }
 
 
@@ -1058,14 +1074,32 @@ rust_rt::malloc(size_t sz) {
     void *p = srv->malloc(sz);
     I(this, p);
     live_allocs++;
-    log(LOG_MEM, "rust_rt::malloc %d bytes -> 0x%" PRIxPTR,
+    log(LOG_MEM, "rust_rt::malloc(%d) -> 0x%" PRIxPTR,
         sz, p);
     return p;
 }
 
+void *
+rust_rt::calloc(size_t sz) {
+    void *p = this->malloc(sz);
+    memset(p, 0, sz);
+    return p;
+}
+
+void *
+rust_rt::realloc(void *p, size_t sz) {
+    void *p1 = srv->realloc(p, sz);
+    I(this, p1);
+    if (!p)
+        live_allocs++;
+    log(LOG_MEM, "rust_rt::realloc(0x%" PRIxPTR ", %d) -> 0x%" PRIxPTR,
+        p, sz, p1);
+    return p1;
+}
+
 void
 rust_rt::free(void *p) {
-    log(LOG_MEM, "rust_rt::free 0x%" PRIxPTR, p);
+    log(LOG_MEM, "rust_rt::free(0x%" PRIxPTR ")", p);
     I(this, p);
     srv->free(p);
     I(this, live_allocs > 0);
@@ -1261,14 +1295,10 @@ upcall_send(rust_rt *rt, rust_proc *src,
     I(rt, src);
     I(rt, port);
     I(rt, sptr);
-    HASH_FIND(hh,src->chans,port,sizeof(rust_port*),chan);
+    HASH_FIND(hh, src->chans, port, sizeof(rust_port*), chan);
     if (!chan) {
-        chan = (rust_chan *)xcalloc(rt, sizeof(rust_chan));
-        rt->log(LOG_MEM|LOG_COMM,
-                "new chan 0x%" PRIxPTR, (uintptr_t)chan);
-        chan->port = port;
-        chan->buf.init(rt, port->unit_sz);
-        HASH_ADD(hh,src->chans,port,sizeof(rust_port*),chan);
+        chan = new (rt) rust_chan(port);
+        HASH_ADD(hh, src->chans, port, sizeof(rust_port*), chan);
     }
     I(rt, chan);
     I(rt, chan->blocked == src || !chan->blocked);
@@ -1344,7 +1374,7 @@ upcall_fail(rust_rt *rt, char const *expr, char const *file,
 static uintptr_t
 upcall_malloc(rust_rt *rt, rust_proc *proc, size_t nbytes)
 {
-    void *p = xalloc(rt, nbytes);
+    void *p = rt->malloc(nbytes);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall malloc(%u) = 0x%" PRIxPTR,
             nbytes, (uintptr_t)p);
@@ -1357,7 +1387,7 @@ upcall_free(rust_rt *rt, void* ptr)
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall free(0x%" PRIxPTR ")",
             (uintptr_t)ptr);
-    xfree(rt, ptr);
+    rt->free(ptr);
 }
 
 typedef uintptr_t (CDECL *native_0)();
@@ -1455,7 +1485,7 @@ static rust_str*
 upcall_new_str(rust_rt *rt, char const *s, size_t fill)
 {
     size_t alloc = next_power_of_two(fill);
-    rust_str *st = (rust_str*) xalloc(rt, sizeof(rust_str) + alloc);
+    rust_str *st = (rust_str*) rt->malloc(sizeof(rust_str) + alloc);
     st->refcnt = 1;
     st->fill = fill;
     st->alloc = alloc;
