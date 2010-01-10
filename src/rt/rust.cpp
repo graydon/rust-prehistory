@@ -236,6 +236,8 @@ struct rust_rt {
     void win32_require(LPTSTR fn, BOOL ok);
 #endif
 
+    size_t n_live_procs();
+    rust_proc *sched();
 };
 
 inline void *operator new(size_t sz, rust_rt *rt) {
@@ -923,12 +925,6 @@ add_proc_state_vec(rust_rt *rt, rust_proc *proc)
 }
 
 
-static size_t
-n_live_procs(rust_rt *rt)
-{
-    return rt->running_procs.length() + rt->blocked_procs.length();
-}
-
 static void
 remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
 {
@@ -938,7 +934,7 @@ remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
             (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
     I(rt, (*v)[proc->idx] == proc);
     v->swapdel(proc);
-    v->trim(n_live_procs(rt));
+    v->trim(rt->n_live_procs());
 }
 
 static void
@@ -964,7 +960,7 @@ upcall_del_proc(rust_rt *rt, rust_proc *proc)
     rt->log(LOG_PROC,
             "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
             proc, proc->refcnt);
-    I(rt, n_live_procs(rt) > 0);
+    I(rt, rt->n_live_procs() > 0);
     /* FIXME: when we have dtors, this might force-execute the dtor
      * synchronously? Hmm. */
     remove_proc_from_state_vec(rt, proc);
@@ -972,21 +968,6 @@ upcall_del_proc(rust_rt *rt, rust_proc *proc)
     rt->log(LOG_MEM|LOG_PROC,
             "proc 0x%" PRIxPTR " killed (and deleted)",
             (uintptr_t)proc);
-}
-
-static rust_proc*
-sched(rust_rt *rt)
-{
-    I(rt, rt);
-    I(rt, n_live_procs(rt) > 0);
-    if (rt->running_procs.length() > 0) {
-        size_t i = rand(&rt->rctx);
-        i %= rt->running_procs.length();
-        return (rust_proc *)rt->running_procs[i];
-    }
-    rt->log(LOG_RT|LOG_PROC,
-            "no schedulable processes");
-    return NULL;
 }
 
 /* Runtime */
@@ -1109,6 +1090,27 @@ rust_rt::win32_require(LPTSTR fn, BOOL ok) {
     }
 }
 #endif
+
+size_t
+rust_rt::n_live_procs()
+{
+    return running_procs.length() + blocked_procs.length();
+}
+
+rust_proc *
+rust_rt::sched()
+{
+    I(this, this);
+    I(this, n_live_procs() > 0);
+    if (running_procs.length() > 0) {
+        size_t i = rand(&rctx);
+        i %= running_procs.length();
+        return (rust_proc *)running_procs[i];
+    }
+    log(LOG_RT|LOG_PROC,
+        "no schedulable processes");
+    return NULL;
+}
 
 /* Upcalls */
 
@@ -1643,7 +1645,7 @@ rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
 
         rt.root_proc = new_proc(&rt, NULL, main_exit_proc_glue, main_fn, 0);
         add_proc_state_vec(&rt, rt.root_proc);
-        proc = sched(&rt);
+        proc = rt.sched();
 
         rt.logptr("root proc", (uintptr_t)proc);
         rt.logptr("proc->sp", (uintptr_t)proc->sp);
@@ -1699,7 +1701,7 @@ rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
                 break;
             }
 
-            proc = sched(&rt);
+            proc = rt.sched();
         }
 
         rt.log(LOG_RT, "finished main loop");
