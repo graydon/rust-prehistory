@@ -640,10 +640,8 @@ let emit_file
     (sess:Session.sess)
     (code:Asm.frag)
     (data:Asm.frag)
+    (sem:Semant.ctxt)
     (dw:Dwarf.debug_records)
-    (main_fn_fixup:fixup)
-    (main_exit_proc_glue_fixup:fixup)
-    (c_to_proc_fixup:fixup)
     : unit =
 
   let all_hdrs_fixup = new_fixup "all headers" in
@@ -775,11 +773,11 @@ let emit_file
                         ~sess
                         ~start_fixup
                         ~rust_start_fixup: rustrt_imports.pe_import_dll_imports.(0).pe_import_address_fixup
-                        ~main_fn_fixup
-                        ~main_exit_proc_glue_fixup
+                        ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
+                        ~main_exit_proc_glue_fixup: sem.Semant.ctxt_main_exit_proc_glue_fixup
                         ~text_fixup
                         ~crate_code: code
-                        ~c_to_proc_fixup)
+                        ~c_to_proc_fixup: sem.Semant.ctxt_c_to_proc_fixup)
   in
   let bss_section = def_aligned bss_fixup (BSS 0x10L)
   in

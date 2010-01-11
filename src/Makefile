@@ -103,7 +103,7 @@ ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml auto.ml \
 FE_MLS := $(addprefix boot/fe/, ast.ml parser.ml lexer.ml)
 DRIVER_TOP_MLS := $(addprefix boot/driver/, main.ml)
 
-BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(BE_MLS) $(FE_MLS) $(ME_MLS) \
+BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(FE_MLS) $(BE_MLS) $(ME_MLS) \
             $(DRIVER_TOP_MLS)
 BOOT_CMOS := $(BOOT_MLS:.ml=.cmo)
 BOOT_CMXS := $(BOOT_MLS:.ml=.cmx)

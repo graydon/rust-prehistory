@@ -234,6 +234,8 @@ let layout_visitor
       match i.node with
           Ast.NATIVE_fn nfn ->
             enter_frame i.id;
+            (* Make note of the implicit frame-info slot: 1 word. *)
+            Hashtbl.replace cx.ctxt_frame_sizes i.id cx.ctxt_abi.Abi.abi_word_sz;
             layout_header i.id
               (Array.map (fun (sid,_) -> sid.id)
                  nfn.Ast.native_fn_input_slots)

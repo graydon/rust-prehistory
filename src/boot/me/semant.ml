@@ -109,7 +109,7 @@ type ctxt =
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
 
-      ctxt_main_fn: fixup;
+      ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
       ctxt_main_exit_proc_glue_fixup: fixup;
     }
@@ -159,7 +159,7 @@ let new_ctxt sess abi crate =
     ctxt_all_item_code = Hashtbl.create 0;
     ctxt_glue_code = Hashtbl.create 0;
     ctxt_data = Hashtbl.create 0;
-    ctxt_main_fn = new_fixup "main fn fixup";
+    ctxt_main_fn_fixup = new_fixup "main fn fixup";
     ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main;
     ctxt_main_exit_proc_glue_fixup = new_fixup "main exit_proc glue"
   }

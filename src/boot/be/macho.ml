@@ -494,10 +494,8 @@ let emit_file
     (sess:Session.sess)
     (code:Asm.frag)
     (data:Asm.frag)
+    (sem:Semant.ctxt)
     (dwarf:Dwarf.debug_records)
-    (main_fn_fixup:fixup)
-    (main_exit_proc_glue_fixup:fixup)
-    (c_to_proc_fixup:fixup)
     : unit =
 
   (* FIXME: alignment? *)
@@ -570,7 +568,7 @@ let emit_file
            WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
            BYTE 1;                (* n_type == N_UNDEF | N_EXT *)
            BYTE 0;                (* n_sect == NO_SECT *)
-           WORD (TY_u16, IMM (Int64.of_int (dylib_index lsl 8))); 
+           WORD (TY_u16, IMM (Int64.of_int (dylib_index lsl 8)));
            (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
            WORD (TY_u32, IMM 0L); (* n_value == unused *)
          |], strtab_entry_fixup)
@@ -588,8 +586,8 @@ let emit_file
          |], strtab_entry_fixup)
   in
 
-  let (symbols:(string * (frag * fixup)) array) = 
-    [| 
+  let (symbols:(string * (frag * fixup)) array) =
+    [|
       ("_rust_start", indirect_symbol_nlist_entry 1);
       ("_exit", indirect_symbol_nlist_entry 2);
       ("_NXArgc", sect_symbol_nlist_entry 2 nxargc_fixup);
@@ -600,14 +598,14 @@ let emit_file
     |]
   in
 
-  let indirect_symbols = 
+  let indirect_symbols =
     [|
       rust_start_fixup;
       exit_fixup
     |]
   in
   let indirect_symtab_fixup = new_fixup "indirect symbol table" in
-  let indirect_symtab = 
+  let indirect_symtab =
     DEF (indirect_symtab_fixup,
          SEQ (Array.mapi
                 (fun i _ -> WORD(TY_u32, IMM (Int64.of_int i)))
@@ -717,9 +715,9 @@ let emit_file
 
     (* Push 16 bytes to preserve SSE alignment. *)
     Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS c_to_proc_fixup)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS main_exit_proc_glue_fixup)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS main_fn_fixup)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_c_to_proc_fixup)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_main_exit_proc_glue_fixup)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_main_fn_fixup)));
     Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS rust_start_fixup))));
     Il.emit e (Il.Push (X86.ro X86.eax));
     Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS exit_fixup))));

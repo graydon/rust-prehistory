@@ -456,6 +456,7 @@ let elf32_linux_x86_file
     ~(rodata_frags:(string, frag) Hashtbl.t)
     ~(import_fixups:(string, fixup) Hashtbl.t)
     ~(dwarf:Dwarf.debug_records)
+    ~(sem:Semant.ctxt)
     ~(needed_libs:string array)
     : frag =
 
@@ -1036,10 +1037,25 @@ let elf32_linux_x86_file
        (rela_plt_frag :: rela_plt_frags))
   in
 
-  let (text_strtab_frags,
-       text_symtab_frags,
+  let symbol_frags_of_item sym_emitter st_bind fn_node fn_fixup x =
+    let (strtab_frags, symtab_frags) = x in
+    let symname = (Ast.fmt_to_str Ast.fmt_name
+                     (Hashtbl.find sem.Semant.ctxt_all_item_names fn_node))
+    in
+    let (strtab_frag, symtab_frag) = sym_emitter symname st_bind fn_fixup in
+      (strtab_frag :: strtab_frags,
+       symtab_frag :: symtab_frags)
+  in
+
+  let (global_text_strtab_frags,
+       global_text_symtab_frags,
        text_body_frags) =
     Hashtbl.fold (frags_of_symbol text_sym STB_GLOBAL) text_frags ([],[],[])
+  in
+
+  let (local_text_strtab_frags,
+       local_text_symtab_frags) =
+    Hashtbl.fold (symbol_frags_of_item text_sym STB_LOCAL) sem.Semant.ctxt_fn_fixups ([], [])
   in
 
   let (rodata_strtab_frags,
@@ -1108,14 +1124,16 @@ let elf32_linux_x86_file
 
   let dynsym_frags = (null_symtab_frag ::
                         (import_symtab_frags @
-                           text_symtab_frags @
+                           global_text_symtab_frags @
+                           local_text_symtab_frags @
                            rodata_symtab_frags @
                            data_symtab_frags))
   in
 
   let dynstr_frags = (null_strtab_frag ::
                         (import_strtab_frags @
-                           text_strtab_frags @
+                           global_text_strtab_frags @
+                           local_text_strtab_frags @
                            rodata_strtab_frags @
                            data_strtab_frags @
                            (Array.to_list dynamic_needed_strtab_frags)))
@@ -1264,10 +1282,8 @@ let emit_file
     (sess:Session.sess)
     (code:Asm.frag)
     (data:Asm.frag)
+    (sem:Semant.ctxt)
     (dwarf:Dwarf.debug_records)
-    (main_fn_fixup:fixup)
-    (main_exit_proc_glue_fixup:fixup)
-    (c_to_proc_fixup:fixup)
     : unit =
 
   let text_frags = Hashtbl.create 4 in
@@ -1340,9 +1356,9 @@ let emit_file
     let e = X86.new_emitter() in
       X86.objfile_start e
         ~start_fixup ~rust_start_fixup
-        ~main_fn_fixup
-        ~main_exit_proc_glue_fixup
-        ~c_to_proc_fixup
+        ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
+        ~main_exit_proc_glue_fixup: sem.Semant.ctxt_main_exit_proc_glue_fixup
+        ~c_to_proc_fixup: sem.Semant.ctxt_c_to_proc_fixup
         ~indirect_start: false;
       X86.frags_of_emitted_quads sess e
   in
@@ -1369,12 +1385,13 @@ let emit_file
     elf32_linux_x86_file
       ~sess
       ~entry_name: "_start"
-      ~text_frags: text_frags
-      ~data_frags: data_frags
-      ~dwarf: dwarf
-      ~rodata_frags: rodata_frags
-      ~import_fixups: import_fixups
-      ~needed_libs: needed_libs
+      ~text_frags
+      ~data_frags
+      ~dwarf
+      ~sem
+      ~rodata_frags
+      ~import_fixups
+      ~needed_libs
   in
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in

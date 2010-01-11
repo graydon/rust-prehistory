@@ -2422,7 +2422,7 @@ let fixup_assigning_visitor
               let path = path_name () in
               let fixup =
                 if path = cx.ctxt_main_name
-                then cx.ctxt_main_fn
+                then cx.ctxt_main_fn_fixup
                 else new_fixup path
               in
                 htab_put cx.ctxt_fn_fixups i.id fixup;
