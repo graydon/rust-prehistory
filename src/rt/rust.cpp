@@ -352,6 +352,10 @@ struct rust_proc {
      */
     uintptr_t upcall_code;
     uintptr_t upcall_args[PROC_MAX_UPCALL_ARGS];
+
+    uintptr_t get_fp();
+    uintptr_t get_previous_fp(uintptr_t fp);
+    frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
 };
 
 struct rust_port {
@@ -702,8 +706,9 @@ del_stk(rust_rt *rt, stk_seg *stk)
 
 /* Processes */
 
-/* FIXME: ifdef by platform. */
+/* FIXME: ifdef by platform. This is getting absurdly x86-specific. */
 size_t const n_callee_saves = 4;
+size_t const callee_save_fp = 0;
 
 static void
 upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
@@ -846,12 +851,14 @@ rust_proc::rust_proc(rust_rt *rt,
     }
 
     // We want 'frame_base' to point to the last callee-save in this
-    // (exit-proc) frame, because we're going to spray this
-    // frame-pointer into *every* callee-save in the *next* (spawnee)
-    // frame. A cheap trick, but this means the spawnee frame will
-    // restore the proper frame pointer of the glue frame as it
-    // runs its epilogue.
+    // (exit-proc) frame, because we're going to inject this
+    // frame-pointer into the callee-save frame pointer value in the
+    // *next* (spawnee) frame. A cheap trick, but this means the
+    // spawnee frame will restore the proper frame pointer of the glue
+    // frame as it runs its epilogue.
     uintptr_t frame_base = (uintptr_t) (spp+1);
+
+    *spp-- = (uintptr_t) 0;          // frame_glue_fns
 
     // Copy args from spawner to spawnee.
     if (spawner)  {
@@ -882,7 +889,11 @@ rust_proc::rust_proc(rust_rt *rt,
     // The context the c_to_proc_glue needs to switch stack.
     *spp-- = (uintptr_t) spawnee_fn;      // instruction to start at
     for (size_t j = 0; j < n_callee_saves; ++j) {
-        *spp-- = frame_base;              // callee-saves to carry in
+        // callee-saves to carry in when we activate
+        if (j == callee_save_fp)
+            *spp-- = frame_base;
+        else
+            *spp-- = NULL;
     }
 
     // Back up one, we overshot where sp should be.
@@ -895,6 +906,18 @@ rust_proc::~rust_proc()
     rt->log(LOG_MEM|LOG_PROC,
             "~rust_proc 0x%" PRIxPTR ", refcnt=%d",
             (uintptr_t)this, refcnt);
+
+    for (uintptr_t fp = get_fp(); fp; fp = get_previous_fp(fp)) {
+        frame_glue_fns *glue_fns = get_frame_glue_fns(fp);
+        rt->log(LOG_MEM|LOG_PROC,
+                "~rust_proc, frame fp=0x%" PRIxPTR ", glue_fns=0x%" PRIxPTR,
+                fp, glue_fns);
+        if (glue_fns) {
+            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, mark_glue=0x%" PRIxPTR, glue_fns->mark_glue);
+            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, drop_glue=0x%" PRIxPTR, glue_fns->drop_glue);
+            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, reloc_glue=0x%" PRIxPTR, glue_fns->reloc_glue);
+        }
+    }
 
     /* FIXME: tighten this up, there are some more
        assertions that hold at proc-lifecycle events. */
@@ -918,6 +941,31 @@ rust_proc::operator delete(void *ptr)
     rt->free(ptr);
 }
 
+static inline uintptr_t
+get_callee_save_fp(uintptr_t *top_of_callee_saves)
+{
+    return top_of_callee_saves[n_callee_saves - (callee_save_fp + 1)];
+}
+
+uintptr_t
+rust_proc::get_fp() {
+    // sp in any suspended proc points to the last callee-saved reg on
+    // the proc stack.
+    return get_callee_save_fp((uintptr_t*)sp);
+}
+
+uintptr_t
+rust_proc::get_previous_fp(uintptr_t fp) {
+    // fp happens to, coincidentally (!) also point to the last
+    // callee-save on the proc stack.
+    return get_callee_save_fp((uintptr_t*)fp);
+}
+
+frame_glue_fns*
+rust_proc::get_frame_glue_fns(uintptr_t fp) {
+    fp -= sizeof(uintptr_t);
+    return *((frame_glue_fns**) fp);
+}
 
 static ptr_vec<rust_proc>*
 get_state_vec(rust_rt *rt, proc_state_t state)
