@@ -723,9 +723,17 @@ let emit_file
     Il.emit e (Il.Pop (X86.rc X86.ecx));
     Il.emit e (Il.Pop (X86.rc X86.ecx));
     Il.emit e (Il.Pop (X86.rc X86.ecx));
+
+    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
     Il.emit e (Il.Push (X86.ro X86.eax));
     Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS exit_fixup))));
     Il.emit e (Il.Pop (X86.rc X86.ecx));
+    Il.emit e (Il.Pop (X86.rc X86.ecx));
+    Il.emit e (Il.Pop (X86.rc X86.ecx));
+    Il.emit e (Il.Pop (X86.rc X86.ecx));
+
     Il.emit e Il.Ret;
   in
 
