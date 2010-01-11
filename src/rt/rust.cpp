@@ -1390,6 +1390,7 @@ upcall_fail(rust_rt *rt, rust_proc *proc, char const *expr, char const *file,
     /* FIXME: throw, don't just exit. */
     rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
             expr, file, line);
+    rt->srv->fatal(expr, file, line);
     fail_proc(rt, proc);
 }
 
