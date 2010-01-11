@@ -187,6 +187,26 @@ let cell_scalar_ty (c:cell) : scalar_ty =
     | Addr (_, rt) -> AddrTy rt
 ;;
 
+let operand_size (op:operand) (word_bits:bits) : bits =
+
+  let scalar_ty_size (st:scalar_ty) : bits =
+    match st with
+        ValTy bits -> bits
+      | AddrTy _ -> word_bits
+      | NilTy -> word_bits (* FIXME: is there some way around this case? *)
+  in
+
+  let cell_size (c:cell) : bits =
+    match c with
+        Reg (_, st) -> scalar_ty_size st
+      | Addr _ -> word_bits
+  in
+
+  match op with
+      Cell cell -> cell_size cell
+    | Imm (_, st) -> scalar_ty_size st
+;;
+
 (* Processor. *)
 
 type quad_processor =

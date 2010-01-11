@@ -54,7 +54,11 @@ let trans_visitor
   in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
-  let imm (i:int64) = Il.Imm (Asm.IMM i, word_ty) in
+  let imm_at (i:int64) (bits:Il.bits) : Il.operand =
+    Il.Imm (Asm.IMM i, Il.ValTy bits)
+  in
+
+  let imm (i:int64) : Il.operand = imm_at i word_bits in
   let marker = imm 0xdeadbeefL in
   let one = imm 1L in
   let zero = imm 0L in
@@ -305,49 +309,49 @@ let trans_visitor
     else ()
   in
 
-  let trans_mach (mach:ty_mach) (src:string) : int64 =
+  let trans_mach (mach:ty_mach) (src:string) : Il.operand =
     match mach with
         TY_u8 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range 0L 0xffL i; i)
+            (check_integral_literal_range 0L 0xffL i; imm_at i Il.Bits8)
 
       | TY_u16 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range 0L 0xffffL i; i)
+            (check_integral_literal_range 0L 0xffffL i; imm_at i Il.Bits16)
 
       | TY_u32 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range 0L 0xffffffffL i; i)
+            (check_integral_literal_range 0L 0xffffffffL i; imm_at i Il.Bits32)
 
-(*
-      | TY_u64 ->
-*)
+      (*
+        | TY_u64 ->
+      *)
 
       | TY_s8 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range (-128L) 127L i; i)
+            (check_integral_literal_range (-128L) 127L i; imm_at i Il.Bits8)
 
       | TY_s16 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range (-32768L) 32767L i; i)
+            (check_integral_literal_range (-32768L) 32767L i; imm_at i Il.Bits16)
 
       | TY_s32 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range (-2147483648L) 2147483647L i; i)
+            (check_integral_literal_range (-2147483648L) 2147483647L i; imm_at i Il.Bits32)
 
-(*
-      | TY_s64 ->
-      | TY_f32 ->
-      | TY_f64 ->
-*)
+      (*
+        | TY_s64 ->
+        | TY_f32 ->
+        | TY_f64 ->
+      *)
 
-      | _ -> 0xbadbeefL
+      | _ -> imm 0xbadbeefL
   in
 
   let iter_block_slots
@@ -559,7 +563,7 @@ let trans_visitor
               | Ast.LIT_int (bi, s) ->
                   imm (Int64.of_int (Big_int.int_of_big_int bi))
               | Ast.LIT_mach (m, s) ->
-                  imm (trans_mach m s)
+                  trans_mach m s
 
               | _ -> marker
           end
@@ -858,10 +862,10 @@ let trans_visitor
 
         Ast.EXPR_binary (binop, a, b) ->
           let arith op =
-            (* FIXME: this has to change when we support other mach types. *)
             let lhs = trans_atom a in
             let rhs = trans_atom b in
-            let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
+            let size = Il.operand_size lhs word_bits in
+            let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy size) in
               anno ();
               emit (Il.binary op dst lhs rhs);
               Il.Cell dst
