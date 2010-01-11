@@ -78,6 +78,11 @@ let layout_visitor
    *
    *)
 
+  (* At the bottom of every frame, there's a frame-info pointer. *)
+  let (frame_info_slot_sz:int64) =
+    cx.ctxt_abi.Abi.abi_word_sz
+  in
+
   let string_of_layout (ly:layout) : string =
     Printf.sprintf "sz=%Ld, off=%Ld, align=%Ld"
       ly.layout_size ly.layout_offset ly.layout_align
@@ -172,7 +177,7 @@ let layout_visitor
     let sz = stk_fold
       (Stack.top block_stacks)
       (fun layout b -> Int64.add layout.layout_size b)
-      0L
+      frame_info_slot_sz
     in
     let frame_id = Stack.top frame_stack in
     let curr = Hashtbl.find cx.ctxt_frame_sizes frame_id in
@@ -234,8 +239,7 @@ let layout_visitor
       match i.node with
           Ast.NATIVE_fn nfn ->
             enter_frame i.id;
-            (* Make note of the implicit frame-info slot: 1 word. *)
-            Hashtbl.replace cx.ctxt_frame_sizes i.id cx.ctxt_abi.Abi.abi_word_sz;
+            Hashtbl.replace cx.ctxt_frame_sizes i.id frame_info_slot_sz;
             layout_header i.id
               (Array.map (fun (sid,_) -> sid.id)
                  nfn.Ast.native_fn_input_slots)
@@ -256,12 +260,7 @@ let layout_visitor
     let frame_id = Stack.top frame_stack in
     let off =
       if Stack.is_empty stk
-      then
-        (*
-         * The "frame-bottom" is 1 word greater than 0, because we
-         * store a frame_glue_fns* at the bottom of each frame.
-         *)
-        cx.ctxt_abi.Abi.abi_word_sz
+      then frame_info_slot_sz
       else (Stack.top stk).layout_offset
     in
     let layout = layout_block off b in
