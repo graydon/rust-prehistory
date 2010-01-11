@@ -296,6 +296,59 @@ let trans_visitor
             end
   in
 
+  (* FIXME: should really give a node_id to err *)
+  (* FIXME: this should be checked earlier, in type checking, or even parsing! *)
+  let check_integral_literal_range (lo:int64) (hi:int64) (i:int64) : unit =
+    if (i < lo) or (i > hi)
+    then (err None "integral literal %Ld out of range [%Ld,%Ld]" i lo hi)
+    else ()
+  in
+
+  let trans_mach (mach:ty_mach) (src:string) : int64 =
+    match mach with
+        TY_u8 ->
+          let i = Int64.of_string src
+          in
+            (check_integral_literal_range 0L 0xffL i; i)
+
+      | TY_u16 ->
+          let i = Int64.of_string src
+          in
+            (check_integral_literal_range 0L 0xffffL i; i)
+
+      | TY_u32 ->
+          let i = Int64.of_string src
+          in
+            (check_integral_literal_range 0L 0xffffffffL i; i)
+
+(*
+      | TY_u64 ->
+*)
+
+      | TY_s8 ->
+          let i = Int64.of_string src
+          in
+            (check_integral_literal_range (-128L) 127L i; i)
+
+      | TY_s16 ->
+          let i = Int64.of_string src
+          in
+            (check_integral_literal_range (-32768L) 32767L i; i)
+
+      | TY_s32 ->
+          let i = Int64.of_string src
+          in
+            (check_integral_literal_range (-2147483648L) 2147483647L i; i)
+
+(*
+      | TY_s64 ->
+      | TY_f32 ->
+      | TY_f64 ->
+*)
+
+      | _ -> 0xbadbeefL
+  in
+
   let rec trans_lval_ext
       (base_ty:Ast.ty)
       (base_addr:Il.addr)
@@ -482,6 +535,8 @@ let trans_visitor
               | Ast.LIT_char c -> imm (Int64.of_int (Char.code c))
               | Ast.LIT_int (bi, s) ->
                   imm (Int64.of_int (Big_int.int_of_big_int bi))
+              | Ast.LIT_mach (m, s) ->
+                  imm (trans_mach m s)
 
               | _ -> marker
           end

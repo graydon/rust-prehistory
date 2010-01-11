@@ -38,6 +38,22 @@ type ty_mach =
   | TY_f64
 ;;
 
+let mach_is_integral (mach:ty_mach) : bool =
+  match mach with
+      TY_f32 -> false
+    | TY_f64 -> false
+    | _ -> true
+;;
+
+let mach_is_signed (mach:ty_mach) : bool =
+  match mach with
+      TY_s8 -> true
+    | TY_s16 -> true
+    | TY_s32 -> true
+    | TY_s64 -> true
+    | _ -> false
+;;
+
 let string_of_ty_mach (mach:ty_mach) : string =
   match mach with
     TY_u8 -> "u8"
