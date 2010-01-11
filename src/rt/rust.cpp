@@ -111,9 +111,10 @@ struct stk_seg {
 typedef enum {
     proc_state_running    = 0,
     proc_state_calling_c  = 1,
-    proc_state_blocked_exited   = 2,
-    proc_state_blocked_reading  = 3,
-    proc_state_blocked_writing  = 4
+    proc_state_failing    = 2,
+    proc_state_blocked_exited   = 3,
+    proc_state_blocked_reading  = 4,
+    proc_state_blocked_writing  = 5
 } proc_state_t;
 
 static char const * const state_names[] =
@@ -924,6 +925,7 @@ get_state_vec(rust_rt *rt, proc_state_t state)
     switch (state) {
     case proc_state_running:
     case proc_state_calling_c:
+    case proc_state_failing:
         return &rt->running_procs;
 
     case proc_state_blocked_exited:
@@ -982,19 +984,28 @@ proc_state_transition(rust_rt *rt,
 }
 
 static void
-upcall_del_proc(rust_rt *rt, rust_proc *proc)
+fail_proc(rust_rt *rt, rust_proc *proc)
 {
     rt->log(LOG_PROC,
-            "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
+            "fail_proc(0x%" PRIxPTR "), refcnt=%d",
             proc, proc->refcnt);
     I(rt, rt->n_live_procs() > 0);
-    /* FIXME: when we have dtors, this might force-execute the dtor
-     * synchronously? Hmm. */
+    proc_state_transition(rt, proc,
+                          proc->state,
+                          proc_state_failing);
+}
+
+static void
+upcall_del_proc(rust_rt *rt, rust_proc *proc)
+{
+    rt->log(LOG_UPCALL,
+            "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
+            proc, proc->refcnt);
+    fail_proc(rt, proc);
+
+    // FIXME: remove this part.
     remove_proc_from_state_vec(rt, proc);
     delete proc;
-    rt->log(LOG_MEM|LOG_PROC,
-            "proc 0x%" PRIxPTR " killed (and deleted)",
-            (uintptr_t)proc);
 }
 
 /* Runtime */
@@ -1373,13 +1384,13 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
 
 
 static void
-upcall_fail(rust_rt *rt, char const *expr, char const *file,
+upcall_fail(rust_rt *rt, rust_proc *proc, char const *expr, char const *file,
             size_t line)
 {
     /* FIXME: throw, don't just exit. */
     rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
             expr, file, line);
-    rt->srv->fatal(expr, file, line);
+    fail_proc(rt, proc);
 }
 
 static uintptr_t
@@ -1623,7 +1634,7 @@ handle_upcall(rust_proc *proc)
         upcall_del_proc(proc->rt, (rust_proc*)args[0]);
         break;
     case upcall_code_fail:
-        upcall_fail(proc->rt,
+        upcall_fail(proc->rt, proc,
                     (char const *)args[0],
                     (char const *)args[1],
                     (size_t)args[2]);
@@ -1718,6 +1729,7 @@ rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
             switch ((proc_state_t) proc->state) {
 
             case proc_state_running:
+            case proc_state_failing:
                 break;
 
             case proc_state_calling_c:
