@@ -309,6 +309,7 @@ and expr =
 and lit =
   | LIT_nil
   | LIT_bool of bool
+  (* FIXME: should be (ty_mach * Big_int.big_int * string) *)
   | LIT_mach of (ty_mach * string)
   | LIT_int of (Big_int.big_int * string)
   | LIT_char of char

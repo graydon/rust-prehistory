@@ -845,14 +845,23 @@ let trans_visitor
         end
     in
 
+(*
+    let op_ty
+        (binop:Ast.binop)
+        (a:Ast.atom)
+        (b:Ast.atom)
+        : Il.bits * Il.bits * Il.bits =
+      match 
+*)
+
     match expr with
 
         Ast.EXPR_binary (binop, a, b) ->
           let arith op =
             (* FIXME: this has to change when we support other mach types. *)
-            let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
             let lhs = trans_atom a in
             let rhs = trans_atom b in
+            let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
               anno ();
               emit (Il.binary op dst lhs rhs);
               Il.Cell dst
