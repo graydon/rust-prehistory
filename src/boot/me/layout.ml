@@ -187,6 +187,7 @@ let layout_visitor
       htab_put cx.ctxt_frame_sizes id 0L;
       htab_put cx.ctxt_call_sizes id 0L;
       htab_put cx.ctxt_spill_fixups id (new_fixup "frame spill fixup");
+      htab_put cx.ctxt_frame_blocks id []
   in
 
   let leave_frame _ =
@@ -262,11 +263,7 @@ let layout_visitor
       else (Stack.top stk).layout_offset
     in
     let layout = layout_block off b in
-    let frame_blocks =
-      match htab_search cx.ctxt_frame_blocks frame_id with
-          None -> []
-        | Some blocks -> blocks
-    in
+    let frame_blocks = Hashtbl.find cx.ctxt_frame_blocks frame_id in
       Hashtbl.replace cx.ctxt_frame_blocks frame_id (b.id :: frame_blocks);
       Stack.push layout stk;
       update_frame_size ();

@@ -75,11 +75,6 @@ let proc_field_upcall_args = proc_field_upcall_code + 1;;
 
 let max_upcall_args = 8;;
 
-let proc_field_mem_budget = proc_field_upcall_args + max_upcall_args + 1;;
-let proc_field_curr_mem = proc_field_mem_budget + 1;;
-let proc_field_tick_budget = proc_field_curr_mem + 1;;
-let proc_field_curr_ticks = proc_field_tick_budget + 1;;
-
 let exterior_rc_slot_field_refcnt = 0;;
 let exterior_rc_slot_field_body = 1;;
 
@@ -98,9 +93,6 @@ let stk_field_prev_sp = stk_field_prev_fp + 1;;
 let stk_field_limit = stk_field_prev_sp + 1;;
 let stk_field_data = stk_field_limit + 1;;
 
-
-(* The "end of the proc" where proc-slots get allocated. *)
-let proc_field_data = proc_field_curr_ticks + 1;;
 
 let rt_field_sp = 0;;
 

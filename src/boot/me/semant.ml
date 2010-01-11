@@ -22,7 +22,6 @@ type glue =
   | GLUE_exit_proc of Ast.ty_sig
   | GLUE_upcall of int
   | GLUE_mark of Ast.ty
-  | GLUE_mark_frame of node_id
   | GLUE_drop of Ast.ty
   | GLUE_free of Ast.ty
   | GLUE_shallow_copy of Ast.ty
@@ -31,6 +30,9 @@ type glue =
   | GLUE_hash of Ast.ty
   | GLUE_write of Ast.ty
   | GLUE_read of Ast.ty
+  | GLUE_mark_frame of node_id
+  | GLUE_drop_frame of node_id
+  | GLUE_reloc_frame of node_id
 ;;
 
 type data =

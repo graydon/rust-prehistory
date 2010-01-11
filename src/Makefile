@@ -197,6 +197,8 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 ######################################################################
 
 TEST_XFAILS := test/run-pass/many.rs \
+               test/run-pass/mlist_cycle.rs \
+               test/run-pass/acyclic-unwind.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
@@ -230,7 +232,7 @@ check: $(TEST_RUN_PASS_EXES) $(TEST_RUN_FAIL_EXES) \
        $(TEST_COMPILE_FAIL_OUTS)
 
 test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
-	$(call CFG_RUN_TARG, $<) 2>&1 | tee $@
+	$(call CFG_RUN_TARG, $<) > $@ ; X=$$? ; cat $@ ; exit $$X
 
 test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) test/run-fail/%.pat $(CFG_RUNTIME)
 	rm -f $@
