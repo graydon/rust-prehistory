@@ -950,6 +950,18 @@ let is_ty8 (ty:Il.scalar_ty) : bool =
     | _ -> false
 ;;
 
+let is_m8 (c:Il.cell) : bool =
+  match c with
+      Il.Addr (_, Il.ScalarTy st) -> is_ty8 st
+    | _ -> false
+;;
+
+let is_r8 (c:Il.cell) : bool =
+  match c with
+      Il.Reg (_, st) -> is_ty8 st
+    | _ -> false
+;;
+
 let is_rm8 (c:Il.cell) : bool =
   match c with
       Il.Addr (_, Il.ScalarTy st) -> is_ty8 st
@@ -974,46 +986,45 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
 
   match (signed, dst, src) with
 
-      (* rm8 <- r8 *)
+      (* m8 <- r8 only. *)
       (_,  _, Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
-        when is_rm8 dst && is_ty8 src_ty ->
+        when is_m8 dst && is_ty8 src_ty ->
           insn_rm_r 0x88 dst (reg r)
+
+    (* r8 <- r8: treat as r32 <- r32. *)
+    | (_,  Il.Reg ((Il.Hreg r), _), Il.Cell src_cell)
+        when is_r8 dst && is_r8 src_cell ->
+        insn_rm_r 0x8b src_cell (reg r)
 
     (* rm32 <- r32 *)
     | (_,  _, Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
-        when is_rm32 dst && is_ty32 src_ty ->
+        when (is_r8 dst || is_rm32 dst) && is_ty32 src_ty ->
         insn_rm_r 0x89 dst (reg r)
-
-    (* r8 <- rm8 *)
-    | (_,  Il.Reg ((Il.Hreg r), dst_ty), Il.Cell src_cell)
-        when is_ty8 dst_ty && is_rm8 src_cell ->
-          insn_rm_r 0x8a src_cell (reg r)
 
     (* r32 <- rm32 *)
     | (_,  (Il.Reg ((Il.Hreg r), dst_ty)), Il.Cell src_cell)
         when is_ty32 dst_ty && is_rm32 src_cell ->
           insn_rm_r 0x8b src_cell (reg r)
 
-
-    (* MOVZX: r32 <- zx(rm8) *)
+    (* MOVZX: r8/r32 <- zx(rm8) *)
     | (false, Il.Reg ((Il.Hreg r, dst_ty)), Il.Cell src_cell)
-        when is_ty32 dst_ty && is_rm8 src_cell ->
+        when (is_ty8 dst_ty || is_ty32 dst_ty) && is_rm8 src_cell ->
         Asm.SEQ [| Asm.BYTE 0x0f;
                    insn_rm_r 0xb6 src_cell (reg r) |]
 
-    (* MOVSX: r32 <- sx(rm8) *)
+    (* MOVSX: r8/r32 <- sx(rm8) *)
     | (true, Il.Reg ((Il.Hreg r), dst_ty), Il.Cell src_cell)
-        when is_ty32 dst_ty && is_rm8 src_cell ->
+        when (is_ty8 dst_ty || is_ty32 dst_ty) && is_rm8 src_cell ->
         Asm.SEQ [| Asm.BYTE 0x0f;
                    insn_rm_r 0xbe src_cell (reg r) |]
 
-    (* rm8 <- imm8 *)
+    (* m8 <- imm8 *)
     | (_, _, Il.Imm ((Asm.IMM n), _))
-        when is_rm8 dst && imm_is_byte n ->
+        when is_m8 dst && imm_is_byte n ->
         insn_rm_r_imm 0xc6 dst slash0 TY_u8 (Asm.IMM n)
 
     (* rm32 <- imm32 *)
-    | (_, _, Il.Imm (i, _)) when is_rm32 dst ->
+    | (_, _, Il.Imm (i, _)) when is_rm32 dst || is_r8 dst ->
         insn_rm_r_imm 0xc7 dst slash0 TY_u32 i
 
     | _ -> raise Unrecognized
