@@ -2303,7 +2303,9 @@ let trans_visitor
         fun arg0_alias ->
           trans_upcall Abi.UPCALL_native
             [|
-              imm (Abi.nabi_to_code nfn.Ast.native_fn_abi);
+              imm (match (Abi.nabi_to_code nfn.Ast.native_fn_abi) with
+                       Some nabi_code -> nabi_code
+                     | None -> (err None "invalid abi specification"));
               (trans_static_string (path_name()));
               (Il.Cell (word_at (fp_imm out_addr_disp)));
               arg0_alias;
