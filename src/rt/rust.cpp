@@ -1491,18 +1491,17 @@ upcall_native(rust_proc *proc, abi_t abi,
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall native('%u', '%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
             abi, sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
-    I(rt, abi == abi_code_cdecl);
 
     uintptr_t retval;
-    uint8_t takes_proc = 0;
     /* FIXME: cache lookups. */
-    uintptr_t fn = rt->srv->lookup(sym, &takes_proc);
+    uintptr_t fn = rt->srv->lookup(sym);
     rt->log(LOG_UPCALL|LOG_MEM,
             "native '%s' resolved to 0x%" PRIxPTR,
             sym, fn);
 
     I(rt, fn);
     /* FIXME: nargs becomes argstr, incorporate libffi, etc. */
+    bool takes_proc = (abi == abi_code_rust);
     switch (nargs) {
     case 0:
         if (takes_proc)
@@ -1851,37 +1850,28 @@ rust_srv::fatal(char const *expr, char const *file, size_t line)
     exit(1);
 }
 
-static CDECL rust_str *implode(rust_proc *, rust_vec *);
-
 uintptr_t
-rust_srv::lookup(char const *sym, uint8_t *takes_proc)
+rust_srv::lookup(char const *sym)
 {
     uintptr_t res;
 
-    *takes_proc = 0;
-
-    if (strcmp(sym, "implode") == 0) {
-        *takes_proc = 1;
-        res = (uintptr_t) &implode;
-    } else {
 #ifdef __WIN32__
-        /* FIXME: pass library name in as well. And use LoadLibrary not
-         * GetModuleHandle, manually refcount. Oh, so much to do
-         * differently. */
-        const char *modules[2] = { "rustrt.dll", "msvcrt.dll" };
-        for (size_t i = 0; i < sizeof(modules) / sizeof(const char *); ++i) {
-            HMODULE lib = GetModuleHandle(modules[i]);
-            if (!lib)
-                fatal("GetModuleHandle", __FILE__, __LINE__);
-            res = (uintptr_t)GetProcAddress(lib, sym);
-            if (res)
-                break;
-        }
-#else
-        /* FIXME: dlopen, as above. */
-        res = (uintptr_t)dlsym(RTLD_DEFAULT, sym);
-#endif
+    /* FIXME: pass library name in as well. And use LoadLibrary not
+     * GetModuleHandle, manually refcount. Oh, so much to do
+     * differently. */
+    const char *modules[2] = { "rustrt.dll", "msvcrt.dll" };
+    for (size_t i = 0; i < sizeof(modules) / sizeof(const char *); ++i) {
+        HMODULE lib = GetModuleHandle(modules[i]);
+        if (!lib)
+            fatal("GetModuleHandle", __FILE__, __LINE__);
+        res = (uintptr_t)GetProcAddress(lib, sym);
+        if (res)
+            break;
     }
+#else
+    /* FIXME: dlopen, as above. */
+    res = (uintptr_t)dlsym(RTLD_DEFAULT, sym);
+#endif
     if (!res)
         fatal("srv->lookup", __FILE__, __LINE__);
     return res;
@@ -1895,7 +1885,7 @@ str_buf(rust_str *s)
     return (char const *)&s->data[0];
 }
 
-static CDECL rust_str*
+extern "C" CDECL rust_str*
 implode(rust_proc *proc, rust_vec *v)
 {
     /*
