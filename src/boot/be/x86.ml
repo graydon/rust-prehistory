@@ -1070,21 +1070,30 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
 ;;
 
 
+type alu_binop_codes =
+     {
+       immslash: int;    (* FIXME: document this *)
+       rm_dst_op8: int;
+       rm_dst_op32: int;
+       rm_src_op8: int;
+       rm_src_op32: int;
+     }
+;;
+
 let alu_binop
-    (dst:Il.cell) (src:Il.operand) (immslash:int)
-    (rm_dst_op:int) (rm_src_op:int)
+    (dst:Il.cell) (src:Il.operand) (codes:alu_binop_codes)
     : Asm.frag =
   match (dst, src) with
       (Il.Reg ((Il.Hreg r), dst_ty), Il.Cell c)
         when is_ty32 dst_ty && is_rm32 c ->
-          insn_rm_r rm_src_op c (reg r)
+          insn_rm_r codes.rm_src_op32 c (reg r)
 
     | (_, Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
         when is_rm32 dst && is_ty32 src_ty ->
-        insn_rm_r rm_dst_op dst (reg r)
+        insn_rm_r codes.rm_dst_op32 dst (reg r)
 
     | (_, Il.Imm (i, _)) when is_rm32 dst
-        -> insn_rm_r_imm_s8_s32 0x83 0x81 dst immslash i
+        -> insn_rm_r_imm_s8_s32 0x83 0x81 dst codes.immslash i
 
     | _ -> raise Unrecognized
 ;;
@@ -1132,10 +1141,26 @@ let select_insn (q:Il.quad) : Asm.frag =
             let binop = alu_binop b.Il.binary_dst b.Il.binary_rhs in
             let mulop = mul_like b.Il.binary_rhs in
               match (b.Il.binary_dst, b.Il.binary_op) with
-                  (_, Il.ADD) -> binop slash0 0x1 0x3
-                | (_, Il.SUB) -> binop slash5 0x29 0x2b
-                | (_, Il.AND) -> binop slash4 0x21 0x23
-                | (_, Il.OR) -> binop slash1 0x09 0x0b
+                  (_, Il.ADD) -> binop { immslash=slash0;
+                                         rm_dst_op8=0x0;
+                                         rm_dst_op32=0x1;
+                                         rm_src_op8=0x2;
+                                         rm_src_op32=0x3; }
+                | (_, Il.SUB) -> binop { immslash=slash5;
+                                         rm_dst_op8=0x28;
+                                         rm_dst_op32=0x29;
+                                         rm_src_op8=0x2a;
+                                         rm_src_op32=0x2b; }
+                | (_, Il.AND) -> binop { immslash=slash4;
+                                         rm_dst_op8=0x20;
+                                         rm_dst_op32=0x21;
+                                         rm_src_op8=0x22;
+                                         rm_src_op32=0x23; }
+                | (_, Il.OR) -> binop { immslash=slash1;
+                                        rm_dst_op8=0x08;
+                                        rm_dst_op32=0x09;
+                                        rm_src_op8=0x0a;
+                                        rm_src_op32=0x0b; }
 
                 | (Il.Reg (Il.Hreg r, t), Il.UMUL)
                     when is_ty32 t && r = eax -> mulop false slash4

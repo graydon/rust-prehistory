@@ -54,11 +54,11 @@ let trans_visitor
   in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
-  let imm_at (i:int64) (bits:Il.bits) : Il.operand =
+  let imm_of_ty (i:int64) (bits:Il.bits) : Il.operand =
     Il.Imm (Asm.IMM i, Il.ValTy bits)
   in
 
-  let imm (i:int64) : Il.operand = imm_at i word_bits in
+  let imm (i:int64) : Il.operand = imm_of_ty i word_bits in
   let marker = imm 0xdeadbeefL in
   let one = imm 1L in
   let zero = imm 0L in
@@ -314,17 +314,17 @@ let trans_visitor
         TY_u8 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range 0L 0xffL i; imm_at i Il.Bits8)
+            (check_integral_literal_range 0L 0xffL i; imm_of_ty i Il.Bits8)
 
       | TY_u16 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range 0L 0xffffL i; imm_at i Il.Bits16)
+            (check_integral_literal_range 0L 0xffffL i; imm_of_ty i Il.Bits16)
 
       | TY_u32 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range 0L 0xffffffffL i; imm_at i Il.Bits32)
+            (check_integral_literal_range 0L 0xffffffffL i; imm_of_ty i Il.Bits32)
 
       (*
         | TY_u64 ->
@@ -333,17 +333,17 @@ let trans_visitor
       | TY_s8 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range (-128L) 127L i; imm_at i Il.Bits8)
+            (check_integral_literal_range (-128L) 127L i; imm_of_ty i Il.Bits8)
 
       | TY_s16 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range (-32768L) 32767L i; imm_at i Il.Bits16)
+            (check_integral_literal_range (-32768L) 32767L i; imm_of_ty i Il.Bits16)
 
       | TY_s32 ->
           let i = Int64.of_string src
           in
-            (check_integral_literal_range (-2147483648L) 2147483647L i; imm_at i Il.Bits32)
+            (check_integral_literal_range (-2147483648L) 2147483647L i; imm_of_ty i Il.Bits32)
 
       (*
         | TY_s64 ->
