@@ -1820,7 +1820,7 @@ and parse_ty_params ps =
 and parse_abi ps =
   match peek ps with
       IDENT id -> (bump ps; id)
-    | _ -> ""
+    | _ -> "cdecl"
 
 and parse_native_mod_item ps =
   let apos = lexpos ps in

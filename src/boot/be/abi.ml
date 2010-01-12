@@ -64,6 +64,12 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_trace_str -> 15L
 ;;
 
+let nabi_to_code (a:string) : int64 =
+  match a with
+    "cdecl" -> 0L
+  | "rust" -> 1L
+;;
+
 (* Word offsets for structure fields in rust.h. *)
 
 let proc_field_rt = 0;;

@@ -2292,16 +2292,18 @@ let trans_visitor
     (* 
      * Native upcall encoding:
      * 
-     * arg0 = symbol name
-     * arg1 = return pointer (dereferenced return-address slot)
-     * arg2 = address of 0th non-implicit arg slot
-     * arg3 = arg count
+     * arg0 = abi
+     * arg1 = symbol name
+     * arg2 = return pointer (dereferenced return-address slot)
+     * arg3 = address of 0th non-implicit arg slot
+     * arg4 = arg count
      *)
     aliasing false (word_at (fp_imm arg0_disp))
       begin
         fun arg0_alias ->
           trans_upcall Abi.UPCALL_native
             [|
+              imm (Abi.nabi_to_code nfn.Ast.native_fn_abi);
               (trans_static_string (path_name()));
               (Il.Cell (word_at (fp_imm out_addr_disp)));
               arg0_alias;

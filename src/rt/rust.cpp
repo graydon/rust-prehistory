@@ -145,6 +145,11 @@ typedef enum {
     upcall_code_trace_str      = 15,
 } upcall_t;
 
+typedef enum {
+    abi_code_cdecl = 0,
+    abi_code_rust = 1
+} abi_t;
+
 /* FIXME: change ptr_vec and circ_buf to use flexible-array element
    rather than pointer-to-buf-at-end. */
 
@@ -1478,14 +1483,15 @@ typedef uintptr_t (CDECL *native_proc_4)(rust_proc *, uintptr_t,
                                          uintptr_t, uintptr_t, uintptr_t);
 
 static void
-upcall_native(rust_proc *proc,
+upcall_native(rust_proc *proc, abi_t abi,
               char const *sym, uintptr_t *retptr,
               uintptr_t *argv, uintptr_t nargs)
 {
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_MEM,
-            "upcall native('%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
-            sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
+            "upcall native('%u', '%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
+            abi, sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
+    I(rt, abi == abi_code_cdecl);
 
     uintptr_t retval;
     uint8_t takes_proc = 0;
@@ -1709,10 +1715,9 @@ handle_upcall(rust_proc *proc)
         upcall_recv(proc->rt, proc, (rust_port*)args[1]);
         break;
     case upcall_code_native:
-        upcall_native(proc, (char const *)args[0],
-                      (uintptr_t*)args[1],
-                      (uintptr_t*)args[2],
-                      (uintptr_t)args[3]);
+        upcall_native(proc, (abi_t)args[0],
+                      (char const *)args[1], (uintptr_t*)args[2],
+                      (uintptr_t*)args[3], (uintptr_t)args[4]);
         break;
     case upcall_code_new_str:
         *((rust_str**)args[0]) = upcall_new_str(proc->rt,
