@@ -2461,41 +2461,48 @@ let fixup_assigning_visitor
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
 
-let emit_c_to_proc_glue cx =
+let emit_aux_global_glue cx glue fix fn =
   let e = Il.new_emitter
     cx.ctxt_abi.Abi.abi_prealloc_quad
     cx.ctxt_abi.Abi.abi_is_2addr_machine
   in
-    cx.ctxt_abi.Abi.abi_c_to_proc e;
-    if e.Il.emit_next_vreg != 0
-    then bug () "c-to-proc glue uses nonzero vregs"
-    else
-      let code =
-        { code_fixup = cx.ctxt_c_to_proc_fixup;
-          code_quads = e.Il.emit_quads;
-          code_vregs_and_spill = None }
-      in
-        htab_put cx.ctxt_glue_code GLUE_C_to_proc code
+    fn e;
+    let quads = e.Il.emit_quads in
+      log cx "emitted quads for global glue";
+      for i = 0 to arr_max quads
+      do
+        log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
+      done;
+      if e.Il.emit_next_vreg != 0
+      then bug () "global glue uses nonzero vregs"
+      else
+        let code =
+          { code_fixup = fix;
+            code_quads = e.Il.emit_quads;
+            code_vregs_and_spill = None }
+        in
+          htab_put cx.ctxt_glue_code glue code
 ;;
 
+
+let emit_c_to_proc_glue cx =
+  emit_aux_global_glue cx GLUE_C_to_proc
+    cx.ctxt_c_to_proc_fixup
+    cx.ctxt_abi.Abi.abi_c_to_proc;
+;;
 
 let emit_proc_to_c_glue cx =
-  let e = Il.new_emitter
-    cx.ctxt_abi.Abi.abi_prealloc_quad
-    cx.ctxt_abi.Abi.abi_is_2addr_machine
-  in
-    cx.ctxt_abi.Abi.abi_proc_to_c e;
-    if e.Il.emit_next_vreg != 0
-    then bug () "proc-to-c glue uses nonzero vregs"
-    else
-      let code =
-        { code_fixup = cx.ctxt_proc_to_c_fixup;
-          code_quads = e.Il.emit_quads;
-          code_vregs_and_spill = None }
-      in
-        htab_put cx.ctxt_glue_code GLUE_proc_to_C code
+  emit_aux_global_glue cx GLUE_proc_to_C
+    cx.ctxt_proc_to_c_fixup
+    cx.ctxt_abi.Abi.abi_proc_to_c;
 ;;
 
+let emit_unwind_glue cx =
+  emit_aux_global_glue cx GLUE_unwind
+    cx.ctxt_unwind_fixup
+    (fun e -> cx.ctxt_abi.Abi.abi_unwind
+       e cx.ctxt_proc_to_c_fixup);
+;;
 
 let process_crate
     (cx:ctxt)
@@ -2513,7 +2520,8 @@ let process_crate
     log cx "translating crate with main function %s" cx.ctxt_main_name;
     run_passes cx path passes (log cx "%s") crate;
     emit_c_to_proc_glue cx;
-    emit_proc_to_c_glue cx
+    emit_proc_to_c_glue cx;
+    emit_unwind_glue cx
 ;;
 
 (*

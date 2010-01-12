@@ -434,31 +434,38 @@ let unwind_glue
   let mov dst src = emit (Il.umov dst src) in
   let push x = emit (Il.Push x) in
   let pop x = emit (Il.Pop x) in
+  let codeptr reg = Il.CodeAddr (Il.Based ((h reg), None)) in
+  let codefix fix = Il.CodeAddr (Il.Pcrel (fix, None)) in
+  let mark fix = Il.emit_full e (Some fix) Il.Dead in
+  let glue_field = Abi.frame_glue_fns_field_drop in
 
-  let repeat_jmp_pc = e.Il.emit_pc in
-    mov (rc edx) (c (fp_n (-1)));                           (* edx <- frame glue functions. *)
-    mov (rc ecx) (c (edx_n Abi.frame_glue_fns_field_drop)); (* edx <- drop glue             *)
+  let repeat_jmp_fix = new_fixup "repeat jump" in
+  let skip_jmp_fix = new_fixup "skip jump" in
+  let exit_jmp_fix = new_fixup "exit jump" in
+
+    mark repeat_jmp_fix;
+    mov (rc edx) (c (fp_n (-1)));                   (* edx <- frame glue functions. *)
+    mov (rc ecx) (c (edx_n glue_field));            (* edx <- drop glue             *)
     emit (Il.cmp (ro ecx) (immi 0L));
-    let skip_jmp_pc = e.Il.emit_pc in
-      emit (Il.jmp Il.JNE Il.CodeNone);                     (* if glue-fn is nonzero        *)
-      push (c proc_ptr);                                    (* form usual call to glue      *)
-      push (immi 0L);                                       (* outptr                       *)
-      emit (Il.call (rc eax)
-              (Il.CodeAddr (Il.Based ((h ecx), None))));    (* call *edx, trashing eax.     *)
-      pop (rc eax);
-      pop (rc eax);
 
-      Il.patch_jump e skip_jmp_pc e.Il.emit_pc;
-      mov (rc edx) (c (fp_n 3));                            (* load next fp (callee-saves[3]) *)
-      emit (Il.cmp (ro edx) (immi 0L));
-      let done_jmp_pc = e.Il.emit_pc in
-        emit (Il.jmp Il.JE Il.CodeNone);                    (* if nonzero               *)
-        mov (rc ebp) (ro edx);                              (* move to next frame       *)
-        emit (Il.jmp Il.JMP (Il.CodeLabel repeat_jmp_pc));  (* loop                     *)
+    emit (Il.jmp Il.JNE (codefix skip_jmp_fix));    (* if glue-fn is nonzero        *)
+    push (c proc_ptr);                              (* form usual call to glue      *)
+    push (immi 0L);                                 (* outptr                       *)
+    emit (Il.call (rc eax) (codeptr ecx));          (* call *edx, trashing eax.     *)
+    pop (rc eax);
+    pop (rc eax);
 
-        (* exit path. *)
-        Il.patch_jump e done_jmp_pc e.Il.emit_pc;
-        emit_upcall e Abi.UPCALL_del_proc [| (c proc_ptr) |] proc_to_c_fixup;
+    mark skip_jmp_fix;
+    mov (rc edx) (c (fp_n 3));                      (* load next fp (callee-saves[3]) *)
+    emit (Il.cmp (ro edx) (immi 0L));
+    emit (Il.jmp Il.JE (codefix exit_jmp_fix));     (* if nonzero               *)
+    mov (rc ebp) (ro edx);                          (* move to next frame       *)
+    emit (Il.jmp Il.JMP (codefix repeat_jmp_fix));  (* loop                     *)
+
+    (* exit path. *)
+    mark exit_jmp_fix;
+    mov (rc eax) (c proc_ptr);
+    emit_upcall_full (h eax) e Abi.UPCALL_del_proc [| (ro eax)  |] proc_to_c_fixup;
 ;;
 
 
@@ -781,6 +788,7 @@ let (abi:Abi.abi) =
     Abi.abi_emit_upcall = emit_upcall;
     Abi.abi_c_to_proc = c_to_proc;
     Abi.abi_proc_to_c = proc_to_c;
+    Abi.abi_unwind = unwind_glue;
 
     Abi.abi_sp_reg = (Il.Hreg esp);
     Abi.abi_fp_reg = (Il.Hreg ebp);
@@ -894,7 +902,7 @@ let insn_pcrel_relax
     (op32_frag:Asm.frag)
     (fix:fixup)
     : Asm.frag =
-  let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in
+  let pcrel_mark_fixup = new_fixup "pcrel mark fixup" in
   let def = Asm.DEF (pcrel_mark_fixup, Asm.MARK) in
   let pcrel_expr = (Asm.SUB (Asm.M_POS fix,
                              Asm.M_POS pcrel_mark_fixup))
@@ -907,7 +915,7 @@ let insn_pcrel_relax
 ;;
 
 let insn_pcrel_simple (op32:int) (fix:fixup) : Asm.frag =
-  let pcrel_mark_fixup = new_fixup "ccall-pcrel mark fixup" in
+  let pcrel_mark_fixup = new_fixup "pcrel mark fixup" in
   let def = Asm.DEF (pcrel_mark_fixup, Asm.MARK) in
   let pcrel_expr = (Asm.SUB (Asm.M_POS fix,
                              Asm.M_POS pcrel_mark_fixup))

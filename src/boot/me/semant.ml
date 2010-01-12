@@ -105,6 +105,7 @@ type ctxt =
       ctxt_abi: Abi.abi;
       ctxt_c_to_proc_fixup: fixup;
       ctxt_proc_to_c_fixup: fixup;
+      ctxt_unwind_fixup: fixup;
       ctxt_file_code: file_code;
       ctxt_all_item_code: item_code;
       ctxt_glue_code: glue_code;
@@ -156,6 +157,7 @@ let new_ctxt sess abi crate =
     ctxt_abi = abi;
     ctxt_c_to_proc_fixup = new_fixup "c-to-proc glue";
     ctxt_proc_to_c_fixup = new_fixup "proc-to-c glue";
+    ctxt_unwind_fixup = new_fixup "unwind glue";
     ctxt_file_code = Hashtbl.create 0;
     ctxt_all_item_code = Hashtbl.create 0;
     ctxt_glue_code = Hashtbl.create 0;

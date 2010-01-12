@@ -267,6 +267,12 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
     return rt.malloc(sz);
 }
 
+struct global_glue_fns {
+    uintptr_t c_to_proc_glue;
+    uintptr_t main_exit_proc_glue;
+    uintptr_t unwind_glue;
+};
+
 
 struct frame_glue_fns {
     uintptr_t mark_glue;

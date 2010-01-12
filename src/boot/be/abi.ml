@@ -88,6 +88,9 @@ let proc_field_upcall_args = proc_field_upcall_code + 1;;
 
 let max_upcall_args = 8;;
 
+let global_glue_fns_c_to_proc_glue = 0;;
+let global_glue_fns_unwind_glue = 1;;
+
 let frame_glue_fns_field_mark = 0;;
 let frame_glue_fns_field_drop = 1;;
 let frame_glue_fns_field_reloc = 2;;
@@ -138,9 +141,10 @@ type abi =
     abi_emit_proc_state_change: (Il.emitter -> proc_state -> unit);
     abi_emit_upcall: (Il.emitter -> upcall -> Il.operand array -> Common.fixup -> unit);
 
-    (* Transitions between runtimes. *)
+    (* Global glue. *)
     abi_c_to_proc: (Il.emitter -> unit);
     abi_proc_to_c: (Il.emitter -> unit);
+    abi_unwind: (Il.emitter -> Common.fixup -> unit);
 
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;
