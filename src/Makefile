@@ -204,6 +204,11 @@ TEST_XFAILS := test/run-pass/many.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
+ifdef CFG_WINDOWSY
+  TEST_XFAILS += test/run-pass/native.rs \
+                 test/run-pass/native.rc
+endif
+
 TEST_RUN_PASS_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rc))
 TEST_RUN_PASS_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rs))
 TEST_RUN_PASS_EXES := $(TEST_RUN_PASS_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
