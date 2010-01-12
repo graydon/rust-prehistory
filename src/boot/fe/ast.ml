@@ -1,4 +1,3 @@
-
 (*
  * There are two kinds of rust files:
  *
@@ -375,6 +374,7 @@ and fn =
 
 and native_fn =
     {
+      native_fn_abi: string;
       native_fn_input_slots: header_slots;
       native_fn_input_constrs: constrs;
       native_fn_output_slot: slot identified;

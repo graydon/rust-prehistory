@@ -1,4 +1,4 @@
 native fn str_buf(str s) -> int;
-native fn puts(int s) -> ();
+native cdecl fn puts(int s) -> ();
 
 mod user = "native.rs";

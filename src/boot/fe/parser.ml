@@ -1817,8 +1817,14 @@ and parse_ty_params ps =
         bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) parse_ty_param ps
     | _ -> arr []
 
+and parse_abi ps =
+  match peek ps with
+      IDENT id -> (bump ps; id)
+    | _ -> ""
+
 and parse_native_mod_item ps =
   let apos = lexpos ps in
+  let abi = ctxt "native fn: abi" parse_abi ps in
   let (ident, item) =
     match peek ps with
         FN None ->
@@ -1829,6 +1835,7 @@ and parse_native_mod_item ps =
               expect ps SEMI;
               let nfn =
                 {
+                  Ast.native_fn_abi = abi;
                   Ast.native_fn_input_slots = inputs;
                   Ast.native_fn_input_constrs = constrs;
                   Ast.native_fn_output_slot = output;
