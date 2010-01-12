@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <ffi/ffi.h>
+
 #include "rust.h"
 #include "rand.h"
 #include "uthash.h"
@@ -1466,21 +1468,67 @@ upcall_free(rust_rt *rt, void* ptr)
     rt->free(ptr);
 }
 
-typedef uintptr_t (CDECL *native_0)();
-typedef uintptr_t (CDECL *native_1)(uintptr_t);
-typedef uintptr_t (CDECL *native_2)(uintptr_t, uintptr_t);
-typedef uintptr_t (CDECL *native_3)(uintptr_t, uintptr_t, uintptr_t);
-typedef uintptr_t (CDECL *native_4)(uintptr_t, uintptr_t, uintptr_t,
-                                    uintptr_t);
+class rust_native {
+    rust_rt *rt;
+    uintptr_t fn;
+    abi_t abi;
+    size_t nargs;
+    ffi_type **atypes;
+    void **avalues;
+    ffi_cif cif;
+public:
+    rust_native(rust_rt *rt, const char *sym, abi_t abi, size_t nargs);
+    ~rust_native();
 
-typedef uintptr_t (CDECL *native_proc_0)(rust_proc *);
-typedef uintptr_t (CDECL *native_proc_1)(rust_proc *, uintptr_t);
-typedef uintptr_t (CDECL *native_proc_2)(rust_proc *, uintptr_t,
-                                         uintptr_t);
-typedef uintptr_t (CDECL *native_proc_3)(rust_proc *, uintptr_t,
-                                         uintptr_t, uintptr_t);
-typedef uintptr_t (CDECL *native_proc_4)(rust_proc *, uintptr_t,
-                                         uintptr_t, uintptr_t, uintptr_t);
+    uintptr_t call(rust_proc *proc, uintptr_t *argv);
+};
+
+rust_native::rust_native(rust_rt *rt, const char *sym, abi_t abi, size_t nargs) :
+    rt(rt), abi(abi), nargs(nargs)
+{
+    uintptr_t fn = rt->srv->lookup(sym);
+    I(rt, fn);
+    rt->log(LOG_UPCALL|LOG_MEM,
+            "native '%s' resolved to 0x%" PRIxPTR,
+            sym, fn);
+
+    // The special abi 'rust' passes rust_proc * as the first argument.
+    if (abi == abi_code_rust)
+        ++nargs;
+
+    atypes = (ffi_type **) rt->malloc(sizeof(ffi_type *) * nargs);
+    I(rt, atypes);
+
+    // It seems we have to keep the argument types array around for the lifetime of cif.
+    for (uintptr_t n = 0; n < nargs; ++n)
+        atypes[n] = &ffi_type_pointer;
+
+    ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, nargs, &ffi_type_pointer, atypes);
+    I(rt, status == FFI_OK);
+
+    // Allocate an array to hold the pointers to the arguments. This is filled at each call.
+    avalues = (void **) rt->malloc(sizeof(void *) * nargs);
+    I(rt, avalues);
+}
+
+rust_native::~rust_native()
+{
+    rt->free(atypes);
+    rt->free(avalues);
+}
+
+uintptr_t
+rust_native::call(rust_proc *proc, uintptr_t *argv)
+{
+    size_t n = 0;
+    if (abi == abi_code_rust)
+        avalues[n++] = &proc;
+    while (n < nargs)
+        avalues[n++] = argv++;
+    ffi_arg retval;
+    ffi_call(&cif, FFI_FN(fn), &retval, avalues);
+    return uintptr_t(retval);
+}
 
 static void
 upcall_native(rust_proc *proc, abi_t abi,
@@ -1492,51 +1540,9 @@ upcall_native(rust_proc *proc, abi_t abi,
             "upcall native('%u', '%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
             abi, sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
 
-    uintptr_t retval;
-    /* FIXME: cache lookups. */
-    uintptr_t fn = rt->srv->lookup(sym);
-    rt->log(LOG_UPCALL|LOG_MEM,
-            "native '%s' resolved to 0x%" PRIxPTR,
-            sym, fn);
-
-    I(rt, fn);
-    /* FIXME: nargs becomes argstr, incorporate libffi, etc. */
-    bool takes_proc = (abi == abi_code_rust);
-    switch (nargs) {
-    case 0:
-        if (takes_proc)
-            retval = ((native_proc_0)fn)(proc);
-        else
-            retval = ((native_0)fn)();
-        break;
-    case 1:
-        if (takes_proc)
-            retval = ((native_proc_1)fn)(proc, argv[0]);
-        else
-            retval = ((native_1)fn)(argv[0]);
-        break;
-    case 2:
-        if (takes_proc)
-            retval = ((native_proc_2)fn)(proc, argv[0], argv[1]);
-        else
-            retval = ((native_2)fn)(argv[0], argv[1]);
-        break;
-    case 3:
-        if (takes_proc)
-            retval = ((native_proc_3)fn)(proc, argv[0], argv[1], argv[2]);
-        else
-            retval = ((native_3)fn)(argv[0], argv[1], argv[2]);
-        break;
-    case 4:
-        if (takes_proc)
-            retval = ((native_proc_4)fn)(proc, argv[0], argv[1], argv[2], argv[3]);
-        else
-            retval = ((native_4)fn)(argv[0], argv[1], argv[2], argv[3]);
-        break;
-    default:
-        I(rt, 0);
-        break;
-    }
+    /* FIXME: Instead of stack-allocating a new native object every time, cache these. */
+    rust_native native(rt, sym, abi, nargs);
+    uintptr_t retval = native.call(proc, argv);
     if (retptr)
         *retptr = retval;
 }

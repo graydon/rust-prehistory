@@ -14,7 +14,7 @@ CFG_VALGRIND :=
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
   CFG_GCC_COMPILE_FLAGS += -fPIC
-  CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl
+  CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl -lffi
   ifeq ($(CFG_CPUTYPE), x86_64)
     CFG_GCC_COMPILE_FLAGS += -m32
     CFG_GCC_LINK_FLAGS += -m32
@@ -30,7 +30,7 @@ endif
 ifeq ($(CFG_OSTYPE), Darwin)
   CFG_RUNTIME := librustrt.dylib
   CFG_UNIXY := 1
-  CFG_GCC_LINK_FLAGS += -dynamiclib
+  CFG_GCC_LINK_FLAGS += -dynamiclib -lffi
   # Darwin has a very blurry notion of "64 bit", and claims it's running
   # "on an i386" when the whole userspace is 64-bit and the compiler
   # emits 64-bit binaries by default. So we just force -m32 here. Smarter
