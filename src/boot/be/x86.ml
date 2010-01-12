@@ -423,6 +423,45 @@ let emit_upcall
 ;;
 
 
+let unwind_glue
+    (e:Il.emitter)
+    (proc_to_c_fixup:fixup)
+    : unit =
+
+  let fp_n = word_n (Il.Hreg ebp) in
+  let edx_n = word_n (Il.Hreg edx) in
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let push x = emit (Il.Push x) in
+  let pop x = emit (Il.Pop x) in
+
+  let repeat_jmp_pc = e.Il.emit_pc in
+    mov (rc edx) (c (fp_n (-1)));                           (* edx <- frame glue functions. *)
+    mov (rc ecx) (c (edx_n Abi.frame_glue_fns_field_drop)); (* edx <- drop glue             *)
+    emit (Il.cmp (ro ecx) (immi 0L));
+    let skip_jmp_pc = e.Il.emit_pc in
+      emit (Il.jmp Il.JNE Il.CodeNone);                     (* if glue-fn is nonzero        *)
+      push (c proc_ptr);                                    (* form usual call to glue      *)
+      push (immi 0L);                                       (* outptr                       *)
+      emit (Il.call (rc eax)
+              (Il.CodeAddr (Il.Based ((h ecx), None))));    (* call *edx, trashing eax.     *)
+      pop (rc eax);
+      pop (rc eax);
+
+      Il.patch_jump e skip_jmp_pc e.Il.emit_pc;
+      mov (rc edx) (c (fp_n 3));                            (* load next fp (callee-saves[3]) *)
+      emit (Il.cmp (ro edx) (immi 0L));
+      let done_jmp_pc = e.Il.emit_pc in
+        emit (Il.jmp Il.JE Il.CodeNone);                    (* if nonzero               *)
+        mov (rc ebp) (ro edx);                              (* move to next frame       *)
+        emit (Il.jmp Il.JMP (Il.CodeLabel repeat_jmp_pc));  (* loop                     *)
+
+        (* exit path. *)
+        Il.patch_jump e done_jmp_pc e.Il.emit_pc;
+        emit_upcall e Abi.UPCALL_del_proc [| (c proc_ptr) |] proc_to_c_fixup;
+;;
+
+
 let fn_prologue
     (e:Il.emitter)
     (argsz:int64)

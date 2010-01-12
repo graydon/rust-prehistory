@@ -87,6 +87,10 @@ let proc_field_upcall_args = proc_field_upcall_code + 1;;
 
 let max_upcall_args = 8;;
 
+let frame_glue_fns_field_mark = 0;;
+let frame_glue_fns_field_drop = 1;;
+let frame_glue_fns_field_reloc = 2;;
+
 let exterior_rc_slot_field_refcnt = 0;;
 let exterior_rc_slot_field_body = 1;;
 

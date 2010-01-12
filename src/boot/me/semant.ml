@@ -30,6 +30,7 @@ type glue =
   | GLUE_hash of Ast.ty
   | GLUE_write of Ast.ty
   | GLUE_read of Ast.ty
+  | GLUE_unwind
   | GLUE_mark_frame of node_id
   | GLUE_drop_frame of node_id
   | GLUE_reloc_frame of node_id
