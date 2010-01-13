@@ -111,6 +111,8 @@ type ctxt =
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
 
+      ctxt_import_fixups: (string,fixup) Hashtbl.t;
+
       ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
       ctxt_main_exit_proc_glue_fixup: fixup;
@@ -162,6 +164,9 @@ let new_ctxt sess abi crate =
     ctxt_all_item_code = Hashtbl.create 0;
     ctxt_glue_code = Hashtbl.create 0;
     ctxt_data = Hashtbl.create 0;
+
+    ctxt_import_fixups = Hashtbl.create 0;
+
     ctxt_main_fn_fixup = new_fixup "main fn fixup";
     ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main;
     ctxt_main_exit_proc_glue_fixup = new_fixup "main exit_proc glue"
@@ -246,6 +251,17 @@ let get_spill (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_spill_fixups id
   then Hashtbl.find cx.ctxt_spill_fixups id
   else bugi cx id "Missing spill fixup"
+;;
+
+let import (cx:ctxt) (lib:import_lib) (name:string) : fixup =
+  if Hashtbl.mem cx.ctxt_import_fixups name
+  then Hashtbl.find cx.ctxt_import_fixups name
+  else
+    let fixup = new_fixup name ~lib:(Some lib) in
+      begin
+        Hashtbl.add cx.ctxt_import_fixups name fixup;
+        fixup
+      end
 ;;
 
 let slot_ty (s:Ast.slot) : Ast.ty =

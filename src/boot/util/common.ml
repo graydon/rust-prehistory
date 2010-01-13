@@ -88,8 +88,14 @@ let ty_mach_signed (mach:ty_mach) : bool =
     | _ -> false
 ;;
 
+type import_lib =
+    LIB_rustrt
+  | LIB_c
+;;
+
 type fixup =
     { fixup_name: string;
+      fixup_lib: import_lib option;
       mutable fixup_file_pos: int option;
       mutable fixup_file_sz: int option;
       mutable fixup_mem_pos: int64 option;
@@ -97,9 +103,10 @@ type fixup =
 ;;
 
 
-let new_fixup (s:string)
+let new_fixup ?(lib = None) (s:string)
     : fixup =
   { fixup_name = s;
+    fixup_lib = lib;
     fixup_file_pos = None;
     fixup_file_sz = None;
     fixup_mem_pos = None;

@@ -96,14 +96,15 @@ OCAMLOPT_FLAGS := $(ML_INCS)
 
 UTIL_BOT_MLS := $(addprefix boot/util/, common.ml bitv.ml)
 DRIVER_BOT_MLS := $(addprefix boot/driver/, session.ml)
-BE_MLS := $(addprefix boot/be/, asm.ml il.ml abi.ml x86.ml ra.ml pe.ml elf.ml \
+BE_MLS := $(addprefix boot/be/, asm.ml x86.ml ra.ml pe.ml elf.ml \
           macho.ml)
+IL_MLS := $(addprefix boot/be/, il.ml abi.ml)
 ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml auto.ml \
           type.ml typestate.ml mode.ml mutable.ml gc.ml layout.ml trans.ml dwarf.ml)
 FE_MLS := $(addprefix boot/fe/, ast.ml parser.ml lexer.ml)
 DRIVER_TOP_MLS := $(addprefix boot/driver/, main.ml)
 
-BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(FE_MLS) $(BE_MLS) $(ME_MLS) \
+BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(FE_MLS) $(IL_MLS) $(ME_MLS) $(BE_MLS) \
             $(DRIVER_TOP_MLS)
 BOOT_CMOS := $(BOOT_MLS:.ml=.cmo)
 BOOT_CMXS := $(BOOT_MLS:.ml=.cmx)

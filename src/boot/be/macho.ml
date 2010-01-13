@@ -506,8 +506,8 @@ let emit_file
   let nxargv_fixup = new_fixup "_NXArgv" in
   let progname_fixup = new_fixup "___progname" in
   let environ_fixup = new_fixup "_environ" in
-  let exit_fixup = new_fixup "_exit" in
-  let rust_start_fixup = new_fixup "_rust_start" in
+  let exit_fixup = (Semant.import sem LIB_c "_exit") in
+  let rust_start_fixup = (Semant.import sem LIB_rustrt "_rust_start") in
 
   let start_fixup = new_fixup "start function entry" in
 
@@ -586,24 +586,35 @@ let emit_file
          |], strtab_entry_fixup)
   in
 
-  let (symbols:(string * (frag * fixup)) array) =
-    [|
-      ("_rust_start", indirect_symbol_nlist_entry 1);
-      ("_exit", indirect_symbol_nlist_entry 2);
-      ("_NXArgc", sect_symbol_nlist_entry 2 nxargc_fixup);
-      ("_NXArgv", sect_symbol_nlist_entry 2 nxargv_fixup);
-      ("_environ", sect_symbol_nlist_entry 2 environ_fixup);
-      ("___progname", sect_symbol_nlist_entry 2 progname_fixup);
-      ("__mh_execute_header", absolute_symbol_nlist_entry mh_execute_header_fixup);
-    |]
+  let indirect_symbols =
+    Array.of_list(htab_vals sem.Semant.ctxt_import_fixups)
   in
 
-  let indirect_symbols =
-    [|
-      rust_start_fixup;
-      exit_fixup
-    |]
+  let dylib_index (lib:import_lib) : int =
+    match lib with
+        LIB_rustrt -> 1
+      | LIB_c -> 2
   in
+
+  let (symbols:(string * (frag * fixup)) array) =
+    Array.map (fun fixup ->
+                 (fixup.fixup_name, indirect_symbol_nlist_entry (match fixup.fixup_lib with
+                                                                     Some lib -> dylib_index lib
+                                                                   | None -> failwith "invalid indirect symbol")))
+              indirect_symbols
+  in
+
+  let (symbols:(string * (frag * fixup)) array) =
+    Array.append symbols
+                 [|
+                   ("_NXArgc", sect_symbol_nlist_entry 2 nxargc_fixup);
+                   ("_NXArgv", sect_symbol_nlist_entry 2 nxargv_fixup);
+                   ("_environ", sect_symbol_nlist_entry 2 environ_fixup);
+                   ("___progname", sect_symbol_nlist_entry 2 progname_fixup);
+                   ("__mh_execute_header", absolute_symbol_nlist_entry mh_execute_header_fixup);
+                 |]
+  in
+
   let indirect_symtab_fixup = new_fixup "indirect symbol table" in
   let indirect_symtab =
     DEF (indirect_symtab_fixup,
