@@ -308,8 +308,7 @@ and expr =
 and lit =
   | LIT_nil
   | LIT_bool of bool
-  (* FIXME: should be (ty_mach * Big_int.big_int * string) *)
-  | LIT_mach of (ty_mach * string)
+  | LIT_mach of (ty_mach * Big_int.big_int * string)
   | LIT_int of (Big_int.big_int * string)
   | LIT_char of char
   | LIT_custom of lit_custom
@@ -766,7 +765,7 @@ and fmt_lit (ff:Format.formatter) (l:lit) : unit =
   | LIT_nil -> fmt ff "()"
   | LIT_bool true -> fmt ff "true"
   | LIT_bool false -> fmt ff "false"
-  | LIT_mach (m, s) ->
+  | LIT_mach (m, _, s) ->
       begin
         fmt_mach ff m;
         fmt ff "(%s)" s

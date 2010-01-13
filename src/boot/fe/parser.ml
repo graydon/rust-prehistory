@@ -965,8 +965,24 @@ and parse_bottom_pexp ps : pexp =
                           bump ps;
                           expect ps RPAREN;
                           let bpos = lexpos ps in
-                            span ps apos bpos (PEXP_lit (Ast.LIT_mach (m,s)))
+                            (* FIXME: parse the integer here, not in trans *)
+                            span ps apos bpos (PEXP_lit (Ast.LIT_mach (m,Big_int.big_int_of_string s,s)))
                         end
+                    | MINUS ->
+                        begin
+                          bump ps;
+                          match peek ps with
+                              LIT_INT (n, s) ->
+                                begin
+                                  bump ps;
+                                  expect ps RPAREN;
+                                  let bpos = lexpos ps in
+                                    (* FIXME: parse the integer here, not in trans *)
+                                    span ps apos bpos (PEXP_lit (Ast.LIT_mach (m,Big_int.big_int_of_string ("-"^s), ("-"^s))))
+                                end
+                            | _ -> raise (unexpected ps)
+                        end
+                      (*Ast.EXPR_unary (Ast.UNOP_neg, Ast.ATOM_literal { Ast.node = LIT_INT*)
                     | _ -> raise (unexpected ps)
                 end
             | _ -> raise (unexpected ps)

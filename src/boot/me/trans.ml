@@ -309,41 +309,30 @@ let trans_visitor
     else ()
   in
 
-  let trans_mach (mach:ty_mach) (src:string) : Il.operand =
+  (* FIXME: should be either an int64 or a float of some sort *)
+  let trans_mach (mach:ty_mach) (i:int64) : Il.operand =
     match mach with
         TY_u8 ->
-          let i = Int64.of_string src
-          in
-            (check_integral_literal_range 0L 0xffL i; imm_of_ty i Il.Bits8)
+          (check_integral_literal_range 0L 0xffL i; imm_of_ty i Il.Bits8)
 
       | TY_u16 ->
-          let i = Int64.of_string src
-          in
-            (check_integral_literal_range 0L 0xffffL i; imm_of_ty i Il.Bits16)
+          (check_integral_literal_range 0L 0xffffL i; imm_of_ty i Il.Bits16)
 
       | TY_u32 ->
-          let i = Int64.of_string src
-          in
-            (check_integral_literal_range 0L 0xffffffffL i; imm_of_ty i Il.Bits32)
+          (check_integral_literal_range 0L 0xffffffffL i; imm_of_ty i Il.Bits32)
 
       (*
         | TY_u64 ->
       *)
 
       | TY_s8 ->
-          let i = Int64.of_string src
-          in
-            (check_integral_literal_range (-128L) 127L i; imm_of_ty i Il.Bits8)
+          (check_integral_literal_range (-128L) 127L i; imm_of_ty i Il.Bits8)
 
       | TY_s16 ->
-          let i = Int64.of_string src
-          in
-            (check_integral_literal_range (-32768L) 32767L i; imm_of_ty i Il.Bits16)
+          (check_integral_literal_range (-32768L) 32767L i; imm_of_ty i Il.Bits16)
 
       | TY_s32 ->
-          let i = Int64.of_string src
-          in
-            (check_integral_literal_range (-2147483648L) 2147483647L i; imm_of_ty i Il.Bits32)
+          (check_integral_literal_range (-2147483648L) 2147483647L i; imm_of_ty i Il.Bits32)
 
       (*
         | TY_s64 ->
@@ -562,8 +551,8 @@ let trans_visitor
               | Ast.LIT_char c -> imm (Int64.of_int (Char.code c))
               | Ast.LIT_int (bi, s) ->
                   imm (Int64.of_int (Big_int.int_of_big_int bi))
-              | Ast.LIT_mach (m, s) ->
-                  trans_mach m s
+              | Ast.LIT_mach (m, n, s) ->
+                  trans_mach m (Big_int.int64_of_big_int n)
 
               | _ -> marker
           end

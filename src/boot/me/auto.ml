@@ -63,7 +63,7 @@ let auto_inference_visitor
     match lit with
       | Ast.LIT_nil -> unify_ty tyo Ast.TY_nil
       | Ast.LIT_bool _ -> unify_ty tyo Ast.TY_bool
-      | Ast.LIT_mach (m, _) -> unify_ty tyo (Ast.TY_mach m)
+      | Ast.LIT_mach (m, _, _) -> unify_ty tyo (Ast.TY_mach m)
       | Ast.LIT_int _ -> unify_ty tyo Ast.TY_int
       | Ast.LIT_char _ -> unify_ty tyo Ast.TY_char
       | Ast.LIT_custom _ -> tyo
