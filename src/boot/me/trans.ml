@@ -549,10 +549,8 @@ let trans_visitor
               | Ast.LIT_bool false -> imm_false
               | Ast.LIT_bool true -> imm_true
               | Ast.LIT_char c -> imm (Int64.of_int (Char.code c))
-              | Ast.LIT_int (bi, s) ->
-                  imm (Int64.of_int (Big_int.int_of_big_int bi))
-              | Ast.LIT_mach (m, n, s) ->
-                  trans_mach m (Big_int.int64_of_big_int n)
+              | Ast.LIT_int (i, s) -> imm i
+              | Ast.LIT_mach (m, n, s) -> trans_mach m n
 
               | _ -> marker
           end

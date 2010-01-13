@@ -89,7 +89,7 @@ type token =
   | SPAWN
 
   (* Literals *)
-  | LIT_INT       of (Big_int.big_int * string)
+  | LIT_INT       of (int64 * string)
   | LIT_FLO       of string
   | LIT_STR       of string
   | LIT_CHAR      of char
@@ -803,7 +803,7 @@ and parse_identified_slot (param_slot:bool) (ps:pstate) : Ast.slot identified =
   let bpos = lexpos ps in
     span ps apos bpos slot
 
-and parse_constrained_ty ps =
+and parse_constrained_ty (ps:pstate) : Ast.ty =
   let base = ctxt "ty: base" parse_atomic_ty ps in
     match peek ps with
         COLON ->
@@ -817,7 +817,7 @@ and parse_ty (ps:pstate) : Ast.ty =
   parse_constrained_ty ps
 
 
-and parse_rec_input ltab ps =
+and parse_rec_input (ltab:((Ast.ident * pexp) list) ref) (ps:pstate) : unit =
   let lab = (ctxt "rec input: label" parse_ident ps) in
     match peek ps with
         EQ ->
@@ -827,7 +827,7 @@ and parse_rec_input ltab ps =
       | _ -> raise (unexpected ps)
 
 
-and parse_rec_inputs ps =
+and parse_rec_inputs (ps:pstate) : ((Ast.ident * pexp) array) =
   let ltab = ref [] in
   let _ = bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
     (ctxt "rec inputs" (parse_rec_input ltab)) ps
@@ -835,14 +835,21 @@ and parse_rec_inputs ps =
     arl (!ltab)
 
 
-and parse_expr_atom_list bra ket ps =
+and parse_expr_atom_list
+    (bra:token)
+    (ket:token)
+    (ps:pstate)
+    : (Ast.stmt array * Ast.atom array) =
   arj1st (bracketed_zero_or_more bra ket (Some COMMA)
             (ctxt "expr-atom list" parse_expr_atom) ps)
 
-and slot_auto = { Ast.slot_mode = Ast.MODE_interior Ast.MUTABLE;
-                  Ast.slot_ty = None }
+and (slot_auto:Ast.slot) =
+  { Ast.slot_mode = Ast.MODE_interior Ast.MUTABLE;
+    Ast.slot_ty = None }
 
-and parse_auto_slot_and_init ps =
+and parse_auto_slot_and_init
+    (ps:pstate)
+    : (Ast.stmt array * Ast.slot * Ast.ident) =
   let apos = lexpos ps in
   let ident = parse_ident ps in
   let bpos = lexpos ps in
@@ -851,21 +858,23 @@ and parse_auto_slot_and_init ps =
     (stmts, slot_auto, ident)
 
 
-and build_tmp ps slot apos bpos =
+and build_tmp
+    (ps:pstate)
+    (slot:Ast.slot)
+    (apos:pos)
+    (bpos:pos)
+    : (temp_id * Ast.lval * Ast.stmt) =
   let nonce = !(ps.pstate_temp_id) in
     ps.pstate_temp_id := Temp ((int_of_temp nonce)+1);
-    if ps.pstate_sess.Session.sess_log_parse
-    then
-      Printf.fprintf ps.pstate_sess.Session.sess_log_out "building temporary %d\n%!" (int_of_temp nonce)
-    else
-      ();
+    iflog ps
+      (fun _ -> log ps "building temporary %d" (int_of_temp nonce));
     let decl = Ast.DECL_slot (Ast.KEY_temp nonce, (span ps apos bpos slot)) in
     let declstmt = span ps apos bpos (Ast.STMT_decl decl) in
     let tmp = Ast.LVAL_base (span ps apos bpos (Ast.BASE_temp nonce)) in
       (nonce, tmp, declstmt)
 
 
-and parse_lit ps =
+and parse_lit (ps:pstate) : Ast.lit =
   match peek ps with
       LIT_INT (n,s) -> (bump ps; Ast.LIT_int (n,s))
     | LIT_CHAR c -> (bump ps; Ast.LIT_char c)
@@ -874,7 +883,7 @@ and parse_lit ps =
     | _ -> raise (unexpected ps)
 
 
-and parse_bottom_pexp ps : pexp =
+and parse_bottom_pexp (ps:pstate) : pexp =
   let apos = lexpos ps in
   match peek ps with
       LPAREN ->
@@ -979,40 +988,22 @@ and parse_bottom_pexp ps : pexp =
         end
 
     | MACH m ->
-        begin
-          bump ps;
+        bump ps;
+        let inner ps =
           match peek ps with
-              LPAREN ->
-                begin
-                  bump ps;
-                  match peek ps with
-                      LIT_INT (n,s) ->
-                        begin
-                          bump ps;
-                          expect ps RPAREN;
-                          let bpos = lexpos ps in
-                            (* FIXME: parse the integer here, not in trans *)
-                            span ps apos bpos (PEXP_lit (Ast.LIT_mach (m,Big_int.big_int_of_string s,s)))
-                        end
-                    | MINUS ->
-                        begin
-                          bump ps;
-                          match peek ps with
-                              LIT_INT (n, s) ->
-                                begin
-                                  bump ps;
-                                  expect ps RPAREN;
-                                  let bpos = lexpos ps in
-                                    (* FIXME: parse the integer here, not in trans *)
-                                    span ps apos bpos (PEXP_lit (Ast.LIT_mach (m,Big_int.big_int_of_string ("-"^s), ("-"^s))))
-                                end
-                            | _ -> raise (unexpected ps)
-                        end
-                      (*Ast.EXPR_unary (Ast.UNOP_neg, Ast.ATOM_literal { Ast.node = LIT_INT*)
-                    | _ -> raise (unexpected ps)
-                end
-            | _ -> raise (unexpected ps)
-        end
+              LIT_INT (n,s) -> bump ps; (n,s)
+              | MINUS ->
+                  begin
+                    bump ps;
+                    match peek ps with
+                        LIT_INT (n,s) -> bump ps; (Int64.neg n, "-" ^ s)
+                      | _ -> raise (unexpected ps)
+                  end
+              | _ -> raise (unexpected ps)
+        in
+        let (num, str) = bracketed LPAREN RPAREN inner ps in
+        let bpos = lexpos ps in
+          span ps apos bpos (PEXP_lit (Ast.LIT_mach (m, num, str)))
 
     | _ ->
         let lit = parse_lit ps in
@@ -1020,7 +1011,7 @@ and parse_bottom_pexp ps : pexp =
           span ps apos bpos (PEXP_lit lit)
 
 
-and parse_ext_pexp ps pexp =
+and parse_ext_pexp (ps:pstate) (pexp:pexp) : pexp =
   let apos = lexpos ps in
     match peek ps with
         NIL | LPAREN ->
@@ -1051,7 +1042,7 @@ and parse_ext_pexp ps pexp =
       | _ -> pexp
 
 
-and parse_negation_pexp ps =
+and parse_negation_pexp (ps:pstate) : pexp =
     let apos = lexpos ps in
       match peek ps with
           NOT ->

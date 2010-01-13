@@ -319,8 +319,8 @@ and expr =
 and lit =
   | LIT_nil
   | LIT_bool of bool
-  | LIT_mach of (ty_mach * Big_int.big_int * string)
-  | LIT_int of (Big_int.big_int * string)
+  | LIT_mach of (ty_mach * int64 * string)
+  | LIT_int of (int64 * string)
   | LIT_char of char
   | LIT_custom of lit_custom
 

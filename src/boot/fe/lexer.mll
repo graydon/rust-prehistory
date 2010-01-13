@@ -172,9 +172,9 @@ rule token = parse
                                      Not_found -> IDENT (i)
                                            }
 
-| bin as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }
-| hex as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }
-| dec as n                      { LIT_INT (Big_int.big_int_of_int (int_of_string n), n)    }
+| bin as n                      { LIT_INT (Int64.of_string n, n)    }
+| hex as n                      { LIT_INT (Int64.of_string n, n)    }
+| dec as n                      { LIT_INT (Int64.of_string n, n)    }
 | flo as n                      { LIT_FLO n                                                }
 | (['"'] ([^'"']|"\\\"")* ['"'])  as s    { LIT_STR  (Scanf.sscanf s "%S" (fun x -> x))    }
 | (['\''] [^'\'']         ['\'']) as c    { LIT_CHAR (Scanf.sscanf c "%C" (fun x -> x))    }
