@@ -399,7 +399,7 @@ let clone_span
 ;;
 
 
-let rec clone_lval ps lval =
+let rec clone_lval (ps:pstate) (lval:Ast.lval) : Ast.lval =
   match lval with
       Ast.LVAL_base nb ->
         let nnb = clone_span ps nb nb.node in
@@ -408,7 +408,7 @@ let rec clone_lval ps lval =
         Ast.LVAL_ext ((clone_lval ps base), ext)
 ;;
 
-let clone_atom ps atom =
+let clone_atom (ps:pstate) (atom:Ast.atom) : Ast.atom =
   match atom with
       Ast.ATOM_literal _ -> atom
     | Ast.ATOM_lval lv -> Ast.ATOM_lval (clone_lval ps lv)
@@ -422,34 +422,30 @@ let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
 ;;
 
 
-let peek ps =
-  begin
-    iflog ps (fun _ -> log ps "peeking at: %s     // %s"
-                (string_of_tok ps.pstate_peek)
-                (match ps.pstate_ctxt with
-                     (s, _) :: _ -> s
-                   | _ -> "<empty>"));
-    ps.pstate_peek
-  end
+let peek (ps:pstate) : token =
+  iflog ps
+    begin
+      fun _ ->
+        log ps "peeking at: %s     // %s"
+          (string_of_tok ps.pstate_peek)
+          (match ps.pstate_ctxt with
+               (s, _) :: _ -> s
+             | _ -> "<empty>")
+    end;
+  ps.pstate_peek
 ;;
 
 
-let bump ps =
+let bump (ps:pstate) : unit =
   begin
-    iflog ps (fun _ -> log ps "bumping past: %s" (string_of_tok ps.pstate_peek));
+    iflog ps (fun _ -> log ps "bumping past: %s"
+                (string_of_tok ps.pstate_peek));
     ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf
   end
 ;;
 
 
-let span_bump ps x =
-  let apos = lexpos ps in
-  let _ = bump ps in
-  let bpos = lexpos ps in
-    span ps apos bpos x
-;;
-
-let expect ps t =
+let expect (ps:pstate) (t:token) : unit =
   let p = peek ps in
     if p == t
     then bump ps
@@ -460,43 +456,30 @@ let expect ps t =
 ;;
 
 
-let err str ps =
+let err (str:string) (ps:pstate) =
   (Parse_err (ps, (str)))
 ;;
 
 
-let unexpected ps =
+let unexpected (ps:pstate) =
   err ("Unexpected token '" ^ (string_of_tok (peek ps)) ^ "'") ps
 ;;
 
 (* Simple helpers *)
 
-
-let arr ls = Array.of_list ls
-;;
-
-
-let arl ls = Array.of_list (List.rev ls)
-;;
-
-let arj ar = Array.concat (Array.to_list ar)
-
+let arr (ls:'a list) : 'a array = Array.of_list ls ;;
+let arl (ls:'a list) : 'a array = Array.of_list (List.rev ls) ;;
+let arj (ar:('a array array)) = Array.concat (Array.to_list ar) ;;
 let arj1st (pairs:(('a array) * 'b) array) : (('a array) * 'b array) =
   let (az, bz) = List.split (Array.to_list pairs) in
     (Array.concat az, Array.of_list bz)
 
 (* Parser combinators *)
-let path sep prule ps =
-  let accum = ref [] in
-    while peek ps == sep
-    do
-      expect ps sep;
-      accum := (ctxt "path" prule ps) :: !accum
-    done;
-    arl !accum
-;;
-
-let one_or_more sep prule ps =
+let one_or_more
+    (sep:token)
+    (prule:pstate -> 'a)
+    (ps:pstate)
+    : 'a array =
   let accum = ref [prule ps] in
     while peek ps == sep
     do
@@ -506,7 +489,14 @@ let one_or_more sep prule ps =
     arl !accum
 ;;
 
-let bracketed_seq mandatory bra ket sepOpt prule ps =
+let bracketed_seq
+    (mandatory:int)
+    (bra:token)
+    (ket:token)
+    (sepOpt:token option)
+    (prule:pstate -> 'a)
+    (ps:pstate)
+    : 'a array =
   expect ps bra;
   let accum = ref [] in
   let dosep _ =
@@ -531,21 +521,39 @@ let bracketed_seq mandatory bra ket sepOpt prule ps =
 ;;
 
 
-let bracketed_zero_or_more bra ket sepOpt prule ps =
+let bracketed_zero_or_more
+    (bra:token)
+    (ket:token)
+    (sepOpt:token option)
+    (prule:pstate -> 'a)
+    (ps:pstate)
+    : 'a array =
   bracketed_seq 0 bra ket sepOpt (ctxt "bracketed_seq" prule) ps
 ;;
 
 
-let bracketed_one_or_more bra ket sepOpt prule ps =
+let bracketed_one_or_more
+    (bra:token)
+    (ket:token)
+    (sepOpt:token option)
+    (prule:pstate -> 'a)
+    (ps:pstate)
+    : 'a array =
   bracketed_seq 1 bra ket sepOpt (ctxt "bracketed_seq" prule) ps
 ;;
 
-let bracketed_two_or_more bra ket sepOpt prule ps =
+let bracketed_two_or_more
+    (bra:token)
+    (ket:token)
+    (sepOpt:token option)
+    (prule:pstate -> 'a)
+    (ps:pstate)
+    : 'a array =
   bracketed_seq 2 bra ket sepOpt (ctxt "bracketed_seq" prule) ps
 ;;
 
 
-let bracketed bra ket prule ps =
+let bracketed (bra:token) (ket:token) (prule:pstate -> 'a) (ps:pstate) : 'a =
   expect ps bra;
   let res = ctxt "bracketed" prule ps in
     expect ps ket;
@@ -553,7 +561,7 @@ let bracketed bra ket prule ps =
 
 (* Small parse rules *)
 
-let parse_ident ps =
+let parse_ident (ps:pstate) : Ast.ident =
   match peek ps with
       IDENT id -> (bump ps; id)
     (* Decay IDX tokens to identifiers if they occur ousdide name paths. *)
@@ -561,7 +569,7 @@ let parse_ident ps =
     | _ -> raise (unexpected ps)
 ;;
 
-let rec parse_name_component ps =
+let rec parse_name_component (ps:pstate) : Ast.name_component =
   match peek ps with
       IDENT id ->
         (bump ps;
@@ -579,7 +587,7 @@ let rec parse_name_component ps =
         Ast.COMP_idx i
     | _ -> raise (unexpected ps)
 
-and parse_name_base ps =
+and parse_name_base (ps:pstate) : Ast.name_base =
   match peek ps with
       IDENT i ->
         (bump ps;
@@ -593,7 +601,7 @@ and parse_name_base ps =
            | _ -> Ast.BASE_ident i)
     | _ -> raise (unexpected ps)
 
-and parse_name ps =
+and parse_name (ps:pstate) : Ast.name =
   let base = Ast.NAME_base (parse_name_base ps) in
     match peek ps with
         DOT ->
@@ -602,12 +610,12 @@ and parse_name ps =
             Array.fold_left (fun x y -> Ast.NAME_ext (x, y)) base comps
       | _ -> base
 
-and parse_carg_base ps =
+and parse_carg_base (ps:pstate) : Ast.carg_base =
   match peek ps with
       STAR -> bump ps; Ast.BASE_formal
     | _ -> Ast.BASE_named (parse_name_base ps)
 
-and parse_carg ps =
+and parse_carg (ps:pstate) : Ast.carg =
   match peek ps with
       IDENT _ ->
         begin
@@ -629,7 +637,7 @@ and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) =
   let pexp = parse_pexp ps in
     desugar_lval ps pexp
 
-and parse_constraint ps =
+and parse_constraint (ps:pstate) : Ast.constr =
   match peek ps with
       (* NB: A constraint *looks* a lot like an EXPR_call, but is restricted *)
       (* syntactically: the constraint name needs to be a name (not an lval) *)
@@ -647,10 +655,10 @@ and parse_constraint ps =
     | _ -> raise (unexpected ps)
 
 
-and parse_constrs ps =
+and parse_constrs (ps:pstate) : Ast.constrs =
   ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps
 
-and parse_atomic_ty ps =
+and parse_atomic_ty (ps:pstate) : Ast.ty =
   match peek ps with
 
       BOOL ->
@@ -741,12 +749,12 @@ and parse_atomic_ty ps =
 
     | _ -> raise (unexpected ps)
 
-and parse_mutability ps =
+and parse_mutability (ps:pstate) : Ast.mutability =
   if flag ps MUTABLE
   then Ast.MUTABLE
   else Ast.IMMUTABLE
 
-and apply_mutability ps slot mut =
+and apply_mutability (ps:pstate) (slot:Ast.slot) (mut:Ast.mutability) : Ast.slot =
   let mode =
     match (slot.Ast.slot_mode, mut) with
         (Ast.MODE_exterior _, mut) -> Ast.MODE_exterior mut
@@ -758,7 +766,7 @@ and apply_mutability ps slot mut =
   in
     { slot with Ast.slot_mode = mode }
 
-and parse_slot param_slot ps =
+and parse_slot (param_slot:bool) (ps:pstate) : Ast.slot =
   let mut = parse_mutability ps in
   match (peek ps, param_slot) with
       (AT, _) ->
@@ -789,7 +797,7 @@ and parse_slot param_slot ps =
             Ast.slot_ty = Some ty }
 
 
-and parse_identified_slot param_slot ps =
+and parse_identified_slot (param_slot:bool) (ps:pstate) : Ast.slot identified =
   let apos = lexpos ps in
   let slot = parse_slot param_slot ps in
   let bpos = lexpos ps in
@@ -805,7 +813,7 @@ and parse_constrained_ty ps =
 
       | _ -> base
 
-and parse_ty ps =
+and parse_ty (ps:pstate) : Ast.ty =
   parse_constrained_ty ps
 
 
@@ -2076,7 +2084,7 @@ and parse_crate_mod_entry
                      | _ -> raise (unexpected ps))
               | _ ->
                   begin
-                    match peek ps with 
+                    match peek ps with
                         LBRACE -> name
                       | SEMI -> name ^ ".rs"
                       | _ -> raise (unexpected ps)
