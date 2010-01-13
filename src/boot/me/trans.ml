@@ -2193,6 +2193,10 @@ let trans_visitor
           in
             Asm.SEQ
               [|
+               (* 
+                * NB: this must match the struct-offsets given in ABI
+                * & rust runtime library.
+                *)
                 Asm.WORD (word_ty_mach, Asm.M_POS mark_frame_glue_fixup);
                 Asm.WORD (word_ty_mach, Asm.M_POS drop_frame_glue_fixup);
                 Asm.WORD (word_ty_mach, Asm.M_POS reloc_frame_glue_fixup);
@@ -2372,11 +2376,63 @@ let trans_visitor
     leave_file_for i
   in
 
+
+  let visit_crate_post _ =
+    let emit_aux_global_glue cx glue glue_name fix fn =
+      push_new_emitter ();
+      let e = emitter() in
+        fn e;
+        iflog (fun _ -> annotate_quads glue_name);
+        if e.Il.emit_next_vreg != 0
+        then bug () "%s uses nonzero vregs" glue_name;
+        pop_emitter();
+        let code =
+          { code_fixup = fix;
+            code_quads = e.Il.emit_quads;
+            code_vregs_and_spill = None }
+        in
+          htab_put cx.ctxt_glue_code glue code
+    in
+    let global_glue_fns =
+      (cx.ctxt_global_glue_fixup,
+       Asm.SEQ [|
+         (* 
+          * NB: this must match the struct-offsets given in ABI
+          * & rust runtime library.
+          *)
+         Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_c_to_proc_fixup);
+         Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_main_exit_proc_glue_fixup);
+         Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_unwind_fixup);
+       |])
+    in
+
+      (* Emit additional glue we didn't do elsewhere. *)
+      emit_aux_global_glue cx GLUE_C_to_proc
+        "c-to-proc glue"
+        cx.ctxt_c_to_proc_fixup
+        cx.ctxt_abi.Abi.abi_c_to_proc;
+
+      emit_aux_global_glue cx GLUE_proc_to_C
+        "proc-to-c glue"
+        cx.ctxt_proc_to_c_fixup
+        cx.ctxt_abi.Abi.abi_proc_to_c;
+
+      emit_aux_global_glue cx GLUE_unwind
+        "unwind glue"
+        cx.ctxt_unwind_fixup
+        (fun e -> cx.ctxt_abi.Abi.abi_unwind
+           e cx.ctxt_proc_to_c_fixup);
+
+      htab_put cx.ctxt_data
+        DATA_global_glue_fns global_glue_fns
+  in
+
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
         Walk.visit_native_mod_item_post = visit_native_mod_item_post;
+        Walk.visit_crate_post = visit_crate_post;
     }
 ;;
 
@@ -2450,48 +2506,6 @@ let fixup_assigning_visitor
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
 
-let emit_aux_global_glue cx glue fix fn =
-  let e = Il.new_emitter
-    cx.ctxt_abi.Abi.abi_prealloc_quad
-    cx.ctxt_abi.Abi.abi_is_2addr_machine
-  in
-    fn e;
-    let quads = e.Il.emit_quads in
-      log cx "emitted quads for global glue";
-      for i = 0 to arr_max quads
-      do
-        log cx "[%6d]\t%s" i (Il.string_of_quad cx.ctxt_abi.Abi.abi_str_of_hardreg quads.(i));
-      done;
-      if e.Il.emit_next_vreg != 0
-      then bug () "global glue uses nonzero vregs"
-      else
-        let code =
-          { code_fixup = fix;
-            code_quads = e.Il.emit_quads;
-            code_vregs_and_spill = None }
-        in
-          htab_put cx.ctxt_glue_code glue code
-;;
-
-
-let emit_c_to_proc_glue cx =
-  emit_aux_global_glue cx GLUE_C_to_proc
-    cx.ctxt_c_to_proc_fixup
-    cx.ctxt_abi.Abi.abi_c_to_proc;
-;;
-
-let emit_proc_to_c_glue cx =
-  emit_aux_global_glue cx GLUE_proc_to_C
-    cx.ctxt_proc_to_c_fixup
-    cx.ctxt_abi.Abi.abi_proc_to_c;
-;;
-
-let emit_unwind_glue cx =
-  emit_aux_global_glue cx GLUE_unwind
-    cx.ctxt_unwind_fixup
-    (fun e -> cx.ctxt_abi.Abi.abi_unwind
-       e cx.ctxt_proc_to_c_fixup);
-;;
 
 let process_crate
     (cx:ctxt)
@@ -2508,9 +2522,6 @@ let process_crate
   in
     log cx "translating crate with main function %s" cx.ctxt_main_name;
     run_passes cx path passes (log cx "%s") crate;
-    emit_c_to_proc_glue cx;
-    emit_proc_to_c_glue cx;
-    emit_unwind_glue cx
 ;;
 
 (*
