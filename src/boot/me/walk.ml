@@ -544,6 +544,9 @@ and walk_stmt
           walk_constrs v cs
 
       (* FIXME: finish this as needed. *)
+      | Ast.STMT_slice _ -> ()
+      | Ast.STMT_bind _ -> ()
+      | Ast.STMT_note _ -> ()
       | Ast.STMT_foreach f -> ()
       | Ast.STMT_for f -> ()
       | Ast.STMT_try t -> ()

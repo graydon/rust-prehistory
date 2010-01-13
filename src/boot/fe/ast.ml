@@ -199,14 +199,22 @@ and check_calls = (lval * (atom array)) array
  * addr. this is a 'tail call' that destroys us.
  *)
 and stmt' =
-    STMT_log of atom
-  | STMT_spawn of (lval * lval * (atom array))
+
+  (* lval-assigning stmts. *)
+    STMT_spawn of (lval * lval * (atom array))
   | STMT_init_rec of (lval * ((ident * mode * atom) array))
   | STMT_init_tup of (lval * ((mode * atom) array))
   | STMT_init_vec of (lval * slot * (atom array))
   | STMT_init_str of (lval * string)
   | STMT_init_port of lval
   | STMT_init_chan of (lval * (lval option))
+  | STMT_copy of (lval * expr)
+  | STMT_call of (lval * lval * (atom array))
+  | STMT_bind of (lval * lval * ((atom option) array))
+  | STMT_recv of (lval * lval)
+  | STMT_slice of (lval * lval * slice)
+
+  (* control-flow stmts. *)
   | STMT_while of stmt_while
   | STMT_do_while of stmt_while
   | STMT_foreach of stmt_foreach
@@ -219,18 +227,18 @@ and stmt' =
   | STMT_alt_tag of stmt_alt_tag
   | STMT_alt_type of stmt_alt_type
   | STMT_alt_port of stmt_alt_port
+
+  (* structural and misc stmts. *)
+  | STMT_send of (lval * lval)
+  | STMT_log of atom
+  | STMT_note of atom
   | STMT_prove of (constrs)
   | STMT_check of (constrs * check_calls)
   | STMT_check_expr of expr
   | STMT_check_if of (constrs * check_calls * block)
   | STMT_block of block
-  | STMT_copy of (lval * expr)
-  | STMT_call of (lval * lval * (atom array))
-  | STMT_send of (lval * lval)
-  | STMT_recv of (lval * lval)
   | STMT_decl of stmt_decl
   | STMT_use of (ty * ident * lval)
-
 
 and stmt = stmt' identified
 
@@ -276,10 +284,8 @@ and stmt_foreach =
 
 and stmt_for =
     {
-      for_init: stmt;
-      for_test: ((stmt array) * atom);
-      for_step: stmt;
-      for_body: stmt;
+      for_lval: ((stmt array) * expr);
+      for_seq: atom;
     }
 
 and stmt_if =
@@ -295,6 +301,11 @@ and stmt_try =
       try_fail: block option;
       try_fini: block option;
     }
+
+and slice =
+    { slice_start: atom option;
+      slice_len: atom option;
+      slice_step: atom option }
 
 and atom =
     ATOM_literal of (lit identified)
