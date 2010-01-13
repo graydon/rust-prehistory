@@ -1,4 +1,6 @@
 
+all: rust.pdf rust.html
+
 %.pdf: %.texi
 	texi2pdf $<
 

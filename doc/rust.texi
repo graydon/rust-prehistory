@@ -2462,10 +2462,10 @@ The result of a @code{spawn} statement is a @code{proc} value.
 
 An example of a @code{spawn} statement:
 @example
-fn helper(chan[u8] out) -> () {
+fn helper(chan[u8] out) -> () @{
     // do some work.
     out <| result;
-}
+@}
 
 let port[u8] out;
 let proc p = spawn helper(chan(out));
