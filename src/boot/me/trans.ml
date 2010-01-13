@@ -54,8 +54,23 @@ let trans_visitor
   in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
+  (* converts a signed int64 and to an unsigned two's-complement representation *)
+  let enc_twos_comp (i:int64) (bits:Il.bits) : int64 =
+    if (Int64.compare i Int64.zero) >= 0
+    then i
+    else
+      let mask =
+        match bits with
+            Il.Bits8 -> 0xFFL
+          | Il.Bits16 -> 0xFFFFL
+          | Il.Bits32 -> 0xFFFFFFFFL
+          | Il.Bits64 -> 0xFFFFFFFFFFFFFFFFL
+      in
+        Int64.add (Int64.logxor (Int64.neg i) mask) 1L
+  in
+
   let imm_of_ty (i:int64) (bits:Il.bits) : Il.operand =
-    Il.Imm (Asm.IMM i, Il.ValTy bits)
+    Il.Imm (Asm.IMM (enc_twos_comp i bits), Il.ValTy bits)
   in
 
   let imm (i:int64) : Il.operand = imm_of_ty i word_bits in
