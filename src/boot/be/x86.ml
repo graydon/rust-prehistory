@@ -712,15 +712,13 @@ let c_to_proc (e:Il.emitter) : unit =
 
   let sp_n = word_n (Il.Hreg esp) in
   let edx_n = word_n (Il.Hreg edx) in
-  let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    mov (rc edx) (c (sp_n 1));                     (* edx <- proc          *)
-    mov (rc ecx) (c (edx_n Abi.proc_field_rt));    (* ecx <- proc->rt      *)
+    mov (rc edx) (c (sp_n 1));                       (* edx <- proc             *)
     save_callee_saves e;
-    mov (ecx_n Abi.rt_field_sp) (ro esp);          (* rt->regs.sp <- esp   *)
-    mov (rc esp) (c (edx_n Abi.proc_field_sp));    (* esp <- proc->regs.sp *)
+    mov (edx_n Abi.proc_field_runtime_sp) (ro esp);  (* proc->runtime_sp <- esp *)
+    mov (rc esp) (c (edx_n Abi.proc_field_rust_sp)); (* esp <- proc->rust_sp    *)
 
     (**** IN PROC STACK ****)
     restore_callee_saves e;
@@ -745,15 +743,13 @@ let proc_to_c (e:Il.emitter) : unit =
    *   *esp          = [retpc  ]
    *)
   let edx_n = word_n (Il.Hreg edx) in
-  let ecx_n = word_n (Il.Hreg ecx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    mov (rc edx) (c proc_ptr);                     (* edx <- proc            *)
-    mov (rc ecx) (c (edx_n Abi.proc_field_rt));    (* ecx <- proc->rt        *)
+    mov (rc edx) (c proc_ptr);                          (* edx <- proc            *)
     save_callee_saves e;
-    mov (edx_n Abi.proc_field_sp) (ro esp);        (* proc->regs.sp <- esp   *)
-    mov (rc esp) (c (ecx_n Abi.rt_field_sp));      (* esp <- rt->regs.sp     *)
+    mov (edx_n Abi.proc_field_rust_sp) (ro esp);        (* proc->rust_sp <- esp   *)
+    mov (rc esp) (c (edx_n Abi.proc_field_runtime_sp)); (* esp <- proc->runtime_sp *)
 
     (**** IN C STACK ****)
     restore_callee_saves e;

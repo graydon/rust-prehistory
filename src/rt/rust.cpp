@@ -222,11 +222,9 @@ struct rust_str {
 };
 
 struct rust_rt {
-
     rust_rt(rust_srv *srv, size_t &live_allocs);
     ~rust_rt();
 
-    uintptr_t sp;          /* Saved sp from the C runtime. */
     rust_srv *srv;
     size_t &live_allocs;
     uint32_t logbits;
@@ -339,7 +337,6 @@ struct frame_glue_fns {
  */
 
 struct rust_proc {
-
     rust_proc(rust_rt *rt,
               rust_proc *spawner,
               uintptr_t exit_proc_glue,
@@ -351,7 +348,8 @@ struct rust_proc {
     rust_rt *rt;
     stk_seg *stk;
     uintptr_t fn;
-    uintptr_t sp;           /* saved sp when not running. */
+    uintptr_t runtime_sp;      /* runtime sp while proc running.   */
+    uintptr_t rust_sp;         /* saved sp when not running.       */
     proc_state_t state;
     size_t idx;
     size_t refcnt;
@@ -808,9 +806,9 @@ upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
     printf("transplant: n_call_bytes %d, n_frame_bytes %d\n", n_call_bytes, n_frame_bytes);
     */
     uintptr_t target = nstk->limit - n_call_bytes;
-    memcpy((void*)target, (void*)proc->sp, n_call_bytes);
+    memcpy((void*)target, (void*)proc->rust_sp, n_call_bytes);
     proc->stk = nstk;
-    proc->sp = target;
+    proc->rust_sp = target;
 }
 
 rust_proc::rust_proc(rust_rt *rt,
@@ -822,7 +820,8 @@ rust_proc::rust_proc(rust_rt *rt,
       rt(rt),
       stk(new_stk(rt, 0)),
       fn(spawnee_fn),
-      sp(stk->limit),
+      runtime_sp(0),
+      rust_sp(stk->limit),
       state(proc_state_running),
       idx(0),
       refcnt(1),
@@ -844,8 +843,8 @@ rust_proc::rust_proc(rust_rt *rt,
     // there are any platforms alive at the moment with
     // >16 byte alignment constraints, but this is sloppy.
 
-    sp -= sizeof(uintptr_t);
-    sp &= ~0xf;
+    rust_sp -= sizeof(uintptr_t);
+    rust_sp &= ~0xf;
 
     // Begin synthesizing frames. There are two: a "fully formed"
     // exit-proc frame at the top of the stack -- that pretends to be
@@ -855,7 +854,7 @@ rust_proc::rust_proc(rust_rt *rt,
     // it. It wasn't; we put that fake frame in place here, but the
     // illusion is enough for the spawnee to return to the exit-proc
     // frame when it's done, and exit.
-    uintptr_t *spp = (uintptr_t *)sp;
+    uintptr_t *spp = (uintptr_t *)rust_sp;
 
     // The exit_proc_glue frame we synthesize above the frame we activate:
     *spp-- = (uintptr_t) this;       // proc
@@ -877,7 +876,7 @@ rust_proc::rust_proc(rust_rt *rt,
 
     // Copy args from spawner to spawnee.
     if (spawner)  {
-        uintptr_t *src = (uintptr_t*) spawner->sp;
+        uintptr_t *src = (uintptr_t*) spawner->rust_sp;
         src += 1;                  // was at upcall-retpc
         src += n_callee_saves;     // proc_to_c_glue-saves
         src += 1;                  // spawn-call output slot
@@ -912,7 +911,7 @@ rust_proc::rust_proc(rust_rt *rt,
     }
 
     // Back up one, we overshot where sp should be.
-    sp = (uintptr_t) (spp+1);
+    rust_sp = (uintptr_t) (spp+1);
 }
 
 
@@ -966,7 +965,7 @@ uintptr_t
 rust_proc::get_fp() {
     // sp in any suspended proc points to the last callee-saved reg on
     // the proc stack.
-    return get_callee_save_fp((uintptr_t*)sp);
+    return get_callee_save_fp((uintptr_t*)rust_sp);
 }
 
 uintptr_t
@@ -1083,7 +1082,6 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
 }
 
 rust_rt::rust_rt(rust_srv *srv, size_t &live_allocs) :
-    sp(0),
     srv(srv),
     live_allocs(live_allocs),
     logbits(get_logbits()),
@@ -1773,7 +1771,7 @@ rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
         proc = rt.sched();
 
         rt.logptr("root proc", (uintptr_t)proc);
-        rt.logptr("proc->sp", (uintptr_t)proc->sp);
+        rt.logptr("proc->rust_sp", (uintptr_t)proc->rust_sp);
 
         while (proc) {
 
@@ -1792,12 +1790,12 @@ rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
               "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
               "stk->prev:0x%" PRIxPTR ", stk->next=0x%" PRIxPTR ", "
               "prev_sp:0x%" PRIxPTR ", " "prev_fp:0x%" PRIxPTR,
-              proc->sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
+              proc->rust_sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
               proc->stk->prev, proc->stk->next,
               proc->stk->prev_sp, proc->stk->prev_fp);
             */
-            I(&rt, proc->sp >= (uintptr_t) &proc->stk->data[0]);
-            I(&rt, proc->sp < proc->stk->limit);
+            I(&rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
+            I(&rt, proc->rust_sp < proc->stk->limit);
 
             switch ((proc_state_t) proc->state) {
 

@@ -76,8 +76,9 @@ let nabi_to_code (a:string) : int64 option =
 let proc_field_rt = 0;;
 let proc_field_stk = proc_field_rt + 1;;
 let proc_field_fn = proc_field_stk + 1;;
-let proc_field_sp = proc_field_fn + 1;;
-let proc_field_state = proc_field_sp + 1;;
+let proc_field_runtime_sp = proc_field_fn + 1;;
+let proc_field_rust_sp = proc_field_runtime_sp + 1;;
+let proc_field_state = proc_field_rust_sp + 1;;
 let proc_field_idx = proc_field_state + 1;;
 let proc_field_refcnt = proc_field_idx + 1;;
 let proc_field_chans = proc_field_refcnt + 1;;
@@ -112,9 +113,6 @@ let stk_field_prev_fp = stk_field_valgrind_id + 1;;
 let stk_field_prev_sp = stk_field_prev_fp + 1;;
 let stk_field_limit = stk_field_prev_sp + 1;;
 let stk_field_data = stk_field_limit + 1;;
-
-
-let rt_field_sp = 0;;
 
 type abi =
   {
