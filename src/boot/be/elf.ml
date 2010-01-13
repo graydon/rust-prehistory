@@ -1321,7 +1321,7 @@ let emit_file
   let init_fixup = new_fixup "_init function entry" in
   let fini_fixup = new_fixup "_fini function entry" in
   let start_fixup = new_fixup "start function entry" in
-  let rust_start_fixup = new_fixup "rust_start" in
+  let rust_start_fixup = (Semant.import sem LIB_rustrt "rust_start") in
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
   let start_fn =
@@ -1379,7 +1379,7 @@ let emit_file
     htab_put rodata_frags "rust_rodata" data;
     htab_put import_fixups "__libc_start_main" libc_start_main_fixup;
 
-    htab_put import_fixups "rust_start" rust_start_fixup
+    Hashtbl.iter (fun name fixup -> htab_put import_fixups name fixup) sem.Semant.ctxt_import_fixups
   in
   let all_frags =
     elf32_linux_x86_file
