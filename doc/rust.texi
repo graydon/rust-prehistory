@@ -10,7 +10,7 @@
 @ifinfo
 This manual is for the ``Rust'' programming language.
 
-Copyright 2006-2009 Graydon Hoare
+qCopyright 2006-2010 Graydon Hoare
 
 All rights reserved (for the time being).
 @end ifinfo
@@ -27,7 +27,7 @@ All rights reserved (for the time being).
 
 @page
 @vskip 0pt plus 1filll
-Copyright @copyright{} 2006-2009 Graydon Hoare
+Copyright @copyright{} 2006-2010 Graydon Hoare
 
 All rights reserved (for the time being).
 @end titlepage
@@ -66,73 +66,34 @@ Complete table of contents
 @node    Disclaimer
 @chapter Disclaimer
 
-Gentle reader,
+To the reader,
 
-You are looking at a work in progress. This is a @emph{non-public} and
-decidedly @emph{unfinished} document describing an even-less-finished
-language that has been stewing in my unconscious for a very long time,
-working its way out through successive sketches and prototypes,
-background reading, and eventually a spare-time ``full''
-implementation starting a little less than 4 years ago. I am sending
-it to you in order to get focused review on the material presented
-within. If you have a moment, I'd like to present some caveats and
-requests:
+Rust is a work in progress. The language continues to evolve as the
+design shifts and is fleshed out in working code. Certain parts work,
+certain parts do not, certain parts will be removed or changed.
 
-@itemize
-@item
-I have written this document entirely in the present tense, despite a
-majority of the features described within only existing in a very
-sketchy, partial, or entirely absent form in the @emph{bootstrap}
-compiler. Moreover, work on the ``real'' @emph{self-hosting} compiler
-is only just beginning, and for the most part if something sounds
-not-yet-implemented, it may well not be. Switching writing tenses
-and/or constantly updating the document to track implementation
-progress seemed too tedious to bother with, so I haven't. If you want
-to know about progress on a particular feature, please ask me.
+This manual is a snapshot written in the present tense. Some features
+described do not yet exist in working code. Some may be temporary.
 
-@item
-At the time of this writing, the bootstrap compiler is about 20,000
-lines of Ocaml -- including its own backend -- and emits small but
-otherwise very inefficient native x86 code in PE and ELF
-executables. It handles the memory, process and communication model,
-including all slot modes, lifecycle and transplantation, and can
-define and call functions (including simple C functions), spawn
-processes, and manipulate basic structural types such as vectors,
-tuples and records. But it is still very much in development.
+At this point, the language is non-public. Please keep this document,
+and your knowledge of the language's existence, to yourself. A small
+group of developers is working on an initial implementation, including
+revision of this document, in private. The project will transition to
+``public'' eventually, but we wish to have a window of time for fast,
+focused work without interruption or public debate. Languages require
+a certain degree of internal coherence, and do not particularly
+benefit from @emph{design} by committee anyway.
 
-@item
-Please keep this document, the existence of this work and my
-engagement in it, completely to yourself. I've selected a group of
-people to review this work but I am not at all interested in
-publishing before the language is at a ``suitably demonstrable''
-stage. Writing languages is delicate work and actually doesn't benefit
-all that much in early stages from ``release early, release
-often''. It benefits a lot in later stages, and I have every intention
-to release it publicly under a nice friendly MIT license once it's
-condensed and contracted to the point that it's worth playing with.
-
-@item
-Regarding ``contraction'': the language @emph{shrinks} the more I work
-on it. This is a good thing: parsimony is a virtue in languages. Most
-of the time I've spent on this language has involved convincing ideas
-that didn't quite seem like they could be merged to merge, so that I
-could discard one or another of them. Therefore, while the version you
-are seeing in this document is ``being filled in'', the scope is
-progressing @emph{inward} as the pieces solidify, from more features
-to fewer. Therefore I ask that @emph{if} you provide feedback that
-suggests feature @emph{additions}, you think long and hard about
-whether they would work in a library, whether they might be deferrable
-to a later version of the language, or whether they might be omitted
-altogether while still providing something of use.  I will be
-absolutely thrilled if I manage to ship all the pieces described here,
-but I expect I'll need to throw a few more out before I'm done. Adding
-is not my goal in requesting feedback.
-@end itemize
+If you have suggestions to make, please try to focus them on
+@emph{reductions} to the language: possible features that can be
+combined or omitted. At this point, every ``additive'' feature we're
+likely to support is already on the table. The task ahead involves
+combining, trimming, and implementing.
 
 Thanks for your time.
 @flushright
                                    - Graydon Hoare
-                                     Sept 2009
+                                     Jan 2010
 @end flushright
 
 
@@ -157,7 +118,8 @@ visually resembles the C language family, but differs significantly in
 syntactic and semantic details. It is strongly oriented towards
 concerns of ``programming in the large'', that is, of creating and
 maintaining @emph{boundaries} -- both abstract and operational -- that
-preserve large-system integrity and availability.
+preserve large-system @emph{integrity}, @emph{availability} and
+@emph{concurrency}.
 
 @menu
 * Goals::                      Intentions, motivations.
@@ -179,6 +141,7 @@ The language design pursues the following goals:
 @item Clarity and precision of expression.
 @item Implementation simplicity.
 @item Run-time efficiency.
+@item High concurrency.
 @end itemize
 @sp 1
 
@@ -187,9 +150,14 @@ showcases for sophisticated language technology. Most of the
 technology in Rust is @emph{old} and has been seen decades earlier in
 other languages.
 
-Also note that ``terseness'' and ``expressiveness'' are absent from
-the list. Rust programs are often larger and more verbose than
-equivalent programs in other languages. 
+All new languages are developed in a technological context. Rust's
+goals arise from the context of writing programs that interact with
+the internet, and execute on increasingly-parallel hardware
+platforms. Our experience is that these two forces -- @emph{security}
+and @emph{concurrency} -- do not conflict; rather they drive system
+design decisions towards extensive use of partitioning. Rust aims to
+make partitioning a natural part of writing programs.
+
 
 @page
 @node    Sales Pitch
@@ -211,7 +179,7 @@ Rust is designed to be compiled to mostly-static native code, with
 relatively large compilation units and plenty of room for whole-unit
 optimisation. The output of a Rust compilation is a standard loadable
 object of machine code (ELF, PE, Mach-O), containing standard metadata
-(DWARF), and works with existing disassemblers, analysis tools,
+(DWARF), and works with @emph{existing} disassemblers, analysis tools,
 debuggers and profilers. Such object files can be dynamically loaded,
 via the standard operating-system loader, into other processes, and
 executed cooperatively.
@@ -298,25 +266,26 @@ of values held in slots, typestates statically model @emph{assertions
 that hold} before and after statements.
 
 @sp 1
-@item Safe control over memory allocation, packing and aliasing.
+@item Static control over memory allocation, packing and aliasing.
 
 Every variable or field in Rust is a combination of a type and a mode;
 this combination is called a @emph{slot}. There are 4 kinds of slot
 mode, denoting 4 ways of referring to a value:
 
 @itemize
-@item ``interior'' (by value)
-@item ``exterior'' (by reference-counted heap allocation)
-@item ``read-alias'' (by provably-owned direct address)
+@item ``interior'' (slot contains value)
+@item ``exterior'' (slot points to to managed heap allocation)
+@item ``read-alias'' (slot points directly to provably-live address)
 @item ``write-alias'' (as with read-alias, but permitting writes)
 @end itemize
 
 Interior slots declared as variables in a function are allocated very
 quickly on the stack, as part of a local activation frame, as in C or
 C++. Read-alias slots permit efficient by-reference parameter passing
-without adjusting heap reference counts, as alias lifetimes outlive
+without adjusting heap reference counts or interacting with garbage
+collection, as alias lifetimes are statically guaranteed to outlive
 callee lifetimes. Write-alias slots additionally permit controlled
-mutation of a parameter by a callee, effectively providing ``out
+mutation of a slot by a callee, effectively providing ``out
 parameters''.
 
 Copying data between slots of different modes may cause either a
@@ -333,19 +302,44 @@ guaranteeing that every use of a slot occurs after it has been
 initialised.
 
 @sp 1
-@item Acyclic ownership graph, copy-on-write memory semantics.
+@item Static control over mutability and memory cycles.
 
-Three of the four slot modes in Rust are mutable, but writing through
-a slot requires that the writer is the sole owner of the memory
-structure being written to. When a structure is shared by an exterior
-slot with a reference count greater than one, the structure is
-automatically duplicated, and the now-private copy is written to.
+Data types in Rust are classified as either immutable, mutable, or
+cyclic. By default, all types are immutable.
 
-Having an acyclic ownership graph supports a ``semi-functional'' view
-of values, in which memory structures are mutable, but always
-@emph{effectively private} to the variable ``owning'' them. This
-assumption is required by the typestate system, the communication
-system and the slot transplanting system.
+If a slot within a type is declared as @code{mutable}, the type is
+@code{mutable} and must also be declared as such.
+
+If a mutable type has a particular form of recursive structure (a
+recursive, mutable exterior member slot) then a value of the type can
+potentially be made to form a cyclic data structure, such as a
+circular list or general graph. Such types must be declared as
+@code{cyclic}. Since cyclic types can only occur if there is a
+particular sort of mutable slot within the type, cyclic types are
+implicitly mutable types.
+
+This three-way classification of data types in Rust interacts with
+the memory allocation and transmission rules. In particular:
+
+@itemize
+@item Only immutable values can be sent over channels.
+@item Only acyclic types can have destructor functions.
+@end itemize
+
+Cyclic values are allocated within local (per-process)
+garbage-collected (GC) heaps. Collection pauses in these GC heaps are
+brief and do not interrupt other processes.
+
+Acyclic values -- mutable or immutable -- are reference-counted and
+have a deterministic destruction order: bottom-up, immediately upon
+release of the last live reference.
+
+Cyclic types can refer to acyclic types, but not vice-versa. Mutable
+types can refer to immutable types, but not vice-versa. Rust therefore
+encourages the programmer to write in a style that consists primarily
+of immutable types, but also permits limited, local (per-process)
+mutability and cyclical memory.
+
 
 @sp 1
 @item Structural algebraic data types
@@ -437,11 +431,11 @@ the signal, route it to a channel, or fail.
 @sp 1
 @item Failure and finishing
 
-If a process fails due to a signal, or if it executes the
-special @code{fail} statement, it enters the @emph{failing} state. A
-failing process unwinds its control stack, frees all of its owned
-resources and enters the @emph{finished} state. Failure is idempotent
-and non-recoverable.
+If a process fails due to a signal, or if it executes the special
+@code{fail} statement, it enters the @emph{failing} state. A failing
+process unwinds its control stack, frees all of its owned resources
+(executing destructors) and enters the @emph{finished} state. Failure
+is idempotent and non-recoverable.
 
 If a process finishes due to failure, it may cause the runtime to
 signal any @emph{linked} processes. This can be used to independently
@@ -451,17 +445,25 @@ related processes.
 @sp 1
 @item Deterministic destruction
 
-Processes have destructors -- called @code{fini} blocks -- which are
-executed deterministically in bottom-up ownership order, as control
-frames are exited and/or owned processes are otherwise freed from data
+Acyclic modules can have destructors -- called @code{fini} blocks --
+which are executed deterministically in bottom-up ownership order, as
+control frames are exited and/or modules are otherwise freed from data
 structures holding them. The same destructors are run in the same
-order whether the process finishes due to failure or normal execution.
+order whether the module is deleted by unwinding during failure or
+normal execution.
 
-Similarly, the rules for freeing non-process memory are deterministic
+Similarly, the rules for freeing acyclic memory are deterministic
 and predictable: on scope-exit or structure-release, interior slots
 are released immediately, exterior slots have their reference count
 decreased and are released if the count drops to zero. Alias slots are
 not affected by scope exit.
+
+Unreferenced cyclic memory is freed at an undefined time between the
+moment the last reference to it from a live frame drops, and the end
+of the lifetime of the process owning it. Cyclic memory can point to
+acyclic memory. When the acyclic memory is released, the destructors
+of the cyclic memory are run and the cyclic memory is freed in normal
+(bottom up) order, as usual.
 
 @end itemize
 
@@ -575,7 +577,7 @@ Euclid, etc.)
 * Ref.Item::                    The components of a module.
 * Ref.Type::                    The types of values held in memory.
 * Ref.Expr::                    Parsed and primitive expressions.
-* Ref.Stmt::                    Program execution as sequences of statements.
+* Ref.Stmt::                    Executable statements.
 * Ref.Run::                     Organisation of runtime services.
 @end menu
 
@@ -653,16 +655,17 @@ The keywords are:
 @sp 2
 
 @multitable @columnfractions .15 .15 .15 .15 .15
-@item @code{mod}
-@tab @code{pub}
-@tab @code{use}
+@item @code{use}
 @tab @code{meta}
 @tab @code{syntax}
 @item @code{let}
+@tab @code{mod}
 @tab @code{auto}
 @tab @code{type}
+@item @code{pub}
 @tab @code{pure}
 @tab @code{mutable}
+@tab @code{cyclic}
 @tab @code{native}
 @item @code{int}
 @tab @code{char}
@@ -684,8 +687,7 @@ The keywords are:
 @tab @code{vec}
 @tab @code{str}
 @tab @code{any}
-@item @code{prog}
-@tab @code{proc}
+@item @code{proc}
 @tab @code{port}
 @tab @code{chan}
 @tab @code{flush}
@@ -1130,7 +1132,8 @@ allocated on entry to each function as the process executes. A stack
 allocation is reclaimed when control leaves the frame containing it.
 
 The @dfn{heap} consists of an acyclic reference graph of
-reference-counted, copy-on-write allocations made explicitly by
+reference-counted allocations, and a cyclic reference graph of
+garbage-collected allocations, all made explicitly by
 memory-allocating statements. A heap allocation lives until the last
 reference to it drops, at which point it is automatically reclaimed.
 
@@ -1139,26 +1142,26 @@ reference to it drops, at which point it is automatically reclaimed.
 @subsection Ref.Mem.Own
 @c * Ref.Mem.Own::                 Memory ownership model.
 
-A process @emph{directly owns} all the dynamic allocations in its
-stack and @emph{lazily owns} all the dynamic allocations in the heap
-reachable through references originating in its stack. A process does
-not own any items.
+A process @emph{owns} all the dynamic allocations in its stack, its
+cyclic heap, and the mutable portion of its acyclic heap. A process
+@emph{shares} all the dynamic allocations of mutable types in its
+acyclic heap with other processes. A process does not own any items.
 
-@dfn{Direct ownership} of an allocation means that the owning process
+@dfn{Ownership} of an allocation means that the owning process
 is the only process that can access the allocation.
 
-@dfn{Lazy ownership} of an allocation means that the owning process
-is the only process that can @emph{observe its own modifications} to the
-allocation.
+@dfn{Sharing} of an allocation means that the same allocation may be
+concurrently referenced by multiple processes, but this shring cannot
+be @emph{observed}. The only shared allocations are those that are
+immutable.
 
-When a stack frame is exited, its directly owned (stack) allocations
-are all released, and its references to lazily owned (heap)
-allocations are dropped, decrementing their reference counts.
+When a stack frame is exited, its interior allocations are all
+released, and its references to heap allocations (both shared and
+owned) are dropped.
 
 When a process finishes, its stack is necessarily empty. The process'
 interior slots are released as the process itself is released, and its
-references to lazily owned (heap) allocations are dropped,
-decrementing their reference counts.
+references to heap allocations are dropped.
 
 @page
 @node       Ref.Mem.Slot
@@ -1180,15 +1183,15 @@ The slot holds the value of the slot.
 @sp 1
 @item @dfn{Exterior mode}
 
-The slot holds the address of a reference-counted, copy-on-write heap
-allocation that holds the value of the slot.
+The slot holds the address of a heap allocation that holds the value
+of the slot.
 
 Exterior slots are indicated by the @emph{at} sigil @code{@@}.
 
 For example, the following code allocates an exterior record, copies
 it by counted-reference to a second exterior slot, then modifies the
-record through the second exterior slot, causing the record to be
-replicated in the heap.
+record through the second exterior slot that points to the same
+exterior allocation.
 @example
 type point3d = rec(int x, int y, int z);
 let @@point3d pt1 = rec(x=1, y=2, z=3);
@@ -1200,10 +1203,11 @@ pt2.z = 4;
 @item @dfn{Write-alias mode}
 
 The slot holds the address of a value. The referenced value may reside
-within a stack allocation or a heap allocation. If the referenced
-value resides within a heap allocation, the heap allocation is
-necessarily unshared: it has reference count equal to 1. Write-alias
-slots can only be declared as members of a function signature.
+within a stack allocation @emph{or} a heap allocation.
+
+Write-alias slots can only be declared as members of a function
+signature, bound to the lifetime of a stack frame. Write-alias
+slots cannot be declared as members of general data types.
 
 Write-alias slots are indicated by the @emph{caret} sigil @code{^}.
 
@@ -1219,8 +1223,11 @@ fn incr(^int i) -> () @{
 @item @dfn{Read-alias mode}
 
 The meaning of the slot is the same as if it were in write-alias mode,
-but the value can only be read from the slot, not written to. Read-alias
-slots can only be declared as members of a function signature.
+but the value can only be read from the slot, not written to.
+
+Like write-aliases, read-alias slots can only be declared as members
+of a function signature, and cannot be declared as members of general
+data types.
 
 Read-alias slots are indicated by the @emph{tilde} sigil @code{~}.
 
@@ -1282,11 +1289,11 @@ have their heap allocation copied, and charged to the new account.
 @section Ref.Proc
 @c * Ref.Proc::                    Semantic model of processes.
 
-A executing Rust program is called a
-@dfn{process}. @xref{Ref.Item.Prog}. Each Rust process has a program,
-an identity, a stack, a set of outgoing communication channels and
-incoming communication ports, and lazy ownership of some portion of
-the heap of a single operating-system process.
+A executing Rust program consists of a tree of processes. A Rust
+@dfn{process} consists of an entry function, a stack, a set of
+outgoing communication channels and incoming communication ports, and
+ownership of some portion of the heap of a single operating-system
+process.
 
 Multiple Rust processes may coexist in a single operating-system
 process. Execution of multiple Rust processes in a single
@@ -1372,7 +1379,6 @@ and events that cause transitions between the states. The lifecycle states
 of a process are:
 
 @itemize
-@item initialising
 @item running
 @item native call
 @item blocked reading
@@ -1382,30 +1388,9 @@ of a process are:
 @item finished
 @end itemize
 
-A process begins its existence -- when it is spawned -- in the
-@emph{initialising} state. It remains in this state until its parent
-completes its @code{init} block successfully or fails. The
-@emph{parent} is responsible for running the @code{init} block -- the
-code executes in the stack and account of the parent -- but the
-@code{init} block can access only the @emph{scope} of the child (its
-member slots and items). If a signal is generated while the parent is
-executing the child's @code{init} block, it is delivered to
-the @emph{parent} process. The parent process is suspended during
-execution of the child's @code{init} block, analogous to the parent
-making a normal function call.
-
-When the parent completes the @code{init} block, the child transitions
-from the @emph{initialising} state to the @emph{running} state. In
-this state, its control executes the contents of its @code{main}
-block. Code in the @code{main} block has access to any @emph{member
-slots} of the process, as does code in the @code{init} and @code{fini}
-blocks of the program. @xref{Ref.Item.Prog}.
-
-If a signal is generated while the child is executing the @code{main}
-block -- after a child process transitions from
-the @emph{initialising} state to the @emph{running} state -- it is
-delivered to the child; the parent is isolated from the signal (though
-it may receive a linked signal, should the child fail).
+A process begins its lifecycle -- once it has been spawned -- in the
+@emph{running} state. In this state it executes the statements of its
+entry function, and any functions called by the entry function.
 
 If a process makes a native call, it is temporarily suspended from
 the @emph{running} state and enters the @emph{native call} state. A
@@ -1435,8 +1420,17 @@ state, back to @emph{running}.
 A process may transition to the @emph{failing} state at any time, due
 to an un-trapped signal or the execution of a @code{fail}
 statement. Once @emph{failing}, a process unwinds its stack and
-transitions to the @emph{finished} state. No other state transitions
-out of the @emph{failing} state are permitted.
+transitions to the @emph{finished} state. Unwinding the stack of a
+process is done by the process itself, on its own control stack. If a
+value with a destructor is freed during unwinding, the code for the
+destructor is run, also on the process' control stack. If the
+destructor code causes any subsequent state transitions, the process
+of unwinding and failing may suspend temporarily, and may involve
+(recursive) unwinding of the stack of a failed
+destructor. Nonetheless, the outermost unwinding activity will
+continue until the stack is unwound and the process transitions to the
+@emph{finished} state. There is no way to ``recover'' from process
+failure.
 
 
 @page
@@ -1466,18 +1460,18 @@ An @dfn{item} is a component of a module. Items are entirely
 determined at compile-time, remain constant during execution, and may
 reside in read-only memory.
 
-There are 5 primary kinds of item: types, functions, predicates,
-modules, and programs.
+There are 4 primary kinds of item: types, functions, predicates
+and modules.
 
 All items form an implicit scope for the declaration of sub-items. In
-other words, within a function, predicate, type or program body,
-declarations of items can (in many cases) be mixed with the
-statements, control blocks, and similar artifacts that otherwise
-compose the item body. The meaning of these scoped items is the same
-as if the item was declared outside the scope, except that the item's
-@emph{path name} within the module namespace is qualified by the name
-of the enclosing item. The exact locations in which sub-items may be
-declared is given by the grammar.  @xref{Ref.Gram}.
+other words, within a function or predicate, declarations of items can
+(in many cases) be mixed with the statements, control blocks, and
+similar artifacts that otherwise compose the item body. The meaning of
+these scoped items is the same as if the item was declared outside the
+scope, except that the item's @emph{path name} within the module
+namespace is qualified by the name of the enclosing item. The exact
+locations in which sub-items may be declared is given by the grammar.
+@xref{Ref.Gram}.
 
 Items may be @emph{parameterised} by type. Type parameters are given
 as a comma-separated list of identifiers enclosed in square brackets
@@ -1494,7 +1488,6 @@ context). There are no general parametric types.
 * Ref.Item.Type::               Items defining the types of values and slots.
 * Ref.Item.Fn::                 Items defining functions.
 * Ref.Item.Pred::               Items defining typestate predicates.
-* Ref.Item.Prog::               Items defining programs.
 @end menu
 
 @page
@@ -1503,11 +1496,10 @@ context). There are no general parametric types.
 @c * Ref.Item.Mod::           Items defining sub-modules.
 
 A @dfn{module item} contains declarations of @emph{items}. Items may
-include functions, programs, modules, types and predicate
-declarations. These declarations have both static and dynamic
-interpretation. The purpose of a module is to organise @emph{names}
-and control @emph{visibility}. Modules are declared with the keyword
-@code{mod}.
+include functions, modules, types and predicate declarations. These
+declarations have both static and dynamic interpretation. The purpose
+of a module is to organise @emph{names} and control
+@emph{visibility}. Modules are declared with the keyword @code{mod}.
 
 An example of a module:
 @example
@@ -1544,7 +1536,7 @@ type map_ty[K,V] = mod @{
                        fn? get(~t map, ~K k) -> ~V;
                    @};
 
-// Dynamically acquire a particular map-module implementation                                
+// Dynamically acquire a particular map-module implementation
 let map_ty[int,str] map_v = get_map_impl[int,str]();
 
 // Open the map-implementation module value as a module item.
@@ -1572,6 +1564,8 @@ value includes:
 @item Whether the value represents textual or numerical information.
 @item Whether the value represents integral or floating-point information.
 @item The sequence of memory operations required to access the value and its components.
+@item Whether the value is mutable or immutable.
+@item Whether, if mutable, the value may be formed into a memory cycle.
 @end itemize
 
 For example, the type @code{rec(u8 x, u8 y)} defines the
@@ -1583,7 +1577,10 @@ components @code{x} and @code{y}, and laid out in memory with the
 Some types are @emph{recursive}. A recursive type is one that includes
 its own definition as a component, by named reference. Recursive types
 are restricted to occur only within a single crate, and only through a
-restricted form of @code{tag} type. @xref{Ref.Type.Tag}.
+restricted form of @code{tag} type. @xref{Ref.Type.Tag}. Only
+recursive types are potentially cyclic. The type checker checks that
+all, and only, truly cyclic recursive types are declared as
+@code{cyclic}.
 
 @page
 @node       Ref.Item.Fn
@@ -1715,50 +1712,6 @@ pred divides(int d, int i) @{
 @end example
 
 @page
-@node       Ref.Item.Prog
-@subsection Ref.Item.Prog
-@c * Ref.Item.Prog::          Items defining programs.
-
-A program is the inert form of a process. @xref{Ref.Proc}. Programs
-are @emph{spawned} in order to produce
-processes. @xref{Ref.Stmt.Spawn}. Each process executes a
-program. @xref{Ref.Type.Proc}. Programs are declared with the keyword
-@code{prog}.
-
-A @code{prog} carries an implicit module, three optional blocks marked
-with the keywords @code{init}, @code{main} and @code{fini}, and a set
-of @emph{member slots} that are shared between the @code{init},
-@code{main} and @code{fini} blocks alone. Significantly: items
-declared in the implicit module of a @code{prog} do @emph{not} share
-access to the member slots of the @code{prog}.
-
-An example of a @code{prog}:
-@example
-type stdio = rec(port[u8] stdin,
-                 chan[u8] stdout,
-                 chan[u8] stderr);
-prog byte_copy @{
-     let stdio io;
-     init (chan[u8] out, chan[u8] err) -> chan[u8] @{
-          io.stdin = port();
-          io.stdout = out;
-          io.stderr = err;
-          ret chan(io.stdin);
-     @}
-     main @{
-         u8 tmp;
-         while (true) @{
-             alt @{
-                 case (tmp <- io.in) @{@}
-                 case (io.out <| tmp) @{@}
-             @}
-         @}
-     @}
-@}
-@end example
-
-
-@page
 @node    Ref.Type
 @section Ref.Type
 
@@ -1792,7 +1745,6 @@ identifiers in any context.
 * Ref.Type.Port::               Unique inter-process message-receipt endpoints.
 * Ref.Type.Chan::               Copyable inter-process message-sending capabilities.
 * Ref.Type.Proc::               General coroutine-instance types.
-* Ref.Type.Prog::               General coroutine-description types.
 * Ref.Type.Mod::                Collections of items.
 * Ref.Type.Constr::             Constrained types.
 * Ref.Type.Type::               Types describing types.
@@ -1830,7 +1782,8 @@ intervals @math{[-(2^7),(2^7)-1)]}, @math{[-(2^{15}),(2^{15})-1)]},
 @math{[-(2^{31}),(2^{31})-1)]} and @math{[-(2^{63}),(2^{63})-1)]}
 respectively.
 @item
-The IEEE 754 double-precision floating point type @code{f64}.
+The IEEE 754 single-precision and double-precision floating point
+types: @code{f32} and @code{f64}, respectively.
 @end itemize
 
 
@@ -1927,17 +1880,43 @@ check (s == p._1 & p._1 == "world");
 @node       Ref.Type.Vec
 @subsection Ref.Type.Vec
 
-The vector type-constructor @code{vec} represents a homogeneous,
-variable-size array of slots. Vectors automatically resize to
-accommodate the addition or removal of elements. Elements can be
-accessed by numeric index, but as with records and tuples, all
-accessible elements are always initialised.
+The vector type-constructor @code{vec} represents a homogeneous array
+of slots. A vector has a fixed size, and may or may not have mutable
+member slots.  If the slots of a vector are mutable, the vector is a
+mutable type.
+
+Vectors can be sliced. Slicing a vector produces a new vector pointing
+to the same underlying storage as the sliced vector, possibly with a
+different origin, length and (optionally) increment value. The
+underlying storage of a vector carries a reference-count maintained by
+all vectors sharing it, and is released when the last referencing
+vector is released.
 
 And example of a @code{vec} type and its use:
 @example
 let vec[int] v = vec(7, 5, 3);
 let int i = v.(2);
+let vec[int] v2 = v.(0,1); // Form a slice.
 @end example
+
+Vectors always @emph{allocate} a storage region sufficient to store
+the first power of two worth of elements greater than or equal to the
+size of the largest slice sharing the storage. This behavior supports
+idiomatic in-place ``growth'' of a mutable slot holding a vector:
+
+@example
+let mutable vec[int] v = vec(1, 2, 3);
+v += vec(4, 5, 6);
+@end example
+
+Normal vector concatenation causes the allocation of a fresh vector to
+hold the result; in this case, however, the slot holding the vector
+recycles the underlying storage in-place (since the reference-count
+of the underlying storage is equal to 1).
+
+All accessible elements of a vector are always initialised, and
+access to a vector is always bounds-checked.
+
 
 @page
 @node       Ref.Type.Tag
@@ -1962,6 +1941,9 @@ slots (in order to bound the in-memory size of the variant).
 @item Recursive type definitions can cross module boundaries, but not module
 @emph{visibility} boundaries, nor crate boundaries (in order to simplify the
 module system).
+@item If a recursive edge (an exterior slot holding a recursive tag type in the same recursion group) is
+@code{mutable}, the tags making up the recursive tag group must be
+declared @code{cyclic}.
 @end itemize
 
 An example of a @code{tag} type and its use:
@@ -2013,13 +1995,9 @@ simplex inter-process communication facility. @xref{Ref.Proc.Comm}. A
 @code{port} type takes a single type parameter, denoting the type of
 value that can be received from a @code{port} value of that type.
 
-Values of type @code{port}, like those of type @code{proc}, have
-purely @emph{local} meaning: they denote communication endpoints
-only @emph{within} a single process. A port is therefore best thought
-of as a @emph{private handle} that a process can use to refer to its
-own ports, but that cannot be used by other processes. If a process
-attempts to use a @code{port} value it received over a channel, it
-receives a signal.
+Ports are modeled as mutable native modules with built-in meaning to
+the language. They cannot be transmitted over channels or otherwise
+replicated, and are always local to the process that creates them.
 
 An example of a @code{port} type:
 @example
@@ -2040,11 +2018,23 @@ facility. @xref{Ref.Proc.Comm}. A @code{chan} type takes a single type
 parameter, denoting the type of value that can be sent to a channel of
 that type.
 
+Channels are immutable types, and can be transmitted over channels to
+other processes. They are modeled as immutable native modules with
+built-in meaning to the language.
+
+When a process sends a message into a channel, the process forms an
+outgoing queue associated with that channel. The per-process queue
+@emph{associated} with a channel can be indirectly manipulated by the
+process, but is @emph{not} otherwise considered ``part of'' to the
+channel: the queue is ``part of'' the @emph{sending process}. Sending
+a channel to another process does not copy the queue associated with
+the channel.
+
 Channels are also @emph{weak}: a channel is directly coupled to a
 particular destination port on a particular process, but does not keep
-that port or process @emph{alive}. A channel may therefore fail to
-operate at any moment. If a process sends to a channel that is
-connected to a nonexistent port, it receives a signal.
+that port or process @emph{alive}. A channel may
+therefore fail to operate at any moment. If a process sends to a
+channel that is connected to a nonexistent port, it receives a signal.
 
 An example of a @code{chan} type:
 @example
@@ -2067,41 +2057,15 @@ purpose of a variable of @code{proc} type is to manage the lifecycle
 of the associated process. Communication is carried out solely using
 channels and ports.
 
-Processes cannot be replicated. If a copy of a slot of
-type @code{proc} is copied to another slot, both slots refer to
-the @emph{same} process value.
-
-Values of type @code{proc}, like those of type @code{port}, have
-purely @emph{local} meaning: they denote processes only @emph{within}
-a single process, their parent. A @code{proc} value is best thought of
-as a @emph{private handle} that a parent can use to refer to its own
-children, but that cannot be used by other processes; it can be
-compared for equality and copied around, but does
-@emph{not} refer to a process when used outside its owning (parent)
-process. If a process attempts to use a @code{proc} value it received
-over a channel, it receives a signal.
+Like ports, processes are modeled as mutable native module types with
+built-in meaning to the language. They cannot be transmitted over
+channels or otherwise replicated, and are always local to the process
+that spawns them.
 
 If all references to a process are dropped (due to the release of any
 slots holding those references), the released process immediately fails.
 @xref{Ref.Proc.Life}.
 
-@page
-@node       Ref.Type.Prog
-@subsection Ref.Type.Prog
-
-The program type-constructor @code{prog} forms new program types. A
-program type consists of a signature, similar to a function type with
-no protocol, describing the inputs and outputs of the initialisation
-routine for programs of that type.
-
-An example of a @code{prog} type:
-@example
-type stdio_prog = prog(chan[u8], chan[u8]) -> chan;
-let stdio_prog cat = get_byte_copy();
-let port[u8] out = port();
-let port[u8] err = port();
-let (proc p, chan[u8] in) = spawn cat(chan(out), chan(err));
-@end example
 
 @page
 @node       Ref.Type.Mod
@@ -2164,11 +2128,10 @@ statements, @xref{Ref.Stmt.Copy}.
 @page
 @node    Ref.Stmt
 @section Ref.Stmt
-@c * Ref.Stmt::               Program execution as sequences of statements.
+@c * Ref.Stmt::               Executable statements.
 
-A @dfn{statement} is a component of a function, or a predicate, or a
-program's @code{init}, @code{main} or @code{fini} blocks. When a
-program is instantiated into a process, the process @emph{executes}
+A @dfn{statement} is a component of a function or a predicate. When a
+function is spawned into a process, the process @emph{executes}
 statements in an order determined by the body of the enclosing
 structure. Each statement causes the process to perform certain
 actions.
@@ -2288,8 +2251,8 @@ pred is_less_than(int a, int b) @{
 @}
 
 fn test() @{
-   int x = 10;
-   int y = 20;
+   let int x = 10;
+   let int y = 20;
    check is_less_than(x,y);
 @}
 @end example
@@ -2297,6 +2260,10 @@ fn test() @{
 This example defines the predicate @code{is_less_than}, and applies it
 to the slots @code{x} and @code{y}. The constraint being checked on
 the third line of the function is @code{is_less_than(x,y)}.
+
+Predicates can only apply to slots holding immutable values. The slots
+a predicate applies to can themselves be mutable, but the types of
+values held in those slots must be immutable.
 
 @page
 @node          Ref.Stmt.Stat.Cond
@@ -2416,8 +2383,8 @@ containing block, both before and after the declaration.
 
 An @dfn{item declaration statement} has a syntactic form identical to
 an item declaration within a module. Declaring an item -- a function,
-type, module, predicate or program -- locally within a statement block
-is simply a way of restricting its scope to a narrow region containing
+type, module or predicate -- locally within a statement block is
+simply a way of restricting its scope to a narrow region containing
 all of its uses; it is otherwise identical in meaning to declaring the
 item outside the statement block.
 
@@ -2464,10 +2431,10 @@ Executing a copy statement causes the value denoted by the expression
 in slots -- to be copied into the slot denoted by the @emph{lval}.
 
 A copy may entail the formation of references, the adjustment of
-reference counts, partially replicating the referent of the
-@emph{lval} in order to prepare it for writing, or similar adjustments
-in order to respect the @code{lval} slot mode. All such adjustment is
-automatic and implied by the @code{=} operator.
+reference counts, execution of destructors, or similar adjustments in
+order to respect the @code{lval} slot mode and any existing value held
+in it. All such adjustment is automatic and implied by the @code{=}
+operator.
 
 An example of three different copy statements:
 @example
@@ -2481,23 +2448,30 @@ x.y = z + 2;
 @subsection Ref.Stmt.Spawn
 @c * Ref.Stmt.Spawn::               Statements creating new processes.
 
-A @code{spawn} statement takes a program (@pxref{Ref.Item.Prog}), a
-set of initialiser arguments for the program, and an @emph{lval}
-denoting a 2-tuple of a @code{proc} slot and the output type of a
-program. The @code{spawn} statement causes the runtime to construct a
-new process running the program. @xref{Ref.Proc.Life}.
+A @code{spawn} statement consists of keyword @code{spawn}, followed by a normal @emph{call} statement (@pxref{Ref.Stmt.Call}).
+A @code{spawn} statement causes the runtime to construct a
+new process executing the called function.
+The called function is referred to as the @dfn{entry function} for the spawned process, and its
+arguments are copied form the spawning process to the spawned process before the spawned process
+begins execution.
 
-The newly spawned process runs its @code{init} block in the execution
-context of the spawning process. When the @code{init} block completes it
-returns a value to the spawning process. The returned value, as well as
-a @code{proc} value holding the new process, are copied into the @emph{lval}
-on the left hand side of the spawn statement's equals sign (@code{=}). 
+Only arguments of interior or exterior mode are permitted in the
+function called by a spawn statement, not arguments with alias modes.
+
+The result of a @code{spawn} statement is a @code{proc} value.
 
 An example of a @code{spawn} statement:
 @example
-let port[u8] out = port();
-let port[u8] err = port();
-let (proc p, chan[u8] in) = spawn byte_copy(chan(out), chan(err));
+fn helper(chan[u8] out) -> () {
+    // do some work.
+    out <| result;
+}
+
+let port[u8] out;
+let proc p = spawn helper(chan(out));
+// let proc run, do other things.
+auto result <- out;
+
 @end example
 
 @page
@@ -2624,12 +2598,13 @@ check (add(4,5) == add5(4));
 
 @end example
 
-In all cases, a @code{bind} statement makes a @emph{copy} of the bound
-arguments when it is executed. Subsequent modification to the values
-passed as bound arguments will have no affect on the bound values; the
-bound values are private to the new function.
-
-Binding a write-alias parameter is prohibited.
+A @code{bind} statement generally stores a copy of the bound arguments
+in the hidden exterior tuple. For bound interior slots and both kinds
+of alias slot in the bound function signature, an interior slot is
+allocated in the hidden tuple and populated with a copy of the bound
+value. For bound exterior slots in the bound function signature, an
+exterior slot is allocated in the hidden tuple and populated with a
+copy of the bound value, an exterior (pointer) value.
 
 The @code{bind} statement is a lightweight mechanism for simulating
 the more elaborate construct of @emph{lexical closures} that exist in
@@ -2715,8 +2690,8 @@ terminating its execution and destroying the iterator function frame.
 Executing a @code{fail} statement causes a process to enter the
 @emph{failing} state. In the @emph{failing} state, a process unwinds
 its stack, destroying all frames and freeing all resources until it
-reaches its @code{main} frame, at which point it runs its @code{fini}
-block and enters the @emph{finished} state.
+reaches its entry frame, at which point it halts execution in the
+@emph{finished} state.
 
 @page
 @node       Ref.Stmt.Log
@@ -2863,34 +2838,13 @@ for-loops.
 @subsubsection Ref.Stmt.For.Linear
 @c * Ref.Stmt.For.Linear::         Statement for looping over vectors.
 
-A @dfn{linear for-loop} is controlled by a @emph{slice}, which has the
-syntactic form of a normal vector or string indexing expression,
-except the index is either a 2-tuple or a 3-tuple describing a bounded
-linear arithmetic sequence of indices to be selected from the vector
-or string. The linear for-loop bounds-checks the sequence @emph{once}
-when initiating the loop, then repeatedly copies each value in the
-sequence into the element variable, executing the loop body once per
-copy.
-
-Within the loop body, the vector or string is only accessible as a
-read alias.
-
-The 3-tuple form of slice provides an initial index @var{i}, a
-bounding index @var{b}, and a step value @var{s}. The associated
-linear loop executes once for each index @var{x = i + n * s} such that
-@code{@var{x} < @var{b}} if @var{s} is positive, or @code{@var{x} >
-@var{b}} if @var{s} is negative, and where @var{n} ranges over
-successive integers @code{0}, @code{1}, @dots{}
-
-If @var{s} is @code{0}, a signal is generated.
-
-If the initial index of a slice is omitted, it is implicitly @code{0}.
-If the bounding index of a slice if omtited, it is implicitly the length
-of the indexed vector or string. If the step value of a slice if ommited,
-it is implicitly @code{1}.
-
-The 2-tuple form of slice is equivalent to ommitting the step value in
-the 3-tuple form.
+A @dfn{linear for-loop} is controlled by a vector or string. The
+linear for-loop bounds-checks the underlying sequence @emph{once} when
+initiating the loop, then repeatedly copies each value of the
+underlying sequence into the element variable, executing the loop body
+once per copy. To perform a linear for-loop on a sub-range of a vector
+or string, form a temporary slice over the sub-range and run the loop
+over the slice.
 
 Example of a 4 linear for-loops, all identical:
 @example
@@ -3181,8 +3135,8 @@ run-time}.} is a relatively compact collection of C and Rust code that
 provides fundamental services and datatypes to all Rust processes at
 run-time. It is smaller and simpler than many modern language
 runtimes. It is tightly integrated into the language's execution model
-of slots, processes, programs, communication, reflection, logging and
-signal handling.
+of slots, processes, communication, reflection, logging and signal
+handling.
 
 @menu
 * Ref.Run.Mem::                 Runtime memory management service.
@@ -3262,9 +3216,9 @@ Reflection is a @emph{mandatory} component of the runtime.
 @c * Ref.Run.Log::                 Runtime logging system.
 
 The runtime contains a system for directing logging statements to a
-logging console and/or internal logging
-buffers. @xref{Ref.Stmt.Log}. Logging statements can be enabled or
-disabled via a two-dimensional filtering process:
+logging console and/or internal logging buffers. @xref{Ref.Stmt.Log}.
+Logging statements can be enabled or disabled via a two-dimensional
+filtering process:
 
 @itemize
 
