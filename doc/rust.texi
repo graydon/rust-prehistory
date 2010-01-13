@@ -1151,7 +1151,7 @@ acyclic heap with other processes. A process does not own any items.
 is the only process that can access the allocation.
 
 @dfn{Sharing} of an allocation means that the same allocation may be
-concurrently referenced by multiple processes, but this shring cannot
+concurrently referenced by multiple processes, but this sharing cannot
 be @emph{observed}. The only shared allocations are those that are
 immutable.
 
