@@ -352,14 +352,19 @@ exception Parse_err of (pstate * string)
 ;;
 
 
-let lexpos ps =
+let lexpos (ps:pstate) : pos =
   let p = ps.pstate_lexbuf.Lexing.lex_start_p in
     (p.Lexing.pos_fname,
      p.Lexing.pos_lnum ,
      (p.Lexing.pos_cnum) - (p.Lexing.pos_bol))
 ;;
 
-let span ps apos bpos x =
+let span
+    (ps:pstate)
+    (apos:pos)
+    (bpos:pos)
+    (x:'a)
+    : 'a identified =
   let span = { lo = apos; hi = bpos } in
   let id = !(ps.pstate_node_id) in
     iflog ps (fun _ -> log ps "span for node #%d: %s"
@@ -369,13 +374,26 @@ let span ps apos bpos x =
     { node = x; id = id }
 ;;
 
+let spans
+    (ps:pstate)
+    (things:('a identified) array)
+    (apos:pos)
+    (thing:'a)
+    : ('a identified) array =
+  Array.append things [| (span ps apos (lexpos ps) thing) |]
+;;
+
 (* The point of this is to make a new node_id entry for a node that is a "copy" of
    an lval returned from somewhere else. For example if you create a temp, the lval
    it returns can only be used in *one* place, for the node_id denotes the place that
    lval is first used; subsequent uses of 'the same' reference must clone_lval it 
    into a new node_id. Otherwise there is trouble. *)
 
-let clone_span ps oldnode newthing =
+let clone_span
+    (ps:pstate)
+    (oldnode:'a identified)
+    (newthing:'b)
+    : 'b identified =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans oldnode.id in
     span ps s.lo s.hi newthing
 ;;
@@ -1490,10 +1508,8 @@ and parse_slot_and_ident_and_init ps =
  * We have no way to parse a single Ast.stmt; any incoming syntactic statement
  * may desugar to N>1 real Ast.stmts
  *)
+
 and parse_stmts ps =
-  let spans stmts apos bpos stmt =
-    Array.append stmts [| (span ps apos bpos stmt) |]
-  in
   let apos = lexpos ps in
     match peek ps with
 
@@ -1501,8 +1517,7 @@ and parse_stmts ps =
           bump ps;
           let (stmts, atom) = ctxt "stmts: log value" parse_expr_atom ps in
             expect ps SEMI;
-            let bpos = lexpos ps in
-              spans stmts apos bpos (Ast.STMT_log atom)
+            spans ps stmts apos (Ast.STMT_log atom)
 
       | CHECK ->
           bump ps;
@@ -1513,8 +1528,8 @@ and parse_stmts ps =
                   let (stmts, expr) = ctxt "stmts: check value" parse_expr ps in
                     expect ps RPAREN;
                     expect ps SEMI;
-                    let bpos = lexpos ps in
-                      spans stmts apos bpos (Ast.STMT_check_expr expr)
+                    spans ps stmts apos (Ast.STMT_check_expr expr)
+
               | IF ->
                   bump ps;
                   expect ps LPAREN;
@@ -1533,6 +1548,15 @@ and parse_stmts ps =
                       [| span ps apos bpos (Ast.STMT_check (constrs, calls)) |]
           end
 
+      | ALT ->
+          bump ps;
+          begin
+            match peek ps with
+                TYPE -> [| |]
+              | LPAREN -> [| |]
+              | _ -> [| |]
+          end
+
       | IF ->
           bump ps;
           let (stmts, expr) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
@@ -1544,8 +1568,7 @@ and parse_stmts ps =
                    Some (ctxt "stmts: if-else" parse_block ps)
                | _ -> None)
           in
-          let bpos = lexpos ps in
-            spans stmts apos bpos
+            spans ps stmts apos
               (Ast.STMT_if
                  { Ast.if_test = expr;
                    Ast.if_then = then_block;
@@ -1571,8 +1594,7 @@ and parse_stmts ps =
                     expect ps SEMI;
                     (stmts, Some expr)
           in
-          let bpos = lexpos ps in
-            spans stmts apos bpos (Ast.STMT_put (proto, e))
+            spans ps stmts apos (Ast.STMT_put (proto, e))
 
       | RET proto ->
           bump ps;
@@ -1584,8 +1606,7 @@ and parse_stmts ps =
                     expect ps SEMI;
                     (stmts, Some expr)
           in
-          let bpos = lexpos ps in
-            spans stmts apos bpos (Ast.STMT_ret (proto, e))
+            spans ps stmts apos (Ast.STMT_ret (proto, e))
 
       | BE proto ->
           bump ps;
@@ -1669,10 +1690,9 @@ and parse_stmts ps =
 
       | MOD | TYPE | (FN _) | PRED ->
           let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
-          let bpos = lexpos ps in
           let decl = Ast.DECL_mod_item (ident, item) in
           let stmts = expand_tags_to_stmts ps item stmts in
-            spans stmts apos bpos (Ast.STMT_decl decl)
+            spans ps stmts apos (Ast.STMT_decl decl)
 
       | LPAREN ->
           let (lstmts, lvals) =
@@ -1722,8 +1742,7 @@ and parse_stmts ps =
                     bump ps;
                     let (stmts, rhs) = ctxt "stmt: recv rhs" parse_lval ps in
                     let _ = expect ps SEMI in
-                    let bpos = lexpos ps in
-                      spans stmts apos bpos (Ast.STMT_recv (lval, rhs))
+                      spans ps stmts apos (Ast.STMT_recv (lval, rhs))
 
                 | SEND ->
                     bump ps;
