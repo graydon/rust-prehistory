@@ -506,8 +506,8 @@ let emit_file
   let nxargv_fixup = new_fixup "_NXArgv" in
   let progname_fixup = new_fixup "___progname" in
   let environ_fixup = new_fixup "_environ" in
-  let exit_fixup = (Semant.import sem LIB_c "_exit") in
-  let rust_start_fixup = (Semant.import sem LIB_rustrt "_rust_start") in
+  let exit_fixup = (Semant.import sem LIB_c "exit") in
+  let rust_start_fixup = (Semant.import sem LIB_rustrt "rust_start") in
 
   let start_fixup = new_fixup "start function entry" in
 
@@ -598,9 +598,10 @@ let emit_file
 
   let (symbols:(string * (frag * fixup)) array) =
     Array.map (fun fixup ->
-                 (fixup.fixup_name, indirect_symbol_nlist_entry (match fixup.fixup_lib with
-                                                                     Some lib -> dylib_index lib
-                                                                   | None -> failwith "invalid indirect symbol")))
+                 ("_" ^ fixup.fixup_name,
+                  indirect_symbol_nlist_entry (match fixup.fixup_lib with
+                                                   Some lib -> dylib_index lib
+                                                 | None -> failwith "invalid indirect symbol")))
               indirect_symbols
   in
 
