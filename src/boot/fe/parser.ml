@@ -1005,7 +1005,28 @@ and parse_bottom_pexp (ps:pstate) : pexp =
         in
         let (num, str) = bracketed LPAREN RPAREN inner ps in
         let bpos = lexpos ps in
-          span ps apos bpos (PEXP_lit (Ast.LIT_mach (m, num, str)))
+        let check_range (lo:int64) (hi:int64) : unit =
+          if (num < lo) or (num > hi)
+          then raise (err (Printf.sprintf "integral literal %Ld out of range [%Ld,%Ld]" num lo hi) ps)
+          else ()
+        in
+          begin
+            (match m with
+                 TY_u8 -> check_range 0L 0xffL
+               | TY_u16 -> check_range 0L 0xffffL
+               | TY_u32 -> check_range 0L 0xffffffffL
+               (* | TY_u64 -> ... *)
+               | TY_s8 -> check_range (-128L) 127L
+               | TY_s16 -> check_range (-32768L) 32767L
+               | TY_s32 -> check_range (-2147483648L) 2147483647L
+               (*
+               | TY_s64 -> ...
+               | TY_f32 -> ...
+               | TY_f64 -> ...
+               *)
+               | _ -> ());
+            span ps apos bpos (PEXP_lit (Ast.LIT_mach (m, num, str)))
+          end
 
     | _ ->
         let lit = parse_lit ps in

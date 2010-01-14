@@ -301,45 +301,36 @@ let trans_visitor
             end
   in
 
-  (* FIXME: should really give a node_id to err *)
-  (* FIXME: this should be checked earlier, in type checking, or even parsing! *)
-  let check_integral_literal_range (lo:int64) (hi:int64) (i:int64) : unit =
-    if (i < lo) or (i > hi)
-    then (err None "integral literal %Ld out of range [%Ld,%Ld]" i lo hi)
-    else ()
+  let iter_block_slots
+      (block_id:node_id)
+      (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
+      : unit =
+    let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
+      Hashtbl.iter
+        begin
+          fun key slot_id ->
+            let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
+              fn key slot_id slot
+        end
+        block_slots
+
   in
 
-  (* FIXME: should be either an int64 or a float of some sort *)
+  (* FIXME: `i' should have type (int64 | float) or something like that *)
   let trans_mach (mach:ty_mach) (i:int64) : Il.operand =
     match mach with
-        TY_u8 ->
-          (check_integral_literal_range 0L 0xffL i; imm_of_ty i Il.Bits8)
-
-      | TY_u16 ->
-          (check_integral_literal_range 0L 0xffffL i; imm_of_ty i Il.Bits16)
-
-      | TY_u32 ->
-          (check_integral_literal_range 0L 0xffffffffL i; imm_of_ty i Il.Bits32)
-
+        TY_u8 -> imm_of_ty i Il.Bits8
+      | TY_u16 -> imm_of_ty i Il.Bits16
+      | TY_u32 -> imm_of_ty i Il.Bits32
+      (* | TY_u64 -> ... *)
+      | TY_s8 -> imm_of_ty i Il.Bits8
+      | TY_s16 -> imm_of_ty i Il.Bits16
+      | TY_s32 -> imm_of_ty i Il.Bits32
       (*
-        | TY_u64 ->
+      | TY_s64 -> ...
+      | TY_f32 -> ...
+      | TY_f64 -> ...
       *)
-
-      | TY_s8 ->
-          (check_integral_literal_range (-128L) 127L i; imm_of_ty i Il.Bits8)
-
-      | TY_s16 ->
-          (check_integral_literal_range (-32768L) 32767L i; imm_of_ty i Il.Bits16)
-
-      | TY_s32 ->
-          (check_integral_literal_range (-2147483648L) 2147483647L i; imm_of_ty i Il.Bits32)
-
-      (*
-        | TY_s64 ->
-        | TY_f32 ->
-        | TY_f64 ->
-      *)
-
       | _ -> imm 0xbadbeefL
   in
 
