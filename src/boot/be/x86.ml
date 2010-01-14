@@ -665,10 +665,6 @@ let objfile_start
     begin
       let addr = Il.Abs (Asm.M_POS rust_start_fixup) in
         Il.emit e (Il.call (rc eax) (ro esp) (Il.CodeAddr addr));
-        (*
-          Il.emit e (Il.umov (rc ecx) (c (Il.Addr (addr, Il.OpaqueTy))));
-          Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Based ((h ecx), None))));
-        *)
     end
   else
     Il.emit e (Il.call (rc eax) (ro esp) (Il.CodeAddr (Il.Pcrel (rust_start_fixup, None))));
