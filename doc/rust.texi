@@ -302,43 +302,34 @@ guaranteeing that every use of a slot occurs after it has been
 initialised.
 
 @sp 1
-@item Static control over mutability and memory cycles.
+@item Static control over mutability.
 
-Data types in Rust are classified as either immutable, mutable, or
-cyclic. By default, all types are immutable.
+Data types in Rust are classified as either immutable or mutable. By
+default, all types are immutable.
 
 If a slot within a type is declared as @code{mutable}, the type is
 @code{mutable} and must also be declared as such.
 
-If a mutable type has a particular form of recursive structure (a
-recursive, mutable exterior member slot) then a value of the type can
-potentially be made to form a cyclic data structure, such as a
-circular list or general graph. Such types must be declared as
-@code{cyclic}. Since cyclic types can only occur if there is a
-particular sort of mutable slot within the type, cyclic types are
-implicitly mutable types.
-
-This three-way classification of data types in Rust interacts with
-the memory allocation and transmission rules. In particular:
+This classification of data types in Rust interacts with the memory
+allocation and transmission rules. In particular:
 
 @itemize
 @item Only immutable values can be sent over channels.
-@item Only acyclic types can have destructor functions.
+@item Only immutable types can have destructor functions.
 @end itemize
 
-Cyclic values are allocated within local (per-process)
-garbage-collected (GC) heaps. Collection pauses in these GC heaps are
+Mutable values are allocated within local (per-process)
+garbage-collected heaps. Collection pauses in these local heaps are
 brief and do not interrupt other processes.
 
-Acyclic values -- mutable or immutable -- are reference-counted and
-have a deterministic destruction order: bottom-up, immediately upon
-release of the last live reference.
+Immutable values are reference-counted and have a deterministic
+destruction order: bottom-up, immediately upon release of the last
+live reference.
 
-Cyclic types can refer to acyclic types, but not vice-versa. Mutable
-types can refer to immutable types, but not vice-versa. Rust therefore
-encourages the programmer to write in a style that consists primarily
-of immutable types, but also permits limited, local (per-process)
-mutability and cyclical memory.
+Mutable types can refer to immutable types, but not vice-versa. Rust
+therefore encourages the programmer to write in a style that consists
+primarily of immutable types, but also permits limited, local
+(per-process) mutability.
 
 
 @sp 1
@@ -445,25 +436,27 @@ related processes.
 @sp 1
 @item Deterministic destruction
 
-Acyclic modules can have destructors -- called @code{fini} blocks --
-which are executed deterministically in bottom-up ownership order, as
-control frames are exited and/or modules are otherwise freed from data
-structures holding them. The same destructors are run in the same
-order whether the module is deleted by unwinding during failure or
-normal execution.
+Immutable modules can have destructors functions, which are executed
+deterministically in bottom-up ownership order, as control frames are
+exited and/or modules are otherwise freed from data structures holding
+them. The same destructors are run in the same order whether the
+module is deleted by unwinding during failure or normal execution.
 
-Similarly, the rules for freeing acyclic memory are deterministic
+Similarly, the rules for freeing immutable memory are deterministic
 and predictable: on scope-exit or structure-release, interior slots
 are released immediately, exterior slots have their reference count
 decreased and are released if the count drops to zero. Alias slots are
 not affected by scope exit.
 
-Unreferenced cyclic memory is freed at an undefined time between the
+Unreferenced mutable memory is freed at an undefined time between the
 moment the last reference to it from a live frame drops, and the end
-of the lifetime of the process owning it. Cyclic memory can point to
-acyclic memory. When the acyclic memory is released, the destructors
-of the cyclic memory are run and the cyclic memory is freed in normal
-(bottom up) order, as usual.
+of the lifetime of the process owning it. Mutable memory can point to
+immutable memory; doing so merely delays (to an undefined future time)
+the moment when the deterministic, bottom-up destruction sequence for
+the referenced immutable memory @emph{starts}. In other words, the
+immutable ``leaves'' of a mutable structure are released in a
+locally-predictable order, even if the ``interior'' of the mutable
+structure is released in an unpredictable order.
 
 @end itemize
 
@@ -658,39 +651,38 @@ The keywords are:
 @item @code{use}
 @tab @code{meta}
 @tab @code{syntax}
-@item @code{let}
-@tab @code{mod}
-@tab @code{auto}
-@tab @code{type}
-@item @code{pub}
-@tab @code{pure}
 @tab @code{mutable}
-@tab @code{cyclic}
 @tab @code{native}
-@item @code{int}
+@item @code{pure}
+@tab @code{auto}
+@tab @code{pub}
+@tab @code{type}
+@tab @code{mod}
+@item @code{let}
+@tab @code{any}
+@tab @code{int}
 @tab @code{char}
 @tab @code{bool}
-@tab @code{true}
-@tab @code{false}
 @item @code{u8}
 @tab @code{u16}
 @tab @code{u32}
 @tab @code{u64}
+@tab @code{f32}
 @item @code{s8}
 @tab @code{s16}
 @tab @code{s32}
 @tab @code{s64}
-@item @code{f32}
 @tab @code{f64}
 @item @code{rec}
 @tab @code{tag}
 @tab @code{vec}
 @tab @code{str}
-@tab @code{any}
-@item @code{proc}
-@tab @code{port}
+@tab @code{proc}
+@item @code{port}
 @tab @code{chan}
 @tab @code{flush}
+@tab @code{true}
+@tab @code{false}
 @item @code{if}
 @tab @code{else}
 @tab @code{alt}
@@ -1132,29 +1124,42 @@ A process' @dfn{stack} consists of activation frames automatically
 allocated on entry to each function as the process executes. A stack
 allocation is reclaimed when control leaves the frame containing it.
 
-The @dfn{heap} consists of an acyclic reference graph of
-reference-counted allocations, and a cyclic reference graph of
-garbage-collected allocations, all made explicitly by
-memory-allocating statements. A heap allocation lives until the last
-reference to it drops, at which point it is automatically reclaimed.
+The @dfn{heap} is a general term that describes two separate memory
+areas that can contain exterior allocations: the @emph{local heap} and
+the @emph{shared heap}. The heap used for an exterior allocation
+depends on the type held in the allocation.
+
+Exterior allocations of mutable types are made within a @dfn{local
+heap}, owned by the process. Such @dfn{local allocations} cannot pass
+over channels and do not outlive the process that owns them. When
+unreferenced, they are collected using a general (cycle-aware)
+garbage-collector local to each process. Garbage collection within a
+local heap does not interrupt execution of other processes.
+
+Exterior allocations of immutable types are made within a @dfn{shared
+heap}, and can be multiply-referenced by many different
+processes. Such @dfn{shared allocations} can pass over channels, and
+live as long as the last process referencing them. When unreferenced,
+they are collected immediately using reference-counting.
+
+
 
 @page
 @node       Ref.Mem.Own
 @subsection Ref.Mem.Own
 @c * Ref.Mem.Own::                 Memory ownership model.
 
-A process @emph{owns} all the dynamic allocations in its stack, its
-cyclic heap, and the mutable portion of its acyclic heap. A process
-@emph{shares} all the dynamic allocations of mutable types in its
-acyclic heap with other processes. A process does not own any items.
+A process @emph{owns} all the interior allocations in its stack and
+exterior allocations in its local heap. A process @emph{shares} the
+exterior allocations in the shared heap with other processes. A
+process does not own any items.
 
 @dfn{Ownership} of an allocation means that the owning process
 is the only process that can access the allocation.
 
 @dfn{Sharing} of an allocation means that the same allocation may be
-concurrently referenced by multiple processes, but this sharing cannot
-be @emph{observed}. The only shared allocations are those that are
-immutable.
+concurrently referenced by multiple processes. The only shared
+allocations are those that are immutable.
 
 When a stack frame is exited, its interior allocations are all
 released, and its references to heap allocations (both shared and
@@ -1566,7 +1571,6 @@ value includes:
 @item Whether the value represents integral or floating-point information.
 @item The sequence of memory operations required to access the value and its components.
 @item Whether the value is mutable or immutable.
-@item Whether, if mutable, the value may be formed into a memory cycle.
 @end itemize
 
 For example, the type @code{rec(u8 x, u8 y)} defines the
@@ -1578,10 +1582,7 @@ components @code{x} and @code{y}, and laid out in memory with the
 Some types are @emph{recursive}. A recursive type is one that includes
 its own definition as a component, by named reference. Recursive types
 are restricted to occur only within a single crate, and only through a
-restricted form of @code{tag} type. @xref{Ref.Type.Tag}. Only
-recursive types are potentially cyclic. The type checker checks that
-all, and only, truly cyclic recursive types are declared as
-@code{cyclic}.
+restricted form of @code{tag} type. @xref{Ref.Type.Tag}.
 
 @page
 @node       Ref.Item.Fn
@@ -1942,9 +1943,6 @@ slots (in order to bound the in-memory size of the variant).
 @item Recursive type definitions can cross module boundaries, but not module
 @emph{visibility} boundaries, nor crate boundaries (in order to simplify the
 module system).
-@item If a recursive edge (an exterior slot holding a recursive tag type in the same recursion group) is
-@code{mutable}, the tags making up the recursive tag group must be
-declared @code{cyclic}.
 @end itemize
 
 An example of a @code{tag} type and its use:
