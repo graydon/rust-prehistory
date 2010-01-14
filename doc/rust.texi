@@ -695,6 +695,7 @@ The keywords are:
 @tab @code{else}
 @tab @code{alt}
 @tab @code{case}
+@tab @code{in}
 @item @code{do}
 @tab @code{while}
 @tab @code{break}
