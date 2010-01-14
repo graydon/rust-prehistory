@@ -356,18 +356,6 @@ let store_proc_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
     Il.emit e (Il.umov (word_n vr i) oper)
 ;;
 
-let load_rt_word (e:Il.emitter) (i:int) : Il.reg =
-  let rt = load_proc_word e 0 in
-  let (vr, vc) = vreg e in
-    Il.emit e (Il.umov vc (c (word_n rt i)));
-    vr
-;;
-
-let store_rt_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
-  let rt = load_proc_word e 0 in
-    Il.emit e (Il.umov (word_n rt i) oper);
-;;
-
 let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
   let code = Abi.proc_state_to_code state in
   let (vr,vc) = vreg e in
