@@ -1633,6 +1633,22 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                    Ast.if_then = then_block;
                    Ast.if_else = else_block; })
 
+      | FOR proto ->
+          bump ps;
+          let inner ps =
+            let slot = (parse_identified_slot_and_ident false ps) in
+            let _    = (expect ps IN) in
+            let lval = (parse_lval ps) in
+              (slot, lval) in
+          let (slot, seq) = ctxt "stmts: for head" (bracketed LPAREN RPAREN inner) ps in
+          let body_block = ctxt "stmts: for body" parse_block ps in
+          let bpos = lexpos ps in
+            [| span ps apos bpos
+                 (Ast.STMT_for
+                    { Ast.for_slot = slot;
+                      Ast.for_seq = seq;
+                      Ast.for_body = body_block; }) |]
+
       | WHILE ->
           bump ps;
           let (stmts, test) = ctxt "stmts: while cond" (bracketed LPAREN RPAREN parse_expr) ps in

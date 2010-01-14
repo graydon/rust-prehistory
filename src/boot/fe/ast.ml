@@ -284,8 +284,9 @@ and stmt_foreach =
 
 and stmt_for =
     {
-      for_lval: ((stmt array) * expr);
-      for_seq: atom;
+      for_slot: (slot identified * ident);
+      for_seq: ((stmt array) * lval);
+      for_body: block;
     }
 
 and stmt_if =
