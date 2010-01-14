@@ -152,6 +152,7 @@ type jmp =
 type call =
     {
       call_dst: cell;
+      call_sp: operand;
       call_targ: code
     }
 
@@ -273,6 +274,7 @@ let process_quad (qp:quad_processor) (q:quad) : quad =
 
         | Call c ->
             Call { call_dst = qp.qp_cell_write qp c.call_dst;
+                   call_sp = qp.qp_op qp c.call_sp;
                    call_targ = qp.qp_code qp c.call_targ }
 
         | Ret -> Ret
@@ -504,8 +506,9 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
           (string_of_cell f c)
 
     | Call c ->
-        Printf.sprintf "%s = call %s"
+        Printf.sprintf "%s = call %s %s"
           (string_of_cell f c.call_dst)
+          (string_of_operand f c.call_sp)
           (string_of_code f c.call_targ)
 
     | Ret -> "ret"
@@ -616,8 +619,10 @@ let cmp (lhs:operand) (rhs:operand) : quad' =
         cmp_rhs = rhs; }
 ;;
 
-let call (dst:cell) (targ:code) : quad' =
+(* sp is the stack to use for the call. If sp == abi_reg_sp, the current stack is used. *)
+let call (dst:cell) (sp:operand) (targ:code) : quad' =
   Call { call_dst = dst;
+         call_sp = sp;
          call_targ = targ; }
 ;;
 

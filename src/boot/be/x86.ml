@@ -395,7 +395,7 @@ let emit_upcall_full
           mov (r_n (Abi.proc_field_upcall_args + i)) arg
       end
       args;
-    emit (Il.call (r scratch) (pcrel proc_to_c_fixup))
+    emit (Il.call (r scratch) (ro esp) (pcrel proc_to_c_fixup))
 ;;
 
 
@@ -439,7 +439,7 @@ let unwind_glue
     emit (Il.jmp Il.JNE (codefix skip_jmp_fix));    (* if glue-fn is nonzero        *)
     push (c proc_ptr);                              (* form usual call to glue      *)
     push (immi 0L);                                 (* outptr                       *)
-    emit (Il.call (rc eax) (codeptr ecx));          (* call *edx, trashing eax.     *)
+    emit (Il.call (rc eax) (ro esp) (codeptr ecx)); (* call *edx, trashing eax.     *)
     pop (rc eax);
     pop (rc eax);
 
@@ -664,14 +664,14 @@ let objfile_start
   then
     begin
       let addr = Il.Abs (Asm.M_POS rust_start_fixup) in
-        Il.emit e (Il.call (rc eax) (Il.CodeAddr addr));
+        Il.emit e (Il.call (rc eax) (ro esp) (Il.CodeAddr addr));
         (*
           Il.emit e (Il.umov (rc ecx) (c (Il.Addr (addr, Il.OpaqueTy))));
           Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Based ((h ecx), None))));
         *)
     end
   else
-    Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Pcrel (rust_start_fixup, None))));
+    Il.emit e (Il.call (rc eax) (ro esp) (Il.CodeAddr (Il.Pcrel (rust_start_fixup, None))));
   Il.emit e (Il.Pop (rc ecx));
   Il.emit e (Il.Pop (rc ecx));
   Il.emit e (Il.umov (rc esp) (ro ebp));
@@ -1030,12 +1030,21 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
 
   match q with
       Il.Call c ->
-        begin
+        (* Determine we are supposed to switch stacks before calling. *)
+        let switch =
+          match c.Il.call_sp with
+              Il.Cell (Il.Reg ((Il.Hreg reg), _)) when reg = esp -> false
+            | _ -> true
+        in
+        let call_insn =
           match c.Il.call_dst with
               Il.Reg ((Il.Hreg dst), _) when dst = eax ->
                 begin
                   match c.Il.call_targ with
-                      Il.CodeAddr (Il.Based b) ->
+                      Il.CodeAddr (Il.Based (Il.Hreg reg, _)) when reg = esp && switch ->
+                        (* If we are switching stacks, we can't refer to the old stack here. *)
+                        raise Unrecognized
+                    | Il.CodeAddr (Il.Based b) ->
                         insn_rm_r 0xff (Il.Addr (Il.Based b, Il.OpaqueTy)) slash2
                     | Il.CodeAddr (Il.Abs a) ->
                         insn_rm_r 0xff (Il.Addr (Il.Abs a, Il.OpaqueTy)) slash2
@@ -1044,7 +1053,10 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
                     | _ -> raise Unrecognized
                 end
             | _ -> raise Unrecognized
-        end
+        in
+          if switch
+          then Asm.SEQ [| mov false (rc esp) c.Il.call_sp; call_insn |]
+          else call_insn;
 
     | Il.Push (Il.Cell (Il.Reg ((Il.Hreg r), t))) when is_ty32 t ->
         Asm.BYTE (0x50 + (reg r))
