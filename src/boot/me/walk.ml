@@ -438,6 +438,16 @@ and walk_stmt
     (v:visitor)
     (s:Ast.stmt)
     : unit =
+  let walk_stmt_for
+      (s:Ast.stmt_for)
+      : unit =
+    let (si,_) = s.Ast.for_slot in
+    let (ss,lv) = s.Ast.for_seq in
+      walk_slot_identified v si;
+      Array.iter (walk_stmt v) ss;
+      walk_lval v lv;
+      walk_block v s.Ast.for_body
+  in
   let walk_stmt_while
       (s:Ast.stmt_while)
       : unit =
@@ -472,6 +482,9 @@ and walk_stmt
       | Ast.STMT_init_chan (chan,port) ->
           walk_option (walk_lval v) port;
           walk_lval v chan;
+
+      | Ast.STMT_for f ->
+          walk_stmt_for f
 
       | Ast.STMT_while w ->
           walk_stmt_while w
