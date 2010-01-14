@@ -10,11 +10,12 @@ CFG_INFO := $(info building on $(CFG_OSTYPE) $(CFG_CPUTYPE))
 CFG_GCC_COMPILE_FLAGS :=
 CFG_GCC_LINK_FLAGS :=
 CFG_VALGRIND :=
+CFG_LIBFFI :=
 
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
   CFG_GCC_COMPILE_FLAGS += -fPIC
-  CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl -lffi
+  CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl
   ifeq ($(CFG_CPUTYPE), x86_64)
     CFG_GCC_COMPILE_FLAGS += -m32
     CFG_GCC_LINK_FLAGS += -m32
@@ -28,6 +29,7 @@ ifeq ($(CFG_OSTYPE), Linux)
 endif
 
 ifeq ($(CFG_OSTYPE), Darwin)
+  CFG_LIBFFI := 1
   CFG_RUNTIME := librustrt.dylib
   CFG_UNIXY := 1
   CFG_GCC_LINK_FLAGS += -dynamiclib -lffi
@@ -204,7 +206,7 @@ TEST_XFAILS := test/run-pass/many.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
-ifdef CFG_WINDOWSY
+ifdef CFG_LIBFFI
   TEST_XFAILS += test/run-pass/native.rs \
                  test/run-pass/native.rc
 endif

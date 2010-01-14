@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifndef __WIN32__
+#ifdef  __APPLE__
 #include <ffi/ffi.h>
 #endif
 
@@ -1474,7 +1474,7 @@ upcall_free(rust_rt *rt, void* ptr)
     rt->free(ptr);
 }
 
-#ifndef __WIN32__
+#ifdef __APPLE__
 
 class rust_native {
     rust_rt *rt;
@@ -1538,7 +1538,7 @@ rust_native::call(rust_proc *proc, uintptr_t *argv)
     return uintptr_t(retval);
 }
 
-#endif // __WIN32__
+#endif // __APPLE__
 
 static void
 upcall_native(rust_proc *proc, abi_t abi,
@@ -1551,7 +1551,7 @@ upcall_native(rust_proc *proc, abi_t abi,
             abi, sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
 
     /* FIXME: Instead of stack-allocating a new native object every time, cache these. */
-#ifndef __WIN32__
+#ifdef __APPLE__
     rust_native native(rt, sym, abi, nargs);
     uintptr_t retval = native.call(proc, argv);
     if (retptr)
