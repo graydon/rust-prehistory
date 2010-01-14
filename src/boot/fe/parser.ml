@@ -329,14 +329,14 @@ and pexp = pexp' identified
 
 
 type pstate =
-    { mutable pstate_peek         : token;
-      mutable pstate_ctxt         : (string * pos) list;
+    { mutable pstate_peek : token;
+      mutable pstate_ctxt : (string * pos) list;
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
       pstate_file         : filename;
       pstate_sess         : Session.sess;
-      pstate_temp_id   : temp_id ref;
-      pstate_node_id   : node_id ref }
+      pstate_temp_id      : temp_id ref;
+      pstate_node_id      : node_id ref }
 ;;
 
 let log (ps:pstate) = Session.log "parse"
@@ -1059,14 +1059,21 @@ and parse_negation_pexp (ps:pstate) : pexp =
 
 (* Binops are all left-associative,                *)
 (* so we factor out some of the parsing code here. *)
-and binop_rhs ps name apos lhs rhs_parse_fn op =
+and binop_rhs
+    (ps:pstate)
+    (name:string)
+    (apos:pos)
+    (lhs:pexp)
+    (rhs_parse_fn:pstate -> pexp)
+    (op:Ast.binop)
+    : pexp =
   bump ps;
   let rhs = (ctxt (name ^ " rhs") rhs_parse_fn ps) in
   let bpos = lexpos ps in
     span ps apos bpos (PEXP_binop (op, lhs, rhs))
 
 
-and parse_factor_pexp ps =
+and parse_factor_pexp (ps:pstate) : pexp =
   let name = "factor pexp" in
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_negation_pexp ps in
@@ -1077,7 +1084,7 @@ and parse_factor_pexp ps =
       | _       -> lhs
 
 
-and parse_term_pexp ps =
+and parse_term_pexp (ps:pstate) : pexp =
   let name = "term pexp" in
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_factor_pexp ps in
@@ -1087,7 +1094,7 @@ and parse_term_pexp ps =
       | _     -> lhs
 
 
-and parse_shift_pexp ps =
+and parse_shift_pexp (ps:pstate) : pexp =
   let name = "shift pexp" in
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_term_pexp ps in
@@ -1098,7 +1105,7 @@ and parse_shift_pexp ps =
       | _   -> lhs
 
 
-and parse_relational_pexp ps =
+and parse_relational_pexp (ps:pstate) : pexp =
   let name = "relational pexp" in
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_shift_pexp ps in
@@ -1110,7 +1117,7 @@ and parse_relational_pexp ps =
       | _  -> lhs
 
 
-and parse_equality_pexp ps =
+and parse_equality_pexp (ps:pstate) : pexp =
   let name = "equality pexp" in
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_relational_pexp ps in
@@ -1120,7 +1127,7 @@ and parse_equality_pexp ps =
       | _    -> lhs
 
 
-and parse_and_pexp ps =
+and parse_and_pexp (ps:pstate) : pexp =
   let name = "and pexp" in
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_equality_pexp ps in
@@ -1129,7 +1136,7 @@ and parse_and_pexp ps =
       | _   -> lhs
 
 
-and parse_or_pexp ps =
+and parse_or_pexp (ps:pstate) : pexp =
   let name = "or pexp" in
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_and_pexp ps in
@@ -1138,11 +1145,11 @@ and parse_or_pexp ps =
       | _  -> lhs
 
 
-and parse_pexp ps =
+and parse_pexp (ps:pstate) : pexp =
   parse_or_pexp ps
 
 
-and parse_pexp_list ps =
+and parse_pexp_list (ps:pstate) : pexp array =
   match peek ps with
       LPAREN ->
         bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
@@ -1151,13 +1158,13 @@ and parse_pexp_list ps =
     | _ -> raise (unexpected ps)
 
 
-and atom_lval ps at =
+and atom_lval (ps:pstate) (at:Ast.atom) : Ast.lval =
   match at with
       Ast.ATOM_lval lv -> lv
     | Ast.ATOM_literal _ -> raise (err "literal where lval expected" ps)
 
 
-and desugar_lval ps pexp =
+and desugar_lval (ps:pstate) (pexp:pexp) : (Ast.stmt array * Ast.lval) =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
     match pexp.node with
@@ -1187,7 +1194,10 @@ and desugar_lval ps pexp =
             (stmts, atom_lval ps atom)
 
 
-and desugar_expr ps pexp : (Ast.stmt array * Ast.expr) =
+and desugar_expr
+    (ps:pstate)
+    (pexp:pexp)
+    : (Ast.stmt array * Ast.expr) =
   match pexp.node with
 
       PEXP_unop (op, pe) ->
@@ -1245,7 +1255,10 @@ and desugar_expr_atom
           raise (err "mutable keyword in atom context" ps)
 
 
-and desugar_expr_mode_atom ps pexp : (Ast.stmt array * (Ast.mode * Ast.atom)) =
+and desugar_expr_mode_atom
+    (ps:pstate)
+    (pexp:pexp)
+    : (Ast.stmt array * (Ast.mode * Ast.atom)) =
   let desugar_inner mut e =
     let (stmts, atom) = desugar_expr_atom ps e in
       (stmts, (mut, atom))
@@ -1258,13 +1271,23 @@ and desugar_expr_mode_atom ps pexp : (Ast.stmt array * (Ast.mode * Ast.atom)) =
       | _ ->
           desugar_inner (Ast.MODE_interior Ast.IMMUTABLE) pexp
 
-and desugar_expr_atoms ps pexps : (Ast.stmt array * Ast.atom array) =
+and desugar_expr_atoms
+    (ps:pstate)
+    (pexps:pexp array)
+    : (Ast.stmt array * Ast.atom array) =
   arj1st (Array.map (desugar_expr_atom ps) pexps)
 
-and desugar_expr_mode_atoms ps pexps : (Ast.stmt array * (Ast.mode * Ast.atom) array) =
+and desugar_expr_mode_atoms
+    (ps:pstate)
+    (pexps:pexp array)
+    : (Ast.stmt array * (Ast.mode * Ast.atom) array) =
   arj1st (Array.map (desugar_expr_mode_atom ps) pexps)
 
-and desugar_expr_init ps dst_lval pexp : (Ast.stmt array) =
+and desugar_expr_init
+    (ps:pstate)
+    (dst_lval:Ast.lval)
+    (pexp:pexp)
+    : (Ast.stmt array) =
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
 
@@ -1381,17 +1404,26 @@ and parse_expr_init (lv:Ast.lval) (ps:pstate) : (Ast.stmt array) =
   let pexp = ctxt "expr" parse_pexp ps in
     desugar_expr_init ps lv pexp
 
-and parse_slot_and_ident param_slot ps =
+and parse_slot_and_ident
+    (param_slot:bool)
+    (ps:pstate)
+    : (Ast.slot * Ast.ident) =
   let slot = ctxt "slot and ident: slot" (parse_slot param_slot) ps in
   let ident = ctxt "slot and ident: ident" parse_ident ps in
     (slot, ident)
 
-and parse_identified_slot_and_ident param_slot ps =
+and parse_identified_slot_and_ident
+    (param_slot:bool)
+    (ps:pstate)
+    : (Ast.slot identified * Ast.ident) =
   let slot = ctxt "identified slot and ident: slot" (parse_identified_slot param_slot) ps in
   let ident = ctxt "identified slot and ident: ident" parse_ident ps in
     (slot, ident)
 
-and parse_two_or_more_identified_tup_slots_and_idents param_slot ps =
+and parse_two_or_more_identified_tup_slots_and_idents
+    (param_slot:bool)
+    (ps:pstate)
+    : ((Ast.slot identified) array * Ast.ident array) =
   let both =
     ctxt "two+ tup slots and idents"
       (bracketed_two_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident param_slot)) ps
@@ -1399,11 +1431,14 @@ and parse_two_or_more_identified_tup_slots_and_idents param_slot ps =
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
 
-and parse_one_or_more_identified_slot_ident_pairs param_slot ps =
+and parse_one_or_more_identified_slot_ident_pairs
+    (param_slot:bool)
+    (ps:pstate)
+    : (((Ast.slot identified) * Ast.ident) array) =
   ctxt "one+ tup slots and idents"
     (bracketed_one_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident param_slot)) ps
 
-and parse_block ps =
+and parse_block (ps:pstate) : Ast.block =
   let apos = lexpos ps in
   let stmts = arj (ctxt "block: stmts"
                      (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
@@ -1411,7 +1446,7 @@ and parse_block ps =
   let bpos = lexpos ps in
     span ps apos bpos stmts
 
-and parse_block_stmt ps =
+and parse_block_stmt (ps:pstate) : Ast.stmt =
   let apos = lexpos ps in
   let block = parse_block ps in
   let bpos = lexpos ps in
@@ -1494,7 +1529,9 @@ and parse_init
   let _ = expect ps SEMI in
     stmts
 
-and parse_slot_and_ident_and_init ps =
+and parse_slot_and_ident_and_init
+    (ps:pstate)
+    : (Ast.stmt array * Ast.slot * Ast.ident) =
   let apos = lexpos ps in
   let (slot, ident) =
     ctxt "slot, ident and init: slot and ident"
@@ -1510,7 +1547,7 @@ and parse_slot_and_ident_and_init ps =
  * may desugar to N>1 real Ast.stmts
  *)
 
-and parse_stmts ps =
+and parse_stmts (ps:pstate) : Ast.stmt array =
   let apos = lexpos ps in
     match peek ps with
 
@@ -1690,9 +1727,9 @@ and parse_stmts ps =
 
 
       | MOD | TYPE | (FN _) | PRED ->
-          let (ident, stmts, item) = ctxt "stmt: decl" parse_mod_item ps in
+          let (ident, item) = ctxt "stmt: decl" parse_mod_item ps in
           let decl = Ast.DECL_mod_item (ident, item) in
-          let stmts = expand_tags_to_stmts ps item stmts in
+          let stmts = expand_tags_to_stmts ps item in
             spans ps stmts apos (Ast.STMT_decl decl)
 
       | LPAREN ->
@@ -1764,7 +1801,9 @@ and parse_stmts ps =
             end
 
 
-and parse_inputs ps =
+and parse_inputs
+    (ps:pstate)
+    : ((Ast.slot identified * Ast.ident) array * Ast.constrs)  =
   let slots =
     match peek ps with
         NIL -> (bump ps; [| |])
@@ -1815,7 +1854,9 @@ and parse_inputs ps =
     (slots, constrs)
 
 
-and parse_in_and_out ps =
+and parse_in_and_out
+    (ps:pstate)
+    : ((Ast.slot identified * Ast.ident) array * Ast.constrs * Ast.slot identified) =
   let (inputs, constrs) = parse_inputs ps in
   let _ = expect ps RARROW in
   let output = ctxt "fn in and out: output slot" (parse_identified_slot true) ps in
@@ -1823,7 +1864,11 @@ and parse_in_and_out ps =
 
 
 (* parse_fn starts at the first lparen of the sig. *)
-and parse_fn proto_opt pure ps =
+and parse_fn
+    (proto_opt:Ast.proto option)
+    (pure:Ast.purity)
+    (ps:pstate)
+    : Ast.fn =
     let (inputs, constrs, output) = ctxt "fn: in_and_out" parse_in_and_out ps in
     let body = ctxt "fn: body" parse_block ps in
       { Ast.fn_input_slots = inputs;
@@ -1833,32 +1878,34 @@ and parse_fn proto_opt pure ps =
                        Ast.fn_proto = proto_opt; };
         Ast.fn_body = body; }
 
-and parse_pred ps =
+and parse_pred (ps:pstate) : Ast.pred =
   let (inputs, constrs) = ctxt "pred: inputs" parse_inputs ps in
   let body = ctxt "pred: body" parse_block ps in
     { Ast.pred_input_slots = inputs;
       Ast.pred_input_constrs = constrs;
       Ast.pred_body = body }
 
-and flag ps tok =
+and flag (ps:pstate) (tok:token) : bool =
   if peek ps = tok
   then (bump ps; true)
   else false
 
-and parse_ty_param ps = parse_ident ps
+and parse_ty_param (ps:pstate) : Ast.ident = parse_ident ps
 
-and parse_ty_params ps =
+and parse_ty_params (ps:pstate) : Ast.ident array =
   match peek ps with
       LBRACKET ->
         bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) parse_ty_param ps
     | _ -> arr []
 
-and parse_abi ps =
+and parse_abi (ps:pstate) : string =
   match peek ps with
       IDENT id -> (bump ps; id)
     | _ -> "cdecl"
 
-and parse_native_mod_item ps =
+and parse_native_mod_item
+    (ps:pstate)
+    : (Ast.ident * Ast.native_mod_item) =
   let apos = lexpos ps in
   let abi = ctxt "native fn: abi" parse_abi ps in
   let (ident, item) =
@@ -1915,7 +1962,7 @@ and parse_native_mod_item ps =
     (ident, (span ps apos bpos item))
 
 
-and parse_mod_item ps =
+and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
   let apos = lexpos ps in
   let public = flag ps PUB in
   let pure =
@@ -1937,9 +1984,7 @@ and parse_mod_item ps =
                        Ast.decl_item = fn }
           in
           let bpos = lexpos ps in
-            (ident, arr [],
-             span ps apos bpos
-               (Ast.MOD_ITEM_fn decl))
+            (ident, span ps apos bpos (Ast.MOD_ITEM_fn decl))
 
       | PRED ->
           bump ps;
@@ -1951,9 +1996,7 @@ and parse_mod_item ps =
                        Ast.decl_item = pred }
           in
           let bpos = lexpos ps in
-            (ident, arr [],
-             span ps apos bpos
-               (Ast.MOD_ITEM_pred decl))
+            (ident, span ps apos bpos (Ast.MOD_ITEM_pred decl))
 
       | TYPE ->
           bump ps;
@@ -1971,12 +2014,15 @@ and parse_mod_item ps =
             then (Ast.MOD_ITEM_public_type decl)
             else (Ast.MOD_ITEM_opaque_type decl)
           in
-            (ident, [| |], span ps apos bpos item)
+            (ident, span ps apos bpos item)
 
       | _ -> raise (unexpected ps)
 
 
-and expand_tags ps item : (Ast.ident * Ast.mod_item) array =
+and expand_tags
+    (ps:pstate)
+    (item:Ast.mod_item)
+    : (Ast.ident * Ast.mod_item) array =
   let handle_ty_tag id params ttag =
     let tags = ref [] in
       Hashtbl.iter
@@ -2008,27 +2054,37 @@ and expand_tags ps item : (Ast.ident * Ast.mod_item) array =
       | _ -> [| |]
 
 
-and expand_tags_to_stmts ps item stmts : Ast.stmt array =
+and expand_tags_to_stmts
+    (ps:pstate)
+    (item:Ast.mod_item)
+    : Ast.stmt array =
   let id_items = expand_tags ps item in
-  let stmts' =
     Array.map
       (fun (ident, tag_item) ->
          clone_span ps item
            (Ast.STMT_decl
               (Ast.DECL_mod_item (ident, tag_item))))
       id_items
-  in
-    Array.append stmts stmts'
 
 
-and expand_tags_to_items ps item (items:Ast.mod_items) : unit =
+and expand_tags_to_items
+    (ps:pstate)
+    (item:Ast.mod_item)
+    (items:Ast.mod_items)
+    : unit =
   let id_items = expand_tags ps item in
     Array.iter
       (fun (ident, item) -> htab_put items ident item)
       id_items
 
 
-and make_parser tref nref sess tok fname =
+and make_parser
+    (tref:temp_id ref)
+    (nref:node_id ref)
+    (sess:Session.sess)
+    (tok:Lexing.lexbuf -> token)
+    (fname:string)
+    : pstate =
   let lexbuf = Lexing.from_channel (open_in fname) in
   let spos = { lexbuf.Lexing.lex_start_p with Lexing.pos_fname = fname } in
   let cpos = { lexbuf.Lexing.lex_curr_p with Lexing.pos_fname = fname } in
@@ -2123,9 +2179,7 @@ and parse_file_mod_items
   let items = Hashtbl.create 4 in
     while peek ps != EOF
     do
-      let (ident, stmts, item) = parse_mod_item ps in
-        if Array.length stmts != 0
-        then raise (Parse_err (ps, "top-level module cannot contain implicit statements"));
+      let (ident, item) = parse_mod_item ps in
         htab_put items ident item;
         expand_tags_to_items ps item items;
     done;
