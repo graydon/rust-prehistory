@@ -62,6 +62,7 @@ type token =
   | FAIL
   | FINI
 
+  | IN
   | FOR of Ast.proto option
   | PUT of Ast.proto option
   | RET of Ast.proto option
@@ -187,6 +188,7 @@ let string_of_tok t =
     | FAIL       -> "fail"
     | FINI       -> "fini"
 
+    | IN         -> "in"
     | FOR None   -> "for"
     | FOR (Some Ast.PROTO_ques)   -> "for?"
     | FOR (Some Ast.PROTO_bang)   -> "for!"

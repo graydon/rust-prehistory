@@ -64,6 +64,7 @@
                 ("true", LIT_BOOL true);
                 ("false", LIT_BOOL false);
 
+                ("in", IN);
               ]
 ;;
 }
@@ -140,6 +141,8 @@ rule token = parse
 | "fn!"                        { FN (Some Ast.PROTO_bang)   }
 | "fn*"                        { FN (Some Ast.PROTO_star)   }
 | "fn+"                        { FN (Some Ast.PROTO_plus)   }
+
+| "in"                         { IN }
 
 | "for"                        { FOR None               }
 | "for?"                       { FOR (Some Ast.PROTO_ques)  }
