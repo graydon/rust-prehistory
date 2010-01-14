@@ -408,6 +408,7 @@ and lower_frag
                            ^ (Int64.to_string i)
                            ^ " into "
                            ^ (string_of_int nbytes)
+                           ^ (if signed then " signed" else " unsigned")
                            ^ " bytes"))
       else
         if Int64.compare i top = 1
@@ -415,6 +416,7 @@ and lower_frag
                              ^ (Int64.to_string i)
                              ^ " into "
                              ^ (string_of_int nbytes)
+                             ^ (if signed then " signed" else " unsigned")
                              ^ " bytes"))
         else
           if lsb0

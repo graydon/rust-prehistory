@@ -200,7 +200,6 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 TEST_XFAILS := test/run-pass/many.rs \
                test/run-pass/mlist_cycle.rs \
                test/run-pass/acyclic-unwind.rs \
-               test/run-pass/s8-incr.rs \
                test/run-pass/linear-for-loop.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs

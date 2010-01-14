@@ -1005,11 +1005,13 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
     (* m8 <- imm8 *)
     | (_, _, Il.Imm ((Asm.IMM n), _))
         when is_m8 dst && imm_is_byte n ->
-        insn_rm_r_imm 0xc6 dst slash0 TY_u8 (Asm.IMM n)
+        let t = if signed then TY_u8 else TY_s8 in
+          insn_rm_r_imm 0xc6 dst slash0 t (Asm.IMM n)
 
     (* rm32 <- imm32 *)
     | (_, _, Il.Imm (i, _)) when is_rm32 dst || is_r8 dst ->
-        insn_rm_r_imm 0xc7 dst slash0 TY_u32 i
+        let t = if signed then TY_u32 else TY_s32 in
+          insn_rm_r_imm 0xc7 dst slash0 t i
 
     | _ -> raise Unrecognized
 ;;
