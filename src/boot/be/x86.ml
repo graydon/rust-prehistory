@@ -366,7 +366,7 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
     mov (vr_n Abi.proc_field_state) (immi code);
 ;;
 
-let emit_c_call_full
+let emit_c_call
     (ret:Il.reg)
     (scratch:Il.reg)
     (e:Il.emitter)
@@ -379,9 +379,7 @@ let emit_c_call_full
   let esp_n = word_n (h esp) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let lea dst addr = emit (Il.lea dst addr) in
   let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
-  let pcrel f = Il.CodeAddr (Il.Pcrel (f, None)) in
 
   let args =                                                   (* rust calls get proc as 1st arg  *)
     if nabi = Abi.NABI_rust
@@ -422,14 +420,20 @@ let emit_c_call_full
 ;;
 
 (* We clobber eax and edx here. This is only safe to use inside native function thunks. *)
-let emit_c_call
+let emit_native_call
     (e:Il.emitter)
     (nabi:Abi.nabi)
     (fn:fixup)
+    (ret:Il.cell)
     (args:Il.operand array)
     : unit =
 
-  emit_c_call_full (h eax) (h edx) e nabi fn args
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+
+    emit_c_call (h eax) (h edx) e nabi fn args;
+    mov (rc edx) (c ret);
+    mov (word_at (h edx)) (ro eax)
 ;;
 
 
@@ -839,7 +843,7 @@ let (abi:Abi.abi) =
 
     Abi.abi_emit_proc_state_change = emit_proc_state_change;
     Abi.abi_emit_upcall = emit_upcall;
-    Abi.abi_emit_c_call = emit_c_call;
+    Abi.abi_emit_native_call = emit_native_call;
     Abi.abi_c_to_proc = c_to_proc;
     Abi.abi_proc_to_c = proc_to_c;
     Abi.abi_unwind = unwind_glue;

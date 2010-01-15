@@ -1599,7 +1599,7 @@ upcall_new_str(rust_rt *rt, char const *s, size_t fill)
 }
 
 
-extern "C" CDECL char const *str_buf(rust_str *s);
+extern "C" CDECL char const *str_buf(rust_proc *proc, rust_str *s);
 
 static void
 rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv);
@@ -1703,7 +1703,7 @@ handle_upcall(rust_proc *proc)
         upcall_log_uint32_t(proc->rt, args[0]);
         break;
     case upcall_code_log_str:
-        upcall_log_str(proc->rt, str_buf((rust_str*)args[0]));
+        upcall_log_str(proc->rt, str_buf(proc, (rust_str*)args[0]));
         break;
     case upcall_code_new_proc:
         *((rust_proc**)args[0]) =
@@ -1905,7 +1905,7 @@ rust_srv::lookup(char const *sym)
 /* Native builtins. */
 
 extern "C" CDECL char const *
-str_buf(rust_str *s)
+str_buf(rust_proc *proc, rust_str *s)
 {
     return (char const *)&s->data[0];
 }

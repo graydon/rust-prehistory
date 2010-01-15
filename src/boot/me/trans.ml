@@ -936,8 +936,8 @@ let trans_visitor
       trace_str cx.ctxt_sess.Session.sess_trace_block
         "exited block";
 
-  and trans_c_call (nabi:Abi.nabi) (lib:import_lib) (name:string) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_c_call (emitter()) nabi (Semant.import cx lib name) args;
+  and trans_native_call (nabi:Abi.nabi) (lib:import_lib) (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
+    abi.Abi.abi_emit_native_call (emitter()) nabi (Semant.import cx lib name) ret args;
 
   and trans_upcall (u:Abi.upcall) (args:Il.operand array) : unit =
     abi.Abi.abi_emit_upcall (emitter()) u args cx.ctxt_proc_to_c_fixup;
@@ -2338,10 +2338,8 @@ let trans_visitor
                      (Il.Cell (word_at (sp_imm (Int64.add (Int64.of_int n) (word_n 3)))))))
     in
       push_new_emitter ();
-      let e =
-        (emitter())
-      in
-        trans_c_call nabi lib name args;
+      let e = (emitter()) in
+        trans_native_call nabi lib name (word_at (sp_imm (word_n 1))) args;
         Il.emit e Il.Ret;
         if e.Il.emit_next_vreg != 0
         then bug () "%s uses nonzero vregs" name;

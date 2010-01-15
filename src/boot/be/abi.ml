@@ -155,7 +155,7 @@ type abi =
 
     abi_emit_proc_state_change: (Il.emitter -> proc_state -> unit);
     abi_emit_upcall: (Il.emitter -> upcall -> Il.operand array -> Common.fixup -> unit);
-    abi_emit_c_call: (Il.emitter -> nabi -> Common.fixup -> Il.operand array -> unit);
+    abi_emit_native_call: (Il.emitter -> nabi -> Common.fixup -> Il.cell -> Il.operand array -> unit);
 
     (* Global glue. *)
     abi_c_to_proc: (Il.emitter -> unit);
