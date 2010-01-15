@@ -89,6 +89,17 @@ let stmt_collecting_visitor
                       htab_put slots key sid.id;
                       htab_put cx.ctxt_slot_keys sid.id key
             end
+        | Ast.STMT_for f ->
+            begin
+              let slots = Hashtbl.find cx.ctxt_block_slots f.Ast.for_body.id in
+              let (si,ident) = f.Ast.for_slot in
+              let key = Ast.KEY_ident ident in
+                begin
+                  log cx "found decl of '%s' in linear-for block header" ident;
+                  htab_put slots key si.id;
+                  htab_put cx.ctxt_slot_keys si.id key
+                end
+            end
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre stmt
@@ -588,10 +599,10 @@ let process_crate
 
   let passes_0 =
     [|
-      (block_scope_forming_visitor cx
-         (stmt_collecting_visitor cx
-            (all_item_collecting_visitor cx path
-               Walk.empty_visitor)));
+      (block_scope_forming_visitor cx Walk.empty_visitor);
+      (stmt_collecting_visitor cx
+         (all_item_collecting_visitor cx path
+            Walk.empty_visitor));
       (scope_stack_managing_visitor scopes
          (type_reference_and_tag_extracting_visitor
             cx scopes node_to_references all_tags
