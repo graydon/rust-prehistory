@@ -430,8 +430,34 @@ let emit_c_call
         mov ret (ro eax);                                         (* write return value           *)
 ;;
 
-(* We clobber eax and edx here. This is only safe to use inside native function thunks. *)
 let emit_native_call
+    (e:Il.emitter)
+    (nabi:Abi.nabi)
+    (fn:fixup)
+    (ret:Il.cell)
+    (args:Il.operand array)
+    : unit =
+
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let (scratch1, _) = vreg e in
+  let (scratch2, _) = vreg e in
+
+    emit_c_call (rc eax) scratch1 scratch2 e nabi fn args;
+    mov ret (ro eax)
+;;
+
+let emit_native_void_call
+    (e:Il.emitter)
+    (nabi:Abi.nabi)
+    (fn:fixup)
+    (args:Il.operand array)
+    : unit =
+
+  emit_native_call e nabi fn (rc eax) args
+;;
+
+let emit_native_thunk
     (e:Il.emitter)
     (nabi:Abi.nabi)
     (fn:fixup)
@@ -443,8 +469,11 @@ let emit_native_call
   let mov dst src = emit (Il.umov dst src) in
 
     emit_c_call (rc eax) (h eax) (h edx) e nabi fn args;
-    mov (rc edx) (c ret);
-    mov (word_at (h edx)) (ro eax)
+
+    match ret with
+        Il.Reg (r, _) -> mov (word_at r) (ro eax)
+      | _ -> mov (rc edx) (c ret);
+             mov (word_at (h edx)) (ro eax)
 ;;
 
 let emit_upcall_full
@@ -854,6 +883,8 @@ let (abi:Abi.abi) =
     Abi.abi_emit_proc_state_change = emit_proc_state_change;
     Abi.abi_emit_upcall = emit_upcall;
     Abi.abi_emit_native_call = emit_native_call;
+    Abi.abi_emit_native_void_call = emit_native_void_call;
+    Abi.abi_emit_native_thunk = emit_native_thunk;
     Abi.abi_c_to_proc = c_to_proc;
     Abi.abi_proc_to_c = proc_to_c;
     Abi.abi_unwind = unwind_glue;

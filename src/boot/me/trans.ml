@@ -510,16 +510,7 @@ let trans_visitor
     let init_sz = Int64.of_int ((String.length s) + 1) in
     let static = trans_static_string s in
     let (dst, _) = trans_lval dst INTENT_init in
-      aliasing true dst
-        begin
-          fun dst_alias ->
-            trans_upcall Abi.UPCALL_new_str
-              [|
-                dst_alias;
-                static;
-                imm init_sz
-              |]
-        end
+      trans_upcall "upcall_new_str" dst [| static; imm init_sz |]
 
   and trans_atom (atom:Ast.atom) : Il.operand =
     iflog
@@ -673,13 +664,13 @@ let trans_visitor
     then
       begin
         let static = trans_static_string s in
-          trans_upcall Abi.UPCALL_trace_str [| static |]
+          trans_void_upcall "upcall_trace_str" [| static |]
       end
 
   and trace_word b w =
     if b
     then
-      trans_upcall Abi.UPCALL_trace_word [| Il.Cell w |]
+      trans_void_upcall "upcall_trace_word" [| Il.Cell w |]
 
   and get_drop_glue
       (ty:Ast.ty)
@@ -936,17 +927,23 @@ let trans_visitor
       trace_str cx.ctxt_sess.Session.sess_trace_block
         "exited block";
 
-  and trans_native_call (nabi:Abi.nabi) (lib:import_lib) (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_native_call (emitter()) nabi (Semant.import cx lib name) ret args;
+  and trans_native_thunk (nabi:Abi.nabi) (lib:import_lib) (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
+    abi.Abi.abi_emit_native_thunk (emitter()) nabi (Semant.import cx lib name) ret args;
 
-  and trans_upcall (u:Abi.upcall) (args:Il.operand array) : unit =
+  and trans_upcall (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
+    abi.Abi.abi_emit_native_call (emitter()) Abi.NABI_rust (Semant.import cx LIB_rustrt name) ret args;
+
+  and trans_void_upcall (name:string) (args:Il.operand array) : unit =
+    abi.Abi.abi_emit_native_void_call (emitter()) Abi.NABI_rust (Semant.import cx LIB_rustrt name) args;
+
+  and trans_upcall_slow (u:Abi.upcall) (args:Il.operand array) : unit =
     abi.Abi.abi_emit_upcall (emitter()) u args cx.ctxt_proc_to_c_fixup;
 
   and trans_log_int (a:Ast.atom) : unit =
-    trans_upcall Abi.UPCALL_log_int [| (trans_atom a) |]
+    trans_void_upcall "upcall_log_int" [| (trans_atom a) |]
 
   and trans_log_str (a:Ast.atom) : unit =
-    trans_upcall Abi.UPCALL_log_str [| (trans_atom a) |]
+    trans_void_upcall "upcall_log_str" [| (trans_atom a) |]
 
   and trans_spawn
       (initialising:bool)
@@ -976,7 +973,7 @@ let trans_visitor
       aliasing true proc_cell
         begin
           fun proc_cell_alias ->
-            trans_upcall Abi.UPCALL_new_proc
+            trans_upcall_slow Abi.UPCALL_new_proc
               [|
                 proc_cell_alias;
                 (alias_cell exit_proc_glue_cell);
@@ -996,7 +993,7 @@ let trans_visitor
               | Some sp -> sp.lo
     in
       iflog (fun _ -> annotate ("condition-fail: " ^ str));
-      trans_upcall Abi.UPCALL_fail
+      trans_upcall_slow Abi.UPCALL_fail
         [|
           trans_static_string str;
           trans_static_string filename;
@@ -1009,21 +1006,17 @@ let trans_visitor
       trans_cond_fail (Ast.fmt_to_str Ast.fmt_expr e) fwd_jmps
 
   and trans_malloc (dst:Il.cell) (nbytes:int64) : unit =
-    aliasing true dst
-      begin
-        fun dst_alias ->
-          trans_upcall Abi.UPCALL_malloc [| dst_alias; imm nbytes |]
-      end
+    trans_upcall "upcall_malloc" dst [| imm nbytes |]
 
   and trans_free (src:Il.cell) : unit =
-    trans_upcall Abi.UPCALL_free [| Il.Cell src |]
+    trans_void_upcall "upcall_free" [| Il.Cell src |]
 
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
     let (srccell, _) = trans_lval src INTENT_read in
       aliasing false srccell
         begin
           fun src_alias ->
-            trans_upcall Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan));
+            trans_upcall_slow Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan));
                                             src_alias |]
         end
 
@@ -1033,8 +1026,8 @@ let trans_visitor
       aliasing true dstcell
         begin
           fun dst_alias ->
-            trans_upcall Abi.UPCALL_recv [| dst_alias;
-                                            (trans_atom (Ast.ATOM_lval chan)) |]
+            trans_upcall_slow Abi.UPCALL_recv [| dst_alias;
+                                                 (trans_atom (Ast.ATOM_lval chan)) |]
         end
 
   and trans_init_port (dst:Ast.lval) : unit =
@@ -1044,19 +1037,14 @@ let trans_visitor
       | _ -> bug () "init dst of port-init has non-port type"
     in
     let unit_sz = ty_sz abi unit_ty in
-      aliasing true dstcell
-        begin
-          fun dst_alias ->
-            trans_upcall Abi.UPCALL_new_port [| dst_alias;
-                                                imm unit_sz |]
-        end
+      trans_upcall "upcall_new_port" dstcell [| imm unit_sz |]
 
   and trans_del_port (port:Il.cell) : unit =
-    trans_upcall Abi.UPCALL_del_port [| Il.Cell port |]
+    trans_void_upcall "upcall_del_port" [| Il.Cell port |]
 
   and trans_del_proc (proc:Il.cell) : unit =
     (* FIXME: this needs to unwind the target, run the fini block, and all that. *)
-    trans_upcall Abi.UPCALL_del_proc [| Il.Cell proc |]
+    trans_upcall_slow Abi.UPCALL_del_proc [| Il.Cell proc |]
 
   (*
    * A vec is implicitly exterior: every slot vec[T] is 1 word and
@@ -2310,7 +2298,7 @@ let trans_visitor
     in
       push_new_emitter ();
       let e = (emitter()) in
-        trans_native_call nabi lib name (word_at (sp_imm (word_n 1))) args;
+        trans_native_thunk nabi lib name (word_at (sp_imm (word_n 1))) args;
         Il.emit e Il.Ret;
         if e.Il.emit_next_vreg != 0
         then bug () "%s uses nonzero vregs" name;

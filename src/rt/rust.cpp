@@ -127,7 +127,7 @@ static char const * const state_names[] =
     };
 
 typedef enum {
-    upcall_code_log_uint32     = 0,
+    upcall_code_log_int        = 0,
     upcall_code_log_str        = 1,
     upcall_code_new_proc       = 2,
     upcall_code_del_proc       = 3,
@@ -1048,7 +1048,7 @@ proc_state_transition(rust_rt *rt,
     add_proc_state_vec(rt, proc);
 }
 
-extern "C" void
+extern "C" CDECL void
 fail_proc(rust_rt *rt, rust_proc *proc)
 {
     rt->log(LOG_PROC,
@@ -1060,7 +1060,7 @@ fail_proc(rust_rt *rt, rust_proc *proc)
                           proc_state_failing);
 }
 
-extern "C" void
+extern "C" CDECL void
 upcall_del_proc(rust_proc *proc)
 {
     rust_rt *rt = proc->rt;
@@ -1235,25 +1235,28 @@ rust_rt::sched()
 
 /* Upcalls */
 
-static void
-upcall_log_uint32_t(rust_proc *proc, uint32_t i)
+extern "C" CDECL char const *str_buf(rust_proc *proc, rust_str *s);
+
+extern "C" CDECL void
+upcall_log_int(rust_proc *proc, int32_t i)
 {
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_ULOG,
-            "upcall log_uint32(0x%" PRIx32 " = %" PRId32 " = '%c')",
+            "upcall log_int(0x%" PRIx32 " = %" PRId32 " = '%c')",
             i, i, (char)i);
 }
 
-extern "C" void
-upcall_log_str(rust_proc *proc, char const *c)
+extern "C" CDECL void
+upcall_log_str(rust_proc *proc, rust_str *str)
 {
     rust_rt *rt = proc->rt;
+    const char *c = str_buf(proc, str);
     rt->log(LOG_UPCALL|LOG_ULOG,
             "upcall log_str(\"%s\")",
             c);
 }
 
-extern "C" void
+extern "C" CDECL void
 upcall_trace_word(rust_proc *proc, uintptr_t i)
 {
     rust_rt *rt = proc->rt;
@@ -1262,7 +1265,7 @@ upcall_trace_word(rust_proc *proc, uintptr_t i)
             i, i, (char)i);
 }
 
-extern "C" void
+extern "C" CDECL void
 upcall_trace_str(rust_proc *proc, char const *c)
 {
     rust_rt *rt = proc->rt;
@@ -1271,7 +1274,7 @@ upcall_trace_str(rust_proc *proc, char const *c)
             c);
 }
 
-extern "C" rust_port*
+extern "C" CDECL rust_port*
 upcall_new_port(rust_proc *proc, size_t unit_sz)
 {
     rust_rt *rt = proc->rt;
@@ -1283,7 +1286,7 @@ upcall_new_port(rust_proc *proc, size_t unit_sz)
     return port;
 }
 
-extern "C" void
+extern "C" CDECL void
 upcall_del_port(rust_proc *proc, rust_port *port)
 {
     rust_rt *rt = proc->rt;
@@ -1365,7 +1368,7 @@ attempt_transmission(rust_rt *rt,
     return 1;
 }
 
-extern "C" void
+extern "C" CDECL void
 upcall_send(rust_proc *src, rust_port *port, void *sptr)
 {
     rust_rt *rt = src->rt;
@@ -1419,7 +1422,7 @@ upcall_send(rust_proc *src, rust_port *port, void *sptr)
     }
 }
 
-extern "C" void
+extern "C" CDECL void
 upcall_recv(rust_proc *dst, rust_port *port)
 {
     rust_rt *rt = dst->rt;
@@ -1454,7 +1457,7 @@ upcall_recv(rust_proc *dst, rust_port *port)
     }
 }
 
-extern "C" void
+extern "C" CDECL void
 upcall_fail(rust_proc *proc, char const *expr, char const *file, size_t line)
 {
     rust_rt *rt =proc->rt;
@@ -1465,7 +1468,7 @@ upcall_fail(rust_proc *proc, char const *expr, char const *file, size_t line)
     fail_proc(rt, proc);
 }
 
-extern "C" uintptr_t
+extern "C" CDECL uintptr_t
 upcall_malloc(rust_proc *proc, size_t nbytes)
 {
     rust_rt *rt = proc->rt;
@@ -1476,7 +1479,7 @@ upcall_malloc(rust_proc *proc, size_t nbytes)
     return (uintptr_t) p;
 }
 
-extern "C" void
+extern "C" CDECL void
 upcall_free(rust_proc *proc, void* ptr)
 {
     rust_rt *rt = proc->rt;
@@ -1502,7 +1505,7 @@ next_power_of_two(size_t s)
 }
 
 
-extern "C" rust_str*
+extern "C" CDECL rust_str*
 upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 {
     rust_rt *rt = proc->rt;
@@ -1519,8 +1522,6 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
     return st;
 }
 
-
-extern "C" CDECL char const *str_buf(rust_proc *proc, rust_str *s);
 
 static void
 rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv);
@@ -1575,7 +1576,7 @@ static void *rust_thread_start(void *ptr)
     return 0;
 }
 
-extern "C" rust_proc*
+extern "C" CDECL rust_proc*
 upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue,
                 uintptr_t spawnee_fn, size_t callsz)
 {
@@ -1588,7 +1589,7 @@ upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue,
     return proc;
 }
 
-extern "C" rust_proc *
+extern "C" CDECL rust_proc *
 upcall_new_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn)
 {
     rust_rt *rt = spawner->rt;
@@ -1622,11 +1623,11 @@ handle_upcall(rust_proc *proc)
     uintptr_t *args = &proc->upcall_args[0];
 
     switch ((upcall_t)proc->upcall_code) {
-    case upcall_code_log_uint32:
-        upcall_log_uint32_t(proc, args[0]);
+    case upcall_code_log_int:
+        upcall_log_int(proc, args[0]);
         break;
     case upcall_code_log_str:
-        upcall_log_str(proc, str_buf(proc, (rust_str*)args[0]));
+        upcall_log_str(proc, (rust_str*)args[0]);
         break;
     case upcall_code_new_proc:
         *((rust_proc**)args[0]) =
@@ -1850,8 +1851,7 @@ implode(rust_proc *proc, rust_vec *v)
     return s;
 }
 
-extern "C"
-int CDECL
+extern "C" CDECL int
 rust_start(uintptr_t main_fn,
            uintptr_t main_exit_proc_glue,
            void CDECL (*c_to_proc_glue)(rust_proc*))
