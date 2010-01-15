@@ -95,7 +95,6 @@ type import_lib =
 
 type fixup =
     { fixup_name: string;
-      fixup_lib: import_lib option;
       mutable fixup_file_pos: int option;
       mutable fixup_file_sz: int option;
       mutable fixup_mem_pos: int64 option;
@@ -103,10 +102,9 @@ type fixup =
 ;;
 
 
-let new_fixup ?(lib = None) (s:string)
+let new_fixup (s:string)
     : fixup =
   { fixup_name = s;
-    fixup_lib = lib;
     fixup_file_pos = None;
     fixup_file_sz = None;
     fixup_mem_pos = None;
@@ -142,6 +140,14 @@ let htab_search (htab:('a,'b) Hashtbl.t) (k:'a) : ('b option) =
   if Hashtbl.mem htab k
   then Some (Hashtbl.find htab k)
   else None
+;;
+
+let htab_search_or_add (htab:('a,'b) Hashtbl.t) (k:'a) (mk:unit -> 'b) : 'b =
+  match htab_search htab k with
+      Some v -> v
+    | None -> let v = mk () in
+        Hashtbl.add htab k v;
+        v
 ;;
 
 let htab_put (htab:('a,'b) Hashtbl.t) (a:'a) (b:'b) : unit =

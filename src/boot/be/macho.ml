@@ -587,7 +587,14 @@ let emit_file
   in
 
   let indirect_symbols =
-    Array.of_list(htab_vals sem.Semant.ctxt_import_fixups)
+    Array.of_list
+      (List.concat
+         (List.map
+            (fun (lib, tab) ->
+               (List.map
+                  (fun (name,fix) -> (lib,name,fix))
+                  (htab_pairs tab)))
+            (htab_pairs sem.Semant.ctxt_imports)))
   in
 
   let dylib_index (lib:import_lib) : int =
@@ -597,12 +604,10 @@ let emit_file
   in
 
   let (symbols:(string * (frag * fixup)) array) =
-    Array.map (fun fixup ->
-                 ("_" ^ fixup.fixup_name,
-                  indirect_symbol_nlist_entry (match fixup.fixup_lib with
-                                                   Some lib -> dylib_index lib
-                                                 | None -> failwith "invalid indirect symbol")))
-              indirect_symbols
+    Array.map (fun (lib,name,_) ->
+                 ("_" ^ name,
+                  indirect_symbol_nlist_entry (dylib_index lib)))
+      indirect_symbols
   in
 
   let (symbols:(string * (frag * fixup)) array) =
@@ -627,7 +632,8 @@ let emit_file
   let nl_symbol_ptr_section =
     def_aligned data_sect_align nl_symbol_ptr_section_fixup
       (SEQ (Array.map
-              (fun fix -> DEF(fix, WORD(TY_u32, IMM 0L)))
+              (fun (_, name, fix) ->
+                 DEF(fix, WORD(TY_u32, IMM 0L)))
               indirect_symbols))
   in
   let strtab = DEF (strtab_fixup,

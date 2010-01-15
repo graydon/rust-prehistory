@@ -1380,7 +1380,17 @@ let emit_file
     htab_put rodata_frags "rust_rodata" data;
     htab_put import_fixups "__libc_start_main" libc_start_main_fixup;
 
-    Hashtbl.iter (fun name fixup -> htab_put import_fixups name fixup) sem.Semant.ctxt_import_fixups
+    Hashtbl.iter
+      begin
+        fun lib tab ->
+          Hashtbl.iter
+            begin
+              fun name fixup ->
+                htab_put import_fixups name fixup
+            end
+            tab
+      end
+      sem.Semant.ctxt_imports
   in
   let all_frags =
     elf32_linux_x86_file

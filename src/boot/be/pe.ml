@@ -619,21 +619,33 @@ let pe_text_section
 
 (*********************************************************************************)
 
-let rustrt_imports =
-  {
-    pe_import_dll_name_fixup = new_fixup "dll name";
-    pe_import_dll_name = "rustrt.dll";
-    pe_import_dll_ILT_fixup = new_fixup "dll ILT";
-    pe_import_dll_IAT_fixup = new_fixup "dll IAT";
-    pe_import_dll_imports =
-      [|
-        {
-          pe_import_name_fixup = new_fixup "import name";
-          pe_import_name = "rust_start";
-          pe_import_address_fixup = new_fixup "import address";
-        }
-      |];
-  }
+let rustrt_imports sem =
+  let make_imports_for_lib (lib, tab) =
+    {
+      pe_import_dll_name_fixup = new_fixup "dll name";
+      pe_import_dll_name = (match lib with
+                                LIB_rustrt -> "rustrt.dll"
+                              | LIB_c -> "msvcrt.dll");
+      pe_import_dll_ILT_fixup = new_fixup "dll ILT";
+      pe_import_dll_IAT_fixup = new_fixup "dll IAT";
+      pe_import_dll_imports =
+        Array.of_list
+          (List.map
+             begin
+               fun (name, fixup) ->
+                 {
+                   pe_import_name_fixup = new_fixup "import name";
+                   pe_import_name = name;
+                   pe_import_address_fixup = fixup;
+                 }
+             end
+             (htab_pairs tab))
+    }
+  in
+    Array.of_list
+      (List.map
+         make_imports_for_lib
+         (htab_pairs sem.Semant.ctxt_imports))
 ;;
 
 let emit_file
@@ -655,6 +667,8 @@ let emit_file
   let image_fixup = new_fixup "image fixup" in
   let symtab_fixup = new_fixup "symbol table" in
   let strtab_fixup = new_fixup "string table" in
+
+  let rust_start_fixup = Semant.import sem LIB_rustrt "rust_start" in
 
   let header = (pe_header
                   ~machine: IMAGE_FILE_MACHINE_I386
@@ -715,7 +729,7 @@ let emit_file
   in
   let import_section = (pe_import_section
                           ~section_fixup: import_dir_fixup
-                          ~dlls: [| rustrt_imports |])
+                          ~dlls: (rustrt_imports sem))
   in
   let import_header = (pe_section_header
                          ~id: SECTION_ID_IMPORTS
@@ -772,7 +786,7 @@ let emit_file
   let text_section = (pe_text_section
                         ~sess
                         ~start_fixup
-                        ~rust_start_fixup: rustrt_imports.pe_import_dll_imports.(0).pe_import_address_fixup
+                        ~rust_start_fixup
                         ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
                         ~main_exit_proc_glue_fixup: sem.Semant.ctxt_main_exit_proc_glue_fixup
                         ~text_fixup

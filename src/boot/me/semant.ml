@@ -113,7 +113,7 @@ type ctxt =
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
 
-      ctxt_import_fixups: (string,fixup) Hashtbl.t;
+      ctxt_imports: (import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
 
       ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
@@ -168,7 +168,7 @@ let new_ctxt sess abi crate =
     ctxt_glue_code = Hashtbl.create 0;
     ctxt_data = Hashtbl.create 0;
 
-    ctxt_import_fixups = Hashtbl.create 0;
+    ctxt_imports = Hashtbl.create 0;
 
     ctxt_main_fn_fixup = new_fixup "main fn fixup";
     ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main;
@@ -257,14 +257,11 @@ let get_spill (cx:ctxt) (id:node_id) : fixup =
 ;;
 
 let import (cx:ctxt) (lib:import_lib) (name:string) : fixup =
-  if Hashtbl.mem cx.ctxt_import_fixups name
-  then Hashtbl.find cx.ctxt_import_fixups name
-  else
-    let fixup = new_fixup name ~lib:(Some lib) in
-      begin
-        Hashtbl.add cx.ctxt_import_fixups name fixup;
-        fixup
-      end
+  let lib_tab = (htab_search_or_add cx.ctxt_imports lib
+                   (fun _ -> Hashtbl.create 0))
+  in
+    htab_search_or_add lib_tab name
+      (fun _ -> new_fixup ("import: " ^ name))
 ;;
 
 let slot_ty (s:Ast.slot) : Ast.ty =

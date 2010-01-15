@@ -52,7 +52,7 @@ let (sess:Session.sess) =
 
 let argspecs =
   [
-    ("-t", Arg.Symbol (["linux-x86-elf"; "win32-x86-pe"],
+    ("-t", Arg.Symbol (["linux-x86-elf"; "win32-x86-pe"; "macos-x86-macho"],
                        fun s -> (sess.Session.sess_targ <-
                                   (match s with
                                        "win32-x86-pe" -> Win32_x86_pe
