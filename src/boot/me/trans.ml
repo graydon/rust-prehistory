@@ -65,6 +65,16 @@ let trans_visitor
   let imm_true = one in
   let imm_false = zero in
 
+  let nabi_indirect =
+      match cx.ctxt_sess.Session.sess_targ with
+          Linux_x86_elf -> false
+        | _ -> true
+  in
+  let nabi_rust =
+    { Abi.nabi_indirect = nabi_indirect;
+      Abi.nabi_convention = Abi.CONV_rust }
+  in
+
   let out_addr_disp = abi.Abi.abi_frame_base_sz in
   let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
   let frame_fns_disp = word_n (-1) in
@@ -931,10 +941,10 @@ let trans_visitor
     abi.Abi.abi_emit_native_thunk (emitter()) nabi (Semant.import cx lib name) ret args;
 
   and trans_upcall (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_native_call (emitter()) Abi.NABI_rust (Semant.import cx LIB_rustrt name) ret args;
+    abi.Abi.abi_emit_native_call (emitter()) nabi_rust (Semant.import cx LIB_rustrt name) ret args;
 
   and trans_void_upcall (name:string) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_native_void_call (emitter()) Abi.NABI_rust (Semant.import cx LIB_rustrt name) args;
+    abi.Abi.abi_emit_native_void_call (emitter()) nabi_rust (Semant.import cx LIB_rustrt name) args;
 
   and trans_upcall_slow (u:Abi.upcall) (args:Il.operand array) : unit =
     abi.Abi.abi_emit_upcall (emitter()) u args cx.ctxt_proc_to_c_fixup;
@@ -2278,15 +2288,15 @@ let trans_visitor
 
   let trans_native_fn (fnid:node_id) (nfn:Ast.native_fn) : unit =
     let nabi =
-      match (Abi.string_to_nabi nfn.Ast.native_fn_abi) with
+      match (Abi.string_to_nabi nfn.Ast.native_fn_abi nabi_indirect) with
           Some n -> n
         | None -> (err None "invalid abi specification")
     in
-    (* This is a gross hack. The library should come from the frontend. *)
+      (* FIXME: This is a gross hack. The library should come from the frontend. *)
     let lib =
-      match nabi with
-          Abi.NABI_rust -> LIB_rustrt
-        | Abi.NABI_cdecl -> LIB_c
+      match nabi.Abi.nabi_convention with
+          Abi.CONV_rust -> LIB_rustrt
+        | Abi.CONV_cdecl -> LIB_c
     in
     let name =
       (Ast.fmt_to_str Ast.fmt_name (Hashtbl.find cx.ctxt_all_item_names fnid))

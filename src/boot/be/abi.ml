@@ -32,10 +32,13 @@ type upcall =
   | UPCALL_trace_str
 ;;
 
-type nabi =
-    NABI_rust
-  | NABI_cdecl
+type nabi_conv =
+    CONV_rust
+  | CONV_cdecl
 ;;
+
+type nabi = { nabi_indirect: bool;
+              nabi_convention: nabi_conv }
 
 (* NB: all these numbers must be kept in sync with runtime. *)
 let proc_state_to_code (st:proc_state) : int64 =
@@ -67,18 +70,13 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_trace_str -> 14L
 ;;
 
-let nabi_to_code (a:string) : int64 option =
+let string_to_nabi (a:string) (indirect:bool) : nabi option =
   match a with
-    "cdecl" -> (Some 0L)
-  | "rust" -> (Some 1L)
-  | _ -> None
-;;
-
-let string_to_nabi (a:string) : nabi option =
-  match a with
-    "cdecl" -> (Some NABI_cdecl)
-  | "rust" -> (Some NABI_rust)
-  | _ -> None
+      "cdecl" -> (Some { nabi_indirect = indirect;
+                         nabi_convention = CONV_cdecl })
+    | "rust" -> (Some { nabi_indirect = indirect;
+                        nabi_convention = CONV_rust })
+    | _ -> None
 ;;
 
 (* Word offsets for structure fields in rust.h. *)

@@ -381,7 +381,7 @@ let emit_c_call
   let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
 
   let args =                                                      (* rust calls get proc as arg0  *)
-    if nabi = Abi.NABI_rust
+    if nabi.Abi.nabi_convention = Abi.CONV_rust
     then Array.append [| c proc_ptr |] args
     else args
   in
@@ -416,8 +416,13 @@ let emit_c_call
                            mov (word_n newsp i) arg)
                   args;
 
-      let addr = (Il.CodeAddr (Il.Abs (Asm.M_POS fn))) in         (* switch stacks and call fn    *)
-        emit (Il.call (rc eax) (c (r newsp)) addr);
+      let addr =
+        if nabi.Abi.nabi_indirect
+        then (Il.Abs (Asm.M_POS fn))
+        else Il.Pcrel (fn, None)
+      in
+        (* switch stacks and call fn    *)
+        emit (Il.call (rc eax) (c (r newsp)) (Il.CodeAddr addr));
 
         mov (rc esp) (c (word_n (h esp) nargs));                  (* esp = stashed proc           *)
         mov (rc esp) (c (word_n (h esp) Abi.proc_field_rust_sp)); (* sp = proc->rust_sp           *)
