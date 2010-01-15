@@ -2335,7 +2335,7 @@ let trans_visitor
     let args =
       (Array.init (Array.length nfn.Ast.native_fn_input_slots)
                   (fun (n:int) ->
-                     (Il.Cell (word_at (fp_imm (Int64.add arg0_disp (word_n (n + 2))))))));
+                     (Il.Cell (word_at (sp_imm (Int64.add (Int64.of_int n) (word_n 3)))))))
     in
       push_new_emitter ();
       let e =
