@@ -1048,7 +1048,7 @@ proc_state_transition(rust_rt *rt,
     add_proc_state_vec(rt, proc);
 }
 
-static void
+extern "C" void
 fail_proc(rust_rt *rt, rust_proc *proc)
 {
     rt->log(LOG_PROC,
@@ -1060,9 +1060,10 @@ fail_proc(rust_rt *rt, rust_proc *proc)
                           proc_state_failing);
 }
 
-static void
-upcall_del_proc(rust_rt *rt, rust_proc *proc)
+extern "C" void
+upcall_del_proc(rust_proc *proc)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL,
             "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
             proc, proc->refcnt);
@@ -1235,40 +1236,45 @@ rust_rt::sched()
 /* Upcalls */
 
 static void
-upcall_log_uint32_t(rust_rt *rt, uint32_t i)
+upcall_log_uint32_t(rust_proc *proc, uint32_t i)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_ULOG,
             "upcall log_uint32(0x%" PRIx32 " = %" PRId32 " = '%c')",
             i, i, (char)i);
 }
 
-static void
-upcall_log_str(rust_rt *rt, char const *c)
+extern "C" void
+upcall_log_str(rust_proc *proc, char const *c)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_ULOG,
             "upcall log_str(\"%s\")",
             c);
 }
 
-static void
-upcall_trace_word(rust_rt *rt, uintptr_t i)
+extern "C" void
+upcall_trace_word(rust_proc *proc, uintptr_t i)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_TRACE,
             "trace: 0x%" PRIxPTR "",
             i, i, (char)i);
 }
 
-static void
-upcall_trace_str(rust_rt *rt, char const *c)
+extern "C" void
+upcall_trace_str(rust_proc *proc, char const *c)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_TRACE,
             "trace: %s",
             c);
 }
 
-static rust_port*
-upcall_new_port(rust_rt *rt, rust_proc *proc, size_t unit_sz)
+extern "C" rust_port*
+upcall_new_port(rust_proc *proc, size_t unit_sz)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
             "upcall_new_port(proc=0x%" PRIxPTR ", unit_sz=%d)",
             (uintptr_t)proc, unit_sz);
@@ -1277,9 +1283,10 @@ upcall_new_port(rust_rt *rt, rust_proc *proc, size_t unit_sz)
     return port;
 }
 
-static void
-upcall_del_port(rust_rt *rt, rust_port *port)
+extern "C" void
+upcall_del_port(rust_proc *proc, rust_port *port)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
             "upcall del_port(0x%" PRIxPTR "), live refcnt=%d, weak refcnt=%d",
             (uintptr_t)port, port->live_refcnt, port->weak_refcnt);
@@ -1358,10 +1365,10 @@ attempt_transmission(rust_rt *rt,
     return 1;
 }
 
-static void
-upcall_send(rust_rt *rt, rust_proc *src,
-            rust_port *port, void *sptr)
+extern "C" void
+upcall_send(rust_proc *src, rust_port *port, void *sptr)
 {
+    rust_rt *rt = src->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall send(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
             (uintptr_t)src,
@@ -1412,9 +1419,10 @@ upcall_send(rust_rt *rt, rust_proc *src,
     }
 }
 
-static void
-upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
+extern "C" void
+upcall_recv(rust_proc *dst, rust_port *port)
 {
+    rust_rt *rt = dst->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall recv(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
             (uintptr_t)dst,
@@ -1446,11 +1454,10 @@ upcall_recv(rust_rt *rt, rust_proc *dst, rust_port *port)
     }
 }
 
-
-static void
-upcall_fail(rust_rt *rt, rust_proc *proc, char const *expr, char const *file,
-            size_t line)
+extern "C" void
+upcall_fail(rust_proc *proc, char const *expr, char const *file, size_t line)
 {
+    rust_rt *rt =proc->rt;
     /* FIXME: throw, don't just exit. */
     rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
             expr, file, line);
@@ -1458,9 +1465,10 @@ upcall_fail(rust_rt *rt, rust_proc *proc, char const *expr, char const *file,
     fail_proc(rt, proc);
 }
 
-static uintptr_t
-upcall_malloc(rust_rt *rt, rust_proc *proc, size_t nbytes)
+extern "C" uintptr_t
+upcall_malloc(rust_proc *proc, size_t nbytes)
 {
+    rust_rt *rt = proc->rt;
     void *p = rt->malloc(nbytes);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall malloc(%u) = 0x%" PRIxPTR,
@@ -1468,9 +1476,10 @@ upcall_malloc(rust_rt *rt, rust_proc *proc, size_t nbytes)
     return (uintptr_t) p;
 }
 
-static void
-upcall_free(rust_rt *rt, void* ptr)
+extern "C" void
+upcall_free(rust_proc *proc, void* ptr)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall free(0x%" PRIxPTR ")",
             (uintptr_t)ptr);
@@ -1493,9 +1502,10 @@ next_power_of_two(size_t s)
 }
 
 
-static rust_str*
-upcall_new_str(rust_rt *rt, char const *s, size_t fill)
+extern "C" rust_str*
+upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 {
+    rust_rt *rt = proc->rt;
     size_t alloc = next_power_of_two(fill);
     rust_str *st = (rust_str*) rt->malloc(sizeof(rust_str) + alloc);
     st->refcnt = 1;
@@ -1565,10 +1575,11 @@ static void *rust_thread_start(void *ptr)
     return 0;
 }
 
-static rust_proc*
-upcall_new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
+extern "C" rust_proc*
+upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue,
                 uintptr_t spawnee_fn, size_t callsz)
 {
+    rust_rt *rt = spawner->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
          "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
          exit_proc_glue, spawnee_fn, callsz);
@@ -1577,9 +1588,10 @@ upcall_new_proc(rust_rt *rt, rust_proc *spawner, uintptr_t exit_proc_glue,
     return proc;
 }
 
-static rust_proc *
-upcall_new_thread(rust_rt *rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn)
+extern "C" rust_proc *
+upcall_new_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn)
 {
+    rust_rt *rt = spawner->rt;
     rust_srv *srv = rt->srv;
     /*
      * The ticket is not bound to the current runtime, so allocate directly from the
@@ -1611,46 +1623,46 @@ handle_upcall(rust_proc *proc)
 
     switch ((upcall_t)proc->upcall_code) {
     case upcall_code_log_uint32:
-        upcall_log_uint32_t(proc->rt, args[0]);
+        upcall_log_uint32_t(proc, args[0]);
         break;
     case upcall_code_log_str:
-        upcall_log_str(proc->rt, str_buf(proc, (rust_str*)args[0]));
+        upcall_log_str(proc, str_buf(proc, (rust_str*)args[0]));
         break;
     case upcall_code_new_proc:
         *((rust_proc**)args[0]) =
-            upcall_new_proc(proc->rt, proc, args[1], args[2],(size_t)args[3]);
+            upcall_new_proc(proc, args[1], args[2],(size_t)args[3]);
         break;
     case upcall_code_del_proc:
-        upcall_del_proc(proc->rt, (rust_proc*)args[0]);
+        upcall_del_proc((rust_proc*)args[0]);
         break;
     case upcall_code_fail:
-        upcall_fail(proc->rt, proc,
+        upcall_fail(proc,
                     (char const *)args[0],
                     (char const *)args[1],
                     (size_t)args[2]);
         break;
     case upcall_code_malloc:
         *((uintptr_t*)args[0]) =
-            upcall_malloc(proc->rt, proc, (size_t)args[1]);
+            upcall_malloc(proc, (size_t)args[1]);
         break;
     case upcall_code_free:
-        upcall_free(proc->rt, (void*)args[0]);
+        upcall_free(proc, (void*)args[0]);
         break;
     case upcall_code_new_port:
         *((rust_port**)args[0]) =
-            upcall_new_port(proc->rt, proc, (size_t)args[1]);
+            upcall_new_port(proc, (size_t)args[1]);
         break;
     case upcall_code_del_port:
-        upcall_del_port(proc->rt, (rust_port*)args[0]);
+        upcall_del_port(proc, (rust_port*)args[0]);
         break;
     case upcall_code_send:
-        upcall_send(proc->rt, proc, (rust_port*)args[0], (void*)args[1]);
+        upcall_send(proc, (rust_port*)args[0], (void*)args[1]);
         break;
     case upcall_code_recv:
-        upcall_recv(proc->rt, proc, (rust_port*)args[1]);
+        upcall_recv(proc, (rust_port*)args[1]);
         break;
     case upcall_code_new_str:
-        *((rust_str**)args[0]) = upcall_new_str(proc->rt,
+        *((rust_str**)args[0]) = upcall_new_str(proc,
                                              (char const *)args[1],
                                              (size_t)args[2]);
         break;
@@ -1658,10 +1670,10 @@ handle_upcall(rust_proc *proc)
         upcall_grow_proc(proc, (size_t)args[0], (size_t)args[1]);
         break;
     case upcall_code_trace_word:
-        upcall_trace_word(proc->rt, args[0]);
+        upcall_trace_word(proc, args[0]);
         break;
     case upcall_code_trace_str:
-        upcall_trace_str(proc->rt, (char const *)args[0]);
+        upcall_trace_str(proc, (char const *)args[0]);
         break;
     }
 }
@@ -1827,7 +1839,7 @@ implode(rust_proc *proc, rust_vec *v)
     rust_str *s;
 
     size_t fill = v->fill >> 2;
-    s = upcall_new_str(proc->rt, NULL, fill);
+    s = upcall_new_str(proc, NULL, fill);
 
     uint32_t *src = (uint32_t*) &v->data[0];
     uint8_t *dst = &s->data[0];
