@@ -925,6 +925,8 @@ let trans_visitor
       trace_str cx.ctxt_sess.Session.sess_trace_block
         "exited block";
 
+  and trans_c_call (nabi:Abi.nabi) (lib:import_lib) (name:string) (args:Il.operand array) : unit =
+    abi.Abi.abi_emit_c_call (emitter()) nabi (Semant.import cx lib name) args;
 
   and trans_upcall (u:Abi.upcall) (args:Il.operand array) : unit =
     abi.Abi.abi_emit_upcall (emitter()) u args cx.ctxt_proc_to_c_fixup;
@@ -2268,7 +2270,7 @@ let trans_visitor
         trans_frame_exit tagid;
   in
 
-  let trans_native_fn (fnid:node_id) (nfn:Ast.native_fn) : unit =
+  let trans_native_fn_via_upcall (fnid:node_id) (nfn:Ast.native_fn) : unit =
 
     trans_frame_entry fnid;
     (* 
@@ -2295,6 +2297,35 @@ let trans_visitor
             |];
           trans_frame_exit fnid;
       end
+  in
+
+  let trans_native_fn_via_c_call (fnid:node_id) (nfn:Ast.native_fn) : unit =
+    let nabi =
+      match (Abi.string_to_nabi nfn.Ast.native_fn_abi) with
+          Some n -> n
+        | None -> (err None "invalid abi specification")
+    in
+    (* This is a gross hack. The library should come from the frontend. *)
+    let lib =
+      match nabi with
+          Abi.NABI_rust -> LIB_rustrt
+        | Abi.NABI_cdecl -> LIB_c
+    in
+    let name =
+      (Ast.fmt_to_str Ast.fmt_name (Hashtbl.find cx.ctxt_all_item_names fnid))
+    in
+    let args =
+      (Array.init (Array.length nfn.Ast.native_fn_input_slots)
+                  (fun (n:int) ->
+                     (Il.Cell (word_at (fp_imm (Int64.add arg0_disp (word_n (n + 2))))))));
+    in
+      push_new_emitter ();
+      trans_c_call nabi lib name args;
+      pop_emitter ();
+  in
+
+  let trans_native_fn =
+    trans_native_fn_via_upcall
   in
 
   let enter_file_for i =

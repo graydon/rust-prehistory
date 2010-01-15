@@ -33,6 +33,11 @@ type upcall =
   | UPCALL_trace_str
 ;;
 
+type nabi =
+    NABI_rust
+  | NABI_cdecl
+;;
+
 (* NB: all these numbers must be kept in sync with runtime. *)
 let proc_state_to_code (st:proc_state) : int64 =
   match st with
@@ -68,6 +73,13 @@ let nabi_to_code (a:string) : int64 option =
   match a with
     "cdecl" -> (Some 0L)
   | "rust" -> (Some 1L)
+  | _ -> None
+;;
+
+let string_to_nabi (a:string) : nabi option =
+  match a with
+    "cdecl" -> (Some NABI_cdecl)
+  | "rust" -> (Some NABI_rust)
   | _ -> None
 ;;
 
@@ -138,6 +150,7 @@ type abi =
 
     abi_emit_proc_state_change: (Il.emitter -> proc_state -> unit);
     abi_emit_upcall: (Il.emitter -> upcall -> Il.operand array -> Common.fixup -> unit);
+    abi_emit_c_call: (Il.emitter -> nabi -> Common.fixup -> Il.operand array -> unit);
 
     (* Global glue. *)
     abi_c_to_proc: (Il.emitter -> unit);

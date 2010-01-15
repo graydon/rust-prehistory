@@ -366,6 +366,61 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
     mov (vr_n Abi.proc_field_state) (immi code);
 ;;
 
+let emit_c_call_full
+    (scratch:Il.reg)
+    (e:Il.emitter)
+    (nabi:Abi.nabi)
+    (fn:fixup)
+    (args:Il.operand array)
+    : unit =
+
+  let scratch_n = word_n scratch in
+  let esp_n = word_n (h esp) in
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
+  let pcrel f = Il.CodeAddr (Il.Pcrel (f, None)) in
+
+  let args =                                                   (* rust calls get proc as 1st arg  *)
+    if nabi = Abi.NABI_rust
+    then Array.append [| c proc_ptr |] args
+    else args
+  in
+  let nargs = Array.length args in
+
+    mov (r scratch) (c proc_ptr);                              (* scratch <- proc                 *)
+    mov (r scratch) (c (scratch_n Abi.proc_field_runtime_sp)); (* scratch <- proc->runtime_sp     *)
+
+    (*
+     * Note: c_to_proc ensures that runtime_sp is always aligned at a 16-byte boundary. We reserve
+     * room for the arguments on the stack, plus one word to save the rust stack pointer. The
+     * frame size is then aligned again at the nearest 16-byte boundary.
+     *)
+    let frame_sz =
+      Int64.of_int(((4 * (nargs + 1)) + 15) land (lnot 15))
+    in
+      sub (r scratch) frame_sz;
+
+    mov (scratch_n nargs) (ro esp);                            (* stash proc's sp above arguments *)
+    Array.iteri (fun i arg -> mov (scratch_n i) arg) args;     (* write arguments onto C stack    *)
+
+    emit (Il.call (r scratch) (c (r scratch)) (pcrel fn));     (* switch stacks and call fn       *)
+
+    mov (rc esp) (c (esp_n nargs))                             (* restore proc's sp               *)
+;;
+
+let emit_c_call
+    (e:Il.emitter)
+    (nabi:Abi.nabi)
+    (fn:fixup)
+    (args:Il.operand array)
+    : unit =
+
+  let (vr,_) = vreg e in
+    emit_c_call_full vr e nabi fn args
+;;
+
+
 let emit_upcall_full
     (scratch:Il.reg)
     (e:Il.emitter)
@@ -683,7 +738,8 @@ let c_to_proc (e:Il.emitter) : unit =
    * compilation unit.
    *
    *   - save regs on C stack
-   *   - save sp to rt.sp
+   *   - align sp on a 16-byte boundary
+   *   - save sp to proc.runtime_sp (runtime_sp is thus always aligned)
    *   - load saved proc sp (switch stack)
    *   - restore saved proc regs
    *   - return to saved proc pc
@@ -698,9 +754,11 @@ let c_to_proc (e:Il.emitter) : unit =
   let edx_n = word_n (Il.Hreg edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
+  let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
 
     mov (rc edx) (c (sp_n 1));                       (* edx <- proc             *)
     save_callee_saves e;
+    sub (rc esp) 12L;                                (* 16-byte align sp        *)
     mov (edx_n Abi.proc_field_runtime_sp) (ro esp);  (* proc->runtime_sp <- esp *)
     mov (rc esp) (c (edx_n Abi.proc_field_rust_sp)); (* esp <- proc->rust_sp    *)
 
@@ -721,6 +779,7 @@ let proc_to_c (e:Il.emitter) : unit =
    *   - save regs on proc stack
    *   - save sp to proc.sp
    *   - load saved C sp (switch stack)
+   *   - undo alignment (see c_to_proc)
    *   - restore saved C regs
    *   - return to saved C pc
    *
@@ -729,6 +788,7 @@ let proc_to_c (e:Il.emitter) : unit =
   let edx_n = word_n (Il.Hreg edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
+  let add dst imm = emit (Il.binary Il.ADD dst (c dst) (immi imm)) in
 
     mov (rc edx) (c proc_ptr);                          (* edx <- proc            *)
     save_callee_saves e;
@@ -736,6 +796,7 @@ let proc_to_c (e:Il.emitter) : unit =
     mov (rc esp) (c (edx_n Abi.proc_field_runtime_sp)); (* esp <- proc->runtime_sp *)
 
     (**** IN C STACK ****)
+    add (rc esp) 12L;
     restore_callee_saves e;
     emit Il.Ret;
     (***********************)
@@ -766,6 +827,7 @@ let (abi:Abi.abi) =
 
     Abi.abi_emit_proc_state_change = emit_proc_state_change;
     Abi.abi_emit_upcall = emit_upcall;
+    Abi.abi_emit_c_call = emit_c_call;
     Abi.abi_c_to_proc = c_to_proc;
     Abi.abi_proc_to_c = proc_to_c;
     Abi.abi_unwind = unwind_glue;
