@@ -16,10 +16,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef  __APPLE__
-#include <ffi/ffi.h>
-#endif
-
 #include "rust.h"
 #include "rand.h"
 #include "uthash.h"
@@ -142,7 +138,7 @@ typedef enum {
     upcall_code_del_port       = 8,
     upcall_code_send           = 9,
     upcall_code_recv           = 10,
-    upcall_code_native         = 11,
+    /* unused                    11 */
     upcall_code_new_str        = 12,
     upcall_code_grow_proc      = 13,
     upcall_code_trace_word     = 14,
@@ -1481,91 +1477,6 @@ upcall_free(rust_rt *rt, void* ptr)
     rt->free(ptr);
 }
 
-#ifdef __APPLE__
-
-class rust_native {
-    rust_rt *rt;
-    uintptr_t fn;
-    abi_t abi;
-    size_t nargs;
-    ffi_type **atypes;
-    void **avalues;
-    ffi_cif cif;
-public:
-    rust_native(rust_rt *rt, const char *sym, abi_t abi, size_t nargs);
-    ~rust_native();
-
-    uintptr_t call(rust_proc *proc, uintptr_t *argv);
-};
-
-rust_native::rust_native(rust_rt *rt, const char *sym, abi_t abi, size_t nargs) :
-    rt(rt), abi(abi), nargs(nargs)
-{
-    uintptr_t fn = rt->srv->lookup(sym);
-    I(rt, fn);
-    rt->log(LOG_UPCALL|LOG_MEM,
-            "native '%s' resolved to 0x%" PRIxPTR,
-            sym, fn);
-
-    // The special abi 'rust' passes rust_proc * as the first argument.
-    if (abi == abi_code_rust)
-        ++nargs;
-
-    atypes = (ffi_type **) rt->malloc(sizeof(ffi_type *) * nargs);
-    I(rt, atypes);
-
-    // It seems we have to keep the argument types array around for the lifetime of cif.
-    for (uintptr_t n = 0; n < nargs; ++n)
-        atypes[n] = &ffi_type_pointer;
-
-    ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, nargs, &ffi_type_pointer, atypes);
-    I(rt, status == FFI_OK);
-
-    // Allocate an array to hold the pointers to the arguments. This is filled at each call.
-    avalues = (void **) rt->malloc(sizeof(void *) * nargs);
-    I(rt, avalues);
-}
-
-rust_native::~rust_native()
-{
-    rt->free(atypes);
-    rt->free(avalues);
-}
-
-uintptr_t
-rust_native::call(rust_proc *proc, uintptr_t *argv)
-{
-    size_t n = 0;
-    if (abi == abi_code_rust)
-        avalues[n++] = &proc;
-    while (n < nargs)
-        avalues[n++] = argv++;
-    ffi_arg retval;
-    ffi_call(&cif, FFI_FN(fn), &retval, avalues);
-    return uintptr_t(retval);
-}
-
-#endif // __APPLE__
-
-static void
-upcall_native(rust_proc *proc, abi_t abi,
-              char const *sym, uintptr_t *retptr,
-              uintptr_t *argv, uintptr_t nargs)
-{
-    rust_rt *rt = proc->rt;
-    rt->log(LOG_UPCALL|LOG_MEM,
-            "upcall native('%u', '%s', 0x%" PRIxPTR ", 0x%" PRIxPTR ", %" PRIdPTR ")",
-            abi, sym, (uintptr_t)retptr, (uintptr_t)argv, nargs);
-
-    /* FIXME: Instead of stack-allocating a new native object every time, cache these. */
-#ifdef __APPLE__
-    rust_native native(rt, sym, abi, nargs);
-    uintptr_t retval = native.call(proc, argv);
-    if (retptr)
-        *retptr = retval;
-#endif
-}
-
 static size_t
 next_power_of_two(size_t s)
 {
@@ -1737,11 +1648,6 @@ handle_upcall(rust_proc *proc)
         break;
     case upcall_code_recv:
         upcall_recv(proc->rt, proc, (rust_port*)args[1]);
-        break;
-    case upcall_code_native:
-        upcall_native(proc, (abi_t)args[0],
-                      (char const *)args[1], (uintptr_t*)args[2],
-                      (uintptr_t*)args[3], (uintptr_t)args[4]);
         break;
     case upcall_code_new_str:
         *((rust_str**)args[0]) = upcall_new_str(proc->rt,

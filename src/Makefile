@@ -28,10 +28,9 @@ ifeq ($(CFG_OSTYPE), Linux)
 endif
 
 ifeq ($(CFG_OSTYPE), Darwin)
-  CFG_LIBFFI := 1
   CFG_RUNTIME := librustrt.dylib
   CFG_UNIXY := 1
-  CFG_GCC_LINK_FLAGS += -dynamiclib -lffi
+  CFG_GCC_LINK_FLAGS += -dynamiclib
   # Darwin has a very blurry notion of "64 bit", and claims it's running
   # "on an i386" when the whole userspace is 64-bit and the compiler
   # emits 64-bit binaries by default. So we just force -m32 here. Smarter
@@ -205,10 +204,6 @@ TEST_XFAILS := test/run-pass/many.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
-ifndef CFG_LIBFFI
-  TEST_XFAILS += test/run-pass/native.rs \
-                 test/run-pass/native.rc
-endif
 
 TEST_RUN_PASS_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rc))
 TEST_RUN_PASS_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rs))

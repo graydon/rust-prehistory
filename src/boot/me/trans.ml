@@ -2288,36 +2288,7 @@ let trans_visitor
         trans_frame_exit tagid;
   in
 
-  let trans_native_fn_via_upcall (fnid:node_id) (nfn:Ast.native_fn) : unit =
-
-    trans_frame_entry fnid;
-    (* 
-     * Native upcall encoding:
-     * 
-     * arg0 = abi
-     * arg1 = symbol name
-     * arg2 = return pointer (dereferenced return-address slot)
-     * arg3 = address of 0th non-implicit arg slot
-     * arg4 = arg count
-     *)
-    aliasing false (word_at (fp_imm arg0_disp))
-      begin
-        fun arg0_alias ->
-          trans_upcall Abi.UPCALL_native
-            [|
-              imm (match (Abi.nabi_to_code nfn.Ast.native_fn_abi) with
-                       Some nabi_code -> nabi_code
-                     | None -> (err None "invalid abi specification"));
-              (trans_static_string (path_name()));
-              (Il.Cell (word_at (fp_imm out_addr_disp)));
-              arg0_alias;
-              imm (Int64.of_int (Array.length nfn.Ast.native_fn_input_slots))
-            |];
-          trans_frame_exit fnid;
-      end
-  in
-
-  let trans_native_fn_via_c_call (fnid:node_id) (nfn:Ast.native_fn) : unit =
+  let trans_native_fn (fnid:node_id) (nfn:Ast.native_fn) : unit =
     let nabi =
       match (Abi.string_to_nabi nfn.Ast.native_fn_abi) with
           Some n -> n
@@ -2345,10 +2316,6 @@ let trans_visitor
         then bug () "%s uses nonzero vregs" name;
         capture_emitted_quads (get_fn_fixup cx fnid) fnid;
         pop_emitter ();
-  in
-
-  let trans_native_fn =
-    trans_native_fn_via_c_call
   in
 
   let enter_file_for i =

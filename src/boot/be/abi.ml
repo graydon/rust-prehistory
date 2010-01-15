@@ -26,7 +26,6 @@ type upcall =
   | UPCALL_del_port
   | UPCALL_send
   | UPCALL_recv
-  | UPCALL_native
   | UPCALL_new_str
   | UPCALL_grow_proc
   | UPCALL_trace_word
@@ -62,7 +61,7 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_del_port -> 8L
   | UPCALL_send -> 9L
   | UPCALL_recv -> 10L
-  | UPCALL_native -> 11L
+  (* unused -> 11L *)
   | UPCALL_new_str -> 12L
   | UPCALL_grow_proc -> 13L
   | UPCALL_trace_word -> 14L
