@@ -699,6 +699,7 @@ let trans_visitor
 
   and get_free_glue
       (ty:Ast.ty)
+      (mctrl:mem_ctrl)
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_free ty in
@@ -718,7 +719,17 @@ let trans_visitor
         trans_call_mem_glue (get_drop_glue ty curr_iso) vr;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "back in free-glue, calling free";
-        trans_free (Il.Addr arg);
+        if mctrl = MEM_gc
+        then
+          begin
+            emit (Il.binary Il.SUB vr (Il.Cell vr)
+                    (imm
+                       (Int64.add exterior_rc_body_off
+                          (word_n Abi.exterior_gc_malloc_return_adjustment))));
+            trans_free vr
+          end
+        else
+          trans_free (Il.Addr arg);
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "free-glue complete";
     in
@@ -1113,11 +1124,11 @@ let trans_visitor
 
   and exterior_gc_allocation_size (slot:Ast.slot) : int64 =
     let layout = layout_ty abi 0L (slot_ty slot) in
-      (Int64.add layout.layout_size exterior_gc_body_off)
+      (Int64.add layout.layout_size (word_n Abi.exterior_gc_header_size))
 
   and exterior_rc_allocation_size (slot:Ast.slot) : int64 =
     let layout = layout_ty abi 0L (slot_ty slot) in
-      (Int64.add layout.layout_size exterior_rc_body_off)
+      (Int64.add layout.layout_size (word_n Abi.exterior_rc_header_size))
 
 
   and ty_is_structured (t:Ast.ty) : bool =
@@ -1135,7 +1146,7 @@ let trans_visitor
 
   and slot_mem_ctrl (cell:Il.cell) (slot:Ast.slot) : mem_ctrl =
     let ty = slot_ty slot in
-      if type_is_cyclic ty
+      if type_is_mutable ty
       then
         match slot.Ast.slot_mode with
             Ast.MODE_exterior _ -> MEM_gc
@@ -1349,7 +1360,8 @@ let trans_visitor
         j
     in
     let ty = slot_ty slot in
-      match slot_mem_ctrl cell slot with
+    let mctrl = slot_mem_ctrl cell slot in
+      match mctrl with
           MEM_rc_opaque rc_off ->
             (* Refcounted opaque objects we handle without glue functions. *)
             let (rc_addr, _) = deref_imm cell (word_n rc_off) in
@@ -1360,8 +1372,15 @@ let trans_visitor
               mov cell zero;
               patch j
 
+        | MEM_gc
         | MEM_rc_struct ->
             (* Refcounted "structured exterior" objects we handle via glue functions. *)
+
+            (* 
+             * 'GC memory' is treated similarly, just happens to have
+             * an extra couple cells on the front.
+             *)
+
             (* 
              * FIXME: check to see that the exterior has further
              * exterior members; if it doesn't we can elide the call to
@@ -1371,7 +1390,7 @@ let trans_visitor
             let j = drop_refcount_and_cmp rc in
             let ty = maybe_iso curr_iso ty in
             let curr_iso = maybe_enter_iso ty curr_iso in
-              trans_call_mem_glue (get_free_glue ty curr_iso) cell;
+              trans_call_mem_glue (get_free_glue ty mctrl curr_iso) cell;
               (* Null the slot out to prevent double-free if the frame unwinds. *)
               mov cell zero;
               patch j
@@ -1390,13 +1409,6 @@ let trans_visitor
             (* Interior allocation of all-interior value: nothing to do. *)
             ()
 
-        | MEM_gc ->
-            (* 
-             * Null the slot out so the mark-phase will not traverse it; 
-             * The general sweep-phase will free the referent if it's unreachable.
-             *)
-            mov cell zero
-
   and exterior_body_off (cell:Il.cell) (slot:Ast.slot) : int64 =
       match slot_mem_ctrl cell slot with
           MEM_gc -> exterior_gc_body_off
@@ -1410,16 +1422,25 @@ let trans_visitor
           MEM_gc ->
             iflog (fun _ -> annotate "init GC exterior: malloc");
             let sz = exterior_gc_allocation_size slot in
+              (* 
+               * Malloc and then immediately shift down to point to
+               * the pseudo-rc cell.
+               *)
               trans_malloc cell sz;
+              emit (Il.binary Il.ADD cell (Il.Cell cell)
+                      (imm (word_n Abi.exterior_gc_malloc_return_adjustment)));
+
               iflog (fun _ -> annotate "init GC exterior: load control word");
               let ctrl = exterior_gc_ctrl_cell cell in
               let fix = get_drop_glue (slot_ty slot) None in
               let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+              let rc = exterior_rc_cell cell in
+                mov rc one;
                 lea tmp (Il.Abs (Asm.M_POS fix));
                 mov ctrl (Il.Cell tmp);
                 iflog (fun _ -> annotate "init GC exterior: load next-pointer");
                 let next = exterior_gc_next_cell cell in
-                  mov next (Il.Cell (Il.Addr (pp_imm (word_n Abi.proc_field_gc_alloc_chain))))
+                  mov next (Il.Cell (Il.Addr (pp_imm (word_n Abi.proc_field_gc_alloc_chain))));
 
         | MEM_rc_opaque rc_off ->
             iflog (fun _ -> annotate "init RC exterior: malloc");
@@ -1613,12 +1634,9 @@ let trans_visitor
         | (MEM_rc_opaque src_rc_off, MEM_rc_opaque _) ->
             lightweight_rc (exterior_ctrl_cell src src_rc_off)
 
+        | (MEM_gc, MEM_gc)
         | (MEM_rc_struct, MEM_rc_struct) ->
             lightweight_rc (exterior_rc_cell src)
-
-        | (MEM_gc, MEM_gc) ->
-            anno "gc light";
-            mov dst (Il.Cell src)
 
       | _ ->
           (* Heavyweight copy: duplicate the referent. *)

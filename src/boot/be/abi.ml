@@ -94,8 +94,7 @@ let proc_field_state = proc_field_rust_sp + 1;;
 let proc_field_idx = proc_field_state + 1;;
 let proc_field_refcnt = proc_field_idx + 1;;
 let proc_field_chans = proc_field_refcnt + 1;;
-let proc_field_gc_frame_chain = proc_field_chans + 1;;
-let proc_field_gc_alloc_chain = proc_field_gc_frame_chain + 1;;
+let proc_field_gc_alloc_chain = proc_field_chans + 1;;
 let proc_field_upcall_code = proc_field_gc_alloc_chain + 1;;
 let proc_field_upcall_args = proc_field_upcall_code + 1;;
 
@@ -111,9 +110,15 @@ let frame_glue_fns_field_reloc = 2;;
 let exterior_rc_slot_field_refcnt = 0;;
 let exterior_rc_slot_field_body = 1;;
 
-let exterior_gc_slot_field_ctrl = 0;;
-let exterior_gc_slot_field_next = 1;;
-let exterior_gc_slot_field_body = 2;;
+let exterior_gc_slot_field_next = (-2);;
+let exterior_gc_slot_field_ctrl = (-1);;
+let exterior_gc_slot_field_refcnt = 0;;
+let exterior_gc_slot_field_body = 1;;
+
+let exterior_rc_header_size = 1;;
+let exterior_gc_header_size = 3;;
+
+let exterior_gc_malloc_return_adjustment = 2;;
 
 let port_field_refcnt = 0;;
 let chan_field_refcnt = 1;;

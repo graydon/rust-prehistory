@@ -292,47 +292,56 @@ struct frame_glue_fns {
  *  - Every frame has a frame_glue_fns pointer in its fp[-1] slot,
  *    written on function-entry.
  *
- *  - Like gc_vals have *two* extra words at their head, not one.
+ *  - Like gc_vals have *three* extra words at their head, not one.
  *
- *  - The first word at the head of a gc_val is not used as a refcount;
- *    instead it is a pointer to a sweep function, with the low bit
- *    of that pointer used as a mark bit.
+ *  - A pointer to a gc_val, however, points to the third of these
+ *    three words. So a certain quantity of code can treat gc_vals the
+ *    same way it would treat refcounted exterior vals.
  *
- *  - The second word at the head of a gc_val is a linked-list pointer
- *    to the gc_val that was allocated just before it. Following this
- *    list traces through all the currently active gc_vals in a proc.
+ *  - The first word at the head of a gc_val is used as a refcount, as
+ *    in non-gc allocations.
+ *
+ *  - The second word at the head of a gc_val is a pointer to a sweep
+ *    function, with the low bit of that pointer used as a mark bit.
+ *
+ *  - The third word at the head of a gc_val is a linked-list pointer
+ *    to the gc_val that was allocated (temporally) just before
+ *    it. Following this list traces through all the currently active
+ *    gc_vals in a proc.
  *
  *  - The proc has a gc_alloc_chain field that points to the most-recent
  *    gc_val allocated.
  *
  *  - GC proceeds as follows:
  *
- *    - The proc asks its runtime for its gc_frame_chain.
- *
- *    - The proc calls frame_glue_fns.mark_glue(fp) which
- *      marks the frame and then tail-calls down the frame chain,
- *      recursively.  this marks all the frames with GC roots (each of
- *      those functions in turn may recursively call into the GC
- *      graph, that's for the mark glue to decide).
+ *    - The proc calls frame_glue_fns.mark_glue(fp) which marks the
+ *      frame and then loops, walking down the frame chain. This marks
+ *      all the frames with GC roots (each of those functions in turn
+ *      may recursively call into the GC graph, that's for the mark
+ *      glue to decide).
  *
  *    - The proc then asks its runtime for its gc_alloc_chain.
  *
- *    - The proc calls gc_alloc_chain[0](gc_ptr=&gc_alloc_chain),
+ *    - The proc calls
+ *
+ *        (~1 & gc_alloc_chain[1])(gc_ptr=&gc_alloc_chain)
+ *
  *      which sweeps the allocation. Sweeping involves checking to see
  *      if the gc_val at *gc_ptr was marked. If not, it loads
- *      (*gc_ptr)[1] into tmp, calls drop_ty(*gc_ptr) then
- *      free(*gc_ptr), then *gc_ptr=tmp and recurs. If marked, it
- *      loads gc_ptr[1] and recurs. The key point is that it has to
- *      drop outgoing links into the refcount graph.
+ *      &(*gc_ptr)[2] into tmp, calls drop_ty(*gc_ptr) then
+ *      free(*gc_ptr), then gc_ptr=tmp and recurs. If marked, it loads
+ *      &(*gc_ptr[2]) into gc_ptr and recurs. The key point is that it
+ *      has to call drop_ty, to drop outgoing links into the refcount
+ *      graph (and possibly run dtors).
  *
  *    - Note that there is no "special gc state" at work here; the
  *      proc looks like it's running normal code that happens to not
  *      perform any gc_val allocation. Mark-bit twiddling is
- *      open-coded into all the (recursive) mark functions, which know
- *      their contents; we only have to do O(gc-frames) indirect calls
- *      to mark, the rest are static. Sweeping costs O(gc-heap)
- *      indirect calls, unfortunately, because the set of sweep
- *      functions to call is arbitrary based on allocation order.
+ *      open-coded into all the mark functions, which know their
+ *      contents; we only have to do O(frames) indirect calls to mark,
+ *      the rest are static. Sweeping costs O(gc-heap) indirect calls,
+ *      unfortunately, because the set of sweep functions to call is
+ *      arbitrary based on allocation order.
  *
  */
 
@@ -355,7 +364,6 @@ struct rust_proc {
     size_t refcnt;
     rust_chan *chans;
 
-    uintptr_t gc_frame_chain;  /* linked list of GC frames.        */
     uintptr_t gc_alloc_chain;  /* linked list of GC allocations.   */
 
     /* Parameter space for upcalls. */
@@ -826,7 +834,6 @@ rust_proc::rust_proc(rust_rt *rt,
       idx(0),
       refcnt(1),
       chans(NULL),
-      gc_frame_chain(0),
       gc_alloc_chain(0),
       upcall_code(0)
 {

@@ -561,7 +561,6 @@ and walk_stmt
       | Ast.STMT_bind _ -> ()
       | Ast.STMT_note _ -> ()
       | Ast.STMT_foreach f -> ()
-      | Ast.STMT_for f -> ()
       | Ast.STMT_try t -> ()
       | Ast.STMT_alt_tag sat -> ()
       | Ast.STMT_alt_type sat -> ()
