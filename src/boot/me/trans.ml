@@ -2321,11 +2321,12 @@ let trans_visitor
     in
       push_new_emitter ();
       trans_c_call nabi lib name args;
+      capture_emitted_quads (get_fn_fixup cx fnid) fnid;
       pop_emitter ();
   in
 
   let trans_native_fn =
-    trans_native_fn_via_upcall
+    trans_native_fn_via_c_call
   in
 
   let enter_file_for i =

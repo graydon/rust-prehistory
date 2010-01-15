@@ -10,7 +10,6 @@ CFG_INFO := $(info building on $(CFG_OSTYPE) $(CFG_CPUTYPE))
 CFG_GCC_COMPILE_FLAGS :=
 CFG_GCC_LINK_FLAGS :=
 CFG_VALGRIND :=
-CFG_LIBFFI :=
 
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
@@ -206,7 +205,7 @@ TEST_XFAILS := test/run-pass/many.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
-ifdef CFG_LIBFFI
+ifndef CFG_LIBFFI
   TEST_XFAILS += test/run-pass/native.rs \
                  test/run-pass/native.rc
 endif
