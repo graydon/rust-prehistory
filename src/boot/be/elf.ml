@@ -451,9 +451,9 @@ let elf32_386_rela_frag r =
 let elf32_linux_x86_file
     ~(sess:Session.sess)
     ~(entry_name:string)
-    ~(text_frags:(string, frag) Hashtbl.t)
-    ~(data_frags:(string, frag) Hashtbl.t)
-    ~(rodata_frags:(string, frag) Hashtbl.t)
+    ~(text_frags:(string option, frag) Hashtbl.t)
+    ~(data_frags:(string option, frag) Hashtbl.t)
+    ~(rodata_frags:(string option, frag) Hashtbl.t)
     ~(import_fixups:(string, fixup) Hashtbl.t)
     ~(dwarf:Dwarf.debug_records)
     ~(sem:Semant.ctxt)
@@ -990,15 +990,21 @@ let elf32_linux_x86_file
       (strtab_frag, symtab_frag)
   in
 
-  let frags_of_symbol sym_emitter st_bind symname symbody x =
+  let frags_of_symbol sym_emitter st_bind symname_opt symbody x =
     let (strtab_frags, symtab_frags, body_frags) = x in
-    let body_fixup = new_fixup ("symbol body fixup: '" ^ symname ^ "'") in
-    let body_frag =
-      if symname = entry_name
-      then DEF (e_entry_fixup, DEF (body_fixup, symbody))
-      else DEF (body_fixup, symbody)
+    let (strtab_frag, symtab_frag, body_frag) =
+      match symname_opt with
+          None -> (MARK, MARK, symbody)
+        | Some symname ->
+            let body_fixup = new_fixup ("symbol body fixup: '" ^ symname ^ "'") in
+            let body =
+              if symname = entry_name
+              then DEF (e_entry_fixup, DEF (body_fixup, symbody))
+              else DEF (body_fixup, symbody)
+            in
+            let (str, sym) = sym_emitter symname st_bind body_fixup in
+              (str, sym, body)
     in
-    let (strtab_frag, symtab_frag) = sym_emitter symname st_bind body_fixup in
       ((strtab_frag :: strtab_frags),
        (symtab_frag :: symtab_frags),
        (body_frag :: body_frags))
@@ -1378,12 +1384,12 @@ let emit_file
   in
 
   let _ =
-    htab_put text_frags "_start" start_fn;
-    htab_put text_frags "_init" (DEF (init_fixup, do_nothing_fn));
-    htab_put text_frags "_fini" (DEF (fini_fixup, do_nothing_fn));
-    htab_put text_frags "main" main_fn;
-    htab_put text_frags "rust_code" code;
-    htab_put rodata_frags "rust_rodata" data;
+    htab_put text_frags (Some "_start") start_fn;
+    htab_put text_frags (Some "_init") (DEF (init_fixup, do_nothing_fn));
+    htab_put text_frags (Some "_fini") (DEF (fini_fixup, do_nothing_fn));
+    htab_put text_frags (Some "main") main_fn;
+    htab_put text_frags None code;
+    htab_put rodata_frags None data;
     htab_put import_fixups "__libc_start_main" libc_start_main_fixup;
 
     Hashtbl.iter

@@ -170,7 +170,7 @@ let new_ctxt sess abi crate =
 
     ctxt_imports = Hashtbl.create 0;
 
-    ctxt_main_fn_fixup = new_fixup "main fn fixup";
+    ctxt_main_fn_fixup = new_fixup "main";
     ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main;
     ctxt_main_exit_proc_glue_fixup = new_fixup "main exit_proc glue"
   }
