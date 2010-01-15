@@ -367,29 +367,31 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
 ;;
 
 let emit_c_call
-    (ret:Il.reg)
-    (scratch:Il.reg)
+    (ret:Il.cell)
+    (scratch1:Il.reg)
+    (scratch2:Il.reg)
     (e:Il.emitter)
     (nabi:Abi.nabi)
     (fn:fixup)
     (args:Il.operand array)
     : unit =
 
-  let scratch_n = word_n scratch in
-  let esp_n = word_n (h esp) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
   let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
 
-  let args =                                                   (* rust calls get proc as 1st arg  *)
+  let args =                                                      (* rust calls get proc as arg0  *)
     if nabi = Abi.NABI_rust
     then Array.append [| c proc_ptr |] args
     else args
   in
   let nargs = Array.length args in
+  let proc = scratch1 in
+  let newsp = scratch2 in
 
-    mov (r scratch) (c proc_ptr);                              (* scratch <- proc                 *)
-    mov (r scratch) (c (scratch_n Abi.proc_field_runtime_sp)); (* scratch <- proc->runtime_sp     *)
+    mov (r proc) (c proc_ptr);                                    (* read proc from argv[-1]      *)
+    mov (word_n proc Abi.proc_field_rust_sp) (ro esp);            (* proc->rust_sp = sp           *)
+    mov (r newsp) (c (word_n proc Abi.proc_field_runtime_sp));    (* newsp = proc->runtime_sp     *)
 
     (*
      * Note: c_to_proc ensures that runtime_sp is always aligned at a 16-byte boundary. We reserve
@@ -399,24 +401,33 @@ let emit_c_call
     let frame_sz =
       Int64.of_int(((4 * (nargs + 1)) + 15) land (lnot 15))
     in
-      sub (r scratch) frame_sz;
+      sub (r newsp) frame_sz;
 
-    mov (scratch_n nargs) (ro esp);                            (* stash proc's sp above arguments *)
-    Array.iteri (fun i (arg:Il.operand) ->                     (* write arguments onto C stack    *)
-                   match arg with
-                       Il.Cell (Il.Addr a) ->
-                         mov (r ret) arg;
-                         mov (scratch_n i) (c (r ret))
-                     | _ ->
-                         mov (scratch_n i) arg)
-                args;
+    mov (word_n newsp nargs) (c (r proc));                        (* stash proc above aguments    *)
 
-    let addr = (Il.CodeAddr (Il.Abs (Asm.M_POS fn))) in        (* switch stacks and call fn       *)
-    let ret = (r ret) in
-    let sp = (c (r scratch)) in
-      emit (Il.call ret sp addr);
+    let tmp = scratch1 in
+    let newsp = scratch2 in
+      Array.iteri (fun i (arg:Il.operand) ->                      (* write arguments onto C stack *)
+                     match arg with
+                         Il.Cell (Il.Addr a) ->
+                           mov (r tmp) arg;
+                           mov (word_n newsp i) (c (r tmp))
+                       | _ ->
+                           mov (word_n newsp i) arg)
+                  args;
 
-    mov (rc esp) (c (esp_n nargs))                             (* restore proc's sp               *)
+      let addr = (Il.CodeAddr (Il.Abs (Asm.M_POS fn))) in         (* switch stacks and call fn    *)
+        emit (Il.call (rc eax) (c (r newsp)) addr);
+
+        mov (rc esp) (c (word_n (h esp) nargs));                  (* esp = stashed proc           *)
+        mov (rc esp) (c (word_n (h esp) Abi.proc_field_rust_sp)); (* sp = proc->rust_sp           *)
+
+        (*
+         * We have to wait until we have restored the original stack before we write to the output
+         * slot, because ret might be sp-relative.
+         *)
+
+        mov ret (ro eax);                                         (* write return value           *)
 ;;
 
 (* We clobber eax and edx here. This is only safe to use inside native function thunks. *)
@@ -431,11 +442,10 @@ let emit_native_call
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    emit_c_call (h eax) (h edx) e nabi fn args;
+    emit_c_call (rc eax) (h eax) (h edx) e nabi fn args;
     mov (rc edx) (c ret);
     mov (word_at (h edx)) (ro eax)
 ;;
-
 
 let emit_upcall_full
     (scratch:Il.reg)
