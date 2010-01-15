@@ -267,6 +267,79 @@ let sect_type_code (s:sect_type) : int64 =
 ;;
 
 
+type n_type =
+  | N_EXT
+  | N_UNDF
+  | N_ABS
+  | N_SECT
+  | N_PBUD
+  | N_INDIR
+;;
+
+let n_type_code (n:n_type) : int64 =
+  match n with
+      N_EXT -> 0x1L
+    | N_UNDF -> 0x0L
+    | N_ABS -> 0x2L
+    | N_SECT -> 0xeL
+    | N_PBUD -> 0xcL
+    | N_INDIR -> 0xaL
+;;
+
+
+type n_desc_reference_type =
+    REFERENCE_FLAG_UNDEFINED_NON_LAZY
+  | REFERENCE_FLAG_UNDEFINED_LAZY
+  | REFERENCE_FLAG_DEFINED
+  | REFERENCE_FLAG_PRIVATE_DEFINED
+  | REFERENCE_FLAG_PRIVATE_UNDEFINED_NON_LAZY
+  | REFERENCE_FLAG_PRIVATE_UNDEFINED_LAZY
+;;
+
+let n_desc_reference_type_code (n:n_desc_reference_type) : int64 =
+  match n with
+      REFERENCE_FLAG_UNDEFINED_NON_LAZY -> 0x0L
+    | REFERENCE_FLAG_UNDEFINED_LAZY -> 0x1L
+    | REFERENCE_FLAG_DEFINED -> 0x2L
+    | REFERENCE_FLAG_PRIVATE_DEFINED -> 0x3L
+    | REFERENCE_FLAG_PRIVATE_UNDEFINED_NON_LAZY -> 0x4L
+    | REFERENCE_FLAG_PRIVATE_UNDEFINED_LAZY -> 0x5L
+;;
+
+type n_desc_flags =
+    REFERENCED_DYNAMICALLY
+  | N_DESC_DISCARDED
+  | N_NO_DEAD_STRIP
+  | N_WEAK_REF
+  | N_WEAK_DEF
+;;
+
+let n_desc_flags_code (n:n_desc_flags) : int64 =
+  match n with
+      REFERENCED_DYNAMICALLY -> 0x10L
+    | N_DESC_DISCARDED -> 0x20L
+    | N_NO_DEAD_STRIP -> 0x20L (* Yes, they reuse 0x20. *)
+    | N_WEAK_REF -> 0x40L
+    | N_WEAK_DEF -> 0x80L
+;;
+
+type n_desc_dylib_ordinal = int;;
+
+type n_desc = (n_desc_dylib_ordinal *
+                 (n_desc_flags list) *
+                 n_desc_reference_type)
+;;
+
+let n_desc_code (n:n_desc) : int64 =
+  let (dylib_ordinal, flags, ty) = n in
+    Int64.logor
+      (Int64.of_int (dylib_ordinal lsl 8))
+      (Int64.logor
+         (fold_flags n_desc_flags_code flags)
+         (n_desc_reference_type_code ty))
+;;
+
+
 let macho_section_command
     (seg_name:string)
     (sect:(string * int * sect_type * fixup))
@@ -548,42 +621,46 @@ let emit_file
   let symtab_fixup = new_fixup "symtab" in
   let strtab_fixup = new_fixup "strtab" in
 
-
-  let sect_symbol_nlist_entry (sect_index:int) (fixup_to_use:fixup) : (frag * fixup) =
+  let symbol_nlist_entry
+      (sect_index:int)
+      (nty:n_type list)
+      (nd:n_desc)
+      (nv:Asm.expr64)
+      : (frag * fixup) =
     let strtab_entry_fixup = new_fixup "strtab entry" in
       (SEQ
          [|
            WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
-           BYTE 0xf;              (* n_type == N_SECT | N_EXT *)
-           BYTE sect_index;       (* n_sect == NO_SECT *)
-           WORD (TY_u16, IMM 0L); (* n_desc == unused *)
-           WORD (TY_u32, M_POS (fixup_to_use));
+           BYTE (Int64.to_int (fold_flags n_type_code nty)); 
+           BYTE sect_index;
+           WORD (TY_u16, IMM (n_desc_code nd));
+           WORD (TY_u32, nv);
          |], strtab_entry_fixup)
+  in
+
+
+  let sect_symbol_nlist_entry (sect_index:int) (fixup_to_use:fixup) : (frag * fixup) =
+    let nty = [ N_SECT; N_EXT ] in
+    let nd = (0, [], REFERENCE_FLAG_UNDEFINED_NON_LAZY) in
+      symbol_nlist_entry sect_index nty nd (M_POS fixup_to_use)
   in
 
   let indirect_symbol_nlist_entry (dylib_index:int) : (frag * fixup) =
-    let strtab_entry_fixup = new_fixup "strtab entry" in
-      (SEQ
-         [|
-           WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
-           BYTE 1;                (* n_type == N_UNDEF | N_EXT *)
-           BYTE 0;                (* n_sect == NO_SECT *)
-           WORD (TY_u16, IMM (Int64.of_int (dylib_index lsl 8)));
-           (* n_desc == REFERENCE_FLAG_UNDEFINED_NON_LAZY *)
-           WORD (TY_u32, IMM 0L); (* n_value == unused *)
-         |], strtab_entry_fixup)
+    let nty = [ N_UNDF; N_EXT ] in
+    let nd = (dylib_index, [], REFERENCE_FLAG_UNDEFINED_NON_LAZY) in
+      symbol_nlist_entry 0 nty nd (IMM 0L)
   in
 
   let absolute_symbol_nlist_entry (fixup_to_use:fixup) : (frag * fixup) =
-    let strtab_entry_fixup = new_fixup "strtab entry" in
-      (SEQ
-         [|
-           WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
-           BYTE 1;                (* n_type == N_ABS | N_EXT *)
-           BYTE 0;                (* n_sect == NO_SECT *)
-           WORD (TY_u16, IMM 2L); (* n_desc == REFERENCE_FLAG_DEFINED *)
-           WORD (TY_u32, M_POS fixup_to_use);
-         |], strtab_entry_fixup)
+    let nty = [ N_ABS; N_EXT ] in
+    let nd = (0, [], REFERENCE_FLAG_DEFINED) in
+      symbol_nlist_entry 0 nty nd (M_POS fixup_to_use)
+  in
+
+  let absolute_private_symbol_nlist_entry (fixup_to_use:fixup) : (frag * fixup) =
+    let nty = [ N_ABS; N_EXT ] in
+    let nd = (0, [], REFERENCE_FLAG_PRIVATE_DEFINED) in
+      symbol_nlist_entry 0 nty nd (M_POS fixup_to_use)
   in
 
   let indirect_symbols =
@@ -603,11 +680,32 @@ let emit_file
       | LIB_c -> 2
   in
 
+  (* Make undef symbols for imports. *)
   let (symbols:(string * (frag * fixup)) array) =
     Array.map (fun (lib,name,_) ->
                  ("_" ^ name,
                   indirect_symbol_nlist_entry (dylib_index lib)))
       indirect_symbols
+  in
+
+  (* Make private symbols for items. *)
+  let (symbols:(string * (frag * fixup)) array) =
+    Array.append symbols
+      (Array.map (fun code ->
+                    let fix = code.Semant.code_fixup in
+                      ("_" ^ fix.fixup_name,
+                       absolute_private_symbol_nlist_entry fix))
+         (Array.of_list (htab_vals sem.Semant.ctxt_all_item_code)))
+  in
+
+  (* Make private symbols for glue. *)
+  let (symbols:(string * (frag * fixup)) array) =
+    Array.append symbols
+      (Array.map (fun code ->
+                    let fix = code.Semant.code_fixup in
+                      (fix.fixup_name,
+                       absolute_private_symbol_nlist_entry fix))
+         (Array.of_list (htab_vals sem.Semant.ctxt_glue_code)))
   in
 
   let (symbols:(string * (frag * fixup)) array) =
