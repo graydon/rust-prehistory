@@ -839,15 +839,6 @@ let trans_visitor
         end
     in
 
-(*
-    let op_ty
-        (binop:Ast.binop)
-        (a:Ast.atom)
-        (b:Ast.atom)
-        : Il.bits * Il.bits * Il.bits =
-      match 
-*)
-
     match expr with
 
         Ast.EXPR_binary (binop, a, b) ->
