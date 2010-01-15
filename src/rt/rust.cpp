@@ -138,11 +138,10 @@ typedef enum {
     upcall_code_del_port       = 8,
     upcall_code_send           = 9,
     upcall_code_recv           = 10,
-    /* unused                    11 */
-    upcall_code_new_str        = 12,
-    upcall_code_grow_proc      = 13,
-    upcall_code_trace_word     = 14,
-    upcall_code_trace_str      = 15,
+    upcall_code_new_str        = 11,
+    upcall_code_grow_proc      = 12,
+    upcall_code_trace_word     = 13,
+    upcall_code_trace_str      = 14,
 } upcall_t;
 
 typedef enum {

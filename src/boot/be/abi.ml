@@ -61,11 +61,10 @@ let upcall_to_code (u:upcall) : int64 =
   | UPCALL_del_port -> 8L
   | UPCALL_send -> 9L
   | UPCALL_recv -> 10L
-  (* unused -> 11L *)
-  | UPCALL_new_str -> 12L
-  | UPCALL_grow_proc -> 13L
-  | UPCALL_trace_word -> 14L
-  | UPCALL_trace_str -> 15L
+  | UPCALL_new_str -> 11L
+  | UPCALL_grow_proc -> 12L
+  | UPCALL_trace_word -> 13L
+  | UPCALL_trace_str -> 14L
 ;;
 
 let nabi_to_code (a:string) : int64 option =
