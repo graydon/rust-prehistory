@@ -21,7 +21,7 @@ ifeq ($(CFG_OSTYPE), Linux)
   endif
   CFG_NATIVE := 1
   CFG_UNIXY := 1
-  CFG_VALGRIND := $(shell which valgrind)
+  #CFG_VALGRIND := $(shell which valgrind)
   ifdef CFG_VALGRIND
     CFG_VALGRIND += --run-libc-freeres=no --leak-check=full --quiet
   endif
@@ -198,6 +198,7 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 ######################################################################
 
 TEST_XFAILS := test/run-pass/many.rs \
+               test/run-pass/spawn-fn.rs \
                test/run-pass/mlist_cycle.rs \
                test/run-pass/acyclic-unwind.rs \
                test/run-pass/linear-for-loop.rs \
