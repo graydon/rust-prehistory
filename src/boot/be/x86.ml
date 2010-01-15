@@ -367,6 +367,7 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
 ;;
 
 let emit_c_call_full
+    (ret:Il.reg)
     (scratch:Il.reg)
     (e:Il.emitter)
     (nabi:Abi.nabi)
@@ -378,6 +379,7 @@ let emit_c_call_full
   let esp_n = word_n (h esp) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
+  let lea dst addr = emit (Il.lea dst addr) in
   let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
   let pcrel f = Il.CodeAddr (Il.Pcrel (f, None)) in
 
@@ -402,13 +404,24 @@ let emit_c_call_full
       sub (r scratch) frame_sz;
 
     mov (scratch_n nargs) (ro esp);                            (* stash proc's sp above arguments *)
-    Array.iteri (fun i arg -> mov (scratch_n i) arg) args;     (* write arguments onto C stack    *)
+    Array.iteri (fun i (arg:Il.operand) ->                     (* write arguments onto C stack    *)
+                   match arg with
+                       Il.Cell (Il.Addr a) ->
+                         mov (r ret) arg;
+                         mov (scratch_n i) (c (r ret))
+                     | _ ->
+                         mov (scratch_n i) arg)
+                args;
 
-    emit (Il.call (r scratch) (c (r scratch)) (pcrel fn));     (* switch stacks and call fn       *)
+    let addr = (Il.CodeAddr (Il.Abs (Asm.M_POS fn))) in        (* switch stacks and call fn       *)
+    let ret = (r ret) in
+    let sp = (c (r scratch)) in
+      emit (Il.call ret sp addr);
 
     mov (rc esp) (c (esp_n nargs))                             (* restore proc's sp               *)
 ;;
 
+(* We clobber eax and edx here. This is only safe to use inside native function thunks. *)
 let emit_c_call
     (e:Il.emitter)
     (nabi:Abi.nabi)
@@ -416,8 +429,7 @@ let emit_c_call
     (args:Il.operand array)
     : unit =
 
-  let (vr,_) = vreg e in
-    emit_c_call_full vr e nabi fn args
+  emit_c_call_full (h eax) (h edx) e nabi fn args
 ;;
 
 

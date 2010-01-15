@@ -2320,9 +2320,15 @@ let trans_visitor
                      (Il.Cell (word_at (fp_imm (Int64.add arg0_disp (word_n (n + 2))))))));
     in
       push_new_emitter ();
-      trans_c_call nabi lib name args;
-      capture_emitted_quads (get_fn_fixup cx fnid) fnid;
-      pop_emitter ();
+      let e =
+        (emitter())
+      in
+        trans_c_call nabi lib name args;
+        Il.emit e Il.Ret;
+        if e.Il.emit_next_vreg != 0
+        then bug () "%s uses nonzero vregs" name;
+        capture_emitted_quads (get_fn_fixup cx fnid) fnid;
+        pop_emitter ();
   in
 
   let trans_native_fn =
