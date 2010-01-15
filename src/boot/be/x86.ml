@@ -390,7 +390,6 @@ let emit_c_call
   let newsp = scratch2 in
 
     mov (r proc) (c proc_ptr);                                    (* read proc from argv[-1]      *)
-    mov (word_n proc Abi.proc_field_rust_sp) (ro esp);            (* proc->rust_sp = sp           *)
     mov (r newsp) (c (word_n proc Abi.proc_field_runtime_sp));    (* newsp = proc->runtime_sp     *)
 
     (*
@@ -403,7 +402,7 @@ let emit_c_call
     in
       sub (r newsp) frame_sz;
 
-    mov (word_n newsp nargs) (c (r proc));                        (* stash proc above aguments    *)
+    mov (word_n newsp nargs) (ro esp);                            (* stash proc sp above args     *)
 
     let tmp = scratch1 in
     let newsp = scratch2 in
@@ -424,8 +423,7 @@ let emit_c_call
         (* switch stacks and call fn    *)
         emit (Il.call (rc eax) (c (r newsp)) (Il.CodeAddr addr));
 
-        mov (rc esp) (c (word_n (h esp) nargs));                  (* esp = stashed proc           *)
-        mov (rc esp) (c (word_n (h esp) Abi.proc_field_rust_sp)); (* sp = proc->rust_sp           *)
+        mov (rc esp) (c (word_n (h esp) nargs));                  (* esp = proc sp                *)
 
         (*
          * We have to wait until we have restored the original stack before we write to the output
