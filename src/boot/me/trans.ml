@@ -2455,10 +2455,6 @@ let fixup_assigning_visitor
       end
   in
 
-  let add_fn_fixup_for id =
-    htab_put cx.ctxt_fn_fixups id (new_fixup (path_name()));
-  in
-
   let visit_mod_item_pre n p i =
     enter_file_for i;
     begin
@@ -2466,7 +2462,8 @@ let fixup_assigning_visitor
 
           Ast.MOD_ITEM_pred _
         | Ast.MOD_ITEM_tag _ ->
-            add_fn_fixup_for i.id
+            htab_put cx.ctxt_fn_fixups i.id
+              (new_fixup (path_name()));
 
         | Ast.MOD_ITEM_fn _ ->
             begin
@@ -2488,7 +2485,9 @@ let fixup_assigning_visitor
     enter_file_for i;
     begin
       match i.node with
-          Ast.NATIVE_fn _ -> add_fn_fixup_for i.id
+          Ast.NATIVE_fn _ ->
+            htab_put cx.ctxt_fn_fixups i.id
+              (new_fixup ((path_name()) ^ " native thunk"));
         | _ -> ()
     end;
     inner.Walk.visit_native_mod_item_pre n i

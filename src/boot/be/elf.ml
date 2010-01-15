@@ -1037,16 +1037,6 @@ let elf32_linux_x86_file
        (rela_plt_frag :: rela_plt_frags))
   in
 
-  let symbol_frags_of_item sym_emitter st_bind fn_node fn_fixup x =
-    let (strtab_frags, symtab_frags) = x in
-    let symname = (Ast.fmt_to_str Ast.fmt_name
-                     (Hashtbl.find sem.Semant.ctxt_all_item_names fn_node))
-    in
-    let (strtab_frag, symtab_frag) = sym_emitter symname st_bind fn_fixup in
-      (strtab_frag :: strtab_frags,
-       symtab_frag :: symtab_frags)
-  in
-
   let (global_text_strtab_frags,
        global_text_symtab_frags,
        text_body_frags) =
@@ -1055,7 +1045,23 @@ let elf32_linux_x86_file
 
   let (local_text_strtab_frags,
        local_text_symtab_frags) =
-    Hashtbl.fold (symbol_frags_of_item text_sym STB_LOCAL) sem.Semant.ctxt_fn_fixups ([], [])
+
+    let symbol_frags_of_code _ code accum =
+      let (strtab_frags, symtab_frags) = accum in
+      let fix = code.Semant.code_fixup in
+      let (strtab_frag, symtab_frag) = text_sym fix.fixup_name STB_LOCAL fix in
+      (strtab_frag :: strtab_frags,
+       symtab_frag :: symtab_frags)
+    in
+
+    let item_str_frags, item_sym_frags =
+      Hashtbl.fold symbol_frags_of_code sem.Semant.ctxt_all_item_code ([], [])
+    in
+    let glue_str_frags, glue_sym_frags =
+      Hashtbl.fold symbol_frags_of_code sem.Semant.ctxt_glue_code ([], [])
+    in
+      (item_str_frags @ glue_str_frags,
+       item_sym_frags @ glue_sym_frags)
   in
 
   let (rodata_strtab_frags,
