@@ -402,39 +402,44 @@ let emit_c_call
      * room for the arguments on the stack, plus one word to save the rust stack pointer. The
      * frame size is then aligned again at the nearest 16-byte boundary.
      *)
-    let frame_sz = align (Int64.of_int (nargs + 1)) 16L
+    let frame_sz = align (Int64.of_int (nargs + 1)) 16L in
+    let tmp = scratch1 in
+    let newsp = scratch2
     in
 
       sub (r newsp) frame_sz;                                     (* make room on the C stack     *)
+
+      mov (r tmp) (ro esp);                                       (* briefly swap in C stack to   *)
+      mov (rc esp) (c (r newsp));                                 (* make valgrind happy          *)
+      mov (rc esp) (c (r tmp));
+
       mov (word_n newsp nargs) (ro esp);                          (* stash proc sp above args     *)
 
-      let tmp = scratch1 in
-      let newsp = scratch2 in
-        Array.iteri (fun i (arg:Il.operand) ->                    (* write arguments onto C stack *)
-                       match arg with
-                           Il.Cell (Il.Addr a) ->
-                             mov (r tmp) arg;
-                             mov (word_n newsp i) (c (r tmp))
-                         | _ ->
-                             mov (word_n newsp i) arg)
-                    args;
+      Array.iteri (fun i (arg:Il.operand) ->                      (* write arguments onto C stack *)
+                     match arg with
+                         Il.Cell (Il.Addr a) ->
+                           mov (r tmp) arg;
+                           mov (word_n newsp i) (c (r tmp))
+                       | _ ->
+                           mov (word_n newsp i) arg)
+        args;
 
-        let addr =
-          if nabi.Abi.nabi_indirect
-          then (Il.Abs (Asm.M_POS fn))
-          else Il.Pcrel (fn, None)
-        in
-                                                                  (* switch stacks and call fn    *)
-          emit (Il.call (rc eax) (c (r newsp)) (Il.CodeAddr addr));
+      let addr =
+        if nabi.Abi.nabi_indirect
+        then (Il.Abs (Asm.M_POS fn))
+        else Il.Pcrel (fn, None)
+      in
 
-          mov (rc esp) (c (word_n (h esp) nargs));                (* esp = proc sp                *)
+        emit (Il.call (rc eax) (c (r newsp)) (Il.CodeAddr addr)); (* switch stacks and call fn    *)
 
-          (*
-           * We have to wait until we have restored the original stack before we write to the output
-           * slot, because ret might be sp-relative.
-           *)
+        mov (rc esp) (c (word_n (h esp) nargs));                  (* esp = proc sp                *)
 
-          mov ret (ro eax)                                        (* write return value           *)
+        (*
+         * We have to wait until we have restored the original stack before we write to the output
+         * slot, because ret might be sp-relative.
+         *)
+
+        mov ret (ro eax)                                          (* write return value           *)
 ;;
 
 let emit_native_call
