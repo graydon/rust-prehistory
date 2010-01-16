@@ -407,11 +407,11 @@ let emit_c_call
     let newsp = scratch2
     in
 
-      sub (r newsp) frame_sz;                                     (* make room on the C stack     *)
-
       mov (r tmp) (ro esp);                                       (* briefly swap in C stack to   *)
       mov (rc esp) (c (r newsp));                                 (* make valgrind happy          *)
-      mov (rc esp) (c (r tmp));
+      sub (rc esp) frame_sz;                                      (* make room on the C stack     *)
+      mov (r newsp) (ro esp);                                     (* ready newsp                  *)
+      mov (rc esp) (c (r tmp));                                   (* swap back on proc stack      *)
 
       mov (word_n newsp nargs) (ro esp);                          (* stash proc sp above args     *)
 
