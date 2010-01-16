@@ -677,11 +677,12 @@ The keywords are:
 @tab @code{tag}
 @tab @code{vec}
 @tab @code{str}
-@tab @code{proc}
-@item @code{port}
+@item @code{proc}
+@tab @code{port}
 @tab @code{chan}
 @tab @code{flush}
-@tab @code{true}
+@tab @code{spawn}
+@item @code{true}
 @tab @code{false}
 @item @code{if}
 @tab @code{else}
@@ -692,11 +693,7 @@ The keywords are:
 @tab @code{while}
 @tab @code{break}
 @tab @code{cont}
-@item @code{init}
-@tab @code{main}
 @tab @code{fail}
-@tab @code{fini}
-@tab @code{spawn}
 @item @code{log}
 @tab @code{note}
 @tab @code{bind}
