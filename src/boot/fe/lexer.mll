@@ -168,6 +168,8 @@ rule token = parse
 | "be*"                        { BE (Some Ast.PROTO_star)  }
 | "be+"                        { BE (Some Ast.PROTO_plus)  }
 
+| "bind"                       { BIND }
+
 | id as i
                                { try
                                      Hashtbl.find keyword_table i

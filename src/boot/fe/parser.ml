@@ -22,6 +22,7 @@ type token =
   | LSL
   | LSR
   | ASR
+  | BIND
 
   (* Structural symbols *)
   | AT
@@ -291,6 +292,7 @@ let string_of_tok t =
 type pexp' =
     PEXP_call of (pexp * pexp array)
   | PEXP_spawn of pexp
+  | PEXP_bind of (pexp * pexp option array)
   | PEXP_rec of ((Ast.ident * pexp) array)
   | PEXP_tup of (pexp array)
   | PEXP_vec of (Ast.slot * (pexp array))
@@ -660,6 +662,31 @@ and parse_constraint (ps:pstate) : Ast.constr =
 and parse_constrs (ps:pstate) : Ast.constrs =
   ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps
 
+(* FIXME: parse constraints --
+     match peek ps with
+       COLON -> bump ps; parse_constrs ps
+     | _ -> [| |]
+   should do it *)
+and parse_fn_ty (pure:bool) (ps:pstate) : Ast.ty =
+  match peek ps with
+      FN p ->
+        bump ps;
+        let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot true) ps in
+          begin
+            match peek ps with
+                RARROW ->
+                  bump ps;
+                  let res_slot = parse_slot false ps in
+                    Ast.TY_fn ({ Ast.sig_input_slots = slots;
+                                 (* FIXME: parse input type constraints *)
+                                 Ast.sig_input_constrs = [| |];
+                                 Ast.sig_output_slot = res_slot; },
+                               { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
+                                 Ast.fn_proto = p; })
+              | _ -> raise (unexpected ps)
+          end
+    | _ -> raise (unexpected ps)
+
 and parse_atomic_ty (ps:pstate) : Ast.ty =
   match peek ps with
 
@@ -746,6 +773,10 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
     | MACH m ->
         bump ps;
         Ast.TY_mach m
+
+    | PURE -> (bump ps; parse_fn_ty true ps)
+
+    | FN _ -> parse_fn_ty false ps
 
     (* FIXME: parse mod types. *)
 
@@ -967,6 +998,14 @@ and parse_bottom_pexp (ps:pstate) : pexp =
           let pexp = ctxt "spawn pexp: init call" parse_pexp ps in
           let bpos = lexpos ps in
               span ps apos bpos (PEXP_spawn pexp)
+
+    | BIND ->
+        begin
+          bump ps;
+          let pexp = ctxt "bind pexp: function" parse_pexp ps in
+            (* FIXME: finish this *)
+            raise (err "not yet implemented" ps)
+        end
 
     | IDENT i ->
         begin
