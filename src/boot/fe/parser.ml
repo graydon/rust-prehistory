@@ -235,6 +235,7 @@ let string_of_tok t =
     (* Magic runtime services *)
     | LOG        -> "log"
     | SPAWN      -> "spawn"
+    | BIND       -> "bind"
 
     (* Literals *)
     | LIT_INT (n,s)  -> s
@@ -1002,7 +1003,7 @@ and parse_bottom_pexp (ps:pstate) : pexp =
     | BIND ->
         begin
           bump ps;
-          let pexp = ctxt "bind pexp: function" parse_pexp ps in
+          (* let pexp = ctxt "bind pexp: function" parse_pexp ps in *)
             (* FIXME: finish this *)
             raise (err "not yet implemented" ps)
         end
@@ -1314,6 +1315,10 @@ and desugar_expr_atom
       | PEXP_mutable _ ->
           raise (err "mutable keyword in atom context" ps)
 
+      | PEXP_bind _ ->
+          raise (err "unimplemented" ps)
+
+
 
 and desugar_expr_mode_atom
     (ps:pstate)
@@ -1449,6 +1454,9 @@ and desugar_expr_init
 
       | PEXP_mutable _ ->
           raise (err "mutable keyword in initialiser context" ps)
+
+      | PEXP_bind _ ->
+          raise (err "unimplemented" ps)
 
 
 
