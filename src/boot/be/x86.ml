@@ -772,15 +772,14 @@ let objfile_start
     ~(start_fixup:fixup)
     ~(rust_start_fixup:fixup)
     ~(main_fn_fixup:fixup)
-    ~(main_exit_proc_glue_fixup:fixup)
-    ~(c_to_proc_fixup:fixup)
+    ~(global_glue:fixup)
     ~(indirect_start:bool)
     : unit =
   Il.emit_full e (Some start_fixup) Il.Dead;
   save_callee_saves e;
   Il.emit e (Il.umov (rc ebp) (ro esp));
-  Il.emit e (Il.Push (imm (Asm.M_POS c_to_proc_fixup)));
-  Il.emit e (Il.Push (imm (Asm.M_POS main_exit_proc_glue_fixup)));
+  Il.emit e (Il.Push (immi 0L));
+  Il.emit e (Il.Push (imm (Asm.M_POS global_glue)));
   Il.emit e (Il.Push (imm (Asm.M_POS main_fn_fixup)));
   if indirect_start
   then

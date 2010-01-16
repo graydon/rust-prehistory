@@ -26,25 +26,13 @@
 
 struct rust_proc;
 
-class rust_srv {
-    void CDECL (*c_to_proc_glue)(rust_proc *);
-
-public:
-    rust_srv(void CDECL (*c_to_proc_glue)(rust_proc *)) :
-        c_to_proc_glue(c_to_proc_glue)
-    {
-    }
-
+struct rust_srv {
     virtual void log(char const *);
     virtual void fatal(char const *, char const *, size_t);
     virtual void *malloc(size_t);
     virtual void *realloc(void *, size_t);
     virtual void free(void *);
     virtual uintptr_t lookup(char const *);
-
-    void activate(rust_proc *proc) {
-        c_to_proc_glue(proc);
-    }
 };
 
 inline void *operator new(size_t size, rust_srv *srv)

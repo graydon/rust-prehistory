@@ -996,6 +996,7 @@ let trans_visitor
       iflog (fun _ -> annotate ("condition-fail: " ^ str));
       trans_upcall_slow Abi.UPCALL_fail
         [|
+          (Il.Cell abi.Abi.abi_pp_cell);
           trans_static_string str;
           trans_static_string filename;
           imm (Int64.of_int line)
@@ -2394,15 +2395,17 @@ let trans_visitor
     in
     let global_glue_fns =
       (cx.ctxt_global_glue_fixup,
-       Asm.SEQ [|
-         (* 
-          * NB: this must match the struct-offsets given in ABI
-          * & rust runtime library.
-          *)
-         Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_c_to_proc_fixup);
-         Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_main_exit_proc_glue_fixup);
-         Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_unwind_fixup);
-       |])
+       Asm.DEF
+         (cx.ctxt_global_glue_fixup,
+          Asm.SEQ [|
+            (* 
+             * NB: this must match the struct-offsets given in ABI
+             * & rust runtime library.
+             *)
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_c_to_proc_fixup);
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_main_exit_proc_glue_fixup);
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_unwind_fixup);
+          |]))
     in
 
       (* Emit additional glue we didn't do elsewhere. *)

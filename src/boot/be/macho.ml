@@ -831,8 +831,8 @@ let emit_file
 
     (* Push 16 bytes to preserve SSE alignment. *)
     Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_c_to_proc_fixup)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_main_exit_proc_glue_fixup)));
+    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_global_glue_fixup)));
     Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_main_fn_fixup)));
     Il.emit e (Il.call (X86.rc X86.eax) (X86.ro X86.esp) (Il.CodeAddr (Il.Abs (Asm.M_POS rust_start_fixup))));
     Il.emit e (Il.Pop (X86.rc X86.ecx));

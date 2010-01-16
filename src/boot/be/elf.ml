@@ -1370,8 +1370,7 @@ let emit_file
       X86.objfile_start e
         ~start_fixup ~rust_start_fixup
         ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
-        ~main_exit_proc_glue_fixup: sem.Semant.ctxt_main_exit_proc_glue_fixup
-        ~c_to_proc_fixup: sem.Semant.ctxt_c_to_proc_fixup
+        ~global_glue: sem.Semant.ctxt_global_glue_fixup
         ~indirect_start: false;
       X86.frags_of_emitted_quads sess e
   in

@@ -588,13 +588,12 @@ let pe_import_section
 
 let pe_text_section
     ~(sess:Session.sess)
+    ~(sem:Semant.ctxt)
     ~(start_fixup:fixup)
     ~(rust_start_fixup:fixup)
     ~(main_fn_fixup:fixup)
-    ~(main_exit_proc_glue_fixup:fixup)
     ~(text_fixup:fixup)
     ~(crate_code:frag)
-    ~(c_to_proc_fixup:fixup)
     : frag =
   let e = X86.new_emitter () in
     (*
@@ -606,8 +605,7 @@ let pe_text_section
       ~start_fixup
       ~rust_start_fixup
       ~main_fn_fixup
-      ~main_exit_proc_glue_fixup
-      ~c_to_proc_fixup
+      ~global_glue: sem.Semant.ctxt_global_glue_fixup
       ~indirect_start: true;
     def_aligned
       text_fixup
@@ -784,14 +782,13 @@ let emit_file
   in
 
   let text_section = (pe_text_section
+                        ~sem
                         ~sess
                         ~start_fixup
                         ~rust_start_fixup
                         ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
-                        ~main_exit_proc_glue_fixup: sem.Semant.ctxt_main_exit_proc_glue_fixup
                         ~text_fixup
-                        ~crate_code: code
-                        ~c_to_proc_fixup: sem.Semant.ctxt_c_to_proc_fixup)
+                        ~crate_code: code)
   in
   let bss_section = def_aligned bss_fixup (BSS 0x10L)
   in

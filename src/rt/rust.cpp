@@ -149,6 +149,18 @@ typedef enum {
     abi_code_rust = 1
 } abi_t;
 
+struct global_glue_fns {
+    void CDECL (*c_to_proc_glue)(rust_proc *);
+    uintptr_t main_exit_proc_glue;
+    uintptr_t unwind_glue;
+};
+
+struct frame_glue_fns {
+    uintptr_t mark_glue;
+    uintptr_t drop_glue;
+    uintptr_t reloc_glue;
+};
+
 /* FIXME: change ptr_vec and circ_buf to use flexible-array element
    rather than pointer-to-buf-at-end. */
 
@@ -217,10 +229,11 @@ struct rust_str {
 };
 
 struct rust_rt {
-    rust_rt(rust_srv *srv, size_t &live_allocs);
+    rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs);
     ~rust_rt();
 
     rust_srv *srv;
+    global_glue_fns *global_glue;
     size_t &live_allocs;
     uint32_t logbits;
     ptr_vec<rust_proc> running_procs;
@@ -229,6 +242,7 @@ struct rust_rt {
     rust_proc *root_proc;
     rust_port *ports;
 
+    void activate(rust_proc *proc);
     void log(uint32_t logbit, char const *fmt, ...);
     void logptr(char const *msg, uintptr_t ptrval);
     template<typename T>
@@ -261,19 +275,6 @@ inline void *operator new(size_t sz, rust_rt &rt) {
 inline void *operator new[](size_t sz, rust_rt &rt) {
     return rt.malloc(sz);
 }
-
-struct global_glue_fns {
-    uintptr_t c_to_proc_glue;
-    uintptr_t main_exit_proc_glue;
-    uintptr_t unwind_glue;
-};
-
-
-struct frame_glue_fns {
-    uintptr_t mark_glue;
-    uintptr_t drop_glue;
-    uintptr_t reloc_glue;
-};
 
 /*
  * "Simple" precise, mark-sweep, single-generation GC.
@@ -369,6 +370,7 @@ struct rust_proc {
     uintptr_t upcall_code;
     uintptr_t upcall_args[PROC_MAX_UPCALL_ARGS];
 
+    void fail();
     uintptr_t get_fp();
     uintptr_t get_previous_fp(uintptr_t fp);
     frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
@@ -963,6 +965,19 @@ get_callee_save_fp(uintptr_t *top_of_callee_saves)
     return top_of_callee_saves[n_callee_saves - (callee_save_fp + 1)];
 }
 
+static void
+proc_state_transition(rust_rt *rt,
+                      rust_proc *proc,
+                      proc_state_t src,
+                      proc_state_t dst);
+
+void
+rust_proc::fail() {
+    proc_state_transition(rt, this, state,
+                          proc_state_failing);
+    rust_sp = rt->global_glue->unwind_glue;
+}
+
 uintptr_t
 rust_proc::get_fp() {
     // sp in any suspended proc points to the last callee-saved reg on
@@ -1048,26 +1063,12 @@ proc_state_transition(rust_rt *rt,
 }
 
 extern "C" CDECL void
-fail_proc(rust_rt *rt, rust_proc *proc)
-{
-    rt->log(LOG_PROC,
-            "fail_proc(0x%" PRIxPTR "), refcnt=%d",
-            proc, proc->refcnt);
-    I(rt, rt->n_live_procs() > 0);
-    proc_state_transition(rt, proc,
-                          proc->state,
-                          proc_state_failing);
-}
-
-extern "C" CDECL void
 upcall_del_proc(rust_proc *proc)
 {
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL,
             "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
             proc, proc->refcnt);
-    fail_proc(rt, proc);
-
     // FIXME: remove this part.
     remove_proc_from_state_vec(rt, proc);
     delete proc;
@@ -1084,8 +1085,9 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     }
 }
 
-rust_rt::rust_rt(rust_srv *srv, size_t &live_allocs) :
+rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs) :
     srv(srv),
+    global_glue(global_glue),
     live_allocs(live_allocs),
     logbits(get_logbits()),
     running_procs(this),
@@ -1131,6 +1133,12 @@ rust_rt::~rust_rt() {
     /* FIXME: remove when port <-> proc linkage is obsolete. */
     while (ports)
         delete ports;
+}
+
+
+void
+rust_rt::activate(rust_proc *proc) {
+    global_glue->c_to_proc_glue(proc);
 }
 
 void
@@ -1457,14 +1465,14 @@ upcall_recv(rust_proc *dst, rust_port *port)
 }
 
 extern "C" CDECL void
-upcall_fail(rust_proc *proc, char const *expr, char const *file, size_t line)
+upcall_fail(rust_proc *proc, rust_proc *failee,
+            char const *expr, char const *file, size_t line)
 {
-    rust_rt *rt =proc->rt;
-    /* FIXME: throw, don't just exit. */
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
             expr, file, line);
     rt->srv->fatal(expr, file, line);
-    fail_proc(rt, proc);
+    failee->fail();
 }
 
 extern "C" CDECL uintptr_t
@@ -1523,18 +1531,18 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 
 
 static void
-rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv);
+rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv);
 
 struct rust_ticket {
     uintptr_t main_fn;
-    uintptr_t main_exit_proc_glue;
+    global_glue_fns *global_glue;
     rust_srv *srv;
 
     explicit rust_ticket(uintptr_t main_fn,
-                         uintptr_t main_exit_proc_glue,
+                         global_glue_fns *global_glue,
                          rust_srv *srv)
         : main_fn(main_fn),
-          main_exit_proc_glue(main_exit_proc_glue),
+          global_glue(global_glue),
           srv(srv)
     {}
 
@@ -1563,14 +1571,14 @@ static void *rust_thread_start(void *ptr)
      */
     rust_ticket *ticket = (rust_ticket *)ptr;
     uintptr_t main_fn = ticket->main_fn;
-    uintptr_t main_exit_proc_glue = ticket->main_exit_proc_glue;
+    global_glue_fns *global_glue = ticket->global_glue;
     rust_srv *srv = ticket->srv;
     delete ticket;
 
     /*
      * Start a new rust main loop for this thread.
      */
-    rust_main_loop(main_fn, main_exit_proc_glue, srv);
+    rust_main_loop(main_fn, global_glue, srv);
 
     return 0;
 }
@@ -1589,7 +1597,7 @@ upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue,
 }
 
 extern "C" CDECL rust_proc *
-upcall_new_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn)
+upcall_new_thread(rust_proc *spawner, global_glue_fns *global_glue, uintptr_t spawnee_fn)
 {
     rust_rt *rt = spawner->rt;
     rust_srv *srv = rt->srv;
@@ -1597,7 +1605,7 @@ upcall_new_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawne
      * The ticket is not bound to the current runtime, so allocate directly from the
      * service.
      */
-    rust_ticket *ticket = new (srv) rust_ticket(spawnee_fn, exit_proc_glue, srv);
+    rust_ticket *ticket = new (srv) rust_ticket(spawnee_fn, global_glue, srv);
 
 #if defined(__WIN32__)
     DWORD thread;
@@ -1637,9 +1645,10 @@ handle_upcall(rust_proc *proc)
         break;
     case upcall_code_fail:
         upcall_fail(proc,
-                    (char const *)args[0],
+                    (rust_proc *)args[0],
                     (char const *)args[1],
-                    (size_t)args[2]);
+                    (char const *)args[2],
+                    (size_t)args[3]);
         break;
     case upcall_code_malloc:
         *((uintptr_t*)args[0]) =
@@ -1680,18 +1689,18 @@ handle_upcall(rust_proc *proc)
 
 
 static void
-rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
+rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
 {
     size_t live_allocs = 0;
     {
         rust_proc *proc;
-        rust_rt rt(srv, live_allocs);
+        rust_rt rt(srv, global_glue, live_allocs);
 
         rt.log(LOG_RT, "control is in rust runtime library");
         rt.logptr("main fn", main_fn);
-        rt.logptr("main exit-proc glue", main_exit_proc_glue);
+        rt.logptr("main exit-proc glue", global_glue->main_exit_proc_glue);
 
-        rt.root_proc = new (rt) rust_proc(&rt, NULL, main_exit_proc_glue, main_fn, 0);
+        rt.root_proc = new (rt) rust_proc(&rt, NULL, global_glue->main_exit_proc_glue, main_fn, 0);
         add_proc_state_vec(&rt, rt.root_proc);
         proc = rt.sched();
 
@@ -1704,7 +1713,7 @@ rust_main_loop(uintptr_t main_fn, uintptr_t main_exit_proc_glue, rust_srv *srv)
                    (uintptr_t)proc);
 
             proc->state = proc_state_running;
-            srv->activate(proc);
+            rt.activate(proc);
 
             rt.log(LOG_PROC,
                    "returned from proc 0x%" PRIxPTR " in state '%s'",
@@ -1852,11 +1861,10 @@ implode(rust_proc *proc, rust_vec *v)
 
 extern "C" CDECL int
 rust_start(uintptr_t main_fn,
-           uintptr_t main_exit_proc_glue,
-           void CDECL (*c_to_proc_glue)(rust_proc*))
+           global_glue_fns *global_glue)
 {
-    rust_srv srv(c_to_proc_glue);
-    rust_main_loop(main_fn, main_exit_proc_glue, &srv);
+    rust_srv srv;
+    rust_main_loop(main_fn, global_glue, &srv);
     return 0;
 }
 
