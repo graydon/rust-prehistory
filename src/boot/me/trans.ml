@@ -1906,7 +1906,7 @@ let trans_visitor
 
   and call_code (code:Il.code) : unit =
     let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
-      emit (Il.call vr (Il.Cell (Il.Reg (abi.Abi.abi_sp_reg, word_ty))) code);
+      emit (Il.call vr code);
 
   and trans_call
       (initialising:bool)

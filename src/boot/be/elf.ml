@@ -1354,7 +1354,6 @@ let emit_file
       push_pos32 start_fixup;
       Il.emit e (Il.call
                    (Il.Reg (Il.Hreg X86.eax, Il.ValTy Il.Bits32))
-                   (Il.Cell (Il.Reg (Il.Hreg X86.esp, Il.ValTy Il.Bits32)))
                    (Il.CodeAddr (Il.Pcrel (libc_start_main_fixup, None))));
       X86.frags_of_emitted_quads sess e
   in

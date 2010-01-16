@@ -379,8 +379,6 @@ let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
 
 let emit_c_call
     (ret:Il.cell)
-    (scratch1:Il.reg)
-    (scratch2:Il.reg)
     (e:Il.emitter)
     (nabi:Abi.nabi)
     (fn:fixup)
@@ -389,6 +387,7 @@ let emit_c_call
 
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
+  let xchg dst src = emit (Il.xchg dst src) in
   let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
 
   let args =                                                      (* rust calls get proc as arg0  *)
@@ -397,38 +396,37 @@ let emit_c_call
     else args
   in
   let nargs = Array.length args in
-  let proc = scratch1 in
-  let newsp = scratch2 in
+  let frame_sz = align (Int64.of_int (nargs + 1)) 16L             (* args + oldsp, aligned        *)
+  in
 
-    mov (r proc) (c proc_ptr);                                    (* read proc from argv[-1]      *)
-    mov (r newsp) (c (word_n proc Abi.proc_field_runtime_sp));    (* newsp = proc->runtime_sp     *)
+    mov (rc eax) (c proc_ptr);                                    (* eax = proc from argv[-1]     *)
+    mov (rc eax) (c (word_n (h eax) Abi.proc_field_runtime_sp));  (* eax = proc->runtime_sp       *)
 
-    (*
-     * Note: c_to_proc ensures that runtime_sp is always aligned at a 16-byte boundary. We reserve
-     * room for the arguments on the stack, plus one word to save the rust stack pointer. The
-     * frame size is then aligned again at the nearest 16-byte boundary.
-     *)
-    let frame_sz = align (Int64.of_int (nargs + 1)) 16L in
-    let tmp = scratch1 in
-    let newsp = scratch2
+    xchg (rc eax) (ro esp);                                       (* newsp <-> oldsp              *)
+    sub (rc esp) frame_sz;                                        (* make room on newsp           *)
+
+    let oldsp_save = word_n (h esp) nargs
     in
 
-      mov (r tmp) (ro esp);                                       (* briefly swap in C stack to   *)
-      mov (rc esp) (c (r newsp));                                 (* make valgrind happy          *)
-      sub (rc esp) frame_sz;                                      (* make room on the C stack     *)
-      mov (r newsp) (ro esp);                                     (* ready newsp                  *)
-      mov (rc esp) (c (r tmp));                                   (* swap back on proc stack      *)
-
-      mov (word_n newsp nargs) (ro esp);                          (* stash proc sp above args     *)
+      mov oldsp_save (ro eax);                                    (* newsp[nargs] = oldsp         *)
 
       Array.iteri (fun i (arg:Il.operand) ->                      (* write arguments onto C stack *)
                      match arg with
-                         Il.Cell (Il.Addr a) ->
-                           mov (r tmp) arg;
-                           mov (word_n newsp i) (c (r tmp))
+                         Il.Cell (Il.Addr (a, _)) ->
+                           begin
+                             match a with
+                                 Il.Based (Il.Hreg base, off) when base == esp ->
+                                   mov (rc eax) (c (Il.Addr (Il.Based (h eax, off), Il.ScalarTy (Il.ValTy word_bits))));
+                                   mov (word_n (h esp) i) (ro eax);
+                                   mov (rc eax) (c oldsp_save)    (* restore oldsp into eax       *)
+                               | _ ->
+                                   mov (rc eax) arg;
+                                   mov (word_n (h esp) i) (ro eax);
+                                   mov (rc eax) (c oldsp_save)    (* restore oldsp into eax       *)
+                           end
                        | _ ->
-                           mov (word_n newsp i) arg)
-        args;
+                           mov (word_n (h esp) i) arg)
+                  args;
 
       let addr =
         if nabi.Abi.nabi_indirect
@@ -436,9 +434,8 @@ let emit_c_call
         else Il.Pcrel (fn, None)
       in
 
-        emit (Il.call (rc eax) (c (r newsp)) (Il.CodeAddr addr)); (* switch stacks and call fn    *)
-
-        mov (rc esp) (c (word_n (h esp) nargs));                  (* esp = proc sp                *)
+        emit (Il.call (rc eax) (Il.CodeAddr addr));
+        mov (rc esp) (c oldsp_save);                              (* switch back original stack   *)
 
         (*
          * We have to wait until we have restored the original stack before we write to the output
@@ -456,13 +453,7 @@ let emit_native_call
     (args:Il.operand array)
     : unit =
 
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-  let (scratch1, _) = vreg e in
-  let (scratch2, _) = vreg e in
-
-    emit_c_call (rc eax) scratch1 scratch2 e nabi fn args;
-    mov ret (ro eax)
+  emit_c_call ret e nabi fn args
 ;;
 
 let emit_native_void_call
@@ -486,7 +477,7 @@ let emit_native_thunk
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    emit_c_call (rc eax) (h eax) (h edx) e nabi fn args;
+    emit_c_call (rc eax) e nabi fn args;
 
     match ret with
         Il.Reg (r, _) -> mov (word_at r) (ro eax)
@@ -523,7 +514,7 @@ let emit_upcall_full
           mov (r_n (Abi.proc_field_upcall_args + i)) arg
       end
       args;
-    emit (Il.call (r scratch) (ro esp) (pcrel proc_to_c_fixup))
+    emit (Il.call (r scratch) (pcrel proc_to_c_fixup))
 ;;
 
 
@@ -571,8 +562,7 @@ let unwind_glue
     push (ro ebp);                                  (* frame-to-drop                *)
     push (c proc_ptr);                              (* form usual call to glue      *)
     push (immi 0L);                                 (* outptr                       *)
-    emit (Il.call (rc eax) (ro esp)                 (* call glue_fn, trashing eax.  *)
-            (glue_codeptr (h edx)));
+    emit (Il.call (rc eax) (glue_codeptr (h edx))); (* call glue_fn, trashing eax.  *)
     pop (rc eax);
     pop (rc eax);
     pop (rc eax);
@@ -783,10 +773,10 @@ let objfile_start
   then
     begin
       let addr = Il.Abs (Asm.M_POS rust_start_fixup) in
-        Il.emit e (Il.call (rc eax) (ro esp) (Il.CodeAddr addr));
+        Il.emit e (Il.call (rc eax) (Il.CodeAddr addr));
     end
   else
-    Il.emit e (Il.call (rc eax) (ro esp) (Il.CodeAddr (Il.Pcrel (rust_start_fixup, None))));
+    Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Pcrel (rust_start_fixup, None))));
   Il.emit e (Il.Pop (rc ecx));
   Il.emit e (Il.Pop (rc ecx));
   Il.emit e (Il.umov (rc esp) (ro ebp));
@@ -1088,6 +1078,16 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
     | _ -> raise Unrecognized
 ;;
 
+let xchg (dst:Il.cell) (src:Il.operand) : Asm.frag =
+  match (dst, src) with
+
+    (* rm32 <- r32 *)
+    | (_,  Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
+        when (is_r8 dst || is_rm32 dst) && is_ty32 src_ty ->
+        insn_rm_r 0x87 dst (reg r)
+
+    | _ -> raise Unrecognized
+;;
 
 let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
 
@@ -1153,21 +1153,12 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
 
   match q with
       Il.Call c ->
-        (* Determine we are supposed to switch stacks before calling. *)
-        let switch =
-          match c.Il.call_sp with
-              Il.Cell (Il.Reg ((Il.Hreg reg), _)) when reg = esp -> false
-            | _ -> true
-        in
-        let call_insn =
+        begin
           match c.Il.call_dst with
               Il.Reg ((Il.Hreg dst), _) when dst = eax ->
                 begin
                   match c.Il.call_targ with
-                      Il.CodeAddr (Il.Based (Il.Hreg reg, _)) when reg = esp && switch ->
-                        (* If we are switching stacks, we can't refer to the old stack here. *)
-                        raise Unrecognized
-                    | Il.CodeAddr (Il.Based b) ->
+                      Il.CodeAddr (Il.Based b) ->
                         insn_rm_r 0xff (Il.Addr (Il.Based b, Il.OpaqueTy)) slash2
                     | Il.CodeAddr (Il.Abs a) ->
                         insn_rm_r 0xff (Il.Addr (Il.Abs a, Il.OpaqueTy)) slash2
@@ -1176,10 +1167,7 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
                     | _ -> raise Unrecognized
                 end
             | _ -> raise Unrecognized
-        in
-          if switch
-          then Asm.SEQ [| mov false (rc esp) c.Il.call_sp; call_insn |]
-          else call_insn;
+        end
 
     | Il.Push (Il.Cell (Il.Reg ((Il.Hreg r), t))) when is_ty32 t ->
         Asm.BYTE (0x50 + (reg r))
@@ -1306,6 +1294,7 @@ let select_insn (q:Il.quad) : Asm.frag =
             match u.Il.unary_op with
                 Il.UMOV -> mov false u.Il.unary_dst u.Il.unary_src
               | Il.IMOV -> mov true u.Il.unary_dst u.Il.unary_src
+              | Il.XCHG -> xchg u.Il.unary_dst u.Il.unary_src
               | Il.NEG -> unop slash3
               | Il.NOT -> unop slash2
           end
