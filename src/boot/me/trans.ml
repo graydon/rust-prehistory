@@ -1045,8 +1045,11 @@ let trans_visitor
     trans_void_upcall "upcall_del_port" [| Il.Cell port |]
 
   and trans_del_proc (proc:Il.cell) : unit =
-    (* FIXME: this needs to unwind the target, run the fini block, and all that. *)
-    trans_upcall_slow Abi.UPCALL_del_proc [| Il.Cell proc |]
+      trans_upcall_slow Abi.UPCALL_fail
+        [|
+          (Il.Cell proc);
+          zero; zero; zero;
+        |];
 
   (*
    * A vec is implicitly exterior: every slot vec[T] is 1 word and

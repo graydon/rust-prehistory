@@ -121,7 +121,8 @@ static char const * const state_names[] =
     {
         "running",
         "calling_c",
-        "exited",
+        "failing",
+        "blocked_exited",
         "blocked_reading",
         "blocked_writing"
     };
@@ -975,7 +976,11 @@ void
 rust_proc::fail() {
     proc_state_transition(rt, this, state,
                           proc_state_failing);
-    rust_sp = rt->global_glue->unwind_glue;
+    uintptr_t *rust_spp = (uintptr_t*)rust_sp;
+    rust_spp += n_callee_saves;
+    *rust_spp = rt->global_glue->unwind_glue;
+    rt->log(LOG_MEM|LOG_PROC, "unwind-glue starts at 0x%" PRIxPTR,
+            rt->global_glue->unwind_glue);
 }
 
 uintptr_t
@@ -1229,7 +1234,8 @@ rust_proc *
 rust_rt::sched()
 {
     I(this, this);
-    I(this, n_live_procs() > 0);
+    // FIXME: in the face of failing processes, this is not always right.
+    // I(this, n_live_procs() > 0);
     if (running_procs.length() > 0) {
         size_t i = rand(&rctx);
         i %= running_procs.length();
@@ -1471,7 +1477,6 @@ upcall_fail(rust_proc *proc, rust_proc *failee,
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
             expr, file, line);
-    rt->srv->fatal(expr, file, line);
     failee->fail();
 }
 
@@ -1712,7 +1717,8 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
             rt.log(LOG_PROC, "activating proc 0x%" PRIxPTR,
                    (uintptr_t)proc);
 
-            proc->state = proc_state_running;
+            if (proc->state != proc_state_failing)
+                proc->state = proc_state_running;
             rt.activate(proc);
 
             rt.log(LOG_PROC,

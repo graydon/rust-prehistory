@@ -309,6 +309,12 @@ let word_n (reg:Il.reg) (i:int) : Il.cell =
     Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
+let word_n_code (reg:Il.reg) (i:int) : Il.code =
+  let imm = word_off_n i in
+  let addr = Il.Based (reg, Some imm) in
+    Il.CodeAddr addr
+;;
+
 let word_n_low_byte (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
   let addr = Il.Based (reg, Some imm) in
@@ -544,10 +550,10 @@ let unwind_glue
   let mov dst src = emit (Il.umov dst src) in
   let push x = emit (Il.Push x) in
   let pop x = emit (Il.Pop x) in
-  let codeptr reg = Il.CodeAddr (Il.Based ((h reg), None)) in
   let codefix fix = Il.CodeAddr (Il.Pcrel (fix, None)) in
   let mark fix = Il.emit_full e (Some fix) Il.Dead in
   let glue_field = Abi.frame_glue_fns_field_drop in
+  let glue_codeptr struct_reg = word_n_code struct_reg glue_field in
 
   let repeat_jmp_fix = new_fixup "repeat jump" in
   let skip_jmp_fix = new_fixup "skip jump" in
@@ -555,13 +561,19 @@ let unwind_glue
 
     mark repeat_jmp_fix;
     mov (rc edx) (c (fp_n (-1)));                   (* edx <- frame glue functions. *)
+    emit (Il.cmp (ro edx) (immi 0L));
+
+    emit (Il.jmp Il.JE (codefix skip_jmp_fix));     (* if struct* is nonzero        *)
     mov (rc ecx) (c (edx_n glue_field));            (* edx <- drop glue             *)
     emit (Il.cmp (ro ecx) (immi 0L));
 
-    emit (Il.jmp Il.JNE (codefix skip_jmp_fix));    (* if glue-fn is nonzero        *)
+    emit (Il.jmp Il.JE (codefix skip_jmp_fix));     (* if glue-fn is nonzero        *)
+    push (ro ebp);                                  (* frame-to-drop                *)
     push (c proc_ptr);                              (* form usual call to glue      *)
     push (immi 0L);                                 (* outptr                       *)
-    emit (Il.call (rc eax) (ro esp) (codeptr ecx)); (* call *edx, trashing eax.     *)
+    emit (Il.call (rc eax) (ro esp)                 (* call glue_fn, trashing eax.  *)
+            (glue_codeptr (h edx)));
+    pop (rc eax);
     pop (rc eax);
     pop (rc eax);
 
@@ -753,20 +765,6 @@ let fn_epilogue (e:Il.emitter) : unit =
 ;;
 
 
-let main_prologue
-    (e:Il.emitter)
-    (block:Ast.block)
-    (framesz:int64)
-    (spill_fixup:fixup)
-    (callsz:int64)
-    : unit =
-  let ssz = Int64.add framesz callsz in
-    save_callee_saves e;
-    Il.emit e (Il.umov (rc ebp) (ro esp));
-    Il.emit e (Il.binary Il.SUB (rc esp) (ro esp)
-                 (imm (Asm.ADD ((Asm.IMM ssz), Asm.M_SZ spill_fixup))))
-;;
-
 let objfile_start
     (e:Il.emitter)
     ~(start_fixup:fixup)
@@ -888,7 +886,6 @@ let (abi:Abi.abi) =
 
     Abi.abi_emit_fn_prologue = fn_prologue;
     Abi.abi_emit_fn_epilogue = fn_epilogue;
-    Abi.abi_emit_main_prologue = main_prologue;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_proc_state_change = emit_proc_state_change;
