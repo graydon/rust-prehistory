@@ -396,10 +396,10 @@ let emit_c_call
 
     mov (rc eax) (c proc_ptr);                                    (* eax = proc from argv[-1]     *)
     mov (rc eax) (c (word_n (h eax) Abi.proc_field_runtime_sp));  (* eax = proc->runtime_sp       *)
-    binary Il.SUB (rc eax) frame_sz;                              (* make room on the stack and   *)
-    binary Il.AND (rc eax) 0xfffffffffffffff0L;                   (* and 16-byte align sp         *)
 
     xchg (rc eax) (ro esp);                                       (* newsp <-> oldsp              *)
+    binary Il.SUB (rc esp) frame_sz;                              (* make room on the stack and   *)
+    binary Il.AND (rc esp) 0xfffffffffffffff0L;                   (* and 16-byte align sp         *)
 
     let oldsp_save = word_n (h esp) nargs
     in
