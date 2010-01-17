@@ -235,11 +235,6 @@ let word_bits = Il.Bits32
 let word_ty = TY_u32
 ;;
 
-let align (value:int64) (align:int64) : int64 =
-  let mask = (Int64.sub align 1L) in
-    Int64.logand (Int64.add value mask) (Int64.lognot mask)
-;;
-
 let spill_slot (framesz:int64) (i:Il.spill) : Il.addr =
   let imm = (Asm.IMM
                (Int64.neg
@@ -388,7 +383,7 @@ let emit_c_call
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
   let xchg dst src = emit (Il.xchg dst src) in
-  let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
+  let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
 
   let args =                                                      (* rust calls get proc as arg0  *)
     if nabi.Abi.nabi_convention = Abi.CONV_rust
@@ -396,14 +391,15 @@ let emit_c_call
     else args
   in
   let nargs = Array.length args in
-  let frame_sz = align (Int64.of_int (nargs + 1)) 16L             (* args + oldsp, aligned        *)
+  let frame_sz = Int64.mul (Int64.of_int (nargs + 1)) word_sz     (* args + oldsp                 *)
   in
 
     mov (rc eax) (c proc_ptr);                                    (* eax = proc from argv[-1]     *)
     mov (rc eax) (c (word_n (h eax) Abi.proc_field_runtime_sp));  (* eax = proc->runtime_sp       *)
+    binary Il.SUB (rc eax) frame_sz;                              (* make room on the stack and   *)
+    binary Il.AND (rc eax) 0xfffffffffffffff0L;                   (* and 16-byte align sp         *)
 
     xchg (rc eax) (ro esp);                                       (* newsp <-> oldsp              *)
-    sub (rc esp) frame_sz;                                        (* make room on newsp           *)
 
     let oldsp_save = word_n (h esp) nargs
     in
@@ -808,11 +804,9 @@ let c_to_proc (e:Il.emitter) : unit =
   let edx_n = word_n (Il.Hreg edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let sub dst imm = emit (Il.binary Il.SUB dst (c dst) (immi imm)) in
 
     mov (rc edx) (c (sp_n 1));                       (* edx <- proc             *)
     save_callee_saves e;
-    sub (rc esp) 12L;                                (* 16-byte align sp        *)
     mov (edx_n Abi.proc_field_runtime_sp) (ro esp);  (* proc->runtime_sp <- esp *)
     mov (rc esp) (c (edx_n Abi.proc_field_rust_sp)); (* esp <- proc->rust_sp    *)
 
@@ -842,7 +836,6 @@ let proc_to_c (e:Il.emitter) : unit =
   let edx_n = word_n (Il.Hreg edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let add dst imm = emit (Il.binary Il.ADD dst (c dst) (immi imm)) in
 
     mov (rc edx) (c proc_ptr);                          (* edx <- proc            *)
     save_callee_saves e;
@@ -850,7 +843,6 @@ let proc_to_c (e:Il.emitter) : unit =
     mov (rc esp) (c (edx_n Abi.proc_field_runtime_sp)); (* esp <- proc->runtime_sp *)
 
     (**** IN C STACK ****)
-    add (rc esp) 12L;
     restore_callee_saves e;
     emit Il.Ret;
     (***********************)

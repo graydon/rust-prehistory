@@ -96,6 +96,8 @@ let proc_field_upcall_args = proc_field_upcall_code + 1;;
 
 let max_upcall_args = 8;;
 
+let proc_field_callee_saves = proc_field_upcall_args + max_upcall_args;;
+
 let global_glue_fns_c_to_proc_glue = 0;;
 let global_glue_fns_unwind_glue = 1;;
 

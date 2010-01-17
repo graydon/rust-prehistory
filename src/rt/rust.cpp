@@ -371,6 +371,13 @@ struct rust_proc {
     uintptr_t upcall_code;
     uintptr_t upcall_args[PROC_MAX_UPCALL_ARGS];
 
+    // When a proc is descheduled, we save callee-saved registers here
+    // until the proc is activated again.
+    uintptr_t callee_saves[4];
+
+    // Save callee-saved registers and return to the main loop.
+    void yield(size_t argc) __attribute__ ((noreturn));
+
     void fail();
     uintptr_t get_fp();
     uintptr_t get_previous_fp(uintptr_t fp);
@@ -729,6 +736,13 @@ del_stk(rust_rt *rt, stk_seg *stk)
 size_t const n_callee_saves = 4;
 size_t const callee_save_fp = 0;
 
+static uintptr_t
+align_down(uintptr_t sp)
+{
+    // There is no platform we care about that needs more than a 16-byte alignment.
+    return sp & ~(16 - 1);
+}
+
 static void
 upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
 {
@@ -839,17 +853,9 @@ rust_proc::rust_proc(rust_rt *rt,
     rt->logptr("exit-proc glue", exit_proc_glue);
     rt->logptr("from spawnee", spawnee_fn);
 
-    // Set sp to last uintptr_t-sized cell of segment
-    // then align down to 16 boundary, to be safe-ish for
-    // alignment (?)
-    //
-    // FIXME: actually convey alignment constraint here so
-    // we're not just being conservative. I don't *think*
-    // there are any platforms alive at the moment with
-    // >16 byte alignment constraints, but this is sloppy.
-
+    // Set sp to last uintptr_t-sized cell of segment and align down (since its a stack).
     rust_sp -= sizeof(uintptr_t);
-    rust_sp &= ~0xf;
+    rust_sp = align_down(rust_sp);
 
     // Begin synthesizing frames. There are two: a "fully formed"
     // exit-proc frame at the top of the stack -- that pretends to be
@@ -952,6 +958,14 @@ rust_proc::~rust_proc()
     }
 }
 
+void
+rust_proc::yield(size_t nargs)
+{
+    uintptr_t sp = runtime_sp;
+
+    // The compiler reserves nargs + 1 word for oldsp on the stack and then aligns it
+    sp = align_down(sp - (nargs + 1) * sizeof(uintptr_t));
+}
 
 void
 rust_proc::operator delete(void *ptr)
