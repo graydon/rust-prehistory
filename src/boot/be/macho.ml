@@ -575,10 +575,10 @@ let emit_file
 
   let mh_execute_header_fixup = new_fixup "__mh_execute header" in
 
-  let nxargc_fixup = new_fixup "_NXArgc" in
-  let nxargv_fixup = new_fixup "_NXArgv" in
-  let progname_fixup = new_fixup "___progname" in
-  let environ_fixup = new_fixup "_environ" in
+  let nxargc_fixup = (Semant.export sem SEG_data "NXArgc") in
+  let nxargv_fixup = (Semant.export sem SEG_data "NXArgv") in
+  let progname_fixup = (Semant.export sem SEG_data "__progname") in
+  let environ_fixup = (Semant.export sem SEG_data "environ") in
   let exit_fixup = (Semant.import sem LIB_c "exit") in
   let rust_start_fixup = (Semant.import sem LIB_rustrt "rust_start") in
 
@@ -674,6 +674,17 @@ let emit_file
             (htab_pairs sem.Semant.ctxt_imports)))
   in
 
+  let exported_symbols =
+    Array.of_list
+      (List.concat
+         (List.map
+            (fun (seg, tab) ->
+               (List.map
+                  (fun (name, fix) -> (seg,name,fix))
+                  (htab_pairs tab)))
+            (htab_pairs sem.Semant.ctxt_exports)))
+  in
+
   let dylib_index (lib:import_lib) : int =
     match lib with
         LIB_rustrt -> 1
@@ -686,6 +697,19 @@ let emit_file
                  ("_" ^ name,
                   indirect_symbol_nlist_entry (dylib_index lib)))
       indirect_symbols
+  in
+
+  (* Make symbols for exports. *)
+  let (symbols:(string * (frag * fixup)) array) =
+    Array.append symbols
+      (Array.map (fun (seg,name,fix) ->
+                    ("_" ^ name,
+                     sect_symbol_nlist_entry
+                       (match seg with
+                            SEG_text -> 1
+                          | SEG_data -> 2)
+                       fix))
+         exported_symbols)
   in
 
   (* Make private symbols for items. *)
@@ -711,10 +735,6 @@ let emit_file
   let (symbols:(string * (frag * fixup)) array) =
     Array.append symbols
                  [|
-                   ("_NXArgc", sect_symbol_nlist_entry 2 nxargc_fixup);
-                   ("_NXArgv", sect_symbol_nlist_entry 2 nxargv_fixup);
-                   ("_environ", sect_symbol_nlist_entry 2 environ_fixup);
-                   ("___progname", sect_symbol_nlist_entry 2 progname_fixup);
                    ("__mh_execute_header", absolute_symbol_nlist_entry mh_execute_header_fixup);
                  |]
   in

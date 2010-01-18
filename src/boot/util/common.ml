@@ -93,6 +93,11 @@ type import_lib =
   | LIB_c
 ;;
 
+type segment =
+    SEG_text
+  | SEG_data
+;;
+
 type fixup =
     { fixup_name: string;
       mutable fixup_file_pos: int option;

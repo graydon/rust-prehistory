@@ -114,6 +114,7 @@ type ctxt =
       ctxt_data: data_frags;
 
       ctxt_imports: (import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_exports: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
 
       ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
@@ -169,6 +170,7 @@ let new_ctxt sess abi crate =
     ctxt_data = Hashtbl.create 0;
 
     ctxt_imports = Hashtbl.create 0;
+    ctxt_exports = Hashtbl.create 0;
 
     ctxt_main_fn_fixup = new_fixup "main";
     ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main;
@@ -262,6 +264,14 @@ let import (cx:ctxt) (lib:import_lib) (name:string) : fixup =
   in
     htab_search_or_add lib_tab name
       (fun _ -> new_fixup ("import: " ^ name))
+;;
+
+let export (cx:ctxt) (seg:segment) (name:string) : fixup =
+  let seg_tab = (htab_search_or_add cx.ctxt_exports seg
+                   (fun _ -> Hashtbl.create 0))
+  in
+    htab_search_or_add seg_tab name
+      (fun _ -> new_fixup ("export: " ^ name))
 ;;
 
 let slot_ty (s:Ast.slot) : Ast.ty =
