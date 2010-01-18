@@ -938,7 +938,7 @@ let elf32_linux_x86_file
         ~string_table_fixup: dynstr_section_fixup
         ~name_string_fixup: name_fixup
         ~sym_target_fixup: (Some fixup)
-        ~st_bind: STB_GLOBAL
+        ~st_bind
         ~st_type: STT_OBJECT
         ~st_shndx: datandx
     in
@@ -953,7 +953,7 @@ let elf32_linux_x86_file
         ~string_table_fixup: dynstr_section_fixup
         ~name_string_fixup: name_fixup
         ~sym_target_fixup: (Some fixup)
-        ~st_bind: st_bind
+        ~st_bind
         ~st_type: STT_OBJECT
         ~st_shndx: rodatandx
     in
@@ -975,7 +975,7 @@ let elf32_linux_x86_file
       (strtab_frag, symtab_frag)
   in
 
-  let import_sym name st_bind fixup =
+  let import_sym name st_bind _(*fixup*) =
     let name_fixup = new_fixup ("import symbol name fixup: '" ^ name ^ "'") in
     let strtab_frag = DEF (name_fixup, ZSTRING name) in
     let symtab_frag =
@@ -983,7 +983,7 @@ let elf32_linux_x86_file
         ~string_table_fixup: dynstr_section_fixup
         ~name_string_fixup: name_fixup
         ~sym_target_fixup: None
-        ~st_bind: st_bind
+        ~st_bind
         ~st_type: STT_FUNC
         ~st_shndx: shn_UNDEF
     in
@@ -1392,7 +1392,7 @@ let emit_file
 
     Hashtbl.iter
       begin
-        fun lib tab ->
+        fun _ tab ->
           Hashtbl.iter
             begin
               fun name fixup ->

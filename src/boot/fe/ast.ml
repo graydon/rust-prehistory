@@ -220,7 +220,6 @@ and stmt' =
   | STMT_foreach of stmt_foreach
   | STMT_for of stmt_for
   | STMT_if of stmt_if
-  | STMT_try of stmt_try
   | STMT_put of (proto option * atom option)
   | STMT_ret of (proto option * atom option)
   | STMT_be of (proto option * lval * (atom array))
@@ -294,13 +293,6 @@ and stmt_if =
       if_test: expr;
       if_then: block;
       if_else: block option;
-    }
-
-and stmt_try =
-    {
-      try_body: block;
-      try_fail: block option;
-      try_fini: block option;
     }
 
 and slice =
@@ -649,9 +641,9 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_idx idx -> fmt ff "idx#%d" idx
 
   (* FIXME: finish these as needed. *)
-  | TY_mod mti -> fmt ff "?mod?"
-  | TY_constrained t -> fmt ff "?constrained?"
-  | TY_pred p -> fmt ff "?pred?"
+  | TY_mod _ -> fmt ff "?mod?"
+  | TY_constrained _ -> fmt ff "?constrained?"
+  | TY_pred _ -> fmt ff "?pred?"
 
 and fmt_constrs (ff:Format.formatter) (cc:constr array) : unit =
   Array.iter (fmt_constr ff) cc
@@ -931,6 +923,9 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_slot_key ff skey;
           fmt ff ";"
 
+      | STMT_decl (DECL_mod_item _) ->
+          fmt ff "?decl_mod_item?"
+
       | STMT_init_rec (dst, entries) ->
           fmt_lval ff dst;
           fmt ff " = rec(";
@@ -984,24 +979,25 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_constrs ff constrs;
           fmt ff ";"
 
-      | _ -> fmt ff "?stmt?;"
+      (* FIXME: finish these. *)
+      | STMT_for _ -> fmt ff "?stmt_for?"
+      | STMT_foreach _ -> fmt ff "?stmt_foreach?"
+      | STMT_put _ -> fmt ff "?stmt_put?"
+      | STMT_be _ -> fmt ff "?stmt_be?"
+      | STMT_alt_tag _ -> fmt ff "?stmt_alt_tag?"
+      | STMT_alt_type _ -> fmt ff "?stmt_alt_type?"
+      | STMT_alt_port _ -> fmt ff "?stmt_alt_port?"
+      | STMT_prove _ -> fmt ff "?stmt_prove?"
+      | STMT_check_if _ -> fmt ff "?stmt_check_if?"
+      | STMT_note _ -> fmt ff "?stmt_note?"
+      | STMT_bind _ -> fmt ff "?stmt_bind?"
+      | STMT_slice _ -> fmt ff "?stmt_slice?"
+      | STMT_init_chan _ -> fmt ff "?stmt_init_chan?"
+      | STMT_init_port _ -> fmt ff "?stmt_init_port?"
+      | STMT_send _ -> fmt ff "?stmt_send?"
+      | STMT_recv _ -> fmt ff "?stmt_recv?"
+      | STMT_use _ -> fmt ff "?stmt_use?"
   end
-
-(*
-  | STMT_for of stmt_for
-  | STMT_foreach of stmt_foreach
-  | STMT_try of stmt_try
-  | STMT_put of (proto option * atom option)
-  | STMT_be of (proto option * lval * (atom array))
-  | STMT_alt_tag of stmt_alt_tag
-  | STMT_alt_type of stmt_alt_type
-  | STMT_alt_port of stmt_alt_port
-  | STMT_prove of (constrs)
-  | STMT_checkif of (constrs * stmt)
-  | STMT_send of (lval * lval)
-  | STMT_recv of (lval * lval)
-  | STMT_use of (ty * ident * lval)
-*)
 
 and fmt_decl_params (ff:Format.formatter) (params:ident array) : unit =
   if Array.length params = 0
@@ -1070,7 +1066,7 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
           fmt_ty ff td.decl_item;
           fmt ff ";";
 
-      | MOD_ITEM_tag td ->
+      | MOD_ITEM_tag _ ->
           fmt ff "?tagdecl?"
 
       | MOD_ITEM_pred pd ->

@@ -595,10 +595,10 @@ let of_int64_us i = match Sys.word_size with
 		      let hi = Int64.shift_right_logical i 62 in 
 		      (Int64.to_int hi) land 1 |] }
   | _ -> assert false
-let to_int64_us v = failwith "todo"
+let to_int64_us _ = failwith "todo"
 
-let of_int64_s i = failwith "todo"
-let to_int64_s v = failwith "todo"
+let of_int64_s _ = failwith "todo"
+let to_int64_s _ = failwith "todo"
 
 (* [Nativeint] *)
 let select_of f32 f64 = match Sys.word_size with 

@@ -868,7 +868,7 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
             (Ast.TY_fn (ty_fn_of_fn fd.Ast.decl_item))
 
       | Ast.MOD_ITEM_tag td ->
-          let (htup, ttag, node) = td.Ast.decl_item in
+          let (htup, ttag, _) = td.Ast.decl_item in
           let taux = { Ast.fn_purity = Ast.PURE;
                        Ast.fn_proto = None }
           in
@@ -960,7 +960,7 @@ let lookup
     (scopes:scope list)
     (key:Ast.slot_key)
     : ((scope list * node_id) option) =
-  let check_items scope ident items =
+  let check_items _ ident items =
     if Hashtbl.mem items ident
     then
       let item = Hashtbl.find items ident in
@@ -1099,10 +1099,10 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
           Il.StructTy (Array.map (slot_referent_type abi) tt)
       | Ast.TY_rec tr ->
           Il.StructTy
-            (Array.map (fun (ident, slot) ->
+            (Array.map (fun (_, slot) ->
                           slot_referent_type abi slot) tr)
 
-      | Ast.TY_tag ttag -> Il.OpaqueTy
+      | Ast.TY_tag _ -> Il.OpaqueTy
       | Ast.TY_iso _
       | Ast.TY_idx _
       | Ast.TY_fn _

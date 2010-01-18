@@ -364,7 +364,7 @@ let store_proc_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
 
 let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
   let code = Abi.proc_state_to_code state in
-  let (vr,vc) = vreg e in
+  let (vr,_) = vreg e in
   let vr_n = word_n vr in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
@@ -1265,7 +1265,7 @@ let mul_like (src:Il.operand) (signed:bool) (slash:int)
       Il.Cell src when is_rm32 src ->
         insn_rm_r 0xf7 src slash
 
-    | Il.Imm i ->
+    | Il.Imm _ ->
         let tmp = Il.Reg ((Il.Hreg edx), Il.ValTy Il.Bits32) in
         Asm.SEQ [| mov signed tmp src;
                    insn_rm_r 0xf7 tmp slash |]

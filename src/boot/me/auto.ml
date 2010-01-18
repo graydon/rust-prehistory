@@ -211,11 +211,11 @@ let auto_inference_visitor
                 | Some (Ast.TY_fn (tsig, _)) -> unify_tsig s.id tsig dst args
                 | _ -> err (Some s.id) "STMT_call fn resolved to non-function type"
             end
-        | Ast.STMT_spawn (dst,fn,args) ->
+        | Ast.STMT_spawn (dst,fn,_) ->
             begin
               match unify_lval None fn with
                   None -> ()
-                | Some (Ast.TY_fn (fsig, faux)) -> ignore (unify_lval (Some Ast.TY_proc) dst)
+                | Some (Ast.TY_fn _) -> ignore (unify_lval (Some Ast.TY_proc) dst)
                 | Some _ -> err (Some s.id) "STMT_spawn prog resolved to non-function type"
             end
         | Ast.STMT_if i ->

@@ -48,7 +48,7 @@ let log name flag chan =
   let k1 s =
     Printf.fprintf chan "%s: %s\n%!" name s
   in
-  let k2 s = () in
+  let k2 _ = () in
     Printf.ksprintf (if flag then k1 else k2)
 ;;
 

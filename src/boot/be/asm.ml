@@ -105,7 +105,7 @@ let rec eval32 (e:expr32)
                            ^ " overflowed 32 bits in eval32: "
                            ^ Int64.to_string v))
   in
-  let expandInt kind name v = Int32.of_int v in
+  let expandInt _ _ v = Int32.of_int v in
   let checkdef kind name v inj =
     match v with
         None -> raise (Undef_sym (kind ^ " fixup " ^ name ^ " undefined in eval32"))
@@ -277,7 +277,7 @@ and resolve_frag_full (relaxation_collector:relaxation -> unit) (frag:frag)
       | PAD i -> bump i
       | BSS i -> mem_pos := Int64.add (!mem_pos) i
       | MEMPOS i -> mem_pos := i
-      | BYTE i -> bump 1
+      | BYTE _ -> bump 1
       | BYTES ia -> bump (Array.length ia)
       | CHAR _ -> bump 1
       | STRING s -> bump (String.length s)
@@ -462,7 +462,7 @@ and lower_frag
       | ULEB128 e -> uleb e
       | SLEB128 e -> sleb e
 
-      | WORD (m,e) -> word (bytes_of_ty_mach m) (ty_mach_signed m) e
+      | WORD (m,e) -> word (bytes_of_ty_mach m) (mach_is_signed m) e
 
       | ALIGN_FILE (n, frag) ->
           let spill = (Buffer.length buf) mod n in
@@ -473,12 +473,12 @@ and lower_frag
             lower_frag_2 lsb0 buf frag
 
       | ALIGN_MEM (_, i) -> lower_frag_2 lsb0 buf i
-      | DEF (f, i) ->  lower_frag_2 lsb0 buf i;
+      | DEF (_, i) ->  lower_frag_2 lsb0 buf i;
       | RELAX rel ->
           try
             lower_frag_2 lsb0 buf rel.relax_options.(!(rel.relax_choice))
           with
-              Bad_fit s -> raise (Relax_more rel)
+              Bad_fit _ -> raise (Relax_more rel)
 
 (*
 (*

@@ -176,7 +176,7 @@ let constr_id_assigning_visitor
                   | _ -> ()
               end
 
-        | Ast.STMT_decl (Ast.DECL_slot (skey, sloti)) ->
+        | Ast.STMT_decl (Ast.DECL_slot (_, sloti)) ->
             note_constr_key (Constr_init sloti.id)
 
         | Ast.STMT_init_rec (dst, entries) ->
@@ -454,7 +454,7 @@ let graph_building_visitor
               end
 
         | Ast.STMT_while sw ->
-            let (stmts, at) = sw.Ast.while_lval in
+            let (stmts, _) = sw.Ast.while_lval in
             let pre_last = last_of_stmts stmt stmts in
               last_of_stmts pre_last sw.Ast.while_body.node
 
@@ -522,7 +522,7 @@ let graph_building_visitor
 
         | Ast.STMT_while sw ->
             begin
-              let (stmts, at) = sw.Ast.while_lval in
+              let (stmts, _) = sw.Ast.while_lval in
               let dests = Hashtbl.find graph s.id in
               let pre_loop_stmt_id =
                 let slen = Array.length stmts in
@@ -578,8 +578,7 @@ let find_roots
     roots
 ;;
 
-let run_dataflow cx sz graph =
-  (* let nodes = Array.of_list (htab_keys graph) in *)
+let run_dataflow cx graph =
   let roots = find_roots graph in
   let nodes = Queue.create () in
   let progress = ref true in
@@ -771,7 +770,7 @@ let process_crate
     |]
   in
     run_passes cx path setup_passes (log cx "%s") crate;
-    run_dataflow cx (!constr_id) graph;
+    run_dataflow cx graph;
     run_passes cx path verify_passes (log cx "%s") crate;
     run_passes cx path aux_passes (log cx "%s") crate
 ;;

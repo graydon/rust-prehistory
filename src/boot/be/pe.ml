@@ -219,8 +219,6 @@ let pe_loader_header
     ~(init_data_fixup:fixup)
     ~(size_of_uninit_data:int64)
     ~(entry_point_fixup:fixup)
-    ~(base_of_code:int64)
-    ~(base_of_data:int64)
     ~(image_fixup:fixup)
     ~(all_hdrs_fixup:fixup)
     ~(subsys:pe_subsystem)
@@ -708,8 +706,6 @@ let emit_file
                          ~init_data_fixup: all_init_data_fixup
                          ~size_of_uninit_data: 0L
                          ~entry_point_fixup: start_fixup
-                         ~base_of_code: 0L
-                         ~base_of_data: 0L
                          ~image_fixup: image_fixup
                          ~subsys: IMAGE_SUBSYSTEM_WINDOWS_CUI
                          ~all_hdrs_fixup

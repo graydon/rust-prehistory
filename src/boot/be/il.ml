@@ -224,7 +224,7 @@ let identity_processor =
                      Reg (r, b) -> Reg (qp.qp_reg qp r, b)
                    | Addr (a, b) -> Addr (qp.qp_addr qp a, b))
   in
-    { qp_reg = (fun qp r -> r);
+    { qp_reg = (fun _ r -> r);
       qp_addr = (fun qp a -> match a with
                      Based (r, o) -> Based (qp.qp_reg qp r, o)
                    | Abs _
@@ -364,7 +364,7 @@ let rec string_of_expr64 (e64:Asm.expr64) : string =
       | Asm.F_SZ f -> Printf.sprintf "<%s>.fsz" f.fixup_name
       | Asm.M_POS f -> Printf.sprintf "<%s>.mpos" f.fixup_name
       | Asm.M_SZ f -> Printf.sprintf "<%s>.msz" f.fixup_name
-      | Asm.EXT e -> "??ext??"
+      | Asm.EXT _ -> "??ext??"
 ;;
 
 let string_of_off (e:Asm.expr64 option) : string =

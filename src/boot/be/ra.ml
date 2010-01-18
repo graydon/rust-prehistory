@@ -61,7 +61,7 @@ exception Ra_error of string ;;
 
 let convert_labels (cx:ctxt) : unit =
   let new_labels = ref [] in
-  let qp_code (qp:Il.quad_processor) (c:Il.code) : Il.code =
+  let qp_code (_:Il.quad_processor) (c:Il.code) : Il.code =
     match c with
         Il.CodeLabel lab ->
           let fix =
@@ -92,7 +92,7 @@ let convert_pre_spills
     (mkspill:(Il.spill -> Il.addr))
     : int =
   let n = ref 0 in
-  let qp_addr (qp:Il.quad_processor) (a:Il.addr) : Il.addr =
+  let qp_addr (_:Il.quad_processor) (a:Il.addr) : Il.addr =
     match a with
         Il.Spill i ->
           begin
@@ -138,7 +138,7 @@ let quad_jump_target_labels (q:quad) : Il.label list =
 
 let quad_used_vregs (q:quad) : Il.vreg list =
   let vregs = ref [] in
-  let qp_reg qp r =
+  let qp_reg _ r =
     match r with
         Il.Vreg v -> (vregs := (v :: (!vregs)); r)
       | _ -> r
@@ -158,7 +158,7 @@ let quad_used_vregs (q:quad) : Il.vreg list =
 
 let quad_defined_vregs (q:quad) : Il.vreg list =
   let vregs = ref [] in
-  let qp_cell_write qp c =
+  let qp_cell_write _ c =
     match c with
         Il.Reg (Il.Vreg v, _) -> (vregs := (v :: (!vregs)); c)
       | _ -> c
@@ -360,7 +360,7 @@ let collect_vreg_tys
     (cx:ctxt)
     (vreg_to_ty:(Il.vreg,Il.scalar_ty) Hashtbl.t)
     : unit =
-  let qp_cell qp c =
+  let qp_cell _ c =
     match c with
         Reg (Vreg v, t) ->
           begin
@@ -472,7 +472,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let spill_some_hreg i =
       match !active_hregs with
           [] -> raise (Ra_error ("spilling with no active hregs"));
-        | h::hs ->
+        | h::_ ->
             begin
               spill_specific_hreg i h;
               h
@@ -514,7 +514,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
             reload vreg hreg;
           hreg
     in
-    let qp_reg def i qp r =
+    let qp_reg def i _ r =
       match r with
           Il.Hreg h -> (spill_specific_hreg i h; r)
         | Il.Vreg v -> (Il.Hreg (use_vreg def i v))

@@ -382,7 +382,7 @@ let type_resolving_visitor
     begin
       try
         let ty = match (item.node, (ty_of_mod_item true item)) with
-            (Ast.MOD_ITEM_tag {Ast.decl_item=(header_slots, ttag, nid)},
+            (Ast.MOD_ITEM_tag {Ast.decl_item=(header_slots, _, nid)},
              Ast.TY_fn (tsig, taux)) when Hashtbl.mem recursive_tag_groups nid ->
               let input_slots = Array.map (fun sloti -> resolve_slot sloti.node) header_slots in
               let output_slot = interior_slot (ty_iso_of cx recursive_tag_groups all_tags nid) in
@@ -423,14 +423,14 @@ let lval_base_resolving_visitor
     log cx "looking up slot or item with ident '%s'" ident;
     match lookup cx (!scopes) (Ast.KEY_ident ident) with
         None -> err (Some id) "unresolved identifier '%s'" ident
-      | Some (scope, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
+      | Some (_, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
   in
   let lookup_slot_by_temp id temp =
     log cx "looking up temp slot #%d" (int_of_temp temp);
     let res = lookup cx (!scopes) (Ast.KEY_temp temp) in
       match res with
           None -> err (Some id) "unresolved temp node #%d" (int_of_temp temp)
-        | Some (scope, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
+        | Some (_, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
   in
   let lookup_slot_by_name_base id nb =
     match nb with

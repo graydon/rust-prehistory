@@ -218,7 +218,7 @@ let trans_visitor
       match op with
           Il.Imm  (_, st) -> do_mov st
         | Il.Cell (Il.Reg rt) -> rt
-        | Il.Cell (Il.Addr (addr, Il.ScalarTy st)) -> do_mov st
+        | Il.Cell (Il.Addr (_, Il.ScalarTy st)) -> do_mov st
         | Il.Cell (Il.Addr (_, rt)) ->
             bug () "forcing non-scalar referent of type %s to register"
               (Il.string_of_referent_ty rt)
@@ -227,7 +227,7 @@ let trans_visitor
   let via_memory (writeback:bool) (c:Il.cell) (thunk:Il.typed_addr -> unit) : unit =
     match c with
         Il.Addr ta -> thunk ta
-      | Il.Reg r ->
+      | Il.Reg _ ->
           let ta = force_to_mem (Il.Cell c) in
             begin
               thunk ta;
@@ -449,7 +449,7 @@ let trans_visitor
               return_fixup (get_fn_fixup cx referent) slot
           | Ast.MOD_ITEM_pred _ ->
               return_fixup (get_fn_fixup cx referent) slot
-          | Ast.MOD_ITEM_tag t ->
+          | Ast.MOD_ITEM_tag _ ->
               return_fixup (get_fn_fixup cx referent) slot
           | _ ->
               bugi cx referent
@@ -468,7 +468,7 @@ let trans_visitor
                 "unhandled native item type in trans_lval_full"
     in
 
-    let return_slot (lval_id:node_id) (slot:Ast.slot) (slot_id:node_id)
+    let return_slot (_:node_id) (slot:Ast.slot) (slot_id:node_id)
         : (Il.cell * Ast.slot) =
       let cell = cell_of_block_slot slot_id in
         (cell, slot)
@@ -541,8 +541,8 @@ let trans_visitor
               | Ast.LIT_bool false -> imm_false
               | Ast.LIT_bool true -> imm_true
               | Ast.LIT_char c -> imm (Int64.of_int (Char.code c))
-              | Ast.LIT_int (i, s) -> imm i
-              | Ast.LIT_mach (m, n, s) -> trans_mach m n
+              | Ast.LIT_int (i, _) -> imm i
+              | Ast.LIT_mach (m, n, _) -> trans_mach m n
 
               | _ -> marker
           end
@@ -947,12 +947,12 @@ let trans_visitor
     trans_void_upcall "upcall_log_str" [| (trans_atom a) |]
 
   and trans_spawn
-      (initialising:bool)
+      ((*initialising*)_:bool)
       (dst:Ast.lval)
       (fn_lval:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (proc_cell, proc_slot) = trans_lval dst INTENT_init in
+    let (proc_cell, _) = trans_lval dst INTENT_init in
     let (fn_cell, fn_slot) = trans_lval fn_lval INTENT_read in
     let tsig =
       match fn_slot.Ast.slot_ty with
@@ -1137,7 +1137,7 @@ let trans_visitor
       fold_ty fold t
 
 
-  and slot_mem_ctrl (cell:Il.cell) (slot:Ast.slot) : mem_ctrl =
+  and slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
     let ty = slot_ty slot in
       if type_is_mutable ty
       then
@@ -1283,7 +1283,7 @@ let trans_visitor
     match (curr_iso, t) with
         (Some iso, Ast.TY_idx n) ->
           Ast.TY_iso { iso with Ast.iso_index = n }
-      | (None, Ast.TY_idx n) ->
+      | (None, Ast.TY_idx _) ->
           bug () "TY_idx outside TY_iso"
       | _ -> t
 
@@ -1301,7 +1301,7 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : unit =
     let ty = slot_ty slot in
-      match slot_mem_ctrl cell slot with
+      match slot_mem_ctrl slot with
           MEM_gc ->
             (iflog (fun _ -> annotate ("mark GC slot " ^
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
@@ -1353,7 +1353,7 @@ let trans_visitor
         j
     in
     let ty = slot_ty slot in
-    let mctrl = slot_mem_ctrl cell slot in
+    let mctrl = slot_mem_ctrl slot in
       match mctrl with
           MEM_rc_opaque rc_off ->
             (* Refcounted opaque objects we handle without glue functions. *)
@@ -1402,8 +1402,8 @@ let trans_visitor
             (* Interior allocation of all-interior value: nothing to do. *)
             ()
 
-  and exterior_body_off (cell:Il.cell) (slot:Ast.slot) : int64 =
-      match slot_mem_ctrl cell slot with
+  and exterior_body_off (slot:Ast.slot) : int64 =
+      match slot_mem_ctrl slot with
           MEM_gc -> exterior_gc_body_off
         | MEM_rc_struct -> exterior_rc_body_off
         | MEM_rc_opaque _
@@ -1411,7 +1411,7 @@ let trans_visitor
 
   (* Returns the offset of the slot-body in the initialized allocation. *)
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
-      match slot_mem_ctrl cell slot with
+      match slot_mem_ctrl slot with
           MEM_gc ->
             iflog (fun _ -> annotate "init GC exterior: malloc");
             let sz = exterior_gc_allocation_size slot in
@@ -1476,13 +1476,13 @@ let trans_visitor
         match intent with
             INTENT_init ->
               init_exterior_slot cell slot;
-              deref_imm cell (exterior_body_off cell slot)
+              deref_imm cell (exterior_body_off slot)
 
           | INTENT_write ->
-              deref_imm cell (exterior_body_off cell slot)
+              deref_imm cell (exterior_body_off slot)
 
           | INTENT_read ->
-              deref_imm cell (exterior_body_off cell slot)
+              deref_imm cell (exterior_body_off slot)
       in
         (addr, body_ty)
 
@@ -1517,7 +1517,7 @@ let trans_visitor
       (src_ta:Il.typed_addr) (src_slots:Ast.ty_tup)
       : unit =
     let (dst_addr, dst_rt) = dst_ta in
-    let (src_addr, src_rt) = src_ta in
+    let (src_addr, _) = src_ta in
     let dst_tys = get_struct_referent_tys dst_rt in
     let src_tys = get_struct_referent_tys dst_rt in
       assert (src_tys = dst_tys);
@@ -1622,8 +1622,8 @@ let trans_visitor
     in
 
       assert (slot_ty src_slot = slot_ty dst_slot);
-      match (slot_mem_ctrl src src_slot,
-             slot_mem_ctrl dst dst_slot) with
+      match (slot_mem_ctrl src_slot,
+             slot_mem_ctrl dst_slot) with
         | (MEM_rc_opaque src_rc_off, MEM_rc_opaque _) ->
             lightweight_rc (exterior_ctrl_cell src src_rc_off)
 
@@ -1909,7 +1909,7 @@ let trans_visitor
       emit (Il.call vr code);
 
   and trans_call
-      (initialising:bool)
+      ((*initialising*)_:bool)
       (logname:(unit -> string))
       (output_cell:Il.cell)
       (callee_cell:Il.cell)
@@ -2175,21 +2175,21 @@ let trans_visitor
           let mark_frame_glue_fixup =
             get_frame_glue (GLUE_mark_frame fnid) "mark"
               begin
-                fun key slot_id slot slot_cell ->
+                fun _ _ slot slot_cell ->
                   mark_slot slot_cell slot None
               end
           in
           let drop_frame_glue_fixup =
             get_frame_glue (GLUE_drop_frame fnid) "drop"
               begin
-                fun key slot_id slot slot_cell ->
+                fun _ _ slot slot_cell ->
                   drop_slot slot_cell slot None
               end
           in
           let reloc_frame_glue_fixup =
             get_frame_glue (GLUE_reloc_frame fnid) "reloc"
               begin
-                fun key slot_id slot slot_cell ->
+                fun _ _ _ _ ->
                   ()
               end
           in

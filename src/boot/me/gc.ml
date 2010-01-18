@@ -8,7 +8,7 @@ let log cx = Session.log "gc"
 
 
 let gc_analysis_visitor
-    (cx:ctxt)
+    (_:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
 

@@ -40,18 +40,17 @@ type ty_mach =
 
 let mach_is_integral (mach:ty_mach) : bool =
   match mach with
-      TY_f32 -> false
-    | TY_f64 -> false
-    | _ -> true
+      TY_s8 | TY_s16 | TY_s32 | TY_s64
+    | TY_u8 | TY_u16 | TY_u32 | TY_u64 -> true
+    | TY_f32 | TY_f64 -> false
 ;;
+
 
 let mach_is_signed (mach:ty_mach) : bool =
   match mach with
-      TY_s8 -> true
-    | TY_s16 -> true
-    | TY_s32 -> true
-    | TY_s64 -> true
-    | _ -> false
+      TY_s8 | TY_s16 | TY_s32 | TY_s64 -> true
+    | TY_u8 | TY_u16 | TY_u32 | TY_u64
+    | TY_f32 | TY_f64 -> false
 ;;
 
 let string_of_ty_mach (mach:ty_mach) : string =
@@ -80,12 +79,6 @@ let bytes_of_ty_mach (mach:ty_mach) : int =
   | TY_s64 -> 8
   | TY_f32 -> 4
   | TY_f64 -> 8
-;;
-
-let ty_mach_signed (mach:ty_mach) : bool =
-  match mach with
-      TY_s8 | TY_s16 | TY_s32 | TY_s64 -> true
-    | _ -> false
 ;;
 
 type import_lib =

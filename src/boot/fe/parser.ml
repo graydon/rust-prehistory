@@ -238,7 +238,7 @@ let string_of_tok t =
     | BIND       -> "bind"
 
     (* Literals *)
-    | LIT_INT (n,s)  -> s
+    | LIT_INT (_,s)  -> s
     | LIT_FLO n -> n
     | LIT_STR s  -> ("\"" ^ (String.escaped s) ^ "\"")
     | LIT_CHAR c -> ("'" ^ (Char.escaped c) ^ "'")
@@ -668,7 +668,7 @@ and parse_constrs (ps:pstate) : Ast.constrs =
        COLON -> bump ps; parse_constrs ps
      | _ -> [| |]
    should do it *)
-and parse_fn_ty (pure:bool) (ps:pstate) : Ast.ty =
+and parse_fn_ty ((*pure*)_:bool) (ps:pstate) : Ast.ty =
   match peek ps with
       FN p ->
         bump ps;
@@ -1309,7 +1309,7 @@ and desugar_expr_atom
           let (stmts, lval) = desugar_lval ps pexp in
             (stmts, Ast.ATOM_lval lval)
 
-      | PEXP_exterior inner ->
+      | PEXP_exterior _ ->
           raise (err "exterior symbol in atom context" ps)
 
       | PEXP_mutable _ ->
@@ -1365,7 +1365,8 @@ and desugar_expr_init
       | PEXP_ext_pexp _ ->
           let (stmts, atom) = desugar_expr_atom ps pexp in
           let expr = Ast.EXPR_atom atom in
-            [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
+            Array.append stmts
+              [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
 
       | PEXP_binop (op, lhs, rhs) ->
           let (lhs_stmts, lhs_atom) = desugar_expr_atom ps lhs in
@@ -1449,7 +1450,7 @@ and desugar_expr_init
           in
             Array.append port_stmts [| chan_stmt |]
 
-      | PEXP_exterior inner ->
+      | PEXP_exterior _ ->
           raise (err "exterior symbol in initialiser context" ps)
 
       | PEXP_mutable _ ->
@@ -1680,7 +1681,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                    Ast.if_then = then_block;
                    Ast.if_else = else_block; })
 
-      | FOR proto ->
+      | FOR None ->
           bump ps;
           let inner ps =
             let slot = (parse_identified_slot_and_ident false ps) in
@@ -1749,7 +1750,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                    ctxt "stmt tup decl: slots and idents"
                      (bracketed LPAREN RPAREN (parse_two_or_more_identified_tup_slots_and_idents false)) ps in
                  let bpos = lexpos ps in
-                 let (nonce, tmp, tempdecl) =
+                 let (_, tmp, tempdecl) =
                    build_tmp ps
                      { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
                        Ast.slot_ty = Some (Ast.TY_tup (Array.map (fun x -> x.node) slots)) }
@@ -1839,7 +1840,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
              *
              *)
 
-          let (nonce, tmp, tempdecl) =
+          let (_, tmp, tempdecl) =
             build_tmp ps slot_auto apos bpos in
           let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_atom atom)) in
           let make_copy i dst =
@@ -1874,7 +1875,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                     let (src, copy) = match rhs with
                         Ast.ATOM_lval lv -> (lv, [| |])
                       | _ ->
-                          let (nonce, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
+                          let (_, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
                           let copy = span ps apos bpos (Ast.STMT_copy (tmp, Ast.EXPR_atom rhs)) in
                             ((clone_lval ps tmp), [| tempdecl; copy |])
                     in
@@ -2293,6 +2294,7 @@ and parse_root_crate_entries
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
   let apos = lexpos ps in
+    log ps "reading crate entries from %s" fname;
     while peek ps != EOF
     do
       match peek ps with
@@ -2372,7 +2374,7 @@ let parse_root_with_parse_fn
 
 let parse_root_srcfile_entries
     (fname:string)
-    (prefix:string)
+    ((*prefix*)_:string)
     (files:(node_id,filename) Hashtbl.t)
     (ps:pstate)
     : Ast.crate =

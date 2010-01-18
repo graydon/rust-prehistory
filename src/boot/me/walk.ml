@@ -111,7 +111,7 @@ let path_to_name
         [] -> failwith "empty path"
       | [(Ast.COMP_ident i)] -> Ast.NAME_base (Ast.BASE_ident i)
       | [(Ast.COMP_app x)] -> Ast.NAME_base (Ast.BASE_app x)
-      | [(Ast.COMP_idx x)] -> failwith "path-name contains COMP_idx"
+      | [(Ast.COMP_idx _)] -> failwith "path-name contains COMP_idx"
       | nc::ncs -> Ast.NAME_ext (name_of ncs, nc)
   in
     name_of (stk_elts_from_top path)
@@ -310,7 +310,7 @@ and walk_ty_fn
     (v:visitor)
     (tfn:Ast.ty_fn)
     : unit =
-  let (tsig, taux) = tfn in
+  let (tsig, _) = tfn in
   walk_ty_sig v tsig
 
 
@@ -473,7 +473,7 @@ and walk_stmt
           walk_lval v lv;
           Array.iter (fun (_, a) -> walk_atom v a) mut_atoms
 
-      | Ast.STMT_init_str (lv, s) ->
+      | Ast.STMT_init_str (lv, _) ->
           walk_lval v lv
 
       | Ast.STMT_init_port lv ->
@@ -560,11 +560,10 @@ and walk_stmt
       | Ast.STMT_slice _ -> ()
       | Ast.STMT_bind _ -> ()
       | Ast.STMT_note _ -> ()
-      | Ast.STMT_foreach f -> ()
-      | Ast.STMT_try t -> ()
-      | Ast.STMT_alt_tag sat -> ()
-      | Ast.STMT_alt_type sat -> ()
-      | Ast.STMT_alt_port sap -> ()
+      | Ast.STMT_foreach _ -> ()
+      | Ast.STMT_alt_tag _ -> ()
+      | Ast.STMT_alt_type _ -> ()
+      | Ast.STMT_alt_port _ -> ()
       | Ast.STMT_use _ -> ()
   in
     walk_bracketed

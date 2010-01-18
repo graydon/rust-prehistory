@@ -24,6 +24,7 @@
 #if defined(__WIN32__)
 extern "C" {
 #include <windows.h>
+#include <tchar.h>
 #include <wincrypt.h>
 }
 #elif defined(__GNUC__)
@@ -254,7 +255,7 @@ struct rust_rt {
     void free(void *p);
 
 #ifdef __WIN32__
-    void win32_require(LPTSTR fn, BOOL ok);
+    void win32_require(LPCTSTR fn, BOOL ok);
 #endif
 
     size_t n_live_procs();
@@ -376,7 +377,7 @@ struct rust_proc {
     uintptr_t callee_saves[4];
 
     // Save callee-saved registers and return to the main loop.
-    void yield(size_t argc) __attribute__ ((noreturn));
+    void yield(size_t argc);
 
     void fail();
     uintptr_t get_fp();
@@ -1121,15 +1122,15 @@ rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_alloc
     {
         HCRYPTPROV hProv;
         win32_require
-            ("CryptAcquireContext",
+            (_T("CryptAcquireContext"),
              CryptAcquireContext(&hProv, NULL, NULL, PROV_DSS,
                                  CRYPT_VERIFYCONTEXT|CRYPT_SILENT));
         win32_require
-            ("CryptGenRandom",
+            (_T("CryptGenRandom"),
              CryptGenRandom(hProv, sizeof(rctx.randrsl),
                             (BYTE*)(&rctx.randrsl)));
         win32_require
-            ("CryptReleaseContext",
+            (_T("CryptReleaseContext"),
              CryptReleaseContext(hProv, 0));
     }
 #else
@@ -1221,7 +1222,7 @@ rust_rt::free(void *p) {
 
 #ifdef __WIN32__
 void
-rust_rt::win32_require(LPTSTR fn, BOOL ok) {
+rust_rt::win32_require(LPCTSTR fn, BOOL ok) {
     if (!ok) {
         LPTSTR buf;
         DWORD err = GetLastError();

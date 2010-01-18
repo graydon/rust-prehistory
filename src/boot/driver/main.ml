@@ -216,7 +216,7 @@ let main_pipeline _ =
 
     exit_if_failed ();
     let (glue_frags:Asm.frag) =
-      let process_glue glue code = process_code 0L code in
+      let process_glue _ code = process_code 0L code in
         list_to_seq (reduce_hash_to_list process_glue sem_cx.Semant.ctxt_glue_code)
     in
 

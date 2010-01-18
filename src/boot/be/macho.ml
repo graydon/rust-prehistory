@@ -568,7 +568,7 @@ let emit_file
     (code:Asm.frag)
     (data:Asm.frag)
     (sem:Semant.ctxt)
-    (dwarf:Dwarf.debug_records)
+    (_:Dwarf.debug_records)
     : unit =
 
   (* FIXME: alignment? *)
@@ -750,7 +750,7 @@ let emit_file
   let nl_symbol_ptr_section =
     def_aligned data_sect_align nl_symbol_ptr_section_fixup
       (SEQ (Array.map
-              (fun (_, name, fix) ->
+              (fun (_, _, fix) ->
                  DEF(fix, WORD(TY_u32, IMM 0L)))
               indirect_symbols))
   in

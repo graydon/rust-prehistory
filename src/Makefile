@@ -68,7 +68,7 @@ endif
 
 ifdef CFG_GCC
   CFG_INFO := $(info using gcc)
-  CFG_GCC_COMPILE_FLAGS += -Wall -fno-rtti -fno-exceptions -g
+  CFG_GCC_COMPILE_FLAGS += -Wall -Werror -fno-rtti -fno-exceptions -g
   CFG_GCC_LINK_FLAGS += -g
   CFG_COMPILE_C = g++ $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
   CFG_LINK_C = g++ $(CFG_GCC_LINK_FLAGS) -o $(1)
@@ -88,8 +88,8 @@ MKFILES := Makefile
 ML_INCS := -I boot/fe -I boot/me -I boot/be -I boot/driver -I boot/util
 ML_LIBS := unix.cma nums.cma
 ML_NATIVE_LIBS := unix.cmxa nums.cmxa
-OCAMLC_FLAGS := -g $(ML_INCS)
-OCAMLOPT_FLAGS := $(ML_INCS)
+OCAMLC_FLAGS := -g $(ML_INCS) -w Ael -warn-error Ael
+OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael
 
 # List them in link order.
 # Nobody calculates the link-order DAG automatically, sadly.
