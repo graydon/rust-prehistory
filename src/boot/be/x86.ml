@@ -353,30 +353,6 @@ let proc_ptr = wordptr_n (Il.Hreg ebp) 6;;
 let out_ptr = wordptr_n (Il.Hreg ebp) 5;;
 let frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;;
 let implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;;
-let proc_to_c_glue_sz = frame_base_sz;;
-
-let load_proc_word (e:Il.emitter) (i:int) : Il.reg =
-  let (vr, vc) = vreg e in
-    Il.emit e (Il.umov vc (c proc_ptr));
-    Il.emit e (Il.umov vc (c (word_n vr i)));
-    vr
-;;
-
-let store_proc_word (e:Il.emitter) (i:int) (oper:Il.operand) : unit =
-  let (vr, vc) = vreg e in
-    Il.emit e (Il.umov vc (c proc_ptr));
-    Il.emit e (Il.umov (word_n vr i) oper)
-;;
-
-let emit_proc_state_change (e:Il.emitter) (state:Abi.proc_state) : unit =
-  let code = Abi.proc_state_to_code state in
-  let (vr,_) = vreg e in
-  let vr_n = word_n vr in
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-    mov (r vr)(c proc_ptr);
-    mov (vr_n Abi.proc_field_state) (immi code);
-;;
 
 let emit_c_call
     (ret:Il.cell)
@@ -468,6 +444,16 @@ let emit_native_void_call
   emit_native_call e nabi fn (rc eax) args
 ;;
 
+let emit_void_upcall
+    (e:Il.emitter)
+    (nabi:Abi.nabi)
+    (fn:fixup)
+    (args:Il.operand array)
+    : unit =
+
+    emit_native_void_call e nabi fn args
+;;
+
 let emit_native_thunk
     (e:Il.emitter)
     (nabi:Abi.nabi)
@@ -487,54 +473,10 @@ let emit_native_thunk
              mov (word_at (h edx)) (ro eax)
 ;;
 
-let emit_upcall_full
-    (scratch:Il.reg)
-    (e:Il.emitter)
-    (u:Abi.upcall)
-    (args:Il.operand array)
-    (proc_to_c_fixup:fixup)
-    : unit =
-  let upcall_code = Abi.upcall_to_code u in
-  let state_code = Abi.proc_state_to_code Abi.STATE_calling_c in
-
-  let r_n = word_n scratch in
-  let r_n_low_byte = word_n_low_byte scratch in
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-
-  let pcrel f = Il.CodeAddr (Il.Pcrel (f, None)) in
-
-    assert ((Array.length args) <= Abi.max_upcall_args);
-
-    mov (r scratch) (c proc_ptr);
-    mov (r_n_low_byte Abi.proc_field_state) (immi_byte state_code);
-    mov (r_n_low_byte Abi.proc_field_upcall_code) (immi_byte upcall_code);
-
-    Array.iteri
-      begin
-        fun i arg ->
-          mov (r_n (Abi.proc_field_upcall_args + i)) arg
-      end
-      args;
-    emit (Il.call (r scratch) (pcrel proc_to_c_fixup))
-;;
-
-
-let emit_upcall
-    (e:Il.emitter)
-    (u:Abi.upcall)
-    (args:Il.operand array)
-    (proc_to_c_fixup:fixup)
-    : unit =
-
-  let (vr,_) = vreg e in
-    emit_upcall_full vr e u args proc_to_c_fixup
-;;
-
-
 let unwind_glue
     (e:Il.emitter)
-    (proc_to_c_fixup:fixup)
+    (nabi:Abi.nabi)
+    (del_proc_fixup:fixup)
     : unit =
 
   let fp_n = word_n (Il.Hreg ebp) in
@@ -579,7 +521,8 @@ let unwind_glue
     (* exit path. *)
     mark exit_jmp_fix;
     mov (rc eax) (c proc_ptr);
-    emit_upcall_full (h eax) e Abi.UPCALL_del_proc [| (ro eax)  |] proc_to_c_fixup;
+
+    emit_void_upcall e nabi del_proc_fixup [| (ro eax) |];
 ;;
 
 
@@ -589,7 +532,8 @@ let fn_prologue
     (framesz:int64)
     (spill_fixup:fixup)
     (callsz:int64)
-    (proc_to_c_fixup:fixup)
+    (nabi:Abi.nabi)
+    (grow_proc_fixup:fixup)
     : unit =
   (*
    *  - save callee-saves
@@ -696,12 +640,7 @@ let fn_prologue
 
       emit (Il.jmp Il.JBE Il.CodeNone);
 
-      emit_upcall_full
-        (h eax)
-        e Abi.UPCALL_grow_proc
-        [| (imm call_region_sz);
-           (imm reserve_new_sz) |]
-        proc_to_c_fixup;
+      emit_void_upcall e nabi grow_proc_fixup [| imm call_region_sz; imm reserve_new_sz |];
 
       mov (rc ecx) (c proc_ptr);                    (* ecx = proc               *)
       mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk          *)
@@ -791,9 +730,7 @@ let objfile_start
   Il.emit e Il.Ret;
 ;;
 
-
-
-let c_to_proc (e:Il.emitter) : unit =
+let c_to_proc_glue (e:Il.emitter) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
    * compilation unit.
@@ -828,8 +765,7 @@ let c_to_proc (e:Il.emitter) : unit =
   ()
 ;;
 
-
-let proc_to_c (e:Il.emitter) : unit =
+let yield_glue (e:Il.emitter) : unit =
 
   (*
    * More glue code. Here we've been called from a proc and
@@ -844,13 +780,15 @@ let proc_to_c (e:Il.emitter) : unit =
    *
    *   *esp          = [retpc  ]
    *)
+  let esp_n = word_n (Il.Hreg esp) in
   let edx_n = word_n (Il.Hreg edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    mov (rc edx) (c proc_ptr);                          (* edx <- proc            *)
+    mov (rc edx) (c (esp_n 0));                         (* edx <- arg0 (proc)      *)
+    mov (rc esp) (c (edx_n Abi.proc_field_rust_sp));    (* esp <- proc->rust_sp    *)
     save_callee_saves e;
-    mov (edx_n Abi.proc_field_rust_sp) (ro esp);        (* proc->rust_sp <- esp   *)
+    mov (edx_n Abi.proc_field_rust_sp) (ro esp);        (* proc->rust_sp <- esp    *)
     mov (rc esp) (c (edx_n Abi.proc_field_runtime_sp)); (* esp <- proc->runtime_sp *)
 
     (**** IN C STACK ****)
@@ -859,7 +797,6 @@ let proc_to_c (e:Il.emitter) : unit =
     (***********************)
   ()
 ;;
-
 
 let (abi:Abi.abi) =
   {
@@ -881,13 +818,11 @@ let (abi:Abi.abi) =
     Abi.abi_emit_fn_epilogue = fn_epilogue;
     Abi.abi_clobbers = clobbers;
 
-    Abi.abi_emit_proc_state_change = emit_proc_state_change;
-    Abi.abi_emit_upcall = emit_upcall;
     Abi.abi_emit_native_call = emit_native_call;
     Abi.abi_emit_native_void_call = emit_native_void_call;
     Abi.abi_emit_native_thunk = emit_native_thunk;
-    Abi.abi_c_to_proc = c_to_proc;
-    Abi.abi_proc_to_c = proc_to_c;
+    Abi.abi_c_to_proc = c_to_proc_glue;
+    Abi.abi_yield = yield_glue;
     Abi.abi_unwind = unwind_glue;
 
     Abi.abi_sp_reg = (Il.Hreg esp);

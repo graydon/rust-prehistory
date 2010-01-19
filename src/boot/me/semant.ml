@@ -16,8 +16,8 @@ type code = {
 ;;
 
 type glue =
-    GLUE_proc_to_C
-  | GLUE_C_to_proc
+    GLUE_C_to_proc
+  | GLUE_yield
   | GLUE_exit_main_proc
   | GLUE_exit_proc of Ast.ty_sig
   | GLUE_upcall of int
@@ -105,7 +105,7 @@ type ctxt =
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_abi: Abi.abi;
       ctxt_c_to_proc_fixup: fixup;
-      ctxt_proc_to_c_fixup: fixup;
+      ctxt_yield_fixup: fixup;
       ctxt_unwind_fixup: fixup;
       ctxt_global_glue_fixup: fixup;
       ctxt_file_code: file_code;
@@ -161,7 +161,7 @@ let new_ctxt sess abi crate =
     ctxt_spill_fixups = Hashtbl.create 0;
     ctxt_abi = abi;
     ctxt_c_to_proc_fixup = new_fixup "c-to-proc glue";
-    ctxt_proc_to_c_fixup = new_fixup "proc-to-c glue";
+    ctxt_yield_fixup = new_fixup "yield glue";
     ctxt_unwind_fixup = new_fixup "unwind glue";
     ctxt_global_glue_fixup = new_fixup "global glue table";
     ctxt_file_code = Hashtbl.create 0;
@@ -279,7 +279,6 @@ let slot_ty (s:Ast.slot) : Ast.ty =
       Some t -> t
     | None -> bug () "untyped slot"
 ;;
-
 
 (* Constraint manipulation. *)
 

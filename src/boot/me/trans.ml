@@ -583,7 +583,7 @@ let trans_visitor
     let framesz = 0L in
       push_new_emitter ();
       iflog (fun _ -> annotate "prologue");
-      abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill callsz cx.ctxt_proc_to_c_fixup;
+      abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill callsz nabi_rust (upcall_fixup "upcall_grow_proc");
       iflog (fun _ -> annotate "finished prologue");
 
   and capture_emitted_glue (name:string) (fix:fixup) (spill:fixup) (g:glue) : unit =
@@ -612,12 +612,10 @@ let trans_visitor
       let arg_layouts = layout_fn_call_tup abi tsig in
       let in_slots = tsig.Ast.sig_input_slots in
       let implicit_args = 2 in
-      let code = Il.CodeAddr (Il.Pcrel (cx.ctxt_proc_to_c_fixup, None)) in
         drop_arg_slots in_slots arg_layouts implicit_args;
 
         iflog (fun _ -> annotate "assume 'exited' state");
-        abi.Abi.abi_emit_proc_state_change (emitter()) Abi.STATE_blocked_exited;
-        call_code code;
+        trans_void_upcall "upcall_exit" [| |];
         capture_emitted_glue "proc glue" fix spill g;
         pop_emitter ()
 
@@ -931,14 +929,14 @@ let trans_visitor
   and trans_native_thunk (nabi:Abi.nabi) (lib:import_lib) (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
     abi.Abi.abi_emit_native_thunk (emitter()) nabi (Semant.import cx lib name) ret args;
 
+  and upcall_fixup (name:string) : fixup =
+    Semant.import cx LIB_rustrt name;
+
   and trans_upcall (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_native_call (emitter()) nabi_rust (Semant.import cx LIB_rustrt name) ret args;
+    abi.Abi.abi_emit_native_call (emitter()) nabi_rust (upcall_fixup name) ret args;
 
   and trans_void_upcall (name:string) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_native_void_call (emitter()) nabi_rust (Semant.import cx LIB_rustrt name) args;
-
-  and trans_upcall_slow (u:Abi.upcall) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_upcall (emitter()) u args cx.ctxt_proc_to_c_fixup;
+    abi.Abi.abi_emit_native_void_call (emitter()) nabi_rust (upcall_fixup name) args;
 
   and trans_log_int (a:Ast.atom) : unit =
     trans_void_upcall "upcall_log_int" [| (trans_atom a) |]
@@ -968,20 +966,15 @@ let trans_visitor
                                  abi.Abi.abi_has_abs_data
                                  exit_proc_glue_fixup Il.CodeTy) in
     let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
+
       iflog (fun _ -> annotate "spawn proc: copy args");
       copy_fn_args proc_cell in_slots arg_layouts args;
       iflog (fun _ -> annotate "spawn proc: upcall");
-      aliasing true proc_cell
-        begin
-          fun proc_cell_alias ->
-            trans_upcall_slow Abi.UPCALL_new_proc
-              [|
-                proc_cell_alias;
-                (alias_cell exit_proc_glue_cell);
-                (alias_cell fn_cell);
-                imm callsz
-              |]
-        end;
+      trans_upcall "upcall_new_proc" proc_cell
+        [|
+          alias_cell exit_proc_glue_cell;
+          alias_cell fn_cell;
+          imm callsz |];
       ()
 
   and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
@@ -994,9 +987,9 @@ let trans_visitor
               | Some sp -> sp.lo
     in
       iflog (fun _ -> annotate ("condition-fail: " ^ str));
-      trans_upcall_slow Abi.UPCALL_fail
+      trans_void_upcall "upcall_fail"
         [|
-          (Il.Cell abi.Abi.abi_pp_cell);
+          Il.Cell abi.Abi.abi_pp_cell;
           trans_static_string str;
           trans_static_string filename;
           imm (Int64.of_int line)
@@ -1018,8 +1011,7 @@ let trans_visitor
       aliasing false srccell
         begin
           fun src_alias ->
-            trans_upcall_slow Abi.UPCALL_send [| (trans_atom (Ast.ATOM_lval chan));
-                                            src_alias |]
+            trans_void_upcall "upcall_send" [| trans_atom (Ast.ATOM_lval chan); src_alias |];
         end
 
   and trans_recv (initialising:bool) (dst:Ast.lval) (chan:Ast.lval) : unit =
@@ -1028,8 +1020,7 @@ let trans_visitor
       aliasing true dstcell
         begin
           fun dst_alias ->
-            trans_upcall_slow Abi.UPCALL_recv [| dst_alias;
-                                                 (trans_atom (Ast.ATOM_lval chan)) |]
+            trans_void_upcall "upcall_recv" [| dst_alias; trans_atom (Ast.ATOM_lval chan) |];
         end
 
   and trans_init_port (dst:Ast.lval) : unit =
@@ -1045,11 +1036,7 @@ let trans_visitor
     trans_void_upcall "upcall_del_port" [| Il.Cell port |]
 
   and trans_del_proc (proc:Il.cell) : unit =
-      trans_upcall_slow Abi.UPCALL_fail
-        [|
-          (Il.Cell proc);
-          zero; zero; zero;
-        |];
+    trans_void_upcall "upcall_del_proc" [| Il.Cell proc |]
 
   (*
    * A vec is implicitly exterior: every slot vec[T] is 1 word and
@@ -2226,7 +2213,12 @@ let trans_visitor
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter ();
       iflog (fun _ -> annotate "prologue");
-      abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill_fixup callsz cx.ctxt_proc_to_c_fixup;
+      abi.Abi.abi_emit_fn_prologue (emitter())
+                                   argsz framesz
+                                   spill_fixup
+                                   callsz
+                                   nabi_rust
+                                   (upcall_fixup "upcall_grow_proc");
       mov (word_at (fp_imm frame_fns_disp)) frame_fns;
       iflog (fun _ -> annotate "finished prologue");
   in
@@ -2418,6 +2410,7 @@ let trans_visitor
             Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_c_to_proc_fixup);
             Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_main_exit_proc_glue_fixup);
             Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_unwind_fixup);
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_yield_fixup);
           |]))
     in
 
@@ -2427,16 +2420,16 @@ let trans_visitor
         cx.ctxt_c_to_proc_fixup
         cx.ctxt_abi.Abi.abi_c_to_proc;
 
-      emit_aux_global_glue cx GLUE_proc_to_C
-        "proc-to-c glue"
-        cx.ctxt_proc_to_c_fixup
-        cx.ctxt_abi.Abi.abi_proc_to_c;
+      emit_aux_global_glue cx GLUE_yield
+        "yield glue"
+        cx.ctxt_yield_fixup
+        cx.ctxt_abi.Abi.abi_yield;
 
       emit_aux_global_glue cx GLUE_unwind
         "unwind glue"
         cx.ctxt_unwind_fixup
         (fun e -> cx.ctxt_abi.Abi.abi_unwind
-           e cx.ctxt_proc_to_c_fixup);
+           e nabi_rust (upcall_fixup "upcall_del_proc"));
 
       htab_put cx.ctxt_data
         DATA_global_glue_fns global_glue_fns

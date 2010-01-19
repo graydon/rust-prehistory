@@ -45,7 +45,6 @@ extern "C" {
 #error "Platform not supported."
 #endif
 
-#define PROC_MAX_UPCALL_ARGS 8
 #define I(rt, e) ((e) ? (void)0 :                           \
                   (rt)->srv->fatal(#e, __FILE__, __LINE__))
 
@@ -66,7 +65,6 @@ static uint32_t const LOG_UPCALL =    0x10;
 static uint32_t const LOG_RT =        0x20;
 static uint32_t const LOG_ULOG =      0x40;
 static uint32_t const LOG_TRACE =     0x80;
-
 
 static uint32_t
 get_logbits()
@@ -111,42 +109,22 @@ struct stk_seg {
 
 typedef enum {
     proc_state_running    = 0,
-    proc_state_calling_c  = 1,
-    proc_state_failing    = 2,
-    proc_state_blocked_exited   = 3,
-    proc_state_blocked_reading  = 4,
-    proc_state_blocked_writing  = 5,
-    proc_state_dead             = 6
+    proc_state_failing    = 1,
+    proc_state_blocked_exited   = 2,
+    proc_state_blocked_reading  = 3,
+    proc_state_blocked_writing  = 4,
+    proc_state_dead             = 5
 } proc_state_t;
 
 static char const * const state_names[] =
     {
         "running",
-        "calling_c",
         "failing",
         "blocked_exited",
         "blocked_reading",
         "blocked_writing",
         "dead"
     };
-
-typedef enum {
-    upcall_code_log_int        = 0,
-    upcall_code_log_str        = 1,
-    upcall_code_new_proc       = 2,
-    upcall_code_del_proc       = 3,
-    upcall_code_fail           = 4,
-    upcall_code_malloc         = 5,
-    upcall_code_free           = 6,
-    upcall_code_new_port       = 7,
-    upcall_code_del_port       = 8,
-    upcall_code_send           = 9,
-    upcall_code_recv           = 10,
-    upcall_code_new_str        = 11,
-    upcall_code_grow_proc      = 12,
-    upcall_code_trace_word     = 13,
-    upcall_code_trace_str      = 14,
-} upcall_t;
 
 typedef enum {
     abi_code_cdecl = 0,
@@ -157,6 +135,7 @@ struct global_glue_fns {
     void CDECL (*c_to_proc_glue)(rust_proc *);
     uintptr_t main_exit_proc_glue;
     uintptr_t unwind_glue;
+    uintptr_t yield_glue;
 };
 
 struct frame_glue_fns {
@@ -368,22 +347,17 @@ struct rust_proc {
 
     uintptr_t gc_alloc_chain;  /* linked list of GC allocations.   */
 
-    /* Parameter space for upcalls. */
-    /*
-     * FIXME: could probably get away with packing upcall code and
-     * state into 1 byte each. And having fewer max upcall args.
-     */
-    uintptr_t upcall_code;
-    uintptr_t upcall_args[PROC_MAX_UPCALL_ARGS];
+    uintptr_t* dptr; /* rendezvous pointer for send/recv */
 
-    // When a proc is descheduled, we save callee-saved registers here
-    // until the proc is activated again.
-    uintptr_t callee_saves[4];
+    // Swap in some glue code to run when we have returned to the
+    // proc's context.
+    void run_after_return(size_t nargs, uintptr_t glue);
 
     // Save callee-saved registers and return to the main loop.
-    void yield(size_t argc);
+    void yield(size_t nargs);
 
-    void fail();
+    void fail(size_t nargs);
+
     uintptr_t get_fp();
     uintptr_t get_previous_fp(uintptr_t fp);
     frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
@@ -763,7 +737,7 @@ align_down(uintptr_t sp)
     return sp & ~(16 - 1);
 }
 
-static void
+extern "C" void
 upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
 {
     /*
@@ -866,8 +840,7 @@ rust_proc::rust_proc(rust_rt *rt,
       idx(0),
       refcnt(1),
       chans(NULL),
-      gc_alloc_chain(0),
-      upcall_code(0)
+      gc_alloc_chain(0)
 {
     rt->logptr("new proc", (uintptr_t)this);
     rt->logptr("exit-proc glue", exit_proc_glue);
@@ -979,12 +952,32 @@ rust_proc::~rust_proc()
 }
 
 void
-rust_proc::yield(size_t nargs)
+rust_proc::run_after_return(size_t nargs, uintptr_t glue)
 {
+    rt->log(LOG_PROC,
+            "run_after_return -> glue==0x%" PRIxPTR,
+            glue);
+
     uintptr_t sp = runtime_sp;
 
     // The compiler reserves nargs + 1 word for oldsp on the stack and then aligns it
     sp = align_down(sp - (nargs + 1) * sizeof(uintptr_t));
+
+    uintptr_t *oldsp = ((uintptr_t *) sp) + nargs;
+    uintptr_t *retpc = ((uintptr_t *) sp) - 1;
+
+    // Move the current return address (which points into rust code) onto the rust
+    // stack and pretend we just called into yield_glue.
+    rust_sp = *oldsp;
+    rust_sp -= sizeof(uintptr_t);
+    *(uintptr_t *)rust_sp = *retpc;
+    *retpc = glue;
+}
+
+void
+rust_proc::yield(size_t nargs)
+{
+    run_after_return(nargs, rt->global_glue->yield_glue);
 }
 
 void
@@ -1007,14 +1000,12 @@ proc_state_transition(rust_rt *rt,
                       proc_state_t dst);
 
 void
-rust_proc::fail() {
+rust_proc::fail(size_t nargs) {
     proc_state_transition(rt, this, state,
                           proc_state_failing);
-    uintptr_t *rust_spp = (uintptr_t*)rust_sp;
-    rust_spp += n_callee_saves;
-    *rust_spp = rt->global_glue->unwind_glue;
     rt->log(LOG_MEM|LOG_PROC, "unwind-glue starts at 0x%" PRIxPTR,
             rt->global_glue->unwind_glue);
+    run_after_return(nargs, rt->global_glue->unwind_glue);
 }
 
 uintptr_t
@@ -1042,7 +1033,6 @@ get_state_vec(rust_rt *rt, proc_state_t state)
 {
     switch (state) {
     case proc_state_running:
-    case proc_state_calling_c:
     case proc_state_failing:
         return &rt->running_procs;
 
@@ -1412,7 +1402,7 @@ attempt_transmission(rust_rt *rt,
         return 0;
     }
 
-    uintptr_t *dptr = (uintptr_t*)dst->upcall_args[0];
+    uintptr_t *dptr = dst->dptr;
     src->buf.shift(dptr);
 
     if (src->blocked) {
@@ -1471,7 +1461,7 @@ upcall_send(rust_proc *src, rust_port *port, void *sptr)
         chan->blocked = src;
         chan->buf.push(sptr);
         proc_state_transition(rt, src,
-                              proc_state_calling_c,
+                              proc_state_running,
                               proc_state_blocked_writing);
         attempt_transmission(rt, chan, port->proc);
         if (chan->buf.unread && !chan->queued) {
@@ -1482,33 +1472,36 @@ upcall_send(rust_proc *src, rust_port *port, void *sptr)
         rt->log(LOG_COMM|LOG_ERR,
                 "port has no proc (possibly throw?)");
     }
+
+    if (src->state != proc_state_running)
+        src->yield(3);
 }
 
 extern "C" CDECL void
-upcall_recv(rust_proc *dst, rust_port *port)
+upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
 {
-    rust_rt *rt = dst->rt;
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall recv(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
-            (uintptr_t)dst,
+            (uintptr_t)proc,
             (uintptr_t)port);
 
     I(rt, port);
     I(rt, port->proc);
-    I(rt, dst);
-    I(rt, port->proc == dst);
+    I(rt, proc);
+    I(rt, port->proc == proc);
 
-    proc_state_transition(rt, dst,
-                          proc_state_calling_c,
+    proc_state_transition(rt, proc,
+                          proc_state_running,
                           proc_state_blocked_reading);
 
     if (port->writers.length() > 0) {
-        I(rt, dst->rt);
-        size_t i = rand(&dst->rt->rctx);
+        I(rt, proc->rt);
+        size_t i = rand(&rt->rctx);
         i %= port->writers.length();
         rust_chan *schan = port->writers[i];
         I(rt, schan->idx == i);
-        if (attempt_transmission(rt, schan, dst)) {
+        if (attempt_transmission(rt, schan, proc)) {
             port->writers.swapdel(schan);
             port->writers.trim(port->writers.length());
             schan->queued = false;
@@ -1516,6 +1509,11 @@ upcall_recv(rust_proc *dst, rust_port *port)
     } else {
         rt->log(LOG_COMM,
                 "no writers sending to port", (uintptr_t)port);
+    }
+
+    if (proc->state != proc_state_running) {
+        proc->dptr = dptr;
+        proc->yield(3);
     }
 }
 
@@ -1526,7 +1524,14 @@ upcall_fail(rust_proc *proc, rust_proc *failee,
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
             expr, file, line);
-    failee->fail();
+    failee->fail(5);
+}
+
+extern "C" CDECL void
+upcall_exit(rust_proc *proc)
+{
+    proc->state = proc_state_blocked_exited;
+    proc->yield(1);
 }
 
 extern "C" CDECL uintptr_t
@@ -1638,8 +1643,7 @@ static void *rust_thread_start(void *ptr)
 }
 
 extern "C" CDECL rust_proc*
-upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue,
-                uintptr_t spawnee_fn, size_t callsz)
+upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     rust_rt *rt = spawner->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
@@ -1677,70 +1681,6 @@ upcall_new_thread(rust_proc *spawner, global_glue_fns *global_glue, uintptr_t sp
      */
     return NULL;
 }
-
-static void
-handle_upcall(rust_proc *proc)
-{
-    uintptr_t *args = &proc->upcall_args[0];
-
-    switch ((upcall_t)proc->upcall_code) {
-    case upcall_code_log_int:
-        upcall_log_int(proc, args[0]);
-        break;
-    case upcall_code_log_str:
-        upcall_log_str(proc, (rust_str*)args[0]);
-        break;
-    case upcall_code_new_proc:
-        *((rust_proc**)args[0]) =
-            upcall_new_proc(proc, args[1], args[2],(size_t)args[3]);
-        break;
-    case upcall_code_del_proc:
-        upcall_del_proc((rust_proc*)args[0]);
-        break;
-    case upcall_code_fail:
-        upcall_fail(proc,
-                    (rust_proc *)args[0],
-                    (char const *)args[1],
-                    (char const *)args[2],
-                    (size_t)args[3]);
-        break;
-    case upcall_code_malloc:
-        *((uintptr_t*)args[0]) =
-            upcall_malloc(proc, (size_t)args[1]);
-        break;
-    case upcall_code_free:
-        upcall_free(proc, (void*)args[0]);
-        break;
-    case upcall_code_new_port:
-        *((rust_port**)args[0]) =
-            upcall_new_port(proc, (size_t)args[1]);
-        break;
-    case upcall_code_del_port:
-        upcall_del_port(proc, (rust_port*)args[0]);
-        break;
-    case upcall_code_send:
-        upcall_send(proc, (rust_port*)args[0], (void*)args[1]);
-        break;
-    case upcall_code_recv:
-        upcall_recv(proc, (rust_port*)args[1]);
-        break;
-    case upcall_code_new_str:
-        *((rust_str**)args[0]) = upcall_new_str(proc,
-                                             (char const *)args[1],
-                                             (size_t)args[2]);
-        break;
-    case upcall_code_grow_proc:
-        upcall_grow_proc(proc, (size_t)args[0], (size_t)args[1]);
-        break;
-    case upcall_code_trace_word:
-        upcall_trace_word(proc, args[0]);
-        break;
-    case upcall_code_trace_str:
-        upcall_trace_str(proc, (char const *)args[0]);
-        break;
-    }
-}
-
 
 static void
 rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
@@ -1793,12 +1733,6 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
             case proc_state_failing:
                 break;
 
-            case proc_state_calling_c:
-                handle_upcall(proc);
-                if (proc->state == proc_state_calling_c)
-                    proc->state = proc_state_running;
-                break;
-
             case proc_state_blocked_exited:
                 /* When a proc exits *itself* we do not yet kill it; for
                  * the time being we let it linger in the blocked-exiting
@@ -1811,7 +1745,6 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
 
             case proc_state_blocked_reading:
             case proc_state_blocked_writing:
-                I(&rt, 0);
                 break;
 
             case proc_state_dead:

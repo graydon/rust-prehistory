@@ -4,35 +4,6 @@
  * dependencies.  Make some attempt to factor it as time goes by.  
  *)
 
-
-type proc_state =
-    STATE_running
-  | STATE_calling_c
-  | STATE_failing
-  | STATE_blocked_exited
-  | STATE_blocked_reading
-  | STATE_blocked_writing
-  | STATE_dead
-;;
-
-type upcall =
-    UPCALL_log_int
-  | UPCALL_log_str
-  | UPCALL_new_proc
-  | UPCALL_del_proc
-  | UPCALL_fail
-  | UPCALL_malloc
-  | UPCALL_free
-  | UPCALL_new_port
-  | UPCALL_del_port
-  | UPCALL_send
-  | UPCALL_recv
-  | UPCALL_new_str
-  | UPCALL_grow_proc
-  | UPCALL_trace_word
-  | UPCALL_trace_str
-;;
-
 type nabi_conv =
     CONV_rust
   | CONV_cdecl
@@ -40,37 +11,6 @@ type nabi_conv =
 
 type nabi = { nabi_indirect: bool;
               nabi_convention: nabi_conv }
-
-(* NB: all these numbers must be kept in sync with runtime. *)
-let proc_state_to_code (st:proc_state) : int64 =
-  match st with
-      STATE_running -> 0L
-    | STATE_calling_c -> 1L
-    | STATE_failing -> 2L
-    | STATE_blocked_exited -> 3L
-    | STATE_blocked_reading -> 4L
-    | STATE_blocked_writing -> 5L
-    | STATE_dead -> 6L
-;;
-
-let upcall_to_code (u:upcall) : int64 =
-  match u with
-    UPCALL_log_int -> 0L
-  | UPCALL_log_str -> 1L
-  | UPCALL_new_proc -> 2L
-  | UPCALL_del_proc -> 3L
-  | UPCALL_fail -> 4L
-  | UPCALL_malloc -> 5L
-  | UPCALL_free -> 6L
-  | UPCALL_new_port -> 7L
-  | UPCALL_del_port -> 8L
-  | UPCALL_send -> 9L
-  | UPCALL_recv -> 10L
-  | UPCALL_new_str -> 11L
-  | UPCALL_grow_proc -> 12L
-  | UPCALL_trace_word -> 13L
-  | UPCALL_trace_str -> 14L
-;;
 
 let string_to_nabi (a:string) (indirect:bool) : nabi option =
   match a with
@@ -93,15 +33,6 @@ let proc_field_idx = proc_field_state + 1;;
 let proc_field_refcnt = proc_field_idx + 1;;
 let proc_field_chans = proc_field_refcnt + 1;;
 let proc_field_gc_alloc_chain = proc_field_chans + 1;;
-let proc_field_upcall_code = proc_field_gc_alloc_chain + 1;;
-let proc_field_upcall_args = proc_field_upcall_code + 1;;
-
-let max_upcall_args = 8;;
-
-let proc_field_callee_saves = proc_field_upcall_args + max_upcall_args;;
-
-let global_glue_fns_c_to_proc_glue = 0;;
-let global_glue_fns_unwind_glue = 1;;
 
 let frame_glue_fns_field_mark = 0;;
 let frame_glue_fns_field_drop = 1;;
@@ -147,21 +78,19 @@ type abi =
     abi_str_of_hardreg: (int -> string);
 
     abi_prealloc_quad: (Il.quad' -> Il.quad');
-    abi_emit_fn_prologue: (Il.emitter -> int64 -> int64 -> Common.fixup -> int64 -> Common.fixup -> unit);
+    abi_emit_fn_prologue: (Il.emitter -> int64 -> int64 -> Common.fixup -> int64 -> nabi -> Common.fixup -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 
-    abi_emit_proc_state_change: (Il.emitter -> proc_state -> unit);
-    abi_emit_upcall: (Il.emitter -> upcall -> Il.operand array -> Common.fixup -> unit);
     abi_emit_native_call: (Il.emitter -> nabi -> Common.fixup -> Il.cell -> Il.operand array -> unit);
     abi_emit_native_void_call: (Il.emitter -> nabi -> Common.fixup -> Il.operand array -> unit);
     abi_emit_native_thunk: (Il.emitter -> nabi -> Common.fixup -> Il.cell -> Il.operand array -> unit);
 
     (* Global glue. *)
     abi_c_to_proc: (Il.emitter -> unit);
-    abi_proc_to_c: (Il.emitter -> unit);
-    abi_unwind: (Il.emitter -> Common.fixup -> unit);
+    abi_yield: (Il.emitter -> unit);
+    abi_unwind: (Il.emitter -> nabi -> Common.fixup -> unit);
 
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;
