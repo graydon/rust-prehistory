@@ -12,6 +12,7 @@ type proc_state =
   | STATE_blocked_exited
   | STATE_blocked_reading
   | STATE_blocked_writing
+  | STATE_dead
 ;;
 
 type upcall =
@@ -49,6 +50,7 @@ let proc_state_to_code (st:proc_state) : int64 =
     | STATE_blocked_exited -> 3L
     | STATE_blocked_reading -> 4L
     | STATE_blocked_writing -> 5L
+    | STATE_dead -> 6L
 ;;
 
 let upcall_to_code (u:upcall) : int64 =

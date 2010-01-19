@@ -1500,12 +1500,12 @@ and parse_two_or_more_identified_tup_slots_and_idents
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
 
-and parse_one_or_more_identified_slot_ident_pairs
+and parse_zero_or_more_identified_slot_ident_pairs
     (param_slot:bool)
     (ps:pstate)
     : (((Ast.slot identified) * Ast.ident) array) =
-  ctxt "one+ tup slots and idents"
-    (bracketed_one_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident param_slot)) ps
+  ctxt "zero+ tup slots and idents"
+    (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident param_slot)) ps
 
 and parse_block (ps:pstate) : Ast.block =
   let apos = lexpos ps in
@@ -1893,7 +1893,7 @@ and parse_inputs
     match peek ps with
         NIL -> (bump ps; [| |])
       | LPAREN -> ctxt "inputs: input idents and slots"
-          (parse_one_or_more_identified_slot_ident_pairs true) ps
+          (parse_zero_or_more_identified_slot_ident_pairs true) ps
       | _ -> raise (unexpected ps)
   in
   let constrs =

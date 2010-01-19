@@ -115,7 +115,8 @@ typedef enum {
     proc_state_failing    = 2,
     proc_state_blocked_exited   = 3,
     proc_state_blocked_reading  = 4,
-    proc_state_blocked_writing  = 5
+    proc_state_blocked_writing  = 5,
+    proc_state_dead             = 6
 } proc_state_t;
 
 static char const * const state_names[] =
@@ -125,7 +126,8 @@ static char const * const state_names[] =
         "failing",
         "blocked_exited",
         "blocked_reading",
-        "blocked_writing"
+        "blocked_writing",
+        "dead"
     };
 
 typedef enum {
@@ -240,6 +242,7 @@ struct rust_rt {
     uint32_t logbits;
     ptr_vec<rust_proc> running_procs;
     ptr_vec<rust_proc> blocked_procs;
+    ptr_vec<rust_proc> dead_procs;
     randctx rctx;
     rust_proc *root_proc;
     rust_port *ports;
@@ -259,6 +262,7 @@ struct rust_rt {
 #endif
 
     size_t n_live_procs();
+    void reap_dead_procs();
     rust_proc *sched();
 };
 
@@ -1031,7 +1035,11 @@ get_state_vec(rust_rt *rt, proc_state_t state)
     case proc_state_blocked_reading:
     case proc_state_blocked_writing:
         return &rt->blocked_procs;
+
+    case proc_state_dead:
+        return &rt->dead_procs;
     }
+
     I(rt, 0);
     return NULL;
 }
@@ -1089,9 +1097,8 @@ upcall_del_proc(rust_proc *proc)
     rt->log(LOG_UPCALL,
             "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
             proc, proc->refcnt);
-    // FIXME: remove this part.
-    remove_proc_from_state_vec(rt, proc);
-    delete proc;
+    proc_state_transition(rt, proc, proc->state,
+                          proc_state_dead);
 }
 
 /* Runtime */
@@ -1112,6 +1119,7 @@ rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_alloc
     logbits(get_logbits()),
     running_procs(this),
     blocked_procs(this),
+    dead_procs(this),
     root_proc(NULL),
     ports(NULL)
 {
@@ -1148,6 +1156,8 @@ rust_rt::~rust_rt() {
     del_all_procs(this, &running_procs);
     log(LOG_PROC, "deleting all blocked procs");
     del_all_procs(this, &blocked_procs);
+    log(LOG_PROC, "deleting all dead procs");
+    del_all_procs(this, &dead_procs);
 
     log(LOG_PROC, "deleting all dangling ports");
     /* FIXME: remove when port <-> proc linkage is obsolete. */
@@ -1243,6 +1253,15 @@ size_t
 rust_rt::n_live_procs()
 {
     return running_procs.length() + blocked_procs.length();
+}
+
+void
+rust_rt::reap_dead_procs()
+{
+    if (dead_procs.length() > 0) {
+        log(LOG_PROC, "deleting %d dead procs", dead_procs.length());
+        del_all_procs(this, &dead_procs);
+    }
 }
 
 rust_proc *
@@ -1734,6 +1753,7 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
 
             if (proc->state != proc_state_failing)
                 proc->state = proc_state_running;
+
             rt.activate(proc);
 
             rt.log(LOG_PROC,
@@ -1778,7 +1798,12 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
             case proc_state_blocked_writing:
                 I(&rt, 0);
                 break;
+
+            case proc_state_dead:
+                break;
             }
+
+            rt.reap_dead_procs();
 
             proc = rt.sched();
         }

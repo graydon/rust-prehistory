@@ -1343,6 +1343,12 @@ let trans_visitor
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
+    let null_check _ =
+      emit (Il.cmp (Il.Cell cell) zero);
+      let j = mark() in
+        emit (Il.jmp Il.JE Il.CodeNone);
+        j
+    in
     let drop_refcount_and_cmp rc =
       (iflog (fun _ -> annotate ("drop refcount and maybe free slot " ^
                                    (Ast.fmt_to_str Ast.fmt_slot slot))));
@@ -1357,13 +1363,15 @@ let trans_visitor
       match mctrl with
           MEM_rc_opaque rc_off ->
             (* Refcounted opaque objects we handle without glue functions. *)
+            let null_jmp = null_check () in
             let (rc_addr, _) = deref_imm cell (word_n rc_off) in
             let rc = word_at rc_addr in
             let j = drop_refcount_and_cmp rc in
               free_ty ty cell;
               (* Null the slot out to prevent double-free if the frame unwinds. *)
               mov cell zero;
-              patch j
+              patch j;
+              patch null_jmp
 
         | MEM_gc
         | MEM_rc_struct ->
@@ -1379,6 +1387,7 @@ let trans_visitor
              * exterior members; if it doesn't we can elide the call to
              * the glue function.
              *)
+            let null_jmp = null_check () in
             let rc = exterior_rc_cell cell in
             let j = drop_refcount_and_cmp rc in
             let ty = maybe_iso curr_iso ty in
@@ -1386,7 +1395,8 @@ let trans_visitor
               trans_call_mem_glue (get_free_glue ty mctrl curr_iso) cell;
               (* Null the slot out to prevent double-free if the frame unwinds. *)
               mov cell zero;
-              patch j
+              patch j;
+              patch null_jmp
 
         | MEM_interior when ty_is_structured ty ->
             (iflog (fun _ -> annotate ("drop interior slot " ^
