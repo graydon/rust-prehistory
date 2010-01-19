@@ -426,16 +426,17 @@ struct rust_port {
 
 struct rust_chan {
 
-    rust_chan(rust_port *port);
+    rust_chan(rust_proc *proc, rust_port *port);
     ~rust_chan();
     void operator delete(void *ptr);
+    void disconnect();
 
     UT_hash_handle hh;
-    rust_port *port;
-    uintptr_t queued;     /* Whether we're in a port->writers vec. */
-    size_t idx;           /* Index in the port->writers vec. */
-    rust_proc *blocked; /* Proc to wake on flush,
-                             NULL if nonblocking. */
+    rust_proc *proc;      // Proc owning this chan.
+    rust_port *port;      // Port chan is connected to, NULL if disconnected.
+    bool queued;          // Whether we're in a port->writers vec.
+    size_t idx;           // Index in the port->writers vec.
+    rust_proc *blocked;   // Proc to wake on flush, NULL if nonblocking.
     circ_buf buf;
 };
 
@@ -653,7 +654,7 @@ rust_port::~rust_port()
             (uintptr_t)this);
     /* FIXME: need to force-fail all the queued writers. */
     for (size_t i = 0; i < writers.length(); ++i)
-        delete writers[i];
+        writers[i]->disconnect();
     /* FIXME: can remove the chaining-of-ports-to-rt when we have
      * unwinding / finishing working. */
     if (prev)
@@ -666,22 +667,36 @@ rust_port::~rust_port()
 
 /* Channels */
 
-rust_chan::rust_chan(rust_port *port)
-    : port(port),
-      queued(0),
+rust_chan::rust_chan(rust_proc *proc, rust_port *port)
+    : proc(proc),
+      port(port),
+      queued(false),
       idx(0),
       blocked(NULL),
       buf(port->proc->rt, port->unit_sz)
 {
-    rust_rt *rt = port->proc->rt;
+    rust_rt *rt = proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_chan(port=0x%" PRIxPTR ") -> chan=0x%" PRIxPTR,
             port, (uintptr_t)this);
 }
 
+void
+rust_chan::disconnect()
+{
+    I(proc->rt, queued);
+    I(proc->rt, port);
+    queued = false;
+    port = NULL;
+}
+
 rust_chan::~rust_chan()
 {
-    rust_rt *rt = port->proc->rt;
+    rust_rt *rt = proc->rt;
+    if (queued) {
+        I(rt, port);
+        port->writers.swapdel(this);
+    }
     rt->log(LOG_MEM|LOG_COMM,
             "~rust_chan 0x%" PRIxPTR, (uintptr_t)this);
 }
@@ -689,7 +704,7 @@ rust_chan::~rust_chan()
 void
 rust_chan::operator delete(void *ptr)
 {
-    rust_rt *rt = ((rust_chan *)ptr)->port->proc->rt;
+    rust_rt *rt = ((rust_chan *)ptr)->proc->rt;
     rt->free(ptr);
 }
 
@@ -1440,7 +1455,7 @@ upcall_send(rust_proc *src, rust_port *port, void *sptr)
     I(rt, sptr);
     HASH_FIND(hh, src->chans, port, sizeof(rust_port*), chan);
     if (!chan) {
-        chan = new (rt) rust_chan(port);
+        chan = new (rt) rust_chan(src, port);
         HASH_ADD(hh, src->chans, port, sizeof(rust_port*), chan);
     }
     I(rt, chan);
@@ -1460,7 +1475,7 @@ upcall_send(rust_proc *src, rust_port *port, void *sptr)
                               proc_state_blocked_writing);
         attempt_transmission(rt, chan, port->proc);
         if (chan->buf.unread && !chan->queued) {
-            chan->queued = 1;
+            chan->queued = true;
             port->writers.push(chan);
         }
     } else {
@@ -1496,7 +1511,7 @@ upcall_recv(rust_proc *dst, rust_port *port)
         if (attempt_transmission(rt, schan, dst)) {
             port->writers.swapdel(schan);
             port->writers.trim(port->writers.length());
-            schan->queued = 0;
+            schan->queued = false;
         }
     } else {
         rt->log(LOG_COMM,
