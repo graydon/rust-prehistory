@@ -540,7 +540,7 @@ circ_buf::~circ_buf()
             "~circ_buf 0x%" PRIxPTR,
             this);
     I(rt, data);
-    I(rt, unread == 0);
+    // I(rt, unread == 0);
     rt->free(data);
 }
 

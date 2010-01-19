@@ -13,6 +13,7 @@ fn f(chan[int] c) -> ()
   while (true) {
     // spin waiting for the parent to kill us.
     log "child waiting to die...";
+    c <| 1;
   }
 }
 

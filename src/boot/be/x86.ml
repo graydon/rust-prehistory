@@ -221,6 +221,12 @@ let clobbers (quad:Il.quad) : Il.hreg list =
             | Il.IMOD | Il.UMOD -> [ eax ]
             | _ -> []
         end
+    | Il.Unary un ->
+        begin
+          match un.Il.unary_op with
+              Il.ZERO -> [ eax; edi; ecx ]
+            | _ -> [ ]
+        end
     | Il.Call _ -> [ eax; ecx; edx; ]
     | _ -> []
 ;;
@@ -706,7 +712,12 @@ let fn_prologue
       Il.patch_jump e jmp_pc e.Il.emit_pc;
 
       (* Now set up a frame, wherever we landed. *)
-      emit (Il.binary Il.SUB (rc esp) (ro esp) (imm callee_frame_sz))
+      emit (Il.binary Il.SUB (rc esp) (ro esp) (imm callee_frame_sz));
+
+      (* Zero the frame (FIXME: this is awful, will go away when we have proper CFI). *)
+      mov (rc edi) (ro esp);
+      mov (rc ecx) (imm callee_frame_sz);
+      emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
 ;;
 
 
@@ -1073,10 +1084,24 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
 let xchg (dst:Il.cell) (src:Il.operand) : Asm.frag =
   match (dst, src) with
 
-    (* rm32 <- r32 *)
-    | (_,  Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
+      (* rm32 <- r32 *)
+      (_,  Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
         when (is_r8 dst || is_rm32 dst) && is_ty32 src_ty ->
-        insn_rm_r 0x87 dst (reg r)
+          insn_rm_r 0x87 dst (reg r)
+
+    | _ -> raise Unrecognized
+;;
+
+let zero (dst:Il.cell) (count:Il.operand) : Asm.frag =
+  match (dst, count) with
+
+      ((Il.Addr (Il.Based ((Il.Hreg dst_ptr), None), _)),
+       Il.Cell (Il.Reg ((Il.Hreg count), _)))
+        when dst_ptr = edi && count = ecx ->
+          Asm.BYTES [|
+            0xb0; 0x0;  (* mov %eax, 0 : move a zero into al. *)
+            0xf3; 0xaa; (* rep stos m8 : fill ecx bytes at [edi] with al *)
+          |]
 
     | _ -> raise Unrecognized
 ;;
@@ -1289,6 +1314,7 @@ let select_insn (q:Il.quad) : Asm.frag =
               | Il.XCHG -> xchg u.Il.unary_dst u.Il.unary_src
               | Il.NEG -> unop slash3
               | Il.NOT -> unop slash2
+              | Il.ZERO -> zero u.Il.unary_dst u.Il.unary_src
           end
 
     | Il.Lea le -> lea le.Il.lea_dst le.Il.lea_src
