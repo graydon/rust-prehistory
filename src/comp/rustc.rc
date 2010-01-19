@@ -1,5 +1,5 @@
 
-native fn str_buf(str s) -> int;
+native rust fn str_buf(str s) -> int;
 native fn fopen(int path, int mode) -> int;
 native fn fgetc(int file) -> int;
 native fn fclose(int file) -> ();

@@ -266,6 +266,32 @@ let sect_type_code (s:sect_type) : int64 =
   | S_LAZY_DYLIB_SYMBOL_POINTERS -> 0x10L
 ;;
 
+type sect_attr =
+    S_ATTR_PURE_INSTRUCTIONS
+  | S_ATTR_NO_TOC
+  | S_ATTR_STRIP_STATIC_SYMS
+  | S_ATTR_NO_DEAD_STRIP
+  | S_ATTR_LIVE_SUPPORT
+  | S_ATTR_SELF_MODIFYING_CODE
+  | S_ATTR_DEBUG
+  | S_ATTR_SOME_INSTRUCTIONS
+  | S_ATTR_EXT_RELOC
+  | S_ATTR_LOC_RELOC
+;;
+
+let sect_attr_code (s:sect_attr) : int64 =
+  match s with
+    S_ATTR_PURE_INSTRUCTIONS -> 0x80000000L
+  | S_ATTR_NO_TOC -> 0x40000000L
+  | S_ATTR_STRIP_STATIC_SYMS -> 0x20000000L
+  | S_ATTR_NO_DEAD_STRIP -> 0x10000000L
+  | S_ATTR_LIVE_SUPPORT -> 0x08000000L
+  | S_ATTR_SELF_MODIFYING_CODE -> 0x04000000L
+  | S_ATTR_DEBUG -> 0x02000000L
+  | S_ATTR_SOME_INSTRUCTIONS -> 0x00000400L
+  | S_ATTR_EXT_RELOC -> 0x00000200L
+  | S_ATTR_LOC_RELOC -> 0x00000100L
+;;
 
 type n_type =
   | N_EXT
@@ -342,9 +368,9 @@ let n_desc_code (n:n_desc) : int64 =
 
 let macho_section_command
     (seg_name:string)
-    (sect:(string * int * sect_type * fixup))
+    (sect:(string * int * (sect_attr list) * sect_type * fixup))
     : frag =
-  let (sect_name, sect_align, sect_type, sect_fixup) = sect in
+  let (sect_name, sect_align, sect_attrs, sect_type, sect_fixup) = sect in
     SEQ [|
       fixed_sz_string 16 sect_name;
       fixed_sz_string 16 seg_name;
@@ -354,7 +380,9 @@ let macho_section_command
       WORD (TY_u32, IMM (Int64.of_int sect_align));
       WORD (TY_u32, IMM 0L); (* reloff *)
       WORD (TY_u32, IMM 0L); (* nreloc *)
-      WORD (TY_u32, IMM (sect_type_code sect_type)); (* flags *)
+      WORD (TY_u32, (IMM (Int64.logor (* flags (and attrs) *)
+                            (fold_flags sect_attr_code sect_attrs)
+                            (sect_type_code sect_type))));
       WORD (TY_u32, IMM 0L); (* reserved1 *)
       WORD (TY_u32, IMM 0L); (* reserved2 *)
   |]
@@ -365,7 +393,7 @@ let macho_segment_command
     (seg_fixup:fixup)
     (maxprot:vm_prot list)
     (initprot:vm_prot list)
-    (sects:(string * int * sect_type * fixup) array)
+    (sects:(string * int * (sect_attr list) * sect_type * fixup) array)
     : frag =
 
   let cmd_fixup = new_fixup "segment command" in
@@ -568,7 +596,7 @@ let emit_file
     (code:Asm.frag)
     (data:Asm.frag)
     (sem:Semant.ctxt)
-    (_:Dwarf.debug_records)
+    (dwarf:Dwarf.debug_records)
     : unit =
 
   (* FIXME: alignment? *)
@@ -615,6 +643,18 @@ let emit_file
   let data_section = def_aligned data_sect_align data_section_fixup data in
   let const_section = def_aligned data_sect_align const_section_fixup (SEQ [| |]) in
   let bss_section = def_aligned data_sect_align bss_section_fixup (SEQ [| |]) in
+
+  (* Officially, Apple doesn't support DWARF sections like this. Whatever. *)
+  let debug_info_section =
+    def_aligned data_sect_align
+      dwarf.Dwarf.debug_info_fixup
+      dwarf.Dwarf.debug_info
+  in
+  let debug_abbrev_section =
+    def_aligned data_sect_align
+      dwarf.Dwarf.debug_abbrev_fixup
+      dwarf.Dwarf.debug_abbrev
+  in
 
 
   (* String, symbol and parallel "nonlazy-pointer" tables. *)
@@ -768,6 +808,7 @@ let emit_file
   let zero_segment_fixup = new_fixup "__PAGEZERO segment" in
   let text_segment_fixup = new_fixup "__TEXT segment" in
   let data_segment_fixup = new_fixup "__DATA segment" in
+  let dwarf_segment_fixup = new_fixup "__DWARF segment" in
   let linkedit_segment_fixup = new_fixup "__LINKEDIT segment" in
 
   let load_commands =
@@ -779,18 +820,26 @@ let emit_file
         [VM_PROT_READ; VM_PROT_EXECUTE]
         [VM_PROT_READ; VM_PROT_EXECUTE]
         [|
-          ("__text", text_sect_align_log2, S_REGULAR, text_section_fixup)
+          ("__text", text_sect_align_log2, [], S_REGULAR, text_section_fixup)
         |];
 
       macho_segment_command "__DATA" data_segment_fixup
         [VM_PROT_READ; VM_PROT_WRITE]
         [VM_PROT_READ; VM_PROT_WRITE]
         [|
-          ("__data", data_sect_align_log2, S_REGULAR, data_section_fixup);
-          ("__const", data_sect_align_log2, S_REGULAR, const_section_fixup);
-          ("__bss", data_sect_align_log2, S_REGULAR, bss_section_fixup);
+          ("__data", data_sect_align_log2, [], S_REGULAR, data_section_fixup);
+          ("__const", data_sect_align_log2, [], S_REGULAR, const_section_fixup);
+          ("__bss", data_sect_align_log2, [], S_REGULAR, bss_section_fixup);
           ("__nl_symbol_ptr", data_sect_align_log2,
-           S_NON_LAZY_SYMBOL_POINTERS, nl_symbol_ptr_section_fixup)
+           [], S_NON_LAZY_SYMBOL_POINTERS, nl_symbol_ptr_section_fixup)
+        |];
+
+      macho_segment_command "__DWARF" dwarf_segment_fixup
+        [VM_PROT_READ]
+        [VM_PROT_READ]
+        [|
+          ("__debug_info", data_sect_align_log2, [], S_REGULAR, dwarf.Dwarf.debug_info_fixup);
+          ("__debug_abbrev", data_sect_align_log2, [], S_REGULAR, dwarf.Dwarf.debug_abbrev_fixup);
         |];
 
       macho_segment_command "__LINKEDIT" linkedit_segment_fixup
@@ -895,6 +944,13 @@ let emit_file
      |])
   in
 
+  let dwarf_segment = def_aligned seg_align dwarf_segment_fixup
+    (SEQ [|
+       debug_info_section;
+       debug_abbrev_section;
+     |])
+  in
+
   let linkedit_segment = def_aligned seg_align linkedit_segment_fixup
     (SEQ [|
        symtab;
@@ -908,6 +964,7 @@ let emit_file
       zero_segment;
       text_segment;
       data_segment;
+      dwarf_segment;
       linkedit_segment;
     |]
   in
