@@ -1421,12 +1421,12 @@ attempt_transmission(rust_rt *rt,
 }
 
 extern "C" CDECL void
-upcall_send(rust_proc *src, rust_port *port, void *sptr)
+upcall_send(rust_proc *proc, rust_port *port, void *sptr)
 {
-    rust_rt *rt = src->rt;
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall send(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
-            (uintptr_t)src,
+            (uintptr_t)proc,
             (uintptr_t)port);
 
     rust_chan *chan = NULL;
@@ -1440,16 +1440,16 @@ upcall_send(rust_proc *src, rust_port *port, void *sptr)
     rt->log(LOG_MEM|LOG_COMM,
             "send to port", (uintptr_t)port);
 
-    I(rt, src);
+    I(rt, proc);
     I(rt, port);
     I(rt, sptr);
-    HASH_FIND(hh, src->chans, port, sizeof(rust_port*), chan);
+    HASH_FIND(hh, proc->chans, port, sizeof(rust_port*), chan);
     if (!chan) {
-        chan = new (rt) rust_chan(src, port);
-        HASH_ADD(hh, src->chans, port, sizeof(rust_port*), chan);
+        chan = new (rt) rust_chan(proc, port);
+        HASH_ADD(hh, proc->chans, port, sizeof(rust_port*), chan);
     }
     I(rt, chan);
-    I(rt, chan->blocked == src || !chan->blocked);
+    I(rt, chan->blocked == proc || !chan->blocked);
     I(rt, chan->port);
     I(rt, chan->port == port);
 
@@ -1458,9 +1458,9 @@ upcall_send(rust_proc *src, rust_port *port, void *sptr)
             (uintptr_t)chan);
 
     if (port->proc) {
-        chan->blocked = src;
+        chan->blocked = proc;
         chan->buf.push(sptr);
-        proc_state_transition(rt, src,
+        proc_state_transition(rt, proc,
                               proc_state_running,
                               proc_state_blocked_writing);
         attempt_transmission(rt, chan, port->proc);
@@ -1473,8 +1473,8 @@ upcall_send(rust_proc *src, rust_port *port, void *sptr)
                 "port has no proc (possibly throw?)");
     }
 
-    if (src->state != proc_state_running)
-        src->yield(3);
+    if (proc->state != proc_state_running)
+        proc->yield(3);
 }
 
 extern "C" CDECL void
