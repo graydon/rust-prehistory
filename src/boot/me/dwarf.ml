@@ -751,6 +751,22 @@ let (abbrev_base_type:abbrev) =
    |])
 ;;
 
+let (abbrev_alias_slot:abbrev) =
+  (DW_TAG_reference_type, DW_CHILDREN_no,
+   [|
+     (DW_AT_type, DW_FORM_ref_addr);
+     (DW_AT_mutable, DW_FORM_flag);
+   |])
+;;
+
+let (abbrev_exterior_slot:abbrev) =
+  (DW_TAG_reference_type, DW_CHILDREN_no,
+   [|
+     (DW_AT_type, DW_FORM_ref_addr);
+     (DW_AT_data_location, DW_FORM_block1);
+   |])
+;;
+
 let (abbrev_rec_type:abbrev) =
     (DW_TAG_structure_type, DW_CHILDREN_yes,
      [|
@@ -859,7 +875,54 @@ let dwarf_visitor
   (* Type DIEs. *)
 
   let (emitted_types:(Ast.ty, Asm.frag) Hashtbl.t) = Hashtbl.create 0 in
-  let rec get_type
+  let (emitted_slots:(Ast.slot, Asm.frag) Hashtbl.t) = Hashtbl.create 0 in
+
+  let rec ref_slot_die
+      (slot:Ast.slot)
+      : frag =
+    if Hashtbl.mem emitted_slots slot
+    then Hashtbl.find emitted_slots slot
+    else
+      let ref_addr_for_fix fix =
+        let res = dw_form_ref_addr fix in
+          Hashtbl.add emitted_slots slot res;
+          res
+      in
+    let alias_slot mut =
+      let fix = new_fixup "alias DIE" in
+        emit_die (DEF (fix, SEQ [|
+                         uleb (get_abbrev_code abbrev_alias_slot);
+                         (* DW_AT_type: DW_FORM_ref_addr *)
+                         (ref_type_die (slot_ty slot));
+                         (* DW_AT_mutable: DW_FORM_flag *)
+                         BYTE (if mut then 1 else 0)
+                       |]));
+        ref_addr_for_fix fix
+    in
+      match slot.Ast.slot_mode with
+          Ast.MODE_exterior _ ->
+            let fix = new_fixup "exterior DIE" in
+              emit_die (DEF (fix, SEQ [|
+                               uleb (get_abbrev_code abbrev_exterior_slot);
+                               (* DW_AT_type: DW_FORM_ref_addr *)
+                               (ref_type_die (slot_ty slot));
+                               (* DW_AT_data_location: DW_FORM_block1 *)
+                               (* This is a DWARF expression for moving
+                                  from the address of an exterior
+                                  allocation to the address of its
+                                  body. *)
+                               dw_form_block1 [| DW_OP_push_object_address;
+                                                 DW_OP_lit (word_sz_int
+                                                            * Abi.exterior_rc_slot_field_body);
+                                                 DW_OP_plus;
+                                                 DW_OP_deref |]
+                             |]));
+              ref_addr_for_fix fix
+      | Ast.MODE_interior _ -> ref_type_die (slot_ty slot)
+      | Ast.MODE_read_alias _ -> alias_slot false
+      | Ast.MODE_write_alias _ -> alias_slot true
+
+  and ref_type_die
       (ty:Ast.ty)
       : frag =
     (* Returns a DW_FORM_ref_addr to the type. *)
@@ -871,7 +934,6 @@ let dwarf_visitor
           Hashtbl.add emitted_types ty res;
           res
       in
-
       let record trec =
         let total_layout = layout_ty abi 0L (Ast.TY_rec trec) in
         let fix = new_fixup "record type DIE" in
@@ -890,7 +952,7 @@ let dwarf_visitor
                             (* DW_AT_name: DW_FORM_string *)
                             ZSTRING ident;
                             (* DW_AT_type: DW_FORM_ref_addr *)
-                            (get_type (slot_ty slot));
+                            (ref_slot_die slot);
                             (* DW_AT_mutable: DW_FORM_flag *)
                             BYTE (if slot_is_mutable slot then 1 else 0);
                             (* DW_AT_data_member_location: DW_FORM_data4 *)
@@ -1127,7 +1189,7 @@ let dwarf_visitor
   in
 
   let visit_ty_pre (ty:Ast.ty) : unit =
-    ignore (get_type ty);
+    ignore (ref_type_die ty);
     inner.Walk.visit_ty_pre ty
   in
 
