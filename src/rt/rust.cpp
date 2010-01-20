@@ -66,6 +66,14 @@ static uint32_t const LOG_RT =        0x20;
 static uint32_t const LOG_ULOG =      0x40;
 static uint32_t const LOG_TRACE =     0x80;
 
+#ifdef __GNUC__
+#define LOG_UPCALL_RETPC(rt)                                            \
+    (rt)->log(LOG_MEM, "upcall retpc: 0x%" PRIxPTR,                     \
+              __builtin_return_address(0))
+#else
+#define LOG_UPCALL_RETPC(rt) ((void)0)
+#endif
+
 static uint32_t
 get_logbits()
 {
@@ -740,6 +748,8 @@ align_down(uintptr_t sp)
 extern "C" void
 upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
 {
+    LOG_UPCALL_RETPC(proc->rt);
+
     /*
      *  We have a stack like this:
      *
@@ -962,7 +972,17 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
             "run_after_return: overwriting retpc=0x%" PRIxPTR
             " @ runtime_sp=0x%" PRIxPTR
             " with glue=0x%" PRIxPTR,
-            *retpc, retpc, glue);
+            *retpc, sp, glue);
+
+    // Debugging aid for finding off-by-ones.
+    /*
+    for (int i = -4; i < 4; ++i) {
+        uintptr_t *spp = (uintptr_t*)sp;
+        rt->log(LOG_MEM,
+                "sp[%d] (0x%" PRIxPTR ") = 0x%" PRIxPTR,
+                i, spp+i, spp[i]);
+    }
+    */
 
     // Move the current return address (which points into rust code) onto the rust
     // stack and pretend we just called into yield_glue.
@@ -1097,6 +1117,7 @@ proc_state_transition(rust_rt *rt,
 extern "C" CDECL void
 upcall_del_proc(rust_proc *proc)
 {
+    LOG_UPCALL_RETPC(proc->rt);
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL,
             "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
@@ -1292,48 +1313,48 @@ extern "C" CDECL char const *str_buf(rust_proc *proc, rust_str *s);
 extern "C" CDECL void
 upcall_log_int(rust_proc *proc, int32_t i)
 {
-    rust_rt *rt = proc->rt;
-    rt->log(LOG_UPCALL|LOG_ULOG,
-            "upcall log_int(0x%" PRIx32 " = %" PRId32 " = '%c')",
-            i, i, (char)i);
+    LOG_UPCALL_RETPC(proc->rt);
+    proc->rt->log(LOG_UPCALL|LOG_ULOG,
+                  "upcall log_int(0x%" PRIx32 " = %" PRId32 " = '%c')",
+                  i, i, (char)i);
 }
 
 extern "C" CDECL void
 upcall_log_str(rust_proc *proc, rust_str *str)
 {
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_RETPC(proc->rt);
     const char *c = str_buf(proc, str);
-    rt->log(LOG_UPCALL|LOG_ULOG,
-            "upcall log_str(\"%s\")",
-            c);
+    proc->rt->log(LOG_UPCALL|LOG_ULOG,
+                  "upcall log_str(\"%s\")",
+                  c);
 }
 
 extern "C" CDECL void
 upcall_trace_word(rust_proc *proc, uintptr_t i)
 {
-    rust_rt *rt = proc->rt;
-    rt->log(LOG_UPCALL|LOG_TRACE,
-            "trace: 0x%" PRIxPTR "",
-            i, i, (char)i);
+    LOG_UPCALL_RETPC(proc->rt);
+    proc->rt->log(LOG_UPCALL|LOG_TRACE,
+                  "trace: 0x%" PRIxPTR "",
+                  i, i, (char)i);
 }
 
 extern "C" CDECL void
 upcall_trace_str(rust_proc *proc, char const *c)
 {
-    rust_rt *rt = proc->rt;
-    rt->log(LOG_UPCALL|LOG_TRACE,
-            "trace: %s",
-            c);
+    LOG_UPCALL_RETPC(proc->rt);
+    proc->rt->log(LOG_UPCALL|LOG_TRACE,
+                  "trace: %s",
+                  c);
 }
 
 extern "C" CDECL rust_port*
 upcall_new_port(rust_proc *proc, size_t unit_sz)
 {
-    rust_rt *rt = proc->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-            "upcall_new_port(proc=0x%" PRIxPTR ", unit_sz=%d)",
-            (uintptr_t)proc, unit_sz);
-    rust_port *port = new (rt) rust_port(proc, unit_sz);
+    LOG_UPCALL_RETPC(proc->rt);
+    proc->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+                  "upcall_new_port(proc=0x%" PRIxPTR ", unit_sz=%d)",
+                  (uintptr_t)proc, unit_sz);
+    rust_port *port = new (proc->rt) rust_port(proc, unit_sz);
     port->live_refcnt = 1;
     return port;
 }
@@ -1341,12 +1362,15 @@ upcall_new_port(rust_proc *proc, size_t unit_sz)
 extern "C" CDECL void
 upcall_del_port(rust_proc *proc, rust_port *port)
 {
-    rust_rt *rt = proc->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-            "upcall del_port(0x%" PRIxPTR "), live refcnt=%d, weak refcnt=%d",
-            (uintptr_t)port, port->live_refcnt, port->weak_refcnt);
+    LOG_UPCALL_RETPC(proc->rt);
+    proc->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+                  "upcall del_port(0x%" PRIxPTR
+                  "), live refcnt=%d, weak refcnt=%d",
+                  (uintptr_t)port, port->live_refcnt,
+                  port->weak_refcnt);
 
-    I(rt, port->live_refcnt == 0 || port->weak_refcnt == 0);
+    I(proc->rt, port->live_refcnt == 0 ||
+      port->weak_refcnt == 0);
 
     if (port->live_refcnt == 0 &&
         port->weak_refcnt == 0) {
@@ -1429,6 +1453,7 @@ extern "C" CDECL void
 upcall_send(rust_proc *proc, rust_port *port, void *sptr)
 {
     rust_rt *rt = proc->rt;
+    LOG_UPCALL_RETPC(rt);
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall send(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
             (uintptr_t)proc,
@@ -1486,6 +1511,7 @@ extern "C" CDECL void
 upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
 {
     rust_rt *rt = proc->rt;
+    LOG_UPCALL_RETPC(rt);
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall recv(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
             (uintptr_t)proc,
@@ -1526,15 +1552,17 @@ extern "C" CDECL void
 upcall_fail(rust_proc *proc, rust_proc *failee,
             char const *expr, char const *file, size_t line)
 {
-    rust_rt *rt = proc->rt;
-    rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
-            expr, file, line);
+    LOG_UPCALL_RETPC(proc->rt);
+    proc->rt->log(LOG_UPCALL, "upcall fail proc=0x%" PRIxPTR ", '%s', %s:%" PRIdPTR,
+                  failee, expr, file, line);
     failee->fail(5);
 }
 
 extern "C" CDECL void
 upcall_exit(rust_proc *proc)
 {
+    LOG_UPCALL_RETPC(proc->rt);
+    proc->rt->log(LOG_UPCALL, "upcall exit proc=0x%" PRIxPTR, proc);
     proc->state = proc_state_blocked_exited;
     proc->yield(1);
 }
@@ -1542,11 +1570,11 @@ upcall_exit(rust_proc *proc)
 extern "C" CDECL uintptr_t
 upcall_malloc(rust_proc *proc, size_t nbytes)
 {
-    rust_rt *rt = proc->rt;
-    void *p = rt->malloc(nbytes);
-    rt->log(LOG_UPCALL|LOG_MEM,
-            "upcall malloc(%u) = 0x%" PRIxPTR,
-            nbytes, (uintptr_t)p);
+    LOG_UPCALL_RETPC(proc->rt);
+    void *p = proc->rt->malloc(nbytes);
+    proc->rt->log(LOG_UPCALL|LOG_MEM,
+                  "upcall malloc(%u) = 0x%" PRIxPTR,
+                  nbytes, (uintptr_t)p);
     return (uintptr_t) p;
 }
 
@@ -1554,6 +1582,7 @@ extern "C" CDECL void
 upcall_free(rust_proc *proc, void* ptr)
 {
     rust_rt *rt = proc->rt;
+    LOG_UPCALL_RETPC(rt);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall free(0x%" PRIxPTR ")",
             (uintptr_t)ptr);
@@ -1580,6 +1609,7 @@ extern "C" CDECL rust_str*
 upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 {
     rust_rt *rt = proc->rt;
+    LOG_UPCALL_RETPC(rt);
     size_t alloc = next_power_of_two(fill);
     rust_str *st = (rust_str*) rt->malloc(sizeof(rust_str) + alloc);
     st->refcnt = 1;
@@ -1651,6 +1681,7 @@ extern "C" CDECL rust_proc*
 upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     rust_rt *rt = spawner->rt;
+    LOG_UPCALL_RETPC(rt);
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
          "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
          exit_proc_glue, spawnee_fn, callsz);
@@ -1663,6 +1694,7 @@ extern "C" CDECL rust_proc *
 upcall_new_thread(rust_proc *spawner, global_glue_fns *global_glue, uintptr_t spawnee_fn)
 {
     rust_rt *rt = spawner->rt;
+    LOG_UPCALL_RETPC(rt);
     rust_srv *srv = rt->srv;
     /*
      * The ticket is not bound to the current runtime, so allocate directly from the
