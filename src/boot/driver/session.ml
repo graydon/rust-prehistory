@@ -34,6 +34,7 @@ type sess =
   mutable sess_trace_drop: bool;
   mutable sess_trace_tag: bool;
   mutable sess_failed: bool;
+  mutable sess_emit_dwarf: bool;
   sess_spans: (node_id,span) Hashtbl.t;
 }
 ;;

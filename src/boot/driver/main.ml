@@ -48,6 +48,7 @@ let (sess:Session.sess) =
     Session.sess_trace_tag = false;
     Session.sess_failed = false;
     Session.sess_spans = Hashtbl.create 0;
+    Session.sess_emit_dwarf = false;
   }
 
 let argspecs =
@@ -93,6 +94,7 @@ let argspecs =
                           sess.Session.sess_trace_drop <- true;
                           sess.Session.sess_trace_tag <- true ),
      "emit all tracing code");
+    ("-dwarf", Arg.Unit (fun _ -> sess.Session.sess_emit_dwarf <- true), "emit DWARF info (default false)")
   ]
 ;;
 

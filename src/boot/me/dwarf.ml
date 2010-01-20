@@ -620,13 +620,6 @@ let dw_op_to_frag (abi:Abi.abi) (op:dw_op) : Asm.frag =
     | DW_OP_bit_piece (sz, off) -> SEQ [| BYTE 0x9d; ULEB128 sz; ULEB128 off |]
 ;;
 
-let dw_block1 (abi:Abi.abi) (ops:dw_op array) : Asm.frag =
-  let frag = SEQ (Array.map (dw_op_to_frag abi) ops) in
-  let block_fixup = new_fixup "DW_FORM_block1 fixup" in
-    SEQ [| WORD (TY_u8, F_SZ block_fixup);
-           DEF (block_fixup, frag) |]
-;;
-
 type dw_lns =
       DW_LNS_copy
     | DW_LNS_advance_pc
@@ -775,6 +768,18 @@ let dwarf_visitor
     (cu_frames:(frag list) ref)
     : Walk.visitor =
 
+  let (abi:Abi.abi) = cx.ctxt_abi in
+  let (word_sz:int64) = abi.Abi.abi_word_sz in
+  let (word_sz_int:int) = Int64.to_int word_sz in
+  let (word_bits:Il.bits) = abi.Abi.abi_word_bits in
+  let (word_ty_mach:ty_mach) =
+    match word_bits with
+        Il.Bits8 -> TY_u8
+      | Il.Bits16 -> TY_u16
+      | Il.Bits32 -> TY_u32
+      | Il.Bits64 -> TY_u64
+  in
+
   let path_name _ = Ast.fmt_to_str Ast.fmt_name (Walk.path_to_name path) in
 
   let (abbrev_table:(abbrev, int) Hashtbl.t) = Hashtbl.create 0 in
@@ -815,6 +820,64 @@ let dwarf_visitor
   let (curr_cu_line:(frag list) ref) = ref [] in
   let (curr_cu_frame:(frag list) ref) = ref [] in
 
+  let cu_info_fixup = new_fixup "CU debug_info fixup" in
+
+  let dw_form_block1 (ops:dw_op array) : Asm.frag =
+    let frag = SEQ (Array.map (dw_op_to_frag abi) ops) in
+    let block_fixup = new_fixup "DW_FORM_block1 fixup" in
+      SEQ [| WORD (TY_u8, F_SZ block_fixup);
+             DEF (block_fixup, frag) |]
+  in
+
+  let dw_form_ref_addr (fix:fixup) : Asm.frag =
+    WORD (word_ty_mach,
+          SUB ((M_POS fix), M_POS cu_info_fixup))
+  in
+
+
+  (* Type DIEs. *)
+
+  let (emitted_types:(Ast.ty, Asm.frag) Hashtbl.t) = Hashtbl.create 0 in
+  let get_type
+      (ty:Ast.ty)
+      : frag =
+    (* Returns a DW_FORM_ref_addr to the type. *)
+    if Hashtbl.mem emitted_types ty
+    then Hashtbl.find emitted_types ty
+    else
+      let base (name, encoding, byte_size) =
+        SEQ [|
+          uleb (get_abbrev_code abbrev_base_type);
+          (* DW_AT_name: DW_FORM_string *)
+          ZSTRING name;
+          (* DW_AT_encoding: DW_FORM_data1 *)
+          BYTE (dw_ate_to_int encoding);
+          (* DW_AT_byte_size: DW_FORM_data1 *)
+          BYTE byte_size
+        |]
+      in
+      let die =
+        match ty with
+            Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
+          | Ast.TY_mach (TY_u8)  -> base ("u8",  DW_ATE_unsigned, 1)
+          | Ast.TY_mach (TY_u16) -> base ("u16", DW_ATE_unsigned, 2)
+          | Ast.TY_mach (TY_u32) -> base ("u32", DW_ATE_unsigned, 4)
+          | Ast.TY_mach (TY_u64) -> base ("u64", DW_ATE_unsigned, 8)
+          | Ast.TY_mach (TY_s8)  -> base ("s8",  DW_ATE_signed, 1)
+          | Ast.TY_mach (TY_s16) -> base ("s16", DW_ATE_signed, 2)
+          | Ast.TY_mach (TY_s32) -> base ("s32", DW_ATE_signed, 4)
+          | Ast.TY_mach (TY_s64) -> base ("s64", DW_ATE_signed, 8)
+          | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
+          | Ast.TY_int -> base ("int", DW_ATE_signed, word_sz_int)
+          | _ -> MARK
+      in
+      let fix = new_fixup "type DIE" in
+      let res = dw_form_ref_addr fix in
+        prepend curr_cu_infos (DEF (fix, die));
+        Hashtbl.add emitted_types ty res;
+        res
+  in
+
   let finish_cu_and_compose_headers _ =
 
     let pubnames_header_and_curr_pubnames =
@@ -825,7 +888,6 @@ let dwarf_visitor
       SEQ [| (BYTE 0) |]
     in
 
-    let cu_info_fixup = new_fixup "CU debug_info fixup" in
     let info_header_fixup = new_fixup "CU debug_info header" in
     let info_header_and_curr_infos =
       SEQ
@@ -929,13 +991,13 @@ let dwarf_visitor
          (* DW_AT_high_pc *)
          WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))));
          (* DW_AT_frame_base *)
-         dw_block1 cx.ctxt_abi [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |];
+         dw_form_block1 [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |];
          (* DW_AT_return_addr *)
          (* 
           * NB: we are fixing fp[0] as the return address here; as in frame.ml,
           * it's not considered 'part of the per-arch ABI'. This might be wrong. 
           *)
-         dw_block1 cx.ctxt_abi [| DW_OP_fbreg (Asm.IMM 0L); |]
+         dw_form_block1 [| DW_OP_fbreg (Asm.IMM 0L); |]
        |])
     in
       prepend curr_cu_infos subprogram_die
@@ -1011,38 +1073,9 @@ let dwarf_visitor
     inner.Walk.visit_slot_identified_pre s
   in
 
-
   let visit_ty_pre (ty:Ast.ty) : unit =
-    let base (name, encoding, byte_size) =
-      let abbrev_code = get_abbrev_code abbrev_base_type in
-      let type_die =
-        SEQ [|
-          uleb abbrev_code;
-          (* DW_AT_name: DW_FORM_string *)
-          ZSTRING name;
-          (* DW_AT_encoding: DW_FORM_data1 *)
-          BYTE (dw_ate_to_int encoding);
-          (* DW_AT_byte_size: DW_FORM_data1 *)
-          BYTE byte_size
-        |]
-      in
-        prepend curr_cu_infos type_die
-    in
-      begin
-        match ty with
-            Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
-          | Ast.TY_mach (TY_u8)  -> base ("u8",  DW_ATE_unsigned, 1)
-          | Ast.TY_mach (TY_u16) -> base ("u16", DW_ATE_unsigned, 2)
-          | Ast.TY_mach (TY_u32) -> base ("u32", DW_ATE_unsigned, 4)
-          | Ast.TY_mach (TY_u64) -> base ("u64", DW_ATE_unsigned, 8)
-          | Ast.TY_mach (TY_s8)  -> base ("s8",  DW_ATE_signed, 1)
-          | Ast.TY_mach (TY_s16) -> base ("s16", DW_ATE_signed, 2)
-          | Ast.TY_mach (TY_s32) -> base ("s32", DW_ATE_signed, 4)
-          | Ast.TY_mach (TY_s64) -> base ("s64", DW_ATE_signed, 8)
-          | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
-          | _ -> ()
-      end;
-      inner.Walk.visit_ty_pre ty
+    ignore (get_type ty);
+    inner.Walk.visit_ty_pre ty
   in
 
     { inner with
@@ -1086,7 +1119,8 @@ let process_crate
   in
 
     log cx "emitting DWARF records";
-    run_passes cx path passes (log cx "%s") crate;
+    if cx.ctxt_sess.Session.sess_emit_dwarf
+    then run_passes cx path passes (log cx "%s") crate;
     {
       debug_aranges = SEQ (Array.of_list (List.rev (!cu_aranges)));
       debug_pubnames = SEQ (Array.of_list (List.rev (!cu_pubnames)));
