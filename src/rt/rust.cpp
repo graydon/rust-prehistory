@@ -881,8 +881,6 @@ rust_proc::rust_proc(rust_rt *rt,
     // Copy args from spawner to spawnee.
     if (spawner)  {
         uintptr_t *src = (uintptr_t*) spawner->rust_sp;
-        src += 1;                  // was at upcall-retpc
-        src += n_callee_saves;     // proc_to_c_glue-saves
         src += 1;                  // spawn-call output slot
         src += 1;                  // spawn-call proc slot
         // Memcpy all but the proc and output pointers
