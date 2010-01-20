@@ -959,7 +959,7 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
     uintptr_t sp = runtime_sp;
 
     // The compiler reserves nargs + 1 word for oldsp on the stack and then aligns it
-    sp = align_down(sp - (nargs + 1) * sizeof(uintptr_t));
+    sp = align_down(sp - nargs * sizeof(uintptr_t));
 
     uintptr_t *retpc = ((uintptr_t *) sp) - 1;
 
