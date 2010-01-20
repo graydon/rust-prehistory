@@ -48,21 +48,24 @@ let (sess:Session.sess) =
     Session.sess_trace_tag = false;
     Session.sess_failed = false;
     Session.sess_spans = Hashtbl.create 0;
-    Session.sess_emit_dwarf = false;
+    (* FIXME: For the time being, our dwarf output appears to do more
+       harm than good on OSX.  On other platforms it's the other way
+       around. Ancient OSX gdb perhaps?  *)
+    Session.sess_emit_dwarf = (not (targ = MacOS_x86_macho));
   }
 
 let argspecs =
   [
     ("-t", Arg.Symbol (["linux-x86-elf"; "win32-x86-pe"; "macos-x86-macho"],
                        fun s -> (sess.Session.sess_targ <-
-                                  (match s with
-                                       "win32-x86-pe" -> Win32_x86_pe
-                                     | "macos-x86-macho" -> MacOS_x86_macho
-                                     | _ -> Linux_x86_elf))),
+                                   (match s with
+                                        "win32-x86-pe" -> Win32_x86_pe
+                                      | "macos-x86-macho" -> MacOS_x86_macho
+                                      | _ -> Linux_x86_elf))),
      ("target (default: " ^ (match sess.Session.sess_targ with
-                                        Win32_x86_pe -> "win32-x86-pe"
-                                      | Linux_x86_elf -> "linux-x86-elf"
-                                      | MacOS_x86_macho -> "macos-x86-macho"
+                                 Win32_x86_pe -> "win32-x86-pe"
+                               | Linux_x86_elf -> "linux-x86-elf"
+                               | MacOS_x86_macho -> "macos-x86-macho"
                             ) ^ ")"));
     ("-o", Arg.String (fun s -> sess.Session.sess_out <- s),
      "output filename (default: " ^ sess.Session.sess_out ^ ")");
