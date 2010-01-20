@@ -1,3 +1,5 @@
+// -*- C -*-
+
 fn main() -> () {
     let u32 word = u32(200000);
     word = word - u32(1);
