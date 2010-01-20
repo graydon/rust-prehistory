@@ -237,6 +237,7 @@ struct rust_rt {
     ptr_vec<rust_proc> dead_procs;
     randctx rctx;
     rust_proc *root_proc;
+    rust_proc *curr_proc;
     rust_port *ports;
 
     void activate(rust_proc *proc);
@@ -362,9 +363,16 @@ struct rust_proc {
 
     uintptr_t* dptr; /* rendezvous pointer for send/recv */
 
+    void check_active() { I(rt, rt->curr_proc == this); }
+    void check_suspended() { I(rt, rt->curr_proc != this); }
+
     // Swap in some glue code to run when we have returned to the
-    // proc's context.
+    // proc's context (assuming we're the active proc).
     void run_after_return(size_t nargs, uintptr_t glue);
+
+    // Swap in some glue code to run when we're next activated
+    // (assuming we're the suspended proc).
+    void run_on_resume(uintptr_t glue);
 
     // Save callee-saved registers and return to the main loop.
     void yield(size_t nargs);
@@ -971,6 +979,9 @@ rust_proc::~rust_proc()
 void
 rust_proc::run_after_return(size_t nargs, uintptr_t glue)
 {
+    // This is only safe to call if we're the currently-running proc.
+    check_active();
+
     uintptr_t sp = runtime_sp;
 
     // The compiler reserves nargs + 1 word for oldsp on the stack and then aligns it
@@ -994,10 +1005,27 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
     */
 
     // Move the current return address (which points into rust code) onto the rust
-    // stack and pretend we just called into yield_glue.
+    // stack and pretend we just called into the glue.
     rust_sp -= sizeof(uintptr_t);
     *(uintptr_t *)rust_sp = *retpc;
     *retpc = glue;
+}
+
+void
+rust_proc::run_on_resume(uintptr_t glue)
+{
+    // This is only safe to call if we're suspended.
+    check_suspended();
+
+    // Inject glue as resume address in the suspended frame.
+    uintptr_t* rsp = (uintptr_t*) rust_sp;
+    rsp += n_callee_saves;
+    rt->log(LOG_PROC|LOG_MEM,
+            "run_on_resume: overwriting retpc=0x%" PRIxPTR
+            " @ rust_sp=0x%" PRIxPTR
+            " with glue=0x%" PRIxPTR,
+            *rsp, rsp, glue);
+    *rsp = glue;
 }
 
 void
@@ -1035,7 +1063,8 @@ rust_proc::kill() {
     proc_state_transition(rt, this, state,
                           proc_state_failing);
     rt->log(LOG_PROC,
-            "proc 0x%" PRIxPTR " killed", this);
+            "killing proc 0x%" PRIxPTR, this);
+    run_on_resume(rt->global_glue->unwind_glue);
 }
 
 void
@@ -1168,6 +1197,7 @@ rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_alloc
     blocked_procs(this),
     dead_procs(this),
     root_proc(NULL),
+    curr_proc(NULL),
     ports(NULL)
 {
     logptr("new rt", (uintptr_t)this);
@@ -1215,7 +1245,9 @@ rust_rt::~rust_rt() {
 
 void
 rust_rt::activate(rust_proc *proc) {
+    curr_proc = proc;
     global_glue->c_to_proc_glue(proc);
+    curr_proc = NULL;
 }
 
 void
