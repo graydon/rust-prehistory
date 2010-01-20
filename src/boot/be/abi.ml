@@ -83,9 +83,9 @@ type abi =
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 
-    abi_emit_native_call: (Il.emitter -> nabi -> Common.fixup -> Il.cell -> Il.operand array -> unit);
+    abi_emit_native_call: (Il.emitter -> Il.cell -> nabi -> Common.fixup -> Il.operand array -> unit);
     abi_emit_native_void_call: (Il.emitter -> nabi -> Common.fixup -> Il.operand array -> unit);
-    abi_emit_native_thunk: (Il.emitter -> nabi -> Common.fixup -> Il.cell -> Il.operand array -> unit);
+    abi_emit_native_call_in_thunk: (Il.emitter -> Il.cell -> nabi -> Common.fixup -> Il.operand array -> unit);
 
     (* Global glue. *)
     abi_c_to_proc: (Il.emitter -> unit);

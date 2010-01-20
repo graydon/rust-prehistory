@@ -927,13 +927,13 @@ let trans_visitor
         "exited block";
 
   and trans_native_thunk (nabi:Abi.nabi) (lib:import_lib) (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_native_thunk (emitter()) nabi (Semant.import cx lib name) ret args;
+    abi.Abi.abi_emit_native_call_in_thunk (emitter()) ret nabi (Semant.import cx lib name) args;
 
   and upcall_fixup (name:string) : fixup =
     Semant.import cx LIB_rustrt name;
 
   and trans_upcall (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
-    abi.Abi.abi_emit_native_call (emitter()) nabi_rust (upcall_fixup name) ret args;
+    abi.Abi.abi_emit_native_call (emitter()) ret nabi_rust (upcall_fixup name) args;
 
   and trans_void_upcall (name:string) (args:Il.operand array) : unit =
     abi.Abi.abi_emit_native_void_call (emitter()) nabi_rust (upcall_fixup name) args;

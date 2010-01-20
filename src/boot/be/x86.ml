@@ -355,8 +355,10 @@ let frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;;
 let implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;;
 
 let emit_c_call
-    (ret:Il.cell)
     (e:Il.emitter)
+    (ret:Il.cell)
+    (tmp1:Il.reg)
+    (tmp2:Il.reg)
     (nabi:Abi.nabi)
     (fn:fixup)
     (args:Il.operand array)
@@ -373,34 +375,32 @@ let emit_c_call
     else args
   in
   let nargs = Array.length args in
-  let frame_sz = Int64.mul (Int64.of_int (nargs + 1)) word_sz     (* args + oldsp                 *)
+  let arg_sz = Int64.mul (Int64.of_int (nargs + 1)) word_sz       (* args + oldsp                 *)
   in
 
-    mov (rc eax) (c proc_ptr);                                    (* eax = proc from argv[-1]     *)
-    mov (rc eax) (c (word_n (h eax) Abi.proc_field_runtime_sp));  (* eax = proc->runtime_sp       *)
+    mov (r tmp1) (c proc_ptr);                                    (* tmp1 = proc from argv[-1]    *)
+    mov (r tmp2) (c (word_n tmp1 Abi.proc_field_runtime_sp));     (* tmp2 = proc->runtime_sp      *)
 
-    xchg (rc eax) (ro esp);                                       (* newsp <-> oldsp              *)
-    binary Il.SUB (rc esp) frame_sz;                              (* make room on the stack and   *)
+    xchg (r tmp2) (ro esp);                                       (* newsp <-> oldsp              *)
+    binary Il.SUB (rc esp) arg_sz;                                (* make room on the stack and   *)
     binary Il.AND (rc esp) 0xfffffffffffffff0L;                   (* and 16-byte align sp         *)
 
     let oldsp_save = word_n (h esp) nargs
     in
 
-      mov oldsp_save (ro eax);                                    (* newsp[nargs] = oldsp         *)
+      mov oldsp_save (c (r tmp2));                                (* newsp[nargs] = oldsp         *)
 
       Array.iteri (fun i (arg:Il.operand) ->                      (* write arguments onto C stack *)
                      match arg with
-                         Il.Cell (Il.Addr (a, _)) ->
+                         Il.Cell (Il.Addr (a, ty)) ->
                            begin
                              match a with
                                  Il.Based (Il.Hreg base, off) when base == esp ->
-                                   mov (rc eax) (c (Il.Addr (Il.Based (h eax, off), Il.ScalarTy (Il.ValTy word_bits))));
-                                   mov (word_n (h esp) i) (ro eax);
-                                   mov (rc eax) (c oldsp_save)    (* restore oldsp into eax       *)
+                                   mov (r tmp1) (c (Il.Addr (Il.Based (tmp2, off), ty)));
+                                   mov (word_n (h esp) i) (c (r tmp1));
                                | _ ->
-                                   mov (rc eax) arg;
-                                   mov (word_n (h esp) i) (ro eax);
-                                   mov (rc eax) (c oldsp_save)    (* restore oldsp into eax       *)
+                                   mov (r tmp1) arg;
+                                   mov (word_n (h esp) i) (c (r tmp1));
                            end
                        | _ ->
                            mov (word_n (h esp) i) arg)
@@ -412,7 +412,7 @@ let emit_c_call
         else Il.Pcrel (fn, None)
       in
 
-        emit (Il.call (rc eax) (Il.CodeAddr addr));
+        emit (Il.call (r tmp1) (Il.CodeAddr addr));
         mov (rc esp) (c oldsp_save);                              (* switch back original stack   *)
 
         (*
@@ -420,18 +420,20 @@ let emit_c_call
          * slot, because ret might be sp-relative.
          *)
 
-        mov ret (ro eax)                                          (* write return value           *)
+        mov ret (c (r tmp1))                                       (* write return value           *)
 ;;
 
 let emit_native_call
     (e:Il.emitter)
+    (ret:Il.cell)
     (nabi:Abi.nabi)
     (fn:fixup)
-    (ret:Il.cell)
     (args:Il.operand array)
     : unit =
 
-  emit_c_call ret e nabi fn args
+  let (tmp1, _) = vreg e in
+  let (tmp2, _) = vreg e in
+    emit_c_call e ret tmp1 tmp2 nabi fn args
 ;;
 
 let emit_native_void_call
@@ -441,7 +443,8 @@ let emit_native_void_call
     (args:Il.operand array)
     : unit =
 
-  emit_native_call e nabi fn (rc eax) args
+  let (ret, _) = vreg e in
+    emit_native_call e (r ret) nabi fn args
 ;;
 
 let emit_void_upcall
@@ -451,21 +454,21 @@ let emit_void_upcall
     (args:Il.operand array)
     : unit =
 
-    emit_native_void_call e nabi fn args
+  emit_native_void_call e nabi fn args
 ;;
 
-let emit_native_thunk
+let emit_native_call_in_thunk
     (e:Il.emitter)
+    (ret:Il.cell)
     (nabi:Abi.nabi)
     (fn:fixup)
-    (ret:Il.cell)
     (args:Il.operand array)
     : unit =
 
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    emit_c_call (rc eax) e nabi fn args;
+    emit_c_call e (rc eax) (h edx) (h ecx) nabi fn args;
 
     match ret with
         Il.Reg (r, _) -> mov (word_at r) (ro eax)
@@ -514,15 +517,14 @@ let unwind_glue
     mark skip_jmp_fix;
     mov (rc edx) (c (fp_n 3));                      (* load next fp (callee-saves[3]) *)
     emit (Il.cmp (ro edx) (immi 0L));
-    emit (Il.jmp Il.JE (codefix exit_jmp_fix));     (* if nonzero               *)
-    mov (rc ebp) (ro edx);                          (* move to next frame       *)
-    emit (Il.jmp Il.JMP (codefix repeat_jmp_fix));  (* loop                     *)
+    emit (Il.jmp Il.JE (codefix exit_jmp_fix));     (* if nonzero                     *)
+    mov (rc ebp) (ro edx);                          (* move to next frame             *)
+    emit (Il.jmp Il.JMP (codefix repeat_jmp_fix));  (* loop                           *)
 
     (* exit path. *)
     mark exit_jmp_fix;
-    mov (rc eax) (c proc_ptr);
 
-    emit_void_upcall e nabi del_proc_fixup [| (ro eax) |];
+    emit_native_call_in_thunk e (rc eax) nabi del_proc_fixup [| (c proc_ptr) |];
 ;;
 
 
@@ -820,7 +822,7 @@ let (abi:Abi.abi) =
 
     Abi.abi_emit_native_call = emit_native_call;
     Abi.abi_emit_native_void_call = emit_native_void_call;
-    Abi.abi_emit_native_thunk = emit_native_thunk;
+    Abi.abi_emit_native_call_in_thunk = emit_native_call_in_thunk;
     Abi.abi_c_to_proc = c_to_proc_glue;
     Abi.abi_yield = yield_glue;
     Abi.abi_unwind = unwind_glue;
