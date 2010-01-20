@@ -374,34 +374,28 @@ let emit_c_call
     else args
   in
   let nargs = Array.length args in
-  let arg_sz = Int64.mul (Int64.of_int (nargs + 1)) word_sz       (* args + oldsp                 *)
+  let arg_sz = Int64.mul (Int64.of_int nargs) word_sz
   in
 
     mov (r tmp1) (c proc_ptr);                                    (* tmp1 = proc from argv[-1]    *)
-    mov (r tmp2) (c (word_n tmp1 Abi.proc_field_runtime_sp));     (* tmp2 = proc->runtime_sp      *)
-
-    mov (r tmp1) (ro esp);                                        (* tmp1 = oldsp                 *)
-    mov (rc esp) (c (r tmp2));                                    (* esp = newsp                  *)
+    mov (r tmp2) (ro esp);                                        (* tmp2 = esp                   *)
+    mov (word_n tmp1 Abi.proc_field_rust_sp) (c (r tmp2));        (* proc->rust_sp = tmp2         *)
+    mov (rc esp) (c (word_n tmp1 Abi.proc_field_runtime_sp));     (* esp = proc->runtime_sp       *)
 
     binary Il.SUB (rc esp) arg_sz;                                (* make room on the stack and   *)
     binary Il.AND (rc esp) 0xfffffffffffffff0L;                   (* and 16-byte align sp         *)
 
-    let oldsp_save = word_n (h esp) nargs
-    in
-
-      mov oldsp_save (c (r tmp1));                                (* newsp[nargs] = oldsp         *)
-
-      Array.iteri (fun i (arg:Il.operand) ->                      (* write arguments onto C stack *)
+    Array.iteri (fun i (arg:Il.operand) ->                        (* write arguments onto C stack *)
                      match arg with
                          Il.Cell (Il.Addr (a, ty)) ->
                            begin
                              match a with
                                  Il.Based (Il.Hreg base, off) when base == esp ->
-                                   mov (r tmp2) (c (Il.Addr (Il.Based (tmp1, off), ty)));
-                                   mov (word_n (h esp) i) (c (r tmp2));
+                                   mov (r tmp1) (c (Il.Addr (Il.Based (tmp2, off), ty)));
+                                   mov (word_n (h esp) i) (c (r tmp1));
                                | _ ->
-                                   mov (r tmp2) arg;
-                                   mov (word_n (h esp) i) (c (r tmp2));
+                                   mov (r tmp1) arg;
+                                   mov (word_n (h esp) i) (c (r tmp1));
                            end
                        | _ ->
                            mov (word_n (h esp) i) arg)
@@ -417,11 +411,13 @@ let emit_c_call
               Il.Addr (Il.Based (Il.Hreg base, _), _) when base == esp ->
                 (* If ret is esp-relative, use a temporary register until we switched stacks. *)
                 emit (Il.call (r tmp1) (Il.CodeAddr addr));
-                mov (rc esp) (c oldsp_save);
+                mov (r tmp2) (c proc_ptr);
+                mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
                 mov ret (c (r tmp1));
             | _ ->
                 emit (Il.call ret (Il.CodeAddr addr));
-                mov (rc esp) (c oldsp_save);
+                mov (r tmp2) (c proc_ptr);
+                mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
         end
 ;;
 

@@ -963,12 +963,10 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
     // The compiler reserves nargs + 1 word for oldsp on the stack and then aligns it
     sp = align_down(sp - (nargs + 1) * sizeof(uintptr_t));
 
-    uintptr_t *oldsp = ((uintptr_t *) sp) + nargs;
     uintptr_t *retpc = ((uintptr_t *) sp) - 1;
 
     // Move the current return address (which points into rust code) onto the rust
     // stack and pretend we just called into yield_glue.
-    rust_sp = *oldsp;
     rust_sp -= sizeof(uintptr_t);
     *(uintptr_t *)rust_sp = *retpc;
     *retpc = glue;
