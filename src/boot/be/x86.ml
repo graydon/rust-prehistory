@@ -495,6 +495,9 @@ let unwind_glue
   let skip_jmp_fix = new_fixup "skip jump" in
   let exit_jmp_fix = new_fixup "exit jump" in
 
+    mov (rc edx) (c proc_ptr);                      (* switch back to rust stack    *)
+    mov (rc esp) (c (edx_n Abi.proc_field_rust_sp));
+
     mark repeat_jmp_fix;
     mov (rc edx) (c (fp_n (-1)));                   (* edx <- frame glue functions. *)
     emit (Il.cmp (ro edx) (immi 0L));
