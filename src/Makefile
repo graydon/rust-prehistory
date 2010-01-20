@@ -204,7 +204,6 @@ TEST_XFAILS := test/run-pass/many.rs \
                test/run-pass/linear-for-loop.rs \
                test/run-pass/fun-indirect-call.rs \
                test/run-pass/bind-trivial.rs \
-               $(wildcard test/run-fail/*.rs) \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 

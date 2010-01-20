@@ -1615,7 +1615,7 @@ extern "C" CDECL void
 upcall_fail(rust_proc *proc, char const *expr, char const *file, size_t line)
 {
     LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
+    proc->rt->log(LOG_UPCALL|LOG_ERR, "upcall fail '%s', %s:%" PRIdPTR,
                   expr, file, line);
     proc->fail(4);
 }
