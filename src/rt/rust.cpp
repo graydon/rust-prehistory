@@ -1102,6 +1102,7 @@ upcall_del_proc(rust_proc *proc)
             proc, proc->refcnt);
     proc_state_transition(rt, proc, proc->state,
                           proc_state_dead);
+    proc->yield(1);
 }
 
 /* Runtime */
