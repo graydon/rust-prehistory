@@ -67,11 +67,16 @@ static uint32_t const LOG_ULOG =      0x40;
 static uint32_t const LOG_TRACE =     0x80;
 
 #ifdef __GNUC__
-#define LOG_UPCALL_RETPC(rt)                                            \
-    (rt)->log(LOG_MEM, "upcall retpc: 0x%" PRIxPTR,                     \
-              __builtin_return_address(0))
+#define LOG_UPCALL_ENTRY(proc)                                          \
+    (proc)->rt->log(LOG_UPCALL,                                         \
+                    "upcall proc: 0x%" PRIxPTR                          \
+                    " retpc: 0x%" PRIxPTR,                              \
+                    (proc), __builtin_return_address(0))
 #else
-#define LOG_UPCALL_RETPC(rt) ((void)0)
+#define LOG_UPCALL_ENTRY(rt) ((void)0)                                  \
+    (proc)->rt->log(LOG_UPCALL,                                         \
+                    "upcall proc: 0x%" PRIxPTR                          \
+                    (proc))
 #endif
 
 static uint32_t
@@ -364,6 +369,10 @@ struct rust_proc {
     // Save callee-saved registers and return to the main loop.
     void yield(size_t nargs);
 
+    // Fail this proc (assuming caller-on-stack is different proc).
+    void kill();
+
+    // Fail self, assuming caller-on-stack is this proc.
     void fail(size_t nargs);
 
     uintptr_t get_fp();
@@ -748,7 +757,7 @@ align_down(uintptr_t sp)
 extern "C" void
 upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
 
     /*
      *  We have a stack like this:
@@ -1019,7 +1028,19 @@ proc_state_transition(rust_rt *rt,
                       proc_state_t dst);
 
 void
+rust_proc::kill() {
+    // Note the distinction here: kill() is when you're in an upcall
+    // from process A and want to force-fail process B, you do B->kill().
+    // If you want to fail yourself you do self->fail(upcall_nargs).
+    proc_state_transition(rt, this, state,
+                          proc_state_failing);
+    rt->log(LOG_PROC,
+            "proc 0x%" PRIxPTR " killed", this);
+}
+
+void
 rust_proc::fail(size_t nargs) {
+    // See note in ::kill() regarding who should call this.
     proc_state_transition(rt, this, state,
                           proc_state_failing);
     rt->log(LOG_PROC,
@@ -1117,7 +1138,7 @@ proc_state_transition(rust_rt *rt,
 extern "C" CDECL void
 upcall_del_proc(rust_proc *proc)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL,
             "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
@@ -1313,7 +1334,7 @@ extern "C" CDECL char const *str_buf(rust_proc *proc, rust_str *s);
 extern "C" CDECL void
 upcall_log_int(rust_proc *proc, int32_t i)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
     proc->rt->log(LOG_UPCALL|LOG_ULOG,
                   "upcall log_int(0x%" PRIx32 " = %" PRId32 " = '%c')",
                   i, i, (char)i);
@@ -1322,7 +1343,7 @@ upcall_log_int(rust_proc *proc, int32_t i)
 extern "C" CDECL void
 upcall_log_str(rust_proc *proc, rust_str *str)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
     const char *c = str_buf(proc, str);
     proc->rt->log(LOG_UPCALL|LOG_ULOG,
                   "upcall log_str(\"%s\")",
@@ -1332,7 +1353,7 @@ upcall_log_str(rust_proc *proc, rust_str *str)
 extern "C" CDECL void
 upcall_trace_word(rust_proc *proc, uintptr_t i)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
     proc->rt->log(LOG_UPCALL|LOG_TRACE,
                   "trace: 0x%" PRIxPTR "",
                   i, i, (char)i);
@@ -1341,7 +1362,7 @@ upcall_trace_word(rust_proc *proc, uintptr_t i)
 extern "C" CDECL void
 upcall_trace_str(rust_proc *proc, char const *c)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
     proc->rt->log(LOG_UPCALL|LOG_TRACE,
                   "trace: %s",
                   c);
@@ -1350,7 +1371,7 @@ upcall_trace_str(rust_proc *proc, char const *c)
 extern "C" CDECL rust_port*
 upcall_new_port(rust_proc *proc, size_t unit_sz)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
     proc->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
                   "upcall_new_port(proc=0x%" PRIxPTR ", unit_sz=%d)",
                   (uintptr_t)proc, unit_sz);
@@ -1362,7 +1383,7 @@ upcall_new_port(rust_proc *proc, size_t unit_sz)
 extern "C" CDECL void
 upcall_del_port(rust_proc *proc, rust_port *port)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
     proc->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
                   "upcall del_port(0x%" PRIxPTR
                   "), live refcnt=%d, weak refcnt=%d",
@@ -1452,12 +1473,12 @@ attempt_transmission(rust_rt *rt,
 extern "C" CDECL void
 upcall_send(rust_proc *proc, rust_port *port, void *sptr)
 {
+    LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
-    LOG_UPCALL_RETPC(rt);
     rt->log(LOG_UPCALL|LOG_COMM,
-            "upcall send(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
-            (uintptr_t)proc,
-            (uintptr_t)port);
+            "upcall send(port=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
+            (uintptr_t)port,
+            (uintptr_t)sptr);
 
     rust_chan *chan = NULL;
 
@@ -1510,11 +1531,11 @@ upcall_send(rust_proc *proc, rust_port *port, void *sptr)
 extern "C" CDECL void
 upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
 {
+    LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
-    LOG_UPCALL_RETPC(rt);
     rt->log(LOG_UPCALL|LOG_COMM,
-            "upcall recv(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
-            (uintptr_t)proc,
+            "upcall recv(dptr=0x" PRIxPTR ", port=0x%" PRIxPTR ")",
+            (uintptr_t)dptr,
             (uintptr_t)port);
 
     I(rt, port);
@@ -1549,20 +1570,27 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
 }
 
 extern "C" CDECL void
-upcall_fail(rust_proc *proc, rust_proc *failee,
-            char const *expr, char const *file, size_t line)
+upcall_fail(rust_proc *proc, char const *expr, char const *file, size_t line)
 {
-    LOG_UPCALL_RETPC(proc->rt);
-    proc->rt->log(LOG_UPCALL, "upcall fail proc=0x%" PRIxPTR ", '%s', %s:%" PRIdPTR,
-                  failee, expr, file, line);
-    failee->fail(5);
+    LOG_UPCALL_ENTRY(proc);
+    proc->rt->log(LOG_UPCALL, "upcall fail '%s', %s:%" PRIdPTR,
+                  expr, file, line);
+    proc->fail(4);
+}
+
+extern "C" CDECL void
+upcall_kill(rust_proc *proc, rust_proc *target)
+{
+    LOG_UPCALL_ENTRY(proc);
+    proc->rt->log(LOG_UPCALL, "upcall kill target=0x%" PRIxPTR, target);
+    target->kill();
 }
 
 extern "C" CDECL void
 upcall_exit(rust_proc *proc)
 {
-    LOG_UPCALL_RETPC(proc->rt);
-    proc->rt->log(LOG_UPCALL, "upcall exit proc=0x%" PRIxPTR, proc);
+    LOG_UPCALL_ENTRY(proc);
+    proc->rt->log(LOG_UPCALL, "upcall exit()");
     proc->state = proc_state_blocked_exited;
     proc->yield(1);
 }
@@ -1570,7 +1598,7 @@ upcall_exit(rust_proc *proc)
 extern "C" CDECL uintptr_t
 upcall_malloc(rust_proc *proc, size_t nbytes)
 {
-    LOG_UPCALL_RETPC(proc->rt);
+    LOG_UPCALL_ENTRY(proc);
     void *p = proc->rt->malloc(nbytes);
     proc->rt->log(LOG_UPCALL|LOG_MEM,
                   "upcall malloc(%u) = 0x%" PRIxPTR,
@@ -1581,8 +1609,8 @@ upcall_malloc(rust_proc *proc, size_t nbytes)
 extern "C" CDECL void
 upcall_free(rust_proc *proc, void* ptr)
 {
+    LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
-    LOG_UPCALL_RETPC(rt);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall free(0x%" PRIxPTR ")",
             (uintptr_t)ptr);
@@ -1608,8 +1636,8 @@ next_power_of_two(size_t s)
 extern "C" CDECL rust_str*
 upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 {
+    LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
-    LOG_UPCALL_RETPC(rt);
     size_t alloc = next_power_of_two(fill);
     rust_str *st = (rust_str*) rt->malloc(sizeof(rust_str) + alloc);
     st->refcnt = 1;
@@ -1618,7 +1646,7 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
     if (s)
         memcpy(&st->data[0], s, fill);
     rt->log(LOG_UPCALL|LOG_MEM,
-            "upcall new_str('%s', %" PRIdPTR ") -> 0x%" PRIxPTR,
+            "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
             s, fill, st);
     return st;
 }
@@ -1680,8 +1708,8 @@ static void *rust_thread_start(void *ptr)
 extern "C" CDECL rust_proc*
 upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
+    LOG_UPCALL_ENTRY(spawner);
     rust_rt *rt = spawner->rt;
-    LOG_UPCALL_RETPC(rt);
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
          "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
          exit_proc_glue, spawnee_fn, callsz);
@@ -1693,8 +1721,8 @@ upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_
 extern "C" CDECL rust_proc *
 upcall_new_thread(rust_proc *spawner, global_glue_fns *global_glue, uintptr_t spawnee_fn)
 {
+    LOG_UPCALL_ENTRY(spawner);
     rust_rt *rt = spawner->rt;
-    LOG_UPCALL_RETPC(rt);
     rust_srv *srv = rt->srv;
     /*
      * The ticket is not bound to the current runtime, so allocate directly from the

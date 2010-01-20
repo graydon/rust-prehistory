@@ -989,7 +989,6 @@ let trans_visitor
       iflog (fun _ -> annotate ("condition-fail: " ^ str));
       trans_void_upcall "upcall_fail"
         [|
-          Il.Cell abi.Abi.abi_pp_cell;
           trans_static_string str;
           trans_static_string filename;
           imm (Int64.of_int line)
@@ -1035,8 +1034,8 @@ let trans_visitor
   and trans_del_port (port:Il.cell) : unit =
     trans_void_upcall "upcall_del_port" [| Il.Cell port |]
 
-  and trans_del_proc (proc:Il.cell) : unit =
-    trans_void_upcall "upcall_del_proc" [| Il.Cell proc |]
+  and trans_kill_proc (proc:Il.cell) : unit =
+    trans_void_upcall "upcall_kill" [| Il.Cell proc |]
 
   (*
    * A vec is implicitly exterior: every slot vec[T] is 1 word and
@@ -1260,7 +1259,7 @@ let trans_visitor
     match ty with
         Ast.TY_port _ -> trans_del_port cell
       | Ast.TY_chan _ -> trans_del_port cell
-      | Ast.TY_proc -> trans_del_proc cell
+      | Ast.TY_proc -> trans_kill_proc cell
       | _ -> trans_free cell
 
   and maybe_iso
