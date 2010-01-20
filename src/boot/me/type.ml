@@ -20,7 +20,7 @@ let type_check_visitor
   let visit_stmt_pre_full (s:Ast.stmt) : unit =
     begin
       match s.node with
-          Ast.STMT_copy (lval,expr) ->
+          Ast.STMT_copy (lval, expr, _) ->
             check_ty_eq (lval_ty cx lval) (expr_type cx expr)
 
         | Ast.STMT_init_str (lval, _) ->

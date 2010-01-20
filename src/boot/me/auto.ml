@@ -114,7 +114,7 @@ let auto_inference_visitor
   and visit_stmt_pre_full (s:Ast.stmt) =
     begin
       match s.node with
-          Ast.STMT_copy (lval,expr) ->
+          Ast.STMT_copy (lval,expr,_) ->
             ignore (unify_lval (unify_expr None expr) lval);
             ignore (unify_expr (unify_lval None lval) expr);
 

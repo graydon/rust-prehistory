@@ -207,7 +207,7 @@ let constr_id_assigning_visitor
               note_keys precond;
               note_keys postcond
 
-        | Ast.STMT_copy (dst, src) ->
+        | Ast.STMT_copy (dst, src, _) ->
             let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               note_keys precond;
@@ -319,7 +319,7 @@ let condition_assigning_visitor
             let postcond = Array.map resolve_constr_to_key constrs in
               raise_postcondition s.id postcond
 
-        | Ast.STMT_copy (dst, src) ->
+        | Ast.STMT_copy (dst, src, _) ->
             let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               raise_precondition s.id precond;
@@ -711,7 +711,7 @@ let lifecycle_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-          Ast.STMT_copy (lv_dst, _)
+          Ast.STMT_copy (lv_dst, _, _)
         | Ast.STMT_call (lv_dst, _, _)
         | Ast.STMT_recv (lv_dst, _) ->
             let prestate = Hashtbl.find cx.ctxt_prestates s.id in

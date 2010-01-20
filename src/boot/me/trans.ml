@@ -366,6 +366,17 @@ let trans_visitor
       List.iter (fun block -> iter_block_slots block fn) blocks
   in
 
+  let binop_to_jmpop (binop:Ast.binop) : Il.jmpop =
+    match binop with
+        Ast.BINOP_eq -> Il.JE
+      | Ast.BINOP_ne -> Il.JNE
+      | Ast.BINOP_lt -> Il.JL
+      | Ast.BINOP_le -> Il.JLE
+      | Ast.BINOP_ge -> Il.JGE
+      | Ast.BINOP_gt -> Il.JG
+      | _ -> bug () "Unhandled binop in binop_to_jmpop"
+  in
+
   let rec trans_lval_ext
       (base_ty:Ast.ty)
       (base_addr:Il.addr)
@@ -794,16 +805,7 @@ let trans_visitor
         Ast.EXPR_binary (binop, a, b) ->
           let lhs = trans_atom a in
           let rhs = trans_atom b in
-          let cjmp =
-            match binop with
-                Ast.BINOP_eq -> Il.JE
-              | Ast.BINOP_ne -> Il.JNE
-              | Ast.BINOP_lt -> Il.JL
-              | Ast.BINOP_le -> Il.JLE
-              | Ast.BINOP_ge -> Il.JGE
-              | Ast.BINOP_gt -> Il.JG
-              | _ -> bug () "Unhandled binop of expr in trans_cond"
-          in
+          let cjmp = binop_to_jmpop binop in
           let cjmp' =
             if invert then
               match cjmp with
@@ -826,6 +828,40 @@ let trans_visitor
             trans_compare Il.JNE bool_operand
               (if invert then imm_true else imm_false)
 
+  and trans_binary
+      (binop:Ast.binop)
+      (lhs:Il.operand)
+      (rhs:Il.operand) : Il.operand =
+    let arith op =
+      let size = Il.operand_size lhs word_bits in
+      let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy size) in
+        emit (Il.binary op dst lhs rhs);
+        Il.Cell dst
+    in
+    match binop with
+        Ast.BINOP_or -> arith Il.OR
+      | Ast.BINOP_and -> arith Il.AND
+
+      | Ast.BINOP_lsl -> arith Il.LSL
+      | Ast.BINOP_lsr -> arith Il.LSR
+      | Ast.BINOP_asr -> arith Il.ASR
+
+      | Ast.BINOP_add -> arith Il.ADD
+      | Ast.BINOP_sub -> arith Il.SUB
+
+      (* FIXME: switch on type of operands, IMUL/IDIV/IMOD etc. *)
+      | Ast.BINOP_mul -> arith Il.UMUL
+      | Ast.BINOP_div -> arith Il.UDIV
+      | Ast.BINOP_mod -> arith Il.UMOD
+
+      | _ -> let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
+          mov dst imm_true;
+          let jmps = trans_compare (binop_to_jmpop binop) lhs rhs in
+            mov dst imm_false;
+            List.iter patch jmps;
+            Il.Cell dst
+
+
   and trans_expr (expr:Ast.expr) : Il.operand =
 
     let anno _ =
@@ -840,43 +876,7 @@ let trans_visitor
     match expr with
 
         Ast.EXPR_binary (binop, a, b) ->
-          let arith op =
-            let lhs = trans_atom a in
-            let rhs = trans_atom b in
-            let size = Il.operand_size lhs word_bits in
-            let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy size) in
-              anno ();
-              emit (Il.binary op dst lhs rhs);
-              Il.Cell dst
-          in
-            begin
-              match binop with
-                  Ast.BINOP_or -> arith Il.OR
-                | Ast.BINOP_and -> arith Il.AND
-
-                | Ast.BINOP_lsl -> arith Il.LSL
-                | Ast.BINOP_lsr -> arith Il.LSR
-                | Ast.BINOP_asr -> arith Il.ASR
-
-                | Ast.BINOP_add -> arith Il.ADD
-                | Ast.BINOP_sub -> arith Il.SUB
-
-                (* FIXME: switch on type of operands, IMUL/IDIV/IMOD etc. *)
-                | Ast.BINOP_mul -> arith Il.UMUL
-                | Ast.BINOP_div -> arith Il.UDIV
-                | Ast.BINOP_mod -> arith Il.UMOD
-
-                | _ ->
-                    (* FIXME: this has to change when we support other mach types. *)
-                    let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
-                      begin
-                        mov dst imm_true;
-                        let jmps = trans_cond false expr in
-                          mov dst imm_false;
-                          List.iter patch jmps;
-                          Il.Cell dst
-                      end
-            end
+          trans_binary binop (trans_atom a) (trans_atom b)
 
       | Ast.EXPR_unary (unop, a) ->
           let src = trans_atom a in
@@ -1730,32 +1730,41 @@ let trans_visitor
   and trans_copy
       (initialising:bool)
       (dst:Ast.lval)
-      (src:Ast.expr) : unit =
+      (src:Ast.expr)
+      (binop_opt:Ast.binop option) : unit =
     let dst_intent =
       if initialising
       then INTENT_init
       else INTENT_write
     in
-    match src with
-        (Ast.EXPR_binary _)
-      | (Ast.EXPR_unary _)
-      | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
-          (* 
-           * Translations of these expr types yield vregs, 
-           * so copy is just MOV into the lval. 
-           *)
-          let (dst_cell, dst_slot) = trans_lval dst dst_intent in
-          let src_operand = trans_expr src in
-            mov (deref_slot dst_cell dst_slot INTENT_read) src_operand
+    let (dst_cell, dst_slot) = trans_lval dst dst_intent in
+    match binop_opt with
+        None ->
+          begin
+            match src with
+                (Ast.EXPR_binary _)
+              | (Ast.EXPR_unary _)
+              | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
+                  (*
+                   * Translations of these expr types yield vregs,
+                   * so copy is just MOV into the lval.
+                   *)
+                  let src_operand = trans_expr src in
+                    mov (deref_slot dst_cell dst_slot INTENT_read) src_operand
 
-      | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
-          (* Possibly-large structure copying *)
-          let (dst_cell, dst_slot) = trans_lval dst dst_intent in
-          let (src_cell, src_slot) = trans_lval src_lval INTENT_read in
-            trans_copy_slot
-              initialising
-              dst_cell dst_slot
-              src_cell src_slot
+              | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
+                  (* Possibly-large structure copying *)
+                  let (src_cell, src_slot) = trans_lval src_lval INTENT_read in
+                    trans_copy_slot
+                      initialising
+                      dst_cell dst_slot
+                      src_cell src_slot
+          end
+      | Some binop ->
+          ignore (trans_binary binop
+            (Il.Cell (deref_slot dst_cell dst_slot INTENT_read))
+            (trans_expr src));
+          ()
 
 
   and trans_init_structural_from_atoms
@@ -2002,8 +2011,8 @@ let trans_visitor
       | Ast.STMT_recv (dst, chan) ->
           trans_recv (maybe_init stmt.id "recv" dst) dst chan
 
-      | Ast.STMT_copy (dst, e_src) ->
-          trans_copy (maybe_init stmt.id "copy" dst) dst e_src
+      | Ast.STMT_copy (dst, e_src, binop_opt) ->
+          trans_copy (maybe_init stmt.id "copy" dst) dst e_src binop_opt
 
       | Ast.STMT_call (dst, flv, args) ->
           trans_call_fn (maybe_init stmt.id "call" dst) dst flv args

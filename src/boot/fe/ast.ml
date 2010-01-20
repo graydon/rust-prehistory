@@ -208,7 +208,7 @@ and stmt' =
   | STMT_init_str of (lval * string)
   | STMT_init_port of lval
   | STMT_init_chan of (lval * (lval option))
-  | STMT_copy of (lval * expr)
+  | STMT_copy of (lval * expr * (binop option))
   | STMT_call of (lval * lval * (atom array))
   | STMT_bind of (lval * lval * ((atom option) array))
   | STMT_recv of (lval * lval)
@@ -897,8 +897,13 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
 
       | STMT_block b -> fmt_block ff b.node
 
-      | STMT_copy (lv, ex) ->
+      | STMT_copy (lv, ex, binop_opt) ->
           fmt_lval ff lv;
+          begin
+            match binop_opt with
+                None -> fmt ff " = "
+              | Some binop -> fmt_binop ff binop
+          end;
           fmt ff " = ";
           fmt_expr ff ex;
           fmt ff ";"

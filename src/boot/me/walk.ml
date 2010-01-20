@@ -502,7 +502,7 @@ and walk_stmt
       | Ast.STMT_block b ->
           walk_block v b
 
-      | Ast.STMT_copy (lv,e) ->
+      | Ast.STMT_copy (lv,e,_) ->
           walk_lval v lv;
           walk_expr v e
 

@@ -109,6 +109,17 @@ rule token = parse
 | '_' (dec as n)               { IDX (int_of_string n) }
 | '}'                          { RBRACE     }
 
+| "+="                         { OPEQ (PLUS) }
+| "-="                         { OPEQ (MINUS) }
+| "*="                         { OPEQ (STAR) }
+| "/="                         { OPEQ (SLASH) }
+| "%="                         { OPEQ (PERCENT) }
+| "&="                         { OPEQ (AND) }
+| "|="                         { OPEQ (OR)  }
+| "<<="                        { OPEQ (LSL) }
+| ">>="                        { OPEQ (LSR) }
+| ">>>="                       { OPEQ (ASR) }
+
 | '#'                          { POUND      }
 | '@'                          { AT         }
 | '^'                          { CARET      }
