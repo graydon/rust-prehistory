@@ -977,6 +977,17 @@ rust_proc::~rust_proc()
 }
 
 void
+push_onto_thread_stack(uintptr_t &sp, uintptr_t value)
+{
+    asm("xchgl %0, %%esp\n"
+        "push %2\n"
+        "xchgl %0, %%esp\n"
+        : "=r" (sp)
+        : "0" (sp), "r" (value)
+        : "eax");
+}
+
+void
 rust_proc::run_after_return(size_t nargs, uintptr_t glue)
 {
     // This is only safe to call if we're the currently-running proc.
@@ -1006,8 +1017,7 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
 
     // Move the current return address (which points into rust code) onto the rust
     // stack and pretend we just called into the glue.
-    rust_sp -= sizeof(uintptr_t);
-    *(uintptr_t *)rust_sp = *retpc;
+    push_onto_thread_stack(rust_sp, *retpc);
     *retpc = glue;
 }
 
