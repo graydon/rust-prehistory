@@ -751,6 +751,24 @@ let (abbrev_base_type:abbrev) =
    |])
 ;;
 
+let (abbrev_rec_type:abbrev) =
+    (DW_TAG_structure_type, DW_CHILDREN_yes,
+     [|
+       (DW_AT_byte_size, DW_FORM_data4)
+     |])
+;;
+
+let (abbrev_rec_type_member:abbrev) =
+    (DW_TAG_member, DW_CHILDREN_no,
+     [|
+       (DW_AT_name, DW_FORM_string);
+       (DW_AT_type, DW_FORM_ref_addr);
+       (DW_AT_mutable, DW_FORM_flag);
+       (DW_AT_data_member_location, DW_FORM_data4);
+       (DW_AT_byte_size, DW_FORM_data4)
+     |])
+;;
+
 
 let prepend lref x = lref := x :: (!lref)
 ;;
@@ -845,18 +863,27 @@ let dwarf_visitor
     if Hashtbl.mem emitted_types ty
     then Hashtbl.find emitted_types ty
     else
-      let base (name, encoding, byte_size) =
-        SEQ [|
-          uleb (get_abbrev_code abbrev_base_type);
-          (* DW_AT_name: DW_FORM_string *)
-          ZSTRING name;
-          (* DW_AT_encoding: DW_FORM_data1 *)
-          BYTE (dw_ate_to_int encoding);
-          (* DW_AT_byte_size: DW_FORM_data1 *)
-          BYTE byte_size
-        |]
+      let ref_addr_for_fix fix =
+        let res = dw_form_ref_addr fix in
+          Hashtbl.add emitted_types ty res;
+          res
       in
-      let die =
+      let base (name, encoding, byte_size) =
+        let fix = new_fixup ("base type DIE: " ^ name) in
+        let die =
+          DEF (fix, SEQ [|
+                 uleb (get_abbrev_code abbrev_base_type);
+                 (* DW_AT_name: DW_FORM_string *)
+                 ZSTRING name;
+                 (* DW_AT_encoding: DW_FORM_data1 *)
+                 BYTE (dw_ate_to_int encoding);
+                 (* DW_AT_byte_size: DW_FORM_data1 *)
+                 BYTE byte_size
+               |])
+        in
+          prepend curr_cu_infos die;
+          ref_addr_for_fix fix
+      in
         match ty with
             Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
           | Ast.TY_mach (TY_u8)  -> base ("u8",  DW_ATE_unsigned, 1)
@@ -870,12 +897,6 @@ let dwarf_visitor
           | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
           | Ast.TY_int -> base ("int", DW_ATE_signed, word_sz_int)
           | _ -> MARK
-      in
-      let fix = new_fixup "type DIE" in
-      let res = dw_form_ref_addr fix in
-        prepend curr_cu_infos (DEF (fix, die));
-        Hashtbl.add emitted_types ty res;
-        res
   in
 
   let finish_cu_and_compose_headers _ =
