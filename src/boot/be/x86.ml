@@ -397,11 +397,11 @@ let emit_c_call
                            begin
                              match a with
                                  Il.Based (Il.Hreg base, off) when base == esp ->
-                                   mov (r tmp1) (c (Il.Addr (Il.Based (tmp2, off), ty)));
-                                   mov (word_n (h esp) i) (c (r tmp1));
+                                   mov (r tmp2) (c (Il.Addr (Il.Based (tmp1, off), ty)));
+                                   mov (word_n (h esp) i) (c (r tmp2));
                                | _ ->
-                                   mov (r tmp1) arg;
-                                   mov (word_n (h esp) i) (c (r tmp1));
+                                   mov (r tmp2) arg;
+                                   mov (word_n (h esp) i) (c (r tmp2));
                            end
                        | _ ->
                            mov (word_n (h esp) i) arg)
