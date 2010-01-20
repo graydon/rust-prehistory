@@ -366,7 +366,6 @@ let emit_c_call
 
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let xchg dst src = emit (Il.xchg dst src) in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
 
   let args =                                                      (* rust calls get proc as arg0  *)
@@ -381,14 +380,16 @@ let emit_c_call
     mov (r tmp1) (c proc_ptr);                                    (* tmp1 = proc from argv[-1]    *)
     mov (r tmp2) (c (word_n tmp1 Abi.proc_field_runtime_sp));     (* tmp2 = proc->runtime_sp      *)
 
-    xchg (r tmp2) (ro esp);                                       (* newsp <-> oldsp              *)
+    mov (r tmp1) (ro esp);                                        (* tmp1 = oldsp                 *)
+    mov (rc esp) (c (r tmp2));                                    (* esp = newsp                  *)
+
     binary Il.SUB (rc esp) arg_sz;                                (* make room on the stack and   *)
     binary Il.AND (rc esp) 0xfffffffffffffff0L;                   (* and 16-byte align sp         *)
 
     let oldsp_save = word_n (h esp) nargs
     in
 
-      mov oldsp_save (c (r tmp2));                                (* newsp[nargs] = oldsp         *)
+      mov oldsp_save (c (r tmp1));                                (* newsp[nargs] = oldsp         *)
 
       Array.iteri (fun i (arg:Il.operand) ->                      (* write arguments onto C stack *)
                      match arg with
@@ -411,16 +412,17 @@ let emit_c_call
         then (Il.Abs (Asm.M_POS fn))
         else Il.Pcrel (fn, None)
       in
-
-        emit (Il.call (r tmp1) (Il.CodeAddr addr));
-        mov (rc esp) (c oldsp_save);                              (* switch back original stack   *)
-
-        (*
-         * We have to wait until we have restored the original stack before we write to the output
-         * slot, because ret might be sp-relative.
-         *)
-
-        mov ret (c (r tmp1))                                       (* write return value           *)
+        begin
+          match ret with
+              Il.Addr (Il.Based (Il.Hreg base, _), _) when base == esp ->
+                (* If ret is esp-relative, use a temporary register until we switched stacks. *)
+                emit (Il.call (r tmp1) (Il.CodeAddr addr));
+                mov (rc esp) (c oldsp_save);
+                mov ret (c (r tmp1));
+            | _ ->
+                emit (Il.call ret (Il.CodeAddr addr));
+                mov (rc esp) (c oldsp_save);
+        end
 ;;
 
 let emit_native_call
@@ -1018,17 +1020,6 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
     | _ -> raise Unrecognized
 ;;
 
-let xchg (dst:Il.cell) (src:Il.operand) : Asm.frag =
-  match (dst, src) with
-
-      (* rm32 <- r32 *)
-      (_,  Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
-        when (is_r8 dst || is_rm32 dst) && is_ty32 src_ty ->
-          insn_rm_r 0x87 dst (reg r)
-
-    | _ -> raise Unrecognized
-;;
-
 let zero (dst:Il.cell) (count:Il.operand) : Asm.frag =
   match (dst, count) with
 
@@ -1248,7 +1239,6 @@ let select_insn (q:Il.quad) : Asm.frag =
             match u.Il.unary_op with
                 Il.UMOV -> mov false u.Il.unary_dst u.Il.unary_src
               | Il.IMOV -> mov true u.Il.unary_dst u.Il.unary_src
-              | Il.XCHG -> xchg u.Il.unary_dst u.Il.unary_src
               | Il.NEG -> unop slash3
               | Il.NOT -> unop slash2
               | Il.ZERO -> zero u.Il.unary_dst u.Il.unary_src

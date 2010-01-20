@@ -100,7 +100,7 @@ type binop =
 type unop =
     NEG | NOT
   | UMOV | IMOV
-  | XCHG | ZERO
+  | ZERO
 ;;
 
 type jmpop =
@@ -443,7 +443,6 @@ let string_of_unop (op:unop) : string =
     | NOT -> "not"
     | UMOV -> "umov"
     | IMOV -> "imov"
-    | XCHG -> "xchg"
     | ZERO -> "zero"
 ;;
 
@@ -626,10 +625,6 @@ let call (dst:cell) (targ:code) : quad' =
 
 let umov (dst:cell) (src:operand) : quad' =
   unary UMOV dst src
-;;
-
-let xchg (dst:cell) (src:operand) : quad' =
-  unary XCHG dst src
 ;;
 
 let zero (dst:cell) (count:operand) : quad' =
