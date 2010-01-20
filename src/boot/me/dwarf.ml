@@ -838,6 +838,8 @@ let dwarf_visitor
   let (curr_cu_line:(frag list) ref) = ref [] in
   let (curr_cu_frame:(frag list) ref) = ref [] in
 
+  let emit_die die = prepend curr_cu_infos die in
+  let emit_null_die _ = emit_die (BYTE 0) in
   let cu_info_fixup = new_fixup "CU debug_info fixup" in
 
   let dw_form_block1 (ops:dw_op array) : Asm.frag =
@@ -853,10 +855,11 @@ let dwarf_visitor
   in
 
 
+
   (* Type DIEs. *)
 
   let (emitted_types:(Ast.ty, Asm.frag) Hashtbl.t) = Hashtbl.create 0 in
-  let get_type
+  let rec get_type
       (ty:Ast.ty)
       : frag =
     (* Returns a DW_FORM_ref_addr to the type. *)
@@ -868,6 +871,38 @@ let dwarf_visitor
           Hashtbl.add emitted_types ty res;
           res
       in
+
+      let record trec =
+        let total_layout = layout_ty abi 0L (Ast.TY_rec trec) in
+        let fix = new_fixup "record type DIE" in
+        let die = DEF (fix, SEQ [|
+                         uleb (get_abbrev_code abbrev_rec_type);
+                         (* DW_AT_byte_size: DW_FORM_data4 *)
+                         WORD (TY_u32, IMM total_layout.layout_size)
+                       |]);
+        in
+          emit_die die;
+          Array.iter
+            begin
+              fun (ident, (slot, layout)) ->
+                emit_die (SEQ [|
+                            uleb (get_abbrev_code abbrev_rec_type_member);
+                            (* DW_AT_name: DW_FORM_string *)
+                            ZSTRING ident;
+                            (* DW_AT_type: DW_FORM_ref_addr *)
+                            (get_type (slot_ty slot));
+                            (* DW_AT_mutable: DW_FORM_flag *)
+                            BYTE (if slot_is_mutable slot then 1 else 0);
+                            (* DW_AT_data_member_location: DW_FORM_data4 *)
+                            WORD (TY_u32, IMM layout.layout_offset);
+                            (* DW_AT_byte_size: DW_FORM_data4 *)
+                            WORD (TY_u32, IMM layout.layout_size) |]);
+            end
+            (layout_rec abi trec);
+          emit_null_die ();
+          ref_addr_for_fix fix
+      in
+
       let base (name, encoding, byte_size) =
         let fix = new_fixup ("base type DIE: " ^ name) in
         let die =
@@ -881,7 +916,7 @@ let dwarf_visitor
                  BYTE byte_size
                |])
         in
-          prepend curr_cu_infos die;
+          emit_die die;
           ref_addr_for_fix fix
       in
         match ty with
@@ -896,6 +931,7 @@ let dwarf_visitor
           | Ast.TY_mach (TY_s64) -> base ("s64", DW_ATE_signed, 8)
           | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
           | Ast.TY_int -> base ("int", DW_ATE_signed, word_sz_int)
+          | Ast.TY_rec trec -> record trec
           | _ -> MARK
   in
 
@@ -994,10 +1030,6 @@ let dwarf_visitor
       curr_cu_line := []
   in
 
-  let emit_null_die _ =
-      prepend curr_cu_infos (BYTE 0)
-  in
-
   let emit_subprogram_die
       (fix:fixup)
       : unit =
@@ -1021,7 +1053,7 @@ let dwarf_visitor
          dw_form_block1 [| DW_OP_fbreg (Asm.IMM 0L); |]
        |])
     in
-      prepend curr_cu_infos subprogram_die
+      emit_die subprogram_die
   in
 
   let visit_mod_item_pre
@@ -1081,7 +1113,7 @@ let dwarf_visitor
          WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))));
       |]
     in
-      prepend curr_cu_infos block_die;
+      emit_die block_die;
       inner.Walk.visit_block_pre b
   in
 
