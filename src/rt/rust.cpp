@@ -952,16 +952,17 @@ rust_proc::~rust_proc()
 void
 rust_proc::run_after_return(size_t nargs, uintptr_t glue)
 {
-    rt->log(LOG_PROC,
-            "run_after_return -> glue==0x%" PRIxPTR,
-            glue);
-
     uintptr_t sp = runtime_sp;
 
     // The compiler reserves nargs + 1 word for oldsp on the stack and then aligns it
     sp = align_down(sp - nargs * sizeof(uintptr_t));
 
     uintptr_t *retpc = ((uintptr_t *) sp) - 1;
+    rt->log(LOG_PROC|LOG_MEM,
+            "run_after_return: overwriting retpc=0x%" PRIxPTR
+            " @ runtime_sp=0x%" PRIxPTR
+            " with glue=0x%" PRIxPTR,
+            *retpc, retpc, glue);
 
     // Move the current return address (which points into rust code) onto the rust
     // stack and pretend we just called into yield_glue.
@@ -973,6 +974,8 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
 void
 rust_proc::yield(size_t nargs)
 {
+    rt->log(LOG_PROC,
+            "proc 0x%" PRIxPTR " yielding", this);
     run_after_return(nargs, rt->global_glue->yield_glue);
 }
 
@@ -999,8 +1002,8 @@ void
 rust_proc::fail(size_t nargs) {
     proc_state_transition(rt, this, state,
                           proc_state_failing);
-    rt->log(LOG_MEM|LOG_PROC, "unwind-glue starts at 0x%" PRIxPTR,
-            rt->global_glue->unwind_glue);
+    rt->log(LOG_PROC,
+            "proc 0x%" PRIxPTR " failing", this);
     run_after_return(nargs, rt->global_glue->unwind_glue);
 }
 
@@ -1400,6 +1403,11 @@ attempt_transmission(rust_rt *rt,
     }
 
     uintptr_t *dptr = dst->dptr;
+    I(rt, src->port);
+    rt->log(LOG_COMM,
+            "receiving %d bytes into dst_proc=0x%" PRIxPTR
+            ", dptr=0x%" PRIxPTR,
+            src->port->unit_sz, dst, dptr);
     src->buf.shift(dptr);
 
     if (src->blocked) {
@@ -1703,53 +1711,53 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
             rt.log(LOG_PROC, "activating proc 0x%" PRIxPTR,
                    (uintptr_t)proc);
 
-            if (proc->state != proc_state_failing)
-                proc->state = proc_state_running;
+            if (proc->state == proc_state_running ||
+                proc->state == proc_state_failing) {
 
-            rt.activate(proc);
+                rt.activate(proc);
 
-            rt.log(LOG_PROC,
-                   "returned from proc 0x%" PRIxPTR " in state '%s'",
-                   (uintptr_t)proc, state_names[proc->state]);
-            /*
-              rt->log(LOG_MEM,
-              "sp:0x%" PRIxPTR ", "
-              "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
-              "stk->prev:0x%" PRIxPTR ", stk->next=0x%" PRIxPTR ", "
-              "prev_sp:0x%" PRIxPTR ", " "prev_fp:0x%" PRIxPTR,
-              proc->rust_sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
-              proc->stk->prev, proc->stk->next,
-              proc->stk->prev_sp, proc->stk->prev_fp);
-            */
-            I(&rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
-            I(&rt, proc->rust_sp < proc->stk->limit);
+                rt.log(LOG_PROC,
+                       "returned from proc 0x%" PRIxPTR " in state '%s'",
+                       (uintptr_t)proc, state_names[proc->state]);
+                /*
+                  rt->log(LOG_MEM,
+                  "sp:0x%" PRIxPTR ", "
+                  "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
+                  "stk->prev:0x%" PRIxPTR ", stk->next=0x%" PRIxPTR ", "
+                  "prev_sp:0x%" PRIxPTR ", " "prev_fp:0x%" PRIxPTR,
+                  proc->rust_sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
+                  proc->stk->prev, proc->stk->next,
+                  proc->stk->prev_sp, proc->stk->prev_fp);
+                */
+                I(&rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
+                I(&rt, proc->rust_sp < proc->stk->limit);
 
-            switch ((proc_state_t) proc->state) {
+                switch ((proc_state_t) proc->state) {
 
-            case proc_state_running:
-            case proc_state_failing:
-                break;
+                case proc_state_running:
+                case proc_state_failing:
+                    break;
 
-            case proc_state_blocked_exited:
-                /* When a proc exits *itself* we do not yet kill it; for
-                 * the time being we let it linger in the blocked-exiting
-                 * state, as someone else still "owns" it. */
-                proc->state = proc_state_running;
-                proc_state_transition(&rt, proc,
-                                      proc_state_running,
-                                      proc_state_blocked_exited);
-                break;
+                case proc_state_blocked_exited:
+                    /* When a proc exits *itself* we do not yet kill it; for
+                     * the time being we let it linger in the blocked-exiting
+                     * state, as someone else still "owns" it. */
+                    proc->state = proc_state_running;
+                    proc_state_transition(&rt, proc,
+                                          proc_state_running,
+                                          proc_state_blocked_exited);
+                    break;
 
-            case proc_state_blocked_reading:
-            case proc_state_blocked_writing:
-                break;
+                case proc_state_blocked_reading:
+                case proc_state_blocked_writing:
+                    break;
 
-            case proc_state_dead:
-                break;
+                case proc_state_dead:
+                    break;
+                }
+
+                rt.reap_dead_procs();
             }
-
-            rt.reap_dead_procs();
-
             proc = rt.sched();
         }
 
