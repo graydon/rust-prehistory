@@ -303,7 +303,7 @@ type pexp' =
   | PEXP_chan of (pexp option)
   | PEXP_binop of (Ast.binop * pexp * pexp)
   | PEXP_unop of (Ast.unop * pexp)
-  | PEXP_deref of plval
+  | PEXP_lval of plval
   | PEXP_lit of Ast.lit
   | PEXP_str of string
   | PEXP_mutable of pexp
@@ -339,6 +339,7 @@ and pexp = pexp' identified
 type pstate =
     { mutable pstate_peek : token;
       mutable pstate_ctxt : (string * pos) list;
+      mutable pstate_rstr : bool;
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
       pstate_file         : filename;
@@ -432,6 +433,15 @@ let ctxt (n:string) (f:pstate -> 'a) (ps:pstate) : 'a =
 ;;
 
 
+let rstr (r:bool) (f:pstate -> 'a) (ps:pstate) : 'a =
+  let prev = ps.pstate_rstr in
+    (ps.pstate_rstr <- r;
+     let res = f ps in
+       ps.pstate_rstr <- prev;
+       res)
+;;
+
+
 let peek (ps:pstate) : token =
   iflog ps
     begin
@@ -474,6 +484,16 @@ let err (str:string) (ps:pstate) =
 let unexpected (ps:pstate) =
   err ("Unexpected token '" ^ (string_of_tok (peek ps)) ^ "'") ps
 ;;
+
+
+(* enforces the restricted pexp grammar when applicable (e.g. after "bind") *)
+let check_rstr_start (ps:pstate) : 'a =
+  if (ps.pstate_rstr) then
+    match peek ps with
+        IDENT _ | LPAREN -> ()
+      | _ -> raise (unexpected ps)
+;;
+
 
 (* Simple helpers *)
 
@@ -923,10 +943,11 @@ and parse_lit (ps:pstate) : Ast.lit =
 
 
 and parse_bottom_pexp (ps:pstate) : pexp =
+  check_rstr_start ps;
   let apos = lexpos ps in
   match peek ps with
       LPAREN ->
-        let pexps = ctxt "paren pexps(s)" parse_pexp_list ps in
+        let pexps = ctxt "paren pexps(s)" (rstr false parse_pexp_list) ps in
         let bpos = lexpos ps in
           if Array.length pexps = 1
           then
@@ -1006,12 +1027,16 @@ and parse_bottom_pexp (ps:pstate) : pexp =
               span ps apos bpos (PEXP_spawn pexp)
 
     | BIND ->
-        begin
-          bump ps;
-          (* let pexp = ctxt "bind pexp: function" parse_pexp ps in *)
-            (* FIXME: finish this *)
-            raise (err "not yet implemented" ps)
-        end
+        let apos = lexpos ps in
+          begin
+            bump ps;
+            let pexp = ctxt "bind pexp: function" (rstr true parse_pexp) ps in
+              expect ps LPAREN;
+              let args = [| |] in
+                expect ps RPAREN;
+                let bpos = lexpos ps in
+                  span ps apos bpos (PEXP_bind (pexp, args))
+          end
 
     | IDENT i ->
         begin
@@ -1024,13 +1049,13 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                       (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
                   in
                   let bpos = lexpos ps in
-                    span ps apos bpos (PEXP_deref (PLVAL_app (i, tys)))
+                    span ps apos bpos (PEXP_lval (PLVAL_app (i, tys)))
                 end
 
             | _ ->
                 begin
                   let bpos = lexpos ps in
-                    span ps apos bpos (PEXP_deref (PLVAL_ident i))
+                    span ps apos bpos (PEXP_lval (PLVAL_ident i))
                 end
         end
 
@@ -1083,10 +1108,13 @@ and parse_ext_pexp (ps:pstate) (pexp:pexp) : pexp =
   let apos = lexpos ps in
     match peek ps with
         NIL | LPAREN ->
-          let args = parse_pexp_list ps in
-          let bpos = lexpos ps in
-          let ext = span ps apos bpos (PEXP_call (pexp, args)) in
-            parse_ext_pexp ps ext
+          if ps.pstate_rstr
+          then pexp
+          else
+            let args = parse_pexp_list ps in
+            let bpos = lexpos ps in
+            let ext = span ps apos bpos (PEXP_call (pexp, args)) in
+              parse_ext_pexp ps ext
 
       | DOT ->
           begin
@@ -1095,14 +1123,14 @@ and parse_ext_pexp (ps:pstate) (pexp:pexp) : pexp =
               match peek ps with
                   LPAREN ->
                     bump ps;
-                    let rhs = parse_pexp ps in
+                    let rhs = rstr false parse_pexp ps in
                       expect ps RPAREN;
                       let bpos = lexpos ps in
-                        span ps apos bpos (PEXP_deref (PLVAL_ext_pexp (pexp, rhs)))
+                        span ps apos bpos (PEXP_lval (PLVAL_ext_pexp (pexp, rhs)))
                 | _ ->
                     let rhs = parse_name_component ps in
                     let bpos = lexpos ps in
-                      span ps apos bpos (PEXP_deref (PLVAL_ext_name (pexp, rhs)))
+                      span ps apos bpos (PEXP_lval (PLVAL_ext_name (pexp, rhs)))
             in
               parse_ext_pexp ps ext
           end
@@ -1235,20 +1263,20 @@ and desugar_lval (ps:pstate) (pexp:pexp) : (Ast.stmt array * Ast.lval) =
   let (apos, bpos) = (s.lo, s.hi) in
     match pexp.node with
 
-        PEXP_deref (PLVAL_ident ident) ->
+        PEXP_lval (PLVAL_ident ident) ->
           let nb = span ps apos bpos (Ast.BASE_ident ident) in
             ([||], Ast.LVAL_base nb)
 
-      | PEXP_deref (PLVAL_app (ident, tys)) ->
+      | PEXP_lval (PLVAL_app (ident, tys)) ->
           let nb = span ps apos bpos (Ast.BASE_app (ident, tys)) in
             ([||], Ast.LVAL_base nb)
 
-      | PEXP_deref (PLVAL_ext_name (base_pexp, comp)) ->
+      | PEXP_lval (PLVAL_ext_name (base_pexp, comp)) ->
           let (base_stmts, base_atom) = desugar_expr_atom ps base_pexp in
           let base_lval = atom_lval ps base_atom in
             (base_stmts, Ast.LVAL_ext (base_lval, Ast.COMP_named comp))
 
-      | PEXP_deref (PLVAL_ext_pexp (base_pexp, ext_pexp)) ->
+      | PEXP_lval (PLVAL_ext_pexp (base_pexp, ext_pexp)) ->
           let (base_stmts, base_atom) = desugar_expr_atom ps base_pexp in
           let (ext_stmts, ext_atom) = desugar_expr_atom ps ext_pexp in
           let base_lval = atom_lval ps base_atom in
@@ -1307,7 +1335,7 @@ and desugar_expr_atom
       | PEXP_lit lit ->
           ([||], Ast.ATOM_literal (span ps apos bpos lit))
 
-      | PEXP_deref _ ->
+      | PEXP_lval _ ->
           let (stmts, lval) = desugar_lval ps pexp in
             (stmts, Ast.ATOM_lval lval)
 
@@ -1361,7 +1389,7 @@ and desugar_expr_init
     match pexp.node with
 
         PEXP_lit _
-      | PEXP_deref _ ->
+      | PEXP_lval _ ->
           let (stmts, atom) = desugar_expr_atom ps pexp in
           let expr = Ast.EXPR_atom atom in
             Array.append stmts
@@ -2204,6 +2232,7 @@ and make_parser
     let ps =
       { pstate_peek = first;
         pstate_ctxt = [];
+        pstate_rstr = false;
         pstate_lexfun = tok;
         pstate_lexbuf = lexbuf;
         pstate_file = fname;
