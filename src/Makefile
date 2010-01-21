@@ -21,7 +21,7 @@ ifeq ($(CFG_OSTYPE), Linux)
   endif
   CFG_NATIVE := 1
   CFG_UNIXY := 1
-  #CFG_VALGRIND := $(shell which valgrind)
+  CFG_VALGRIND := $(shell which valgrind)
   ifdef CFG_VALGRIND
     CFG_VALGRIND += --run-libc-freeres=no --leak-check=full --quiet --vex-iropt-level=0
   endif
