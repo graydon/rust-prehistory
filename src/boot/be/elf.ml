@@ -511,7 +511,7 @@ let elf32_linux_x86_file
     let plt0_frag =
       let e = Il.new_emitter X86.prealloc_quad true in
         Il.emit e (Il.Push (X86.imm (M_POS got1_fixup)));
-        Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Abs (M_POS got2_fixup))));
+        Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.AbsIn (M_POS got2_fixup, None))));
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
@@ -1020,10 +1020,10 @@ let elf32_linux_x86_file
       new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
     let plt_frag =
       Il.emit_full e (Some plt_entry_fixup)
-        (Il.jmp Il.JMP (Il.CodeAddr (Il.Abs (M_POS jump_slot_fixup))));
+        (Il.jmp Il.JMP (Il.CodeAddr (Il.AbsIn (M_POS jump_slot_fixup, None))));
       Il.emit_full e (Some jump_slot_initial_target_fixup)
         (Il.Push (X86.immi (Int64.of_int i)));
-      Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Pcrel (plt0_fixup, None))));
+      Il.emit e (Il.jmp Il.JMP (Il.CodeAddr (Il.Abs (M_POS plt0_fixup))));
       X86.frags_of_emitted_quads sess e
     in
     let got_plt_frag = DEF (jump_slot_fixup,
@@ -1354,7 +1354,7 @@ let emit_file
       push_pos32 start_fixup;
       Il.emit e (Il.call
                    (Il.Reg (Il.Hreg X86.eax, Il.ValTy Il.Bits32))
-                   (Il.CodeAddr (Il.Pcrel (libc_start_main_fixup, None))));
+                   (Il.CodeAddr (Il.Abs (M_POS libc_start_main_fixup))));
       X86.frags_of_emitted_quads sess e
   in
 

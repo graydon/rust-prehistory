@@ -74,7 +74,7 @@ let convert_labels (cx:ctxt) : unit =
                     end
               | Some f -> f
           in
-            Il.CodeAddr (Il.Pcrel (fix, None))
+            Il.CodeAddr (Il.Abs (Asm.M_POS fix))
       | _ -> c
   in
   let qp = { Il.identity_processor

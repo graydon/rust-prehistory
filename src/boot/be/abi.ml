@@ -65,8 +65,8 @@ type abi =
     abi_word_ty: Common.ty_mach;
 
     abi_is_2addr_machine: bool;
-    abi_has_pcrel_data: bool;
-    abi_has_pcrel_code: bool;
+    abi_has_absin_data: bool;
+    abi_has_absin_code: bool;
     abi_has_abs_data: bool;
     abi_has_abs_code: bool;
 

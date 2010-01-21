@@ -248,7 +248,7 @@ let spill_slot (framesz:int64) (i:Il.spill) : Il.addr =
                      (Int64.mul word_sz
                         (Int64.of_int (i+1))))))
   in
-    Il.Based ((Il.Hreg ebp), Some imm)
+    Il.RegIn ((Il.Hreg ebp), Some imm)
 ;;
 
 let c (c:Il.cell) : Il.operand = Il.Cell c ;;
@@ -295,7 +295,7 @@ let word_off_n (i:int) : Asm.expr64 =
 ;;
 
 let word_at (reg:Il.reg) : Il.cell =
-  let addr = Il.Based (reg, None) in
+  let addr = Il.RegIn (reg, None) in
     Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
@@ -306,25 +306,25 @@ let word_at_abs (abs:Asm.expr64) : Il.cell =
 
 let word_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
-  let addr = Il.Based (reg, Some imm) in
+  let addr = Il.RegIn (reg, Some imm) in
     Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
 let word_n_code (reg:Il.reg) (i:int) : Il.code =
   let imm = word_off_n i in
-  let addr = Il.Based (reg, Some imm) in
+  let addr = Il.RegIn (reg, Some imm) in
     Il.CodeAddr addr
 ;;
 
 let word_n_low_byte (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
-  let addr = Il.Based (reg, Some imm) in
+  let addr = Il.RegIn (reg, Some imm) in
     Il.Addr (addr, Il.ScalarTy (Il.ValTy Il.Bits8))
 ;;
 
 let wordptr_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
-  let addr = Il.Based (reg, Some imm) in
+  let addr = Il.RegIn (reg, Some imm) in
     Il.Addr (addr, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
 ;;
 
@@ -391,8 +391,8 @@ let emit_c_call
                          Il.Cell (Il.Addr (a, ty)) ->
                            begin
                              match a with
-                                 Il.Based (Il.Hreg base, off) when base == esp ->
-                                   mov (r tmp1) (c (Il.Addr (Il.Based (tmp2, off), ty)));
+                                 Il.RegIn (Il.Hreg base, off) when base == esp ->
+                                   mov (r tmp1) (c (Il.Addr (Il.RegIn (tmp2, off), ty)));
                                    mov (word_n (h esp) i) (c (r tmp1));
                                | _ ->
                                    mov (r tmp1) arg;
@@ -404,12 +404,12 @@ let emit_c_call
 
       let addr =
         if nabi.Abi.nabi_indirect
-        then (Il.Abs (Asm.M_POS fn))
-        else Il.Pcrel (fn, None)
+        then Il.AbsIn (Asm.M_POS fn, None)
+        else Il.Abs (Asm.M_POS fn)
       in
         begin
           match ret with
-              Il.Addr (Il.Based (Il.Hreg base, _), _) when base == esp ->
+              Il.Addr (Il.RegIn (Il.Hreg base, _), _) when base == esp ->
                 assert (not in_prologue);
                 (* If ret is esp-relative, use a temporary register until we switched stacks. *)
                 emit (Il.call (r tmp1) (Il.CodeAddr addr));
@@ -502,7 +502,7 @@ let unwind_glue
   let mov dst src = emit (Il.umov dst src) in
   let push x = emit (Il.Push x) in
   let pop x = emit (Il.Pop x) in
-  let codefix fix = Il.CodeAddr (Il.Pcrel (fix, None)) in
+  let codefix fix = Il.CodeAddr (Il.Abs (Asm.M_POS fix)) in
   let mark fix = Il.emit_full e (Some fix) Il.Dead in
   let glue_field = Abi.frame_glue_fns_field_drop in
   let glue_codeptr struct_reg = word_n_code struct_reg glue_field in
@@ -695,19 +695,17 @@ let objfile_start
   Il.emit e (Il.Push (immi 0L));
   Il.emit e (Il.Push (imm (Asm.M_POS global_glue)));
   Il.emit e (Il.Push (imm (Asm.M_POS main_fn_fixup)));
-  if indirect_start
-  then
-    begin
-      let addr = Il.Abs (Asm.M_POS rust_start_fixup) in
-        Il.emit e (Il.call (rc eax) (Il.CodeAddr addr));
-    end
-  else
-    Il.emit e (Il.call (rc eax) (Il.CodeAddr (Il.Pcrel (rust_start_fixup, None))));
-  Il.emit e (Il.Pop (rc ecx));
-  Il.emit e (Il.Pop (rc ecx));
-  Il.emit e (Il.umov (rc esp) (ro ebp));
-  restore_callee_saves e;
-  Il.emit e Il.Ret;
+  let addr =
+    if indirect_start
+    then Il.AbsIn (Asm.M_POS rust_start_fixup, None)
+    else Il.Abs (Asm.M_POS rust_start_fixup)
+  in
+    Il.emit e (Il.call (rc eax) (Il.CodeAddr addr));
+    Il.emit e (Il.Pop (rc ecx));
+    Il.emit e (Il.Pop (rc ecx));
+    Il.emit e (Il.umov (rc esp) (ro ebp));
+    restore_callee_saves e;
+    Il.emit e Il.Ret;
 ;;
 
 let c_to_proc_glue (e:Il.emitter) : unit =
@@ -785,10 +783,10 @@ let (abi:Abi.abi) =
     Abi.abi_word_ty = word_ty;
 
     Abi.abi_is_2addr_machine = true;
-    Abi.abi_has_pcrel_data = false;
-    Abi.abi_has_pcrel_code = true;
-    Abi.abi_has_abs_data = false;
-    Abi.abi_has_abs_code = false;
+    Abi.abi_has_absin_data = false; (* abs-in data = N/A          *)
+    Abi.abi_has_absin_code = true;  (* abs-in code = deref_disp32 *)
+    Abi.abi_has_abs_data = true;    (* abs data == deref_disp32   *)
+    Abi.abi_has_abs_code = true;    (* abs code == pcrel          *)
 
     Abi.abi_n_hardregs = n_hardregs;
     Abi.abi_str_of_hardreg = reg_str;
@@ -857,24 +855,24 @@ let rm_r (c:Il.cell) (r:int) : Asm.frag =
                   Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
                              Asm.WORD (TY_s32, disp) |]
 
-              | Il.Based ((Il.Hreg rm), None) when rm != reg_ebp ->
+              | Il.RegIn ((Il.Hreg rm), None) when rm != reg_ebp ->
                   seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
 
-              | Il.Based ((Il.Hreg rm), Some (Asm.IMM 0L)) when rm != reg_ebp ->
+              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM 0L)) when rm != reg_ebp ->
                   seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
 
               (* The next two are just to save the relaxation system some churn. *)
-              | Il.Based ((Il.Hreg rm), Some (Asm.IMM n)) when imm_is_byte n ->
+              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM n)) when imm_is_byte n ->
                   seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
                     (Asm.WORD (TY_s8, Asm.IMM n))
 
-              | Il.Based ((Il.Hreg rm), Some (Asm.IMM n)) ->
+              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM n)) ->
                   seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
                     (Asm.WORD (TY_s32, Asm.IMM n))
 
-              | Il.Based ((Il.Hreg rm), Some disp) ->
+              | Il.RegIn ((Il.Hreg rm), Some disp) ->
                   Asm.new_relaxation
                     [|
                       seq2 rm
@@ -999,7 +997,7 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
 let zero (dst:Il.cell) (count:Il.operand) : Asm.frag =
   match (dst, count) with
 
-      ((Il.Addr (Il.Based ((Il.Hreg dst_ptr), None), _)),
+      ((Il.Addr (Il.RegIn ((Il.Hreg dst_ptr), None), _)),
        Il.Cell (Il.Reg ((Il.Hreg count), _)))
         when dst_ptr = edi && count = ecx ->
           Asm.BYTES [|
@@ -1072,6 +1070,24 @@ let lea (dst:Il.cell) (addr:Il.addr) : Asm.frag =
 
 let select_insn_misc (q:Il.quad') : Asm.frag =
 
+  (* A note on abs vs. abs-in jumps and calls:
+   * 
+   * On x86, there *is no* general abs-in addressing mode. You can't do
+   * an absolute-indirect load, store, add, subtract, etc. So in the
+   * general rm_r path, we don't handle abs-in, and at the ABI level we
+   * don't claim to support abs-in for data, only code.
+   * 
+   * Code references, of course, are special.
+   * 
+   * In the case of control transfer (jmp, call) the instruction
+   * semantics are defined to treat the deref-disp32 (normally
+   * absolute) addressing mode as though it means
+   * absolute-indirect.
+   * 
+   * How do you encode an absolute code reference? As a pcrel, of course.
+   * which doesn't exist for data. Har har.
+   *)
+
   match q with
       Il.Call c ->
         begin
@@ -1079,12 +1095,17 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
               Il.Reg ((Il.Hreg dst), _) when dst = eax ->
                 begin
                   match c.Il.call_targ with
-                      Il.CodeAddr (Il.Based b) ->
-                        insn_rm_r 0xff (Il.Addr (Il.Based b, Il.OpaqueTy)) slash2
-                    | Il.CodeAddr (Il.Abs a) ->
-                        insn_rm_r 0xff (Il.Addr (Il.Abs a, Il.OpaqueTy)) slash2
-                    | Il.CodeAddr (Il.Pcrel (f, None)) ->
+
+                      Il.CodeAddr (Il.RegIn b) ->
+                        insn_rm_r 0xff (Il.Addr (Il.RegIn b, Il.OpaqueTy)) slash2
+
+                    (* X86-ism: rewrite AbsIn as Abs for CALL. See above. *)
+                    | Il.CodeAddr (Il.AbsIn (e, None)) ->
+                        insn_rm_r 0xff (Il.Addr (Il.Abs e, Il.OpaqueTy)) slash2
+
+                    | Il.CodeAddr (Il.Abs (Asm.M_POS f)) ->
                         insn_pcrel_simple 0xe8 f
+
                     | _ -> raise Unrecognized
                 end
             | _ -> raise Unrecognized
@@ -1114,14 +1135,19 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
         begin
           match (j.Il.jmp_op, j.Il.jmp_targ) with
 
-              (Il.JMP, Il.CodeAddr (Il.Pcrel (f, None))) ->
+              (Il.JMP, Il.CodeAddr (Il.Abs (Asm.M_POS f))) ->
                 insn_pcrel 0xeb 0xe9 f
+
+            (* X86-ism: rewrite AbsIn as Abs for JMP. See above. *)
+            | (Il.JMP, Il.CodeAddr (Il.AbsIn (Asm.M_POS f, None))) ->
+                insn_rm_r 0xff (Il.Addr ((Il.Abs (Asm.M_POS f)), Il.OpaqueTy)) slash4
 
             | (Il.JMP, Il.CodeAddr r) ->
                 insn_rm_r 0xff (Il.Addr (r, Il.OpaqueTy)) slash4
 
-
-            | (_, Il.CodeAddr (Il.Pcrel (f, None))) ->
+            (* FIXME: refactor this to handle conditional absolute-indirect jumps
+             * by rewriting, if we ever need them. So far not. *)
+            | (_, Il.CodeAddr (Il.Abs (Asm.M_POS f))) ->
                 let (op8, op32) =
                   match j.Il.jmp_op with
                     | Il.JC  -> (0x72, 0x82)

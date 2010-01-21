@@ -889,7 +889,7 @@ let emit_file
     Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargc_fixup)) (X86.ro X86.ebx));
 
     (* Store argv. *)
-    Il.emit e (Il.lea (X86.rc X86.ecx) (Il.Based (Il.Hreg X86.ebp, Some (X86.word_off_n 2))));
+    Il.emit e (Il.lea (X86.rc X86.ecx) (Il.RegIn (Il.Hreg X86.ebp, Some (X86.word_off_n 2))));
     Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargv_fixup)) (X86.ro X86.ebx));
 
     (* Calculte and store envp. *)
@@ -903,10 +903,10 @@ let emit_file
     Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
     Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_global_glue_fixup)));
     Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_main_fn_fixup)));
-    Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS rust_start_fixup))));
+    Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.AbsIn (Asm.M_POS rust_start_fixup, None))));
     Il.emit e (Il.Pop (X86.rc X86.ecx));
     Il.emit e (Il.Push (X86.ro X86.eax));
-    Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.Abs (Asm.M_POS exit_fixup))));
+    Il.emit e (Il.call (X86.rc X86.eax) (Il.CodeAddr (Il.AbsIn (Asm.M_POS exit_fixup, None))));
     Il.emit e (Il.Pop (X86.rc X86.ecx));
     Il.emit e (Il.Pop (X86.rc X86.ecx));
     Il.emit e (Il.Pop (X86.rc X86.ecx));

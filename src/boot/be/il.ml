@@ -40,8 +40,8 @@ type reg =
 
 type addr =
     Abs of Asm.expr64
-  | Based of (reg * (Asm.expr64 option))
-  | Pcrel of (fixup * (Asm.expr64 option))
+  | RegIn of (reg * (Asm.expr64 option))
+  | AbsIn of (Asm.expr64 * (Asm.expr64 option))
   | Spill of spill
 ;;
 
@@ -226,9 +226,9 @@ let identity_processor =
   in
     { qp_reg = (fun _ r -> r);
       qp_addr = (fun qp a -> match a with
-                     Based (r, o) -> Based (qp.qp_reg qp r, o)
+                     RegIn (r, o) -> RegIn (qp.qp_reg qp r, o)
                    | Abs _
-                   | Pcrel _
+                   | AbsIn _
                    | Spill _ -> a);
       qp_cell_read = qp_cell;
       qp_cell_write = qp_cell;
@@ -378,10 +378,10 @@ let string_of_addr (f:hreg_formatter) (a:addr) : string =
   match a with
       Abs e ->
         Printf.sprintf "[%s]" (string_of_expr64 e)
-    | Based (r, off) ->
+    | RegIn (r, off) ->
         Printf.sprintf "[%s%s]" (string_of_reg f r) (string_of_off off)
-    | Pcrel (f, off) ->
-        Printf.sprintf "[<fixup %s>%s]" f.fixup_name (string_of_off off)
+    | AbsIn (e, off) ->
+        Printf.sprintf "[[%s]%s]" (string_of_expr64 e) (string_of_off off)
     | Spill i ->
         Printf.sprintf "[<spill %d>]" i
 ;;

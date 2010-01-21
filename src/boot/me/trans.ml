@@ -117,11 +117,11 @@ let trans_visitor
   in
 
   let based (reg:Il.reg) : Il.addr =
-    Il.Based (reg, None)
+    Il.RegIn (reg, None)
   in
 
   let based_off (reg:Il.reg) (off:Asm.expr64) : Il.addr =
-    Il.Based (reg, Some off)
+    Il.RegIn (reg, Some off)
   in
 
   let based_imm (reg:Il.reg) (imm:int64) : Il.addr =
@@ -148,10 +148,10 @@ let trans_visitor
     let addto e = Asm.ADD (off, e) in
       match addr with
           Il.Abs e -> Il.Abs (addto e)
-        | Il.Based (r, None) -> Il.Based (r, Some off)
-        | Il.Based (r, Some e) -> Il.Based (r, Some (addto e))
-        | Il.Pcrel (f, None) -> Il.Pcrel (f, Some off)
-        | Il.Pcrel (f, Some e) -> Il.Pcrel (f, Some (addto e))
+        | Il.RegIn (r, None) -> Il.RegIn (r, Some off)
+        | Il.RegIn (r, Some e) -> Il.RegIn (r, Some (addto e))
+        | Il.AbsIn (f, None) -> Il.AbsIn (f, Some off)
+        | Il.AbsIn (f, Some e) -> Il.AbsIn (f, Some (addto e))
         | Il.Spill _ -> bug () "Adding offset to spill slot"
   in
 
@@ -437,14 +437,13 @@ let trans_visitor
 
   and trans_lval_full
       (lv:Ast.lval)
-      (pcrel_ok:bool)
       (abs_ok:bool)
       (intent:intent)
       : (Il.cell * Ast.slot) =
 
     let return_fixup (fix:fixup) (slot:Ast.slot)
         : (Il.cell * Ast.slot) =
-      let addr = (fixup_to_addr pcrel_ok abs_ok fix
+      let addr = (fixup_to_addr abs_ok fix
                     (slot_referent_type abi slot))
       in
         (Il.Addr (addr, (slot_referent_type abi slot)), slot)
@@ -487,7 +486,7 @@ let trans_visitor
 
       match lv with
           Ast.LVAL_ext (base, comp) ->
-            let (base_cell, base_slot) = trans_lval_full base false true intent in
+            let (base_cell, base_slot) = trans_lval_full base abi.Abi.abi_has_abs_data intent in
             let base_cell' = deref_slot base_cell base_slot intent in
             let (addr, _) = need_addr_cell base_cell' in
               trans_lval_ext (slot_ty base_slot) addr comp
@@ -506,7 +505,7 @@ let trans_visitor
               end
 
   and trans_lval (lv:Ast.lval) (intent:intent) : (Il.cell * Ast.slot) =
-    trans_lval_full lv abi.Abi.abi_has_pcrel_data abi.Abi.abi_has_abs_data intent
+    trans_lval_full lv abi.Abi.abi_has_abs_data intent
 
   and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Il.operand =
     let fix =
@@ -559,21 +558,17 @@ let trans_visitor
           end
 
   and fixup_to_addr
-      (pcrel_ok:bool)
       (abs_ok:bool)
       (fix:fixup)
       (referent_ty:Il.referent_ty)
       : Il.addr =
-    if pcrel_ok
-    then Il.Pcrel (fix, None)
-    else
-      let i = Asm.M_POS fix in
-        if abs_ok
-        then Il.Abs i
-        else
-          let ta = (Il.Abs i, referent_ty) in
-          let (reg, _) = force_to_reg (alias ta) in
-            Il.Based (reg, None)
+    let i = Asm.M_POS fix in
+      if abs_ok
+      then Il.Abs i
+      else
+        let ta = (Il.Abs i, referent_ty) in
+        let (reg, _) = force_to_reg (alias ta) in
+          Il.RegIn (reg, None)
 
   and annotate_quads (name:string) : unit =
     let e = emitter() in
@@ -759,7 +754,6 @@ let trans_visitor
 
   and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
     let code = Il.CodeAddr (fixup_to_addr
-                              abi.Abi.abi_has_pcrel_code
                               abi.Abi.abi_has_abs_code
                               fix Il.OpaqueTy)
     in
@@ -962,7 +956,6 @@ let trans_visitor
     let callsz = (pack 0L arg_layouts).layout_size in
     let exit_proc_glue_fixup = get_exit_proc_glue tsig in
     let exit_proc_glue_addr = (fixup_to_addr
-                                 abi.Abi.abi_has_pcrel_data
                                  abi.Abi.abi_has_abs_data
                                  exit_proc_glue_fixup Il.CodeTy) in
     let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
@@ -1828,7 +1821,6 @@ let trans_visitor
     let (dst_cell, _) = trans_lval dst INTENT_init in
     let (fn_cell, fn_slot) =
       trans_lval_full flv
-        abi.Abi.abi_has_pcrel_code
         abi.Abi.abi_has_abs_code
         INTENT_read
     in
@@ -1851,7 +1843,6 @@ let trans_visitor
     let dst_cell = Il.Addr (force_to_mem imm_false) in
     let (fn_cell, fn_slot) =
       trans_lval_full flv
-        abi.Abi.abi_has_pcrel_code
         abi.Abi.abi_has_abs_code
         INTENT_read
     in
