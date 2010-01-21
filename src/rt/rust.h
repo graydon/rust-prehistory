@@ -33,6 +33,7 @@ struct rust_srv {
     virtual void *realloc(void *, size_t);
     virtual void free(void *);
     virtual uintptr_t lookup(char const *);
+    virtual ~rust_srv() {}
 };
 
 inline void *operator new(size_t size, rust_srv *srv)
