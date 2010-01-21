@@ -697,7 +697,11 @@ and parse_fn_ty ((*pure*)_:bool) (ps:pstate) : Ast.ty =
   match peek ps with
       FN p ->
         bump ps;
-        let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot true) ps in
+        let slots =
+          match peek ps with
+              NIL -> (bump ps; [| |])
+            | _ -> bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot true) ps
+        in
           begin
             match peek ps with
                 RARROW ->
@@ -1031,11 +1035,15 @@ and parse_bottom_pexp (ps:pstate) : pexp =
           begin
             bump ps;
             let pexp = ctxt "bind pexp: function" (rstr true parse_pexp) ps in
-              expect ps LPAREN;
-              let args = [| |] in
-                expect ps RPAREN;
-                let bpos = lexpos ps in
-                  span ps apos bpos (PEXP_bind (pexp, args))
+            let args =
+              match peek ps with
+                  NIL -> (bump ps; [| |])
+                | _ ->
+                    ctxt "bind args"
+                      (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_bind_arg) ps
+            in
+            let bpos = lexpos ps in
+              span ps apos bpos (PEXP_bind (pexp, args))
           end
 
     | IDENT i ->
@@ -1102,6 +1110,10 @@ and parse_bottom_pexp (ps:pstate) : pexp =
         let lit = parse_lit ps in
         let bpos = lexpos ps in
           span ps apos bpos (PEXP_lit lit)
+
+
+and parse_bind_arg (ps:pstate) : pexp option =
+  Some (parse_pexp ps)
 
 
 and parse_ext_pexp (ps:pstate) (pexp:pexp) : pexp =
