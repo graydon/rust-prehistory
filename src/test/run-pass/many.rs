@@ -13,7 +13,7 @@ fn sub(chan[int] parent, int id) -> () {
 
 fn main() -> () {
   let port[int] p = port();
-  auto child = spawn sub(chan(p), 5);
+  auto child = spawn sub(chan(p), 500);
   let int y <- p;
-  check (y == 5);
+  check (y == 500);
 }

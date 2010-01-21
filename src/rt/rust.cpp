@@ -446,7 +446,7 @@ ptr_vec<T>::ptr_vec(rust_rt *rt) :
 {
     I(rt, data);
     rt->log(LOG_MEM,
-            "new ptr_vec(data=0x%" PRIxPTR ") -> ptr_vec==0x%" PRIxPTR,
+            "new ptr_vec(data=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
             (uintptr_t)data, (uintptr_t)this);
 }
 
@@ -466,9 +466,11 @@ void
 ptr_vec<T>::push(T *p)
 {
     I(rt, data);
+    I(rt, fill <= alloc);
     if (fill == alloc) {
         alloc *= 2;
-        data = (T **)rt->realloc(data, alloc);
+        data = (T **)rt->realloc(data, alloc * sizeof(T*));
+        I(rt, data);
     }
     I(rt, fill < alloc);
     p->idx = fill;
@@ -491,7 +493,7 @@ ptr_vec<T>::trim(size_t sz)
         (alloc / 2) >= INIT_SIZE) {
         alloc /= 2;
         I(rt, alloc >= fill);
-        data = (T **)rt->realloc(data, alloc);
+        data = (T **)rt->realloc(data, alloc * sizeof(T*));
         I(rt, data);
     }
 }
@@ -917,6 +919,7 @@ rust_proc::~rust_proc()
             "~rust_proc 0x%" PRIxPTR ", refcnt=%d",
             (uintptr_t)this, refcnt);
 
+    /*
     for (uintptr_t fp = get_fp(); fp; fp = get_previous_fp(fp)) {
         frame_glue_fns *glue_fns = get_frame_glue_fns(fp);
         rt->log(LOG_MEM|LOG_PROC,
@@ -928,6 +931,7 @@ rust_proc::~rust_proc()
             rt->log(LOG_MEM|LOG_PROC, "~rust_proc, reloc_glue=0x%" PRIxPTR, glue_fns->reloc_glue);
         }
     }
+    */
 
     /* FIXME: tighten this up, there are some more
        assertions that hold at proc-lifecycle events. */
