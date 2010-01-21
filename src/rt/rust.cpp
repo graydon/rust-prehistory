@@ -111,11 +111,7 @@ get_logbits()
 /* Proc stack segments. Heap allocated and chained together. */
 
 struct stk_seg {
-    struct stk_seg *prev;
-    struct stk_seg *next;
     unsigned int valgrind_id;
-    uintptr_t prev_fp;
-    uintptr_t prev_sp;
     uintptr_t limit;
     uint8_t data[];
 };
@@ -732,21 +728,9 @@ new_stk(rust_rt *rt, size_t minsz)
 static void
 del_stk(rust_rt *rt, stk_seg *stk)
 {
-    stk_seg *nxt = 0;
-
-    /* Rewind to bottom-most stk segment. */
-    while (stk->prev)
-        stk = stk->prev;
-
-    /* Then free forwards. */
-    do {
-        nxt = stk->next;
-        rt->logptr("freeing stk segment", (uintptr_t)stk);
-        VALGRIND_STACK_DEREGISTER(stk->valgrind_id);
-        rt->free(stk);
-        stk = nxt;
-    } while (stk);
-    rt->log(LOG_MEM, "freed stacks");
+    VALGRIND_STACK_DEREGISTER(stk->valgrind_id);
+    rt->logptr("freeing stk segment", (uintptr_t)stk);
+    rt->free(stk);
 }
 
 /* Processes */
@@ -762,94 +746,77 @@ align_down(uintptr_t sp)
     return sp & ~(16 - 1);
 }
 
+static size_t
+next_power_of_two(size_t s)
+{
+    size_t tmp = s - 1;
+    tmp |= tmp >> 1;
+    tmp |= tmp >> 2;
+    tmp |= tmp >> 4;
+    tmp |= tmp >> 8;
+    tmp |= tmp >> 16;
+#if SIZE_MAX == UINT64_MAX
+    tmp |= tmp >> 32;
+#endif
+    return tmp + 1;
+}
+
 extern "C" void
-upcall_grow_proc(rust_proc *proc, size_t n_call_bytes, size_t n_frame_bytes)
+upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
 {
     LOG_UPCALL_ENTRY(proc);
 
-    /*
-     *  We have a stack like this:
-     *
-     *  | higher frame  |
-     *  +---------------+ <-- top of call region
-     *  | caller args   |
-     *  | ...           |
-     *  | ABI operands  |   <-- top of fixed-size call region
-     *  | ...           |
-     *  | retpc         |
-     *  | callee save 1 |
-     *  | ...           |
-     *  | callee save N |
-     *  +---------------+ <-- fp, base of call region
-     *  |               |
-     *
-     * And we were hoping to move fp down by n_frame_bytes to allocate
-     * an n_frame_bytes frame for the current function, but we ran out
-     * of stack. So rather than subtract fp, we called into this
-     * function.
-     *
-     * This function's job is:
-     *
-     *  - Check to see if we have an existing stack segment chained on
-     *    the end of the stack chain. If so, check to see that it's
-     *    big enough for K. If not, or if we lack an existing stack
-     *    segment altogether, allocate a new one of size K and chain
-     *    it into the stack segments list for this proc.
-     *
-     *  - Transition to the new segment. This means memcopying the
-     *    call region [fp, fp+n_call_bytes) into the new segment and
-     *    adjusting the process' fp to point to the new base of the
-     *    (transplanted) call region.
-     *
-     *
-     *  K = max(min_stk_bytes, n_call_bytes + n_frame_bytes)
-     *
-     *  n_call_bytes = (arg_sz + abi_frame_base_sz)
-     *
-     *  n_frame_bytes = (new_frame_sz +
-     *                   new_spill_sz +
-     *                   new_call_sz +
-     *                   abi_frame_base_sz +
-     *                   proco_c_glue_sz)
-     *
-     *  proco_c_glue_sz = abi_frame_base_sz
-     *
-     * Note: there's a lot of stuff in K! You have to reserve enough
-     * space for the new frame, enough space for the transplanted call,
-     * enough space to *make* an outgoing call out of the new frame,
-     * and enough space to perform a proc-to-C glue call to get back to
-     * this function when you find you're out of stack again, mid-call.
-     *
-     */
     rust_rt *rt = proc->rt;
-    stk_seg *nstk = proc->stk->next;
-    if (nstk) {
-        /* Figure out if the existing chunk is big enough. */
-        size_t sz = nstk->limit - ((uintptr_t) &proc->stk->data[0]);
-        if (sz < n_frame_bytes) {
-            nstk = new_stk(rt, n_frame_bytes);
-            nstk->next = proc->stk->next;
-            nstk->next->prev = nstk;
+    stk_seg *old_stk = proc->stk;
+    uintptr_t old_top = (uintptr_t) old_stk->limit;
+    uintptr_t old_bottom = (uintptr_t) &old_stk->data[0];
+    uintptr_t rust_sp_disp = old_top - proc->rust_sp;
+    size_t ssz = old_top - old_bottom;
+    rt->log(LOG_MEM|LOG_PROC, "upcall_grow_proc old size %d bytes (old lim: 0x%" PRIxPTR ")",
+            ssz, old_top);
+    ssz *= 2;
+    if (ssz < n_frame_bytes)
+        ssz = n_frame_bytes;
+    ssz = next_power_of_two(ssz);
+
+    rt->log(LOG_MEM|LOG_PROC, "upcall_grow_proc growing stk 0x%" PRIxPTR " to %d bytes",
+            old_stk, ssz);
+
+    stk_seg *stk = new_stk(rt, ssz);
+    uintptr_t new_bottom = (uintptr_t) &stk->data[0];
+    uintptr_t new_top = (uintptr_t) &stk->data[ssz];
+    size_t n_copy = old_top - old_bottom;
+    rt->log(LOG_MEM|LOG_PROC,
+            "copying %d bytes of stack from [0x%" PRIxPTR ", 0x%" PRIxPTR "]"
+            " to [0x%" PRIxPTR ", 0x%" PRIxPTR "]",
+            n_copy,
+            old_bottom, old_bottom + n_copy,
+            new_top - n_copy, new_top);
+
+    memcpy((void*)(new_top - n_copy), (void*)old_bottom, n_copy);
+
+    stk->valgrind_id = VALGRIND_STACK_REGISTER(new_bottom, new_top);
+    stk->limit = new_top;
+    proc->stk = stk;
+    proc->rust_sp = new_top - rust_sp_disp;
+
+    rt->log(LOG_MEM|LOG_PROC, "processing relocations");
+
+    // FIXME: this is the most ridiculously crude relocation scheme ever.
+    // Try actually, you know, writing out reloc descriptors?
+    size_t n_relocs = 0;
+    for (uintptr_t* p = (uintptr_t*)(new_top - n_copy); p < (uintptr_t*)new_top; ++p) {
+        if (old_bottom <= *p && *p < old_top) {
+            //rt->log(LOG_MEM, "relocating pointer 0x%" PRIxPTR " by %d bytes",
+            //        *p, (new_top - old_top));
+            n_relocs++;
+            *p += (new_top - old_top);
         }
-    } else {
-        /* There is no existing next stack segment, grow. */
-        nstk = new_stk(rt, n_frame_bytes);
     }
-    I(rt, nstk);
-    proc->stk->next = nstk;
-    nstk->prev = proc->stk;
-    /*
-    uintptr_t i;
-    for (i = proc->sp + n_call_bytes; i >= proc->sp; i -= sizeof(uintptr_t)) {
-        uintptr_t val = *((uintptr_t*)i);
-        printf("stk[0x%" PRIxPTR "] = 0x%" PRIxPTR "\n", i, val);
-    }
-    printf("transplant: n_call_bytes %d, n_frame_bytes %d\n", n_call_bytes, n_frame_bytes);
-    */
-    uintptr_t target = nstk->limit - n_call_bytes;
-    memcpy((void*)target, (void*)proc->rust_sp, n_call_bytes);
-    proc->stk = nstk;
-    proc->rust_sp = target;
+    rt->log(LOG_MEM|LOG_PROC, "processed %d relocations", n_relocs);
+
+    del_stk(rt, old_stk);
+    rt->logptr("grown stk limit", new_top);
 }
 
 rust_proc::rust_proc(rust_rt *rt,
@@ -1659,21 +1626,6 @@ upcall_free(rust_proc *proc, void* ptr)
     rt->free(ptr);
 }
 
-static size_t
-next_power_of_two(size_t s)
-{
-    size_t tmp = s - 1;
-    tmp |= tmp >> 1;
-    tmp |= tmp >> 2;
-    tmp |= tmp >> 4;
-    tmp |= tmp >> 8;
-    tmp |= tmp >> 16;
-#if SIZE_MAX == UINT64_MAX
-    tmp |= tmp >> 32;
-#endif
-    return tmp + 1;
-}
-
 
 extern "C" CDECL rust_str*
 upcall_new_str(rust_proc *proc, char const *s, size_t fill)
@@ -1821,16 +1773,7 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
                 rt.log(LOG_PROC,
                        "returned from proc 0x%" PRIxPTR " in state '%s'",
                        (uintptr_t)proc, state_names[proc->state]);
-                /*
-                  rt->log(LOG_MEM,
-                  "sp:0x%" PRIxPTR ", "
-                  "stk:[0x%" PRIxPTR ", " "0x%" PRIxPTR "], "
-                  "stk->prev:0x%" PRIxPTR ", stk->next=0x%" PRIxPTR ", "
-                  "prev_sp:0x%" PRIxPTR ", " "prev_fp:0x%" PRIxPTR,
-                  proc->rust_sp, (uintptr_t) &proc->stk->data[0], proc->stk->limit,
-                  proc->stk->prev, proc->stk->next,
-                  proc->stk->prev_sp, proc->stk->prev_fp);
-                */
+
                 I(&rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
                 I(&rt, proc->rust_sp < proc->stk->limit);
 

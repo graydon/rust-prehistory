@@ -360,6 +360,7 @@ let emit_c_call
     (tmp1:Il.reg)
     (tmp2:Il.reg)
     (nabi:Abi.nabi)
+    (in_prologue:bool)
     (fn:fixup)
     (args:Il.operand array)
     : unit =
@@ -409,16 +410,41 @@ let emit_c_call
         begin
           match ret with
               Il.Addr (Il.Based (Il.Hreg base, _), _) when base == esp ->
+                assert (not in_prologue);
                 (* If ret is esp-relative, use a temporary register until we switched stacks. *)
                 emit (Il.call (r tmp1) (Il.CodeAddr addr));
                 mov (r tmp2) (c proc_ptr);
                 mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
                 mov ret (c (r tmp1));
+
+            | _ when in_prologue ->
+                (* 
+                 * We have to do something a little surprising here:
+                 * we're doing a 'grow' call so ebp is going to point
+                 * into a dead stack frame on call-return. So we
+                 * temporarily store proc-ptr into ebp and then reload
+                 * esp *and* ebp via ebp->rust_sp on the other side of
+                 * the call. 
+                 *)
+                mov (rc ebp) (c proc_ptr);
+                emit (Il.call ret (Il.CodeAddr addr));
+                mov (rc esp) (c (word_n (h ebp) Abi.proc_field_rust_sp));
+                mov (rc ebp) (ro esp);
+
             | _ ->
                 emit (Il.call ret (Il.CodeAddr addr));
                 mov (r tmp2) (c proc_ptr);
                 mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
         end
+;;
+
+let emit_void_prologue_call
+    (e:Il.emitter)
+    (nabi:Abi.nabi)
+    (fn:fixup)
+    (args:Il.operand array)
+    : unit =
+    emit_c_call e (rc eax) (h edx) (h ecx) nabi true fn args
 ;;
 
 let emit_native_call
@@ -431,7 +457,7 @@ let emit_native_call
 
   let (tmp1, _) = vreg e in
   let (tmp2, _) = vreg e in
-    emit_c_call e ret tmp1 tmp2 nabi fn args
+    emit_c_call e ret tmp1 tmp2 nabi false fn args
 ;;
 
 let emit_native_void_call
@@ -445,16 +471,6 @@ let emit_native_void_call
     emit_native_call e (r ret) nabi fn args
 ;;
 
-let emit_void_upcall
-    (e:Il.emitter)
-    (nabi:Abi.nabi)
-    (fn:fixup)
-    (args:Il.operand array)
-    : unit =
-
-  emit_native_void_call e nabi fn args
-;;
-
 let emit_native_call_in_thunk
     (e:Il.emitter)
     (ret:Il.cell)
@@ -466,12 +482,12 @@ let emit_native_call_in_thunk
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    emit_c_call e (rc eax) (h edx) (h ecx) nabi fn args;
+    emit_c_call e (rc eax) (h edx) (h ecx) nabi false fn args;
 
     match ret with
         Il.Reg (r, _) -> mov (word_at r) (ro eax)
       | _ -> mov (rc edx) (c ret);
-             mov (word_at (h edx)) (ro eax)
+          mov (word_at (h edx)) (ro eax)
 ;;
 
 let unwind_glue
@@ -602,14 +618,14 @@ let fn_prologue
    * worth to permit a 'grow' upcall to occur!
    *)
   let reserve_current_sz =
-    (Asm.ADD (callee_frame_sz, (Asm.IMM (add frame_base_sz frame_base_sz))))
+    (Asm.ADD (callee_frame_sz, (Asm.IMM frame_base_sz)))
   in
 
   (* Amount of memory to copy, starting from sp, if we grow. Add in
    * one more term of frame_base_sz to handle the 'grow' upcall in
    * progress that'll exist when we memcpy.
    *)
-  let call_region_sz = Asm.IMM (add argsz (add frame_base_sz frame_base_sz)) in
+  let call_region_sz = Asm.IMM (add argsz frame_base_sz) in
 
   (* Amount we'll need in a new chunk, minimum, if we grow. *)
   let reserve_new_sz =
@@ -620,9 +636,6 @@ let fn_prologue
     save_callee_saves e;
 
     (* Save pre-grow esp and ebp to esi and edi, for use after-the-grow.      *)
-    mov (rc esi) (ro esp);                        (* esi = esp                *)
-    mov (rc edi) (ro ebp);                        (* edi = ebp                *)
-
     mov (rc ebp) (ro esp);                        (* Need an fp to do anything   *)
 
     mov (rc eax) (ro esp);                        (* eax = esp               *)
@@ -643,14 +656,8 @@ let fn_prologue
 
       emit (Il.jmp Il.JBE Il.CodeNone);
 
-      emit_void_upcall e nabi grow_proc_fixup [| imm call_region_sz; imm reserve_new_sz |];
+      emit_void_prologue_call e nabi grow_proc_fixup [| imm reserve_new_sz |];
 
-      mov (rc ecx) (c proc_ptr);                    (* ecx = proc               *)
-      mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk          *)
-
-      mov (ecx_n Abi.stk_field_prev_sp) (ro esi);   (* proc->stk->prev_sp = saved esp *)
-      mov (ecx_n Abi.stk_field_prev_fp) (ro edi);   (* proc->stk->prev_fp = saved ebp *)
-      mov (rc ebp) (ro esp);                        (* grow moved esp; re-clobber ebp *)
       Il.patch_jump e jmp_pc e.Il.emit_pc;
 
       (* Now set up a frame, wherever we landed. *)
@@ -665,42 +672,12 @@ let fn_prologue
 
 let fn_epilogue (e:Il.emitter) : unit =
 
-  let ecx_n = word_n (h ecx) in
-  let eax_n = word_n (h eax) in
+  (* Tear down existing frame. *)
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-
-    (* 
-     * We need to notice when we restore a stack pointer that's outside
-     * the current stack segment, and shift the current stack segment to
-     * match. To do *that* we need to snag the process pointer before the
-     * frame dies, and hold it in a caller-save reg that we can work
-     * with.
-     *)
-    mov (rc ecx) (c proc_ptr);                        (* ecx = proc              *)
-
-    (* Tear down existing frame. *)
-    Il.emit e (Il.umov (rc esp) (ro ebp));
+    mov (rc esp) (ro ebp);
     restore_callee_saves e;
-
-    (* 
-     * We have now restored ebp from the caller frame; it's possible
-     * that this ebp points to a frame in an earlier stack chunk. Notice
-     * when this happens and do the transition.
-     *)
-    mov (rc eax) (c (ecx_n Abi.proc_field_stk));      (* eax = proc->stk            *)
-    mov (rc edx) (c (eax_n Abi.stk_field_prev_fp));   (* edx = proc->stk->prev_fp   *)
-    emit (Il.cmp (ro edx) (ro ebp));
-    let jmp_pc = e.Il.emit_pc in
-      emit (Il.jmp Il.JNE Il.CodeNone);
-      (* We can't use 'ret' here at all, must indirect-jump while swapping stack pointer. *)
-      mov (rc edx) (ro esp);                          (* edx <- ptr-to-return-address     *)
-      mov (rc esp) (c (eax_n Abi.stk_field_prev_sp)); (* esp = proc->stk->prev_sp         *)
-      mov (rc eax) (c (eax_n Abi.stk_field_prev));    (* eax = proc->stk->prev            *)
-      mov (ecx_n Abi.proc_field_stk) (ro eax);        (* proc->stk = proc->stk->prev      *)
-      emit (Il.jmp Il.JMP (Il.CodeAddr (Il.Based ((h edx), None))));
-      Il.patch_jump e jmp_pc e.Il.emit_pc;
-      emit Il.Ret;
+    emit Il.Ret;
 ;;
 
 

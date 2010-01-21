@@ -54,12 +54,8 @@ let exterior_gc_malloc_return_adjustment = 2;;
 let port_field_refcnt = 0;;
 let chan_field_refcnt = 1;;
 
-let stk_field_prev = 0;;
-let stk_field_next = stk_field_prev + 1;;
-let stk_field_valgrind_id = stk_field_next + 1;;
-let stk_field_prev_fp = stk_field_valgrind_id + 1;;
-let stk_field_prev_sp = stk_field_prev_fp + 1;;
-let stk_field_limit = stk_field_prev_sp + 1;;
+let stk_field_valgrind_id = 0 + 1;;
+let stk_field_limit = stk_field_valgrind_id + 1;;
 let stk_field_data = stk_field_limit + 1;;
 
 type abi =
