@@ -742,6 +742,13 @@ let (abbrev_variable:abbrev) =
    |])
 ;;
 
+let (abbrev_unspecified_type:abbrev) =
+  (DW_TAG_unspecified_type, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
+   |])
+;;
+
 let (abbrev_base_type:abbrev) =
   (DW_TAG_base_type, DW_CHILDREN_no,
    [|
@@ -794,6 +801,7 @@ let dwarf_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     (path:Ast.name_component Stack.t)
+    (cu_info_section_fixup:fixup)
     (cu_aranges:(frag list) ref)
     (cu_pubnames:(frag list) ref)
     (cu_infos:(frag list) ref)
@@ -863,7 +871,6 @@ let dwarf_visitor
 
   let emit_die die = prepend curr_cu_infos die in
   let emit_null_die _ = emit_die (BYTE 0) in
-  let cu_info_fixup = new_fixup "CU debug_info fixup" in
 
   let dw_form_block1 (ops:dw_op array) : Asm.frag =
     let frag = SEQ (Array.map (dw_op_to_frag abi) ops) in
@@ -874,7 +881,7 @@ let dwarf_visitor
 
   let dw_form_ref_addr (fix:fixup) : Asm.frag =
     WORD (signed_word_ty_mach,
-          SUB ((M_POS fix), M_POS cu_info_fixup))
+          SUB ((M_POS fix), M_POS cu_info_section_fixup))
   in
 
 
@@ -988,6 +995,19 @@ let dwarf_visitor
           emit_die die;
           ref_addr_for_fix fix
       in
+
+      let unspecified name =
+        let fix = new_fixup ("unspecified-type DIE: " ^ name) in
+        let die =
+          DEF (fix, SEQ [|
+                 uleb (get_abbrev_code abbrev_unspecified_type);
+                 (* DW_AT_name: DW_FORM_string *)
+                 ZSTRING name
+               |])
+        in
+          emit_die die;
+          ref_addr_for_fix fix
+      in
         match ty with
             Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
           | Ast.TY_mach (TY_u8)  -> base ("u8",  DW_ATE_unsigned, 1)
@@ -1001,7 +1021,14 @@ let dwarf_visitor
           | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
           | Ast.TY_int -> base ("int", DW_ATE_signed, word_sz_int)
           | Ast.TY_rec trec -> record trec
-          | _ -> MARK
+          | Ast.TY_chan _ -> unspecified "chan"
+          | Ast.TY_port _ -> unspecified "port"
+          | Ast.TY_proc -> unspecified "proc"
+          | Ast.TY_fn _ -> unspecified "fn"
+          | Ast.TY_tag _ -> unspecified "tag"
+          | Ast.TY_iso _ -> unspecified "iso"
+          | Ast.TY_idx _ -> unspecified "idx"
+          | _ -> unspecified "void"
   in
 
   let finish_cu_and_compose_headers _ =
@@ -1014,6 +1041,7 @@ let dwarf_visitor
       SEQ [| (BYTE 0) |]
     in
 
+    let cu_info_fixup = new_fixup "CU debug_info fixup" in
     let info_header_fixup = new_fixup "CU debug_info header" in
     let info_header_and_curr_infos =
       SEQ
@@ -1023,7 +1051,7 @@ let dwarf_visitor
                             (F_SZ info_header_fixup))));    (* excluding this word.    *)
           DEF (info_header_fixup,
                (SEQ [|
-                  WORD (TY_u16, IMM 2L);                    (* DWARF version           *)
+                  WORD (TY_u16, IMM 3L);                    (* DWARF version           *)
                   (* Since we share abbrevs across all CUs, offset is always 0.        *)
                   WORD (TY_u32, IMM 0L);                    (* CU-abbrev offset.       *)
                   BYTE 4;                                   (* Size of an address.     *)
@@ -1044,7 +1072,7 @@ let dwarf_visitor
                             (F_SZ cu_line_header_fixup)))); (* excluding this word.     *)
           DEF (cu_line_header_fixup,
                (SEQ [|
-                  WORD (TY_u16, IMM 2L);                    (* DWARF version.           *)
+                  WORD (TY_u16, IMM 3L);                    (* DWARF version.           *)
                   WORD (TY_u32, (F_SZ line_header_fixup));  (* Another header-length.   *)
                   DEF (line_header_fixup,
                        SEQ [|
@@ -1089,8 +1117,11 @@ let dwarf_visitor
     let cu_info =
       (SEQ [|
          uleb abbrev_code;
+         (* DW_AT_name:  DW_FORM_string *)
          ZSTRING name;
+         (* DW_AT_low_pc, DW_FORM_addr *)
          WORD (word_ty_mach, M_POS cu_text_fixup);
+         (* DW_AT_high_pc, DW_FORM_addr *)
          WORD (word_ty_mach, ADD ((M_POS cu_text_fixup),
                                   (M_SZ cu_text_fixup)))
        |])
@@ -1160,7 +1191,7 @@ let dwarf_visitor
     if Hashtbl.mem cx.ctxt_item_files item.id
     then
       begin
-        emit_null_die ();
+        log cx "finishing CU and composing headers (%d DIEs collected)" (List.length (!curr_cu_infos));
         finish_cu_and_compose_headers ()
       end
     else ();
@@ -1172,6 +1203,7 @@ let dwarf_visitor
   in
 
   let visit_block_pre (b:Ast.block) : unit =
+    log cx "entering lexical block";
     let fix = Hashtbl.find cx.ctxt_block_fixups b.id in
     let abbrev_code = get_abbrev_code abbrev_lexical_block in
     let block_die =
@@ -1189,6 +1221,7 @@ let dwarf_visitor
 
   let visit_block_post (b:Ast.block) : unit =
     inner.Walk.visit_block_post b;
+    log cx "entering lexical block, terminating with NULL DIE";
     emit_null_die ()
   in
 
@@ -1266,6 +1299,7 @@ let process_crate
   let passes =
     [|
       dwarf_visitor cx Walk.empty_visitor path
+        debug_info_fixup
         cu_aranges cu_pubnames
         cu_infos cu_abbrevs
         cu_lines cu_frames
@@ -1277,13 +1311,6 @@ let process_crate
     then run_passes cx path passes (log cx "%s") crate;
 
     (* Terminate the tables. *)
-    prepend cu_aranges (BYTE 0);
-    prepend cu_pubnames (BYTE 0);
-    prepend cu_infos (BYTE 0);
-    prepend cu_abbrevs (BYTE 0);
-    prepend cu_lines (BYTE 0);
-    prepend cu_frames (BYTE 0);
-
     {
       debug_aranges = SEQ (Array.of_list (List.rev (!cu_aranges)));
       debug_pubnames = SEQ (Array.of_list (List.rev (!cu_pubnames)));

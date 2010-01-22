@@ -669,7 +669,7 @@ let emit_file
   let header = (pe_header
                   ~machine: IMAGE_FILE_MACHINE_I386
                   ~symbol_table_fixup: symtab_fixup
-                  ~number_of_sections: 10L
+                  ~number_of_sections: 6L
                   ~number_of_symbols: 0L
                   ~loader_hdr_fixup: loader_hdr_fixup
                   ~characteristics:[IMAGE_FILE_EXECUTABLE_IMAGE;
@@ -733,6 +733,7 @@ let emit_file
                        ~id: SECTION_ID_DATA
                        ~hdr_fixup: data_fixup)
   in
+(*
   let debug_aranges_header = (pe_section_header
                                 ~id: SECTION_ID_DEBUG_ARANGES
                                 ~hdr_fixup: dw.Dwarf.debug_aranges_fixup)
@@ -741,6 +742,7 @@ let emit_file
                                  ~id: SECTION_ID_DEBUG_PUBNAMES
                                  ~hdr_fixup: dw.Dwarf.debug_pubnames_fixup)
   in
+*)
   let debug_info_header = (pe_section_header
                              ~id: SECTION_ID_DEBUG_INFO
                              ~hdr_fixup: dw.Dwarf.debug_info_fixup)
@@ -749,6 +751,7 @@ let emit_file
                                ~id: SECTION_ID_DEBUG_ABBREV
                                ~hdr_fixup: dw.Dwarf.debug_abbrev_fixup)
   in
+(*
   let debug_line_header = (pe_section_header
                              ~id: SECTION_ID_DEBUG_LINE
                              ~hdr_fixup: dw.Dwarf.debug_line_fixup)
@@ -757,6 +760,7 @@ let emit_file
                               ~id: SECTION_ID_DEBUG_FRAME
                               ~hdr_fixup: dw.Dwarf.debug_frame_fixup)
   in
+*)
   let all_headers = (def_file_aligned
                        all_hdrs_fixup
                        (SEQ
@@ -768,12 +772,16 @@ let emit_file
                             bss_header;
                             import_header;
                             data_header;
+                            (*
                             debug_aranges_header;
                             debug_pubnames_header;
+                            *)
                             debug_info_header;
                             debug_abbrev_header;
+                            (*
                             debug_line_header;
                             debug_frame_header;
+                            *)
                           |]))
   in
 
@@ -795,24 +803,28 @@ let emit_file
                          all_init_data_fixup
                          (SEQ [| import_section; data_section; |]))
   in
+(*
   let debug_aranges_section =
     def_aligned dw.Dwarf.debug_aranges_fixup dw.Dwarf.debug_aranges
   in
   let debug_pubnames_section =
     def_aligned dw.Dwarf.debug_pubnames_fixup dw.Dwarf.debug_pubnames
   in
+*)
   let debug_info_section =
     def_aligned dw.Dwarf.debug_info_fixup dw.Dwarf.debug_info
   in
   let debug_abbrev_section =
     def_aligned dw.Dwarf.debug_abbrev_fixup dw.Dwarf.debug_abbrev
   in
+(*
   let debug_line_section =
     def_aligned dw.Dwarf.debug_line_fixup dw.Dwarf.debug_line
   in
   let debug_frame_section =
     def_aligned dw.Dwarf.debug_frame_fixup dw.Dwarf.debug_frame
   in
+*)
 
   let all_frags = SEQ [| MEMPOS pe_image_base;
                          (def_file_aligned image_fixup
@@ -820,12 +832,12 @@ let emit_file
                                     text_section;
                                     bss_section;
                                     all_init_data;
-                                    debug_aranges_section;
-                                    debug_pubnames_section;
+                                    (* debug_aranges_section; *)
+                                    (* debug_pubnames_section; *)
                                     debug_info_section;
                                     debug_abbrev_section;
-                                    debug_line_section;
-                                    debug_frame_section;
+                                    (* debug_line_section; *)
+                                    (* debug_frame_section; *)
                                     ALIGN_MEM (pe_mem_alignment, MARK) |]))|]
   in
   let buf = Buffer.create 16 in
