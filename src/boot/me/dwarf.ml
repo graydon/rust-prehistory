@@ -948,6 +948,7 @@ let dwarf_visitor
           Hashtbl.add emitted_types ty res;
           res
       in
+
       let record trec =
         let total_layout = layout_ty abi 0L (Ast.TY_rec trec) in
         let fix = new_fixup "record type DIE" in
@@ -1021,6 +1022,7 @@ let dwarf_visitor
           | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
           | Ast.TY_int -> base ("int", DW_ATE_signed, word_sz_int)
           | Ast.TY_rec trec -> record trec
+
           | Ast.TY_chan _ -> unspecified "chan"
           | Ast.TY_port _ -> unspecified "port"
           | Ast.TY_proc -> unspecified "proc"

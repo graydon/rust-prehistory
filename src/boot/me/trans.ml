@@ -960,7 +960,7 @@ let trans_visitor
     let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
 
       iflog (fun _ -> annotate "spawn proc: copy args");
-      copy_fn_args proc_cell in_slots arg_layouts args;
+      copy_fn_args proc_cell in_slots arg_layouts args [||];
       iflog (fun _ -> annotate "spawn proc: upcall");
       trans_upcall "upcall_new_proc" proc_cell
         [|
@@ -1832,7 +1832,7 @@ let trans_visitor
     let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
       trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots arg_layouts args
+        dst_cell fn_cell in_slots arg_layouts args [||]
 
   and trans_call_pred_and_check
       (constr:Ast.constr)
@@ -1854,7 +1854,7 @@ let trans_visitor
     let arg_layouts = layout_pred_call_tup abi tpred in
       iflog (fun _ -> annotate "predicate call");
       trans_call true (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots arg_layouts args;
+        dst_cell fn_cell in_slots arg_layouts args [||];
       iflog (fun _ -> annotate "predicate check/fail");
       let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
       let errstr = Printf.sprintf "predicate check: %a"
@@ -1885,14 +1885,21 @@ let trans_visitor
         Il.Addr (a, _) -> Il.CodeAddr a
       | _ -> bug () "loading code from register"
 
-  and copy_fn_args output_cell in_slots arg_layouts args =
+  and copy_fn_args
+      (output_cell:Il.cell)
+      (in_slots:Ast.slot array)
+      (arg_layouts:layout array)
+      (args:Ast.atom array)
+      (extra_args:Il.operand array)
+      : unit =
     let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
     let n_layouts = Array.length arg_layouts in
+    let n_extras = Array.length extra_args in
       assert (n_layouts == ((Array.length args) + 2));
       for i = 0 to n_layouts - 1 do
         iflog (fun _ ->
-                 annotate (Printf.sprintf "fn-call arg %d of %d"
-                             i n_layouts));
+                 annotate (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
+                             i n_layouts n_extras));
         match i with
             0 -> trans_arg0 (param_cell i None) output_cell
           | 1 -> trans_arg1 (param_cell i None)
@@ -1911,10 +1918,11 @@ let trans_visitor
       (in_slots:Ast.slot array)
       (arg_layouts:layout array)
       (args:Ast.atom array)
+      (extra_args:Il.operand array)
       : unit =
     let implicit_args = 2 in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args output_cell in_slots arg_layouts args;
+      copy_fn_args output_cell in_slots arg_layouts args  extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* 
        * FIXME: we need to actually handle writing to an already-initialised slot. Currently
