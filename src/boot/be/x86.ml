@@ -547,7 +547,6 @@ let unwind_glue
 
 let fn_prologue
     (e:Il.emitter)
-    (argsz:int64)
     (framesz:int64)
     (spill_fixup:fixup)
     (callsz:int64)
@@ -559,13 +558,12 @@ let fn_prologue
    *  - load esp into eax
    *  - subtract sz from eax
    *  - load bot = proc->stk->data (bottom of stack chunk)
-   *  - add upcall gap to bot
    *  - compare bot to eax
    *  - fwd jump if bot <= eax
-   *  - emit upcall grow_proc
+   *  - emit prologue-upcall grow_proc
    *  - fwd jump target
-   *  - save esp to ebp
    *  - subtract frame size from esp
+   *  - zero frame (for gc)
    *)
   let ecx_n = word_n (h ecx) in
   let emit = Il.emit e in
@@ -578,29 +576,24 @@ let fn_prologue
    *  | ...           |
    *  | caller frame  |
    *  | + spill       |
-   *  +---------------+ <-- top of call region
    *  | caller arg K  |
    *  | ...           |
    *  | caller arg 0  | 
-   *  | retpc         | <-- sp we receive, top of frame-base
+   *  | retpc         | <-- sp we received, top of callee frame
    *  | callee save 1 |
    *  | ...           |
-   *  | callee save N |
-   *  +---------------+ <-- base of call region, soon-to-be ebp
-   *  | callee frame  |     and sp value by the time we call 'grow'
+   *  | callee save N | <-- ebp and esp after saving callee-saves
+   *  | ...           |
+   *  | callee frame  |
    *  | + spill       |
    *  | callee arg J  |
    *  | ...           |
-   *  | callee arg 0  |
-   *  +---------------+ <-- callee frame sz
+   *  | callee arg 0  | <-- bottom of callee frame
    *  | next retpc    |
    *  | next save 1   |
    *  | ...           |
    *  | next save N   | <-- bottom of region we must reserve
    *  | ...           |
-   * 
-   * A "call region" consists of a "frame base" and a set of caller args.
-   * It's the region we have to *transplant* when we run out of stack.
    * 
    * A "frame base" is the retpc and set of callee-saves.
    * 
@@ -621,29 +614,17 @@ let fn_prologue
     (Asm.ADD (callee_frame_sz, (Asm.IMM frame_base_sz)))
   in
 
-  (* Amount of memory to copy, starting from sp, if we grow. Add in
-   * one more term of frame_base_sz to handle the 'grow' upcall in
-   * progress that'll exist when we memcpy.
-   *)
-  let call_region_sz = Asm.IMM (add argsz frame_base_sz) in
-
-  (* Amount we'll need in a new chunk, minimum, if we grow. *)
-  let reserve_new_sz =
-    (Asm.ADD (call_region_sz,
-              Asm.ADD (callee_frame_sz, call_region_sz)))
-  in
     (* We must have room to save regs on entry. *)
     save_callee_saves e;
 
-    (* Save pre-grow esp and ebp to esi and edi, for use after-the-grow.      *)
-    mov (rc ebp) (ro esp);                        (* Need an fp to do anything   *)
+    mov (rc ebp) (ro esp);                        (* Establish frame base.   *)
 
     mov (rc eax) (ro esp);                        (* eax = esp               *)
     emit (Il.binary Il.SUB (rc eax)
             (ro eax) (imm reserve_current_sz));
     mov (rc ecx) (c proc_ptr);                    (* ecx = proc              *)
     mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk         *)
-    emit (Il.binary Il.ADD (rc ecx) (ro ecx)      (* ecx = &proc->stk->data[0]   *)
+    emit (Il.binary Il.ADD (rc ecx) (ro ecx)      (* ecx = &stk->data[0]     *)
             (imm (word_off_n Abi.stk_field_data)));
 
     (* Compare and possibly upcall to 'grow'. *)
@@ -656,14 +637,17 @@ let fn_prologue
 
       emit (Il.jmp Il.JBE Il.CodeNone);
 
-      emit_void_prologue_call e nabi grow_proc_fixup [| imm reserve_new_sz |];
+      emit_void_prologue_call e nabi grow_proc_fixup [| imm reserve_current_sz |];
 
       Il.patch_jump e jmp_pc e.Il.emit_pc;
 
       (* Now set up a frame, wherever we landed. *)
       emit (Il.binary Il.SUB (rc esp) (ro esp) (imm callee_frame_sz));
 
-      (* Zero the frame (FIXME: this is awful, will go away when we have proper CFI). *)
+      (* Zero the frame
+       * 
+       * FIXME: this is awful, will go away when we have proper CFI.
+       *)
       mov (rc edi) (ro esp);
       mov (rc ecx) (imm callee_frame_sz);
       emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
@@ -1077,16 +1061,13 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
    * general rm_r path, we don't handle abs-in, and at the ABI level we
    * don't claim to support abs-in for data, only code.
    * 
-   * Code references, of course, are special.
+   * Code references are special though.
    * 
    * In the case of control transfer (jmp, call) the instruction
    * semantics are defined to treat the deref-disp32 (normally
-   * absolute) addressing mode as though it means
-   * absolute-indirect.
+   * absolute) addressing mode as though it means absolute-indirect.
    * 
-   * How do you encode an absolute code reference? As a pcrel, of course.
-   * which doesn't exist for data. Har har.
-   *)
+   * Absolute code references are done as pcrel, unlike data.  *)
 
   match q with
       Il.Call c ->

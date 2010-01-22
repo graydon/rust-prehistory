@@ -585,11 +585,11 @@ let trans_visitor
       log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
     done
 
-  and trans_glue_frame_entry (argsz:int64) (callsz:int64) (spill:fixup) : unit =
+  and trans_glue_frame_entry (callsz:int64) (spill:fixup) : unit =
     let framesz = 0L in
       push_new_emitter ();
       iflog (fun _ -> annotate "prologue");
-      abi.Abi.abi_emit_fn_prologue (emitter()) argsz framesz spill callsz nabi_rust (upcall_fixup "upcall_grow_proc");
+      abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill callsz nabi_rust (upcall_fixup "upcall_grow_proc");
       iflog (fun _ -> annotate "finished prologue");
 
   and capture_emitted_glue (name:string) (fix:fixup) (spill:fixup) (g:glue) : unit =
@@ -639,11 +639,10 @@ let trans_visitor
    * one pointer arg and reutrn nothing.
    *)
 
-  and trans_mem_glue_frame_entry (n_incoming_args:int) (n_outgoing_args:int) (spill:fixup) : unit =
+  and trans_mem_glue_frame_entry (n_outgoing_args:int) (spill:fixup) : unit =
     let isz = cx.ctxt_abi.Abi.abi_implicit_args_sz in
-    let argsz = Int64.add isz (word_n n_incoming_args) in
     let callsz = Int64.add isz (word_n n_outgoing_args) in
-      trans_glue_frame_entry argsz callsz spill
+      trans_glue_frame_entry callsz spill
 
   and get_mem_glue (g:glue) (prefix:unit -> string) (inner:Il.addr -> unit) : fixup =
     match htab_search cx.ctxt_glue_code g with
@@ -662,7 +661,7 @@ let trans_visitor
                              code_vregs_and_spill = None } in
             let spill = new_fixup ("glue spill: " ^ prefix) in
               htab_put cx.ctxt_glue_code g tmp_code;
-              trans_mem_glue_frame_entry 1 1 spill;
+              trans_mem_glue_frame_entry 1 spill;
               let (arg:Il.addr) = fp_imm arg0_disp in
                 inner arg;
                 Hashtbl.remove cx.ctxt_glue_code g;
@@ -2204,8 +2203,6 @@ let trans_visitor
 
   let trans_frame_entry (fnid:node_id) : unit =
     let frame_fns = get_frame_glue_fns fnid in
-    let header = Hashtbl.find cx.ctxt_header_layouts fnid in
-    let argsz = Int64.add cx.ctxt_abi.Abi.abi_implicit_args_sz header.layout_size in
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
@@ -2213,7 +2210,7 @@ let trans_visitor
       push_new_emitter ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter())
-                                   argsz framesz
+                                   framesz
                                    spill_fixup
                                    callsz
                                    nabi_rust
