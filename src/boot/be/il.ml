@@ -53,7 +53,7 @@ type code =
 
 type typed_reg = (reg * scalar_ty);;
 type typed_addr = (addr * referent_ty);;
-type typed_imm = (Asm.expr64 * scalar_ty);;
+type typed_imm = (Asm.expr64 * ty_mach);;
 
 type cell =
     Reg of typed_reg
@@ -188,6 +188,20 @@ let cell_scalar_ty (c:cell) : scalar_ty =
     | Addr (_, rt) -> AddrTy rt
 ;;
 
+let bits_of_ty_mach (tm:ty_mach) : bits =
+  match tm with
+    | TY_u8 -> Bits8
+    | TY_s8 -> Bits8
+    | TY_u16 -> Bits16
+    | TY_s16 -> Bits16
+    | TY_u32 -> Bits32
+    | TY_s32 -> Bits32
+    | TY_u64 -> Bits64
+    | TY_s64 -> Bits64
+    | TY_f32 -> Bits32
+    | TY_f64 -> Bits64
+;;
+
 let operand_size (op:operand) (word_bits:bits) : bits =
 
   let scalar_ty_size (st:scalar_ty) : bits =
@@ -205,7 +219,7 @@ let operand_size (op:operand) (word_bits:bits) : bits =
 
   match op with
       Cell cell -> cell_size cell
-    | Imm (_, st) -> scalar_ty_size st
+    | Imm (_, tm) -> bits_of_ty_mach tm
 ;;
 
 (* Processor. *)
@@ -415,7 +429,7 @@ let string_of_operand (f:hreg_formatter) (op:operand) : string =
     | Imm (i, ty) ->
         if !log_iltypes
         then
-          Printf.sprintf "%s:%s" (string_of_expr64 i) (string_of_scalar_ty ty)
+          Printf.sprintf "%s:%s" (string_of_expr64 i) (string_of_ty_mach ty)
         else
           Printf.sprintf "%s" (string_of_expr64 i)
 ;;

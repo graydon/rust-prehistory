@@ -54,11 +54,11 @@ let trans_visitor
   in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
-  let imm_of_ty (i:int64) (bits:Il.bits) : Il.operand =
-    Il.Imm (Asm.IMM i, Il.ValTy bits)
+  let imm_of_ty (i:int64) (tm:ty_mach) : Il.operand =
+    Il.Imm (Asm.IMM i, tm)
   in
 
-  let imm (i:int64) : Il.operand = imm_of_ty i word_bits in
+  let imm (i:int64) : Il.operand = imm_of_ty i word_ty_mach in
   let marker = imm 0xdeadbeefL in
   let one = imm 1L in
   let zero = imm 0L in
@@ -216,7 +216,7 @@ let trans_visitor
         regty
     in
       match op with
-          Il.Imm  (_, st) -> do_mov st
+          Il.Imm  (_, tm) -> do_mov (Il.ValTy (Il.bits_of_ty_mach tm))
         | Il.Cell (Il.Reg rt) -> rt
         | Il.Cell (Il.Addr (_, Il.ScalarTy st)) -> do_mov st
         | Il.Cell (Il.Addr (_, rt)) ->
@@ -326,38 +326,6 @@ let trans_visitor
 
   in
 
-  (* FIXME: `i' should have type (int64 | float) or something like that *)
-  let trans_mach (mach:ty_mach) (i:int64) : Il.operand =
-    match mach with
-        TY_u8 -> imm_of_ty i Il.Bits8
-      | TY_u16 -> imm_of_ty i Il.Bits16
-      | TY_u32 -> imm_of_ty i Il.Bits32
-      (* | TY_u64 -> ... *)
-      | TY_s8 -> imm_of_ty i Il.Bits8
-      | TY_s16 -> imm_of_ty i Il.Bits16
-      | TY_s32 -> imm_of_ty i Il.Bits32
-      (*
-      | TY_s64 -> ...
-      | TY_f32 -> ...
-      | TY_f64 -> ...
-      *)
-      | _ -> imm 0xbadbeefL
-  in
-
-  let iter_block_slots
-      (block_id:node_id)
-      (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
-      : unit =
-    let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
-      Hashtbl.iter
-        begin
-          fun key slot_id ->
-            let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
-              fn key slot_id slot
-        end
-        block_slots
-  in
-
   let iter_frame_slots
       (fn_id:node_id)
       (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
@@ -413,6 +381,18 @@ let trans_visitor
             let (addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, slot_referent_type abi slot), slot)
+
+      | (Ast.TY_str,
+         Ast.COMP_atom at) ->
+          let atop = trans_atom at in
+          let unit_sz = 1L in
+          let reg = next_vreg () in
+          let t = Il.Reg (reg, Il.ValTy word_bits) in
+          let slot = interior_slot (Ast.TY_mach TY_u8) in
+            emit (Il.binary Il.UMUL t atop (imm unit_sz));
+            let (addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
+            let elt_addr = trans_bounds_check addr (Il.Cell t) in
+              (Il.Addr (elt_addr, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
 
       | _ -> bug () "unhandled form of lval_ext in trans_lval_ext"
 
@@ -520,7 +500,7 @@ let trans_visitor
           fix
     in
       (* FIXME: wrong operand type. *)
-      Il.Imm (Asm.M_POS fix, word_ty)
+      Il.Imm (Asm.M_POS fix, word_ty_mach)
 
   and trans_static_string (s:string) : Il.operand =
     trans_data_frag (DATA_str s) (fun _ -> Asm.ZSTRING s)
@@ -552,7 +532,7 @@ let trans_visitor
               | Ast.LIT_bool true -> imm_true
               | Ast.LIT_char c -> imm (Int64.of_int (Char.code c))
               | Ast.LIT_int (i, _) -> imm i
-              | Ast.LIT_mach (m, n, _) -> trans_mach m n
+              | Ast.LIT_mach (m, n, _) -> imm_of_ty n m
 
               | _ -> marker
           end

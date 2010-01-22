@@ -687,6 +687,9 @@ let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
             | (Ast.TY_vec slot, Ast.COMP_atom _) ->
                 slot
 
+            | (Ast.TY_str, Ast.COMP_atom _) ->
+                interior_slot (Ast.TY_mach TY_u8)
+
             | (_,_) -> bug () "unhandled form of lval-ext"
 ;;
 

@@ -261,14 +261,14 @@ let vreg (e:Il.emitter) : (Il.reg * Il.cell) =
     (vr, (Il.Reg (vr, (Il.ValTy word_bits))))
 ;;
 let imm (x:Asm.expr64) : Il.operand =
-  Il.Imm (x, Il.ValTy word_bits)
+  Il.Imm (x, word_ty)
 ;;
 let immi (x:int64) : Il.operand =
   imm (Asm.IMM x)
 ;;
 
 let imm_byte (x:Asm.expr64) : Il.operand =
-  Il.Imm (x, Il.ValTy Il.Bits8)
+  Il.Imm (x, TY_u8)
 ;;
 let immi_byte (x:int64) : Il.operand =
   imm_byte (Asm.IMM x)
@@ -803,8 +803,12 @@ let (abi:Abi.abi) =
  *)
 
 
-let imm_is_byte (n:int64) : bool =
+let imm_is_signed_byte (n:int64) : bool =
   (i64_le (-128L) n) && (i64_le n 127L)
+;;
+
+let imm_is_unsigned_byte (n:int64) : bool =
+  (i64_le (0L) n) && (i64_le n 255L)
 ;;
 
 
@@ -846,7 +850,7 @@ let rm_r (c:Il.cell) (r:int) : Asm.frag =
                   seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
 
               (* The next two are just to save the relaxation system some churn. *)
-              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM n)) when imm_is_byte n ->
+              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM n)) when imm_is_signed_byte n ->
                   seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
                     (Asm.WORD (TY_s8, Asm.IMM n))
@@ -883,13 +887,25 @@ let insn_rm_r_imm (op:int) (c:Il.cell) (r:int) (ty:ty_mach) (i:Asm.expr64) : Asm
 
 let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64) : Asm.frag =
   match i with
-      Asm.IMM n when imm_is_byte n ->
+      Asm.IMM n when imm_is_signed_byte n ->
         insn_rm_r_imm op8 c r TY_s8 i
     | _ ->
         Asm.new_relaxation
           [|
             insn_rm_r_imm op32 c r TY_s32 i;
             insn_rm_r_imm op8 c r TY_s8 i
+          |]
+;;
+
+let insn_rm_r_imm_u8_u32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64) : Asm.frag =
+  match i with
+      Asm.IMM n when imm_is_unsigned_byte n ->
+        insn_rm_r_imm op8 c r TY_u8 i
+    | _ ->
+        Asm.new_relaxation
+          [|
+            insn_rm_r_imm op32 c r TY_u32 i;
+            insn_rm_r_imm op8 c r TY_u8 i
           |]
 ;;
 
@@ -969,8 +985,14 @@ let is_rm8 (c:Il.cell) : bool =
 (* FIXME: tighten imm-based dispatch by imm type. *)
 let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
   match (a,b) with
-      (Il.Cell c, Il.Imm (i, _)) when is_rm32 c ->
-        insn_rm_r_imm_s8_s32 0x83 0x81 c slash7 i
+      (Il.Cell c, Il.Imm (i, TY_s8)) when is_rm8 c ->
+        insn_rm_r_imm 0x80 c slash7 TY_s8 i
+    | (Il.Cell c, Il.Imm (i, TY_u8)) when is_rm8 c ->
+        insn_rm_r_imm 0x80 c slash7 TY_u8 i
+    | (Il.Cell c, Il.Imm (i, t)) when is_rm32 c ->
+        if mach_is_signed t
+        then insn_rm_r_imm_s8_s32 0x83 0x81 c slash7 i
+        else insn_rm_r_imm_u8_u32 0x83 0x81 c slash7 i
     | (Il.Cell c, Il.Cell (Il.Reg (Il.Hreg r, _))) ->
         insn_rm_r 0x39 c (reg r)
     | (Il.Cell (Il.Reg (Il.Hreg r, _)), Il.Cell c) ->
@@ -1028,11 +1050,15 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
         Asm.SEQ [| Asm.BYTE 0x0f;
                    insn_rm_r 0xbe src_cell (reg r) |]
 
-    (* m8 <- imm8 *)
+    (* m8 <- imm8 (signed) *)
     | (_, _, Il.Imm ((Asm.IMM n), _))
-        when is_m8 dst && imm_is_byte n ->
-        let t = if signed then TY_u8 else TY_s8 in
-          insn_rm_r_imm 0xc6 dst slash0 t (Asm.IMM n)
+        when is_m8 dst && imm_is_signed_byte n && signed ->
+          insn_rm_r_imm 0xc6 dst slash0 TY_s8 (Asm.IMM n)
+
+    (* m8 <- imm8 (unsigned) *)
+    | (_, _, Il.Imm ((Asm.IMM n), _))
+        when is_m8 dst && imm_is_unsigned_byte n && (not signed) ->
+          insn_rm_r_imm 0xc6 dst slash0 TY_u8 (Asm.IMM n)
 
     (* rm32 <- imm32 *)
     | (_, _, Il.Imm (i, _)) when is_rm32 dst || is_r8 dst ->
@@ -1098,7 +1124,7 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
     | Il.Push (Il.Cell c) when is_rm32 c ->
         insn_rm_r 0xff c slash6
 
-    | Il.Push (Il.Imm (Asm.IMM i, _)) when imm_is_byte i ->
+    | Il.Push (Il.Imm (Asm.IMM i, _)) when imm_is_unsigned_byte i ->
         Asm.SEQ [| Asm.BYTE 0x6a; Asm.WORD (TY_u8, (Asm.IMM i)) |]
 
     | Il.Push (Il.Imm (i, _)) ->
