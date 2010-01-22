@@ -597,9 +597,7 @@ let trans_visitor
        *)
       let arg_layouts = layout_fn_call_tup abi tsig in
       let in_slots = tsig.Ast.sig_input_slots in
-      let implicit_args = 2 in
-        drop_arg_slots in_slots arg_layouts implicit_args;
-
+        drop_arg_slots in_slots arg_layouts;
         iflog (fun _ -> annotate "assume 'exited' state");
         trans_void_upcall "upcall_exit" [| |];
         capture_emitted_glue "proc glue" fix spill g;
@@ -1843,22 +1841,24 @@ let trans_visitor
         trans_cond_fail errstr jmp
 
 
-  and trans_arg0 (param_cell:Il.cell) (output_cell:Il.cell) =
+  and trans_arg0 (arg_cell:Il.cell) (output_cell:Il.cell) : unit =
     (* Emit arg0 of any call: the output slot. *)
+    iflog (fun _ -> annotate "fn-call arg 0: output slot");
     trans_init_slot_from_cell
-      param_cell (word_write_alias_slot abi)
+      arg_cell (word_write_alias_slot abi)
       output_cell (word_slot abi)
 
-  and trans_arg1 (param_cell:Il.cell) =
+  and trans_arg1 (arg_cell:Il.cell) : unit =
     (* Emit arg1 or any call: the process pointer. *)
+    iflog (fun _ -> annotate "fn-call arg 1: process pointer");
     trans_init_slot_from_cell
-      param_cell (word_slot abi)
+      arg_cell (word_slot abi)
       abi.Abi.abi_pp_cell (word_slot abi)
 
-  and trans_argN n (param_cell:Il.cell) slots args =
+  and trans_argN (arg_cell:Il.cell) (arg_slot:Ast.slot) (arg:Ast.atom) : unit =
     trans_init_slot_from_atom
-      param_cell slots.(n)
-      args.(n)
+      arg_cell arg_slot
+      arg
 
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
@@ -1867,24 +1867,26 @@ let trans_visitor
 
   and copy_fn_args
       (output_cell:Il.cell)
-      (in_slots:Ast.slot array)
+      (arg_slots:Ast.slot array)
       (arg_layouts:layout array)
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
-    let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
+    assert (Array.length args == Array.length arg_slots);
     let n_layouts = Array.length arg_layouts in
     let n_extras = Array.length extra_args in
       assert (n_layouts == ((Array.length args) + 2));
-      for i = 0 to n_layouts - 1 do
-        iflog (fun _ ->
-                 annotate (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
-                             i n_layouts n_extras));
-        match i with
-            0 -> trans_arg0 (param_cell i None) output_cell
-          | 1 -> trans_arg1 (param_cell i None)
-          | _ -> trans_argN (i-2) (param_cell i (Some (i-2))) in_slots args
-      done
+      trans_arg0 (implicit_arg_cell arg_layouts 0) output_cell;
+      trans_arg1 (implicit_arg_cell arg_layouts 1);
+      Array.iteri
+        begin
+          fun i slot ->
+            iflog (fun _ ->
+                     annotate (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
+                                 i n_layouts n_extras));
+            trans_argN (arg_cell arg_slots arg_layouts i) slot args.(i)
+        end
+        arg_slots
 
   and call_code (code:Il.code) : unit =
     let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
@@ -1895,14 +1897,13 @@ let trans_visitor
       (logname:(unit -> string))
       (output_cell:Il.cell)
       (callee_cell:Il.cell)
-      (in_slots:Ast.slot array)
+      (arg_slots:Ast.slot array)
       (arg_layouts:layout array)
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
-    let implicit_args = 2 in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args output_cell in_slots arg_layouts args  extra_args;
+      copy_fn_args output_cell arg_slots arg_layouts args  extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* 
        * FIXME: we need to actually handle writing to an already-initialised slot. Currently
@@ -1910,31 +1911,34 @@ let trans_visitor
        * writing to an interior output slot, but we'll leak any exteriors as we do that. 
        *)
       call_code (code_of_cell callee_cell);
-      drop_arg_slots in_slots arg_layouts implicit_args
+      drop_arg_slots arg_slots arg_layouts
 
-  and param_cell_full
-      (in_slots:Ast.slot array)
+  and implicit_arg_cell
       (arg_layouts:layout array)
-      (layout:int)
-      (input_opt:int option)
+      (arg:int)
       : Il.cell =
-    let param_addr = sp_imm arg_layouts.(layout).layout_offset in
-    let param_referent_ty =
-      match input_opt with
-          None -> Il.ScalarTy (Il.voidptr_t)
-        | Some i -> slot_referent_type abi in_slots.(i)
-    in
-      Il.Addr (param_addr, param_referent_ty)
+    assert (arg < 2);
+    let arg_addr = sp_imm arg_layouts.(arg).layout_offset in
+    let arg_referent_ty = Il.ScalarTy (Il.voidptr_t) in
+      Il.Addr (arg_addr, arg_referent_ty)
+
+  and arg_cell
+      (arg_slots:Ast.slot array)
+      (arg_layouts:layout array)
+      (arg:int)
+      : Il.cell =
+    (* NB: first 2 layouts account for implicit args. *)
+    let arg_addr = sp_imm arg_layouts.(2 + arg).layout_offset in
+    let arg_referent_ty = slot_referent_type abi arg_slots.(arg) in
+      Il.Addr (arg_addr, arg_referent_ty)
 
   and drop_arg_slots
-      (in_slots:Ast.slot array)
+      (arg_slots:Ast.slot array)
       (arg_layouts:layout array)
-      (implicit_args:int)
       : unit =
-    let param_cell li ii = param_cell_full in_slots arg_layouts li ii in
-    for i = implicit_args to arr_max arg_layouts do
+    for i = 0 to arr_max arg_slots do
       iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
-      drop_slot (param_cell i (Some (i-implicit_args))) in_slots.(i-implicit_args) None
+      drop_slot (arg_cell arg_slots arg_layouts i) arg_slots.(i) None
     done
 
 
