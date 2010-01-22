@@ -217,7 +217,7 @@ let rec resolve_frag (sess:Session.sess) (frag:frag) : unit =
     try
       Buffer.reset dummy_buffer;
       resolve_frag_full dummy_collector frag;
-      lower_frag true dummy_buffer frag;
+      lower_frag sess true dummy_buffer frag;
       false
     with
         Relax_more r ->
@@ -320,6 +320,7 @@ and resolve_frag_full (relaxation_collector:relaxation -> unit) (frag:frag)
     resolve_frag frag
 
 and lower_frag
+    ~(sess:Session.sess)
     ~(lsb0:bool)
     ~(buf:Buffer.t)
     ~(it:frag)
@@ -433,7 +434,7 @@ and lower_frag
         MARK -> ()
 
       | SEQ frags ->
-          Array.iter (lower_frag_2 lsb0 buf) frags
+          Array.iter (lower_frag_2 sess lsb0 buf) frags
 
       | PAD c ->
           for i = 1 to c do
@@ -447,22 +448,29 @@ and lower_frag
       | BYTE i -> byte i
 
       | BYTES bs ->
+          log sess "lowering %d bytes" (Array.length bs);
           Array.iter byte bs
 
       | CHAR c ->
+          log sess "lowering char: %c" c;
           Buffer.add_char buf c
 
       | STRING s ->
+          log sess "lowering string: %s" s;
           Buffer.add_string buf s
 
       | ZSTRING s ->
+          log sess "lowering zstring: %s" s;
           Buffer.add_string buf s;
           byte 0
 
       | ULEB128 e -> uleb e
       | SLEB128 e -> sleb e
 
-      | WORD (m,e) -> word (bytes_of_ty_mach m) (mach_is_signed m) e
+      | WORD (m,e) ->
+          log sess "lowering word %s"
+            (string_of_ty_mach m);
+          word (bytes_of_ty_mach m) (mach_is_signed m) e
 
       | ALIGN_FILE (n, frag) ->
           let spill = (Buffer.length buf) mod n in
@@ -470,13 +478,16 @@ and lower_frag
             for i = 1 to pad do
               Buffer.add_char buf '\x00'
             done;
-            lower_frag_2 lsb0 buf frag
+            lower_frag_2 sess lsb0 buf frag
 
-      | ALIGN_MEM (_, i) -> lower_frag_2 lsb0 buf i
-      | DEF (_, i) ->  lower_frag_2 lsb0 buf i;
+      | ALIGN_MEM (_, i) -> lower_frag_2 sess lsb0 buf i
+      | DEF (f, i) ->
+          log sess "lowering fixup: %s" f.fixup_name;
+          lower_frag_2 sess lsb0 buf i;
+
       | RELAX rel ->
           try
-            lower_frag_2 lsb0 buf rel.relax_options.(!(rel.relax_choice))
+            lower_frag_2 sess lsb0 buf rel.relax_options.(!(rel.relax_choice))
           with
               Bad_fit _ -> raise (Relax_more rel)
 
@@ -499,9 +510,8 @@ and lower_frag
 *)
 and
     (* Some odd recursion bug? Unifier gets sad without this indirection. *)
-    lower_frag_2 lsb0 buf i = lower_frag lsb0 buf i
+    lower_frag_2 sess lsb0 buf i = lower_frag sess lsb0 buf i
 ;;
-
 
 let fold_flags (f:'a -> int64) (flags:'a list) : int64 =
   List.fold_left (Int64.logor) 0x0L (List.map f flags)

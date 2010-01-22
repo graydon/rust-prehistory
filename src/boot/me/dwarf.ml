@@ -813,6 +813,13 @@ let dwarf_visitor
       | Il.Bits32 -> TY_u32
       | Il.Bits64 -> TY_u64
   in
+  let (signed_word_ty_mach:ty_mach) =
+    match word_bits with
+        Il.Bits8 -> TY_s8
+      | Il.Bits16 -> TY_s16
+      | Il.Bits32 -> TY_s32
+      | Il.Bits64 -> TY_s64
+  in
 
   let path_name _ = Ast.fmt_to_str Ast.fmt_name (Walk.path_to_name path) in
 
@@ -866,7 +873,7 @@ let dwarf_visitor
   in
 
   let dw_form_ref_addr (fix:fixup) : Asm.frag =
-    WORD (word_ty_mach,
+    WORD (signed_word_ty_mach,
           SUB ((M_POS fix), M_POS cu_info_fixup))
   in
 
@@ -1083,9 +1090,9 @@ let dwarf_visitor
       (SEQ [|
          uleb abbrev_code;
          ZSTRING name;
-         WORD (TY_u32, M_POS cu_text_fixup);
-         WORD (TY_u32, ADD ((M_POS cu_text_fixup),
-                            (M_SZ cu_text_fixup)))
+         WORD (word_ty_mach, M_POS cu_text_fixup);
+         WORD (word_ty_mach, ADD ((M_POS cu_text_fixup),
+                                  (M_SZ cu_text_fixup)))
        |])
     in
       curr_cu_infos := [cu_info];
@@ -1102,9 +1109,9 @@ let dwarf_visitor
          (* DW_AT_name *)
          ZSTRING (path_name());
          (* DW_AT_low_pc *)
-         WORD (TY_u32, M_POS fix);
+         WORD (word_ty_mach, M_POS fix);
          (* DW_AT_high_pc *)
-         WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))));
+         WORD (word_ty_mach, (ADD ((M_POS fix), (M_SZ fix))));
          (* DW_AT_frame_base *)
          dw_form_block1 [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |];
          (* DW_AT_return_addr *)
@@ -1153,6 +1160,7 @@ let dwarf_visitor
     if Hashtbl.mem cx.ctxt_item_files item.id
     then
       begin
+        emit_null_die ();
         finish_cu_and_compose_headers ()
       end
     else ();
@@ -1170,9 +1178,9 @@ let dwarf_visitor
       SEQ [|
         uleb abbrev_code;
          (* DW_AT_low_pc *)
-         WORD (TY_u32, M_POS fix);
+         WORD (word_ty_mach, M_POS fix);
          (* DW_AT_high_pc *)
-         WORD (TY_u32, (ADD ((M_POS fix), (M_SZ fix))));
+         WORD (word_ty_mach, (ADD ((M_POS fix), (M_SZ fix))));
       |]
     in
       emit_die block_die;
@@ -1185,6 +1193,37 @@ let dwarf_visitor
   in
 
   let visit_slot_identified_pre (s:Ast.slot identified) : unit =
+    begin
+      match htab_search cx.ctxt_slot_keys s.id with
+          None
+        | Some Ast.KEY_temp _ -> ()
+        | Some Ast.KEY_ident ident ->
+            begin
+              let abbrev_code = get_abbrev_code abbrev_variable in
+              let resolved_slot = Hashtbl.find cx.ctxt_all_slots s.id in
+              let emit_var_die slot_loc =
+                let var_die =
+                  SEQ [|
+                    uleb abbrev_code;
+                    (* DW_AT_name: DW_FORM_string *)
+                    ZSTRING ident;
+                    (* DW_AT_location:  DW_FORM_block1 *)
+                    dw_form_block1 slot_loc;
+                    (* DW_AT_type: DW_FORM_ref_addr *)
+                    ref_slot_die resolved_slot
+                  |]
+                in
+                  emit_die var_die;
+              in
+                match htab_search cx.ctxt_slot_layouts s.id with
+                    Some layout ->
+                      emit_var_die
+                        [| DW_OP_fbreg (Asm.IMM layout.layout_offset) |]
+                  | None ->
+                      (* FIXME: handle slots assigned to vregs. *)
+                      ()
+            end
+    end;
     inner.Walk.visit_slot_identified_pre s
   in
 
@@ -1236,6 +1275,15 @@ let process_crate
     log cx "emitting DWARF records";
     if cx.ctxt_sess.Session.sess_emit_dwarf
     then run_passes cx path passes (log cx "%s") crate;
+
+    (* Terminate the tables. *)
+    prepend cu_aranges (BYTE 0);
+    prepend cu_pubnames (BYTE 0);
+    prepend cu_infos (BYTE 0);
+    prepend cu_abbrevs (BYTE 0);
+    prepend cu_lines (BYTE 0);
+    prepend cu_frames (BYTE 0);
+
     {
       debug_aranges = SEQ (Array.of_list (List.rev (!cu_aranges)));
       debug_pubnames = SEQ (Array.of_list (List.rev (!cu_pubnames)));

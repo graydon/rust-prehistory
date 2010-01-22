@@ -972,7 +972,7 @@ let emit_file
   let buf = Buffer.create 16 in
   let out = open_out_bin sess.Session.sess_out in
     resolve_frag sess segments;
-    lower_frag ~lsb0: true ~buf ~it: segments;
+    lower_frag ~sess ~lsb0: true ~buf ~it: segments;
     Buffer.output_buffer out buf;
     flush out;
     close_out out
