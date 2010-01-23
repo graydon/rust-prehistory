@@ -476,6 +476,8 @@ and crate = crate' identified
 
 (***********************************************************************)
 
+(* FIXME (bug 541525): finish all parts with ?foo? as their output. *)
+
 let fmt = Format.fprintf;;
 
 let fmt_ident (ff:Format.formatter) (i:ident) : unit =
@@ -640,7 +642,6 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_iso tiso -> fmt_iso ff tiso
   | TY_idx idx -> fmt ff "idx#%d" idx
 
-  (* FIXME: finish these as needed. *)
   | TY_mod _ -> fmt ff "?mod?"
   | TY_constrained _ -> fmt ff "?constrained?"
   | TY_pred _ -> fmt ff "?pred?"
@@ -984,7 +985,6 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_constrs ff constrs;
           fmt ff ";"
 
-      (* FIXME: finish these. *)
       | STMT_for _ -> fmt ff "?stmt_for?"
       | STMT_foreach _ -> fmt ff "?stmt_foreach?"
       | STMT_put _ -> fmt ff "?stmt_put?"

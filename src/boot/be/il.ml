@@ -1,6 +1,6 @@
 open Common;;
 
-(* FIXME: thread a session object through this eventually. *)
+(* FIXME (bug 541581): thread a session object through this eventually. *)
 let log_iltypes = ref false;;
 
 (* IL type system, very rudimentary. *)
@@ -208,7 +208,8 @@ let operand_size (op:operand) (word_bits:bits) : bits =
     match st with
         ValTy bits -> bits
       | AddrTy _ -> word_bits
-      | NilTy -> word_bits (* FIXME: is there some way around this case? *)
+          (* FIXME (bug 541565): is there some way around this case? *)
+      | NilTy -> word_bits
   in
 
   let cell_size (c:cell) : bits =

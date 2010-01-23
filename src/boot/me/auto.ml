@@ -57,7 +57,8 @@ let auto_inference_visitor
                     unify_ty tyo
                       (Hashtbl.find cx.ctxt_all_item_types referent)
             end
-      | _ -> (* FIXME: full-name unification? Oh, that'll be complex... *) None
+      | _ -> (* FIXME (bug 541570): full-name unification? Oh, that'll be complex... *)
+          None
   in
   let unify_lit (tyo:Ast.ty option) (lit:Ast.lit) : Ast.ty option =
     match lit with
@@ -223,7 +224,7 @@ let auto_inference_visitor
         | Ast.STMT_while w ->
             let (_, e) = w.Ast.while_lval in
               ignore (unify_expr (Some Ast.TY_bool) e)
-        | _ -> () (* FIXME: plenty more to handle here. *)
+        | _ -> () (* FIXME (bug 541570): plenty more to handle here. *)
     end;
     inner.Walk.visit_stmt_pre s
   in

@@ -30,6 +30,7 @@ let mode_check_visitor
         | Ast.STMT_init_vec (dst, _, _) -> check_write s.id dst
         | Ast.STMT_init_str (dst, _) -> check_write s.id dst
         | Ast.STMT_recv (dst, _) -> check_write s.id dst
+            (* FIXME (bug 541538): finish these. *)
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
@@ -42,15 +43,22 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
-  let path = Stack.create () in 
+  let path = Stack.create () in
   let passes =
     [|
       (mode_check_visitor cx
          Walk.empty_visitor)
     |]
   in
+    (* FIXME: (bug 541538) Need an additional visitor here that checks
+       that alias formation occurs uniquely in the presence of writes:
+       that is, given f(^int x, ^int y), we should not be allowed to
+       call f(a,a). Same sort of rule applies when mixing aliases and
+       exterior slots. This is essential if f() is to be able to treat the 
+       constraints holding over x and y independently. *)
+
     run_passes cx path passes (log cx "%s") crate;
-()
+    ()
 ;;
 
 

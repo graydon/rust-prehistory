@@ -25,17 +25,14 @@ let alias_analysis_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-          (*
-           * FIXME: must expand this analysis to cover alias-forming arg slots, when
-           * they are supported.
-           *)
+          (* FIXME (bug 541574): must expand this analysis to cover
+           * alias-forming arg slots, when they are supported.*)
 
-          (*
-           * FIXME: actually all these *existing* cases can probably go now that we're
-           * using Trans.aliasing to form short-term spill-based aliases. Only 
-           * aliases that survive 'into' a sub-block (those formed during iteration)
-           * need to be handled in this module.
-           *)
+          (* FIXME (bug 541559): actually all these *existing* cases
+           * can probably go now that we're using Trans.aliasing to
+           * form short-term spill-based aliases. Only aliases that
+           * survive 'into' a sub-block (those formed during iteration)
+           * need to be handled in this module.  *)
           Ast.STMT_call (dst, _, _) -> alias dst
         | Ast.STMT_spawn (dst, _, _) -> alias dst
         | Ast.STMT_send (_, src) -> alias src
@@ -44,7 +41,7 @@ let alias_analysis_visitor
         | Ast.STMT_init_chan (dst, _) -> alias dst
         | Ast.STMT_init_vec (dst, _, _) -> alias dst
         | Ast.STMT_init_str (dst, _) -> alias dst
-        | _ -> () (* FIXME: plenty more to handle here. *)
+        | _ -> () (* FIXME (bug 541572): plenty more to handle here. *)
     end;
     inner.Walk.visit_stmt_pre s
   in

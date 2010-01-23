@@ -32,7 +32,6 @@ struct rust_srv {
     virtual void *malloc(size_t);
     virtual void *realloc(void *, size_t);
     virtual void free(void *);
-    virtual uintptr_t lookup(char const *);
     virtual ~rust_srv() {}
 };
 

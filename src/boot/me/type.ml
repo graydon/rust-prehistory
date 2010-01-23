@@ -55,7 +55,7 @@ let type_check_visitor
             let (_, e) = w.Ast.while_lval in
               check_ty_eq Ast.TY_bool (expr_type cx e)
 
-        (* FIXME: plenty more to handle here. *)
+        (* FIXME (bug 541531): plenty more to handle here. *)
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s

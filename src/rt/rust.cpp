@@ -392,7 +392,7 @@ struct rust_port {
     size_t live_refcnt;
     size_t weak_refcnt;
     rust_proc *proc;
-    /* FIXME: 'next' and 'prev' fields are only used for collecting
+    /* FIXME (bug 541584): 'next' and 'prev' fields are only used for collecting
      * dangling ports on abrupt process termination; can remove this
      * when we have unwinding / finishing working.
      */
@@ -652,7 +652,7 @@ rust_port::~rust_port()
     /* FIXME: need to force-fail all the queued writers. */
     for (size_t i = 0; i < writers.length(); ++i)
         writers[i]->disconnect();
-    /* FIXME: can remove the chaining-of-ports-to-rt when we have
+    /* FIXME (bug 541584): can remove the chaining-of-ports-to-rt when we have
      * unwinding / finishing working. */
     if (prev)
         prev->next = next;
@@ -737,7 +737,7 @@ del_stk(rust_rt *rt, stk_seg *stk)
 
 /* Processes */
 
-/* FIXME: ifdef by platform. This is getting absurdly x86-specific. */
+/* FIXME (bug 541585): ifdef by platform. This is getting absurdly x86-specific. */
 size_t const n_callee_saves = 4;
 size_t const callee_save_fp = 0;
 
@@ -804,7 +804,7 @@ upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
 
     rt->log(LOG_MEM|LOG_PROC, "processing relocations");
 
-    // FIXME: this is the most ridiculously crude relocation scheme ever.
+    // FIXME (bug 541586): this is the most ridiculously crude relocation scheme ever.
     // Try actually, you know, writing out reloc descriptors?
     size_t n_relocs = 0;
     for (uintptr_t* p = (uintptr_t*)(new_top - n_copy); p < (uintptr_t*)new_top; ++p) {
@@ -891,9 +891,9 @@ rust_proc::rust_proc(rust_rt *rt,
         I(rt, callsz==0);
     }
 
-    // The *implicit* incoming args to the spawnee frame we're activating:
-    // FIXME: wire up output-address properly so spawnee can write a return
-    // value.
+    // The *implicit* incoming args to the spawnee frame we're
+    // activating: FIXME (bug 541587): wire up output-address properly
+    // so spawnee can write a return value.
     *spp-- = (uintptr_t) this;            // proc
     *spp-- = (uintptr_t) 0;               // output addr
     *spp-- = (uintptr_t) exit_proc_glue;  // retpc
@@ -1218,7 +1218,8 @@ rust_rt::~rust_rt() {
     del_all_procs(this, &dead_procs);
 
     log(LOG_PROC, "deleting all dangling ports");
-    /* FIXME: remove when port <-> proc linkage is obsolete. */
+    /* FIXME (bug 541584): remove when port <-> proc linkage is
+       obsolete. */
     while (ports)
         delete ports;
 }
@@ -1848,33 +1849,6 @@ rust_srv::fatal(char const *expr, char const *file, size_t line)
     snprintf(buf, sizeof(buf), "fatal, '%s' failed, %s:%d", expr, file, (int)line);
     log(buf);
     exit(1);
-}
-
-uintptr_t
-rust_srv::lookup(char const *sym)
-{
-    uintptr_t res;
-
-#ifdef __WIN32__
-    /* FIXME: pass library name in as well. And use LoadLibrary not
-     * GetModuleHandle, manually refcount. Oh, so much to do
-     * differently. */
-    const char *modules[2] = { "rustrt.dll", "msvcrt.dll" };
-    for (size_t i = 0; i < sizeof(modules) / sizeof(const char *); ++i) {
-        HMODULE lib = GetModuleHandle(modules[i]);
-        if (!lib)
-            fatal("GetModuleHandle", __FILE__, __LINE__);
-        res = (uintptr_t)GetProcAddress(lib, sym);
-        if (res)
-            break;
-    }
-#else
-    /* FIXME: dlopen, as above. */
-    res = (uintptr_t)dlsym(RTLD_DEFAULT, sym);
-#endif
-    if (!res)
-        fatal("srv->lookup", __FILE__, __LINE__);
-    return res;
 }
 
 /* Native builtins. */

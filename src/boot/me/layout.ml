@@ -272,24 +272,21 @@ let layout_visitor
   in
   let visit_block_post b =
     inner.Walk.visit_block_post b;
-    (* 
-     * FIXME: In earlier versions of this file, multiple lexical
-     * blocks in the same frame would reuse space from one to the next
-     * so long as they were not nested; The (commented-out) code here
-     * supports that logic. Unfortunately since our marking and
-     * unwinding strategy is very simplistic for now (analogous to
+    (* FIXME (bug 541568): In earlier versions of this file, multiple
+     * lexical blocks in the same frame would reuse space from one to
+     * the next so long as they were not nested; The (commented-out)
+     * code here supports that logic. Unfortunately since our marking
+     * and unwinding strategy is very simplistic for now (analogous to
      * shadow stacks) we're going to have give lexical block in a frame
-     * its own space in the frame, even if they seem like they
-     * *should* be able to reuse space. This makes it possible to
-     * arrive at the frame and work out which variables are live (and
-     * which frame memory corresponds to them) w/o paying attention to
-     * the current pc in the function; a greatly-simplifying
-     * assumption.
+     * its own space in the frame, even if they seem like they *should*
+     * be able to reuse space. This makes it possible to arrive at the
+     * frame and work out which variables are live (and which frame
+     * memory corresponds to them) w/o paying attention to the current
+     * pc in the function; a greatly-simplifying assumption.
      * 
      * This is of course not optimal for the long term, but in the
      * longer term we'll have time to form proper DWARF CFI
-     * records. We're in a hurry at the moment.
-     *)
+     * records. We're in a hurry at the moment.  *)
     (*
       let stk = Stack.top block_stacks in
       ignore (Stack.pop stk)

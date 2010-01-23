@@ -1255,7 +1255,7 @@ let dwarf_visitor
                       emit_var_die
                         [| DW_OP_fbreg (Asm.IMM layout.layout_offset) |]
                   | None ->
-                      (* FIXME: handle slots assigned to vregs. *)
+                      (* FIXME (bug 541569): handle slots assigned to vregs. *)
                       ()
             end
     end;

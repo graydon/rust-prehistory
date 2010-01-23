@@ -1077,7 +1077,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
         Ast.TY_any -> Il.StructTy [| word;  ptr |]
       | Ast.TY_nil -> s Il.NilTy
       | Ast.TY_int -> word
-          (* FIXME: bool should be 8 bit, not word-sized. *)
+          (* FIXME (bug 541563): bool should be 8 bit, not word-sized. *)
       | Ast.TY_bool -> word
 
       | Ast.TY_mach (TY_u8)
@@ -1216,13 +1216,13 @@ and layout_tag (abi:Abi.abi) (ttag:Ast.ty_tag) : layout =
     pack 0L [| tag_layout; body_layout |]
 
 and layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
-  (* FIXME: tag types may need to be represented in the IL type system? *)
+  (* FIXME (bug 541562): tag types may need to be represented in the IL type system? *)
   match t with
       Ast.TY_tag ttag -> layout_tag abi ttag
     | Ast.TY_iso tiso -> layout_tag abi tiso.Ast.iso_group.(tiso.Ast.iso_index)
     | _ -> layout_referent abi off (referent_type abi t)
 
-(* FIXME: redirect this to slot_referent_type *)
+(* FIXME (bug 541561): redirect this to slot_referent_type *)
 and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
   match s.Ast.slot_mode with
       Ast.MODE_interior _
@@ -1232,10 +1232,10 @@ and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
               None -> bug () "layout_slot on untyped slot"
             | Some t -> layout_ty abi off t
         end
-          (* FIXME: turning this on makes a bunch of slots go into
-           * regs (great!)  except they're not supposed to; the
-           * alias-analysis pass is supposed to catch them. It doesn't
-           * yet, though. *)
+          (* FIXME (bug 541559): turning this on makes a bunch of
+           * slots go into regs (great!)  except they're not supposed
+           * to; the alias-analysis pass is supposed to catch them. It
+           * doesn't yet, though. *)
           (* | _ -> word_layout abi off *)
 
 and ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =

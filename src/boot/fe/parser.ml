@@ -688,7 +688,7 @@ and parse_constraint (ps:pstate) : Ast.constr =
 and parse_constrs (ps:pstate) : Ast.constrs =
   ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps
 
-(* FIXME: parse constraints --
+(* FIXME (bug 541578): parse constraints --
      match peek ps with
        COLON -> bump ps; parse_constrs ps
      | _ -> [| |]
@@ -708,7 +708,7 @@ and parse_fn_ty ((*pure*)_:bool) (ps:pstate) : Ast.ty =
                   bump ps;
                   let res_slot = parse_slot false ps in
                     Ast.TY_fn ({ Ast.sig_input_slots = slots;
-                                 (* FIXME: parse input type constraints *)
+                                 (* FIXME (bug 541578): parse input type constraints *)
                                  Ast.sig_input_constrs = [| |];
                                  Ast.sig_output_slot = res_slot; },
                                { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
@@ -808,7 +808,7 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
 
     | FN _ -> parse_fn_ty false ps
 
-    (* FIXME: parse mod types. *)
+    (* FIXME (bug 541576): parse mod types. *)
 
     | _ -> raise (unexpected ps)
 

@@ -556,7 +556,7 @@ and walk_stmt
       | Ast.STMT_prove cs ->
           walk_constrs v cs
 
-      (* FIXME: finish this as needed. *)
+      (* FIXME (bug 541526): finish this as needed. *)
       | Ast.STMT_slice _ -> ()
       | Ast.STMT_bind _ -> ()
       | Ast.STMT_note _ -> ()

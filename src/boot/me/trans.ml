@@ -499,7 +499,7 @@ let trans_visitor
           htab_put cx.ctxt_data d (fix, item);
           fix
     in
-      (* FIXME: wrong operand type. *)
+      (* FIXME (bug 541552): wrong operand type. *)
       Il.Imm (Asm.M_POS fix, word_ty_mach)
 
   and trans_static_string (s:string) : Il.operand =
@@ -527,9 +527,11 @@ let trans_visitor
       | Ast.ATOM_literal lit ->
           begin
             match lit.node with
-                Ast.LIT_nil -> imm_false (* FIXME: make an Il.Nil operand constructor? *)
+                (* FIXME (bug 541565): handle nil properly. *)
+                Ast.LIT_nil -> imm_false
               | Ast.LIT_bool false -> imm_false
               | Ast.LIT_bool true -> imm_true
+                (* FIXME (bug 541566): handle char as exactly 32 bits, not word size. *)
               | Ast.LIT_char c -> imm (Int64.of_int (Char.code c))
               | Ast.LIT_int (i, _) -> imm i
               | Ast.LIT_mach (m, n, _) -> imm_of_ty n m
@@ -820,7 +822,7 @@ let trans_visitor
       | Ast.BINOP_add -> arith Il.ADD
       | Ast.BINOP_sub -> arith Il.SUB
 
-      (* FIXME: switch on type of operands, IMUL/IDIV/IMOD etc. *)
+      (* FIXME (bug 541544): switch on type of operands, IMUL/IDIV/IMOD etc. *)
       | Ast.BINOP_mul -> arith Il.UMUL
       | Ast.BINOP_div -> arith Il.UDIV
       | Ast.BINOP_mod -> arith Il.UMOD
@@ -851,7 +853,7 @@ let trans_visitor
 
       | Ast.EXPR_unary (unop, a) ->
           let src = trans_atom a in
-            (* FIXME: this has to change when we support other mach types. *)
+            (* FIXME (bug 541544): this has to change when we support other mach types. *)
           let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
           let op = match unop with
               Ast.UNOP_not -> Il.NOT
@@ -875,11 +877,9 @@ let trans_visitor
     iter_block_slots block.id
       begin
         fun slotkey slot_id slot ->
-          (* 
-           * FIXME: this is not going to free things in the proper order; 
-           * we need to analyze the decl order in an earlier phase and thread
-           * it through to here. 
-           *)
+          (* FIXME (bug 541543): this is not going to free things in
+           * the proper order; we need to analyze the decl order in an
+           * earlier phase and thread it through to here.  *)
           iflog
             begin
               fun _ ->
@@ -892,10 +892,10 @@ let trans_visitor
           let cell = cell_of_block_slot slot_id in
             drop_slot cell slot None
       end;
-      emit Il.Leave;
-      ignore (Stack.pop block_layouts);
-      trace_str cx.ctxt_sess.Session.sess_trace_block
-        "exited block";
+    emit Il.Leave;
+    ignore (Stack.pop block_layouts);
+    trace_str cx.ctxt_sess.Session.sess_trace_block
+      "exited block";
 
   and trans_native_thunk (nabi:Abi.nabi) (lib:import_lib) (name:string) (ret:Il.cell) (args:Il.operand array) : unit =
     abi.Abi.abi_emit_native_call_in_thunk (emitter()) ret nabi (Semant.import cx lib name) args;
@@ -1177,7 +1177,7 @@ let trans_visitor
     let tup_addr = addr_add_imm addr word_sz in
       mov tag (Il.Cell (word_at addr));
       for i = 0 to arr_max tag_keys do
-        (* FIXME: A table-switch would be better. *)
+        (* FIXME (bug 541540): A table-switch would be better. *)
         (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
         let jmps = trans_compare Il.JNE (Il.Cell tag) (imm (Int64.of_int i)) in
         let ttup = Hashtbl.find ttag tag_keys.(i) in
@@ -1338,11 +1338,9 @@ let trans_visitor
              * an extra couple cells on the front.
              *)
 
-            (* 
-             * FIXME: check to see that the exterior has further
-             * exterior members; if it doesn't we can elide the call to
-             * the glue function.
-             *)
+            (* FIXME (bug 541542): check to see that the exterior has
+             * further exterior members; if it doesn't we can elide the
+             * call to the glue function.  *)
             let null_jmp = null_check () in
             let rc = exterior_rc_cell cell in
             let j = drop_refcount_and_cmp rc in
@@ -1472,10 +1470,9 @@ let trans_visitor
       | Il.CodeTy -> failwith "expected structural referent type, got code"
 
 
-  (* FIXME: this should permit f.e. copying (foo,bar) <- (@foo,@bar), but 
-   * presently it walks through both structures via the layouts for the
-   * destination slots.
-   *)
+  (* FIXME (bug 541541): this should permit f.e. copying (foo,bar) <-
+   * (@foo,@bar), but presently it walks through both structures via
+   * the layouts for the destination slots.  *)
   and trans_copy_structural
       (initialising:bool)
       (layouts:layout array)
@@ -1546,7 +1543,7 @@ let trans_visitor
       mov src_tag_val (Il.Cell (word_at src_addr));
       mov (word_at dst_addr) (Il.Cell src_tag_val);
       for i = 0 to arr_max tag_keys do
-        (* FIXME: A table-switch would be better. *)
+        (* FIXME (bug 541540): A table-switch would be better. *)
         (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
         let jmps = trans_compare Il.JNE (Il.Cell src_tag_val) (imm (Int64.of_int i)) in
         let dst_ttup = Hashtbl.find dst_tag tag_keys.(i) in
@@ -1905,11 +1902,11 @@ let trans_visitor
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args output_cell arg_slots arg_layouts args  extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
-      (* 
-       * FIXME: we need to actually handle writing to an already-initialised slot. Currently
-       * we blindly assume we're initialising, overwrite the slot; this is ok if we're 
-       * writing to an interior output slot, but we'll leak any exteriors as we do that. 
-       *)
+      (* FIXME (bug 541535 ): we need to actually handle writing to an
+       * already-initialised slot. Currently we blindly assume we're
+       * initialising, overwrite the slot; this is ok if we're writing
+       * to an interior output slot, but we'll leak any exteriors as we
+       * do that.  *)
       call_code (code_of_cell callee_cell);
       drop_arg_slots arg_slots arg_layouts
 
@@ -2277,7 +2274,8 @@ let trans_visitor
           Some n -> n
         | None -> (err None "invalid abi specification")
     in
-      (* FIXME: This is a gross hack. The library should come from the frontend. *)
+      (* FIXME (bug 541532): This is a gross hack. The library should
+         come from the frontend. *)
     let lib =
       match nabi.Abi.nabi_convention with
           Abi.CONV_rust -> LIB_rustrt
@@ -2288,8 +2286,8 @@ let trans_visitor
     in
     let args =
       (Array.init (Array.length nfn.Ast.native_fn_input_slots)
-                  (fun (n:int) ->
-                     (Il.Cell (word_at (sp_imm (Int64.add (Int64.of_int n) (word_n 3)))))))
+         (fun (n:int) ->
+            (Il.Cell (word_at (sp_imm (Int64.add (Int64.of_int n) (word_n 3)))))))
     in
       push_new_emitter ();
       let e = (emitter()) in

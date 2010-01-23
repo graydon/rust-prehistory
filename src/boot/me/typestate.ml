@@ -28,7 +28,7 @@ let determine_constr_key
    * unique key for idenfitying a predicate.
    *)
   let cident =
-    (* FIXME: handle other forms of constr name. *)
+    (* FIXME (bug 541527): handle other forms of constr name. *)
     match c.Ast.constr_name with
         Ast.NAME_base (Ast.BASE_ident ident) -> ident
       | _ -> err None "unhandled form of constraint-name"
@@ -47,7 +47,7 @@ let determine_constr_key
   in
   let tighten_to_carg carg =
     match carg with
-        (* FIXME: handle other forms of constr-arg. *)
+        (* FIXME (bug 541527): handle other forms of constr-arg. *)
         Ast.CARG_path (Ast.CARG_base (Ast.BASE_formal)) -> ()
       | Ast.CARG_path (Ast.CARG_ext (Ast.CARG_base (Ast.BASE_formal), _)) -> ()
       | Ast.CARG_lit _ -> ()

@@ -48,7 +48,7 @@ let (sess:Session.sess) =
     Session.sess_trace_tag = false;
     Session.sess_failed = false;
     Session.sess_spans = Hashtbl.create 0;
-    (* FIXME: For the time being, our dwarf output appears to do more
+    (* FIXME (bug 541579): For the time being, our dwarf output appears to do more
        harm than good on OSX.  On other platforms it's the other way
        around. Ancient OSX gdb perhaps?  *)
     Session.sess_emit_dwarf = (not (targ = MacOS_x86_macho));
