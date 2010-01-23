@@ -950,14 +950,12 @@ rust_proc::~rust_proc()
 void
 push_onto_thread_stack(uintptr_t &sp, uintptr_t value)
 {
-    asm("movl %%esp, %%ecx\n"
-        "movl %0, %%esp\n"
+    asm("xchgl %0, %%esp\n"
         "push %2\n"
-        "movl %%esp, %0\n"
-        "movl %%ecx, %%esp\n"
+        "xchgl %0, %%esp\n"
         : "=r" (sp)
         : "0" (sp), "r" (value)
-        : "eax", "ecx");
+        : "eax");
 }
 
 void
