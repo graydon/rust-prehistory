@@ -2121,13 +2121,17 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
       | MUTABLE -> Ast.IMPURE Ast.MUTABLE
       | _ -> Ast.IMPURE Ast.IMMUTABLE
   in
+  let parse_ident_and_params item =
+    bump ps;
+    let ident = ctxt ("mod " ^ item ^ " item: ident") parse_ident ps in
+    let params = ctxt ("mod " ^ item ^ " item: type params") parse_ty_params ps in
+      (ident, params)
+  in
 
     match peek ps with
 
         FN proto_opt ->
-          bump ps;
-          let ident = ctxt "mod fn item: ident" parse_ident ps in
-          let params = ctxt "mod fn item: type params" parse_ty_params ps in
+          let (ident, params) = parse_ident_and_params "fn" in
           let fn = ctxt "mod fn item: fn" (parse_fn proto_opt pure) ps in
           let
               decl = { Ast.decl_params = params;
@@ -2137,9 +2141,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             (ident, span ps apos bpos (Ast.MOD_ITEM_fn decl))
 
       | PRED ->
-          bump ps;
-          let ident = ctxt "mod pred item: ident" parse_ident ps in
-          let params = ctxt "mod pred item: type params" parse_ty_params ps in
+          let (ident, params) = parse_ident_and_params "pred" in
           let pred = ctxt "mod pred item: pred" parse_pred ps in
           let
               decl = { Ast.decl_params = params;
@@ -2149,9 +2151,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             (ident, span ps apos bpos (Ast.MOD_ITEM_pred decl))
 
       | TYPE ->
-          bump ps;
-          let ident = ctxt "mod ty item: ident" parse_ident ps in
-          let params = ctxt "mod ty item: type params" parse_ty_params ps in
+          let (ident, params) = parse_ident_and_params "type" in
           let _ = expect ps EQ in
           let ty = ctxt "mod type item: ty" parse_ty ps in
           let _ = expect ps SEMI in
@@ -2165,6 +2165,16 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             else (Ast.MOD_ITEM_opaque_type decl)
           in
             (ident, span ps apos bpos item)
+
+      | MOD ->
+          let (ident, params) = parse_ident_and_params "mod" in
+            expect ps LBRACE;
+            let items = parse_mod_items ps RBRACE in
+            let bpos = lexpos ps in
+            let decl = { Ast.decl_params = params;
+                         Ast.decl_item = items; }
+            in
+              (ident, span ps apos bpos (Ast.MOD_ITEM_mod decl))
 
       | _ -> raise (unexpected ps)
 
@@ -2303,7 +2313,7 @@ and parse_crate_mod_entry
                       ps.pstate_lexfun
                       full_fname
                   in
-                    (parse_file_mod_items p, true)
+                    (parse_mod_items p EOF, true)
               | LBRACE ->
                   bump ps;
                   let items =
@@ -2324,17 +2334,18 @@ and parse_crate_mod_entry
             htab_put mod_items name item_mod
         end
 
-and parse_file_mod_items
+and parse_mod_items
     (ps:pstate)
+    (terminal:token)
     : Ast.mod_items =
   let items = Hashtbl.create 4 in
-    while peek ps != EOF
+    while peek ps != terminal
     do
       let (ident, item) = parse_mod_item ps in
         htab_put items ident item;
         expand_tags_to_items ps item items;
     done;
-    expect ps EOF;
+    expect ps terminal;
     items
 
 and parse_crate_mod_entries
@@ -2446,7 +2457,7 @@ let parse_root_srcfile_entries
     : Ast.crate =
   let stem = Filename.chop_suffix (Filename.basename fname) ".rs" in
   let apos = lexpos ps in
-  let items = parse_file_mod_items ps in
+  let items = parse_mod_items ps EOF in
   let bpos = lexpos ps in
   let modi = span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
                                                    Ast.decl_item = items })
