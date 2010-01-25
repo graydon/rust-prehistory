@@ -22,7 +22,6 @@ type token =
   | LSL
   | LSR
   | ASR
-  | BIND
   | OPEQ of token
 
   (* Structural symbols *)
@@ -90,6 +89,9 @@ type token =
   (* Magic runtime services *)
   | LOG
   | SPAWN
+  | BIND
+  | THREAD
+  | PROCESS
 
   (* Literals *)
   | LIT_INT       of (int64 * string)
@@ -238,6 +240,8 @@ let rec string_of_tok t =
     | LOG        -> "log"
     | SPAWN      -> "spawn"
     | BIND       -> "bind"
+    | THREAD     -> "thread"
+    | PROCESS    -> "process"
 
     (* Literals *)
     | LIT_INT (_,s)  -> s
