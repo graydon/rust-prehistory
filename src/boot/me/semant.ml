@@ -413,11 +413,6 @@ let interior_slot_full mut ty : Ast.slot =
 let interior_slot ty : Ast.slot = interior_slot_full Ast.IMMUTABLE ty
 ;;
 
-let read_alias_slot ty : Ast.slot =
-  { Ast.slot_mode = Ast.MODE_read_alias;
-    Ast.slot_ty = Some ty }
-;;
-
 let sorted_tag_keys (ttag:Ast.ty_tag) : Ast.name array =
   let tag_keys = Array.of_list (htab_keys ttag) in
     Array.sort compare tag_keys;
@@ -737,7 +732,7 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
     | (Ast.TY_mod mtis, Ast.COMP_named (Ast.COMP_ident id)) ->
         begin
           match htab_search mtis id with
-              Some mti -> read_alias_slot (ty_of_mod_type_item mti)
+              Some mti -> interior_slot (ty_of_mod_type_item mti)
             | None -> err None "unknown module-member '%s'" id
         end
 
