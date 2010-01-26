@@ -40,6 +40,7 @@ type data =
     DATA_str of string
   | DATA_typeinfo of Ast.ty
   | DATA_frame_glue_fns of node_id
+  | DATA_mod_table of node_id
   | DATA_global_glue_fns
 ;;
 
@@ -411,12 +412,6 @@ let interior_slot_full mut ty : Ast.slot =
 ;;
 
 let interior_slot ty : Ast.slot = interior_slot_full Ast.IMMUTABLE ty
-;;
-
-let sorted_tag_keys (ttag:Ast.ty_tag) : Ast.name array =
-  let tag_keys = Array.of_list (htab_keys ttag) in
-    Array.sort compare tag_keys;
-    tag_keys
 ;;
 
 

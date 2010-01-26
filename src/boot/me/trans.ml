@@ -505,8 +505,8 @@ let trans_visitor
           fix
       else
         let fix = new_fixup "data item fixup" in
-        let item = Asm.DEF (fix, thunk ()) in
-          htab_put cx.ctxt_data d (fix, item);
+        let frag = Asm.DEF (fix, thunk ()) in
+          htab_put cx.ctxt_data d (fix, frag);
           fix
     in
       (* FIXME (bug 541552): wrong operand type. *)
@@ -514,6 +514,10 @@ let trans_visitor
 
   and trans_static_string (s:string) : Il.operand =
     trans_data_frag (DATA_str s) (fun _ -> Asm.ZSTRING s)
+
+  and trans_type_info (t:Ast.ty) : Il.operand =
+    (* FIXME: emit type-info table here. *)
+    trans_data_frag (DATA_typeinfo t) (fun _ -> Asm.MARK)
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
     (* Include null byte. *)
@@ -1181,7 +1185,7 @@ let trans_visitor
         (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
         (curr_iso:Ast.ty_iso option)
         : unit =
-    let tag_keys = sorted_tag_keys ttag in
+    let tag_keys = sorted_htab_keys ttag in
     let (tag:Il.cell) = Il.Reg (next_vreg(), word_ty) in
     let (addr, _) = ta in
     let tup_addr = addr_add_imm addr word_sz in
@@ -1544,7 +1548,7 @@ let trans_visitor
       (dst_ta:Il.typed_addr) (dst_tag:Ast.ty_tag)
       (src_ta:Il.typed_addr) (src_tag:Ast.ty_tag)
       : unit =
-    let tag_keys = sorted_tag_keys dst_tag in
+    let tag_keys = sorted_htab_keys dst_tag in
     let (src_tag_val:Il.cell) = Il.Reg (next_vreg(), word_ty) in
     let (dst_addr, _) = dst_ta in
     let (src_addr, _) = src_ta in
@@ -2306,7 +2310,7 @@ let trans_visitor
         | _ -> bugi cx tagid "unexpected type for tag constructor"
     in
     let slots = Array.map (fun sloti -> Hashtbl.find cx.ctxt_all_slots sloti.id) header_tup in
-    let tag_keys = sorted_tag_keys ttag in
+    let tag_keys = sorted_htab_keys ttag in
     let i = ref (-1) in
       begin
         for j = 0 to arr_max tag_keys do
@@ -2365,6 +2369,37 @@ let trans_visitor
         pop_emitter ();
   in
 
+  let trans_mod (id:node_id) (m:Ast.mod_items) : unit =
+    log cx "emitting %d-entry mod table for %s" (Hashtbl.length m) (path_name());
+    let item_pairs =
+      Array.map
+        begin
+          fun ident ->
+            let item = Hashtbl.find m ident in
+            let fix =
+              match item.node with
+                  Ast.MOD_ITEM_fn _
+                | Ast.MOD_ITEM_pred _
+                | Ast.MOD_ITEM_tag _ -> get_fn_fixup cx item.id
+                | Ast.MOD_ITEM_mod _ -> get_mod_fixup cx item.id
+                | Ast.MOD_ITEM_opaque_type td
+                | Ast.MOD_ITEM_public_type td ->
+                    let t = td.Ast.decl_item in
+                      ignore (trans_type_info t);
+                      let (fix, _) = Hashtbl.find cx.ctxt_data (DATA_typeinfo t) in
+                        fix
+            in
+              Asm.SEQ
+                [| Asm.WORD (word_ty_mach, Asm.M_POS fix);
+                   Asm.WORD (word_ty_mach, Asm.IMM 0L) |]
+        end
+        (sorted_htab_keys m)
+    in
+    let fix = get_mod_fixup cx id in
+    let frag = Asm.DEF (fix, Asm.SEQ item_pairs) in
+      htab_put cx.ctxt_data (DATA_mod_table id) (fix, frag)
+  in
+
   let enter_file_for i =
     if Hashtbl.mem cx.ctxt_item_files i.id
     then begin
@@ -2415,6 +2450,11 @@ let trans_visitor
 
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
+    begin
+      match i.node with
+          Ast.MOD_ITEM_mod m -> trans_mod i.id m.Ast.decl_item
+        | _ -> ()
+    end;
     leave_file_for i
   in
 

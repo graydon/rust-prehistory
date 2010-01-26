@@ -126,6 +126,12 @@ let htab_keys (htab:('a,'b) Hashtbl.t) : ('a list) =
   Hashtbl.fold (fun k _ accum -> k :: accum) htab []
 ;;
 
+let sorted_htab_keys (tab:('a, 'b) Hashtbl.t) : 'a array =
+  let keys = Array.of_list (htab_keys tab) in
+    Array.sort compare keys;
+    keys
+;;
+
 let htab_vals (htab:('a,'b) Hashtbl.t) : ('b list)  =
   Hashtbl.fold (fun _ v accum -> v :: accum) htab []
 ;;
