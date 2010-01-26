@@ -989,10 +989,15 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
         insn_rm_r_imm 0x80 c slash7 TY_s8 i
     | (Il.Cell c, Il.Imm (i, TY_u8)) when is_rm8 c ->
         insn_rm_r_imm 0x80 c slash7 TY_u8 i
-    | (Il.Cell c, Il.Imm (i, t)) when is_rm32 c ->
-        if mach_is_signed t
-        then insn_rm_r_imm_s8_s32 0x83 0x81 c slash7 i
-        else insn_rm_r_imm_u8_u32 0x83 0x81 c slash7 i
+    | (Il.Cell c, Il.Imm (i, _)) when is_rm32 c ->
+        (* 
+         * NB: We can't switch on signed-ness here, as 'cmp' is
+         * defined to sign-extend its operand; i.e. we have to treat
+         * it as though you're emitting a signed byte (in the sense of
+         * immediate-size selection) even if the incoming value is
+         * unsigned.
+         *)
+        insn_rm_r_imm_s8_s32 0x83 0x81 c slash7 i
     | (Il.Cell c, Il.Cell (Il.Reg (Il.Hreg r, _))) ->
         insn_rm_r 0x39 c (reg r)
     | (Il.Cell (Il.Reg (Il.Hreg r, _)), Il.Cell c) ->
