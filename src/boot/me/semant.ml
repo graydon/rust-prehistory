@@ -1225,6 +1225,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
   let word = sv abi.Abi.abi_word_bits in
   let ptr = sp Il.OpaqueTy in
+  let codeptr = sp Il.CodeTy in
 
     match t with
         Ast.TY_any -> Il.StructTy [| word;  ptr |]
@@ -1257,14 +1258,15 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
             (Array.map (fun (_, slot) ->
                           slot_referent_type abi slot) tr)
 
+      | Ast.TY_fn _
+      | Ast.TY_pred _ -> Il.StructTy [| codeptr; ptr |]
+      | Ast.TY_mod _ -> Il.StructTy [| ptr; ptr |]
+
       | Ast.TY_tag _ -> Il.OpaqueTy
       | Ast.TY_iso _
       | Ast.TY_idx _
-      | Ast.TY_fn _
-      | Ast.TY_pred _
       | Ast.TY_chan _
       | Ast.TY_port _
-      | Ast.TY_mod _
       | Ast.TY_proc
       | Ast.TY_opaque _
       | Ast.TY_type -> ptr
