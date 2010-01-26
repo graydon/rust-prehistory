@@ -2,10 +2,18 @@
 # Auto-configuration
 ######################################################################
 
+ifdef VERBOSE
+  CFG_QUIET :=
+  CFG_ECHO =
+else
+  CFG_QUIET := @
+  CFG_ECHO = echo $(1)
+endif
+
 CFG_OSTYPE := $(shell uname -s)
 CFG_CPUTYPE := $(shell uname -m)
 
-CFG_INFO := $(info building on $(CFG_OSTYPE) $(CFG_CPUTYPE))
+CFG_INFO := $(info cfg: building on $(CFG_OSTYPE) $(CFG_CPUTYPE))
 
 CFG_GCC_COMPILE_FLAGS :=
 CFG_GCC_LINK_FLAGS :=
@@ -44,7 +52,7 @@ ifneq ($(findstring MINGW,$(CFG_OSTYPE)),)
 endif
 
 ifdef CFG_WINDOWSY
-  CFG_INFO := $(info windows-y environment)
+  CFG_INFO := $(info cfg: windows-y environment)
   CFG_PATH_MUNGE := | sed -e 's/\\\(.\)/\/\1/g'
   CFG_RUNTIME := rustrt.dll
   CFG_OBJ_SUFFIX := .o
@@ -58,7 +66,7 @@ ifdef CFG_WINDOWSY
 endif
 
 ifdef CFG_UNIXY
-  CFG_INFO := $(info unix-y environment)
+  CFG_INFO := $(info cfg: unix-y environment)
   CFG_BOOT := ./rustboot
   CFG_COMPILER := ./rustc
   CFG_OBJ_SUFFIX := .o
@@ -67,7 +75,7 @@ ifdef CFG_UNIXY
 endif
 
 ifdef CFG_GCC
-  CFG_INFO := $(info using gcc)
+  CFG_INFO := $(info cfg: using gcc)
   CFG_GCC_COMPILE_FLAGS += -Wall -Werror -fno-rtti -fno-exceptions -g
   CFG_GCC_LINK_FLAGS += -g
   CFG_COMPILE_C = g++ $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
@@ -122,32 +130,40 @@ loc:
 	wc -l $(BOOT_MLS) $(RUNTIME_CS) rt/rust.h
 
 $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) rt/rust.h
-	$(call CFG_LINK_C, $@) $(RUNTIME_OBJS)
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)$(call CFG_LINK_C, $@) $(RUNTIME_OBJS)
 
 %$(CFG_OBJ_SUFFIX): %.cpp $(MKFILES)
-	$(call CFG_COMPILE_C, $@, $(RUNTIME_INCS)) $<
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)$(call CFG_COMPILE_C, $@, $(RUNTIME_INCS)) $<
 
 ifdef CFG_NATIVE
 $(CFG_BOOT): $(BOOT_CMXS) $(MKFILES)
-	ocamlopt.opt -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(BOOT_CMXS)
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)ocamlopt.opt -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(BOOT_CMXS)
 else
 $(CFG_BOOT): $(BOOT_CMOS) $(MKFILES)
-	ocamlc.opt -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(BOOT_CMOS)
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)ocamlc.opt -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(BOOT_CMOS)
 endif
 
 %.cmi: %.mli $(MKFILES)
-	ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
 
 %.cmo: %.ml $(MKFILES)
-	ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
 
 %.cmo: %.cmi $(MKFILES)
 
 %.cmx %.o: %.ml $(MKFILES)
-	ocamlopt.opt -c -o $@ $(OCAMLOPT_FLAGS) $<
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)ocamlopt.opt -c -o $@ $(OCAMLOPT_FLAGS) $<
 
 %.ml: %.mll $(MKFILES)
-	ocamllex.opt -o $@ $<
+	@$(call CFG_ECHO, lex-gen: $<)
+	$(CFG_QUIET)ocamllex.opt -q -o $@ $<
 
 
 ######################################################################
@@ -166,12 +182,13 @@ DRIVER_TOP_RSS := $(addprefix comp/driver/, rustc.rs)
 COMPILER_RSS := $(wildcard $(UTIL_BOT_RSS) $(DRIVER_BOT_RSS) $(BE_RSS) $(FE_RSS) $(ME_RSS) $(DRIVER_TOP_RSS))
 
 $(CFG_COMPILER): comp/rustc.rc $(COMPILER_RSS) $(CFG_BOOT) $(CFG_RUNTIME)
-	echo $(COMPILER_RSS)
-	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
-	chmod 0755 $@
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)chmod 0755 $@
 
 self: $(CFG_COMPILER)
-	$(call CFG_RUN_TARG, $(CFG_COMPILER)) comp/rustc.rc
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)$(call CFG_RUN_TARG, $(CFG_COMPILER)) comp/rustc.rc
 
 
 ######################################################################
@@ -182,13 +199,16 @@ ML_DEPFILES := $(BOOT_MLS:%.ml=%.d)
 C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 
 %.d: %.cpp $(MKFILES)
-	$(call CFG_DEPEND_C, $@ $(patsubst %.cpp, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)$(call CFG_DEPEND_C, $@ $(patsubst %.cpp, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.ml $(MKFILES)
-	ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.mli $(MKFILES)
-	ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
 
 -include $(ML_DEPFILES) $(C_DEPFILES)
 
@@ -240,38 +260,46 @@ check: $(TEST_RUN_PASS_EXES) $(TEST_RUN_FAIL_EXES) \
        $(TEST_COMPILE_FAIL_OUTS)
 
 test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
-	$(call CFG_RUN_TARG, $<) > $@ ; X=$$? ; cat $@ ; exit $$X
+	@$(call CFG_ECHO, run: $<)
+	$(CFG_QUIET)$(call CFG_RUN_TARG, $<) > $@
 
 test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) test/run-fail/%.pat $(CFG_RUNTIME)
-	rm -f $@
-	$(call CFG_RUN_TARG, $<) >$@ 2>&1 ; X=$$? ; if [ $$X -eq 0 ] ; then exit 1 ; else exit 0 ; fi
-	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
+	@$(call CFG_ECHO, run: $<)
+	$(CFG_QUIET)rm -f $@
+	$(CFG_QUIET)$(call CFG_RUN_TARG, $<) >$@ 2>&1 ; X=$$? ; if [ $$X -eq 0 ] ; then exit 1 ; else exit 0 ; fi
+	$(CFG_QUIET)grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
-	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
-	chmod 0755 $@
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)chmod 0755 $@
 
 test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rc test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
-	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
-	chmod 0755 $@
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)chmod 0755 $@
 
 test/compile-fail/%.out: test/compile-fail/%.rc test/run-pass/%.rs test/compile-fail/%.pat $(CFG_BOOT) $(CFG_RUNTIME)
-	rm -f $@
-	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
-	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
+	@$(call CFG_ECHO, run: $<)
+	$(CFG_QUIET)rm -f $@
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	$(CFG_QUIET)grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
-	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
-	chmod 0755 $@
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)chmod 0755 $@
 
 test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
-	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
-	chmod 0755 $@
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)chmod 0755 $@
 
 test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_BOOT) $(CFG_RUNTIME)
-	rm -f $@
-	OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
-	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)rm -f $@
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	$(CFG_QUIET)grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 
 ######################################################################
@@ -296,19 +324,23 @@ PKG_FILES := README COPYING\
              $(TEST_COMPILE_FAIL_CRATES) $(TEST_COMPILE_FAIL_SOURCES) $(TEST_COMPILE_FAIL_PATS)
 
 dist:
-	mkdir -p dist/$(PKG_DIR)
-	tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
-	tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
-	rm -Rf dist
+	@$(call CFG_ECHO, making dist dir)
+	$(CFG_QUIET)mkdir -p dist/$(PKG_DIR)
+	$(CFG_QUIET)tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
+	$(CFG_QUIET)tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
+	$(CFG_QUIET)rm -Rf dist
 
 distcheck:
-	rm -Rf $(PKG_NAME)-*.tar.gz dist
-	mkdir -p dist/$(PKG_DIR)
-	tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
-	make -C dist/$(PKG_DIR) check
-	make -C dist/$(PKG_DIR) clean
-	tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
-	rm -Rf dist
+	@$(call CFG_ECHO, making dist dir)
+	$(CFG_QUIET)rm -Rf $(PKG_NAME)-*.tar.gz dist
+	$(CFG_QUIET)mkdir -p dist/$(PKG_DIR)
+	$(CFG_QUIET)tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
+	@$(call CFG_ECHO, making 'check' in dist dir)
+	$(CFG_QUIET)make -C dist/$(PKG_DIR) check
+	$(CFG_QUIET)make -C dist/$(PKG_DIR) clean
+	@$(call CFG_ECHO, making tarball)
+	$(CFG_QUIET)tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
+	$(CFG_QUIET)rm -Rf dist
 	@echo
 	@echo -----------------------------------------------
 	@echo $(PKG_TAR) ready for distribution
@@ -322,12 +354,13 @@ distcheck:
 .phony: clean
 
 clean:
-	rm -f $(RUNTIME_OBJS) $(BOOT_CMOS) $(BOOT_CMIS) $(BOOT_CMXS) $(BOOT_OBJS)
-	rm -f $(CFG_COMPILER)
-	rm -f $(ML_DEPFILES) $(C_DEPFILES)
-	rm -f boot/fe/lexer.ml
-	rm -f $(CFG_BOOT) $(CFG_RUNTIME)
-	rm -f $(TEST_RUN_PASS_EXES) $(TEST_RUN_PASS_OUTS)
-	rm -f $(TEST_RUN_FAIL_EXES) $(TEST_RUN_FAIL_OUTS)
-	rm -f $(TEST_COMPILE_FAIL_EXES) $(TEST_COMPILE_FAIL_OUTS)
-	rm -Rf $(PKG_NAME)-*.tar.gz dist
+	@$(call CFG_ECHO, cleaning)
+	$(CFG_QUIET)rm -f $(RUNTIME_OBJS) $(BOOT_CMOS) $(BOOT_CMIS) $(BOOT_CMXS) $(BOOT_OBJS)
+	$(CFG_QUIET)rm -f $(CFG_COMPILER)
+	$(CFG_QUIET)rm -f $(ML_DEPFILES) $(C_DEPFILES)
+	$(CFG_QUIET)rm -f boot/fe/lexer.ml
+	$(CFG_QUIET)rm -f $(CFG_BOOT) $(CFG_RUNTIME)
+	$(CFG_QUIET)rm -f $(TEST_RUN_PASS_EXES) $(TEST_RUN_PASS_OUTS)
+	$(CFG_QUIET)rm -f $(TEST_RUN_FAIL_EXES) $(TEST_RUN_FAIL_OUTS)
+	$(CFG_QUIET)rm -f $(TEST_COMPILE_FAIL_EXES) $(TEST_COMPILE_FAIL_OUTS)
+	$(CFG_QUIET)rm -Rf $(PKG_NAME)-*.tar.gz dist
