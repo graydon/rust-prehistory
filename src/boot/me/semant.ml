@@ -688,13 +688,14 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
     | (_,_) -> bug () "unhandled form of lval-ext in Semant.project_slot"
 
 
+let check_concrete params thing =
+  if Array.length params = 0
+  then thing
+  else bug () "unhandled parametric binding"
+;;
+
 
 let ty_of_mod_type_item (mti:Ast.mod_type_item) : Ast.ty =
-  let check_concrete params ty =
-    if Array.length params = 0
-    then ty
-    else bug () "type-item has parametric type in ty_of_mod_type_item"
-  in
     match mti.node with
         Ast.MOD_TYPE_ITEM_opaque_type td ->
           let (_, mut) = td.Ast.decl_item in
@@ -738,7 +739,7 @@ let project_mod_type_to_type (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.ty
     | _ -> err None "non-module base type in Semant.project_mod_type_to_type"
 
 
-(* NB: this will fail if lval resolves to an item not a slot! *)
+(* NB: this will fail if lval is not a slot. *)
 let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
   match lval with
       Ast.LVAL_base nb -> lval_to_slot cx nb.id
@@ -747,11 +748,77 @@ let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
           project_type_to_slot base_ty comp
 ;;
 
+(* NB: this will fail if lval is not an item. *)
+let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
+  match lval with
+      Ast.LVAL_base nb ->
+        begin
+          let referent = lval_to_referent cx nb.id in
+            match htab_search cx.ctxt_all_items referent with
+                Some item -> {node=item; id=referent}
+              | None -> bug () "lval does not name an item"
+        end
+    | Ast.LVAL_ext (base, comp) ->
+        match (lval_item cx base).node with
+            Ast.MOD_ITEM_mod mis ->
+              begin
+                match comp with
+                    Ast.COMP_named (Ast.COMP_ident i) ->
+                      begin
+                        match htab_search mis.Ast.decl_item i with
+                            None -> err None "unknown module item '%s'" i
+                          | Some sub -> check_concrete mis.Ast.decl_params sub
+                      end
+                  | _ ->
+                      bug () "unhandled lval-component in Semant.lval_item"
+              end
+          | _ -> err None "lval base %a does not name a module" Ast.sprintf_lval base
+;;
+
+(* NB: this will fail if lval is not a native item. *)
+let rec lval_native_item (cx:ctxt) (lval:Ast.lval) : Ast.native_mod_item =
+  match lval with
+      Ast.LVAL_base nb ->
+        begin
+          let referent = lval_to_referent cx nb.id in
+            match htab_search cx.ctxt_all_native_items referent with
+                Some item -> {node=item; id=referent}
+              | None -> bug () "lval does not name a native item"
+        end
+    | Ast.LVAL_ext (base, comp) ->
+        match (lval_native_item cx base).node with
+            Ast.NATIVE_mod mis ->
+              begin
+                match comp with
+                    Ast.COMP_named (Ast.COMP_ident i) ->
+                      begin
+                        match htab_search mis i with
+                            None -> err None "unknown native module item '%s'" i
+                          | Some sub -> sub
+                      end
+                  | _ ->
+                      bug () "unhandled lval-component in Semant.lval_native_item"
+              end
+          | _ -> err None "lval base %a does not name a native module" Ast.sprintf_lval base
+;;
+
 
 let lval_is_slot (cx:ctxt) (lval:Ast.lval) : bool =
   let base_id = lval_base_id lval in
   let referent = lval_to_referent cx base_id in
     Hashtbl.mem cx.ctxt_all_slots referent
+;;
+
+let lval_is_item (cx:ctxt) (lval:Ast.lval) : bool =
+  let base_id = lval_base_id lval in
+  let referent = lval_to_referent cx base_id in
+    Hashtbl.mem cx.ctxt_all_items referent
+;;
+
+let lval_is_native_item (cx:ctxt) (lval:Ast.lval) : bool =
+  let base_id = lval_base_id lval in
+  let referent = lval_to_referent cx base_id in
+    Hashtbl.mem cx.ctxt_all_native_items referent
 ;;
 
 let rec lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =

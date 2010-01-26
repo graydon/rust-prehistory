@@ -3,6 +3,7 @@
 mod inner {
   mod inner2 {
     fn hello() -> () {
+      log "hello, modular world";
     }
   }
   fn hello() -> () {

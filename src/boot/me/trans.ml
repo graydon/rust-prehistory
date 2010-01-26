@@ -345,7 +345,7 @@ let trans_visitor
       | _ -> bug () "Unhandled binop in binop_to_jmpop"
   in
 
-  let rec trans_lval_ext
+  let rec trans_slot_lval_ext
       (base_ty:Ast.ty)
       (base_addr:Il.addr)
       (comp:Ast.lval_component)
@@ -394,7 +394,7 @@ let trans_visitor
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
 
-      | _ -> bug () "unhandled form of lval_ext in trans_lval_ext"
+      | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
 
   (* 
    * vec: operand holding ptr to vec.
@@ -429,32 +429,32 @@ let trans_visitor
         (Il.Addr (addr, (slot_referent_type abi slot)), slot)
     in
 
-    let return_item (item:Ast.mod_item') (referent:node_id)
+    let return_item (item:Ast.mod_item)
         : (Il.cell * Ast.slot) =
-      let ty = Hashtbl.find cx.ctxt_all_item_types referent in
+      let ty = Hashtbl.find cx.ctxt_all_item_types item.id in
       let slot = interior_slot ty
       in
-        match item with
+        match item.node with
             Ast.MOD_ITEM_fn _ ->
-              return_fixup (get_fn_fixup cx referent) slot
+              return_fixup (get_fn_fixup cx item.id) slot
           | Ast.MOD_ITEM_pred _ ->
-              return_fixup (get_fn_fixup cx referent) slot
+              return_fixup (get_fn_fixup cx item.id) slot
           | Ast.MOD_ITEM_tag _ ->
-              return_fixup (get_fn_fixup cx referent) slot
+              return_fixup (get_fn_fixup cx item.id) slot
           | _ ->
-              bugi cx referent
+              bugi cx item.id
                 "unhandled item type in trans_lval_full"
     in
 
-    let return_native_item (item:Ast.native_mod_item') (referent:node_id)
+    let return_native_item (item:Ast.native_mod_item)
         : (Il.cell * Ast.slot) =
-      let ty = Hashtbl.find cx.ctxt_all_item_types referent in
+      let ty = Hashtbl.find cx.ctxt_all_item_types item.id in
       let slot = interior_slot ty in
-        match item with
+        match item.node with
             Ast.NATIVE_fn _ ->
-              return_fixup (get_fn_fixup cx referent) slot
+              return_fixup (get_fn_fixup cx item.id) slot
           | _ ->
-              bugi cx referent
+              bugi cx item.id
                 "unhandled native item type in trans_lval_full"
     in
 
@@ -464,25 +464,33 @@ let trans_visitor
         (cell, slot)
     in
 
+    let rec trans_slot_lval_full lv intent =
       match lv with
           Ast.LVAL_ext (base, comp) ->
-            let (base_cell, base_slot) = trans_lval_full base abi.Abi.abi_has_abs_data intent in
+            let (base_cell, base_slot) = trans_slot_lval_full base intent in
             let base_cell' = deref_slot base_cell base_slot intent in
             let (addr, _) = need_addr_cell base_cell' in
-              trans_lval_ext (slot_ty base_slot) addr comp
+              trans_slot_lval_ext (slot_ty base_slot) addr comp
 
         | Ast.LVAL_base nb ->
             let referent = lval_to_referent cx nb.id in
-              begin
-                match htab_search cx.ctxt_all_items referent with
-                    Some item -> return_item item referent
-                  | None ->
-                      match htab_search cx.ctxt_all_native_items referent with
-                          Some item -> return_native_item item referent
-                        | None ->
-                            let slot = lval_to_slot cx nb.id in
-                              return_slot nb.id slot referent
-              end
+            let slot = lval_to_slot cx nb.id in
+              return_slot nb.id slot referent
+    in
+      if lval_is_slot cx lv
+      then trans_slot_lval_full lv intent
+      else
+        match intent with
+            INTENT_read ->
+              if lval_is_item cx lv
+              then return_item (lval_item cx lv)
+              else
+                begin
+                  assert (lval_is_native_item cx lv);
+                  return_native_item (lval_native_item cx lv)
+                end
+          | _ -> err None "writing to item"
+
 
   and trans_lval (lv:Ast.lval) (intent:intent) : (Il.cell * Ast.slot) =
     trans_lval_full lv abi.Abi.abi_has_abs_data intent
