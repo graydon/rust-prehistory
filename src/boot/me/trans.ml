@@ -1771,7 +1771,6 @@ let trans_visitor
           let (src, src_slot) = trans_lval src_lval INTENT_read in
             trans_init_slot_from_cell dst dst_slot src src_slot
 
-
   and trans_init_slot_from_cell
       (dst:Il.cell) (dst_slot:Ast.slot)
       (src:Il.cell) (src_slot:Ast.slot)
@@ -1879,11 +1878,21 @@ let trans_visitor
         begin
           fun i slot ->
             iflog (fun _ ->
-                     annotate (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
-                                 i n_layouts n_extras));
+                     annotate
+                       (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
+                          i n_layouts n_extras));
             trans_argN (arg_cell arg_slots arg_layouts i) slot args.(i)
         end
-        arg_slots
+        arg_slots;
+      Array.iteri
+        begin
+          fun i operand ->
+            iflog (fun _ ->
+                     annotate (Printf.sprintf "fn-call extra-arg %d of %d"
+                                 i n_extras));
+            mov (extra_arg_cell arg_layouts i) operand
+        end
+        extra_args
 
   and call_code (code:Il.code) : unit =
     let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
@@ -1927,6 +1936,26 @@ let trans_visitor
     (* NB: first 2 layouts account for implicit args. *)
     let arg_addr = sp_imm arg_layouts.(2 + arg).layout_offset in
     let arg_referent_ty = slot_referent_type abi arg_slots.(arg) in
+      Il.Addr (arg_addr, arg_referent_ty)
+
+  and extra_arg_cell
+      (arg_layouts:layout array)
+      (arg:int)
+      : Il.cell =
+    let n_args = Array.length arg_layouts in
+    let extra_args_start =
+      if n_args > 0
+      then
+        let last_arg_layout = arg_layouts.(n_args - 1) in
+          Int64.add
+            last_arg_layout.layout_offset
+            last_arg_layout.layout_size
+      else
+        word_n 2
+    in
+    let arg_off = Int64.add extra_args_start (word_n arg) in
+    let arg_addr = sp_imm arg_off in
+    let arg_referent_ty = Il.ScalarTy (Il.voidptr_t) in
       Il.Addr (arg_addr, arg_referent_ty)
 
   and drop_arg_slots
