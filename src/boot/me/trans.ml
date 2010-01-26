@@ -65,6 +65,12 @@ let trans_visitor
   let imm_true = one in
   let imm_false = zero in
 
+  let table_of_fixups (fixups:fixup array) : Asm.frag =
+    Asm.SEQ
+      (Array.map
+         (fun fix -> Asm.WORD (word_ty_mach, Asm.M_POS fix)) fixups)
+  in
+
   let nabi_indirect =
       match cx.ctxt_sess.Session.sess_targ with
           Linux_x86_elf -> false
@@ -1628,16 +1634,7 @@ let trans_visitor
 
   (* NB: heavyweight copying here does not mean "producing a deep
    * clone of the entire data tree rooted at the src operand". It means
-   * "replicating a single level of the tree". You usually only need to
-   * heavyweight copy if you're preparing to write to a sub-component
-   * of an lval with refcount > 1.
-   * 
-   * If you're dereferencing a path x.y.z in order to write to the z
-   * component, you may have to make 0..2 heavyweight copies:
-   * 
-   *   - let x' = if x.rc > 1 then heavy_copy(x) else x
-   *   - let y' = if x'.y.rc > 1 then heavy_copy(x'.y) else x'.y
-   *   - let z' = if y'.z.rc > 1 then heavy_copy(y'.z) else y'.z
+   * "replicating a single level of the tree".
    * 
    * There is no general-recursion entailed in performing a heavy
    * copy. There is only "one level" to each heavy copy call.
@@ -2247,15 +2244,15 @@ let trans_visitor
                   ()
               end
           in
-            Asm.SEQ
+            table_of_fixups
               [|
                (* 
                 * NB: this must match the struct-offsets given in ABI
                 * & rust runtime library.
                 *)
-                Asm.WORD (word_ty_mach, Asm.M_POS mark_frame_glue_fixup);
-                Asm.WORD (word_ty_mach, Asm.M_POS drop_frame_glue_fixup);
-                Asm.WORD (word_ty_mach, Asm.M_POS reloc_frame_glue_fixup);
+                mark_frame_glue_fixup;
+                drop_frame_glue_fixup;
+                reloc_frame_glue_fixup;
               |]
       end
   in
@@ -2494,16 +2491,17 @@ let trans_visitor
       (cx.ctxt_global_glue_fixup,
        Asm.DEF
          (cx.ctxt_global_glue_fixup,
-          Asm.SEQ [|
+          table_of_fixups
+            [|
             (* 
              * NB: this must match the struct-offsets given in ABI
              * & rust runtime library.
              *)
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_c_to_proc_fixup);
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_main_exit_proc_glue_fixup);
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_unwind_fixup);
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_yield_fixup);
-          |]))
+              cx.ctxt_c_to_proc_fixup;
+              cx.ctxt_main_exit_proc_glue_fixup;
+              cx.ctxt_unwind_fixup;
+              cx.ctxt_yield_fixup;
+            |]))
     in
 
       (* Emit additional glue we didn't do elsewhere. *)
