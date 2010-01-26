@@ -100,6 +100,7 @@ type ctxt =
 
       (* Translation-y stuff. *)
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
+      ctxt_mod_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_block_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
@@ -156,6 +157,7 @@ let new_ctxt sess abi crate =
     ctxt_call_sizes = Hashtbl.create 0;
 
     ctxt_fn_fixups = Hashtbl.create 0;
+    ctxt_mod_fixups = Hashtbl.create 0;
     ctxt_block_fixups = Hashtbl.create 0;
     ctxt_file_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
@@ -218,44 +220,50 @@ let bugi (cx:ctxt) (i:node_id) =
 let lval_to_referent (cx:ctxt) (id:node_id) : node_id =
   if Hashtbl.mem cx.ctxt_lval_to_referent id
   then Hashtbl.find cx.ctxt_lval_to_referent id
-  else bug () "Unresolved lval"
+  else bug () "unresolved lval"
 ;;
 
 let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
   let referent = lval_to_referent cx id in
     if Hashtbl.mem cx.ctxt_all_slots referent
     then Hashtbl.find cx.ctxt_all_slots referent
-    else bugi cx referent "Unknown slot"
+    else bugi cx referent "unknown slot"
 ;;
 
 let get_block_layout (cx:ctxt) (id:node_id) : layout =
   if Hashtbl.mem cx.ctxt_block_layouts id
   then Hashtbl.find cx.ctxt_block_layouts id
-  else bugi cx id "Unknown block layout"
+  else bugi cx id "unknown block layout"
 ;;
 
 let get_fn_fixup (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_fn_fixups id
   then Hashtbl.find cx.ctxt_fn_fixups id
-  else bugi cx id "Fn without fixup"
+  else bugi cx id "fn without fixup"
+;;
+
+let get_mod_fixup (cx:ctxt) (id:node_id) : fixup =
+  if Hashtbl.mem cx.ctxt_mod_fixups id
+  then Hashtbl.find cx.ctxt_mod_fixups id
+  else bugi cx id "mod without fixup"
 ;;
 
 let get_framesz (cx:ctxt) (id:node_id) : int64 =
   if Hashtbl.mem cx.ctxt_frame_sizes id
   then Hashtbl.find cx.ctxt_frame_sizes id
-  else bugi cx id "Missing framesz"
+  else bugi cx id "missing framesz"
 ;;
 
 let get_callsz (cx:ctxt) (id:node_id) : int64 =
   if Hashtbl.mem cx.ctxt_call_sizes id
   then Hashtbl.find cx.ctxt_call_sizes id
-  else bugi cx id "Missing callsz"
+  else bugi cx id "missing callsz"
 ;;
 
 let get_spill (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_spill_fixups id
   then Hashtbl.find cx.ctxt_spill_fixups id
-  else bugi cx id "Missing spill fixup"
+  else bugi cx id "missing spill fixup"
 ;;
 
 let import (cx:ctxt) (lib:import_lib) (name:string) : fixup =

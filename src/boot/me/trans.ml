@@ -441,6 +441,8 @@ let trans_visitor
               return_fixup (get_fn_fixup cx item.id) slot
           | Ast.MOD_ITEM_tag _ ->
               return_fixup (get_fn_fixup cx item.id) slot
+          | Ast.MOD_ITEM_mod _ ->
+              return_fixup (get_mod_fixup cx item.id) slot
           | _ ->
               bugi cx item.id
                 "unhandled item type in trans_lval_full"
@@ -2508,6 +2510,10 @@ let fixup_assigning_visitor
               in
                 htab_put cx.ctxt_fn_fixups i.id fixup;
             end
+
+        | Ast.MOD_ITEM_mod _ ->
+            htab_put cx.ctxt_mod_fixups i.id
+              (new_fixup (path_name()));
 
         | _ -> ()
     end;
