@@ -400,6 +400,26 @@ let trans_visitor
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
 
+      | (Ast.TY_mod mtis,
+         Ast.COMP_named (Ast.COMP_ident id)) ->
+          let sorted_idents = sorted_htab_keys mtis in
+          let find i ident = if ident = id then Some i else None in
+            begin
+              match arr_search sorted_idents find with
+                  None -> bug () "unknown module item '%s'" id
+                | Some i ->
+                    (* A mod is a pair of pointers [mod_table, binding];
+                     * we dereference the first cell of this pair and then
+                     * return the address of the Nth table-item. Each table
+                     * item is itself a pair. *)
+                    let (table_addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
+                    let off = word_n (i * 2) in
+                    let item_addr = addr_add_imm table_addr off in
+                    let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
+                    let item_referent_ty = referent_type abi item_ty in
+                      (Il.Addr (item_addr, item_referent_ty), interior_slot item_ty)
+            end
+
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
 
   (* 
