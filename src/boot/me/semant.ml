@@ -405,6 +405,11 @@ let interior_slot_full mut ty : Ast.slot =
 let interior_slot ty : Ast.slot = interior_slot_full Ast.IMMUTABLE ty
 ;;
 
+let read_alias_slot ty : Ast.slot =
+  { Ast.slot_mode = Ast.MODE_read_alias;
+    Ast.slot_ty = Some ty }
+;;
+
 let sorted_tag_keys (ttag:Ast.ty_tag) : Ast.name array =
   let tag_keys = Array.of_list (htab_keys ttag) in
     Array.sort compare tag_keys;
@@ -665,31 +670,6 @@ let type_is_cyclic (t:Ast.ty) : bool =
 ;;
 
 
-let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
-  match (base_ty, comp) with
-      (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
-        begin
-          match atab_search elts id with
-              Some slot -> slot
-            | None -> err None "unknown record-member '%s'" id
-        end
-
-    | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
-        if 0 <= i && i < (Array.length elts)
-        then elts.(i)
-        else err None "out-of-range tuple index %d" i
-
-    | (Ast.TY_vec slot, Ast.COMP_atom _) ->
-        slot
-
-    | (Ast.TY_str, Ast.COMP_atom _) ->
-        interior_slot (Ast.TY_mach TY_u8)
-
-    | (_,_) ->
-        bug () "unhandled form of lval-ext in Semant.project_slot: %a indexed by %a"
-          Ast.sprintf_ty base_ty Ast.sprintf_lval_component comp
-
-
 let check_concrete params thing =
   if Array.length params = 0
   then thing
@@ -725,6 +705,40 @@ let ty_of_mod_type_item (mti:Ast.mod_type_item) : Ast.ty =
             (Ast.TY_fn fd.Ast.decl_item)
 ;;
 
+
+let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
+  match (base_ty, comp) with
+      (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
+        begin
+          match atab_search elts id with
+              Some slot -> slot
+            | None -> err None "unknown record-member '%s'" id
+        end
+
+    | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
+        if 0 <= i && i < (Array.length elts)
+        then elts.(i)
+        else err None "out-of-range tuple index %d" i
+
+    | (Ast.TY_vec slot, Ast.COMP_atom _) ->
+        slot
+
+    | (Ast.TY_str, Ast.COMP_atom _) ->
+        interior_slot (Ast.TY_mach TY_u8)
+
+    | (Ast.TY_mod mtis, Ast.COMP_named (Ast.COMP_ident id)) ->
+        begin
+          match htab_search mtis id with
+              Some mti -> read_alias_slot (ty_of_mod_type_item mti)
+            | None -> err None "unknown module-member '%s'" id
+        end
+
+    | (_,_) ->
+        bug () "unhandled form of lval-ext in Semant.project_slot: %a indexed by %a"
+          Ast.sprintf_ty base_ty Ast.sprintf_lval_component comp
+;;
+
+
 let project_mod_type_to_type (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.ty =
   match base_ty with
       Ast.TY_mod mty ->
@@ -739,6 +753,7 @@ let project_mod_type_to_type (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.ty
             | _ -> bug () "unhandled name-component type in Semant.project_mod_type_to_type"
         end
     | _ -> err None "non-module base type in Semant.project_mod_type_to_type"
+;;
 
 
 (* NB: this will fail if lval is not a slot. *)
