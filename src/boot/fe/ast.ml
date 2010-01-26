@@ -982,7 +982,6 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
                 None -> fmt ff " = "
               | Some binop -> fmt_binop ff binop
           end;
-          fmt ff " = ";
           fmt_expr ff ex;
           fmt ff ";"
 
