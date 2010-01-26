@@ -419,7 +419,7 @@ let lval_base_resolving_visitor
     (scopes:(scope list) ref)
     (inner:Walk.visitor)
     : Walk.visitor =
-  let lookup_slot_by_ident id ident =
+  let lookup_referent_by_ident id ident =
     log cx "looking up slot or item with ident '%s'" ident;
     match lookup cx (!scopes) (Ast.KEY_ident ident) with
         None -> err (Some id) "unresolved identifier '%s'" ident
@@ -432,9 +432,9 @@ let lval_base_resolving_visitor
           None -> err (Some id) "unresolved temp node #%d" (int_of_temp temp)
         | Some (_, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
   in
-  let lookup_slot_by_name_base id nb =
+  let lookup_referent_by_name_base id nb =
     match nb with
-        Ast.BASE_ident ident -> lookup_slot_by_ident id ident
+        Ast.BASE_ident ident -> lookup_referent_by_ident id ident
       | Ast.BASE_temp temp -> lookup_slot_by_temp id temp
       | Ast.BASE_app _ -> err (Some id) "unhandled name base case BASE_app"
   in
@@ -450,9 +450,9 @@ let lval_base_resolving_visitor
                 | _ -> ()
             end
         | Ast.LVAL_base nb ->
-            let slot_id = lookup_slot_by_name_base nb.id nb.node in
-              log cx "resolved lval #%d to slot #%d" (int_of_node nb.id) (int_of_node slot_id);
-              htab_put cx.ctxt_lval_to_referent nb.id slot_id
+            let referent_id = lookup_referent_by_name_base nb.id nb.node in
+              log cx "resolved lval #%d to referent #%d" (int_of_node nb.id) (int_of_node referent_id);
+              htab_put cx.ctxt_lval_to_referent nb.id referent_id
     in
       lookup_lval lv;
       inner.Walk.visit_lval_pre lv
