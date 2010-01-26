@@ -493,7 +493,7 @@ let emit_native_call_in_thunk
 let unwind_glue
     (e:Il.emitter)
     (nabi:Abi.nabi)
-    (del_proc_fixup:fixup)
+    (exit_proc_fixup:fixup)
     : unit =
 
   let fp_n = word_n (Il.Hreg ebp) in
@@ -541,7 +541,7 @@ let unwind_glue
     (* exit path. *)
     mark exit_jmp_fix;
 
-    emit_native_call_in_thunk e (rc eax) nabi del_proc_fixup [| (c proc_ptr) |];
+    emit_native_call_in_thunk e (rc eax) nabi exit_proc_fixup [| (c proc_ptr) |];
 ;;
 
 

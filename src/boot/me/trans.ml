@@ -2415,7 +2415,7 @@ let trans_visitor
         "unwind glue"
         cx.ctxt_unwind_fixup
         (fun e -> cx.ctxt_abi.Abi.abi_unwind
-           e nabi_rust (upcall_fixup "upcall_del_proc"));
+           e nabi_rust (upcall_fixup "upcall_exit"));
 
       htab_put cx.ctxt_data
         DATA_global_glue_fns global_glue_fns

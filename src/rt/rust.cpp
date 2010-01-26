@@ -117,22 +117,22 @@ struct stk_seg {
 };
 
 typedef enum {
-    proc_state_running    = 0,
-    proc_state_failing    = 1,
-    proc_state_blocked_exited   = 2,
-    proc_state_blocked_reading  = 3,
-    proc_state_blocked_writing  = 4,
-    proc_state_dead             = 5
+    proc_state_running,
+    proc_state_failing,
+    proc_state_blocked_reading,
+    proc_state_blocked_writing,
+    proc_state_dead_exited,
+    proc_state_dead_failed
 } proc_state_t;
 
 static char const * const state_names[] =
     {
         "running",
         "failing",
-        "blocked_exited",
         "blocked_reading",
         "blocked_writing",
-        "dead"
+        "dead_exited",
+        "dead_failed"
     };
 
 typedef enum {
@@ -348,16 +348,17 @@ struct rust_proc {
     rust_rt *rt;
     stk_seg *stk;
     uintptr_t fn;
-    uintptr_t runtime_sp;      /* runtime sp while proc running.   */
-    uintptr_t rust_sp;         /* saved sp when not running.       */
+    uintptr_t runtime_sp;      // runtime sp while proc running.
+    uintptr_t rust_sp;         // saved sp when not running.
     proc_state_t state;
     size_t idx;
     size_t refcnt;
     rust_chan *chans;
 
-    uintptr_t gc_alloc_chain;  /* linked list of GC allocations.   */
+    uintptr_t gc_alloc_chain;  // linked list of GC allocations.
 
-    uintptr_t* dptr; /* rendezvous pointer for send/recv */
+    uintptr_t* dptr;           // rendezvous pointer for send/recv
+    rust_proc *spawner;        // parent-link
 
     void check_active() { I(rt, rt->curr_proc == this); }
     void check_suspended() { I(rt, rt->curr_proc != this); }
@@ -836,7 +837,9 @@ rust_proc::rust_proc(rust_rt *rt,
       idx(0),
       refcnt(1),
       chans(NULL),
-      gc_alloc_chain(0)
+      gc_alloc_chain(0),
+      dptr(0),
+      spawner(spawner)
 {
     rt->logptr("new proc", (uintptr_t)this);
     rt->logptr("exit-proc glue", exit_proc_glue);
@@ -1056,6 +1059,13 @@ rust_proc::fail(size_t nargs) {
     rt->log(LOG_PROC,
             "proc 0x%" PRIxPTR " failing", this);
     run_after_return(nargs, rt->global_glue->unwind_glue);
+    if (spawner) {
+        rt->log(LOG_PROC,
+                "proc 0x%" PRIxPTR
+                " propagating failure to parent 0x%" PRIxPTR,
+                this, spawner);
+        spawner->kill();
+    }
 }
 
 uintptr_t
@@ -1086,12 +1096,12 @@ get_state_vec(rust_rt *rt, proc_state_t state)
     case proc_state_failing:
         return &rt->running_procs;
 
-    case proc_state_blocked_exited:
     case proc_state_blocked_reading:
     case proc_state_blocked_writing:
         return &rt->blocked_procs;
 
-    case proc_state_dead:
+    case proc_state_dead_exited:
+    case proc_state_dead_failed:
         return &rt->dead_procs;
     }
 
@@ -1145,26 +1155,13 @@ proc_state_transition(rust_rt *rt,
     add_proc_state_vec(rt, proc);
 }
 
-extern "C" CDECL void
-upcall_del_proc(rust_proc *proc)
-{
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
-    rt->log(LOG_UPCALL,
-            "upcall del_proc(0x%" PRIxPTR "), refcnt=%d",
-            proc, proc->refcnt);
-    proc_state_transition(rt, proc, proc->state,
-                          proc_state_dead);
-    proc->yield(1);
-}
-
 /* Runtime */
 
 static void
 del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     I(rt, v);
     while (v->length()) {
-        rt->log(LOG_PROC, "deleting live proc %" PRIdPTR, v->length() - 1);
+        rt->log(LOG_PROC, "deleting proc %" PRIdPTR, v->length() - 1);
         delete v->pop();
     }
 }
@@ -1319,9 +1316,15 @@ rust_rt::n_live_procs()
 void
 rust_rt::reap_dead_procs()
 {
-    if (dead_procs.length() > 0) {
-        log(LOG_PROC, "deleting %d dead procs", dead_procs.length());
-        del_all_procs(this, &dead_procs);
+    for (size_t i = 0; i < dead_procs.length(); ) {
+        rust_proc *p = dead_procs[i];
+        if (p == root_proc || p->refcnt == 0) {
+            dead_procs.swapdel(p);
+            log(LOG_PROC, "deleting unreferenced dead proc 0x%" PRIxPTR, p);
+            delete p;
+            continue;
+        }
+        ++i;
     }
 }
 
@@ -1604,8 +1607,13 @@ extern "C" CDECL void
 upcall_exit(rust_proc *proc)
 {
     LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL, "upcall exit()");
-    proc->state = proc_state_blocked_exited;
+    if (proc->state == proc_state_failing) {
+        proc->rt->log(LOG_UPCALL, "upcall exit(), failed");
+        proc->state = proc_state_dead_failed;
+    } else {
+        proc->rt->log(LOG_UPCALL, "upcall exit(), exited ok");
+        proc->state = proc_state_dead_exited;
+    }
     proc->yield(1);
 }
 
@@ -1651,7 +1659,7 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 }
 
 
-static void
+static int
 rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv);
 
 struct rust_ticket {
@@ -1746,9 +1754,10 @@ upcall_new_thread(rust_proc *spawner, global_glue_fns *global_glue, uintptr_t sp
     return NULL;
 }
 
-static void
+static int
 rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
 {
+    int ret = 0;
     size_t live_allocs = 0;
     {
         rust_proc *proc;
@@ -1788,21 +1797,31 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
                 case proc_state_failing:
                     break;
 
-                case proc_state_blocked_exited:
-                    /* When a proc exits *itself* we do not yet kill it; for
-                     * the time being we let it linger in the blocked-exiting
-                     * state, as someone else still "owns" it. */
-                    proc->state = proc_state_running;
-                    proc_state_transition(&rt, proc,
-                                          proc_state_running,
-                                          proc_state_blocked_exited);
+                case proc_state_dead_failed:
+                    if (proc == rt.root_proc) {
+                        rt.log(LOG_RT, "runtime 0x%" PRIxPTR " root proc failed", &rt);
+                        ret = 1;
+                    }
+                    // fall through...
+
+                case proc_state_dead_exited:
+
+                    // When a proc exits *itself* we do not yet kill
+                    // it; for the time being we let it linger in the
+                    // blocked-exiting state, as someone else still
+                    // has a refcount on it.  The reap loop below will
+                    // mop it up when there are no more refs.
+                    {
+                        proc_state_t tstate = proc->state;
+                        proc->state = proc_state_running;
+                        proc_state_transition(&rt, proc,
+                                              proc_state_running,
+                                              tstate);
+                    }
                     break;
 
                 case proc_state_blocked_reading:
                 case proc_state_blocked_writing:
-                    break;
-
-                case proc_state_dead:
                     break;
                 }
 
@@ -1811,11 +1830,12 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
             proc = rt.sched();
         }
 
-        rt.log(LOG_RT, "finished main loop");
+        rt.log(LOG_RT, "finished main loop (retval = %d)", ret);
     }
     if (live_allocs != 0) {
         srv->fatal("leaked memory in rust main loop", __FILE__, __LINE__);
     }
+    return ret;
 }
 
 void
@@ -1886,8 +1906,8 @@ rust_start(uintptr_t main_fn,
            global_glue_fns *global_glue)
 {
     rust_srv srv;
-    rust_main_loop(main_fn, global_glue, &srv);
-    return 0;
+    int ret = rust_main_loop(main_fn, global_glue, &srv);
+    return ret;
 }
 
 /*

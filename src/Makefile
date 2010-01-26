@@ -199,6 +199,7 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 
 TEST_XFAILS := test/run-pass/spawn-fn.rs \
                test/run-pass/inner-module.rs \
+               test/run-pass/rec.rs \
                test/run-pass/mlist_cycle.rs \
                test/run-pass/linear-for-loop.rs \
                test/run-pass/fun-indirect-call.rs \
@@ -243,7 +244,7 @@ test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 
 test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) test/run-fail/%.pat $(CFG_RUNTIME)
 	rm -f $@
-	$(call CFG_RUN_TARG, $<) >$@ 2>&1 || true
+	$(call CFG_RUN_TARG, $<) >$@ 2>&1 ; X=$$? ; if [ $$X -eq 0 ] ; then exit 1 ; else exit 0 ; fi
 	grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
