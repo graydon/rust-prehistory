@@ -685,7 +685,9 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
     | (Ast.TY_str, Ast.COMP_atom _) ->
         interior_slot (Ast.TY_mach TY_u8)
 
-    | (_,_) -> bug () "unhandled form of lval-ext in Semant.project_slot"
+    | (_,_) ->
+        bug () "unhandled form of lval-ext in Semant.project_slot: %a indexed by %a"
+          Ast.sprintf_ty base_ty Ast.sprintf_lval_component comp
 
 
 let check_concrete params thing =

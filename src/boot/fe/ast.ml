@@ -562,7 +562,11 @@ and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) opt
   done;
   fmt ff "@])"
 
-and fmt_ty_fn (ff:Format.formatter) (tf:ty_fn) : unit =
+and fmt_ty_fn
+    (ff:Format.formatter)
+    (ident_and_params:(ident * ident array) option)
+    (tf:ty_fn)
+    : unit =
   let (tsig, ta) = tf in
     begin
       match ta.fn_purity with
@@ -575,9 +579,34 @@ and fmt_ty_fn (ff:Format.formatter) (tf:ty_fn) : unit =
           None -> ()
         | Some p -> fmt_proto ff p
     end;
+    begin
+      match ident_and_params with
+          Some (id, params) ->
+            fmt ff " ";
+            fmt_ident_and_params ff id params
+        | None -> ()
+    end;
     fmt_slots ff tsig.sig_input_slots None;
+    fmt_decl_constrs ff tsig.sig_input_constrs;
     fmt ff " -> ";
     fmt_slot ff tsig.sig_output_slot;
+
+and fmt_ty_pred
+    (ff:Format.formatter)
+    (ident_and_params:(ident * ident array) option)
+    (tp:ty_pred)
+    : unit =
+  let (in_slots, in_constrs) = tp in
+    fmt ff "pred";
+    begin
+      match ident_and_params with
+          Some (id, params) ->
+            fmt ff " ";
+            fmt_ident_and_params ff id params
+        | None -> ()
+    end;
+    fmt_slots ff in_slots None;
+    fmt_decl_constrs ff in_constrs
 
 and fmt_tag (ff:Format.formatter) (ttag:ty_tag) : unit =
   fmt ff "@[tag(@[";
@@ -636,15 +665,63 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
 
-  | TY_fn tfn -> fmt_ty_fn ff tfn
+  | TY_fn tfn -> fmt_ty_fn ff None tfn
   | TY_proc -> fmt ff "proc"
   | TY_tag ttag -> fmt_tag ff ttag
   | TY_iso tiso -> fmt_iso ff tiso
   | TY_idx idx -> fmt ff "idx#%d" idx
 
-  | TY_mod _ -> fmt ff "?mod?"
+  | TY_mod tm -> fmt_ty_mod ff None tm
   | TY_constrained _ -> fmt ff "?constrained?"
-  | TY_pred _ -> fmt ff "?pred?"
+  | TY_pred tp -> fmt_ty_pred ff None tp
+
+and fmt_mod_type_item
+    (ff:Format.formatter)
+    (id:ident)
+    (item:mod_type_item)
+    : unit =
+  fmt ff "@\n";
+  begin
+    match item.node with
+        MOD_TYPE_ITEM_opaque_type td ->
+          fmt ff "type ";
+          fmt_ident_and_params ff id td.decl_params;
+          fmt ff ";"
+
+      | MOD_TYPE_ITEM_public_type td ->
+          fmt ff "pub type ";
+          fmt_ident_and_params ff id td.decl_params;
+          fmt ff " = ";
+          fmt_ty ff td.decl_item;
+          fmt ff ";";
+
+      | MOD_TYPE_ITEM_pred pd ->
+          fmt_ty_pred ff (Some (id, pd.decl_params)) pd.decl_item;
+          fmt ff ";";
+
+      | MOD_TYPE_ITEM_mod md ->
+          fmt_ty_mod ff (Some (id, md.decl_params)) md.decl_item
+
+      | MOD_TYPE_ITEM_fn fd ->
+          fmt_ty_fn ff (Some (id, fd.decl_params)) fd.decl_item;
+          fmt ff ";";
+  end
+
+
+and fmt_ty_mod
+    (ff:Format.formatter)
+    (ident_and_params:(ident * ident array) option)
+    (mti:mod_type_items)
+    : unit =
+  fmt ff "mod ";
+  begin
+    match ident_and_params with
+        Some (id, params) -> fmt_ident_and_params ff id params
+      | None -> ()
+  end;
+  fmt_obr ff;
+  Hashtbl.iter (fmt_mod_type_item ff) mti;
+  fmt_cbb ff
 
 and fmt_constrs (ff:Format.formatter) (cc:constr array) : unit =
   Array.iter (fmt_constr ff) cc
@@ -1123,6 +1200,7 @@ let sprintf_fmt
 let sprintf_expr = sprintf_fmt fmt_expr;;
 let sprintf_name = sprintf_fmt fmt_name;;
 let sprintf_lval = sprintf_fmt fmt_lval;;
+let sprintf_lval_component = sprintf_fmt fmt_lval_component;;
 let sprintf_atom = sprintf_fmt fmt_atom;;
 let sprintf_slot = sprintf_fmt fmt_slot;;
 let sprintf_slot_key = sprintf_fmt fmt_slot_key;;
