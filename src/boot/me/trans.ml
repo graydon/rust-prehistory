@@ -1567,6 +1567,18 @@ let trans_visitor
           List.iter patch jmps
       done
 
+  and trans_copy_pair
+      (_(*initialising*):bool)
+      (dst_ta:Il.typed_addr)
+      (src_ta:Il.typed_addr)
+      : unit =
+    (* FIXME: adjust refcounts on non-null bound value carried along. *)
+    let (dst_addr, _) = dst_ta in
+    let (src_addr, _) = src_ta in
+      mov (word_at dst_addr) (Il.Cell (word_at src_addr));
+      let dst_addr = addr_add_imm dst_addr (word_n 1) in
+      let src_addr = addr_add_imm src_addr (word_n 1) in
+        mov (word_at dst_addr) (Il.Cell (word_at src_addr));
 
   and trans_copy_slot
       (initialising:bool)
@@ -1696,6 +1708,21 @@ let trans_visitor
                   dst_ta dst_tag
                   src_ta src_tag
 
+          | (Il.Addr dst_ta, Ast.TY_fn _,
+             Il.Addr src_ta, Ast.TY_fn _)
+          | (Il.Addr dst_ta, Ast.TY_pred _,
+             Il.Addr src_ta, Ast.TY_pred _)
+          | (Il.Addr dst_ta, Ast.TY_mod _,
+             Il.Addr src_ta, Ast.TY_mod _) ->
+              (*
+               * FIXME: will need to split out TY_mod when module type
+               * conversion (thus structural rearrangement) is part of
+               * 1st-class mod copying.
+               *)
+              trans_copy_pair
+                initialising
+                dst_ta src_ta
+
           | (_, t, _, _) when (i64_le (ty_sz abi t) word_sz) ->
               mov dst (Il.Cell src)
 
@@ -1714,17 +1741,17 @@ let trans_visitor
       else INTENT_write
     in
     let (dst_cell, dst_slot) = trans_lval dst dst_intent in
-    match binop_opt with
-        None ->
-          begin
-            match src with
-                (Ast.EXPR_binary _)
-              | (Ast.EXPR_unary _)
-              | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
-                  (*
-                   * Translations of these expr types yield vregs,
-                   * so copy is just MOV into the lval.
-                   *)
+      match binop_opt with
+          None ->
+            begin
+              match src with
+                  (Ast.EXPR_binary _)
+                | (Ast.EXPR_unary _)
+                | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
+                    (*
+                     * Translations of these expr types yield vregs,
+                     * so copy is just MOV into the lval.
+                     *)
                   let src_operand = trans_expr src in
                     mov (deref_slot dst_cell dst_slot INTENT_read) src_operand
 
