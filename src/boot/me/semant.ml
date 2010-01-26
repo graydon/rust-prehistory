@@ -754,7 +754,7 @@ let lval_is_slot (cx:ctxt) (lval:Ast.lval) : bool =
     Hashtbl.mem cx.ctxt_all_slots referent
 ;;
 
-let lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
+let rec lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
   let base_id = lval_base_id lval in
   let referent = lval_to_referent cx base_id in
   if Hashtbl.mem cx.ctxt_all_slots referent
@@ -766,7 +766,14 @@ let lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
     match lval with
         Ast.LVAL_base _ ->
           (Hashtbl.find cx.ctxt_all_item_types referent)
-      | _ -> bugi cx base_id "Unimplemented structured item-reference"
+      | Ast.LVAL_ext (base, comp) ->
+          let prefix_type = lval_ty cx base in
+            if lval_is_slot cx base
+            then
+              let slot = project_type_to_slot prefix_type comp in
+                slot_ty slot
+            else
+              project_mod_type_to_type prefix_type comp
 ;;
 
 let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
