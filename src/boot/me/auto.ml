@@ -46,7 +46,7 @@ let auto_inference_visitor
           Some t
       | (tyo, Some t) -> unify_ty tyo t
   in
-  let unify_lval (tyo:Ast.ty option) (lval:Ast.lval) : Ast.ty option =
+  let rec unify_lval (tyo:Ast.ty option) (lval:Ast.lval) : Ast.ty option =
     match lval with
         Ast.LVAL_base nb ->
           let referent = Hashtbl.find cx.ctxt_lval_to_referent nb.id in
@@ -57,8 +57,24 @@ let auto_inference_visitor
                     unify_ty tyo
                       (Hashtbl.find cx.ctxt_all_item_types referent)
             end
-      | _ -> (* FIXME (bug 541570): full-name unification? Oh, that'll be complex... *)
-          None
+      | Ast.LVAL_ext (base, comp) ->
+          begin
+            (* We are being asked to unify the full lval with a given type,
+             * which means we do not know anything in particular about its
+             * prefix type -- type T could be embedded in any number of containing
+             * structures -- so we unify the prefix-lval with None and only
+             * extend it if we get a real type back.
+             *)
+            match unify_lval None base with
+                None -> None
+              | Some prefix_type ->
+                  if lval_is_slot cx base
+                  then
+                    let slot = project_type_to_slot prefix_type comp in
+                      slot.Ast.slot_ty
+                  else
+                    Some (project_mod_type_to_type prefix_type comp)
+          end
   in
   let unify_lit (tyo:Ast.ty option) (lit:Ast.lit) : Ast.ty option =
     match lit with

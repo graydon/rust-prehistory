@@ -665,32 +665,86 @@ let type_is_cyclic (t:Ast.ty) : bool =
 ;;
 
 
+let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
+  match (base_ty, comp) with
+      (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
+        begin
+          match atab_search elts id with
+              Some slot -> slot
+            | None -> err None "unknown record-member '%s'" id
+        end
+
+    | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
+        if 0 <= i && i < (Array.length elts)
+        then elts.(i)
+        else err None "out-of-range tuple index %d" i
+
+    | (Ast.TY_vec slot, Ast.COMP_atom _) ->
+        slot
+
+    | (Ast.TY_str, Ast.COMP_atom _) ->
+        interior_slot (Ast.TY_mach TY_u8)
+
+    | (_,_) -> bug () "unhandled form of lval-ext in Semant.project_slot"
+
+
+
+let ty_of_mod_type_item (mti:Ast.mod_type_item) : Ast.ty =
+  let check_concrete params ty =
+    if Array.length params = 0
+    then ty
+    else bug () "type-item has parametric type in ty_of_mod_type_item"
+  in
+    match mti.node with
+        Ast.MOD_TYPE_ITEM_opaque_type td ->
+          let (_, mut) = td.Ast.decl_item in
+            (* 
+             * FIXME (bug 541598): generate opaque_ids uniquely per
+             * name (incl. type parameters), don't just cast node_ids
+             * to them.
+             *)
+          let opaque_id = Opaque (int_of_node mti.id) in
+            check_concrete td.Ast.decl_params (Ast.TY_opaque (opaque_id, mut))
+
+      | Ast.MOD_TYPE_ITEM_public_type td ->
+          check_concrete td.Ast.decl_params td.Ast.decl_item
+
+      | Ast.MOD_TYPE_ITEM_pred pd ->
+          check_concrete pd.Ast.decl_params
+            (Ast.TY_pred pd.Ast.decl_item)
+
+      | Ast.MOD_TYPE_ITEM_mod md ->
+          check_concrete md.Ast.decl_params
+            (Ast.TY_mod md.Ast.decl_item)
+
+      | Ast.MOD_TYPE_ITEM_fn fd ->
+          check_concrete fd.Ast.decl_params
+            (Ast.TY_fn fd.Ast.decl_item)
+;;
+
+let project_mod_type_to_type (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.ty =
+  match base_ty with
+      Ast.TY_mod mty ->
+        begin
+          match comp with
+              Ast.COMP_named (Ast.COMP_ident id) ->
+                begin
+                  match htab_search mty id with
+                      None -> err None "unknown module-type item '%s'" id
+                    | Some mti -> ty_of_mod_type_item mti
+                end
+            | _ -> bug () "unhandled name-component type in Semant.project_mod_type_to_type"
+        end
+    | _ -> err None "non-module base type in Semant.project_mod_type_to_type"
+
+
 (* NB: this will fail if lval resolves to an item not a slot! *)
 let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
   match lval with
       Ast.LVAL_base nb -> lval_to_slot cx nb.id
     | Ast.LVAL_ext (base, comp) ->
         let base_ty = slot_ty (lval_slot cx base) in
-          match (base_ty, comp) with
-              (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
-                begin
-                  match atab_search elts id with
-                      Some slot -> slot
-                    | None -> bug () "unknown record-member '%s'" id
-                end
-
-            | (Ast.TY_tup elts, Ast.COMP_named (Ast.COMP_idx i)) ->
-                if 0 <= i && i < (Array.length elts)
-                then elts.(i)
-                else bug () "out-of-range tuple index %d" i
-
-            | (Ast.TY_vec slot, Ast.COMP_atom _) ->
-                slot
-
-            | (Ast.TY_str, Ast.COMP_atom _) ->
-                interior_slot (Ast.TY_mach TY_u8)
-
-            | (_,_) -> bug () "unhandled form of lval-ext"
+          project_type_to_slot base_ty comp
 ;;
 
 
@@ -768,7 +822,12 @@ and mod_type_item_of_mod_item
           then
             Some (Ast.MOD_TYPE_ITEM_public_type td)
           else
-            Some (Ast.MOD_TYPE_ITEM_opaque_type (decl td.Ast.decl_params ()))
+            let mut =
+              if type_is_mutable td.Ast.decl_item
+              then Ast.MUTABLE else Ast.IMMUTABLE
+            in
+            let pair = ((), mut) in
+              Some (Ast.MOD_TYPE_ITEM_opaque_type (decl td.Ast.decl_params pair))
       | Ast.MOD_ITEM_public_type td ->
           Some (Ast.MOD_TYPE_ITEM_public_type td)
       | Ast.MOD_ITEM_pred pd ->
