@@ -66,6 +66,19 @@
                 ("false", LIT_BOOL false);
 
                 ("in", IN);
+
+                ("bind", BIND);
+
+                ("u8", MACH TY_u8);
+                ("u16", MACH TY_u16);
+                ("u32", MACH TY_u32);
+                ("u64", MACH TY_u64);
+                ("s8", MACH TY_s8);
+                ("s16", MACH TY_s16);
+                ("s32", MACH TY_s32);
+                ("s64", MACH TY_s64);
+                ("f32", MACH TY_f32);
+                ("f64", MACH TY_f64)
               ]
 ;;
 }
@@ -137,24 +150,11 @@ rule token = parse
 | '['                          { LBRACKET   }
 | ']'                          { RBRACKET   }
 
-| "u8"                         { MACH TY_u8 }
-| "u16"                        { MACH TY_u16 }
-| "u32"                        { MACH TY_u32 }
-| "u64"                        { MACH TY_u64 }
-| "s8"                         { MACH TY_s8 }
-| "s16"                        { MACH TY_s16 }
-| "s32"                        { MACH TY_s32 }
-| "s64"                        { MACH TY_s64 }
-| "f32"                        { MACH TY_f32 }
-| "f64"                        { MACH TY_f64 }
-
 | "fn"                         { FN None                }
 | "fn?"                        { FN (Some Ast.PROTO_ques)   }
 | "fn!"                        { FN (Some Ast.PROTO_bang)   }
 | "fn*"                        { FN (Some Ast.PROTO_star)   }
 | "fn+"                        { FN (Some Ast.PROTO_plus)   }
-
-| "in"                         { IN }
 
 | "for"                        { FOR None               }
 | "for?"                       { FOR (Some Ast.PROTO_ques)  }
@@ -179,8 +179,6 @@ rule token = parse
 | "be!"                        { BE (Some Ast.PROTO_bang)  }
 | "be*"                        { BE (Some Ast.PROTO_star)  }
 | "be+"                        { BE (Some Ast.PROTO_plus)  }
-
-| "bind"                       { BIND }
 
 | id as i
                                { try
