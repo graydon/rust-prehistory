@@ -228,6 +228,7 @@ and stmt' =
   | STMT_alt_port of stmt_alt_port
 
   (* structural and misc stmts. *)
+  | STMT_yield
   | STMT_send of (lval * lval)
   | STMT_log of atom
   | STMT_note of atom
@@ -1085,6 +1086,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_slice _ -> fmt ff "?stmt_slice?"
       | STMT_init_chan _ -> fmt ff "?stmt_init_chan?"
       | STMT_init_port _ -> fmt ff "?stmt_init_port?"
+      | STMT_yield -> fmt ff "?stmt_yield?"
       | STMT_send _ -> fmt ff "?stmt_send?"
       | STMT_recv _ -> fmt ff "?stmt_recv?"
       | STMT_use _ -> fmt ff "?stmt_use?"

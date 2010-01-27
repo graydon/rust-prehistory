@@ -91,6 +91,7 @@ type token =
   | SPAWN
   | BIND
   | THREAD
+  | YIELD
 
   (* Literals *)
   | LIT_INT       of (int64 * string)
@@ -240,6 +241,7 @@ let rec string_of_tok t =
     | SPAWN      -> "spawn"
     | BIND       -> "bind"
     | THREAD     -> "thread"
+    | YIELD      -> "yield"
 
     (* Literals *)
     | LIT_INT (_,s)  -> s
@@ -1860,6 +1862,11 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           in
             Array.concat [[| span ps apos bpos (Ast.STMT_decl decl) |]; stmts]
 
+      | YIELD ->
+          bump ps;
+          expect ps SEMI;
+          let bpos = lexpos ps in
+            [| span ps apos bpos Ast.STMT_yield |]
 
       | MOD | TYPE | (FN _) | PRED ->
           let (ident, item) = ctxt "stmt: decl" parse_mod_item ps in

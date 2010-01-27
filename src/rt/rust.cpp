@@ -1488,6 +1488,15 @@ attempt_transmission(rust_rt *rt,
 }
 
 extern "C" CDECL void
+upcall_yield(rust_proc *proc)
+{
+    LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_UPCALL|LOG_COMM, "upcall yield()");
+    proc->yield(1);
+}
+
+extern "C" CDECL void
 upcall_send(rust_proc *proc, rust_port *port, void *sptr)
 {
     LOG_UPCALL_ENTRY(proc);

@@ -1021,6 +1021,9 @@ let trans_visitor
   and trans_free (src:Il.cell) : unit =
     trans_void_upcall "upcall_free" [| Il.Cell src |]
 
+  and trans_yield () : unit =
+    trans_void_upcall "upcall_yield" [| |];
+
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
     let (srccell, _) = trans_lval src INTENT_read in
       aliasing false srccell
@@ -2072,6 +2075,9 @@ let trans_visitor
                 Ast.TY_bool -> trans_check_expr e
               | _ -> bugi cx stmt.id "check expr on non-bool"
           end
+
+      | Ast.STMT_yield ->
+          trans_yield ()
 
       | Ast.STMT_send (chan,src) ->
           trans_send chan src
