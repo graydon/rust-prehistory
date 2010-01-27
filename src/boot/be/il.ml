@@ -25,6 +25,7 @@ and referent_ty =
 ;;
 
 let (voidptr_t:scalar_ty) = AddrTy OpaqueTy;;
+let (codeptr_t:scalar_ty) = AddrTy CodeTy;;
 
 (* Operands. *)
 

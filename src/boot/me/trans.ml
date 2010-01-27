@@ -2400,6 +2400,11 @@ let trans_visitor
 
   let trans_mod (id:node_id) (m:Ast.mod_items) : unit =
     log cx "emitting %d-entry mod table for %s" (Hashtbl.length m) (path_name());
+    let pair_with_nil fix =
+      Asm.SEQ
+        [| Asm.WORD (word_ty_mach, Asm.M_POS fix);
+           Asm.WORD (word_ty_mach, Asm.IMM 0L) |]
+    in
     let item_pairs =
       Array.map
         begin
@@ -2418,15 +2423,16 @@ let trans_visitor
                       let (fix, _) = Hashtbl.find cx.ctxt_data (DATA_typeinfo t) in
                         fix
             in
-              Asm.SEQ
-                [| Asm.WORD (word_ty_mach, Asm.M_POS fix);
-                   Asm.WORD (word_ty_mach, Asm.IMM 0L) |]
+              pair_with_nil fix
         end
         (sorted_htab_keys m)
     in
-    let fix = get_mod_fixup cx id in
-    let frag = Asm.DEF (fix, Asm.SEQ item_pairs) in
-      htab_put cx.ctxt_data (DATA_mod_table id) (fix, frag)
+    let table_fix = new_fixup "mod table" in
+    let pair_fix = get_mod_fixup cx id in
+    let table_frag = Asm.DEF (table_fix, Asm.SEQ item_pairs) in
+    let pair_frag = Asm.DEF (pair_fix, pair_with_nil table_fix) in
+      htab_put cx.ctxt_data (DATA_mod_table id) (table_fix, table_frag);
+      htab_put cx.ctxt_data (DATA_mod_pair id) (pair_fix, pair_frag)
   in
 
   let enter_file_for i =

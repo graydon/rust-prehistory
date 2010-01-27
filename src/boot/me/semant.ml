@@ -41,6 +41,7 @@ type data =
   | DATA_typeinfo of Ast.ty
   | DATA_frame_glue_fns of node_id
   | DATA_mod_table of node_id
+  | DATA_mod_pair of node_id
   | DATA_global_glue_fns
 ;;
 
