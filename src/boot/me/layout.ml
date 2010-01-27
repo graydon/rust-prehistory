@@ -260,7 +260,7 @@ let layout_visitor
     let frame_id = Stack.top frame_stack in
     let off =
       if Stack.is_empty stk
-      then frame_info_slot_sz
+      then Int64.neg frame_info_slot_sz
       else (Stack.top stk).layout_offset
     in
     let layout = layout_block off b in
