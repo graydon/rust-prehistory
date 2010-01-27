@@ -862,8 +862,8 @@ and fmt_lit (ff:Format.formatter) (l:lit) : unit =
 
 and fmt_realm (ff:Format.formatter) (r:realm) : unit =
   match r with
-      REALM_local -> fmt ff "local"
-    | REALM_thread -> fmt ff "thread"
+      REALM_local -> ()
+    | REALM_thread -> fmt ff "thread "
 
 and fmt_atom (ff:Format.formatter) (a:atom) : unit =
   match a with

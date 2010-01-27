@@ -43,6 +43,7 @@
 
                 ("log", LOG);
                 ("spawn", SPAWN);
+		("thread", THREAD);
 
                 ("bool", BOOL);
 

@@ -91,7 +91,6 @@ type token =
   | SPAWN
   | BIND
   | THREAD
-  | PROCESS
 
   (* Literals *)
   | LIT_INT       of (int64 * string)
@@ -241,7 +240,6 @@ let rec string_of_tok t =
     | SPAWN      -> "spawn"
     | BIND       -> "bind"
     | THREAD     -> "thread"
-    | PROCESS    -> "process"
 
     (* Literals *)
     | LIT_INT (_,s)  -> s
@@ -298,7 +296,7 @@ let rec string_of_tok t =
 
 type pexp' =
     PEXP_call of (pexp * pexp array)
-  | PEXP_spawn of pexp
+  | PEXP_spawn of (Ast.realm * pexp)
   | PEXP_bind of (pexp * pexp option array)
   | PEXP_rec of ((Ast.ident * pexp) array)
   | PEXP_tup of (pexp array)
@@ -1029,10 +1027,15 @@ and parse_bottom_pexp (ps:pstate) : pexp =
         end
 
     | SPAWN ->
-          bump ps;
-          let pexp = ctxt "spawn pexp: init call" parse_pexp ps in
-          let bpos = lexpos ps in
-              span ps apos bpos (PEXP_spawn pexp)
+        bump ps;
+        let realm =
+          match peek ps with
+              THREAD -> bump ps; Ast.REALM_thread
+            | _ -> Ast.REALM_local
+        in
+        let pexp = ctxt "spawn [realm] pexp: init call" parse_pexp ps in
+        let bpos = lexpos ps in
+          span ps apos bpos (PEXP_spawn (realm, pexp))
 
     | BIND ->
         let apos = lexpos ps in
@@ -1433,14 +1436,14 @@ and desugar_expr_init
           let call_stmt = span ps apos bpos (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
             Array.concat [ fn_stmts; arg_stmts; [| call_stmt |] ]
 
-      | PEXP_spawn sub ->
+      | PEXP_spawn (realm, sub) ->
           begin
             match sub.node with
                 PEXP_call (fn, args) ->
                   let (fn_stmts, fn_atom) = desugar_expr_atom ps fn in
                   let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
                   let fn_lval = atom_lval ps fn_atom in
-                  let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, Ast.REALM_local, fn_lval, arg_atoms)) in
+                  let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, realm, fn_lval, arg_atoms)) in
                     Array.concat [ fn_stmts; arg_stmts; [| spawn_stmt |] ]
               | _ -> raise (err "non-call spawn" ps)
           end

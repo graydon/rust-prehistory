@@ -981,10 +981,10 @@ let trans_visitor
       iflog (fun _ -> annotate "spawn proc: copy args");
       copy_fn_args proc_cell in_slots arg_layouts args [||];
       iflog (fun _ -> annotate "spawn proc: upcall");
-      let upcall =
+      let upcall = "upcall_spawn_" ^
         match realm with
-            Ast.REALM_local -> "upcall_new_proc"
-          | Ast.REALM_thread -> "upcall_new_thread"
+            Ast.REALM_local -> "local"
+          | Ast.REALM_thread -> "thread"
       in
         trans_upcall upcall proc_cell
           [|

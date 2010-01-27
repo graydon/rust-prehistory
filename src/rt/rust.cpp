@@ -1685,6 +1685,7 @@ struct rust_ticket {
     }
 };
 
+#if 0
 #if defined(__WIN32__)
 static DWORD WINAPI rust_thread_start(void *ptr)
 #elif defined(__GNUC__)
@@ -1711,9 +1712,10 @@ static void *rust_thread_start(void *ptr)
 
     return 0;
 }
+#endif
 
 extern "C" CDECL rust_proc*
-upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
+upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     LOG_UPCALL_ENTRY(spawner);
     rust_rt *rt = spawner->rt;
@@ -1726,8 +1728,11 @@ upcall_new_proc(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_
 }
 
 extern "C" CDECL rust_proc *
-upcall_new_thread(rust_proc *spawner, global_glue_fns *global_glue, uintptr_t spawnee_fn)
+upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
+#if 1
+    return upcall_spawn_local(spawner, exit_proc_glue, spawnee_fn, callsz);
+#else
     LOG_UPCALL_ENTRY(spawner);
     rust_rt *rt = spawner->rt;
     rust_srv *srv = rt->srv;
@@ -1752,6 +1757,7 @@ upcall_new_thread(rust_proc *spawner, global_glue_fns *global_glue, uintptr_t sp
      * All communication will go through this proxy proc.
      */
     return NULL;
+#endif
 }
 
 static int
