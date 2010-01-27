@@ -1440,7 +1440,7 @@ and desugar_expr_init
                   let (fn_stmts, fn_atom) = desugar_expr_atom ps fn in
                   let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
                   let fn_lval = atom_lval ps fn_atom in
-                  let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, fn_lval, arg_atoms)) in
+                  let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, Ast.REALM_local, fn_lval, arg_atoms)) in
                     Array.concat [ fn_stmts; arg_stmts; [| spawn_stmt |] ]
               | _ -> raise (err "non-call spawn" ps)
           end

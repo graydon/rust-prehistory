@@ -300,7 +300,7 @@ let layout_visitor
       let callees =
         match s.node with
             Ast.STMT_call (_, lv, _)
-          | Ast.STMT_spawn (_, lv, _) -> [| lv |]
+          | Ast.STMT_spawn (_, _, lv, _) -> [| lv |]
           | Ast.STMT_check (_, calls) -> Array.map (fun (lv, _) -> lv) calls
           | _ -> [| |]
       in

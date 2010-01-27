@@ -958,6 +958,7 @@ let trans_visitor
   and trans_spawn
       ((*initialising*)_:bool)
       (dst:Ast.lval)
+      (realm:Ast.realm)
       (fn_lval:Ast.lval)
       (args:Ast.atom array)
       : unit =
@@ -980,12 +981,17 @@ let trans_visitor
       iflog (fun _ -> annotate "spawn proc: copy args");
       copy_fn_args proc_cell in_slots arg_layouts args [||];
       iflog (fun _ -> annotate "spawn proc: upcall");
-      trans_upcall "upcall_new_proc" proc_cell
-        [|
-          alias_cell exit_proc_glue_cell;
-          alias_cell fn_cell;
-          imm callsz |];
-      ()
+      let upcall =
+        match realm with
+            Ast.REALM_local -> "upcall_new_proc"
+          | Ast.REALM_thread -> "upcall_new_thread"
+      in
+        trans_upcall upcall proc_cell
+          [|
+            alias_cell exit_proc_glue_cell;
+            alias_cell fn_cell;
+            imm callsz |];
+        ()
 
   and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
     let (filename, line, _) =
@@ -2070,8 +2076,8 @@ let trans_visitor
       | Ast.STMT_send (chan,src) ->
           trans_send chan src
 
-      | Ast.STMT_spawn (dst, plv, args) ->
-          trans_spawn (maybe_init stmt.id "spawn" dst) dst plv args
+      | Ast.STMT_spawn (dst, realm, plv, args) ->
+          trans_spawn (maybe_init stmt.id "spawn" dst) dst realm plv args
 
       | Ast.STMT_recv (dst, chan) ->
           trans_recv (maybe_init stmt.id "recv" dst) dst chan

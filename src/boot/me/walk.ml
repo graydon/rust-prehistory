@@ -511,7 +511,7 @@ and walk_stmt
           walk_lval v f;
           Array.iter (walk_atom v) az
 
-      | Ast.STMT_spawn (dst,p,az) ->
+      | Ast.STMT_spawn (dst,_,p,az) ->
           walk_lval v dst;
           walk_lval v p;
           Array.iter (walk_atom v) az
@@ -592,7 +592,6 @@ and walk_expr
     children
     v.visit_expr_post
     e
-
 
 and walk_atom
     (v:visitor)

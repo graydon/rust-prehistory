@@ -201,7 +201,7 @@ and check_calls = (lval * (atom array)) array
 and stmt' =
 
   (* lval-assigning stmts. *)
-    STMT_spawn of (lval * lval * (atom array))
+    STMT_spawn of (lval * realm * lval * (atom array))
   | STMT_init_rec of (lval * ((ident * mode * atom) array))
   | STMT_init_tup of (lval * ((mode * atom) array))
   | STMT_init_vec of (lval * slot * (atom array))
@@ -299,6 +299,10 @@ and slice =
     { slice_start: atom option;
       slice_len: atom option;
       slice_step: atom option }
+
+and realm =
+    REALM_local
+  | REALM_thread
 
 and atom =
     ATOM_literal of (lit identified)
@@ -856,6 +860,11 @@ and fmt_lit (ff:Format.formatter) (l:lit) : unit =
   | LIT_char c -> fmt ff "'%s'" (Char.escaped c)
   | LIT_custom _ -> fmt ff "?lit?"
 
+and fmt_realm (ff:Format.formatter) (r:realm) : unit =
+  match r with
+      REALM_local -> fmt ff "local"
+    | REALM_thread -> fmt ff "thread"
+
 and fmt_atom (ff:Format.formatter) (a:atom) : unit =
   match a with
       ATOM_literal lit -> fmt_lit ff lit.node
@@ -895,9 +904,10 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
             fmt ff ";"
           end
 
-      | STMT_spawn (dst, fn, args) ->
+      | STMT_spawn (dst, realm, fn, args) ->
           fmt_lval ff dst;
           fmt ff " = spawn ";
+          fmt_realm ff realm;
           fmt_lval ff fn;
           fmt ff "(";
           for i = 0 to (Array.length args) - 1

@@ -34,7 +34,7 @@ let alias_analysis_visitor
            * survive 'into' a sub-block (those formed during iteration)
            * need to be handled in this module.  *)
           Ast.STMT_call (dst, _, _) -> alias dst
-        | Ast.STMT_spawn (dst, _, _) -> alias dst
+        | Ast.STMT_spawn (dst, _, _, _) -> alias dst
         | Ast.STMT_send (_, src) -> alias src
         | Ast.STMT_recv (dst, _) -> alias dst
         | Ast.STMT_init_port (dst) -> alias dst
