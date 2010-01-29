@@ -781,7 +781,7 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
                 match comp with
                     Ast.COMP_named (Ast.COMP_ident i) ->
                       begin
-                        match htab_search mis.Ast.decl_item i with
+                        match htab_search (snd mis.Ast.decl_item) i with
                             None -> err None "unknown module item '%s'" i
                           | Some sub -> check_concrete mis.Ast.decl_params sub
                       end
@@ -925,7 +925,7 @@ and mod_type_item_of_mod_item
                   (decl pd.Ast.decl_params (ty_pred_of_pred pd.Ast.decl_item)))
       | Ast.MOD_ITEM_mod md ->
           Some (Ast.MOD_TYPE_ITEM_mod
-                  (decl md.Ast.decl_params (ty_mod_of_mod true md.Ast.decl_item)))
+                  (decl md.Ast.decl_params (ty_mod_of_mod true (snd md.Ast.decl_item))))
       | Ast.MOD_ITEM_fn fd ->
           Some (Ast.MOD_TYPE_ITEM_fn
                   (decl fd.Ast.decl_params (ty_fn_of_fn fd.Ast.decl_item)))
@@ -1012,7 +1012,7 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
 
       | Ast.MOD_ITEM_mod md ->
           check_concrete md.Ast.decl_params
-            (Ast.TY_mod (ty_mod_of_mod inside md.Ast.decl_item))
+            (Ast.TY_mod (ty_mod_of_mod inside (snd md.Ast.decl_item)))
 
       | Ast.MOD_ITEM_fn fd ->
           check_concrete fd.Ast.decl_params
@@ -1175,7 +1175,7 @@ let lookup
                           match_input_slot p.Ast.decl_item.Ast.pred_input_slots
 
                       | Ast.MOD_ITEM_mod m ->
-                          check_items scope ident m.Ast.decl_item
+                          check_items scope ident (snd m.Ast.decl_item)
 
                       | _ -> None
                   end

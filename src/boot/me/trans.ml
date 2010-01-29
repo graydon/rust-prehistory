@@ -2487,7 +2487,7 @@ let trans_visitor
     inner.Walk.visit_mod_item_post n p i;
     begin
       match i.node with
-          Ast.MOD_ITEM_mod m -> trans_mod i.id m.Ast.decl_item
+          Ast.MOD_ITEM_mod m -> trans_mod i.id (snd m.Ast.decl_item)
         | _ -> ()
     end;
     leave_file_for i

@@ -2182,11 +2182,21 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
 
       | MOD ->
           let (ident, params) = parse_ident_and_params "mod" in
+          let hdr =
+            begin
+              match peek ps with
+                  NIL -> (bump ps; Some [| |])
+                | LPAREN ->
+                    Some (ctxt "stateful mod header: input idents and slots"
+                            (parse_zero_or_more_identified_slot_ident_pairs true) ps)
+                | _ -> None
+            end
+          in
             expect ps LBRACE;
             let items = parse_mod_items ps RBRACE in
             let bpos = lexpos ps in
             let decl = { Ast.decl_params = params;
-                         Ast.decl_item = items; }
+                         Ast.decl_item = (hdr, items); }
             in
               (ident, span ps apos bpos (Ast.MOD_ITEM_mod decl))
 
@@ -2341,7 +2351,7 @@ and parse_crate_mod_entry
           let item_mod =
             (* FIXME: permit type-parametric top-level modules. *)
             span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
-                                                  Ast.decl_item = items })
+                                                  Ast.decl_item = (None, items) })
           in
             if is_cu
             then htab_put files item_mod.id full_fname;
@@ -2417,8 +2427,9 @@ and find_main_fn
   and extract_fn prefix_name ident item =
     match item.node with
         Ast.MOD_ITEM_mod md ->
-          if Array.length md.Ast.decl_params = 0
-          then dig (Some (extend prefix_name ident)) md.Ast.decl_item
+          if Array.length md.Ast.decl_params = 0 &&
+            (fst md.Ast.decl_item = None)
+          then dig (Some (extend prefix_name ident)) (snd md.Ast.decl_item)
           else ()
       | Ast.MOD_ITEM_fn fd ->
           if Array.length fd.Ast.decl_params = 0 && ident = "main"
@@ -2474,7 +2485,7 @@ let parse_root_srcfile_entries
   let items = parse_mod_items ps EOF in
   let bpos = lexpos ps in
   let modi = span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
-                                                   Ast.decl_item = items })
+                                                   Ast.decl_item = (None, items) })
   in
   let mitems = Hashtbl.create 0 in
     htab_put files modi.id fname;

@@ -443,7 +443,7 @@ and mod_item' =
   | MOD_ITEM_public_type of ty decl
   | MOD_ITEM_tag of (header_tup * ty_tag * node_id) decl
   | MOD_ITEM_pred of pred decl
-  | MOD_ITEM_mod of mod_items decl
+  | MOD_ITEM_mod of (header_slots option * mod_items) decl
   | MOD_ITEM_fn of fn decl
 
 and mod_item = mod_item' identified
@@ -1177,9 +1177,14 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
           fmt_obox ff;
           fmt ff "mod ";
           fmt_ident_and_params ff id md.decl_params;
+          begin
+            match (fst md.decl_item) with
+                None -> ()
+              | Some hdr -> fmt_header_slots ff hdr
+          end;
           fmt ff " ";
           fmt_obr ff;
-          fmt_mod_items ff md.decl_item;
+          fmt_mod_items ff (snd md.decl_item);
           fmt_cbb ff
 
       | MOD_ITEM_fn fd ->
