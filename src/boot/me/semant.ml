@@ -1175,7 +1175,18 @@ let lookup
                           match_input_slot p.Ast.decl_item.Ast.pred_input_slots
 
                       | Ast.MOD_ITEM_mod m ->
-                          check_items scope ident (snd m.Ast.decl_item)
+                          let (hdr, md) = m.Ast.decl_item in
+                            begin
+                              match check_items scope ident md with
+                                  Some m -> Some m
+                                | None ->
+                                    begin
+                                      match hdr with
+                                          None -> None
+                                        | Some h ->
+                                            match_input_slot h
+                                    end
+                            end
 
                       | _ -> None
                   end

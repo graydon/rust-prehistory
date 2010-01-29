@@ -210,7 +210,11 @@ and walk_mod_item
       | Ast.MOD_ITEM_pred pd ->
           (pd.Ast.decl_params, (fun _ -> walk_pred v pd.Ast.decl_item))
       | Ast.MOD_ITEM_mod md ->
-          (md.Ast.decl_params, (fun _ -> walk_mod_items v (snd md.Ast.decl_item)))
+          (md.Ast.decl_params,
+           (fun _ ->
+              let (hdr, md) = md.Ast.decl_item in
+                walk_option (fun h -> walk_header_slots v h) hdr;
+                walk_mod_items v md))
       | Ast.MOD_ITEM_fn fd ->
           (fd.Ast.decl_params, (fun _ -> walk_fn v fd.Ast.decl_item))
   in
