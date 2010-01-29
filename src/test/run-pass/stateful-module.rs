@@ -1,7 +1,7 @@
 
 // -*- C++ -*-
 
-mod counter(int x) {
+mod counter(mutable int x) {
   fn incr() -> () {
     x = x + 1;
   }
