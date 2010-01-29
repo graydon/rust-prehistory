@@ -218,6 +218,7 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 ######################################################################
 
 TEST_XFAILS := test/run-pass/spawn-fn.rs \
+               test/run-pass/stateful-module.rs \
                test/run-pass/mlist_cycle.rs \
                test/run-pass/linear-for-loop.rs \
                test/run-pass/fun-indirect-call.rs \
