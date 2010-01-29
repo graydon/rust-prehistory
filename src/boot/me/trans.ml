@@ -1856,31 +1856,47 @@ let trans_visitor
       (initialising:bool)
       (dst:Ast.lval)
       (flv:Ast.lval)
+      (tsig:Ast.ty_sig)
       (args:Ast.atom array)
       : unit =
-    let (dst_cell, _) = trans_lval dst INTENT_init in
-    let (fn_cell, fn_slot) =
+    let (dst_cell, _) = trans_lval dst
+      (if initialising then INTENT_init else INTENT_write)
+    in
+    let (fn_cell, _) =
       trans_lval_full flv
         abi.Abi.abi_has_abs_code
         INTENT_read
     in
-    let tfn =
-      match slot_ty fn_slot with
-          Ast.TY_fn fty -> fty
-        | _ -> bug () "Calling non-function."
-    in
-    let (tsig, _) = tfn in
     let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
       trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots arg_layouts args [||]
 
-  and trans_call_pred_and_check
-      (constr:Ast.constr)
+  and trans_call_mod
+      (initialising:bool)
+      (dst:Ast.lval)
+      (flv:Ast.lval)
+      (tmod_hdr:Ast.ty_mod_header)
+      (args:Ast.atom array)
+      : unit =
+    let (dst_cell, _) = trans_lval dst
+      (if initialising then INTENT_init else INTENT_write)
+    in
+    let (fn_cell, _) =
+      trans_lval_full flv
+        abi.Abi.abi_has_abs_code
+        INTENT_read
+    in
+    let (in_slots, _) = tmod_hdr in
+    let arg_layouts = layout_mod_call_tup abi tmod_hdr in
+      trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
+        dst_cell fn_cell in_slots arg_layouts args [||]
+
+  and trans_call_pred
+      (dst_cell:Il.cell)
       (flv:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let dst_cell = Il.Addr (force_to_mem imm_false) in
     let (fn_cell, fn_slot) =
       trans_lval_full flv
         abi.Abi.abi_has_abs_code
@@ -1896,6 +1912,14 @@ let trans_visitor
       iflog (fun _ -> annotate "predicate call");
       trans_call true (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots arg_layouts args [||];
+
+  and trans_call_pred_and_check
+      (constr:Ast.constr)
+      (flv:Ast.lval)
+      (args:Ast.atom array)
+      : unit =
+    let dst_cell = Il.Addr (force_to_mem imm_false) in
+      trans_call_pred dst_cell flv args;
       iflog (fun _ -> annotate "predicate check/fail");
       let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
       let errstr = Printf.sprintf "predicate check: %a"
@@ -2092,7 +2116,23 @@ let trans_visitor
           trans_copy (maybe_init stmt.id "copy" dst) dst e_src binop_opt
 
       | Ast.STMT_call (dst, flv, args) ->
-          trans_call_fn (maybe_init stmt.id "call" dst) dst flv args
+          begin
+            let init = maybe_init stmt.id "call" dst in
+            match lval_ty cx flv with
+                Ast.TY_fn (tsig, _) ->
+                  trans_call_fn init dst flv tsig args
+
+              | Ast.TY_pred _ ->
+                  let (dst_cell, _) = trans_lval dst
+                    (if init then INTENT_init else INTENT_write)
+                  in
+                    trans_call_pred dst_cell flv args
+
+              | Ast.TY_mod (Some tmod_hdr, _) ->
+                    trans_call_mod init dst flv tmod_hdr args
+
+              | _ -> bug () "Calling unexpected lval."
+          end
 
       | Ast.STMT_init_rec (dst, atab) ->
           let (slot_cell, slot) = trans_lval dst INTENT_init in
