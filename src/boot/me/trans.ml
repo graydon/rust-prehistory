@@ -400,7 +400,7 @@ let trans_visitor
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
 
-      | (Ast.TY_mod mtis,
+      | (Ast.TY_mod (_, mtis),
          Ast.COMP_named (Ast.COMP_ident id)) ->
           let sorted_idents = sorted_htab_keys mtis in
           let find i ident = if ident = id then Some i else None in

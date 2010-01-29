@@ -2185,10 +2185,10 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
           let hdr =
             begin
               match peek ps with
-                  NIL -> (bump ps; Some [| |])
+                  NIL -> (bump ps; Some ([| |], [| |]))
                 | LPAREN ->
                     Some (ctxt "stateful mod header: input idents and slots"
-                            (parse_zero_or_more_identified_slot_ident_pairs true) ps)
+                            parse_inputs ps)
                 | _ -> None
             end
           in

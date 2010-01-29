@@ -213,7 +213,9 @@ and walk_mod_item
           (md.Ast.decl_params,
            (fun _ ->
               let (hdr, md) = md.Ast.decl_item in
-                walk_option (fun h -> walk_header_slots v h) hdr;
+                walk_option (fun (h,constrs) ->
+                               walk_header_slots v h;
+                               walk_constrs v constrs) hdr;
                 walk_mod_items v md))
       | Ast.MOD_ITEM_fn fd ->
           (fd.Ast.decl_params, (fun _ -> walk_fn v fd.Ast.decl_item))
@@ -330,9 +332,7 @@ and walk_mod_type_item
       | Ast.MOD_TYPE_ITEM_public_type td ->
           (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
       | Ast.MOD_TYPE_ITEM_pred pd ->
-          let (slots, constrs) = pd.Ast.decl_item in
-            (pd.Ast.decl_params, (fun _ -> (Array.iter (walk_slot v) slots;
-                                            walk_constrs v constrs)))
+            (pd.Ast.decl_params, (fun _ -> walk_ty_pred v pd.Ast.decl_item))
       | Ast.MOD_TYPE_ITEM_mod md ->
           (md.Ast.decl_params, (fun _ -> walk_mod_type_items v md.Ast.decl_item))
       | Ast.MOD_TYPE_ITEM_fn fd ->
@@ -344,12 +344,27 @@ and walk_mod_type_item
       (v.visit_mod_type_item_post name params)
       item
 
+and walk_ty_pred
+    (v:visitor)
+    (tpred:Ast.ty_pred)
+    : unit =
+  let (slots, constrs) = tpred in
+    Array.iter (walk_slot v) slots;
+    walk_constrs v constrs
 
 and walk_mod_type_items
     (v:visitor)
-    (items:Ast.mod_type_items)
+    (tmod:Ast.ty_mod)
     : unit =
-  Hashtbl.iter (walk_mod_type_item v) items
+  let (hdr, items) = tmod in
+    begin
+      match hdr with
+          None -> ()
+        | Some (slots, constrs) ->
+            Array.iter (walk_slot v) slots;
+            walk_constrs v constrs
+    end;
+    Hashtbl.iter (walk_mod_type_item v) items
 
 
 and walk_constrs

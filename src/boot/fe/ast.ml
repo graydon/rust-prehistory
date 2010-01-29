@@ -94,7 +94,7 @@ and ty =
   | TY_chan of ty
   | TY_port of ty
 
-  | TY_mod of (mod_type_items)
+  | TY_mod of ty_mod
   | TY_proc
 
   | TY_opaque of (opaque_id * mutability)
@@ -189,6 +189,10 @@ and ty_fn_aux =
 and ty_fn = (ty_sig * ty_fn_aux)
 
 and ty_pred = (slot array * constrs)
+
+and ty_mod_header = (slot array * constrs)
+
+and ty_mod = ((ty_mod_header option) * mod_type_items)
 
 and check_calls = (lval * (atom array)) array
 
@@ -369,6 +373,8 @@ and unop =
 
 and header_slots = ((slot identified) * ident) array
 
+and mod_header = (header_slots * constrs)
+
 and header_tup = (slot identified) array
 
 and fn =
@@ -443,7 +449,7 @@ and mod_item' =
   | MOD_ITEM_public_type of ty decl
   | MOD_ITEM_tag of (header_tup * ty_tag * node_id) decl
   | MOD_ITEM_pred of pred decl
-  | MOD_ITEM_mod of (header_slots option * mod_items) decl
+  | MOD_ITEM_mod of (mod_header option * mod_items) decl
   | MOD_ITEM_fn of fn decl
 
 and mod_item = mod_item' identified
@@ -453,7 +459,7 @@ and mod_type_item' =
     MOD_TYPE_ITEM_opaque_type of (unit * mutability) decl
   | MOD_TYPE_ITEM_public_type of ty decl
   | MOD_TYPE_ITEM_pred of ty_pred decl
-  | MOD_TYPE_ITEM_mod of mod_type_items decl
+  | MOD_TYPE_ITEM_mod of ty_mod decl
   | MOD_TYPE_ITEM_fn of ty_fn decl
 
 and mod_type_item = mod_type_item' identified
@@ -716,7 +722,7 @@ and fmt_mod_type_item
 and fmt_ty_mod
     (ff:Format.formatter)
     (ident_and_params:(ident * ident array) option)
-    (mti:mod_type_items)
+    (tm:ty_mod)
     : unit =
   fmt ff "mod ";
   begin
@@ -724,9 +730,17 @@ and fmt_ty_mod
         Some (id, params) -> fmt_ident_and_params ff id params
       | None -> ()
   end;
-  fmt_obr ff;
-  Hashtbl.iter (fmt_mod_type_item ff) mti;
-  fmt_cbb ff
+  let (hdr, mti) = tm in
+    begin
+      match hdr with
+          None -> ()
+        | Some (slots, constrs) ->
+            fmt_slots ff slots None;
+            fmt_decl_constrs ff constrs
+    end;
+    fmt_obr ff;
+    Hashtbl.iter (fmt_mod_type_item ff) mti;
+    fmt_cbb ff
 
 and fmt_constrs (ff:Format.formatter) (cc:constr array) : unit =
   Array.iter (fmt_constr ff) cc
@@ -1180,7 +1194,9 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
           begin
             match (fst md.decl_item) with
                 None -> ()
-              | Some hdr -> fmt_header_slots ff hdr
+              | Some (hslots, constrs) ->
+                  fmt_header_slots ff hslots;
+                  fmt_decl_constrs ff constrs
           end;
           fmt ff " ";
           fmt_obr ff;

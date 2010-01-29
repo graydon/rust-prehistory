@@ -443,7 +443,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_pred : ('slots * Ast.constrs) -> 'ty;
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
-      ty_fold_mod : Ast.mod_type_items -> 'ty;
+      ty_fold_mod : (('slots * Ast.constrs) option * Ast.mod_type_items) -> 'ty;
       ty_fold_proc : unit -> 'ty;
       ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
       ty_fold_named : Ast.name -> 'ty;
@@ -489,7 +489,14 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_chan t -> f.ty_fold_chan (fold_ty f t)
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
-  | Ast.TY_mod mtis -> f.ty_fold_mod mtis
+  | Ast.TY_mod (hdr, mti) ->
+      let folded_hdr =
+        match hdr with
+            None -> None
+          | Some (slots, constrs) -> Some (fold_slots slots, constrs)
+      in
+        f.ty_fold_mod (folded_hdr, mti)
+
   | Ast.TY_proc -> f.ty_fold_proc ()
 
   | Ast.TY_opaque x -> f.ty_fold_opaque x
@@ -561,7 +568,7 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
                       id (Ast.TY_pred (islots, constrs)));
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
     ty_fold_port = (fun t -> id (Ast.TY_port t));
-    ty_fold_mod = (fun mti -> id (Ast.TY_mod mti));
+    ty_fold_mod = (fun (hdr, mti) -> id (Ast.TY_mod (hdr, mti)));
     ty_fold_proc = (fun _ -> id Ast.TY_proc);
     ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
@@ -725,7 +732,7 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
     | (Ast.TY_str, Ast.COMP_atom _) ->
         interior_slot (Ast.TY_mach TY_u8)
 
-    | (Ast.TY_mod mtis, Ast.COMP_named (Ast.COMP_ident id)) ->
+    | (Ast.TY_mod (_, mtis), Ast.COMP_named (Ast.COMP_ident id)) ->
         begin
           match htab_search mtis id with
               Some mti -> interior_slot (ty_of_mod_type_item mti)
@@ -740,12 +747,12 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
 
 let project_mod_type_to_type (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.ty =
   match base_ty with
-      Ast.TY_mod mty ->
+      Ast.TY_mod (_, mtis) ->
         begin
           match comp with
               Ast.COMP_named (Ast.COMP_ident id) ->
                 begin
-                  match htab_search mty id with
+                  match htab_search mtis id with
                       None -> err None "unknown module-type item '%s'" id
                     | Some mti -> ty_of_mod_type_item mti
                 end
@@ -887,15 +894,24 @@ let expr_type (cx:ctxt) (e:Ast.expr) : Ast.ty =
 
 (* Mappings between mod items and their respective types. *)
 
-let rec ty_mod_of_mod (inside:bool) (m:Ast.mod_items) : Ast.mod_type_items =
-  let ty_items = Hashtbl.create (Hashtbl.length m) in
+let rec ty_mod_of_mod
+    (inside:bool)
+    (m:(Ast.mod_header option * Ast.mod_items))
+    : Ast.ty_mod =
+  let (hdr, mis) = m in
+  let hdr_type =
+    match hdr with
+        None -> None
+      | Some (slots, constrs) -> Some (arg_slots slots, constrs)
+  in
+  let ty_items = Hashtbl.create (Hashtbl.length mis) in
   let add n i =
     match mod_type_item_of_mod_item inside i with
         None -> ()
       | Some mty -> Hashtbl.add ty_items n mty
   in
-    Hashtbl.iter add m;
-    ty_items
+    Hashtbl.iter add mis;
+    (hdr_type, ty_items)
 
 and mod_type_item_of_mod_item
     (inside:bool)
@@ -925,7 +941,7 @@ and mod_type_item_of_mod_item
                   (decl pd.Ast.decl_params (ty_pred_of_pred pd.Ast.decl_item)))
       | Ast.MOD_ITEM_mod md ->
           Some (Ast.MOD_TYPE_ITEM_mod
-                  (decl md.Ast.decl_params (ty_mod_of_mod true (snd md.Ast.decl_item))))
+                  (decl md.Ast.decl_params (ty_mod_of_mod true md.Ast.decl_item)))
       | Ast.MOD_ITEM_fn fd ->
           Some (Ast.MOD_TYPE_ITEM_fn
                   (decl fd.Ast.decl_params (ty_fn_of_fn fd.Ast.decl_item)))
@@ -958,7 +974,7 @@ and mod_type_item_of_native_mod_item
       | Ast.NATIVE_type mty ->
           Ast.MOD_TYPE_ITEM_public_type (decl (Ast.TY_mach mty))
       | Ast.NATIVE_mod m ->
-          Ast.MOD_TYPE_ITEM_mod (decl (ty_mod_of_native_mod m))
+          Ast.MOD_TYPE_ITEM_mod (decl (None, (ty_mod_of_native_mod m)))
   in
     { id = item.id;
       node = mti }
@@ -990,7 +1006,7 @@ and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
 and ty_of_native_mod_item (item:Ast.native_mod_item) : Ast.ty =
     match item.node with
       | Ast.NATIVE_type _ -> Ast.TY_type
-      | Ast.NATIVE_mod items -> Ast.TY_mod (ty_mod_of_native_mod items)
+      | Ast.NATIVE_mod items -> Ast.TY_mod (None, (ty_mod_of_native_mod items))
       | Ast.NATIVE_fn nfn -> Ast.TY_fn (ty_fn_of_native_fn nfn)
 
 and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
@@ -1012,7 +1028,7 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
 
       | Ast.MOD_ITEM_mod md ->
           check_concrete md.Ast.decl_params
-            (Ast.TY_mod (ty_mod_of_mod inside (snd md.Ast.decl_item)))
+            (Ast.TY_mod (ty_mod_of_mod inside md.Ast.decl_item))
 
       | Ast.MOD_ITEM_fn fd ->
           check_concrete fd.Ast.decl_params
@@ -1183,7 +1199,7 @@ let lookup
                                     begin
                                       match hdr with
                                           None -> None
-                                        | Some h ->
+                                        | Some (h, _) ->
                                             match_input_slot h
                                     end
                             end

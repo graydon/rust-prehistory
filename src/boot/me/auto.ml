@@ -112,15 +112,17 @@ let auto_inference_visitor
       | Ast.EXPR_unary (_, atom) -> unify_atom tyo atom
       | Ast.EXPR_atom atom -> unify_atom tyo atom
   in
+  let unify_header_slots id hdr args =
+      if Array.length hdr != Array.length args
+      then err (Some id) "argument count mismatch";
+      for i = 0 to (Array.length hdr) - 1
+      do
+        ignore (unify_atom hdr.(i).Ast.slot_ty args.(i));
+      done
+  in
   let unify_tsig id tsig dst args =
     ignore (unify_lval tsig.Ast.sig_output_slot.Ast.slot_ty dst);
-    let islots = tsig.Ast.sig_input_slots in
-      if Array.length islots != Array.length args
-      then err (Some id) "argument count mismatch";
-      for i = 0 to (Array.length islots) - 1
-      do
-        ignore (unify_atom islots.(i).Ast.slot_ty args.(i));
-      done
+    unify_header_slots id tsig.Ast.sig_input_slots args
   in
   let rec visit_stmt_pre (s:Ast.stmt) =
     try
@@ -226,7 +228,17 @@ let auto_inference_visitor
               match unify_lval None fn with
                   None -> ()
                 | Some (Ast.TY_fn (tsig, _)) -> unify_tsig s.id tsig dst args
-                | _ -> err (Some s.id) "STMT_call fn resolved to non-function type"
+                | Some (Ast.TY_mod tmod) ->
+                    begin
+                      match tmod with
+                          (Some (hdr, _), _) ->
+                            ignore (unify_lval (Some (Ast.TY_mod tmod)) dst);
+                            unify_header_slots s.id hdr args
+                        | _ ->
+                            err (Some s.id) "STMT_call on non-stateful module type"
+                    end
+                | Some (Ast.TY_pred (hdr, _)) -> unify_header_slots s.id hdr args
+                | _ -> err (Some s.id) "STMT_call on unexpected type"
             end
         | Ast.STMT_spawn (dst,_,fn,_) ->
             begin
