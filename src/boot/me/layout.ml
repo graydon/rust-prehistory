@@ -201,24 +201,32 @@ let layout_visitor
   in
 
   let visit_mod_item_pre n p i =
+    let header_slot_ids hdr = Array.map (fun (sid,_) -> sid.id) hdr in
     begin
       match i.node with
           Ast.MOD_ITEM_fn fd ->
             enter_frame i.id;
             layout_header i.id
-              (Array.map (fun (sid,_) -> sid.id)
-                 fd.Ast.decl_item.Ast.fn_input_slots)
+              (header_slot_ids fd.Ast.decl_item.Ast.fn_input_slots)
+
         | Ast.MOD_ITEM_pred pd ->
             enter_frame i.id;
             layout_header i.id
-              (Array.map (fun (sid,_) -> sid.id)
+              (header_slot_ids
                  pd.Ast.decl_item.Ast.pred_input_slots)
+
         | Ast.MOD_ITEM_tag td ->
             let (header_slots, _, _) = td.Ast.decl_item in
               enter_frame i.id;
               layout_header i.id
                 (Array.map (fun sid -> sid.id)
                    header_slots)
+
+        | Ast.MOD_ITEM_mod {Ast.decl_item=(Some (hdr, _), _)} ->
+            let layout = layout_slot_ids false 0L (header_slot_ids hdr) in
+              log cx "node #%d stateful module tuple layout: %s"
+                (int_of_node i.id) (string_of_layout layout);
+              htab_put cx.ctxt_header_layouts i.id layout
 
         | _ -> ()
     end;
@@ -314,6 +322,7 @@ let layout_visitor
                   (match lv_ty with
                        Ast.TY_fn (tsig, _) -> layout_fn_call_tup abi tsig
                      | Ast.TY_pred tpred -> layout_pred_call_tup abi tpred
+                     | Ast.TY_mod (Some hdr, _) -> layout_mod_call_tup abi hdr
                      | _ -> err (Some s.id) "unexpected callee type")
               in
               let sz = layout.layout_size in

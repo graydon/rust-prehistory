@@ -1449,6 +1449,14 @@ let layout_pred_call_tup (abi:Abi.abi) (tpred:Ast.ty_pred) : (layout array) =
     layout_tup abi slots'
 ;;
 
+let layout_mod_call_tup (abi:Abi.abi) (hdr:Ast.ty_mod_header) : (layout array) =
+  let (slots,_) = hdr in
+  let proc_ptr = word_slot abi in
+  let out_ptr = word_slot abi in
+  let slots' = Array.append [| out_ptr; proc_ptr |] slots in
+    layout_tup abi slots'
+;;
+
 (*
  * Local Variables:
  * fill-column: 70;
