@@ -223,9 +223,6 @@ struct rust_str {
 };
 
 struct rust_rt {
-    rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs);
-    ~rust_rt();
-
     rust_srv *srv;
     global_glue_fns *global_glue;
     size_t &live_allocs;
@@ -237,6 +234,10 @@ struct rust_rt {
     rust_proc *root_proc;
     rust_proc *curr_proc;
     rust_port *ports;
+    int rval;
+
+    rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs);
+    ~rust_rt();
 
     void activate(rust_proc *proc);
     void log(uint32_t logbit, char const *fmt, ...);
@@ -1205,7 +1206,8 @@ rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_alloc
     dead_procs(this),
     root_proc(NULL),
     curr_proc(NULL),
-    ports(NULL)
+    ports(NULL),
+    rval(0)
 {
     logptr("new rt", (uintptr_t)this);
     memset(&rctx, 0, sizeof(rctx));
@@ -1665,8 +1667,13 @@ extern "C" CDECL void
 upcall_exit(rust_proc *proc)
 {
     LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
     if (proc->state == proc_state_failing) {
-        proc->rt->log(LOG_UPCALL, "upcall exit(), failed");
+        rt->log(LOG_UPCALL, "upcall exit(), failed");
+        if (proc == rt->root_proc) {
+            rt->log(LOG_RT, "runtime 0x%" PRIxPTR " root proc failed", &rt);
+            rt->rval = 1;
+        }
         proc->state = proc_state_dead_failed;
     } else {
         proc->rt->log(LOG_UPCALL, "upcall exit(), exited ok");
@@ -1822,7 +1829,7 @@ upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spaw
 static int
 rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
 {
-    int ret = 0;
+    int rval;
     size_t live_allocs = 0;
     {
         rust_proc *proc;
@@ -1863,12 +1870,6 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
                     break;
 
                 case proc_state_dead_failed:
-                    if (proc == rt.root_proc) {
-                        rt.log(LOG_RT, "runtime 0x%" PRIxPTR " root proc failed", &rt);
-                        ret = 1;
-                    }
-                    // fall through...
-
                 case proc_state_dead_exited:
 
                     // When a proc exits *itself* we do not yet kill
@@ -1896,12 +1897,13 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
             proc = rt.sched();
         }
 
-        rt.log(LOG_RT, "finished main loop (retval = %d)", ret);
+        rt.log(LOG_RT, "finished main loop (rt.rval = %d)", rt.rval);
+        rval = rt.rval;
     }
     if (live_allocs != 0) {
         srv->fatal("leaked memory in rust main loop", __FILE__, __LINE__);
     }
-    return ret;
+    return rval;
 }
 
 void
