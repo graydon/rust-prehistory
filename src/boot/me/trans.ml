@@ -654,14 +654,23 @@ let trans_visitor
               emit_exit_proc_glue tsig fix g;
               fix
 
-  and emit_new_mod_glue (_(*hdr*):Ast.mod_header) (fix:fixup) (g:glue) : unit =
+  and emit_new_mod_glue (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
     let spill = new_fixup "new-mod glue spill" in
       push_new_emitter ();
-      capture_emitted_glue "new-mod glue" fix spill g;
-      pop_emitter();
+      let (dst_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
+      let (slots, _) = hdr in
+      let ty = Ast.TY_tup slots in
+      let rty = referent_type abi ty in
+      let sz = ty_sz abi ty in
+      let dst_ta = (dst_addr, rty) in
+      let src_ta = (fp_imm arg0_disp, rty) in
+        trans_malloc (Il.Addr dst_ta) sz;
+        trans_copy_tup true dst_ta slots src_ta slots;
+        capture_emitted_glue "new-mod glue" fix spill g;
+        pop_emitter();
 
 
-  and get_new_mod_glue (mod_id:node_id) (hdr:Ast.mod_header) : fixup =
+  and get_new_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) : fixup =
     let g = GLUE_new_module mod_id in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
@@ -1899,9 +1908,10 @@ let trans_visitor
       (if initialising then INTENT_init else INTENT_write)
     in
     let item = lval_item cx flv in
+    let item_ty = Hashtbl.find cx.ctxt_all_item_types item.id in
     let glue_fixup =
-      match item.node with
-          Ast.MOD_ITEM_mod {Ast.decl_item=(Some hdr, _)} ->
+      match item_ty with
+          Ast.TY_mod (Some hdr, _) ->
             get_new_mod_glue item.id hdr
         | _ -> err None "call to unexpected form of module"
     in
