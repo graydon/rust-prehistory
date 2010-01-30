@@ -1,12 +1,13 @@
 // -*- C -*-
 
 fn main() -> () {
-  spawn child();
+  auto other = spawn child();
   log "1";
   yield;
   log "2";
   yield;
   log "3";
+  join other;
 }
 
 fn child() -> () {

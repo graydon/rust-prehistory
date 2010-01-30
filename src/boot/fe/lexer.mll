@@ -45,6 +45,7 @@
                 ("spawn", SPAWN);
 		("thread", THREAD);
 		("yield", YIELD);
+		("wait", WAIT);
 
                 ("bool", BOOL);
 

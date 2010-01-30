@@ -551,6 +551,9 @@ and walk_stmt
       | Ast.STMT_yield ->
           ()
 
+      | Ast.STMT_join proc ->
+          walk_lval v proc
+
       | Ast.STMT_send (dst,src) ->
           walk_lval v dst;
           walk_lval v src

@@ -92,6 +92,7 @@ type token =
   | BIND
   | THREAD
   | YIELD
+  | JOIN
 
   (* Literals *)
   | LIT_INT       of (int64 * string)
@@ -242,6 +243,7 @@ let rec string_of_tok t =
     | BIND       -> "bind"
     | THREAD     -> "thread"
     | YIELD      -> "yield"
+    | JOIN       -> "join"
 
     (* Literals *)
     | LIT_INT (_,s)  -> s
@@ -1867,6 +1869,12 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           expect ps SEMI;
           let bpos = lexpos ps in
             [| span ps apos bpos Ast.STMT_yield |]
+
+      | JOIN ->
+          bump ps;
+          let (stmts, lval) = ctxt "stmts: proc expr" parse_lval ps in
+            expect ps SEMI;
+            spans ps stmts apos (Ast.STMT_join lval)
 
       | MOD | TYPE | (FN _) | PRED ->
           let (ident, item) = ctxt "stmt: decl" parse_mod_item ps in

@@ -1049,6 +1049,9 @@ let trans_visitor
   and trans_yield () : unit =
     trans_void_upcall "upcall_yield" [| |];
 
+  and trans_join (proc:Ast.lval) : unit =
+    trans_void_upcall "upcall_join" [| trans_atom (Ast.ATOM_lval proc) |]
+
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
     let (srccell, _) = trans_lval src INTENT_read in
       aliasing false srccell
@@ -2135,6 +2138,9 @@ let trans_visitor
 
       | Ast.STMT_yield ->
           trans_yield ()
+
+      | Ast.STMT_join proc ->
+          trans_join proc
 
       | Ast.STMT_send (chan,src) ->
           trans_send chan src

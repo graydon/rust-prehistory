@@ -121,6 +121,7 @@ typedef enum {
     proc_state_failing,
     proc_state_blocked_reading,
     proc_state_blocked_writing,
+    proc_state_blocked_waiting,
     proc_state_dead_exited,
     proc_state_dead_failed
 } proc_state_t;
@@ -131,6 +132,7 @@ static char const * const state_names[] =
         "failing",
         "blocked_reading",
         "blocked_writing",
+        "blocked_waiting",
         "dead_exited",
         "dead_failed"
     };
@@ -360,6 +362,8 @@ struct rust_proc {
     uintptr_t* dptr;           // rendezvous pointer for send/recv
     rust_proc *spawner;        // parent-link
 
+    ptr_vec<rust_proc> waiting_procs;
+
     void check_active() { I(rt, rt->curr_proc == this); }
     void check_suspended() { I(rt, rt->curr_proc != this); }
 
@@ -379,6 +383,9 @@ struct rust_proc {
 
     // Fail self, assuming caller-on-stack is this proc.
     void fail(size_t nargs);
+
+    // Notify procs waiting for us that we are about to die.
+    void notify_waiting_procs();
 
     uintptr_t get_fp();
     uintptr_t get_previous_fp(uintptr_t fp);
@@ -839,7 +846,8 @@ rust_proc::rust_proc(rust_rt *rt,
       chans(NULL),
       gc_alloc_chain(0),
       dptr(0),
-      spawner(spawner)
+      spawner(spawner),
+      waiting_procs(rt)
 {
     rt->logptr("new proc", (uintptr_t)this);
     rt->logptr("exit-proc glue", exit_proc_glue);
@@ -1068,6 +1076,25 @@ rust_proc::fail(size_t nargs) {
     }
 }
 
+void
+rust_proc::notify_waiting_procs()
+{
+    while (waiting_procs.length() > 0) {
+        rust_proc *p = waiting_procs.pop();
+        proc_state_t state = p->state;
+        if (state == proc_state_blocked_waiting) {
+            proc_state_transition(rt, p,
+                                  proc_state_blocked_waiting,
+                                  proc_state_running);
+        } else {
+            I(rt,
+              state != proc_state_running &&
+              state != proc_state_blocked_reading &&
+              state != proc_state_blocked_writing);
+        }
+    }
+}
+
 uintptr_t
 rust_proc::get_fp() {
     // sp in any suspended proc points to the last callee-saved reg on
@@ -1098,6 +1125,7 @@ get_state_vec(rust_rt *rt, proc_state_t state)
 
     case proc_state_blocked_reading:
     case proc_state_blocked_writing:
+    case proc_state_blocked_waiting:
         return &rt->blocked_procs;
 
     case proc_state_dead_exited:
@@ -1319,6 +1347,7 @@ rust_rt::reap_dead_procs()
     for (size_t i = 0; i < dead_procs.length(); ) {
         rust_proc *p = dead_procs[i];
         if (p == root_proc || p->refcnt == 0) {
+            I(this, !p->waiting_procs.length());
             dead_procs.swapdel(p);
             log(LOG_PROC, "deleting unreferenced dead proc 0x%" PRIxPTR, p);
             delete p;
@@ -1497,6 +1526,25 @@ upcall_yield(rust_proc *proc)
 }
 
 extern "C" CDECL void
+upcall_join(rust_proc *proc, rust_proc *other)
+{
+    LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_UPCALL|LOG_COMM,
+            "upcall join(other=0x%" PRIxPTR ")",
+            (uintptr_t)other);
+
+    // If the other proc is already dying, we dont have to wait for it.
+    if (other->state != proc_state_dead_exited && other->state != proc_state_dead_failed) {
+        other->waiting_procs.push(proc);
+        proc_state_transition(rt, proc,
+                              proc_state_running,
+                              proc_state_blocked_waiting);
+        proc->yield(2);
+    }
+}
+
+extern "C" CDECL void
 upcall_send(rust_proc *proc, rust_port *port, void *sptr)
 {
     LOG_UPCALL_ENTRY(proc);
@@ -1623,6 +1671,7 @@ upcall_exit(rust_proc *proc)
         proc->rt->log(LOG_UPCALL, "upcall exit(), exited ok");
         proc->state = proc_state_dead_exited;
     }
+    proc->notify_waiting_procs();
     proc->yield(1);
 }
 
@@ -1837,6 +1886,7 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
 
                 case proc_state_blocked_reading:
                 case proc_state_blocked_writing:
+                case proc_state_blocked_waiting:
                     break;
                 }
 
