@@ -654,6 +654,22 @@ let trans_visitor
               emit_exit_proc_glue tsig fix g;
               fix
 
+  and emit_new_mod_glue (_(*hdr*):Ast.mod_header) (fix:fixup) (g:glue) : unit =
+    let spill = new_fixup "new-mod glue spill" in
+      push_new_emitter ();
+      capture_emitted_glue "new-mod glue" fix spill g;
+      pop_emitter();
+
+
+  and get_new_mod_glue (mod_id:node_id) (hdr:Ast.mod_header) : fixup =
+    let g = GLUE_new_module mod_id in
+      match htab_search cx.ctxt_glue_code g with
+          Some code -> code.code_fixup
+        | None ->
+            let fix = new_fixup "new-mod glue" in
+              emit_new_mod_glue hdr fix g;
+              fix
+
   (* 
    * Mem-glue functions are either 'mark', 'drop' or 'free', they take
    * one pointer arg and reutrn nothing.
@@ -774,7 +790,7 @@ let trans_visitor
   and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
     let code = Il.CodeAddr (fixup_to_addr
                               abi.Abi.abi_has_abs_code
-                              fix Il.OpaqueTy)
+                              fix Il.CodeTy)
     in
     let tsig = { Ast.sig_input_slots = [| interior_slot (Ast.TY_mach word_ty_mach) |];
                  Ast.sig_input_constrs = [| |];
@@ -1882,11 +1898,18 @@ let trans_visitor
     let (dst_cell, _) = trans_lval dst
       (if initialising then INTENT_init else INTENT_write)
     in
-    let (fn_cell, _) =
-      trans_lval_full flv
-        abi.Abi.abi_has_abs_code
-        INTENT_read
+    let item = lval_item cx flv in
+    let glue_fixup =
+      match item.node with
+          Ast.MOD_ITEM_mod {Ast.decl_item=(Some hdr, _)} ->
+            get_new_mod_glue item.id hdr
+        | _ -> err None "call to unexpected form of module"
     in
+    let fn_addr = (fixup_to_addr
+                     abi.Abi.abi_has_abs_code
+                     glue_fixup Il.CodeTy)
+    in
+    let fn_cell = Il.Addr (fn_addr, Il.CodeTy) in
     let (in_slots, _) = tmod_hdr in
     let arg_layouts = layout_mod_call_tup abi tmod_hdr in
       trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
