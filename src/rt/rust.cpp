@@ -122,8 +122,7 @@ typedef enum {
     proc_state_blocked_reading,
     proc_state_blocked_writing,
     proc_state_blocked_waiting,
-    proc_state_dead_exited,
-    proc_state_dead_failed
+    proc_state_dead,
 } proc_state_t;
 
 static char const * const state_names[] =
@@ -133,8 +132,7 @@ static char const * const state_names[] =
         "blocked_reading",
         "blocked_writing",
         "blocked_waiting",
-        "dead_exited",
-        "dead_failed"
+        "dead",
     };
 
 typedef enum {
@@ -1130,8 +1128,7 @@ get_state_vec(rust_rt *rt, proc_state_t state)
     case proc_state_blocked_waiting:
         return &rt->blocked_procs;
 
-    case proc_state_dead_exited:
-    case proc_state_dead_failed:
+    case proc_state_dead:
         return &rt->dead_procs;
     }
 
@@ -1538,7 +1535,7 @@ upcall_join(rust_proc *proc, rust_proc *other)
             (uintptr_t)other);
 
     // If the other proc is already dying, we dont have to wait for it.
-    if (other->state != proc_state_dead_exited && other->state != proc_state_dead_failed) {
+    if (other->state != proc_state_dead) {
         other->waiting_procs.push(proc);
         proc_state_transition(rt, proc,
                               proc_state_running,
@@ -1674,11 +1671,10 @@ upcall_exit(rust_proc *proc)
             rt->log(LOG_RT, "runtime 0x%" PRIxPTR " root proc failed", &rt);
             rt->rval = 1;
         }
-        proc->state = proc_state_dead_failed;
     } else {
         proc->rt->log(LOG_UPCALL, "upcall exit(), exited ok");
-        proc->state = proc_state_dead_exited;
     }
+    proc->state = proc_state_dead;
     proc->notify_waiting_procs();
     proc->yield(1);
 }
@@ -1869,9 +1865,7 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
                 case proc_state_failing:
                     break;
 
-                case proc_state_dead_failed:
-                case proc_state_dead_exited:
-
+                case proc_state_dead:
                     // When a proc exits *itself* we do not yet kill
                     // it; for the time being we let it linger in the
                     // blocked-exiting state, as someone else still
