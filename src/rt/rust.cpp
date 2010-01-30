@@ -118,7 +118,6 @@ struct stk_seg {
 
 typedef enum {
     proc_state_running,
-    proc_state_failing,
     proc_state_blocked_reading,
     proc_state_blocked_writing,
     proc_state_blocked_waiting,
@@ -128,7 +127,6 @@ typedef enum {
 static char const * const state_names[] =
     {
         "running",
-        "failing",
         "blocked_reading",
         "blocked_writing",
         "blocked_waiting",
@@ -242,6 +240,7 @@ struct rust_rt {
     void logptr(char const *msg, uintptr_t ptrval);
     template<typename T>
     void logptr(char const *msg, T* ptrval);
+    void fail();
     void *malloc(size_t sz);
     void *calloc(size_t sz);
     void *realloc(void *data, size_t sz);
@@ -1052,20 +1051,22 @@ rust_proc::kill() {
     // Note the distinction here: kill() is when you're in an upcall
     // from process A and want to force-fail process B, you do B->kill().
     // If you want to fail yourself you do self->fail(upcall_nargs).
-    proc_state_transition(rt, this, state,
-                          proc_state_failing);
-    rt->log(LOG_PROC,
-            "killing proc 0x%" PRIxPTR, this);
+    rt->log(LOG_PROC, "killing proc 0x%" PRIxPTR, this);
+    // Unblock the proc so it can unwind.
+    proc_state_transition(rt, this, state, proc_state_running);
+    if (this == rt->root_proc)
+        rt->fail();
     run_on_resume(rt->global_glue->unwind_glue);
 }
 
 void
 rust_proc::fail(size_t nargs) {
     // See note in ::kill() regarding who should call this.
-    proc_state_transition(rt, this, state,
-                          proc_state_failing);
-    rt->log(LOG_PROC,
-            "proc 0x%" PRIxPTR " failing", this);
+    rt->log(LOG_PROC, "proc 0x%" PRIxPTR " failing", this);
+    // Unblock the proc so it can unwind.
+    proc_state_transition(rt, this, state, proc_state_running);
+    if (this == rt->root_proc)
+        rt->fail();
     run_after_return(nargs, rt->global_glue->unwind_glue);
     if (spawner) {
         rt->log(LOG_PROC,
@@ -1120,7 +1121,6 @@ get_state_vec(rust_rt *rt, proc_state_t state)
 {
     switch (state) {
     case proc_state_running:
-    case proc_state_failing:
         return &rt->running_procs;
 
     case proc_state_blocked_reading:
@@ -1277,6 +1277,13 @@ rust_rt::logptr(char const *msg, uintptr_t ptrval) {
 template<typename T> void
 rust_rt::logptr(char const *msg, T* ptrval) {
     log(LOG_MEM, "%s 0x%" PRIxPTR, msg, (uintptr_t)ptrval);
+}
+
+void
+rust_rt::fail() {
+    log(LOG_RT, "runtime 0x%" PRIxPTR " root proc failed", this);
+    I(this, rval == 0);
+    rval = 1;
 }
 
 void *
@@ -1664,16 +1671,7 @@ extern "C" CDECL void
 upcall_exit(rust_proc *proc)
 {
     LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
-    if (proc->state == proc_state_failing) {
-        rt->log(LOG_UPCALL, "upcall exit(), failed");
-        if (proc == rt->root_proc) {
-            rt->log(LOG_RT, "runtime 0x%" PRIxPTR " root proc failed", &rt);
-            rt->rval = 1;
-        }
-    } else {
-        proc->rt->log(LOG_UPCALL, "upcall exit(), exited ok");
-    }
+    proc->rt->log(LOG_UPCALL, "upcall exit");
     proc->state = proc_state_dead;
     proc->notify_waiting_procs();
     proc->yield(1);
@@ -1847,9 +1845,7 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
             rt.log(LOG_PROC, "activating proc 0x%" PRIxPTR,
                    (uintptr_t)proc);
 
-            if (proc->state == proc_state_running ||
-                proc->state == proc_state_failing) {
-
+            if (proc->state == proc_state_running) {
                 rt.activate(proc);
 
                 rt.log(LOG_PROC,
@@ -1862,7 +1858,6 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
                 switch ((proc_state_t) proc->state) {
 
                 case proc_state_running:
-                case proc_state_failing:
                     break;
 
                 case proc_state_dead:
