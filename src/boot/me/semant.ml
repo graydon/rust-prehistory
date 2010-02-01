@@ -193,11 +193,6 @@ let err (idopt:node_id option) =
     Printf.ksprintf k
 ;;
 
-let bug _ =
-  let k s = failwith s
-  in Printf.ksprintf k
-;;
-
 let report_err cx ido str =
   let sess = cx.ctxt_sess in
   let spano = match ido with

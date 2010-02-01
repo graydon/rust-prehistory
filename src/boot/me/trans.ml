@@ -150,21 +150,6 @@ let trans_visitor
     Il.Addr (addr, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
   in
 
-  let addr_add (addr:Il.addr) (off:Asm.expr64) : Il.addr =
-    let addto e = Asm.ADD (off, e) in
-      match addr with
-          Il.Abs e -> Il.Abs (addto e)
-        | Il.RegIn (r, None) -> Il.RegIn (r, Some off)
-        | Il.RegIn (r, Some e) -> Il.RegIn (r, Some (addto e))
-        | Il.AbsIn (f, None) -> Il.AbsIn (f, Some off)
-        | Il.AbsIn (f, Some e) -> Il.AbsIn (f, Some (addto e))
-        | Il.Spill _ -> bug () "Adding offset to spill slot"
-  in
-
-  let addr_add_imm (addr:Il.addr) (imm:int64) : Il.addr =
-    addr_add addr (Asm.IMM imm)
-  in
-
   let mov (dst:Il.cell) (src:Il.operand) : unit =
     emit (Il.umov dst src)
   in
@@ -358,7 +343,7 @@ let trans_visitor
       : (Il.cell * Ast.slot) =
 
     let displaced slot disp =
-      Il.Addr (addr_add_imm base_addr disp,
+      Il.Addr (Il.addr_add_imm base_addr disp,
                slot_referent_type abi slot)
     in
 
@@ -414,7 +399,7 @@ let trans_visitor
                      * item is itself a pair. *)
                     let (table_addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
                     let off = word_n (i * 2) in
-                    let item_addr = addr_add_imm table_addr off in
+                    let item_addr = Il.addr_add_imm table_addr off in
                     let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
                     let item_referent_ty = referent_type abi item_ty in
                       (Il.Addr (item_addr, item_referent_ty), interior_slot item_ty)
@@ -428,13 +413,13 @@ let trans_visitor
    * return: ptr to element.
    *)
   and trans_bounds_check (vec:Il.addr) (mul_idx:Il.operand) : Il.addr =
-    let (len:Il.cell) = word_at (addr_add_imm vec (word_n 2)) in
+    let (len:Il.cell) = word_at (Il.addr_add_imm vec (word_n 2)) in
     let (base:Il.cell) = Il.Reg (next_vreg(), Il.voidptr_t) in
     let (elt_reg:Il.reg) = next_vreg () in
     let (elt:Il.cell) = Il.Reg (elt_reg, Il.voidptr_t) in
     let (diff:Il.cell) = Il.Reg (next_vreg (), Il.ValTy word_bits) in
       annotate "bounds check";
-      lea base (addr_add_imm vec (word_n 3));
+      lea base (Il.addr_add_imm vec (word_n 3));
       emit (Il.binary Il.ADD elt (Il.Cell base) mul_idx);
       emit (Il.binary Il.SUB diff (Il.Cell elt) (Il.Cell base));
       let jmp = trans_compare Il.JB (Il.Cell diff) (Il.Cell len) in
@@ -1213,7 +1198,7 @@ let trans_visitor
           fun i (_, (_, layout)) ->
             let (_, sub_slot) = entries.(i) in
             let disp = layout.layout_offset in
-            let cell = wordptr_at (addr_add_imm addr disp) in
+            let cell = wordptr_at (Il.addr_add_imm addr disp) in
               f cell sub_slot curr_iso
         end
         layouts
@@ -1237,7 +1222,7 @@ let trans_visitor
           fun i layout ->
             let sub_slot = slots.(i) in
             let disp = layout.layout_offset in
-            let cell = wordptr_at (addr_add_imm addr disp) in
+            let cell = wordptr_at (Il.addr_add_imm addr disp) in
               f cell sub_slot curr_iso
         end
         layouts
@@ -1251,7 +1236,7 @@ let trans_visitor
     let tag_keys = sorted_htab_keys ttag in
     let (tag:Il.cell) = Il.Reg (next_vreg(), word_ty) in
     let (addr, _) = ta in
-    let tup_addr = addr_add_imm addr word_sz in
+    let tup_addr = Il.addr_add_imm addr word_sz in
       mov tag (Il.Cell (word_at addr));
       for i = 0 to arr_max tag_keys do
         (* FIXME (bug 541540): A table-switch would be better. *)
@@ -1566,8 +1551,8 @@ let trans_visitor
         begin
           fun i layout ->
             let disp = layout.layout_offset in
-            let sub_dst = addr_add_imm dst_addr disp in
-            let sub_src = addr_add_imm src_addr disp in
+            let sub_dst = Il.addr_add_imm dst_addr disp in
+            let sub_src = Il.addr_add_imm src_addr disp in
             let sub_dst_cell = Il.Addr (sub_dst, dst_tys.(i)) in
             let sub_src_cell = Il.Addr (sub_src, src_tys.(i)) in
               assert (slot_ty src_slots.(i) = slot_ty dst_slots.(i));
@@ -1615,8 +1600,8 @@ let trans_visitor
     let (src_tag_val:Il.cell) = Il.Reg (next_vreg(), word_ty) in
     let (dst_addr, _) = dst_ta in
     let (src_addr, _) = src_ta in
-    let dst_tup_addr = addr_add_imm dst_addr word_sz in
-    let src_tup_addr = addr_add_imm src_addr word_sz in
+    let dst_tup_addr = Il.addr_add_imm dst_addr word_sz in
+    let src_tup_addr = Il.addr_add_imm src_addr word_sz in
       mov src_tag_val (Il.Cell (word_at src_addr));
       mov (word_at dst_addr) (Il.Cell src_tag_val);
       for i = 0 to arr_max tag_keys do
@@ -1643,8 +1628,8 @@ let trans_visitor
     let (dst_addr, _) = dst_ta in
     let (src_addr, _) = src_ta in
       mov (word_at dst_addr) (Il.Cell (word_at src_addr));
-      let dst_addr = addr_add_imm dst_addr (word_n 1) in
-      let src_addr = addr_add_imm src_addr (word_n 1) in
+      let dst_addr = Il.addr_add_imm dst_addr (word_n 1) in
+      let src_addr = Il.addr_add_imm src_addr (word_n 1) in
         mov (word_at dst_addr) (Il.Cell (word_at src_addr));
 
   and trans_copy_slot
@@ -1839,7 +1824,7 @@ let trans_visitor
       begin
         fun i layout ->
           let disp = layout.layout_offset in
-          let sub_dst = addr_add_imm dst_addr disp in
+          let sub_dst = Il.addr_add_imm dst_addr disp in
           let sub_slot = dst_slots.(i) in
           let sub_rtype = slot_referent_type abi sub_slot in
           let sub_dst_cell = Il.Addr (sub_dst, sub_rtype) in
@@ -2433,7 +2418,7 @@ let trans_visitor
       let tag_cell = word_at out_addr in
       let rty = referent_type abi (Ast.TY_tup slots) in
       let src_ta = (fp_imm arg0_disp, rty) in
-      let dst_ta = ((addr_add_imm out_addr word_sz), rty) in
+      let dst_ta = ((Il.addr_add_imm out_addr word_sz), rty) in
         (* A clever compiler will inline this. We are not clever. *)
         iflog (fun _ -> annotate (Printf.sprintf "write tag #%d" (!i)));
         mov tag_cell (imm (Int64.of_int (!i)));

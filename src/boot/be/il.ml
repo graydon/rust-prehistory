@@ -87,6 +87,24 @@ type operand =
  *)
 
 
+(* Helpers. *)
+
+let addr_add (addr:addr) (off:Asm.expr64) : addr =
+  let addto e = Asm.ADD (off, e) in
+    match addr with
+        Abs e -> Abs (addto e)
+      | RegIn (r, None) -> RegIn (r, Some off)
+      | RegIn (r, Some e) -> RegIn (r, Some (addto e))
+      | AbsIn (f, None) -> AbsIn (f, Some off)
+      | AbsIn (f, Some e) -> AbsIn (f, Some (addto e))
+      | Spill _ -> bug () "Adding offset to spill slot"
+;;
+
+let addr_add_imm (addr:addr) (imm:int64) : addr =
+  addr_add addr (Asm.IMM imm)
+;;
+
+
 (* Quads. *)
 
 type binop =

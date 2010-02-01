@@ -81,6 +81,11 @@ let bytes_of_ty_mach (mach:ty_mach) : int =
   | TY_f64 -> 8
 ;;
 
+let bug _ =
+  let k s = failwith s
+  in Printf.ksprintf k
+;;
+
 type import_lib =
     LIB_rustrt
   | LIB_c
