@@ -1248,7 +1248,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
     match t with
         Ast.TY_any -> Il.StructTy [| word;  ptr |]
-      | Ast.TY_nil -> s Il.NilTy
+      | Ast.TY_nil -> Il.NilTy
       | Ast.TY_int -> word
           (* FIXME (bug 541563): bool should be 8 bit, not word-sized. *)
       | Ast.TY_bool -> word
@@ -1350,8 +1350,7 @@ let rec layout_referent (abi:Abi.abi) (off:int64) (rty:Il.referent_ty) : layout 
       Il.ScalarTy sty ->
         begin
           match sty with
-              Il.NilTy -> new_layout off 0L 0L
-            | Il.ValTy Il.Bits8 -> new_layout off 1L 1L
+              Il.ValTy Il.Bits8 -> new_layout off 1L 1L
             | Il.ValTy Il.Bits16 -> new_layout off 2L 2L
             | Il.ValTy Il.Bits32 -> new_layout off 4L 4L
             | Il.ValTy Il.Bits64 -> new_layout off 8L 8L
@@ -1360,6 +1359,7 @@ let rec layout_referent (abi:Abi.abi) (off:int64) (rty:Il.referent_ty) : layout 
     | Il.StructTy rtys ->
         let layouts = Array.map (layout_referent abi 0L) rtys in
           pack off layouts
+    | Il.NilTy -> new_layout off 0L 0L
     | Il.OpaqueTy -> bug () "laying out opaque IL type in layout_referent"
     | Il.CodeTy -> bug () "laying out code IL type in layout_referent"
 ;;

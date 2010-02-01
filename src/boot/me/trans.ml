@@ -64,6 +64,7 @@ let trans_visitor
   let zero = imm 0L in
   let imm_true = one in
   let imm_false = zero in
+  let nil_ptr = Il.Addr ((Il.Abs (Asm.IMM 0L)), Il.NilTy) in
 
   let table_of_fixups (fixups:fixup array) : Asm.frag =
     Asm.SEQ
@@ -171,7 +172,11 @@ let trans_visitor
   let alias (ta:Il.typed_addr) : Il.operand =
     let addr, ty = ta in
     let vreg_cell = Il.next_vreg_cell (emitter()) (Il.AddrTy ty) in
-      lea vreg_cell addr;
+      begin
+        match ty with
+            Il.NilTy -> ()
+          | _ -> lea vreg_cell addr
+      end;
       Il.Cell vreg_cell
   in
 
@@ -284,14 +289,14 @@ let trans_visitor
     let referent_type = slot_id_referent_type slot_id in
       match htab_search cx.ctxt_slot_vregs slot_id with
           Some vr ->
-            let scalar_type =
+            begin
               match referent_type with
-                  Il.ScalarTy st -> st
+                  Il.ScalarTy st -> Il.Reg (Il.Vreg (cell_vreg_num vr), st)
+                | Il.NilTy -> nil_ptr
                 | Il.StructTy _ -> bugi cx slot_id "cannot treat structured referent as single operand"
                 | Il.OpaqueTy -> bugi cx slot_id "cannot treat opaque referent as single operand"
                 | Il.CodeTy ->  bugi cx slot_id "cannot treat code referent as single operand"
-            in
-              Il.Reg (Il.Vreg (cell_vreg_num vr), scalar_type)
+            end
         | None ->
             begin
               match htab_search cx.ctxt_slot_layouts slot_id with
@@ -552,8 +557,7 @@ let trans_visitor
       | Ast.ATOM_literal lit ->
           begin
             match lit.node with
-                (* FIXME (bug 541565): handle nil properly. *)
-                Ast.LIT_nil -> imm_false
+                Ast.LIT_nil -> Il.Cell (nil_ptr)
               | Ast.LIT_bool false -> imm_false
               | Ast.LIT_bool true -> imm_true
                 (* FIXME (bug 541566): handle char as exactly 32 bits, not word size. *)
@@ -1530,6 +1534,7 @@ let trans_visitor
       | Il.ScalarTy _ -> failwith "expected structural referent type, got scalar"
       | Il.OpaqueTy -> failwith "expected structural referent type, got opaque"
       | Il.CodeTy -> failwith "expected structural referent type, got code"
+      | Il.NilTy -> failwith "expected structural referent type, got nil"
 
 
   (* FIXME (bug 541541): this should permit f.e. copying (foo,bar) <-

@@ -15,13 +15,13 @@ type bits =
 type scalar_ty =
     ValTy of bits
   | AddrTy of referent_ty
-  | NilTy (* 0 bits of space. *)
 
 and referent_ty =
     ScalarTy of scalar_ty
   | StructTy of referent_ty array
   | OpaqueTy (* Unknown memory-resident thing. *)
   | CodeTy   (* Executable machine code. *)
+  | NilTy    (* 0 bits of space. *)
 ;;
 
 let (voidptr_t:scalar_ty) = AddrTy OpaqueTy;;
@@ -88,6 +88,19 @@ type operand =
 
 
 (* Helpers. *)
+
+let cell_is_nil c =
+  match c with
+      Addr (_, NilTy) -> true
+    | Reg (_, AddrTy NilTy) -> true
+    | _ -> false
+;;
+
+let operand_is_nil o =
+  match o with
+      Cell c -> cell_is_nil c
+    | _ -> false
+;;
 
 let addr_add (addr:addr) (off:Asm.expr64) : addr =
   let addto e = Asm.ADD (off, e) in
@@ -227,8 +240,6 @@ let operand_size (op:operand) (word_bits:bits) : bits =
     match st with
         ValTy bits -> bits
       | AddrTy _ -> word_bits
-          (* FIXME (bug 541565): is there some way around this case? *)
-      | NilTy -> word_bits
   in
 
   let cell_size (c:cell) : bits =
@@ -350,7 +361,6 @@ let rec string_of_scalar_ty (s:scalar_ty) : string =
   match s with
       ValTy b -> (string_of_bits b)
     | AddrTy r -> (string_of_referent_ty r) ^ "*"
-    | NilTy -> "()"
 
 and string_of_referent_ty (r:referent_ty) : string =
   match r with
@@ -361,6 +371,7 @@ and string_of_referent_ty (r:referent_ty) : string =
              (Array.to_list (Array.map string_of_referent_ty rs)))
     | OpaqueTy -> "?"
     | CodeTy -> "!"
+    | NilTy -> "()"
 ;;
 
 
@@ -658,7 +669,9 @@ let call (dst:cell) (targ:code) : quad' =
 ;;
 
 let umov (dst:cell) (src:operand) : quad' =
-  unary UMOV dst src
+    if (cell_is_nil dst || operand_is_nil src)
+    then Dead
+    else unary UMOV dst src
 ;;
 
 let zero (dst:cell) (count:operand) : quad' =
