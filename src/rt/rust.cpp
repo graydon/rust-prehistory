@@ -392,22 +392,23 @@ struct rust_proc {
 };
 
 struct rust_port {
+    // fields known to the compiler
+    size_t live_refcnt;
+    size_t weak_refcnt;
+
+    // fields known only to the runtime
+    rust_proc *proc; // port might outlive proc, so don't rely on it in destructor
+    rust_rt *rt;
+    size_t unit_sz;
+    ptr_vec<rust_chan> writers;
+    // FIXME (bug 541584): 'next' and 'prev' fields are only used for collecting
+    // dangling ports on abrupt process termination; can remove this
+    // when we have unwinding / finishing working.
+    rust_port *next;
+    rust_port *prev;
 
     rust_port(rust_proc *proc, size_t unit_sz);
     ~rust_port();
-
-    size_t live_refcnt;
-    size_t weak_refcnt;
-    rust_proc *proc;
-    /* FIXME (bug 541584): 'next' and 'prev' fields are only used for collecting
-     * dangling ports on abrupt process termination; can remove this
-     * when we have unwinding / finishing working.
-     */
-    rust_port *next;
-    rust_port *prev;
-    size_t unit_sz;
-    ptr_vec<rust_chan> writers;
-    rust_rt *rt;
 
     void operator delete(void *ptr)
     {
@@ -636,11 +637,11 @@ rust_port::rust_port(rust_proc *proc, size_t unit_sz)
     : live_refcnt(0),
       weak_refcnt(0),
       proc(proc),
-      next(NULL),
-      prev(NULL),
+      rt(proc->rt),
       unit_sz(unit_sz),
       writers(proc->rt),
-      rt(proc->rt)
+      next(NULL),
+      prev(NULL)
 {
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
