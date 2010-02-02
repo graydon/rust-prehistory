@@ -28,8 +28,7 @@ let proc_field_stk = proc_field_rt + 1;;
 let proc_field_fn = proc_field_stk + 1;;
 let proc_field_runtime_sp = proc_field_fn + 1;;
 let proc_field_rust_sp = proc_field_runtime_sp + 1;;
-let proc_field_idx = proc_field_rust_sp + 1;;
-let proc_field_refcnt = proc_field_idx + 1;;
+let proc_field_refcnt = proc_field_rust_sp + 1;;
 let proc_field_chans = proc_field_refcnt + 1;;
 let proc_field_gc_alloc_chain = proc_field_chans + 1;;
 

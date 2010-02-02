@@ -344,7 +344,6 @@ struct rust_proc {
     uintptr_t fn;
     uintptr_t runtime_sp;      // runtime sp while proc running.
     uintptr_t rust_sp;         // saved sp when not running.
-    size_t idx;
     size_t refcnt;
     rust_q *queues;
     uintptr_t gc_alloc_chain;  // linked list of GC allocations.
@@ -354,6 +353,7 @@ struct rust_proc {
     uintptr_t* dptr;           // rendezvous pointer for send/recv
     rust_proc *spawner;        // parent-link
     ptr_vec<rust_proc> waiting_procs;
+    size_t idx;
 
     rust_proc(rust_rt *rt,
               rust_proc *spawner,
@@ -827,14 +827,14 @@ rust_proc::rust_proc(rust_rt *rt,
       fn(spawnee_fn),
       runtime_sp(0),
       rust_sp(stk->limit),
-      idx(0),
       refcnt(1),
       queues(NULL),
       gc_alloc_chain(0),
       state(proc_state_running),
       dptr(0),
       spawner(spawner),
-      waiting_procs(rt)
+      waiting_procs(rt),
+      idx(0)
 {
     rt->logptr("new proc", (uintptr_t)this);
     rt->logptr("exit-proc glue", exit_proc_glue);
