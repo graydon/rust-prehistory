@@ -10,12 +10,6 @@ let log cx = Session.log "trans"
 
 let arr_max a = (Array.length a) - 1;;
 
-type intent =
-    INTENT_init
-  | INTENT_read
-  | INTENT_write
-;;
-
 type quad_idx = int
 ;;
 
@@ -432,9 +426,9 @@ let trans_visitor
         based elt_reg
 
   and trans_lval_full
+      (initializing:bool)
       (lv:Ast.lval)
       (abs_ok:bool)
-      (intent:intent)
       : (Il.cell * Ast.slot) =
 
     let return_fixup (fix:fixup) (slot:Ast.slot)
@@ -482,11 +476,11 @@ let trans_visitor
         (cell, slot)
     in
 
-    let rec trans_slot_lval_full lv intent =
+    let rec trans_slot_lval_full (initializing:bool) lv =
       match lv with
           Ast.LVAL_ext (base, comp) ->
-            let (base_cell, base_slot) = trans_slot_lval_full base intent in
-            let base_cell' = deref_slot base_cell base_slot intent in
+            let (base_cell, base_slot) = trans_slot_lval_full initializing base in
+            let base_cell' = deref_slot initializing base_cell base_slot in
             let (addr, _) = need_addr_cell base_cell' in
               trans_slot_lval_ext (slot_ty base_slot) addr comp
 
@@ -496,22 +490,27 @@ let trans_visitor
               return_slot nb.id slot referent
     in
       if lval_is_slot cx lv
-      then trans_slot_lval_full lv intent
+      then trans_slot_lval_full initializing lv
       else
-        match intent with
-            INTENT_read ->
-              if lval_is_item cx lv
-              then return_item (lval_item cx lv)
-              else
-                begin
-                  assert (lval_is_native_item cx lv);
-                  return_native_item (lval_native_item cx lv)
-                end
-          | _ -> err None "writing to item"
+        if initializing
+        then err None "init item"
+        else
+          if lval_is_item cx lv
+          then return_item (lval_item cx lv)
+          else
+            begin
+              assert (lval_is_native_item cx lv);
+              return_native_item (lval_native_item cx lv)
+            end
 
+  and trans_lval_maybe_init (initializing:bool) (lv:Ast.lval) : (Il.cell * Ast.slot) =
+    trans_lval_full initializing lv abi.Abi.abi_has_abs_data
 
-  and trans_lval (lv:Ast.lval) (intent:intent) : (Il.cell * Ast.slot) =
-    trans_lval_full lv abi.Abi.abi_has_abs_data intent
+  and trans_lval_init (lv:Ast.lval) : (Il.cell * Ast.slot) =
+    trans_lval_maybe_init true lv
+
+  and trans_lval (lv:Ast.lval) : (Il.cell * Ast.slot) =
+    trans_lval_maybe_init false lv
 
   and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Il.operand =
     let fix =
@@ -539,7 +538,7 @@ let trans_visitor
     (* Include null byte. *)
     let init_sz = Int64.of_int ((String.length s) + 1) in
     let static = trans_static_string s in
-    let (dst, _) = trans_lval dst INTENT_init in
+    let (dst, _) = trans_lval_init dst in
       trans_upcall "upcall_new_str" dst [| static; imm init_sz |]
 
   and trans_atom (atom:Ast.atom) : Il.operand =
@@ -551,8 +550,8 @@ let trans_visitor
 
     match atom with
         Ast.ATOM_lval lv ->
-          let (cell, slot) = trans_lval lv INTENT_read in
-            Il.Cell (deref_slot cell slot INTENT_read)
+          let (cell, slot) = trans_lval lv in
+            Il.Cell (deref_slot false cell slot)
 
       | Ast.ATOM_literal lit ->
           begin
@@ -971,14 +970,14 @@ let trans_visitor
     trans_void_upcall "upcall_log_str" [| (trans_atom a) |]
 
   and trans_spawn
-      ((*initialising*)_:bool)
+      ((*initializing*)_:bool)
       (dst:Ast.lval)
       (realm:Ast.realm)
       (fn_lval:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (proc_cell, _) = trans_lval dst INTENT_init in
-    let (fn_cell, fn_slot) = trans_lval fn_lval INTENT_read in
+    let (proc_cell, _) = trans_lval_init dst in
+    let (fn_cell, fn_slot) = trans_lval fn_lval in
     let tsig =
       match fn_slot.Ast.slot_ty with
           Some (Ast.TY_fn (tsig, _)) -> tsig
@@ -1043,16 +1042,15 @@ let trans_visitor
     trans_void_upcall "upcall_join" [| trans_atom (Ast.ATOM_lval proc) |]
 
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
-    let (srccell, _) = trans_lval src INTENT_read in
+    let (srccell, _) = trans_lval src in
       aliasing false srccell
         begin
           fun src_alias ->
             trans_void_upcall "upcall_send" [| trans_atom (Ast.ATOM_lval chan); src_alias |];
         end
 
-  and trans_recv (initialising:bool) (dst:Ast.lval) (chan:Ast.lval) : unit =
-    let intent = if initialising then INTENT_init else INTENT_write in
-    let (dstcell, _) = trans_lval dst intent in
+  and trans_recv (initializing:bool) (dst:Ast.lval) (chan:Ast.lval) : unit =
+    let (dstcell, _) = trans_lval_maybe_init initializing dst in
       aliasing true dstcell
         begin
           fun dst_alias ->
@@ -1060,7 +1058,7 @@ let trans_visitor
         end
 
   and trans_init_port (dst:Ast.lval) : unit =
-    let (dstcell, dst_slot) = trans_lval dst INTENT_init in
+    let (dstcell, dst_slot) = trans_lval_init dst in
     let unit_ty = match slot_ty dst_slot with
         Ast.TY_port t -> t
       | _ -> bug () "init dst of port-init has non-port type"
@@ -1089,7 +1087,7 @@ let trans_visitor
    *)
 
   and trans_init_vec (dst:Ast.lval) (atoms:Ast.atom array) : unit =
-    let (dstcell, dst_slot) = trans_lval dst INTENT_init in
+    let (dstcell, dst_slot) = trans_lval_init dst in
     let unit_slot = match slot_ty dst_slot with
         Ast.TY_vec s -> s
       | _ -> bug () "init dst of vec-init has non-vec type"
@@ -1484,13 +1482,7 @@ let trans_visitor
 
         | MEM_interior -> bug () "init_exterior_slot of MEM_interior"
 
-  and intent_str i =
-    match i with
-        INTENT_init -> "init"
-      | INTENT_write -> "write"
-      | INTENT_read -> "read"
-
-  and deref_exterior (intent:intent) (cell:Il.cell) (slot:Ast.slot) : Il.typed_addr =
+  and deref_exterior (initializing:bool) (cell:Il.cell) (slot:Ast.slot) : Il.typed_addr =
     let body_ty =
       match pointee_type cell with
           Il.StructTy parts
@@ -1500,34 +1492,27 @@ let trans_visitor
             (Il.string_of_referent_ty ty)
     in
       iflog (fun _ -> annotate ("deref exterior: " ^
-                                  (intent_str intent) ^ ", " ^
+                                  (if initializing
+                                   then "init"
+                                   else "access") ^ ", " ^
                                   (Il.string_of_cell
                                      abi.Abi.abi_str_of_hardreg cell)));
+      if initializing
+      then init_exterior_slot cell slot;
       let (addr, _) =
-        match intent with
-            INTENT_init ->
-              init_exterior_slot cell slot;
-              deref_imm cell (exterior_body_off slot)
-
-          | INTENT_write ->
-              deref_imm cell (exterior_body_off slot)
-
-          | INTENT_read ->
-              deref_imm cell (exterior_body_off slot)
+        deref_imm cell (exterior_body_off slot)
       in
         (addr, body_ty)
 
-
-  and deref_slot (cell:Il.cell) (slot:Ast.slot) (intent:intent) : Il.cell =
+  and deref_slot (initializing:bool) (cell:Il.cell) (slot:Ast.slot) : Il.cell =
     match slot.Ast.slot_mode with
         Ast.MODE_interior _ -> cell
-      | Ast.MODE_exterior _ -> Il.Addr (deref_exterior intent cell slot)
+      | Ast.MODE_exterior _ -> Il.Addr (deref_exterior initializing cell slot)
       | Ast.MODE_read_alias
       | Ast.MODE_write_alias ->
-          match intent with
-              INTENT_init -> cell
-            | _ -> Il.Addr (deref cell)
-
+          if initializing
+          then cell
+          else Il.Addr (deref cell)
 
   and get_struct_referent_tys (t:Il.referent_ty) : Il.referent_ty array =
     match t with
@@ -1542,7 +1527,7 @@ let trans_visitor
    * (@foo,@bar), but presently it walks through both structures via
    * the layouts for the destination slots.  *)
   and trans_copy_structural
-      (initialising:bool)
+      (initializing:bool)
       (layouts:layout array)
       (dst_ta:Il.typed_addr) (dst_slots:Ast.ty_tup)
       (src_ta:Il.typed_addr) (src_slots:Ast.ty_tup)
@@ -1563,15 +1548,14 @@ let trans_visitor
             let sub_src_cell = Il.Addr (sub_src, src_tys.(i)) in
               assert (slot_ty src_slots.(i) = slot_ty dst_slots.(i));
               trans_copy_slot
-                initialising
+                initializing
                 sub_dst_cell dst_slots.(i)
                 sub_src_cell src_slots.(i)
         end
         layouts
 
-
   and trans_copy_rec
-      (initialising:bool)
+      (initializing:bool)
       (dst_ta:Il.typed_addr) (dst_entries:Ast.ty_rec)
       (src_ta:Il.typed_addr) (src_entries:Ast.ty_rec)
       : unit =
@@ -1580,25 +1564,23 @@ let trans_visitor
     let dst_slots = Array.map (fun (_, slot) -> slot) dst_entries in
     let src_slots = Array.map (fun (_, slot) -> slot) src_entries in
       trans_copy_structural
-        initialising layouts'
+        initializing layouts'
         dst_ta dst_slots
         src_ta src_slots
 
-
   and trans_copy_tup
-      (initialising:bool)
+      (initializing:bool)
       (dst_ta:Il.typed_addr) (dst_slots:Ast.ty_tup)
       (src_ta:Il.typed_addr) (src_slots:Ast.ty_tup)
       : unit =
     let layouts = layout_tup abi dst_slots in
       trans_copy_structural
-        initialising layouts
+        initializing layouts
         dst_ta dst_slots
         src_ta src_slots
 
-
   and trans_copy_tag
-      (initialising:bool)
+      (initializing:bool)
       (dst_ta:Il.typed_addr) (dst_tag:Ast.ty_tag)
       (src_ta:Il.typed_addr) (src_tag:Ast.ty_tag)
       : unit =
@@ -1619,14 +1601,14 @@ let trans_visitor
         let dst_rty = referent_type abi (Ast.TY_tup dst_ttup) in
         let src_rty = referent_type abi (Ast.TY_tup src_ttup) in
           trans_copy_tup
-            initialising
+            initializing
             (dst_tup_addr, dst_rty) dst_ttup
             (src_tup_addr, src_rty) src_ttup;
           List.iter patch jmps
       done
 
   and trans_copy_pair
-      (_(*initialising*):bool)
+      (_(*initializing*):bool)
       (dst_ta:Il.typed_addr)
       (src_ta:Il.typed_addr)
       : unit =
@@ -1639,7 +1621,7 @@ let trans_visitor
         mov (word_at dst_addr) (Il.Cell (word_at src_addr));
 
   and trans_copy_slot
-      (initialising:bool)
+      (initializing:bool)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (src:Il.cell) (src_slot:Ast.slot)
       : unit =
@@ -1658,7 +1640,7 @@ let trans_visitor
       (* Lightweight copy: twiddle refcounts, move pointer. *)
       anno "refcounted light";
       emit (Il.binary Il.ADD src_rc (Il.Cell src_rc) one);
-      if not initialising
+      if not initializing
       then
         drop_slot dst dst_slot None;
       mov dst (Il.Cell src)
@@ -1677,7 +1659,7 @@ let trans_visitor
       | _ ->
           (* Heavyweight copy: duplicate the referent. *)
           anno "heavy";
-          trans_copy_slot_heavy initialising
+          trans_copy_slot_heavy initializing
             dst dst_slot src src_slot
 
   (* NB: heavyweight copying here does not mean "producing a deep
@@ -1708,88 +1690,76 @@ let trans_visitor
    *)
 
   and trans_copy_slot_heavy
-      (initialising:bool)
+      (initializing:bool)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (src:Il.cell) (src_slot:Ast.slot)
       : unit =
     assert (slot_ty src_slot = slot_ty dst_slot);
-    let dst_intent =
-      if initialising
-      then INTENT_init
-      else INTENT_write
-    in
+    iflog (fun _ ->
+             annotate ("heavy copy: slot preparation"));
+    let dst = deref_slot initializing dst dst_slot in
+    let src = deref_slot false src src_slot in
       iflog (fun _ ->
-               annotate ("heavy copy: slot preparation"));
-      let dst = deref_slot dst dst_slot dst_intent in
-      let src = deref_slot src src_slot INTENT_read in
-        iflog (fun _ ->
-                 annotate ("heavy copy: referent data"));
+               annotate ("heavy copy: referent data"));
+      match (dst, slot_ty dst_slot,
+             src, slot_ty src_slot) with
+          (Il.Addr dst_ta, Ast.TY_rec dst_entries,
+           Il.Addr src_ta, Ast.TY_rec src_entries) ->
+            trans_copy_rec
+              initializing
+              dst_ta dst_entries
+              src_ta src_entries
 
-        match (dst, slot_ty dst_slot,
-               src, slot_ty src_slot) with
-            (Il.Addr dst_ta, Ast.TY_rec dst_entries,
-             Il.Addr src_ta, Ast.TY_rec src_entries) ->
-              trans_copy_rec
-                initialising
-                dst_ta dst_entries
-                src_ta src_entries
+        | (Il.Addr dst_ta, Ast.TY_tup dst_slots,
+           Il.Addr src_ta, Ast.TY_tup src_slots) ->
+            trans_copy_tup
+              initializing
+              dst_ta dst_slots
+              src_ta src_slots
 
-          | (Il.Addr dst_ta, Ast.TY_tup dst_slots,
-             Il.Addr src_ta, Ast.TY_tup src_slots) ->
-              trans_copy_tup
-                initialising
-                dst_ta dst_slots
-                src_ta src_slots
+        | (Il.Addr dst_ta, Ast.TY_tag dst_tag,
+           Il.Addr src_ta, Ast.TY_tag src_tag) ->
+            trans_copy_tag
+              initializing
+              dst_ta dst_tag
+              src_ta src_tag
 
-          | (Il.Addr dst_ta, Ast.TY_tag dst_tag,
-             Il.Addr src_ta, Ast.TY_tag src_tag) ->
+        | (Il.Addr dst_ta, Ast.TY_iso dst_iso,
+           Il.Addr src_ta, Ast.TY_iso src_iso) ->
+            let src_tag = get_iso_tag src_iso in
+            let dst_tag = get_iso_tag dst_iso in
               trans_copy_tag
-                initialising
+                initializing
                 dst_ta dst_tag
                 src_ta src_tag
 
-          | (Il.Addr dst_ta, Ast.TY_iso dst_iso,
-             Il.Addr src_ta, Ast.TY_iso src_iso) ->
-              let src_tag = get_iso_tag src_iso in
-              let dst_tag = get_iso_tag dst_iso in
-                trans_copy_tag
-                  initialising
-                  dst_ta dst_tag
-                  src_ta src_tag
+        | (Il.Addr dst_ta, Ast.TY_fn _,
+           Il.Addr src_ta, Ast.TY_fn _)
+        | (Il.Addr dst_ta, Ast.TY_pred _,
+           Il.Addr src_ta, Ast.TY_pred _)
+        | (Il.Addr dst_ta, Ast.TY_mod _,
+           Il.Addr src_ta, Ast.TY_mod _) ->
+            (*
+             * FIXME: will need to split out TY_mod when module type
+             * conversion (thus structural rearrangement) is part of
+             * 1st-class mod copying.
+             *)
+            trans_copy_pair
+              initializing
+              dst_ta src_ta
 
-          | (Il.Addr dst_ta, Ast.TY_fn _,
-             Il.Addr src_ta, Ast.TY_fn _)
-          | (Il.Addr dst_ta, Ast.TY_pred _,
-             Il.Addr src_ta, Ast.TY_pred _)
-          | (Il.Addr dst_ta, Ast.TY_mod _,
-             Il.Addr src_ta, Ast.TY_mod _) ->
-              (*
-               * FIXME: will need to split out TY_mod when module type
-               * conversion (thus structural rearrangement) is part of
-               * 1st-class mod copying.
-               *)
-              trans_copy_pair
-                initialising
-                dst_ta src_ta
+        | (_, t, _, _) when (i64_le (ty_sz abi t) word_sz) ->
+            mov dst (Il.Cell src)
 
-          | (_, t, _, _) when (i64_le (ty_sz abi t) word_sz) ->
-              mov dst (Il.Cell src)
-
-          | (_, t, _, _) ->
-              bug () "unhandled form of heavyweight copy: %s" (Ast.fmt_to_str Ast.fmt_ty t)
-
+        | (_, t, _, _) ->
+            bug () "unhandled form of heavyweight copy: %s" (Ast.fmt_to_str Ast.fmt_ty t)
 
   and trans_copy
-      (initialising:bool)
+      (initializing:bool)
       (dst:Ast.lval)
       (src:Ast.expr)
       (binop_opt:Ast.binop option) : unit =
-    let dst_intent =
-      if initialising
-      then INTENT_init
-      else INTENT_write
-    in
-    let (dst_cell, dst_slot) = trans_lval dst dst_intent in
+    let (dst_cell, dst_slot) = trans_lval_maybe_init initializing dst in
       match binop_opt with
           None ->
             begin
@@ -1802,19 +1772,19 @@ let trans_visitor
                      * so copy is just MOV into the lval.
                      *)
                   let src_operand = trans_expr src in
-                    mov (deref_slot dst_cell dst_slot INTENT_read) src_operand
+                    mov (deref_slot false dst_cell dst_slot) src_operand
 
               | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
                   (* Possibly-large structure copying *)
-                  let (src_cell, src_slot) = trans_lval src_lval INTENT_read in
+                  let (src_cell, src_slot) = trans_lval src_lval in
                     trans_copy_slot
-                      initialising
+                      initializing
                       dst_cell dst_slot
                       src_cell src_slot
           end
       | Some binop ->
           ignore (trans_binary binop
-            (Il.Cell (deref_slot dst_cell dst_slot INTENT_read))
+            (Il.Cell (deref_slot false dst_cell dst_slot))
             (trans_expr src));
           ()
 
@@ -1851,10 +1821,10 @@ let trans_visitor
                   Ast.MODE_read_alias
                 | Ast.MODE_write_alias ->
                     mov dst (alias (force_to_mem src))
-                | _ -> mov (deref_slot dst dst_slot INTENT_init) src
+                | _ -> mov (deref_slot true dst dst_slot) src
             end
       | Ast.ATOM_lval src_lval ->
-          let (src, src_slot) = trans_lval src_lval INTENT_read in
+          let (src, src_slot) = trans_lval src_lval in
             trans_init_slot_from_cell dst dst_slot src src_slot
 
   and trans_init_slot_from_cell
@@ -1872,34 +1842,30 @@ let trans_visitor
             src src_slot
 
   and trans_call_fn
-      (initialising:bool)
+      (initializing:bool)
       (dst:Ast.lval)
       (flv:Ast.lval)
       (tsig:Ast.ty_sig)
       (args:Ast.atom array)
       : unit =
-    let (dst_cell, _) = trans_lval dst
-      (if initialising then INTENT_init else INTENT_write)
+    let (dst_cell, _) = trans_lval_maybe_init initializing dst
     in
     let (fn_cell, _) =
-      trans_lval_full flv
-        abi.Abi.abi_has_abs_code
-        INTENT_read
+      trans_lval_full false flv abi.Abi.abi_has_abs_code
     in
     let in_slots = tsig.Ast.sig_input_slots in
     let arg_layouts = layout_fn_call_tup abi tsig in
-      trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
+      trans_call initializing (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots arg_layouts args [||]
 
   and trans_call_mod
-      (initialising:bool)
+      (initializing:bool)
       (dst:Ast.lval)
       (flv:Ast.lval)
       (tmod_hdr:Ast.ty_mod_header)
       (args:Ast.atom array)
       : unit =
-    let (dst_cell, _) = trans_lval dst
-      (if initialising then INTENT_init else INTENT_write)
+    let (dst_cell, _) = trans_lval_maybe_init initializing dst
     in
     let item = lval_item cx flv in
     let item_ty = Hashtbl.find cx.ctxt_all_item_types item.id in
@@ -1916,7 +1882,7 @@ let trans_visitor
     let fn_cell = Il.Addr (fn_addr, Il.CodeTy) in
     let (in_slots, _) = tmod_hdr in
     let arg_layouts = layout_mod_call_tup abi tmod_hdr in
-      trans_call initialising (fun _ -> Ast.sprintf_lval () flv)
+      trans_call initializing (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots arg_layouts args [||]
 
   and trans_call_pred
@@ -1925,9 +1891,7 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (fn_cell, fn_slot) =
-      trans_lval_full flv
-        abi.Abi.abi_has_abs_code
-        INTENT_read
+      trans_lval_full false flv abi.Abi.abi_has_abs_code
     in
     let tpred =
       match slot_ty fn_slot with
@@ -2017,7 +1981,7 @@ let trans_visitor
       emit (Il.call vr code);
 
   and trans_call
-      ((*initialising*)_:bool)
+      ((*initializing*)_:bool)
       (logname:(unit -> string))
       (output_cell:Il.cell)
       (callee_cell:Il.cell)
@@ -2031,7 +1995,7 @@ let trans_visitor
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
-       * initialising, overwrite the slot; this is ok if we're writing
+       * initializing, overwrite the slot; this is ok if we're writing
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
       call_code (code_of_cell callee_cell);
@@ -2103,7 +2067,7 @@ let trans_visitor
 
   and maybe_init (id:node_id) (action:string) (dst:Ast.lval) : bool =
     let b = Hashtbl.mem cx.ctxt_copy_stmt_is_init id in
-    let act = if b then ("initialising-" ^ action) else action in
+    let act = if b then ("initializing-" ^ action) else action in
       iflog
         (fun _ ->
            annotate (Printf.sprintf "%s on dst lval %a" act Ast.sprintf_lval dst));
@@ -2153,8 +2117,7 @@ let trans_visitor
                   trans_call_fn init dst flv tsig args
 
               | Ast.TY_pred _ ->
-                  let (dst_cell, _) = trans_lval dst
-                    (if init then INTENT_init else INTENT_write)
+                  let (dst_cell, _) = trans_lval_maybe_init init dst
                   in
                     trans_call_pred dst_cell flv args
 
@@ -2165,26 +2128,26 @@ let trans_visitor
           end
 
       | Ast.STMT_init_rec (dst, atab) ->
-          let (slot_cell, slot) = trans_lval dst INTENT_init in
+          let (slot_cell, slot) = trans_lval_init dst in
           let dst_slots =
             match slot_ty slot with
                 Ast.TY_rec trec -> (Array.map (fun (_, slot) -> slot) trec)
               | _ -> bugi cx stmt.id "non-rec destination type in stmt_init_rec"
           in
           let atoms = Array.map (fun (_, _, atom) -> atom) atab in
-          let dst_cell = deref_slot slot_cell slot INTENT_init in
+          let dst_cell = deref_slot true slot_cell slot in
             trans_init_structural_from_atoms dst_cell dst_slots atoms
 
 
       | Ast.STMT_init_tup (dst, mode_atoms) ->
-          let (slot_cell, slot) = trans_lval dst INTENT_init in
+          let (slot_cell, slot) = trans_lval_init dst in
           let dst_slots =
             match slot_ty slot with
                 Ast.TY_tup ttup -> ttup
               | _ -> bugi cx stmt.id "non-tup destination type in stmt_init_tup"
           in
           let atoms = Array.map (fun (_, atom) -> atom) mode_atoms in
-          let dst_cell = deref_slot slot_cell slot INTENT_init in
+          let dst_cell = deref_slot true slot_cell slot in
             trans_init_structural_from_atoms dst_cell dst_slots atoms
 
 
@@ -2199,14 +2162,14 @@ let trans_visitor
 
       | Ast.STMT_init_chan (dst, port) ->
           let (dst_cell, dst_slot) =
-            trans_lval dst INTENT_init
+            trans_lval_init dst
           in
             begin
               match port with
                   None ->
                     mov dst_cell imm_false
                 | Some p ->
-                    let (src_cell, _) = trans_lval p INTENT_read in
+                    let (src_cell, _) = trans_lval p in
                     let src_slot = interior_slot (slot_ty dst_slot) in
                       trans_copy_slot true
                         dst_cell dst_slot
