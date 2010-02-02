@@ -428,12 +428,6 @@ struct rust_port {
  */
 
 struct rust_chan {
-
-    rust_chan(rust_proc *proc, rust_port *port);
-    ~rust_chan();
-    void operator delete(void *ptr);
-    void disconnect();
-
     UT_hash_handle hh;
     rust_proc *proc;      // Proc owning this chan.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
@@ -441,6 +435,12 @@ struct rust_chan {
     size_t idx;           // Index in the port->writers vec.
     rust_proc *blocked;   // Proc to wake on flush, NULL if nonblocking.
     circ_buf buf;
+
+    rust_chan(rust_proc *proc, rust_port *port);
+    ~rust_chan();
+
+    void operator delete(void *ptr);
+    void disconnect();
 };
 
 /* Utility type: pointer-vector. */
