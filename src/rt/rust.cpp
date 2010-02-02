@@ -50,6 +50,7 @@ extern "C" {
 
 struct rust_proc;
 struct rust_port;
+struct rust_chan;
 struct rust_q;
 struct rust_rt;
 
@@ -229,7 +230,7 @@ struct rust_rt {
     randctx rctx;
     rust_proc *root_proc;
     rust_proc *curr_proc;
-    rust_port *ports;
+    ptr_vec<rust_port> ports; // bug 541584
     int rval;
 
     rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs);
@@ -401,11 +402,7 @@ struct rust_port {
     rust_rt *rt;
     size_t unit_sz;
     ptr_vec<rust_q> writers;
-    // FIXME (bug 541584): 'next' and 'prev' fields are only used for collecting
-    // dangling ports on abrupt process termination; can remove this
-    // when we have unwinding / finishing working.
-    rust_port *next;
-    rust_port *prev;
+    size_t idx; // bug 541584
 
     rust_port(rust_proc *proc, size_t unit_sz);
     ~rust_port();
@@ -639,17 +636,12 @@ rust_port::rust_port(rust_proc *proc, size_t unit_sz)
       proc(proc),
       rt(proc->rt),
       unit_sz(unit_sz),
-      writers(proc->rt),
-      next(NULL),
-      prev(NULL)
+      writers(proc->rt)
 {
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
             PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)this);
-    if (rt->ports)
-        rt->ports->prev = this;
-    next = rt->ports;
-    rt->ports = this;
+    rt->ports.push(this);
 }
 
 rust_port::~rust_port()
@@ -660,14 +652,9 @@ rust_port::~rust_port()
     /* FIXME: need to force-fail all writers waiting to send to us. */
     for (size_t i = 0; i < writers.length(); ++i)
         writers[i]->disconnect();
-    /* FIXME (bug 541584): can remove the chaining-of-ports-to-rt when we have
-     * unwinding / finishing working. */
-    if (prev)
-        prev->next = next;
-    else if (this == rt->ports)
-        rt->ports = next;
-    if (next)
-        next->prev = prev;
+    // FIXME (bug 541584): can remove the ports list when we have
+    // unwinding / finishing working.
+    rt->ports.swapdel(this);
 }
 
 /* Outgoing message queues */
@@ -1204,7 +1191,7 @@ rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_alloc
     dead_procs(this),
     root_proc(NULL),
     curr_proc(NULL),
-    ports(NULL),
+    ports(this),
     rval(0)
 {
     logptr("new rt", (uintptr_t)this);
@@ -1244,12 +1231,10 @@ rust_rt::~rust_rt() {
     del_all_procs(this, &dead_procs);
 
     log(LOG_PROC, "deleting all dangling ports");
-    /* FIXME (bug 541584): remove when port <-> proc linkage is
-       obsolete. */
-    while (ports)
-        delete ports;
+    // FIXME (bug 541584): remove when port <-> proc linkage is obsolete.
+    for (size_t i = 0; i < ports.length(); ++i)
+        delete ports[i];
 }
-
 
 void
 rust_rt::activate(rust_proc *proc) {
