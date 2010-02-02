@@ -645,18 +645,19 @@ let trans_visitor
 
   and emit_new_mod_glue (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
     let spill = new_fixup "new-mod glue spill" in
-      push_new_emitter ();
+      trans_mem_glue_frame_entry 0 spill;
       let (dst_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
       let (slots, _) = hdr in
       let ty = Ast.TY_tup slots in
       let rty = referent_type abi ty in
-      let sz = ty_sz abi ty in
+      let sz = Int64.add word_sz (ty_sz abi ty) in
       let dst_ta = (dst_addr, rty) in
+      let dst_body_ta = (Il.addr_add_imm dst_addr word_sz, rty) in
       let src_ta = (fp_imm arg0_disp, rty) in
         trans_malloc (Il.Addr dst_ta) sz;
-        trans_copy_tup true dst_ta slots src_ta slots;
-        capture_emitted_glue "new-mod glue" fix spill g;
-        pop_emitter();
+        mov (word_at dst_addr) one;
+        trans_copy_tup true dst_body_ta slots src_ta slots;
+        trans_glue_frame_exit "new-mod glue" fix spill g;
 
 
   and get_new_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) : fixup =
