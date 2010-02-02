@@ -431,7 +431,7 @@ struct rust_q {
     UT_hash_handle hh;
     rust_proc *proc;      // Proc owning this chan.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
-    bool queued;          // Whether we're in a port->writers vec.
+    bool sending;         // Whether we're in a port->writers vec.
     size_t idx;           // Index in the port->writers vec.
     rust_proc *blocked;   // Proc to wake on flush, NULL if nonblocking.
     circ_buf buf;
@@ -657,7 +657,7 @@ rust_port::~rust_port()
     rt->log(LOG_COMM|LOG_MEM,
             "~rust_port 0x%" PRIxPTR,
             (uintptr_t)this);
-    /* FIXME: need to force-fail all the queued writers. */
+    /* FIXME: need to force-fail all writers waiting to send to us. */
     for (size_t i = 0; i < writers.length(); ++i)
         writers[i]->disconnect();
     /* FIXME (bug 541584): can remove the chaining-of-ports-to-rt when we have
@@ -675,7 +675,7 @@ rust_port::~rust_port()
 rust_q::rust_q(rust_proc *proc, rust_port *port)
     : proc(proc),
       port(port),
-      queued(false),
+      sending(false),
       idx(0),
       blocked(NULL),
       buf(port->proc->rt, port->unit_sz)
@@ -689,16 +689,16 @@ rust_q::rust_q(rust_proc *proc, rust_port *port)
 void
 rust_q::disconnect()
 {
-    I(proc->rt, queued);
+    I(proc->rt, sending);
     I(proc->rt, port);
-    queued = false;
+    sending = false;
     port = NULL;
 }
 
 rust_q::~rust_q()
 {
     rust_rt *rt = proc->rt;
-    if (queued) {
+    if (sending) {
         I(rt, port);
         port->writers.swapdel(this);
     }
@@ -1597,8 +1597,8 @@ upcall_send(rust_proc *proc, rust_port *port, void *sptr)
                               proc_state_running,
                               proc_state_blocked_writing);
         attempt_transmission(rt, q, port->proc);
-        if (q->buf.unread && !q->queued) {
-            q->queued = true;
+        if (q->buf.unread && !q->sending) {
+            q->sending = true;
             port->writers.push(q);
         }
     } else {
@@ -1638,7 +1638,7 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
         if (attempt_transmission(rt, q, proc)) {
             port->writers.swapdel(q);
             port->writers.trim(port->writers.length());
-            q->queued = false;
+            q->sending = false;
         }
     } else {
         rt->log(LOG_COMM,
