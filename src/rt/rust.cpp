@@ -50,7 +50,7 @@ extern "C" {
 
 struct rust_proc;
 struct rust_port;
-struct rust_chan;
+struct rust_q;
 struct rust_rt;
 
 struct rust_str;
@@ -345,7 +345,7 @@ struct rust_proc {
     uintptr_t rust_sp;         // saved sp when not running.
     size_t idx;
     size_t refcnt;
-    rust_chan *chans;
+    rust_q *queues;
     uintptr_t gc_alloc_chain;  // linked list of GC allocations.
 
     // fields known only to the runtime
@@ -400,7 +400,7 @@ struct rust_port {
     rust_proc *proc; // port might outlive proc, so don't rely on it in destructor
     rust_rt *rt;
     size_t unit_sz;
-    ptr_vec<rust_chan> writers;
+    ptr_vec<rust_q> writers;
     // FIXME (bug 541584): 'next' and 'prev' fields are only used for collecting
     // dangling ports on abrupt process termination; can remove this
     // when we have unwinding / finishing working.
@@ -422,12 +422,12 @@ struct rust_port {
  * with liveness of the chan indicated by weak_refcnt.
  *
  * Inside each proc, there is a uthash hashtable that maps ports to
- * rust_chan* values, below. The table enforces uniqueness of the
- * channel: one proc has exactly one outgoing channel (buffer) for
+ * rust_q* values, below. The table enforces uniqueness of the
+ * queues: one proc has exactly one outgoing queue (buffer) for
  * each port.
  */
 
-struct rust_chan {
+struct rust_q {
     UT_hash_handle hh;
     rust_proc *proc;      // Proc owning this chan.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
@@ -436,8 +436,8 @@ struct rust_chan {
     rust_proc *blocked;   // Proc to wake on flush, NULL if nonblocking.
     circ_buf buf;
 
-    rust_chan(rust_proc *proc, rust_port *port);
-    ~rust_chan();
+    rust_q(rust_proc *proc, rust_port *port);
+    ~rust_q();
 
     void operator delete(void *ptr);
     void disconnect();
@@ -670,9 +670,9 @@ rust_port::~rust_port()
         next->prev = prev;
 }
 
-/* Channels */
+/* Outgoing message queues */
 
-rust_chan::rust_chan(rust_proc *proc, rust_port *port)
+rust_q::rust_q(rust_proc *proc, rust_port *port)
     : proc(proc),
       port(port),
       queued(false),
@@ -682,12 +682,12 @@ rust_chan::rust_chan(rust_proc *proc, rust_port *port)
 {
     rust_rt *rt = proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
-            "new rust_chan(port=0x%" PRIxPTR ") -> chan=0x%" PRIxPTR,
+            "new rust_q(port=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
             port, (uintptr_t)this);
 }
 
 void
-rust_chan::disconnect()
+rust_q::disconnect()
 {
     I(proc->rt, queued);
     I(proc->rt, port);
@@ -695,7 +695,7 @@ rust_chan::disconnect()
     port = NULL;
 }
 
-rust_chan::~rust_chan()
+rust_q::~rust_q()
 {
     rust_rt *rt = proc->rt;
     if (queued) {
@@ -703,13 +703,13 @@ rust_chan::~rust_chan()
         port->writers.swapdel(this);
     }
     rt->log(LOG_MEM|LOG_COMM,
-            "~rust_chan 0x%" PRIxPTR, (uintptr_t)this);
+            "~rust_q 0x%" PRIxPTR, (uintptr_t)this);
 }
 
 void
-rust_chan::operator delete(void *ptr)
+rust_q::operator delete(void *ptr)
 {
-    rust_rt *rt = ((rust_chan *)ptr)->proc->rt;
+    rust_rt *rt = ((rust_q *)ptr)->proc->rt;
     rt->free(ptr);
 }
 
@@ -842,7 +842,7 @@ rust_proc::rust_proc(rust_rt *rt,
       rust_sp(stk->limit),
       idx(0),
       refcnt(1),
-      chans(NULL),
+      queues(NULL),
       gc_alloc_chain(0),
       state(proc_state_running),
       dptr(0),
@@ -951,10 +951,10 @@ rust_proc::~rust_proc()
 
     del_stk(rt, stk);
 
-    while (chans) {
-        rust_chan *c = chans;
-        HASH_DEL(chans, c);
-        delete c;
+    while (queues) {
+        rust_q *q = queues;
+        HASH_DEL(queues, q);
+        delete q;
     }
 }
 
@@ -1477,7 +1477,7 @@ upcall_del_port(rust_proc *proc, rust_port *port)
 
 static int
 attempt_transmission(rust_rt *rt,
-                     rust_chan *src,
+                     rust_q *src,
                      rust_proc *dst)
 {
     I(rt, src);
@@ -1562,7 +1562,7 @@ upcall_send(rust_proc *proc, rust_port *port, void *sptr)
             (uintptr_t)port,
             (uintptr_t)sptr);
 
-    rust_chan *chan = NULL;
+    rust_q *q = NULL;
 
     if (!port) {
         rt->log(LOG_COMM|LOG_ERR,
@@ -1576,30 +1576,30 @@ upcall_send(rust_proc *proc, rust_port *port, void *sptr)
     I(rt, proc);
     I(rt, port);
     I(rt, sptr);
-    HASH_FIND(hh, proc->chans, port, sizeof(rust_port*), chan);
-    if (!chan) {
-        chan = new (rt) rust_chan(proc, port);
-        HASH_ADD(hh, proc->chans, port, sizeof(rust_port*), chan);
+    HASH_FIND(hh, proc->queues, port, sizeof(rust_port*), q);
+    if (!q) {
+        q = new (rt) rust_q(proc, port);
+        HASH_ADD(hh, proc->queues, port, sizeof(rust_port*), q);
     }
-    I(rt, chan);
-    I(rt, chan->blocked == proc || !chan->blocked);
-    I(rt, chan->port);
-    I(rt, chan->port == port);
+    I(rt, q);
+    I(rt, q->blocked == proc || !q->blocked);
+    I(rt, q->port);
+    I(rt, q->port == port);
 
     rt->log(LOG_MEM|LOG_COMM,
-            "sending via chan 0x%" PRIxPTR,
-            (uintptr_t)chan);
+            "sending via queue 0x%" PRIxPTR,
+            (uintptr_t)q);
 
     if (port->proc) {
-        chan->blocked = proc;
-        chan->buf.push(sptr);
+        q->blocked = proc;
+        q->buf.push(sptr);
         proc_state_transition(rt, proc,
                               proc_state_running,
                               proc_state_blocked_writing);
-        attempt_transmission(rt, chan, port->proc);
-        if (chan->buf.unread && !chan->queued) {
-            chan->queued = true;
-            port->writers.push(chan);
+        attempt_transmission(rt, q, port->proc);
+        if (q->buf.unread && !q->queued) {
+            q->queued = true;
+            port->writers.push(q);
         }
     } else {
         rt->log(LOG_COMM|LOG_ERR,
@@ -1633,12 +1633,12 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
         I(rt, proc->rt);
         size_t i = rand(&rt->rctx);
         i %= port->writers.length();
-        rust_chan *schan = port->writers[i];
-        I(rt, schan->idx == i);
-        if (attempt_transmission(rt, schan, proc)) {
-            port->writers.swapdel(schan);
+        rust_q *q = port->writers[i];
+        I(rt, q->idx == i);
+        if (attempt_transmission(rt, q, proc)) {
+            port->writers.swapdel(q);
             port->writers.trim(port->writers.length());
-            schan->queued = false;
+            q->queued = false;
         }
     } else {
         rt->log(LOG_COMM,
