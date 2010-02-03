@@ -1601,9 +1601,6 @@ let trans_visitor
       | Il.NilTy -> failwith "expected structural referent type, got nil"
 
 
-  (* FIXME (bug 541541): this should permit f.e. copying (foo,bar) <-
-   * (@foo,@bar), but presently it walks through both structures via
-   * the layouts for the destination slots.  *)
   and trans_copy_structural
       (initializing:bool)
       (layouts:layout array)
