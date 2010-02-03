@@ -157,10 +157,33 @@ let trans_visitor
     (addr, Il.ScalarTy (Il.AddrTy (referent_type abi pointee_ty)))
   in
 
+  let need_scalar_ty (rty:Il.referent_ty) : Il.scalar_ty =
+    match rty with
+        Il.ScalarTy s -> s
+      | _ -> bug () "expected ScalarTy"
+  in
+
   let need_addr_cell (cell:Il.cell) : Il.typed_addr =
     match cell with
         Il.Addr a -> a
       | Il.Reg _ -> bug () "expected address cell, got non-address register cell"
+  in
+
+  let get_element_ptr (addr_cell:Il.cell) (i:int) : Il.cell =
+    match addr_cell with
+        Il.Addr (addr, Il.StructTy elts) when i >= 0 && i < (Array.length elts) ->
+          assert ((Array.length elts) != 0);
+          begin
+            let elts_before = Array.sub elts 0 i in
+            let elt_rty = elts.(i) in
+            let elts_before_size = Il.referent_ty_size word_bits (Il.StructTy elts_before) in
+            let elt_align = Il.referent_ty_align word_bits elt_rty in
+            let elt_off = Il.align_to elt_align elts_before_size in
+              Il.Addr (Il.addr_add_imm addr elt_off, elt_rty)
+          end
+
+      | _ -> bug () "get_element_ptr %d on cell %s" i
+          (Il.string_of_cell abi.Abi.abi_str_of_hardreg addr_cell)
   in
 
   let alias (ta:Il.typed_addr) : Il.operand =
@@ -642,21 +665,47 @@ let trans_visitor
               emit_exit_proc_glue tsig fix g;
               fix
 
-  and emit_new_mod_glue (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
+  and emit_new_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
     let spill = new_fixup "new-mod glue spill" in
       trans_mem_glue_frame_entry 0 spill;
-      let (dst_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
+
       let (slots, _) = hdr in
       let ty = Ast.TY_tup slots in
-      let rty = referent_type abi ty in
-      let sz = Int64.add word_sz (ty_sz abi ty) in
-      let dst_ta = (dst_addr, rty) in
-      let dst_body_ta = (Il.addr_add_imm dst_addr word_sz, rty) in
-      let src_ta = (fp_imm arg0_disp, rty) in
-        trans_malloc (Il.Addr dst_ta) sz;
-        mov (word_at dst_addr) one;
-        trans_copy_tup true dst_body_ta slots src_ta slots;
-        trans_glue_frame_exit "new-mod glue" fix spill g;
+      let src_rty = slot_referent_type abi (interior_slot ty) in
+      let binding_ptr_rty = slot_referent_type abi (exterior_slot ty) in
+      let sz = exterior_rc_allocation_size (exterior_slot ty) in
+
+
+      let (pair_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
+        (* 
+         * pair_addr now points to the pair [item,binding*]
+         *)
+      let item_ptr_addr = Il.addr_add_imm pair_addr (word_n Abi.binding_field_item) in
+      let item_fixup = get_mod_fixup cx mod_id in
+      let item_addr = fixup_to_addr abi.Abi.abi_has_abs_data item_fixup Il.OpaqueTy in
+      let binding_ptr_addr = Il.addr_add_imm pair_addr (word_n Abi.binding_field_binding) in
+      let binding_ptr_cell = Il.Addr (binding_ptr_addr, binding_ptr_rty) in
+
+        (* Load first cell of pair with static item addr.*)
+      let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+        lea tmp item_addr;
+        mov (wordptr_at item_ptr_addr) (Il.Cell tmp);
+
+        (* Load second cell of pair with pointer to fresh binding tuple.*)
+        trans_malloc binding_ptr_cell sz;
+
+        (* Copy args into the binding tuple. *)
+        let dst_ptr = Il.next_vreg_cell (emitter()) (need_scalar_ty binding_ptr_rty) in
+          mov dst_ptr (Il.Cell binding_ptr_cell);
+          let dst = Il.Addr (deref dst_ptr) in
+          let refcnt_cell = get_element_ptr dst 0 in
+          let body_cell = get_element_ptr dst 1 in
+          let src_ta = (fp_imm arg0_disp, src_rty) in
+
+            mov refcnt_cell one;
+
+            trans_copy_tup true (need_addr_cell body_cell) slots src_ta slots;
+            trans_glue_frame_exit "new-mod glue" fix spill g;
 
 
   and get_new_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) : fixup =
@@ -665,7 +714,7 @@ let trans_visitor
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup "new-mod glue" in
-              emit_new_mod_glue hdr fix g;
+              emit_new_mod_glue mod_id hdr fix g;
               fix
 
   (* 
@@ -860,8 +909,8 @@ let trans_visitor
       (lhs:Il.operand)
       (rhs:Il.operand) : Il.operand =
     let arith op =
-      let size = Il.operand_size lhs word_bits in
-      let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy size) in
+      let bits = Il.operand_bits word_bits lhs in
+      let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy bits) in
         emit (Il.binary op dst lhs rhs);
         Il.Cell dst
     in
@@ -1279,6 +1328,27 @@ let trans_visitor
           | Ast.TY_iso tiso ->
               let ttag = get_iso_tag tiso in
                 iter_tag_slots addr ttag f (Some tiso)
+          | Ast.TY_fn _
+          | Ast.TY_mod _ ->
+              (* TY_fn and TY_mod are stored as pairs, one of which
+               * points to an item and one of which is a (possible)
+               * pointer to an exterior allocation.
+               *)
+              let (addr, _) = addr in
+              let binding_field_addr = Il.addr_add_imm addr (word_n Abi.binding_field_binding) in
+              let binding_field_cell = wordptr_at binding_field_addr in
+                emit (Il.cmp (Il.Cell binding_field_cell) zero);
+                let null_jmp = mark() in
+                  emit (Il.jmp Il.JE Il.CodeNone);
+                  (* Call thunk if we have a binding. *)
+                  (* 
+                   * FIXME (bug 543738): this is completely wrong, need a second thunk that
+                   * generates code to make use of a runtime type descriptor extracted from a
+                   * binding tuple. For now this only works by accident.
+                   *)
+                  (f binding_field_cell (exterior_slot Ast.TY_int) curr_iso);
+                  patch null_jmp
+
           | _ -> ()
 
   and drop_ty

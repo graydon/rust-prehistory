@@ -408,7 +408,15 @@ let interior_slot_full mut ty : Ast.slot =
     Ast.slot_ty = Some ty }
 ;;
 
+let exterior_slot_full mut ty : Ast.slot =
+  { Ast.slot_mode = Ast.MODE_exterior mut;
+    Ast.slot_ty = Some ty }
+;;
+
 let interior_slot ty : Ast.slot = interior_slot_full Ast.IMMUTABLE ty
+;;
+
+let exterior_slot ty : Ast.slot = exterior_slot_full Ast.IMMUTABLE ty
 ;;
 
 

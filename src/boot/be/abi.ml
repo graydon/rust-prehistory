@@ -56,6 +56,10 @@ let stk_field_valgrind_id = 0 + 1;;
 let stk_field_limit = stk_field_valgrind_id + 1;;
 let stk_field_data = stk_field_limit + 1;;
 
+let binding_size = 2;;
+let binding_field_item = 0;;
+let binding_field_binding = 1;;
+
 type abi =
   {
     abi_word_sz: int64;

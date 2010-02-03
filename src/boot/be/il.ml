@@ -234,24 +234,86 @@ let bits_of_ty_mach (tm:ty_mach) : bits =
     | TY_f64 -> Bits64
 ;;
 
-let operand_size (op:operand) (word_bits:bits) : bits =
 
-  let scalar_ty_size (st:scalar_ty) : bits =
-    match st with
-        ValTy bits -> bits
-      | AddrTy _ -> word_bits
-  in
+let scalar_ty_bits (word_bits:bits) (st:scalar_ty) : bits =
+  match st with
+      ValTy bits -> bits
+    | AddrTy _ -> word_bits
+;;
 
-  let cell_size (c:cell) : bits =
-    match c with
-        Reg (_, st) -> scalar_ty_size st
-      | Addr _ -> word_bits
-  in
+let cell_bits (word_bits:bits) (c:cell) : bits =
+  match c with
+      Reg (_, st) -> scalar_ty_bits word_bits st
+    | Addr (_, ScalarTy st) -> scalar_ty_bits word_bits st
+    | Addr _ -> failwith "addr of non-scalar in Il.cell_bits"
+;;
 
+let operand_bits (word_bits:bits) (op:operand) : bits =
   match op with
-      Cell cell -> cell_size cell
+      Cell cell -> cell_bits word_bits cell
     | Imm (_, tm) -> bits_of_ty_mach tm
 ;;
+
+let bits_size (bits:bits) : int64 =
+  match bits with
+      Bits8 -> 1L
+    | Bits16 -> 2L
+    | Bits32 -> 4L
+    | Bits64 -> 8L
+;;
+
+let bits_align (bits:bits) : int64 =
+  match bits with
+      Bits8 -> 1L
+    | Bits16 -> 2L
+    | Bits32 -> 4L
+    | Bits64 -> 8L
+;;
+
+let scalar_ty_size (word_bits:bits) (st:scalar_ty) : int64 =
+  bits_size (scalar_ty_bits word_bits st)
+;;
+
+let scalar_ty_align (word_bits:bits) (st:scalar_ty) : int64 =
+  bits_align (scalar_ty_bits word_bits st)
+;;
+
+let align_to (align:int64) (v:int64) : int64 =
+  if align = 0L || align = 1L
+  then v
+  else
+    let rem = Int64.rem v align in
+      if rem = 0L
+      then v
+      else
+        let padding = Int64.sub align rem in
+          Int64.add v padding
+;;
+
+let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (int64 * int64) =
+  match rt with
+      ScalarTy st -> (scalar_ty_size word_bits st, scalar_ty_align word_bits st)
+    | StructTy rts ->
+        begin
+          let accum (off,align) rt : (int64 * int64) =
+            let elt_align = referent_ty_align word_bits rt in
+            let elt_off = align_to elt_align off in
+            let elt_size = referent_ty_size word_bits rt in
+              (Int64.add elt_off elt_size, i64_max elt_align align)
+          in
+            Array.fold_left accum (0L,0L) rts
+        end
+    | OpaqueTy _ -> failwith "opaque ty in referent_ty_layout"
+    | CodeTy _ -> failwith "code ty in referent_ty_layout"
+    | NilTy -> (0L, 0L)
+
+and referent_ty_size (word_bits:bits) (rt:referent_ty) : int64 =
+  fst (referent_ty_layout word_bits rt)
+
+and referent_ty_align (word_bits:bits) (rt:referent_ty) : int64 =
+  snd (referent_ty_layout word_bits rt)
+;;
+
 
 (* Processor. *)
 
