@@ -364,25 +364,17 @@ let trans_visitor
       (comp:Ast.lval_component)
       : (Il.cell * Ast.slot) =
 
-    let displaced slot disp =
-      Il.Addr (Il.addr_add_imm base_addr disp,
-               slot_referent_type abi slot)
-    in
+    let cell = Il.Addr (base_addr, referent_type abi base_ty) in
 
     match (base_ty, comp) with
         (Ast.TY_rec entries,
          Ast.COMP_named (Ast.COMP_ident id)) ->
-          let layouts = layout_rec abi entries in
-          let (slot, layout) = atab_find layouts id in
-          let cell = displaced slot layout.layout_offset in
-            (cell, slot)
+          let i = atab_idx entries id in
+            (get_element_ptr cell i, snd entries.(i))
 
       | (Ast.TY_tup entries,
          Ast.COMP_named (Ast.COMP_idx i)) ->
-          let layouts = layout_tup abi entries in
-          let slot = entries.(i) in
-          let cell = displaced slot layouts.(i).layout_offset in
-            (cell, slot)
+          (get_element_ptr cell i, entries.(i))
 
       | (Ast.TY_vec slot,
          Ast.COMP_atom at) ->
