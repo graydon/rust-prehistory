@@ -231,6 +231,7 @@ struct rust_rt {
     rust_proc *root_proc;
     rust_proc *curr_proc;
     ptr_vec<rust_port> ports; // bug 541584
+    ptr_vec<rust_chan> chans;
     int rval;
 
     rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs);
@@ -394,8 +395,7 @@ struct rust_proc {
 
 struct rust_port {
     // fields known to the compiler
-    size_t live_refcnt;
-    size_t weak_refcnt;
+    size_t refcnt;
 
     // fields known only to the runtime
     rust_proc *proc; // port might outlive proc, so don't rely on it in destructor
@@ -410,6 +410,26 @@ struct rust_port {
     void operator delete(void *ptr)
     {
         rust_rt *rt = ((rust_port *)ptr)->rt;
+        rt->free(ptr);
+    }
+};
+
+struct rust_chan {
+    // fields known to the compiler
+    size_t refcnt;
+
+    // fields known only to the runtime
+    rust_proc* proc; // chan might outlive proc, so don't rely on it in destructor
+    rust_rt* rt;
+    rust_port* port;
+    size_t idx; // bug 541584
+
+    rust_chan(rust_proc *proc, rust_port *port);
+    ~rust_chan();
+
+    void operator delete(void *ptr)
+    {
+        rust_rt *rt = ((rust_chan *)ptr)->rt;
         rt->free(ptr);
     }
 };
@@ -631,8 +651,7 @@ circ_buf::shift(void *dst)
 /* Ports */
 
 rust_port::rust_port(rust_proc *proc, size_t unit_sz)
-    : live_refcnt(0),
-      weak_refcnt(0),
+    : refcnt(1),
       proc(proc),
       rt(proc->rt),
       unit_sz(unit_sz),
@@ -655,6 +674,20 @@ rust_port::~rust_port()
     // FIXME (bug 541584): can remove the ports list when we have
     // unwinding / finishing working.
     rt->ports.swapdel(this);
+}
+
+rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
+    refcnt(1),
+    proc(proc),
+    rt(proc->rt),
+    port(port)
+{
+    rt->chans.push(this);
+}
+
+rust_chan::~rust_chan()
+{
+    rt->chans.swapdel(this);
 }
 
 /* Outgoing message queues */
@@ -1192,6 +1225,7 @@ rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_alloc
     root_proc(NULL),
     curr_proc(NULL),
     ports(this),
+    chans(this),
     rval(0)
 {
     logptr("new rt", (uintptr_t)this);
@@ -1230,8 +1264,11 @@ rust_rt::~rust_rt() {
     log(LOG_PROC, "deleting all dead procs");
     del_all_procs(this, &dead_procs);
 
-    log(LOG_PROC, "deleting all dangling ports");
+    log(LOG_PROC, "deleting all dangling ports and chans");
     // FIXME (bug 541584): remove when port <-> proc linkage is obsolete.
+    for (size_t i = 0; i < chans.length(); ++i)
+        delete chans[i];
+    // delete ports last since chans can still hold references to them
     for (size_t i = 0; i < ports.length(); ++i)
         delete ports[i];
 }
@@ -1411,12 +1448,11 @@ extern "C" CDECL rust_port*
 upcall_new_port(rust_proc *proc, size_t unit_sz)
 {
     LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-                  "upcall_new_port(proc=0x%" PRIxPTR ", unit_sz=%d)",
-                  (uintptr_t)proc, unit_sz);
-    rust_port *port = new (proc->rt) rust_port(proc, unit_sz);
-    port->live_refcnt = 1;
-    return port;
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+            "upcall_new_port(proc=0x%" PRIxPTR ", unit_sz=%d)",
+            (uintptr_t)proc, unit_sz);
+    return new (rt) rust_port(proc, unit_sz);
 }
 
 extern "C" CDECL void
@@ -1424,18 +1460,36 @@ upcall_del_port(rust_proc *proc, rust_port *port)
 {
     LOG_UPCALL_ENTRY(proc);
     proc->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-                  "upcall del_port(0x%" PRIxPTR
-                  "), live refcnt=%d, weak refcnt=%d",
-                  (uintptr_t)port, port->live_refcnt,
-                  port->weak_refcnt);
+                  "upcall del_port(0x%" PRIxPTR ")", (uintptr_t)port);
+    I(proc->rt, !port->refcnt);
+    delete port;
+}
 
-    I(proc->rt, port->live_refcnt == 0 ||
-      port->weak_refcnt == 0);
+extern "C" CDECL rust_chan*
+upcall_new_chan(rust_proc *proc, rust_port *port)
+{
+    LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+            "upcall_new_chan(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
+            (uintptr_t)proc, port);
+    I(rt, port);
+    ++(port->refcnt);
+    return new (rt) rust_chan(proc, port);
+}
 
-    if (port->live_refcnt == 0 &&
-        port->weak_refcnt == 0) {
+extern "C" CDECL void
+upcall_del_chan(rust_proc *proc, rust_chan *chan)
+{
+    LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+            "upcall del_chan(0x%" PRIxPTR ")", (uintptr_t)chan);
+    I(rt, !chan->refcnt);
+    rust_port *port = chan->port;
+    if (!--(port->refcnt))
         delete port;
-    }
+    delete chan;
 }
 
 /*
@@ -1538,22 +1592,24 @@ upcall_join(rust_proc *proc, rust_proc *other)
 }
 
 extern "C" CDECL void
-upcall_send(rust_proc *proc, rust_port *port, void *sptr)
+upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
 {
     LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
-            "upcall send(port=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
-            (uintptr_t)port,
+            "upcall send(chan=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
+            (uintptr_t)chan,
             (uintptr_t)sptr);
 
     rust_q *q = NULL;
 
-    if (!port) {
+    if (!chan) {
         rt->log(LOG_COMM|LOG_ERR,
-                "send to NULL port (possibly throw?)");
+                "send to NULL chan (possibly throw?)");
         return;
     }
+
+    rust_port *port = chan->port;
 
     rt->log(LOG_MEM|LOG_COMM,
             "send to port", (uintptr_t)port);

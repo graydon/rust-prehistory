@@ -1069,6 +1069,14 @@ let trans_visitor
   and trans_del_port (port:Il.cell) : unit =
     trans_void_upcall "upcall_del_port" [| Il.Cell port |]
 
+  and trans_init_chan (dst:Ast.lval) (port:Ast.lval) : unit =
+    let (dstcell, _) = trans_lval_init dst
+    in
+      trans_upcall "upcall_new_chan" dstcell [| trans_atom (Ast.ATOM_lval port) |]
+
+  and trans_del_chan (chan:Il.cell) : unit =
+    trans_void_upcall "upcall_del_chan" [| Il.Cell chan |]
+
   and trans_kill_proc (proc:Il.cell) : unit =
     trans_void_upcall "upcall_kill" [| Il.Cell proc |]
 
@@ -1293,7 +1301,7 @@ let trans_visitor
         : unit =
     match ty with
         Ast.TY_port _ -> trans_del_port cell
-      | Ast.TY_chan _ -> trans_del_port cell
+      | Ast.TY_chan _ -> trans_del_chan cell
       | Ast.TY_proc -> trans_kill_proc cell
       | _ -> trans_free cell
 
@@ -2161,20 +2169,16 @@ let trans_visitor
           trans_init_port dst
 
       | Ast.STMT_init_chan (dst, port) ->
-          let (dst_cell, dst_slot) =
-            trans_lval_init dst
-          in
-            begin
-              match port with
-                  None ->
+          begin
+            match port with
+                None ->
+                  let (dst_cell, _) =
+                    trans_lval_init dst
+                  in
                     mov dst_cell imm_false
-                | Some p ->
-                    let (src_cell, _) = trans_lval p in
-                    let src_slot = interior_slot (slot_ty dst_slot) in
-                      trans_copy_slot true
-                        dst_cell dst_slot
-                        src_cell src_slot
-            end
+              | Some p ->
+                  trans_init_chan dst p
+          end
 
       | Ast.STMT_block block ->
           trans_block block
