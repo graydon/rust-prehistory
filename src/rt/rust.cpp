@@ -1635,6 +1635,8 @@ upcall_send(rust_proc *proc, rust_chan **chanp, void *sptr)
             rt->log(LOG_MEM|LOG_COMM,
                     "lazily cloned channel 0x%" PRIxPTR " -> 0x%" PRIxPTR,
                     (uintptr_t)*chanp, (uintptr_t)chan);
+            // update the caller's reference and drop the refcnt of the original
+            (*chanp)->refcnt--;
             *chanp = chan;
         }
         // we have resolved the right queue to send via
