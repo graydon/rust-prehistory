@@ -419,10 +419,12 @@ struct rust_chan {
     size_t refcnt;
 
     // fields known only to the runtime
-    rust_proc* proc; // chan might outlive proc, so don't rely on it in destructor
     rust_rt* rt;
     rust_port* port;
     size_t idx; // bug 541584
+
+    // queue the chan is sending to (resolved lazily)
+    rust_q* q;
 
     rust_chan(rust_proc *proc, rust_port *port);
     ~rust_chan();
@@ -678,10 +680,11 @@ rust_port::~rust_port()
 
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     refcnt(1),
-    proc(proc),
     rt(proc->rt),
-    port(port)
+    port(port),
+    q(NULL)
 {
+    ++(port->refcnt);
     rt->chans.push(this);
 }
 
@@ -1474,7 +1477,6 @@ upcall_new_chan(rust_proc *proc, rust_port *port)
             "upcall_new_chan(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
             (uintptr_t)proc, port);
     I(rt, port);
-    ++(port->refcnt);
     return new (rt) rust_chan(proc, port);
 }
 
@@ -1601,32 +1603,44 @@ upcall_send(rust_proc *proc, rust_chan **chanp, void *sptr)
             (uintptr_t)chanp,
             (uintptr_t)sptr);
 
-    rust_q *q = NULL;
+    I(rt, chanp);
+    I(rt, sptr);
 
     rust_chan *chan = *chanp;
-    if (!chan) {
-        rt->log(LOG_COMM|LOG_ERR,
-                "send to NULL chan (possibly throw?)");
-        return;
-    }
+    I(rt, chan);
 
     rust_port *port = chan->port;
-
     rt->log(LOG_MEM|LOG_COMM,
             "send to port", (uintptr_t)port);
-
-    I(rt, proc);
     I(rt, port);
-    I(rt, sptr);
-    HASH_FIND(hh, proc->queues, port, sizeof(rust_port*), q);
-    if (!q) {
-        q = new (rt) rust_q(proc, port);
-        HASH_ADD(hh, proc->queues, port, sizeof(rust_port*), q);
+
+    // if the queue wasn't resolved yet or is not ours, lookup the queue
+    rust_q *q = chan->q;
+    if (!q || q->proc != proc) {
+        HASH_FIND(hh, proc->queues, port, sizeof(rust_q*), q);
+        if (!q) {
+            q = new (rt) rust_q(proc, port);
+            HASH_ADD(hh, proc->queues, port, sizeof(rust_q*), q);
+        }
+        I(rt, q);
+        I(rt, q->blocked == proc || !q->blocked);
+        I(rt, q->port);
+        I(rt, q->port == port);
+        // if the channel was already associated with a queue, make a new channel
+        // and update the reference in the caller
+        if (chan->q) {
+            chan = new (rt) rust_chan(proc, port);
+            rt->log(LOG_MEM|LOG_COMM,
+                    "lazily cloned channel 0x%" PRIxPTR " -> 0x%" PRIxPTR,
+                    (uintptr_t)*chanp, (uintptr_t)chan);
+            *chanp = chan;
+        }
+        // we have resolved the right queue to send via
+        chan->q = q;
     }
-    I(rt, q);
-    I(rt, q->blocked == proc || !q->blocked);
-    I(rt, q->port);
-    I(rt, q->port == port);
+
+    I(rt, chan->q->proc == proc);
+    I(rt, chan->port == port);
 
     rt->log(LOG_MEM|LOG_COMM,
             "sending via queue 0x%" PRIxPTR,
