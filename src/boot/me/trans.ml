@@ -1329,6 +1329,7 @@ let trans_visitor
               let ttag = get_iso_tag tiso in
                 iter_tag_slots addr ttag f (Some tiso)
           | Ast.TY_fn _
+          | Ast.TY_pred _
           | Ast.TY_mod _ ->
               (* TY_fn and TY_mod are stored as pairs, one of which
                * points to an item and one of which is a (possible)
