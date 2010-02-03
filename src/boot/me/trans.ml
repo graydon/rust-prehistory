@@ -311,6 +311,7 @@ let trans_visitor
                   Il.ScalarTy st -> Il.Reg (Il.Vreg (cell_vreg_num vr), st)
                 | Il.NilTy -> nil_ptr
                 | Il.StructTy _ -> bugi cx slot_id "cannot treat structured referent as single operand"
+                | Il.UnionTy _ -> bugi cx slot_id "cannot treat union referent as single operand"
                 | Il.OpaqueTy -> bugi cx slot_id "cannot treat opaque referent as single operand"
                 | Il.CodeTy ->  bugi cx slot_id "cannot treat code referent as single operand"
             end
@@ -1593,54 +1594,31 @@ let trans_visitor
           then cell
           else Il.Addr (deref cell)
 
-  and get_struct_referent_tys (t:Il.referent_ty) : Il.referent_ty array =
-    match t with
-        Il.StructTy tys -> tys
-      | Il.ScalarTy _ -> failwith "expected structural referent type, got scalar"
-      | Il.OpaqueTy -> failwith "expected structural referent type, got opaque"
-      | Il.CodeTy -> failwith "expected structural referent type, got code"
-      | Il.NilTy -> failwith "expected structural referent type, got nil"
-
-
   and trans_copy_structural
       (initializing:bool)
-      (layouts:layout array)
       (dst_ta:Il.typed_addr) (dst_slots:Ast.ty_tup)
       (src_ta:Il.typed_addr) (src_slots:Ast.ty_tup)
       : unit =
-    let (dst_addr, dst_rt) = dst_ta in
-    let (src_addr, _) = src_ta in
-    let dst_tys = get_struct_referent_tys dst_rt in
-    let src_tys = get_struct_referent_tys dst_rt in
-      assert (src_tys = dst_tys);
-      assert (Array.length src_tys = Array.length layouts);
-      Array.iteri
-        begin
-          fun i layout ->
-            let disp = layout.layout_offset in
-            let sub_dst = Il.addr_add_imm dst_addr disp in
-            let sub_src = Il.addr_add_imm src_addr disp in
-            let sub_dst_cell = Il.Addr (sub_dst, dst_tys.(i)) in
-            let sub_src_cell = Il.Addr (sub_src, src_tys.(i)) in
-              assert (slot_ty src_slots.(i) = slot_ty dst_slots.(i));
-              trans_copy_slot
-                initializing
-                sub_dst_cell dst_slots.(i)
-                sub_src_cell src_slots.(i)
-        end
-        layouts
+    assert ((snd dst_ta) = (snd src_ta));
+    assert (dst_slots = src_slots);
+    Array.iteri
+      begin
+        fun i slot ->
+          let sub_dst_cell = get_element_ptr (Il.Addr dst_ta) i in
+          let sub_src_cell = get_element_ptr (Il.Addr src_ta) i in
+            trans_copy_slot initializing sub_dst_cell slot sub_src_cell slot
+      end
+      src_slots
 
   and trans_copy_rec
       (initializing:bool)
       (dst_ta:Il.typed_addr) (dst_entries:Ast.ty_rec)
       (src_ta:Il.typed_addr) (src_entries:Ast.ty_rec)
       : unit =
-    let layouts = layout_rec abi dst_entries in
-    let layouts' = Array.map (fun (_, (_, layout)) -> layout) layouts in
     let dst_slots = Array.map (fun (_, slot) -> slot) dst_entries in
     let src_slots = Array.map (fun (_, slot) -> slot) src_entries in
       trans_copy_structural
-        initializing layouts'
+        initializing
         dst_ta dst_slots
         src_ta src_slots
 
@@ -1649,9 +1627,8 @@ let trans_visitor
       (dst_ta:Il.typed_addr) (dst_slots:Ast.ty_tup)
       (src_ta:Il.typed_addr) (src_slots:Ast.ty_tup)
       : unit =
-    let layouts = layout_tup abi dst_slots in
       trans_copy_structural
-        initializing layouts
+        initializing
         dst_ta dst_slots
         src_ta src_slots
 

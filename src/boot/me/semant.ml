@@ -1253,6 +1253,17 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
   let word = sv abi.Abi.abi_word_bits in
   let ptr = sp Il.OpaqueTy in
   let codeptr = sp Il.CodeTy in
+  let tup ttup = Il.StructTy (Array.map (slot_referent_type abi) ttup) in
+  let tag ttag =
+    let union =
+      Il.UnionTy
+        (Array.map
+           (fun key -> tup (Hashtbl.find ttag key))
+           (sorted_htab_keys ttag))
+    in
+    let discriminant = word in
+      Il.StructTy [| discriminant; union |]
+  in
 
     match t with
         Ast.TY_any -> Il.StructTy [| word;  ptr |]
@@ -1278,24 +1289,22 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
       | Ast.TY_str -> sp (Il.StructTy [| word; word; word; ptr |])
       | Ast.TY_vec _ -> sp (Il.StructTy [| word; word; word; ptr |])
-      | Ast.TY_tup tt ->
-          Il.StructTy (Array.map (slot_referent_type abi) tt)
-      | Ast.TY_rec tr ->
-          Il.StructTy
-            (Array.map (fun (_, slot) ->
-                          slot_referent_type abi slot) tr)
+      | Ast.TY_tup tt -> tup tt
+      | Ast.TY_rec tr -> tup (Array.map snd tr)
 
       | Ast.TY_fn _
       | Ast.TY_pred _ -> Il.StructTy [| codeptr; ptr |]
       | Ast.TY_mod _ -> Il.StructTy [| ptr; ptr |]
 
-      | Ast.TY_tag _ -> Il.OpaqueTy
-      | Ast.TY_iso _
-      | Ast.TY_idx _
+      | Ast.TY_tag ttag -> tag ttag
+      | Ast.TY_iso tiso -> tag tiso.Ast.iso_group.(tiso.Ast.iso_index)
+
+      | Ast.TY_idx _ -> Il.OpaqueTy
+
+      | Ast.TY_opaque _
       | Ast.TY_chan _
       | Ast.TY_port _
       | Ast.TY_proc
-      | Ast.TY_opaque _
       | Ast.TY_type -> ptr
 
       | Ast.TY_named _ -> bug () "named type in referent_type"
@@ -1354,22 +1363,8 @@ let word_layout (abi:Abi.abi) (off:int64) : layout =
 ;;
 
 let rec layout_referent (abi:Abi.abi) (off:int64) (rty:Il.referent_ty) : layout =
-  match rty with
-      Il.ScalarTy sty ->
-        begin
-          match sty with
-              Il.ValTy Il.Bits8 -> new_layout off 1L 1L
-            | Il.ValTy Il.Bits16 -> new_layout off 2L 2L
-            | Il.ValTy Il.Bits32 -> new_layout off 4L 4L
-            | Il.ValTy Il.Bits64 -> new_layout off 8L 8L
-            | Il.AddrTy _ -> word_layout abi off
-        end
-    | Il.StructTy rtys ->
-        let layouts = Array.map (layout_referent abi 0L) rtys in
-          pack off layouts
-    | Il.NilTy -> new_layout off 0L 0L
-    | Il.OpaqueTy -> bug () "laying out opaque IL type in layout_referent"
-    | Il.CodeTy -> bug () "laying out code IL type in layout_referent"
+  let (sz, align) = Il.referent_ty_layout abi.Abi.abi_word_bits rty in
+    new_layout off sz align
 ;;
 
 let rec layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
@@ -1388,37 +1383,13 @@ and layout_tup (abi:Abi.abi) (tup:Ast.ty_tup) : (layout array) =
     layouts
 
 and layout_tag (abi:Abi.abi) (ttag:Ast.ty_tag) : layout =
-  let tag_layout = word_layout abi 0L in
-  let body_layout = new_layout 0L 0L 0L in
-  Hashtbl.iter (fun _ ttup ->
-                  let tup_layout = pack 0L (layout_tup abi ttup) in
-                    body_layout.layout_size <- i64_max body_layout.layout_size tup_layout.layout_size;
-                    body_layout.layout_align <- i64_max body_layout.layout_align tup_layout.layout_align)
-    ttag;
-    pack 0L [| tag_layout; body_layout |]
+  layout_referent abi 0L (referent_type abi (Ast.TY_tag ttag))
 
 and layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
-  (* FIXME (bug 541562): tag types may need to be represented in the IL type system? *)
-  match t with
-      Ast.TY_tag ttag -> layout_tag abi ttag
-    | Ast.TY_iso tiso -> layout_tag abi tiso.Ast.iso_group.(tiso.Ast.iso_index)
-    | _ -> layout_referent abi off (referent_type abi t)
+  layout_referent abi off (referent_type abi t)
 
-(* FIXME (bug 541561): redirect this to slot_referent_type *)
 and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
-  match s.Ast.slot_mode with
-      Ast.MODE_interior _
-    | _ ->
-        begin
-          match s.Ast.slot_ty with
-              None -> bug () "layout_slot on untyped slot"
-            | Some t -> layout_ty abi off t
-        end
-          (* FIXME (bug 541559): turning this on makes a bunch of
-           * slots go into regs (great!)  except they're not supposed
-           * to; the alias-analysis pass is supposed to catch them. It
-           * doesn't yet, though. *)
-          (* | _ -> word_layout abi off *)
+  layout_referent abi off (slot_referent_type abi s)
 
 and ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
   let slot = interior_slot t in

@@ -87,6 +87,29 @@ let layout_visitor
     Printf.sprintf "sz=%Ld, off=%Ld, align=%Ld"
       ly.layout_size ly.layout_offset ly.layout_align
   in
+  let force_slot_to_mem (slot:Ast.slot) : bool =
+    (* FIXME (bug 541559): For the time being we force any slot that
+     * points into memory or is of opaque/code type to be stored in the
+     * frame rather than in a vreg. This can probably be relaxed in the
+     * future.
+     *)
+    let rec st_in_mem st =
+      match st with
+          Il.ValTy _ -> false
+        | Il.AddrTy _ -> true
+
+    and rt_in_mem rt =
+      match rt with
+          Il.ScalarTy st -> st_in_mem st
+        | Il.StructTy rts
+        | Il.UnionTy rts -> List.exists rt_in_mem (Array.to_list rts)
+        | Il.OpaqueTy
+        | Il.CodeTy -> true
+        | Il.NilTy -> false
+    in
+      rt_in_mem (slot_referent_type cx.ctxt_abi slot)
+  in
+
   let layout_slot_ids (vregs_ok:bool) (offset:int64) (slots:node_id array) : layout =
     let layout_slot_id id =
       if Hashtbl.mem cx.ctxt_slot_layouts id
@@ -96,6 +119,7 @@ let layout_visitor
         let layout = layout_slot cx.ctxt_abi 0L slot in
           if vregs_ok
             && (i64_le layout.layout_size cx.ctxt_abi.Abi.abi_word_sz)
+            && (not (force_slot_to_mem slot))
             && (not (Hashtbl.mem cx.ctxt_slot_aliased id))
           then
             begin

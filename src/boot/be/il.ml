@@ -19,6 +19,7 @@ type scalar_ty =
 and referent_ty =
     ScalarTy of scalar_ty
   | StructTy of referent_ty array
+  | UnionTy of referent_ty array
   | OpaqueTy (* Unknown memory-resident thing. *)
   | CodeTy   (* Executable machine code. *)
   | NilTy    (* 0 bits of space. *)
@@ -303,6 +304,15 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (int64 * int64) =
           in
             Array.fold_left accum (0L,0L) rts
         end
+   | UnionTy rts ->
+        begin
+          let accum (sz,align) rt : (int64 * int64) =
+            let elt_align = referent_ty_align word_bits rt in
+            let elt_size = referent_ty_size word_bits rt in
+              (i64_max sz elt_size, i64_max elt_align align)
+          in
+            Array.fold_left accum (0L,0L) rts
+        end
     | OpaqueTy _ -> failwith "opaque ty in referent_ty_layout"
     | CodeTy _ -> failwith "code ty in referent_ty_layout"
     | NilTy -> (0L, 0L)
@@ -429,6 +439,10 @@ and string_of_referent_ty (r:referent_ty) : string =
       ScalarTy s ->  (string_of_scalar_ty s)
     | StructTy rs ->
         Printf.sprintf "[%s]"
+          (String.concat ","
+             (Array.to_list (Array.map string_of_referent_ty rs)))
+    | UnionTy rs ->
+        Printf.sprintf "(%s)"
           (String.concat "|"
              (Array.to_list (Array.map string_of_referent_ty rs)))
     | OpaqueTy -> "?"
