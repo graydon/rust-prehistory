@@ -31,7 +31,6 @@ let trans_visitor
     else ()
   in
 
-  let block_layouts = Stack.create () in
   let curr_file = ref None in
   let curr_stmt = ref None in
 
@@ -971,7 +970,6 @@ let trans_visitor
           trans_atom a
 
   and trans_block (block:Ast.block) : unit =
-    Stack.push (get_block_layout cx block.id) block_layouts;
     trace_str cx.ctxt_sess.Session.sess_trace_block
       "entering block";
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups block.id));
@@ -997,7 +995,6 @@ let trans_visitor
             drop_slot cell slot None
       end;
     emit Il.Leave;
-    ignore (Stack.pop block_layouts);
     trace_str cx.ctxt_sess.Session.sess_trace_block
       "exited block";
 
@@ -1195,12 +1192,14 @@ let trans_visitor
     exterior_ctrl_cell cell Abi.exterior_gc_slot_field_next
 
   and exterior_gc_allocation_size (slot:Ast.slot) : int64 =
-    let layout = layout_ty abi 0L (slot_ty slot) in
-      (Int64.add layout.layout_size (word_n Abi.exterior_gc_header_size))
+    (Int64.add
+       (ty_sz  abi (slot_ty slot))
+       (word_n Abi.exterior_gc_header_size))
 
   and exterior_rc_allocation_size (slot:Ast.slot) : int64 =
-    let layout = layout_ty abi 0L (slot_ty slot) in
-      (Int64.add layout.layout_size (word_n Abi.exterior_rc_header_size))
+      (Int64.add
+         (ty_sz abi (slot_ty slot))
+         (word_n Abi.exterior_rc_header_size))
 
 
   and ty_is_structured (t:Ast.ty) : bool =
