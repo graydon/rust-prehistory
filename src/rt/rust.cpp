@@ -1592,17 +1592,18 @@ upcall_join(rust_proc *proc, rust_proc *other)
 }
 
 extern "C" CDECL void
-upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
+upcall_send(rust_proc *proc, rust_chan **chanp, void *sptr)
 {
     LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
-            "upcall send(chan=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
-            (uintptr_t)chan,
+            "upcall send(chanp=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
+            (uintptr_t)chanp,
             (uintptr_t)sptr);
 
     rust_q *q = NULL;
 
+    rust_chan *chan = *chanp;
     if (!chan) {
         rt->log(LOG_COMM|LOG_ERR,
                 "send to NULL chan (possibly throw?)");

@@ -1042,11 +1042,16 @@ let trans_visitor
     trans_void_upcall "upcall_join" [| trans_atom (Ast.ATOM_lval proc) |]
 
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
+    let (chancell, _) = trans_lval chan in
     let (srccell, _) = trans_lval src in
-      aliasing false srccell
+      aliasing true chancell
         begin
-          fun src_alias ->
-            trans_void_upcall "upcall_send" [| trans_atom (Ast.ATOM_lval chan); src_alias |];
+          fun chan_alias ->
+            aliasing false srccell
+              begin
+                fun src_alias ->
+                  trans_void_upcall "upcall_send" [| chan_alias; src_alias |];
+              end
         end
 
   and trans_recv (initializing:bool) (dst:Ast.lval) (chan:Ast.lval) : unit =
