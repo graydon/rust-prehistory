@@ -419,6 +419,7 @@ struct rust_chan {
     size_t refcnt;
 
     // fields known only to the runtime
+    rust_proc *proc;
     rust_rt* rt;
     rust_port* port;
     size_t idx; // bug 541584
@@ -680,6 +681,7 @@ rust_port::~rust_port()
 
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     refcnt(1),
+    proc(proc),
     rt(proc->rt),
     port(port),
     q(NULL)
@@ -1269,11 +1271,11 @@ rust_rt::~rust_rt() {
 
     log(LOG_PROC, "deleting all dangling ports and chans");
     // FIXME (bug 541584): remove when port <-> proc linkage is obsolete.
-    for (size_t i = 0; i < chans.length(); ++i)
-        delete chans[i];
+    while (chans.length() > 0)
+        delete chans[0];
     // delete ports last since chans can still hold references to them
-    for (size_t i = 0; i < ports.length(); ++i)
-        delete ports[i];
+    while (ports.length() > 0)
+        delete ports[0];
 }
 
 void
@@ -1616,7 +1618,7 @@ upcall_send(rust_proc *proc, rust_chan **chanp, void *sptr)
 
     // if the queue wasn't resolved yet or is not ours, lookup the queue
     rust_q *q = chan->q;
-    if (!q || q->proc != proc) {
+    if (!q || chan->proc != proc) {
         HASH_FIND(hh, proc->queues, port, sizeof(rust_q*), q);
         if (!q) {
             q = new (rt) rust_q(proc, port);
