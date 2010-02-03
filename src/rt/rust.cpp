@@ -419,12 +419,12 @@ struct rust_chan {
     size_t refcnt;
 
     // fields known only to the runtime
-    rust_proc *proc;
     rust_rt* rt;
     rust_port* port;
     size_t idx; // bug 541584
 
     // queue the chan is sending to (resolved lazily)
+    rust_proc *proc;
     rust_q* q;
 
     rust_chan(rust_proc *proc, rust_port *port);
@@ -681,9 +681,9 @@ rust_port::~rust_port()
 
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     refcnt(1),
-    proc(proc),
     rt(proc->rt),
     port(port),
+    proc(NULL),
     q(NULL)
 {
     ++(port->refcnt);
@@ -1596,20 +1596,17 @@ upcall_join(rust_proc *proc, rust_proc *other)
 }
 
 extern "C" CDECL void
-upcall_send(rust_proc *proc, rust_chan **chanp, void *sptr)
+upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
 {
     LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
-            "upcall send(chanp=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
-            (uintptr_t)chanp,
+            "upcall send(chan=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
+            (uintptr_t)chan,
             (uintptr_t)sptr);
 
-    I(rt, chanp);
-    I(rt, sptr);
-
-    rust_chan *chan = *chanp;
     I(rt, chan);
+    I(rt, sptr);
 
     rust_port *port = chan->port;
     rt->log(LOG_MEM|LOG_COMM,
@@ -1628,18 +1625,8 @@ upcall_send(rust_proc *proc, rust_chan **chanp, void *sptr)
         I(rt, q->blocked == proc || !q->blocked);
         I(rt, q->port);
         I(rt, q->port == port);
-        // if the channel was already associated with a queue, make a new channel
-        // and update the reference in the caller
-        if (chan->q) {
-            chan = new (rt) rust_chan(proc, port);
-            rt->log(LOG_MEM|LOG_COMM,
-                    "lazily cloned channel 0x%" PRIxPTR " -> 0x%" PRIxPTR,
-                    (uintptr_t)*chanp, (uintptr_t)chan);
-            // update the caller's reference and drop the refcnt of the original
-            (*chanp)->refcnt--;
-            *chanp = chan;
-        }
         // we have resolved the right queue to send via
+        chan->proc = proc;
         chan->q = q;
     }
 
