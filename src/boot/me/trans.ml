@@ -1246,23 +1246,7 @@ let trans_visitor
       (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    let (addr, t) = ta in
-    let layouts = layout_rec abi entries in
-      begin
-        match t with
-            Il.StructTy elts ->
-              assert (Array.length layouts = Array.length elts)
-          | _ -> bug () "iter_rec_slots of non-struct referent ty"
-      end;
-      Array.iteri
-        begin
-          fun i (_, (_, layout)) ->
-            let (_, sub_slot) = entries.(i) in
-            let disp = layout.layout_offset in
-            let cell = wordptr_at (Il.addr_add_imm addr disp) in
-              f cell sub_slot curr_iso
-        end
-        layouts
+    iter_tup_slots ta (Array.map snd entries) f curr_iso
 
   and iter_tup_slots
       (ta:Il.typed_addr)
@@ -1270,23 +1254,10 @@ let trans_visitor
       (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    let (addr, t) = ta in
-    let layouts = layout_tup abi slots in
-      begin
-        match t with
-            Il.StructTy elts ->
-              assert (Array.length layouts = Array.length elts)
-          | _ -> bug () "iter_tup_slots of non-struct referent ty"
-      end;
-      Array.iteri
-        begin
-          fun i layout ->
-            let sub_slot = slots.(i) in
-            let disp = layout.layout_offset in
-            let cell = wordptr_at (Il.addr_add_imm addr disp) in
-              f cell sub_slot curr_iso
-        end
-        layouts
+    Array.iteri
+      (fun i slot ->
+         f (get_element_ptr (Il.Addr ta) i) slot curr_iso)
+      slots
 
   and iter_tag_slots
         (ta:Il.typed_addr)
