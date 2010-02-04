@@ -201,7 +201,7 @@ struct circ_buf {
 
 // Interrupt transparent queue, Schoen et. al, "On Interrupt-Transparent Synchronization
 // in an Embedded Object-Oriented Operating System", 2000. enqueue() is allowed to
-// interrupt enqueue()( and dequeue(), however, dequeue() is not allowed to interrupt
+// interrupt enqueue() and dequeue(), however, dequeue() is not allowed to interrupt
 // itself.
 
 struct itq_chain {
@@ -289,6 +289,7 @@ struct rust_rt {
     ptr_vec<rust_port> ports; // bug 541584
     ptr_vec<rust_chan> chans;
     int rval;
+    itq *writers; // waiting writers from other threads or processes
 
     rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs);
     ~rust_rt();
@@ -497,7 +498,7 @@ struct rust_chan : public rc_base {
  * each port.
  */
 
-struct rust_q {
+struct rust_q : public itq_chain {
     UT_hash_handle hh;
     rust_proc *proc;      // Proc owning this chan.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
