@@ -1260,15 +1260,18 @@ let trans_visitor
       let union = get_element_ptr cell 1 in
       let tmp = next_vreg_cell word_ty in
         mov tmp (Il.Cell tag);
-        for i = 0 to arr_max tag_keys
-        do
-          (* FIXME (bug 541540): A table-switch would be better. *)
-          (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
-          let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
-          let ttup = Hashtbl.find ttag tag_keys.(i) in
-            iter_tup_slots (need_addr_cell (get_variant_ptr union i)) ttup f curr_iso;
-            List.iter patch jmps
-        done
+        Array.iteri
+          begin
+            fun i key ->
+              (* FIXME (bug 541540): A table-switch would be better. *)
+              (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i)
+                                         ^ " == " ^ (Ast.fmt_to_str Ast.fmt_name key))));
+              let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
+              let ttup = Hashtbl.find ttag key in
+                iter_tup_slots (need_addr_cell (get_variant_ptr union i)) ttup f curr_iso;
+                List.iter patch jmps
+          end
+          tag_keys
 
   and get_iso_tag tiso =
     tiso.Ast.iso_group.(tiso.Ast.iso_index)
@@ -1596,31 +1599,36 @@ let trans_visitor
 
   and trans_copy_tag
       (initializing:bool)
-      (dst_ta:Il.typed_addr) (dst_tag:Ast.ty_tag)
-      (src_ta:Il.typed_addr) (src_tag:Ast.ty_tag)
+      (dst_ta:Il.typed_addr) (dst_ttag:Ast.ty_tag)
+      (src_ta:Il.typed_addr) (src_ttag:Ast.ty_tag)
       : unit =
-    let tag_keys = sorted_htab_keys dst_tag in
-    let (src_tag_val:Il.cell) = Il.Reg (next_vreg(), word_ty) in
-    let (dst_addr, _) = dst_ta in
-    let (src_addr, _) = src_ta in
-    let dst_tup_addr = Il.addr_add_imm dst_addr word_sz in
-    let src_tup_addr = Il.addr_add_imm src_addr word_sz in
-      mov src_tag_val (Il.Cell (word_at src_addr));
-      mov (word_at dst_addr) (Il.Cell src_tag_val);
-      for i = 0 to arr_max tag_keys do
-        (* FIXME (bug 541540): A table-switch would be better. *)
-        (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
-        let jmps = trans_compare Il.JNE (Il.Cell src_tag_val) (imm (Int64.of_int i)) in
-        let dst_ttup = Hashtbl.find dst_tag tag_keys.(i) in
-        let src_ttup = Hashtbl.find src_tag tag_keys.(i) in
-        let dst_rty = referent_type abi (Ast.TY_tup dst_ttup) in
-        let src_rty = referent_type abi (Ast.TY_tup src_ttup) in
-          trans_copy_tup
-            initializing
-            (dst_tup_addr, dst_rty) dst_ttup
-            (src_tup_addr, src_rty) src_ttup;
-          List.iter patch jmps
-      done
+    assert (src_ttag = dst_ttag);
+    let tag_keys = sorted_htab_keys dst_ttag in
+
+    let tmp = next_vreg_cell word_ty in
+    let dst_tag = get_element_ptr (Il.Addr dst_ta) 0 in
+    let src_tag = get_element_ptr (Il.Addr src_ta) 0 in
+
+    let dst_union = (get_element_ptr (Il.Addr dst_ta) 1) in
+    let src_union = (get_element_ptr (Il.Addr src_ta) 1) in
+
+      mov tmp (Il.Cell src_tag);
+      mov dst_tag (Il.Cell tmp);
+      Array.iteri
+        begin
+          fun i key ->
+            (* FIXME (bug 541540): A table-switch would be better. *)
+            (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i)
+                                       ^ " == " ^ (Ast.fmt_to_str Ast.fmt_name key))));
+            let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
+            let ttup = Hashtbl.find dst_ttag key in
+              trans_copy_tup
+                initializing
+                (need_addr_cell (get_variant_ptr dst_union i)) ttup
+                (need_addr_cell (get_variant_ptr src_union i)) ttup;
+              List.iter patch jmps
+        end
+        tag_keys
 
   and trans_copy_pair
       (_(*initializing*):bool)
