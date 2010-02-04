@@ -848,6 +848,10 @@ let lval_is_native_item (cx:ctxt) (lval:Ast.lval) : bool =
     Hashtbl.mem cx.ctxt_all_native_items referent
 ;;
 
+let lval_is_direct_fn (cx:ctxt) (lval:Ast.lval) : bool =
+  (lval_is_item cx lval) || (lval_is_native_item cx lval)
+;;
+
 let rec lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
   let base_id = lval_base_id lval in
   let referent = lval_to_referent cx base_id in

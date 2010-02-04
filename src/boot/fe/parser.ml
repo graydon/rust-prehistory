@@ -1332,6 +1332,17 @@ and desugar_expr
           (stmts, Ast.EXPR_atom at)
 
 
+and desugar_opt_expr_atom
+    (ps:pstate)
+    (po:pexp option)
+    : (Ast.stmt array * Ast.atom option) =
+  match po with
+      None -> ([| |], None)
+    | Some pexp ->
+        let (stmts, atom) = desugar_expr_atom ps pexp in
+          (stmts, Some atom)
+
+
 and desugar_expr_atom
     (ps:pstate)
     (pexp:pexp)
@@ -1349,6 +1360,7 @@ and desugar_expr_atom
       | PEXP_port
       | PEXP_chan _
       | PEXP_call _
+      | PEXP_bind _
       | PEXP_spawn _ ->
           let (_, tmp, decl_stmt) = build_tmp ps slot_auto apos bpos in
           let stmts = desugar_expr_init ps tmp pexp in
@@ -1367,10 +1379,6 @@ and desugar_expr_atom
 
       | PEXP_mutable _ ->
           raise (err "mutable keyword in atom context" ps)
-
-      | PEXP_bind _ ->
-          raise (err "unimplemented" ps)
-
 
 
 and desugar_expr_mode_atom
@@ -1394,6 +1402,12 @@ and desugar_expr_atoms
     (pexps:pexp array)
     : (Ast.stmt array * Ast.atom array) =
   arj1st (Array.map (desugar_expr_atom ps) pexps)
+
+and desugar_opt_expr_atoms
+    (ps:pstate)
+    (pexps:pexp option array)
+    : (Ast.stmt array * Ast.atom option array) =
+  arj1st (Array.map (desugar_opt_expr_atom ps) pexps)
 
 and desugar_expr_mode_atoms
     (ps:pstate)
@@ -1439,6 +1453,13 @@ and desugar_expr_init
           let fn_lval = atom_lval ps fn_atom in
           let call_stmt = span ps apos bpos (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
             Array.concat [ fn_stmts; arg_stmts; [| call_stmt |] ]
+
+      | PEXP_bind (fn, args) ->
+          let (fn_stmts, fn_atom) = desugar_expr_atom ps fn in
+          let (arg_stmts, arg_atoms) = desugar_opt_expr_atoms ps args in
+          let fn_lval = atom_lval ps fn_atom in
+          let bind_stmt = span ps apos bpos (Ast.STMT_bind (dst_lval, fn_lval, arg_atoms)) in
+            Array.concat [ fn_stmts; arg_stmts; [| bind_stmt |] ]
 
       | PEXP_spawn (realm, sub) ->
           begin
@@ -1507,10 +1528,6 @@ and desugar_expr_init
 
       | PEXP_mutable _ ->
           raise (err "mutable keyword in initialiser context" ps)
-
-      | PEXP_bind _ ->
-          raise (err "unimplemented" ps)
-
 
 
 and parse_expr (ps:pstate) : (Ast.stmt array * Ast.expr) =

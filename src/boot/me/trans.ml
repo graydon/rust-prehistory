@@ -1859,6 +1859,7 @@ let trans_visitor
 
   and trans_call_fn
       (initializing:bool)
+      ((*direct*)_:bool)
       (dst:Ast.lval)
       (flv:Ast.lval)
       (tsig:Ast.ty_sig)
@@ -2105,7 +2106,7 @@ let trans_visitor
             let init = maybe_init stmt.id "call" dst in
             match lval_ty cx flv with
                 Ast.TY_fn (tsig, _) ->
-                  trans_call_fn init dst flv tsig args
+                  trans_call_fn init (lval_is_direct_fn cx flv) dst flv tsig args
 
               | Ast.TY_pred _ ->
                   let (dst_cell, _) = trans_lval_maybe_init init dst
@@ -2117,6 +2118,9 @@ let trans_visitor
 
               | _ -> bug () "Calling unexpected lval."
           end
+
+      | Ast.STMT_bind ((*dst*)_, (*flv*)_, (*args*)_) ->
+          bugi cx stmt.id "bind not yet implemented"
 
       | Ast.STMT_init_rec (dst, atab) ->
           let (slot_cell, slot) = trans_lval_init dst in
