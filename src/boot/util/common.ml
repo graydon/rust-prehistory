@@ -203,18 +203,6 @@ let atab_search (atab:('a * 'b) array) (a:'a) : ('b option) =
   in
     step 0
 
-let atab_idx (atab:'a array) (a:'a) : int =
-  let lim = Array.length atab in
-  let rec step i =
-    if i = lim
-    then failwith "Not found"
-    else
-      if atab.(i) = a
-      then i
-      else step (i+1)
-  in
-    step 0
-
 let atab_find (atab:('a * 'b) array) (a:'a) : 'b =
   match atab_search atab a with
       None -> failwith "Not found"
@@ -290,6 +278,13 @@ let arr_search (a:'a array) (f:int -> 'a -> 'b option) : 'b option =
       None
   in
     iter 0
+;;
+
+let arr_idx (arr:'a array) (a:'a) : int =
+  let find i v = if v = a then Some i else None in
+    match arr_search arr find with
+        None -> failwith "Not found"
+      | Some i -> i
 ;;
 
 let arr_map_partial (a:'a array) (f:'a -> 'b option) : 'b array =

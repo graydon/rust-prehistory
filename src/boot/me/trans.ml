@@ -380,7 +380,7 @@ let trans_visitor
     match (base_ty, comp) with
         (Ast.TY_rec entries,
          Ast.COMP_named (Ast.COMP_ident id)) ->
-          let i = atab_idx (Array.map fst entries) id in
+          let i = arr_idx (Array.map fst entries) id in
             (get_element_ptr cell i, snd entries.(i))
 
       | (Ast.TY_tup entries,
@@ -413,7 +413,7 @@ let trans_visitor
       | (Ast.TY_mod (_, mtis),
          Ast.COMP_named (Ast.COMP_ident id)) ->
           let sorted_idents = sorted_htab_keys mtis in
-          let i = atab_idx sorted_idents id in
+          let i = arr_idx sorted_idents id in
             (* A mod is a pair of pointers [mod_table, binding];
              * we dereference the first cell of this pair and then
              * return the address of the Nth table-item. Each table
@@ -2360,24 +2360,16 @@ let trans_visitor
     in
     let slots = Array.map (fun sloti -> Hashtbl.find cx.ctxt_all_slots sloti.id) header_tup in
     let tag_keys = sorted_htab_keys ttag in
-    let i = ref (-1) in
-      begin
-        for j = 0 to arr_max tag_keys do
-          if tag_keys.(j) = (Ast.NAME_base (Ast.BASE_ident n))
-          then i := j
-        done;
-        if (!i) = -1
-        then bugi cx tagid "error sorting tag";
-      end;
-      let _ = log cx "tag variant: %s -> tag value #%d" n (!i) in
-      let (out_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
-      let tag_cell = word_at out_addr in
-      let rty = referent_type abi (Ast.TY_tup slots) in
-      let src_ta = (fp_imm arg0_disp, rty) in
-      let dst_ta = ((Il.addr_add_imm out_addr word_sz), rty) in
+    let i = arr_idx tag_keys (Ast.NAME_base (Ast.BASE_ident n)) in
+      let _ = log cx "tag variant: %s -> tag value #%d" n i in
+      let out_cell = Il.Addr (deref (Il.Addr (ptr_at (fp_imm out_addr_disp) (Ast.TY_tag ttag)))) in
+      let tag_cell = get_element_ptr out_cell 0 in
+      let union_cell = get_element_ptr out_cell 1 in
+      let dst_ta = need_addr_cell (get_variant_ptr union_cell i) in
+      let src_ta = (fp_imm arg0_disp, snd dst_ta) in
         (* A clever compiler will inline this. We are not clever. *)
-        iflog (fun _ -> annotate (Printf.sprintf "write tag #%d" (!i)));
-        mov tag_cell (imm (Int64.of_int (!i)));
+        iflog (fun _ -> annotate (Printf.sprintf "write tag #%d" i));
+        mov tag_cell (imm (Int64.of_int i));
         iflog (fun _ -> annotate "copy tag-content tuple");
         trans_copy_tup true
           dst_ta slots
