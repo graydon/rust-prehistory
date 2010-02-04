@@ -390,7 +390,6 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
 
 struct rust_proc {
     // fields known to the compiler
-    rust_rt *rt;
     stk_seg *stk;
     uintptr_t runtime_sp;      // runtime sp while proc running.
     uintptr_t rust_sp;         // saved sp when not running.
@@ -399,6 +398,7 @@ struct rust_proc {
 
     // fields known only to the runtime
     proc_state_t state;
+    rust_rt *rt;
     uintptr_t fn;
     rust_q *queues;
     uintptr_t* dptr;           // rendezvous pointer for send/recv
@@ -910,13 +910,13 @@ rust_proc::rust_proc(rust_rt *rt,
                      uintptr_t spawnee_fn,
                      size_t callsz)
     :
-      rt(rt),
       stk(new_stk(rt, 0)),
       runtime_sp(0),
       rust_sp(stk->limit),
       refcnt(1),
       gc_alloc_chain(0),
       state(proc_state_running),
+      rt(rt),
       fn(spawnee_fn),
       queues(NULL),
       dptr(0),
