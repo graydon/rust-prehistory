@@ -202,6 +202,56 @@ struct circ_buf {
     void shift(void *dst);
 };
 
+// Interrupt transparent queue, Schoen et. al, "On Interrupt-Transparent Synchronization
+// in an Embedded Object-Oriented Operating System", 2000. enqueue() is allowed to
+// interrupt enqueue()( and dequeue(), however, dequeue() is not allowed to interrupt
+// itself.
+
+struct itq_chain {
+    itq_chain *next;
+};
+
+class itq : public itq_chain {
+    itq_chain *tail;
+public:
+    itq();
+    void enqueue(itq_chain *item);
+    itq_chain *dequeue();
+};
+
+itq::itq() :
+    tail(this)
+{
+}
+
+void
+itq::enqueue(itq_chain *item)
+{
+    item->next = (itq_chain *)0;
+    itq_chain *last = tail;
+    tail = item;
+    while (last->next)
+        last = last->next;
+    last->next = item;
+}
+
+itq_chain *
+itq::dequeue()
+{
+    itq_chain *item = next;
+    if (item && !(next = item->next)) {
+        tail = (itq_chain *)this;
+        if (item->next) {
+            itq_chain *lost = item->next;
+            itq_chain *help;
+            do {
+                help = lost->next;
+                enqueue(lost);
+            } while ((lost = help) != (itq_chain *)0);
+        }
+    }
+    return item;
+}
 
 /* Rust types vec and str look identical from our perspective. */
 
