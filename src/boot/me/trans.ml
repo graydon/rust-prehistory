@@ -91,6 +91,7 @@ let trans_visitor
   let emitter _ = Stack.top emitters in
   let emit q = Il.emit (emitter()) q in
   let next_vreg _ = Il.next_vreg (emitter()) in
+  let next_vreg_cell t = Il.next_vreg_cell (emitter()) t in
   let mark _ : quad_idx = (emitter()).Il.emit_pc in
   let patch_existing (jmp:quad_idx) (targ:quad_idx) : unit =
     Il.patch_jump (emitter()) jmp targ
@@ -197,7 +198,7 @@ let trans_visitor
 
   let alias (ta:Il.typed_addr) : Il.operand =
     let addr, ty = ta in
-    let vreg_cell = Il.next_vreg_cell (emitter()) (Il.AddrTy ty) in
+    let vreg_cell = next_vreg_cell (Il.AddrTy ty) in
       begin
         match ty with
             Il.NilTy -> ()
@@ -682,7 +683,7 @@ let trans_visitor
       let binding_ptr_cell = Il.Addr (binding_ptr_addr, binding_ptr_rty) in
 
         (* Load first cell of pair with static item addr.*)
-      let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+      let tmp = next_vreg_cell Il.voidptr_t in
         lea tmp item_addr;
         mov (wordptr_at item_ptr_addr) (Il.Cell tmp);
 
@@ -690,7 +691,7 @@ let trans_visitor
         trans_malloc binding_ptr_cell sz;
 
         (* Copy args into the binding tuple. *)
-        let dst_ptr = Il.next_vreg_cell (emitter()) (need_scalar_ty binding_ptr_rty) in
+        let dst_ptr = next_vreg_cell (need_scalar_ty binding_ptr_rty) in
           mov dst_ptr (Il.Cell binding_ptr_cell);
           let dst = Il.Addr (deref dst_ptr) in
           let refcnt_cell = get_element_ptr dst 0 in
@@ -793,7 +794,7 @@ let trans_visitor
        * just a way to move drop+free out of leaf code. 
        *)
       let (body_addr, _) = deref_imm (Il.Addr arg) exterior_rc_body_off in
-      let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+      let vr = next_vreg_cell Il.voidptr_t in
         lea vr body_addr;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "in free-glue, calling drop-glue";
@@ -1257,7 +1258,7 @@ let trans_visitor
       let cell = Il.Addr ta in
       let tag = get_element_ptr cell 0 in
       let union = get_element_ptr cell 1 in
-      let tmp = Il.next_vreg_cell (emitter()) word_ty in
+      let tmp = next_vreg_cell word_ty in
         mov tmp (Il.Cell tag);
         for i = 0 to arr_max tag_keys
         do
@@ -1372,7 +1373,7 @@ let trans_visitor
             let null_cell_jump = mark () in
               emit (Il.jmp Il.JE Il.CodeNone);
               let gc_word = exterior_gc_ctrl_cell cell in
-              let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+              let tmp = next_vreg_cell Il.voidptr_t in
                 (* if this has been marked already, jump to exit.*)
                 emit (Il.binary Il.AND tmp (Il.Cell gc_word) one);
                 let already_marked_jump = mark () in
@@ -1392,7 +1393,7 @@ let trans_visitor
             (iflog (fun _ -> annotate ("mark interior slot " ^
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
             let (addr, _) = need_addr_cell cell in
-            let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+            let tmp = next_vreg_cell Il.voidptr_t in
             let ty = maybe_iso curr_iso ty in
             let curr_iso = maybe_enter_iso ty curr_iso in
               lea tmp addr;
@@ -1462,7 +1463,7 @@ let trans_visitor
             (iflog (fun _ -> annotate ("drop interior slot " ^
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
             let (addr, _) = need_addr_cell cell in
-            let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+            let vr = next_vreg_cell Il.voidptr_t in
             let ty = maybe_iso curr_iso ty in
             let curr_iso = maybe_enter_iso ty curr_iso in
               lea vr addr;
@@ -1496,7 +1497,7 @@ let trans_visitor
               iflog (fun _ -> annotate "init GC exterior: load control word");
               let ctrl = exterior_gc_ctrl_cell cell in
               let fix = get_drop_glue (slot_ty slot) None in
-              let tmp = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+              let tmp = next_vreg_cell Il.voidptr_t in
               let rc = exterior_rc_cell cell in
                 mov rc one;
                 lea tmp (Il.Abs (Asm.M_POS fix));
@@ -1983,7 +1984,7 @@ let trans_visitor
         extra_args
 
   and call_code (code:Il.code) : unit =
-    let vr = Il.next_vreg_cell (emitter()) Il.voidptr_t in
+    let vr = next_vreg_cell Il.voidptr_t in
       emit (Il.call vr code);
 
   and trans_call
