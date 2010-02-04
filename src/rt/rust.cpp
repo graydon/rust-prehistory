@@ -54,9 +54,6 @@ struct rust_chan;
 struct rust_q;
 struct rust_rt;
 
-struct rust_str;
-struct rust_vec;
-
 static uint32_t const LOG_ALL = 0xffffffff;
 static uint32_t const LOG_ERR =        0x1;
 static uint32_t const LOG_MEM =        0x2;
@@ -253,20 +250,29 @@ itq::dequeue()
     return item;
 }
 
-/* Rust types vec and str look identical from our perspective. */
+// Every reference counted object should derive from this base class.
+struct rc_base {
+    size_t refcnt;
 
-struct rust_vec {
-    size_t refcount;
+    rc_base();
+    ~rc_base();
+};
+
+// Rust types vec and str look identical from our perspective.
+
+struct rust_vec : public rc_base {
     size_t alloc;
     size_t fill;
     uint8_t data[];
 };
 
-struct rust_str {
-    size_t refcnt;
+struct rust_str : public rc_base {
     size_t alloc;
     size_t fill;
-    uint8_t data[];         /* C99 "flexible array" element. */
+    uint8_t data[];         // C99 "flexible array" element.
+
+    rust_str(size_t alloc, size_t fill, char const *s);
+    ~rust_str();
 };
 
 struct rust_rt {
@@ -306,6 +312,10 @@ struct rust_rt {
     void reap_dead_procs();
     rust_proc *sched();
 };
+
+inline void *operator new(size_t sz, void *mem) {
+    return mem;
+}
 
 inline void *operator new(size_t sz, rust_rt *rt) {
     return rt->malloc(sz);
@@ -388,9 +398,8 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
  *
  */
 
-struct rust_proc {
+struct rust_proc : public rc_base {
     // fields known to the compiler
-    size_t refcnt;
     stk_seg *stk;
     uintptr_t runtime_sp;      // runtime sp while proc running.
     uintptr_t rust_sp;         // saved sp when not running.
@@ -443,10 +452,7 @@ struct rust_proc {
     frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
 };
 
-struct rust_port {
-    // fields known to the compiler
-    size_t refcnt;
-
+struct rust_port : public rc_base {
     // fields known only to the runtime
     rust_proc *proc; // port might outlive proc, so don't rely on it in destructor
     rust_rt *rt;
@@ -464,10 +470,7 @@ struct rust_port {
     }
 };
 
-struct rust_chan {
-    // fields known to the compiler
-    size_t refcnt;
-
+struct rust_chan : public rc_base {
     // fields known only to the runtime
     rust_rt* rt;
     rust_port* port;
@@ -488,9 +491,6 @@ struct rust_chan {
 };
 
 /*
- * The value held in a rust 'chan' slot is actually a rust_port*,
- * with liveness of the chan indicated by weak_refcnt.
- *
  * Inside each proc, there is a uthash hashtable that maps ports to
  * rust_q* values, below. The table enforces uniqueness of the
  * queues: one proc has exactly one outgoing queue (buffer) for
@@ -701,11 +701,35 @@ circ_buf::shift(void *dst)
     }
 }
 
-/* Ports */
+// Reference counted objects
+
+rc_base::rc_base() :
+    refcnt(1)
+{
+}
+
+rc_base::~rc_base()
+{
+}
+
+// Strings
+
+rust_str::rust_str(size_t alloc, size_t fill, char const *s) :
+    alloc(alloc),
+    fill(fill)
+{
+    if (s)
+        memcpy(&data[0], s, fill);
+}
+
+rust_str::~rust_str()
+{
+}
+
+// Ports
 
 rust_port::rust_port(rust_proc *proc, size_t unit_sz)
-    : refcnt(1),
-      proc(proc),
+    : proc(proc),
       rt(proc->rt),
       unit_sz(unit_sz),
       writers(proc->rt)
@@ -730,7 +754,6 @@ rust_port::~rust_port()
 }
 
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
-    refcnt(1),
     rt(proc->rt),
     port(port),
     proc(NULL),
@@ -910,7 +933,6 @@ rust_proc::rust_proc(rust_rt *rt,
                      uintptr_t spawnee_fn,
                      size_t callsz)
     :
-      refcnt(1),
       stk(new_stk(rt, 0)),
       runtime_sp(0),
       rust_sp(stk->limit),
@@ -1804,12 +1826,8 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
     LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
     size_t alloc = next_power_of_two(fill);
-    rust_str *st = (rust_str*) rt->malloc(sizeof(rust_str) + alloc);
-    st->refcnt = 1;
-    st->fill = fill;
-    st->alloc = alloc;
-    if (s)
-        memcpy(&st->data[0], s, fill);
+    void *mem = rt->malloc(sizeof(rust_str) + alloc);
+    rust_str *st = new (mem) rust_str(alloc, fill, s);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
             s, fill, st);
