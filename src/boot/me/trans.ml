@@ -462,8 +462,7 @@ let trans_visitor
     let return_item (item:Ast.mod_item)
         : (Il.cell * Ast.slot) =
       let ty = Hashtbl.find cx.ctxt_all_item_types item.id in
-      let slot = interior_slot ty
-      in
+      let slot = interior_slot ty in
         match item.node with
             Ast.MOD_ITEM_fn _ ->
               return_fixup (get_fn_fixup cx item.id) slot
@@ -671,21 +670,21 @@ let trans_visitor
       let binding_ptr_rty = slot_referent_type abi (exterior_slot ty) in
       let sz = exterior_rc_allocation_size (exterior_slot ty) in
 
+      let mod_ty = Hashtbl.find cx.ctxt_all_item_types mod_id in
+      let mod_cell = Il.Addr (deref (Il.Addr (ptr_at (fp_imm out_addr_disp) mod_ty))) in
 
-      let (pair_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
         (* 
          * pair_addr now points to the pair [item,binding*]
          *)
-      let item_ptr_addr = Il.addr_add_imm pair_addr (word_n Abi.binding_field_item) in
+      let item_ptr_cell = get_element_ptr mod_cell 0 in
       let item_fixup = get_mod_fixup cx mod_id in
       let item_addr = fixup_to_addr abi.Abi.abi_has_abs_data item_fixup Il.OpaqueTy in
-      let binding_ptr_addr = Il.addr_add_imm pair_addr (word_n Abi.binding_field_binding) in
-      let binding_ptr_cell = Il.Addr (binding_ptr_addr, binding_ptr_rty) in
+      let binding_ptr_cell = get_element_ptr mod_cell 1 in
 
         (* Load first cell of pair with static item addr.*)
       let tmp = next_vreg_cell Il.voidptr_t in
         lea tmp item_addr;
-        mov (wordptr_at item_ptr_addr) (Il.Cell tmp);
+        mov item_ptr_cell (Il.Cell tmp);
 
         (* Load second cell of pair with pointer to fresh binding tuple.*)
         trans_malloc binding_ptr_cell sz;
