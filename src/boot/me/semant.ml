@@ -1407,12 +1407,14 @@ let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
     Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
 ;;
 
-let layout_fn_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
-  let slots = tsig.Ast.sig_input_slots in
+let fn_call_tup (abi:Abi.abi) (inputs:Ast.ty_tup) : Ast.ty_tup =
   let proc_ptr = word_slot abi in
   let out_ptr = word_slot abi in
-  let slots' = Array.append [| out_ptr; proc_ptr |] slots in
-    layout_tup abi slots'
+    Array.append [| out_ptr; proc_ptr |] inputs
+;;
+
+let layout_fn_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
+    layout_tup abi (fn_call_tup abi tsig.Ast.sig_input_slots)
 ;;
 
 let layout_pred_call_tup (abi:Abi.abi) (tpred:Ast.ty_pred) : (layout array) =

@@ -640,9 +640,8 @@ let trans_visitor
        * to drop the slots associated with tsig, which are already on the stack
        * as though we put them there in a call, then assume the 'exited' state.
        *)
-      let arg_layouts = layout_fn_call_tup abi tsig in
       let in_slots = tsig.Ast.sig_input_slots in
-        drop_arg_slots in_slots arg_layouts;
+        drop_arg_slots in_slots;
         iflog (fun _ -> annotate "assume 'exited' state");
         trans_void_upcall "upcall_exit" [| |];
         capture_emitted_glue "proc glue" fix spill g;
@@ -1032,7 +1031,7 @@ let trans_visitor
     let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
 
       iflog (fun _ -> annotate "spawn proc: copy args");
-      copy_fn_args proc_cell in_slots arg_layouts args [||];
+      copy_fn_args proc_cell in_slots args [||];
       iflog (fun _ -> annotate "spawn proc: upcall");
       let upcall = "upcall_spawn_" ^
         match realm with
@@ -1869,9 +1868,8 @@ let trans_visitor
       trans_lval_full false flv abi.Abi.abi_has_abs_code
     in
     let in_slots = tsig.Ast.sig_input_slots in
-    let arg_layouts = layout_fn_call_tup abi tsig in
       trans_call initializing (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots arg_layouts args [||]
+        dst_cell fn_cell in_slots args [||]
 
   and trans_call_mod
       (initializing:bool)
@@ -1896,9 +1894,8 @@ let trans_visitor
     in
     let fn_cell = Il.Addr (fn_addr, Il.CodeTy) in
     let (in_slots, _) = tmod_hdr in
-    let arg_layouts = layout_mod_call_tup abi tmod_hdr in
       trans_call initializing (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots arg_layouts args [||]
+        dst_cell fn_cell in_slots args [||]
 
   and trans_call_pred
       (dst_cell:Il.cell)
@@ -1914,10 +1911,9 @@ let trans_visitor
         | _ -> bug () "Calling non-predicate."
     in
     let (in_slots, _) = tpred in
-    let arg_layouts = layout_pred_call_tup abi tpred in
       iflog (fun _ -> annotate "predicate call");
       trans_call true (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots arg_layouts args [||];
+        dst_cell fn_cell in_slots args [||];
 
   and trans_call_pred_and_check
       (constr:Ast.constr)
@@ -1961,24 +1957,23 @@ let trans_visitor
   and copy_fn_args
       (output_cell:Il.cell)
       (arg_slots:Ast.slot array)
-      (arg_layouts:layout array)
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
     assert (Array.length args == Array.length arg_slots);
-    let n_layouts = Array.length arg_layouts in
+    let n_args = Array.length args in
     let n_extras = Array.length extra_args in
-      assert (n_layouts == ((Array.length args) + 2));
-      trans_arg0 (implicit_arg_cell arg_layouts 0) output_cell;
-      trans_arg1 (implicit_arg_cell arg_layouts 1);
+    let arg_tup = arg_tup_cell arg_slots in
+      trans_arg0 (get_element_ptr arg_tup 0) output_cell;
+      trans_arg1 (get_element_ptr arg_tup 1);
       Array.iteri
         begin
           fun i slot ->
             iflog (fun _ ->
                      annotate
                        (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
-                          i n_layouts n_extras));
-            trans_argN (arg_cell arg_slots arg_layouts i) slot args.(i)
+                          i n_args n_extras));
+            trans_argN (get_element_ptr arg_tup (2+i)) slot args.(i)
         end
         arg_slots;
       Array.iteri
@@ -1987,7 +1982,7 @@ let trans_visitor
             iflog (fun _ ->
                      annotate (Printf.sprintf "fn-call extra-arg %d of %d"
                                  i n_extras));
-            mov (extra_arg_cell arg_layouts i) operand
+            mov (extra_arg_cell arg_tup i) operand
         end
         extra_args
 
@@ -2001,12 +1996,11 @@ let trans_visitor
       (output_cell:Il.cell)
       (callee_cell:Il.cell)
       (arg_slots:Ast.slot array)
-      (arg_layouts:layout array)
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args output_cell arg_slots arg_layouts args  extra_args;
+      copy_fn_args output_cell arg_slots args  extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
@@ -2014,42 +2008,22 @@ let trans_visitor
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
       call_code (code_of_cell callee_cell);
-      drop_arg_slots arg_slots arg_layouts
+      drop_arg_slots arg_slots
 
-  and implicit_arg_cell
-      (arg_layouts:layout array)
-      (arg:int)
-      : Il.cell =
-    assert (arg < 2);
-    let arg_addr = sp_imm arg_layouts.(arg).layout_offset in
-    let arg_referent_ty = Il.ScalarTy (Il.voidptr_t) in
-      Il.Addr (arg_addr, arg_referent_ty)
-
-  and arg_cell
+  and arg_tup_cell
       (arg_slots:Ast.slot array)
-      (arg_layouts:layout array)
-      (arg:int)
       : Il.cell =
-    (* NB: first 2 layouts account for implicit args. *)
-    let arg_addr = sp_imm arg_layouts.(2 + arg).layout_offset in
-    let arg_referent_ty = slot_referent_type abi arg_slots.(arg) in
-      Il.Addr (arg_addr, arg_referent_ty)
+    let addr = sp_imm 0L in
+    let ty = Ast.TY_tup (fn_call_tup abi arg_slots) in
+    let rty = referent_type abi ty in
+      Il.Addr (addr, rty)
 
   and extra_arg_cell
-      (arg_layouts:layout array)
+      (arg_tup:Il.cell)
       (arg:int)
       : Il.cell =
-    let n_args = Array.length arg_layouts in
-    let extra_args_start =
-      if n_args > 0
-      then
-        let last_arg_layout = arg_layouts.(n_args - 1) in
-          Int64.add
-            last_arg_layout.layout_offset
-            last_arg_layout.layout_size
-      else
-        word_n 2
-    in
+    let (_, rty) = need_addr_cell arg_tup in
+    let extra_args_start = Il.referent_ty_size word_bits rty in
     let arg_off = Int64.add extra_args_start (word_n arg) in
     let arg_addr = sp_imm arg_off in
     let arg_referent_ty = Il.ScalarTy (Il.voidptr_t) in
@@ -2057,11 +2031,11 @@ let trans_visitor
 
   and drop_arg_slots
       (arg_slots:Ast.slot array)
-      (arg_layouts:layout array)
       : unit =
+    let arg_tup = arg_tup_cell arg_slots in
     for i = 0 to arr_max arg_slots do
       iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
-      drop_slot (arg_cell arg_slots arg_layouts i) arg_slots.(i) None
+      drop_slot (get_element_ptr arg_tup (2+i)) arg_slots.(i) None
     done
 
 
