@@ -203,16 +203,15 @@ let atab_search (atab:('a * 'b) array) (a:'a) : ('b option) =
   in
     step 0
 
-let atab_idx (atab:('a * 'b) array) (a:'a) : int =
+let atab_idx (atab:'a array) (a:'a) : int =
   let lim = Array.length atab in
   let rec step i =
     if i = lim
     then failwith "Not found"
     else
-      let (k,_) = atab.(i) in
-        if k = a
-        then i
-        else step (i+1)
+      if atab.(i) = a
+      then i
+      else step (i+1)
   in
     step 0
 

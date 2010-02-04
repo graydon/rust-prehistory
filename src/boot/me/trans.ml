@@ -185,6 +185,16 @@ let trans_visitor
           (Il.string_of_cell abi.Abi.abi_str_of_hardreg addr_cell)
   in
 
+  let get_variant_ptr (addr_cell:Il.cell) (i:int) : Il.cell =
+    match addr_cell with
+        Il.Addr (addr, Il.UnionTy elts) when i >= 0 && i < (Array.length elts) ->
+          assert ((Array.length elts) != 0);
+          Il.Addr (addr, elts.(i))
+
+      | _ -> bug () "get_variant_ptr %d on cell %s" i
+          (Il.string_of_cell abi.Abi.abi_str_of_hardreg addr_cell)
+  in
+
   let alias (ta:Il.typed_addr) : Il.operand =
     let addr, ty = ta in
     let vreg_cell = Il.next_vreg_cell (emitter()) (Il.AddrTy ty) in
@@ -369,7 +379,7 @@ let trans_visitor
     match (base_ty, comp) with
         (Ast.TY_rec entries,
          Ast.COMP_named (Ast.COMP_ident id)) ->
-          let i = atab_idx entries id in
+          let i = atab_idx (Array.map fst entries) id in
             (get_element_ptr cell i, snd entries.(i))
 
       | (Ast.TY_tup entries,
@@ -402,23 +412,18 @@ let trans_visitor
       | (Ast.TY_mod (_, mtis),
          Ast.COMP_named (Ast.COMP_ident id)) ->
           let sorted_idents = sorted_htab_keys mtis in
-          let find i ident = if ident = id then Some i else None in
-            begin
-              match arr_search sorted_idents find with
-                  None -> bug () "unknown module item '%s'" id
-                | Some i ->
-                    (* A mod is a pair of pointers [mod_table, binding];
-                     * we dereference the first cell of this pair and then
-                     * return the address of the Nth table-item. Each table
-                     * item is itself a pair. *)
-                    let (table_addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
-                    let off = word_n (i * 2) in
-                    let item_addr = Il.addr_add_imm table_addr off in
-                    let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
-                    let item_referent_ty = referent_type abi item_ty in
-                      (Il.Addr (item_addr, item_referent_ty), interior_slot item_ty)
-            end
-
+          let i = atab_idx sorted_idents id in
+            (* A mod is a pair of pointers [mod_table, binding];
+             * we dereference the first cell of this pair and then
+             * return the address of the Nth table-item. Each table
+             * item is itself a pair. *)
+          let (table_addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
+          let off = word_n (i * 2) in
+          let item_addr = Il.addr_add_imm table_addr off in
+          let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
+          let item_referent_ty = referent_type abi item_ty in
+            (Il.Addr (item_addr, item_referent_ty), interior_slot item_ty)
+ 
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
 
   (* 
@@ -448,10 +453,9 @@ let trans_visitor
 
     let return_fixup (fix:fixup) (slot:Ast.slot)
         : (Il.cell * Ast.slot) =
-      let addr = (fixup_to_addr abs_ok fix
-                    (slot_referent_type abi slot))
-      in
-        (Il.Addr (addr, (slot_referent_type abi slot)), slot)
+      let rty = slot_referent_type abi slot in
+      let addr = fixup_to_addr abs_ok fix rty in
+        (Il.Addr (addr, rty), slot)
     in
 
     let return_item (item:Ast.mod_item)
@@ -1249,19 +1253,21 @@ let trans_visitor
         (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
         (curr_iso:Ast.ty_iso option)
         : unit =
-    let tag_keys = sorted_htab_keys ttag in
-    let (tag:Il.cell) = Il.Reg (next_vreg(), word_ty) in
-    let (addr, _) = ta in
-    let tup_addr = Il.addr_add_imm addr word_sz in
-      mov tag (Il.Cell (word_at addr));
-      for i = 0 to arr_max tag_keys do
-        (* FIXME (bug 541540): A table-switch would be better. *)
-        (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
-        let jmps = trans_compare Il.JNE (Il.Cell tag) (imm (Int64.of_int i)) in
-        let ttup = Hashtbl.find ttag tag_keys.(i) in
-          iter_tup_slots (tup_addr, referent_type abi (Ast.TY_tup ttup)) ttup f curr_iso;
-          List.iter patch jmps
-      done
+      let tag_keys = sorted_htab_keys ttag in
+      let cell = Il.Addr ta in
+      let tag = get_element_ptr cell 0 in
+      let union = get_element_ptr cell 1 in
+      let tmp = Il.next_vreg_cell (emitter()) word_ty in
+        mov tmp (Il.Cell tag);
+        for i = 0 to arr_max tag_keys
+        do
+          (* FIXME (bug 541540): A table-switch would be better. *)
+          (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i))));
+          let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
+          let ttup = Hashtbl.find ttag tag_keys.(i) in
+            iter_tup_slots (need_addr_cell (get_variant_ptr union i)) ttup f curr_iso;
+            List.iter patch jmps
+        done
 
   and get_iso_tag tiso =
     tiso.Ast.iso_group.(tiso.Ast.iso_index)
