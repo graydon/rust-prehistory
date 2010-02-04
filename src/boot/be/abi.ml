@@ -23,10 +23,10 @@ let string_to_nabi (a:string) (indirect:bool) : nabi option =
 
 (* Word offsets for structure fields in rust.h. *)
 
-let proc_field_stk = 0;;
+let proc_field_refcnt = 0;;
+let proc_field_stk = proc_field_refcnt + 1;;
 let proc_field_runtime_sp = proc_field_stk + 1;;
 let proc_field_rust_sp = proc_field_runtime_sp + 1;;
-let proc_field_refcnt = proc_field_rust_sp + 1;;
 let proc_field_gc_alloc_chain = proc_field_refcnt + 1;;
 
 let frame_glue_fns_field_mark = 0;;

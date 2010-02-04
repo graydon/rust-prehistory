@@ -390,10 +390,10 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
 
 struct rust_proc {
     // fields known to the compiler
+    size_t refcnt;
     stk_seg *stk;
     uintptr_t runtime_sp;      // runtime sp while proc running.
     uintptr_t rust_sp;         // saved sp when not running.
-    size_t refcnt;
     uintptr_t gc_alloc_chain;  // linked list of GC allocations.
 
     // fields known only to the runtime
@@ -910,10 +910,10 @@ rust_proc::rust_proc(rust_rt *rt,
                      uintptr_t spawnee_fn,
                      size_t callsz)
     :
+      refcnt(1),
       stk(new_stk(rt, 0)),
       runtime_sp(0),
       rust_sp(stk->limit),
-      refcnt(1),
       gc_alloc_chain(0),
       state(proc_state_running),
       rt(rt),
