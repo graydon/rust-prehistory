@@ -392,7 +392,6 @@ struct rust_proc {
     // fields known to the compiler
     rust_rt *rt;
     stk_seg *stk;
-    uintptr_t fn;
     uintptr_t runtime_sp;      // runtime sp while proc running.
     uintptr_t rust_sp;         // saved sp when not running.
     size_t refcnt;
@@ -400,6 +399,7 @@ struct rust_proc {
 
     // fields known only to the runtime
     proc_state_t state;
+    uintptr_t fn;
     rust_q *queues;
     uintptr_t* dptr;           // rendezvous pointer for send/recv
     rust_proc *spawner;        // parent-link
@@ -912,12 +912,12 @@ rust_proc::rust_proc(rust_rt *rt,
     :
       rt(rt),
       stk(new_stk(rt, 0)),
-      fn(spawnee_fn),
       runtime_sp(0),
       rust_sp(stk->limit),
       refcnt(1),
       gc_alloc_chain(0),
       state(proc_state_running),
+      fn(spawnee_fn),
       queues(NULL),
       dptr(0),
       spawner(spawner),
