@@ -760,7 +760,6 @@ rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     proc(NULL),
     q(NULL)
 {
-    ++(port->refcnt);
     rt->chans.push(this);
 }
 
@@ -1552,6 +1551,7 @@ upcall_new_chan(rust_proc *proc, rust_port *port)
             "upcall_new_chan(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
             (uintptr_t)proc, port);
     I(rt, port);
+    ++(port->refcnt);
     return new (rt) rust_chan(proc, port);
 }
 
