@@ -1300,9 +1300,7 @@ let trans_visitor
                * points to an item and one of which is a (possible)
                * pointer to an exterior allocation.
                *)
-              let (addr, _) = addr in
-              let binding_field_addr = Il.addr_add_imm addr (word_n Abi.binding_field_binding) in
-              let binding_field_cell = wordptr_at binding_field_addr in
+              let binding_field_cell = get_element_ptr (Il.Addr addr) 1 in
                 emit (Il.cmp (Il.Cell binding_field_cell) zero);
                 let null_jmp = mark() in
                   emit (Il.jmp Il.JE Il.CodeNone);
