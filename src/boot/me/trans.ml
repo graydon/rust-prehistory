@@ -830,18 +830,12 @@ let trans_visitor
                               abi.Abi.abi_has_abs_code
                               fix Il.CodeTy)
     in
-    let tsig = { Ast.sig_input_slots = [| interior_slot (Ast.TY_mach word_ty_mach) |];
-                 Ast.sig_input_constrs = [| |];
-                 Ast.sig_output_slot = interior_slot Ast.TY_nil }
-    in
-    let arg_layouts = layout_fn_call_tup abi tsig in
-    let arg_n n = sp_imm arg_layouts.(n).layout_offset in
-    let arg_n_cell n = Il.Addr (arg_n n, Il.OpaqueTy) in
+    let arg_tup = arg_tup_cell [| interior_slot (Ast.TY_mach word_ty_mach) |] in
       (* Arg0 is omitted as there's no output-slot for gc glue. *)
       (* Arg1 is process-pointer, as usual. *)
       (* Arg2 is the sole pointer we pass in. Hard-wire its address here. *)
-      mov (arg_n_cell 1) (Il.Cell abi.Abi.abi_pp_cell);
-      mov (arg_n_cell 2) (Il.Cell arg);
+      mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
+      mov (get_element_ptr arg_tup 2) (Il.Cell arg);
       call_code code;
 
   (* trans_compare returns a quad number of the cjmp, which the caller
@@ -1022,8 +1016,8 @@ let trans_visitor
         | _ -> bug () "spawned-function slot has wrong type"
     in
     let in_slots = tsig.Ast.sig_input_slots in
-    let arg_layouts = layout_fn_call_tup abi tsig in
-    let callsz = (pack 0L arg_layouts).layout_size in
+    let in_tup = arg_tup_cell in_slots in
+    let callsz = Il.referent_ty_size word_bits (snd (need_addr_cell in_tup)) in
     let exit_proc_glue_fixup = get_exit_proc_glue tsig in
     let exit_proc_glue_addr = (fixup_to_addr
                                  abi.Abi.abi_has_abs_data
@@ -1804,23 +1798,19 @@ let trans_visitor
 
 
   and trans_init_structural_from_atoms
-      (dst:Il.cell) (dst_slots:Ast.slot array)
+      (dst:Il.cell)
+      (dst_slots:Ast.slot array)
       (atoms:Ast.atom array)
       : unit =
-    let layouts = layout_tup abi dst_slots in
-    assert (Array.length layouts == Array.length atoms);
-    let (dst_addr, _) = need_addr_cell dst in
     Array.iteri
       begin
-        fun i layout ->
-          let disp = layout.layout_offset in
-          let sub_dst = Il.addr_add_imm dst_addr disp in
-          let sub_slot = dst_slots.(i) in
-          let sub_rtype = slot_referent_type abi sub_slot in
-          let sub_dst_cell = Il.Addr (sub_dst, sub_rtype) in
-            trans_init_slot_from_atom sub_dst_cell sub_slot atoms.(i)
+        fun i atom ->
+          trans_init_slot_from_atom
+            (get_element_ptr dst i)
+            dst_slots.(i)
+            atom
       end
-      layouts
+      atoms
 
 
   and trans_init_slot_from_atom
