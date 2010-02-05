@@ -22,7 +22,7 @@ CFG_VALGRIND :=
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
   CFG_GCC_COMPILE_FLAGS += -fPIC
-  CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl
+  CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl -lpthread
   ifeq ($(CFG_CPUTYPE), x86_64)
     CFG_GCC_COMPILE_FLAGS += -m32
     CFG_GCC_LINK_FLAGS += -m32
