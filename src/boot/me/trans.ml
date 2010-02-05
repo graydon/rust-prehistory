@@ -153,8 +153,8 @@ let trans_visitor
     emit (Il.lea dst src)
   in
 
-  let ptr_at (addr:Il.addr) (pointee_ty:Ast.ty) : Il.typed_addr =
-    (addr, Il.ScalarTy (Il.AddrTy (referent_type abi pointee_ty)))
+  let ptr_at (addr:Il.addr) (pointee_ty:Ast.ty) : Il.cell =
+    Il.Addr (addr, Il.ScalarTy (Il.AddrTy (referent_type abi pointee_ty)))
   in
 
   let need_scalar_ty (rty:Il.referent_ty) : Il.scalar_ty =
@@ -686,7 +686,7 @@ let trans_visitor
       let sz = exterior_rc_allocation_size (exterior_slot ty) in
 
       let mod_ty = Hashtbl.find cx.ctxt_all_item_types mod_id in
-      let mod_cell = deref (Il.Addr (ptr_at (fp_imm out_addr_disp) mod_ty)) in
+      let mod_cell = deref (ptr_at (fp_imm out_addr_disp) mod_ty) in
 
         (* 
          * pair_addr now points to the pair [item,binding*]
@@ -762,7 +762,7 @@ let trans_visitor
                 fix
           end
 
-  and get_typed_mem_glue (g:glue) (ty:Ast.ty) (prefix:unit -> string) (inner:Il.typed_addr -> unit) : fixup =
+  and get_typed_mem_glue (g:glue) (ty:Ast.ty) (prefix:unit -> string) (inner:Il.cell -> unit) : fixup =
     get_mem_glue g prefix (fun addr -> inner (ptr_at addr ty))
 
   and trace_str b s =
@@ -784,11 +784,11 @@ let trans_visitor
       : fixup =
     let g = GLUE_drop ty in
     let prefix _ = "drop " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner (arg:Il.typed_addr) =
+    let inner (arg:Il.cell) =
       trace_str cx.ctxt_sess.Session.sess_trace_drop
         "in drop-glue, dropping";
-      trace_word cx.ctxt_sess.Session.sess_trace_drop (Il.Addr arg);
-      drop_ty ty (deref (Il.Addr arg)) curr_iso;
+      trace_word cx.ctxt_sess.Session.sess_trace_drop arg;
+      drop_ty ty (deref arg) curr_iso;
       trace_str cx.ctxt_sess.Session.sess_trace_drop
         "drop-glue complete";
     in
@@ -801,13 +801,13 @@ let trans_visitor
       : fixup =
     let g = GLUE_free ty in
     let prefix _ = "free " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner (arg:Il.typed_addr) =
+    let inner (arg:Il.cell) =
       (* 
        * Free-glue assumes we're looking at a pointer to an 
        * exterior allocation with normal exterior layout. It's
        * just a way to move drop+free out of leaf code. 
        *)
-      let (body_addr, _) = need_addr_cell (deref_imm (Il.Addr arg) exterior_rc_body_off) in
+      let (body_addr, _) = need_addr_cell (deref_imm arg exterior_rc_body_off) in
       let vr = next_vreg_cell Il.voidptr_t in
         lea vr body_addr;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
@@ -826,7 +826,7 @@ let trans_visitor
             trans_free vr
           end
         else
-          trans_free (Il.Addr arg);
+          trans_free arg;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "free-glue complete";
     in
@@ -839,7 +839,7 @@ let trans_visitor
       : fixup =
     let g = GLUE_mark ty in
     let prefix _ = "mark " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner (arg:Il.typed_addr) = mark_ty ty (deref (Il.Addr arg)) curr_iso in
+    let inner (arg:Il.cell) = mark_ty ty (deref arg) curr_iso in
     let fix = get_typed_mem_glue g ty prefix inner in
       fix
 
@@ -849,9 +849,9 @@ let trans_visitor
       : fixup =
     let g = GLUE_clone ty in
     let prefix _ = "clone " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
-    let inner (arg:Il.typed_addr) =
-      let dst = (deref (Il.Addr (ptr_at (fp_imm out_addr_disp) ty))) in
-      let src = (deref (Il.Addr arg)) in
+    let inner (arg:Il.cell) =
+      let dst = deref (ptr_at (fp_imm out_addr_disp) ty) in
+      let src = deref arg in
         clone_ty ty dst src curr_iso
     in
     let fix = get_typed_mem_glue g ty prefix inner in
@@ -2451,7 +2451,7 @@ let trans_visitor
     let tag_keys = sorted_htab_keys ttag in
     let i = arr_idx tag_keys (Ast.NAME_base (Ast.BASE_ident n)) in
       let _ = log cx "tag variant: %s -> tag value #%d" n i in
-      let out_cell = deref (Il.Addr (ptr_at (fp_imm out_addr_disp) (Ast.TY_tag ttag))) in
+      let out_cell = deref (ptr_at (fp_imm out_addr_disp) (Ast.TY_tag ttag)) in
       let tag_cell = get_element_ptr out_cell 0 in
       let union_cell = get_element_ptr out_cell 1 in
       let dst = get_variant_ptr union_cell i in
