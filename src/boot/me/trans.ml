@@ -389,11 +389,9 @@ let trans_visitor
 
   let rec trans_slot_lval_ext
       (base_ty:Ast.ty)
-      (base_addr:Il.addr)
+      (cell:Il.cell)
       (comp:Ast.lval_component)
       : (Il.cell * Ast.slot) =
-
-    let cell = Il.Addr (base_addr, referent_type abi base_ty) in
 
     match (base_ty, comp) with
         (Ast.TY_rec entries,
@@ -412,7 +410,7 @@ let trans_visitor
           let reg = next_vreg () in
           let t = Il.Reg (reg, Il.ValTy word_bits) in
             emit (Il.binary Il.UMUL t atop (imm unit_sz));
-            let (addr, _) = need_addr_cell (deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t))) in
+            let (addr, _) = need_addr_cell (deref cell) in
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, slot_referent_type abi slot), slot)
 
@@ -424,7 +422,7 @@ let trans_visitor
           let t = Il.Reg (reg, Il.ValTy word_bits) in
           let slot = interior_slot (Ast.TY_mach TY_u8) in
             emit (Il.binary Il.UMUL t atop (imm unit_sz));
-            let (addr, _) = need_addr_cell (deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t))) in
+            let (addr, _) = need_addr_cell (deref cell) in
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
 
@@ -436,7 +434,7 @@ let trans_visitor
              * we dereference the first cell of this pair and then
              * return the address of the Nth table-item. Each table
              * item is itself a pair. *)
-          let (table_addr, _) = need_addr_cell (deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t))) in
+          let (table_addr, _) = need_addr_cell (deref (get_element_ptr cell 0)) in
           let off = word_n (i * 2) in
           let item_addr = Il.addr_add_imm table_addr off in
           let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
@@ -518,8 +516,7 @@ let trans_visitor
           Ast.LVAL_ext (base, comp) ->
             let (base_cell, base_slot) = trans_slot_lval_full initializing base in
             let base_cell' = deref_slot initializing base_cell base_slot in
-            let (addr, _) = need_addr_cell base_cell' in
-              trans_slot_lval_ext (slot_ty base_slot) addr comp
+              trans_slot_lval_ext (slot_ty base_slot) base_cell' comp
 
         | Ast.LVAL_base nb ->
             let referent = lval_to_referent cx nb.id in
