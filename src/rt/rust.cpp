@@ -149,9 +149,6 @@ struct frame_glue_fns {
     uintptr_t reloc_glue;
 };
 
-/* FIXME: change ptr_vec and circ_buf to use flexible-array element
-   rather than pointer-to-buf-at-end. */
-
 template <typename T>
 class ptr_vec {
     static const size_t INIT_SIZE = 8;
