@@ -1849,7 +1849,6 @@ struct rust_ticket {
     }
 };
 
-#if 0
 #if defined(__WIN32__)
 static DWORD WINAPI rust_thread_start(void *ptr)
 #elif defined(__GNUC__)
@@ -1876,7 +1875,6 @@ static void *rust_thread_start(void *ptr)
 
     return 0;
 }
-#endif
 
 extern "C" CDECL rust_proc*
 upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
@@ -1897,12 +1895,9 @@ upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spaw
     LOG_UPCALL_ENTRY(spawner);
     rust_rt *rt = spawner->rt;
 
-#if 0
+    // The ticket is not bound to the current runtime, so allocate directly from the
+    // service.
     rust_srv *srv = rt->srv;
-    /*
-     * The ticket is not bound to the current runtime, so allocate directly from the
-     * service.
-     */
     rust_ticket *ticket = new (srv) rust_ticket(spawnee_fn, rt->global_glue, srv);
 
 #if defined(__WIN32__)
@@ -1914,8 +1909,9 @@ upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spaw
 #else
 #error "Platform not supported"
 #endif
-#endif
 
+    // Create a fake placeholder proc that sits in our runtime and blocks and merely controls the
+    // lifetime of the remote runtime.
     rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, callsz);
     add_proc_state_vec(rt, proc);
     proc_state_transition(rt,
@@ -2069,6 +2065,11 @@ rust_start(uintptr_t main_fn,
 {
     rust_srv srv;
     int ret = rust_main_loop(main_fn, global_glue, &srv);
+#if !defined(__WIN32__)
+    // Don't take down the process if the main thread exits without an error.
+    if (!ret)
+        pthread_exit(NULL);
+#endif
     return ret;
 }
 
