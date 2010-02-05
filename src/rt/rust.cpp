@@ -204,47 +204,47 @@ struct circ_buf {
 // interrupt enqueue() and dequeue(), however, dequeue() is not allowed to interrupt
 // itself.
 
-struct itq_chain {
-    itq_chain *next;
+struct lockfree_queue_chain {
+    lockfree_queue_chain *next;
 };
 
-class itq : public itq_chain {
-    itq_chain *tail;
+class lockfree_queue : public lockfree_queue_chain {
+    lockfree_queue_chain *tail;
 public:
-    itq();
-    void enqueue(itq_chain *item);
-    itq_chain *dequeue();
+    lockfree_queue();
+    void enqueue(lockfree_queue_chain *item);
+    lockfree_queue_chain *dequeue();
 };
 
-itq::itq() :
+lockfree_queue::lockfree_queue() :
     tail(this)
 {
 }
 
 void
-itq::enqueue(itq_chain *item)
+lockfree_queue::enqueue(lockfree_queue_chain *item)
 {
-    item->next = (itq_chain *)0;
-    itq_chain *last = tail;
+    item->next = (lockfree_queue_chain *)0;
+    lockfree_queue_chain *last = tail;
     tail = item;
     while (last->next)
         last = last->next;
     last->next = item;
 }
 
-itq_chain *
-itq::dequeue()
+lockfree_queue_chain *
+lockfree_queue::dequeue()
 {
-    itq_chain *item = next;
+    lockfree_queue_chain *item = next;
     if (item && !(next = item->next)) {
-        tail = (itq_chain *)this;
+        tail = (lockfree_queue_chain *)this;
         if (item->next) {
-            itq_chain *lost = item->next;
-            itq_chain *help;
+            lockfree_queue_chain *lost = item->next;
+            lockfree_queue_chain *help;
             do {
                 help = lost->next;
                 enqueue(lost);
-            } while ((lost = help) != (itq_chain *)0);
+            } while ((lost = help) != (lockfree_queue_chain *)0);
         }
     }
     return item;
@@ -289,7 +289,7 @@ struct rust_rt {
     ptr_vec<rust_port> ports; // bug 541584
     ptr_vec<rust_chan> chans;
     int rval;
-    itq *writers; // waiting writers from other threads or processes
+    lockfree_queue *incoming; // incoming messages from other threads
 
     rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs);
     ~rust_rt();
@@ -410,7 +410,7 @@ struct rust_proc : public rc_base {
     proc_state_t state;
     rust_rt *rt;
     uintptr_t fn;
-    rust_q *queues;
+    rust_q *outgoing;
     uintptr_t* dptr;           // rendezvous pointer for send/recv
     rust_proc *spawner;        // parent-link
     ptr_vec<rust_proc> waiting_procs;
@@ -498,7 +498,7 @@ struct rust_chan : public rc_base {
  * each port.
  */
 
-struct rust_q : public itq_chain {
+struct rust_q : public lockfree_queue_chain {
     UT_hash_handle hh;
     rust_proc *proc;      // Proc owning this chan.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
@@ -940,7 +940,7 @@ rust_proc::rust_proc(rust_rt *rt,
       state(proc_state_running),
       rt(rt),
       fn(spawnee_fn),
-      queues(NULL),
+      outgoing(NULL),
       dptr(0),
       spawner(spawner),
       waiting_procs(rt),
@@ -1048,9 +1048,9 @@ rust_proc::~rust_proc()
 
     del_stk(rt, stk);
 
-    while (queues) {
-        rust_q *q = queues;
-        HASH_DEL(queues, q);
+    while (outgoing) {
+        rust_q *q = outgoing;
+        HASH_DEL(outgoing, q);
         delete q;
     }
 }
@@ -1689,10 +1689,10 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
     // if the queue wasn't resolved yet or is not ours, lookup the queue
     rust_q *q = chan->q;
     if (!q || chan->proc != proc) {
-        HASH_FIND(hh, proc->queues, port, sizeof(rust_q*), q);
+        HASH_FIND(hh, proc->outgoing, port, sizeof(rust_q*), q);
         if (!q) {
             q = new (rt) rust_q(proc, port);
-            HASH_ADD(hh, proc->queues, port, sizeof(rust_q*), q);
+            HASH_ADD(hh, proc->outgoing, port, sizeof(rust_q*), q);
         }
         I(rt, q);
         I(rt, q->blocked == proc || !q->blocked);
