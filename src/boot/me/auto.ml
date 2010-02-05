@@ -135,10 +135,40 @@ let auto_inference_visitor
       match s.node with
           Ast.STMT_copy (lval,expr,_) ->
             ignore (unify_lval (unify_expr None expr) lval);
-            ignore (unify_expr (unify_lval None lval) expr);
+            ignore (unify_expr (unify_lval None lval) expr)
 
         | Ast.STMT_init_str (lval, _) ->
             ignore (unify_lval (Some Ast.TY_str) lval)
+
+        | Ast.STMT_init_vec (lval, slot, atoms) ->
+            let unify_init tyo =
+              match tyo with
+                  None ->
+                    begin
+                      let lim = Array.length atoms in
+                      let rec step i tyo =
+                        if i = lim
+                        then (Some (Ast.TY_vec {slot with Ast.slot_ty=tyo}))
+                        else
+                          let at = atoms.(i) in
+                          match unify_atom tyo at with
+                              None -> None
+                            | Some t ->
+                                step (i+1) (Some t)
+                      in
+                        step 0 None
+                    end
+                | Some (Ast.TY_vec aslot) ->
+                    for i = 0 to (Array.length atoms) - 1
+                    do
+                      let at = atoms.(i) in
+                        ignore (unify_atom aslot.Ast.slot_ty at)
+                    done;
+                    tyo
+                | Some _ -> err None "Non-vector type for vector initializer"
+            in
+              ignore (unify_lval (unify_init None) lval);
+              ignore (unify_init (unify_lval None lval))
 
         | Ast.STMT_init_chan (chan, Some port) ->
             begin

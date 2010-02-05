@@ -199,7 +199,7 @@ and check_calls = (lval * (atom array)) array
 (* put+ f(a,b) means to call f with current put addr and self as ret
  * addr. this is a 'tail yield' that bypasses us during f execution.
  *
- * ret+ f(a,b) means to call f with current pur addr and current ret
+ * ret+ f(a,b) means to call f with current put addr and current ret
  * addr. this is a 'tail call' that destroys us.
  *)
 and stmt' =
