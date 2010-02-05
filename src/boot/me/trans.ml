@@ -273,27 +273,27 @@ let trans_visitor
             (Il.string_of_cell abi.Abi.abi_str_of_hardreg ptr)
   in
 
-  let deref (ptr:Il.cell) : Il.typed_addr =
+  let deref (ptr:Il.cell) : Il.cell =
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
-          Il.AddrTy rt -> (based r, rt)
+          Il.AddrTy rt -> Il.Addr (based r, rt)
         | _ -> bug () "dereferencing non-address cell of type %s "
             (Il.string_of_scalar_ty st)
   in
 
-  let deref_off (ptr:Il.cell) (off:Asm.expr64) : Il.typed_addr =
+  let deref_off (ptr:Il.cell) (off:Asm.expr64) : Il.cell =
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
-          Il.AddrTy rt -> (based_off r off, rt)
+          Il.AddrTy rt -> Il.Addr (based_off r off, rt)
         | _ -> bug () "offset-dereferencing non-address cell of type %s "
             (Il.string_of_scalar_ty st)
   in
 
-  let deref_imm (ptr:Il.cell) (imm:int64) : Il.typed_addr =
+  let deref_imm (ptr:Il.cell) (imm:int64) : Il.cell =
     deref_off ptr (Asm.IMM imm)
   in
 
-  let pp_imm (imm:int64) : Il.typed_addr =
+  let pp_imm (imm:int64) : Il.cell =
     deref_imm abi.Abi.abi_pp_cell imm
   in
 
@@ -412,7 +412,7 @@ let trans_visitor
           let reg = next_vreg () in
           let t = Il.Reg (reg, Il.ValTy word_bits) in
             emit (Il.binary Il.UMUL t atop (imm unit_sz));
-            let (addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
+            let (addr, _) = need_addr_cell (deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t))) in
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, slot_referent_type abi slot), slot)
 
@@ -424,7 +424,7 @@ let trans_visitor
           let t = Il.Reg (reg, Il.ValTy word_bits) in
           let slot = interior_slot (Ast.TY_mach TY_u8) in
             emit (Il.binary Il.UMUL t atop (imm unit_sz));
-            let (addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
+            let (addr, _) = need_addr_cell (deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t))) in
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
               (Il.Addr (elt_addr, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
 
@@ -436,7 +436,7 @@ let trans_visitor
              * we dereference the first cell of this pair and then
              * return the address of the Nth table-item. Each table
              * item is itself a pair. *)
-          let (table_addr, _) = deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t)) in
+          let (table_addr, _) = need_addr_cell (deref (Il.Addr (base_addr, Il.ScalarTy Il.voidptr_t))) in
           let off = word_n (i * 2) in
           let item_addr = Il.addr_add_imm table_addr off in
           let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
@@ -689,7 +689,7 @@ let trans_visitor
       let sz = exterior_rc_allocation_size (exterior_slot ty) in
 
       let mod_ty = Hashtbl.find cx.ctxt_all_item_types mod_id in
-      let mod_cell = Il.Addr (deref (Il.Addr (ptr_at (fp_imm out_addr_disp) mod_ty))) in
+      let mod_cell = deref (Il.Addr (ptr_at (fp_imm out_addr_disp) mod_ty)) in
 
         (* 
          * pair_addr now points to the pair [item,binding*]
@@ -710,7 +710,7 @@ let trans_visitor
         (* Copy args into the binding tuple. *)
         let dst_ptr = next_vreg_cell (need_scalar_ty binding_ptr_rty) in
           mov dst_ptr (Il.Cell binding_ptr_cell);
-          let dst = Il.Addr (deref dst_ptr) in
+          let dst = deref dst_ptr in
           let refcnt_cell = get_element_ptr dst 0 in
           let body_cell = get_element_ptr dst 1 in
           let src_ta = (fp_imm arg0_disp, src_rty) in
@@ -810,7 +810,7 @@ let trans_visitor
        * exterior allocation with normal exterior layout. It's
        * just a way to move drop+free out of leaf code. 
        *)
-      let (body_addr, _) = deref_imm (Il.Addr arg) exterior_rc_body_off in
+      let (body_addr, _) = need_addr_cell (deref_imm (Il.Addr arg) exterior_rc_body_off) in
       let vr = next_vreg_cell Il.voidptr_t in
         lea vr body_addr;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
@@ -1195,14 +1195,14 @@ let trans_visitor
     let padded_sz = Int64.add init_sz (word_n 3) in
     let alloc_sz = next_power_of_two padded_sz in
       trans_malloc dstcell alloc_sz;
-      mov (Il.Addr (deref_imm dstcell (word_n 0))) one;
-      mov (Il.Addr (deref_imm dstcell (word_n 1))) (imm alloc_sz);
-      mov (Il.Addr (deref_imm dstcell (word_n 2))) (imm init_sz);
+      mov (deref_imm dstcell (word_n 0)) one;
+      mov (deref_imm dstcell (word_n 1)) (imm alloc_sz);
+      mov (deref_imm dstcell (word_n 2)) (imm init_sz);
       Array.iteri
         begin
           fun i atom ->
             let off = Int64.add (word_n 3) (Int64.mul (Int64.of_int i) unit_sz) in
-            let cell = Il.Addr (deref_imm dstcell off) in
+            let cell = deref_imm dstcell off in
               trans_init_slot_from_atom cell unit_slot atom
         end
         atoms
@@ -1221,7 +1221,7 @@ let trans_visitor
   and exterior_gc_body_off : int64 = word_n Abi.exterior_gc_slot_field_body
 
   and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =
-    let (rc_addr, _) = deref_imm cell (word_n off) in
+    let (rc_addr, _) = need_addr_cell (deref_imm cell (word_n off)) in
     word_at rc_addr
 
   and exterior_rc_cell (cell:Il.cell) : Il.cell =
@@ -1282,32 +1282,31 @@ let trans_visitor
                     MEM_interior
 
   and iter_rec_slots
-      (ta:Il.typed_addr)
+      (cell:Il.cell)
       (entries:Ast.ty_rec)
       (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    iter_tup_slots ta (Array.map snd entries) f curr_iso
+    iter_tup_slots cell (Array.map snd entries) f curr_iso
 
   and iter_tup_slots
-      (ta:Il.typed_addr)
+      (cell:Il.cell)
       (slots:Ast.ty_tup)
       (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
     Array.iteri
       (fun i slot ->
-         f (get_element_ptr (Il.Addr ta) i) slot curr_iso)
+         f (get_element_ptr cell i) slot curr_iso)
       slots
 
   and iter_tag_slots
-        (ta:Il.typed_addr)
+        (cell:Il.cell)
         (ttag:Ast.ty_tag)
         (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
         (curr_iso:Ast.ty_iso option)
         : unit =
       let tag_keys = sorted_htab_keys ttag in
-      let cell = Il.Addr ta in
       let tag = get_element_ptr cell 0 in
       let union = get_element_ptr cell 1 in
       let tmp = next_vreg_cell word_ty in
@@ -1319,7 +1318,7 @@ let trans_visitor
                                          ^ " == " ^ (Ast.fmt_to_str Ast.fmt_name key))));
               let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
               let ttup = Hashtbl.find ttag key in
-                iter_tup_slots (need_addr_cell (get_variant_ptr union i)) ttup f curr_iso;
+                iter_tup_slots (get_variant_ptr union i) ttup f curr_iso;
                 List.iter patch jmps
           end
           tag_keys
@@ -1329,7 +1328,7 @@ let trans_visitor
 
   and iter_ty_slots
         (ty:Ast.ty)
-        (addr:Il.typed_addr)
+        (cell:Il.cell)
         (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
         (curr_iso:Ast.ty_iso option)
         : unit =
@@ -1339,12 +1338,12 @@ let trans_visitor
          * addrs presently.
          *)
         match ty with
-            Ast.TY_rec entries -> iter_rec_slots addr entries f curr_iso
-          | Ast.TY_tup slots -> iter_tup_slots addr slots f curr_iso
-          | Ast.TY_tag tag -> iter_tag_slots addr tag f curr_iso
+            Ast.TY_rec entries -> iter_rec_slots cell entries f curr_iso
+          | Ast.TY_tup slots -> iter_tup_slots cell slots f curr_iso
+          | Ast.TY_tag tag -> iter_tag_slots cell tag f curr_iso
           | Ast.TY_iso tiso ->
               let ttag = get_iso_tag tiso in
-                iter_tag_slots addr ttag f (Some tiso)
+                iter_tag_slots cell ttag f (Some tiso)
           | Ast.TY_fn _
           | Ast.TY_pred _
           | Ast.TY_mod _ ->
@@ -1352,7 +1351,7 @@ let trans_visitor
                * points to an item and one of which is a (possible)
                * pointer to an exterior allocation.
                *)
-              let binding_field_cell = get_element_ptr (Il.Addr addr) 1 in
+              let binding_field_cell = get_element_ptr cell 1 in
                 emit (Il.cmp (Il.Cell binding_field_cell) zero);
                 let null_jmp = mark() in
                   emit (Il.jmp Il.JE Il.CodeNone);
@@ -1369,27 +1368,27 @@ let trans_visitor
 
   and drop_ty
       (ty:Ast.ty)
-      (addr:Il.typed_addr)
+      (cell:Il.cell)
       (curr_iso:Ast.ty_iso option)
       : unit =
-      iter_ty_slots ty addr drop_slot curr_iso
+      iter_ty_slots ty cell drop_slot curr_iso
 
   and mark_ty
       (ty:Ast.ty)
-      (addr:Il.typed_addr)
+      (cell:Il.cell)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    iter_ty_slots ty addr mark_slot curr_iso
+    iter_ty_slots ty cell mark_slot curr_iso
 
   and clone_ty
       (ty:Ast.ty)
-      (dst:Il.typed_addr)
-      (src:Il.typed_addr)
+      (dst:Il.cell)
+      (src:Il.cell)
       (curr_iso:Ast.ty_iso option)
       : unit =
     match ty with
         Ast.TY_chan _ ->
-          trans_upcall "upcall_clone_chan" (Il.Addr dst) [| (Il.Cell (Il.Addr src)) |]
+          trans_upcall "upcall_clone_chan" dst [| (Il.Cell src) |]
       | Ast.TY_proc
       | Ast.TY_port _
       | _ when type_is_mutable ty -> bug () "cloning mutable type"
@@ -1447,7 +1446,7 @@ let trans_visitor
                   (* Set mark bit in allocation header. *)
                   emit (Il.binary Il.OR gc_word (Il.Cell gc_word) one);
                   (* Iterate over exterior slots marking outgoing links. *)
-                  let (body_addr, _) = deref_imm cell exterior_gc_body_off in
+                  let (body_addr, _) = need_addr_cell (deref_imm cell exterior_gc_body_off) in
                   let ty = maybe_iso curr_iso ty in
                   let curr_iso = maybe_enter_iso ty curr_iso in
                     lea tmp body_addr;
@@ -1505,7 +1504,7 @@ let trans_visitor
           MEM_rc_opaque rc_off ->
             (* Refcounted opaque objects we handle without glue functions. *)
             let null_jmp = null_check () in
-            let (rc_addr, _) = deref_imm cell (word_n rc_off) in
+            let (rc_addr, _) = need_addr_cell (deref_imm cell (word_n rc_off)) in
             let rc = word_at rc_addr in
             let j = drop_refcount_and_cmp rc in
               free_ty ty cell;
@@ -1582,7 +1581,7 @@ let trans_visitor
                 mov ctrl (Il.Cell tmp);
                 iflog (fun _ -> annotate "init GC exterior: load next-pointer");
                 let next = exterior_gc_next_cell cell in
-                  mov next (Il.Cell (Il.Addr (pp_imm (word_n Abi.proc_field_gc_alloc_chain))));
+                  mov next (Il.Cell (pp_imm (word_n Abi.proc_field_gc_alloc_chain)));
 
         | MEM_rc_opaque rc_off ->
             iflog (fun _ -> annotate "init RC exterior: malloc");
@@ -1620,7 +1619,7 @@ let trans_visitor
       if initializing
       then init_exterior_slot cell slot;
       let (addr, _) =
-        deref_imm cell (exterior_body_off slot)
+        need_addr_cell (deref_imm cell (exterior_body_off slot))
       in
         (addr, body_ty)
 
@@ -1632,7 +1631,7 @@ let trans_visitor
       | Ast.MODE_write_alias ->
           if initializing
           then cell
-          else Il.Addr (deref cell)
+          else deref cell
 
   and trans_copy_tup
       (initializing:bool)
@@ -2300,7 +2299,7 @@ let trans_visitor
                     match atom_opt with
                         None -> ()
                       | Some at ->
-                          let (dst_addr, _) = deref (wordptr_at (fp_imm out_addr_disp)) in
+                          let (dst_addr, _) = need_addr_cell (deref (wordptr_at (fp_imm out_addr_disp))) in
                           let atom_ty = atom_type cx at in
                           let dst_slot = interior_slot atom_ty in
                           let dst_ty = referent_type abi atom_ty in
@@ -2360,7 +2359,7 @@ let trans_visitor
                           let referent_type = slot_id_referent_type slot_id in
                           let disp = layout.layout_offset in
                           let fp_cell = Il.Addr (addr, (Il.ScalarTy (Il.AddrTy referent_type))) in
-                          let slot_cell = Il.Addr (deref_imm fp_cell disp) in
+                          let slot_cell = deref_imm fp_cell disp in
                             inner key slot_id slot slot_cell
                 end
           end
@@ -2455,7 +2454,7 @@ let trans_visitor
     let tag_keys = sorted_htab_keys ttag in
     let i = arr_idx tag_keys (Ast.NAME_base (Ast.BASE_ident n)) in
       let _ = log cx "tag variant: %s -> tag value #%d" n i in
-      let out_cell = Il.Addr (deref (Il.Addr (ptr_at (fp_imm out_addr_disp) (Ast.TY_tag ttag)))) in
+      let out_cell = deref (Il.Addr (ptr_at (fp_imm out_addr_disp) (Ast.TY_tag ttag))) in
       let tag_cell = get_element_ptr out_cell 0 in
       let union_cell = get_element_ptr out_cell 1 in
       let dst = get_variant_ptr union_cell i in
