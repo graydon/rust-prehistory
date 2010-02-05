@@ -1829,24 +1829,14 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv);
 struct rust_ticket {
     uintptr_t main_fn;
     global_glue_fns *global_glue;
-    rust_srv *srv;
 
-    explicit rust_ticket(uintptr_t main_fn,
-                         global_glue_fns *global_glue,
-                         rust_srv *srv)
-        : main_fn(main_fn),
-          global_glue(global_glue),
-          srv(srv)
+    explicit rust_ticket(uintptr_t main_fn, global_glue_fns *global_glue) :
+        main_fn(main_fn),
+        global_glue(global_glue)
     {}
 
     ~rust_ticket()
     {}
-
-    void operator delete(void *ptr)
-    {
-        rust_srv *srv = ((rust_ticket *)ptr)->srv;
-        srv->free(ptr);
-    }
 };
 
 #if defined(__WIN32__)
@@ -1865,13 +1855,13 @@ static void *rust_thread_start(void *ptr)
     rust_ticket *ticket = (rust_ticket *)ptr;
     uintptr_t main_fn = ticket->main_fn;
     global_glue_fns *global_glue = ticket->global_glue;
-    rust_srv *srv = ticket->srv;
     delete ticket;
 
     /*
      * Start a new rust main loop for this thread.
      */
-    rust_main_loop(main_fn, global_glue, srv);
+    rust_srv srv;
+    rust_main_loop(main_fn, global_glue, &srv);
 
     return 0;
 }
@@ -1896,9 +1886,8 @@ upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spaw
     rust_rt *rt = spawner->rt;
 
     // The ticket is not bound to the current runtime, so allocate directly from the
-    // service.
-    rust_srv *srv = rt->srv;
-    rust_ticket *ticket = new (srv) rust_ticket(spawnee_fn, rt->global_glue, srv);
+    // system heap.
+    rust_ticket *ticket = new rust_ticket(spawnee_fn, rt->global_glue);
 
 #if defined(__WIN32__)
     DWORD thread;
