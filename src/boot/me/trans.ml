@@ -1297,35 +1297,43 @@ let trans_visitor
                     MEM_interior
 
   and iter_rec_slots
-      (cell:Il.cell)
+      (dst_cell:Il.cell)
+      (src_cell:Il.cell)
       (entries:Ast.ty_rec)
-      (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    iter_tup_slots cell (Array.map snd entries) f curr_iso
+    iter_tup_slots dst_cell src_cell (Array.map snd entries) f curr_iso
 
   and iter_tup_slots
-      (cell:Il.cell)
+      (dst_cell:Il.cell)
+      (src_cell:Il.cell)
       (slots:Ast.ty_tup)
-      (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
     Array.iteri
-      (fun i slot ->
-         f (get_element_ptr cell i) slot curr_iso)
+      begin
+        fun i slot ->
+          f (get_element_ptr dst_cell i)
+            (get_element_ptr src_cell i)
+            slot curr_iso
+      end
       slots
 
   and iter_tag_slots
-        (cell:Il.cell)
+        (dst_cell:Il.cell)
+        (src_cell:Il.cell)
         (ttag:Ast.ty_tag)
-        (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+        (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
         (curr_iso:Ast.ty_iso option)
         : unit =
       let tag_keys = sorted_htab_keys ttag in
-      let tag = get_element_ptr cell 0 in
-      let union = get_element_ptr cell 1 in
+      let src_tag = get_element_ptr src_cell 0 in
+      let src_union = get_element_ptr src_cell 1 in
+      let dst_union = get_element_ptr dst_cell 1 in
       let tmp = next_vreg_cell word_ty in
-        mov tmp (Il.Cell tag);
+        mov tmp (Il.Cell src_tag);
         Array.iteri
           begin
             fun i key ->
@@ -1333,7 +1341,10 @@ let trans_visitor
                                          ^ " == " ^ (Ast.fmt_to_str Ast.fmt_name key))));
               let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
               let ttup = Hashtbl.find ttag key in
-                iter_tup_slots (get_variant_ptr union i) ttup f curr_iso;
+                iter_tup_slots
+                  (get_variant_ptr dst_union i)
+                  (get_variant_ptr src_union i)
+                  ttup f curr_iso;
                 List.iter patch jmps
           end
           tag_keys
@@ -1341,10 +1352,11 @@ let trans_visitor
   and get_iso_tag tiso =
     tiso.Ast.iso_group.(tiso.Ast.iso_index)
 
-  and iter_ty_slots
+  and iter_ty_slots_full
         (ty:Ast.ty)
-        (cell:Il.cell)
-        (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+        (dst_cell:Il.cell)
+        (src_cell:Il.cell)
+        (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
         (curr_iso:Ast.ty_iso option)
         : unit =
         (* 
@@ -1353,12 +1365,19 @@ let trans_visitor
          * addrs presently.
          *)
         match ty with
-            Ast.TY_rec entries -> iter_rec_slots cell entries f curr_iso
-          | Ast.TY_tup slots -> iter_tup_slots cell slots f curr_iso
-          | Ast.TY_tag tag -> iter_tag_slots cell tag f curr_iso
+            Ast.TY_rec entries ->
+              iter_rec_slots dst_cell src_cell entries f curr_iso
+
+          | Ast.TY_tup slots ->
+              iter_tup_slots dst_cell src_cell slots f curr_iso
+
+          | Ast.TY_tag tag ->
+              iter_tag_slots dst_cell src_cell tag f curr_iso
+
           | Ast.TY_iso tiso ->
               let ttag = get_iso_tag tiso in
-                iter_tag_slots cell ttag f (Some tiso)
+                iter_tag_slots dst_cell src_cell ttag f (Some tiso)
+
           | Ast.TY_fn _
           | Ast.TY_pred _
           | Ast.TY_mod _ ->
@@ -1366,20 +1385,33 @@ let trans_visitor
                * points to an item and one of which is a (possible)
                * pointer to an exterior allocation.
                *)
-              let binding_field_cell = get_element_ptr cell 1 in
-                emit (Il.cmp (Il.Cell binding_field_cell) zero);
+              let src_binding_field_cell = get_element_ptr src_cell 1 in
+              let dst_binding_field_cell = get_element_ptr dst_cell 1 in
+                emit (Il.cmp (Il.Cell src_binding_field_cell) zero);
                 let null_jmp = mark() in
                   emit (Il.jmp Il.JE Il.CodeNone);
-                  (* Call thunk if we have a binding. *)
+                  (* Call thunk if we have a src binding. *)
                   (* 
                    * FIXME (bug 543738): this is completely wrong, need a second thunk that
                    * generates code to make use of a runtime type descriptor extracted from a
                    * binding tuple. For now this only works by accident.
                    *)
-                  (f binding_field_cell (exterior_slot Ast.TY_int) curr_iso);
+                  (f dst_binding_field_cell
+                     src_binding_field_cell
+                     (exterior_slot Ast.TY_int) curr_iso);
                   patch null_jmp
 
           | _ -> ()
+
+  and iter_ty_slots
+        (ty:Ast.ty)
+        (cell:Il.cell)
+        (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+        (curr_iso:Ast.ty_iso option)
+        : unit =
+    iter_ty_slots_full ty cell cell
+      (fun _ src_cell slot curr_iso -> f src_cell slot curr_iso)
+      curr_iso
 
   and drop_ty
       (ty:Ast.ty)
