@@ -2,15 +2,11 @@
 
 fn main() -> () {
   let port[int] p = port();
-  spawn thread child(chan(p));
-  let int y;
-  y <- p;
-  log "received";
-  log y;
-  check (y == 10);
+  spawn thread child();
+  log "spawned new thread";
 }
 
-fn child(chan[int] c) -> () {
-  c <| 10;
+fn child() -> () {
+  log "I am the new thread";
 }
 
