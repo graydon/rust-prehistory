@@ -1842,6 +1842,7 @@ struct rust_ticket {
     }
 };
 
+#if 0
 #if defined(__WIN32__)
 static DWORD WINAPI rust_thread_start(void *ptr)
 #elif defined(__GNUC__)
@@ -1868,6 +1869,7 @@ static void *rust_thread_start(void *ptr)
 
     return 0;
 }
+#endif
 
 extern "C" CDECL rust_proc*
 upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
@@ -1882,11 +1884,13 @@ upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawn
     return proc;
 }
 
-extern "C" CDECL void
+extern "C" CDECL rust_proc*
 upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     LOG_UPCALL_ENTRY(spawner);
     rust_rt *rt = spawner->rt;
+
+#if 0
     rust_srv *srv = rt->srv;
     /*
      * The ticket is not bound to the current runtime, so allocate directly from the
@@ -1903,6 +1907,15 @@ upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spaw
 #else
 #error "Platform not supported"
 #endif
+#endif
+
+    rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, callsz);
+    add_proc_state_vec(rt, proc);
+    proc_state_transition(rt,
+                          proc,
+                          proc_state_running,
+                          proc_state_blocked_waiting);
+    return proc;
 }
 
 static int
