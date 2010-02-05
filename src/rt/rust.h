@@ -27,12 +27,16 @@
 struct rust_proc;
 
 struct rust_srv {
+    size_t live_allocs;
+
     virtual void log(char const *);
     virtual void fatal(char const *, char const *, size_t);
     virtual void *malloc(size_t);
     virtual void *realloc(void *, size_t);
     virtual void free(void *);
-    virtual ~rust_srv() {}
+
+    rust_srv();
+    virtual ~rust_srv();
 };
 
 inline void *operator new(size_t size, rust_srv *srv)

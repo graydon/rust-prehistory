@@ -275,7 +275,6 @@ struct rust_str : public rc_base {
 struct rust_rt {
     rust_srv *srv;
     global_glue_fns *global_glue;
-    size_t &live_allocs;
     uint32_t logbits;
     ptr_vec<rust_proc> running_procs;
     ptr_vec<rust_proc> blocked_procs;
@@ -286,7 +285,7 @@ struct rust_rt {
     int rval;
     lockfree_queue *incoming; // incoming messages from other threads
 
-    rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs);
+    rust_rt(rust_srv *srv, global_glue_fns *global_glue);
     ~rust_rt();
 
     void activate(rust_proc *proc);
@@ -1288,10 +1287,9 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     }
 }
 
-rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue, size_t &live_allocs) :
+rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue) :
     srv(srv),
     global_glue(global_glue),
-    live_allocs(live_allocs),
     logbits(get_logbits()),
     running_procs(this),
     blocked_procs(this),
@@ -1377,7 +1375,6 @@ void *
 rust_rt::malloc(size_t sz) {
     void *p = srv->malloc(sz);
     I(this, p);
-    live_allocs++;
     log(LOG_MEM, "rust_rt::malloc(%d) -> 0x%" PRIxPTR,
         sz, p);
     return p;
@@ -1394,8 +1391,6 @@ void *
 rust_rt::realloc(void *p, size_t sz) {
     void *p1 = srv->realloc(p, sz);
     I(this, p1);
-    if (!p)
-        live_allocs++;
     log(LOG_MEM, "rust_rt::realloc(0x%" PRIxPTR ", %d) -> 0x%" PRIxPTR,
         p, sz, p1);
     return p1;
@@ -1406,8 +1401,6 @@ rust_rt::free(void *p) {
     log(LOG_MEM, "rust_rt::free(0x%" PRIxPTR ")", p);
     I(this, p);
     srv->free(p);
-    I(this, live_allocs > 0);
-    live_allocs--;
 }
 
 #ifdef __WIN32__
@@ -1914,75 +1907,81 @@ static int
 rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
 {
     int rval;
-    size_t live_allocs = 0;
-    {
-        rust_proc *proc;
-        rust_rt rt(srv, global_glue, live_allocs);
+    rust_proc *proc;
+    rust_rt rt(srv, global_glue);
 
-        rt.log(LOG_RT, "control is in rust runtime library");
-        rt.logptr("main fn", main_fn);
-        rt.logptr("main exit-proc glue", global_glue->main_exit_proc_glue);
+    rt.log(LOG_RT, "control is in rust runtime library");
+    rt.logptr("main fn", main_fn);
+    rt.logptr("main exit-proc glue", global_glue->main_exit_proc_glue);
 
-        rt.root_proc = new (rt) rust_proc(&rt, NULL, global_glue->main_exit_proc_glue, main_fn, 0);
-        add_proc_state_vec(&rt, rt.root_proc);
-        proc = rt.sched();
+    rt.root_proc = new (rt) rust_proc(&rt, NULL, global_glue->main_exit_proc_glue, main_fn, 0);
+    add_proc_state_vec(&rt, rt.root_proc);
+    proc = rt.sched();
 
-        rt.logptr("root proc", (uintptr_t)proc);
-        rt.logptr("proc->rust_sp", (uintptr_t)proc->rust_sp);
+    rt.logptr("root proc", (uintptr_t)proc);
+    rt.logptr("proc->rust_sp", (uintptr_t)proc->rust_sp);
 
-        while (proc) {
+    while (proc) {
 
-            rt.log(LOG_PROC, "activating proc 0x%" PRIxPTR,
-                   (uintptr_t)proc);
+        rt.log(LOG_PROC, "activating proc 0x%" PRIxPTR,
+               (uintptr_t)proc);
 
-            if (proc->state == proc_state_running) {
-                rt.activate(proc);
+        if (proc->state == proc_state_running) {
+            rt.activate(proc);
 
-                rt.log(LOG_PROC,
-                       "returned from proc 0x%" PRIxPTR " in state '%s'",
-                       (uintptr_t)proc, state_names[proc->state]);
+            rt.log(LOG_PROC,
+                   "returned from proc 0x%" PRIxPTR " in state '%s'",
+                   (uintptr_t)proc, state_names[proc->state]);
 
-                I(&rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
-                I(&rt, proc->rust_sp < proc->stk->limit);
+            I(&rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
+            I(&rt, proc->rust_sp < proc->stk->limit);
 
-                switch ((proc_state_t) proc->state) {
+            switch ((proc_state_t) proc->state) {
 
-                case proc_state_running:
-                    break;
+            case proc_state_running:
+                break;
 
-                case proc_state_dead:
-                    // When a proc exits *itself* we do not yet kill
-                    // it; for the time being we let it linger in the
-                    // blocked-exiting state, as someone else still
-                    // has a refcount on it.  The reap loop below will
-                    // mop it up when there are no more refs.
-                    {
-                        proc_state_t tstate = proc->state;
-                        proc->state = proc_state_running;
-                        proc_state_transition(&rt, proc,
-                                              proc_state_running,
-                                              tstate);
-                    }
-                    break;
-
-                case proc_state_blocked_reading:
-                case proc_state_blocked_writing:
-                case proc_state_blocked_waiting:
-                    break;
+            case proc_state_dead:
+                // When a proc exits *itself* we do not yet kill
+                // it; for the time being we let it linger in the
+                // blocked-exiting state, as someone else still
+                // has a refcount on it.  The reap loop below will
+                // mop it up when there are no more refs.
+                {
+                    proc_state_t tstate = proc->state;
+                    proc->state = proc_state_running;
+                    proc_state_transition(&rt, proc,
+                                          proc_state_running,
+                                          tstate);
                 }
+                break;
 
-                rt.reap_dead_procs();
+            case proc_state_blocked_reading:
+            case proc_state_blocked_writing:
+            case proc_state_blocked_waiting:
+                break;
             }
-            proc = rt.sched();
+
+            rt.reap_dead_procs();
         }
+        proc = rt.sched();
 
         rt.log(LOG_RT, "finished main loop (rt.rval = %d)", rt.rval);
         rval = rt.rval;
     }
-    if (live_allocs != 0) {
-        srv->fatal("leaked memory in rust main loop", __FILE__, __LINE__);
-    }
     return rval;
+}
+
+rust_srv::rust_srv() :
+    live_allocs(0)
+{
+}
+
+rust_srv::~rust_srv()
+{
+    if (live_allocs != 0) {
+        fatal("leaked memory in rust main loop", __FILE__, __LINE__);
+    }
 }
 
 void
@@ -1994,18 +1993,24 @@ rust_srv::log(char const *str)
 void *
 rust_srv::malloc(size_t bytes)
 {
+    ++live_allocs;
     return ::malloc(bytes);
 }
 
 void *
 rust_srv::realloc(void *p, size_t bytes)
 {
+    if (!p)
+        live_allocs++;
     return ::realloc(p, bytes);
 }
 
 void
 rust_srv::free(void *p)
 {
+    if (live_allocs < 1)
+        fatal("live_allocs < 1", __FILE__, __LINE__);
+    live_allocs--;
     ::free(p);
 }
 
