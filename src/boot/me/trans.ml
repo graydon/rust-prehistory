@@ -1933,6 +1933,17 @@ let trans_visitor
         trans_cond_fail errstr jmp
 
 
+  and trans_bind_fn
+      ((*initializing*)_:bool)
+      ((*direct*)_:bool)
+      ((*dst*)_:Ast.lval)
+      ((*flv*)_:Ast.lval)
+      ((*tsig*)_:Ast.ty_sig)
+      ((*args*)_:Ast.atom option array)
+      : unit =
+    bug () "trans_bind_fn not yet implemented"
+
+
   and trans_arg0 (arg_cell:Il.cell) (output_cell:Il.cell) : unit =
     (* Emit arg0 of any call: the output slot. *)
     iflog (fun _ -> annotate "fn-call arg 0: output slot");
@@ -2119,8 +2130,15 @@ let trans_visitor
               | _ -> bug () "Calling unexpected lval."
           end
 
-      | Ast.STMT_bind ((*dst*)_, (*flv*)_, (*args*)_) ->
-          bugi cx stmt.id "bind not yet implemented"
+      | Ast.STMT_bind (dst, flv, args) ->
+          begin
+            let init = maybe_init stmt.id "bind" dst in
+              match lval_ty cx flv with
+                  Ast.TY_fn (tsig, _) ->
+                    trans_bind_fn init (lval_is_direct_fn cx flv) dst flv tsig args
+                      (* FIXME (bug 544382): implement bind for modules *)
+                | _ -> bug () "Binding unexpected lval."
+          end
 
       | Ast.STMT_init_rec (dst, atab) ->
           let (slot_cell, slot) = trans_lval_init dst in

@@ -530,6 +530,11 @@ and walk_stmt
           walk_lval v f;
           Array.iter (walk_atom v) az
 
+      | Ast.STMT_bind (dst, f, az) ->
+          walk_lval v dst;
+          walk_lval v f;
+          Array.iter (walk_opt_atom v) az
+
       | Ast.STMT_spawn (dst,_,p,az) ->
           walk_lval v dst;
           walk_lval v p;
@@ -582,14 +587,14 @@ and walk_stmt
           walk_constrs v cs
 
       (* FIXME (bug 541526): finish this as needed. *)
-      | Ast.STMT_slice _ -> ()
-      | Ast.STMT_bind _ -> ()
-      | Ast.STMT_note _ -> ()
-      | Ast.STMT_foreach _ -> ()
-      | Ast.STMT_alt_tag _ -> ()
-      | Ast.STMT_alt_type _ -> ()
-      | Ast.STMT_alt_port _ -> ()
-      | Ast.STMT_use _ -> ()
+      | Ast.STMT_slice _
+      | Ast.STMT_note _
+      | Ast.STMT_foreach _
+      | Ast.STMT_alt_tag _
+      | Ast.STMT_alt_type _
+      | Ast.STMT_alt_port _
+      | Ast.STMT_use _ ->
+          bug () "unimplemented statement type in Walk.walk_stmt"
   in
     walk_bracketed
       v.visit_stmt_pre
@@ -625,6 +630,15 @@ and walk_atom
   match a with
       Ast.ATOM_literal ls -> walk_lit v ls.node
     | Ast.ATOM_lval lv -> walk_lval v lv
+
+
+and walk_opt_atom
+    (v:visitor)
+    (ao:Ast.atom option)
+    : unit =
+  match ao with
+      None -> ()
+    | Some a -> walk_atom v a
 
 
 and walk_lit
