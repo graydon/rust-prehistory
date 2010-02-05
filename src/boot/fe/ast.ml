@@ -1091,6 +1091,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           let (slot, ident) = sfor.for_slot in
           let (stmts, lval) = sfor.for_seq in
             begin
+              fmt_obox ff;
               fmt ff "for (";
               fmt_slot ff slot.node;
               fmt ff " ";
@@ -1099,7 +1100,9 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
               fmt_stmts ff stmts;
               fmt_lval ff lval;
               fmt ff ") ";
-              fmt_block ff sfor.for_body.node
+              fmt_obr ff;
+              fmt_stmts ff sfor.for_body.node;
+              fmt_cbb ff
             end
 
       | STMT_foreach _ -> fmt ff "?stmt_foreach?"
