@@ -1892,15 +1892,7 @@ upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spaw
 #error "Platform not supported"
 #endif
 
-    // Create a fake placeholder proc that sits in our runtime and blocks and merely controls the
-    // lifetime of the remote runtime.
-    rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, callsz);
-    add_proc_state_vec(rt, proc);
-    proc_state_transition(rt,
-                          proc,
-                          proc_state_running,
-                          proc_state_blocked_waiting);
-    return proc;
+    return 0; /* nil */
 }
 
 static int
