@@ -1087,7 +1087,21 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_constrs ff constrs;
           fmt ff ";"
 
-      | STMT_for _ -> fmt ff "?stmt_for?"
+      | STMT_for sfor ->
+          let (slot, ident) = sfor.for_slot in
+          let (stmts, lval) = sfor.for_seq in
+            begin
+              fmt ff "for (";
+              fmt_slot ff slot.node;
+              fmt ff " ";
+              fmt_ident ff ident;
+              fmt ff " in ";
+              fmt_stmts ff stmts;
+              fmt_lval ff lval;
+              fmt ff ") ";
+              fmt_block ff sfor.for_body.node
+            end
+
       | STMT_foreach _ -> fmt ff "?stmt_foreach?"
       | STMT_put _ -> fmt ff "?stmt_put?"
       | STMT_be _ -> fmt ff "?stmt_be?"

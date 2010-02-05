@@ -2315,7 +2315,7 @@ let trans_visitor
 
       | Ast.STMT_decl _ -> ()
 
-      | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt"
+      | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt %a" Ast.sprintf_stmt stmt
   in
 
   let capture_emitted_quads (fix:fixup) (node:node_id) : unit =
