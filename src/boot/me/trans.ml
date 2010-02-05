@@ -717,7 +717,7 @@ let trans_visitor
 
             mov refcnt_cell one;
 
-            trans_copy_tup true (need_addr_cell body_cell) slots src_ta slots;
+            trans_copy_tup true body_cell (Il.Addr src_ta) slots;
             trans_glue_frame_exit "new-mod glue" fix spill g;
 
 
@@ -1634,58 +1634,43 @@ let trans_visitor
           then cell
           else Il.Addr (deref cell)
 
-  and trans_copy_structural
+  and trans_copy_tup
       (initializing:bool)
-      (dst_ta:Il.typed_addr) (dst_slots:Ast.ty_tup)
-      (src_ta:Il.typed_addr) (src_slots:Ast.ty_tup)
+      (dst:Il.cell)
+      (src:Il.cell)
+      (slots:Ast.ty_tup)
       : unit =
-    assert ((snd dst_ta) = (snd src_ta));
-    assert (dst_slots = src_slots);
     Array.iteri
       begin
         fun i slot ->
-          let sub_dst_cell = get_element_ptr (Il.Addr dst_ta) i in
-          let sub_src_cell = get_element_ptr (Il.Addr src_ta) i in
+          let sub_dst_cell = get_element_ptr dst i in
+          let sub_src_cell = get_element_ptr src i in
             trans_copy_slot initializing sub_dst_cell slot sub_src_cell slot
       end
-      src_slots
+      slots
 
   and trans_copy_rec
       (initializing:bool)
-      (dst_ta:Il.typed_addr) (dst_entries:Ast.ty_rec)
-      (src_ta:Il.typed_addr) (src_entries:Ast.ty_rec)
+      (dst:Il.cell)
+      (src:Il.cell)
+      (entries:Ast.ty_rec)
       : unit =
-    let dst_slots = Array.map (fun (_, slot) -> slot) dst_entries in
-    let src_slots = Array.map (fun (_, slot) -> slot) src_entries in
-      trans_copy_structural
-        initializing
-        dst_ta dst_slots
-        src_ta src_slots
-
-  and trans_copy_tup
-      (initializing:bool)
-      (dst_ta:Il.typed_addr) (dst_slots:Ast.ty_tup)
-      (src_ta:Il.typed_addr) (src_slots:Ast.ty_tup)
-      : unit =
-      trans_copy_structural
-        initializing
-        dst_ta dst_slots
-        src_ta src_slots
+    let slots = Array.map (fun (_, slot) -> slot) entries in
+      trans_copy_tup initializing dst src slots
 
   and trans_copy_tag
       (initializing:bool)
-      (dst_ta:Il.typed_addr) (dst_ttag:Ast.ty_tag)
-      (src_ta:Il.typed_addr) (src_ttag:Ast.ty_tag)
+      (dst:Il.cell)
+      (src:Il.cell)
+      (ttag:Ast.ty_tag)
       : unit =
-    assert (src_ttag = dst_ttag);
-    let tag_keys = sorted_htab_keys dst_ttag in
+    let tag_keys = sorted_htab_keys ttag in
 
     let tmp = next_vreg_cell word_ty in
-    let dst_tag = get_element_ptr (Il.Addr dst_ta) 0 in
-    let src_tag = get_element_ptr (Il.Addr src_ta) 0 in
-
-    let dst_union = (get_element_ptr (Il.Addr dst_ta) 1) in
-    let src_union = (get_element_ptr (Il.Addr src_ta) 1) in
+    let dst_tag = get_element_ptr dst 0 in
+    let src_tag = get_element_ptr src 0 in
+    let dst_union = get_element_ptr dst 1 in
+    let src_union = get_element_ptr src 1 in
 
       mov tmp (Il.Cell src_tag);
       mov dst_tag (Il.Cell tmp);
@@ -1695,27 +1680,22 @@ let trans_visitor
             (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i)
                                        ^ " == " ^ (Ast.fmt_to_str Ast.fmt_name key))));
             let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
-            let ttup = Hashtbl.find dst_ttag key in
-              trans_copy_tup
-                initializing
-                (need_addr_cell (get_variant_ptr dst_union i)) ttup
-                (need_addr_cell (get_variant_ptr src_union i)) ttup;
+            let ttup = Hashtbl.find ttag key in
+            let dst = get_variant_ptr dst_union i in
+            let src = get_variant_ptr src_union i in
+              trans_copy_tup initializing dst src ttup;
               List.iter patch jmps
         end
         tag_keys
 
   and trans_copy_pair
       (_(*initializing*):bool)
-      (dst_ta:Il.typed_addr)
-      (src_ta:Il.typed_addr)
+      (dst:Il.cell)
+      (src:Il.cell)
       : unit =
     (* FIXME: adjust refcounts on non-null bound value carried along. *)
-    let (dst_addr, _) = dst_ta in
-    let (src_addr, _) = src_ta in
-      mov (word_at dst_addr) (Il.Cell (word_at src_addr));
-      let dst_addr = Il.addr_add_imm dst_addr (word_n 1) in
-      let src_addr = Il.addr_add_imm src_addr (word_n 1) in
-        mov (word_at dst_addr) (Il.Cell (word_at src_addr));
+    mov (get_element_ptr dst 0) (Il.Cell (get_element_ptr src 0));
+    mov (get_element_ptr dst 1) (Il.Cell (get_element_ptr src 1));
 
   and trans_copy_slot
       (initializing:bool)
@@ -1798,58 +1778,35 @@ let trans_visitor
     let src = deref_slot false src src_slot in
       iflog (fun _ ->
                annotate ("heavy copy: referent data"));
-      match (dst, slot_ty dst_slot,
-             src, slot_ty src_slot) with
-          (Il.Addr dst_ta, Ast.TY_rec dst_entries,
-           Il.Addr src_ta, Ast.TY_rec src_entries) ->
-            trans_copy_rec
-              initializing
-              dst_ta dst_entries
-              src_ta src_entries
+      match slot_ty dst_slot with
+          Ast.TY_rec entries ->
+            trans_copy_rec initializing dst src entries
 
-        | (Il.Addr dst_ta, Ast.TY_tup dst_slots,
-           Il.Addr src_ta, Ast.TY_tup src_slots) ->
-            trans_copy_tup
-              initializing
-              dst_ta dst_slots
-              src_ta src_slots
+        | Ast.TY_tup slots ->
+            trans_copy_tup initializing dst src slots
 
-        | (Il.Addr dst_ta, Ast.TY_tag dst_tag,
-           Il.Addr src_ta, Ast.TY_tag src_tag) ->
-            trans_copy_tag
-              initializing
-              dst_ta dst_tag
-              src_ta src_tag
+        | Ast.TY_tag tag ->
+            trans_copy_tag initializing dst src tag
 
-        | (Il.Addr dst_ta, Ast.TY_iso dst_iso,
-           Il.Addr src_ta, Ast.TY_iso src_iso) ->
-            let src_tag = get_iso_tag src_iso in
-            let dst_tag = get_iso_tag dst_iso in
-              trans_copy_tag
-                initializing
-                dst_ta dst_tag
-                src_ta src_tag
+        | Ast.TY_iso iso ->
+            let tag = get_iso_tag iso in
+              trans_copy_tag initializing dst src tag
 
-        | (Il.Addr dst_ta, Ast.TY_fn _,
-           Il.Addr src_ta, Ast.TY_fn _)
-        | (Il.Addr dst_ta, Ast.TY_pred _,
-           Il.Addr src_ta, Ast.TY_pred _)
-        | (Il.Addr dst_ta, Ast.TY_mod _,
-           Il.Addr src_ta, Ast.TY_mod _) ->
+        | Ast.TY_fn _
+        | Ast.TY_pred _
+        | Ast.TY_mod _ ->
             (*
              * FIXME: will need to split out TY_mod when module type
              * conversion (thus structural rearrangement) is part of
              * 1st-class mod copying.
              *)
-            trans_copy_pair
-              initializing
-              dst_ta src_ta
+            trans_copy_pair initializing dst src
 
-        | (_, t, _, _) when (i64_le (ty_sz abi t) word_sz) ->
+        | t when (i64_le (ty_sz abi t) word_sz) ->
             mov dst (Il.Cell src)
 
-        | (_, t, _, _) ->
-            bug () "unhandled form of heavyweight copy: %s" (Ast.fmt_to_str Ast.fmt_ty t)
+        | t ->
+            bug () "unhandled form of heavyweight copy: %a" Ast.sprintf_ty t
 
   and trans_copy
       (initializing:bool)
@@ -2501,15 +2458,13 @@ let trans_visitor
       let out_cell = Il.Addr (deref (Il.Addr (ptr_at (fp_imm out_addr_disp) (Ast.TY_tag ttag)))) in
       let tag_cell = get_element_ptr out_cell 0 in
       let union_cell = get_element_ptr out_cell 1 in
-      let dst_ta = need_addr_cell (get_variant_ptr union_cell i) in
-      let src_ta = (fp_imm arg0_disp, snd dst_ta) in
+      let dst = get_variant_ptr union_cell i in
+      let src = Il.Addr (fp_imm arg0_disp, snd (need_addr_cell dst)) in
         (* A clever compiler will inline this. We are not clever. *)
         iflog (fun _ -> annotate (Printf.sprintf "write tag #%d" i));
         mov tag_cell (imm (Int64.of_int i));
         iflog (fun _ -> annotate "copy tag-content tuple");
-        trans_copy_tup true
-          dst_ta slots
-          src_ta slots;
+        trans_copy_tup true dst src slots;
         trace_str cx.ctxt_sess.Session.sess_trace_tag
           ("finished tag constructor " ^ n);
         trans_frame_exit tagid;
