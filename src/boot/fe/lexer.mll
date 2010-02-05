@@ -123,6 +123,7 @@ rule token = parse
 | '~'                          { TILDE      }
 | '{'                          { LBRACE     }
 | '_' (dec as n)               { IDX (int_of_string n) }
+| '_'                          { UNDERSCORE }
 | '}'                          { RBRACE     }
 
 | "+="                         { OPEQ (PLUS) }

@@ -104,6 +104,7 @@ type token =
   (* Name components *)
   | IDENT         of string
   | IDX           of int
+  | UNDERSCORE
 
   (* Reserved type names *)
   | NIL
@@ -255,6 +256,7 @@ let rec string_of_tok t =
     (* Name components *)
     | IDENT s    -> s
     | IDX i      -> ("_" ^ (string_of_int i))
+    | UNDERSCORE -> "_"
 
     (* Reserved type names *)
     | NIL        -> "nil"
@@ -1124,7 +1126,9 @@ and parse_bottom_pexp (ps:pstate) : pexp =
 
 
 and parse_bind_arg (ps:pstate) : pexp option =
-  Some (parse_pexp ps)
+  match peek ps with
+      UNDERSCORE -> (bump ps; None)
+    | _ -> Some (parse_pexp ps)
 
 
 and parse_ext_pexp (ps:pstate) (pexp:pexp) : pexp =
