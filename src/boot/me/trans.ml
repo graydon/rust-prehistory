@@ -846,19 +846,46 @@ let trans_visitor
     let fix = get_typed_mem_glue g ty prefix inner in
       fix
 
+  and get_clone_glue
+      (ty:Ast.ty)
+      (curr_iso:Ast.ty_iso option)
+      : fixup =
+    let g = GLUE_clone ty in
+    let prefix _ = "clone " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
+    let inner (arg:Il.typed_addr) =
+      let dst = (deref (Il.Addr (ptr_at (fp_imm out_addr_disp) ty))) in
+      let src = (deref (Il.Addr arg)) in
+        clone_ty ty dst src curr_iso
+    in
+    let fix = get_typed_mem_glue g ty prefix inner in
+      fix
 
-  and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
+  and trans_call_mem_glue_full (dst:Il.cell option) (fix:fixup) (arg:Il.cell) : unit =
     let code = Il.CodeAddr (fixup_to_addr
                               abi.Abi.abi_has_abs_code
                               fix Il.CodeTy)
     in
     let arg_tup = arg_tup_cell [| interior_slot (Ast.TY_mach word_ty_mach) |] in
-      (* Arg0 is omitted as there's no output-slot for gc glue. *)
+      (* Arg0 may or may not be provided; if given we alias it. *)
       (* Arg1 is process-pointer, as usual. *)
       (* Arg2 is the sole pointer we pass in. Hard-wire its address here. *)
+    let inner _ =
       mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
       mov (get_element_ptr arg_tup 2) (Il.Cell arg);
-      call_code code;
+      call_code code
+    in
+      match dst with
+          None -> inner()
+        | Some cell ->
+            aliasing true cell
+              begin
+                fun op ->
+                  mov (get_element_ptr arg_tup 0) op;
+                  inner()
+              end
+
+  and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
+    trans_call_mem_glue_full None fix arg
 
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
@@ -1047,19 +1074,27 @@ let trans_visitor
     let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
 
       iflog (fun _ -> annotate "spawn proc: copy args");
-      copy_fn_args proc_cell in_slots args [||];
-      iflog (fun _ -> annotate "spawn proc: upcall");
-      let upcall = "upcall_spawn_" ^
+
+      (* FIXME: artificial temporary use of 'get_clone_glue' here to please compiler. *)
+      (* Need to actually define a clone_fn_args function that uses it. *)
+      let _ = get_clone_glue in
+      let clone_fn_args = copy_fn_args in
+
+      let (realm_str, arg_copy_fn) =
         match realm with
-            Ast.REALM_local -> "local"
-          | Ast.REALM_thread -> "thread"
+            Ast.REALM_local -> ("local", copy_fn_args)
+          | Ast.REALM_thread -> ("thread", clone_fn_args)
       in
-        trans_upcall upcall proc_cell
-          [|
-            alias_cell exit_proc_glue_cell;
-            alias_cell fn_cell;
-            imm callsz |];
-        ()
+        iflog (fun _ -> annotate ("spawn-" ^ realm_str ^ " proc: upcall"));
+        arg_copy_fn proc_cell in_slots args [||];
+        let upcall = "upcall_spawn_" ^ realm_str in
+          trans_upcall upcall proc_cell
+            [|
+              alias_cell exit_proc_glue_cell;
+              alias_cell fn_cell;
+              imm callsz
+            |];
+          ()
 
   and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
     let (filename, line, _) =
@@ -1346,6 +1381,20 @@ let trans_visitor
       : unit =
     iter_ty_slots ty addr mark_slot curr_iso
 
+  and clone_ty
+      (ty:Ast.ty)
+      (dst:Il.typed_addr)
+      (src:Il.typed_addr)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+    match ty with
+        Ast.TY_chan _ ->
+          trans_upcall "upcall_clone_chan" (Il.Addr dst) [| (Il.Cell (Il.Addr src)) |]
+      | Ast.TY_proc
+      | Ast.TY_port _
+      | _ when type_is_mutable ty -> bug () "cloning mutable type"
+      | _ -> iter_ty_slots ty src clone_slot curr_iso
+
   and free_ty
         (ty:Ast.ty)
         (cell:Il.cell)
@@ -1417,6 +1466,18 @@ let trans_visitor
               trans_call_mem_glue (get_mark_glue ty curr_iso) tmp
 
         | _ -> ()
+
+  and clone_slot
+      ((*cell*)_:Il.cell)
+      (slot:Ast.slot)
+      ((*curr_iso*)_:Ast.ty_iso option)
+      : unit =
+    let mctrl = slot_mem_ctrl slot in
+      match mctrl with
+          _ ->
+            (* FIXME: totally wrong; generalize trans_copy_slot call-tree to 
+             * iterate over the slots in a structure in parallel. *)
+            ()
 
   and drop_slot
       (cell:Il.cell)
