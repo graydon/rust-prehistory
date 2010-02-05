@@ -1280,7 +1280,6 @@ let trans_visitor
         Array.iteri
           begin
             fun i key ->
-              (* FIXME (bug 541540): A table-switch would be better. *)
               (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i)
                                          ^ " == " ^ (Ast.fmt_to_str Ast.fmt_name key))));
               let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
@@ -1632,7 +1631,6 @@ let trans_visitor
       Array.iteri
         begin
           fun i key ->
-            (* FIXME (bug 541540): A table-switch would be better. *)
             (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i)
                                        ^ " == " ^ (Ast.fmt_to_str Ast.fmt_name key))));
             let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
