@@ -116,19 +116,38 @@ let all_item_collecting_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
 
+  let push_on_item_arg_list item_id arg_id =
+    let existing =
+      match htab_search cx.ctxt_frame_args item_id with
+          None -> []
+        | Some x -> x
+    in
+      Hashtbl.replace cx.ctxt_frame_args item_id (arg_id :: existing)
+  in
+
+  let note_header item_id header =
+    Array.iter
+      (fun (sloti,ident) ->
+         let key = Ast.KEY_ident ident in
+           htab_put cx.ctxt_slot_keys sloti.id key;
+           push_on_item_arg_list item_id sloti.id)
+      header;
+  in
+
   let visit_native_mod_item_pre n i =
     htab_put cx.ctxt_all_native_items i.id i.node;
     htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
     log cx "collected native item #%d: %s" (int_of_node i.id) n;
+    begin
+      match i.node with
+          Ast.NATIVE_fn nfn ->
+            note_header i.id nfn.Ast.native_fn_input_slots
+        | _ -> ()
+    end;
     inner.Walk.visit_native_mod_item_pre n i
   in
 
   let visit_mod_item_pre n p i =
-    let note_header =
-      Array.iter
-        (fun (sloti,ident) ->
-           htab_put cx.ctxt_slot_keys sloti.id (Ast.KEY_ident ident))
-    in
       htab_put cx.ctxt_all_items i.id i.node;
       htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
       log cx "collected item #%d: %s" (int_of_node i.id) n;
@@ -136,13 +155,9 @@ let all_item_collecting_visitor
         (* FIXME: this is incomplete. *)
         match i.node with
             Ast.MOD_ITEM_fn fd ->
-              begin
-                note_header fd.Ast.decl_item.Ast.fn_input_slots;
-              end
+              note_header i.id fd.Ast.decl_item.Ast.fn_input_slots;
           | Ast.MOD_ITEM_pred pd ->
-              begin
-                note_header pd.Ast.decl_item.Ast.pred_input_slots
-              end
+              note_header i.id pd.Ast.decl_item.Ast.pred_input_slots
           | _ -> ()
       end;
       inner.Walk.visit_mod_item_pre n p i

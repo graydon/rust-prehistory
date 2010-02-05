@@ -66,6 +66,7 @@ type constr_key =
 
 type ctxt =
     { ctxt_sess: Session.sess;
+      ctxt_frame_args: (node_id,node_id list) Hashtbl.t;
       ctxt_frame_blocks: (node_id,node_id list) Hashtbl.t;
       ctxt_block_slots: block_slots_table;
       ctxt_block_items: block_items_table;
@@ -128,6 +129,7 @@ type ctxt =
 
 let new_ctxt sess abi crate =
   { ctxt_sess = sess;
+    ctxt_frame_args = Hashtbl.create 0;
     ctxt_frame_blocks = Hashtbl.create 0;
     ctxt_block_slots = Hashtbl.create 0;
     ctxt_block_items = Hashtbl.create 0;

@@ -351,11 +351,29 @@ let trans_visitor
   in
 
   let iter_frame_slots
-      (fn_id:node_id)
+      (frame_id:node_id)
       (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
       : unit =
-    let blocks = Hashtbl.find cx.ctxt_frame_blocks fn_id in
+    let blocks = Hashtbl.find cx.ctxt_frame_blocks frame_id in
       List.iter (fun block -> iter_block_slots block fn) blocks
+  in
+
+  let iter_frame_and_arg_slots
+      (frame_id:node_id)
+      (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
+      : unit =
+    iter_frame_slots frame_id fn;
+    match htab_search cx.ctxt_frame_args frame_id with
+        None -> ()
+      | Some ls ->
+          List.iter
+            begin
+              fun slot_id ->
+                let key = Hashtbl.find cx.ctxt_slot_keys slot_id in
+                let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
+                  fn key slot_id slot
+            end
+            ls
   in
 
   let binop_to_jmpop (binop:Ast.binop) : Il.jmpop =
@@ -2280,7 +2298,7 @@ let trans_visitor
           (fun _ -> prefix ^ " frame: " ^ path)
           begin
             fun addr ->
-              iter_frame_slots fnid
+              iter_frame_and_arg_slots fnid
                 begin
                   fun key slot_id slot ->
                     match htab_search cx.ctxt_slot_layouts slot_id with

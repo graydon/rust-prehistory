@@ -282,8 +282,6 @@ struct rust_rt {
     randctx rctx;
     rust_proc *root_proc;
     rust_proc *curr_proc;
-    ptr_vec<rust_port> ports; // bug 541584
-    ptr_vec<rust_chan> chans;
     int rval;
     lockfree_queue *incoming; // incoming messages from other threads
 
@@ -455,7 +453,6 @@ struct rust_port : public rc_base {
     rust_rt *rt;
     size_t unit_sz;
     ptr_vec<rust_q> writers;
-    size_t idx; // bug 541584
 
     rust_port(rust_proc *proc, size_t unit_sz);
     ~rust_port();
@@ -471,7 +468,6 @@ struct rust_chan : public rc_base {
     // fields known only to the runtime
     rust_rt* rt;
     rust_port* port;
-    size_t idx; // bug 541584
 
     // queue the chan is sending to (resolved lazily)
     rust_proc *proc;
@@ -741,7 +737,6 @@ rust_port::rust_port(rust_proc *proc, size_t unit_sz)
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
             PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)this);
-    rt->ports.push(this);
 }
 
 rust_port::~rust_port()
@@ -749,11 +744,8 @@ rust_port::~rust_port()
     rt->log(LOG_COMM|LOG_MEM,
             "~rust_port 0x%" PRIxPTR,
             (uintptr_t)this);
-    for (size_t i = 0; i < writers.length(); ++i)
-        writers[i]->disconnect();
-    // FIXME (bug 541584): can remove the ports list when we have
-    // unwinding / finishing working.
-    rt->ports.swapdel(this);
+    while (writers.length() > 0)
+        writers.pop()->disconnect();
 }
 
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
@@ -762,12 +754,10 @@ rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     proc(NULL),
     q(NULL)
 {
-    rt->chans.push(this);
 }
 
 rust_chan::~rust_chan()
 {
-    rt->chans.swapdel(this);
 }
 
 /* Outgoing message queues */
@@ -796,9 +786,13 @@ rust_q::disconnect()
 
     sending = false;
     port = NULL;
-    proc_state_transition(rt, proc,
-                          proc_state_blocked_writing,
-                          proc_state_running);
+    // Only wake up if blocked on us (might be dead).
+    if (proc->state == proc_state_blocked_reading ||
+        proc->state == proc_state_blocked_writing) {
+        proc_state_transition(rt, proc,
+                              proc->state,
+                              proc_state_running);
+    }
 }
 
 rust_q::~rust_q()
@@ -1302,8 +1296,6 @@ rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue) :
     dead_procs(this),
     root_proc(NULL),
     curr_proc(NULL),
-    ports(this),
-    chans(this),
     rval(0)
 {
     logptr("new rt", (uintptr_t)this);
@@ -1341,14 +1333,6 @@ rust_rt::~rust_rt() {
     del_all_procs(this, &blocked_procs);
     log(LOG_PROC, "deleting all dead procs");
     del_all_procs(this, &dead_procs);
-
-    log(LOG_PROC, "deleting all dangling ports and chans");
-    // FIXME (bug 541584): remove when port <-> proc linkage is obsolete.
-    while (chans.length() > 0)
-        delete chans[0];
-    // delete ports last since chans can still hold references to them
-    while (ports.length() > 0)
-        delete ports[0];
 }
 
 void
