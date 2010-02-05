@@ -511,8 +511,15 @@ struct rust_q : public lockfree_queue_chain {
     ~rust_q();
 
     void operator delete(void *ptr);
+
     void disconnect();
 };
+
+static void
+proc_state_transition(rust_rt *rt,
+                      rust_proc *proc,
+                      proc_state_t src,
+                      proc_state_t dst);
 
 /* Utility type: pointer-vector. */
 
@@ -746,7 +753,6 @@ rust_port::~rust_port()
     rt->log(LOG_COMM|LOG_MEM,
             "~rust_port 0x%" PRIxPTR,
             (uintptr_t)this);
-    /* FIXME: need to force-fail all writers waiting to send to us. */
     for (size_t i = 0; i < writers.length(); ++i)
         writers[i]->disconnect();
     // FIXME (bug 541584): can remove the ports list when we have
@@ -787,10 +793,16 @@ rust_q::rust_q(rust_proc *proc, rust_port *port)
 void
 rust_q::disconnect()
 {
-    I(proc->rt, sending);
-    I(proc->rt, port);
+    rust_rt *rt = proc->rt;
+
+    I(rt, sending);
+    I(rt, port);
+
     sending = false;
     port = NULL;
+    proc_state_transition(rt, proc,
+                          proc_state_blocked_writing,
+                          proc_state_running);
 }
 
 rust_q::~rust_q()
@@ -1137,12 +1149,6 @@ get_callee_save_fp(uintptr_t *top_of_callee_saves)
 {
     return top_of_callee_saves[n_callee_saves - (callee_save_fp + 1)];
 }
-
-static void
-proc_state_transition(rust_rt *rt,
-                      rust_proc *proc,
-                      proc_state_t src,
-                      proc_state_t dst);
 
 void
 rust_proc::kill() {
