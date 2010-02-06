@@ -57,7 +57,7 @@ let trans_visitor
   let zero = imm 0L in
   let imm_true = one in
   let imm_false = zero in
-  let nil_ptr = Il.Addr ((Il.Abs (Asm.IMM 0L)), Il.NilTy) in
+  let nil_ptr = Il.Mem ((Il.Abs (Asm.IMM 0L)), Il.NilTy) in
 
   let table_of_fixups (fixups:fixup array) : Asm.frag =
     Asm.SEQ
@@ -138,11 +138,11 @@ let trans_visitor
   in
 
   let word_at (addr:Il.addr) : Il.cell =
-    Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
+    Il.Mem (addr, Il.ScalarTy (Il.ValTy word_bits))
   in
 
   let wordptr_at (addr:Il.addr) : Il.cell =
-    Il.Addr (addr, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
+    Il.Mem (addr, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
   in
 
   let mov (dst:Il.cell) (src:Il.operand) : unit =
@@ -154,7 +154,7 @@ let trans_visitor
   in
 
   let ptr_at (addr:Il.addr) (pointee_ty:Ast.ty) : Il.cell =
-    Il.Addr (addr, Il.ScalarTy (Il.AddrTy (referent_type abi pointee_ty)))
+    Il.Mem (addr, Il.ScalarTy (Il.AddrTy (referent_type abi pointee_ty)))
   in
 
   let need_scalar_ty (rty:Il.referent_ty) : Il.scalar_ty =
@@ -165,13 +165,13 @@ let trans_visitor
 
   let need_addr_cell (cell:Il.cell) : Il.typed_addr =
     match cell with
-        Il.Addr a -> a
+        Il.Mem a -> a
       | Il.Reg _ -> bug () "expected address cell, got non-address register cell"
   in
 
   let get_element_ptr (addr_cell:Il.cell) (i:int) : Il.cell =
     match addr_cell with
-        Il.Addr (addr, Il.StructTy elts) when i >= 0 && i < (Array.length elts) ->
+        Il.Mem (addr, Il.StructTy elts) when i >= 0 && i < (Array.length elts) ->
           assert ((Array.length elts) != 0);
           begin
             let elts_before = Array.sub elts 0 i in
@@ -179,7 +179,7 @@ let trans_visitor
             let elts_before_size = Il.referent_ty_size word_bits (Il.StructTy elts_before) in
             let elt_align = Il.referent_ty_align word_bits elt_rty in
             let elt_off = Il.align_to elt_align elts_before_size in
-              Il.Addr (Il.addr_add_imm addr elt_off, elt_rty)
+              Il.Mem (Il.addr_add_imm addr elt_off, elt_rty)
           end
 
       | _ -> bug () "get_element_ptr %d on cell %s" i
@@ -188,9 +188,9 @@ let trans_visitor
 
   let get_variant_ptr (addr_cell:Il.cell) (i:int) : Il.cell =
     match addr_cell with
-        Il.Addr (addr, Il.UnionTy elts) when i >= 0 && i < (Array.length elts) ->
+        Il.Mem (addr, Il.UnionTy elts) when i >= 0 && i < (Array.length elts) ->
           assert ((Array.length elts) != 0);
-          Il.Addr (addr, elts.(i))
+          Il.Mem (addr, elts.(i))
 
       | _ -> bug () "get_variant_ptr %d on cell %s" i
           (Il.string_of_cell abi.Abi.abi_str_of_hardreg addr_cell)
@@ -219,11 +219,11 @@ let trans_visitor
       let s = (Il.next_spill (emitter())) in
       let spill_addr = Il.Spill s in
       let spill_ta = (spill_addr, Il.ScalarTy t) in
-        mov (Il.Addr spill_ta) src;
+        mov (Il.Mem spill_ta) src;
         spill_ta
     in
     match src with
-        Il.Cell (Il.Addr ta) -> ta
+        Il.Cell (Il.Mem ta) -> ta
       | Il.Cell (Il.Reg (_, t)) -> do_spill t
       | Il.Imm _ -> do_spill (Il.ValTy word_bits)
   in
@@ -238,17 +238,17 @@ let trans_visitor
       match op with
           Il.Imm  (_, tm) -> do_mov (Il.ValTy (Il.bits_of_ty_mach tm))
         | Il.Cell (Il.Reg rt) -> rt
-        | Il.Cell (Il.Addr (_, Il.ScalarTy st)) -> do_mov st
-        | Il.Cell (Il.Addr (_, rt)) ->
+        | Il.Cell (Il.Mem (_, Il.ScalarTy st)) -> do_mov st
+        | Il.Cell (Il.Mem (_, rt)) ->
             bug () "forcing non-scalar referent of type %s to register"
               (Il.string_of_referent_ty rt)
   in
 
   let via_memory (writeback:bool) (c:Il.cell) (thunk:Il.cell -> unit) : unit =
     match c with
-        Il.Addr _ -> thunk c
+        Il.Mem _ -> thunk c
       | Il.Reg _ ->
-          let mem_c = Il.Addr (force_to_mem (Il.Cell c)) in
+          let mem_c = Il.Mem (force_to_mem (Il.Cell c)) in
             thunk mem_c;
             if writeback
             then
@@ -262,7 +262,7 @@ let trans_visitor
   let pointee_type (ptr:Il.cell) : Il.referent_ty =
     match ptr with
         Il.Reg (_, (Il.AddrTy rt)) -> rt
-      | Il.Addr (_, Il.ScalarTy (Il.AddrTy rt)) -> rt
+      | Il.Mem (_, Il.ScalarTy (Il.AddrTy rt)) -> rt
       | _ ->
           bug () "taking pointee-type of non-address cell %s "
             (Il.string_of_cell abi.Abi.abi_str_of_hardreg ptr)
@@ -271,7 +271,7 @@ let trans_visitor
   let deref (ptr:Il.cell) : Il.cell =
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
-          Il.AddrTy rt -> Il.Addr (based r, rt)
+          Il.AddrTy rt -> Il.Mem (based r, rt)
         | _ -> bug () "dereferencing non-address cell of type %s "
             (Il.string_of_scalar_ty st)
   in
@@ -279,7 +279,7 @@ let trans_visitor
   let deref_off (ptr:Il.cell) (off:Asm.expr64) : Il.cell =
     let (r, st) = force_to_reg (Il.Cell ptr) in
       match st with
-          Il.AddrTy rt -> Il.Addr (based_off r off, rt)
+          Il.AddrTy rt -> Il.Mem (based_off r off, rt)
         | _ -> bug () "offset-dereferencing non-address cell of type %s "
             (Il.string_of_scalar_ty st)
   in
@@ -326,7 +326,7 @@ let trans_visitor
                   None -> bugi cx slot_id "slot assigned to neither vreg nor layout"
                 | Some layout ->
                     let disp = layout.layout_offset in
-                      Il.Addr (fp_imm disp, referent_type)
+                      Il.Mem (fp_imm disp, referent_type)
             end
   in
 
@@ -407,7 +407,7 @@ let trans_visitor
             emit (Il.binary Il.UMUL t atop (imm unit_sz));
             let (addr, _) = need_addr_cell (deref cell) in
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
-              (Il.Addr (elt_addr, slot_referent_type abi slot), slot)
+              (Il.Mem (elt_addr, slot_referent_type abi slot), slot)
 
       | (Ast.TY_str,
          Ast.COMP_atom at) ->
@@ -419,7 +419,7 @@ let trans_visitor
             emit (Il.binary Il.UMUL t atop (imm unit_sz));
             let (addr, _) = need_addr_cell (deref cell) in
             let elt_addr = trans_bounds_check addr (Il.Cell t) in
-              (Il.Addr (elt_addr, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
+              (Il.Mem (elt_addr, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
 
       | (Ast.TY_mod (_, mtis),
          Ast.COMP_named (Ast.COMP_ident id)) ->
@@ -434,7 +434,7 @@ let trans_visitor
           let item_addr = Il.addr_add_imm table_addr off in
           let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
           let item_referent_ty = referent_type abi item_ty in
-            (Il.Addr (item_addr, item_referent_ty), interior_slot item_ty)
+            (Il.Mem (item_addr, item_referent_ty), interior_slot item_ty)
 
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
 
@@ -467,7 +467,7 @@ let trans_visitor
         : (Il.cell * Ast.slot) =
       let rty = slot_referent_type abi slot in
       let addr = fixup_to_addr abs_ok fix rty in
-        (Il.Addr (addr, rty), slot)
+        (Il.Mem (addr, rty), slot)
     in
 
     let return_item (item:Ast.mod_item)
@@ -605,7 +605,7 @@ let trans_visitor
       if abs_ok
       then Il.Abs i
       else
-        let c = Il.Addr (Il.Abs i, referent_ty) in
+        let c = Il.Mem (Il.Abs i, referent_ty) in
         let (reg, _) = force_to_reg (Il.Cell (alias c)) in
           Il.RegIn (reg, None)
 
@@ -709,7 +709,7 @@ let trans_visitor
 
             mov refcnt_cell one;
 
-            trans_copy_tup true body_cell (Il.Addr src_ta) slots;
+            trans_copy_tup true body_cell (Il.Mem src_ta) slots;
             trans_glue_frame_exit "new-mod glue" fix spill g;
 
 
@@ -1084,7 +1084,7 @@ let trans_visitor
     let exit_proc_glue_addr = (fixup_to_addr
                                  abi.Abi.abi_has_abs_data
                                  exit_proc_glue_fixup Il.CodeTy) in
-    let exit_proc_glue_cell = Il.Addr (exit_proc_glue_addr, Il.CodeTy) in
+    let exit_proc_glue_cell = Il.Mem (exit_proc_glue_addr, Il.CodeTy) in
 
       iflog (fun _ -> annotate "spawn proc: copy args");
 
@@ -1682,7 +1682,7 @@ let trans_visitor
   and deref_slot (initializing:bool) (cell:Il.cell) (slot:Ast.slot) : Il.cell =
     match slot.Ast.slot_mode with
         Ast.MODE_interior _ -> cell
-      | Ast.MODE_exterior _ -> Il.Addr (deref_exterior initializing cell slot)
+      | Ast.MODE_exterior _ -> Il.Mem (deref_exterior initializing cell slot)
       | Ast.MODE_read_alias
       | Ast.MODE_write_alias ->
           if initializing
@@ -1862,7 +1862,7 @@ let trans_visitor
               match dst_slot.Ast.slot_mode with
                   Ast.MODE_read_alias
                 | Ast.MODE_write_alias ->
-                    mov dst (Il.Cell (alias (Il.Addr (force_to_mem src))))
+                    mov dst (Il.Cell (alias (Il.Mem (force_to_mem src))))
                 | _ -> mov (deref_slot true dst dst_slot) src
             end
       | Ast.ATOM_lval src_lval ->
@@ -1928,12 +1928,12 @@ let trans_visitor
     if lval_is_item cx flv then
       let fn_item = lval_item cx flv in
       let fn_addr = fixup_to_addr abi.Abi.abi_has_abs_code (get_fn_fixup cx fn_item.id) Il.CodeTy in
-        (Il.Addr (fn_addr, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
+        (Il.Mem (fn_addr, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
     (* direct call to native item *)
     else if lval_is_native_item cx flv then
       let fn_item = lval_native_item cx flv in
       let fn_addr = fixup_to_addr abi.Abi.abi_has_abs_code (get_fn_fixup cx fn_item.id) Il.CodeTy in
-        (Il.Addr (fn_addr, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
+        (Il.Mem (fn_addr, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
     (* indirect call to computed slot *)
     else
       let (cell, slot) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
@@ -1961,7 +1961,7 @@ let trans_visitor
                      abi.Abi.abi_has_abs_code
                      glue_fixup Il.CodeTy)
     in
-    let fn_cell = Il.Addr (fn_addr, Il.CodeTy) in
+    let fn_cell = Il.Mem (fn_addr, Il.CodeTy) in
     let (in_slots, _) = tmod_hdr in
       trans_call initializing true (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots args [||]
@@ -1987,7 +1987,7 @@ let trans_visitor
       (flv:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let dst_cell = Il.Addr (force_to_mem imm_false) in
+    let dst_cell = Il.Mem (force_to_mem imm_false) in
       trans_call_pred dst_cell flv args;
       iflog (fun _ -> annotate "predicate check/fail");
       let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
@@ -2041,8 +2041,8 @@ let trans_visitor
 
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
-        Il.Addr (a, Il.CodeTy) -> Il.CodeAddr a
-      | Il.Addr (_, ty) ->
+        Il.Mem (a, Il.CodeTy) -> Il.CodeAddr a
+      | Il.Mem (_, ty) ->
           bug () "expected code cell, found cell of type %s" (Il.string_of_referent_ty ty)
       | _ -> bug () "loading code from register"
 
@@ -2120,7 +2120,7 @@ let trans_visitor
     let addr = sp_imm 0L in
     let ty = Ast.TY_tup (fn_call_tup abi arg_slots) in
     let rty = referent_type abi ty in
-      Il.Addr (addr, rty)
+      Il.Mem (addr, rty)
 
   and extra_arg_cell
       (arg_tup:Il.cell)
@@ -2131,7 +2131,7 @@ let trans_visitor
     let arg_off = Int64.add extra_args_start (word_n arg) in
     let arg_addr = sp_imm arg_off in
     let arg_referent_ty = Il.ScalarTy (Il.voidptr_t) in
-      Il.Addr (arg_addr, arg_referent_ty)
+      Il.Mem (arg_addr, arg_referent_ty)
 
   and drop_arg_slots
       (arg_slots:Ast.slot array)
@@ -2323,7 +2323,7 @@ let trans_visitor
                           let atom_ty = atom_type cx at in
                           let dst_slot = interior_slot atom_ty in
                           let dst_ty = referent_type abi atom_ty in
-                          let dst_cell = Il.Addr (dst_addr, dst_ty) in
+                          let dst_cell = Il.Mem (dst_addr, dst_ty) in
                             trans_init_slot_from_atom dst_cell dst_slot at
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
@@ -2378,7 +2378,7 @@ let trans_visitor
                       | Some layout ->
                           let referent_type = slot_id_referent_type slot_id in
                           let disp = layout.layout_offset in
-                          let fp_cell = Il.Addr (addr, (Il.ScalarTy (Il.AddrTy referent_type))) in
+                          let fp_cell = Il.Mem (addr, (Il.ScalarTy (Il.AddrTy referent_type))) in
                           let slot_cell = deref_imm fp_cell disp in
                             inner key slot_id slot slot_cell
                 end
@@ -2478,7 +2478,7 @@ let trans_visitor
       let tag_cell = get_element_ptr out_cell 0 in
       let union_cell = get_element_ptr out_cell 1 in
       let dst = get_variant_ptr union_cell i in
-      let src = Il.Addr (fp_imm arg0_disp, snd (need_addr_cell dst)) in
+      let src = Il.Mem (fp_imm arg0_disp, snd (need_addr_cell dst)) in
         (* A clever compiler will inline this. We are not clever. *)
         iflog (fun _ -> annotate (Printf.sprintf "write tag #%d" i));
         mov tag_cell (imm (Int64.of_int i));

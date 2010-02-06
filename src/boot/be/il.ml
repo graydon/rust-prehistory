@@ -59,7 +59,7 @@ type typed_imm = (Asm.expr64 * ty_mach);;
 
 type cell =
     Reg of typed_reg
-  | Addr of typed_addr
+  | Mem of typed_addr
 ;;
 
 type operand =
@@ -92,7 +92,7 @@ type operand =
 
 let cell_is_nil c =
   match c with
-      Addr (_, NilTy) -> true
+      Mem (_, NilTy) -> true
     | Reg (_, AddrTy NilTy) -> true
     | _ -> false
 ;;
@@ -218,7 +218,7 @@ type quads = quad array ;;
 let cell_scalar_ty (c:cell) : scalar_ty =
   match c with
       Reg (_, st) -> st
-    | Addr (_, rt) -> AddrTy rt
+    | Mem (_, rt) -> AddrTy rt
 ;;
 
 let bits_of_ty_mach (tm:ty_mach) : bits =
@@ -245,8 +245,8 @@ let scalar_ty_bits (word_bits:bits) (st:scalar_ty) : bits =
 let cell_bits (word_bits:bits) (c:cell) : bits =
   match c with
       Reg (_, st) -> scalar_ty_bits word_bits st
-    | Addr (_, ScalarTy st) -> scalar_ty_bits word_bits st
-    | Addr _ -> failwith "addr of non-scalar in Il.cell_bits"
+    | Mem (_, ScalarTy st) -> scalar_ty_bits word_bits st
+    | Mem _ -> failwith "addr of non-scalar in Il.cell_bits"
 ;;
 
 let operand_bits (word_bits:bits) (op:operand) : bits =
@@ -329,7 +329,7 @@ and referent_ty_align (word_bits:bits) (rt:referent_ty) : int64 =
 
 type quad_processor =
     { qp_reg:  (quad_processor -> reg -> reg);
-      qp_addr:  (quad_processor -> addr -> addr);
+      qp_mem:  (quad_processor -> addr -> addr);
       qp_cell_read: (quad_processor -> cell -> cell);
       qp_cell_write: (quad_processor -> cell -> cell);
       qp_code: (quad_processor -> code -> code);
@@ -339,10 +339,10 @@ type quad_processor =
 let identity_processor =
   let qp_cell = (fun qp c -> match c with
                      Reg (r, b) -> Reg (qp.qp_reg qp r, b)
-                   | Addr (a, b) -> Addr (qp.qp_addr qp a, b))
+                   | Mem (a, b) -> Mem (qp.qp_mem qp a, b))
   in
     { qp_reg = (fun _ r -> r);
-      qp_addr = (fun qp a -> match a with
+      qp_mem = (fun qp a -> match a with
                      RegIn (r, o) -> RegIn (qp.qp_reg qp r, o)
                    | Abs _
                    | AbsIn _
@@ -350,7 +350,7 @@ let identity_processor =
       qp_cell_read = qp_cell;
       qp_cell_write = qp_cell;
       qp_code = (fun qp c -> match c with
-                     CodeAddr a -> CodeAddr (qp.qp_addr qp a)
+                     CodeAddr a -> CodeAddr (qp.qp_mem qp a)
                    | CodeLabel _
                    | CodeNone -> c);
       qp_op = (fun qp op -> match op with
@@ -373,7 +373,7 @@ let process_quad (qp:quad_processor) (q:quad) : quad =
 
         | Lea le ->
             Lea { lea_dst = qp.qp_cell_write qp le.lea_dst;
-                  lea_src = qp.qp_addr qp le.lea_src }
+                  lea_src = qp.qp_mem qp le.lea_src }
 
         | Cmp c ->
             Cmp { cmp_lhs = qp.qp_op qp c.cmp_lhs;
@@ -522,7 +522,7 @@ let string_of_cell (f:hreg_formatter) (c:cell) : string =
           Printf.sprintf "%s:%s" (string_of_reg f r) (string_of_scalar_ty ty)
         else
           Printf.sprintf "%s" (string_of_reg f r)
-    | Addr (a,ty) ->
+    | Mem (a,ty) ->
         if !log_iltypes
         then
           Printf.sprintf "%s:%s" (string_of_addr f a) (string_of_referent_ty ty)
@@ -779,14 +779,14 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
   let emit_quad (q':quad') : unit =
     (* decay addr-addr movs *)
     match q' with
-        Unary { unary_dst = Addr (dst_addr, dst_ty);
-                unary_src = Cell (Addr (src_addr, src_ty));
+        Unary { unary_dst = Mem (dst_addr, dst_ty);
+                unary_src = Cell (Mem (src_addr, src_ty));
                 unary_op = op }
           when is_mov op ->
             begin
               let v = next_vreg_cell e (AddrTy dst_ty) in
-                emit_quad_bottom (unary op v (Cell (Addr (src_addr, src_ty))));
-                emit_quad_bottom (unary op (Addr (dst_addr, dst_ty)) (Cell v))
+                emit_quad_bottom (unary op v (Cell (Mem (src_addr, src_ty))));
+                emit_quad_bottom (unary op (Mem (dst_addr, dst_ty)) (Cell v))
             end
       | _ -> emit_quad_bottom q'
   in

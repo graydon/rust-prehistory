@@ -296,18 +296,18 @@ let word_off_n (i:int) : Asm.expr64 =
 
 let word_at (reg:Il.reg) : Il.cell =
   let addr = Il.RegIn (reg, None) in
-    Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
+    Il.Mem (addr, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
 let word_at_abs (abs:Asm.expr64) : Il.cell =
   let addr = Il.Abs abs in
-    Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
+    Il.Mem (addr, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
 let word_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
   let addr = Il.RegIn (reg, Some imm) in
-    Il.Addr (addr, Il.ScalarTy (Il.ValTy word_bits))
+    Il.Mem (addr, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
 let word_n_code (reg:Il.reg) (i:int) : Il.code =
@@ -319,13 +319,13 @@ let word_n_code (reg:Il.reg) (i:int) : Il.code =
 let word_n_low_byte (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
   let addr = Il.RegIn (reg, Some imm) in
-    Il.Addr (addr, Il.ScalarTy (Il.ValTy Il.Bits8))
+    Il.Mem (addr, Il.ScalarTy (Il.ValTy Il.Bits8))
 ;;
 
 let wordptr_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
   let addr = Il.RegIn (reg, Some imm) in
-    Il.Addr (addr, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
+    Il.Mem (addr, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
 ;;
 
 
@@ -388,11 +388,11 @@ let emit_c_call
 
     Array.iteri (fun i (arg:Il.operand) ->                        (* write arguments onto C stack *)
                      match arg with
-                         Il.Cell (Il.Addr (a, ty)) ->
+                         Il.Cell (Il.Mem (a, ty)) ->
                            begin
                              match a with
                                  Il.RegIn (Il.Hreg base, off) when base == esp ->
-                                   mov (r tmp1) (c (Il.Addr (Il.RegIn (tmp2, off), ty)));
+                                   mov (r tmp1) (c (Il.Mem (Il.RegIn (tmp2, off), ty)));
                                    mov (word_n (h esp) i) (c (r tmp1));
                                | _ ->
                                    mov (r tmp1) arg;
@@ -409,7 +409,7 @@ let emit_c_call
       in
         begin
           match ret with
-              Il.Addr (Il.RegIn (Il.Hreg base, _), _) when base == esp ->
+              Il.Mem (Il.RegIn (Il.Hreg base, _), _) when base == esp ->
                 assert (not in_prologue);
                 (* If ret is esp-relative, use a temporary register until we switched stacks. *)
                 emit (Il.call (r tmp1) (Il.CodeAddr addr));
@@ -836,7 +836,7 @@ let rm_r (c:Il.cell) (r:int) : Asm.frag =
     match c with
         Il.Reg ((Il.Hreg rm), _) ->
           Asm.BYTE (modrm_reg (reg rm) r)
-      | Il.Addr (a, _) ->
+      | Il.Mem (a, _) ->
           begin
             match a with
                 Il.Abs disp ->
@@ -953,7 +953,7 @@ let is_ty32 (ty:Il.scalar_ty) : bool =
 let is_rm32 (c:Il.cell) : bool =
   match c with
       (* FIXME: tighten this up. Currently it's willing to accept *any* address as rm32. *)
-      Il.Addr (_, _) -> true
+      Il.Mem (_, _) -> true
     | Il.Reg (_, st) -> is_ty32 st
 ;;
 
@@ -965,7 +965,7 @@ let is_ty8 (ty:Il.scalar_ty) : bool =
 
 let is_m8 (c:Il.cell) : bool =
   match c with
-      Il.Addr (_, Il.ScalarTy st) -> is_ty8 st
+      Il.Mem (_, Il.ScalarTy st) -> is_ty8 st
     | _ -> false
 ;;
 
@@ -977,7 +977,7 @@ let is_r8 (c:Il.cell) : bool =
 
 let is_rm8 (c:Il.cell) : bool =
   match c with
-      Il.Addr (_, Il.ScalarTy st) -> is_ty8 st
+      Il.Mem (_, Il.ScalarTy st) -> is_ty8 st
     | Il.Reg (_, st) -> is_ty8 st
     | _ -> false
 ;;
@@ -1008,7 +1008,7 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
 let zero (dst:Il.cell) (count:Il.operand) : Asm.frag =
   match (dst, count) with
 
-      ((Il.Addr (Il.RegIn ((Il.Hreg dst_ptr), None), _)),
+      ((Il.Mem (Il.RegIn ((Il.Hreg dst_ptr), None), _)),
        Il.Cell (Il.Reg ((Il.Hreg count), _)))
         when dst_ptr = edi && count = ecx ->
           Asm.BYTES [|
@@ -1077,7 +1077,7 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
 let lea (dst:Il.cell) (addr:Il.addr) : Asm.frag =
   match dst with
       Il.Reg ((Il.Hreg r), dst_ty) when is_ty32 dst_ty ->
-        insn_rm_r 0x8d (Il.Addr (addr, Il.OpaqueTy)) (reg r)
+        insn_rm_r 0x8d (Il.Mem (addr, Il.OpaqueTy)) (reg r)
 
     | _ -> raise Unrecognized
 ;;
@@ -1109,11 +1109,11 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
                   match c.Il.call_targ with
 
                       Il.CodeAddr (Il.RegIn b) ->
-                        insn_rm_r 0xff (Il.Addr (Il.RegIn b, Il.OpaqueTy)) slash2
+                        insn_rm_r 0xff (Il.Mem (Il.RegIn b, Il.OpaqueTy)) slash2
 
                     (* X86-ism: rewrite AbsIn as Abs for CALL. See above. *)
                     | Il.CodeAddr (Il.AbsIn (e, None)) ->
-                        insn_rm_r 0xff (Il.Addr (Il.Abs e, Il.OpaqueTy)) slash2
+                        insn_rm_r 0xff (Il.Mem (Il.Abs e, Il.OpaqueTy)) slash2
 
                     | Il.CodeAddr (Il.Abs (Asm.M_POS f)) ->
                         insn_pcrel_simple 0xe8 f
@@ -1152,10 +1152,10 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
 
             (* X86-ism: rewrite AbsIn as Abs for JMP. See above. *)
             | (Il.JMP, Il.CodeAddr (Il.AbsIn (Asm.M_POS f, None))) ->
-                insn_rm_r 0xff (Il.Addr ((Il.Abs (Asm.M_POS f)), Il.OpaqueTy)) slash4
+                insn_rm_r 0xff (Il.Mem ((Il.Abs (Asm.M_POS f)), Il.OpaqueTy)) slash4
 
             | (Il.JMP, Il.CodeAddr r) ->
-                insn_rm_r 0xff (Il.Addr (r, Il.OpaqueTy)) slash4
+                insn_rm_r 0xff (Il.Mem (r, Il.OpaqueTy)) slash4
 
             (* FIXME: refactor this to handle conditional absolute-indirect jumps
              * by rewriting, if we ever need them. So far not. *)

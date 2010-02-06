@@ -92,7 +92,7 @@ let convert_pre_spills
     (mkspill:(Il.spill -> Il.addr))
     : int =
   let n = ref 0 in
-  let qp_addr (_:Il.quad_processor) (a:Il.addr) : Il.addr =
+  let qp_mem (_:Il.quad_processor) (a:Il.addr) : Il.addr =
     match a with
         Il.Spill i ->
           begin
@@ -104,7 +104,7 @@ let convert_pre_spills
   in
   let qp = Il.identity_processor in
   let qp = { qp with
-               Il.qp_addr = qp_addr  }
+               Il.qp_mem = qp_mem  }
   in
     begin
       Il.rewrite_quads qp cx.ctxt_quads;
@@ -146,7 +146,7 @@ let quad_used_vregs (q:quad) : Il.vreg list =
   let qp_cell_write qp c =
     match c with
         Il.Reg _ -> c
-      | Il.Addr (a, b) -> Il.Addr (qp.qp_addr qp a, b)
+      | Il.Mem (a, b) -> Il.Mem (qp.qp_mem qp a, b)
   in
   let qp = { Il.identity_processor with
                Il.qp_reg = qp_reg;
@@ -412,7 +412,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       else Il.voidptr_t
     in
     let vreg_spill_cell v =
-      Il.Addr ((spill_slot (Hashtbl.find vreg_to_spill v)),
+      Il.Mem ((spill_slot (Hashtbl.find vreg_to_spill v)),
                Il.ScalarTy (vreg_ty v))
     in
     let newq = ref [] in
@@ -445,7 +445,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                     end
                 in
                 let spill_addr = spill_slot spill_idx in
-                let spill_cell = Il.Addr (spill_addr, Il.ScalarTy (vreg_ty vreg)) in
+                let spill_cell = Il.Mem (spill_addr, Il.ScalarTy (vreg_ty vreg)) in
                   log cx "spilling <%d> from %s to %s"
                     vreg (hr_str hreg) (string_of_addr hr_str spill_addr);
                   prepend (Il.mk_quad (Il.umov spill_cell (Il.Cell (hr hreg))));
@@ -522,9 +522,9 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let qp_cell def i qp c =
       match c with
           Il.Reg (r, b) -> Il.Reg (qp_reg def i qp r, b)
-        | Il.Addr  (a, b) ->
+        | Il.Mem  (a, b) ->
             let qp = { qp with Il.qp_reg = qp_reg false i } in
-              Il.Addr (qp.qp_addr qp a, b)
+              Il.Mem (qp.qp_mem qp a, b)
     in
     let qp i = { Il.identity_processor with
                    Il.qp_cell_read = qp_cell false i;
