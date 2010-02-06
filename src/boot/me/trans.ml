@@ -1917,8 +1917,20 @@ let trans_visitor
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (fn_cell, _) = trans_callee cx flv in
     let in_slots = tsig.Ast.sig_input_slots in
-      trans_call initializing (lval_is_direct_fn cx flv) (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots args [||]
+    let direct = lval_is_direct_fn cx flv in
+    let logname () = Ast.sprintf_lval () flv in
+    let extra_args =
+      if direct then
+        [||]
+      else
+        begin
+          iflog (fun _ -> annotate (Printf.sprintf "copy env ptr to extra args for call to %s" (logname ())));
+          let env_ptr = Il.Cell (deref (get_element_ptr fn_cell 1)) in
+            [| env_ptr |]
+        end
+    in
+      trans_call initializing (lval_is_direct_fn cx flv) logname
+        dst_cell fn_cell in_slots args extra_args
 
   and trans_callee
       (cx:ctxt)
@@ -2104,6 +2116,11 @@ let trans_visitor
     in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args false output_cell arg_slots args  extra_args;
+      if not direct then
+        begin
+          (* FIXME: copy the environment pointer to the extra_args *)
+          
+        end;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
@@ -2111,7 +2128,6 @@ let trans_visitor
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
       call_code (code_of_cell callee_code_cell);
-      (* FIXME: copy the environment pointer to the extra_args *)
       drop_arg_slots arg_slots
 
   and arg_tup_cell
