@@ -1924,7 +1924,7 @@ let trans_visitor
         [||]
       else
         begin
-          iflog (fun _ -> annotate (Printf.sprintf "copy env ptr to extra args for call to %s" (logname ())));
+          iflog (fun _ -> annotate (Printf.sprintf "get env ptr for extra args in call to %s" (logname ())));
           let env_ptr = Il.Cell (deref (get_element_ptr fn_cell 1)) in
             [| env_ptr |]
         end
@@ -1991,6 +1991,7 @@ let trans_visitor
     in
     let (in_slots, _) = tpred in
       iflog (fun _ -> annotate "predicate call");
+      (* FIXME: extra_args if indirect *)
       trans_call true (lval_is_direct_fn cx flv) (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots args [||];
 
@@ -2116,11 +2117,6 @@ let trans_visitor
     in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args false output_cell arg_slots args  extra_args;
-      if not direct then
-        begin
-          (* FIXME: copy the environment pointer to the extra_args *)
-          
-        end;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
