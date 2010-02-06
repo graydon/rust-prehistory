@@ -2066,15 +2066,15 @@ let trans_visitor
       if direct then
         callee_cell
       else
-        bug () "trans_call unimplemented for indirect fn"
-(*
-        let tmp = next_vreg () in
-          begin
-            iflog (fun _ -> annotate (Printf.sprintf "extract fn addr for call to %s" (logname ())));
-            
-            tmp
-          end
-*)
+        begin
+          let tmp = next_vreg () in
+          let tmp_cell = Il.Addr (Il.RegIn (tmp, None), Il.CodeTy) in
+            begin
+              iflog (fun _ -> annotate (Printf.sprintf "extract fn addr for call to %s" (logname ())));
+              mov tmp_cell (Il.Cell (deref callee_cell));
+              tmp_cell
+            end
+        end
     in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args output_cell arg_slots args  extra_args;
@@ -2085,6 +2085,7 @@ let trans_visitor
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
       call_code (code_of_cell callee_code_cell);
+      (* FIXME: copy the environment pointer to the extra_args *)
       drop_arg_slots arg_slots
 
   and arg_tup_cell
