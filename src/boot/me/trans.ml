@@ -435,7 +435,7 @@ let trans_visitor
           let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
           let item_referent_ty = referent_type abi item_ty in
             (Il.Addr (item_addr, item_referent_ty), interior_slot item_ty)
- 
+
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
 
   (* 
@@ -1330,9 +1330,11 @@ let trans_visitor
         : unit =
       let tag_keys = sorted_htab_keys ttag in
       let src_tag = get_element_ptr src_cell 0 in
+      let dst_tag = get_element_ptr src_cell 0 in
       let src_union = get_element_ptr src_cell 1 in
       let dst_union = get_element_ptr dst_cell 1 in
       let tmp = next_vreg_cell word_ty in
+        f dst_tag src_tag (interior_slot (Ast.TY_mach word_ty_mach)) curr_iso;
         mov tmp (Il.Cell src_tag);
         Array.iteri
           begin
@@ -1403,12 +1405,18 @@ let trans_visitor
 
           | _ -> ()
 
+  (* 
+   * This just calls iter_ty_slots_full with your cell as both src and
+   * dst, with an adaptor function that discards the dst slots of the
+   * parallel traversal and and calls your provided function on the
+   * passed-in src slots.
+   *)
   and iter_ty_slots
-        (ty:Ast.ty)
-        (cell:Il.cell)
-        (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
-        (curr_iso:Ast.ty_iso option)
-        : unit =
+      (ty:Ast.ty)
+      (cell:Il.cell)
+      (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
     iter_ty_slots_full ty cell cell
       (fun _ src_cell slot curr_iso -> f src_cell slot curr_iso)
       curr_iso
@@ -1418,7 +1426,7 @@ let trans_visitor
       (cell:Il.cell)
       (curr_iso:Ast.ty_iso option)
       : unit =
-      iter_ty_slots ty cell drop_slot curr_iso
+    iter_ty_slots ty cell drop_slot curr_iso
 
   and mark_ty
       (ty:Ast.ty)
@@ -1442,9 +1450,9 @@ let trans_visitor
       | _ -> iter_ty_slots ty src clone_slot curr_iso
 
   and free_ty
-        (ty:Ast.ty)
-        (cell:Il.cell)
-        : unit =
+      (ty:Ast.ty)
+      (cell:Il.cell)
+      : unit =
     match ty with
         Ast.TY_port _ -> trans_del_port cell
       | Ast.TY_chan _ -> trans_del_chan cell
@@ -1691,62 +1699,15 @@ let trans_visitor
         fun i slot ->
           let sub_dst_cell = get_element_ptr dst i in
           let sub_src_cell = get_element_ptr src i in
-            trans_copy_slot initializing sub_dst_cell slot sub_src_cell slot
+            trans_copy_slot initializing sub_dst_cell slot sub_src_cell slot None
       end
       slots
-
-  and trans_copy_rec
-      (initializing:bool)
-      (dst:Il.cell)
-      (src:Il.cell)
-      (entries:Ast.ty_rec)
-      : unit =
-    let slots = Array.map (fun (_, slot) -> slot) entries in
-      trans_copy_tup initializing dst src slots
-
-  and trans_copy_tag
-      (initializing:bool)
-      (dst:Il.cell)
-      (src:Il.cell)
-      (ttag:Ast.ty_tag)
-      : unit =
-    let tag_keys = sorted_htab_keys ttag in
-
-    let tmp = next_vreg_cell word_ty in
-    let dst_tag = get_element_ptr dst 0 in
-    let src_tag = get_element_ptr src 0 in
-    let dst_union = get_element_ptr dst 1 in
-    let src_union = get_element_ptr src 1 in
-
-      mov tmp (Il.Cell src_tag);
-      mov dst_tag (Il.Cell tmp);
-      Array.iteri
-        begin
-          fun i key ->
-            (iflog (fun _ -> annotate ("tag case #" ^ (string_of_int i)
-                                       ^ " == " ^ (Ast.fmt_to_str Ast.fmt_name key))));
-            let jmps = trans_compare Il.JNE (Il.Cell tmp) (imm (Int64.of_int i)) in
-            let ttup = Hashtbl.find ttag key in
-            let dst = get_variant_ptr dst_union i in
-            let src = get_variant_ptr src_union i in
-              trans_copy_tup initializing dst src ttup;
-              List.iter patch jmps
-        end
-        tag_keys
-
-  and trans_copy_pair
-      (_(*initializing*):bool)
-      (dst:Il.cell)
-      (src:Il.cell)
-      : unit =
-    (* FIXME: adjust refcounts on non-null bound value carried along. *)
-    mov (get_element_ptr dst 0) (Il.Cell (get_element_ptr src 0));
-    mov (get_element_ptr dst 1) (Il.Cell (get_element_ptr src 1));
 
   and trans_copy_slot
       (initializing:bool)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (src:Il.cell) (src_slot:Ast.slot)
+      (curr_iso:Ast.ty_iso option)
       : unit =
     let anno (weight:string) : unit =
       iflog
@@ -1780,10 +1741,10 @@ let trans_visitor
             lightweight_rc (exterior_rc_cell src)
 
       | _ ->
-          (* Heavyweight copy: duplicate the referent. *)
+          (* Heavyweight copy: duplicate 1 level of the referent. *)
           anno "heavy";
           trans_copy_slot_heavy initializing
-            dst dst_slot src src_slot
+            dst dst_slot src src_slot curr_iso
 
   (* NB: heavyweight copying here does not mean "producing a deep
    * clone of the entire data tree rooted at the src operand". It means
@@ -1816,43 +1777,26 @@ let trans_visitor
       (initializing:bool)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (src:Il.cell) (src_slot:Ast.slot)
+      (curr_iso:Ast.ty_iso option)
       : unit =
     assert (slot_ty src_slot = slot_ty dst_slot);
     iflog (fun _ ->
              annotate ("heavy copy: slot preparation"));
+
+    let ty = slot_ty src_slot in
+    let ty = maybe_iso curr_iso ty in
+    let curr_iso = maybe_enter_iso ty curr_iso in
     let dst = deref_slot initializing dst dst_slot in
     let src = deref_slot false src src_slot in
       iflog (fun _ ->
                annotate ("heavy copy: referent data"));
-      match slot_ty dst_slot with
-          Ast.TY_rec entries ->
-            trans_copy_rec initializing dst src entries
-
-        | Ast.TY_tup slots ->
-            trans_copy_tup initializing dst src slots
-
-        | Ast.TY_tag tag ->
-            trans_copy_tag initializing dst src tag
-
-        | Ast.TY_iso iso ->
-            let tag = get_iso_tag iso in
-              trans_copy_tag initializing dst src tag
-
-        | Ast.TY_fn _
-        | Ast.TY_pred _
-        | Ast.TY_mod _ ->
-            (*
-             * FIXME: will need to split out TY_mod when module type
-             * conversion (thus structural rearrangement) is part of
-             * 1st-class mod copying.
-             *)
-            trans_copy_pair initializing dst src
-
-        | t when (i64_le (ty_sz abi t) word_sz) ->
-            mov dst (Il.Cell src)
-
-        | t ->
-            bug () "unhandled form of heavyweight copy: %a" Ast.sprintf_ty t
+      if (i64_le (ty_sz abi ty) word_sz)
+      then mov dst (Il.Cell src)
+      else
+        iter_ty_slots_full ty dst src
+          (fun dst src slot curr_iso ->
+             trans_copy_slot initializing dst slot src slot curr_iso)
+          curr_iso
 
   and trans_copy
       (initializing:bool)
@@ -1881,6 +1825,7 @@ let trans_visitor
                       initializing
                       dst_cell dst_slot
                       src_cell src_slot
+                      None
           end
       | Some binop ->
           ignore (trans_binary binop
@@ -1936,6 +1881,7 @@ let trans_visitor
             true
             dst dst_slot
             src src_slot
+            None
 
   and trans_call_fn
       (initializing:bool)

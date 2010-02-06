@@ -313,8 +313,8 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (int64 * int64) =
           in
             Array.fold_left accum (0L,0L) rts
         end
-    | OpaqueTy _ -> failwith "opaque ty in referent_ty_layout"
-    | CodeTy _ -> failwith "code ty in referent_ty_layout"
+    | OpaqueTy _ -> bug () "opaque ty in referent_ty_layout"
+    | CodeTy _ -> bug () "code ty in referent_ty_layout"
     | NilTy -> (0L, 0L)
 
 and referent_ty_size (word_bits:bits) (rt:referent_ty) : int64 =
