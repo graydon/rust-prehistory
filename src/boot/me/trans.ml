@@ -1447,7 +1447,7 @@ let trans_visitor
       | Ast.TY_proc
       | Ast.TY_port _
       | _ when type_is_mutable ty -> bug () "cloning mutable type"
-      | _ -> iter_ty_slots ty src clone_slot curr_iso
+      | _ -> iter_ty_slots_full ty dst src clone_slot curr_iso
 
   and free_ty
       (ty:Ast.ty)
@@ -1522,16 +1522,12 @@ let trans_visitor
         | _ -> ()
 
   and clone_slot
-      ((*cell*)_:Il.cell)
+      (dst:Il.cell)
+      (src:Il.cell)
       (slot:Ast.slot)
-      ((*curr_iso*)_:Ast.ty_iso option)
+      (curr_iso:Ast.ty_iso option)
       : unit =
-    let mctrl = slot_mem_ctrl slot in
-      match mctrl with
-          _ ->
-            (* FIXME: totally wrong; generalize trans_copy_slot call-tree to 
-             * iterate over the slots in a structure in parallel. *)
-            ()
+    trans_copy_slot_heavy true dst slot src slot curr_iso
 
   and drop_slot
       (cell:Il.cell)
