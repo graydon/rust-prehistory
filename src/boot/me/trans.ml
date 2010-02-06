@@ -1088,18 +1088,13 @@ let trans_visitor
 
       iflog (fun _ -> annotate "spawn proc: copy args");
 
-      (* FIXME: artificial temporary use of 'get_clone_glue' here to please compiler. *)
-      (* Need to actually define a clone_fn_args function that uses it. *)
-      let _ = get_clone_glue in
-      let clone_fn_args = copy_fn_args in
-
-      let (realm_str, arg_copy_fn) =
+      let (realm_str, clone) =
         match realm with
-            Ast.REALM_local -> ("local", copy_fn_args)
-          | Ast.REALM_thread -> ("thread", clone_fn_args)
+            Ast.REALM_local -> ("local", false)
+          | Ast.REALM_thread -> ("thread", true)
       in
         iflog (fun _ -> annotate ("spawn-" ^ realm_str ^ " proc: upcall"));
-        arg_copy_fn proc_cell in_slots args [||];
+        copy_fn_args clone proc_cell in_slots args [||];
         let upcall = "upcall_spawn_" ^ realm_str in
           trans_upcall upcall proc_cell
             [|
@@ -1524,10 +1519,20 @@ let trans_visitor
   and clone_slot
       (dst:Il.cell)
       (src:Il.cell)
-      (slot:Ast.slot)
+      (dst_slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    trans_copy_slot_heavy true dst slot src slot curr_iso
+    match dst_slot.Ast.slot_mode with
+        Ast.MODE_exterior _ ->
+          let dst = deref_slot true dst dst_slot in
+          let glue_fix = get_clone_glue (slot_ty dst_slot) curr_iso in
+            trans_call_mem_glue_full (Some dst) glue_fix src
+
+      | Ast.MODE_read_alias
+      | Ast.MODE_write_alias -> bug () "cloning into alias slot"
+
+      | Ast.MODE_interior _ ->
+          trans_copy_slot_heavy true dst dst_slot src dst_slot curr_iso
 
   and drop_slot
       (cell:Il.cell)
@@ -1864,6 +1869,28 @@ let trans_visitor
           let (src, src_slot) = trans_lval src_lval in
             trans_init_slot_from_cell dst dst_slot src src_slot
 
+
+  and trans_init_slot_from_atom_clone
+      (dst:Il.cell) (dst_slot:Ast.slot)
+      (atom:Ast.atom)
+      : unit =
+    match dst_slot.Ast.slot_mode with
+        Ast.MODE_read_alias
+      | Ast.MODE_write_alias ->
+          bug () "attempting to clone alias cell"
+      | _ ->
+          begin
+            match atom with
+              | Ast.ATOM_literal _ ->
+                  let src = trans_atom atom in
+                    mov (deref_slot true dst dst_slot) src
+
+              | Ast.ATOM_lval src_lval ->
+                  let (src, _) = trans_lval src_lval in
+                    clone_slot dst src dst_slot None
+          end
+
+
   and trans_init_slot_from_cell
       (dst:Il.cell) (dst_slot:Ast.slot)
       (src:Il.cell) (src_slot:Ast.slot)
@@ -2000,10 +2027,17 @@ let trans_visitor
       arg_cell (word_slot abi)
       abi.Abi.abi_pp_cell (word_slot abi)
 
-  and trans_argN (arg_cell:Il.cell) (arg_slot:Ast.slot) (arg:Ast.atom) : unit =
-    trans_init_slot_from_atom
-      arg_cell arg_slot
-      arg
+  and trans_argN
+      (clone:bool)
+      (arg_cell:Il.cell)
+      (arg_slot:Ast.slot)
+      (arg:Ast.atom)
+      : unit =
+    if clone
+    then
+      trans_init_slot_from_atom_clone arg_cell arg_slot arg
+    else
+      trans_init_slot_from_atom arg_cell arg_slot arg
 
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
@@ -2013,6 +2047,7 @@ let trans_visitor
       | _ -> bug () "loading code from register"
 
   and copy_fn_args
+      (clone:bool)
       (output_cell:Il.cell)
       (arg_slots:Ast.slot array)
       (args:Ast.atom array)
@@ -2031,7 +2066,7 @@ let trans_visitor
                      annotate
                        (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
                           i n_args n_extras));
-            trans_argN (get_element_ptr arg_tup (2+i)) slot args.(i)
+            trans_argN clone (get_element_ptr arg_tup (2+i)) slot args.(i)
         end
         arg_slots;
       Array.iteri
@@ -2073,7 +2108,7 @@ let trans_visitor
         end
     in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args output_cell arg_slots args  extra_args;
+      copy_fn_args false output_cell arg_slots args  extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
