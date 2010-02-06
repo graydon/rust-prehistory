@@ -74,7 +74,7 @@ let convert_labels (cx:ctxt) : unit =
                     end
               | Some f -> f
           in
-            Il.CodeAddr (Il.Abs (Asm.M_POS fix))
+            Il.CodeMem (Il.Abs (Asm.M_POS fix))
       | _ -> c
   in
   let qp = { Il.identity_processor
@@ -89,10 +89,10 @@ let convert_labels (cx:ctxt) : unit =
 
 let convert_pre_spills
     (cx:ctxt)
-    (mkspill:(Il.spill -> Il.addr))
+    (mkspill:(Il.spill -> Il.mem))
     : int =
   let n = ref 0 in
-  let qp_mem (_:Il.quad_processor) (a:Il.addr) : Il.addr =
+  let qp_mem (_:Il.quad_processor) (a:Il.mem) : Il.mem =
     match a with
         Il.Spill i ->
           begin
@@ -444,10 +444,10 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                         s
                     end
                 in
-                let spill_addr = spill_slot spill_idx in
-                let spill_cell = Il.Mem (spill_addr, Il.ScalarTy (vreg_ty vreg)) in
+                let spill_mem = spill_slot spill_idx in
+                let spill_cell = Il.Mem (spill_mem, Il.ScalarTy (vreg_ty vreg)) in
                   log cx "spilling <%d> from %s to %s"
-                    vreg (hr_str hreg) (string_of_addr hr_str spill_addr);
+                    vreg (hr_str hreg) (string_of_mem hr_str spill_mem);
                   prepend (Il.mk_quad (Il.umov spill_cell (Il.Cell (hr hreg))));
               else ()
             end

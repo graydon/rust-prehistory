@@ -40,7 +40,7 @@ type reg =
   | Hreg of hreg
 ;;
 
-type addr =
+type mem =
     Abs of Asm.expr64
   | RegIn of (reg * (Asm.expr64 option))
   | AbsIn of (Asm.expr64 * (Asm.expr64 option))
@@ -49,17 +49,17 @@ type addr =
 
 type code =
     CodeLabel of label (* Index into current quad block. *)
-  | CodeAddr of addr
+  | CodeMem of mem
   | CodeNone
 ;;
 
 type typed_reg = (reg * scalar_ty);;
-type typed_addr = (addr * referent_ty);;
+type typed_mem = (mem * referent_ty);;
 type typed_imm = (Asm.expr64 * ty_mach);;
 
 type cell =
     Reg of typed_reg
-  | Mem of typed_addr
+  | Mem of typed_mem
 ;;
 
 type operand =
@@ -103,9 +103,9 @@ let operand_is_nil o =
     | _ -> false
 ;;
 
-let addr_add (addr:addr) (off:Asm.expr64) : addr =
+let mem_off (mem:mem) (off:Asm.expr64) : mem =
   let addto e = Asm.ADD (off, e) in
-    match addr with
+    match mem with
         Abs e -> Abs (addto e)
       | RegIn (r, None) -> RegIn (r, Some off)
       | RegIn (r, Some e) -> RegIn (r, Some (addto e))
@@ -114,8 +114,8 @@ let addr_add (addr:addr) (off:Asm.expr64) : addr =
       | Spill _ -> bug () "Adding offset to spill slot"
 ;;
 
-let addr_add_imm (addr:addr) (imm:int64) : addr =
-  addr_add addr (Asm.IMM imm)
+let mem_off_imm (mem:mem) (imm:int64) : mem =
+  mem_off mem (Asm.IMM imm)
 ;;
 
 
@@ -172,7 +172,7 @@ type cmp =
 type lea =
     {
       lea_dst: cell;
-      lea_src: addr
+      lea_src: mem
     }
 ;;
 
@@ -246,7 +246,7 @@ let cell_bits (word_bits:bits) (c:cell) : bits =
   match c with
       Reg (_, st) -> scalar_ty_bits word_bits st
     | Mem (_, ScalarTy st) -> scalar_ty_bits word_bits st
-    | Mem _ -> failwith "addr of non-scalar in Il.cell_bits"
+    | Mem _ -> failwith "mem of non-scalar in Il.cell_bits"
 ;;
 
 let operand_bits (word_bits:bits) (op:operand) : bits =
@@ -329,7 +329,7 @@ and referent_ty_align (word_bits:bits) (rt:referent_ty) : int64 =
 
 type quad_processor =
     { qp_reg:  (quad_processor -> reg -> reg);
-      qp_mem:  (quad_processor -> addr -> addr);
+      qp_mem:  (quad_processor -> mem -> mem);
       qp_cell_read: (quad_processor -> cell -> cell);
       qp_cell_write: (quad_processor -> cell -> cell);
       qp_code: (quad_processor -> code -> code);
@@ -350,7 +350,7 @@ let identity_processor =
       qp_cell_read = qp_cell;
       qp_cell_write = qp_cell;
       qp_code = (fun qp c -> match c with
-                     CodeAddr a -> CodeAddr (qp.qp_mem qp a)
+                     CodeMem a -> CodeMem (qp.qp_mem qp a)
                    | CodeLabel _
                    | CodeNone -> c);
       qp_op = (fun qp op -> match op with
@@ -495,7 +495,7 @@ let string_of_off (e:Asm.expr64 option) : string =
     | Some e' -> " + " ^ (string_of_expr64 e')
 ;;
 
-let string_of_addr (f:hreg_formatter) (a:addr) : string =
+let string_of_mem (f:hreg_formatter) (a:mem) : string =
   match a with
       Abs e ->
         Printf.sprintf "[%s]" (string_of_expr64 e)
@@ -510,7 +510,7 @@ let string_of_addr (f:hreg_formatter) (a:addr) : string =
 let string_of_code (f:hreg_formatter) (c:code) : string =
   match c with
       CodeLabel lab -> Printf.sprintf "<label %d>" lab
-    | CodeAddr a -> string_of_addr f a
+    | CodeMem a -> string_of_mem f a
     | CodeNone -> "<none>"
 ;;
 
@@ -525,9 +525,9 @@ let string_of_cell (f:hreg_formatter) (c:cell) : string =
     | Mem (a,ty) ->
         if !log_iltypes
         then
-          Printf.sprintf "%s:%s" (string_of_addr f a) (string_of_referent_ty ty)
+          Printf.sprintf "%s:%s" (string_of_mem f a) (string_of_referent_ty ty)
         else
-          Printf.sprintf "%s" (string_of_addr f a)
+          Printf.sprintf "%s" (string_of_mem f a)
 ;;
 
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
@@ -611,7 +611,7 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
     | Lea le ->
         Printf.sprintf "lea %s %s"
           (string_of_cell f le.lea_dst)
-          (string_of_addr f le.lea_src)
+          (string_of_mem f le.lea_src)
 
     | Jmp j ->
         Printf.sprintf "%s %s"
@@ -697,7 +697,7 @@ let next_spill (e:emitter) : spill =
     i
 ;;
 
-let next_spill_slot (e:emitter) (r:referent_ty) : typed_addr =
+let next_spill_slot (e:emitter) (r:referent_ty) : typed_mem =
   (Spill (next_spill e), r);
 ;;
 
@@ -729,7 +729,7 @@ let jmp (op:jmpop) (targ:code) : quad' =
         jmp_targ = targ; }
 ;;
 
-let lea (dst:cell) (src:addr) : quad' =
+let lea (dst:cell) (src:mem) : quad' =
   Lea { lea_dst = dst;
         lea_src = src; }
 ;;
@@ -777,16 +777,16 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
 
 
   let emit_quad (q':quad') : unit =
-    (* decay addr-addr movs *)
+    (* decay mem-mem movs *)
     match q' with
-        Unary { unary_dst = Mem (dst_addr, dst_ty);
-                unary_src = Cell (Mem (src_addr, src_ty));
+        Unary { unary_dst = Mem (dst_mem, dst_ty);
+                unary_src = Cell (Mem (src_mem, src_ty));
                 unary_op = op }
           when is_mov op ->
             begin
               let v = next_vreg_cell e (AddrTy dst_ty) in
-                emit_quad_bottom (unary op v (Cell (Mem (src_addr, src_ty))));
-                emit_quad_bottom (unary op (Mem (dst_addr, dst_ty)) (Cell v))
+                emit_quad_bottom (unary op v (Cell (Mem (src_mem, src_ty))));
+                emit_quad_bottom (unary op (Mem (dst_mem, dst_ty)) (Cell v))
             end
       | _ -> emit_quad_bottom q'
   in
