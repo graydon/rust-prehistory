@@ -344,8 +344,8 @@ let layout_visitor
               let layout =
                 pack 0L
                   (match lv_ty with
-                       Ast.TY_fn (tsig, _) -> layout_fn_call_tup abi tsig
-                     | Ast.TY_pred tpred -> layout_pred_call_tup abi tpred
+                       Ast.TY_fn (tsig, _) -> layout_fn_call_tup abi tsig (lval_is_direct_fn cx callee)
+                     | Ast.TY_pred tpred -> layout_pred_call_tup abi tpred (lval_is_direct_fn cx callee)
                      | Ast.TY_mod (Some hdr, _) -> layout_mod_call_tup abi hdr
                      | _ -> err (Some s.id) "unexpected callee type")
               in

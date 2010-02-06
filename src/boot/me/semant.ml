@@ -1418,11 +1418,20 @@ let fn_call_tup (abi:Abi.abi) (inputs:Ast.ty_tup) : Ast.ty_tup =
     Array.append [| out_ptr; proc_ptr |] inputs
 ;;
 
-let layout_fn_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) : (layout array) =
-    layout_tup abi (fn_call_tup abi tsig.Ast.sig_input_slots)
+let layout_fn_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) (direct:bool) : (layout array) =
+  let tup = fn_call_tup abi tsig.Ast.sig_input_slots in
+  let full_tup =
+    if direct then
+      tup
+    else
+      let env_ptr = word_slot abi in
+        Array.append tup [| env_ptr |]
+  in
+    layout_tup abi full_tup
 ;;
 
-let layout_pred_call_tup (abi:Abi.abi) (tpred:Ast.ty_pred) : (layout array) =
+(* FIXME: if not direct then ... *)
+let layout_pred_call_tup (abi:Abi.abi) (tpred:Ast.ty_pred) ((*direct*)_:bool) : (layout array) =
   let (slots,_) = tpred in
   let proc_ptr = word_slot abi in
   let out_ptr = word_slot abi in

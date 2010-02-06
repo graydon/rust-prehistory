@@ -2098,13 +2098,8 @@ let trans_visitor
         callee_cell
       else
         begin
-          let tmp = next_vreg () in
-          let tmp_cell = Il.Addr (Il.RegIn (tmp, None), Il.CodeTy) in
-            begin
-              iflog (fun _ -> annotate (Printf.sprintf "extract fn addr for call to %s" (logname ())));
-              mov tmp_cell (Il.Cell (deref callee_cell));
-              tmp_cell
-            end
+          iflog (fun _ -> annotate (Printf.sprintf "extract fn addr for call to %s" (logname ())));
+          deref (get_element_ptr callee_cell 0)
         end
     in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
