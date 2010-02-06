@@ -2010,6 +2010,23 @@ let trans_visitor
         trans_cond_fail errstr jmp
 
 
+  (* FIXME: here's some pseudocode for trans_bind_fn:
+   *   1. create the glue function for this lval id, which should:
+   *      a. save the fn ptr in a tmp vreg
+   *      b. save the env ptr in a tmp vreg
+   *      c. shift the new args over into their proper place
+   *      d. pull the saved args from the env into the holes
+   *      e. call into the fn ptr
+   *   ==> Q: what's the diff between a fn ptr to a direct fn vs. indirect fn?
+   *   ==> Q: refcount add/drop on any of these data structures?
+   *   2. create the env data structure on the heap, which should:
+   *      a. have a gc control word iff any of the args are mutable
+   *      b. have a refcount word
+   *      c. have an inlined tuple of all args that are not _
+   *   3. mov dst[0] <- fn ptr
+   *   4. mov dst[1] <- env ptr
+   *)
+
   and trans_bind_fn
       ((*initializing*)_:bool)
       ((*direct*)_:bool)
