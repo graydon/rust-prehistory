@@ -732,7 +732,7 @@ let trans_visitor
 
   (* 
    * Mem-glue functions are either 'mark', 'drop' or 'free', they take
-   * one pointer arg and reutrn nothing.
+   * one pointer arg and return nothing.
    *)
 
   and trans_mem_glue_frame_entry (n_outgoing_args:int) (spill:fixup) : unit =
@@ -1936,20 +1936,37 @@ let trans_visitor
 
   and trans_call_fn
       (initializing:bool)
-      ((*direct*)_:bool)
+      (cx:ctxt)
       (dst:Ast.lval)
       (flv:Ast.lval)
       (tsig:Ast.ty_sig)
       (args:Ast.atom array)
       : unit =
-    let (dst_cell, _) = trans_lval_maybe_init initializing dst
-    in
-    let (fn_cell, _) =
-      trans_lval_full false flv abi.Abi.abi_has_abs_code
-    in
+    let (dst_cell, _) = trans_lval_maybe_init initializing dst in
+    let (fn_cell, _) = trans_callee cx flv in
     let in_slots = tsig.Ast.sig_input_slots in
-      trans_call initializing (fun _ -> Ast.sprintf_lval () flv)
+      trans_call initializing (lval_is_direct_fn cx flv) (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots args [||]
+
+  and trans_callee
+      (cx:ctxt)
+      (flv:Ast.lval)
+      : (Il.cell * Ast.ty) =
+    (* direct call to item *)
+    if lval_is_item cx flv then
+      let fn_item = lval_item cx flv in
+      let fn_addr = fixup_to_addr abi.Abi.abi_has_abs_code (get_fn_fixup cx fn_item.id) Il.CodeTy in
+        (Il.Addr (fn_addr, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
+    (* direct call to native item *)
+    else if lval_is_native_item cx flv then
+      let fn_item = lval_native_item cx flv in
+      let fn_addr = fixup_to_addr abi.Abi.abi_has_abs_code (get_fn_fixup cx fn_item.id) Il.CodeTy in
+        (Il.Addr (fn_addr, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
+    (* indirect call to computed slot *)
+    else
+      let (cell, slot) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
+        (cell, slot_ty slot)
+
 
   and trans_call_mod
       (initializing:bool)
@@ -1974,7 +1991,7 @@ let trans_visitor
     in
     let fn_cell = Il.Addr (fn_addr, Il.CodeTy) in
     let (in_slots, _) = tmod_hdr in
-      trans_call initializing (fun _ -> Ast.sprintf_lval () flv)
+      trans_call initializing true (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots args [||]
 
   and trans_call_pred
@@ -1982,17 +1999,15 @@ let trans_visitor
       (flv:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (fn_cell, fn_slot) =
-      trans_lval_full false flv abi.Abi.abi_has_abs_code
-    in
+    let (fn_cell, fn_ty) = trans_callee cx flv in
     let tpred =
-      match slot_ty fn_slot with
+      match fn_ty with
           Ast.TY_pred tpred -> tpred
         | _ -> bug () "Calling non-predicate."
     in
     let (in_slots, _) = tpred in
       iflog (fun _ -> annotate "predicate call");
-      trans_call true (fun _ -> Ast.sprintf_lval () flv)
+      trans_call true (lval_is_direct_fn cx flv) (fun _ -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots args [||];
 
   and trans_call_pred_and_check
@@ -2018,6 +2033,11 @@ let trans_visitor
       ((*tsig*)_:Ast.ty_sig)
       ((*args*)_:Ast.atom option array)
       : unit =
+(*
+    let (dst_cell, _) = trans_lval_maybe_init initializing dst in
+    let (fn_cell, fn_slot) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
+    let fn_ty = slot_ty fn_slot in
+*)      
     bug () "trans_bind_fn not yet implemented"
 
 
@@ -2042,7 +2062,9 @@ let trans_visitor
 
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
-        Il.Addr (a, _) -> Il.CodeAddr a
+        Il.Addr (a, Il.CodeTy) -> Il.CodeAddr a
+      | Il.Addr (_, ty) ->
+          bug () "expected code cell, found cell of type %s" (Il.string_of_referent_ty ty)
       | _ -> bug () "loading code from register"
 
   and copy_fn_args
@@ -2083,6 +2105,7 @@ let trans_visitor
 
   and trans_call
       ((*initializing*)_:bool)
+      (direct:bool)
       (logname:(unit -> string))
       (output_cell:Il.cell)
       (callee_cell:Il.cell)
@@ -2090,6 +2113,20 @@ let trans_visitor
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
+    let callee_code_cell =
+      if direct then
+        callee_cell
+      else
+        bug () "trans_call unimplemented for indirect fn"
+(*
+        let tmp = next_vreg () in
+          begin
+            iflog (fun _ -> annotate (Printf.sprintf "extract fn addr for call to %s" (logname ())));
+            
+            tmp
+          end
+*)
+    in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args output_cell arg_slots args  extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
@@ -2098,7 +2135,7 @@ let trans_visitor
        * initializing, overwrite the slot; this is ok if we're writing
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
-      call_code (code_of_cell callee_cell);
+      call_code (code_of_cell callee_code_cell);
       drop_arg_slots arg_slots
 
   and arg_tup_cell
@@ -2194,7 +2231,7 @@ let trans_visitor
             let init = maybe_init stmt.id "call" dst in
             match lval_ty cx flv with
                 Ast.TY_fn (tsig, _) ->
-                  trans_call_fn init (lval_is_direct_fn cx flv) dst flv tsig args
+                  trans_call_fn init cx dst flv tsig args
 
               | Ast.TY_pred _ ->
                   let (dst_cell, _) = trans_lval_maybe_init init dst

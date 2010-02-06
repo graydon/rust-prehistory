@@ -225,6 +225,7 @@ TEST_XFAILS := test/run-pass/spawn-fn.rs \
                test/run-pass/bind-thunk.rs \
                test/run-pass/bind-trivial.rs \
                test/run-pass/fun-call-variants.rs \
+               test/run-pass/first-class-modules.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
