@@ -56,7 +56,7 @@ let (sess:Session.sess) =
 ;;
 
 let dump_file s =
-  let arr = Asm.mmap_array s in
+  let ar = Asm.new_asm_reader s in
     Printf.printf "mapped file: %s\n" s;
     let get_sections =
       match sess.Session.sess_targ with
@@ -64,7 +64,7 @@ let dump_file s =
         | MacOS_x86_macho -> Macho.get_sections
         | Linux_x86_elf -> Elf.get_sections
     in
-      ignore (get_sections arr);
+      ignore (get_sections ar);
       exit 0
 ;;
 

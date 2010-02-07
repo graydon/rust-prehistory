@@ -518,56 +518,94 @@ let fold_flags (f:'a -> int64) (flags:'a list) : int64 =
 ;;
 
 
-(* reverse-asm stuff for reading mapped files. *)
+(* Asm-reader stuff for loading info back from mapped files. *)
+(*
+ * Unfortunately the ocaml Bigarray interface takes 'int' indices, so
+ * f.e. can't do 64-bit offsets / files when running on a 32bit platform.
+ * Despite the fact that we can possibly produce them. Sigh. Yet another
+ * "bootstrap compiler limitation".
+ *)
+type asm_reader =
+    {
+      asm_seek: int -> unit;
+      asm_get_u32: unit -> int;
+      asm_get_u16: unit -> int;
+      asm_get_u8: unit -> int;
+      asm_get_zstr: unit -> string;
+      asm_get_zstr_padded: int -> string;
+      asm_get_off: unit -> int;
+      asm_adv: int -> unit;
+      asm_adv_u32: unit -> unit;
+      asm_adv_u16: unit -> unit;
+      asm_adv_u8: unit -> unit;
+      asm_adv_zstr: unit -> unit;
+    }
+;;
+
 type mmap_arr = (int, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t;;
 
-let mmap_array (file:string) : mmap_arr =
-  let fd = Unix.openfile file [ Unix.O_RDONLY ] 0 in
-    Bigarray.Array1.map_file
-      fd ~pos:0L Bigarray.int8_unsigned Bigarray.c_layout false (-1)
-;;
-
-let get_word (n:int) (arr:mmap_arr) (i:int) : int64 =
+let new_asm_reader (s:filename) =
+  let fd = Unix.openfile s [ Unix.O_RDONLY ] 0 in
+  let arr = (Bigarray.Array1.map_file
+               fd ~pos:0L
+               Bigarray.int8_unsigned
+               Bigarray.c_layout
+               false (-1))
+  in
+  let tmp = ref Nativeint.zero in
+  let buf = Buffer.create 16 in
+  let off = ref 0 in
+  let get_word_as_int (nbytes:int) : int =
   let lsb0 = true in
-  let x = ref 0L in
+    tmp := Nativeint.zero;
     if lsb0
     then
-      for j = n-1 downto 0 do
-        x := Int64.shift_left (!x) 8;
-        x := Int64.logor (!x) (Int64.of_int arr.{i + j})
+      for j = nbytes-1 downto 0 do
+        tmp := Nativeint.shift_left (!tmp) 8;
+        tmp := Nativeint.logor (!tmp) (Nativeint.of_int arr.{(!off) + j})
       done
     else
-      for j = 0 to n-1 do
-        x := Int64.shift_left (!x) 8;
-        x := Int64.logor (!x) (Int64.of_int arr.{i + j})
+      for j = 0 to nbytes-1 do
+        tmp := Nativeint.shift_left (!tmp) 8;
+        tmp := Nativeint.logor (!tmp) (Nativeint.of_int arr.{(!off) + j})
       done;
-    !x
-;;
-
-let get_u16 (arr:mmap_arr) (i:int) : int64 =
-  get_word 2 arr i
-;;
-
-let get_u32 (arr:mmap_arr) (i:int) : int64 =
-  get_word 4 arr i
-;;
-
-let get_u32_as_int (arr:mmap_arr) (i:int) : int =
-  Int64.to_int (get_u32 arr i)
-;;
-
-let get_u16_as_int (arr:mmap_arr) (i:int) : int =
-  Int64.to_int (get_u16 arr i)
-;;
-
-let get_zstr (arr:mmap_arr) (i:int) : string =
-  let buf = Buffer.create 16 in
-  let j = ref i in
-    while arr.{!j} != 0 do
-      Buffer.add_char buf (Char.chr arr.{!j});
-      incr j
-    done;
-    Buffer.contents buf
+    off := (!off) + nbytes;
+    Nativeint.to_int (!tmp)
+  in
+  let get_zstr_padded pad_opt =
+    let i = ref (!off) in
+      Buffer.clear buf;
+      while arr.{!i} != 0 do
+        Buffer.add_char buf (Char.chr arr.{!i});
+        incr i
+      done;
+      begin
+        match pad_opt with
+            None -> off := (!off) + (Buffer.length buf) + 1
+          | Some pad ->
+              begin
+                assert (((Buffer.length buf) + 1) <= pad);
+                off := (!off) + pad
+              end
+      end;
+      Buffer.contents buf
+  in
+  let bump i = off := (!off) + i in
+    {
+      asm_seek = (fun i -> off := i);
+      asm_get_u32 = (fun _ -> get_word_as_int 4);
+      asm_get_u16 = (fun _ -> get_word_as_int 2);
+      asm_get_u8 = (fun _ -> get_word_as_int 1);
+      asm_get_zstr = (fun _ -> get_zstr_padded None);
+      asm_get_zstr_padded = (fun pad -> get_zstr_padded (Some pad));
+      asm_get_off = (fun _ -> !off);
+      asm_adv = bump;
+      asm_adv_u32 = (fun _ -> bump 4);
+      asm_adv_u16 = (fun _ -> bump 2);
+      asm_adv_u8 = (fun _ -> bump 1);
+      asm_adv_zstr = (fun _ -> while arr.{!off} != 0
+                      do incr off done)
+    }
 ;;
 
 
