@@ -850,6 +850,54 @@ let emit_file
 ;;
 
 
+let get_sections (arr:mmap_arr) : (string,(int*int)) Hashtbl.t =
+  let pe_hdr_off = get_u32_as_int arr 0x3c in
+  let _ = Printf.printf "PE header offset: 0x%x\n" pe_hdr_off in
+
+  let pe_signature = get_zstr arr pe_hdr_off in
+  let _ = Printf.printf "    PE signature: '%s'\n" pe_signature in
+  let _ = assert (pe_signature = "PE") in
+
+  let num_sections = get_u16_as_int arr (pe_hdr_off + 6) in
+  let _ = Printf.printf "    num sections: %d\n" num_sections in
+
+  let symtab_off = get_u32_as_int arr (pe_hdr_off + 12) in
+  let _ = Printf.printf "   symtab offset: 0x%x\n" symtab_off in
+
+  let num_symbols = get_u32_as_int arr (pe_hdr_off + 16) in
+  let _ = Printf.printf "     num symbols: %d\n" num_symbols in
+  let _ = assert (num_symbols = 0) in
+
+  let loader_hdr_size = get_u16_as_int arr (pe_hdr_off + 20) in
+  let _ = Printf.printf "loader header sz: %d\n" loader_hdr_size in
+
+  let sections_off = pe_hdr_off + 24 + loader_hdr_size in
+
+  let sects = Hashtbl.create 0 in
+
+  let _ =
+    for i = 0 to (num_sections - 1) do
+      let sect_hdr_off = sections_off + i * (8 + (8*4)) in
+      let sect_name =
+        let sect_name = get_zstr arr sect_hdr_off in
+        if sect_name.[0] = '/'
+        then
+          let off_str = String.sub sect_name 1 ((String.length sect_name) - 1) in
+          let i = int_of_string off_str in
+          let ext_name = get_zstr arr (symtab_off + i) in
+            ext_name
+        else
+          sect_name
+      in
+      let sz = get_u32_as_int arr (sect_hdr_off + 16) in
+      let off = get_u32_as_int arr (sect_hdr_off + 20) in
+        Hashtbl.add sects sect_name (off,sz);
+        Printf.printf "       section %d: %s, size %d, offset 0x%x\n" i sect_name sz off;
+    done
+  in
+    sects
+;;
+
 (*
  * Local Variables:
  * fill-column: 70;

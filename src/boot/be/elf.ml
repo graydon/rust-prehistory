@@ -1421,6 +1421,11 @@ let emit_file
     Buffer.output_buffer out buf;
     flush out;
     close_out out
+;;
+
+let get_sections (_:mmap_arr) : (string,(int*int)) Hashtbl.t =
+  Hashtbl.create 0
+;;
 
 
 (*

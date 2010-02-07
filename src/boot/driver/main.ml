@@ -53,6 +53,20 @@ let (sess:Session.sess) =
        around. Ancient OSX gdb perhaps?  *)
     Session.sess_emit_dwarf = (not (targ = MacOS_x86_macho));
   }
+;;
+
+let dump_file s =
+  let arr = Asm.mmap_array s in
+    Printf.printf "mapped file: %s\n" s;
+    let get_sections =
+      match sess.Session.sess_targ with
+          Win32_x86_pe -> Pe.get_sections
+        | MacOS_x86_macho -> Macho.get_sections
+        | Linux_x86_elf -> Elf.get_sections
+    in
+      ignore (get_sections arr);
+      exit 0
+;;
 
 let argspecs =
   [
@@ -97,7 +111,8 @@ let argspecs =
                           sess.Session.sess_trace_drop <- true;
                           sess.Session.sess_trace_tag <- true ),
      "emit all tracing code");
-    ("-dwarf", Arg.Unit (fun _ -> sess.Session.sess_emit_dwarf <- true), "emit DWARF info (default false)")
+    ("-dwarf", Arg.Unit (fun _ -> sess.Session.sess_emit_dwarf <- true), "emit DWARF info (default false)");
+    ("-dump", Arg.String dump_file, "dump DWARF info in compiled file")
   ]
 ;;
 

@@ -978,6 +978,10 @@ let emit_file
     close_out out
 ;;
 
+let get_sections (_:mmap_arr) : (string,(int*int)) Hashtbl.t =
+  Hashtbl.create 0
+;;
+
 
 (*
  * Local Variables:

@@ -518,6 +518,61 @@ let fold_flags (f:'a -> int64) (flags:'a list) : int64 =
 ;;
 
 
+(* reverse-asm stuff for reading mapped files. *)
+type mmap_arr = (int, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t;;
+
+let mmap_array (file:string) : mmap_arr =
+  let fd = Unix.openfile file [ Unix.O_RDONLY ] 0 in
+    Bigarray.Array1.map_file
+      fd ~pos:0L Bigarray.int8_unsigned Bigarray.c_layout false (-1)
+;;
+
+let get_word (n:int) (arr:mmap_arr) (i:int) : int64 =
+  let lsb0 = true in
+  let x = ref 0L in
+    if lsb0
+    then
+      for j = n-1 downto 0 do
+        x := Int64.shift_left (!x) 8;
+        x := Int64.logor (!x) (Int64.of_int arr.{i + j})
+      done
+    else
+      for j = 0 to n-1 do
+        x := Int64.shift_left (!x) 8;
+        x := Int64.logor (!x) (Int64.of_int arr.{i + j})
+      done;
+    !x
+;;
+
+let get_u16 (arr:mmap_arr) (i:int) : int64 =
+  get_word 2 arr i
+;;
+
+let get_u32 (arr:mmap_arr) (i:int) : int64 =
+  get_word 4 arr i
+;;
+
+let get_u32_as_int (arr:mmap_arr) (i:int) : int =
+  Int64.to_int (get_u32 arr i)
+;;
+
+let get_u16_as_int (arr:mmap_arr) (i:int) : int =
+  Int64.to_int (get_u16 arr i)
+;;
+
+let get_zstr (arr:mmap_arr) (i:int) : string =
+  let buf = Buffer.create 16 in
+  let j = ref i in
+    while arr.{!j} != 0 do
+      Buffer.add_char buf (Char.chr arr.{!j});
+      incr j
+    done;
+    Buffer.contents buf
+;;
+
+
+
+
 (*
  * Local Variables:
  * fill-column: 70;
