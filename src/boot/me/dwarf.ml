@@ -1560,6 +1560,55 @@ let read_abbrevs (ar:asm_reader) ((off:int),(sz:int)) : (int,abbrev) Hashtbl.t =
     read_abbrevs()
 ;;
 
+let read_dies (ar:asm_reader) ((off:int),(sz:int)) (abbrevs:(int,abbrev) Hashtbl.t) : unit =
+  ar.asm_seek off;
+  let cu_len = ar.asm_get_u32() in
+  let _ = Printf.printf "debug_info cu_len: %d, section size %d\n" cu_len sz in
+  let _ = assert ((cu_len + 4) = sz) in
+  let dwarf_vers = ar.asm_get_u16() in
+  let _ = assert (dwarf_vers = 3) in
+  let cu_abbrev_off = ar.asm_get_u32() in
+  let _ = assert (cu_abbrev_off = 0) in
+  let sizeof_addr = ar.asm_get_u8() in
+  let _ = assert (sizeof_addr = 4) in
+
+  let adv_block1 _ =
+    let len = ar.asm_get_u8() in
+      ar.asm_adv len
+  in
+
+  let rec read_dies _ =
+    if ar.asm_get_off() >= (off + sz)
+    then ()
+    else
+      begin
+        let abbrev_num = ar.asm_get_uleb() in
+          if abbrev_num = 0
+          then ()
+          else
+            let _ = Printf.printf "DIE with abbrev %d\n" abbrev_num in
+            let abbrev = Hashtbl.find abbrevs abbrev_num in
+            let (_(*tag*), _(*children*), attrs) = abbrev in
+              Array.iter
+                begin
+                  fun (_,form) ->
+                    match form with
+                        DW_FORM_string -> Printf.printf "DW_FORM_string: %s\n" (ar.asm_get_zstr())
+                      | DW_FORM_addr -> Printf.printf "DW_FORM_addr: %d\n" (ar.asm_get_u32())
+                      | DW_FORM_ref_addr -> Printf.printf "DW_FORM_ref_addr: %d\n" (ar.asm_get_u32())
+                      | DW_FORM_data1 -> Printf.printf "DW_FORM_data1: %d\n" (ar.asm_get_u8())
+                      | DW_FORM_data4 -> Printf.printf "DW_FORM_data4: %d\n" (ar.asm_get_u32())
+                      | DW_FORM_flag -> Printf.printf "DW_FORM_flag: %d\n" (ar.asm_get_u8())
+                      | DW_FORM_block1 -> (Printf.printf "DW_FORM_block1\n"; adv_block1())
+                      | _ -> failwith ("unknown DWARF form " ^ (string_of_int (dw_form_to_int form)))
+                end
+                attrs;
+              read_dies()
+      end
+  in
+    read_dies()
+;;
+
 (*
  * Local Variables:
  * fill-column: 70;

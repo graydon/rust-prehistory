@@ -65,7 +65,8 @@ let dump_file s =
         | Linux_x86_elf -> Elf.get_sections
     in
     let sects = get_sections ar in
-      ignore (Dwarf.read_abbrevs ar (Hashtbl.find sects ".debug_abbrev"));
+    let abbrevs = Dwarf.read_abbrevs ar (Hashtbl.find sects ".debug_abbrev") in
+      ignore (Dwarf.read_dies ar (Hashtbl.find sects ".debug_info")  abbrevs);
       exit 0
 ;;
 
