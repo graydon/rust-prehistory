@@ -722,6 +722,38 @@ let trans_visitor
               emit_new_mod_glue mod_id hdr fix g;
               fix
 
+
+  (* FIXME (bug 544925): this should eventually use tail calling logic *)
+
+  (* FIXME: here's some pseudocode for emit_new_bind_glue:
+   *   1. save the fn ptr in a tmp vreg
+   *   2. save the env ptr in a tmp vreg
+   *   3. copy the new and saved args into a new arg tuple
+   *      (via trans_copy_slot, which also does refcount logic)
+   *   4. call into the fn ptr
+   *      (try to reuse trans_call_fn)
+   *)
+  and emit_new_bind_glue
+      ((*fn_id*)_:node_id)
+      ((*fn_sig*)_:Ast.ty_sig)
+      ((*bound_args*)_:bool array)
+      ((*fix*)_:fixup)
+      ((*g*)_:glue)
+      : unit =
+    bug () "not yet implemented"
+
+
+  (* FIXME: abstract out the memoization logic between get_new_mod_glue and get_new_bind_glue *)
+  and get_new_bind_glue (fn_id:node_id) (fn_sig:Ast.ty_sig) (bound_args:bool array) : fixup =
+    let g = GLUE_new_bind fn_id in
+      match htab_search cx.ctxt_glue_code g with
+          Some code -> code.code_fixup
+        | None ->
+            let fix = new_fixup "new-bind glue" in
+              emit_new_bind_glue fn_id fn_sig bound_args fix g;
+              fix
+
+
   (* 
    * Mem-glue functions are either 'mark', 'drop' or 'free', they take
    * one pointer arg and return nothing.
@@ -2012,13 +2044,6 @@ let trans_visitor
 
   (* FIXME: here's some pseudocode for trans_bind_fn:
    *   1. create the glue function for this lval id, which should:
-   *      a. save the fn ptr in a tmp vreg
-   *      b. save the env ptr in a tmp vreg
-   *      c. shift the new args over into their proper place
-   *      d. pull the saved args from the env into the holes
-   *      e. call into the fn ptr
-   *   ==> Q: what's the diff between a fn ptr to a direct fn vs. indirect fn?
-   *   ==> Q: refcount add/drop on any of these data structures?
    *   2. create the env data structure on the heap, which should:
    *      a. have a gc control word iff any of the args are mutable
    *      b. have a refcount word
@@ -2028,18 +2053,25 @@ let trans_visitor
    *)
 
   and trans_bind_fn
-      ((*initializing*)_:bool)
+      (initializing:bool)
       ((*direct*)_:bool)
-      ((*dst*)_:Ast.lval)
-      ((*flv*)_:Ast.lval)
+      (dst:Ast.lval)
+      (flv:Ast.lval)
       ((*tsig*)_:Ast.ty_sig)
-      ((*args*)_:Ast.atom option array)
+      (args:Ast.atom option array)
       : unit =
-(*
-    let (dst_cell, _) = trans_lval_maybe_init initializing dst in
-    let (fn_cell, fn_slot) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
+    let (*(dst_cell, _)*)_ = trans_lval_maybe_init initializing dst in
+    let fn_item = lval_item cx flv in
+    let ((*fn_cell*)_, fn_slot) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
     let fn_ty = slot_ty fn_slot in
-*)      
+    let bound_args = Array.map (fun arg -> match arg with Some _ -> true | None -> false) args in
+    let (*glue_fixup*)_ =
+      match fn_ty with
+          Ast.TY_fn (fn_sig, _) ->
+            get_new_bind_glue fn_item.id fn_sig bound_args
+        (* FIXME: should work for TY_pred too *)
+        | _ -> err None "bind of unexpected form of function"
+    in
     bug () "trans_bind_fn not yet implemented"
 
 
@@ -2113,6 +2145,21 @@ let trans_visitor
     let vr = next_vreg_cell Il.voidptr_t in
       emit (Il.call vr code);
 
+
+  and trans_callee_code
+      (callee_cell:Il.cell)
+      (direct:bool)
+      (logname:unit -> string)
+      : Il.cell =
+    if direct then
+      callee_cell
+    else
+      begin
+        iflog (fun _ -> annotate (Printf.sprintf "extract fn mem for call to %s" (logname ())));
+        deref (get_element_ptr callee_cell 0)
+      end
+
+
   and trans_call
       ((*initializing*)_:bool)
       (direct:bool)
@@ -2123,17 +2170,9 @@ let trans_visitor
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
-    let callee_code_cell =
-      if direct then
-        callee_cell
-      else
-        begin
-          iflog (fun _ -> annotate (Printf.sprintf "extract fn mem for call to %s" (logname ())));
-          deref (get_element_ptr callee_cell 0)
-        end
-    in
+    let callee_code_cell = trans_callee_code callee_cell direct logname in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args false output_cell arg_slots args  extra_args;
+      copy_fn_args false output_cell arg_slots args extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're

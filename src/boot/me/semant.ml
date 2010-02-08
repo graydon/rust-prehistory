@@ -34,6 +34,7 @@ type glue =
   | GLUE_drop_frame of node_id
   | GLUE_reloc_frame of node_id
   | GLUE_new_module of node_id
+  | GLUE_new_bind of node_id
 ;;
 
 type data =
