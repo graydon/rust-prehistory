@@ -64,7 +64,8 @@ let dump_file s =
         | MacOS_x86_macho -> Macho.get_sections
         | Linux_x86_elf -> Elf.get_sections
     in
-      ignore (get_sections ar);
+    let sects = get_sections ar in
+      ignore (Dwarf.read_abbrevs ar (Hashtbl.find sects ".debug_abbrev"));
       exit 0
 ;;
 

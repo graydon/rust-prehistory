@@ -531,6 +531,7 @@ type asm_reader =
       asm_get_u32: unit -> int;
       asm_get_u16: unit -> int;
       asm_get_u8: unit -> int;
+      asm_get_uleb: unit -> int;
       asm_get_zstr: unit -> string;
       asm_get_zstr_padded: int -> string;
       asm_get_off: unit -> int;
@@ -596,6 +597,33 @@ let new_asm_reader (s:filename) =
       asm_get_u32 = (fun _ -> get_word_as_int 4);
       asm_get_u16 = (fun _ -> get_word_as_int 2);
       asm_get_u8 = (fun _ -> get_word_as_int 1);
+      asm_get_uleb =
+        begin
+          fun _ ->
+            let hi_mask = 0x80 in
+            let lo_mask = 0x7f in
+            let rec accum i =
+              tmp := Nativeint.logor (!tmp) (Nativeint.of_int (i land lo_mask));
+              if (i land hi_mask) = hi_mask
+              then
+                begin
+                  tmp := Nativeint.shift_left (!tmp) 7;
+                  incr off;
+                  accum arr.{!off}
+                end
+              else
+                Nativeint.to_int (!tmp)
+            in
+            let first = arr.{!off} in
+              incr off;
+              if first = 0
+              then 0
+              else
+                begin
+                  tmp := Nativeint.zero;
+                  accum first
+                end
+        end;
       asm_get_zstr = (fun _ -> get_zstr_padded None);
       asm_get_zstr_padded = (fun pad -> get_zstr_padded (Some pad));
       asm_get_off = (fun _ -> !off);
