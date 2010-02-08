@@ -95,7 +95,7 @@ MKFILES := Makefile
 
 ML_INCS := -I boot/fe -I boot/me -I boot/be -I boot/driver -I boot/util
 ML_LIBS := unix.cma nums.cma bigarray.cma
-ML_NATIVE_LIBS := unix.cmxa nums.cmxa
+ML_NATIVE_LIBS := unix.cmxa nums.cmxa bigarray.cmxa
 OCAMLC_FLAGS := -g $(ML_INCS) -w Ael -warn-error Ael
 OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael
 
