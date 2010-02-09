@@ -765,11 +765,11 @@ let emit_file
   (* Make private symbols for glue. *)
   let (symbols:(string * (frag * fixup)) array) =
     Array.append symbols
-      (Array.map (fun code ->
+      (Array.map (fun (g,code) ->
                     let fix = code.Semant.code_fixup in
-                      (fix.fixup_name,
+                      (Semant.glue_str sem g,
                        absolute_private_symbol_nlist_entry fix))
-         (Array.of_list (htab_vals sem.Semant.ctxt_glue_code)))
+         (Array.of_list (htab_pairs sem.Semant.ctxt_glue_code)))
   in
 
   let (symbols:(string * (frag * fixup)) array) =

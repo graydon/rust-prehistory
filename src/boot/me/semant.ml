@@ -20,7 +20,6 @@ type glue =
   | GLUE_yield
   | GLUE_exit_main_proc
   | GLUE_exit_proc of Ast.ty_sig
-  | GLUE_upcall of int
   | GLUE_mark of Ast.ty
   | GLUE_drop of Ast.ty
   | GLUE_free of Ast.ty
@@ -50,6 +49,10 @@ type glue_code = (glue, code) Hashtbl.t;;
 type item_code = (node_id, code) Hashtbl.t;;
 type file_code = (node_id, item_code) Hashtbl.t;;
 type data_frags = (data, (fixup * Asm.frag)) Hashtbl.t;;
+
+let string_of_name (n:Ast.name) : string =
+  Ast.fmt_to_str Ast.fmt_name n
+;;
 
 (* The node_id in the Constr_pred constr_key is the innermost block_id
    of any of the constr's pred name or cargs; this is the *outermost*
@@ -180,9 +183,9 @@ let new_ctxt sess abi crate =
     ctxt_imports = Hashtbl.create 0;
     ctxt_exports = Hashtbl.create 0;
 
-    ctxt_main_fn_fixup = new_fixup "main";
-    ctxt_main_name = Ast.fmt_to_str Ast.fmt_name crate.Ast.crate_main;
-    ctxt_main_exit_proc_glue_fixup = new_fixup "main exit_proc glue"
+    ctxt_main_fn_fixup = new_fixup (string_of_name crate.Ast.crate_main);
+    ctxt_main_name = string_of_name crate.Ast.crate_main;
+    ctxt_main_exit_proc_glue_fixup = new_fixup "main exit-proc glue"
   }
 ;;
 
@@ -1448,6 +1451,133 @@ let layout_mod_call_tup (abi:Abi.abi) (hdr:Ast.ty_mod_header) : (layout array) =
   let slots' = Array.append [| out_ptr; proc_ptr |] slots in
     layout_tup abi slots'
 ;;
+
+
+(* name mangling support. *)
+
+let item_name (cx:ctxt) (id:node_id) : Ast.name =
+  Hashtbl.find cx.ctxt_all_item_names id
+;;
+
+let item_str (cx:ctxt) (id:node_id) : string =
+    string_of_name (item_name cx id)
+;;
+
+let ty_str (ty:Ast.ty) : string =
+  let base = associative_binary_op_ty_fold "" (fun a b -> a ^ b) in
+  let fold_slot (mode,ty) =
+    match mode with
+        Ast.MODE_exterior Ast.IMMUTABLE -> "E" ^ ty
+      | Ast.MODE_interior Ast.IMMUTABLE -> ty
+      | Ast.MODE_exterior Ast.MUTABLE -> "M" ^ ty
+      | Ast.MODE_interior Ast.MUTABLE -> "m" ^ ty
+      | Ast.MODE_read_alias -> "r" ^ ty
+      | Ast.MODE_write_alias -> "w" ^ ty
+  in
+  let num n = (string_of_int n) ^ "$" in
+  let len a = num (Array.length a) in
+  let join az = Array.fold_left (fun a b -> a ^ b) "" az in
+  let fold_slots slots =
+    "t"
+    ^ (len slots)
+    ^ (join slots)
+  in
+  let fold_rec entries =
+    "r"
+    ^ (len entries)
+    ^ (Array.fold_left
+         (fun str (ident, s) -> str ^ "$" ^ ident ^ "$" ^ s)
+         "" entries)
+  in
+  let fold_tags tags =
+    "g"
+    ^ (num (Hashtbl.length tags))
+    ^ (Array.fold_left
+         (fun str key -> str ^ (string_of_name key) ^ (Hashtbl.find tags key))
+         "" (sorted_htab_keys tags))
+  in
+  let fold_iso (n, tags) =
+    "G"
+    ^ (num n)
+    ^ (len tags)
+    ^ (join tags)
+  in
+  let fold_mach m =
+    match m with
+        TY_u8 -> "U0"
+      | TY_u16 -> "U1"
+      | TY_u32 -> "U2"
+      | TY_u64 -> "U3"
+      | TY_s8 -> "S0"
+      | TY_s16 -> "S1"
+      | TY_s32 -> "S2"
+      | TY_s64 -> "S3"
+      | TY_f32 -> "F2"
+      | TY_f64 -> "F3"
+  in
+  let fold =
+     { base with
+         ty_fold_slot = fold_slot;
+         ty_fold_slots = fold_slots;
+         ty_fold_tags = fold_tags;
+         ty_fold_rec = fold_rec;
+         ty_fold_any = (fun _ -> "a");
+         ty_fold_nil = (fun _ -> "n");
+         ty_fold_bool = (fun _ -> "b");
+         ty_fold_mach = fold_mach;
+         ty_fold_int = (fun _ -> "i");
+         ty_fold_char = (fun _ -> "c");
+         ty_fold_str = (fun _ -> "s");
+         ty_fold_vec = (fun s -> "v" ^ s);
+         ty_fold_iso = fold_iso;
+         ty_fold_idx = (fun i -> "x" ^ (string_of_int i));
+         (* FIXME: encode constrs, aux as well. *)
+         ty_fold_fn = (fun ((ins,_,out),_) -> "f" ^ ins ^ out);
+         ty_fold_pred = (fun (ins,_) -> "p" ^ ins);
+         ty_fold_chan = (fun t -> "H" ^ t);
+         ty_fold_port = (fun t -> "R" ^ t);
+         (* FIXME: encode module types. *)
+         ty_fold_mod = (fun _ -> "m");
+         ty_fold_proc = (fun _ -> "P");
+         ty_fold_opaque = (fun _ -> "Q");
+         ty_fold_named = (fun _ -> failwith "string-encoding named type");
+         ty_fold_type = (fun _ -> "T");
+         (* FIXME: encode constrs as well. *)
+         ty_fold_constrained = (fun (t,_)-> t) }
+  in
+    fold_ty fold ty
+;;
+
+let glue_str (cx:ctxt) (g:glue) : string =
+  match g with
+      GLUE_C_to_proc -> "glue$c_to_proc"
+    | GLUE_yield -> "glue$yield"
+    | GLUE_exit_main_proc -> "glue$exit_main_proc"
+    | GLUE_exit_proc tsig ->
+        let taux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
+                     Ast.fn_proto = None }
+        in
+          "glue$exit_proc$" ^ (ty_str (Ast.TY_fn (tsig, taux)))
+    | GLUE_mark ty -> "glue$mark$" ^ (ty_str ty)
+    | GLUE_drop ty -> "glue$drop$" ^ (ty_str ty)
+    | GLUE_free ty -> "glue$free$" ^ (ty_str ty)
+    | GLUE_clone ty -> "glue$clone$" ^ (ty_str ty)
+    | GLUE_compare ty -> "glue$compare$" ^ (ty_str ty)
+    | GLUE_hash ty -> "glue$hash$" ^ (ty_str ty)
+    | GLUE_write ty -> "glue$write$" ^ (ty_str ty)
+    | GLUE_read ty -> "glue$read$" ^ (ty_str ty)
+    | GLUE_unwind -> "glue$unwind"
+    | GLUE_mark_frame i -> "glue$mark_frame$" ^ (item_str cx i)
+    | GLUE_drop_frame i -> "glue$drop_frame$" ^ (item_str cx i)
+    | GLUE_reloc_frame i -> "glue$reloc_frame$" ^ (item_str cx i)
+    | GLUE_new_module i -> "glue$new_mod$" ^ (item_str cx i)
+        (* 
+         * FIXME: the node_id here isn't an item, it's a statement; 
+         * lookup bind target and encode bound arg tuple type.
+         *)
+    | GLUE_new_bind _ -> "glue$new_bind"
+;;
+
 
 (*
  * Local Variables:

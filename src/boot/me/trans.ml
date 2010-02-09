@@ -115,7 +115,7 @@ let trans_visitor
   let epilogue_jumps = Stack.create() in
 
   let path_name (_:unit) : string =
-    Ast.fmt_to_str Ast.fmt_name (Walk.path_to_name path)
+    string_of_name (Walk.path_to_name path)
   in
 
   let based (reg:Il.reg) : Il.mem =
@@ -638,23 +638,24 @@ let trans_visitor
       abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill callsz nabi_rust (upcall_fixup "upcall_grow_proc");
       iflog (fun _ -> annotate "finished prologue");
 
-  and capture_emitted_glue (name:string) (fix:fixup) (spill:fixup) (g:glue) : unit =
+  and capture_emitted_glue (fix:fixup) (spill:fixup) (g:glue) : unit =
     let e = emitter() in
-      iflog (fun _ -> annotate_quads name);
+      iflog (fun _ -> annotate_quads (glue_str cx g));
       let code = { code_fixup = fix;
                    code_quads = e.Il.emit_quads;
                    code_vregs_and_spill = Some (e.Il.emit_next_vreg, spill) }
       in
         htab_put cx.ctxt_glue_code g code
 
-  and trans_glue_frame_exit (name:string) (fix:fixup) (spill:fixup) (g:glue) : unit =
+  and trans_glue_frame_exit (fix:fixup) (spill:fixup) (g:glue) : unit =
     iflog (fun _ -> annotate "epilogue");
     abi.Abi.abi_emit_fn_epilogue (emitter());
-    capture_emitted_glue name fix spill g;
+    capture_emitted_glue fix spill g;
     pop_emitter ()
 
   and emit_exit_proc_glue (tsig:Ast.ty_sig) (fix:fixup) (g:glue) : unit =
-    let spill = new_fixup "proc glue spill" in
+    let name = glue_str cx g in
+    let spill = new_fixup (name ^ " spill") in
       push_new_emitter ();
       (* 
        * We return-to-here in a synthetic frame we did not build; our job is
@@ -665,7 +666,7 @@ let trans_visitor
         drop_arg_slots in_slots;
         iflog (fun _ -> annotate "assume 'exited' state");
         trans_void_upcall "upcall_exit" [| |];
-        capture_emitted_glue "proc glue" fix spill g;
+        capture_emitted_glue fix spill g;
         pop_emitter ()
 
   and get_exit_proc_glue (tsig:Ast.ty_sig) : fixup =
@@ -673,12 +674,13 @@ let trans_visitor
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
-            let fix = new_fixup "proc glue" in
+            let fix = new_fixup (glue_str cx g) in
               emit_exit_proc_glue tsig fix g;
               fix
 
   and emit_new_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
-    let spill = new_fixup "new-mod glue spill" in
+    let name = glue_str cx g in
+    let spill = new_fixup (name ^ " spill") in
       trans_mem_glue_frame_entry 0 spill;
 
       let (slots, _) = hdr in
@@ -717,7 +719,7 @@ let trans_visitor
             mov refcnt_cell one;
 
             trans_copy_tup true body_cell (Il.Mem src_ta) slots;
-            trans_glue_frame_exit "new-mod glue" fix spill g;
+            trans_glue_frame_exit fix spill g;
 
 
   and get_new_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) : fixup =
@@ -725,7 +727,7 @@ let trans_visitor
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
-            let fix = new_fixup "new-mod glue" in
+            let fix = new_fixup (glue_str cx g) in
               emit_new_mod_glue mod_id hdr fix g;
               fix
 
@@ -756,7 +758,7 @@ let trans_visitor
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
-            let fix = new_fixup "new-bind glue" in
+            let fix = new_fixup (glue_str cx g) in
               emit_new_bind_glue bind_id fn_sig bound_args fix g;
               fix
 
@@ -771,13 +773,13 @@ let trans_visitor
     let callsz = Int64.add isz (word_n n_outgoing_args) in
       trans_glue_frame_entry callsz spill
 
-  and get_mem_glue (g:glue) (prefix:unit -> string) (inner:Il.mem -> unit) : fixup =
+  and get_mem_glue (g:glue) (inner:Il.mem -> unit) : fixup =
     match htab_search cx.ctxt_glue_code g with
         Some code -> code.code_fixup
       | None ->
           begin
-            let prefix = prefix () in
-            let fix = new_fixup ("glue: " ^ prefix) in
+            let name = glue_str cx g in
+            let fix = new_fixup name in
               (* 
                * Put a temporary code entry in the table to handle
                * recursive emit calls during the generation of the glue
@@ -786,23 +788,22 @@ let trans_visitor
             let tmp_code = { code_fixup = fix;
                              code_quads = [| |];
                              code_vregs_and_spill = None } in
-            let spill = new_fixup ("glue spill: " ^ prefix) in
+            let spill = new_fixup (name ^ " spill") in
               htab_put cx.ctxt_glue_code g tmp_code;
               trans_mem_glue_frame_entry 1 spill;
               let (arg:Il.mem) = fp_imm arg0_disp in
                 inner arg;
                 Hashtbl.remove cx.ctxt_glue_code g;
-                trans_glue_frame_exit ("glue: " ^ prefix) fix spill g;
+                trans_glue_frame_exit fix spill g;
                 fix
           end
 
   and get_typed_mem_glue
       (g:glue)
       (ty:Ast.ty)
-      (prefix:unit -> string)
       (inner:Il.cell -> unit)
       : fixup =
-    get_mem_glue g prefix (fun mem -> inner (ptr_at mem ty))
+    get_mem_glue g (fun mem -> inner (ptr_at mem ty))
 
   and trace_str b s =
     if b
@@ -822,7 +823,6 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_drop ty in
-    let prefix _ = "drop " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
     let inner (arg:Il.cell) =
       trace_str cx.ctxt_sess.Session.sess_trace_drop
         "in drop-glue, dropping";
@@ -831,7 +831,7 @@ let trans_visitor
       trace_str cx.ctxt_sess.Session.sess_trace_drop
         "drop-glue complete";
     in
-      get_typed_mem_glue g ty prefix inner
+      get_typed_mem_glue g ty inner
 
   and get_free_glue
       (ty:Ast.ty)
@@ -839,7 +839,6 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_free ty in
-    let prefix _ = "free " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
     let inner (arg:Il.cell) =
       (* 
        * Free-glue assumes we're looking at a pointer to an 
@@ -869,7 +868,7 @@ let trans_visitor
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "free-glue complete";
     in
-      get_typed_mem_glue g ty prefix inner
+      get_typed_mem_glue g ty inner
 
 
   and get_mark_glue
@@ -877,9 +876,8 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_mark ty in
-    let prefix _ = "mark " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
     let inner (arg:Il.cell) = mark_ty ty (deref arg) curr_iso in
-    let fix = get_typed_mem_glue g ty prefix inner in
+    let fix = get_typed_mem_glue g ty inner in
       fix
 
   and get_clone_glue
@@ -887,7 +885,6 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_clone ty in
-    let prefix _ = "clone " ^ (Ast.fmt_to_str Ast.fmt_ty ty) in
     let inner (arg:Il.cell) =
       let dst = deref (ptr_at (fp_imm out_mem_disp) ty) in
       let src = deref arg in
@@ -895,7 +892,7 @@ let trans_visitor
       let rt = word_at (fp_imm (Int64.add arg0_disp (word_n 1))) in
         clone_ty rt ty dst src curr_iso
     in
-    let fix = get_typed_mem_glue g ty prefix inner in
+    let fix = get_typed_mem_glue g ty inner in
       fix
 
   and trans_call_clone_glue (dst:Il.cell) (fix:fixup) (arg:Il.cell) (rt:Il.cell) : unit =
@@ -2472,45 +2469,43 @@ let trans_visitor
   in
 
   let get_frame_glue_fns (fnid:node_id) : Il.operand =
-    let get_frame_glue glue prefix inner =
-      let path = path_name() in
-        get_mem_glue glue
-          (fun _ -> prefix ^ " frame: " ^ path)
-          begin
-            fun mem ->
-              iter_frame_and_arg_slots fnid
-                begin
-                  fun key slot_id slot ->
-                    match htab_search cx.ctxt_slot_layouts slot_id with
-                        None -> ()
-                      | Some layout ->
-                          let referent_type = slot_id_referent_type slot_id in
-                          let disp = layout.layout_offset in
-                          let fp_cell = Il.Mem (mem, (Il.ScalarTy (Il.AddrTy referent_type))) in
-                          let slot_cell = deref_imm fp_cell disp in
-                            inner key slot_id slot slot_cell
-                end
-          end
+    let get_frame_glue glue inner =
+      get_mem_glue glue
+        begin
+          fun mem ->
+            iter_frame_and_arg_slots fnid
+              begin
+                fun key slot_id slot ->
+                  match htab_search cx.ctxt_slot_layouts slot_id with
+                      None -> ()
+                    | Some layout ->
+                        let referent_type = slot_id_referent_type slot_id in
+                        let disp = layout.layout_offset in
+                        let fp_cell = Il.Mem (mem, (Il.ScalarTy (Il.AddrTy referent_type))) in
+                        let slot_cell = deref_imm fp_cell disp in
+                          inner key slot_id slot slot_cell
+              end
+        end
     in
     trans_data_frag (DATA_frame_glue_fns fnid)
       begin
         fun _ ->
           let mark_frame_glue_fixup =
-            get_frame_glue (GLUE_mark_frame fnid) "mark"
+            get_frame_glue (GLUE_mark_frame fnid)
               begin
                 fun _ _ slot slot_cell ->
                   mark_slot slot_cell slot None
               end
           in
           let drop_frame_glue_fixup =
-            get_frame_glue (GLUE_drop_frame fnid) "drop"
+            get_frame_glue (GLUE_drop_frame fnid)
               begin
                 fun _ _ slot slot_cell ->
                   drop_slot slot_cell slot None
               end
           in
           let reloc_frame_glue_fixup =
-            get_frame_glue (GLUE_reloc_frame fnid) "reloc"
+            get_frame_glue (GLUE_reloc_frame fnid)
               begin
                 fun _ _ _ _ ->
                   ()
@@ -2610,12 +2605,14 @@ let trans_visitor
           Abi.CONV_rust -> LIB_rustrt
         | Abi.CONV_cdecl -> LIB_c
     in
-    let name = Hashtbl.find cx.ctxt_all_item_names fnid in
+    let name = item_name cx fnid in
     let name =
       match name with
           Ast.NAME_base (Ast.BASE_ident id) -> id
         | Ast.NAME_ext (_, Ast.COMP_ident id) -> id
-        | _ -> err (Some fnid) "Native fn %a lacks simple identifier-name" Ast.sprintf_name name
+        | _ -> (err (Some fnid)
+                  "Native fn %a lacks simple identifier-name"
+                  Ast.sprintf_name name)
     in
     let args =
       (Array.init (Array.length nfn.Ast.native_fn_input_slots)

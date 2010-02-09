@@ -1060,11 +1060,19 @@ let elf32_linux_x86_file
        symtab_frag :: symtab_frags)
     in
 
+    let symbol_frags_of_glue_code g code accum =
+      let (strtab_frags, symtab_frags) = accum in
+      let fix = code.Semant.code_fixup in
+      let (strtab_frag, symtab_frag) = text_sym (Semant.glue_str sem g) STB_LOCAL fix in
+      (strtab_frag :: strtab_frags,
+       symtab_frag :: symtab_frags)
+    in
+
     let item_str_frags, item_sym_frags =
       Hashtbl.fold symbol_frags_of_code sem.Semant.ctxt_all_item_code ([], [])
     in
     let glue_str_frags, glue_sym_frags =
-      Hashtbl.fold symbol_frags_of_code sem.Semant.ctxt_glue_code ([], [])
+      Hashtbl.fold symbol_frags_of_glue_code sem.Semant.ctxt_glue_code ([], [])
     in
       (item_str_frags @ glue_str_frags,
        item_sym_frags @ glue_sym_frags)
