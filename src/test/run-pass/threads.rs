@@ -2,7 +2,7 @@
 
 fn main() -> () {
   let port[int] p = port();
-  let int i = 1000;
+  let int i = 10;
   while (i > 0) {
     spawn thread child(i);
     i = i - 1;
