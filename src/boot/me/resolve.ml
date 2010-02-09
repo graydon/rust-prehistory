@@ -122,6 +122,7 @@ let all_item_collecting_visitor
           None -> []
         | Some x -> x
     in
+      htab_put cx.ctxt_slot_is_arg arg_id ();
       Hashtbl.replace cx.ctxt_frame_args item_id (arg_id :: existing)
   in
 

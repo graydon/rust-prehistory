@@ -951,6 +951,16 @@ let (abbrev_variable:abbrev) =
    |])
 ;;
 
+(* NB: must have same abbrev-body as abbrev_variable. *)
+let (abbrev_formal:abbrev) =
+  (DW_TAG_formal_parameter, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_location, DW_FORM_block1);
+     (DW_AT_type, DW_FORM_ref_addr)
+   |])
+;;
+
 let (abbrev_unspecified_type:abbrev) =
   (DW_TAG_unspecified_type, DW_CHILDREN_no,
    [|
@@ -1490,7 +1500,11 @@ let dwarf_visitor
         | Some Ast.KEY_temp _ -> ()
         | Some Ast.KEY_ident ident ->
             begin
-              let abbrev_code = get_abbrev_code abbrev_variable in
+              let abbrev_code =
+                if Hashtbl.mem cx.ctxt_slot_is_arg s.id
+                then get_abbrev_code abbrev_formal
+                else get_abbrev_code abbrev_variable
+              in
               let resolved_slot = Hashtbl.find cx.ctxt_all_slots s.id in
               let emit_var_die slot_loc =
                 let var_die =
