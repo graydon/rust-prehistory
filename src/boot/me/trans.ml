@@ -1473,7 +1473,10 @@ let trans_visitor
           trans_upcall "upcall_clone_chan" dst [| (Il.Cell src) |]
       | Ast.TY_proc
       | Ast.TY_port _
-      | _ when type_is_mutable ty -> bug () "cloning mutable type"
+      | _ when type_is_mutable ty
+          -> bug () "cloning mutable type"
+      | _ when i64_le (ty_sz abi ty) word_sz
+          -> mov dst (Il.Cell src)
       | _ -> iter_ty_slots_full ty dst src clone_slot curr_iso
 
   and free_ty
@@ -1554,17 +1557,18 @@ let trans_visitor
       (dst_slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    match dst_slot.Ast.slot_mode with
-        Ast.MODE_exterior _ ->
-          let dst = deref_slot true dst dst_slot in
-          let glue_fix = get_clone_glue (slot_ty dst_slot) curr_iso in
-            trans_call_mem_glue_full (Some dst) glue_fix src
+    let ty = slot_ty dst_slot in
+      match dst_slot.Ast.slot_mode with
+          Ast.MODE_exterior _ ->
+            let ty = maybe_iso curr_iso ty in
+            let curr_iso = maybe_enter_iso ty curr_iso in
+            let dst = deref_slot true dst dst_slot in
+            let glue_fix = get_clone_glue (slot_ty dst_slot) curr_iso in
+              trans_call_mem_glue_full (Some dst) glue_fix src
 
-      | Ast.MODE_read_alias
-      | Ast.MODE_write_alias -> bug () "cloning into alias slot"
-
-      | Ast.MODE_interior _ ->
-          trans_copy_slot_heavy true dst dst_slot src dst_slot curr_iso
+        | Ast.MODE_read_alias
+        | Ast.MODE_write_alias -> bug () "cloning into alias slot"
+        | Ast.MODE_interior _ -> clone_ty ty dst src curr_iso
 
   and drop_slot
       (cell:Il.cell)
