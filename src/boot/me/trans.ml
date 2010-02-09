@@ -45,6 +45,7 @@ let trans_visitor
       | Il.Bits32 -> TY_u32
       | Il.Bits64 -> TY_u64
   in
+  let (word_slot:Ast.slot) = word_slot abi in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
   let imm_of_ty (i:int64) (tm:ty_mach) : Il.operand =
@@ -609,6 +610,12 @@ let trans_visitor
         let (reg, _) = force_to_reg (Il.Cell (alias c)) in
           Il.RegIn (reg, None)
 
+  and code_fixup_to_mem (fix:fixup) : Il.mem =
+    fixup_to_mem abi.Abi.abi_has_abs_code fix Il.CodeTy
+
+  and fixup_to_code (fix:fixup) : Il.code =
+    Il.CodeMem (code_fixup_to_mem fix)
+
   and annotate_quads (name:string) : unit =
     let e = emitter() in
     let quads = e.Il.emit_quads in
@@ -884,37 +891,39 @@ let trans_visitor
     let inner (arg:Il.cell) =
       let dst = deref (ptr_at (fp_imm out_mem_disp) ty) in
       let src = deref arg in
-        clone_ty ty dst src curr_iso
+        (* FIXME: Gross hack here: we know rt is one-past arg in clone glue args. *)
+      let rt = word_at (fp_imm (Int64.add arg0_disp (word_n 1))) in
+        clone_ty rt ty dst src curr_iso
     in
     let fix = get_typed_mem_glue g ty prefix inner in
       fix
 
-  and trans_call_mem_glue_full (dst:Il.cell option) (fix:fixup) (arg:Il.cell) : unit =
-    let code = Il.CodeMem (fixup_to_mem
-                              abi.Abi.abi_has_abs_code
-                              fix Il.CodeTy)
-    in
-    let arg_tup = arg_tup_cell [| interior_slot (Ast.TY_mach word_ty_mach) |] in
-      (* Arg0 may or may not be provided; if given we alias it. *)
+  and trans_call_clone_glue (dst:Il.cell) (fix:fixup) (arg:Il.cell) (rt:Il.cell) : unit =
+    let code = fixup_to_code fix in
+    let arg_tup = arg_tup_cell [| word_slot; word_slot |] in
+      (* Arg0 is target of clone, to which we write. *)
       (* Arg1 is process-pointer, as usual. *)
-      (* Arg2 is the sole pointer we pass in. Hard-wire its address here. *)
-    let inner _ =
+      (* Arg2 is the address of the slot we're cloning. *)
+      (* Arg3 is the address of the runtime into which we're to clone various things. *)
+      aliasing true dst
+        begin
+          fun dst ->
+            mov (get_element_ptr arg_tup 0) (Il.Cell dst);
+            mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
+            mov (get_element_ptr arg_tup 2) (Il.Cell arg);
+            mov (get_element_ptr arg_tup 3) (Il.Cell rt);
+            call_code code
+        end
+
+  and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
+    let code = fixup_to_code fix in
+    let arg_tup = arg_tup_cell [| word_slot |] in
+      (* Arg0 we ignore, not present. *)
+      (* Arg1 is process-pointer, as usual. *)
+      (* Arg2 is the sole pointer we pass in. *)
       mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
       mov (get_element_ptr arg_tup 2) (Il.Cell arg);
       call_code code
-    in
-      match dst with
-          None -> inner()
-        | Some cell ->
-            aliasing true cell
-              begin
-                fun cell ->
-                  mov (get_element_ptr arg_tup 0) (Il.Cell cell);
-                  inner()
-              end
-
-  and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
-    trans_call_mem_glue_full None fix arg
 
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
@@ -1113,20 +1122,23 @@ let trans_visitor
     let in_tup = arg_tup_cell in_slots in
     let callsz = Il.referent_ty_size word_bits (snd (need_mem_cell in_tup)) in
     let exit_proc_glue_fixup = get_exit_proc_glue tsig in
-    let exit_proc_glue_mem = (fixup_to_mem
-                                 abi.Abi.abi_has_abs_data
-                                 exit_proc_glue_fixup Il.CodeTy) in
+    let exit_proc_glue_mem = code_fixup_to_mem exit_proc_glue_fixup in
     let exit_proc_glue_cell = Il.Mem (exit_proc_glue_mem, Il.CodeTy) in
 
       iflog (fun _ -> annotate "spawn proc: copy args");
 
-      let (realm_str, clone) =
+      let (realm_str, clone_rt) =
         match realm with
-            Ast.REALM_local -> ("local", false)
-          | Ast.REALM_thread -> ("thread", true)
+            Ast.REALM_local -> ("local", None)
+          | Ast.REALM_thread ->
+              begin
+                let rt = next_vreg_cell Il.voidptr_t in
+                  trans_upcall "upcall_new_rt" rt [|  |];
+                  ("thread", Some rt)
+              end
       in
         iflog (fun _ -> annotate ("spawn-" ^ realm_str ^ " proc: upcall"));
-        copy_fn_args clone proc_cell in_slots args [||];
+        copy_fn_args clone_rt proc_cell in_slots args [||];
         let upcall = "upcall_spawn_" ^ realm_str in
           trans_upcall upcall proc_cell
             [|
@@ -1361,7 +1373,7 @@ let trans_visitor
       let src_union = get_element_ptr src_cell 1 in
       let dst_union = get_element_ptr dst_cell 1 in
       let tmp = next_vreg_cell word_ty in
-        f dst_tag src_tag (interior_slot (Ast.TY_mach word_ty_mach)) curr_iso;
+        f dst_tag src_tag word_slot curr_iso;
         mov tmp (Il.Cell src_tag);
         Array.iteri
           begin
@@ -1463,6 +1475,7 @@ let trans_visitor
     iter_ty_slots ty cell mark_slot curr_iso
 
   and clone_ty
+      (rt:Il.cell)
       (ty:Ast.ty)
       (dst:Il.cell)
       (src:Il.cell)
@@ -1470,14 +1483,14 @@ let trans_visitor
       : unit =
     match ty with
         Ast.TY_chan _ ->
-          trans_upcall "upcall_clone_chan" dst [| (Il.Cell src) |]
+          trans_upcall "upcall_clone_chan" dst [| (Il.Cell src); (Il.Cell rt) |]
       | Ast.TY_proc
       | Ast.TY_port _
       | _ when type_is_mutable ty
           -> bug () "cloning mutable type"
       | _ when i64_le (ty_sz abi ty) word_sz
           -> mov dst (Il.Cell src)
-      | _ -> iter_ty_slots_full ty dst src clone_slot curr_iso
+      | _ -> iter_ty_slots_full ty dst src (clone_slot rt) curr_iso
 
   and free_ty
       (ty:Ast.ty)
@@ -1552,6 +1565,7 @@ let trans_visitor
         | _ -> ()
 
   and clone_slot
+      (rt:Il.cell)
       (dst:Il.cell)
       (src:Il.cell)
       (dst_slot:Ast.slot)
@@ -1564,11 +1578,11 @@ let trans_visitor
             let curr_iso = maybe_enter_iso ty curr_iso in
             let dst = deref_slot true dst dst_slot in
             let glue_fix = get_clone_glue (slot_ty dst_slot) curr_iso in
-              trans_call_mem_glue_full (Some dst) glue_fix src
+              trans_call_clone_glue dst glue_fix src rt
 
         | Ast.MODE_read_alias
         | Ast.MODE_write_alias -> bug () "cloning into alias slot"
-        | Ast.MODE_interior _ -> clone_ty ty dst src curr_iso
+        | Ast.MODE_interior _ -> clone_ty rt ty dst src curr_iso
 
   and drop_slot
       (cell:Il.cell)
@@ -1907,6 +1921,7 @@ let trans_visitor
 
 
   and trans_init_slot_from_atom_clone
+      (rt:Il.cell)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (atom:Ast.atom)
       : unit =
@@ -1923,7 +1938,7 @@ let trans_visitor
 
               | Ast.ATOM_lval src_lval ->
                   let (src, _) = trans_lval src_lval in
-                    clone_slot dst src dst_slot None
+                    clone_slot rt dst src dst_slot None
           end
 
 
@@ -1977,12 +1992,12 @@ let trans_visitor
     (* direct call to item *)
     if lval_is_item cx flv then
       let fn_item = lval_item cx flv in
-      let fn_mem = fixup_to_mem abi.Abi.abi_has_abs_code (get_fn_fixup cx fn_item.id) Il.CodeTy in
+      let fn_mem = code_fixup_to_mem (get_fn_fixup cx fn_item.id) in
         (Il.Mem (fn_mem, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
     (* direct call to native item *)
     else if lval_is_native_item cx flv then
       let fn_item = lval_native_item cx flv in
-      let fn_mem = fixup_to_mem abi.Abi.abi_has_abs_code (get_fn_fixup cx fn_item.id) Il.CodeTy in
+      let fn_mem = code_fixup_to_mem (get_fn_fixup cx fn_item.id) in
         (Il.Mem (fn_mem, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
     (* indirect call to computed slot *)
     else
@@ -2007,10 +2022,7 @@ let trans_visitor
             get_new_mod_glue item.id hdr
         | _ -> err None "call to unexpected form of module"
     in
-    let fn_mem = (fixup_to_mem
-                     abi.Abi.abi_has_abs_code
-                     glue_fixup Il.CodeTy)
-    in
+    let fn_mem = code_fixup_to_mem glue_fixup in
     let fn_cell = Il.Mem (fn_mem, Il.CodeTy) in
     let (in_slots, _) = tmod_hdr in
       trans_call initializing true (fun _ -> Ast.sprintf_lval () flv)
@@ -2101,26 +2113,26 @@ let trans_visitor
     iflog (fun _ -> annotate "fn-call arg 0: output slot");
     trans_init_slot_from_cell
       arg_cell (word_write_alias_slot abi)
-      output_cell (word_slot abi)
+      output_cell word_slot
 
   and trans_arg1 (arg_cell:Il.cell) : unit =
     (* Emit arg1 or any call: the process pointer. *)
     iflog (fun _ -> annotate "fn-call arg 1: process pointer");
     trans_init_slot_from_cell
-      arg_cell (word_slot abi)
-      abi.Abi.abi_pp_cell (word_slot abi)
+      arg_cell word_slot
+      abi.Abi.abi_pp_cell word_slot
 
   and trans_argN
-      (clone:bool)
+      (clone_rt:Il.cell option)
       (arg_cell:Il.cell)
       (arg_slot:Ast.slot)
       (arg:Ast.atom)
       : unit =
-    if clone
-    then
-      trans_init_slot_from_atom_clone arg_cell arg_slot arg
-    else
-      trans_init_slot_from_atom arg_cell arg_slot arg
+    match clone_rt with
+        None ->
+          trans_init_slot_from_atom arg_cell arg_slot arg
+      | Some rt ->
+          trans_init_slot_from_atom_clone rt arg_cell arg_slot arg
 
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
@@ -2130,7 +2142,7 @@ let trans_visitor
       | _ -> bug () "loading code from register"
 
   and copy_fn_args
-      (clone:bool)
+      (clone_rt:Il.cell option)
       (output_cell:Il.cell)
       (arg_slots:Ast.slot array)
       (args:Ast.atom array)
@@ -2149,7 +2161,7 @@ let trans_visitor
                      annotate
                        (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
                           i n_args n_extras));
-            trans_argN clone (get_element_ptr arg_tup (2+i)) slot args.(i)
+            trans_argN clone_rt (get_element_ptr arg_tup (2+i)) slot args.(i)
         end
         arg_slots;
       Array.iteri
@@ -2195,7 +2207,7 @@ let trans_visitor
       : unit =
     let callee_code_cell = trans_callee_code callee_cell direct logname in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args false output_cell arg_slots args extra_args;
+      copy_fn_args None output_cell arg_slots args extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
