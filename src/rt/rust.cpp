@@ -284,6 +284,9 @@ struct rust_rt {
     rust_proc *curr_proc;
     int rval;
     lockfree_queue *incoming; // incoming messages from other threads
+#ifndef __WIN32__
+    pthread_attr_t attr;
+#endif
 
     rust_rt(rust_srv *srv, global_glue_fns *global_glue);
     ~rust_rt();
@@ -1324,6 +1327,9 @@ rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue) :
     I(this, read(fd, (void*) &rctx.randrsl, sizeof(rctx.randrsl))
       == sizeof(rctx.randrsl));
     I(this, close(fd) == 0);
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 1024 * 1024);
+    pthread_attr_setdetachstate(&attr, true);
 #endif
     randinit(&rctx, 1);
 }
@@ -1335,6 +1341,9 @@ rust_rt::~rust_rt() {
     del_all_procs(this, &blocked_procs);
     log(LOG_PROC, "deleting all dead procs");
     del_all_procs(this, &dead_procs);
+#ifndef __WIN32__
+    pthread_attr_destroy(&attr);
+#endif
 }
 
 void
@@ -1881,16 +1890,9 @@ upcall_spawn_thread(rust_proc *spawner, rust_rt *new_rt, uintptr_t exit_proc_glu
 #if defined(__WIN32__)
     DWORD thread;
     CreateThread(NULL, 0, rust_thread_start, (void *)new_rt, 0, &thread);
-#elif defined(__GNUC__)
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 1024 * 1024);
-    pthread_attr_setdetachstate(&attr, true);
-    pthread_t thread;
-    pthread_create(&thread, NULL, rust_thread_start, (void *)new_rt);
-    pthread_attr_destroy(&attr);
 #else
-#error "Platform not supported"
+    pthread_t thread;
+    pthread_create(&thread, &rt->attr, rust_thread_start, (void *)new_rt);
 #endif
 
     return 0; /* nil */
