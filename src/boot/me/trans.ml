@@ -2610,13 +2610,17 @@ let trans_visitor
           Abi.CONV_rust -> LIB_rustrt
         | Abi.CONV_cdecl -> LIB_c
     in
+    let name = Hashtbl.find cx.ctxt_all_item_names fnid in
     let name =
-      (Ast.fmt_to_str Ast.fmt_name (Hashtbl.find cx.ctxt_all_item_names fnid))
+      match name with
+          Ast.NAME_base (Ast.BASE_ident id) -> id
+        | Ast.NAME_ext (_, Ast.COMP_ident id) -> id
+        | _ -> err (Some fnid) "Native fn %a lacks simple identifier-name" Ast.sprintf_name name
     in
     let args =
       (Array.init (Array.length nfn.Ast.native_fn_input_slots)
          (fun (n:int) ->
-            (Il.Cell (word_at (sp_imm (Int64.add (Int64.of_int n) (word_n 3)))))))
+            (Il.Cell (word_at (sp_imm (Int64.add (word_n n) (word_n 3)))))))
     in
       push_new_emitter ();
       let e = (emitter()) in

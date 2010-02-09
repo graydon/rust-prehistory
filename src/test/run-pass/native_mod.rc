@@ -1,0 +1,16 @@
+native mod libc {
+  mod io {
+    fn open(int name, int flags, int mode) -> int;
+    fn close(int fd) -> int;
+    fn read(int fd, int buf, int count) -> int;
+    fn write(int fd, int buf, int count) -> int;
+  }
+  mod mem {
+    fn malloc(int sz) -> int;
+    fn free(int p) -> ();
+  }
+}
+
+native rust fn str_buf(str s) -> int;
+
+mod inner = "native_mod.rs";
