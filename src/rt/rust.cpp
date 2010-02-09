@@ -2035,16 +2035,21 @@ implode(rust_proc *proc, rust_vec *v)
     return s;
 }
 
+static rust_srv srv;
+
 extern "C" CDECL int
 rust_start(uintptr_t main_fn, global_glue_fns *global_glue)
 {
-    rust_srv srv;
-    rust_rt rt(&srv, global_glue);
+    int ret;
 
-    rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.global_glue->main_exit_proc_glue, main_fn, 0);
-    add_proc_state_vec(&rt, rt.root_proc);
+    {
+        rust_rt rt(&srv, global_glue);
 
-    int ret = rust_main_loop(&rt);
+        rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.global_glue->main_exit_proc_glue, main_fn, 0);
+        add_proc_state_vec(&rt, rt.root_proc);
+
+        ret = rust_main_loop(&rt);
+    }
 
 #if !defined(__WIN32__)
     // Don't take down the process if the main thread exits without an error.
