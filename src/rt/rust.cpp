@@ -1801,7 +1801,7 @@ upcall_free(rust_proc *proc, void* ptr)
 }
 
 
-extern "C" CDECL rust_str*
+extern "C" CDECL rust_str *
 upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 {
     LOG_UPCALL_ENTRY(proc);
@@ -1859,7 +1859,7 @@ static void *rust_thread_start(void *ptr)
     return 0;
 }
 
-extern "C" CDECL rust_proc*
+extern "C" CDECL rust_proc *
 upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     LOG_UPCALL_ENTRY(spawner);
@@ -1872,7 +1872,19 @@ upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawn
     return proc;
 }
 
-extern "C" CDECL rust_proc*
+extern "C" CDECL rust_rt *
+upcall_new_rt(rust_proc *proc)
+{
+    LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
+    rust_rt *new_rt = new rust_rt(rt->srv, rt->global_glue);
+    rt->log(LOG_UPCALL|LOG_MEM,
+            "upcall new_rt() = 0x%" PRIxPTR,
+            new_rt);
+    return new_rt;
+}
+
+extern "C" CDECL rust_proc *
 upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     LOG_UPCALL_ENTRY(spawner);
