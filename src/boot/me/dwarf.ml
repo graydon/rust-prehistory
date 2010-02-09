@@ -904,6 +904,13 @@ let (abbrev_cu:abbrev) =
    |])
 ;;
 
+let (abbrev_module:abbrev) =
+  (DW_TAG_module, DW_CHILDREN_yes,
+   [|
+     (DW_AT_name, DW_FORM_string);
+   |])
+;;
+
 let (abbrev_subprogram:abbrev) =
   (DW_TAG_subprogram, DW_CHILDREN_yes,
    [|
@@ -1322,6 +1329,18 @@ let dwarf_visitor
       curr_cu_line := []
   in
 
+  let emit_module_die _ : unit =
+    let abbrev_code = get_abbrev_code abbrev_module in
+    let module_die =
+      (SEQ [|
+         uleb abbrev_code;
+         (* DW_AT_name *)
+         ZSTRING (path_name());
+       |])
+    in
+      emit_die module_die
+  in
+
   let emit_subprogram_die
       (fix:fixup)
       : unit =
@@ -1364,7 +1383,12 @@ let dwarf_visitor
       ();
     begin
       match item.node with
-          Ast.MOD_ITEM_fn _ ->
+          Ast.MOD_ITEM_mod _ ->
+            begin
+              log cx "walking module '%s'" (path_name());
+              emit_module_die ()
+            end
+        | Ast.MOD_ITEM_fn _ ->
             begin
               log cx "walking function '%s'" (path_name());
               emit_subprogram_die (Hashtbl.find cx.ctxt_fn_fixups item.id)
@@ -1389,7 +1413,8 @@ let dwarf_visitor
     else ();
     begin
       match item.node with
-          Ast.MOD_ITEM_fn _ -> emit_null_die ()
+          Ast.MOD_ITEM_mod _
+        | Ast.MOD_ITEM_fn _ -> emit_null_die ()
         | _ -> ()
     end;
   in

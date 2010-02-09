@@ -230,6 +230,10 @@ TEST_XFAILS := test/run-pass/spawn-fn.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
+ifdef CFG_WINDOWSY
+TEST_XFAILS += test/run-pass/native_mod.rc \
+               test/run-pass/native_mod.rs
+endif
 
 TEST_RUN_PASS_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rc))
 TEST_RUN_PASS_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rs))
