@@ -297,9 +297,8 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (int64 * int64) =
     | StructTy rts ->
         begin
           let accum (off,align) rt : (int64 * int64) =
-            let elt_align = referent_ty_align word_bits rt in
+            let (elt_size, elt_align) = referent_ty_layout word_bits rt in
             let elt_off = align_to elt_align off in
-            let elt_size = referent_ty_size word_bits rt in
               (Int64.add elt_off elt_size, i64_max elt_align align)
           in
             Array.fold_left accum (0L,0L) rts
@@ -307,8 +306,7 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (int64 * int64) =
    | UnionTy rts ->
         begin
           let accum (sz,align) rt : (int64 * int64) =
-            let elt_align = referent_ty_align word_bits rt in
-            let elt_size = referent_ty_size word_bits rt in
+            let (elt_size, elt_align) = referent_ty_layout word_bits rt in
               (i64_max sz elt_size, i64_max elt_align align)
           in
             Array.fold_left accum (0L,0L) rts
