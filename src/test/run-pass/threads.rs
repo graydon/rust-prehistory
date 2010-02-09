@@ -2,12 +2,15 @@
 
 fn main() -> () {
   let port[int] p = port();
-  spawn thread child(5);
-  log "spawned new thread";
+  let int i = 1000;
+  while (i > 0) {
+    spawn thread child(i);
+    i = i - 1;
+  }
+  log "main thread exiting";
 }
 
 fn child(int x) -> () {
-  log "I am the new thread";
   log x;
 }
 
