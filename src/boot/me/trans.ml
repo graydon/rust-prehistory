@@ -734,7 +734,7 @@ let trans_visitor
    *      (try to reuse trans_call_fn)
    *)
   and emit_new_bind_glue
-      ((*fn_id*)_:node_id)
+      ((*bind_id*)_:node_id)
       ((*fn_sig*)_:Ast.ty_sig)
       ((*bound_args*)_:bool array)
       ((*fix*)_:fixup)
@@ -744,13 +744,13 @@ let trans_visitor
 
 
   (* FIXME: abstract out the memoization logic between get_new_mod_glue and get_new_bind_glue *)
-  and get_new_bind_glue (fn_id:node_id) (fn_sig:Ast.ty_sig) (bound_args:bool array) : fixup =
-    let g = GLUE_new_bind fn_id in
+  and get_new_bind_glue (bind_id:node_id) (fn_sig:Ast.ty_sig) (bound_args:bool array) : fixup =
+    let g = GLUE_new_bind bind_id in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup "new-bind glue" in
-              emit_new_bind_glue fn_id fn_sig bound_args fix g;
+              emit_new_bind_glue bind_id fn_sig bound_args fix g;
               fix
 
 
@@ -1961,8 +1961,10 @@ let trans_visitor
       else
         begin
           iflog (fun _ -> annotate (Printf.sprintf "get env ptr for extra args in call to %s" (logname ())));
-          let env_ptr = Il.Cell (deref (get_element_ptr fn_cell 1)) in
-            [| env_ptr |]
+          let env_ptr = Il.Cell (deref (get_element_ptr fn_cell 2)) in
+            iflog (fun _ -> annotate (Printf.sprintf "get proxy ptr for extra args in call to %s" (logname ())));
+            let proxy_ptr = Il.Cell (deref (get_element_ptr fn_cell 3)) in
+              [| env_ptr; proxy_ptr |]
         end
     in
       trans_call initializing (lval_is_direct_fn cx flv) logname
@@ -2056,23 +2058,38 @@ let trans_visitor
    *   4. mov dst[1] <- env ptr
    *)
 
+  (*
+   * Closure representation (always on heap):
+   * 
+   *  +----+
+   *  | rc |
+   *  +----+
+   *  |    |---> [code]
+   *  +----+                 +---+---...---+
+   *  |    |---> args vector |   |         |
+   *  +----+                 +---+---...---+
+   *  |    |---> next closure
+   *  +----+
+   * 
+   *)
+
   and trans_bind_fn
       (initializing:bool)
       ((*direct*)_:bool)
+      (bind_id:node_id)
       (dst:Ast.lval)
       (flv:Ast.lval)
       ((*tsig*)_:Ast.ty_sig)
       (args:Ast.atom option array)
       : unit =
     let (*(dst_cell, _)*)_ = trans_lval_maybe_init initializing dst in
-    let fn_item = lval_item cx flv in
     let ((*fn_cell*)_, fn_slot) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
     let fn_ty = slot_ty fn_slot in
     let bound_args = Array.map (fun arg -> match arg with Some _ -> true | None -> false) args in
     let (*glue_fixup*)_ =
       match fn_ty with
           Ast.TY_fn (fn_sig, _) ->
-            get_new_bind_glue fn_item.id fn_sig bound_args
+            get_new_bind_glue bind_id fn_sig bound_args
         (* FIXME: should work for TY_pred too *)
         | _ -> err None "bind of unexpected form of function"
     in
@@ -2159,8 +2176,10 @@ let trans_visitor
       callee_cell
     else
       begin
-        iflog (fun _ -> annotate (Printf.sprintf "extract fn mem for call to %s" (logname ())));
-        deref (get_element_ptr callee_cell 0)
+        iflog (fun _ -> annotate (Printf.sprintf "extract closure mem for call to %s" (logname ())));
+        let closure_cell = deref (get_element_ptr callee_cell 0) in
+          iflog (fun _ -> annotate (Printf.sprintf "extract code mem for call to %s" (logname ())));
+          deref (get_element_ptr closure_cell 1)
       end
 
 
@@ -2297,7 +2316,7 @@ let trans_visitor
             let init = maybe_init stmt.id "bind" dst in
               match lval_ty cx flv with
                   Ast.TY_fn (tsig, _) ->
-                    trans_bind_fn init (lval_is_direct_fn cx flv) dst flv tsig args
+                    trans_bind_fn init (lval_is_direct_fn cx flv) stmt.id dst flv tsig args
                       (* FIXME (bug 544382): implement bind for modules *)
                 | _ -> bug () "Binding unexpected lval."
           end
