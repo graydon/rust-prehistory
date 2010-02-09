@@ -1835,7 +1835,9 @@ static void *rust_thread_start(void *ptr)
     // Start a new rust main loop for this thread.
     rust_main_loop(rt);
 
+    rust_srv *srv = rt->srv;
     delete rt;
+    delete srv;
 
     return 0;
 }
@@ -1858,9 +1860,7 @@ upcall_new_rt(rust_proc *proc)
 {
     LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
-    // The new runtime is not bound to the current runtime, so allocate directly from the
-    // system heap.
-    rust_rt *new_rt = new rust_rt(rt->srv, rt->global_glue);
+    rust_rt *new_rt = new rust_rt(rt->srv->clone(), rt->global_glue);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall new_rt() = 0x%" PRIxPTR,
             new_rt);
@@ -1969,7 +1969,9 @@ rust_srv::rust_srv() :
 rust_srv::~rust_srv()
 {
     if (live_allocs != 0) {
-        fatal("leaked memory in rust main loop", __FILE__, __LINE__);
+        char msg[128];
+        printf(msg, "leaked memory in rust main loop (%d objects)", live_allocs);
+        fatal(msg, __FILE__, __LINE__);
     }
 }
 
@@ -2012,6 +2014,12 @@ rust_srv::fatal(char const *expr, char const *file, size_t line)
     exit(1);
 }
 
+rust_srv *
+rust_srv::clone()
+{
+    return new rust_srv();
+}
+
 /* Native builtins. */
 
 extern "C" CDECL char const *
@@ -2042,14 +2050,13 @@ implode(rust_proc *proc, rust_vec *v)
     return s;
 }
 
-static rust_srv srv;
-
 extern "C" CDECL int
 rust_start(uintptr_t main_fn, global_glue_fns *global_glue)
 {
     int ret;
 
     {
+        rust_srv srv;
         rust_rt rt(&srv, global_glue);
 
         rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.global_glue->main_exit_proc_glue, main_fn, NULL, 0);
