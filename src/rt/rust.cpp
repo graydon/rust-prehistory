@@ -1972,7 +1972,7 @@ rust_srv::~rust_srv()
 {
     if (live_allocs != 0) {
         char msg[128];
-        printf(msg, "leaked memory in rust main loop (%d objects)", live_allocs);
+        snprintf(msg, sizeof(msg), "leaked memory in rust main loop (%d objects)", live_allocs);
         fatal(msg, __FILE__, __LINE__);
     }
 }
