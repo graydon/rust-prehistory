@@ -1127,26 +1127,31 @@ let trans_visitor
 
       iflog (fun _ -> annotate "spawn proc: copy args");
 
-      let (realm_str, clone_rt) =
-        match realm with
-            Ast.REALM_local -> ("local", None)
-          | Ast.REALM_thread ->
-              begin
-                let rt = next_vreg_cell Il.voidptr_t in
-                  trans_upcall "upcall_new_rt" rt [|  |];
-                  ("thread", Some rt)
-              end
-      in
-        iflog (fun _ -> annotate ("spawn-" ^ realm_str ^ " proc: upcall"));
-        copy_fn_args clone_rt proc_cell in_slots args [||];
-        let upcall = "upcall_spawn_" ^ realm_str in
-          trans_upcall upcall proc_cell
-            [|
-              Il.Cell (alias exit_proc_glue_cell);
-              Il.Cell (alias fn_cell);
-              imm callsz
-            |];
-          ()
+      match realm with
+          Ast.REALM_thread ->
+            begin
+              let clone_rt = next_vreg_cell Il.voidptr_t in
+                trans_upcall "upcall_new_rt" clone_rt [|  |];
+                copy_fn_args (Some clone_rt) proc_cell in_slots args [| |];
+                trans_upcall "upcall_spawn_thread" proc_cell
+                  [|
+                    Il.Cell (alias clone_rt);
+                    Il.Cell (alias exit_proc_glue_cell);
+                    Il.Cell (alias fn_cell);
+                    imm callsz
+                  |];
+            end
+         | _ ->
+            begin
+              copy_fn_args None proc_cell in_slots args [||];
+              trans_upcall "upcall_spawn_local" proc_cell
+                [|
+                  Il.Cell (alias exit_proc_glue_cell);
+                  Il.Cell (alias fn_cell);
+                  imm callsz
+                |];
+            end;
+      ()
 
   and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
     let (filename, line, _) =

@@ -1817,20 +1817,7 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 
 
 static int
-rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv);
-
-struct rust_ticket {
-    uintptr_t main_fn;
-    global_glue_fns *global_glue;
-
-    explicit rust_ticket(uintptr_t main_fn, global_glue_fns *global_glue) :
-        main_fn(main_fn),
-        global_glue(global_glue)
-    {}
-
-    ~rust_ticket()
-    {}
-};
+rust_main_loop(rust_rt *rt);
 
 #if defined(__WIN32__)
 static DWORD WINAPI rust_thread_start(void *ptr)
@@ -1840,21 +1827,11 @@ static void *rust_thread_start(void *ptr)
 #error "Platform not supported"
 #endif
 {
-    /*
-     * The thread that spawn us handed us a ticket. Read the ticket's content
-     * and then deallocate it. Since thread creation is asynchronous, the other
-     * thread can't do this for us.
-     */
-    rust_ticket *ticket = (rust_ticket *)ptr;
-    uintptr_t main_fn = ticket->main_fn;
-    global_glue_fns *global_glue = ticket->global_glue;
-    delete ticket;
+    // We were handed the runtime we are supposed to run.
+    rust_rt *rt = (rust_rt *)ptr;
 
-    /*
-     * Start a new rust main loop for this thread.
-     */
-    rust_srv srv;
-    rust_main_loop(main_fn, global_glue, &srv);
+    // Start a new rust main loop for this thread.
+    rust_main_loop(rt);
 
     return 0;
 }
@@ -1865,8 +1842,8 @@ upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawn
     LOG_UPCALL_ENTRY(spawner);
     rust_rt *rt = spawner->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-         "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
-         exit_proc_glue, spawnee_fn, callsz);
+            "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
+            exit_proc_glue, spawnee_fn, callsz);
     rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, callsz);
     add_proc_state_vec(rt, proc);
     return proc;
@@ -1877,6 +1854,8 @@ upcall_new_rt(rust_proc *proc)
 {
     LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
+    // The new runtime is not bound to the current runtime, so allocate directly from the
+    // system heap.
     rust_rt *new_rt = new rust_rt(rt->srv, rt->global_glue);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall new_rt() = 0x%" PRIxPTR,
@@ -1885,21 +1864,22 @@ upcall_new_rt(rust_proc *proc)
 }
 
 extern "C" CDECL rust_proc *
-upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
+upcall_spawn_thread(rust_proc *spawner, rust_rt *new_rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     LOG_UPCALL_ENTRY(spawner);
     rust_rt *rt = spawner->rt;
-
-    // The ticket is not bound to the current runtime, so allocate directly from the
-    // system heap.
-    rust_ticket *ticket = new rust_ticket(spawnee_fn, rt->global_glue);
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
+            "spawn thread fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
+            exit_proc_glue, spawnee_fn, callsz);
+    new_rt->root_proc = new (new_rt) rust_proc(new_rt, NULL, exit_proc_glue, spawnee_fn, callsz);
+    add_proc_state_vec(rt, new_rt->root_proc);
 
 #if defined(__WIN32__)
     DWORD thread;
-    CreateThread(NULL, 0, rust_thread_start, (void *)ticket, 0, &thread);
+    CreateThread(NULL, 0, rust_thread_start, (void *)new_rt, 0, &thread);
 #elif defined(__GNUC__)
     pthread_t thread;
-    pthread_create(&thread, NULL, rust_thread_start, (void *)ticket);
+    pthread_create(&thread, NULL, rust_thread_start, (void *)new_rt);
 #else
 #error "Platform not supported"
 #endif
@@ -1908,37 +1888,33 @@ upcall_spawn_thread(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spaw
 }
 
 static int
-rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
+rust_main_loop(rust_rt *rt)
 {
     int rval;
     rust_proc *proc;
-    rust_rt rt(srv, global_glue);
 
-    rt.log(LOG_RT, "control is in rust runtime library");
-    rt.logptr("main fn", main_fn);
-    rt.logptr("main exit-proc glue", global_glue->main_exit_proc_glue);
+    rt->log(LOG_RT, "control is in rust runtime library");
+    rt->logptr("main exit-proc glue", rt->global_glue->main_exit_proc_glue);
 
-    rt.root_proc = new (rt) rust_proc(&rt, NULL, global_glue->main_exit_proc_glue, main_fn, 0);
-    add_proc_state_vec(&rt, rt.root_proc);
-    proc = rt.sched();
+    proc = rt->sched();
 
-    rt.logptr("root proc", (uintptr_t)proc);
-    rt.logptr("proc->rust_sp", (uintptr_t)proc->rust_sp);
+    rt->logptr("root proc", (uintptr_t)proc);
+    rt->logptr("proc->rust_sp", (uintptr_t)proc->rust_sp);
 
     while (proc) {
 
-        rt.log(LOG_PROC, "activating proc 0x%" PRIxPTR,
-               (uintptr_t)proc);
+        rt->log(LOG_PROC, "activating proc 0x%" PRIxPTR,
+                (uintptr_t)proc);
 
         if (proc->state == proc_state_running) {
-            rt.activate(proc);
+            rt->activate(proc);
 
-            rt.log(LOG_PROC,
-                   "returned from proc 0x%" PRIxPTR " in state '%s'",
-                   (uintptr_t)proc, state_names[proc->state]);
+            rt->log(LOG_PROC,
+                    "returned from proc 0x%" PRIxPTR " in state '%s'",
+                    (uintptr_t)proc, state_names[proc->state]);
 
-            I(&rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
-            I(&rt, proc->rust_sp < proc->stk->limit);
+            I(rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
+            I(rt, proc->rust_sp < proc->stk->limit);
 
             switch ((proc_state_t) proc->state) {
 
@@ -1954,7 +1930,7 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
                 {
                     proc_state_t tstate = proc->state;
                     proc->state = proc_state_running;
-                    proc_state_transition(&rt, proc,
+                    proc_state_transition(rt, proc,
                                           proc_state_running,
                                           tstate);
                 }
@@ -1966,12 +1942,12 @@ rust_main_loop(uintptr_t main_fn, global_glue_fns *global_glue, rust_srv *srv)
                 break;
             }
 
-            rt.reap_dead_procs();
+            rt->reap_dead_procs();
         }
-        proc = rt.sched();
+        proc = rt->sched();
 
-        rt.log(LOG_RT, "finished main loop (rt.rval = %d)", rt.rval);
-        rval = rt.rval;
+        rt->log(LOG_RT, "finished main loop (rt.rval = %d)", rt->rval);
+        rval = rt->rval;
     }
     return rval;
 }
@@ -2058,11 +2034,15 @@ implode(rust_proc *proc, rust_vec *v)
 }
 
 extern "C" CDECL int
-rust_start(uintptr_t main_fn,
-           global_glue_fns *global_glue)
+rust_start(uintptr_t main_fn, global_glue_fns *global_glue)
 {
     rust_srv srv;
-    int ret = rust_main_loop(main_fn, global_glue, &srv);
+    rust_rt rt(&srv, global_glue);
+
+    rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.global_glue->main_exit_proc_glue, main_fn, 0);
+    add_proc_state_vec(&rt, rt.root_proc);
+
+    int ret = rust_main_loop(&rt);
 #if !defined(__WIN32__)
     // Don't take down the process if the main thread exits without an error.
     if (!ret)
