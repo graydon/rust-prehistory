@@ -898,9 +898,13 @@ type abbrev = (dw_tag * dw_children * ((dw_at * dw_form) array));;
 let (abbrev_cu:abbrev) =
   (DW_TAG_compile_unit, DW_CHILDREN_yes,
    [|
+     (DW_AT_producer, DW_FORM_string);
+     (DW_AT_language, DW_FORM_data4);
      (DW_AT_name, DW_FORM_string);
+     (DW_AT_comp_dir, DW_FORM_string);
      (DW_AT_low_pc, DW_FORM_addr);
-     (DW_AT_high_pc, DW_FORM_addr)
+     (DW_AT_high_pc, DW_FORM_addr);
+     (DW_AT_use_UTF8, DW_FORM_flag)
    |])
 ;;
 
@@ -919,6 +923,14 @@ let (abbrev_subprogram:abbrev) =
      (DW_AT_high_pc, DW_FORM_addr);
      (DW_AT_frame_base, DW_FORM_block1);
      (DW_AT_return_addr, DW_FORM_block1);
+   |])
+;;
+
+let (abbrev_typedef:abbrev) =
+  (DW_TAG_typedef, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_type, DW_FORM_ref_addr)
    |])
 ;;
 
@@ -1316,13 +1328,21 @@ let dwarf_visitor
     let cu_info =
       (SEQ [|
          uleb abbrev_code;
+         (* DW_AT_producer:  DW_FORM_string *)
+         ZSTRING "Rustboot pre-release";
+         (* DW_AT_producer:  DW_FORM_string *)
+         WORD (word_ty_mach,IMM 0x2L);     (* DW_LANG_C *)
          (* DW_AT_name:  DW_FORM_string *)
-         ZSTRING name;
+         ZSTRING (Filename.basename name);
+         (* DW_AT_comp_dir:  DW_FORM_string *)
+         ZSTRING (Filename.concat (Sys.getcwd()) (Filename.dirname name));
          (* DW_AT_low_pc, DW_FORM_addr *)
          WORD (word_ty_mach, M_POS cu_text_fixup);
          (* DW_AT_high_pc, DW_FORM_addr *)
          WORD (word_ty_mach, ADD ((M_POS cu_text_fixup),
-                                  (M_SZ cu_text_fixup)))
+                                  (M_SZ cu_text_fixup)));
+         (* DW_AT_use_UTF8, DW_FORM_flag *)
+         BYTE 1
        |])
     in
       curr_cu_infos := [cu_info];
@@ -1358,13 +1378,28 @@ let dwarf_visitor
          dw_form_block1 [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |];
          (* DW_AT_return_addr *)
          (* 
-          * NB: we are fixing fp[0] as the return address here; as in frame.ml,
-          * it's not considered 'part of the per-arch ABI'. This might be wrong. 
+          * NB: we are fixing ebp[16] as the return address here; as in x86.ml.
           *)
-         dw_form_block1 [| DW_OP_fbreg (Asm.IMM 0L); |]
+         dw_form_block1 [| DW_OP_fbreg (Asm.IMM 16L); |]
        |])
     in
       emit_die subprogram_die
+  in
+
+  let emit_typedef_die
+      (ty:Ast.ty)
+      : unit =
+    let abbrev_code = get_abbrev_code abbrev_typedef in
+    let typedef_die =
+      (SEQ [|
+         uleb abbrev_code;
+         (* DW_AT_name: DW_FORM_string *)
+         ZSTRING (path_name());
+         (* DW_AT_type: DW_FORM_ref_addr *)
+         (ref_type_die ty);
+       |])
+    in
+      emit_die typedef_die
   in
 
   let visit_mod_item_pre
@@ -1392,6 +1427,12 @@ let dwarf_visitor
             begin
               log cx "walking function '%s'" (path_name());
               emit_subprogram_die (Hashtbl.find cx.ctxt_fn_fixups item.id)
+            end
+        | Ast.MOD_ITEM_public_type td
+        | Ast.MOD_ITEM_opaque_type td ->
+            begin
+              log cx "walking typedef '%s'" (path_name());
+              emit_typedef_die td.Ast.decl_item
             end
         | _ -> ()
     end;
