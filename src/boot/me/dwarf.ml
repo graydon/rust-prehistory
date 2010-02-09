@@ -261,6 +261,70 @@ let dw_tag_of_int (i:int) : dw_tag =
 ;;
 
 
+let dw_tag_to_string (tag:dw_tag) : string =
+  match tag with
+    DW_TAG_array_type -> "DW_TAG_array_type"
+  | DW_TAG_class_type -> "DW_TAG_class_type"
+  | DW_TAG_entry_point -> "DW_TAG_entry_point"
+  | DW_TAG_enumeration_type -> "DW_TAG_enumeration_type"
+  | DW_TAG_formal_parameter -> "DW_TAG_formal_parameter"
+  | DW_TAG_imported_declaration -> "DW_TAG_imported_declaration"
+  | DW_TAG_label -> "DW_TAG_label"
+  | DW_TAG_lexical_block -> "DW_TAG_lexical_block"
+  | DW_TAG_member -> "DW_TAG_member"
+  | DW_TAG_pointer_type -> "DW_TAG_pointer_type"
+  | DW_TAG_reference_type -> "DW_TAG_reference_type"
+  | DW_TAG_compile_unit -> "DW_TAG_compile_unit"
+  | DW_TAG_string_type -> "DW_TAG_string_type"
+  | DW_TAG_structure_type -> "DW_TAG_structure_type"
+  | DW_TAG_subroutine_type -> "DW_TAG_subroutine_type"
+  | DW_TAG_typedef -> "DW_TAG_typedef"
+  | DW_TAG_union_type -> "DW_TAG_union_type"
+  | DW_TAG_unspecified_parameters -> "DW_TAG_unspecified_parameters"
+  | DW_TAG_variant -> "DW_TAG_variant"
+  | DW_TAG_common_block -> "DW_TAG_common_block"
+  | DW_TAG_common_inclusion -> "DW_TAG_common_inclusion"
+  | DW_TAG_inheritance -> "DW_TAG_inheritance"
+  | DW_TAG_inlined_subroutine -> "DW_TAG_inlined_subroutine"
+  | DW_TAG_module -> "DW_TAG_module"
+  | DW_TAG_ptr_to_member_type -> "DW_TAG_ptr_to_member_type"
+  | DW_TAG_set_type -> "DW_TAG_set_type"
+  | DW_TAG_subrange_type -> "DW_TAG_subrange_type"
+  | DW_TAG_with_stmt -> "DW_TAG_with_stmt"
+  | DW_TAG_access_declaration -> "DW_TAG_access_declaration"
+  | DW_TAG_base_type -> "DW_TAG_base_type"
+  | DW_TAG_catch_block -> "DW_TAG_catch_block"
+  | DW_TAG_const_type -> "DW_TAG_const_type"
+  | DW_TAG_constant -> "DW_TAG_constant"
+  | DW_TAG_enumerator -> "DW_TAG_enumerator"
+  | DW_TAG_file_type -> "DW_TAG_file_type"
+  | DW_TAG_friend -> "DW_TAG_friend"
+  | DW_TAG_namelist -> "DW_TAG_namelist"
+  | DW_TAG_namelist_item -> "DW_TAG_namelist_item"
+  | DW_TAG_packed_type -> "DW_TAG_packed_type"
+  | DW_TAG_subprogram -> "DW_TAG_subprogram"
+  | DW_TAG_template_type_parameter -> "DW_TAG_template_type_parameter"
+  | DW_TAG_template_value_parameter -> "DW_TAG_template_value_parameter"
+  | DW_TAG_thrown_type -> "DW_TAG_thrown_type"
+  | DW_TAG_try_block -> "DW_TAG_try_block"
+  | DW_TAG_variant_part -> "DW_TAG_variant_part"
+  | DW_TAG_variable -> "DW_TAG_variable"
+  | DW_TAG_volatile_type -> "DW_TAG_volatile_type"
+  | DW_TAG_dwarf_procedure -> "DW_TAG_dwarf_procedure"
+  | DW_TAG_restrict_type -> "DW_TAG_restrict_type"
+  | DW_TAG_interface_type -> "DW_TAG_interface_type"
+  | DW_TAG_namespace -> "DW_TAG_namespace"
+  | DW_TAG_imported_module -> "DW_TAG_imported_module"
+  | DW_TAG_unspecified_type -> "DW_TAG_unspecified_type"
+  | DW_TAG_partial_unit -> "DW_TAG_partial_unit"
+  | DW_TAG_imported_unit -> "DW_TAG_imported_unit"
+  | DW_TAG_condition -> "DW_TAG_condition"
+  | DW_TAG_shared_type -> "DW_TAG_shared_type"
+  | DW_TAG_lo_user -> "DW_TAG_lo_user"
+  | DW_TAG_hi_user -> "DW_TAG_hi_user"
+;;
+
+
 type dw_children =
     DW_CHILDREN_no
   | DW_CHILDREN_yes
@@ -557,6 +621,99 @@ let dw_at_of_int (i:int) : dw_at =
     | _ -> failwith ("bad DWARF attribute code: " ^ (string_of_int i))
 ;;
 
+let dw_at_to_string (a:dw_at) : string =
+  match a with
+      DW_AT_sibling -> "DW_AT_sibling"
+    | DW_AT_location -> "DW_AT_location"
+    | DW_AT_name -> "DW_AT_name"
+    | DW_AT_ordering -> "DW_AT_ordering"
+    | DW_AT_byte_size -> "DW_AT_byte_size"
+    | DW_AT_bit_offset -> "DW_AT_bit_offset"
+    | DW_AT_bit_size -> "DW_AT_bit_size"
+    | DW_AT_stmt_list -> "DW_AT_stmt_list"
+    | DW_AT_low_pc -> "DW_AT_low_pc"
+    | DW_AT_high_pc -> "DW_AT_high_pc"
+    | DW_AT_language -> "DW_AT_language"
+    | DW_AT_discr -> "DW_AT_discr"
+    | DW_AT_discr_value -> "DW_AT_discr_value"
+    | DW_AT_visibility -> "DW_AT_visibility"
+    | DW_AT_import -> "DW_AT_import"
+    | DW_AT_string_length -> "DW_AT_string_length"
+    | DW_AT_common_reference -> "DW_AT_common_reference"
+    | DW_AT_comp_dir -> "DW_AT_comp_dir"
+    | DW_AT_const_value -> "DW_AT_const_value"
+    | DW_AT_containing_type -> "DW_AT_containing_type"
+    | DW_AT_default_value -> "DW_AT_default_value"
+    | DW_AT_inline -> "DW_AT_inline"
+    | DW_AT_is_optional -> "DW_AT_is_optional"
+    | DW_AT_lower_bound -> "DW_AT_lower_bound"
+    | DW_AT_producer -> "DW_AT_producer"
+    | DW_AT_prototyped -> "DW_AT_prototyped"
+    | DW_AT_return_addr -> "DW_AT_return_addr"
+    | DW_AT_start_scope -> "DW_AT_start_scope"
+    | DW_AT_bit_stride -> "DW_AT_bit_stride"
+    | DW_AT_upper_bound -> "DW_AT_upper_bound"
+    | DW_AT_abstract_origin -> "DW_AT_abstract_origin"
+    | DW_AT_accessibility -> "DW_AT_accessibility"
+    | DW_AT_address_class -> "DW_AT_address_class"
+    | DW_AT_artificial -> "DW_AT_artificial"
+    | DW_AT_base_types -> "DW_AT_base_types"
+    | DW_AT_calling_convention -> "DW_AT_calling_convention"
+    | DW_AT_count -> "DW_AT_count"
+    | DW_AT_data_member_location -> "DW_AT_data_member_location"
+    | DW_AT_decl_column -> "DW_AT_decl_column"
+    | DW_AT_decl_file -> "DW_AT_decl_file"
+    | DW_AT_decl_line -> "DW_AT_decl_line"
+    | DW_AT_declaration -> "DW_AT_declaration"
+    | DW_AT_discr_list -> "DW_AT_discr_list"
+    | DW_AT_encoding -> "DW_AT_encoding"
+    | DW_AT_external -> "DW_AT_external"
+    | DW_AT_frame_base -> "DW_AT_frame_base"
+    | DW_AT_friend -> "DW_AT_friend"
+    | DW_AT_identifier_case -> "DW_AT_identifier_case"
+    | DW_AT_macro_info -> "DW_AT_macro_info"
+    | DW_AT_namelist_item -> "DW_AT_namelist_item"
+    | DW_AT_priority -> "DW_AT_priority"
+    | DW_AT_segment -> "DW_AT_segment"
+    | DW_AT_specification -> "DW_AT_specification"
+    | DW_AT_static_link -> "DW_AT_static_link"
+    | DW_AT_type -> "DW_AT_type"
+    | DW_AT_use_location -> "DW_AT_use_location"
+    | DW_AT_variable_parameter -> "DW_AT_variable_parameter"
+    | DW_AT_virtuality -> "DW_AT_virtuality"
+    | DW_AT_vtable_elem_location -> "DW_AT_vtable_elem_location"
+    | DW_AT_allocated -> "DW_AT_allocated"
+    | DW_AT_associated -> "DW_AT_associated"
+    | DW_AT_data_location -> "DW_AT_data_location"
+    | DW_AT_byte_stride -> "DW_AT_byte_stride"
+    | DW_AT_entry_pc -> "DW_AT_entry_pc"
+    | DW_AT_use_UTF8 -> "DW_AT_use_UTF8"
+    | DW_AT_extension -> "DW_AT_extension"
+    | DW_AT_ranges -> "DW_AT_ranges"
+    | DW_AT_trampoline -> "DW_AT_trampoline"
+    | DW_AT_call_column -> "DW_AT_call_column"
+    | DW_AT_call_file -> "DW_AT_call_file"
+    | DW_AT_call_line -> "DW_AT_call_line"
+    | DW_AT_description -> "DW_AT_description"
+    | DW_AT_binary_scale -> "DW_AT_binary_scale"
+    | DW_AT_decimal_scale -> "DW_AT_decimal_scale"
+    | DW_AT_small -> "DW_AT_small"
+    | DW_AT_decimal_sign -> "DW_AT_decimal_sign"
+    | DW_AT_digit_count -> "DW_AT_digit_count"
+    | DW_AT_picture_string -> "DW_AT_picture_string"
+    | DW_AT_mutable -> "DW_AT_mutable"
+    | DW_AT_threads_scaled -> "DW_AT_threads_scaled"
+    | DW_AT_explicit -> "DW_AT_explicit"
+    | DW_AT_object_pointer -> "DW_AT_object_pointer"
+    | DW_AT_endianity -> "DW_AT_endianity"
+    | DW_AT_elemental -> "DW_AT_elemental"
+    | DW_AT_pure -> "DW_AT_pure"
+    | DW_AT_recursive -> "DW_AT_recursive"
+    | DW_AT_lo_user -> "DW_AT_lo_user"
+    | DW_AT_hi_user -> "DW_AT_hi_user"
+;;
+
+
 type dw_ate =
       DW_ATE_address
     | DW_ATE_boolean
@@ -672,6 +829,31 @@ let dw_form_of_int (i:int) : dw_form =
     | 0x15 -> DW_FORM_ref_udata
     | 0x16 -> DW_FORM_indirect
     | _ -> failwith ("bad DWARF attribute code: " ^ (string_of_int i))
+;;
+
+let dw_form_to_string (f:dw_form) : string =
+  match f with
+    | DW_FORM_addr -> "DW_FORM_addr"
+    | DW_FORM_block2 -> "DW_FORM_block2"
+    | DW_FORM_block4 -> "DW_FORM_block4"
+    | DW_FORM_data2 -> "DW_FORM_data2"
+    | DW_FORM_data4 -> "DW_FORM_data4"
+    | DW_FORM_data8 -> "DW_FORM_data8"
+    | DW_FORM_string -> "DW_FORM_string"
+    | DW_FORM_block -> "DW_FORM_block"
+    | DW_FORM_block1 -> "DW_FORM_block1"
+    | DW_FORM_data1 -> "DW_FORM_data1"
+    | DW_FORM_flag -> "DW_FORM_flag"
+    | DW_FORM_sdata -> "DW_FORM_sdata"
+    | DW_FORM_strp -> "DW_FORM_strp"
+    | DW_FORM_udata -> "DW_FORM_udata"
+    | DW_FORM_ref_addr -> "DW_FORM_ref_addr"
+    | DW_FORM_ref1 -> "DW_FORM_ref1"
+    | DW_FORM_ref2 -> "DW_FORM_ref2"
+    | DW_FORM_ref4 -> "DW_FORM_ref4"
+    | DW_FORM_ref8 -> "DW_FORM_ref8"
+    | DW_FORM_ref_udata -> "DW_FORM_ref_udata"
+    | DW_FORM_indirect -> "DW_FORM_indirect"
 ;;
 
 type dw_op =
@@ -1647,7 +1829,23 @@ let read_abbrevs (ar:asm_reader) ((off:int),(sz:int)) : (int,abbrev) Hashtbl.t =
     read_abbrevs()
 ;;
 
-let read_dies (ar:asm_reader) ((off:int),(sz:int)) (abbrevs:(int,abbrev) Hashtbl.t) : unit =
+type data =
+    DATA_str of string
+  | DATA_num of int
+  | DATA_other
+;;
+
+type die =
+    { die_off: int;
+      die_tag: dw_tag;
+      die_attrs: (dw_at * dw_form * data) array;
+      die_children: die array; }
+
+let read_dies
+    (ar:asm_reader)
+    ((off:int),(sz:int))
+    (abbrevs:(int,abbrev) Hashtbl.t)
+    : (int,die) Hashtbl.t =
   ar.asm_seek off;
   let cu_len = ar.asm_get_u32() in
   let _ = Printf.printf "debug_info cu_len: %d, section size %d\n" cu_len sz in
@@ -1663,37 +1861,89 @@ let read_dies (ar:asm_reader) ((off:int),(sz:int)) (abbrevs:(int,abbrev) Hashtbl
     let len = ar.asm_get_u8() in
       ar.asm_adv len
   in
+  let all_dies = Hashtbl.create 0 in
 
   let rec read_dies _ =
-    if ar.asm_get_off() >= (off + sz)
-    then ()
-    else
-      begin
-        let abbrev_num = ar.asm_get_uleb() in
-          if abbrev_num = 0
-          then ()
-          else
-            let _ = Printf.printf "DIE with abbrev %d\n" abbrev_num in
-            let abbrev = Hashtbl.find abbrevs abbrev_num in
-            let (_(*tag*), _(*children*), attrs) = abbrev in
-              Array.iter
-                begin
-                  fun (_,form) ->
-                    match form with
-                        DW_FORM_string -> Printf.printf "DW_FORM_string: %s\n" (ar.asm_get_zstr())
-                      | DW_FORM_addr -> Printf.printf "DW_FORM_addr: %d\n" (ar.asm_get_u32())
-                      | DW_FORM_ref_addr -> Printf.printf "DW_FORM_ref_addr: %d\n" (ar.asm_get_u32())
-                      | DW_FORM_data1 -> Printf.printf "DW_FORM_data1: %d\n" (ar.asm_get_u8())
-                      | DW_FORM_data4 -> Printf.printf "DW_FORM_data4: %d\n" (ar.asm_get_u32())
-                      | DW_FORM_flag -> Printf.printf "DW_FORM_flag: %d\n" (ar.asm_get_u8())
-                      | DW_FORM_block1 -> (Printf.printf "DW_FORM_block1\n"; adv_block1())
-                      | _ -> failwith ("unknown DWARF form " ^ (string_of_int (dw_form_to_int form)))
-                end
-                attrs;
-              read_dies()
-      end
+    let dies = ref [] in
+    let die_arr _ = Array.of_list (List.rev (!dies)) in
+      if ar.asm_get_off() >= (off + sz)
+      then die_arr()
+      else
+        begin
+          let off = ar.asm_get_off() in
+          let abbrev_num = ar.asm_get_uleb() in
+            if abbrev_num = 0
+            then die_arr()
+            else
+              let _ = Printf.printf "DIE with abbrev %d\n" abbrev_num in
+              let abbrev = Hashtbl.find abbrevs abbrev_num in
+              let (tag, children, attrs) = abbrev in
+              let attrs =
+                Array.map
+                  begin
+                    fun (attr,form) ->
+                      let data =
+                        match form with
+                            DW_FORM_string -> DATA_str (ar.asm_get_zstr())
+                          | DW_FORM_addr -> DATA_num (ar.asm_get_u32())
+                          | DW_FORM_ref_addr -> DATA_num (ar.asm_get_u32())
+                          | DW_FORM_data1 -> DATA_num (ar.asm_get_u8())
+                          | DW_FORM_data4 -> DATA_num (ar.asm_get_u32())
+                          | DW_FORM_flag -> DATA_num (ar.asm_get_u8())
+                          | DW_FORM_block1 -> (adv_block1(); DATA_other)
+                          | _ -> failwith ("unknown DWARF form " ^ (string_of_int (dw_form_to_int form)))
+                      in
+                        (attr, form, data)
+                  end
+                  attrs;
+              in
+              let children =
+                match children with
+                    DW_CHILDREN_yes -> read_dies()
+                  | DW_CHILDREN_no -> [| |]
+              in
+              let die = { die_off = off;
+                          die_tag = tag;
+                          die_attrs = attrs;
+                          die_children = children }
+              in
+                prepend dies die;
+                htab_put all_dies off die;
+                read_dies()
+        end
   in
-    read_dies()
+    ignore (read_dies());
+    all_dies
+;;
+
+let fmt_dies
+    (ff:Format.formatter)
+    (dies:(int,die) Hashtbl.t)
+    : unit =
+  let rec fmt_die die =
+    Ast.fmt_obox ff;
+    Ast.fmt ff "\nDIE: <%d> %s" die.die_off (dw_tag_to_string die.die_tag);
+    Array.iter
+      begin
+        fun (at,form,data) ->
+          Ast.fmt ff "\n  %s: %s = " (dw_at_to_string at) (dw_form_to_string form);
+          match data with
+              DATA_num n -> Ast.fmt ff "%d"  n
+            | DATA_str s -> Ast.fmt ff "\"%s\"" s
+            | DATA_other -> Ast.fmt ff "<other>"
+      end
+      die.die_attrs;
+    if (Array.length die.die_children) != 0
+    then
+      begin
+        Ast.fmt ff "\n  children: ";
+        Ast.fmt_obr ff;
+        Array.iter fmt_die die.die_children;
+        Ast.fmt_cbr ff
+      end;
+    Ast.fmt_cbox ff;
+  in
+    fmt_die (Hashtbl.find dies 0)
 ;;
 
 (*

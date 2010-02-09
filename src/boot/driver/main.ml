@@ -66,7 +66,10 @@ let dump_file s =
     in
     let sects = get_sections ar in
     let abbrevs = Dwarf.read_abbrevs ar (Hashtbl.find sects ".debug_abbrev") in
-      ignore (Dwarf.read_dies ar (Hashtbl.find sects ".debug_info")  abbrevs);
+    let dies = Dwarf.read_dies ar (Hashtbl.find sects ".debug_info")  abbrevs in
+      Printf.fprintf stderr "DWARF contents of %s:\n%!" s;
+      Format.set_margin 80;
+      Printf.fprintf stderr "%s\n!" (Ast.fmt_to_str Dwarf.fmt_dies dies);
       exit 0
 ;;
 

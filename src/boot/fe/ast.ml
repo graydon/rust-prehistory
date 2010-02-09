@@ -21,7 +21,7 @@ type slot_key =
   | KEY_temp of temp_id
 ;;
 
-(* "names" are statically computable references to particular slots;
+(* "names" are statically computable references to particular items;
    they never involve dynamic indexing (nor even static tuple-indexing;
    you could add it but there are few contexts that need names that would
    benefit from it).
