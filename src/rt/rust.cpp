@@ -414,6 +414,7 @@ struct rust_proc : public rc_base {
               rust_proc *spawner,
               uintptr_t exit_proc_glue,
               uintptr_t spawnee_fn,
+              uintptr_t args,
               size_t callsz);
     ~rust_proc();
 
@@ -933,6 +934,7 @@ rust_proc::rust_proc(rust_rt *rt,
                      rust_proc *spawner,
                      uintptr_t exit_proc_glue,
                      uintptr_t spawnee_fn,
+                     uintptr_t args,
                      size_t callsz)
     :
       stk(new_stk(rt, 0)),
@@ -985,8 +987,8 @@ rust_proc::rust_proc(rust_rt *rt,
     *spp-- = (uintptr_t) 0;          // frame_glue_fns
 
     // Copy args from spawner to spawnee.
-    if (spawner)  {
-        uintptr_t *src = (uintptr_t*) spawner->rust_sp;
+    if (args)  {
+        uintptr_t *src = (uintptr_t *)args;
         src += 1;                  // spawn-call output slot
         src += 1;                  // spawn-call proc slot
         // Memcpy all but the proc and output pointers
@@ -1846,7 +1848,7 @@ upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawn
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
             "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
             exit_proc_glue, spawnee_fn, callsz);
-    rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, callsz);
+    rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
     add_proc_state_vec(rt, proc);
     return proc;
 }
@@ -1873,8 +1875,8 @@ upcall_spawn_thread(rust_proc *spawner, rust_rt *new_rt, uintptr_t exit_proc_glu
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
             "spawn thread fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
             exit_proc_glue, spawnee_fn, callsz);
-    new_rt->root_proc = new (new_rt) rust_proc(new_rt, NULL, exit_proc_glue, spawnee_fn, callsz);
-    add_proc_state_vec(rt, new_rt->root_proc);
+    new_rt->root_proc = new (new_rt) rust_proc(new_rt, NULL, exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
+    add_proc_state_vec(new_rt, new_rt->root_proc);
 
 #if defined(__WIN32__)
     DWORD thread;
@@ -2045,7 +2047,7 @@ rust_start(uintptr_t main_fn, global_glue_fns *global_glue)
     {
         rust_rt rt(&srv, global_glue);
 
-        rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.global_glue->main_exit_proc_glue, main_fn, 0);
+        rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.global_glue->main_exit_proc_glue, main_fn, NULL, 0);
         add_proc_state_vec(&rt, rt.root_proc);
 
         ret = rust_main_loop(&rt);
