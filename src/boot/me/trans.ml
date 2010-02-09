@@ -1135,7 +1135,7 @@ let trans_visitor
                 copy_fn_args (Some clone_rt) proc_cell in_slots args [| |];
                 trans_upcall "upcall_spawn_thread" proc_cell
                   [|
-                    Il.Cell (alias clone_rt);
+                    Il.Cell clone_rt;
                     Il.Cell (alias exit_proc_glue_cell);
                     Il.Cell (alias fn_cell);
                     imm callsz
