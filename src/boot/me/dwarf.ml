@@ -919,6 +919,7 @@ let (abbrev_subprogram:abbrev) =
   (DW_TAG_subprogram, DW_CHILDREN_yes,
    [|
      (DW_AT_name, DW_FORM_string);
+     (DW_AT_type, DW_FORM_ref_addr);
      (DW_AT_low_pc, DW_FORM_addr);
      (DW_AT_high_pc, DW_FORM_addr);
      (DW_AT_frame_base, DW_FORM_block1);
@@ -1229,7 +1230,8 @@ let dwarf_visitor
           ref_addr_for_fix fix
       in
         match ty with
-            Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
+            Ast.TY_nil -> unspecified "nil"
+          | Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
           | Ast.TY_mach (TY_u8)  -> base ("u8",  DW_ATE_unsigned, 1)
           | Ast.TY_mach (TY_u16) -> base ("u16", DW_ATE_unsigned, 2)
           | Ast.TY_mach (TY_u32) -> base ("u32", DW_ATE_unsigned, 4)
@@ -1249,7 +1251,7 @@ let dwarf_visitor
           | Ast.TY_tag _ -> unspecified "tag"
           | Ast.TY_iso _ -> unspecified "iso"
           | Ast.TY_idx _ -> unspecified "idx"
-          | _ -> unspecified "void"
+          | _ -> unspecified "unknown"
   in
 
   let finish_cu_and_compose_headers _ =
@@ -1372,6 +1374,7 @@ let dwarf_visitor
   in
 
   let emit_subprogram_die
+      (ret_slot:Ast.slot)
       (fix:fixup)
       : unit =
     let abbrev_code = get_abbrev_code abbrev_subprogram in
@@ -1380,6 +1383,8 @@ let dwarf_visitor
          uleb abbrev_code;
          (* DW_AT_name *)
          ZSTRING (path_name());
+         (* DW_AT_type: DW_FORM_ref_addr *)
+         ref_slot_die ret_slot;
          (* DW_AT_low_pc *)
          WORD (word_ty_mach, M_POS fix);
          (* DW_AT_high_pc *)
@@ -1433,10 +1438,12 @@ let dwarf_visitor
               log cx "walking module '%s'" (path_name());
               emit_module_die ()
             end
-        | Ast.MOD_ITEM_fn _ ->
+        | Ast.MOD_ITEM_fn fd ->
             begin
               log cx "walking function '%s'" (path_name());
-              emit_subprogram_die (Hashtbl.find cx.ctxt_fn_fixups item.id)
+              emit_subprogram_die
+                fd.Ast.decl_item.Ast.fn_output_slot.node
+                (Hashtbl.find cx.ctxt_fn_fixups item.id)
             end
         | Ast.MOD_ITEM_public_type td
         | Ast.MOD_ITEM_opaque_type td ->
