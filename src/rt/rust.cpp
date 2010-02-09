@@ -1833,6 +1833,8 @@ static void *rust_thread_start(void *ptr)
     // Start a new rust main loop for this thread.
     rust_main_loop(rt);
 
+    delete rt;
+
     return 0;
 }
 
@@ -2043,6 +2045,7 @@ rust_start(uintptr_t main_fn, global_glue_fns *global_glue)
     add_proc_state_vec(&rt, rt.root_proc);
 
     int ret = rust_main_loop(&rt);
+
 #if !defined(__WIN32__)
     // Don't take down the process if the main thread exits without an error.
     if (!ret)
