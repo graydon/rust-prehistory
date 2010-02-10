@@ -1140,10 +1140,10 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (proc_cell, _) = trans_lval_init dst in
-    let (fn_cell, fn_slot) = trans_lval fn_lval in
+    let (fn_cell, fn_ty) = trans_callee fn_lval in
     let tsig =
-      match fn_slot.Ast.slot_ty with
-          Some (Ast.TY_fn (tsig, _)) -> tsig
+      match fn_ty with
+          Ast.TY_fn (tsig, _) -> tsig
         | _ -> bug () "spawned-function slot has wrong type"
     in
     let in_slots = tsig.Ast.sig_input_slots in
@@ -1999,7 +1999,7 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
-    let (fn_cell, _) = trans_callee cx flv in
+    let (fn_cell, _) = trans_callee flv in
     let in_slots = tsig.Ast.sig_input_slots in
     let direct = lval_is_direct_fn cx flv in
     let extra_args =
@@ -2008,11 +2008,12 @@ let trans_visitor
       else
         [| Il.Cell fn_cell |]
     in
+      log cx "trans_call_fn: %s call to lval %a"
+        (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
       trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots args extra_args
 
   and trans_callee
-      (cx:ctxt)
       (flv:Ast.lval)
       : (Il.cell * Ast.ty) =
     (* direct call to item *)
@@ -2059,7 +2060,7 @@ let trans_visitor
       (flv:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (fn_cell, fn_ty) = trans_callee cx flv in
+    let (fn_cell, fn_ty) = trans_callee flv in
     let tpred =
       match fn_ty with
           Ast.TY_pred tpred -> tpred
@@ -2131,7 +2132,7 @@ let trans_visitor
       (args:Ast.atom option array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
-    let (fn_cell, _) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
+    let (fn_cell, _) = trans_callee flv in
     let arg_bound_flags = Array.map bool_of_option args in
     let arg_slots =
       arr_map2
@@ -2299,11 +2300,15 @@ let trans_visitor
       (logname:unit -> string)
       : Il.cell =
     if direct then
-      callee_cell
+      begin
+        log cx "making direct call";
+        callee_cell
+      end
     else
       begin
+        log cx "dereferencing closure";
         iflog (fun _ -> annotate (Printf.sprintf "deref closure for call to %s" (logname ())));
-        let closure_cell = deref (get_element_ptr callee_cell 0) in
+        let closure_cell = deref (callee_cell) in
           iflog (fun _ -> annotate (Printf.sprintf "deref glue-code for call to %s" (logname ())));
           deref (get_element_ptr closure_cell 1)
       end

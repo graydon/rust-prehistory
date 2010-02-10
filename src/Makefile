@@ -27,7 +27,7 @@ ifeq ($(CFG_OSTYPE), Linux)
     CFG_GCC_COMPILE_FLAGS += -m32
     CFG_GCC_LINK_FLAGS += -m32
   endif
-  CFG_NATIVE := 1
+  # CFG_NATIVE := 1
   CFG_UNIXY := 1
   CFG_VALGRIND := $(shell which valgrind)
   ifdef CFG_VALGRIND
