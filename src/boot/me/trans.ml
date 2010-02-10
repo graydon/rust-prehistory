@@ -2205,7 +2205,7 @@ let trans_visitor
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
-    assert (Array.length args == Array.length arg_slots);
+    assert ((Array.length args) + (Array.length extra_args) == Array.length arg_slots);
     let n_args = Array.length args in
     let n_extras = Array.length extra_args in
     let arg_tup = arg_tup_cell arg_slots in
@@ -2213,14 +2213,14 @@ let trans_visitor
       trans_arg1 (get_element_ptr arg_tup 1);
       Array.iteri
         begin
-          fun i slot ->
+          fun i arg ->
             iflog (fun _ ->
                      annotate
                        (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
                           i n_args n_extras));
-            trans_argN clone_rt (get_element_ptr arg_tup (2+i)) slot args.(i)
+            trans_argN clone_rt (get_element_ptr arg_tup (2+i)) arg_slots.(i) arg
         end
-        arg_slots;
+        args;
       Array.iteri
         begin
           fun i operand ->
