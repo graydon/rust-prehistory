@@ -5,7 +5,7 @@ fn ho(fn(int) -> int f) -> int {
   ret n;
 }
 
-fn direct(int x) -> () {
+fn direct(int x) -> int {
   ret x + 1;
 }
 
