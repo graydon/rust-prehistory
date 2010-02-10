@@ -1845,7 +1845,7 @@ let read_dies
     (ar:asm_reader)
     ((off:int),(sz:int))
     (abbrevs:(int,abbrev) Hashtbl.t)
-    : (int,die) Hashtbl.t =
+    : (int * ((int,die) Hashtbl.t)) =
   ar.asm_seek off;
   let cu_len = ar.asm_get_u32() in
   let _ = Printf.printf "debug_info cu_len: %d, section size %d\n" cu_len sz in
@@ -1862,20 +1862,20 @@ let read_dies
       ar.asm_adv len
   in
   let all_dies = Hashtbl.create 0 in
+  let root = (ar.asm_get_off()) - off in
 
-  let rec read_dies _ =
-    let dies = ref [] in
+  let rec read_dies (dies:(die list) ref) =
     let die_arr _ = Array.of_list (List.rev (!dies)) in
       if ar.asm_get_off() >= (off + sz)
       then die_arr()
       else
         begin
-          let off = ar.asm_get_off() in
+          let die_off = (ar.asm_get_off()) - off in
           let abbrev_num = ar.asm_get_uleb() in
             if abbrev_num = 0
             then die_arr()
             else
-              let _ = Printf.printf "DIE with abbrev %d\n" abbrev_num in
+              let _ = Printf.printf "DIE at off <%d> with abbrev %d\n" die_off abbrev_num in
               let abbrev = Hashtbl.find abbrevs abbrev_num in
               let (tag, children, attrs) = abbrev in
               let attrs =
@@ -1891,7 +1891,8 @@ let read_dies
                           | DW_FORM_data4 -> DATA_num (ar.asm_get_u32())
                           | DW_FORM_flag -> DATA_num (ar.asm_get_u8())
                           | DW_FORM_block1 -> (adv_block1(); DATA_other)
-                          | _ -> failwith ("unknown DWARF form " ^ (string_of_int (dw_form_to_int form)))
+                          | _ -> failwith ("unknown DWARF form " ^
+                                             (string_of_int (dw_form_to_int form)))
                       in
                         (attr, form, data)
                   end
@@ -1899,51 +1900,54 @@ let read_dies
               in
               let children =
                 match children with
-                    DW_CHILDREN_yes -> read_dies()
+                    DW_CHILDREN_yes -> read_dies (ref [])
                   | DW_CHILDREN_no -> [| |]
               in
-              let die = { die_off = off;
+              let die = { die_off = die_off;
                           die_tag = tag;
                           die_attrs = attrs;
                           die_children = children }
               in
                 prepend dies die;
-                htab_put all_dies off die;
-                read_dies()
+                htab_put all_dies die_off die;
+                read_dies dies
         end
   in
-    ignore (read_dies());
-    all_dies
+    ignore (read_dies (ref []));
+    (root, all_dies)
 ;;
 
 let fmt_dies
     (ff:Format.formatter)
-    (dies:(int,die) Hashtbl.t)
+    ((root:int),(dies:(int,die) Hashtbl.t))
     : unit =
   let rec fmt_die die =
-    Ast.fmt_obox ff;
-    Ast.fmt ff "\nDIE: <%d> %s" die.die_off (dw_tag_to_string die.die_tag);
+    Ast.fmt ff "@\nDIE <0x%x> %s" die.die_off (dw_tag_to_string die.die_tag);
     Array.iter
       begin
         fun (at,form,data) ->
-          Ast.fmt ff "\n  %s: %s = " (dw_at_to_string at) (dw_form_to_string form);
-          match data with
-              DATA_num n -> Ast.fmt ff "%d"  n
-            | DATA_str s -> Ast.fmt ff "\"%s\"" s
-            | DATA_other -> Ast.fmt ff "<other>"
+          Ast.fmt ff "@\n  %s = " (dw_at_to_string at);
+          begin
+            match data with
+                DATA_num n -> Ast.fmt ff "0x%x"  n
+              | DATA_str s -> Ast.fmt ff "\"%s\"" s
+              | DATA_other -> Ast.fmt ff "<other>"
+          end;
+          Ast.fmt ff "  (%s)" (dw_form_to_string form)
       end
       die.die_attrs;
     if (Array.length die.die_children) != 0
     then
       begin
-        Ast.fmt ff "\n  children: ";
+        Ast.fmt ff "@\n";
+        Ast.fmt_obox ff;
+        Ast.fmt ff "  children: ";
         Ast.fmt_obr ff;
         Array.iter fmt_die die.die_children;
-        Ast.fmt_cbr ff
+        Ast.fmt_cbb ff
       end;
-    Ast.fmt_cbox ff;
   in
-    fmt_die (Hashtbl.find dies 0)
+    fmt_die (Hashtbl.find dies root)
 ;;
 
 (*

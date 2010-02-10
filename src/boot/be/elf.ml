@@ -1431,8 +1431,57 @@ let emit_file
     close_out out
 ;;
 
-let get_sections (_:asm_reader) : (string,(int*int)) Hashtbl.t =
-  Hashtbl.create 0
+let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
+  let sects = Hashtbl.create 0 in
+  let elf_id = ar.asm_get_zstr_padded 4 in
+  let _ = assert (elf_id = "\x7fELF") in
+
+  let _ = ar.asm_seek 0x10 in
+  let _ = ar.asm_adv_u16 () in (* e_type *)
+  let _ = ar.asm_adv_u16 () in (* e_machine *)
+  let _ = ar.asm_adv_u32 () in (* e_version *)
+  let _ = ar.asm_adv_u32 () in (* e_entry *)
+  let _ = ar.asm_adv_u32 () in (* e_phoff *)
+  let e_shoff = ar.asm_get_u32 () in (* e_shoff *)
+  let _ = ar.asm_adv_u32 () in (* e_flags *)
+  let _ = ar.asm_adv_u16 () in (* e_ehsize *)
+  let _ = ar.asm_adv_u16 () in (* e_phentsize *)
+  let _ = ar.asm_adv_u16 () in (* e_phnum *)
+  let e_shentsize = ar.asm_get_u16 () in
+  let e_shnum = ar.asm_get_u16 () in
+  let e_shstrndx = ar.asm_get_u16 () in
+  let _ = Printf.printf
+    "%d ELF section headers, %d bytes each, starting at 0x%x\n" 
+    e_shnum e_shentsize e_shoff
+  in
+  let _ = Printf.printf "section %d is .shstrtab\n" e_shstrndx in
+
+  let read_section_hdr n =
+    let _ = ar.asm_seek (e_shoff + n * e_shentsize) in
+    let str_off = ar.asm_get_u32() in
+    let _ = ar.asm_adv_u32() in (* sh_type  *)
+    let _ = ar.asm_adv_u32() in (* sh_flags *)
+    let _ = ar.asm_adv_u32() in (* sh_addr *)
+    let off = ar.asm_get_u32() in (* sh_off *)
+    let size = ar.asm_get_u32() in (* sh_size *)
+    let _ = ar.asm_adv_u32() in (* sh_link *)
+    let _ = ar.asm_adv_u32() in (* sh_info *)
+    let _ = ar.asm_adv_u32() in (* sh_addralign *)
+    let _ = ar.asm_adv_u32() in (* sh_entsize *)
+      (str_off, off, size)
+  in
+
+  let (_, str_base, _) = read_section_hdr e_shstrndx in
+
+  let _ = ar.asm_seek e_shoff in
+    for i = 0 to (e_shnum - 1) do
+      let (str_off, off, size) = read_section_hdr i in
+      let _ = ar.asm_seek (str_base + str_off) in
+      let name = ar.asm_get_zstr() in
+        Printf.printf "section %d: %s, size %d, offset 0x%x\n" i name size off;
+        Hashtbl.add sects name (off, size);
+    done;
+    sects
 ;;
 
 

@@ -576,7 +576,12 @@ let new_asm_reader (s:filename) =
   let get_zstr_padded pad_opt =
     let i = ref (!off) in
       Buffer.clear buf;
-      while arr.{!i} != 0 do
+      let buflen_ok _ =
+        match pad_opt with
+            None -> true
+          | Some pad -> (Buffer.length buf) < pad
+      in
+      while arr.{!i} != 0 && (buflen_ok()) do
         Buffer.add_char buf (Char.chr arr.{!i});
         incr i
       done;
@@ -585,7 +590,7 @@ let new_asm_reader (s:filename) =
             None -> off := (!off) + (Buffer.length buf) + 1
           | Some pad ->
               begin
-                assert (((Buffer.length buf) + 1) <= pad);
+                assert ((Buffer.length buf) <= pad);
                 off := (!off) + pad
               end
       end;
