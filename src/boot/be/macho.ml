@@ -978,8 +978,67 @@ let emit_file
     close_out out
 ;;
 
-let get_sections (_:asm_reader) : (string,(int*int)) Hashtbl.t =
-  Hashtbl.create 0
+let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
+  let sects = Hashtbl.create 0 in
+  let magic = ar.asm_get_u32() in
+  let _ = assert (magic = (Int64.to_int mh_magic)) in
+  let _ = ar.asm_adv_u32() in (* cpu type *)
+  let _ = ar.asm_adv_u32() in (* cpu subtype *)
+  let _ = ar.asm_adv_u32() in (* file type *)
+  let n_load_cmds = ar.asm_get_u32() in
+  let _ = ar.asm_adv_u32() in
+  let _ = Printf.printf "Mach-o file with %d load commands\n" n_load_cmds in
+  let _ = ar.asm_adv_u32() in (* flags *)
+  let lc_seg = Int64.to_int (load_command_code LC_SEGMENT) in
+    for i = 0 to n_load_cmds - 1 do
+      let load_cmd_code = ar.asm_get_u32() in
+      let load_cmd_size = ar.asm_get_u32() in
+      let _ = Printf.printf "load command %d:\n" i in
+        if load_cmd_code != lc_seg
+        then ar.asm_adv (load_cmd_size - 8)
+        else
+          begin
+            let seg_name = ar.asm_get_zstr_padded 16 in
+            let _ = Printf.printf "LC_SEGMENT %s\n" seg_name in
+            let _ = ar.asm_adv_u32() in (* seg mem pos *)
+            let _ = ar.asm_adv_u32() in (* seg mem sz *)
+            let _ = ar.asm_adv_u32() in (* seg file pos *)
+            let _ = ar.asm_adv_u32() in (* seg file sz *)
+            let _ = ar.asm_adv_u32() in (* maxprot *)
+            let _ = ar.asm_adv_u32() in (* initprot *)
+            let n_sects = ar.asm_get_u32() in
+            let _ = ar.asm_get_u32() in (* flags *)
+            let _ = Printf.printf "%d sections\n" in
+              for j = 0 to n_sects - 1 do
+                let sect_name = ar.asm_get_zstr_padded 16 in
+                let _ = ar.asm_adv 16 in (* seg name *)
+                let _ = ar.asm_adv_u32() in (* sect mem pos *)
+                let m_sz = ar.asm_get_u32() in
+                let f_pos = ar.asm_get_u32() in
+                let _ = ar.asm_adv_u32() in (* sect align *)
+                let _ = ar.asm_adv_u32() in (* reloff *)
+                let _ = ar.asm_adv_u32() in (* nreloc *)
+                let _ = ar.asm_adv_u32() in (* flags *)
+                let _ = ar.asm_adv_u32() in (* reserved1 *)
+                let _ = ar.asm_adv_u32() in (* reserved2 *)
+                let _ =
+                  Printf.printf
+                    "  section %d: 0x%x - 0x%x %s \n"
+                    j f_pos (f_pos + m_sz) sect_name
+                in
+                let len = String.length sect_name in
+                let sect_name =
+                  if (len > 2
+                      && sect_name.[0] = '_'
+                      && sect_name.[1] = '_')
+                  then "." ^ (String.sub sect_name 2 (len-2))
+                  else sect_name
+                in
+                  Hashtbl.add sects sect_name (f_pos, m_sz)
+              done
+          end
+    done;
+    sects
 ;;
 
 
