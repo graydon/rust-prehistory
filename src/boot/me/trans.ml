@@ -461,51 +461,7 @@ let trans_visitor
   and trans_lval_full
       (initializing:bool)
       (lv:Ast.lval)
-      (abs_ok:bool)
       : (Il.cell * Ast.slot) =
-
-    let return_fixup (fix:fixup) (slot:Ast.slot)
-        : (Il.cell * Ast.slot) =
-      let rty = slot_referent_type abi slot in
-      let mem = fixup_to_mem abs_ok fix rty in
-        (Il.Mem (mem, rty), slot)
-    in
-
-    let return_item (item:Ast.mod_item)
-        : (Il.cell * Ast.slot) =
-      let ty = Hashtbl.find cx.ctxt_all_item_types item.id in
-      let slot = interior_slot ty in
-        match item.node with
-            Ast.MOD_ITEM_fn _ ->
-              return_fixup (get_fn_fixup cx item.id) slot
-          | Ast.MOD_ITEM_pred _ ->
-              return_fixup (get_fn_fixup cx item.id) slot
-          | Ast.MOD_ITEM_tag _ ->
-              return_fixup (get_fn_fixup cx item.id) slot
-          | Ast.MOD_ITEM_mod _ ->
-              return_fixup (get_mod_fixup cx item.id) slot
-          | _ ->
-              bugi cx item.id
-                "unhandled item type in trans_lval_full"
-    in
-
-    let return_native_item (item:Ast.native_mod_item)
-        : (Il.cell * Ast.slot) =
-      let ty = Hashtbl.find cx.ctxt_all_item_types item.id in
-      let slot = interior_slot ty in
-        match item.node with
-            Ast.NATIVE_fn _ ->
-              return_fixup (get_fn_fixup cx item.id) slot
-          | _ ->
-              bugi cx item.id
-                "unhandled native item type in trans_lval_full"
-    in
-
-    let return_slot (_:node_id) (slot:Ast.slot) (slot_id:node_id)
-        : (Il.cell * Ast.slot) =
-      let cell = cell_of_block_slot slot_id in
-        (cell, slot)
-    in
 
     let rec trans_slot_lval_full (initializing:bool) lv =
       match lv with
@@ -515,9 +471,10 @@ let trans_visitor
               trans_slot_lval_ext (slot_ty base_slot) base_cell' comp
 
         | Ast.LVAL_base nb ->
-            let referent = lval_to_referent cx nb.id in
             let slot = lval_to_slot cx nb.id in
-              return_slot nb.id slot referent
+            let referent = lval_to_referent cx nb.id in
+            let cell = cell_of_block_slot referent in
+              (cell, slot)
     in
       if lval_is_slot cx lv
       then trans_slot_lval_full initializing lv
@@ -526,21 +483,40 @@ let trans_visitor
         then err None "init item"
         else
           if lval_is_item cx lv
-          then return_item (lval_item cx lv)
+          then bug () "trans_lval_full called on item lval '%a'" Ast.sprintf_lval lv
           else
             begin
               assert (lval_is_native_item cx lv);
-              return_native_item (lval_native_item cx lv)
+              bug () "trans_lval_full called on native-item lval '%a'" Ast.sprintf_lval lv
             end
 
   and trans_lval_maybe_init (initializing:bool) (lv:Ast.lval) : (Il.cell * Ast.slot) =
-    trans_lval_full initializing lv abi.Abi.abi_has_abs_data
+    trans_lval_full initializing lv
 
   and trans_lval_init (lv:Ast.lval) : (Il.cell * Ast.slot) =
     trans_lval_maybe_init true lv
 
   and trans_lval (lv:Ast.lval) : (Il.cell * Ast.slot) =
     trans_lval_maybe_init false lv
+
+  and trans_callee
+      (flv:Ast.lval)
+      : (Il.cell * Ast.ty) =
+    (* direct call to item *)
+    if lval_is_item cx flv then
+      let fn_item = lval_item cx flv in
+      let fn_mem = code_fixup_to_mem (get_fn_fixup cx fn_item.id) in
+        (Il.Mem (fn_mem, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
+    (* direct call to native item *)
+    else if lval_is_native_item cx flv then
+      let fn_item = lval_native_item cx flv in
+      let fn_mem = code_fixup_to_mem (get_fn_fixup cx fn_item.id) in
+        (Il.Mem (fn_mem, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
+    (* indirect call to computed slot *)
+    else
+      let (cell, slot) = trans_lval flv in
+        (cell, slot_ty slot)
+
 
   and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Il.operand =
     let fix =
@@ -2012,25 +1988,6 @@ let trans_visitor
         (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
       trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots args extra_args
-
-  and trans_callee
-      (flv:Ast.lval)
-      : (Il.cell * Ast.ty) =
-    (* direct call to item *)
-    if lval_is_item cx flv then
-      let fn_item = lval_item cx flv in
-      let fn_mem = code_fixup_to_mem (get_fn_fixup cx fn_item.id) in
-        (Il.Mem (fn_mem, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
-    (* direct call to native item *)
-    else if lval_is_native_item cx flv then
-      let fn_item = lval_native_item cx flv in
-      let fn_mem = code_fixup_to_mem (get_fn_fixup cx fn_item.id) in
-        (Il.Mem (fn_mem, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
-    (* indirect call to computed slot *)
-    else
-      let (cell, slot) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
-        (cell, slot_ty slot)
-
 
   and trans_call_mod
       (initializing:bool)
