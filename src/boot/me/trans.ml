@@ -2273,12 +2273,12 @@ let trans_visitor
               if is_bound then
                 begin
                   iflog (fun _ -> annotate (Printf.sprintf "extract bound arg %d as actual arg %d" !bound_i arg_i));
-                  deref (get_element_ptr closure_cell (!bound_i + 3));
+                  get_element_ptr closure_cell (!bound_i + 3)
                 end
               else
                 begin
                   iflog (fun _ -> annotate (Printf.sprintf "extract unbound arg %d as actual arg %d" !unbound_i arg_i));
-                  deref (get_element_ptr in_cell (!unbound_i + 2))
+                  get_element_ptr in_cell (!unbound_i + 2)
                 end
             in
               iflog (fun _ -> annotate (Printf.sprintf "copy into actual-arg %d" arg_i));
