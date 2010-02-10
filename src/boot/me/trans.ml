@@ -1335,6 +1335,7 @@ let trans_visitor
               (* Vecs and strs are pseudo-exterior. *)
           | Ast.TY_vec _ -> MEM_rc_struct
           | Ast.TY_str -> MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
+          | Ast.TY_fn _ -> MEM_rc_struct
           | _ ->
               match slot.Ast.slot_mode with
                   Ast.MODE_exterior _ when ty_is_structured (slot_ty slot) ->
@@ -1431,25 +1432,13 @@ let trans_visitor
           | Ast.TY_fn _
           | Ast.TY_pred _
           | Ast.TY_mod _ ->
-              (* TY_fn and TY_mod are stored as pairs, one of which
-               * points to an item and one of which is a (possible)
-               * pointer to an exterior allocation.
+              (* TY_fn and TY_mod are stored as pointer-to-exterior-closure. *)
+              (* 
+               * FIXME (bug 543738): this is completely wrong, need a second thunk that
+               * generates code to make use of a runtime type descriptor extracted from a
+               * binding tuple. For now this only works by accident.
                *)
-              let src_binding_field_cell = get_element_ptr src_cell 1 in
-              let dst_binding_field_cell = get_element_ptr dst_cell 1 in
-                emit (Il.cmp (Il.Cell src_binding_field_cell) zero);
-                let null_jmp = mark() in
-                  emit (Il.jmp Il.JE Il.CodeNone);
-                  (* Call thunk if we have a src binding. *)
-                  (* 
-                   * FIXME (bug 543738): this is completely wrong, need a second thunk that
-                   * generates code to make use of a runtime type descriptor extracted from a
-                   * binding tuple. For now this only works by accident.
-                   *)
-                  (f dst_binding_field_cell
-                     src_binding_field_cell
-                     (exterior_slot Ast.TY_int) curr_iso);
-                  patch null_jmp
+              ()
 
           | _ -> ()
 
