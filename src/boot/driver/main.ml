@@ -13,6 +13,8 @@ let (targ:Common.target) =
     | _ -> Linux_x86_elf
 ;;
 
+let (abi:Abi.abi) = X86.abi;;
+
 let (sess:Session.sess) =
   {
     Session.sess_in = "";
@@ -69,7 +71,15 @@ let dump_file s =
     let dies = Dwarf.read_dies ar (Hashtbl.find sects ".debug_info")  abbrevs in
       Printf.fprintf stdout "DWARF contents of %s:\n%!" s;
       Format.set_margin 80;
-      Printf.fprintf stdout "%s\n!" (Ast.fmt_to_str Dwarf.fmt_dies dies);
+      Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Dwarf.fmt_dies dies);
+      begin
+        match Dwarf.extract_mod_type_item abi dies with
+            None -> Printf.fprintf stdout "unable to extract a mod type item\n%!"
+          | Some (ident, mti) ->
+              Printf.fprintf stdout "extracted mod type item:\n%!";
+              Printf.fprintf stdout "%s\n%!"
+                (Ast.fmt_to_str (fun ff mti -> Ast.fmt_mod_type_item ff ident mti) mti);
+      end;
       exit 0
 ;;
 
@@ -173,7 +183,6 @@ then
   end
 
 let list_to_seq ls = Asm.SEQ (Array.of_list ls);;
-let (abi:Abi.abi) = X86.abi;;
 let (select_insns:(Il.quads -> Asm.frag)) = X86.select_insns sess;;
 
 (* Semantic passes. *)

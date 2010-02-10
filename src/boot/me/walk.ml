@@ -326,7 +326,7 @@ and walk_mod_type_item
     (item:Ast.mod_type_item)
     : unit =
   let (params,children) =
-    match item.node with
+    match item with
         Ast.MOD_TYPE_ITEM_opaque_type td ->
           (td.Ast.decl_params, (fun _ -> ()))
       | Ast.MOD_TYPE_ITEM_public_type td ->

@@ -755,6 +755,28 @@ let dw_ate_to_int (ate:dw_ate) : int =
     | DW_ATE_hi_user -> 0xff
 ;;
 
+let dw_ate_of_int (i:int) : dw_ate =
+  match i with
+      0x01 -> DW_ATE_address
+    | 0x02 -> DW_ATE_boolean
+    | 0x03 -> DW_ATE_complex_float
+    | 0x04 -> DW_ATE_float
+    | 0x05 -> DW_ATE_signed
+    | 0x06 -> DW_ATE_signed_char
+    | 0x07 -> DW_ATE_unsigned
+    | 0x08 -> DW_ATE_unsigned_char
+    | 0x09 -> DW_ATE_imaginary_float
+    | 0x0a -> DW_ATE_packed_decimal
+    | 0x0b -> DW_ATE_numeric_string
+    | 0x0c -> DW_ATE_edited
+    | 0x0d -> DW_ATE_signed_fixed
+    | 0x0e -> DW_ATE_unsigned_fixed
+    | 0x0f -> DW_ATE_decimal_float
+    | 0x80 -> DW_ATE_lo_user
+    | 0xff -> DW_ATE_hi_user
+    | _ -> failwith ("bad DWARF attribute-encoding code: " ^ (string_of_int i))
+;;
+
 type dw_form =
   | DW_FORM_addr
   | DW_FORM_block2
@@ -1172,6 +1194,7 @@ let (abbrev_exterior_slot:abbrev) =
   (DW_TAG_reference_type, DW_CHILDREN_no,
    [|
      (DW_AT_type, DW_FORM_ref_addr);
+     (DW_AT_mutable, DW_FORM_flag);
      (DW_AT_data_location, DW_FORM_block1);
    |])
 ;;
@@ -1316,12 +1339,14 @@ let dwarf_visitor
         ref_addr_for_fix fix
     in
       match slot.Ast.slot_mode with
-          Ast.MODE_exterior _ ->
+          Ast.MODE_exterior mut ->
             let fix = new_fixup "exterior DIE" in
               emit_die (DEF (fix, SEQ [|
                                uleb (get_abbrev_code abbrev_exterior_slot);
                                (* DW_AT_type: DW_FORM_ref_addr *)
                                (ref_type_die (slot_ty slot));
+                               (* DW_AT_mutable: DW_FORM_flag *)
+                               BYTE (if mut = Ast.MUTABLE then 1 else 0);
                                (* DW_AT_data_location: DW_FORM_block1 *)
                                (* This is a DWARF expression for moving
                                   from the address of an exterior
@@ -1543,19 +1568,22 @@ let dwarf_visitor
       curr_cu_line := []
   in
 
-  let emit_module_die _ : unit =
+  let emit_module_die
+      (id:Ast.ident)
+      : unit =
     let abbrev_code = get_abbrev_code abbrev_module in
     let module_die =
       (SEQ [|
          uleb abbrev_code;
          (* DW_AT_name *)
-         ZSTRING (path_name());
+         ZSTRING id;
        |])
     in
       emit_die module_die
   in
 
   let emit_subprogram_die
+      (id:Ast.ident)
       (ret_slot:Ast.slot)
       (fix:fixup)
       : unit =
@@ -1564,7 +1592,7 @@ let dwarf_visitor
       (SEQ [|
          uleb abbrev_code;
          (* DW_AT_name *)
-         ZSTRING (path_name());
+         ZSTRING id;
          (* DW_AT_type: DW_FORM_ref_addr *)
          ref_slot_die ret_slot;
          (* DW_AT_low_pc *)
@@ -1584,6 +1612,7 @@ let dwarf_visitor
   in
 
   let emit_typedef_die
+      (id:Ast.ident)
       (ty:Ast.ty)
       : unit =
     let abbrev_code = get_abbrev_code abbrev_typedef in
@@ -1591,7 +1620,7 @@ let dwarf_visitor
       (SEQ [|
          uleb abbrev_code;
          (* DW_AT_name: DW_FORM_string *)
-         ZSTRING (path_name());
+         ZSTRING id;
          (* DW_AT_type: DW_FORM_ref_addr *)
          (ref_type_die ty);
        |])
@@ -1618,12 +1647,13 @@ let dwarf_visitor
           Ast.MOD_ITEM_mod _ ->
             begin
               log cx "walking module '%s'" (path_name());
-              emit_module_die ()
+              emit_module_die id
             end
         | Ast.MOD_ITEM_fn fd ->
             begin
               log cx "walking function '%s'" (path_name());
               emit_subprogram_die
+                id
                 fd.Ast.decl_item.Ast.fn_output_slot.node
                 (Hashtbl.find cx.ctxt_fn_fixups item.id)
             end
@@ -1631,7 +1661,7 @@ let dwarf_visitor
         | Ast.MOD_ITEM_opaque_type td ->
             begin
               log cx "walking typedef '%s'" (path_name());
-              emit_typedef_die td.Ast.decl_item
+              emit_typedef_die id td.Ast.decl_item
             end
         | _ -> ()
     end;
@@ -1790,7 +1820,8 @@ let process_crate
 ;;
 
 (*
- * Support for reconstituting DWARF from a file.
+ * Support for reconstituting a DWARF tree from a file, and various
+ * artifacts we can distill back from said DWARF.
  *)
 
 let read_abbrevs (ar:asm_reader) ((off:int),(sz:int)) : (int,abbrev) Hashtbl.t =
@@ -1838,7 +1869,7 @@ type data =
 type die =
     { die_off: int;
       die_tag: dw_tag;
-      die_attrs: (dw_at * dw_form * data) array;
+      die_attrs: (dw_at * (dw_form * data)) array;
       die_children: die array; }
 
 let read_dies
@@ -1894,7 +1925,7 @@ let read_dies
                           | _ -> failwith ("unknown DWARF form " ^
                                              (string_of_int (dw_form_to_int form)))
                       in
-                        (attr, form, data)
+                        (attr, (form, data))
                   end
                   attrs;
               in
@@ -1925,7 +1956,7 @@ let fmt_dies
     Ast.fmt ff "@\nDIE <0x%x> %s" die.die_off (dw_tag_to_string die.die_tag);
     Array.iter
       begin
-        fun (at,form,data) ->
+        fun (at,(form,data)) ->
           Ast.fmt ff "@\n  %s = " (dw_at_to_string at);
           begin
             match data with
@@ -1948,6 +1979,171 @@ let fmt_dies
       end;
   in
     fmt_die (Hashtbl.find dies root)
+;;
+
+let rec extract_mod_type_item
+    (abi:Abi.abi)
+    ((i:int),(dies:(int,die) Hashtbl.t))
+    : (Ast.ident * Ast.mod_type_item) option =
+
+  let (word_sz:int64) = abi.Abi.abi_word_sz in
+  let (word_sz_int:int) = Int64.to_int word_sz in
+
+  let get_die i =
+    Hashtbl.find dies i
+  in
+
+  let get_attr die attr =
+    atab_find die.die_attrs attr
+  in
+
+  let get_str die attr  =
+    match get_attr die attr with
+        (_, DATA_str s) -> s
+      | _ -> bug () "unexpected num form for %s" (dw_at_to_string attr)
+  in
+
+  let get_num die attr =
+    match get_attr die attr with
+        (_, DATA_num n) -> n
+      | _ -> bug () "unexpected str form for %s" (dw_at_to_string attr)
+  in
+
+  let get_name die = get_str die DW_AT_name in
+
+  let rec get_ty die : Ast.ty =
+      match die.die_tag with
+
+          DW_TAG_unspecified_type ->
+            begin
+              match get_name die with
+                  "nil" -> Ast.TY_nil
+                | "proc" -> Ast.TY_proc
+                | _ -> Ast.TY_nil (* FIXME: finish this. *)
+            end
+
+        | DW_TAG_base_type ->
+            begin
+              match ((get_name die),
+                     (dw_ate_of_int (get_num die DW_AT_encoding)),
+                     (get_num die DW_AT_byte_size)) with
+                  ("u8", DW_ATE_unsigned, 1) -> Ast.TY_mach TY_u8
+                | ("u16", DW_ATE_unsigned, 2) -> Ast.TY_mach TY_u16
+                | ("u32", DW_ATE_unsigned, 4) -> Ast.TY_mach TY_u32
+                | ("u64", DW_ATE_unsigned, 8) -> Ast.TY_mach TY_u64
+                | ("s8", DW_ATE_signed, 1) -> Ast.TY_mach TY_u8
+                | ("s16", DW_ATE_signed, 2) -> Ast.TY_mach TY_u16
+                | ("s32", DW_ATE_signed, 4) -> Ast.TY_mach TY_u32
+                | ("s64", DW_ATE_signed, 8) -> Ast.TY_mach TY_u64
+                | ("char", DW_ATE_unsigned_char, 4) -> Ast.TY_char
+                | ("int", DW_ATE_signed, sz) when sz = word_sz_int -> Ast.TY_int
+                | _ -> bug () "unexpected type of DW_TAG_base_type"
+            end
+
+        | DW_TAG_structure_type ->
+            let entries =
+              Array.map
+                (fun member_die -> ((get_name member_die),
+                                    (get_slot member_die)))
+                die.die_children
+            in
+              Ast.TY_rec entries
+
+        | _ -> bug () "unexpected tag in get_ty: %s" (dw_tag_to_string die.die_tag)
+
+  and get_slot die : Ast.slot =
+    match die.die_tag with
+        DW_TAG_reference_type ->
+          let ty = get_referenced_ty die in
+          let mut =
+            match get_attr die DW_AT_mutable with
+                (DW_FORM_flag, DATA_num 0) -> Ast.IMMUTABLE
+              | (DW_FORM_flag, DATA_num 1) -> Ast.MUTABLE
+              | _ -> bug () "unexpected form of DW_AT_mutable"
+          in
+          let mode =
+            (* Exterior slots have a 'data_location' attr. *)
+            match (atab_search die.die_attrs DW_AT_data_location, mut) with
+                (Some _, mut) -> Ast.MODE_exterior mut
+              | (None, Ast.MUTABLE) -> Ast.MODE_write_alias
+              | (None, Ast.IMMUTABLE) -> Ast.MODE_read_alias
+          in
+            { Ast.slot_mode = mode; Ast.slot_ty = Some ty }
+      | _ ->
+          let ty = get_ty die in
+            (* FIXME: encode mutability of interior slots properly. *)
+            { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
+              Ast.slot_ty = Some ty }
+
+  and get_referenced_ty die =
+    match get_attr die DW_AT_type with
+        (DW_FORM_ref_addr, DATA_num n) -> get_ty (get_die n)
+      | _ -> bug () "unexpected form of DW_AT_type in get_referenced_ty"
+
+  and get_referenced_slot die =
+    match get_attr die DW_AT_type with
+        (DW_FORM_ref_addr, DATA_num n) -> get_slot (get_die n)
+      | _ -> bug () "unexpected form of DW_AT_type in get_referenced_slot"
+  in
+
+  let decl i = { Ast.decl_params = [| |]; Ast.decl_item = i; } in
+
+  let get_formals die =
+    arr_map_partial
+      die.die_children
+      begin
+        fun child ->
+          match child.die_tag with
+              DW_TAG_formal_parameter -> Some (get_referenced_slot child)
+            | _ -> None
+      end
+  in
+
+  let get_mod_type_items die =
+    let len = Array.length die.die_children in
+    let mtis = Hashtbl.create len in
+      for i = 0 to (len - 1) do
+        let child = die.die_children.(i) in
+          match extract_mod_type_item abi (child.die_off,dies) with
+              None -> ()
+            | Some (ident, mti) -> htab_put mtis ident mti
+      done;
+      mtis
+  in
+
+
+  let die = Hashtbl.find dies i in
+    match die.die_tag with
+        DW_TAG_typedef ->
+          let ident = get_name die in
+          let ty = get_referenced_ty die in
+          let tyi = Ast.MOD_TYPE_ITEM_public_type (decl ty) in
+            Some (ident, tyi)
+
+      | DW_TAG_compile_unit
+      | DW_TAG_module ->
+          let ident = get_name die in
+          let mtis = get_mod_type_items die in
+          let tmod = (None, mtis) in
+          let mti = Ast.MOD_TYPE_ITEM_mod (decl tmod) in
+            Some (ident, mti)
+
+      | DW_TAG_subprogram ->
+          (* FIXME: finish this. *)
+          let ident = get_name die in
+          let oslot = get_referenced_slot die in
+          let islots = get_formals die in
+          let taux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
+                       Ast.fn_proto = None }
+          in
+          let tsig = { Ast.sig_input_slots = islots;
+                       Ast.sig_input_constrs = [| |];
+                       Ast.sig_output_slot = oslot }
+          in
+          let fty = Ast.MOD_TYPE_ITEM_fn (decl (tsig, taux)) in
+            Some (ident, fty)
+
+      | _ -> None
 ;;
 
 (*

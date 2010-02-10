@@ -694,15 +694,14 @@ let check_concrete params thing =
 
 
 let ty_of_mod_type_item (mti:Ast.mod_type_item) : Ast.ty =
-    match mti.node with
+    match mti with
         Ast.MOD_TYPE_ITEM_opaque_type td ->
           let (_, mut) = td.Ast.decl_item in
             (* 
              * FIXME (bug 541598): generate opaque_ids uniquely per
-             * name (incl. type parameters), don't just cast node_ids
-             * to them.
+             * name (incl. type parameters)
              *)
-          let opaque_id = Opaque (int_of_node mti.id) in
+          let opaque_id = Opaque 0 in
             check_concrete td.Ast.decl_params (Ast.TY_opaque (opaque_id, mut))
 
       | Ast.MOD_TYPE_ITEM_public_type td ->
@@ -935,7 +934,6 @@ and mod_type_item_of_mod_item
     { Ast.decl_params = params;
       Ast.decl_item = item }
   in
-  let tyo =
     match item.node with
         Ast.MOD_ITEM_opaque_type td ->
           if inside
@@ -960,12 +958,6 @@ and mod_type_item_of_mod_item
           Some (Ast.MOD_TYPE_ITEM_fn
                   (decl fd.Ast.decl_params (ty_fn_of_fn fd.Ast.decl_item)))
       | Ast.MOD_ITEM_tag _ -> None
-  in
-    match tyo with
-        None -> None
-      | Some ty ->
-          Some { id = item.id;
-                 node = ty }
 
 
 and ty_mod_of_native_mod (m:Ast.native_mod_items) : Ast.mod_type_items =
@@ -981,7 +973,6 @@ and mod_type_item_of_native_mod_item
   let decl inner = { Ast.decl_params = [| |];
                      Ast.decl_item = inner }
   in
-  let mti =
     match item.node with
         Ast.NATIVE_fn fn ->
           Ast.MOD_TYPE_ITEM_fn (decl (ty_fn_of_native_fn fn))
@@ -989,9 +980,6 @@ and mod_type_item_of_native_mod_item
           Ast.MOD_TYPE_ITEM_public_type (decl (Ast.TY_mach mty))
       | Ast.NATIVE_mod m ->
           Ast.MOD_TYPE_ITEM_mod (decl (None, (ty_mod_of_native_mod m)))
-  in
-    { id = item.id;
-      node = mti }
 
 and arg_slots (slots:Ast.header_slots) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
@@ -1074,7 +1062,7 @@ let id_of_scope (sco:scope) : node_id =
   match sco with
       SCOPE_block id -> id
     | SCOPE_mod_item i -> i.id
-    | SCOPE_mod_type_item ti -> ti.id
+    | SCOPE_mod_type_item _ -> bug () "id_of_scope within mod_type_item"
     | SCOPE_crate c -> c.id
 ;;
 

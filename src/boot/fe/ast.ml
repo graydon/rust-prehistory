@@ -456,14 +456,13 @@ and mod_item' =
 and mod_item = mod_item' identified
 and mod_items = (ident, mod_item) Hashtbl.t
 
-and mod_type_item' =
+and mod_type_item =
     MOD_TYPE_ITEM_opaque_type of (unit * mutability) decl
   | MOD_TYPE_ITEM_public_type of ty decl
   | MOD_TYPE_ITEM_pred of ty_pred decl
   | MOD_TYPE_ITEM_mod of ty_mod decl
   | MOD_TYPE_ITEM_fn of ty_fn decl
 
-and mod_type_item = mod_type_item' identified
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
 
@@ -694,7 +693,7 @@ and fmt_mod_type_item
     : unit =
   fmt ff "@\n";
   begin
-    match item.node with
+    match item with
         MOD_TYPE_ITEM_opaque_type td ->
           fmt ff "type ";
           fmt_ident_and_params ff id td.decl_params;
@@ -725,6 +724,7 @@ and fmt_ty_mod
     (ident_and_params:(ident * ident array) option)
     (tm:ty_mod)
     : unit =
+  fmt_obox ff;
   fmt ff "mod ";
   begin
     match ident_and_params with
@@ -739,6 +739,7 @@ and fmt_ty_mod
             fmt_slots ff slots None;
             fmt_decl_constrs ff constrs
     end;
+    fmt ff " ";
     fmt_obr ff;
     Hashtbl.iter (fmt_mod_type_item ff) mti;
     fmt_cbb ff
