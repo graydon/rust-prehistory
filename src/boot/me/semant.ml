@@ -80,6 +80,7 @@ type ctxt =
       ctxt_all_native_items: (node_id,Ast.native_mod_item') Hashtbl.t;
       ctxt_all_item_names: (node_id,Ast.name) Hashtbl.t;
       ctxt_all_item_types: (node_id,Ast.ty) Hashtbl.t;
+      ctxt_all_type_items: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
@@ -143,6 +144,7 @@ let new_ctxt sess abi crate =
     ctxt_all_native_items = Hashtbl.create 0;
     ctxt_all_item_names = Hashtbl.create 0;
     ctxt_all_item_types = Hashtbl.create 0;
+    ctxt_all_type_items = Hashtbl.create 0;
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
     ctxt_lval_to_referent = Hashtbl.create 0;

@@ -397,6 +397,17 @@ let type_resolving_visitor
   let visit_mod_item_pre id params item =
     begin
       try
+        let _ =
+          match item.node with
+          | Ast.MOD_ITEM_public_type td
+          | Ast.MOD_ITEM_opaque_type td ->
+              let ty =
+                resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info td.Ast.decl_item
+              in
+                log cx "resolved item %s, defining type %a" id Ast.sprintf_ty ty;
+                htab_put cx.ctxt_all_type_items item.id ty
+          | _ -> ()
+        in
         let ty = match (item.node, (ty_of_mod_item true item)) with
             (Ast.MOD_ITEM_tag {Ast.decl_item=(header_slots, _, nid)},
              Ast.TY_fn (tsig, taux)) when Hashtbl.mem recursive_tag_groups nid ->
@@ -405,7 +416,7 @@ let type_resolving_visitor
                 Ast.TY_fn ({tsig with
                               Ast.sig_input_slots = input_slots;
                               Ast.sig_output_slot = output_slot }, taux)
-          | (_e, t) ->
+          | (_, t) ->
               resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info t
         in
           log cx "resolved item %s, type as %a" id Ast.sprintf_ty ty;

@@ -1207,14 +1207,14 @@ let (abbrev_exterior_slot:abbrev) =
    |])
 ;;
 
-let (abbrev_rec_type:abbrev) =
+let (abbrev_struct_type:abbrev) =
     (DW_TAG_structure_type, DW_CHILDREN_yes,
      [|
        (DW_AT_byte_size, DW_FORM_data4)
      |])
 ;;
 
-let (abbrev_rec_type_member:abbrev) =
+let (abbrev_struct_type_member:abbrev) =
     (DW_TAG_member, DW_CHILDREN_no,
      [|
        (DW_AT_name, DW_FORM_string);
@@ -1388,7 +1388,7 @@ let dwarf_visitor
         let total_layout = layout_ty abi 0L (Ast.TY_rec trec) in
         let fix = new_fixup "record type DIE" in
         let die = DEF (fix, SEQ [|
-                         uleb (get_abbrev_code abbrev_rec_type);
+                         uleb (get_abbrev_code abbrev_struct_type);
                          (* DW_AT_byte_size: DW_FORM_data4 *)
                          WORD (TY_u32, IMM total_layout.layout_size)
                        |]);
@@ -1398,7 +1398,7 @@ let dwarf_visitor
             begin
               fun (ident, (slot, layout)) ->
                 emit_die (SEQ [|
-                            uleb (get_abbrev_code abbrev_rec_type_member);
+                            uleb (get_abbrev_code abbrev_struct_type_member);
                             (* DW_AT_name: DW_FORM_string *)
                             ZSTRING ident;
                             (* DW_AT_type: DW_FORM_ref_addr *)
@@ -1487,6 +1487,7 @@ let dwarf_visitor
           | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
           | Ast.TY_str -> unspecified "str"
           | Ast.TY_rec trec -> record trec
+          | Ast.TY_tup ttup -> record (Array.mapi (fun i s -> ("_" ^ (string_of_int i), s)) ttup)
 
           | Ast.TY_vec s -> unspecified_ref_slot "vec" s
           | Ast.TY_chan t -> unspecified_ref_ty "chan" t
@@ -1495,6 +1496,7 @@ let dwarf_visitor
           | Ast.TY_fn _ -> unspecified "fn"
           | Ast.TY_tag _ -> unspecified "tag"
           | Ast.TY_iso _ -> unspecified "iso"
+          | Ast.TY_type -> unspecified "type"
           | _ -> unspecified "unknown"
   in
 
@@ -1686,19 +1688,25 @@ let dwarf_visitor
               log cx "walking module '%s'" (path_name());
               emit_module_die id
             end
-        | Ast.MOD_ITEM_fn fd ->
+        | Ast.MOD_ITEM_fn _ ->
             begin
-              log cx "walking function '%s'" (path_name());
-              emit_subprogram_die
-                id
-                fd.Ast.decl_item.Ast.fn_output_slot.node
-                (Hashtbl.find cx.ctxt_fn_fixups item.id)
+              let ty = Hashtbl.find cx.ctxt_all_item_types item.id in
+              let (tsig,_) =
+                match ty with
+                    Ast.TY_fn tfn -> tfn
+                  | _ -> bug () "non-fn type when emitting dwarf for MOD_ITEM_fn"
+              in
+                log cx "walking function '%s'" (path_name());
+                emit_subprogram_die
+                  id
+                  tsig.Ast.sig_output_slot
+                  (Hashtbl.find cx.ctxt_fn_fixups item.id)
             end
-        | Ast.MOD_ITEM_public_type td
-        | Ast.MOD_ITEM_opaque_type td ->
+        | Ast.MOD_ITEM_public_type _
+        | Ast.MOD_ITEM_opaque_type _ ->
             begin
               log cx "walking typedef '%s'" (path_name());
-              emit_typedef_die id td.Ast.decl_item
+              emit_typedef_die id (Hashtbl.find cx.ctxt_all_type_items item.id)
             end
         | _ -> ()
     end;
@@ -1788,18 +1796,12 @@ let dwarf_visitor
     inner.Walk.visit_slot_identified_pre s
   in
 
-  let visit_ty_pre (ty:Ast.ty) : unit =
-    ignore (ref_type_die ty);
-    inner.Walk.visit_ty_pre ty
-  in
-
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post;
-        Walk.visit_slot_identified_pre = visit_slot_identified_pre;
-        Walk.visit_ty_pre = visit_ty_pre
+        Walk.visit_slot_identified_pre = visit_slot_identified_pre
     }
 ;;
 
@@ -2060,6 +2062,7 @@ let rec extract_mod_type_item
                 | "chan" -> Ast.TY_chan (get_referenced_ty die)
                 | "vec" -> Ast.TY_vec (get_referenced_slot die)
                 | "str" -> Ast.TY_str
+                | "type" -> Ast.TY_type
                 | _ -> Ast.TY_nil (* FIXME: finish this. *)
             end
 
@@ -2083,13 +2086,42 @@ let rec extract_mod_type_item
             end
 
         | DW_TAG_structure_type ->
-            let entries =
-              Array.map
-                (fun member_die -> ((get_name member_die),
-                                    (get_slot member_die)))
+            begin
+              let is_num_idx s =
+                let len = String.length s in
+                  if len >= 2 && s.[0] = '_'
+                  then
+                    let ok = ref true in
+                      String.iter
+                        (fun c -> ok := (!ok) && '0' <= c && c <= '9')
+                        (String.sub s 1 (len-1));
+                      !ok
+                  else
+                    false
+              in
+              let members = arr_map_partial
                 die.die_children
-            in
-              Ast.TY_rec entries
+                begin
+                  fun child ->
+                    if child.die_tag = DW_TAG_member
+                    then Some child
+                    else None
+                end
+              in
+                assert ((Array.length members) > 0);
+                if is_num_idx (get_name members.(0))
+                then
+                  let slots = Array.map get_referenced_slot members in
+                    Ast.TY_tup slots
+                else
+                  let entries =
+                    Array.map
+                      (fun member_die -> ((get_name member_die),
+                                          (get_referenced_slot member_die)))
+                      members
+                  in
+                    Ast.TY_rec entries
+            end
 
         | _ -> bug () "unexpected tag in get_ty: %s" (dw_tag_to_string die.die_tag)
 
