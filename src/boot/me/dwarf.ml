@@ -1225,6 +1225,14 @@ let (abbrev_struct_type_member:abbrev) =
      |])
 ;;
 
+let (abbrev_string_type:abbrev) =
+    (DW_TAG_string_type, DW_CHILDREN_no,
+     [|
+       (DW_AT_string_length, DW_FORM_block1);
+       (DW_AT_data_location, DW_FORM_block1);
+     |])
+;;
+
 
 let prepend lref x = lref := x :: (!lref)
 ;;
@@ -1415,6 +1423,30 @@ let dwarf_visitor
           ref_addr_for_fix fix
       in
 
+      let string_type _ =
+        (* 
+         * Strings, like vecs, are &[rc,alloc,fill,data...] 
+         *)
+        let fix = new_fixup "string type DIE" in
+        let die =
+          DEF (fix, SEQ [|
+                 uleb (get_abbrev_code abbrev_string_type);
+                 (* (DW_AT_byte_size, DW_FORM_block1); *)
+                 dw_form_block1 [| DW_OP_push_object_address;
+                                   DW_OP_deref;
+                                   DW_OP_lit (word_sz_int * 2);
+                                   DW_OP_plus; |];
+                 (* (DW_AT_data_location, DW_FORM_block1); *)
+                 dw_form_block1 [| DW_OP_push_object_address;
+                                   DW_OP_deref;
+                                   DW_OP_lit (word_sz_int * 3);
+                                   DW_OP_plus |]
+               |])
+        in
+          emit_die die;
+          ref_addr_for_fix fix
+      in
+
       let base (name, encoding, byte_size) =
         let fix = new_fixup ("base type DIE: " ^ name) in
         let die =
@@ -1485,7 +1517,7 @@ let dwarf_visitor
           | Ast.TY_mach (TY_s64) -> base ("s64", DW_ATE_signed, 8)
           | Ast.TY_int -> base ("int", DW_ATE_signed, word_sz_int)
           | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
-          | Ast.TY_str -> unspecified "str"
+          | Ast.TY_str -> string_type ()
           | Ast.TY_rec trec -> record trec
           | Ast.TY_tup ttup -> record (Array.mapi (fun i s -> ("_" ^ (string_of_int i), s)) ttup)
 
@@ -2061,10 +2093,11 @@ let rec extract_mod_type_item
                 | "port" -> Ast.TY_port (get_referenced_ty die)
                 | "chan" -> Ast.TY_chan (get_referenced_ty die)
                 | "vec" -> Ast.TY_vec (get_referenced_slot die)
-                | "str" -> Ast.TY_str
                 | "type" -> Ast.TY_type
                 | _ -> Ast.TY_nil (* FIXME: finish this. *)
             end
+
+        | DW_TAG_string_type -> Ast.TY_str
 
         | DW_TAG_base_type ->
             begin
