@@ -1293,7 +1293,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_rec tr -> tup (Array.map snd tr)
 
       | Ast.TY_fn _
-      | Ast.TY_pred _ -> Il.StructTy [| codeptr; ptr |]
+      | Ast.TY_pred _ -> sp (Il.StructTy [| word; codeptr; ptr |])
       | Ast.TY_mod _ -> Il.StructTy [| ptr; ptr |]
 
       | Ast.TY_tag ttag -> tag ttag
