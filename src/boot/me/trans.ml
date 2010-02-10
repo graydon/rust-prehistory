@@ -2262,7 +2262,7 @@ let trans_visitor
     begin
       (* FIXME: rename in/out *)
       let in_cell = Il.Mem (fp_imm out_mem_disp, in_rty) in
-      let out_cell = Il.Mem (sp_imm out_mem_disp, out_rty) in
+      let out_cell = Il.Mem (sp_imm 0L, out_rty) in
         iflog (fun _ -> annotate "copy out-ptr");
         mov (get_element_ptr out_cell 0) (Il.Cell (get_element_ptr in_cell 0));
         iflog (fun _ -> annotate "copy proc-ptr");
@@ -2273,7 +2273,7 @@ let trans_visitor
         let bound_i = ref 0 in
         let unbound_i = ref 0 in
           for arg_i = 0 to (n_args - 1) do
-            let dst_cell = get_element_ptr (Il.Mem (sp_imm 0L, out_rty)) (arg_i + 2) in
+            let dst_cell = get_element_ptr out_cell (arg_i + 2) in
             let slot = arg_slots.(arg_i) in
             let is_bound = arg_bound_flags.(arg_i) in
             let src_cell =
