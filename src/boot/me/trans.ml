@@ -2260,8 +2260,13 @@ let trans_visitor
       (arg_bound_flags:bool array)
       : unit =
     begin
+      (* FIXME: rename in/out *)
       let in_cell = Il.Mem (fp_imm out_mem_disp, in_rty) in
-        (* FIXME: copy outptr, procptr *)
+      let out_cell = Il.Mem (sp_imm out_mem_disp, out_rty) in
+        iflog (fun _ -> annotate "copy out-ptr");
+        mov (get_element_ptr out_cell 0) (Il.Cell (get_element_ptr in_cell 0));
+        iflog (fun _ -> annotate "copy proc-ptr");
+        mov (get_element_ptr out_cell 1) (Il.Cell (get_element_ptr in_cell 1));
         iflog (fun _ -> annotate "extract closure extra-arg");
         let closure_cell = deref (get_element_ptr in_cell (n_unbound + 2)) in
         let n_args = Array.length arg_bound_flags in
