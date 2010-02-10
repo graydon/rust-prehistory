@@ -2159,7 +2159,7 @@ let trans_visitor
         iflog (fun _ -> annotate "init closure refcount");
         mov (get_element_ptr clo_cell 0) one;
         iflog (fun _ -> annotate "set closure glue-code ptr");
-        mov (get_element_ptr clo_cell 1) (Il.Cell glue_cell);
+        mov (get_element_ptr clo_cell 1) (Il.Cell (alias glue_cell));
         iflog (fun _ -> annotate "set closure target ptr");
         mov (get_element_ptr clo_cell 2) target_operand;
         copy_bound_args clo_cell bound_arg_slots bound_args 3
@@ -2205,7 +2205,7 @@ let trans_visitor
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
-    assert ((Array.length args) + (Array.length extra_args) == Array.length arg_slots);
+    assert (Array.length args == Array.length arg_slots);
     let n_args = Array.length args in
     let n_extras = Array.length extra_args in
     let arg_tup = arg_tup_cell arg_slots in

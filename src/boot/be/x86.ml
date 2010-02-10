@@ -310,10 +310,8 @@ let word_n (reg:Il.reg) (i:int) : Il.cell =
     Il.Mem (mem, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
-let word_n_code (reg:Il.reg) (i:int) : Il.code =
-  let imm = word_off_n i in
-  let mem = Il.RegIn (reg, Some imm) in
-    Il.CodeMem mem
+let regin_code (reg:Il.reg) : Il.code =
+  Il.CodeMem (Il.RegIn (reg, None))
 ;;
 
 let word_n_low_byte (reg:Il.reg) (i:int) : Il.cell =
@@ -505,7 +503,6 @@ let unwind_glue
   let codefix fix = Il.CodeMem (Il.Abs (Asm.M_POS fix)) in
   let mark fix = Il.emit_full e (Some fix) Il.Dead in
   let glue_field = Abi.frame_glue_fns_field_drop in
-  let glue_codeptr struct_reg = word_n_code struct_reg glue_field in
 
   let repeat_jmp_fix = new_fixup "repeat jump" in
   let skip_jmp_fix = new_fixup "skip jump" in
@@ -526,7 +523,7 @@ let unwind_glue
     push (ro ebp);                                  (* frame-to-drop                *)
     push (c proc_ptr);                              (* form usual call to glue      *)
     push (immi 0L);                                 (* outptr                       *)
-    emit (Il.call (rc eax) (glue_codeptr (h edx))); (* call glue_fn, trashing eax.  *)
+    emit (Il.call (rc eax) (regin_code (h ecx)));   (* call glue_fn, trashing eax.  *)
     pop (rc eax);
     pop (rc eax);
     pop (rc eax);
@@ -1085,7 +1082,7 @@ let lea (dst:Il.cell) (mem:Il.mem) : Asm.frag =
 
 let select_insn_misc (q:Il.quad') : Asm.frag =
 
-  (* A note on abs vs. abs-in jumps and calls:
+  (* A note on abs vs. abs-in, reg vs reg-in jumps and calls:
    * 
    * On x86, there *is no* general abs-in addressing mode. You can't do
    * an absolute-indirect load, store, add, subtract, etc. So in the
@@ -1098,7 +1095,15 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
    * semantics are defined to treat the deref-disp32 (normally
    * absolute) addressing mode as though it means absolute-indirect.
    * 
-   * Absolute code references are done as pcrel, unlike data.  *)
+   * Moreover, they define all the deref-reg modes as though the
+   * register points to an absolute-indirect cell, not code. So if you've
+   * (rightly) made a Mem (RegIn, CodeTy), we must express this as
+   * register-direct mode (mod 0b11) in order to actually jump to the
+   * pointed-to code, rather than interpreting the first 4 bytes of the
+   * code as an address and jumping to them. Sigh.
+   * 
+   * Absolute code references are done as pcrel, unlike data.
+   *)
 
   match q with
       Il.Call c ->
@@ -1108,8 +1113,9 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
                 begin
                   match c.Il.call_targ with
 
-                      Il.CodeMem (Il.RegIn b) ->
-                        insn_rm_r 0xff (Il.Mem (Il.RegIn b, Il.OpaqueTy)) slash2
+                      (* X86-ism: rewrite RegIn as Reg for CALL. See above. *)
+                      Il.CodeMem (Il.RegIn (b, None)) ->
+                        insn_rm_r 0xff (Il.Reg (b, Il.AddrTy Il.CodeTy)) slash2
 
                     (* X86-ism: rewrite AbsIn as Abs for CALL. See above. *)
                     | Il.CodeMem (Il.AbsIn (e, None)) ->
@@ -1150,14 +1156,18 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
               (Il.JMP, Il.CodeMem (Il.Abs (Asm.M_POS f))) ->
                 insn_pcrel 0xeb 0xe9 f
 
+            (* X86-ism: rewrite RegIn as Reg for CALL. See above. *)
+            | (Il.JMP, Il.CodeMem (Il.RegIn (b, None))) ->
+                insn_rm_r 0xff (Il.Reg (b, Il.AddrTy Il.CodeTy)) slash4
+
             (* X86-ism: rewrite AbsIn as Abs for JMP. See above. *)
             | (Il.JMP, Il.CodeMem (Il.AbsIn (Asm.M_POS f, None))) ->
-                insn_rm_r 0xff (Il.Mem ((Il.Abs (Asm.M_POS f)), Il.OpaqueTy)) slash4
+                insn_rm_r 0xff (Il.Mem ((Il.Abs (Asm.M_POS f)), Il.CodeTy)) slash4
 
             | (Il.JMP, Il.CodeMem r) ->
                 insn_rm_r 0xff (Il.Mem (r, Il.OpaqueTy)) slash4
 
-            (* FIXME: refactor this to handle conditional absolute-indirect jumps
+            (* FIXME: refactor this to handle conditional reg/abs-indirect jumps
              * by rewriting, if we ever need them. So far not. *)
             | (_, Il.CodeMem (Il.Abs (Asm.M_POS f))) ->
                 let (op8, op32) =

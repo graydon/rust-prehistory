@@ -6,6 +6,6 @@ fn f(int n) -> int {
 
 fn main() -> () {
   let fn(int) -> int g = bind f(_);
-  let int i = g();
+  let int i = g(42);
   check(i == 42);
 }
