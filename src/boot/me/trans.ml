@@ -734,32 +734,63 @@ let trans_visitor
 
   (* FIXME (bug 544925): this should eventually use tail calling logic *)
 
-  (* FIXME: here's some pseudocode for emit_new_bind_glue:
-   *   1. save the fn ptr in a tmp vreg
-   *   2. save the env ptr in a tmp vreg
-   *   3. copy the new and saved args into a new arg tuple
-   *      (via trans_copy_slot, which also does refcount logic)
-   *   4. call into the fn ptr
-   *      (try to reuse trans_call_fn)
-   *)
   and emit_new_bind_glue
-      ((*bind_id*)_:node_id)
-      ((*fn_sig*)_:Ast.ty_sig)
-      ((*bound_args*)_:bool array)
-      ((*fix*)_:fixup)
-      ((*g*)_:glue)
+      (direct:bool)
+      (fn_cell:Il.cell)
+      (arg_slots:Ast.slot array)
+      (arg_bound_flags:bool array)
+      (fix:fixup)
+      (g:glue)
       : unit =
-    bug () "not yet implemented"
+    let extract_slots want_bound =
+      arr_filter_some
+        (arr_map2
+           (fun slot bound ->
+              if bound = want_bound then Some slot else None)
+           arg_slots
+           arg_bound_flags)
+    in
+    let bound_slots = extract_slots true in
+    let unbound_slots = extract_slots false in
+    let implicit_rtys = [| Il.ScalarTy Il.voidptr_t; Il.ScalarTy Il.voidptr_t |] in
+    let closure_rty = closure_referent_type bound_slots in
+    let extra_rtys = [| Il.ScalarTy (Il.AddrTy closure_rty) |] in
+    let unbound_rtys = Array.map (slot_referent_type abi) unbound_slots in
+    let n_unbound = Array.length unbound_slots in
+    let arg_rtys = Array.map (slot_referent_type abi) arg_slots in
+    let in_rty = Il.StructTy (Array.concat [ implicit_rtys; unbound_rtys; extra_rtys ]) in
+    let out_rty =
+      if direct then
+        Il.StructTy (Array.append implicit_rtys arg_rtys)
+      else
+        Il.StructTy (Array.concat [ implicit_rtys; arg_rtys; [| Il.ScalarTy Il.voidptr_t |] ])
+    in
+    let out_layout = layout_referent abi 0L out_rty in
+    let callsz = out_layout.layout_size in
+    let spill = new_fixup "bind glue spill" in
+      trans_glue_frame_entry callsz spill;
+      merge_bound_args in_rty n_unbound out_rty arg_slots arg_bound_flags;
+      let callee_code_cell = trans_callee_code fn_cell direct (fun () -> "bind glue") in
+        call_code (code_of_cell callee_code_cell);
+      (* FIXME: drop_slots *)
+      trans_glue_frame_exit fix spill g
 
 
   (* FIXME: abstract out the memoization logic between get_new_mod_glue and get_new_bind_glue *)
-  and get_new_bind_glue (bind_id:node_id) (fn_sig:Ast.ty_sig) (bound_args:bool array) : fixup =
+
+  and get_new_bind_glue
+      (direct:bool)
+      (bind_id:node_id)
+      (fn_cell:Il.cell)
+      (arg_slots:Ast.slot array)
+      (arg_bound_flags:bool array)
+      : fixup =
     let g = GLUE_new_bind bind_id in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup (glue_str cx g) in
-              emit_new_bind_glue bind_id fn_sig bound_args fix g;
+              emit_new_bind_glue direct fn_cell arg_slots arg_bound_flags fix g;
               fix
 
 
@@ -1971,20 +2002,13 @@ let trans_visitor
     let (fn_cell, _) = trans_callee cx flv in
     let in_slots = tsig.Ast.sig_input_slots in
     let direct = lval_is_direct_fn cx flv in
-    let logname () = Ast.sprintf_lval () flv in
     let extra_args =
       if direct then
         [||]
       else
-        begin
-          iflog (fun _ -> annotate (Printf.sprintf "get env ptr for extra args in call to %s" (logname ())));
-          let env_ptr = Il.Cell (deref (get_element_ptr fn_cell 2)) in
-            iflog (fun _ -> annotate (Printf.sprintf "get proxy ptr for extra args in call to %s" (logname ())));
-            let proxy_ptr = Il.Cell (deref (get_element_ptr fn_cell 3)) in
-              [| env_ptr; proxy_ptr |]
-        end
+        [| Il.Cell fn_cell |]
     in
-      trans_call initializing (lval_is_direct_fn cx flv) logname
+      trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
         dst_cell fn_cell in_slots args extra_args
 
   and trans_callee
@@ -2062,52 +2086,81 @@ let trans_visitor
         trans_cond_fail errstr jmp
 
 
-  (* FIXME: here's some pseudocode for trans_bind_fn:
-   *   1. create the glue function for this lval id, which should:
-   *   2. create the env data structure on the heap, which should:
-   *      a. have a gc control word iff any of the args are mutable
-   *      b. have a refcount word
-   *      c. have an inlined tuple of all args that are not _
-   *   3. mov dst[0] <- fn ptr
-   *   4. mov dst[1] <- env ptr
+  (*
+   * Closure representation (always exterior):
+   * 
+   *  ......
+   *  . gc . gc control word, if mutable
+   *  +----+
+   *  | rc | refcount
+   *  +----+
+   *  | pg | ---> glue code
+   *  +----+
+   *  | pc | ---> next closure or NULL
+   *  +----+
+   *  | b1 | bound arg1
+   *  +----+
+   *  .    .
+   *  .    .
+   *  .    .
+   *  +----+
+   *  | bN | bound argN
+   *  +----+
    *)
 
-  (*
-   * Closure representation (always on heap):
-   * 
-   *  +----+
-   *  | rc |
-   *  +----+
-   *  |    |---> [code]
-   *  +----+                 +---+---...---+
-   *  |    |---> args vector |   |         |
-   *  +----+                 +---+---...---+
-   *  |    |---> next closure
-   *  +----+
-   * 
-   *)
+  and closure_referent_type
+      (bs:Ast.slot array)
+      (* FIXME: mutability flag *)
+      : Il.referent_ty =
+    let rc = Il.ScalarTy word_ty in
+    let pg = Il.ScalarTy Il.codeptr_t in
+    let pc = Il.ScalarTy Il.codeptr_t in
+      Il.StructTy
+        (Array.append
+           [| rc; pg; pc |]
+           (Array.map (slot_referent_type abi) bs))
+
 
   and trans_bind_fn
       (initializing:bool)
-      ((*direct*)_:bool)
+      (direct:bool)
       (bind_id:node_id)
       (dst:Ast.lval)
       (flv:Ast.lval)
-      ((*tsig*)_:Ast.ty_sig)
+      (fn_sig:Ast.ty_sig)
       (args:Ast.atom option array)
       : unit =
-    let (*(dst_cell, _)*)_ = trans_lval_maybe_init initializing dst in
-    let ((*fn_cell*)_, fn_slot) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
-    let fn_ty = slot_ty fn_slot in
-    let bound_args = Array.map (fun arg -> match arg with Some _ -> true | None -> false) args in
-    let (*glue_fixup*)_ =
-      match fn_ty with
-          Ast.TY_fn (fn_sig, _) ->
-            get_new_bind_glue bind_id fn_sig bound_args
-        (* FIXME: should work for TY_pred too *)
-        | _ -> err None "bind of unexpected form of function"
+    let (dst_cell, _) = trans_lval_maybe_init initializing dst in
+    let (fn_cell, _) = trans_lval_full false flv abi.Abi.abi_has_abs_code in
+    let arg_bound_flags = Array.map bool_of_option args in
+    let arg_slots =
+      arr_map2
+        (fun arg_slot bound_flag ->
+           if bound_flag then Some arg_slot else None)
+        fn_sig.Ast.sig_input_slots
+        arg_bound_flags
     in
-    bug () "trans_bind_fn not yet implemented"
+    let bound_arg_slots = arr_filter_some arg_slots in
+    let bound_args = arr_filter_some args in
+    let glue_fixup = get_new_bind_glue direct bind_id fn_cell fn_sig.Ast.sig_input_slots arg_bound_flags in
+    let glue_mem = fixup_to_mem
+                     abi.Abi.abi_has_abs_code
+                     glue_fixup Il.CodeTy
+    in
+    let glue_cell = Il.Mem (glue_mem, Il.CodeTy) in
+    let target_operand = if direct then zero else Il.Cell fn_cell in
+    let closure_ty = closure_referent_type bound_arg_slots in
+    let layout = layout_referent abi 0L closure_ty in
+    let closuresz = layout.layout_size in
+      iflog (fun _ -> annotate "heap-allocate closure");
+      trans_malloc dst_cell closuresz;
+      iflog (fun _ -> annotate "init closure refcount");
+      mov (get_element_ptr dst_cell 0) one;
+      iflog (fun _ -> annotate "set closure glue-code ptr");
+      mov (get_element_ptr dst_cell 1) (Il.Cell glue_cell);
+      iflog (fun _ -> annotate "set closure target ptr");
+      mov (get_element_ptr dst_cell 2) target_operand;
+      copy_bound_args dst_cell bound_arg_slots bound_args 3
 
 
   and trans_arg0 (arg_cell:Il.cell) (output_cell:Il.cell) : unit =
@@ -2181,6 +2234,65 @@ let trans_visitor
       emit (Il.call vr code);
 
 
+  and copy_bound_args
+      (dst_cell:Il.cell)
+      (bound_arg_slots:Ast.slot array)
+      (bound_args:Ast.atom array)
+      (base:int)
+      : unit =
+    let n_slots = Array.length bound_arg_slots in
+      Array.iteri
+        begin
+          fun i slot ->
+            iflog (fun _ ->
+                     annotate (Printf.sprintf "copy bound arg %d of %d" i n_slots));
+            trans_argN None (get_element_ptr dst_cell (base + i)) slot bound_args.(i)
+        end
+        bound_arg_slots
+
+  and merge_bound_args
+      (in_rty:Il.referent_ty)
+      (n_unbound:int)
+      (out_rty:Il.referent_ty)
+      (arg_slots:Ast.slot array)
+      (arg_bound_flags:bool array)
+      : unit =
+    begin
+      let in_cell = Il.Mem (fp_imm out_mem_disp, in_rty) in
+        (* FIXME: copy outptr, procptr *)
+        iflog (fun _ -> annotate "extract closure extra-arg");
+        let closure_cell = deref (get_element_ptr in_cell (n_unbound + 2)) in
+        let n_args = Array.length arg_bound_flags in
+        let bound_i = ref 0 in
+        let unbound_i = ref 0 in
+          for arg_i = 0 to (n_args - 1) do
+            let dst_cell = get_element_ptr (Il.Mem (sp_imm 0L, out_rty)) (arg_i + 2) in
+            let slot = arg_slots.(arg_i) in
+            let is_bound = arg_bound_flags.(arg_i) in
+            let src_cell =
+              if is_bound then
+                begin
+                  iflog (fun _ -> annotate (Printf.sprintf "extract bound arg %d as actual arg %d" !bound_i arg_i));
+                  deref (get_element_ptr closure_cell (!bound_i + 3));
+                end
+              else
+                begin
+                  iflog (fun _ -> annotate (Printf.sprintf "extract unbound arg %d as actual arg %d" !unbound_i arg_i));
+                  deref (get_element_ptr in_cell (!unbound_i + 2))
+                end
+            in
+              iflog (fun _ -> annotate (Printf.sprintf "copy into actual-arg %d" arg_i));
+              trans_copy_slot true dst_cell slot src_cell slot None;
+              if is_bound then
+                bound_i := !bound_i + 1
+              else
+                unbound_i := !unbound_i + 1
+          done;
+
+          assert ((!bound_i + !unbound_i) == n_args)
+    end
+
+
   and trans_callee_code
       (callee_cell:Il.cell)
       (direct:bool)
@@ -2190,9 +2302,9 @@ let trans_visitor
       callee_cell
     else
       begin
-        iflog (fun _ -> annotate (Printf.sprintf "extract closure mem for call to %s" (logname ())));
+        iflog (fun _ -> annotate (Printf.sprintf "deref closure for call to %s" (logname ())));
         let closure_cell = deref (get_element_ptr callee_cell 0) in
-          iflog (fun _ -> annotate (Printf.sprintf "extract code mem for call to %s" (logname ())));
+          iflog (fun _ -> annotate (Printf.sprintf "deref glue-code for call to %s" (logname ())));
           deref (get_element_ptr closure_cell 1)
       end
 

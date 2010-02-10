@@ -1419,8 +1419,8 @@ let layout_fn_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) (direct:bool) : (layout a
     if direct then
       tup
     else
-      let env_ptr = word_slot abi in
-        Array.append tup [| env_ptr |]
+      let closure_ptr = word_slot abi in
+        Array.append tup [| closure_ptr |]
   in
     layout_tup abi full_tup
 ;;

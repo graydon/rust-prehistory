@@ -246,6 +246,17 @@ let rec list_search_ctxt
             Some b -> Some (list, b)
           | None -> list_search_ctxt az f
 
+
+(*
+ * Auxiliary option functions.
+ *)
+
+let bool_of_option x =
+  match x with
+      Some _ -> true
+    | None -> false
+
+
 (*
  * Auxiliary stack functions.
  *)
@@ -300,6 +311,16 @@ let arr_map_partial (a:'a array) (f:'a -> 'b option) : 'b array =
   in
     Array.of_list (Array.fold_right accum a [])
 ;;
+
+let arr_filter_some (a:'a option array) : 'a array =
+  arr_map_partial a (fun x -> x)
+;;
+
+(* FIXME: use Array.build or whatever it's called for efficiency *)
+let arr_map2 (f:'a -> 'b -> 'c) (a:'a array) (b:'b array) : 'c array =
+  Array.of_list (List.map2 f (Array.to_list a) (Array.to_list b))
+;;
+
 
 (*
  * Auxiliary int64 functions
