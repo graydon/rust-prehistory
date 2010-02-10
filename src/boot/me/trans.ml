@@ -2155,13 +2155,14 @@ let trans_visitor
     let closuresz = layout.layout_size in
       iflog (fun _ -> annotate "heap-allocate closure");
       trans_malloc dst_cell closuresz;
-      iflog (fun _ -> annotate "init closure refcount");
-      mov (get_element_ptr dst_cell 0) one;
-      iflog (fun _ -> annotate "set closure glue-code ptr");
-      mov (get_element_ptr dst_cell 1) (Il.Cell glue_cell);
-      iflog (fun _ -> annotate "set closure target ptr");
-      mov (get_element_ptr dst_cell 2) target_operand;
-      copy_bound_args dst_cell bound_arg_slots bound_args 3
+      let clo_cell = deref dst_cell in
+        iflog (fun _ -> annotate "init closure refcount");
+        mov (get_element_ptr clo_cell 0) one;
+        iflog (fun _ -> annotate "set closure glue-code ptr");
+        mov (get_element_ptr clo_cell 1) (Il.Cell glue_cell);
+        iflog (fun _ -> annotate "set closure target ptr");
+        mov (get_element_ptr clo_cell 2) target_operand;
+        copy_bound_args clo_cell bound_arg_slots bound_args 3
 
 
   and trans_arg0 (arg_cell:Il.cell) (output_cell:Il.cell) : unit =
