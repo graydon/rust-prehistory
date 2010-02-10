@@ -1173,6 +1173,14 @@ let (abbrev_unspecified_type:abbrev) =
    |])
 ;;
 
+let (abbrev_unspecified_ref_type:abbrev) =
+  (DW_TAG_unspecified_type, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_type, DW_FORM_ref_addr)
+   |])
+;;
+
 let (abbrev_base_type:abbrev) =
   (DW_TAG_base_type, DW_CHILDREN_no,
    [|
@@ -1436,6 +1444,34 @@ let dwarf_visitor
           emit_die die;
           ref_addr_for_fix fix
       in
+      let unspecified_ref_ty name ty =
+        let fix = new_fixup ("unspecified-ref-type DIE: " ^ name) in
+        let die =
+          DEF (fix, SEQ [|
+                 uleb (get_abbrev_code abbrev_unspecified_ref_type);
+                 (* DW_AT_name: DW_FORM_string *)
+                 ZSTRING name;
+                 (* DW_AT_type: DW_FORM_ref_addr *)
+                 (ref_type_die ty)
+               |])
+        in
+          emit_die die;
+          ref_addr_for_fix fix
+      in
+      let unspecified_ref_slot name slot =
+        let fix = new_fixup ("unspecified-ref-slot DIE: " ^ name) in
+        let die =
+          DEF (fix, SEQ [|
+                 uleb (get_abbrev_code abbrev_unspecified_ref_type);
+                 (* DW_AT_name: DW_FORM_string *)
+                 ZSTRING name;
+                 (* DW_AT_type: DW_FORM_ref_addr *)
+                 (ref_slot_die slot)
+               |])
+        in
+          emit_die die;
+          ref_addr_for_fix fix
+      in
         match ty with
             Ast.TY_nil -> unspecified "nil"
           | Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
@@ -1447,17 +1483,18 @@ let dwarf_visitor
           | Ast.TY_mach (TY_s16) -> base ("s16", DW_ATE_signed, 2)
           | Ast.TY_mach (TY_s32) -> base ("s32", DW_ATE_signed, 4)
           | Ast.TY_mach (TY_s64) -> base ("s64", DW_ATE_signed, 8)
-          | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
           | Ast.TY_int -> base ("int", DW_ATE_signed, word_sz_int)
+          | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
+          | Ast.TY_str -> unspecified "str"
           | Ast.TY_rec trec -> record trec
 
-          | Ast.TY_chan _ -> unspecified "chan"
-          | Ast.TY_port _ -> unspecified "port"
+          | Ast.TY_vec s -> unspecified_ref_slot "vec" s
+          | Ast.TY_chan t -> unspecified_ref_ty "chan" t
+          | Ast.TY_port t -> unspecified_ref_ty "port" t
           | Ast.TY_proc -> unspecified "proc"
           | Ast.TY_fn _ -> unspecified "fn"
           | Ast.TY_tag _ -> unspecified "tag"
           | Ast.TY_iso _ -> unspecified "iso"
-          | Ast.TY_idx _ -> unspecified "idx"
           | _ -> unspecified "unknown"
   in
 
@@ -2019,6 +2056,10 @@ let rec extract_mod_type_item
               match get_name die with
                   "nil" -> Ast.TY_nil
                 | "proc" -> Ast.TY_proc
+                | "port" -> Ast.TY_port (get_referenced_ty die)
+                | "chan" -> Ast.TY_chan (get_referenced_ty die)
+                | "vec" -> Ast.TY_vec (get_referenced_slot die)
+                | "str" -> Ast.TY_str
                 | _ -> Ast.TY_nil (* FIXME: finish this. *)
             end
 
@@ -2027,7 +2068,8 @@ let rec extract_mod_type_item
               match ((get_name die),
                      (dw_ate_of_int (get_num die DW_AT_encoding)),
                      (get_num die DW_AT_byte_size)) with
-                  ("u8", DW_ATE_unsigned, 1) -> Ast.TY_mach TY_u8
+                  ("bool", DW_ATE_boolean, 1) -> Ast.TY_bool
+                | ("u8", DW_ATE_unsigned, 1) -> Ast.TY_mach TY_u8
                 | ("u16", DW_ATE_unsigned, 2) -> Ast.TY_mach TY_u16
                 | ("u32", DW_ATE_unsigned, 4) -> Ast.TY_mach TY_u32
                 | ("u64", DW_ATE_unsigned, 8) -> Ast.TY_mach TY_u64
