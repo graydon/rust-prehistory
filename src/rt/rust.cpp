@@ -1091,16 +1091,6 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
             " with glue=0x%" PRIxPTR,
             *retpc, sp, glue);
 
-    // Debugging aid for finding off-by-ones.
-    /*
-    for (int i = -4; i < 4; ++i) {
-        uintptr_t *spp = (uintptr_t*)sp;
-        rt->log(LOG_MEM,
-                "sp[%d] (0x%" PRIxPTR ") = 0x%" PRIxPTR,
-                i, spp+i, spp[i]);
-    }
-    */
-
     // Move the current return address (which points into rust code) onto the rust
     // stack and pretend we just called into the glue.
     push_onto_thread_stack(rust_sp, *retpc);
