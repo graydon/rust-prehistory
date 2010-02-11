@@ -255,6 +255,13 @@ struct rc_base {
     ~rc_base();
 };
 
+template <typename T>
+struct rt_owned {
+    void operator delete(void *ptr) {
+        ((T *)ptr)->rt->free(ptr);
+    }
+};
+
 // Rust types vec and str look identical from our perspective.
 
 struct rust_vec : public rc_base {
@@ -396,7 +403,7 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
  *
  */
 
-struct rust_proc : public rc_base {
+struct rust_proc : public rc_base, public rt_owned<rust_proc> {
     // fields known to the compiler
     stk_seg *stk;
     uintptr_t runtime_sp;      // runtime sp while proc running.
@@ -420,8 +427,6 @@ struct rust_proc : public rc_base {
               uintptr_t args,
               size_t callsz);
     ~rust_proc();
-
-    void operator delete(void *ptr);
 
     void check_active() { I(rt, rt->curr_proc == this); }
     void check_suspended() { I(rt, rt->curr_proc != this); }
@@ -451,7 +456,7 @@ struct rust_proc : public rc_base {
     frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
 };
 
-struct rust_port : public rc_base {
+struct rust_port : public rc_base, public rt_owned<rust_port> {
     // fields known only to the runtime
     rust_proc *proc; // port might outlive proc, so don't rely on it in destructor
     rust_rt *rt;
@@ -460,15 +465,9 @@ struct rust_port : public rc_base {
 
     rust_port(rust_proc *proc, size_t unit_sz);
     ~rust_port();
-
-    void operator delete(void *ptr)
-    {
-        rust_rt *rt = ((rust_port *)ptr)->rt;
-        rt->free(ptr);
-    }
 };
 
-struct rust_chan : public rc_base {
+struct rust_chan : public rc_base, public rt_owned<rust_chan> {
     // fields known only to the runtime
     rust_rt* rt;
     rust_port* port;
@@ -479,12 +478,6 @@ struct rust_chan : public rc_base {
 
     rust_chan(rust_proc *proc, rust_port *port);
     ~rust_chan();
-
-    void operator delete(void *ptr)
-    {
-        rust_rt *rt = ((rust_chan *)ptr)->rt;
-        rt->free(ptr);
-    }
 };
 
 /*
@@ -494,9 +487,10 @@ struct rust_chan : public rc_base {
  * each port.
  */
 
-struct rust_q : public lockfree_queue_chain {
+struct rust_q : public rt_owned<rust_q> {
     UT_hash_handle hh;
-    rust_proc *proc;      // Proc owning this chan.
+    rust_rt *rt;
+    rust_proc *proc;      // Proc owning this q.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
     bool sending;         // Whether we're in a port->writers vec.
     size_t idx;           // Index in the port->writers vec.
@@ -505,8 +499,6 @@ struct rust_q : public lockfree_queue_chain {
 
     rust_q(rust_proc *proc, rust_port *port);
     ~rust_q();
-
-    void operator delete(void *ptr);
 
     void disconnect();
 };
@@ -766,15 +758,15 @@ rust_chan::~rust_chan()
 
 /* Outgoing message queues */
 
-rust_q::rust_q(rust_proc *proc, rust_port *port)
-    : proc(proc),
-      port(port),
-      sending(false),
-      idx(0),
-      blocked(NULL),
-      buf(port->proc->rt, port->unit_sz)
+rust_q::rust_q(rust_proc *proc, rust_port *port) :
+    rt(proc->rt),
+    proc(proc),
+    port(port),
+    sending(false),
+    idx(0),
+    blocked(NULL),
+    buf(port->proc->rt, port->unit_sz)
 {
-    rust_rt *rt = proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_q(port=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
             port, (uintptr_t)this);
@@ -783,8 +775,6 @@ rust_q::rust_q(rust_proc *proc, rust_port *port)
 void
 rust_q::disconnect()
 {
-    rust_rt *rt = proc->rt;
-
     I(rt, sending);
     I(rt, port);
 
@@ -803,7 +793,6 @@ rust_q::disconnect()
 
 rust_q::~rust_q()
 {
-    rust_rt *rt = proc->rt;
     if (sending) {
         I(rt, port);
         port->writers.swapdel(this);
@@ -811,14 +800,6 @@ rust_q::~rust_q()
     rt->log(LOG_MEM|LOG_COMM,
             "~rust_q 0x%" PRIxPTR, (uintptr_t)this);
 }
-
-void
-rust_q::operator delete(void *ptr)
-{
-    rust_rt *rt = ((rust_q *)ptr)->proc->rt;
-    rt->free(ptr);
-}
-
 
 /* Stacks */
 
@@ -1122,13 +1103,6 @@ rust_proc::yield(size_t nargs)
     rt->log(LOG_PROC,
             "proc 0x%" PRIxPTR " yielding", this);
     run_after_return(nargs, rt->global_glue->yield_glue);
-}
-
-void
-rust_proc::operator delete(void *ptr)
-{
-    rust_rt *rt = ((rust_proc *)ptr)->rt;
-    rt->free(ptr);
 }
 
 static inline uintptr_t
