@@ -158,16 +158,17 @@ let trans_visitor
     Il.Mem (mem, Il.ScalarTy (Il.AddrTy (referent_type abi pointee_ty)))
   in
 
-  let need_scalar_ty (rty:Il.referent_ty) : Il.scalar_ty =
-    match rty with
-        Il.ScalarTy s -> s
-      | _ -> bug () "expected ScalarTy"
-  in
-
   let need_mem_cell (cell:Il.cell) : Il.typed_mem =
     match cell with
         Il.Mem a -> a
       | Il.Reg _ -> bug () "expected address cell, got non-address register cell"
+  in
+
+  let need_cell (operand:Il.operand) : Il.cell =
+    match operand with
+        Il.Cell c -> c
+      | _ -> bug () "expected cell, got operand %s"
+          (Il.string_of_operand  abi.Abi.abi_str_of_hardreg operand)
   in
 
   let get_element_ptr (mem_cell:Il.cell) (i:int) : Il.cell =
@@ -227,6 +228,7 @@ let trans_visitor
         Il.Cell (Il.Mem ta) -> ta
       | Il.Cell (Il.Reg (_, t)) -> do_spill t
       | Il.Imm _ -> do_spill (Il.ValTy word_bits)
+      | Il.ImmPtr _ -> do_spill (Il.ValTy word_bits)
   in
 
   let force_to_reg (op:Il.operand) : Il.typed_reg =
@@ -238,6 +240,7 @@ let trans_visitor
     in
       match op with
           Il.Imm  (_, tm) -> do_mov (Il.ValTy (Il.bits_of_ty_mach tm))
+        | Il.ImmPtr  (_, _) -> do_mov (Il.ValTy word_bits)
         | Il.Cell (Il.Reg rt) -> rt
         | Il.Cell (Il.Mem (_, Il.ScalarTy st)) -> do_mov st
         | Il.Cell (Il.Mem (_, rt)) ->
@@ -501,21 +504,21 @@ let trans_visitor
 
   and trans_callee
       (flv:Ast.lval)
-      : (Il.cell * Ast.ty) =
+      : (Il.operand * Ast.ty) =
     (* direct call to item *)
     if lval_is_item cx flv then
       let fn_item = lval_item cx flv in
-      let fn_mem = code_fixup_to_mem (get_fn_fixup cx fn_item.id) in
-        (Il.Mem (fn_mem, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
+      let fn_ptr = code_fixup_to_ptr_operand (get_fn_fixup cx fn_item.id) in
+        (fn_ptr, Hashtbl.find cx.ctxt_all_item_types fn_item.id)
     (* direct call to native item *)
     else if lval_is_native_item cx flv then
       let fn_item = lval_native_item cx flv in
-      let fn_mem = code_fixup_to_mem (get_fn_fixup cx fn_item.id) in
-        (Il.Mem (fn_mem, Il.CodeTy), Hashtbl.find cx.ctxt_all_item_types fn_item.id)
+      let fn_ptr = code_fixup_to_ptr_operand (get_fn_fixup cx fn_item.id) in
+        (fn_ptr, Hashtbl.find cx.ctxt_all_item_types fn_item.id)
     (* indirect call to computed slot *)
     else
       let (cell, slot) = trans_lval flv in
-        (cell, slot_ty slot)
+        (Il.Cell cell, slot_ty slot)
 
 
   and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Il.operand =
@@ -573,24 +576,24 @@ let trans_visitor
               | _ -> marker
           end
 
-  and fixup_to_mem
-      (abs_ok:bool)
+  and fixup_to_ptr_operand
+      (imm_ok:bool)
       (fix:fixup)
       (referent_ty:Il.referent_ty)
-      : Il.mem =
+      : Il.operand =
     let i = Asm.M_POS fix in
-      if abs_ok
-      then Il.Abs i
+    let imm = Il.ImmPtr (i, referent_ty) in
+      if imm_ok
+      then imm
       else
-        let c = Il.Mem (Il.Abs i, referent_ty) in
-        let (reg, _) = force_to_reg (Il.Cell (alias c)) in
-          Il.RegIn (reg, None)
+        let (reg, _) = force_to_reg imm in
+          Il.Cell (Il.Reg (reg, Il.AddrTy referent_ty))
 
-  and code_fixup_to_mem (fix:fixup) : Il.mem =
-    fixup_to_mem abi.Abi.abi_has_abs_code fix Il.CodeTy
+  and code_fixup_to_ptr_operand (fix:fixup) : Il.operand =
+    fixup_to_ptr_operand abi.Abi.abi_has_abs_code fix Il.CodeTy
 
   and fixup_to_code (fix:fixup) : Il.code =
-    Il.CodeMem (code_fixup_to_mem fix)
+    code_of_operand (code_fixup_to_ptr_operand fix)
 
   and annotate_quads (name:string) : unit =
     let e = emitter() in
@@ -659,6 +662,10 @@ let trans_visitor
     let spill = new_fixup (name ^ " spill") in
       trans_mem_glue_frame_entry 0 spill;
 
+      let _ = mod_id in
+      let _ = hdr in
+      let _ = fix in
+(*
       let (slots, _) = hdr in
       let ty = Ast.TY_tup slots in
       let src_rty = slot_referent_type abi (interior_slot ty) in
@@ -695,6 +702,7 @@ let trans_visitor
             mov refcnt_cell one;
 
             trans_copy_tup true body_cell (Il.Mem src_ta) slots;
+*)
             trans_glue_frame_exit fix spill g;
 
 
@@ -712,7 +720,7 @@ let trans_visitor
 
   and emit_new_bind_glue
       (direct:bool)
-      (fn_cell:Il.cell)
+      (fptr:Il.operand)
       (arg_slots:Ast.slot array)
       (arg_bound_flags:bool array)
       (fix:fixup)
@@ -746,8 +754,8 @@ let trans_visitor
     let spill = new_fixup "bind glue spill" in
       trans_glue_frame_entry callsz spill;
       merge_bound_args in_rty n_unbound out_rty arg_slots arg_bound_flags;
-      let callee_code_cell = trans_callee_code fn_cell direct (fun () -> "bind glue") in
-        call_code (code_of_cell callee_code_cell);
+      let callee_fptr = trans_callee_code fptr direct (fun () -> "bind glue") in
+        call_code (code_of_operand callee_fptr);
       (* FIXME: drop_slots *)
       trans_glue_frame_exit fix spill g
 
@@ -757,7 +765,7 @@ let trans_visitor
   and get_new_bind_glue
       (direct:bool)
       (bind_id:node_id)
-      (fn_cell:Il.cell)
+      (fptr:Il.operand)
       (arg_slots:Ast.slot array)
       (arg_bound_flags:bool array)
       : fixup =
@@ -766,7 +774,7 @@ let trans_visitor
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup (glue_str cx g) in
-              emit_new_bind_glue direct fn_cell arg_slots arg_bound_flags fix g;
+              emit_new_bind_glue direct fptr arg_slots arg_bound_flags fix g;
               fix
 
 
@@ -1116,7 +1124,7 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (proc_cell, _) = trans_lval_init dst in
-    let (fn_cell, fn_ty) = trans_callee fn_lval in
+    let (fptr_operand, fn_ty) = trans_callee fn_lval in
     let tsig =
       match fn_ty with
           Ast.TY_fn (tsig, _) -> tsig
@@ -1126,8 +1134,7 @@ let trans_visitor
     let in_tup = arg_tup_cell in_slots in
     let callsz = Il.referent_ty_size word_bits (snd (need_mem_cell in_tup)) in
     let exit_proc_glue_fixup = get_exit_proc_glue tsig in
-    let exit_proc_glue_mem = code_fixup_to_mem exit_proc_glue_fixup in
-    let exit_proc_glue_cell = Il.Mem (exit_proc_glue_mem, Il.CodeTy) in
+    let exit_proc_glue_fptr = code_fixup_to_ptr_operand exit_proc_glue_fixup in
 
       iflog (fun _ -> annotate "spawn proc: copy args");
 
@@ -1140,8 +1147,8 @@ let trans_visitor
                 trans_upcall "upcall_spawn_thread" proc_cell
                   [|
                     Il.Cell clone_rt;
-                    Il.Cell (alias exit_proc_glue_cell);
-                    Il.Cell (alias fn_cell);
+                    exit_proc_glue_fptr;
+                    fptr_operand;
                     imm callsz
                   |];
             end
@@ -1150,8 +1157,8 @@ let trans_visitor
               copy_fn_args None proc_cell in_slots args [||];
               trans_upcall "upcall_spawn_local" proc_cell
                 [|
-                  Il.Cell (alias exit_proc_glue_cell);
-                  Il.Cell (alias fn_cell);
+                  exit_proc_glue_fptr;
+                  fptr_operand;
                   imm callsz
                 |];
             end;
@@ -1964,19 +1971,19 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
-    let (fn_cell, _) = trans_callee flv in
+    let (ptr, _) = trans_callee flv in
     let in_slots = tsig.Ast.sig_input_slots in
     let direct = lval_is_direct_fn cx flv in
     let extra_args =
       if direct then
         [||]
       else
-        [| Il.Cell fn_cell |]
+        [| ptr |]
     in
       log cx "trans_call_fn: %s call to lval %a"
         (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
       trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots args extra_args
+        dst_cell ptr in_slots args extra_args
 
   and trans_call_mod
       (initializing:bool)
@@ -1995,18 +2002,17 @@ let trans_visitor
             get_new_mod_glue item.id hdr
         | _ -> err None "call to unexpected form of module"
     in
-    let fn_mem = code_fixup_to_mem glue_fixup in
-    let fn_cell = Il.Mem (fn_mem, Il.CodeTy) in
+    let ptr = code_fixup_to_ptr_operand glue_fixup in
     let (in_slots, _) = tmod_hdr in
       trans_call initializing true (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots args [||]
+        dst_cell ptr in_slots args [||]
 
   and trans_call_pred
       (dst_cell:Il.cell)
       (flv:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (fn_cell, fn_ty) = trans_callee flv in
+    let (ptr, fn_ty) = trans_callee flv in
     let tpred =
       match fn_ty with
           Ast.TY_pred tpred -> tpred
@@ -2016,7 +2022,7 @@ let trans_visitor
       iflog (fun _ -> annotate "predicate call");
       (* FIXME: extra_args if indirect *)
       trans_call true (lval_is_direct_fn cx flv) (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell fn_cell in_slots args [||];
+        dst_cell ptr in_slots args [||];
 
   and trans_call_pred_and_check
       (constr:Ast.constr)
@@ -2078,7 +2084,7 @@ let trans_visitor
       (args:Ast.atom option array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
-    let (fn_cell, _) = trans_callee flv in
+    let (fptr, _) = trans_callee flv in
     let arg_bound_flags = Array.map bool_of_option args in
     let arg_slots =
       arr_map2
@@ -2089,13 +2095,9 @@ let trans_visitor
     in
     let bound_arg_slots = arr_filter_some arg_slots in
     let bound_args = arr_filter_some args in
-    let glue_fixup = get_new_bind_glue direct bind_id fn_cell fn_sig.Ast.sig_input_slots arg_bound_flags in
-    let glue_mem = fixup_to_mem
-                     abi.Abi.abi_has_abs_code
-                     glue_fixup Il.CodeTy
-    in
-    let glue_cell = Il.Mem (glue_mem, Il.CodeTy) in
-    let target_operand = if direct then zero else Il.Cell fn_cell in
+    let glue_fixup = get_new_bind_glue direct bind_id fptr fn_sig.Ast.sig_input_slots arg_bound_flags in
+    let glue_fptr = code_fixup_to_ptr_operand glue_fixup in
+    let target_operand = if direct then zero else fptr in
     let closure_ty = closure_referent_type bound_arg_slots in
     let layout = layout_referent abi 0L closure_ty in
     let closuresz = layout.layout_size in
@@ -2105,7 +2107,7 @@ let trans_visitor
         iflog (fun _ -> annotate "init closure refcount");
         mov (get_element_ptr clo_cell 0) one;
         iflog (fun _ -> annotate "set closure glue-code ptr");
-        mov (get_element_ptr clo_cell 1) (Il.Cell (alias glue_cell));
+        mov (get_element_ptr clo_cell 1) glue_fptr;
         iflog (fun _ -> annotate "set closure target ptr");
         mov (get_element_ptr clo_cell 2) target_operand;
         copy_bound_args clo_cell bound_arg_slots bound_args 3
@@ -2139,10 +2141,19 @@ let trans_visitor
 
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
-        Il.Mem (a, Il.CodeTy) -> Il.CodeMem a
-      | Il.Mem (_, ty) ->
-          bug () "expected code cell, found cell of type %s" (Il.string_of_referent_ty ty)
-      | _ -> bug () "loading code from register"
+        Il.Mem (_, Il.ScalarTy (Il.AddrTy Il.CodeTy))
+      | Il.Reg (_, Il.AddrTy Il.CodeTy) -> Il.CodePtr (Il.Cell cell)
+      | _ ->
+          bug () "expected code-pointer cell, found %s"
+            (Il.string_of_cell abi.Abi.abi_str_of_hardreg cell)
+
+  and code_of_operand (operand:Il.operand) : Il.code =
+    match operand with
+        Il.Cell c -> code_of_cell c
+      | Il.ImmPtr (_, Il.CodeTy) -> Il.CodePtr operand
+      | _ ->
+          bug () "expected code-pointer operand, got %s"
+            (Il.string_of_operand abi.Abi.abi_str_of_hardreg operand)
 
   and copy_fn_args
       (clone_rt:Il.cell option)
@@ -2247,22 +2258,22 @@ let trans_visitor
 
 
   and trans_callee_code
-      (callee_cell:Il.cell)
+      (fptr:Il.operand)
       (direct:bool)
       (logname:unit -> string)
-      : Il.cell =
+      : Il.operand =
     if direct then
       begin
         log cx "making direct call";
-        callee_cell
+        fptr
       end
     else
       begin
         log cx "dereferencing closure";
         iflog (fun _ -> annotate (Printf.sprintf "deref closure for call to %s" (logname ())));
-        let closure_cell = deref (callee_cell) in
+        let closure_cell = deref (need_cell (fptr)) in
           iflog (fun _ -> annotate (Printf.sprintf "deref glue-code for call to %s" (logname ())));
-          deref (get_element_ptr closure_cell 1)
+          Il.Cell (get_element_ptr closure_cell 1)
       end
 
 
@@ -2271,12 +2282,12 @@ let trans_visitor
       (direct:bool)
       (logname:(unit -> string))
       (output_cell:Il.cell)
-      (callee_cell:Il.cell)
+      (callee_ptr:Il.operand)
       (arg_slots:Ast.slot array)
       (args:Ast.atom array)
       (extra_args:Il.operand array)
       : unit =
-    let callee_code_cell = trans_callee_code callee_cell direct logname in
+    let callee_fptr = trans_callee_code callee_ptr direct logname in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args None output_cell arg_slots args extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
@@ -2285,7 +2296,7 @@ let trans_visitor
        * initializing, overwrite the slot; this is ok if we're writing
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
-      call_code (code_of_cell callee_code_cell);
+      call_code (code_of_operand callee_fptr);
       drop_arg_slots arg_slots
 
   and arg_tup_cell

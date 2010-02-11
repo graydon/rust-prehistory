@@ -47,24 +47,33 @@ type mem =
   | Spill of spill
 ;;
 
-type code =
-    CodeLabel of label (* Index into current quad block. *)
-  | CodeMem of mem
-  | CodeNone
-;;
-
 type typed_reg = (reg * scalar_ty);;
 type typed_mem = (mem * referent_ty);;
 type typed_imm = (Asm.expr64 * ty_mach);;
+type typed_imm_ptr = (Asm.expr64 * referent_ty);;
 
 type cell =
     Reg of typed_reg
   | Mem of typed_mem
 ;;
 
+(* 
+ * ImmPtr (a, rty) can be assigned to anything of scalar_ty 
+ * AddrTy rty; the difference is that ImmAddr carries its value
+ * so can be used in cases where we want to have an immediate
+ * address constant-propagated through the code to the backend.
+ *)
 type operand =
     Cell of cell
   | Imm of typed_imm
+  | ImmPtr of typed_imm_ptr
+;;
+
+
+type code =
+    CodeLabel of label (* Index into current quad block. *)
+  | CodePtr of operand
+  | CodeNone
 ;;
 
 (* NB: for the most part, we let the register allocator assign spills
@@ -89,6 +98,24 @@ type operand =
 
 
 (* Helpers. *)
+
+let indirect_code_ptr fix =
+  (CodePtr
+     (Cell
+        (Mem (Abs (Asm.M_POS fix),
+                 ScalarTy (AddrTy CodeTy)))))
+;;
+
+let direct_code_ptr fix =
+  (CodePtr (ImmPtr ((Asm.M_POS fix), CodeTy)))
+;;
+
+let cell_referent_ty c =
+  match c with
+      Reg (_, st) -> ScalarTy st
+    | Mem (_, rt) -> rt
+;;
+
 
 let cell_is_nil c =
   match c with
@@ -253,6 +280,7 @@ let operand_bits (word_bits:bits) (op:operand) : bits =
   match op with
       Cell cell -> cell_bits word_bits cell
     | Imm (_, tm) -> bits_of_ty_mach tm
+    | ImmPtr _ -> word_bits
 ;;
 
 let bits_size (bits:bits) : int64 =
@@ -348,11 +376,12 @@ let identity_processor =
       qp_cell_read = qp_cell;
       qp_cell_write = qp_cell;
       qp_code = (fun qp c -> match c with
-                     CodeMem a -> CodeMem (qp.qp_mem qp a)
+                     CodePtr op -> CodePtr (qp.qp_op qp op)
                    | CodeLabel _
                    | CodeNone -> c);
       qp_op = (fun qp op -> match op with
                    Cell c -> Cell (qp.qp_cell_read qp c)
+                 | ImmPtr _ -> op
                  | Imm _ -> op) }
 ;;
 
@@ -504,14 +533,6 @@ let string_of_mem (f:hreg_formatter) (a:mem) : string =
     | Spill i ->
         Printf.sprintf "[<spill %d>]" i
 ;;
-
-let string_of_code (f:hreg_formatter) (c:code) : string =
-  match c with
-      CodeLabel lab -> Printf.sprintf "<label %d>" lab
-    | CodeMem a -> string_of_mem f a
-    | CodeNone -> "<none>"
-;;
-
 let string_of_cell (f:hreg_formatter) (c:cell) : string =
   match c with
       Reg (r,ty) ->
@@ -531,13 +552,28 @@ let string_of_cell (f:hreg_formatter) (c:cell) : string =
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
   match op with
       Cell c -> string_of_cell f c
+    | ImmPtr (i, ty) ->
+        if !log_iltypes
+        then
+          Printf.sprintf "$%s:%s*" (string_of_expr64 i) (string_of_referent_ty ty)
+        else
+          Printf.sprintf "$%s" (string_of_expr64 i)
     | Imm (i, ty) ->
         if !log_iltypes
         then
-          Printf.sprintf "%s:%s" (string_of_expr64 i) (string_of_ty_mach ty)
+          Printf.sprintf "$%s:%s" (string_of_expr64 i) (string_of_ty_mach ty)
         else
-          Printf.sprintf "%s" (string_of_expr64 i)
+          Printf.sprintf "$%s" (string_of_expr64 i)
 ;;
+
+
+let string_of_code (f:hreg_formatter) (c:code) : string =
+  match c with
+      CodeLabel lab -> Printf.sprintf "<label %d>" lab
+    | CodePtr op -> string_of_operand f op
+    | CodeNone -> "<none>"
+;;
+
 
 let string_of_binop (op:binop) : string =
   match op with
