@@ -790,9 +790,11 @@ rust_q::disconnect()
 
     sending = false;
     port = NULL;
+
+    proc_state_t state = proc->state;
+    I(rt, state != proc_state_blocked_reading);
     // Only wake up if blocked on us (might be dead).
-    if (proc->state == proc_state_blocked_reading ||
-        proc->state == proc_state_blocked_writing) {
+    if (proc->state == proc_state_blocked_writing) {
         proc_state_transition(rt, proc,
                               proc->state,
                               proc_state_running);
