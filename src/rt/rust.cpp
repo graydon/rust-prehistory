@@ -1751,9 +1751,11 @@ upcall_kill(rust_proc *proc, rust_proc *target)
 extern "C" CDECL void
 upcall_exit(rust_proc *proc)
 {
+    rust_rt *rt = proc->rt;
+
     LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL, "upcall exit");
-    proc->state = proc_state_dead;
+    rt->log(LOG_UPCALL, "upcall exit");
+    proc_state_transition(rt, proc, proc_state_running, proc_state_dead);
     proc->notify_waiting_procs();
     proc->yield(1);
 }
@@ -1895,32 +1897,6 @@ rust_main_loop(rust_rt *rt)
 
             I(rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
             I(rt, proc->rust_sp < proc->stk->limit);
-
-            switch ((proc_state_t) proc->state) {
-
-            case proc_state_running:
-                break;
-
-            case proc_state_dead:
-                // When a proc exits *itself* we do not yet kill
-                // it; for the time being we let it linger in the
-                // blocked-exiting state, as someone else still
-                // has a refcount on it.  The reap loop below will
-                // mop it up when there are no more refs.
-                {
-                    proc_state_t tstate = proc->state;
-                    proc->state = proc_state_running;
-                    proc_state_transition(rt, proc,
-                                          proc_state_running,
-                                          tstate);
-                }
-                break;
-
-            case proc_state_blocked_reading:
-            case proc_state_blocked_writing:
-            case proc_state_blocked_waiting:
-                break;
-            }
 
             rt->reap_dead_procs();
         }
