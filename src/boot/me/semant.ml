@@ -32,8 +32,8 @@ type glue =
   | GLUE_mark_frame of node_id
   | GLUE_drop_frame of node_id
   | GLUE_reloc_frame of node_id
-  | GLUE_new_module of node_id
-  | GLUE_new_bind of node_id
+  | GLUE_bind_mod of node_id
+  | GLUE_fn_binding of node_id
 ;;
 
 type data =
@@ -1560,12 +1560,12 @@ let glue_str (cx:ctxt) (g:glue) : string =
     | GLUE_mark_frame i -> "glue$mark_frame$" ^ (item_str cx i)
     | GLUE_drop_frame i -> "glue$drop_frame$" ^ (item_str cx i)
     | GLUE_reloc_frame i -> "glue$reloc_frame$" ^ (item_str cx i)
-    | GLUE_new_module i -> "glue$new_mod$" ^ (item_str cx i)
+    | GLUE_bind_mod i -> "glue$bind_mod$" ^ (item_str cx i)
         (* 
          * FIXME: the node_id here isn't an item, it's a statement; 
          * lookup bind target and encode bound arg tuple type.
          *)
-    | GLUE_new_bind _ -> "glue$new_bind"
+    | GLUE_fn_binding _ -> "glue$fn_binding"
 ;;
 
 

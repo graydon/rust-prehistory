@@ -158,6 +158,12 @@ let trans_visitor
     Il.Mem (mem, Il.ScalarTy (Il.AddrTy (referent_type abi pointee_ty)))
   in
 
+  let need_scalar_ty (rty:Il.referent_ty) : Il.scalar_ty =
+    match rty with
+        Il.ScalarTy s -> s
+      | _ -> bug () "expected ScalarTy"
+  in
+
   let need_mem_cell (cell:Il.cell) : Il.typed_mem =
     match cell with
         Il.Mem a -> a
@@ -657,15 +663,11 @@ let trans_visitor
               emit_exit_proc_glue tsig fix g;
               fix
 
-  and emit_new_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
+  and emit_bind_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
     let name = glue_str cx g in
     let spill = new_fixup (name ^ " spill") in
       trans_mem_glue_frame_entry 0 spill;
 
-      let _ = mod_id in
-      let _ = hdr in
-      let _ = fix in
-(*
       let (slots, _) = hdr in
       let ty = Ast.TY_tup slots in
       let src_rty = slot_referent_type abi (interior_slot ty) in
@@ -680,13 +682,11 @@ let trans_visitor
          *)
       let item_ptr_cell = get_element_ptr mod_cell 0 in
       let item_fixup = get_mod_fixup cx mod_id in
-      let item_mem = fixup_to_mem abi.Abi.abi_has_abs_data item_fixup Il.OpaqueTy in
+      let item_ptr = fixup_to_ptr_operand abi.Abi.abi_has_abs_data item_fixup Il.OpaqueTy in
       let binding_ptr_cell = get_element_ptr mod_cell 1 in
 
         (* Load first cell of pair with static item mem addr.*)
-      let tmp = next_vreg_cell Il.voidptr_t in
-        lea tmp item_mem;
-        mov item_ptr_cell (Il.Cell tmp);
+        mov item_ptr_cell item_ptr;
 
         (* Load second cell of pair with pointer to fresh binding tuple.*)
         trans_malloc binding_ptr_cell sz;
@@ -697,28 +697,27 @@ let trans_visitor
           let dst = deref dst_ptr in
           let refcnt_cell = get_element_ptr dst 0 in
           let body_cell = get_element_ptr dst 1 in
-          let src_ta = (fp_imm arg0_disp, src_rty) in
+          let src_mem = (fp_imm arg0_disp, src_rty) in
 
             mov refcnt_cell one;
 
-            trans_copy_tup true body_cell (Il.Mem src_ta) slots;
-*)
+            trans_copy_tup true body_cell (Il.Mem src_mem) slots;
             trans_glue_frame_exit fix spill g;
 
 
-  and get_new_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) : fixup =
-    let g = GLUE_new_module mod_id in
+  and get_bind_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) : fixup =
+    let g = GLUE_bind_mod mod_id in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup (glue_str cx g) in
-              emit_new_mod_glue mod_id hdr fix g;
+              emit_bind_mod_glue mod_id hdr fix g;
               fix
 
 
   (* FIXME (bug 544925): this should eventually use tail calling logic *)
 
-  and emit_new_bind_glue
+  and emit_fn_binding_glue
       (direct:bool)
       (fptr:Il.operand)
       (arg_slots:Ast.slot array)
@@ -749,8 +748,7 @@ let trans_visitor
       else
         Il.StructTy (Array.concat [ implicit_rtys; arg_rtys; [| Il.ScalarTy Il.voidptr_t |] ])
     in
-    let out_layout = layout_referent abi 0L out_rty in
-    let callsz = out_layout.layout_size in
+    let callsz = Il.referent_ty_size word_bits out_rty in
     let spill = new_fixup "bind glue spill" in
       trans_glue_frame_entry callsz spill;
       merge_bound_args in_rty n_unbound out_rty arg_slots arg_bound_flags;
@@ -760,21 +758,21 @@ let trans_visitor
       trans_glue_frame_exit fix spill g
 
 
-  (* FIXME: abstract out the memoization logic between get_new_mod_glue and get_new_bind_glue *)
+  (* FIXME: abstract out the memoization logic between get_bind_mod_glue and get_fn_binding_glue *)
 
-  and get_new_bind_glue
+  and get_fn_binding_glue
       (direct:bool)
       (bind_id:node_id)
       (fptr:Il.operand)
       (arg_slots:Ast.slot array)
       (arg_bound_flags:bool array)
       : fixup =
-    let g = GLUE_new_bind bind_id in
+    let g = GLUE_fn_binding bind_id in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup (glue_str cx g) in
-              emit_new_bind_glue direct fptr arg_slots arg_bound_flags fix g;
+              emit_fn_binding_glue direct fptr arg_slots arg_bound_flags fix g;
               fix
 
 
@@ -1999,7 +1997,7 @@ let trans_visitor
     let glue_fixup =
       match item_ty with
           Ast.TY_mod (Some hdr, _) ->
-            get_new_mod_glue item.id hdr
+            get_bind_mod_glue item.id hdr
         | _ -> err None "call to unexpected form of module"
     in
     let ptr = code_fixup_to_ptr_operand glue_fixup in
@@ -2095,12 +2093,11 @@ let trans_visitor
     in
     let bound_arg_slots = arr_filter_some arg_slots in
     let bound_args = arr_filter_some args in
-    let glue_fixup = get_new_bind_glue direct bind_id fptr fn_sig.Ast.sig_input_slots arg_bound_flags in
+    let glue_fixup = get_fn_binding_glue direct bind_id fptr fn_sig.Ast.sig_input_slots arg_bound_flags in
     let glue_fptr = code_fixup_to_ptr_operand glue_fixup in
     let target_operand = if direct then zero else fptr in
     let closure_ty = closure_referent_type bound_arg_slots in
-    let layout = layout_referent abi 0L closure_ty in
-    let closuresz = layout.layout_size in
+    let closuresz = Il.referent_ty_size word_bits closure_ty in
       iflog (fun _ -> annotate "heap-allocate closure");
       trans_malloc dst_cell closuresz;
       let clo_cell = deref dst_cell in
