@@ -1263,17 +1263,21 @@ let trans_visitor
     let padded_sz = Int64.add init_sz (word_n 3) in
     let alloc_sz = next_power_of_two padded_sz in
       trans_malloc dstcell alloc_sz;
-      mov (deref_imm dstcell (word_n 0)) one;
-      mov (deref_imm dstcell (word_n 1)) (imm alloc_sz);
-      mov (deref_imm dstcell (word_n 2)) (imm init_sz);
-      Array.iteri
-        begin
-          fun i atom ->
-            let off = Int64.add (word_n 3) (Int64.mul (Int64.of_int i) unit_sz) in
-            let cell = deref_imm dstcell off in
-              trans_init_slot_from_atom cell unit_slot atom
-        end
-        atoms
+      let vec = deref dstcell in
+        mov (get_element_ptr vec 0) one;
+        mov (get_element_ptr vec 1) (imm alloc_sz);
+        mov (get_element_ptr vec 2) (imm init_sz);
+        let body_mem = fst (need_mem_cell (get_element_ptr vec 3)) in
+        let unit_rty = slot_referent_type abi unit_slot in
+        let body_rty = Il.StructTy (Array.map (fun _ -> unit_rty) atoms) in
+        let body = Il.Mem (body_mem, body_rty) in
+          Array.iteri
+            begin
+              fun i atom ->
+                let cell = get_element_ptr body i in
+                  trans_init_slot_from_atom cell unit_slot atom
+            end
+            atoms
 
   and next_power_of_two (x:int64) : int64 =
     let xr = ref (Int64.sub x 1L) in
@@ -1384,7 +1388,7 @@ let trans_visitor
         : unit =
       let tag_keys = sorted_htab_keys ttag in
       let src_tag = get_element_ptr src_cell 0 in
-      let dst_tag = get_element_ptr src_cell 0 in
+      let dst_tag = get_element_ptr dst_cell 0 in
       let src_union = get_element_ptr src_cell 1 in
       let dst_union = get_element_ptr dst_cell 1 in
       let tmp = next_vreg_cell word_ty in
@@ -1843,9 +1847,19 @@ let trans_visitor
     let dst = deref_slot initializing dst dst_slot in
     let src = deref_slot false src src_slot in
       iflog (fun _ ->
-               annotate ("heavy copy: referent data"));
-      if (i64_le (ty_sz abi ty) word_sz)
-      then mov dst (Il.Cell src)
+               annotate ("heavy copy: referent data of type " ^
+                           (Ast.fmt_to_str Ast.fmt_ty ty)));
+      if ((Il.cell_is_scalar src)
+          && (Il.cell_is_scalar dst)
+          && (i64_le (ty_sz abi ty) word_sz))
+      then
+        begin
+          iflog (fun _ ->
+                   annotate ("heavy copy: simple mov ("
+                             ^ (Int64.to_string (ty_sz abi ty))
+                             ^ " byte scalar)"));
+          mov dst (Il.Cell src)
+        end
       else
         iter_ty_slots_full ty dst src
           (fun dst src slot curr_iso ->
@@ -2658,11 +2672,13 @@ let trans_visitor
       let tag_cell = get_element_ptr out_cell 0 in
       let union_cell = get_element_ptr out_cell 1 in
       let dst = get_variant_ptr union_cell i in
-      let src = Il.Mem (fp_imm arg0_disp, snd (need_mem_cell dst)) in
+      let dst_ty = snd (need_mem_cell dst) in
+      let src = Il.Mem (fp_imm arg0_disp, dst_ty) in
         (* A clever compiler will inline this. We are not clever. *)
         iflog (fun _ -> annotate (Printf.sprintf "write tag #%d" i));
         mov tag_cell (imm (Int64.of_int i));
-        iflog (fun _ -> annotate "copy tag-content tuple");
+        iflog (fun _ -> annotate ("copy tag-content tuple: dst_ty=" ^
+                                    (Il.string_of_referent_ty dst_ty)));
         trans_copy_tup true dst src slots;
         trace_str cx.ctxt_sess.Session.sess_trace_tag
           ("finished tag constructor " ^ n);

@@ -952,9 +952,9 @@ let is_ty32 (ty:Il.scalar_ty) : bool =
 
 let is_rm32 (c:Il.cell) : bool =
   match c with
-      (* FIXME: tighten this up. Currently it's willing to accept *any* address as rm32. *)
-      Il.Mem (_, _) -> true
+      Il.Mem (_, Il.ScalarTy st) -> is_ty32 st
     | Il.Reg (_, st) -> is_ty32 st
+    | _ -> false
 ;;
 
 let is_ty8 (ty:Il.scalar_ty) : bool =

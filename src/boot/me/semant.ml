@@ -1392,7 +1392,7 @@ and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
   layout_referent abi off (slot_referent_type abi s)
 
 and ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
-    (layout_ty abi 0L t).layout_size
+  Il.referent_ty_size abi.Abi.abi_word_bits (referent_type abi t)
 
 and slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
   (layout_slot abi 0L s).layout_size

@@ -242,10 +242,19 @@ type quads = quad array ;;
 
 (* Query functions. *)
 
+let cell_is_scalar (c:cell) : bool =
+  match c with
+      Reg (_, _) -> true
+    | Mem (_, ScalarTy _) -> true
+    | _ -> false
+;;
+
+
 let cell_scalar_ty (c:cell) : scalar_ty =
   match c with
       Reg (_, st) -> st
-    | Mem (_, rt) -> AddrTy rt
+    | Mem (_, ScalarTy st) -> st
+    | _ -> failwith "mem of non-scalar in Il.cell_scalar_ty"
 ;;
 
 let bits_of_ty_mach (tm:ty_mach) : bits =
@@ -813,15 +822,13 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
   let emit_quad (q':quad') : unit =
     (* decay mem-mem movs *)
     match q' with
-        Unary { unary_dst = Mem (dst_mem, dst_ty);
-                unary_src = Cell (Mem (src_mem, src_ty));
+        Unary { unary_dst = Mem (dst_mem, ScalarTy src_st);
+                unary_src = Cell (Mem (src_mem, ScalarTy dst_st));
                 unary_op = op }
           when is_mov op ->
-            begin
-              let v = next_vreg_cell e (AddrTy dst_ty) in
-                emit_quad_bottom (unary op v (Cell (Mem (src_mem, src_ty))));
-                emit_quad_bottom (unary op (Mem (dst_mem, dst_ty)) (Cell v))
-            end
+            let v = next_vreg_cell e dst_st in
+              emit_quad_bottom (unary op v (Cell (Mem (src_mem, ScalarTy src_st))));
+              emit_quad_bottom (unary op (Mem (dst_mem, ScalarTy dst_st)) (Cell v))
       | _ -> emit_quad_bottom q'
   in
 
