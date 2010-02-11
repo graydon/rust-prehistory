@@ -114,7 +114,8 @@ let auto_inference_visitor
   in
   let unify_header_slots id hdr args =
       if Array.length hdr != Array.length args
-      then err (Some id) "argument count mismatch";
+      then err (Some id) "argument count mismatch: %d given, %d expected"
+        (Array.length args) (Array.length hdr);
       for i = 0 to (Array.length hdr) - 1
       do
         ignore (unify_atom hdr.(i).Ast.slot_ty args.(i));

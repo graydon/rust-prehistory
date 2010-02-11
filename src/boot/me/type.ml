@@ -55,6 +55,43 @@ let type_check_visitor
             let (_, e) = w.Ast.while_lval in
               check_ty_eq Ast.TY_bool (expr_type cx e)
 
+        | Ast.STMT_call (out, callee, args) ->
+            begin
+              let _ = out in
+              let callee_ty = lval_ty cx callee in
+              let check_ins in_slots =
+                if (Array.length in_slots) != (Array.length args)
+                then err (Some s.id) "argument count mismatch: %d given, %d expected"
+                  (Array.length args) (Array.length in_slots);
+                for i = 0 to (Array.length args) - 1 do
+                  check_ty_eq (slot_ty in_slots.(i)) (atom_type cx args.(i))
+                done
+              in
+              let check_out out_slot =
+                check_ty_eq (slot_ty out_slot) (lval_ty cx out)
+              in
+                match callee_ty with
+                    Ast.TY_fn (tsig, _(*taux*)) ->
+                      begin
+                        check_ins tsig.Ast.sig_input_slots;
+                        check_out tsig.Ast.sig_output_slot
+                      end
+                  | Ast.TY_pred (in_slots, _(*constrs*)) ->
+                      begin
+                        check_ins in_slots;
+                        check_out (interior_slot Ast.TY_bool)
+                      end
+                  | Ast.TY_mod (Some (in_slots, _(*constrs*)), mtis) ->
+                      begin
+                        check_ins in_slots;
+                        check_out (interior_slot (Ast.TY_mod (None, mtis)));
+                      end
+                  | _ ->
+                      err (Some s.id) "call to non-callable lval: %a of type %a"
+                        Ast.sprintf_lval callee
+                        Ast.sprintf_ty callee_ty
+              end
+
         (* FIXME (bug 541531): plenty more to handle here. *)
         | _ -> ()
     end;
