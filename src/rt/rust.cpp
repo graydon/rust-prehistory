@@ -138,23 +138,6 @@ struct stk_seg {
 };
 
 typedef enum {
-    proc_state_running,
-    proc_state_blocked_reading,
-    proc_state_blocked_writing,
-    proc_state_blocked_waiting,
-    proc_state_dead,
-} proc_state_t;
-
-static char const * const state_names[] =
-    {
-        "running",
-        "blocked_reading",
-        "blocked_writing",
-        "blocked_waiting",
-        "dead",
-    };
-
-typedef enum {
     abi_code_cdecl = 0,
     abi_code_rust = 1
 } abi_t;
@@ -321,6 +304,10 @@ struct rust_rt {
 #endif
 
     size_t n_live_procs();
+    void add_proc_to_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc);
+    void remove_proc_from_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc);
+    const char *state_vec_name(ptr_vec<rust_proc> *v);
+
     void reap_dead_procs();
     rust_proc *sched();
 };
@@ -344,6 +331,12 @@ inline void *operator new(size_t sz, rust_rt &rt) {
 inline void *operator new[](size_t sz, rust_rt &rt) {
     return rt.malloc(sz);
 }
+
+// A cond(ition) is something we can block on. This can be a channel (writing), a
+// port (reading) or a proc (waiting).
+
+struct rust_cond {
+};
 
 /*
  * "Simple" precise, mark-sweep, single-generation GC.
@@ -410,7 +403,7 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
  *
  */
 
-struct rust_proc : public rc_base, public rt_owned<rust_proc> {
+struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond {
     // fields known to the compiler
     stk_seg *stk;
     uintptr_t runtime_sp;      // runtime sp while proc running.
@@ -418,7 +411,8 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc> {
     uintptr_t gc_alloc_chain;  // linked list of GC allocations.
 
     // fields known only to the runtime
-    proc_state_t state;
+    ptr_vec<rust_proc> *state;
+    rust_cond *cond;
     rust_rt *rt;
     uintptr_t fn;
     rust_q *outgoing;
@@ -434,6 +428,19 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc> {
               uintptr_t args,
               size_t callsz);
     ~rust_proc();
+
+    bool running();
+    bool blocked();
+    bool blocked_on(rust_cond *cond);
+    bool dead();
+
+    const char *state_str();
+    void transition(ptr_vec<rust_proc> *svec, ptr_vec<rust_proc> *dvec);
+
+    void block(rust_cond *on);
+    void wakeup(rust_cond *from);
+    void die();
+    void unblock();
 
     void check_active() { I(rt, rt->curr_proc == this); }
     void check_suspended() { I(rt, rt->curr_proc != this); }
@@ -463,7 +470,7 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc> {
     frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
 };
 
-struct rust_port : public rc_base, public rt_owned<rust_port> {
+struct rust_port : public rc_base, public rt_owned<rust_port>, public rust_cond {
     // fields known only to the runtime
     rust_rt *rt; // port might outlive proc, so this is rt_owned
     rust_proc *proc;
@@ -494,13 +501,12 @@ struct rust_chan : public rc_base, public rt_owned<rust_chan> {
  * each port.
  */
 
-struct rust_q : public proc_owned<rust_q> {
+struct rust_q : public proc_owned<rust_q>, public rust_cond {
     UT_hash_handle hh;
     rust_proc *proc;      // Proc owning this q.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
     bool sending;         // Whether we're in a port->writers vec.
     size_t idx;           // Index in the port->writers vec.
-    rust_proc *blocked;   // Proc to wake on flush, NULL if nonblocking.
     circ_buf buf;
 
     rust_q(rust_proc *proc, rust_port *port);
@@ -508,12 +514,6 @@ struct rust_q : public proc_owned<rust_q> {
 
     void disconnect();
 };
-
-static void
-proc_state_transition(rust_rt *rt,
-                      rust_proc *proc,
-                      proc_state_t src,
-                      proc_state_t dst);
 
 // Reference counted objects
 
@@ -762,7 +762,6 @@ rust_q::rust_q(rust_proc *proc, rust_port *port) :
     port(port),
     sending(false),
     idx(0),
-    blocked(NULL),
     buf(port->proc->rt, port->unit_sz)
 {
     rust_rt *rt = proc->rt;
@@ -782,14 +781,8 @@ rust_q::disconnect()
     sending = false;
     port = NULL;
 
-    proc_state_t state = proc->state;
-    I(rt, state != proc_state_blocked_reading);
-    // Only wake up if blocked on us (might be dead).
-    if (proc->state == proc_state_blocked_writing) {
-        proc_state_transition(rt, proc,
-                              proc->state,
-                              proc_state_running);
-    }
+    if (proc->blocked())
+        proc->wakeup(this); // must be blocked on us (or dead)
 }
 
 rust_q::~rust_q()
@@ -930,7 +923,8 @@ rust_proc::rust_proc(rust_rt *rt,
       runtime_sp(0),
       rust_sp(stk->limit),
       gc_alloc_chain(0),
-      state(proc_state_running),
+      state(&rt->running_procs),
+      cond(NULL),
       rt(rt),
       fn(spawnee_fn),
       outgoing(NULL),
@@ -1011,6 +1005,8 @@ rust_proc::rust_proc(rust_rt *rt,
 
     // Back up one, we overshot where sp should be.
     rust_sp = (uintptr_t) (spp+1);
+
+    rt->add_proc_to_state_vec(&rt->running_procs, this);
 }
 
 
@@ -1121,7 +1117,7 @@ rust_proc::kill() {
     // If you want to fail yourself you do self->fail(upcall_nargs).
     rt->log(LOG_PROC, "killing proc 0x%" PRIxPTR, this);
     // Unblock the proc so it can unwind.
-    proc_state_transition(rt, this, state, proc_state_running);
+    unblock();
     if (this == rt->root_proc)
         rt->fail();
     run_on_resume(rt->global_glue->unwind_glue);
@@ -1132,7 +1128,7 @@ rust_proc::fail(size_t nargs) {
     // See note in ::kill() regarding who should call this.
     rt->log(LOG_PROC, "proc 0x%" PRIxPTR " failing", this);
     // Unblock the proc so it can unwind.
-    proc_state_transition(rt, this, state, proc_state_running);
+    unblock();
     if (this == rt->root_proc)
         rt->fail();
     run_after_return(nargs, rt->global_glue->unwind_glue);
@@ -1150,17 +1146,8 @@ rust_proc::notify_waiting_procs()
 {
     while (waiting_procs.length() > 0) {
         rust_proc *p = waiting_procs.pop();
-        proc_state_t state = p->state;
-        if (state == proc_state_blocked_waiting) {
-            proc_state_transition(rt, p,
-                                  proc_state_blocked_waiting,
-                                  proc_state_running);
-        } else {
-            I(rt,
-              state != proc_state_running &&
-              state != proc_state_blocked_reading &&
-              state != proc_state_blocked_writing);
-        }
+        if (!p->dead())
+            p->wakeup(this);
     }
 }
 
@@ -1184,73 +1171,77 @@ rust_proc::get_frame_glue_fns(uintptr_t fp) {
     return *((frame_glue_fns**) fp);
 }
 
-static ptr_vec<rust_proc>*
-get_state_vec(rust_rt *rt, proc_state_t state)
+bool
+rust_proc::running()
 {
-    switch (state) {
-    case proc_state_running:
-        return &rt->running_procs;
-
-    case proc_state_blocked_reading:
-    case proc_state_blocked_writing:
-    case proc_state_blocked_waiting:
-        return &rt->blocked_procs;
-
-    case proc_state_dead:
-        return &rt->dead_procs;
-    }
-
-    I(rt, 0);
-    return NULL;
+    return state == &rt->running_procs;
 }
 
-static ptr_vec<rust_proc>*
-get_proc_vec(rust_rt *rt, rust_proc *proc)
+bool
+rust_proc::blocked()
 {
-    return get_state_vec(rt, proc->state);
+    return state == &rt->blocked_procs;
 }
 
-static void
-add_proc_state_vec(rust_rt *rt, rust_proc *proc)
+bool
+rust_proc::blocked_on(rust_cond *on)
 {
-    ptr_vec<rust_proc> *v = get_proc_vec(rt, proc);
-    rt->log(LOG_MEM|LOG_PROC,
-            "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
-            (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
-    v->push(proc);
+    return blocked() && cond == on;
 }
 
-
-static void
-remove_proc_from_state_vec(rust_rt *rt, rust_proc *proc)
+bool
+rust_proc::dead()
 {
-    ptr_vec<rust_proc> *v = get_proc_vec(rt, proc);
-    rt->log(LOG_MEM|LOG_PROC,
-            "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
-            (uintptr_t)proc, state_names[(size_t)proc->state], (uintptr_t)v);
-    I(rt, (*v)[proc->idx] == proc);
-    v->swapdel(proc);
-    v->trim(rt->n_live_procs());
+    return state == &rt->dead_procs;
 }
 
-static void
-proc_state_transition(rust_rt *rt,
-                      rust_proc *proc,
-                      proc_state_t src,
-                      proc_state_t dst)
+void
+rust_proc::transition(ptr_vec<rust_proc> *src, ptr_vec<rust_proc> *dst)
 {
+    I(rt, state == src);
     rt->log(LOG_PROC,
             "proc 0x%" PRIxPTR " state change '%s' -> '%s'",
-            (uintptr_t)proc,
-            state_names[(size_t)src],
-            state_names[(size_t)dst]);
-    I(rt, proc->state == src);
-    remove_proc_from_state_vec(rt, proc);
-    proc->state = dst;
-    add_proc_state_vec(rt, proc);
+            (uintptr_t)this,
+            rt->state_vec_name(src),
+            rt->state_vec_name(dst));
+    rt->remove_proc_from_state_vec(src, this);
+    rt->add_proc_to_state_vec(dst, this);
+    state = dst;
 }
 
-/* Runtime */
+void
+rust_proc::block(rust_cond *on)
+{
+    I(rt, on);
+    transition(&rt->running_procs, &rt->blocked_procs);
+    rt->log(LOG_PROC,
+            "proc 0x%" PRIxPTR " blocking on 0x%" PRIxPTR,
+            (uintptr_t)this,
+            (uintptr_t)on);
+    cond = on;
+}
+
+void
+rust_proc::wakeup(rust_cond *from)
+{
+    transition(&rt->blocked_procs, &rt->running_procs);
+    I(rt, cond == from);
+}
+
+void
+rust_proc::die()
+{
+    transition(&rt->running_procs, &rt->dead_procs);
+}
+
+void
+rust_proc::unblock()
+{
+    if (blocked())
+        wakeup(cond);
+}
+
+// Runtime
 
 static void
 del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
@@ -1409,6 +1400,38 @@ rust_rt::n_live_procs()
 }
 
 void
+rust_rt::add_proc_to_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc)
+{
+    log(LOG_MEM|LOG_PROC,
+        "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
+        (uintptr_t)proc, state_vec_name(v), (uintptr_t)v);
+    v->push(proc);
+}
+
+
+void
+rust_rt::remove_proc_from_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc)
+{
+    log(LOG_MEM|LOG_PROC,
+        "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
+        (uintptr_t)proc, state_vec_name(v), (uintptr_t)v);
+    I(this, (*v)[proc->idx] == proc);
+    v->swapdel(proc);
+    v->trim(n_live_procs());
+}
+
+const char *
+rust_rt::state_vec_name(ptr_vec<rust_proc> *v)
+{
+    if (v == &running_procs)
+        return "running";
+    if (v == &blocked_procs)
+        return "blocked";
+    I(this, v == &dead_procs);
+    return "dead";
+}
+
+void
 rust_rt::reap_dead_procs()
 {
     for (size_t i = 0; i < dead_procs.length(); ) {
@@ -1559,42 +1582,33 @@ attempt_transmission(rust_rt *rt,
     I(rt, src);
     I(rt, dst);
 
-    if (dst->state != proc_state_blocked_reading) {
+    if (src->buf.unread == 0) {
         rt->log(LOG_COMM,
-                "dst in non-reading state, "
-                "transmission incomplete");
+                "buffer empty, transmission incomplete");
         return 0;
     }
 
-    if (src->blocked) {
-        I(rt, src->blocked->state == proc_state_blocked_writing);
-    }
+    I(rt, src->port);
 
-    if (src->buf.unread == 0) {
+    if (!dst->blocked_on(src->port)) {
         rt->log(LOG_COMM,
-                "buffer empty, "
-                "transmission incomplete");
+                "dst in non-reading state, transmission incomplete");
         return 0;
     }
 
     uintptr_t *dptr = dst->dptr;
-    I(rt, src->port);
     rt->log(LOG_COMM,
-            "receiving %d bytes into dst_proc=0x%" PRIxPTR
-            ", dptr=0x%" PRIxPTR,
+            "receiving %d bytes into dst_proc=0x%" PRIxPTR ", dptr=0x%" PRIxPTR,
             src->port->unit_sz, dst, dptr);
     src->buf.shift(dptr);
 
-    if (src->blocked) {
-        proc_state_transition(rt, src->blocked,
-                              proc_state_blocked_writing,
-                              proc_state_running);
-        src->blocked = NULL;
-    }
+    // Wake up the sender if its waiting for the send operation.
+    rust_proc *sender = src->proc;
+    if (sender->blocked_on(src))
+        sender->wakeup(src);
 
-    proc_state_transition(rt, dst,
-                          proc_state_blocked_reading,
-                          proc_state_running);
+    // Wakeup the receiver, there is new data.
+    dst->wakeup(src->port);
 
     rt->log(LOG_COMM, "transmission complete");
     return 1;
@@ -1619,11 +1633,9 @@ upcall_join(rust_proc *proc, rust_proc *other)
             (uintptr_t)other);
 
     // If the other proc is already dying, we dont have to wait for it.
-    if (other->state != proc_state_dead) {
+    if (!other->dead()) {
         other->waiting_procs.push(proc);
-        proc_state_transition(rt, proc,
-                              proc_state_running,
-                              proc_state_blocked_waiting);
+        proc->block(other);
         proc->yield(2);
     }
 }
@@ -1655,7 +1667,6 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
             HASH_ADD(hh, proc->outgoing, port, sizeof(rust_q*), q);
         }
         I(rt, q);
-        I(rt, q->blocked == proc || !q->blocked);
         I(rt, q->port);
         I(rt, q->port == port);
         // we have resolved the right queue to send via
@@ -1671,11 +1682,8 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
             (uintptr_t)q);
 
     if (port->proc) {
-        q->blocked = proc;
         q->buf.push(sptr);
-        proc_state_transition(rt, proc,
-                              proc_state_running,
-                              proc_state_blocked_writing);
+        proc->block(q);
         attempt_transmission(rt, q, port->proc);
         if (q->buf.unread && !q->sending) {
             q->sending = true;
@@ -1686,7 +1694,7 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
                 "port has no proc (possibly throw?)");
     }
 
-    if (proc->state != proc_state_running)
+    if (!proc->running())
         proc->yield(3);
 }
 
@@ -1705,9 +1713,7 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
     I(rt, proc);
     I(rt, port->proc == proc);
 
-    proc_state_transition(rt, proc,
-                          proc_state_running,
-                          proc_state_blocked_reading);
+    proc->block(port);
 
     if (port->writers.length() > 0) {
         I(rt, proc->rt);
@@ -1725,7 +1731,7 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
                 "no writers sending to port", (uintptr_t)port);
     }
 
-    if (proc->state != proc_state_running) {
+    if (!proc->running()) {
         proc->dptr = dptr;
         proc->yield(3);
     }
@@ -1755,7 +1761,7 @@ upcall_exit(rust_proc *proc)
 
     LOG_UPCALL_ENTRY(proc);
     rt->log(LOG_UPCALL, "upcall exit");
-    proc_state_transition(rt, proc, proc_state_running, proc_state_dead);
+    proc->die();
     proc->notify_waiting_procs();
     proc->yield(1);
 }
@@ -1831,7 +1837,6 @@ upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawn
             "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
             exit_proc_glue, spawnee_fn, callsz);
     rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
-    add_proc_state_vec(rt, proc);
     return proc;
 }
 
@@ -1856,7 +1861,6 @@ upcall_spawn_thread(rust_proc *spawner, rust_rt *new_rt, uintptr_t exit_proc_glu
             "spawn thread fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
             exit_proc_glue, spawnee_fn, callsz);
     new_rt->root_proc = new (new_rt) rust_proc(new_rt, NULL, exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
-    add_proc_state_vec(new_rt, new_rt->root_proc);
 
 #if defined(__WIN32__)
     DWORD thread;
@@ -1888,12 +1892,12 @@ rust_main_loop(rust_rt *rt)
         rt->log(LOG_PROC, "activating proc 0x%" PRIxPTR,
                 (uintptr_t)proc);
 
-        if (proc->state == proc_state_running) {
+        if (proc->running()) {
             rt->activate(proc);
 
             rt->log(LOG_PROC,
                     "returned from proc 0x%" PRIxPTR " in state '%s'",
-                    (uintptr_t)proc, state_names[proc->state]);
+                    (uintptr_t)proc, rt->state_vec_name(proc->state));
 
             I(rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
             I(rt, proc->rust_sp < proc->stk->limit);
@@ -2009,7 +2013,6 @@ rust_start(uintptr_t main_fn, global_glue_fns *global_glue)
         rust_rt rt(&srv, global_glue);
 
         rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.global_glue->main_exit_proc_glue, main_fn, NULL, 0);
-        add_proc_state_vec(&rt, rt.root_proc);
 
         ret = rust_main_loop(&rt);
     }
