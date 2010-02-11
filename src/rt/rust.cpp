@@ -106,7 +106,30 @@ get_logbits()
     return bits;
 }
 
-/* Proc stack segments. Heap allocated and chained together. */
+// Every reference counted object should derive from this base class.
+
+struct rc_base {
+    size_t refcnt;
+
+    rc_base();
+    ~rc_base();
+};
+
+template <typename T>
+struct rt_owned {
+    void operator delete(void *ptr) {
+        ((T *)ptr)->rt->free(ptr);
+    }
+};
+
+template <typename T>
+struct proc_owned {
+    void operator delete(void *ptr) {
+        ((T *)ptr)->proc->rt->free(ptr);
+    }
+};
+
+// Proc stack segments. Heap allocated and chained together.
 
 struct stk_seg {
     unsigned int valgrind_id;
@@ -150,7 +173,7 @@ struct frame_glue_fns {
 };
 
 template <typename T>
-class ptr_vec {
+class ptr_vec : public rt_owned<ptr_vec<T> > {
     static const size_t INIT_SIZE = 8;
 
     rust_rt *rt;
@@ -176,7 +199,7 @@ public:
     void swapdel(T* p);
 };
 
-struct circ_buf {
+struct circ_buf : public rt_owned<circ_buf> {
     static const size_t INIT_CIRC_BUF_UNITS = 8;
     static const size_t MAX_CIRC_BUF_SIZE = 1 << 24;
 
@@ -189,7 +212,6 @@ struct circ_buf {
 
     circ_buf(rust_rt *rt, size_t unit_sz);
     ~circ_buf();
-    void operator delete(void *ptr);
 
     void transfer(void *dst);
     void push(void *src);
@@ -246,21 +268,6 @@ lockfree_queue::dequeue()
     }
     return item;
 }
-
-// Every reference counted object should derive from this base class.
-struct rc_base {
-    size_t refcnt;
-
-    rc_base();
-    ~rc_base();
-};
-
-template <typename T>
-struct rt_owned {
-    void operator delete(void *ptr) {
-        ((T *)ptr)->rt->free(ptr);
-    }
-};
 
 // Rust types vec and str look identical from our perspective.
 
@@ -458,8 +465,8 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc> {
 
 struct rust_port : public rc_base, public rt_owned<rust_port> {
     // fields known only to the runtime
-    rust_proc *proc; // port might outlive proc, so don't rely on it in destructor
-    rust_rt *rt;
+    rust_rt *rt; // port might outlive proc, so this is rt_owned
+    rust_proc *proc;
     size_t unit_sz;
     ptr_vec<rust_q> writers;
 
@@ -469,7 +476,7 @@ struct rust_port : public rc_base, public rt_owned<rust_port> {
 
 struct rust_chan : public rc_base, public rt_owned<rust_chan> {
     // fields known only to the runtime
-    rust_rt* rt;
+    rust_rt* rt; // proc is resolved lazily, so this is rt_owned
     rust_port* port;
 
     // queue the chan is sending to (resolved lazily)
@@ -487,9 +494,8 @@ struct rust_chan : public rc_base, public rt_owned<rust_chan> {
  * each port.
  */
 
-struct rust_q : public rt_owned<rust_q> {
+struct rust_q : public proc_owned<rust_q> {
     UT_hash_handle hh;
-    rust_rt *rt;
     rust_proc *proc;      // Proc owning this q.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
     bool sending;         // Whether we're in a port->writers vec.
@@ -509,7 +515,18 @@ proc_state_transition(rust_rt *rt,
                       proc_state_t src,
                       proc_state_t dst);
 
-/* Utility type: pointer-vector. */
+// Reference counted objects
+
+rc_base::rc_base() :
+    refcnt(1)
+{
+}
+
+rc_base::~rc_base()
+{
+}
+
+// Utility type: pointer-vector.
 
 template <typename T>
 ptr_vec<T>::ptr_vec(rust_rt *rt) :
@@ -589,7 +606,7 @@ ptr_vec<T>::swapdel(T *item)
     }
 }
 
-/* Utility type: circular buffer. */
+// Utility type: circular buffer.
 
 circ_buf::circ_buf(rust_rt *rt, size_t unit_sz) :
     rt(rt),
@@ -614,13 +631,6 @@ circ_buf::~circ_buf()
     I(rt, data);
     // I(rt, unread == 0);
     rt->free(data);
-}
-
-void
-circ_buf::operator delete(void *ptr)
-{
-    rust_rt *rt = ((circ_buf *)ptr)->rt;
-    rt->free(ptr);
 }
 
 void
@@ -697,17 +707,6 @@ circ_buf::shift(void *dst)
     }
 }
 
-// Reference counted objects
-
-rc_base::rc_base() :
-    refcnt(1)
-{
-}
-
-rc_base::~rc_base()
-{
-}
-
 // Strings
 
 rust_str::rust_str(size_t alloc, size_t fill, char const *s) :
@@ -724,11 +723,11 @@ rust_str::~rust_str()
 
 // Ports
 
-rust_port::rust_port(rust_proc *proc, size_t unit_sz)
-    : proc(proc),
-      rt(proc->rt),
-      unit_sz(unit_sz),
-      writers(proc->rt)
+rust_port::rust_port(rust_proc *proc, size_t unit_sz) :
+    rt(proc->rt),
+    proc(proc),
+    unit_sz(unit_sz),
+    writers(proc->rt)
 {
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
@@ -759,7 +758,6 @@ rust_chan::~rust_chan()
 /* Outgoing message queues */
 
 rust_q::rust_q(rust_proc *proc, rust_port *port) :
-    rt(proc->rt),
     proc(proc),
     port(port),
     sending(false),
@@ -767,6 +765,7 @@ rust_q::rust_q(rust_proc *proc, rust_port *port) :
     blocked(NULL),
     buf(port->proc->rt, port->unit_sz)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_q(port=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
             port, (uintptr_t)this);
@@ -775,6 +774,8 @@ rust_q::rust_q(rust_proc *proc, rust_port *port) :
 void
 rust_q::disconnect()
 {
+    rust_rt *rt = proc->rt;
+
     I(rt, sending);
     I(rt, port);
 
@@ -793,6 +794,8 @@ rust_q::disconnect()
 
 rust_q::~rust_q()
 {
+    rust_rt *rt = proc->rt;
+
     if (sending) {
         I(rt, port);
         port->writers.swapdel(this);
