@@ -146,9 +146,9 @@ typedef enum {
 } abi_t;
 
 struct frame_glue_fns {
-    uintptr_t mark_glue;
-    uintptr_t drop_glue;
-    uintptr_t reloc_glue;
+    uintptr_t mark_glue_off;
+    uintptr_t drop_glue_off;
+    uintptr_t reloc_glue_off;
 };
 
 template <typename T>
@@ -346,24 +346,18 @@ rust_crate
     // The following fields are emitted by the compiler for the static
     // rust_crate object inside each compiled crate.
 
-    uintptr_t self_addr;          // Non-relocated crate address of 'this'.
-
-    uintptr_t debug_abbrev_addr;  // Non-relocated address of .debug_abbrev.
+    uintptr_t debug_abbrev_off;   // Memory offset from this to .debug_abbrev.
     size_t debug_abbrev_sz;       // Size of .debug_abbrev.
 
-    uintptr_t debug_info_addr;    // Non-relocated address of .debug_info.
+    uintptr_t debug_info_off;     // Memory offset from this to .debug_info.
     size_t debug_info_sz;         // Size of .debug_info.
 
-    uintptr_t c_to_proc_glue;
-    uintptr_t main_exit_proc_glue;
-    uintptr_t unwind_glue;
-    uintptr_t yield_glue;
+    uintptr_t c_to_proc_glue_off;
+    uintptr_t main_exit_proc_glue_off;
+    uintptr_t unwind_glue_off;
+    uintptr_t yield_glue_off;
 
     // The remainder of rust_crate is stateless, reads from dwarf tables.
-
-    ptrdiff_t addr_diff() {
-        return self_addr - (uintptr_t)this;
-    }
 
     struct mem_area
     {
@@ -483,28 +477,28 @@ rust_crate
 public:
 
     c_to_proc_glue_ty get_c_to_proc_glue() {
-        return (c_to_proc_glue_ty) (addr_diff() + c_to_proc_glue);
+        return (c_to_proc_glue_ty) ((uintptr_t)this + c_to_proc_glue_off);
     }
 
     uintptr_t get_main_exit_proc_glue() {
-        return (addr_diff() + main_exit_proc_glue);
+        return ((uintptr_t)this + main_exit_proc_glue_off);
     }
 
     uintptr_t get_unwind_glue() {
-        return (addr_diff() + unwind_glue);
+        return ((uintptr_t)this + unwind_glue_off);
     }
 
     uintptr_t get_yield_glue() {
-        return (addr_diff() + yield_glue);
+        return ((uintptr_t)this + yield_glue_off);
     }
 
     mem_area get_debug_info(rust_rt *rt) {
-        return mem_area(rt, addr_diff() + debug_info_addr,
+        return mem_area(rt, ((uintptr_t)this + debug_info_off),
                         debug_info_sz);
     }
 
     mem_area get_debug_abbrev(rust_rt *rt) {
-        return mem_area(rt, addr_diff() + debug_abbrev_addr,
+        return mem_area(rt, ((uintptr_t)this + debug_abbrev_off),
                         debug_abbrev_sz);
     }
 
@@ -735,6 +729,10 @@ public:
 
     void dump(rust_rt *rt)
     {
+        rt->log(LOG_MEM, "this: 0x%" PRIxPTR, this);
+        rt->log(LOG_MEM, "debug_info_off: 0x%" PRIxPTR, debug_info_off);
+        rt->log(LOG_MEM, "debug_abbrev_off: 0x%" PRIxPTR, debug_abbrev_off);
+
         // For now, perform diagnostics only.
         mem_area abbrev_mem = get_debug_abbrev(rt);
         abbrev_reader abbrevs(abbrev_mem);

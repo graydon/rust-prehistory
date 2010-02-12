@@ -45,6 +45,13 @@ let trans_visitor
       | Il.Bits32 -> TY_u32
       | Il.Bits64 -> TY_u64
   in
+  let (word_ty_signed_mach:ty_mach) =
+    match word_bits with
+        Il.Bits8 -> TY_s8
+      | Il.Bits16 -> TY_s16
+      | Il.Bits32 -> TY_s32
+      | Il.Bits64 -> TY_s64
+  in
   let (word_slot:Ast.slot) = word_slot abi in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
 
@@ -59,6 +66,14 @@ let trans_visitor
   let imm_true = one in
   let imm_false = zero in
   let nil_ptr = Il.Mem ((Il.Abs (Asm.IMM 0L)), Il.NilTy) in
+
+  let crate_rel fix =
+    Asm.SUB (Asm.M_POS fix, Asm.M_POS cx.ctxt_crate_fixup)
+  in
+
+  let crate_rel_off fix =
+    Asm.WORD (word_ty_signed_mach, crate_rel fix)
+  in
 
   let table_of_fixups (fixups:fixup array) : Asm.frag =
     Asm.SEQ
@@ -2858,19 +2873,16 @@ let trans_visitor
              * NB: this must match the rust_crate structure
              * in the rust runtime library.
              *)
-
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_crate_fixup);
-
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_debug_abbrev_fixup);
+            crate_rel_off cx.ctxt_debug_abbrev_fixup;
             Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_abbrev_fixup);
 
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_debug_info_fixup);
+            crate_rel_off cx.ctxt_debug_info_fixup;
             Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_info_fixup);
 
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_c_to_proc_fixup);
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_main_exit_proc_glue_fixup);
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_unwind_fixup);
-            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_yield_fixup)
+            crate_rel_off cx.ctxt_c_to_proc_fixup;
+            crate_rel_off cx.ctxt_main_exit_proc_glue_fixup;
+            crate_rel_off cx.ctxt_unwind_fixup;
+            crate_rel_off cx.ctxt_yield_fixup
           |]))
     in
 
