@@ -533,13 +533,15 @@ public:
     {
         rust_rt *rt;
         size_t idx;
-        uintptr_t off;
+        uintptr_t body_off;
+        size_t body_sz;
         uintptr_t tag;
         uint8_t has_children;
-        abbrev(rust_rt *rt, size_t idx, uintptr_t off, uintptr_t tag, uint8_t has_children) :
+        abbrev(rust_rt *rt, size_t idx, uintptr_t body_off, size_t body_sz,
+               uintptr_t tag, uint8_t has_children) :
             rt(rt),
             idx(idx),
-            off(off),
+            body_off(body_off),
             tag(tag),
             has_children(has_children)
         {}
@@ -565,7 +567,7 @@ public:
                 get(has_children);
 
                 uintptr_t attr, form;
-                size_t off = tell_off();
+                size_t body_off = tell_off();
                 while (is_ok() && step_attr_form_pair(attr, form));
 
                 // rt->log(LOG_DWARF,
@@ -576,7 +578,8 @@ public:
                 if (is_ok() || at_end()) {
                     rt->log(LOG_DWARF, "read abbrev: %" PRIdPTR, idx);
                     I(rt, idx = abbrevs.length() + 1);
-                    abbrevs.push(new (rt) abbrev(rt, idx, off, tag, has_children));
+                    abbrevs.push(new (rt) abbrev(rt, idx, body_off, tell_off() - body_off,
+                                                 tag, has_children));
                 }
             }
         }
@@ -605,20 +608,31 @@ public:
         }
     };
 
-    class die : rt_owned<die>
+    struct die : rt_owned<die>
     {
+        rust_rt *rt;
         size_t idx;
         uintptr_t off;
+        size_t sz;
+        abbrev *ab;
+        die(rust_rt *rt, uintptr_t off, size_t sz, abbrev *ab)
+            : rt(rt),
+              off(off),
+              sz(sz),
+              ab(ab)
+        {}
     };
 
     class die_reader : public mem_reader
     {
         abbrev_reader &abbrevs;
+        ptr_vec<die> dies;
     public:
         die_reader(mem_area &die_mem,
                    abbrev_reader &abbrevs)
             : mem_reader(die_mem),
-              abbrevs(abbrevs)
+              abbrevs(abbrevs),
+              dies(die_mem.rt)
         {
             rust_rt *rt = mem.rt;
             uint32_t cu_unit_length = 0;
@@ -639,7 +653,7 @@ public:
                 rt->log(LOG_DWARF, "CU abbrev off: %" PRId32, cu_abbrev_off);
                 rt->log(LOG_DWARF, "size of address: %" PRId8, sizeof_addr);
                 while (is_ok() && tell_off() < cu_base + cu_unit_length) {
-                    size_t die_off = tell_off();
+                    size_t off = tell_off();
                     size_t ab_idx;
                     get_uleb(ab_idx);
 
@@ -649,14 +663,14 @@ public:
                         break;
                     }
 
-                    rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, die_off, ab_idx);
+                    rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, off, ab_idx);
                     abbrev *ab = abbrevs.get_abbrev(ab_idx);
                     if (!ab) {
                         fail();
                         break;
                     }
                     abbrevs.reset();
-                    abbrevs.seek_off(ab->off);
+                    abbrevs.seek_off(ab->body_off);
                     uintptr_t attr, form;
                     while (abbrevs.step_attr_form_pair(attr, form) && is_ok()) {
                         char buf[128];
@@ -722,7 +736,14 @@ public:
                             break;
                         }
                     }
+                    dies.push(new (rt) die(rt, off, tell_off() - off, ab));
                 }
+            }
+        }
+
+        ~die_reader() {
+            while (dies.length()) {
+                delete dies.pop();
             }
         }
     };
