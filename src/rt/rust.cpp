@@ -1417,7 +1417,6 @@ rust_rt::remove_proc_from_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc)
         (uintptr_t)proc, state_vec_name(v), (uintptr_t)v);
     I(this, (*v)[proc->idx] == proc);
     v->swapdel(proc);
-    v->trim(n_live_procs());
 }
 
 const char *
@@ -1723,7 +1722,6 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
         I(rt, q->idx == i);
         if (attempt_transmission(rt, q, proc)) {
             port->writers.swapdel(q);
-            port->writers.trim(port->writers.length());
             q->sending = false;
         }
     } else {
