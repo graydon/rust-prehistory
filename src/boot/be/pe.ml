@@ -603,7 +603,7 @@ let pe_text_section
       ~start_fixup
       ~rust_start_fixup
       ~main_fn_fixup
-      ~global_glue: sem.Semant.ctxt_global_glue_fixup
+      ~crate_fixup: sem.Semant.ctxt_crate_fixup
       ~indirect_start: true;
     def_aligned
       text_fixup
@@ -736,29 +736,29 @@ let emit_file
 (*
   let debug_aranges_header = (pe_section_header
                                 ~id: SECTION_ID_DEBUG_ARANGES
-                                ~hdr_fixup: dw.Dwarf.debug_aranges_fixup)
+                                ~hdr_fixup: sem.Semant.ctxt_debug_aranges_fixup)
   in
   let debug_pubnames_header = (pe_section_header
                                  ~id: SECTION_ID_DEBUG_PUBNAMES
-                                 ~hdr_fixup: dw.Dwarf.debug_pubnames_fixup)
+                                 ~hdr_fixup: sem.Semant.ctxt_debug_pubnames_fixup)
   in
 *)
   let debug_info_header = (pe_section_header
                              ~id: SECTION_ID_DEBUG_INFO
-                             ~hdr_fixup: dw.Dwarf.debug_info_fixup)
+                             ~hdr_fixup: sem.Semant.ctxt_debug_info_fixup)
   in
   let debug_abbrev_header = (pe_section_header
                                ~id: SECTION_ID_DEBUG_ABBREV
-                               ~hdr_fixup: dw.Dwarf.debug_abbrev_fixup)
+                               ~hdr_fixup: sem.Semant.ctxt_debug_abbrev_fixup)
   in
 (*
   let debug_line_header = (pe_section_header
                              ~id: SECTION_ID_DEBUG_LINE
-                             ~hdr_fixup: dw.Dwarf.debug_line_fixup)
+                             ~hdr_fixup: sem.Semant.ctxt_debug_line_fixup)
   in
   let debug_frame_header = (pe_section_header
                               ~id: SECTION_ID_DEBUG_FRAME
-                              ~hdr_fixup: dw.Dwarf.debug_frame_fixup)
+                              ~hdr_fixup: sem.Semant.ctxt_debug_frame_fixup)
   in
 *)
   let all_headers = (def_file_aligned
@@ -805,24 +805,24 @@ let emit_file
   in
 (*
   let debug_aranges_section =
-    def_aligned dw.Dwarf.debug_aranges_fixup dw.Dwarf.debug_aranges
+    def_aligned sem.Semant.ctxt_debug_aranges_fixup dw.Dwarf.debug_aranges
   in
   let debug_pubnames_section =
-    def_aligned dw.Dwarf.debug_pubnames_fixup dw.Dwarf.debug_pubnames
+    def_aligned sem.Semant.ctxt_debug_pubnames_fixup dw.Dwarf.debug_pubnames
   in
 *)
   let debug_info_section =
-    def_aligned dw.Dwarf.debug_info_fixup dw.Dwarf.debug_info
+    def_aligned sem.Semant.ctxt_debug_info_fixup dw.Dwarf.debug_info
   in
   let debug_abbrev_section =
-    def_aligned dw.Dwarf.debug_abbrev_fixup dw.Dwarf.debug_abbrev
+    def_aligned sem.Semant.ctxt_debug_abbrev_fixup dw.Dwarf.debug_abbrev
   in
 (*
   let debug_line_section =
-    def_aligned dw.Dwarf.debug_line_fixup dw.Dwarf.debug_line
+    def_aligned sem.Semant.ctxt_debug_line_fixup dw.Dwarf.debug_line
   in
   let debug_frame_section =
-    def_aligned dw.Dwarf.debug_frame_fixup dw.Dwarf.debug_frame
+    def_aligned sem.Semant.ctxt_debug_frame_fixup dw.Dwarf.debug_frame
   in
 *)
 

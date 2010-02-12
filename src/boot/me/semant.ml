@@ -42,7 +42,7 @@ type data =
   | DATA_frame_glue_fns of node_id
   | DATA_mod_table of node_id
   | DATA_mod_pair of node_id
-  | DATA_global_glue_fns
+  | DATA_crate
 ;;
 
 type glue_code = (glue, code) Hashtbl.t;;
@@ -116,7 +116,16 @@ type ctxt =
       ctxt_c_to_proc_fixup: fixup;
       ctxt_yield_fixup: fixup;
       ctxt_unwind_fixup: fixup;
-      ctxt_global_glue_fixup: fixup;
+
+      ctxt_debug_aranges_fixup: fixup;
+      ctxt_debug_pubnames_fixup: fixup;
+      ctxt_debug_info_fixup: fixup;
+      ctxt_debug_abbrev_fixup: fixup;
+      ctxt_debug_line_fixup: fixup;
+      ctxt_debug_frame_fixup: fixup;
+
+      ctxt_crate_fixup: fixup;
+
       ctxt_file_code: file_code;
       ctxt_all_item_code: item_code;
       ctxt_glue_code: glue_code;
@@ -176,7 +185,15 @@ let new_ctxt sess abi crate =
     ctxt_c_to_proc_fixup = new_fixup "c-to-proc glue";
     ctxt_yield_fixup = new_fixup "yield glue";
     ctxt_unwind_fixup = new_fixup "unwind glue";
-    ctxt_global_glue_fixup = new_fixup "global glue table";
+
+    ctxt_debug_aranges_fixup = new_fixup "debug_aranges section";
+    ctxt_debug_pubnames_fixup = new_fixup "debug_pubnames section";
+    ctxt_debug_info_fixup = new_fixup "debug_info section";
+    ctxt_debug_abbrev_fixup = new_fixup "debug_abbrev section";
+    ctxt_debug_line_fixup = new_fixup "debug_line section";
+    ctxt_debug_frame_fixup = new_fixup "debug_frame section";
+
+    ctxt_crate_fixup = new_fixup "root crate structure";
     ctxt_file_code = Hashtbl.create 0;
     ctxt_all_item_code = Hashtbl.create 0;
     ctxt_glue_code = Hashtbl.create 0;

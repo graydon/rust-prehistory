@@ -647,12 +647,12 @@ let emit_file
   (* Officially, Apple doesn't support DWARF sections like this. Whatever. *)
   let debug_info_section =
     def_aligned data_sect_align
-      dwarf.Dwarf.debug_info_fixup
+      sem.Semant.ctxt_debug_info_fixup
       dwarf.Dwarf.debug_info
   in
   let debug_abbrev_section =
     def_aligned data_sect_align
-      dwarf.Dwarf.debug_abbrev_fixup
+      sem.Semant.ctxt_debug_abbrev_fixup
       dwarf.Dwarf.debug_abbrev
   in
 
@@ -671,7 +671,7 @@ let emit_file
       (SEQ
          [|
            WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
-           BYTE (Int64.to_int (fold_flags n_type_code nty)); 
+           BYTE (Int64.to_int (fold_flags n_type_code nty));
            BYTE sect_index;
            WORD (TY_u16, IMM (n_desc_code nd));
            WORD (TY_u32, nv);
@@ -838,8 +838,8 @@ let emit_file
         [VM_PROT_READ]
         [VM_PROT_READ]
         [|
-          ("__debug_info", data_sect_align_log2, [], S_REGULAR, dwarf.Dwarf.debug_info_fixup);
-          ("__debug_abbrev", data_sect_align_log2, [], S_REGULAR, dwarf.Dwarf.debug_abbrev_fixup);
+          ("__debug_info", data_sect_align_log2, [], S_REGULAR, sem.Semant.ctxt_debug_info_fixup);
+          ("__debug_abbrev", data_sect_align_log2, [], S_REGULAR, sem.Semant.ctxt_debug_abbrev_fixup);
         |];
 
       macho_segment_command "__LINKEDIT" linkedit_segment_fixup
@@ -901,7 +901,7 @@ let emit_file
     (* Push 16 bytes to preserve SSE alignment. *)
     Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
     Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_global_glue_fixup)));
+    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_crate_fixup)));
     Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_main_fn_fixup)));
     Il.emit e (Il.call (X86.rc X86.eax) (Il.indirect_code_ptr rust_start_fixup));
     Il.emit e (Il.Pop (X86.rc X86.ecx));

@@ -71,7 +71,7 @@ static uint32_t const LOG_TRACE =     0x80;
                     " retpc: 0x%" PRIxPTR,                              \
                     (proc), __builtin_return_address(0))
 #else
-#define LOG_UPCALL_ENTRY(rt) ((void)0)                                  \
+#define LOG_UPCALL_ENTRY(proc)                                          \
     (proc)->rt->log(LOG_UPCALL,                                         \
                     "upcall proc: 0x%" PRIxPTR                          \
                     (proc))
@@ -141,13 +141,6 @@ typedef enum {
     abi_code_cdecl = 0,
     abi_code_rust = 1
 } abi_t;
-
-struct global_glue_fns {
-    void CDECL (*c_to_proc_glue)(rust_proc *);
-    uintptr_t main_exit_proc_glue;
-    uintptr_t unwind_glue;
-    uintptr_t yield_glue;
-};
 
 struct frame_glue_fns {
     uintptr_t mark_glue;
@@ -269,9 +262,11 @@ struct rust_str : public rc_base {
     ~rust_str();
 };
 
+class rust_crate;
+
 struct rust_rt {
     rust_srv *srv;
-    global_glue_fns *global_glue;
+    rust_crate *crate;
     uint32_t logbits;
     ptr_vec<rust_proc> running_procs;
     ptr_vec<rust_proc> blocked_procs;
@@ -285,7 +280,7 @@ struct rust_rt {
     pthread_attr_t attr;
 #endif
 
-    rust_rt(rust_srv *srv, global_glue_fns *global_glue);
+    rust_rt(rust_srv *srv, rust_crate *crate);
     ~rust_rt();
 
     void activate(rust_proc *proc);
@@ -331,6 +326,173 @@ inline void *operator new(size_t sz, rust_rt &rt) {
 inline void *operator new[](size_t sz, rust_rt &rt) {
     return rt.malloc(sz);
 }
+
+// Crates.
+
+typedef void CDECL (*c_to_proc_glue_ty)(rust_proc *);
+
+class
+rust_crate
+{
+    // A crate is compiled thinking that its address is self_addr.
+    // When the crate is loaded at some address, 'this' may not be
+    // equal to self_addr: a difference means that the crate was
+    // relocated.  That difference is added to all subsequent accesses
+    // to static data pointers.
+
+    // The following 5 fields are emitted by the compiler for the static
+    // rust_crate object inside each compiled crate.
+
+    uintptr_t self_addr;          // Non-relocated crate address of 'this'.
+
+    uintptr_t debug_abbrev_addr;  // Non-relocated address of .debug_abbrev.
+    size_t debug_abbrev_sz;       // Size of .debug_abbrev.
+
+    uintptr_t debug_info_addr;    // Non-relocated address of .debug_info.
+    size_t debug_info_sz;         // Size of .debug_info.
+
+    uintptr_t c_to_proc_glue;
+    uintptr_t main_exit_proc_glue;
+    uintptr_t unwind_glue;
+    uintptr_t yield_glue;
+
+    // The remainder of rust_crate is stateless, reads from dwarf tables.
+
+    ptrdiff_t addr_diff() {
+        return self_addr - (uintptr_t)this;
+    }
+
+    class mem_reader;
+
+    class mem_area
+    {
+        rust_rt *rt;
+        uintptr_t base;
+        uintptr_t lim;
+
+        friend class mem_reader;
+
+    public:
+        mem_area(rust_rt *rt, uintptr_t pos, size_t sz)
+            : rt(rt),
+              base(pos),
+              lim(pos + sz)
+        {
+            rt->log(LOG_MEM, "new mem_area [0x%" PRIxPTR ",0x%" PRIxPTR "]",
+                    base, lim);
+        }
+    };
+
+    class mem_reader
+    {
+        mem_area &mem;
+        bool ok;
+        uintptr_t pos;
+    public:
+        mem_reader(mem_area &m)
+            : mem(mem),
+              ok(true),
+              pos(m.base)
+        {}
+
+        uintptr_t tell() {
+            return pos;
+        }
+
+        void seek(uintptr_t p) {
+            if (!ok || p < mem.base || p >= mem.lim)
+                ok = false;
+            else
+                pos = p;
+        }
+
+        template<typename T>
+        void get(T &out) {
+            if (pos < mem.base
+                || pos >= mem.lim
+                || pos + sizeof(T) >= mem.lim)
+                ok = false;
+            if (!ok)
+                return;
+            out = *(reinterpret_cast<T*>(pos));
+            pos += sizeof(T);
+            I(mem.rt, mem.base <= pos && pos < mem.lim);
+        }
+
+        template<typename T>
+        void adv() {
+            if (pos < mem.base
+                || pos >= mem.lim
+                || pos + sizeof(T) >= mem.lim)
+                ok = false;
+            if (!ok)
+                return;
+            pos += sizeof(T);
+            I(mem.rt, mem.base <= pos && pos < mem.lim);
+        }
+    };
+
+public:
+
+    c_to_proc_glue_ty get_c_to_proc_glue() {
+        return (c_to_proc_glue_ty) (addr_diff() + c_to_proc_glue);
+    }
+
+    uintptr_t get_main_exit_proc_glue() {
+        return (addr_diff() + main_exit_proc_glue);
+    }
+
+    uintptr_t get_unwind_glue() {
+        return (addr_diff() + unwind_glue);
+    }
+
+    uintptr_t get_yield_glue() {
+        return (addr_diff() + yield_glue);
+    }
+
+    mem_area get_debug_info(rust_rt *rt) {
+        return mem_area(rt, addr_diff() + debug_info_addr,
+                        debug_info_sz);
+    }
+
+    mem_area get_debug_abbrev(rust_rt *rt) {
+        return mem_area(rt, addr_diff() + debug_abbrev_addr,
+                        debug_abbrev_sz);
+    }
+
+
+    class abbrev_reader : public mem_reader
+    {
+    public:
+        abbrev_reader(mem_area &abbrev_mem)
+            : mem_reader(abbrev_mem)
+        {}
+    };
+
+    class die_reader : public mem_reader
+    {
+        abbrev_reader &abbrevs;
+    public:
+        die_reader(mem_area &die_mem,
+                   abbrev_reader &abbrevs)
+            : mem_reader(die_mem),
+              abbrevs(abbrevs)
+        {}
+    };
+
+    void dump(rust_rt *rt)
+    {
+        // For now, perform diagnostics only.
+        mem_area abbrev_mem = get_debug_abbrev(rt);
+        abbrev_reader abbrevs(abbrev_mem);
+
+        mem_area die_mem = get_debug_info(rt);
+        die_reader dies(die_mem, abbrevs);
+    }
+};
+
+
+
 
 // A cond(ition) is something we can block on. This can be a channel (writing), a
 // port (reading) or a proc (waiting).
@@ -1101,7 +1263,7 @@ rust_proc::yield(size_t nargs)
 {
     rt->log(LOG_PROC,
             "proc 0x%" PRIxPTR " yielding", this);
-    run_after_return(nargs, rt->global_glue->yield_glue);
+    run_after_return(nargs, rt->crate->get_yield_glue());
 }
 
 static inline uintptr_t
@@ -1120,7 +1282,7 @@ rust_proc::kill() {
     unblock();
     if (this == rt->root_proc)
         rt->fail();
-    run_on_resume(rt->global_glue->unwind_glue);
+    run_on_resume(rt->crate->get_unwind_glue());
 }
 
 void
@@ -1131,7 +1293,7 @@ rust_proc::fail(size_t nargs) {
     unblock();
     if (this == rt->root_proc)
         rt->fail();
-    run_after_return(nargs, rt->global_glue->unwind_glue);
+    run_after_return(nargs, rt->crate->get_unwind_glue());
     if (spawner) {
         rt->log(LOG_PROC,
                 "proc 0x%" PRIxPTR
@@ -1252,9 +1414,9 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     }
 }
 
-rust_rt::rust_rt(rust_srv *srv, global_glue_fns *global_glue) :
+rust_rt::rust_rt(rust_srv *srv, rust_crate *crate) :
     srv(srv),
-    global_glue(global_glue),
+    crate(crate),
     logbits(get_logbits()),
     running_procs(this),
     blocked_procs(this),
@@ -1309,7 +1471,7 @@ rust_rt::~rust_rt() {
 void
 rust_rt::activate(rust_proc *proc) {
     curr_proc = proc;
-    global_glue->c_to_proc_glue(proc);
+    crate->get_c_to_proc_glue()(proc);
     curr_proc = NULL;
 }
 
@@ -1843,7 +2005,7 @@ upcall_new_rt(rust_proc *proc)
 {
     LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
-    rust_rt *new_rt = new rust_rt(rt->srv->clone(), rt->global_glue);
+    rust_rt *new_rt = new rust_rt(rt->srv->clone(), rt->crate);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall new_rt() = 0x%" PRIxPTR,
             new_rt);
@@ -1878,7 +2040,7 @@ rust_main_loop(rust_rt *rt)
     rust_proc *proc;
 
     rt->log(LOG_RT, "control is in rust runtime library");
-    rt->logptr("main exit-proc glue", rt->global_glue->main_exit_proc_glue);
+    rt->logptr("main exit-proc glue", rt->crate->get_main_exit_proc_glue());
 
     proc = rt->sched();
 
@@ -2002,15 +2164,16 @@ implode(rust_proc *proc, rust_vec *v)
 }
 
 extern "C" CDECL int
-rust_start(uintptr_t main_fn, global_glue_fns *global_glue)
+rust_start(uintptr_t main_fn, rust_crate *crate)
 {
     int ret;
-
     {
         rust_srv srv;
-        rust_rt rt(&srv, global_glue);
+        rust_rt rt(&srv, crate);
 
-        rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.global_glue->main_exit_proc_glue, main_fn, NULL, 0);
+        crate->dump(&rt);
+
+        rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
 
         ret = rust_main_loop(&rt);
     }

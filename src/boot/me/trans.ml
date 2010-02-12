@@ -2849,21 +2849,29 @@ let trans_visitor
         in
           htab_put cx.ctxt_glue_code glue code
     in
-    let global_glue_fns =
-      (cx.ctxt_global_glue_fixup,
+    let crate =
+      (cx.ctxt_crate_fixup,
        Asm.DEF
-         (cx.ctxt_global_glue_fixup,
-          table_of_fixups
-            [|
+         (cx.ctxt_crate_fixup,
+          Asm.SEQ [|
             (* 
-             * NB: this must match the struct-offsets given in ABI
-             * & rust runtime library.
+             * NB: this must match the rust_crate structure
+             * in the rust runtime library.
              *)
-              cx.ctxt_c_to_proc_fixup;
-              cx.ctxt_main_exit_proc_glue_fixup;
-              cx.ctxt_unwind_fixup;
-              cx.ctxt_yield_fixup;
-            |]))
+
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_crate_fixup);
+
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_debug_abbrev_fixup);
+            Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_abbrev_fixup);
+
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_debug_info_fixup);
+            Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_info_fixup);
+
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_c_to_proc_fixup);
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_main_exit_proc_glue_fixup);
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_unwind_fixup);
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_yield_fixup)
+          |]))
     in
 
       (* Emit additional glue we didn't do elsewhere. *)
@@ -2884,7 +2892,7 @@ let trans_visitor
            e nabi_rust (upcall_fixup "upcall_exit"));
 
       htab_put cx.ctxt_data
-        DATA_global_glue_fns global_glue_fns
+        DATA_crate crate
   in
 
     { inner with

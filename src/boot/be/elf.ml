@@ -794,7 +794,7 @@ let elf32_linux_x86_file
            ~shname_string_fixup: debug_aranges_section_name_fixup
            ~sh_type: SHT_PROGBITS
            ~sh_flags: []
-           ~section_fixup: (Some dwarf.Dwarf.debug_aranges_fixup)
+           ~section_fixup: (Some sem.Semant.ctxt_debug_aranges_fixup)
            ~sh_addralign: 8L
            ~sh_entsize: 0L
            ~sh_link: None);
@@ -806,7 +806,7 @@ let elf32_linux_x86_file
            ~shname_string_fixup: debug_pubnames_section_name_fixup
            ~sh_type: SHT_PROGBITS
            ~sh_flags: []
-           ~section_fixup: (Some dwarf.Dwarf.debug_pubnames_fixup)
+           ~section_fixup: (Some sem.Semant.ctxt_debug_pubnames_fixup)
            ~sh_addralign: 1L
            ~sh_entsize: 0L
            ~sh_link: None);
@@ -818,7 +818,7 @@ let elf32_linux_x86_file
            ~shname_string_fixup: debug_info_section_name_fixup
            ~sh_type: SHT_PROGBITS
            ~sh_flags: []
-           ~section_fixup: (Some dwarf.Dwarf.debug_info_fixup)
+           ~section_fixup: (Some sem.Semant.ctxt_debug_info_fixup)
            ~sh_addralign: 1L
            ~sh_entsize: 0L
            ~sh_link: None);
@@ -829,7 +829,7 @@ let elf32_linux_x86_file
            ~shname_string_fixup: debug_abbrev_section_name_fixup
            ~sh_type: SHT_PROGBITS
            ~sh_flags: []
-           ~section_fixup: (Some dwarf.Dwarf.debug_abbrev_fixup)
+           ~section_fixup: (Some sem.Semant.ctxt_debug_abbrev_fixup)
            ~sh_addralign: 1L
            ~sh_entsize: 0L
            ~sh_link: None);
@@ -840,7 +840,7 @@ let elf32_linux_x86_file
            ~shname_string_fixup: debug_line_section_name_fixup
            ~sh_type: SHT_PROGBITS
            ~sh_flags: []
-           ~section_fixup: (Some dwarf.Dwarf.debug_line_fixup)
+           ~section_fixup: (Some sem.Semant.ctxt_debug_line_fixup)
            ~sh_addralign: 1L
            ~sh_entsize: 0L
            ~sh_link: None);
@@ -853,7 +853,7 @@ let elf32_linux_x86_file
            ~shname_string_fixup: debug_frame_section_name_fixup
            ~sh_type: SHT_PROGBITS
            ~sh_flags: []
-           ~section_fixup: (Some dwarf.Dwarf.debug_frame_fixup)
+           ~section_fixup: (Some sem.Semant.ctxt_debug_frame_fixup)
            ~sh_addralign: 4L
            ~sh_entsize: 0L
            ~sh_link: None);
@@ -1223,22 +1223,22 @@ let elf32_linux_x86_file
   in
 
   let debug_aranges_section =
-    def_aligned dwarf.Dwarf.debug_aranges_fixup dwarf.Dwarf.debug_aranges
+    def_aligned sem.Semant.ctxt_debug_aranges_fixup dwarf.Dwarf.debug_aranges
   in
   let debug_pubnames_section =
-    def_aligned dwarf.Dwarf.debug_pubnames_fixup dwarf.Dwarf.debug_pubnames
+    def_aligned sem.Semant.ctxt_debug_pubnames_fixup dwarf.Dwarf.debug_pubnames
   in
   let debug_info_section =
-    def_aligned dwarf.Dwarf.debug_info_fixup dwarf.Dwarf.debug_info
+    def_aligned sem.Semant.ctxt_debug_info_fixup dwarf.Dwarf.debug_info
   in
   let debug_abbrev_section =
-    def_aligned dwarf.Dwarf.debug_abbrev_fixup dwarf.Dwarf.debug_abbrev
+    def_aligned sem.Semant.ctxt_debug_abbrev_fixup dwarf.Dwarf.debug_abbrev
   in
   let debug_line_section =
-    def_aligned dwarf.Dwarf.debug_line_fixup dwarf.Dwarf.debug_line
+    def_aligned sem.Semant.ctxt_debug_line_fixup dwarf.Dwarf.debug_line
   in
   let debug_frame_section =
-    def_aligned dwarf.Dwarf.debug_frame_fixup dwarf.Dwarf.debug_frame
+    def_aligned sem.Semant.ctxt_debug_frame_fixup dwarf.Dwarf.debug_frame
   in
 
   let load_address = 0x0804_8000L in
@@ -1378,7 +1378,7 @@ let emit_file
       X86.objfile_start e
         ~start_fixup ~rust_start_fixup
         ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
-        ~global_glue: sem.Semant.ctxt_global_glue_fixup
+        ~crate_fixup: sem.Semant.ctxt_crate_fixup
         ~indirect_start: false;
       X86.frags_of_emitted_quads sess e
   in

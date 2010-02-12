@@ -1088,13 +1088,6 @@ type debug_records =
       debug_abbrev: Asm.frag;
       debug_line: Asm.frag;
       debug_frame: Asm.frag;
-
-      debug_aranges_fixup: fixup;
-      debug_pubnames_fixup: fixup;
-      debug_info_fixup: fixup;
-      debug_abbrev_fixup: fixup;
-      debug_line_fixup: fixup;
-      debug_frame_fixup: fixup;
     }
 
 type abbrev = (dw_tag * dw_children * ((dw_at * dw_form) array));;
@@ -1850,18 +1843,12 @@ let process_crate
   let cu_lines = ref [] in
   let cu_frames = ref [] in
 
-  let debug_aranges_fixup = new_fixup "debug_aranges section" in
-  let debug_pubnames_fixup = new_fixup "debug_pubnames section" in
-  let debug_info_fixup = new_fixup "debug_info section" in
-  let debug_abbrev_fixup = new_fixup "debug_abbrev section" in
-  let debug_line_fixup = new_fixup "debug_line section" in
-  let debug_frame_fixup = new_fixup "debug_frame section" in
   let path = Stack.create () in
 
   let passes =
     [|
       dwarf_visitor cx Walk.empty_visitor path
-        debug_info_fixup
+        cx.ctxt_debug_info_fixup
         cu_aranges cu_pubnames
         cu_infos cu_abbrevs
         cu_lines cu_frames
@@ -1880,13 +1867,6 @@ let process_crate
       debug_abbrev = SEQ (Array.of_list (List.rev (!cu_abbrevs)));
       debug_line = SEQ (Array.of_list (List.rev (!cu_lines)));
       debug_frame = SEQ (Array.of_list (List.rev (!cu_frames)));
-
-      debug_aranges_fixup = debug_aranges_fixup;
-      debug_pubnames_fixup = debug_pubnames_fixup;
-      debug_info_fixup = debug_info_fixup;
-      debug_abbrev_fixup = debug_abbrev_fixup;
-      debug_line_fixup = debug_line_fixup;
-      debug_frame_fixup = debug_frame_fixup;
     }
 ;;
 
