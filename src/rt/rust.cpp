@@ -340,7 +340,7 @@ rust_crate
     // relocated.  That difference is added to all subsequent accesses
     // to static data pointers.
 
-    // The following 5 fields are emitted by the compiler for the static
+    // The following fields are emitted by the compiler for the static
     // rust_crate object inside each compiled crate.
 
     uintptr_t self_addr;          // Non-relocated crate address of 'this'.
