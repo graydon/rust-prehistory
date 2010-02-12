@@ -63,6 +63,7 @@ static uint32_t const LOG_UPCALL =    0x10;
 static uint32_t const LOG_RT =        0x20;
 static uint32_t const LOG_ULOG =      0x40;
 static uint32_t const LOG_TRACE =     0x80;
+static uint32_t const LOG_DWARF =    0x100;
 
 #ifdef __GNUC__
 #define LOG_UPCALL_ENTRY(proc)                                          \
@@ -100,6 +101,8 @@ get_logbits()
             bits |= LOG_ULOG;
         if (strstr(c, "trace"))
             bits |= LOG_TRACE;
+        if (strstr(c, "dwarf"))
+            bits |= LOG_DWARF;
         if (strstr(c, "all"))
             bits = 0xffffffff;
     }
@@ -362,17 +365,12 @@ rust_crate
         return self_addr - (uintptr_t)this;
     }
 
-    class mem_reader;
-
-    class mem_area
+    struct mem_area
     {
         rust_rt *rt;
         uintptr_t base;
         uintptr_t lim;
 
-        friend class mem_reader;
-
-    public:
         mem_area(rust_rt *rt, uintptr_t pos, size_t sz)
             : rt(rt),
               base(pos),
@@ -385,50 +383,100 @@ rust_crate
 
     class mem_reader
     {
+    protected:
         mem_area &mem;
         bool ok;
         uintptr_t pos;
     public:
+
+        bool is_ok() {
+            return ok;
+        }
+
+        bool at_end() {
+            return pos == mem.lim;
+        }
+
+        void fail() {
+            ok = false;
+        }
+
+        void reset() {
+            pos = mem.base;
+            ok = true;
+        }
+
         mem_reader(mem_area &m)
-            : mem(mem),
+            : mem(m),
               ok(true),
               pos(m.base)
         {}
 
-        uintptr_t tell() {
+        size_t tell_abs() {
             return pos;
         }
 
-        void seek(uintptr_t p) {
+        size_t tell_off() {
+            return pos - mem.base;
+        }
+
+        void seek_abs(uintptr_t p) {
             if (!ok || p < mem.base || p >= mem.lim)
                 ok = false;
             else
                 pos = p;
         }
 
+        void seek_off(uintptr_t p) {
+            seek_abs(p + mem.base);
+        }
+
         template<typename T>
         void get(T &out) {
             if (pos < mem.base
                 || pos >= mem.lim
-                || pos + sizeof(T) >= mem.lim)
+                || pos + sizeof(T) > mem.lim)
                 ok = false;
             if (!ok)
                 return;
+            // mem.rt->log(LOG_MEM, "get %d bytes @ 0x%" PRIxPTR, sizeof(T), pos);
             out = *(reinterpret_cast<T*>(pos));
             pos += sizeof(T);
-            I(mem.rt, mem.base <= pos && pos < mem.lim);
+            ok &= !at_end();
+            I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
         }
 
         template<typename T>
-        void adv() {
+        void get_uleb(T &out) {
+            out = T(0);
+            for (size_t i = 0; i < sizeof(T) && ok; ++i) {
+                uint8_t byte;
+                get(byte);
+                out <<= 7;
+                out |= byte & 0x7f;
+                if (!(byte & 0x80))
+                    break;
+            }
+            // mem.rt->log(LOG_MEM, "got uleb 0x%" PRIxPTR, out);
+            I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
+        }
+
+        void adv(size_t amt) {
             if (pos < mem.base
                 || pos >= mem.lim
-                || pos + sizeof(T) >= mem.lim)
+                || pos + amt > mem.lim)
                 ok = false;
             if (!ok)
                 return;
-            pos += sizeof(T);
-            I(mem.rt, mem.base <= pos && pos < mem.lim);
+            // mem.rt->log(LOG_MEM, "adv %d bytes", amt);
+            pos += amt;
+            ok &= !at_end();
+            I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
+        }
+
+        template<typename T>
+        void adv_sizeof(T &) {
+            adv(sizeof(T));
         }
     };
 
@@ -461,12 +509,112 @@ public:
     }
 
 
+    // Dwarf stuff.
+
+    enum dw_form {
+        DW_FORM_addr = 0x01,
+        DW_FORM_block2 = 0x03,
+        DW_FORM_block4 = 0x04,
+        DW_FORM_data2 = 0x05,
+        DW_FORM_data4 = 0x06,
+        DW_FORM_data8 = 0x07,
+        DW_FORM_string = 0x08,
+        DW_FORM_block = 0x09,
+        DW_FORM_block1 = 0x0a,
+        DW_FORM_data1 = 0x0b,
+        DW_FORM_flag = 0x0c,
+        DW_FORM_sdata = 0x0d,
+        DW_FORM_strp = 0x0e,
+        DW_FORM_udata = 0x0f,
+        DW_FORM_ref_addr = 0x10,
+        DW_FORM_ref1 = 0x11,
+        DW_FORM_ref2 = 0x12,
+        DW_FORM_ref4 = 0x13,
+        DW_FORM_ref8 = 0x14,
+        DW_FORM_ref_udata = 0x15,
+        DW_FORM_indirect = 0x16
+    };
+
+    struct abbrev : rt_owned<abbrev>
+    {
+        rust_rt *rt;
+        size_t idx;
+        uintptr_t off;
+        uintptr_t tag;
+        uint8_t has_children;
+        abbrev(rust_rt *rt, size_t idx, uintptr_t off, uintptr_t tag, uint8_t has_children) :
+            rt(rt),
+            idx(idx),
+            off(off),
+            tag(tag),
+            has_children(has_children)
+        {}
+    };
+
     class abbrev_reader : public mem_reader
     {
+        ptr_vec<abbrev> abbrevs;
     public:
         abbrev_reader(mem_area &abbrev_mem)
-            : mem_reader(abbrev_mem)
-        {}
+            : mem_reader(abbrev_mem),
+              abbrevs(abbrev_mem.rt)
+        {
+            rust_rt *rt = mem.rt;
+            while (is_ok()) {
+
+                // rt->log(LOG_DWARF, "reading new abbrev at 0x%" PRIxPTR, tell_off());
+
+                uintptr_t idx, tag;
+                uint8_t has_children;
+                get_uleb(idx);
+                get_uleb(tag);
+                get(has_children);
+
+                uintptr_t attr, form;
+                size_t off = tell_off();
+                while (is_ok() && step_attr_form_pair(attr, form));
+
+                // rt->log(LOG_DWARF,
+                //         "finished scanning attr/form pairs, pos=0x%"
+                //         PRIxPTR ", lim=0x%" PRIxPTR ", is_ok=%d, at_end=%d",
+                //        pos, mem.lim, is_ok(), at_end());
+
+                if (is_ok() || at_end()) {
+                    rt->log(LOG_DWARF, "read abbrev: %" PRIdPTR, idx);
+                    I(rt, idx = abbrevs.length() + 1);
+                    abbrevs.push(new (rt) abbrev(rt, idx, off, tag, has_children));
+                }
+            }
+        }
+
+        abbrev *get_abbrev(size_t i) {
+            i -= 1;
+            if (i < abbrevs.length())
+                return abbrevs[i];
+            return NULL;
+        }
+
+        bool step_attr_form_pair(uintptr_t &attr, uintptr_t &form)
+        {
+            attr = 0;
+            form = 0;
+            // mem.rt->log(LOG_DWARF, "reading attr/form pair at 0x%" PRIxPTR, tell_off());
+            get_uleb(attr);
+            get_uleb(form);
+            // mem.rt->log(LOG_DWARF, "attr 0x%" PRIxPTR ", form 0x%" PRIxPTR, attr, form);
+            return ! (attr == 0 && form == 0);
+        }
+        ~abbrev_reader() {
+            while (abbrevs.length()) {
+                delete abbrevs.pop();
+            }
+        }
+    };
+
+    class die : rt_owned<die>
+    {
+        size_t idx;
+        uintptr_t off;
     };
 
     class die_reader : public mem_reader
@@ -477,7 +625,112 @@ public:
                    abbrev_reader &abbrevs)
             : mem_reader(die_mem),
               abbrevs(abbrevs)
-        {}
+        {
+            rust_rt *rt = mem.rt;
+            uint32_t cu_unit_length = 0;
+            uint16_t dwarf_vers = 0;
+            uint32_t cu_abbrev_off = 0;
+            uint8_t sizeof_addr = 0;
+
+            get(cu_unit_length);
+            uintptr_t cu_base = tell_off();
+
+            get(dwarf_vers);
+            get(cu_abbrev_off);
+            get(sizeof_addr);
+
+            if (is_ok()) {
+                rt->log(LOG_DWARF, "CU unit length: %" PRId32, cu_unit_length);
+                rt->log(LOG_DWARF, "dwarf version: %" PRId16, dwarf_vers);
+                rt->log(LOG_DWARF, "CU abbrev off: %" PRId32, cu_abbrev_off);
+                rt->log(LOG_DWARF, "size of address: %" PRId8, sizeof_addr);
+                while (is_ok() && tell_off() < cu_base + cu_unit_length) {
+                    size_t die_off = tell_off();
+                    size_t ab_idx;
+                    get_uleb(ab_idx);
+
+                    if (ab_idx == 0) {
+                        rt->log(LOG_DWARF, "hit null DIE marker at off 0x%" PRIxPTR " of 0x%" PRIxPTR,
+                                tell_abs(), mem.lim);
+                        break;
+                    }
+
+                    rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, die_off, ab_idx);
+                    abbrev *ab = abbrevs.get_abbrev(ab_idx);
+                    if (!ab) {
+                        fail();
+                        break;
+                    }
+                    abbrevs.reset();
+                    abbrevs.seek_off(ab->off);
+                    uintptr_t attr, form;
+                    while (abbrevs.step_attr_form_pair(attr, form) && is_ok()) {
+                        char buf[128];
+                        uint32_t u32;
+                        uint8_t u8;
+                        char ch;
+                        size_t i;
+
+                        switch ((dw_form)form) {
+                        case DW_FORM_string:
+                            i = 0;
+                            do {
+                                get(ch);
+                                if (i >= sizeof(buf))
+                                    break;
+                                buf[i++] = ch;
+                            } while (is_ok() && ch != '\0');
+                            if (is_ok() || at_end())
+                                rt->log(LOG_DWARF, "  DW_FORM_string: %s", buf);
+                            break;
+
+                        case DW_FORM_addr:
+                            get(u32);
+                            if (is_ok() || at_end())
+                                rt->log(LOG_DWARF, "  DW_FORM_addr: 0x%" PRIx32, u32);
+                            break;
+
+                        case DW_FORM_ref_addr:
+                            get(u32);
+                            if (is_ok() || at_end())
+                                rt->log(LOG_DWARF, "  DW_FORM_data4: 0x%" PRIx32, u32);
+                            break;
+
+                        case DW_FORM_data4:
+                            get(u32);
+                            if (is_ok() || at_end())
+                                rt->log(LOG_DWARF, "  DW_FORM_data4: 0x%" PRIx32, u32);
+                            break;
+
+                        case DW_FORM_data1:
+                            get(u8);
+                            if (is_ok() || at_end())
+                                rt->log(LOG_DWARF, "  DW_FORM_data1: 0x%" PRIx8, u8);
+                            break;
+
+                        case DW_FORM_flag:
+                            get(u8);
+                            if (is_ok() || at_end())
+                                rt->log(LOG_DWARF, "  DW_FORM_flag: 0x%" PRIx8, u8);
+                            break;
+
+
+                        case DW_FORM_block1:
+                            get(u8);
+                            adv(u8);
+                            if (is_ok() || at_end())
+                                rt->log(LOG_DWARF, "  DW_FORM_block1: %" PRId8 " bytes", u8);
+                            break;
+
+                        default:
+                            rt->log(LOG_DWARF, "  unknown dwarf form: 0x%" PRIxPTR, form);
+                            fail();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     };
 
     void dump(rust_rt *rt)
@@ -2171,7 +2424,8 @@ rust_start(uintptr_t main_fn, rust_crate *crate)
         rust_srv srv;
         rust_rt rt(&srv, crate);
 
-        crate->dump(&rt);
+        if (rt.logbits & LOG_DWARF)
+            crate->dump(&rt);
 
         rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
 
