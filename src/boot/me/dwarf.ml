@@ -1875,7 +1875,23 @@ let process_crate
  * artifacts we can distill back from said DWARF.
  *)
 
-let read_abbrevs (ar:asm_reader) ((off:int),(sz:int)) : (int,abbrev) Hashtbl.t =
+let log sess = Session.log "dwarf"
+  sess.Session.sess_log_dwarf
+  sess.Session.sess_log_out
+;;
+
+
+let iflog (sess:Session.sess) (thunk:(unit -> unit)) : unit =
+  if sess.Session.sess_log_dwarf
+  then thunk ()
+  else ()
+;;
+
+let read_abbrevs
+    (sess:Session.sess)
+    (ar:asm_reader)
+    ((off:int),(sz:int))
+    : (int,abbrev) Hashtbl.t =
   ar.asm_seek off;
   let abs = Hashtbl.create 0 in
   let rec read_abbrevs _ =
@@ -1887,11 +1903,11 @@ let read_abbrevs (ar:asm_reader) ((off:int),(sz:int)) : (int,abbrev) Hashtbl.t =
         let tag = ar.asm_get_uleb() in
         let has_children = ar.asm_get_u8() in
         let pairs = ref [] in
-        let _ = Printf.printf "abbrev: %d, tag: %d, has_children: %d\n" n tag has_children in
+        let _ = log sess "abbrev: %d, tag: %d, has_children: %d" n tag has_children in
         let rec read_pairs _ =
           let attr = ar.asm_get_uleb() in
           let form = ar.asm_get_uleb() in
-          let _ = Printf.printf "attr: %d, form: %d\n" attr form in
+          let _ = log sess "attr: %d, form: %d" attr form in
             match (attr,form) with
                 (0,0) -> Array.of_list (List.rev (!pairs))
               | _ ->
@@ -1923,14 +1939,48 @@ type die =
       die_attrs: (dw_at * (dw_form * data)) array;
       die_children: die array; }
 
+let fmt_dies
+    (ff:Format.formatter)
+    ((root:int),(dies:(int,die) Hashtbl.t))
+    : unit =
+  let rec fmt_die die =
+    Ast.fmt ff "@\nDIE <0x%x> %s" die.die_off (dw_tag_to_string die.die_tag);
+    Array.iter
+      begin
+        fun (at,(form,data)) ->
+          Ast.fmt ff "@\n  %s = " (dw_at_to_string at);
+          begin
+            match data with
+                DATA_num n -> Ast.fmt ff "0x%x"  n
+              | DATA_str s -> Ast.fmt ff "\"%s\"" s
+              | DATA_other -> Ast.fmt ff "<other>"
+          end;
+          Ast.fmt ff "  (%s)" (dw_form_to_string form)
+      end
+      die.die_attrs;
+    if (Array.length die.die_children) != 0
+    then
+      begin
+        Ast.fmt ff "@\n";
+        Ast.fmt_obox ff;
+        Ast.fmt ff "  children: ";
+        Ast.fmt_obr ff;
+        Array.iter fmt_die die.die_children;
+        Ast.fmt_cbb ff
+      end;
+  in
+    fmt_die (Hashtbl.find dies root)
+;;
+
 let read_dies
+    (sess:Session.sess)
     (ar:asm_reader)
     ((off:int),(sz:int))
     (abbrevs:(int,abbrev) Hashtbl.t)
     : (int * ((int,die) Hashtbl.t)) =
   ar.asm_seek off;
   let cu_len = ar.asm_get_u32() in
-  let _ = Printf.printf "debug_info cu_len: %d, section size %d\n" cu_len sz in
+  let _ = log sess "debug_info cu_len: %d, section size %d" cu_len sz in
   let _ = assert ((cu_len + 4) = sz) in
   let dwarf_vers = ar.asm_get_u16() in
   let _ = assert (dwarf_vers = 3) in
@@ -1957,7 +2007,7 @@ let read_dies
             if abbrev_num = 0
             then die_arr()
             else
-              let _ = Printf.printf "DIE at off <%d> with abbrev %d\n" die_off abbrev_num in
+              let _ = log sess "DIE at off <%d> with abbrev %d" die_off abbrev_num in
               let abbrev = Hashtbl.find abbrevs abbrev_num in
               let (tag, children, attrs) = abbrev in
               let attrs =
@@ -1996,41 +2046,15 @@ let read_dies
         end
   in
     ignore (read_dies (ref []));
+    iflog sess
+      begin
+        fun _ ->
+          log sess "read DIEs:";
+          log sess "%s" (Ast.fmt_to_str fmt_dies (root, all_dies));
+      end;
     (root, all_dies)
 ;;
 
-let fmt_dies
-    (ff:Format.formatter)
-    ((root:int),(dies:(int,die) Hashtbl.t))
-    : unit =
-  let rec fmt_die die =
-    Ast.fmt ff "@\nDIE <0x%x> %s" die.die_off (dw_tag_to_string die.die_tag);
-    Array.iter
-      begin
-        fun (at,(form,data)) ->
-          Ast.fmt ff "@\n  %s = " (dw_at_to_string at);
-          begin
-            match data with
-                DATA_num n -> Ast.fmt ff "0x%x"  n
-              | DATA_str s -> Ast.fmt ff "\"%s\"" s
-              | DATA_other -> Ast.fmt ff "<other>"
-          end;
-          Ast.fmt ff "  (%s)" (dw_form_to_string form)
-      end
-      die.die_attrs;
-    if (Array.length die.die_children) != 0
-    then
-      begin
-        Ast.fmt ff "@\n";
-        Ast.fmt_obox ff;
-        Ast.fmt ff "  children: ";
-        Ast.fmt_obr ff;
-        Array.iter fmt_die die.die_children;
-        Ast.fmt_cbb ff
-      end;
-  in
-    fmt_die (Hashtbl.find dies root)
-;;
 
 let rec extract_mod_type_item
     (abi:Abi.abi)

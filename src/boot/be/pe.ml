@@ -24,6 +24,18 @@
 open Asm;;
 open Common;;
 
+let log (sess:Session.sess) =
+  Session.log "obj (pe)"
+    sess.Session.sess_log_obj
+    sess.Session.sess_log_out
+;;
+
+let iflog (sess:Session.sess) (thunk:(unit -> unit)) : unit =
+  if sess.Session.sess_log_obj
+  then thunk ()
+  else ()
+;;
+
 (*
 
    The default image base (VA) for an executable on Win32 is 0x400000.
@@ -850,32 +862,35 @@ let emit_file
 ;;
 
 
-let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
+let get_sections
+    (sess:Session.sess)
+    (ar:asm_reader)
+    : (string,(int*int)) Hashtbl.t =
   (* PE header offset is at 0x3c in the MS-DOS compatibility header. *)
   let _ = ar.asm_seek 0x3c in
   let pe_hdr_off = ar.asm_get_u32() in
-  let _ = Printf.printf "PE header offset: 0x%x\n" pe_hdr_off in
+  let _ = log sess "PE header offset: 0x%x" pe_hdr_off in
 
   let _ = ar.asm_seek pe_hdr_off in
   let pe_signature = ar.asm_get_zstr_padded 4 in
-  let _ = Printf.printf "    PE signature: '%s'\n" pe_signature in
+  let _ = log sess "    PE signature: '%s'" pe_signature in
   let _ = assert (pe_signature = "PE") in
   let _ = ar.asm_adv_u16() in (* machine type *)
 
   let num_sections = ar.asm_get_u16() in
-  let _ = Printf.printf "    num sections: %d\n" num_sections in
+  let _ = log sess "    num sections: %d" num_sections in
 
   let _ = ar.asm_adv_u32() in (* timestamp *)
 
   let symtab_off = ar.asm_get_u32() in
-  let _ = Printf.printf "   symtab offset: 0x%x\n" symtab_off in
+  let _ = log sess "   symtab offset: 0x%x" symtab_off in
 
   let num_symbols = ar.asm_get_u32() in
-  let _ = Printf.printf "     num symbols: %d\n" num_symbols in
+  let _ = log sess "     num symbols: %d" num_symbols in
   let _ = assert (num_symbols = 0) in
 
   let loader_hdr_size = ar.asm_get_u16() in
-  let _ = Printf.printf "loader header sz: %d\n" loader_hdr_size in
+  let _ = log sess "loader header sz: %d" loader_hdr_size in
 
   let _ = ar.asm_adv_u16() in (* flags *)
   let sections_off = (ar.asm_get_off()) + loader_hdr_size in
@@ -913,7 +928,7 @@ let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
       let _ = ar.asm_adv_u32() in (* reserved *)
       let _ = ar.asm_adv_u32() in (* flags *)
         Hashtbl.add sects sect_name (file_off, file_sz);
-        Printf.printf "       section %d: %s, size %d, offset 0x%x\n" i sect_name file_sz file_off;
+        log sess "       section %d: %s, size %d, offset 0x%x" i sect_name file_sz file_off;
     done
   in
     sects

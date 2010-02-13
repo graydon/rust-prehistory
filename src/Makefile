@@ -21,6 +21,7 @@ CFG_VALGRIND :=
 
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
+  CFG_STDLIB := libstd.so
   CFG_GCC_COMPILE_FLAGS += -fPIC
   CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl -lpthread
   ifeq ($(CFG_CPUTYPE), x86_64)
@@ -37,6 +38,7 @@ endif
 
 ifeq ($(CFG_OSTYPE), Darwin)
   CFG_RUNTIME := librustrt.dylib
+  CFG_STDLIB := libstd.dylib
   CFG_UNIXY := 1
   CFG_GCC_LINK_FLAGS += -dynamiclib -lpthread
   # Darwin has a very blurry notion of "64 bit", and claims it's running
@@ -55,6 +57,7 @@ ifdef CFG_WINDOWSY
   CFG_INFO := $(info cfg: windows-y environment)
   CFG_PATH_MUNGE := | sed -e 's/\\\(.\)/\/\1/g'
   CFG_RUNTIME := rustrt.dll
+  CFG_STDLIB := std.dll
   CFG_OBJ_SUFFIX := .o
   CFG_EXE_SUFFIX := .exe
   CFG_BOOT := ./rustboot.exe
@@ -109,7 +112,7 @@ BE_MLS := $(addprefix boot/be/, asm.ml x86.ml ra.ml pe.ml elf.ml \
 IL_MLS := $(addprefix boot/be/, il.ml abi.ml)
 ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml auto.ml \
           type.ml typestate.ml mode.ml mutable.ml gc.ml layout.ml trans.ml dwarf.ml)
-FE_MLS := $(addprefix boot/fe/, ast.ml parser.ml lexer.ml)
+FE_MLS := $(addprefix boot/fe/, ast.ml lexer.ml parser.ml)
 DRIVER_TOP_MLS := $(addprefix boot/driver/, main.ml)
 
 BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(FE_MLS) $(IL_MLS) $(ME_MLS) $(BE_MLS) \
@@ -132,6 +135,10 @@ loc:
 $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) rt/rust.h
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)$(call CFG_LINK_C, $@) $(RUNTIME_OBJS)
+
+$(CFG_STDLIB): $(CFG_BOOT) $(wildcard lib/*.rs lib/*.rc)
+	@$(call CFG_ECHO, compile: lib/std.rc)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ lib/std.rc
 
 %$(CFG_OBJ_SUFFIX): %.cpp $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
@@ -181,7 +188,7 @@ DRIVER_TOP_RSS := $(addprefix comp/driver/, rustc.rs)
 
 COMPILER_RSS := $(wildcard $(UTIL_BOT_RSS) $(DRIVER_BOT_RSS) $(BE_RSS) $(FE_RSS) $(ME_RSS) $(DRIVER_TOP_RSS))
 
-$(CFG_COMPILER): comp/rustc.rc $(COMPILER_RSS) $(CFG_BOOT) $(CFG_RUNTIME)
+$(CFG_COMPILER): comp/rustc.rc $(COMPILER_RSS) $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
@@ -221,6 +228,8 @@ TEST_XFAILS := test/run-pass/spawn-fn.rs \
                test/run-pass/stateful-module.rs \
                test/run-pass/mlist_cycle.rs \
                test/run-pass/mlist.rs \
+               test/run-pass/user.rs \
+               test/run-pass/user.rc \
                test/run-pass/linear-for-loop.rs \
                test/run-pass/fun-indirect-call.rs \
                test/run-pass/first-class-modules.rs \
@@ -361,7 +370,7 @@ clean:
 	$(CFG_QUIET)rm -f $(CFG_COMPILER)
 	$(CFG_QUIET)rm -f $(ML_DEPFILES) $(C_DEPFILES)
 	$(CFG_QUIET)rm -f boot/fe/lexer.ml
-	$(CFG_QUIET)rm -f $(CFG_BOOT) $(CFG_RUNTIME)
+	$(CFG_QUIET)rm -f $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	$(CFG_QUIET)rm -f $(TEST_RUN_PASS_EXES) $(TEST_RUN_PASS_OUTS)
 	$(CFG_QUIET)rm -f $(TEST_RUN_FAIL_EXES) $(TEST_RUN_FAIL_OUTS)
 	$(CFG_QUIET)rm -f $(TEST_COMPILE_FAIL_EXES) $(TEST_COMPILE_FAIL_OUTS)

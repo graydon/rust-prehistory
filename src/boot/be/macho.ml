@@ -3,6 +3,18 @@ open Common;;
 
 (* Mach-O writer. *)
 
+let log (sess:Session.sess) =
+  Session.log "obj (mach-o)"
+    sess.Session.sess_log_obj
+    sess.Session.sess_log_out
+;;
+
+let iflog (sess:Session.sess) (thunk:(unit -> unit)) : unit =
+  if sess.Session.sess_log_obj
+  then thunk ()
+  else ()
+;;
+
 let (cpu_arch_abi64:int64) = 0x01000000L
 ;;
 
@@ -978,7 +990,10 @@ let emit_file
     close_out out
 ;;
 
-let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
+let get_sections
+    (sess:Session.sess)
+    (ar:asm_reader)
+    : (string,(int*int)) Hashtbl.t =
   let sects = Hashtbl.create 0 in
   let magic = ar.asm_get_u32() in
   let _ = assert (magic = (Int64.to_int mh_magic)) in
@@ -987,19 +1002,19 @@ let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
   let _ = ar.asm_adv_u32() in (* file type *)
   let n_load_cmds = ar.asm_get_u32() in
   let _ = ar.asm_adv_u32() in
-  let _ = Printf.printf "Mach-o file with %d load commands\n" n_load_cmds in
+  let _ = log sess "Mach-o file with %d load commands" n_load_cmds in
   let _ = ar.asm_adv_u32() in (* flags *)
   let lc_seg = Int64.to_int (load_command_code LC_SEGMENT) in
     for i = 0 to n_load_cmds - 1 do
       let load_cmd_code = ar.asm_get_u32() in
       let load_cmd_size = ar.asm_get_u32() in
-      let _ = Printf.printf "load command %d:\n" i in
+      let _ = log sess "load command %d:" i in
         if load_cmd_code != lc_seg
         then ar.asm_adv (load_cmd_size - 8)
         else
           begin
             let seg_name = ar.asm_get_zstr_padded 16 in
-            let _ = Printf.printf "LC_SEGMENT %s\n" seg_name in
+            let _ = log sess "LC_SEGMENT %s" seg_name in
             let _ = ar.asm_adv_u32() in (* seg mem pos *)
             let _ = ar.asm_adv_u32() in (* seg mem sz *)
             let _ = ar.asm_adv_u32() in (* seg file pos *)
@@ -1008,7 +1023,7 @@ let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
             let _ = ar.asm_adv_u32() in (* initprot *)
             let n_sects = ar.asm_get_u32() in
             let _ = ar.asm_get_u32() in (* flags *)
-            let _ = Printf.printf "%d sections\n" in
+            let _ = log sess "%d sections" in
               for j = 0 to n_sects - 1 do
                 let sect_name = ar.asm_get_zstr_padded 16 in
                 let _ = ar.asm_adv 16 in (* seg name *)
@@ -1022,8 +1037,8 @@ let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
                 let _ = ar.asm_adv_u32() in (* reserved1 *)
                 let _ = ar.asm_adv_u32() in (* reserved2 *)
                 let _ =
-                  Printf.printf
-                    "  section %d: 0x%x - 0x%x %s \n"
+                  log sess
+                    "  section %d: 0x%x - 0x%x %s "
                     j f_pos (f_pos + m_sz) sect_name
                 in
                 let len = String.length sect_name in

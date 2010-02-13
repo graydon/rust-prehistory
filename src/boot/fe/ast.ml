@@ -478,6 +478,7 @@ and native_mod_items = (ident, native_mod_item) Hashtbl.t
 and crate' =
     {
       crate_items: mod_items;
+      crate_imports: mod_type_items;
       crate_native_items: native_mod_items;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;

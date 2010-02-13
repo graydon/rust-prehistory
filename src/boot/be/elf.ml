@@ -10,6 +10,18 @@
 open Asm;;
 open Common;;
 
+let log (sess:Session.sess) =
+  Session.log "obj (elf)"
+    sess.Session.sess_log_obj
+    sess.Session.sess_log_out
+;;
+
+let iflog (sess:Session.sess) (thunk:(unit -> unit)) : unit =
+  if sess.Session.sess_log_obj
+  then thunk ()
+  else ()
+;;
+
 
 (* Fixed sizes of structs involved in elf32 spec. *)
 let elf32_ehsize = 52L;;
@@ -1432,7 +1444,10 @@ let emit_file
     close_out out
 ;;
 
-let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
+let get_sections
+    (sess:Session.sess)
+    (ar:asm_reader)
+    : (string,(int*int)) Hashtbl.t =
   let sects = Hashtbl.create 0 in
   let elf_id = ar.asm_get_zstr_padded 4 in
   let _ = assert (elf_id = "\x7fELF") in
@@ -1451,11 +1466,11 @@ let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
   let e_shentsize = ar.asm_get_u16 () in
   let e_shnum = ar.asm_get_u16 () in
   let e_shstrndx = ar.asm_get_u16 () in
-  let _ = Printf.printf
-    "%d ELF section headers, %d bytes each, starting at 0x%x\n" 
+  let _ = log sess
+    "%d ELF section headers, %d bytes each, starting at 0x%x"
     e_shnum e_shentsize e_shoff
   in
-  let _ = Printf.printf "section %d is .shstrtab\n" e_shstrndx in
+  let _ = log sess "section %d is .shstrtab" e_shstrndx in
 
   let read_section_hdr n =
     let _ = ar.asm_seek (e_shoff + n * e_shentsize) in
@@ -1479,7 +1494,7 @@ let get_sections (ar:asm_reader) : (string,(int*int)) Hashtbl.t =
       let (str_off, off, size) = read_section_hdr i in
       let _ = ar.asm_seek (str_base + str_off) in
       let name = ar.asm_get_zstr() in
-        Printf.printf "section %d: %s, size %d, offset 0x%x\n" i name size off;
+        log sess "section %d: %s, size %d, offset 0x%x" i name size off;
         Hashtbl.add sects name (off, size);
     done;
     sects

@@ -63,6 +63,19 @@
 
 open Common;;
 
+
+let log (sess:Session.sess) =
+  Session.log "asm"
+    sess.Session.sess_log_asm
+    sess.Session.sess_log_out
+;;
+
+let iflog (sess:Session.sess) (thunk:(unit -> unit)) : unit =
+  if sess.Session.sess_log_asm
+  then thunk ()
+  else ()
+;;
+
 exception Bad_fit of string;;
 exception Undef_sym of string;;
 
@@ -545,7 +558,8 @@ type asm_reader =
 
 type mmap_arr = (int, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t;;
 
-let new_asm_reader (s:filename) =
+let new_asm_reader (sess:Session.sess) (s:filename) : asm_reader =
+  log sess "opening file %s" s;
   let fd = Unix.openfile s [ Unix.O_RDONLY ] 0 in
   let arr = (Bigarray.Array1.map_file
                fd ~pos:0L

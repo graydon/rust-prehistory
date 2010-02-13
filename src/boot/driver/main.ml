@@ -57,30 +57,38 @@ let (sess:Session.sess) =
   }
 ;;
 
-let dump_file s =
-  let ar = Asm.new_asm_reader s in
-    Printf.printf "mapped file: %s\n" s;
+let get_signature filename =
+  let ar = Asm.new_asm_reader sess filename in
     let get_sections =
       match sess.Session.sess_targ with
           Win32_x86_pe -> Pe.get_sections
         | MacOS_x86_macho -> Macho.get_sections
         | Linux_x86_elf -> Elf.get_sections
     in
-    let sects = get_sections ar in
-    let abbrevs = Dwarf.read_abbrevs ar (Hashtbl.find sects ".debug_abbrev") in
-    let dies = Dwarf.read_dies ar (Hashtbl.find sects ".debug_info")  abbrevs in
-      Printf.fprintf stdout "DWARF contents of %s:\n%!" s;
-      Format.set_margin 80;
-      Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Dwarf.fmt_dies dies);
-      begin
-        match Dwarf.extract_mod_type_item abi dies with
-            None -> Printf.fprintf stdout "unable to extract a mod type item\n%!"
-          | Some (ident, mti) ->
-              Printf.fprintf stdout "extracted mod type item:\n%!";
-              Printf.fprintf stdout "%s\n%!"
-                (Ast.fmt_to_str (fun ff mti -> Ast.fmt_mod_type_item ff ident mti) mti);
-      end;
-      exit 0
+    let sects = get_sections sess ar in
+    let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
+    let dies = Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs in
+      Dwarf.extract_mod_type_item abi dies
+;;
+
+let infer_crate_filename ident =
+  match sess.Session.sess_targ with
+      Win32_x86_pe -> ident ^ ".dll"
+    | MacOS_x86_macho -> "lib" ^ ident ^ ".dylib"
+    | Linux_x86_elf -> "lib" ^ ident ^ ".so"
+;;
+
+
+let dump_file filename =
+  match get_signature filename with
+      None ->
+        Printf.fprintf stderr "Error: unable to extract module signature from %s\n%!" filename;
+        exit 1
+    | Some (ident, mti) ->
+        Printf.fprintf stdout "extracted mod type item:\n%!";
+        Printf.fprintf stdout "%s\n%!"
+          (Ast.fmt_to_str (fun ff mti -> Ast.fmt_mod_type_item ff ident mti) mti);
+        exit 0
 ;;
 
 let argspecs =
@@ -158,10 +166,10 @@ let _ =
 
 let (crate:Ast.crate) =
   if Filename.check_suffix sess.Session.sess_in ".rc"
-  then Parser.parse_crate sess Lexer.token
+  then Parser.parse_crate sess Lexer.token get_signature infer_crate_filename
   else
     if Filename.check_suffix sess.Session.sess_in ".rs"
-    then Parser.parse_srcfile sess Lexer.token
+    then Parser.parse_srcfile sess Lexer.token get_signature infer_crate_filename
     else
       begin
         Printf.fprintf stderr

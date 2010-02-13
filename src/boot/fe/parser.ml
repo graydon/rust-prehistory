@@ -353,7 +353,9 @@ type pstate =
       pstate_file         : filename;
       pstate_sess         : Session.sess;
       pstate_temp_id      : temp_id ref;
-      pstate_node_id      : node_id ref }
+      pstate_node_id      : node_id ref;
+      pstate_get_signature        : (filename -> (Ast.ident * Ast.mod_type_item) option);
+      pstate_infer_crate_filename : (Ast.ident -> filename); }
 ;;
 
 let log (ps:pstate) = Session.log "parse"
@@ -2296,6 +2298,8 @@ and make_parser
     (nref:node_id ref)
     (sess:Session.sess)
     (tok:Lexing.lexbuf -> token)
+    (get_signature:filename -> (Ast.ident * Ast.mod_type_item) option)
+    (infer_crate_filename:Ast.ident -> filename)
     (fname:string)
     : pstate =
   let lexbuf = Lexing.from_channel (open_in fname) in
@@ -2313,7 +2317,9 @@ and make_parser
         pstate_file = fname;
         pstate_sess = sess;
         pstate_temp_id = tref;
-        pstate_node_id = nref }
+        pstate_node_id = nref;
+        pstate_get_signature = get_signature;
+        pstate_infer_crate_filename = infer_crate_filename; }
     in
       iflog ps (fun _ -> log ps "made parser for: %s\n%!" fname);
       ps
@@ -2364,6 +2370,8 @@ and parse_crate_mod_entry
                       ps.pstate_node_id
                       ps.pstate_sess
                       ps.pstate_lexfun
+                      ps.pstate_get_signature
+                      ps.pstate_infer_crate_filename
                       full_fname
                   in
                     (parse_mod_items p EOF, true)
@@ -2415,6 +2423,27 @@ and parse_crate_mod_entries
     expect ps RBRACE;
     items
 
+and parse_crate_import
+    (imports:Ast.mod_type_items)
+    (ps:pstate)
+    : unit =
+  expect ps USE;
+  let ident = parse_ident ps in
+    expect ps SEMI;
+    let filename = ps.pstate_infer_crate_filename ident in
+    match ps.pstate_get_signature filename with
+        None ->
+          raise (err ("unable to extract module signature from " ^ filename) ps)
+      | Some (ident, mti) ->
+          iflog ps
+            begin
+              fun _ ->
+                log ps "extracted module signature from %s (compiled from %s)" filename ident;
+                log ps "%s" (Ast.fmt_to_str (fun ff mti -> Ast.fmt_mod_type_item ff ident mti) mti);
+            end;
+          Hashtbl.add imports ident mti
+
+
 and parse_root_crate_entries
     (fname:string)
     (prefix:string)
@@ -2423,6 +2452,7 @@ and parse_root_crate_entries
     : Ast.crate =
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
+  let imports = Hashtbl.create 4 in
   let apos = lexpos ps in
     log ps "reading crate entries from %s" fname;
     while peek ps != EOF
@@ -2430,6 +2460,8 @@ and parse_root_crate_entries
       match peek ps with
           NATIVE | MOD ->
             parse_crate_mod_entry prefix files items nitems ps
+        | USE ->
+            parse_crate_import imports ps
         | _ -> raise (unexpected ps)
     done;
     expect ps EOF;
@@ -2437,6 +2469,7 @@ and parse_root_crate_entries
     let bpos = lexpos ps in
       span ps apos bpos
         { Ast.crate_items = items;
+          Ast.crate_imports = imports;
           Ast.crate_native_items = nitems;
           Ast.crate_main = main;
           Ast.crate_files = files }
@@ -2478,12 +2511,14 @@ let parse_root_with_parse_fn
     fn
     (sess:Session.sess)
     tok
+    (get_signature:(filename -> (Ast.ident * Ast.mod_type_item) option))
+    (infer_crate_filename:(Ast.ident -> filename))
     : Ast.crate =
   let files = Hashtbl.create 0 in
   let fname = sess.Session.sess_in in
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
-  let ps = make_parser tref nref sess tok fname in
+  let ps = make_parser tref nref sess tok get_signature infer_crate_filename fname in
   let apos = lexpos ps in
     try
       if Filename.check_suffix fname suffix
@@ -2499,6 +2534,7 @@ let parse_root_with_parse_fn
             ps.pstate_ctxt;
           span ps apos apos
             { Ast.crate_items = Hashtbl.create 0;
+              Ast.crate_imports = Hashtbl.create 0;
               Ast.crate_native_items = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
               Ast.crate_files = files }
@@ -2520,6 +2556,7 @@ let parse_root_srcfile_entries
     htab_put files modi.id fname;
     htab_put mitems stem modi;
     span ps apos bpos { Ast.crate_items = mitems;
+                        Ast.crate_imports = Hashtbl.create 0;
                         Ast.crate_native_items = Hashtbl.create 0;
                         Ast.crate_main = find_main_fn ps mitems;
                         Ast.crate_files = files }

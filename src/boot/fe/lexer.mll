@@ -43,9 +43,9 @@
 
                 ("log", LOG);
                 ("spawn", SPAWN);
-		("thread", THREAD);
-		("yield", YIELD);
-		("join", JOIN);
+                ("thread", THREAD);
+                ("yield", YIELD);
+                ("join", JOIN);
 
                 ("bool", BOOL);
 
