@@ -1785,13 +1785,10 @@ let dwarf_visitor
       (crate:Ast.crate)
       : unit =
     inner.Walk.visit_crate_post crate;
-    if Hashtbl.mem cx.ctxt_item_files crate.id
-    then
-      begin
-        log cx "finishing crate CU and composing headers (%d DIEs collected)" (List.length (!curr_cu_infos));
-        finish_crate_cu_and_compose_headers ()
-      end
-    else ();
+    assert (Hashtbl.mem cx.ctxt_item_files crate.id);
+    emit_null_die();
+    log cx "finishing crate CU and composing headers (%d DIEs collected)" (List.length (!curr_cu_infos));
+    finish_crate_cu_and_compose_headers ()
   in
 
   let visit_mod_item_post
@@ -1829,7 +1826,7 @@ let dwarf_visitor
 
   let visit_block_post (b:Ast.block) : unit =
     inner.Walk.visit_block_post b;
-    log cx "entering lexical block, terminating with NULL DIE";
+    log cx "leaving lexical block, terminating with NULL DIE";
     emit_null_die ()
   in
 
