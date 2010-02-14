@@ -31,7 +31,7 @@ let trans_visitor
     else ()
   in
 
-  let curr_file = ref None in
+  let curr_file = Stack.create () in
   let curr_stmt = ref None in
 
   let (abi:Abi.abi) = cx.ctxt_abi in
@@ -2553,9 +2553,10 @@ let trans_visitor
     let n_vregs = e.Il.emit_next_vreg in
     let quads = e.Il.emit_quads in
     let name = path_name () in
-    let f = match !curr_file with
-        None -> bugi cx node "Missing file scope when capturing quads."
-      | Some f -> f
+    let f =
+      if Stack.is_empty curr_file
+      then bugi cx node "Missing file scope when capturing quads."
+      else Stack.top curr_file
     in
     let item_code = Hashtbl.find cx.ctxt_file_code f in
       begin
@@ -2774,26 +2775,21 @@ let trans_visitor
       htab_put cx.ctxt_data (DATA_mod_pair id) (pair_fix, pair_frag)
   in
 
-  let enter_file_for i =
-    if Hashtbl.mem cx.ctxt_item_files i.id
-    then begin
-      match !curr_file with
-          None -> curr_file := Some i.id
-        | Some _ -> bugi cx i.id "Existing source file on file-scope entry."
-    end
+  let enter_file_for id =
+    if Hashtbl.mem cx.ctxt_item_files id
+    then Stack.push id curr_file
   in
 
-  let leave_file_for i =
-    if Hashtbl.mem cx.ctxt_item_files i.id
-    then begin
-      match !curr_file with
-          None -> bugi cx i.id "Missing source file on file-scope exit."
-        | Some _ -> curr_file := None
-    end
+  let leave_file_for id =
+    if Hashtbl.mem cx.ctxt_item_files id
+    then
+      if Stack.is_empty curr_file
+      then bugi cx id "Missing source file on file-scope exit."
+      else ignore (Stack.pop curr_file)
   in
 
   let visit_mod_item_pre n p i =
-    enter_file_for i;
+    enter_file_for i.id;
     begin
       match i.node with
           Ast.MOD_ITEM_fn f ->
@@ -2829,11 +2825,11 @@ let trans_visitor
           Ast.MOD_ITEM_mod m -> trans_mod i.id (snd m.Ast.decl_item)
         | _ -> ()
     end;
-    leave_file_for i
+    leave_file_for i.id
   in
 
   let visit_native_mod_item_pre n i =
-    enter_file_for i;
+    enter_file_for i.id;
     begin
       match i.node with
           Ast.NATIVE_fn nfn -> trans_native_fn i.id nfn
@@ -2844,11 +2840,16 @@ let trans_visitor
 
   let visit_native_mod_item_post n i =
     inner.Walk.visit_native_mod_item_post n i;
-    leave_file_for i
+    leave_file_for i.id
   in
 
+  let visit_crate_pre crate =
+    enter_file_for crate.id;
+    inner.Walk.visit_crate_pre crate
+  in
 
-  let visit_crate_post _ =
+  let visit_crate_post crate =
+    inner.Walk.visit_crate_post crate;
     let emit_aux_global_glue cx glue glue_name fix fn =
       push_new_emitter ();
       let e = emitter() in
@@ -2864,7 +2865,7 @@ let trans_visitor
         in
           htab_put cx.ctxt_glue_code glue code
     in
-    let crate =
+    let crate_data =
       (cx.ctxt_crate_fixup,
        Asm.DEF
          (cx.ctxt_crate_fixup,
@@ -2904,15 +2905,17 @@ let trans_visitor
            e nabi_rust (upcall_fixup "upcall_exit"));
 
       htab_put cx.ctxt_data
-        DATA_crate crate
+        DATA_crate crate_data;
+    leave_file_for crate.id
   in
 
     { inner with
+        Walk.visit_crate_pre = visit_crate_pre;
+        Walk.visit_crate_post = visit_crate_post;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
         Walk.visit_native_mod_item_post = visit_native_mod_item_post;
-        Walk.visit_crate_post = visit_crate_post;
     }
 ;;
 
@@ -2927,18 +2930,23 @@ let fixup_assigning_visitor
     Ast.fmt_to_str Ast.fmt_name (Walk.path_to_name path)
   in
 
-  let enter_file_for i =
-    if Hashtbl.mem cx.ctxt_item_files i.id
+  let enter_file_for id =
+    if Hashtbl.mem cx.ctxt_item_files id
     then
       begin
-        htab_put cx.ctxt_file_fixups i.id (new_fixup (path_name()));
-        if not (Hashtbl.mem cx.ctxt_file_code i.id)
-        then htab_put cx.ctxt_file_code i.id (Hashtbl.create 0);
+        let name =
+          if Stack.is_empty path
+          then "crate root"
+          else path_name()
+        in
+        htab_put cx.ctxt_file_fixups id (new_fixup name);
+        if not (Hashtbl.mem cx.ctxt_file_code id)
+        then htab_put cx.ctxt_file_code id (Hashtbl.create 0);
       end
   in
 
   let visit_mod_item_pre n p i =
-    enter_file_for i;
+    enter_file_for i.id;
     begin
       match i.node with
 
@@ -2968,7 +2976,7 @@ let fixup_assigning_visitor
   in
 
   let visit_native_mod_item_pre n i =
-    enter_file_for i;
+    enter_file_for i.id;
     begin
       match i.node with
           Ast.NATIVE_fn _ ->
@@ -2984,10 +2992,16 @@ let fixup_assigning_visitor
     inner.Walk.visit_block_pre b
   in
 
+  let visit_crate_pre c =
+    enter_file_for c.id;
+    inner.Walk.visit_crate_pre c
+  in
+
   { inner with
-        Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_block_pre = visit_block_pre;
-        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
+      Walk.visit_crate_pre = visit_crate_pre;
+      Walk.visit_mod_item_pre = visit_mod_item_pre;
+      Walk.visit_block_pre = visit_block_pre;
+      Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
 
 
 let process_crate

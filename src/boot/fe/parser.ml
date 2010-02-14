@@ -2467,12 +2467,16 @@ and parse_root_crate_entries
     expect ps EOF;
     let main = find_main_fn ps items in
     let bpos = lexpos ps in
+    let crate =
       span ps apos bpos
         { Ast.crate_items = items;
           Ast.crate_imports = imports;
           Ast.crate_native_items = nitems;
           Ast.crate_main = main;
           Ast.crate_files = files }
+    in
+      htab_put files crate.id fname;
+      crate
 
 and find_main_fn
     (ps:pstate)
@@ -2553,13 +2557,16 @@ let parse_root_srcfile_entries
                                                    Ast.decl_item = (None, items) })
   in
   let mitems = Hashtbl.create 0 in
-    htab_put files modi.id fname;
     htab_put mitems stem modi;
-    span ps apos bpos { Ast.crate_items = mitems;
-                        Ast.crate_imports = Hashtbl.create 0;
-                        Ast.crate_native_items = Hashtbl.create 0;
-                        Ast.crate_main = find_main_fn ps mitems;
-                        Ast.crate_files = files }
+    let crate =
+      span ps apos bpos { Ast.crate_items = mitems;
+                          Ast.crate_imports = Hashtbl.create 0;
+                          Ast.crate_native_items = Hashtbl.create 0;
+                          Ast.crate_main = find_main_fn ps mitems;
+                          Ast.crate_files = files }
+    in
+      htab_put files crate.id fname;
+      crate
 ;;
 
 let parse_crate = parse_root_with_parse_fn ".rc" parse_root_crate_entries;;

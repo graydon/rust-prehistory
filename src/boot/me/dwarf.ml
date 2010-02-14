@@ -1092,9 +1092,9 @@ type debug_records =
 
 type abbrev = (dw_tag * dw_children * ((dw_at * dw_form) array));;
 
-let (abbrev_cu:abbrev) =
-  (DW_TAG_compile_unit, DW_CHILDREN_yes,
-   [|
+let (abbrev_crate_cu:abbrev) =
+   (DW_TAG_compile_unit, DW_CHILDREN_yes,
+    [|
      (DW_AT_producer, DW_FORM_string);
      (DW_AT_language, DW_FORM_data4);
      (DW_AT_name, DW_FORM_string);
@@ -1102,8 +1102,20 @@ let (abbrev_cu:abbrev) =
      (DW_AT_low_pc, DW_FORM_addr);
      (DW_AT_high_pc, DW_FORM_addr);
      (DW_AT_use_UTF8, DW_FORM_flag)
+    |])
+ ;;
+
+
+let (abbrev_srcfile_cu:abbrev) =
+  (DW_TAG_compile_unit, DW_CHILDREN_yes,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_comp_dir, DW_FORM_string);
+     (DW_AT_low_pc, DW_FORM_addr);
+     (DW_AT_high_pc, DW_FORM_addr);
    |])
 ;;
+
 
 let (abbrev_module:abbrev) =
   (DW_TAG_module, DW_CHILDREN_yes,
@@ -1525,7 +1537,7 @@ let dwarf_visitor
           | _ -> unspecified "unknown"
   in
 
-  let finish_cu_and_compose_headers _ =
+  let finish_crate_cu_and_compose_headers _ =
 
     let pubnames_header_and_curr_pubnames =
       SEQ [| (BYTE 0) |]
@@ -1603,18 +1615,40 @@ let dwarf_visitor
           (curr_cu_frame, cu_frames, frame_header_and_curr_frame) ]
   in
 
-  let begin_cu_and_emit_cu_die
+  let emit_srcfile_cu_die
       (name:string)
       (cu_text_fixup:fixup)
       : unit =
-    let abbrev_code = get_abbrev_code abbrev_cu in
-    let cu_info =
+    let abbrev_code = get_abbrev_code abbrev_srcfile_cu in
+    let srcfile_cu_die =
+      (SEQ [|
+         uleb abbrev_code;
+         (* DW_AT_name:  DW_FORM_string *)
+         ZSTRING (Filename.basename name);
+         (* DW_AT_comp_dir:  DW_FORM_string *)
+         ZSTRING (Filename.concat (Sys.getcwd()) (Filename.dirname name));
+         (* DW_AT_low_pc, DW_FORM_addr *)
+         WORD (word_ty_mach, M_POS cu_text_fixup);
+         (* DW_AT_high_pc, DW_FORM_addr *)
+         WORD (word_ty_mach, ADD ((M_POS cu_text_fixup),
+                                  (M_SZ cu_text_fixup)));
+       |])
+    in
+      emit_die srcfile_cu_die
+  in
+
+  let begin_crate_cu_and_emit_cu_die
+      (name:string)
+      (cu_text_fixup:fixup)
+      : unit =
+    let abbrev_code = get_abbrev_code abbrev_crate_cu in
+    let crate_cu_die =
       (SEQ [|
          uleb abbrev_code;
          (* DW_AT_producer:  DW_FORM_string *)
          ZSTRING "Rustboot pre-release";
-         (* DW_AT_producer:  DW_FORM_string *)
-         WORD (word_ty_mach,IMM 0x2L);     (* DW_LANG_C *)
+         (* DW_AT_language:  DW_FORM_data4 *)
+         WORD (word_ty_mach, IMM 0x2L);     (* DW_LANG_C *)
          (* DW_AT_name:  DW_FORM_string *)
          ZSTRING (Filename.basename name);
          (* DW_AT_comp_dir:  DW_FORM_string *)
@@ -1628,7 +1662,7 @@ let dwarf_visitor
          BYTE 1
        |])
     in
-      curr_cu_infos := [cu_info];
+      curr_cu_infos := [crate_cu_die];
       curr_cu_line := []
   in
 
@@ -1692,6 +1726,15 @@ let dwarf_visitor
       emit_die typedef_die
   in
 
+  let visit_crate_pre
+      (crate:Ast.crate)
+      : unit =
+    let filename = (Hashtbl.find cx.ctxt_item_files crate.id) in
+      log cx "walking crate CU '%s'" filename;
+      begin_crate_cu_and_emit_cu_die filename (Hashtbl.find cx.ctxt_file_fixups crate.id);
+      inner.Walk.visit_crate_pre crate
+  in
+
   let visit_mod_item_pre
       (id:Ast.ident)
       (params:Ast.ident array)
@@ -1701,8 +1744,8 @@ let dwarf_visitor
     then
       begin
         let filename = (Hashtbl.find cx.ctxt_item_files item.id) in
-          log cx "walking CU '%s'" filename;
-          begin_cu_and_emit_cu_die filename (Hashtbl.find cx.ctxt_file_fixups item.id);
+          log cx "walking srcfile CU '%s'" filename;
+          emit_srcfile_cu_die filename (Hashtbl.find cx.ctxt_file_fixups item.id);
       end
     else
       ();
@@ -1738,19 +1781,25 @@ let dwarf_visitor
     inner.Walk.visit_mod_item_pre id params item
   in
 
+  let visit_crate_post
+      (crate:Ast.crate)
+      : unit =
+    inner.Walk.visit_crate_post crate;
+    if Hashtbl.mem cx.ctxt_item_files crate.id
+    then
+      begin
+        log cx "finishing crate CU and composing headers (%d DIEs collected)" (List.length (!curr_cu_infos));
+        finish_crate_cu_and_compose_headers ()
+      end
+    else ();
+  in
+
   let visit_mod_item_post
       (id:Ast.ident)
       (params:Ast.ident array)
       (item:Ast.mod_item)
       : unit =
     inner.Walk.visit_mod_item_post id params item;
-    if Hashtbl.mem cx.ctxt_item_files item.id
-    then
-      begin
-        log cx "finishing CU and composing headers (%d DIEs collected)" (List.length (!curr_cu_infos));
-        finish_cu_and_compose_headers ()
-      end
-    else ();
     begin
       match item.node with
           Ast.MOD_ITEM_mod _
@@ -1822,6 +1871,8 @@ let dwarf_visitor
   in
 
     { inner with
+        Walk.visit_crate_pre = visit_crate_pre;
+        Walk.visit_crate_post = visit_crate_post;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_block_pre = visit_block_pre;
