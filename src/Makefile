@@ -28,7 +28,7 @@ ifeq ($(CFG_OSTYPE), Linux)
     CFG_GCC_COMPILE_FLAGS += -m32
     CFG_GCC_LINK_FLAGS += -m32
   endif
-  # CFG_NATIVE := 1
+  CFG_NATIVE := 1
   CFG_UNIXY := 1
   CFG_VALGRIND := $(shell which valgrind)
   ifdef CFG_VALGRIND
@@ -56,6 +56,10 @@ endif
 ifdef CFG_WINDOWSY
   CFG_INFO := $(info cfg: windows-y environment)
   CFG_PATH_MUNGE := | sed -e 's/\\\(.\)/\/\1/g'
+  CFG_FLEXLINK := $(shell which flexlink)
+  ifdef CFG_FLEXLINK
+    CFG_NATIVE := 1
+  endif
   CFG_RUNTIME := rustrt.dll
   CFG_STDLIB := std.dll
   CFG_OBJ_SUFFIX := .o
@@ -88,6 +92,26 @@ else
   CFG_ERR := $(error please try on a system with gcc)
 endif
 
+CFG_OCAMLC_OPT := $(shell which ocamlc.opt)
+ifdef CFG_OCAMLC_OPT
+  $(info cfg: using ocaml native compiler)
+  OPT=.opt
+else
+  $(info cfg: using ocaml bytecode compiler)
+endif
+
+ifdef PROFILE
+  $(info cfg: building with profiling info (forcing native output))
+  CFG_NATIVE := 1
+  CFG_OCAMLOPT_PROFILE_FLAGS := -p
+endif
+
+
+ifdef CFG_NATIVE
+  $(info cfg: building native compiler)
+else
+  $(info cfg: building bytecode compiler)
+endif
 
 MKFILES := Makefile
 
@@ -100,7 +124,7 @@ ML_INCS := -I boot/fe -I boot/me -I boot/be -I boot/driver -I boot/util
 ML_LIBS := unix.cma nums.cma bigarray.cma
 ML_NATIVE_LIBS := unix.cmxa nums.cmxa bigarray.cmxa
 OCAMLC_FLAGS := -g $(ML_INCS) -w Ael -warn-error Ael
-OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael
+OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael $(CFG_OCAMLOPT_PROFILE_FLAGS)
 
 # List them in link order.
 # Nobody calculates the link-order DAG automatically, sadly.
@@ -147,30 +171,30 @@ $(CFG_STDLIB): $(CFG_BOOT) $(wildcard lib/*.rs lib/*.rc)
 ifdef CFG_NATIVE
 $(CFG_BOOT): $(BOOT_CMXS) $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)ocamlopt.opt -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(BOOT_CMXS)
+	$(CFG_QUIET)ocamlopt$(OPT) -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(BOOT_CMXS)
 else
 $(CFG_BOOT): $(BOOT_CMOS) $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)ocamlc.opt -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(BOOT_CMOS)
+	$(CFG_QUIET)ocamlc$(OPT) -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(BOOT_CMOS)
 endif
 
 %.cmi: %.mli $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
+	$(CFG_QUIET)ocamlc$(OPT) -c -o $@ $(OCAMLC_FLAGS) $<
 
 %.cmo: %.ml $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)ocamlc.opt -c -o $@ $(OCAMLC_FLAGS) $<
+	$(CFG_QUIET)ocamlc$(OPT) -c -o $@ $(OCAMLC_FLAGS) $<
 
 %.cmo: %.cmi $(MKFILES)
 
 %.cmx %.o: %.ml $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)ocamlopt.opt -c -o $@ $(OCAMLOPT_FLAGS) $<
+	$(CFG_QUIET)ocamlopt$(OPT) -c -o $@ $(OCAMLOPT_FLAGS) $<
 
 %.ml: %.mll $(MKFILES)
 	@$(call CFG_ECHO, lex-gen: $<)
-	$(CFG_QUIET)ocamllex.opt -q -o $@ $<
+	$(CFG_QUIET)ocamllex$(OPT) -q -o $@ $<
 
 
 ######################################################################
@@ -211,11 +235,11 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 
 %.d: %.ml $(MKFILES)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
+	$(CFG_QUIET)ocamldep$(OPT) $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.mli $(MKFILES)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)ocamldep $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
+	$(CFG_QUIET)ocamldep$(OPT) $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
 
 -include $(ML_DEPFILES) $(C_DEPFILES)
 
