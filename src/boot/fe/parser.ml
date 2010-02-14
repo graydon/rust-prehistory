@@ -354,7 +354,7 @@ type pstate =
       pstate_sess         : Session.sess;
       pstate_temp_id      : temp_id ref;
       pstate_node_id      : node_id ref;
-      pstate_get_signature        : (filename -> (Ast.ident * Ast.mod_type_item) option);
+      pstate_get_ty_mod           : (filename -> Ast.ty_mod);
       pstate_infer_crate_filename : (Ast.ident -> filename); }
 ;;
 
@@ -2298,7 +2298,7 @@ and make_parser
     (nref:node_id ref)
     (sess:Session.sess)
     (tok:Lexing.lexbuf -> token)
-    (get_signature:filename -> (Ast.ident * Ast.mod_type_item) option)
+    (get_ty_mod:filename -> Ast.ty_mod)
     (infer_crate_filename:Ast.ident -> filename)
     (fname:string)
     : pstate =
@@ -2318,7 +2318,7 @@ and make_parser
         pstate_sess = sess;
         pstate_temp_id = tref;
         pstate_node_id = nref;
-        pstate_get_signature = get_signature;
+        pstate_get_ty_mod = get_ty_mod;
         pstate_infer_crate_filename = infer_crate_filename; }
     in
       iflog ps (fun _ -> log ps "made parser for: %s\n%!" fname);
@@ -2370,7 +2370,7 @@ and parse_crate_mod_entry
                       ps.pstate_node_id
                       ps.pstate_sess
                       ps.pstate_lexfun
-                      ps.pstate_get_signature
+                      ps.pstate_get_ty_mod
                       ps.pstate_infer_crate_filename
                       full_fname
                   in
@@ -2431,17 +2431,17 @@ and parse_crate_import
   let ident = parse_ident ps in
     expect ps SEMI;
     let filename = ps.pstate_infer_crate_filename ident in
-    match ps.pstate_get_signature filename with
-        None ->
-          raise (err ("unable to extract module signature from " ^ filename) ps)
-      | Some (ident, mti) ->
-          iflog ps
-            begin
-              fun _ ->
-                log ps "extracted module signature from %s (compiled from %s)" filename ident;
-                log ps "%s" (Ast.fmt_to_str (fun ff mti -> Ast.fmt_mod_type_item ff ident mti) mti);
-            end;
-          Hashtbl.add imports ident mti
+    let tmod = ps.pstate_get_ty_mod filename in
+      iflog ps
+        begin
+          fun _ ->
+            log ps "extracted mod type from %s (binding to %s)" filename ident;
+            log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
+        end;
+      let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
+                                       Ast.decl_item = tmod}
+      in
+        Hashtbl.add imports ident mti
 
 
 and parse_root_crate_entries
@@ -2515,14 +2515,14 @@ let parse_root_with_parse_fn
     fn
     (sess:Session.sess)
     tok
-    (get_signature:(filename -> (Ast.ident * Ast.mod_type_item) option))
+    (get_ty_mod:(filename ->  Ast.ty_mod))
     (infer_crate_filename:(Ast.ident -> filename))
     : Ast.crate =
   let files = Hashtbl.create 0 in
   let fname = sess.Session.sess_in in
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
-  let ps = make_parser tref nref sess tok get_signature infer_crate_filename fname in
+  let ps = make_parser tref nref sess tok get_ty_mod infer_crate_filename fname in
   let apos = lexpos ps in
     try
       if Filename.check_suffix fname suffix

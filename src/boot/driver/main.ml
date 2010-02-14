@@ -57,7 +57,7 @@ let (sess:Session.sess) =
   }
 ;;
 
-let get_signature filename =
+let get_ty_mod (filename:filename) : Ast.ty_mod =
   let ar = Asm.new_asm_reader sess filename in
     let get_sections =
       match sess.Session.sess_targ with
@@ -68,10 +68,12 @@ let get_signature filename =
     let sects = get_sections sess ar in
     let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
     let dies = Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs in
-      Dwarf.extract_mod_type_item abi dies
+    let mtis = Hashtbl.create 0 in
+      Dwarf.extract_mod_type_items abi mtis dies;
+      (None, mtis)
 ;;
 
-let infer_crate_filename ident =
+let infer_crate_filename (ident:filename) : filename =
   match sess.Session.sess_targ with
       Win32_x86_pe -> ident ^ ".dll"
     | MacOS_x86_macho -> "lib" ^ ident ^ ".dylib"
@@ -79,16 +81,11 @@ let infer_crate_filename ident =
 ;;
 
 
-let dump_file filename =
-  match get_signature filename with
-      None ->
-        Printf.fprintf stderr "Error: unable to extract module signature from %s\n%!" filename;
-        exit 1
-    | Some (ident, mti) ->
-        Printf.fprintf stdout "extracted mod type item:\n%!";
-        Printf.fprintf stdout "%s\n%!"
-          (Ast.fmt_to_str (fun ff mti -> Ast.fmt_mod_type_item ff ident mti) mti);
-        exit 0
+let dump_file (filename:filename) : unit =
+  let tmod = get_ty_mod filename in
+    Printf.fprintf stdout "extracted mod type:\n%!";
+    Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_ty (Ast.TY_mod tmod));
+    exit 0
 ;;
 
 let argspecs =
@@ -166,10 +163,10 @@ let _ =
 
 let (crate:Ast.crate) =
   if Filename.check_suffix sess.Session.sess_in ".rc"
-  then Parser.parse_crate sess Lexer.token get_signature infer_crate_filename
+  then Parser.parse_crate sess Lexer.token get_ty_mod infer_crate_filename
   else
     if Filename.check_suffix sess.Session.sess_in ".rs"
-    then Parser.parse_srcfile sess Lexer.token get_signature infer_crate_filename
+    then Parser.parse_srcfile sess Lexer.token get_ty_mod infer_crate_filename
     else
       begin
         Printf.fprintf stderr

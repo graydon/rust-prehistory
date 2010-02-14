@@ -1806,6 +1806,8 @@ let dwarf_visitor
         | Ast.MOD_ITEM_fn _ -> emit_null_die ()
         | _ -> ()
     end;
+    if Hashtbl.mem cx.ctxt_item_files item.id
+    then emit_null_die()
   in
 
   let visit_block_pre (b:Ast.block) : unit =
@@ -2107,10 +2109,11 @@ let read_dies
 ;;
 
 
-let rec extract_mod_type_item
+let rec extract_mod_type_items
     (abi:Abi.abi)
+    (mtis:Ast.mod_type_items)
     ((i:int),(dies:(int,die) Hashtbl.t))
-    : (Ast.ident * Ast.mod_type_item) option =
+    : unit =
 
   let (word_sz:int64) = abi.Abi.abi_word_sz in
   let (word_sz_int:int) = Int64.to_int word_sz in
@@ -2261,18 +2264,19 @@ let rec extract_mod_type_item
       end
   in
 
+  let extract_children mtis die =
+    Array.iter
+      (fun child ->
+         extract_mod_type_items abi mtis (child.die_off,dies))
+      die.die_children
+  in
+
   let get_mod_type_items die =
     let len = Array.length die.die_children in
     let mtis = Hashtbl.create len in
-      for i = 0 to (len - 1) do
-        let child = die.die_children.(i) in
-          match extract_mod_type_item abi (child.die_off,dies) with
-              None -> ()
-            | Some (ident, mti) -> htab_put mtis ident mti
-      done;
+      extract_children mtis die;
       mtis
   in
-
 
   let die = Hashtbl.find dies i in
     match die.die_tag with
@@ -2280,15 +2284,17 @@ let rec extract_mod_type_item
           let ident = get_name die in
           let ty = get_referenced_ty die in
           let tyi = Ast.MOD_TYPE_ITEM_public_type (decl ty) in
-            Some (ident, tyi)
+            htab_put mtis ident tyi
 
-      | DW_TAG_compile_unit
+      | DW_TAG_compile_unit ->
+          extract_children mtis die
+
       | DW_TAG_module ->
           let ident = get_name die in
-          let mtis = get_mod_type_items die in
-          let tmod = (None, mtis) in
+          let sub_mtis = get_mod_type_items die in
+          let tmod = (None, sub_mtis) in
           let mti = Ast.MOD_TYPE_ITEM_mod (decl tmod) in
-            Some (ident, mti)
+            htab_put mtis ident mti
 
       | DW_TAG_subprogram ->
           (* FIXME: finish this. *)
@@ -2303,9 +2309,9 @@ let rec extract_mod_type_item
                        Ast.sig_output_slot = oslot }
           in
           let fty = Ast.MOD_TYPE_ITEM_fn (decl (tsig, taux)) in
-            Some (ident, fty)
+            htab_put mtis ident fty
 
-      | _ -> None
+      | _ -> ()
 ;;
 
 (*

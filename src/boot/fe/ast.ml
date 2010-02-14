@@ -740,7 +740,8 @@ and fmt_ty_mod
             fmt_slots ff slots None;
             fmt_decl_constrs ff constrs
     end;
-    fmt ff " ";
+    if not (hdr = None && ident_and_params = None)
+    then fmt ff " ";
     fmt_obr ff;
     Hashtbl.iter (fmt_mod_type_item ff) mti;
     fmt_cbb ff
