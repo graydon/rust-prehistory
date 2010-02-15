@@ -615,12 +615,12 @@ let emit_file
 
   let mh_execute_header_fixup = new_fixup "__mh_execute header" in
 
-  let nxargc_fixup = (Semant.export sem SEG_data "NXArgc") in
-  let nxargv_fixup = (Semant.export sem SEG_data "NXArgv") in
-  let progname_fixup = (Semant.export sem SEG_data "__progname") in
-  let environ_fixup = (Semant.export sem SEG_data "environ") in
-  let exit_fixup = (Semant.import sem LIB_c "exit") in
-  let rust_start_fixup = (Semant.import sem LIB_rustrt "rust_start") in
+  let nxargc_fixup = (Semant.export_native sem SEG_data "NXArgc") in
+  let nxargv_fixup = (Semant.export_native sem SEG_data "NXArgv") in
+  let progname_fixup = (Semant.export_native sem SEG_data "__progname") in
+  let environ_fixup = (Semant.export_native sem SEG_data "environ") in
+  let exit_fixup = (Semant.import_native sem LIB_c "exit") in
+  let rust_start_fixup = (Semant.import_native sem LIB_rustrt "rust_start") in
 
   let start_fixup = new_fixup "start function entry" in
 
@@ -723,7 +723,7 @@ let emit_file
                (List.map
                   (fun (name,fix) -> (lib,name,fix))
                   (htab_pairs tab)))
-            (htab_pairs sem.Semant.ctxt_imports)))
+            (htab_pairs sem.Semant.ctxt_native_imports)))
   in
 
   let exported_symbols =
@@ -734,7 +734,7 @@ let emit_file
                (List.map
                   (fun (name, fix) -> (seg,name,fix))
                   (htab_pairs tab)))
-            (htab_pairs sem.Semant.ctxt_exports)))
+            (htab_pairs sem.Semant.ctxt_native_exports)))
   in
 
   let dylib_index (lib:import_lib) : int =
@@ -743,7 +743,7 @@ let emit_file
       | LIB_c -> 2
   in
 
-  (* Make undef symbols for imports. *)
+  (* Make undef symbols for native imports. *)
   let (symbols:(string * (frag * fixup)) array) =
     Array.map (fun (lib,name,_) ->
                  ("_" ^ name,

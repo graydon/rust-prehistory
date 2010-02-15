@@ -131,8 +131,8 @@ type ctxt =
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
 
-      ctxt_imports: (import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
-      ctxt_exports: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_native_imports: (import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_native_exports: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
 
       ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
@@ -199,8 +199,8 @@ let new_ctxt sess abi crate =
     ctxt_glue_code = Hashtbl.create 0;
     ctxt_data = Hashtbl.create 0;
 
-    ctxt_imports = Hashtbl.create 0;
-    ctxt_exports = Hashtbl.create 0;
+    ctxt_native_imports = Hashtbl.create 0;
+    ctxt_native_exports = Hashtbl.create 0;
 
     ctxt_main_fn_fixup = new_fixup (string_of_name crate.Ast.crate_main);
     ctxt_main_name = string_of_name crate.Ast.crate_main;
@@ -289,16 +289,16 @@ let get_spill (cx:ctxt) (id:node_id) : fixup =
   else bugi cx id "missing spill fixup"
 ;;
 
-let import (cx:ctxt) (lib:import_lib) (name:string) : fixup =
-  let lib_tab = (htab_search_or_add cx.ctxt_imports lib
+let import_native (cx:ctxt) (lib:import_lib) (name:string) : fixup =
+  let lib_tab = (htab_search_or_add cx.ctxt_native_imports lib
                    (fun _ -> Hashtbl.create 0))
   in
     htab_search_or_add lib_tab name
       (fun _ -> new_fixup ("import: " ^ name))
 ;;
 
-let export (cx:ctxt) (seg:segment) (name:string) : fixup =
-  let seg_tab = (htab_search_or_add cx.ctxt_exports seg
+let export_native (cx:ctxt) (seg:segment) (name:string) : fixup =
+  let seg_tab = (htab_search_or_add cx.ctxt_native_exports seg
                    (fun _ -> Hashtbl.create 0))
   in
     htab_search_or_add seg_tab name

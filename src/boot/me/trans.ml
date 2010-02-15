@@ -1103,10 +1103,10 @@ let trans_visitor
       (args:Il.operand array)
       : unit =
     abi.Abi.abi_emit_native_call_in_thunk (emitter())
-      ret nabi (Semant.import cx lib name) args;
+      ret nabi (Semant.import_native cx lib name) args;
 
   and upcall_fixup (name:string) : fixup =
-    Semant.import cx LIB_rustrt name;
+    Semant.import_native cx LIB_rustrt name;
 
   and trans_upcall
       (name:string)

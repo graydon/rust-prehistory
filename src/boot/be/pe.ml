@@ -653,7 +653,7 @@ let rustrt_imports sem =
     Array.of_list
       (List.map
          make_imports_for_lib
-         (htab_pairs sem.Semant.ctxt_imports))
+         (htab_pairs sem.Semant.ctxt_native_imports))
 ;;
 
 let emit_file
@@ -676,7 +676,7 @@ let emit_file
   let symtab_fixup = new_fixup "symbol table" in
   let strtab_fixup = new_fixup "string table" in
 
-  let rust_start_fixup = Semant.import sem LIB_rustrt "rust_start" in
+  let rust_start_fixup = Semant.import_native sem LIB_rustrt "rust_start" in
 
   let header = (pe_header
                   ~machine: IMAGE_FILE_MACHINE_I386
