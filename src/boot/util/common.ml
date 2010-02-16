@@ -155,12 +155,19 @@ let htab_search (htab:('a,'b) Hashtbl.t) (k:'a) : ('b option) =
   else None
 ;;
 
-let htab_search_or_add (htab:('a,'b) Hashtbl.t) (k:'a) (mk:unit -> 'b) : 'b =
+let htab_search_or_default (htab:('a,'b) Hashtbl.t) (k:'a) (def:unit -> 'b) : 'b =
   match htab_search htab k with
       Some v -> v
-    | None -> let v = mk () in
-        Hashtbl.add htab k v;
-        v
+    | None -> def()
+;;
+
+let htab_search_or_add (htab:('a,'b) Hashtbl.t) (k:'a) (mk:unit -> 'b) : 'b =
+  let def () =
+    let v = mk() in
+      Hashtbl.add htab k v;
+      v
+  in
+    htab_search_or_default htab k def
 ;;
 
 let htab_put (htab:('a,'b) Hashtbl.t) (a:'a) (b:'b) : unit =

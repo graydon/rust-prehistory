@@ -773,7 +773,7 @@ let trans_visitor
       trans_glue_frame_exit fix spill g
 
 
-  (* FIXME: abstract out the memoization logic between get_bind_mod_glue and get_fn_binding_glue *)
+  (* FIXME (546471): abstract out common glue-emitting logic *)
 
   and get_fn_binding_glue
       (direct:bool)
@@ -2047,7 +2047,7 @@ let trans_visitor
     in
     let (in_slots, _) = tpred in
       iflog (fun _ -> annotate "predicate call");
-      (* FIXME: extra_args if indirect *)
+      (* FIXME (bug 546450): extra_args if indirect *)
       trans_call true (lval_is_direct_fn cx flv) (fun _ -> Ast.sprintf_lval () flv)
         dst_cell ptr in_slots args [||];
 
@@ -2090,7 +2090,7 @@ let trans_visitor
 
   and closure_referent_type
       (bs:Ast.slot array)
-      (* FIXME: mutability flag *)
+      (* FIXME (bug 546448): mutability flag *)
       : Il.referent_ty =
     let rc = Il.ScalarTy word_ty in
     let pg = Il.ScalarTy Il.codeptr_t in
@@ -2236,27 +2236,26 @@ let trans_visitor
         bound_arg_slots
 
   and merge_bound_args
-      (in_rty:Il.referent_ty)
+      (args_rty:Il.referent_ty)
       (n_unbound:int)
-      (out_rty:Il.referent_ty)
+      (merged_args_rty:Il.referent_ty)
       (arg_slots:Ast.slot array)
       (arg_bound_flags:bool array)
       : unit =
     begin
-      (* FIXME: rename in/out *)
-      let in_cell = Il.Mem (fp_imm out_mem_disp, in_rty) in
-      let out_cell = Il.Mem (sp_imm 0L, out_rty) in
+      let args_cell = Il.Mem (fp_imm out_mem_disp, args_rty) in
+      let merged_args_cell = Il.Mem (sp_imm 0L, merged_args_rty) in
         iflog (fun _ -> annotate "copy out-ptr");
-        mov (get_element_ptr out_cell 0) (Il.Cell (get_element_ptr in_cell 0));
+        mov (get_element_ptr merged_args_cell 0) (Il.Cell (get_element_ptr args_cell 0));
         iflog (fun _ -> annotate "copy proc-ptr");
-        mov (get_element_ptr out_cell 1) (Il.Cell (get_element_ptr in_cell 1));
+        mov (get_element_ptr merged_args_cell 1) (Il.Cell (get_element_ptr args_cell 1));
         iflog (fun _ -> annotate "extract closure extra-arg");
-        let closure_cell = deref (get_element_ptr in_cell (n_unbound + 2)) in
+        let closure_cell = deref (get_element_ptr args_cell (n_unbound + 2)) in
         let n_args = Array.length arg_bound_flags in
         let bound_i = ref 0 in
         let unbound_i = ref 0 in
           for arg_i = 0 to (n_args - 1) do
-            let dst_cell = get_element_ptr out_cell (arg_i + 2) in
+            let dst_cell = get_element_ptr merged_args_cell (arg_i + 2) in
             let slot = arg_slots.(arg_i) in
             let is_bound = arg_bound_flags.(arg_i) in
             let src_cell =
@@ -2268,7 +2267,7 @@ let trans_visitor
               else
                 begin
                   iflog (fun _ -> annotate (Printf.sprintf "extract unbound arg %d as actual arg %d" !unbound_i arg_i));
-                  get_element_ptr in_cell (!unbound_i + 2)
+                  get_element_ptr args_cell (!unbound_i + 2)
                 end
             in
               iflog (fun _ -> annotate (Printf.sprintf "copy into actual-arg %d" arg_i));
