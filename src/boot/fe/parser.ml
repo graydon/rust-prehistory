@@ -354,6 +354,7 @@ type pstate =
       pstate_sess         : Session.sess;
       pstate_temp_id      : temp_id ref;
       pstate_node_id      : node_id ref;
+      pstate_opaque_id    : opaque_id ref;
       pstate_get_ty_mod           : (filename -> Ast.ty_mod);
       pstate_infer_crate_filename : (Ast.ident -> filename); }
 ;;
@@ -380,6 +381,21 @@ let lexpos (ps:pstate) : pos =
      (p.Lexing.pos_cnum) - (p.Lexing.pos_bol))
 ;;
 
+
+let next_node_id (ps:pstate) : node_id =
+  let id = !(ps.pstate_node_id) in
+    ps.pstate_node_id := Node ((int_of_node id)+1);
+    id
+;;
+
+
+let next_opaque_id (ps:pstate) : opaque_id =
+  let id = !(ps.pstate_opaque_id) in
+    ps.pstate_opaque_id := Opaque ((int_of_opaque id)+1);
+    id
+;;
+
+
 let span
     (ps:pstate)
     (apos:pos)
@@ -387,10 +403,9 @@ let span
     (x:'a)
     : 'a identified =
   let span = { lo = apos; hi = bpos } in
-  let id = !(ps.pstate_node_id) in
+  let id = next_node_id ps in
     iflog ps (fun _ -> log ps "span for node #%d: %s"
                 (int_of_node id) (Session.string_of_span span));
-    ps.pstate_node_id := Node ((int_of_node id)+1);
     htab_put ps.pstate_sess.Session.sess_spans id span;
     { node = x; id = id }
 ;;
@@ -2296,6 +2311,7 @@ and expand_tags_to_items
 and make_parser
     (tref:temp_id ref)
     (nref:node_id ref)
+    (oref:opaque_id ref)
     (sess:Session.sess)
     (tok:Lexing.lexbuf -> token)
     (get_ty_mod:filename -> Ast.ty_mod)
@@ -2318,6 +2334,7 @@ and make_parser
         pstate_sess = sess;
         pstate_temp_id = tref;
         pstate_node_id = nref;
+        pstate_opaque_id = oref;
         pstate_get_ty_mod = get_ty_mod;
         pstate_infer_crate_filename = infer_crate_filename; }
     in
@@ -2368,6 +2385,7 @@ and parse_crate_mod_entry
                     make_parser
                       ps.pstate_temp_id
                       ps.pstate_node_id
+                      ps.pstate_opaque_id
                       ps.pstate_sess
                       ps.pstate_lexfun
                       ps.pstate_get_ty_mod
@@ -2424,24 +2442,124 @@ and parse_crate_mod_entries
     items
 
 and parse_crate_import
-    (imports:Ast.mod_type_items)
+    (imports:(Ast.ident, (Ast.mod_type_item*span)) Hashtbl.t)
     (ps:pstate)
     : unit =
-  expect ps USE;
-  let ident = parse_ident ps in
-    expect ps SEMI;
-    let filename = ps.pstate_infer_crate_filename ident in
-    let tmod = ps.pstate_get_ty_mod filename in
-      iflog ps
-        begin
-          fun _ ->
-            log ps "extracted mod type from %s (binding to %s)" filename ident;
-            log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
-        end;
-      let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
-                                       Ast.decl_item = tmod}
-      in
-        Hashtbl.add imports ident mti
+  let apos = lexpos ps in
+    expect ps USE;
+    let ident = parse_ident ps in
+      expect ps SEMI;
+      let filename = ps.pstate_infer_crate_filename ident in
+      let tmod = ps.pstate_get_ty_mod filename in
+        iflog ps
+          begin
+            fun _ ->
+              log ps "extracted mod type from %s (binding to %s)" filename ident;
+              log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
+          end;
+        let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
+                                         Ast.decl_item = tmod}
+        in
+        let bpos = lexpos ps in
+          Hashtbl.add imports ident (mti, {lo=apos;hi=bpos})
+
+and expand_imports
+    (ps:pstate)
+    (crate:Ast.crate)
+    : unit =
+
+  let wrap span i =
+    let id = next_node_id ps in
+      htab_put ps.pstate_sess.Session.sess_spans id span;
+      { node = i; id = id }
+  in
+
+  let rec extract_item (span:span) (mti:Ast.mod_type_item) : Ast.mod_item' =
+
+    let wrap i = wrap span i in
+
+    let form_header_slots slots =
+      Array.mapi
+        (fun i slot -> (wrap slot, "_" ^ (string_of_int i)))
+        slots
+    in
+
+    match mti with
+        Ast.MOD_TYPE_ITEM_opaque_type { Ast.decl_item=(_, mut);
+                                        Ast.decl_params=params } ->
+          Ast.MOD_ITEM_opaque_type
+            { Ast.decl_item=Ast.TY_opaque ((next_opaque_id ps), mut);
+              Ast.decl_params=params }
+
+      | Ast.MOD_TYPE_ITEM_public_type { Ast.decl_item=ty;
+                                        Ast.decl_params=params } ->
+          Ast.MOD_ITEM_public_type
+            { Ast.decl_item=ty;
+              Ast.decl_params=params }
+
+      | Ast.MOD_TYPE_ITEM_pred { Ast.decl_item=tpred;
+                                 Ast.decl_params=params } ->
+          let (slots, constrs) = tpred in
+          let pred =
+            { Ast.pred_input_slots = form_header_slots slots;
+              Ast.pred_input_constrs = constrs;
+              Ast.pred_body = wrap [| |] }
+          in
+            Ast.MOD_ITEM_pred
+              { Ast.decl_item=pred;
+                Ast.decl_params=params }
+
+      | Ast.MOD_TYPE_ITEM_mod { Ast.decl_item=tmod;
+                                Ast.decl_params=params } ->
+          begin
+            let hdr, mtis = tmod in
+              match hdr with
+                  None ->
+                    Ast.MOD_ITEM_mod
+                      { Ast.decl_item=(None, extract_mod span mtis);
+                        Ast.decl_params=params }
+                | Some (slots, constrs) ->
+                    Ast.MOD_ITEM_mod
+                      { Ast.decl_item=(Some (form_header_slots slots, constrs),
+                                       extract_mod span mtis);
+                        Ast.decl_params=params }
+          end
+
+      | Ast.MOD_TYPE_ITEM_fn { Ast.decl_item=tfn;
+                               Ast.decl_params=params } ->
+          let (tsig, taux) = tfn in
+          let fn =
+            { Ast.fn_input_slots=form_header_slots tsig.Ast.sig_input_slots;
+              Ast.fn_input_constrs=tsig.Ast.sig_input_constrs;
+              Ast.fn_output_slot=wrap tsig.Ast.sig_output_slot;
+              Ast.fn_aux=taux;
+              Ast.fn_body=wrap [| |]; }
+          in
+            Ast.MOD_ITEM_fn
+              { Ast.decl_item=fn;
+                Ast.decl_params=params }
+
+
+  and extract_mod (span:span) (mtis:Ast.mod_type_items) : Ast.mod_items =
+    htab_map
+      mtis
+      begin
+        fun ident mti ->
+           let item' = extract_item span mti in
+             (ident, wrap span item')
+      end
+  in
+
+  let extract_items
+      (ident:Ast.ident)
+      ((import_mti:Ast.mod_type_item), (span:span))
+      : (Ast.ident * Ast.mod_item) =
+    let imported_mod = extract_item span import_mti in
+      (ident, wrap span imported_mod)
+  in
+
+  let mis = htab_map crate.node.Ast.crate_imports extract_items in
+    Hashtbl.iter (htab_put crate.node.Ast.crate_items) mis
 
 
 and parse_root_crate_entries
@@ -2522,12 +2640,17 @@ let parse_root_with_parse_fn
   let fname = sess.Session.sess_in in
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
-  let ps = make_parser tref nref sess tok get_ty_mod infer_crate_filename fname in
+  let oref = ref (Opaque 0) in
+  let ps = make_parser tref nref oref sess tok get_ty_mod infer_crate_filename fname in
   let apos = lexpos ps in
     try
-      if Filename.check_suffix fname suffix
-      then fn fname (Filename.dirname fname) files ps
-      else raise (err "parsing wrong kind of file" ps)
+      let crate =
+        if Filename.check_suffix fname suffix
+        then fn fname (Filename.dirname fname) files ps
+        else raise (err "parsing wrong kind of file" ps)
+      in
+        expand_imports ps crate;
+        crate
     with
         Parse_err (ps, str) ->
           Session.fail sess "Parse error: %s\n%!" str;
