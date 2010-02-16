@@ -54,6 +54,13 @@ let clear (v:t) : unit =
   done
 ;;
 
+let invert (v:t) : unit =
+  for i = 0 to (Array.length v.storage) - 1
+  do
+    v.storage.(i) <- Int64.lognot v.storage.(i)
+  done
+;;
+
 let set (v:t) (i:int) (x:bool) : unit =
   assert (i >= 0);
   assert (i < v.nbits);

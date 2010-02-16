@@ -197,16 +197,10 @@ let calculate_live_bitvectors
 
   let outer_changed = ref true in
 
-  (* Working bit-vectors. *)
-  let live_in_saved = new_bitv() in
-  let live_out_saved = new_bitv() in
-  let bitvs_equal a b = Bits.equal a b in
+  (* Working bit-vector. *)
+  let scratch = new_bitv() in
 
   (* bit-vector helpers. *)
-  let clear bv = Bits.clear bv in
-  let copy dst src = Bits.copy dst src in
-  let union dst src = Bits.union dst src in
-
     (* Setup pass. *)
     for i = 0 to n_quads - 1 do
       let q = quads.(i) in
@@ -220,8 +214,8 @@ let calculate_live_bitvectors
       iflog cx (fun _ -> log cx "iterating outer bitvector calculation");
       outer_changed := false;
       for i = 0 to n_quads - 1 do
-        clear live_in_vregs.(i);
-        clear live_out_vregs.(i)
+        Bits.clear live_in_vregs.(i);
+        Bits.clear live_out_vregs.(i)
       done;
       let inner_changed = ref true in
         while !inner_changed do
@@ -229,44 +223,30 @@ let calculate_live_bitvectors
           iflog cx (fun _ -> log cx "iterating inner bitvector calculation over %d quads" n_quads);
           for i = n_quads - 1 downto 0 do
 
+            let note_change b = if b then inner_changed := true in
             let live_in = live_in_vregs.(i) in
             let live_out = live_out_vregs.(i) in
             let used = quad_used_vrs.(i) in
             let defined = quad_defined_vrs.(i) in
 
-              ignore (copy live_in_saved live_in);
-              ignore (copy live_out_saved live_out);
-
               (* Union in the vregs we use. *)
-              ignore (union live_in used);
+              note_change (Bits.union live_in used);
 
               (* Union in all our jump targets. *)
               List.iter
-                (fun i -> ignore (union live_out live_in_vregs.(i)))
+                (fun i -> note_change (Bits.union live_out live_in_vregs.(i)))
                 (quad_jmp_targs.(i));
 
               (* Union in our block successor if we have one *)
               if i < (n_quads - 1) && (not (quad_uncond_jmp.(i)))
-              then ignore (union live_out live_in_vregs.(i+1));
+              then note_change (Bits.union live_out live_in_vregs.(i+1));
 
               (* Propagate live-out to live-in on anything we don't define. *)
-              for i = 0 to (n_vregs - 1)
-              do
-                if Bits.get live_out i && not (Bits.get defined i)
-                then Bits.set live_in i true
-                else ()
-              done;
+              ignore (Bits.copy scratch defined);
+              Bits.invert scratch;
+              ignore (Bits.intersect scratch live_out);
+              note_change (Bits.union live_in scratch);
 
-              (* Possibly update matters. *)
-              if bitvs_equal live_in live_in_saved &&
-                bitvs_equal live_out live_out_saved
-              then ()
-              else
-                begin
-                  ignore (copy live_in_vregs.(i) live_in);
-                  ignore (copy live_out_vregs.(i) live_out);
-                  inner_changed := true
-                end;
           done
         done;
         let kill_mov_to_dead_target i q =
@@ -291,7 +271,7 @@ let calculate_live_bitvectors
           log cx "=========================";
           for q = 0 to n_quads - 1 do
             let buf = Buffer.create 128 in
-              for v = 0 to n_vregs
+              for v = 0 to (n_vregs - 1)
               do
                 if ((Bits.get live_in_vregs.(q) v)
                     && (Bits.get live_out_vregs.(q) v))
