@@ -78,6 +78,22 @@ static uint32_t const LOG_DWARF =    0x100;
                     (proc))
 #endif
 
+// Override the uthash default SPI, require (ugh) there to be a symbol
+// 'rt' in the environment of any hash operations.
+
+#undef uthash_fatal
+#undef uthash_bkt_malloc
+#undef uthash_bkt_free
+#undef uthash_tbl_malloc
+#undef uthash_tbl_free
+
+#define uthash_fatal(msg) rt->srv->fatal(msg, __FILE__, __LINE__)
+#define uthash_bkt_malloc(sz) rt->malloc(sz)
+#define uthash_bkt_free(ptr) rt->free(ptr)
+#define uthash_tbl_malloc(sz) rt->malloc(sz)
+#define uthash_tbl_free(ptr) rt->free(ptr)
+
+
 static uint32_t
 get_logbits()
 {
