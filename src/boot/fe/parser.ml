@@ -2442,7 +2442,7 @@ and parse_crate_mod_entries
     items
 
 and parse_crate_import
-    (imports:(Ast.ident, (Ast.mod_type_item*span)) Hashtbl.t)
+    (imports:(import_lib, (Ast.ident * Ast.mod_type_item * span)) Hashtbl.t)
     (ps:pstate)
     : unit =
   let apos = lexpos ps in
@@ -2450,6 +2450,7 @@ and parse_crate_import
     let ident = parse_ident ps in
       expect ps SEMI;
       let filename = ps.pstate_infer_crate_filename ident in
+      let ilib = { import_libname = filename; } in
       let tmod = ps.pstate_get_ty_mod filename in
         iflog ps
           begin
@@ -2461,7 +2462,7 @@ and parse_crate_import
                                          Ast.decl_item = tmod}
         in
         let bpos = lexpos ps in
-          Hashtbl.add imports ident (mti, {lo=apos;hi=bpos})
+          Hashtbl.add imports ilib (ident, mti, {lo=apos;hi=bpos})
 
 and expand_imports
     (ps:pstate)
@@ -2474,7 +2475,11 @@ and expand_imports
       { node = i; id = id }
   in
 
-  let rec extract_item (span:span) (mti:Ast.mod_type_item) : Ast.mod_item' =
+  let rec extract_item
+      (span:span)
+      (ilib:import_lib)
+      (mti:Ast.mod_type_item)
+      : Ast.mod_item' =
 
     let wrap i = wrap span i in
 
@@ -2516,12 +2521,12 @@ and expand_imports
               match hdr with
                   None ->
                     Ast.MOD_ITEM_mod
-                      { Ast.decl_item=(None, extract_mod span mtis);
+                      { Ast.decl_item=(None, extract_mod span ilib mtis);
                         Ast.decl_params=params }
                 | Some (slots, constrs) ->
                     Ast.MOD_ITEM_mod
                       { Ast.decl_item=(Some (form_header_slots slots, constrs),
-                                       extract_mod span mtis);
+                                       extract_mod span ilib mtis);
                         Ast.decl_params=params }
           end
 
@@ -2540,21 +2545,34 @@ and expand_imports
                 Ast.decl_params=params }
 
 
-  and extract_mod (span:span) (mtis:Ast.mod_type_items) : Ast.mod_items =
+  and extract_and_wrap_item
+      (span:span)
+      (ilib:import_lib)
+      (mti:Ast.mod_type_item)
+      : Ast.mod_item =
+    let item' = extract_item span ilib mti in
+    let wrapped = wrap span item' in
+      (* FIXME: register node -> import lib mapping here. *)
+    let _ = ilib in
+      wrapped
+
+  and extract_mod
+      (span:span)
+      (ilib:import_lib)
+      (mtis:Ast.mod_type_items)
+      : Ast.mod_items =
     htab_map
       mtis
       begin
-        fun ident mti ->
-           let item' = extract_item span mti in
-             (ident, wrap span item')
+        fun ident mti -> (ident, extract_and_wrap_item span ilib mti)
       end
   in
 
   let extract_items
-      (ident:Ast.ident)
-      ((import_mti:Ast.mod_type_item), (span:span))
+      (ilib:import_lib)
+      ((ident:Ast.ident), (import_mti:Ast.mod_type_item), (span:span))
       : (Ast.ident * Ast.mod_item) =
-    let imported_mod = extract_item span import_mti in
+    let imported_mod = extract_item span ilib import_mti in
       (ident, wrap span imported_mod)
   in
 
