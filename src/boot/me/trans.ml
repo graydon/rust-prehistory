@@ -2662,6 +2662,17 @@ let trans_visitor
     trans_frame_exit fnid;
   in
 
+  let trans_imported_fn (fnid:node_id) (blockid:node_id) : unit =
+    trans_frame_entry fnid;
+    emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
+    let s = trans_static_string (path_name()) in
+    let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
+      trans_upcall "upcall_import" f [| s |];
+      call_code (code_of_operand (Il.Cell f));
+      emit Il.Leave;
+      trans_frame_exit fnid;
+  in
+
   let trans_tag
       (n:Ast.ident)
       (tagid:node_id)
@@ -2787,7 +2798,7 @@ let trans_visitor
       else ignore (Stack.pop curr_file)
   in
 
-  let visit_mod_item_pre n p i =
+  let visit_local_mod_item_pre n p i =
     enter_file_for i.id;
     begin
       match i.node with
@@ -2817,7 +2828,23 @@ let trans_visitor
     inner.Walk.visit_mod_item_pre n p i
   in
 
-  let visit_mod_item_post n p i =
+  let visit_imported_mod_item_pre _ _ i =
+    match i.node with
+        Ast.MOD_ITEM_fn f -> trans_imported_fn i.id f.Ast.decl_item.Ast.fn_body.id
+      | Ast.MOD_ITEM_mod _ -> ()
+      | _ -> bugi cx i.id "unsupported type of import: %s" (path_name())
+  in
+
+  let visit_mod_item_pre n p i =
+    if Hashtbl.mem cx.ctxt_imported_items i.id
+    then
+      visit_imported_mod_item_pre n p i
+    else
+      visit_local_mod_item_pre n p i
+  in
+
+
+  let visit_local_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
     begin
       match i.node with
@@ -2825,6 +2852,11 @@ let trans_visitor
         | _ -> ()
     end;
     leave_file_for i.id
+  in
+
+  let visit_mod_item_post n p i =
+    if not (Hashtbl.mem cx.ctxt_imported_items i.id)
+    then visit_local_mod_item_post n p i;
   in
 
   let visit_native_mod_item_pre n i =

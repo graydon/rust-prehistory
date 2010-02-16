@@ -84,7 +84,7 @@ type ctxt =
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
-      ctxt_item_import: (node_id, import_lib) Hashtbl.t;
+      ctxt_imported_items: (node_id, import_lib) Hashtbl.t;
 
       (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
@@ -161,7 +161,7 @@ let new_ctxt sess abi crate =
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
     ctxt_lval_to_referent = Hashtbl.create 0;
-    ctxt_item_import = Hashtbl.create 0;
+    ctxt_imported_items = crate.Ast.crate_imported;
 
     ctxt_mutable_slot_referent = Hashtbl.create 0;
 

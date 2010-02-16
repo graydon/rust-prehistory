@@ -2545,15 +2545,13 @@ and expand_imports
                 Ast.decl_params=params }
 
 
-  and extract_and_wrap_item
+  and wrap_item
       (span:span)
       (ilib:import_lib)
-      (mti:Ast.mod_type_item)
+      (item':Ast.mod_item')
       : Ast.mod_item =
-    let item' = extract_item span ilib mti in
     let wrapped = wrap span item' in
-      (* FIXME: register node -> import lib mapping here. *)
-    let _ = ilib in
+      htab_put crate.node.Ast.crate_imported wrapped.id ilib;
       wrapped
 
   and extract_mod
@@ -2564,7 +2562,7 @@ and expand_imports
     htab_map
       mtis
       begin
-        fun ident mti -> (ident, extract_and_wrap_item span ilib mti)
+        fun ident mti -> (ident, wrap_item span ilib (extract_item span ilib mti))
       end
   in
 
@@ -2573,7 +2571,7 @@ and expand_imports
       ((ident:Ast.ident), (import_mti:Ast.mod_type_item), (span:span))
       : (Ast.ident * Ast.mod_item) =
     let imported_mod = extract_item span ilib import_mti in
-      (ident, wrap span imported_mod)
+      (ident, wrap_item span ilib imported_mod)
   in
 
   let mis = htab_map crate.node.Ast.crate_imports extract_items in
@@ -2589,6 +2587,7 @@ and parse_root_crate_entries
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
   let imports = Hashtbl.create 4 in
+  let imported = Hashtbl.create 4 in
   let apos = lexpos ps in
     log ps "reading crate entries from %s" fname;
     while peek ps != EOF
@@ -2607,6 +2606,7 @@ and parse_root_crate_entries
       span ps apos bpos
         { Ast.crate_items = items;
           Ast.crate_imports = imports;
+          Ast.crate_imported = imported;
           Ast.crate_native_items = nitems;
           Ast.crate_main = main;
           Ast.crate_files = files }
@@ -2680,6 +2680,7 @@ let parse_root_with_parse_fn
           span ps apos apos
             { Ast.crate_items = Hashtbl.create 0;
               Ast.crate_imports = Hashtbl.create 0;
+              Ast.crate_imported = Hashtbl.create 0;
               Ast.crate_native_items = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
               Ast.crate_files = files }
@@ -2702,6 +2703,7 @@ let parse_root_srcfile_entries
     let crate =
       span ps apos bpos { Ast.crate_items = mitems;
                           Ast.crate_imports = Hashtbl.create 0;
+                          Ast.crate_imported = Hashtbl.create 0;
                           Ast.crate_native_items = Hashtbl.create 0;
                           Ast.crate_main = find_main_fn ps mitems;
                           Ast.crate_files = files }

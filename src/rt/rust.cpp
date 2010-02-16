@@ -2251,6 +2251,14 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
     return st;
 }
 
+extern "C" CDECL uintptr_t
+upcall_import(rust_proc *proc, char const *s)
+{
+    LOG_UPCALL_ENTRY(proc);
+    proc->rt->log(LOG_UPCALL, "upcall import: %s", s);
+    proc->fail(2);
+    return 0;
+}
 
 static int
 rust_main_loop(rust_rt *rt);
