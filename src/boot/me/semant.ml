@@ -84,6 +84,7 @@ type ctxt =
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
+      ctxt_item_import: (node_id, import_lib) Hashtbl.t;
 
       (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
@@ -131,8 +132,11 @@ type ctxt =
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
 
-      ctxt_native_imports: (import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_native_imports: (native_import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
       ctxt_native_exports: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
+
+      ctxt_import_item_num: (node_id, int) Hashtbl.t;
+      ctxt_imports: (import_lib, node_id array) Hashtbl.t;
 
       ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
@@ -157,6 +161,7 @@ let new_ctxt sess abi crate =
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
     ctxt_lval_to_referent = Hashtbl.create 0;
+    ctxt_item_import = Hashtbl.create 0;
 
     ctxt_mutable_slot_referent = Hashtbl.create 0;
 
@@ -201,6 +206,9 @@ let new_ctxt sess abi crate =
 
     ctxt_native_imports = Hashtbl.create 0;
     ctxt_native_exports = Hashtbl.create 0;
+
+    ctxt_import_item_num = Hashtbl.create 0;
+    ctxt_imports = Hashtbl.create 0;
 
     ctxt_main_fn_fixup = new_fixup (string_of_name crate.Ast.crate_main);
     ctxt_main_name = string_of_name crate.Ast.crate_main;
@@ -289,7 +297,7 @@ let get_spill (cx:ctxt) (id:node_id) : fixup =
   else bugi cx id "missing spill fixup"
 ;;
 
-let import_native (cx:ctxt) (lib:import_lib) (name:string) : fixup =
+let import_native (cx:ctxt) (lib:native_import_lib) (name:string) : fixup =
   let lib_tab = (htab_search_or_add cx.ctxt_native_imports lib
                    (fun _ -> Hashtbl.create 0))
   in

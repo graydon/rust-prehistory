@@ -619,8 +619,8 @@ let emit_file
   let nxargv_fixup = (Semant.export_native sem SEG_data "NXArgv") in
   let progname_fixup = (Semant.export_native sem SEG_data "__progname") in
   let environ_fixup = (Semant.export_native sem SEG_data "environ") in
-  let exit_fixup = (Semant.import_native sem LIB_c "exit") in
-  let rust_start_fixup = (Semant.import_native sem LIB_rustrt "rust_start") in
+  let exit_fixup = (Semant.import_native sem NATIVE_LIB_c "exit") in
+  let rust_start_fixup = (Semant.import_native sem NATIVE_LIB_rustrt "rust_start") in
 
   let start_fixup = new_fixup "start function entry" in
 
@@ -737,10 +737,10 @@ let emit_file
             (htab_pairs sem.Semant.ctxt_native_exports)))
   in
 
-  let dylib_index (lib:import_lib) : int =
+  let dylib_index (lib:native_import_lib) : int =
     match lib with
-        LIB_rustrt -> 1
-      | LIB_c -> 2
+        NATIVE_LIB_rustrt -> 1
+      | NATIVE_LIB_c -> 2
   in
 
   (* Make undef symbols for native imports. *)

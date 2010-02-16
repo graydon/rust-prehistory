@@ -1097,7 +1097,7 @@ let trans_visitor
 
   and trans_native_thunk
       (nabi:Abi.nabi)
-      (lib:import_lib)
+      (lib:native_import_lib)
       (name:string)
       (ret:Il.cell)
       (args:Il.operand array)
@@ -1106,7 +1106,7 @@ let trans_visitor
       ret nabi (Semant.import_native cx lib name) args;
 
   and upcall_fixup (name:string) : fixup =
-    Semant.import_native cx LIB_rustrt name;
+    Semant.import_native cx NATIVE_LIB_rustrt name;
 
   and trans_upcall
       (name:string)
@@ -2711,8 +2711,8 @@ let trans_visitor
          come from the frontend. *)
     let lib =
       match nabi.Abi.nabi_convention with
-          Abi.CONV_rust -> LIB_rustrt
-        | Abi.CONV_cdecl -> LIB_c
+          Abi.CONV_rust -> NATIVE_LIB_rustrt
+        | Abi.CONV_cdecl -> NATIVE_LIB_c
     in
     let name = item_name cx fnid in
     let name =
