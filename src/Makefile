@@ -129,7 +129,7 @@ OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael $(CFG_OCAMLOPT_PROFILE_FLAGS
 # List them in link order.
 # Nobody calculates the link-order DAG automatically, sadly.
 
-UTIL_BOT_MLS := $(addprefix boot/util/, common.ml bitv.ml)
+UTIL_BOT_MLS := $(addprefix boot/util/, common.ml bits.ml)
 DRIVER_BOT_MLS := $(addprefix boot/driver/, session.ml)
 BE_MLS := $(addprefix boot/be/, asm.ml x86.ml ra.ml pe.ml elf.ml \
           macho.ml)

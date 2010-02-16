@@ -3018,7 +3018,7 @@ let process_crate
     |];
   in
     log cx "translating crate with main function %s" cx.ctxt_main_name;
-    run_passes cx path passes (log cx "%s") crate;
+    run_passes cx "trans" path passes (log cx "%s") crate;
 ;;
 
 (*

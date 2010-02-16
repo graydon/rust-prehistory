@@ -100,10 +100,10 @@ type ctxt =
       (* Typestate-y stuff. *)
       ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
       ctxt_constr_ids: (constr_key,constr_id) Hashtbl.t;
-      ctxt_preconditions: (node_id,Bitv.t) Hashtbl.t;
-      ctxt_postconditions: (node_id,Bitv.t) Hashtbl.t;
-      ctxt_prestates: (node_id,Bitv.t) Hashtbl.t;
-      ctxt_poststates: (node_id,Bitv.t) Hashtbl.t;
+      ctxt_preconditions: (node_id,Bits.t) Hashtbl.t;
+      ctxt_postconditions: (node_id,Bits.t) Hashtbl.t;
+      ctxt_prestates: (node_id,Bits.t) Hashtbl.t;
+      ctxt_poststates: (node_id,Bits.t) Hashtbl.t;
       ctxt_copy_stmt_is_init: (node_id,unit) Hashtbl.t;
 
       (* Translation-y stuff. *)
@@ -1236,6 +1236,7 @@ let lookup
 
 let run_passes
     (cx:ctxt)
+    (name:string)
     (path:Ast.name_component Stack.t)
     (passes:Walk.visitor array)
     (log:string->unit)
@@ -1253,7 +1254,8 @@ let run_passes
     then ()
     else
       try
-        Array.iteri do_pass passes
+        Session.time_inner name sess
+          (fun _ -> Array.iteri do_pass passes)
       with
           Semant_err (ido, str) -> report_err cx ido str
 ;;

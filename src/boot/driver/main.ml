@@ -54,6 +54,8 @@ let (sess:Session.sess) =
        harm than good on OSX.  On other platforms it's the other way
        around. Ancient OSX gdb perhaps?  *)
     Session.sess_emit_dwarf = (not (targ = MacOS_x86_macho));
+    Session.sess_report_timing = false;
+    Session.sess_timings = Hashtbl.create 0
   }
 ;;
 
@@ -131,6 +133,7 @@ let argspecs =
                           sess.Session.sess_trace_drop <- true;
                           sess.Session.sess_trace_tag <- true ),
      "emit all tracing code");
+    ("-time", Arg.Unit (fun _ -> sess.Session.sess_report_timing <- true), "report timing of compiler phases");
     ("-dwarf", Arg.Unit (fun _ -> sess.Session.sess_emit_dwarf <- true), "emit DWARF info (default false)");
     ("-dump", Arg.String dump_file, "dump DWARF info in compiled file")
   ]
@@ -188,7 +191,10 @@ then
   end
 
 let list_to_seq ls = Asm.SEQ (Array.of_list ls);;
-let (select_insns:(Il.quads -> Asm.frag)) = X86.select_insns sess;;
+let select_insns (quads:Il.quads) : Asm.frag =
+  Session.time_inner "insn" sess
+    (fun _ -> X86.select_insns sess quads)
+;;
 
 (* Semantic passes. *)
 let sem_cx = Semant.new_ctxt sess abi crate.node
@@ -220,9 +226,11 @@ let main_pipeline _ =
           None -> select_insns code.Semant.code_quads
         | Some (n_vregs, spill_fix) ->
             let (quads', n_spills) =
-              Ra.reg_alloc sess
-                code.Semant.code_quads
-                n_vregs abi frame_sz
+              (Session.time_inner "RA" sess
+                 (fun _ ->
+                    Ra.reg_alloc sess
+                      code.Semant.code_quads
+                      n_vregs abi frame_sz))
             in
             let insns = select_insns quads' in
               begin
@@ -265,7 +273,10 @@ let main_pipeline _ =
                                 (fun _ (_, i) -> i) sem_cx.Semant.ctxt_data)
       in
       (* Emitting Dwarf and PE/ELF/Macho. *)
-      let (dwarf:Dwarf.debug_records) = Dwarf.process_crate sem_cx crate in
+      let (dwarf:Dwarf.debug_records) =
+        Session.time_inner "dwarf" sess
+          (fun _ -> Dwarf.process_crate sem_cx crate)
+      in
 
         exit_if_failed ();
         let emitter =
@@ -274,12 +285,26 @@ let main_pipeline _ =
             | MacOS_x86_macho -> Macho.emit_file
             | Linux_x86_elf -> Elf.emit_file
         in
-          emitter sess code data sem_cx dwarf;
+          Session.time_inner "emit" sess
+            (fun _ -> emitter sess code data sem_cx dwarf);
           exit_if_failed ()
 ;;
 
 
 main_pipeline ();;
+
+if sess.Session.sess_report_timing
+then
+  begin
+    Printf.fprintf stderr "timing:\n\n";
+    Array.iter
+      begin
+        fun name ->
+          Printf.fprintf stderr "%20s: %f\n" name
+            (Hashtbl.find sess.Session.sess_timings name)
+      end
+      (sorted_htab_keys sess.Session.sess_timings)
+  end;
 
 (*
  * Local Variables:

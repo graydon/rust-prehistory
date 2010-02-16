@@ -59,7 +59,7 @@ let process_crate
          Walk.empty_visitor);
     |]
   in
-    run_passes cx path passes (log cx "%s") crate
+    run_passes cx "alias" path passes (log cx "%s") crate
 ;;
 
 (*

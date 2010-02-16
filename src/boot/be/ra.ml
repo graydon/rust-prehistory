@@ -179,19 +179,19 @@ let quad_is_unconditional_jump (q:quad) : bool =
 
 let calculate_live_bitvectors
     (cx:ctxt)
-    : ((Bitv.t array) * (Bitv.t array)) =
+    : ((Bits.t array) * (Bits.t array)) =
 
   log cx "calculating live bitvectors";
 
   let quads = cx.ctxt_quads in
   let n_quads = Array.length quads in
   let n_vregs = cx.ctxt_n_vregs in
-  let new_bitv _ = Bitv.create n_vregs false in
-  let (live_in_vregs:Bitv.t array) = Array.init n_quads new_bitv in
-  let (live_out_vregs:Bitv.t array) = Array.init n_quads new_bitv in
+  let new_bitv _ = Bits.create n_vregs false in
+  let (live_in_vregs:Bits.t array) = Array.init n_quads new_bitv in
+  let (live_out_vregs:Bits.t array) = Array.init n_quads new_bitv in
 
-  let (quad_used_vrs:Bitv.t array) = Array.init n_quads new_bitv in
-  let (quad_defined_vrs:Bitv.t array) = Array.init n_quads new_bitv in
+  let (quad_used_vrs:Bits.t array) = Array.init n_quads new_bitv in
+  let (quad_defined_vrs:Bits.t array) = Array.init n_quads new_bitv in
   let (quad_uncond_jmp:bool array) = Array.make n_quads false in
   let (quad_jmp_targs:(Il.label list) array) = Array.make n_quads [] in
 
@@ -200,20 +200,20 @@ let calculate_live_bitvectors
   (* Working bit-vectors. *)
   let live_in_saved = new_bitv() in
   let live_out_saved = new_bitv() in
-  let bitvs_equal a b = ((Bitv.to_list a) = (Bitv.to_list b)) in
+  let bitvs_equal a b = Bits.equal a b in
 
   (* bit-vector helpers. *)
-  let clear bv = Bitv.fill bv 0 (Bitv.length bv) false in
-  let copy dst src = Bitv.blit src 0 dst 0 (Bitv.length src) in
-  let union dst src = Bitv.iteri_true (fun i -> Bitv.set dst i true) src in
+  let clear bv = Bits.clear bv in
+  let copy dst src = Bits.copy dst src in
+  let union dst src = Bits.union dst src in
 
     (* Setup pass. *)
     for i = 0 to n_quads - 1 do
       let q = quads.(i) in
         quad_uncond_jmp.(i) <- quad_is_unconditional_jump q;
         quad_jmp_targs.(i) <- quad_jump_target_labels q;
-        List.iter (fun v -> Bitv.set quad_used_vrs.(i) v true) (quad_used_vregs q);
-        List.iter (fun v -> Bitv.set quad_defined_vrs.(i) v true) (quad_defined_vregs q)
+        List.iter (fun v -> Bits.set quad_used_vrs.(i) v true) (quad_used_vregs q);
+        List.iter (fun v -> Bits.set quad_defined_vrs.(i) v true) (quad_defined_vregs q)
     done;
 
     while !outer_changed do
@@ -234,25 +234,26 @@ let calculate_live_bitvectors
             let used = quad_used_vrs.(i) in
             let defined = quad_defined_vrs.(i) in
 
-              copy live_in_saved live_in;
-              copy live_out_saved live_out;
+              ignore (copy live_in_saved live_in);
+              ignore (copy live_out_saved live_out);
 
               (* Union in the vregs we use. *)
-              union live_in used;
+              ignore (union live_in used);
 
               (* Union in all our jump targets. *)
-              List.iter (fun i -> union live_out live_in_vregs.(i)) (quad_jmp_targs.(i));
+              List.iter
+                (fun i -> ignore (union live_out live_in_vregs.(i)))
+                (quad_jmp_targs.(i));
 
               (* Union in our block successor if we have one *)
               if i < (n_quads - 1) && (not (quad_uncond_jmp.(i)))
-              then union live_out live_in_vregs.(i+1)
-              else ();
+              then ignore (union live_out live_in_vregs.(i+1));
 
               (* Propagate live-out to live-in on anything we don't define. *)
               for i = 0 to (n_vregs - 1)
               do
-                if Bitv.get live_out i && not (Bitv.get defined i)
-                then Bitv.set live_in i true
+                if Bits.get live_out i && not (Bits.get defined i)
+                then Bits.set live_in i true
                 else ()
               done;
 
@@ -262,8 +263,8 @@ let calculate_live_bitvectors
               then ()
               else
                 begin
-                  copy live_in_vregs.(i) live_in;
-                  copy live_out_vregs.(i) live_out;
+                  ignore (copy live_in_vregs.(i) live_in);
+                  ignore (copy live_out_vregs.(i) live_out);
                   inner_changed := true
                 end;
           done
@@ -274,7 +275,7 @@ let calculate_live_bitvectors
                          Il.unary_dst=Il.Reg (Il.Vreg v, _) }
                 when
                   ((Il.is_mov uop) &&
-                     not (Bitv.get live_out_vregs.(i) v)) ->
+                     not (Bits.get live_out_vregs.(i) v)) ->
                   begin
                     kill_quad i cx;
                     outer_changed := true;
@@ -290,13 +291,10 @@ let calculate_live_bitvectors
           log cx "=========================";
           for q = 0 to n_quads - 1 do
             let buf = Buffer.create 128 in
-            let live_vregs = (Bitv.bw_or
-                                live_in_vregs.(q)
-                                live_out_vregs.(q))
-            in
-              for v = 0 to (Bitv.length live_vregs) - 1
+              for v = 0 to n_vregs
               do
-                if Bitv.get live_vregs v
+                if ((Bits.get live_in_vregs.(q) v)
+                    && (Bits.get live_out_vregs.(q) v))
                 then Printf.bprintf buf " %-2d" v
                 else Buffer.add_string buf "   "
               done;
@@ -382,8 +380,8 @@ let collect_vreg_tys
 ;;
 
 (* Simple local register allocator. Nothing fancy. *)
-let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (framesz:int64) =
-  try
+let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (framesz:int64) = 
+ try
     let cx = new_ctxt sess quads vregs abi in
     let _ =
       iflog cx
@@ -432,7 +430,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
           then
             begin
               Hashtbl.remove dirty_vregs vreg;
-              if (Bitv.get (live_out_vregs.(i)) vreg)
+              if (Bits.get (live_out_vregs.(i)) vreg)
               then
                 let spill_idx =
                   if Hashtbl.mem vreg_to_spill vreg
@@ -564,8 +562,8 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                     log cx "processing quad %d = %s" i (string_of_quad hr_str quad);
                     (lstr "dirt" (htab_keys dirty_vregs) vr_str);
                     (lstr "clob" clobbers hr_str);
-                    (lstr "in" (Bitv.to_list live_in_vregs.(i)) vr_str);
-                    (lstr "out" (Bitv.to_list live_out_vregs.(i)) vr_str);
+                    (lstr "in" (Bits.to_list live_in_vregs.(i)) vr_str);
+                    (lstr "out" (Bits.to_list live_out_vregs.(i)) vr_str);
                     (lstr "use" used vr_str);
                     (lstr "def" defined vr_str);
               end;
@@ -604,7 +602,6 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
             log cx "register-allocated quads:";
             dump_quads cx;
         end;
-
       (cx.ctxt_quads, cx.ctxt_next_spill)
 
   with

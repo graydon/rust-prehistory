@@ -35,8 +35,27 @@ type sess =
   mutable sess_trace_tag: bool;
   mutable sess_failed: bool;
   mutable sess_emit_dwarf: bool;
+  mutable sess_report_timing: bool;
+  sess_timings: (string, float) Hashtbl.t;
   sess_spans: (node_id,span) Hashtbl.t;
 }
+;;
+
+let add_time sess name amt =
+  let existing =
+    if Hashtbl.mem sess.sess_timings name
+    then Hashtbl.find sess.sess_timings name
+    else 0.0
+  in
+    (Hashtbl.replace sess.sess_timings name (existing +. amt))
+;;
+
+let time_inner name sess thunk =
+  let t0 = Unix.gettimeofday() in
+  let x = thunk() in
+  let t1 = Unix.gettimeofday() in
+    add_time sess name (t1 -. t0);
+    x
 ;;
 
 let get_span sess id =

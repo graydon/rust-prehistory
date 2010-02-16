@@ -646,10 +646,10 @@ let process_crate
     |]
   in
     log cx "running primary resolve passes";
-    run_passes cx path passes_0 (log cx "%s") crate;
+    run_passes cx "resolve collect" path passes_0 (log cx "%s") crate;
     resolve_recursion cx node_to_references recursive_tag_groups;
     log cx "running secondary resolve passes";
-    run_passes cx path passes_1 (log cx "%s") crate
+    run_passes cx "resolve bind" path passes_1 (log cx "%s") crate
 ;;
 
 (*

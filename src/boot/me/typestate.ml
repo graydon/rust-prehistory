@@ -259,10 +259,10 @@ let bitmap_assigning_visitor
   let visit_stmt_pre s =
     iflog cx (fun _ -> log cx "building %d-entry bitmap for node %d"
                 (!idref) (int_of_node s.id));
-    htab_put cx.ctxt_preconditions s.id (Bitv.create (!idref) false);
-    htab_put cx.ctxt_postconditions s.id (Bitv.create (!idref) false);
-    htab_put cx.ctxt_prestates s.id (Bitv.create (!idref) false);
-    htab_put cx.ctxt_poststates s.id (Bitv.create (!idref) false);
+    htab_put cx.ctxt_preconditions s.id (Bits.create (!idref) false);
+    htab_put cx.ctxt_postconditions s.id (Bits.create (!idref) false);
+    htab_put cx.ctxt_prestates s.id (Bits.create (!idref) false);
+    htab_put cx.ctxt_poststates s.id (Bits.create (!idref) false);
     inner.Walk.visit_stmt_pre s
   in
     { inner with
@@ -276,14 +276,14 @@ let condition_assigning_visitor
     : Walk.visitor =
   let scope_ids _ = List.map id_of_scope (!scopes) in
 
-  let raise_bits (bitv:Bitv.t) (keys:constr_key array) : unit =
+  let raise_bits (bitv:Bits.t) (keys:constr_key array) : unit =
     Array.iter
       (fun key ->
          let cid = Hashtbl.find cx.ctxt_constr_ids key in
          let i = int_of_constr cid in
            iflog cx (fun _ -> log cx "setting bit %d, constraint %s"
                        i (fmt_constr_key cx key));
-           Bitv.set bitv (int_of_constr cid) true)
+           Bits.set bitv (int_of_constr cid) true)
       keys
   in
 
@@ -634,47 +634,24 @@ let run_dataflow cx graph =
     String.concat ", "
       (List.map
          (fun i -> fmt_constr_key cx (Hashtbl.find cx.ctxt_constrs (Constr i)))
-         (Bitv.to_list bitv))
+         (Bits.to_list bitv))
   in
   let set_bits dst src =
-    Bitv.iteri
-      begin
-        fun i b ->
-          if (Bitv.get dst i) = b
-          then ()
-          else
-            (progress := true;
-             iflog cx (fun _ -> log cx "made progress setting bit %d" i);
-             Bitv.set dst i b)
-      end
-      src
+    if Bits.copy dst src
+    then (progress := true;
+          iflog cx (fun _ -> log cx "made progress setting bits"))
   in
   let intersect_bits dst src =
-    Bitv.iteri
-      begin
-        fun i b ->
-          if (not b) && (Bitv.get dst i)
-          then
-            (progress := true;
-             iflog cx (fun _ -> log cx
-                         "made progress clearing bit %d" i);
-             Bitv.set dst i b)
-      end
-      src
+    if Bits.intersect dst src
+    then (progress := true;
+          iflog cx (fun _ -> log cx
+                      "made progress intersecting bits"))
   in
   let raise_bits dst src =
-    Bitv.iteri_true
-      begin
-        fun i ->
-          if Bitv.get dst i
-          then ()
-          else
-            (progress := true;
-             iflog cx (fun _ -> log cx
-                         "made progress raising bit %d" i);
-             Bitv.set dst i true)
-      end
-      src
+    if Bits.union dst src
+    then (progress := true;
+          iflog cx (fun _ -> log cx
+                      "made progress unioning bits"))
   in
   let iter = ref 0 in
   let written = Hashtbl.create 0 in
@@ -733,9 +710,9 @@ let typestate_verify_visitor
   let visit_stmt_pre s =
     let prestate = Hashtbl.find cx.ctxt_prestates s.id in
     let precond = Hashtbl.find cx.ctxt_preconditions s.id in
-      Bitv.iteri_true
+      List.iter
         (fun i ->
-           if not (Bitv.get prestate i)
+           if not (Bits.get prestate i)
            then
              let ckey = Hashtbl.find cx.ctxt_constrs (Constr i) in
              let constr_str = fmt_constr_key cx ckey in
@@ -745,7 +722,7 @@ let typestate_verify_visitor
                  (int_of_node s.id)
                  (Ast.fmt_to_str Ast.fmt_stmt
                     (Hashtbl.find cx.ctxt_all_stmts s.id)))
-        precond;
+        (Bits.to_list precond);
       inner.Walk.visit_stmt_pre s
   in
     { inner with
@@ -768,7 +745,7 @@ let lifecycle_visitor
             let is_initializing slot =
               let cid = Hashtbl.find cx.ctxt_constr_ids (Constr_init slot) in
               let i = int_of_constr cid in
-                (not (Bitv.get prestate i)) && (Bitv.get poststate i)
+                (not (Bits.get prestate i)) && (Bits.get poststate i)
             in
             let initializing = List.exists is_initializing (Array.to_list dst_slots) in
               if initializing
@@ -817,10 +794,10 @@ let process_crate
          Walk.empty_visitor)
     |]
   in
-    run_passes cx path setup_passes (log cx "%s") crate;
+    run_passes cx "typestate setup" path setup_passes (log cx "%s") crate;
     run_dataflow cx graph;
-    run_passes cx path verify_passes (log cx "%s") crate;
-    run_passes cx path aux_passes (log cx "%s") crate
+    run_passes cx "typestate verify" path verify_passes (log cx "%s") crate;
+    run_passes cx "typestate aux" path aux_passes (log cx "%s") crate
 ;;
 
 

@@ -57,7 +57,7 @@ let process_crate
        exterior slots. This is essential if f() is to be able to treat the 
        constraints holding over x and y independently. *)
 
-    run_passes cx path passes (log cx "%s") crate;
+    run_passes cx "mode" path passes (log cx "%s") crate;
     ()
 ;;
 

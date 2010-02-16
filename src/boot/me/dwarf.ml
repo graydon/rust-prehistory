@@ -1907,7 +1907,7 @@ let process_crate
 
     log cx "emitting DWARF records";
     if cx.ctxt_sess.Session.sess_emit_dwarf
-    then run_passes cx path passes (log cx "%s") crate;
+    then run_passes cx "dwarf" path passes (log cx "%s") crate;
 
     (* Terminate the tables. *)
     {

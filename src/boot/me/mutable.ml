@@ -95,7 +95,7 @@ let process_crate
             Walk.empty_visitor));
     |]
   in
-    run_passes cx path passes (log cx "%s") crate
+    run_passes cx "mutable" path passes (log cx "%s") crate
 ;;
 
 (*
