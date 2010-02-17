@@ -873,14 +873,14 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
             mov_if_operands_differ b.binary_lhs b'.binary_lhs;
             mov_if_operands_differ b.binary_rhs b'.binary_rhs;
             if e.emit_is_2addr &&
-              (b'.binary_lhs != (Cell b'.binary_dst))
+              (not (b'.binary_lhs = (Cell b'.binary_dst)))
             then
               begin
                 emit_mov b'.binary_dst b'.binary_lhs;
                 emit_quad (Binary { b' with binary_lhs = (Cell b'.binary_dst) })
               end
             else
-              emit_quad q';
+              emit_quad (Binary b');
             mov_if_cells_differ b.binary_dst b'.binary_dst
           end
 

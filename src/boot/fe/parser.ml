@@ -566,7 +566,7 @@ let bracketed_seq
       dosep ();
       accum := (prule ps) :: (!accum)
     done;
-    while peek ps != ket
+    while (not (peek ps = ket))
     do
       dosep ();
       accum := (prule ps) :: !accum
@@ -2418,7 +2418,7 @@ and parse_mod_items
     (terminal:token)
     : Ast.mod_items =
   let items = Hashtbl.create 4 in
-    while peek ps != terminal
+    while (not (peek ps = terminal))
     do
       let (ident, item) = parse_mod_item ps in
         htab_put items ident item;
@@ -2434,7 +2434,7 @@ and parse_crate_mod_entries
     : Ast.mod_items =
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
-    while peek ps != RBRACE
+    while (not (peek ps = RBRACE))
     do
       parse_crate_mod_entry prefix files items nitems ps
     done;
@@ -2591,7 +2591,7 @@ and parse_root_crate_entries
   let imported = Hashtbl.create 4 in
   let apos = lexpos ps in
     log ps "reading crate entries from %s" fname;
-    while peek ps != EOF
+    while (not (peek ps = EOF))
     do
       match peek ps with
           NATIVE | MOD ->
