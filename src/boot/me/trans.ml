@@ -2972,7 +2972,10 @@ let trans_visitor
 
       htab_put cx.ctxt_data
         DATA_crate crate_data;
-    leave_file_for crate.id
+
+      export_existing_native cx SEG_data "rust_crate" cx.ctxt_crate_fixup;
+
+      leave_file_for crate.id
   in
 
     { inner with

@@ -236,6 +236,7 @@ let pe_loader_header
     ~(subsys:pe_subsystem)
     ~(loader_hdr_fixup:fixup)
     ~(import_dir_fixup:fixup)
+    ~(export_dir_fixup:fixup)
     : frag =
   DEF
     (loader_hdr_fixup,
@@ -289,16 +290,17 @@ let pe_loader_header
 
        (*
 
-          Standard PE files have ~10 directories referenced from
-          here. We only fill in one of them -- the import directory --
-          because we don't care about the others. We leave the rest as
-          zero in case someone is looking for them. This may be
-          superfluous or wrong.
+         Standard PE files have ~10 directories referenced from
+         here. We only fill in two of them -- the export/import
+         directories -- because we don't care about the others. We
+         leave the rest as zero in case someone is looking for
+         them. This may be superfluous or wrong.
 
        *)
 
 
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Export dir.        *)
+       WORD (TY_u32, (rva export_dir_fixup));
+       WORD (TY_u32, (M_SZ export_dir_fixup));
 
        WORD (TY_u32, (rva import_dir_fixup));
        WORD (TY_u32, (M_SZ import_dir_fixup));
@@ -330,6 +332,7 @@ type pe_section_id =
   | SECTION_ID_RDATA
   | SECTION_ID_BSS
   | SECTION_ID_IMPORTS
+  | SECTION_ID_EXPORTS
   | SECTION_ID_DEBUG_ARANGES
   | SECTION_ID_DEBUG_PUBNAMES
   | SECTION_ID_DEBUG_INFO
@@ -368,6 +371,8 @@ let pe_section_header
       | SECTION_ID_IMPORTS -> [ IMAGE_SCN_CNT_INITIALIZED_DATA;
                                 IMAGE_SCN_MEM_READ;
                                 IMAGE_SCN_MEM_WRITE ]
+      | SECTION_ID_EXPORTS -> [ IMAGE_SCN_CNT_INITIALIZED_DATA;
+                                IMAGE_SCN_MEM_READ ]
       | SECTION_ID_RDATA
       | SECTION_ID_DEBUG_ARANGES
       | SECTION_ID_DEBUG_PUBNAMES
@@ -386,6 +391,7 @@ let pe_section_header
             | SECTION_ID_RDATA -> ".rdata\x00\x00"
             | SECTION_ID_BSS -> ".bss\x00\x00\x00\x00"
             | SECTION_ID_IMPORTS -> ".idata\x00\x00"
+            | SECTION_ID_EXPORTS -> ".edata\x00\x00"
 
             (* There is a bizarre Microsoft COFF extension to account
              * for longer-than-8-char section names: you emit a single
@@ -493,7 +499,7 @@ type pe_import_dll_entry =
   *)
 
 let pe_import_section
-    ~(section_fixup:fixup)
+    ~(import_dir_fixup:fixup)
     ~(dlls:pe_import_dll_entry array)
     : frag =
 
@@ -585,7 +591,7 @@ let pe_import_section
   let strings = SEQ (Array.map form_dir_entry_string dlls)
   in
     def_aligned
-      section_fixup
+      import_dir_fixup
       (SEQ
          [|
            dir;
@@ -594,6 +600,83 @@ let pe_import_section
            strings
          |])
 
+;;
+
+type pe_export =
+    {
+      pe_export_name_fixup: fixup;
+      pe_export_name: string;
+      pe_export_address_fixup: fixup;
+    }
+;;
+
+let pe_export_section
+    ~(export_dir_fixup:fixup)
+    ~(image_name_fixup:fixup)
+    ~(exports:pe_export array)
+    : frag =
+  Array.sort (fun a b -> compare a.pe_export_name b.pe_export_name) exports;
+  let export_addr_table_fixup = new_fixup "export address table" in
+  let export_addr_table =
+    DEF
+      (export_addr_table_fixup,
+       SEQ
+         (Array.map
+            (fun e -> (WORD (TY_u32, rva e.pe_export_address_fixup)))
+            exports))
+  in
+  let export_name_pointer_table_fixup = new_fixup "export name pointer table" in
+  let export_name_pointer_table =
+    DEF
+      (export_name_pointer_table_fixup,
+       SEQ
+         (Array.map
+            (fun e -> (WORD (TY_u32, rva e.pe_export_name_fixup)))
+            exports))
+  in
+  let export_name_table_fixup = new_fixup "export name table" in
+  let export_name_table =
+    DEF
+      (export_name_table_fixup,
+       SEQ
+         (Array.map
+            (fun e -> (DEF (e.pe_export_name_fixup,
+                            (ZSTRING e.pe_export_name))))
+            exports))
+  in
+  let export_ordinal_table_fixup = new_fixup "export ordinal table" in
+  let export_ordinal_table =
+    DEF
+      (export_ordinal_table_fixup,
+       SEQ
+         (Array.mapi
+            (fun i _ -> (WORD (TY_u16, IMM (Int64.of_int (i)))))
+            exports))
+  in
+  let n_exports = IMM (Int64.of_int (Array.length exports)) in
+  let export_dir_table =
+    SEQ [|
+      WORD (TY_u32, IMM 0L);               (* Flags, reserved.    *)
+      WORD (TY_u32, IMM 0L);               (* Timestamp, unused.  *)
+      WORD (TY_u16, IMM 0L);               (* Major vers., unused *)
+      WORD (TY_u16, IMM 0L);               (* Minor vers., unused *)
+      WORD (TY_u32, rva image_name_fixup); (* Name RVA (of this image).      *)
+      WORD (TY_u32, IMM 1L);               (* Ordinal base, 1 by convention. *)
+      WORD (TY_u32, n_exports);            (* # entries in EAT.              *)
+      WORD (TY_u32, n_exports);            (* # entries in ENPT/EOT.         *)
+      WORD (TY_u32, rva export_addr_table_fixup);          (* EAT  *)
+      WORD (TY_u32, rva export_name_pointer_table_fixup);  (* ENPT *)
+      WORD (TY_u32, rva export_ordinal_table_fixup);       (* EOT  *)
+    |]
+  in
+    def_aligned export_dir_fixup
+      (SEQ [|
+         export_dir_table;
+         export_addr_table;
+         export_name_pointer_table;
+         export_ordinal_table;
+         export_name_table
+       |])
 ;;
 
 let pe_text_section
@@ -656,6 +739,24 @@ let rustrt_imports sem =
          (htab_pairs sem.Semant.ctxt_native_imports))
 ;;
 
+
+let crate_exports (sem:Semant.ctxt) : pe_export array =
+  let export_sym (name, fixup) =
+    {
+      pe_export_name_fixup = new_fixup "export name fixup";
+      pe_export_name = name;
+      pe_export_address_fixup = fixup;
+    }
+  in
+  let export_seg (_, tab) =
+    Array.of_list (List.map export_sym (htab_pairs tab))
+  in
+    Array.concat
+      (List.map export_seg
+         (htab_pairs sem.Semant.ctxt_native_exports))
+;;
+
+
 let emit_file
     (sess:Session.sess)
     (code:Asm.frag)
@@ -668,11 +769,13 @@ let emit_file
   let all_init_data_fixup = new_fixup "all initialized data" in
   let loader_hdr_fixup = new_fixup "loader header" in
   let import_dir_fixup = new_fixup "import directory" in
+  let export_dir_fixup = new_fixup "export directory" in
   let text_fixup = new_fixup "text section" in
   let start_fixup = new_fixup "start" in
   let bss_fixup = new_fixup "bss section" in
   let data_fixup = new_fixup "data section" in
   let image_fixup = new_fixup "image fixup" in
+  let image_name_fixup = new_fixup "image name fixup" in
   let symtab_fixup = new_fixup "symbol table" in
   let strtab_fixup = new_fixup "string table" in
 
@@ -681,7 +784,7 @@ let emit_file
   let header = (pe_header
                   ~machine: IMAGE_FILE_MACHINE_I386
                   ~symbol_table_fixup: symtab_fixup
-                  ~number_of_sections: 6L
+                  ~number_of_sections: 7L
                   ~number_of_symbols: 0L
                   ~loader_hdr_fixup: loader_hdr_fixup
                   ~characteristics:[IMAGE_FILE_EXECUTABLE_IMAGE;
@@ -710,7 +813,8 @@ let emit_file
                ZSTRING ".debug_info";
                ZSTRING ".debug_abbrev";
                ZSTRING ".debug_line";
-               ZSTRING ".debug_frame"
+               ZSTRING ".debug_frame";
+               DEF (image_name_fixup, ZSTRING sess.Session.sess_out)
              |])))
   in
   let loader_header = (pe_loader_header
@@ -722,7 +826,8 @@ let emit_file
                          ~subsys: IMAGE_SUBSYSTEM_WINDOWS_CUI
                          ~all_hdrs_fixup
                          ~loader_hdr_fixup
-                         ~import_dir_fixup)
+                         ~import_dir_fixup
+                         ~export_dir_fixup)
   in
   let text_header = (pe_section_header
                        ~id: SECTION_ID_TEXT
@@ -734,12 +839,21 @@ let emit_file
                       ~hdr_fixup: bss_fixup)
   in
   let import_section = (pe_import_section
-                          ~section_fixup: import_dir_fixup
+                          ~import_dir_fixup
                           ~dlls: (rustrt_imports sem))
   in
   let import_header = (pe_section_header
                          ~id: SECTION_ID_IMPORTS
                          ~hdr_fixup: import_dir_fixup)
+  in
+  let export_section = (pe_export_section
+                          ~image_name_fixup
+                          ~export_dir_fixup
+                          ~exports: (crate_exports sem))
+  in
+  let export_header = (pe_section_header
+                         ~id: SECTION_ID_EXPORTS
+                         ~hdr_fixup: export_dir_fixup)
   in
   let data_header = (pe_section_header
                        ~id: SECTION_ID_DATA
@@ -783,6 +897,7 @@ let emit_file
                             text_header;
                             bss_header;
                             import_header;
+                            export_header;
                             data_header;
                             (*
                             debug_aranges_header;
@@ -813,7 +928,9 @@ let emit_file
   in
   let all_init_data = (def_aligned
                          all_init_data_fixup
-                         (SEQ [| import_section; data_section; |]))
+                         (SEQ [| import_section;
+                                 export_section;
+                                 data_section; |]))
   in
 (*
   let debug_aranges_section =

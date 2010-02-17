@@ -315,6 +315,13 @@ let export_native (cx:ctxt) (seg:segment) (name:string) : fixup =
       (fun _ -> new_fixup ("export: " ^ name))
 ;;
 
+let export_existing_native (cx:ctxt) (seg:segment) (name:string) (fix:fixup) : unit =
+  let seg_tab = (htab_search_or_add cx.ctxt_native_exports seg
+                   (fun _ -> Hashtbl.create 0))
+  in
+    htab_put seg_tab name fix
+;;
+
 let slot_ty (s:Ast.slot) : Ast.ty =
   match s.Ast.slot_ty with
       Some t -> t
