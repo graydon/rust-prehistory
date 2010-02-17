@@ -103,18 +103,19 @@ let path_managing_visitor
     }
 ;;
 
+let rec name_of ncs =
+  match ncs with
+      [] -> failwith "empty path"
+    | [(Ast.COMP_ident i)] -> Ast.NAME_base (Ast.BASE_ident i)
+    | [(Ast.COMP_app x)] -> Ast.NAME_base (Ast.BASE_app x)
+    | [(Ast.COMP_idx _)] -> failwith "path-name contains COMP_idx"
+    | nc::ncs -> Ast.NAME_ext (name_of ncs, nc)
+;;
+
 let path_to_name
     (path:Ast.name_component Stack.t)
     : Ast.name =
-  let rec name_of ncs =
-    match ncs with
-        [] -> failwith "empty path"
-      | [(Ast.COMP_ident i)] -> Ast.NAME_base (Ast.BASE_ident i)
-      | [(Ast.COMP_app x)] -> Ast.NAME_base (Ast.BASE_app x)
-      | [(Ast.COMP_idx _)] -> failwith "path-name contains COMP_idx"
-      | nc::ncs -> Ast.NAME_ext (name_of ncs, nc)
-  in
-    name_of (stk_elts_from_top path)
+  name_of (stk_elts_from_top path)
 ;;
 
 

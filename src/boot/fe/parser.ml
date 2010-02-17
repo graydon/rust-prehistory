@@ -2450,7 +2450,9 @@ and parse_crate_import
     let ident = parse_ident ps in
       expect ps SEMI;
       let filename = ps.pstate_infer_crate_filename ident in
-      let ilib = { import_libname = filename; } in
+      let ilib = { import_libname = filename;
+                   import_prefix = 1 }
+      in
       let tmod = ps.pstate_get_ty_mod filename in
         iflog ps
           begin
@@ -2468,7 +2470,6 @@ and expand_imports
     (ps:pstate)
     (crate:Ast.crate)
     : unit =
-
   let wrap span i =
     let id = next_node_id ps in
       htab_put ps.pstate_sess.Session.sess_spans id span;

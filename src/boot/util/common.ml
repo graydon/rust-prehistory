@@ -92,7 +92,10 @@ type native_import_lib =
 ;;
 
 type import_lib =
-    { import_libname: string }
+    {
+      import_libname: string;
+      import_prefix: int;
+    }
 ;;
 
 type segment =
@@ -256,6 +259,12 @@ let rec list_search_ctxt
         match f a with
             Some b -> Some (list, b)
           | None -> list_search_ctxt az f
+
+let rec list_drop n ls =
+  if n = 0
+  then ls
+  else list_drop (n-1) (List.tl ls)
+;;
 
 
 (*

@@ -2694,12 +2694,18 @@ let trans_visitor
   let trans_imported_fn (fnid:node_id) (blockid:node_id) : unit =
     trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
-    let s = trans_static_string (path_name()) in
-    let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
-      trans_upcall "upcall_import" f [| s |];
-      call_code (code_of_operand (Il.Cell f));
-      emit Il.Leave;
-      trans_frame_exit fnid;
+    let ilib = Hashtbl.find cx.ctxt_imported_items fnid in
+    let path_elts = stk_elts_from_bot path in
+      assert (ilib.import_prefix < (List.length path_elts));
+      let relative_path_elts = list_drop ilib.import_prefix path_elts in
+      let relative_path = Walk.name_of (List.rev relative_path_elts) in
+      let libstr = trans_static_string ilib.import_libname in
+      let relpath = trans_static_string (string_of_name relative_path) in
+      let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
+        trans_upcall "upcall_import" f [| libstr; relpath |];
+        call_code (code_of_operand (Il.Cell f));
+        emit Il.Leave;
+        trans_frame_exit fnid;
   in
 
   let trans_tag

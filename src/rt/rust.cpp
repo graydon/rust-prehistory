@@ -2252,12 +2252,29 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 }
 
 extern "C" CDECL uintptr_t
-upcall_import(rust_proc *proc, char const *s)
+upcall_import(rust_proc *proc, char const *lib, char const *sym)
 {
     LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL, "upcall import: %s", s);
-    proc->fail(2);
+    proc->rt->log(LOG_UPCALL, "upcall import: [%s] %s", lib, sym);
+
+#if defined(__WIN32__)
+    proc->fail(3);
     return 0;
+
+#else
+    void *handle = dlopen(lib, RTLD_LOCAL|RTLD_LAZY);
+    proc->rt->log(LOG_UPCALL, "dlopen(\"%s\") -> 0x%" PRIxPTR, lib, handle);
+    if (!handle) {
+        proc->fail(3);
+        return 0;
+    }
+    void *s = dlsym(handle, sym);
+    if (!s)
+        proc->fail(3);
+    proc->rt->log(LOG_UPCALL, "dlsym(0x%" PRIxPTR ", \"%s\") -> 0x%" PRIxPTR, handle, sym, s);
+    return (uintptr_t)s;
+#endif
+
 }
 
 static int
