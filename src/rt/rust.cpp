@@ -2258,21 +2258,35 @@ upcall_import(rust_proc *proc, char const *lib, char const *sym)
     proc->rt->log(LOG_UPCALL, "upcall import: [%s] %s", lib, sym);
 
 #if defined(__WIN32__)
-    proc->fail(3);
-    return 0;
+
+    HMODULE handle = LoadLibrary(_T(lib));
+    proc->rt->log(LOG_UPCALL, "LoadLibrary(\"%s\") -> 0x%" PRIxPTR, lib, handle);
+    if (!lib) {
+        proc->fail(3);
+        return 0;
+    }
+
+    FARPROC s = GetProcAddress(handle, _T(sym));
+    proc->rt->log(LOG_UPCALL, "GetProcAddress(0x%" PRIxPTR ", \"%s\") -> 0x%" PRIxPTR, handle, sym, s);
+    if (!s)
+        proc->fail(3);
+    return (uintptr_t) s;
 
 #else
+
     void *handle = dlopen(lib, RTLD_LOCAL|RTLD_LAZY);
     proc->rt->log(LOG_UPCALL, "dlopen(\"%s\") -> 0x%" PRIxPTR, lib, handle);
     if (!handle) {
         proc->fail(3);
         return 0;
     }
+
     void *s = dlsym(handle, sym);
     if (!s)
         proc->fail(3);
     proc->rt->log(LOG_UPCALL, "dlsym(0x%" PRIxPTR ", \"%s\") -> 0x%" PRIxPTR, handle, sym, s);
     return (uintptr_t)s;
+
 #endif
 
 }
