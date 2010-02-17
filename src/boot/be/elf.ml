@@ -515,21 +515,44 @@ let elf32_linux_x86_file
    *)
 
     let plt0_fixup = new_fixup "PLT[0]" in
-    let got1_fixup = new_fixup "GOT[1]" in
-    let got2_fixup = new_fixup "GOT[2]" in
     let got_prefix = SEQ [| WORD (TY_u32, (IMM 0L));
-                            DEF (got1_fixup, WORD (TY_u32, (IMM 0L)));
-                            DEF (got2_fixup, WORD (TY_u32, (IMM 0L))); |]
+                            WORD (TY_u32, (IMM 0L));
+                            WORD (TY_u32, (IMM 0L)); |]
     in
+
+    let got_cell i =
+      let eax = Il.Hreg X86.eax in
+      let got_entry_off = Int64.of_int (i*4) in
+      let got_entry_mem = Il.RegIn (eax, (Some (Asm.IMM got_entry_off))) in
+        Il.Mem (got_entry_mem, Il.ScalarTy (Il.AddrTy Il.CodeTy))
+    in
+
+    let got_code_cell i =
+      Il.CodePtr (Il.Cell (got_cell i))
+    in
+
     let plt0_frag =
       let e = Il.new_emitter X86.prealloc_quad true in
-        Il.emit e (Il.Push (X86.imm (M_POS got1_fixup)));
-        Il.emit e (Il.jmp Il.JMP (Il.indirect_code_ptr got2_fixup));
+        Il.emit e (Il.Push (Il.Cell (got_cell 1)));
+        Il.emit e (Il.jmp Il.JMP (got_code_cell 2));
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
         DEF (plt0_fixup, (X86.frags_of_emitted_quads sess e))
+    in
+
+    let i686_get_pc_thunk_ax_fixup = new_fixup "__i686.get_pc_thunk.ax" in
+    let i686_get_pc_thunk_ax_frag =
+      let e = Il.new_emitter X86.prealloc_quad true in
+      let sty = Il.AddrTy Il.CodeTy in
+      let rty = Il.ScalarTy sty in
+      let deref_esp = Il.Mem (Il.RegIn (Il.Hreg X86.esp, None), rty) in
+      let eax = (Il.Reg (Il.Hreg X86.eax, sty)) in
+        Il.emit_full e (Some i686_get_pc_thunk_ax_fixup)
+          (Il.umov eax (Il.Cell deref_esp));
+        Il.emit e Il.Ret;
+        X86.frags_of_emitted_quads sess e
     in
 
 
@@ -931,7 +954,7 @@ let elf32_linux_x86_file
   let elf_header =
     elf32_header
       ~ei_data: ELFDATA2LSB
-      ~e_type: ET_EXEC
+      ~e_type: ET_EXEC (* ET_DYN soon, but not yet *)
       ~e_machine: EM_386
       ~e_version: EV_CURRENT
 
@@ -1031,13 +1054,45 @@ let elf32_linux_x86_file
     let jump_slot_fixup = new_fixup ("jump slot #" ^ string_of_int i) in
     let jump_slot_initial_target_fixup =
       new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
+
+    (* You may notice this PLT entry doesn't look like either of the
+     * types of "normal" PLT entries outlined in the ELF manual. It is,
+     * however, just what you get when you combine a PIC PLT entry with
+     * inline calls to the horrible __i686.get_pc_thunk.ax kludge used
+     * on x86 to support entering PIC PLTs. We're just doing it *in*
+     * the PLT entries rather than infecting all the callers with the
+     * obligation of having the GOT address in a register on
+     * PLT-entry.
+     *)
+
     let plt_frag =
-      Il.emit_full e (Some plt_entry_fixup)
-        (Il.jmp Il.JMP (Il.indirect_code_ptr jump_slot_fixup));
-      Il.emit_full e (Some jump_slot_initial_target_fixup)
-        (Il.Push (X86.immi (Int64.of_int i)));
-      Il.emit e (Il.jmp Il.JMP (Il.direct_code_ptr plt0_fixup));
-      X86.frags_of_emitted_quads sess e
+      let eax = Il.Hreg X86.eax in
+      let get_eax_thunk_code = Il.direct_code_ptr i686_get_pc_thunk_ax_fixup in
+      let eax_cell = Il.Reg (eax, Il.AddrTy Il.CodeTy) in
+      let thunk_identified_fixup = new_fixup "address identified by __i686.get_pc_thunk.ax" in
+      let off_to_got = Il.Imm (Asm.SUB ((Asm.M_POS got_plt_section_fixup),
+                                        (Asm.M_POS thunk_identified_fixup)),
+                               TY_s32)
+      in
+
+        (* This call retrieves the address of thunk_identified_fixup in eax. *)
+        Il.emit_full e (Some plt_entry_fixup)
+          (Il.call eax_cell get_eax_thunk_code);
+
+        (* We now have this instruction's address in eax. We add the distance 
+         * from this instruction to the GOT, and we will have the GOT base 
+         * address in eax. *)
+
+        Il.emit_full e (Some thunk_identified_fixup)
+          (Il.binary Il.ADD eax_cell (Il.Cell eax_cell) off_to_got);
+
+        Il.emit e (Il.jmp Il.JMP (got_code_cell (2+i)));
+
+        Il.emit_full e (Some jump_slot_initial_target_fixup)
+          (Il.Push (X86.immi (Int64.of_int i)));
+
+        Il.emit e (Il.jmp Il.JMP (Il.direct_code_ptr plt0_fixup));
+        X86.frags_of_emitted_quads sess e
     in
     let got_plt_frag = DEF (jump_slot_fixup,
                             WORD (TY_u32, (M_POS jump_slot_initial_target_fixup))) in
@@ -1178,7 +1233,10 @@ let elf32_linux_x86_file
 
   let text_section =
     DEF (text_section_fixup,
-         SEQ (Array.of_list text_body_frags))
+         SEQ (
+           Array.of_list
+             (i686_get_pc_thunk_ax_frag ::
+                text_body_frags)))
   in
   let rodata_section =
     DEF (rodata_section_fixup,

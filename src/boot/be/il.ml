@@ -854,7 +854,7 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
   in
 
   let mov_if_operands_differ (old_op:operand) (new_op:operand) : unit =
-    if new_op != old_op
+    if not (new_op = old_op)
     then
       match new_op with
           Cell new_cell -> emit_mov new_cell old_op
@@ -862,7 +862,7 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
   in
 
   let mov_if_cells_differ (old_cell:cell) (new_cell:cell) : unit =
-    if new_cell != old_cell
+    if not (new_cell = old_cell)
     then
       emit_mov old_cell (Cell new_cell)
   in
