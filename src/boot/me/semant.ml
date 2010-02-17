@@ -83,7 +83,7 @@ type ctxt =
       ctxt_all_type_items: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
-      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
+      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;               (* maps references to definitions *)
       ctxt_imported_items: (node_id, import_lib) Hashtbl.t;
 
       (* Layout-y stuff. *)
@@ -248,6 +248,8 @@ let bugi (cx:ctxt) (i:node_id) =
 ;;
 
 (* Convenience accessors. *)
+
+(* resolve a reference to the id of its definition *)
 let lval_to_referent (cx:ctxt) (id:node_id) : node_id =
   if Hashtbl.mem cx.ctxt_lval_to_referent id
   then Hashtbl.find cx.ctxt_lval_to_referent id
@@ -862,22 +864,29 @@ let rec lval_native_item (cx:ctxt) (lval:Ast.lval) : Ast.native_mod_item =
 ;;
 
 
-let lval_is_slot (cx:ctxt) (lval:Ast.lval) : bool =
+let lval_search (cx:ctxt) (htab:('a,'b) Hashtbl.t) (lval:Ast.lval) : 'b option =
   let base_id = lval_base_id lval in
   let referent = lval_to_referent cx base_id in
-    Hashtbl.mem cx.ctxt_all_slots referent
+    htab_search htab referent
+;;
+
+let lval_mem (cx:ctxt) (htab:('a,'b) Hashtbl.t) (lval:Ast.lval) : bool =
+  match lval_search cx htab lval with
+      Some _ -> true
+    | None -> false
+;;
+
+
+let lval_is_slot (cx:ctxt) (lval:Ast.lval) : bool =
+  lval_mem cx cx.ctxt_all_slots lval
 ;;
 
 let lval_is_item (cx:ctxt) (lval:Ast.lval) : bool =
-  let base_id = lval_base_id lval in
-  let referent = lval_to_referent cx base_id in
-    Hashtbl.mem cx.ctxt_all_items referent
+  lval_mem cx cx.ctxt_all_items lval
 ;;
 
 let lval_is_native_item (cx:ctxt) (lval:Ast.lval) : bool =
-  let base_id = lval_base_id lval in
-  let referent = lval_to_referent cx base_id in
-    Hashtbl.mem cx.ctxt_all_native_items referent
+  lval_mem cx cx.ctxt_all_native_items lval
 ;;
 
 let lval_is_direct_fn (cx:ctxt) (lval:Ast.lval) : bool =
