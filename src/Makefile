@@ -255,7 +255,6 @@ TEST_XFAILS := test/run-pass/spawn-fn.rs \
                test/run-pass/user.rs \
                test/run-pass/user.rc \
                test/run-pass/linear-for-loop.rs \
-               test/run-pass/fun-indirect-call.rs \
                test/run-pass/first-class-modules.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs

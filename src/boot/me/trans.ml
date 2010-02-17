@@ -67,6 +67,43 @@ let trans_visitor
   let imm_false = zero in
   let nil_ptr = Il.Mem ((Il.Abs (Asm.IMM 0L)), Il.NilTy) in
 
+  (*
+   * Closure representation (always exterior):
+   * 
+   *  ......
+   *  . gc . gc control word, if mutable
+   *  +----+
+   *  | rc | refcount
+   *  +----+
+   *  | pg | ---> glue code
+   *  +----+
+   *  | pc | ---> next closure or NULL
+   *  +----+
+   *  | b1 | bound arg1
+   *  +----+
+   *  .    .
+   *  .    .
+   *  .    .
+   *  +----+
+   *  | bN | bound argN
+   *  +----+
+   *)
+
+  let closure_referent_type
+      (bs:Ast.slot array)
+      (* FIXME (bug 546448): mutability flag *)
+      : Il.referent_ty =
+    let rc = Il.ScalarTy word_ty in
+    let pg = Il.ScalarTy Il.codeptr_t in
+    let pc = Il.ScalarTy Il.codeptr_t in
+      Il.StructTy
+        (Array.append
+           [| rc; pg; pc |]
+           (Array.map (slot_referent_type abi) bs))
+  in
+
+  let direct_fn_referent_ty = closure_referent_type [| |] in
+
   let crate_rel fix =
     Asm.SUB (Asm.M_POS fix, Asm.M_POS cx.ctxt_crate_fixup)
   in
@@ -1901,20 +1938,41 @@ let trans_visitor
                   let src_operand = trans_expr src in
                     mov (deref_slot false dst_cell dst_slot) src_operand
 
-              | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
-                  (* Possibly-large structure copying *)
-                  let (src_cell, src_slot) = trans_lval src_lval in
-                    trans_copy_slot
-                      initializing
-                      dst_cell dst_slot
-                      src_cell src_slot
-                      None
+                | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
+                    if lval_is_direct_fn cx src_lval then
+                      trans_copy_direct_fn dst_cell src_lval
+                    else
+                      (* Possibly-large structure copying *)
+                      let (src_cell, src_slot) = trans_lval src_lval in
+                        trans_copy_slot
+                          initializing
+                          dst_cell dst_slot
+                          src_cell src_slot
+                          None
           end
       | Some binop ->
           ignore (trans_binary binop
             (Il.Cell (deref_slot false dst_cell dst_slot))
             (trans_expr src));
           ()
+
+
+  and trans_copy_direct_fn
+      (dst_cell:Il.cell)
+      (flv:Ast.lval)
+      : unit =
+    (* FIXME: trans_callee is kind of a lame abstraction at this point; we're not calling flv! *)
+    let (fptr, _) = trans_callee flv in
+    let wrappersz = Il.referent_ty_size word_bits direct_fn_referent_ty in
+      iflog (fun _ -> annotate "heap-allocate direct-fn wrapper");
+      trans_malloc dst_cell wrappersz;
+      let wrapper_cell = deref dst_cell in
+        iflog (fun _ -> annotate "init wrapper refcount");
+        mov (get_element_ptr wrapper_cell 0) one;
+        iflog (fun _ -> annotate "set wrapper code ptr");
+        mov (get_element_ptr wrapper_cell 1) fptr;
+        iflog (fun _ -> annotate "set closure target ptr");
+        mov (get_element_ptr wrapper_cell 2) zero
 
 
   and trans_init_structural_from_atoms
@@ -2064,41 +2122,6 @@ let trans_visitor
         Ast.sprintf_constr constr
       in
         trans_cond_fail errstr jmp
-
-
-  (*
-   * Closure representation (always exterior):
-   * 
-   *  ......
-   *  . gc . gc control word, if mutable
-   *  +----+
-   *  | rc | refcount
-   *  +----+
-   *  | pg | ---> glue code
-   *  +----+
-   *  | pc | ---> next closure or NULL
-   *  +----+
-   *  | b1 | bound arg1
-   *  +----+
-   *  .    .
-   *  .    .
-   *  .    .
-   *  +----+
-   *  | bN | bound argN
-   *  +----+
-   *)
-
-  and closure_referent_type
-      (bs:Ast.slot array)
-      (* FIXME (bug 546448): mutability flag *)
-      : Il.referent_ty =
-    let rc = Il.ScalarTy word_ty in
-    let pg = Il.ScalarTy Il.codeptr_t in
-    let pc = Il.ScalarTy Il.codeptr_t in
-      Il.StructTy
-        (Array.append
-           [| rc; pg; pc |]
-           (Array.map (slot_referent_type abi) bs))
 
 
   and trans_bind_fn
