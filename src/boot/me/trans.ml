@@ -1967,12 +1967,7 @@ let trans_visitor
       iflog (fun _ -> annotate "heap-allocate direct-fn wrapper");
       trans_malloc dst_cell wrappersz;
       let wrapper_cell = deref dst_cell in
-        iflog (fun _ -> annotate "init wrapper refcount");
-        mov (get_element_ptr wrapper_cell 0) one;
-        iflog (fun _ -> annotate "set wrapper code ptr");
-        mov (get_element_ptr wrapper_cell 1) fptr;
-        iflog (fun _ -> annotate "set closure target ptr");
-        mov (get_element_ptr wrapper_cell 2) zero
+        trans_init_closure "fn-wrapper" wrapper_cell fptr zero [| |] [| |]
 
 
   and trans_init_structural_from_atoms
@@ -2124,6 +2119,23 @@ let trans_visitor
         trans_cond_fail errstr jmp
 
 
+  and trans_init_closure
+      (referent_desc:string)
+      (clo_cell:Il.cell)
+      (fptr:Il.operand)
+      (tgt:Il.operand)
+      (bound_arg_slots:Ast.slot array)
+      (bound_args:Ast.atom array)
+      : unit =
+    iflog (fun _ -> annotate (Printf.sprintf "init %s refcount" referent_desc));
+    mov (get_element_ptr clo_cell 0) one;
+    iflog (fun _ -> annotate (Printf.sprintf "set %s code ptr" referent_desc));
+    mov (get_element_ptr clo_cell 1) fptr;
+    iflog (fun _ -> annotate (Printf.sprintf "set %s target ptr" referent_desc));
+    mov (get_element_ptr clo_cell 2) tgt;
+    copy_bound_args clo_cell bound_arg_slots bound_args 3
+
+
   and trans_bind_fn
       (initializing:bool)
       (direct:bool)
@@ -2153,13 +2165,7 @@ let trans_visitor
       iflog (fun _ -> annotate "heap-allocate closure");
       trans_malloc dst_cell closuresz;
       let clo_cell = deref dst_cell in
-        iflog (fun _ -> annotate "init closure refcount");
-        mov (get_element_ptr clo_cell 0) one;
-        iflog (fun _ -> annotate "set closure glue-code ptr");
-        mov (get_element_ptr clo_cell 1) glue_fptr;
-        iflog (fun _ -> annotate "set closure target ptr");
-        mov (get_element_ptr clo_cell 2) target_operand;
-        copy_bound_args clo_cell bound_arg_slots bound_args 3
+        trans_init_closure "closure" clo_cell glue_fptr target_operand bound_arg_slots bound_args
 
 
   and trans_arg0 (arg_cell:Il.cell) (output_cell:Il.cell) : unit =
