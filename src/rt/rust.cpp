@@ -668,15 +668,23 @@ public:
                 rt->log(LOG_DWARF, "dwarf version: %" PRId16, dwarf_vers);
                 rt->log(LOG_DWARF, "CU abbrev off: %" PRId32, cu_abbrev_off);
                 rt->log(LOG_DWARF, "size of address: %" PRId8, sizeof_addr);
+                int depth = 0;
                 while (is_ok() && tell_off() < cu_base + cu_unit_length) {
                     size_t off = tell_off();
                     size_t ab_idx;
                     get_uleb(ab_idx);
 
+                    I(rt, depth >= 0);
                     if (ab_idx == 0) {
-                        rt->log(LOG_DWARF, "hit null DIE marker at off 0x%" PRIxPTR " of 0x%" PRIxPTR,
-                                tell_abs(), mem.lim);
-                        break;
+                        rt->log(LOG_DWARF, "(null DIE)");
+                        --depth;
+                        I(rt, depth >= 0);
+                        if (depth == 0) {
+                            I(rt, tell_off() == cu_base + cu_unit_length);
+                            rt->log(LOG_DWARF, "outermost CU end");
+                            break;
+                        }
+                        continue;
                     }
 
                     rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, off, ab_idx);
@@ -685,6 +693,7 @@ public:
                         fail();
                         break;
                     }
+                    rt->log(LOG_DWARF, "abbrev tag %d, has children: %d (depth: %d)", ab->tag, ab->has_children, depth);
                     abbrevs.reset();
                     abbrevs.seek_off(ab->body_off);
                     uintptr_t attr, form;
@@ -753,6 +762,8 @@ public:
                         }
                     }
                     dies.push(new (rt) die(rt, off, tell_off() - off, ab));
+                    if (ab->has_children)
+                        depth++;
                 }
             }
         }
@@ -2260,35 +2271,49 @@ upcall_import(rust_proc *proc, char const *lib, char const *sym)
 #if defined(__WIN32__)
 
     HMODULE handle = LoadLibrary(_T(lib));
-    proc->rt->log(LOG_UPCALL, "LoadLibrary(\"%s\") -> 0x%" PRIxPTR, lib, handle);
+    proc->rt->log(LOG_UPCALL,
+                  "LoadLibrary(\"%s\") -> 0x%" PRIxPTR,
+                  lib, handle);
     if (!lib) {
         proc->fail(3);
         return 0;
     }
 
-    FARPROC s = GetProcAddress(handle, _T(sym));
-    proc->rt->log(LOG_UPCALL, "GetProcAddress(0x%" PRIxPTR ", \"%s\") -> 0x%" PRIxPTR, handle, sym, s);
-    if (!s)
+    FARPROC s = GetProcAddress(handle, _T("rust_crate"));
+    proc->rt->log(LOG_UPCALL,
+                  "GetProcAddress(0x%" PRIxPTR
+                  ", \"rust_crate\") -> 0x%" PRIxPTR,
+                  handle, s);
+    if (!s) {
         proc->fail(3);
-    return (uintptr_t) s;
+        return 0;
+    }
 
 #else
 
     void *handle = dlopen(lib, RTLD_LOCAL|RTLD_LAZY);
-    proc->rt->log(LOG_UPCALL, "dlopen(\"%s\") -> 0x%" PRIxPTR, lib, handle);
+    proc->rt->log(LOG_UPCALL,
+                  "dlopen(\"%s\") -> 0x%" PRIxPTR,
+                  lib, handle);
     if (!handle) {
         proc->fail(3);
         return 0;
     }
 
-    void *s = dlsym(handle, sym);
+    void *s = dlsym(handle, "rust_crate");
     if (!s)
         proc->fail(3);
-    proc->rt->log(LOG_UPCALL, "dlsym(0x%" PRIxPTR ", \"%s\") -> 0x%" PRIxPTR, handle, sym, s);
-    return (uintptr_t)s;
+    proc->rt->log(LOG_UPCALL,
+                  "dlsym(0x%" PRIxPTR
+                  ", \"rust_crate\") -> 0x%" PRIxPTR,
+                  handle, s);
 
 #endif
 
+    rust_crate *crate = (rust_crate*)s;
+    crate->dump(proc->rt);
+    proc->fail(3);
+    return (uintptr_t) s;
 }
 
 static int
