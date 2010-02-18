@@ -450,7 +450,7 @@ rust_crate
             if (!ok)
                 return;
             // mem.rt->log(LOG_MEM, "get %d bytes @ 0x%" PRIxPTR, sizeof(T), pos);
-            out = *(reinterpret_cast<T*>(pos));
+            out = *((T*)(pos));
             pos += sizeof(T);
             ok &= !at_end();
             I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
@@ -469,6 +469,25 @@ rust_crate
             }
             // mem.rt->log(LOG_MEM, "got uleb 0x%" PRIxPTR, out);
             I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
+        }
+
+        bool adv_zstr(size_t sz) {
+            sz = 0;
+            while (ok) {
+                char c;
+                get(c);
+                ++sz;
+                if (c == '\0')
+                    return true;
+            }
+            return false;
+        }
+
+        bool get_zstr(const char *&c, size_t &sz) {
+            if (!ok)
+                return false;
+            c = (const char*)(pos);
+            return adv_zstr(sz);
         }
 
         void adv(size_t amt) {
@@ -543,6 +562,159 @@ public:
         DW_FORM_ref8 = 0x14,
         DW_FORM_ref_udata = 0x15,
         DW_FORM_indirect = 0x16
+    };
+
+    enum dw_at {
+        DW_AT_sibling = 0x01,
+        DW_AT_location = 0x02,
+        DW_AT_name = 0x03,
+        DW_AT_ordering = 0x09,
+        DW_AT_byte_size = 0x0b,
+        DW_AT_bit_offset = 0x0c,
+        DW_AT_bit_size = 0x0d,
+        DW_AT_stmt_list = 0x10,
+        DW_AT_low_pc = 0x11,
+        DW_AT_high_pc = 0x12,
+        DW_AT_language = 0x13,
+        DW_AT_discr = 0x15,
+        DW_AT_discr_value = 0x16,
+        DW_AT_visibility = 0x17,
+        DW_AT_import = 0x18,
+        DW_AT_string_length = 0x19,
+        DW_AT_common_reference = 0x1a,
+        DW_AT_comp_dir = 0x1b,
+        DW_AT_const_value = 0x1c,
+        DW_AT_containing_type = 0x1d,
+        DW_AT_default_value = 0x1e,
+        DW_AT_inline = 0x20,
+        DW_AT_is_optional = 0x21,
+        DW_AT_lower_bound = 0x22,
+        DW_AT_producer = 0x25,
+        DW_AT_prototyped = 0x27,
+        DW_AT_return_addr = 0x2a,
+        DW_AT_start_scope = 0x2c,
+        DW_AT_bit_stride = 0x2e,
+        DW_AT_upper_bound = 0x2f,
+        DW_AT_abstract_origin = 0x31,
+        DW_AT_accessibility = 0x32,
+        DW_AT_address_class = 0x33,
+        DW_AT_artificial = 0x34,
+        DW_AT_base_types = 0x35,
+        DW_AT_calling_convention = 0x36,
+        DW_AT_count = 0x37,
+        DW_AT_data_member_location = 0x38,
+        DW_AT_decl_column = 0x39,
+        DW_AT_decl_file = 0x3a,
+        DW_AT_decl_line = 0x3b,
+        DW_AT_declaration = 0x3c,
+        DW_AT_discr_list = 0x3d,
+        DW_AT_encoding = 0x3e,
+        DW_AT_external = 0x3f,
+        DW_AT_frame_base = 0x40,
+        DW_AT_friend = 0x41,
+        DW_AT_identifier_case = 0x42,
+        DW_AT_macro_info = 0x43,
+        DW_AT_namelist_item = 0x44,
+        DW_AT_priority = 0x45,
+        DW_AT_segment = 0x46,
+        DW_AT_specification = 0x47,
+        DW_AT_static_link = 0x48,
+        DW_AT_type = 0x49,
+        DW_AT_use_location = 0x4a,
+        DW_AT_variable_parameter = 0x4b,
+        DW_AT_virtuality = 0x4c,
+        DW_AT_vtable_elem_location = 0x4d,
+        DW_AT_allocated = 0x4e,
+        DW_AT_associated = 0x4f,
+        DW_AT_data_location = 0x50,
+        DW_AT_byte_stride = 0x51,
+        DW_AT_entry_pc = 0x52,
+        DW_AT_use_UTF8 = 0x53,
+        DW_AT_extension = 0x54,
+        DW_AT_ranges = 0x55,
+        DW_AT_trampoline = 0x56,
+        DW_AT_call_column = 0x57,
+        DW_AT_call_file = 0x58,
+        DW_AT_call_line = 0x59,
+        DW_AT_description = 0x5a,
+        DW_AT_binary_scale = 0x5b,
+        DW_AT_decimal_scale = 0x5c,
+        DW_AT_small = 0x5d,
+        DW_AT_decimal_sign = 0x5e,
+        DW_AT_digit_count = 0x5f,
+        DW_AT_picture_string = 0x60,
+        DW_AT_mutable = 0x61,
+        DW_AT_threads_scaled = 0x62,
+        DW_AT_explicit = 0x63,
+        DW_AT_object_pointer = 0x64,
+        DW_AT_endianity = 0x65,
+        DW_AT_elemental = 0x66,
+        DW_AT_pure = 0x67,
+        DW_AT_recursive = 0x68,
+        DW_AT_lo_user = 0x2000,
+        DW_AT_hi_user = 0x3fff
+    };
+
+    enum dw_tag {
+        DW_TAG_array_type = 0x01,
+        DW_TAG_class_type = 0x02,
+        DW_TAG_entry_point = 0x03,
+        DW_TAG_enumeration_type = 0x04,
+        DW_TAG_formal_parameter = 0x05,
+        DW_TAG_imported_declaration = 0x08,
+        DW_TAG_label = 0x0a,
+        DW_TAG_lexical_block = 0x0b,
+        DW_TAG_member = 0x0d,
+        DW_TAG_pointer_type = 0x0f,
+        DW_TAG_reference_type = 0x10,
+        DW_TAG_compile_unit = 0x11,
+        DW_TAG_string_type = 0x12,
+        DW_TAG_structure_type = 0x13,
+        DW_TAG_subroutine_type = 0x15,
+        DW_TAG_typedef = 0x16,
+        DW_TAG_union_type = 0x17,
+        DW_TAG_unspecified_parameters = 0x18,
+        DW_TAG_variant = 0x19,
+        DW_TAG_common_block = 0x1a,
+        DW_TAG_common_inclusion = 0x1b,
+        DW_TAG_inheritance = 0x1c,
+        DW_TAG_inlined_subroutine = 0x1d,
+        DW_TAG_module = 0x1e,
+        DW_TAG_ptr_to_member_type = 0x1f,
+        DW_TAG_set_type = 0x20,
+        DW_TAG_subrange_type = 0x21,
+        DW_TAG_with_stmt = 0x22,
+        DW_TAG_access_declaration = 0x23,
+        DW_TAG_base_type = 0x24,
+        DW_TAG_catch_block = 0x25,
+        DW_TAG_const_type = 0x26,
+        DW_TAG_constant = 0x27,
+        DW_TAG_enumerator = 0x28,
+        DW_TAG_file_type = 0x29,
+        DW_TAG_friend = 0x2a,
+        DW_TAG_namelist = 0x2b,
+        DW_TAG_namelist_item = 0x2c,
+        DW_TAG_packed_type = 0x2d,
+        DW_TAG_subprogram = 0x2e,
+        DW_TAG_template_type_parameter = 0x2f,
+        DW_TAG_template_value_parameter = 0x30,
+        DW_TAG_thrown_type = 0x31,
+        DW_TAG_try_block = 0x32,
+        DW_TAG_variant_part = 0x33,
+        DW_TAG_variable = 0x34,
+        DW_TAG_volatile_type = 0x35,
+        DW_TAG_dwarf_procedure = 0x36,
+        DW_TAG_restrict_type = 0x37,
+        DW_TAG_interface_type = 0x38,
+        DW_TAG_namespace = 0x39,
+        DW_TAG_imported_module = 0x3a,
+        DW_TAG_unspecified_type = 0x3b,
+        DW_TAG_partial_unit = 0x3c,
+        DW_TAG_imported_unit = 0x3d,
+        DW_TAG_condition = 0x3f,
+        DW_TAG_shared_type = 0x40,
+        DW_TAG_lo_user = 0x4080,
+        DW_TAG_hi_user = 0xffff,
     };
 
     struct abbrev : rt_owned<abbrev>
@@ -624,31 +796,136 @@ public:
         }
     };
 
-    struct die : rt_owned<die>
-    {
-        rust_rt *rt;
-        size_t idx;
-        uintptr_t off;
-        size_t sz;
-        abbrev *ab;
-        die(rust_rt *rt, uintptr_t off, size_t sz, abbrev *ab)
-            : rt(rt),
-              off(off),
-              sz(sz),
-              ab(ab)
-        {}
-    };
-
     class die_reader : public mem_reader
     {
         abbrev_reader &abbrevs;
-        ptr_vec<die> dies;
+
+        struct die {
+            die_reader *rdr;
+            uintptr_t off;
+            abbrev *ab;
+
+            die(die_reader *rdr, uintptr_t off) : rdr(rdr), off(off) {
+                rdr->reset();
+                rdr->seek_off(off);
+                if (!rdr->is_ok()) {
+                    ab = NULL;
+                    return;
+                }
+                size_t ab_idx;
+                rdr->get_uleb(ab_idx);
+                if (!ab_idx) {
+                    ab = NULL;
+                    rdr->mem.rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> (null)", off);
+                } else {
+                    ab = rdr->abbrevs.get_abbrev(ab_idx);
+                    rdr->mem.rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, off, ab_idx);
+                    rdr->mem.rt->log(LOG_DWARF, "  tag %d, has children: %d", ab->tag, ab->has_children);
+                }
+            }
+
+            bool is_null() {
+                return ab == NULL;
+            }
+
+            bool has_children() {
+                return (!is_null()) && ab->has_children;
+            }
+
+            dw_tag tag() {
+                if (is_null())
+                    return (dw_tag) (-1);
+                return (dw_tag) ab->tag;
+            }
+
+            bool start_attrs() {
+                rdr->abbrevs.reset();
+                rdr->abbrevs.seek_off(ab->body_off);
+                return rdr->is_ok();
+            }
+
+            bool step_attr(dw_form &form, dw_at &at,
+                           bool &numeric, uintptr_t &num,
+                           bool &string, char const *&s, size_t &ssz)
+            {
+                uintptr_t a, f;
+                numeric = false;
+                string = false;
+                if (rdr->abbrevs.step_attr_form_pair(a, f) && rdr->is_ok()) {
+                    at = (dw_at)a;
+                    form = (dw_form)f;
+
+                    uint32_t u32;
+                    uint8_t u8;
+
+                    switch (form) {
+                    case DW_FORM_string:
+                        string = true;
+                        return rdr->get_zstr(s, ssz);
+                        break;
+
+                    case DW_FORM_ref_addr:
+                        I(rdr->mem.rt, sizeof(uintptr_t) == 4);
+                    case DW_FORM_addr:
+                    case DW_FORM_data4:
+                        rdr->get(u32);
+                        num = (uintptr_t)u32;
+                        numeric = true;
+                        return rdr->is_ok() || rdr->at_end();
+                        break;
+
+                    case DW_FORM_data1:
+                    case DW_FORM_flag:
+                        rdr->get(u8);
+                        numeric = true;
+                        return rdr->is_ok() || rdr->at_end();
+                        break;
+
+                    case DW_FORM_block1:
+                        rdr->get(u8);
+                        rdr->adv(u8);
+                        return rdr->is_ok() || rdr->at_end();
+                        break;
+
+                    default:
+                        rdr->mem.rt->log(LOG_DWARF, "  unknown dwarf form: 0x%" PRIxPTR, form);
+                        rdr->fail();
+                        break;
+                    }
+                }
+                return false;
+            }
+
+            die next() {
+                dw_form form;
+                dw_at at;
+                bool numeric, string;
+                uintptr_t num;
+                char const *s;
+                size_t ssz;
+                if (is_null())
+                    return die(rdr, rdr->tell_off());
+
+                if (start_attrs()) {
+                    while (step_attr(form, at, numeric, num, string, s, ssz)) {
+                        I(rdr->mem.rt, !(numeric && string));
+                        if (numeric)
+                            rdr->mem.rt->log(LOG_DWARF, "  attr num: 0x%" PRIxPTR, num);
+                        else if (string)
+                            rdr->mem.rt->log(LOG_DWARF, "  attr str: %s", s);
+                        else
+                            rdr->mem.rt->log(LOG_DWARF, "  attr ??:");
+                    }
+                }
+                return die(rdr, rdr->tell_off());
+            }
+        };
+
     public:
         die_reader(mem_area &die_mem,
                    abbrev_reader &abbrevs)
             : mem_reader(die_mem),
-              abbrevs(abbrevs),
-              dies(die_mem.rt)
+              abbrevs(abbrevs)
         {
             rust_rt *rt = mem.rt;
             uint32_t cu_unit_length = 0;
@@ -669,109 +946,25 @@ public:
                 rt->log(LOG_DWARF, "CU abbrev off: %" PRId32, cu_abbrev_off);
                 rt->log(LOG_DWARF, "size of address: %" PRId8, sizeof_addr);
                 int depth = 0;
+                die d(this, tell_off());
                 while (is_ok() && tell_off() < cu_base + cu_unit_length) {
-                    size_t off = tell_off();
-                    size_t ab_idx;
-                    get_uleb(ab_idx);
-
-                    I(rt, depth >= 0);
-                    if (ab_idx == 0) {
-                        rt->log(LOG_DWARF, "(null DIE)");
+                    if (d.has_children())
+                        ++depth;
+                    d = d.next();
+                    if (d.is_null()) {
                         --depth;
                         I(rt, depth >= 0);
                         if (depth == 0) {
-                            I(rt, tell_off() == cu_base + cu_unit_length);
-                            rt->log(LOG_DWARF, "outermost CU end");
-                            break;
-                        }
-                        continue;
-                    }
-
-                    rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, off, ab_idx);
-                    abbrev *ab = abbrevs.get_abbrev(ab_idx);
-                    if (!ab) {
-                        fail();
-                        break;
-                    }
-                    rt->log(LOG_DWARF, "abbrev tag %d, has children: %d (depth: %d)", ab->tag, ab->has_children, depth);
-                    abbrevs.reset();
-                    abbrevs.seek_off(ab->body_off);
-                    uintptr_t attr, form;
-                    while (abbrevs.step_attr_form_pair(attr, form) && is_ok()) {
-                        char buf[128];
-                        uint32_t u32;
-                        uint8_t u8;
-                        char ch;
-                        size_t i;
-
-                        switch ((dw_form)form) {
-                        case DW_FORM_string:
-                            i = 0;
-                            do {
-                                get(ch);
-                                if (i >= sizeof(buf))
-                                    break;
-                                buf[i++] = ch;
-                            } while (is_ok() && ch != '\0');
-                            if (is_ok() || at_end())
-                                rt->log(LOG_DWARF, "  DW_FORM_string: %s", buf);
-                            break;
-
-                        case DW_FORM_addr:
-                            get(u32);
-                            if (is_ok() || at_end())
-                                rt->log(LOG_DWARF, "  DW_FORM_addr: 0x%" PRIx32, u32);
-                            break;
-
-                        case DW_FORM_ref_addr:
-                            get(u32);
-                            if (is_ok() || at_end())
-                                rt->log(LOG_DWARF, "  DW_FORM_data4: 0x%" PRIx32, u32);
-                            break;
-
-                        case DW_FORM_data4:
-                            get(u32);
-                            if (is_ok() || at_end())
-                                rt->log(LOG_DWARF, "  DW_FORM_data4: 0x%" PRIx32, u32);
-                            break;
-
-                        case DW_FORM_data1:
-                            get(u8);
-                            if (is_ok() || at_end())
-                                rt->log(LOG_DWARF, "  DW_FORM_data1: 0x%" PRIx8, u8);
-                            break;
-
-                        case DW_FORM_flag:
-                            get(u8);
-                            if (is_ok() || at_end())
-                                rt->log(LOG_DWARF, "  DW_FORM_flag: 0x%" PRIx8, u8);
-                            break;
-
-
-                        case DW_FORM_block1:
-                            get(u8);
-                            adv(u8);
-                            if (is_ok() || at_end())
-                                rt->log(LOG_DWARF, "  DW_FORM_block1: %" PRId8 " bytes", u8);
-                            break;
-
-                        default:
-                            rt->log(LOG_DWARF, "  unknown dwarf form: 0x%" PRIxPTR, form);
-                            fail();
+                            I(rt, at_end());
+                            rt->log(LOG_DWARF, "end of outermost CU DIE");
                             break;
                         }
                     }
-                    dies.push(new (rt) die(rt, off, tell_off() - off, ab));
-                    if (ab->has_children)
-                        depth++;
                 }
             }
         }
 
         ~die_reader() {
-            while (dies.length()) {
-                delete dies.pop();
-            }
         }
     };
 
