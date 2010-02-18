@@ -285,7 +285,7 @@ class rust_crate;
 
 struct rust_rt {
     rust_srv *srv;
-    rust_crate *crate;
+    rust_crate const *crate;
     uint32_t logbits;
     ptr_vec<rust_proc> running_procs;
     ptr_vec<rust_proc> blocked_procs;
@@ -299,7 +299,7 @@ struct rust_rt {
     pthread_attr_t attr;
 #endif
 
-    rust_rt(rust_srv *srv, rust_crate *crate);
+    rust_rt(rust_srv *srv, rust_crate const *crate);
     ~rust_rt();
 
     void activate(rust_proc *proc);
@@ -373,7 +373,25 @@ rust_crate
     uintptr_t unwind_glue_off;
     uintptr_t yield_glue_off;
 
-    // The remainder of rust_crate is stateless, reads from dwarf tables.
+    // Crates are immutable, constructed by the compiler.
+
+public:
+
+    c_to_proc_glue_ty get_c_to_proc_glue() const {
+        return (c_to_proc_glue_ty) ((uintptr_t)this + c_to_proc_glue_off);
+    }
+
+    uintptr_t get_main_exit_proc_glue() const {
+        return ((uintptr_t)this + main_exit_proc_glue_off);
+    }
+
+    uintptr_t get_unwind_glue() const {
+        return ((uintptr_t)this + unwind_glue_off);
+    }
+
+    uintptr_t get_yield_glue() const {
+        return ((uintptr_t)this + yield_glue_off);
+    }
 
     struct mem_area
     {
@@ -391,10 +409,202 @@ rust_crate
         }
     };
 
+    mem_area get_debug_info(rust_rt *rt) const {
+        return mem_area(rt, ((uintptr_t)this + debug_info_off),
+                        debug_info_sz);
+    }
+
+    mem_area get_debug_abbrev(rust_rt *rt) const {
+        return mem_area(rt, ((uintptr_t)this + debug_abbrev_off),
+                        debug_abbrev_sz);
+    }
+
+};
+
+
+enum dw_form {
+    DW_FORM_addr = 0x01,
+    DW_FORM_block2 = 0x03,
+    DW_FORM_block4 = 0x04,
+    DW_FORM_data2 = 0x05,
+    DW_FORM_data4 = 0x06,
+    DW_FORM_data8 = 0x07,
+    DW_FORM_string = 0x08,
+    DW_FORM_block = 0x09,
+    DW_FORM_block1 = 0x0a,
+    DW_FORM_data1 = 0x0b,
+    DW_FORM_flag = 0x0c,
+    DW_FORM_sdata = 0x0d,
+    DW_FORM_strp = 0x0e,
+    DW_FORM_udata = 0x0f,
+    DW_FORM_ref_addr = 0x10,
+    DW_FORM_ref1 = 0x11,
+    DW_FORM_ref2 = 0x12,
+    DW_FORM_ref4 = 0x13,
+    DW_FORM_ref8 = 0x14,
+    DW_FORM_ref_udata = 0x15,
+    DW_FORM_indirect = 0x16
+};
+
+enum dw_at {
+    DW_AT_sibling = 0x01,
+    DW_AT_location = 0x02,
+    DW_AT_name = 0x03,
+    DW_AT_ordering = 0x09,
+    DW_AT_byte_size = 0x0b,
+    DW_AT_bit_offset = 0x0c,
+    DW_AT_bit_size = 0x0d,
+    DW_AT_stmt_list = 0x10,
+    DW_AT_low_pc = 0x11,
+    DW_AT_high_pc = 0x12,
+    DW_AT_language = 0x13,
+    DW_AT_discr = 0x15,
+    DW_AT_discr_value = 0x16,
+    DW_AT_visibility = 0x17,
+    DW_AT_import = 0x18,
+    DW_AT_string_length = 0x19,
+    DW_AT_common_reference = 0x1a,
+    DW_AT_comp_dir = 0x1b,
+    DW_AT_const_value = 0x1c,
+    DW_AT_containing_type = 0x1d,
+    DW_AT_default_value = 0x1e,
+    DW_AT_inline = 0x20,
+    DW_AT_is_optional = 0x21,
+    DW_AT_lower_bound = 0x22,
+    DW_AT_producer = 0x25,
+    DW_AT_prototyped = 0x27,
+    DW_AT_return_addr = 0x2a,
+    DW_AT_start_scope = 0x2c,
+    DW_AT_bit_stride = 0x2e,
+    DW_AT_upper_bound = 0x2f,
+    DW_AT_abstract_origin = 0x31,
+    DW_AT_accessibility = 0x32,
+    DW_AT_address_class = 0x33,
+    DW_AT_artificial = 0x34,
+    DW_AT_base_types = 0x35,
+    DW_AT_calling_convention = 0x36,
+    DW_AT_count = 0x37,
+    DW_AT_data_member_location = 0x38,
+    DW_AT_decl_column = 0x39,
+    DW_AT_decl_file = 0x3a,
+    DW_AT_decl_line = 0x3b,
+    DW_AT_declaration = 0x3c,
+    DW_AT_discr_list = 0x3d,
+    DW_AT_encoding = 0x3e,
+    DW_AT_external = 0x3f,
+    DW_AT_frame_base = 0x40,
+    DW_AT_friend = 0x41,
+    DW_AT_identifier_case = 0x42,
+    DW_AT_macro_info = 0x43,
+    DW_AT_namelist_item = 0x44,
+    DW_AT_priority = 0x45,
+    DW_AT_segment = 0x46,
+    DW_AT_specification = 0x47,
+    DW_AT_static_link = 0x48,
+    DW_AT_type = 0x49,
+    DW_AT_use_location = 0x4a,
+    DW_AT_variable_parameter = 0x4b,
+    DW_AT_virtuality = 0x4c,
+    DW_AT_vtable_elem_location = 0x4d,
+    DW_AT_allocated = 0x4e,
+    DW_AT_associated = 0x4f,
+    DW_AT_data_location = 0x50,
+    DW_AT_byte_stride = 0x51,
+    DW_AT_entry_pc = 0x52,
+    DW_AT_use_UTF8 = 0x53,
+    DW_AT_extension = 0x54,
+    DW_AT_ranges = 0x55,
+    DW_AT_trampoline = 0x56,
+    DW_AT_call_column = 0x57,
+    DW_AT_call_file = 0x58,
+    DW_AT_call_line = 0x59,
+    DW_AT_description = 0x5a,
+    DW_AT_binary_scale = 0x5b,
+    DW_AT_decimal_scale = 0x5c,
+    DW_AT_small = 0x5d,
+    DW_AT_decimal_sign = 0x5e,
+    DW_AT_digit_count = 0x5f,
+    DW_AT_picture_string = 0x60,
+    DW_AT_mutable = 0x61,
+    DW_AT_threads_scaled = 0x62,
+    DW_AT_explicit = 0x63,
+    DW_AT_object_pointer = 0x64,
+    DW_AT_endianity = 0x65,
+    DW_AT_elemental = 0x66,
+    DW_AT_pure = 0x67,
+    DW_AT_recursive = 0x68,
+    DW_AT_lo_user = 0x2000,
+    DW_AT_hi_user = 0x3fff
+};
+
+enum dw_tag {
+    DW_TAG_array_type = 0x01,
+    DW_TAG_class_type = 0x02,
+    DW_TAG_entry_point = 0x03,
+    DW_TAG_enumeration_type = 0x04,
+    DW_TAG_formal_parameter = 0x05,
+    DW_TAG_imported_declaration = 0x08,
+    DW_TAG_label = 0x0a,
+    DW_TAG_lexical_block = 0x0b,
+    DW_TAG_member = 0x0d,
+    DW_TAG_pointer_type = 0x0f,
+    DW_TAG_reference_type = 0x10,
+    DW_TAG_compile_unit = 0x11,
+    DW_TAG_string_type = 0x12,
+    DW_TAG_structure_type = 0x13,
+    DW_TAG_subroutine_type = 0x15,
+    DW_TAG_typedef = 0x16,
+    DW_TAG_union_type = 0x17,
+    DW_TAG_unspecified_parameters = 0x18,
+    DW_TAG_variant = 0x19,
+    DW_TAG_common_block = 0x1a,
+    DW_TAG_common_inclusion = 0x1b,
+    DW_TAG_inheritance = 0x1c,
+    DW_TAG_inlined_subroutine = 0x1d,
+    DW_TAG_module = 0x1e,
+    DW_TAG_ptr_to_member_type = 0x1f,
+    DW_TAG_set_type = 0x20,
+    DW_TAG_subrange_type = 0x21,
+    DW_TAG_with_stmt = 0x22,
+    DW_TAG_access_declaration = 0x23,
+    DW_TAG_base_type = 0x24,
+    DW_TAG_catch_block = 0x25,
+    DW_TAG_const_type = 0x26,
+    DW_TAG_constant = 0x27,
+    DW_TAG_enumerator = 0x28,
+    DW_TAG_file_type = 0x29,
+    DW_TAG_friend = 0x2a,
+    DW_TAG_namelist = 0x2b,
+    DW_TAG_namelist_item = 0x2c,
+    DW_TAG_packed_type = 0x2d,
+    DW_TAG_subprogram = 0x2e,
+    DW_TAG_template_type_parameter = 0x2f,
+    DW_TAG_template_value_parameter = 0x30,
+    DW_TAG_thrown_type = 0x31,
+    DW_TAG_try_block = 0x32,
+    DW_TAG_variant_part = 0x33,
+    DW_TAG_variable = 0x34,
+    DW_TAG_volatile_type = 0x35,
+    DW_TAG_dwarf_procedure = 0x36,
+    DW_TAG_restrict_type = 0x37,
+    DW_TAG_interface_type = 0x38,
+    DW_TAG_namespace = 0x39,
+    DW_TAG_imported_module = 0x3a,
+    DW_TAG_unspecified_type = 0x3b,
+    DW_TAG_partial_unit = 0x3c,
+    DW_TAG_imported_unit = 0x3d,
+    DW_TAG_condition = 0x3f,
+    DW_TAG_shared_type = 0x40,
+    DW_TAG_lo_user = 0x4080,
+    DW_TAG_hi_user = 0xffff,
+};
+
+class rust_crate_reader
+{
     class mem_reader
     {
     protected:
-        mem_area &mem;
+        rust_crate::mem_area &mem;
         bool ok;
         uintptr_t pos;
     public:
@@ -416,7 +626,7 @@ rust_crate
             ok = true;
         }
 
-        mem_reader(mem_area &m)
+        mem_reader(rust_crate::mem_area &m)
             : mem(m),
               ok(true),
               pos(m.base)
@@ -510,213 +720,6 @@ rust_crate
         }
     };
 
-public:
-
-    c_to_proc_glue_ty get_c_to_proc_glue() {
-        return (c_to_proc_glue_ty) ((uintptr_t)this + c_to_proc_glue_off);
-    }
-
-    uintptr_t get_main_exit_proc_glue() {
-        return ((uintptr_t)this + main_exit_proc_glue_off);
-    }
-
-    uintptr_t get_unwind_glue() {
-        return ((uintptr_t)this + unwind_glue_off);
-    }
-
-    uintptr_t get_yield_glue() {
-        return ((uintptr_t)this + yield_glue_off);
-    }
-
-    mem_area get_debug_info(rust_rt *rt) {
-        return mem_area(rt, ((uintptr_t)this + debug_info_off),
-                        debug_info_sz);
-    }
-
-    mem_area get_debug_abbrev(rust_rt *rt) {
-        return mem_area(rt, ((uintptr_t)this + debug_abbrev_off),
-                        debug_abbrev_sz);
-    }
-
-
-    // Dwarf stuff.
-
-    enum dw_form {
-        DW_FORM_addr = 0x01,
-        DW_FORM_block2 = 0x03,
-        DW_FORM_block4 = 0x04,
-        DW_FORM_data2 = 0x05,
-        DW_FORM_data4 = 0x06,
-        DW_FORM_data8 = 0x07,
-        DW_FORM_string = 0x08,
-        DW_FORM_block = 0x09,
-        DW_FORM_block1 = 0x0a,
-        DW_FORM_data1 = 0x0b,
-        DW_FORM_flag = 0x0c,
-        DW_FORM_sdata = 0x0d,
-        DW_FORM_strp = 0x0e,
-        DW_FORM_udata = 0x0f,
-        DW_FORM_ref_addr = 0x10,
-        DW_FORM_ref1 = 0x11,
-        DW_FORM_ref2 = 0x12,
-        DW_FORM_ref4 = 0x13,
-        DW_FORM_ref8 = 0x14,
-        DW_FORM_ref_udata = 0x15,
-        DW_FORM_indirect = 0x16
-    };
-
-    enum dw_at {
-        DW_AT_sibling = 0x01,
-        DW_AT_location = 0x02,
-        DW_AT_name = 0x03,
-        DW_AT_ordering = 0x09,
-        DW_AT_byte_size = 0x0b,
-        DW_AT_bit_offset = 0x0c,
-        DW_AT_bit_size = 0x0d,
-        DW_AT_stmt_list = 0x10,
-        DW_AT_low_pc = 0x11,
-        DW_AT_high_pc = 0x12,
-        DW_AT_language = 0x13,
-        DW_AT_discr = 0x15,
-        DW_AT_discr_value = 0x16,
-        DW_AT_visibility = 0x17,
-        DW_AT_import = 0x18,
-        DW_AT_string_length = 0x19,
-        DW_AT_common_reference = 0x1a,
-        DW_AT_comp_dir = 0x1b,
-        DW_AT_const_value = 0x1c,
-        DW_AT_containing_type = 0x1d,
-        DW_AT_default_value = 0x1e,
-        DW_AT_inline = 0x20,
-        DW_AT_is_optional = 0x21,
-        DW_AT_lower_bound = 0x22,
-        DW_AT_producer = 0x25,
-        DW_AT_prototyped = 0x27,
-        DW_AT_return_addr = 0x2a,
-        DW_AT_start_scope = 0x2c,
-        DW_AT_bit_stride = 0x2e,
-        DW_AT_upper_bound = 0x2f,
-        DW_AT_abstract_origin = 0x31,
-        DW_AT_accessibility = 0x32,
-        DW_AT_address_class = 0x33,
-        DW_AT_artificial = 0x34,
-        DW_AT_base_types = 0x35,
-        DW_AT_calling_convention = 0x36,
-        DW_AT_count = 0x37,
-        DW_AT_data_member_location = 0x38,
-        DW_AT_decl_column = 0x39,
-        DW_AT_decl_file = 0x3a,
-        DW_AT_decl_line = 0x3b,
-        DW_AT_declaration = 0x3c,
-        DW_AT_discr_list = 0x3d,
-        DW_AT_encoding = 0x3e,
-        DW_AT_external = 0x3f,
-        DW_AT_frame_base = 0x40,
-        DW_AT_friend = 0x41,
-        DW_AT_identifier_case = 0x42,
-        DW_AT_macro_info = 0x43,
-        DW_AT_namelist_item = 0x44,
-        DW_AT_priority = 0x45,
-        DW_AT_segment = 0x46,
-        DW_AT_specification = 0x47,
-        DW_AT_static_link = 0x48,
-        DW_AT_type = 0x49,
-        DW_AT_use_location = 0x4a,
-        DW_AT_variable_parameter = 0x4b,
-        DW_AT_virtuality = 0x4c,
-        DW_AT_vtable_elem_location = 0x4d,
-        DW_AT_allocated = 0x4e,
-        DW_AT_associated = 0x4f,
-        DW_AT_data_location = 0x50,
-        DW_AT_byte_stride = 0x51,
-        DW_AT_entry_pc = 0x52,
-        DW_AT_use_UTF8 = 0x53,
-        DW_AT_extension = 0x54,
-        DW_AT_ranges = 0x55,
-        DW_AT_trampoline = 0x56,
-        DW_AT_call_column = 0x57,
-        DW_AT_call_file = 0x58,
-        DW_AT_call_line = 0x59,
-        DW_AT_description = 0x5a,
-        DW_AT_binary_scale = 0x5b,
-        DW_AT_decimal_scale = 0x5c,
-        DW_AT_small = 0x5d,
-        DW_AT_decimal_sign = 0x5e,
-        DW_AT_digit_count = 0x5f,
-        DW_AT_picture_string = 0x60,
-        DW_AT_mutable = 0x61,
-        DW_AT_threads_scaled = 0x62,
-        DW_AT_explicit = 0x63,
-        DW_AT_object_pointer = 0x64,
-        DW_AT_endianity = 0x65,
-        DW_AT_elemental = 0x66,
-        DW_AT_pure = 0x67,
-        DW_AT_recursive = 0x68,
-        DW_AT_lo_user = 0x2000,
-        DW_AT_hi_user = 0x3fff
-    };
-
-    enum dw_tag {
-        DW_TAG_array_type = 0x01,
-        DW_TAG_class_type = 0x02,
-        DW_TAG_entry_point = 0x03,
-        DW_TAG_enumeration_type = 0x04,
-        DW_TAG_formal_parameter = 0x05,
-        DW_TAG_imported_declaration = 0x08,
-        DW_TAG_label = 0x0a,
-        DW_TAG_lexical_block = 0x0b,
-        DW_TAG_member = 0x0d,
-        DW_TAG_pointer_type = 0x0f,
-        DW_TAG_reference_type = 0x10,
-        DW_TAG_compile_unit = 0x11,
-        DW_TAG_string_type = 0x12,
-        DW_TAG_structure_type = 0x13,
-        DW_TAG_subroutine_type = 0x15,
-        DW_TAG_typedef = 0x16,
-        DW_TAG_union_type = 0x17,
-        DW_TAG_unspecified_parameters = 0x18,
-        DW_TAG_variant = 0x19,
-        DW_TAG_common_block = 0x1a,
-        DW_TAG_common_inclusion = 0x1b,
-        DW_TAG_inheritance = 0x1c,
-        DW_TAG_inlined_subroutine = 0x1d,
-        DW_TAG_module = 0x1e,
-        DW_TAG_ptr_to_member_type = 0x1f,
-        DW_TAG_set_type = 0x20,
-        DW_TAG_subrange_type = 0x21,
-        DW_TAG_with_stmt = 0x22,
-        DW_TAG_access_declaration = 0x23,
-        DW_TAG_base_type = 0x24,
-        DW_TAG_catch_block = 0x25,
-        DW_TAG_const_type = 0x26,
-        DW_TAG_constant = 0x27,
-        DW_TAG_enumerator = 0x28,
-        DW_TAG_file_type = 0x29,
-        DW_TAG_friend = 0x2a,
-        DW_TAG_namelist = 0x2b,
-        DW_TAG_namelist_item = 0x2c,
-        DW_TAG_packed_type = 0x2d,
-        DW_TAG_subprogram = 0x2e,
-        DW_TAG_template_type_parameter = 0x2f,
-        DW_TAG_template_value_parameter = 0x30,
-        DW_TAG_thrown_type = 0x31,
-        DW_TAG_try_block = 0x32,
-        DW_TAG_variant_part = 0x33,
-        DW_TAG_variable = 0x34,
-        DW_TAG_volatile_type = 0x35,
-        DW_TAG_dwarf_procedure = 0x36,
-        DW_TAG_restrict_type = 0x37,
-        DW_TAG_interface_type = 0x38,
-        DW_TAG_namespace = 0x39,
-        DW_TAG_imported_module = 0x3a,
-        DW_TAG_unspecified_type = 0x3b,
-        DW_TAG_partial_unit = 0x3c,
-        DW_TAG_imported_unit = 0x3d,
-        DW_TAG_condition = 0x3f,
-        DW_TAG_shared_type = 0x40,
-        DW_TAG_lo_user = 0x4080,
-        DW_TAG_hi_user = 0xffff,
-    };
 
     struct abbrev : rt_owned<abbrev>
     {
@@ -740,7 +743,7 @@ public:
     {
         ptr_vec<abbrev> abbrevs;
     public:
-        abbrev_reader(mem_area &abbrev_mem)
+        abbrev_reader(rust_crate::mem_area &abbrev_mem)
             : mem_reader(abbrev_mem),
               abbrevs(abbrev_mem.rt)
         {
@@ -862,6 +865,8 @@ public:
                 rdr->in_use = false;
             }
         };
+
+    public:
 
         struct die {
             die_reader *rdr;
@@ -1092,7 +1097,7 @@ public:
         }
 
 
-        die_reader(mem_area &die_mem,
+        die_reader(rust_crate::mem_area &die_mem,
                    abbrev_reader &abbrevs)
             : mem_reader(die_mem),
               abbrevs(abbrevs),
@@ -1132,18 +1137,31 @@ public:
         }
     };
 
-    void dump(rust_rt *rt)
+    rust_rt *rt;
+    size_t idx;
+    rust_crate const *crate;
+
+    rust_crate::mem_area abbrev_mem;
+    abbrev_reader abbrevs;
+
+    rust_crate::mem_area die_mem;
+    die_reader dies;
+
+public:
+
+    rust_crate_reader(rust_rt *rt,
+                      rust_crate const *crate)
+        : rt(rt),
+          crate(crate),
+          abbrev_mem(crate->get_debug_abbrev(rt)),
+          abbrevs(abbrev_mem),
+          die_mem(crate->get_debug_info(rt)),
+          dies(die_mem, abbrevs)
     {
-        rt->log(LOG_MEM, "this: 0x%" PRIxPTR, this);
-        rt->log(LOG_MEM, "debug_info_off: 0x%" PRIxPTR, debug_info_off);
-        rt->log(LOG_MEM, "debug_abbrev_off: 0x%" PRIxPTR, debug_abbrev_off);
-
+        rt->log(LOG_MEM, "crate_reader on crate: 0x%" PRIxPTR, this);
+        rt->log(LOG_MEM, "debug_abbrev: 0x%" PRIxPTR, abbrev_mem.base);
+        rt->log(LOG_MEM, "debug_info: 0x%" PRIxPTR, die_mem.base);
         // For now, perform diagnostics only.
-        mem_area abbrev_mem = get_debug_abbrev(rt);
-        abbrev_reader abbrevs(abbrev_mem);
-
-        mem_area die_mem = get_debug_info(rt);
-        die_reader dies(die_mem, abbrevs);
         dies.dump();
     }
 };
@@ -2071,7 +2089,7 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
     }
 }
 
-rust_rt::rust_rt(rust_srv *srv, rust_crate *crate) :
+rust_rt::rust_rt(rust_srv *srv, rust_crate const *crate) :
     srv(srv),
     crate(crate),
     logbits(get_logbits()),
@@ -2667,9 +2685,10 @@ upcall_import(rust_proc *proc, char const *lib, char const *sym)
                   handle, s);
 
 #endif
-
-    rust_crate *crate = (rust_crate*)s;
-    crate->dump(proc->rt);
+    {
+        rust_crate const *crate = (rust_crate*)s;
+        rust_crate_reader rdr(proc->rt, crate);
+    }
     proc->fail(3);
     return (uintptr_t) s;
 }
@@ -2874,15 +2893,16 @@ implode(rust_proc *proc, rust_vec *v)
 }
 
 extern "C" CDECL int
-rust_start(uintptr_t main_fn, rust_crate *crate)
+rust_start(uintptr_t main_fn, rust_crate const *crate)
 {
     int ret;
     {
         rust_srv srv;
         rust_rt rt(&srv, crate);
 
-        if (rt.logbits & LOG_DWARF)
-            crate->dump(&rt);
+        if (rt.logbits & LOG_DWARF) {
+            rust_crate_reader rdr(&rt, crate);
+        }
 
         rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
 
