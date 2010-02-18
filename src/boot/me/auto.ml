@@ -41,7 +41,7 @@ let auto_inference_visitor
         (None, None) -> None
       | (Some t, None) ->
           log cx "setting type of slot #%d to %s" (int_of_node id) (Ast.fmt_to_str Ast.fmt_ty t);
-          Hashtbl.replace cx.ctxt_all_slots id { s with Ast.slot_ty = (Some t) };
+          Hashtbl.replace cx.ctxt_all_defns id (DEFN_slot { s with Ast.slot_ty = (Some t) });
           progress := true;
           Some t
       | (tyo, Some t) -> unify_ty tyo t
@@ -51,9 +51,9 @@ let auto_inference_visitor
         Ast.LVAL_base nb ->
           let referent = Hashtbl.find cx.ctxt_lval_to_referent nb.id in
             begin
-              match htab_search cx.ctxt_all_slots referent with
-                  Some s -> unify_slot tyo referent s
-                | None ->
+              match Hashtbl.find cx.ctxt_all_defns referent with
+                  DEFN_slot s -> unify_slot tyo referent s
+                | _ ->
                     unify_ty tyo
                       (Hashtbl.find cx.ctxt_all_item_types referent)
             end
@@ -299,16 +299,16 @@ let process_crate
   try
     let path = Stack.create () in
     let auto_queue = Queue.create () in
-    let enqueue_auto_slot id slot =
-      match slot.Ast.slot_ty with
-          None ->
+    let enqueue_auto_defn id defn =
+      match defn with
+          DEFN_slot { Ast.slot_ty = None } ->
             log cx "enqueueing auto slot #%d" (int_of_node id);
             Queue.add id auto_queue
         | _ -> ()
     in
     let progress = ref true in
     let auto_pass = ref 0 in
-      Hashtbl.iter enqueue_auto_slot cx.ctxt_all_slots;
+      Hashtbl.iter enqueue_auto_defn cx.ctxt_all_defns;
       while not (Queue.is_empty auto_queue) do
         if not (!progress)
         then err None "auto inference pass wedged";
@@ -326,8 +326,8 @@ let process_crate
                   (auto_inference_visitor cx progress Walk.empty_visitor)))
             crate;
           Queue.iter
-            (fun id -> enqueue_auto_slot id
-               (Hashtbl.find cx.ctxt_all_slots id))
+            (fun id -> enqueue_auto_defn id
+               (Hashtbl.find cx.ctxt_all_defns id))
             tmpq;
           incr auto_pass;
       done

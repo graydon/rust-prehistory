@@ -22,7 +22,7 @@ let mutability_analysis_visitor
    *)
   let visit_slot_identified_post s =
     (* Pick up the auto type-resolved slot. *)
-    let slot = Hashtbl.find cx.ctxt_all_slots s.id in
+    let slot = referent_to_slot cx s.id in
       begin
         if type_is_mutable (slot_ty slot)
         then Hashtbl.replace cx.ctxt_mutable_slot_referent s.id ();

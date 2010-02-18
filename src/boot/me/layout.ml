@@ -115,7 +115,7 @@ let layout_visitor
       if Hashtbl.mem cx.ctxt_slot_layouts id
       then Some (Hashtbl.find cx.ctxt_slot_layouts id)
       else
-        let slot = Hashtbl.find cx.ctxt_all_slots id in
+        let slot = referent_to_slot cx id in
         let layout = layout_slot cx.ctxt_abi 0L slot in
           if vregs_ok
             && (i64_le layout.layout_size cx.ctxt_abi.Abi.abi_word_sz)

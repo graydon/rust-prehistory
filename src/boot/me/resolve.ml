@@ -136,7 +136,7 @@ let all_item_collecting_visitor
   in
 
   let visit_native_mod_item_pre n i =
-    htab_put cx.ctxt_all_native_items i.id i.node;
+    htab_put cx.ctxt_all_defns i.id (DEFN_native_item i.node);
     htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
     log cx "collected native item #%d: %s" (int_of_node i.id) n;
     begin
@@ -149,7 +149,7 @@ let all_item_collecting_visitor
   in
 
   let visit_mod_item_pre n p i =
-      htab_put cx.ctxt_all_items i.id i.node;
+      htab_put cx.ctxt_all_defns i.id (DEFN_item i.node);
       htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
       log cx "collected item #%d: %s" (int_of_node i.id) n;
       begin
@@ -179,20 +179,14 @@ let lookup_type_by_ident
     match res with
         None -> err None "identifier '%s' does not resolve to a type" ident
       | Some (scopes, id) ->
-          begin
-            if Hashtbl.mem cx.ctxt_all_items id
-            then
-              begin
-                let ty =
-                  match Hashtbl.find cx.ctxt_all_items id with
-                      Ast.MOD_ITEM_opaque_type td -> td.Ast.decl_item
-                    | Ast.MOD_ITEM_public_type td -> td.Ast.decl_item
-                    | _ -> err None "identifier '%s' resolves to non-type" ident
-                in
-                  (scopes, id, ty)
-              end
-            else err None "identifier '%s' resolves to a non-type" ident
-          end
+          let ty =
+            match htab_search cx.ctxt_all_defns id with
+                Some (DEFN_item (Ast.MOD_ITEM_opaque_type td))
+              | Some (DEFN_item (Ast.MOD_ITEM_public_type td)) ->
+                  td.Ast.decl_item
+              | _ -> err None "identifier '%s' resolves to non-type" ident
+          in
+            (scopes, id, ty)
 ;;
 
 
@@ -386,7 +380,7 @@ let type_resolving_visitor
 
   let visit_slot_identified_pre slot =
     let slot = resolve_slot_identified slot in
-      htab_put cx.ctxt_all_slots slot.id slot.node;
+      htab_put cx.ctxt_all_defns slot.id (DEFN_slot slot.node);
       log cx "collected resolved slot #%d with type %s" (int_of_node slot.id)
         (match slot.node.Ast.slot_ty with
              None -> "??"
@@ -563,9 +557,9 @@ let resolve_recursion
       begin fun id _ ->
         if can_reach id [] id
         then begin
-          match Hashtbl.find cx.ctxt_all_items id with
-              Ast.MOD_ITEM_public_type { Ast.decl_item = Ast.TY_tag _ }
-            | Ast.MOD_ITEM_opaque_type { Ast.decl_item = Ast.TY_tag _ } ->
+          match Hashtbl.find cx.ctxt_all_defns id with
+              DEFN_item (Ast.MOD_ITEM_public_type { Ast.decl_item = Ast.TY_tag _ })
+            | DEFN_item (Ast.MOD_ITEM_opaque_type { Ast.decl_item = Ast.TY_tag _ }) ->
                 log cx "type %d is a recursive tag" (int_of_node id);
                 Hashtbl.replace recursive_tag_types id ()
             | _ ->

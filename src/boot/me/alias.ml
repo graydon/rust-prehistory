@@ -14,7 +14,7 @@ let alias_analysis_visitor
     match lval with
         Ast.LVAL_base nb ->
           let referent = Hashtbl.find cx.ctxt_lval_to_referent nb.id in
-            if Hashtbl.mem cx.ctxt_all_slots referent
+            if (referent_is_slot cx referent)
             then
               begin
                 log cx "noting slot #%d as aliased" (int_of_node referent);

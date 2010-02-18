@@ -45,6 +45,12 @@ type data =
   | DATA_crate
 ;;
 
+type defn =
+    DEFN_slot of Ast.slot
+  | DEFN_item of Ast.mod_item'
+  | DEFN_native_item of Ast.native_mod_item'
+;;
+
 type glue_code = (glue, code) Hashtbl.t;;
 type item_code = (node_id, code) Hashtbl.t;;
 type file_code = (node_id, item_code) Hashtbl.t;;
@@ -73,17 +79,15 @@ type ctxt =
       ctxt_frame_blocks: (node_id,node_id list) Hashtbl.t;
       ctxt_block_slots: block_slots_table;
       ctxt_block_items: block_items_table;
-      ctxt_all_slots: (node_id,Ast.slot) Hashtbl.t;
       ctxt_slot_is_arg: (node_id,unit) Hashtbl.t;
       ctxt_slot_keys: (node_id,Ast.slot_key) Hashtbl.t;
-      ctxt_all_items: (node_id,Ast.mod_item') Hashtbl.t;
-      ctxt_all_native_items: (node_id,Ast.native_mod_item') Hashtbl.t;
       ctxt_all_item_names: (node_id,Ast.name) Hashtbl.t;
       ctxt_all_item_types: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_type_items: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
-      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;               (* maps references to definitions *)
+      ctxt_all_defns: (node_id,defn) Hashtbl.t;                         (* definition id --> definition *)
+      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;               (* reference id --> definition id *)
       ctxt_imported_items: (node_id, import_lib) Hashtbl.t;
 
       (* Layout-y stuff. *)
@@ -150,16 +154,14 @@ let new_ctxt sess abi crate =
     ctxt_frame_blocks = Hashtbl.create 0;
     ctxt_block_slots = Hashtbl.create 0;
     ctxt_block_items = Hashtbl.create 0;
-    ctxt_all_slots = Hashtbl.create 0;
     ctxt_slot_is_arg = Hashtbl.create 0;
     ctxt_slot_keys = Hashtbl.create 0;
-    ctxt_all_items = Hashtbl.create 0;
-    ctxt_all_native_items = Hashtbl.create 0;
     ctxt_all_item_names = Hashtbl.create 0;
     ctxt_all_item_types = Hashtbl.create 0;
     ctxt_all_type_items = Hashtbl.create 0;
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
+    ctxt_all_defns = Hashtbl.create 0;
     ctxt_lval_to_referent = Hashtbl.create 0;
     ctxt_imported_items = crate.Ast.crate_imported;
 
@@ -249,18 +251,36 @@ let bugi (cx:ctxt) (i:node_id) =
 
 (* Convenience accessors. *)
 
-(* resolve a reference to the id of its definition *)
+(* resolve an lval reference id to the id of its definition *)
 let lval_to_referent (cx:ctxt) (id:node_id) : node_id =
   if Hashtbl.mem cx.ctxt_lval_to_referent id
   then Hashtbl.find cx.ctxt_lval_to_referent id
   else bug () "unresolved lval"
 ;;
 
+(* resolve an lval reference id to its definition *)
+let resolve_lval_id (cx:ctxt) (id:node_id) : defn =
+  Hashtbl.find cx.ctxt_all_defns (lval_to_referent cx id)
+;;
+
+let referent_is_slot (cx:ctxt) (id:node_id) : bool =
+  match Hashtbl.find cx.ctxt_all_defns id with
+      DEFN_slot _ -> true
+    | _ -> false
+;;
+
+(* coerce an lval definition id to a slot *)
+let referent_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
+  match Hashtbl.find cx.ctxt_all_defns id with
+      DEFN_slot slot -> slot
+    | _ -> bugi cx id "unknown slot"
+;;
+
+(* coerce an lval reference id to its definition slot *)
 let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
-  let referent = lval_to_referent cx id in
-    if Hashtbl.mem cx.ctxt_all_slots referent
-    then Hashtbl.find cx.ctxt_all_slots referent
-    else bugi cx referent "unknown slot"
+  match resolve_lval_id cx id with
+      DEFN_slot slot -> slot
+    | _ -> bugi cx id "unknown slot"
 ;;
 
 let get_block_layout (cx:ctxt) (id:node_id) : layout =
@@ -328,6 +348,39 @@ let slot_ty (s:Ast.slot) : Ast.ty =
     | None -> bug () "untyped slot"
 ;;
 
+let defn_is_slot (d:defn) : bool =
+  match d with
+      DEFN_slot _ -> true
+    | _ -> false
+;;
+
+let defn_is_item (d:defn) : bool =
+  match d with
+      DEFN_item _ -> true
+    | _ -> false
+;;
+
+let defn_is_native_item (d:defn) : bool =
+  match d with
+      DEFN_native_item _ -> true
+    | _ -> false
+;;
+
+(* determines whether d defines a statically-known value *)
+let defn_is_static (d:defn) : bool =
+  not (defn_is_slot d)
+;;
+
+let defn_is_callable (d:defn) : bool =
+  match d with
+      DEFN_slot { Ast.slot_ty = Some Ast.TY_fn _ }
+    | DEFN_slot { Ast.slot_ty = Some Ast.TY_pred _ }
+    | DEFN_item (Ast.MOD_ITEM_pred _ )
+    | DEFN_item (Ast.MOD_ITEM_fn _ )
+    | DEFN_native_item (Ast.NATIVE_fn _) -> true
+    | _ -> false
+;;
+
 (* Constraint manipulation. *)
 
 let rec apply_names_to_carg_path
@@ -389,7 +442,7 @@ let rec lval_base_slot (cx:ctxt) (lv:Ast.lval) : node_id option =
   match lv with
       Ast.LVAL_base nbi ->
         let referent = lval_to_referent cx nbi.id in
-          if Hashtbl.mem cx.ctxt_all_slots referent
+          if referent_is_slot cx referent
           then Some referent
           else None
     | Ast.LVAL_ext (lv, _) -> lval_base_slot cx lv
@@ -399,7 +452,7 @@ let rec lval_slots (cx:ctxt) (lv:Ast.lval) : node_id array =
   match lv with
       Ast.LVAL_base nbi ->
         let referent = lval_to_referent cx nbi.id in
-          if Hashtbl.mem cx.ctxt_all_slots referent
+          if referent_is_slot cx referent
           then [| referent |]
           else [| |]
     | Ast.LVAL_ext (lv, Ast.COMP_named _) -> lval_slots cx lv
@@ -418,6 +471,9 @@ let lval_option_slots (cx:ctxt) (lv:Ast.lval option) : node_id array =
     | Some lv -> lval_slots cx lv
 ;;
 
+let resolve_lval (cx:ctxt) (lv:Ast.lval) : defn =
+  resolve_lval_id cx (lval_base_id lv)
+;;
 
 let atoms_slots (cx:ctxt) (az:Ast.atom array) : node_id array =
   Array.concat (List.map (atom_slots cx) (Array.to_list az))
@@ -822,9 +878,9 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
       Ast.LVAL_base nb ->
         begin
           let referent = lval_to_referent cx nb.id in
-            match htab_search cx.ctxt_all_items referent with
-                Some item -> {node=item; id=referent}
-              | None -> bug () "lval does not name an item"
+            match htab_search cx.ctxt_all_defns referent with
+                Some (DEFN_item item) -> {node=item; id=referent}
+              | _ -> bug () "lval does not name an item"
         end
     | Ast.LVAL_ext (base, comp) ->
         match (lval_item cx base).node with
@@ -849,9 +905,9 @@ let rec lval_native_item (cx:ctxt) (lval:Ast.lval) : Ast.native_mod_item =
       Ast.LVAL_base nb ->
         begin
           let referent = lval_to_referent cx nb.id in
-            match htab_search cx.ctxt_all_native_items referent with
-                Some item -> {node=item; id=referent}
-              | None -> bug () "lval does not name a native item"
+            match htab_search cx.ctxt_all_defns referent with
+                Some (DEFN_native_item item) -> {node=item; id=referent}
+              | _ -> bug () "lval does not name a native item"
         end
     | Ast.LVAL_ext (base, comp) ->
         match (lval_native_item cx base).node with
@@ -871,39 +927,41 @@ let rec lval_native_item (cx:ctxt) (lval:Ast.lval) : Ast.native_mod_item =
 ;;
 
 
-let lval_search (cx:ctxt) (htab:('a,'b) Hashtbl.t) (lval:Ast.lval) : 'b option =
-  let base_id = lval_base_id lval in
-  let referent = lval_to_referent cx base_id in
-    htab_search htab referent
-;;
-
-let lval_mem (cx:ctxt) (htab:('a,'b) Hashtbl.t) (lval:Ast.lval) : bool =
-  match lval_search cx htab lval with
-      Some _ -> true
-    | None -> false
-;;
-
-
 let lval_is_slot (cx:ctxt) (lval:Ast.lval) : bool =
-  lval_mem cx cx.ctxt_all_slots lval
+  match resolve_lval cx lval with
+      DEFN_slot _ -> true
+    | _ -> false
 ;;
 
 let lval_is_item (cx:ctxt) (lval:Ast.lval) : bool =
-  lval_mem cx cx.ctxt_all_items lval
+  match resolve_lval cx lval with
+      DEFN_item _ -> true
+    | _ -> false
 ;;
 
 let lval_is_native_item (cx:ctxt) (lval:Ast.lval) : bool =
-  lval_mem cx cx.ctxt_all_native_items lval
+  match resolve_lval cx lval with
+      DEFN_native_item _ -> true
+    | _ -> false
 ;;
 
 let lval_is_direct_fn (cx:ctxt) (lval:Ast.lval) : bool =
   (lval_is_item cx lval) || (lval_is_native_item cx lval)
 ;;
 
+let lval_is_static (cx:ctxt) (lval:Ast.lval) : bool =
+  defn_is_static (resolve_lval cx lval)
+;;
+
+let lval_is_callable (cx:ctxt) (lval:Ast.lval) : bool =
+  defn_is_callable (resolve_lval cx lval)
+;;
+
+
 let rec lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
   let base_id = lval_base_id lval in
   let referent = lval_to_referent cx base_id in
-  if Hashtbl.mem cx.ctxt_all_slots referent
+  if referent_is_slot cx referent
   then
     match (lval_slot cx lval).Ast.slot_ty with
         Some t -> t

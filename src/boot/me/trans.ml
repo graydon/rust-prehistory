@@ -364,7 +364,7 @@ let trans_visitor
   in
 
   let slot_id_referent_type (slot_id:node_id) : Il.referent_ty =
-    slot_referent_type abi (Hashtbl.find cx.ctxt_all_slots slot_id)
+    slot_referent_type abi (referent_to_slot cx slot_id)
   in
 
   let cell_of_block_slot
@@ -400,7 +400,7 @@ let trans_visitor
       Hashtbl.iter
         begin
           fun key slot_id ->
-            let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
+            let slot = referent_to_slot cx slot_id in
               fn key slot_id slot
         end
         block_slots
@@ -427,7 +427,7 @@ let trans_visitor
             begin
               fun slot_id ->
                 let key = Hashtbl.find cx.ctxt_slot_keys slot_id in
-                let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
+                let slot = referent_to_slot cx slot_id in
                   fn key slot_id slot
             end
             ls
@@ -2725,7 +2725,7 @@ let trans_visitor
             get_iso_tag tiso
         | _ -> bugi cx tagid "unexpected type for tag constructor"
     in
-    let slots = Array.map (fun sloti -> Hashtbl.find cx.ctxt_all_slots sloti.id) header_tup in
+    let slots = Array.map (fun sloti -> referent_to_slot cx sloti.id) header_tup in
     let tag_keys = sorted_htab_keys ttag in
     let i = arr_idx tag_keys (Ast.NAME_base (Ast.BASE_ident n)) in
       let _ = log cx "tag variant: %s -> tag value #%d" n i in

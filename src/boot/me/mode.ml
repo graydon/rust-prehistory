@@ -14,7 +14,7 @@ let mode_check_visitor
     let slot_ids = lval_slots cx dst in
       Array.iter
         (fun slot_id ->
-           let slot = Hashtbl.find cx.ctxt_all_slots slot_id in
+           let slot = referent_to_slot cx slot_id in
              match slot.Ast.slot_mode with
                  Ast.MODE_read_alias -> err (Some id) "writing to read-alias"
                | _ -> ())
