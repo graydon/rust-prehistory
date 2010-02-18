@@ -449,8 +449,9 @@ rust_crate
                 ok = false;
             if (!ok)
                 return;
-            // mem.rt->log(LOG_MEM, "get %d bytes @ 0x%" PRIxPTR, sizeof(T), pos);
             out = *((T*)(pos));
+            // mem.rt->log(LOG_MEM, "get %d bytes @ 0x%" PRIxPTR " = %d / '%c'",
+            //             sizeof(T), pos, (int)out, (char)out);
             pos += sizeof(T);
             ok &= !at_end();
             I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
@@ -483,10 +484,10 @@ rust_crate
             return false;
         }
 
-        bool get_zstr(const char *&c, size_t &sz) {
+        bool get_zstr(char const *&c, size_t &sz) {
             if (!ok)
                 return false;
-            c = (const char*)(pos);
+            c = (char const *)(pos);
             return adv_zstr(sz);
         }
 
@@ -798,14 +799,84 @@ public:
 
     class die_reader : public mem_reader
     {
-        abbrev_reader &abbrevs;
+
+        struct attr {
+            dw_form form;
+            dw_at at;
+            union {
+                struct {
+                    char const *s;
+                    size_t sz;
+                } str;
+                uintptr_t num;
+            } val;
+
+            bool is_numeric() const {
+                switch (form) {
+                case DW_FORM_ref_addr:
+                case DW_FORM_addr:
+                case DW_FORM_data4:
+                case DW_FORM_data1:
+                case DW_FORM_flag:
+                    return true;
+                default:
+                    break;
+                }
+                return false;
+            }
+
+            bool is_string() const {
+                return form == DW_FORM_string;
+            }
+
+            size_t get_ssz(rust_rt *rt) const {
+                I(rt, is_string());
+                return val.str.sz;
+            }
+
+            char const *get_str(rust_rt *rt) const {
+                I(rt, is_string());
+                return val.str.s;
+            }
+
+            uintptr_t get_num(rust_rt *rt) const {
+                I(rt, is_numeric());
+                return val.num;
+            }
+
+            bool is_unknown() const {
+                return !(is_numeric() || is_string());
+            }
+        };
+
+        struct rdr_sess
+        {
+            die_reader *rdr;
+            rdr_sess(die_reader *rdr) : rdr(rdr)
+            {
+                I(rdr->mem.rt, !rdr->in_use);
+                rdr->in_use = true;
+            }
+            ~rdr_sess()
+            {
+                rdr->in_use = false;
+            }
+        };
 
         struct die {
             die_reader *rdr;
             uintptr_t off;
             abbrev *ab;
+            bool using_rdr;
 
-            die(die_reader *rdr, uintptr_t off) : rdr(rdr), off(off) {
+            die(die_reader *rdr, uintptr_t off)
+                : rdr(rdr),
+                  off(off),
+                  using_rdr(false)
+            {
+                rust_rt *rt = rdr->mem.rt;
+                rdr_sess use(rdr);
+
                 rdr->reset();
                 rdr->seek_off(off);
                 if (!rdr->is_ok()) {
@@ -816,52 +887,51 @@ public:
                 rdr->get_uleb(ab_idx);
                 if (!ab_idx) {
                     ab = NULL;
-                    rdr->mem.rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> (null)", off);
+                    rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> (null)", off);
                 } else {
                     ab = rdr->abbrevs.get_abbrev(ab_idx);
-                    rdr->mem.rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, off, ab_idx);
-                    rdr->mem.rt->log(LOG_DWARF, "  tag %d, has children: %d", ab->tag, ab->has_children);
+                    rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, off, ab_idx);
+                    rt->log(LOG_DWARF, "  tag 0x%x, has children: %d", ab->tag, ab->has_children);
                 }
             }
 
-            bool is_null() {
+            bool is_null() const {
                 return ab == NULL;
             }
 
-            bool has_children() {
+            bool has_children() const {
                 return (!is_null()) && ab->has_children;
             }
 
-            dw_tag tag() {
+            dw_tag tag() const {
                 if (is_null())
                     return (dw_tag) (-1);
                 return (dw_tag) ab->tag;
             }
 
-            bool start_attrs() {
+            bool start_attrs() const {
+                if (is_null())
+                    return false;
+                rdr->reset();
+                rdr->seek_off(off + 1);
                 rdr->abbrevs.reset();
                 rdr->abbrevs.seek_off(ab->body_off);
                 return rdr->is_ok();
             }
 
-            bool step_attr(dw_form &form, dw_at &at,
-                           bool &numeric, uintptr_t &num,
-                           bool &string, char const *&s, size_t &ssz)
+            bool step_attr(attr &a) const
             {
-                uintptr_t a, f;
-                numeric = false;
-                string = false;
-                if (rdr->abbrevs.step_attr_form_pair(a, f) && rdr->is_ok()) {
-                    at = (dw_at)a;
-                    form = (dw_form)f;
+                uintptr_t ai, fi;
+                if (rdr->abbrevs.step_attr_form_pair(ai, fi) && rdr->is_ok()) {
+                    a.at = (dw_at)ai;
+                    a.form = (dw_form)fi;
 
                     uint32_t u32;
                     uint8_t u8;
 
-                    switch (form) {
+                    switch (a.form) {
                     case DW_FORM_string:
-                        string = true;
-                        return rdr->get_zstr(s, ssz);
+                        return rdr->get_zstr(a.val.str.s, a.val.str.sz);
                         break;
 
                     case DW_FORM_ref_addr:
@@ -869,15 +939,14 @@ public:
                     case DW_FORM_addr:
                     case DW_FORM_data4:
                         rdr->get(u32);
-                        num = (uintptr_t)u32;
-                        numeric = true;
+                        a.val.num = (uintptr_t)u32;
                         return rdr->is_ok() || rdr->at_end();
                         break;
 
                     case DW_FORM_data1:
                     case DW_FORM_flag:
                         rdr->get(u8);
-                        numeric = true;
+                        a.val.num = u8;
                         return rdr->is_ok() || rdr->at_end();
                         break;
 
@@ -888,7 +957,7 @@ public:
                         break;
 
                     default:
-                        rdr->mem.rt->log(LOG_DWARF, "  unknown dwarf form: 0x%" PRIxPTR, form);
+                        rdr->mem.rt->log(LOG_DWARF, "  unknown dwarf form: 0x%" PRIxPTR, a.form);
                         rdr->fail();
                         break;
                     }
@@ -896,71 +965,166 @@ public:
                 return false;
             }
 
-            die next() {
-                dw_form form;
-                dw_at at;
-                bool numeric, string;
-                uintptr_t num;
-                char const *s;
-                size_t ssz;
+            bool find_str_attr(dw_at at, char const *&c) {
+                rdr_sess use(rdr);
                 if (is_null())
-                    return die(rdr, rdr->tell_off());
-
+                    return false;
                 if (start_attrs()) {
-                    while (step_attr(form, at, numeric, num, string, s, ssz)) {
-                        I(rdr->mem.rt, !(numeric && string));
-                        if (numeric)
-                            rdr->mem.rt->log(LOG_DWARF, "  attr num: 0x%" PRIxPTR, num);
-                        else if (string)
-                            rdr->mem.rt->log(LOG_DWARF, "  attr str: %s", s);
-                        else
-                            rdr->mem.rt->log(LOG_DWARF, "  attr ??:");
+                    attr a;
+                    while (step_attr(a)) {
+                        if (a.at == at && a.is_string()) {
+                            c = a.get_str(rdr->mem.rt);
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            bool find_num_attr(dw_at at, uintptr_t &n) {
+                rdr_sess use(rdr);
+                if (is_null())
+                    return false;
+                if (start_attrs()) {
+                    attr a;
+                    while (step_attr(a)) {
+                        if (a.at == at && a.is_numeric()) {
+                            n = a.get_num(rdr->mem.rt);
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            bool find_child_by_name(char const *c, die &child) {
+                rust_rt *rt = rdr->mem.rt;
+                I(rt, has_children());
+                I(rt, !is_null());
+
+                for (child = next(); !child.is_null(); child = child.next_sibling()) {
+                    char const *ac;
+                    if (child.find_str_attr(DW_AT_name, ac)
+                        && strcmp(ac, c) == 0)
+                        return true;
+                }
+                return false;
+            }
+
+            bool find_child_by_tag(dw_tag tag, die &child) {
+                rust_rt *rt = rdr->mem.rt;
+                I(rt, has_children());
+                I(rt, !is_null());
+
+                for (child = next(); !child.is_null(); child = child.next_sibling()) {
+                    if (child.tag() == tag)
+                        return true;
+                }
+                return false;
+            }
+
+            die next() const {
+                rust_rt *rt = rdr->mem.rt;
+
+                if (is_null()) {
+                    rdr->seek_off(off + 1);
+                    return die(rdr, rdr->tell_off());
+                }
+
+                {
+                    rdr_sess use(rdr);
+                    if (start_attrs()) {
+                        attr a;
+                        while (step_attr(a)) {
+                            I(rt, !(a.is_numeric() && a.is_string()));
+                            if (a.is_numeric())
+                                rt->log(LOG_DWARF, "  attr num: 0x%" PRIxPTR, a.get_num(rt));
+                            else if (a.is_string())
+                                rt->log(LOG_DWARF, "  attr str: %s", a.get_str(rt));
+                            else
+                                rt->log(LOG_DWARF, "  attr ??:");
+                        }
                     }
                 }
                 return die(rdr, rdr->tell_off());
             }
+
+            die next_sibling() const {
+                // FIXME: use DW_AT_sibling, when present.
+                if (has_children()) {
+                    // rdr->mem.rt->log(LOG_DWARF, "+++ children of die 0x%" PRIxPTR, off);
+                    die child = next();
+                    while (!child.is_null())
+                        child = child.next_sibling();
+                    // rdr->mem.rt->log(LOG_DWARF, "--- children of die 0x%" PRIxPTR, off);
+                    return child.next();
+                } else {
+                    return next();
+                }
+            }
         };
 
+        abbrev_reader &abbrevs;
+        uint32_t cu_unit_length;
+        uintptr_t cu_base;
+        uint16_t dwarf_vers;
+        uint32_t cu_abbrev_off;
+        uint8_t sizeof_addr;
+        bool in_use;
+
     public:
+
+        die first_die() {
+            seek_off(cu_base
+                     + sizeof(dwarf_vers)
+                     + sizeof(cu_abbrev_off)
+                     + sizeof(sizeof_addr));
+            return die(this, tell_off());
+        }
+
+        void dump() {
+            rust_rt *rt = mem.rt;
+            die d = first_die();
+            while (!d.is_null())
+                d = d.next_sibling();
+            I(rt, d.is_null());
+            I(rt, d.off == mem.lim - mem.base);
+        }
+
+
         die_reader(mem_area &die_mem,
                    abbrev_reader &abbrevs)
             : mem_reader(die_mem),
-              abbrevs(abbrevs)
+              abbrevs(abbrevs),
+              cu_unit_length(0),
+              cu_base(0),
+              dwarf_vers(0),
+              cu_abbrev_off(0),
+              sizeof_addr(0),
+              in_use(false)
         {
             rust_rt *rt = mem.rt;
-            uint32_t cu_unit_length = 0;
-            uint16_t dwarf_vers = 0;
-            uint32_t cu_abbrev_off = 0;
-            uint8_t sizeof_addr = 0;
+
+            rdr_sess use(this);
 
             get(cu_unit_length);
-            uintptr_t cu_base = tell_off();
+            cu_base = tell_off();
 
             get(dwarf_vers);
             get(cu_abbrev_off);
             get(sizeof_addr);
 
             if (is_ok()) {
+                rt->log(LOG_DWARF, "new root CU at 0x%" PRIxPTR, die_mem.base);
                 rt->log(LOG_DWARF, "CU unit length: %" PRId32, cu_unit_length);
                 rt->log(LOG_DWARF, "dwarf version: %" PRId16, dwarf_vers);
                 rt->log(LOG_DWARF, "CU abbrev off: %" PRId32, cu_abbrev_off);
                 rt->log(LOG_DWARF, "size of address: %" PRId8, sizeof_addr);
-                int depth = 0;
-                die d(this, tell_off());
-                while (is_ok() && tell_off() < cu_base + cu_unit_length) {
-                    if (d.has_children())
-                        ++depth;
-                    d = d.next();
-                    if (d.is_null()) {
-                        --depth;
-                        I(rt, depth >= 0);
-                        if (depth == 0) {
-                            I(rt, at_end());
-                            rt->log(LOG_DWARF, "end of outermost CU DIE");
-                            break;
-                        }
-                    }
-                }
+                I(rt, sizeof_addr == sizeof(uintptr_t));
+                I(rt, dwarf_vers == 3);
+                I(rt, cu_base + cu_unit_length == die_mem.lim - die_mem.base);
+            } else {
+                rt->log(LOG_DWARF, "failed to read root CU header");
             }
         }
 
@@ -980,6 +1144,7 @@ public:
 
         mem_area die_mem = get_debug_info(rt);
         die_reader dies(die_mem, abbrevs);
+        dies.dump();
     }
 };
 
