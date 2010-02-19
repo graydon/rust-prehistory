@@ -1335,9 +1335,9 @@ struct rust_port : public rc_base, public proc_owned<rust_port>, public rust_con
     ~rust_port();
 };
 
-struct rust_chan : public rc_base, public rt_owned<rust_chan> {
+struct rust_chan : public rc_base, public proc_owned<rust_chan> {
     // fields known only to the runtime
-    rust_rt* rt; // proc is resolved lazily, so this is rt_owned
+    rust_proc* proc;
     rust_port* port;
     size_t idx; // Index into port->chans.
 
@@ -1610,7 +1610,7 @@ rust_port::~rust_port()
 }
 
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
-    rt(proc->rt),
+    proc(proc),
     port(port),
     q(NULL)
 {
@@ -1627,7 +1627,7 @@ rust_chan::~rust_chan()
 void
 rust_chan::disassociate()
 {
-    I(rt, port);
+    I(proc->rt, port);
 
     // delete reference to the port
     port = NULL;
