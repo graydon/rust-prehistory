@@ -384,14 +384,10 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let vreg_to_hreg = Hashtbl.create 0 in (* vreg -> hreg *)
     let vreg_to_ty = Hashtbl.create 0 in (* vreg -> scalar_ty *)
     let vreg_to_spill = Hashtbl.create 0 in (* vreg -> spill *)
-    let vreg_ty v =
-      if Hashtbl.mem vreg_to_ty v
-      then Hashtbl.find vreg_to_ty v
-      else Il.voidptr_t
-    in
+    let (word_ty:Il.scalar_ty) = Il.ValTy abi.Abi.abi_word_bits in
     let vreg_spill_cell v =
       Il.Mem ((spill_slot (Hashtbl.find vreg_to_spill v)),
-               Il.ScalarTy (vreg_ty v))
+              Il.ScalarTy word_ty)
     in
     let newq = ref [] in
     let fixup = ref None in
@@ -423,7 +419,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
                     end
                 in
                 let spill_mem = spill_slot spill_idx in
-                let spill_cell = Il.Mem (spill_mem, Il.ScalarTy (vreg_ty vreg)) in
+                let spill_cell = Il.Mem (spill_mem, Il.ScalarTy word_ty) in
                   log cx "spilling <%d> from %s to %s"
                     vreg (hr_str hreg) (string_of_mem hr_str spill_mem);
                   prepend (Il.mk_quad (Il.umov spill_cell (Il.Cell (hr hreg))));

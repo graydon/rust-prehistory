@@ -2466,6 +2466,13 @@ let trans_visitor
             match atom_type cx a with
                 Ast.TY_str -> trans_log_str a
               | Ast.TY_int -> trans_log_int a
+              | Ast.TY_char -> trans_log_int a
+              | Ast.TY_mach (TY_u8) -> trans_log_int a
+              | Ast.TY_mach (TY_u16) -> trans_log_int a
+              | Ast.TY_mach (TY_u32) -> trans_log_int a
+              | Ast.TY_mach (TY_s8) -> trans_log_int a
+              | Ast.TY_mach (TY_s16) -> trans_log_int a
+              | Ast.TY_mach (TY_s32) -> trans_log_int a
               | _ -> bugi cx stmt.id "unimplemented logging type"
           end
 

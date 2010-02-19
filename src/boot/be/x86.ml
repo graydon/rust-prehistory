@@ -985,6 +985,12 @@ let is_ty8 (ty:Il.scalar_ty) : bool =
     | _ -> false
 ;;
 
+let is_m32 (c:Il.cell) : bool =
+  match c with
+      Il.Mem (_, Il.ScalarTy st) -> is_ty32 st
+    | _ -> false
+;;
+
 let is_m8 (c:Il.cell) : bool =
   match c with
       Il.Mem (_, Il.ScalarTy st) -> is_ty8 st
@@ -1071,11 +1077,37 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
         Asm.SEQ [| Asm.BYTE 0x0f;
                    insn_rm_r 0xb6 src_cell (reg r) |]
 
+    (* MOVZX: m32 <- zx(r8) *)
+    | (false, _, (Il.Cell (Il.Reg ((Il.Hreg r), src_ty) as src_cell)))
+        when (is_m32 dst) && is_ty8 src_ty ->
+        (* Fake with 2 insns: 
+         * 
+         * movzx r32 <- r8;   (in-place zero-extension)
+         * mov m32 <- r32; 
+         *)
+        Asm.SEQ [| Asm.BYTE 0x0f;
+                   insn_rm_r 0xb6 src_cell (reg r);
+                   insn_rm_r 0x89 dst (reg r);
+                |]
+
     (* MOVSX: r8/r32 <- sx(rm8) *)
     | (true, Il.Reg ((Il.Hreg r), dst_ty), Il.Cell src_cell)
         when (is_ty8 dst_ty || is_ty32 dst_ty) && is_rm8 src_cell ->
         Asm.SEQ [| Asm.BYTE 0x0f;
                    insn_rm_r 0xbe src_cell (reg r) |]
+
+    (* MOVSX: m32 <- sx(r8) *)
+    | (true, _, (Il.Cell (Il.Reg ((Il.Hreg r), src_ty) as src_cell)))
+        when (is_m32 dst) && is_ty8 src_ty ->
+        (* Fake with 2 insns: 
+         * 
+         * movsx r32 <- r8;   (in-place sign-extension)
+         * mov m32 <- r32; 
+         *)
+        Asm.SEQ [| Asm.BYTE 0x0f;
+                   insn_rm_r 0xbe src_cell (reg r);
+                   insn_rm_r 0x89 dst (reg r);
+                |]
 
     (* m8 <- imm8 (signed) *)
     | (_, _, Il.Imm ((Asm.IMM n), _))
