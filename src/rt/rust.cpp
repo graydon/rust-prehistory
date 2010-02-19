@@ -1319,7 +1319,7 @@ struct rust_chan : public rc_base, public rt_owned<rust_chan> {
     rust_chan(rust_proc *proc, rust_port *port);
     ~rust_chan();
 
-    void disconnect();
+    void disassociate();
 };
 
 /*
@@ -1572,7 +1572,7 @@ rust_port::~rust_port()
     while (writers.length() > 0)
         writers.pop()->disconnect();
     while (chans.length() > 0)
-        chans.pop()->disconnect();
+        chans.pop()->disassociate();
 }
 
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
@@ -1590,7 +1590,7 @@ rust_chan::~rust_chan()
 }
 
 void
-rust_chan::disconnect()
+rust_chan::disassociate()
 {
     I(rt, port);
 
