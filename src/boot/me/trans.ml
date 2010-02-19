@@ -2047,8 +2047,14 @@ let trans_visitor
         | _ -> false
     in
       match clone with
-          CLONE_none
-        | CLONE_chan _ ->
+          CLONE_chan clone_proc ->
+            let clone =
+              if (type_contains_chan (slot_ty src_slot))
+              then CLONE_all clone_proc
+              else CLONE_none
+            in
+              trans_init_slot_from_cell clone dst dst_slot src src_slot
+        | CLONE_none ->
             if is_alias_cell
             then mov dst (Il.Cell (alias src))
             else trans_copy_slot true dst dst_slot src src_slot None
