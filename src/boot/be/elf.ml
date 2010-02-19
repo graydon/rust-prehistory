@@ -1389,11 +1389,7 @@ let emit_file
     let push_r32 r = Il.emit e
       (Il.Push (Il.Cell (Il.Reg (Il.Hreg r, Il.ValTy Il.Bits32))))
     in
-    let push_pos32 fix =
-      let (reg, _, _) = X86.get_next_pc_thunk in
-        Abi.load_fixup_addr e sem.Semant.ctxt_abi reg fix Il.CodeTy;
-        Il.emit e (Il.Push (Il.Cell (Il.Reg (reg, Il.AddrTy Il.CodeTy))))
-    in
+    let push_pos32 = X86.push_pos32 e sem.Semant.ctxt_abi in
       push_r32 X86.eax;
       push_r32 X86.esp;
       push_r32 X86.edx;
@@ -1417,6 +1413,7 @@ let emit_file
   let main_fn =
     let e = X86.new_emitter() in
       X86.objfile_start e
+        ~abi: sem.Semant.ctxt_abi
         ~start_fixup ~rust_start_fixup
         ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
         ~crate_fixup: sem.Semant.ctxt_crate_fixup

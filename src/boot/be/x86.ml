@@ -662,36 +662,6 @@ let fn_epilogue (e:Il.emitter) : unit =
     emit Il.Ret;
 ;;
 
-
-let objfile_start
-    (e:Il.emitter)
-    ~(start_fixup:fixup)
-    ~(rust_start_fixup:fixup)
-    ~(main_fn_fixup:fixup)
-    ~(crate_fixup:fixup)
-    ~(indirect_start:bool)
-    : unit =
-  Il.emit_full e (Some start_fixup) Il.Dead;
-  save_callee_saves e;
-  Il.emit e (Il.umov (rc ebp) (ro esp));
-  Il.emit e (Il.Push (immi 0L));
-  Il.emit e (Il.Push (imm (Asm.M_POS crate_fixup)));
-  Il.emit e (Il.Push (imm (Asm.M_POS main_fn_fixup)));
-  let fptr =
-    Il.CodePtr
-      (if indirect_start
-       then Il.Cell (Il.Mem (Il.Abs (Asm.M_POS rust_start_fixup),
-                             Il.ScalarTy (Il.AddrTy Il.CodeTy)))
-       else Il.ImmPtr ((Asm.M_POS rust_start_fixup), Il.CodeTy))
-  in
-    Il.emit e (Il.call (rc eax) fptr);
-    Il.emit e (Il.Pop (rc ecx));
-    Il.emit e (Il.Pop (rc ecx));
-    Il.emit e (Il.umov (rc esp) (ro ebp));
-    restore_callee_saves e;
-    Il.emit e Il.Ret;
-;;
-
 let c_to_proc_glue (e:Il.emitter) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
@@ -760,7 +730,6 @@ let yield_glue (e:Il.emitter) : unit =
   ()
 ;;
 
-
 let get_next_pc_thunk : (Il.reg * fixup * (Il.emitter -> unit)) =
   let get_next_pc_thunk_fixup = new_fixup "glue$get_next_pc" in
   let emit_get_next_pc_thunk (e:Il.emitter) : unit =
@@ -773,6 +742,43 @@ let get_next_pc_thunk : (Il.reg * fixup * (Il.emitter -> unit)) =
       Il.emit e Il.Ret;
   in
     (Il.Hreg eax, get_next_pc_thunk_fixup, emit_get_next_pc_thunk)
+;;
+
+let push_pos32 (e:Il.emitter) (abi:Abi.abi) (fix:fixup) : unit =
+  let (reg, _, _) = get_next_pc_thunk in
+    Abi.load_fixup_addr e abi reg fix Il.OpaqueTy;
+    Il.emit e (Il.Push (Il.Cell (Il.Reg (reg, Il.AddrTy Il.OpaqueTy))))
+;;
+
+let objfile_start
+    (e:Il.emitter)
+    ~(abi:Abi.abi)
+    ~(start_fixup:fixup)
+    ~(rust_start_fixup:fixup)
+    ~(main_fn_fixup:fixup)
+    ~(crate_fixup:fixup)
+    ~(indirect_start:bool)
+    : unit =
+  let push_pos32 = push_pos32 e abi in
+    Il.emit_full e (Some start_fixup) Il.Dead;
+    save_callee_saves e;
+    Il.emit e (Il.umov (rc ebp) (ro esp));
+    Il.emit e (Il.Push (immi 0L));
+    push_pos32 crate_fixup;
+    push_pos32 main_fn_fixup;
+    let fptr =
+      Il.CodePtr
+        (if indirect_start
+         then Il.Cell (Il.Mem (Il.Abs (Asm.M_POS rust_start_fixup),
+                               Il.ScalarTy (Il.AddrTy Il.CodeTy)))
+         else Il.ImmPtr ((Asm.M_POS rust_start_fixup), Il.CodeTy))
+    in
+      Il.emit e (Il.call (rc eax) fptr);
+      Il.emit e (Il.Pop (rc ecx));
+      Il.emit e (Il.Pop (rc ecx));
+      Il.emit e (Il.umov (rc esp) (ro ebp));
+      restore_callee_saves e;
+      Il.emit e Il.Ret;
 ;;
 
 let (abi:Abi.abi) =
