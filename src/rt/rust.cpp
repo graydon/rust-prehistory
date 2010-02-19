@@ -1314,7 +1314,6 @@ struct rust_chan : public rc_base, public rt_owned<rust_chan> {
     size_t idx; // Index into port->chans.
 
     // queue the chan is sending to (resolved lazily)
-    rust_proc *proc;
     rust_q* q;
 
     rust_chan(rust_proc *proc, rust_port *port);
@@ -1579,7 +1578,6 @@ rust_port::~rust_port()
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     rt(proc->rt),
     port(port),
-    proc(NULL),
     q(NULL)
 {
     port->chans.push(this);
@@ -1600,7 +1598,6 @@ rust_chan::disconnect()
     port = NULL;
 
     // flush the cached state
-    proc = NULL;
     q = NULL;
 }
 
@@ -2509,7 +2506,7 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
 
     // if the queue wasn't resolved yet or is not ours, lookup the queue
     rust_q *q = chan->q;
-    if (!q || chan->proc != proc) {
+    if (!q || q->proc != proc) {
         HASH_FIND(hh, proc->outgoing, port, sizeof(rust_q*), q);
         if (!q) {
             q = new (rt) rust_q(proc, port);
@@ -2519,7 +2516,6 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
         I(rt, q->port);
         I(rt, q->port == port);
         // we have resolved the right queue to send via
-        chan->proc = proc;
         chan->q = q;
     }
 
