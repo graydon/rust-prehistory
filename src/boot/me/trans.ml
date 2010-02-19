@@ -953,9 +953,9 @@ let trans_visitor
     let inner (arg:Il.cell) =
       let dst = deref (ptr_at (fp_imm out_mem_disp) ty) in
       let src = deref arg in
-        (* FIXME: Gross hack here: we know rt is one-past arg in clone glue args. *)
-      let rt = word_at (fp_imm (Int64.add arg0_disp (word_n 1))) in
-        clone_ty rt ty dst src curr_iso
+        (* FIXME: Gross hack here: we know clone_proc is one-past arg in clone glue args. *)
+      let clone_proc = word_at (fp_imm (Int64.add arg0_disp (word_n 1))) in
+        clone_ty clone_proc ty dst src curr_iso
     in
     let fix = get_typed_mem_glue g ty inner in
       fix
@@ -1188,30 +1188,32 @@ let trans_visitor
 
       iflog (fun _ -> annotate "spawn proc: copy args");
 
-      match realm with
-          Ast.REALM_thread ->
-            begin
-              let clone_rt = next_vreg_cell Il.voidptr_t in
-                trans_upcall "upcall_new_rt" clone_rt [|  |];
-                copy_fn_args (Some clone_rt) proc_cell in_slots args [| |];
-                trans_upcall "upcall_spawn_thread" proc_cell
+      let new_proc = next_vreg_cell Il.voidptr_t in
+        match realm with
+            Ast.REALM_thread ->
+              begin
+                trans_upcall "upcall_new_thread" new_proc [| |];
+                copy_fn_args (Some new_proc) proc_cell in_slots args [| |];
+                trans_upcall "upcall_start_thread" proc_cell
                   [|
-                    Il.Cell clone_rt;
+                    Il.Cell new_proc;
                     exit_proc_glue_fptr;
                     fptr_operand;
                     imm callsz
                   |];
             end
          | _ ->
-            begin
-              copy_fn_args None proc_cell in_slots args [||];
-              trans_upcall "upcall_spawn_local" proc_cell
-                [|
-                  exit_proc_glue_fptr;
-                  fptr_operand;
-                  imm callsz
-                |];
-            end;
+             begin
+                 trans_upcall "upcall_new_proc" new_proc [| |];
+                 copy_fn_args None proc_cell in_slots args [| |];
+                 trans_upcall "upcall_start_proc" proc_cell
+                   [|
+                     Il.Cell new_proc;
+                     exit_proc_glue_fptr;
+                     fptr_operand;
+                     imm callsz
+                   |];
+             end;
       ()
 
   and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
@@ -1624,7 +1626,7 @@ let trans_visitor
         | _ -> ()
 
   and clone_slot
-      (rt:Il.cell)
+      (clone_proc:Il.cell)
       (dst:Il.cell)
       (src:Il.cell)
       (dst_slot:Ast.slot)
@@ -1637,11 +1639,11 @@ let trans_visitor
             let curr_iso = maybe_enter_iso ty curr_iso in
             let dst = deref_slot true dst dst_slot in
             let glue_fix = get_clone_glue (slot_ty dst_slot) curr_iso in
-              trans_call_clone_glue dst glue_fix src rt
+              trans_call_clone_glue dst glue_fix src clone_proc
 
         | Ast.MODE_read_alias
         | Ast.MODE_write_alias -> bug () "cloning into alias slot"
-        | Ast.MODE_interior _ -> clone_ty rt ty dst src curr_iso
+        | Ast.MODE_interior _ -> clone_ty clone_proc ty dst src curr_iso
 
   and drop_slot
       (cell:Il.cell)
@@ -2006,7 +2008,7 @@ let trans_visitor
 
 
   and trans_init_slot_from_atom_clone
-      (rt:Il.cell)
+      (clone_proc:Il.cell)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (atom:Ast.atom)
       : unit =
@@ -2023,7 +2025,7 @@ let trans_visitor
 
               | Ast.ATOM_lval src_lval ->
                   let (src, _) = trans_lval src_lval in
-                    clone_slot rt dst src dst_slot None
+                    clone_slot clone_proc dst src dst_slot None
           end
 
 
@@ -2183,16 +2185,16 @@ let trans_visitor
       abi.Abi.abi_pp_cell word_slot
 
   and trans_argN
-      (clone_rt:Il.cell option)
+      (clone_proc:Il.cell option)
       (arg_cell:Il.cell)
       (arg_slot:Ast.slot)
       (arg:Ast.atom)
       : unit =
-    match clone_rt with
+    match clone_proc with
         None ->
           trans_init_slot_from_atom arg_cell arg_slot arg
-      | Some rt ->
-          trans_init_slot_from_atom_clone rt arg_cell arg_slot arg
+      | Some proc ->
+          trans_init_slot_from_atom_clone proc arg_cell arg_slot arg
 
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
@@ -2211,7 +2213,7 @@ let trans_visitor
             (Il.string_of_operand abi.Abi.abi_str_of_hardreg operand)
 
   and copy_fn_args
-      (clone_rt:Il.cell option)
+      (clone_proc:Il.cell option)
       (output_cell:Il.cell)
       (arg_slots:Ast.slot array)
       (args:Ast.atom array)
@@ -2230,7 +2232,7 @@ let trans_visitor
                      annotate
                        (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
                           i n_args n_extras));
-            trans_argN clone_rt (get_element_ptr arg_tup (2+i)) arg_slots.(i) arg
+            trans_argN clone_proc (get_element_ptr arg_tup (2+i)) arg_slots.(i) arg
         end
         args;
       Array.iteri

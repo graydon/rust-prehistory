@@ -2128,6 +2128,8 @@ rust_rt::rust_rt(rust_srv *srv, rust_crate const *crate) :
     pthread_attr_setdetachstate(&attr, true);
 #endif
     randinit(&rctx, 1);
+
+    root_proc = new (this) rust_proc(this, NULL);
 }
 
 rust_rt::~rust_rt() {
@@ -2419,7 +2421,11 @@ attempt_transmission(rust_rt *rt,
         return 0;
     }
 
-    I(rt, src->port);
+    if (!src->port) {
+        rt->log(LOG_COMM,
+                "src died, transmission incomplete");
+        return 0;
+    }
 
     if (!dst->blocked_on(src->port)) {
         rt->log(LOG_COMM,
@@ -2589,9 +2595,9 @@ upcall_kill(rust_proc *proc, rust_proc *target)
 extern "C" CDECL void
 upcall_exit(rust_proc *proc)
 {
-    rust_rt *rt = proc->rt;
-
     LOG_UPCALL_ENTRY(proc);
+
+    rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL, "upcall exit");
     proc->die();
     proc->notify_waiting_procs();
@@ -2602,6 +2608,7 @@ extern "C" CDECL uintptr_t
 upcall_malloc(rust_proc *proc, size_t nbytes)
 {
     LOG_UPCALL_ENTRY(proc);
+
     void *p = proc->rt->malloc(nbytes);
     proc->rt->log(LOG_UPCALL|LOG_MEM,
                   "upcall malloc(%u) = 0x%" PRIxPTR,
@@ -2613,6 +2620,7 @@ extern "C" CDECL void
 upcall_free(rust_proc *proc, void* ptr)
 {
     LOG_UPCALL_ENTRY(proc);
+
     rust_rt *rt = proc->rt;
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall free(0x%" PRIxPTR ")",
@@ -2625,6 +2633,7 @@ extern "C" CDECL rust_str *
 upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 {
     LOG_UPCALL_ENTRY(proc);
+
     rust_rt *rt = proc->rt;
     size_t alloc = next_power_of_two(fill);
     void *mem = rt->malloc(sizeof(rust_str) + alloc);
@@ -2639,10 +2648,10 @@ extern "C" CDECL uintptr_t
 upcall_import(rust_proc *proc, char const *lib, char const *sym)
 {
     LOG_UPCALL_ENTRY(proc);
+
     proc->rt->log(LOG_UPCALL, "upcall import: [%s] %s", lib, sym);
 
 #if defined(__WIN32__)
-
     HMODULE handle = LoadLibrary(_T(lib));
     proc->rt->log(LOG_UPCALL,
                   "LoadLibrary(\"%s\") -> 0x%" PRIxPTR,
@@ -2661,9 +2670,7 @@ upcall_import(rust_proc *proc, char const *lib, char const *sym)
         proc->fail(3);
         return 0;
     }
-
 #else
-
     void *handle = dlopen(lib, RTLD_LOCAL|RTLD_LAZY);
     proc->rt->log(LOG_UPCALL,
                   "dlopen(\"%s\") -> 0x%" PRIxPTR,
@@ -2680,7 +2687,6 @@ upcall_import(rust_proc *proc, char const *lib, char const *sym)
                   "dlsym(0x%" PRIxPTR
                   ", \"rust_crate\") -> 0x%" PRIxPTR,
                   handle, s);
-
 #endif
     {
         rust_crate const *crate = (rust_crate*)s;
@@ -2715,47 +2721,61 @@ static void *rust_thread_start(void *ptr)
 }
 
 extern "C" CDECL rust_proc *
-upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
+upcall_new_proc(rust_proc *spawner)
 {
     LOG_UPCALL_ENTRY(spawner);
+
+    rust_rt *rt = spawner->rt;
+    rust_proc *proc = new (rt) rust_proc(rt, spawner);
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
+            "upcall new_proc: spawner 0x%" PRIxPTR " = 0x%" PRIxPTR,
+            spawner, proc);
+    return proc;
+}
+
+extern "C" CDECL rust_proc *
+upcall_start_proc(rust_proc *spawner, rust_proc *proc, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
+{
+    LOG_UPCALL_ENTRY(spawner);
+
     rust_rt *rt = spawner->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-            "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
-            exit_proc_glue, spawnee_fn, callsz);
-    rust_proc *proc = new (rt) rust_proc(rt, spawner);
+            "upcall start_proc: proc 0x%" PRIxPTR " exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
+            proc, exit_proc_glue, spawnee_fn, callsz);
     proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
     return proc;
 }
 
-extern "C" CDECL rust_rt *
-upcall_new_rt(rust_proc *proc)
+extern "C" CDECL rust_proc *
+upcall_new_thread(rust_proc *proc)
 {
     LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
-    rust_rt *new_rt = new rust_rt(rt->srv->clone(), rt->crate);
-    rt->log(LOG_UPCALL|LOG_MEM,
-            "upcall new_rt() = 0x%" PRIxPTR,
-            new_rt);
-    return new_rt;
+
+    rust_rt *old_rt = proc->rt;
+    rust_rt *new_rt = new rust_rt(old_rt->srv->clone(), old_rt->crate);
+    new_rt->log(LOG_UPCALL|LOG_MEM,
+                "upcall new_thread = 0x%" PRIxPTR,
+                new_rt->root_proc);
+    return new_rt->root_proc;
 }
 
 extern "C" CDECL rust_proc *
-upcall_spawn_thread(rust_proc *spawner, rust_rt *new_rt, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
+upcall_start_thread(rust_proc *spawner, rust_proc *root_proc, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     LOG_UPCALL_ENTRY(spawner);
+
     rust_rt *rt = spawner->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-            "spawn thread fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
+            "upcall start_thread: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
             exit_proc_glue, spawnee_fn, callsz);
-    new_rt->root_proc = new (new_rt) rust_proc(new_rt, NULL);
-    new_rt->root_proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
+    root_proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
 
 #if defined(__WIN32__)
     DWORD thread;
-    CreateThread(NULL, 0, rust_thread_start, (void *)new_rt, 0, &thread);
+    CreateThread(NULL, 0, rust_thread_start, root_proc->rt, 0, &thread);
 #else
     pthread_t thread;
-    pthread_create(&thread, &rt->attr, rust_thread_start, (void *)new_rt);
+    pthread_create(&thread, &rt->attr, rust_thread_start, (void *)root_proc->rt);
 #endif
 
     return 0; /* nil */
@@ -2903,7 +2923,6 @@ rust_start(uintptr_t main_fn, rust_crate const *crate)
             rust_crate_reader rdr(&rt, crate);
         }
 
-        rt.root_proc = new (&rt) rust_proc(&rt, NULL);
         rt.root_proc->start(rt.crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
 
         ret = rust_main_loop(&rt);
