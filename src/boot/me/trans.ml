@@ -1343,7 +1343,7 @@ let trans_visitor
             begin
               fun i atom ->
                 let cell = get_element_ptr body i in
-                  trans_init_slot_from_atom cell unit_slot atom
+                  trans_init_slot_from_atom None cell unit_slot atom
             end
             atoms
 
@@ -1995,53 +1995,49 @@ let trans_visitor
       begin
         fun i atom ->
           trans_init_slot_from_atom
+            None
             (get_element_ptr dst i)
             dst_slots.(i)
             atom
       end
       atoms
 
-
   and trans_init_slot_from_atom
+      (clone:Il.cell option)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (atom:Ast.atom)
       : unit =
-    match atom with
-      | Ast.ATOM_literal _ ->
-          let src = trans_atom atom in
-            begin
-              match dst_slot.Ast.slot_mode with
-                  Ast.MODE_read_alias
-                | Ast.MODE_write_alias ->
-                    mov dst (Il.Cell (alias (Il.Mem (force_to_mem src))))
-                | _ -> mov (deref_slot true dst dst_slot) src
-            end
-      | Ast.ATOM_lval src_lval ->
-          let (src, src_slot) = trans_lval src_lval in
-            trans_init_slot_from_cell dst dst_slot src src_slot
-
-
-  and trans_init_slot_from_atom_clone
-      (clone_proc:Il.cell)
-      (dst:Il.cell) (dst_slot:Ast.slot)
-      (atom:Ast.atom)
-      : unit =
-    match dst_slot.Ast.slot_mode with
-        Ast.MODE_read_alias
-      | Ast.MODE_write_alias ->
-          bug () "attempting to clone alias cell"
-      | _ ->
-          begin
-            match atom with
-              | Ast.ATOM_literal _ ->
-                  let src = trans_atom atom in
-                    mov (deref_slot true dst dst_slot) src
-
-              | Ast.ATOM_lval src_lval ->
-                  let (src, _) = trans_lval src_lval in
-                    clone_slot clone_proc dst src dst_slot None
-          end
-
+    let is_alias_cell =
+      match dst_slot.Ast.slot_mode with
+          Ast.MODE_read_alias
+        | Ast.MODE_write_alias -> true
+        | _ -> false
+    in
+      match atom with
+        | Ast.ATOM_literal _ ->
+            let src = trans_atom atom in
+              begin
+                match clone with
+                    None ->
+                      if is_alias_cell
+                      then mov dst (Il.Cell (alias (Il.Mem (force_to_mem src))))
+                      else mov (deref_slot true dst dst_slot) src
+                  | Some _ ->
+                      if is_alias_cell
+                      then bug () "attempting to clone alias cell";
+                      mov (deref_slot true dst dst_slot) src
+              end
+        | Ast.ATOM_lval src_lval ->
+            let (src, src_slot) = trans_lval src_lval in
+              begin
+                match clone with
+                    None ->
+                      trans_init_slot_from_cell dst dst_slot src src_slot
+                  | Some clone_proc ->
+                      if is_alias_cell
+                      then bug () "attempting to clone alias cell";
+                      clone_slot clone_proc dst src dst_slot None
+              end
 
   and trans_init_slot_from_cell
       (dst:Il.cell) (dst_slot:Ast.slot)
@@ -2199,16 +2195,12 @@ let trans_visitor
       abi.Abi.abi_pp_cell word_slot
 
   and trans_argN
-      (clone_proc:Il.cell option)
+      (clone:Il.cell option)
       (arg_cell:Il.cell)
       (arg_slot:Ast.slot)
       (arg:Ast.atom)
       : unit =
-    match clone_proc with
-        None ->
-          trans_init_slot_from_atom arg_cell arg_slot arg
-      | Some proc ->
-          trans_init_slot_from_atom_clone proc arg_cell arg_slot arg
+    trans_init_slot_from_atom clone arg_cell arg_slot arg
 
   and code_of_cell (cell:Il.cell) : Il.code =
     match cell with
@@ -2579,7 +2571,7 @@ let trans_visitor
                           let dst_slot = interior_slot atom_ty in
                           let dst_ty = referent_type abi atom_ty in
                           let dst_cell = Il.Mem (dst_mem, dst_ty) in
-                            trans_init_slot_from_atom dst_cell dst_slot at
+                            trans_init_slot_from_atom None dst_cell dst_slot at
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;
