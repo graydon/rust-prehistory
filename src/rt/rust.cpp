@@ -184,10 +184,7 @@ public:
         return fill;
     }
 
-    T *& operator[](ssize_t offset) {
-        return data[offset];
-    }
-
+    T *& operator[](size_t offset);
     void push(T *p);
     T *pop();
     void trim(size_t fill);
@@ -1380,6 +1377,12 @@ ptr_vec<T>::~ptr_vec()
     rt->free(data);
 }
 
+template <typename T> T *&
+ptr_vec<T>::operator[](size_t offset) {
+    I(rt, data[offset]->idx == offset);
+    return data[offset];
+}
+
 template <typename T>
 void
 ptr_vec<T>::push(T *p)
@@ -2565,7 +2568,6 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
         size_t i = rand(&rt->rctx);
         i %= port->writers.length();
         rust_q *q = port->writers[i];
-        I(rt, q->idx == i);
         if (attempt_transmission(rt, q, proc)) {
             port->writers.swapdel(q);
             q->sending = false;
