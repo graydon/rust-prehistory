@@ -1224,7 +1224,7 @@ let trans_visitor
          | _ ->
              begin
                  trans_upcall "upcall_new_proc" new_proc [| |];
-                 copy_fn_args CLONE_none proc_cell in_slots args [| |];
+                 copy_fn_args (CLONE_chan new_proc) proc_cell in_slots args [| |];
                  trans_upcall "upcall_start_proc" proc_cell
                    [|
                      Il.Cell new_proc;
@@ -2021,44 +2021,41 @@ let trans_visitor
       match atom with
         | Ast.ATOM_literal _ ->
             let src = trans_atom atom in
-              begin
+              if is_alias_cell
+              then
                 match clone with
                     CLONE_none ->
-                      if is_alias_cell
-                      then mov dst (Il.Cell (alias (Il.Mem (force_to_mem src))))
-                      else mov (deref_slot true dst dst_slot) src
+                      mov dst (Il.Cell (alias (Il.Mem (force_to_mem src))))
                   | _ ->
-                      if is_alias_cell
-                      then bug () "attempting to clone alias cell"
-                      else mov (deref_slot true dst dst_slot) src
-              end
+                      bug () "attempting to clone alias cell"
+              else
+                mov (deref_slot true dst dst_slot) src
         | Ast.ATOM_lval src_lval ->
             let (src, src_slot) = trans_lval src_lval in
-              begin
-                match clone with
-                    CLONE_none
-                  | CLONE_chan _ ->
-                      trans_init_slot_from_cell dst dst_slot src src_slot
-                  | CLONE_all clone_proc ->
-                      if is_alias_cell
-                      then bug () "attempting to clone alias cell"
-                      else clone_slot clone_proc dst src dst_slot None
-              end
+              trans_init_slot_from_cell clone dst dst_slot src src_slot
 
   and trans_init_slot_from_cell
+      (clone:clone_ctrl)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (src:Il.cell) (src_slot:Ast.slot)
       : unit =
     assert (slot_ty src_slot = slot_ty dst_slot);
-    match dst_slot.Ast.slot_mode with
-        Ast.MODE_read_alias
-      | Ast.MODE_write_alias -> mov dst (Il.Cell (alias src))
-      | _ ->
-          trans_copy_slot
-            true
-            dst dst_slot
-            src src_slot
-            None
+    let is_alias_cell =
+      match dst_slot.Ast.slot_mode with
+          Ast.MODE_read_alias
+        | Ast.MODE_write_alias -> true
+        | _ -> false
+    in
+      match clone with
+          CLONE_none
+        | CLONE_chan _ ->
+            if is_alias_cell
+            then mov dst (Il.Cell (alias src))
+            else trans_copy_slot true dst dst_slot src src_slot None
+        | CLONE_all clone_proc ->
+            if is_alias_cell
+            then bug () "attempting to clone alias cell"
+            else clone_slot clone_proc dst src dst_slot None
 
   and trans_call_fn
       (initializing:bool)
@@ -2190,6 +2187,7 @@ let trans_visitor
     (* Emit arg0 of any call: the output slot. *)
     iflog (fun _ -> annotate "fn-call arg 0: output slot");
     trans_init_slot_from_cell
+      CLONE_none
       arg_cell (word_write_alias_slot abi)
       output_cell word_slot
 
@@ -2197,6 +2195,7 @@ let trans_visitor
     (* Emit arg1 or any call: the process pointer. *)
     iflog (fun _ -> annotate "fn-call arg 1: process pointer");
     trans_init_slot_from_cell
+      CLONE_none
       arg_cell word_slot
       abi.Abi.abi_pp_cell word_slot
 
