@@ -1241,7 +1241,6 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond 
     ptr_vec<rust_proc> *state;
     rust_cond *cond;
     rust_rt *rt;
-    uintptr_t fn;
     rust_q *outgoing;
     uintptr_t* dptr;           // rendezvous pointer for send/recv
     rust_proc *spawner;        // parent-link
@@ -1762,7 +1761,6 @@ rust_proc::rust_proc(rust_rt *rt,
       state(&rt->running_procs),
       cond(NULL),
       rt(rt),
-      fn(spawnee_fn),
       outgoing(NULL),
       dptr(0),
       spawner(spawner),
