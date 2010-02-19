@@ -353,12 +353,6 @@ typedef void CDECL (*c_to_proc_glue_ty)(rust_proc *);
 class
 rust_crate
 {
-    // A crate is compiled thinking that its address is self_addr.
-    // When the crate is loaded at some address, 'this' may not be
-    // equal to self_addr: a difference means that the crate was
-    // relocated.  That difference is added to all subsequent accesses
-    // to static data pointers.
-
     // The following fields are emitted by the compiler for the static
     // rust_crate object inside each compiled crate.
 
