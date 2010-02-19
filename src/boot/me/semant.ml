@@ -956,7 +956,8 @@ let lval_is_native_item (cx:ctxt) (lval:Ast.lval) : bool =
 ;;
 
 let lval_is_direct_fn (cx:ctxt) (lval:Ast.lval) : bool =
-  (lval_is_item cx lval) || (lval_is_native_item cx lval)
+  let defn = resolve_lval cx lval in
+    (defn_is_static defn) && (defn_is_callable defn)
 ;;
 
 let lval_is_static (cx:ctxt) (lval:Ast.lval) : bool =

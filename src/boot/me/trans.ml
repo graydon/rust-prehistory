@@ -2074,7 +2074,7 @@ let trans_visitor
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (ptr, _) = trans_callee flv in
     let in_slots = tsig.Ast.sig_input_slots in
-    let direct = lval_is_direct_fn cx flv in
+    let direct = lval_is_static cx flv in
     let extra_args =
       if direct then
         [||]
@@ -2122,7 +2122,7 @@ let trans_visitor
     let (in_slots, _) = tpred in
       iflog (fun _ -> annotate "predicate call");
       (* FIXME (bug 546450): extra_args if indirect *)
-      trans_call true (lval_is_direct_fn cx flv) (fun _ -> Ast.sprintf_lval () flv)
+      trans_call true (lval_is_static cx flv) (fun _ -> Ast.sprintf_lval () flv)
         dst_cell ptr in_slots args [||];
 
   and trans_call_pred_and_check
@@ -2483,7 +2483,7 @@ let trans_visitor
             let init = maybe_init stmt.id "bind" dst in
               match lval_ty cx flv with
                   Ast.TY_fn (tsig, _) ->
-                    trans_bind_fn init (lval_is_direct_fn cx flv) stmt.id dst flv tsig args
+                    trans_bind_fn init (lval_is_static cx flv) stmt.id dst flv tsig args
                       (* FIXME (bug 544382): implement bind for modules *)
                 | _ -> bug () "Binding unexpected lval."
           end
