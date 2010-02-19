@@ -1303,12 +1303,12 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond 
     frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
 };
 
-struct rust_port : public rc_base, public rt_owned<rust_port>, public rust_cond {
+struct rust_port : public rc_base, public proc_owned<rust_port>, public rust_cond {
     // fields known only to the runtime
-    rust_rt *rt; // port might outlive proc, so this is rt_owned
     rust_proc *proc;
     size_t unit_sz;
     ptr_vec<rust_q> writers;
+    ptr_vec<rust_q> idle;
 
     rust_port(rust_proc *proc, size_t unit_sz);
     ~rust_port();
@@ -1338,8 +1338,8 @@ struct rust_q : public proc_owned<rust_q>, public rust_cond {
     UT_hash_handle hh;
     rust_proc *proc;      // Proc owning this q.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
-    bool sending;         // Whether we're in a port->writers vec.
-    size_t idx;           // Index in the port->writers vec.
+    bool sending;         // Whether we're in a port->writers or port->idle.
+    size_t idx;           // Index into port->writers/idle.
     circ_buf buf;
 
     rust_q(rust_proc *proc, rust_port *port);
@@ -1557,11 +1557,12 @@ rust_str::~rust_str()
 // Ports
 
 rust_port::rust_port(rust_proc *proc, size_t unit_sz) :
-    rt(proc->rt),
     proc(proc),
     unit_sz(unit_sz),
-    writers(proc->rt)
+    writers(proc->rt),
+    idle(proc->rt)
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
             PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)this);
@@ -1569,11 +1570,14 @@ rust_port::rust_port(rust_proc *proc, size_t unit_sz) :
 
 rust_port::~rust_port()
 {
+    rust_rt *rt = proc->rt;
     rt->log(LOG_COMM|LOG_MEM,
             "~rust_port 0x%" PRIxPTR,
             (uintptr_t)this);
     while (writers.length() > 0)
         writers.pop()->disconnect();
+    while (idle.length() > 0)
+        idle.pop()->disconnect();
 }
 
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
@@ -1597,10 +1601,28 @@ rust_q::rust_q(rust_proc *proc, rust_port *port) :
     idx(0),
     buf(port->proc->rt, port->unit_sz)
 {
+    port->idle.push(this);
+
     rust_rt *rt = proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_q(port=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
             port, (uintptr_t)this);
+}
+
+rust_q::~rust_q()
+{
+    rust_rt *rt = proc->rt;
+
+    if (port) {
+        if (sending) {
+            port->writers.swapdel(this);
+        } else {
+            port->idle.swapdel(this);
+        }
+    }
+
+    rt->log(LOG_MEM|LOG_COMM,
+            "~rust_q 0x%" PRIxPTR, (uintptr_t)this);
 }
 
 void
@@ -1608,26 +1630,13 @@ rust_q::disconnect()
 {
     rust_rt *rt = proc->rt;
 
-    I(rt, sending);
     I(rt, port);
+
+    if (sending && proc->blocked())
+        proc->wakeup(this); // must be blocked on us (or dead)
 
     sending = false;
     port = NULL;
-
-    if (proc->blocked())
-        proc->wakeup(this); // must be blocked on us (or dead)
-}
-
-rust_q::~rust_q()
-{
-    rust_rt *rt = proc->rt;
-
-    if (sending) {
-        I(rt, port);
-        port->writers.swapdel(this);
-    }
-    rt->log(LOG_MEM|LOG_COMM,
-            "~rust_q 0x%" PRIxPTR, (uintptr_t)this);
 }
 
 /* Stacks */
@@ -2366,7 +2375,6 @@ upcall_new_chan(rust_proc *proc, rust_port *port)
             "upcall_new_chan(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
             (uintptr_t)proc, port);
     I(rt, port);
-    ++(port->refcnt);
     return new (rt) rust_chan(proc, port);
 }
 
@@ -2378,9 +2386,6 @@ upcall_del_chan(rust_proc *proc, rust_chan *chan)
     rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
             "upcall del_chan(0x%" PRIxPTR ")", (uintptr_t)chan);
     I(rt, !chan->refcnt);
-    rust_port *port = chan->port;
-    if (!--(port->refcnt))
-        delete port;
     delete chan;
 }
 
@@ -2519,6 +2524,7 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
         attempt_transmission(rt, q, port->proc);
         if (q->buf.unread && !q->sending) {
             q->sending = true;
+            port->idle.swapdel(q);
             port->writers.push(q);
         }
     } else {
@@ -2555,6 +2561,7 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
         I(rt, q->idx == i);
         if (attempt_transmission(rt, q, proc)) {
             port->writers.swapdel(q);
+            port->idle.push(q);
             q->sending = false;
         }
     } else {
