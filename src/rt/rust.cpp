@@ -1318,13 +1318,12 @@ struct rust_port : public rc_base, public proc_owned<rust_port>, public rust_con
 };
 
 struct rust_q : public rust_cond {
-    rust_proc *proc;      // Proc owning this q.
-    rust_port *port;      // Port chan is connected to, NULL if disconnected.
+    rust_chan *chan;      // Link back to the channel this q belongs to
     bool sending;         // Whether we're in a port->writers.
     size_t idx;           // Index into port->writers.
     circ_buf buf;
 
-    rust_q(rust_proc *proc, rust_port *port);
+    rust_q(rust_chan *chan);
     ~rust_q();
 
     void disconnect();
@@ -1586,7 +1585,7 @@ rust_port::~rust_port()
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     proc(proc),
     port(port),
-    q(proc, port)
+    q(this)
 {
     if (port)
         port->chans.push(this);
@@ -1609,22 +1608,22 @@ rust_chan::disassociate()
 
 /* Outgoing message queues */
 
-rust_q::rust_q(rust_proc *proc, rust_port *port) :
-    proc(proc),
-    port(port),
+rust_q::rust_q(rust_chan *chan) :
+    chan(chan),
     sending(false),
     idx(0),
-    buf(port->proc->rt, port->unit_sz)
+    buf(chan->proc->rt, chan->port->unit_sz)
 {
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = chan->proc->rt;
     rt->log(LOG_MEM|LOG_COMM,
             "new rust_q(port=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
-            port, (uintptr_t)this);
+            chan->port, (uintptr_t)this);
 }
 
 rust_q::~rust_q()
 {
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = chan->proc->rt;
+    rust_port *port = chan->port;
 
     if (port && sending)
         port->writers.swapdel(this);
@@ -1636,15 +1635,15 @@ rust_q::~rust_q()
 void
 rust_q::disconnect()
 {
+    rust_proc *proc = chan->proc;
     rust_rt *rt = proc->rt;
 
-    I(rt, port);
+    I(rt, chan->port);
 
     if (sending && proc->blocked())
         proc->wakeup(this); // must be blocked on us (or dead)
 
     sending = false;
-    port = NULL;
 }
 
 /* Stacks */
@@ -2440,13 +2439,16 @@ attempt_transmission(rust_rt *rt,
         return 0;
     }
 
-    if (!src->port) {
+    rust_chan *chan = src->chan;
+    rust_port *port = chan->port;
+
+    if (!port) {
         rt->log(LOG_COMM,
                 "src died, transmission incomplete");
         return 0;
     }
 
-    if (!dst->blocked_on(src->port)) {
+    if (!dst->blocked_on(port)) {
         rt->log(LOG_COMM,
                 "dst in non-reading state, transmission incomplete");
         return 0;
@@ -2455,16 +2457,16 @@ attempt_transmission(rust_rt *rt,
     uintptr_t *dptr = dst->dptr;
     rt->log(LOG_COMM,
             "receiving %d bytes into dst_proc=0x%" PRIxPTR ", dptr=0x%" PRIxPTR,
-            src->port->unit_sz, dst, dptr);
+            port->unit_sz, dst, dptr);
     src->buf.shift(dptr);
 
     // Wake up the sender if its waiting for the send operation.
-    rust_proc *sender = src->proc;
+    rust_proc *sender = chan->proc;
     if (sender->blocked_on(src))
         sender->wakeup(src);
 
     // Wakeup the receiver, there is new data.
-    dst->wakeup(src->port);
+    dst->wakeup(port);
 
     rt->log(LOG_COMM, "transmission complete");
     return 1;
