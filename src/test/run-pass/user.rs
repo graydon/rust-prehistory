@@ -1,3 +1,3 @@
 fn main() -> () {
-    std.hello.hello();
+    log std.hello.hello(); 
 }

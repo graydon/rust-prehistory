@@ -1,3 +1,3 @@
-fn hello() -> str {
-   ret "hello from std lib.";
+fn hello() -> int {
+   ret 12345;
 }

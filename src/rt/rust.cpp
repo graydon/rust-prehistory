@@ -353,6 +353,8 @@ rust_crate
     // The following fields are emitted by the compiler for the static
     // rust_crate object inside each compiled crate.
 
+    uintptr_t self_addr;          // Un-relocated qddres of 'this'.
+
     uintptr_t debug_abbrev_off;   // Memory offset from this to .debug_abbrev.
     size_t debug_abbrev_sz;       // Size of .debug_abbrev.
 
@@ -367,6 +369,10 @@ rust_crate
     // Crates are immutable, constructed by the compiler.
 
 public:
+
+    void adjust_for_relocation(uintptr_t &addr) const {
+        addr += ((uintptr_t)this - self_addr);
+    }
 
     c_to_proc_glue_ty get_c_to_proc_glue() const {
         return (c_to_proc_glue_ty) ((uintptr_t)this + c_to_proc_glue_off);
@@ -790,6 +796,17 @@ class rust_crate_reader
         }
     };
 
+    rust_rt *rt;
+    size_t idx;
+    rust_crate const *crate;
+
+    rust_crate::mem_area abbrev_mem;
+    abbrev_reader abbrevs;
+
+    rust_crate::mem_area die_mem;
+
+public:
+
     class die_reader : public mem_reader
     {
 
@@ -992,16 +1009,39 @@ class rust_crate_reader
                 return false;
             }
 
-            bool find_child_by_name(char const *c, die &child) {
+            bool is_transparent() {
+                // "semantically transparent" DIEs are those with
+                // children that serve to structure the tree but have
+                // tags that don't reflect anything in the rust-module
+                // name hierarchy.
+                switch (tag()) {
+                case DW_TAG_compile_unit:
+                case DW_TAG_lexical_block:
+                    return (has_children());
+                default:
+                    break;
+                }
+                return false;
+            }
+
+            bool find_child_by_name(char const *c, die &child, bool exact=false) {
                 rust_rt *rt = rdr->mem.rt;
                 I(rt, has_children());
                 I(rt, !is_null());
 
-                for (child = next(); !child.is_null(); child = child.next_sibling()) {
+                for (die ch = next(); !ch.is_null(); ch = ch.next_sibling()) {
                     char const *ac;
-                    if (child.find_str_attr(DW_AT_name, ac)
-                        && strcmp(ac, c) == 0)
-                        return true;
+                    if (ch.find_str_attr(DW_AT_name, ac)) {
+                        if (strcmp(ac, c) == 0) {
+                            child = ch;
+                            return true;
+                        }
+                    }
+                    if (!exact && ch.is_transparent()) {
+                        if (ch.find_child_by_name(c, child, exact)) {
+                            return true;
+                        }
+                    }
                 }
                 return false;
             }
@@ -1070,6 +1110,7 @@ class rust_crate_reader
     public:
 
         die first_die() {
+            reset();
             seek_off(cu_base
                      + sizeof(dwarf_vers)
                      + sizeof(cu_abbrev_off)
@@ -1127,17 +1168,7 @@ class rust_crate_reader
         }
     };
 
-    rust_rt *rt;
-    size_t idx;
-    rust_crate const *crate;
-
-    rust_crate::mem_area abbrev_mem;
-    abbrev_reader abbrevs;
-
-    rust_crate::mem_area die_mem;
     die_reader dies;
-
-public:
 
     rust_crate_reader(rust_rt *rt,
                       rust_crate const *crate)
@@ -2665,11 +2696,14 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
 }
 
 extern "C" CDECL uintptr_t
-upcall_import(rust_proc *proc, char const *lib, char const *sym)
+upcall_import(rust_proc *proc, char const *lib, char const **sym)
 {
     LOG_UPCALL_ENTRY(proc);
 
-    proc->rt->log(LOG_UPCALL, "upcall import: [%s] %s", lib, sym);
+    proc->rt->log(LOG_UPCALL, "upcall import: [%s]", lib);
+    for (char const **c = sym; *c; ++c) {
+        proc->rt->log(LOG_UPCALL, "upcall import: + %s", *c);
+    }
 
 #if defined(__WIN32__)
     HMODULE handle = LoadLibrary(_T(lib));
@@ -2708,12 +2742,43 @@ upcall_import(rust_proc *proc, char const *lib, char const *sym)
                   ", \"rust_crate\") -> 0x%" PRIxPTR,
                   handle, s);
 #endif
+    uintptr_t addr;
     {
+        typedef rust_crate_reader::die_reader::die die;
         rust_crate const *crate = (rust_crate*)s;
         rust_crate_reader rdr(proc->rt, crate);
+        bool found_root = false;
+        bool found_leaf = false;
+        for (die d = rdr.dies.first_die();
+             !(found_root || d.is_null());
+             d = d.next_sibling()) {
+
+            die t1 = d;
+            die t2 = d;
+            for (char const **c = sym;
+                 (*c
+                  && !t1.is_null()
+                  && t1.find_child_by_name(*c, t2));
+                 ++c, t1=t2) {
+                proc->rt->log(LOG_UPCALL, "matched die <0x%"  PRIxPTR
+                              ">, child '%s' = die<0x%" PRIxPTR ">",
+                              t1.off, *c, t2.off);
+                found_root = found_root || true;
+                if (!*(c+1) && t2.find_num_attr(DW_AT_low_pc, addr)) {
+                    crate->adjust_for_relocation(addr);
+                    found_leaf = true;
+                    break;
+                }
+            }
+        }
+        if (found_leaf) {
+            proc->rt->log(LOG_UPCALL, "resolved symbol to 0x%"  PRIxPTR, addr);
+        } else {
+            proc->rt->log(LOG_UPCALL, "failed to resolve symbol");
+            proc->fail(3);
+        }
     }
-    proc->fail(3);
-    return (uintptr_t) s;
+    return addr;
 }
 
 static int

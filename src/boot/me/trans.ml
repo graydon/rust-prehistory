@@ -579,27 +579,41 @@ let trans_visitor
         (Il.Cell cell, slot_ty slot)
 
 
-  and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Il.operand =
-    let fix =
-      if Hashtbl.mem cx.ctxt_data d
-      then
-        let (fix, _) = Hashtbl.find cx.ctxt_data d in
-          fix
-      else
-        let fix = new_fixup "data item fixup" in
-        let frag = Asm.DEF (fix, thunk ()) in
-          htab_put cx.ctxt_data d (fix, frag);
-          fix
+  and trans_data_operand (d:data) (thunk:unit -> Asm.frag) : Il.operand =
+    let (fix, _) =
+      htab_search_or_add cx.ctxt_data d
+        begin
+          fun _ ->
+            let fix = new_fixup "data item" in
+            let frag = Asm.DEF (fix, thunk()) in
+              (fix, frag)
+        end
     in
       (* FIXME (bug 541552): wrong operand type. *)
       Il.Imm (Asm.M_POS fix, word_ty_mach)
 
+  and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Asm.frag =
+    let (fix, _) =
+      htab_search_or_add cx.ctxt_data d
+        begin
+          fun _ ->
+            let fix = new_fixup "data item" in
+            let frag = Asm.DEF (fix, thunk()) in
+              (fix, frag)
+        end
+    in
+      (* FIXME (bug 541552): wrong operand type. *)
+      Asm.WORD (word_ty_mach, Asm.M_POS fix)
+
   and trans_static_string (s:string) : Il.operand =
+    trans_data_operand (DATA_str s) (fun _ -> Asm.ZSTRING s)
+
+  and trans_static_string_frag (s:string) : Asm.frag =
     trans_data_frag (DATA_str s) (fun _ -> Asm.ZSTRING s)
 
   and trans_type_info (t:Ast.ty) : Il.operand =
     (* FIXME: emit type-info table here. *)
-    trans_data_frag (DATA_typeinfo t) (fun _ -> Asm.MARK)
+    trans_data_operand (DATA_typeinfo t) (fun _ -> Asm.MARK)
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
     (* Include null byte. *)
@@ -2624,7 +2638,7 @@ let trans_visitor
               end
         end
     in
-    trans_data_frag (DATA_frame_glue_fns fnid)
+    trans_data_operand (DATA_frame_glue_fns fnid)
       begin
         fun _ ->
           let mark_frame_glue_fixup =
@@ -2693,6 +2707,19 @@ let trans_visitor
     trans_frame_exit fnid;
   in
 
+  let trans_static_name_components (ncs:Ast.name_component list) : Il.operand =
+    let f nc =
+      match nc with
+          Ast.COMP_ident i -> trans_static_string_frag i
+        | _ -> bug () "unexpected static name component"
+    in
+      trans_data_operand
+        (DATA_name (Walk.name_of ncs))
+        (fun _ -> Asm.SEQ (Array.append
+                             (Array.map f (Array.of_list ncs))
+                             [| Asm.WORD (word_ty_mach, Asm.IMM 0L) |]))
+  in
+
   let trans_imported_fn (fnid:node_id) (blockid:node_id) : unit =
     trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
@@ -2700,11 +2727,18 @@ let trans_visitor
     let path_elts = stk_elts_from_bot path in
       assert (ilib.import_prefix < (List.length path_elts));
       let relative_path_elts = list_drop ilib.import_prefix path_elts in
-      let relative_path = Walk.name_of (List.rev relative_path_elts) in
       let libstr = trans_static_string ilib.import_libname in
-      let relpath = trans_static_string (string_of_name relative_path) in
+      let relpath = trans_static_name_components (List.rev relative_path_elts) in
       let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
         trans_upcall "upcall_import" f [| libstr; relpath |];
+
+        (* FIXME: write fn_args_referent_ty, any day now. *)
+        let implicit_rtys = [| Il.ScalarTy Il.voidptr_t; Il.ScalarTy Il.voidptr_t |] in
+        let args_rty = Il.StructTy implicit_rtys in
+        let caller_args_cell = Il.Mem (fp_imm out_mem_disp, args_rty) in
+        let callee_args_cell = Il.Mem (sp_imm 0L, args_rty) in
+        mov (get_element_ptr callee_args_cell 0) (Il.Cell (get_element_ptr caller_args_cell 0));
+        mov (get_element_ptr callee_args_cell 1) (Il.Cell (get_element_ptr caller_args_cell 1));
         call_code (code_of_operand (Il.Cell f));
         emit Il.Leave;
         trans_frame_exit fnid;
@@ -2946,6 +2980,8 @@ let trans_visitor
              * NB: this must match the rust_crate structure
              * in the rust runtime library.
              *)
+            Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_crate_fixup);
+
             crate_rel_off cx.ctxt_debug_abbrev_fixup;
             Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_abbrev_fixup);
 
