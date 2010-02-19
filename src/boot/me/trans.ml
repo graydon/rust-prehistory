@@ -19,6 +19,11 @@ type mem_ctrl =
   | MEM_gc
   | MEM_interior
 
+type clone_ctrl =
+    CLONE_none
+  | CLONE_chan of Il.cell
+  | CLONE_all of Il.cell
+
 let trans_visitor
     (cx:ctxt)
     (path:Ast.name_component Stack.t)
@@ -1207,7 +1212,7 @@ let trans_visitor
             Ast.REALM_thread ->
               begin
                 trans_upcall "upcall_new_thread" new_proc [| |];
-                copy_fn_args (Some new_proc) proc_cell in_slots args [| |];
+                copy_fn_args (CLONE_all new_proc) proc_cell in_slots args [| |];
                 trans_upcall "upcall_start_thread" proc_cell
                   [|
                     Il.Cell new_proc;
@@ -1219,7 +1224,7 @@ let trans_visitor
          | _ ->
              begin
                  trans_upcall "upcall_new_proc" new_proc [| |];
-                 copy_fn_args None proc_cell in_slots args [| |];
+                 copy_fn_args CLONE_none proc_cell in_slots args [| |];
                  trans_upcall "upcall_start_proc" proc_cell
                    [|
                      Il.Cell new_proc;
@@ -1343,7 +1348,7 @@ let trans_visitor
             begin
               fun i atom ->
                 let cell = get_element_ptr body i in
-                  trans_init_slot_from_atom None cell unit_slot atom
+                  trans_init_slot_from_atom CLONE_none cell unit_slot atom
             end
             atoms
 
@@ -1995,7 +2000,7 @@ let trans_visitor
       begin
         fun i atom ->
           trans_init_slot_from_atom
-            None
+            CLONE_none
             (get_element_ptr dst i)
             dst_slots.(i)
             atom
@@ -2003,7 +2008,7 @@ let trans_visitor
       atoms
 
   and trans_init_slot_from_atom
-      (clone:Il.cell option)
+      (clone:clone_ctrl)
       (dst:Il.cell) (dst_slot:Ast.slot)
       (atom:Ast.atom)
       : unit =
@@ -2018,25 +2023,26 @@ let trans_visitor
             let src = trans_atom atom in
               begin
                 match clone with
-                    None ->
+                    CLONE_none ->
                       if is_alias_cell
                       then mov dst (Il.Cell (alias (Il.Mem (force_to_mem src))))
                       else mov (deref_slot true dst dst_slot) src
-                  | Some _ ->
+                  | _ ->
                       if is_alias_cell
-                      then bug () "attempting to clone alias cell";
-                      mov (deref_slot true dst dst_slot) src
+                      then bug () "attempting to clone alias cell"
+                      else mov (deref_slot true dst dst_slot) src
               end
         | Ast.ATOM_lval src_lval ->
             let (src, src_slot) = trans_lval src_lval in
               begin
                 match clone with
-                    None ->
+                    CLONE_none
+                  | CLONE_chan _ ->
                       trans_init_slot_from_cell dst dst_slot src src_slot
-                  | Some clone_proc ->
+                  | CLONE_all clone_proc ->
                       if is_alias_cell
-                      then bug () "attempting to clone alias cell";
-                      clone_slot clone_proc dst src dst_slot None
+                      then bug () "attempting to clone alias cell"
+                      else clone_slot clone_proc dst src dst_slot None
               end
 
   and trans_init_slot_from_cell
@@ -2195,7 +2201,7 @@ let trans_visitor
       abi.Abi.abi_pp_cell word_slot
 
   and trans_argN
-      (clone:Il.cell option)
+      (clone:clone_ctrl)
       (arg_cell:Il.cell)
       (arg_slot:Ast.slot)
       (arg:Ast.atom)
@@ -2219,7 +2225,7 @@ let trans_visitor
             (Il.string_of_operand abi.Abi.abi_str_of_hardreg operand)
 
   and copy_fn_args
-      (clone_proc:Il.cell option)
+      (clone:clone_ctrl)
       (output_cell:Il.cell)
       (arg_slots:Ast.slot array)
       (args:Ast.atom array)
@@ -2238,7 +2244,7 @@ let trans_visitor
                      annotate
                        (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
                           i n_args n_extras));
-            trans_argN clone_proc (get_element_ptr arg_tup (2+i)) arg_slots.(i) arg
+            trans_argN clone (get_element_ptr arg_tup (2+i)) arg_slots.(i) arg
         end
         args;
       Array.iteri
@@ -2268,7 +2274,7 @@ let trans_visitor
           fun i slot ->
             iflog (fun _ ->
                      annotate (Printf.sprintf "copy bound arg %d of %d" i n_slots));
-            trans_argN None (get_element_ptr dst_cell (base + i)) slot bound_args.(i)
+            trans_argN CLONE_none (get_element_ptr dst_cell (base + i)) slot bound_args.(i)
         end
         bound_arg_slots
 
@@ -2351,7 +2357,7 @@ let trans_visitor
       : unit =
     let callee_fptr = trans_callee_code callee_ptr direct logname in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args None output_cell arg_slots args extra_args;
+      copy_fn_args CLONE_none output_cell arg_slots args extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
@@ -2571,7 +2577,7 @@ let trans_visitor
                           let dst_slot = interior_slot atom_ty in
                           let dst_ty = referent_type abi atom_ty in
                           let dst_cell = Il.Mem (dst_mem, dst_ty) in
-                            trans_init_slot_from_atom None dst_cell dst_slot at
+                            trans_init_slot_from_atom CLONE_none dst_cell dst_slot at
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;
