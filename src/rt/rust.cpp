@@ -264,8 +264,11 @@ struct rust_str : public rc_base {
 class rust_crate;
 
 struct rust_rt {
-    rust_srv *srv;
+    // Fields known to the compiler.
     rust_crate const *crate;
+
+    // Fields known only to the runtime.
+    rust_srv *srv;
     uint32_t logbits;
     ptr_vec<rust_proc> running_procs;
     ptr_vec<rust_proc> blocked_procs;
@@ -1247,11 +1250,11 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond 
     uintptr_t runtime_sp;      // runtime sp while proc running.
     uintptr_t rust_sp;         // saved sp when not running.
     uintptr_t gc_alloc_chain;  // linked list of GC allocations.
+    rust_rt *rt;
 
     // fields known only to the runtime
     ptr_vec<rust_proc> *state;
     rust_cond *cond;
-    rust_rt *rt;
     uintptr_t* dptr;           // rendezvous pointer for send/recv
     rust_proc *spawner;        // parent-link
     ptr_vec<rust_proc> waiting_procs;
@@ -1783,9 +1786,9 @@ rust_proc::rust_proc(rust_rt *rt,
     runtime_sp(0),
     rust_sp(stk->limit),
     gc_alloc_chain(0),
+    rt(rt),
     state(&rt->running_procs),
     cond(NULL),
-    rt(rt),
     dptr(0),
     spawner(spawner),
     waiting_procs(rt),
@@ -2112,8 +2115,8 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
 }
 
 rust_rt::rust_rt(rust_srv *srv, rust_crate const *crate) :
-    srv(srv),
     crate(crate),
+    srv(srv),
     logbits(get_logbits()),
     running_procs(this),
     blocked_procs(this),
@@ -2195,6 +2198,17 @@ template<typename T> void
 rust_rt::logptr(char const *msg, T* ptrval) {
     log(LOG_MEM, "%s 0x%" PRIxPTR, msg, (uintptr_t)ptrval);
 }
+
+template<typename T> T*
+crate_rel(rust_rt *rt, T *t) {
+    return (T*)(((uintptr_t)rt->crate) + ((uintptr_t)t));
+}
+
+template<typename T> T const*
+crate_rel(rust_rt *rt, T const *t) {
+    return (T const*)(((uintptr_t)rt->crate) + ((uintptr_t)t));
+}
+
 
 void
 rust_rt::fail() {

@@ -113,8 +113,12 @@ let trans_visitor
     Asm.SUB (Asm.M_POS fix, Asm.M_POS cx.ctxt_crate_fixup)
   in
 
-  let crate_rel_off fix =
+  let crate_rel_word fix =
     Asm.WORD (word_ty_signed_mach, crate_rel fix)
+  in
+
+  let crate_rel_imm (fix:fixup) : Il.operand =
+    Il.Imm (crate_rel fix, word_ty_signed_mach)
   in
 
   let table_of_fixups (fixups:fixup array) : Asm.frag =
@@ -261,6 +265,11 @@ let trans_visitor
           (Il.string_of_cell abi.Abi.abi_str_of_hardreg mem_cell)
   in
 
+  let ptr_cast (cell:Il.cell) (rty:Il.referent_ty) : Il.cell =
+    let mem, _ = need_mem_cell cell in
+      Il.Mem (mem, rty)
+  in
+
   (* 
    * Note: alias *requires* its cell to be in memory already, and should
    * only be used on slots you know to be memory-resident. Use 'aliasing' or 
@@ -357,6 +366,17 @@ let trans_visitor
 
   let pp_imm (imm:int64) : Il.cell =
     deref_imm abi.Abi.abi_pp_cell imm
+  in
+
+  let crate_rel_to_ptr (rel:Il.operand) (rty:Il.referent_ty) : Il.cell =
+    let rt = pp_imm (word_n Abi.proc_field_rt) in
+    let rt = ptr_cast rt (Il.ScalarTy Il.voidptr_t) in
+    let crate = deref_imm rt (word_n Abi.rt_field_crate) in
+    let crate = ptr_cast crate (Il.ScalarTy Il.voidptr_t) in
+    let tmp = next_vreg_cell (Il.AddrTy rty) in
+      emit (Il.umov tmp (Il.Cell crate));
+      emit (Il.binary Il.ADD tmp (Il.Cell tmp) rel);
+      tmp
   in
 
   let cell_vreg_num (vr:(int option) ref) : int =
@@ -583,7 +603,6 @@ let trans_visitor
       let (cell, slot) = trans_lval flv in
         (Il.Cell cell, slot_ty slot)
 
-
   and trans_data_operand (d:data) (thunk:unit -> Asm.frag) : Il.operand =
     let (fix, _) =
       htab_search_or_add cx.ctxt_data d
@@ -596,6 +615,19 @@ let trans_visitor
     in
       (* FIXME (bug 541552): wrong operand type. *)
       Il.Imm (Asm.M_POS fix, word_ty_mach)
+
+  and trans_crate_rel_data_operand (d:data) (thunk:unit -> Asm.frag) : Il.operand =
+    let (fix, _) =
+      htab_search_or_add cx.ctxt_data d
+        begin
+          fun _ ->
+            let fix = new_fixup "data item" in
+            let frag = Asm.DEF (fix, thunk()) in
+              (fix, frag)
+        end
+    in
+      (* FIXME (bug 541552): wrong operand type. *)
+      crate_rel_imm fix
 
   and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Asm.frag =
     let (fix, _) =
@@ -611,7 +643,9 @@ let trans_visitor
       Asm.WORD (word_ty_mach, Asm.M_POS fix)
 
   and trans_static_string (s:string) : Il.operand =
-    trans_data_operand (DATA_str s) (fun _ -> Asm.ZSTRING s)
+    Il.Cell (crate_rel_to_ptr
+               (trans_crate_rel_data_operand (DATA_str s) (fun _ -> Asm.ZSTRING s))
+               (referent_type abi Ast.TY_str))
 
   and trans_static_string_frag (s:string) : Asm.frag =
     trans_data_frag (DATA_str s) (fun _ -> Asm.ZSTRING s)
@@ -2985,16 +3019,16 @@ let trans_visitor
              *)
             Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_crate_fixup);
 
-            crate_rel_off cx.ctxt_debug_abbrev_fixup;
+            crate_rel_word cx.ctxt_debug_abbrev_fixup;
             Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_abbrev_fixup);
 
-            crate_rel_off cx.ctxt_debug_info_fixup;
+            crate_rel_word cx.ctxt_debug_info_fixup;
             Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_info_fixup);
 
-            crate_rel_off cx.ctxt_c_to_proc_fixup;
-            crate_rel_off cx.ctxt_main_exit_proc_glue_fixup;
-            crate_rel_off cx.ctxt_unwind_fixup;
-            crate_rel_off cx.ctxt_yield_fixup
+            crate_rel_word cx.ctxt_c_to_proc_fixup;
+            crate_rel_word cx.ctxt_main_exit_proc_glue_fixup;
+            crate_rel_word cx.ctxt_unwind_fixup;
+            crate_rel_word cx.ctxt_yield_fixup
           |]))
     in
 
