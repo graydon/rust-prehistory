@@ -2552,7 +2552,7 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
 
     // if the queue wasn't resolved yet or is not ours, lookup the queue
     rust_q *q = chan->q;
-    if (!q || q->proc != proc) {
+    if (!q) {
         HASH_FIND(hh, proc->outgoing, port, sizeof(rust_q*), q);
         if (!q) {
             q = new (rt) rust_q(proc, port);
@@ -2565,6 +2565,7 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
         chan->q = q;
     }
 
+    I(rt, q->proc == proc);
     I(rt, chan->q->proc == proc);
     I(rt, chan->port == port);
 
