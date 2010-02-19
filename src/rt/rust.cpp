@@ -1320,10 +1320,13 @@ struct rust_port : public rc_base, public proc_owned<rust_port>, public rust_con
 struct rust_token : public rust_cond {
     rust_chan *chan;      // Link back to the channel this token belongs to
     size_t idx;           // Index into port->writers.
+    bool submitted;       // Whether token is in a port->writers.
 
     rust_token(rust_chan *chan);
     ~rust_token();
 
+    bool pending() const;
+    void submit();
     void withdraw();
 };
 
@@ -1332,7 +1335,6 @@ struct rust_chan : public rc_base, public proc_owned<rust_chan> {
     rust_proc* proc;
     rust_port* port;
     circ_buf buf;
-    bool sending;         // Whether token is in a port->writers.
     size_t idx;           // Index into port->chans.
 
     // token belonging to this chan, it will be placed into a port's
@@ -1585,7 +1587,6 @@ rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     proc(proc),
     port(port),
     buf(proc->rt, port->unit_sz),
-    sending(false),
     token(this)
 {
     if (port)
@@ -1595,7 +1596,7 @@ rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
 rust_chan::~rust_chan()
 {
     if (port) {
-        if (sending)
+        if (token.pending())
             token.withdraw();
         port->chans.swapdel(this);
     }
@@ -1606,10 +1607,8 @@ rust_chan::disassociate()
 {
     I(proc->rt, port);
 
-    if (sending) {
+    if (token.pending())
         token.withdraw();
-        sending = false;
-    }
 
     // delete reference to the port
     port = NULL;
@@ -1619,12 +1618,32 @@ rust_chan::disassociate()
 
 rust_token::rust_token(rust_chan *chan) :
     chan(chan),
-    idx(0)
+    idx(0),
+    submitted(false)
 {
 }
 
 rust_token::~rust_token()
 {
+}
+
+bool
+rust_token::pending() const
+{
+    return submitted;
+}
+
+void
+rust_token::submit()
+{
+    rust_port *port = chan->port;
+    rust_rt *rt = chan->proc->rt;
+
+    I(rt, port);
+    I(rt, !submitted);
+
+    port->writers.push(this);
+    submitted = true;
 }
 
 void
@@ -1635,11 +1654,12 @@ rust_token::withdraw()
     rust_rt *rt = proc->rt;
 
     I(rt, port);
-    I(rt, chan->sending);
+    I(rt, submitted);
 
     if (proc->blocked())
         proc->wakeup(this); // must be blocked on us (or dead)
     port->writers.swapdel(this);
+    submitted = false;
 }
 
 /* Stacks */
@@ -2521,10 +2541,8 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
         chan->buf.push(sptr);
         proc->block(token);
         attempt_transmission(rt, chan, port->proc);
-        if (chan->buf.unread && !chan->sending) {
-            chan->sending = true;
-            port->writers.push(token);
-        }
+        if (chan->buf.unread && !token->pending())
+            token->submit();
     } else {
         rt->log(LOG_COMM|LOG_ERR,
                 "port has no proc (possibly throw?)");
@@ -2557,10 +2575,8 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
         i %= port->writers.length();
         rust_token *token = port->writers[i];
         rust_chan *chan = token->chan;
-        if (attempt_transmission(rt, chan, proc)) {
-            port->writers.swapdel(token);
-            chan->sending = false;
-        }
+        if (attempt_transmission(rt, chan, proc))
+            token->withdraw();
     } else {
         rt->log(LOG_COMM,
                 "no writers sending to port", (uintptr_t)port);
