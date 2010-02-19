@@ -18,7 +18,6 @@
 
 #include "rust.h"
 #include "rand.h"
-#include "uthash.h"
 #include "valgrind.h"
 
 #if defined(__WIN32__)
@@ -77,22 +76,6 @@ static uint32_t const LOG_DWARF =    0x100;
                     "upcall proc: 0x%" PRIxPTR                          \
                     (proc))
 #endif
-
-// Override the uthash default SPI, require (ugh) there to be a symbol
-// 'rt' in the environment of any hash operations.
-
-#undef uthash_fatal
-#undef uthash_bkt_malloc
-#undef uthash_bkt_free
-#undef uthash_tbl_malloc
-#undef uthash_tbl_free
-
-#define uthash_fatal(msg) rt->srv->fatal(msg, __FILE__, __LINE__)
-#define uthash_bkt_malloc(sz) rt->malloc(sz)
-#define uthash_bkt_free(ptr) rt->free(ptr)
-#define uthash_tbl_malloc(sz) rt->malloc(sz)
-#define uthash_tbl_free(ptr) rt->free(ptr)
-
 
 static uint32_t
 get_logbits()
@@ -1269,7 +1252,6 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond 
     ptr_vec<rust_proc> *state;
     rust_cond *cond;
     rust_rt *rt;
-    rust_q *outgoing;
     uintptr_t* dptr;           // rendezvous pointer for send/recv
     rust_proc *spawner;        // parent-link
     ptr_vec<rust_proc> waiting_procs;
@@ -1335,30 +1317,7 @@ struct rust_port : public rc_base, public proc_owned<rust_port>, public rust_con
     ~rust_port();
 };
 
-struct rust_chan : public rc_base, public proc_owned<rust_chan> {
-    // fields known only to the runtime
-    rust_proc* proc;
-    rust_port* port;
-    size_t idx; // Index into port->chans.
-
-    // queue the chan is sending to (resolved lazily)
-    rust_q* q;
-
-    rust_chan(rust_proc *proc, rust_port *port);
-    ~rust_chan();
-
-    void disassociate();
-};
-
-/*
- * Inside each proc, there is a uthash hashtable that maps ports to
- * rust_q* values, below. The table enforces uniqueness of the
- * queues: one proc has exactly one outgoing queue (buffer) for
- * each port.
- */
-
-struct rust_q : public proc_owned<rust_q>, public rust_cond {
-    UT_hash_handle hh;
+struct rust_q : public rust_cond {
     rust_proc *proc;      // Proc owning this q.
     rust_port *port;      // Port chan is connected to, NULL if disconnected.
     bool sending;         // Whether we're in a port->writers.
@@ -1369,6 +1328,21 @@ struct rust_q : public proc_owned<rust_q>, public rust_cond {
     ~rust_q();
 
     void disconnect();
+};
+
+struct rust_chan : public rc_base, public proc_owned<rust_chan> {
+    // fields known only to the runtime
+    rust_proc* proc;
+    rust_port* port;
+    size_t idx; // Index into port->chans.
+
+    // outgoing queue for this chan
+    rust_q q;
+
+    rust_chan(rust_proc *proc, rust_port *port);
+    ~rust_chan();
+
+    void disassociate();
 };
 
 // Reference counted objects
@@ -1612,7 +1586,7 @@ rust_port::~rust_port()
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     proc(proc),
     port(port),
-    q(NULL)
+    q(proc, port)
 {
     if (port)
         port->chans.push(this);
@@ -1631,9 +1605,6 @@ rust_chan::disassociate()
 
     // delete reference to the port
     port = NULL;
-
-    // flush the cached state
-    q = NULL;
 }
 
 /* Outgoing message queues */
@@ -1800,7 +1771,6 @@ rust_proc::rust_proc(rust_rt *rt,
     state(&rt->running_procs),
     cond(NULL),
     rt(rt),
-    outgoing(NULL),
     dptr(0),
     spawner(spawner),
     waiting_procs(rt),
@@ -1835,12 +1805,6 @@ rust_proc::~rust_proc()
       (refcnt == 1 && this == rt->root_proc));
 
     del_stk(rt, stk);
-
-    while (outgoing) {
-        rust_q *q = outgoing;
-        HASH_DEL(outgoing, q);
-        delete q;
-    }
 }
 
 void
@@ -2550,24 +2514,7 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
             "send to port", (uintptr_t)port);
     I(rt, port);
 
-    // if the queue wasn't resolved yet or is not ours, lookup the queue
-    rust_q *q = chan->q;
-    if (!q) {
-        HASH_FIND(hh, proc->outgoing, port, sizeof(rust_q*), q);
-        if (!q) {
-            q = new (rt) rust_q(proc, port);
-            HASH_ADD(hh, proc->outgoing, port, sizeof(rust_q*), q);
-        }
-        I(rt, q);
-        I(rt, q->port);
-        I(rt, q->port == port);
-        // we have resolved the right queue to send via
-        chan->q = q;
-    }
-
-    I(rt, q->proc == proc);
-    I(rt, chan->q->proc == proc);
-    I(rt, chan->port == port);
+    rust_q *q = &chan->q;
 
     rt->log(LOG_MEM|LOG_COMM,
             "sending via queue 0x%" PRIxPTR,
