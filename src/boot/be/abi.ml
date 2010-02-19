@@ -89,6 +89,7 @@ type abi =
     abi_c_to_proc: (Il.emitter -> unit);
     abi_yield: (Il.emitter -> unit);
     abi_unwind: (Il.emitter -> nabi -> Common.fixup -> unit);
+    abi_get_next_pc_thunk: ((Il.hreg * Common.fixup * (Il.emitter -> unit)) option);
 
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;

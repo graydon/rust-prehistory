@@ -2915,8 +2915,11 @@ let trans_visitor
   in
 
   let visit_crate_post crate =
+
     inner.Walk.visit_crate_post crate;
-    let emit_aux_global_glue cx glue glue_name fix fn =
+
+    let emit_aux_global_glue cx glue fix fn =
+      let glue_name = glue_str cx glue in
       push_new_emitter ();
       let e = emitter() in
         fn e;
@@ -2931,6 +2934,7 @@ let trans_visitor
         in
           htab_put cx.ctxt_glue_code glue code
     in
+
     let crate_data =
       (cx.ctxt_crate_fixup,
        Asm.DEF
@@ -2955,20 +2959,24 @@ let trans_visitor
 
       (* Emit additional glue we didn't do elsewhere. *)
       emit_aux_global_glue cx GLUE_C_to_proc
-        "c-to-proc glue"
         cx.ctxt_c_to_proc_fixup
-        cx.ctxt_abi.Abi.abi_c_to_proc;
+        abi.Abi.abi_c_to_proc;
 
       emit_aux_global_glue cx GLUE_yield
-        "yield glue"
         cx.ctxt_yield_fixup
-        cx.ctxt_abi.Abi.abi_yield;
+        abi.Abi.abi_yield;
 
       emit_aux_global_glue cx GLUE_unwind
-        "unwind glue"
         cx.ctxt_unwind_fixup
-        (fun e -> cx.ctxt_abi.Abi.abi_unwind
+        (fun e -> abi.Abi.abi_unwind
            e nabi_rust (upcall_fixup "upcall_exit"));
+
+      begin
+        match abi.Abi.abi_get_next_pc_thunk with
+            None -> ()
+          | Some (_, fix, fn) ->
+              emit_aux_global_glue cx GLUE_get_next_pc fix fn
+      end;
 
       htab_put cx.ctxt_data
         DATA_crate crate_data;

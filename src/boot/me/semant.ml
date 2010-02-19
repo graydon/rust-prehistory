@@ -29,6 +29,7 @@ type glue =
   | GLUE_write of Ast.ty
   | GLUE_read of Ast.ty
   | GLUE_unwind
+  | GLUE_get_next_pc
   | GLUE_mark_frame of node_id
   | GLUE_drop_frame of node_id
   | GLUE_reloc_frame of node_id
@@ -1658,6 +1659,7 @@ let glue_str (cx:ctxt) (g:glue) : string =
     | GLUE_write ty -> "glue$write$" ^ (ty_str ty)
     | GLUE_read ty -> "glue$read$" ^ (ty_str ty)
     | GLUE_unwind -> "glue$unwind"
+    | GLUE_get_next_pc -> "glue$get_next_pc"
     | GLUE_mark_frame i -> "glue$mark_frame$" ^ (item_str cx i)
     | GLUE_drop_frame i -> "glue$drop_frame$" ^ (item_str cx i)
     | GLUE_reloc_frame i -> "glue$reloc_frame$" ^ (item_str cx i)

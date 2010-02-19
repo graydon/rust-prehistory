@@ -527,7 +527,7 @@ let macho_symtab_command
       [|
         WORD (TY_u32, IMM (load_command_code LC_SYMTAB));
         WORD (TY_u32, F_SZ cmd_fixup);
-        
+
         WORD (TY_u32, F_POS symtab_fixup); (* symoff *)
         WORD (TY_u32, IMM nsyms);          (* nsyms *)
 
@@ -550,7 +550,7 @@ let macho_dysymtab_command
       [|
         WORD (TY_u32, IMM (load_command_code LC_DYSYMTAB));
         WORD (TY_u32, F_SZ cmd_fixup);
-        
+
         WORD (TY_u32, IMM 0L); (* ilocalsym *)
         WORD (TY_u32, IMM 0L); (* nlocalsym *)
 

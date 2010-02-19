@@ -760,6 +760,21 @@ let yield_glue (e:Il.emitter) : unit =
   ()
 ;;
 
+
+let get_next_pc_thunk : (Il.hreg * fixup * (Il.emitter -> unit)) =
+  let get_next_pc_thunk_fixup = new_fixup "glue$get_next_pc" in
+  let emit_get_next_pc_thunk (e:Il.emitter) : unit =
+    let sty = Il.AddrTy Il.CodeTy in
+    let rty = Il.ScalarTy sty in
+    let deref_esp = Il.Mem (Il.RegIn (Il.Hreg esp, None), rty) in
+    let eax = (Il.Reg (Il.Hreg eax, sty)) in
+      Il.emit_full e (Some get_next_pc_thunk_fixup)
+        (Il.umov eax (Il.Cell deref_esp));
+      Il.emit e Il.Ret;
+  in
+    (eax, get_next_pc_thunk_fixup, emit_get_next_pc_thunk)
+;;
+
 let (abi:Abi.abi) =
   {
     Abi.abi_word_sz = word_sz;
@@ -786,6 +801,7 @@ let (abi:Abi.abi) =
     Abi.abi_c_to_proc = c_to_proc_glue;
     Abi.abi_yield = yield_glue;
     Abi.abi_unwind = unwind_glue;
+    Abi.abi_get_next_pc_thunk = Some get_next_pc_thunk;
 
     Abi.abi_sp_reg = (Il.Hreg esp);
     Abi.abi_fp_reg = (Il.Hreg ebp);

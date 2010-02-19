@@ -542,20 +542,6 @@ let elf32_linux_x86_file
         DEF (plt0_fixup, (X86.frags_of_emitted_quads sess e))
     in
 
-    let i686_get_pc_thunk_ax_fixup = new_fixup "__i686.get_pc_thunk.ax" in
-    let i686_get_pc_thunk_ax_frag =
-      let e = Il.new_emitter X86.prealloc_quad true in
-      let sty = Il.AddrTy Il.CodeTy in
-      let rty = Il.ScalarTy sty in
-      let deref_esp = Il.Mem (Il.RegIn (Il.Hreg X86.esp, None), rty) in
-      let eax = (Il.Reg (Il.Hreg X86.eax, sty)) in
-        Il.emit_full e (Some i686_get_pc_thunk_ax_fixup)
-          (Il.umov eax (Il.Cell deref_esp));
-        Il.emit e Il.Ret;
-        X86.frags_of_emitted_quads sess e
-    in
-
-
   (*
    * The existence of the GOT/PLT mish-mash causes, therefore, the
    * following new sections:
@@ -1066,25 +1052,27 @@ let elf32_linux_x86_file
      *)
 
     let plt_frag =
-      let eax = Il.Hreg X86.eax in
-      let get_eax_thunk_code = Il.direct_code_ptr i686_get_pc_thunk_ax_fixup in
-      let eax_cell = Il.Reg (eax, Il.AddrTy Il.CodeTy) in
-      let thunk_identified_fixup = new_fixup "address identified by __i686.get_pc_thunk.ax" in
+      let (hreg, get_next_pc_thunk_fixup, _) = X86.get_next_pc_thunk in
+      let reg = Il.Hreg hreg in
+      let get_next_pc_thunk_code = Il.direct_code_ptr get_next_pc_thunk_fixup in
+      let reg_cell = Il.Reg (reg, Il.AddrTy Il.CodeTy) in
+      let thunk_identified_fixup = new_fixup "address identified by glue$get_next_pc" in
       let off_to_got = Il.Imm (Asm.SUB ((Asm.M_POS got_plt_section_fixup),
                                         (Asm.M_POS thunk_identified_fixup)),
                                TY_s32)
       in
 
-        (* This call retrieves the address of thunk_identified_fixup in eax. *)
+        (* This call retrieves the address of thunk_identified_fixup in hreg. *)
         Il.emit_full e (Some plt_entry_fixup)
-          (Il.call eax_cell get_eax_thunk_code);
+          (Il.call reg_cell get_next_pc_thunk_code);
 
-        (* We now have this instruction's address in eax. We add the distance 
+        (* We now have this instruction's address in hreg. We add the distance 
          * from this instruction to the GOT, and we will have the GOT base 
-         * address in eax. *)
+         * address in hreg. 
+         *)
 
         Il.emit_full e (Some thunk_identified_fixup)
-          (Il.binary Il.ADD eax_cell (Il.Cell eax_cell) off_to_got);
+          (Il.binary Il.ADD reg_cell (Il.Cell reg_cell) off_to_got);
 
         Il.emit e (Il.jmp Il.JMP (got_code_cell (2+i)));
 
@@ -1233,10 +1221,7 @@ let elf32_linux_x86_file
 
   let text_section =
     DEF (text_section_fixup,
-         SEQ (
-           Array.of_list
-             (i686_get_pc_thunk_ax_frag ::
-                text_body_frags)))
+         SEQ (Array.of_list text_body_frags))
   in
   let rodata_section =
     DEF (rodata_section_fixup,
