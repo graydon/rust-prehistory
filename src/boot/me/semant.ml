@@ -716,7 +716,6 @@ let ty_fold_list_concat _ : ('a list) simple_ty_fold =
   associative_binary_op_ty_fold [] (fun a b -> a @ b)
 ;;
 
-
 (* Mutability analysis. *)
 
 let mode_is_mutable (m:Ast.mode) : bool =
@@ -738,6 +737,15 @@ let type_is_mutable (t:Ast.ty) : bool =
   in
   let fold = ty_fold_bool_or false in
   let fold = { fold with ty_fold_slot = fold_slot } in
+    fold_ty fold t
+;;
+
+(* Analyze whether a type contains a channel, in which case we have to deep copy. *)
+
+let type_contains_chan (t:Ast.ty) : bool =
+  let fold_chan _ = true in
+  let fold = ty_fold_bool_or false in
+  let fold = { fold with ty_fold_chan = fold_chan } in
     fold_ty fold t
 ;;
 
