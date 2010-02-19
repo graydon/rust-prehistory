@@ -1389,8 +1389,10 @@ let emit_file
     let push_r32 r = Il.emit e
       (Il.Push (Il.Cell (Il.Reg (Il.Hreg r, Il.ValTy Il.Bits32))))
     in
-    let push_pos32 fix = Il.emit e
-      (Il.Push (X86.imm (M_POS fix)))
+    let push_pos32 fix =
+      let (reg, _, _) = X86.get_next_pc_thunk in
+        Abi.load_fixup_addr e sem.Semant.ctxt_abi reg fix Il.CodeTy;
+        Il.emit e (Il.Push (Il.Cell (Il.Reg (reg, Il.AddrTy Il.CodeTy))))
     in
       push_r32 X86.eax;
       push_r32 X86.esp;
