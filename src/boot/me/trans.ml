@@ -960,20 +960,20 @@ let trans_visitor
     let fix = get_typed_mem_glue g ty inner in
       fix
 
-  and trans_call_clone_glue (dst:Il.cell) (fix:fixup) (arg:Il.cell) (rt:Il.cell) : unit =
+  and trans_call_clone_glue (dst:Il.cell) (fix:fixup) (arg:Il.cell) (clone_proc:Il.cell) : unit =
     let code = fixup_to_code fix in
     let arg_tup = arg_tup_cell [| word_slot; word_slot |] in
       (* Arg0 is target of clone, to which we write. *)
       (* Arg1 is process-pointer, as usual. *)
       (* Arg2 is the address of the slot we're cloning. *)
-      (* Arg3 is the address of the runtime into which we're to clone various things. *)
+      (* Arg3 is the process that will own the data. *)
       aliasing true dst
         begin
           fun dst ->
             mov (get_element_ptr arg_tup 0) (Il.Cell dst);
             mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
             mov (get_element_ptr arg_tup 2) (Il.Cell arg);
-            mov (get_element_ptr arg_tup 3) (Il.Cell rt);
+            mov (get_element_ptr arg_tup 3) (Il.Cell clone_proc);
             call_code code
         end
 
@@ -1536,7 +1536,7 @@ let trans_visitor
     iter_ty_slots ty cell mark_slot curr_iso
 
   and clone_ty
-      (rt:Il.cell)
+      (clone_proc:Il.cell)
       (ty:Ast.ty)
       (dst:Il.cell)
       (src:Il.cell)
@@ -1544,14 +1544,14 @@ let trans_visitor
       : unit =
     match ty with
         Ast.TY_chan _ ->
-          trans_upcall "upcall_clone_chan" dst [| (Il.Cell src); (Il.Cell rt) |]
+          trans_upcall "upcall_clone_chan" dst [| (Il.Cell clone_proc); (Il.Cell src) |]
       | Ast.TY_proc
       | Ast.TY_port _
       | _ when type_is_mutable ty
           -> bug () "cloning mutable type"
       | _ when i64_le (ty_sz abi ty) word_sz
           -> mov dst (Il.Cell src)
-      | _ -> iter_ty_slots_full ty dst src (clone_slot rt) curr_iso
+      | _ -> iter_ty_slots_full ty dst src (clone_slot clone_proc) curr_iso
 
   and free_ty
       (ty:Ast.ty)
