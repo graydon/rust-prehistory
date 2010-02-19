@@ -1583,7 +1583,8 @@ rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     port(port),
     q(NULL)
 {
-    port->chans.push(this);
+    if (port)
+        port->chans.push(this);
 }
 
 rust_chan::~rust_chan()
@@ -2397,6 +2398,17 @@ upcall_del_chan(rust_proc *proc, rust_chan *chan)
     delete chan;
 }
 
+extern "C" CDECL rust_chan *
+upcall_clone_chan(rust_proc *proc, rust_proc *owner, rust_chan *chan)
+{
+    LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+            "upcall clone_chan(owner 0x%" PRIxPTR ", chan 0x%" PRIxPTR ")",
+            (uintptr_t)owner, (uintptr_t)chan);
+    return new (owner->rt) rust_chan(owner, chan->port);
+}
+
 /*
  * Buffering protocol:
  *
@@ -2736,7 +2748,7 @@ upcall_new_proc(rust_proc *spawner)
     rust_rt *rt = spawner->rt;
     rust_proc *proc = new (rt) rust_proc(rt, spawner);
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-            "upcall new_proc: spawner 0x%" PRIxPTR " = 0x%" PRIxPTR,
+            "upcall new_proc(spawner 0x%" PRIxPTR ") = 0x%" PRIxPTR,
             spawner, proc);
     return proc;
 }
@@ -2748,7 +2760,7 @@ upcall_start_proc(rust_proc *spawner, rust_proc *proc, uintptr_t exit_proc_glue,
 
     rust_rt *rt = spawner->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-            "upcall start_proc: proc 0x%" PRIxPTR " exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
+            "upcall start_proc(proc 0x%" PRIxPTR " exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
             proc, exit_proc_glue, spawnee_fn, callsz);
     proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
     return proc;
@@ -2762,7 +2774,7 @@ upcall_new_thread(rust_proc *proc)
     rust_rt *old_rt = proc->rt;
     rust_rt *new_rt = new rust_rt(old_rt->srv->clone(), old_rt->crate);
     new_rt->log(LOG_UPCALL|LOG_MEM,
-                "upcall new_thread = 0x%" PRIxPTR,
+                "upcall new_thread() = 0x%" PRIxPTR,
                 new_rt->root_proc);
     return new_rt->root_proc;
 }
@@ -2774,7 +2786,7 @@ upcall_start_thread(rust_proc *spawner, rust_proc *root_proc, uintptr_t exit_pro
 
     rust_rt *rt = spawner->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-            "upcall start_thread: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
+            "upcall start_thread(exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
             exit_proc_glue, spawnee_fn, callsz);
     root_proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
 
