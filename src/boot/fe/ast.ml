@@ -250,7 +250,7 @@ and stmt = stmt' identified
 and stmt_alt_tag =
     {
       alt_tag_lval: lval;
-      alt_tag_arms: (ident * (ident * slot identified) array * block) array;
+      alt_tag_arms: (ident * (slot identified * ident) array * block) array;
     }
 
 and stmt_alt_type =

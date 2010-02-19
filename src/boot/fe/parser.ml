@@ -59,6 +59,7 @@ type token =
   | DO
   | WHILE
   | ALT
+  | CASE
 
   | FAIL
   | FINI
@@ -191,6 +192,7 @@ let rec string_of_tok t =
     | DO         -> "do"
     | WHILE      -> "while"
     | ALT        -> "alt"
+    | CASE       -> "case"
 
     | FAIL       -> "fail"
     | FINI       -> "fini"
@@ -1750,7 +1752,42 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           begin
             match peek ps with
                 TYPE -> [| |]
-              | LPAREN -> [| |]
+              | LPAREN ->
+                  let (stmts, lval) = bracketed LPAREN RPAREN parse_lval ps in
+                  let parse_tag_pat ps =
+                    match peek ps with
+                        IDENT ident ->
+                          bump ps;
+                          ident,
+                          begin
+                            match peek ps with
+                                LPAREN ->
+                                (parse_zero_or_more_identified_slot_ident_pairs
+                                  false ps)
+                              | _ -> [| |]
+                          end
+                      | tok -> raise (Parse_err (ps,
+                          "Expected tag constructor but found '" ^
+                          (string_of_tok tok) ^ "'"))
+                  in
+                  let rec parse_arms ps =
+                    match peek ps with
+                        CASE ->
+                          bump ps;
+                          begin
+                            match bracketed LPAREN RPAREN parse_tag_pat ps with
+                              (tag_cons, tag_vars) ->
+                                (tag_cons, tag_vars, parse_block ps) ::
+                                parse_arms ps
+                          end
+                      | _ -> []
+                  in
+                  spans ps stmts apos begin
+                    Ast.STMT_alt_tag {
+                      Ast.alt_tag_lval = lval;
+                      Ast.alt_tag_arms = Array.of_list (parse_arms ps)
+                    }
+                  end
               | _ -> [| |]
           end
 
