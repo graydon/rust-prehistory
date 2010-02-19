@@ -89,7 +89,7 @@ type abi =
     abi_c_to_proc: (Il.emitter -> unit);
     abi_yield: (Il.emitter -> unit);
     abi_unwind: (Il.emitter -> nabi -> Common.fixup -> unit);
-    abi_get_next_pc_thunk: ((Il.hreg * Common.fixup * (Il.emitter -> unit)) option);
+    abi_get_next_pc_thunk: ((Il.reg * Common.fixup * (Il.emitter -> unit)) option);
 
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;
@@ -99,6 +99,53 @@ type abi =
     abi_frame_base_sz: int64;
     abi_spill_slot: (int64 -> Il.spill -> Il.mem);
   }
+;;
+
+let load_fixup_addr
+    (e:Il.emitter)
+    (abi:abi)
+    (out_reg:Il.reg)
+    (fix:Common.fixup)
+    (rty:Il.referent_ty)
+    : unit =
+  let sty = Il.AddrTy rty in
+  match abi.abi_get_next_pc_thunk with
+
+      None ->
+        let cell = Il.Reg (out_reg, sty) in
+        let mem = Il.Abs (Asm.M_POS fix) in
+            Il.emit e (Il.lea cell mem);
+
+    | Some (reg, thunk_fix, _) ->
+        let signed_word_ty_mach =
+          match abi.abi_word_bits with
+              Il.Bits8 -> Common.TY_s8
+            | Il.Bits16 -> Common.TY_s16
+            | Il.Bits32 -> Common.TY_s32
+            | Il.Bits64 -> Common.TY_s64
+        in
+        let thunk_code = Il.direct_code_ptr thunk_fix in
+        let reg_cell = Il.Reg (reg, Il.AddrTy Il.CodeTy) in
+        let anchor_insn_fixup = Common.new_fixup "anchor insn" in
+        let fix_off = Il.Imm (Asm.SUB ((Asm.M_POS fix),
+                                       (Asm.M_POS anchor_insn_fixup)),
+                              signed_word_ty_mach)
+        in
+          (* This call retrieves the address of anchor_insn_fixup in reg. *)
+          Il.emit e (Il.call reg_cell thunk_code);
+
+          (* 
+           * We now have this instruction's address in reg. We add the distance 
+           * from this instruction to fix, and we will have fix addr in reg.
+           *)
+          Il.emit_full e (Some anchor_insn_fixup)
+            (Il.binary Il.ADD reg_cell (Il.Cell reg_cell) fix_off);
+
+          (* mov to the target if it's different from the reg wired into the thunk. *)
+          if not (reg = out_reg)
+          then Il.emit e (Il.umov (Il.Reg (out_reg, sty)) (Il.Cell (Il.Reg (reg, sty))))
+;;
+
 
 
 (* 

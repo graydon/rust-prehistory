@@ -520,21 +520,21 @@ let elf32_linux_x86_file
                             WORD (TY_u32, (IMM 0L)); |]
     in
 
-    let got_cell i =
-      let eax = Il.Hreg X86.eax in
+    let got_cell reg i =
       let got_entry_off = Int64.of_int (i*4) in
-      let got_entry_mem = Il.RegIn (eax, (Some (Asm.IMM got_entry_off))) in
+      let got_entry_mem = Il.RegIn (reg, (Some (Asm.IMM got_entry_off))) in
         Il.Mem (got_entry_mem, Il.ScalarTy (Il.AddrTy Il.CodeTy))
     in
 
-    let got_code_cell i =
-      Il.CodePtr (Il.Cell (got_cell i))
+    let got_code_cell reg i =
+      Il.CodePtr (Il.Cell (got_cell reg i))
     in
 
     let plt0_frag =
+      let reg = Il.Hreg X86.eax in
       let e = Il.new_emitter X86.prealloc_quad true in
-        Il.emit e (Il.Push (Il.Cell (got_cell 1)));
-        Il.emit e (Il.jmp Il.JMP (got_code_cell 2));
+        Il.emit e (Il.Push (Il.Cell (got_cell reg 1)));
+        Il.emit e (Il.jmp Il.JMP (got_code_cell reg 2));
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
         Il.emit e Il.Nop;
@@ -1052,29 +1052,13 @@ let elf32_linux_x86_file
      *)
 
     let plt_frag =
-      let (hreg, get_next_pc_thunk_fixup, _) = X86.get_next_pc_thunk in
-      let reg = Il.Hreg hreg in
-      let get_next_pc_thunk_code = Il.direct_code_ptr get_next_pc_thunk_fixup in
-      let reg_cell = Il.Reg (reg, Il.AddrTy Il.CodeTy) in
-      let thunk_identified_fixup = new_fixup "address identified by glue$get_next_pc" in
-      let off_to_got = Il.Imm (Asm.SUB ((Asm.M_POS got_plt_section_fixup),
-                                        (Asm.M_POS thunk_identified_fixup)),
-                               TY_s32)
-      in
+      let (reg, _, _) = X86.get_next_pc_thunk in
 
-        (* This call retrieves the address of thunk_identified_fixup in hreg. *)
-        Il.emit_full e (Some plt_entry_fixup)
-          (Il.call reg_cell get_next_pc_thunk_code);
+        Il.emit_full e (Some plt_entry_fixup) Il.Dead;
 
-        (* We now have this instruction's address in hreg. We add the distance 
-         * from this instruction to the GOT, and we will have the GOT base 
-         * address in hreg. 
-         *)
+        Abi.load_fixup_addr e sem.Semant.ctxt_abi reg got_plt_section_fixup Il.CodeTy;
 
-        Il.emit_full e (Some thunk_identified_fixup)
-          (Il.binary Il.ADD reg_cell (Il.Cell reg_cell) off_to_got);
-
-        Il.emit e (Il.jmp Il.JMP (got_code_cell (2+i)));
+        Il.emit e (Il.jmp Il.JMP (got_code_cell reg (2+i)));
 
         Il.emit_full e (Some jump_slot_initial_target_fixup)
           (Il.Push (X86.immi (Int64.of_int i)));

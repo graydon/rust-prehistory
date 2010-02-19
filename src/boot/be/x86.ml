@@ -761,7 +761,7 @@ let yield_glue (e:Il.emitter) : unit =
 ;;
 
 
-let get_next_pc_thunk : (Il.hreg * fixup * (Il.emitter -> unit)) =
+let get_next_pc_thunk : (Il.reg * fixup * (Il.emitter -> unit)) =
   let get_next_pc_thunk_fixup = new_fixup "glue$get_next_pc" in
   let emit_get_next_pc_thunk (e:Il.emitter) : unit =
     let sty = Il.AddrTy Il.CodeTy in
@@ -772,7 +772,7 @@ let get_next_pc_thunk : (Il.hreg * fixup * (Il.emitter -> unit)) =
         (Il.umov eax (Il.Cell deref_esp));
       Il.emit e Il.Ret;
   in
-    (eax, get_next_pc_thunk_fixup, emit_get_next_pc_thunk)
+    (Il.Hreg eax, get_next_pc_thunk_fixup, emit_get_next_pc_thunk)
 ;;
 
 let (abi:Abi.abi) =
