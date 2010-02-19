@@ -50,7 +50,7 @@ extern "C" {
 struct rust_proc;
 struct rust_port;
 struct rust_chan;
-struct rust_q;
+struct rust_token;
 struct rust_rt;
 
 static uint32_t const LOG_ALL = 0xffffffff;
@@ -1310,33 +1310,34 @@ struct rust_port : public rc_base, public proc_owned<rust_port>, public rust_con
     // fields known only to the runtime
     rust_proc *proc;
     size_t unit_sz;
-    ptr_vec<rust_q> writers;
+    ptr_vec<rust_token> writers;
     ptr_vec<rust_chan> chans;
 
     rust_port(rust_proc *proc, size_t unit_sz);
     ~rust_port();
 };
 
-struct rust_q : public rust_cond {
-    rust_chan *chan;      // Link back to the channel this q belongs to
-    bool sending;         // Whether we're in a port->writers.
+struct rust_token : public rust_cond {
+    rust_chan *chan;      // Link back to the channel this token belongs to
     size_t idx;           // Index into port->writers.
-    circ_buf buf;
 
-    rust_q(rust_chan *chan);
-    ~rust_q();
+    rust_token(rust_chan *chan);
+    ~rust_token();
 
-    void disconnect();
+    void withdraw();
 };
 
 struct rust_chan : public rc_base, public proc_owned<rust_chan> {
     // fields known only to the runtime
     rust_proc* proc;
     rust_port* port;
-    size_t idx; // Index into port->chans.
+    circ_buf buf;
+    bool sending;         // Whether token is in a port->writers.
+    size_t idx;           // Index into port->chans.
 
-    // outgoing queue for this chan
-    rust_q q;
+    // token belonging to this chan, it will be placed into a port's
+    // writers vector if we have something to send to the port
+    rust_token token;
 
     rust_chan(rust_proc *proc, rust_port *port);
     ~rust_chan();
@@ -1576,8 +1577,6 @@ rust_port::~rust_port()
     rt->log(LOG_COMM|LOG_MEM,
             "~rust_port 0x%" PRIxPTR,
             (uintptr_t)this);
-    while (writers.length() > 0)
-        writers.pop()->disconnect();
     while (chans.length() > 0)
         chans.pop()->disassociate();
 }
@@ -1585,7 +1584,9 @@ rust_port::~rust_port()
 rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
     proc(proc),
     port(port),
-    q(this)
+    buf(proc->rt, port->unit_sz),
+    sending(false),
+    token(this)
 {
     if (port)
         port->chans.push(this);
@@ -1593,8 +1594,11 @@ rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
 
 rust_chan::~rust_chan()
 {
-    if (port)
+    if (port) {
+        if (sending)
+            token.withdraw();
         port->chans.swapdel(this);
+    }
 }
 
 void
@@ -1602,48 +1606,40 @@ rust_chan::disassociate()
 {
     I(proc->rt, port);
 
+    if (sending) {
+        token.withdraw();
+        sending = false;
+    }
+
     // delete reference to the port
     port = NULL;
 }
 
-/* Outgoing message queues */
+/* Tokens */
 
-rust_q::rust_q(rust_chan *chan) :
+rust_token::rust_token(rust_chan *chan) :
     chan(chan),
-    sending(false),
-    idx(0),
-    buf(chan->proc->rt, chan->port->unit_sz)
+    idx(0)
 {
-    rust_rt *rt = chan->proc->rt;
-    rt->log(LOG_MEM|LOG_COMM,
-            "new rust_q(port=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
-            chan->port, (uintptr_t)this);
 }
 
-rust_q::~rust_q()
+rust_token::~rust_token()
 {
-    rust_rt *rt = chan->proc->rt;
-    rust_port *port = chan->port;
-
-    if (port && sending)
-        port->writers.swapdel(this);
-
-    rt->log(LOG_MEM|LOG_COMM,
-            "~rust_q 0x%" PRIxPTR, (uintptr_t)this);
 }
 
 void
-rust_q::disconnect()
+rust_token::withdraw()
 {
     rust_proc *proc = chan->proc;
+    rust_port *port = chan->port;
     rust_rt *rt = proc->rt;
 
-    I(rt, chan->port);
+    I(rt, port);
+    I(rt, chan->sending);
 
-    if (sending && proc->blocked())
+    if (proc->blocked())
         proc->wakeup(this); // must be blocked on us (or dead)
-
-    sending = false;
+    port->writers.swapdel(this);
 }
 
 /* Stacks */
@@ -2427,24 +2423,23 @@ upcall_clone_chan(rust_proc *proc, rust_proc *owner, rust_chan *chan)
 
 static int
 attempt_transmission(rust_rt *rt,
-                     rust_q *src,
+                     rust_chan *src,
                      rust_proc *dst)
 {
     I(rt, src);
     I(rt, dst);
 
-    if (src->buf.unread == 0) {
-        rt->log(LOG_COMM,
-                "buffer empty, transmission incomplete");
-        return 0;
-    }
-
-    rust_chan *chan = src->chan;
-    rust_port *port = chan->port;
-
+    rust_port *port = src->port;
     if (!port) {
         rt->log(LOG_COMM,
                 "src died, transmission incomplete");
+        return 0;
+    }
+
+    circ_buf *buf = &src->buf;
+    if (buf->unread == 0) {
+        rt->log(LOG_COMM,
+                "buffer empty, transmission incomplete");
         return 0;
     }
 
@@ -2458,12 +2453,13 @@ attempt_transmission(rust_rt *rt,
     rt->log(LOG_COMM,
             "receiving %d bytes into dst_proc=0x%" PRIxPTR ", dptr=0x%" PRIxPTR,
             port->unit_sz, dst, dptr);
-    src->buf.shift(dptr);
+    buf->shift(dptr);
 
     // Wake up the sender if its waiting for the send operation.
-    rust_proc *sender = chan->proc;
-    if (sender->blocked_on(src))
-        sender->wakeup(src);
+    rust_proc *sender = src->proc;
+    rust_token *token = &src->token;
+    if (sender->blocked_on(token))
+        sender->wakeup(token);
 
     // Wakeup the receiver, there is new data.
     dst->wakeup(port);
@@ -2516,19 +2512,18 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
             "send to port", (uintptr_t)port);
     I(rt, port);
 
-    rust_q *q = &chan->q;
-
+    rust_token *token = &chan->token;
     rt->log(LOG_MEM|LOG_COMM,
-            "sending via queue 0x%" PRIxPTR,
-            (uintptr_t)q);
+            "sending via token 0x%" PRIxPTR,
+            (uintptr_t)token);
 
     if (port->proc) {
-        q->buf.push(sptr);
-        proc->block(q);
-        attempt_transmission(rt, q, port->proc);
-        if (q->buf.unread && !q->sending) {
-            q->sending = true;
-            port->writers.push(q);
+        chan->buf.push(sptr);
+        proc->block(token);
+        attempt_transmission(rt, chan, port->proc);
+        if (chan->buf.unread && !chan->sending) {
+            chan->sending = true;
+            port->writers.push(token);
         }
     } else {
         rt->log(LOG_COMM|LOG_ERR,
@@ -2560,10 +2555,11 @@ upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
         I(rt, proc->rt);
         size_t i = rand(&rt->rctx);
         i %= port->writers.length();
-        rust_q *q = port->writers[i];
-        if (attempt_transmission(rt, q, proc)) {
-            port->writers.swapdel(q);
-            q->sending = false;
+        rust_token *token = port->writers[i];
+        rust_chan *chan = token->chan;
+        if (attempt_transmission(rt, chan, proc)) {
+            port->writers.swapdel(token);
+            chan->sending = false;
         }
     } else {
         rt->log(LOG_COMM,
