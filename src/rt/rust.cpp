@@ -421,7 +421,6 @@ public:
 
 };
 
-
 enum dw_form {
     DW_FORM_addr = 0x01,
     DW_FORM_block2 = 0x03,
@@ -1165,9 +1164,6 @@ public:
         dies.dump();
     }
 };
-
-
-
 
 // A cond(ition) is something we can block on. This can be a channel (writing), a
 // port (reading) or a proc (waiting).
