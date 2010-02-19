@@ -1248,13 +1248,13 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond 
     size_t idx;
 
     rust_proc(rust_rt *rt,
-              rust_proc *spawner,
-              uintptr_t exit_proc_glue,
-              uintptr_t spawnee_fn,
-              uintptr_t args,
-              size_t callsz);
+              rust_proc *spawner);
     ~rust_proc();
 
+    void start(uintptr_t exit_proc_glue,
+               uintptr_t spawnee_fn,
+               uintptr_t args,
+               size_t callsz);
     bool running();
     bool blocked();
     bool blocked_on(rust_cond *cond);
@@ -1748,26 +1748,63 @@ upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
 }
 
 rust_proc::rust_proc(rust_rt *rt,
-                     rust_proc *spawner,
-                     uintptr_t exit_proc_glue,
-                     uintptr_t spawnee_fn,
-                     uintptr_t args,
-                     size_t callsz)
-    :
-      stk(new_stk(rt, 0)),
-      runtime_sp(0),
-      rust_sp(stk->limit),
-      gc_alloc_chain(0),
-      state(&rt->running_procs),
-      cond(NULL),
-      rt(rt),
-      outgoing(NULL),
-      dptr(0),
-      spawner(spawner),
-      waiting_procs(rt),
-      idx(0)
+                     rust_proc *spawner) :
+    stk(new_stk(rt, 0)),
+    runtime_sp(0),
+    rust_sp(stk->limit),
+    gc_alloc_chain(0),
+    state(&rt->running_procs),
+    cond(NULL),
+    rt(rt),
+    outgoing(NULL),
+    dptr(0),
+    spawner(spawner),
+    waiting_procs(rt),
+    idx(0)
 {
     rt->logptr("new proc", (uintptr_t)this);
+}
+
+rust_proc::~rust_proc()
+{
+    rt->log(LOG_MEM|LOG_PROC,
+            "~rust_proc 0x%" PRIxPTR ", refcnt=%d",
+            (uintptr_t)this, refcnt);
+
+    /*
+    for (uintptr_t fp = get_fp(); fp; fp = get_previous_fp(fp)) {
+        frame_glue_fns *glue_fns = get_frame_glue_fns(fp);
+        rt->log(LOG_MEM|LOG_PROC,
+                "~rust_proc, frame fp=0x%" PRIxPTR ", glue_fns=0x%" PRIxPTR,
+                fp, glue_fns);
+        if (glue_fns) {
+            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, mark_glue=0x%" PRIxPTR, glue_fns->mark_glue);
+            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, drop_glue=0x%" PRIxPTR, glue_fns->drop_glue);
+            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, reloc_glue=0x%" PRIxPTR, glue_fns->reloc_glue);
+        }
+    }
+    */
+
+    /* FIXME: tighten this up, there are some more
+       assertions that hold at proc-lifecycle events. */
+    I(rt, refcnt == 0 ||
+      (refcnt == 1 && this == rt->root_proc));
+
+    del_stk(rt, stk);
+
+    while (outgoing) {
+        rust_q *q = outgoing;
+        HASH_DEL(outgoing, q);
+        delete q;
+    }
+}
+
+void
+rust_proc::start(uintptr_t exit_proc_glue,
+                 uintptr_t spawnee_fn,
+                 uintptr_t args,
+                 size_t callsz)
+{
     rt->logptr("exit-proc glue", exit_proc_glue);
     rt->logptr("from spawnee", spawnee_fn);
 
@@ -1841,41 +1878,6 @@ rust_proc::rust_proc(rust_rt *rt,
     rust_sp = (uintptr_t) (spp+1);
 
     rt->add_proc_to_state_vec(&rt->running_procs, this);
-}
-
-
-rust_proc::~rust_proc()
-{
-    rt->log(LOG_MEM|LOG_PROC,
-            "~rust_proc 0x%" PRIxPTR ", refcnt=%d",
-            (uintptr_t)this, refcnt);
-
-    /*
-    for (uintptr_t fp = get_fp(); fp; fp = get_previous_fp(fp)) {
-        frame_glue_fns *glue_fns = get_frame_glue_fns(fp);
-        rt->log(LOG_MEM|LOG_PROC,
-                "~rust_proc, frame fp=0x%" PRIxPTR ", glue_fns=0x%" PRIxPTR,
-                fp, glue_fns);
-        if (glue_fns) {
-            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, mark_glue=0x%" PRIxPTR, glue_fns->mark_glue);
-            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, drop_glue=0x%" PRIxPTR, glue_fns->drop_glue);
-            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, reloc_glue=0x%" PRIxPTR, glue_fns->reloc_glue);
-        }
-    }
-    */
-
-    /* FIXME: tighten this up, there are some more
-       assertions that hold at proc-lifecycle events. */
-    I(rt, refcnt == 0 ||
-      (refcnt == 1 && this == rt->root_proc));
-
-    del_stk(rt, stk);
-
-    while (outgoing) {
-        rust_q *q = outgoing;
-        HASH_DEL(outgoing, q);
-        delete q;
-    }
 }
 
 void
@@ -2720,7 +2722,8 @@ upcall_spawn_local(rust_proc *spawner, uintptr_t exit_proc_glue, uintptr_t spawn
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
             "spawn fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
             exit_proc_glue, spawnee_fn, callsz);
-    rust_proc *proc = new (rt) rust_proc(rt, spawner, exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
+    rust_proc *proc = new (rt) rust_proc(rt, spawner);
+    proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
     return proc;
 }
 
@@ -2744,7 +2747,8 @@ upcall_spawn_thread(rust_proc *spawner, rust_rt *new_rt, uintptr_t exit_proc_glu
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
             "spawn thread fn: exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d",
             exit_proc_glue, spawnee_fn, callsz);
-    new_rt->root_proc = new (new_rt) rust_proc(new_rt, NULL, exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
+    new_rt->root_proc = new (new_rt) rust_proc(new_rt, NULL);
+    new_rt->root_proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
 
 #if defined(__WIN32__)
     DWORD thread;
@@ -2899,7 +2903,8 @@ rust_start(uintptr_t main_fn, rust_crate const *crate)
             rust_crate_reader rdr(&rt, crate);
         }
 
-        rt.root_proc = new (&rt) rust_proc(&rt, NULL, rt.crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
+        rt.root_proc = new (&rt) rust_proc(&rt, NULL);
+        rt.root_proc->start(rt.crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
 
         ret = rust_main_loop(&rt);
     }
