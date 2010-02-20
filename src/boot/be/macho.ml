@@ -897,18 +897,18 @@ let emit_file
                  (X86.imm (Asm.IMM 0xfffffffffffffff0L)));
 
     (* Store argc. *)
-    Il.emit e (Il.umov (X86.rc X86.ebx) (X86.c (X86.word_n (Il.Hreg X86.ebp) 1)));
-    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargc_fixup)) (X86.ro X86.ebx));
+    Il.emit e (Il.umov (X86.rc X86.eax) (X86.c (X86.word_n (Il.Hreg X86.ebp) 1)));
+    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargc_fixup)) (X86.ro X86.eax));
 
     (* Store argv. *)
     Il.emit e (Il.lea (X86.rc X86.ecx) (Il.RegIn (Il.Hreg X86.ebp, Some (X86.word_off_n 2))));
-    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargv_fixup)) (X86.ro X86.ebx));
+    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargv_fixup)) (X86.ro X86.eax));
 
     (* Calculte and store envp. *)
-    Il.emit e (Il.binary Il.ADD (X86.rc X86.ebx) (X86.ro X86.ebx) (X86.imm (Asm.IMM 1L)));
-    Il.emit e (Il.binary Il.UMUL (X86.rc X86.ebx) (X86.ro X86.ebx) (X86.imm (Asm.IMM X86.word_sz)));
-    Il.emit e (Il.binary Il.ADD (X86.rc X86.ebx) (X86.ro X86.ebx) (X86.ro X86.ecx));
-    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS environ_fixup)) (X86.ro X86.ebx));
+    Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM 1L)));
+    Il.emit e (Il.binary Il.UMUL (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM X86.word_sz)));
+    Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.ro X86.ecx));
+    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS environ_fixup)) (X86.ro X86.eax));
 
     (* Push 16 bytes to preserve SSE alignment. *)
     Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
