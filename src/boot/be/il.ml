@@ -250,13 +250,6 @@ let cell_is_scalar (c:cell) : bool =
 ;;
 
 
-let cell_scalar_ty (c:cell) : scalar_ty =
-  match c with
-      Reg (_, st) -> st
-    | Mem (_, ScalarTy st) -> st
-    | _ -> failwith "mem of non-scalar in Il.cell_scalar_ty"
-;;
-
 let bits_of_ty_mach (tm:ty_mach) : bits =
   match tm with
     | TY_u8 -> Bits8
@@ -269,6 +262,20 @@ let bits_of_ty_mach (tm:ty_mach) : bits =
     | TY_s64 -> Bits64
     | TY_f32 -> Bits32
     | TY_f64 -> Bits64
+;;
+
+let cell_scalar_ty (c:cell) : scalar_ty =
+  match c with
+      Reg (_, st) -> st
+    | Mem (_, ScalarTy st) -> st
+    | _ -> failwith "mem of non-scalar in Il.cell_scalar_ty"
+;;
+
+let operand_scalar_ty (op:operand) : scalar_ty =
+  match op with
+      Cell c -> cell_scalar_ty c
+    | Imm (_, t) -> ValTy (bits_of_ty_mach t)
+    | ImmPtr (_, t) -> AddrTy t
 ;;
 
 
