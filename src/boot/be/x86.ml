@@ -500,7 +500,7 @@ let emit_c_call
         Il.CodePtr
           (if nabi.Abi.nabi_indirect
            then Il.Cell (Il.Mem (Il.Abs (Asm.M_POS fn), Il.ScalarTy (Il.AddrTy Il.CodeTy)))
-           else Il.ImmPtr ((Asm.M_POS fn), Il.CodeTy))
+           else Il.ImmPtr (fn, Il.CodeTy))
       in
         begin
           match ret with
@@ -597,7 +597,7 @@ let unwind_glue
   let mov dst src = emit (Il.umov dst src) in
   let push x = emit (Il.Push x) in
   let pop x = emit (Il.Pop x) in
-  let codefix fix = Il.CodePtr (Il.ImmPtr ((Asm.M_POS fix), Il.CodeTy)) in
+  let codefix fix = Il.CodePtr (Il.ImmPtr (fix, Il.CodeTy)) in
   let mark fix = Il.emit_full e (Some fix) Il.Dead in
   let glue_field = Abi.frame_glue_fns_field_drop in
 
@@ -867,7 +867,7 @@ let objfile_start
         (if indirect_start
          then Il.Cell (Il.Mem (Il.Abs (Asm.M_POS rust_start_fixup),
                                Il.ScalarTy (Il.AddrTy Il.CodeTy)))
-         else Il.ImmPtr ((Asm.M_POS rust_start_fixup), Il.CodeTy))
+         else Il.ImmPtr (rust_start_fixup, Il.CodeTy))
     in
       Il.emit e (Il.call (rc eax) fptr);
       Il.emit e (Il.Pop (rc ecx));
@@ -1174,11 +1174,6 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
         let t = if signed then TY_u32 else TY_s32 in
           insn_rm_r_imm 0xc7 dst slash0 t i
 
-    (* rm32 <- immptr32 *)
-    | (_, _, Il.ImmPtr (i, _)) when is_rm32 dst ->
-        let t = if signed then TY_u32 else TY_s32 in
-          insn_rm_r_imm 0xc7 dst slash0 t i
-
     | _ -> raise Unrecognized
 ;;
 
@@ -1206,7 +1201,7 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
                         when Il.cell_referent_ty c = Il.ScalarTy (Il.AddrTy Il.CodeTy) ->
                           insn_rm_r 0xff c slash2
 
-                    | Il.CodePtr (Il.ImmPtr (Asm.M_POS f, Il.CodeTy)) ->
+                    | Il.CodePtr (Il.ImmPtr (f, Il.CodeTy)) ->
                         insn_pcrel_simple 0xe8 f
 
                     | _ -> raise Unrecognized
@@ -1238,7 +1233,7 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
         begin
           match (j.Il.jmp_op, j.Il.jmp_targ) with
 
-              (Il.JMP, Il.CodePtr (Il.ImmPtr (Asm.M_POS f, Il.CodeTy))) ->
+              (Il.JMP, Il.CodePtr (Il.ImmPtr (f, Il.CodeTy))) ->
                 insn_pcrel 0xeb 0xe9 f
 
             | (Il.JMP, Il.CodePtr (Il.Cell c))
@@ -1247,7 +1242,7 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
 
             (* FIXME: refactor this to handle cell-based jumps
              * if we ever need them. So far not. *)
-            | (_, Il.CodePtr (Il.ImmPtr (Asm.M_POS f, Il.CodeTy))) ->
+            | (_, Il.CodePtr (Il.ImmPtr (f, Il.CodeTy))) ->
                 let (op8, op32) =
                   match j.Il.jmp_op with
                     | Il.JC  -> (0x72, 0x82)

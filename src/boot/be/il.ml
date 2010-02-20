@@ -50,7 +50,7 @@ type mem =
 type typed_reg = (reg * scalar_ty);;
 type typed_mem = (mem * referent_ty);;
 type typed_imm = (Asm.expr64 * ty_mach);;
-type typed_imm_ptr = (Asm.expr64 * referent_ty);;
+type typed_imm_ptr = (fixup * referent_ty);;
 
 type cell =
     Reg of typed_reg
@@ -107,7 +107,7 @@ let indirect_code_ptr fix =
 ;;
 
 let direct_code_ptr fix =
-  (CodePtr (ImmPtr ((Asm.M_POS fix), CodeTy)))
+  (CodePtr (ImmPtr (fix, CodeTy)))
 ;;
 
 let cell_referent_ty c =
@@ -568,12 +568,12 @@ let string_of_cell (f:hreg_formatter) (c:cell) : string =
 let string_of_operand (f:hreg_formatter) (op:operand) : string =
   match op with
       Cell c -> string_of_cell f c
-    | ImmPtr (i, ty) ->
+    | ImmPtr (f, ty) ->
         if !log_iltypes
         then
-          Printf.sprintf "$%s:%s*" (string_of_expr64 i) (string_of_referent_ty ty)
+          Printf.sprintf "$<%s>.mpos:%s*" f.fixup_name (string_of_referent_ty ty)
         else
-          Printf.sprintf "$%s" (string_of_expr64 i)
+          Printf.sprintf "$<%s>.mpos" f.fixup_name
     | Imm (i, ty) ->
         if !log_iltypes
         then
