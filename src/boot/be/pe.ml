@@ -958,7 +958,8 @@ let emit_file
 
   let all_frags = SEQ [| MEMPOS pe_image_base;
                          (def_file_aligned image_fixup
-                            (SEQ [| all_headers;
+                            (SEQ [| DEF (sem.Semant.ctxt_image_base_fixup, MARK);
+                                    all_headers;
                                     text_section;
                                     bss_section;
                                     all_init_data;

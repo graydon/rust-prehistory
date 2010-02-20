@@ -339,25 +339,30 @@ rust_crate
     // The following fields are emitted by the compiler for the static
     // rust_crate object inside each compiled crate.
 
-    uintptr_t self_addr;          // Un-relocated qddres of 'this'.
+    ptrdiff_t image_base_off;     // Memory offset from this to the loaded image base.
+    uintptr_t self_addr;          // Un-relocated addres of 'this'.
 
-    uintptr_t debug_abbrev_off;   // Memory offset from this to .debug_abbrev.
+    ptrdiff_t debug_abbrev_off;   // Memory offset from this to .debug_abbrev.
     size_t debug_abbrev_sz;       // Size of .debug_abbrev.
 
-    uintptr_t debug_info_off;     // Memory offset from this to .debug_info.
+    ptrdiff_t debug_info_off;     // Memory offset from this to .debug_info.
     size_t debug_info_sz;         // Size of .debug_info.
 
-    uintptr_t c_to_proc_glue_off;
-    uintptr_t main_exit_proc_glue_off;
-    uintptr_t unwind_glue_off;
-    uintptr_t yield_glue_off;
+    ptrdiff_t c_to_proc_glue_off;
+    ptrdiff_t main_exit_proc_glue_off;
+    ptrdiff_t unwind_glue_off;
+    ptrdiff_t yield_glue_off;
 
     // Crates are immutable, constructed by the compiler.
 
 public:
 
-    void adjust_for_relocation(uintptr_t &addr) const {
-        addr += ((uintptr_t)this - self_addr);
+    uintptr_t get_image_base() const {
+        return ((uintptr_t)this + image_base_off);
+    }
+
+    ptrdiff_t get_relocation_diff() const {
+        return ((uintptr_t)this - self_addr);
     }
 
     c_to_proc_glue_ty get_c_to_proc_glue() const {
@@ -2741,11 +2746,15 @@ upcall_import(rust_proc *proc, char const *lib, char const **sym)
                               t1.off, *c, t2.off);
                 found_root = found_root || true;
                 if (!*(c+1) && t2.find_num_attr(DW_AT_low_pc, addr)) {
-                    crate->adjust_for_relocation(addr);
+                    proc->rt->log(LOG_UPCALL, "found relative address: 0x%"  PRIxPTR, addr);
+                    proc->rt->log(LOG_UPCALL, "plus image-base 0x%"  PRIxPTR, crate->get_image_base());
+                    addr += crate->get_image_base();
                     found_leaf = true;
                     break;
                 }
             }
+            if (found_root || found_leaf)
+                break;
         }
         if (found_leaf) {
             proc->rt->log(LOG_UPCALL, "resolved symbol to 0x%"  PRIxPTR, addr);

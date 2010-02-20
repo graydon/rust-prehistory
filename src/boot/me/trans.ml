@@ -3038,6 +3038,7 @@ let trans_visitor
              * NB: this must match the rust_crate structure
              * in the rust runtime library.
              *)
+            crate_rel_word cx.ctxt_image_base_fixup;
             Asm.WORD (word_ty_mach, Asm.M_POS cx.ctxt_crate_fixup);
 
             crate_rel_word cx.ctxt_debug_abbrev_fixup;

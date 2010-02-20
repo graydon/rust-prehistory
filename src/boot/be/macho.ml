@@ -973,6 +973,12 @@ let emit_file
 
   let segments =
     SEQ [|
+      (* 
+       * Correct? Perhaps the OSX notion of image-base is the
+       * beginning of the text segment rather than the zero
+       * segment? 
+       *)
+      DEF (sem.Semant.ctxt_image_base_fixup, MARK);
       zero_segment;
       text_segment;
       data_segment;

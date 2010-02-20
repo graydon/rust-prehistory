@@ -1291,6 +1291,7 @@ let elf32_linux_x86_file
              (segment_2_fixup,
               SEQ
                 [|
+                  DEF (sem.Semant.ctxt_image_base_fixup, MARK);
                   elf_header;
                   ALIGN_FILE
                     (segment_0_align,

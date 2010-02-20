@@ -1615,6 +1615,21 @@ let dwarf_visitor
           (curr_cu_frame, cu_frames, frame_header_and_curr_frame) ]
   in
 
+  let image_base_rel (fix:fixup) : expr64 =
+    SUB (M_POS (fix), M_POS (cx.ctxt_image_base_fixup))
+  in
+
+  let addr_ranges (fix:fixup) : frag =
+    let lo = image_base_rel fix in
+      SEQ [|
+        (* DW_AT_low_pc, DW_FORM_addr *)
+        WORD (word_ty_mach, lo);
+        (* DW_AT_high_pc, DW_FORM_addr *)
+        WORD (word_ty_mach, ADD ((lo),
+                                 (M_SZ fix)))
+      |]
+  in
+
   let emit_srcfile_cu_die
       (name:string)
       (cu_text_fixup:fixup)
@@ -1627,11 +1642,7 @@ let dwarf_visitor
          ZSTRING (Filename.basename name);
          (* DW_AT_comp_dir:  DW_FORM_string *)
          ZSTRING (Filename.concat (Sys.getcwd()) (Filename.dirname name));
-         (* DW_AT_low_pc, DW_FORM_addr *)
-         WORD (word_ty_mach, M_POS cu_text_fixup);
-         (* DW_AT_high_pc, DW_FORM_addr *)
-         WORD (word_ty_mach, ADD ((M_POS cu_text_fixup),
-                                  (M_SZ cu_text_fixup)));
+         addr_ranges cu_text_fixup;
        |])
     in
       emit_die srcfile_cu_die
@@ -1653,11 +1664,7 @@ let dwarf_visitor
          ZSTRING (Filename.basename name);
          (* DW_AT_comp_dir:  DW_FORM_string *)
          ZSTRING (Filename.concat (Sys.getcwd()) (Filename.dirname name));
-         (* DW_AT_low_pc, DW_FORM_addr *)
-         WORD (word_ty_mach, M_POS cu_text_fixup);
-         (* DW_AT_high_pc, DW_FORM_addr *)
-         WORD (word_ty_mach, ADD ((M_POS cu_text_fixup),
-                                  (M_SZ cu_text_fixup)));
+         addr_ranges cu_text_fixup;
          (* DW_AT_use_UTF8, DW_FORM_flag *)
          BYTE 1
        |])
@@ -1693,10 +1700,7 @@ let dwarf_visitor
          ZSTRING id;
          (* DW_AT_type: DW_FORM_ref_addr *)
          ref_slot_die ret_slot;
-         (* DW_AT_low_pc *)
-         WORD (word_ty_mach, M_POS fix);
-         (* DW_AT_high_pc *)
-         WORD (word_ty_mach, (ADD ((M_POS fix), (M_SZ fix))));
+         addr_ranges fix;
          (* DW_AT_frame_base *)
          dw_form_block1 [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |];
          (* DW_AT_return_addr *)
@@ -1814,10 +1818,7 @@ let dwarf_visitor
     let block_die =
       SEQ [|
         uleb abbrev_code;
-         (* DW_AT_low_pc *)
-         WORD (word_ty_mach, M_POS fix);
-         (* DW_AT_high_pc *)
-         WORD (word_ty_mach, (ADD ((M_POS fix), (M_SZ fix))));
+        addr_ranges fix;
       |]
     in
       emit_die block_die;

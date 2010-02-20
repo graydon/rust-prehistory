@@ -131,6 +131,7 @@ type ctxt =
       ctxt_debug_line_fixup: fixup;
       ctxt_debug_frame_fixup: fixup;
 
+      ctxt_image_base_fixup: fixup;
       ctxt_crate_fixup: fixup;
 
       ctxt_file_code: file_code;
@@ -202,6 +203,7 @@ let new_ctxt sess abi crate =
     ctxt_debug_line_fixup = new_fixup "debug_line section";
     ctxt_debug_frame_fixup = new_fixup "debug_frame section";
 
+    ctxt_image_base_fixup = new_fixup "loaded image base";
     ctxt_crate_fixup = new_fixup "root crate structure";
     ctxt_file_code = Hashtbl.create 0;
     ctxt_all_item_code = Hashtbl.create 0;
