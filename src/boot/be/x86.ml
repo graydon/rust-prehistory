@@ -884,10 +884,8 @@ let (abi:Abi.abi) =
     Abi.abi_word_ty = word_ty;
 
     Abi.abi_is_2addr_machine = true;
-    Abi.abi_has_absin_data = false; (* abs-in data = N/A          *)
-    Abi.abi_has_absin_code = true;  (* abs-in code = deref_disp32 *)
-    Abi.abi_has_abs_data = true;    (* abs data == deref_disp32   *)
-    Abi.abi_has_abs_code = true;    (* abs code == pcrel          *)
+    Abi.abi_has_pcrel_data = false;
+    Abi.abi_has_pcrel_code = true;
 
     Abi.abi_n_hardregs = n_hardregs;
     Abi.abi_str_of_hardreg = reg_str;

@@ -692,16 +692,12 @@ let trans_visitor
       (fix:fixup)
       (referent_ty:Il.referent_ty)
       : Il.operand =
-    let i = Asm.M_POS fix in
-    let imm = Il.ImmPtr (i, referent_ty) in
-      if imm_ok
-      then imm
-      else
-        let (reg, _) = force_to_reg imm in
-          Il.Cell (Il.Reg (reg, Il.AddrTy referent_ty))
+    if imm_ok
+    then Il.ImmPtr ((Asm.M_POS fix), referent_ty)
+    else Il.Cell (crate_rel_to_ptr (crate_rel_imm fix) referent_ty)
 
   and code_fixup_to_ptr_operand (fix:fixup) : Il.operand =
-    fixup_to_ptr_operand abi.Abi.abi_has_abs_code fix Il.CodeTy
+    fixup_to_ptr_operand abi.Abi.abi_has_pcrel_code fix Il.CodeTy
 
   and fixup_to_code (fix:fixup) : Il.code =
     code_of_operand (code_fixup_to_ptr_operand fix)
@@ -787,7 +783,7 @@ let trans_visitor
          *)
       let item_ptr_cell = get_element_ptr mod_cell 0 in
       let item_fixup = get_mod_fixup cx mod_id in
-      let item_ptr = fixup_to_ptr_operand abi.Abi.abi_has_abs_data item_fixup Il.OpaqueTy in
+      let item_ptr = fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data item_fixup Il.OpaqueTy in
       let binding_ptr_cell = get_element_ptr mod_cell 1 in
 
         (* Load first cell of pair with static item mem addr.*)
