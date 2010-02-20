@@ -100,6 +100,17 @@ let stmt_collecting_visitor
                   htab_put cx.ctxt_slot_keys si.id key
                 end
             end
+        | Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
+            let iter_arms (_, bindings, block) =
+              let slots = Hashtbl.find cx.ctxt_block_slots block.id in
+              let iter_binding ({ node = _; id = node_id }, ident) =
+                let key = Ast.KEY_ident ident in
+                htab_put slots key node_id;
+                htab_put cx.ctxt_slot_keys node_id key;
+              in
+              Array.iter iter_binding bindings
+            in
+            Array.iter iter_arms arms
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre stmt
