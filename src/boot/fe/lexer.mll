@@ -24,6 +24,7 @@
                 ("while", WHILE);
                 ("do", DO);
                 ("alt", ALT);
+                ("case", CASE);
 
                 ("fail", FAIL);
                 ("fini", FINI);

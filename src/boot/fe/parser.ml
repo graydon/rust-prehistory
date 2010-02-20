@@ -1777,17 +1777,21 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                           begin
                             match bracketed LPAREN RPAREN parse_tag_pat ps with
                               (tag_cons, tag_vars) ->
-                                (tag_cons, tag_vars, parse_block ps) ::
-                                parse_arms ps
+                                let block = parse_block ps in
+                                (tag_cons, tag_vars, block) :: (parse_arms ps)
                           end
                       | _ -> []
                   in
-                  spans ps stmts apos begin
-                    Ast.STMT_alt_tag {
-                      Ast.alt_tag_lval = lval;
-                      Ast.alt_tag_arms = Array.of_list (parse_arms ps)
-                    }
-                  end
+                  let parse_alt_block ps =
+                    let arms = ctxt "alt tag arms" parse_arms ps in
+                    spans ps stmts apos begin
+                      Ast.STMT_alt_tag {
+                        Ast.alt_tag_lval = lval;
+                        Ast.alt_tag_arms = Array.of_list arms
+                      }
+                    end
+                  in
+                  bracketed LBRACE RBRACE parse_alt_block ps
               | _ -> [| |]
           end
 

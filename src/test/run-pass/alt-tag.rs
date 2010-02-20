@@ -8,15 +8,15 @@ type color = tag(
 
 fn process(color c) -> () {
   alt (c) {
-    case (rgb(r, g, b)) {
+    case (rgb(int r, int g, int b)) {
       log "rgb";
       log r;
     }
-    case (rgba(r, g, b, a)) {
+    case (rgba(int r, int g, int b, int a)) {
       log "rgba";
       log a;
     }
-    case (hsl(h, s, l)) {
+    case (hsl(int h, int s, int l)) {
       log "hsl";
       log h;
     }
@@ -24,9 +24,9 @@ fn process(color c) -> () {
 }
 
 fn main() -> () {
-  color gray = rgb(127, 127, 127);
-  color clear = rgba(50, 150, 250, 0);
-  color red = hsl(0, 255, 255);
+  let color gray = rgb(127, 127, 127);
+  let color clear = rgba(50, 150, 250, 0);
+  let color red = hsl(0, 255, 255);
   process(gray);
   process(clear);
   process(red);
