@@ -587,11 +587,20 @@ and walk_stmt
       | Ast.STMT_prove cs ->
           walk_constrs v cs
 
+      | Ast.STMT_alt_tag
+            { Ast.alt_tag_lval = lval; Ast.alt_tag_arms = arms } ->
+          walk_lval v lval;
+          let walk_arm (_, slots, block) =
+            let walk_binding (si, _) = walk_slot_identified v si in
+              Array.iter walk_binding slots;
+              walk_block v block
+          in
+          Array.iter walk_arm arms
+
       (* FIXME (bug 541526): finish this as needed. *)
       | Ast.STMT_slice _
       | Ast.STMT_note _
       | Ast.STMT_foreach _
-      | Ast.STMT_alt_tag _
       | Ast.STMT_alt_type _
       | Ast.STMT_alt_port _
       | Ast.STMT_use _ ->
