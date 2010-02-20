@@ -699,8 +699,8 @@ let trans_visitor
     code_of_operand (code_fixup_to_ptr_operand fix)
 
   (* A pointer-valued op may be of the form ImmPtr, which carries its
-   * target fixup, essentially "constant-propagated" through trans so
-   * that pc-relative addressing can make use of it whenever
+   * target fixup, "constant-propagated" through trans so that
+   * pc-relative addressing can make use of it whenever
    * appropriate. Reify_ptr exists for cases when you are about to
    * store an ImmPtr into a memory cell or other place beyond which the
    * compiler will cease to know about its identity; at this point you
@@ -708,10 +708,9 @@ let trans_visitor
    * (computationally) add it to the crate base value, before working
    * with it.
    * 
-   * Essentially this hels you obey the IL type-system rule that you
-   * should never be able to 'mov' an ImmPtr to a cell. If you forget
-   * to call this in the right places, you will get code-generation
-   * failures.
+   * This helps you obey the IL type-system prohibition against
+   * 'mov'-ing an ImmPtr to a cell. If you forget to call this
+   * in the right places, you will get code-generation failures.
    *)
   and reify_ptr (op:Il.operand) : Il.operand =
     match op with
