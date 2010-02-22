@@ -1083,7 +1083,7 @@ let elf32_linux_x86_file
        (rela_plt_frag :: rela_plt_frags))
   in
 
-  (* Emit rodata export symbols. *)
+  (* Emit text export symbols. *)
   let (global_text_strtab_frags, global_text_symtab_frags) =
     match htab_search sem.Semant.ctxt_native_exports SEG_text with
         None -> ([], [])
