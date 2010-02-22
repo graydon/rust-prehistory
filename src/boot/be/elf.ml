@@ -556,6 +556,7 @@ let elf32_linux_x86_file
    *   .interp    - the read-only section that names ld.so
    *   .dynsym    - symbols named by the PLT/GOT entries, r/x segment
    *   .dynstr    - string-names used in those symbols, r/x segment
+   *   .hash      - hashtable in which to look these up, r/x segment
    *   .dynamic   - the machine-readable description of the dynamic
    *                linkage requirements of this elf file, in the
    *                r/w _DYNAMIC segment
@@ -575,14 +576,17 @@ let elf32_linux_x86_file
   (* section 3:  .rodata                   ...                        *)
   (* section 4:  .dynsym                   ...                        *)
   (* section 5:  .dynstr                   ...                        *)
-  (* section 6:  .rela.plt                 ...                        *)
+  (* section 6:  .hash                     ...                        *)
+  (* section 7:  .plt                      ...                        *)
+  (* section 8:  .got                      ...                        *)
+  (* section 9:  .rela.plt                 ...                        *)
   (*                                                                  *)
-  (* section 7:  .data              (segment 3: R+W, LOAD)            *)
-  (* section 8:  .bss                      ...                        *)
+  (* section 10: .data              (segment 3: R+W, LOAD)            *)
+  (* section 11: .bss                      ...                        *)
   (*                                                                  *)
-  (* section 9:  .dynamic           (segment 4: R+W, DYNAMIC)         *)
+  (* section 12:  .dynamic          (segment 4: R+W, DYNAMIC)         *)
   (*                                                                  *)
-  (* section 10: .shstrtab          (not in a segment)                *)
+  (* section 13: .shstrtab          (not in a segment)                *)
 
   let null_section_name_fixup = new_fixup "string name of <null> section" in
   let interp_section_name_fixup = new_fixup "string name of '.interp' section" in
@@ -590,6 +594,7 @@ let elf32_linux_x86_file
   let rodata_section_name_fixup = new_fixup "string name of '.rodata' section" in
   let dynsym_section_name_fixup = new_fixup "string name of '.dynsym' section" in
   let dynstr_section_name_fixup = new_fixup "string name of '.dynstr' section" in
+  let hash_section_name_fixup = new_fixup "string name of '.hash' section" in
   let plt_section_name_fixup = new_fixup "string name of '.plt' section" in
   let got_plt_section_name_fixup = new_fixup "string name of '.got.plt' section" in
   let rela_plt_section_name_fixup = new_fixup "string name of '.rela.plt' section" in
@@ -609,13 +614,14 @@ let elf32_linux_x86_file
   let rodatandx      = 3L in  (* Section index of .rodata *)
   let dynsymndx      = 4L in  (* Section index of .dynsym *)
   let dynstrndx      = 5L in  (* Section index of .dynstr *)
-  (* let pltndx         = 6L in *)  (* Section index of .plt *)
-  (* let gotpltndx      = 7L in *)  (* Section index of .got.plt *)
-  (* let relapltndx     = 8L in *)  (* Section index of .rela.plt *)
-  let datandx        = 9L in  (* Section index of .data *)
-  (* let bssndx         = 10L in *) (* Section index of .bss *)
-  (* let dynamicndx     = 11L in *) (* Section index of .dynamic *)
-  let shstrtabndx    = 12L in (* Section index of .shstrtab *)
+  (* let hashndx        = 6L in *)  (* Section index of .hash *)
+  (* let pltndx         = 7L in *)  (* Section index of .plt *)
+  (* let gotpltndx      = 8L in *)  (* Section index of .got.plt *)
+  (* let relapltndx     = 9L in *)  (* Section index of .rela.plt *)
+  let datandx        = 10L in  (* Section index of .data *)
+  (* let bssndx         = 11L in *) (* Section index of .bss *)
+  (* let dynamicndx     = 12L in *) (* Section index of .dynamic *)
+  let shstrtabndx    = 13L in (* Section index of .shstrtab *)
 
   let section_header_table_fixup = new_fixup ".section header table" in
   let interp_section_fixup = new_fixup ".interp section" in
@@ -623,6 +629,7 @@ let elf32_linux_x86_file
   let rodata_section_fixup = new_fixup ".rodata section" in
   let dynsym_section_fixup = new_fixup ".dynsym section" in
   let dynstr_section_fixup = new_fixup ".dynstr section" in
+  let hash_section_fixup = new_fixup ".hash section" in
   let plt_section_fixup = new_fixup ".plt section" in
   let got_plt_section_fixup = new_fixup ".got.plt section" in
   let rela_plt_section_fixup = new_fixup ".rela.plt section" in
@@ -640,6 +647,7 @@ let elf32_linux_x86_file
         DEF (rodata_section_name_fixup, ZSTRING ".rodata");
         DEF (dynsym_section_name_fixup, ZSTRING ".dynsym");
         DEF (dynstr_section_name_fixup, ZSTRING ".dynstr");
+        DEF (hash_section_name_fixup, ZSTRING ".hash");
         DEF (plt_section_name_fixup, ZSTRING ".plt");
         DEF (got_plt_section_name_fixup, ZSTRING ".got.plt");
         DEF (rela_plt_section_name_fixup, ZSTRING ".rela.plt");
@@ -723,6 +731,17 @@ let elf32_linux_x86_file
            ~sh_addralign: 1L
            ~sh_entsize: 0L
            ~sh_link: None);
+
+        (* .hash *)
+        (section_header
+           ~shstring_table_fixup: shstrtab_section_fixup
+           ~shname_string_fixup: hash_section_name_fixup
+           ~sh_type: SHT_PROGBITS
+           ~sh_flags: [ SHF_ALLOC ]
+           ~section_fixup: (Some hash_section_fixup)
+           ~sh_addralign: 4L
+           ~sh_entsize: 4L
+           ~sh_link: (Some dynsymndx));
 
         (* .plt *)
         (section_header
@@ -952,6 +971,8 @@ let elf32_linux_x86_file
       ~e_shstrndx: shstrtabndx
   in
 
+  let n_syms = ref 1 in (* The empty symbol, implicit. *)
+
   let data_sym name st_bind fixup =
     let name_fixup = new_fixup ("data symbol name fixup: '" ^ name ^ "'") in
     let strtab_entry = DEF (name_fixup, ZSTRING name) in
@@ -964,6 +985,7 @@ let elf32_linux_x86_file
         ~st_type: STT_OBJECT
         ~st_shndx: datandx
     in
+      incr n_syms;
       (strtab_entry, symtab_entry)
   in
 
@@ -979,6 +1001,7 @@ let elf32_linux_x86_file
         ~st_type: STT_OBJECT
         ~st_shndx: rodatandx
     in
+      incr n_syms;
       (strtab_entry, symtab_entry)
   in
 
@@ -994,6 +1017,7 @@ let elf32_linux_x86_file
         ~st_type: STT_FUNC
         ~st_shndx: textndx
     in
+      incr n_syms;
       (strtab_frag, symtab_frag)
   in
 
@@ -1009,6 +1033,7 @@ let elf32_linux_x86_file
         ~st_type: STT_FUNC
         ~st_shndx: shn_UNDEF
     in
+      incr n_syms;
       (strtab_frag, symtab_frag)
   in
 
@@ -1205,6 +1230,7 @@ let elf32_linux_x86_file
          elf32_dyn_frag (DT_SYMTAB, M_POS dynsym_section_fixup);
          elf32_dyn_frag (DT_SYMENT, IMM elf32_symsize);
 
+         elf32_dyn_frag (DT_HASH, M_POS hash_section_fixup);
          elf32_dyn_frag (DT_PLTGOT, M_POS got_plt_section_fixup);
 
          elf32_dyn_frag (DT_PLTREL, IMM (elf32_num_of_dyn_tag DT_RELA));
@@ -1269,6 +1295,31 @@ let elf32_linux_x86_file
   let dynstr_section =
     DEF (dynstr_section_fixup,
          SEQ (Array.of_list dynstr_frags))
+  in
+
+  let hash_section =
+    let n_syms = !n_syms in
+
+    DEF (hash_section_fixup,
+         (* Worst hashtable ever: one chain. *)
+         SEQ [|
+           WORD (TY_u32, IMM 1L);          (* nbucket *)
+           WORD (TY_u32,                   (* nchain *)
+                 IMM (Int64.of_int n_syms));
+           WORD (TY_u32, IMM 1L);          (* bucket 0 => symbol 1. *)
+           SEQ
+             begin
+               Array.init
+                 n_syms
+                 (fun i ->
+                    let next = (* chain[i] => if last then 0 else i+1 *)
+                      if i > 0 && i < (n_syms-1)
+                      then Int64.of_int (i+1)
+                      else 0L
+                    in
+                      WORD (TY_u32, IMM next))
+             end;
+         |])
   in
 
   let plt_section =
@@ -1352,6 +1403,7 @@ let elf32_linux_x86_file
                   rodata_section;
                   dynsym_section;
                   dynstr_section;
+                  hash_section;
                   plt_section;
                   rela_plt_section;
                   debug_aranges_section;

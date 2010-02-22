@@ -261,7 +261,9 @@ TEST_XFAILS := test/run-pass/spawn-fn.rs \
 ifdef CFG_WINDOWSY
 TEST_XFAILS += test/run-pass/native_mod.rc \
                test/run-pass/native_mod.rs
-else
+endif
+
+ifeq ($(CFG_OSTYPE), Darwin)
 TEST_XFAILS += test/run-pass/user.rs \
                test/run-pass/user.rc
 
