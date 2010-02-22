@@ -121,10 +121,8 @@ let trans_visitor
     Il.Imm (crate_rel fix, word_ty_signed_mach)
   in
 
-  let table_of_fixups (fixups:fixup array) : Asm.frag =
-    Asm.SEQ
-      (Array.map
-         (fun fix -> Asm.WORD (word_ty_mach, Asm.M_POS fix)) fixups)
+  let table_of_crate_rel_fixups (fixups:fixup array) : Asm.frag =
+    Asm.SEQ (Array.map crate_rel_word fixups)
   in
 
   let nabi_indirect =
@@ -2720,7 +2718,7 @@ let trans_visitor
                   ()
               end
           in
-            table_of_fixups
+            table_of_crate_rel_fixups
               [|
                (* 
                 * NB: this must match the struct-offsets given in ABI
