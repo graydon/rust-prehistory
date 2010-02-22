@@ -940,7 +940,7 @@ let elf32_linux_x86_file
   let elf_header =
     elf32_header
       ~ei_data: ELFDATA2LSB
-      ~e_type: ET_EXEC (* ET_DYN soon, but not yet *)
+      ~e_type: ET_DYN
       ~e_machine: EM_386
       ~e_version: EV_CURRENT
 

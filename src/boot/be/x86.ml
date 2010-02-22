@@ -618,11 +618,12 @@ let unwind_glue
     emit (Il.cmp (ro edx) (immi 0L));
 
     emit (Il.jmp Il.JE (codefix skip_jmp_fix));     (* if struct* is nonzero        *)
+    add edx esi;                                    (* add crate ptr to disp.       *)
     mov (rc ecx) (c (edx_n glue_field));            (* ecx <- drop glue             *)
     emit (Il.cmp (ro ecx) (immi 0L));
 
     emit (Il.jmp Il.JE (codefix skip_jmp_fix));     (* if glue-fn is nonzero        *)
-    add ecx esi;                                    (* add crate-rel disp to crate  *)
+    add ecx esi;                                    (* add crate ptr to disp.       *)
     push (ro ebp);                                  (* frame-to-drop                *)
     push (c proc_ptr);                              (* form usual call to glue      *)
     push (immi 0L);                                 (* outptr                       *)

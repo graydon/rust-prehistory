@@ -2694,7 +2694,8 @@ let trans_visitor
               end
         end
     in
-    trans_data_operand (DATA_frame_glue_fns fnid)
+    trans_crate_rel_data_operand
+      (DATA_frame_glue_fns fnid)
       begin
         fun _ ->
           let mark_frame_glue_fixup =
