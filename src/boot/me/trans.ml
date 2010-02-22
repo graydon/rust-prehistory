@@ -597,19 +597,6 @@ let trans_visitor
       let (cell, slot) = trans_lval flv in
         (Il.Cell cell, slot_ty slot)
 
-  and trans_data_operand (d:data) (thunk:unit -> Asm.frag) : Il.operand =
-    let (fix, _) =
-      htab_search_or_add cx.ctxt_data d
-        begin
-          fun _ ->
-            let fix = new_fixup "data item" in
-            let frag = Asm.DEF (fix, thunk()) in
-              (fix, frag)
-        end
-    in
-      (* FIXME (bug 541552): wrong operand type. *)
-      Il.Imm (Asm.M_POS fix, word_ty_mach)
-
   and trans_crate_rel_data_operand (d:data) (thunk:unit -> Asm.frag) : Il.operand =
     let (fix, _) =
       htab_search_or_add cx.ctxt_data d
@@ -620,10 +607,9 @@ let trans_visitor
               (fix, frag)
         end
     in
-      (* FIXME (bug 541552): wrong operand type. *)
       crate_rel_imm fix
 
-  and trans_data_frag (d:data) (thunk:unit -> Asm.frag) : Asm.frag =
+  and trans_crate_rel_data_frag (d:data) (thunk:unit -> Asm.frag) : Asm.frag =
     let (fix, _) =
       htab_search_or_add cx.ctxt_data d
         begin
@@ -633,20 +619,22 @@ let trans_visitor
               (fix, frag)
         end
     in
-      (* FIXME (bug 541552): wrong operand type. *)
-      Asm.WORD (word_ty_mach, Asm.M_POS fix)
+      crate_rel_word fix
+
+  and trans_crate_rel_static_string_operand (s:string) : Il.operand =
+    trans_crate_rel_data_operand (DATA_str s) (fun _ -> Asm.ZSTRING s)
+
+  and trans_crate_rel_static_string_frag (s:string) : Asm.frag =
+    trans_crate_rel_data_frag (DATA_str s) (fun _ -> Asm.ZSTRING s)
 
   and trans_static_string (s:string) : Il.operand =
     Il.Cell (crate_rel_to_ptr
-               (trans_crate_rel_data_operand (DATA_str s) (fun _ -> Asm.ZSTRING s))
+               (trans_crate_rel_static_string_operand s)
                (referent_type abi Ast.TY_str))
-
-  and trans_static_string_frag (s:string) : Asm.frag =
-    trans_data_frag (DATA_str s) (fun _ -> Asm.ZSTRING s)
 
   and trans_type_info (t:Ast.ty) : Il.operand =
     (* FIXME: emit type-info table here. *)
-    trans_data_operand (DATA_typeinfo t) (fun _ -> Asm.MARK)
+    trans_crate_rel_data_operand (DATA_typeinfo t) (fun _ -> Asm.MARK)
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
     (* Include null byte. *)
@@ -2767,10 +2755,10 @@ let trans_visitor
   let trans_static_name_components (ncs:Ast.name_component list) : Il.operand =
     let f nc =
       match nc with
-          Ast.COMP_ident i -> trans_static_string_frag i
+          Ast.COMP_ident i -> trans_crate_rel_static_string_frag i
         | _ -> bug () "unexpected static name component"
     in
-      trans_data_operand
+      trans_crate_rel_data_operand
         (DATA_name (Walk.name_of ncs))
         (fun _ -> Asm.SEQ (Array.append
                              (Array.map f (Array.of_list ncs))

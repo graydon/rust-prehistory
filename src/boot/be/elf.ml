@@ -1083,10 +1083,31 @@ let elf32_linux_x86_file
        (rela_plt_frag :: rela_plt_frags))
   in
 
+  (* Emit rodata export symbols. *)
+  let (global_text_strtab_frags, global_text_symtab_frags) =
+    match htab_search sem.Semant.ctxt_native_exports SEG_text with
+        None -> ([], [])
+      | Some etab ->
+          Hashtbl.fold
+            begin
+              fun name fix x ->
+                let (strtab_frags, symtab_frags) = x in
+                let (str, sym) = text_sym name STB_GLOBAL fix in
+                  (str :: strtab_frags,
+                   sym :: symtab_frags)
+            end
+            etab
+            ([],[])
+  in
+
+  (* Emit text fragments (possibly named). *)
   let (global_text_strtab_frags,
        global_text_symtab_frags,
        text_body_frags) =
-    Hashtbl.fold (frags_of_symbol text_sym STB_GLOBAL) text_frags ([],[],[])
+    Hashtbl.fold
+      (frags_of_symbol text_sym STB_GLOBAL)
+      text_frags
+      (global_text_strtab_frags, global_text_symtab_frags, [])
   in
 
   let (local_text_strtab_frags,
@@ -1118,11 +1139,33 @@ let elf32_linux_x86_file
        item_sym_frags @ glue_sym_frags)
   in
 
+  (* Emit rodata export symbols. *)
+  let (rodata_strtab_frags, rodata_symtab_frags) =
+    match htab_search sem.Semant.ctxt_native_exports SEG_data with
+        None -> ([], [])
+      | Some etab ->
+          Hashtbl.fold
+            begin
+              fun name fix x ->
+                let (strtab_frags, symtab_frags) = x in
+                let (str, sym) = rodata_sym name STB_GLOBAL fix in
+                  (str :: strtab_frags,
+                   sym :: symtab_frags)
+            end
+            etab
+            ([],[])
+  in
+
+  (* Emit rodata fragments (possibly named). *)
   let (rodata_strtab_frags,
        rodata_symtab_frags,
        rodata_body_frags) =
-    Hashtbl.fold (frags_of_symbol rodata_sym STB_GLOBAL) rodata_frags ([],[],[])
+    Hashtbl.fold
+      (frags_of_symbol rodata_sym STB_GLOBAL)
+      rodata_frags
+      (rodata_strtab_frags, rodata_symtab_frags, [])
   in
+
 
   let (data_strtab_frags,
        data_symtab_frags,

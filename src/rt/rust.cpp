@@ -2680,15 +2680,16 @@ extern "C" CDECL uintptr_t
 upcall_import(rust_proc *proc, char const *lib, char const **sym)
 {
     LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
 
-    proc->rt->log(LOG_UPCALL, "upcall import: [%s]", lib);
-    for (char const **c = sym; *c; ++c) {
-        proc->rt->log(LOG_UPCALL, "upcall import: + %s", *c);
+    rt->log(LOG_UPCALL, "upcall import: [%s]", lib);
+    for (char const **c = crate_rel(rt, sym); *c; ++c) {
+        rt->log(LOG_UPCALL, "upcall import: + %s", crate_rel(rt, *c));
     }
 
 #if defined(__WIN32__)
     HMODULE handle = LoadLibrary(_T(lib));
-    proc->rt->log(LOG_UPCALL,
+    rt->log(LOG_UPCALL,
                   "LoadLibrary(\"%s\") -> 0x%" PRIxPTR,
                   lib, handle);
     if (!lib) {
@@ -2697,7 +2698,7 @@ upcall_import(rust_proc *proc, char const *lib, char const **sym)
     }
 
     FARPROC s = GetProcAddress(handle, _T("rust_crate"));
-    proc->rt->log(LOG_UPCALL,
+    rt->log(LOG_UPCALL,
                   "GetProcAddress(0x%" PRIxPTR
                   ", \"rust_crate\") -> 0x%" PRIxPTR,
                   handle, s);
@@ -2707,7 +2708,7 @@ upcall_import(rust_proc *proc, char const *lib, char const **sym)
     }
 #else
     void *handle = dlopen(lib, RTLD_LOCAL|RTLD_LAZY);
-    proc->rt->log(LOG_UPCALL,
+    rt->log(LOG_UPCALL,
                   "dlopen(\"%s\") -> 0x%" PRIxPTR,
                   lib, handle);
     if (!handle) {
@@ -2716,18 +2717,20 @@ upcall_import(rust_proc *proc, char const *lib, char const **sym)
     }
 
     void *s = dlsym(handle, "rust_crate");
-    if (!s)
-        proc->fail(3);
-    proc->rt->log(LOG_UPCALL,
+    rt->log(LOG_UPCALL,
                   "dlsym(0x%" PRIxPTR
                   ", \"rust_crate\") -> 0x%" PRIxPTR,
                   handle, s);
+    if (!s) {
+        proc->fail(3);
+        return 0;
+    }
 #endif
     uintptr_t addr;
     {
         typedef rust_crate_reader::die_reader::die die;
         rust_crate const *crate = (rust_crate*)s;
-        rust_crate_reader rdr(proc->rt, crate);
+        rust_crate_reader rdr(rt, crate);
         bool found_root = false;
         bool found_leaf = false;
         for (die d = rdr.dies.first_die();
@@ -2736,18 +2739,18 @@ upcall_import(rust_proc *proc, char const *lib, char const **sym)
 
             die t1 = d;
             die t2 = d;
-            for (char const **c = sym;
+            for (char const **c = crate_rel(rt, sym);
                  (*c
                   && !t1.is_null()
-                  && t1.find_child_by_name(*c, t2));
+                  && t1.find_child_by_name(crate_rel(rt, *c), t2));
                  ++c, t1=t2) {
-                proc->rt->log(LOG_UPCALL, "matched die <0x%"  PRIxPTR
+                rt->log(LOG_UPCALL, "matched die <0x%"  PRIxPTR
                               ">, child '%s' = die<0x%" PRIxPTR ">",
-                              t1.off, *c, t2.off);
+                              t1.off, crate_rel(rt, *c), t2.off);
                 found_root = found_root || true;
                 if (!*(c+1) && t2.find_num_attr(DW_AT_low_pc, addr)) {
-                    proc->rt->log(LOG_UPCALL, "found relative address: 0x%"  PRIxPTR, addr);
-                    proc->rt->log(LOG_UPCALL, "plus image-base 0x%"  PRIxPTR, crate->get_image_base());
+                    rt->log(LOG_UPCALL, "found relative address: 0x%"  PRIxPTR, addr);
+                    rt->log(LOG_UPCALL, "plus image-base 0x%"  PRIxPTR, crate->get_image_base());
                     addr += crate->get_image_base();
                     found_leaf = true;
                     break;
@@ -2757,9 +2760,9 @@ upcall_import(rust_proc *proc, char const *lib, char const **sym)
                 break;
         }
         if (found_leaf) {
-            proc->rt->log(LOG_UPCALL, "resolved symbol to 0x%"  PRIxPTR, addr);
+            rt->log(LOG_UPCALL, "resolved symbol to 0x%"  PRIxPTR, addr);
         } else {
-            proc->rt->log(LOG_UPCALL, "failed to resolve symbol");
+            rt->log(LOG_UPCALL, "failed to resolve symbol");
             proc->fail(3);
         }
     }
