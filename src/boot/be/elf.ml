@@ -1558,7 +1558,7 @@ let emit_file
       ~needed_libs
   in
   let buf = Buffer.create 16 in
-  let out = open_out_bin sess.Session.sess_out in
+  let out = open_out_bin (Session.filename_of sess.Session.sess_out) in
     resolve_frag sess all_frags;
     lower_frag ~sess ~lsb0: true ~buf: buf ~it: all_frags;
     Buffer.output_buffer out buf;

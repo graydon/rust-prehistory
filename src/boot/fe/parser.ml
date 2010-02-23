@@ -2697,11 +2697,12 @@ let parse_root_with_parse_fn
     (infer_crate_filename:(Ast.ident -> filename))
     : Ast.crate =
   let files = Hashtbl.create 0 in
-  let fname = sess.Session.sess_in in
+  let fname = Session.filename_of sess.Session.sess_in in
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
   let oref = ref (Opaque 0) in
-  let ps = make_parser tref nref oref sess tok get_ty_mod infer_crate_filename fname in
+  let ps = make_parser tref nref oref sess tok get_ty_mod infer_crate_filename fname
+  in
   let apos = lexpos ps in
     try
       let crate =

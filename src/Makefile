@@ -162,7 +162,7 @@ $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) rt/rust.h
 
 $(CFG_STDLIB): $(CFG_BOOT) $(wildcard lib/*.rs lib/*.rc)
 	@$(call CFG_ECHO, compile: lib/std.rc)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ lib/std.rc
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -shared -o $@ lib/std.rc
 
 %$(CFG_OBJ_SUFFIX): %.cpp $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)

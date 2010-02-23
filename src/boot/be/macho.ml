@@ -880,7 +880,7 @@ let emit_file
     macho_header_32
       CPU_TYPE_X86
       CPU_SUBTYPE_X86_ALL
-      MH_EXECUTE
+      (if sess.Session.sess_library_mode then MH_DYLIB else MH_EXECUTE)
       [ MH_BINDATLOAD; MH_DYLDLINK; MH_TWOLEVEL ]
       load_commands
   in
@@ -988,7 +988,7 @@ let emit_file
   in
 
   let buf = Buffer.create 16 in
-  let out = open_out_bin sess.Session.sess_out in
+  let out = open_out_bin (Session.filename_of sess.Session.sess_out) in
     resolve_frag sess segments;
     lower_frag ~sess ~lsb0: true ~buf ~it: segments;
     Buffer.output_buffer out buf;

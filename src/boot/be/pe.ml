@@ -815,7 +815,7 @@ let emit_file
                ZSTRING ".debug_abbrev";
                ZSTRING ".debug_line";
                ZSTRING ".debug_frame";
-               DEF (image_name_fixup, ZSTRING sess.Session.sess_out)
+               DEF (image_name_fixup, ZSTRING (Session.filename_of sess.Session.sess_out))
              |])))
   in
   let loader_header = (pe_loader_header
@@ -972,7 +972,7 @@ let emit_file
                                     ALIGN_MEM (pe_mem_alignment, MARK) |]))|]
   in
   let buf = Buffer.create 16 in
-  let out = open_out_bin sess.Session.sess_out in
+  let out = open_out_bin (Session.filename_of sess.Session.sess_out) in
     resolve_frag sess all_frags;
     lower_frag ~sess ~lsb0: true ~buf ~it: all_frags;
     Buffer.output_buffer out buf;

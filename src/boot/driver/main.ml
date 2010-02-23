@@ -17,14 +17,11 @@ let (abi:Abi.abi) = X86.abi;;
 
 let (sess:Session.sess) =
   {
-    Session.sess_in = "";
+    Session.sess_in = None;
+    Session.sess_out = None;
+    Session.sess_library_mode = false;
     (* FIXME: need something fancier here for unix sub-flavours. *)
     Session.sess_targ = targ;
-    Session.sess_out =
-      ("rust_out" ^ (match targ with
-                         Linux_x86_elf -> ""
-                       | MacOS_x86_macho -> ""
-                       | Win32_x86_pe -> ".exe"));
     Session.sess_log_lex = false;
     Session.sess_log_parse = false;
     Session.sess_log_ast = false;
@@ -51,7 +48,7 @@ let (sess:Session.sess) =
     Session.sess_failed = false;
     Session.sess_spans = Hashtbl.create 0;
     Session.sess_report_timing = false;
-    Session.sess_timings = Hashtbl.create 0
+    Session.sess_timings = Hashtbl.create 0;
   }
 ;;
 
@@ -78,6 +75,30 @@ let infer_crate_filename (ident:filename) : filename =
     | Linux_x86_elf -> "lib" ^ ident ^ ".so"
 ;;
 
+let default_output_filename (sess:Session.sess) : filename option =
+  match sess.Session.sess_in with
+      None -> None
+    | Some fname ->
+        let base = Filename.chop_extension (Filename.basename fname) in
+        let out =
+          if sess.Session.sess_library_mode
+          then 
+            infer_crate_filename base
+          else 
+            base ^ (match sess.Session.sess_targ with
+                        Linux_x86_elf -> ""
+                      | MacOS_x86_macho -> ""
+                      | Win32_x86_pe -> ".exe")
+        in
+          Some out
+;;
+
+let set_default_output_filename (sess:Session.sess) : unit = 
+  match sess.Session.sess_out with
+      None -> (sess.Session.sess_out <- default_output_filename sess)
+    | _ -> ()
+;;
+
 
 let dump_file (filename:filename) : unit =
   let tmod = get_ty_mod filename in
@@ -99,8 +120,9 @@ let argspecs =
                                | Linux_x86_elf -> "linux-x86-elf"
                                | MacOS_x86_macho -> "macos-x86-macho"
                             ) ^ ")"));
-    ("-o", Arg.String (fun s -> sess.Session.sess_out <- s),
-     "output filename (default: " ^ sess.Session.sess_out ^ ")");
+    ("-o", Arg.String (fun s -> sess.Session.sess_out <- Some s),
+     "output filename (default: " ^ (Session.filename_of sess.Session.sess_out) ^ ")");
+    ("-shared", Arg.Unit (fun _ -> sess.Session.sess_library_mode <- true), "compile a shared-library crate");
     ("-llex", Arg.Unit (fun _ -> sess.Session.sess_log_lex <- true), "log lexing");
     ("-lparse", Arg.Unit (fun _ -> sess.Session.sess_log_parse <- true), "log parsing");
     ("-last", Arg.Unit (fun _ -> sess.Session.sess_log_ast <- true), "log post-parse AST");
@@ -142,34 +164,38 @@ let exit_if_failed _ =
 
 Arg.parse
   argspecs
-  (fun arg -> sess.Session.sess_in <- arg)
+  (fun arg -> sess.Session.sess_in <- (Some arg))
   ("usage: " ^ Sys.argv.(0) ^ " [options] (CRATE_FILE.rc|SOURCE_FILE.rs)\n%!")
 ;;
 
+let _ = set_default_output_filename  sess
+;;
+
 let _ =
-  if sess.Session.sess_out = ""
+  if sess.Session.sess_out = None
   then (Printf.fprintf stderr "Error: no output file specified\n%!"; exit 1)
   else ()
 ;;
 
 let _ =
-  if sess.Session.sess_in = ""
+  if sess.Session.sess_in = None
   then (Printf.fprintf stderr "Error: empty input filename\n%!"; exit 1)
   else ()
 ;;
 
 
 let (crate:Ast.crate) =
-  if Filename.check_suffix sess.Session.sess_in ".rc"
+  let infile = Session.filename_of sess.Session.sess_in in
+  if Filename.check_suffix infile ".rc"
   then Parser.parse_crate sess Lexer.token get_ty_mod infer_crate_filename
   else
-    if Filename.check_suffix sess.Session.sess_in ".rs"
+    if Filename.check_suffix infile ".rs"
     then Parser.parse_srcfile sess Lexer.token get_ty_mod infer_crate_filename
     else
       begin
         Printf.fprintf stderr
           "Error: unrecognized input file type: %s\n%!"
-          sess.Session.sess_in;
+          infile;
         exit 1
       end
 ;;
