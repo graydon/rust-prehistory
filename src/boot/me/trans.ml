@@ -2435,6 +2435,41 @@ let trans_visitor
     done
 
 
+  and trans_alt_tag { Ast.alt_tag_lval = lval; Ast.alt_tag_arms = arms } =
+    let ((lval_cell:Il.cell), { Ast.slot_mode = _; Ast.slot_ty = ty }) =
+      trans_lval lval
+    in
+    let ty_tag : Ast.ty_tag =
+      match ty with
+          Some (Ast.TY_tag tag_ty) -> tag_ty
+        | Some (Ast.TY_iso { Ast.iso_index = i; Ast.iso_group = g }) -> g.(i)
+        | _ -> bug cx "expected tag ty"
+    in
+    let tag_keys = sorted_htab_keys ty_tag in
+    let tag_cell:Il.cell = get_element_ptr lval_cell 0 in
+    let union_cell:Il.cell = get_element_ptr lval_cell 1 in
+    let trans_arm ((tag_id:Ast.ident), slots, (block:Ast.block)) : quad_idx =
+      let tag_name = Ast.NAME_base (Ast.BASE_ident tag_id) in
+      let tag_number = arr_idx tag_keys tag_name in
+      emit (Il.cmp (Il.Cell tag_cell) (imm (Int64.of_int tag_number)));
+      let next_jump = mark() in
+      emit (Il.jmp Il.JNE Il.CodeNone);
+      let tup_cell:Il.cell = get_variant_ptr union_cell tag_number in
+      let trans_dst idx ({ node = dst_slot; id = dst_id }, _) =
+        let dst_cell = cell_of_block_slot dst_id in
+        let src_operand = Il.Cell (get_element_ptr tup_cell idx) in
+        mov (deref_slot true dst_cell dst_slot) src_operand
+      in
+      Array.iteri trans_dst slots;
+      trans_block block;
+      let last_jump = mark() in
+      emit (Il.jmp Il.JMP Il.CodeNone);
+      patch next_jump;
+      last_jump
+    in
+    let last_jumps = Array.map trans_arm arms in
+    Array.iter patch last_jumps
+
   and trans_stmt (stmt:Ast.stmt) : unit =
     (* Helper to localize errors by stmt, at minimum. *)
     try
@@ -2630,6 +2665,8 @@ let trans_visitor
                 emit (Il.jmp Il.JMP Il.CodeNone)
             | Some _ -> ()
           end
+
+      | Ast.STMT_alt_tag stmt_alt_tag -> trans_alt_tag stmt_alt_tag
 
       | Ast.STMT_decl _ -> ()
 
