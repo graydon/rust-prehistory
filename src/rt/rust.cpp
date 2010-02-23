@@ -1148,7 +1148,7 @@ public:
                 rt->log(LOG_DWARF, "CU abbrev off: %" PRId32, cu_abbrev_off);
                 rt->log(LOG_DWARF, "size of address: %" PRId8, sizeof_addr);
                 I(rt, sizeof_addr == sizeof(uintptr_t));
-                I(rt, dwarf_vers == 3);
+                I(rt, dwarf_vers >= 2);
                 I(rt, cu_base + cu_unit_length == die_mem.lim - die_mem.base);
             } else {
                 rt->log(LOG_DWARF, "failed to read root CU header");

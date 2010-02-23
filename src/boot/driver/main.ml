@@ -50,10 +50,6 @@ let (sess:Session.sess) =
     Session.sess_trace_tag = false;
     Session.sess_failed = false;
     Session.sess_spans = Hashtbl.create 0;
-    (* FIXME (bug 541579): For the time being, our dwarf output appears to do more
-       harm than good on OSX.  On other platforms it's the other way
-       around. Ancient OSX gdb perhaps?  *)
-    Session.sess_emit_dwarf = (not (targ = MacOS_x86_macho));
     Session.sess_report_timing = false;
     Session.sess_timings = Hashtbl.create 0
   }
@@ -134,7 +130,6 @@ let argspecs =
                           sess.Session.sess_trace_tag <- true ),
      "emit all tracing code");
     ("-time", Arg.Unit (fun _ -> sess.Session.sess_report_timing <- true), "report timing of compiler phases");
-    ("-dwarf", Arg.Unit (fun _ -> sess.Session.sess_emit_dwarf <- true), "emit DWARF info (default false)");
     ("-dump", Arg.String dump_file, "dump DWARF info in compiled file")
   ]
 ;;

@@ -1557,7 +1557,7 @@ let dwarf_visitor
                             (F_SZ info_header_fixup))));    (* excluding this word.    *)
           DEF (info_header_fixup,
                (SEQ [|
-                  WORD (TY_u16, IMM 3L);                    (* DWARF version           *)
+                  WORD (TY_u16, IMM 2L);                    (* DWARF version           *)
                   (* Since we share abbrevs across all CUs, offset is always 0.        *)
                   WORD (TY_u32, IMM 0L);                    (* CU-abbrev offset.       *)
                   BYTE 4;                                   (* Size of an address.     *)
@@ -1578,7 +1578,7 @@ let dwarf_visitor
                             (F_SZ cu_line_header_fixup)))); (* excluding this word.     *)
           DEF (cu_line_header_fixup,
                (SEQ [|
-                  WORD (TY_u16, IMM 3L);                    (* DWARF version.           *)
+                  WORD (TY_u16, IMM 2L);                    (* DWARF version.           *)
                   WORD (TY_u32, (F_SZ line_header_fixup));  (* Another header-length.   *)
                   DEF (line_header_fixup,
                        SEQ [|
@@ -1907,8 +1907,7 @@ let process_crate
   in
 
     log cx "emitting DWARF records";
-    if cx.ctxt_sess.Session.sess_emit_dwarf
-    then run_passes cx "dwarf" path passes (log cx "%s") crate;
+    run_passes cx "dwarf" path passes (log cx "%s") crate;
 
     (* Terminate the tables. *)
     {
@@ -2034,7 +2033,7 @@ let read_dies
   let _ = log sess "debug_info cu_len: %d, section size %d" cu_len sz in
   let _ = assert ((cu_len + 4) = sz) in
   let dwarf_vers = ar.asm_get_u16() in
-  let _ = assert (dwarf_vers = 3) in
+  let _ = assert (dwarf_vers >= 2) in
   let cu_abbrev_off = ar.asm_get_u32() in
   let _ = assert (cu_abbrev_off = 0) in
   let sizeof_addr = ar.asm_get_u8() in
