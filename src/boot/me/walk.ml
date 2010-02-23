@@ -601,8 +601,7 @@ and walk_stmt
       | Ast.STMT_note _
       | Ast.STMT_foreach _
       | Ast.STMT_alt_type _
-      | Ast.STMT_alt_port _
-      | Ast.STMT_use _ ->
+      | Ast.STMT_alt_port _ ->
           bug () "unimplemented statement type in Walk.walk_stmt"
   in
     walk_bracketed

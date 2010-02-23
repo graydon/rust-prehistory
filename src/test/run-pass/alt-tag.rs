@@ -8,22 +8,18 @@ type color = tag(
 
 fn process(color c) -> int {
   let int x;
-  x = 0; // temporary hack for typestate bug.
   alt (c) {
     case (rgb(int r, int g, int b)) {
-      r = 127; // temporary hack for typestate bug.
       log "rgb";
       log r;
       x = r;
     }
     case (rgba(int r, int g, int b, int a)) {
-      a = 0; // temporary hack for typestate bug.
       log "rgba";
       log a;
       x = a;
     }
     case (hsl(int h, int s, int l)) {
-      s = 255; // temporary hack for typestate bug.
       log "hsl";
       log s;
       x = s;

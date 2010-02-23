@@ -194,59 +194,18 @@ let constr_id_assigning_visitor
                   | _ -> ()
               end
 
-        | Ast.STMT_decl (Ast.DECL_slot (_, sloti)) ->
-            note_constr_key (Constr_init sloti.id)
-
-        | Ast.STMT_init_rec (dst, entries) ->
-            let precond = Array.map (fun s -> Constr_init s) (entries_slots cx entries) in
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              note_keys precond;
-              note_keys postcond
-
-        | Ast.STMT_init_tup (dst, modes_atoms) ->
-            let precond = Array.map (fun s -> Constr_init s) (modes_and_atoms_slots cx modes_atoms) in
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              note_keys precond;
-              note_keys postcond
-
-        | Ast.STMT_init_vec (dst, _, atoms) ->
-            let precond = Array.map (fun s -> Constr_init s) (atoms_slots cx atoms) in
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              note_keys precond;
-              note_keys postcond
-
-        | Ast.STMT_init_str (dst, _) ->
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              note_keys postcond
-
-        | Ast.STMT_init_port dst ->
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              note_keys postcond
-
-        | Ast.STMT_init_chan (dst, port) ->
-            let precond = Array.map (fun s -> Constr_init s) (lval_option_slots cx port) in
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              note_keys precond;
-              note_keys postcond
-
-        | Ast.STMT_copy (dst, src, _) ->
-            let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              note_keys precond;
-              note_keys postcond
-
-        | Ast.STMT_recv (dst, src) ->
-            let precond = Array.map (fun s -> Constr_init s) (lval_slots cx src) in
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              note_keys precond;
-              note_keys postcond
-
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
   in
+
+  let visit_slot_identified_pre s =
+    note_constr_key (Constr_init s.id);
+    inner.Walk.visit_slot_identified_pre s
+  in
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_slot_identified_pre = visit_slot_identified_pre;
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_constr_pre = visit_constr_pre }
 ;;
@@ -265,8 +224,18 @@ let bitmap_assigning_visitor
     htab_put cx.ctxt_poststates s.id (Bits.create (!idref) false);
     inner.Walk.visit_stmt_pre s
   in
+  let visit_block_pre b =
+    iflog cx (fun _ -> log cx "building %d-entry bitmap for node %d"
+                (!idref) (int_of_node b.id));
+    htab_put cx.ctxt_preconditions b.id (Bits.create (!idref) false);
+    htab_put cx.ctxt_postconditions b.id (Bits.create (!idref) false);
+    htab_put cx.ctxt_prestates b.id (Bits.create (!idref) false);
+    htab_put cx.ctxt_poststates b.id (Bits.create (!idref) false);
+    inner.Walk.visit_block_pre b
+  in
     { inner with
-        Walk.visit_stmt_pre = visit_stmt_pre }
+        Walk.visit_stmt_pre = visit_stmt_pre;
+        Walk.visit_block_pre = visit_block_pre }
 ;;
 
 let condition_assigning_visitor
@@ -287,11 +256,6 @@ let condition_assigning_visitor
       keys
   in
 
-  let raise_prestate (id:node_id) (keys:constr_key array) : unit =
-    let bitv = Hashtbl.find cx.ctxt_prestates id in
-      raise_bits bitv keys
-  in
-
   let raise_postcondition (id:node_id) (keys:constr_key array) : unit =
     let bitv = Hashtbl.find cx.ctxt_postconditions id in
       raise_bits bitv keys
@@ -306,42 +270,39 @@ let condition_assigning_visitor
     determine_constr_key cx (!scopes) (scope_ids()) constr
   in
 
+  let raise_entry_state input_keys init_keys block =
+    iflog cx (fun _ -> log cx
+                "setting entry state as block %d postcondition (block-entry prestate)"
+                (int_of_node block.id));
+    raise_postcondition block.id input_keys;
+    raise_postcondition block.id init_keys;
+    iflog cx (fun _ -> log cx "done setting block postcondition")
+  in
+
   let visit_mod_item_pre n p i =
-    let raise_entry_state input_keys init_keys block =
-      if (Array.length block.node) != 0
-      then
-        begin
-          iflog cx (fun _ -> log cx
-                      "setting entry state as stmt %d prestate"
-                      (int_of_node block.node.(0).id));
-          raise_prestate block.node.(0).id input_keys;
-          raise_prestate block.node.(0).id init_keys;
-          iflog cx (fun _ -> log cx "done propagating fn entry state")
-        end
-    in
     begin
-    match i.node with
-        Ast.MOD_ITEM_fn fd ->
-          let (input_keys, init_keys) = fn_decl_keys fd resolve_constr_to_key in
-            raise_entry_state input_keys init_keys fd.Ast.decl_item.Ast.fn_body
+      match i.node with
+          Ast.MOD_ITEM_fn fd ->
+            let (input_keys, init_keys) = fn_decl_keys fd resolve_constr_to_key in
+              raise_entry_state input_keys init_keys fd.Ast.decl_item.Ast.fn_body
 
-      | Ast.MOD_ITEM_mod {Ast.decl_item=(Some hdr, mis)} ->
-          let (input_keys, init_keys) = stateful_mod_decl_keys hdr resolve_constr_to_key in
-          let raise_in_item _ item =
-            match item.node with
-                Ast.MOD_ITEM_fn fd ->
-                  raise_entry_state input_keys init_keys fd.Ast.decl_item.Ast.fn_body
-              | Ast.MOD_ITEM_pred pd ->
-                  raise_entry_state input_keys init_keys pd.Ast.decl_item.Ast.pred_body
-              | _ -> ()
-          in
-            Hashtbl.iter raise_in_item mis
+        | Ast.MOD_ITEM_mod {Ast.decl_item=(Some hdr, mis)} ->
+            let (input_keys, init_keys) = stateful_mod_decl_keys hdr resolve_constr_to_key in
+            let raise_in_item _ item =
+              match item.node with
+                  Ast.MOD_ITEM_fn fd ->
+                    raise_entry_state input_keys init_keys fd.Ast.decl_item.Ast.fn_body
+                | Ast.MOD_ITEM_pred pd ->
+                    raise_entry_state input_keys init_keys pd.Ast.decl_item.Ast.pred_body
+                | _ -> ()
+            in
+              Hashtbl.iter raise_in_item mis
 
-      | Ast.MOD_ITEM_pred pd ->
-          let (input_keys, init_keys) = pred_decl_keys pd resolve_constr_to_key in
-            raise_entry_state input_keys init_keys pd.Ast.decl_item.Ast.pred_body
+        | Ast.MOD_ITEM_pred pd ->
+            let (input_keys, init_keys) = pred_decl_keys pd resolve_constr_to_key in
+              raise_entry_state input_keys init_keys pd.Ast.decl_item.Ast.pred_body
 
-      | _ -> ()
+        | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
   in
@@ -353,17 +314,18 @@ let condition_assigning_visitor
             let postcond = Array.map resolve_constr_to_key constrs in
               raise_postcondition s.id postcond
 
-        | Ast.STMT_copy (dst, src, _) ->
-            let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
-            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-              raise_precondition s.id precond;
-              raise_postcondition s.id postcond
-
         | Ast.STMT_recv (dst, src) ->
             let precond = Array.map (fun s -> Constr_init s) (lval_slots cx src) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
+
+        | Ast.STMT_send (dst, src) ->
+            let precond = Array.append
+              (Array.map (fun s -> Constr_init s) (lval_slots cx dst))
+              (Array.map (fun s -> Constr_init s) (lval_slots cx src))
+            in
+              raise_precondition s.id precond;
 
         | Ast.STMT_init_rec (dst, entries) ->
             let precond = Array.map (fun s -> Constr_init s) (entries_slots cx entries) in
@@ -397,6 +359,13 @@ let condition_assigning_visitor
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
 
+        | Ast.STMT_copy (dst, src, _) ->
+            let precond = Array.map (fun s -> Constr_init s) (expr_slots cx src) in
+            let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+              raise_precondition s.id precond;
+              raise_postcondition s.id postcond
+
+        | Ast.STMT_spawn (dst, _, lv, args)
         | Ast.STMT_call (dst, lv, args) ->
             let referent_ty = lval_ty cx lv in
               begin
@@ -426,7 +395,34 @@ let condition_assigning_visitor
 
         | Ast.STMT_ret (_, Some at) ->
             let precond = Array.map (fun s -> Constr_init s) (atom_slots cx at) in
+              raise_precondition s.id precond
+
+        | Ast.STMT_join lval ->
+            let precond = Array.map (fun s -> Constr_init s) (lval_slots cx lval) in
+              raise_precondition s.id precond
+
+        | Ast.STMT_log atom ->
+            let precond = Array.map (fun s -> Constr_init s) (atom_slots cx atom) in
+              raise_precondition s.id precond
+
+        | Ast.STMT_check_expr expr ->
+            let precond = Array.map (fun s -> Constr_init s) (expr_slots cx expr) in
+              raise_precondition s.id precond
+
+        | Ast.STMT_while sw ->
+            let (_, expr) = sw.Ast.while_lval in
+            let precond = Array.map (fun s -> Constr_init s) (expr_slots cx expr) in
+              raise_precondition s.id precond
+
+        | Ast.STMT_alt_tag at ->
+            let precond = Array.map (fun s -> Constr_init s) (lval_slots cx at.Ast.alt_tag_lval) in
+            let visit_arm (_, header_slots, block) =
+              (* FIXME: propagate tag-carried constrs here. *)
+              let (input_keys, init_keys) = entry_keys header_slots [| |] resolve_constr_to_key in
+                raise_entry_state input_keys init_keys block
+            in
               raise_precondition s.id precond;
+              Array.iter visit_arm at.Ast.alt_tag_arms
 
         | _ -> ()
     end;
@@ -437,10 +433,22 @@ let condition_assigning_visitor
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
-let lset_add x xs =
+let lset_add (x:node_id) (xs:node_id list) : node_id list =
   if List.mem x xs
   then xs
   else x::xs
+;;
+
+let lset_remove (x:node_id) (xs:node_id list) : node_id list =
+  List.filter (fun a -> not (a = x)) xs
+;;
+
+let lset_union (xs:node_id list) (ys:node_id list) : node_id list =
+  List.fold_left (fun ns n -> lset_add n ns) xs ys
+;;
+
+let lset_diff (xs:node_id list) (ys:node_id list) : node_id list =
+  List.fold_left (fun ns n -> lset_remove n ns) xs ys
 ;;
 
 let lset_fmt lset =
@@ -451,34 +459,32 @@ let lset_fmt lset =
     "]"
 ;;
 
-let graph_building_visitor
+type node_graph = (node_id, (node_id list)) Hashtbl.t;;
+
+let graph_sequence_building_visitor
     (cx:ctxt)
-    (graph:(node_id, (node_id list)) Hashtbl.t)
+    (graph:node_graph)
     (inner:Walk.visitor)
     : Walk.visitor =
 
+  (* Flow each stmt to its sequence-successor. *)
   let visit_stmts stmts =
-    for i = 0 to (Array.length stmts) - 2
-    do
-      let stmt = stmts.(i) in
-      let next = stmts.(i+1) in
-      let dests =
-        if Hashtbl.mem graph stmt.id
-        then Hashtbl.find graph stmt.id
-        else []
-      in
-        log cx "stmt edge %d -> %d"
-          (int_of_node stmt.id) (int_of_node next.id);
-        Hashtbl.replace graph stmt.id (lset_add next.id dests);
-    done;
+    let len = Array.length stmts in
+      for i = 0 to len - 2
+      do
+        let stmt = stmts.(i) in
+        let next = stmts.(i+1) in
+          log cx "sequential stmt edge %d -> %d"
+            (int_of_node stmt.id) (int_of_node next.id);
+          htab_put graph stmt.id [next.id]
+      done;
+      (* Flow last node to nowhere. *)
+      if len > 0
+      then htab_put graph stmts.(len-1).id []
   in
 
   let visit_stmt_pre s =
-    begin
-      if not (Hashtbl.mem graph s.id)
-      then htab_put graph s.id []
-      else ()
-    end;
+    (* Sequence the prelude nodes on special stmts. *)
     begin
       match s.node with
           Ast.STMT_while sw ->
@@ -489,136 +495,151 @@ let graph_building_visitor
     inner.Walk.visit_stmt_pre s
   in
 
-  let visit_block_pre b = visit_stmts b.node in
+  let visit_block_pre b =
+    visit_stmts b.node;
+    inner.Walk.visit_block_pre b
+  in
 
-  let rec last_of (stmt:Ast.stmt) =
-    let last_of_stmts (best:Ast.stmt) (stmts:Ast.stmt array) : Ast.stmt =
-      let len = Array.length stmts in
-        if len = 0 then best else last_of (stmts.(len - 1))
-    in
-      match stmt.node with
-          Ast.STMT_block b -> last_of_stmts stmt b.node
-        | Ast.STMT_if sif ->
-            let then_last = last_of_stmts stmt sif.Ast.if_then.node in
-              begin
-                match sif.Ast.if_else with
-                    None -> then_last
-                  | Some b -> last_of_stmts then_last b.node
-              end
+    { inner with
+        Walk.visit_stmt_pre = visit_stmt_pre;
+        Walk.visit_block_pre = visit_block_pre }
+;;
 
-        | Ast.STMT_while sw ->
-            let (stmts, _) = sw.Ast.while_lval in
-            let pre_last = last_of_stmts stmt stmts in
-              last_of_stmts pre_last sw.Ast.while_body.node
+let add_flow_edges (graph:node_graph) (n:node_id) (dsts:node_id list) : unit =
+  let existing = Hashtbl.find graph n in
+    Hashtbl.replace graph n (lset_union existing dsts)
+;;
 
-        | _ -> stmt
+let remove_flow_edges (graph:node_graph) (n:node_id) (dsts:node_id list) : unit =
+  let existing = Hashtbl.find graph n in
+    Hashtbl.replace graph n (lset_diff existing dsts)
+;;
+
+let graph_general_block_structure_building_visitor
+    ((*cx*)_:ctxt)
+    (graph:node_graph)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+
+  let stmts = Stack.create () in
+
+  let visit_stmt_pre s =
+    Stack.push s stmts;
+    inner.Walk.visit_stmt_pre s
   in
 
   let visit_stmt_post s =
+    inner.Walk.visit_stmt_post s;
+    ignore (Stack.pop stmts)
+  in
+
+  let visit_block_pre b =
     begin
-      (* Rewire blocks, loops and conditionals a bit. *)
+    let len = Array.length b.node in
+
+    (* Flow container-stmt to block, save existing out-edges for below. *)
+    let dsts =
+      if Stack.is_empty stmts
+      then []
+      else
+        let s = Stack.top stmts in
+        let dsts = Hashtbl.find graph s.id in
+          add_flow_edges graph s.id [b.id];
+          dsts
+    in
+
+      (*
+       * If block has len, 
+       * then flow block to block.node.(0) and block.node.(len-1) to dsts
+       * else flow block to dsts
+       *)
+      if len > 0
+      then
+        begin
+          htab_put graph b.id [b.node.(0).id];
+          add_flow_edges graph b.node.(len-1).id dsts
+        end
+      else
+        htab_put graph b.id dsts
+    end;
+    inner.Walk.visit_block_pre b
+  in
+
+    { inner with
+        Walk.visit_stmt_pre = visit_stmt_pre;
+        Walk.visit_stmt_post = visit_stmt_post;
+        Walk.visit_block_pre = visit_block_pre }
+;;
+
+
+let graph_special_block_structure_building_visitor
+    ((*cx*)_:ctxt)
+    (graph:(node_id, (node_id list)) Hashtbl.t)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+
+  let visit_stmt_pre s =
+    begin
       match s.node with
-          Ast.STMT_block b when not ((Array.length b.node) = 0) ->
-            let dests = Hashtbl.find graph s.id in
-            let first = b.node.(0) in
-            let last = last_of (b.node.((Array.length b.node) - 1)) in
-              log cx "block entry edge %d -> %d"
-                (int_of_node s.id) (int_of_node first.id);
-              log cx "block exit edge %d -> %s"
-                (int_of_node last.id) (lset_fmt dests);
-              Hashtbl.replace graph s.id [first.id];
-              Hashtbl.replace graph last.id dests
 
         | Ast.STMT_if sif ->
-            begin
-              let dests = Hashtbl.find graph s.id in
-              let tlen = Array.length sif.Ast.if_then.node in
-              let nonempty_else =
+            (* Drop implicit stmt-bypass edge(s); can only flow to inner block(s). *)
+            let block_ids =
+              [sif.Ast.if_then.id] @
                 match sif.Ast.if_else with
-                    None -> None
-                  | Some b ->
-                      if Array.length b.node = 0
-                      then None
-                      else Some b.node
-              in
-                match (tlen != 0, nonempty_else) with
-                    (false, None) -> ()
-                  | (true, None) ->
-                      begin
-                        let first = sif.Ast.if_then.node.(0) in
-                        let last = last_of sif.Ast.if_then.node.(tlen - 1) in
-                          log cx "rewiring if stmt %d to enter 'then' block at %d" 
-                            (int_of_node s.id) (int_of_node first.id);
-                          Hashtbl.replace graph s.id [first.id];
-                          Hashtbl.replace graph last.id dests
-                      end
-                  | (false, Some e) ->
-                      begin
-                        let elen = Array.length e in
-                        let first = e.(0) in
-                        let last = last_of e.(elen - 1) in
-                          Hashtbl.replace graph s.id [first.id];
-                          Hashtbl.replace graph last.id dests
-                      end
-                  | (true, Some e) ->
-                      begin
-                        let elen = Array.length e in
-                        let t_first = sif.Ast.if_then.node.(0) in
-                        let t_last = last_of sif.Ast.if_then.node.(tlen - 1) in
-                        let e_first = e.(0) in
-                        let e_last = last_of e.(elen - 1) in
-                          Hashtbl.replace graph s.id [t_first.id; e_first.id];
-                          Hashtbl.replace graph t_last.id dests;
-                          Hashtbl.replace graph e_last.id dests
-                      end
-            end
+                    None -> []
+                  | Some eb -> [eb.id]
+            in
+              Hashtbl.replace graph s.id block_ids
 
         | Ast.STMT_while sw ->
+            (* There are a bunch of rewirings to do on 'while' nodes. *)
+
             begin
-              let (stmts, _) = sw.Ast.while_lval in
-              let dests = Hashtbl.find graph s.id in
-              let pre_loop_stmt_id =
-                let slen = Array.length stmts in
-                  if slen != 0
+              let dsts = Hashtbl.find graph s.id in
+              let body = sw.Ast.while_body in
+              let succ_stmts = List.filter (fun x -> not (x = body.id)) dsts in
+
+              let (pre_loop_stmts, _) = sw.Ast.while_lval in
+              let loop_head_id =
+                (* Splice loop prelude into flow graph, save loop-head node. *)
+                let slen = Array.length pre_loop_stmts in
+                  if slen > 0
                   then
                     begin
-                      let first = stmts.(0) in
-                      let last = last_of stmts.(slen - 1) in
-                        log cx "while stmt, pre-loop entry edge %d -> %d"
-                          (int_of_node s.id) (int_of_node first.id);
-                        Hashtbl.replace graph s.id [first.id];
-                        last.id
+                      remove_flow_edges graph s.id [body.id];
+                      add_flow_edges graph s.id [pre_loop_stmts.(0).id];
+                      add_flow_edges graph pre_loop_stmts.(slen-1).id [body.id];
+                      pre_loop_stmts.(slen - 1).id
                     end
                   else
-                    s.id
+                    body.id
               in
-              let block = sw.Ast.while_body.node in
-              let blen = Array.length block in
-                if blen != 0
-                then
-                  begin
-                    let first = block.(0) in
-                    let last = last_of block.(blen - 1) in
-                    let new_dests = s.id :: dests in
-                      log cx "while stmt, block entry edge %d -> %d"
-                        (int_of_node pre_loop_stmt_id) (int_of_node first.id);
-                      log cx "while stmt, block exit edge %d -> %s"
-                        (int_of_node last.id) (lset_fmt new_dests);
-                      Hashtbl.replace graph pre_loop_stmt_id [first.id];
-                      Hashtbl.replace graph last.id new_dests
-                  end
-                else
-                  Hashtbl.replace graph pre_loop_stmt_id dests
+
+                (* Always flow s into the loop prelude; prelude may end loop. *)
+                remove_flow_edges graph s.id succ_stmts;
+                add_flow_edges graph loop_head_id succ_stmts;
+
+                (* Flow loop-end to loop-head. *)
+                let blen = Array.length body.node in
+                  if blen > 0
+                  then add_flow_edges graph body.node.(blen - 1).id [loop_head_id]
+                  else add_flow_edges graph body.id [loop_head_id]
             end
+
+        | Ast.STMT_alt_tag at ->
+            let dsts = Hashtbl.find graph s.id in
+            let arm_blocks = Array.to_list (Array.map (fun (_, _, block) -> block.id) at.Ast.alt_tag_arms) in
+            let succ_stmts = List.filter (fun x -> not (List.mem x arm_blocks)) dsts in
+              remove_flow_edges graph s.id succ_stmts
+
 
         | _ -> ()
     end;
     inner.Walk.visit_stmt_post s
   in
     { inner with
-        Walk.visit_block_pre = visit_block_pre;
-        Walk.visit_stmt_pre = visit_stmt_pre;
-        Walk.visit_stmt_post = visit_stmt_post }
+        Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
 let find_roots
@@ -672,8 +693,9 @@ let run_dataflow cx graph =
             let postcond = Hashtbl.find cx.ctxt_postconditions node in
             let poststate = Hashtbl.find cx.ctxt_poststates node in
               iflog cx (fun _ -> log cx "stmt %d: '%s'" (int_of_node node)
-                          (Ast.fmt_to_str Ast.fmt_stmt
-                             (Hashtbl.find cx.ctxt_all_stmts node)));
+                       (match htab_search cx.ctxt_all_stmts node with
+                            None -> "??"
+                          | Some stmt -> Ast.fmt_to_str Ast.fmt_stmt stmt));
               iflog cx (fun _ -> log cx "stmt %d:" (int_of_node node));
               iflog cx (fun _ -> log cx
                           "    prestate %s" (fmt_constr_bitv prestate));
@@ -768,7 +790,7 @@ let process_crate
     (cx:ctxt)
     (crate:Ast.crate)
     : unit =
-  let path = Stack.create () in 
+  let path = Stack.create () in
   let (scopes:(scope list) ref) = ref [] in
   let constr_id = ref 0 in
   let (graph:(node_id, (node_id list)) Hashtbl.t) = Hashtbl.create 0 in
@@ -782,8 +804,12 @@ let process_crate
       (scope_stack_managing_visitor scopes
          (condition_assigning_visitor cx scopes
             Walk.empty_visitor));
-      (graph_building_visitor cx graph
-         Walk.empty_visitor)
+      (graph_sequence_building_visitor cx graph
+         Walk.empty_visitor);
+      (graph_general_block_structure_building_visitor cx graph
+         Walk.empty_visitor);
+      (graph_special_block_structure_building_visitor cx graph
+         Walk.empty_visitor);
     |]
   in
   let verify_passes =

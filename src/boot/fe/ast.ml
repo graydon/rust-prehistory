@@ -243,7 +243,6 @@ and stmt' =
   | STMT_check_if of (constrs * check_calls * block)
   | STMT_block of block
   | STMT_decl of stmt_decl
-  | STMT_use of (ty * ident * lval)
 
 and stmt = stmt' identified
 
@@ -1126,7 +1125,6 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_join _ -> fmt ff "?stmt_join?"
       | STMT_send _ -> fmt ff "?stmt_send?"
       | STMT_recv _ -> fmt ff "?stmt_recv?"
-      | STMT_use _ -> fmt ff "?stmt_use?"
   end
 
 and fmt_decl_params (ff:Format.formatter) (params:ident array) : unit =
