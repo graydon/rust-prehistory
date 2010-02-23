@@ -1,3 +1,5 @@
+// error-pattern: argument count
+
 fn f(int x) -> () {
 }
 

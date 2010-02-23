@@ -1,5 +1,7 @@
 // -*- C -*-
 
+// error-pattern:predicate check
+
 fn f(int a, int b) : lt(a,b) -> () {
 }
 

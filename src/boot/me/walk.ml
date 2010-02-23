@@ -588,12 +588,11 @@ and walk_stmt
           walk_constrs v cs
 
       | Ast.STMT_alt_tag
-            { Ast.alt_tag_lval = lval; Ast.alt_tag_arms = arms } ->
+          { Ast.alt_tag_lval = lval; Ast.alt_tag_arms = arms } ->
           walk_lval v lval;
-          let walk_arm (_, slots, block) =
-            let walk_binding (si, _) = walk_slot_identified v si in
-              Array.iter walk_binding slots;
-              walk_block v block
+          let walk_arm (_, header_slots, block) =
+            walk_header_slots v header_slots;
+            walk_block v block
           in
           Array.iter walk_arm arms
 

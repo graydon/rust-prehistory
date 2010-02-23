@@ -1,5 +1,7 @@
 // -*- C -*-
 
+// error-pattern: writing to read-alias
+
 type point = rec(int x, int y, int z);
 
 fn f(~point p) -> () {

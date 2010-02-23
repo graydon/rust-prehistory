@@ -1,1 +1,0 @@
-.*Error: Infinite type recursion.*

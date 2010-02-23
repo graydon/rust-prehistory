@@ -254,6 +254,7 @@ TEST_XFAILS := test/run-pass/spawn-fn.rs \
                test/run-pass/mlist.rs \
                test/run-pass/linear-for-loop.rs \
                test/run-pass/first-class-modules.rs \
+               test/run-pass/drop-on-ret.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
@@ -277,7 +278,6 @@ TEST_RUN_PASS_OUTS := $(TEST_RUN_PASS_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 TEST_RUN_FAIL_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-fail/*.rc))
 TEST_RUN_FAIL_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-fail/*.rs))
-TEST_RUN_FAIL_PATS := $(wildcard test/run-fail/*.pat)
 TEST_RUN_FAIL_EXES := $(TEST_RUN_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
                       $(TEST_RUN_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
 TEST_RUN_FAIL_OUTS := $(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
@@ -285,7 +285,6 @@ TEST_RUN_FAIL_OUTS := $(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 TEST_COMPILE_FAIL_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/compile-fail/*.rc))
 TEST_COMPILE_FAIL_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/compile-fail/*.rs))
-TEST_COMPILE_FAIL_PATS := $(wildcard test/compile-fail/*.pat)
 TEST_COMPILE_FAIL_EXES := $(TEST_COMPILE_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
                           $(TEST_COMPILE_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
 TEST_COMPILE_FAIL_OUTS := $(TEST_COMPILE_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
@@ -301,27 +300,22 @@ test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 	@$(call CFG_ECHO, run: $<)
 	$(CFG_QUIET)$(call CFG_RUN_TARG, $<) > $@
 
-test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) test/run-fail/%.pat $(CFG_RUNTIME)
+test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 	@$(call CFG_ECHO, run: $<)
 	$(CFG_QUIET)rm -f $@
 	$(CFG_QUIET)$(call CFG_RUN_TARG, $<) >$@ 2>&1 ; X=$$? ; if [ $$X -eq 0 ] ; then exit 1 ; else exit 0 ; fi
-	$(CFG_QUIET)grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
+	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $(@:.out=.rs)`" $@
+
+test/compile-fail/%.out: test/compile-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
+	@$(call CFG_ECHO, run: $<)
+	$(CFG_QUIET)rm -f $@
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $<`" $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
-
-test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rc test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
-	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
-	$(CFG_QUIET)chmod 0755 $@
-
-test/compile-fail/%.out: test/compile-fail/%.rc test/run-pass/%.rs test/compile-fail/%.pat $(CFG_BOOT) $(CFG_RUNTIME)
-	@$(call CFG_ECHO, run: $<)
-	$(CFG_QUIET)rm -f $@
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
-	$(CFG_QUIET)grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile: $<)
@@ -332,12 +326,6 @@ test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME) 
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
-
-test/compile-fail/%.out: test/compile-fail/%.rs test/compile-fail/%.pat $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
-	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)rm -f $@
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
-	$(CFG_QUIET)grep --line-regexp --text --quiet --file=$(@:.out=.pat) $@
 
 
 ######################################################################

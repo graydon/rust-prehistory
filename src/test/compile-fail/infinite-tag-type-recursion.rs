@@ -1,5 +1,7 @@
 // -*- C -*-
 
+// error-pattern: Infinite type recursion
+
 type mlist = tag(cons(int,mlist), nil());
 
 fn main() -> () {

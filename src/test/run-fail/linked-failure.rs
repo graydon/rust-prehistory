@@ -1,5 +1,7 @@
 // -*- C++ -*-
 
+// error-pattern:1 == 2
+
 fn child() -> () {
   check (1 == 2);
 }

@@ -1,5 +1,7 @@
 // -*- C -*-
 
+// error-pattern: Unsatisfied .* lt(a, c)
+
 fn f(int a, int b) : lt(a,b) -> () {
 }
 

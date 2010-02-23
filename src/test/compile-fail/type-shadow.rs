@@ -1,5 +1,7 @@
 // -*- C -*-
 
+// error-pattern: mismatched types
+
 fn main() -> () {
   type X = int;
   type Y = X;

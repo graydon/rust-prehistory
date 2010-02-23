@@ -1,3 +1,6 @@
+
+// error-pattern: mismatched types
+
 fn f(int x) -> () {
 }
 

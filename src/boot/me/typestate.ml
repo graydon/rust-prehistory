@@ -423,6 +423,11 @@ let condition_assigning_visitor
                 let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
                   raise_postcondition s.id postcond
               end
+
+        | Ast.STMT_ret (_, Some at) ->
+            let precond = Array.map (fun s -> Constr_init s) (atom_slots cx at) in
+              raise_precondition s.id precond;
+
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s

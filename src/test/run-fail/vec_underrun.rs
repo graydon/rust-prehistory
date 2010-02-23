@@ -1,5 +1,7 @@
 // -*- C -*-
 
+// error-pattern:bounds check
+
 fn main() -> () {
   let vec[int] v = vec(10, 20);
   let int x = 0;
