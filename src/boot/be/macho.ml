@@ -539,8 +539,10 @@ let macho_symtab_command
 ;;
 
 let macho_dysymtab_command
-    (defined_syms_index:int64)
-    (defined_syms_count:int64)
+    (local_defined_syms_index:int64)
+    (local_defined_syms_count:int64)
+    (external_defined_syms_index:int64)
+    (external_defined_syms_count:int64)
     (undefined_syms_index:int64)
     (undefined_syms_count:int64)
     (indirect_symtab_fixup:fixup)  : frag =
@@ -551,11 +553,11 @@ let macho_dysymtab_command
         WORD (TY_u32, IMM (load_command_code LC_DYSYMTAB));
         WORD (TY_u32, F_SZ cmd_fixup);
 
-        WORD (TY_u32, IMM 0L); (* ilocalsym *)
-        WORD (TY_u32, IMM 0L); (* nlocalsym *)
+        WORD (TY_u32, IMM local_defined_syms_index); (* ilocalsym *)
+        WORD (TY_u32, IMM local_defined_syms_count); (* nlocalsym *)
 
-        WORD (TY_u32, IMM defined_syms_index); (* iextdefsym *)
-        WORD (TY_u32, IMM defined_syms_count); (* nextdefsym *)
+        WORD (TY_u32, IMM external_defined_syms_index); (* iextdefsym *)
+        WORD (TY_u32, IMM external_defined_syms_count); (* nextdefsym *)
 
         WORD (TY_u32, IMM undefined_syms_index); (* iundefsym *)
         WORD (TY_u32, IMM undefined_syms_count); (* nundefsym *)
@@ -642,6 +644,13 @@ let emit_file
               (align_both a MARK)|])
   in
 
+  (* Segments. *)
+  let zero_segment_fixup = new_fixup "__PAGEZERO segment" in
+  let text_segment_fixup = new_fixup "__TEXT segment" in
+  let data_segment_fixup = new_fixup "__DATA segment" in
+  let dwarf_segment_fixup = new_fixup "__DWARF segment" in
+  let linkedit_segment_fixup = new_fixup "__LINKEDIT segment" in
+
   (* Sections in the text segment. *)
   let text_section_fixup = new_fixup "__text section" in
   let text_section = def_aligned text_sect_align text_section_fixup code in
@@ -690,10 +699,25 @@ let emit_file
          |], strtab_entry_fixup)
   in
 
-
-  let sect_symbol_nlist_entry (sect_index:int) (fixup_to_use:fixup) : (frag * fixup) =
+  let sect_symbol_nlist_entry (seg:segment) (fixup_to_use:fixup) : (frag * fixup) =
     let nty = [ N_SECT; N_EXT ] in
     let nd = (0, [], REFERENCE_FLAG_UNDEFINED_NON_LAZY) in
+    let (sect_index, _(*seg_fix*)) =
+      match seg with
+          SEG_text -> (1, text_segment_fixup)
+        | SEG_data -> (2, data_segment_fixup)
+    in
+      symbol_nlist_entry sect_index nty nd (M_POS fixup_to_use)
+  in
+
+  let sect_private_symbol_nlist_entry (seg:segment) (fixup_to_use:fixup) : (frag * fixup) =
+    let nty = [ N_SECT; ] in
+    let nd = (0, [], REFERENCE_FLAG_UNDEFINED_NON_LAZY) in
+    let (sect_index, _(*seg_fix*)) =
+      match seg with
+          SEG_text -> (1, text_segment_fixup)
+        | SEG_data -> (2, data_segment_fixup)
+    in
       symbol_nlist_entry sect_index nty nd (M_POS fixup_to_use)
   in
 
@@ -701,18 +725,6 @@ let emit_file
     let nty = [ N_UNDF; N_EXT ] in
     let nd = (dylib_index, [], REFERENCE_FLAG_UNDEFINED_NON_LAZY) in
       symbol_nlist_entry 0 nty nd (IMM 0L)
-  in
-
-  let absolute_symbol_nlist_entry (fixup_to_use:fixup) : (frag * fixup) =
-    let nty = [ N_ABS; N_EXT ] in
-    let nd = (0, [], REFERENCE_FLAG_DEFINED) in
-      symbol_nlist_entry 0 nty nd (M_POS fixup_to_use)
-  in
-
-  let absolute_private_symbol_nlist_entry (fixup_to_use:fixup) : (frag * fixup) =
-    let nty = [ N_ABS; N_EXT ] in
-    let nd = (0, [], REFERENCE_FLAG_PRIVATE_DEFINED) in
-      symbol_nlist_entry 0 nty nd (M_POS fixup_to_use)
   in
 
   let indirect_symbols =
@@ -726,17 +738,6 @@ let emit_file
             (htab_pairs sem.Semant.ctxt_native_imports)))
   in
 
-  let exported_symbols =
-    Array.of_list
-      (List.concat
-         (List.map
-            (fun (seg, tab) ->
-               (List.map
-                  (fun (name, fix) -> (seg,name,fix))
-                  (htab_pairs tab)))
-            (htab_pairs sem.Semant.ctxt_native_exports)))
-  in
-
   let dylib_index (lib:native_import_lib) : int =
     match lib with
         NATIVE_LIB_rustrt -> 1
@@ -744,7 +745,7 @@ let emit_file
   in
 
   (* Make undef symbols for native imports. *)
-  let (symbols:(string * (frag * fixup)) array) =
+  let (undefined_symbols:(string * (frag * fixup)) array) =
     Array.map (fun (lib,name,_) ->
                  ("_" ^ name,
                   indirect_symbol_nlist_entry (dylib_index lib)))
@@ -752,50 +753,74 @@ let emit_file
   in
 
   (* Make symbols for exports. *)
-  let (symbols:(string * (frag * fixup)) array) =
-    Array.append symbols
-      (Array.map (fun (seg,name,fix) ->
-                    ("_" ^ name,
-                     sect_symbol_nlist_entry
-                       (match seg with
-                            SEG_text -> 1
-                          | SEG_data -> 2)
-                       fix))
-         exported_symbols)
+  let (export_symbols:(string * (frag * fixup)) array) =
+    let export_symbols_of_seg (seg, tab) =
+      List.map
+        begin
+          fun (name, fix) ->
+            let name = "_" ^ name in
+            let sym = sect_symbol_nlist_entry seg fix in
+              (name, sym)
+        end
+        (htab_pairs tab)
+    in
+      Array.of_list
+        (List.concat
+           (List.map export_symbols_of_seg
+              (htab_pairs sem.Semant.ctxt_native_exports)))
   in
 
   (* Make private symbols for items. *)
-  let (symbols:(string * (frag * fixup)) array) =
-    Array.append symbols
-      (Array.map (fun code ->
-                    let fix = code.Semant.code_fixup in
-                      ("_" ^ fix.fixup_name,
-                       absolute_private_symbol_nlist_entry fix))
-         (Array.of_list (htab_vals sem.Semant.ctxt_all_item_code)))
+  let (local_item_symbols:(string * (frag * fixup)) array) =
+    Array.map (fun code ->
+                 let fix = code.Semant.code_fixup in
+                   ("_" ^ fix.fixup_name,
+                    sect_private_symbol_nlist_entry SEG_text fix))
+      (Array.of_list (htab_vals sem.Semant.ctxt_all_item_code))
   in
 
   (* Make private symbols for glue. *)
-  let (symbols:(string * (frag * fixup)) array) =
-    Array.append symbols
-      (Array.map (fun (g,code) ->
-                    let fix = code.Semant.code_fixup in
-                      (Semant.glue_str sem g,
-                       absolute_private_symbol_nlist_entry fix))
-         (Array.of_list (htab_pairs sem.Semant.ctxt_glue_code)))
+  let (local_glue_symbols:(string * (frag * fixup)) array) =
+    Array.map (fun (g, code) ->
+                 let fix = code.Semant.code_fixup in
+                   ("_" ^ (Semant.glue_str sem g),
+                    sect_private_symbol_nlist_entry SEG_text fix))
+      (Array.of_list (htab_pairs sem.Semant.ctxt_glue_code))
   in
 
-  let (symbols:(string * (frag * fixup)) array) =
-    Array.append symbols
-                 [|
-                   ("__mh_execute_header", absolute_symbol_nlist_entry mh_execute_header_fixup);
-                 |]
+  let (export_header_symbols:(string * (frag * fixup)) array) =
+    let name =
+      if sess.Session.sess_library_mode
+      then "__mh_dylib_header"
+      else "__mh_execute_header"
+    in
+      [|
+        (name, sect_symbol_nlist_entry SEG_text mh_execute_header_fixup);
+      |]
   in
 
+  let export_symbols = Array.concat [ export_symbols;
+                                      export_header_symbols ]
+  in
+
+  let local_symbols = Array.concat [ local_item_symbols;
+                                     local_glue_symbols ]
+  in
+
+  let symbols = Array.concat [ local_symbols;
+                               export_symbols;
+                               undefined_symbols ]
+  in
+  let n_local_syms = Array.length local_symbols in
+  let n_export_syms = Array.length export_symbols in
+  let n_undef_syms = Array.length undefined_symbols in
+
+  let indirect_symbols_off = n_local_syms + n_export_syms in
   let indirect_symtab_fixup = new_fixup "indirect symbol table" in
   let indirect_symtab =
     DEF (indirect_symtab_fixup,
          SEQ (Array.mapi
-                (fun i _ -> WORD(TY_u32, IMM (Int64.of_int i)))
+                (fun i _ -> WORD(TY_u32, IMM (Int64.of_int (i + indirect_symbols_off))))
                 indirect_symbols))
   in
 
@@ -815,13 +840,6 @@ let emit_file
                     SEQ (Array.map (fun (_, (frag, _)) -> frag) symbols))
   in
 
-
-  (* Segments. *)
-  let zero_segment_fixup = new_fixup "__PAGEZERO segment" in
-  let text_segment_fixup = new_fixup "__TEXT segment" in
-  let data_segment_fixup = new_fixup "__DATA segment" in
-  let dwarf_segment_fixup = new_fixup "__DWARF segment" in
-  let linkedit_segment_fixup = new_fixup "__LINKEDIT segment" in
 
   let load_commands =
     [|
@@ -863,8 +881,12 @@ let emit_file
       macho_symtab_command
         symtab_fixup (Int64.of_int (Array.length symbols)) strtab_fixup;
 
-      (* These index-and-count numbers must match the 'symbols' table above.*)
-      macho_dysymtab_command 2L 5L 0L 2L indirect_symtab_fixup;
+
+      macho_dysymtab_command
+        0L                                            (Int64.of_int n_local_syms)
+        (Int64.of_int n_local_syms)                   (Int64.of_int n_export_syms)
+        (Int64.of_int (n_local_syms + n_export_syms)) (Int64.of_int n_undef_syms)
+        indirect_symtab_fixup;
 
       macho_dylinker_command;
 
