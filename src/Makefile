@@ -301,7 +301,7 @@ test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $(@:.out=.rs) | tr -d '\n\r'`" $@
 
 test/compile-fail/%.out: test/compile-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
-	@$(call CFG_ECHO, run: $<)
+	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)rm -f $@
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
 	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $< | tr -d '\n\r'`" $@
