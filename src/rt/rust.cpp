@@ -1022,14 +1022,14 @@ public:
 
                 for (die ch = next(); !ch.is_null(); ch = ch.next_sibling()) {
                     char const *ac;
-                    if (ch.find_str_attr(DW_AT_name, ac)) {
-                        if (strcmp(ac, c) == 0) {
-                            child = ch;
+                    if (!exact && ch.is_transparent()) {
+                        if (ch.find_child_by_name(c, child, exact)) {
                             return true;
                         }
                     }
-                    if (!exact && ch.is_transparent()) {
-                        if (ch.find_child_by_name(c, child, exact)) {
+                    else if (ch.find_str_attr(DW_AT_name, ac)) {
+                        if (strcmp(ac, c) == 0) {
+                            child = ch;
                             return true;
                         }
                     }
