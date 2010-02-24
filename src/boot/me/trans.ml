@@ -197,6 +197,14 @@ let trans_visitor
     based_imm abi.Abi.abi_sp_reg imm
   in
 
+  let caller_args_cell (args_rty:Il.referent_ty) : Il.cell =
+    Il.Mem (fp_imm out_mem_disp, args_rty)
+  in
+
+  let callee_args_cell (args_rty:Il.referent_ty) : Il.cell =
+    Il.Mem (sp_imm 0L, args_rty)
+  in
+
   let word_at (mem:Il.mem) : Il.cell =
     Il.Mem (mem, Il.ScalarTy (Il.ValTy word_bits))
   in
@@ -2814,11 +2822,9 @@ let trans_visitor
       let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
         trans_upcall "upcall_import" f [| libstr; relpath |];
 
-        (* FIXME: write fn_args_referent_ty, any day now. *)
-        let implicit_rtys = [| Il.ScalarTy Il.voidptr_t; Il.ScalarTy Il.voidptr_t |] in
-        let args_rty = Il.StructTy implicit_rtys in
-        let caller_args_cell = Il.Mem (fp_imm out_mem_disp, args_rty) in
-        let callee_args_cell = Il.Mem (sp_imm 0L, args_rty) in
+        let args_rty = direct_call_args_referent_type cx fnid in
+        let caller_args_cell = caller_args_cell args_rty in
+        let callee_args_cell = callee_args_cell args_rty in
         mov (get_element_ptr callee_args_cell 0) (Il.Cell (get_element_ptr caller_args_cell 0));
         mov (get_element_ptr callee_args_cell 1) (Il.Cell (get_element_ptr caller_args_cell 1));
         call_code (code_of_operand (Il.Cell f));

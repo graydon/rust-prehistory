@@ -31,8 +31,10 @@ let proc_field_runtime_sp = proc_field_stk + 1;;
 let proc_field_rust_sp = proc_field_runtime_sp + 1;;
 let proc_field_gc_alloc_chain = proc_field_rust_sp + 1;;
 let proc_field_rt = proc_field_gc_alloc_chain + 1;;
+let n_visible_proc_fields = proc_field_rt + 1;;
 
 let rt_field_crate = 0;;
+let n_visible_rt_fields = rt_field_crate + 1;;
 
 let frame_glue_fns_field_mark = 0;;
 let frame_glue_fns_field_drop = 1;;

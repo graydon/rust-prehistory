@@ -1357,6 +1357,14 @@ let run_passes
 
 (* Rust type -> IL type conversion. *)
 
+let word_sty (abi:Abi.abi) : Il.scalar_ty =
+  Il.ValTy abi.Abi.abi_word_bits
+;;
+
+let word_rty (abi:Abi.abi) : Il.referent_ty =
+  Il.ScalarTy (word_sty abi)
+;;
+
 let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
   let s t = Il.ScalarTy t in
   let v b = Il.ValTy b in
@@ -1364,7 +1372,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
   let sv b = s (v b) in
   let sp t = s (p t) in
 
-  let word = sv abi.Abi.abi_word_bits in
+  let word = word_rty abi in
   let ptr = sp Il.OpaqueTy in
   let codeptr = sp Il.CodeTy in
   let tup ttup = Il.StructTy (Array.map (slot_referent_type abi) ttup) in
@@ -1439,6 +1447,80 @@ and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
     | Ast.MODE_interior _ -> rty
     | Ast.MODE_read_alias -> sp rty
     | Ast.MODE_write_alias -> sp rty
+;;
+
+let rt_rty (abi:Abi.abi) : Il.referent_ty =
+  Il.StructTy (Array.init Abi.n_visible_rt_fields (fun _ -> word_rty abi))
+;;
+
+let proc_rty (abi:Abi.abi) : Il.referent_ty =
+  Il.StructTy
+    begin
+      Array.init
+        Abi.n_visible_proc_fields
+        begin
+          fun i ->
+            if i = Abi.proc_field_rt
+            then (Il.ScalarTy (Il.AddrTy (rt_rty abi)))
+            else word_rty abi
+        end
+    end
+;;
+
+let call_args_referent_type
+    (abi:Abi.abi)
+    (out_slot:Ast.slot)
+    (in_slots:Ast.slot array)
+    (extra_arg_rtys:Il.referent_ty array)
+    : Il.referent_ty =
+  let out_slot_rty = slot_referent_type abi out_slot in
+  let out_ptr_rty = Il.ScalarTy (Il.AddrTy out_slot_rty) in
+  let proc_ptr_rty = Il.ScalarTy (Il.AddrTy (proc_rty abi)) in
+  let arg_rtys = Il.StructTy (Array.map (slot_referent_type abi) in_slots) in
+    Il.StructTy [| out_ptr_rty; proc_ptr_rty; arg_rtys; Il.StructTy extra_arg_rtys |]
+;;
+
+let call_args_referent_type
+    (cx:ctxt)
+    (callee_ty:Ast.ty)
+    (pass_extra_closure:bool)
+    : Il.referent_ty =
+  let with_closure e =
+    if pass_extra_closure
+    then Array.append e [| word_rty cx.ctxt_abi |]
+    else e
+  in
+    match callee_ty with
+        Ast.TY_fn (tsig, taux) ->
+          let extras =
+            match taux.Ast.fn_proto with
+                None -> with_closure [| |]
+                  (* FIXME: extra-args will expand with non-empty call-protocol *)
+              | _ -> bug cx "nonempty call protocols not yet implemented"
+          in
+            call_args_referent_type
+              cx.ctxt_abi
+              tsig.Ast.sig_output_slot
+              tsig.Ast.sig_input_slots
+              extras
+
+      | Ast.TY_pred (in_args, _) ->
+          call_args_referent_type
+            cx.ctxt_abi
+            (interior_slot Ast.TY_bool)
+            in_args
+            (with_closure [| |])
+
+      | _ -> bug cx "Semant.direct_call_args_referent_type on non-callable type"
+;;
+
+let indirect_call_args_referent_type (cx:ctxt) (callee_ty:Ast.ty) : Il.referent_ty =
+  call_args_referent_type cx callee_ty true
+;;
+
+let direct_call_args_referent_type (cx:ctxt) (callee_node:node_id) : Il.referent_ty =
+  let ity = Hashtbl.find cx.ctxt_all_item_types callee_node in
+    call_args_referent_type cx ity false
 ;;
 
 (* Layout calculations. *)
