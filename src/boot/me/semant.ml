@@ -1511,6 +1511,13 @@ let call_args_referent_type
             in_args
             (with_closure [| |])
 
+      | Ast.TY_mod (Some (in_args, _), mtis) ->
+          call_args_referent_type
+            cx.ctxt_abi
+            (interior_slot (Ast.TY_mod (None, mtis)))
+            in_args
+            (with_closure [| |])
+
       | _ -> bug cx "Semant.direct_call_args_referent_type on non-callable type"
 ;;
 
