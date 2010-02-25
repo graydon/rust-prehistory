@@ -95,7 +95,7 @@ type ctxt =
       (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
-      ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
+      ctxt_slot_frame_offsets: (node_id,int64) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_call_sizes: (node_id,int64) Hashtbl.t;
 
@@ -178,7 +178,7 @@ let new_ctxt sess abi crate =
 
     ctxt_slot_aliased = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;
-    ctxt_slot_layouts = Hashtbl.create 0;
+    ctxt_slot_frame_offsets = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
 
@@ -1518,60 +1518,6 @@ let indirect_call_args_referent_type (cx:ctxt) (callee_ty:Ast.ty) : Il.referent_
 let direct_call_args_referent_type (cx:ctxt) (callee_node:node_id) : Il.referent_ty =
   let ity = Hashtbl.find cx.ctxt_all_item_types callee_node in
     call_args_referent_type cx ity false
-;;
-
-(* Layout calculations. *)
-
-let new_layout (off:int64) (sz:int64) (align:int64) : layout =
-  { layout_offset = off;
-    layout_size = sz;
-    layout_align = align }
-;;
-
-let align_to (align:int64) (v:int64) : int64 =
-  if align = 0L || align = 1L
-  then v
-  else
-    let rem = Int64.rem v align in
-      if rem = 0L
-      then v
-      else
-        let padding = Int64.sub align rem in
-          Int64.add v padding
-;;
-
-let pack (offset:int64) (layouts:layout array) : layout =
-  let pack_one (off,align) curr =
-    curr.layout_offset <- align_to curr.layout_align off;
-    ((Int64.add curr.layout_offset curr.layout_size),
-     (i64_max align curr.layout_align))
-  in
-  let (final,align) = Array.fold_left pack_one (offset,0L) layouts in
-  let sz = Int64.sub final offset in
-    new_layout offset sz align
-;;
-
-let word_layout (abi:Abi.abi) (off:int64) : layout =
-  new_layout off abi.Abi.abi_word_sz abi.Abi.abi_word_sz
-;;
-
-let rec layout_referent (abi:Abi.abi) (off:int64) (rty:Il.referent_ty) : layout =
-  let (sz, align) = Il.referent_ty_layout abi.Abi.abi_word_bits rty in
-    new_layout off sz align
-;;
-
-let rec layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * layout)) array) =
-  let layouts = Array.map (fun (_,slot) -> layout_slot abi 0L slot) atab in
-    begin
-      ignore (pack 0L layouts);
-      assert ((Array.length layouts) = (Array.length atab));
-      Array.mapi (fun i layout ->
-                    let (ident, slot) = atab.(i) in
-                      (ident, (slot, layout))) layouts
-    end
-
-and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
-  layout_referent abi off (slot_referent_type abi s)
 ;;
 
 let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =

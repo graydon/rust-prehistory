@@ -122,14 +122,6 @@ let new_fixup (s:string)
 ;;
 
 
-type layout =
-    {
-      mutable layout_size: int64;
-      mutable layout_offset: int64;
-      mutable layout_align: int64;
-    }
-;;
-
 (*
  * Auxiliary hashtable functions.
  *)

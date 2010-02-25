@@ -86,10 +86,6 @@ let layout_visitor
     cx.ctxt_abi.Abi.abi_word_sz
   in
 
-  let string_of_layout (ly:layout) : string =
-    Printf.sprintf "sz=%Ld, off=%Ld, align=%Ld"
-      ly.layout_size ly.layout_offset ly.layout_align
-  in
   let force_slot_to_mem (slot:Ast.slot) : bool =
     (* FIXME (bug 541559): For the time being we force any slot that
      * points into memory or is of opaque/code type to be stored in the
@@ -113,77 +109,54 @@ let layout_visitor
       rt_in_mem (slot_referent_type cx.ctxt_abi slot)
   in
 
-  let layout_slot_ids (slot_accum:slot_stack) (vregs_ok:bool) (offset:int64) (slots:node_id array) : layout =
-    let layout_slot_id id =
-      if Hashtbl.mem cx.ctxt_slot_layouts id
-      then Some (Hashtbl.find cx.ctxt_slot_layouts id)
-      else
-        let slot = referent_to_slot cx id in
-        let layout = layout_slot cx.ctxt_abi 0L slot in
-          if vregs_ok
-            && (i64_le layout.layout_size cx.ctxt_abi.Abi.abi_word_sz)
-            && (not (force_slot_to_mem slot))
-            && (not (Hashtbl.mem cx.ctxt_slot_aliased id))
-          then
-            begin
-              log cx "assigning slot #%d to vreg" (int_of_node id);
-              htab_put cx.ctxt_slot_vregs id (ref None);
-              None
-            end
-          else
-            begin
+  let rty_sz rty = Il.referent_ty_size cx.ctxt_abi.Abi.abi_word_bits rty in
+  let rty_layout rty = Il.referent_ty_layout cx.ctxt_abi.Abi.abi_word_bits rty in
+
+  let layout_slot_ids
+      (slot_accum:slot_stack)
+      (upwards:bool)
+      (vregs_ok:bool)
+      (offset:int64)
+      (slots:node_id array)
+      : unit =
+    let accum (off,align) id : (int64 * int64) =
+      let slot = referent_to_slot cx id in
+      let rt = slot_referent_type cx.ctxt_abi slot in
+      let (elt_size, elt_align) = rty_layout rt in
+        if vregs_ok
+          && (i64_le elt_size cx.ctxt_abi.Abi.abi_word_sz)
+          && (not (force_slot_to_mem slot))
+          && (not (Hashtbl.mem cx.ctxt_slot_aliased id))
+        then
+          begin
+            log cx "assigning slot #%d to vreg" (int_of_node id);
+            htab_put cx.ctxt_slot_vregs id (ref None);
+            (off,align)
+          end
+        else
+          begin
+            let elt_off = Il.align_to elt_align off in
+            let frame_off =
+              if upwards
+              then elt_off
+              else Int64.neg (Int64.add elt_off elt_size)
+            in
               Stack.push (slot_referent_type cx.ctxt_abi slot) slot_accum;
-              log cx "forming layout for slot #%d: %s" (int_of_node id) (string_of_layout layout);
-              htab_put cx.ctxt_slot_layouts id layout;
-              Some layout
-            end
+              log cx "slot #%d offset: %Ld" (int_of_node id) frame_off;
+              if (not (Hashtbl.mem cx.ctxt_slot_frame_offsets id))
+              then htab_put cx.ctxt_slot_frame_offsets id frame_off;
+              (Int64.add elt_off elt_size, i64_max elt_align align)
+          end
     in
-    let layouts = arr_map_partial slots layout_slot_id  in
-    let group_layout = pack offset layouts in
-      for i = 0 to (Array.length layouts) - 1 do
-        log cx "packed slot #%d layout to: %s" (int_of_node slots.(i)) (string_of_layout layouts.(i))
-      done;
-      group_layout
+      ignore (Array.fold_left accum (offset, 0L) slots)
   in
 
-  let layout_block (slot_accum:slot_stack) (offset:int64) (block:Ast.block) : layout =
+  let layout_block (slot_accum:slot_stack) (offset:int64) (block:Ast.block) : unit =
     log cx "laying out block #%d at fp offset %Ld" (int_of_node block.id) offset;
-    let block_slots = Hashtbl.find cx.ctxt_block_slots block.id in
-    let get_keyed_slot_ids key id accum = ((key, id) :: accum) in
-    let keyed_slot_ids = Hashtbl.fold get_keyed_slot_ids block_slots [] in
-    let sorted_keyed_slot_ids =
-      (Array.of_list
-         (Sort.list
-            (fun (a, _) (b, _) -> a < b) keyed_slot_ids))
+    let block_slot_ids =
+      Array.of_list (htab_vals (Hashtbl.find cx.ctxt_block_slots block.id))
     in
-      for i = 0 to (Array.length sorted_keyed_slot_ids) - 1 do
-        let (key,sid) = sorted_keyed_slot_ids.(i) in
-          log cx "block #%d entry %d: '%s' = slot #%d"
-            (int_of_node block.id) i (Ast.fmt_to_str Ast.fmt_slot_key key) (int_of_node sid)
-      done;
-      let sorted_slot_ids = Array.map (fun (_,sid) -> sid) sorted_keyed_slot_ids in
-      let layout = layout_slot_ids slot_accum true offset sorted_slot_ids in
-        (*
-         * At this point the layout extends from [off,off+sz] but we need to adjust it
-         * to cover [off-sz,off]. We also have to iterate through all the slot layouts
-         * and adjust them down by sz.
-         *)
-      let sz = layout.layout_size in
-      let sub_sz ly = ly.layout_offset <- Int64.sub ly.layout_offset sz in
-        sub_sz layout;
-        Array.iter
-          begin
-            fun sid ->
-              match htab_search cx.ctxt_slot_layouts sid with
-                  None -> ()
-                | Some layout ->
-                    sub_sz layout;
-                    log cx "shifted slot #%d down to final frame offset %Ld"
-                      (int_of_node sid) layout.layout_offset
-          end
-          sorted_slot_ids;
-        log cx "block #%d total layout: %s" (int_of_node block.id) (string_of_layout layout);
-        layout;
+      layout_slot_ids slot_accum false true offset block_slot_ids
   in
 
   let layout_header (id:node_id) (input_slot_ids:node_id array) : unit =
@@ -193,7 +166,7 @@ let layout_visitor
         cx.ctxt_abi.Abi.abi_implicit_args_sz
     in
       log cx "laying out header for node #%d at fp offset %Ld" (int_of_node id) offset;
-      ignore (layout_slot_ids (Stack.create()) false offset input_slot_ids)
+      layout_slot_ids (Stack.create()) true false offset input_slot_ids
   in
 
   let (frame_stack:(node_id * frame_blocks) Stack.t) = Stack.create() in
@@ -205,8 +178,6 @@ let layout_visitor
   let frame_rty (frame:frame_blocks) : Il.referent_ty =
     Il.StructTy (Array.of_list (List.map block_rty (stk_elts_from_bot frame)))
   in
-
-  let rty_sz rty = Il.referent_ty_size cx.ctxt_abi.Abi.abi_word_bits rty in
 
   let update_frame_size _ =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
@@ -252,7 +223,7 @@ let layout_visitor
                    header_slots)
 
         | Ast.MOD_ITEM_mod {Ast.decl_item=(Some (hdr, _), _)} ->
-            ignore (layout_slot_ids (Stack.create()) false 0L (header_slot_ids hdr))
+            layout_header i.id (header_slot_ids hdr)
 
         | _ -> ()
     end;
@@ -292,15 +263,14 @@ let layout_visitor
   let visit_block_pre b =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
     let off =
-      Int64.neg
-        (if Stack.is_empty frame_blocks
-         then frame_info_slot_sz
-         else (Int64.add frame_info_slot_sz (rty_sz (frame_rty frame_blocks))))
+      if Stack.is_empty frame_blocks
+      then frame_info_slot_sz
+      else (Int64.add frame_info_slot_sz (rty_sz (frame_rty frame_blocks)))
     in
     let block_slots = Stack.create() in
     let frame_block_ids = Hashtbl.find cx.ctxt_frame_blocks frame_id in
       Hashtbl.replace cx.ctxt_frame_blocks frame_id (b.id :: frame_block_ids);
-      ignore (layout_block block_slots off b);
+      layout_block block_slots off b;
       Stack.push block_slots frame_blocks;
       update_frame_size ();
       inner.Walk.visit_block_pre b

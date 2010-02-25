@@ -408,11 +408,10 @@ let trans_visitor
             end
         | None ->
             begin
-              match htab_search cx.ctxt_slot_layouts slot_id with
-                  None -> bugi cx slot_id "slot assigned to neither vreg nor layout"
-                | Some layout ->
-                    let disp = layout.layout_offset in
-                      Il.Mem (fp_imm disp, referent_type)
+              match htab_search cx.ctxt_slot_frame_offsets slot_id with
+                  None -> bugi cx slot_id "slot assigned to neither vreg nor frame-offset"
+                | Some off ->
+                    Il.Mem (fp_imm off, referent_type)
             end
   in
 
@@ -2713,13 +2712,12 @@ let trans_visitor
             iter_frame_and_arg_slots fnid
               begin
                 fun key slot_id slot ->
-                  match htab_search cx.ctxt_slot_layouts slot_id with
+                  match htab_search cx.ctxt_slot_frame_offsets slot_id with
                       None -> ()
-                    | Some layout ->
+                    | Some off ->
                         let referent_type = slot_id_referent_type slot_id in
-                        let disp = layout.layout_offset in
                         let fp_cell = Il.Mem (mem, (Il.ScalarTy (Il.AddrTy referent_type))) in
-                        let slot_cell = deref_imm fp_cell disp in
+                        let slot_cell = deref_imm fp_cell off in
                           inner key slot_id slot slot_cell
               end
         end

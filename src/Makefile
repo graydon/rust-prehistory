@@ -58,7 +58,7 @@ ifdef CFG_WINDOWSY
   CFG_PATH_MUNGE := | sed -e 's/\\\(.\)/\/\1/g'
   CFG_FLEXLINK := $(shell which flexlink)
   ifdef CFG_FLEXLINK
-    CFG_NATIVE := 1
+    #CFG_NATIVE := 1
   endif
   CFG_RUNTIME := rustrt.dll
   CFG_STDLIB := std.dll

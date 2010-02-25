@@ -1398,7 +1398,9 @@ let dwarf_visitor
       in
 
       let record trec =
-        let rec_sz = ty_sz abi (Ast.TY_rec trec) in
+        let rty = referent_type abi (Ast.TY_rec trec) in
+        let rty_sz = Il.referent_ty_size abi.Abi.abi_word_bits in
+        let rec_sz = rty_sz rty in
         let fix = new_fixup "record type DIE" in
         let die = DEF (fix, SEQ [|
                          uleb (get_abbrev_code abbrev_struct_type);
@@ -1406,10 +1408,15 @@ let dwarf_visitor
                          WORD (TY_u32, IMM rec_sz)
                        |]);
         in
+        let rtys =
+          match rty with
+              Il.StructTy rtys -> rtys
+            | _ -> bug () "record type became non-struct referent_ty"
+        in
           emit_die die;
-          Array.iter
+          Array.iteri
             begin
-              fun (ident, (slot, layout)) ->
+              fun i (ident, slot) ->
                 emit_die (SEQ [|
                             uleb (get_abbrev_code abbrev_struct_type_member);
                             (* DW_AT_name: DW_FORM_string *)
@@ -1419,11 +1426,11 @@ let dwarf_visitor
                             (* DW_AT_mutable: DW_FORM_flag *)
                             BYTE (if slot_is_mutable slot then 1 else 0);
                             (* DW_AT_data_member_location: DW_FORM_data4 *)
-                            WORD (TY_u32, IMM layout.layout_offset);
+                            WORD (TY_u32, IMM (Il.get_element_offset word_bits rtys i));
                             (* DW_AT_byte_size: DW_FORM_data4 *)
-                            WORD (TY_u32, IMM layout.layout_size) |]);
+                            WORD (TY_u32, IMM (rty_sz rtys.(i))) |]);
             end
-            (layout_rec abi trec);
+            trec;
           emit_null_die ();
           ref_addr_for_fix fix
       in
@@ -1858,10 +1865,10 @@ let dwarf_visitor
                 in
                   emit_die var_die;
               in
-                match htab_search cx.ctxt_slot_layouts s.id with
-                    Some layout ->
+                match htab_search cx.ctxt_slot_frame_offsets s.id with
+                    Some off ->
                       emit_var_die
-                        [| DW_OP_fbreg (Asm.IMM layout.layout_offset) |]
+                        [| DW_OP_fbreg (Asm.IMM off) |]
                   | None ->
                       (* FIXME (bug 541569): handle slots assigned to vregs. *)
                       ()
