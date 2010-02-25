@@ -190,9 +190,7 @@ let layout_visitor
         cx.ctxt_abi.Abi.abi_implicit_args_sz
     in
       log cx "laying out header for node #%d at fp offset %Ld" (int_of_node id) offset;
-      let layout = layout_slot_ids false offset input_slot_ids in
-        log cx "node #%d header layout: %s" (int_of_node id) (string_of_layout layout);
-        htab_put cx.ctxt_header_layouts id layout
+      ignore (layout_slot_ids false offset input_slot_ids)
   in
 
   let (block_stacks:(layout Stack.t) Stack.t) = Stack.create () in
@@ -247,10 +245,7 @@ let layout_visitor
                    header_slots)
 
         | Ast.MOD_ITEM_mod {Ast.decl_item=(Some (hdr, _), _)} ->
-            let layout = layout_slot_ids false 0L (header_slot_ids hdr) in
-              log cx "node #%d stateful module tuple layout: %s"
-                (int_of_node i.id) (string_of_layout layout);
-              htab_put cx.ctxt_header_layouts i.id layout
+            ignore (layout_slot_ids false 0L (header_slot_ids hdr))
 
         | _ -> ()
     end;

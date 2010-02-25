@@ -97,7 +97,6 @@ type ctxt =
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
       ctxt_block_layouts: (node_id,layout) Hashtbl.t;
-      ctxt_header_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_call_sizes: (node_id,int64) Hashtbl.t;
 
@@ -182,7 +181,6 @@ let new_ctxt sess abi crate =
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
     ctxt_block_layouts = Hashtbl.create 0;
-    ctxt_header_layouts = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
 
