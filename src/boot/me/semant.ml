@@ -1457,7 +1457,7 @@ let proc_rty (abi:Abi.abi) : Il.referent_ty =
     end
 ;;
 
-let call_args_referent_type
+let call_args_referent_type_full
     (abi:Abi.abi)
     (out_slot:Ast.slot)
     (in_slots:Ast.slot array)
@@ -1473,12 +1473,12 @@ let call_args_referent_type
 let call_args_referent_type
     (cx:ctxt)
     (callee_ty:Ast.ty)
-    (pass_extra_closure:bool)
+    (closure:Il.referent_ty option)
     : Il.referent_ty =
   let with_closure e =
-    if pass_extra_closure
-    then Array.append e [| word_rty cx.ctxt_abi |]
-    else e
+    match closure with
+        None -> e
+      | Some c -> Array.append e [| Il.ScalarTy (Il.AddrTy c) |]
   in
     match callee_ty with
         Ast.TY_fn (tsig, taux) ->
@@ -1488,36 +1488,43 @@ let call_args_referent_type
                   (* FIXME: extra-args will expand with non-empty call-protocol *)
               | _ -> bug cx "nonempty call protocols not yet implemented"
           in
-            call_args_referent_type
+            call_args_referent_type_full
               cx.ctxt_abi
               tsig.Ast.sig_output_slot
               tsig.Ast.sig_input_slots
               extras
 
       | Ast.TY_pred (in_args, _) ->
-          call_args_referent_type
+          call_args_referent_type_full
             cx.ctxt_abi
             (interior_slot Ast.TY_bool)
             in_args
             (with_closure [| |])
 
       | Ast.TY_mod (Some (in_args, _), mtis) ->
-          call_args_referent_type
+          call_args_referent_type_full
             cx.ctxt_abi
             (interior_slot (Ast.TY_mod (None, mtis)))
             in_args
             (with_closure [| |])
 
-      | _ -> bug cx "Semant.direct_call_args_referent_type on non-callable type"
+      | _ -> bug cx "Semant.call_args_referent_type on non-callable type"
 ;;
 
-let indirect_call_args_referent_type (cx:ctxt) (callee_ty:Ast.ty) : Il.referent_ty =
-  call_args_referent_type cx callee_ty true
+let indirect_call_args_referent_type
+    (cx:ctxt)
+    (callee_ty:Ast.ty)
+    (closure:Il.referent_ty)
+    : Il.referent_ty =
+  call_args_referent_type cx callee_ty (Some closure)
 ;;
 
-let direct_call_args_referent_type (cx:ctxt) (callee_node:node_id) : Il.referent_ty =
+let direct_call_args_referent_type
+    (cx:ctxt)
+    (callee_node:node_id)
+    : Il.referent_ty =
   let ity = Hashtbl.find cx.ctxt_all_item_types callee_node in
-    call_args_referent_type cx ity false
+    call_args_referent_type cx ity None
 ;;
 
 let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =

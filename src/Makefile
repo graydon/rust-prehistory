@@ -106,6 +106,10 @@ ifdef PROFILE
   CFG_OCAMLOPT_PROFILE_FLAGS := -p
 endif
 
+ifdef DEBUG
+  $(info cfg: forcing bytecode output)
+  CFG_NATIVE :=
+endif
 
 ifdef CFG_NATIVE
   $(info cfg: building native compiler)

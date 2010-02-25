@@ -315,7 +315,8 @@ let layout_visitor
               let lv_ty = lval_ty cx callee in
               let abi = cx.ctxt_abi in
               let static = lval_is_static cx callee in
-              let rty = call_args_referent_type cx lv_ty (not static) in
+              let closure = if static then None else Some Il.OpaqueTy in
+              let rty = call_args_referent_type cx lv_ty closure in
               let sz = Il.referent_ty_size abi.Abi.abi_word_bits rty in
               let frame_id = fst (Stack.top frame_stack) in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in

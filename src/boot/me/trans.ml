@@ -823,6 +823,19 @@ let trans_visitor
 
   (* FIXME (bug 544925): this should eventually use tail calling logic *)
 
+  and mk_ty_fn
+      (out_slot:Ast.slot)
+      (arg_slots:Ast.slot array)
+      : Ast.ty =
+    let taux = { Ast.fn_purity = Ast.PURE;
+                 Ast.fn_proto = None; }
+    in
+    let tsig = { Ast.sig_input_slots = arg_slots;
+                 Ast.sig_input_constrs = [| |];
+                 Ast.sig_output_slot = out_slot; }
+    in
+      Ast.TY_fn (tsig, taux)
+
   and emit_fn_binding_glue
       (direct:bool)
       (fptr:Il.operand)
@@ -839,25 +852,25 @@ let trans_visitor
            arg_slots
            arg_bound_flags)
     in
+      (* For the sake of binding, we don't care what the output slot is. *)
+    let out_slot = interior_slot Ast.TY_nil in
     let bound_slots = extract_slots true in
     let unbound_slots = extract_slots false in
-    let implicit_rtys = [| Il.ScalarTy Il.voidptr_t; Il.ScalarTy Il.voidptr_t |] in
-    let closure_rty = closure_referent_type bound_slots in
-    let extra_rtys = [| Il.ScalarTy (Il.AddrTy closure_rty) |] in
-    let unbound_rtys = Array.map (slot_referent_type abi) unbound_slots in
-    let n_unbound = Array.length unbound_slots in
-    let arg_rtys = Array.map (slot_referent_type abi) arg_slots in
-    let in_rty = Il.StructTy (Array.concat [ implicit_rtys; unbound_rtys; extra_rtys ]) in
-    let out_rty =
-      if direct then
-        Il.StructTy (Array.append implicit_rtys arg_rtys)
-      else
-        Il.StructTy (Array.concat [ implicit_rtys; arg_rtys; [| Il.ScalarTy Il.voidptr_t |] ])
+    let (self_ty:Ast.ty) = mk_ty_fn out_slot unbound_slots in
+    let (callee_ty:Ast.ty) = mk_ty_fn out_slot arg_slots in
+
+    let self_closure_rty = closure_referent_type bound_slots in
+    let self_args_rty = call_args_referent_type cx self_ty (Some self_closure_rty) in
+    let callee_args_rty =
+      if direct
+      then call_args_referent_type cx callee_ty None
+      else call_args_referent_type cx callee_ty (Some Il.OpaqueTy)
     in
-    let callsz = Il.referent_ty_size word_bits out_rty in
+
+    let callsz = Il.referent_ty_size word_bits callee_args_rty in
     let spill = new_fixup "bind glue spill" in
       trans_glue_frame_entry callsz spill;
-      merge_bound_args in_rty n_unbound out_rty arg_slots arg_bound_flags;
+      merge_bound_args self_args_rty callee_args_rty arg_slots arg_bound_flags;
       let callee_fptr = trans_callee_code fptr direct (fun () -> "bind glue") in
         call_code (code_of_operand callee_fptr);
       (* FIXME: drop_slots *)
@@ -2322,48 +2335,58 @@ let trans_visitor
         bound_arg_slots
 
   and merge_bound_args
-      (args_rty:Il.referent_ty)
-      (n_unbound:int)
-      (merged_args_rty:Il.referent_ty)
+      (all_self_args_rty:Il.referent_ty)
+      (all_callee_args_rty:Il.referent_ty)
       (arg_slots:Ast.slot array)
       (arg_bound_flags:bool array)
       : unit =
     begin
-      let args_cell = Il.Mem (fp_imm out_mem_disp, args_rty) in
-      let merged_args_cell = Il.Mem (sp_imm 0L, merged_args_rty) in
+      (* 
+       * NB: 'all_*_args', both self and callee, are always 4-tuples: 
+       * 
+       *    [out_ptr, proc_ptr, [args], [extra_args]] 
+       * 
+       * The first few bindings here just destructure those via GEP.
+       * 
+       *)
+      let all_self_args_cell = Il.Mem (fp_imm out_mem_disp, all_self_args_rty) in
+      let all_callee_args_cell = Il.Mem (sp_imm 0L, all_callee_args_rty) in
+
+      let self_args_cell = get_element_ptr all_self_args_cell 2 in
+      let callee_args_cell = get_element_ptr all_callee_args_cell 2 in
+      let self_extra_args_cell = get_element_ptr all_self_args_cell 3 in
+
+      let n_args = Array.length arg_bound_flags in
+      let bound_i = ref 0 in
+      let unbound_i = ref 0 in
+
         iflog (fun _ -> annotate "copy out-ptr");
-        mov (get_element_ptr merged_args_cell 0) (Il.Cell (get_element_ptr args_cell 0));
+        mov (get_element_ptr all_callee_args_cell 0) (Il.Cell (get_element_ptr all_self_args_cell 0));
         iflog (fun _ -> annotate "copy proc-ptr");
-        mov (get_element_ptr merged_args_cell 1) (Il.Cell (get_element_ptr args_cell 1));
+        mov (get_element_ptr all_callee_args_cell 1) (Il.Cell (get_element_ptr all_self_args_cell 1));
         iflog (fun _ -> annotate "extract closure extra-arg");
-        let closure_cell = deref (get_element_ptr args_cell (n_unbound + 2)) in
-        let n_args = Array.length arg_bound_flags in
-        let bound_i = ref 0 in
-        let unbound_i = ref 0 in
+        let self_closure_cell = deref (get_element_ptr self_extra_args_cell 0) in
+
           for arg_i = 0 to (n_args - 1) do
-            let dst_cell = get_element_ptr merged_args_cell (arg_i + 2) in
+            let dst_cell = get_element_ptr callee_args_cell arg_i in
             let slot = arg_slots.(arg_i) in
             let is_bound = arg_bound_flags.(arg_i) in
             let src_cell =
               if is_bound then
                 begin
                   iflog (fun _ -> annotate (Printf.sprintf "extract bound arg %d as actual arg %d" !bound_i arg_i));
-                  get_element_ptr closure_cell (!bound_i + 3)
+                  get_element_ptr self_closure_cell (!bound_i + 3);
                 end
               else
                 begin
                   iflog (fun _ -> annotate (Printf.sprintf "extract unbound arg %d as actual arg %d" !unbound_i arg_i));
-                  get_element_ptr args_cell (!unbound_i + 2)
+                  get_element_ptr self_args_cell (!unbound_i);
                 end
             in
               iflog (fun _ -> annotate (Printf.sprintf "copy into actual-arg %d" arg_i));
               trans_copy_slot true dst_cell slot src_cell slot None;
-              if is_bound then
-                bound_i := !bound_i + 1
-              else
-                unbound_i := !unbound_i + 1
+              incr (if is_bound then bound_i else unbound_i);
           done;
-
           assert ((!bound_i + !unbound_i) == n_args)
     end
 
