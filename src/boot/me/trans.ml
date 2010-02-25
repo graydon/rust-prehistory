@@ -2349,8 +2349,8 @@ let trans_visitor
        * The first few bindings here just destructure those via GEP.
        * 
        *)
-      let all_self_args_cell = Il.Mem (fp_imm out_mem_disp, all_self_args_rty) in
-      let all_callee_args_cell = Il.Mem (sp_imm 0L, all_callee_args_rty) in
+      let all_self_args_cell = caller_args_cell all_self_args_rty in
+      let all_callee_args_cell = callee_args_cell all_callee_args_rty in
 
       let self_args_cell = get_element_ptr all_self_args_cell 2 in
       let callee_args_cell = get_element_ptr all_callee_args_cell 2 in
