@@ -341,15 +341,9 @@ let layout_visitor
             fun (callee:Ast.lval) ->
               let lv_ty = lval_ty cx callee in
               let abi = cx.ctxt_abi in
-              let layout =
-                pack 0L
-                  (match lv_ty with
-                       Ast.TY_fn (tsig, _) -> layout_fn_call_tup abi tsig (lval_is_static cx callee)
-                     | Ast.TY_pred tpred -> layout_pred_call_tup abi tpred (lval_is_static cx callee)
-                     | Ast.TY_mod (Some hdr, _) -> layout_mod_call_tup abi hdr
-                     | _ -> err (Some s.id) "unexpected callee type")
-              in
-              let sz = layout.layout_size in
+              let static = lval_is_static cx callee in
+              let rty = call_args_referent_type cx lv_ty (not static) in
+              let sz = Il.referent_ty_size abi.Abi.abi_word_bits rty in
               let frame_id = Stack.top frame_stack in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in
                 log cx "extending frame #%d call size to %Ld"

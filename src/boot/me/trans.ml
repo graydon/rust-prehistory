@@ -249,11 +249,8 @@ let trans_visitor
         Il.Mem (mem, Il.StructTy elts) when i >= 0 && i < (Array.length elts) ->
           assert ((Array.length elts) != 0);
           begin
-            let elts_before = Array.sub elts 0 i in
             let elt_rty = elts.(i) in
-            let elts_before_size = Il.referent_ty_size word_bits (Il.StructTy elts_before) in
-            let elt_align = Il.referent_ty_align word_bits elt_rty in
-            let elt_off = Il.align_to elt_align elts_before_size in
+            let elt_off = Il.get_element_offset word_bits elts i in
               Il.Mem (Il.mem_off_imm mem elt_off, elt_rty)
           end
 

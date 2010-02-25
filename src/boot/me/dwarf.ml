@@ -1398,12 +1398,12 @@ let dwarf_visitor
       in
 
       let record trec =
-        let total_layout = layout_ty abi 0L (Ast.TY_rec trec) in
+        let rec_sz = ty_sz abi (Ast.TY_rec trec) in
         let fix = new_fixup "record type DIE" in
         let die = DEF (fix, SEQ [|
                          uleb (get_abbrev_code abbrev_struct_type);
                          (* DW_AT_byte_size: DW_FORM_data4 *)
-                         WORD (TY_u32, IMM total_layout.layout_size)
+                         WORD (TY_u32, IMM rec_sz)
                        |]);
         in
           emit_die die;

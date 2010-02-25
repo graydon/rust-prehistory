@@ -364,8 +364,17 @@ and referent_ty_size (word_bits:bits) (rt:referent_ty) : int64 =
 
 and referent_ty_align (word_bits:bits) (rt:referent_ty) : int64 =
   snd (referent_ty_layout word_bits rt)
+
 ;;
 
+let get_element_offset (word_bits:bits) (elts:referent_ty array) (i:int) : int64 =
+  let elts_before = Array.sub elts 0 i in
+  let elt_rty = elts.(i) in
+  let elts_before_size = referent_ty_size word_bits (StructTy elts_before) in
+  let elt_align = referent_ty_align word_bits elt_rty in
+  let elt_off = align_to elt_align elts_before_size in
+    elt_off
+;;
 
 (* Processor. *)
 

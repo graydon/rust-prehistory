@@ -1580,25 +1580,16 @@ let rec layout_rec (abi:Abi.abi) (atab:Ast.ty_rec) : ((Ast.ident * (Ast.slot * l
                       (ident, (slot, layout))) layouts
     end
 
-and layout_tup (abi:Abi.abi) (tup:Ast.ty_tup) : (layout array) =
-  let layouts = Array.map (layout_slot abi 0L) tup in
-    ignore (pack 0L layouts);
-    layouts
-
-and layout_tag (abi:Abi.abi) (ttag:Ast.ty_tag) : layout =
-  layout_referent abi 0L (referent_type abi (Ast.TY_tag ttag))
-
-and layout_ty (abi:Abi.abi) (off:int64) (t:Ast.ty) : layout =
-  layout_referent abi off (referent_type abi t)
-
 and layout_slot (abi:Abi.abi) (off:int64) (s:Ast.slot) : layout =
   layout_referent abi off (slot_referent_type abi s)
+;;
 
-and ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
+let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
   Il.referent_ty_size abi.Abi.abi_word_bits (referent_type abi t)
+;;
 
-and slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
-  (layout_slot abi 0L s).layout_size
+let slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
+  Il.referent_ty_size abi.Abi.abi_word_bits (slot_referent_type abi s)
 ;;
 
 let word_slot (abi:Abi.abi) : Ast.slot =
@@ -1614,35 +1605,6 @@ let fn_call_tup (abi:Abi.abi) (inputs:Ast.ty_tup) : Ast.ty_tup =
   let proc_ptr = word_slot abi in
   let out_ptr = word_slot abi in
     Array.append [| out_ptr; proc_ptr |] inputs
-;;
-
-let layout_fn_call_tup (abi:Abi.abi) (tsig:Ast.ty_sig) (direct:bool) : (layout array) =
-  let tup = fn_call_tup abi tsig.Ast.sig_input_slots in
-  let full_tup =
-    if direct then
-      tup
-    else
-      let closure_ptr = word_slot abi in
-        Array.append tup [| closure_ptr |]
-  in
-    layout_tup abi full_tup
-;;
-
-(* FIXME: if not direct then ... *)
-let layout_pred_call_tup (abi:Abi.abi) (tpred:Ast.ty_pred) ((*direct*)_:bool) : (layout array) =
-  let (slots,_) = tpred in
-  let proc_ptr = word_slot abi in
-  let out_ptr = word_slot abi in
-  let slots' = Array.append [| out_ptr; proc_ptr |] slots in
-    layout_tup abi slots'
-;;
-
-let layout_mod_call_tup (abi:Abi.abi) (hdr:Ast.ty_mod_header) : (layout array) =
-  let (slots,_) = hdr in
-  let proc_ptr = word_slot abi in
-  let out_ptr = word_slot abi in
-  let slots' = Array.append [| out_ptr; proc_ptr |] slots in
-    layout_tup abi slots'
 ;;
 
 
