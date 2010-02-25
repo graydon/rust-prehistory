@@ -19,7 +19,7 @@ type glue =
     GLUE_C_to_proc
   | GLUE_yield
   | GLUE_exit_main_proc
-  | GLUE_exit_proc of Ast.ty_sig
+  | GLUE_exit_proc of Ast.ty
   | GLUE_mark of Ast.ty
   | GLUE_drop of Ast.ty
   | GLUE_free of Ast.ty
@@ -1651,11 +1651,7 @@ let glue_str (cx:ctxt) (g:glue) : string =
       GLUE_C_to_proc -> "glue$c_to_proc"
     | GLUE_yield -> "glue$yield"
     | GLUE_exit_main_proc -> "glue$exit_main_proc"
-    | GLUE_exit_proc tsig ->
-        let taux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
-                     Ast.fn_proto = None }
-        in
-          "glue$exit_proc$" ^ (ty_str (Ast.TY_fn (tsig, taux)))
+    | GLUE_exit_proc ty -> "glue$exit_proc$" ^ (ty_str ty)
     | GLUE_mark ty -> "glue$mark$" ^ (ty_str ty)
     | GLUE_drop ty -> "glue$drop$" ^ (ty_str ty)
     | GLUE_free ty -> "glue$free$" ^ (ty_str ty)

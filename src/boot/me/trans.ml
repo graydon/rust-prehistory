@@ -744,7 +744,7 @@ let trans_visitor
     capture_emitted_glue fix spill g;
     pop_emitter ()
 
-  and emit_exit_proc_glue (tsig:Ast.ty_sig) (fix:fixup) (g:glue) : unit =
+  and emit_exit_proc_glue (callee_ty:Ast.ty) (fix:fixup) (g:glue) : unit =
     let name = glue_str cx g in
     let spill = new_fixup (name ^ " spill") in
       push_new_emitter ();
@@ -753,20 +753,19 @@ let trans_visitor
        * to drop the slots associated with tsig, which are already on the stack
        * as though we put them there in a call, then assume the 'exited' state.
        *)
-      let in_slots = tsig.Ast.sig_input_slots in
-        drop_arg_slots in_slots;
-        iflog (fun _ -> annotate "assume 'exited' state");
-        trans_void_upcall "upcall_exit" [| |];
-        capture_emitted_glue fix spill g;
-        pop_emitter ()
+      drop_arg_slots callee_ty;
+      iflog (fun _ -> annotate "assume 'exited' state");
+      trans_void_upcall "upcall_exit" [| |];
+      capture_emitted_glue fix spill g;
+      pop_emitter ()
 
-  and get_exit_proc_glue (tsig:Ast.ty_sig) : fixup =
-    let g = GLUE_exit_proc tsig in
+  and get_exit_proc_glue (callee_ty:Ast.ty) : fixup =
+    let g = GLUE_exit_proc callee_ty in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup (glue_str cx g) in
-              emit_exit_proc_glue tsig fix g;
+              emit_exit_proc_glue callee_ty fix g;
               fix
 
   and emit_bind_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
@@ -820,13 +819,11 @@ let trans_visitor
               emit_bind_mod_glue mod_id hdr fix g;
               fix
 
-
-  (* FIXME (bug 544925): this should eventually use tail calling logic *)
-
   and mk_ty_fn
       (out_slot:Ast.slot)
       (arg_slots:Ast.slot array)
       : Ast.ty =
+    (* In some cases we don't care what aux or constrs are. *)
     let taux = { Ast.fn_purity = Ast.PURE;
                  Ast.fn_proto = None; }
     in
@@ -835,6 +832,16 @@ let trans_visitor
                  Ast.sig_output_slot = out_slot; }
     in
       Ast.TY_fn (tsig, taux)
+
+  and mk_simple_ty_fn
+      (arg_slots:Ast.slot array)
+      : Ast.ty =
+    (* In some cases we don't care what the output slot is. *)
+    let out_slot = interior_slot Ast.TY_nil in
+      mk_ty_fn out_slot arg_slots
+
+
+  (* FIXME (bug 544925): this should eventually use tail calling logic *)
 
   and emit_fn_binding_glue
       (direct:bool)
@@ -852,12 +859,10 @@ let trans_visitor
            arg_slots
            arg_bound_flags)
     in
-      (* For the sake of binding, we don't care what the output slot is. *)
-    let out_slot = interior_slot Ast.TY_nil in
     let bound_slots = extract_slots true in
     let unbound_slots = extract_slots false in
-    let (self_ty:Ast.ty) = mk_ty_fn out_slot unbound_slots in
-    let (callee_ty:Ast.ty) = mk_ty_fn out_slot arg_slots in
+    let (self_ty:Ast.ty) = mk_simple_ty_fn unbound_slots in
+    let (callee_ty:Ast.ty) = mk_simple_ty_fn arg_slots in
 
     let self_closure_rty = closure_referent_type bound_slots in
     let self_args_rty = call_args_referent_type cx self_ty (Some self_closure_rty) in
@@ -1242,16 +1247,15 @@ let trans_visitor
       : unit =
     let (proc_cell, _) = trans_lval_init dst in
     let (fptr_operand, fn_ty) = trans_callee fn_lval in
-    let fptr_operand = reify_ptr fptr_operand in
-    let tsig =
-      match fn_ty with
-          Ast.TY_fn (tsig, _) -> tsig
-        | _ -> bug () "spawned-function slot has wrong type"
+    let _ =
+      (* FIXME: handle indirect-spawns (clone closure?). *)
+      if not (lval_is_direct_fn cx fn_lval)
+      then bug () "unhandled indirect-spawn"
     in
-    let in_slots = tsig.Ast.sig_input_slots in
-    let in_tup = arg_tup_cell in_slots in
-    let callsz = Il.referent_ty_size word_bits (snd (need_mem_cell in_tup)) in
-    let exit_proc_glue_fixup = get_exit_proc_glue tsig in
+    let args_rty = call_args_referent_type cx fn_ty None in
+    let fptr_operand = reify_ptr fptr_operand in
+    let callsz = Il.referent_ty_size word_bits args_rty in
+    let exit_proc_glue_fixup = get_exit_proc_glue fn_ty in
     let exit_proc_glue_fptr = code_fixup_to_ptr_operand exit_proc_glue_fixup in
     let exit_proc_glue_fptr = reify_ptr exit_proc_glue_fptr in
 
@@ -1262,7 +1266,7 @@ let trans_visitor
             Ast.REALM_thread ->
               begin
                 trans_upcall "upcall_new_thread" new_proc [| |];
-                copy_fn_args (CLONE_all new_proc) proc_cell in_slots args [| |];
+                copy_fn_args (CLONE_all new_proc) false fn_ty proc_cell args [| |];
                 trans_upcall "upcall_start_thread" proc_cell
                   [|
                     Il.Cell new_proc;
@@ -1274,7 +1278,7 @@ let trans_visitor
          | _ ->
              begin
                  trans_upcall "upcall_new_proc" new_proc [| |];
-                 copy_fn_args (CLONE_chan new_proc) proc_cell in_slots args [| |];
+                 copy_fn_args (CLONE_chan new_proc) false fn_ty proc_cell args [| |];
                  trans_upcall "upcall_start_proc" proc_cell
                    [|
                      Il.Cell new_proc;
@@ -2118,12 +2122,11 @@ let trans_visitor
       (cx:ctxt)
       (dst:Ast.lval)
       (flv:Ast.lval)
-      (tsig:Ast.ty_sig)
+      (fn_ty:Ast.ty)
       (args:Ast.atom array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (ptr, _) = trans_callee flv in
-    let in_slots = tsig.Ast.sig_input_slots in
     let direct = lval_is_static cx flv in
     let extra_args =
       if direct then
@@ -2134,13 +2137,14 @@ let trans_visitor
       log cx "trans_call_fn: %s call to lval %a"
         (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
       trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
-        dst_cell ptr in_slots args extra_args
+        ptr fn_ty
+        dst_cell args extra_args
 
   and trans_call_mod
       (initializing:bool)
       (dst:Ast.lval)
       (flv:Ast.lval)
-      (tmod_hdr:Ast.ty_mod_header)
+      (_:Ast.ty_mod_header)
       (args:Ast.atom array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst
@@ -2154,9 +2158,10 @@ let trans_visitor
         | _ -> err None "call to unexpected form of module"
     in
     let ptr = code_fixup_to_ptr_operand glue_fixup in
-    let (in_slots, _) = tmod_hdr in
-      trans_call initializing true (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell ptr in_slots args [||]
+      trans_call
+        initializing true (fun _ -> Ast.sprintf_lval () flv)
+        ptr item_ty
+        dst_cell args [||]
 
   and trans_call_pred
       (dst_cell:Il.cell)
@@ -2164,16 +2169,12 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (ptr, fn_ty) = trans_callee flv in
-    let tpred =
-      match fn_ty with
-          Ast.TY_pred tpred -> tpred
-        | _ -> bug () "Calling non-predicate."
-    in
-    let (in_slots, _) = tpred in
       iflog (fun _ -> annotate "predicate call");
       (* FIXME (bug 546450): extra_args if indirect *)
-      trans_call true (lval_is_static cx flv) (fun _ -> Ast.sprintf_lval () flv)
-        dst_cell ptr in_slots args [||];
+      trans_call
+        true (lval_is_static cx flv) (fun _ -> Ast.sprintf_lval () flv)
+        ptr fn_ty
+        dst_cell args [||];
 
   and trans_call_pred_and_check
       (constr:Ast.constr)
@@ -2249,7 +2250,7 @@ let trans_visitor
       output_cell word_slot
 
   and trans_arg1 (arg_cell:Il.cell) : unit =
-    (* Emit arg1 or any call: the process pointer. *)
+    (* Emit arg1 of any call: the process pointer. *)
     iflog (fun _ -> annotate "fn-call arg 1: process pointer");
     trans_init_slot_from_cell
       CLONE_none
@@ -2280,38 +2281,71 @@ let trans_visitor
           bug () "expected code-pointer operand, got %s"
             (Il.string_of_operand abi.Abi.abi_str_of_hardreg operand)
 
+  and ty_arg_slots (ty:Ast.ty) : Ast.slot array =
+    match ty with
+        Ast.TY_fn (tsig, _) -> tsig.Ast.sig_input_slots
+      | Ast.TY_pred (args, _) -> args
+      | Ast.TY_mod (Some (args, _), _) -> args
+      | _ -> bug () "Trans.ty_arg_slots on non-callable type: %a" Ast.sprintf_ty ty
+
   and copy_fn_args
       (clone:clone_ctrl)
-      (output_cell:Il.cell)
-      (arg_slots:Ast.slot array)
-      (args:Ast.atom array)
-      (extra_args:Il.operand array)
+      (direct:bool)
+
+      (callee_ty:Ast.ty)
+
+      (caller_output_cell:Il.cell)
+      (caller_arg_atoms:Ast.atom array)
+      (caller_extra_args:Il.operand array)
+
       : unit =
-    assert (Array.length args == Array.length arg_slots);
-    let n_args = Array.length args in
-    let n_extras = Array.length extra_args in
-    let arg_tup = arg_tup_cell arg_slots in
-      trans_arg0 (get_element_ptr arg_tup 0) output_cell;
-      trans_arg1 (get_element_ptr arg_tup 1);
+
+    let all_callee_args_cell =
+      let all_callee_args_rty =
+        if direct
+        then call_args_referent_type cx callee_ty None
+        else call_args_referent_type cx callee_ty (Some Il.OpaqueTy)
+      in
+        callee_args_cell all_callee_args_rty
+    in
+
+    let callee_arg_slots = ty_arg_slots callee_ty in
+    let callee_output_cell = get_element_ptr all_callee_args_cell 0 in
+    let callee_proc_cell = get_element_ptr all_callee_args_cell 1 in
+    let callee_args = get_element_ptr all_callee_args_cell 2 in
+    let callee_extra_args = get_element_ptr all_callee_args_cell 3 in
+
+    let n_args = Array.length caller_arg_atoms in
+    let n_extras = Array.length caller_extra_args in
+
+      trans_arg0 callee_output_cell caller_output_cell;
+      trans_arg1 callee_proc_cell;
+
       Array.iteri
         begin
-          fun i arg ->
+          fun i arg_atom ->
             iflog (fun _ ->
                      annotate
                        (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
                           i n_args n_extras));
-            trans_argN clone (get_element_ptr arg_tup (2+i)) arg_slots.(i) arg
+            trans_argN
+              clone
+              (get_element_ptr callee_args i)
+              callee_arg_slots.(i)
+              arg_atom
         end
-        args;
+        caller_arg_atoms;
+
       Array.iteri
         begin
-          fun i operand ->
+          fun i extra_arg_operand ->
             iflog (fun _ ->
                      annotate (Printf.sprintf "fn-call extra-arg %d of %d"
                                  i n_extras));
-            mov (extra_arg_cell arg_tup i) operand
+            mov (get_element_ptr callee_extra_args i) extra_arg_operand
         end
-        extra_args
+        caller_extra_args
+
 
   and call_code (code:Il.code) : unit =
     let vr = next_vreg_cell Il.voidptr_t in
@@ -2415,15 +2449,21 @@ let trans_visitor
       ((*initializing*)_:bool)
       (direct:bool)
       (logname:(unit -> string))
-      (output_cell:Il.cell)
+
       (callee_ptr:Il.operand)
-      (arg_slots:Ast.slot array)
-      (args:Ast.atom array)
-      (extra_args:Il.operand array)
+      (callee_ty:Ast.ty)
+
+      (caller_output_cell:Il.cell)
+      (caller_arg_atoms:Ast.atom array)
+      (caller_extra_args:Il.operand array)
       : unit =
+
     let callee_fptr = trans_callee_code callee_ptr direct logname in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args CLONE_none output_cell arg_slots args extra_args;
+      copy_fn_args
+        CLONE_none direct
+        callee_ty
+        caller_output_cell caller_arg_atoms caller_extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
@@ -2431,7 +2471,7 @@ let trans_visitor
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
       call_code (code_of_operand callee_fptr);
-      drop_arg_slots arg_slots
+      drop_arg_slots callee_ty
 
   and arg_tup_cell
       (arg_slots:Ast.slot array)
@@ -2441,25 +2481,21 @@ let trans_visitor
     let rty = referent_type abi ty in
       Il.Mem (mem, rty)
 
-  and extra_arg_cell
-      (arg_tup:Il.cell)
-      (arg:int)
-      : Il.cell =
-    let (_, rty) = need_mem_cell arg_tup in
-    let extra_args_start = Il.referent_ty_size word_bits rty in
-    let arg_off = Int64.add extra_args_start (word_n arg) in
-    let arg_mem = sp_imm arg_off in
-    let arg_referent_ty = Il.ScalarTy (Il.voidptr_t) in
-      Il.Mem (arg_mem, arg_referent_ty)
-
   and drop_arg_slots
-      (arg_slots:Ast.slot array)
+      (callee_ty:Ast.ty)
       : unit =
-    let arg_tup = arg_tup_cell arg_slots in
-    for i = 0 to arr_max arg_slots do
-      iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
-      drop_slot (get_element_ptr arg_tup (2+i)) arg_slots.(i) None
-    done
+    let all_callee_args_cell =
+      let all_callee_args_rty = call_args_referent_type cx callee_ty None in
+        callee_args_cell all_callee_args_rty
+    in
+    let callee_args_cell = get_element_ptr all_callee_args_cell 2 in
+      Array.iteri
+        begin
+          fun i slot ->
+            iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
+            drop_slot (get_element_ptr callee_args_cell i) slot None
+        end
+        (ty_arg_slots callee_ty)
 
 
   and trans_alt_tag { Ast.alt_tag_lval = lval; Ast.alt_tag_arms = arms } =
@@ -2566,9 +2602,10 @@ let trans_visitor
       | Ast.STMT_call (dst, flv, args) ->
           begin
             let init = maybe_init stmt.id "call" dst in
-            match lval_ty cx flv with
-                Ast.TY_fn (tsig, _) ->
-                  trans_call_fn init cx dst flv tsig args
+            let ty = lval_ty cx flv in
+            match ty with
+                Ast.TY_fn _ ->
+                  trans_call_fn init cx dst flv ty args
 
               | Ast.TY_pred _ ->
                   let (dst_cell, _) = trans_lval_maybe_init init dst
@@ -2984,17 +3021,10 @@ let trans_visitor
             then
               begin
                 log cx "emitting main exit-proc glue for %s" cx.ctxt_main_name;
-                let main_tsig =
-                  {
-                    Ast.sig_input_slots = [| |];
-                    Ast.sig_input_constrs = [| |];
-                    Ast.sig_output_slot = interior_slot Ast.TY_nil;
-                  }
-                in
-                  emit_exit_proc_glue
-                    main_tsig
-                    cx.ctxt_main_exit_proc_glue_fixup
-                    GLUE_exit_main_proc;
+                emit_exit_proc_glue
+                  (Hashtbl.find cx.ctxt_all_item_types i.id)
+                  cx.ctxt_main_exit_proc_glue_fixup
+                  GLUE_exit_main_proc;
               end;
             trans_fn i.id f.Ast.decl_item.Ast.fn_body
 
