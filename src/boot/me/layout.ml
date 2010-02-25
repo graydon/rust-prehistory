@@ -179,7 +179,6 @@ let layout_visitor
           end
           sorted_slot_ids;
         log cx "block #%d total layout: %s" (int_of_node block.id) (string_of_layout layout);
-        htab_put cx.ctxt_block_layouts block.id layout;
         layout;
   in
 

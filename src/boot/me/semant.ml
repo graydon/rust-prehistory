@@ -96,7 +96,6 @@ type ctxt =
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
       ctxt_slot_layouts: (node_id,layout) Hashtbl.t;
-      ctxt_block_layouts: (node_id,layout) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_call_sizes: (node_id,int64) Hashtbl.t;
 
@@ -180,7 +179,6 @@ let new_ctxt sess abi crate =
     ctxt_slot_aliased = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_layouts = Hashtbl.create 0;
-    ctxt_block_layouts = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
 
@@ -283,12 +281,6 @@ let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
   match resolve_lval_id cx id with
       DEFN_slot slot -> slot
     | _ -> bugi cx id "unknown slot"
-;;
-
-let get_block_layout (cx:ctxt) (id:node_id) : layout =
-  if Hashtbl.mem cx.ctxt_block_layouts id
-  then Hashtbl.find cx.ctxt_block_layouts id
-  else bugi cx id "unknown block layout"
 ;;
 
 let get_fn_fixup (cx:ctxt) (id:node_id) : fixup =
