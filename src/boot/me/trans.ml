@@ -2122,11 +2122,10 @@ let trans_visitor
       (cx:ctxt)
       (dst:Ast.lval)
       (flv:Ast.lval)
-      (fn_ty:Ast.ty)
       (args:Ast.atom array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
-    let (ptr, _) = trans_callee flv in
+    let (ptr, fn_ty) = trans_callee flv in
     let direct = lval_is_static cx flv in
     let extra_args =
       if direct then
@@ -2144,11 +2143,9 @@ let trans_visitor
       (initializing:bool)
       (dst:Ast.lval)
       (flv:Ast.lval)
-      (_:Ast.ty_mod_header)
       (args:Ast.atom array)
       : unit =
-    let (dst_cell, _) = trans_lval_maybe_init initializing dst
-    in
+    let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let item = lval_item cx flv in
     let item_ty = Hashtbl.find cx.ctxt_all_item_types item.id in
     let glue_fixup =
@@ -2163,33 +2160,24 @@ let trans_visitor
         ptr item_ty
         dst_cell args [||]
 
-  and trans_call_pred
-      (dst_cell:Il.cell)
-      (flv:Ast.lval)
-      (args:Ast.atom array)
-      : unit =
-    let (ptr, fn_ty) = trans_callee flv in
-      iflog (fun _ -> annotate "predicate call");
-      (* FIXME (bug 546450): extra_args if indirect *)
-      trans_call
-        true (lval_is_static cx flv) (fun _ -> Ast.sprintf_lval () flv)
-        ptr fn_ty
-        dst_cell args [||];
-
   and trans_call_pred_and_check
       (constr:Ast.constr)
       (flv:Ast.lval)
       (args:Ast.atom array)
       : unit =
+    let (ptr, fn_ty) = trans_callee flv in
     let dst_cell = Il.Mem (force_to_mem imm_false) in
-      trans_call_pred dst_cell flv args;
+      iflog (fun _ -> annotate "predicate call");
+      trans_call
+        true (lval_is_static cx flv) (fun _ -> Ast.sprintf_lval () flv)
+        ptr fn_ty
+        dst_cell args [||];
       iflog (fun _ -> annotate "predicate check/fail");
       let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
       let errstr = Printf.sprintf "predicate check: %a"
         Ast.sprintf_constr constr
       in
         trans_cond_fail errstr jmp
-
 
   and trans_init_closure
       (referent_desc:string)
@@ -2206,7 +2194,6 @@ let trans_visitor
     iflog (fun _ -> annotate (Printf.sprintf "set %s target ptr" referent_desc));
     mov (get_element_ptr clo_cell 2) (reify_ptr tgt);
     copy_bound_args clo_cell bound_arg_slots bound_args 3
-
 
   and trans_bind_fn
       (initializing:bool)
@@ -2604,16 +2591,12 @@ let trans_visitor
             let init = maybe_init stmt.id "call" dst in
             let ty = lval_ty cx flv in
             match ty with
-                Ast.TY_fn _ ->
-                  trans_call_fn init cx dst flv ty args
-
+                Ast.TY_fn _
               | Ast.TY_pred _ ->
-                  let (dst_cell, _) = trans_lval_maybe_init init dst
-                  in
-                    trans_call_pred dst_cell flv args
+                  trans_call_fn init cx dst flv args
 
-              | Ast.TY_mod (Some tmod_hdr, _) ->
-                    trans_call_mod init dst flv tmod_hdr args
+              | Ast.TY_mod (Some _, _) ->
+                  trans_call_mod init dst flv args
 
               | _ -> bug () "Calling unexpected lval."
           end
