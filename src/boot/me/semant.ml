@@ -1415,8 +1415,13 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_rec tr -> tup (Array.map snd tr)
 
       | Ast.TY_fn _
-      | Ast.TY_pred _ -> sp (Il.StructTy [| word; codeptr; ptr |])
-      | Ast.TY_mod _ -> Il.StructTy [| ptr; ptr |]
+      | Ast.TY_pred _ ->
+          let fn_closure_ptr = sp (Il.StructTy [| word; ptr |]) in
+            Il.StructTy [| codeptr; fn_closure_ptr |]
+
+      | Ast.TY_mod _ ->
+          let mod_closure_ptr = sp (Il.StructTy [| word; ptr |]) in
+            Il.StructTy [| ptr; mod_closure_ptr |]
 
       | Ast.TY_tag ttag -> tag ttag
       | Ast.TY_iso tiso -> tag tiso.Ast.iso_group.(tiso.Ast.iso_index)
