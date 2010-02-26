@@ -256,7 +256,6 @@ TEST_XFAILS := test/run-pass/stateful-module.rs \
                test/run-pass/mlist_cycle.rs \
                test/run-pass/linear-for-loop.rs \
                test/run-pass/first-class-modules.rs \
-               test/run-pass/drop-on-ret.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 

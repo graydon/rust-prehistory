@@ -43,6 +43,7 @@ let trans_visitor
   let (word_sz:int64) = abi.Abi.abi_word_sz in
   let (word_bits:Il.bits) = abi.Abi.abi_word_bits in
   let (word_ty:Il.scalar_ty) = Il.ValTy word_bits in
+  let (word_rty:Il.referent_ty) = Il.ScalarTy word_ty in
   let (word_ty_mach:ty_mach) =
     match word_bits with
         Il.Bits8 -> TY_u8
@@ -707,28 +708,26 @@ let trans_visitor
     capture_emitted_glue fix spill g;
     pop_emitter ()
 
-  and emit_exit_proc_glue (callee_ty:Ast.ty) (fix:fixup) (g:glue) : unit =
+  and emit_exit_proc_glue (fix:fixup) (g:glue) : unit =
     let name = glue_str cx g in
     let spill = new_fixup (name ^ " spill") in
       push_new_emitter ();
       (* 
        * We return-to-here in a synthetic frame we did not build; our job is
-       * to drop the slots associated with tsig, which are already on the stack
-       * as though we put them there in a call, then assume the 'exited' state.
+       * merely to call upcall_exit.
        *)
-      drop_arg_slots callee_ty;
       iflog (fun _ -> annotate "assume 'exited' state");
       trans_void_upcall "upcall_exit" [| |];
       capture_emitted_glue fix spill g;
       pop_emitter ()
 
-  and get_exit_proc_glue (callee_ty:Ast.ty) : fixup =
-    let g = GLUE_exit_proc callee_ty in
+  and get_exit_proc_glue _ : fixup =
+    let g = GLUE_exit_proc in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup (glue_str cx g) in
-              emit_exit_proc_glue callee_ty fix g;
+              emit_exit_proc_glue fix g;
               fix
 
   and emit_bind_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
@@ -1250,7 +1249,7 @@ let trans_visitor
     let args_rty = call_args_referent_type cx fn_ty None in
     let fptr_operand = reify_ptr fptr_operand in
     let callsz = Il.referent_ty_size word_bits args_rty in
-    let exit_proc_glue_fixup = get_exit_proc_glue fn_ty in
+    let exit_proc_glue_fixup = get_exit_proc_glue () in
     let exit_proc_glue_fptr = code_fixup_to_ptr_operand exit_proc_glue_fixup in
     let exit_proc_glue_fptr = reify_ptr exit_proc_glue_fptr in
 
@@ -1712,6 +1711,15 @@ let trans_visitor
 
         | _ -> ()
 
+  and check_exterior_rty cell =
+    match cell with
+        Il.Reg (_, Il.AddrTy (Il.StructTy fields))
+      | Il.Mem (_, Il.ScalarTy (Il.AddrTy (Il.StructTy fields)))
+          when (((Array.length fields) > 0) && (fields.(0) = word_rty)) -> ()
+      | _ -> bug ()
+          "expected plausibly-exterior cell, got %s"
+            (Il.string_of_referent_ty (Il.cell_referent_ty cell))
+
   and clone_slot
       (clone_proc:Il.cell)
       (dst:Il.cell)
@@ -1757,6 +1765,7 @@ let trans_visitor
       match mctrl with
           MEM_rc_opaque rc_off ->
             (* Refcounted opaque objects we handle without glue functions. *)
+            let _ = check_exterior_rty cell in
             let null_jmp = null_check () in
             let (rc_mem, _) = need_mem_cell (deref_imm cell (word_n rc_off)) in
             let rc = word_at rc_mem in
@@ -1779,6 +1788,7 @@ let trans_visitor
             (* FIXME (bug 541542): check to see that the exterior has
              * further exterior members; if it doesn't we can elide the
              * call to the glue function.  *)
+            let _ = check_exterior_rty cell in
             let null_jmp = null_check () in
             let rc = exterior_rc_cell cell in
             let j = drop_refcount_and_cmp rc in
@@ -2496,8 +2506,7 @@ let trans_visitor
        * initializing, overwrite the slot; this is ok if we're writing
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
-      call_code (code_of_operand callee_fptr);
-      drop_arg_slots callee_ty
+      call_code (code_of_operand callee_fptr)
 
   and arg_tup_cell
       (arg_slots:Ast.slot array)
@@ -2507,21 +2516,12 @@ let trans_visitor
     let rty = referent_type abi ty in
       Il.Mem (mem, rty)
 
-  and drop_arg_slots
-      (callee_ty:Ast.ty)
+  and callee_drop_slot
+      (_:Ast.slot_key)
+      (slot_id:node_id)
+      (slot:Ast.slot)
       : unit =
-    let all_callee_args_cell =
-      let all_callee_args_rty = call_args_referent_type cx callee_ty None in
-        callee_args_cell all_callee_args_rty
-    in
-    let callee_args_cell = get_element_ptr all_callee_args_cell 2 in
-      Array.iteri
-        begin
-          fun i slot ->
-            iflog (fun _ -> annotate (Printf.sprintf "drop arg %d" i));
-            drop_slot (get_element_ptr callee_args_cell i) slot None
-        end
-        (ty_arg_slots callee_ty)
+    drop_slot (cell_of_block_slot slot_id) slot None
 
 
   and trans_alt_tag { Ast.alt_tag_lval = lval; Ast.alt_tag_arms = arms } =
@@ -2862,6 +2862,8 @@ let trans_visitor
 
   let trans_frame_exit (fnid:node_id) : unit =
     Stack.iter patch (Stack.pop epilogue_jumps);
+    iflog (fun _ -> annotate "drop frame");
+    iter_frame_and_arg_slots fnid callee_drop_slot;
     iflog (fun _ -> annotate "epilogue");
     abi.Abi.abi_emit_fn_epilogue (emitter());
     capture_emitted_quads (get_fn_fixup cx fnid) fnid;
@@ -3044,7 +3046,6 @@ let trans_visitor
               begin
                 log cx "emitting main exit-proc glue for %s" cx.ctxt_main_name;
                 emit_exit_proc_glue
-                  (Hashtbl.find cx.ctxt_all_item_types i.id)
                   cx.ctxt_main_exit_proc_glue_fixup
                   GLUE_exit_main_proc;
               end;

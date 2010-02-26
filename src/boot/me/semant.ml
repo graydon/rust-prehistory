@@ -19,7 +19,7 @@ type glue =
     GLUE_C_to_proc
   | GLUE_yield
   | GLUE_exit_main_proc
-  | GLUE_exit_proc of Ast.ty
+  | GLUE_exit_proc
   | GLUE_mark of Ast.ty
   | GLUE_drop of Ast.ty
   | GLUE_free of Ast.ty
@@ -1374,6 +1374,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
   let word = word_rty abi in
   let ptr = sp Il.OpaqueTy in
+  let rc_ptr = sp (Il.StructTy [| word; Il.OpaqueTy |]) in
   let codeptr = sp Il.CodeTy in
   let tup ttup = Il.StructTy (Array.map (slot_referent_type abi) ttup) in
   let tag ttag =
@@ -1432,7 +1433,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_chan _
       | Ast.TY_port _
       | Ast.TY_proc
-      | Ast.TY_type -> ptr
+      | Ast.TY_type -> rc_ptr
 
       | Ast.TY_named _ -> bug () "named type in referent_type"
       | Ast.TY_constrained (t, _) -> referent_type abi t
@@ -1666,7 +1667,7 @@ let glue_str (cx:ctxt) (g:glue) : string =
       GLUE_C_to_proc -> "glue$c_to_proc"
     | GLUE_yield -> "glue$yield"
     | GLUE_exit_main_proc -> "glue$exit_main_proc"
-    | GLUE_exit_proc ty -> "glue$exit_proc$" ^ (ty_str ty)
+    | GLUE_exit_proc -> "glue$exit_proc"
     | GLUE_mark ty -> "glue$mark$" ^ (ty_str ty)
     | GLUE_drop ty -> "glue$drop$" ^ (ty_str ty)
     | GLUE_free ty -> "glue$free$" ^ (ty_str ty)
