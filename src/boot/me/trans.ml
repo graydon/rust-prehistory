@@ -2017,13 +2017,16 @@ let trans_visitor
                     if lval_is_direct_fn cx src_lval then
                       trans_copy_direct_fn dst_cell src_lval
                     else
-                      (* Possibly-large structure copying *)
-                      let (src_cell, src_slot) = trans_lval src_lval in
-                        trans_copy_slot
-                          initializing
-                          dst_cell dst_slot
-                          src_cell src_slot
-                          None
+                      if lval_is_direct_mod cx src_lval then
+                        trans_copy_direct_mod dst_cell src_lval
+                      else
+                        (* Possibly-large structure copying *)
+                        let (src_cell, src_slot) = trans_lval src_lval in
+                          trans_copy_slot
+                            initializing
+                            dst_cell dst_slot
+                            src_cell src_slot
+                            None
           end
       | Some binop ->
           ignore (trans_binary binop
@@ -2043,6 +2046,18 @@ let trans_visitor
       trans_malloc dst_cell wrappersz;
       let wrapper_cell = deref dst_cell in
         trans_init_closure "fn-wrapper" wrapper_cell fptr zero [| |] [| |]
+
+  and trans_copy_direct_mod
+      (dst_cell:Il.cell)
+      (flv:Ast.lval)
+      : unit =
+    let item = lval_item cx flv in
+    let fix = Hashtbl.find cx.ctxt_mod_fixups item.id in
+    let ptr = fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data fix Il.OpaqueTy in
+    let item_ptr_cell = get_element_ptr dst_cell 0 in
+    let binding_ptr_cell = get_element_ptr dst_cell 1 in
+      mov item_ptr_cell ptr;
+      mov binding_ptr_cell zero;
 
 
   and trans_init_structural_from_atoms

@@ -952,6 +952,16 @@ let lval_is_direct_fn (cx:ctxt) (lval:Ast.lval) : bool =
     (defn_is_static defn) && (defn_is_callable defn)
 ;;
 
+let lval_is_direct_mod (cx:ctxt) (lval:Ast.lval) : bool =
+  let defn = resolve_lval cx lval in
+    if not (defn_is_static defn)
+    then false
+    else
+      match defn with
+          DEFN_item (Ast.MOD_ITEM_mod {Ast.decl_item=(None, _)}) -> true
+        | _ -> false
+;;
+
 let lval_is_static (cx:ctxt) (lval:Ast.lval) : bool =
   defn_is_static (resolve_lval cx lval)
 ;;
