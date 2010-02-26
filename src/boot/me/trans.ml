@@ -1567,22 +1567,30 @@ let trans_visitor
           | Ast.TY_fn _
           | Ast.TY_pred _
           | Ast.TY_mod _ ->
-              let src_binding_field_cell = get_element_ptr src_cell 1 in
-              let dst_binding_field_cell = get_element_ptr dst_cell 1 in
-                emit (Il.cmp (Il.Cell src_binding_field_cell) zero);
-                let null_jmp = mark() in
-                  emit (Il.jmp Il.JE Il.CodeNone);
-                  (* TY_fn and TY_mod are stored as pairs [item_ptr, closure_ptr]. *)
-                  (* Call thunk if we have a src binding. *)
-                  (*
-                   * FIXME (bug 543738): this is completely wrong, need a second thunk that
-                   * generates code to make use of a runtime type descriptor extracted from a
-                   * binding tuple. For now this only works by accident.
-                   *)
-                  (f dst_binding_field_cell
-                     src_binding_field_cell
-                     (exterior_slot Ast.TY_int) curr_iso);
-                  patch null_jmp
+
+              (* Fake-int to provoke copying of the static part. *)
+              let src_fn_field_cell = get_element_ptr src_cell 0 in
+              let dst_fn_field_cell = get_element_ptr dst_cell 0 in
+                f dst_fn_field_cell
+                  src_fn_field_cell
+                  (interior_slot Ast.TY_int) curr_iso;
+
+                let src_binding_field_cell = get_element_ptr src_cell 1 in
+                let dst_binding_field_cell = get_element_ptr dst_cell 1 in
+                  emit (Il.cmp (Il.Cell src_binding_field_cell) zero);
+                  let null_jmp = mark() in
+                    emit (Il.jmp Il.JE Il.CodeNone);
+                    (* TY_fn and TY_mod are stored as pairs [item_ptr, closure_ptr]. *)
+                    (* Call thunk if we have a src binding. *)
+                    (*
+                     * FIXME (bug 543738): this is completely wrong, need a second thunk that
+                     * generates code to make use of a runtime type descriptor extracted from a
+                     * binding tuple. For now this only works by accident.
+                     *)
+                    (f dst_binding_field_cell
+                       src_binding_field_cell
+                       (exterior_slot Ast.TY_int) curr_iso);
+                    patch null_jmp
 
           | _ -> ()
 
