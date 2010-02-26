@@ -188,10 +188,21 @@ let layout_visitor
       Hashtbl.replace cx.ctxt_frame_sizes frame_id (i64_max curr sz)
   in
 
+  (* 
+   * FIXME: this is a little aggressive for default callsz; it can be 
+   * narrowed in frames with no drop glue and/or no indirect drop glue.
+   *)
+
+  let glue_callsz =
+    let word = interior_slot Ast.TY_int in
+    let glue_fn = mk_simple_ty_fn [| word; word |] in
+      rty_sz (indirect_call_args_referent_type cx glue_fn Il.OpaqueTy)
+  in
+
   let enter_frame id =
       Stack.push (id, (Stack.create())) frame_stack;
       htab_put cx.ctxt_frame_sizes id 0L;
-      htab_put cx.ctxt_call_sizes id 0L;
+      htab_put cx.ctxt_call_sizes id glue_callsz;
       htab_put cx.ctxt_spill_fixups id (new_fixup "frame spill fixup");
       htab_put cx.ctxt_frame_blocks id []
   in

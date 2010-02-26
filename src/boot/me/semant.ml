@@ -1567,6 +1567,30 @@ let fn_call_tup (abi:Abi.abi) (inputs:Ast.ty_tup) : Ast.ty_tup =
 ;;
 
 
+let mk_ty_fn
+    (out_slot:Ast.slot)
+    (arg_slots:Ast.slot array)
+    : Ast.ty =
+  (* In some cases we don't care what aux or constrs are. *)
+  let taux = { Ast.fn_purity = Ast.PURE;
+               Ast.fn_proto = None; }
+  in
+  let tsig = { Ast.sig_input_slots = arg_slots;
+               Ast.sig_input_constrs = [| |];
+               Ast.sig_output_slot = out_slot; }
+  in
+    Ast.TY_fn (tsig, taux)
+;;
+
+let mk_simple_ty_fn
+    (arg_slots:Ast.slot array)
+    : Ast.ty =
+  (* In some cases we don't care what the output slot is. *)
+  let out_slot = interior_slot Ast.TY_nil in
+    mk_ty_fn out_slot arg_slots
+;;
+
+
 (* name mangling support. *)
 
 let item_name (cx:ctxt) (id:node_id) : Ast.name =
