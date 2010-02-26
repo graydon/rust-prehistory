@@ -872,12 +872,10 @@ let trans_visitor
       let closure_cell = deref (get_element_ptr self_extra_args_cell 0) in
       let closure_target_cell = get_element_ptr closure_cell 1 in
 
-      (* FIXME: merge seems busted. *)
         merge_bound_args self_args_rty callee_args_rty arg_slots arg_bound_flags;
         iflog (fun _ -> annotate "call through to closure target fn");
         let target_fn_ptr = callee_fn_ptr (Il.Cell closure_target_cell) false in
           call_code (code_of_operand target_fn_ptr);
-          (* FIXME: drop_slots *)
           trans_glue_frame_exit fix spill g
 
 
