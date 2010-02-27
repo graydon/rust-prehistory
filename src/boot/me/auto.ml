@@ -262,8 +262,8 @@ let auto_inference_visitor
                 | Some (Ast.TY_mod tmod) ->
                     begin
                       match tmod with
-                          (Some (hdr, _), _) ->
-                            ignore (unify_lval (Some (Ast.TY_mod tmod)) dst);
+                          (Some (hdr, _), mtis) ->
+                            ignore (unify_lval (Some (Ast.TY_mod (None, mtis))) dst);
                             unify_header_slots s.id hdr args
                         | _ ->
                             err (Some s.id) "STMT_call on non-stateful module type"
