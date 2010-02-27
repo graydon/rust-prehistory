@@ -34,6 +34,11 @@ let type_check_visitor
       | _ -> false
   in
 
+  let check_stmt_while (w:Ast.stmt_while) : unit =
+      let (_, e) = w.Ast.while_lval in
+        check_ty_eq Ast.TY_bool (expr_type cx e)
+  in
+
   let visit_stmt_pre_full (s:Ast.stmt) : unit =
     begin
       match s.node with
@@ -102,9 +107,9 @@ let type_check_visitor
                         Ast.sprintf_ty callee_ty
               end
 
-        | Ast.STMT_while w ->
-            let (_, e) = w.Ast.while_lval in
-              check_ty_eq Ast.TY_bool (expr_type cx e)
+        | Ast.STMT_while w -> check_stmt_while w
+
+        | Ast.STMT_do_while w -> check_stmt_while w
 
         | Ast.STMT_if i ->
             check_ty_eq Ast.TY_bool (expr_type cx i.Ast.if_test)
