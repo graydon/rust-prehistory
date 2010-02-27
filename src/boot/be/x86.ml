@@ -497,6 +497,7 @@ let emit_c_call
                   args;
 
       let fptr =
+        (* FIXME (bug 549131): this is not PIC for nabi_indirect. Need to use Abi.load_fixup_addr. *)
         Il.CodePtr
           (if nabi.Abi.nabi_indirect
            then Il.Cell (Il.Mem (Il.Abs (Asm.M_POS fn), Il.ScalarTy (Il.AddrTy Il.CodeTy)))
