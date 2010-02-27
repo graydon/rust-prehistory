@@ -60,6 +60,9 @@ let trans_visitor
   in
   let (word_slot:Ast.slot) = word_slot abi in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
+  let exterior_rc_body_off : int64 = word_n Abi.exterior_rc_slot_field_body in
+  let exterior_gc_body_off : int64 = word_n Abi.exterior_gc_slot_field_body in
+
 
   let imm_of_ty (i:int64) (tm:ty_mach) : Il.operand =
     Il.Imm (Asm.IMM i, tm)
@@ -102,6 +105,8 @@ let trans_visitor
   let out_mem_disp = abi.Abi.abi_frame_base_sz in
   let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
   let frame_fns_disp = word_n (-1) in
+
+  let fns = Stack.create () in
 
   let emitters = Stack.create () in
   let push_new_emitter _ =
@@ -376,7 +381,18 @@ let trans_visitor
                   None -> bugi cx slot_id "slot assigned to neither vreg nor offset"
                 | Some off ->
                     if slot_is_module_state cx slot_id
-                    then bug () "Don't support module-state slots yet."
+                    then
+                      begin
+                        let curr_fn = Stack.top fns in
+                        let curr_fn_ty = Hashtbl.find cx.ctxt_all_item_types curr_fn in
+                        let curr_args_rty = call_args_referent_type cx curr_fn_ty (Some Il.OpaqueTy) in
+                        let self_args_cell = callee_args_cell curr_args_rty in
+                        let self_extra_args = get_element_ptr self_args_cell 3 in
+                        let closure_arg = get_element_ptr self_extra_args 0 in
+                        let slot_off_in_closure = Int64.add exterior_rc_body_off off in
+                        let (slot_mem, _) = need_mem_cell (deref_imm closure_arg slot_off_in_closure) in
+                          Il.Mem (slot_mem, referent_type)
+                      end
                     else Il.Mem (fp_imm off, referent_type)
             end
   in
@@ -1414,9 +1430,6 @@ let trans_visitor
       xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 32);
       Int64.add 1L (!xr)
 
-  and exterior_rc_body_off : int64 = word_n Abi.exterior_rc_slot_field_body
-  and exterior_gc_body_off : int64 = word_n Abi.exterior_gc_slot_field_body
-
   and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =
     let (rc_mem, _) = need_mem_cell (deref_imm cell (word_n off)) in
     word_at rc_mem
@@ -2183,7 +2196,7 @@ let trans_visitor
       if direct then
         [||]
       else
-        [| callee_binding_ptr ptr direct |]
+        [| callee_binding_ptr flv direct |]
     in
       log cx "trans_call_fn: %s call to lval %a"
         (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
@@ -2276,7 +2289,7 @@ let trans_visitor
     let bound_args = arr_filter_some args in
     let glue_fixup = get_fn_binding_glue bind_id fn_sig.Ast.sig_input_slots arg_bound_flags in
     let target_fn_ptr = callee_fn_ptr target_ptr direct in
-    let target_binding_ptr = callee_binding_ptr target_ptr direct in
+    let target_binding_ptr = callee_binding_ptr flv direct in
     let closure_rty = closure_referent_type bound_arg_slots in
     let closure_sz = Il.referent_ty_size word_bits closure_rty in
     let fn_cell = get_element_ptr dst_cell 0 in
@@ -2492,12 +2505,16 @@ let trans_visitor
         Il.Cell (crate_rel_to_ptr (Il.Cell disp_cell) Il.CodeTy)
 
   and callee_binding_ptr
-      (fptr:Il.operand)
+      (pair_lval:Ast.lval)
       (direct:bool)
       : Il.operand =
     if direct
     then zero
-    else Il.Cell (get_element_ptr (need_cell (reify_ptr fptr)) 1)
+    else
+      let lval_base_id = lval_base_id pair_lval in
+      let pair_slot = lval_to_referent cx lval_base_id in
+      let pair_cell = cell_of_block_slot pair_slot in
+        Il.Cell (get_element_ptr pair_cell 1)
 
 
   and trans_call
@@ -2892,9 +2909,11 @@ let trans_visitor
   in
 
   let trans_fn (fnid:node_id) (body:Ast.block) : unit =
+    Stack.push fnid fns;
     trans_frame_entry fnid;
     trans_block body;
     trans_frame_exit fnid;
+    ignore (Stack.pop fns);
   in
 
   let trans_static_name_components (ncs:Ast.name_component list) : Il.operand =
