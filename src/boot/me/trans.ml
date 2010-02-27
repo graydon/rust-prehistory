@@ -2567,6 +2567,8 @@ let trans_visitor
         Ast.STMT_log a ->
           begin
             match atom_type cx a with
+              (* NB: If you extend this, be sure to update the typechecking
+               * code in type.ml as well. *)
                 Ast.TY_str -> trans_log_str a
               | Ast.TY_int -> trans_log_int a
               | Ast.TY_char -> trans_log_int a

@@ -11,10 +11,27 @@ let type_check_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
+  let ty_err (ty:Ast.ty) (expected:string) : unit =
+    err None "mismatched types: found %s, expected %s "
+      (Ast.fmt_to_str Ast.fmt_ty ty) expected
+  in
+
   let check_ty_eq (t1:Ast.ty) (t2:Ast.ty) : unit =
-    if not (t1 = t2)
-    then err None "mismatched types: %s vs. %s "
-      (Ast.fmt_to_str Ast.fmt_ty t1) (Ast.fmt_to_str Ast.fmt_ty t2)
+    if not (t1 = t2) then ty_err t1 (Ast.fmt_to_str Ast.fmt_ty t2)
+  in
+
+  let loggable (ty:Ast.ty) : bool =
+    match ty with
+        Ast.TY_str -> true
+      | Ast.TY_int -> true
+      | Ast.TY_char -> true
+      | Ast.TY_mach (TY_u8) -> true
+      | Ast.TY_mach (TY_u16) -> true
+      | Ast.TY_mach (TY_u32) -> true
+      | Ast.TY_mach (TY_s8) -> true
+      | Ast.TY_mach (TY_s16) -> true
+      | Ast.TY_mach (TY_s32) -> true
+      | _ -> false
   in
 
   let visit_stmt_pre_full (s:Ast.stmt) : unit =
@@ -91,6 +108,10 @@ let type_check_visitor
                         Ast.sprintf_lval callee
                         Ast.sprintf_ty callee_ty
               end
+
+        | Ast.STMT_log atom ->
+            let atom_ty = atom_type cx atom in
+            if not (loggable atom_ty) then ty_err atom_ty "loggable"
 
         (* FIXME (bug 541531): plenty more to handle here. *)
         | _ -> ()
