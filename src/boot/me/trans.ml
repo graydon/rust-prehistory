@@ -372,10 +372,12 @@ let trans_visitor
             end
         | None ->
             begin
-              match htab_search cx.ctxt_slot_frame_offsets slot_id with
-                  None -> bugi cx slot_id "slot assigned to neither vreg nor frame-offset"
+              match htab_search cx.ctxt_slot_offsets slot_id with
+                  None -> bugi cx slot_id "slot assigned to neither vreg nor offset"
                 | Some off ->
-                    Il.Mem (fp_imm off, referent_type)
+                    if slot_is_module_state cx slot_id
+                    then bug () "Don't support module-state slots yet."
+                    else Il.Mem (fp_imm off, referent_type)
             end
   in
 
@@ -738,46 +740,49 @@ let trans_visitor
               emit_exit_proc_glue fix g;
               fix
 
-  and emit_bind_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) (fix:fixup) (g:glue) : unit =
+  and emit_bind_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) (self_fix:fixup) (g:glue) : unit =
     let name = glue_str cx g in
     let spill = new_fixup (name ^ " spill") in
       trans_mem_glue_frame_entry 0 spill;
 
       let (slots, _) = hdr in
-      let ty = Ast.TY_tup slots in
-      let src_rty = slot_referent_type abi (interior_slot ty) in
-      let binding_ptr_rty = slot_referent_type abi (exterior_slot ty) in
-      let sz = exterior_rc_allocation_size (exterior_slot ty) in
+      let state_ty = Ast.TY_tup slots in
+      let src_rty = slot_referent_type abi (interior_slot state_ty) in
+      let exterior_binding_slot = exterior_slot state_ty in
+      let binding_ptr_rty = slot_referent_type abi exterior_binding_slot in
+      let binding_malloc_sz = exterior_rc_allocation_size exterior_binding_slot in
 
       let mod_ty = Hashtbl.find cx.ctxt_all_item_types mod_id in
-      let mod_cell = deref (ptr_at (fp_imm out_mem_disp) mod_ty) in
+      let mod_rty = referent_type abi mod_ty in
 
-        (* 
-         * pair_mem is now the pair [item,binding*]
-         *)
-      let item_ptr_cell = get_element_ptr mod_cell 0 in
-      let item_fixup = get_mod_fixup cx mod_id in
-      let item_ptr = fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data item_fixup Il.OpaqueTy in
-      let binding_ptr_cell = get_element_ptr mod_cell 1 in
+      let mod_fix = Hashtbl.find cx.ctxt_mod_fixups mod_id in
+      let mod_ptr = fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data mod_fix mod_rty in
 
-        (* Load first cell of pair with static item mem addr.*)
-        mov item_ptr_cell item_ptr;
+      let src_pair_cell = deref (need_cell (reify_ptr mod_ptr)) in
+      let src_pair_0_cell = get_element_ptr src_pair_cell 0 in
+
+      let dst_pair_cell = deref (ptr_at (fp_imm out_mem_disp) mod_ty) in
+      let dst_pair_0_cell = get_element_ptr dst_pair_cell 0 in
+      let dst_pair_1_cell = get_element_ptr dst_pair_cell 1 in
+
+
+        (* Load first cell of pair with first cell of the static module pair.*)
+        mov dst_pair_0_cell (Il.Cell src_pair_0_cell);
 
         (* Load second cell of pair with pointer to fresh binding tuple.*)
-        trans_malloc binding_ptr_cell sz;
+        trans_malloc dst_pair_1_cell binding_malloc_sz;
 
         (* Copy args into the binding tuple. *)
-        let dst_ptr = next_vreg_cell (need_scalar_ty binding_ptr_rty) in
-          mov dst_ptr (Il.Cell binding_ptr_cell);
-          let dst = deref dst_ptr in
-          let refcnt_cell = get_element_ptr dst 0 in
-          let body_cell = get_element_ptr dst 1 in
-          let src_mem = (fp_imm arg0_disp, src_rty) in
+        let binding_ptr = next_vreg_cell (need_scalar_ty binding_ptr_rty) in
+          mov binding_ptr (Il.Cell dst_pair_1_cell);
+          let binding = deref binding_ptr in
+          let refcnt_cell = get_element_ptr binding 0 in
+          let body_cell = get_element_ptr binding 1 in
+          let src_arg_mem = (fp_imm arg0_disp, src_rty) in
 
             mov refcnt_cell one;
-
-            trans_copy_tup true body_cell (Il.Mem src_mem) slots;
-            trans_glue_frame_exit fix spill g;
+            trans_copy_tup true body_cell (Il.Mem src_arg_mem) slots;
+            trans_glue_frame_exit self_fix spill g;
 
 
   and get_bind_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) : fixup =
@@ -1174,20 +1179,24 @@ let trans_visitor
     iter_block_slots block.id
       begin
         fun slotkey slot_id slot ->
-          (* FIXME (bug 541543): this is not going to free things in
-           * the proper order; we need to analyze the decl order in an
-           * earlier phase and thread it through to here.  *)
-          iflog
+          if (not (slot_is_module_state cx slot_id))
+          then
             begin
-              fun _ ->
-                annotate
-                  ("drop slot: " ^
-                     (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
+              (* FIXME (bug 541543): this is not going to free things in
+               * the proper order; we need to analyze the decl order in an
+               * earlier phase and thread it through to here.  *)
+              iflog
+                begin
+                  fun _ ->
+                    annotate
+                      ("drop slot: " ^
+                         (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
+                end;
+              trace_str cx.ctxt_sess.Session.sess_trace_drop
+                ("dropping slot " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
+              let cell = cell_of_block_slot slot_id in
+                drop_slot cell slot None
             end;
-          trace_str cx.ctxt_sess.Session.sess_trace_drop
-            ("dropping slot " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
-          let cell = cell_of_block_slot slot_id in
-            drop_slot cell slot None
       end;
     emit Il.Leave;
     trace_str cx.ctxt_sess.Session.sess_trace_block
@@ -2070,14 +2079,14 @@ let trans_visitor
       (dst_cell:Il.cell)
       (flv:Ast.lval)
       : unit =
-    let item = lval_item cx flv in
-    let item_ty = Hashtbl.find cx.ctxt_all_item_types item.id in
-    let item_rty = referent_type abi item_ty in
+    let mod_item = lval_item cx flv in
+    let mod_ty = Hashtbl.find cx.ctxt_all_item_types mod_item.id in
+    let mod_rty = referent_type abi mod_ty in
 
-    let fix = Hashtbl.find cx.ctxt_mod_fixups item.id in
-    let item_ptr = fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data fix item_rty in
+    let mod_fix = Hashtbl.find cx.ctxt_mod_fixups mod_item.id in
+    let mod_ptr = fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data mod_fix mod_rty in
 
-    let src_pair_cell = deref (need_cell (reify_ptr item_ptr)) in
+    let src_pair_cell = deref (need_cell (reify_ptr mod_ptr)) in
     let src_pair_0_cell = get_element_ptr src_pair_cell 0 in
     let src_pair_1_cell = get_element_ptr src_pair_cell 1 in
 
@@ -2806,13 +2815,13 @@ let trans_visitor
             iter_frame_and_arg_slots fnid
               begin
                 fun key slot_id slot ->
-                  match htab_search cx.ctxt_slot_frame_offsets slot_id with
-                      None -> ()
-                    | Some off ->
+                  match htab_search cx.ctxt_slot_offsets slot_id with
+                      Some off when not (slot_is_module_state cx slot_id) ->
                         let referent_type = slot_id_referent_type slot_id in
                         let fp_cell = Il.Mem (mem, (Il.ScalarTy (Il.AddrTy referent_type))) in
                         let slot_cell = deref_imm fp_cell off in
                           inner key slot_id slot slot_cell
+                    | _ -> ()
               end
         end
     in

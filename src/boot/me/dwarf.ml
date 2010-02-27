@@ -1865,7 +1865,7 @@ let dwarf_visitor
                 in
                   emit_die var_die;
               in
-                match htab_search cx.ctxt_slot_frame_offsets s.id with
+                match htab_search cx.ctxt_slot_offsets s.id with
                     Some off ->
                       emit_var_die
                         [| DW_OP_fbreg (Asm.IMM off) |]

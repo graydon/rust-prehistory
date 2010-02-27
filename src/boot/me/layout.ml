@@ -143,8 +143,8 @@ let layout_visitor
             in
               Stack.push (slot_referent_type cx.ctxt_abi slot) slot_accum;
               log cx "slot #%d offset: %Ld" (int_of_node id) frame_off;
-              if (not (Hashtbl.mem cx.ctxt_slot_frame_offsets id))
-              then htab_put cx.ctxt_slot_frame_offsets id frame_off;
+              if (not (Hashtbl.mem cx.ctxt_slot_offsets id))
+              then htab_put cx.ctxt_slot_offsets id frame_off;
               (Int64.add elt_off elt_size, i64_max elt_align align)
           end
     in
@@ -234,7 +234,11 @@ let layout_visitor
                    header_slots)
 
         | Ast.MOD_ITEM_mod {Ast.decl_item=(Some (hdr, _), _)} ->
-            layout_header i.id (header_slot_ids hdr)
+            let ids = header_slot_ids hdr in
+              layout_header i.id ids;
+              Array.iter
+                (fun id -> htab_put cx.ctxt_slot_is_module_state id ())
+                ids
 
         | _ -> ()
     end;

@@ -94,8 +94,9 @@ type ctxt =
 
       (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
+      ctxt_slot_is_module_state: (node_id,unit) Hashtbl.t;
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
-      ctxt_slot_frame_offsets: (node_id,int64) Hashtbl.t;
+      ctxt_slot_offsets: (node_id,int64) Hashtbl.t;
       ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
       ctxt_call_sizes: (node_id,int64) Hashtbl.t;
 
@@ -177,8 +178,9 @@ let new_ctxt sess abi crate =
     ctxt_copy_stmt_is_init = Hashtbl.create 0;
 
     ctxt_slot_aliased = Hashtbl.create 0;
+    ctxt_slot_is_module_state = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;
-    ctxt_slot_frame_offsets = Hashtbl.create 0;
+    ctxt_slot_offsets = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
 
@@ -359,6 +361,11 @@ let defn_is_native_item (d:defn) : bool =
       DEFN_native_item _ -> true
     | _ -> false
 ;;
+
+let slot_is_module_state (cx:ctxt) (sid:node_id) : bool =
+  Hashtbl.mem cx.ctxt_slot_is_module_state sid
+;;
+
 
 (* determines whether d defines a statically-known value *)
 let defn_is_static (d:defn) : bool =
