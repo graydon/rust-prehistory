@@ -478,10 +478,14 @@ let trans_visitor
           let item_ty = ty_of_mod_type_item item in
           let item_rty = referent_type abi item_ty in
           let i = arr_idx sorted_idents id in
-            (* A cell is a pair of pointers [mod_table_disp, binding];
-             * we dereference the first cell of this pair and then
-             * return the address of the Nth table-item. Each table
-             * item is itself a pair. *)
+
+          (* 
+           * A cell is a pair [mod_table_disp, binding*]; we
+           * dereference the first cell of this pair and then return
+           * the address of the Nth table-item. Each table item is
+           * itself a pair.
+           *)
+
           let pair_0_cell = get_element_ptr cell 0 in
           let table_ptr = crate_rel_to_ptr (Il.Cell pair_0_cell) table_rty in
           let (table_mem, _) = need_mem_cell (deref table_ptr) in
