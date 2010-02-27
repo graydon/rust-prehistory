@@ -37,11 +37,16 @@ let type_check_visitor
   let visit_stmt_pre_full (s:Ast.stmt) : unit =
     begin
       match s.node with
-          Ast.STMT_copy (lval, expr, _) ->
-            check_ty_eq (lval_ty cx lval) (expr_type cx expr)
-
-        | Ast.STMT_init_str (lval, _) ->
-            check_ty_eq (lval_ty cx lval) Ast.TY_str
+          Ast.STMT_init_rec (lval,atab) ->
+            let rtype = Array.map
+              begin
+                fun (id, mode, at) ->
+                  (id, {Ast.slot_mode=mode;
+                        Ast.slot_ty=Some (atom_type cx at)})
+              end
+              atab
+            in
+              check_ty_eq (lval_ty cx lval) (Ast.TY_rec rtype)
 
         | Ast.STMT_init_tup (lval,mode_atoms) ->
             let ttype = Array.map
@@ -54,23 +59,11 @@ let type_check_visitor
             in
               check_ty_eq (lval_ty cx lval) (Ast.TY_tup ttype)
 
-        | Ast.STMT_init_rec (lval,atab) ->
-            let rtype = Array.map
-              begin
-                fun (id, mode, at) ->
-                  (id, {Ast.slot_mode=mode;
-                        Ast.slot_ty=Some (atom_type cx at)})
-              end
-              atab
-            in
-              check_ty_eq (lval_ty cx lval) (Ast.TY_rec rtype)
+        | Ast.STMT_init_str (lval, _) ->
+            check_ty_eq (lval_ty cx lval) Ast.TY_str
 
-        | Ast.STMT_if i ->
-            check_ty_eq Ast.TY_bool (expr_type cx i.Ast.if_test)
-
-        | Ast.STMT_while w ->
-            let (_, e) = w.Ast.while_lval in
-              check_ty_eq Ast.TY_bool (expr_type cx e)
+        | Ast.STMT_copy (lval, expr, _) ->
+            check_ty_eq (lval_ty cx lval) (expr_type cx expr)
 
         | Ast.STMT_call (out, callee, args) ->
             begin
@@ -108,6 +101,13 @@ let type_check_visitor
                         Ast.sprintf_lval callee
                         Ast.sprintf_ty callee_ty
               end
+
+        | Ast.STMT_while w ->
+            let (_, e) = w.Ast.while_lval in
+              check_ty_eq Ast.TY_bool (expr_type cx e)
+
+        | Ast.STMT_if i ->
+            check_ty_eq Ast.TY_bool (expr_type cx i.Ast.if_test)
 
         | Ast.STMT_log atom ->
             let atom_ty = atom_type cx atom in
