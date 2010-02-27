@@ -473,17 +473,21 @@ let trans_visitor
       | (Ast.TY_mod (_, mtis),
          Ast.COMP_named (Ast.COMP_ident id)) ->
           let sorted_idents = sorted_htab_keys mtis in
+          let table_rty = referent_type abi base_ty in
+          let item = Hashtbl.find mtis id in
+          let item_ty = ty_of_mod_type_item item in
+          let item_rty = referent_type abi item_ty in
           let i = arr_idx sorted_idents id in
-            (* A mod is a pair of pointers [mod_table, binding];
+            (* A cell is a pair of pointers [mod_table_disp, binding];
              * we dereference the first cell of this pair and then
              * return the address of the Nth table-item. Each table
              * item is itself a pair. *)
-          let (table_mem, _) = need_mem_cell (deref (get_element_ptr cell 0)) in
+          let pair_0_cell = get_element_ptr cell 0 in
+          let table_ptr = crate_rel_to_ptr (Il.Cell pair_0_cell) table_rty in
+          let (table_mem, _) = need_mem_cell (deref table_ptr) in
           let off = word_n (i * 2) in
           let item_mem = Il.mem_off_imm table_mem off in
-          let item_ty = ty_of_mod_type_item (Hashtbl.find mtis id) in
-          let item_referent_ty = referent_type abi item_ty in
-            (Il.Mem (item_mem, item_referent_ty), interior_slot item_ty)
+            (Il.Mem (item_mem, item_rty), interior_slot item_ty)
 
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
 
@@ -849,12 +853,20 @@ let trans_visitor
       let self_extra_args_cell = get_element_ptr all_self_args_cell 3 in
       let closure_cell = deref (get_element_ptr self_extra_args_cell 0) in
       let closure_target_cell = get_element_ptr closure_cell 1 in
+      let closure_target_fn_cell = get_element_ptr closure_target_cell 0 in
 
         merge_bound_args self_args_rty callee_args_rty arg_slots arg_bound_flags;
         iflog (fun _ -> annotate "call through to closure target fn");
-        let target_fn_ptr = callee_fn_ptr (Il.Cell closure_target_cell) false in
-          call_code (code_of_operand target_fn_ptr);
-          trans_glue_frame_exit fix spill g
+
+        (* 
+         * Closures, unlike first-class [disp,*binding] pairs, contain
+         * a fully-resolved target pointer, not a displacement. So we
+         * don't want to use callee_fn_ptr or the like to access the
+         * contents. We just call through the cell directly.
+         *)
+
+        call_code (code_of_cell closure_target_fn_cell);
+        trans_glue_frame_exit fix spill g
 
 
   (* FIXME (546471): abstract out common glue-emitting logic *)
@@ -2041,24 +2053,36 @@ let trans_visitor
       (dst_cell:Il.cell)
       (flv:Ast.lval)
       : unit =
-    (* FIXME: trans_callee is kind of a lame abstraction at this point; we're not calling flv! *)
-    let (ptr, _) = trans_callee flv in
-    let item_ptr_cell = get_element_ptr dst_cell 0 in
-    let binding_ptr_cell = get_element_ptr dst_cell 1 in
-      mov item_ptr_cell (reify_ptr ptr);
-      mov binding_ptr_cell zero;
+    let item = lval_item cx flv in
+    let fix = Hashtbl.find cx.ctxt_fn_fixups item.id in
+
+    let dst_pair_0_cell = get_element_ptr dst_cell 0 in
+    let dst_pair_1_cell = get_element_ptr dst_cell 1 in
+
+      mov dst_pair_0_cell (crate_rel_imm fix);
+      mov dst_pair_1_cell zero
 
   and trans_copy_direct_mod
       (dst_cell:Il.cell)
       (flv:Ast.lval)
       : unit =
     let item = lval_item cx flv in
+    let item_ty = Hashtbl.find cx.ctxt_all_item_types item.id in
+    let item_rty = referent_type abi item_ty in
+
     let fix = Hashtbl.find cx.ctxt_mod_fixups item.id in
-    let ptr = fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data fix Il.OpaqueTy in
-    let item_ptr_cell = get_element_ptr dst_cell 0 in
-    let binding_ptr_cell = get_element_ptr dst_cell 1 in
-      mov item_ptr_cell (reify_ptr ptr);
-      mov binding_ptr_cell zero;
+    let item_ptr = fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data fix item_rty in
+
+    let src_pair_cell = deref (need_cell (reify_ptr item_ptr)) in
+    let src_pair_0_cell = get_element_ptr src_pair_cell 0 in
+    let src_pair_1_cell = get_element_ptr src_pair_cell 1 in
+
+    let dst_pair_0_cell = get_element_ptr dst_cell 0 in
+    let dst_pair_1_cell = get_element_ptr dst_cell 1 in
+
+      mov dst_pair_0_cell (Il.Cell src_pair_0_cell);
+      mov dst_pair_1_cell (Il.Cell src_pair_1_cell);
+
 
   and trans_init_structural_from_atoms
       (dst:Il.cell)
@@ -2238,7 +2262,6 @@ let trans_visitor
     let bound_arg_slots = arr_filter_some arg_slots in
     let bound_args = arr_filter_some args in
     let glue_fixup = get_fn_binding_glue bind_id fn_sig.Ast.sig_input_slots arg_bound_flags in
-    let glue_fptr = code_fixup_to_ptr_operand glue_fixup in
     let target_fn_ptr = callee_fn_ptr target_ptr direct in
     let target_binding_ptr = callee_binding_ptr target_ptr direct in
     let closure_rty = closure_referent_type bound_arg_slots in
@@ -2250,7 +2273,7 @@ let trans_visitor
         (Il.ScalarTy (Il.AddrTy (closure_rty)))
     in
       iflog (fun _ -> annotate "assign glue-code to fn slot of pair");
-      mov fn_cell (reify_ptr glue_fptr);
+      mov fn_cell (crate_rel_imm glue_fixup);
       iflog (fun _ -> annotate "heap-allocate closure to binding slot of pair");
       trans_malloc closure_cell closure_sz;
       trans_init_closure
@@ -2449,7 +2472,11 @@ let trans_visitor
       : Il.operand =
     if direct
     then fptr
-    else Il.Cell (get_element_ptr (need_cell (reify_ptr fptr)) 0)
+    else
+      (* fptr is a pair [disp, binding*] *)
+      let pair_cell = need_cell (reify_ptr fptr) in
+      let disp_cell = get_element_ptr pair_cell 0 in
+        Il.Cell (crate_rel_to_ptr (Il.Cell disp_cell) Il.CodeTy)
 
   and callee_binding_ptr
       (fptr:Il.operand)
@@ -2971,7 +2998,7 @@ let trans_visitor
     log cx "emitting %d-entry mod table for %s" (Hashtbl.length m) (path_name());
     let pair_with_nil fix =
       Asm.SEQ
-        [| Asm.WORD (word_ty_mach, Asm.M_POS fix);
+        [| crate_rel_word fix;
            Asm.WORD (word_ty_mach, Asm.IMM 0L) |]
     in
     let item_pairs =
