@@ -43,7 +43,6 @@ type reg =
 type mem =
     Abs of Asm.expr64
   | RegIn of (reg * (Asm.expr64 option))
-  | AbsIn of (Asm.expr64 * (Asm.expr64 option))
   | Spill of spill
 ;;
 
@@ -136,8 +135,6 @@ let mem_off (mem:mem) (off:Asm.expr64) : mem =
         Abs e -> Abs (addto e)
       | RegIn (r, None) -> RegIn (r, Some off)
       | RegIn (r, Some e) -> RegIn (r, Some (addto e))
-      | AbsIn (f, None) -> AbsIn (f, Some off)
-      | AbsIn (f, Some e) -> AbsIn (f, Some (addto e))
       | Spill _ -> bug () "Adding offset to spill slot"
 ;;
 
@@ -396,7 +393,6 @@ let identity_processor =
       qp_mem = (fun qp a -> match a with
                      RegIn (r, o) -> RegIn (qp.qp_reg qp r, o)
                    | Abs _
-                   | AbsIn _
                    | Spill _ -> a);
       qp_cell_read = qp_cell;
       qp_cell_write = qp_cell;
@@ -553,8 +549,6 @@ let string_of_mem (f:hreg_formatter) (a:mem) : string =
         Printf.sprintf "[%s]" (string_of_expr64 e)
     | RegIn (r, off) ->
         Printf.sprintf "[%s%s]" (string_of_reg f r) (string_of_off off)
-    | AbsIn (e, off) ->
-        Printf.sprintf "[[%s]%s]" (string_of_expr64 e) (string_of_off off)
     | Spill i ->
         Printf.sprintf "[<spill %d>]" i
 ;;
