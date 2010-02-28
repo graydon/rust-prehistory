@@ -19,5 +19,6 @@ fn main() -> () {
   log y.get();
   y.incr();
   y.incr();
+  log y.get();
   check (y.get() == 2);
 }

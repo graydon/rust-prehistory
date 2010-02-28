@@ -169,6 +169,16 @@ let layout_visitor
       layout_slot_ids (Stack.create()) true false offset input_slot_ids
   in
 
+  let layout_mod_closure (id:node_id) (closure_slot_ids:node_id array) : unit =
+    let offset =
+      let word_sz = cx.ctxt_abi.Abi.abi_word_sz in
+      let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
+        word_n Abi.exterior_rc_slot_field_body
+    in
+      log cx "laying out module-closure for node #%d at offset %Ld" (int_of_node id) offset;
+      layout_slot_ids (Stack.create()) true false offset closure_slot_ids
+  in
+
   let (frame_stack:(node_id * frame_blocks) Stack.t) = Stack.create() in
 
   let block_rty (block:slot_stack) : Il.referent_ty =
@@ -235,7 +245,7 @@ let layout_visitor
 
         | Ast.MOD_ITEM_mod {Ast.decl_item=(Some (hdr, _), _)} ->
             let ids = header_slot_ids hdr in
-              layout_header i.id ids;
+              layout_mod_closure i.id ids;
               Array.iter
                 (fun id -> htab_put cx.ctxt_slot_is_module_state id ())
                 ids

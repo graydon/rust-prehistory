@@ -252,8 +252,7 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 # Testing
 ######################################################################
 
-TEST_XFAILS := test/run-pass/stateful-module.rs \
-               test/run-pass/mlist_cycle.rs \
+TEST_XFAILS := test/run-pass/mlist_cycle.rs \
                test/run-pass/linear-for-loop.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs

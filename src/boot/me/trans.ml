@@ -386,11 +386,10 @@ let trans_visitor
                         let curr_fn = Stack.top fns in
                         let curr_fn_ty = Hashtbl.find cx.ctxt_all_item_types curr_fn in
                         let curr_args_rty = call_args_referent_type cx curr_fn_ty (Some Il.OpaqueTy) in
-                        let self_args_cell = callee_args_cell curr_args_rty in
+                        let self_args_cell = caller_args_cell curr_args_rty in
                         let self_extra_args = get_element_ptr self_args_cell 3 in
                         let closure_arg = get_element_ptr self_extra_args 0 in
-                        let slot_off_in_closure = Int64.add exterior_rc_body_off off in
-                        let (slot_mem, _) = need_mem_cell (deref_imm closure_arg slot_off_in_closure) in
+                        let (slot_mem, _) = need_mem_cell (deref_imm closure_arg off) in
                           Il.Mem (slot_mem, referent_type)
                       end
                     else Il.Mem (fp_imm off, referent_type)
