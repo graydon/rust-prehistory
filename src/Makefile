@@ -254,6 +254,7 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 
 TEST_XFAILS := test/run-pass/mlist_cycle.rs \
                test/run-pass/linear-for-loop.rs \
+               test/run-pass/tail-direct.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
