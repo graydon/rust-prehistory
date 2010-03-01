@@ -1864,11 +1864,12 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
       | BE proto ->
           bump ps;
-          let (lstmts, lval) = ctxt "be: lval" parse_lval ps in
+          let (lstmts, lval) = ctxt "be: lval" (rstr true parse_lval) ps in
           let (astmts, args) = ctxt "be: args" (parse_expr_atom_list LPAREN RPAREN) ps in
           let bpos = lexpos ps in
           let be = span ps apos bpos (Ast.STMT_be (proto, lval, args)) in
-          Array.concat [ lstmts; astmts; [| be |] ]
+            expect ps SEMI;
+            Array.concat [ lstmts; astmts; [| be |] ]
 
       | LBRACE -> [| ctxt "stmts: block" parse_block_stmt ps |]
 
