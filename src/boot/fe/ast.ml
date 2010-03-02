@@ -1002,6 +1002,24 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           end;
           fmt ff ";"
 
+      | STMT_be (po, fn, args) ->
+          fmt ff "be";
+          begin
+            match po with
+                None -> ()
+              | Some proto -> fmt_proto ff proto
+          end;
+          fmt ff " ";
+          fmt_lval ff fn;
+          fmt ff "(";
+          for i = 0 to (Array.length args) - 1
+          do
+            if i != 0
+            then fmt ff ", ";
+            fmt_atom ff args.(i);
+          done;
+          fmt ff ");";
+
       | STMT_block b -> fmt_block ff b.node
 
       | STMT_copy (lv, ex, binop_opt) ->
@@ -1110,7 +1128,6 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
 
       | STMT_foreach _ -> fmt ff "?stmt_foreach?"
       | STMT_put _ -> fmt ff "?stmt_put?"
-      | STMT_be _ -> fmt ff "?stmt_be?"
       | STMT_alt_tag _ -> fmt ff "?stmt_alt_tag?"
       | STMT_alt_type _ -> fmt ff "?stmt_alt_type?"
       | STMT_alt_port _ -> fmt ff "?stmt_alt_port?"

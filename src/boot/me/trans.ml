@@ -2181,6 +2181,34 @@ let trans_visitor
             then bug () "attempting to clone alias cell"
             else clone_slot clone_proc dst src dst_slot None
 
+  and trans_be_fn
+      (cx:ctxt)
+      (dst_cell:Il.cell)
+      (flv:Ast.lval)
+      (args:Ast.atom array)
+      : unit =
+    let (ptr, fn_ty) = trans_callee flv in
+    let direct = lval_is_static cx flv in
+    let extra_args =
+      if direct then
+        [||]
+      else
+        [| callee_binding_ptr flv direct |]
+    in
+    (* FIXME: true if caller is a member of a stateful module *)
+    let caller_is_closure = false in
+      log cx "trans_be_fn: %s call to lval %a"
+        (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
+      trans_be direct (fun () -> Ast.sprintf_lval () flv)
+        ptr fn_ty caller_is_closure dst_cell args extra_args
+
+  and trans_be_mod
+      ((*flv*)_:Ast.lval)
+      ((*args*)_:Ast.atom array)
+      : unit =
+    (* FIXME: implement be module *)
+    bug () "trans_be_mod not yet implemented"
+
   and trans_call_fn
       (initializing:bool)
       (cx:ctxt)
@@ -2516,6 +2544,34 @@ let trans_visitor
         Il.Cell (get_element_ptr pair_cell 1)
 
 
+  and trans_be
+      (direct:bool)
+      (logname:(unit -> string))
+
+      (callee_ptr:Il.operand)
+      (callee_ty:Ast.ty)
+
+      (caller_is_closure:bool)
+      (caller_output_cell:Il.cell)
+      (caller_arg_atoms:Ast.atom array)
+      (caller_extra_args:Il.operand array)
+      : unit =
+    let callee_fptr = callee_fn_ptr callee_ptr direct in
+    let callee_code = code_of_operand callee_fptr in
+    let callee_args_rty = call_args_referent_type cx callee_ty (if direct then None else (Some Il.OpaqueTy)) in
+    let callee_callsz = Il.referent_ty_size word_bits callee_args_rty in
+    let caller_fn = Stack.top fns in
+    let caller_fn_ty = Hashtbl.find cx.ctxt_all_item_types caller_fn in
+    let caller_args_rty = call_args_referent_type cx caller_fn_ty (if caller_is_closure then (Some Il.OpaqueTy) else None) in
+    let caller_callsz = Il.referent_ty_size word_bits caller_args_rty in
+      iflog (fun _ -> annotate (Printf.sprintf "copy args for tail call to %s" (logname ())));
+      copy_fn_args
+        CLONE_none direct
+        callee_ty
+        caller_output_cell caller_arg_atoms caller_extra_args;
+      abi.Abi.abi_emit_fn_tail_call (emitter()) caller_callsz callee_code callee_callsz;
+
+
   and trans_call
       ((*initializing*)_:bool)
       (direct:bool)
@@ -2787,6 +2843,31 @@ let trans_visitor
                 end;
                 emit (Il.jmp Il.JMP Il.CodeNone)
             | Some _ -> ()
+          end
+
+      | Ast.STMT_be (proto_opt, flv, args) ->
+          begin
+            match proto_opt with
+                None ->
+                  begin
+                    let ty = lval_ty cx flv in
+                      match ty with
+                          Ast.TY_fn ({ Ast.sig_output_slot={ Ast.slot_ty=Some result_ty } }, _) ->
+                            let (dst_mem, _) = need_mem_cell (deref (wordptr_at (fp_imm out_mem_disp))) in
+                            let dst_rty = referent_type abi result_ty in
+                            let dst_cell = Il.Mem (dst_mem, dst_rty) in
+                              trans_be_fn cx dst_cell flv args
+
+                        | Ast.TY_pred _ ->
+                            bug () "be pred not yet implemented"
+
+                        | Ast.TY_mod (Some _, _) ->
+                            trans_be_mod flv args
+
+                        | _ -> bug () "Calling unexpected lval."
+                  end
+              | Some _ ->
+                  bugi cx stmt.id "be{?,!,*,+} unhandled in trans_stmt %a" Ast.sprintf_stmt stmt
           end
 
       | Ast.STMT_alt_tag stmt_alt_tag -> trans_alt_tag stmt_alt_tag

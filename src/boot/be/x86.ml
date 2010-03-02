@@ -766,6 +766,43 @@ let fn_epilogue (e:Il.emitter) : unit =
     emit Il.Ret;
 ;;
 
+let fn_tail_call
+    (e:Il.emitter)
+    (caller_callsz:int64)
+    (callee_code:Il.code)
+    (callee_callsz:int64)
+    : unit =
+  let emit = Il.emit e in
+  let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
+  let mov dst src = emit (Il.umov dst src) in
+  let lea dst src = emit (Il.lea dst src) in
+    (* LEA edx <- esp + callee_callsz - 1 *)
+    lea (rc edx) (Il.RegIn (Il.Hreg esp, Some (Asm.IMM (Int64.sub callee_callsz 1L))));
+    (* MOV esp <- ebp *)
+    mov (rc esp) (ro ebp);
+    (* POP ... *)
+    restore_callee_saves e;
+    (* POP ecx *)
+    emit (Il.Pop (rc ecx));
+    (* SUB esp (caller_callsz + implicit_args_sz) *)
+    binary Il.SUB (rc esp) (Int64.add caller_callsz implicit_args_sz);
+    (* PUSH ... *)
+    begin
+      let rec reshuffle (i:int64) : unit =
+        if (Int64.compare i 0L) > 0 then
+          begin
+            emit (Il.Push (Il.Cell (Il.Mem (Il.RegIn (Il.Hreg edx, Some (Asm.IMM i)), Il.ScalarTy (Il.ValTy word_bits)))));
+            reshuffle (Int64.sub i 1L);
+          end
+      in
+        reshuffle (Int64.sub callee_callsz 1L)
+    end;
+    (* PUSH ecx *)
+    emit (Il.Push (ro ecx));
+    (* JMP callee_code *)
+    emit (Il.Jmp { Il.jmp_op=Il.JMP; Il.jmp_targ=callee_code });
+;;
+
 let c_to_proc_glue (e:Il.emitter) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
@@ -901,6 +938,7 @@ let (abi:Abi.abi) =
 
     Abi.abi_emit_fn_prologue = fn_prologue;
     Abi.abi_emit_fn_epilogue = fn_epilogue;
+    Abi.abi_emit_fn_tail_call = fn_tail_call;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_native_call = emit_native_call;
