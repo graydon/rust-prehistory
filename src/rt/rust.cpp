@@ -1184,6 +1184,18 @@ public:
 struct rust_cond {
 };
 
+// An alarm can be put into a wait queue and the proc will be notified when
+// the wait queue is flushed.
+
+struct rust_alarm {
+    rust_proc *receiver;
+    size_t idx;
+
+    rust_alarm(rust_proc *receiver);
+};
+
+typedef ptr_vec<rust_alarm> rust_wait_queue;
+
 /*
  * "Simple" precise, mark-sweep, single-generation GC.
  *
@@ -1262,8 +1274,11 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond 
     rust_cond *cond;
     uintptr_t* dptr;           // rendezvous pointer for send/recv
     rust_proc *spawner;        // parent-link
-    ptr_vec<rust_proc> waiting_procs;
     size_t idx;
+
+    // wait queue for procs waiting for this proc
+    rust_wait_queue waiting_procs;
+    rust_alarm alarm;
 
     rust_proc(rust_rt *rt,
               rust_proc *spawner);
@@ -1785,8 +1800,12 @@ upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
     rt->logptr("grown stk limit", new_top);
 }
 
-rust_proc::rust_proc(rust_rt *rt,
-                     rust_proc *spawner) :
+rust_alarm::rust_alarm(rust_proc *receiver) :
+    receiver(receiver)
+{
+}
+
+rust_proc::rust_proc(rust_rt *rt, rust_proc *spawner) :
     stk(new_stk(rt, 0)),
     runtime_sp(0),
     rust_sp(stk->limit),
@@ -1796,8 +1815,9 @@ rust_proc::rust_proc(rust_rt *rt,
     cond(NULL),
     dptr(0),
     spawner(spawner),
+    idx(0),
     waiting_procs(rt),
-    idx(0)
+    alarm(this)
 {
     rt->logptr("new proc", (uintptr_t)this);
 }
@@ -2012,7 +2032,7 @@ void
 rust_proc::notify_waiting_procs()
 {
     while (waiting_procs.length() > 0) {
-        rust_proc *p = waiting_procs.pop();
+        rust_proc *p = waiting_procs.pop()->receiver;
         if (!p->dead())
             p->wakeup(this);
     }
@@ -2527,7 +2547,7 @@ upcall_join(rust_proc *proc, rust_proc *other)
 
     // If the other proc is already dying, we dont have to wait for it.
     if (!other->dead()) {
-        other->waiting_procs.push(proc);
+        other->waiting_procs.push(&proc->alarm);
         proc->block(other);
         proc->yield(2);
     }
