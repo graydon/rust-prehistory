@@ -1,7 +1,7 @@
 
 
 {
-  open Parser;;
+  open Token;;
   open Common;;
   let bump_line p = { p with
               Lexing.pos_lnum = p.Lexing.pos_lnum + 1;
