@@ -711,18 +711,18 @@ class rust_crate_reader
     struct abbrev : rt_owned<abbrev>
     {
         rust_rt *rt;
-        size_t idx;
         uintptr_t body_off;
         size_t body_sz;
         uintptr_t tag;
         uint8_t has_children;
-        abbrev(rust_rt *rt, size_t idx, uintptr_t body_off, size_t body_sz,
+        size_t idx;
+        abbrev(rust_rt *rt, uintptr_t body_off, size_t body_sz,
                uintptr_t tag, uint8_t has_children) :
             rt(rt),
-            idx(idx),
             body_off(body_off),
             tag(tag),
-            has_children(has_children)
+            has_children(has_children),
+            idx(0)
         {}
     };
 
@@ -757,7 +757,7 @@ class rust_crate_reader
                 if (is_ok() || at_end()) {
                     rt->log(LOG_DWARF, "read abbrev: %" PRIdPTR, idx);
                     I(rt, idx = abbrevs.length() + 1);
-                    abbrevs.push(new (rt) abbrev(rt, idx, body_off, tell_off() - body_off,
+                    abbrevs.push(new (rt) abbrev(rt, body_off, tell_off() - body_off,
                                                  tag, has_children));
                 }
             }
