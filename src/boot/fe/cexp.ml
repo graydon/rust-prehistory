@@ -34,12 +34,12 @@ open Parser;;
  *)
 
 type cexp =
-    CEXP_alt of cexp_alt
-  | CEXP_let of cexp_let
-  | CEXP_src_mod of cexp_src
-  | CEXP_dir_mod of cexp_dir
-  | CEXP_use_mod of cexp_use
-  | CEXP_nat_mod of cexp_nat
+    CEXP_alt of cexp_alt identified
+  | CEXP_let of cexp_let identified
+  | CEXP_src_mod of cexp_src identified
+  | CEXP_dir_mod of cexp_dir identified
+  | CEXP_use_mod of cexp_use identified
+  | CEXP_nat_mod of cexp_nat identified
   | CEXP_pexp of Pexp.pexp
 
 and cexp_alt =
@@ -85,66 +85,75 @@ and cexp_nat =
 
 let rec parse_cexp (ps:pstate) : cexp =
 
-  match peek ps with
-      MOD ->
-        begin
-          bump ps;
-          let name = ctxt "mod: name" parse_cexp ps in
-          let path = ctxt "mod: path" parse_eq_cexp_opt ps
-          in
-            match peek ps with
-                SEMI ->
-                  bump ps;
-                  CEXP_src_mod { src_name = name;
-                                 src_path = path }
-              | LBRACE ->
-                  let mods =
-                    bracketed_zero_or_more LBRACE RBRACE
-                      None parse_cexp ps
-                  in
-                    CEXP_dir_mod { dir_name = name;
-                                   dir_path = path;
-                                   dir_mods = mods }
-              | _ -> raise (unexpected ps)
+  let apos = lexpos ps in
+    match peek ps with
+        MOD ->
+          begin
+            bump ps;
+            let name = ctxt "mod: name" parse_cexp ps in
+            let path = ctxt "mod: path" parse_eq_cexp_opt ps
+            in
+              match peek ps with
+                  SEMI ->
+                    bump ps;
+                    let bpos = lexpos ps in
+                      CEXP_src_mod
+                        (span ps apos bpos { src_name = name;
+                                             src_path = path })
+                | LBRACE ->
+                    let mods =
+                      bracketed_zero_or_more LBRACE RBRACE
+                        None parse_cexp ps
+                    in
+                    let bpos = lexpos ps in
+                      CEXP_dir_mod
+                        (span ps apos bpos { dir_name = name;
+                                             dir_path = path;
+                                             dir_mods = mods })
+                | _ -> raise (unexpected ps)
         end
 
-    | NATIVE ->
-        begin
-          bump ps;
-          expect ps MOD;
-          let name = ctxt "native mod: name" parse_cexp ps in
-          let path = ctxt "native mod: path" parse_eq_cexp_opt ps in
-          let meta = [| |] in
-          let items = Hashtbl.create 0 in
-          let get_item ps =
-            let (ident, item) = Item.parse_native_mod_item ps in
-              (*
-               * FIXME: don't forget to do this when evaluating native items: 
-               * 
-               *   'htab_put files item.id ps.pstate_file'
-               *)
-              htab_put items ident item;
-          in
-            ignore (bracketed_zero_or_more
-                      LBRACE RBRACE None get_item ps);
-            CEXP_nat_mod { nat_name = name;
-                           nat_path = path;
-                           nat_meta = meta;
-                           nat_items = items }
-        end
+      | NATIVE ->
+          begin
+            bump ps;
+            expect ps MOD;
+            let name = ctxt "native mod: name" parse_cexp ps in
+            let path = ctxt "native mod: path" parse_eq_cexp_opt ps in
+            let meta = [| |] in
+            let items = Hashtbl.create 0 in
+            let get_item ps =
+              let (ident, item) = Item.parse_native_mod_item ps in
+                (*
+                 * FIXME: don't forget to do this when evaluating native items: 
+                 * 
+                 *   'htab_put files item.id ps.pstate_file'
+                 *)
+                htab_put items ident item;
+            in
+              ignore (bracketed_zero_or_more
+                        LBRACE RBRACE None get_item ps);
+              let bpos = lexpos ps in
+                CEXP_nat_mod
+                  (span ps apos bpos { nat_name = name;
+                                       nat_path = path;
+                                       nat_meta = meta;
+                                       nat_items = items })
+          end
 
-    | USE ->
-        begin
-          bump ps;
-          let name = ctxt "use mod: name" parse_cexp ps in
-          let path = ctxt "use mod: path" parse_eq_cexp_opt ps in
-          let meta = [| |] in
-            CEXP_use_mod { use_name = name;
-                           use_path = path;
-                           use_meta = meta }
-        end
+      | USE ->
+          begin
+            bump ps;
+            let name = ctxt "use mod: name" parse_cexp ps in
+            let path = ctxt "use mod: path" parse_eq_cexp_opt ps in
+            let meta = [| |] in
+            let bpos = lexpos ps in
+              CEXP_use_mod
+                (span ps apos bpos { use_name = name;
+                                     use_path = path;
+                                     use_meta = meta })
+          end
 
-    | _ -> CEXP_pexp (Pexp.parse_pexp ps)
+      | _ -> CEXP_pexp (Pexp.parse_pexp ps)
 
 
 and  parse_eq_cexp_opt (ps:pstate) : cexp option =
@@ -170,9 +179,13 @@ type cval =
   | CVAL_num of int64
   | CVAL_bool of bool
   | CVAL_ident of Ast.ident
-  | CVAL_mod of Ast.mod_items
-  | CVAL_native_mod of Ast.native_mod_items
+  | CVAL_mod of (Ast.ident * Ast.mod_items)
+  | CVAL_native_mod of (Ast.ident * Ast.native_mod_items)
 ;;
+
+type env = { env_bindings: (Ast.ident * cval) list;
+             env_prefix: filename list;
+             env_items: (filename, Ast.mod_items) Hashtbl.t }
 
 let unexpected_val (expected:string) (v:cval)  =
   let got =
@@ -181,17 +194,21 @@ let unexpected_val (expected:string) (v:cval)  =
       | CVAL_num i -> "num " ^ (Int64.to_string i)
       | CVAL_bool b -> if b then "bool true" else "bool false"
       | CVAL_ident i -> "ident " ^ i
-      | CVAL_mod mis -> "mod with " ^ (string_of_int (Hashtbl.length mis)) ^ " items"
-      | CVAL_native_mod nmis -> "native mod with " ^ (string_of_int (Hashtbl.length nmis)) ^ " items"
+      | CVAL_mod (name, mis) ->
+          (Printf.sprintf "mod '%s' with %d items"
+             name (Hashtbl.length mis))
+      | CVAL_native_mod (name, nmis) ->
+          (Printf.sprintf "native mod '%s' with %d items"
+             name (Hashtbl.length nmis))
   in
     (* FIXME: proper error reporting, please. *)
     failwith ("expected " ^ expected ^ ", got " ^ got)
 ;;
 
 
-let rec eval_cexp (env:(Ast.ident * cval) list) (exp:cexp) : cval =
+let rec eval_cexp (env:env) (exp:cexp) : cval =
   match exp with
-      CEXP_alt ca ->
+      CEXP_alt {node=ca} ->
         let v = eval_cexp env ca.alt_val in
         let rec try_arm i =
           if i >= Array.length ca.alt_arms
@@ -205,63 +222,85 @@ let rec eval_cexp (env:(Ast.ident * cval) list) (exp:cexp) : cval =
         in
           eval_cexp env (try_arm 0)
 
-    | CEXP_let cl ->
+    | CEXP_let {node=cl} ->
         let ident = eval_cexp_to_ident env cl.let_ident in
         let v = eval_cexp env cl.let_value in
-          eval_cexp ((ident,v)::env) cl.let_body
+        let env = { env with
+                      env_bindings = ((ident,v)::env.env_bindings ) }
+        in
+          eval_cexp env cl.let_body
 
-    | CEXP_src_mod _ ->
+    | CEXP_src_mod {node=s} ->
         let items = Hashtbl.create 0 in
-          CVAL_mod items
+        let name = eval_cexp_to_ident env s.src_name in
+          CVAL_mod (name, items)
 
-    | CEXP_dir_mod _ ->
+    | CEXP_dir_mod {node=d; id=id} ->
         let items = Hashtbl.create 0 in
-          CVAL_mod items
+        let name = eval_cexp_to_ident env d.dir_name in
+        let path =
+          match d.dir_path with
+              None -> name
+            | Some p -> eval_cexp_to_str env p
+        in
+        let env = { env with
+                      env_prefix = path :: env.env_prefix } in
+        let sub_items = Array.map (eval_cexp_to_mod env) d.dir_mods in
+        let add (k,v) =
+          let v = Ast.MOD_ITEM_mod { Ast.decl_params = [| |];
+                                     Ast.decl_item = (None, v) }
+          in
+            Hashtbl.add items k {id=id; node=v}
+        in
+          Array.iter add sub_items;
+          CVAL_mod (name, items)
 
-    | CEXP_use_mod _ ->
+    | CEXP_use_mod {node=u} ->
         let items = Hashtbl.create 0 in
-          CVAL_mod items
+        let name = eval_cexp_to_ident env u.use_name in
+          CVAL_mod (name, items)
 
-    | CEXP_nat_mod cn ->
-        CVAL_native_mod cn.nat_items
+    | CEXP_nat_mod {node=cn} ->
+        let name = eval_cexp_to_ident env cn.nat_name in
+          CVAL_native_mod (name, cn.nat_items)
 
     | CEXP_pexp exp ->
         eval_pexp env exp
 
 
 
-and eval_cexp_to_str (env:(Ast.ident * cval) list) (exp:cexp) : string =
+and eval_cexp_to_str (env:env) (exp:cexp) : string =
   match eval_cexp env exp with
       CVAL_str s -> s
     | v -> unexpected_val "str" v
 
-and eval_cexp_to_num (env:(Ast.ident * cval) list) (exp:cexp) : int64 =
+and eval_cexp_to_num (env:env) (exp:cexp) : int64 =
   match eval_cexp env exp with
       CVAL_num n -> n
     | v -> unexpected_val "num" v
 
-and eval_cexp_to_bool (env:(Ast.ident * cval) list) (exp:cexp) : bool =
+and eval_cexp_to_bool (env:env) (exp:cexp) : bool =
   match eval_cexp env exp with
       CVAL_bool b -> b
     | v -> unexpected_val "bool" v
 
-and eval_cexp_to_ident (env:(Ast.ident * cval) list) (exp:cexp) : Ast.ident =
+and eval_cexp_to_ident (env:env) (exp:cexp) : Ast.ident =
   match eval_cexp env exp with
       CVAL_ident i -> i
     | v -> unexpected_val "ident" v
 
-and eval_cexp_to_mod (env:(Ast.ident * cval) list) (exp:cexp) : Ast.mod_items =
+and eval_cexp_to_mod (env:env) (exp:cexp) : (Ast.ident * Ast.mod_items) =
   match eval_cexp env exp with
       CVAL_mod mis -> mis
     | v -> unexpected_val "mod" v
 
-and eval_cexp_to_native_mod (env:(Ast.ident * cval) list) (exp:cexp) : Ast.native_mod_items =
+and eval_cexp_to_native_mod (env:env) (exp:cexp) : (Ast.ident * Ast.native_mod_items) =
   match eval_cexp env exp with
       CVAL_native_mod nmis -> nmis
     | v -> unexpected_val "native mod" v
 
 
-and eval_pexp (env:(Ast.ident * cval) list) (exp:Pexp.pexp) : cval =
+and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
   match exp.node with
     | Pexp.PEXP_binop (bop, a, b) ->
         begin
@@ -289,7 +328,7 @@ and eval_pexp (env:(Ast.ident * cval) list) (exp:Pexp.pexp) : cval =
 
     | Pexp.PEXP_lval (Pexp.PLVAL_ident ident) ->
         begin
-          match ltab_search env ident with
+          match ltab_search env.env_bindings ident with
               None -> CVAL_ident ident
             | Some v -> v
         end
@@ -306,17 +345,17 @@ and eval_pexp (env:(Ast.ident * cval) list) (exp:Pexp.pexp) : cval =
     | _ -> failwith "evaluating unhandled pexp type"
 
 
-and eval_pexp_to_str (env:(Ast.ident * cval) list) (exp:Pexp.pexp) : string =
+and eval_pexp_to_str (env:env) (exp:Pexp.pexp) : string =
   match eval_pexp env exp with
       CVAL_str s -> s
     | v -> unexpected_val "str" v
 
-and eval_pexp_to_num (env:(Ast.ident * cval) list) (exp:Pexp.pexp) : int64 =
+and eval_pexp_to_num (env:env) (exp:Pexp.pexp) : int64 =
   match eval_pexp env exp with
       CVAL_num n -> n
     | v -> unexpected_val "num" v
 
-and eval_pexp_to_bool (env:(Ast.ident * cval) list) (exp:Pexp.pexp) : bool =
+and eval_pexp_to_bool (env:env) (exp:Pexp.pexp) : bool =
   match eval_pexp env exp with
       CVAL_bool b -> b
     | v -> unexpected_val "bool" v
