@@ -330,7 +330,8 @@ let arr_filter_some (a:'a option array) : 'a array =
 
 (* FIXME: use Array.build or whatever it's called for efficiency *)
 let arr_map2 (f:'a -> 'b -> 'c) (a:'a array) (b:'b array) : 'c array =
-  Array.of_list (List.map2 f (Array.to_list a) (Array.to_list b))
+  assert ((Array.length a) = (Array.length b));
+  Array.init (Array.length a) (fun i -> f a.(i) b.(i))
 ;;
 
 

@@ -68,7 +68,7 @@ let get_ty_mod (filename:filename) : Ast.ty_mod =
       (None, mtis)
 ;;
 
-let infer_crate_filename (ident:filename) : filename =
+let infer_lib_name (ident:filename) : filename =
   match sess.Session.sess_targ with
       Win32_x86_pe -> ident ^ ".dll"
     | MacOS_x86_macho -> "lib" ^ ident ^ ".dylib"
@@ -83,7 +83,7 @@ let default_output_filename (sess:Session.sess) : filename option =
         let out =
           if sess.Session.sess_library_mode
           then 
-            infer_crate_filename base
+            infer_lib_name base
           else 
             base ^ (match sess.Session.sess_targ with
                         Linux_x86_elf -> ""
@@ -187,10 +187,10 @@ let _ =
 let (crate:Ast.crate) =
   let infile = Session.filename_of sess.Session.sess_in in
   if Filename.check_suffix infile ".rc"
-  then Cexp.parse_crate sess Lexer.token get_ty_mod infer_crate_filename
+  then Cexp.parse_crate sess Lexer.token get_ty_mod infer_lib_name
   else
     if Filename.check_suffix infile ".rs"
-    then Cexp.parse_srcfile sess Lexer.token get_ty_mod infer_crate_filename
+    then Cexp.parse_srcfile sess Lexer.token get_ty_mod infer_lib_name
     else
       begin
         Printf.fprintf stderr

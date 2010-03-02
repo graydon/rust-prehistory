@@ -15,8 +15,8 @@ type pstate =
       pstate_temp_id      : temp_id ref;
       pstate_node_id      : node_id ref;
       pstate_opaque_id    : opaque_id ref;
-      pstate_get_ty_mod           : (filename -> Ast.ty_mod);
-      pstate_infer_crate_filename : (Ast.ident -> filename); }
+      pstate_get_ty_mod     : (filename -> Ast.ty_mod);
+      pstate_infer_lib_name : (Ast.ident -> filename); }
 ;;
 
 let log (ps:pstate) = Session.log "parse"
@@ -37,7 +37,7 @@ let make_parser
     (sess:Session.sess)
     (tok:Lexing.lexbuf -> token)
     (get_ty_mod:filename -> Ast.ty_mod)
-    (infer_crate_filename:Ast.ident -> filename)
+    (infer_lib_name:Ast.ident -> filename)
     (fname:string)
     : pstate =
   let lexbuf = Lexing.from_channel (open_in fname) in
@@ -58,7 +58,7 @@ let make_parser
         pstate_node_id = nref;
         pstate_opaque_id = oref;
         pstate_get_ty_mod = get_ty_mod;
-        pstate_infer_crate_filename = infer_crate_filename; }
+        pstate_infer_lib_name = infer_lib_name; }
     in
       iflog ps (fun _ -> log ps "made parser for: %s\n%!" fname);
       ps
