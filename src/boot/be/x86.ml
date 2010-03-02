@@ -787,16 +787,54 @@ let fn_tail_call
     (* SUB esp (caller_callsz + implicit_args_sz) *)
     binary Il.SUB (rc esp) (Int64.add caller_callsz implicit_args_sz);
     (* PUSH ... *)
+
+    (*
+     * stack grows downwards; copy from high to low
+     * 
+     *   bpw = word_sz
+     *   w = floor(callee_callsz / word_sz)
+     *   b = callee_callsz % word_sz
+     * 
+     * byte copies:
+     *   +------------------------+
+     *   |                        |
+     *   +------------------------+ <-- base + callee_callsz + (b - 1)
+     *   .                        .
+     *   +------------------------+
+     *   |                        |
+     *   +------------------------+ <-- base + callee_callsz + (b - b)
+     * word copies:                     =
+     *   +------------------------+ <-- base + ((w-0) * word_sz)
+     *   | bytes                  |
+     *   | (w-1)*bpw..w*bpw-1     |
+     *   +------------------------+ <-- base + ((w-1) * word_sz)
+     *   | bytes                  |
+     *   | (w-2)*bpw..(w-1)*bpw-1 |
+     *   +------------------------+ <-- base + ((w-2) * word_sz)
+     *   .                        .
+     *   .                        .
+     *   .                        .
+     *   +------------------------+
+     *   | bytes                  |
+     *   | 0..bpw - 1             |
+     *   +------------------------+ <-- base + ((w-w) * word_sz)
+     *)
+
     begin
-      let rec reshuffle (i:int64) : unit =
-        if (Int64.compare i 0L) > 0 then
-          begin
-            emit (Il.Push (Il.Cell (Il.Mem (Il.RegIn (Il.Hreg edx, Some (Asm.IMM i)), Il.ScalarTy (Il.ValTy word_bits)))));
-            reshuffle (Int64.sub i 1L);
-          end
-      in
-        reshuffle (Int64.sub callee_callsz 1L)
+      let bpw = Int64.to_int word_sz in
+      let w = Int64.to_int (Int64.div callee_callsz word_sz) in
+      let b = Int64.to_int (Int64.rem callee_callsz word_sz) in
+        for i = 1 to b do
+          (* FIXME: copy the remaining b bytes *)
+          ()
+        done;
+        for i = 1 to w do
+          let off = (w - i) * bpw in
+            mov (word_n (Il.Hreg esp) off) (c (word_n (Il.Hreg edx) off))
+        done;
     end;
+    (* ADD esp callee_callsz *)
+    binary Il.ADD (rc esp) callee_callsz;
     (* PUSH ecx *)
     emit (Il.Push (ro ecx));
     (* JMP callee_code *)

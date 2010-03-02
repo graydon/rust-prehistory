@@ -346,6 +346,23 @@ let i64_gt (a:int64) (b:int64) : bool = (Int64.compare a b) > 0
 let i64_max (a:int64) (b:int64) : int64 = (if (Int64.compare a b) > 0 then a else b)
 let i64_min (a:int64) (b:int64) : int64 = (if (Int64.compare a b) < 0 then a else b)
 
+
+let rec i64_for (lo:int64) (hi:int64) (thunk:int64 -> unit) : unit =
+  if i64_lt lo hi then
+    begin
+      thunk lo;
+      i64_for (Int64.add lo 1L) hi thunk;
+    end
+;;
+
+let rec i64_for_rev (hi:int64) (lo:int64) (thunk:int64 -> unit) : unit =
+  if i64_ge hi lo then
+    begin
+      thunk hi;
+      i64_for_rev (Int64.sub hi 1L) lo thunk;
+    end
+;;
+
 (*
  * Local Variables:
  * fill-column: 70;
