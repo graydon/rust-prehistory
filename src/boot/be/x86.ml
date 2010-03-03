@@ -371,21 +371,6 @@ let immi_byte (x:int64) : Il.operand =
 ;;
 
 
-let save_callee_saves (e:Il.emitter) : unit =
-    Il.emit e (Il.Push (ro ebp));
-    Il.emit e (Il.Push (ro edi));
-    Il.emit e (Il.Push (ro esi));
-    Il.emit e (Il.Push (ro ebx));
-;;
-
-
-let restore_callee_saves (e:Il.emitter) : unit =
-    Il.emit e (Il.Pop (rc ebx));
-    Il.emit e (Il.Pop (rc esi));
-    Il.emit e (Il.Pop (rc edi));
-    Il.emit e (Il.Pop (rc ebp));
-;;
-
 let byte_off_n (i:int) : Asm.expr64 =
   Asm.IMM (Int64.of_int i)
 ;;
@@ -430,6 +415,39 @@ let wordptr_n (reg:Il.reg) (i:int) : Il.cell =
   let imm = word_off_n i in
   let mem = Il.RegIn (reg, Some imm) in
     Il.Mem (mem, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
+;;
+
+
+let save_callee_saves (e:Il.emitter) : unit =
+    Il.emit e (Il.Push (ro ebp));
+    Il.emit e (Il.Push (ro edi));
+    Il.emit e (Il.Push (ro esi));
+    Il.emit e (Il.Push (ro ebx));
+;;
+
+
+let restore_callee_saves (e:Il.emitter) : unit =
+    Il.emit e (Il.Pop (rc ebx));
+    Il.emit e (Il.Pop (rc esi));
+    Il.emit e (Il.Pop (rc edi));
+    Il.emit e (Il.Pop (rc ebp));
+;;
+
+
+(* restores registers from the frame base without updating esp:
+ *   - sets ebp, edi, esi, ebx to stored values from frame base
+ *   - sets `retpc' register to stored retpc from frame base
+ *   - sets `base' register to current fp
+ *)
+let restore_frame_base (e:Il.emitter) (base:Il.reg) (retpc:Il.reg) : unit =
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+    mov (r base) (ro ebp);
+    mov (rc ebx) (c (word_at base));
+    mov (rc esi) (c (word_n base 1));
+    mov (rc edi) (c (word_n base 2));
+    mov (rc ebp) (c (word_n base 3));
+    mov (r retpc) (c (word_n base 4));
 ;;
 
 
@@ -785,16 +803,11 @@ let fn_tail_call
   let emit = Il.emit e in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
   let mov dst src = emit (Il.umov dst src) in
-    (* MOV edx <- esp *)
-    mov (rc edx) (ro esp);
-    (* MOV esp <- ebp *)
-    mov (rc esp) (ro ebp);
-    (* POP ... *)
-    restore_callee_saves e;
-    (* POP ecx (retpc) *)
-    emit (Il.Pop (rc ecx));  
-    (* adjust esp for difference in call sizes *)
-    binary Il.ADD (rc esp) (Int64.sub caller_callsz callee_callsz);
+  let callsz_diff = Int64.sub caller_callsz callee_callsz in
+    (* edx <- ebp; restore ebp, edi, esi, ebx; ecx <- retpc *)
+    restore_frame_base e (h edx) (h ecx);
+    (* move edx past frame base and adjust for difference in call sizes *)
+    binary Il.ADD (rc edx) (Int64.add frame_base_sz callsz_diff);
 
     (*
      * stack grows downwards; copy from high to low
@@ -835,15 +848,17 @@ let fn_tail_call
         (* NOTE: must copy top-to-bottom in case the regions overlap *)
         for i = (b-1) downto 0 do
           let off = (w*bpw) + i in
-            mov (rc eax) (c (byte_n (Il.Hreg edx) off));
-            mov (byte_n (Il.Hreg esp) off) (ro eax);
+            mov (rc eax) (c (byte_n (h esp) off));
+            mov (byte_n (h edx) off) (ro eax);
         done;
         for i = (w-1) downto 0 do
-          mov (rc eax) (c (word_n (Il.Hreg edx) i));
-          mov (word_n (Il.Hreg esp) i) (ro eax);
+          mov (rc eax) (c (word_n (h esp) i));
+          mov (word_n (h edx) i) (ro eax);
         done;
     end;
 
+    (* esp <- edx *)
+    mov (rc esp) (ro edx);
     (* PUSH ecx (retpc) *)
     emit (Il.Push (ro ecx));
     (* JMP callee_code *)
