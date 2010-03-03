@@ -386,6 +386,16 @@ let restore_callee_saves (e:Il.emitter) : unit =
     Il.emit e (Il.Pop (rc ebp));
 ;;
 
+let byte_off_n (i:int) : Asm.expr64 =
+  Asm.IMM (Int64.of_int i)
+;;
+
+let byte_n (reg:Il.reg) (i:int) : Il.cell =
+  let imm = byte_off_n i in
+  let mem = Il.RegIn (reg, Some imm) in
+    Il.Mem (mem, Il.ScalarTy (Il.ValTy Il.Bits8))
+;;
+
 let word_off_n (i:int) : Asm.expr64 =
   Asm.IMM (Int64.mul (Int64.of_int i) word_sz)
 ;;
@@ -775,17 +785,16 @@ let fn_tail_call
   let emit = Il.emit e in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
   let mov dst src = emit (Il.umov dst src) in
-    (* mov edx <- esp *)
+    (* MOV edx <- esp *)
     mov (rc edx) (ro esp);
     (* MOV esp <- ebp *)
     mov (rc esp) (ro ebp);
     (* POP ... *)
     restore_callee_saves e;
-    (* ecx <- retpc *)
+    (* POP ecx (retpc) *)
     emit (Il.Pop (rc ecx));  
     (* adjust esp for difference in call sizes *)
     binary Il.ADD (rc esp) (Int64.sub caller_callsz callee_callsz);
-    (* PUSH ... *)
 
     (*
      * stack grows downwards; copy from high to low
@@ -797,11 +806,11 @@ let fn_tail_call
      * byte copies:
      *   +------------------------+
      *   |                        |
-     *   +------------------------+ <-- base + callee_callsz + (b - 1)
+     *   +------------------------+ <-- base + (w * word_sz) + (b - 1)
      *   .                        .
      *   +------------------------+
      *   |                        |
-     *   +------------------------+ <-- base + callee_callsz + (b - b)
+     *   +------------------------+ <-- base + (w * word_sz) + (b - b)
      * word copies:                     =
      *   +------------------------+ <-- base + ((w-0) * word_sz)
      *   | bytes                  |
@@ -820,18 +829,22 @@ let fn_tail_call
      *)
 
     begin
+      let bpw = Int64.to_int word_sz in
       let w = Int64.to_int (Int64.div callee_callsz word_sz) in
       let b = Int64.to_int (Int64.rem callee_callsz word_sz) in
-        for i = 1 to b do
-          (* FIXME: copy the remaining b bytes *)
-          ()
+        (* NOTE: must copy top-to-bottom in case the regions overlap *)
+        for i = (b-1) downto 0 do
+          let off = (w*bpw) + i in
+            mov (rc eax) (c (byte_n (Il.Hreg edx) off));
+            mov (byte_n (Il.Hreg esp) off) (ro eax);
         done;
         for i = (w-1) downto 0 do
-          mov (word_n (Il.Hreg esp) i) (c (word_n (Il.Hreg edx) i))
+          mov (rc eax) (c (word_n (Il.Hreg edx) i));
+          mov (word_n (Il.Hreg esp) i) (ro eax);
         done;
     end;
 
-    (* PUSH ecx *)
+    (* PUSH ecx (retpc) *)
     emit (Il.Push (ro ecx));
     (* JMP callee_code *)
     emit (Il.Jmp { Il.jmp_op=Il.JMP; Il.jmp_targ=callee_code });
