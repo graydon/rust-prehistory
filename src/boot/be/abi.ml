@@ -79,7 +79,7 @@ type abi =
     abi_prealloc_quad: (Il.quad' -> Il.quad');
     abi_emit_fn_prologue: (Il.emitter -> int64 -> Common.fixup -> int64 -> nabi -> Common.fixup -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
-    abi_emit_fn_tail_call: (Il.emitter -> int64 -> Il.code -> int64 -> unit);
+    abi_emit_fn_tail_call: (Il.emitter -> int64 -> int64 -> Il.code -> int64 -> unit);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 

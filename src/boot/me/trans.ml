@@ -112,6 +112,7 @@ let trans_visitor
   let current_fn_args_rty (closure:Il.referent_ty option) : Il.referent_ty =
     call_args_referent_type cx (current_fn_ty ()) closure
   in
+  let current_fn_callsz () = get_callsz cx (current_fn()) in
   let native_mods = Stack.create () in
 
   let emitters = Stack.create () in
@@ -176,8 +177,12 @@ let trans_visitor
     Il.Mem (fp_imm out_mem_disp, args_rty)
   in
 
-  let callee_args_cell (args_rty:Il.referent_ty) : Il.cell =
-    Il.Mem (sp_imm 0L, args_rty)
+  let callee_args_cell (tail_area:bool) (args_rty:Il.referent_ty) : Il.cell =
+    if tail_area
+    then
+      Il.Mem (sp_imm (current_fn_callsz ()), args_rty)
+    else
+      Il.Mem (sp_imm 0L, args_rty)
   in
 
   let word_at (mem:Il.mem) : Il.cell =
@@ -1281,7 +1286,7 @@ let trans_visitor
             Ast.REALM_thread ->
               begin
                 trans_upcall "upcall_new_thread" new_proc [| |];
-                copy_fn_args (CLONE_all new_proc) false fn_ty proc_cell args [| |];
+                copy_fn_args false (CLONE_all new_proc) false fn_ty proc_cell args [| |];
                 trans_upcall "upcall_start_thread" proc_cell
                   [|
                     Il.Cell new_proc;
@@ -1293,7 +1298,7 @@ let trans_visitor
          | _ ->
              begin
                  trans_upcall "upcall_new_proc" new_proc [| |];
-                 copy_fn_args (CLONE_chan new_proc) false fn_ty proc_cell args [| |];
+                 copy_fn_args false (CLONE_chan new_proc) false fn_ty proc_cell args [| |];
                  trans_upcall "upcall_start_proc" proc_cell
                    [|
                      Il.Cell new_proc;
@@ -2385,6 +2390,7 @@ let trans_visitor
       | _ -> bug () "Trans.ty_arg_slots on non-callable type: %a" Ast.sprintf_ty ty
 
   and copy_fn_args
+      (tail_area:bool)
       (clone:clone_ctrl)
       (direct:bool)
 
@@ -2402,7 +2408,7 @@ let trans_visitor
         then call_args_referent_type cx callee_ty None
         else call_args_referent_type cx callee_ty (Some Il.OpaqueTy)
       in
-        callee_args_cell all_callee_args_rty
+        callee_args_cell tail_area all_callee_args_rty
     in
 
     let callee_arg_slots = ty_arg_slots callee_ty in
@@ -2479,7 +2485,7 @@ let trans_visitor
        * 
        *)
       let all_self_args_cell = caller_args_cell all_self_args_rty in
-      let all_callee_args_cell = callee_args_cell all_callee_args_rty in
+      let all_callee_args_cell = callee_args_cell false all_callee_args_rty in
 
       let self_args_cell = get_element_ptr all_self_args_cell 2 in
       let callee_args_cell = get_element_ptr all_callee_args_cell 2 in
@@ -2561,16 +2567,18 @@ let trans_visitor
     let callee_fptr = callee_fn_ptr callee_ptr direct in
     let callee_code = code_of_operand callee_fptr in
     let callee_args_rty = call_args_referent_type cx callee_ty (if direct then None else (Some Il.OpaqueTy)) in
-    let callee_callsz = Il.referent_ty_size word_bits callee_args_rty in
+    let callee_argsz = Il.referent_ty_size word_bits callee_args_rty in
     let caller_args_rty = current_fn_args_rty (if caller_is_closure then (Some Il.OpaqueTy) else None) in
-    let caller_callsz = Il.referent_ty_size word_bits caller_args_rty in
+    let caller_argsz = Il.referent_ty_size word_bits caller_args_rty in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for tail call to %s" (logname ())));
       copy_fn_args
+        true
         CLONE_none direct
         callee_ty
         caller_output_cell caller_arg_atoms caller_extra_args;
       iter_frame_and_arg_slots (current_fn ()) callee_drop_slot;
-      abi.Abi.abi_emit_fn_tail_call (emitter()) caller_callsz callee_code callee_callsz;
+      abi.Abi.abi_emit_fn_tail_call (emitter())
+        (current_fn_callsz()) caller_argsz callee_code callee_argsz;
 
 
   and trans_call
@@ -2589,6 +2597,7 @@ let trans_visitor
     let callee_fptr = callee_fn_ptr callee_ptr direct in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args
+        false
         CLONE_none direct
         callee_ty
         caller_output_cell caller_arg_atoms caller_extra_args;
@@ -3024,7 +3033,7 @@ let trans_visitor
 
         let args_rty = direct_call_args_referent_type cx fnid in
         let caller_args_cell = caller_args_cell args_rty in
-        let callee_args_cell = callee_args_cell args_rty in
+        let callee_args_cell = callee_args_cell false args_rty in
         mov (get_element_ptr callee_args_cell 0) (Il.Cell (get_element_ptr caller_args_cell 0));
         mov (get_element_ptr callee_args_cell 1) (Il.Cell (get_element_ptr caller_args_cell 1));
         call_code (code_of_operand (Il.Cell f));

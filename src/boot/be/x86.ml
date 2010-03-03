@@ -399,10 +399,13 @@ let word_at_abs (abs:Asm.expr64) : Il.cell =
     Il.Mem (mem, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
-let word_n (reg:Il.reg) (i:int) : Il.cell =
-  let imm = word_off_n i in
-  let mem = Il.RegIn (reg, Some imm) in
+let word_at_off (reg:Il.reg) (off:Asm.expr64) : Il.cell =
+  let mem = Il.RegIn (reg, Some off) in
     Il.Mem (mem, Il.ScalarTy (Il.ValTy word_bits))
+;;
+
+let word_n (reg:Il.reg) (i:int) : Il.cell =
+  word_at_off reg (word_off_n i)
 ;;
 
 let reg_codeptr (reg:Il.reg) : Il.code =
@@ -734,6 +737,21 @@ let fn_prologue
    * (pushing eip and callee-saves) before we perform the next check.
    *)
 
+  (* 
+   * We double the reserved callsz because we need a 'temporary tail-call region'
+   * above the actual call region, in case there's a drop call at the end of 
+   * assembling the tail-call args and before copying them to callee position.
+   *)
+
+  let callsz = Int64.mul callsz 2L in
+
+  (* 
+   * Add in *another* word to handle an extra-awkward spill of the
+   * callee address that might occur during an indirect tail call.
+   *)
+  let callsz = Int64.add callsz word_sz in
+
+
   let callee_frame_sz = (Asm.ADD ((Asm.IMM (add framesz callsz)),
                                   Asm.M_SZ spill_fixup))
   in
@@ -799,26 +817,63 @@ let fn_epilogue (e:Il.emitter) : unit =
 let fn_tail_call
     (e:Il.emitter)
     (caller_callsz:int64)
+    (caller_argsz:int64)
     (callee_code:Il.code)
-    (callee_callsz:int64)
+    (callee_argsz:int64)
     : unit =
   let emit = Il.emit e in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
   let mov dst src = emit (Il.umov dst src) in
-  let callsz_diff = Int64.sub caller_callsz callee_callsz in
+  let argsz_diff = Int64.sub caller_argsz callee_argsz in
+  let callee_spill_cell = word_at_off (h esp) (Asm.IMM caller_callsz) in
+
+    (*
+     * Our outgoing arguments were prepared in a region above the call region;
+     * this is reserved for the purpose of making tail-calls *only*, so we do
+     * not collide with glue calls we had to make while dropping the frame,
+     * after assembling our arg region.
+     * 
+     * Thus, esp points to the "normal" arg region, and we need to move it
+     * to point to the tail-call arg region. To make matters simple, both
+     * regions are the same size, one atop the other.
+     *)
+
+    annotate e "tail call: move esp to temporary tail call arg-prep area";
+    binary Il.ADD (rc esp) caller_callsz;
+
+    (* 
+     * If we're given a non-ImmPtr callee, we may need to move it to a known
+     * cell to avoid clobbering its register while we do the argument shuffle
+     * below.
+     * 
+     * Sadly, we are too register-starved to just flush our callee to a reg;
+     * so we carve out an extra word of the temporary call-region and use
+     * it. 
+     * 
+     * This is ridiculous, but works.
+     *)
+    begin
+      match callee_code with
+          Il.CodePtr (Il.Cell c) ->
+              annotate e "tail call: spill callee-ptr to temporary memory";
+              mov callee_spill_cell (Il.Cell c);
+
+        | _ -> ()
+    end;
+
     (* edx <- ebp; restore ebp, edi, esi, ebx; ecx <- retpc *)
     annotate e "tail call: restore callee-saves from frame base";
     restore_frame_base e (h edx) (h ecx);
     (* move edx past frame base and adjust for difference in call sizes *)
     annotate e "tail call: adjust temporary fp";
-    binary Il.ADD (rc edx) (Int64.add frame_base_sz callsz_diff);
+    binary Il.ADD (rc edx) (Int64.add frame_base_sz argsz_diff);
 
     (*
      * stack grows downwards; copy from high to low
      * 
      *   bpw = word_sz
-     *   w = floor(callee_callsz / word_sz)
-     *   b = callee_callsz % word_sz
+     *   w = floor(callee_argsz / word_sz)
+     *   b = callee_argsz % word_sz
      * 
      * byte copies:
      *   +------------------------+
@@ -848,8 +903,8 @@ let fn_tail_call
     annotate e "tail call: move arg-tuple up to top of frame";
     begin
       let bpw = Int64.to_int word_sz in
-      let w = Int64.to_int (Int64.div callee_callsz word_sz) in
-      let b = Int64.to_int (Int64.rem callee_callsz word_sz) in
+      let w = Int64.to_int (Int64.div callee_argsz word_sz) in
+      let b = Int64.to_int (Int64.rem callee_argsz word_sz) in
         (* NOTE: must copy top-to-bottom in case the regions overlap *)
         for i = (b-1) downto 0 do
           let off = (w*bpw) + i in
@@ -862,6 +917,22 @@ let fn_tail_call
         done;
     end;
 
+    (* 
+     * We're done with eax now; so in the case where we had to spill
+     * our callee codeptr, we can reload it into eax here and rewrite 
+     * our callee into *eax.
+     *)
+    let callee_code =
+      match callee_code with
+          Il.CodePtr (Il.Cell _) ->
+              annotate e "tail call: reload callee-ptr from temporary memory";
+              mov (rc eax) (Il.Cell callee_spill_cell);
+              reg_codeptr (h eax)
+
+        | _ -> callee_code
+    in
+
+
     (* esp <- edx *)
     annotate e "tail call: adjust stack pointer";
     mov (rc esp) (ro edx);
@@ -869,8 +940,9 @@ let fn_tail_call
     annotate e "tail call: push retpc";
     emit (Il.Push (ro ecx));
     (* JMP callee_code *)
-    emit (Il.Jmp { Il.jmp_op=Il.JMP; Il.jmp_targ=callee_code });
+    emit (Il.jmp Il.JMP callee_code);
 ;;
+
 
 let c_to_proc_glue (e:Il.emitter) : unit =
   (*
