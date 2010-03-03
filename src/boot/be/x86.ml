@@ -337,6 +337,10 @@ let word_bits = Il.Bits32
 let word_ty = TY_u32
 ;;
 
+let annotate (e:Il.emitter) (str:string) =
+  Hashtbl.add e.Il.emit_annotations e.Il.emit_pc str
+;;
+
 let spill_slot (framesz:int64) (i:Il.spill) : Il.mem =
   let imm = (Asm.IMM
                (Int64.neg
@@ -805,8 +809,10 @@ let fn_tail_call
   let mov dst src = emit (Il.umov dst src) in
   let callsz_diff = Int64.sub caller_callsz callee_callsz in
     (* edx <- ebp; restore ebp, edi, esi, ebx; ecx <- retpc *)
+    annotate e "tail call: restore callee-saves from frame base";
     restore_frame_base e (h edx) (h ecx);
     (* move edx past frame base and adjust for difference in call sizes *)
+    annotate e "tail call: adjust temporary fp";
     binary Il.ADD (rc edx) (Int64.add frame_base_sz callsz_diff);
 
     (*
@@ -841,6 +847,7 @@ let fn_tail_call
      *   +------------------------+ <-- base + ((w-w) * word_sz)
      *)
 
+    annotate e "tail call: move arg-tuple up to top of frame";
     begin
       let bpw = Int64.to_int word_sz in
       let w = Int64.to_int (Int64.div callee_callsz word_sz) in
@@ -858,8 +865,10 @@ let fn_tail_call
     end;
 
     (* esp <- edx *)
+    annotate e "tail call: adjust stack pointer";
     mov (rc esp) (ro edx);
     (* PUSH ecx (retpc) *)
+    annotate e "tail call: push retpc";
     emit (Il.Push (ro ecx));
     (* JMP callee_code *)
     emit (Il.Jmp { Il.jmp_op=Il.JMP; Il.jmp_targ=callee_code });
