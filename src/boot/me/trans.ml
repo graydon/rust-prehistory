@@ -249,9 +249,7 @@ let trans_visitor
 
 
   and crate_rel_to_ptr (rel:Il.operand) (rty:Il.referent_ty) : Il.cell =
-    let rt = pp_imm (word_n Abi.proc_field_rt) in
-    let rt = ptr_cast rt (Il.ScalarTy Il.voidptr_t) in
-    let crate = deref_imm rt (word_n Abi.rt_field_crate) in
+    let crate = pp_imm (word_n Abi.proc_field_crate) in
     let crate = ptr_cast crate (Il.ScalarTy Il.voidptr_t) in
     let tmp = next_vreg_cell (Il.AddrTy rty) in
       emit (Il.umov tmp (Il.Cell crate));

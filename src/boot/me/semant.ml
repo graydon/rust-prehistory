@@ -1462,21 +1462,12 @@ and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
     | Ast.MODE_write_alias -> sp rty
 ;;
 
-let rt_rty (abi:Abi.abi) : Il.referent_ty =
-  Il.StructTy (Array.init Abi.n_visible_rt_fields (fun _ -> word_rty abi))
-;;
-
 let proc_rty (abi:Abi.abi) : Il.referent_ty =
   Il.StructTy
     begin
       Array.init
         Abi.n_visible_proc_fields
-        begin
-          fun i ->
-            if i = Abi.proc_field_rt
-            then (Il.ScalarTy (Il.AddrTy (rt_rty abi)))
-            else word_rty abi
-        end
+        (fun _ -> word_rty abi)
     end
 ;;
 

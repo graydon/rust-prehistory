@@ -626,7 +626,6 @@ let unwind_glue
 
   let fp_n = word_n (Il.Hreg ebp) in
   let edx_n = word_n (Il.Hreg edx) in
-  let esi_n = word_n (Il.Hreg esi) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
   let push x = emit (Il.Push x) in
@@ -643,8 +642,7 @@ let unwind_glue
     mov (rc edx) (c proc_ptr);                      (* switch back to rust stack    *)
     mov (rc esp) (c (edx_n Abi.proc_field_rust_sp));
 
-    mov (rc esi) (c (edx_n Abi.proc_field_rt));
-    mov (rc esi) (c (esi_n Abi.rt_field_crate));    (* esi <- crate ptr             *)
+    mov (rc esi) (c (edx_n Abi.proc_field_crate));  (* esi <- crate ptr             *)
 
     mark repeat_jmp_fix;
     mov (rc edx) (c (fp_n (-1)));                   (* edx <- frame glue functions. *)

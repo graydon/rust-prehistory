@@ -264,10 +264,6 @@ struct rust_str : public rc_base {
 class rust_crate;
 
 struct rust_rt {
-    // Fields known to the compiler.
-    rust_crate const *crate;
-
-    // Fields known only to the runtime.
     rust_srv *srv;
     uint32_t logbits;
     ptr_vec<rust_proc> running_procs;
@@ -1263,6 +1259,8 @@ typedef ptr_vec<rust_alarm> rust_wait_queue;
 
 struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond {
     // fields known to the compiler
+
+    rust_crate const *crate;
     stk_seg *stk;
     uintptr_t runtime_sp;      // runtime sp while proc running.
     uintptr_t rust_sp;         // saved sp when not running.
@@ -1281,7 +1279,8 @@ struct rust_proc : public rc_base, public rt_owned<rust_proc>, public rust_cond 
     rust_alarm alarm;
 
     rust_proc(rust_rt *rt,
-              rust_proc *spawner);
+              rust_proc *spawner,
+              rust_crate const *crate);
     ~rust_proc();
 
     void start(uintptr_t exit_proc_glue,
@@ -1805,7 +1804,8 @@ rust_alarm::rust_alarm(rust_proc *receiver) :
 {
 }
 
-rust_proc::rust_proc(rust_rt *rt, rust_proc *spawner) :
+rust_proc::rust_proc(rust_rt *rt, rust_proc *spawner, rust_crate const *crate) :
+    crate(crate),
     stk(new_stk(rt, 0)),
     runtime_sp(0),
     rust_sp(stk->limit),
@@ -1988,7 +1988,7 @@ rust_proc::yield(size_t nargs)
 {
     rt->log(LOG_PROC,
             "proc 0x%" PRIxPTR " yielding", this);
-    run_after_return(nargs, rt->crate->get_yield_glue());
+    run_after_return(nargs, crate->get_yield_glue());
 }
 
 static inline uintptr_t
@@ -2007,7 +2007,7 @@ rust_proc::kill() {
     unblock();
     if (this == rt->root_proc)
         rt->fail();
-    run_on_resume(rt->crate->get_unwind_glue());
+    run_on_resume(crate->get_unwind_glue());
 }
 
 void
@@ -2018,7 +2018,7 @@ rust_proc::fail(size_t nargs) {
     unblock();
     if (this == rt->root_proc)
         rt->fail();
-    run_after_return(nargs, rt->crate->get_unwind_glue());
+    run_after_return(nargs, crate->get_unwind_glue());
     if (spawner) {
         rt->log(LOG_PROC,
                 "proc 0x%" PRIxPTR
@@ -2140,7 +2140,6 @@ del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
 }
 
 rust_rt::rust_rt(rust_srv *srv, rust_crate const *crate) :
-    crate(crate),
     srv(srv),
     logbits(get_logbits()),
     running_procs(this),
@@ -2180,7 +2179,7 @@ rust_rt::rust_rt(rust_srv *srv, rust_crate const *crate) :
 #endif
     randinit(&rctx, 1);
 
-    root_proc = new (this) rust_proc(this, NULL);
+    root_proc = new (this) rust_proc(this, NULL, crate);
 }
 
 rust_rt::~rust_rt() {
@@ -2198,7 +2197,7 @@ rust_rt::~rust_rt() {
 void
 rust_rt::activate(rust_proc *proc) {
     curr_proc = proc;
-    crate->get_c_to_proc_glue()(proc);
+    proc->crate->get_c_to_proc_glue()(proc);
     curr_proc = NULL;
 }
 
@@ -2225,13 +2224,13 @@ rust_rt::logptr(char const *msg, T* ptrval) {
 }
 
 template<typename T> T*
-crate_rel(rust_rt *rt, T *t) {
-    return (T*)(((uintptr_t)rt->crate) + ((uintptr_t)t));
+crate_rel(rust_proc *proc, T *t) {
+    return (T*)(((uintptr_t)proc->crate) + ((ptrdiff_t)t));
 }
 
 template<typename T> T const*
-crate_rel(rust_rt *rt, T const *t) {
-    return (T const*)(((uintptr_t)rt->crate) + ((uintptr_t)t));
+crate_rel(rust_proc *proc, T const *t) {
+    return (T const*)(((uintptr_t)proc->crate) + ((ptrdiff_t)t));
 }
 
 
@@ -2703,8 +2702,8 @@ upcall_import(rust_proc *proc, char const *lib, char const **sym)
     rust_rt *rt = proc->rt;
 
     rt->log(LOG_UPCALL, "upcall import: [%s]", lib);
-    for (char const **c = crate_rel(rt, sym); *c; ++c) {
-        rt->log(LOG_UPCALL, "upcall import: + %s", crate_rel(rt, *c));
+    for (char const **c = crate_rel(proc, sym); *c; ++c) {
+        rt->log(LOG_UPCALL, "upcall import: + %s", crate_rel(proc, *c));
     }
 
 #if defined(__WIN32__)
@@ -2759,14 +2758,14 @@ upcall_import(rust_proc *proc, char const *lib, char const **sym)
 
             die t1 = d;
             die t2 = d;
-            for (char const **c = crate_rel(rt, sym);
+            for (char const **c = crate_rel(proc, sym);
                  (*c
                   && !t1.is_null()
-                  && t1.find_child_by_name(crate_rel(rt, *c), t2));
+                  && t1.find_child_by_name(crate_rel(proc, *c), t2));
                  ++c, t1=t2) {
                 rt->log(LOG_UPCALL, "matched die <0x%"  PRIxPTR
                               ">, child '%s' = die<0x%" PRIxPTR ">",
-                              t1.off, crate_rel(rt, *c), t2.off);
+                              t1.off, crate_rel(proc, *c), t2.off);
                 found_root = found_root || true;
                 if (!*(c+1) && t2.find_num_attr(DW_AT_low_pc, addr)) {
                     rt->log(LOG_UPCALL, "found relative address: 0x%"  PRIxPTR, addr);
@@ -2819,7 +2818,7 @@ upcall_new_proc(rust_proc *spawner)
     LOG_UPCALL_ENTRY(spawner);
 
     rust_rt *rt = spawner->rt;
-    rust_proc *proc = new (rt) rust_proc(rt, spawner);
+    rust_proc *proc = new (rt) rust_proc(rt, spawner, spawner->crate);
     rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
             "upcall new_proc(spawner 0x%" PRIxPTR ") = 0x%" PRIxPTR,
             spawner, proc);
@@ -2845,7 +2844,7 @@ upcall_new_thread(rust_proc *proc)
     LOG_UPCALL_ENTRY(proc);
 
     rust_rt *old_rt = proc->rt;
-    rust_rt *new_rt = new rust_rt(old_rt->srv->clone(), old_rt->crate);
+    rust_rt *new_rt = new rust_rt(old_rt->srv->clone(), proc->crate);
     new_rt->log(LOG_UPCALL|LOG_MEM,
                 "upcall new_thread() = 0x%" PRIxPTR,
                 new_rt->root_proc);
@@ -2881,7 +2880,7 @@ rust_main_loop(rust_rt *rt)
     rust_proc *proc;
 
     rt->log(LOG_RT, "control is in rust runtime library");
-    rt->logptr("main exit-proc glue", rt->crate->get_main_exit_proc_glue());
+    rt->logptr("main exit-proc glue", rt->root_proc->crate->get_main_exit_proc_glue());
 
     proc = rt->sched();
 
@@ -3016,7 +3015,7 @@ rust_start(uintptr_t main_fn, rust_crate const *crate)
             rust_crate_reader rdr(&rt, crate);
         }
 
-        rt.root_proc->start(rt.crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
+        rt.root_proc->start(crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
 
         ret = rust_main_loop(&rt);
     }
