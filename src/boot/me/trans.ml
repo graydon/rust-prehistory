@@ -2569,6 +2569,7 @@ let trans_visitor
         CLONE_none direct
         callee_ty
         caller_output_cell caller_arg_atoms caller_extra_args;
+      iter_frame_and_arg_slots caller_fn callee_drop_slot;
       abi.Abi.abi_emit_fn_tail_call (emitter()) caller_callsz callee_code callee_callsz;
 
 
