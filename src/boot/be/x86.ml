@@ -775,17 +775,16 @@ let fn_tail_call
   let emit = Il.emit e in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
   let mov dst src = emit (Il.umov dst src) in
-  let lea dst src = emit (Il.lea dst src) in
-    (* LEA edx <- esp + callee_callsz - 1 *)
-    lea (rc edx) (Il.RegIn (Il.Hreg esp, Some (Asm.IMM (Int64.sub callee_callsz 1L))));
+    (* mov edx <- esp *)
+    mov (rc edx) (ro esp);
     (* MOV esp <- ebp *)
     mov (rc esp) (ro ebp);
     (* POP ... *)
     restore_callee_saves e;
-    (* POP ecx *)
-    emit (Il.Pop (rc ecx));
-    (* SUB esp (caller_callsz + implicit_args_sz) *)
-    binary Il.SUB (rc esp) (Int64.add caller_callsz implicit_args_sz);
+    (* ecx <- retpc *)
+    emit (Il.Pop (rc ecx));  
+    (* adjust esp for difference in call sizes *)
+    binary Il.ADD (rc esp) (Int64.sub caller_callsz callee_callsz);
     (* PUSH ... *)
 
     (*
@@ -821,20 +820,17 @@ let fn_tail_call
      *)
 
     begin
-      let bpw = Int64.to_int word_sz in
       let w = Int64.to_int (Int64.div callee_callsz word_sz) in
       let b = Int64.to_int (Int64.rem callee_callsz word_sz) in
         for i = 1 to b do
           (* FIXME: copy the remaining b bytes *)
           ()
         done;
-        for i = 1 to w do
-          let off = (w - i) * bpw in
-            mov (word_n (Il.Hreg esp) off) (c (word_n (Il.Hreg edx) off))
+        for i = (w-1) downto 0 do
+          mov (word_n (Il.Hreg esp) i) (c (word_n (Il.Hreg edx) i))
         done;
     end;
-    (* ADD esp callee_callsz *)
-    binary Il.ADD (rc esp) callee_callsz;
+
     (* PUSH ecx *)
     emit (Il.Push (ro ecx));
     (* JMP callee_code *)
