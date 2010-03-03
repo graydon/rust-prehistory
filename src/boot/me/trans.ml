@@ -107,6 +107,11 @@ let trans_visitor
   let frame_fns_disp = word_n (-1) in
 
   let fns = Stack.create () in
+  let current_fn () = Stack.top fns in
+  let current_fn_ty () = Hashtbl.find cx.ctxt_all_item_types (current_fn ()) in
+  let current_fn_args_rty (closure:Il.referent_ty option) : Il.referent_ty =
+    call_args_referent_type cx (current_fn_ty ()) closure
+  in
   let native_mods = Stack.create () in
 
   let emitters = Stack.create () in
@@ -384,9 +389,7 @@ let trans_visitor
                     if slot_is_module_state cx slot_id
                     then
                       begin
-                        let curr_fn = Stack.top fns in
-                        let curr_fn_ty = Hashtbl.find cx.ctxt_all_item_types curr_fn in
-                        let curr_args_rty = call_args_referent_type cx curr_fn_ty (Some Il.OpaqueTy) in
+                        let curr_args_rty = current_fn_args_rty (Some Il.OpaqueTy) in
                         let self_args_cell = caller_args_cell curr_args_rty in
                         let self_extra_args = get_element_ptr self_args_cell 3 in
                         let closure_arg = get_element_ptr self_extra_args 0 in
@@ -2561,16 +2564,14 @@ let trans_visitor
     let callee_code = code_of_operand callee_fptr in
     let callee_args_rty = call_args_referent_type cx callee_ty (if direct then None else (Some Il.OpaqueTy)) in
     let callee_callsz = Il.referent_ty_size word_bits callee_args_rty in
-    let caller_fn = Stack.top fns in
-    let caller_fn_ty = Hashtbl.find cx.ctxt_all_item_types caller_fn in
-    let caller_args_rty = call_args_referent_type cx caller_fn_ty (if caller_is_closure then (Some Il.OpaqueTy) else None) in
+    let caller_args_rty = current_fn_args_rty (if caller_is_closure then (Some Il.OpaqueTy) else None) in
     let caller_callsz = Il.referent_ty_size word_bits caller_args_rty in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for tail call to %s" (logname ())));
       copy_fn_args
         CLONE_none direct
         callee_ty
         caller_output_cell caller_arg_atoms caller_extra_args;
-      iter_frame_and_arg_slots caller_fn callee_drop_slot;
+      iter_frame_and_arg_slots (current_fn ()) callee_drop_slot;
       abi.Abi.abi_emit_fn_tail_call (emitter()) caller_callsz callee_code callee_callsz;
 
 
