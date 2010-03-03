@@ -205,6 +205,62 @@ let rec parse_cexp (ps:pstate) : cexp =
                                      use_meta = meta })
           end
 
+      | LET ->
+          begin
+            bump ps;
+            let id = parse_cexp ps in
+              expect ps EQ;
+              let v = parse_cexp ps in
+                expect ps IN;
+                let body = parse_cexp ps in
+                let bpos = lexpos ps in
+                  CEXP_let
+                    (span ps apos bpos
+                       { let_ident = id;
+                         let_value = v;
+                         let_body = body })
+          end
+
+      | ALT ->
+          begin
+            bump ps;
+            expect ps LPAREN;
+            let v = parse_cexp ps in
+              expect ps RPAREN;
+              expect ps LBRACE;
+              let rec consume_arms arms =
+                match peek ps with
+                    CASE ->
+                      begin
+                        bump ps;
+                        expect ps LPAREN;
+                        let cond = parse_cexp ps in
+                          expect ps RPAREN;
+                          expect ps LBRACE;
+                          let consequent = parse_cexp ps in
+                            expect ps RBRACE;
+                            let arm = (cond, consequent) in
+                            consume_arms (arm::arms)
+                      end
+                  | ELSE ->
+                      begin
+                        bump ps;
+                        expect ps LBRACE;
+                        let consequent = parse_cexp ps in
+                          expect ps RBRACE;
+                          expect ps RBRACE;
+                          let bpos = lexpos ps in
+                            span ps apos bpos
+                              { alt_val = v;
+                                alt_arms = Array.of_list (List.rev arms);
+                                alt_else = consequent }
+                      end
+
+                  | _ -> raise (unexpected ps)
+              in
+                CEXP_alt (consume_arms [])
+          end
+
       | _ -> CEXP_pexp (Pexp.parse_pexp ps)
 
 
