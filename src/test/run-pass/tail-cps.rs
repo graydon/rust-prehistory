@@ -5,11 +5,14 @@ fn checktrue(bool res) -> () {
 }
 
 fn main() -> () {
-  evenk(42, checktrue);
-  oddk(45, checktrue);
+  auto k = checktrue;
+  evenk(42, k);
+  oddk(45, k);
 }
 
 fn evenk(int n, fn(bool) -> () k) -> bool {
+  log "evenk";
+  log n;
   if (n == 0) {
     be k(true);
   }
@@ -19,6 +22,8 @@ fn evenk(int n, fn(bool) -> () k) -> bool {
 }
 
 fn oddk(int n, fn(bool) -> () k) -> bool {
+  log "oddk";
+  log n;
   if (n == 0) {
     be k(false);
   }
