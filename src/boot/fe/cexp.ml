@@ -67,7 +67,8 @@ and cexp_use =
       use_meta: (cexp * cexp) array; }
 
 and cexp_nat =
-    { nat_name: cexp;
+    { nat_abi: cexp;
+      nat_name: cexp;
       nat_path: cexp option;
       nat_meta: (cexp * cexp) array;
       (* 
@@ -77,6 +78,49 @@ and cexp_nat =
        *)
       nat_items: Ast.native_mod_items;
     }
+;;
+
+
+(* Native mod item grammar -- can only occur in crates. *)
+
+let rec parse_native_mod_item
+    (ps:pstate)
+    : (Ast.ident * Ast.native_mod_item) =
+  let apos = lexpos ps in
+  let (ident, item) =
+    match peek ps with
+        FN None ->
+          begin
+            bump ps;
+            let ident = ctxt "native fn: ident" Pexp.parse_ident ps in
+            let (inputs, constrs, output) = ctxt "native fn: in_and_out" Item.parse_in_and_out ps in
+              expect ps SEMI;
+              let nfn =
+                {
+                  Ast.native_fn_input_slots = inputs;
+                  Ast.native_fn_input_constrs = constrs;
+                  Ast.native_fn_output_slot = output;
+                }
+              in
+                (ident, Ast.NATIVE_fn nfn)
+          end
+
+      | TYPE ->
+          begin
+            bump ps;
+            let ident = ctxt "native ty: ident" Pexp.parse_ident ps in
+            let tymach = match peek ps with
+                MACH m -> m
+              | _ -> raise (unexpected ps)
+            in
+              expect ps SEMI;
+                (ident, Ast.NATIVE_type tymach)
+          end
+
+      | _ -> raise (unexpected ps)
+  in
+  let bpos = lexpos ps in
+    (ident, (span ps apos bpos item))
 ;;
 
 
@@ -116,25 +160,32 @@ let rec parse_cexp (ps:pstate) : cexp =
       | NATIVE ->
           begin
             bump ps;
-            expect ps MOD;
+            let abi =
+              let apos = lexpos ps in
+                match peek ps with
+                    MOD ->
+                      bump ps;
+                      let bpos = lexpos ps in
+                        CEXP_pexp (span ps apos bpos (Pexp.PEXP_str "cdecl"))
+                  | _ ->
+                      let cexp = parse_cexp ps in
+                        expect ps MOD;
+                        cexp
+            in
             let name = ctxt "native mod: name" parse_cexp ps in
             let path = ctxt "native mod: path" parse_eq_cexp_opt ps in
             let meta = [| |] in
             let items = Hashtbl.create 0 in
             let get_item ps =
-              let (ident, item) = Item.parse_native_mod_item ps in
-                (*
-                 * FIXME: don't forget to do this when evaluating native items: 
-                 * 
-                 *   'htab_put files item.id ps.pstate_file'
-                 *)
+              let (ident, item) = parse_native_mod_item ps in
                 htab_put items ident item;
             in
               ignore (bracketed_zero_or_more
                         LBRACE RBRACE None get_item ps);
               let bpos = lexpos ps in
                 CEXP_nat_mod
-                  (span ps apos bpos { nat_name = name;
+                  (span ps apos bpos { nat_abi = abi;
+                                       nat_name = name;
                                        nat_path = path;
                                        nat_meta = meta;
                                        nat_items = items })
@@ -147,6 +198,7 @@ let rec parse_cexp (ps:pstate) : cexp =
             let path = ctxt "use mod: path" parse_eq_cexp_opt ps in
             let meta = [| |] in
             let bpos = lexpos ps in
+              expect ps SEMI;
               CEXP_use_mod
                 (span ps apos bpos { use_name = name;
                                      use_path = path;
@@ -178,14 +230,18 @@ type cval =
     CVAL_str of string
   | CVAL_num of int64
   | CVAL_bool of bool
+  | CVAL_none
   | CVAL_ident of Ast.ident
-  | CVAL_mod of (Ast.ident * Ast.mod_items)
-  | CVAL_native_mod of (Ast.ident * Ast.native_mod_items)
+  | CVAL_mod_item of (Ast.ident * Ast.mod_item)
+  | CVAL_native_mod_item of (Ast.ident * Ast.native_mod_item)
 ;;
 
 type env = { env_bindings: (Ast.ident * cval) list;
              env_prefix: filename list;
-             env_items: (filename, Ast.mod_items) Hashtbl.t }
+             env_items: (filename, Ast.mod_items) Hashtbl.t;
+             env_files: (node_id,filename) Hashtbl.t;
+             env_imports: (import_lib, (Ast.ident * Ast.mod_type_item * span)) Hashtbl.t;
+             env_ps: pstate; }
 
 let unexpected_val (expected:string) (v:cval)  =
   let got =
@@ -193,16 +249,19 @@ let unexpected_val (expected:string) (v:cval)  =
         CVAL_str s -> "str \"" ^ (String.escaped s) ^ "\""
       | CVAL_num i -> "num " ^ (Int64.to_string i)
       | CVAL_bool b -> if b then "bool true" else "bool false"
+      | CVAL_none -> "none"
       | CVAL_ident i -> "ident " ^ i
-      | CVAL_mod (name, mis) ->
-          (Printf.sprintf "mod '%s' with %d items"
-             name (Hashtbl.length mis))
-      | CVAL_native_mod (name, nmis) ->
-          (Printf.sprintf "native mod '%s' with %d items"
-             name (Hashtbl.length nmis))
+      | CVAL_mod_item (name, _) -> "mod item " ^ name
+      | CVAL_native_mod_item (name, _) -> "native mod item " ^ name
   in
     (* FIXME: proper error reporting, please. *)
     failwith ("expected " ^ expected ^ ", got " ^ got)
+;;
+
+let rewrap_items id items =
+  let item = Ast.MOD_ITEM_mod { Ast.decl_params = [| |];
+                                Ast.decl_item = (None, items) } in
+    { id = id; node = item }
 ;;
 
 
@@ -230,10 +289,29 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         in
           eval_cexp env cl.let_body
 
-    | CEXP_src_mod {node=s} ->
-        let items = Hashtbl.create 0 in
+    | CEXP_src_mod {node=s; id=id} ->
         let name = eval_cexp_to_ident env s.src_name in
-          CVAL_mod (name, items)
+        let path =
+          match s.src_path with
+              None -> name ^ ".rs"
+            | Some p -> eval_cexp_to_str env p
+        in
+        let full_path = List.fold_left Filename.concat "" (List.rev (path :: env.env_prefix)) in
+        let ps = env.env_ps in
+        let p =
+          make_parser
+            ps.pstate_temp_id
+            ps.pstate_node_id
+            ps.pstate_opaque_id
+            ps.pstate_sess
+            ps.pstate_lexfun
+            ps.pstate_get_ty_mod
+            ps.pstate_infer_lib_name
+            full_path
+        in
+        let items = Item.parse_mod_items p EOF in
+          htab_put env.env_files id full_path;
+          CVAL_mod_item (name, rewrap_items id items)
 
     | CEXP_dir_mod {node=d; id=id} ->
         let items = Hashtbl.create 0 in
@@ -246,23 +324,49 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         let env = { env with
                       env_prefix = path :: env.env_prefix } in
         let sub_items = Array.map (eval_cexp_to_mod env) d.dir_mods in
-        let add (k,v) =
-          let v = Ast.MOD_ITEM_mod { Ast.decl_params = [| |];
-                                     Ast.decl_item = (None, v) }
-          in
-            Hashtbl.add items k {id=id; node=v}
-        in
+        let add (k, v) = htab_put items k v in
           Array.iter add sub_items;
-          CVAL_mod (name, items)
+            CVAL_mod_item (name, rewrap_items id items)
 
-    | CEXP_use_mod {node=u} ->
-        let items = Hashtbl.create 0 in
+    | CEXP_use_mod {node=u; id=id} ->
+        let ps = env.env_ps in
         let name = eval_cexp_to_ident env u.use_name in
-          CVAL_mod (name, items)
+        let filename = ps.pstate_infer_lib_name name in
+        let ilib = { import_libname = filename;
+                     import_prefix = 1 }
+        in
+        let tmod = ps.pstate_get_ty_mod filename in
+          iflog ps
+            begin
+              fun _ ->
+                log ps "extracted mod type from %s (binding to %s)" filename name;
+                log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
+            end;
+          let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
+                                           Ast.decl_item = tmod}
+          in
+          let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
+            Hashtbl.add env.env_imports ilib (name, mti, span);
+            CVAL_none
 
-    | CEXP_nat_mod {node=cn} ->
+    | CEXP_nat_mod {node=cn;id=id} ->
+        let abi = eval_cexp_to_str env cn.nat_abi in
         let name = eval_cexp_to_ident env cn.nat_name in
-          CVAL_native_mod (name, cn.nat_items)
+        let path =
+          match cn.nat_path with
+              None -> env.env_ps.pstate_infer_lib_name name
+            | Some p -> eval_cexp_to_str env p
+        in
+        let note_item_in_file _ item =
+          htab_put env.env_files item.id path
+        in
+          Hashtbl.iter note_item_in_file cn.nat_items;
+          let nmod = { Ast.native_mod_abi = abi;
+                       Ast.native_mod_libname = name;
+                       Ast.native_mod_items = cn.nat_items; }
+          in
+          let item = Ast.NATIVE_mod nmod in
+            CVAL_native_mod_item (name, {node=item; id=id})
 
     | CEXP_pexp exp ->
         eval_pexp env exp
@@ -289,15 +393,15 @@ and eval_cexp_to_ident (env:env) (exp:cexp) : Ast.ident =
       CVAL_ident i -> i
     | v -> unexpected_val "ident" v
 
-and eval_cexp_to_mod (env:env) (exp:cexp) : (Ast.ident * Ast.mod_items) =
+and eval_cexp_to_mod (env:env) (exp:cexp) : (Ast.ident * Ast.mod_item) =
   match eval_cexp env exp with
-      CVAL_mod mis -> mis
-    | v -> unexpected_val "mod" v
+      CVAL_mod_item i -> i
+    | v -> unexpected_val "mod item" v
 
-and eval_cexp_to_native_mod (env:env) (exp:cexp) : (Ast.ident * Ast.native_mod_items) =
+and eval_cexp_to_native_mod (env:env) (exp:cexp) : (Ast.ident * Ast.native_mod_item) =
   match eval_cexp env exp with
-      CVAL_native_mod nmis -> nmis
-    | v -> unexpected_val "native mod" v
+      CVAL_native_mod_item nm -> nm
+    | v -> unexpected_val "native mod item" v
 
 
 and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
@@ -342,7 +446,8 @@ and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
     | Pexp.PEXP_str s ->
         CVAL_str s
 
-    | _ -> failwith "evaluating unhandled pexp type"
+    | _ ->
+        CVAL_none
 
 
 and eval_pexp_to_str (env:env) (exp:Pexp.pexp) : string =
@@ -363,118 +468,9 @@ and eval_pexp_to_bool (env:env) (exp:Pexp.pexp) : bool =
 ;;
 
 
-let rec parse_crate_mod_entry
-    (prefix:string)
-    (files:(node_id,filename) Hashtbl.t)
-    (mod_items:Ast.mod_items)
-    (native_mod_items:Ast.native_mod_items)
-    (ps:pstate)
-    : unit =
-  match peek ps with
-      NATIVE ->
-        begin
-            bump ps;
-            let (ident, item) = Item.parse_native_mod_item ps in
-              htab_put native_mod_items ident item;
-              htab_put files item.id ps.pstate_file
-        end
-    | _ ->
-        begin
-          expect ps MOD;
-          let apos = lexpos ps in
-          let name = ctxt "mod: name" Pexp.parse_ident ps in
-          let fname =
-            match peek ps with
-                EQ ->
-                  bump ps;
-                  (match peek ps with
-                       LIT_STR s -> bump ps; s
-                     | _ -> raise (unexpected ps))
-              | _ ->
-                  begin
-                    match peek ps with
-                        LBRACE -> name
-                      | SEMI -> name ^ ".rs"
-                      | _ -> raise (unexpected ps)
-                  end
-          in
-          let full_fname = Filename.concat prefix fname in
-          let (items,is_cu) =
-            match peek ps with
-                SEMI ->
-                  bump ps;
-                  let p =
-                    make_parser
-                      ps.pstate_temp_id
-                      ps.pstate_node_id
-                      ps.pstate_opaque_id
-                      ps.pstate_sess
-                      ps.pstate_lexfun
-                      ps.pstate_get_ty_mod
-                      ps.pstate_infer_lib_name
-                      full_fname
-                  in
-                    (Item.parse_mod_items p EOF, true)
-              | LBRACE ->
-                  bump ps;
-                  let items =
-                    parse_crate_mod_entries full_fname files ps
-                  in
-                    (items, false)
 
-              | _ -> raise (unexpected ps)
-          in
-          let bpos = lexpos ps in
-          let item_mod =
-            (* FIXME: permit type-parametric top-level modules. *)
-            span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
-                                                  Ast.decl_item = (None, items) })
-          in
-            if is_cu
-            then htab_put files item_mod.id full_fname;
-            htab_put mod_items name item_mod
-        end
 
-and parse_crate_mod_entries
-    (prefix:string)
-    (files:(node_id,filename) Hashtbl.t)
-    (ps:pstate)
-    : Ast.mod_items =
-  let items = Hashtbl.create 4 in
-  let nitems = Hashtbl.create 4 in
-    while (not (peek ps = RBRACE))
-    do
-      parse_crate_mod_entry prefix files items nitems ps
-    done;
-    expect ps RBRACE;
-    items
-
-and parse_crate_import
-    (imports:(import_lib, (Ast.ident * Ast.mod_type_item * span)) Hashtbl.t)
-    (ps:pstate)
-    : unit =
-  let apos = lexpos ps in
-    expect ps USE;
-    let ident = Pexp.parse_ident ps in
-      expect ps SEMI;
-      let filename = ps.pstate_infer_lib_name ident in
-      let ilib = { import_libname = filename;
-                   import_prefix = 1 }
-      in
-      let tmod = ps.pstate_get_ty_mod filename in
-        iflog ps
-          begin
-            fun _ ->
-              log ps "extracted mod type from %s (binding to %s)" filename ident;
-              log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
-          end;
-        let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
-                                         Ast.decl_item = tmod}
-        in
-        let bpos = lexpos ps in
-          Hashtbl.add imports ilib (ident, mti, {lo=apos;hi=bpos})
-
-and expand_imports
+let expand_imports
     (ps:pstate)
     (crate:Ast.crate)
     : unit =
@@ -585,45 +581,10 @@ and expand_imports
 
   let mis = htab_map crate.node.Ast.crate_imports extract_items in
     Hashtbl.iter (htab_put crate.node.Ast.crate_items) mis
+;;
 
 
-and parse_root_crate_entries
-    (fname:string)
-    (prefix:string)
-    (files:(node_id,filename) Hashtbl.t)
-    (ps:pstate)
-    : Ast.crate =
-  let items = Hashtbl.create 4 in
-  let nitems = Hashtbl.create 4 in
-  let imports = Hashtbl.create 4 in
-  let imported = Hashtbl.create 4 in
-  let apos = lexpos ps in
-    log ps "reading crate entries from %s" fname;
-    while (not (peek ps = EOF))
-    do
-      match peek ps with
-          NATIVE | MOD ->
-            parse_crate_mod_entry prefix files items nitems ps
-        | USE ->
-            parse_crate_import imports ps
-        | _ -> raise (unexpected ps)
-    done;
-    expect ps EOF;
-    let main = find_main_fn ps items in
-    let bpos = lexpos ps in
-    let crate =
-      span ps apos bpos
-        { Ast.crate_items = items;
-          Ast.crate_imports = imports;
-          Ast.crate_imported = imported;
-          Ast.crate_native_items = nitems;
-          Ast.crate_main = main;
-          Ast.crate_files = files }
-    in
-      htab_put files crate.id fname;
-      crate
-
-and find_main_fn
+let find_main_fn
     (ps:pstate)
     (crate_items:Ast.mod_items)
     : Ast.name =
@@ -655,76 +616,123 @@ and find_main_fn
       | _ -> raise (err "multiple 'main' functions found" ps)
 ;;
 
-let parse_root_with_parse_fn
-    (suffix:string)
-    fn
-    (sess:Session.sess)
-    tok
-    (get_ty_mod:(filename ->  Ast.ty_mod))
-    (infer_lib_name:(Ast.ident -> filename))
-    : Ast.crate =
-  let files = Hashtbl.create 0 in
-  let fname = Session.filename_of sess.Session.sess_in in
-  let tref = ref (Temp 0) in
-  let nref = ref (Node 0) in
-  let oref = ref (Opaque 0) in
-  let ps = make_parser tref nref oref sess tok get_ty_mod infer_lib_name fname
-  in
-  let apos = lexpos ps in
-    try
-      let crate =
-        if Filename.check_suffix fname suffix
-        then fn fname (Filename.dirname fname) files ps
-        else raise (err "parsing wrong kind of file" ps)
-      in
-        expand_imports ps crate;
-        crate
-    with
-        Parse_err (ps, str) ->
-          Session.fail sess "Parse error: %s\n%!" str;
-          List.iter
-            (fun (cx,pos) ->
-               Session.fail sess "%s:E (parse context): %s\n%!"
-                 (Session.string_of_pos pos) cx)
-            ps.pstate_ctxt;
+
+let with_err_handling sess thunk =
+  try
+    thunk ()
+  with
+      Parse_err (ps, str) ->
+        Session.fail sess "Parse error: %s\n%!" str;
+        List.iter
+          (fun (cx,pos) ->
+             Session.fail sess "%s:E (parse context): %s\n%!"
+               (Session.string_of_pos pos) cx)
+          ps.pstate_ctxt;
+        let apos = lexpos ps in
           span ps apos apos
             { Ast.crate_items = Hashtbl.create 0;
               Ast.crate_imports = Hashtbl.create 0;
               Ast.crate_imported = Hashtbl.create 0;
               Ast.crate_native_items = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
-              Ast.crate_files = files }
-
-let parse_root_srcfile_entries
-    (fname:string)
-    ((*prefix*)_:string)
-    (files:(node_id,filename) Hashtbl.t)
-    (ps:pstate)
-    : Ast.crate =
-  let stem = Filename.chop_suffix (Filename.basename fname) ".rs" in
-  let apos = lexpos ps in
-  let items = Item.parse_mod_items ps EOF in
-  let bpos = lexpos ps in
-  let modi = span ps apos bpos (Ast.MOD_ITEM_mod { Ast.decl_params = arr [];
-                                                   Ast.decl_item = (None, items) })
-  in
-  let mitems = Hashtbl.create 0 in
-    htab_put mitems stem modi;
-    let crate =
-      span ps apos bpos { Ast.crate_items = mitems;
-                          Ast.crate_imports = Hashtbl.create 0;
-                          Ast.crate_imported = Hashtbl.create 0;
-                          Ast.crate_native_items = Hashtbl.create 0;
-                          Ast.crate_main = find_main_fn ps mitems;
-                          Ast.crate_files = files }
-    in
-      htab_put files crate.id fname;
-      crate
+              Ast.crate_files = Hashtbl.create 0 }
 ;;
 
-let parse_crate = parse_root_with_parse_fn ".rc" parse_root_crate_entries;;
-let parse_srcfile = parse_root_with_parse_fn ".rs" parse_root_srcfile_entries;;
 
+let parse_crate_file
+    (sess:Session.sess)
+    (tok:Lexing.lexbuf -> Token.token)
+    (get_ty_mod:(filename ->  Ast.ty_mod))
+    (infer_lib_name:(Ast.ident -> filename))
+    : Ast.crate =
+  let fname = Session.filename_of sess.Session.sess_in in
+  let tref = ref (Temp 0) in
+  let nref = ref (Node 0) in
+  let oref = ref (Opaque 0) in
+  let ps =
+    make_parser tref nref oref sess tok get_ty_mod infer_lib_name fname
+  in
+
+  let files = Hashtbl.create 0 in
+  let items = Hashtbl.create 4 in
+  let nitems = Hashtbl.create 4 in
+  let imports = Hashtbl.create 4 in
+  let imported = Hashtbl.create 4 in
+  let env = { env_bindings = [];
+              env_prefix = [Filename.dirname fname];
+              env_items = Hashtbl.create 0;
+              env_files = files;
+              env_imports = imports;
+              env_ps = ps; }
+  in
+    with_err_handling sess
+      begin
+        fun _ ->
+          let apos = lexpos ps in
+          let _ =
+            while (not ((peek ps) = EOF))
+            do
+              let cexp = parse_cexp ps in
+                match eval_cexp env cexp with
+                    CVAL_mod_item (name, item) -> htab_put items name item
+                  | CVAL_native_mod_item (name, nitem) -> htab_put nitems name nitem
+                  | CVAL_none -> ()
+                  | v -> unexpected_val "mod item or native mod item" v
+            done
+          in
+          let bpos = lexpos ps in
+          let main = find_main_fn ps items in
+          let crate = { Ast.crate_items = items;
+                        Ast.crate_imports = imports;
+                        Ast.crate_imported = imported;
+                        Ast.crate_native_items = nitems;
+                        Ast.crate_main = main;
+                        Ast.crate_files = files }
+          in
+          let cratei = span ps apos bpos crate in
+            expand_imports ps cratei;
+            htab_put files cratei.id fname;
+            cratei
+      end
+;;
+
+let parse_src_file
+    (sess:Session.sess)
+    (tok:Lexing.lexbuf -> Token.token)
+    (get_ty_mod:(filename ->  Ast.ty_mod))
+    (infer_lib_name:(Ast.ident -> filename))
+    : Ast.crate =
+  let fname = Session.filename_of sess.Session.sess_in in
+  let tref = ref (Temp 0) in
+  let nref = ref (Node 0) in
+  let oref = ref (Opaque 0) in
+  let ps =
+    make_parser tref nref oref sess tok get_ty_mod infer_lib_name fname
+  in
+    with_err_handling sess
+      begin
+        fun _ ->
+          let apos = lexpos ps in
+          let items = Item.parse_mod_items ps EOF in
+          let bpos = lexpos ps in
+          let files = Hashtbl.create 0 in
+          let nitems = Hashtbl.create 4 in
+          let imports = Hashtbl.create 4 in
+          let imported = Hashtbl.create 4 in
+          let main = find_main_fn ps items in
+          let crate = { Ast.crate_items = items;
+                        Ast.crate_imports = imports;
+                        Ast.crate_imported = imported;
+                        Ast.crate_native_items = nitems;
+                        Ast.crate_main = main;
+                        Ast.crate_files = files }
+          in
+          let cratei = span ps apos bpos crate in
+            expand_imports ps cratei;
+            htab_put files cratei.id fname;
+            cratei
+      end
+;;
 
 
 (*

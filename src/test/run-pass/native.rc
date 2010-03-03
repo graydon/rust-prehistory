@@ -1,4 +1,11 @@
-native rust fn str_buf(str s) -> int; // cdecl is implied
-native cdecl fn puts(int s) -> ();
+// -*- C++ -*-
+
+native "rust" mod librust {
+  fn str_buf(str s) -> int;
+}
+
+native mod libc {
+  fn puts(int s) -> ();
+}
 
 mod user = "native.rs";

@@ -107,6 +107,7 @@ let trans_visitor
   let frame_fns_disp = word_n (-1) in
 
   let fns = Stack.create () in
+  let native_mods = Stack.create () in
 
   let emitters = Stack.create () in
   let push_new_emitter _ =
@@ -3071,18 +3072,23 @@ let trans_visitor
   in
 
   let trans_native_fn (fnid:node_id) (nfn:Ast.native_fn) : unit =
+    let native_mod = Stack.top native_mods in
     let nabi =
-      match (Abi.string_to_nabi nfn.Ast.native_fn_abi nabi_indirect) with
+      match (Abi.string_to_nabi native_mod.Ast.native_mod_abi nabi_indirect) with
           Some n -> n
         | None -> (err None "invalid abi specification")
     in
       (* FIXME (bug 541532): This is a gross hack. The library should
-         come from the frontend. *)
+         come from the frontend.
+         
+         Should be: let lib = native_mod.Ast.native_mod_libname in
+      *)
     let lib =
       match nabi.Abi.nabi_convention with
           Abi.CONV_rust -> NATIVE_LIB_rustrt
         | Abi.CONV_cdecl -> NATIVE_LIB_c
     in
+
     let name = item_name cx fnid in
     let name =
       match name with
@@ -3215,6 +3221,7 @@ let trans_visitor
     begin
       match i.node with
           Ast.NATIVE_fn nfn -> trans_native_fn i.id nfn
+        | Ast.NATIVE_mod nmod -> Stack.push nmod native_mods
         | _ -> ()
     end;
     inner.Walk.visit_native_mod_item_pre n i
@@ -3222,6 +3229,11 @@ let trans_visitor
 
   let visit_native_mod_item_post n i =
     inner.Walk.visit_native_mod_item_post n i;
+    begin
+      match i.node with
+          Ast.NATIVE_mod _ -> ignore (Stack.pop native_mods)
+        | _ -> ()
+    end;
     leave_file_for i.id
   in
 

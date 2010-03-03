@@ -187,10 +187,10 @@ let _ =
 let (crate:Ast.crate) =
   let infile = Session.filename_of sess.Session.sess_in in
   if Filename.check_suffix infile ".rc"
-  then Cexp.parse_crate sess Lexer.token get_ty_mod infer_lib_name
+  then Cexp.parse_crate_file sess Lexer.token get_ty_mod infer_lib_name
   else
     if Filename.check_suffix infile ".rs"
-    then Cexp.parse_srcfile sess Lexer.token get_ty_mod infer_lib_name
+    then Cexp.parse_src_file sess Lexer.token get_ty_mod infer_lib_name
     else
       begin
         Printf.fprintf stderr

@@ -920,12 +920,12 @@ let rec lval_native_item (cx:ctxt) (lval:Ast.lval) : Ast.native_mod_item =
         end
     | Ast.LVAL_ext (base, comp) ->
         match (lval_native_item cx base).node with
-            Ast.NATIVE_mod mis ->
+            Ast.NATIVE_mod nmod ->
               begin
                 match comp with
                     Ast.COMP_named (Ast.COMP_ident i) ->
                       begin
-                        match htab_search mis i with
+                        match htab_search nmod.Ast.native_mod_items i with
                             None -> err None "unknown native module item '%s'" i
                           | Some sub -> sub
                       end
@@ -1100,7 +1100,7 @@ and mod_type_item_of_native_mod_item
       | Ast.NATIVE_type mty ->
           Ast.MOD_TYPE_ITEM_public_type (decl (Ast.TY_mach mty))
       | Ast.NATIVE_mod m ->
-          Ast.MOD_TYPE_ITEM_mod (decl (None, (ty_mod_of_native_mod m)))
+          Ast.MOD_TYPE_ITEM_mod (decl (None, (ty_mod_of_native_mod m.Ast.native_mod_items)))
 
 and arg_slots (slots:Ast.header_slots) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
@@ -1129,7 +1129,7 @@ and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
 and ty_of_native_mod_item (item:Ast.native_mod_item) : Ast.ty =
     match item.node with
       | Ast.NATIVE_type _ -> Ast.TY_type
-      | Ast.NATIVE_mod items -> Ast.TY_mod (None, (ty_mod_of_native_mod items))
+      | Ast.NATIVE_mod nmod -> Ast.TY_mod (None, (ty_mod_of_native_mod nmod.Ast.native_mod_items))
       | Ast.NATIVE_fn nfn -> Ast.TY_fn (ty_fn_of_native_fn nfn)
 
 and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =

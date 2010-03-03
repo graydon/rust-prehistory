@@ -244,7 +244,7 @@ and walk_native_mod_item
     match item.node with
         Ast.NATIVE_fn nfn -> walk_native_fn v nfn
       | Ast.NATIVE_type tmach -> walk_ty v (Ast.TY_mach tmach)
-      | Ast.NATIVE_mod items -> walk_native_mod_items v items
+      | Ast.NATIVE_mod nmod -> walk_native_mod_items v nmod.Ast.native_mod_items
   in
     walk_bracketed
       (v.visit_native_mod_item_pre name)
