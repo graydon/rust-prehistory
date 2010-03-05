@@ -361,8 +361,7 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
 
 typedef void CDECL (*c_to_proc_glue_ty)(rust_proc *);
 
-class
-rust_crate
+class rust_crate
 {
     // The following fields are emitted by the compiler for the static
     // rust_crate object inside each compiled crate.
@@ -381,9 +380,13 @@ rust_crate
     ptrdiff_t unwind_glue_off;
     ptrdiff_t yield_glue_off;
 
-    // Crates are immutable, constructed by the compiler.
-
 public:
+
+    size_t n_rust_syms;
+    size_t n_c_syms;
+    size_t n_libs;
+
+    // Crates are immutable, constructed by the compiler.
 
     uintptr_t get_image_base() const {
         return ((uintptr_t)this + image_base_off);
@@ -1970,6 +1973,7 @@ public:
 
     lib *get_lib(size_t n, char const *name)
     {
+        I(rt, n < crate->n_libs);
         lib *library = libs[n];
         if (!library) {
             library = new (rt) lib(rt, name);
@@ -1980,6 +1984,7 @@ public:
 
     c_sym *get_c_sym(size_t n, lib *library, char const *name)
     {
+        I(rt, n < crate->n_c_syms);
         c_sym *sym = c_syms[n];
         if (!sym) {
             sym = new (rt) c_sym(rt, library, name);
@@ -1990,6 +1995,7 @@ public:
 
     rust_sym *get_rust_sym(size_t n, rust_rt *rt, rust_crate const *curr_crate, c_sym *crate_sym, char const **path)
     {
+        I(rt, n < crate->n_rust_syms);
         rust_sym *sym = rust_syms[n];
         if (!sym) {
             sym = new (rt) rust_sym(rt, curr_crate, crate_sym, path);
@@ -1999,11 +2005,6 @@ public:
     }
 
 private:
-
-    // Cache sizes.
-    size_t n_rust_syms;
-    size_t n_c_syms;
-    size_t n_libs;
 
     // Caches.
     rust_sym **rust_syms;
@@ -2017,16 +2018,10 @@ public:
     size_t idx;
 
     rust_crate_cache(rust_rt *rt,
-                     rust_crate const *crate,
-                     size_t n_rust_syms,
-                     size_t n_c_syms,
-                     size_t n_libs)
-        : n_rust_syms(n_rust_syms),
-          n_c_syms(n_c_syms),
-          n_libs(n_libs),
-          rust_syms((rust_sym**) rt->calloc(sizeof(rust_sym*) * n_rust_syms)),
-          c_syms((c_sym**) rt->calloc(sizeof(c_sym*) * n_c_syms)),
-          libs((lib**) rt->calloc(sizeof(lib*) * n_libs)),
+                     rust_crate const *crate)
+        : rust_syms((rust_sym**) rt->calloc(sizeof(rust_sym*) * crate->n_rust_syms)),
+          c_syms((c_sym**) rt->calloc(sizeof(c_sym*) * crate->n_c_syms)),
+          libs((lib**) rt->calloc(sizeof(lib*) * crate->n_libs)),
           crate(crate),
           rt(rt),
           idx(0)
@@ -2038,7 +2033,7 @@ public:
 
     void flush() {
         rt->log(LOG_LINK, "rust_crate_cache::flush()");
-        for (size_t i = 0; i < n_rust_syms; ++i) {
+        for (size_t i = 0; i < crate->n_rust_syms; ++i) {
             rust_sym *s = rust_syms[i];
             if (s) {
                 rt->log(LOG_LINK, "rust_crate_cache::flush() deref rust_sym %"
@@ -2048,7 +2043,7 @@ public:
             rust_syms[i] = NULL;
         }
 
-        for (size_t i = 0; i < n_c_syms; ++i) {
+        for (size_t i = 0; i < crate->n_c_syms; ++i) {
             c_sym *s = c_syms[i];
             if (s) {
                 rt->log(LOG_LINK, "rust_crate_cache::flush() deref c_sym %"
@@ -2058,7 +2053,7 @@ public:
             c_syms[i] = NULL;
         }
 
-        for (size_t i = 0; i < n_libs; ++i) {
+        for (size_t i = 0; i < crate->n_libs; ++i) {
             lib *l = libs[i];
             if (l) {
                 rt->log(LOG_LINK, "rust_crate_cache::flush() deref lib %"
@@ -2976,7 +2971,7 @@ rust_rt::get_cache(rust_crate const *crate) {
             break;
     }
     if (!cache) {
-        cache = new (this) rust_crate_cache(this, crate, 1, 1, 1);
+        cache = new (this) rust_crate_cache(this, crate);
         caches.push(cache);
     }
     cache->ref();
@@ -2985,7 +2980,11 @@ rust_rt::get_cache(rust_crate const *crate) {
 
 
 extern "C" CDECL uintptr_t
-upcall_import(rust_proc *proc, rust_crate const *curr_crate, char const *library, char const **path)
+upcall_import(rust_proc *proc, rust_crate const *curr_crate,
+              size_t lib_num,      // # of lib
+              size_t c_sym_num,    // # of C sym "rust_crate" in lib
+              size_t rust_sym_num, // # of rust sym
+              char const *library, char const **path)
 {
     LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
@@ -2999,18 +2998,24 @@ upcall_import(rust_proc *proc, rust_crate const *curr_crate, char const *library
         proc->cache = rt->get_cache(curr_crate);
     }
 
-    rt->log(LOG_UPCALL, "upcall import: [%s]", library);
+    rt->log(LOG_UPCALL|LOG_LINK,
+            "upcall import: lib #%" PRIdPTR
+            " = %s, c_sym #%" PRIdPTR
+            ", rust_sym #%" PRIdPTR,
+            lib_num, library, c_sym_num, rust_sym_num);
     for (char const **c = crate_rel(curr_crate, path); *c; ++c) {
         rt->log(LOG_UPCALL, "upcall import: + %s", crate_rel(curr_crate, *c));
     }
 
     rust_crate_cache *cache = proc->cache;
-    rust_crate_cache::lib *l = cache->get_lib(0, library);
-    rust_crate_cache::c_sym *c = cache->get_c_sym(0, l, "rust_crate");
-    rust_crate_cache::rust_sym *s = cache->get_rust_sym(0, rt, curr_crate, c, path);
+    rust_crate_cache::lib *l = cache->get_lib(lib_num, library);
+    rust_crate_cache::c_sym *c = cache->get_c_sym(c_sym_num, l, "rust_crate");
+    rust_crate_cache::rust_sym *s = cache->get_rust_sym(rust_sym_num, rt, curr_crate, c, path);
     uintptr_t addr = s->get_val();
-    if (!addr) {
-        rt->log(LOG_UPCALL, "failed to resolve symbol");
+    if (addr) {
+        rt->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
+    } else {
+        rt->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
         proc->fail(4);
     }
     return addr;

@@ -3040,13 +3040,29 @@ let trans_visitor
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
     let ilib = Hashtbl.find cx.ctxt_imported_items fnid in
     let path_elts = stk_elts_from_bot path in
+    let lib_num =
+      htab_search_or_add cx.ctxt_import_lib_num ilib
+        (fun _ -> Hashtbl.length cx.ctxt_import_lib_num)
+    in
+    let c_sym_num =
+      htab_search_or_add cx.ctxt_import_c_sym_num (ilib, "rust_crate")
+        (fun _ -> Hashtbl.length cx.ctxt_import_c_sym_num)
+    in
+    let rust_sym_num =
+      htab_search_or_add cx.ctxt_import_rust_sym_num fnid
+        (fun _ -> Hashtbl.length cx.ctxt_import_rust_sym_num)
+    in
       assert (ilib.import_prefix < (List.length path_elts));
       let relative_path_elts = list_drop ilib.import_prefix path_elts in
       let libstr = trans_static_string ilib.import_libname in
-      let relpath = trans_static_name_components (List.rev relative_path_elts) in
+      let relpath = trans_static_name_components relative_path_elts in
       let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
-        trans_upcall "upcall_import" f [| Il.Cell (curr_crate_ptr()); libstr; relpath |];
-
+        trans_upcall "upcall_import" f [| Il.Cell (curr_crate_ptr());
+                                          imm (Int64.of_int lib_num);
+                                          imm (Int64.of_int c_sym_num);
+                                          imm (Int64.of_int rust_sym_num);
+                                          libstr;
+                                          relpath |];
         let args_rty = direct_call_args_referent_type cx fnid in
         let caller_args_cell = caller_args_cell args_rty in
         let callee_args_cell = callee_args_cell false args_rty in
@@ -3287,6 +3303,10 @@ let trans_visitor
           htab_put cx.ctxt_glue_code glue code
     in
 
+    let tab_sz htab =
+      Asm.WORD (word_ty_mach, Asm.IMM (Int64.of_int (Hashtbl.length htab)))
+    in
+
     let crate_data =
       (cx.ctxt_crate_fixup,
        Asm.DEF
@@ -3308,7 +3328,11 @@ let trans_visitor
             crate_rel_word cx.ctxt_c_to_proc_fixup;
             crate_rel_word cx.ctxt_main_exit_proc_glue_fixup;
             crate_rel_word cx.ctxt_unwind_fixup;
-            crate_rel_word cx.ctxt_yield_fixup
+            crate_rel_word cx.ctxt_yield_fixup;
+
+            tab_sz cx.ctxt_import_rust_sym_num;
+            tab_sz cx.ctxt_import_c_sym_num;
+            tab_sz cx.ctxt_import_lib_num;
           |]))
     in
 

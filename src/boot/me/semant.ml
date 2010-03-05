@@ -141,8 +141,9 @@ type ctxt =
       ctxt_native_imports: (native_import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
       ctxt_native_exports: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
 
-      ctxt_import_item_num: (node_id, int) Hashtbl.t;
-      ctxt_imports: (import_lib, node_id array) Hashtbl.t;
+      ctxt_import_rust_sym_num: (node_id, int) Hashtbl.t;
+      ctxt_import_c_sym_num: ((import_lib * string), int) Hashtbl.t;
+      ctxt_import_lib_num: (import_lib, int) Hashtbl.t;
 
       ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
@@ -211,8 +212,9 @@ let new_ctxt sess abi crate =
     ctxt_native_imports = Hashtbl.create 0;
     ctxt_native_exports = Hashtbl.create 0;
 
-    ctxt_import_item_num = Hashtbl.create 0;
-    ctxt_imports = Hashtbl.create 0;
+    ctxt_import_rust_sym_num = Hashtbl.create 0;
+    ctxt_import_c_sym_num = Hashtbl.create 0;
+    ctxt_import_lib_num = Hashtbl.create 0;
 
     ctxt_main_fn_fixup = new_fixup (string_of_name crate.Ast.crate_main);
     ctxt_main_name = string_of_name crate.Ast.crate_main;
