@@ -104,7 +104,8 @@ let trans_visitor
 
   let out_mem_disp = abi.Abi.abi_frame_base_sz in
   let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
-  let frame_fns_disp = word_n (-1) in
+  let frame_crate_ptr = word_n (-1) in
+  let frame_fns_disp = word_n (-2) in
 
   let fns = Stack.create () in
   let current_fn () = Stack.top fns in
@@ -249,17 +250,19 @@ let trans_visitor
   in
 
   let rec ptr_cast (cell:Il.cell) (rty:Il.referent_ty) : Il.cell =
-    let mem, _ = need_mem_cell cell in
-      Il.Mem (mem, rty)
+    match cell with
+        Il.Mem (mem, _) -> Il.Mem (mem, rty)
+      | Il.Reg (reg, Il.AddrTy _) -> Il.Reg (reg, Il.AddrTy rty)
+      | _ -> bug () "expected address cell in Trans.ptr_cast"
 
+  and curr_crate_ptr _ : Il.cell =
+    word_at (fp_imm frame_crate_ptr)
 
   and crate_rel_to_ptr (rel:Il.operand) (rty:Il.referent_ty) : Il.cell =
-    let crate = pp_imm (word_n Abi.proc_field_crate) in
-    let crate = ptr_cast crate (Il.ScalarTy Il.voidptr_t) in
-    let tmp = next_vreg_cell (Il.AddrTy rty) in
-      emit (Il.umov tmp (Il.Cell crate));
-      emit (Il.binary Il.ADD tmp (Il.Cell tmp) rel);
-      tmp
+    let cell = next_vreg_cell (Il.AddrTy rty) in
+      mov cell (Il.Cell (curr_crate_ptr()));
+      emit (Il.binary Il.ADD cell (Il.Cell cell) rel);
+      cell
 
   (* 
    * Note: alias *requires* its cell to be in memory already, and should
@@ -718,11 +721,26 @@ let trans_visitor
         log cx "[%6d]\t%s" i (Il.string_of_quad abi.Abi.abi_str_of_hardreg quads.(i));
       done
 
+
+  and write_frame_info_ptrs (fnid:node_id option) =
+    let frame_fns =
+      match fnid with
+          None -> zero
+        | Some fnid -> get_frame_glue_fns fnid
+    in
+    let crate_ptr_reg = next_vreg () in
+    let crate_ptr_cell = Il.Reg (crate_ptr_reg, (Il.AddrTy Il.OpaqueTy)) in
+      iflog (fun _ -> annotate "write frame-info pointers");
+      Abi.load_fixup_addr (emitter()) abi crate_ptr_reg cx.ctxt_crate_fixup Il.OpaqueTy;
+      mov (word_at (fp_imm frame_crate_ptr)) (Il.Cell (crate_ptr_cell));
+      mov (word_at (fp_imm frame_fns_disp)) frame_fns
+
   and trans_glue_frame_entry (callsz:int64) (spill:fixup) : unit =
     let framesz = 0L in
       push_new_emitter ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill callsz nabi_rust (upcall_fixup "upcall_grow_proc");
+      write_frame_info_ptrs None;
       iflog (fun _ -> annotate "finished prologue");
 
   and capture_emitted_glue (fix:fixup) (spill:fixup) (g:glue) : unit =
@@ -2885,9 +2903,8 @@ let trans_visitor
       | Ast.STMT_decl _ -> ()
 
       | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt %a" Ast.sprintf_stmt stmt
-  in
 
-  let capture_emitted_quads (fix:fixup) (node:node_id) : unit =
+  and capture_emitted_quads (fix:fixup) (node:node_id) : unit =
     let e = emitter() in
     let n_vregs = e.Il.emit_next_vreg in
     let quads = e.Il.emit_quads in
@@ -2912,9 +2929,8 @@ let trans_visitor
           htab_put item_code node code;
           htab_put cx.ctxt_all_item_code node code
       end
-  in
 
-  let get_frame_glue_fns (fnid:node_id) : Il.operand =
+  and get_frame_glue_fns (fnid:node_id) : Il.operand =
     let get_frame_glue glue inner =
       get_mem_glue glue
         begin
@@ -2971,7 +2987,6 @@ let trans_visitor
   in
 
   let trans_frame_entry (fnid:node_id) : unit =
-    let frame_fns = get_frame_glue_fns fnid in
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
@@ -2984,7 +2999,8 @@ let trans_visitor
                                    callsz
                                    nabi_rust
                                    (upcall_fixup "upcall_grow_proc");
-      mov (word_at (fp_imm frame_fns_disp)) frame_fns;
+
+      write_frame_info_ptrs (Some fnid);
       iflog (fun _ -> annotate "finished prologue");
   in
 
@@ -3029,7 +3045,7 @@ let trans_visitor
       let libstr = trans_static_string ilib.import_libname in
       let relpath = trans_static_name_components (List.rev relative_path_elts) in
       let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
-        trans_upcall "upcall_import" f [| libstr; relpath |];
+        trans_upcall "upcall_import" f [| Il.Cell (curr_crate_ptr()); libstr; relpath |];
 
         let args_rty = direct_call_args_referent_type cx fnid in
         let caller_args_cell = caller_args_cell args_rty in

@@ -645,10 +645,10 @@ let unwind_glue
     mov (rc edx) (c proc_ptr);                      (* switch back to rust stack    *)
     mov (rc esp) (c (edx_n Abi.proc_field_rust_sp));
 
-    mov (rc esi) (c (edx_n Abi.proc_field_crate));  (* esi <- crate ptr             *)
+    mov (rc esi) (c (fp_n (-1)));                   (* esi <- crate ptr             *)
 
     mark repeat_jmp_fix;
-    mov (rc edx) (c (fp_n (-1)));                   (* edx <- frame glue functions. *)
+    mov (rc edx) (c (fp_n (-2)));                   (* edx <- frame glue functions. *)
     emit (Il.cmp (ro edx) (immi 0L));
 
     emit (Il.jmp Il.JE (codefix skip_jmp_fix));     (* if struct* is nonzero        *)

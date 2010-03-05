@@ -81,9 +81,12 @@ let layout_visitor
    *
    *)
 
-  (* At the bottom of every frame, there's a frame-info pointer. *)
+  (* At the bottom of every frame, there are two frame-info pointers.
+   * The first (ebp-4) points to the crate the frame is in, and the second
+   * (ebp-8) is a crate-relative offset to the frame's particular info.
+   *)
   let (frame_info_slot_sz:int64) =
-    cx.ctxt_abi.Abi.abi_word_sz
+    Int64.mul 2L cx.ctxt_abi.Abi.abi_word_sz
   in
 
   let force_slot_to_mem (slot:Ast.slot) : bool =

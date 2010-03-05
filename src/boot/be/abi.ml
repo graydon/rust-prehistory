@@ -26,8 +26,7 @@ let string_to_nabi (a:string) (indirect:bool) : nabi option =
 let rc_base_field_refcnt = 0;;
 
 let proc_field_refcnt = rc_base_field_refcnt;;
-let proc_field_crate = proc_field_refcnt + 1;;
-let proc_field_stk = proc_field_crate + 1;;
+let proc_field_stk = proc_field_refcnt + 1;;
 let proc_field_runtime_sp = proc_field_stk + 1;;
 let proc_field_rust_sp = proc_field_runtime_sp + 1;;
 let proc_field_gc_alloc_chain = proc_field_rust_sp + 1;;
