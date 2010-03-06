@@ -1057,8 +1057,8 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_slot_key ff skey;
           fmt ff ";"
 
-      | STMT_decl (DECL_mod_item _) ->
-          fmt ff "?decl_mod_item?"
+      | STMT_decl (DECL_mod_item (ident, item)) ->
+          fmt_mod_item ff ident item
 
       | STMT_init_rec (dst, entries) ->
           fmt_lval ff dst;

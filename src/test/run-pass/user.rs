@@ -1,5 +1,7 @@
 // -*- C++ -*-
 
+use std;
+
 fn main() -> () {
   log std.hello.hello();
   log std.hello.goodbye("first");
