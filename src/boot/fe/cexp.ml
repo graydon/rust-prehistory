@@ -27,12 +27,6 @@ open Parser;;
  * 
  *)
 
-
-(*
- * FIXME: shift from interpret-while-parsing model to parse-then-interpret
- * model for cexps. Currently type 'cexp' here is feeling lonely.
- *)
-
 type cexp =
     CEXP_alt of cexp_alt identified
   | CEXP_let of cexp_let identified
@@ -286,7 +280,6 @@ type cval =
     CVAL_str of string
   | CVAL_num of int64
   | CVAL_bool of bool
-  | CVAL_none
   | CVAL_ident of Ast.ident
   | CVAL_mod_item of (Ast.ident * Ast.mod_item)
   | CVAL_native_mod_item of (Ast.ident * Ast.native_mod_item)
@@ -296,7 +289,7 @@ type env = { env_bindings: (Ast.ident * cval) list;
              env_prefix: filename list;
              env_items: (filename, Ast.mod_items) Hashtbl.t;
              env_files: (node_id,filename) Hashtbl.t;
-             env_imports: (import_lib, (Ast.ident * Ast.mod_type_item * span)) Hashtbl.t;
+             env_imported: (node_id, import_lib) Hashtbl.t;
              env_ps: pstate; }
 
 let unexpected_val (expected:string) (v:cval)  =
@@ -305,7 +298,6 @@ let unexpected_val (expected:string) (v:cval)  =
         CVAL_str s -> "str \"" ^ (String.escaped s) ^ "\""
       | CVAL_num i -> "num " ^ (Int64.to_string i)
       | CVAL_bool b -> if b then "bool true" else "bool false"
-      | CVAL_none -> "none"
       | CVAL_ident i -> "ident " ^ i
       | CVAL_mod_item (name, _) -> "mod item " ^ name
       | CVAL_native_mod_item (name, _) -> "native mod item " ^ name
@@ -363,6 +355,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
             ps.pstate_lexfun
             ps.pstate_get_ty_mod
             ps.pstate_infer_lib_name
+            env.env_imported
             full_path
         in
         let items = Item.parse_mod_items p EOF in
@@ -402,8 +395,9 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
                                            Ast.decl_item = tmod}
           in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
-            Hashtbl.add env.env_imports ilib (name, mti, span);
-            CVAL_none
+          let item = Item.expand_imported_mod env.env_ps span ilib mti in
+            htab_put ps.pstate_imported id ilib;
+            CVAL_mod_item (name, { id = id; node = item })
 
     | CEXP_nat_mod {node=cn;id=id} ->
         let abi = eval_cexp_to_str env cn.nat_abi in
@@ -502,8 +496,7 @@ and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
     | Pexp.PEXP_str s ->
         CVAL_str s
 
-    | _ ->
-        CVAL_none
+    | _ -> failwith "unexpected Pexp in Cexp.eval_pexp"
 
 
 and eval_pexp_to_str (env:env) (exp:Pexp.pexp) : string =
@@ -524,122 +517,6 @@ and eval_pexp_to_bool (env:env) (exp:Pexp.pexp) : bool =
 ;;
 
 
-
-
-let expand_imports
-    (ps:pstate)
-    (crate:Ast.crate)
-    : unit =
-  let wrap span i =
-    let id = next_node_id ps in
-      htab_put ps.pstate_sess.Session.sess_spans id span;
-      { node = i; id = id }
-  in
-
-  let rec extract_item
-      (span:span)
-      (ilib:import_lib)
-      (mti:Ast.mod_type_item)
-      : Ast.mod_item' =
-
-    let wrap i = wrap span i in
-
-    let form_header_slots slots =
-      Array.mapi
-        (fun i slot -> (wrap slot, "_" ^ (string_of_int i)))
-        slots
-    in
-
-    match mti with
-        Ast.MOD_TYPE_ITEM_opaque_type { Ast.decl_item=(_, mut);
-                                        Ast.decl_params=params } ->
-          Ast.MOD_ITEM_opaque_type
-            { Ast.decl_item=Ast.TY_opaque ((next_opaque_id ps), mut);
-              Ast.decl_params=params }
-
-      | Ast.MOD_TYPE_ITEM_public_type { Ast.decl_item=ty;
-                                        Ast.decl_params=params } ->
-          Ast.MOD_ITEM_public_type
-            { Ast.decl_item=ty;
-              Ast.decl_params=params }
-
-      | Ast.MOD_TYPE_ITEM_pred { Ast.decl_item=tpred;
-                                 Ast.decl_params=params } ->
-          let (slots, constrs) = tpred in
-          let pred =
-            { Ast.pred_input_slots = form_header_slots slots;
-              Ast.pred_input_constrs = constrs;
-              Ast.pred_body = wrap [| |] }
-          in
-            Ast.MOD_ITEM_pred
-              { Ast.decl_item=pred;
-                Ast.decl_params=params }
-
-      | Ast.MOD_TYPE_ITEM_mod { Ast.decl_item=tmod;
-                                Ast.decl_params=params } ->
-          begin
-            let hdr, mtis = tmod in
-              match hdr with
-                  None ->
-                    Ast.MOD_ITEM_mod
-                      { Ast.decl_item=(None, extract_mod span ilib mtis);
-                        Ast.decl_params=params }
-                | Some (slots, constrs) ->
-                    Ast.MOD_ITEM_mod
-                      { Ast.decl_item=(Some (form_header_slots slots, constrs),
-                                       extract_mod span ilib mtis);
-                        Ast.decl_params=params }
-          end
-
-      | Ast.MOD_TYPE_ITEM_fn { Ast.decl_item=tfn;
-                               Ast.decl_params=params } ->
-          let (tsig, taux) = tfn in
-          let fn =
-            { Ast.fn_input_slots=form_header_slots tsig.Ast.sig_input_slots;
-              Ast.fn_input_constrs=tsig.Ast.sig_input_constrs;
-              Ast.fn_output_slot=wrap tsig.Ast.sig_output_slot;
-              Ast.fn_aux=taux;
-              Ast.fn_body=wrap [| |]; }
-          in
-            Ast.MOD_ITEM_fn
-              { Ast.decl_item=fn;
-                Ast.decl_params=params }
-
-
-  and wrap_item
-      (span:span)
-      (ilib:import_lib)
-      (item':Ast.mod_item')
-      : Ast.mod_item =
-    let wrapped = wrap span item' in
-      htab_put crate.node.Ast.crate_imported wrapped.id ilib;
-      wrapped
-
-  and extract_mod
-      (span:span)
-      (ilib:import_lib)
-      (mtis:Ast.mod_type_items)
-      : Ast.mod_items =
-    htab_map
-      mtis
-      begin
-        fun ident mti -> (ident, wrap_item span ilib (extract_item span ilib mti))
-      end
-  in
-
-  let extract_items
-      (ilib:import_lib)
-      ((ident:Ast.ident), (import_mti:Ast.mod_type_item), (span:span))
-      : (Ast.ident * Ast.mod_item) =
-    let imported_mod = extract_item span ilib import_mti in
-      (ident, wrap_item span ilib imported_mod)
-  in
-
-  let mis = htab_map crate.node.Ast.crate_imports extract_items in
-    Hashtbl.iter (htab_put crate.node.Ast.crate_items) mis
-;;
-
-
 let find_main_fn
     (ps:pstate)
     (crate_items:Ast.mod_items)
@@ -653,17 +530,20 @@ let find_main_fn
   let rec dig prefix_name items =
     Hashtbl.iter (extract_fn prefix_name) items
   and extract_fn prefix_name ident item =
-    match item.node with
-        Ast.MOD_ITEM_mod md ->
-          if Array.length md.Ast.decl_params = 0 &&
-            (fst md.Ast.decl_item = None)
-          then dig (Some (extend prefix_name ident)) (snd md.Ast.decl_item)
-          else ()
-      | Ast.MOD_ITEM_fn fd ->
-          if Array.length fd.Ast.decl_params = 0 && ident = "main"
-          then fns := (extend prefix_name ident) :: (!fns)
-          else ()
-      | _ -> ()
+    if Hashtbl.mem ps.pstate_imported item.id
+    then ()
+    else
+      match item.node with
+          Ast.MOD_ITEM_mod md ->
+            if Array.length md.Ast.decl_params = 0 &&
+              (fst md.Ast.decl_item = None)
+            then dig (Some (extend prefix_name ident)) (snd md.Ast.decl_item)
+            else ()
+        | Ast.MOD_ITEM_fn fd ->
+            if Array.length fd.Ast.decl_params = 0 && ident = "main"
+            then fns := (extend prefix_name ident) :: (!fns)
+            else ()
+        | _ -> ()
   in
     dig None crate_items;
     match !fns with
@@ -687,7 +567,6 @@ let with_err_handling sess thunk =
         let apos = lexpos ps in
           span ps apos apos
             { Ast.crate_items = Hashtbl.create 0;
-              Ast.crate_imports = Hashtbl.create 0;
               Ast.crate_imported = Hashtbl.create 0;
               Ast.crate_native_items = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
@@ -705,20 +584,19 @@ let parse_crate_file
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
   let oref = ref (Opaque 0) in
+  let imported = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess tok get_ty_mod infer_lib_name fname
+    make_parser tref nref oref sess tok get_ty_mod infer_lib_name imported fname
   in
 
   let files = Hashtbl.create 0 in
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
-  let imports = Hashtbl.create 4 in
-  let imported = Hashtbl.create 4 in
   let env = { env_bindings = [];
               env_prefix = [Filename.dirname fname];
               env_items = Hashtbl.create 0;
               env_files = files;
-              env_imports = imports;
+              env_imported = imported;
               env_ps = ps; }
   in
     with_err_handling sess
@@ -732,21 +610,18 @@ let parse_crate_file
                 match eval_cexp env cexp with
                     CVAL_mod_item (name, item) -> htab_put items name item
                   | CVAL_native_mod_item (name, nitem) -> htab_put nitems name nitem
-                  | CVAL_none -> ()
                   | v -> unexpected_val "mod item or native mod item" v
             done
           in
           let bpos = lexpos ps in
           let main = find_main_fn ps items in
           let crate = { Ast.crate_items = items;
-                        Ast.crate_imports = imports;
                         Ast.crate_imported = imported;
                         Ast.crate_native_items = nitems;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
           in
           let cratei = span ps apos bpos crate in
-            expand_imports ps cratei;
             htab_put files cratei.id fname;
             cratei
       end
@@ -762,8 +637,9 @@ let parse_src_file
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
   let oref = ref (Opaque 0) in
+  let imported = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess tok get_ty_mod infer_lib_name fname
+    make_parser tref nref oref sess tok get_ty_mod infer_lib_name imported fname
   in
     with_err_handling sess
       begin
@@ -773,18 +649,14 @@ let parse_src_file
           let bpos = lexpos ps in
           let files = Hashtbl.create 0 in
           let nitems = Hashtbl.create 4 in
-          let imports = Hashtbl.create 4 in
-          let imported = Hashtbl.create 4 in
           let main = find_main_fn ps items in
           let crate = { Ast.crate_items = items;
-                        Ast.crate_imports = imports;
                         Ast.crate_imported = imported;
                         Ast.crate_native_items = nitems;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
           in
           let cratei = span ps apos bpos crate in
-            expand_imports ps cratei;
             htab_put files cratei.id fname;
             cratei
       end

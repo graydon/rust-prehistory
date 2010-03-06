@@ -671,6 +671,46 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             in
               (ident, span ps apos bpos (Ast.MOD_ITEM_mod decl))
 
+      | USE ->
+          begin
+            bump ps;
+            let name = ctxt "use mod: name" Pexp.parse_ident ps in
+            let path =
+              match peek ps with
+                  EQ ->
+                    begin
+                      bump ps;
+                      match peek ps with
+                          LIT_STR s -> (bump ps; s)
+                        | _ -> raise (unexpected ps)
+                    end
+                | _ -> ps.pstate_infer_lib_name name
+            in
+            (*
+            let meta = [| |] in
+            *)
+            let bpos = lexpos ps in
+              expect ps SEMI;
+              let ilib = { import_libname = path;
+                           import_prefix = ps.pstate_depth }
+              in
+              let tmod = ps.pstate_get_ty_mod path in
+                iflog ps
+                  begin
+                    fun _ ->
+                      log ps "extracted mod type from %s (binding to %s)" path name;
+                      log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
+                  end;
+                let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
+                                                 Ast.decl_item = tmod}
+                in
+                let item' = expand_imported_mod ps {lo=apos; hi=bpos} ilib mti in
+                let item = span ps apos bpos item' in
+                  htab_put ps.pstate_imported item.id ilib;
+                  (name, item)
+          end
+
+
       | _ -> raise (unexpected ps)
 
 
@@ -733,10 +773,110 @@ and expand_tags_to_items
       id_items
 
 
+and expand_imported_mod
+    (ps:pstate)
+    (span:span)
+    (ilib:import_lib)
+    (mti:Ast.mod_type_item)
+    : Ast.mod_item' =
+
+  let wrap span i =
+    let id = next_node_id ps in
+      htab_put ps.pstate_sess.Session.sess_spans id span;
+      { node = i; id = id }
+  in
+
+  let rec extract_item
+      (mti:Ast.mod_type_item)
+      : Ast.mod_item' =
+
+    let wrap i = wrap span i in
+
+    let form_header_slots slots =
+      Array.mapi
+        (fun i slot -> (wrap slot, "_" ^ (string_of_int i)))
+        slots
+    in
+
+    match mti with
+        Ast.MOD_TYPE_ITEM_opaque_type { Ast.decl_item=(_, mut);
+                                        Ast.decl_params=params } ->
+          Ast.MOD_ITEM_opaque_type
+            { Ast.decl_item=Ast.TY_opaque ((next_opaque_id ps), mut);
+              Ast.decl_params=params }
+
+      | Ast.MOD_TYPE_ITEM_public_type { Ast.decl_item=ty;
+                                        Ast.decl_params=params } ->
+          Ast.MOD_ITEM_public_type
+            { Ast.decl_item=ty;
+              Ast.decl_params=params }
+
+      | Ast.MOD_TYPE_ITEM_pred { Ast.decl_item=tpred;
+                                 Ast.decl_params=params } ->
+          let (slots, constrs) = tpred in
+          let pred =
+            { Ast.pred_input_slots = form_header_slots slots;
+              Ast.pred_input_constrs = constrs;
+              Ast.pred_body = wrap [| |] }
+          in
+            Ast.MOD_ITEM_pred
+              { Ast.decl_item=pred;
+                Ast.decl_params=params }
+
+      | Ast.MOD_TYPE_ITEM_mod { Ast.decl_item=tmod;
+                                Ast.decl_params=params } ->
+          begin
+            let hdr, mtis = tmod in
+              match hdr with
+                  None ->
+                    Ast.MOD_ITEM_mod
+                      { Ast.decl_item=(None, extract_mod mtis);
+                        Ast.decl_params=params }
+                | Some (slots, constrs) ->
+                    Ast.MOD_ITEM_mod
+                      { Ast.decl_item=(Some (form_header_slots slots, constrs),
+                                       extract_mod mtis);
+                        Ast.decl_params=params }
+          end
+
+      | Ast.MOD_TYPE_ITEM_fn { Ast.decl_item=tfn;
+                               Ast.decl_params=params } ->
+          let (tsig, taux) = tfn in
+          let fn =
+            { Ast.fn_input_slots=form_header_slots tsig.Ast.sig_input_slots;
+              Ast.fn_input_constrs=tsig.Ast.sig_input_constrs;
+              Ast.fn_output_slot=wrap tsig.Ast.sig_output_slot;
+              Ast.fn_aux=taux;
+              Ast.fn_body=wrap [| |]; }
+          in
+            Ast.MOD_ITEM_fn
+              { Ast.decl_item=fn;
+                Ast.decl_params=params }
+
+  and wrap_item
+      (item':Ast.mod_item')
+      : Ast.mod_item =
+    let wrapped = wrap span item' in
+      htab_put ps.pstate_imported wrapped.id ilib;
+      wrapped
+
+  and extract_mod
+      (mtis:Ast.mod_type_items)
+      : Ast.mod_items =
+    htab_map
+      mtis
+      begin
+        fun ident mti -> (ident, wrap_item (extract_item mti))
+      end
+  in
+    extract_item mti
+
+
 and parse_mod_items
     (ps:pstate)
     (terminal:token)
     : Ast.mod_items =
+  ps.pstate_depth <- ps.pstate_depth + 1;
   let items = Hashtbl.create 4 in
     while (not (peek ps = terminal))
     do
@@ -745,6 +885,7 @@ and parse_mod_items
         expand_tags_to_items ps item items;
     done;
     expect ps terminal;
+    ps.pstate_depth <- ps.pstate_depth - 1;
     items
 ;;
 

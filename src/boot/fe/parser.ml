@@ -8,6 +8,7 @@ type pstate =
     { mutable pstate_peek : token;
       mutable pstate_ctxt : (string * pos) list;
       mutable pstate_rstr : bool;
+      mutable pstate_depth: int;
       pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
       pstate_file         : filename;
@@ -16,7 +17,8 @@ type pstate =
       pstate_node_id      : node_id ref;
       pstate_opaque_id    : opaque_id ref;
       pstate_get_ty_mod     : (filename -> Ast.ty_mod);
-      pstate_infer_lib_name : (Ast.ident -> filename); }
+      pstate_infer_lib_name : (Ast.ident -> filename);
+      pstate_imported       : (node_id, import_lib) Hashtbl.t; }
 ;;
 
 let log (ps:pstate) = Session.log "parse"
@@ -38,6 +40,7 @@ let make_parser
     (tok:Lexing.lexbuf -> token)
     (get_ty_mod:filename -> Ast.ty_mod)
     (infer_lib_name:Ast.ident -> filename)
+    (imported:(node_id, import_lib) Hashtbl.t)
     (fname:string)
     : pstate =
   let lexbuf = Lexing.from_channel (open_in fname) in
@@ -50,6 +53,7 @@ let make_parser
       { pstate_peek = first;
         pstate_ctxt = [];
         pstate_rstr = false;
+        pstate_depth = 0;
         pstate_lexfun = tok;
         pstate_lexbuf = lexbuf;
         pstate_file = fname;
@@ -58,7 +62,8 @@ let make_parser
         pstate_node_id = nref;
         pstate_opaque_id = oref;
         pstate_get_ty_mod = get_ty_mod;
-        pstate_infer_lib_name = infer_lib_name; }
+        pstate_infer_lib_name = infer_lib_name;
+        pstate_imported = imported; }
     in
       iflog ps (fun _ -> log ps "made parser for: %s\n%!" fname);
       ps
