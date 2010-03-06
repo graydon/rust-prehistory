@@ -3004,10 +3004,14 @@ let trans_visitor
       iflog (fun _ -> annotate "finished prologue");
   in
 
-  let trans_frame_exit (fnid:node_id) : unit =
+  let trans_frame_exit (fnid:node_id) (drop_slots:bool) : unit =
     Stack.iter patch (Stack.pop epilogue_jumps);
-    iflog (fun _ -> annotate "drop frame");
-    iter_frame_and_arg_slots fnid callee_drop_slot;
+    if drop_slots
+    then
+      begin
+        iflog (fun _ -> annotate "drop frame");
+        iter_frame_and_arg_slots fnid callee_drop_slot;
+      end;
     iflog (fun _ -> annotate "epilogue");
     abi.Abi.abi_emit_fn_epilogue (emitter());
     capture_emitted_quads (get_fn_fixup cx fnid) fnid;
@@ -3018,7 +3022,7 @@ let trans_visitor
     Stack.push fnid fns;
     trans_frame_entry fnid;
     trans_block body;
-    trans_frame_exit fnid;
+    trans_frame_exit fnid true;
     ignore (Stack.pop fns);
   in
 
@@ -3066,11 +3070,14 @@ let trans_visitor
         let args_rty = direct_call_args_referent_type cx fnid in
         let caller_args_cell = caller_args_cell args_rty in
         let callee_args_cell = callee_args_cell false args_rty in
-        mov (get_element_ptr callee_args_cell 0) (Il.Cell (get_element_ptr caller_args_cell 0));
-        mov (get_element_ptr callee_args_cell 1) (Il.Cell (get_element_ptr caller_args_cell 1));
-        call_code (code_of_operand (Il.Cell f));
-        emit Il.Leave;
-        trans_frame_exit fnid;
+        let (dst_reg, _) = force_to_reg (Il.Cell (alias callee_args_cell)) in
+        let (src_reg, _) = force_to_reg (Il.Cell (alias caller_args_cell)) in
+        let tmp_reg = next_vreg () in
+        let nbytes = Il.referent_ty_size word_bits args_rty in
+          abi.Abi.abi_emit_inline_memcpy (emitter()) nbytes dst_reg src_reg tmp_reg false;
+          call_code (code_of_operand (Il.Cell f));
+          emit Il.Leave;
+          trans_frame_exit fnid false;
   in
 
   let trans_tag
@@ -3108,7 +3115,7 @@ let trans_visitor
         trans_copy_tup true dst src slots;
         trace_str cx.ctxt_sess.Session.sess_trace_tag
           ("finished tag constructor " ^ n);
-        trans_frame_exit tagid;
+        trans_frame_exit tagid true;
   in
 
   let trans_native_fn (fnid:node_id) (nfn:Ast.native_fn) : unit =

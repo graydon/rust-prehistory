@@ -814,6 +814,48 @@ let fn_epilogue (e:Il.emitter) : unit =
     emit Il.Ret;
 ;;
 
+let inline_memcpy
+    (e:Il.emitter)
+    (n_bytes:int64)
+    (dst_ptr:Il.reg)
+    (src_ptr:Il.reg)
+    (tmp_reg:Il.reg)
+    (ascending:bool)
+    : unit =
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let bpw = Int64.to_int word_sz in
+  let w = Int64.to_int (Int64.div n_bytes word_sz) in
+  let b = Int64.to_int (Int64.rem n_bytes word_sz) in
+    if ascending
+    then
+      begin
+        for i = 0 to (w-1) do
+          mov (r tmp_reg) (c (word_n src_ptr i));
+          mov (word_n dst_ptr i) (c (r tmp_reg));
+        done;
+        for i = 0 to (b-1) do
+          let off = (w*bpw) + i in
+            mov (r tmp_reg) (c (byte_n src_ptr off));
+            mov (byte_n dst_ptr off) (c (r tmp_reg));
+        done;
+      end
+    else
+      begin
+        for i = (b-1) downto 0 do
+          let off = (w*bpw) + i in
+            mov (r tmp_reg) (c (byte_n src_ptr off));
+            mov (byte_n dst_ptr off) (c (r tmp_reg));
+        done;
+        for i = (w-1) downto 0 do
+          mov (r tmp_reg) (c (word_n src_ptr i));
+          mov (word_n dst_ptr i) (c (r tmp_reg));
+        done;
+      end
+;;
+
+
+
 let fn_tail_call
     (e:Il.emitter)
     (caller_callsz:int64)
@@ -901,21 +943,8 @@ let fn_tail_call
      *)
 
     annotate e "tail call: move arg-tuple up to top of frame";
-    begin
-      let bpw = Int64.to_int word_sz in
-      let w = Int64.to_int (Int64.div callee_argsz word_sz) in
-      let b = Int64.to_int (Int64.rem callee_argsz word_sz) in
-        (* NOTE: must copy top-to-bottom in case the regions overlap *)
-        for i = (b-1) downto 0 do
-          let off = (w*bpw) + i in
-            mov (rc eax) (c (byte_n (h esp) off));
-            mov (byte_n (h edx) off) (ro eax);
-        done;
-        for i = (w-1) downto 0 do
-          mov (rc eax) (c (word_n (h esp) i));
-          mov (word_n (h edx) i) (ro eax);
-        done;
-    end;
+    (* NOTE: must copy top-to-bottom in case the regions overlap *)
+    inline_memcpy e callee_argsz (h edx) (h esp) (h eax) false;
 
     (* 
      * We're done with eax now; so in the case where we had to spill
@@ -1085,6 +1114,8 @@ let (abi:Abi.abi) =
     Abi.abi_emit_native_call = emit_native_call;
     Abi.abi_emit_native_void_call = emit_native_void_call;
     Abi.abi_emit_native_call_in_thunk = emit_native_call_in_thunk;
+    Abi.abi_emit_inline_memcpy = inline_memcpy;
+
     Abi.abi_c_to_proc = c_to_proc_glue;
     Abi.abi_yield = yield_glue;
     Abi.abi_unwind = unwind_glue;
