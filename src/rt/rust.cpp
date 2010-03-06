@@ -2978,15 +2978,14 @@ rust_rt::get_cache(rust_crate const *crate) {
     return cache;
 }
 
-
-extern "C" CDECL uintptr_t
-upcall_import(rust_proc *proc, rust_crate const *curr_crate,
-              size_t lib_num,      // # of lib
-              size_t c_sym_num,    // # of C sym "rust_crate" in lib
-              size_t rust_sym_num, // # of rust sym
-              char const *library, char const **path)
+static rust_crate_cache::c_sym *
+fetch_c_sym(rust_proc *proc,
+            rust_crate const *curr_crate,
+            size_t lib_num,
+            size_t c_sym_num,
+            char const *library,
+            char const *symbol)
 {
-    LOG_UPCALL_ENTRY(proc);
     rust_rt *rt = proc->rt;
 
     if (proc->cache && proc->cache->crate != curr_crate) {
@@ -2998,25 +2997,74 @@ upcall_import(rust_proc *proc, rust_crate const *curr_crate,
         proc->cache = rt->get_cache(curr_crate);
     }
 
+    rust_crate_cache *cache = proc->cache;
+    rust_crate_cache::lib *l = cache->get_lib(lib_num, library);
+    return cache->get_c_sym(c_sym_num, l, symbol);
+}
+
+extern "C" CDECL uintptr_t
+upcall_import_rust_sym(rust_proc *proc,
+                       rust_crate const *curr_crate,
+                       size_t lib_num,      // # of lib
+                       size_t c_sym_num,    // # of C sym "rust_crate" in lib
+                       size_t rust_sym_num, // # of rust sym
+                       char const *library,
+                       char const **path)
+{
+    LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
+
     rt->log(LOG_UPCALL|LOG_LINK,
-            "upcall import: lib #%" PRIdPTR
+            "upcall import rust sym: lib #%" PRIdPTR
             " = %s, c_sym #%" PRIdPTR
             ", rust_sym #%" PRIdPTR,
             lib_num, library, c_sym_num, rust_sym_num);
     for (char const **c = crate_rel(curr_crate, path); *c; ++c) {
-        rt->log(LOG_UPCALL, "upcall import: + %s", crate_rel(curr_crate, *c));
+        rt->log(LOG_UPCALL, " + %s", crate_rel(curr_crate, *c));
     }
 
-    rust_crate_cache *cache = proc->cache;
-    rust_crate_cache::lib *l = cache->get_lib(lib_num, library);
-    rust_crate_cache::c_sym *c = cache->get_c_sym(c_sym_num, l, "rust_crate");
-    rust_crate_cache::rust_sym *s = cache->get_rust_sym(rust_sym_num, rt, curr_crate, c, path);
+    rust_crate_cache::c_sym *c =
+        fetch_c_sym(proc, curr_crate, lib_num, c_sym_num, library, "rust_crate");
+
+    rust_crate_cache::rust_sym *s =
+        proc->cache->get_rust_sym(rust_sym_num, rt, curr_crate, c, path);
+
     uintptr_t addr = s->get_val();
     if (addr) {
         rt->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
         rt->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
-        proc->fail(4);
+        proc->fail(7);
+    }
+    return addr;
+}
+
+extern "C" CDECL uintptr_t
+upcall_import_c_sym(rust_proc *proc,
+                    rust_crate const *curr_crate,
+                    size_t lib_num,      // # of lib
+                    size_t c_sym_num,    // # of C sym
+                    char const *library,
+                    char const *symbol)
+{
+    LOG_UPCALL_ENTRY(proc);
+    rust_rt *rt = proc->rt;
+
+    rt->log(LOG_UPCALL|LOG_LINK,
+            "upcall import c sym: lib #%" PRIdPTR
+            " = %s, c_sym #%" PRIdPTR
+            " = %s",
+            lib_num, library, c_sym_num, symbol);
+
+    rust_crate_cache::c_sym *c =
+        fetch_c_sym(proc, curr_crate, lib_num, c_sym_num, library, symbol);
+
+    uintptr_t addr = c->get_val();
+    if (addr) {
+        rt->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
+    } else {
+        rt->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
+        proc->fail(6);
     }
     return addr;
 }

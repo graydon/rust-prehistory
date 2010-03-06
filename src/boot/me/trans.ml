@@ -3039,7 +3039,7 @@ let trans_visitor
                              [| Asm.WORD (word_ty_mach, Asm.IMM 0L) |]))
   in
 
-  let trans_imported_fn (fnid:node_id) (blockid:node_id) : unit =
+  let trans_imported_rust_fn (fnid:node_id) (blockid:node_id) : unit =
     trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
     let ilib = Hashtbl.find cx.ctxt_imported_items fnid in
@@ -3061,12 +3061,12 @@ let trans_visitor
       let libstr = trans_static_string ilib.import_libname in
       let relpath = trans_static_name_components relative_path_elts in
       let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
-        trans_upcall "upcall_import" f [| Il.Cell (curr_crate_ptr());
-                                          imm (Int64.of_int lib_num);
-                                          imm (Int64.of_int c_sym_num);
-                                          imm (Int64.of_int rust_sym_num);
-                                          libstr;
-                                          relpath |];
+        trans_upcall "upcall_import_rust_sym" f [| Il.Cell (curr_crate_ptr());
+                                                   imm (Int64.of_int lib_num);
+                                                   imm (Int64.of_int c_sym_num);
+                                                   imm (Int64.of_int rust_sym_num);
+                                                   libstr;
+                                                   relpath |];
         let args_rty = direct_call_args_referent_type cx fnid in
         let caller_args_cell = caller_args_cell args_rty in
         let callee_args_cell = callee_args_cell false args_rty in
@@ -3234,7 +3234,7 @@ let trans_visitor
 
   let visit_imported_mod_item_pre _ _ i =
     match i.node with
-        Ast.MOD_ITEM_fn f -> trans_imported_fn i.id f.Ast.decl_item.Ast.fn_body.id
+        Ast.MOD_ITEM_fn f -> trans_imported_rust_fn i.id f.Ast.decl_item.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
       | _ -> bugi cx i.id "unsupported type of import: %s" (path_name())
   in
