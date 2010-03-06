@@ -3166,7 +3166,7 @@ rust_main_loop(rust_rt *rt)
     while ((proc = rt->sched()) != NULL) {
         I(rt, proc->running());
 
-        rt->log(LOG_PROC, "activating proc 0x%" PRIxPTR "sp=0x%" PRIxPTR,
+        rt->log(LOG_PROC, "activating proc 0x%" PRIxPTR ", sp=0x%" PRIxPTR,
                 (uintptr_t)proc, proc->rust_sp);
 
         rt->activate(proc);
