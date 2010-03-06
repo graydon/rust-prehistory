@@ -3163,29 +3163,22 @@ rust_main_loop(rust_rt *rt)
     rt->log(LOG_RT, "control is in rust runtime library");
     rt->logptr("main exit-proc glue", rt->root_crate->get_main_exit_proc_glue());
 
-    proc = rt->sched();
+    while ((proc = rt->sched()) != NULL) {
+        I(rt, proc->running());
 
-    rt->logptr("root proc", (uintptr_t)proc);
-    rt->logptr("proc->rust_sp", (uintptr_t)proc->rust_sp);
+        rt->log(LOG_PROC, "activating proc 0x%" PRIxPTR "sp=0x%" PRIxPTR,
+                (uintptr_t)proc, proc->rust_sp);
 
-    while (proc) {
+        rt->activate(proc);
 
-        rt->log(LOG_PROC, "activating proc 0x%" PRIxPTR,
-                (uintptr_t)proc);
+        rt->log(LOG_PROC,
+                "returned from proc 0x%" PRIxPTR " in state '%s', sp=0x%" PRIxPTR,
+                (uintptr_t)proc, rt->state_vec_name(proc->state), proc->rust_sp);
 
-        if (proc->running()) {
-            rt->activate(proc);
+        I(rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
+        I(rt, proc->rust_sp < proc->stk->limit);
 
-            rt->log(LOG_PROC,
-                    "returned from proc 0x%" PRIxPTR " in state '%s', sp=0x%" PRIxPTR,
-                    (uintptr_t)proc, rt->state_vec_name(proc->state), proc->rust_sp);
-
-            I(rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
-            I(rt, proc->rust_sp < proc->stk->limit);
-
-            rt->reap_dead_procs();
-        }
-        proc = rt->sched();
+        rt->reap_dead_procs();
     }
 
     rt->log(LOG_RT, "finished main loop (rt.rval = %d)", rt->rval);
