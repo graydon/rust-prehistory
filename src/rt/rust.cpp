@@ -3177,8 +3177,8 @@ rust_main_loop(rust_rt *rt)
             rt->activate(proc);
 
             rt->log(LOG_PROC,
-                    "returned from proc 0x%" PRIxPTR " in state '%s'",
-                    (uintptr_t)proc, rt->state_vec_name(proc->state));
+                    "returned from proc 0x%" PRIxPTR " in state '%s', sp=0x%" PRIxPTR,
+                    (uintptr_t)proc, rt->state_vec_name(proc->state), proc->rust_sp);
 
             I(rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
             I(rt, proc->rust_sp < proc->stk->limit);
@@ -3186,10 +3186,11 @@ rust_main_loop(rust_rt *rt)
             rt->reap_dead_procs();
         }
         proc = rt->sched();
-
-        rt->log(LOG_RT, "finished main loop (rt.rval = %d)", rt->rval);
-        rval = rt->rval;
     }
+
+    rt->log(LOG_RT, "finished main loop (rt.rval = %d)", rt->rval);
+    rval = rt->rval;
+
     return rval;
 }
 
