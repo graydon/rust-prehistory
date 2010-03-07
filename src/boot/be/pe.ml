@@ -611,8 +611,8 @@ type pe_export =
 ;;
 
 let pe_export_section
+    ~(sess:Session.sess)
     ~(export_dir_fixup:fixup)
-    ~(image_name_fixup:fixup)
     ~(exports:pe_export array)
     : frag =
   Array.sort (fun a b -> compare a.pe_export_name b.pe_export_name) exports;
@@ -653,6 +653,7 @@ let pe_export_section
             (fun i _ -> (WORD (TY_u16, IMM (Int64.of_int (i)))))
             exports))
   in
+  let image_name_fixup = new_fixup "image name fixup" in
   let n_exports = IMM (Int64.of_int (Array.length exports)) in
   let export_dir_table =
     SEQ [|
@@ -675,6 +676,7 @@ let pe_export_section
          export_addr_table;
          export_name_pointer_table;
          export_ordinal_table;
+         DEF (image_name_fixup, ZSTRING (Session.filename_of sess.Session.sess_out));
          export_name_table
        |])
 ;;
@@ -775,7 +777,6 @@ let emit_file
   let bss_fixup = new_fixup "bss section" in
   let data_fixup = new_fixup "data section" in
   let image_fixup = new_fixup "image fixup" in
-  let image_name_fixup = new_fixup "image name fixup" in
   let symtab_fixup = new_fixup "symbol table" in
   let strtab_fixup = new_fixup "string table" in
 
@@ -814,7 +815,6 @@ let emit_file
                ZSTRING ".debug_abbrev";
                ZSTRING ".debug_line";
                ZSTRING ".debug_frame";
-               DEF (image_name_fixup, ZSTRING (Session.filename_of sess.Session.sess_out))
              |])))
   in
   let loader_header = (pe_loader_header
@@ -847,7 +847,7 @@ let emit_file
                          ~hdr_fixup: import_dir_fixup)
   in
   let export_section = (pe_export_section
-                          ~image_name_fixup
+                          ~sess
                           ~export_dir_fixup
                           ~exports: (crate_exports sem))
   in
