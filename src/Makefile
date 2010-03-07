@@ -283,10 +283,6 @@ TEST_XFAILS += test/run-pass/native_mod.rc \
                test/run-pass/native_mod.rs
 endif
 
-ifneq ($(CFG_OSTYPE), Linux)
-TEST_XFAILS += test/run-pass/user.rs
-endif
-
 TEST_RUN_PASS_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rc))
 TEST_RUN_PASS_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rs))
 TEST_RUN_PASS_EXES := $(TEST_RUN_PASS_CRATES:.rc=$(CFG_EXE_SUFFIX)) \

@@ -227,6 +227,7 @@ type pe_subsystem =
 ;;
 
 let pe_loader_header
+    ~(sess:Session.sess)
     ~(text_fixup:fixup)
     ~(init_data_fixup:fixup)
     ~(size_of_uninit_data:int64)
@@ -249,7 +250,13 @@ let pe_loader_header
        WORD (TY_u32, (F_SZ text_fixup));            (* "size of code"            *)
        WORD (TY_u32, (F_SZ init_data_fixup));       (* "size of all init data"   *)
        WORD (TY_u32, (IMM size_of_uninit_data));
-       WORD (TY_u32, (rva entry_point_fixup));      (* "address of entry point"  *)
+
+       if sess.Session.sess_library_mode
+       then
+         WORD (TY_u32, (IMM 0L))                    (* DLLMain *)
+       else
+         WORD (TY_u32, (rva entry_point_fixup));    (* "address of entry point"  *)
+
        WORD (TY_u32, (rva text_fixup));             (* "base of code"            *)
        WORD (TY_u32, (rva init_data_fixup));        (* "base of data"            *)
        WORD (TY_u32, (IMM pe_image_base));
@@ -821,7 +828,8 @@ let emit_file
              |])))
   in
   let loader_header = (pe_loader_header
-                         ~text_fixup: text_fixup
+                         ~sess
+                         ~text_fixup
                          ~init_data_fixup: all_init_data_fixup
                          ~size_of_uninit_data: 0L
                          ~entry_point_fixup: start_fixup
