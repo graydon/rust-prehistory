@@ -788,10 +788,13 @@ let emit_file
                   ~number_of_sections: 7L
                   ~number_of_symbols: 0L
                   ~loader_hdr_fixup: loader_hdr_fixup
-                  ~characteristics:[IMAGE_FILE_EXECUTABLE_IMAGE;
-                                    IMAGE_FILE_RELOCS_STRIPPED;
+                  ~characteristics:([IMAGE_FILE_EXECUTABLE_IMAGE;
                                     IMAGE_FILE_LINE_NUMS_STRIPPED;
-                                    IMAGE_FILE_32BIT_MACHINE;])
+                                    IMAGE_FILE_32BIT_MACHINE;]
+                                    @
+                                    (if sess.Session.sess_library_mode
+                                     then [ IMAGE_FILE_DLL ]
+                                     else [ ])))
   in
   let symtab =
     (* 

@@ -1895,13 +1895,17 @@ public:
         {
             library->ref();
             uintptr_t handle = library->get_handle();
+            if (handle) {
 #if defined(__WIN32__)
-            val = (uintptr_t)GetProcAddress((HMODULE)handle, _T(name));
-            // rt->win32_require(_T("GetProcAddress"), val != 0);
+                val = (uintptr_t)GetProcAddress((HMODULE)handle, _T(name));
+                // rt->win32_require(_T("GetProcAddress"), val != 0);
 #else
-            val = (uintptr_t)dlsym((void*)handle, name);
+                val = (uintptr_t)dlsym((void*)handle, name);
 #endif
-            rt->log(LOG_LINK, "resolved symbol '%s' to 0x%"  PRIxPTR, name, val);
+                rt->log(LOG_LINK, "resolved symbol '%s' to 0x%"  PRIxPTR, name, val);
+            } else {
+                rt->log(LOG_LINK, "unresolved symbol '%s', null lib handle", name);
+            }
         }
 
         uintptr_t get_val() {
@@ -1929,6 +1933,10 @@ public:
             crate_sym->ref();
             typedef rust_crate_reader::die_reader::die die;
             rust_crate const *crate = (rust_crate*)crate_sym->get_val();
+            if (!crate) {
+                rt->log(LOG_LINK, "failed to resolve symbol, null crate symbol");
+                return;
+            }
             rust_crate_reader rdr(rt, crate);
             bool found_root = false;
             bool found_leaf = false;
@@ -1960,6 +1968,8 @@ public:
             }
             if (found_leaf) {
                 rt->log(LOG_LINK, "resolved symbol to 0x%"  PRIxPTR, val);
+            } else {
+                rt->log(LOG_LINK, "failed to resolve symbol");
             }
         }
 
