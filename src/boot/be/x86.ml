@@ -304,6 +304,17 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
           let ty = Il.cell_scalar_ty c.Il.call_dst in
             Il.Call { c with
                         Il.call_dst = Il.Reg ((Il.Hreg eax), ty) }
+
+      | Il.Lea le ->
+          begin
+            match (le.Il.lea_dst, le.Il.lea_src) with
+                (Il.Reg (_, dst_ty), Il.ImmPtr _)
+                  when is_ty32 dst_ty ->
+                    Il.Lea { le with
+                               Il.lea_dst = Il.Reg (Il.Hreg eax, dst_ty) }
+              | _ -> quad'
+          end
+
       | x -> x
 ;;
 
@@ -394,11 +405,6 @@ let word_at (reg:Il.reg) : Il.cell =
     Il.Mem (mem, Il.ScalarTy (Il.ValTy word_bits))
 ;;
 
-let word_at_abs (abs:Asm.expr64) : Il.cell =
-  let mem = Il.Abs abs in
-    Il.Mem (mem, Il.ScalarTy (Il.ValTy word_bits))
-;;
-
 let word_at_off (reg:Il.reg) (off:Asm.expr64) : Il.cell =
   let mem = Il.RegIn (reg, Some off) in
     Il.Mem (mem, Il.ScalarTy (Il.ValTy word_bits))
@@ -483,6 +489,23 @@ let out_ptr = wordptr_n (Il.Hreg ebp) 5;;
 let frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;;
 let implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;;
 
+let get_next_pc_thunk_fixup = new_fixup "glue$get_next_pc"
+;;
+
+let emit_get_next_pc_thunk (e:Il.emitter) : unit =
+  let sty = Il.AddrTy Il.CodeTy in
+  let rty = Il.ScalarTy sty in
+  let deref_esp = Il.Mem (Il.RegIn (Il.Hreg esp, None), rty) in
+  let eax = (Il.Reg (Il.Hreg eax, sty)) in
+    Il.emit_full e (Some get_next_pc_thunk_fixup)
+      (Il.umov eax (Il.Cell deref_esp));
+    Il.emit e Il.Ret;
+;;
+
+let get_next_pc_thunk : (Il.reg * fixup * (Il.emitter -> unit)) =
+    (Il.Hreg eax, get_next_pc_thunk_fixup, emit_get_next_pc_thunk)
+;;
+
 let emit_c_call
     (e:Il.emitter)
     (ret:Il.cell)
@@ -531,13 +554,7 @@ let emit_c_call
                            mov (word_n (h esp) i) arg)
                   args;
 
-      let fptr =
-        (* FIXME (bug 549131): this is not PIC for nabi_indirect. Need to use Abi.load_fixup_addr. *)
-        Il.CodePtr
-          (if nabi.Abi.nabi_indirect
-           then Il.Cell (Il.Mem (Il.Abs (Asm.M_POS fn), Il.ScalarTy (Il.AddrTy Il.CodeTy)))
-           else Il.ImmPtr (fn, Il.CodeTy))
-      in
+      let fptr = Abi.load_fixup_codeptr e (h eax) fn true nabi.Abi.nabi_indirect in
         begin
           match ret with
               Il.Mem (Il.RegIn (Il.Hreg base, _), _) when base == esp ->
@@ -1041,49 +1058,29 @@ let yield_glue (e:Il.emitter) : unit =
   ()
 ;;
 
-let get_next_pc_thunk : (Il.reg * fixup * (Il.emitter -> unit)) =
-  let get_next_pc_thunk_fixup = new_fixup "glue$get_next_pc" in
-  let emit_get_next_pc_thunk (e:Il.emitter) : unit =
-    let sty = Il.AddrTy Il.CodeTy in
-    let rty = Il.ScalarTy sty in
-    let deref_esp = Il.Mem (Il.RegIn (Il.Hreg esp, None), rty) in
-    let eax = (Il.Reg (Il.Hreg eax, sty)) in
-      Il.emit_full e (Some get_next_pc_thunk_fixup)
-        (Il.umov eax (Il.Cell deref_esp));
-      Il.emit e Il.Ret;
-  in
-    (Il.Hreg eax, get_next_pc_thunk_fixup, emit_get_next_pc_thunk)
-;;
 
-let push_pos32 (e:Il.emitter) (abi:Abi.abi) (fix:fixup) : unit =
+let push_pos32 (e:Il.emitter) (fix:fixup) : unit =
   let (reg, _, _) = get_next_pc_thunk in
-    Abi.load_fixup_addr e abi reg fix Il.OpaqueTy;
+    Abi.load_fixup_addr e reg fix Il.OpaqueTy;
     Il.emit e (Il.Push (Il.Cell (Il.Reg (reg, Il.AddrTy Il.OpaqueTy))))
 ;;
 
 let objfile_start
     (e:Il.emitter)
-    ~(abi:Abi.abi)
     ~(start_fixup:fixup)
     ~(rust_start_fixup:fixup)
     ~(main_fn_fixup:fixup)
     ~(crate_fixup:fixup)
     ~(indirect_start:bool)
     : unit =
-  let push_pos32 = push_pos32 e abi in
+  let push_pos32 = push_pos32 e in
     Il.emit_full e (Some start_fixup) Il.Dead;
     save_callee_saves e;
     Il.emit e (Il.umov (rc ebp) (ro esp));
     Il.emit e (Il.Push (immi 0L));
     push_pos32 crate_fixup;
     push_pos32 main_fn_fixup;
-    let fptr =
-      Il.CodePtr
-        (if indirect_start
-         then Il.Cell (Il.Mem (Il.Abs (Asm.M_POS rust_start_fixup),
-                               Il.ScalarTy (Il.AddrTy Il.CodeTy)))
-         else Il.ImmPtr (rust_start_fixup, Il.CodeTy))
-    in
+    let fptr = Abi.load_fixup_codeptr e (h eax) rust_start_fixup true indirect_start in
       Il.emit e (Il.call (rc eax) fptr);
       Il.emit e (Il.Pop (rc ecx));
       Il.emit e (Il.Pop (rc ecx));
@@ -1396,10 +1393,27 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
 ;;
 
 
-let lea (dst:Il.cell) (mem:Il.mem) : Asm.frag =
-  match dst with
-      Il.Reg ((Il.Hreg r), dst_ty) when is_ty32 dst_ty ->
-        insn_rm_r 0x8d (Il.Mem (mem, Il.OpaqueTy)) (reg r)
+let lea (dst:Il.cell) (src:Il.operand) : Asm.frag =
+  match (dst, src) with
+      (Il.Reg ((Il.Hreg r), dst_ty),
+       Il.Cell (Il.Mem (mem, _)))
+        when is_ty32 dst_ty ->
+          insn_rm_r 0x8d (Il.Mem (mem, Il.OpaqueTy)) (reg r)
+
+    | (Il.Reg ((Il.Hreg r), dst_ty),
+       Il.ImmPtr (fix, _))
+        when is_ty32 dst_ty && r = eax ->
+        let anchor = new_fixup "anchor" in
+        let fix_off = Asm.SUB ((Asm.M_POS fix),
+                               (Asm.M_POS anchor))
+        in
+          (* NB: These instructions must come as a
+           * cluster, w/o any separation.
+           *)
+          Asm.SEQ [|
+            insn_pcrel_simple 0xe8 get_next_pc_thunk_fixup;
+            Asm.DEF (anchor, insn_rm_r_imm 0x81 dst slash0 TY_s32 fix_off);
+          |]
 
     | _ -> raise Unrecognized
 ;;
@@ -1417,7 +1431,7 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
 
                       Il.CodePtr (Il.Cell c)
                         when Il.cell_referent_ty c = Il.ScalarTy (Il.AddrTy Il.CodeTy) ->
-                          insn_rm_r 0xff c slash2
+                        insn_rm_r 0xff c slash2
 
                     | Il.CodePtr (Il.ImmPtr (f, Il.CodeTy)) ->
                         insn_pcrel_simple 0xe8 f

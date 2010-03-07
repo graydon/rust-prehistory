@@ -908,45 +908,58 @@ let emit_file
   in
 
   let objfile_start e =
-    Il.emit_full e (Some start_fixup) Il.Dead;
+    let edx = X86.h X86.edx in
+    let edx_pointee =
+      Il.Mem ((Il.RegIn (edx, None)), Il.OpaqueTy)
+    in
+      Il.emit_full e (Some start_fixup) Il.Dead;
 
-    (* zero marks the bottom of the frame chain. *)
-    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
-    Il.emit e (Il.umov (X86.rc X86.ebp) (X86.ro X86.esp));
+      (* zero marks the bottom of the frame chain. *)
+      Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+      Il.emit e (Il.umov (X86.rc X86.ebp) (X86.ro X86.esp));
 
-    (* 16-byte align stack for SSE. *)
-    Il.emit e (Il.binary Il.AND (X86.rc X86.esp) (X86.ro X86.esp)
-                 (X86.imm (Asm.IMM 0xfffffffffffffff0L)));
+      (* 16-byte align stack for SSE. *)
+      Il.emit e (Il.binary Il.AND (X86.rc X86.esp) (X86.ro X86.esp)
+                   (X86.imm (Asm.IMM 0xfffffffffffffff0L)));
 
-    (* Store argc. *)
-    Il.emit e (Il.umov (X86.rc X86.eax) (X86.c (X86.word_n (Il.Hreg X86.ebp) 1)));
-    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargc_fixup)) (X86.ro X86.eax));
+      (* Store argc. *)
+      Abi.load_fixup_addr e edx nxargc_fixup Il.OpaqueTy;
+      Il.emit e (Il.umov (X86.rc X86.eax) (X86.c (X86.word_n (Il.Hreg X86.ebp) 1)));
+      Il.emit e (Il.umov edx_pointee (X86.ro X86.eax));
 
     (* Store argv. *)
-    Il.emit e (Il.lea (X86.rc X86.ecx) (Il.RegIn (Il.Hreg X86.ebp, Some (X86.word_off_n 2))));
-    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS nxargv_fixup)) (X86.ro X86.eax));
+      Abi.load_fixup_addr e edx nxargv_fixup Il.OpaqueTy;
+      Il.emit e (Il.lea (X86.rc X86.ecx) (Il.Cell (Il.Mem ((Il.RegIn (Il.Hreg X86.ebp,
+                                                                      Some (X86.word_off_n 2))),
+                                                           Il.OpaqueTy))));
+      Il.emit e (Il.umov edx_pointee (X86.ro X86.ecx));
 
     (* Calculte and store envp. *)
-    Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM 1L)));
-    Il.emit e (Il.binary Il.UMUL (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM X86.word_sz)));
-    Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.ro X86.ecx));
-    Il.emit e (Il.umov (X86.word_at_abs (Asm.M_POS environ_fixup)) (X86.ro X86.eax));
+      Abi.load_fixup_addr e edx environ_fixup Il.OpaqueTy;
+      Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM 1L)));
+      Il.emit e (Il.binary Il.UMUL (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM X86.word_sz)));
+      Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.ro X86.ecx));
+      Il.emit e (Il.umov edx_pointee (X86.ro X86.eax));
 
     (* Push 16 bytes to preserve SSE alignment. *)
-    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
-    Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_crate_fixup)));
-    Il.emit e (Il.Push (X86.imm (Asm.M_POS sem.Semant.ctxt_main_fn_fixup)));
-    Il.emit e (Il.call (X86.rc X86.eax) (Il.indirect_code_ptr rust_start_fixup));
-    Il.emit e (Il.Pop (X86.rc X86.ecx));
-    Il.emit e (Il.Push (X86.ro X86.eax));
-    Il.emit e (Il.call (X86.rc X86.eax) (Il.indirect_code_ptr exit_fixup));
-    Il.emit e (Il.Pop (X86.rc X86.ecx));
-    Il.emit e (Il.Pop (X86.rc X86.ecx));
-    Il.emit e (Il.Pop (X86.rc X86.ecx));
-    Il.emit e (Il.Pop (X86.rc X86.ecx));
+      Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+      Il.emit e (Il.Push (X86.imm (Asm.IMM 0L)));
+      Abi.load_fixup_addr e edx sem.Semant.ctxt_crate_fixup Il.OpaqueTy;
+      Il.emit e (Il.Push (X86.ro X86.edx));
+      Abi.load_fixup_addr e edx sem.Semant.ctxt_main_fn_fixup Il.OpaqueTy;
+      Il.emit e (Il.Push (X86.ro X86.edx));
+      let fptr = Abi.load_fixup_codeptr e edx rust_start_fixup true true in
+        Il.emit e (Il.call (X86.rc X86.eax) fptr);
+        Il.emit e (Il.Pop (X86.rc X86.ecx));
+        Il.emit e (Il.Push (X86.ro X86.eax));
+        let fptr = Abi.load_fixup_codeptr e edx exit_fixup true true in
+          Il.emit e (Il.call (X86.rc X86.eax) fptr);
+          Il.emit e (Il.Pop (X86.rc X86.ecx));
+          Il.emit e (Il.Pop (X86.rc X86.ecx));
+          Il.emit e (Il.Pop (X86.rc X86.ecx));
+          Il.emit e (Il.Pop (X86.rc X86.ecx));
 
-    Il.emit e Il.Ret;
+          Il.emit e Il.Ret;
   in
 
   let text_segment =

@@ -1859,6 +1859,7 @@ public:
         {
 #if defined(__WIN32__)
             handle = (uintptr_t)LoadLibrary(_T(name));
+            // rt->win32_require(_T("LoadLibrary"), handle != 0);
 #else
             handle = (uintptr_t)dlopen(name, RTLD_LOCAL|RTLD_LAZY);
 #endif
@@ -1896,6 +1897,7 @@ public:
             uintptr_t handle = library->get_handle();
 #if defined(__WIN32__)
             val = (uintptr_t)GetProcAddress((HMODULE)handle, _T(name));
+            // rt->win32_require(_T("GetProcAddress"), val != 0);
 #else
             val = (uintptr_t)dlsym((void*)handle, name);
 #endif

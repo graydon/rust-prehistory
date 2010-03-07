@@ -98,13 +98,6 @@ type code =
 
 (* Helpers. *)
 
-let indirect_code_ptr fix =
-  (CodePtr
-     (Cell
-        (Mem (Abs (Asm.M_POS fix),
-                 ScalarTy (AddrTy CodeTy)))))
-;;
-
 let direct_code_ptr fix =
   (CodePtr (ImmPtr (fix, CodeTy)))
 ;;
@@ -114,7 +107,6 @@ let cell_referent_ty c =
       Reg (_, st) -> ScalarTy st
     | Mem (_, rt) -> rt
 ;;
-
 
 let cell_is_nil c =
   match c with
@@ -196,7 +188,7 @@ type cmp =
 type lea =
     {
       lea_dst: cell;
-      lea_src: mem
+      lea_src: operand
     }
 ;;
 
@@ -421,7 +413,7 @@ let process_quad (qp:quad_processor) (q:quad) : quad =
 
         | Lea le ->
             Lea { lea_dst = qp.qp_cell_write qp le.lea_dst;
-                  lea_src = qp.qp_mem qp le.lea_src }
+                  lea_src = qp.qp_op qp le.lea_src }
 
         | Cmp c ->
             Cmp { cmp_lhs = qp.qp_op qp c.cmp_lhs;
@@ -664,7 +656,7 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
     | Lea le ->
         Printf.sprintf "lea %s %s"
           (string_of_cell f le.lea_dst)
-          (string_of_mem f le.lea_src)
+          (string_of_operand f le.lea_src)
 
     | Jmp j ->
         Printf.sprintf "%s %s"
@@ -782,7 +774,7 @@ let jmp (op:jmpop) (targ:code) : quad' =
         jmp_targ = targ; }
 ;;
 
-let lea (dst:cell) (src:mem) : quad' =
+let lea (dst:cell) (src:operand) : quad' =
   Lea { lea_dst = dst;
         lea_src = src; }
 ;;
@@ -914,6 +906,10 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
       | (Call c, Call c') ->
           emit_quad (Call c');
           mov_if_cells_differ c.call_dst c'.call_dst
+
+      | (Lea lea, Lea lea') ->
+          emit_quad (Lea lea');
+          mov_if_cells_differ lea.lea_dst lea'.lea_dst
 
       | (x, y) ->
           assert (x = y);

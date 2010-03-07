@@ -105,49 +105,39 @@ type abi =
 
 let load_fixup_addr
     (e:Il.emitter)
-    (abi:abi)
     (out_reg:Il.reg)
     (fix:Common.fixup)
     (rty:Il.referent_ty)
     : unit =
-  let sty = Il.AddrTy rty in
-  match abi.abi_get_next_pc_thunk with
 
-      None ->
-        let cell = Il.Reg (out_reg, sty) in
-        let mem = Il.Abs (Asm.M_POS fix) in
-            Il.emit e (Il.lea cell mem);
-
-    | Some (reg, thunk_fix, _) ->
-        let signed_word_ty_mach =
-          match abi.abi_word_bits with
-              Il.Bits8 -> Common.TY_s8
-            | Il.Bits16 -> Common.TY_s16
-            | Il.Bits32 -> Common.TY_s32
-            | Il.Bits64 -> Common.TY_s64
-        in
-        let thunk_code = Il.direct_code_ptr thunk_fix in
-        let reg_cell = Il.Reg (reg, Il.AddrTy Il.CodeTy) in
-        let anchor_insn_fixup = Common.new_fixup "anchor insn" in
-        let fix_off = Il.Imm (Asm.SUB ((Asm.M_POS fix),
-                                       (Asm.M_POS anchor_insn_fixup)),
-                              signed_word_ty_mach)
-        in
-          (* This call retrieves the address of anchor_insn_fixup in reg. *)
-          Il.emit e (Il.call reg_cell thunk_code);
-
-          (* 
-           * We now have this instruction's address in reg. We add the distance 
-           * from this instruction to fix, and we will have fix addr in reg.
-           *)
-          Il.emit_full e (Some anchor_insn_fixup)
-            (Il.binary Il.ADD reg_cell (Il.Cell reg_cell) fix_off);
-
-          (* mov to the target if it's different from the reg wired into the thunk. *)
-          if not (reg = out_reg)
-          then Il.emit e (Il.umov (Il.Reg (out_reg, sty)) (Il.Cell (Il.Reg (reg, sty))))
+  let cell = Il.Reg (out_reg, Il.AddrTy rty) in
+  let op = Il.ImmPtr (fix, rty) in
+    Il.emit e (Il.lea cell op);
 ;;
 
+let load_fixup_codeptr
+    (e:Il.emitter)
+    (out_reg:Il.reg)
+    (fixup:Common.fixup)
+    (has_pcrel_code:bool)
+    (indirect:bool)
+    : Il.code =
+  if indirect
+  then
+    begin
+      load_fixup_addr e out_reg fixup (Il.ScalarTy (Il.AddrTy Il.CodeTy));
+      Il.CodePtr (Il.Cell (Il.Mem (Il.RegIn (out_reg, None),
+                                   Il.ScalarTy (Il.AddrTy Il.CodeTy))))
+    end
+  else
+    if has_pcrel_code
+    then (Il.CodePtr (Il.ImmPtr (fixup, Il.CodeTy)))
+    else
+      begin
+        load_fixup_addr e out_reg fixup Il.CodeTy;
+        Il.CodePtr (Il.Cell (Il.Reg (out_reg, Il.AddrTy Il.CodeTy)))
+      end
+;;
 
 
 (* 

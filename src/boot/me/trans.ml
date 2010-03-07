@@ -199,7 +199,7 @@ let trans_visitor
   in
 
   let lea (dst:Il.cell) (src:Il.mem) : unit =
-    emit (Il.lea dst src)
+    emit (Il.lea dst (Il.Cell (Il.Mem (src, Il.OpaqueTy))))
   in
 
   let ptr_at (mem:Il.mem) (pointee_ty:Ast.ty) : Il.cell =
@@ -731,7 +731,7 @@ let trans_visitor
     let crate_ptr_reg = next_vreg () in
     let crate_ptr_cell = Il.Reg (crate_ptr_reg, (Il.AddrTy Il.OpaqueTy)) in
       iflog (fun _ -> annotate "write frame-info pointers");
-      Abi.load_fixup_addr (emitter()) abi crate_ptr_reg cx.ctxt_crate_fixup Il.OpaqueTy;
+      Abi.load_fixup_addr (emitter()) crate_ptr_reg cx.ctxt_crate_fixup Il.OpaqueTy;
       mov (word_at (fp_imm frame_crate_ptr)) (Il.Cell (crate_ptr_cell));
       mov (word_at (fp_imm frame_fns_disp)) frame_fns
 

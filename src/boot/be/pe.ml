@@ -695,7 +695,6 @@ let pe_text_section
      * stack before returning.
      *)
     X86.objfile_start e
-      ~abi: sem.Semant.ctxt_abi
       ~start_fixup
       ~rust_start_fixup
       ~main_fn_fixup
