@@ -79,15 +79,34 @@ ifdef CFG_UNIXY
   CFG_OBJ_SUFFIX := .o
   CFG_RUN_TARG = LD_LIBRARY_PATH=. $(CFG_VALGRIND) $(1)
   CFG_GCC := 1
+  ifdef MINGW_CROSS
+    CFG_INFO := $(info cfg: mingw-cross)
+    CFG_GCC_CROSS := i586-mingw32msvc-
+    CFG_BOOT += -t win32-x86-pe
+    CFG_RUNTIME := rustrt.dll
+    CFG_STDLIB := std.dll
+    CFG_COMPILER := ./rustc.exe
+    ifdef CFG_VALGRIND
+      CFG_VALGRIND += wine
+    endif
+    CFG_OBJ_SUFFIX := .o
+    CFG_EXE_SUFFIX := .exe
+    CFG_GCC_COMPILE_FLAGS :=
+    CFG_GCC_LINK_FLAGS := -shared
+    ifeq ($(CFG_CPUTYPE), x86_64)
+      CFG_GCC_COMPILE_FLAGS += -m32
+      CFG_GCC_LINK_FLAGS += -m32
+    endif
+  endif
 endif
 
 ifdef CFG_GCC
   CFG_INFO := $(info cfg: using gcc)
   CFG_GCC_COMPILE_FLAGS += -Wall -Werror -fno-rtti -fno-exceptions -g
   CFG_GCC_LINK_FLAGS += -g
-  CFG_COMPILE_C = g++ $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
-  CFG_LINK_C = g++ $(CFG_GCC_LINK_FLAGS) -o $(1)
-  CFG_DEPEND_C = g++ -MT "$(1)" -MM $(2)
+  CFG_COMPILE_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
+  CFG_LINK_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_LINK_FLAGS) -o $(1)
+  CFG_DEPEND_C = $(CFG_GCC_CROSS)g++ -MT "$(1)" -MM $(2)
 else
   CFG_ERR := $(error please try on a system with gcc)
 endif

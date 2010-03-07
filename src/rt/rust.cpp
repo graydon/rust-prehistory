@@ -2444,7 +2444,7 @@ rust_rt::rust_rt(rust_srv *srv, rust_crate const *root_crate) :
         HCRYPTPROV hProv;
         win32_require
             (_T("CryptAcquireContext"),
-             CryptAcquireContext(&hProv, NULL, NULL, PROV_DSS,
+             CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_FULL,
                                  CRYPT_VERIFYCONTEXT|CRYPT_SILENT));
         win32_require
             (_T("CryptGenRandom"),
