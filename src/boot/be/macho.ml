@@ -910,7 +910,7 @@ let emit_file
   let objfile_start e =
     let edx = X86.h X86.edx in
     let edx_pointee =
-      Il.Mem ((Il.RegIn (edx, None)), Il.OpaqueTy)
+      Il.Mem ((Il.RegIn (edx, None)), Il.ScalarTy (Il.AddrTy Il.OpaqueTy))
     in
       Il.emit_full e (Some start_fixup) Il.Dead;
 
