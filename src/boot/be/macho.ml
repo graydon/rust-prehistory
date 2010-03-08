@@ -653,7 +653,6 @@ let emit_file
 
   (* Sections in the text segment. *)
   let text_section_fixup = new_fixup "__text section" in
-  let text_section = def_aligned text_sect_align text_section_fixup code in
 
   (* Sections in the data segment. *)
   let data_section_fixup = new_fixup "__data section" in
@@ -935,10 +934,10 @@ let emit_file
       Il.emit e (Il.umov edx_pointee (X86.ro X86.ecx));
 
     (* Calculte and store envp. *)
-      Abi.load_fixup_addr e edx environ_fixup Il.OpaqueTy;
       Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM 1L)));
       Il.emit e (Il.binary Il.UMUL (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM X86.word_sz)));
       Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.ro X86.ecx));
+      Abi.load_fixup_addr e edx environ_fixup Il.OpaqueTy;
       Il.emit e (Il.umov edx_pointee (X86.ro X86.eax));
 
     (* Push 16 bytes to preserve SSE alignment. *)
@@ -962,13 +961,23 @@ let emit_file
           Il.emit e Il.Ret;
   in
 
+  let text_section =
+    let start_code =
+      let e = X86.new_emitter () in
+        objfile_start e;
+        X86.frags_of_emitted_quads sess e
+    in
+      def_aligned text_sect_align text_section_fixup 
+        (SEQ [|
+           start_code;
+           code
+         |])
+  in
+
   let text_segment =
-    let e = X86.new_emitter () in
-      objfile_start e;
       def_aligned seg_align text_segment_fixup
         (SEQ [|
            DEF (mh_execute_header_fixup, header_and_commands);
-           X86.frags_of_emitted_quads sess e;
            text_section;
            align_both seg_align MARK;
          |]);
