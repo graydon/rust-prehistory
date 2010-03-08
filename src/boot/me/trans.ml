@@ -1244,7 +1244,7 @@ let trans_visitor
 
   and trans_native_thunk
       (nabi:Abi.nabi)
-      (lib:native_import_lib)
+      (lib:import_lib)
       (name:string)
       (ret:Il.cell)
       (args:Il.operand array)
@@ -1253,7 +1253,7 @@ let trans_visitor
       ret nabi (Semant.import_native cx lib name) args;
 
   and upcall_fixup (name:string) : fixup =
-    Semant.import_native cx NATIVE_LIB_rustrt name;
+    Semant.import_native cx IMPORT_LIB_rustrt name;
 
   and trans_upcall
       (name:string)
@@ -3043,41 +3043,48 @@ let trans_visitor
     trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
     let ilib = Hashtbl.find cx.ctxt_imported_items fnid in
-    let path_elts = stk_elts_from_bot path in
     let lib_num =
       htab_search_or_add cx.ctxt_import_lib_num ilib
         (fun _ -> Hashtbl.length cx.ctxt_import_lib_num)
     in
-    let c_sym_num =
-      htab_search_or_add cx.ctxt_import_c_sym_num (ilib, "rust_crate")
-        (fun _ -> Hashtbl.length cx.ctxt_import_c_sym_num)
-    in
-    let rust_sym_num =
-      htab_search_or_add cx.ctxt_import_rust_sym_num fnid
-        (fun _ -> Hashtbl.length cx.ctxt_import_rust_sym_num)
-    in
-      assert (ilib.import_prefix < (List.length path_elts));
-      let relative_path_elts = list_drop ilib.import_prefix path_elts in
-      let libstr = trans_static_string ilib.import_libname in
-      let relpath = trans_static_name_components relative_path_elts in
-      let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
-        trans_upcall "upcall_import_rust_sym" f [| Il.Cell (curr_crate_ptr());
-                                                   imm (Int64.of_int lib_num);
-                                                   imm (Int64.of_int c_sym_num);
-                                                   imm (Int64.of_int rust_sym_num);
-                                                   libstr;
-                                                   relpath |];
-        let args_rty = direct_call_args_referent_type cx fnid in
-        let caller_args_cell = caller_args_cell args_rty in
-        let callee_args_cell = callee_args_cell false args_rty in
-        let (dst_reg, _) = force_to_reg (Il.Cell (alias callee_args_cell)) in
-        let (src_reg, _) = force_to_reg (Il.Cell (alias caller_args_cell)) in
-        let tmp_reg = next_vreg () in
-        let nbytes = Il.referent_ty_size word_bits args_rty in
-          abi.Abi.abi_emit_inline_memcpy (emitter()) nbytes dst_reg src_reg tmp_reg false;
-          call_code (code_of_operand (Il.Cell f));
-          emit Il.Leave;
-          trans_frame_exit fnid false;
+    let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
+      begin
+        match ilib with
+            IMPORT_LIB_rust ls ->
+              begin
+                let c_sym_num =
+                  htab_search_or_add cx.ctxt_import_c_sym_num (ilib, "rust_crate")
+                    (fun _ -> Hashtbl.length cx.ctxt_import_c_sym_num)
+                in
+                let rust_sym_num =
+                  htab_search_or_add cx.ctxt_import_rust_sym_num fnid
+                    (fun _ -> Hashtbl.length cx.ctxt_import_rust_sym_num)
+                in
+                let path_elts = stk_elts_from_bot path in
+                let _ = assert (ls.import_prefix < (List.length path_elts)) in
+                let relative_path_elts = list_drop ls.import_prefix path_elts in
+                let libstr = trans_static_string ls.import_libname in
+                let relpath = trans_static_name_components relative_path_elts in
+                  trans_upcall "upcall_import_rust_sym" f [| Il.Cell (curr_crate_ptr());
+                                                             imm (Int64.of_int lib_num);
+                                                             imm (Int64.of_int c_sym_num);
+                                                             imm (Int64.of_int rust_sym_num);
+                                                             libstr;
+                                                             relpath |];
+              end
+          | _ -> bug () "Trans.imported_rust_fn on non-rust import library"
+      end;
+      let args_rty = direct_call_args_referent_type cx fnid in
+      let caller_args_cell = caller_args_cell args_rty in
+      let callee_args_cell = callee_args_cell false args_rty in
+      let (dst_reg, _) = force_to_reg (Il.Cell (alias callee_args_cell)) in
+      let (src_reg, _) = force_to_reg (Il.Cell (alias caller_args_cell)) in
+      let tmp_reg = next_vreg () in
+      let nbytes = Il.referent_ty_size word_bits args_rty in
+        abi.Abi.abi_emit_inline_memcpy (emitter()) nbytes dst_reg src_reg tmp_reg false;
+        call_code (code_of_operand (Il.Cell f));
+        emit Il.Leave;
+        trans_frame_exit fnid false;
   in
 
   let trans_tag
@@ -3132,8 +3139,8 @@ let trans_visitor
       *)
     let lib =
       match nabi.Abi.nabi_convention with
-          Abi.CONV_rust -> NATIVE_LIB_rustrt
-        | Abi.CONV_cdecl -> NATIVE_LIB_c
+          Abi.CONV_rust -> IMPORT_LIB_rustrt
+        | Abi.CONV_cdecl -> IMPORT_LIB_crt
     in
 
     let name = item_name cx fnid in

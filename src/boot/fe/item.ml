@@ -691,8 +691,8 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             *)
             let bpos = lexpos ps in
               expect ps SEMI;
-              let ilib = { import_libname = path;
-                           import_prefix = ps.pstate_depth }
+              let ilib = IMPORT_LIB_rust { import_libname = path;
+                                           import_prefix = ps.pstate_depth }
               in
               let tmod = ps.pstate_get_ty_mod path in
                 iflog ps

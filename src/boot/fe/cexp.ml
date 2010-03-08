@@ -381,8 +381,8 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         let ps = env.env_ps in
         let name = eval_cexp_to_ident env u.use_name in
         let filename = ps.pstate_infer_lib_name name in
-        let ilib = { import_libname = filename;
-                     import_prefix = 1 }
+        let ilib = IMPORT_LIB_rust { import_libname = filename;
+                                     import_prefix = 1 }
         in
         let tmod = ps.pstate_get_ty_mod filename in
           iflog ps

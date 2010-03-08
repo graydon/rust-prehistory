@@ -138,7 +138,7 @@ type ctxt =
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
 
-      ctxt_native_imports: (native_import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_native_imports: (import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
       ctxt_native_exports: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
 
       ctxt_import_rust_sym_num: (node_id, int) Hashtbl.t;
@@ -317,7 +317,7 @@ let get_spill (cx:ctxt) (id:node_id) : fixup =
   else bugi cx id "missing spill fixup"
 ;;
 
-let import_native (cx:ctxt) (lib:native_import_lib) (name:string) : fixup =
+let import_native (cx:ctxt) (lib:import_lib) (name:string) : fixup =
   let lib_tab = (htab_search_or_add cx.ctxt_native_imports lib
                    (fun _ -> Hashtbl.create 0))
   in

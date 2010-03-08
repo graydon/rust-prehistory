@@ -86,16 +86,18 @@ let bug _ =
   in Printf.ksprintf k
 ;;
 
-type native_import_lib =
-    NATIVE_LIB_rustrt
-  | NATIVE_LIB_c
-;;
-
-type import_lib =
+type import_lib_spec =
     {
       import_libname: string;
       import_prefix: int;
     }
+;;
+
+type import_lib =
+    IMPORT_LIB_rustrt
+  | IMPORT_LIB_crt
+  | IMPORT_LIB_rust of import_lib_spec
+  | IMPORT_LIB_c of import_lib_spec
 ;;
 
 type segment =

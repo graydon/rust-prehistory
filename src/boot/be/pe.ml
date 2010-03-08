@@ -724,8 +724,10 @@ let rustrt_imports sem =
     {
       pe_import_dll_name_fixup = new_fixup "dll name";
       pe_import_dll_name = (match lib with
-                                NATIVE_LIB_rustrt -> "rustrt.dll"
-                              | NATIVE_LIB_c -> "msvcrt.dll");
+                                IMPORT_LIB_rustrt -> "rustrt.dll"
+                              | IMPORT_LIB_crt -> "msvcrt.dll"
+                              | IMPORT_LIB_rust ls
+                              | IMPORT_LIB_c ls -> ls.import_libname);
       pe_import_dll_ILT_fixup = new_fixup "dll ILT";
       pe_import_dll_IAT_fixup = new_fixup "dll IAT";
       pe_import_dll_imports =
@@ -787,7 +789,7 @@ let emit_file
   let symtab_fixup = new_fixup "symbol table" in
   let strtab_fixup = new_fixup "string table" in
 
-  let rust_start_fixup = Semant.import_native sem NATIVE_LIB_rustrt "rust_start" in
+  let rust_start_fixup = Semant.import_native sem IMPORT_LIB_rustrt "rust_start" in
 
   let header = (pe_header
                   ~machine: IMAGE_FILE_MACHINE_I386
