@@ -369,6 +369,7 @@ let rec i64_for_rev (hi:int64) (lo:int64) (thunk:int64 -> unit) : unit =
  * Local Variables:
  * fill-column: 70;
  * indent-tabs-mode: nil
+ * buffer-file-coding-system: utf-8-unix
  * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)
