@@ -603,7 +603,8 @@ let emit_native_call
 
   let (tmp1, _) = vreg e in
   let (tmp2, _) = vreg e in
-  let callee = Abi.load_fixup_codeptr e (h eax) fn true nabi.Abi.nabi_indirect in
+  let (freg, _) = vreg e in
+  let callee = Abi.load_fixup_codeptr e freg fn true nabi.Abi.nabi_indirect in
     emit_c_call e ret tmp1 tmp2 nabi false callee args
 ;;
 
@@ -635,8 +636,11 @@ let emit_native_call_in_thunk
            * NB: old path, remove when/if you're sure you don't
            * want native-linker-symbol-driven imports.
            *)
-          Il.ImmPtr _ ->
-            emit_c_call e (rc eax) (h edx) (h ecx) nabi false (Il.CodePtr fn) args;
+          Il.ImmPtr (fix, _) ->
+            let code =
+              Abi.load_fixup_codeptr e (h eax) fix true nabi.Abi.nabi_indirect
+            in
+              emit_c_call e (rc eax) (h edx) (h ecx) nabi false code args;
 
         | _ ->
             (* 
