@@ -161,7 +161,6 @@ and parse_ty_params (ps:pstate) : Ast.ident array =
     | _ -> arr []
 
 and parse_ident_and_params (ps:pstate) (cstr:string) : (Ast.ident * Ast.ident array) =
-    bump ps;
   let ident = ctxt ("mod " ^ cstr ^ " item: ident") parse_ident ps in
   let params = ctxt ("mod " ^ cstr ^ " item: type params") parse_ty_params ps in
     (ident, params)
@@ -247,6 +246,7 @@ and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
           begin
             let (ident_and_params, ty) = parse_ty_fn false ps in
             let (ident, params) = need_ident_and_params ident_and_params in
+              expect ps SEMI;
               (ident, (Ast.MOD_TYPE_ITEM_fn (decl params ty)))
           end
 
@@ -255,11 +255,13 @@ and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
           expect ps TYPE;
           let (ident, params) = parse_ident_and_params ps "type pub type" in
           let t = parse_ty ps in
+            expect ps SEMI;
             (ident, (Ast.MOD_TYPE_ITEM_public_type (decl params t)))
 
       | TYPE ->
           bump ps;
           let (ident, params) = parse_ident_and_params ps "type type" in
+            expect ps SEMI;
             (ident, (Ast.MOD_TYPE_ITEM_opaque_type (decl params Ast.IMMUTABLE)))
 
       (* FIXME: parse ty_pred. *)
@@ -270,10 +272,10 @@ and parse_mod_ty_items (ps:pstate) : Ast.mod_type_items =
       expect ps LBRACE;
       while not (peek ps = RBRACE)
       do
-        let (ident, mti) = parse_mod_ty_item ps in
+        let (ident, mti) = ctxt "mod ty items: mod ty item" parse_mod_ty_item ps in
           Hashtbl.add mtis ident mti;
-          expect ps SEMI;
       done;
+      expect ps RBRACE;
       mtis
 
 and parse_atomic_ty (ps:pstate) : Ast.ty =

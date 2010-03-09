@@ -408,7 +408,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
             expect ps SEMI;
             spans ps stmts apos (Ast.STMT_join lval)
 
-      | MOD | TYPE | (FN _) | PRED | USE ->
+      | MOD | TYPE | (FN _) | PRED | USE | NATIVE ->
           let (ident, item) = ctxt "stmt: decl" parse_mod_item ps in
           let decl = Ast.DECL_mod_item (ident, item) in
           let stmts = expand_tags_to_stmts ps item in
@@ -608,6 +608,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
     match peek ps with
 
         FN proto_opt ->
+          bump ps;
           let (ident, params) = Pexp.parse_ident_and_params ps "fn" in
           let fn = ctxt "mod fn item: fn" (parse_fn proto_opt pure) ps in
           let
@@ -618,6 +619,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             (ident, span ps apos bpos (Ast.MOD_ITEM_fn decl))
 
       | PRED ->
+          bump ps;
           let (ident, params) = Pexp.parse_ident_and_params ps "pred" in
           let pred = ctxt "mod pred item: pred" parse_pred ps in
           let
@@ -628,6 +630,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             (ident, span ps apos bpos (Ast.MOD_ITEM_pred decl))
 
       | TYPE ->
+          bump ps;
           let (ident, params) = Pexp.parse_ident_and_params ps "type" in
           let _ = expect ps EQ in
           let ty = ctxt "mod type item: ty" Pexp.parse_ty ps in
@@ -644,6 +647,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             (ident, span ps apos bpos item)
 
       | MOD ->
+          bump ps;
           let (ident, params) = Pexp.parse_ident_and_params ps "mod" in
           let hdr =
             begin
@@ -663,10 +667,35 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             in
               (ident, span ps apos bpos (Ast.MOD_ITEM_mod decl))
 
+      | NATIVE ->
+          begin
+            bump ps;
+            expect ps MOD;
+            (* FIXME: probably handle this manually, to support optional pathname. *)
+            let (ident_and_params, tmod) = Pexp.parse_ty_mod ps in
+            let (ident, params) =
+              match ident_and_params with
+                  None -> raise (Parse_err (ps, "native mod without name"))
+                | Some (ident, params) -> (ident, params)
+            in
+            let path = ps.pstate_infer_lib_name ident in
+            let bpos = lexpos ps in
+            let ilib = IMPORT_LIB_c { import_libname = path;
+                                      import_prefix = ps.pstate_depth }
+            in
+            let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = params;
+                                             Ast.decl_item = tmod}
+            in
+            let item' = expand_imported_mod ps {lo=apos; hi=bpos} ilib mti in
+            let item = span ps apos bpos item' in
+              htab_put ps.pstate_imported item.id ilib;
+              (ident, item)
+          end
+
       | USE ->
           begin
             bump ps;
-            let name = ctxt "use mod: name" Pexp.parse_ident ps in
+            let ident = ctxt "use mod: ident" Pexp.parse_ident ps in
             let path =
               match peek ps with
                   EQ ->
@@ -676,7 +705,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                           LIT_STR s -> (bump ps; s)
                         | _ -> raise (unexpected ps)
                     end
-                | _ -> ps.pstate_infer_lib_name name
+                | _ -> ps.pstate_infer_lib_name ident
             in
             (*
             let meta = [| |] in
@@ -690,7 +719,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                 iflog ps
                   begin
                     fun _ ->
-                      log ps "extracted mod type from %s (binding to %s)" path name;
+                      log ps "extracted mod type from %s (binding to %s)" path ident;
                       log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
                   end;
                 let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
@@ -699,7 +728,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                 let item' = expand_imported_mod ps {lo=apos; hi=bpos} ilib mti in
                 let item = span ps apos bpos item' in
                   htab_put ps.pstate_imported item.id ilib;
-                  (name, item)
+                  (ident, item)
           end
 
 
