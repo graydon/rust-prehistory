@@ -605,6 +605,18 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
       | MUTABLE -> Ast.IMPURE Ast.MUTABLE
       | _ -> Ast.IMPURE Ast.IMMUTABLE
   in
+  let parse_lib_name ident =
+    match peek ps with
+        EQ ->
+          begin
+            bump ps;
+            match peek ps with
+                LIT_STR s -> (bump ps; s)
+              | _ -> raise (unexpected ps)
+          end
+      | _ -> ps.pstate_infer_lib_name ident
+  in
+
     match peek ps with
 
         FN proto_opt ->
@@ -671,14 +683,10 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
           begin
             bump ps;
             expect ps MOD;
-            (* FIXME: probably handle this manually, to support optional pathname. *)
-            let (ident_and_params, tmod) = Pexp.parse_ty_mod ps in
-            let (ident, params) =
-              match ident_and_params with
-                  None -> raise (Parse_err (ps, "native mod without name"))
-                | Some (ident, params) -> (ident, params)
-            in
-            let path = ps.pstate_infer_lib_name ident in
+            let (ident, params) = Pexp.parse_ident_and_params ps "native mod" in
+            let path = parse_lib_name ident in
+            let items = Pexp.parse_mod_ty_items ps in
+            let tmod = (None, items) in
             let bpos = lexpos ps in
             let ilib = IMPORT_LIB_c { import_libname = path;
                                       import_prefix = ps.pstate_depth }
@@ -696,17 +704,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
           begin
             bump ps;
             let ident = ctxt "use mod: ident" Pexp.parse_ident ps in
-            let path =
-              match peek ps with
-                  EQ ->
-                    begin
-                      bump ps;
-                      match peek ps with
-                          LIT_STR s -> (bump ps; s)
-                        | _ -> raise (unexpected ps)
-                    end
-                | _ -> ps.pstate_infer_lib_name ident
-            in
+            let path = parse_lib_name ident in
             (*
             let meta = [| |] in
             *)

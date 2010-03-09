@@ -513,7 +513,7 @@ let emit_c_call
     (tmp2:Il.reg)
     (nabi:Abi.nabi)
     (in_prologue:bool)
-    (fn:fixup)
+    (fptr:Il.code)
     (args:Il.operand array)
     : unit =
 
@@ -554,36 +554,33 @@ let emit_c_call
                            mov (word_n (h esp) i) arg)
                   args;
 
-      let fptr = Abi.load_fixup_codeptr e (h eax) fn true nabi.Abi.nabi_indirect in
-        begin
-          match ret with
-              Il.Mem (Il.RegIn (Il.Hreg base, _), _) when base == esp ->
-                assert (not in_prologue);
-                (* If ret is esp-relative, use a temporary register until we switched stacks. *)
-                emit (Il.call (r tmp1) fptr);
-                mov (r tmp2) (c proc_ptr);
-                mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
-                mov ret (c (r tmp1));
+    match ret with
+        Il.Mem (Il.RegIn (Il.Hreg base, _), _) when base == esp ->
+          assert (not in_prologue);
+          (* If ret is esp-relative, use a temporary register until we switched stacks. *)
+          emit (Il.call (r tmp1) fptr);
+          mov (r tmp2) (c proc_ptr);
+          mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
+          mov ret (c (r tmp1));
 
-            | _ when in_prologue ->
-                (* 
-                 * We have to do something a little surprising here:
-                 * we're doing a 'grow' call so ebp is going to point
-                 * into a dead stack frame on call-return. So we
-                 * temporarily store proc-ptr into ebp and then reload
-                 * esp *and* ebp via ebp->rust_sp on the other side of
-                 * the call. 
-                 *)
-                mov (rc ebp) (c proc_ptr);
-                emit (Il.call ret fptr);
-                mov (rc esp) (c (word_n (h ebp) Abi.proc_field_rust_sp));
-                mov (rc ebp) (ro esp);
+      | _ when in_prologue ->
+          (* 
+           * We have to do something a little surprising here:
+           * we're doing a 'grow' call so ebp is going to point
+           * into a dead stack frame on call-return. So we
+           * temporarily store proc-ptr into ebp and then reload
+           * esp *and* ebp via ebp->rust_sp on the other side of
+           * the call. 
+           *)
+          mov (rc ebp) (c proc_ptr);
+          emit (Il.call ret fptr);
+          mov (rc esp) (c (word_n (h ebp) Abi.proc_field_rust_sp));
+          mov (rc ebp) (ro esp);
 
-            | _ ->
-                emit (Il.call ret fptr);
-                mov (r tmp2) (c proc_ptr);
-                mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
-        end
+      | _ ->
+          emit (Il.call ret fptr);
+          mov (r tmp2) (c proc_ptr);
+          mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
 ;;
 
 let emit_void_prologue_call
@@ -592,7 +589,8 @@ let emit_void_prologue_call
     (fn:fixup)
     (args:Il.operand array)
     : unit =
-    emit_c_call e (rc eax) (h edx) (h ecx) nabi true fn args
+  let callee = Abi.load_fixup_codeptr e (h eax) fn true nabi.Abi.nabi_indirect in
+    emit_c_call e (rc eax) (h edx) (h ecx) nabi true callee args
 ;;
 
 let emit_native_call
@@ -605,7 +603,8 @@ let emit_native_call
 
   let (tmp1, _) = vreg e in
   let (tmp2, _) = vreg e in
-    emit_c_call e ret tmp1 tmp2 nabi false fn args
+  let callee = Abi.load_fixup_codeptr e (h eax) fn true nabi.Abi.nabi_indirect in
+    emit_c_call e ret tmp1 tmp2 nabi false callee args
 ;;
 
 let emit_native_void_call
@@ -623,14 +622,33 @@ let emit_native_call_in_thunk
     (e:Il.emitter)
     (ret:Il.cell)
     (nabi:Abi.nabi)
-    (fn:fixup)
+    (fn:Il.operand)
     (args:Il.operand array)
     : unit =
 
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    emit_c_call e (rc eax) (h edx) (h ecx) nabi false fn args;
+    begin
+      match fn with
+          (* 
+           * NB: old path, remove when/if you're sure you don't
+           * want native-linker-symbol-driven imports.
+           *)
+          Il.ImmPtr _ ->
+            emit_c_call e (rc eax) (h edx) (h ecx) nabi false (Il.CodePtr fn) args;
+
+        | _ ->
+            (* 
+             * NB: new path, ignores nabi_indirect, assumes
+             * indirect via pointer from upcall_import_c_sym
+             * or crate cache.
+             *)
+            mov (rc eax) fn;
+            let cell = Il.Reg (h eax, Il.AddrTy Il.CodeTy) in
+            let fptr = Il.CodePtr (Il.Cell cell) in
+              emit_c_call e (rc eax) (h edx) (h ecx) nabi false fptr args;
+    end;
 
     match ret with
         Il.Reg (r, _) -> mov (word_at r) (ro eax)
@@ -693,7 +711,8 @@ let unwind_glue
     (* exit path. *)
     mark exit_jmp_fix;
 
-    emit_native_call_in_thunk e (rc eax) nabi exit_proc_fixup [| (c proc_ptr) |];
+    let callee = Abi.load_fixup_codeptr e (h eax) exit_proc_fixup false nabi.Abi.nabi_indirect in
+      emit_c_call e (rc eax) (h edx) (h ecx) nabi false callee [| (c proc_ptr) |];
 ;;
 
 

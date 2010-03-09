@@ -84,7 +84,7 @@ type abi =
 
     abi_emit_native_call: (Il.emitter -> Il.cell -> nabi -> Common.fixup -> Il.operand array -> unit);
     abi_emit_native_void_call: (Il.emitter -> nabi -> Common.fixup -> Il.operand array -> unit);
-    abi_emit_native_call_in_thunk: (Il.emitter -> Il.cell -> nabi -> Common.fixup -> Il.operand array -> unit);
+    abi_emit_native_call_in_thunk: (Il.emitter -> Il.cell -> nabi -> Il.operand -> Il.operand array -> unit);
     abi_emit_inline_memcpy: (Il.emitter -> int64 -> Il.reg -> Il.reg -> Il.reg -> bool -> unit);
 
     (* Global glue. *)

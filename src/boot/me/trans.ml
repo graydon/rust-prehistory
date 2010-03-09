@@ -97,9 +97,15 @@ let trans_visitor
           Linux_x86_elf -> false
         | _ -> true
   in
+
   let nabi_rust =
     { Abi.nabi_indirect = nabi_indirect;
       Abi.nabi_convention = Abi.CONV_rust }
+  in
+
+  let nabi_c =
+    { Abi.nabi_indirect = true;
+      Abi.nabi_convention = Abi.CONV_cdecl }
   in
 
   let out_mem_disp = abi.Abi.abi_frame_base_sz in
@@ -1249,8 +1255,9 @@ let trans_visitor
       (ret:Il.cell)
       (args:Il.operand array)
       : unit =
+
     abi.Abi.abi_emit_native_call_in_thunk (emitter())
-      ret nabi (Semant.import_native cx lib name) args;
+      ret nabi (Il.ImmPtr ((Semant.import_native cx lib name), Il.CodeTy)) args;
 
   and upcall_fixup (name:string) : fixup =
     Semant.import_native cx IMPORT_LIB_rustrt name;
@@ -3026,11 +3033,16 @@ let trans_visitor
     ignore (Stack.pop fns);
   in
 
+  let string_of_name_component (nc:Ast.name_component) : string =
+    match nc with
+        Ast.COMP_ident i -> i
+      | _ -> bug () "Trans.string_of_name_component on non-COMP_ident name component"
+  in
+
+
   let trans_static_name_components (ncs:Ast.name_component list) : Il.operand =
     let f nc =
-      match nc with
-          Ast.COMP_ident i -> trans_crate_rel_static_string_frag i
-        | _ -> bug () "unexpected static name component"
+      trans_crate_rel_static_string_frag (string_of_name_component nc)
     in
       trans_crate_rel_data_operand
         (DATA_name (Walk.name_of ncs))
@@ -3039,7 +3051,7 @@ let trans_visitor
                              [| Asm.WORD (word_ty_mach, Asm.IMM 0L) |]))
   in
 
-  let trans_imported_rust_fn (fnid:node_id) (blockid:node_id) : unit =
+  let trans_imported_fn (fnid:node_id) (blockid:node_id) : unit =
     trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
     let ilib = Hashtbl.find cx.ctxt_imported_items fnid in
@@ -3048,6 +3060,9 @@ let trans_visitor
         (fun _ -> Hashtbl.length cx.ctxt_import_lib_num)
     in
     let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
+    let args_rty = direct_call_args_referent_type cx fnid in
+    let caller_args_cell = caller_args_cell args_rty in
+    let callee_args_cell = callee_args_cell false args_rty in
       begin
         match ilib with
             IMPORT_LIB_rust ls ->
@@ -3071,18 +3086,58 @@ let trans_visitor
                                                              imm (Int64.of_int rust_sym_num);
                                                              libstr;
                                                              relpath |];
+
+                  let (dst_reg, _) = force_to_reg (Il.Cell (alias callee_args_cell)) in
+                  let (src_reg, _) = force_to_reg (Il.Cell (alias caller_args_cell)) in
+                  let tmp_reg = next_vreg () in
+                  let nbytes = Il.referent_ty_size word_bits args_rty in
+                    abi.Abi.abi_emit_inline_memcpy (emitter()) nbytes dst_reg src_reg tmp_reg false;
+                    call_code (code_of_operand (Il.Cell f));
               end
-          | _ -> bug () "Trans.imported_rust_fn on non-rust import library"
+
+          | IMPORT_LIB_c ls ->
+              begin
+                let c_sym_str = string_of_name_component (Stack.top path) in
+                let c_sym_num =
+                  (* FIXME: permit remapping symbol names to handle mangled variants. *)
+                  htab_search_or_add cx.ctxt_import_c_sym_num (ilib, c_sym_str)
+                    (fun _ -> Hashtbl.length cx.ctxt_import_c_sym_num)
+                in
+                let libstr = trans_static_string ls.import_libname in
+                let symstr = trans_static_string c_sym_str in
+                let check_rty_sz rty =
+                  if Il.referent_ty_size word_bits rty = word_sz
+                  then ()
+                  else bug () "unsupported non-word-size arg or ret cell used with native import"
+                in
+                let ret = get_element_ptr caller_args_cell 0 in
+                let _ = check_rty_sz (pointee_type ret) in
+                let args =
+                  let args_cell = get_element_ptr caller_args_cell 2 in
+                  let n_args =
+                    match args_cell with
+                        Il.Mem (_, Il.StructTy elts) -> Array.length elts
+                      | _ -> bug () "non-StructTy in Trans.trans_imported_fn"
+                  in
+                  let mk_arg i =
+                    let arg = get_element_ptr args_cell i in
+                    let _ = check_rty_sz (Il.cell_referent_ty arg) in
+                      Il.Cell arg
+                  in
+                    Array.init n_args mk_arg
+                in
+                  trans_upcall "upcall_import_c_sym" f [| Il.Cell (curr_crate_ptr());
+                                                          imm (Int64.of_int lib_num);
+                                                          imm (Int64.of_int c_sym_num);
+                                                          libstr;
+                                                          symstr |];
+
+                  abi.Abi.abi_emit_native_call_in_thunk (emitter())
+                    ret nabi_c (Il.Cell f) args;
+              end
+
+          | _ -> bug () "Trans.imported_rust_fn on unexpected form of import library"
       end;
-      let args_rty = direct_call_args_referent_type cx fnid in
-      let caller_args_cell = caller_args_cell args_rty in
-      let callee_args_cell = callee_args_cell false args_rty in
-      let (dst_reg, _) = force_to_reg (Il.Cell (alias callee_args_cell)) in
-      let (src_reg, _) = force_to_reg (Il.Cell (alias caller_args_cell)) in
-      let tmp_reg = next_vreg () in
-      let nbytes = Il.referent_ty_size word_bits args_rty in
-        abi.Abi.abi_emit_inline_memcpy (emitter()) nbytes dst_reg src_reg tmp_reg false;
-        call_code (code_of_operand (Il.Cell f));
         emit Il.Leave;
         trans_frame_exit fnid false;
   in
@@ -3241,7 +3296,7 @@ let trans_visitor
 
   let visit_imported_mod_item_pre _ _ i =
     match i.node with
-        Ast.MOD_ITEM_fn f -> trans_imported_rust_fn i.id f.Ast.decl_item.Ast.fn_body.id
+        Ast.MOD_ITEM_fn f -> trans_imported_fn i.id f.Ast.decl_item.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
       | _ -> bugi cx i.id "unsupported type of import: %s" (path_name())
   in

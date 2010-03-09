@@ -1872,11 +1872,13 @@ public:
 
         ~lib() {
             rt->log(LOG_LINK, "~rust_crate_cache::lib(0x%" PRIxPTR ")", handle);
+            if (handle) {
 #if defined(__WIN32__)
-            FreeLibrary((HMODULE)handle);
+                FreeLibrary((HMODULE)handle);
 #else
-            dlclose((void*)handle);
+                dlclose((void*)handle);
 #endif
+            }
         }
     };
 

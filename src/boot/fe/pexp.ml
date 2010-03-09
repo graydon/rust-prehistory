@@ -218,8 +218,8 @@ and parse_ty_mod (ps:pstate) : (((Ast.ident * Ast.ident array) option) * Ast.ty_
             Some (slots, constrs)
       | _ -> None
   in
-  let item = parse_mod_ty_items ps in
-    (ident_and_params, (hdr, item))
+  let items = parse_mod_ty_items ps in
+    (ident_and_params, (hdr, items))
 
 
 
