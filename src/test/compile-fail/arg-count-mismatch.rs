@@ -1,4 +1,4 @@
-// error-pattern: argument count
+// error-pattern: mismatched types
 
 fn f(int x) {
 }
