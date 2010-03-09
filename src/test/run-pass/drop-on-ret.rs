@@ -7,6 +7,6 @@ fn f() -> int {
   }
   ret 0;
 }
-fn main() -> () {
+fn main() {
   f();
 }

@@ -1,6 +1,6 @@
 // -*- C -*-
 
-fn main() -> () {
+fn main() {
   log "hello, world";
 }
 

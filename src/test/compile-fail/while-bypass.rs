@@ -8,6 +8,6 @@ fn f() -> int {
   ret x;
 }
 
-fn main() -> () {
+fn main() {
   f();
 }

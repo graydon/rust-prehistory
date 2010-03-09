@@ -1,6 +1,6 @@
 // -*- C -*-
 
-fn a(chan[int] c) -> () {
+fn a(chan[int] c) {
   if (true) {
     log "proc a";
     log "proc a";
@@ -22,7 +22,7 @@ fn g(int x, str y) -> int {
   ret z;
 }
 
-fn main() -> () {
+fn main() {
     let int n = 2 + 3 * 7;
     let str s = "hello there";
     let port[int] p = port();
@@ -37,7 +37,7 @@ fn main() -> () {
     log "children finished, root finishing";
 }
 
-fn b(chan[int] c) -> () {
+fn b(chan[int] c) {
   if (true) {
     log "proc b";
     log "proc b";

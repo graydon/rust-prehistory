@@ -147,34 +147,134 @@ and parse_constraint (ps:pstate) : Ast.constr =
 and parse_constrs (ps:pstate) : Ast.constrs =
   ctxt "state: constraints" (one_or_more COMMA parse_constraint) ps
 
-(* FIXME (bug 541578): parse constraints --
-     match peek ps with
-       COLON -> bump ps; parse_constrs ps
-     | _ -> [| |]
-   should do it *)
-and parse_fn_ty ((*pure*)_:bool) (ps:pstate) : Ast.ty =
+and parse_optional_trailing_constrs (ps:pstate) : Ast.constrs =
   match peek ps with
-      FN p ->
+      COLON -> (bump ps; parse_constrs ps)
+    | _ -> [| |]
+
+and parse_ty_param (ps:pstate) : Ast.ident = parse_ident ps
+
+and parse_ty_params (ps:pstate) : Ast.ident array =
+  match peek ps with
+      LBRACKET ->
+        bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) parse_ty_param ps
+    | _ -> arr []
+
+and parse_ident_and_params (ps:pstate) (cstr:string) : (Ast.ident * Ast.ident array) =
+    bump ps;
+  let ident = ctxt ("mod " ^ cstr ^ " item: ident") parse_ident ps in
+  let params = ctxt ("mod " ^ cstr ^ " item: type params") parse_ty_params ps in
+    (ident, params)
+
+
+and parse_ty_fn (pure:bool) (ps:pstate) : (((Ast.ident * Ast.ident array) option) * Ast.ty_fn) =
+  match peek ps with
+      FN proto ->
         bump ps;
-        let slots =
+        let ident_and_params =
+          match peek ps with
+              IDENT _ -> Some (parse_ident_and_params ps "fn type")
+            | _ -> None
+        in
+        let in_slots =
           match peek ps with
               NIL -> (bump ps; [| |])
-            | _ -> bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot true) ps
+            | _ ->
+                bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
+                  (parse_slot_and_optional_ignored_ident true) ps
         in
-          begin
-            match peek ps with
-                RARROW ->
-                  bump ps;
-                  let res_slot = parse_slot false ps in
-                    Ast.TY_fn ({ Ast.sig_input_slots = slots;
-                                 (* FIXME (bug 541578): parse input type constraints *)
-                                 Ast.sig_input_constrs = [| |];
-                                 Ast.sig_output_slot = res_slot; },
-                               { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
-                                 Ast.fn_proto = p; })
-              | _ -> raise (unexpected ps)
-          end
+        let out_slot =
+          match peek ps with
+              RARROW -> (bump ps; parse_slot false ps)
+            | _ -> slot_nil
+        in
+        let constrs = parse_optional_trailing_constrs ps in
+        let ty = ({ Ast.sig_input_slots = in_slots;
+                    Ast.sig_input_constrs = constrs;
+                    Ast.sig_output_slot = out_slot; },
+                  (* FIXME: parse purity more thoroughly. *)
+                  { Ast.fn_purity = (if pure
+                                     then Ast.PURE
+                                     else Ast.IMPURE Ast.IMMUTABLE);
+                    Ast.fn_proto = proto; })
+        in
+          (ident_and_params, ty)
+
     | _ -> raise (unexpected ps)
+
+
+and parse_ty_mod (ps:pstate) : (((Ast.ident * Ast.ident array) option) * Ast.ty_mod) =
+  let ident_and_params =
+    match peek ps with
+        IDENT _ -> Some (parse_ident_and_params ps "mod type")
+      | _ -> None
+  in
+  let hdr =
+    match peek ps with
+        LPAREN ->
+          let slots = (bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
+                         (parse_slot_and_optional_ignored_ident true) ps)
+          in
+          let constrs = parse_optional_trailing_constrs ps in
+            Some (slots, constrs)
+      | _ -> None
+  in
+  let item = parse_mod_ty_items ps in
+    (ident_and_params, (hdr, item))
+
+
+
+and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
+  let decl p i =
+    { Ast.decl_params = p;
+      Ast.decl_item = i }
+  in
+  let need_ident_and_params ni_opt =
+    match ni_opt with
+        None -> raise (Parse_err (ps, "item in mod type without name"))
+      | Some (ident, params) -> (ident, params)
+  in
+    match peek ps with
+        MOD ->
+          begin
+            bump ps;
+            let (ident_and_params, ty) = parse_ty_mod ps in
+            let (ident, params) = need_ident_and_params ident_and_params in
+              (ident, (Ast.MOD_TYPE_ITEM_mod (decl params ty)))
+          end
+
+      | FN _ ->
+          begin
+            let (ident_and_params, ty) = parse_ty_fn false ps in
+            let (ident, params) = need_ident_and_params ident_and_params in
+              (ident, (Ast.MOD_TYPE_ITEM_fn (decl params ty)))
+          end
+
+      | PUB ->
+          bump ps;
+          expect ps TYPE;
+          let (ident, params) = parse_ident_and_params ps "type pub type" in
+          let t = parse_ty ps in
+            (ident, (Ast.MOD_TYPE_ITEM_public_type (decl params t)))
+
+      | TYPE ->
+          bump ps;
+          let (ident, params) = parse_ident_and_params ps "type type" in
+            (ident, (Ast.MOD_TYPE_ITEM_opaque_type (decl params Ast.IMMUTABLE)))
+
+      (* FIXME: parse ty_pred. *)
+      | _ -> raise (unexpected ps)
+
+and parse_mod_ty_items (ps:pstate) : Ast.mod_type_items =
+    let mtis = Hashtbl.create 0 in
+      expect ps LBRACE;
+      while not (peek ps = RBRACE)
+      do
+        let (ident, mti) = parse_mod_ty_item ps in
+          Hashtbl.add mtis ident mti;
+          expect ps SEMI;
+      done;
+      mtis
 
 and parse_atomic_ty (ps:pstate) : Ast.ty =
   match peek ps with
@@ -263,11 +363,13 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
         bump ps;
         Ast.TY_mach m
 
-    | PURE -> (bump ps; parse_fn_ty true ps)
+    | PURE -> (bump ps; Ast.TY_fn (snd (parse_ty_fn true ps)))
 
-    | FN _ -> parse_fn_ty false ps
+    | FN _ -> Ast.TY_fn (snd (parse_ty_fn false ps))
 
-    (* FIXME (bug 541576): parse mod types. *)
+    | MOD ->
+        bump ps;
+        Ast.TY_mod (snd (parse_ty_mod ps))
 
     | _ -> raise (unexpected ps)
 
@@ -331,6 +433,17 @@ and parse_slot_and_ident
   let ident = ctxt "slot and ident: ident" parse_ident ps in
     (slot, ident)
 
+and parse_slot_and_optional_ignored_ident
+    (param_slot:bool)
+    (ps:pstate)
+    : Ast.slot =
+  let slot = parse_slot param_slot ps in
+    begin
+      match peek ps with
+          IDENT _ -> bump ps
+        | _ -> ()
+    end;
+    slot
 
 and parse_identified_slot (param_slot:bool) (ps:pstate) : Ast.slot identified =
   let apos = lexpos ps in

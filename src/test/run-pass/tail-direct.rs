@@ -1,6 +1,6 @@
 // -*- C -*-
 
-fn main() -> () {
+fn main() {
   check(even(42));
   check(odd(45));
 }

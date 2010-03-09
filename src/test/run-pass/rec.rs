@@ -2,14 +2,14 @@
 
 type rect = rec(int x, int y, int w, int h);
 
-fn f(rect r, int x, int y, int w, int h) -> () {
+fn f(rect r, int x, int y, int w, int h) {
   check (r.x == x);
   check (r.y == y);
   check (r.w == w);
   check (r.h == h);
 }
 
-fn main() -> () {
+fn main() {
   let rect r = rec(x=10, y=20, w=100, h=200);
   check (r.x == 10);
   check (r.y == 20);

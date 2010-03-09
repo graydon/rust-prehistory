@@ -1,6 +1,6 @@
 // -*- C++ -*-
 
-fn f() -> () {
+fn f() {
   let rec(int a, int b, int c, int d,
           int e, int f, int g, int h,
           int i, int j, int k, int l) foo =
@@ -9,6 +9,6 @@ fn f() -> () {
         i=0, j=0, k=0, l=0);
 }
 
-fn main() -> () {
+fn main() {
   f();
 }

@@ -1,5 +1,5 @@
 
-fn main() -> () {
+fn main() {
   auto s = "hello";
   let u8 c = s.(4);
   log c;

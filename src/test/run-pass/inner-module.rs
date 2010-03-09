@@ -2,16 +2,16 @@
 
 mod inner {
   mod inner2 {
-    fn hello() -> () {
+    fn hello() {
       log "hello, modular world";
     }
   }
-  fn hello() -> () {
+  fn hello() {
     inner2.hello();
   }
 }
 
-fn main() -> () {
+fn main() {
   inner.hello();
   inner.inner2.hello();
 }

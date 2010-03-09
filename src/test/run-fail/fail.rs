@@ -1,5 +1,5 @@
 // error-pattern:1 == 2
 
-fn main() -> () {
+fn main() {
    check (1 == 2);
 }

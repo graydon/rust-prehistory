@@ -1,6 +1,6 @@
 // error-pattern: mismatched types
 
-fn main() -> () {
+fn main() {
   log main;
 }
 

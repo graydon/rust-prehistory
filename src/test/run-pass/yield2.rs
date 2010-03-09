@@ -1,6 +1,6 @@
 // -*- C -*-
 
-fn main() -> () {
+fn main() {
   let int i = 0;
   while (i < 100) {
     i -= 1;

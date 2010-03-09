@@ -1,11 +1,11 @@
 // -*- C -*-
 
-fn x(str s, int n) -> () {
+fn x(str s, int n) {
   log s;
   log n;
 }
 
-fn main() -> () {
+fn main() {
   spawn x("hello from first spawned fn", 65);
   spawn x("hello from second spawned fn", 66);
   spawn x("hello from third spawned fn", 67);

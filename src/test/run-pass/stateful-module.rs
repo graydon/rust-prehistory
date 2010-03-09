@@ -5,7 +5,7 @@ mod counter(mutable int x) {
   fn hello() -> int {
     ret 12345;
   }
-  fn incr() -> () {
+  fn incr() {
     x = x + 1;
   }
   fn get() -> int {
@@ -13,7 +13,7 @@ mod counter(mutable int x) {
   }
 }
 
-fn main() -> () {
+fn main() {
   auto y = counter(0);
   check (y.hello() == 12345);
   log y.get();

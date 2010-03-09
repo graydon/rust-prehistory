@@ -1,6 +1,6 @@
 // -*- C -*-
 
-fn main() -> () {
+fn main() {
   let int x = 1;
   x *= 2;
   x += 3;

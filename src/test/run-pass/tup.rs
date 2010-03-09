@@ -2,12 +2,12 @@
 
 type point = (int, int);
 
-fn f(point p, int x, int y) -> () {
+fn f(point p, int x, int y) {
   check (p._0 == x);
   check (p._1 == y);
 }
 
-fn main() -> () {
+fn main() {
   let point p = (10, 20);
   check (p._0 == 10);
   check (p._1 == 20);

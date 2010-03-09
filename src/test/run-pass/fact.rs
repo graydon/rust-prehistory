@@ -14,7 +14,7 @@ fn f(int x) -> int {
     ret y;
   }
 }
-fn main () -> () {
+fn main () {
   check (f(5) == 120);
   // log "all done";
 }

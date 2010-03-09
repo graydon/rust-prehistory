@@ -562,8 +562,15 @@ and parse_in_and_out
     (ps:pstate)
     : ((Ast.slot identified * Ast.ident) array * Ast.constrs * Ast.slot identified) =
   let (inputs, constrs) = parse_inputs ps in
-  let _ = expect ps RARROW in
-  let output = ctxt "fn in and out: output slot" (Pexp.parse_identified_slot true) ps in
+  let output =
+    match peek ps with
+        RARROW ->
+          bump ps;
+          ctxt "fn in and out: output slot" (Pexp.parse_identified_slot true) ps
+      | _ ->
+          let apos = lexpos ps in
+            span ps apos apos slot_nil
+  in
     (inputs, constrs, output)
 
 
@@ -589,14 +596,6 @@ and parse_pred (ps:pstate) : Ast.pred =
       Ast.pred_input_constrs = constrs;
       Ast.pred_body = body }
 
-and parse_ty_param (ps:pstate) : Ast.ident = Pexp.parse_ident ps
-
-and parse_ty_params (ps:pstate) : Ast.ident array =
-  match peek ps with
-      LBRACKET ->
-        bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) parse_ty_param ps
-    | _ -> arr []
-
 and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
   let apos = lexpos ps in
   let public = Pexp.flag ps PUB in
@@ -606,17 +605,10 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
       | MUTABLE -> Ast.IMPURE Ast.MUTABLE
       | _ -> Ast.IMPURE Ast.IMMUTABLE
   in
-  let parse_ident_and_params item =
-    bump ps;
-    let ident = ctxt ("mod " ^ item ^ " item: ident") Pexp.parse_ident ps in
-    let params = ctxt ("mod " ^ item ^ " item: type params") parse_ty_params ps in
-      (ident, params)
-  in
-
     match peek ps with
 
         FN proto_opt ->
-          let (ident, params) = parse_ident_and_params "fn" in
+          let (ident, params) = Pexp.parse_ident_and_params ps "fn" in
           let fn = ctxt "mod fn item: fn" (parse_fn proto_opt pure) ps in
           let
               decl = { Ast.decl_params = params;
@@ -626,7 +618,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             (ident, span ps apos bpos (Ast.MOD_ITEM_fn decl))
 
       | PRED ->
-          let (ident, params) = parse_ident_and_params "pred" in
+          let (ident, params) = Pexp.parse_ident_and_params ps "pred" in
           let pred = ctxt "mod pred item: pred" parse_pred ps in
           let
               decl = { Ast.decl_params = params;
@@ -636,7 +628,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             (ident, span ps apos bpos (Ast.MOD_ITEM_pred decl))
 
       | TYPE ->
-          let (ident, params) = parse_ident_and_params "type" in
+          let (ident, params) = Pexp.parse_ident_and_params ps "type" in
           let _ = expect ps EQ in
           let ty = ctxt "mod type item: ty" Pexp.parse_ty ps in
           let _ = expect ps SEMI in
@@ -652,7 +644,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             (ident, span ps apos bpos item)
 
       | MOD ->
-          let (ident, params) = parse_ident_and_params "mod" in
+          let (ident, params) = Pexp.parse_ident_and_params ps "mod" in
           let hdr =
             begin
               match peek ps with
@@ -799,7 +791,7 @@ and expand_imported_mod
     in
 
     match mti with
-        Ast.MOD_TYPE_ITEM_opaque_type { Ast.decl_item=(_, mut);
+        Ast.MOD_TYPE_ITEM_opaque_type { Ast.decl_item=mut;
                                         Ast.decl_params=params } ->
           Ast.MOD_ITEM_opaque_type
             { Ast.decl_item=Ast.TY_opaque ((next_opaque_id ps), mut);

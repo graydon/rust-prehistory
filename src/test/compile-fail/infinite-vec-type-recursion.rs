@@ -4,6 +4,6 @@
 
 type x = vec[x];
 
-fn main() -> () {
+fn main() {
   let x b = vec();
 }

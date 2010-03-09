@@ -3,14 +3,14 @@
 type point = rec(int x, int y);
 type rect = (point, point);
 
-fn f(rect r, int x1, int y1, int x2, int y2) -> () {
+fn f(rect r, int x1, int y1, int x2, int y2) {
   check (r._0.x == x1);
   check (r._0.y == y1);
   check (r._1.x == x2);
   check (r._1.y == y2);
 }
 
-fn main() -> () {
+fn main() {
   let rect r = ( rec(x=10, y=20),
                  rec(x=11, y=22) );
   check (r._0.x == 10);

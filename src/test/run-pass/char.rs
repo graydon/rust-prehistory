@@ -1,4 +1,4 @@
-fn main() -> () {
+fn main() {
     let char c = 'x';
     let char d = 'x';
     check(c == 'x');

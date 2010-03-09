@@ -1,12 +1,12 @@
 // -*- C++ -*-
 
 mod x {
-  fn hello() -> () {
+  fn hello() {
     log "hello, first-class module world";
   }
 }
 
-fn main() -> () {
+fn main() {
   auto mx = x;
   mx.hello();
 }

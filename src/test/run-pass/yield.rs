@@ -1,6 +1,6 @@
 // -*- C -*-
 
-fn main() -> () {
+fn main() {
   auto other = spawn child();
   log "1";
   yield;
@@ -10,7 +10,7 @@ fn main() -> () {
   join other;
 }
 
-fn child() -> () {
+fn child() {
   log "4";
   yield;
   log "5";

@@ -1,6 +1,6 @@
 // error-pattern: precondition constraint
 
-fn main() -> () {
+fn main() {
   let bool x;
   while(x) {
   }

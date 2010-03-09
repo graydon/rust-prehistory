@@ -799,7 +799,7 @@ let check_concrete params thing =
 let ty_of_mod_type_item (mti:Ast.mod_type_item) : Ast.ty =
     match mti with
         Ast.MOD_TYPE_ITEM_opaque_type td ->
-          let (_, mut) = td.Ast.decl_item in
+          let mut = td.Ast.decl_item in
             (* 
              * FIXME (bug 541598): generate opaque_ids uniquely per
              * name (incl. type parameters)
@@ -1067,8 +1067,7 @@ and mod_type_item_of_mod_item
               if type_is_mutable td.Ast.decl_item
               then Ast.MUTABLE else Ast.IMMUTABLE
             in
-            let pair = ((), mut) in
-              Some (Ast.MOD_TYPE_ITEM_opaque_type (decl td.Ast.decl_params pair))
+              Some (Ast.MOD_TYPE_ITEM_opaque_type (decl td.Ast.decl_params mut))
       | Ast.MOD_ITEM_public_type td ->
           Some (Ast.MOD_TYPE_ITEM_public_type td)
       | Ast.MOD_ITEM_pred pd ->

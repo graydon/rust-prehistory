@@ -8,6 +8,6 @@ fn f(int x) -> int {
   }
 }
 
-fn main() -> () {
+fn main() {
   check (f(5000) == 5000);
 }

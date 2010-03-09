@@ -2,7 +2,7 @@
 
 // error-pattern:bounds check
 
-fn main() -> () {
+fn main() {
   let vec[int] v = vec(10);
   let int x = 0;
   check (v.(x) == 10);

@@ -2,14 +2,14 @@
 
 // error-pattern: Unsatisfied .* lt(a, c)
 
-fn f(int a, int b) : lt(a,b) -> () {
+fn f(int a, int b) : lt(a,b) {
 }
 
 pred lt(int a, int b) {
   ret a < b;
 }
 
-fn main() -> () {
+fn main() {
   let int a = 10;
   let int b = 23;
   let int c = 77;

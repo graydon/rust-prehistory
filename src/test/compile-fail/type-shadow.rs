@@ -2,7 +2,7 @@
 
 // error-pattern: mismatched types
 
-fn main() -> () {
+fn main() {
   type X = int;
   type Y = X;
   if (true) {

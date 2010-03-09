@@ -1,8 +1,8 @@
-fn f() -> () {
+fn f() {
    let () x = ();
    ret x;
 }
 
-fn main() -> () {
+fn main() {
    auto x = f();
 }

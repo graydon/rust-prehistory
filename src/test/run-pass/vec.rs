@@ -1,6 +1,6 @@
 // -*- C -*-
 
-fn main() -> () {
+fn main() {
   let vec[int] v = vec(10, 20);
   check (v.(0) == 10);
   check (v.(1) == 20);

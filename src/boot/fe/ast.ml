@@ -462,7 +462,7 @@ and mod_item = mod_item' identified
 and mod_items = (ident, mod_item) Hashtbl.t
 
 and mod_type_item =
-    MOD_TYPE_ITEM_opaque_type of (unit * mutability) decl
+    MOD_TYPE_ITEM_opaque_type of mutability decl
   | MOD_TYPE_ITEM_public_type of ty decl
   | MOD_TYPE_ITEM_pred of ty_pred decl
   | MOD_TYPE_ITEM_mod of ty_mod decl
