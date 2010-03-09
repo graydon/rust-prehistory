@@ -483,7 +483,7 @@ and native_mod_items = (ident, native_mod_item) Hashtbl.t
 and crate' =
     {
       crate_items: mod_items;
-      crate_imported: (node_id, import_lib) Hashtbl.t;
+      crate_imported: (node_id, (import_lib * nabi_conv)) Hashtbl.t;
       crate_native_items: native_mod_items;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;

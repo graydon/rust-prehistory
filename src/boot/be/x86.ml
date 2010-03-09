@@ -511,7 +511,7 @@ let emit_c_call
     (ret:Il.cell)
     (tmp1:Il.reg)
     (tmp2:Il.reg)
-    (nabi:Abi.nabi)
+    (nabi:nabi)
     (in_prologue:bool)
     (fptr:Il.code)
     (args:Il.operand array)
@@ -522,7 +522,7 @@ let emit_c_call
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
 
   let args =                                                      (* rust calls get proc as arg0  *)
-    if nabi.Abi.nabi_convention = Abi.CONV_rust
+    if nabi.nabi_convention = CONV_rust
     then Array.append [| c proc_ptr |] args
     else args
   in
@@ -585,18 +585,18 @@ let emit_c_call
 
 let emit_void_prologue_call
     (e:Il.emitter)
-    (nabi:Abi.nabi)
+    (nabi:nabi)
     (fn:fixup)
     (args:Il.operand array)
     : unit =
-  let callee = Abi.load_fixup_codeptr e (h eax) fn true nabi.Abi.nabi_indirect in
+  let callee = Abi.load_fixup_codeptr e (h eax) fn true nabi.nabi_indirect in
     emit_c_call e (rc eax) (h edx) (h ecx) nabi true callee args
 ;;
 
 let emit_native_call
     (e:Il.emitter)
     (ret:Il.cell)
-    (nabi:Abi.nabi)
+    (nabi:nabi)
     (fn:fixup)
     (args:Il.operand array)
     : unit =
@@ -604,13 +604,13 @@ let emit_native_call
   let (tmp1, _) = vreg e in
   let (tmp2, _) = vreg e in
   let (freg, _) = vreg e in
-  let callee = Abi.load_fixup_codeptr e freg fn true nabi.Abi.nabi_indirect in
+  let callee = Abi.load_fixup_codeptr e freg fn true nabi.nabi_indirect in
     emit_c_call e ret tmp1 tmp2 nabi false callee args
 ;;
 
 let emit_native_void_call
     (e:Il.emitter)
-    (nabi:Abi.nabi)
+    (nabi:nabi)
     (fn:fixup)
     (args:Il.operand array)
     : unit =
@@ -622,7 +622,7 @@ let emit_native_void_call
 let emit_native_call_in_thunk
     (e:Il.emitter)
     (ret:Il.cell)
-    (nabi:Abi.nabi)
+    (nabi:nabi)
     (fn:Il.operand)
     (args:Il.operand array)
     : unit =
@@ -638,7 +638,7 @@ let emit_native_call_in_thunk
            *)
           Il.ImmPtr (fix, _) ->
             let code =
-              Abi.load_fixup_codeptr e (h eax) fix true nabi.Abi.nabi_indirect
+              Abi.load_fixup_codeptr e (h eax) fix true nabi.nabi_indirect
             in
               emit_c_call e (rc eax) (h edx) (h ecx) nabi false code args;
 
@@ -662,7 +662,7 @@ let emit_native_call_in_thunk
 
 let unwind_glue
     (e:Il.emitter)
-    (nabi:Abi.nabi)
+    (nabi:nabi)
     (exit_proc_fixup:fixup)
     : unit =
 
@@ -715,7 +715,7 @@ let unwind_glue
     (* exit path. *)
     mark exit_jmp_fix;
 
-    let callee = Abi.load_fixup_codeptr e (h eax) exit_proc_fixup false nabi.Abi.nabi_indirect in
+    let callee = Abi.load_fixup_codeptr e (h eax) exit_proc_fixup false nabi.nabi_indirect in
       emit_c_call e (rc eax) (h edx) (h ecx) nabi false callee [| (c proc_ptr) |];
 ;;
 
@@ -725,7 +725,7 @@ let fn_prologue
     (framesz:int64)
     (spill_fixup:fixup)
     (callsz:int64)
-    (nabi:Abi.nabi)
+    (nabi:nabi)
     (grow_proc_fixup:fixup)
     : unit =
   (*

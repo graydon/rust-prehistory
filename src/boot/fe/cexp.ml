@@ -289,7 +289,7 @@ type env = { env_bindings: (Ast.ident * cval) list;
              env_prefix: filename list;
              env_items: (filename, Ast.mod_items) Hashtbl.t;
              env_files: (node_id,filename) Hashtbl.t;
-             env_imported: (node_id, import_lib) Hashtbl.t;
+             env_imported: (node_id, (import_lib * nabi_conv)) Hashtbl.t;
              env_ps: pstate; }
 
 let unexpected_val (expected:string) (v:cval)  =
@@ -395,8 +395,8 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
                                            Ast.decl_item = tmod}
           in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
-          let item = Item.expand_imported_mod env.env_ps span ilib mti in
-            htab_put ps.pstate_imported id ilib;
+          let item = Item.expand_imported_mod env.env_ps span CONV_rust ilib mti in
+            htab_put ps.pstate_imported id (ilib,CONV_rust);
             CVAL_mod_item (name, { id = id; node = item })
 
     | CEXP_nat_mod {node=cn;id=id} ->

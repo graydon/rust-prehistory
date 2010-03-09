@@ -18,7 +18,7 @@ type pstate =
       pstate_opaque_id    : opaque_id ref;
       pstate_get_ty_mod     : (filename -> Ast.ty_mod);
       pstate_infer_lib_name : (Ast.ident -> filename);
-      pstate_imported       : (node_id, import_lib) Hashtbl.t; }
+      pstate_imported       : (node_id, (import_lib * nabi_conv)) Hashtbl.t; }
 ;;
 
 let log (ps:pstate) = Session.log "parse"
@@ -40,7 +40,7 @@ let make_parser
     (tok:Lexing.lexbuf -> token)
     (get_ty_mod:filename -> Ast.ty_mod)
     (infer_lib_name:Ast.ident -> filename)
-    (imported:(node_id, import_lib) Hashtbl.t)
+    (imported:(node_id, (import_lib * nabi_conv)) Hashtbl.t)
     (fname:string)
     : pstate =
   let lexbuf = Lexing.from_channel (open_in fname) in

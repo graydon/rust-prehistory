@@ -4,23 +4,6 @@
  * dependencies.  Make some attempt to factor it as time goes by.  
  *)
 
-type nabi_conv =
-    CONV_rust
-  | CONV_cdecl
-;;
-
-type nabi = { nabi_indirect: bool;
-              nabi_convention: nabi_conv }
-
-let string_to_nabi (a:string) (indirect:bool) : nabi option =
-  match a with
-      "cdecl" -> (Some { nabi_indirect = indirect;
-                         nabi_convention = CONV_cdecl })
-    | "rust" -> (Some { nabi_indirect = indirect;
-                        nabi_convention = CONV_rust })
-    | _ -> None
-;;
-
 (* Word offsets for structure fields in rust.h. *)
 
 let rc_base_field_refcnt = 0;;
@@ -76,21 +59,21 @@ type abi =
     abi_str_of_hardreg: (int -> string);
 
     abi_prealloc_quad: (Il.quad' -> Il.quad');
-    abi_emit_fn_prologue: (Il.emitter -> int64 -> Common.fixup -> int64 -> nabi -> Common.fixup -> unit);
+    abi_emit_fn_prologue: (Il.emitter -> int64 -> Common.fixup -> int64 -> Common.nabi -> Common.fixup -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_fn_tail_call: (Il.emitter -> int64 -> int64 -> Il.code -> int64 -> unit);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 
-    abi_emit_native_call: (Il.emitter -> Il.cell -> nabi -> Common.fixup -> Il.operand array -> unit);
-    abi_emit_native_void_call: (Il.emitter -> nabi -> Common.fixup -> Il.operand array -> unit);
-    abi_emit_native_call_in_thunk: (Il.emitter -> Il.cell -> nabi -> Il.operand -> Il.operand array -> unit);
+    abi_emit_native_call: (Il.emitter -> Il.cell -> Common.nabi -> Common.fixup -> Il.operand array -> unit);
+    abi_emit_native_void_call: (Il.emitter -> Common.nabi -> Common.fixup -> Il.operand array -> unit);
+    abi_emit_native_call_in_thunk: (Il.emitter -> Il.cell -> Common.nabi -> Il.operand -> Il.operand array -> unit);
     abi_emit_inline_memcpy: (Il.emitter -> int64 -> Il.reg -> Il.reg -> Il.reg -> bool -> unit);
 
     (* Global glue. *)
     abi_c_to_proc: (Il.emitter -> unit);
     abi_yield: (Il.emitter -> unit);
-    abi_unwind: (Il.emitter -> nabi -> Common.fixup -> unit);
+    abi_unwind: (Il.emitter -> Common.nabi -> Common.fixup -> unit);
     abi_get_next_pc_thunk: ((Il.reg * Common.fixup * (Il.emitter -> unit)) option);
 
     abi_sp_reg: Il.reg;

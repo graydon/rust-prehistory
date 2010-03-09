@@ -19,6 +19,14 @@ let int_of_constr (Constr i) = i
 
 type 'a identified = { node: 'a; id: node_id }
 
+
+let bug _ =
+  let k s = failwith s
+  in Printf.ksprintf k
+;;
+
+(* Some ubiquitous low-level types. *)
+
 type target =
     Linux_x86_elf
   | Win32_x86_pe
@@ -81,9 +89,24 @@ let bytes_of_ty_mach (mach:ty_mach) : int =
   | TY_f64 -> 8
 ;;
 
-let bug _ =
-  let k s = failwith s
-  in Printf.ksprintf k
+type nabi_conv =
+    CONV_rust
+  | CONV_cdecl
+;;
+
+type nabi = { nabi_indirect: bool;
+              nabi_convention: nabi_conv }
+;;
+
+
+(* FIXME: remove this when native items go away. *)
+let string_to_nabi (a:string) (indirect:bool) : nabi option =
+  match a with
+      "cdecl" -> (Some { nabi_indirect = indirect;
+                         nabi_convention = CONV_cdecl })
+    | "rust" -> (Some { nabi_indirect = indirect;
+                        nabi_convention = CONV_rust })
+    | _ -> None
 ;;
 
 type import_lib_spec =

@@ -99,13 +99,13 @@ let trans_visitor
   in
 
   let nabi_rust =
-    { Abi.nabi_indirect = nabi_indirect;
-      Abi.nabi_convention = Abi.CONV_rust }
+    { nabi_indirect = nabi_indirect;
+      nabi_convention = CONV_rust }
   in
 
   let nabi_c =
-    { Abi.nabi_indirect = true;
-      Abi.nabi_convention = Abi.CONV_cdecl }
+    { nabi_indirect = true;
+      nabi_convention = CONV_cdecl }
   in
 
   let out_mem_disp = abi.Abi.abi_frame_base_sz in
@@ -1249,7 +1249,7 @@ let trans_visitor
       "exited block";
 
   and trans_native_thunk
-      (nabi:Abi.nabi)
+      (nabi:nabi)
       (lib:import_lib)
       (name:string)
       (ret:Il.cell)
@@ -3054,7 +3054,7 @@ let trans_visitor
   let trans_imported_fn (fnid:node_id) (blockid:node_id) : unit =
     trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
-    let ilib = Hashtbl.find cx.ctxt_imported_items fnid in
+    let (ilib, _) = Hashtbl.find cx.ctxt_imported_items fnid in
     let lib_num =
       htab_search_or_add cx.ctxt_import_lib_num ilib
         (fun _ -> Hashtbl.length cx.ctxt_import_lib_num)
@@ -3183,7 +3183,7 @@ let trans_visitor
   let trans_native_fn (fnid:node_id) (nfn:Ast.native_fn) : unit =
     let native_mod = Stack.top native_mods in
     let nabi =
-      match (Abi.string_to_nabi native_mod.Ast.native_mod_abi nabi_indirect) with
+      match (string_to_nabi native_mod.Ast.native_mod_abi nabi_indirect) with
           Some n -> n
         | None -> (err None "invalid abi specification")
     in
@@ -3193,9 +3193,9 @@ let trans_visitor
          Should be: let lib = native_mod.Ast.native_mod_libname in
       *)
     let lib =
-      match nabi.Abi.nabi_convention with
-          Abi.CONV_rust -> IMPORT_LIB_rustrt
-        | Abi.CONV_cdecl -> IMPORT_LIB_crt
+      match nabi.nabi_convention with
+          CONV_rust -> IMPORT_LIB_rustrt
+        | CONV_cdecl -> IMPORT_LIB_crt
     in
 
     let name = item_name cx fnid in

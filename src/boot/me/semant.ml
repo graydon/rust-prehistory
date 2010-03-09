@@ -90,7 +90,7 @@ type ctxt =
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_all_defns: (node_id,defn) Hashtbl.t;                         (* definition id --> definition *)
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;               (* reference id --> definition id *)
-      ctxt_imported_items: (node_id, import_lib) Hashtbl.t;
+      ctxt_imported_items: (node_id, (import_lib * nabi_conv)) Hashtbl.t;
 
       (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;

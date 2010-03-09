@@ -682,22 +682,28 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
       | NATIVE ->
           begin
             bump ps;
-            expect ps MOD;
-            let (ident, params) = Pexp.parse_ident_and_params ps "native mod" in
-            let path = parse_lib_name ident in
-            let items = Pexp.parse_mod_ty_items ps in
-            let tmod = (None, items) in
-            let bpos = lexpos ps in
-            let ilib = IMPORT_LIB_c { import_libname = path;
-                                      import_prefix = ps.pstate_depth }
+            let conv =
+              match peek ps with
+                  LIT_STR "rust" -> (bump ps; CONV_rust)
+                | LIT_STR "cdecl" -> (bump ps; CONV_cdecl)
+                | _ -> raise (unexpected ps)
             in
-            let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = params;
-                                             Ast.decl_item = tmod}
-            in
-            let item' = expand_imported_mod ps {lo=apos; hi=bpos} ilib mti in
-            let item = span ps apos bpos item' in
-              htab_put ps.pstate_imported item.id ilib;
-              (ident, item)
+              expect ps MOD;
+              let (ident, params) = Pexp.parse_ident_and_params ps "native mod" in
+              let path = parse_lib_name ident in
+              let items = Pexp.parse_mod_ty_items ps in
+              let tmod = (None, items) in
+              let bpos = lexpos ps in
+              let ilib = IMPORT_LIB_c { import_libname = path;
+                                        import_prefix = ps.pstate_depth }
+              in
+              let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = params;
+                                               Ast.decl_item = tmod}
+              in
+              let item' = expand_imported_mod ps {lo=apos; hi=bpos} conv ilib mti in
+              let item = span ps apos bpos item' in
+                htab_put ps.pstate_imported item.id (ilib, conv);
+                (ident, item)
           end
 
       | USE ->
@@ -723,9 +729,9 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                 let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
                                                  Ast.decl_item = tmod}
                 in
-                let item' = expand_imported_mod ps {lo=apos; hi=bpos} ilib mti in
+                let item' = expand_imported_mod ps {lo=apos; hi=bpos} CONV_rust ilib mti in
                 let item = span ps apos bpos item' in
-                  htab_put ps.pstate_imported item.id ilib;
+                  htab_put ps.pstate_imported item.id (ilib, CONV_rust);
                   (ident, item)
           end
 
@@ -795,6 +801,7 @@ and expand_tags_to_items
 and expand_imported_mod
     (ps:pstate)
     (span:span)
+    (conv:nabi_conv)
     (ilib:import_lib)
     (mti:Ast.mod_type_item)
     : Ast.mod_item' =
@@ -876,7 +883,7 @@ and expand_imported_mod
       (item':Ast.mod_item')
       : Ast.mod_item =
     let wrapped = wrap span item' in
-      htab_put ps.pstate_imported wrapped.id ilib;
+      htab_put ps.pstate_imported wrapped.id (ilib, conv);
       wrapped
 
   and extract_mod
