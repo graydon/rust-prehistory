@@ -386,20 +386,6 @@ and fn =
       fn_body: block;
     }
 
-and native_fn =
-    {
-      native_fn_input_slots: header_slots;
-      native_fn_input_constrs: constrs;
-      native_fn_output_slot: slot identified;
-    }
-
-and native_mod =
-    {
-      native_mod_abi: string;
-      native_mod_libname: string;
-      native_mod_items: native_mod_items;
-    }
-
 and pred =
     {
       pred_input_slots: header_slots;
@@ -470,21 +456,10 @@ and mod_type_item =
 
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
-
-and native_mod_item' =
-    NATIVE_fn of native_fn
-  | NATIVE_type of ty_mach
-  | NATIVE_mod of native_mod
-
-and native_mod_item = native_mod_item' identified
-and native_mod_items = (ident, native_mod_item) Hashtbl.t
-
-
 and crate' =
     {
       crate_items: mod_items;
       crate_imported: (node_id, (import_lib * nabi_conv)) Hashtbl.t;
-      crate_native_items: native_mod_items;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;
     }

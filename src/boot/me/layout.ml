@@ -267,27 +267,6 @@ let layout_visitor
         | _ -> ()
     end
   in
-  let visit_native_mod_item_pre n i =
-    begin
-      match i.node with
-          Ast.NATIVE_fn nfn ->
-            enter_frame i.id;
-            Hashtbl.replace cx.ctxt_frame_sizes i.id frame_info_slot_sz;
-            layout_header i.id
-              (Array.map (fun (sid,_) -> sid.id)
-                 nfn.Ast.native_fn_input_slots)
-        | _ -> ()
-    end;
-    inner.Walk.visit_native_mod_item_pre n i
-  in
-  let visit_native_mod_item_post n i =
-    inner.Walk.visit_native_mod_item_post n i;
-    begin
-      match i.node with
-          Ast.NATIVE_fn _ -> leave_frame ()
-        | _ -> ()
-    end
-  in
   let visit_block_pre b =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
     let off =
@@ -360,8 +339,6 @@ let layout_visitor
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
-        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
-        Walk.visit_native_mod_item_post = visit_native_mod_item_post;
 
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_block_pre = visit_block_pre;

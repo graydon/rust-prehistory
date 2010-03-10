@@ -146,19 +146,6 @@ let all_item_collecting_visitor
       header;
   in
 
-  let visit_native_mod_item_pre n i =
-    htab_put cx.ctxt_all_defns i.id (DEFN_native_item i.node);
-    htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
-    log cx "collected native item #%d: %s" (int_of_node i.id) n;
-    begin
-      match i.node with
-          Ast.NATIVE_fn nfn ->
-            note_header i.id nfn.Ast.native_fn_input_slots
-        | _ -> ()
-    end;
-    inner.Walk.visit_native_mod_item_pre n i
-  in
-
   let visit_mod_item_pre n p i =
       htab_put cx.ctxt_all_defns i.id (DEFN_item i.node);
       htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
@@ -175,9 +162,7 @@ let all_item_collecting_visitor
       inner.Walk.visit_mod_item_pre n p i
   in
     { inner with
-        Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
-    }
+        Walk.visit_mod_item_pre = visit_mod_item_pre; }
 ;;
 
 
@@ -432,17 +417,9 @@ let type_resolving_visitor
     inner.Walk.visit_mod_item_pre id params item
   in
 
-  let visit_native_mod_item_pre id item =
-    begin
-      let ty = resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info (ty_of_native_mod_item item) in
-        htab_put cx.ctxt_all_item_types item.id ty
-    end;
-    inner.Walk.visit_native_mod_item_pre id item
-  in
     { inner with
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;
-        Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
+        Walk.visit_mod_item_pre = visit_mod_item_pre; }
 ;;
 
 

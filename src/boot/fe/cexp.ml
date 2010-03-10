@@ -239,7 +239,6 @@ type cval =
   | CVAL_bool of bool
   | CVAL_ident of Ast.ident
   | CVAL_mod_item of (Ast.ident * Ast.mod_item)
-  | CVAL_native_mod_item of (Ast.ident * Ast.native_mod_item)
 ;;
 
 type env = { env_bindings: (Ast.ident * cval) list;
@@ -257,7 +256,6 @@ let unexpected_val (expected:string) (v:cval)  =
       | CVAL_bool b -> if b then "bool true" else "bool false"
       | CVAL_ident i -> "ident " ^ i
       | CVAL_mod_item (name, _) -> "mod item " ^ name
-      | CVAL_native_mod_item (name, _) -> "native mod item " ^ name
   in
     (* FIXME: proper error reporting, please. *)
     failwith ("expected " ^ expected ^ ", got " ^ got)
@@ -411,12 +409,6 @@ and eval_cexp_to_mod (env:env) (exp:cexp) : (Ast.ident * Ast.mod_item) =
       CVAL_mod_item i -> i
     | v -> unexpected_val "mod item" v
 
-and eval_cexp_to_native_mod (env:env) (exp:cexp) : (Ast.ident * Ast.native_mod_item) =
-  match eval_cexp env exp with
-      CVAL_native_mod_item nm -> nm
-    | v -> unexpected_val "native mod item" v
-
-
 and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
   match exp.node with
     | Pexp.PEXP_binop (bop, a, b) ->
@@ -531,7 +523,6 @@ let with_err_handling sess thunk =
           span ps apos apos
             { Ast.crate_items = Hashtbl.create 0;
               Ast.crate_imported = Hashtbl.create 0;
-              Ast.crate_native_items = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
               Ast.crate_files = Hashtbl.create 0 }
 ;;
@@ -554,7 +545,6 @@ let parse_crate_file
 
   let files = Hashtbl.create 0 in
   let items = Hashtbl.create 4 in
-  let nitems = Hashtbl.create 4 in
   let target_bindings =
     let (os, arch, libc) =
       match sess.Session.sess_targ with
@@ -595,15 +585,13 @@ let parse_crate_file
               let cexp = parse_cexp ps in
                 match eval_cexp env cexp with
                     CVAL_mod_item (name, item) -> htab_put items name item
-                  | CVAL_native_mod_item (name, nitem) -> htab_put nitems name nitem
-                  | v -> unexpected_val "mod item or native mod item" v
+                  | v -> unexpected_val "mod item" v
             done
           in
           let bpos = lexpos ps in
           let main = find_main_fn ps items in
           let crate = { Ast.crate_items = items;
                         Ast.crate_imported = imported;
-                        Ast.crate_native_items = nitems;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
           in
@@ -634,11 +622,9 @@ let parse_src_file
           let items = Item.parse_mod_items ps EOF in
           let bpos = lexpos ps in
           let files = Hashtbl.create 0 in
-          let nitems = Hashtbl.create 4 in
           let main = find_main_fn ps items in
           let crate = { Ast.crate_items = items;
                         Ast.crate_imported = imported;
-                        Ast.crate_native_items = nitems;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
           in

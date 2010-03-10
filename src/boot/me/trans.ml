@@ -120,7 +120,6 @@ let trans_visitor
     call_args_referent_type cx (current_fn_ty ()) closure
   in
   let current_fn_callsz () = get_callsz cx (current_fn()) in
-  let native_mods = Stack.create () in
 
   let emitters = Stack.create () in
   let push_new_emitter _ =
@@ -571,13 +570,10 @@ let trans_visitor
         if initializing
         then err None "init item"
         else
-          if lval_is_item cx lv
-          then bug () "trans_lval_full called on item lval '%a'" Ast.sprintf_lval lv
-          else
-            begin
-              assert (lval_is_native_item cx lv);
-              bug () "trans_lval_full called on native-item lval '%a'" Ast.sprintf_lval lv
-            end
+          begin
+            assert (lval_is_item cx lv);
+            bug () "trans_lval_full called on item lval '%a'" Ast.sprintf_lval lv
+          end
 
   and trans_lval_maybe_init (initializing:bool) (lv:Ast.lval) : (Il.cell * Ast.slot) =
     trans_lval_full initializing lv
@@ -594,11 +590,6 @@ let trans_visitor
     (* direct call to item *)
     if lval_is_item cx flv then
       let fn_item = lval_item cx flv in
-      let fn_ptr = code_fixup_to_ptr_operand (get_fn_fixup cx fn_item.id) in
-        (fn_ptr, Hashtbl.find cx.ctxt_all_item_types fn_item.id)
-    (* direct call to native item *)
-    else if lval_is_native_item cx flv then
-      let fn_item = lval_native_item cx flv in
       let fn_ptr = code_fixup_to_ptr_operand (get_fn_fixup cx fn_item.id) in
         (fn_ptr, Hashtbl.find cx.ctxt_all_item_types fn_item.id)
     (* indirect call to computed slot *)
@@ -1247,17 +1238,6 @@ let trans_visitor
     emit Il.Leave;
     trace_str cx.ctxt_sess.Session.sess_trace_block
       "exited block";
-
-  and trans_native_thunk
-      (nabi:nabi)
-      (lib:import_lib)
-      (name:string)
-      (ret:Il.cell)
-      (args:Il.operand array)
-      : unit =
-
-    abi.Abi.abi_emit_native_call_in_thunk (emitter())
-      ret nabi (Il.ImmPtr ((Semant.import_native cx lib name), Il.CodeTy)) args;
 
   and upcall_fixup (name:string) : fixup =
     Semant.import_native cx IMPORT_LIB_rustrt name;
@@ -3181,48 +3161,6 @@ let trans_visitor
         trans_frame_exit tagid true;
   in
 
-  let trans_native_fn (fnid:node_id) (nfn:Ast.native_fn) : unit =
-    let native_mod = Stack.top native_mods in
-    let nabi =
-      match (string_to_nabi native_mod.Ast.native_mod_abi nabi_indirect) with
-          Some n -> n
-        | None -> (err None "invalid abi specification")
-    in
-      (* FIXME (bug 541532): This is a gross hack. The library should
-         come from the frontend.
-         
-         Should be: let lib = native_mod.Ast.native_mod_libname in
-      *)
-    let lib =
-      match nabi.nabi_convention with
-          CONV_rust -> IMPORT_LIB_rustrt
-        | CONV_cdecl -> IMPORT_LIB_crt
-    in
-
-    let name = item_name cx fnid in
-    let name =
-      match name with
-          Ast.NAME_base (Ast.BASE_ident id) -> id
-        | Ast.NAME_ext (_, Ast.COMP_ident id) -> id
-        | _ -> (err (Some fnid)
-                  "Native fn %a lacks simple identifier-name"
-                  Ast.sprintf_name name)
-    in
-    let args =
-      (Array.init (Array.length nfn.Ast.native_fn_input_slots)
-         (fun (n:int) ->
-            (Il.Cell (word_at (sp_imm (Int64.add (word_n n) (word_n 3)))))))
-    in
-      push_new_emitter ();
-      let e = (emitter()) in
-        trans_native_thunk nabi lib name (word_at (sp_imm (word_n 1))) args;
-        Il.emit e Il.Ret;
-        if e.Il.emit_next_vreg != 0
-        then bug () "%s uses nonzero vregs" name;
-        capture_emitted_quads (get_fn_fixup cx fnid) fnid;
-        pop_emitter ();
-  in
-
   let trans_mod (id:node_id) (m:Ast.mod_items) : unit =
     log cx "emitting %d-entry mod table for %s" (Hashtbl.length m) (path_name());
     let pair_with_nil fix =
@@ -3326,27 +3264,6 @@ let trans_visitor
     then visit_local_mod_item_post n p i;
   in
 
-  let visit_native_mod_item_pre n i =
-    enter_file_for i.id;
-    begin
-      match i.node with
-          Ast.NATIVE_fn nfn -> trans_native_fn i.id nfn
-        | Ast.NATIVE_mod nmod -> Stack.push nmod native_mods
-        | _ -> ()
-    end;
-    inner.Walk.visit_native_mod_item_pre n i
-  in
-
-  let visit_native_mod_item_post n i =
-    inner.Walk.visit_native_mod_item_post n i;
-    begin
-      match i.node with
-          Ast.NATIVE_mod _ -> ignore (Stack.pop native_mods)
-        | _ -> ()
-    end;
-    leave_file_for i.id
-  in
-
   let visit_crate_pre crate =
     enter_file_for crate.id;
     inner.Walk.visit_crate_pre crate
@@ -3440,8 +3357,6 @@ let trans_visitor
         Walk.visit_crate_post = visit_crate_post;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
-        Walk.visit_native_mod_item_pre = visit_native_mod_item_pre;
-        Walk.visit_native_mod_item_post = visit_native_mod_item_post;
     }
 ;;
 
@@ -3501,18 +3416,6 @@ let fixup_assigning_visitor
     inner.Walk.visit_mod_item_pre n p i
   in
 
-  let visit_native_mod_item_pre n i =
-    enter_file_for i.id;
-    begin
-      match i.node with
-          Ast.NATIVE_fn _ ->
-            htab_put cx.ctxt_fn_fixups i.id
-              (new_fixup ((path_name()) ^ " native thunk"));
-        | _ -> ()
-    end;
-    inner.Walk.visit_native_mod_item_pre n i
-  in
-
   let visit_block_pre b =
     htab_put cx.ctxt_block_fixups b.id (new_fixup "lexical block");
     inner.Walk.visit_block_pre b
@@ -3526,8 +3429,7 @@ let fixup_assigning_visitor
   { inner with
       Walk.visit_crate_pre = visit_crate_pre;
       Walk.visit_mod_item_pre = visit_mod_item_pre;
-      Walk.visit_block_pre = visit_block_pre;
-      Walk.visit_native_mod_item_pre = visit_native_mod_item_pre }
+      Walk.visit_block_pre = visit_block_pre; }
 
 
 let process_crate

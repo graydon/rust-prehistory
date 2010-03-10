@@ -34,10 +34,6 @@ type visitor =
         Ast.ident -> (Ast.ident array) -> Ast.mod_item -> unit;
       visit_mod_item_post:
         Ast.ident -> (Ast.ident array) -> Ast.mod_item -> unit;
-      visit_native_mod_item_pre:
-        Ast.ident -> Ast.native_mod_item -> unit;
-      visit_native_mod_item_post:
-        Ast.ident -> Ast.native_mod_item -> unit;
       visit_mod_type_item_pre:
         Ast.ident -> (Ast.ident array) -> Ast.mod_type_item -> unit;
       visit_mod_type_item_post:
@@ -67,8 +63,6 @@ let empty_visitor =
     visit_lval_post = (fun _ -> ());
     visit_mod_item_pre = (fun _ _ _ -> ());
     visit_mod_item_post = (fun _ _ _ -> ());
-    visit_native_mod_item_pre = (fun _ _ -> ());
-    visit_native_mod_item_post = (fun _ _ -> ());
     visit_mod_type_item_pre = (fun _ _ _ -> ());
     visit_mod_type_item_post = (fun _ _ _ -> ());
     visit_crate_pre = (fun _ -> ());
@@ -87,19 +81,9 @@ let path_managing_visitor
     inner.visit_mod_item_post ident params item;
     ignore (Stack.pop path)
   in
-  let visit_native_mod_item_pre ident item =
-    Stack.push (Ast.COMP_ident ident) path;
-    inner.visit_native_mod_item_pre ident item
-  in
-  let visit_native_mod_item_post ident item =
-    inner.visit_native_mod_item_post ident item;
-    ignore (Stack.pop path)
-  in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;
         visit_mod_item_post = visit_mod_item_post;
-        visit_native_mod_item_pre = visit_native_mod_item_pre;
-        visit_native_mod_item_post = visit_native_mod_item_post;
     }
 ;;
 
@@ -133,19 +117,9 @@ let mod_item_logging_visitor
     logfn (Printf.sprintf "leaving %s" (path_name()));
     inner.visit_mod_item_post name params item;
   in
-  let visit_native_mod_item_pre name item =
-    logfn (Printf.sprintf "entering %s (native)" (path_name()));
-    inner.visit_native_mod_item_pre name item
-  in
-  let visit_native_mod_item_post name item =
-    logfn (Printf.sprintf "leaving %s (native)" (path_name()));
-    inner.visit_native_mod_item_post name item;
-  in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;
-        visit_mod_item_post = visit_mod_item_post;
-        visit_native_mod_item_pre = visit_native_mod_item_pre;
-        visit_native_mod_item_post = visit_native_mod_item_post }
+        visit_mod_item_post = visit_mod_item_post; }
 ;;
 
 
@@ -179,9 +153,7 @@ let rec walk_crate
     : unit =
     walk_bracketed
       v.visit_crate_pre
-      (fun _ ->
-         walk_mod_items v crate.node.Ast.crate_items;
-         walk_native_mod_items v crate.node.Ast.crate_native_items)
+      (fun _ -> walk_mod_items v crate.node.Ast.crate_items)
       v.visit_crate_post
       crate
 
@@ -225,31 +197,6 @@ and walk_mod_item
       (v.visit_mod_item_pre name params)
       children
       (v.visit_mod_item_post name params)
-      item
-
-
-and walk_native_mod_items
-    (v:visitor)
-    (items:Ast.native_mod_items)
-    : unit =
-  Hashtbl.iter (walk_native_mod_item v) items
-
-
-and walk_native_mod_item
-    (v:visitor)
-    (name:Ast.ident)
-    (item:Ast.native_mod_item)
-    : unit =
-  let children _ =
-    match item.node with
-        Ast.NATIVE_fn nfn -> walk_native_fn v nfn
-      | Ast.NATIVE_type tmach -> walk_ty v (Ast.TY_mach tmach)
-      | Ast.NATIVE_mod nmod -> walk_native_mod_items v nmod.Ast.native_mod_items
-  in
-    walk_bracketed
-      (v.visit_native_mod_item_pre name)
-      children
-      (v.visit_native_mod_item_post name)
       item
 
 
@@ -426,15 +373,6 @@ and walk_fn
   walk_constrs v f.Ast.fn_input_constrs;
   walk_slot_identified v f.Ast.fn_output_slot;
   walk_block v f.Ast.fn_body
-
-and walk_native_fn
-    (v:visitor)
-    (f:Ast.native_fn)
-    : unit =
-  walk_header_slots v f.Ast.native_fn_input_slots;
-  walk_constrs v f.Ast.native_fn_input_constrs;
-  walk_slot_identified v f.Ast.native_fn_output_slot;
-
 
 and walk_slot_identified
     (v:visitor)
