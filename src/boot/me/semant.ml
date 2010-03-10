@@ -272,6 +272,12 @@ let referent_is_slot (cx:ctxt) (id:node_id) : bool =
     | _ -> false
 ;;
 
+let referent_is_item (cx:ctxt) (id:node_id) : bool =
+  match Hashtbl.find cx.ctxt_all_defns id with
+      DEFN_item _ -> true
+    | _ -> false
+;;
+
 (* coerce an lval definition id to a slot *)
 let referent_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
   match Hashtbl.find cx.ctxt_all_defns id with
@@ -1164,93 +1170,90 @@ let scope_stack_managing_visitor
 ;;
 
 (* Generic lookup, used for slots, items, types, etc. *)
-(* 
- * FIXME: currently doesn't lookup inside type-item scopes
- * nor return type variables bound by items. 
- *)
-let lookup
+
+let lookup_by_ident
     (cx:ctxt)
     (scopes:scope list)
-    (key:Ast.slot_key)
+    (ident:Ast.ident)
     : ((scope list * node_id) option) =
-  let check_items _ ident items =
-    if Hashtbl.mem items ident
-    then
-      let item = Hashtbl.find items ident in
-        Some item.id
-    else
-      None
+  let check_items items =
+    match htab_search items ident with
+        None -> None
+      | Some i -> Some i.id
+  in
+  let check_input_slot islots =
+    arr_search islots
+      (fun _ (sloti,ident') ->
+         if ident = ident'
+         then Some sloti.id
+         else None)
   in
   let check_scope scope =
     match scope with
         SCOPE_block block_id ->
           let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
           let block_items = Hashtbl.find cx.ctxt_block_items block_id in
-            if Hashtbl.mem block_slots key
-            then
-              let id = Hashtbl.find block_slots key in
-                Some id
-            else
-              begin
-                match key with
-                    Ast.KEY_temp _ -> None
-                  | Ast.KEY_ident ident ->
-                      if Hashtbl.mem block_items ident
-                      then
-                        let id = Hashtbl.find block_items ident in
-                          Some id
-                      else
-                        None
-              end
+            begin
+              match htab_search block_slots (Ast.KEY_ident ident) with
+                  Some id -> Some id
+                | None -> htab_search block_items ident
+            end
 
       | SCOPE_crate crate ->
-          begin
-            match key with
-                Ast.KEY_temp _ -> None
-              | Ast.KEY_ident ident ->
-                  check_items scope ident crate.node.Ast.crate_items
-          end
+          check_items crate.node.Ast.crate_items
 
       | SCOPE_mod_item item ->
           begin
-            match key with
-                Ast.KEY_temp _ -> None
-              | Ast.KEY_ident ident ->
-                  begin
-                    let match_input_slot islots =
-                      arr_search islots
-                        (fun _ (sloti,ident') ->
-                           if ident = ident'
-                           then Some sloti.id
-                           else None)
-                    in
-                    match item.node with
-                        Ast.MOD_ITEM_fn f ->
-                          match_input_slot f.Ast.decl_item.Ast.fn_input_slots
+            match item.node with
+                Ast.MOD_ITEM_fn f ->
+                  check_input_slot f.Ast.decl_item.Ast.fn_input_slots
 
-                      | Ast.MOD_ITEM_pred p ->
-                          match_input_slot p.Ast.decl_item.Ast.pred_input_slots
+              | Ast.MOD_ITEM_pred p ->
+                  check_input_slot p.Ast.decl_item.Ast.pred_input_slots
 
-                      | Ast.MOD_ITEM_mod m ->
-                          let (hdr, md) = m.Ast.decl_item in
+              | Ast.MOD_ITEM_mod m ->
+                  let (hdr, md) = m.Ast.decl_item in
+                    begin
+                      match check_items md with
+                          Some m -> Some m
+                        | None ->
                             begin
-                              match check_items scope ident md with
-                                  Some m -> Some m
-                                | None ->
-                                    begin
-                                      match hdr with
-                                          None -> None
-                                        | Some (h, _) ->
-                                            match_input_slot h
-                                    end
+                              match hdr with
+                                  None -> None
+                                | Some (h, _) ->
+                                    check_input_slot h
                             end
-
-                      | _ -> None
-                  end
+                    end
+              | _ -> None
           end
+      | SCOPE_mod_type_item _ -> None
+  in
+    list_search_ctxt scopes check_scope
+;;
+
+let lookup_by_temp
+    (cx:ctxt)
+    (scopes:scope list)
+    (temp:temp_id)
+    : ((scope list * node_id) option) =
+  let check_scope scope =
+    match scope with
+        SCOPE_block block_id ->
+          let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
+            htab_search block_slots (Ast.KEY_temp temp)
       | _ -> None
   in
     list_search_ctxt scopes check_scope
+;;
+
+let lookup
+    (cx:ctxt)
+    (scopes:scope list)
+    (key:Ast.slot_key)
+    : ((scope list * node_id) option) =
+  match key with
+      Ast.KEY_temp temp -> lookup_by_temp cx scopes temp
+    | Ast.KEY_ident ident -> lookup_by_ident cx scopes ident
 ;;
 
 

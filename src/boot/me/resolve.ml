@@ -445,7 +445,13 @@ let lval_base_resolving_visitor
     match nb with
         Ast.BASE_ident ident -> lookup_referent_by_ident id ident
       | Ast.BASE_temp temp -> lookup_slot_by_temp id temp
-      | Ast.BASE_app _ -> err (Some id) "unhandled name base case BASE_app"
+      | Ast.BASE_app (ident, _) ->
+          let referent = lookup_referent_by_ident id ident in
+            begin
+              match Hashtbl.find cx.ctxt_all_defns id with
+                  DEFN_slot _ -> err (Some referent) "lval resolved to type-parametric slot"
+                | DEFN_item _ -> err (Some referent) "unhandled parametric-type item"
+            end
   in
 
   let visit_lval_pre lv =
