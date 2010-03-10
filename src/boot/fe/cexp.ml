@@ -70,51 +70,8 @@ and cexp_nat =
        * symbol-names, to handle mangling schemes that aren't
        * Token.IDENT values
        *)
-      nat_items: Ast.native_mod_items;
+      nat_items: Ast.mod_type_items;
     }
-;;
-
-
-(* Native mod item grammar -- can only occur in crates. *)
-
-let rec parse_native_mod_item
-    (ps:pstate)
-    : (Ast.ident * Ast.native_mod_item) =
-  let apos = lexpos ps in
-  let (ident, item) =
-    match peek ps with
-        FN None ->
-          begin
-            bump ps;
-            let ident = ctxt "native fn: ident" Pexp.parse_ident ps in
-            let (inputs, constrs, output) = ctxt "native fn: in_and_out" Item.parse_in_and_out ps in
-              expect ps SEMI;
-              let nfn =
-                {
-                  Ast.native_fn_input_slots = inputs;
-                  Ast.native_fn_input_constrs = constrs;
-                  Ast.native_fn_output_slot = output;
-                }
-              in
-                (ident, Ast.NATIVE_fn nfn)
-          end
-
-      | TYPE ->
-          begin
-            bump ps;
-            let ident = ctxt "native ty: ident" Pexp.parse_ident ps in
-            let tymach = match peek ps with
-                MACH m -> m
-              | _ -> raise (unexpected ps)
-            in
-              expect ps SEMI;
-                (ident, Ast.NATIVE_type tymach)
-          end
-
-      | _ -> raise (unexpected ps)
-  in
-  let bpos = lexpos ps in
-    (ident, (span ps apos bpos item))
 ;;
 
 
@@ -171,7 +128,7 @@ let rec parse_cexp (ps:pstate) : cexp =
             let meta = [| |] in
             let items = Hashtbl.create 0 in
             let get_item ps =
-              let (ident, item) = parse_native_mod_item ps in
+              let (ident, item) = Pexp.parse_mod_ty_item ps in
                 htab_put items ident item;
             in
               ignore (bracketed_zero_or_more
@@ -400,23 +357,29 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
             CVAL_mod_item (name, { id = id; node = item })
 
     | CEXP_nat_mod {node=cn;id=id} ->
-        let abi = eval_cexp_to_str env cn.nat_abi in
+        let conv =
+          let v = eval_cexp_to_str env cn.nat_abi in
+          match string_to_conv v with
+              None -> unexpected_val "calling convention" (CVAL_str v)
+            | Some c -> c
+        in
         let name = eval_cexp_to_ident env cn.nat_name in
-        let path =
+        let filename =
           match cn.nat_path with
               None -> env.env_ps.pstate_infer_lib_name name
             | Some p -> eval_cexp_to_str env p
         in
-        let note_item_in_file _ item =
-          htab_put env.env_files item.id path
+        let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
+                                         Ast.decl_item = (None, cn.nat_items) }
         in
-          Hashtbl.iter note_item_in_file cn.nat_items;
-          let nmod = { Ast.native_mod_abi = abi;
-                       Ast.native_mod_libname = name;
-                       Ast.native_mod_items = cn.nat_items; }
-          in
-          let item = Ast.NATIVE_mod nmod in
-            CVAL_native_mod_item (name, {node=item; id=id})
+        let ilib = IMPORT_LIB_c { import_libname = filename;
+                                  import_prefix = 1 }
+        in
+        let ps = env.env_ps in
+        let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
+        let item = Item.expand_imported_mod env.env_ps span conv ilib mti in
+          htab_put ps.pstate_imported id (ilib,CONV_rust);
+          CVAL_mod_item (name, { id = id; node = item })
 
     | CEXP_pexp exp ->
         eval_pexp env exp
@@ -592,7 +555,30 @@ let parse_crate_file
   let files = Hashtbl.create 0 in
   let items = Hashtbl.create 4 in
   let nitems = Hashtbl.create 4 in
-  let env = { env_bindings = [];
+  let target_bindings =
+    let (os, arch, libc) =
+      match sess.Session.sess_targ with
+          Linux_x86_elf -> ("linux", "x86", "libc.so.6")
+        | Win32_x86_pe -> ("win32", "x86", "msvcrt.dll")
+        | MacOS_x86_macho -> ("macos", "x86", "libc.dylib")
+    in
+      [
+        ("target_os", CVAL_str os);
+        ("target_arch", CVAL_str arch);
+        ("target_libc", CVAL_str libc)
+      ]
+  in
+  let build_bindings =
+    [
+      ("build_compiler", CVAL_str Sys.executable_name);
+      ("build_input", CVAL_str fname);
+    ]
+  in
+  let initial_bindings =
+    target_bindings
+    @ build_bindings
+  in
+  let env = { env_bindings = initial_bindings;
               env_prefix = [Filename.dirname fname];
               env_items = Hashtbl.create 0;
               env_files = files;

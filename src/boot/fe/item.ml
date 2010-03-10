@@ -684,8 +684,13 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             bump ps;
             let conv =
               match peek ps with
-                  LIT_STR "rust" -> (bump ps; CONV_rust)
-                | LIT_STR "cdecl" -> (bump ps; CONV_cdecl)
+                  LIT_STR s ->
+                    bump ps;
+                    begin
+                      match string_to_conv s with
+                          None -> raise (unexpected ps)
+                        | Some c -> c
+                    end
                 | _ -> raise (unexpected ps)
             in
               expect ps MOD;

@@ -1,6 +1,6 @@
 // -*- C++ -*-
 
-native mod libc {
+native mod libc = target_libc {
   fn open(int name, int flags, int mode) -> int;
   fn close(int fd) -> int;
   fn read(int fd, int buf, int count) -> int;
@@ -9,7 +9,7 @@ native mod libc {
   fn free(int p) -> ();
 }
 
-native "rust" mod librust {
+native "rust" mod rustrt {
   fn str_buf(str s) -> int;
 }
 

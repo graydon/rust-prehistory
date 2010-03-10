@@ -98,15 +98,19 @@ type nabi = { nabi_indirect: bool;
               nabi_convention: nabi_conv }
 ;;
 
+let string_to_conv (a:string) : nabi_conv option =
+  match a with
+      "cdecl" -> Some CONV_cdecl
+    | "rust" -> Some CONV_rust
+    | _ -> None
 
 (* FIXME: remove this when native items go away. *)
-let string_to_nabi (a:string) (indirect:bool) : nabi option =
-  match a with
-      "cdecl" -> (Some { nabi_indirect = indirect;
-                         nabi_convention = CONV_cdecl })
-    | "rust" -> (Some { nabi_indirect = indirect;
-                        nabi_convention = CONV_rust })
-    | _ -> None
+let string_to_nabi (s:string) (indirect:bool) : nabi option =
+  match string_to_conv s with
+      None -> None
+    | Some c ->
+        Some { nabi_indirect = indirect;
+               nabi_convention = c }
 ;;
 
 type import_lib_spec =

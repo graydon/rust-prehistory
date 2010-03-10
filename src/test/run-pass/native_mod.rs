@@ -2,7 +2,7 @@
 
 fn main() {
    auto f = "Makefile";
-   auto s = librust.str_buf(f);
+   auto s = rustrt.str_buf(f);
    auto buf = libc.malloc(1024);
    auto fd = libc.open(s, 0, 0);
    libc.read(fd, buf, 1024);

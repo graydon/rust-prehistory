@@ -1,10 +1,11 @@
 // -*- C++ -*-
 
-native "rust" mod librust {
+native "rust" mod rustrt {
   fn str_buf(str s) -> int;
 }
 
-native mod libc {
+
+native mod libc = target_libc {
   fn puts(int s) -> ();
 }
 

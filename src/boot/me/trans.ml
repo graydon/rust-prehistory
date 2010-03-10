@@ -3106,9 +3106,10 @@ let trans_visitor
                 let libstr = trans_static_string ls.import_libname in
                 let symstr = trans_static_string c_sym_str in
                 let check_rty_sz rty =
-                  if Il.referent_ty_size word_bits rty = word_sz
+                  let sz = Il.referent_ty_size word_bits rty in
+                  if sz = 0L || sz = word_sz
                   then ()
-                  else bug () "unsupported non-word-size arg or ret cell used with native import"
+                  else bug () "unsupported arg or ret cell size used with native import"
                 in
                 let ret = get_element_ptr caller_args_cell 0 in
                 let _ = check_rty_sz (pointee_type ret) in
