@@ -105,6 +105,11 @@ let span
     { node = x; id = id }
 ;;
 
+let decl p i =
+  { Ast.decl_params = p;
+    Ast.decl_item = i }
+;;
+
 let spans
     (ps:pstate)
     (things:('a identified) array)

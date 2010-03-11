@@ -262,8 +262,7 @@ let unexpected_val (expected:string) (v:cval)  =
 ;;
 
 let rewrap_items id items =
-  let item = Ast.MOD_ITEM_mod { Ast.decl_params = [| |];
-                                Ast.decl_item = (None, items) } in
+  let item = decl [||] (Ast.MOD_ITEM_mod (None, items)) in
     { id = id; node = item }
 ;;
 
@@ -346,9 +345,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
                 log ps "extracted mod type from %s (binding to %s)" filename name;
                 log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
             end;
-          let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
-                                           Ast.decl_item = tmod}
-          in
+          let mti = decl [||] (Ast.MOD_TYPE_ITEM_mod tmod) in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
           let item = Item.expand_imported_mod env.env_ps span CONV_rust ilib mti in
             htab_put ps.pstate_imported id (ilib,CONV_rust);
@@ -367,9 +364,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
               None -> env.env_ps.pstate_infer_lib_name name
             | Some p -> eval_cexp_to_str env p
         in
-        let mti = Ast.MOD_TYPE_ITEM_mod {Ast.decl_params = [| |];
-                                         Ast.decl_item = (None, cn.nat_items) }
-        in
+        let mti = decl [||] (Ast.MOD_TYPE_ITEM_mod (None, cn.nat_items)) in
         let ilib = IMPORT_LIB_c { import_libname = filename;
                                   import_prefix = 1 }
         in
@@ -485,19 +480,19 @@ let find_main_fn
   let rec dig prefix_name items =
     Hashtbl.iter (extract_fn prefix_name) items
   and extract_fn prefix_name ident item =
-    if Hashtbl.mem ps.pstate_imported item.id
+    if not (Array.length item.node.Ast.decl_params = 0) ||
+      Hashtbl.mem ps.pstate_imported item.id
     then ()
     else
-      match item.node with
-          Ast.MOD_ITEM_mod md ->
-            if Array.length md.Ast.decl_params = 0 &&
-              (fst md.Ast.decl_item = None)
-            then dig (Some (extend prefix_name ident)) (snd md.Ast.decl_item)
-            else ()
-        | Ast.MOD_ITEM_fn fd ->
-            if Array.length fd.Ast.decl_params = 0 && ident = "main"
+      match item.node.Ast.decl_item with
+          Ast.MOD_ITEM_mod (None, items) ->
+            dig (Some (extend prefix_name ident)) items
+
+       | Ast.MOD_ITEM_fn _ ->
+            if ident = "main"
             then fns := (extend prefix_name ident) :: (!fns)
             else ()
+
         | _ -> ()
   in
     dig None crate_items;

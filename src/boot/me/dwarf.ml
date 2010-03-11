@@ -1761,7 +1761,7 @@ let dwarf_visitor
     else
       ();
     begin
-      match item.node with
+      match item.node.Ast.decl_item with
           Ast.MOD_ITEM_mod _ ->
             begin
               log cx "walking module '%s'" (path_name());
@@ -1809,7 +1809,7 @@ let dwarf_visitor
       : unit =
     inner.Walk.visit_mod_item_post id params item;
     begin
-      match item.node with
+      match item.node.Ast.decl_item with
           Ast.MOD_ITEM_mod _
         | Ast.MOD_ITEM_fn _ -> emit_null_die ()
         | _ -> ()
@@ -2287,8 +2287,8 @@ let rec extract_mod_type_items
         DW_TAG_typedef ->
           let ident = get_name die in
           let ty = get_referenced_ty die in
-          let tyi = Ast.MOD_TYPE_ITEM_public_type (decl ty) in
-            htab_put mtis ident tyi
+          let tyi = Ast.MOD_TYPE_ITEM_public_type ty in
+            htab_put mtis ident (decl tyi)
 
       | DW_TAG_compile_unit ->
           extract_children mtis die
@@ -2297,8 +2297,8 @@ let rec extract_mod_type_items
           let ident = get_name die in
           let sub_mtis = get_mod_type_items die in
           let tmod = (None, sub_mtis) in
-          let mti = Ast.MOD_TYPE_ITEM_mod (decl tmod) in
-            htab_put mtis ident mti
+          let mti = Ast.MOD_TYPE_ITEM_mod tmod in
+            htab_put mtis ident (decl mti)
 
       | DW_TAG_subprogram ->
           (* FIXME: finish this. *)
@@ -2312,8 +2312,8 @@ let rec extract_mod_type_items
                        Ast.sig_input_constrs = [| |];
                        Ast.sig_output_slot = oslot }
           in
-          let fty = Ast.MOD_TYPE_ITEM_fn (decl (tsig, taux)) in
-            htab_put mtis ident fty
+          let fty = Ast.MOD_TYPE_ITEM_fn (tsig, taux) in
+            htab_put mtis ident (decl fty)
 
       | _ -> ()
 ;;

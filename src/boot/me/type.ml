@@ -142,18 +142,13 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         let check_entry (query:Ast.ident) tv : unit =
           if Hashtbl.mem items query
           then
-            match Hashtbl.find items query with
+            match (Hashtbl.find items query).Ast.decl_item with
                 (* TODO: parametric modules *)
-                Ast.MOD_TYPE_ITEM_opaque_type _ ->
-                  () (* FIXME: is this right? *)
-              | Ast.MOD_TYPE_ITEM_public_type ty_decl ->
-                  unify_ty ty_decl.Ast.decl_item tv
-              | Ast.MOD_TYPE_ITEM_pred pred_decl ->
-                  unify_ty (Ast.TY_pred pred_decl.Ast.decl_item) tv
-              | Ast.MOD_TYPE_ITEM_mod mod_decl ->
-                  unify_ty (Ast.TY_mod mod_decl.Ast.decl_item) tv
-              | Ast.MOD_TYPE_ITEM_fn fn_decl ->
-                  unify_ty (Ast.TY_fn fn_decl.Ast.decl_item) tv
+                Ast.MOD_TYPE_ITEM_opaque_type _ -> () (* FIXME: is this right? *)
+              | Ast.MOD_TYPE_ITEM_public_type ty -> unify_ty ty tv
+              | Ast.MOD_TYPE_ITEM_pred p -> unify_ty (Ast.TY_pred p) tv
+              | Ast.MOD_TYPE_ITEM_mod m -> unify_ty (Ast.TY_mod m) tv
+              | Ast.MOD_TYPE_ITEM_fn f -> unify_ty (Ast.TY_fn f) tv
           else fail ()
         in
         Hashtbl.iter check_entry dct
@@ -722,9 +717,9 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
     let visit_mod_item_pre n p mod_item =
       begin
         try
-          match mod_item.node with
-              Ast.MOD_ITEM_fn { Ast.decl_item =
-                  { Ast.fn_output_slot = { node = node; id = id } } } ->
+          match mod_item.node.Ast.decl_item with
+              Ast.MOD_ITEM_fn
+                { Ast.fn_output_slot = { node = node; id = id } } ->
                 retval_tv_r := ref TYSPEC_all;
                 unify_slot node (Some id) !retval_tv_r
             | _ -> ()

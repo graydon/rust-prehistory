@@ -224,10 +224,6 @@ and parse_ty_mod (ps:pstate) : (((Ast.ident * Ast.ident array) option) * Ast.ty_
 
 
 and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
-  let decl p i =
-    { Ast.decl_params = p;
-      Ast.decl_item = i }
-  in
   let need_ident_and_params ni_opt =
     match ni_opt with
         None -> raise (Parse_err (ps, "item in mod type without name"))
@@ -239,7 +235,7 @@ and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
             bump ps;
             let (ident_and_params, ty) = parse_ty_mod ps in
             let (ident, params) = need_ident_and_params ident_and_params in
-              (ident, (Ast.MOD_TYPE_ITEM_mod (decl params ty)))
+              (ident, decl params (Ast.MOD_TYPE_ITEM_mod ty))
           end
 
       | FN _ ->
@@ -247,7 +243,7 @@ and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
             let (ident_and_params, ty) = parse_ty_fn false ps in
             let (ident, params) = need_ident_and_params ident_and_params in
               expect ps SEMI;
-              (ident, (Ast.MOD_TYPE_ITEM_fn (decl params ty)))
+              (ident, decl params (Ast.MOD_TYPE_ITEM_fn ty))
           end
 
       | PUB ->
@@ -256,13 +252,13 @@ and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
           let (ident, params) = parse_ident_and_params ps "type pub type" in
           let t = parse_ty ps in
             expect ps SEMI;
-            (ident, (Ast.MOD_TYPE_ITEM_public_type (decl params t)))
+            (ident, decl params (Ast.MOD_TYPE_ITEM_public_type t))
 
       | TYPE ->
           bump ps;
           let (ident, params) = parse_ident_and_params ps "type type" in
             expect ps SEMI;
-            (ident, (Ast.MOD_TYPE_ITEM_opaque_type (decl params Ast.IMMUTABLE)))
+            (ident, decl params (Ast.MOD_TYPE_ITEM_opaque_type Ast.IMMUTABLE))
 
       (* FIXME: parse ty_pred. *)
       | _ -> raise (unexpected ps)

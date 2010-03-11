@@ -92,17 +92,17 @@ let entry_keys header constrs resolver =
 ;;
 
 
-let fn_decl_keys fd resolver =
-  let fn = fd.Ast.decl_item in
+let fn_keys fn resolver =
     entry_keys fn.Ast.fn_input_slots fn.Ast.fn_input_constrs resolver
 ;;
 
-let pred_decl_keys pd resolver =
-  let pred = pd.Ast.decl_item in
+let pred_keys pred resolver =
     entry_keys pred.Ast.pred_input_slots pred.Ast.pred_input_constrs resolver
+;;
 
-let stateful_mod_decl_keys hdr resolver =
-    entry_keys (fst hdr) (snd hdr) resolver
+let stateful_mod_keys (slots, constrs) resolver =
+    entry_keys slots constrs resolver
+;;
 
 
 let constr_id_assigning_visitor
@@ -136,17 +136,17 @@ let constr_id_assigning_visitor
 
   let visit_mod_item_pre n p i =
     begin
-    match i.node with
-        Ast.MOD_ITEM_fn fd ->
-          let (input_keys, init_keys) = fn_decl_keys fd resolve_constr_to_key in
+    match i.node.Ast.decl_item with
+        Ast.MOD_ITEM_fn f ->
+          let (input_keys, init_keys) = fn_keys f resolve_constr_to_key in
             note_keys input_keys;
             note_keys init_keys
-      | Ast.MOD_ITEM_mod {Ast.decl_item=(Some hdr, _)} ->
-          let (input_keys, init_keys) = stateful_mod_decl_keys hdr resolve_constr_to_key in
+      | Ast.MOD_ITEM_mod (Some hdr, _) ->
+          let (input_keys, init_keys) = stateful_mod_keys hdr resolve_constr_to_key in
             note_keys input_keys;
             note_keys init_keys
-      | Ast.MOD_ITEM_pred pd ->
-          let (input_keys, init_keys) = pred_decl_keys pd resolve_constr_to_key in
+      | Ast.MOD_ITEM_pred p ->
+          let (input_keys, init_keys) = pred_keys p resolve_constr_to_key in
             note_keys input_keys;
             note_keys init_keys
       | _ -> ()
@@ -281,26 +281,26 @@ let condition_assigning_visitor
 
   let visit_mod_item_pre n p i =
     begin
-      match i.node with
-          Ast.MOD_ITEM_fn fd ->
-            let (input_keys, init_keys) = fn_decl_keys fd resolve_constr_to_key in
-              raise_entry_state input_keys init_keys fd.Ast.decl_item.Ast.fn_body
+      match i.node.Ast.decl_item with
+          Ast.MOD_ITEM_fn f ->
+            let (input_keys, init_keys) = fn_keys f resolve_constr_to_key in
+              raise_entry_state input_keys init_keys f.Ast.fn_body
 
-        | Ast.MOD_ITEM_mod {Ast.decl_item=(Some hdr, mis)} ->
-            let (input_keys, init_keys) = stateful_mod_decl_keys hdr resolve_constr_to_key in
+        | Ast.MOD_ITEM_mod (Some hdr, mis) ->
+            let (input_keys, init_keys) = stateful_mod_keys hdr resolve_constr_to_key in
             let raise_in_item _ item =
-              match item.node with
-                  Ast.MOD_ITEM_fn fd ->
-                    raise_entry_state input_keys init_keys fd.Ast.decl_item.Ast.fn_body
-                | Ast.MOD_ITEM_pred pd ->
-                    raise_entry_state input_keys init_keys pd.Ast.decl_item.Ast.pred_body
+              match item.node.Ast.decl_item with
+                  Ast.MOD_ITEM_fn f ->
+                    raise_entry_state input_keys init_keys f.Ast.fn_body
+                | Ast.MOD_ITEM_pred p ->
+                    raise_entry_state input_keys init_keys p.Ast.pred_body
                 | _ -> ()
             in
               Hashtbl.iter raise_in_item mis
 
-        | Ast.MOD_ITEM_pred pd ->
-            let (input_keys, init_keys) = pred_decl_keys pd resolve_constr_to_key in
-              raise_entry_state input_keys init_keys pd.Ast.decl_item.Ast.pred_body
+        | Ast.MOD_ITEM_pred p ->
+            let (input_keys, init_keys) = pred_keys p resolve_constr_to_key in
+              raise_entry_state input_keys init_keys p.Ast.pred_body
 
         | _ -> ()
     end;

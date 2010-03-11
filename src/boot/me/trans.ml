@@ -3175,17 +3175,16 @@ let trans_visitor
           fun ident ->
             let item = Hashtbl.find m ident in
             let fix =
-              match item.node with
+              match item.node.Ast.decl_item with
                   Ast.MOD_ITEM_fn _
                 | Ast.MOD_ITEM_pred _
                 | Ast.MOD_ITEM_tag _ -> get_fn_fixup cx item.id
                 | Ast.MOD_ITEM_mod _ -> get_mod_fixup cx item.id
-                | Ast.MOD_ITEM_opaque_type td
-                | Ast.MOD_ITEM_public_type td ->
-                    let t = td.Ast.decl_item in
-                      ignore (trans_type_info t);
-                      let (fix, _) = Hashtbl.find cx.ctxt_data (DATA_typeinfo t) in
-                        fix
+                | Ast.MOD_ITEM_opaque_type t
+                | Ast.MOD_ITEM_public_type t ->
+                    ignore (trans_type_info t);
+                    let (fix, _) = Hashtbl.find cx.ctxt_data (DATA_typeinfo t) in
+                      fix
             in
               pair_with_nil fix
         end
@@ -3215,7 +3214,7 @@ let trans_visitor
   let visit_local_mod_item_pre n p i =
     enter_file_for i.id;
     begin
-      match i.node with
+      match i.node.Ast.decl_item with
           Ast.MOD_ITEM_fn f ->
             if path_name() = cx.ctxt_main_name
             then
@@ -3225,18 +3224,18 @@ let trans_visitor
                   cx.ctxt_main_exit_proc_glue_fixup
                   GLUE_exit_main_proc;
               end;
-            trans_fn i.id f.Ast.decl_item.Ast.fn_body
+            trans_fn i.id f.Ast.fn_body
 
-        | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.decl_item.Ast.pred_body
-        | Ast.MOD_ITEM_tag t -> trans_tag n i.id t.Ast.decl_item
+        | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.pred_body
+        | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
   in
 
   let visit_imported_mod_item_pre _ _ i =
-    match i.node with
-        Ast.MOD_ITEM_fn f -> trans_imported_fn i.id f.Ast.decl_item.Ast.fn_body.id
+    match i.node.Ast.decl_item with
+        Ast.MOD_ITEM_fn f -> trans_imported_fn i.id f.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
       | _ -> bugi cx i.id "unsupported type of import: %s" (path_name())
   in
@@ -3253,8 +3252,8 @@ let trans_visitor
   let visit_local_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
     begin
-      match i.node with
-          Ast.MOD_ITEM_mod m -> trans_mod i.id (snd m.Ast.decl_item)
+      match i.node.Ast.decl_item with
+          Ast.MOD_ITEM_mod (_, mis) -> trans_mod i.id mis
         | _ -> ()
     end;
     leave_file_for i.id
@@ -3390,7 +3389,7 @@ let fixup_assigning_visitor
   let visit_mod_item_pre n p i =
     enter_file_for i.id;
     begin
-      match i.node with
+      match i.node.Ast.decl_item with
 
           Ast.MOD_ITEM_pred _
         | Ast.MOD_ITEM_tag _ ->

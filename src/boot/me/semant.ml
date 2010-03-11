@@ -797,30 +797,21 @@ let check_concrete params thing =
 
 
 let ty_of_mod_type_item (mti:Ast.mod_type_item) : Ast.ty =
-    match mti with
-        Ast.MOD_TYPE_ITEM_opaque_type td ->
-          let mut = td.Ast.decl_item in
+  check_concrete mti.Ast.decl_params
+    begin
+      match mti.Ast.decl_item with
+          Ast.MOD_TYPE_ITEM_opaque_type mut ->
             (* 
              * FIXME (bug 541598): generate opaque_ids uniquely per
              * name (incl. type parameters)
              *)
-          let opaque_id = Opaque 0 in
-            check_concrete td.Ast.decl_params (Ast.TY_opaque (opaque_id, mut))
-
-      | Ast.MOD_TYPE_ITEM_public_type td ->
-          check_concrete td.Ast.decl_params td.Ast.decl_item
-
-      | Ast.MOD_TYPE_ITEM_pred pd ->
-          check_concrete pd.Ast.decl_params
-            (Ast.TY_pred pd.Ast.decl_item)
-
-      | Ast.MOD_TYPE_ITEM_mod md ->
-          check_concrete md.Ast.decl_params
-            (Ast.TY_mod md.Ast.decl_item)
-
-      | Ast.MOD_TYPE_ITEM_fn fd ->
-          check_concrete fd.Ast.decl_params
-            (Ast.TY_fn fd.Ast.decl_item)
+            let opaque_id = Opaque 0 in
+              Ast.TY_opaque (opaque_id, mut)
+        | Ast.MOD_TYPE_ITEM_public_type ty -> ty
+        | Ast.MOD_TYPE_ITEM_pred p -> Ast.TY_pred p
+        | Ast.MOD_TYPE_ITEM_mod m -> Ast.TY_mod m
+        | Ast.MOD_TYPE_ITEM_fn f -> Ast.TY_fn f
+    end
 ;;
 
 
@@ -890,19 +881,25 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
         begin
           let referent = lval_to_referent cx nb.id in
             match htab_search cx.ctxt_all_defns referent with
-                Some (DEFN_item item) -> {node=item; id=referent}
+                (*
+                 * FIXME: returning empty params this way is wrong.
+                 * DEFN_item should hold an Ast.mod_item' decl.
+                 *)
+                Some (DEFN_item item) -> {node={Ast.decl_params=[||];
+                                                Ast.decl_item=item}; id=referent}
               | _ -> bug () "lval does not name an item"
         end
     | Ast.LVAL_ext (base, comp) ->
-        match (lval_item cx base).node with
-            Ast.MOD_ITEM_mod mis ->
+        let base_item = lval_item cx base in
+        match base_item.node.Ast.decl_item with
+            Ast.MOD_ITEM_mod (_, items) ->
               begin
                 match comp with
                     Ast.COMP_named (Ast.COMP_ident i) ->
                       begin
-                        match htab_search (snd mis.Ast.decl_item) i with
+                        match htab_search items i with
                             None -> err None "unknown module item '%s'" i
-                          | Some sub -> check_concrete mis.Ast.decl_params sub
+                          | Some sub -> check_concrete base_item.node.Ast.decl_params sub
                       end
                   | _ ->
                       bug () "unhandled lval-component in Semant.lval_item"
@@ -933,7 +930,7 @@ let lval_is_direct_mod (cx:ctxt) (lval:Ast.lval) : bool =
     then false
     else
       match defn with
-          DEFN_item (Ast.MOD_ITEM_mod {Ast.decl_item=(None, _)}) -> true
+          DEFN_item (Ast.MOD_ITEM_mod (None, _)) -> true
         | _ -> false
 ;;
 
@@ -1019,33 +1016,34 @@ and mod_type_item_of_mod_item
     (inside:bool)
     (item:Ast.mod_item)
     : Ast.mod_type_item option =
-  let decl params item =
-    { Ast.decl_params = params;
-      Ast.decl_item = item }
-  in
-    match item.node with
-        Ast.MOD_ITEM_opaque_type td ->
+  let item_opt =
+    match item.node.Ast.decl_item with
+        Ast.MOD_ITEM_opaque_type t ->
           if inside
           then
-            Some (Ast.MOD_TYPE_ITEM_public_type td)
+            Some (Ast.MOD_TYPE_ITEM_public_type t)
           else
             let mut =
-              if type_is_mutable td.Ast.decl_item
-              then Ast.MUTABLE else Ast.IMMUTABLE
+              if type_is_mutable t
+              then Ast.MUTABLE
+              else Ast.IMMUTABLE
             in
-              Some (Ast.MOD_TYPE_ITEM_opaque_type (decl td.Ast.decl_params mut))
-      | Ast.MOD_ITEM_public_type td ->
-          Some (Ast.MOD_TYPE_ITEM_public_type td)
-      | Ast.MOD_ITEM_pred pd ->
-          Some (Ast.MOD_TYPE_ITEM_pred
-                  (decl pd.Ast.decl_params (ty_pred_of_pred pd.Ast.decl_item)))
-      | Ast.MOD_ITEM_mod md ->
-          Some (Ast.MOD_TYPE_ITEM_mod
-                  (decl md.Ast.decl_params (ty_mod_of_mod true md.Ast.decl_item)))
-      | Ast.MOD_ITEM_fn fd ->
-          Some (Ast.MOD_TYPE_ITEM_fn
-                  (decl fd.Ast.decl_params (ty_fn_of_fn fd.Ast.decl_item)))
+              Some (Ast.MOD_TYPE_ITEM_opaque_type mut)
+      | Ast.MOD_ITEM_public_type t ->
+          Some (Ast.MOD_TYPE_ITEM_public_type t)
+      | Ast.MOD_ITEM_pred p ->
+          Some (Ast.MOD_TYPE_ITEM_pred (ty_pred_of_pred p))
+      | Ast.MOD_ITEM_mod m ->
+          Some (Ast.MOD_TYPE_ITEM_mod (ty_mod_of_mod true m))
+      | Ast.MOD_ITEM_fn f ->
+          Some (Ast.MOD_TYPE_ITEM_fn (ty_fn_of_fn f))
       | Ast.MOD_ITEM_tag _ -> None
+  in
+    match item_opt with
+        None -> None
+      | Some item' ->
+          Some { Ast.decl_params = item.node.Ast.decl_params;
+                 Ast.decl_item = item' }
 
 and arg_slots (slots:Ast.header_slots) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
@@ -1064,41 +1062,24 @@ and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
    pred.Ast.pred_input_constrs)
 
 and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
-  let check_concrete params ty =
-    if Array.length params = 0
-    then ty
-    else bug () "item has parametric type in ty_of_mod_item"
-  in
-    match item.node with
-        Ast.MOD_ITEM_opaque_type td ->
-          check_concrete td.Ast.decl_params Ast.TY_type
-
-      | Ast.MOD_ITEM_public_type td ->
-          check_concrete td.Ast.decl_params Ast.TY_type
-
-      | Ast.MOD_ITEM_pred pd ->
-          check_concrete pd.Ast.decl_params
-            (Ast.TY_pred (ty_pred_of_pred pd.Ast.decl_item))
-
-      | Ast.MOD_ITEM_mod md ->
-          check_concrete md.Ast.decl_params
-            (Ast.TY_mod (ty_mod_of_mod inside md.Ast.decl_item))
-
-      | Ast.MOD_ITEM_fn fd ->
-          check_concrete fd.Ast.decl_params
-            (Ast.TY_fn (ty_fn_of_fn fd.Ast.decl_item))
-
-      | Ast.MOD_ITEM_tag td ->
-          let (htup, ttag, _) = td.Ast.decl_item in
-          let taux = { Ast.fn_purity = Ast.PURE;
-                       Ast.fn_proto = None }
-          in
-          let tsig = { Ast.sig_input_slots = tup_slots htup;
-                       Ast.sig_input_constrs = [| |];
-                       Ast.sig_output_slot = interior_slot (Ast.TY_tag ttag) }
-          in
-            check_concrete td.Ast.decl_params
+  check_concrete item.node.Ast.decl_params
+    begin
+      match item.node.Ast.decl_item with
+          Ast.MOD_ITEM_opaque_type _
+        | Ast.MOD_ITEM_public_type _ -> Ast.TY_type
+        | Ast.MOD_ITEM_pred p -> (Ast.TY_pred (ty_pred_of_pred p))
+        | Ast.MOD_ITEM_mod m -> (Ast.TY_mod (ty_mod_of_mod inside m))
+        | Ast.MOD_ITEM_fn f -> (Ast.TY_fn (ty_fn_of_fn f))
+        | Ast.MOD_ITEM_tag (htup, ttag, _) ->
+            let taux = { Ast.fn_purity = Ast.PURE;
+                         Ast.fn_proto = None }
+            in
+            let tsig = { Ast.sig_input_slots = tup_slots htup;
+                         Ast.sig_input_constrs = [| |];
+                         Ast.sig_output_slot = interior_slot (Ast.TY_tag ttag) }
+            in
               (Ast.TY_fn (tsig, taux))
+    end
 ;;
 
 (* Scopes and the visitor that builds them. *)
@@ -1206,26 +1187,25 @@ let lookup_by_ident
 
       | SCOPE_mod_item item ->
           begin
-            match item.node with
+            match item.node.Ast.decl_item with
                 Ast.MOD_ITEM_fn f ->
-                  check_input_slot f.Ast.decl_item.Ast.fn_input_slots
+                  check_input_slot f.Ast.fn_input_slots
 
               | Ast.MOD_ITEM_pred p ->
-                  check_input_slot p.Ast.decl_item.Ast.pred_input_slots
+                  check_input_slot p.Ast.pred_input_slots
 
-              | Ast.MOD_ITEM_mod m ->
-                  let (hdr, md) = m.Ast.decl_item in
-                    begin
-                      match check_items md with
-                          Some m -> Some m
-                        | None ->
-                            begin
-                              match hdr with
-                                  None -> None
-                                | Some (h, _) ->
-                                    check_input_slot h
-                            end
-                    end
+              | Ast.MOD_ITEM_mod (hdr, md) ->
+                  begin
+                    match check_items md with
+                        Some m -> Some m
+                      | None ->
+                          begin
+                            match hdr with
+                                None -> None
+                              | Some (h, _) ->
+                                  check_input_slot h
+                          end
+                  end
               | _ -> None
           end
       | SCOPE_mod_type_item _ -> None

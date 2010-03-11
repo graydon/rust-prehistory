@@ -440,23 +440,24 @@ and 'a decl =
  *)
 
 and mod_item' =
-    MOD_ITEM_opaque_type of ty decl
-  | MOD_ITEM_public_type of ty decl
-  | MOD_ITEM_tag of (header_tup * ty_tag * node_id) decl
-  | MOD_ITEM_pred of pred decl
-  | MOD_ITEM_mod of (mod_header option * mod_items) decl
-  | MOD_ITEM_fn of fn decl
+    MOD_ITEM_opaque_type of ty
+  | MOD_ITEM_public_type of ty
+  | MOD_ITEM_tag of (header_tup * ty_tag * node_id)
+  | MOD_ITEM_pred of pred
+  | MOD_ITEM_mod of (mod_header option * mod_items)
+  | MOD_ITEM_fn of fn
 
-and mod_item = mod_item' identified
+and mod_item = (mod_item' decl) identified
 and mod_items = (ident, mod_item) Hashtbl.t
 
-and mod_type_item =
-    MOD_TYPE_ITEM_opaque_type of mutability decl
-  | MOD_TYPE_ITEM_public_type of ty decl
-  | MOD_TYPE_ITEM_pred of ty_pred decl
-  | MOD_TYPE_ITEM_mod of ty_mod decl
-  | MOD_TYPE_ITEM_fn of ty_fn decl
+and mod_type_item' =
+    MOD_TYPE_ITEM_opaque_type of mutability
+  | MOD_TYPE_ITEM_public_type of ty
+  | MOD_TYPE_ITEM_pred of ty_pred
+  | MOD_TYPE_ITEM_mod of ty_mod
+  | MOD_TYPE_ITEM_fn of ty_fn
 
+and mod_type_item = mod_type_item' decl
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
 and crate' =
@@ -677,28 +678,28 @@ and fmt_mod_type_item
     : unit =
   fmt ff "@\n";
   begin
-    match item with
-        MOD_TYPE_ITEM_opaque_type td ->
+    match item.decl_item with
+        MOD_TYPE_ITEM_opaque_type _ ->
           fmt ff "type ";
-          fmt_ident_and_params ff id td.decl_params;
+          fmt_ident_and_params ff id item.decl_params;
           fmt ff ";"
 
-      | MOD_TYPE_ITEM_public_type td ->
+      | MOD_TYPE_ITEM_public_type ty ->
           fmt ff "pub type ";
-          fmt_ident_and_params ff id td.decl_params;
+          fmt_ident_and_params ff id item.decl_params;
           fmt ff " = ";
-          fmt_ty ff td.decl_item;
+          fmt_ty ff ty;
           fmt ff ";";
 
-      | MOD_TYPE_ITEM_pred pd ->
-          fmt_ty_pred ff (Some (id, pd.decl_params)) pd.decl_item;
+      | MOD_TYPE_ITEM_pred p ->
+          fmt_ty_pred ff (Some (id, item.decl_params)) p;
           fmt ff ";";
 
-      | MOD_TYPE_ITEM_mod md ->
-          fmt_ty_mod ff (Some (id, md.decl_params)) md.decl_item
+      | MOD_TYPE_ITEM_mod m ->
+          fmt_ty_mod ff (Some (id, item.decl_params)) m
 
-      | MOD_TYPE_ITEM_fn fd ->
-          fmt_ty_fn ff (Some (id, fd.decl_params)) fd.decl_item;
+      | MOD_TYPE_ITEM_fn f ->
+          fmt_ty_fn ff (Some (id, item.decl_params)) f;
           fmt ff ";";
   end
 
@@ -1178,55 +1179,56 @@ and fmt_fn (ff:Format.formatter) (id:ident) (params:ident array) (f:fn) : unit =
 
 and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
   fmt ff "@\n";
-  begin
-    match item.node with
-        MOD_ITEM_opaque_type td ->
-          fmt ff "type ";
-          fmt_ident_and_params ff id td.decl_params;
-          fmt ff " = ";
-          fmt_ty ff td.decl_item;
-          fmt ff ";";
+  let params = item.node.decl_params in
+    begin
+      match item.node.decl_item with
+          MOD_ITEM_opaque_type ty ->
+            fmt ff "type ";
+            fmt_ident_and_params ff id params;
+            fmt ff " = ";
+            fmt_ty ff ty;
+            fmt ff ";";
 
-      | MOD_ITEM_public_type td ->
-          fmt ff "pub type ";
-          fmt_ident_and_params ff id td.decl_params;
-          fmt ff " = ";
-          fmt_ty ff td.decl_item;
-          fmt ff ";";
+        | MOD_ITEM_public_type ty ->
+            fmt ff "pub type ";
+            fmt_ident_and_params ff id params;
+            fmt ff " = ";
+            fmt_ty ff ty;
+            fmt ff ";";
 
-      | MOD_ITEM_tag _ ->
-          fmt ff "?tagdecl?"
+        | MOD_ITEM_tag _ ->
+            fmt ff "?tagdecl?"
 
-      | MOD_ITEM_pred pd ->
-          fmt_obox ff;
-          fmt ff "pred ";
-          fmt_ident_and_params ff id pd.decl_params;
-          fmt_header_slots ff pd.decl_item.pred_input_slots;
-          fmt_decl_constrs ff pd.decl_item.pred_input_constrs;
-          fmt ff " ";
-          fmt_obr ff;
-          fmt_stmts ff pd.decl_item.pred_body.node;
-          fmt_cbb ff
+        | MOD_ITEM_pred p ->
+            fmt_obox ff;
+            fmt ff "pred ";
+            fmt_ident_and_params ff id params;
+            fmt_header_slots ff p.pred_input_slots;
+            fmt_decl_constrs ff p.pred_input_constrs;
+            fmt ff " ";
+            fmt_obr ff;
+            fmt_stmts ff p.pred_body.node;
+            fmt_cbb ff
 
-      | MOD_ITEM_mod md ->
-          fmt_obox ff;
-          fmt ff "mod ";
-          fmt_ident_and_params ff id md.decl_params;
-          begin
-            match (fst md.decl_item) with
-                None -> ()
-              | Some (hslots, constrs) ->
-                  fmt_header_slots ff hslots;
-                  fmt_decl_constrs ff constrs
-          end;
-          fmt ff " ";
-          fmt_obr ff;
-          fmt_mod_items ff (snd md.decl_item);
-          fmt_cbb ff
+        | MOD_ITEM_mod (hdr,items) ->
+            fmt_obox ff;
+            fmt ff "mod ";
+            fmt_ident_and_params ff id params;
+            begin
+              match hdr with
+                  None -> ()
+                | Some (hslots, constrs) ->
+                    fmt_header_slots ff hslots;
+                    fmt_decl_constrs ff constrs
+            end;
+            fmt ff " ";
+            fmt_obr ff;
+            fmt_mod_items ff items;
+            fmt_cbb ff
 
-      | MOD_ITEM_fn fd ->
-          fmt_fn ff id fd.decl_params fd.decl_item
-  end
+        | MOD_ITEM_fn f ->
+            fmt_fn ff id params f
+    end
 
 and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
   Hashtbl.iter (fmt_mod_item ff) mi

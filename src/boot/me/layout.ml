@@ -227,26 +227,23 @@ let layout_visitor
   let visit_mod_item_pre n p i =
     let header_slot_ids hdr = Array.map (fun (sid,_) -> sid.id) hdr in
     begin
-      match i.node with
-          Ast.MOD_ITEM_fn fd ->
+      match i.node.Ast.decl_item with
+          Ast.MOD_ITEM_fn f ->
             enter_frame i.id;
             layout_header i.id
-              (header_slot_ids fd.Ast.decl_item.Ast.fn_input_slots)
+              (header_slot_ids f.Ast.fn_input_slots)
 
-        | Ast.MOD_ITEM_pred pd ->
+        | Ast.MOD_ITEM_pred p ->
             enter_frame i.id;
             layout_header i.id
-              (header_slot_ids
-                 pd.Ast.decl_item.Ast.pred_input_slots)
+              (header_slot_ids p.Ast.pred_input_slots)
 
-        | Ast.MOD_ITEM_tag td ->
-            let (header_slots, _, _) = td.Ast.decl_item in
-              enter_frame i.id;
-              layout_header i.id
-                (Array.map (fun sid -> sid.id)
-                   header_slots)
+        | Ast.MOD_ITEM_tag (header_slots, _, _) ->
+            enter_frame i.id;
+            layout_header i.id
+              (Array.map (fun sid -> sid.id) header_slots)
 
-        | Ast.MOD_ITEM_mod {Ast.decl_item=(Some (hdr, _), _)} ->
+        | Ast.MOD_ITEM_mod (Some (hdr, _), _) ->
             let ids = header_slot_ids hdr in
               layout_mod_closure i.id ids;
               Array.iter
@@ -260,7 +257,7 @@ let layout_visitor
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
     begin
-      match i.node with
+      match i.node.Ast.decl_item with
           Ast.MOD_ITEM_fn _ -> leave_frame ()
         | Ast.MOD_ITEM_pred _ -> leave_frame ()
         | Ast.MOD_ITEM_tag _ -> leave_frame ()

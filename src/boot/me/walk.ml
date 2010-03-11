@@ -169,34 +169,27 @@ and walk_mod_item
     (name:Ast.ident)
     (item:Ast.mod_item)
     : unit =
-  let (params,children) =
-    match item.node with
-        Ast.MOD_ITEM_opaque_type td ->
-          (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
-      | Ast.MOD_ITEM_public_type td ->
-          (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
-      | Ast.MOD_ITEM_tag td ->
-          (td.Ast.decl_params, (fun _ ->
-                                  let (htup, ttag, _) = td.Ast.decl_item in
-                                    walk_header_tup v htup;
-                                    walk_ty_tag v ttag))
-      | Ast.MOD_ITEM_pred pd ->
-          (pd.Ast.decl_params, (fun _ -> walk_pred v pd.Ast.decl_item))
-      | Ast.MOD_ITEM_mod md ->
-          (md.Ast.decl_params,
-           (fun _ ->
-              let (hdr, md) = md.Ast.decl_item in
-                walk_option (fun (h,constrs) ->
-                               walk_header_slots v h;
-                               walk_constrs v constrs) hdr;
-                walk_mod_items v md))
-      | Ast.MOD_ITEM_fn fd ->
-          (fd.Ast.decl_params, (fun _ -> walk_fn v fd.Ast.decl_item))
+  let children _ =
+    match item.node.Ast.decl_item with
+        Ast.MOD_ITEM_opaque_type ty
+      | Ast.MOD_ITEM_public_type ty -> walk_ty v ty
+      | Ast.MOD_ITEM_fn f -> walk_fn v f
+      | Ast.MOD_ITEM_pred p -> walk_pred v p
+      | Ast.MOD_ITEM_tag (htup, ttag, _) ->
+          walk_header_tup v htup;
+          walk_ty_tag v ttag
+
+      | Ast.MOD_ITEM_mod (hdr, items) ->
+          walk_option (fun (h,constrs) ->
+                         walk_header_slots v h;
+                         walk_constrs v constrs) hdr;
+          walk_mod_items v items
+
   in
     walk_bracketed
-      (v.visit_mod_item_pre name params)
+      (v.visit_mod_item_pre name item.node.Ast.decl_params)
       children
-      (v.visit_mod_item_post name params)
+      (v.visit_mod_item_post name item.node.Ast.decl_params)
       item
 
 
@@ -273,23 +266,18 @@ and walk_mod_type_item
     (name:Ast.ident)
     (item:Ast.mod_type_item)
     : unit =
-  let (params,children) =
-    match item with
-        Ast.MOD_TYPE_ITEM_opaque_type td ->
-          (td.Ast.decl_params, (fun _ -> ()))
-      | Ast.MOD_TYPE_ITEM_public_type td ->
-          (td.Ast.decl_params, (fun _ -> walk_ty v td.Ast.decl_item))
-      | Ast.MOD_TYPE_ITEM_pred pd ->
-            (pd.Ast.decl_params, (fun _ -> walk_ty_pred v pd.Ast.decl_item))
-      | Ast.MOD_TYPE_ITEM_mod md ->
-          (md.Ast.decl_params, (fun _ -> walk_mod_type_items v md.Ast.decl_item))
-      | Ast.MOD_TYPE_ITEM_fn fd ->
-          (fd.Ast.decl_params, (fun _ -> walk_ty_fn v fd.Ast.decl_item))
+  let children _ =
+    match item.Ast.decl_item with
+        Ast.MOD_TYPE_ITEM_opaque_type _ -> ()
+      | Ast.MOD_TYPE_ITEM_public_type ty -> walk_ty v ty
+      | Ast.MOD_TYPE_ITEM_pred p -> walk_ty_pred v p
+      | Ast.MOD_TYPE_ITEM_mod m -> walk_mod_type_items v m
+      | Ast.MOD_TYPE_ITEM_fn f -> walk_ty_fn v f
   in
     walk_bracketed
-      (v.visit_mod_type_item_pre name params)
+      (v.visit_mod_type_item_pre name item.Ast.decl_params)
       children
-      (v.visit_mod_type_item_post name params)
+      (v.visit_mod_type_item_post name item.Ast.decl_params)
       item
 
 and walk_ty_pred
