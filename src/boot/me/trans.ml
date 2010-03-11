@@ -103,11 +103,6 @@ let trans_visitor
       nabi_convention = CONV_rust }
   in
 
-  let nabi_c =
-    { nabi_indirect = true;
-      nabi_convention = CONV_cdecl }
-  in
-
   let out_mem_disp = abi.Abi.abi_frame_base_sz in
   let arg0_disp = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
   let frame_crate_ptr = word_n (-1) in
@@ -3035,7 +3030,7 @@ let trans_visitor
   let trans_imported_fn (fnid:node_id) (blockid:node_id) : unit =
     trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
-    let (ilib, _) = Hashtbl.find cx.ctxt_imported_items fnid in
+    let (ilib, conv) = Hashtbl.find cx.ctxt_imported_items fnid in
     let lib_num =
       htab_search_or_add cx.ctxt_import_lib_num ilib
         (fun _ -> Hashtbl.length cx.ctxt_import_lib_num)
@@ -3108,6 +3103,9 @@ let trans_visitor
                   in
                     Array.init n_args mk_arg
                 in
+                let nabi = { nabi_convention = conv;
+                             nabi_indirect = true }
+                in
                   trans_upcall "upcall_import_c_sym" f [| Il.Cell (curr_crate_ptr());
                                                           imm (Int64.of_int lib_num);
                                                           imm (Int64.of_int c_sym_num);
@@ -3115,7 +3113,7 @@ let trans_visitor
                                                           symstr |];
 
                   abi.Abi.abi_emit_native_call_in_thunk (emitter())
-                    ret nabi_c (Il.Cell f) args;
+                    ret nabi (Il.Cell f) args;
               end
 
           | _ -> bug () "Trans.imported_rust_fn on unexpected form of import library"
