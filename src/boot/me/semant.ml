@@ -90,6 +90,7 @@ type ctxt =
       ctxt_all_defns: (node_id,defn) Hashtbl.t;                         (* definition id --> definition *)
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;               (* reference id --> definition id *)
       ctxt_imported_items: (node_id, (import_lib * nabi_conv)) Hashtbl.t;
+      ctxt_pat_to_tag: (node_id,node_id) Hashtbl.t;
 
       (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
@@ -166,6 +167,7 @@ let new_ctxt sess abi crate =
     ctxt_all_defns = Hashtbl.create 0;
     ctxt_lval_to_referent = Hashtbl.create 0;
     ctxt_imported_items = crate.Ast.crate_imported;
+    ctxt_pat_to_tag = Hashtbl.create 0;
 
     ctxt_mutable_slot_referent = Hashtbl.create 0;
 

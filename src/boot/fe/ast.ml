@@ -249,7 +249,7 @@ and stmt = stmt' identified
 and stmt_alt_tag =
     {
       alt_tag_lval: lval;
-      alt_tag_arms: (ident * header_slots * block) array;
+      alt_tag_arms: pat array;
     }
 
 and stmt_alt_type =
@@ -308,6 +308,9 @@ and slice =
 and realm =
     REALM_local
   | REALM_thread
+
+and pat' = ident * header_slots * block
+and pat = pat' identified
 
 and atom =
     ATOM_literal of (lit identified)

@@ -2643,7 +2643,8 @@ let trans_visitor
     let tag_keys = sorted_htab_keys ty_tag in
     let tag_cell:Il.cell = get_element_ptr lval_cell 0 in
     let union_cell:Il.cell = get_element_ptr lval_cell 1 in
-    let trans_arm ((tag_id:Ast.ident), slots, (block:Ast.block)) : quad_idx =
+    let trans_arm
+        { node = ((tag_id:Ast.ident), slots, (block:Ast.block)) } : quad_idx =
       let tag_name = Ast.NAME_base (Ast.BASE_ident tag_id) in
       let tag_number = arr_idx tag_keys tag_name in
       emit (Il.cmp (Il.Cell tag_cell) (imm (Int64.of_int tag_number)));

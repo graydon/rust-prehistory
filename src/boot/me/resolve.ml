@@ -101,7 +101,7 @@ let stmt_collecting_visitor
                 end
             end
         | Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
-            let iter_arms (_, bindings, block) =
+            let resolve_arm { node = (_, bindings, block); id = _ } =
               let slots = Hashtbl.find cx.ctxt_block_slots block.id in
               let iter_binding ({ node = _; id = node_id }, ident) =
                 let key = Ast.KEY_ident ident in
@@ -110,7 +110,7 @@ let stmt_collecting_visitor
               in
               Array.iter iter_binding bindings
             in
-            Array.iter iter_arms arms
+            Array.iter resolve_arm arms
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre stmt
@@ -600,6 +600,32 @@ let resolve_recursion
     end
 ;;
 
+let pattern_resolving_visitor
+    (cx:ctxt)
+    (scopes:scope list ref)
+    (inner:Walk.visitor) : Walk.visitor =
+  let visit_stmt_pre stmt =
+    begin
+      match stmt.node with
+        Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
+          let resolve_arm { node = (ident, _, _); id = arm_id } =
+            match lookup_by_ident cx !scopes ident with
+                None ->
+                  err (Some arm_id) "unresolved tag constructor '%s'" ident
+              | Some (_, tag_id) ->
+                  match Hashtbl.find cx.ctxt_all_defns tag_id with
+                      DEFN_item (Ast.MOD_ITEM_tag _) ->
+                        Hashtbl.add cx.ctxt_pat_to_tag arm_id tag_id
+                    | _ ->
+                        err (Some arm_id) "'%s' is not a tag constructor" ident
+          in
+          Array.iter resolve_arm arms
+      | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre stmt
+  in
+  { inner with Walk.visit_stmt_pre = visit_stmt_pre }
+;;
 
 let process_crate
     (cx:ctxt)
@@ -633,11 +659,20 @@ let process_crate
                Walk.empty_visitor)));
     |]
   in
+  let passes_2 =
+    [|
+      (scope_stack_managing_visitor scopes
+        (pattern_resolving_visitor cx scopes
+          Walk.empty_visitor))
+    |]
+  in
     log cx "running primary resolve passes";
     run_passes cx "resolve collect" path passes_0 (log cx "%s") crate;
     resolve_recursion cx node_to_references recursive_tag_groups;
     log cx "running secondary resolve passes";
-    run_passes cx "resolve bind" path passes_1 (log cx "%s") crate
+    run_passes cx "resolve bind" path passes_1 (log cx "%s") crate;
+    log cx "running tertiary resolve passes";
+    run_passes cx "resolve patterns" path passes_2 (log cx "%s") crate
 ;;
 
 (*

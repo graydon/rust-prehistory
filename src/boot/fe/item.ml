@@ -230,7 +230,8 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                             match bracketed LPAREN RPAREN parse_tag_pat ps with
                               (tag_cons, tag_vars) ->
                                 let block = parse_block ps in
-                                (tag_cons, tag_vars, block) :: (parse_arms ps)
+                                let arm = (tag_cons, tag_vars, block) in
+                                (span ps apos (lexpos ps) arm)::(parse_arms ps)
                           end
                       | _ -> []
                   in
