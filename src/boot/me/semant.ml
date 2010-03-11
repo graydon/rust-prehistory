@@ -49,7 +49,7 @@ type data =
 
 type defn =
     DEFN_slot of Ast.slot
-  | DEFN_item of Ast.mod_item'
+  | DEFN_item of Ast.mod_item' Ast.decl
 ;;
 
 type glue_code = (glue, code) Hashtbl.t;;
@@ -379,8 +379,8 @@ let defn_is_callable (d:defn) : bool =
   match d with
       DEFN_slot { Ast.slot_ty = Some Ast.TY_fn _ }
     | DEFN_slot { Ast.slot_ty = Some Ast.TY_pred _ }
-    | DEFN_item (Ast.MOD_ITEM_pred _ )
-    | DEFN_item (Ast.MOD_ITEM_fn _ ) -> true
+    | DEFN_item { Ast.decl_item = (Ast.MOD_ITEM_pred _ ) }
+    | DEFN_item { Ast.decl_item = (Ast.MOD_ITEM_fn _ ) } -> true
     | _ -> false
 ;;
 
@@ -885,8 +885,7 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
                  * FIXME: returning empty params this way is wrong.
                  * DEFN_item should hold an Ast.mod_item' decl.
                  *)
-                Some (DEFN_item item) -> {node={Ast.decl_params=[||];
-                                                Ast.decl_item=item}; id=referent}
+                Some (DEFN_item item) -> {node=item; id=referent}
               | _ -> bug () "lval does not name an item"
         end
     | Ast.LVAL_ext (base, comp) ->
@@ -930,7 +929,7 @@ let lval_is_direct_mod (cx:ctxt) (lval:Ast.lval) : bool =
     then false
     else
       match defn with
-          DEFN_item (Ast.MOD_ITEM_mod (None, _)) -> true
+          DEFN_item { Ast.decl_item = Ast.MOD_ITEM_mod (None, _) } -> true
         | _ -> false
 ;;
 

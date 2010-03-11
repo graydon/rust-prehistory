@@ -275,6 +275,7 @@ TEST_XFAILS := test/run-pass/mlist_cycle.rs \
                test/run-pass/linear-for-loop.rs \
                test/run-pass/spawn-fn.rs \
                test/run-pass/yield2.rs \
+               test/run-pass/generic-fn.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 

@@ -147,7 +147,7 @@ let all_item_collecting_visitor
   in
 
   let visit_mod_item_pre n p i =
-      htab_put cx.ctxt_all_defns i.id (DEFN_item i.node.Ast.decl_item);
+      htab_put cx.ctxt_all_defns i.id (DEFN_item i.node);
       htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
       log cx "collected item #%d: %s" (int_of_node i.id) n;
       begin
@@ -177,8 +177,8 @@ let lookup_type_by_ident
       | Some (scopes, id) ->
           let ty =
             match htab_search cx.ctxt_all_defns id with
-                Some (DEFN_item (Ast.MOD_ITEM_opaque_type t))
-              | Some (DEFN_item (Ast.MOD_ITEM_public_type t)) -> t
+                Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_opaque_type t})
+              | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_public_type t}) -> t
               | _ -> err None "identifier '%s' resolves to non-type" ident
           in
             (scopes, id, ty)
@@ -446,7 +446,7 @@ let lval_base_resolving_visitor
       | Ast.BASE_app (ident, _) ->
           let referent = lookup_referent_by_ident id ident in
             begin
-              match Hashtbl.find cx.ctxt_all_defns id with
+              match Hashtbl.find cx.ctxt_all_defns referent with
                   DEFN_slot _ -> err (Some referent) "lval resolved to type-parametric slot"
                 | DEFN_item _ -> err (Some referent) "unhandled parametric-type item"
             end
@@ -550,8 +550,8 @@ let resolve_recursion
         if can_reach id [] id
         then begin
           match Hashtbl.find cx.ctxt_all_defns id with
-              DEFN_item (Ast.MOD_ITEM_public_type (Ast.TY_tag _))
-            | DEFN_item (Ast.MOD_ITEM_opaque_type (Ast.TY_tag _ )) ->
+              DEFN_item { Ast.decl_item = Ast.MOD_ITEM_public_type (Ast.TY_tag _) }
+            | DEFN_item { Ast.decl_item = Ast.MOD_ITEM_opaque_type (Ast.TY_tag _ ) } ->
                 log cx "type %d is a recursive tag" (int_of_node id);
                 Hashtbl.replace recursive_tag_types id ()
             | _ ->
@@ -612,7 +612,7 @@ let pattern_resolving_visitor
                   err (Some arm_id) "unresolved tag constructor '%s'" ident
               | Some (_, tag_id) ->
                   match Hashtbl.find cx.ctxt_all_defns tag_id with
-                      DEFN_item (Ast.MOD_ITEM_tag _) ->
+                      DEFN_item { Ast.decl_item = Ast.MOD_ITEM_tag _ } ->
                         Hashtbl.add cx.ctxt_pat_to_tag arm_id tag_id
                     | _ ->
                         err (Some arm_id) "'%s' is not a tag constructor" ident
