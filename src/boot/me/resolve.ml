@@ -180,7 +180,7 @@ let lookup_type_by_ident
             match htab_search cx.ctxt_all_defns id with
                 Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_opaque_type t})
               | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_public_type t}) -> t
-              | Some (DEFN_ty_param (_, x)) -> Ast.TY_opaque x
+              | Some (DEFN_ty_param (_, x)) -> Ast.TY_param x
               | _ -> err None "identifier '%s' resolves to non-type" ident
           in
             (scopes, id, ty)

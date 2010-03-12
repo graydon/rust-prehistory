@@ -224,6 +224,7 @@ and walk_ty
           end
       | Ast.TY_named _ -> ()
       | Ast.TY_opaque _ -> ()
+      | Ast.TY_param _ -> ()
       | Ast.TY_idx _ -> ()
       | Ast.TY_mach _ -> ()
       | Ast.TY_type -> ()

@@ -152,18 +152,19 @@ and parse_optional_trailing_constrs (ps:pstate) : Ast.constrs =
       COLON -> (bump ps; parse_constrs ps)
     | _ -> [| |]
 
-and parse_ty_param (ps:pstate) : Ast.ty_param identified =
+and parse_ty_param (iref:int ref) (ps:pstate) : Ast.ty_param identified =
   let apos = lexpos ps in
   let mut = parse_mutability ps in
   let ident = parse_ident ps in
-  let opaque = next_opaque_id ps in
+  let i = !iref in
   let bpos = lexpos ps in
-    span ps apos bpos (ident, (opaque, mut))
+    incr iref;
+    span ps apos bpos (ident, (i, mut))
 
 and parse_ty_params (ps:pstate) : (Ast.ty_param identified) array =
   match peek ps with
       LBRACKET ->
-        bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) parse_ty_param ps
+        bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) (parse_ty_param (ref 0)) ps
     | _ -> arr []
 
 and parse_ident_and_params (ps:pstate) (cstr:string) : (Ast.ident * (Ast.ty_param identified) array) =

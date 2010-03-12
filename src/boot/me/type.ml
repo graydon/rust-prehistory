@@ -160,8 +160,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | Ast.TY_port _ | Ast.TY_proc | Ast.TY_tup _ | Ast.TY_vec _
           | Ast.TY_rec _ | Ast.TY_tag _ | Ast.TY_iso _ | Ast.TY_idx _ ->
               comparable
-          | Ast.TY_fn _ | Ast.TY_pred _ | Ast.TY_mod _ | Ast.TY_opaque _ |
-                Ast.TY_type -> false
+          | Ast.TY_fn _ | Ast.TY_pred _ | Ast.TY_mod _ | Ast.TY_opaque _
+          | Ast.TY_param _ | Ast.TY_type -> false
           | Ast.TY_named _ -> bug () "is_comparable_or_ordered: TY_named TODO"
           | Ast.TY_constrained (ty, _) ->
               is_comparable_or_ordered comparable ty

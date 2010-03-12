@@ -552,6 +552,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_mod : (('slots * Ast.constrs) option * Ast.mod_type_items) -> 'ty;
       ty_fold_proc : unit -> 'ty;
       ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
+      ty_fold_param : (int * Ast.mutability) -> 'ty;
       ty_fold_named : Ast.name -> 'ty;
       ty_fold_type : unit -> 'ty;
       ty_fold_constrained : ('ty * Ast.constrs) -> 'ty }
@@ -606,6 +607,7 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_proc -> f.ty_fold_proc ()
 
   | Ast.TY_opaque x -> f.ty_fold_opaque x
+  | Ast.TY_param x -> f.ty_fold_param x
   | Ast.TY_named n -> f.ty_fold_named n
   | Ast.TY_type -> f.ty_fold_type ()
 
@@ -641,6 +643,7 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_mod = (fun _ -> default);
       ty_fold_proc = (fun _ -> default);
       ty_fold_opaque = (fun _ -> default);
+      ty_fold_param = (fun _ -> default);
       ty_fold_named = (fun _ -> default);
       ty_fold_type = (fun _ -> default);
       ty_fold_constrained = (fun _ -> default) }
@@ -677,6 +680,7 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_mod = (fun (hdr, mti) -> id (Ast.TY_mod (hdr, mti)));
     ty_fold_proc = (fun _ -> id Ast.TY_proc);
     ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
+    ty_fold_param = (fun (i, mut) -> id (Ast.TY_param (i, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
     ty_fold_type = (fun _ -> id (Ast.TY_type));
     ty_fold_constrained = (fun (t, constrs) -> id (Ast.TY_constrained (t, constrs))) }
@@ -1347,12 +1351,13 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
       | Ast.TY_idx _ -> Il.OpaqueTy
 
-      | Ast.TY_opaque _
       | Ast.TY_chan _
       | Ast.TY_port _
       | Ast.TY_proc
       | Ast.TY_type -> rc_ptr
 
+      | Ast.TY_opaque _ -> bug () "opaque type in referent_type"
+      | Ast.TY_param _ -> bug () "type parameter in referent_type"
       | Ast.TY_named _ -> bug () "named type in referent_type"
       | Ast.TY_constrained (t, _) -> referent_type abi t
 
@@ -1586,7 +1591,9 @@ let ty_str (ty:Ast.ty) : string =
          (* FIXME: encode module types. *)
          ty_fold_mod = (fun _ -> "m");
          ty_fold_proc = (fun _ -> "P");
+         (* FIXME: encode opaque and param numbers. *)
          ty_fold_opaque = (fun _ -> "Q");
+         ty_fold_param = (fun _ -> "A");
          ty_fold_named = (fun _ -> failwith "string-encoding named type");
          ty_fold_type = (fun _ -> "T");
          (* FIXME: encode constrs as well. *)

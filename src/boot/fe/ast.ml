@@ -98,6 +98,7 @@ and ty =
   | TY_proc
 
   | TY_opaque of (opaque_id * mutability)
+  | TY_param of (int * mutability)
   | TY_named of name
   | TY_type
 
@@ -405,7 +406,7 @@ and pred =
  * even if it's a type that's bound by a quantifier in its environment.
  *)
 
-and ty_param = ident * (opaque_id * mutability)
+and ty_param = ident * (int * mutability)
 
 and ('param, 'item) decl =
     {
@@ -659,6 +660,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
 
   | TY_opaque (id, m) -> (fmt_mutable ff m;
                           fmt ff "<opaque#%d>" (int_of_opaque id))
+  | TY_param (i, m) -> (fmt_mutable ff m; fmt ff "<param#%d>" i)
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
 
@@ -1139,10 +1141,10 @@ and fmt_decl_params (ff:Format.formatter) (params:ty_param array) : unit =
       do
         if i = 0
         then fmt ff ", ";
-        let (ident, (opaque, mut)) = params.(i) in
+        let (ident, (i, mut)) = params.(i) in
           fmt_mutable ff mut;
           fmt_ident ff ident;
-          fmt ff "=<opaque#%d>" (int_of_opaque opaque)
+          fmt ff "=<param#%d>" i
       done;
       fmt ff "]"
     end;
