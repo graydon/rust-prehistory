@@ -13,10 +13,12 @@ type tyspec =
   | TYSPEC_loggable
   | TYSPEC_numeric                      (* integer-like or float-like *)
   | TYSPEC_ordered                      (* comparable with < and friends *)
-  | TYSPEC_parametric of int (* arity *) * dict
   | TYSPEC_record of dict
   | TYSPEC_tuple of tyvar array         (* heterogeneous tuple *)
   | TYSPEC_vector of tyvar
+  | TYSPEC_parametric of params * tyvar
+
+and params = (int option) ref (* ty_param arity *)
 
 and dict = (Ast.ident, tyvar) Hashtbl.t
 
@@ -69,9 +71,13 @@ let rec tyspec_to_str (ts:tyspec) : string =
       | TYSPEC_loggable -> "<loggable>"
       | TYSPEC_numeric -> "<numeric>"
       | TYSPEC_ordered -> "<ordered>"
-      | TYSPEC_parametric (arity, names) ->
-          Printf.sprintf "<module with %d type parameters and members %s>" arity
-            (format_dict names)
+      | TYSPEC_parametric (params, tv) ->
+          begin
+            match !params with
+                None -> "[?]" ^ (tyspec_to_str !tv)
+              | Some 0 ->  (tyspec_to_str !tv)
+              | Some n -> (Printf.sprintf "[%d]" n) ^ (tyspec_to_str !tv)
+          end
       | TYSPEC_record dct -> "<record with fields " ^ (format_dict dct) ^ ">"
       | TYSPEC_tuple tvs -> "(" ^ (join_tvs tvs) ^ ")"
       | TYSPEC_vector tv -> "vec[" ^ (tyspec_to_str !tv) ^ "]"
@@ -137,19 +143,25 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           Hashtbl.iter check_entry dct
       in
       let unify_dict_with_mod_type_items
+          (params:params)
           (dct:dict)
           (items:Ast.mod_type_items) : unit =
         let check_entry (query:Ast.ident) tv : unit =
-          if Hashtbl.mem items query
-          then
-            match (Hashtbl.find items query).Ast.decl_item with
-                (* TODO: parametric modules *)
-                Ast.MOD_TYPE_ITEM_opaque_type _ -> () (* FIXME: is this right? *)
-              | Ast.MOD_TYPE_ITEM_public_type ty -> unify_ty ty tv
-              | Ast.MOD_TYPE_ITEM_pred p -> unify_ty (Ast.TY_pred p) tv
-              | Ast.MOD_TYPE_ITEM_mod m -> unify_ty (Ast.TY_mod m) tv
-              | Ast.MOD_TYPE_ITEM_fn f -> unify_ty (Ast.TY_fn f) tv
-          else fail ()
+          match htab_search items query with
+              None -> fail ()
+            | Some item ->
+                let n_params = Array.length item.Ast.decl_params in
+                  begin
+                    match !params with
+                        Some n when n != n_params -> fail()
+                      | _ -> params := Some n_params
+                  end;
+                  match item.Ast.decl_item with
+                      Ast.MOD_TYPE_ITEM_opaque_type _ -> () (* FIXME: is this right? *)
+                    | Ast.MOD_TYPE_ITEM_public_type ty -> unify_ty ty tv
+                    | Ast.MOD_TYPE_ITEM_pred p -> unify_ty (Ast.TY_pred p) tv
+                    | Ast.MOD_TYPE_ITEM_mod m -> unify_ty (Ast.TY_mod m) tv
+                    | Ast.MOD_TYPE_ITEM_fn f -> unify_ty (Ast.TY_fn f) tv
         in
           Hashtbl.iter check_entry dct
       in
@@ -245,41 +257,40 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                 match ty with
                     Ast.TY_rec fields ->
                       unify_dict_with_record_fields dct fields
-                  | Ast.TY_mod (None, items) ->
-                      unify_dict_with_mod_type_items dct items
+                  | Ast.TY_mod (_, items) ->
+                      let params = ref (Some 0) in
+                        unify_dict_with_mod_type_items params dct items
                   | _ -> fail ()
               end;
               TYSPEC_resolved ty
 
-          | (TYSPEC_resolved ty, TYSPEC_integral) |
-                (TYSPEC_integral, TYSPEC_resolved ty) ->
+          | (TYSPEC_resolved ty, TYSPEC_integral)
+          | (TYSPEC_integral, TYSPEC_resolved ty) ->
               if not (integral ty) then fail () else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved ty, TYSPEC_loggable) |
-                (TYSPEC_loggable, TYSPEC_resolved ty) ->
+          | (TYSPEC_resolved ty, TYSPEC_loggable)
+          | (TYSPEC_loggable, TYSPEC_resolved ty) ->
               if not (loggable ty) then fail () else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved ty, TYSPEC_numeric) |
-                (TYSPEC_numeric, TYSPEC_resolved ty) ->
+          | (TYSPEC_resolved ty, TYSPEC_numeric)
+          | (TYSPEC_numeric, TYSPEC_resolved ty) ->
               if not ((integral ty) || (floating ty)) then fail ()
               else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved ty, TYSPEC_ordered) |
-                (TYSPEC_ordered, TYSPEC_resolved ty) ->
+          | (TYSPEC_resolved ty, TYSPEC_ordered)
+          | (TYSPEC_ordered, TYSPEC_resolved ty) ->
               if not (is_comparable_or_ordered false ty) then fail ()
               else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved ty, TYSPEC_parametric (arity, _)) |
-                (TYSPEC_parametric (arity, _), TYSPEC_resolved ty) ->
+          | (TYSPEC_resolved ty, TYSPEC_parametric (params, tv))
+          | (TYSPEC_parametric (params, tv), TYSPEC_resolved ty) ->
               begin
-                match ty with
-                    Ast.TY_mod (Some (slots, _), _) ->
-                      (if Array.length slots != arity then fail ());
-                      log cx "warning: unifying parametric modules unimp\n"
-                        (* TODO *)
+                match (!tv, ty) with
+                    (TYSPEC_dictionary dct, Ast.TY_mod (_, items)) ->
+                      unify_dict_with_mod_type_items params dct items
                   | _ -> fail ()
               end;
-                  TYSPEC_resolved ty
+              TYSPEC_resolved ty
 
           | (TYSPEC_resolved ty, TYSPEC_record dct) |
                 (TYSPEC_record dct, TYSPEC_resolved ty) ->
@@ -491,10 +502,17 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_tuple _, TYSPEC_ordered)
           | (TYSPEC_vector _, TYSPEC_ordered) -> fail ()
 
-          | (TYSPEC_parametric (arity_a, names_a),
-             TYSPEC_parametric (arity_b, names_b)) ->
-              if arity_a != arity_b then fail ()
-              else TYSPEC_parametric (arity_a, (merge_dicts names_a names_b))
+          | (TYSPEC_parametric (params_a, tv_a),
+             TYSPEC_parametric (params_b, tv_b)) ->
+              begin
+                match (!params_a, !params_b) with
+                    (Some m, Some n) when n != m -> fail()
+                  | (Some m, None) -> params_b := Some m
+                  | (None, Some n) -> params_a := Some n
+                  | _ -> ()
+              end;
+              unify_tyvars tv_a tv_b;
+              TYSPEC_parametric (params_a, tv_a)
 
           | (TYSPEC_parametric _, TYSPEC_record _)
           | (TYSPEC_parametric _, TYSPEC_tuple _)
@@ -617,14 +635,23 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
     and unify_lval (lval:Ast.lval) (tv:tyvar) : unit =
       match lval with
-          Ast.LVAL_base { node = _; id = id } ->
+          Ast.LVAL_base { node = node; id = id } ->
             let referent = Hashtbl.find cx.ctxt_lval_to_referent id in
               begin
                 match Hashtbl.find cx.ctxt_all_defns referent with
                     DEFN_slot slot -> unify_slot slot (Some referent) tv
                   | _ ->
                       let ty = Hashtbl.find cx.ctxt_all_item_types referent in
-                        unify_ty ty tv
+                      let spec = TYSPEC_resolved ty in
+                      let spec =
+                        match node with
+                            Ast.BASE_ident _
+                          | Ast.BASE_temp _ -> spec
+                          | Ast.BASE_app (_, tys) ->
+                              let n = Array.length tys in
+                                TYSPEC_parametric (ref (Some n), ref spec)
+                      in
+                        unify_tyvars (ref spec) tv
               end
         | Ast.LVAL_ext (base, comp) ->
             let base_ts = match comp with
@@ -632,13 +659,18 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                   let names = Hashtbl.create 1 in
                     Hashtbl.add names id tv;
                     TYSPEC_dictionary names
-              | Ast.COMP_named (Ast.COMP_app (id, types)) ->
+
+              | Ast.COMP_named (Ast.COMP_app (id, tys)) ->
+                  let n = Array.length tys in
+                  let tv = ref (TYSPEC_parametric (ref (Some n), tv)) in
                   let names = Hashtbl.create 1 in
                     Hashtbl.add names id tv;
-                    TYSPEC_parametric (Array.length types, names)
+                    TYSPEC_dictionary names
+
               | Ast.COMP_named (Ast.COMP_idx i) ->
                   let init j = if i + 1 == j then tv else ref TYSPEC_all in
                     TYSPEC_tuple (Array.init (i + 1) init)
+
               | Ast.COMP_atom atom ->
                   unify_atom atom (ref (TYSPEC_resolved Ast.TY_int));
                   TYSPEC_collection tv
