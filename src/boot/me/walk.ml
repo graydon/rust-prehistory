@@ -31,13 +31,13 @@ type visitor =
       visit_lval_pre: Ast.lval -> unit;
       visit_lval_post: Ast.lval -> unit;
       visit_mod_item_pre:
-        Ast.ident -> (Ast.ident array) -> Ast.mod_item -> unit;
+        Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
       visit_mod_item_post:
-        Ast.ident -> (Ast.ident array) -> Ast.mod_item -> unit;
+        Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
       visit_mod_type_item_pre:
-        Ast.ident -> (Ast.ident array) -> Ast.mod_type_item -> unit;
+        Ast.ident -> (Ast.ty_param array) -> Ast.mod_type_item -> unit;
       visit_mod_type_item_post:
-        Ast.ident -> (Ast.ident array) -> Ast.mod_type_item -> unit;
+        Ast.ident -> (Ast.ty_param array) -> Ast.mod_type_item -> unit;
       visit_crate_pre: Ast.crate -> unit;
       visit_crate_post: Ast.crate -> unit;
     }

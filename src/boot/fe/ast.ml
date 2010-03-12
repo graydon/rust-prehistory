@@ -405,11 +405,12 @@ and pred =
  * even if it's a type that's bound by a quantifier in its environment.
  *)
 
+and ty_param = ident * (opaque_id * mutability)
 
-and 'a decl =
+and ('param, 'item) decl =
     {
-      decl_params: ident array;
-      decl_item: 'a;
+      decl_params: 'param array;
+      decl_item: 'item;
     }
 
 (*
@@ -447,7 +448,7 @@ and mod_item' =
   | MOD_ITEM_mod of (mod_header option * mod_items)
   | MOD_ITEM_fn of fn
 
-and mod_item = (mod_item' decl) identified
+and mod_item = (((ty_param identified), mod_item') decl) identified
 and mod_items = (ident, mod_item) Hashtbl.t
 
 and mod_type_item' =
@@ -457,7 +458,7 @@ and mod_type_item' =
   | MOD_TYPE_ITEM_mod of ty_mod
   | MOD_TYPE_ITEM_fn of ty_fn
 
-and mod_type_item = mod_type_item' decl
+and mod_type_item = (ty_param, mod_type_item') decl
 and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
 and crate' =
@@ -560,7 +561,7 @@ and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) opt
 
 and fmt_ty_fn
     (ff:Format.formatter)
-    (ident_and_params:(ident * ident array) option)
+    (ident_and_params:(ident * ty_param array) option)
     (tf:ty_fn)
     : unit =
   let (tsig, ta) = tf in
@@ -589,7 +590,7 @@ and fmt_ty_fn
 
 and fmt_ty_pred
     (ff:Format.formatter)
-    (ident_and_params:(ident * ident array) option)
+    (ident_and_params:(ident * ty_param array) option)
     (tp:ty_pred)
     : unit =
   let (in_slots, in_constrs) = tp in
@@ -657,7 +658,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
         fmt ff "@]"
 
   | TY_opaque (id, m) -> (fmt_mutable ff m;
-                          fmt ff "opaque#%d" (int_of_opaque id))
+                          fmt ff "<opaque#%d>" (int_of_opaque id))
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
 
@@ -665,7 +666,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_proc -> fmt ff "proc"
   | TY_tag ttag -> fmt_tag ff ttag
   | TY_iso tiso -> fmt_iso ff tiso
-  | TY_idx idx -> fmt ff "idx#%d" idx
+  | TY_idx idx -> fmt ff "<idx#%d>" idx
 
   | TY_mod tm -> fmt_ty_mod ff None tm
   | TY_constrained _ -> fmt ff "?constrained?"
@@ -706,7 +707,7 @@ and fmt_mod_type_item
 
 and fmt_ty_mod
     (ff:Format.formatter)
-    (ident_and_params:(ident * ident array) option)
+    (ident_and_params:(ident * ty_param array) option)
     (tm:ty_mod)
     : unit =
   fmt_obox ff;
@@ -1128,7 +1129,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_recv _ -> fmt ff "?stmt_recv?"
   end
 
-and fmt_decl_params (ff:Format.formatter) (params:ident array) : unit =
+and fmt_decl_params (ff:Format.formatter) (params:ty_param array) : unit =
   if Array.length params = 0
   then ()
   else
@@ -1138,7 +1139,10 @@ and fmt_decl_params (ff:Format.formatter) (params:ident array) : unit =
       do
         if i = 0
         then fmt ff ", ";
-        fmt_ident ff params.(i)
+        let (ident, (opaque, mut)) = params.(i) in
+          fmt_mutable ff mut;
+          fmt_ident ff ident;
+          fmt ff "=<opaque#%d>" (int_of_opaque opaque)
       done;
       fmt ff "]"
     end;
@@ -1148,11 +1152,11 @@ and fmt_header_slots (ff:Format.formatter) (hslots:header_slots) : unit =
     (Array.map (fun (s,_) -> s.node) hslots)
     (Some (Array.map (fun (_, i) -> i) hslots))
 
-and fmt_ident_and_params (ff:Format.formatter) (id:ident) (params:ident array) : unit =
+and fmt_ident_and_params (ff:Format.formatter) (id:ident) (params:ty_param array) : unit =
   fmt_ident ff id;
   fmt_decl_params ff params
 
-and fmt_fn (ff:Format.formatter) (id:ident) (params:ident array) (f:fn) : unit =
+and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : unit =
   fmt_obox ff;
   begin
     match f.fn_aux.fn_purity with
@@ -1184,14 +1188,14 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
       match item.node.decl_item with
           MOD_ITEM_opaque_type ty ->
             fmt ff "type ";
-            fmt_ident_and_params ff id params;
+            fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
             fmt ff " = ";
             fmt_ty ff ty;
             fmt ff ";";
 
         | MOD_ITEM_public_type ty ->
             fmt ff "pub type ";
-            fmt_ident_and_params ff id params;
+            fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
             fmt ff " = ";
             fmt_ty ff ty;
             fmt ff ";";
@@ -1202,7 +1206,7 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
         | MOD_ITEM_pred p ->
             fmt_obox ff;
             fmt ff "pred ";
-            fmt_ident_and_params ff id params;
+            fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
             fmt_header_slots ff p.pred_input_slots;
             fmt_decl_constrs ff p.pred_input_constrs;
             fmt ff " ";
@@ -1213,7 +1217,7 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
         | MOD_ITEM_mod (hdr,items) ->
             fmt_obox ff;
             fmt ff "mod ";
-            fmt_ident_and_params ff id params;
+            fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
             begin
               match hdr with
                   None -> ()
@@ -1227,7 +1231,7 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
             fmt_cbb ff
 
         | MOD_ITEM_fn f ->
-            fmt_fn ff id params f
+            fmt_fn ff id (Array.map (fun i -> i.node) params) f
     end
 
 and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =

@@ -1748,7 +1748,7 @@ let dwarf_visitor
 
   let visit_mod_item_pre
       (id:Ast.ident)
-      (params:Ast.ident array)
+      (params:(Ast.ty_param identified) array)
       (item:Ast.mod_item)
       : unit =
     if Hashtbl.mem cx.ctxt_item_files item.id
@@ -1804,7 +1804,7 @@ let dwarf_visitor
 
   let visit_mod_item_post
       (id:Ast.ident)
-      (params:Ast.ident array)
+      (params:(Ast.ty_param identified) array)
       (item:Ast.mod_item)
       : unit =
     inner.Walk.visit_mod_item_post id params item;

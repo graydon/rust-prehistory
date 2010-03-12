@@ -152,21 +152,27 @@ and parse_optional_trailing_constrs (ps:pstate) : Ast.constrs =
       COLON -> (bump ps; parse_constrs ps)
     | _ -> [| |]
 
-and parse_ty_param (ps:pstate) : Ast.ident = parse_ident ps
+and parse_ty_param (ps:pstate) : Ast.ty_param identified =
+  let apos = lexpos ps in
+  let mut = parse_mutability ps in
+  let ident = parse_ident ps in
+  let opaque = next_opaque_id ps in
+  let bpos = lexpos ps in
+    span ps apos bpos (ident, (opaque, mut))
 
-and parse_ty_params (ps:pstate) : Ast.ident array =
+and parse_ty_params (ps:pstate) : (Ast.ty_param identified) array =
   match peek ps with
       LBRACKET ->
         bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) parse_ty_param ps
     | _ -> arr []
 
-and parse_ident_and_params (ps:pstate) (cstr:string) : (Ast.ident * Ast.ident array) =
+and parse_ident_and_params (ps:pstate) (cstr:string) : (Ast.ident * (Ast.ty_param identified) array) =
   let ident = ctxt ("mod " ^ cstr ^ " item: ident") parse_ident ps in
   let params = ctxt ("mod " ^ cstr ^ " item: type params") parse_ty_params ps in
     (ident, params)
 
 
-and parse_ty_fn (pure:bool) (ps:pstate) : (((Ast.ident * Ast.ident array) option) * Ast.ty_fn) =
+and parse_ty_fn (pure:bool) (ps:pstate) : (((Ast.ident * (Ast.ty_param identified) array) option) * Ast.ty_fn) =
   match peek ps with
       FN proto ->
         bump ps;
@@ -202,7 +208,7 @@ and parse_ty_fn (pure:bool) (ps:pstate) : (((Ast.ident * Ast.ident array) option
     | _ -> raise (unexpected ps)
 
 
-and parse_ty_mod (ps:pstate) : (((Ast.ident * Ast.ident array) option) * Ast.ty_mod) =
+and parse_ty_mod (ps:pstate) : (((Ast.ident * (Ast.ty_param identified) array) option) * Ast.ty_mod) =
   let ident_and_params =
     match peek ps with
         IDENT _ -> Some (parse_ident_and_params ps "mod type")
@@ -227,7 +233,7 @@ and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
   let need_ident_and_params ni_opt =
     match ni_opt with
         None -> raise (Parse_err (ps, "item in mod type without name"))
-      | Some (ident, params) -> (ident, params)
+      | Some (ident, params) -> (ident, Array.map (fun i -> i.node) params)
   in
     match peek ps with
         MOD ->
@@ -250,6 +256,7 @@ and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
           bump ps;
           expect ps TYPE;
           let (ident, params) = parse_ident_and_params ps "type pub type" in
+          let params = Array.map (fun i -> i.node) params in
           let t = parse_ty ps in
             expect ps SEMI;
             (ident, decl params (Ast.MOD_TYPE_ITEM_public_type t))
@@ -257,6 +264,7 @@ and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
       | TYPE ->
           bump ps;
           let (ident, params) = parse_ident_and_params ps "type type" in
+          let params = Array.map (fun i -> i.node) params in
             expect ps SEMI;
             (ident, decl params (Ast.MOD_TYPE_ITEM_opaque_type Ast.IMMUTABLE))
 

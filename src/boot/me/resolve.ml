@@ -147,18 +147,19 @@ let all_item_collecting_visitor
   in
 
   let visit_mod_item_pre n p i =
-      htab_put cx.ctxt_all_defns i.id (DEFN_item i.node);
-      htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
-      log cx "collected item #%d: %s" (int_of_node i.id) n;
-      begin
-        (* FIXME: this is incomplete. *)
-        match i.node.Ast.decl_item with
-            Ast.MOD_ITEM_fn f ->
-              note_header i.id f.Ast.fn_input_slots;
-          | Ast.MOD_ITEM_pred p ->
-              note_header i.id p.Ast.pred_input_slots
-          | _ -> ()
-      end;
+    Array.iter (fun p -> htab_put cx.ctxt_all_defns p.id (DEFN_ty_param p.node)) p;
+    htab_put cx.ctxt_all_defns i.id (DEFN_item i.node);
+    htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
+    log cx "collected item #%d: %s" (int_of_node i.id) n;
+    begin
+      (* FIXME: this is incomplete. *)
+      match i.node.Ast.decl_item with
+          Ast.MOD_ITEM_fn f ->
+            note_header i.id f.Ast.fn_input_slots;
+        | Ast.MOD_ITEM_pred p ->
+            note_header i.id p.Ast.pred_input_slots
+        | _ -> ()
+    end;
       inner.Walk.visit_mod_item_pre n p i
   in
     { inner with
@@ -179,6 +180,7 @@ let lookup_type_by_ident
             match htab_search cx.ctxt_all_defns id with
                 Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_opaque_type t})
               | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_public_type t}) -> t
+              | Some (DEFN_ty_param (_, x)) -> Ast.TY_opaque x
               | _ -> err None "identifier '%s' resolves to non-type" ident
           in
             (scopes, id, ty)
@@ -441,15 +443,9 @@ let lval_base_resolving_visitor
   in
   let lookup_referent_by_name_base id nb =
     match nb with
-        Ast.BASE_ident ident -> lookup_referent_by_ident id ident
+        Ast.BASE_ident ident
+      | Ast.BASE_app (ident, _) -> lookup_referent_by_ident id ident
       | Ast.BASE_temp temp -> lookup_slot_by_temp id temp
-      | Ast.BASE_app (ident, _) ->
-          let referent = lookup_referent_by_ident id ident in
-            begin
-              match Hashtbl.find cx.ctxt_all_defns referent with
-                  DEFN_slot _ -> err (Some referent) "lval resolved to type-parametric slot"
-                | DEFN_item _ -> err (Some referent) "unhandled parametric-type item"
-            end
   in
 
   let visit_lval_pre lv =

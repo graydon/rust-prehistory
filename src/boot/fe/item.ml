@@ -688,6 +688,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             in
               expect ps MOD;
               let (ident, params) = Pexp.parse_ident_and_params ps "native mod" in
+              let params = Array.map (fun i -> i.node) params in
               let path = parse_lib_name ident in
               let items = Pexp.parse_mod_ty_items ps in
               let tmod = (None, items) in
@@ -791,23 +792,21 @@ and expand_tags_to_items
 
 and expand_imported_mod
     (ps:pstate)
-    (span:span)
+    (sp:span)
     (conv:nabi_conv)
     (ilib:import_lib)
     (mti:Ast.mod_type_item)
-    : Ast.mod_item' Ast.decl =
+    : ((Ast.ty_param identified), Ast.mod_item') Ast.decl =
 
-  let wrap span i =
+  let wrap i =
     let id = next_node_id ps in
-      htab_put ps.pstate_sess.Session.sess_spans id span;
+      htab_put ps.pstate_sess.Session.sess_spans id sp;
       { node = i; id = id }
   in
 
   let rec extract_item
       (mti:Ast.mod_type_item)
-      : Ast.mod_item' Ast.decl =
-
-    let wrap i = wrap span i in
+      : ((Ast.ty_param identified), Ast.mod_item') Ast.decl =
 
     let form_header_slots slots =
       Array.mapi
@@ -848,12 +847,12 @@ and expand_imported_mod
               Ast.fn_aux=taux;
               Ast.fn_body=wrap [| |]; }
     in
-      decl mti.Ast.decl_params item
+      decl (Array.map (fun p -> wrap p) mti.Ast.decl_params) item
 
   and wrap_item
-      (item':Ast.mod_item' Ast.decl)
+      (item':((Ast.ty_param identified), Ast.mod_item') Ast.decl)
       : Ast.mod_item =
-    let wrapped = wrap span item' in
+    let wrapped = wrap item' in
       htab_put ps.pstate_imported wrapped.id (ilib, conv);
       wrapped
 

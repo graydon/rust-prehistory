@@ -49,7 +49,8 @@ type data =
 
 type defn =
     DEFN_slot of Ast.slot
-  | DEFN_item of Ast.mod_item' Ast.decl
+  | DEFN_item of (Ast.ty_param identified, Ast.mod_item') Ast.decl
+  | DEFN_ty_param of Ast.ty_param
 ;;
 
 type glue_code = (glue, code) Hashtbl.t;;
@@ -1041,7 +1042,7 @@ and mod_type_item_of_mod_item
     match item_opt with
         None -> None
       | Some item' ->
-          Some { Ast.decl_params = item.node.Ast.decl_params;
+          Some { Ast.decl_params = Array.map (fun i -> i.node) item.node.Ast.decl_params;
                  Ast.decl_item = item' }
 
 and arg_slots (slots:Ast.header_slots) : Ast.slot array =
@@ -1061,24 +1062,21 @@ and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
    pred.Ast.pred_input_constrs)
 
 and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
-  check_concrete item.node.Ast.decl_params
-    begin
-      match item.node.Ast.decl_item with
-          Ast.MOD_ITEM_opaque_type _
-        | Ast.MOD_ITEM_public_type _ -> Ast.TY_type
-        | Ast.MOD_ITEM_pred p -> (Ast.TY_pred (ty_pred_of_pred p))
-        | Ast.MOD_ITEM_mod m -> (Ast.TY_mod (ty_mod_of_mod inside m))
-        | Ast.MOD_ITEM_fn f -> (Ast.TY_fn (ty_fn_of_fn f))
-        | Ast.MOD_ITEM_tag (htup, ttag, _) ->
-            let taux = { Ast.fn_purity = Ast.PURE;
-                         Ast.fn_proto = None }
-            in
-            let tsig = { Ast.sig_input_slots = tup_slots htup;
-                         Ast.sig_input_constrs = [| |];
-                         Ast.sig_output_slot = interior_slot (Ast.TY_tag ttag) }
-            in
-              (Ast.TY_fn (tsig, taux))
-    end
+  match item.node.Ast.decl_item with
+      Ast.MOD_ITEM_opaque_type _
+    | Ast.MOD_ITEM_public_type _ -> Ast.TY_type
+    | Ast.MOD_ITEM_pred p -> (Ast.TY_pred (ty_pred_of_pred p))
+    | Ast.MOD_ITEM_mod m -> (Ast.TY_mod (ty_mod_of_mod inside m))
+    | Ast.MOD_ITEM_fn f -> (Ast.TY_fn (ty_fn_of_fn f))
+    | Ast.MOD_ITEM_tag (htup, ttag, _) ->
+        let taux = { Ast.fn_purity = Ast.PURE;
+                     Ast.fn_proto = None }
+        in
+        let tsig = { Ast.sig_input_slots = tup_slots htup;
+                     Ast.sig_input_constrs = [| |];
+                     Ast.sig_output_slot = interior_slot (Ast.TY_tag ttag) }
+        in
+          (Ast.TY_fn (tsig, taux))
 ;;
 
 (* Scopes and the visitor that builds them. *)
@@ -1170,6 +1168,11 @@ let lookup_by_ident
          then Some sloti.id
          else None)
   in
+  let check_params params =
+    arr_search params
+      (fun _ {node=(i,_); id=id} ->
+         if i = ident then Some id else None)
+  in
   let check_scope scope =
     match scope with
         SCOPE_block block_id ->
@@ -1186,27 +1189,33 @@ let lookup_by_ident
 
       | SCOPE_mod_item item ->
           begin
-            match item.node.Ast.decl_item with
-                Ast.MOD_ITEM_fn f ->
-                  check_input_slot f.Ast.fn_input_slots
+            let item_match =
+              match item.node.Ast.decl_item with
+                  Ast.MOD_ITEM_fn f ->
+                    check_input_slot f.Ast.fn_input_slots
 
-              | Ast.MOD_ITEM_pred p ->
-                  check_input_slot p.Ast.pred_input_slots
+                | Ast.MOD_ITEM_pred p ->
+                    check_input_slot p.Ast.pred_input_slots
 
-              | Ast.MOD_ITEM_mod (hdr, md) ->
-                  begin
-                    match check_items md with
-                        Some m -> Some m
-                      | None ->
-                          begin
-                            match hdr with
-                                None -> None
-                              | Some (h, _) ->
-                                  check_input_slot h
-                          end
-                  end
-              | _ -> None
+                | Ast.MOD_ITEM_mod (hdr, md) ->
+                    begin
+                      match check_items md with
+                          Some m -> Some m
+                        | None ->
+                            begin
+                              match hdr with
+                                  None -> None
+                                | Some (h, _) ->
+                                    check_input_slot h
+                            end
+                    end
+                | _ -> None
+            in
+              match item_match with
+                  Some _ -> item_match
+                | None -> check_params item.node.Ast.decl_params
           end
+
       | SCOPE_mod_type_item _ -> None
   in
     list_search_ctxt scopes check_scope
