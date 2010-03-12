@@ -70,7 +70,7 @@ let rec tyspec_to_str (ts:tyspec) : string =
             end
 
       | TYSPEC_callable (out, ins) ->
-          Printf.sprintf "fn(%s) -> %s"
+          Printf.sprintf "<callable fn(%s) -> %s>"
             (join_tvs ins) (tyspec_to_str !out)
       | TYSPEC_collection tv -> "<collection of " ^ (tyspec_to_str !tv) ^ ">"
       | TYSPEC_comparable -> "<comparable>"
@@ -84,9 +84,9 @@ let rec tyspec_to_str (ts:tyspec) : string =
           begin
             match !params with
                 None ->
-                  Printf.sprintf "(%s)[?]" (tyspec_to_str !tv)
+                  Printf.sprintf "<parametric (%s)[?]>" (tyspec_to_str !tv)
               | Some tvs ->
-                  Printf.sprintf "(%s)[%s]" (tyspec_to_str !tv) (join_tvs tvs)
+                  Printf.sprintf "<parametric (%s)[%s]>" (tyspec_to_str !tv) (join_tvs tvs)
           end
       | TYSPEC_record dct -> "<record with fields " ^ (format_dict dct) ^ ">"
       | TYSPEC_tuple tvs -> "(" ^ (join_tvs tvs) ^ ")"
@@ -107,6 +107,12 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
   in
   let visitor (cx:ctxt) (inner:Walk.visitor) : Walk.visitor =
 
+    let iflog thunk =
+      if cx.ctxt_sess.Session.sess_log_type
+      then thunk ()
+      else ()
+    in
+
     let rec unify_slot
         (slot:Ast.slot)
         (id_opt:node_id option)
@@ -124,8 +130,16 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             end
         | { Ast.slot_ty = Some ty; Ast.slot_mode = _ } -> unify_ty ty tv
 
+    and unify_tyvars  (av:tyvar) (bv:tyvar) : unit =
+      iflog (fun _ ->
+               log cx "unifying types: %s vs. %s"
+                 (tyspec_to_str !av) (tyspec_to_str !bv));
+      unify_tyvars' av bv;
+      iflog (fun _ ->
+               log cx "    unified to: %s and %s"
+                 (tyspec_to_str !av) (tyspec_to_str !bv));
 
-    and unify_tyvars (av:tyvar) (bv:tyvar) : unit =
+    and unify_tyvars' (av:tyvar) (bv:tyvar) : unit =
       let (a, b) = ((resolve_tyvar av), (resolve_tyvar bv)) in
       let fail () =
         err None "mismatched types: %s vs. %s" (tyspec_to_str !av)
@@ -684,22 +698,13 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
     and unify_lval (lval:Ast.lval) (tv:tyvar) : unit =
       match lval with
-          Ast.LVAL_base { node = node; id = id } ->
+          Ast.LVAL_base { id = id } ->
             let referent = Hashtbl.find cx.ctxt_lval_to_referent id in
               begin
                 match Hashtbl.find cx.ctxt_all_defns referent with
                     DEFN_slot slot -> unify_slot slot (Some referent) tv
                   | _ ->
-                      let ty = Hashtbl.find cx.ctxt_all_item_types referent in
-                      let spec = TYSPEC_resolved (ty, None) in
-                      let spec =
-                        match node with
-                            Ast.BASE_ident _
-                          | Ast.BASE_temp _ -> spec
-                          | Ast.BASE_app (_, tys) ->
-                              let vars = Array.map (fun t -> ref (TYSPEC_resolved (t, None))) tys in
-                                TYSPEC_parametric (ref spec, ref (Some vars))
-                      in
+                      let spec = (!(Hashtbl.find bindings referent)) in
                         unify_tyvars (ref spec) tv
               end
         | Ast.LVAL_ext (base, comp) ->
