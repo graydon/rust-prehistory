@@ -4,8 +4,8 @@ open Semant;;
 type tyspec =
     TYSPEC_equiv of tyvar
   | TYSPEC_all
-  | TYSPEC_callable of (tyvar * tyvar array)   (* params, out, ins *)
-  | TYSPEC_resolved of (Ast.ty * tyapp option) (* base type, applied type args *)
+  | TYSPEC_resolved of Ast.ty
+  | TYSPEC_callable of (tyvar * tyvar array)   (* out, ins *)
   | TYSPEC_collection of tyvar                 (* homogeneous ordered collection *)
   | TYSPEC_comparable                          (* comparable with = and != *)
   | TYSPEC_dictionary of dict
@@ -19,10 +19,6 @@ type tyspec =
   | TYSPEC_parametric of (tyvar * typarams)
 
 and typarams = ((tyvar array) option) ref
-
-and tyapp =
-    APP_unapplied of int                  (* ty_param arity  *)
-  | APP_applied of (Ast.ty array)         (* ty_param values *)
 
 and dict = (Ast.ident, tyvar) Hashtbl.t
 
@@ -40,7 +36,6 @@ type binopsig =
 let rec tyspec_to_str (ts:tyspec) : string =
 
   let join (strings:string list) = String.concat ", " strings in
-  let join_arr (strings:string array) = join (Array.to_list strings) in
 
   let format_dict (dct:dict) =
     let format_name ident tv tail =
@@ -56,19 +51,7 @@ let rec tyspec_to_str (ts:tyspec) : string =
     match ts with
         TYSPEC_equiv tv -> ":" ^ (tyspec_to_str !tv)
       | TYSPEC_all -> "<?>"
-      | TYSPEC_resolved (ty, app) ->
-          let s = Ast.sprintf_ty () ty in
-            begin
-              match app with
-                  None -> s
-                | Some (APP_unapplied n) ->
-                    Printf.sprintf "forall[%s](%s)"
-                      (join_arr (Array.init n (Printf.sprintf "T%d"))) s
-                | Some (APP_applied args) ->
-                    Printf.sprintf "(%s)[%s]"
-                      s (join_arr (Array.map (Ast.sprintf_ty ()) args))
-            end
-
+      | TYSPEC_resolved ty -> Ast.sprintf_ty () ty
       | TYSPEC_callable (out, ins) ->
           Printf.sprintf "<callable fn(%s) -> %s>"
             (join_tvs ins) (tyspec_to_str !out)
@@ -106,6 +89,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       | _ -> tv
   in
   let visitor (cx:ctxt) (inner:Walk.visitor) : Walk.visitor =
+
+    let params_stk = Stack.create () in
 
     let iflog thunk =
       if cx.ctxt_sess.Session.sess_log_type
@@ -245,6 +230,45 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | _ -> false
       in
 
+      let rebuild_ty_under_params ty params =
+        let unresolved = ref false in
+        let substituted = ref false in
+        let base = ty_fold_rebuild (fun t -> t) in
+        let ty_fold_param (i, mut) =
+          match !params with
+              None ->
+                unresolved := true;
+                Ast.TY_param (i, mut)
+            | Some params ->
+                if i < Array.length params
+                then
+                  match !(resolve_tyvar params.(i)) with
+                      TYSPEC_resolved ty ->
+                        substituted := true;
+                        ty
+                    | _ ->
+                        unresolved := true;
+                        Ast.TY_param (i, mut)
+                else
+                  begin
+                    unresolved := true;
+                    Ast.TY_param (i, mut)
+                  end
+        in
+        let fold = { base with ty_fold_param = ty_fold_param } in
+        let ty' = fold_ty fold ty in
+          (* 
+           * FIXME: "substituted" and "ty'" here are only required
+           * because the current equality-comparison code uses <> and
+           * will judge some cases, such as rebuilt tags, as unequal
+           * simply due to the different hashtable order in the
+           * fold.
+           *)
+          if !substituted
+          then (ty', !unresolved)
+          else (ty, !unresolved)
+      in
+
       let result =
         match (!a, !b) with
             (TYSPEC_equiv _, _) | (_, TYSPEC_equiv _) ->
@@ -253,10 +277,35 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_all, other) | (other, TYSPEC_all) -> other
 
           | (TYSPEC_resolved ty_a, TYSPEC_resolved ty_b) ->
-              if ty_a <> ty_b then fail () else TYSPEC_resolved ty_a
+              let param n =
+                let params = Stack.top params_stk in
+                  match !params with
+                      None -> fail ()
+                    | Some params ->
+                        if n < Array.length params
+                        then params.(n)
+                        else fail()
+              in
+                begin
+                  match ty_a, ty_b with
+                      (Ast.TY_param (m,_), Ast.TY_param (n,_)) ->
+                        if m != n
+                        then fail ()
+                        else !(param n)
+                    | (Ast.TY_param (n,_), _) ->
+                        unify_ty ty_b (param n);
+                        TYSPEC_resolved ty_b
+                    | (_, Ast.TY_param (n,_)) ->
+                        unify_ty ty_a (param n);
+                        TYSPEC_resolved ty_a
+                    | _ ->
+                        if ty_a <> ty_b
+                        then fail ()
+                        else TYSPEC_resolved ty_a
+                end
 
-          | (TYSPEC_resolved (ty,app), TYSPEC_callable (out_tv, in_tvs))
-          | (TYSPEC_callable (out_tv, in_tvs), TYSPEC_resolved (ty,app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_callable (out_tv, in_tvs))
+          | (TYSPEC_callable (out_tv, in_tvs), TYSPEC_resolved ty) ->
               let unify_in_slot i in_slot =
                 unify_slot in_slot None in_tvs.(i)
               in
@@ -280,25 +329,25 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                         Array.iteri unify_in_slot slots
                     | _ -> fail ()
                 end;
-                TYSPEC_resolved (ty,app)
+                TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_collection tv)
-          | (TYSPEC_collection tv, TYSPEC_resolved (ty, app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_collection tv)
+          | (TYSPEC_collection tv, TYSPEC_resolved ty) ->
               begin
                 match ty with
                     Ast.TY_vec slot -> unify_slot slot None tv
                   | Ast.TY_str -> unify_ty (Ast.TY_mach TY_u8) tv
                   | _ -> fail ()
               end;
-              TYSPEC_resolved (ty, app)
+              TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_comparable)
-          | (TYSPEC_comparable, TYSPEC_resolved (ty, app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_comparable)
+          | (TYSPEC_comparable, TYSPEC_resolved ty) ->
               if not (is_comparable_or_ordered true ty) then fail ()
-              else TYSPEC_resolved (ty, app)
+              else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_dictionary dct)
-          | (TYSPEC_dictionary dct, TYSPEC_resolved (ty, app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_dictionary dct)
+          | (TYSPEC_dictionary dct, TYSPEC_resolved ty) ->
               begin
                 match ty with
                     Ast.TY_rec fields ->
@@ -307,66 +356,46 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                       unify_dict_with_mod_type_items dct items
                   | _ -> fail ()
               end;
-              TYSPEC_resolved (ty, app)
+              TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_integral)
-          | (TYSPEC_integral, TYSPEC_resolved (ty, app)) ->
-              if not (integral ty) then fail () else TYSPEC_resolved (ty, app)
+          | (TYSPEC_resolved ty, TYSPEC_integral)
+          | (TYSPEC_integral, TYSPEC_resolved ty) ->
+              if not (integral ty) then fail () else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_loggable)
-          | (TYSPEC_loggable, TYSPEC_resolved (ty, app)) ->
-              if not (loggable ty) then fail () else TYSPEC_resolved (ty, app)
+          | (TYSPEC_resolved ty, TYSPEC_loggable)
+          | (TYSPEC_loggable, TYSPEC_resolved ty) ->
+              if not (loggable ty) then fail () else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_numeric)
-          | (TYSPEC_numeric, TYSPEC_resolved (ty, app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_numeric)
+          | (TYSPEC_numeric, TYSPEC_resolved ty) ->
               if not ((integral ty) || (floating ty)) then fail ()
-              else TYSPEC_resolved (ty, app)
+              else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_ordered)
-          | (TYSPEC_ordered, TYSPEC_resolved (ty, app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_ordered)
+          | (TYSPEC_ordered, TYSPEC_resolved ty) ->
               if not (is_comparable_or_ordered false ty) then fail ()
-              else TYSPEC_resolved (ty, app)
+              else TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_parametric (tv, params))
-          | (TYSPEC_parametric (tv, params), TYSPEC_resolved (ty, app)) ->
-              begin
-                match (!params, app) with
+          | (TYSPEC_resolved ty, TYSPEC_parametric (tv, params))
+          | (TYSPEC_parametric (tv, params), TYSPEC_resolved ty) ->
+              let (ty, unresolved) = rebuild_ty_under_params ty params in
+                unify_ty ty tv;
+                if unresolved
+                then TYSPEC_parametric (tv, params)
+                else TYSPEC_resolved ty
 
-                    (* Known non-parametric ty. *)
-                    (None, None) -> params := Some [| |]
-
-                  (* Known parametric ty with unapplied parameters. *)
-                  | (None, Some (APP_unapplied n)) ->
-                      params := Some (Array.init n (fun _ -> ref TYSPEC_all))
-
-                  (* Known parametric ty with applied parameters. *)
-                  | (None, Some (APP_applied tys)) ->
-                      params := Some (Array.map (fun t -> ref (TYSPEC_resolved (t, None))) tys)
-
-                  (* Same 3 cases but with information already in params. *)
-                  | (Some _, None) -> fail()
-                  | (Some tvs, Some (APP_unapplied n)) ->
-                      if Array.length tvs != n then fail()
-                  | (Some tvs, Some (APP_applied tys)) ->
-                      if Array.length tvs != Array.length tys
-                      then fail()
-                      else Array.iteri (fun i ty -> unify_ty ty tvs.(i)) tys
-              end;
-              unify_ty ty tv;
-              TYSPEC_parametric (tv, params)
-
-          | (TYSPEC_resolved (ty, app), TYSPEC_record dct)
-          | (TYSPEC_record dct, TYSPEC_resolved (ty, app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_record dct)
+          | (TYSPEC_record dct, TYSPEC_resolved ty) ->
               begin
                 match ty with
                     Ast.TY_rec fields ->
                       unify_dict_with_record_fields dct fields
                   | _ -> fail ()
               end;
-                  TYSPEC_resolved (ty, app)
+              TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_tuple tvs)
-          | (TYSPEC_tuple tvs, TYSPEC_resolved (ty, app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_tuple tvs)
+          | (TYSPEC_tuple tvs, TYSPEC_resolved ty) ->
               begin
                 match ty with
                     Ast.TY_tup (elem_slots:Ast.slot array) ->
@@ -379,15 +408,15 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                           Array.iteri check_elem tvs
                   | _ -> fail ()
               end;
-                  TYSPEC_resolved (ty, app)
+              TYSPEC_resolved ty
 
-          | (TYSPEC_resolved (ty, app), TYSPEC_vector tv)
-          | (TYSPEC_vector tv, TYSPEC_resolved (ty, app)) ->
+          | (TYSPEC_resolved ty, TYSPEC_vector tv)
+          | (TYSPEC_vector tv, TYSPEC_resolved ty) ->
               begin
                 match ty with
                     Ast.TY_vec slot ->
                       unify_slot slot None tv;
-                      TYSPEC_resolved (ty, app)
+                      TYSPEC_resolved ty
                   | _ -> fail ()
               end
 
@@ -451,7 +480,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_collection av, TYSPEC_vector bv)
           | (TYSPEC_vector bv, TYSPEC_collection av) ->
               unify_tyvars av bv;
-                  TYSPEC_vector av
+              TYSPEC_vector av
 
           | (TYSPEC_comparable, TYSPEC_comparable) -> TYSPEC_comparable
 
@@ -568,8 +597,18 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_parametric (tv_a, params_a),
              TYSPEC_parametric (tv_b, params_b)) ->
               unify_typarams params_a params_b;
+              Stack.push params_a params_stk;
               unify_tyvars tv_a tv_b;
-              TYSPEC_parametric (tv_a, params_a)
+              ignore (Stack.pop params_stk);
+              begin
+                match !(resolve_tyvar tv_a) with
+                    TYSPEC_resolved ty ->
+                      let (ty, unresolved) = rebuild_ty_under_params ty params_a in
+                        if unresolved
+                        then TYSPEC_parametric (tv_a, params_a)
+                        else TYSPEC_resolved ty
+                  | _ -> TYSPEC_parametric (tv_a, params_a)
+              end
 
           | (TYSPEC_parametric _, TYSPEC_record _)
           | (TYSPEC_parametric _, TYSPEC_tuple _)
@@ -614,10 +653,12 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         b := TYSPEC_equiv c
 
     and unify_parametric_ty (n:int) (ty:Ast.ty) (tv:tyvar) : unit =
-      unify_tyvars (ref (TYSPEC_resolved (ty, Some (APP_unapplied n)))) tv
+      let resolved = ref (TYSPEC_resolved ty) in
+      let params = ref (Some (Array.init n (fun _ -> ref TYSPEC_all))) in
+        unify_tyvars (ref (TYSPEC_parametric (resolved, params))) tv
 
     and unify_ty (ty:Ast.ty) (tv:tyvar) : unit =
-      unify_tyvars (ref (TYSPEC_resolved (ty, None))) tv
+      unify_tyvars (ref (TYSPEC_resolved ty)) tv
     in
 
     let rec unify_atom (atom:Ast.atom) (tv:tyvar) : unit =
@@ -659,8 +700,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               begin
                 match binop_sig with
                     BINOPSIG_bool_bool_bool ->
-                      unify_atom lhs (ref (TYSPEC_resolved (Ast.TY_bool, None)));
-                      unify_atom rhs (ref (TYSPEC_resolved (Ast.TY_bool, None)));
+                      unify_atom lhs (ref (TYSPEC_resolved Ast.TY_bool));
+                      unify_atom rhs (ref (TYSPEC_resolved Ast.TY_bool));
                       unify_ty Ast.TY_bool tv
                   | BINOPSIG_comp_comp_bool ->
                       let tv_a = ref TYSPEC_comparable in
@@ -687,7 +728,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             begin
               match unop with
                   Ast.UNOP_not ->
-                    unify_atom atom (ref (TYSPEC_resolved (Ast.TY_bool, None)));
+                    unify_atom atom (ref (TYSPEC_resolved Ast.TY_bool));
                     unify_ty Ast.TY_bool tv
                 | Ast.UNOP_neg ->
                     let tv_a = ref TYSPEC_numeric in
@@ -715,7 +756,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                     TYSPEC_dictionary names
 
               | Ast.COMP_named (Ast.COMP_app (id, tys)) ->
-                  let vars = Array.map (fun t -> ref (TYSPEC_resolved (t, None))) tys in
+                  let vars = Array.map (fun t -> ref (TYSPEC_resolved t)) tys in
                   let tv = ref (TYSPEC_parametric (tv, ref (Some vars))) in
                   let names = Hashtbl.create 1 in
                     Hashtbl.add names id tv;
@@ -726,7 +767,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                     TYSPEC_tuple (Array.init (i + 1) init)
 
               | Ast.COMP_atom atom ->
-                  unify_atom atom (ref (TYSPEC_resolved (Ast.TY_int, None)));
+                  unify_atom atom (ref (TYSPEC_resolved Ast.TY_int));
                   TYSPEC_collection tv
             in
               unify_lval base (ref base_ts)
@@ -742,10 +783,17 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
     let visit_stmt_pre (stmt:Ast.stmt) : unit =
       match stmt.node with
           Ast.STMT_spawn (out, _, callee, args) ->
-            unify_lval out (ref (TYSPEC_resolved (Ast.TY_proc, None)));
+            unify_lval out (ref (TYSPEC_resolved Ast.TY_proc));
             let in_tvs = gen_atom_tvs args in
             let callee_tv = ref (TYSPEC_callable (ref TYSPEC_all, in_tvs)) in
-              unify_lval callee callee_tv
+              (* 
+               * NB: calls are all implicitly 'unknown type-parametric' so permit 
+               * resolving against whatever sort of parametric callee shows up
+               * in the callee lval.
+               *)
+            let full_callee_tv = ref (TYSPEC_parametric (callee_tv, ref None)) in
+              unify_lval callee full_callee_tv
+
         | Ast.STMT_init_rec (lval, fields) ->
             let dct = Hashtbl.create 10 in
             let add_field (ident, _, atom) =
@@ -755,6 +803,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             in
               Array.iter add_field fields;
               unify_lval lval (ref (TYSPEC_record dct))
+
         | Ast.STMT_init_tup (lval, members) ->
             let member_to_tv (_, atom) =
               let tv = ref TYSPEC_all in
@@ -763,31 +812,43 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             in
             let member_tvs = Array.map member_to_tv members in
               unify_lval lval (ref (TYSPEC_tuple member_tvs))
+
         | Ast.STMT_init_vec (lval, _, atoms) ->
             let tv = ref TYSPEC_all in
             let unify_with_tv atom = unify_atom atom tv in
               Array.iter unify_with_tv atoms;
               unify_lval lval (ref (TYSPEC_vector tv))
+
         | Ast.STMT_init_str (lval, _) ->
-            unify_lval lval (ref (TYSPEC_resolved (Ast.TY_str, None)))
+            unify_lval lval (ref (TYSPEC_resolved Ast.TY_str))
+
         | Ast.STMT_copy (lval, expr, _) ->
             let tv = ref TYSPEC_all in
               unify_expr expr tv;
               unify_lval lval tv
+
         | Ast.STMT_call (out, callee, args) ->
             let out_tv = ref TYSPEC_all in
               unify_lval out out_tv;
               let in_tvs = gen_atom_tvs args in
               let callee_tv = ref (TYSPEC_callable (out_tv, in_tvs)) in
-                unify_lval callee callee_tv
+              (* NB: see STMT_spawn for note on parametricity. *)
+              let full_callee_tv = ref (TYSPEC_parametric (callee_tv, ref None)) in
+                unify_lval callee full_callee_tv
+
         | Ast.STMT_log atom -> unify_atom atom (ref TYSPEC_loggable)
+
         | Ast.STMT_check_expr expr ->
-            unify_expr expr (ref (TYSPEC_resolved (Ast.TY_bool, None)))
+            unify_expr expr (ref (TYSPEC_resolved Ast.TY_bool))
+
         | Ast.STMT_while { Ast.while_lval = (_, expr); Ast.while_body = _ } ->
-            unify_expr expr (ref (TYSPEC_resolved (Ast.TY_bool, None)))
+            unify_expr expr (ref (TYSPEC_resolved Ast.TY_bool))
+
         | Ast.STMT_if { Ast.if_test = if_test } ->
-            unify_expr if_test (ref (TYSPEC_resolved (Ast.TY_bool, None)));
+            unify_expr if_test (ref (TYSPEC_resolved Ast.TY_bool));
+
         | Ast.STMT_decl _ -> ()
+
         | Ast.STMT_ret (_, atom_opt) ->
             begin
               match atom_opt with
@@ -829,18 +890,24 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               Queue.add id auto_queue;
               Hashtbl.add bindings id (ref TYSPEC_all)
           | DEFN_slot { Ast.slot_mode = _; Ast.slot_ty = Some ty } ->
-              Hashtbl.add bindings id (ref (TYSPEC_resolved (ty, None)))
+              Hashtbl.add bindings id (ref (TYSPEC_resolved ty))
           | _ -> ()
       in
       let init_item_tyvar id ty =
-        let app =
+        let n_params =
           match Hashtbl.find cx.ctxt_all_defns id with
-              DEFN_item i ->
-                let n = Array.length i.Ast.decl_params in
-                  if n = 0 then None else Some (APP_unapplied n)
+              DEFN_item i -> Array.length i.Ast.decl_params
             | _ -> err (Some id) "expected item defn for item tyvar"
         in
-          Hashtbl.add bindings id (ref (TYSPEC_resolved (ty, app)))
+        let resolved = (TYSPEC_resolved ty) in
+        let spec =
+          if n_params = 0
+          then resolved
+          else
+            let params = Some (Array.init n_params (fun _ -> ref TYSPEC_all)) in
+              TYSPEC_parametric (ref resolved, ref params)
+        in
+          Hashtbl.add bindings id (ref spec)
       in
         Hashtbl.iter init_slot_tyvar cx.ctxt_all_defns;
         Hashtbl.iter init_item_tyvar cx.ctxt_all_item_types;
@@ -862,25 +929,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         let check_auto_tyvar id =
           let ts = !(resolve_tyvar (Hashtbl.find bindings id)) in
             match ts with
-              | TYSPEC_parametric (tv, params) ->
-                  begin
-                    match (!tv, !params) with
-                        (TYSPEC_resolved (ty, _), Some tvs) ->
-                          let get_tv i tv =
-                            match !tv with
-                                TYSPEC_resolved (ty, None) -> ty
-                              | _ -> err (Some id) "unresolved parameter %d in %s" i (tyspec_to_str ts)
-                          in
-                          let tys = Array.mapi get_tv tvs in
-                          let base = ty_fold_rebuild (fun t -> t) in
-                          let ty_fold_param (n,_) = tys.(n) in
-                          let fold = { base with ty_fold_param = ty_fold_param } in
-                          let substituted = fold_ty fold ty in
-                            update_auto_tyvar id substituted
-                      | _ -> err (Some id) "unresolved parametric type %s (%d)" (tyspec_to_str ts)
-                          (int_of_node id)
-                  end
-              | TYSPEC_resolved (ty, None) -> update_auto_tyvar id ty
+                TYSPEC_resolved ty -> update_auto_tyvar id ty
               | _ -> err (Some id) "unresolved type %s (%d)" (tyspec_to_str ts)
                   (int_of_node id)
         in
