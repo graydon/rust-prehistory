@@ -787,7 +787,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             let in_tvs = gen_atom_tvs args in
             let callee_tv = ref (TYSPEC_callable (ref TYSPEC_all, in_tvs)) in
               (* 
-               * NB: calls are all implicitly 'unknown type-parametric' so permit 
+               * NB: calls are all implicitly 'unknown type-parametric' to permit 
                * resolving against whatever sort of parametric callee shows up
                * in the callee lval.
                *)
