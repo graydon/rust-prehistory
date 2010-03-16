@@ -159,7 +159,7 @@ and parse_ty_param (iref:int ref) (ps:pstate) : Ast.ty_param identified =
   let i = !iref in
   let bpos = lexpos ps in
     incr iref;
-    span ps apos bpos (ident, (i, mut))
+    span ps apos bpos (ident, (i, next_opaque_id ps, mut))
 
 and parse_ty_params (ps:pstate) : (Ast.ty_param identified) array =
   match peek ps with

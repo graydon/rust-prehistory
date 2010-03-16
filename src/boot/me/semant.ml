@@ -552,7 +552,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_mod : (('slots * Ast.constrs) option * Ast.mod_type_items) -> 'ty;
       ty_fold_proc : unit -> 'ty;
       ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
-      ty_fold_param : (int * Ast.mutability) -> 'ty;
+      ty_fold_param : (int * opaque_id * Ast.mutability) -> 'ty;
       ty_fold_named : Ast.name -> 'ty;
       ty_fold_type : unit -> 'ty;
       ty_fold_constrained : ('ty * Ast.constrs) -> 'ty }
@@ -680,7 +680,7 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_mod = (fun (hdr, mti) -> id (Ast.TY_mod (hdr, mti)));
     ty_fold_proc = (fun _ -> id Ast.TY_proc);
     ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
-    ty_fold_param = (fun (i, mut) -> id (Ast.TY_param (i, mut)));
+    ty_fold_param = (fun (i, oid, mut) -> id (Ast.TY_param (i, oid, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
     ty_fold_type = (fun _ -> id (Ast.TY_type));
     ty_fold_constrained = (fun (t, constrs) -> id (Ast.TY_constrained (t, constrs))) }

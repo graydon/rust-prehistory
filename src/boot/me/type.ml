@@ -96,7 +96,17 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
   in
   let visitor (cx:ctxt) (inner:Walk.visitor) : Walk.visitor =
 
-    let params_stk = Stack.create () in
+    (* 
+     * The stack of ty_params we're visiting while *walking*; new param sets get pushed
+     * on here and popped off as walking traverses through a parametric mod_item.
+     *)
+    let (item_params_stk:((Ast.ty_param identified) array) Stack.t) = Stack.create () in
+
+    (* 
+     * The stack of typarams we're visiting while *unifying*; new param sets get pushed
+     * on here and popped off as unification traverses through a TYSPEC_parametric.
+     *)
+    let (spec_params_stk:typarams Stack.t) = Stack.create () in
 
     let rec unify_slot
         (slot:Ast.slot)
@@ -237,26 +247,18 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         let unresolved = ref false in
         let substituted = ref false in
         let base = ty_fold_rebuild (fun t -> t) in
-        let ty_fold_param (i, mut) =
-          match !params with
-              None ->
-                unresolved := true;
-                Ast.TY_param (i, mut)
-            | Some params ->
-                if i < Array.length params
-                then
-                  match !(resolve_tyvar params.(i)) with
-                      TYSPEC_resolved ty ->
-                        substituted := true;
-                        ty
-                    | _ ->
-                        unresolved := true;
-                        Ast.TY_param (i, mut)
-                else
-                  begin
-                    unresolved := true;
-                    Ast.TY_param (i, mut)
-                  end
+        let ty_fold_param (i, oid, mut) =
+          let ty = Ast.TY_param (i, oid, mut) in
+            match !params with
+                None -> unresolved := true; ty
+              | Some params ->
+                  if i < Array.length params
+                  then
+                    match !(resolve_tyvar params.(i)) with
+                        TYSPEC_resolved ty -> substituted := true; ty
+                      | _ -> unresolved := true; ty
+                    else
+                      (unresolved := true; ty)
         in
         let fold = { base with ty_fold_param = ty_fold_param } in
         let ty' = fold_ty fold ty in
@@ -280,26 +282,47 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_all, other) | (other, TYSPEC_all) -> other
 
           | (TYSPEC_resolved ty_a, TYSPEC_resolved ty_b) ->
-              let param n =
-                let params = Stack.top params_stk in
-                  match !params with
-                      None -> fail ()
-                    | Some params ->
-                        if n < Array.length params
-                        then params.(n)
-                        else fail()
+              let param oid n =
+                let spec_ty_param _ =
+                  let params =
+                    if Stack.is_empty spec_params_stk
+                    then bug () "indexed spec-param access outside parametric type"
+                    else
+                      Stack.top spec_params_stk
+                  in
+                    match !params with
+                        None -> fail ()
+                      | Some params ->
+                          if n < Array.length params
+                          then params.(n)
+                          else fail()
+                in
+                  if not (Stack.is_empty item_params_stk)
+                  then
+                    let item_params = Stack.top item_params_stk in
+                    let search_param_by_oid (_:int) (param:Ast.ty_param identified) : Ast.ty option =
+                      let (_, (i, oid', mut)) = param.node in
+                      if oid = oid'
+                      then Some (Ast.TY_param (i, oid, mut))
+                      else None
+                    in
+                      match arr_search item_params search_param_by_oid with
+                          Some t -> ref (TYSPEC_resolved t)
+                        | None -> spec_ty_param ()
+                  else
+                    spec_ty_param ()
               in
                 begin
                   match ty_a, ty_b with
-                      (Ast.TY_param (m,_), Ast.TY_param (n,_)) ->
-                        if m != n
+                      (Ast.TY_param (m,moid,_), Ast.TY_param (n,noid,_)) ->
+                        if m != n || moid != noid
                         then fail ()
-                        else !(param n)
-                    | (Ast.TY_param (n,_), _) ->
-                        unify_ty ty_b (param n);
+                        else !(param noid n)
+                    | (Ast.TY_param (n,noid,_), _) ->
+                        unify_ty ty_b (param noid n);
                         TYSPEC_resolved ty_b
-                    | (_, Ast.TY_param (n,_)) ->
-                        unify_ty ty_a (param n);
+                    | (_, Ast.TY_param (n,noid,_)) ->
+                        unify_ty ty_a (param noid n);
                         TYSPEC_resolved ty_a
                     | _ ->
                         if ty_a <> ty_b
@@ -600,9 +623,9 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_parametric (tv_a, params_a),
              TYSPEC_parametric (tv_b, params_b)) ->
               unify_typarams params_a params_b;
-              Stack.push params_a params_stk;
+              Stack.push params_a spec_params_stk;
               unify_tyvars tv_a tv_b;
-              ignore (Stack.pop params_stk);
+              ignore (Stack.pop spec_params_stk);
               begin
                 match !(resolve_tyvar tv_a) with
                     TYSPEC_resolved ty ->
@@ -864,7 +887,9 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             log cx "warning: not typechecking stmt %s\n"
               (Ast.sprintf_stmt () stmt)
     in
+
     let visit_mod_item_pre n p mod_item =
+      Stack.push mod_item.node.Ast.decl_params item_params_stk;
       begin
         try
           match mod_item.node.Ast.decl_item with
@@ -878,11 +903,19 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       end;
       inner.Walk.visit_mod_item_pre n p mod_item
     in
+
+    let visit_mod_item_post n p mod_item =
+      inner.Walk.visit_mod_item_post n p mod_item;
+      ignore (Stack.pop item_params_stk)
+    in
+
       {
         inner with
           Walk.visit_mod_item_pre = visit_mod_item_pre;
+          Walk.visit_mod_item_post = visit_mod_item_post;
           Walk.visit_stmt_pre = visit_stmt_pre
       }
+
   in
     try
       let path = Stack.create () in
