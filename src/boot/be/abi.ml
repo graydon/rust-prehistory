@@ -45,6 +45,8 @@ let binding_size = 2;;
 let binding_field_item = 0;;
 let binding_field_binding = 1;;
 
+let general_code_alignment = 16;;
+
 type abi =
   {
     abi_word_sz: int64;

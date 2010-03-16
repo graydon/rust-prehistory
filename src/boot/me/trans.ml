@@ -700,7 +700,7 @@ let trans_visitor
 
   and annotate_quads (name:string) : unit =
     let e = emitter() in
-    let quads = e.Il.emit_quads in
+    let quads = emitted_quads e in
     let annotations = annotations() in
       log cx "emitted quads for %s:" name;
       for i = 0 to arr_max quads
@@ -735,11 +735,14 @@ let trans_visitor
       write_frame_info_ptrs None;
       iflog (fun _ -> annotate "finished prologue");
 
+  and emitted_quads e =
+    Array.sub e.Il.emit_quads 0 e.Il.emit_pc
+
   and capture_emitted_glue (fix:fixup) (spill:fixup) (g:glue) : unit =
     let e = emitter() in
       iflog (fun _ -> annotate_quads (glue_str cx g));
       let code = { code_fixup = fix;
-                   code_quads = e.Il.emit_quads;
+                   code_quads = emitted_quads e;
                    code_vregs_and_spill = Some (e.Il.emit_next_vreg, spill) }
       in
         htab_put cx.ctxt_glue_code g code
@@ -2890,7 +2893,7 @@ let trans_visitor
   and capture_emitted_quads (fix:fixup) (node:node_id) : unit =
     let e = emitter() in
     let n_vregs = e.Il.emit_next_vreg in
-    let quads = e.Il.emit_quads in
+    let quads = emitted_quads e in
     let name = path_name () in
     let f =
       if Stack.is_empty curr_file
@@ -3282,7 +3285,7 @@ let trans_visitor
         pop_emitter();
         let code =
           { code_fixup = fix;
-            code_quads = e.Il.emit_quads;
+            code_quads = emitted_quads e;
             code_vregs_and_spill = None }
         in
           htab_put cx.ctxt_glue_code glue code

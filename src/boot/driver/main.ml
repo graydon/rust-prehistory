@@ -272,7 +272,8 @@ let main_pipeline _ =
                 insns
               end
     in
-      Asm.DEF (code.Semant.code_fixup, frag)
+      Asm.ALIGN_FILE (Abi.general_code_alignment,
+                      Asm.DEF (code.Semant.code_fixup, frag))
   in
 
   let process_node_code (node:node_id) (code:Semant.code) : Asm.frag =
