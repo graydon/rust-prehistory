@@ -205,12 +205,6 @@ let new_relaxation (frags:frag array) =
 ;;
 
 
-let log sess = Session.log "asm"
-  sess.Session.sess_log_asm
-  sess.Session.sess_log_out
-;;
-
-
 let rec resolve_frag (sess:Session.sess) (frag:frag) : unit =
   let relaxations = ref [] in
   let reset_relaxation rel =
@@ -240,7 +234,7 @@ let rec resolve_frag (sess:Session.sess) (frag:frag) : unit =
           end
   in
     while still_relaxing frag do
-      log sess "relaxing";
+      iflog sess (fun _ -> log sess "relaxing");
     done;
     resolve_frag_full dummy_collector frag
 
@@ -461,19 +455,19 @@ and lower_frag
       | BYTE i -> byte i
 
       | BYTES bs ->
-          log sess "lowering %d bytes" (Array.length bs);
+          iflog sess (fun _ -> log sess "lowering %d bytes" (Array.length bs));
           Array.iter byte bs
 
       | CHAR c ->
-          log sess "lowering char: %c" c;
+          iflog sess (fun _ -> log sess "lowering char: %c" c);
           Buffer.add_char buf c
 
       | STRING s ->
-          log sess "lowering string: %s" s;
+          iflog sess (fun _ -> log sess "lowering string: %s" s);
           Buffer.add_string buf s
 
       | ZSTRING s ->
-          log sess "lowering zstring: %s" s;
+          iflog sess (fun _ -> log sess "lowering zstring: %s" s);
           Buffer.add_string buf s;
           byte 0
 
@@ -481,8 +475,10 @@ and lower_frag
       | SLEB128 e -> sleb e
 
       | WORD (m,e) ->
-          log sess "lowering word %s"
-            (string_of_ty_mach m);
+          iflog sess
+            (fun _ ->
+               log sess "lowering word %s"
+                 (string_of_ty_mach m));
           word (bytes_of_ty_mach m) (mach_is_signed m) e
 
       | ALIGN_FILE (n, frag) ->
@@ -495,7 +491,7 @@ and lower_frag
 
       | ALIGN_MEM (_, i) -> lower_frag_2 sess lsb0 buf i
       | DEF (f, i) ->
-          log sess "lowering fixup: %s" f.fixup_name;
+          iflog sess (fun _ -> log sess "lowering fixup: %s" f.fixup_name);
           lower_frag_2 sess lsb0 buf i;
 
       | RELAX rel ->
@@ -559,7 +555,7 @@ type asm_reader =
 type mmap_arr = (int, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t;;
 
 let new_asm_reader (sess:Session.sess) (s:filename) : asm_reader =
-  log sess "opening file %s" s;
+  iflog sess (fun _ -> log sess "opening file %s" s);
   let fd = Unix.openfile s [ Unix.O_RDONLY ] 0 in
   let arr = (Bigarray.Array1.map_file
                fd ~pos:0L
