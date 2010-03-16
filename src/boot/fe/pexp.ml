@@ -20,7 +20,7 @@ type pexp' =
     PEXP_call of (pexp * pexp array)
   | PEXP_spawn of (Ast.realm * pexp)
   | PEXP_bind of (pexp * pexp option array)
-  | PEXP_rec of ((Ast.ident * pexp) array)
+  | PEXP_rec of ((Ast.ident * pexp) array * pexp option)
   | PEXP_tup of (pexp array)
   | PEXP_vec of (Ast.slot * (pexp array))
   | PEXP_port
@@ -347,14 +347,17 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
 
     | REC ->
         bump ps;
-        let ltab = ref [] in
         let parse_rec_entry ps =
           let mut = parse_mutability ps in
           let (slot, ident) = parse_slot_and_ident false ps in
-            ltab := ltab_put (!ltab) ident (apply_mutability ps slot mut)
+            (ident, apply_mutability ps slot mut)
         in
-        let _ = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_rec_entry ps in
-          Ast.TY_rec (arl (!ltab))
+        let entries = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_rec_entry ps in
+        let labels = Array.map (fun (l, _) -> l) entries in
+          begin
+            arr_check_dups labels (fun l _ -> raise (err (Printf.sprintf "duplicate record label: %s" l) ps));
+            Ast.TY_rec entries
+          end
 
     | LPAREN ->
         let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps in
@@ -472,22 +475,25 @@ and parse_ty (ps:pstate) : Ast.ty =
   parse_constrained_ty ps
 
 
-and parse_rec_input (ltab:((Ast.ident * pexp) list) ref) (ps:pstate) : unit =
+and parse_rec_input (ps:pstate) : (Ast.ident * pexp) =
   let lab = (ctxt "rec input: label" parse_ident ps) in
     match peek ps with
         EQ ->
           bump ps;
-          let pexp = (ctxt "rec input: expr" parse_pexp ps) in
-            ltab := ltab_put (!ltab) lab pexp
+          let pexp = ctxt "rec input: expr" parse_pexp ps in
+            (lab, pexp)
       | _ -> raise (unexpected ps)
 
 
 and parse_rec_inputs (ps:pstate) : ((Ast.ident * pexp) array) =
-  let ltab = ref [] in
-  let _ = bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
-    (ctxt "rec inputs" (parse_rec_input ltab)) ps
+  let inputs = bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
+    (ctxt "rec inputs" parse_rec_input) ps
   in
-    arl (!ltab)
+  let labels = Array.map (fun (l, _) -> l) inputs in
+    begin
+      arr_check_dups labels (fun l _ -> raise (err (Printf.sprintf "duplicate record label: %s" l) ps));
+      inputs
+    end
 
 
 and parse_lit (ps:pstate) : Ast.lit =
@@ -528,7 +534,7 @@ and parse_bottom_pexp (ps:pstate) : pexp =
           bump ps;
           let inputs = ctxt "rec pexp: rec inputs" parse_rec_inputs ps in
           let bpos = lexpos ps in
-            span ps apos bpos (PEXP_rec inputs)
+            span ps apos bpos (PEXP_rec (inputs, None))
 
     | VEC ->
         bump ps;
@@ -1033,7 +1039,7 @@ and desugar_expr_init
               | _ -> raise (err "non-call spawn" ps)
           end
 
-          | PEXP_rec args ->
+      | PEXP_rec (args, (*base*)_) ->
           let (arg_stmts, entries) =
             arj1st
               begin
@@ -1046,7 +1052,7 @@ and desugar_expr_init
                   args
               end
           in
-          let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries)) in
+          let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, None)) in
             Array.append arg_stmts [| rec_stmt |]
 
       | PEXP_tup args ->

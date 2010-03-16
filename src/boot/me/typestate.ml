@@ -327,7 +327,7 @@ let condition_assigning_visitor
             in
               raise_precondition s.id precond;
 
-        | Ast.STMT_init_rec (dst, entries) ->
+        | Ast.STMT_init_rec (dst, entries, (*base*)_) ->
             let precond = Array.map (fun s -> Constr_init s) (entries_slots cx entries) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               raise_precondition s.id precond;

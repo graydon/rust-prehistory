@@ -2757,7 +2757,7 @@ let trans_visitor
                 | _ -> bug () "Binding unexpected lval."
           end
 
-      | Ast.STMT_init_rec (dst, atab) ->
+      | Ast.STMT_init_rec (dst, atab, (*base*)_) ->
           let (slot_cell, slot) = trans_lval_init dst in
           let dst_slots =
             match slot_ty slot with

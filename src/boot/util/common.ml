@@ -357,6 +357,30 @@ let arr_filter_some (a:'a option array) : 'a array =
   arr_map_partial a (fun x -> x)
 ;;
 
+let arr_find_dups (a:'a array) : ('a * 'a) option =
+  let copy = Array.copy a in
+    Array.sort compare copy;
+    let lasti = (Array.length copy) - 1 in
+    let rec find_dups i =
+      if i < lasti then
+        let this = copy.(i) in
+        let next = copy.(i+1) in
+          (if (this = next) then
+             Some (this, next)
+           else
+             find_dups (i+1))
+      else
+        None
+    in
+      find_dups 0
+;;
+
+let arr_check_dups (a:'a array) (f:'a -> 'a -> unit) : unit =
+  match arr_find_dups a with
+      Some (x, y) -> f x y
+    | None -> ()
+;;
+
 (* FIXME: use Array.build or whatever it's called for efficiency *)
 let arr_map2 (f:'a -> 'b -> 'c) (a:'a array) (b:'b array) : 'c array =
   assert ((Array.length a) = (Array.length b));

@@ -408,7 +408,7 @@ and walk_stmt
         Ast.STMT_log a ->
           walk_atom v a
 
-      | Ast.STMT_init_rec (lv, atab) ->
+      | Ast.STMT_init_rec (lv, atab, (*base*)_) ->
           walk_lval v lv;
           Array.iter (fun (_, _, a) -> walk_atom v a) atab
 

@@ -207,7 +207,7 @@ and stmt' =
 
   (* lval-assigning stmts. *)
     STMT_spawn of (lval * realm * lval * (atom array))
-  | STMT_init_rec of (lval * ((ident * mode * atom) array))
+  | STMT_init_rec of (lval * ((ident * mode * atom) array) * atom option)
   | STMT_init_tup of (lval * ((mode * atom) array))
   | STMT_init_vec of (lval * slot * (atom array))
   | STMT_init_str of (lval * string)
@@ -1042,7 +1042,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_decl (DECL_mod_item (ident, item)) ->
           fmt_mod_item ff ident item
 
-      | STMT_init_rec (dst, entries) ->
+      | STMT_init_rec (dst, entries, (*base*)_) ->
           fmt_lval ff dst;
           fmt ff " = rec(";
           for i = 0 to (Array.length entries) - 1
