@@ -1032,10 +1032,9 @@ let emit_file
     |]
   in
 
-  let buf = Buffer.create 16 in
+  let buf = Buffer.create 0xffff in
   let out = open_out_bin (Session.filename_of sess.Session.sess_out) in
-    resolve_frag sess segments;
-    lower_frag ~sess ~lsb0: true ~buf ~it: segments;
+    write_frag ~sess ~lsb0: true ~buf ~frag: segments;
     Buffer.output_buffer out buf;
     flush out;
     close_out out

@@ -205,7 +205,12 @@ let new_relaxation (frags:frag array) =
 ;;
 
 
-let rec resolve_frag (sess:Session.sess) (frag:frag) : unit =
+let rec write_frag
+    ~(sess:Session.sess)
+    ~(lsb0:bool)
+    ~(buf:Buffer.t)
+    ~(frag:frag)
+    : unit =
   let relaxations = ref [] in
   let reset_relaxation rel =
     rel.relax_choice := ((Array.length rel.relax_options) - 1);
@@ -216,15 +221,14 @@ let rec resolve_frag (sess:Session.sess) (frag:frag) : unit =
   in
   let dummy_collector _ = () in
   let _ = resolve_frag_full real_collector frag in
-  let dummy_buffer = Buffer.create 0xffff in
   let relax r =
     r.relax_choice := (!(r.relax_choice)) - 1
   in
   let still_relaxing frag =
     try
-      Buffer.reset dummy_buffer;
+      Buffer.clear buf;
       resolve_frag_full dummy_collector frag;
-      lower_frag sess true dummy_buffer frag;
+      lower_frag ~sess ~lsb0 ~buf ~frag;
       false
     with
         Relax_more r ->
@@ -235,8 +239,7 @@ let rec resolve_frag (sess:Session.sess) (frag:frag) : unit =
   in
     while still_relaxing frag do
       iflog sess (fun _ -> log sess "relaxing");
-    done;
-    resolve_frag_full dummy_collector frag
+    done
 
 and resolve_frag_full (relaxation_collector:relaxation -> unit) (frag:frag)
     : unit =
@@ -330,7 +333,7 @@ and lower_frag
     ~(sess:Session.sess)
     ~(lsb0:bool)
     ~(buf:Buffer.t)
-    ~(it:frag)
+    ~(frag:frag)
     : unit =
   let byte (i:int) =
     if i < 0
@@ -437,7 +440,7 @@ and lower_frag
               emit1 (mask1 (shift i (8*n)))
             done
   in
-    match it with
+    match frag with
         MARK -> ()
 
       | SEQ frags ->

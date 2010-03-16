@@ -1556,10 +1556,9 @@ let emit_file
       ~import_fixups
       ~needed_libs
   in
-  let buf = Buffer.create 16 in
+  let buf = Buffer.create 0xffff in
   let out = open_out_bin (Session.filename_of sess.Session.sess_out) in
-    resolve_frag sess all_frags;
-    lower_frag ~sess ~lsb0: true ~buf: buf ~it: all_frags;
+    write_frag ~sess ~lsb0: true ~buf ~frag: all_frags;
     Buffer.output_buffer out buf;
     flush out;
     close_out out
