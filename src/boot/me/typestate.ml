@@ -552,7 +552,18 @@ let graph_general_block_structure_building_visitor
        * If block has len, 
        * then flow block to block.node.(0) and block.node.(len-1) to dsts
        * else flow block to dsts
+       * 
+       * so AST:
+       * 
+       *   block#n{ stmt#0 ... stmt#k };
+       *   stmt#j;
+       * 
+       * turns into graph:
+       * 
+       *   block#n -> stmt#0 -> ... -> stmt#k -> stmt#j
+       * 
        *)
+
       if len > 0
       then
         begin
@@ -655,7 +666,7 @@ let find_roots
     roots
 ;;
 
-let run_dataflow cx graph =
+let run_dataflow cx graph : unit =
   let roots = find_roots graph in
   let nodes = Queue.create () in
   let progress = ref true in
