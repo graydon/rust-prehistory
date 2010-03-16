@@ -1053,7 +1053,7 @@ and desugar_expr_init
               | _ -> raise (err "non-call spawn" ps)
           end
 
-      | PEXP_rec (args, (*base*)_) ->
+      | PEXP_rec (args, base) ->
           let (arg_stmts, entries) =
             arj1st
               begin
@@ -1066,8 +1066,16 @@ and desugar_expr_init
                   args
               end
           in
-          let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, None)) in
-            Array.append arg_stmts [| rec_stmt |]
+            begin
+              match base with
+                  Some base ->
+                    let (base_stmts, base_atom) = desugar_expr_atom ps base in
+                    let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, Some base_atom)) in
+                      Array.concat [ arg_stmts; base_stmts; [| rec_stmt |] ]
+                | None ->
+                    let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, None)) in
+                      Array.append arg_stmts [| rec_stmt |]
+            end
 
       | PEXP_tup args ->
           let (arg_stmts, arg_mode_atoms) = desugar_expr_mode_atoms ps args in
