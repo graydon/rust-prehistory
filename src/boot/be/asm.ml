@@ -204,6 +204,8 @@ let new_relaxation (frags:frag array) =
           relax_choice = ref 0; }
 ;;
 
+type pos = (int*int64)
+;;
 
 let rec write_frag
     ~(sess:Session.sess)
@@ -243,91 +245,94 @@ let rec write_frag
 
 and resolve_frag_full (relaxation_collector:relaxation -> unit) (frag:frag)
     : unit =
-  let file_pos = ref 0 in
-  let mem_pos = ref 0L in
-  let bump i =
-    mem_pos := Int64.add (!mem_pos) (Int64.of_int i);
-    file_pos := (!file_pos) + i
+
+  let bump (pos:pos) (i:int) : pos =
+    let (fpos, mpos) = pos in
+      (fpos+i, Int64.add mpos (Int64.of_int i))
   in
 
-  let uleb (e:expr64) : unit =
-    let rec loop value =
+  let bump_mem (pos:pos) (i:int64) : pos =
+    let (fpos, mpos) = pos in
+      (fpos, Int64.add mpos i)
+  in
+
+
+  let uleb (pos:pos) (e:expr64) : pos =
+    let rec loop value pos =
       let value = Int64.shift_right_logical value 7 in
         if value = 0L
-        then bump 1
+        then bump pos 1
         else
           begin
-            bump 1;
-            loop value
+            loop value (bump pos 1)
           end
     in
-      loop (eval64 e)
+      loop (eval64 e) pos
   in
 
-  let sleb (e:expr64) : unit =
-    let rec loop value =
+  let sleb (pos:pos) (e:expr64) : pos =
+    let rec loop value pos =
       let byte = Int64.logand value 0xf7L in
       let value = Int64.shift_right value 7 in
       let signbit = Int64.logand byte 0x40L in
         if (((value = 0L) && (signbit = 0L)) ||
               ((value = -1L) && (signbit = 0x40L)))
-        then bump 1
+        then bump pos 1
         else
           begin
-            bump 1;
-            loop value
+            loop value (bump pos 1)
           end
     in
-      loop (eval64 e)
+      loop (eval64 e) pos
   in
-  let rec resolve_frag it =
-    match it with
-      | MARK -> ()
-      | SEQ frags -> Array.iter resolve_frag frags
-      | PAD i -> bump i
-      | BSS i -> mem_pos := Int64.add (!mem_pos) i
-      | MEMPOS i -> mem_pos := i
-      | BYTE _ -> bump 1
-      | BYTES ia -> bump (Array.length ia)
-      | CHAR _ -> bump 1
-      | STRING s -> bump (String.length s)
-      | ZSTRING s -> bump ((String.length s) + 1)
-      | ULEB128 e -> uleb e
-      | SLEB128 e -> sleb e
-      | WORD (mach,_) -> bump (bytes_of_ty_mach mach)
+  let rec resolve_frag (pos:pos) (frag:frag) : pos =
+    match frag with
+      | MARK -> pos
+      | SEQ frags -> Array.fold_left resolve_frag pos frags
+      | PAD i -> bump pos i
+      | BSS i -> bump_mem pos i
+      | MEMPOS i -> (fst pos, i)
+      | BYTE _ -> bump pos 1
+      | BYTES ia -> bump pos (Array.length ia)
+      | CHAR _ -> bump pos 1
+      | STRING s -> bump pos (String.length s)
+      | ZSTRING s -> bump pos ((String.length s) + 1)
+      | ULEB128 e -> uleb pos e
+      | SLEB128 e -> sleb pos e
+      | WORD (mach,_) -> bump pos (bytes_of_ty_mach mach)
       | ALIGN_FILE (n, frag) ->
-          let spill = (!file_pos) mod n in
+          let (fpos, _) = pos in
+          let spill = fpos mod n in
           let pad = (n - spill) mod n in
-            file_pos := (!file_pos) + pad;
             (*
              * NB: aligning the file *causes* likewise alignment of
              * memory, since we implement "file alignment" by
              * padding!
              *)
-            mem_pos := Int64.add (!mem_pos) (Int64.of_int pad);
-            resolve_frag frag
+            resolve_frag (bump pos pad) frag
 
       | ALIGN_MEM (n, frag) ->
+          let (_, mpos) = pos in
           let n64 = Int64.of_int n in
-          let spill = Int64.rem (!mem_pos) n64 in
+          let spill = Int64.rem mpos n64 in
           let pad = Int64.rem (Int64.sub n64 spill) n64 in
-            mem_pos := Int64.add (!mem_pos) pad;
-            resolve_frag frag
+            resolve_frag (bump_mem pos pad) frag
 
       | DEF (f, i) ->
-          let fpos1 = !file_pos in
-          let mpos1 = !mem_pos in
-            resolve_frag i;
-            f.fixup_file_pos <- Some fpos1;
-            f.fixup_mem_pos <- Some mpos1;
-            f.fixup_file_sz <- Some ((!file_pos) - fpos1);
-            f.fixup_mem_sz <- Some (Int64.sub (!mem_pos) mpos1)
+          let (fpos, mpos) = pos in
+          let (fpos1, mpos1) = resolve_frag pos i in
+            f.fixup_file_pos <- Some fpos;
+            f.fixup_mem_pos <- Some mpos;
+            f.fixup_file_sz <- Some (fpos1 - fpos);
+            f.fixup_mem_sz <- Some (Int64.sub mpos1 mpos);
+            (fpos1, mpos1)
 
       | RELAX rel ->
           (relaxation_collector rel;
-           resolve_frag rel.relax_options.(!(rel.relax_choice)))
+           resolve_frag pos rel.relax_options.(!(rel.relax_choice)))
   in
-    resolve_frag frag
+    ignore (resolve_frag (0,0L) frag)
+
 
 and lower_frag
     ~(sess:Session.sess)
