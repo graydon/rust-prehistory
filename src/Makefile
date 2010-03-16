@@ -405,3 +405,4 @@ clean:
 	$(CFG_QUIET)rm -f $(TEST_RUN_FAIL_EXES) $(TEST_RUN_FAIL_OUTS)
 	$(CFG_QUIET)rm -f $(TEST_COMPILE_FAIL_EXES) $(TEST_COMPILE_FAIL_OUTS)
 	$(CFG_QUIET)rm -Rf $(PKG_NAME)-*.tar.gz dist
+	$(CFG_QUIET)rm -f $(foreach ext,cmx cmi cmo cma o a d exe,$(wildcard boot/*/*.$(ext)))
