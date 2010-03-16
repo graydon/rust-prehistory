@@ -3,8 +3,7 @@ open Common;;
 
 let _ =
   Gc.set { (Gc.get()) with
-             Gc.space_overhead = 400;
-}
+             Gc.space_overhead = 400; }
 ;;
 
 let (targ:Common.target) =

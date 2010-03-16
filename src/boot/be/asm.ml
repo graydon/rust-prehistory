@@ -201,7 +201,7 @@ exception Relax_more of relaxation;;
 
 let new_relaxation (frags:frag array) =
   RELAX { relax_options = frags;
-          relax_choice = ref 0; }
+          relax_choice = ref ((Array.length frags) - 1); }
 ;;
 
 
@@ -211,37 +211,33 @@ let rec write_frag
     ~(buf:Buffer.t)
     ~(frag:frag)
     : unit =
-  let relaxations = ref [] in
-  let reset_relaxation rel =
-    rel.relax_choice := ((Array.length rel.relax_options) - 1);
+  let relax = Queue.create () in
+  let bump_relax r =
+    iflog sess (fun _ ->
+                  log sess "bumping relaxation to position %d"
+                    ((!(r.relax_choice)) - 1));
+    r.relax_choice := (!(r.relax_choice)) - 1;
+    if !(r.relax_choice) < 0
+    then failwith "relaxation ran out of options"
   in
-  let real_collector rel =
-    reset_relaxation rel;
-    relaxations := rel :: (!relaxations)
+  let rec loop _ =
+    Queue.clear relax;
+    Buffer.clear buf;
+    resolve_frag_full relax frag;
+    lower_frag ~sess ~lsb0 ~buf ~relax ~frag;
+    if Queue.is_empty relax
+    then ()
+    else
+      begin
+        iflog sess (fun _ -> log sess "relaxing");
+        Queue.iter bump_relax relax;
+        loop ()
+      end
   in
-  let dummy_collector _ = () in
-  let _ = resolve_frag_full real_collector frag in
-  let relax r =
-    r.relax_choice := (!(r.relax_choice)) - 1
-  in
-  let still_relaxing frag =
-    try
-      Buffer.clear buf;
-      resolve_frag_full dummy_collector frag;
-      lower_frag ~sess ~lsb0 ~buf ~frag;
-      false
-    with
-        Relax_more r ->
-          begin
-            relax r;
-            true
-          end
-  in
-    while still_relaxing frag do
-      iflog sess (fun _ -> log sess "relaxing");
-    done
+    loop ()
 
-and resolve_frag_full (relaxation_collector:relaxation -> unit) (frag:frag)
+
+and resolve_frag_full (relax:relaxation Queue.t) (frag:frag)
     : unit =
   let file_pos = ref 0 in
   let mem_pos = ref 0L in
@@ -324,8 +320,12 @@ and resolve_frag_full (relaxation_collector:relaxation -> unit) (frag:frag)
             f.fixup_mem_sz <- Some (Int64.sub (!mem_pos) mpos1)
 
       | RELAX rel ->
-          (relaxation_collector rel;
-           resolve_frag rel.relax_options.(!(rel.relax_choice)))
+          begin
+            try
+              resolve_frag rel.relax_options.(!(rel.relax_choice))
+            with
+                Bad_fit _ -> Queue.add rel relax
+          end
   in
     resolve_frag frag
 
@@ -333,6 +333,7 @@ and lower_frag
     ~(sess:Session.sess)
     ~(lsb0:bool)
     ~(buf:Buffer.t)
+    ~(relax:relaxation Queue.t)
     ~(frag:frag)
     : unit =
   let byte (i:int) =
@@ -444,7 +445,7 @@ and lower_frag
         MARK -> ()
 
       | SEQ frags ->
-          Array.iter (lower_frag_2 sess lsb0 buf) frags
+          Array.iter (fun frag -> lower_frag ~sess ~lsb0 ~buf ~relax ~frag) frags
 
       | PAD c ->
           for i = 1 to c do
@@ -490,39 +491,20 @@ and lower_frag
             for i = 1 to pad do
               Buffer.add_char buf '\x00'
             done;
-            lower_frag_2 sess lsb0 buf frag
+            lower_frag sess lsb0 buf relax frag
 
-      | ALIGN_MEM (_, i) -> lower_frag_2 sess lsb0 buf i
+      | ALIGN_MEM (_, i) -> lower_frag sess lsb0 buf relax i
       | DEF (f, i) ->
           iflog sess (fun _ -> log sess "lowering fixup: %s" f.fixup_name);
-          lower_frag_2 sess lsb0 buf i;
+          lower_frag sess lsb0 buf relax i;
 
       | RELAX rel ->
-          try
-            lower_frag_2 sess lsb0 buf rel.relax_options.(!(rel.relax_choice))
-          with
-              Bad_fit _ -> raise (Relax_more rel)
-
-(*
-(*
-  * We need to ensure that if the DEF advanced the file_pos
-  * associated with the fixup -- indicative of an aligned MARK
-  * or similar -- that we pad out to the recorded size.
-*)
-          lower_frag_2 lsb0 buf i;
-          let len = Buffer.length buf in
-          match (f.fixup_file_pos, f.fixup_file_sz) with
-              (Some fp, Some fs) ->
-                let target_len = fp + fs in
-                  for i = 1 to (target_len - len)
-                  do
-                    Buffer.add_char buf '\x00'
-                  done
-            | _ -> ()
-*)
-and
-    (* Some odd recursion bug? Unifier gets sad without this indirection. *)
-    lower_frag_2 sess lsb0 buf i = lower_frag sess lsb0 buf i
+          begin
+            try
+              lower_frag sess lsb0 buf relax rel.relax_options.(!(rel.relax_choice))
+            with
+                Bad_fit _ -> Queue.add rel relax
+          end
 ;;
 
 let fold_flags (f:'a -> int64) (flags:'a list) : int64 =
