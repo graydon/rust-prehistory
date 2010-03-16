@@ -1,11 +1,17 @@
 type t = {
-  storage: int64 array;
+  storage: int array;
   nbits: int;
 }
 ;;
 
+let int_bits =
+  if max_int = (1 lsl 30) - 1
+  then 31
+  else 63
+;;
+
 let create nbits flag =
-  { storage = Array.make (nbits / 64 + 1) (if flag then Int64.lognot 0L else 0L);
+  { storage = Array.make (nbits / int_bits + 1) (if flag then lnot 0 else 0);
     nbits = nbits }
 ;;
 
@@ -13,7 +19,7 @@ let create nbits flag =
  * mutate v0 in place: v0.(i) <- v0.(i) op v1.(i), returning bool indicating
  * whether any bits in v0 changed in the process. 
  *)
-let process (op:int64 -> int64 -> int64) (v0:t) (v1:t) : bool =
+let process (op:int -> int -> int) (v0:t) (v1:t) : bool =
   let changed = ref false in
     assert (v0.nbits = v1.nbits);
     assert ((Array.length v0.storage) = (Array.length v1.storage));
@@ -30,17 +36,17 @@ let process (op:int64 -> int64 -> int64) (v0:t) (v1:t) : bool =
     !changed
 ;;
 
-let union = process Int64.logor ;;
-let intersect = process Int64.logand ;;
+let union = process (lor) ;;
+let intersect = process (land) ;;
 let copy = process (fun _ w1 -> w1) ;;
 
 let get (v:t) (i:int) : bool =
   assert (i >= 0);
   assert (i < v.nbits);
-  let w = i / 64 in
-  let b = i mod 64 in
-  let x = Int64.logand 1L (Int64.shift_right_logical v.storage.(w) b) in
-    x = 1L
+  let w = i / int_bits in
+  let b = i mod int_bits in
+  let x = 1 land (v.storage.(w) lsr b) in
+    x = 1
 ;;
 
 let equal (v1:t) (v0:t) : bool =
@@ -50,28 +56,28 @@ let equal (v1:t) (v0:t) : bool =
 let clear (v:t) : unit =
   for i = 0 to (Array.length v.storage) - 1
   do
-    v.storage.(i) <- 0L
+    v.storage.(i) <- 0
   done
 ;;
 
 let invert (v:t) : unit =
   for i = 0 to (Array.length v.storage) - 1
   do
-    v.storage.(i) <- Int64.lognot v.storage.(i)
+    v.storage.(i) <- lnot v.storage.(i)
   done
 ;;
 
 let set (v:t) (i:int) (x:bool) : unit =
   assert (i >= 0);
   assert (i < v.nbits);
-  let w = i / 64 in
-  let b = i mod 64 in
+  let w = i / int_bits in
+  let b = i mod int_bits in
   let w0 = v.storage.(w) in
-  let flag = Int64.shift_left 1L b in
+  let flag = 1 lsl b in
     v.storage.(w) <-
       if x
-      then Int64.logor w0 flag
-      else Int64.logand w0 (Int64.lognot flag)
+      then w0 lor flag
+      else w0 land (lnot flag)
 ;;
 
 let to_list (v:t) : int list =
@@ -81,11 +87,11 @@ let to_list (v:t) : int list =
     let accum = ref [] in
     let word = ref v.storage.(0) in
       for i = 0 to v.nbits do
-        if i mod 64 = 0
-        then word := v.storage.(i / 64);
-        if (Int64.logand 1L (!word)) = 1L
+        if i mod int_bits = 0
+        then word := v.storage.(i / int_bits);
+        if (1 land (!word)) = 1
         then accum := i :: (!accum);
-        word := Int64.shift_right_logical (!word) 1;
+        word := (!word) lsr 1;
       done;
       !accum
 ;;

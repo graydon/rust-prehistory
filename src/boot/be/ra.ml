@@ -334,31 +334,6 @@ let dump_quads cx =
 ;;
 
 
-let collect_vreg_tys
-    (cx:ctxt)
-    (vreg_to_ty:(Il.vreg,Il.scalar_ty) Hashtbl.t)
-    : unit =
-  let qp_cell _ c =
-    match c with
-        Reg (Vreg v, t) ->
-          begin
-            if Hashtbl.mem vreg_to_ty v
-            then
-              let ty = Hashtbl.find vreg_to_ty v in
-                assert (ty = t)
-            else
-              Hashtbl.replace vreg_to_ty v t;
-            c
-          end
-      | _ -> c
-  in
-  let qp = { Il.identity_processor with
-               Il.qp_cell_read = qp_cell;
-               Il.qp_cell_write = qp_cell }
-  in
-    Il.visit_quads qp cx.ctxt_quads
-;;
-
 (* Simple local register allocator. Nothing fancy. *)
 let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (framesz:int64) = 
  try
@@ -376,13 +351,15 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     let spill_slot (s:Il.spill) = abi.Abi.abi_spill_slot framesz s in
     let n_pre_spills = convert_pre_spills cx spill_slot in
 
-    let (live_in_vregs, live_out_vregs) = calculate_live_bitvectors cx in
+    let (live_in_vregs, live_out_vregs) =
+      Session.time_inner "RA liveness" sess
+        (fun _ -> calculate_live_bitvectors cx)
+    in
     let inactive_hregs = ref [] in (* [hreg] *)
     let active_hregs = ref [] in (* [hreg] *)
     let dirty_vregs = Hashtbl.create 0 in (* vreg -> () *)
     let hreg_to_vreg = Hashtbl.create 0 in  (* hreg -> vreg *)
     let vreg_to_hreg = Hashtbl.create 0 in (* vreg -> hreg *)
-    let vreg_to_ty = Hashtbl.create 0 in (* vreg -> scalar_ty *)
     let vreg_to_spill = Hashtbl.create 0 in (* vreg -> spill *)
     let (word_ty:Il.scalar_ty) = Il.ValTy abi.Abi.abi_word_bits in
     let vreg_spill_cell v =
@@ -507,7 +484,6 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     in
       cx.ctxt_next_spill <- n_pre_spills;
       convert_labels cx;
-      collect_vreg_tys cx vreg_to_ty;
       for i = 0 to cx.ctxt_abi.Abi.abi_n_hardregs - 1
       do
         inactive_hregs := i :: (!inactive_hregs)
