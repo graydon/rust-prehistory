@@ -76,6 +76,12 @@ let rec tyspec_to_str (ts:tyspec) : string =
       | TYSPEC_vector tv -> "vec[" ^ (tyspec_to_str !tv) ^ "]"
 ;;
 
+let iflog cx thunk =
+  if cx.ctxt_sess.Session.sess_log_type
+  then thunk ()
+  else ()
+;;
+
 let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
   let log cx = Session.log "type"
     cx.ctxt_sess.Session.sess_log_type
@@ -92,37 +98,34 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
     let params_stk = Stack.create () in
 
-    let iflog thunk =
-      if cx.ctxt_sess.Session.sess_log_type
-      then thunk ()
-      else ()
-    in
-
     let rec unify_slot
         (slot:Ast.slot)
         (id_opt:node_id option)
         (tv:tyvar) : unit =
-      match slot with
-          { Ast.slot_ty = None; Ast.slot_mode = _ } ->
-            begin
-              match id_opt with
-                  None -> bug () "untyped slot without an ID"
-                | Some id ->
-                    if Hashtbl.mem bindings id
-                    then unify_tyvars (Hashtbl.find bindings id) tv
-                    else bug id "slot not in ctxt_all_defns: %d: %s"
-                      (int_of_node id) (Ast.sprintf_slot () slot)
-            end
-        | { Ast.slot_ty = Some ty; Ast.slot_mode = _ } -> unify_ty ty tv
+      match id_opt with
+          Some id -> unify_tyvars (Hashtbl.find bindings id) tv
+        | None ->
+            match slot.Ast.slot_ty with
+                None -> bug () "untyped unidentified slot"
+              | Some ty -> unify_ty ty tv
+
+    and check_sane_tyvar tv =
+      match !tv with
+          TYSPEC_resolved (Ast.TY_named _) -> bug () "named-type in type checker"
+        | _ -> ()
 
     and unify_tyvars  (av:tyvar) (bv:tyvar) : unit =
-      iflog (fun _ ->
-               log cx "unifying types: %s vs. %s"
-                 (tyspec_to_str !av) (tyspec_to_str !bv));
+      iflog cx (fun _ ->
+                  log cx "unifying types: %s vs. %s"
+                    (tyspec_to_str !av) (tyspec_to_str !bv));
+      check_sane_tyvar av;
+      check_sane_tyvar bv;
       unify_tyvars' av bv;
-      iflog (fun _ ->
-               log cx "    unified to: %s and %s"
-                 (tyspec_to_str !av) (tyspec_to_str !bv));
+      iflog cx (fun _ ->
+                  log cx "    unified to: %s and %s"
+                    (tyspec_to_str !av) (tyspec_to_str !bv));
+      check_sane_tyvar av;
+      check_sane_tyvar bv;
 
     and unify_tyvars' (av:tyvar) (bv:tyvar) : unit =
       let (a, b) = ((resolve_tyvar av), (resolve_tyvar bv)) in
@@ -890,10 +893,16 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               Queue.add id auto_queue;
               Hashtbl.add bindings id (ref TYSPEC_all)
           | DEFN_slot { Ast.slot_mode = _; Ast.slot_ty = Some ty } ->
+              let _ = iflog cx (fun _ -> log cx "initial slot #%d type: %a"
+                                  (int_of_node id) Ast.sprintf_ty ty)
+              in
               Hashtbl.add bindings id (ref (TYSPEC_resolved ty))
           | _ -> ()
       in
       let init_item_tyvar id ty =
+        let _ = iflog cx (fun _ -> log cx "initial item #%d type: %a"
+                            (int_of_node id) Ast.sprintf_ty ty)
+        in
         let n_params =
           match Hashtbl.find cx.ctxt_all_defns id with
               DEFN_item i -> Array.length i.Ast.decl_params
