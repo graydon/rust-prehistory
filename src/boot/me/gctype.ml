@@ -1,8 +1,8 @@
 open Semant;;
 open Common;;
 
-let log cx = Session.log "gc"
-  cx.ctxt_sess.Session.sess_log_gc
+let log cx = Session.log "gctype"
+  cx.ctxt_sess.Session.sess_log_gctype
   cx.ctxt_sess.Session.sess_log_out
 ;;
 

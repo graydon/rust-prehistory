@@ -1,6 +1,12 @@
 
 open Common;;
 
+let _ =
+  Gc.set { (Gc.get()) with
+             Gc.space_overhead = 400;
+}
+;;
+
 let (targ:Common.target) =
   match Sys.os_type with
       "Unix" ->
@@ -32,7 +38,7 @@ let (sess:Session.sess) =
     Session.sess_log_typestate = false;
     Session.sess_log_mode = false;
     Session.sess_log_mutable = false;
-    Session.sess_log_gc = false;
+    Session.sess_log_gctype = false;
     Session.sess_log_layout = false;
     Session.sess_log_itype = false;
     Session.sess_log_trans = false;
@@ -48,6 +54,7 @@ let (sess:Session.sess) =
     Session.sess_failed = false;
     Session.sess_spans = Hashtbl.create 0;
     Session.sess_report_timing = false;
+    Session.sess_report_gc = false;
     Session.sess_timings = Hashtbl.create 0;
   }
 ;;
@@ -133,7 +140,7 @@ let argspecs =
     ("-ltypestate", Arg.Unit (fun _ -> sess.Session.sess_log_typestate <- true), "log typestate checking");
     ("-lmode", Arg.Unit (fun _ -> sess.Session.sess_log_mode <- true), "log mode checking");
     ("-lmutable", Arg.Unit (fun _ -> sess.Session.sess_log_mutable <- true), "log mutability checking");
-    ("-lgc", Arg.Unit (fun _ -> sess.Session.sess_log_gc <- true), "log gc pointer analysis");
+    ("-lgctype", Arg.Unit (fun _ -> sess.Session.sess_log_gctype <- true), "log gc type analysis");
     ("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
     ("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
     ("-litype", Arg.Unit (fun _ -> sess.Session.sess_log_itype <- true;
@@ -152,6 +159,7 @@ let argspecs =
                           sess.Session.sess_trace_tag <- true ),
      "emit all tracing code");
     ("-time", Arg.Unit (fun _ -> sess.Session.sess_report_timing <- true), "report timing of compiler phases");
+    ("-gc", Arg.Unit (fun _ -> sess.Session.sess_report_gc <- true), "report gc behavior of compiler");
     ("-dump", Arg.String dump_file, "dump DWARF info in compiled file")
   ]
 ;;
@@ -238,7 +246,7 @@ let main_pipeline _ =
          Typestate.process_crate;
          Mode.process_crate;
          Mutable.process_crate;
-         Gc.process_crate;
+         Gctype.process_crate;
          Layout.process_crate;
          Trans.process_crate |]
   in
@@ -329,6 +337,11 @@ then
       end
       (sorted_htab_keys sess.Session.sess_timings)
   end;
+;;
+
+if sess.Session.sess_report_gc
+then Gc.print_stat stdout;;
+
 
 (*
  * Local Variables:

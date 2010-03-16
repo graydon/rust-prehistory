@@ -21,7 +21,7 @@ type sess =
   mutable sess_log_typestate: bool;
   mutable sess_log_mode: bool;
   mutable sess_log_mutable: bool;
-  mutable sess_log_gc: bool;
+  mutable sess_log_gctype: bool;
   mutable sess_log_layout: bool;
   mutable sess_log_trans: bool;
   mutable sess_log_itype: bool;
@@ -36,6 +36,7 @@ type sess =
   mutable sess_trace_tag: bool;
   mutable sess_failed: bool;
   mutable sess_report_timing: bool;
+  mutable sess_report_gc: bool;
   sess_timings: (string, float) Hashtbl.t;
   sess_spans: (node_id,span) Hashtbl.t;
 }
