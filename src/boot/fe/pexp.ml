@@ -485,15 +485,29 @@ and parse_rec_input (ps:pstate) : (Ast.ident * pexp) =
       | _ -> raise (unexpected ps)
 
 
-and parse_rec_inputs (ps:pstate) : ((Ast.ident * pexp) array) =
-  let inputs = bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
-    (ctxt "rec inputs" parse_rec_input) ps
-  in
-  let labels = Array.map (fun (l, _) -> l) inputs in
-    begin
-      arr_check_dups labels (fun l _ -> raise (err (Printf.sprintf "duplicate record label: %s" l) ps));
-      inputs
-    end
+and parse_rec_body (ps:pstate) : pexp' = (*((Ast.ident * pexp) array) =*)
+  begin
+    expect ps LPAREN;
+    match peek ps with
+        RPAREN -> PEXP_rec ([||], None)
+      | COLON -> raise (err "empty record extension" ps)
+      | _ ->
+          let inputs = one_or_more COMMA parse_rec_input ps in
+          let labels = Array.map (fun (l, _) -> l) inputs in
+            begin
+              arr_check_dups labels (fun l _ -> raise (err (Printf.sprintf "duplicate record label: %s" l) ps));
+              match peek ps with
+                  RPAREN -> (bump ps; PEXP_rec (inputs, None))
+                | COLON ->
+                    begin
+                      bump ps;
+                      let base = ctxt "rec input: extension base" parse_pexp ps in
+                        expect ps RPAREN;
+                        PEXP_rec (inputs, Some base)
+                    end
+                | _ -> raise (err "expected : or )" ps)
+            end
+  end
 
 
 and parse_lit (ps:pstate) : Ast.lit =
@@ -532,9 +546,9 @@ and parse_bottom_pexp (ps:pstate) : pexp =
 
     | REC ->
           bump ps;
-          let inputs = ctxt "rec pexp: rec inputs" parse_rec_inputs ps in
+          let body = ctxt "rec pexp: rec body" parse_rec_body ps in
           let bpos = lexpos ps in
-            span ps apos bpos (PEXP_rec (inputs, None))
+            span ps apos bpos body
 
     | VEC ->
         bump ps;
