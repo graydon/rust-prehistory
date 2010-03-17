@@ -490,7 +490,7 @@ and parse_rec_body (ps:pstate) : pexp' = (*((Ast.ident * pexp) array) =*)
     expect ps LPAREN;
     match peek ps with
         RPAREN -> PEXP_rec ([||], None)
-      | COLON -> raise (err "empty record extension" ps)
+      | WITH -> raise (err "empty record extension" ps)
       | _ ->
           let inputs = one_or_more COMMA parse_rec_input ps in
           let labels = Array.map (fun (l, _) -> l) inputs in
@@ -498,14 +498,14 @@ and parse_rec_body (ps:pstate) : pexp' = (*((Ast.ident * pexp) array) =*)
               arr_check_dups labels (fun l _ -> raise (err (Printf.sprintf "duplicate record label: %s" l) ps));
               match peek ps with
                   RPAREN -> (bump ps; PEXP_rec (inputs, None))
-                | COLON ->
+                | WITH ->
                     begin
                       bump ps;
                       let base = ctxt "rec input: extension base" parse_pexp ps in
                         expect ps RPAREN;
                         PEXP_rec (inputs, Some base)
                     end
-                | _ -> raise (err "expected : or )" ps)
+                | _ -> raise (err "expected 'with' or ')'" ps)
             end
   end
 

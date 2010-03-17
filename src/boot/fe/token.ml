@@ -20,6 +20,7 @@ type token =
   | LSR
   | ASR
   | OPEQ of token
+  | WITH
 
   (* Structural symbols *)
   | AT
@@ -153,6 +154,7 @@ let rec string_of_tok t =
     | LSR        -> ">>"
     | ASR        -> ">>>"
     | OPEQ op    -> string_of_tok op ^ "="
+    | WITH       -> "with"
 
     (* Structural symbols *)
     | AT         -> "@"

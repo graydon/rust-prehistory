@@ -2162,7 +2162,7 @@ let trans_visitor
                     trans_copy_slot
                       true
                       (get_element_ptr dst i) slot
-                      (deref (get_element_ptr src i)) slot
+                      (get_element_ptr src i) slot
                       None
       end
       trec

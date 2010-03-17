@@ -70,6 +70,8 @@
 
                 ("in", IN);
 
+                ("with", WITH);
+
                 ("bind", BIND);
 
                 ("u8", MACH TY_u8);

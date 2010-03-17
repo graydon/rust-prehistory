@@ -820,6 +820,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             let full_callee_tv = ref (TYSPEC_parametric (callee_tv, ref None)) in
               unify_lval callee full_callee_tv
 
+        (* FIXME: visit the base *)
         | Ast.STMT_init_rec (lval, fields, (*base*)_) ->
             let dct = Hashtbl.create 10 in
             let add_field (ident, _, atom) =
