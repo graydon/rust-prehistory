@@ -2135,6 +2135,37 @@ let trans_visitor
       end
       atoms
 
+  and trans_init_rec_update
+      (dst:Il.cell)
+      (dst_slots:Ast.slot array)
+      (trec:Ast.ty_rec)
+      (atab:(Ast.ident * Ast.mode * Ast.atom) array)
+      ((*base*)_:Ast.atom)
+      : unit =
+    Array.iteri
+      begin
+        fun i (fml_ident, _) ->
+          let fml_entry _ (act_ident, _, atom) =
+            if act_ident = fml_ident then Some atom else None
+          in
+          match arr_search atab fml_entry with
+              Some atom ->
+                trans_init_slot_from_atom
+                  CLONE_none
+                  (get_element_ptr dst i)
+                  dst_slots.(i)
+                  atom
+            | None ->
+                (*
+                trans_copy_slot
+                  true
+                  (get_element_ptr dst i) dst_slots.(i)
+                  (get_element_ptr src i) dst_slots.(i)
+                *)
+                bug () "not yet implemented"
+      end
+      trec
+
   and trans_init_slot_from_atom
       (clone:clone_ctrl)
       (dst:Il.cell) (dst_slot:Ast.slot)
@@ -2757,17 +2788,22 @@ let trans_visitor
                 | _ -> bug () "Binding unexpected lval."
           end
 
-      | Ast.STMT_init_rec (dst, atab, (*base*)_) ->
+      | Ast.STMT_init_rec (dst, atab, base) ->
           let (slot_cell, slot) = trans_lval_init dst in
-          let dst_slots =
+          let (trec, dst_slots) =
             match slot_ty slot with
-                Ast.TY_rec trec -> (Array.map (fun (_, slot) -> slot) trec)
+                Ast.TY_rec trec -> (trec, Array.map (fun (_, slot) -> slot) trec)
               | _ -> bugi cx stmt.id "non-rec destination type in stmt_init_rec"
           in
-          let atoms = Array.map (fun (_, _, atom) -> atom) atab in
           let dst_cell = deref_slot true slot_cell slot in
-            trans_init_structural_from_atoms dst_cell dst_slots atoms
-
+            begin
+              match base with
+                  None ->
+                    let atoms = Array.map (fun (_, _, atom) -> atom) atab in
+                      trans_init_structural_from_atoms dst_cell dst_slots atoms
+                | Some base ->
+                    trans_init_rec_update dst_cell dst_slots trec atab base
+            end
 
       | Ast.STMT_init_tup (dst, mode_atoms) ->
           let (slot_cell, slot) = trans_lval_init dst in
