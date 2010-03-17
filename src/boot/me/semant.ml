@@ -1356,8 +1356,9 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_proc
       | Ast.TY_type -> rc_ptr
 
+      | Ast.TY_param (i, _, _) -> Il.ParamTy i
+
       | Ast.TY_opaque _ -> bug () "opaque type in referent_type"
-      | Ast.TY_param _ -> bug () "type parameter in referent_type"
       | Ast.TY_named _ -> bug () "named type in referent_type"
       | Ast.TY_constrained (t, _) -> referent_type abi t
 
@@ -1458,11 +1459,11 @@ let direct_call_args_referent_type
 ;;
 
 let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
-  Il.referent_ty_size abi.Abi.abi_word_bits (referent_type abi t)
+  force_sz (Il.referent_ty_size abi.Abi.abi_word_bits (referent_type abi t))
 ;;
 
 let slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
-  Il.referent_ty_size abi.Abi.abi_word_bits (slot_referent_type abi s)
+  force_sz (Il.referent_ty_size abi.Abi.abi_word_bits (slot_referent_type abi s))
 ;;
 
 let word_slot (abi:Abi.abi) : Ast.slot =

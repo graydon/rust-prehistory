@@ -98,7 +98,7 @@ and ty =
   | TY_proc
 
   | TY_opaque of (opaque_id * mutability)
-  | TY_param of (int * opaque_id * mutability)
+  | TY_param of (ty_param_idx * opaque_id * mutability)
   | TY_named of name
   | TY_type
 
@@ -406,7 +406,7 @@ and pred =
  * even if it's a type that's bound by a quantifier in its environment.
  *)
 
-and ty_param = ident * (int * opaque_id * mutability)
+and ty_param = ident * (ty_param_idx * opaque_id * mutability)
 
 and ('param, 'item) decl =
     {

@@ -18,7 +18,7 @@ let int_of_opaque (Opaque i) = i
 let int_of_constr (Constr i) = i
 
 type 'a identified = { node: 'a; id: node_id }
-
+;;
 
 let bug _ =
   let k s = failwith s
@@ -87,6 +87,9 @@ let bytes_of_ty_mach (mach:ty_mach) : int =
   | TY_s64 -> 8
   | TY_f32 -> 4
   | TY_f64 -> 8
+;;
+
+type ty_param_idx = int
 ;;
 
 type nabi_conv =
@@ -398,6 +401,17 @@ let i64_ge (a:int64) (b:int64) : bool = (Int64.compare a b) >= 0
 let i64_gt (a:int64) (b:int64) : bool = (Int64.compare a b) > 0
 let i64_max (a:int64) (b:int64) : int64 = (if (Int64.compare a b) > 0 then a else b)
 let i64_min (a:int64) (b:int64) : int64 = (if (Int64.compare a b) < 0 then a else b)
+let i64_align (align:int64) (v:int64) : int64 =
+  if align = 0L || align = 1L
+  then v
+  else
+    let rem = Int64.rem v align in
+      if rem = 0L
+      then v
+      else
+        let padding = Int64.sub align rem in
+          Int64.add v padding
+;;
 
 
 let rec i64_for (lo:int64) (hi:int64) (thunk:int64 -> unit) : unit =
@@ -414,6 +428,63 @@ let rec i64_for_rev (hi:int64) (lo:int64) (thunk:int64 -> unit) : unit =
       thunk hi;
       i64_for_rev (Int64.sub hi 1L) lo thunk;
     end
+;;
+
+
+(*
+ * Size-expressions.
+ *)
+
+
+type size =
+    SIZE_fixed of int64
+  | SIZE_param_size of ty_param_idx
+  | SIZE_param_align of ty_param_idx
+  | SIZE_add of size * size
+  | SIZE_mul of size * size
+  | SIZE_max of size * size
+  | SIZE_align of size * size
+;;
+
+let rec simplify_sz (a:size) : size =
+  match a with
+      SIZE_fixed _
+    | SIZE_param_size _
+    | SIZE_param_align _ -> a
+    | SIZE_add (a, b) ->
+        begin
+          match (simplify_sz a, simplify_sz b) with
+              (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
+            | (a, SIZE_fixed b) -> SIZE_add (SIZE_fixed b, a)
+            | (a, b) -> SIZE_add (a, b)
+        end
+    | SIZE_mul (a, b) ->
+        begin
+          match (simplify_sz a, simplify_sz b) with
+              (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.mul a b)
+            | (a, SIZE_fixed b) -> SIZE_mul (SIZE_fixed b, a)
+            | (a, b) -> SIZE_mul (a, b)
+        end
+    | SIZE_max (a, b) ->
+        begin
+          match (simplify_sz a, simplify_sz b) with
+              (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_max a b)
+            | (a, SIZE_fixed b) -> SIZE_max (SIZE_fixed b, a)
+            | (a, b) -> SIZE_max (a, b)
+        end
+    | SIZE_align (a, b) ->
+        begin
+          match (simplify_sz a, simplify_sz b) with
+              (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
+            | (a, SIZE_fixed b) -> SIZE_align (SIZE_fixed b, a)
+            | (a, b) -> SIZE_align (a, b)
+        end
+;;
+
+let force_sz (a:size) : int64 =
+  match simplify_sz a with
+      SIZE_fixed i -> i
+    | _ -> failwith "forced non-fixed size expression"
 ;;
 
 (*

@@ -106,14 +106,18 @@ let layout_visitor
         | Il.StructTy rts
         | Il.UnionTy rts -> List.exists rt_in_mem (Array.to_list rts)
         | Il.OpaqueTy
+        | Il.ParamTy _
         | Il.CodeTy -> true
         | Il.NilTy -> false
     in
       rt_in_mem (slot_referent_type cx.ctxt_abi slot)
   in
 
-  let rty_sz rty = Il.referent_ty_size cx.ctxt_abi.Abi.abi_word_bits rty in
-  let rty_layout rty = Il.referent_ty_layout cx.ctxt_abi.Abi.abi_word_bits rty in
+  let rty_sz rty = force_sz (Il.referent_ty_size cx.ctxt_abi.Abi.abi_word_bits rty) in
+  let rty_layout rty =
+    let ssz, asz = Il.referent_ty_layout cx.ctxt_abi.Abi.abi_word_bits rty in
+      (force_sz ssz, force_sz asz)
+  in
 
   let layout_slot_ids
       (slot_accum:slot_stack)
@@ -138,7 +142,7 @@ let layout_visitor
           end
         else
           begin
-            let elt_off = Il.align_to elt_align off in
+            let elt_off = force_sz (SIZE_align (SIZE_fixed elt_align, SIZE_fixed off)) in
             let frame_off =
               if upwards
               then elt_off
@@ -321,7 +325,7 @@ let layout_visitor
               let static = lval_is_static cx callee in
               let closure = if static then None else Some Il.OpaqueTy in
               let rty = call_args_referent_type cx lv_ty closure in
-              let sz = Il.referent_ty_size abi.Abi.abi_word_bits rty in
+              let sz = force_sz (Il.referent_ty_size abi.Abi.abi_word_bits rty) in
               let frame_id = fst (Stack.top frame_stack) in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in
                 log cx "extending frame #%d call size to %Ld"

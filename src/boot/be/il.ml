@@ -20,9 +20,10 @@ and referent_ty =
     ScalarTy of scalar_ty
   | StructTy of referent_ty array
   | UnionTy of referent_ty array
-  | OpaqueTy (* Unknown memory-resident thing. *)
-  | CodeTy   (* Executable machine code. *)
-  | NilTy    (* 0 bits of space. *)
+  | ParamTy of ty_param_idx (* Thing of size given by current-frame type param #n *)
+  | OpaqueTy                (* Unknown memory-resident thing. *)
+  | CodeTy                  (* Executable machine code. *)
+  | NilTy                   (* 0 bits of space. *)
 ;;
 
 let (voidptr_t:scalar_ty) = AddrTy OpaqueTy;;
@@ -312,47 +313,37 @@ let scalar_ty_align (word_bits:bits) (st:scalar_ty) : int64 =
   bits_align (scalar_ty_bits word_bits st)
 ;;
 
-let align_to (align:int64) (v:int64) : int64 =
-  if align = 0L || align = 1L
-  then v
-  else
-    let rem = Int64.rem v align in
-      if rem = 0L
-      then v
-      else
-        let padding = Int64.sub align rem in
-          Int64.add v padding
-;;
-
-let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (int64 * int64) =
+let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (size * size) =
   match rt with
-      ScalarTy st -> (scalar_ty_size word_bits st, scalar_ty_align word_bits st)
+      ScalarTy st -> (SIZE_fixed (scalar_ty_size word_bits st),
+                      SIZE_fixed (scalar_ty_align word_bits st))
     | StructTy rts ->
         begin
-          let accum (off,align) rt : (int64 * int64) =
+          let accum (off,align) rt : (size * size) =
             let (elt_size, elt_align) = referent_ty_layout word_bits rt in
-            let elt_off = align_to elt_align off in
-              (Int64.add elt_off elt_size, i64_max elt_align align)
+            let elt_off = SIZE_align (elt_align, off) in
+              (SIZE_add (elt_off, elt_size), SIZE_max (elt_align, align))
           in
-            Array.fold_left accum (0L,0L) rts
+            Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 0L) rts
         end
    | UnionTy rts ->
         begin
-          let accum (sz,align) rt : (int64 * int64) =
+          let accum (sz,align) rt : (size * size) =
             let (elt_size, elt_align) = referent_ty_layout word_bits rt in
-              (i64_max sz elt_size, i64_max elt_align align)
+              (SIZE_max (sz, elt_size), SIZE_max (elt_align, align))
           in
-            Array.fold_left accum (0L,0L) rts
+            Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 0L) rts
         end
-    | OpaqueTy _ -> bug () "opaque ty in referent_ty_layout"
-    | CodeTy _ -> bug () "code ty in referent_ty_layout"
-    | NilTy -> (0L, 0L)
+   | OpaqueTy _ -> bug () "opaque ty in referent_ty_layout"
+   | CodeTy _ -> bug () "code ty in referent_ty_layout"
+   | ParamTy i -> (SIZE_param_size i, SIZE_param_align i)
+   | NilTy -> (SIZE_fixed 0L, SIZE_fixed 0L)
 
-and referent_ty_size (word_bits:bits) (rt:referent_ty) : int64 =
-  fst (referent_ty_layout word_bits rt)
+and referent_ty_size (word_bits:bits) (rt:referent_ty) : size =
+  (fst (referent_ty_layout word_bits rt))
 
-and referent_ty_align (word_bits:bits) (rt:referent_ty) : int64 =
-  snd (referent_ty_layout word_bits rt)
+and referent_ty_align (word_bits:bits) (rt:referent_ty) : size =
+  (snd (referent_ty_layout word_bits rt))
 
 ;;
 
@@ -361,7 +352,7 @@ let get_element_offset (word_bits:bits) (elts:referent_ty array) (i:int) : int64
   let elt_rty = elts.(i) in
   let elts_before_size = referent_ty_size word_bits (StructTy elts_before) in
   let elt_align = referent_ty_align word_bits elt_rty in
-  let elt_off = align_to elt_align elts_before_size in
+  let elt_off = force_sz (SIZE_align (elt_align, elts_before_size)) in
     elt_off
 ;;
 
@@ -485,6 +476,7 @@ and string_of_referent_ty (r:referent_ty) : string =
         Printf.sprintf "(%s)"
           (String.concat "|"
              (Array.to_list (Array.map string_of_referent_ty rs)))
+    | ParamTy i -> Printf.sprintf "#%d" i
     | OpaqueTy -> "?"
     | CodeTy -> "!"
     | NilTy -> "()"

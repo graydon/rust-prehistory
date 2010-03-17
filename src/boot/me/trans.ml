@@ -384,6 +384,7 @@ let trans_visitor
                 | Il.NilTy -> nil_ptr
                 | Il.StructTy _ -> bugi cx slot_id "cannot treat structured referent as single operand"
                 | Il.UnionTy _ -> bugi cx slot_id "cannot treat union referent as single operand"
+                | Il.ParamTy _ -> bugi cx slot_id "cannot treat parametric referent as single operand"
                 | Il.OpaqueTy -> bugi cx slot_id "cannot treat opaque referent as single operand"
                 | Il.CodeTy ->  bugi cx slot_id "cannot treat code referent as single operand"
             end
@@ -889,7 +890,7 @@ let trans_visitor
     let self_args_rty = call_args_referent_type cx self_ty (Some self_closure_rty) in
     let callee_args_rty = call_args_referent_type cx callee_ty (Some Il.OpaqueTy) in
 
-    let callsz = Il.referent_ty_size word_bits callee_args_rty in
+    let callsz = force_sz (Il.referent_ty_size word_bits callee_args_rty) in
     let spill = new_fixup "bind glue spill" in
       trans_glue_frame_entry callsz spill;
 
@@ -1277,7 +1278,7 @@ let trans_visitor
     in
     let args_rty = call_args_referent_type cx fn_ty None in
     let fptr_operand = reify_ptr fptr_operand in
-    let callsz = Il.referent_ty_size word_bits args_rty in
+    let callsz = force_sz (Il.referent_ty_size word_bits args_rty) in
     let exit_proc_glue_fixup = get_exit_proc_glue () in
     let exit_proc_glue_fptr = code_fixup_to_ptr_operand exit_proc_glue_fixup in
     let exit_proc_glue_fptr = reify_ptr exit_proc_glue_fptr in
@@ -2359,7 +2360,7 @@ let trans_visitor
     let target_fn_ptr = callee_fn_ptr target_ptr direct in
     let target_binding_ptr = callee_binding_ptr flv direct in
     let closure_rty = closure_referent_type bound_arg_slots in
-    let closure_sz = Il.referent_ty_size word_bits closure_rty in
+    let closure_sz = force_sz (Il.referent_ty_size word_bits closure_rty) in
     let fn_cell = get_element_ptr dst_cell 0 in
     let closure_cell =
       ptr_cast
@@ -2601,9 +2602,9 @@ let trans_visitor
     let callee_fptr = callee_fn_ptr callee_ptr direct in
     let callee_code = code_of_operand callee_fptr in
     let callee_args_rty = call_args_referent_type cx callee_ty (if direct then None else (Some Il.OpaqueTy)) in
-    let callee_argsz = Il.referent_ty_size word_bits callee_args_rty in
+    let callee_argsz = force_sz (Il.referent_ty_size word_bits callee_args_rty) in
     let caller_args_rty = current_fn_args_rty (if caller_is_closure then (Some Il.OpaqueTy) else None) in
-    let caller_argsz = Il.referent_ty_size word_bits caller_args_rty in
+    let caller_argsz = force_sz (Il.referent_ty_size word_bits caller_args_rty) in
       iflog (fun _ -> annotate (Printf.sprintf "copy args for tail call to %s" (logname ())));
       copy_fn_args
         true
@@ -3105,7 +3106,7 @@ let trans_visitor
                   let (dst_reg, _) = force_to_reg (Il.Cell (alias callee_args_cell)) in
                   let (src_reg, _) = force_to_reg (Il.Cell (alias caller_args_cell)) in
                   let tmp_reg = next_vreg () in
-                  let nbytes = Il.referent_ty_size word_bits args_rty in
+                  let nbytes = force_sz (Il.referent_ty_size word_bits args_rty) in
                     abi.Abi.abi_emit_inline_memcpy (emitter()) nbytes dst_reg src_reg tmp_reg false;
                     call_code (code_of_operand (Il.Cell f));
               end
@@ -3121,7 +3122,7 @@ let trans_visitor
                 let libstr = trans_static_string ls.import_libname in
                 let symstr = trans_static_string c_sym_str in
                 let check_rty_sz rty =
-                  let sz = Il.referent_ty_size word_bits rty in
+                  let sz = force_sz (Il.referent_ty_size word_bits rty) in
                   if sz = 0L || sz = word_sz
                   then ()
                   else bug () "unsupported arg or ret cell size used with native import"
