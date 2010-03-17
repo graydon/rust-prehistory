@@ -258,7 +258,7 @@ let unexpected_val (expected:string) (v:cval)  =
       | CVAL_mod_item (name, _) -> "mod item " ^ name
   in
     (* FIXME: proper error reporting, please. *)
-    failwith ("expected " ^ expected ^ ", got " ^ got)
+    bug () "expected %s, got %s" expected got
 ;;
 
 let rewrap_items id items =
@@ -417,7 +417,7 @@ and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
                   | Ast.BINOP_sub -> Int64.sub av bv
                   | Ast.BINOP_mul -> Int64.mul av bv
                   | Ast.BINOP_div -> Int64.div av bv
-                  | _ -> failwith "unhandled arithmetic op while evaluating pexp"
+                  | _ -> bug () "unhandled arithmetic op in Cexp.eval_pexp"
               end
         end
 
@@ -446,7 +446,7 @@ and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
     | Pexp.PEXP_str s ->
         CVAL_str s
 
-    | _ -> failwith "unexpected Pexp in Cexp.eval_pexp"
+    | _ -> bug () "unexpected Pexp in Cexp.eval_pexp"
 
 
 and eval_pexp_to_str (env:env) (exp:Pexp.pexp) : string =

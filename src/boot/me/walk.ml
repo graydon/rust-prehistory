@@ -89,10 +89,10 @@ let path_managing_visitor
 
 let rec name_of ncs =
   match ncs with
-      [] -> failwith "empty path"
+      [] -> bug () "Walk.name_of_ncs: empty path"
     | [(Ast.COMP_ident i)] -> Ast.NAME_base (Ast.BASE_ident i)
     | [(Ast.COMP_app x)] -> Ast.NAME_base (Ast.BASE_app x)
-    | [(Ast.COMP_idx _)] -> failwith "path-name contains COMP_idx"
+    | [(Ast.COMP_idx _)] -> bug () "Walk.name_of_ncs: path-name contains COMP_idx"
     | nc::ncs -> Ast.NAME_ext (name_of ncs, nc)
 ;;
 

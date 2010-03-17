@@ -243,7 +243,7 @@ let atab_search (atab:('a * 'b) array) (a:'a) : ('b option) =
 
 let atab_find (atab:('a * 'b) array) (a:'a) : 'b =
   match atab_search atab a with
-      None -> failwith "Not found"
+      None -> bug () "atab_find: element not found"
     | Some b -> b
 
 let atab_mem (atab:('a * 'b) array) (a:'a) : bool =
@@ -343,7 +343,7 @@ let arr_search (a:'a array) (f:int -> 'a -> 'b option) : 'b option =
 let arr_idx (arr:'a array) (a:'a) : int =
   let find i v = if v = a then Some i else None in
     match arr_search arr find with
-        None -> failwith "Not found"
+        None -> bug () "arr_idx: element not found"
       | Some i -> i
 ;;
 
@@ -484,7 +484,7 @@ let rec simplify_sz (a:size) : size =
 let force_sz (a:size) : int64 =
   match simplify_sz a with
       SIZE_fixed i -> i
-    | _ -> failwith "forced non-fixed size expression"
+    | _ -> bug () "force_sz: forced non-fixed size expression"
 ;;
 
 (*

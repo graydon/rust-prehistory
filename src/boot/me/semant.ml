@@ -1595,7 +1595,7 @@ let ty_str (ty:Ast.ty) : string =
          (* FIXME: encode opaque and param numbers. *)
          ty_fold_opaque = (fun _ -> "Q");
          ty_fold_param = (fun _ -> "A");
-         ty_fold_named = (fun _ -> failwith "string-encoding named type");
+         ty_fold_named = (fun _ -> bug () "string-encoding named type");
          ty_fold_type = (fun _ -> "T");
          (* FIXME: encode constrs as well. *)
          ty_fold_constrained = (fun (t,_)-> t) }

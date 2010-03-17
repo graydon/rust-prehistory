@@ -258,7 +258,7 @@ let cell_scalar_ty (c:cell) : scalar_ty =
   match c with
       Reg (_, st) -> st
     | Mem (_, ScalarTy st) -> st
-    | _ -> failwith "mem of non-scalar in Il.cell_scalar_ty"
+    | _ -> bug () "mem of non-scalar in Il.cell_scalar_ty"
 ;;
 
 let operand_scalar_ty (op:operand) : scalar_ty =
@@ -279,7 +279,7 @@ let cell_bits (word_bits:bits) (c:cell) : bits =
   match c with
       Reg (_, st) -> scalar_ty_bits word_bits st
     | Mem (_, ScalarTy st) -> scalar_ty_bits word_bits st
-    | Mem _ -> failwith "mem of non-scalar in Il.cell_bits"
+    | Mem _ -> bug () "mem of non-scalar in Il.cell_bits"
 ;;
 
 let operand_bits (word_bits:bits) (op:operand) : bits =

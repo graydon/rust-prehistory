@@ -218,7 +218,7 @@ let rec write_frag
                     ((!(r.relax_choice)) - 1));
     r.relax_choice := (!(r.relax_choice)) - 1;
     if !(r.relax_choice) < 0
-    then failwith "relaxation ran out of options"
+    then bug () "relaxation ran out of options"
   in
   let rec loop _ =
     Queue.clear relax;

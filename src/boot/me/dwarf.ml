@@ -257,7 +257,7 @@ let dw_tag_of_int (i:int) : dw_tag =
   | 0x40 -> DW_TAG_shared_type
   | 0x4080 -> DW_TAG_lo_user
   | 0xffff -> DW_TAG_hi_user
-    | _ -> failwith ("bad DWARF tag code: " ^ (string_of_int i))
+  | _ -> bug () "bad DWARF tag code: %d" i
 ;;
 
 
@@ -341,7 +341,7 @@ let dw_children_of_int (i:int) : dw_children =
   match i with
       0 -> DW_CHILDREN_no
     | 1 -> DW_CHILDREN_yes
-    | _ -> failwith ("bad DWARF children code: " ^ (string_of_int i))
+    | _ -> bug () "bad DWARF children code: %d" i
 ;;
 
 type dw_at =
@@ -618,7 +618,7 @@ let dw_at_of_int (i:int) : dw_at =
     | 0x68 -> DW_AT_recursive
     | 0x2000 -> DW_AT_lo_user
     | 0x3fff -> DW_AT_hi_user
-    | _ -> failwith ("bad DWARF attribute code: " ^ (string_of_int i))
+    | _ -> bug () "bad DWARF attribute code: %d" i
 ;;
 
 let dw_at_to_string (a:dw_at) : string =
@@ -774,7 +774,7 @@ let dw_ate_of_int (i:int) : dw_ate =
     | 0x0f -> DW_ATE_decimal_float
     | 0x80 -> DW_ATE_lo_user
     | 0xff -> DW_ATE_hi_user
-    | _ -> failwith ("bad DWARF attribute-encoding code: " ^ (string_of_int i))
+    | _ -> bug () "bad DWARF attribute-encoding code: %d" i
 ;;
 
 type dw_form =
@@ -850,7 +850,7 @@ let dw_form_of_int (i:int) : dw_form =
     | 0x14 -> DW_FORM_ref8
     | 0x15 -> DW_FORM_ref_udata
     | 0x16 -> DW_FORM_indirect
-    | _ -> failwith ("bad DWARF attribute code: " ^ (string_of_int i))
+    | _ -> bug () "bad DWARF attribute code: %d" i
 ;;
 
 let dw_form_to_string (f:dw_form) : string =
@@ -1043,7 +1043,7 @@ let int_to_dw_lns i =
     | 10 -> DW_LNS_set_prologue_end
     | 11 -> DW_LNS_set_epilogue_begin
     | 12 -> DW_LNS_set_isa
-    | _ -> failwith ("Internal logic error: (Dwarf.int_to_dw_lns " ^ (string_of_int i) ^ ")")
+    | _ -> bug () "Internal logic error: (Dwarf.int_to_dw_lns %d)" i
 ;;
 
 let dw_lns_to_int lns =
@@ -2080,8 +2080,7 @@ let read_dies
                           | DW_FORM_data4 -> DATA_num (ar.asm_get_u32())
                           | DW_FORM_flag -> DATA_num (ar.asm_get_u8())
                           | DW_FORM_block1 -> (adv_block1(); DATA_other)
-                          | _ -> failwith ("unknown DWARF form " ^
-                                             (string_of_int (dw_form_to_int form)))
+                          | _ -> bug () "unknown DWARF form %d" (dw_form_to_int form)
                       in
                         (attr, (form, data))
                   end

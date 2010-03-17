@@ -555,7 +555,7 @@ let pe_import_section
       |]
     in
       if Array.length dll.pe_import_dll_imports < 1
-      then failwith "empty imports"
+      then bug () "Pe.form_tables_for_dll: empty imports"
       else
         SEQ [|
           DEF (dll.pe_import_dll_ILT_fixup, ilt);
