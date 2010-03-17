@@ -1061,7 +1061,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
             match base with
                 None -> ()
               | Some b ->
-                  fmt ff " : ";
+                  fmt ff " with ";
                   fmt_lval ff b
           end;
           fmt ff ");"
