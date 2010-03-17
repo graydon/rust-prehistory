@@ -1069,8 +1069,8 @@ and desugar_expr_init
             begin
               match base with
                   Some base ->
-                    let (base_stmts, base_atom) = desugar_expr_atom ps base in
-                    let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, Some base_atom)) in
+                    let (base_stmts, base_lval) = desugar_lval ps base in
+                    let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, Some base_lval)) in
                       Array.concat [ arg_stmts; base_stmts; [| rec_stmt |] ]
                 | None ->
                     let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, None)) in

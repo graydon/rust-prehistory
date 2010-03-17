@@ -2141,7 +2141,7 @@ let trans_visitor
       (dst_slots:Ast.slot array)
       (trec:Ast.ty_rec)
       (atab:(Ast.ident * Ast.mode * Ast.atom) array)
-      ((*base*)_:Ast.atom)
+      (base:Ast.lval)
       : unit =
     Array.iteri
       begin
@@ -2149,21 +2149,21 @@ let trans_visitor
           let fml_entry _ (act_ident, _, atom) =
             if act_ident = fml_ident then Some atom else None
           in
-          match arr_search atab fml_entry with
-              Some atom ->
-                trans_init_slot_from_atom
-                  CLONE_none
-                  (get_element_ptr dst i)
-                  dst_slots.(i)
-                  atom
-            | None ->
-                (*
-                trans_copy_slot
-                  true
-                  (get_element_ptr dst i) dst_slots.(i)
-                  (get_element_ptr src i) dst_slots.(i)
-                *)
-                bug () "not yet implemented"
+          let slot = dst_slots.(i) in
+            match arr_search atab fml_entry with
+                Some atom ->
+                  trans_init_slot_from_atom
+                    CLONE_none
+                    (get_element_ptr dst i)
+                    slot
+                    atom
+              | None ->
+                  let (src, _) = trans_lval base in
+                    trans_copy_slot
+                      true
+                      (get_element_ptr dst i) slot
+                      (deref (get_element_ptr src i)) slot
+                      None
       end
       trec
 
@@ -2802,8 +2802,8 @@ let trans_visitor
                   None ->
                     let atoms = Array.map (fun (_, _, atom) -> atom) atab in
                       trans_init_structural_from_atoms dst_cell dst_slots atoms
-                | Some base ->
-                    trans_init_rec_update dst_cell dst_slots trec atab base
+                | Some base_lval ->
+                    trans_init_rec_update dst_cell dst_slots trec atab base_lval
             end
 
       | Ast.STMT_init_tup (dst, mode_atoms) ->

@@ -207,7 +207,7 @@ and stmt' =
 
   (* lval-assigning stmts. *)
     STMT_spawn of (lval * realm * lval * (atom array))
-  | STMT_init_rec of (lval * ((ident * mode * atom) array) * atom option)
+  | STMT_init_rec of (lval * ((ident * mode * atom) array) * lval option)
   | STMT_init_tup of (lval * ((mode * atom) array))
   | STMT_init_vec of (lval * slot * (atom array))
   | STMT_init_str of (lval * string)
