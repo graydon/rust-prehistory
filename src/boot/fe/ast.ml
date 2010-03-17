@@ -1044,7 +1044,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_decl (DECL_mod_item (ident, item)) ->
           fmt_mod_item ff ident item
 
-      | STMT_init_rec (dst, entries, (*base*)_) ->
+      | STMT_init_rec (dst, entries, base) ->
           fmt_lval ff dst;
           fmt ff " = rec(";
           for i = 0 to (Array.length entries) - 1
@@ -1057,6 +1057,13 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
               fmt_mode ff mode;
               fmt_atom ff atom;
           done;
+          begin
+            match base with
+                None -> ()
+              | Some b ->
+                  fmt ff " : ";
+                  fmt_lval ff b
+          end;
           fmt ff ");"
 
       | STMT_init_vec (dst, _, atoms) ->
