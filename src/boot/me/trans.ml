@@ -117,13 +117,18 @@ let trans_visitor
   let current_fn_callsz () = get_callsz cx (current_fn()) in
 
   let emitters = Stack.create () in
-  let push_new_emitter _ =
+  let push_new_emitter (vregs_ok:bool) =
     Stack.push
       (Il.new_emitter
          abi.Abi.abi_prealloc_quad
-         abi.Abi.abi_is_2addr_machine)
+         abi.Abi.abi_is_2addr_machine
+         vregs_ok)
       emitters
   in
+
+  let push_new_emitter_with_vregs _ = push_new_emitter true in
+  let push_new_emitter_without_vregs _ = push_new_emitter false in
+
   let pop_emitter _ = ignore (Stack.pop emitters) in
   let emitter _ = Stack.top emitters in
   let emit q = Il.emit (emitter()) q in
@@ -730,7 +735,7 @@ let trans_visitor
 
   and trans_glue_frame_entry (callsz:int64) (spill:fixup) : unit =
     let framesz = 0L in
-      push_new_emitter ();
+      push_new_emitter_with_vregs ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill callsz nabi_rust (upcall_fixup "upcall_grow_proc");
       write_frame_info_ptrs None;
@@ -744,7 +749,7 @@ let trans_visitor
       iflog (fun _ -> annotate_quads (glue_str cx g));
       let code = { code_fixup = fix;
                    code_quads = emitted_quads e;
-                   code_vregs_and_spill = Some (e.Il.emit_next_vreg, spill) }
+                   code_vregs_and_spill = Some (Il.num_vregs e, spill) }
       in
         htab_put cx.ctxt_glue_code g code
 
@@ -757,7 +762,7 @@ let trans_visitor
   and emit_exit_proc_glue (fix:fixup) (g:glue) : unit =
     let name = glue_str cx g in
     let spill = new_fixup (name ^ " spill") in
-      push_new_emitter ();
+      push_new_emitter_with_vregs ();
       (* 
        * We return-to-here in a synthetic frame we did not build; our job is
        * merely to call upcall_exit.
@@ -2929,7 +2934,7 @@ let trans_visitor
 
   and capture_emitted_quads (fix:fixup) (node:node_id) : unit =
     let e = emitter() in
-    let n_vregs = e.Il.emit_next_vreg in
+    let n_vregs = Il.num_vregs e in
     let quads = emitted_quads e in
     let name = path_name () in
     let f =
@@ -3014,7 +3019,7 @@ let trans_visitor
     let callsz = get_callsz cx fnid in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
       Stack.push (Stack.create()) epilogue_jumps;
-      push_new_emitter ();
+      push_new_emitter_with_vregs ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter())
                                    framesz
@@ -3313,11 +3318,11 @@ let trans_visitor
 
     let emit_aux_global_glue cx glue fix fn =
       let glue_name = glue_str cx glue in
-      push_new_emitter ();
+      push_new_emitter_without_vregs ();
       let e = emitter() in
         fn e;
         iflog (fun _ -> annotate_quads glue_name);
-        if e.Il.emit_next_vreg != 0
+        if (Il.num_vregs e) != 0
         then bug () "%s uses nonzero vregs" glue_name;
         pop_emitter();
         let code =

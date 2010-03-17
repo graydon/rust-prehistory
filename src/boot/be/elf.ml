@@ -532,7 +532,7 @@ let elf32_linux_x86_file
 
     let plt0_frag =
       let reg = Il.Hreg X86.eax in
-      let e = Il.new_emitter X86.prealloc_quad true in
+      let e = X86.new_emitter_without_vregs () in
         Il.emit e (Il.Push (Il.Cell (got_cell reg 1)));
         Il.emit e (Il.jmp Il.JMP (got_code_cell reg 2));
         Il.emit e Il.Nop;
@@ -1061,7 +1061,7 @@ let elf32_linux_x86_file
     let (i, strtab_frags, symtab_frags,
          plt_frags, got_plt_frags, rela_plt_frags) = x in
     let (strtab_frag, symtab_frag) = sym_emitter symname st_bind None in
-    let e = Il.new_emitter X86.prealloc_quad true in
+    let e = X86.new_emitter_without_vregs () in
     let jump_slot_fixup = new_fixup ("jump slot #" ^ string_of_int i) in
     let jump_slot_initial_target_fixup =
       new_fixup ("jump slot #" ^ string_of_int i ^ " initial target") in
@@ -1481,7 +1481,7 @@ let emit_file
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
   let start_fn =
-    let e = X86.new_emitter () in
+    let e = X86.new_emitter_without_vregs () in
     let push_r32 r = Il.emit e
       (Il.Push (Il.Cell (Il.Reg (Il.Hreg r, Il.ValTy Il.Bits32))))
     in
@@ -1501,13 +1501,13 @@ let emit_file
   in
 
   let do_nothing_fn =
-    let e = Il.new_emitter X86.prealloc_quad true in
+    let e = X86.new_emitter_without_vregs () in
       Il.emit e Il.Ret;
       X86.frags_of_emitted_quads sess e
   in
 
   let main_fn =
-    let e = X86.new_emitter() in
+    let e = X86.new_emitter_without_vregs () in
       X86.objfile_start e
         ~start_fixup ~rust_start_fixup
         ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup

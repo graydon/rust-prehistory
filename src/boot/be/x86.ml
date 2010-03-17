@@ -1657,10 +1657,11 @@ let select_insn (q:Il.quad) : Asm.frag =
 ;;
 
 
-let new_emitter _ : Il.emitter =
+let new_emitter_without_vregs _ : Il.emitter =
   Il.new_emitter
     abi.Abi.abi_prealloc_quad
     abi.Abi.abi_is_2addr_machine
+    false
 ;;
 
 let select_insns (sess:Session.sess) (q:Il.quads) : Asm.frag =

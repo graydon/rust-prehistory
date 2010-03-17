@@ -697,7 +697,7 @@ let pe_text_section
     ~(text_fixup:fixup)
     ~(crate_code:frag)
     : frag =
-  let e = X86.new_emitter () in
+  let e = X86.new_emitter_without_vregs () in
     (*
      * We are called from the Microsoft C library startup routine,
      * and assumed to be stdcall; so we have to clean up our own

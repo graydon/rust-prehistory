@@ -683,7 +683,7 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
 
 
 type emitter = { mutable emit_pc: int;
-                 mutable emit_next_vreg: int;
+                 mutable emit_next_vreg: int option;
                  mutable emit_next_spill: int;
                  emit_preallocator: (quad' -> quad');
                  emit_is_2addr: bool;
@@ -701,10 +701,10 @@ let deadq = { quad_fixup = None;
 ;;
 
 
-let new_emitter (preallocator:quad' -> quad') (is_2addr:bool) =
+let new_emitter (preallocator:quad' -> quad') (is_2addr:bool) (vregs_ok:bool) =
   {
     emit_pc = 0;
-    emit_next_vreg = 0;
+    emit_next_vreg = (if vregs_ok then Some 0 else None);
     emit_next_spill = 0;
     emit_preallocator = preallocator;
     emit_is_2addr = is_2addr;
@@ -714,10 +714,18 @@ let new_emitter (preallocator:quad' -> quad') (is_2addr:bool) =
 ;;
 
 
+let num_vregs (e:emitter) : int =
+  match e.emit_next_vreg with
+      None -> 0
+    | Some i -> i
+;;
+
 let next_vreg_num (e:emitter) : vreg =
-  let i = e.emit_next_vreg in
-    e.emit_next_vreg <- i + 1;
-    i
+  match e.emit_next_vreg with
+      None -> bug () "Il.next_vreg_num on non-vreg emitter"
+    | Some i ->
+        e.emit_next_vreg <- Some (i + 1);
+        i
 ;;
 
 let next_vreg (e:emitter) : reg =

@@ -964,7 +964,7 @@ let emit_file
 
   let text_section =
     let start_code =
-      let e = X86.new_emitter () in
+      let e = X86.new_emitter_without_vregs () in
         objfile_start e;
         X86.frags_of_emitted_quads sess e
     in
