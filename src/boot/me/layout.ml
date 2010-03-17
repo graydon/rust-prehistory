@@ -142,7 +142,7 @@ let layout_visitor
           end
         else
           begin
-            let elt_off = force_sz (SIZE_align (SIZE_fixed elt_align, SIZE_fixed off)) in
+            let elt_off = force_sz (align_sz (SIZE_fixed elt_align) (SIZE_fixed off)) in
             let frame_off =
               if upwards
               then elt_off

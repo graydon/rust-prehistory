@@ -1426,7 +1426,7 @@ let dwarf_visitor
                             (* DW_AT_mutable: DW_FORM_flag *)
                             BYTE (if slot_is_mutable slot then 1 else 0);
                             (* DW_AT_data_member_location: DW_FORM_data4 *)
-                            WORD (TY_u32, IMM (Il.get_element_offset word_bits rtys i));
+                            WORD (TY_u32, IMM (force_sz (Il.get_element_offset word_bits rtys i)));
                             (* DW_AT_byte_size: DW_FORM_data4 *)
                             WORD (TY_u32, IMM (force_sz (rty_sz rtys.(i)))) |]);
             end

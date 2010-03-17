@@ -237,7 +237,10 @@ let trans_visitor
           begin
             let elt_rty = elts.(i) in
             let elt_off = Il.get_element_offset word_bits elts i in
-              Il.Mem (Il.mem_off_imm mem elt_off, elt_rty)
+              match elt_off with
+                  SIZE_fixed fixed_off ->
+                    Il.Mem (Il.mem_off_imm mem fixed_off, elt_rty)
+                | _ -> bug () "Trans.get_element_ptr to non-fixed offset"
           end
 
       | _ -> bug () "get_element_ptr %d on cell %s" i

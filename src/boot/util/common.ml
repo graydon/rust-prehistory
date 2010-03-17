@@ -440,49 +440,34 @@ type size =
     SIZE_fixed of int64
   | SIZE_param_size of ty_param_idx
   | SIZE_param_align of ty_param_idx
-  | SIZE_add of size * size
-  | SIZE_mul of size * size
-  | SIZE_max of size * size
-  | SIZE_align of size * size
+  | SIZE_rt_add of size * size
+  | SIZE_rt_max of size * size
+  | SIZE_rt_align of size * size
 ;;
 
-let rec simplify_sz (a:size) : size =
-  match a with
-      SIZE_fixed _
-    | SIZE_param_size _
-    | SIZE_param_align _ -> a
-    | SIZE_add (a, b) ->
-        begin
-          match (simplify_sz a, simplify_sz b) with
-              (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
-            | (a, SIZE_fixed b) -> SIZE_add (SIZE_fixed b, a)
-            | (a, b) -> SIZE_add (a, b)
-        end
-    | SIZE_mul (a, b) ->
-        begin
-          match (simplify_sz a, simplify_sz b) with
-              (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.mul a b)
-            | (a, SIZE_fixed b) -> SIZE_mul (SIZE_fixed b, a)
-            | (a, b) -> SIZE_mul (a, b)
-        end
-    | SIZE_max (a, b) ->
-        begin
-          match (simplify_sz a, simplify_sz b) with
-              (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_max a b)
-            | (a, SIZE_fixed b) -> SIZE_max (SIZE_fixed b, a)
-            | (a, b) -> SIZE_max (a, b)
-        end
-    | SIZE_align (a, b) ->
-        begin
-          match (simplify_sz a, simplify_sz b) with
-              (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
-            | (a, SIZE_fixed b) -> SIZE_align (SIZE_fixed b, a)
-            | (a, b) -> SIZE_align (a, b)
-        end
+let add_sz (a:size) (b:size) : size =
+  match (a, b) with
+      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
+    | (a, SIZE_fixed b) -> SIZE_rt_add (SIZE_fixed b, a)
+    | (a, b) -> SIZE_rt_add (a, b)
+;;
+
+let max_sz (a:size) (b:size) : size =
+  match (a, b) with
+      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_max a b)
+    | (a, SIZE_fixed b) -> SIZE_rt_max (SIZE_fixed b, a)
+    | (a, b) -> SIZE_rt_max (a, b)
+;;
+
+let align_sz (a:size) (b:size) : size =
+  match (a, b) with
+      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
+    | (a, SIZE_fixed b) -> SIZE_rt_align (SIZE_fixed b, a)
+    | (a, b) -> SIZE_rt_align (a, b)
 ;;
 
 let force_sz (a:size) : int64 =
-  match simplify_sz a with
+  match a with
       SIZE_fixed i -> i
     | _ -> bug () "force_sz: forced non-fixed size expression"
 ;;

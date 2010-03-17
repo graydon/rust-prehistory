@@ -321,8 +321,8 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (size * size) =
         begin
           let accum (off,align) rt : (size * size) =
             let (elt_size, elt_align) = referent_ty_layout word_bits rt in
-            let elt_off = SIZE_align (elt_align, off) in
-              (SIZE_add (elt_off, elt_size), SIZE_max (elt_align, align))
+            let elt_off = align_sz elt_align off in
+              (add_sz elt_off elt_size, max_sz elt_align align)
           in
             Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 0L) rts
         end
@@ -330,7 +330,7 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (size * size) =
         begin
           let accum (sz,align) rt : (size * size) =
             let (elt_size, elt_align) = referent_ty_layout word_bits rt in
-              (SIZE_max (sz, elt_size), SIZE_max (elt_align, align))
+              (max_sz sz elt_size, max_sz elt_align align)
           in
             Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 0L) rts
         end
@@ -347,12 +347,12 @@ and referent_ty_align (word_bits:bits) (rt:referent_ty) : size =
 
 ;;
 
-let get_element_offset (word_bits:bits) (elts:referent_ty array) (i:int) : int64 =
+let get_element_offset (word_bits:bits) (elts:referent_ty array) (i:int) : size =
   let elts_before = Array.sub elts 0 i in
   let elt_rty = elts.(i) in
   let elts_before_size = referent_ty_size word_bits (StructTy elts_before) in
   let elt_align = referent_ty_align word_bits elt_rty in
-  let elt_off = force_sz (SIZE_align (elt_align, elts_before_size)) in
+  let elt_off = align_sz elt_align elts_before_size in
     elt_off
 ;;
 
