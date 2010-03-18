@@ -792,6 +792,22 @@ let rec calculate_sz (e:Il.emitter) (size:size) : unit =
           add eax edx                            (* off+pad  align    pad           *)
 ;;
 
+let rec size_calculation_stack_highwater (size:size) : int =
+  match size with
+      SIZE_fixed _
+    | SIZE_param_size _
+    | SIZE_param_align _ -> 0
+    | SIZE_rt_max (a, b) ->
+        (size_calculation_stack_highwater a)
+        + (size_calculation_stack_highwater b)
+    | SIZE_rt_add (a, b)
+    | SIZE_rt_align (a, b) ->
+        (size_calculation_stack_highwater a)
+        + (size_calculation_stack_highwater b)
+        + 1
+;;
+
+
 let fn_prologue
     (e:Il.emitter)
     (framesz:int64)
@@ -832,9 +848,6 @@ let fn_prologue
   (* FIXME: temporary, change to possibly-dynamic sizes. *)
   let framesz = SIZE_fixed framesz in
   let callsz = SIZE_fixed callsz in
-
-  (* FIXME: temporary, change to calculated primordial size. *)
-  let primordial_frame_sz = Asm.IMM 0L in
 
   (*
    *  After we save callee-saves, We have a stack like this:
@@ -893,6 +906,14 @@ let fn_prologue
    * either path, depending on whether this is a static or dynamic size.
    *)
   let call_and_frame_sz = add_sz callsz framesz in
+
+  let primordial_frame_sz =
+    Asm.IMM
+      (Int64.mul word_sz
+         (Int64.of_int
+            (size_calculation_stack_highwater
+               call_and_frame_sz)))
+  in
 
     (* Aalready have room to save regs on entry. *)
     save_callee_saves e;
