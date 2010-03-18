@@ -327,9 +327,15 @@ let condition_assigning_visitor
             in
               raise_precondition s.id precond;
 
-        (* FIXME: visit the base *)
-        | Ast.STMT_init_rec (dst, entries, (*base*)_) ->
-            let precond = Array.map (fun s -> Constr_init s) (entries_slots cx entries) in
+        | Ast.STMT_init_rec (dst, entries, base) ->
+            let base_slots =
+              begin
+                match base with
+                    None -> [| |]
+                  | Some lval -> lval_slots cx lval
+              end
+            in
+            let precond = Array.map (fun s -> Constr_init s) (Array.append (entries_slots cx entries) base_slots) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
