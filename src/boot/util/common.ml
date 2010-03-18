@@ -402,15 +402,9 @@ let i64_gt (a:int64) (b:int64) : bool = (Int64.compare a b) > 0
 let i64_max (a:int64) (b:int64) : int64 = (if (Int64.compare a b) > 0 then a else b)
 let i64_min (a:int64) (b:int64) : int64 = (if (Int64.compare a b) < 0 then a else b)
 let i64_align (align:int64) (v:int64) : int64 =
-  if align = 0L || align = 1L
-  then v
-  else
-    let rem = Int64.rem v align in
-      if rem = 0L
-      then v
-      else
-        let padding = Int64.sub align rem in
-          Int64.add v padding
+  (assert (align <> 0L));
+  let padding = Int64.rem (Int64.sub align (Int64.rem v align)) align in
+    Int64.add v padding
 ;;
 
 
@@ -441,7 +435,6 @@ type size =
   | SIZE_param_size of ty_param_idx
   | SIZE_param_align of ty_param_idx
   | SIZE_rt_add of size * size
-  | SIZE_rt_mul of size * size
   | SIZE_rt_max of size * size
   | SIZE_rt_align of size * size
 ;;
@@ -451,13 +444,6 @@ let add_sz (a:size) (b:size) : size =
       (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
     | (a, SIZE_fixed b) -> SIZE_rt_add (SIZE_fixed b, a)
     | (a, b) -> SIZE_rt_add (a, b)
-;;
-
-let mul_sz (a:size) (b:size) : size =
-  match (a, b) with
-      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.mul a b)
-    | (a, SIZE_fixed b) -> SIZE_rt_mul (SIZE_fixed b, a)
-    | (a, b) -> SIZE_rt_mul (a, b)
 ;;
 
 let max_sz (a:size) (b:size) : size =

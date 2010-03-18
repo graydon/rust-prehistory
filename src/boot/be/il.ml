@@ -324,7 +324,7 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (size * size) =
             let elt_off = align_sz elt_align off in
               (add_sz elt_off elt_size, max_sz elt_align align)
           in
-            Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 0L) rts
+            Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 1L) rts
         end
    | UnionTy rts ->
         begin
@@ -332,12 +332,12 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (size * size) =
             let (elt_size, elt_align) = referent_ty_layout word_bits rt in
               (max_sz sz elt_size, max_sz elt_align align)
           in
-            Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 0L) rts
+            Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 1L) rts
         end
    | OpaqueTy _ -> bug () "opaque ty in referent_ty_layout"
    | CodeTy _ -> bug () "code ty in referent_ty_layout"
    | ParamTy i -> (SIZE_param_size i, SIZE_param_align i)
-   | NilTy -> (SIZE_fixed 0L, SIZE_fixed 0L)
+   | NilTy -> (SIZE_fixed 0L, SIZE_fixed 1L)
 
 and referent_ty_size (word_bits:bits) (rt:referent_ty) : size =
   (fst (referent_ty_layout word_bits rt))

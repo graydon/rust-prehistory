@@ -484,10 +484,16 @@ let restore_frame_base (e:Il.emitter) (base:Il.reg) (retpc:Il.reg) : unit =
  *
  *)
 
-let proc_ptr = wordptr_n (Il.Hreg ebp) 6;;
-let out_ptr = wordptr_n (Il.Hreg ebp) 5;;
-let frame_base_sz = (* eip,ebp,edi,esi,ebx *) Int64.mul 5L word_sz;;
-let implicit_args_sz = (* proc ptr,out ptr *) Int64.mul 2L word_sz;;
+let frame_base_words = 5 (* eip,ebp,edi,esi,ebx *) ;;
+let frame_base_sz = Int64.mul (Int64.of_int frame_base_words) word_sz;;
+
+let implicit_arg_words = 2 (* proc ptr,out ptr *);;
+let implicit_args_sz =  Int64.mul (Int64.of_int implicit_arg_words) word_sz;;
+
+let out_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words);;
+let proc_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words+1);;
+let ty_param_n i = wordptr_n (Il.Hreg ebp) (frame_base_words + implicit_arg_words + i);;
+
 
 let get_next_pc_thunk_fixup = new_fixup "glue$get_next_pc"
 ;;
@@ -719,6 +725,72 @@ let unwind_glue
       emit_c_call e (rc eax) (h edx) (h ecx) nabi false callee [| (c proc_ptr) |];
 ;;
 
+(* Puts result in eax; clobbers ecx, edx in the process. *)
+let rec calculate_sz (e:Il.emitter) (size:size) : unit =
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let push x = emit (Il.Push x) in
+  let pop x = emit (Il.Pop x) in
+  let add x y = emit (Il.binary Il.ADD (rc x) (ro x) (ro y)) in
+  let sub x y = emit (Il.binary Il.SUB (rc x) (ro x) (ro y)) in
+  let eax_gets_a_and_ecx_gets_b a b =
+    calculate_sz e b;
+    push (ro eax);
+    calculate_sz e a;
+    pop (rc ecx);
+  in
+  let edx_gets_eax_mod_ecx _ =
+    emit (Il.binary Il.UMOD (rc edx) (ro eax) (ro ecx))
+  in
+    match size with
+        SIZE_fixed i ->
+          mov (rc eax) (immi i)
+
+      | SIZE_param_size i ->
+          mov (rc eax) (Il.Cell (ty_param_n i));
+          mov (rc eax) (Il.Cell (word_n (h eax) Abi.tydesc_field_size))
+
+      | SIZE_param_align i ->
+          mov (rc eax) (Il.Cell (ty_param_n i));
+          mov (rc eax) (Il.Cell (word_n (h eax) Abi.tydesc_field_align))
+
+      | SIZE_rt_add (a, b) ->
+          eax_gets_a_and_ecx_gets_b a b;
+          add eax ecx
+
+      | SIZE_rt_max (a, b) ->
+          eax_gets_a_and_ecx_gets_b a b;
+          emit (Il.cmp (ro eax) (ro ecx));
+          let jmp_pc = e.Il.emit_pc in
+            emit (Il.jmp Il.JAE Il.CodeNone);
+            mov (rc eax) (ro ecx);
+            Il.patch_jump e jmp_pc e.Il.emit_pc;
+
+      | SIZE_rt_align (align, off) ->
+          (*
+           * calculate off + pad where:
+           *
+           * pad = (align - (off mod align)) mod align
+           *
+           * abbreviations in the table below:
+           *
+           *     t1 =          (off mod align)
+           *     t2 =  align - (off mod align)
+           *)
+                                                 (* eax      ecx      edx     sp[0] *)
+                                                 (* ------------------------------- *)
+          eax_gets_a_and_ecx_gets_b off align;   (* off      align                  *)
+          push (ro eax);                         (* off      align            off   *)
+          mov (rc edx) (immi 0L);                (* off      align            off   *)
+          edx_gets_eax_mod_ecx ();               (*          align    t1      off   *)
+          mov (rc eax) (ro edx);                 (* t1       align    t1      off   *)
+          mov (rc eax) (ro ecx);                 (* align    align    t1      off   *)
+          sub eax edx;                           (* t2       align    t1      off   *)
+          mov (rc edx) (immi 0L);                (* t2       align            off   *)
+          edx_gets_eax_mod_ecx ();               (*          align    pad     off   *)
+          pop (rc eax);                          (* off      align    pad           *)
+          add eax edx                            (* off+pad  align    pad           *)
+;;
 
 let fn_prologue
     (e:Il.emitter)
@@ -802,7 +874,7 @@ let fn_prologue
    * assembling the tail-call args and before copying them to callee position.
    *)
 
-  let callsz = mul_sz (SIZE_fixed 2L) callsz in
+  let callsz = add_sz callsz callsz in
 
   (* 
    * Add in *another* word to handle an extra-awkward spill of the

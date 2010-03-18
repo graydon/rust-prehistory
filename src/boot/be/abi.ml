@@ -47,6 +47,12 @@ let binding_field_binding = 1;;
 
 let general_code_alignment = 16;;
 
+let tydesc_field_size = 0;;
+let tydesc_field_align = 1;;
+let tydesc_field_copy_glue = 2;;
+let tydesc_field_drop_glue = 3;;
+let tydesc_field_free_glue = 4;;
+
 type abi =
   {
     abi_word_sz: int64;
