@@ -240,7 +240,7 @@ let trans_visitor
               match elt_off with
                   SIZE_fixed fixed_off ->
                     Il.Mem (Il.mem_off_imm mem fixed_off, elt_rty)
-                | _ -> bug () "Trans.get_element_ptr to non-fixed offset"
+                | _ -> bug () "get_element_ptr %d on dynamic-size cell" i
           end
 
       | _ -> bug () "get_element_ptr %d on cell %s" i

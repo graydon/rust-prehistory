@@ -1791,8 +1791,11 @@ upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
     uintptr_t old_bottom = (uintptr_t) &old_stk->data[0];
     uintptr_t rust_sp_disp = old_top - proc->rust_sp;
     size_t ssz = old_top - old_bottom;
-    rt->log(LOG_MEM|LOG_PROC, "upcall_grow_proc old size %d bytes (old lim: 0x%" PRIxPTR ")",
-            ssz, old_top);
+    rt->log(LOG_MEM|LOG_PROC|LOG_UPCALL,
+            "upcall_grow_proc(%" PRIdPTR
+            "), old size %" PRIdPTR
+            " bytes (old lim: 0x%" PRIxPTR ")",
+            n_frame_bytes, ssz, old_top);
     ssz *= 2;
     if (ssz < n_frame_bytes)
         ssz = n_frame_bytes;

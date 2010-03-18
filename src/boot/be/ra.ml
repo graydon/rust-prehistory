@@ -60,16 +60,16 @@ let next_label (cx:ctxt) : string =
 exception Ra_error of string ;;
 
 let convert_labels (cx:ctxt) : unit =
-  let new_labels = ref [] in
+  let quad_fixups = Array.map (fun q -> q.quad_fixup) cx.ctxt_quads in
   let qp_code (_:Il.quad_processor) (c:Il.code) : Il.code =
     match c with
         Il.CodeLabel lab ->
           let fix =
-            match cx.ctxt_quads.(lab).quad_fixup with
+            match quad_fixups.(lab) with
                 None ->
                   let fix = new_fixup (next_label cx) in
                     begin
-                      new_labels := (lab, fix) :: (!new_labels);
+                      quad_fixups.(lab) <- Some fix;
                       fix
                     end
               | Some f -> f
@@ -81,10 +81,10 @@ let convert_labels (cx:ctxt) : unit =
              with Il.qp_code = qp_code }
   in
     Il.rewrite_quads qp cx.ctxt_quads;
-    List.iter (fun (i, fix) ->
-                 cx.ctxt_quads.(i) <- { cx.ctxt_quads.(i)
-                                        with Il.quad_fixup = Some fix })
-      (!new_labels)
+    Array.iteri (fun i fix ->
+                   cx.ctxt_quads.(i) <- { cx.ctxt_quads.(i) with
+                                            Il.quad_fixup = fix })
+      quad_fixups;
 ;;
 
 let convert_pre_spills

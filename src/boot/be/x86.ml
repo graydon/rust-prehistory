@@ -728,22 +728,41 @@ let fn_prologue
     (nabi:nabi)
     (grow_proc_fixup:fixup)
     : unit =
-  (*
-   *  - save callee-saves
-   *  - load esp into eax
-   *  - subtract sz from eax
-   *  - load bot = proc->stk->data (bottom of stack chunk)
-   *  - compare bot to eax
-   *  - fwd jump if bot <= eax
-   *  - emit prologue-upcall grow_proc
-   *  - fwd jump target
-   *  - subtract frame size from esp
-   *  - zero frame (for gc)
-   *)
-  let ecx_n = word_n (h ecx) in
+
+  let esi_n = word_n (h esi) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let add = Int64.add in
+  let add dst src = emit (Il.binary Il.ADD dst (Il.Cell dst) src) in
+  let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
+
+  (* We may be in a dynamic-sized frame. This makes matters complex,
+   * as we can't just perform a simple growth check in terms of a
+   * static size. The check is against a dynamic size, and we need to
+   * calculate that size.
+   *
+   * Unlike size-calculations in 'trans', we do not use vregs to
+   * calculate the frame size; instead we use a PUSH/POP stack-machine
+   * translation that doesn't disturb the registers we're
+   * somewhat-carefully *using* during frame setup.
+   *
+   * This only pushes the problem back a little ways though: we still
+   * need to be sure we have enough room to do the PUSH/POP
+   * calculation.  We refer to this amount of space as the 'primordial'
+   * frame size, which can *thankfully* be calculated exactly from the
+   * arithmetic expression we're aiming to calculate. So we make room
+   * for the primordial frame, run the calculation of the full dynamic
+   * frame size, then make room *again* for this dynamic size.
+   *
+   * Our caller reserved enough room for us to push our own frame-base,
+   * as well as the frame-base that it will cost to do an upcall.
+   *)
+
+  (* FIXME: temporary, change to possibly-dynamic sizes. *)
+  let framesz = SIZE_fixed framesz in
+  let callsz = SIZE_fixed callsz in
+
+  (* FIXME: temporary, change to calculated primordial size. *)
+  let primordial_frame_sz = Asm.IMM 0L in
 
   (*
    *  After we save callee-saves, We have a stack like this:
@@ -783,64 +802,86 @@ let fn_prologue
    * assembling the tail-call args and before copying them to callee position.
    *)
 
-  let callsz = Int64.mul callsz 2L in
+  let callsz = mul_sz (SIZE_fixed 2L) callsz in
 
   (* 
    * Add in *another* word to handle an extra-awkward spill of the
    * callee address that might occur during an indirect tail call.
    *)
-  let callsz = Int64.add callsz word_sz in
+  let callsz = add_sz (SIZE_fixed word_sz) callsz in
 
-
-  let callee_frame_sz = (Asm.ADD ((Asm.IMM (add framesz callsz)),
-                                  Asm.M_SZ spill_fixup))
+  let boundary_sz = (Asm.IMM
+                       (Int64.add                   (* Extra non-frame room:           *)
+                          frame_base_sz             (* to safely enter the next frame, *)
+                          frame_base_sz))           (* and make a 'grow' upcall there. *)
   in
 
-  (* Amount of memory we need to *have* in this chunk, beneath sp
-   * (after saving), to not-grow. Add in one more term of frame_base_sz
-   * worth to permit a 'grow' upcall to occur!
+  (*
+   * Cumulative dynamic-frame size, not including the spills. Add spill size to
+   * either path, depending on whether this is a static or dynamic size.
    *)
-  let reserve_current_sz =
-    (Asm.ADD (callee_frame_sz, (Asm.IMM frame_base_sz)))
-  in
+  let call_and_frame_sz = add_sz callsz framesz in
 
-    (* We must have room to save regs on entry. *)
+    (* Aalready have room to save regs on entry. *)
     save_callee_saves e;
 
-    mov (rc ebp) (ro esp);                        (* Establish frame base.   *)
+    let restart_pc = e.Il.emit_pc in
 
-    mov (rc eax) (ro esp);                        (* eax = esp               *)
-    emit (Il.binary Il.SUB (rc eax)
-            (ro eax) (imm reserve_current_sz));
-    mov (rc ecx) (c proc_ptr);                    (* ecx = proc              *)
-    mov (rc ecx) (c (ecx_n Abi.proc_field_stk));  (* ecx = proc->stk         *)
-    emit (Il.binary Il.ADD (rc ecx) (ro ecx)      (* ecx = &stk->data[0]     *)
-            (imm (word_off_n Abi.stk_field_data)));
+      mov (rc ebp) (ro esp);                        (* Establish frame base.     *)
+      mov (rc esi) (c proc_ptr);                    (* esi = proc                *)
+      mov (rc esi) (c (esi_n Abi.proc_field_stk));  (* esi = proc->stk           *)
+      add (rc esi) (imm
+                      (Asm.ADD
+                         ((word_off_n Abi.stk_field_data),
+                          boundary_sz)));
 
-    (* Compare and possibly upcall to 'grow'. *)
-    (* The case we *want* to jump for is the 'not underflowing' case,
-     * which is when ecx (the bottom) is less than or equal to
-     * eax (the proposed new sp) 
-     *)
-    emit (Il.cmp (ro ecx) (ro eax));
-    let jmp_pc = e.Il.emit_pc in
 
-      emit (Il.jmp Il.JBE Il.CodeNone);
+    (* Primordial size-check. *)
+    mov (rc edi) (ro esp);                          (* edi = esp                 *)
+    sub (rc edi) (imm primordial_frame_sz);         (* edi -= size-request       *)
+      emit (Il.cmp (ro esi) (ro edi));
+      (* Jump to 'grow' upcall on underflow: if esi (bottom) is > edi (proposed-esp) *)
+      let primordial_underflow_jmp_pc = e.Il.emit_pc in
+        emit (Il.jmp Il.JA Il.CodeNone);
 
-      emit_void_prologue_call e nabi grow_proc_fixup [| imm reserve_current_sz |];
+        (* Calculate dynamic frame size using stack-machine translation. *)
+        (* ... *)
 
-      Il.patch_jump e jmp_pc e.Il.emit_pc;
+        (* FIXME: temporary, change to calculated dynamic size. *)
+        let dynamic_frame_sz = (imm
+                                  (Asm.ADD (Asm.M_SZ spill_fixup,
+                                            (Asm.IMM (force_sz call_and_frame_sz)))))
+        in
 
-      (* Now set up a frame, wherever we landed. *)
-      emit (Il.binary Il.SUB (rc esp) (ro esp) (imm callee_frame_sz));
+          (* "Full" frame size-check. *)
+          mov (rc edi) (ro esp);                        (* edi = esp                 *)
+          sub (rc edi) dynamic_frame_sz;                (* edi -= size-request       *)
+          emit (Il.cmp (ro esi) (ro edi));
+          (* Jump *over* 'grow' upcall on non-underflow: if esi (bottom) is <= edi (proposed-esp) *)
 
-      (* Zero the frame
-       * 
-       * FIXME: this is awful, will go away when we have proper CFI.
-       *)
-      mov (rc edi) (ro esp);
-      mov (rc ecx) (imm callee_frame_sz);
-      emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
+          let bypass_grow_upcall_jmp_pc = e.Il.emit_pc in
+            emit (Il.jmp Il.JBE Il.CodeNone);
+
+            Il.patch_jump e primordial_underflow_jmp_pc e.Il.emit_pc;
+            (* Extract growth-amount from edi. *)
+            mov (rc esi) (ro esp);
+            sub (rc esi) (ro edi);
+            add (rc esi) (Il.Imm (boundary_sz, word_ty));
+            (* Perform 'grow' upcall, then restart frame-entry. *)
+            emit_void_prologue_call e nabi grow_proc_fixup [| ro esi |];
+            emit (Il.jmp Il.JMP (Il.CodeLabel restart_pc));
+            Il.patch_jump e bypass_grow_upcall_jmp_pc e.Il.emit_pc;
+
+            (* Establish a frame, wherever we landed. *)
+            sub (rc esp) dynamic_frame_sz;
+
+            (* Zero the frame.
+             * 
+             * FIXME: this is awful, will go away when we have proper CFI.
+             *)
+            mov (rc edi) (ro esp);
+            mov (rc ecx) dynamic_frame_sz;
+            emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
 ;;
 
 

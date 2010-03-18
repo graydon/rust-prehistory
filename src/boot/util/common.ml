@@ -441,6 +441,7 @@ type size =
   | SIZE_param_size of ty_param_idx
   | SIZE_param_align of ty_param_idx
   | SIZE_rt_add of size * size
+  | SIZE_rt_mul of size * size
   | SIZE_rt_max of size * size
   | SIZE_rt_align of size * size
 ;;
@@ -450,6 +451,13 @@ let add_sz (a:size) (b:size) : size =
       (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
     | (a, SIZE_fixed b) -> SIZE_rt_add (SIZE_fixed b, a)
     | (a, b) -> SIZE_rt_add (a, b)
+;;
+
+let mul_sz (a:size) (b:size) : size =
+  match (a, b) with
+      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.mul a b)
+    | (a, SIZE_fixed b) -> SIZE_rt_mul (SIZE_fixed b, a)
+    | (a, b) -> SIZE_rt_mul (a, b)
 ;;
 
 let max_sz (a:size) (b:size) : size =
