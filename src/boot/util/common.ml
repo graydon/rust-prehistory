@@ -390,6 +390,21 @@ let arr_map2 (f:'a -> 'b -> 'c) (a:'a array) (b:'b array) : 'c array =
   Array.init (Array.length a) (fun i -> f a.(i) b.(i))
 ;;
 
+let arr_for_all (f:int -> 'a -> bool) (a:'a array) : bool =
+  let len = Array.length a in
+  let rec loop i =
+    (i >= len) || ((f i a.(i)) && (loop (i+1)))
+  in
+    loop 0
+;;
+
+let arr_exists (f:int -> 'a -> bool) (a:'a array) : bool =
+  let len = Array.length a in
+  let rec loop i =
+    (i < len) && ((f i a.(i)) || (loop (i+1)))
+  in
+    loop 0
+;;
 
 (*
  * Auxiliary int64 functions
