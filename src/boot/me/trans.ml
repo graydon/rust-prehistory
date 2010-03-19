@@ -112,7 +112,7 @@ let trans_visitor
   let current_fn () = Stack.top fns in
   let current_fn_ty () = Hashtbl.find cx.ctxt_all_item_types (current_fn ()) in
   let current_fn_args_rty (closure:Il.referent_ty option) : Il.referent_ty =
-    call_args_referent_type cx 0 (current_fn_ty ()) closure
+    call_args_referent_type cx (n_item_ty_params cx (current_fn())) (current_fn_ty ()) closure
   in
   let current_fn_callsz () = get_callsz cx (current_fn()) in
 
@@ -378,6 +378,57 @@ let trans_visitor
 
   let slot_id_referent_type (slot_id:node_id) : Il.referent_ty =
     slot_referent_type abi (referent_to_slot cx slot_id)
+  in
+
+  let rec calculate_sz (e:Il.emitter) (size:size) : Il.operand =
+    match size with
+        SIZE_fixed i -> imm i
+      | SIZE_param_size i ->
+          let self_args = caller_args_cell (current_fn_args_rty None) in
+          let ty_params = get_element_ptr self_args Abi.calltup_elt_ty_params in
+          let ty_desc = deref (get_element_ptr ty_params i) in
+            Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_size)
+
+      | SIZE_param_align i ->
+          let self_args = caller_args_cell (current_fn_args_rty None) in
+          let ty_params = get_element_ptr self_args Abi.calltup_elt_ty_params in
+          let ty_desc = deref (get_element_ptr ty_params i) in
+            Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_align)
+
+      | SIZE_rt_add (a, b) ->
+          let op_a = calculate_sz e a in
+          let op_b = calculate_sz e b in
+          let tmp = next_vreg_cell word_ty in
+            emit (Il.binary Il.ADD tmp op_a op_b);
+            Il.Cell tmp
+
+      | SIZE_rt_max (a, b) ->
+          let op_a = calculate_sz e a in
+          let op_b = calculate_sz e b in
+          let tmp = next_vreg_cell word_ty in
+            mov tmp op_a;
+            emit (Il.cmp op_a op_b);
+            let jmp = mark () in
+              emit (Il.jmp Il.JAE Il.CodeNone);
+              mov tmp op_b;
+              patch jmp;
+              Il.Cell tmp
+
+      | SIZE_rt_align (align, off) ->
+          (*
+           * calculate off + pad where:
+           *
+           * pad = (align - (off mod align)) mod align
+           *
+           *)
+          let op_align = calculate_sz e align in
+          let op_off = calculate_sz e off in
+          let tmp = next_vreg_cell word_ty in
+            emit (Il.binary Il.UMOD tmp op_off op_align);
+            emit (Il.binary Il.SUB tmp op_align (Il.Cell tmp));
+            emit (Il.binary Il.UMOD tmp (Il.Cell tmp) op_align);
+            emit (Il.binary Il.ADD tmp (Il.Cell tmp) op_off);
+            Il.Cell tmp
   in
 
   let cell_of_block_slot

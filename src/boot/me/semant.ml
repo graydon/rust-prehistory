@@ -319,6 +319,12 @@ let get_callsz (cx:ctxt) (id:node_id) : int64 =
   else bugi cx id "missing callsz"
 ;;
 
+let n_item_ty_params (cx:ctxt) (id:node_id) : int =
+  match Hashtbl.find cx.ctxt_all_defns id with
+      DEFN_item i -> Array.length i.Ast.decl_params
+    | _ -> bugi cx id "n_item_ty_params on non-item"
+;;
+
 let get_spill (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_spill_fixups id
   then Hashtbl.find cx.ctxt_spill_fixups id
