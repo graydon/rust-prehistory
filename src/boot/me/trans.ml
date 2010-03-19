@@ -112,7 +112,7 @@ let trans_visitor
   let current_fn () = Stack.top fns in
   let current_fn_ty () = Hashtbl.find cx.ctxt_all_item_types (current_fn ()) in
   let current_fn_args_rty (closure:Il.referent_ty option) : Il.referent_ty =
-    call_args_referent_type cx (current_fn_ty ()) closure
+    call_args_referent_type cx 0 (current_fn_ty ()) closure
   in
   let current_fn_callsz () = get_callsz cx (current_fn()) in
 
@@ -406,8 +406,8 @@ let trans_visitor
                       begin
                         let curr_args_rty = current_fn_args_rty (Some Il.OpaqueTy) in
                         let self_args_cell = caller_args_cell curr_args_rty in
-                        let self_extra_args = get_element_ptr self_args_cell 3 in
-                        let closure_arg = get_element_ptr self_extra_args 0 in
+                        let self_extra_args = get_element_ptr self_args_cell Abi.calltup_elt_extra_args in
+                        let closure_arg = get_element_ptr self_extra_args Abi.extra_args_elt_closure in
                         let (slot_mem, _) = need_mem_cell (deref_imm closure_arg off) in
                           Il.Mem (slot_mem, referent_type)
                       end
@@ -895,16 +895,16 @@ let trans_visitor
     let (callee_ty:Ast.ty) = mk_simple_ty_fn arg_slots in
 
     let self_closure_rty = closure_referent_type bound_slots in
-    let self_args_rty = call_args_referent_type cx self_ty (Some self_closure_rty) in
-    let callee_args_rty = call_args_referent_type cx callee_ty (Some Il.OpaqueTy) in
+    let self_args_rty = call_args_referent_type cx 0 self_ty (Some self_closure_rty) in
+    let callee_args_rty = call_args_referent_type cx 0 callee_ty (Some Il.OpaqueTy) in
 
     let callsz = force_sz (Il.referent_ty_size word_bits callee_args_rty) in
     let spill = new_fixup "bind glue spill" in
       trans_glue_frame_entry callsz spill;
 
       let all_self_args_cell = caller_args_cell self_args_rty in
-      let self_extra_args_cell = get_element_ptr all_self_args_cell 3 in
-      let closure_cell = deref (get_element_ptr self_extra_args_cell 0) in
+      let self_extra_args_cell = get_element_ptr all_self_args_cell Abi.calltup_elt_extra_args in
+      let closure_cell = deref (get_element_ptr self_extra_args_cell Abi.extra_args_elt_closure) in
       let closure_target_cell = get_element_ptr closure_cell 1 in
       let closure_target_fn_cell = get_element_ptr closure_target_cell 0 in
 
@@ -1284,7 +1284,7 @@ let trans_visitor
       if not (lval_is_direct_fn cx fn_lval)
       then bug () "unhandled indirect-spawn"
     in
-    let args_rty = call_args_referent_type cx fn_ty None in
+    let args_rty = call_args_referent_type cx 0 fn_ty None in
     let fptr_operand = reify_ptr fptr_operand in
     let callsz = force_sz (Il.referent_ty_size word_bits args_rty) in
     let exit_proc_glue_fixup = get_exit_proc_glue () in
@@ -2448,17 +2448,17 @@ let trans_visitor
     let all_callee_args_cell =
       let all_callee_args_rty =
         if direct
-        then call_args_referent_type cx callee_ty None
-        else call_args_referent_type cx callee_ty (Some Il.OpaqueTy)
+        then call_args_referent_type cx 0 callee_ty None
+        else call_args_referent_type cx 0 callee_ty (Some Il.OpaqueTy)
       in
         callee_args_cell tail_area all_callee_args_rty
     in
 
     let callee_arg_slots = ty_arg_slots callee_ty in
-    let callee_output_cell = get_element_ptr all_callee_args_cell 0 in
-    let callee_proc_cell = get_element_ptr all_callee_args_cell 1 in
-    let callee_args = get_element_ptr all_callee_args_cell 2 in
-    let callee_extra_args = get_element_ptr all_callee_args_cell 3 in
+    let callee_output_cell = get_element_ptr all_callee_args_cell Abi.calltup_elt_out_ptr in
+    let callee_proc_cell = get_element_ptr all_callee_args_cell Abi.calltup_elt_proc_ptr in
+    let callee_args = get_element_ptr all_callee_args_cell Abi.calltup_elt_args in
+    let callee_extra_args = get_element_ptr all_callee_args_cell Abi.calltup_elt_extra_args in
 
     let n_args = Array.length caller_arg_atoms in
     let n_extras = Array.length caller_extra_args in
@@ -2530,20 +2530,26 @@ let trans_visitor
       let all_self_args_cell = caller_args_cell all_self_args_rty in
       let all_callee_args_cell = callee_args_cell false all_callee_args_rty in
 
-      let self_args_cell = get_element_ptr all_self_args_cell 2 in
-      let callee_args_cell = get_element_ptr all_callee_args_cell 2 in
-      let self_extra_args_cell = get_element_ptr all_self_args_cell 3 in
+      let self_args_cell = get_element_ptr all_self_args_cell Abi.calltup_elt_args in
+      let callee_args_cell = get_element_ptr all_callee_args_cell Abi.calltup_elt_args in
+      let self_extra_args_cell = get_element_ptr all_self_args_cell Abi.calltup_elt_extra_args in
 
       let n_args = Array.length arg_bound_flags in
       let bound_i = ref 0 in
       let unbound_i = ref 0 in
 
         iflog (fun _ -> annotate "copy out-ptr");
-        mov (get_element_ptr all_callee_args_cell 0) (Il.Cell (get_element_ptr all_self_args_cell 0));
+        mov
+          (get_element_ptr all_callee_args_cell Abi.calltup_elt_out_ptr)
+          (Il.Cell (get_element_ptr all_self_args_cell Abi.calltup_elt_out_ptr));
+
         iflog (fun _ -> annotate "copy proc-ptr");
-        mov (get_element_ptr all_callee_args_cell 1) (Il.Cell (get_element_ptr all_self_args_cell 1));
+        mov
+          (get_element_ptr all_callee_args_cell Abi.calltup_elt_proc_ptr)
+          (Il.Cell (get_element_ptr all_self_args_cell Abi.calltup_elt_proc_ptr));
+
         iflog (fun _ -> annotate "extract closure extra-arg");
-        let closure_cell = deref (get_element_ptr self_extra_args_cell 0) in
+        let closure_cell = deref (get_element_ptr self_extra_args_cell Abi.extra_args_elt_closure) in
         let closure_args_cell = get_element_ptr closure_cell 2 in
 
           for arg_i = 0 to (n_args - 1) do
@@ -2609,7 +2615,7 @@ let trans_visitor
       : unit =
     let callee_fptr = callee_fn_ptr callee_ptr direct in
     let callee_code = code_of_operand callee_fptr in
-    let callee_args_rty = call_args_referent_type cx callee_ty (if direct then None else (Some Il.OpaqueTy)) in
+    let callee_args_rty = call_args_referent_type cx 0 callee_ty (if direct then None else (Some Il.OpaqueTy)) in
     let callee_argsz = force_sz (Il.referent_ty_size word_bits callee_args_rty) in
     let caller_args_rty = current_fn_args_rty (if caller_is_closure then (Some Il.OpaqueTy) else None) in
     let caller_argsz = force_sz (Il.referent_ty_size word_bits caller_args_rty) in
@@ -2652,6 +2658,7 @@ let trans_visitor
        * do that.  *)
       call_code (code_of_operand callee_fptr)
 
+  (* FIXME: eliminate this, it duplicates logic elsewhere. *)
   and arg_tup_cell
       (arg_slots:Ast.slot array)
       : Il.cell =
@@ -3084,7 +3091,7 @@ let trans_visitor
         (fun _ -> Hashtbl.length cx.ctxt_import_lib_num)
     in
     let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
-    let args_rty = direct_call_args_referent_type cx fnid in
+    let args_rty = direct_call_args_referent_type cx 0 fnid in
     let caller_args_cell = caller_args_cell args_rty in
     let callee_args_cell = callee_args_cell false args_rty in
       begin
@@ -3135,10 +3142,10 @@ let trans_visitor
                   then ()
                   else bug () "unsupported arg or ret cell size used with native import"
                 in
-                let ret = get_element_ptr caller_args_cell 0 in
-                let _ = check_rty_sz (pointee_type ret) in
+                let out = get_element_ptr caller_args_cell Abi.calltup_elt_out_ptr in
+                let _ = check_rty_sz (pointee_type out) in
                 let args =
-                  let args_cell = get_element_ptr caller_args_cell 2 in
+                  let args_cell = get_element_ptr caller_args_cell Abi.calltup_elt_args in
                   let n_args =
                     match args_cell with
                         Il.Mem (_, Il.StructTy elts) -> Array.length elts
@@ -3161,7 +3168,7 @@ let trans_visitor
                                                           symstr |];
 
                   abi.Abi.abi_emit_native_call_in_thunk (emitter())
-                    ret nabi (Il.Cell f) args;
+                    out nabi (Il.Cell f) args;
               end
 
           | _ -> bug () "Trans.imported_rust_fn on unexpected form of import library"

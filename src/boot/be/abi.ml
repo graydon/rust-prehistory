@@ -1,10 +1,13 @@
 
-(* 
+(*
  * The 'abi' structure is pretty much just a grab-bag of machine
- * dependencies.  Make some attempt to factor it as time goes by.  
+ * dependencies and structure-layout information. Part of the latter
+ * is shared with trans and semant.
+ *
+ * Make some attempt to factor it as time goes by.
  *)
 
-(* Word offsets for structure fields in rust.h. *)
+(* Word offsets for structure fields in rust.h, and elsewhere in compiler. *)
 
 let rc_base_field_refcnt = 0;;
 
@@ -52,6 +55,14 @@ let tydesc_field_align = 1;;
 let tydesc_field_copy_glue = 2;;
 let tydesc_field_drop_glue = 3;;
 let tydesc_field_free_glue = 4;;
+
+let calltup_elt_out_ptr = 0;;
+let calltup_elt_proc_ptr = 1;;
+let calltup_elt_ty_params = 2;;
+let calltup_elt_args = 3;;
+let calltup_elt_extra_args = 4;;
+
+let extra_args_elt_closure = 0;;
 
 type abi =
   {

@@ -1388,28 +1388,64 @@ let proc_rty (abi:Abi.abi) : Il.referent_ty =
     end
 ;;
 
+let tydesc_rty (abi:Abi.abi) : Il.referent_ty =
+  (* 
+   * NB: must match corresponding tydesc structure
+   * in trans and offsets in ABI exactly.
+   *)
+  Il.StructTy
+    [|
+      word_rty abi;                      (* Abi.tydesc_field_size      *)
+      word_rty abi;                      (* Abi.tydesc_field_align     *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_copy_glue *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_drop_glue *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_free_glue *)
+    |]
+;;
+
 let call_args_referent_type_full
     (abi:Abi.abi)
     (out_slot:Ast.slot)
+    (n_ty_params:int)
     (in_slots:Ast.slot array)
     (extra_arg_rtys:Il.referent_ty array)
     : Il.referent_ty =
   let out_slot_rty = slot_referent_type abi out_slot in
   let out_ptr_rty = Il.ScalarTy (Il.AddrTy out_slot_rty) in
   let proc_ptr_rty = Il.ScalarTy (Il.AddrTy (proc_rty abi)) in
+  let ty_param_rtys =
+    let td = Il.ScalarTy (Il.AddrTy (tydesc_rty abi)) in
+      Il.StructTy (Array.init n_ty_params (fun _ -> td))
+  in
   let arg_rtys = Il.StructTy (Array.map (slot_referent_type abi) in_slots) in
-    Il.StructTy [| out_ptr_rty; proc_ptr_rty; arg_rtys; Il.StructTy extra_arg_rtys |]
+    (* 
+     * NB: must match corresponding calltup structure in trans and
+     * member indices in ABI exactly.
+     *)
+    Il.StructTy
+      [|
+        out_ptr_rty;                (* Abi.calltup_elt_out_ptr    *)
+        proc_ptr_rty;               (* Abi.calltup_elt_proc_ptr   *)
+        ty_param_rtys;              (* Abi.calltup_elt_ty_params  *)
+        arg_rtys;                   (* Abi.calltup_elt_args       *)
+        Il.StructTy extra_arg_rtys  (* Abi.calltup_elt_extra_args *)
+      |]
 ;;
 
 let call_args_referent_type
     (cx:ctxt)
+    (n_ty_params:int)
     (callee_ty:Ast.ty)
     (closure:Il.referent_ty option)
     : Il.referent_ty =
   let with_closure e =
     match closure with
         None -> e
-      | Some c -> Array.append e [| Il.ScalarTy (Il.AddrTy c) |]
+      | Some c ->
+          Array.append e
+            [|
+              Il.ScalarTy (Il.AddrTy c) (* Abi.extra_args_elt_closure *)
+            |]
   in
     match callee_ty with
         Ast.TY_fn (tsig, taux) ->
@@ -1422,6 +1458,7 @@ let call_args_referent_type
             call_args_referent_type_full
               cx.ctxt_abi
               tsig.Ast.sig_output_slot
+              n_ty_params
               tsig.Ast.sig_input_slots
               extras
 
@@ -1429,6 +1466,7 @@ let call_args_referent_type
           call_args_referent_type_full
             cx.ctxt_abi
             (interior_slot Ast.TY_bool)
+            n_ty_params
             in_args
             (with_closure [| |])
 
@@ -1436,6 +1474,7 @@ let call_args_referent_type
           call_args_referent_type_full
             cx.ctxt_abi
             (interior_slot (Ast.TY_mod (None, mtis)))
+            n_ty_params
             in_args
             (with_closure [| |])
 
@@ -1444,18 +1483,20 @@ let call_args_referent_type
 
 let indirect_call_args_referent_type
     (cx:ctxt)
+    (n_ty_params:int)
     (callee_ty:Ast.ty)
     (closure:Il.referent_ty)
     : Il.referent_ty =
-  call_args_referent_type cx callee_ty (Some closure)
+  call_args_referent_type cx n_ty_params callee_ty (Some closure)
 ;;
 
 let direct_call_args_referent_type
     (cx:ctxt)
+    (n_ty_params:int)
     (callee_node:node_id)
     : Il.referent_ty =
   let ity = Hashtbl.find cx.ctxt_all_item_types callee_node in
-    call_args_referent_type cx ity None
+    call_args_referent_type cx n_ty_params ity None
 ;;
 
 let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
@@ -1475,6 +1516,7 @@ let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
     Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
 ;;
 
+(* FIXME: eliminate this, it duplicates logic elsewhere. *)
 let fn_call_tup (abi:Abi.abi) (inputs:Ast.ty_tup) : Ast.ty_tup =
   let proc_ptr = word_slot abi in
   let out_ptr = word_slot abi in

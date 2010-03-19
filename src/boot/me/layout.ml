@@ -213,7 +213,7 @@ let layout_visitor
   let glue_callsz =
     let word = interior_slot Ast.TY_int in
     let glue_fn = mk_simple_ty_fn [| word; word |] in
-      rty_sz (indirect_call_args_referent_type cx glue_fn Il.OpaqueTy)
+      rty_sz (indirect_call_args_referent_type cx 0 glue_fn Il.OpaqueTy)
   in
 
   let enter_frame id =
@@ -324,7 +324,7 @@ let layout_visitor
               let abi = cx.ctxt_abi in
               let static = lval_is_static cx callee in
               let closure = if static then None else Some Il.OpaqueTy in
-              let rty = call_args_referent_type cx lv_ty closure in
+              let rty = call_args_referent_type cx 0 lv_ty closure in
               let sz = force_sz (Il.referent_ty_size abi.Abi.abi_word_bits rty) in
               let frame_id = fst (Stack.top frame_stack) in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in
