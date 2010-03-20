@@ -731,7 +731,9 @@ let rec calculate_sz (e:Il.emitter) (size:size) : unit =
   let mov dst src = emit (Il.umov dst src) in
   let push x = emit (Il.Push x) in
   let pop x = emit (Il.Pop x) in
+  let neg x = emit (Il.unary Il.NEG (rc x) (ro x)) in
   let add x y = emit (Il.binary Il.ADD (rc x) (ro x) (ro y)) in
+  let mul x y = emit (Il.binary Il.UMUL (rc x) (ro x) (ro y)) in
   let sub x y = emit (Il.binary Il.SUB (rc x) (ro x) (ro y)) in
   let eax_gets_a_and_ecx_gets_b a b =
     calculate_sz e b;
@@ -754,9 +756,17 @@ let rec calculate_sz (e:Il.emitter) (size:size) : unit =
           mov (rc eax) (Il.Cell (ty_param_n i));
           mov (rc eax) (Il.Cell (word_n (h eax) Abi.tydesc_field_align))
 
+      | SIZE_rt_neg a ->
+          calculate_sz e a;
+          neg eax
+
       | SIZE_rt_add (a, b) ->
           eax_gets_a_and_ecx_gets_b a b;
           add eax ecx
+
+      | SIZE_rt_mul (a, b) ->
+          eax_gets_a_and_ecx_gets_b a b;
+          mul eax ecx
 
       | SIZE_rt_max (a, b) ->
           eax_gets_a_and_ecx_gets_b a b;
@@ -797,10 +807,13 @@ let rec size_calculation_stack_highwater (size:size) : int =
       SIZE_fixed _
     | SIZE_param_size _
     | SIZE_param_align _ -> 0
+    | SIZE_rt_neg a  ->
+        (size_calculation_stack_highwater a)
     | SIZE_rt_max (a, b) ->
         (size_calculation_stack_highwater a)
         + (size_calculation_stack_highwater b)
     | SIZE_rt_add (a, b)
+    | SIZE_rt_mul (a, b)
     | SIZE_rt_align (a, b) ->
         (size_calculation_stack_highwater a)
         + (size_calculation_stack_highwater b)

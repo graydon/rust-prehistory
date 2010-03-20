@@ -186,7 +186,7 @@ let trans_visitor
   let callee_args_cell (tail_area:bool) (args_rty:Il.referent_ty) : Il.cell =
     if tail_area
     then
-      Il.Mem (sp_imm (current_fn_callsz ()), args_rty)
+      Il.Mem (sp_imm (force_sz (current_fn_callsz ())), args_rty)
     else
       Il.Mem (sp_imm 0L, args_rty)
   in
@@ -395,11 +395,24 @@ let trans_visitor
           let ty_desc = deref (get_element_ptr ty_params i) in
             Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_align)
 
+      | SIZE_rt_neg a ->
+          let op_a = calculate_sz e a in
+          let tmp = next_vreg_cell word_ty in
+            emit (Il.unary Il.NEG tmp op_a);
+            Il.Cell tmp
+
       | SIZE_rt_add (a, b) ->
           let op_a = calculate_sz e a in
           let op_b = calculate_sz e b in
           let tmp = next_vreg_cell word_ty in
             emit (Il.binary Il.ADD tmp op_a op_b);
+            Il.Cell tmp
+
+      | SIZE_rt_mul (a, b) ->
+          let op_a = calculate_sz e a in
+          let op_b = calculate_sz e b in
+          let tmp = next_vreg_cell word_ty in
+            emit (Il.binary Il.UMUL tmp op_a op_b);
             Il.Cell tmp
 
       | SIZE_rt_max (a, b) ->
@@ -452,6 +465,7 @@ let trans_visitor
               match htab_search cx.ctxt_slot_offsets slot_id with
                   None -> bugi cx slot_id "slot assigned to neither vreg nor offset"
                 | Some off ->
+                    let off = force_sz off in
                     if slot_is_module_state cx slot_id
                     then
                       begin
@@ -2678,7 +2692,7 @@ let trans_visitor
         caller_output_cell caller_arg_atoms caller_extra_args;
       iter_frame_and_arg_slots (current_fn ()) callee_drop_slot;
       abi.Abi.abi_emit_fn_tail_call (emitter())
-        (current_fn_callsz()) caller_argsz callee_code callee_argsz;
+        (force_sz (current_fn_callsz())) caller_argsz callee_code callee_argsz;
 
 
   and trans_call
@@ -3029,6 +3043,7 @@ let trans_visitor
                 fun key slot_id slot ->
                   match htab_search cx.ctxt_slot_offsets slot_id with
                       Some off when not (slot_is_module_state cx slot_id) ->
+                        let off = force_sz off in
                         let referent_type = slot_id_referent_type slot_id in
                         let fp_cell = Il.Mem (mem, (Il.ScalarTy (Il.AddrTy referent_type))) in
                         let slot_cell = deref_imm fp_cell off in
@@ -3078,6 +3093,8 @@ let trans_visitor
   let trans_frame_entry (fnid:node_id) : unit =
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
+    let framesz = force_sz framesz in
+    let callsz = force_sz callsz in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter_with_vregs ();

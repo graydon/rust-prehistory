@@ -97,9 +97,9 @@ type ctxt =
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
       ctxt_slot_is_module_state: (node_id,unit) Hashtbl.t;
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
-      ctxt_slot_offsets: (node_id,int64) Hashtbl.t;
-      ctxt_frame_sizes: (node_id,int64) Hashtbl.t;
-      ctxt_call_sizes: (node_id,int64) Hashtbl.t;
+      ctxt_slot_offsets: (node_id,size) Hashtbl.t;
+      ctxt_frame_sizes: (node_id,size) Hashtbl.t;
+      ctxt_call_sizes: (node_id,size) Hashtbl.t;
 
       (* Mutability and GC stuff. *)
       ctxt_mutable_slot_referent: (node_id,unit) Hashtbl.t;
@@ -307,13 +307,13 @@ let get_mod_fixup (cx:ctxt) (id:node_id) : fixup =
   else bugi cx id "mod without fixup"
 ;;
 
-let get_framesz (cx:ctxt) (id:node_id) : int64 =
+let get_framesz (cx:ctxt) (id:node_id) : size =
   if Hashtbl.mem cx.ctxt_frame_sizes id
   then Hashtbl.find cx.ctxt_frame_sizes id
   else bugi cx id "missing framesz"
 ;;
 
-let get_callsz (cx:ctxt) (id:node_id) : int64 =
+let get_callsz (cx:ctxt) (id:node_id) : size =
   if Hashtbl.mem cx.ctxt_call_sizes id
   then Hashtbl.find cx.ctxt_call_sizes id
   else bugi cx id "missing callsz"

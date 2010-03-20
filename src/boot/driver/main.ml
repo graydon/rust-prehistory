@@ -283,7 +283,7 @@ let main_pipeline _ =
         sem_cx.Semant.ctxt_frame_sizes
         node
     in
-      process_code frame_sz code
+      process_code (force_sz frame_sz) code
   in
 
   let (file_frags:Asm.frag) =

@@ -449,9 +449,17 @@ type size =
     SIZE_fixed of int64
   | SIZE_param_size of ty_param_idx
   | SIZE_param_align of ty_param_idx
+  | SIZE_rt_neg of size
   | SIZE_rt_add of size * size
+  | SIZE_rt_mul of size * size
   | SIZE_rt_max of size * size
   | SIZE_rt_align of size * size
+;;
+
+let neg_sz (a:size) : size =
+  match a with
+      SIZE_fixed a -> SIZE_fixed (Int64.neg a)
+    | _ -> SIZE_rt_neg a
 ;;
 
 let add_sz (a:size) (b:size) : size =
@@ -459,6 +467,13 @@ let add_sz (a:size) (b:size) : size =
       (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
     | (a, SIZE_fixed b) -> SIZE_rt_add (SIZE_fixed b, a)
     | (a, b) -> SIZE_rt_add (a, b)
+;;
+
+let mul_sz (a:size) (b:size) : size =
+  match (a, b) with
+      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.mul a b)
+    | (a, SIZE_fixed b) -> SIZE_rt_mul (SIZE_fixed b, a)
+    | (a, b) -> SIZE_rt_mul (a, b)
 ;;
 
 let max_sz (a:size) (b:size) : size =
@@ -473,6 +488,23 @@ let align_sz (a:size) (b:size) : size =
       (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
     | (a, SIZE_fixed b) -> SIZE_rt_align (SIZE_fixed b, a)
     | (a, b) -> SIZE_rt_align (a, b)
+;;
+
+let rec string_of_size (s:size) : string =
+  match s with
+      SIZE_fixed i -> Printf.sprintf "%Ld" i
+    | SIZE_param_size i -> Printf.sprintf "ty[%d].size" i
+    | SIZE_param_align i -> Printf.sprintf "ty[%d].align" i
+    | SIZE_rt_neg a ->
+        Printf.sprintf "-(%s)" (string_of_size a)
+    | SIZE_rt_add (a, b) ->
+        Printf.sprintf "(%s + %s)" (string_of_size a) (string_of_size b)
+    | SIZE_rt_mul (a, b) ->
+        Printf.sprintf "(%s * %s)" (string_of_size a) (string_of_size b)
+    | SIZE_rt_max (a, b) ->
+        Printf.sprintf "max(%s,%s)" (string_of_size a) (string_of_size b)
+    | SIZE_rt_align (align, off) ->
+        Printf.sprintf "align(%s,%s)" (string_of_size align) (string_of_size off)
 ;;
 
 let force_sz (a:size) : int64 =

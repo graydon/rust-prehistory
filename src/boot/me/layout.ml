@@ -85,8 +85,8 @@ let layout_visitor
    * The first (ebp-4) points to the crate the frame is in, and the second
    * (ebp-8) is a crate-relative offset to the frame's particular info.
    *)
-  let (frame_info_slot_sz:int64) =
-    Int64.mul 2L cx.ctxt_abi.Abi.abi_word_sz
+  let (frame_info_slot_sz:size) =
+    SIZE_fixed (Int64.mul 2L cx.ctxt_abi.Abi.abi_word_sz)
   in
 
   let force_slot_to_mem (slot:Ast.slot) : bool =
@@ -113,25 +113,28 @@ let layout_visitor
       rt_in_mem (slot_referent_type cx.ctxt_abi slot)
   in
 
-  let rty_sz rty = force_sz (Il.referent_ty_size cx.ctxt_abi.Abi.abi_word_bits rty) in
-  let rty_layout rty =
-    let ssz, asz = Il.referent_ty_layout cx.ctxt_abi.Abi.abi_word_bits rty in
-      (force_sz ssz, force_sz asz)
+  let rty_sz rty = Il.referent_ty_size cx.ctxt_abi.Abi.abi_word_bits rty in
+  let rty_layout rty = Il.referent_ty_layout cx.ctxt_abi.Abi.abi_word_bits rty in
+
+  let is_subword_size sz =
+    match sz with
+        SIZE_fixed i -> i64_le i cx.ctxt_abi.Abi.abi_word_sz
+      | _ -> false
   in
 
   let layout_slot_ids
       (slot_accum:slot_stack)
       (upwards:bool)
       (vregs_ok:bool)
-      (offset:int64)
+      (offset:size)
       (slots:node_id array)
       : unit =
-    let accum (off,align) id : (int64 * int64) =
+    let accum (off,align) id : (size * size) =
       let slot = referent_to_slot cx id in
       let rt = slot_referent_type cx.ctxt_abi slot in
       let (elt_size, elt_align) = rty_layout rt in
         if vregs_ok
-          && (i64_le elt_size cx.ctxt_abi.Abi.abi_word_sz)
+          && (is_subword_size elt_size)
           && (not (force_slot_to_mem slot))
           && (not (Hashtbl.mem cx.ctxt_slot_aliased id))
         then
@@ -142,24 +145,24 @@ let layout_visitor
           end
         else
           begin
-            let elt_off = force_sz (align_sz (SIZE_fixed elt_align) (SIZE_fixed off)) in
+            let elt_off = align_sz elt_align off in
             let frame_off =
               if upwards
               then elt_off
-              else Int64.neg (Int64.add elt_off elt_size)
+              else neg_sz (add_sz elt_off elt_size)
             in
               Stack.push (slot_referent_type cx.ctxt_abi slot) slot_accum;
-              log cx "slot #%d offset: %Ld" (int_of_node id) frame_off;
+              log cx "slot #%d offset: %s" (int_of_node id) (string_of_size frame_off);
               if (not (Hashtbl.mem cx.ctxt_slot_offsets id))
               then htab_put cx.ctxt_slot_offsets id frame_off;
-              (Int64.add elt_off elt_size, i64_max elt_align align)
+              (add_sz elt_off elt_size, max_sz elt_align align)
           end
     in
-      ignore (Array.fold_left accum (offset, 0L) slots)
+      ignore (Array.fold_left accum (offset, SIZE_fixed 0L) slots)
   in
 
-  let layout_block (slot_accum:slot_stack) (offset:int64) (block:Ast.block) : unit =
-    log cx "laying out block #%d at fp offset %Ld" (int_of_node block.id) offset;
+  let layout_block (slot_accum:slot_stack) (offset:size) (block:Ast.block) : unit =
+    log cx "laying out block #%d at fp offset %s" (int_of_node block.id) (string_of_size offset);
     let block_slot_ids =
       Array.of_list (htab_vals (Hashtbl.find cx.ctxt_block_slots block.id))
     in
@@ -167,12 +170,11 @@ let layout_visitor
   in
 
   let layout_header (id:node_id) (input_slot_ids:node_id array) : unit =
-    let offset =
-      Int64.add
-        cx.ctxt_abi.Abi.abi_frame_base_sz
-        cx.ctxt_abi.Abi.abi_implicit_args_sz
+    let offset = SIZE_fixed (Int64.add
+                               cx.ctxt_abi.Abi.abi_frame_base_sz
+                               cx.ctxt_abi.Abi.abi_implicit_args_sz)
     in
-      log cx "laying out header for node #%d at fp offset %Ld" (int_of_node id) offset;
+      log cx "laying out header for node #%d at fp offset %s" (int_of_node id) (string_of_size offset);
       layout_slot_ids (Stack.create()) true false offset input_slot_ids
   in
 
@@ -180,9 +182,9 @@ let layout_visitor
     let offset =
       let word_sz = cx.ctxt_abi.Abi.abi_word_sz in
       let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
-        word_n Abi.exterior_rc_slot_field_body
+        SIZE_fixed (word_n Abi.exterior_rc_slot_field_body)
     in
-      log cx "laying out module-closure for node #%d at offset %Ld" (int_of_node id) offset;
+      log cx "laying out module-closure for node #%d at offset %s" (int_of_node id) (string_of_size offset);
       layout_slot_ids (Stack.create()) true false offset closure_slot_ids
   in
 
@@ -198,11 +200,12 @@ let layout_visitor
 
   let update_frame_size _ =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
-    let sz = Int64.add frame_info_slot_sz (rty_sz (frame_rty frame_blocks)) in
+    let sz = add_sz frame_info_slot_sz (rty_sz (frame_rty frame_blocks)) in
     let curr = Hashtbl.find cx.ctxt_frame_sizes frame_id in
-      log cx "extending frame #%d frame to size %Ld"
-        (int_of_node frame_id) (i64_max curr sz) ;
-      Hashtbl.replace cx.ctxt_frame_sizes frame_id (i64_max curr sz)
+    let sz = max_sz curr sz in
+      log cx "extending frame #%d frame to size %s"
+        (int_of_node frame_id) (string_of_size sz);
+      Hashtbl.replace cx.ctxt_frame_sizes frame_id sz
   in
 
   (* 
@@ -218,7 +221,7 @@ let layout_visitor
 
   let enter_frame id =
       Stack.push (id, (Stack.create())) frame_stack;
-      htab_put cx.ctxt_frame_sizes id 0L;
+      htab_put cx.ctxt_frame_sizes id (SIZE_fixed 0L);
       htab_put cx.ctxt_call_sizes id glue_callsz;
       htab_put cx.ctxt_spill_fixups id (new_fixup "frame spill fixup");
       htab_put cx.ctxt_frame_blocks id []
@@ -273,7 +276,7 @@ let layout_visitor
     let off =
       if Stack.is_empty frame_blocks
       then frame_info_slot_sz
-      else (Int64.add frame_info_slot_sz (rty_sz (frame_rty frame_blocks)))
+      else (add_sz frame_info_slot_sz (rty_sz (frame_rty frame_blocks)))
     in
     let block_slots = Stack.create() in
     let frame_block_ids = Hashtbl.find cx.ctxt_frame_blocks frame_id in
@@ -324,13 +327,18 @@ let layout_visitor
               let abi = cx.ctxt_abi in
               let static = lval_is_static cx callee in
               let closure = if static then None else Some Il.OpaqueTy in
-              let rty = call_args_referent_type cx 0 lv_ty closure in
-              let sz = force_sz (Il.referent_ty_size abi.Abi.abi_word_bits rty) in
+              let n_ty_params =
+                match resolve_lval cx callee with
+                    DEFN_item i -> Array.length i.Ast.decl_params
+                  | _ -> 0
+              in
+              let rty = call_args_referent_type cx n_ty_params lv_ty closure in
+              let sz = Il.referent_ty_size abi.Abi.abi_word_bits rty in
               let frame_id = fst (Stack.top frame_stack) in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in
-                log cx "extending frame #%d call size to %Ld"
-                  (int_of_node frame_id) (i64_max curr sz);
-                Hashtbl.replace cx.ctxt_call_sizes frame_id (i64_max curr sz)
+                log cx "extending frame #%d call size to %s"
+                  (int_of_node frame_id) (string_of_size (max_sz curr sz));
+                Hashtbl.replace cx.ctxt_call_sizes frame_id (max_sz curr sz)
           end
           callees
     end;
