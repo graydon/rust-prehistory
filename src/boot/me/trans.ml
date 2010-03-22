@@ -3433,7 +3433,7 @@ let trans_visitor
             crate_rel_word cx.ctxt_debug_info_fixup;
             Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_info_fixup);
 
-            crate_rel_word cx.ctxt_c_to_proc_fixup;
+            crate_rel_word cx.ctxt_activate_fixup;
             crate_rel_word cx.ctxt_main_exit_proc_glue_fixup;
             crate_rel_word cx.ctxt_unwind_fixup;
             crate_rel_word cx.ctxt_yield_fixup;
@@ -3445,9 +3445,9 @@ let trans_visitor
     in
 
       (* Emit additional glue we didn't do elsewhere. *)
-      emit_aux_global_glue cx GLUE_C_to_proc
-        cx.ctxt_c_to_proc_fixup
-        abi.Abi.abi_c_to_proc;
+      emit_aux_global_glue cx GLUE_activate
+        cx.ctxt_activate_fixup
+        abi.Abi.abi_activate;
 
       emit_aux_global_glue cx GLUE_yield
         cx.ctxt_yield_fixup

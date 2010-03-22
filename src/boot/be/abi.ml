@@ -90,7 +90,7 @@ type abi =
     abi_emit_inline_memcpy: (Il.emitter -> int64 -> Il.reg -> Il.reg -> Il.reg -> bool -> unit);
 
     (* Global glue. *)
-    abi_c_to_proc: (Il.emitter -> unit);
+    abi_activate: (Il.emitter -> unit);
     abi_yield: (Il.emitter -> unit);
     abi_unwind: (Il.emitter -> Common.nabi -> Common.fixup -> unit);
     abi_get_next_pc_thunk: ((Il.reg * Common.fixup * (Il.emitter -> unit)) option);

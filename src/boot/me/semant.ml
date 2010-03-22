@@ -16,7 +16,7 @@ type code = {
 ;;
 
 type glue =
-    GLUE_C_to_proc
+    GLUE_activate
   | GLUE_yield
   | GLUE_exit_main_proc
   | GLUE_exit_proc
@@ -120,7 +120,7 @@ type ctxt =
       ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_abi: Abi.abi;
-      ctxt_c_to_proc_fixup: fixup;
+      ctxt_activate_fixup: fixup;
       ctxt_yield_fixup: fixup;
       ctxt_unwind_fixup: fixup;
 
@@ -193,7 +193,7 @@ let new_ctxt sess abi crate =
     ctxt_file_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
     ctxt_abi = abi;
-    ctxt_c_to_proc_fixup = new_fixup "c-to-proc glue";
+    ctxt_activate_fixup = new_fixup "activate glue";
     ctxt_yield_fixup = new_fixup "yield glue";
     ctxt_unwind_fixup = new_fixup "unwind glue";
 
@@ -1653,7 +1653,7 @@ let ty_str (ty:Ast.ty) : string =
 
 let glue_str (cx:ctxt) (g:glue) : string =
   match g with
-      GLUE_C_to_proc -> "glue$c_to_proc"
+      GLUE_activate -> "glue$activate"
     | GLUE_yield -> "glue$yield"
     | GLUE_exit_main_proc -> "glue$exit_main_proc"
     | GLUE_exit_proc -> "glue$exit_proc"

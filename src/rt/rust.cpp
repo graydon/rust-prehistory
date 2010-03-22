@@ -359,7 +359,7 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
 
 // Crates.
 
-typedef void CDECL (*c_to_proc_glue_ty)(rust_proc *);
+typedef void CDECL (*activate_glue_ty)(rust_proc *);
 
 class rust_crate
 {
@@ -375,7 +375,7 @@ class rust_crate
     ptrdiff_t debug_info_off;     // Memory offset from this to .debug_info.
     size_t debug_info_sz;         // Size of .debug_info.
 
-    ptrdiff_t c_to_proc_glue_off;
+    ptrdiff_t activate_glue_off;
     ptrdiff_t main_exit_proc_glue_off;
     ptrdiff_t unwind_glue_off;
     ptrdiff_t yield_glue_off;
@@ -396,8 +396,8 @@ public:
         return ((uintptr_t)this - self_addr);
     }
 
-    c_to_proc_glue_ty get_c_to_proc_glue() const {
-        return (c_to_proc_glue_ty) ((uintptr_t)this + c_to_proc_glue_off);
+    activate_glue_ty get_activate_glue() const {
+        return (activate_glue_ty) ((uintptr_t)this + activate_glue_off);
     }
 
     uintptr_t get_main_exit_proc_glue() const {
@@ -2205,7 +2205,7 @@ rust_proc::start(uintptr_t exit_proc_glue,
     *spp-- = (uintptr_t) 0;               // output addr
     *spp-- = (uintptr_t) exit_proc_glue;  // retpc
 
-    // The context the c_to_proc_glue needs to switch stack.
+    // The context the activate_glue needs to switch stack.
     *spp-- = (uintptr_t) spawnee_fn;      // instruction to start at
     for (size_t j = 0; j < n_callee_saves; ++j) {
         // callee-saves to carry in when we activate
@@ -2491,7 +2491,7 @@ rust_rt::~rust_rt() {
 void
 rust_rt::activate(rust_proc *proc) {
     curr_proc = proc;
-    root_crate->get_c_to_proc_glue()(proc);
+    root_crate->get_activate_glue()(proc);
     curr_proc = NULL;
 }
 

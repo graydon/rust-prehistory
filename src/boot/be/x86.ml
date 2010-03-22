@@ -1160,7 +1160,7 @@ let fn_tail_call
 ;;
 
 
-let c_to_proc_glue (e:Il.emitter) : unit =
+let activate_glue (e:Il.emitter) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
    * compilation unit.
@@ -1204,7 +1204,7 @@ let yield_glue (e:Il.emitter) : unit =
    *   - save regs on proc stack
    *   - save sp to proc.sp
    *   - load saved C sp (switch stack)
-   *   - undo alignment (see c_to_proc)
+   *   - undo alignment (see activate_glue)
    *   - restore saved C regs
    *   - return to saved C pc
    *
@@ -1283,7 +1283,7 @@ let (abi:Abi.abi) =
     Abi.abi_emit_native_call_in_thunk = emit_native_call_in_thunk;
     Abi.abi_emit_inline_memcpy = inline_memcpy;
 
-    Abi.abi_c_to_proc = c_to_proc_glue;
+    Abi.abi_activate = activate_glue;
     Abi.abi_yield = yield_glue;
     Abi.abi_unwind = unwind_glue;
     Abi.abi_get_next_pc_thunk = Some get_next_pc_thunk;
