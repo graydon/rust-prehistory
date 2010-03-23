@@ -277,6 +277,7 @@ TEST_XFAILS := test/run-pass/mlist_cycle.rs \
                test/run-pass/yield2.rs \
                test/run-pass/generic-fn.rs \
                test/run-pass/rec-auto.rs \
+               test/run-pass/str-concat.rs \
                test/compile-fail/rec-missing-fields.rs \
                test/compile-fail/infinite-tag-type-recursion.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
