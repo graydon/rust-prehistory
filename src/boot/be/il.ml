@@ -464,13 +464,12 @@ let rec size_to_expr64 (a:size) : Asm.expr64 option =
           begin
             match (size_to_expr64 s) with
                 None -> None
-              | Some s -> Some (Asm.SUB (Asm.IMM 0L, s))
+              | Some s -> Some (Asm.NEG s)
           end
       | SIZE_rt_add (a, b) -> binary a b (fun a b -> Asm.ADD (a,b))
       | SIZE_rt_mul (a, b) -> binary a b (fun a b -> Asm.MUL (a,b))
       | SIZE_rt_max (a, b) -> binary a b (fun a b -> Asm.MAX (a,b))
-      | SIZE_rt_align (a, b) ->
-          binary a b (fun a b -> Asm.ADD (b, Asm.REM (Asm.SUB (a, Asm.REM (b, a)), a)))
+      | SIZE_rt_align (a, b) -> binary a b (fun a b -> Asm.ALIGN (a,b))
       | _ -> None
 ;;
 
@@ -534,6 +533,9 @@ let rec string_of_expr64 (e64:Asm.expr64) : string =
       | Asm.MAX (a,b) ->
           Printf.sprintf "(max %s %s)"
             (string_of_expr64 a) (string_of_expr64 b)
+      | Asm.ALIGN (a,b) ->
+          Printf.sprintf "(align %s %s)"
+            (string_of_expr64 a) (string_of_expr64 b)
       | Asm.SLL (a,b) -> bini "<<" a b
       | Asm.SLR (a,b) -> bini ">>" a b
       | Asm.SAR (a,b) -> bini ">>>" a b
@@ -541,6 +543,7 @@ let rec string_of_expr64 (e64:Asm.expr64) : string =
       | Asm.XOR (a,b) -> bin "xor" a b
       | Asm.OR (a,b) -> bin "|" a b
       | Asm.NOT a -> Printf.sprintf "(not %s)" (string_of_expr64 a)
+      | Asm.NEG a -> Printf.sprintf "-%s" (string_of_expr64 a)
       | Asm.F_POS f -> Printf.sprintf "<%s>.fpos" f.fixup_name
       | Asm.F_SZ f -> Printf.sprintf "<%s>.fsz" f.fixup_name
       | Asm.M_POS f -> Printf.sprintf "<%s>.mpos" f.fixup_name

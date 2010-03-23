@@ -474,44 +474,6 @@ type size =
   | SIZE_rt_align of size * size
 ;;
 
-let neg_sz (a:size) : size =
-  match a with
-      SIZE_fixed a -> SIZE_fixed (Int64.neg a)
-    | _ -> SIZE_rt_neg a
-;;
-
-let add_sz (a:size) (b:size) : size =
-  match (a, b) with
-      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
-    | (SIZE_fixed 0L, b) -> b
-    | (a, SIZE_fixed 0L) -> a
-    | (a, SIZE_fixed b) -> SIZE_rt_add (SIZE_fixed b, a)
-    | (a, b) -> SIZE_rt_add (a, b)
-;;
-
-let mul_sz (a:size) (b:size) : size =
-  match (a, b) with
-      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.mul a b)
-    | (a, SIZE_fixed b) -> SIZE_rt_mul (SIZE_fixed b, a)
-    | (a, b) -> SIZE_rt_mul (a, b)
-;;
-
-let max_sz (a:size) (b:size) : size =
-  match (a, b) with
-      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_max a b)
-    | (a, SIZE_fixed b) -> SIZE_rt_max (SIZE_fixed b, a)
-    | (a, b) -> SIZE_rt_max (a, b)
-;;
-
-let align_sz (a:size) (b:size) : size =
-  match (a, b) with
-      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
-    | (SIZE_fixed 1L, b) -> b
-    | (a, SIZE_fixed 1L) -> a
-    | (a, SIZE_fixed b) -> SIZE_rt_align (SIZE_fixed b, a)
-    | (a, b) -> SIZE_rt_align (a, b)
-;;
-
 let rec string_of_size (s:size) : string =
   match s with
       SIZE_fixed i -> Printf.sprintf "%Ld" i
@@ -529,6 +491,90 @@ let rec string_of_size (s:size) : string =
         Printf.sprintf "max(%s,%s)" (string_of_size a) (string_of_size b)
     | SIZE_rt_align (align, off) ->
         Printf.sprintf "align(%s,%s)" (string_of_size align) (string_of_size off)
+;;
+
+let neg_sz (a:size) : size =
+  match a with
+      SIZE_fixed a -> SIZE_fixed (Int64.neg a)
+    | _ -> SIZE_rt_neg a
+;;
+
+let add_sz (a:size) (b:size) : size =
+  match (a, b) with
+      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
+
+    | ((SIZE_rt_add ((SIZE_fixed a), c)), SIZE_fixed b)
+    | ((SIZE_rt_add (c, (SIZE_fixed a))), SIZE_fixed b)
+    | (SIZE_fixed a, (SIZE_rt_add ((SIZE_fixed b), c)))
+    | (SIZE_fixed a, (SIZE_rt_add (c, (SIZE_fixed b)))) ->
+        SIZE_rt_add (SIZE_fixed (Int64.add a b), c)
+
+    | (SIZE_fixed 0L, b) -> b
+    | (a, SIZE_fixed 0L) -> a
+    | (a, SIZE_fixed b) -> SIZE_rt_add (SIZE_fixed b, a)
+    | (a, b) -> SIZE_rt_add (a, b)
+;;
+
+let mul_sz (a:size) (b:size) : size =
+  match (a, b) with
+      (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.mul a b)
+    | (a, SIZE_fixed b) -> SIZE_rt_mul (SIZE_fixed b, a)
+    | (a, b) -> SIZE_rt_mul (a, b)
+;;
+
+let max_sz (a:size) (b:size) : size =
+  let rec no_negs x =
+    match x with
+        SIZE_fixed _
+      | SIZE_fixup_mem_sz _
+      | SIZE_fixup_mem_pos _
+      | SIZE_param_size _
+      | SIZE_param_align _ -> true
+      | SIZE_rt_neg _ -> false
+      | SIZE_rt_add (a,b) -> (no_negs a) && (no_negs b)
+      | SIZE_rt_mul (a,b) -> (no_negs a) && (no_negs b)
+      | SIZE_rt_max (a,b) -> (no_negs a) && (no_negs b)
+      | SIZE_rt_align (a,b) -> (no_negs a) && (no_negs b)
+  in
+    match (a, b) with
+        (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_max a b)
+      | (SIZE_fixed 0L, b) when no_negs b -> b
+      | (a, SIZE_fixed 0L) when no_negs a -> b
+      | (a, SIZE_fixed b) -> SIZE_rt_max (SIZE_fixed b, a)
+      | (a, b) -> SIZE_rt_max (a, b)
+;;
+
+(* FIXME: audit this carefuly; I am not terribly certain of the
+ * algebraic simplification going on here. Sadly, without it
+ * the diagnostic output from translation becomes completely
+ * illegible.
+ *)
+
+let align_sz (a:size) (b:size) : size =
+  let rec alignment_of s =
+    match s with
+        SIZE_rt_align (SIZE_fixed n, s) ->
+          let inner_alignment = alignment_of s in
+            if (Int64.rem n inner_alignment) = 0L
+            then inner_alignment
+            else n
+      | SIZE_rt_add (SIZE_fixed n, s)
+      | SIZE_rt_add (s, SIZE_fixed n) ->
+          let inner_alignment = alignment_of s in
+            if (Int64.rem n inner_alignment) = 0L
+            then inner_alignment
+            else 1L (* This could be lcd(...) or such. *)
+      | _ -> 1L
+  in
+    match (a, b) with
+        (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
+      | (SIZE_fixed 1L, b) -> b
+      | (SIZE_fixed a, b) ->
+          let inner_alignment = alignment_of b in
+          if (Int64.rem a inner_alignment) = 0L
+          then b
+          else SIZE_rt_align (SIZE_fixed a, b)
+      | (a, b) -> SIZE_rt_align (a, b)
 ;;
 
 let force_sz (a:size) : int64 =

@@ -87,6 +87,7 @@ type ('a, 'b) expr =
   | DIV of (('a, 'b) expr) * (('a, 'b) expr)
   | REM of (('a, 'b) expr) * (('a, 'b) expr)
   | MAX of (('a, 'b) expr) * (('a, 'b) expr)
+  | ALIGN of (('a, 'b) expr) * (('a, 'b) expr)
   | SLL of (('a, 'b) expr) * int
   | SLR of (('a, 'b) expr) * int
   | SAR of (('a, 'b) expr) * int
@@ -94,6 +95,7 @@ type ('a, 'b) expr =
   | XOR of (('a, 'b) expr) * (('a, 'b) expr)
   | OR of (('a, 'b) expr) * (('a, 'b) expr)
   | NOT of (('a, 'b) expr)
+  | NEG of (('a, 'b) expr)
   | F_POS of fixup
   | F_SZ of fixup
   | M_POS of fixup
@@ -133,6 +135,7 @@ let rec eval32 (e:expr32)
     | DIV (a, b) -> Int32.div (eval32 a) (eval32 b)
     | REM (a, b) -> Int32.rem (eval32 a) (eval32 b)
     | MAX (a, b) -> i32_max (eval32 a) (eval32 b)
+    | ALIGN (a, b) -> i32_align (eval32 a) (eval32 b)
     | SLL (a, b) -> Int32.shift_left (eval32 a) b
     | SLR (a, b) -> Int32.shift_right_logical (eval32 a) b
     | SAR (a, b) -> Int32.shift_right (eval32 a) b
@@ -140,6 +143,7 @@ let rec eval32 (e:expr32)
     | XOR (a, b) -> Int32.logxor (eval32 a) (eval32 b)
     | OR (a, b) -> Int32.logor (eval32 a) (eval32 b)
     | NOT a -> Int32.lognot (eval32 a)
+    | NEG a -> Int32.neg (eval32 a)
     | F_POS f -> checkdef "file position" f.fixup_name f.fixup_file_pos expandInt
     | F_SZ f -> checkdef "file size" f.fixup_name f.fixup_file_sz expandInt
     | M_POS f -> checkdef "mem position" f.fixup_name f.fixup_mem_pos chop64
@@ -162,6 +166,7 @@ let rec eval64 (e:expr64)
     | DIV (a, b) -> Int64.div (eval64 a) (eval64 b)
     | REM (a, b) -> Int64.rem (eval64 a) (eval64 b)
     | MAX (a, b) -> i64_max (eval64 a) (eval64 b)
+    | ALIGN (a, b) -> i64_align (eval64 a) (eval64 b)
     | SLL (a, b) -> Int64.shift_left (eval64 a) b
     | SLR (a, b) -> Int64.shift_right_logical (eval64 a) b
     | SAR (a, b) -> Int64.shift_right (eval64 a) b
@@ -169,6 +174,7 @@ let rec eval64 (e:expr64)
     | XOR (a, b) -> Int64.logxor (eval64 a) (eval64 b)
     | OR (a, b) -> Int64.logor (eval64 a) (eval64 b)
     | NOT a -> Int64.lognot (eval64 a)
+    | NEG a -> Int64.neg (eval64 a)
     | F_POS f -> checkdef "file position" f.fixup_name f.fixup_file_pos Int64.of_int
     | F_SZ f -> checkdef "file size" f.fixup_name f.fixup_file_sz Int64.of_int
     | M_POS f -> checkdef "mem position" f.fixup_name f.fixup_mem_pos (fun x -> x)
