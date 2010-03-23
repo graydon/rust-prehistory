@@ -801,8 +801,8 @@ let trans_visitor
       mov (word_at (fp_imm frame_crate_ptr)) (Il.Cell (crate_ptr_cell));
       mov (word_at (fp_imm frame_fns_disp)) frame_fns
 
-  and trans_glue_frame_entry (callsz:int64) (spill:fixup) : unit =
-    let framesz = 0L in
+  and trans_glue_frame_entry (callsz:size) (spill:fixup) : unit =
+    let framesz = SIZE_fixed 0L in
       push_new_emitter_with_vregs ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill callsz nabi_rust (upcall_fixup "upcall_grow_proc");
@@ -963,7 +963,7 @@ let trans_visitor
     let self_args_rty = call_args_referent_type cx 0 self_ty (Some self_closure_rty) in
     let callee_args_rty = call_args_referent_type cx 0 callee_ty (Some Il.OpaqueTy) in
 
-    let callsz = force_sz (Il.referent_ty_size word_bits callee_args_rty) in
+    let callsz = Il.referent_ty_size word_bits callee_args_rty in
     let spill = new_fixup "bind glue spill" in
       trans_glue_frame_entry callsz spill;
 
@@ -1010,7 +1010,7 @@ let trans_visitor
 
   and trans_mem_glue_frame_entry (n_outgoing_args:int) (spill:fixup) : unit =
     let isz = cx.ctxt_abi.Abi.abi_implicit_args_sz in
-    let callsz = Int64.add isz (word_n n_outgoing_args) in
+    let callsz = SIZE_fixed (Int64.add isz (word_n n_outgoing_args)) in
       trans_glue_frame_entry callsz spill
 
   and get_mem_glue (g:glue) (inner:Il.mem -> unit) : fixup =
@@ -3093,8 +3093,6 @@ let trans_visitor
   let trans_frame_entry (fnid:node_id) : unit =
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
-    let framesz = force_sz framesz in
-    let callsz = force_sz callsz in
     let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter_with_vregs ();

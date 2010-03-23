@@ -823,9 +823,9 @@ let rec size_calculation_stack_highwater (size:size) : int =
 
 let fn_prologue
     (e:Il.emitter)
-    (framesz:int64)
+    (framesz:size)
     (spill_fixup:fixup)
-    (callsz:int64)
+    (callsz:size)
     (nabi:nabi)
     (grow_proc_fixup:fixup)
     : unit =
@@ -857,10 +857,6 @@ let fn_prologue
    * Our caller reserved enough room for us to push our own frame-base,
    * as well as the frame-base that it will cost to do an upcall.
    *)
-
-  (* FIXME: temporary, change to possibly-dynamic sizes. *)
-  let framesz = SIZE_fixed framesz in
-  let callsz = SIZE_fixed callsz in
 
   (*
    *  After we save callee-saves, We have a stack like this:
