@@ -179,18 +179,6 @@ let trans_visitor
     based_imm abi.Abi.abi_sp_reg imm
   in
 
-  let caller_args_cell (args_rty:Il.referent_ty) : Il.cell =
-    Il.Mem (fp_imm out_mem_disp, args_rty)
-  in
-
-  let callee_args_cell (tail_area:bool) (args_rty:Il.referent_ty) : Il.cell =
-    if tail_area
-    then
-      Il.Mem (sp_imm (force_sz (current_fn_callsz ())), args_rty)
-    else
-      Il.Mem (sp_imm 0L, args_rty)
-  in
-
   let word_at (mem:Il.mem) : Il.cell =
     Il.Mem (mem, Il.ScalarTy (Il.ValTy word_bits))
   in
@@ -380,7 +368,7 @@ let trans_visitor
     slot_referent_type abi (referent_to_slot cx slot_id)
   in
 
-  let rec calculate_sz (e:Il.emitter) (size:size) : Il.operand =
+  let rec calculate_sz (size:size) : Il.operand =
     match size with
         SIZE_fixed i -> imm i
       | SIZE_fixup_mem_pos f -> Il.Imm (Asm.M_POS f, word_ty_mach)
@@ -399,28 +387,28 @@ let trans_visitor
             Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_align)
 
       | SIZE_rt_neg a ->
-          let op_a = calculate_sz e a in
+          let op_a = calculate_sz a in
           let tmp = next_vreg_cell word_ty in
             emit (Il.unary Il.NEG tmp op_a);
             Il.Cell tmp
 
       | SIZE_rt_add (a, b) ->
-          let op_a = calculate_sz e a in
-          let op_b = calculate_sz e b in
+          let op_a = calculate_sz a in
+          let op_b = calculate_sz b in
           let tmp = next_vreg_cell word_ty in
             emit (Il.binary Il.ADD tmp op_a op_b);
             Il.Cell tmp
 
       | SIZE_rt_mul (a, b) ->
-          let op_a = calculate_sz e a in
-          let op_b = calculate_sz e b in
+          let op_a = calculate_sz a in
+          let op_b = calculate_sz b in
           let tmp = next_vreg_cell word_ty in
             emit (Il.binary Il.UMUL tmp op_a op_b);
             Il.Cell tmp
 
       | SIZE_rt_max (a, b) ->
-          let op_a = calculate_sz e a in
-          let op_b = calculate_sz e b in
+          let op_a = calculate_sz a in
+          let op_b = calculate_sz b in
           let tmp = next_vreg_cell word_ty in
             mov tmp op_a;
             emit (Il.cmp op_a op_b);
@@ -437,33 +425,40 @@ let trans_visitor
            * pad = (align - (off mod align)) mod align
            *
            *)
-          let op_align = calculate_sz e align in
-          let op_off = calculate_sz e off in
+          let op_align = calculate_sz align in
+          let op_off = calculate_sz off in
           let tmp = next_vreg_cell word_ty in
             emit (Il.binary Il.UMOD tmp op_off op_align);
             emit (Il.binary Il.SUB tmp op_align (Il.Cell tmp));
             emit (Il.binary Il.UMOD tmp (Il.Cell tmp) op_align);
             emit (Il.binary Il.ADD tmp (Il.Cell tmp) op_off);
             Il.Cell tmp
-  in
 
-  let based_sz (reg:Il.reg) (size:size) : Il.mem =
+  and caller_args_cell (args_rty:Il.referent_ty) : Il.cell =
+    Il.Mem (fp_imm out_mem_disp, args_rty)
+
+  and callee_args_cell (tail_area:bool) (args_rty:Il.referent_ty) : Il.cell =
+    if tail_area
+    then
+      Il.Mem (sp_off_sz (current_fn_callsz ()), args_rty)
+    else
+      Il.Mem (sp_imm 0L, args_rty)
+
+  and based_sz (reg:Il.reg) (size:size) : Il.mem =
     match Il.size_to_expr64 size with
         Some e -> based_off reg e
-      | None -> bug () "offset-dereferencing dynamic-sized cell"
-          (* FIXME: want to do this: *)
-          (* 
-             let runtime_size = calculate_sz (emitter()) size in
+      | None ->
+             let runtime_size = calculate_sz size in
              let v = next_vreg () in
              let c = (Il.Reg (v, word_ty)) in
-             mov c (Il.Cell (Il.Reg (reg, word_ty)));
-             emit (Il.binary Il.ADD c (Il.Cell c) runtime_size);
-             based v
-          *)
-  in
-
-  let fp_off_sz (size:size) : Il.mem =
+               mov c (Il.Cell (Il.Reg (reg, word_ty)));
+               emit (Il.binary Il.ADD c (Il.Cell c) runtime_size);
+               based v
+  and fp_off_sz (size:size) : Il.mem =
     based_sz abi.Abi.abi_fp_reg size
+
+  and sp_off_sz (size:size) : Il.mem =
+    based_sz abi.Abi.abi_sp_reg size
   in
 
   let deref_off_sz (ptr:Il.cell) (size:size) : Il.cell =
@@ -1379,8 +1374,8 @@ let trans_visitor
     in
     let args_rty = call_args_referent_type cx 0 fn_ty None in
     let fptr_operand = reify_ptr fptr_operand in
-    let callsz = force_sz (Il.referent_ty_size word_bits args_rty) in
     let exit_proc_glue_fixup = get_exit_proc_glue () in
+    let callsz = calculate_sz (Il.referent_ty_size word_bits args_rty) in
     let exit_proc_glue_fptr = code_fixup_to_ptr_operand exit_proc_glue_fixup in
     let exit_proc_glue_fptr = reify_ptr exit_proc_glue_fptr in
 
@@ -1397,7 +1392,7 @@ let trans_visitor
                     Il.Cell new_proc;
                     exit_proc_glue_fptr;
                     fptr_operand;
-                    imm callsz
+                    callsz
                   |];
             end
          | _ ->
@@ -1409,7 +1404,7 @@ let trans_visitor
                      Il.Cell new_proc;
                      exit_proc_glue_fptr;
                      fptr_operand;
-                     imm callsz
+                     callsz
                    |];
              end;
       ()
