@@ -450,9 +450,13 @@ and walk_stmt
       | Ast.STMT_block b ->
           walk_block v b
 
-      | Ast.STMT_copy (lv,e,_) ->
+      | Ast.STMT_copy (lv,e) ->
           walk_lval v lv;
           walk_expr v e
+
+      | Ast.STMT_copy_binop (lv,_,a) ->
+          walk_lval v lv;
+          walk_atom v a
 
       | Ast.STMT_call (dst,f,az) ->
           walk_lval v dst;

@@ -69,7 +69,8 @@ let mutability_checking_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-          Ast.STMT_copy (dst, _, _) -> check_write s.id dst
+          Ast.STMT_copy (dst, _) -> check_write s.id dst
+        | Ast.STMT_copy_binop (dst, _, _) -> check_write s.id dst
         | Ast.STMT_call (dst, _, _) -> check_write s.id dst
         | Ast.STMT_recv (dst, _) -> check_write s.id dst
         | _ -> ()

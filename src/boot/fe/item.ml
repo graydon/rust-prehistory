@@ -364,8 +364,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                      let src_atom = Ast.ATOM_lval src_lval in
                      let dst_lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident idents.(i))) in
                      let copy = span ps apos bpos
-                       (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom,
-                         None)) in
+                       (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
                            copies := copy :: (!copies)
                    end;
                    let slot = {slot with node = Pexp.apply_mutability ps slot.node Ast.MUTABLE} in
@@ -441,12 +440,12 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           let (_, tmp, tempdecl) =
             build_tmp ps slot_auto apos bpos in
           let copy = span ps apos bpos
-            (Ast.STMT_copy (tmp, Ast.EXPR_atom atom, None)) in
+            (Ast.STMT_copy (tmp, Ast.EXPR_atom atom)) in
           let make_copy i dst =
             let ext = Ast.COMP_named (Ast.COMP_idx i) in
             let lval = Ast.LVAL_ext ((clone_lval ps tmp), ext) in
             let e = Ast.EXPR_atom (Ast.ATOM_lval lval) in
-              span ps apos bpos (Ast.STMT_copy (dst, e, None))
+              span ps apos bpos (Ast.STMT_copy (dst, e))
           in
             let copies = Array.mapi make_copy lvals in
               Array.concat [ stmts; [| tempdecl; copy |]; copies ]
@@ -462,23 +461,23 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
                 | OPEQ binop_token ->
                     bump ps;
-                    let (stmts, rhs) = ctxt "stmt: opeq rhs" parse_expr ps in
-                    let binop = match binop_token with
-                      PLUS    -> Ast.BINOP_add
-                    | MINUS   -> Ast.BINOP_sub
-                    | STAR    -> Ast.BINOP_mul
-                    | SLASH   -> Ast.BINOP_div
-                    | PERCENT -> Ast.BINOP_mod
-                    | AND     -> Ast.BINOP_and
-                    | OR      -> Ast.BINOP_or
-                    | LSL     -> Ast.BINOP_lsl
-                    | LSR     -> Ast.BINOP_lsr
-                    | ASR     -> Ast.BINOP_asr
-                    | _       -> raise (err "unknown opeq token" ps)
+                    let (stmts, rhs) = ctxt "stmt: opeq rhs" parse_expr_atom ps in
+                    let binop =
+                      match binop_token with
+                          PLUS    -> Ast.BINOP_add
+                        | MINUS   -> Ast.BINOP_sub
+                        | STAR    -> Ast.BINOP_mul
+                        | SLASH   -> Ast.BINOP_div
+                        | PERCENT -> Ast.BINOP_mod
+                        | AND     -> Ast.BINOP_and
+                        | OR      -> Ast.BINOP_or
+                        | LSL     -> Ast.BINOP_lsl
+                        | LSR     -> Ast.BINOP_lsr
+                        | ASR     -> Ast.BINOP_asr
+                        | _       -> raise (err "unknown opeq token" ps)
                     in
-                    expect ps SEMI;
-                    spans ps stmts apos (Ast.STMT_copy(lval, rhs,
-                      Some binop))
+                      expect ps SEMI;
+                      spans ps stmts apos (Ast.STMT_copy_binop (lval, binop, rhs))
 
                 | LARROW ->
                     bump ps;
@@ -496,7 +495,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                       | _ ->
                           let (_, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
                           let copy = span ps apos bpos
-                            (Ast.STMT_copy (tmp, Ast.EXPR_atom rhs, None)) in
+                            (Ast.STMT_copy (tmp, Ast.EXPR_atom rhs)) in
                               ((clone_lval ps tmp), [| tempdecl; copy |])
                     in
                     let send = span ps apos bpos (Ast.STMT_send (lval, src)) in

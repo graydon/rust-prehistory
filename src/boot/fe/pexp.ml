@@ -1010,21 +1010,21 @@ and desugar_expr_init
           let (stmts, atom) = desugar_expr_atom ps pexp in
           let expr = Ast.EXPR_atom atom in
             Array.append stmts
-              [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr, None)) |]
+              [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
 
       | PEXP_binop (op, lhs, rhs) ->
           let (lhs_stmts, lhs_atom) = desugar_expr_atom ps lhs in
           let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
           let expr = Ast.EXPR_binary (op, lhs_atom, rhs_atom) in
           let copy_stmt = span ps apos bpos
-            (Ast.STMT_copy (dst_lval, expr, None)) in
+            (Ast.STMT_copy (dst_lval, expr)) in
               Array.concat [ lhs_stmts; rhs_stmts; [| copy_stmt |] ]
 
       | PEXP_unop (op, rhs) ->
           let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
           let expr = Ast.EXPR_unary (op, rhs_atom) in
           let copy_stmt = span ps apos bpos
-            (Ast.STMT_copy (dst_lval, expr, None)) in
+            (Ast.STMT_copy (dst_lval, expr)) in
               Array.append rhs_stmts [| copy_stmt |]
 
       | PEXP_call (fn, args) ->

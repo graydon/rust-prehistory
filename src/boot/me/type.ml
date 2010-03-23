@@ -862,9 +862,14 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         | Ast.STMT_init_str (lval, _) ->
             unify_lval lval (ref (TYSPEC_resolved Ast.TY_str))
 
-        | Ast.STMT_copy (lval, expr, _) ->
+        | Ast.STMT_copy (lval, expr) ->
             let tv = ref TYSPEC_all in
               unify_expr expr tv;
+              unify_lval lval tv
+
+        | Ast.STMT_copy_binop (lval, _, at) ->
+            let tv = ref TYSPEC_all in
+              unify_atom at tv;
               unify_lval lval tv
 
         | Ast.STMT_call (out, callee, args) ->

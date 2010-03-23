@@ -2144,42 +2144,33 @@ let trans_visitor
       (initializing:bool)
       (dst:Ast.lval)
       (src:Ast.expr)
-      (binop_opt:Ast.binop option) : unit =
+      : unit =
     let (dst_cell, dst_slot) = trans_lval_maybe_init initializing dst in
-      match binop_opt with
-          None ->
-            begin
-              match src with
-                  (Ast.EXPR_binary _)
-                | (Ast.EXPR_unary _)
-                | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
-                    (*
-                     * Translations of these expr types yield vregs,
-                     * so copy is just MOV into the lval.
-                     *)
-                  let src_operand = trans_expr src in
-                    mov (deref_slot false dst_cell dst_slot) src_operand
+      match src with
+          (Ast.EXPR_binary _)
+        | (Ast.EXPR_unary _)
+        | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
+            (*
+             * Translations of these expr types yield vregs,
+             * so copy is just MOV into the lval.
+             *)
+            let src_operand = trans_expr src in
+              mov (deref_slot false dst_cell dst_slot) src_operand
 
-                | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
-                    if lval_is_direct_fn cx src_lval then
-                      trans_copy_direct_fn dst_cell src_lval
-                    else
-                      if lval_is_direct_mod cx src_lval then
-                        trans_copy_direct_mod dst_cell src_lval
-                      else
-                        (* Possibly-large structure copying *)
-                        let (src_cell, src_slot) = trans_lval src_lval in
-                          trans_copy_slot
-                            initializing
-                            dst_cell dst_slot
-                            src_cell src_slot
-                            None
-          end
-      | Some binop ->
-          ignore (trans_binary binop
-            (Il.Cell (deref_slot false dst_cell dst_slot))
-            (trans_expr src));
-          ()
+        | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
+            if lval_is_direct_fn cx src_lval then
+              trans_copy_direct_fn dst_cell src_lval
+            else
+              if lval_is_direct_mod cx src_lval then
+                trans_copy_direct_mod dst_cell src_lval
+              else
+                (* Possibly-large structure copying *)
+                let (src_cell, src_slot) = trans_lval src_lval in
+                  trans_copy_slot
+                    initializing
+                    dst_cell dst_slot
+                    src_cell src_slot
+                    None
 
   and trans_copy_direct_fn
       (dst_cell:Il.cell)
@@ -2864,8 +2855,15 @@ let trans_visitor
       | Ast.STMT_recv (dst, chan) ->
           trans_recv (maybe_init stmt.id "recv" dst) dst chan
 
-      | Ast.STMT_copy (dst, e_src, binop_opt) ->
-          trans_copy (maybe_init stmt.id "copy" dst) dst e_src binop_opt
+      | Ast.STMT_copy (dst, e_src) ->
+          trans_copy (maybe_init stmt.id "copy" dst) dst e_src
+
+      | Ast.STMT_copy_binop (dst, binop, a_src) ->
+          let initializing = (maybe_init stmt.id "copy" dst) in
+          let (dst_cell, dst_slot) = trans_lval_maybe_init initializing dst in
+            ignore (trans_binary binop
+                      (Il.Cell (deref_slot false dst_cell dst_slot))
+                      (trans_atom a_src))
 
       | Ast.STMT_call (dst, flv, args) ->
           begin

@@ -23,7 +23,8 @@ let mode_check_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-          Ast.STMT_copy (dst, _, _) -> check_write s.id dst
+          Ast.STMT_copy (dst, _) -> check_write s.id dst
+        | Ast.STMT_copy_binop (dst, _, _) -> check_write s.id dst
         | Ast.STMT_call (dst, _, _) -> check_write s.id dst
         | Ast.STMT_init_tup (dst, _) -> check_write s.id dst
         | Ast.STMT_init_rec (dst, _, _) -> check_write s.id dst
