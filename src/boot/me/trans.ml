@@ -108,7 +108,7 @@ let trans_visitor
   let frame_crate_ptr = word_n (-1) in
   let frame_fns_disp = word_n (-2) in
 
-  let fns = Stack.create () in
+  let (fns:node_id Stack.t) = Stack.create () in
   let current_fn () = Stack.top fns in
   let current_fn_ty () = Hashtbl.find cx.ctxt_all_item_types (current_fn ()) in
   let current_fn_args_rty (closure:Il.referent_ty option) : Il.referent_ty =
