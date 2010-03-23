@@ -252,7 +252,7 @@ let main_pipeline _ =
   in
 
   (* Tying up various knots, allocating registers and selecting instructions. *)
-  let process_code (frame_sz:int64) (code:Semant.code) : Asm.frag =
+  let process_code _ (code:Semant.code) : Asm.frag =
     let frag =
       match code.Semant.code_vregs_and_spill with
           None -> select_insns code.Semant.code_quads
@@ -262,7 +262,7 @@ let main_pipeline _ =
                  (fun _ ->
                     Ra.reg_alloc sess
                       code.Semant.code_quads
-                      n_vregs abi frame_sz))
+                      n_vregs abi))
             in
             let insns = select_insns quads' in
               begin
@@ -277,27 +277,17 @@ let main_pipeline _ =
                       Asm.DEF (code.Semant.code_fixup, frag))
   in
 
-  let process_node_code (node:node_id) (code:Semant.code) : Asm.frag =
-    let frame_sz =
-      Hashtbl.find
-        sem_cx.Semant.ctxt_frame_sizes
-        node
-    in
-      process_code (force_sz frame_sz) code
-  in
-
   let (file_frags:Asm.frag) =
     let process_file file_id frag_code =
       let file_fix = Hashtbl.find sem_cx.Semant.ctxt_file_fixups file_id in
-        Asm.DEF (file_fix, list_to_seq (reduce_hash_to_list process_node_code frag_code))
+        Asm.DEF (file_fix, list_to_seq (reduce_hash_to_list process_code frag_code))
     in
       list_to_seq (reduce_hash_to_list process_file sem_cx.Semant.ctxt_file_code)
   in
 
     exit_if_failed ();
     let (glue_frags:Asm.frag) =
-      let process_glue _ code = process_code 0L code in
-        list_to_seq (reduce_hash_to_list process_glue sem_cx.Semant.ctxt_glue_code)
+      list_to_seq (reduce_hash_to_list process_code sem_cx.Semant.ctxt_glue_code)
     in
 
       exit_if_failed ();

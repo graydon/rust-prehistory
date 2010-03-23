@@ -447,10 +447,35 @@ let rewrite_quads (qp:quad_processor) (qs:quads) : unit =
   done
 ;;
 
+
+(* A little partial-evaluator to help lowering sizes. *)
+
+let rec size_to_expr64 (a:size) : Asm.expr64 option =
+  let binary a b f =
+    match (size_to_expr64 a, size_to_expr64 b) with
+        (Some a, Some b) -> Some (f a b)
+      | _ -> None
+  in
+    match a with
+        SIZE_fixed i -> Some (Asm.IMM i)
+      | SIZE_fixup_mem_sz f -> Some (Asm.M_SZ f)
+      | SIZE_fixup_mem_pos f -> Some (Asm.M_POS f)
+      | SIZE_rt_neg s ->
+          begin
+            match (size_to_expr64 s) with
+                None -> None
+              | Some s -> Some (Asm.SUB (Asm.IMM 0L, s))
+          end
+      | SIZE_rt_add (a, b) -> binary a b (fun a b -> Asm.ADD (a,b))
+      | SIZE_rt_mul (a, b) -> binary a b (fun a b -> Asm.MUL (a,b))
+      | SIZE_rt_max (a, b) -> binary a b (fun a b -> Asm.MAX (a,b))
+      | SIZE_rt_align (a, b) ->
+          binary a b (fun a b -> Asm.ADD (b, Asm.REM (Asm.SUB (a, Asm.REM (b, a)), a)))
+      | _ -> None
+;;
+
+
 (* Formatters. *)
-
-
-
 
 let string_of_bits (b:bits) : string =
   match b with
@@ -506,6 +531,9 @@ let rec string_of_expr64 (e64:Asm.expr64) : string =
       | Asm.MUL (a,b) -> bin "*" a b
       | Asm.DIV (a,b) -> bin "/" a b
       | Asm.REM (a,b) -> bin "%" a b
+      | Asm.MAX (a,b) ->
+          Printf.sprintf "(max %s %s)"
+            (string_of_expr64 a) (string_of_expr64 b)
       | Asm.SLL (a,b) -> bini "<<" a b
       | Asm.SLR (a,b) -> bini ">>" a b
       | Asm.SAR (a,b) -> bini ">>>" a b

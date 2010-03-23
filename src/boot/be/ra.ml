@@ -335,7 +335,7 @@ let dump_quads cx =
 
 
 (* Simple local register allocator. Nothing fancy. *)
-let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (framesz:int64) = 
+let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
  try
     let cx = new_ctxt sess quads vregs abi in
     let _ =
@@ -348,7 +348,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
     in
 
     (* Work out pre-spilled slots and allocate 'em. *)
-    let spill_slot (s:Il.spill) = abi.Abi.abi_spill_slot framesz s in
+    let spill_slot (s:Il.spill) = abi.Abi.abi_spill_slot s in
     let n_pre_spills = convert_pre_spills cx spill_slot in
 
     let (live_in_vregs, live_out_vregs) =
@@ -549,7 +549,6 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) (fr
       iflog cx
         begin
           fun _ ->
-            log cx "frame size: %Ld" framesz;
             log cx "spills: %d pre-spilled, %d total" n_pre_spills cx.ctxt_next_spill;
             log cx "register-allocated quads:";
             dump_quads cx;

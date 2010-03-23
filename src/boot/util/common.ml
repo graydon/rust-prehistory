@@ -422,7 +422,6 @@ let i64_align (align:int64) (v:int64) : int64 =
     Int64.add v padding
 ;;
 
-
 let rec i64_for (lo:int64) (hi:int64) (thunk:int64 -> unit) : unit =
   if i64_lt lo hi then
     begin
@@ -441,12 +440,31 @@ let rec i64_for_rev (hi:int64) (lo:int64) (thunk:int64 -> unit) : unit =
 
 
 (*
+ * Auxiliary int32 functions
+ *)
+
+let i32_lt (a:int32) (b:int32) : bool = (Int32.compare a b) < 0
+let i32_le (a:int32) (b:int32) : bool = (Int32.compare a b) <= 0
+let i32_ge (a:int32) (b:int32) : bool = (Int32.compare a b) >= 0
+let i32_gt (a:int32) (b:int32) : bool = (Int32.compare a b) > 0
+let i32_max (a:int32) (b:int32) : int32 = (if (Int32.compare a b) > 0 then a else b)
+let i32_min (a:int32) (b:int32) : int32 = (if (Int32.compare a b) < 0 then a else b)
+let i32_align (align:int32) (v:int32) : int32 =
+  (assert (align <> 0l));
+  let padding = Int32.rem (Int32.sub align (Int32.rem v align)) align in
+    Int32.add v padding
+;;
+
+
+(*
  * Size-expressions.
  *)
 
 
 type size =
     SIZE_fixed of int64
+  | SIZE_fixup_mem_sz of fixup
+  | SIZE_fixup_mem_pos of fixup
   | SIZE_param_size of ty_param_idx
   | SIZE_param_align of ty_param_idx
   | SIZE_rt_neg of size
@@ -465,6 +483,8 @@ let neg_sz (a:size) : size =
 let add_sz (a:size) (b:size) : size =
   match (a, b) with
       (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (Int64.add a b)
+    | (SIZE_fixed 0L, b) -> b
+    | (a, SIZE_fixed 0L) -> a
     | (a, SIZE_fixed b) -> SIZE_rt_add (SIZE_fixed b, a)
     | (a, b) -> SIZE_rt_add (a, b)
 ;;
@@ -486,6 +506,8 @@ let max_sz (a:size) (b:size) : size =
 let align_sz (a:size) (b:size) : size =
   match (a, b) with
       (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
+    | (SIZE_fixed 1L, b) -> b
+    | (a, SIZE_fixed 1L) -> a
     | (a, SIZE_fixed b) -> SIZE_rt_align (SIZE_fixed b, a)
     | (a, b) -> SIZE_rt_align (a, b)
 ;;
@@ -493,6 +515,8 @@ let align_sz (a:size) (b:size) : size =
 let rec string_of_size (s:size) : string =
   match s with
       SIZE_fixed i -> Printf.sprintf "%Ld" i
+    | SIZE_fixup_mem_sz f -> Printf.sprintf "%s.mem_sz" f.fixup_name
+    | SIZE_fixup_mem_pos f -> Printf.sprintf "%s.mem_pos" f.fixup_name
     | SIZE_param_size i -> Printf.sprintf "ty[%d].size" i
     | SIZE_param_align i -> Printf.sprintf "ty[%d].align" i
     | SIZE_rt_neg a ->
@@ -510,7 +534,7 @@ let rec string_of_size (s:size) : string =
 let force_sz (a:size) : int64 =
   match a with
       SIZE_fixed i -> i
-    | _ -> bug () "force_sz: forced non-fixed size expression"
+    | _ -> bug () "force_sz: forced non-fixed size expression %s" (string_of_size a)
 ;;
 
 (*

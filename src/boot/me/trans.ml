@@ -383,6 +383,9 @@ let trans_visitor
   let rec calculate_sz (e:Il.emitter) (size:size) : Il.operand =
     match size with
         SIZE_fixed i -> imm i
+      | SIZE_fixup_mem_pos f -> Il.Imm (Asm.M_POS f, word_ty_mach)
+      | SIZE_fixup_mem_sz f -> Il.Imm (Asm.M_SZ f, word_ty_mach)
+
       | SIZE_param_size i ->
           let self_args = caller_args_cell (current_fn_args_rty None) in
           let ty_params = get_element_ptr self_args Abi.calltup_elt_ty_params in
@@ -444,6 +447,32 @@ let trans_visitor
             Il.Cell tmp
   in
 
+  let based_sz (reg:Il.reg) (size:size) : Il.mem =
+    match Il.size_to_expr64 size with
+        Some e -> based_off reg e
+      | None -> bug () "offset-dereferencing dynamic-sized cell"
+          (* FIXME: want to do this: *)
+          (* 
+             let runtime_size = calculate_sz (emitter()) size in
+             let v = next_vreg () in
+             let c = (Il.Reg (v, word_ty)) in
+             mov c (Il.Cell (Il.Reg (reg, word_ty)));
+             emit (Il.binary Il.ADD c (Il.Cell c) runtime_size);
+             based v
+          *)
+  in
+
+  let fp_off_sz (size:size) : Il.mem =
+    based_sz abi.Abi.abi_fp_reg size
+  in
+
+  let deref_off_sz (ptr:Il.cell) (size:size) : Il.cell =
+    match Il.size_to_expr64 size with
+        Some e -> deref_off ptr e
+      | None -> bug () "offset-dereferencing dynamic-sized cell"
+          (* FIXME: want to do something like based_sz. *)
+  in
+
   let cell_of_block_slot
       (slot_id:node_id)
       : Il.cell =
@@ -465,7 +494,6 @@ let trans_visitor
               match htab_search cx.ctxt_slot_offsets slot_id with
                   None -> bugi cx slot_id "slot assigned to neither vreg nor offset"
                 | Some off ->
-                    let off = force_sz off in
                     if slot_is_module_state cx slot_id
                     then
                       begin
@@ -473,10 +501,10 @@ let trans_visitor
                         let self_args_cell = caller_args_cell curr_args_rty in
                         let self_extra_args = get_element_ptr self_args_cell Abi.calltup_elt_extra_args in
                         let closure_arg = get_element_ptr self_extra_args Abi.extra_args_elt_closure in
-                        let (slot_mem, _) = need_mem_cell (deref_imm closure_arg off) in
+                        let (slot_mem, _) = need_mem_cell (deref_imm closure_arg (force_sz off)) in
                           Il.Mem (slot_mem, referent_type)
                       end
-                    else Il.Mem (fp_imm off, referent_type)
+                    else Il.Mem (fp_off_sz off, referent_type)
             end
   in
 
@@ -802,10 +830,10 @@ let trans_visitor
       mov (word_at (fp_imm frame_fns_disp)) frame_fns
 
   and trans_glue_frame_entry (callsz:size) (spill:fixup) : unit =
-    let framesz = SIZE_fixed 0L in
+    let framesz = SIZE_fixup_mem_sz spill in
       push_new_emitter_with_vregs ();
       iflog (fun _ -> annotate "prologue");
-      abi.Abi.abi_emit_fn_prologue (emitter()) framesz spill callsz nabi_rust (upcall_fixup "upcall_grow_proc");
+      abi.Abi.abi_emit_fn_prologue (emitter()) framesz callsz nabi_rust (upcall_fixup "upcall_grow_proc");
       write_frame_info_ptrs None;
       iflog (fun _ -> annotate "finished prologue");
 
@@ -3043,10 +3071,9 @@ let trans_visitor
                 fun key slot_id slot ->
                   match htab_search cx.ctxt_slot_offsets slot_id with
                       Some off when not (slot_is_module_state cx slot_id) ->
-                        let off = force_sz off in
                         let referent_type = slot_id_referent_type slot_id in
                         let fp_cell = Il.Mem (mem, (Il.ScalarTy (Il.AddrTy referent_type))) in
-                        let slot_cell = deref_imm fp_cell off in
+                        let slot_cell = deref_off_sz fp_cell off in
                           inner key slot_id slot slot_cell
                     | _ -> ()
               end
@@ -3093,16 +3120,12 @@ let trans_visitor
   let trans_frame_entry (fnid:node_id) : unit =
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
-    let spill_fixup = Hashtbl.find cx.ctxt_spill_fixups fnid in
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter_with_vregs ();
       iflog (fun _ -> annotate "prologue");
-      abi.Abi.abi_emit_fn_prologue (emitter())
-                                   framesz
-                                   spill_fixup
-                                   callsz
-                                   nabi_rust
-                                   (upcall_fixup "upcall_grow_proc");
+      abi.Abi.abi_emit_fn_prologue
+        (emitter()) framesz callsz nabi_rust
+        (upcall_fixup "upcall_grow_proc");
 
       write_frame_info_ptrs (Some fnid);
       iflog (fun _ -> annotate "finished prologue");

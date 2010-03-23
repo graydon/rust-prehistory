@@ -352,16 +352,6 @@ let annotate (e:Il.emitter) (str:string) =
   Hashtbl.add e.Il.emit_annotations e.Il.emit_pc str
 ;;
 
-let spill_slot (framesz:int64) (i:Il.spill) : Il.mem =
-  let imm = (Asm.IMM
-               (Int64.neg
-                  (Int64.add framesz
-                     (Int64.mul word_sz
-                        (Int64.of_int (i+1))))))
-  in
-    Il.RegIn ((Il.Hreg ebp), Some imm)
-;;
-
 let c (c:Il.cell) : Il.operand = Il.Cell c ;;
 let r (r:Il.reg) : Il.cell = Il.Reg ( r, (Il.ValTy word_bits) ) ;;
 let h (x:Il.hreg) : Il.reg = Il.Hreg x ;;
@@ -487,12 +477,25 @@ let restore_frame_base (e:Il.emitter) (base:Il.reg) (retpc:Il.reg) : unit =
 let frame_base_words = 5 (* eip,ebp,edi,esi,ebx *) ;;
 let frame_base_sz = Int64.mul (Int64.of_int frame_base_words) word_sz;;
 
+let frame_info_words = 2 (* crate ptr, crate-rel frame info disp *) ;;
+let frame_info_sz = Int64.mul (Int64.of_int frame_info_words) word_sz;;
+
 let implicit_arg_words = 2 (* proc ptr,out ptr *);;
 let implicit_args_sz =  Int64.mul (Int64.of_int implicit_arg_words) word_sz;;
 
 let out_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words);;
 let proc_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words+1);;
 let ty_param_n i = wordptr_n (Il.Hreg ebp) (frame_base_words + implicit_arg_words + i);;
+
+let spill_slot (i:Il.spill) : Il.mem =
+  let imm = (Asm.IMM
+               (Int64.neg
+                  (Int64.add frame_info_sz
+                     (Int64.mul word_sz
+                        (Int64.of_int (i+1))))))
+  in
+    Il.RegIn ((Il.Hreg ebp), Some imm)
+;;
 
 
 let get_next_pc_thunk_fixup = new_fixup "glue$get_next_pc"
@@ -748,6 +751,12 @@ let rec calculate_sz (e:Il.emitter) (size:size) : unit =
         SIZE_fixed i ->
           mov (rc eax) (immi i)
 
+      | SIZE_fixup_mem_sz f ->
+          mov (rc eax) (imm (Asm.M_SZ f))
+
+      | SIZE_fixup_mem_pos f ->
+          mov (rc eax) (imm (Asm.M_POS f))
+
       | SIZE_param_size i ->
           mov (rc eax) (Il.Cell (ty_param_n i));
           mov (rc eax) (Il.Cell (word_n (h eax) Abi.tydesc_field_size))
@@ -805,6 +814,8 @@ let rec calculate_sz (e:Il.emitter) (size:size) : unit =
 let rec size_calculation_stack_highwater (size:size) : int =
   match size with
       SIZE_fixed _
+    | SIZE_fixup_mem_sz _
+    | SIZE_fixup_mem_pos _
     | SIZE_param_size _
     | SIZE_param_align _ -> 0
     | SIZE_rt_neg a  ->
@@ -820,11 +831,9 @@ let rec size_calculation_stack_highwater (size:size) : int =
         + 1
 ;;
 
-
 let fn_prologue
     (e:Il.emitter)
     (framesz:size)
-    (spill_fixup:fixup)
     (callsz:size)
     (nabi:nabi)
     (grow_proc_fixup:fixup)
@@ -911,8 +920,7 @@ let fn_prologue
   in
 
   (*
-   * Cumulative dynamic-frame size, not including the spills. Add spill size to
-   * either path, depending on whether this is a static or dynamic size.
+   * Cumulative dynamic-frame size.
    *)
   let call_and_frame_sz = add_sz callsz framesz in
 
@@ -949,10 +957,11 @@ let fn_prologue
         (* Calculate dynamic frame size using stack-machine translation. *)
         (* ... *)
 
-        (* FIXME: temporary, change to calculated dynamic size. *)
-        let dynamic_frame_sz = (imm
-                                  (Asm.ADD (Asm.M_SZ spill_fixup,
-                                            (Asm.IMM (force_sz call_and_frame_sz)))))
+        (* FIXME: temporary, handle calculating dynamic size. *)
+        let dynamic_frame_sz =
+          match Il.size_to_expr64 call_and_frame_sz with
+              None -> (immi (force_sz call_and_frame_sz))
+            | Some e -> (imm e)
         in
 
           (* "Full" frame size-check. *)
@@ -1289,6 +1298,7 @@ let (abi:Abi.abi) =
     Abi.abi_dwarf_fp_reg = dwarf_ebp;
     Abi.abi_pp_cell = proc_ptr;
     Abi.abi_frame_base_sz = frame_base_sz;
+    Abi.abi_frame_info_sz = frame_info_sz;
     Abi.abi_implicit_args_sz = implicit_args_sz;
     Abi.abi_spill_slot = spill_slot;
   }

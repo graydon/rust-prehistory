@@ -86,6 +86,7 @@ type ('a, 'b) expr =
   | MUL of (('a, 'b) expr) * (('a, 'b) expr)
   | DIV of (('a, 'b) expr) * (('a, 'b) expr)
   | REM of (('a, 'b) expr) * (('a, 'b) expr)
+  | MAX of (('a, 'b) expr) * (('a, 'b) expr)
   | SLL of (('a, 'b) expr) * int
   | SLR of (('a, 'b) expr) * int
   | SAR of (('a, 'b) expr) * int
@@ -131,6 +132,7 @@ let rec eval32 (e:expr32)
     | MUL (a, b) -> Int32.mul (eval32 a) (eval32 b)
     | DIV (a, b) -> Int32.div (eval32 a) (eval32 b)
     | REM (a, b) -> Int32.rem (eval32 a) (eval32 b)
+    | MAX (a, b) -> i32_max (eval32 a) (eval32 b)
     | SLL (a, b) -> Int32.shift_left (eval32 a) b
     | SLR (a, b) -> Int32.shift_right_logical (eval32 a) b
     | SAR (a, b) -> Int32.shift_right (eval32 a) b
@@ -159,6 +161,7 @@ let rec eval64 (e:expr64)
     | MUL (a, b) -> Int64.mul (eval64 a) (eval64 b)
     | DIV (a, b) -> Int64.div (eval64 a) (eval64 b)
     | REM (a, b) -> Int64.rem (eval64 a) (eval64 b)
+    | MAX (a, b) -> i64_max (eval64 a) (eval64 b)
     | SLL (a, b) -> Int64.shift_left (eval64 a) b
     | SLR (a, b) -> Int64.shift_right_logical (eval64 a) b
     | SAR (a, b) -> Int64.shift_right (eval64 a) b
@@ -172,6 +175,7 @@ let rec eval64 (e:expr64)
     | M_SZ f -> checkdef "mem size" f.fixup_name f.fixup_mem_sz (fun x -> x)
     | EXT e -> Int64.of_int32 (eval32 e)
 ;;
+
 
 type frag =
     MARK  (* MARK == 'PAD (IMM 0L)' *)

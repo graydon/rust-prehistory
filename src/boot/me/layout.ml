@@ -16,50 +16,55 @@ let layout_visitor
   (*
    *   - Frames look, broadly, like this (growing downward):
    *
-   *     +----------------------------+ <-- Rewind tail calls to here. If varargs are supported,
-   *     |caller args                 |     must use memmove or similar "overlap-permitting" move,
-   *     |...                         |     if supporting tail-calling.
+   *     +----------------------------+ <-- Rewind tail calls to here.
+   *     |caller args                 |
+   *     |...                         |
    *     |...                         |
    *     +----------------------------+ <-- fp + abi_frame_base_sz + abi_implicit_args_sz
-   *     |caller non-reg ABI operands |
-   *     |possibly empty, if fastcall |
-   *     |  - process pointer?        |
-   *     |  - runtime pointer?        |
-   *     |  - yield pc or delta?      |
-   *     |  - yield slot addr?        |
-   *     |  - ret slot addr?          |
+   *     |process ptr (implicit arg)  |
+   *     |output ptr (implicit arg)   |
    *     +----------------------------+ <-- fp + abi_frame_base_sz
-   *     |return pc pushed by machine |
-   *     |plus any callee-save stuff  |
+   *     |return pc                   |
+   *     |callee-save registers       |
+   *     |...                         |
    *     +----------------------------+ <-- fp
-   *     |(optional gc info)          |
+   *     |crate ptr                   |
+   *     |crate-rel frame info disp   |
+   *     +----------------------------+ <-- fp - abi_frame_info_sz
+   *     |spills determined in ra     |
+   *     |...                         |
+   *     |...                         |
+   *     +----------------------------+ <-- fp - (abi_frame_info_sz + spillsz)
    *     |...                         |
    *     |frame-allocated stuff       |
    *     |determined in resolve       |
    *     |laid out in layout          |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - framesz
-   *     |spills determined in ra     |
-   *     |...                         |
-   *     |...                         |
-   *     +----------------------------+ <-- fp - (framesz + spillsz)
+   *     +----------------------------+ <-- fp - framesz == sp + callsz
    *     |call space                  |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - (framesz + spillsz + callsz)
+   *     +----------------------------+ <-- fp - (framesz + callsz) == sp
    *
-   *   - the layout of a frame is offset from fp:
-   *     in other words, frame_layout.layout_offset = -(frame_layout.layout_size)
+   *   - Slot offsets fall into three classes:
    *
-   *   - the layout of a slot in the function frame is offset from (fp-framesz)
+   *     #1 frame-locals are negative offsets from fp
+   *        (beneath the frame-info and spills)
+   *
+   *     #2 incoming arg slots are positive offsets from fp
+   *        (above the frame-base)
+   *
+   *     #3 outgoing arg slots are positive offsets from sp
+   *        (they could be negative from fp as well, this is just
+   *         historical)
    *
    *   - Slots are split into two classes:
    *
-   *     #1 Those that are never aliased and fit in a word, so are
+   *     #1 those that are never aliased and fit in a word, so are
    *        vreg-allocated
    *
-   *     #2 All others
+   *     #2 all others
    *
    *   - Non-aliased, word-fitting slots consume no frame space
    *     *yet*; they are given a generic value that indicates "try a
@@ -67,27 +72,26 @@ let layout_visitor
    *     needs to, but that's not our concern.
    *
    *   - Aliased / too-big slots are frame-allocated, need to be
-   *     laid out in the frame at fixed offsets, so need to be
-   *     assigned Common.layout values.  (Is this true of aliased
-   *     word-fitting? Can we not runtime-calculate the position of
-   *     a spill slot? Meh.)
+   *     laid out in the frame at fixed offsets.
    *
    *   - The frame size is the maximum of all the block sizes contained
-   *     within it.
-   * 
+   *     within it. Though at the moment it's the sum of them, due to
+   *     the blood-curdling hack we use to ensure proper unwind/drop
+   *     behavior in absence of CFI or similar precise frame-evolution
+   *     tracking. See visit_block_post below (bug 541568).
+   *
    *   - Each call is examined and the size of the call tuple required
    *     for that call is calculated. The call size is the maximum of all
    *     such call tuples.
    *
+   *   - In frames that have a tail call (in fact, currently, all frames
+   *     because we're lazy) we double the call size in order to handle
+   *     the possible need to *execute* a call (to drop glue) while
+   *     destroying the frame, after we've built the outgoing args. This is
+   *     done in the backend though; the logic in this file is ignorant of the
+   *     doubling (some platforms may not require it? Hard to guess)
+   *
    *)
-
-  (* At the bottom of every frame, there are two frame-info pointers.
-   * The first (ebp-4) points to the crate the frame is in, and the second
-   * (ebp-8) is a crate-relative offset to the frame's particular info.
-   *)
-  let (frame_info_slot_sz:size) =
-    SIZE_fixed (Int64.mul 2L cx.ctxt_abi.Abi.abi_word_sz)
-  in
 
   let force_slot_to_mem (slot:Ast.slot) : bool =
     (* FIXME (bug 541559): For the time being we force any slot that
@@ -200,7 +204,14 @@ let layout_visitor
 
   let update_frame_size _ =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
-    let sz = add_sz frame_info_slot_sz (rty_sz (frame_rty frame_blocks)) in
+    let frame_spill = Hashtbl.find cx.ctxt_spill_fixups frame_id in
+    let sz =
+      add_sz
+        (add_sz
+           (rty_sz (frame_rty frame_blocks))
+           (SIZE_fixup_mem_sz frame_spill))
+        (SIZE_fixed cx.ctxt_abi.Abi.abi_frame_info_sz)
+    in
     let curr = Hashtbl.find cx.ctxt_frame_sizes frame_id in
     let sz = max_sz curr sz in
       log cx "extending frame #%d frame to size %s"
@@ -273,10 +284,18 @@ let layout_visitor
   in
   let visit_block_pre b =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
+    let frame_spill = Hashtbl.find cx.ctxt_spill_fixups frame_id in
+    let spill_sz = SIZE_fixup_mem_sz frame_spill in
+    let info_sz = SIZE_fixed cx.ctxt_abi.Abi.abi_frame_info_sz in
     let off =
       if Stack.is_empty frame_blocks
-      then frame_info_slot_sz
-      else (add_sz frame_info_slot_sz (rty_sz (frame_rty frame_blocks)))
+      then add_sz spill_sz info_sz
+      else
+        add_sz
+          spill_sz
+          (add_sz
+             info_sz
+             (rty_sz (frame_rty frame_blocks)))
     in
     let block_slots = Stack.create() in
     let frame_block_ids = Hashtbl.find cx.ctxt_frame_blocks frame_id in
