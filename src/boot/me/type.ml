@@ -889,10 +889,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               unify_expr expr tv;
               unify_lval lval tv
 
-        | Ast.STMT_copy_binop (lval, _, at) ->
+        | Ast.STMT_copy_binop (lval, binop, at) ->
             let tv = ref TYSPEC_all in
-              unify_atom at tv;
-              unify_lval lval tv
+              unify_expr (Ast.EXPR_binary (binop, Ast.ATOM_lval lval, at)) tv;
+              unify_lval lval tv;
 
         | Ast.STMT_call (out, callee, args) ->
             let out_tv = ref TYSPEC_all in
