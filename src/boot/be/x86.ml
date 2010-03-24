@@ -954,14 +954,14 @@ let fn_prologue
       let primordial_underflow_jmp_pc = e.Il.emit_pc in
         emit (Il.jmp Il.JA Il.CodeNone);
 
-        (* Calculate dynamic frame size using stack-machine translation. *)
-        (* ... *)
-
-        (* FIXME: temporary, handle calculating dynamic size. *)
+        (* Calculate static or dynamic frame size. *)
         let dynamic_frame_sz =
           match Il.size_to_expr64 call_and_frame_sz with
-              None -> (immi (force_sz call_and_frame_sz))
-            | Some e -> (imm e)
+              None ->
+                calculate_sz e call_and_frame_sz;
+                (ro eax)
+            | Some e ->
+                (imm e)
         in
 
           (* "Full" frame size-check. *)

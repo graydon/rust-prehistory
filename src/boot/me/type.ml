@@ -817,8 +817,27 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                * resolving against whatever sort of parametric callee shows up
                * in the callee lval.
                *)
-            let full_callee_tv = ref (TYSPEC_parametric (callee_tv, ref None)) in
-              unify_lval callee full_callee_tv
+            let param_tys = ref None in
+            let full_callee_tv = ref (TYSPEC_parametric (callee_tv, param_tys)) in
+              unify_lval callee full_callee_tv;
+              begin
+                match !param_tys with
+                    None -> ()
+                  | Some specs ->
+                      Hashtbl.add cx.ctxt_call_stmt_params stmt.id
+                        begin
+                          Array.map
+                            begin
+                              fun spec ->
+                                match !spec with
+                                    TYSPEC_resolved t -> t
+                                  | ts -> err (Some stmt.id)
+                                      "unresolved type parameter %s"
+                                        (tyspec_to_str ts)
+                            end
+                            specs
+                        end
+              end
 
         | Ast.STMT_init_rec (lval, fields, Some base) ->
             let dct = Hashtbl.create 10 in

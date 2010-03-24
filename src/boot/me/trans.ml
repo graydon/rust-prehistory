@@ -2364,11 +2364,11 @@ let trans_visitor
       (cx:ctxt)
       (dst:Ast.lval)
       (flv:Ast.lval)
+      (ty_params:Ast.ty array)
       (args:Ast.atom array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (ptr, fn_ty) = trans_callee flv in
-    let fn_ty_params = [| |] in
     let direct = lval_is_static cx flv in
     let extra_args =
       if direct then
@@ -2379,19 +2379,19 @@ let trans_visitor
       log cx "trans_call_fn: %s call to lval %a"
         (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
       trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
-        ptr fn_ty_params fn_ty
+        ptr ty_params fn_ty
         dst_cell args extra_args
 
   and trans_call_mod
       (initializing:bool)
       (dst:Ast.lval)
       (flv:Ast.lval)
+      (ty_params:Ast.ty array)
       (args:Ast.atom array)
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let item = lval_item cx flv in
     let item_ty = Hashtbl.find cx.ctxt_all_item_types item.id in
-    let fn_ty_params = [| |] in
     let glue_fixup =
       match item_ty with
           Ast.TY_mod (Some hdr, _) ->
@@ -2401,7 +2401,7 @@ let trans_visitor
     let ptr = code_fixup_to_ptr_operand glue_fixup in
       trans_call
         initializing true (fun _ -> Ast.sprintf_lval () flv)
-        ptr fn_ty_params item_ty
+        ptr ty_params item_ty
         dst_cell args [||]
 
   and trans_call_pred_and_check
@@ -2909,15 +2909,20 @@ let trans_visitor
           begin
             let init = maybe_init stmt.id "call" dst in
             let ty = lval_ty cx flv in
-            match ty with
-                Ast.TY_fn _
-              | Ast.TY_pred _ ->
-                  trans_call_fn init cx dst flv args
+            let ty_params =
+              match htab_search cx.ctxt_call_stmt_params stmt.id with
+                  Some params -> params
+                | None -> [| |]
+            in
+              match ty with
+                  Ast.TY_fn _
+                | Ast.TY_pred _ ->
+                    trans_call_fn init cx dst flv ty_params args
 
-              | Ast.TY_mod (Some _, _) ->
-                  trans_call_mod init dst flv args
+                | Ast.TY_mod (Some _, _) ->
+                    trans_call_mod init dst flv ty_params args
 
-              | _ -> bug () "Calling unexpected lval."
+                | _ -> bug () "Calling unexpected lval."
           end
 
       | Ast.STMT_bind (dst, flv, args) ->
