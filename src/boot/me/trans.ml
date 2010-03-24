@@ -724,9 +724,21 @@ let trans_visitor
                (trans_crate_rel_static_string_operand s)
                (referent_type abi Ast.TY_str))
 
-  and trans_type_info (t:Ast.ty) : Il.operand =
-    (* FIXME: emit type-info table here. *)
-    trans_crate_rel_data_operand (DATA_typeinfo t) (fun _ -> Asm.MARK)
+  and trans_tydesc (t:Ast.ty) : Il.operand =
+    trans_crate_rel_data_operand
+      (DATA_tydesc t)
+      begin
+        fun _ ->
+          Asm.SEQ
+            [|
+              Asm.WORD (word_ty_mach, Asm.IMM (ty_sz abi t));
+              (* FIXME: finish this. *)
+              Asm.WORD (word_ty_mach, Asm.IMM 1L);
+              Asm.WORD (word_ty_mach, Asm.IMM 0L);
+              Asm.WORD (word_ty_mach, Asm.IMM 0L);
+              Asm.WORD (word_ty_mach, Asm.IMM 0L);
+            |]
+      end
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
     (* Include null byte. *)
@@ -1367,6 +1379,7 @@ let trans_visitor
       : unit =
     let (proc_cell, _) = trans_lval_init dst in
     let (fptr_operand, fn_ty) = trans_callee fn_lval in
+    let fn_ty_params = [| |] in
     let _ =
       (* FIXME: handle indirect-spawns (clone closure?). *)
       if not (lval_is_direct_fn cx fn_lval)
@@ -1386,7 +1399,8 @@ let trans_visitor
             Ast.REALM_thread ->
               begin
                 trans_upcall "upcall_new_thread" new_proc [| |];
-                copy_fn_args false (CLONE_all new_proc) false fn_ty proc_cell args [| |];
+                copy_fn_args false (CLONE_all new_proc) false
+                  fn_ty_params fn_ty proc_cell args [| |];
                 trans_upcall "upcall_start_thread" proc_cell
                   [|
                     Il.Cell new_proc;
@@ -1398,7 +1412,8 @@ let trans_visitor
          | _ ->
              begin
                  trans_upcall "upcall_new_proc" new_proc [| |];
-                 copy_fn_args false (CLONE_chan new_proc) false fn_ty proc_cell args [| |];
+                 copy_fn_args false (CLONE_chan new_proc) false
+                   fn_ty_params fn_ty proc_cell args [| |];
                  trans_upcall "upcall_start_proc" proc_cell
                    [|
                      Il.Cell new_proc;
@@ -2272,6 +2287,11 @@ let trans_visitor
               then
                 match clone with
                     CLONE_none ->
+                      (* 
+                       * FIXME: this won't work on write aliases, it
+                       * doesn't know to reload. Try something
+                       * else.
+                       *)
                       mov dst (Il.Cell (alias (Il.Mem (force_to_mem src))))
                   | _ ->
                       bug () "attempting to clone alias cell"
@@ -2317,6 +2337,7 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (ptr, fn_ty) = trans_callee flv in
+    let fn_ty_params = [| |] in
     let direct = lval_is_static cx flv in
     let extra_args =
       if direct then
@@ -2324,12 +2345,12 @@ let trans_visitor
       else
         [| callee_binding_ptr flv direct |]
     in
-    (* FIXME: true if caller is a member of a stateful module *)
+      (* FIXME: true if caller is a member of a stateful module *)
     let caller_is_closure = false in
       log cx "trans_be_fn: %s call to lval %a"
         (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
       trans_be direct (fun () -> Ast.sprintf_lval () flv)
-        ptr fn_ty caller_is_closure dst_cell args extra_args
+        ptr fn_ty_params fn_ty caller_is_closure dst_cell args extra_args
 
   and trans_be_mod
       ((*flv*)_:Ast.lval)
@@ -2347,6 +2368,7 @@ let trans_visitor
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (ptr, fn_ty) = trans_callee flv in
+    let fn_ty_params = [| |] in
     let direct = lval_is_static cx flv in
     let extra_args =
       if direct then
@@ -2357,7 +2379,7 @@ let trans_visitor
       log cx "trans_call_fn: %s call to lval %a"
         (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
       trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
-        ptr fn_ty
+        ptr fn_ty_params fn_ty
         dst_cell args extra_args
 
   and trans_call_mod
@@ -2369,6 +2391,7 @@ let trans_visitor
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let item = lval_item cx flv in
     let item_ty = Hashtbl.find cx.ctxt_all_item_types item.id in
+    let fn_ty_params = [| |] in
     let glue_fixup =
       match item_ty with
           Ast.TY_mod (Some hdr, _) ->
@@ -2378,7 +2401,7 @@ let trans_visitor
     let ptr = code_fixup_to_ptr_operand glue_fixup in
       trans_call
         initializing true (fun _ -> Ast.sprintf_lval () flv)
-        ptr item_ty
+        ptr fn_ty_params item_ty
         dst_cell args [||]
 
   and trans_call_pred_and_check
@@ -2387,11 +2410,12 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (ptr, fn_ty) = trans_callee flv in
+    let fn_ty_params = [| |] in
     let dst_cell = Il.Mem (force_to_mem imm_false) in
       iflog (fun _ -> annotate "predicate call");
       trans_call
         true (lval_is_static cx flv) (fun _ -> Ast.sprintf_lval () flv)
-        ptr fn_ty
+        ptr fn_ty_params fn_ty
         dst_cell args [||];
       iflog (fun _ -> annotate "predicate check/fail");
       let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
@@ -2516,6 +2540,7 @@ let trans_visitor
       (clone:clone_ctrl)
       (direct:bool)
 
+      (ty_params:Ast.ty array)
       (callee_ty:Ast.ty)
 
       (caller_output_cell:Il.cell)
@@ -2524,11 +2549,12 @@ let trans_visitor
 
       : unit =
 
+    let n_ty_params = Array.length ty_params in
     let all_callee_args_cell =
       let all_callee_args_rty =
         if direct
-        then call_args_referent_type cx 0 callee_ty None
-        else call_args_referent_type cx 0 callee_ty (Some Il.OpaqueTy)
+        then call_args_referent_type cx n_ty_params callee_ty None
+        else call_args_referent_type cx n_ty_params callee_ty (Some Il.OpaqueTy)
       in
         callee_args_cell tail_area all_callee_args_rty
     in
@@ -2536,6 +2562,7 @@ let trans_visitor
     let callee_arg_slots = ty_arg_slots callee_ty in
     let callee_output_cell = get_element_ptr all_callee_args_cell Abi.calltup_elt_out_ptr in
     let callee_proc_cell = get_element_ptr all_callee_args_cell Abi.calltup_elt_proc_ptr in
+    let callee_ty_params = get_element_ptr all_callee_args_cell Abi.calltup_elt_ty_params in
     let callee_args = get_element_ptr all_callee_args_cell Abi.calltup_elt_args in
     let callee_extra_args = get_element_ptr all_callee_args_cell Abi.calltup_elt_extra_args in
 
@@ -2544,6 +2571,15 @@ let trans_visitor
 
       trans_arg0 callee_output_cell caller_output_cell;
       trans_arg1 callee_proc_cell;
+
+      Array.iteri
+        begin
+          fun i ty_param ->
+            trans_init_slot_from_cell CLONE_none
+              (get_element_ptr callee_ty_params i) word_slot
+              (crate_rel_to_ptr (trans_tydesc ty_param) Il.OpaqueTy) word_slot
+        end
+        ty_params;
 
       Array.iteri
         begin
@@ -2685,6 +2721,7 @@ let trans_visitor
       (logname:(unit -> string))
 
       (callee_ptr:Il.operand)
+      (call_ty_params:Ast.ty array)
       (callee_ty:Ast.ty)
 
       (caller_is_closure:bool)
@@ -2702,6 +2739,7 @@ let trans_visitor
       copy_fn_args
         true
         CLONE_none direct
+        call_ty_params
         callee_ty
         caller_output_cell caller_arg_atoms caller_extra_args;
       iter_frame_and_arg_slots (current_fn ()) callee_drop_slot;
@@ -2715,6 +2753,7 @@ let trans_visitor
       (logname:(unit -> string))
 
       (callee_ptr:Il.operand)
+      (call_ty_params:Ast.ty array)
       (callee_ty:Ast.ty)
 
       (caller_output_cell:Il.cell)
@@ -2727,6 +2766,7 @@ let trans_visitor
       copy_fn_args
         false
         CLONE_none direct
+        call_ty_params
         callee_ty
         caller_output_cell caller_arg_atoms caller_extra_args;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
@@ -3317,8 +3357,8 @@ let trans_visitor
                 | Ast.MOD_ITEM_mod _ -> get_mod_fixup cx item.id
                 | Ast.MOD_ITEM_opaque_type t
                 | Ast.MOD_ITEM_public_type t ->
-                    ignore (trans_type_info t);
-                    let (fix, _) = Hashtbl.find cx.ctxt_data (DATA_typeinfo t) in
+                    ignore (trans_tydesc t);
+                    let (fix, _) = Hashtbl.find cx.ctxt_data (DATA_tydesc t) in
                       fix
             in
               pair_with_nil fix

@@ -40,7 +40,7 @@ type glue =
 type data =
     DATA_str of string
   | DATA_name of Ast.name
-  | DATA_typeinfo of Ast.ty
+  | DATA_tydesc of Ast.ty
   | DATA_frame_glue_fns of node_id
   | DATA_mod_table of node_id
   | DATA_mod_pair of node_id
