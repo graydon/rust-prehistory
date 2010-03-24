@@ -228,7 +228,8 @@ let trans_visitor
               match elt_off with
                   SIZE_fixed fixed_off ->
                     Il.Mem (Il.mem_off_imm mem fixed_off, elt_rty)
-                | _ -> bug () "get_element_ptr %d on dynamic-size cell" i
+                | _ -> bug () "get_element_ptr %d on dynamic-size cell: offset %s"
+                    i (string_of_size elt_off)
           end
 
       | _ -> bug () "get_element_ptr %d on cell %s" i
@@ -732,8 +733,8 @@ let trans_visitor
           Asm.SEQ
             [|
               Asm.WORD (word_ty_mach, Asm.IMM (ty_sz abi t));
+              Asm.WORD (word_ty_mach, Asm.IMM (ty_align abi t));
               (* FIXME: finish this. *)
-              Asm.WORD (word_ty_mach, Asm.IMM 1L);
               Asm.WORD (word_ty_mach, Asm.IMM 0L);
               Asm.WORD (word_ty_mach, Asm.IMM 0L);
               Asm.WORD (word_ty_mach, Asm.IMM 0L);
@@ -2550,15 +2551,16 @@ let trans_visitor
       : unit =
 
     let n_ty_params = Array.length ty_params in
-    let all_callee_args_cell =
-      let all_callee_args_rty =
-        if direct
-        then call_args_referent_type cx n_ty_params callee_ty None
-        else call_args_referent_type cx n_ty_params callee_ty (Some Il.OpaqueTy)
-      in
-        callee_args_cell tail_area all_callee_args_rty
+    let all_callee_args_rty =
+      if direct
+      then call_args_referent_type cx n_ty_params callee_ty None
+      else call_args_referent_type cx n_ty_params callee_ty (Some Il.OpaqueTy)
     in
+    let all_callee_args_cell = callee_args_cell tail_area all_callee_args_rty in
 
+    let _ = iflog (fun _ -> log cx "copying fn args to %d-ty-param call with rty: %s\n"
+                     n_ty_params (Il.string_of_referent_ty all_callee_args_rty))
+    in
     let callee_arg_slots = ty_arg_slots callee_ty in
     let callee_output_cell = get_element_ptr all_callee_args_cell Abi.calltup_elt_out_ptr in
     let callee_proc_cell = get_element_ptr all_callee_args_cell Abi.calltup_elt_proc_ptr in

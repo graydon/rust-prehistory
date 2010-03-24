@@ -1511,6 +1511,10 @@ let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
   force_sz (Il.referent_ty_size abi.Abi.abi_word_bits (referent_type abi t))
 ;;
 
+let ty_align (abi:Abi.abi) (t:Ast.ty) : int64 =
+  force_sz (Il.referent_ty_align abi.Abi.abi_word_bits (referent_type abi t))
+;;
+
 let slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
   force_sz (Il.referent_ty_size abi.Abi.abi_word_bits (slot_referent_type abi s))
 ;;
