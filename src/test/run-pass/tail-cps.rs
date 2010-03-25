@@ -1,7 +1,8 @@
 // -*- C -*-
 
-fn checktrue(bool res) {
+fn checktrue(bool res) -> bool {
   check(res);
+  ret true;
 }
 
 fn main() {
@@ -10,7 +11,7 @@ fn main() {
   oddk(45, k);
 }
 
-fn evenk(int n, fn(bool) k) -> bool {
+fn evenk(int n, fn(bool) -> bool k) -> bool {
   log "evenk";
   log n;
   if (n == 0) {
@@ -21,7 +22,7 @@ fn evenk(int n, fn(bool) k) -> bool {
   }
 }
 
-fn oddk(int n, fn(bool) k) -> bool {
+fn oddk(int n, fn(bool) -> bool k) -> bool {
   log "oddk";
   log n;
   if (n == 0) {

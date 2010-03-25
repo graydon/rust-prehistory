@@ -89,6 +89,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
   in
   let retval_tv_r = ref (ref TYSPEC_all) in
   let (bindings:(node_id, tyvar) Hashtbl.t) = Hashtbl.create 10 in
+  let (lval_tyvars:(node_id, tyvar) Hashtbl.t) = Hashtbl.create 0 in
   let rec resolve_tyvar (tv:tyvar) : tyvar =
     match !tv with
         TYSPEC_equiv subtv -> resolve_tyvar subtv
@@ -763,7 +764,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             end
         | Ast.EXPR_atom atom -> unify_atom atom tv
 
-    and unify_lval (lval:Ast.lval) (tv:tyvar) : unit =
+    and unify_lval' (lval:Ast.lval) (tv:tyvar) : unit =
       match lval with
           Ast.LVAL_base { id = id } ->
             let referent = Hashtbl.find cx.ctxt_lval_to_referent id in
@@ -796,7 +797,13 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                   unify_atom atom (ref (TYSPEC_resolved Ast.TY_int));
                   TYSPEC_collection tv
             in
-              unify_lval base (ref base_ts)
+              unify_lval' base (ref base_ts)
+
+    and unify_lval (lval:Ast.lval) (tv:tyvar) : unit =
+      let id = lval_base_id lval in
+        Hashtbl.add lval_tyvars id tv;
+        unify_lval' lval tv
+
     in
     let gen_atom_tvs atoms =
       let gen_atom_tv atom =
@@ -807,40 +814,42 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         Array.map gen_atom_tv atoms
     in
     let visit_stmt_pre (stmt:Ast.stmt) : unit =
-      let param_tys = ref None in
-      let record_ty_params _ =
-        match !param_tys with
-            None -> ()
-          | Some specs ->
-              Hashtbl.add cx.ctxt_call_stmt_params stmt.id
-                begin
-                  Array.mapi
-                    begin
-                      fun i tv ->
-                        match !(resolve_tyvar tv) with
-                            TYSPEC_resolved t ->
-                              log cx "recording type parameter %d = %a"
-                                i Ast.sprintf_ty t; t
-                          | ts -> err (Some stmt.id)
-                              "unresolved type parameter %s"
-                                (tyspec_to_str ts)
-                    end
-                    specs
-                end
+
+      let check_callable out_tv callee args =
+        let param_tys = ref None in
+        let in_tvs = gen_atom_tvs args in
+        let callee_tv = ref (TYSPEC_callable (out_tv, in_tvs)) in
+          (* 
+           * NB: calls are all implicitly 'unknown type-parametric' to permit 
+           * resolving against whatever sort of parametric callee shows up
+           * in the callee lval.
+           *)
+        let full_callee_tv = ref (TYSPEC_parametric (callee_tv, param_tys)) in
+          unify_lval callee full_callee_tv;
+          match !param_tys with
+              None -> ()
+            | Some specs ->
+                Hashtbl.add cx.ctxt_call_lval_params (lval_base_id callee)
+                  begin
+                    Array.mapi
+                      begin
+                        fun i tv ->
+                          match !(resolve_tyvar tv) with
+                              TYSPEC_resolved t ->
+                                log cx "recording type parameter %d = %a"
+                                  i Ast.sprintf_ty t; t
+                            | ts -> err (Some stmt.id)
+                                "unresolved type parameter %s"
+                                  (tyspec_to_str ts)
+                      end
+                      specs
+                  end
       in
       match stmt.node with
           Ast.STMT_spawn (out, _, callee, args) ->
-            unify_lval out (ref (TYSPEC_resolved Ast.TY_proc));
-            let in_tvs = gen_atom_tvs args in
-            let callee_tv = ref (TYSPEC_callable (ref TYSPEC_all, in_tvs)) in
-              (* 
-               * NB: calls are all implicitly 'unknown type-parametric' to permit 
-               * resolving against whatever sort of parametric callee shows up
-               * in the callee lval.
-               *)
-            let full_callee_tv = ref (TYSPEC_parametric (callee_tv, param_tys)) in
-              unify_lval callee full_callee_tv;
-              record_ty_params ()
+            let out_tv = ref (TYSPEC_resolved Ast.TY_nil) in
+              unify_lval out (ref (TYSPEC_resolved Ast.TY_proc));
+              check_callable out_tv callee args
 
         | Ast.STMT_init_rec (lval, fields, Some base) ->
             let dct = Hashtbl.create 10 in
@@ -897,17 +906,19 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         | Ast.STMT_call (out, callee, args) ->
             let out_tv = ref TYSPEC_all in
               unify_lval out out_tv;
-              let in_tvs = gen_atom_tvs args in
-              let callee_tv = ref (TYSPEC_callable (out_tv, in_tvs)) in
-              (* NB: see STMT_spawn for note on parametricity. *)
-              let full_callee_tv = ref (TYSPEC_parametric (callee_tv, param_tys)) in
-                unify_lval callee full_callee_tv;
-                record_ty_params ()
+              check_callable out_tv callee args
 
         | Ast.STMT_log atom -> unify_atom atom (ref TYSPEC_loggable)
 
         | Ast.STMT_check_expr expr ->
             unify_expr expr (ref (TYSPEC_resolved Ast.TY_bool))
+
+        | Ast.STMT_check (_, check_calls) ->
+            let out_tv = ref (TYSPEC_resolved Ast.TY_bool) in
+              Array.iter
+                (fun (callee, args) ->
+                   check_callable out_tv callee args)
+                check_calls
 
         | Ast.STMT_while { Ast.while_lval = (_, expr); Ast.while_body = _ } ->
             unify_expr expr (ref (TYSPEC_resolved Ast.TY_bool))
@@ -923,6 +934,33 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                   None -> unify_ty Ast.TY_nil !retval_tv_r
                 | Some atom -> unify_atom atom !retval_tv_r
             end
+
+        | Ast.STMT_be (_, callee, args) ->
+            check_callable (!retval_tv_r) callee args
+
+        | Ast.STMT_bind (bound, callee, arg_opts) ->
+            (* FIXME: handle binding type parameters eventually. *)
+            let out_tv = ref TYSPEC_all in
+            let residue = ref [] in
+            let gen_atom_opt_tvs atoms =
+              let gen_atom_tv atom_opt =
+                let tv = ref TYSPEC_all in
+                  begin
+                    match atom_opt with
+                        None -> residue := tv :: (!residue);
+                      | Some atom -> unify_atom atom tv
+                  end;
+                  tv
+              in
+                Array.map gen_atom_tv atoms
+            in
+
+            let in_tvs = gen_atom_opt_tvs arg_opts in
+            let arg_residue_tvs = Array.of_list (List.rev (!residue)) in
+            let callee_tv = ref (TYSPEC_callable (out_tv, in_tvs)) in
+            let bound_tv = ref (TYSPEC_callable (out_tv, arg_residue_tvs)) in
+              unify_lval callee callee_tv;
+              unify_lval bound bound_tv
 
         (* FIXME (bug 541531): plenty more to handle here. *)
         | _ ->
@@ -1017,7 +1055,14 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               | _ -> err (Some id) "unresolved type %s (%d)" (tyspec_to_str ts)
                   (int_of_node id)
         in
-          Queue.iter check_auto_tyvar auto_queue
+        let record_lval_ty id tv =
+          let ts = !(resolve_tyvar tv) in
+            match ts with
+                TYSPEC_resolved ty -> Hashtbl.add cx.ctxt_all_lval_types id ty
+              | _ -> err (Some id) "unresolved type %s" (tyspec_to_str ts)
+        in
+          Queue.iter check_auto_tyvar auto_queue;
+          Hashtbl.iter record_lval_ty lval_tyvars;
     with Semant_err (ido, str) -> report_err cx ido str
 ;;
 

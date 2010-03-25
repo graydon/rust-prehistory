@@ -2912,7 +2912,7 @@ let trans_visitor
             let init = maybe_init stmt.id "call" dst in
             let ty = lval_ty cx flv in
             let ty_params =
-              match htab_search cx.ctxt_call_stmt_params stmt.id with
+              match htab_search cx.ctxt_call_lval_params (lval_base_id flv) with
                   Some params -> params
                 | None -> [| |]
             in

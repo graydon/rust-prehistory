@@ -85,6 +85,7 @@ type ctxt =
       ctxt_slot_keys: (node_id,Ast.slot_key) Hashtbl.t;
       ctxt_all_item_names: (node_id,Ast.name) Hashtbl.t;
       ctxt_all_item_types: (node_id,Ast.ty) Hashtbl.t;
+      ctxt_all_lval_types: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_type_items: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
@@ -111,7 +112,7 @@ type ctxt =
       ctxt_postconditions: (node_id,Bits.t) Hashtbl.t;
       ctxt_prestates: (node_id,Bits.t) Hashtbl.t;
       ctxt_poststates: (node_id,Bits.t) Hashtbl.t;
-      ctxt_call_stmt_params: (node_id,Ast.ty array) Hashtbl.t;
+      ctxt_call_lval_params: (node_id,Ast.ty array) Hashtbl.t;
       ctxt_copy_stmt_is_init: (node_id,unit) Hashtbl.t;
 
       (* Translation-y stuff. *)
@@ -163,6 +164,7 @@ let new_ctxt sess abi crate =
     ctxt_slot_keys = Hashtbl.create 0;
     ctxt_all_item_names = Hashtbl.create 0;
     ctxt_all_item_types = Hashtbl.create 0;
+    ctxt_all_lval_types = Hashtbl.create 0;
     ctxt_all_type_items = Hashtbl.create 0;
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
@@ -180,7 +182,7 @@ let new_ctxt sess abi crate =
     ctxt_prestates = Hashtbl.create 0;
     ctxt_poststates = Hashtbl.create 0;
     ctxt_copy_stmt_is_init = Hashtbl.create 0;
-    ctxt_call_stmt_params = Hashtbl.create 0;
+    ctxt_call_lval_params = Hashtbl.create 0;
 
     ctxt_slot_aliased = Hashtbl.create 0;
     ctxt_slot_is_module_state = Hashtbl.create 0;
@@ -957,24 +959,7 @@ let lval_is_callable (cx:ctxt) (lval:Ast.lval) : bool =
 
 let rec lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
   let base_id = lval_base_id lval in
-  let referent = lval_to_referent cx base_id in
-  if referent_is_slot cx referent
-  then
-    match (lval_slot cx lval).Ast.slot_ty with
-        Some t -> t
-      | None -> bugi cx referent "Referent has un-inferred type"
-  else
-    match lval with
-        Ast.LVAL_base _ ->
-          (Hashtbl.find cx.ctxt_all_item_types referent)
-      | Ast.LVAL_ext (base, comp) ->
-          let prefix_type = lval_ty cx base in
-            if lval_is_slot cx base
-            then
-              let slot = project_type_to_slot prefix_type comp in
-                slot_ty slot
-            else
-              project_mod_type_to_type prefix_type comp
+    Hashtbl.find cx.ctxt_all_lval_types base_id
 ;;
 
 let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
