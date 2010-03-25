@@ -1759,6 +1759,13 @@ let select_insn (q:Il.quad) : Asm.frag =
           then
             let binop = alu_binop b.Il.binary_dst b.Il.binary_rhs in
             let mulop = mul_like b.Il.binary_rhs in
+            let divop signed slash =
+                    Asm.SEQ [|
+                      (* xor edx edx, then mul_like. *)
+                      insn_rm_r 0x33 (rc edx) (reg edx);
+                      mul_like b.Il.binary_rhs signed slash
+                    |]
+            in
               match (b.Il.binary_dst, b.Il.binary_op) with
                   (_, Il.ADD) -> binop { insn="ADD";
                                          immslash=slash0;
@@ -1792,16 +1799,16 @@ let select_insn (q:Il.quad) : Asm.frag =
                     when is_ty32 t && r = eax -> mulop true slash5
 
                 | (Il.Reg (Il.Hreg r, t), Il.UDIV)
-                    when is_ty32 t && r = eax -> mulop false slash6
+                    when is_ty32 t && r = eax -> divop false slash6
 
                 | (Il.Reg (Il.Hreg r, t), Il.IDIV)
-                    when is_ty32 t && r = eax -> mulop true slash7
+                    when is_ty32 t && r = eax -> divop true slash7
 
                 | (Il.Reg (Il.Hreg r, t), Il.UMOD)
-                    when is_ty32 t && r = edx -> mulop false slash6
+                    when is_ty32 t && r = edx -> divop false slash6
 
                 | (Il.Reg (Il.Hreg r, t), Il.IMOD)
-                    when is_ty32 t && r = edx -> mulop true slash7
+                    when is_ty32 t && r = edx -> divop true slash7
 
                 | _ -> raise Unrecognized
           else raise Unrecognized
