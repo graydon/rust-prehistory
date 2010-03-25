@@ -1867,13 +1867,14 @@ let dwarf_visitor
               in
                 match htab_search cx.ctxt_slot_offsets s.id with
                     Some off ->
-                      let off =
+                      begin
                         match Il.size_to_expr64 off with
-                            None -> bug () "emitting DIE for dynamic-offset cell"
-                          | Some e -> e
-                      in
-                        emit_var_die
-                          [| DW_OP_fbreg off |]
+                            (* FIXME: handle dynamic-size slots. *)
+                            None -> ()
+                          | Some off ->
+                              emit_var_die
+                                [| DW_OP_fbreg off |]
+                      end
                   | None ->
                       (* FIXME (bug 541569): handle slots assigned to vregs. *)
                       ()
