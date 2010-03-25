@@ -681,14 +681,15 @@ let trans_visitor
       (flv:Ast.lval)
       : (Il.operand * Ast.ty) =
     (* direct call to item *)
-    if lval_is_item cx flv then
-      let fn_item = lval_item cx flv in
-      let fn_ptr = code_fixup_to_ptr_operand (get_fn_fixup cx fn_item.id) in
-        (fn_ptr, Hashtbl.find cx.ctxt_all_item_types fn_item.id)
-    (* indirect call to computed slot *)
-    else
-      let (cell, slot) = trans_lval flv in
-        (Il.Cell cell, slot_ty slot)
+    let fty = Hashtbl.find cx.ctxt_all_lval_types (lval_base_id flv) in
+      if lval_is_item cx flv then
+        let fn_item = lval_item cx flv in
+        let fn_ptr = code_fixup_to_ptr_operand (get_fn_fixup cx fn_item.id) in
+          (fn_ptr, fty)
+            (* indirect call to computed slot *)
+      else
+        let (cell, _) = trans_lval flv in
+          (Il.Cell cell, fty)
 
   and trans_crate_rel_data_operand (d:data) (thunk:unit -> Asm.frag) : Il.operand =
     let (fix, _) =
@@ -2377,8 +2378,14 @@ let trans_visitor
       else
         [| callee_binding_ptr flv direct |]
     in
-      log cx "trans_call_fn: %s call to lval %a"
-        (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
+      iflog
+        begin
+          fun _ ->
+            log cx "trans_call_fn: %s call to lval %a"
+              (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
+            log cx "lval type: %a" Ast.sprintf_ty fn_ty;
+            Array.iteri (fun i t -> log cx "ty param %d = %a" i Ast.sprintf_ty t) ty_params;
+        end;
       trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
         ptr ty_params fn_ty
         dst_cell args extra_args
