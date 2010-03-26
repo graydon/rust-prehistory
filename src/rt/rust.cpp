@@ -2979,6 +2979,41 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
     return st;
 }
 
+/*
+ * Here we have dst = a + b for strings.  If dst and a point to the
+ * same rust_str, *and* that rust_str is singly-referenced, then we
+ * optimise by growing it in place.  Otherwise, we want dst to point
+ * to a brand-new rust_str, formed by concatenating a and b (note that
+ * dst and a might still be the same in this case, but not
+ * singly-referenced).
+ *
+ * Returns the new value for the slot dst.
+ */
+extern "C" CDECL rust_str *
+upcall_str_concat(rust_proc *proc, rust_str *dst, rust_str *a, rust_str *b)
+{
+    LOG_UPCALL_ENTRY(proc);
+
+    size_t fill = a->fill + b->fill - 1;
+    size_t alloc = next_power_of_two(fill);
+
+    // fast path
+    if (dst == a && a->refcnt == 1) {
+        if (alloc > a->alloc) {
+            void *mem = proc->rt->realloc(a, sizeof(rust_str) + alloc);
+            a = static_cast<rust_str *>(mem);
+            a->alloc = alloc;
+        }
+        memcpy(&a->data[a->fill - 1], b->data, b->fill);
+        a->fill = fill;
+        return a;
+    }
+
+    // regular ol' path
+    // FIXME implement?
+    return NULL;
+}
+
 rust_crate_cache *
 rust_rt::get_cache(rust_crate const *crate) {
     rust_crate_cache *cache = NULL;

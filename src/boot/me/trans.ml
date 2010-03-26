@@ -2927,11 +2927,17 @@ let trans_visitor
           trans_copy (maybe_init stmt.id "copy" dst) dst e_src
 
       | Ast.STMT_copy_binop (dst, binop, a_src) ->
-          let initializing = (maybe_init stmt.id "copy" dst) in
-          let (dst_cell, dst_slot) = trans_lval_maybe_init initializing dst in
-            ignore (trans_binary binop
-                      (Il.Cell (deref_slot false dst_cell dst_slot))
-                      (trans_atom a_src))
+          begin
+            let initializing = (maybe_init stmt.id "copy" dst) in
+            let (dst_cell, dst_slot) = trans_lval_maybe_init initializing dst in
+              match slot_ty dst_slot with
+                  Ast.TY_str ->
+                    trans_upcall "upcall_str_concat" dst_cell [| Il.Cell dst_cell; Il.Cell dst_cell; (trans_atom a_src); |]
+                | _ ->
+                    ignore (trans_binary binop
+                              (Il.Cell (deref_slot false dst_cell dst_slot))
+                              (trans_atom a_src))
+          end
 
       | Ast.STMT_call (dst, flv, args) ->
           begin
