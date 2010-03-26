@@ -703,8 +703,8 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
     | Nop -> "nop"
     | Dead -> "dead"
     | Debug -> "debug"
-    | Enter f -> "enter " ^ f.fixup_name
-    | Leave -> "leave"
+    | Enter _ -> "enter lexical block"
+    | Leave -> "leave lexical block"
     | End -> "---"
 ;;
 

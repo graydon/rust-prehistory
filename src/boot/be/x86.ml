@@ -231,22 +231,18 @@ let is_rm8 (c:Il.cell) : bool =
 ;;
 
 let prealloc_quad (quad':Il.quad') : Il.quad' =
-  let target_cell hreg c =
-    match c with
-        Il.Reg (Il.Vreg _, sty) ->
-          Il.Reg (Il.Hreg hreg, sty)
-      | _ -> c
+  let target_cell reg c =
+    Il.Reg (Il.Hreg reg, Il.cell_scalar_ty c)
   in
   let target_operand reg op =
-    match op with
-        Il.Cell c -> Il.Cell (target_cell reg c)
-      | _ -> op
+    Il.Cell (Il.Reg (Il.Hreg reg, Il.operand_scalar_ty op))
   in
 
-  let target_bin_to_hreg bin hreg =
+  let target_bin_to_hreg bin dst src =
     { bin with
-        Il.binary_lhs = target_operand hreg bin.Il.binary_lhs;
-        Il.binary_dst = target_cell hreg bin.Il.binary_dst }
+        Il.binary_rhs = target_operand src bin.Il.binary_rhs;
+        Il.binary_lhs = target_operand dst bin.Il.binary_lhs;
+        Il.binary_dst = target_cell dst bin.Il.binary_dst }
   in
 
   let target_8bit_binary_to_ecx bin =
@@ -291,8 +287,8 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
               begin
                 match bin.Il.binary_op with
                     Il.IMUL | Il.UMUL
-                  | Il.IDIV | Il.UDIV -> target_bin_to_hreg bin eax
-                  | Il.IMOD | Il.UMOD -> target_bin_to_hreg bin edx
+                  | Il.IDIV | Il.UDIV -> target_bin_to_hreg bin eax ecx
+                  | Il.IMOD | Il.UMOD -> target_bin_to_hreg bin eax ecx
                   | _ -> target_8bit_binary_to_ecx bin
               end
           end
@@ -325,7 +321,7 @@ let clobbers (quad:Il.quad) : Il.hreg list =
           match bin.Il.binary_op with
               Il.IMUL | Il.UMUL
             | Il.IDIV | Il.UDIV -> [ edx ]
-            | Il.IMOD | Il.UMOD -> [ eax ]
+            | Il.IMOD | Il.UMOD -> [ edx ]
             | _ -> []
         end
     | Il.Unary un ->
@@ -1760,11 +1756,18 @@ let select_insn (q:Il.quad) : Asm.frag =
             let binop = alu_binop b.Il.binary_dst b.Il.binary_rhs in
             let mulop = mul_like b.Il.binary_rhs in
             let divop signed slash =
-                    Asm.SEQ [|
-                      (* xor edx edx, then mul_like. *)
-                      insn_rm_r 0x33 (rc edx) (reg edx);
-                      mul_like b.Il.binary_rhs signed slash
-                    |]
+              Asm.SEQ [|
+                (* xor edx edx, then mul_like. *)
+                insn_rm_r 0x33 (rc edx) (reg edx);
+                mul_like b.Il.binary_rhs signed slash
+              |]
+            in
+            let modop signed slash =
+              Asm.SEQ [|
+                (* divop, then mov remainder to eax instead. *)
+                divop signed slash;
+                mov false (rc eax) (ro edx)
+              |]
             in
               match (b.Il.binary_dst, b.Il.binary_op) with
                   (_, Il.ADD) -> binop { insn="ADD";
@@ -1805,10 +1808,10 @@ let select_insn (q:Il.quad) : Asm.frag =
                     when is_ty32 t && r = eax -> divop true slash7
 
                 | (Il.Reg (Il.Hreg r, t), Il.UMOD)
-                    when is_ty32 t && r = edx -> divop false slash6
+                    when is_ty32 t && r = eax -> modop false slash6
 
                 | (Il.Reg (Il.Hreg r, t), Il.IMOD)
-                    when is_ty32 t && r = edx -> divop true slash7
+                    when is_ty32 t && r = eax -> modop true slash7
 
                 | _ -> raise Unrecognized
           else raise Unrecognized
