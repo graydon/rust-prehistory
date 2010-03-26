@@ -92,6 +92,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
   in
   let retval_tv_r = ref (ref TYSPEC_all) in
   let (bindings:(node_id, tyvar) Hashtbl.t) = Hashtbl.create 10 in
+  let (item_params:(node_id, tyvar array) Hashtbl.t) = Hashtbl.create 10 in
   let (lval_tyvars:(node_id, tyvar) Hashtbl.t) = Hashtbl.create 0 in
   let rec resolve_tyvar (tv:tyvar) : tyvar =
     match !tv with
@@ -763,6 +764,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
     and unify_parametric_ty (n:int) (ty:Ast.ty) (tv:tyvar) : unit =
       let resolved = ref (TYSPEC_resolved ty) in
       let params = ref (Some (Array.init n (fun _ -> ref TYSPEC_all))) in
+      (* let params = make_typarams params in *)
         unify_tyvars (ref (TYSPEC_parametric (resolved, params))) tv
 
     and unify_ty (ty:Ast.ty) (tv:tyvar) : unit =
@@ -899,7 +901,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       in
         Array.map gen_atom_tv atoms
     in
-    let visit_stmt_pre (stmt:Ast.stmt) : unit =
+    let visit_stmt_pre_full (stmt:Ast.stmt) : unit =
 
       let check_callable out_tv callee args =
         let param_tys = ref None in
@@ -1054,6 +1056,21 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               (Ast.sprintf_stmt () stmt)
     in
 
+    let visit_stmt_pre (stmt:Ast.stmt) : unit =
+      try
+        visit_stmt_pre_full stmt;
+        (* 
+         * Reset any item-parameters that were resolved to types
+         * during inference for this statement.
+         *)
+        Hashtbl.iter
+          (fun _ params -> Array.iter (fun tv -> tv := TYSPEC_all) params)
+          item_params;
+      with
+          Semant_err (None, msg) ->
+            raise (Semant_err ((Some stmt.id), msg))
+    in
+
     let visit_mod_item_pre n p mod_item =
       Stack.push mod_item.node.Ast.decl_params item_params_stk;
       begin
@@ -1095,7 +1112,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               let _ = iflog cx (fun _ -> log cx "initial slot #%d type: %a"
                                   (int_of_node id) Ast.sprintf_ty ty)
               in
-              Hashtbl.add bindings id (ref (TYSPEC_resolved ty))
+                Hashtbl.add bindings id (ref (TYSPEC_resolved ty))
           | _ -> ()
       in
       let init_item_tyvar id ty =
@@ -1112,8 +1129,9 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           if n_params = 0
           then resolved
           else
-            let params = Some (Array.init n_params (fun _ -> ref TYSPEC_all)) in
-              TYSPEC_parametric (ref resolved, ref params)
+            let params = (Array.init n_params (fun _ -> ref TYSPEC_all)) in
+              htab_put item_params id params;
+              TYSPEC_parametric (ref resolved, ref (Some params))
         in
           Hashtbl.add bindings id (ref spec)
       in
