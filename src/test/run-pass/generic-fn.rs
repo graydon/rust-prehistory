@@ -5,8 +5,8 @@ fn id[T](T x) -> T {
 }
 
 fn main() {
-   auto x = 10;
-   auto y = 11;
+   auto x = 62;
+   auto y = 63;
    y = id[int](x);
    log y;
    check (x == y);

@@ -401,75 +401,86 @@ let trans_visitor
   in
 
   let rec calculate_sz (fp:Il.reg) (fn:node_id) (size:size) : Il.operand =
-    match size with
-        SIZE_fixed i -> imm i
-      | SIZE_fixup_mem_pos f -> Il.Imm (Asm.M_POS f, word_ty_mach)
-      | SIZE_fixup_mem_sz f -> Il.Imm (Asm.M_SZ f, word_ty_mach)
+    iflog (fun _ -> annotate
+             (Printf.sprintf "calculating size %s"
+                (string_of_size size)));
+    let res =
+      match size with
+          SIZE_fixed i -> imm i
+        | SIZE_fixup_mem_pos f -> Il.Imm (Asm.M_POS f, word_ty_mach)
+        | SIZE_fixup_mem_sz f -> Il.Imm (Asm.M_SZ f, word_ty_mach)
 
-      | SIZE_param_size i ->
-          let ty_desc = get_ty_desc fp fn i in
-            Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_size)
+        | SIZE_param_size i ->
+            let ty_desc = get_ty_desc fp fn i in
+              Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_size)
 
-      | SIZE_param_align i ->
-          let ty_desc = get_ty_desc fp fn i in
-            Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_align)
+        | SIZE_param_align i ->
+            let ty_desc = get_ty_desc fp fn i in
+              Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_align)
 
-      | SIZE_rt_neg a ->
-          let op_a = calculate_sz fp fn a in
-          let tmp = next_vreg_cell word_ty in
-            emit (Il.unary Il.NEG tmp op_a);
-            Il.Cell tmp
-
-      | SIZE_rt_add (a, b) ->
-          let op_a = calculate_sz fp fn a in
-          let op_b = calculate_sz fp fn b in
-          let tmp = next_vreg_cell word_ty in
-            emit (Il.binary Il.ADD tmp op_a op_b);
-            Il.Cell tmp
-
-      | SIZE_rt_mul (a, b) ->
-          let op_a = calculate_sz fp fn a in
-          let op_b = calculate_sz fp fn b in
-          let tmp = next_vreg_cell word_ty in
-            emit (Il.binary Il.UMUL tmp op_a op_b);
-            Il.Cell tmp
-
-      | SIZE_rt_max (a, b) ->
-          let op_a = calculate_sz fp fn a in
-          let op_b = calculate_sz fp fn b in
-          let tmp = next_vreg_cell word_ty in
-            mov tmp op_a;
-            emit (Il.cmp op_a op_b);
-            let jmp = mark () in
-              emit (Il.jmp Il.JAE Il.CodeNone);
-              mov tmp op_b;
-              patch jmp;
+        | SIZE_rt_neg a ->
+            let op_a = calculate_sz fp fn a in
+            let tmp = next_vreg_cell word_ty in
+              emit (Il.unary Il.NEG tmp op_a);
               Il.Cell tmp
 
-      | SIZE_rt_align (align, off) ->
-          (*
-           * calculate off + pad where:
-           *
-           * pad = (align - (off mod align)) mod align
-           *
-           *)
-          annotate "fetch alignment";
-          let op_align = calculate_sz fp fn align in
-          annotate "fetch offset";
-          let op_off = calculate_sz fp fn off in
-          let t1 = next_vreg_cell word_ty in
-          let t2 = next_vreg_cell word_ty in
-          let t3 = next_vreg_cell word_ty in
-          let t4 = next_vreg_cell word_ty in
-            annotate "tmp = off % align";
-            emit (Il.binary Il.UMOD t1 op_off op_align);
-            annotate "tmp = align - tmp";
-            emit (Il.binary Il.SUB t2 op_align (Il.Cell t1));
-            annotate "tmp = tmp % align";
-            emit (Il.binary Il.UMOD t3 (Il.Cell t2) op_align);
-            annotate "tmp = tmp + off";
-            emit (Il.binary Il.ADD t4 (Il.Cell t4) op_off);
-            Il.Cell t4
+        | SIZE_rt_add (a, b) ->
+            let op_a = calculate_sz fp fn a in
+            let op_b = calculate_sz fp fn b in
+            let tmp = next_vreg_cell word_ty in
+              emit (Il.binary Il.ADD tmp op_a op_b);
+              Il.Cell tmp
+
+        | SIZE_rt_mul (a, b) ->
+            let op_a = calculate_sz fp fn a in
+            let op_b = calculate_sz fp fn b in
+            let tmp = next_vreg_cell word_ty in
+              emit (Il.binary Il.UMUL tmp op_a op_b);
+              Il.Cell tmp
+
+        | SIZE_rt_max (a, b) ->
+            let op_a = calculate_sz fp fn a in
+            let op_b = calculate_sz fp fn b in
+            let tmp = next_vreg_cell word_ty in
+              mov tmp op_a;
+              emit (Il.cmp op_a op_b);
+              let jmp = mark () in
+                emit (Il.jmp Il.JAE Il.CodeNone);
+                mov tmp op_b;
+                patch jmp;
+                Il.Cell tmp
+
+        | SIZE_rt_align (align, off) ->
+            (*
+             * calculate off + pad where:
+             *
+             * pad = (align - (off mod align)) mod align
+             *
+             *)
+            annotate "fetch alignment";
+            let op_align = calculate_sz fp fn align in
+              annotate "fetch offset";
+              let op_off = calculate_sz fp fn off in
+              let t1 = next_vreg_cell word_ty in
+              let t2 = next_vreg_cell word_ty in
+              let t3 = next_vreg_cell word_ty in
+              let t4 = next_vreg_cell word_ty in
+                annotate "tmp = off % align";
+                emit (Il.binary Il.UMOD t1 op_off op_align);
+                annotate "tmp = align - tmp";
+                emit (Il.binary Il.SUB t2 op_align (Il.Cell t1));
+                annotate "tmp = tmp % align";
+                emit (Il.binary Il.UMOD t3 (Il.Cell t2) op_align);
+                annotate "tmp = tmp + off";
+                emit (Il.binary Il.ADD t4 (Il.Cell t3) op_off);
+                Il.Cell t4
+    in
+      iflog (fun _ -> annotate
+               (Printf.sprintf "calculated size %s is %s"
+                  (string_of_size size)
+                  (Il.string_of_operand abi.Abi.abi_str_of_hardreg res)));
+      res
+
 
   and calculate_sz_in_current_frame (size:size) : Il.operand =
     calculate_sz abi.Abi.abi_fp_reg (current_fn()) size
