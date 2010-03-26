@@ -388,6 +388,18 @@ let trans_visitor
     slot_referent_type abi (referent_to_slot cx slot_id)
   in
 
+  let get_ty_desc (fp:Il.reg) (fn:node_id) (param_idx:int) : Il.cell =
+    let args_cell =
+      Il.Mem (based_imm fp out_mem_disp, (fn_args_rty fn None))
+    in
+    let ty_params = get_element_ptr args_cell Abi.calltup_elt_ty_params in
+      deref (get_element_ptr ty_params param_idx)
+  in
+
+  let get_current_fn_ty_desc (param_idx:int) : Il.cell =
+    get_ty_desc abi.Abi.abi_fp_reg (current_fn()) param_idx
+  in
+
   let rec calculate_sz (fp:Il.reg) (fn:node_id) (size:size) : Il.operand =
     match size with
         SIZE_fixed i -> imm i
@@ -395,19 +407,11 @@ let trans_visitor
       | SIZE_fixup_mem_sz f -> Il.Imm (Asm.M_SZ f, word_ty_mach)
 
       | SIZE_param_size i ->
-          let args_cell =
-            Il.Mem (based_imm fp out_mem_disp, (fn_args_rty fn None))
-          in
-          let ty_params = get_element_ptr args_cell Abi.calltup_elt_ty_params in
-          let ty_desc = deref (get_element_ptr ty_params i) in
+          let ty_desc = get_ty_desc fp fn i in
             Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_size)
 
       | SIZE_param_align i ->
-          let args_cell =
-            Il.Mem (based_imm fp out_mem_disp, (fn_args_rty fn None))
-          in
-          let ty_params = get_element_ptr args_cell Abi.calltup_elt_ty_params in
-          let ty_desc = deref (get_element_ptr ty_params i) in
+          let ty_desc = get_ty_desc fp fn i in
             Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_align)
 
       | SIZE_rt_neg a ->
@@ -1301,6 +1305,25 @@ let trans_visitor
             call_code code
         end
 
+  and trans_call_copy_glue
+      (glue:Il.cell)
+      (dst:Il.cell)
+      (src:Il.cell)
+      : unit =
+    let code = code_of_cell glue  in
+    let arg_tup = arg_tup_cell [| word_slot |] in
+      (* Arg0 is target of copy, to which we write. *)
+      (* Arg1 is process-pointer, as usual. *)
+      (* Arg2 is the address of the slot we're cloning. *)
+      aliasing true dst
+        begin
+          fun dst ->
+            mov (get_element_ptr arg_tup 0) (Il.Cell dst);
+            mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
+            mov (get_element_ptr arg_tup 2) (Il.Cell src);
+            call_code code
+        end
+
   and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
     let code = fixup_to_code fix in
     let arg_tup = arg_tup_cell [| word_slot |] in
@@ -1910,25 +1933,41 @@ let trans_visitor
       (src:Il.cell)
       (curr_iso:Ast.ty_iso option)
       : unit =
-      iflog (fun _ ->
-               annotate ("copy_ty: referent data of type " ^
-                           (Ast.fmt_to_str Ast.fmt_ty ty)));
-      if ((Il.cell_is_scalar src)
-          && (Il.cell_is_scalar dst)
-          && (i64_le (ty_sz abi ty) word_sz))
-      then
-        begin
-          iflog (fun _ ->
-                   annotate ("copy_ty: simple mov ("
-                             ^ (Int64.to_string (ty_sz abi ty))
-                             ^ " byte scalar)"));
-          mov dst (Il.Cell src)
-        end
-      else
-        iter_ty_slots_full ty dst src
-          (fun dst src slot curr_iso ->
-             trans_copy_slot true dst slot src slot curr_iso)
-          curr_iso
+    iflog (fun _ ->
+             annotate ("copy_ty: referent data of type " ^
+                         (Ast.fmt_to_str Ast.fmt_ty ty)));
+    match ty with
+        Ast.TY_nil
+      | Ast.TY_bool
+      | Ast.TY_mach _
+      | Ast.TY_int
+      | Ast.TY_char ->
+          begin
+            iflog (fun _ -> annotate
+                     (Printf.sprintf "copy_ty: simple mov (%Ld byte scalar)"
+                        (ty_sz abi ty)));
+            mov dst (Il.Cell src)
+          end
+
+      | Ast.TY_param (i, _, _) ->
+          begin
+            iflog (fun _ -> annotate
+                     (Printf.sprintf "copy_ty: parametric copy %#d" i));
+            let ty_desc = get_current_fn_ty_desc i in
+            let copy_glue =
+              get_element_ptr ty_desc Abi.tydesc_field_copy_glue
+            in
+            let copy_glue_ptr =
+              crate_rel_to_ptr (Il.Cell copy_glue) Il.CodeTy
+            in
+              trans_call_copy_glue copy_glue_ptr dst src
+          end
+
+      | _ ->
+          iter_ty_slots_full ty dst src
+            (fun dst src slot curr_iso ->
+               trans_copy_slot true dst slot src slot curr_iso)
+            curr_iso
 
   and free_ty
       (ty:Ast.ty)
@@ -3115,7 +3154,9 @@ let trans_visitor
               match slot_ty dst_slot with
                   Ast.TY_str ->
                     trans_upcall "upcall_str_concat" dst_cell
-                      [| Il.Cell dst_cell; Il.Cell dst_cell; (trans_atom a_src); |]
+                      [| Il.Cell dst_cell;
+                         Il.Cell dst_cell;
+                         (trans_atom a_src); |]
                 | _ ->
                     ignore (trans_binary binop
                               (Il.Cell (deref_slot false dst_cell dst_slot))
@@ -3459,7 +3500,8 @@ let trans_visitor
             IMPORT_LIB_rust ls ->
               begin
                 let c_sym_num =
-                  htab_search_or_add cx.ctxt_import_c_sym_num (ilib, "rust_crate")
+                  htab_search_or_add cx.ctxt_import_c_sym_num
+                    (ilib, "rust_crate")
                     (fun _ -> Hashtbl.length cx.ctxt_import_c_sym_num)
                 in
                 let rust_sym_num =
