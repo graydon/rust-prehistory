@@ -170,22 +170,28 @@ BOOT_OBJS := $(BOOT_MLS:.ml=.o)
 BOOT_CMIS := $(BOOT_MLS:.ml=.cmi)
 
 RUNTIME_CS := rt/rust.cpp rt/isaac/randport.cpp
+RUNTIME_HDR := rt/rust.h
 RUNTIME_INCS := -Irt/isaac -Irt/uthash
 RUNTIME_OBJS := $(RUNTIME_CS:.cpp=$(CFG_OBJ_SUFFIX))
 RUNTIME_LIBS := $(CFG_RUNTIME_LIBS)
 
+STDLIB_CRATE := lib/std.rc
+STDLIB_INPUTS := $(wildcard lib/*.rc lib/*.rs lib/*/*.rs)
+COMPILER_CRATE := comp/rustc.rc
+COMPILER_INPUTS := $(wildcard comp/*.rc comp/*.rs comp/*/*.rs)
+
 all: $(CFG_COMPILER) $(MKFILES) boot/fe/lexer.ml
 
 loc:
-	wc -l $(BOOT_MLS) $(RUNTIME_CS) rt/rust.h
+	wc -l $(BOOT_MLS) $(RUNTIME_CS) $(RUNTIME_HDR)
 
-$(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) rt/rust.h
+$(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) $(RUNTIME_HDR)
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)$(call CFG_LINK_C, $@) $(RUNTIME_OBJS)
 
-$(CFG_STDLIB): $(CFG_BOOT) $(wildcard lib/*.rs lib/*.rc)
-	@$(call CFG_ECHO, compile: lib/std.rc)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -shared -o $@ lib/std.rc
+$(CFG_STDLIB): $(STDLIB_CRATE) $(CFG_BOOT) $(MKFILES)
+	@$(call CFG_ECHO, compile: $<)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -shared -o $@ $(STDLIB_CRATE)
 
 %$(CFG_OBJ_SUFFIX): %.cpp $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
@@ -224,47 +230,14 @@ endif
 # Main compiler targets and rules
 ######################################################################
 
-UTIL_BOT_RSS := $(addprefix comp/util/, common.rs bitv.rs)
-DRIVER_BOT_RSS := $(addprefix comp/driver/, session.rs)
-BE_RSS := $(addprefix comp/be/, asm.rs il.rs abi.rs x86.rs ra.rs pe.rs elf.rs \
-          macho.rs)
-ME_RSS := $(addprefix comp/me/, walk.rs semant.rs resolve.rs alias.rs auto.rs \
-          type.rs mode.rs typestate.rs layout.rs trans.rs dwarf.rs)
-FE_RSS := $(addprefix comp/fe/, ast.rs parser.rs lexer.rs)
-DRIVER_TOP_RSS := $(addprefix comp/driver/, rustc.rs)
-
-COMPILER_RSS := $(wildcard $(UTIL_BOT_RSS) $(DRIVER_BOT_RSS) $(BE_RSS) $(FE_RSS) $(ME_RSS) $(DRIVER_TOP_RSS))
-
-$(CFG_COMPILER): comp/rustc.rc $(COMPILER_RSS) $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+$(CFG_COMPILER): $(COMPILER_CRATE) $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
 
 self: $(CFG_COMPILER)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)$(call CFG_RUN_TARG, $(CFG_COMPILER)) comp/rustc.rc
-
-
-######################################################################
-# Auto-dependency
-######################################################################
-
-ML_DEPFILES := $(BOOT_MLS:%.ml=%.d)
-C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
-
-%.d: %.cpp $(MKFILES)
-	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)$(call CFG_DEPEND_C, $@ $(patsubst %.cpp, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
-
-%.d: %.ml $(MKFILES)
-	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)ocamldep$(OPT) $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
-
-%.d: %.mli $(MKFILES)
-	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)ocamldep$(OPT) $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
-
--include $(ML_DEPFILES) $(C_DEPFILES)
+	$(CFG_QUIET)$(call CFG_RUN_TARG, $(CFG_COMPILER)) $(COMPILER_CRATE)
 
 
 ######################################################################
@@ -282,12 +255,12 @@ TEST_XFAILS := test/run-pass/mlist_cycle.rs \
                test/compile-fail/infinite-vec-type-recursion.rs
 
 ifdef CFG_WINDOWSY
-TEST_XFAILS += test/run-pass/native_mod.rc \
-               test/run-pass/native_mod.rs
+TEST_XFAILS += test/run-pass/native_mod.rc
 endif
 
 TEST_RUN_PASS_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rc))
 TEST_RUN_PASS_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-pass/*.rs))
+TEST_RUN_PASS_EXTRAS := $(wildcard test/run-pass/*/*.rs)
 TEST_RUN_PASS_EXES := $(TEST_RUN_PASS_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
                       $(TEST_RUN_PASS_SOURCES:.rs=$(CFG_EXE_SUFFIX))
 TEST_RUN_PASS_OUTS := $(TEST_RUN_PASS_EXES:$(CFG_EXE_SUFFIX)=.out)
@@ -295,6 +268,7 @@ TEST_RUN_PASS_OUTS := $(TEST_RUN_PASS_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 TEST_RUN_FAIL_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-fail/*.rc))
 TEST_RUN_FAIL_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/run-fail/*.rs))
+TEST_RUN_FAIL_EXTRAS := $(wildcard test/run-fail/*/*.rs)
 TEST_RUN_FAIL_EXES := $(TEST_RUN_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
                       $(TEST_RUN_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
 TEST_RUN_FAIL_OUTS := $(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
@@ -302,9 +276,20 @@ TEST_RUN_FAIL_OUTS := $(TEST_RUN_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
 
 TEST_COMPILE_FAIL_CRATES := $(filter-out $(TEST_XFAILS), $(wildcard test/compile-fail/*.rc))
 TEST_COMPILE_FAIL_SOURCES := $(filter-out $(TEST_XFAILS), $(wildcard test/compile-fail/*.rs))
+TEST_COMPILE_FAIL_EXTRAS := $(wildcard test/compile-fail/*/*.rs)
 TEST_COMPILE_FAIL_EXES := $(TEST_COMPILE_FAIL_CRATES:.rc=$(CFG_EXE_SUFFIX)) \
                           $(TEST_COMPILE_FAIL_SOURCES:.rs=$(CFG_EXE_SUFFIX))
 TEST_COMPILE_FAIL_OUTS := $(TEST_COMPILE_FAIL_EXES:$(CFG_EXE_SUFFIX)=.out)
+
+ALL_TEST_CRATES := $(TEST_COMPILE_FAIL_CRATES) \
+                   $(TEST_RUN_FAIL_CRATES) \
+                   $(TEST_RUN_PASS_CRATES)
+
+ALL_TEST_SOURCES := $(TEST_COMPILE_FAIL_SOURCES) \
+                    $(TEST_RUN_FAIL_SOURCES) \
+                    $(TEST_RUN_PASS_SOURCES)
+
+ALL_TEST_INPUTS := $(wildcard test/*/*.rs test/*/*/*.rs test/*/*.rc)
 
 
 check_nocompile: $(TEST_COMPILE_FAIL_OUTS)
@@ -329,7 +314,7 @@ test/compile-fail/%.out: test/compile-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
 	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $< | tr -d '\n\r'`" $@
 
-test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+test/run-pass/%$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
@@ -343,6 +328,42 @@ test/run-fail/%$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME) 
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
+
+
+######################################################################
+# Auto-dependency
+######################################################################
+
+STDLIB_DEPFILE := $(basename $(CFG_STDLIB)).d
+ML_DEPFILES := $(BOOT_MLS:%.ml=%.d)
+C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
+CRATE_DEPFILES := $(ALL_TEST_CRATES:%.rc=%.d) $(STDLIB_DEPFILE)
+
+%.d: %.cpp $(MKFILES)
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)$(call CFG_DEPEND_C, $@ $(patsubst %.cpp, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
+
+%.d: %.ml $(MKFILES)
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)ocamldep$(OPT) $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
+
+%.d: %.mli $(MKFILES)
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)ocamldep$(OPT) $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
+
+$(STDLIB_DEPFILE): $(STDLIB_CRATE) $(MKFILES) $(CFG_BOOT)
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)$(CFG_BOOT) -shared -rdeps $< $(CFG_PATH_MUNGE) >$@
+
+%.d: %.rc $(MKFILES) $(CFG_BOOT)
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)$(CFG_BOOT) -rdeps $< $(CFG_PATH_MUNGE) >$@
+
+%.d: %.rs $(MKFILES) $(CFG_BOOT)
+	@$(call CFG_ECHO, dep: $<)
+	$(CFG_QUIET)$(CFG_BOOT) -rdeps $< $(CFG_PATH_MUNGE) >$@
+
+-include $(ML_DEPFILES) $(C_DEPFILES) $(CRATE_DEPFILES)
 
 
 ######################################################################
@@ -360,11 +381,10 @@ PKG_3RDPARTY := rt/valgrind.h \
                 rt/bigint/bigint_ext.cpp rt/bigint/low_primes.h
 PKG_FILES := README COPYING\
              $(MKFILES) $(BOOT_MLS) boot/fe/lexer.mll \
-             comp/rustc.rc $(COMPILER_RSS) \
-             $(RUNTIME_CS) rt/rust.h $(PKG_3RDPARTY) \
-             $(TEST_RUN_PASS_CRATES) $(TEST_RUN_PASS_SOURCES) \
-             $(TEST_RUN_FAIL_CRATES) $(TEST_RUN_FAIL_SOURCES) $(TEST_RUN_FAIL_PATS) \
-             $(TEST_COMPILE_FAIL_CRATES) $(TEST_COMPILE_FAIL_SOURCES) $(TEST_COMPILE_FAIL_PATS)
+             $(COMPILER_CRATE) $(COMPILER_INPUTS) \
+             $(STDLIB_CRATE) $(STDLIB_INPUTS) \
+             $(RUNTIME_CS) $(RUNTIME_HDR) $(PKG_3RDPARTY) \
+             $(ALL_TEST_INPUTS)
 
 dist:
 	@$(call CFG_ECHO, making dist dir)

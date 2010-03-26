@@ -37,6 +37,7 @@ type sess =
   mutable sess_failed: bool;
   mutable sess_report_timing: bool;
   mutable sess_report_gc: bool;
+  mutable sess_report_deps: bool;
   sess_timings: (string, float) Hashtbl.t;
   sess_spans: (node_id,span) Hashtbl.t;
 }

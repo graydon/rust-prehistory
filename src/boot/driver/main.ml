@@ -46,7 +46,7 @@ let (sess:Session.sess) =
     Session.sess_log_insn = false;
     Session.sess_log_asm = false;
     Session.sess_log_obj = false;
-    Session.sess_log_out = stderr;
+    Session.sess_log_out = stdout;
     Session.sess_trace_block = false;
     Session.sess_trace_drop = false;
     Session.sess_trace_tag = false;
@@ -54,6 +54,7 @@ let (sess:Session.sess) =
     Session.sess_spans = Hashtbl.create 0;
     Session.sess_report_timing = false;
     Session.sess_report_gc = false;
+    Session.sess_report_deps = false;
     Session.sess_timings = Hashtbl.create 0;
   }
 ;;
@@ -157,9 +158,10 @@ let argspecs =
                           sess.Session.sess_trace_drop <- true;
                           sess.Session.sess_trace_tag <- true ),
      "emit all tracing code");
-    ("-time", Arg.Unit (fun _ -> sess.Session.sess_report_timing <- true), "report timing of compiler phases");
-    ("-gc", Arg.Unit (fun _ -> sess.Session.sess_report_gc <- true), "report gc behavior of compiler");
-    ("-dump", Arg.String dump_file, "dump DWARF info in compiled file")
+    ("-rtime", Arg.Unit (fun _ -> sess.Session.sess_report_timing <- true), "report timing of compiler phases");
+    ("-rgc", Arg.Unit (fun _ -> sess.Session.sess_report_gc <- true), "report gc behavior of compiler");
+    ("-rdwarf", Arg.String dump_file, "report DWARF info in compiled file, then exit");
+    ("-rdeps", Arg.Unit (fun _ -> sess.Session.sess_report_deps <- true), "report dependencies of input, then exit");
   ]
 ;;
 
@@ -196,6 +198,7 @@ let (crate:Ast.crate) =
     begin
       fun _ ->
         let infile = Session.filename_of sess.Session.sess_in in
+        let crate =
           if Filename.check_suffix infile ".rc"
           then Cexp.parse_crate_file sess Lexer.token get_ty_mod infer_lib_name
           else
@@ -208,6 +211,26 @@ let (crate:Ast.crate) =
                   infile;
                 exit 1
               end
+        in
+          if sess.Session.sess_report_deps
+          then
+            let outfile = (Session.filename_of sess.Session.sess_out) in
+            let depfile = (Filename.chop_extension outfile) ^ ".d" in
+            begin
+              Array.iter
+                begin
+                  fun out ->
+                    Printf.fprintf stdout "%s: \\\n" out;
+                    Hashtbl.iter
+                      (fun _ file -> Printf.fprintf stdout "    %s \\\n" file)
+                      crate.node.Ast.crate_files;
+                    Printf.fprintf stdout "\n"
+                end
+                [| outfile; depfile|];
+              exit 0
+            end
+          else
+            crate
     end
 ;;
 
@@ -217,9 +240,9 @@ exit_if_failed ()
 if sess.Session.sess_log_ast
 then
   begin
-    Printf.fprintf stderr "Post-parse AST:\n%!";
+    Printf.fprintf stdout "Post-parse AST:\n%!";
     Format.set_margin 80;
-    Printf.fprintf stderr "%s\n!" (Ast.fmt_to_str Ast.fmt_crate crate)
+    Printf.fprintf stdout "%s\n!" (Ast.fmt_to_str Ast.fmt_crate crate)
   end
 
 let list_to_seq ls = Asm.SEQ (Array.of_list ls);;
@@ -227,6 +250,7 @@ let select_insns (quads:Il.quads) : Asm.frag =
   Session.time_inner "insn" sess
     (fun _ -> X86.select_insns sess quads)
 ;;
+
 
 (* Semantic passes. *)
 let sem_cx = Semant.new_ctxt sess abi crate.node
@@ -319,11 +343,11 @@ main_pipeline ();;
 if sess.Session.sess_report_timing
 then
   begin
-    Printf.fprintf stderr "timing:\n\n";
+    Printf.fprintf stdout "timing:\n\n";
     Array.iter
       begin
         fun name ->
-          Printf.fprintf stderr "%20s: %f\n" name
+          Printf.fprintf stdout "%20s: %f\n" name
             (Hashtbl.find sess.Session.sess_timings name)
       end
       (sorted_htab_keys sess.Session.sess_timings)
