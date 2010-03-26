@@ -453,14 +453,23 @@ let trans_visitor
            * pad = (align - (off mod align)) mod align
            *
            *)
+          annotate "fetch alignment";
           let op_align = calculate_sz fp fn align in
+          annotate "fetch offset";
           let op_off = calculate_sz fp fn off in
-          let tmp = next_vreg_cell word_ty in
-            emit (Il.binary Il.UMOD tmp op_off op_align);
-            emit (Il.binary Il.SUB tmp op_align (Il.Cell tmp));
-            emit (Il.binary Il.UMOD tmp (Il.Cell tmp) op_align);
-            emit (Il.binary Il.ADD tmp (Il.Cell tmp) op_off);
-            Il.Cell tmp
+          let t1 = next_vreg_cell word_ty in
+          let t2 = next_vreg_cell word_ty in
+          let t3 = next_vreg_cell word_ty in
+          let t4 = next_vreg_cell word_ty in
+            annotate "tmp = off % align";
+            emit (Il.binary Il.UMOD t1 op_off op_align);
+            annotate "tmp = align - tmp";
+            emit (Il.binary Il.SUB t2 op_align (Il.Cell t1));
+            annotate "tmp = tmp % align";
+            emit (Il.binary Il.UMOD t3 (Il.Cell t2) op_align);
+            annotate "tmp = tmp + off";
+            emit (Il.binary Il.ADD t4 (Il.Cell t4) op_off);
+            Il.Cell t4
 
   and calculate_sz_in_current_frame (size:size) : Il.operand =
     calculate_sz abi.Abi.abi_fp_reg (current_fn()) size
