@@ -23,7 +23,8 @@ type glue =
   | GLUE_mark of Ast.ty
   | GLUE_drop of Ast.ty
   | GLUE_free of Ast.ty
-  | GLUE_clone of Ast.ty
+  | GLUE_copy of Ast.ty      (* One-level copy. *)
+  | GLUE_clone of Ast.ty     (* Deep copy. *)
   | GLUE_compare of Ast.ty
   | GLUE_hash of Ast.ty
   | GLUE_write of Ast.ty
@@ -1651,6 +1652,7 @@ let glue_str (cx:ctxt) (g:glue) : string =
     | GLUE_mark ty -> "glue$mark$" ^ (ty_str ty)
     | GLUE_drop ty -> "glue$drop$" ^ (ty_str ty)
     | GLUE_free ty -> "glue$free$" ^ (ty_str ty)
+    | GLUE_copy ty -> "glue$copy$" ^ (ty_str ty)
     | GLUE_clone ty -> "glue$clone$" ^ (ty_str ty)
     | GLUE_compare ty -> "glue$compare$" ^ (ty_str ty)
     | GLUE_hash ty -> "glue$hash$" ^ (ty_str ty)

@@ -799,10 +799,12 @@ let trans_visitor
             [|
               Asm.WORD (word_ty_mach, Asm.IMM (ty_sz abi t));
               Asm.WORD (word_ty_mach, Asm.IMM (ty_align abi t));
-              (* FIXME: finish this. *)
-              Asm.WORD (word_ty_mach, Asm.IMM 0L);
-              Asm.WORD (word_ty_mach, Asm.IMM 0L);
-              Asm.WORD (word_ty_mach, Asm.IMM 0L);
+              table_of_crate_rel_fixups
+                [|
+                  get_copy_glue t None;
+                  get_drop_glue t None;
+                  get_free_glue t (slot_mem_ctrl (interior_slot t)) None;
+                |]
             |]
       end
 
@@ -1260,6 +1262,19 @@ let trans_visitor
          *)
       let clone_proc = word_at (fp_imm (Int64.add arg0_disp (word_n 1))) in
         clone_ty clone_proc ty dst src curr_iso
+    in
+    let fix = get_typed_mem_glue g ty inner in
+      fix
+
+  and get_copy_glue
+      (ty:Ast.ty)
+      (curr_iso:Ast.ty_iso option)
+      : fixup =
+    let g = GLUE_copy ty in
+    let inner (arg:Il.cell) =
+      let dst = deref (ptr_at (fp_imm out_mem_disp) ty) in
+      let src = deref arg in
+        copy_ty ty dst src curr_iso
     in
     let fix = get_typed_mem_glue g ty inner in
       fix
@@ -1889,6 +1904,32 @@ let trans_visitor
           -> mov dst (Il.Cell src)
       | _ -> iter_ty_slots_full ty dst src (clone_slot clone_proc) curr_iso
 
+  and copy_ty
+      (ty:Ast.ty)
+      (dst:Il.cell)
+      (src:Il.cell)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+      iflog (fun _ ->
+               annotate ("copy_ty: referent data of type " ^
+                           (Ast.fmt_to_str Ast.fmt_ty ty)));
+      if ((Il.cell_is_scalar src)
+          && (Il.cell_is_scalar dst)
+          && (i64_le (ty_sz abi ty) word_sz))
+      then
+        begin
+          iflog (fun _ ->
+                   annotate ("copy_ty: simple mov ("
+                             ^ (Int64.to_string (ty_sz abi ty))
+                             ^ " byte scalar)"));
+          mov dst (Il.Cell src)
+        end
+      else
+        iter_ty_slots_full ty dst src
+          (fun dst src slot curr_iso ->
+             trans_copy_slot true dst slot src slot curr_iso)
+          curr_iso
+
   and free_ty
       (ty:Ast.ty)
       (cell:Il.cell)
@@ -2213,11 +2254,11 @@ let trans_visitor
         | (MEM_rc_struct, MEM_rc_struct) ->
             lightweight_rc (exterior_rc_cell src)
 
-      | _ ->
-          (* Heavyweight copy: duplicate 1 level of the referent. *)
-          anno "heavy";
-          trans_copy_slot_heavy initializing
-            dst dst_slot src src_slot curr_iso
+        | _ ->
+            (* Heavyweight copy: duplicate 1 level of the referent. *)
+            anno "heavy";
+            trans_copy_slot_heavy initializing
+              dst dst_slot src src_slot curr_iso
 
   (* NB: heavyweight copying here does not mean "producing a deep
    * clone of the entire data tree rooted at the src operand". It means
@@ -2261,25 +2302,7 @@ let trans_visitor
     let curr_iso = maybe_enter_iso ty curr_iso in
     let dst = deref_slot initializing dst dst_slot in
     let src = deref_slot false src src_slot in
-      iflog (fun _ ->
-               annotate ("heavy copy: referent data of type " ^
-                           (Ast.fmt_to_str Ast.fmt_ty ty)));
-      if ((Il.cell_is_scalar src)
-          && (Il.cell_is_scalar dst)
-          && (i64_le (ty_sz abi ty) word_sz))
-      then
-        begin
-          iflog (fun _ ->
-                   annotate ("heavy copy: simple mov ("
-                             ^ (Int64.to_string (ty_sz abi ty))
-                             ^ " byte scalar)"));
-          mov dst (Il.Cell src)
-        end
-      else
-        iter_ty_slots_full ty dst src
-          (fun dst src slot curr_iso ->
-             trans_copy_slot initializing dst slot src slot curr_iso)
-          curr_iso
+      copy_ty ty dst src curr_iso
 
   and trans_copy
       (initializing:bool)
