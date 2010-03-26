@@ -2932,7 +2932,8 @@ let trans_visitor
             let (dst_cell, dst_slot) = trans_lval_maybe_init initializing dst in
               match slot_ty dst_slot with
                   Ast.TY_str ->
-                    trans_upcall "upcall_str_concat" dst_cell [| Il.Cell dst_cell; Il.Cell dst_cell; (trans_atom a_src); |]
+                    trans_upcall "upcall_str_concat" dst_cell
+                      [| Il.Cell dst_cell; Il.Cell dst_cell; (trans_atom a_src); |]
                 | _ ->
                     ignore (trans_binary binop
                               (Il.Cell (deref_slot false dst_cell dst_slot))
