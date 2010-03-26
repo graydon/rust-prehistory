@@ -1960,7 +1960,9 @@ let trans_visitor
             let copy_glue_ptr =
               crate_rel_to_ptr (Il.Cell copy_glue) Il.CodeTy
             in
-              trans_call_copy_glue copy_glue_ptr dst src
+              aliasing false src
+                (fun src ->
+                   trans_call_copy_glue copy_glue_ptr dst src)
           end
 
       | _ ->
