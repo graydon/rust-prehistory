@@ -89,9 +89,9 @@ let default_output_filename (sess:Session.sess) : filename option =
         let base = Filename.chop_extension (Filename.basename fname) in
         let out =
           if sess.Session.sess_library_mode
-          then 
+          then
             infer_lib_name base
-          else 
+          else
             base ^ (match sess.Session.sess_targ with
                         Linux_x86_elf -> ""
                       | MacOS_x86_macho -> ""
@@ -100,7 +100,7 @@ let default_output_filename (sess:Session.sess) : filename option =
           Some out
 ;;
 
-let set_default_output_filename (sess:Session.sess) : unit = 
+let set_default_output_filename (sess:Session.sess) : unit =
   match sess.Session.sess_out with
       None -> (sess.Session.sess_out <- default_output_filename sess)
     | _ -> ()
@@ -215,20 +215,25 @@ let (crate:Ast.crate) =
           if sess.Session.sess_report_deps
           then
             let outfile = (Session.filename_of sess.Session.sess_out) in
-            let depfile = (Filename.chop_extension outfile) ^ ".d" in
-            begin
-              Array.iter
-                begin
-                  fun out ->
-                    Printf.fprintf stdout "%s: \\\n" out;
-                    Hashtbl.iter
-                      (fun _ file -> Printf.fprintf stdout "    %s \\\n" file)
-                      crate.node.Ast.crate_files;
-                    Printf.fprintf stdout "\n"
-                end
-                [| outfile; depfile|];
-              exit 0
-            end
+            let depfile =
+              match sess.Session.sess_targ with
+                  Linux_x86_elf
+                | MacOS_x86_macho -> outfile ^ ".d"
+                | Win32_x86_pe -> (Filename.chop_extension outfile) ^ ".d"
+            in
+              begin
+                Array.iter
+                  begin
+                    fun out ->
+                      Printf.fprintf stdout "%s: \\\n" out;
+                      Hashtbl.iter
+                        (fun _ file -> Printf.fprintf stdout "    %s \\\n" file)
+                        crate.node.Ast.crate_files;
+                      Printf.fprintf stdout "\n"
+                  end
+                  [| outfile; depfile|];
+                exit 0
+              end
           else
             crate
     end
