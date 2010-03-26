@@ -1,13 +1,6 @@
 open Common;;
 open Semant;;
 
-(*
- * Lattice:
- * 
- * all
- * 
- *)
-
 type tyspec =
     TYSPEC_equiv of tyvar
   | TYSPEC_all
