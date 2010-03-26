@@ -1,6 +1,13 @@
 open Common;;
 open Semant;;
 
+(*
+ * Lattice:
+ * 
+ * all
+ * 
+ *)
+
 type tyspec =
     TYSPEC_equiv of tyvar
   | TYSPEC_all
@@ -8,6 +15,7 @@ type tyspec =
   | TYSPEC_callable of (tyvar * tyvar array)   (* out, ins *)
   | TYSPEC_collection of tyvar                 (* homogeneous ordered collection *)
   | TYSPEC_comparable                          (* comparable with = and != *)
+  | TYSPEC_plusable                            (* nums, vecs, and strings *)
   | TYSPEC_dictionary of dict
   | TYSPEC_integral                            (* integer-like *)
   | TYSPEC_loggable
@@ -31,6 +39,7 @@ type binopsig =
   | BINOPSIG_ord_ord_bool       (* ordered a * ordered a -> bool *)
   | BINOPSIG_integ_integ_integ  (* integral a * integral a -> integral a *)
   | BINOPSIG_num_num_num        (* numeric a * numeric a -> numeric a *)
+  | BINOPSIG_plus_plus_plus     (* plusable a * plusable a -> plusable a *)
 ;;
 
 let rec tyspec_to_str (ts:tyspec) : string =
@@ -57,6 +66,7 @@ let rec tyspec_to_str (ts:tyspec) : string =
             (join_tvs ins) (tyspec_to_str !out)
       | TYSPEC_collection tv -> "<collection of " ^ (tyspec_to_str !tv) ^ ">"
       | TYSPEC_comparable -> "<comparable>"
+      | TYSPEC_plusable -> "<plusable>"
       | TYSPEC_dictionary dct ->
           "<dictionary with members " ^ (format_dict dct) ^ ">"
       | TYSPEC_integral -> "<integral>"
@@ -236,6 +246,14 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | _ -> false
       in
 
+      let numeric (ty:Ast.ty) : bool = (integral ty) || (floating ty) in
+
+      let plusable (ty:Ast.ty) : bool =
+        match ty with
+            Ast.TY_str -> true
+          | _ -> numeric ty
+      in
+
       let loggable (ty:Ast.ty) : bool =
         match ty with
             Ast.TY_str | Ast.TY_int | Ast.TY_char | Ast.TY_mach TY_u8
@@ -281,6 +299,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               bug () "equiv found even though tyvar was resolved"
 
           | (TYSPEC_all, other) | (other, TYSPEC_all) -> other
+
+          (* resolved *)
 
           | (TYSPEC_resolved ty_a, TYSPEC_resolved ty_b) ->
               let param oid n =
@@ -373,6 +393,11 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               if not (is_comparable_or_ordered true ty) then fail ()
               else TYSPEC_resolved ty
 
+          | (TYSPEC_resolved ty, TYSPEC_plusable)
+          | (TYSPEC_plusable, TYSPEC_resolved ty) ->
+              if not (plusable ty) then fail ()
+              else TYSPEC_resolved ty
+
           | (TYSPEC_resolved ty, TYSPEC_dictionary dct)
           | (TYSPEC_dictionary dct, TYSPEC_resolved ty) ->
               begin
@@ -395,7 +420,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
           | (TYSPEC_resolved ty, TYSPEC_numeric)
           | (TYSPEC_numeric, TYSPEC_resolved ty) ->
-              if not ((integral ty) || (floating ty)) then fail ()
+              if not (numeric ty) then fail ()
               else TYSPEC_resolved ty
 
           | (TYSPEC_resolved ty, TYSPEC_ordered)
@@ -447,6 +472,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                   | _ -> fail ()
               end
 
+          (* callable *)
+
           | (TYSPEC_callable (a_out_tv, a_in_tvs),
              TYSPEC_callable (b_out_tv, b_in_tvs)) ->
               unify_tyvars a_out_tv b_out_tv;
@@ -458,6 +485,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
           | (TYSPEC_callable _, TYSPEC_collection _)
           | (TYSPEC_callable _, TYSPEC_comparable)
+          | (TYSPEC_callable _, TYSPEC_plusable)
           | (TYSPEC_callable _, TYSPEC_dictionary _)
           | (TYSPEC_callable _, TYSPEC_integral)
           | (TYSPEC_callable _, TYSPEC_loggable)
@@ -469,6 +497,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_callable _, TYSPEC_vector _)
           | (TYSPEC_collection _, TYSPEC_callable _)
           | (TYSPEC_comparable, TYSPEC_callable _)
+          | (TYSPEC_plusable, TYSPEC_callable _)
           | (TYSPEC_dictionary _, TYSPEC_callable _)
           | (TYSPEC_integral, TYSPEC_callable _)
           | (TYSPEC_loggable, TYSPEC_callable _)
@@ -479,13 +508,18 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_tuple _, TYSPEC_callable _)
           | (TYSPEC_vector _, TYSPEC_callable _) -> fail ()
 
+          (* collection *)
+
           | (TYSPEC_collection av, TYSPEC_collection bv) ->
               unify_tyvars av bv;
               TYSPEC_collection av
 
-          | (TYSPEC_collection av, TYSPEC_comparable) |
-                (TYSPEC_comparable, TYSPEC_collection av) ->
+          | (TYSPEC_collection av, TYSPEC_comparable)
+          | (TYSPEC_comparable, TYSPEC_collection av) ->
               TYSPEC_collection av
+
+          | (TYSPEC_collection v, TYSPEC_plusable)
+          | (TYSPEC_plusable, TYSPEC_collection v) -> TYSPEC_collection v
 
           | (TYSPEC_collection _, TYSPEC_dictionary _)
           | (TYSPEC_collection _, TYSPEC_integral)
@@ -509,7 +543,12 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               unify_tyvars av bv;
               TYSPEC_vector av
 
+          (* comparable *)
+
           | (TYSPEC_comparable, TYSPEC_comparable) -> TYSPEC_comparable
+
+          | (TYSPEC_comparable, TYSPEC_plusable)
+          | (TYSPEC_plusable, TYSPEC_comparable) -> TYSPEC_plusable
 
           | (TYSPEC_comparable, TYSPEC_dictionary dict)
           | (TYSPEC_dictionary dict, TYSPEC_comparable) ->
@@ -539,6 +578,39 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_comparable, TYSPEC_vector v)
           | (TYSPEC_vector v, TYSPEC_comparable) -> TYSPEC_vector v
 
+          (* plusable *)
+
+          | (TYSPEC_plusable, TYSPEC_plusable) -> TYSPEC_plusable
+
+          | (TYSPEC_plusable, TYSPEC_dictionary _)
+          | (TYSPEC_dictionary _, TYSPEC_plusable) -> fail ()
+
+          | (TYSPEC_plusable, TYSPEC_integral)
+          | (TYSPEC_integral, TYSPEC_plusable) -> TYSPEC_integral
+
+          | (TYSPEC_plusable, TYSPEC_loggable)
+          | (TYSPEC_loggable, TYSPEC_plusable) -> TYSPEC_plusable
+
+          | (TYSPEC_plusable, TYSPEC_numeric)
+          | (TYSPEC_numeric, TYSPEC_plusable) -> TYSPEC_numeric
+
+          | (TYSPEC_plusable, TYSPEC_ordered)
+          | (TYSPEC_ordered, TYSPEC_plusable) -> TYSPEC_plusable
+
+          | (TYSPEC_plusable, TYSPEC_record _)
+          | (TYSPEC_record _, TYSPEC_plusable) -> fail ()
+
+          | (TYSPEC_plusable, TYSPEC_tuple _)
+          | (TYSPEC_tuple _, TYSPEC_plusable) -> fail ()
+
+          | (TYSPEC_plusable, TYSPEC_vector v)
+          | (TYSPEC_vector v, TYSPEC_plusable) -> TYSPEC_vector v
+
+          | (TYSPEC_plusable, TYSPEC_parametric _)
+          | (TYSPEC_parametric _, TYSPEC_plusable) -> fail ()
+
+          (* dictionary *)
+
           | (TYSPEC_dictionary da, TYSPEC_dictionary db) ->
               TYSPEC_dictionary (merge_dicts da db)
 
@@ -562,6 +634,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_tuple _, TYSPEC_dictionary _)
           | (TYSPEC_vector _, TYSPEC_dictionary _) -> fail ()
 
+          (* integral *)
+
           | (TYSPEC_integral, TYSPEC_integral)
           | (TYSPEC_integral, TYSPEC_loggable)
           | (TYSPEC_integral, TYSPEC_numeric)
@@ -578,6 +652,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_record _, TYSPEC_integral)
           | (TYSPEC_tuple _, TYSPEC_integral)
           | (TYSPEC_vector _, TYSPEC_integral) -> fail ()
+
+          (* loggable *)
 
           | (TYSPEC_loggable, TYSPEC_loggable) -> TYSPEC_loggable
 
@@ -596,6 +672,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_tuple _, TYSPEC_loggable)
           | (TYSPEC_vector _, TYSPEC_loggable) -> fail ()
 
+          (* numeric *)
+
           | (TYSPEC_numeric, TYSPEC_numeric) -> TYSPEC_numeric
 
           | (TYSPEC_numeric, TYSPEC_ordered)
@@ -610,6 +688,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_tuple _, TYSPEC_numeric)
           | (TYSPEC_vector _, TYSPEC_numeric) -> fail ()
 
+          (* ordered *)
+
           | (TYSPEC_ordered, TYSPEC_ordered) -> TYSPEC_ordered
 
           | (TYSPEC_ordered, TYSPEC_parametric _)
@@ -620,6 +700,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_record _, TYSPEC_ordered)
           | (TYSPEC_tuple _, TYSPEC_ordered)
           | (TYSPEC_vector _, TYSPEC_ordered) -> fail ()
+
+          (* parametric *)
 
           | (TYSPEC_parametric (tv_a, params_a),
              TYSPEC_parametric (tv_b, params_b)) ->
@@ -644,6 +726,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_tuple _, TYSPEC_parametric _)
           | (TYSPEC_vector _, TYSPEC_parametric _) -> fail ()
 
+          (* record *)
+
           | (TYSPEC_record da, TYSPEC_record db) ->
               TYSPEC_record (merge_dicts da db)
 
@@ -651,6 +735,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | (TYSPEC_record _, TYSPEC_vector _)
           | (TYSPEC_tuple _, TYSPEC_record _)
           | (TYSPEC_vector _, TYSPEC_record _) -> fail ()
+
+          (* tuple *)
 
           | (TYSPEC_tuple tvs_a, TYSPEC_tuple tvs_b) ->
               let len_a = Array.length tvs_a in
@@ -670,6 +756,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
           | (TYSPEC_tuple _, TYSPEC_vector _)
           | (TYSPEC_vector _, TYSPEC_tuple _) -> fail ()
+
+          (* vector *)
 
           | (TYSPEC_vector av, TYSPEC_vector bv) ->
               unify_tyvars av bv;
@@ -717,7 +805,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               | Ast.BINOP_lsl -> BINOPSIG_integ_integ_integ
               | Ast.BINOP_lsr -> BINOPSIG_integ_integ_integ
               | Ast.BINOP_asr -> BINOPSIG_integ_integ_integ
-              | Ast.BINOP_add -> BINOPSIG_num_num_num
+              | Ast.BINOP_add -> BINOPSIG_plus_plus_plus
               | Ast.BINOP_sub -> BINOPSIG_num_num_num
               | Ast.BINOP_mul -> BINOPSIG_num_num_num
               | Ast.BINOP_div -> BINOPSIG_num_num_num
@@ -747,6 +835,11 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                         unify_tyvars tv tv_a
                   | BINOPSIG_num_num_num ->
                       let tv_a = ref TYSPEC_numeric in
+                        unify_atom lhs tv_a;
+                        unify_atom rhs tv_a;
+                        unify_tyvars tv tv_a
+                  | BINOPSIG_plus_plus_plus ->
+                      let tv_a = ref TYSPEC_plusable in
                         unify_atom lhs tv_a;
                         unify_atom rhs tv_a;
                         unify_tyvars tv tv_a
