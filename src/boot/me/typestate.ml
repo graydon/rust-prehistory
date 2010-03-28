@@ -13,6 +13,12 @@ let iflog cx thunk =
   else ()
 ;;
 
+let name_base_to_slot_key (nb:Ast.name_base) : Ast.slot_key =
+  match nb with
+      Ast.BASE_ident ident -> Ast.KEY_ident ident
+    | Ast.BASE_temp tmp -> Ast.KEY_temp tmp
+    | Ast.BASE_app _ -> bug () "name_base_to_slot_key on parametric name"
+;;
 
 let determine_constr_key
     (cx:ctxt)
@@ -27,16 +33,20 @@ let determine_constr_key
    * The combination of that, plus the constr itself, forms a 
    * unique key for idenfitying a predicate.
    *)
-  let cident =
+  let key =
     (* FIXME (bug 541527): handle other forms of constr name. *)
     match c.Ast.constr_name with
-        Ast.NAME_base (Ast.BASE_ident ident) -> ident
-      | _ -> err None "unhandled form of constraint-name"
+        Ast.NAME_base nb -> name_base_to_slot_key nb
+      | x ->
+          err None "unhandled form of constraint-name: %a"
+            Ast.sprintf_name x
   in
   let cid =
-    ref (match lookup cx scopes (Ast.KEY_ident cident) with
+    ref (match lookup cx scopes key with
              Some (scope::_, _) -> id_of_scope scope
-           | _ -> err None "unresolved constraint '%s'" cident)
+           | _ ->
+               err None "unresolved constraint '%a'"
+                 Ast.sprintf_slot_key key)
   in
   let rec tighten_to id sids =
     match sids with
@@ -51,13 +61,18 @@ let determine_constr_key
         Ast.CARG_path (Ast.CARG_base (Ast.BASE_formal)) -> ()
       | Ast.CARG_path (Ast.CARG_ext (Ast.CARG_base (Ast.BASE_formal), _)) -> ()
       | Ast.CARG_lit _ -> ()
-      | Ast.CARG_path (Ast.CARG_base (Ast.BASE_named (Ast.BASE_ident argident))) ->
+      | Ast.CARG_path (Ast.CARG_base (Ast.BASE_named nb)) ->
           begin
-            match lookup cx scopes (Ast.KEY_ident argident) with
-                Some (scope::_, _) -> tighten_to (id_of_scope scope) scope_ids
-              | _ -> err None "unresolved constraint-arg '%s'" argident
+            let key = name_base_to_slot_key nb in
+              match lookup cx scopes key with
+                  Some (scope::_, _) -> tighten_to (id_of_scope scope) scope_ids
+                | _ ->
+                    err None "unresolved constraint-arg '%a'"
+                      Ast.sprintf_slot_key key
           end
-      | _ -> err None "unhandled form of constraint-arg name"
+      | _ ->
+          err None "unhandled form of constraint-arg name: %a"
+            Ast.sprintf_carg carg
   in
     Array.iter tighten_to_carg c.Ast.constr_args;
     Constr_pred (c, !cid)
