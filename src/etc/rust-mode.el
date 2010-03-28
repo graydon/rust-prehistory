@@ -1,4 +1,4 @@
-;;; derived-mode-ex.el --- example of a CC Mode derived mode for a new language
+;;; rust-mode.el --- CC Mode derived mode for rust.
 
 ;; Author:     Graydon Hoare
 ;; Maintainer: Graydon Hoare
@@ -286,4 +286,4 @@ Key bindings:
 
 (provide 'rust-mode)
 
-;;; derived-mode-ex.el ends here
+;;; rust-mode.el ends here
