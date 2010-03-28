@@ -184,8 +184,7 @@ and parse_ty_fn (pure:bool) (ps:pstate) : (((Ast.ident * (Ast.ty_param identifie
         in
         let in_slots =
           match peek ps with
-              NIL -> (bump ps; [| |])
-            | _ ->
+              _ ->
                 bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
                   (parse_slot_and_optional_ignored_ident true) ps
         in
@@ -302,10 +301,6 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
         bump ps;
         Ast.TY_str
 
-    | NIL ->
-        bump ps;
-        Ast.TY_nil
-
     | ANY ->
         bump ps;
         Ast.TY_any
@@ -337,7 +332,6 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
           let tup =
             match peek ps with
                 LPAREN -> bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps
-              | NIL -> (bump ps; [| |])
               | _ -> raise (err "tag variant missing argument list" ps)
           in
             htab_put htab (Ast.NAME_base (Ast.BASE_ident ident)) tup
@@ -361,13 +355,16 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
 
     | LPAREN ->
         let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps in
-          if Array.length slots = 1 && (match slots.(0).Ast.slot_mode with
-                                            Ast.MODE_interior _ -> true
-                                          | _ -> false)
-          then match slots.(0).Ast.slot_ty with
-              None -> raise (err "slot without type" ps )
-            | Some t -> t
-          else Ast.TY_tup slots
+          if Array.length slots = 0
+          then Ast.TY_nil
+          else
+            if Array.length slots = 1 && (match slots.(0).Ast.slot_mode with
+                                              Ast.MODE_interior _ -> true
+                                            | _ -> false)
+            then match slots.(0).Ast.slot_ty with
+                None -> raise (err "slot without type" ps )
+              | Some t -> t
+            else Ast.TY_tup slots
 
     | MACH m ->
         bump ps;
@@ -515,7 +512,6 @@ and parse_lit (ps:pstate) : Ast.lit =
       LIT_INT (n,s) -> (bump ps; Ast.LIT_int (n,s))
     | LIT_CHAR c -> (bump ps; Ast.LIT_char c)
     | LIT_BOOL b -> (bump ps; Ast.LIT_bool b)
-    | NIL -> (bump ps; Ast.LIT_nil)
     | _ -> raise (unexpected ps)
 
 
@@ -526,11 +522,14 @@ and parse_bottom_pexp (ps:pstate) : pexp =
       LPAREN ->
         let pexps = ctxt "paren pexps(s)" (rstr false parse_pexp_list) ps in
         let bpos = lexpos ps in
-          if Array.length pexps = 1
-          then
-            pexps.(0)
+          if Array.length pexps = 0
+          then span ps apos bpos (PEXP_lit Ast.LIT_nil)
           else
-            span ps apos bpos (PEXP_tup pexps)
+            if Array.length pexps = 1
+            then
+              pexps.(0)
+            else
+              span ps apos bpos (PEXP_tup pexps)
 
     | MUTABLE ->
         bump ps;
@@ -573,7 +572,8 @@ and parse_bottom_pexp (ps:pstate) : pexp =
     | PORT ->
         begin
             bump ps;
-            expect ps NIL;
+            expect ps LPAREN;
+            expect ps RPAREN;
             let bpos = lexpos ps in
               span ps apos bpos (PEXP_port)
         end
@@ -583,13 +583,15 @@ and parse_bottom_pexp (ps:pstate) : pexp =
             bump ps;
             let port =
               match peek ps with
-                  NIL -> (bump ps; None)
-                | LPAREN ->
+                  LPAREN ->
                     begin
                       bump ps;
-                      let lv = parse_pexp ps in
-                        expect ps RPAREN;
-                        Some lv
+                      match peek ps with
+                          RPAREN -> (bump ps; None)
+                        | _ ->
+                            let lv = parse_pexp ps in
+                              expect ps RPAREN;
+                              Some lv
                     end
                 | _ -> raise (unexpected ps)
             in
@@ -614,11 +616,8 @@ and parse_bottom_pexp (ps:pstate) : pexp =
             bump ps;
             let pexp = ctxt "bind pexp: function" (rstr true parse_pexp) ps in
             let args =
-              match peek ps with
-                  NIL -> (bump ps; [| |])
-                | _ ->
-                    ctxt "bind args"
-                      (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_bind_arg) ps
+              ctxt "bind args"
+                (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_bind_arg) ps
             in
             let bpos = lexpos ps in
               span ps apos bpos (PEXP_bind (pexp, args))
@@ -699,7 +698,7 @@ and parse_bind_arg (ps:pstate) : pexp option =
 and parse_ext_pexp (ps:pstate) (pexp:pexp) : pexp =
   let apos = lexpos ps in
     match peek ps with
-        NIL | LPAREN ->
+        LPAREN ->
           if ps.pstate_rstr
           then pexp
           else
@@ -840,7 +839,6 @@ and parse_pexp_list (ps:pstate) : pexp array =
       LPAREN ->
         bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
           (ctxt "pexp list" parse_pexp) ps
-    | NIL -> (bump ps; [| |])
     | _ -> raise (unexpected ps)
 
 ;;

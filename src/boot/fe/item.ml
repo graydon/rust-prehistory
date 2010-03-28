@@ -331,48 +331,70 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           begin
             match peek ps with
                LPAREN ->
-                 let (slots, idents) =
-                   ctxt "stmt tup decl: slots and idents"
-                     (bracketed LPAREN RPAREN (parse_two_or_more_identified_tup_slots_and_idents false)) ps in
-                 let bpos = lexpos ps in
-                 let (_, tmp, tempdecl) =
-                   build_tmp ps
-                     { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
-                       Ast.slot_ty = Some (Ast.TY_tup (Array.map (fun x -> x.node) slots)) }
-                     apos bpos
-                 in
-                 let stmts = ctxt "stmt tup decl: init" (parse_init tmp) ps in
-                   (*
-                    * A little destructuring assignment sugar:
-                    *
-                    *   let (int a, int b) = foo();
-                    *
-                    * desugars to:
-                    *
-                    *   temp (int, int) t_n = foo();
-                    *   let int a = t_n.{0};
-                    *   let int b = t_n.{1};
-                    *
-                    *)
+                 begin
+                   bump ps;
+                   match peek ps with
+                       RPAREN ->
+                         bump ps;
+                         let slot = slot_nil in
+                         let ident = Pexp.parse_ident ps in
+                         let bpos = lexpos ps in
+                         let lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident ident)) in
+                         let stmts = ctxt "nil-slot init: init" (parse_init lval) ps in
+                         let slot = Pexp.apply_mutability ps slot Ast.MUTABLE in
+                         let bpos = lexpos ps in
+                         let decl = Ast.DECL_slot (Ast.KEY_ident ident,
+                                                   (span ps apos bpos slot))
+                         in
+                           Array.concat [[| span ps apos bpos (Ast.STMT_decl decl) |]; stmts]
+                     | _ ->
+                         begin
 
-                 let copies = ref [] in
+                           let (slots, idents) =
+                             ctxt "stmt tup decl: slots and idents"
+                               (bracketed LPAREN RPAREN (parse_two_or_more_identified_tup_slots_and_idents false)) ps
+                           in
+                           let bpos = lexpos ps in
+                           let (_, tmp, tempdecl) =
+                             build_tmp ps
+                               { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
+                                 Ast.slot_ty = Some (Ast.TY_tup (Array.map (fun x -> x.node) slots)) }
+                               apos bpos
+                           in
+                           let stmts = ctxt "stmt tup decl: init" (parse_init tmp) ps in
+                             (*
+                              * A little destructuring assignment sugar:
+                              *
+                              *   let (int a, int b) = foo();
+                              *
+                              * desugars to:
+                              *
+                              *   temp (int, int) t_n = foo();
+                              *   let int a = t_n.{0};
+                              *   let int b = t_n.{1};
+                              *
+                              *)
 
-                 let makedecl i slot =
-                   begin
-                     let ext = Ast.COMP_named (Ast.COMP_idx i) in
-                     let src_lval = Ast.LVAL_ext ((clone_lval ps tmp), ext) in
-                     let src_atom = Ast.ATOM_lval src_lval in
-                     let dst_lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident idents.(i))) in
-                     let copy = span ps apos bpos
-                       (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
-                           copies := copy :: (!copies)
-                   end;
-                   let slot = {slot with node = Pexp.apply_mutability ps slot.node Ast.MUTABLE} in
-                   let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slot) in
-                     span ps apos bpos (Ast.STMT_decl decl)
-                 in
-                 let letdecls = Array.mapi makedecl slots in
-                   Array.concat [stmts; [| tempdecl |]; letdecls; arl (!copies)]
+                           let copies = ref [] in
+
+                           let makedecl i slot =
+                             begin
+                               let ext = Ast.COMP_named (Ast.COMP_idx i) in
+                               let src_lval = Ast.LVAL_ext ((clone_lval ps tmp), ext) in
+                               let src_atom = Ast.ATOM_lval src_lval in
+                               let dst_lval = Ast.LVAL_base (span ps apos bpos (Ast.BASE_ident idents.(i))) in
+                               let copy = span ps apos bpos
+                                 (Ast.STMT_copy (dst_lval, Ast.EXPR_atom src_atom)) in
+                                 copies := copy :: (!copies)
+                             end;
+                             let slot = {slot with node = Pexp.apply_mutability ps slot.node Ast.MUTABLE} in
+                             let decl = Ast.DECL_slot (Ast.KEY_ident idents.(i), slot) in
+                               span ps apos bpos (Ast.STMT_decl decl)
+                           in
+                           let letdecls = Array.mapi makedecl slots in
+                             Array.concat [stmts; [| tempdecl |]; letdecls; arl (!copies)]
+                         end
+                 end
 
              | _ ->
                  let (stmts, slot, ident) =
@@ -510,8 +532,7 @@ and parse_inputs
     : ((Ast.slot identified * Ast.ident) array * Ast.constrs)  =
   let slots =
     match peek ps with
-        NIL -> (bump ps; [| |])
-      | LPAREN -> ctxt "inputs: input idents and slots"
+        LPAREN -> ctxt "inputs: input idents and slots"
           (parse_zero_or_more_identified_slot_ident_pairs true) ps
       | _ -> raise (unexpected ps)
   in
@@ -657,8 +678,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
           let hdr =
             begin
               match peek ps with
-                  NIL -> (bump ps; Some ([| |], [| |]))
-                | LPAREN ->
+                  LPAREN ->
                     Some (ctxt "stateful mod header: input idents and slots"
                             parse_inputs ps)
                 | _ -> None

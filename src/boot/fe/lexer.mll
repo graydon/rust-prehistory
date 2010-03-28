@@ -150,7 +150,6 @@ rule token = parse
 | "<-"                         { LARROW     }
 | "<|"                         { SEND       }
 | "->"                         { RARROW     }
-| '(' ws* ')'                  { NIL        }
 | '('                          { LPAREN     }
 | ')'                          { RPAREN     }
 | '['                          { LBRACKET   }

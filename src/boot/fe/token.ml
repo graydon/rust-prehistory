@@ -106,7 +106,6 @@ type token =
   | UNDERSCORE
 
   (* Reserved type names *)
-  | NIL
   | BOOL
   | INT
   | CHAR
@@ -260,7 +259,6 @@ let rec string_of_tok t =
     | UNDERSCORE -> "_"
 
     (* Reserved type names *)
-    | NIL        -> "nil"
     | BOOL       -> "bool"
     | INT        -> "int"
     | CHAR       -> "char"
