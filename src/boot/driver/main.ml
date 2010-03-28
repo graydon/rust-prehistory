@@ -247,7 +247,7 @@ then
   begin
     Printf.fprintf stdout "Post-parse AST:\n%!";
     Format.set_margin 80;
-    Printf.fprintf stdout "%s\n!" (Ast.fmt_to_str Ast.fmt_crate crate)
+    Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_crate crate)
   end
 
 let list_to_seq ls = Asm.SEQ (Array.of_list ls);;
