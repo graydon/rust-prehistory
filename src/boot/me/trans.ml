@@ -72,8 +72,8 @@ let trans_visitor
   let marker = imm 0xdeadbeefL in
   let one = imm 1L in
   let zero = imm 0L in
-  let imm_true = one in
-  let imm_false = zero in
+  let imm_true = imm_of_ty 1L TY_u8 in
+  let imm_false = imm_of_ty 0L TY_u8 in
   let nil_ptr = Il.Mem ((Il.Abs (Asm.IMM 0L)), Il.NilTy) in
 
   let crate_rel fix =
@@ -1431,7 +1431,7 @@ let trans_visitor
       | Ast.BINOP_div -> arith Il.UDIV
       | Ast.BINOP_mod -> arith Il.UMOD
 
-      | _ -> let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
+      | _ -> let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy Il.Bits8) in
           mov dst imm_true;
           let jmps = trans_compare (binop_to_jmpop binop) lhs rhs in
             mov dst imm_false;
@@ -1457,10 +1457,8 @@ let trans_visitor
 
       | Ast.EXPR_unary (unop, a) ->
           let src = trans_atom a in
-            (* FIXME (bug 541544): this has to change when we support
-             * other mach types.
-             *)
-          let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy word_bits) in
+          let bits = Il.operand_bits word_bits src in
+          let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy bits) in
           let op = match unop with
               Ast.UNOP_not -> Il.NOT
             | Ast.UNOP_neg -> Il.NEG
@@ -3134,6 +3132,7 @@ let trans_visitor
                * code in type.ml as well. *)
                 Ast.TY_str -> trans_log_str a
               | Ast.TY_int -> trans_log_int a
+              | Ast.TY_bool -> trans_log_int a
               | Ast.TY_char -> trans_log_int a
               | Ast.TY_mach (TY_u8) -> trans_log_int a
               | Ast.TY_mach (TY_u16) -> trans_log_int a

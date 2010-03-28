@@ -918,6 +918,7 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
           end
 
       | (Unary u, Unary u') ->
+          mov_if_operands_differ u.unary_src u'.unary_src;
           emit_quad (Unary u');
           mov_if_cells_differ u.unary_dst u'.unary_dst
 

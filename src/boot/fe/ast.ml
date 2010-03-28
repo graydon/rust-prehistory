@@ -1014,6 +1014,7 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
 
       | STMT_copy (lv, ex) ->
           fmt_lval ff lv;
+          fmt ff " = ";
           fmt_expr ff ex;
           fmt ff ";"
 

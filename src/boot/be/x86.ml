@@ -269,12 +269,29 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
         un
   in
 
-  let target_8bit_cmp_to_ecx cmp =
+  let target_8bit_mem_mov_to_ecx un =
+    let src_ty = Il.operand_scalar_ty un.Il.unary_src in
+    let dst_ty = Il.cell_scalar_ty un.Il.unary_dst in
+      if is_ty8 src_ty || is_ty8 dst_ty
+      then
+        match (un.Il.unary_src, un.Il.unary_dst) with
+            (Il.Cell (Il.Mem _), Il.Reg _) ->
+              { un with
+                  Il.unary_dst = target_cell ecx un.Il.unary_dst }
+          | (Il.Cell (Il.Reg _), Il.Mem _) ->
+              { un with
+                  Il.unary_src = target_operand ecx un.Il.unary_src }
+          | _ -> un
+      else
+        un
+  in
+
+  let target_8bit_cmp_to_eax_and_ecx cmp =
     let lhs_ty = Il.operand_scalar_ty cmp.Il.cmp_lhs in
     let rhs_ty = Il.operand_scalar_ty cmp.Il.cmp_rhs in
       if is_ty8 lhs_ty || is_ty8 rhs_ty
       then
-        { Il.cmp_lhs = target_operand ecx cmp.Il.cmp_lhs;
+        { Il.cmp_lhs = target_operand eax cmp.Il.cmp_lhs;
           Il.cmp_rhs = target_operand ecx cmp.Il.cmp_rhs }
       else
         cmp
@@ -293,8 +310,16 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
               end
           end
 
-      | Il.Unary un -> Il.Unary (target_8bit_unary_to_ecx un)
-      | Il.Cmp cmp -> Il.Cmp (target_8bit_cmp_to_ecx cmp)
+      | Il.Unary un ->
+          begin
+            match un.Il.unary_op with
+                Il.IMOV | Il.UMOV ->
+                  Il.Unary (target_8bit_mem_mov_to_ecx un)
+              | _  ->
+                  Il.Unary (target_8bit_unary_to_ecx un)
+          end
+
+      | Il.Cmp cmp -> Il.Cmp (target_8bit_cmp_to_eax_and_ecx cmp)
 
       | Il.Call c ->
           let ty = Il.cell_scalar_ty c.Il.call_dst in

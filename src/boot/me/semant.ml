@@ -1308,8 +1308,8 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
         Ast.TY_any -> Il.StructTy [| word;  ptr |]
       | Ast.TY_nil -> Il.NilTy
       | Ast.TY_int -> word
-          (* FIXME (bug 541563): bool should be 8 bit, not word-sized. *)
-      | Ast.TY_bool -> word
+
+      | Ast.TY_bool -> sv Il.Bits8
 
       | Ast.TY_mach (TY_u8)
       | Ast.TY_mach (TY_s8) -> sv Il.Bits8
