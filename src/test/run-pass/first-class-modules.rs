@@ -1,4 +1,4 @@
-// -*- C++ -*-
+// -*- rust -*-
 
 mod x {
   fn hello() {

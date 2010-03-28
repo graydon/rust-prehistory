@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 type pair = rec(int head, mutable mlist tail);
 type mlist = tag(cons(@pair), nil());

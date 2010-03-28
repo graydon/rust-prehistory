@@ -1,4 +1,4 @@
-// -*- C++ -*-
+// -*- rust -*-
 
 fn main() {
    auto f = "Makefile";

@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 type mlist = tag(cons(int,@mlist), nil());
 

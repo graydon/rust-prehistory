@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn a(chan[int] c) {
   if (true) {

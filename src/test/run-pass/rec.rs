@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 type rect = rec(int x, int y, int w, int h);
 

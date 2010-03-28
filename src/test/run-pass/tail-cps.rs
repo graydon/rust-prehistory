@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn checktrue(bool res) -> bool {
   check(res);

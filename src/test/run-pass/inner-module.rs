@@ -1,4 +1,4 @@
-// -*- C++ -*-
+// -*- rust -*-
 
 mod inner {
   mod inner2 {

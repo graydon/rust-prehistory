@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn ho(fn(int) -> int f) -> int {
   let int n = f(3);

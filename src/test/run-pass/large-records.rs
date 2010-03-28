@@ -1,4 +1,4 @@
-// -*- C++ -*-
+// -*- rust -*-
 
 fn f() {
   let rec(int a, int b, int c, int d,

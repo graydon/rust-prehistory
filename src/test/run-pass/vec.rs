@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn main() {
   let vec[int] v = vec(10, 20);

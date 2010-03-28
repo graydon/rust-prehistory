@@ -1,5 +1,4 @@
-
-// -*- C++ -*-
+// -*- rust -*-
 
 mod counter(mutable int x) {
   fn hello() -> int {

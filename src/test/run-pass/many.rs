@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn sub(chan[int] parent, int id) {
   if (id == 0) {

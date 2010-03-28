@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn f(int x) -> int {
   // log "in f:";

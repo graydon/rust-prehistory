@@ -1,4 +1,5 @@
-// -*- C++ -*-
+// -*- rust -*-
+
 fn f(int x) -> int {
   if (x == 1) {
     ret 1;

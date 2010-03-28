@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 type colour = tag(red(int,int), green());
 

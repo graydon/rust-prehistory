@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn f(int n) -> int {
   ret n;

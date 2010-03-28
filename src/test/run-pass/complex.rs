@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 pub type t = int;
 fn putstr(str s) {}

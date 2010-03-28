@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn x(str s, int n) {
   log s;

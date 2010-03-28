@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn f(int a, int b) : lt(a,b) {
 }

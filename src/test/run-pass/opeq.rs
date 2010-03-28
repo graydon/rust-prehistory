@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn main() {
   let int x = 1;

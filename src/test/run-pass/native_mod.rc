@@ -1,4 +1,4 @@
-// -*- C++ -*-
+// -*- rust -*-
 
 native mod libc = target_libc {
   fn open(int name, int flags, int mode) -> int;

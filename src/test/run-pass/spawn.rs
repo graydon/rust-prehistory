@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn main() {
   spawn child(10);

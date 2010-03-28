@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 type point = rec(int x, int y);
 

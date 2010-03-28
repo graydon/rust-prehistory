@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn main() {
   libc.puts(rustrt.str_buf("hello, native world 1"));
