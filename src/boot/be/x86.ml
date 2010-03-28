@@ -945,15 +945,7 @@ let fn_prologue
    *)
   let call_and_frame_sz = add_sz callsz framesz in
 
-  let primordial_frame_sz =
-    Asm.IMM
-      (Int64.mul word_sz
-         (Int64.of_int
-            (size_calculation_stack_highwater
-               call_and_frame_sz)))
-  in
-
-    (* Aalready have room to save regs on entry. *)
+    (* Already have room to save regs on entry. *)
     save_callee_saves e;
 
     let restart_pc = e.Il.emit_pc in
@@ -966,54 +958,65 @@ let fn_prologue
                          ((word_off_n Abi.stk_field_data),
                           boundary_sz)));
 
+      let (dynamic_frame_sz, dynamic_grow_jmp) =
+        match Il.size_to_expr64 call_and_frame_sz with
+            None ->
+              begin
+                let primordial_frame_sz =
+                  Asm.IMM
+                    (Int64.mul word_sz
+                       (Int64.of_int
+                          (size_calculation_stack_highwater
+                             call_and_frame_sz)))
+                in
+                  (* Primordial size-check. *)
+                  mov (rc edi) (ro esp);                          (* edi = esp                 *)
+                  sub (rc edi) (imm primordial_frame_sz);         (* edi -= size-request       *)
+                  emit (Il.cmp (ro esi) (ro edi));
+                  (* Jump to 'grow' upcall on underflow: if esi (bottom) is > edi (proposed-esp) *)
+                  let primordial_underflow_jmp_pc = e.Il.emit_pc in
+                    emit (Il.jmp Il.JA Il.CodeNone);
 
-    (* Primordial size-check. *)
-    mov (rc edi) (ro esp);                          (* edi = esp                 *)
-    sub (rc edi) (imm primordial_frame_sz);         (* edi -= size-request       *)
-      emit (Il.cmp (ro esi) (ro edi));
-      (* Jump to 'grow' upcall on underflow: if esi (bottom) is > edi (proposed-esp) *)
-      let primordial_underflow_jmp_pc = e.Il.emit_pc in
-        emit (Il.jmp Il.JA Il.CodeNone);
+                    (* Calculate dynamic frame size. *)
+                    calculate_sz e call_and_frame_sz;
+                    ((ro eax), Some primordial_underflow_jmp_pc)
+              end
+          | Some e -> ((imm e), None)
+      in
 
-        (* Calculate static or dynamic frame size. *)
-        let dynamic_frame_sz =
-          match Il.size_to_expr64 call_and_frame_sz with
-              None ->
-                calculate_sz e call_and_frame_sz;
-                (ro eax)
-            | Some e ->
-                (imm e)
-        in
+        (* "Full" frame size-check. *)
+        mov (rc edi) (ro esp);                        (* edi = esp                 *)
+        sub (rc edi) dynamic_frame_sz;                (* edi -= size-request       *)
+        emit (Il.cmp (ro esi) (ro edi));
+        (* Jump *over* 'grow' upcall on non-underflow: if esi (bottom) is <= edi (proposed-esp) *)
 
-          (* "Full" frame size-check. *)
-          mov (rc edi) (ro esp);                        (* edi = esp                 *)
-          sub (rc edi) dynamic_frame_sz;                (* edi -= size-request       *)
-          emit (Il.cmp (ro esi) (ro edi));
-          (* Jump *over* 'grow' upcall on non-underflow: if esi (bottom) is <= edi (proposed-esp) *)
+        let bypass_grow_upcall_jmp_pc = e.Il.emit_pc in
+          emit (Il.jmp Il.JBE Il.CodeNone);
 
-          let bypass_grow_upcall_jmp_pc = e.Il.emit_pc in
-            emit (Il.jmp Il.JBE Il.CodeNone);
+          begin
+            match dynamic_grow_jmp with
+                None -> ()
+              | Some j -> Il.patch_jump e j e.Il.emit_pc
+          end;
+          (* Extract growth-amount from edi. *)
+          mov (rc esi) (ro esp);
+          sub (rc esi) (ro edi);
+          add (rc esi) (Il.Imm (boundary_sz, word_ty));
+          (* Perform 'grow' upcall, then restart frame-entry. *)
+          emit_void_prologue_call e nabi grow_proc_fixup [| ro esi |];
+          emit (Il.jmp Il.JMP (Il.CodeLabel restart_pc));
+          Il.patch_jump e bypass_grow_upcall_jmp_pc e.Il.emit_pc;
 
-            Il.patch_jump e primordial_underflow_jmp_pc e.Il.emit_pc;
-            (* Extract growth-amount from edi. *)
-            mov (rc esi) (ro esp);
-            sub (rc esi) (ro edi);
-            add (rc esi) (Il.Imm (boundary_sz, word_ty));
-            (* Perform 'grow' upcall, then restart frame-entry. *)
-            emit_void_prologue_call e nabi grow_proc_fixup [| ro esi |];
-            emit (Il.jmp Il.JMP (Il.CodeLabel restart_pc));
-            Il.patch_jump e bypass_grow_upcall_jmp_pc e.Il.emit_pc;
+          (* Establish a frame, wherever we landed. *)
+          sub (rc esp) dynamic_frame_sz;
 
-            (* Establish a frame, wherever we landed. *)
-            sub (rc esp) dynamic_frame_sz;
-
-            (* Zero the frame.
-             * 
-             * FIXME: this is awful, will go away when we have proper CFI.
-             *)
-            mov (rc edi) (ro esp);
-            mov (rc ecx) dynamic_frame_sz;
-            emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
+          (* Zero the frame.
+           * 
+           * FIXME: this is awful, will go away when we have proper CFI.
+           *)
+          mov (rc edi) (ro esp);
+          mov (rc ecx) dynamic_frame_sz;
+          emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
 ;;
 
 
