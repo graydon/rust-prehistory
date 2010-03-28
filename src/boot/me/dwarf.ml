@@ -1627,7 +1627,17 @@ let dwarf_visitor
   in
 
   let addr_ranges (fix:fixup) : frag =
-    let lo = image_base_rel fix in
+    let image_is_relocated =
+      match cx.ctxt_sess.Session.sess_targ with
+          Win32_x86_pe ->
+            cx.ctxt_sess.Session.sess_library_mode
+        | _ -> true
+    in
+    let lo =
+      if image_is_relocated
+      then image_base_rel fix
+      else M_POS fix
+    in
       SEQ [|
         (* DW_AT_low_pc, DW_FORM_addr *)
         WORD (word_ty_mach, lo);
