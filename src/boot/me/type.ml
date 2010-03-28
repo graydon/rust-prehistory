@@ -1080,6 +1080,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                 { Ast.fn_output_slot = { node = node; id = id } } ->
                   retval_tv_r := ref TYSPEC_all;
                   unify_slot node (Some id) !retval_tv_r
+
+            | Ast.MOD_ITEM_pred _ ->
+                retval_tv_r := ref (TYSPEC_resolved Ast.TY_bool)
+
             | _ -> ()
         with Semant_err (None, msg) ->
           raise (Semant_err ((Some mod_item.id), msg))
