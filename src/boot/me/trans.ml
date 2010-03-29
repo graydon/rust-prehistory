@@ -3754,9 +3754,22 @@ let trans_visitor
     leave_file_for i.id
   in
 
+  let visit_imported_mod_item_post n p i =
+    inner.Walk.visit_mod_item_post n p i;
+    begin
+      match i.node.Ast.decl_item with
+          Ast.MOD_ITEM_mod (_, mis) -> trans_mod i.id mis
+        | _ -> ()
+    end;
+    leave_file_for i.id
+  in
+
   let visit_mod_item_post n p i =
-    if not (Hashtbl.mem cx.ctxt_imported_items i.id)
-    then visit_local_mod_item_post n p i;
+    if Hashtbl.mem cx.ctxt_imported_items i.id
+    then
+      visit_imported_mod_item_post n p i
+    else
+      visit_local_mod_item_post n p i
   in
 
   let visit_crate_pre crate =

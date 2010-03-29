@@ -4,5 +4,6 @@ mod main;
 // Built-in types support modules.
 mod _int;
 mod _u8;
-mod _vec;
+// The parametric code in _vec doesn't work yet.
+// mod _vec;
 mod _str;
