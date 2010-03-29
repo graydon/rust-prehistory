@@ -2003,6 +2003,7 @@ public:
     {
         I(rt, n < crate->n_c_syms);
         c_sym *sym = c_syms[n];
+        rt->log(LOG_LINK, "cached C symbol %s = 0x%" PRIxPTR, name, sym);
         if (!sym) {
             sym = new (rt) c_sym(rt, library, name);
             c_syms[n] = sym;
@@ -3016,13 +3017,17 @@ upcall_str_concat(rust_proc *proc, rust_str *dst, rust_str *a, rust_str *b)
 
 rust_crate_cache *
 rust_rt::get_cache(rust_crate const *crate) {
+    log(LOG_LINK, "looking for crate-cache for crate 0x%" PRIxPTR, crate);
     rust_crate_cache *cache = NULL;
     for (size_t i = 0; i < caches.length(); ++i) {
-        cache = caches[i];
-        if (cache->crate == crate)
+        rust_crate_cache *c = caches[i];
+        if (c->crate == crate) {
+            cache = c;
             break;
+        }
     }
     if (!cache) {
+        log(LOG_LINK, "making new crate-cache for crate 0x%" PRIxPTR, crate);
         cache = new (this) rust_crate_cache(this, crate);
         caches.push(cache);
     }
@@ -3041,11 +3046,13 @@ fetch_c_sym(rust_proc *proc,
     rust_rt *rt = proc->rt;
 
     if (proc->cache && proc->cache->crate != curr_crate) {
+        proc->rt->log(LOG_LINK, "lookup uses different crate");
         proc->cache->deref();
         proc->cache = NULL;
     }
 
     if (!proc->cache) {
+        proc->rt->log(LOG_LINK, "fetching cache for current crate");
         proc->cache = rt->get_cache(curr_crate);
     }
 
@@ -3069,15 +3076,20 @@ upcall_import_rust_sym(rust_proc *proc,
     rt->log(LOG_UPCALL|LOG_LINK,
             "upcall import rust sym: lib #%" PRIdPTR
             " = %s, c_sym #%" PRIdPTR
-            ", rust_sym #%" PRIdPTR,
-            lib_num, library, c_sym_num, rust_sym_num);
+            ", rust_sym #%" PRIdPTR
+            ", curr_crate = 0x%" PRIxPTR,
+            lib_num, library, c_sym_num, rust_sym_num,
+            curr_crate);
     for (char const **c = crate_rel(curr_crate, path); *c; ++c) {
         rt->log(LOG_UPCALL, " + %s", crate_rel(curr_crate, *c));
     }
 
+    rt->log(LOG_UPCALL|LOG_LINK,
+            "import C symbol 'rust_crate' from lib #%" PRIdPTR,lib_num);
     rust_crate_cache::c_sym *c =
         fetch_c_sym(proc, curr_crate, lib_num, c_sym_num, library, "rust_crate");
 
+    rt->log(LOG_UPCALL|LOG_LINK, "import rust symbol inside crate");
     rust_crate_cache::rust_sym *s =
         proc->cache->get_rust_sym(rust_sym_num, rt, curr_crate, c, path);
 
@@ -3105,8 +3117,9 @@ upcall_import_c_sym(rust_proc *proc,
     rt->log(LOG_UPCALL|LOG_LINK,
             "upcall import c sym: lib #%" PRIdPTR
             " = %s, c_sym #%" PRIdPTR
-            " = %s",
-            lib_num, library, c_sym_num, symbol);
+            " = %s"
+            ", curr_crate = 0x%" PRIxPTR,
+            lib_num, library, c_sym_num, symbol, curr_crate);
 
     rust_crate_cache::c_sym *c =
         fetch_c_sym(proc, curr_crate, lib_num, c_sym_num, library, symbol);
