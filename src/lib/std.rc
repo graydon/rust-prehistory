@@ -1,2 +1,8 @@
 mod hello;
 mod main;
+
+// Built-in types support modules.
+mod _int;
+mod _u8;
+mod _vec;
+mod _str;

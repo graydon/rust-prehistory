@@ -1516,9 +1516,9 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
 
   match (signed, dst, src) with
 
-      (* m8 <- r8 only. *)
-      (_,  _, Il.Cell (Il.Reg ((Il.Hreg r), src_ty)))
-        when is_m8 dst && is_ty8 src_ty ->
+      (* m8 <- r??, r8 or truncate(r32). *)
+      (_,  _, Il.Cell (Il.Reg ((Il.Hreg r), _)))
+        when is_m8 dst ->
           insn_rm_r 0x88 dst (reg r)
 
     (* r8 <- r8: treat as r32 <- r32. *)
@@ -1747,10 +1747,20 @@ let mul_like (src:Il.operand) (signed:bool) (slash:int)
       Il.Cell src when is_rm32 src ->
         insn_rm_r 0xf7 src slash
 
-    | Il.Imm _ ->
+    | Il.Cell src when is_rm8 src ->
+        insn_rm_r 0xf6 src slash
+
+    | Il.Imm (_, TY_u32)
+    | Il.Imm (_, TY_s32) ->
         let tmp = Il.Reg ((Il.Hreg edx), Il.ValTy Il.Bits32) in
         Asm.SEQ [| mov signed tmp src;
                    insn_rm_r 0xf7 tmp slash |]
+
+    | Il.Imm (_, TY_u8)
+    | Il.Imm (_, TY_s8) ->
+        let tmp = Il.Reg ((Il.Hreg edx), Il.ValTy Il.Bits8) in
+        Asm.SEQ [| mov signed tmp src;
+                   insn_rm_r 0xf6 tmp slash |]
 
     | _ -> raise Unrecognized
 ;;
@@ -1824,22 +1834,28 @@ let select_insn (q:Il.quad) : Asm.frag =
                                         rm_src_op32=0x0b; }
 
                 | (Il.Reg (Il.Hreg r, t), Il.UMUL)
-                    when is_ty32 t && r = eax -> mulop false slash4
+                    when (is_ty32 t || is_ty8 t) && r = eax ->
+                    mulop false slash4
 
                 | (Il.Reg (Il.Hreg r, t), Il.IMUL)
-                    when is_ty32 t && r = eax -> mulop true slash5
+                    when (is_ty32 t || is_ty8 t) && r = eax ->
+                    mulop true slash5
 
                 | (Il.Reg (Il.Hreg r, t), Il.UDIV)
-                    when is_ty32 t && r = eax -> divop false slash6
+                    when (is_ty32 t || is_ty8 t) && r = eax ->
+                    divop false slash6
 
                 | (Il.Reg (Il.Hreg r, t), Il.IDIV)
-                    when is_ty32 t && r = eax -> divop true slash7
+                    when (is_ty32 t || is_ty8 t) && r = eax ->
+                    divop true slash7
 
                 | (Il.Reg (Il.Hreg r, t), Il.UMOD)
-                    when is_ty32 t && r = eax -> modop false slash6
+                    when (is_ty32 t || is_ty8 t) && r = eax ->
+                    modop false slash6
 
                 | (Il.Reg (Il.Hreg r, t), Il.IMOD)
-                    when is_ty32 t && r = eax -> modop true slash7
+                    when (is_ty32 t || is_ty8 t) && r = eax ->
+                    modop true slash7
 
                 | _ -> raise Unrecognized
           else raise Unrecognized
