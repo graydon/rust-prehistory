@@ -216,8 +216,8 @@ Each list item should be a regexp matching a single identifier.")
           (cons "rust" (c-lang-const c-mode-menu rust)))
 
 ;;;###autoload
-(add-to-list 'auto-mode-alist '("\\.rs\\'" . rust-mode))
-(add-to-list 'auto-mode-alist '("\\.rc\\'" . rust-crate-mode))
+(add-to-list 'auto-mode-alist '("\\.rs$" . rust-mode))
+(add-to-list 'auto-mode-alist '("\\.rc$" . rust-crate-mode))
 
 ;;;###autoload
 (defun rust-mode ()
