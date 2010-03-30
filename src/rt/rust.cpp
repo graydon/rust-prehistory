@@ -271,7 +271,7 @@ struct rust_str : public rc_base<rust_str> {
     size_t fill;
     uint8_t data[];         // C99 "flexible array" element.
 
-    rust_str(size_t alloc, size_t fill, char const *s);
+    rust_str(rust_rt *rt, size_t alloc, size_t fill, char const *s);
     ~rust_str();
 };
 
@@ -1608,12 +1608,13 @@ circ_buf::shift(void *dst)
 
 // Strings
 
-rust_str::rust_str(size_t alloc, size_t fill, char const *s) :
+rust_str::rust_str(rust_rt *rt, size_t alloc, size_t fill, char const *s) :
     alloc(alloc),
     fill(fill)
 {
-    if (s)
-        memcpy(&data[0], s, fill);
+    I(rt, s);
+    I(rt, fill > 0);
+    memcpy(&data[0], s, fill);
 }
 
 rust_str::~rust_str()
@@ -2973,7 +2974,7 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
     rust_rt *rt = proc->rt;
     size_t alloc = next_power_of_two(fill);
     void *mem = rt->malloc(sizeof(rust_str) + alloc);
-    rust_str *st = new (mem) rust_str(alloc, fill, s);
+    rust_str *st = new (mem) rust_str(rt, alloc, fill, s);
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
             s, fill, st);
@@ -3314,6 +3315,18 @@ rust_srv::clone()
 }
 
 /* Native builtins. */
+
+extern "C" CDECL rust_str*
+str_alloc(rust_proc *proc, size_t n_bytes)
+{
+    rust_rt *rt = proc->rt;
+    size_t alloc = next_power_of_two(n_bytes);
+    void *mem = rt->malloc(sizeof(rust_str) + alloc);
+    rust_str *st = new (mem) rust_str(rt, alloc, 1, "");
+    if (!st)
+        proc->fail(2);
+    return st;
+}
 
 extern "C" CDECL char const *
 str_buf(rust_proc *proc, rust_str *s)
