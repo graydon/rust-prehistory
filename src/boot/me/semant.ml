@@ -535,12 +535,13 @@ let exterior_slot ty : Ast.slot = exterior_slot_full Ast.IMMUTABLE ty
 
 (* General folds of Ast.ty. *)
 
-type ('ty, 'slot, 'slots, 'tag) ty_fold =
+type ('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold =
     {
       (* Functions that correspond to interior nodes in Ast.ty. *)
       ty_fold_slot : (Ast.mode * 'ty) -> 'slot;
       ty_fold_slots : ('slot array) -> 'slots;
       ty_fold_tags : (Ast.name, 'slots) Hashtbl.t -> 'tag;
+      ty_fold_mod_type_items : (Ast.ident, 'mti) Hashtbl.t -> 'mtis;
 
       (* Functions that correspond to the Ast.ty constructors. *)
       ty_fold_any: unit -> 'ty;
@@ -560,7 +561,12 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_pred : ('slots * Ast.constrs) -> 'ty;
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
-      ty_fold_mod : (('slots * Ast.constrs) option * Ast.mod_type_items) -> 'ty;
+      ty_fold_mod : (('slots * Ast.constrs) option * 'mtis) -> 'ty;
+      ty_fold_mod_type_item_opaque_type : (Ast.ty_param array) -> Ast.mutability -> 'mti;
+      ty_fold_mod_type_item_public_type : (Ast.ty_param array) -> 'ty -> 'mti;
+      ty_fold_mod_type_item_pred : (Ast.ty_param array) -> ('slots * Ast.constrs) -> 'mti;
+      ty_fold_mod_type_item_fn : (Ast.ty_param array) -> (('slots * Ast.constrs * 'slot) * Ast.ty_fn_aux) -> 'mti;
+      ty_fold_mod_type_item_mod : (Ast.ty_param array) -> (('slots * Ast.constrs) option * 'mtis) -> 'mti;
       ty_fold_proc : unit -> 'ty;
       ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
       ty_fold_param : (int * opaque_id * Ast.mutability) -> 'ty;
@@ -569,7 +575,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_constrained : ('ty * Ast.constrs) -> 'ty }
 ;;
 
-let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
+let rec fold_ty (f:('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold) (ty:Ast.ty) : 'ty =
   let fold_slot (s:Ast.slot) : 'slot =
     f.ty_fold_slot (s.Ast.slot_mode, fold_ty f (slot_ty s))
   in
@@ -583,6 +589,29 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
     (fold_slots tsig.Ast.sig_input_slots,
      tsig.Ast.sig_input_constrs,
      fold_slot tsig.Ast.sig_output_slot)
+  in
+  let rec fold_mti (mti:Ast.mod_type_item) : 'mti =
+    let p = mti.Ast.decl_params in
+      match mti.Ast.decl_item with
+          Ast.MOD_TYPE_ITEM_opaque_type mut ->
+            f.ty_fold_mod_type_item_opaque_type p mut
+        | Ast.MOD_TYPE_ITEM_public_type t ->
+            f.ty_fold_mod_type_item_public_type p (fold_ty f t)
+        | Ast.MOD_TYPE_ITEM_pred (slots, constrs) ->
+            f.ty_fold_mod_type_item_pred p (fold_slots slots, constrs)
+        | Ast.MOD_TYPE_ITEM_mod tmod ->
+            f.ty_fold_mod_type_item_mod p (fold_tmod tmod)
+        | Ast.MOD_TYPE_ITEM_fn (tsig, taux) ->
+            f.ty_fold_mod_type_item_fn p (fold_sig tsig, taux)
+  and fold_mtis (mtis:Ast.mod_type_items) : 'mtis =
+    f.ty_fold_mod_type_items (htab_map mtis (fun k v -> (k, fold_mti v)))
+  and fold_tmod ((hdr:(Ast.slot array * Ast.constrs) option), (mtis:Ast.mod_type_items))
+      : (('slots * Ast.constrs) option * 'mtis) =
+    let hdr' = match hdr with
+        None -> None
+      | Some (slots, constrs) -> Some (fold_slots slots, constrs)
+    in
+      (hdr', (fold_mtis mtis))
   in
     match ty with
     Ast.TY_any -> f.ty_fold_any ()
@@ -607,14 +636,7 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_chan t -> f.ty_fold_chan (fold_ty f t)
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
-  | Ast.TY_mod (hdr, mti) ->
-      let folded_hdr =
-        match hdr with
-            None -> None
-          | Some (slots, constrs) -> Some (fold_slots slots, constrs)
-      in
-        f.ty_fold_mod (folded_hdr, mti)
-
+  | Ast.TY_mod tmod -> f.ty_fold_mod (fold_tmod tmod)
   | Ast.TY_proc -> f.ty_fold_proc ()
 
   | Ast.TY_opaque x -> f.ty_fold_opaque x
@@ -627,12 +649,13 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
 
 ;;
 
-type 'a simple_ty_fold = ('a, 'a, 'a, 'a) ty_fold
+type 'a simple_ty_fold = ('a, 'a, 'a, 'a, 'a, 'a) ty_fold
 ;;
 
 let ty_fold_default (default:'a) : 'a simple_ty_fold =
     { ty_fold_slot = (fun _ -> default);
       ty_fold_slots = (fun _ -> default);
+      ty_fold_mod_type_items = (fun _ -> default);
       ty_fold_tags = (fun _ -> default);
       ty_fold_any = (fun _ -> default);
       ty_fold_nil = (fun _ -> default);
@@ -652,6 +675,11 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_chan = (fun _ -> default);
       ty_fold_port = (fun _ -> default);
       ty_fold_mod = (fun _ -> default);
+      ty_fold_mod_type_item_opaque_type = (fun _ _ -> default);
+      ty_fold_mod_type_item_public_type = (fun _ _ -> default);
+      ty_fold_mod_type_item_pred = (fun _ _ -> default);
+      ty_fold_mod_type_item_fn = (fun _ _ -> default);
+      ty_fold_mod_type_item_mod = (fun _ _ -> default);
       ty_fold_proc = (fun _ -> default);
       ty_fold_opaque = (fun _ -> default);
       ty_fold_param = (fun _ -> default);
@@ -661,10 +689,15 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
 ;;
 
 let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
-    : (Ast.ty, Ast.slot, Ast.slot array, Ast.ty_tag) ty_fold =
+    : (Ast.ty, Ast.slot, Ast.slot array, Ast.ty_tag,
+       Ast.mod_type_item, Ast.mod_type_items) ty_fold =
+  let decl p i = { Ast.decl_params = p;
+                   Ast.decl_item = i }
+  in
   { ty_fold_slot = (fun (mode, t) -> { Ast.slot_mode = mode;
                                        Ast.slot_ty = Some t });
     ty_fold_slots = (fun slots -> slots);
+    ty_fold_mod_type_items = (fun mtis -> mtis);
     ty_fold_tags = (fun htab -> htab);
     ty_fold_any = (fun _ -> id Ast.TY_any);
     ty_fold_nil = (fun _ -> id Ast.TY_nil);
@@ -689,6 +722,14 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
     ty_fold_port = (fun t -> id (Ast.TY_port t));
     ty_fold_mod = (fun (hdr, mti) -> id (Ast.TY_mod (hdr, mti)));
+    ty_fold_mod_type_item_opaque_type = (fun p mut -> decl p (Ast.MOD_TYPE_ITEM_opaque_type mut));
+    ty_fold_mod_type_item_public_type = (fun p ty -> decl p (Ast.MOD_TYPE_ITEM_public_type ty));
+    ty_fold_mod_type_item_pred = (fun p psig -> decl p (Ast.MOD_TYPE_ITEM_pred psig));
+    ty_fold_mod_type_item_fn = (fun p ((islots,constrs,oslot),taux) ->
+                                  decl p (Ast.MOD_TYPE_ITEM_fn ({ Ast.sig_input_slots = islots;
+                                                                  Ast.sig_input_constrs = constrs;
+                                                                  Ast.sig_output_slot = oslot }, taux)));
+    ty_fold_mod_type_item_mod = (fun p tmod -> decl p (Ast.MOD_TYPE_ITEM_mod tmod));
     ty_fold_proc = (fun _ -> id Ast.TY_proc);
     ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
     ty_fold_param = (fun (i, oid, mut) -> id (Ast.TY_param (i, oid, mut)));
@@ -710,6 +751,7 @@ let associative_binary_op_ty_fold
     { base with
         ty_fold_slots = (fun slots -> reduce (Array.to_list slots));
         ty_fold_slot = (fun (_, a) -> a);
+        ty_fold_mod_type_items = (fun mtis -> reduce (htab_vals mtis));
         ty_fold_tags = (fun tab -> reduce (htab_vals tab));
         ty_fold_tup = (fun a -> a);
         ty_fold_vec = (fun a -> a);
@@ -718,6 +760,18 @@ let associative_binary_op_ty_fold
         ty_fold_iso = (fun (_,iso) -> reduce (Array.to_list iso));
         ty_fold_fn = (fun ((islots, _, oslot), _) -> fn islots oslot);
         ty_fold_pred = (fun (islots, _) -> islots);
+        ty_fold_mod = (fun (hdr,a) ->
+                         match hdr with
+                             None -> a
+                           | Some (h,_) -> fn h a);
+        ty_fold_mod_type_item_opaque_type = (fun _ _ -> default);
+        ty_fold_mod_type_item_public_type = (fun _ a -> a);
+        ty_fold_mod_type_item_pred = (fun _ (islots, _) -> islots);
+        ty_fold_mod_type_item_fn = (fun _ ((islots, _, oslot), _) -> fn islots oslot);
+        ty_fold_mod_type_item_mod = (fun _ (hdr,a) ->
+                                       match hdr with
+                                           None -> a
+                                         | Some (h, _) -> fn h a);
         ty_fold_chan = (fun a -> a);
         ty_fold_port = (fun a -> a);
         ty_fold_constrained = (fun (a, _) -> a) }
