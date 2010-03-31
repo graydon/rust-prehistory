@@ -1153,7 +1153,7 @@ and fmt_decl_params (ff:Format.formatter) (params:ty_param array) : unit =
       fmt ff "[";
       for i = 0 to (Array.length params) - 1
       do
-        if i = 0
+        if i <> 0
         then fmt ff ", ";
         let (ident, (i, oid, mut)) = params.(i) in
           fmt_mutable ff mut;
