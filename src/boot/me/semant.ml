@@ -544,6 +544,8 @@ type ('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold =
       ty_fold_mod_type_items : (Ast.ident, 'mti) Hashtbl.t -> 'mtis;
       ty_fold_enter_params : (Ast.ty_param array) -> unit;
       ty_fold_leave_params : (Ast.ty_param array) -> unit;
+      ty_fold_enter_mod : (Ast.ty_mod) -> unit;
+      ty_fold_leave_mod : (Ast.ty_mod) -> unit;
 
       (* Functions that correspond to the Ast.ty constructors. *)
       ty_fold_any: unit -> 'ty;
@@ -609,12 +611,16 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold) (ty:Ast.ty) 
         | Ast.MOD_TYPE_ITEM_pred (slots, constrs) ->
             f.ty_fold_mod_type_item_pred p
               (in_param_scope (fun _ -> (fold_slots slots, constrs)))
-        | Ast.MOD_TYPE_ITEM_mod tmod ->
-            f.ty_fold_mod_type_item_mod p
-              (in_param_scope (fun _ -> (fold_tmod tmod)))
         | Ast.MOD_TYPE_ITEM_fn (tsig, taux) ->
             f.ty_fold_mod_type_item_fn p
               (in_param_scope (fun _ -> (fold_sig tsig, taux)))
+        | Ast.MOD_TYPE_ITEM_mod tmod ->
+            f.ty_fold_enter_mod tmod;
+            let r = f.ty_fold_mod_type_item_mod p
+              (in_param_scope (fun _ -> (fold_tmod tmod)))
+            in
+              f.ty_fold_leave_mod tmod;
+              r
 
   and fold_mtis (mtis:Ast.mod_type_items) : 'mtis =
     f.ty_fold_mod_type_items (htab_map mtis (fun k v -> (k, fold_mti v)))
@@ -649,7 +655,12 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold) (ty:Ast.ty) 
   | Ast.TY_chan t -> f.ty_fold_chan (fold_ty f t)
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
-  | Ast.TY_mod tmod -> f.ty_fold_mod (fold_tmod tmod)
+  | Ast.TY_mod tmod ->
+      f.ty_fold_enter_mod tmod;
+      let r = f.ty_fold_mod (fold_tmod tmod) in
+        f.ty_fold_leave_mod tmod;
+        r
+
   | Ast.TY_proc -> f.ty_fold_proc ()
 
   | Ast.TY_opaque x -> f.ty_fold_opaque x
@@ -671,6 +682,8 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_mod_type_items = (fun _ -> default);
       ty_fold_enter_params = (fun _ -> ());
       ty_fold_leave_params = (fun _ -> ());
+      ty_fold_enter_mod = (fun _ -> ());
+      ty_fold_leave_mod = (fun _ -> ());
       ty_fold_tags = (fun _ -> default);
       ty_fold_any = (fun _ -> default);
       ty_fold_nil = (fun _ -> default);
@@ -715,6 +728,8 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_mod_type_items = (fun mtis -> mtis);
     ty_fold_enter_params = (fun _ -> ());
     ty_fold_leave_params = (fun _ -> ());
+    ty_fold_enter_mod = (fun _ -> ());
+    ty_fold_leave_mod = (fun _ -> ());
     ty_fold_tags = (fun htab -> htab);
     ty_fold_any = (fun _ -> id Ast.TY_any);
     ty_fold_nil = (fun _ -> id Ast.TY_nil);

@@ -329,6 +329,8 @@ and resolve_type
     (t:Ast.ty)
     : Ast.ty =
   let base = ty_fold_rebuild (fun t -> t) in
+  let ty_fold_enter_mod _ = err None "Resolve.resolve_type on type containing mod_type" in
+  let ty_fold_enter_params _ = err None "Resolve.resolve_type on type containing parametric item" in
   let ty_fold_named name =
     let (scopes, node, t) = lookup_type_by_name cx scopes name in
       log cx "resolved type name '%a' to item %d" Ast.sprintf_name name (int_of_node node);
@@ -345,7 +347,13 @@ and resolve_type
                 let recur = push_node recur node in
                   resolve_type cx scopes recursive_tag_groups all_tags recur t
   in
-  let fold = { base with ty_fold_named = ty_fold_named } in
+  let fold =
+    { base with
+        ty_fold_named = ty_fold_named;
+        ty_fold_enter_mod = ty_fold_enter_mod;
+        ty_fold_enter_params = ty_fold_enter_params;
+    }
+  in
     fold_ty fold t
 ;;
 
