@@ -25,6 +25,7 @@ let (sess:Session.sess) =
     Session.sess_in = None;
     Session.sess_out = None;
     Session.sess_library_mode = false;
+    Session.sess_alt_backend = false;
     (* FIXME: need something fancier here for unix sub-flavours. *)
     Session.sess_targ = targ;
     Session.sess_log_lex = false;
@@ -162,7 +163,7 @@ let argspecs =
     ("-rgc", Arg.Unit (fun _ -> sess.Session.sess_report_gc <- true), "report gc behavior of compiler");
     ("-rdwarf", Arg.String dump_file, "report DWARF info in compiled file, then exit");
     ("-rdeps", Arg.Unit (fun _ -> sess.Session.sess_report_deps <- true), "report dependencies of input, then exit");
-  ]
+  ] @ (Glue.alt_argspecs sess)
 ;;
 
 let exit_if_failed _ =
@@ -342,8 +343,11 @@ let main_pipeline _ =
           exit_if_failed ()
 ;;
 
-
-main_pipeline ();;
+(* And we're off! *)
+if sess.Session.sess_alt_backend
+then Glue.alt_pipeline sess sem_cx crate
+else main_pipeline ()
+;;
 
 if sess.Session.sess_report_timing
 then
