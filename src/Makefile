@@ -287,15 +287,15 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       inner-module.rs int.rs large-records.rs lazychan.rs \
                       linear-for-loop.rs many.rs mlist.rs mlist_cycle.rs \
                       mutual-recursion-group.rs native.rc native.rs \
-											native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \
-											rec-extend.rs rec.rs rec_tup.rs return-nil.rs \
-											s32-sub.rs s8-incr.rs spawn-fn.rs spawn.rs \
-											stateful-module.rs str-concat.rs str-idx.rs tag.rs \
-											tail-cps.rs tail-direct.rs threads.rs tup.rs \
-											u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \
-											writealias.rs yield.rs yield2.rs) \
-										$(addprefix test/run-fail/,fail.rs linked-failure.rs \
-											pred.rs vec_overrun.rs vec_underrun.rs) \
+                      native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \
+                      rec-extend.rs rec.rs rec_tup.rs return-nil.rs \
+                      s32-sub.rs s8-incr.rs spawn-fn.rs spawn.rs \
+                      stateful-module.rs str-concat.rs str-idx.rs tag.rs \
+                      tail-cps.rs tail-direct.rs threads.rs tup.rs \
+                      u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \
+                      writealias.rs yield.rs yield2.rs) \
+                    $(addprefix test/run-fail/,fail.rs linked-failure.rs \
+                      pred.rs vec_overrun.rs vec_underrun.rs) \
                     $(addprefix test/compile-fail/,rec-missing-fields.rs \
                       infinite-tag-type-recursion.rs \
                       infinite-vec-type-recursion.rs)
