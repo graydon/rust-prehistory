@@ -764,7 +764,6 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
     and unify_parametric_ty (n:int) (ty:Ast.ty) (tv:tyvar) : unit =
       let resolved = ref (TYSPEC_resolved ty) in
       let params = ref (Some (Array.init n (fun _ -> ref TYSPEC_all))) in
-      (* let params = make_typarams params in *)
         unify_tyvars (ref (TYSPEC_parametric (resolved, params))) tv
 
     and unify_ty (ty:Ast.ty) (tv:tyvar) : unit =
@@ -889,8 +888,13 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
     and unify_lval (lval:Ast.lval) (tv:tyvar) : unit =
       let id = lval_base_id lval in
-        Hashtbl.add lval_tyvars id tv;
-        unify_lval' lval tv
+      (* Fetch lval with type components resolved. *)
+        iflog cx (fun _ -> log cx
+                    "fetching resolved version of lval #%d"
+                    (int_of_node id));
+        let lval = Hashtbl.find cx.ctxt_all_lvals id in
+          Hashtbl.add lval_tyvars id tv;
+          unify_lval' lval tv
 
     in
     let gen_atom_tvs atoms =

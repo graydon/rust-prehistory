@@ -20,6 +20,11 @@ let log cx = Session.log "resolve"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
+let iflog cx thunk =
+  if cx.ctxt_sess.Session.sess_log_resolve
+  then thunk ()
+  else ()
+;;
 
 let block_scope_forming_visitor
     (cx:ctxt)
@@ -366,12 +371,14 @@ let type_resolving_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
 
+  let resolve_ty (t:Ast.ty) : Ast.ty =
+    resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info t
+  in
+
   let resolve_slot (s:Ast.slot) : Ast.slot =
     match s.Ast.slot_ty with
         None -> s
-      | Some ty ->
-          let ty = resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info ty in
-            { s with Ast.slot_ty = Some ty }
+      | Some ty -> { s with Ast.slot_ty = Some (resolve_ty ty) }
   in
 
   let resolve_slot_identified (s:Ast.slot identified) : (Ast.slot identified) =
@@ -505,10 +512,49 @@ let type_resolving_visitor
       | _ -> ()
   in
 
+  let visit_lval_pre lv =
+    let rec rebuild_lval' lv =
+        match lv with
+            Ast.LVAL_ext (base, ext) ->
+              let ext =
+                match ext with
+                    Ast.COMP_named (Ast.COMP_ident _)
+                  | Ast.COMP_named (Ast.COMP_idx _)
+                  | Ast.COMP_atom (Ast.ATOM_literal _) -> ext
+                  | Ast.COMP_atom (Ast.ATOM_lval lv) ->
+                      Ast.COMP_atom (Ast.ATOM_lval (rebuild_lval lv))
+                  | Ast.COMP_named (Ast.COMP_app (ident, params)) ->
+                      Ast.COMP_named (Ast.COMP_app (ident, Array.map resolve_ty params))
+              in
+                Ast.LVAL_ext (rebuild_lval' base, ext)
+
+          | Ast.LVAL_base nb ->
+              let node =
+                match nb.node with
+                    Ast.BASE_ident _
+                  | Ast.BASE_temp _ -> nb.node
+                  | Ast.BASE_app (ident, params) ->
+                      Ast.BASE_app (ident, Array.map resolve_ty params)
+              in
+                Ast.LVAL_base {nb with node = node}
+
+    and rebuild_lval lv =
+      let id = lval_base_id lv in
+      let lv' = rebuild_lval' lv in
+        iflog cx (fun _ -> log cx "rebuilt lval %a as %a (#%d)"
+                    Ast.sprintf_lval lv Ast.sprintf_lval lv' (int_of_node id));
+        htab_put cx.ctxt_all_lvals id lv';
+        lv'
+    in
+      ignore (rebuild_lval lv);
+      inner.Walk.visit_lval_pre lv
+  in
+
     { inner with
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_mod_item_post = visit_mod_item_post; }
+        Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_lval_pre = visit_lval_pre; }
 ;;
 
 
@@ -539,6 +585,7 @@ let lval_base_resolving_visitor
 
   let visit_lval_pre lv =
     let rec lookup_lval lv =
+      iflog cx (fun _ -> log cx "looking up lval #%d" (int_of_node (lval_base_id lv)));
       match lv with
           Ast.LVAL_ext (base, ext) ->
             begin
@@ -549,7 +596,8 @@ let lval_base_resolving_visitor
             end
         | Ast.LVAL_base nb ->
             let referent_id = lookup_referent_by_name_base nb.id nb.node in
-              log cx "resolved lval #%d to referent #%d" (int_of_node nb.id) (int_of_node referent_id);
+              iflog cx (fun _ -> log cx "resolved lval #%d to referent #%d"
+                          (int_of_node nb.id) (int_of_node referent_id));
               htab_put cx.ctxt_lval_to_referent nb.id referent_id
     in
       lookup_lval lv;
