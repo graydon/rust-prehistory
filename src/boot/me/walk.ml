@@ -34,10 +34,6 @@ type visitor =
         Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
       visit_mod_item_post:
         Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
-      visit_mod_type_item_pre:
-        Ast.ident -> (Ast.ty_param array) -> Ast.mod_type_item -> unit;
-      visit_mod_type_item_post:
-        Ast.ident -> (Ast.ty_param array) -> Ast.mod_type_item -> unit;
       visit_crate_pre: Ast.crate -> unit;
       visit_crate_post: Ast.crate -> unit;
     }
@@ -63,8 +59,6 @@ let empty_visitor =
     visit_lval_post = (fun _ -> ());
     visit_mod_item_pre = (fun _ _ _ -> ());
     visit_mod_item_post = (fun _ _ _ -> ());
-    visit_mod_type_item_pre = (fun _ _ _ -> ());
-    visit_mod_type_item_post = (fun _ _ _ -> ());
     visit_crate_pre = (fun _ -> ());
     visit_crate_post = (fun _ -> ()); }
 ;;
@@ -178,12 +172,12 @@ and walk_mod_item
       | Ast.MOD_ITEM_tag (htup, ttag, _) ->
           walk_header_tup v htup;
           walk_ty_tag v ttag
-
-      | Ast.MOD_ITEM_mod (hdr, items) ->
-          walk_option (fun (h,constrs) ->
-                         walk_header_slots v h;
-                         walk_constrs v constrs) hdr;
+      | Ast.MOD_ITEM_mod items ->
           walk_mod_items v items
+      | Ast.MOD_ITEM_obj ob ->
+          walk_header_slots v ob.Ast.obj_state;
+          walk_constrs v ob.Ast.obj_constrs;
+          Hashtbl.iter (fun _ fn -> walk_fn v fn.node) ob.Ast.obj_fns
 
   in
     walk_bracketed
@@ -209,6 +203,8 @@ and walk_ty
       | Ast.TY_tag ttag -> walk_ty_tag v ttag
       | Ast.TY_iso tiso -> Array.iter (walk_ty_tag v) tiso.Ast.iso_group
       | Ast.TY_fn tfn -> walk_ty_fn v tfn
+      | Ast.TY_obj fns ->
+          Hashtbl.iter (fun _ tfn -> walk_ty_fn v tfn) fns
       | Ast.TY_pred (slots, constrs) ->
           begin
             Array.iter (walk_slot v) slots;
@@ -216,7 +212,6 @@ and walk_ty
           end
       | Ast.TY_chan t -> walk_ty v t
       | Ast.TY_port t -> walk_ty v t
-      | Ast.TY_mod mt -> walk_mod_type_items v mt
       | Ast.TY_constrained (t,cs) ->
           begin
             walk_ty v t;
@@ -262,25 +257,6 @@ and walk_ty_fn
   walk_ty_sig v tsig
 
 
-and walk_mod_type_item
-    (v:visitor)
-    (name:Ast.ident)
-    (item:Ast.mod_type_item)
-    : unit =
-  let children _ =
-    match item.Ast.decl_item with
-        Ast.MOD_TYPE_ITEM_opaque_type _ -> ()
-      | Ast.MOD_TYPE_ITEM_public_type ty -> walk_ty v ty
-      | Ast.MOD_TYPE_ITEM_pred p -> walk_ty_pred v p
-      | Ast.MOD_TYPE_ITEM_mod m -> walk_mod_type_items v m
-      | Ast.MOD_TYPE_ITEM_fn f -> walk_ty_fn v f
-  in
-    walk_bracketed
-      (v.visit_mod_type_item_pre name item.Ast.decl_params)
-      children
-      (v.visit_mod_type_item_post name item.Ast.decl_params)
-      item
-
 and walk_ty_pred
     (v:visitor)
     (tpred:Ast.ty_pred)
@@ -288,20 +264,6 @@ and walk_ty_pred
   let (slots, constrs) = tpred in
     Array.iter (walk_slot v) slots;
     walk_constrs v constrs
-
-and walk_mod_type_items
-    (v:visitor)
-    (tmod:Ast.ty_mod)
-    : unit =
-  let (hdr, items) = tmod in
-    begin
-      match hdr with
-          None -> ()
-        | Some (slots, constrs) ->
-            Array.iter (walk_slot v) slots;
-            walk_constrs v constrs
-    end;
-    Hashtbl.iter (walk_mod_type_item v) items
 
 
 and walk_constrs

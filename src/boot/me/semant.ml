@@ -34,7 +34,6 @@ type glue =
   | GLUE_mark_frame of node_id
   | GLUE_drop_frame of node_id
   | GLUE_reloc_frame of node_id
-  | GLUE_bind_mod of node_id
   | GLUE_fn_binding of node_id
 ;;
 
@@ -43,8 +42,7 @@ type data =
   | DATA_name of Ast.name
   | DATA_tydesc of Ast.ty
   | DATA_frame_glue_fns of node_id
-  | DATA_mod_table of node_id
-  | DATA_mod_pair of node_id
+  | DATA_obj_vtbl of node_id
   | DATA_crate
 ;;
 
@@ -98,7 +96,7 @@ type ctxt =
 
       (* Layout-y stuff. *)
       ctxt_slot_aliased: (node_id,unit) Hashtbl.t;
-      ctxt_slot_is_module_state: (node_id,unit) Hashtbl.t;
+      ctxt_slot_is_obj_state: (node_id,unit) Hashtbl.t;
       ctxt_slot_vregs: (node_id,((int option) ref)) Hashtbl.t;
       ctxt_slot_offsets: (node_id,size) Hashtbl.t;
       ctxt_frame_sizes: (node_id,size) Hashtbl.t;
@@ -119,7 +117,6 @@ type ctxt =
 
       (* Translation-y stuff. *)
       ctxt_fn_fixups: (node_id,fixup) Hashtbl.t;
-      ctxt_mod_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_block_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_file_fixups: (node_id,fixup) Hashtbl.t;
       ctxt_spill_fixups: (node_id,fixup) Hashtbl.t;
@@ -188,14 +185,13 @@ let new_ctxt sess abi crate =
     ctxt_call_lval_params = Hashtbl.create 0;
 
     ctxt_slot_aliased = Hashtbl.create 0;
-    ctxt_slot_is_module_state = Hashtbl.create 0;
+    ctxt_slot_is_obj_state = Hashtbl.create 0;
     ctxt_slot_vregs = Hashtbl.create 0;
     ctxt_slot_offsets = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
 
     ctxt_fn_fixups = Hashtbl.create 0;
-    ctxt_mod_fixups = Hashtbl.create 0;
     ctxt_block_fixups = Hashtbl.create 0;
     ctxt_file_fixups = Hashtbl.create 0;
     ctxt_spill_fixups = Hashtbl.create 0;
@@ -308,12 +304,6 @@ let get_fn_fixup (cx:ctxt) (id:node_id) : fixup =
   else bugi cx id "fn without fixup"
 ;;
 
-let get_mod_fixup (cx:ctxt) (id:node_id) : fixup =
-  if Hashtbl.mem cx.ctxt_mod_fixups id
-  then Hashtbl.find cx.ctxt_mod_fixups id
-  else bugi cx id "mod without fixup"
-;;
-
 let get_framesz (cx:ctxt) (id:node_id) : size =
   if Hashtbl.mem cx.ctxt_frame_sizes id
   then Hashtbl.find cx.ctxt_frame_sizes id
@@ -379,8 +369,8 @@ let defn_is_item (d:defn) : bool =
     | _ -> false
 ;;
 
-let slot_is_module_state (cx:ctxt) (sid:node_id) : bool =
-  Hashtbl.mem cx.ctxt_slot_is_module_state sid
+let slot_is_obj_state (cx:ctxt) (sid:node_id) : bool =
+  Hashtbl.mem cx.ctxt_slot_is_obj_state sid
 ;;
 
 
@@ -537,17 +527,12 @@ let exterior_slot ty : Ast.slot = exterior_slot_full Ast.IMMUTABLE ty
 
 (* General folds of Ast.ty. *)
 
-type ('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold =
+type ('ty, 'slot, 'slots, 'tag) ty_fold =
     {
       (* Functions that correspond to interior nodes in Ast.ty. *)
       ty_fold_slot : (Ast.mode * 'ty) -> 'slot;
       ty_fold_slots : ('slot array) -> 'slots;
       ty_fold_tags : (Ast.name, 'slots) Hashtbl.t -> 'tag;
-      ty_fold_mod_type_items : (Ast.ident, 'mti) Hashtbl.t -> 'mtis;
-      ty_fold_enter_params : (Ast.ty_param array) -> unit;
-      ty_fold_leave_params : (Ast.ty_param array) -> unit;
-      ty_fold_enter_mod : (Ast.ty_mod) -> unit;
-      ty_fold_leave_mod : (Ast.ty_mod) -> unit;
 
       (* Functions that correspond to the Ast.ty constructors. *)
       ty_fold_any: unit -> 'ty;
@@ -564,15 +549,11 @@ type ('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold =
       ty_fold_iso : (int * 'tag array) -> 'ty;
       ty_fold_idx : int -> 'ty;
       ty_fold_fn : (('slots * Ast.constrs * 'slot) * Ast.ty_fn_aux) -> 'ty;
+      ty_fold_obj : ((Ast.ident, (('slots * Ast.constrs * 'slot) *
+                                    Ast.ty_fn_aux)) Hashtbl.t) -> 'ty;
       ty_fold_pred : ('slots * Ast.constrs) -> 'ty;
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
-      ty_fold_mod : (('slots * Ast.constrs) option * 'mtis) -> 'ty;
-      ty_fold_mod_type_item_opaque_type : (Ast.ty_param array) -> Ast.mutability -> 'mti;
-      ty_fold_mod_type_item_public_type : (Ast.ty_param array) -> 'ty -> 'mti;
-      ty_fold_mod_type_item_pred : (Ast.ty_param array) -> ('slots * Ast.constrs) -> 'mti;
-      ty_fold_mod_type_item_fn : (Ast.ty_param array) -> (('slots * Ast.constrs * 'slot) * Ast.ty_fn_aux) -> 'mti;
-      ty_fold_mod_type_item_mod : (Ast.ty_param array) -> (('slots * Ast.constrs) option * 'mtis) -> 'mti;
       ty_fold_proc : unit -> 'ty;
       ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
       ty_fold_param : (int * opaque_id * Ast.mutability) -> 'ty;
@@ -581,7 +562,7 @@ type ('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold =
       ty_fold_constrained : ('ty * Ast.constrs) -> 'ty }
 ;;
 
-let rec fold_ty (f:('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold) (ty:Ast.ty) : 'ty =
+let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   let fold_slot (s:Ast.slot) : 'slot =
     f.ty_fold_slot (s.Ast.slot_mode, fold_ty f (slot_ty s))
   in
@@ -596,43 +577,8 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold) (ty:Ast.ty) 
      tsig.Ast.sig_input_constrs,
      fold_slot tsig.Ast.sig_output_slot)
   in
-  let rec fold_mti (mti:Ast.mod_type_item) : 'mti =
-    let p = mti.Ast.decl_params in
-    let in_param_scope thunk =
-      f.ty_fold_enter_params p;
-      let res = thunk () in
-        f.ty_fold_leave_params p;
-        res
-    in
-      match mti.Ast.decl_item with
-          Ast.MOD_TYPE_ITEM_opaque_type mut ->
-            f.ty_fold_mod_type_item_opaque_type p mut
-        | Ast.MOD_TYPE_ITEM_public_type t ->
-            f.ty_fold_mod_type_item_public_type p
-              (in_param_scope (fun _ -> fold_ty f t))
-        | Ast.MOD_TYPE_ITEM_pred (slots, constrs) ->
-            f.ty_fold_mod_type_item_pred p
-              (in_param_scope (fun _ -> (fold_slots slots, constrs)))
-        | Ast.MOD_TYPE_ITEM_fn (tsig, taux) ->
-            f.ty_fold_mod_type_item_fn p
-              (in_param_scope (fun _ -> (fold_sig tsig, taux)))
-        | Ast.MOD_TYPE_ITEM_mod tmod ->
-            f.ty_fold_enter_mod tmod;
-            let r = f.ty_fold_mod_type_item_mod p
-              (in_param_scope (fun _ -> (fold_tmod tmod)))
-            in
-              f.ty_fold_leave_mod tmod;
-              r
-
-  and fold_mtis (mtis:Ast.mod_type_items) : 'mtis =
-    f.ty_fold_mod_type_items (htab_map mtis (fun k v -> (k, fold_mti v)))
-  and fold_tmod ((hdr:(Ast.slot array * Ast.constrs) option), (mtis:Ast.mod_type_items))
-      : (('slots * Ast.constrs) option * 'mtis) =
-    let hdr' = match hdr with
-        None -> None
-      | Some (slots, constrs) -> Some (fold_slots slots, constrs)
-    in
-      (hdr', (fold_mtis mtis))
+  let fold_obj fns =
+    htab_map fns (fun i (tsig, taux) -> (i, (fold_sig tsig, taux)))
   in
     match ty with
     Ast.TY_any -> f.ty_fold_any ()
@@ -657,12 +603,7 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold) (ty:Ast.ty) 
   | Ast.TY_chan t -> f.ty_fold_chan (fold_ty f t)
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
-  | Ast.TY_mod tmod ->
-      f.ty_fold_enter_mod tmod;
-      let r = f.ty_fold_mod (fold_tmod tmod) in
-        f.ty_fold_leave_mod tmod;
-        r
-
+  | Ast.TY_obj t -> f.ty_fold_obj (fold_obj t)
   | Ast.TY_proc -> f.ty_fold_proc ()
 
   | Ast.TY_opaque x -> f.ty_fold_opaque x
@@ -675,17 +616,12 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag, 'mti, 'mtis) ty_fold) (ty:Ast.ty) 
 
 ;;
 
-type 'a simple_ty_fold = ('a, 'a, 'a, 'a, 'a, 'a) ty_fold
+type 'a simple_ty_fold = ('a, 'a, 'a, 'a) ty_fold
 ;;
 
 let ty_fold_default (default:'a) : 'a simple_ty_fold =
     { ty_fold_slot = (fun _ -> default);
       ty_fold_slots = (fun _ -> default);
-      ty_fold_mod_type_items = (fun _ -> default);
-      ty_fold_enter_params = (fun _ -> ());
-      ty_fold_leave_params = (fun _ -> ());
-      ty_fold_enter_mod = (fun _ -> ());
-      ty_fold_leave_mod = (fun _ -> ());
       ty_fold_tags = (fun _ -> default);
       ty_fold_any = (fun _ -> default);
       ty_fold_nil = (fun _ -> default);
@@ -701,15 +637,10 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_iso = (fun _ -> default);
       ty_fold_idx = (fun _ -> default);
       ty_fold_fn = (fun _ -> default);
+      ty_fold_obj = (fun _ -> default);
       ty_fold_pred = (fun _ -> default);
       ty_fold_chan = (fun _ -> default);
       ty_fold_port = (fun _ -> default);
-      ty_fold_mod = (fun _ -> default);
-      ty_fold_mod_type_item_opaque_type = (fun _ _ -> default);
-      ty_fold_mod_type_item_public_type = (fun _ _ -> default);
-      ty_fold_mod_type_item_pred = (fun _ _ -> default);
-      ty_fold_mod_type_item_fn = (fun _ _ -> default);
-      ty_fold_mod_type_item_mod = (fun _ _ -> default);
       ty_fold_proc = (fun _ -> default);
       ty_fold_opaque = (fun _ -> default);
       ty_fold_param = (fun _ -> default);
@@ -719,19 +650,15 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
 ;;
 
 let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
-    : (Ast.ty, Ast.slot, Ast.slot array, Ast.ty_tag,
-       Ast.mod_type_item, Ast.mod_type_items) ty_fold =
-  let decl p i = { Ast.decl_params = p;
-                   Ast.decl_item = i }
+    : (Ast.ty, Ast.slot, Ast.slot array, Ast.ty_tag) ty_fold =
+  let rebuild_fn ((islots, constrs, oslot), aux) =
+    ({ Ast.sig_input_slots = islots;
+       Ast.sig_input_constrs = constrs;
+       Ast.sig_output_slot = oslot }, aux)
   in
   { ty_fold_slot = (fun (mode, t) -> { Ast.slot_mode = mode;
                                        Ast.slot_ty = Some t });
     ty_fold_slots = (fun slots -> slots);
-    ty_fold_mod_type_items = (fun mtis -> mtis);
-    ty_fold_enter_params = (fun _ -> ());
-    ty_fold_leave_params = (fun _ -> ());
-    ty_fold_enter_mod = (fun _ -> ());
-    ty_fold_leave_mod = (fun _ -> ());
     ty_fold_tags = (fun htab -> htab);
     ty_fold_any = (fun _ -> id Ast.TY_any);
     ty_fold_nil = (fun _ -> id Ast.TY_nil);
@@ -747,23 +674,15 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_iso = (fun (i, tags) -> id (Ast.TY_iso { Ast.iso_index = i;
                                                      Ast.iso_group = tags }));
     ty_fold_idx = (fun i -> id (Ast.TY_idx i));
-    ty_fold_fn = (fun ((islots, constrs, oslot), aux) ->
-                    id (Ast.TY_fn ({ Ast.sig_input_slots = islots;
-                                     Ast.sig_input_constrs = constrs;
-                                     Ast.sig_output_slot = oslot }, aux)));
+    ty_fold_fn = (fun t -> id (Ast.TY_fn (rebuild_fn t)));
+    ty_fold_obj = (fun fns ->
+                     id (Ast.TY_obj
+                           (htab_map fns
+                              (fun id fn -> (id, rebuild_fn fn)))));
     ty_fold_pred = (fun (islots, constrs) ->
                       id (Ast.TY_pred (islots, constrs)));
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
     ty_fold_port = (fun t -> id (Ast.TY_port t));
-    ty_fold_mod = (fun (hdr, mti) -> id (Ast.TY_mod (hdr, mti)));
-    ty_fold_mod_type_item_opaque_type = (fun p mut -> decl p (Ast.MOD_TYPE_ITEM_opaque_type mut));
-    ty_fold_mod_type_item_public_type = (fun p ty -> decl p (Ast.MOD_TYPE_ITEM_public_type ty));
-    ty_fold_mod_type_item_pred = (fun p psig -> decl p (Ast.MOD_TYPE_ITEM_pred psig));
-    ty_fold_mod_type_item_fn = (fun p ((islots,constrs,oslot),taux) ->
-                                  decl p (Ast.MOD_TYPE_ITEM_fn ({ Ast.sig_input_slots = islots;
-                                                                  Ast.sig_input_constrs = constrs;
-                                                                  Ast.sig_output_slot = oslot }, taux)));
-    ty_fold_mod_type_item_mod = (fun p tmod -> decl p (Ast.MOD_TYPE_ITEM_mod tmod));
     ty_fold_proc = (fun _ -> id Ast.TY_proc);
     ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
     ty_fold_param = (fun (i, oid, mut) -> id (Ast.TY_param (i, oid, mut)));
@@ -782,30 +701,23 @@ let associative_binary_op_ty_fold
         [] -> default
       | x::xs -> List.fold_left fn x xs
   in
+  let reduce_fn ((islots, _, oslot), _) =
+    fn islots oslot
+  in
     { base with
         ty_fold_slots = (fun slots -> reduce (Array.to_list slots));
         ty_fold_slot = (fun (_, a) -> a);
-        ty_fold_mod_type_items = (fun mtis -> reduce (htab_vals mtis));
         ty_fold_tags = (fun tab -> reduce (htab_vals tab));
         ty_fold_tup = (fun a -> a);
         ty_fold_vec = (fun a -> a);
-        ty_fold_rec = (fun sz -> reduce (Array.to_list (Array.map (fun (_, s) -> s) sz)));
+        ty_fold_rec = (fun sz ->
+                         reduce (Array.to_list (Array.map (fun (_, s) -> s) sz)));
         ty_fold_tag = (fun a -> a);
         ty_fold_iso = (fun (_,iso) -> reduce (Array.to_list iso));
-        ty_fold_fn = (fun ((islots, _, oslot), _) -> fn islots oslot);
+        ty_fold_fn = reduce_fn;
+        ty_fold_obj = (fun fns ->
+                         reduce (List.map reduce_fn (htab_vals fns)));
         ty_fold_pred = (fun (islots, _) -> islots);
-        ty_fold_mod = (fun (hdr,a) ->
-                         match hdr with
-                             None -> a
-                           | Some (h,_) -> fn h a);
-        ty_fold_mod_type_item_opaque_type = (fun _ _ -> default);
-        ty_fold_mod_type_item_public_type = (fun _ a -> a);
-        ty_fold_mod_type_item_pred = (fun _ (islots, _) -> islots);
-        ty_fold_mod_type_item_fn = (fun _ ((islots, _, oslot), _) -> fn islots oslot);
-        ty_fold_mod_type_item_mod = (fun _ (hdr,a) ->
-                                       match hdr with
-                                           None -> a
-                                         | Some (h, _) -> fn h a);
         ty_fold_chan = (fun a -> a);
         ty_fold_port = (fun a -> a);
         ty_fold_constrained = (fun (a, _) -> a) }
@@ -900,25 +812,6 @@ let check_concrete params thing =
 ;;
 
 
-let ty_of_mod_type_item (mti:Ast.mod_type_item) : Ast.ty =
-  check_concrete mti.Ast.decl_params
-    begin
-      match mti.Ast.decl_item with
-          Ast.MOD_TYPE_ITEM_opaque_type mut ->
-            (* 
-             * FIXME (bug 541598): generate opaque_ids uniquely per
-             * name (incl. type parameters)
-             *)
-            let opaque_id = Opaque 0 in
-              Ast.TY_opaque (opaque_id, mut)
-        | Ast.MOD_TYPE_ITEM_public_type ty -> ty
-        | Ast.MOD_TYPE_ITEM_pred p -> Ast.TY_pred p
-        | Ast.MOD_TYPE_ITEM_mod m -> Ast.TY_mod m
-        | Ast.MOD_TYPE_ITEM_fn f -> Ast.TY_fn f
-    end
-;;
-
-
 let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
   match (base_ty, comp) with
       (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
@@ -939,33 +832,9 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
     | (Ast.TY_str, Ast.COMP_atom _) ->
         interior_slot (Ast.TY_mach TY_u8)
 
-    | (Ast.TY_mod (_, mtis), Ast.COMP_named (Ast.COMP_ident id)) ->
-        begin
-          match htab_search mtis id with
-              Some mti -> interior_slot (ty_of_mod_type_item mti)
-            | None -> err None "unknown module-member '%s'" id
-        end
-
     | (_,_) ->
         bug () "unhandled form of lval-ext in Semant.project_slot: %a indexed by %a"
           Ast.sprintf_ty base_ty Ast.sprintf_lval_component comp
-;;
-
-
-let project_mod_type_to_type (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.ty =
-  match base_ty with
-      Ast.TY_mod (_, mtis) ->
-        begin
-          match comp with
-              Ast.COMP_named (Ast.COMP_ident id) ->
-                begin
-                  match htab_search mtis id with
-                      None -> err None "unknown module-type item '%s'" id
-                    | Some mti -> ty_of_mod_type_item mti
-                end
-            | _ -> bug () "unhandled name-component type in Semant.project_mod_type_to_type"
-        end
-    | _ -> err None "non-module base type in Semant.project_mod_type_to_type"
 ;;
 
 
@@ -995,7 +864,7 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
     | Ast.LVAL_ext (base, comp) ->
         let base_item = lval_item cx base in
         match base_item.node.Ast.decl_item with
-            Ast.MOD_ITEM_mod (_, items) ->
+            Ast.MOD_ITEM_mod items ->
               begin
                 match comp with
                     Ast.COMP_named (Ast.COMP_ident i) ->
@@ -1033,7 +902,7 @@ let lval_is_direct_mod (cx:ctxt) (lval:Ast.lval) : bool =
     then false
     else
       match defn with
-          DEFN_item { Ast.decl_item = Ast.MOD_ITEM_mod (None, _) } -> true
+          DEFN_item { Ast.decl_item = Ast.MOD_ITEM_mod _ } -> true
         | _ -> false
 ;;
 
@@ -1076,84 +945,50 @@ let expr_type (cx:ctxt) (e:Ast.expr) : Ast.ty =
     | Ast.EXPR_atom a -> atom_type cx a
 ;;
 
-
 (* Mappings between mod items and their respective types. *)
 
-let rec ty_mod_of_mod
-    (inside:bool)
-    (m:(Ast.mod_header option * Ast.mod_items))
-    : Ast.ty_mod =
-  let (hdr, mis) = m in
-  let hdr_type =
-    match hdr with
-        None -> None
-      | Some (slots, constrs) -> Some (arg_slots slots, constrs)
-  in
-  let ty_items = Hashtbl.create (Hashtbl.length mis) in
-  let add n i =
-    match mod_type_item_of_mod_item inside i with
-        None -> ()
-      | Some mty -> Hashtbl.add ty_items n mty
-  in
-    Hashtbl.iter add mis;
-    (hdr_type, ty_items)
-
-and mod_type_item_of_mod_item
-    (inside:bool)
-    (item:Ast.mod_item)
-    : Ast.mod_type_item option =
-  let item_opt =
-    match item.node.Ast.decl_item with
-        Ast.MOD_ITEM_opaque_type t ->
-          if inside
-          then
-            Some (Ast.MOD_TYPE_ITEM_public_type t)
-          else
-            let mut =
-              if type_is_mutable t
-              then Ast.MUTABLE
-              else Ast.IMMUTABLE
-            in
-              Some (Ast.MOD_TYPE_ITEM_opaque_type mut)
-      | Ast.MOD_ITEM_public_type t ->
-          Some (Ast.MOD_TYPE_ITEM_public_type t)
-      | Ast.MOD_ITEM_pred p ->
-          Some (Ast.MOD_TYPE_ITEM_pred (ty_pred_of_pred p))
-      | Ast.MOD_ITEM_mod m ->
-          Some (Ast.MOD_TYPE_ITEM_mod (ty_mod_of_mod true m))
-      | Ast.MOD_ITEM_fn f ->
-          Some (Ast.MOD_TYPE_ITEM_fn (ty_fn_of_fn f))
-      | Ast.MOD_ITEM_tag _ -> None
-  in
-    match item_opt with
-        None -> None
-      | Some item' ->
-          Some { Ast.decl_params = Array.map (fun i -> i.node) item.node.Ast.decl_params;
-                 Ast.decl_item = item' }
-
-and arg_slots (slots:Ast.header_slots) : Ast.slot array =
+let arg_slots (slots:Ast.header_slots) : Ast.slot array =
   Array.map (fun (sid,_) -> sid.node) slots
+;;
 
-and tup_slots (slots:Ast.header_tup) : Ast.slot array =
+let tup_slots (slots:Ast.header_tup) : Ast.slot array =
   Array.map (fun sid -> sid.node) slots
+;;
 
-and ty_fn_of_fn (fn:Ast.fn) : Ast.ty_fn =
+let ty_fn_of_fn (fn:Ast.fn) : Ast.ty_fn =
   ({ Ast.sig_input_slots = arg_slots fn.Ast.fn_input_slots;
      Ast.sig_input_constrs = fn.Ast.fn_input_constrs;
      Ast.sig_output_slot = fn.Ast.fn_output_slot.node },
    fn.Ast.fn_aux )
+;;
 
-and ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
+let ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
   (arg_slots pred.Ast.pred_input_slots,
    pred.Ast.pred_input_constrs)
+;;
 
-and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
+let ty_obj_of_obj (obj:Ast.obj) : Ast.ty_obj =
+  htab_map obj.Ast.obj_fns (fun i f -> (i, ty_fn_of_fn f.node))
+;;
+
+let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =
   match item.node.Ast.decl_item with
       Ast.MOD_ITEM_opaque_type _
     | Ast.MOD_ITEM_public_type _ -> Ast.TY_type
     | Ast.MOD_ITEM_pred p -> (Ast.TY_pred (ty_pred_of_pred p))
-    | Ast.MOD_ITEM_mod m -> (Ast.TY_mod (ty_mod_of_mod inside m))
     | Ast.MOD_ITEM_fn f -> (Ast.TY_fn (ty_fn_of_fn f))
+    | Ast.MOD_ITEM_mod _ -> bug () "Semant.ty_of_mod_item on mod"
+    | Ast.MOD_ITEM_obj ob ->
+        let taux = { Ast.fn_purity = Ast.PURE;
+                     Ast.fn_proto = None }
+        in
+        let tobj = Ast.TY_obj (ty_obj_of_obj ob) in
+        let tsig = { Ast.sig_input_slots = arg_slots ob.Ast.obj_state;
+                     Ast.sig_input_constrs = ob.Ast.obj_constrs;
+                     Ast.sig_output_slot = interior_slot tobj }
+        in
+          (Ast.TY_fn (tsig, taux))
+
     | Ast.MOD_ITEM_tag (htup, ttag, _) ->
         let taux = { Ast.fn_purity = Ast.PURE;
                      Ast.fn_proto = None }
@@ -1170,7 +1005,6 @@ and ty_of_mod_item (inside:bool) (item:Ast.mod_item) : Ast.ty =
 type scope =
     SCOPE_block of node_id
   | SCOPE_mod_item of Ast.mod_item
-  | SCOPE_mod_type_item of Ast.mod_type_item
   | SCOPE_crate of Ast.crate
 ;;
 
@@ -1178,7 +1012,6 @@ let id_of_scope (sco:scope) : node_id =
   match sco with
       SCOPE_block id -> id
     | SCOPE_mod_item i -> i.id
-    | SCOPE_mod_type_item _ -> bug () "id_of_scope within mod_type_item"
     | SCOPE_crate c -> c.id
 ;;
 
@@ -1208,14 +1041,6 @@ let scope_stack_managing_visitor
     inner.Walk.visit_mod_item_post n p i;
     pop();
   in
-  let visit_mod_type_item_pre n p i =
-    push (SCOPE_mod_type_item i);
-    inner.Walk.visit_mod_type_item_pre n p i
-  in
-  let visit_mod_type_item_post n p i =
-    inner.Walk.visit_mod_type_item_post n p i;
-    pop();
-  in
   let visit_crate_pre c =
     push (SCOPE_crate c);
     inner.Walk.visit_crate_pre c
@@ -1229,8 +1054,6 @@ let scope_stack_managing_visitor
         Walk.visit_block_post = visit_block_post;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
-        Walk.visit_mod_type_item_pre = visit_mod_type_item_pre;
-        Walk.visit_mod_type_item_post = visit_mod_type_item_post;
         Walk.visit_crate_pre = visit_crate_pre;
         Walk.visit_crate_post = visit_crate_post; }
 ;;
@@ -1247,7 +1070,7 @@ let lookup_by_ident
         None -> None
       | Some i -> Some i.id
   in
-  let check_input_slot islots =
+  let check_slots islots =
     arr_search islots
       (fun _ (sloti,ident') ->
          if ident = ident'
@@ -1278,23 +1101,21 @@ let lookup_by_ident
             let item_match =
               match item.node.Ast.decl_item with
                   Ast.MOD_ITEM_fn f ->
-                    check_input_slot f.Ast.fn_input_slots
+                    check_slots f.Ast.fn_input_slots
 
                 | Ast.MOD_ITEM_pred p ->
-                    check_input_slot p.Ast.pred_input_slots
+                    check_slots p.Ast.pred_input_slots
 
-                | Ast.MOD_ITEM_mod (hdr, md) ->
+                | Ast.MOD_ITEM_obj obj ->
                     begin
-                      match check_items md with
-                          Some m -> Some m
-                        | None ->
-                            begin
-                              match hdr with
-                                  None -> None
-                                | Some (h, _) ->
-                                    check_input_slot h
-                            end
+                      match htab_search obj.Ast.obj_fns ident with
+                          Some fn -> Some fn.id
+                        | None -> check_slots obj.Ast.obj_state
                     end
+
+                | Ast.MOD_ITEM_mod md ->
+                    check_items md
+
                 | _ -> None
             in
               match item_match with
@@ -1302,7 +1123,6 @@ let lookup_by_ident
                 | None -> check_params item.node.Ast.decl_params
           end
 
-      | SCOPE_mod_type_item _ -> None
   in
     list_search_ctxt scopes check_scope
 ;;
@@ -1421,12 +1241,12 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
       | Ast.TY_fn _
       | Ast.TY_pred _ ->
-          let fn_closure_ptr = sp (Il.StructTy [| word; ptr |]) in
+          let fn_closure_ptr = sp (Il.StructTy [| word; Il.OpaqueTy |]) in
             Il.StructTy [| codeptr; fn_closure_ptr |]
 
-      | Ast.TY_mod _ ->
-          let mod_closure_ptr = sp (Il.StructTy [| word; ptr |]) in
-            Il.StructTy [| ptr; mod_closure_ptr |]
+      | Ast.TY_obj _ ->
+          let obj_closure_ptr = sp (Il.StructTy [| word; Il.OpaqueTy |]) in
+            Il.StructTy [| ptr; obj_closure_ptr |]
 
       | Ast.TY_tag ttag -> tag ttag
       | Ast.TY_iso tiso -> tag tiso.Ast.iso_group.(tiso.Ast.iso_index)
@@ -1548,14 +1368,6 @@ let call_args_referent_type
           call_args_referent_type_full
             cx.ctxt_abi
             (interior_slot Ast.TY_bool)
-            n_ty_params
-            in_args
-            (with_closure [| |])
-
-      | Ast.TY_mod (Some (in_args, _), mtis) ->
-          call_args_referent_type_full
-            cx.ctxt_abi
-            (interior_slot (Ast.TY_mod (None, mtis)))
             n_ty_params
             in_args
             (with_closure [| |])
@@ -1717,8 +1529,8 @@ let ty_str (ty:Ast.ty) : string =
          ty_fold_pred = (fun (ins,_) -> "p" ^ ins);
          ty_fold_chan = (fun t -> "H" ^ t);
          ty_fold_port = (fun t -> "R" ^ t);
-         (* FIXME: encode module types. *)
-         ty_fold_mod = (fun _ -> "m");
+         (* FIXME: encode obj types. *)
+         ty_fold_obj = (fun _ -> "o");
          ty_fold_proc = (fun _ -> "P");
          (* FIXME: encode opaque and param numbers. *)
          ty_fold_opaque = (fun _ -> "Q");
@@ -1751,7 +1563,6 @@ let glue_str (cx:ctxt) (g:glue) : string =
     | GLUE_mark_frame i -> "glue$mark_frame$" ^ (item_str cx i)
     | GLUE_drop_frame i -> "glue$drop_frame$" ^ (item_str cx i)
     | GLUE_reloc_frame i -> "glue$reloc_frame$" ^ (item_str cx i)
-    | GLUE_bind_mod i -> "glue$bind_mod$" ^ (item_str cx i)
         (* 
          * FIXME: the node_id here isn't an item, it's a statement; 
          * lookup bind target and encode bound arg tuple type.

@@ -16,7 +16,7 @@ type pstate =
       pstate_temp_id      : temp_id ref;
       pstate_node_id      : node_id ref;
       pstate_opaque_id    : opaque_id ref;
-      pstate_get_ty_mod     : (filename -> Ast.ty_mod);
+      pstate_get_mod      : (filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items);
       pstate_infer_lib_name : (Ast.ident -> filename);
       pstate_imported       : (node_id, (import_lib * nabi_conv)) Hashtbl.t; }
 ;;
@@ -38,7 +38,7 @@ let make_parser
     (oref:opaque_id ref)
     (sess:Session.sess)
     (tok:Lexing.lexbuf -> token)
-    (get_ty_mod:filename -> Ast.ty_mod)
+    (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
     (infer_lib_name:Ast.ident -> filename)
     (imported:(node_id, (import_lib * nabi_conv)) Hashtbl.t)
     (fname:string)
@@ -61,7 +61,7 @@ let make_parser
         pstate_temp_id = tref;
         pstate_node_id = nref;
         pstate_opaque_id = oref;
-        pstate_get_ty_mod = get_ty_mod;
+        pstate_get_mod = get_mod;
         pstate_infer_lib_name = infer_lib_name;
         pstate_imported = imported; }
     in

@@ -152,36 +152,10 @@ and parse_optional_trailing_constrs (ps:pstate) : Ast.constrs =
       COLON -> (bump ps; parse_constrs ps)
     | _ -> [| |]
 
-and parse_ty_param (iref:int ref) (ps:pstate) : Ast.ty_param identified =
-  let apos = lexpos ps in
-  let mut = parse_mutability ps in
-  let ident = parse_ident ps in
-  let i = !iref in
-  let bpos = lexpos ps in
-    incr iref;
-    span ps apos bpos (ident, (i, next_opaque_id ps, mut))
-
-and parse_ty_params (ps:pstate) : (Ast.ty_param identified) array =
-  match peek ps with
-      LBRACKET ->
-        bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) (parse_ty_param (ref 0)) ps
-    | _ -> arr []
-
-and parse_ident_and_params (ps:pstate) (cstr:string) : (Ast.ident * (Ast.ty_param identified) array) =
-  let ident = ctxt ("mod " ^ cstr ^ " item: ident") parse_ident ps in
-  let params = ctxt ("mod " ^ cstr ^ " item: type params") parse_ty_params ps in
-    (ident, params)
-
-
-and parse_ty_fn (pure:bool) (ps:pstate) : (((Ast.ident * (Ast.ty_param identified) array) option) * Ast.ty_fn) =
+and parse_ty_fn (pure:bool) (ps:pstate) : Ast.ty_fn =
   match peek ps with
       FN proto ->
         bump ps;
-        let ident_and_params =
-          match peek ps with
-              IDENT _ -> Some (parse_ident_and_params ps "fn type")
-            | _ -> None
-        in
         let in_slots =
           match peek ps with
               _ ->
@@ -194,93 +168,16 @@ and parse_ty_fn (pure:bool) (ps:pstate) : (((Ast.ident * (Ast.ty_param identifie
             | _ -> slot_nil
         in
         let constrs = parse_optional_trailing_constrs ps in
-        let ty = ({ Ast.sig_input_slots = in_slots;
-                    Ast.sig_input_constrs = constrs;
-                    Ast.sig_output_slot = out_slot; },
-                  (* FIXME: parse purity more thoroughly. *)
-                  { Ast.fn_purity = (if pure
-                                     then Ast.PURE
-                                     else Ast.IMPURE Ast.IMMUTABLE);
-                    Ast.fn_proto = proto; })
-        in
-          (ident_and_params, ty)
+          ({ Ast.sig_input_slots = in_slots;
+             Ast.sig_input_constrs = constrs;
+             Ast.sig_output_slot = out_slot; },
+           (* FIXME: parse purity more thoroughly. *)
+           { Ast.fn_purity = (if pure
+                              then Ast.PURE
+                              else Ast.IMPURE Ast.IMMUTABLE);
+             Ast.fn_proto = proto; })
 
     | _ -> raise (unexpected ps)
-
-
-and parse_ty_mod (ps:pstate) : (((Ast.ident * (Ast.ty_param identified) array) option) * Ast.ty_mod) =
-  let ident_and_params =
-    match peek ps with
-        IDENT _ -> Some (parse_ident_and_params ps "mod type")
-      | _ -> None
-  in
-  let hdr =
-    match peek ps with
-        LPAREN ->
-          let slots = (bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
-                         (parse_slot_and_optional_ignored_ident true) ps)
-          in
-          let constrs = parse_optional_trailing_constrs ps in
-            Some (slots, constrs)
-      | _ -> None
-  in
-  let items = parse_mod_ty_items ps in
-    (ident_and_params, (hdr, items))
-
-
-
-and parse_mod_ty_item (ps:pstate) : (Ast.ident * Ast.mod_type_item) =
-  let need_ident_and_params ni_opt =
-    match ni_opt with
-        None -> raise (Parse_err (ps, "item in mod type without name"))
-      | Some (ident, params) -> (ident, Array.map (fun i -> i.node) params)
-  in
-    match peek ps with
-        MOD ->
-          begin
-            bump ps;
-            let (ident_and_params, ty) = parse_ty_mod ps in
-            let (ident, params) = need_ident_and_params ident_and_params in
-              (ident, decl params (Ast.MOD_TYPE_ITEM_mod ty))
-          end
-
-      | FN _ ->
-          begin
-            let (ident_and_params, ty) = parse_ty_fn false ps in
-            let (ident, params) = need_ident_and_params ident_and_params in
-              expect ps SEMI;
-              (ident, decl params (Ast.MOD_TYPE_ITEM_fn ty))
-          end
-
-      | PUB ->
-          bump ps;
-          expect ps TYPE;
-          let (ident, params) = parse_ident_and_params ps "type pub type" in
-          let params = Array.map (fun i -> i.node) params in
-          let t = parse_ty ps in
-            expect ps SEMI;
-            (ident, decl params (Ast.MOD_TYPE_ITEM_public_type t))
-
-      | TYPE ->
-          bump ps;
-          let (ident, params) = parse_ident_and_params ps "type type" in
-          let params = Array.map (fun i -> i.node) params in
-            expect ps SEMI;
-            (ident, decl params (Ast.MOD_TYPE_ITEM_opaque_type Ast.IMMUTABLE))
-
-      (* FIXME: parse ty_pred. *)
-      | _ -> raise (unexpected ps)
-
-and parse_mod_ty_items (ps:pstate) : Ast.mod_type_items =
-    let mtis = Hashtbl.create 0 in
-      expect ps LBRACE;
-      while not (peek ps = RBRACE)
-      do
-        let (ident, mti) = ctxt "mod ty items: mod ty item" parse_mod_ty_item ps in
-          Hashtbl.add mtis ident mti;
-      done;
-      expect ps RBRACE;
-      mtis
 
 and parse_atomic_ty (ps:pstate) : Ast.ty =
   match peek ps with
@@ -370,13 +267,9 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
         bump ps;
         Ast.TY_mach m
 
-    | PURE -> (bump ps; Ast.TY_fn (snd (parse_ty_fn true ps)))
+    | PURE -> (bump ps; Ast.TY_fn (parse_ty_fn true ps))
 
-    | FN _ -> Ast.TY_fn (snd (parse_ty_fn false ps))
-
-    | MOD ->
-        bump ps;
-        Ast.TY_mod (snd (parse_ty_mod ps))
+    | FN _ -> Ast.TY_fn (parse_ty_fn false ps)
 
     | _ -> raise (unexpected ps)
 

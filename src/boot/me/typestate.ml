@@ -106,6 +106,9 @@ let entry_keys header constrs resolver =
     (input_keys, init_keys)
 ;;
 
+let obj_keys ob resolver =
+    entry_keys ob.Ast.obj_state ob.Ast.obj_constrs resolver
+;;
 
 let fn_keys fn resolver =
     entry_keys fn.Ast.fn_input_slots fn.Ast.fn_input_constrs resolver
@@ -114,11 +117,6 @@ let fn_keys fn resolver =
 let pred_keys pred resolver =
     entry_keys pred.Ast.pred_input_slots pred.Ast.pred_input_constrs resolver
 ;;
-
-let stateful_mod_keys (slots, constrs) resolver =
-    entry_keys slots constrs resolver
-;;
-
 
 let constr_id_assigning_visitor
     (cx:ctxt)
@@ -156,8 +154,8 @@ let constr_id_assigning_visitor
           let (input_keys, init_keys) = fn_keys f resolve_constr_to_key in
             note_keys input_keys;
             note_keys init_keys
-      | Ast.MOD_ITEM_mod (Some hdr, _) ->
-          let (input_keys, init_keys) = stateful_mod_keys hdr resolve_constr_to_key in
+      | Ast.MOD_ITEM_obj ob ->
+          let (input_keys, init_keys) = obj_keys ob resolve_constr_to_key in
             note_keys input_keys;
             note_keys init_keys
       | Ast.MOD_ITEM_pred p ->
@@ -197,11 +195,6 @@ let constr_id_assigning_visitor
                         Array.iter visit_constr_pre constrs'
 
                   | Ast.TY_pred (_, constrs) ->
-                      let names = atoms_to_names args in
-                      let constrs' = Array.map (apply_names_to_constr names) constrs in
-                        Array.iter visit_constr_pre constrs'
-
-                  | Ast.TY_mod (Some (_, constrs), _) ->
                       let names = atoms_to_names args in
                       let constrs' = Array.map (apply_names_to_constr names) constrs in
                         Array.iter visit_constr_pre constrs'
@@ -301,17 +294,12 @@ let condition_assigning_visitor
             let (input_keys, init_keys) = fn_keys f resolve_constr_to_key in
               raise_entry_state input_keys init_keys f.Ast.fn_body
 
-        | Ast.MOD_ITEM_mod (Some hdr, mis) ->
-            let (input_keys, init_keys) = stateful_mod_keys hdr resolve_constr_to_key in
-            let raise_in_item _ item =
-              match item.node.Ast.decl_item with
-                  Ast.MOD_ITEM_fn f ->
-                    raise_entry_state input_keys init_keys f.Ast.fn_body
-                | Ast.MOD_ITEM_pred p ->
-                    raise_entry_state input_keys init_keys p.Ast.pred_body
-                | _ -> ()
+        | Ast.MOD_ITEM_obj ob ->
+            let (input_keys, init_keys) = obj_keys ob resolve_constr_to_key in
+            let raise_in_fn _ f =
+              raise_entry_state input_keys init_keys f.node.Ast.fn_body
             in
-              Hashtbl.iter raise_in_item mis
+              Hashtbl.iter raise_in_fn ob.Ast.obj_fns
 
         | Ast.MOD_ITEM_pred p ->
             let (input_keys, init_keys) = pred_keys p resolve_constr_to_key in
@@ -405,11 +393,6 @@ let condition_assigning_visitor
                       let keys = Array.map resolve_constr_to_key constrs in
                         raise_precondition s.id keys
                   | Ast.TY_pred (_,formal_constrs) ->
-                      let names = atoms_to_names args in
-                      let constrs = Array.map (apply_names_to_constr names) formal_constrs in
-                      let keys = Array.map resolve_constr_to_key constrs in
-                        raise_precondition s.id keys
-                  | Ast.TY_mod (Some (_,formal_constrs), _) ->
                       let names = atoms_to_names args in
                       let constrs = Array.map (apply_names_to_constr names) formal_constrs in
                       let keys = Array.map resolve_constr_to_key constrs in

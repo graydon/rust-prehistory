@@ -334,8 +334,6 @@ and resolve_type
     (t:Ast.ty)
     : Ast.ty =
   let base = ty_fold_rebuild (fun t -> t) in
-  let ty_fold_enter_mod _ = err None "Resolve.resolve_type on type containing mod_type" in
-  let ty_fold_enter_params _ = err None "Resolve.resolve_type on type containing parametric item" in
   let ty_fold_named name =
     let (scopes, node, t) = lookup_type_by_name cx scopes name in
       log cx "resolved type name '%a' to item %d" Ast.sprintf_name name (int_of_node node);
@@ -354,10 +352,7 @@ and resolve_type
   in
   let fold =
     { base with
-        ty_fold_named = ty_fold_named;
-        ty_fold_enter_mod = ty_fold_enter_mod;
-        ty_fold_enter_params = ty_fold_enter_params;
-    }
+        ty_fold_named = ty_fold_named; }
   in
     fold_ty fold t
 ;;
@@ -411,7 +406,7 @@ let type_resolving_visitor
                 log cx "resolved item %s, defining type %a" id Ast.sprintf_ty ty;
                 htab_put cx.ctxt_all_type_items item.id ty
 
-          (* Don't resolve the type of a mod item; just resolve its members. *)
+          (* Don't resolve the "type" of a mod item; just resolve its members. *)
           | Ast.MOD_ITEM_mod _ -> ()
 
           | Ast.MOD_ITEM_tag (header_slots, _, nid)
@@ -442,74 +437,6 @@ let type_resolving_visitor
           Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
     end;
     inner.Walk.visit_mod_item_pre id params item
-  in
-
-  let visit_mod_item_post id params item =
-    inner.Walk.visit_mod_item_post id params item;
-    match item.node.Ast.decl_item with
-        Ast.MOD_ITEM_mod (hdr, tmod) ->
-          begin
-            let mtis = Hashtbl.create (Hashtbl.length tmod) in
-            let item_ty_item ident item =
-              let add i t = htab_put mtis i {Ast.decl_item=t;
-                                             Ast.decl_params=(Array.map (fun p -> p.node) item.node.Ast.decl_params)}
-              in
-              let ty = Hashtbl.find cx.ctxt_all_item_types item.id in
-                match item.node.Ast.decl_item with
-                  Ast.MOD_ITEM_opaque_type _ ->
-                    add ident (Ast.MOD_TYPE_ITEM_opaque_type
-                                 (if type_is_mutable ty
-                                  then Ast.IMMUTABLE
-                                  else Ast.MUTABLE))
-
-                  | Ast.MOD_ITEM_public_type _ ->
-                      add ident (Ast.MOD_TYPE_ITEM_public_type ty)
-
-                  | Ast.MOD_ITEM_pred _ ->
-                      begin
-                        match ty with
-                            Ast.TY_pred tpred ->
-                              add ident (Ast.MOD_TYPE_ITEM_pred tpred)
-                          | _ ->
-                              bug (Some item.id)
-                                "pred resolved to non-pred type %a"
-                                Ast.sprintf_ty ty
-                      end
-                  | Ast.MOD_ITEM_fn _ ->
-                      begin
-                        match ty with
-                            Ast.TY_fn tfn ->
-                              add ident (Ast.MOD_TYPE_ITEM_fn tfn)
-                          | _ ->
-                              bug (Some item.id)
-                                "fn resolved to non-fn type %a"
-                                Ast.sprintf_ty ty
-                      end
-                  | Ast.MOD_ITEM_mod _ ->
-                      begin
-                        match ty with
-                            Ast.TY_mod tmod ->
-                              add ident (Ast.MOD_TYPE_ITEM_mod tmod)
-                          | _ ->
-                              bug (Some item.id)
-                                "mod resolved to non-mod type %a"
-                                Ast.sprintf_ty ty
-                      end
-
-                  (* Don't map tag ctors, they have no type standing. *)
-                  | Ast.MOD_ITEM_tag _ -> ()
-            in
-              Hashtbl.iter item_ty_item tmod;
-              let hdr =
-                match hdr with
-                    None -> None
-                  | Some (slotis, constrs) ->
-                      Some (Array.map (fun (s,_) -> s.node) slotis, constrs)
-              in
-              let ty = Ast.TY_mod (hdr, mtis) in
-                htab_put cx.ctxt_all_item_types item.id ty
-          end
-      | _ -> ()
   in
 
   let visit_lval_pre lv =
@@ -553,7 +480,6 @@ let type_resolving_visitor
     { inner with
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_lval_pre = visit_lval_pre; }
 ;;
 

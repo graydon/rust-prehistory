@@ -60,7 +60,7 @@ let (sess:Session.sess) =
   }
 ;;
 
-let get_ty_mod (filename:filename) : Ast.ty_mod =
+let get_mod (filename:filename) (nref:node_id ref) (oref:opaque_id ref) : Ast.mod_items =
   let ar = Asm.new_asm_reader sess filename in
     let get_sections =
       match sess.Session.sess_targ with
@@ -71,9 +71,9 @@ let get_ty_mod (filename:filename) : Ast.ty_mod =
     let sects = get_sections sess ar in
     let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
     let dies = Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs in
-    let mtis = Hashtbl.create 0 in
-      Dwarf.extract_mod_type_items abi mtis dies;
-      (None, mtis)
+    let items = Hashtbl.create 0 in
+      Dwarf.extract_mod_items nref oref abi items dies;
+      items
 ;;
 
 let infer_lib_name (ident:filename) : filename =
@@ -109,9 +109,9 @@ let set_default_output_filename (sess:Session.sess) : unit =
 
 
 let dump_file (filename:filename) : unit =
-  let tmod = get_ty_mod filename in
-    Printf.fprintf stdout "extracted mod type:\n%!";
-    Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_ty (Ast.TY_mod tmod));
+  let items = get_mod filename (ref (Node 0)) (ref (Opaque 0)) in
+    Printf.fprintf stdout "extracted mod:\n%!";
+    Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_mod_items items);
     exit 0
 ;;
 
@@ -201,10 +201,10 @@ let (crate:Ast.crate) =
         let infile = Session.filename_of sess.Session.sess_in in
         let crate =
           if Filename.check_suffix infile ".rc"
-          then Cexp.parse_crate_file sess Lexer.token get_ty_mod infer_lib_name
+          then Cexp.parse_crate_file sess Lexer.token get_mod infer_lib_name
           else
             if Filename.check_suffix infile ".rs"
-            then Cexp.parse_src_file sess Lexer.token get_ty_mod infer_lib_name
+            then Cexp.parse_src_file sess Lexer.token get_mod infer_lib_name
             else
               begin
                 Printf.fprintf stderr

@@ -94,7 +94,7 @@ and ty =
   | TY_chan of ty
   | TY_port of ty
 
-  | TY_mod of ty_mod
+  | TY_obj of ty_obj
   | TY_proc
 
   | TY_opaque of (opaque_id * mutability)
@@ -191,9 +191,9 @@ and ty_fn = (ty_sig * ty_fn_aux)
 
 and ty_pred = (slot array * constrs)
 
-and ty_mod_header = (slot array * constrs)
+and ty_obj_header = (slot array * constrs)
 
-and ty_mod = ((ty_mod_header option) * mod_type_items)
+and ty_obj = (ident,ty_fn) Hashtbl.t
 
 and check_calls = (lval * (atom array)) array
 
@@ -378,8 +378,6 @@ and unop =
 
 and header_slots = ((slot identified) * ident) array
 
-and mod_header = (header_slots * constrs)
-
 and header_tup = (slot identified) array
 
 and fn =
@@ -396,6 +394,13 @@ and pred =
       pred_input_slots: header_slots;
       pred_input_constrs: constrs;
       pred_body: block;
+    }
+
+and obj =
+    {
+      obj_state: header_slots;
+      obj_constrs: constrs;
+      obj_fns: (ident,fn identified) Hashtbl.t;
     }
 
 (*
@@ -415,53 +420,17 @@ and ('param, 'item) decl =
       decl_item: 'item;
     }
 
-(*
- * We have module types and module declarations. A module declaration is
- * a table of module items. A module type is a table of module-type items.
- *
- * The latter describe the former, despite the fact that modules can
- * contain types: module types are not *equivalent* to module declarations,
- * and every module declaration gives rise to a module value that conforms to
- * a possibly-existential module type.
- *
- * Module values of particular module types are 'opened' by a 'use' statement.
- * This converts a module with opaque existential types into a module with
- * a corresponding set of concrete, disjoint opaque (skolem) types. These can
- * be projected out of the module bound by the 'use' statement in subsequent
- * declarations and statements, without risk of collision with other types.
- *
- * For this reason, the MOD_TYPE_ITEM_opaque_type constructor takes no
- * arguments -- it simply describes the presence of *some* existential type
- * in a module -- but whatever that existential may be, it is converted
- * in the bound module to a MOD_ITEM_type (TY_opaque i) for some fresh i,
- * when 'use'd.
- *
- * This technique is explained in some depth in section 4.2 of the
- * paper "first class modules for haskell", by Mark Shields and Simon
- * Peyton Jones. Hopefully I'm doing it right. It's a little near the
- * limit of tricks I understand.
- *)
-
 and mod_item' =
     MOD_ITEM_opaque_type of ty
   | MOD_ITEM_public_type of ty
   | MOD_ITEM_tag of (header_tup * ty_tag * node_id)
   | MOD_ITEM_pred of pred
-  | MOD_ITEM_mod of (mod_header option * mod_items)
+  | MOD_ITEM_mod of mod_items
   | MOD_ITEM_fn of fn
+  | MOD_ITEM_obj of obj
 
 and mod_item = (((ty_param identified), mod_item') decl) identified
 and mod_items = (ident, mod_item) Hashtbl.t
-
-and mod_type_item' =
-    MOD_TYPE_ITEM_opaque_type of mutability
-  | MOD_TYPE_ITEM_public_type of ty
-  | MOD_TYPE_ITEM_pred of ty_pred
-  | MOD_TYPE_ITEM_mod of ty_mod
-  | MOD_TYPE_ITEM_fn of ty_fn
-
-and mod_type_item = (ty_param, mod_type_item') decl
-and mod_type_items = (ident, mod_type_item) Hashtbl.t
 
 and crate' =
     {
@@ -672,69 +641,23 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_tag ttag -> fmt_tag ff ttag
   | TY_iso tiso -> fmt_iso ff tiso
   | TY_idx idx -> fmt ff "<idx#%d>" idx
-
-  | TY_mod tm -> fmt_ty_mod ff None tm
   | TY_constrained _ -> fmt ff "?constrained?"
   | TY_pred tp -> fmt_ty_pred ff None tp
 
-and fmt_mod_type_item
-    (ff:Format.formatter)
-    (id:ident)
-    (item:mod_type_item)
-    : unit =
-  fmt ff "@\n";
-  begin
-    match item.decl_item with
-        MOD_TYPE_ITEM_opaque_type _ ->
-          fmt ff "type ";
-          fmt_ident_and_params ff id item.decl_params;
-          fmt ff ";"
+  | TY_obj fns ->
+      fmt_obox ff;
+      fmt ff "obj ";
+      fmt_obr ff;
+      Hashtbl.iter
+        begin
+          fun id fn ->
+            fmt ff "@\n";
+            fmt_ty_fn ff (Some (id, [||])) fn;
+            fmt ff ";"
+        end
+        fns;
+      fmt_cbb ff
 
-      | MOD_TYPE_ITEM_public_type ty ->
-          fmt ff "pub type ";
-          fmt_ident_and_params ff id item.decl_params;
-          fmt ff " = ";
-          fmt_ty ff ty;
-          fmt ff ";";
-
-      | MOD_TYPE_ITEM_pred p ->
-          fmt_ty_pred ff (Some (id, item.decl_params)) p;
-          fmt ff ";";
-
-      | MOD_TYPE_ITEM_mod m ->
-          fmt_ty_mod ff (Some (id, item.decl_params)) m
-
-      | MOD_TYPE_ITEM_fn f ->
-          fmt_ty_fn ff (Some (id, item.decl_params)) f;
-          fmt ff ";";
-  end
-
-
-and fmt_ty_mod
-    (ff:Format.formatter)
-    (ident_and_params:(ident * ty_param array) option)
-    (tm:ty_mod)
-    : unit =
-  fmt_obox ff;
-  fmt ff "mod ";
-  begin
-    match ident_and_params with
-        Some (id, params) -> fmt_ident_and_params ff id params
-      | None -> ()
-  end;
-  let (hdr, mti) = tm in
-    begin
-      match hdr with
-          None -> ()
-        | Some (slots, constrs) ->
-            fmt_slots ff slots None;
-            fmt_decl_constrs ff constrs
-    end;
-    if not (hdr = None && ident_and_params = None)
-    then fmt ff " ";
-    fmt_obr ff;
-    Hashtbl.iter (fmt_mod_type_item ff) mti;
-    fmt_cbb ff
 
 and fmt_constrs (ff:Format.formatter) (cc:constr array) : unit =
   Array.iter (fmt_constr ff) cc
@@ -1197,6 +1120,18 @@ and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : uni
   fmt_cbb ff
 
 
+and fmt_obj (ff:Format.formatter) (id:ident) (params:ty_param array) (obj:obj) : unit =
+  fmt_obox ff;
+  fmt ff "obj ";
+  fmt_ident_and_params ff id params;
+  fmt_header_slots ff obj.obj_state;
+  fmt_decl_constrs ff obj.obj_constrs;
+  fmt ff " ";
+  fmt_obr ff;
+  Hashtbl.iter (fun id fn -> fmt_fn ff id [||] fn.node) obj.obj_fns;
+  fmt_cbb ff
+
+
 and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
   fmt ff "@\n";
   let params = item.node.decl_params in
@@ -1230,17 +1165,10 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
             fmt_stmts ff p.pred_body.node;
             fmt_cbb ff
 
-        | MOD_ITEM_mod (hdr,items) ->
+        | MOD_ITEM_mod items ->
             fmt_obox ff;
             fmt ff "mod ";
             fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
-            begin
-              match hdr with
-                  None -> ()
-                | Some (hslots, constrs) ->
-                    fmt_header_slots ff hslots;
-                    fmt_decl_constrs ff constrs
-            end;
             fmt ff " ";
             fmt_obr ff;
             fmt_mod_items ff items;
@@ -1248,6 +1176,9 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
 
         | MOD_ITEM_fn f ->
             fmt_fn ff id (Array.map (fun i -> i.node) params) f
+
+        | MOD_ITEM_obj obj ->
+            fmt_obj ff id (Array.map (fun i -> i.node) params) obj
     end
 
 and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
@@ -1285,6 +1216,7 @@ let sprintf_tag = sprintf_fmt fmt_tag;;
 let sprintf_carg = sprintf_fmt fmt_carg;;
 let sprintf_constr = sprintf_fmt fmt_constr;;
 let sprintf_stmt = sprintf_fmt fmt_stmt;;
+let sprintf_mod_items = sprintf_fmt fmt_mod_items;;
 
 (*
  * Local Variables:

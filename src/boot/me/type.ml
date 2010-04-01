@@ -187,25 +187,13 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           Hashtbl.iter check_entry dct
       in
 
-      let unify_dict_with_mod_type_items
+      let unify_dict_with_obj_fns
           (dct:dict)
-          (items:Ast.mod_type_items) : unit =
+          (fns:(Ast.ident,Ast.ty_fn) Hashtbl.t) : unit =
         let check_entry (query:Ast.ident) tv : unit =
-          match htab_search items query with
+          match htab_search fns query with
               None -> fail ()
-            | Some item ->
-                let n_params = Array.length item.Ast.decl_params in
-                let unify =
-                  if n_params > 0
-                  then unify_parametric_ty n_params
-                  else unify_ty
-                in
-                  match item.Ast.decl_item with
-                      Ast.MOD_TYPE_ITEM_opaque_type _ -> () (* FIXME: is this right? *)
-                    | Ast.MOD_TYPE_ITEM_public_type ty -> unify ty tv
-                    | Ast.MOD_TYPE_ITEM_pred p -> unify (Ast.TY_pred p) tv
-                    | Ast.MOD_TYPE_ITEM_mod m -> unify (Ast.TY_mod m) tv
-                    | Ast.MOD_TYPE_ITEM_fn f -> unify (Ast.TY_fn f) tv
+            | Some fn -> unify_ty (Ast.TY_fn fn) tv
         in
           Hashtbl.iter check_entry dct
       in
@@ -217,7 +205,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | Ast.TY_port _ | Ast.TY_proc | Ast.TY_tup _ | Ast.TY_vec _
           | Ast.TY_rec _ | Ast.TY_tag _ | Ast.TY_iso _ | Ast.TY_idx _ ->
               comparable
-          | Ast.TY_fn _ | Ast.TY_pred _ | Ast.TY_mod _ | Ast.TY_opaque _
+          | Ast.TY_fn _ | Ast.TY_pred _ | Ast.TY_obj _ | Ast.TY_opaque _
           | Ast.TY_param _ | Ast.TY_type -> false
           | Ast.TY_named _ -> bug () "is_comparable_or_ordered: TY_named TODO"
           | Ast.TY_constrained (ty, _) ->
@@ -360,11 +348,6 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                         then fail ();
                         unify_slot out_slot None out_tv;
                         Array.iteri unify_in_slot in_slots
-                    | Ast.TY_mod (Some (header_slots, _), items) ->
-                        if Array.length header_slots != Array.length in_tvs
-                        then fail ();
-                        unify_ty (Ast.TY_mod (None, items)) out_tv;
-                        Array.iteri unify_in_slot header_slots
                     | Ast.TY_pred (slots, _) ->
                         unify_ty Ast.TY_bool out_tv;
                         Array.iteri unify_in_slot slots
@@ -398,8 +381,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                 match ty with
                     Ast.TY_rec fields ->
                       unify_dict_with_record_fields dct fields
-                  | Ast.TY_mod (_, items) ->
-                      unify_dict_with_mod_type_items dct items
+                  | Ast.TY_obj fns ->
+                      unify_dict_with_obj_fns dct fns
                   | _ -> fail ()
               end;
               TYSPEC_resolved ty
@@ -760,11 +743,6 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       let c = ref result in
         a := TYSPEC_equiv c;
         b := TYSPEC_equiv c
-
-    and unify_parametric_ty (n:int) (ty:Ast.ty) (tv:tyvar) : unit =
-      let resolved = ref (TYSPEC_resolved ty) in
-      let params = ref (Some (Array.init n (fun _ -> ref TYSPEC_all))) in
-        unify_tyvars (ref (TYSPEC_parametric (resolved, params))) tv
 
     and unify_ty (ty:Ast.ty) (tv:tyvar) : unit =
       unify_tyvars (ref (TYSPEC_resolved ty)) tv
@@ -1143,8 +1121,32 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         in
           Hashtbl.add bindings id (ref spec)
       in
+
+      let init_mod_dict id defn =
+        let rec tv_of_item id item =
+          match item.Ast.decl_item with
+              Ast.MOD_ITEM_mod items ->
+                if Hashtbl.mem bindings id
+                then Hashtbl.find bindings id
+                else
+                  let dict = htab_map items
+                    (fun i item -> (i, tv_of_item item.id item.node))
+                  in
+                  let spec = TYSPEC_dictionary dict in
+                  let tv = ref spec in
+                    Hashtbl.add bindings id tv;
+                    tv
+            | _ ->
+                Hashtbl.find bindings id
+        in
+          match defn with
+              DEFN_item ({ Ast.decl_item=Ast.MOD_ITEM_mod _ } as item) ->
+                ignore (tv_of_item id item)
+            | _ -> ()
+      in
         Hashtbl.iter init_slot_tyvar cx.ctxt_all_defns;
         Hashtbl.iter init_item_tyvar cx.ctxt_all_item_types;
+        Hashtbl.iter init_mod_dict cx.ctxt_all_defns;
         Walk.walk_crate
           (Walk.path_managing_visitor path
              (Walk.mod_item_logging_visitor

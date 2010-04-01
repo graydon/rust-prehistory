@@ -274,6 +274,9 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/spawn-fn.rs \
                     test/run-pass/yield2.rs \
                     test/run-pass/rec-auto.rs \
+                    test/run-pass/first-class-modules.rs \
+                    test/run-pass/stateful-module.rs \
+                    test/run-pass/user.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
                     test/compile-fail/infinite-vec-type-recursion.rs

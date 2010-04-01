@@ -2128,11 +2128,19 @@ let read_dies
 ;;
 
 
-let rec extract_mod_type_items
+let rec extract_mod_items
+    (nref:node_id ref)
+    (oref:opaque_id ref)
     (abi:Abi.abi)
-    (mtis:Ast.mod_type_items)
+    (mis:Ast.mod_items)
     ((i:int),(dies:(int,die) Hashtbl.t))
     : unit =
+
+  let next_node_id _ : node_id =
+    let id = !nref in
+      nref:= Node ((int_of_node id)+1);
+      id
+  in
 
   let (word_sz:int64) = abi.Abi.abi_word_sz in
   let (word_sz_int:int) = Int64.to_int word_sz in
@@ -2270,7 +2278,15 @@ let rec extract_mod_type_items
       | _ -> bug () "unexpected form of DW_AT_type in get_referenced_slot"
   in
 
-  let decl i = { Ast.decl_params = [| |]; Ast.decl_item = i; } in
+  let wrap n =
+    { id = next_node_id ();
+      node = n }
+  in
+
+  let decl i =
+    wrap { Ast.decl_params = [| |];
+           Ast.decl_item = i; }
+  in
 
   let get_formals die =
     arr_map_partial
@@ -2283,18 +2299,24 @@ let rec extract_mod_type_items
       end
   in
 
-  let extract_children mtis die =
+  let extract_children mis die =
     Array.iter
       (fun child ->
-         extract_mod_type_items abi mtis (child.die_off,dies))
+         extract_mod_items nref oref abi mis (child.die_off,dies))
       die.die_children
   in
 
-  let get_mod_type_items die =
+  let get_mod_items die =
     let len = Array.length die.die_children in
-    let mtis = Hashtbl.create len in
-      extract_children mtis die;
-      mtis
+    let mis = Hashtbl.create len in
+      extract_children mis die;
+      mis
+  in
+
+  let form_header_slots slots =
+    Array.mapi
+      (fun i slot -> (wrap slot, "_" ^ (string_of_int i)))
+      slots
   in
 
   let die = Hashtbl.find dies i in
@@ -2302,18 +2324,17 @@ let rec extract_mod_type_items
         DW_TAG_typedef ->
           let ident = get_name die in
           let ty = get_referenced_ty die in
-          let tyi = Ast.MOD_TYPE_ITEM_public_type ty in
-            htab_put mtis ident (decl tyi)
+          let tyi = Ast.MOD_ITEM_public_type ty in
+            htab_put mis ident (decl tyi)
 
       | DW_TAG_compile_unit ->
-          extract_children mtis die
+          extract_children mis die
 
       | DW_TAG_module ->
           let ident = get_name die in
-          let sub_mtis = get_mod_type_items die in
-          let tmod = (None, sub_mtis) in
-          let mti = Ast.MOD_TYPE_ITEM_mod tmod in
-            htab_put mtis ident (decl mti)
+          let sub_mis = get_mod_items die in
+          let mi = Ast.MOD_ITEM_mod sub_mis in
+            htab_put mis ident (decl mi)
 
       | DW_TAG_subprogram ->
           (* FIXME: finish this. *)
@@ -2323,12 +2344,14 @@ let rec extract_mod_type_items
           let taux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
                        Ast.fn_proto = None }
           in
-          let tsig = { Ast.sig_input_slots = islots;
-                       Ast.sig_input_constrs = [| |];
-                       Ast.sig_output_slot = oslot }
+          let tfn = { Ast.fn_input_slots = form_header_slots islots;
+                       Ast.fn_input_constrs = [| |];
+                       Ast.fn_output_slot = wrap oslot;
+                       Ast.fn_aux = taux;
+                       Ast.fn_body = (wrap [||]); }
           in
-          let fty = Ast.MOD_TYPE_ITEM_fn (tsig, taux) in
-            htab_put mtis ident (decl fty)
+          let fn = Ast.MOD_ITEM_fn tfn in
+            htab_put mis ident (decl fn)
 
       | _ -> ()
 ;;

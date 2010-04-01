@@ -70,7 +70,7 @@ and cexp_nat =
        * symbol-names, to handle mangling schemes that aren't
        * Token.IDENT values
        *)
-      nat_items: Ast.mod_type_items;
+      nat_items: Ast.mod_items;
     }
 ;;
 
@@ -128,7 +128,7 @@ let rec parse_cexp (ps:pstate) : cexp =
             let meta = [| |] in
             let items = Hashtbl.create 0 in
             let get_item ps =
-              let (ident, item) = Pexp.parse_mod_ty_item ps in
+              let (ident, item) = Item.parse_mod_item_from_signature ps in
                 htab_put items ident item;
             in
               ignore (bracketed_zero_or_more
@@ -262,7 +262,7 @@ let unexpected_val (expected:string) (v:cval)  =
 ;;
 
 let rewrap_items id items =
-  let item = decl [||] (Ast.MOD_ITEM_mod (None, items)) in
+  let item = decl [||] (Ast.MOD_ITEM_mod items) in
     { id = id; node = item }
 ;;
 
@@ -307,7 +307,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
             ps.pstate_opaque_id
             ps.pstate_sess
             ps.pstate_lexfun
-            ps.pstate_get_ty_mod
+            ps.pstate_get_mod
             ps.pstate_infer_lib_name
             env.env_imported
             full_path
@@ -338,18 +338,19 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         let ilib = IMPORT_LIB_rust { import_libname = filename;
                                      import_prefix = 1 }
         in
-        let tmod = ps.pstate_get_ty_mod filename in
+        let items = ps.pstate_get_mod filename ps.pstate_node_id ps.pstate_opaque_id in
           iflog ps
             begin
               fun _ ->
-                log ps "extracted mod type from %s (binding to %s)" filename name;
-                log ps "%a" Ast.sprintf_ty (Ast.TY_mod tmod);
+                log ps "extracted mod signature from %s (binding to %s)" filename name;
+                log ps "%a" Ast.sprintf_mod_items items;
             end;
-          let mti = decl [||] (Ast.MOD_TYPE_ITEM_mod tmod) in
+          let item = decl [||] (Ast.MOD_ITEM_mod items) in
+          let item = { id = id; node = item } in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
-          let item = Item.expand_imported_mod env.env_ps span CONV_rust ilib mti in
-            htab_put ps.pstate_imported id (ilib,CONV_rust);
-            CVAL_mod_item (name, { id = id; node = item })
+            Item.note_imported_mod env.env_ps span CONV_rust ilib item;
+            htab_put ps.pstate_imported id (ilib, CONV_rust);
+            CVAL_mod_item (name, item)
 
     | CEXP_nat_mod {node=cn;id=id} ->
         let conv =
@@ -364,15 +365,16 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
               None -> env.env_ps.pstate_infer_lib_name name
             | Some p -> eval_cexp_to_str env p
         in
-        let mti = decl [||] (Ast.MOD_TYPE_ITEM_mod (None, cn.nat_items)) in
+        let item = decl [||] (Ast.MOD_ITEM_mod cn.nat_items) in
+        let item = { id = id; node = item } in
         let ilib = IMPORT_LIB_c { import_libname = filename;
                                   import_prefix = 1 }
         in
         let ps = env.env_ps in
         let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
-        let item = Item.expand_imported_mod env.env_ps span conv ilib mti in
-          htab_put ps.pstate_imported id (ilib,CONV_rust);
-          CVAL_mod_item (name, { id = id; node = item })
+          Item.note_imported_mod env.env_ps span conv ilib item;
+          htab_put ps.pstate_imported id (ilib, CONV_rust);
+          CVAL_mod_item (name, item)
 
     | CEXP_pexp exp ->
         eval_pexp env exp
@@ -485,7 +487,7 @@ let find_main_fn
     then ()
     else
       match item.node.Ast.decl_item with
-          Ast.MOD_ITEM_mod (None, items) ->
+          Ast.MOD_ITEM_mod items ->
             dig (Some (extend prefix_name ident)) items
 
        | Ast.MOD_ITEM_fn _ ->
@@ -526,7 +528,7 @@ let with_err_handling sess thunk =
 let parse_crate_file
     (sess:Session.sess)
     (tok:Lexing.lexbuf -> Token.token)
-    (get_ty_mod:(filename ->  Ast.ty_mod))
+    (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
     (infer_lib_name:(Ast.ident -> filename))
     : Ast.crate =
   let fname = Session.filename_of sess.Session.sess_in in
@@ -535,7 +537,7 @@ let parse_crate_file
   let oref = ref (Opaque 0) in
   let imported = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess tok get_ty_mod infer_lib_name imported fname
+    make_parser tref nref oref sess tok get_mod infer_lib_name imported fname
   in
 
   let files = Hashtbl.create 0 in
@@ -599,7 +601,7 @@ let parse_crate_file
 let parse_src_file
     (sess:Session.sess)
     (tok:Lexing.lexbuf -> Token.token)
-    (get_ty_mod:(filename ->  Ast.ty_mod))
+    (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
     (infer_lib_name:(Ast.ident -> filename))
     : Ast.crate =
   let fname = Session.filename_of sess.Session.sess_in in
@@ -608,7 +610,7 @@ let parse_src_file
   let oref = ref (Opaque 0) in
   let imported = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess tok get_ty_mod infer_lib_name imported fname
+    make_parser tref nref oref sess tok get_mod infer_lib_name imported fname
   in
     with_err_handling sess
       begin

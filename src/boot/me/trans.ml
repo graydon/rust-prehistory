@@ -557,7 +557,7 @@ let trans_visitor
                   None -> bugi cx slot_id
                     "slot assigned to neither vreg nor offset"
                 | Some off ->
-                    if slot_is_module_state cx slot_id
+                    if slot_is_obj_state cx slot_id
                     then
                       begin
                         let curr_args_rty =
@@ -673,29 +673,6 @@ let trans_visitor
             let (mem, _) = need_mem_cell (deref cell) in
             let elt_mem = trans_bounds_check mem (Il.Cell t) in
               (Il.Mem (elt_mem, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
-
-      | (Ast.TY_mod (_, mtis),
-         Ast.COMP_named (Ast.COMP_ident id)) ->
-          let sorted_idents = sorted_htab_keys mtis in
-          let table_rty = referent_type abi base_ty in
-          let item = Hashtbl.find mtis id in
-          let item_ty = ty_of_mod_type_item item in
-          let item_rty = referent_type abi item_ty in
-          let i = arr_idx sorted_idents id in
-
-          (* 
-           * A cell is a pair [mod_table_disp, binding*]; we
-           * dereference the first cell of this pair and then return
-           * the address of the Nth table-item. Each table item is
-           * itself a pair.
-           *)
-
-          let pair_0_cell = get_element_ptr cell 0 in
-          let table_ptr = crate_rel_to_ptr (Il.Cell pair_0_cell) table_rty in
-          let (table_mem, _) = need_mem_cell (deref table_ptr) in
-          let off = word_n (i * 2) in
-          let item_mem = Il.mem_off_imm table_mem off in
-            (Il.Mem (item_mem, item_rty), interior_slot item_ty)
 
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
 
@@ -831,6 +808,30 @@ let trans_visitor
                 |]
             |]
       end
+
+  and trans_obj_vtbl (id:node_id) : Il.operand =
+    let obj =
+      match Hashtbl.find cx.ctxt_all_defns id with
+          DEFN_item { Ast.decl_item=Ast.MOD_ITEM_obj obj} -> obj
+        | _ -> bug () "Trans.trans_obj_vtbl on non-obj referent"
+    in
+      trans_crate_rel_data_operand (DATA_obj_vtbl id)
+        begin
+          fun _ ->
+            iflog (fun _ -> log cx "emitting %d-entry obj vtbl for %s"
+                     (Hashtbl.length obj.Ast.obj_fns) (path_name()));
+            let fptrs =
+              Array.map
+                begin
+                  fun k ->
+                    let fn = Hashtbl.find obj.Ast.obj_fns k in
+                    let fix = get_fn_fixup cx fn.id in
+                      crate_rel_word fix
+                end
+                (sorted_htab_keys obj.Ast.obj_fns)
+            in
+              Asm.SEQ fptrs
+        end
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
     (* Include null byte. *)
@@ -978,69 +979,6 @@ let trans_visitor
         | None ->
             let fix = new_fixup (glue_str cx g) in
               emit_exit_proc_glue fix g;
-              fix
-
-  and emit_bind_mod_glue
-      (mod_id:node_id)
-      (hdr:Ast.ty_mod_header)
-      (self_fix:fixup)
-      (g:glue)
-      : unit =
-    let name = glue_str cx g in
-    let spill = new_fixup (name ^ " spill") in
-      trans_mem_glue_frame_entry 0 spill;
-
-      let (slots, _) = hdr in
-      let state_ty = Ast.TY_tup slots in
-      let src_rty = slot_referent_type abi (interior_slot state_ty) in
-      let exterior_binding_slot = exterior_slot state_ty in
-      let binding_ptr_rty = slot_referent_type abi exterior_binding_slot in
-      let binding_malloc_sz =
-        exterior_rc_allocation_size exterior_binding_slot
-      in
-
-      let mod_ty = Hashtbl.find cx.ctxt_all_item_types mod_id in
-      let mod_rty = referent_type abi mod_ty in
-
-      let mod_fix = Hashtbl.find cx.ctxt_mod_fixups mod_id in
-      let mod_ptr =
-        fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data mod_fix mod_rty
-      in
-
-      let src_pair_cell = deref (need_cell (reify_ptr mod_ptr)) in
-      let src_pair_0_cell = get_element_ptr src_pair_cell 0 in
-
-      let dst_pair_cell = deref (ptr_at (fp_imm out_mem_disp) mod_ty) in
-      let dst_pair_0_cell = get_element_ptr dst_pair_cell 0 in
-      let dst_pair_1_cell = get_element_ptr dst_pair_cell 1 in
-
-
-        (* Load first cell of pair with first cell of the static module pair.*)
-        mov dst_pair_0_cell (Il.Cell src_pair_0_cell);
-
-        (* Load second cell of pair with pointer to fresh binding tuple.*)
-        trans_malloc dst_pair_1_cell binding_malloc_sz;
-
-        (* Copy args into the binding tuple. *)
-        let binding_ptr = next_vreg_cell (need_scalar_ty binding_ptr_rty) in
-          mov binding_ptr (Il.Cell dst_pair_1_cell);
-          let binding = deref binding_ptr in
-          let refcnt_cell = get_element_ptr binding 0 in
-          let body_cell = get_element_ptr binding 1 in
-          let src_arg_mem = (fp_imm arg0_disp, src_rty) in
-
-            mov refcnt_cell one;
-            trans_copy_tup true body_cell (Il.Mem src_arg_mem) slots;
-            trans_glue_frame_exit self_fix spill g;
-
-
-  and get_bind_mod_glue (mod_id:node_id) (hdr:Ast.ty_mod_header) : fixup =
-    let g = GLUE_bind_mod mod_id in
-      match htab_search cx.ctxt_glue_code g with
-          Some code -> code.code_fixup
-        | None ->
-            let fix = new_fixup (glue_str cx g) in
-              emit_bind_mod_glue mod_id hdr fix g;
               fix
 
   (*
@@ -1477,7 +1415,7 @@ let trans_visitor
     iter_block_slots block.id
       begin
         fun slotkey slot_id slot ->
-          if (not (slot_is_module_state cx slot_id))
+          if (not (slot_is_obj_state cx slot_id))
           then
             begin
               (* FIXME (bug 541543): this is not going to free things in
@@ -1744,7 +1682,7 @@ let trans_visitor
                    ty_fold_idx = (fun _ -> true);
                    ty_fold_fn = (fun _ -> true);
                    ty_fold_pred = (fun _ -> true);
-                   ty_fold_mod = (fun _ -> true) }
+                   ty_fold_obj = (fun _ -> true) }
     in
       fold_ty fold t
 
@@ -1862,7 +1800,7 @@ let trans_visitor
 
           | Ast.TY_fn _
           | Ast.TY_pred _
-          | Ast.TY_mod _ ->
+          | Ast.TY_obj _ ->
 
               (* Fake-int to provoke copying of the static part. *)
               let src_fn_field_cell = get_element_ptr src_cell 0 in
@@ -2381,16 +2319,13 @@ let trans_visitor
             if lval_is_direct_fn cx src_lval then
               trans_copy_direct_fn dst_cell src_lval
             else
-              if lval_is_direct_mod cx src_lval then
-                trans_copy_direct_mod dst_cell src_lval
-              else
-                (* Possibly-large structure copying *)
-                let (src_cell, src_slot) = trans_lval src_lval in
-                  trans_copy_slot
-                    initializing
-                    dst_cell dst_slot
-                    src_cell src_slot
-                    None
+              (* Possibly-large structure copying *)
+              let (src_cell, src_slot) = trans_lval src_lval in
+                trans_copy_slot
+                  initializing
+                  dst_cell dst_slot
+                  src_cell src_slot
+                  None
 
   and trans_copy_direct_fn
       (dst_cell:Il.cell)
@@ -2404,29 +2339,6 @@ let trans_visitor
 
       mov dst_pair_0_cell (crate_rel_imm fix);
       mov dst_pair_1_cell zero
-
-  and trans_copy_direct_mod
-      (dst_cell:Il.cell)
-      (flv:Ast.lval)
-      : unit =
-    let mod_item = lval_item cx flv in
-    let mod_ty = Hashtbl.find cx.ctxt_all_item_types mod_item.id in
-    let mod_rty = referent_type abi mod_ty in
-
-    let mod_fix = Hashtbl.find cx.ctxt_mod_fixups mod_item.id in
-    let mod_ptr =
-      fixup_to_ptr_operand abi.Abi.abi_has_pcrel_data mod_fix mod_rty
-    in
-
-    let src_pair_cell = deref (need_cell (reify_ptr mod_ptr)) in
-    let src_pair_0_cell = get_element_ptr src_pair_cell 0 in
-    let src_pair_1_cell = get_element_ptr src_pair_cell 1 in
-
-    let dst_pair_0_cell = get_element_ptr dst_cell 0 in
-    let dst_pair_1_cell = get_element_ptr dst_cell 1 in
-
-      mov dst_pair_0_cell (Il.Cell src_pair_0_cell);
-      mov dst_pair_1_cell (Il.Cell src_pair_1_cell);
 
 
   and trans_init_structural_from_atoms
@@ -2559,13 +2471,6 @@ let trans_visitor
       trans_be direct (fun () -> Ast.sprintf_lval () flv)
         ptr fn_ty_params fn_ty caller_is_closure dst_cell args extra_args
 
-  and trans_be_mod
-      ((*flv*)_:Ast.lval)
-      ((*args*)_:Ast.atom array)
-      : unit =
-    (* FIXME: implement be module *)
-    bug () "trans_be_mod not yet implemented"
-
   and trans_call_fn
       (initializing:bool)
       (cx:ctxt)
@@ -2596,28 +2501,6 @@ let trans_visitor
       trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
         ptr ty_params fn_ty
         dst_cell args extra_args
-
-  and trans_call_mod
-      (initializing:bool)
-      (dst:Ast.lval)
-      (flv:Ast.lval)
-      (ty_params:Ast.ty array)
-      (args:Ast.atom array)
-      : unit =
-    let (dst_cell, _) = trans_lval_maybe_init initializing dst in
-    let item = lval_item cx flv in
-    let item_ty = Hashtbl.find cx.ctxt_all_item_types item.id in
-    let glue_fixup =
-      match item_ty with
-          Ast.TY_mod (Some hdr, _) ->
-            get_bind_mod_glue item.id hdr
-        | _ -> err None "call to unexpected form of module"
-    in
-    let ptr = code_fixup_to_ptr_operand glue_fixup in
-      trans_call
-        initializing true (fun _ -> Ast.sprintf_lval () flv)
-        ptr ty_params item_ty
-        dst_cell args [||]
 
   and trans_call_pred_and_check
       (constr:Ast.constr)
@@ -2749,7 +2632,6 @@ let trans_visitor
     match ty with
         Ast.TY_fn (tsig, _) -> tsig.Ast.sig_input_slots
       | Ast.TY_pred (args, _) -> args
-      | Ast.TY_mod (Some (args, _), _) -> args
       | _ -> bug () "Trans.ty_arg_slots on non-callable type: %a"
           Ast.sprintf_ty ty
 
@@ -3194,10 +3076,6 @@ let trans_visitor
                   Ast.TY_fn _
                 | Ast.TY_pred _ ->
                     trans_call_fn init cx dst flv ty_params args
-
-                | Ast.TY_mod (Some _, _) ->
-                    trans_call_mod init dst flv ty_params args
-
                 | _ -> bug () "Calling unexpected lval."
           end
 
@@ -3343,9 +3221,6 @@ let trans_visitor
                         | Ast.TY_pred _ ->
                             bug () "be pred not yet implemented"
 
-                        | Ast.TY_mod (Some _, _) ->
-                            trans_be_mod flv args
-
                         | _ -> bug () "Calling unexpected lval."
                   end
               | Some _ ->
@@ -3395,7 +3270,7 @@ let trans_visitor
               begin
                 fun key slot_id slot ->
                   match htab_search cx.ctxt_slot_offsets slot_id with
-                      Some off when not (slot_is_module_state cx slot_id) ->
+                      Some off when not (slot_is_obj_state cx slot_id) ->
                         let referent_type = slot_id_referent_type slot_id in
                         let (fp, st) =
                           force_to_reg (Il.Cell (rty_ptr_at mem referent_type))
@@ -3480,6 +3355,52 @@ let trans_visitor
     trans_block body;
     trans_frame_exit fnid true;
     ignore (Stack.pop fns);
+  in
+
+  let trans_obj_ctor
+      (obj_id:node_id)
+      (state:Ast.header_slots)
+      : unit =
+    trans_frame_entry obj_id;
+
+    let slots = Array.map (fun (sloti,_) -> sloti.node) state in
+    let state_ty = Ast.TY_tup slots in
+    let src_rty = slot_referent_type abi (interior_slot state_ty) in
+    let exterior_state_slot = exterior_slot state_ty in
+    let state_ptr_rty = slot_referent_type abi exterior_state_slot in
+    let state_malloc_sz =
+      exterior_rc_allocation_size exterior_state_slot
+    in
+
+    let ctor_ty = Hashtbl.find cx.ctxt_all_item_types obj_id in
+    let obj_ty =
+      match ctor_ty with
+          Ast.TY_fn (tsig, _) -> slot_ty tsig.Ast.sig_output_slot
+        | _ -> bug () "object constructor doesn't have function type"
+    in
+    let vtbl_ptr = trans_obj_vtbl obj_id in
+    let src_cell = need_cell (reify_ptr vtbl_ptr) in
+
+    let dst_pair_cell = deref (ptr_at (fp_imm out_mem_disp) obj_ty) in
+    let dst_pair_0_cell = get_element_ptr dst_pair_cell 0 in
+    let dst_pair_1_cell = get_element_ptr dst_pair_cell 1 in
+
+      (* Load first cell of pair with vtbl ptr.*)
+      mov dst_pair_0_cell (Il.Cell src_cell);
+
+      (* Load second cell of pair with pointer to fresh state tuple.*)
+      trans_malloc dst_pair_1_cell state_malloc_sz;
+
+      (* Copy args into the state tuple. *)
+      let state_ptr = next_vreg_cell (need_scalar_ty state_ptr_rty) in
+        mov state_ptr (Il.Cell dst_pair_1_cell);
+        let state = deref state_ptr in
+        let refcnt_cell = get_element_ptr state 0 in
+        let body_cell = get_element_ptr state 1 in
+        let src_arg_mem = (fp_imm arg0_disp, src_rty) in
+          mov refcnt_cell one;
+          trans_copy_tup true body_cell (Il.Mem src_arg_mem) slots;
+          trans_frame_exit obj_id false;
   in
 
   let string_of_name_component (nc:Ast.name_component) : string =
@@ -3657,42 +3578,6 @@ let trans_visitor
         trans_frame_exit tagid true;
   in
 
-  let trans_mod (id:node_id) (m:Ast.mod_items) : unit =
-    log cx "emitting %d-entry mod table for %s" (Hashtbl.length m) (path_name());
-    let pair_with_nil fix =
-      Asm.SEQ
-        [| crate_rel_word fix;
-           Asm.WORD (word_ty_mach, Asm.IMM 0L) |]
-    in
-    let item_pairs =
-      Array.map
-        begin
-          fun ident ->
-            let item = Hashtbl.find m ident in
-            let fix =
-              match item.node.Ast.decl_item with
-                  Ast.MOD_ITEM_fn _
-                | Ast.MOD_ITEM_pred _
-                | Ast.MOD_ITEM_tag _ -> get_fn_fixup cx item.id
-                | Ast.MOD_ITEM_mod _ -> get_mod_fixup cx item.id
-                | Ast.MOD_ITEM_opaque_type t
-                | Ast.MOD_ITEM_public_type t ->
-                    ignore (trans_tydesc t);
-                    let (fix, _) = Hashtbl.find cx.ctxt_data (DATA_tydesc t) in
-                      fix
-            in
-              pair_with_nil fix
-        end
-        (sorted_htab_keys m)
-    in
-    let table_fix = new_fixup "mod table" in
-    let pair_fix = get_mod_fixup cx id in
-    let table_frag = Asm.DEF (table_fix, Asm.SEQ item_pairs) in
-    let pair_frag = Asm.DEF (pair_fix, pair_with_nil table_fix) in
-      htab_put cx.ctxt_data (DATA_mod_table id) (table_fix, table_frag);
-      htab_put cx.ctxt_data (DATA_mod_pair id) (pair_fix, pair_frag)
-  in
-
   let enter_file_for id =
     if Hashtbl.mem cx.ctxt_item_files id
     then Stack.push id curr_file
@@ -3723,6 +3608,7 @@ let trans_visitor
 
         | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.pred_body
         | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
+        | Ast.MOD_ITEM_obj ob -> trans_obj_ctor i.id ob.Ast.obj_state
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -3746,21 +3632,11 @@ let trans_visitor
 
   let visit_local_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
-    begin
-      match i.node.Ast.decl_item with
-          Ast.MOD_ITEM_mod (_, mis) -> trans_mod i.id mis
-        | _ -> ()
-    end;
     leave_file_for i.id
   in
 
   let visit_imported_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
-    begin
-      match i.node.Ast.decl_item with
-          Ast.MOD_ITEM_mod (_, mis) -> trans_mod i.id mis
-        | _ -> ()
-    end;
     leave_file_for i.id
   in
 
@@ -3904,6 +3780,7 @@ let fixup_assigning_visitor
             htab_put cx.ctxt_fn_fixups i.id
               (new_fixup (path_name()));
 
+        | Ast.MOD_ITEM_obj _
         | Ast.MOD_ITEM_fn _ ->
             begin
               let path = path_name () in
@@ -3914,10 +3791,6 @@ let fixup_assigning_visitor
               in
                 htab_put cx.ctxt_fn_fixups i.id fixup;
             end
-
-        | Ast.MOD_ITEM_mod _ ->
-            htab_put cx.ctxt_mod_fixups i.id
-              (new_fixup (path_name()));
 
         | _ -> ()
     end;

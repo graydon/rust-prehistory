@@ -265,11 +265,11 @@ let layout_visitor
             layout_header i.id
               (Array.map (fun sid -> sid.id) header_slots)
 
-        | Ast.MOD_ITEM_mod (Some (hdr, _), _) ->
-            let ids = header_slot_ids hdr in
+        | Ast.MOD_ITEM_obj obj ->
+            let ids = header_slot_ids obj.Ast.obj_state in
               layout_mod_closure i.id ids;
               Array.iter
-                (fun id -> htab_put cx.ctxt_slot_is_module_state id ())
+                (fun id -> htab_put cx.ctxt_slot_is_obj_state id ())
                 ids
 
         | _ -> ()
