@@ -50,6 +50,7 @@ type defn =
     DEFN_slot of Ast.slot
   | DEFN_item of (Ast.ty_param identified, Ast.mod_item') Ast.decl
   | DEFN_ty_param of Ast.ty_param
+  | DEFN_obj_fn of (node_id * Ast.fn)
 ;;
 
 type glue_code = (glue, code) Hashtbl.t;;
@@ -319,6 +320,7 @@ let get_callsz (cx:ctxt) (id:node_id) : size =
 let n_item_ty_params (cx:ctxt) (id:node_id) : int =
   match Hashtbl.find cx.ctxt_all_defns id with
       DEFN_item i -> Array.length i.Ast.decl_params
+    | DEFN_obj_fn _ -> 0
     | _ -> bugi cx id "n_item_ty_params on non-item"
 ;;
 
@@ -832,6 +834,9 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
     | (Ast.TY_str, Ast.COMP_atom _) ->
         interior_slot (Ast.TY_mach TY_u8)
 
+    | (Ast.TY_obj fns, Ast.COMP_named (Ast.COMP_ident id)) ->
+        interior_slot (Ast.TY_fn (Hashtbl.find fns id))
+
     | (_,_) ->
         bug () "unhandled form of lval-ext in Semant.project_slot: %a indexed by %a"
           Ast.sprintf_ty base_ty Ast.sprintf_lval_component comp
@@ -914,6 +919,19 @@ let lval_is_callable (cx:ctxt) (lval:Ast.lval) : bool =
   defn_is_callable (resolve_lval cx lval)
 ;;
 
+let lval_is_obj_vtbl (cx:ctxt) (lval:Ast.lval) : bool =
+  if lval_is_slot cx lval
+  then
+    match lval with
+        Ast.LVAL_ext (base, _) ->
+          begin
+            match slot_ty (lval_slot cx base) with
+                Ast.TY_obj _ -> true
+              | _ -> false
+          end
+      | _ -> false
+  else false
+;;
 
 let rec lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
   let base_id = lval_base_id lval in

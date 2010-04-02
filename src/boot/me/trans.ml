@@ -24,6 +24,11 @@ type clone_ctrl =
   | CLONE_chan of Il.cell
   | CLONE_all of Il.cell
 
+type call_ctrl =
+    CALL_direct
+  | CALL_vtbl
+  | CALL_closure
+
 let trans_visitor
     (cx:ctxt)
     (path:Ast.name_component Stack.t)
@@ -680,10 +685,10 @@ let trans_visitor
           let sorted_idents = sorted_htab_keys fns in
           let i = arr_idx sorted_idents id in
           let fn_ty = Hashtbl.find fns id in
-          let (table_mem, _) = need_mem_cell cell in
+          let (table_mem, _) = (need_mem_cell (deref (get_element_ptr cell 0))) in
           let off = word_n i in
           let item_mem = Il.mem_off_imm table_mem off in
-            (Il.Mem (item_mem, Il.CodeTy), interior_slot (Ast.TY_fn fn_ty))
+            (Il.Mem (item_mem, Il.ScalarTy (Il.AddrTy Il.CodeTy)), interior_slot (Ast.TY_fn fn_ty))
 
 
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
@@ -760,8 +765,8 @@ let trans_visitor
         let fn_item = lval_item cx flv in
         let fn_ptr = code_fixup_to_ptr_operand (get_fn_fixup cx fn_item.id) in
           (fn_ptr, fty)
-            (* indirect call to computed slot *)
       else
+        (* indirect call to computed slot *)
         let (cell, _) = trans_lval flv in
           (Il.Cell cell, fty)
 
@@ -2493,7 +2498,7 @@ let trans_visitor
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (ptr, fn_ty) = trans_callee flv in
-    let direct = lval_is_static cx flv in
+    let direct = lval_is_static cx flv || lval_is_obj_vtbl cx flv in
     let extra_args =
       if direct then
         [||]
@@ -3620,7 +3625,11 @@ let trans_visitor
 
         | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.pred_body
         | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
-        | Ast.MOD_ITEM_obj ob -> trans_obj_ctor i.id ob.Ast.obj_state
+        | Ast.MOD_ITEM_obj ob ->
+            trans_obj_ctor i.id ob.Ast.obj_state;
+            Hashtbl.iter
+              (fun _ fn -> trans_fn fn.id fn.node.Ast.fn_body)
+              ob.Ast.obj_fns
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i

@@ -163,6 +163,18 @@ let all_item_collecting_visitor
             note_header i.id f.Ast.fn_input_slots;
         | Ast.MOD_ITEM_pred p ->
             note_header i.id p.Ast.pred_input_slots
+        | Ast.MOD_ITEM_obj ob ->
+            note_header i.id ob.Ast.obj_state;
+            Hashtbl.iter
+              begin
+                fun ident fn ->
+                  htab_put cx.ctxt_all_defns fn.id
+                    (DEFN_obj_fn (i.id, fn.node));
+                  htab_put cx.ctxt_all_item_names fn.id
+                    (Ast.NAME_ext ((Walk.path_to_name path),
+                                   Ast.COMP_ident ident));
+              end
+              ob.Ast.obj_fns
         | _ -> ()
     end;
       inner.Walk.visit_mod_item_pre n p i

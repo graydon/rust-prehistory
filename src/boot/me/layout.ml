@@ -248,12 +248,14 @@ let layout_visitor
 
   let visit_mod_item_pre n p i =
     let header_slot_ids hdr = Array.map (fun (sid,_) -> sid.id) hdr in
+    let visit_fn id f =
+      enter_frame id;
+      layout_header id
+        (header_slot_ids f.Ast.fn_input_slots)
+    in
     begin
       match i.node.Ast.decl_item with
-          Ast.MOD_ITEM_fn f ->
-            enter_frame i.id;
-            layout_header i.id
-              (header_slot_ids f.Ast.fn_input_slots)
+          Ast.MOD_ITEM_fn f -> visit_fn i.id f
 
         | Ast.MOD_ITEM_pred p ->
             enter_frame i.id;
@@ -271,7 +273,14 @@ let layout_visitor
               layout_mod_closure i.id ids;
               Array.iter
                 (fun id -> htab_put cx.ctxt_slot_is_obj_state id ())
-                ids
+                ids;
+              Hashtbl.iter
+                begin
+                  fun _ fn ->
+                    visit_fn fn.id fn.node
+                end
+                obj.Ast.obj_fns
+
 
         | _ -> ()
     end;
