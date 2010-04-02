@@ -3780,7 +3780,6 @@ let fixup_assigning_visitor
             htab_put cx.ctxt_fn_fixups i.id
               (new_fixup (path_name()));
 
-        | Ast.MOD_ITEM_obj _
         | Ast.MOD_ITEM_fn _ ->
             begin
               let path = path_name () in
@@ -3791,6 +3790,15 @@ let fixup_assigning_visitor
               in
                 htab_put cx.ctxt_fn_fixups i.id fixup;
             end
+
+        | Ast.MOD_ITEM_obj obj ->
+            let obj_path = path_name() in
+            htab_put cx.ctxt_fn_fixups i.id (new_fixup obj_path);
+              Hashtbl.iter
+                (fun ident fn ->
+                   let fixup = new_fixup (obj_path ^ "." ^ ident) in
+                     htab_put cx.ctxt_fn_fixups fn.id fixup)
+                obj.Ast.obj_fns;
 
         | _ -> ()
     end;
