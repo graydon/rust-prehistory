@@ -274,8 +274,8 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/spawn-fn.rs \
                     test/run-pass/yield2.rs \
                     test/run-pass/rec-auto.rs \
-                    test/run-pass/first-class-modules.rs \
-                    test/run-pass/stateful-module.rs \
+                    test/run-pass/simple-obj.rs \
+                    test/run-pass/stateful-obj.rs \
                     test/run-pass/user.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
@@ -285,7 +285,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       basic.rs bind-thunk.rs bind-trivial.rs char.rs comm.rs \
                       complex.rs dead-code-one-arm-if.rs deep.rs div-mod.rs \
                       drop-on-ret.rs exterior.rs fact.rs \
-                      first-class-modules.rs fun-call-variants.rs \
+                      simple-obj.rs fun-call-variants.rs \
                       fun-indirect-call.rs generic-fn.rs hello.rs \
                       inner-module.rs int.rs large-records.rs lazychan.rs \
                       linear-for-loop.rs many.rs mlist.rs mlist_cycle.rs \
@@ -293,7 +293,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \
                       rec-extend.rs rec.rs rec_tup.rs return-nil.rs \
                       s32-sub.rs s8-incr.rs spawn-fn.rs spawn.rs \
-                      stateful-module.rs str-concat.rs str-idx.rs tag.rs \
+                      stateful-obj.rs str-concat.rs str-idx.rs tag.rs \
                       tail-cps.rs tail-direct.rs threads.rs tup.rs \
                       u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \
                       writealias.rs yield.rs yield2.rs) \
@@ -536,7 +536,7 @@ clean:
 	@$(call CFG_ECHO, cleaning)
 	$(CFG_QUIET)rm -f $(RUNTIME_OBJS) $(BOOT_CMOS) $(BOOT_CMIS) $(BOOT_CMXS) $(BOOT_OBJS)
 	$(CFG_QUIET)rm -f $(CFG_COMPILER)
-	$(CFG_QUIET)rm -f $(ML_DEPFILES) $(C_DEPFILES)
+	$(CFG_QUIET)rm -f $(ML_DEPFILES) $(C_DEPFILES) $(CRATE_DEPFILES)
 	$(CFG_QUIET)rm -f boot/fe/lexer.ml
 	$(CFG_QUIET)rm -f $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	$(CFG_QUIET)rm -f $(TEST_RUN_PASS_EXES) $(TEST_RUN_PASS_OUTS)

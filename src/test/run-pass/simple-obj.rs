@@ -1,12 +1,12 @@
 // -*- rust -*-
 
-mod x {
+obj x() {
   fn hello() {
-    log "hello, first-class module world";
+    log "hello, object world";
   }
 }
 
 fn main() {
-  auto mx = x;
+  auto mx = x();
   mx.hello();
 }

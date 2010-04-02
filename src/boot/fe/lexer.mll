@@ -60,6 +60,8 @@
                 ("vec", VEC);
                 ("any", ANY);
 
+                ("obj", OBJ);
+
                 ("port", PORT);
                 ("chan", CHAN);
 

@@ -266,6 +266,7 @@ let layout_visitor
               (Array.map (fun sid -> sid.id) header_slots)
 
         | Ast.MOD_ITEM_obj obj ->
+            enter_frame i.id;
             let ids = header_slot_ids obj.Ast.obj_state in
               layout_mod_closure i.id ids;
               Array.iter
@@ -280,9 +281,10 @@ let layout_visitor
     inner.Walk.visit_mod_item_post n p i;
     begin
       match i.node.Ast.decl_item with
-          Ast.MOD_ITEM_fn _ -> leave_frame ()
-        | Ast.MOD_ITEM_pred _ -> leave_frame ()
-        | Ast.MOD_ITEM_tag _ -> leave_frame ()
+          Ast.MOD_ITEM_fn _
+        | Ast.MOD_ITEM_pred _
+        | Ast.MOD_ITEM_tag _
+        | Ast.MOD_ITEM_obj _ -> leave_frame ()
         | _ -> ()
     end
   in

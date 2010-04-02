@@ -644,8 +644,8 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
   let public = Pexp.flag ps PUB in
   let pure =
     match peek ps with
-        PURE -> Ast.PURE
-      | MUTABLE -> Ast.IMPURE Ast.MUTABLE
+        PURE -> (bump ps; Ast.PURE)
+      | MUTABLE -> (bump ps; Ast.IMPURE Ast.MUTABLE)
       | _ -> Ast.IMPURE Ast.IMMUTABLE
   in
   let parse_lib_name ident =
@@ -758,6 +758,43 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                   note_imported_mod ps {lo=apos; hi=bpos} CONV_rust ilib item;
                   htab_put ps.pstate_imported item.id (ilib, CONV_rust);
                   (ident, item)
+          end
+
+      | OBJ ->
+          begin
+            bump ps;
+            let (ident, params) = parse_ident_and_params ps "obj" in
+            let (state, constrs) = (ctxt "obj state" parse_inputs ps) in
+              expect ps LBRACE;
+              let fns = Hashtbl.create 0 in
+                while (not (peek ps = RBRACE))
+                do
+                  let apos = lexpos ps in
+                  let pure =
+                    match peek ps with
+                        PURE -> (bump ps; Ast.PURE)
+                      | MUTABLE -> (bump ps; Ast.IMPURE Ast.MUTABLE)
+                      | _ -> Ast.IMPURE Ast.IMMUTABLE
+                  in
+                    match peek ps with
+                        FN proto_opt ->
+                          bump ps;
+                          let ident = ctxt "obj fn: ident" Pexp.parse_ident ps in
+                          let fn = ctxt "obj fn: fn" (parse_fn proto_opt pure) ps in
+                          let bpos = lexpos ps in
+                            htab_put fns ident (span ps apos bpos fn)
+                      | RBRACE -> ()
+                      | _ -> raise (unexpected ps)
+                done;
+                expect ps RBRACE;
+                let bpos = lexpos ps in
+                let obj = { Ast.obj_state = state;
+                            Ast.obj_constrs = constrs;
+                            Ast.obj_fns = fns }
+                in
+                  (ident,
+                   span ps apos bpos
+                     (decl params (Ast.MOD_ITEM_obj obj)))
           end
 
 

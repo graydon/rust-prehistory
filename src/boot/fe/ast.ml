@@ -1128,7 +1128,13 @@ and fmt_obj (ff:Format.formatter) (id:ident) (params:ty_param array) (obj:obj) :
   fmt_decl_constrs ff obj.obj_constrs;
   fmt ff " ";
   fmt_obr ff;
-  Hashtbl.iter (fun id fn -> fmt_fn ff id [||] fn.node) obj.obj_fns;
+  Hashtbl.iter
+    begin
+      fun id fn ->
+        fmt ff "@\n";
+        fmt_fn ff id [||] fn.node
+    end
+    obj.obj_fns;
   fmt_cbb ff
 
 

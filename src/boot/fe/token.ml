@@ -121,10 +121,12 @@ type token =
   (* Callable type constructors *)
   | FN of Ast.proto option
 
+  (* Object type *)
+  | OBJ
+
+  (* Comm and proc types *)
   | CHAN
   | PORT
-
-  (* Process types *)
   | PROC
 
   | EOF
@@ -277,6 +279,9 @@ let rec string_of_tok t =
     | FN (Some Ast.PROTO_bang)   -> "fn!"
     | FN (Some Ast.PROTO_star)   -> "fn*"
     | FN (Some Ast.PROTO_plus)   -> "fn+"
+
+    (* Object type *)
+    | OBJ -> "obj"
 
     (* Ports and channels *)
     | CHAN          -> "chan"

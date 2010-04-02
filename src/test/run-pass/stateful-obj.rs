@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-mod counter(mutable int x) {
+obj counter(mutable int x) {
   fn hello() -> int {
     ret 12345;
   }
