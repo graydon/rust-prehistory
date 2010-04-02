@@ -674,6 +674,18 @@ let trans_visitor
             let elt_mem = trans_bounds_check mem (Il.Cell t) in
               (Il.Mem (elt_mem, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
 
+      | (Ast.TY_obj fns,
+         Ast.COMP_named (Ast.COMP_ident id)) ->
+
+          let sorted_idents = sorted_htab_keys fns in
+          let i = arr_idx sorted_idents id in
+          let fn_ty = Hashtbl.find fns id in
+          let (table_mem, _) = need_mem_cell cell in
+          let off = word_n i in
+          let item_mem = Il.mem_off_imm table_mem off in
+            (Il.Mem (item_mem, Il.CodeTy), interior_slot (Ast.TY_fn fn_ty))
+
+
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
 
   (* 
