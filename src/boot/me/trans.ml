@@ -3379,7 +3379,7 @@ let trans_visitor
         | _ -> bug () "object constructor doesn't have function type"
     in
     let vtbl_ptr = trans_obj_vtbl obj_id in
-    let src_cell = need_cell (reify_ptr vtbl_ptr) in
+    let src_cell = crate_rel_to_ptr vtbl_ptr Il.CodeTy in
 
     let dst_pair_cell = deref (ptr_at (fp_imm out_mem_disp) obj_ty) in
     let dst_pair_0_cell = get_element_ptr dst_pair_cell 0 in
