@@ -143,13 +143,16 @@ ifneq ($(CFG_LLVM_CONFIG),)
 endif
 ifdef CFG_LLVM_CONFIG
   VARIANT=llvm
-  LLVM_LIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
+  WHERE := $(shell ocamlc -where)
+  LLVM_LIBS := llvm.cma llvm_bitwriter.cma
+  LLVM_NATIVE_LIBS := llvm.cmxa llvm_bitwiter.cmxa
+  LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
   LLVM_INCS := -I boot/llvm
   LLVM_MLS := $(addprefix boot/llvm/, lltrans.ml llemit.ml)
   $(info cfg: found llvm-config at $(CFG_LLVM_CONFIG))
 else
   VARIANT=x86
-  LLVM_LIBS :=
+  LLVM_CLIBS :=
   LLVM_INCS :=
   LLVM_MLS :=
   $(info cfg: disabling LLVM backend)
@@ -170,8 +173,8 @@ OCAMLC_FLAGS := -g $(ML_INCS) -w Ael -warn-error Ael
 OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael $(CFG_OCAMLOPT_PROFILE_FLAGS)
 
 ifdef CFG_LLVM_CONFIG
-  ML_LIBS += -custom -cclib -lstdc++ $(LLVM_LIBS)
-  ML_NATIVE_LIBS += -custom -cclib -lstdc++ $(LLVM_LIBS)
+  ML_LIBS += $(LLVM_LIBS) -custom -cclib -lstdc++ $(LLVM_CLIBS)
+  ML_NATIVE_LIBS += $(LLVM_NATIVE_LIBS) -custom -cclib -lstdc++ $(LLVM_CLIBS)
 endif
 
 # List them in link order.
