@@ -24,7 +24,7 @@ let alt_pipeline sess sem_cx crate =
       Gctype.process_crate;
       Layout.process_crate
     |];
-  Llemit.trans_and_process_crate sess crate
+  Llemit.trans_and_process_crate sess sem_cx crate
 ;;
 
 (*

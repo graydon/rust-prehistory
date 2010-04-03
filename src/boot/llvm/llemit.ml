@@ -3,7 +3,11 @@
  *)
 
 (* The top-level interface to the LLVM translation subsystem. *)
-let trans_and_process_crate (sess:Session.sess) (crate:Ast.crate) : unit =
+let trans_and_process_crate
+    (sess:Session.sess)
+    (sem_cx:Semant.ctxt)
+    (crate:Ast.crate)
+    : unit =
   let llcontext = Llvm.create_context () in
   begin
     try
@@ -13,7 +17,7 @@ let trans_and_process_crate (sess:Session.sess) (crate:Ast.crate) : unit =
         then raise (Failure ("failed to write the LLVM bitcode '" ^ filename
           ^ "'"))
       in
-      let llmod = Lltrans.trans_crate llcontext sess crate in
+      let llmod = Lltrans.trans_crate sem_cx llcontext sess crate in
       begin
         try
           emit_file llmod
