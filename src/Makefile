@@ -277,7 +277,6 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/spawn-fn.rs \
                     test/run-pass/yield2.rs \
                     test/run-pass/rec-auto.rs \
-                    test/run-pass/simple-obj.rs \
                     test/run-pass/stateful-obj.rs \
                     test/run-pass/user.rs \
                     test/compile-fail/rec-missing-fields.rs \

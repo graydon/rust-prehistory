@@ -686,9 +686,8 @@ let trans_visitor
           let i = arr_idx sorted_idents id in
           let fn_ty = Hashtbl.find fns id in
           let (table_mem, _) = (need_mem_cell (deref (get_element_ptr cell 0))) in
-          let off = word_n i in
-          let item_mem = Il.mem_off_imm table_mem off in
-            (Il.Mem (item_mem, Il.ScalarTy (Il.AddrTy Il.CodeTy)), interior_slot (Ast.TY_fn fn_ty))
+          let callee_disp = Il.Cell (word_at (Il.mem_off_imm table_mem (word_n i))) in
+            (crate_rel_to_ptr callee_disp Il.CodeTy, interior_slot (Ast.TY_fn fn_ty))
 
 
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
