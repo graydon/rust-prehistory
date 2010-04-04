@@ -1108,6 +1108,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         let n_params =
           match Hashtbl.find cx.ctxt_all_defns id with
               DEFN_item i -> Array.length i.Ast.decl_params
+            | DEFN_obj_fn _ -> 0
             | _ -> err (Some id) "expected item defn for item tyvar"
         in
         let resolved = (TYSPEC_resolved ty) in
