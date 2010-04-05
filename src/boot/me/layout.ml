@@ -248,16 +248,6 @@ let layout_visitor
 
   let header_slot_ids hdr = Array.map (fun (sid,_) -> sid.id) hdr in
 
-  let visit_obj_fn_pre _ _ fn =
-    enter_frame fn.id;
-    layout_header fn.id
-      (header_slot_ids fn.node.Ast.fn_input_slots)
-  in
-
-  let visit_obj_fn_post _ _ _ =
-    leave_frame ()
-  in
-
   let visit_mod_item_pre n p i =
     begin
       match i.node.Ast.decl_item with
@@ -288,6 +278,7 @@ let layout_visitor
     end;
     inner.Walk.visit_mod_item_pre n p i
   in
+
   let visit_mod_item_post n p i =
     inner.Walk.visit_mod_item_post n p i;
     begin
@@ -299,6 +290,19 @@ let layout_visitor
         | _ -> ()
     end
   in
+
+  let visit_obj_fn_pre obj ident fn =
+    enter_frame fn.id;
+    layout_header fn.id
+      (header_slot_ids fn.node.Ast.fn_input_slots);
+    inner.Walk.visit_obj_fn_pre obj ident fn
+  in
+
+  let visit_obj_fn_post obj ident fn =
+    inner.Walk.visit_obj_fn_post obj ident fn;
+    leave_frame ()
+  in
+
   let visit_block_pre b =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
     let frame_spill = Hashtbl.find cx.ctxt_spill_fixups frame_id in
@@ -322,6 +326,7 @@ let layout_visitor
       update_frame_size ();
       inner.Walk.visit_block_pre b
   in
+
   let visit_block_post b =
     inner.Walk.visit_block_post b;
     (* FIXME (bug 541568): In earlier versions of this file, multiple

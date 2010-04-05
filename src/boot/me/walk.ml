@@ -35,9 +35,9 @@ type visitor =
       visit_mod_item_post:
         Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
       visit_obj_fn_pre:
-        Ast.obj -> Ast.ident -> (Ast.fn identified) -> unit;
+        (Ast.obj identified) -> Ast.ident -> (Ast.fn identified) -> unit;
       visit_obj_fn_post:
-        Ast.obj -> Ast.ident -> (Ast.fn identified) -> unit;
+        (Ast.obj identified) -> Ast.ident -> (Ast.fn identified) -> unit;
       visit_crate_pre: Ast.crate -> unit;
       visit_crate_post: Ast.crate -> unit;
     }
@@ -203,7 +203,8 @@ and walk_mod_item
       | Ast.MOD_ITEM_obj ob ->
           walk_header_slots v ob.Ast.obj_state;
           walk_constrs v ob.Ast.obj_constrs;
-          Hashtbl.iter (walk_obj_fn v ob) ob.Ast.obj_fns
+          let oid = { node = ob; id = item.id } in
+            Hashtbl.iter (walk_obj_fn v oid) ob.Ast.obj_fns
 
   in
     walk_bracketed
@@ -343,7 +344,7 @@ and walk_pred
 
 and walk_obj_fn
     (v:visitor)
-    (obj:Ast.obj)
+    (obj:Ast.obj identified)
     (ident:Ast.ident)
     (f:Ast.fn identified)
     : unit =
