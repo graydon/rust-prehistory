@@ -294,13 +294,6 @@ let condition_assigning_visitor
             let (input_keys, init_keys) = fn_keys f resolve_constr_to_key in
               raise_entry_state input_keys init_keys f.Ast.fn_body
 
-        | Ast.MOD_ITEM_obj ob ->
-            let (input_keys, init_keys) = obj_keys ob resolve_constr_to_key in
-            let raise_in_fn _ f =
-              raise_entry_state input_keys init_keys f.node.Ast.fn_body
-            in
-              Hashtbl.iter raise_in_fn ob.Ast.obj_fns
-
         | Ast.MOD_ITEM_pred p ->
             let (input_keys, init_keys) = pred_keys p resolve_constr_to_key in
               raise_entry_state input_keys init_keys p.Ast.pred_body
@@ -308,6 +301,12 @@ let condition_assigning_visitor
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
+  in
+
+  let visit_obj_fn_pre obj ident fn =
+    let (input_keys, init_keys) = obj_keys obj.node resolve_constr_to_key in
+      raise_entry_state input_keys init_keys fn.node.Ast.fn_body;
+      inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
   let visit_stmt_pre s =
@@ -441,6 +440,7 @@ let condition_assigning_visitor
   in
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_obj_fn_pre = visit_obj_fn_pre;
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
