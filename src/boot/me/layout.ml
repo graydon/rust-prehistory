@@ -186,14 +186,14 @@ let layout_visitor
       layout_slot_ids (Stack.create()) true false offset input_slot_ids
   in
 
-  let layout_mod_closure (id:node_id) (closure_slot_ids:node_id array) : unit =
+  let layout_obj_state (id:node_id) (state_slot_ids:node_id array) : unit =
     let offset =
       let word_sz = cx.ctxt_abi.Abi.abi_word_sz in
       let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
         SIZE_fixed (word_n Abi.exterior_rc_slot_field_body)
     in
-      log cx "laying out module-closure for node #%d at offset %s" (int_of_node id) (string_of_size offset);
-      layout_slot_ids (Stack.create()) true false offset closure_slot_ids
+      log cx "laying out object-state for node #%d at offset %s" (int_of_node id) (string_of_size offset);
+      layout_slot_ids (Stack.create()) true false offset state_slot_ids
   in
 
   let (frame_stack:(node_id * frame_blocks) Stack.t) = Stack.create() in
@@ -246,16 +246,25 @@ let layout_visitor
     ignore (Stack.pop frame_stack);
   in
 
+  let header_slot_ids hdr = Array.map (fun (sid,_) -> sid.id) hdr in
+
+  let visit_obj_fn_pre _ _ fn =
+    enter_frame fn.id;
+    layout_header fn.id
+      (header_slot_ids fn.node.Ast.fn_input_slots)
+  in
+
+  let visit_obj_fn_post _ _ _ =
+    leave_frame ()
+  in
+
   let visit_mod_item_pre n p i =
-    let header_slot_ids hdr = Array.map (fun (sid,_) -> sid.id) hdr in
-    let visit_fn id f =
-      enter_frame id;
-      layout_header id
-        (header_slot_ids f.Ast.fn_input_slots)
-    in
     begin
       match i.node.Ast.decl_item with
-          Ast.MOD_ITEM_fn f -> visit_fn i.id f
+          Ast.MOD_ITEM_fn f ->
+            enter_frame i.id;
+            layout_header i.id
+              (header_slot_ids f.Ast.fn_input_slots)
 
         | Ast.MOD_ITEM_pred p ->
             enter_frame i.id;
@@ -270,17 +279,10 @@ let layout_visitor
         | Ast.MOD_ITEM_obj obj ->
             enter_frame i.id;
             let ids = header_slot_ids obj.Ast.obj_state in
-              layout_mod_closure i.id ids;
+              layout_obj_state i.id ids;
               Array.iter
                 (fun id -> htab_put cx.ctxt_slot_is_obj_state id ())
-                ids;
-              Hashtbl.iter
-                begin
-                  fun _ fn ->
-                    visit_fn fn.id fn.node
-                end
-                obj.Ast.obj_fns
-
+                ids
 
         | _ -> ()
     end;
@@ -382,6 +384,9 @@ let layout_visitor
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
+
+        Walk.visit_obj_fn_pre = visit_obj_fn_pre;
+        Walk.visit_obj_fn_post = visit_obj_fn_post;
 
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_block_pre = visit_block_pre;
