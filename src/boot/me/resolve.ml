@@ -443,27 +443,20 @@ let type_resolving_visitor
               in
                 log cx "resolved item %s, type as %a" id Ast.sprintf_ty ty;
                 htab_put cx.ctxt_all_item_types item.id ty;
-                match item.node.Ast.decl_item with
-                  | Ast.MOD_ITEM_obj ob ->
-                      Hashtbl.iter
-                        begin
-                          fun ident fn ->
-                            let fty = Ast.TY_fn (ty_fn_of_fn fn.node) in
-                            let fty =
-                              resolve_type cx (!scopes) recursive_tag_groups all_tags
-                                empty_recur_info fty
-                            in
-                              log cx "resolved obj fn %s as %a" ident Ast.sprintf_ty fty;
-                              htab_put cx.ctxt_all_item_types fn.id fty;
-                        end
-                        ob.Ast.obj_fns
-                  | _ -> ()
-
-
       with
           Semant_err (None, e) -> raise (Semant_err ((Some item.id), e))
     end;
     inner.Walk.visit_mod_item_pre id params item
+  in
+
+  let visit_obj_fn_pre obj ident fn =
+    let fty =
+      resolve_type cx (!scopes) recursive_tag_groups all_tags
+        empty_recur_info (Ast.TY_fn (ty_fn_of_fn fn.node))
+    in
+      log cx "resolved obj fn %s as %a" ident Ast.sprintf_ty fty;
+      htab_put cx.ctxt_all_item_types fn.id fty;
+      inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
   let visit_lval_pre lv =
@@ -507,6 +500,7 @@ let type_resolving_visitor
     { inner with
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_obj_fn_pre = visit_obj_fn_pre;
         Walk.visit_lval_pre = visit_lval_pre; }
 ;;
 
