@@ -34,6 +34,10 @@ type visitor =
         Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
       visit_mod_item_post:
         Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
+      visit_obj_fn_pre:
+        Ast.obj -> Ast.ident -> (Ast.fn identified) -> unit;
+      visit_obj_fn_post:
+        Ast.obj -> Ast.ident -> (Ast.fn identified) -> unit;
       visit_crate_pre: Ast.crate -> unit;
       visit_crate_post: Ast.crate -> unit;
     }
@@ -59,6 +63,8 @@ let empty_visitor =
     visit_lval_post = (fun _ -> ());
     visit_mod_item_pre = (fun _ _ _ -> ());
     visit_mod_item_post = (fun _ _ _ -> ());
+    visit_obj_fn_pre = (fun _ _ _ -> ());
+    visit_obj_fn_post = (fun _ _ _ -> ());
     visit_crate_pre = (fun _ -> ());
     visit_crate_post = (fun _ -> ()); }
 ;;
@@ -75,9 +81,19 @@ let path_managing_visitor
     inner.visit_mod_item_post ident params item;
     ignore (Stack.pop path)
   in
+  let visit_obj_fn_pre obj ident fn =
+    Stack.push (Ast.COMP_ident ident) path;
+    inner.visit_obj_fn_pre obj ident fn
+  in
+  let visit_obj_fn_post obj ident fn =
+    inner.visit_obj_fn_post obj ident fn;
+    ignore (Stack.pop path)
+  in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;
         visit_mod_item_post = visit_mod_item_post;
+        visit_obj_fn_pre = visit_obj_fn_pre;
+        visit_obj_fn_post = visit_obj_fn_post;
     }
 ;;
 
@@ -111,9 +127,19 @@ let mod_item_logging_visitor
     logfn (Printf.sprintf "leaving %s" (path_name()));
     inner.visit_mod_item_post name params item;
   in
+  let visit_obj_fn_pre obj ident fn =
+    logfn (Printf.sprintf "entering %s" (path_name()));
+    inner.visit_obj_fn_pre obj ident fn
+  in
+  let visit_obj_fn_post obj ident fn =
+    logfn (Printf.sprintf "leaving %s" (path_name()));
+    inner.visit_obj_fn_post obj ident fn;
+  in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;
-        visit_mod_item_post = visit_mod_item_post; }
+        visit_mod_item_post = visit_mod_item_post;
+        visit_obj_fn_pre = visit_obj_fn_pre;
+        visit_obj_fn_post = visit_obj_fn_post; }
 ;;
 
 
@@ -177,7 +203,7 @@ and walk_mod_item
       | Ast.MOD_ITEM_obj ob ->
           walk_header_slots v ob.Ast.obj_state;
           walk_constrs v ob.Ast.obj_constrs;
-          Hashtbl.iter (fun _ fn -> walk_fn v fn.node) ob.Ast.obj_fns
+          Hashtbl.iter (walk_obj_fn v ob) ob.Ast.obj_fns
 
   in
     walk_bracketed
@@ -315,6 +341,15 @@ and walk_pred
   walk_constrs v p.Ast.pred_input_constrs;
   walk_block v p.Ast.pred_body
 
+and walk_obj_fn
+    (v:visitor)
+    (obj:Ast.obj)
+    (ident:Ast.ident)
+    (f:Ast.fn identified)
+    : unit =
+  v.visit_obj_fn_pre obj ident f;
+  walk_fn v f.node;
+  v.visit_obj_fn_post obj ident f
 
 and walk_fn
     (v:visitor)
