@@ -121,20 +121,20 @@ let trans_crate
         : Llvm.llbuilder =
       let trans_literal
           (lit:Ast.lit)
-          : Llvm.llvalue option =
+          : Llvm.llvalue =
         match lit with
-            Ast.LIT_nil -> None
+            Ast.LIT_nil -> Llvm.undef (Llvm.void_type llctx)
           | Ast.LIT_bool value ->
-            Some (Llvm.const_int (Llvm.i1_type llctx) (if value then 1 else 0))
+            Llvm.const_int (Llvm.i1_type llctx) (if value then 1 else 0)
           | Ast.LIT_mach (mty, value, _) ->
             let llty = trans_mach_ty mty in
-            Some (Llvm.const_of_int64 llty value (mach_is_signed mty))
+            Llvm.const_of_int64 llty value (mach_is_signed mty)
           | Ast.LIT_int (value, _) ->
             (* TODO: bignums? *)
-            Some (Llvm.const_of_int64 (Llvm.i32_type llctx) value true)
+            Llvm.const_of_int64 (Llvm.i32_type llctx) value true
           | Ast.LIT_char ch ->
-            Some (Llvm.const_int (Llvm.i32_type llctx) (Char.code ch))
-          | Ast.LIT_custom _ -> Some bogus (* TODO *)
+            Llvm.const_int (Llvm.i32_type llctx) (Char.code ch)
+          | Ast.LIT_custom _ -> bogus (* TODO *)
       in
 
       let trans_lval (lval:Ast.lval) : Llvm.llvalue =
@@ -143,17 +143,17 @@ let trans_crate
           | Ast.LVAL_ext _ -> bogus (* TODO *)
       in
 
-      let trans_atom atom =
+      let trans_atom (atom:Ast.atom) : Llvm.llvalue =
         match atom with
             Ast.ATOM_literal { node = lit } -> trans_literal lit
-          | Ast.ATOM_lval lval -> Some (trans_lval lval)
+          | Ast.ATOM_lval lval -> trans_lval lval
       in
 
       let trans_binary_expr
           ((op:Ast.binop), (lhs:Ast.atom), (rhs:Ast.atom))
           : Llvm.llvalue =
         (* Evaluate the operands in the proper order. *)
-        let (lllhs_opt, llrhs_opt) =
+        let (lllhs, llrhs) =
           match op with
               Ast.BINOP_or | Ast.BINOP_and | Ast.BINOP_eq | Ast.BINOP_ne
                   | Ast.BINOP_lt | Ast.BINOP_le | Ast.BINOP_ge | Ast.BINOP_gt
@@ -166,15 +166,9 @@ let trans_crate
                 let lllhs = trans_atom lhs in
                 (lllhs, llrhs)
         in
-        let (lllhs, llrhs) =
-          match (lllhs_opt, llrhs_opt) with
-              (Some lllhs, Some llrhs) -> (lllhs, llrhs)
-            | _ ->
-              (* FIXME: Can this legitimately occur with send? *)
-              raise (Failure "nil found in binary expression")
-        in
         match op with
             Ast.BINOP_eq ->
+              (* TODO: equality works on more than just numbers *)
               let llid = anon_llid "expr" in
               Llvm.build_icmp Llvm.Icmp.Eq lllhs llrhs llid llbuilder
           | _ -> bogus (* TODO *)
@@ -182,10 +176,10 @@ let trans_crate
 
       let trans_unary_expr _ = bogus in (* TODO *)
 
-      let trans_expr (expr:Ast.expr) : Llvm.llvalue option =
+      let trans_expr (expr:Ast.expr) : Llvm.llvalue =
         match expr with
-            Ast.EXPR_binary binexp -> Some (trans_binary_expr binexp)
-          | Ast.EXPR_unary unexp -> Some (trans_unary_expr unexp)
+            Ast.EXPR_binary binexp -> trans_binary_expr binexp
+          | Ast.EXPR_unary unexp -> trans_unary_expr unexp
           | Ast.EXPR_atom atom -> trans_atom atom
       in
 
@@ -212,11 +206,7 @@ let trans_crate
                   Ast.if_then = if_then;
                   Ast.if_else = else_opt
                 } ->
-                  let llexpr =
-                    match trans_expr test with
-                        None -> raise (Failure "llvm: nil value as if test")
-                      | Some llexpr -> llexpr
-                  in
+                  let llexpr = trans_expr test in
                   let (next_llblock, final_llbuilder, terminate) =
                     trans_tail_in_new_block ()
                   in
