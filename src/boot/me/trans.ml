@@ -685,7 +685,7 @@ let trans_visitor
           let sorted_idents = sorted_htab_keys fns in
           let i = arr_idx sorted_idents id in
           let fn_ty = Hashtbl.find fns id in
-          let (table_mem, _) = (need_mem_cell (deref (get_element_ptr cell 0))) in
+          let (table_mem, _) = (need_mem_cell (deref (get_element_ptr cell Abi.binding_field_item))) in
           let callee_disp = Il.Cell (word_at (Il.mem_off_imm table_mem (word_n i))) in
             (crate_rel_to_ptr callee_disp Il.CodeTy, interior_slot (Ast.TY_fn fn_ty))
 
@@ -1072,8 +1072,8 @@ let trans_visitor
       let closure_cell =
         deref (get_element_ptr self_extra_args_cell Abi.extra_args_elt_closure)
       in
-      let closure_target_cell = get_element_ptr closure_cell 1 in
-      let closure_target_fn_cell = get_element_ptr closure_target_cell 0 in
+      let closure_target_cell = get_element_ptr closure_cell Abi.binding_field_binding in
+      let closure_target_fn_cell = get_element_ptr closure_target_cell Abi.binding_field_item in
 
         merge_bound_args
           self_args_rty callee_args_rty
@@ -2350,11 +2350,11 @@ let trans_visitor
     let item = lval_item cx flv in
     let fix = Hashtbl.find cx.ctxt_fn_fixups item.id in
 
-    let dst_pair_0_cell = get_element_ptr dst_cell 0 in
-    let dst_pair_1_cell = get_element_ptr dst_cell 1 in
+    let dst_pair_item_cell = get_element_ptr dst_cell Abi.binding_field_item in
+    let dst_pair_binding_cell = get_element_ptr dst_cell Abi.binding_field_binding in
 
-      mov dst_pair_0_cell (crate_rel_imm fix);
-      mov dst_pair_1_cell zero
+      mov dst_pair_item_cell (crate_rel_imm fix);
+      mov dst_pair_binding_cell zero
 
 
   and trans_init_structural_from_atoms
@@ -2578,10 +2578,10 @@ let trans_visitor
     let target_binding_ptr = callee_binding_ptr flv cc in
     let closure_rty = closure_referent_type bound_arg_slots in
     let closure_sz = force_sz (Il.referent_ty_size word_bits closure_rty) in
-    let fn_cell = get_element_ptr dst_cell 0 in
+    let fn_cell = get_element_ptr dst_cell Abi.binding_field_item in
     let closure_cell =
       ptr_cast
-        (get_element_ptr dst_cell 1)
+        (get_element_ptr dst_cell Abi.binding_field_binding)
         (Il.ScalarTy (Il.AddrTy (closure_rty)))
     in
       iflog (fun _ -> annotate "assign glue-code to fn slot of pair");
@@ -2841,7 +2841,7 @@ let trans_visitor
       | CALL_indirect ->
           (* fptr is a pair [disp, binding*] *)
           let pair_cell = need_cell (reify_ptr fptr) in
-          let disp_cell = get_element_ptr pair_cell 0 in
+          let disp_cell = get_element_ptr pair_cell Abi.binding_field_item in
             Il.Cell (crate_rel_to_ptr (Il.Cell disp_cell) Il.CodeTy)
 
   and callee_binding_ptr
@@ -2851,10 +2851,8 @@ let trans_visitor
     if cc = CALL_direct
     then zero
     else
-      let lval_base_id = lval_base_id pair_lval in
-      let pair_slot = lval_to_referent cx lval_base_id in
-      let pair_cell = cell_of_block_slot pair_slot in
-        Il.Cell (get_element_ptr pair_cell 1)
+      let (pair_cell, _) = trans_lval pair_lval in
+        Il.Cell (get_element_ptr pair_cell Abi.binding_field_binding)
 
   and call_ctrl flv : call_ctrl =
     if lval_is_static cx flv
@@ -2883,10 +2881,7 @@ let trans_visitor
                * FIXME: will need to pass both words of obj if we add
                * a 'self' value for self-dispatch within objs.
                *)
-              Ast.LVAL_ext (base, _) ->
-                let (obj, _) = trans_lval base in
-                let state = get_element_ptr obj 0 in
-                  [| Il.Cell state |]
+              Ast.LVAL_ext (base, _) -> [| callee_binding_ptr base cc |]
             | _ -> bug (lval_base_id flv) "call_extra_args on obj-fn without base obj"
 
   and trans_be
@@ -3418,26 +3413,35 @@ let trans_visitor
         | _ -> bug () "object constructor doesn't have function type"
     in
     let vtbl_ptr = trans_obj_vtbl obj_id in
+    let _ = iflog (fun _ -> annotate "calculate vtbl-ptr from displacement") in
     let src_cell = crate_rel_to_ptr vtbl_ptr Il.CodeTy in
 
+    let _ = iflog (fun _ -> annotate "load destination obj pair ptr") in
     let dst_pair_cell = deref (ptr_at (fp_imm out_mem_disp) obj_ty) in
-    let dst_pair_0_cell = get_element_ptr dst_pair_cell 0 in
-    let dst_pair_1_cell = get_element_ptr dst_pair_cell 1 in
+    let dst_pair_item_cell = get_element_ptr dst_pair_cell Abi.binding_field_item in
+    let dst_pair_state_cell = get_element_ptr dst_pair_cell Abi.binding_field_binding in
 
       (* Load first cell of pair with vtbl ptr.*)
-      mov dst_pair_0_cell (Il.Cell src_cell);
+      iflog (fun _ -> annotate "mov vtbl-ptr to obj.item cell");
+      mov dst_pair_item_cell (Il.Cell src_cell);
 
       (* Load second cell of pair with pointer to fresh state tuple.*)
-      trans_malloc dst_pair_1_cell state_malloc_sz;
+      iflog (fun _ -> annotate (Printf.sprintf
+                                  "malloc %Ld state-tuple bytes to obj.state cell"
+                                  state_malloc_sz));
+      trans_malloc dst_pair_state_cell state_malloc_sz;
 
       (* Copy args into the state tuple. *)
       let state_ptr = next_vreg_cell (need_scalar_ty state_ptr_rty) in
-        mov state_ptr (Il.Cell dst_pair_1_cell);
+        iflog (fun _ -> annotate "load obj.state ptr to vreg");
+        mov state_ptr (Il.Cell dst_pair_state_cell);
         let state = deref state_ptr in
         let refcnt_cell = get_element_ptr state 0 in
         let body_cell = get_element_ptr state 1 in
         let src_arg_mem = (fp_imm arg0_disp, src_rty) in
+          iflog (fun _ -> annotate "write refcnt=1 to state[0]");
           mov refcnt_cell one;
+          iflog (fun _ -> annotate "copy state args to state[1..]");
           trans_copy_tup true body_cell (Il.Mem src_arg_mem) slots;
           trans_frame_exit obj_id false;
   in
