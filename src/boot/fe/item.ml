@@ -928,13 +928,10 @@ and note_imported_mod
     (ilib:import_lib)
     (item:Ast.mod_item)
     : unit =
+  iflog ps (fun _ -> log ps "marking item #%d as imported" (int_of_node item.id));
+  htab_put ps.pstate_imported item.id (ilib, conv);
   if not (Hashtbl.mem ps.pstate_sess.Session.sess_spans item.id)
-  then
-    begin
-      iflog ps (fun _ -> log ps "marking item #%d as imported" (int_of_node item.id));
-      htab_put ps.pstate_imported item.id (ilib, conv);
-      Hashtbl.add ps.pstate_sess.Session.sess_spans item.id sp;
-    end;
+  then Hashtbl.add ps.pstate_sess.Session.sess_spans item.id sp;
   match item.node.Ast.decl_item with
       Ast.MOD_ITEM_mod items ->
         Hashtbl.iter

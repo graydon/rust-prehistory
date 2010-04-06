@@ -349,7 +349,6 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
           let item = { id = id; node = item } in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
             Item.note_imported_mod env.env_ps span CONV_rust ilib item;
-            htab_put ps.pstate_imported id (ilib, CONV_rust);
             CVAL_mod_item (name, item)
 
     | CEXP_nat_mod {node=cn;id=id} ->
@@ -373,7 +372,6 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         let ps = env.env_ps in
         let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
           Item.note_imported_mod env.env_ps span conv ilib item;
-          htab_put ps.pstate_imported id (ilib, CONV_rust);
           CVAL_mod_item (name, item)
 
     | CEXP_pexp exp ->

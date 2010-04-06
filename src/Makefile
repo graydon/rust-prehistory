@@ -281,7 +281,6 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/spawn-fn.rs \
                     test/run-pass/yield2.rs \
                     test/run-pass/rec-auto.rs \
-                    test/run-pass/user.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
                     test/compile-fail/infinite-vec-type-recursion.rs
@@ -474,8 +473,11 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(ML_DEPFILES) $(C_DEPFILES)
 endif
 
-ifneq ($(MAKE_RESTARTS),)
-STDLIB_DEPFILE := $(basename $(CFG_STDLIB)).d
+RUSTBOOT_PROBE := $(wildcard $(CFG_BOOT))
+
+ifneq ($(RUSTBOOT_PROBE),)
+CFG_INFO := $(info cfg: using built $(CFG_BOOT) for rust deps)
+STDLIB_DEPFILE := $(CFG_STDLIB).d
 CRATE_DEPFILES := $(ALL_TEST_CRATES:%.rc=%.d) $(STDLIB_DEPFILE)
 
 $(STDLIB_DEPFILE): $(STDLIB_CRATE) $(MKFILES) $(CFG_BOOT)
