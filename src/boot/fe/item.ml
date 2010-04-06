@@ -729,7 +729,6 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
               let item = decl params (Ast.MOD_ITEM_mod items) in
               let item = span ps apos bpos item in
                 note_imported_mod ps {lo=apos; hi=bpos} conv ilib item;
-                htab_put ps.pstate_imported item.id (ilib, conv);
                 (ident, item)
           end
 
@@ -756,7 +755,6 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                 let item = decl [||] (Ast.MOD_ITEM_mod items) in
                 let item = span ps apos bpos item in
                   note_imported_mod ps {lo=apos; hi=bpos} CONV_rust ilib item;
-                  htab_put ps.pstate_imported item.id (ilib, CONV_rust);
                   (ident, item)
           end
 
@@ -931,7 +929,12 @@ and note_imported_mod
     (item:Ast.mod_item)
     : unit =
   if not (Hashtbl.mem ps.pstate_sess.Session.sess_spans item.id)
-  then Hashtbl.add ps.pstate_sess.Session.sess_spans item.id sp;
+  then
+    begin
+      iflog ps (fun _ -> log ps "marking item #%d as imported" (int_of_node item.id));
+      htab_put ps.pstate_imported item.id (ilib, conv);
+      Hashtbl.add ps.pstate_sess.Session.sess_spans item.id sp;
+    end;
   match item.node.Ast.decl_item with
       Ast.MOD_ITEM_mod items ->
         Hashtbl.iter

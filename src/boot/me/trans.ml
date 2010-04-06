@@ -3281,7 +3281,9 @@ let trans_visitor
     in
     let item_code = Hashtbl.find cx.ctxt_file_code f in
       begin
-        iflog (fun _ -> annotate_quads name);
+        iflog (fun _ ->
+                 log cx "capturing quads for item #%d" (int_of_node node);
+                 annotate_quads name);
         let vr_s =
           match htab_search cx.ctxt_spill_fixups node with
               None -> (assert (n_vregs = 0); None)
@@ -3635,6 +3637,7 @@ let trans_visitor
   in
 
   let visit_local_mod_item_pre n _ i =
+    iflog (fun _ -> log cx "translating local item #%d = %s" (int_of_node i.id) (path_name()));
     match i.node.Ast.decl_item with
         Ast.MOD_ITEM_fn f ->
           if path_name() = cx.ctxt_main_name
@@ -3654,6 +3657,7 @@ let trans_visitor
   in
 
   let visit_imported_mod_item_pre _ _ i =
+    iflog (fun _ -> log cx "translating imported item #%d = %s" (int_of_node i.id) (path_name()));
     match i.node.Ast.decl_item with
         Ast.MOD_ITEM_fn f -> trans_imported_fn i.id f.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
