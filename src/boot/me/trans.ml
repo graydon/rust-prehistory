@@ -3607,31 +3607,23 @@ let trans_visitor
       else ignore (Stack.pop curr_file)
   in
 
-  let visit_local_mod_item_pre n p i =
-    enter_file_for i.id;
-    begin
-      match i.node.Ast.decl_item with
-          Ast.MOD_ITEM_fn f ->
-            if path_name() = cx.ctxt_main_name
-            then
-              begin
-                log cx "emitting main exit-proc glue for %s" cx.ctxt_main_name;
-                emit_exit_proc_glue
-                  cx.ctxt_main_exit_proc_glue_fixup
-                  GLUE_exit_main_proc;
-              end;
-            trans_fn i.id f.Ast.fn_body
+  let visit_local_mod_item_pre n _ i =
+    match i.node.Ast.decl_item with
+        Ast.MOD_ITEM_fn f ->
+          if path_name() = cx.ctxt_main_name
+          then
+            begin
+              log cx "emitting main exit-proc glue for %s" cx.ctxt_main_name;
+              emit_exit_proc_glue
+                cx.ctxt_main_exit_proc_glue_fixup
+                GLUE_exit_main_proc;
+            end;
+          trans_fn i.id f.Ast.fn_body
 
-        | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.pred_body
-        | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
-        | Ast.MOD_ITEM_obj ob ->
-            trans_obj_ctor i.id ob.Ast.obj_state;
-            Hashtbl.iter
-              (fun _ fn -> trans_fn fn.id fn.node.Ast.fn_body)
-              ob.Ast.obj_fns
-        | _ -> ()
-    end;
-    inner.Walk.visit_mod_item_pre n p i
+      | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.pred_body
+      | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
+      | Ast.MOD_ITEM_obj ob -> trans_obj_ctor i.id ob.Ast.obj_state
+      | _ -> ()
   in
 
   let visit_imported_mod_item_pre _ _ i =
@@ -3641,31 +3633,46 @@ let trans_visitor
       | _ -> bugi cx i.id "unsupported type of import: %s" (path_name())
   in
 
+  let visit_local_obj_fn_pre _ _ fn =
+    trans_fn fn.id fn.node.Ast.fn_body
+  in
+
+  let visit_imported_obj_fn_pre _ _ _ =
+    ()
+  in
+
+  let visit_obj_fn_pre obj ident fn =
+    enter_file_for fn.id;
+    begin
+      if Hashtbl.mem cx.ctxt_imported_items fn.id
+      then
+        visit_imported_obj_fn_pre obj ident fn
+      else
+        visit_local_obj_fn_pre obj ident fn
+    end;
+    inner.Walk.visit_obj_fn_pre obj ident fn
+  in
+
   let visit_mod_item_pre n p i =
-    if Hashtbl.mem cx.ctxt_imported_items i.id
-    then
-      visit_imported_mod_item_pre n p i
-    else
-      visit_local_mod_item_pre n p i
-  in
-
-
-  let visit_local_mod_item_post n p i =
-    inner.Walk.visit_mod_item_post n p i;
-    leave_file_for i.id
-  in
-
-  let visit_imported_mod_item_post n p i =
-    inner.Walk.visit_mod_item_post n p i;
-    leave_file_for i.id
+    enter_file_for i.id;
+    begin
+      if Hashtbl.mem cx.ctxt_imported_items i.id
+      then
+        visit_imported_mod_item_pre n p i
+      else
+        visit_local_mod_item_pre n p i
+    end;
+    inner.Walk.visit_mod_item_pre n p i
   in
 
   let visit_mod_item_post n p i =
-    if Hashtbl.mem cx.ctxt_imported_items i.id
-    then
-      visit_imported_mod_item_post n p i
-    else
-      visit_local_mod_item_post n p i
+    inner.Walk.visit_mod_item_post n p i;
+    leave_file_for i.id
+  in
+
+  let visit_obj_fn_post obj ident fn =
+    inner.Walk.visit_obj_fn_post obj ident fn;
+    leave_file_for fn.id
   in
 
   let visit_crate_pre crate =
@@ -3761,6 +3768,8 @@ let trans_visitor
         Walk.visit_crate_post = visit_crate_post;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_obj_fn_pre = visit_obj_fn_pre;
+        Walk.visit_obj_fn_post = visit_obj_fn_post;
     }
 ;;
 
@@ -3811,18 +3820,19 @@ let fixup_assigning_visitor
                 htab_put cx.ctxt_fn_fixups i.id fixup;
             end
 
-        | Ast.MOD_ITEM_obj obj ->
-            let obj_path = path_name() in
-            htab_put cx.ctxt_fn_fixups i.id (new_fixup obj_path);
-              Hashtbl.iter
-                (fun ident fn ->
-                   let fixup = new_fixup (obj_path ^ "." ^ ident) in
-                     htab_put cx.ctxt_fn_fixups fn.id fixup)
-                obj.Ast.obj_fns;
+        | Ast.MOD_ITEM_obj _ ->
+            htab_put cx.ctxt_fn_fixups i.id
+              (new_fixup (path_name()));
 
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
+  in
+
+  let visit_obj_fn_pre obj ident fn =
+    htab_put cx.ctxt_fn_fixups fn.id
+      (new_fixup (path_name()));
+    inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
   let visit_block_pre b =
@@ -3838,6 +3848,7 @@ let fixup_assigning_visitor
   { inner with
       Walk.visit_crate_pre = visit_crate_pre;
       Walk.visit_mod_item_pre = visit_mod_item_pre;
+      Walk.visit_obj_fn_pre = visit_obj_fn_pre;
       Walk.visit_block_pre = visit_block_pre; }
 
 
