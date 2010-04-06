@@ -13,6 +13,10 @@ endif
 CFG_OSTYPE := $(shell uname -s)
 CFG_CPUTYPE := $(shell uname -m)
 
+ifneq ($(MAKE_RESTARTS),)
+CFG_INFO := $(info cfg: make restarts: $(MAKE_RESTARTS))
+endif
+
 CFG_INFO := $(info cfg: building on $(CFG_OSTYPE) $(CFG_CPUTYPE))
 
 CFG_GCC_COMPILE_FLAGS :=
@@ -452,10 +456,8 @@ test/run-fail/%.llvm$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNT
 # Auto-dependency
 ######################################################################
 
-STDLIB_DEPFILE := $(basename $(CFG_STDLIB)).d
 ML_DEPFILES := $(BOOT_MLS:%.ml=%.d)
 C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
-CRATE_DEPFILES := $(ALL_TEST_CRATES:%.rc=%.d) $(STDLIB_DEPFILE)
 
 %.d: %.cpp $(MKFILES)
 	@$(call CFG_ECHO, dep: $<)
@@ -469,6 +471,14 @@ CRATE_DEPFILES := $(ALL_TEST_CRATES:%.rc=%.d) $(STDLIB_DEPFILE)
 	@$(call CFG_ECHO, dep: $<)
 	$(CFG_QUIET)ocamldep$(OPT) $(ML_INCS) $< $(CFG_PATH_MUNGE) >$@
 
+ifneq ($(MAKECMDGOALS),clean)
+-include $(ML_DEPFILES) $(C_DEPFILES)
+endif
+
+ifneq ($(MAKE_RESTARTS),)
+STDLIB_DEPFILE := $(basename $(CFG_STDLIB)).d
+CRATE_DEPFILES := $(ALL_TEST_CRATES:%.rc=%.d) $(STDLIB_DEPFILE)
+
 $(STDLIB_DEPFILE): $(STDLIB_CRATE) $(MKFILES) $(CFG_BOOT)
 	@$(call CFG_ECHO, dep: $<)
 	$(CFG_QUIET)$(CFG_BOOT) -shared -rdeps $< $(CFG_PATH_MUNGE) >$@
@@ -481,8 +491,10 @@ $(STDLIB_DEPFILE): $(STDLIB_CRATE) $(MKFILES) $(CFG_BOOT)
 	@$(call CFG_ECHO, dep: $<)
 	$(CFG_QUIET)$(CFG_BOOT) -rdeps $< $(CFG_PATH_MUNGE) >$@
 
--include $(ML_DEPFILES) $(C_DEPFILES) $(CRATE_DEPFILES)
-
+ifneq ($(MAKECMDGOALS),clean)
+-include $(CRATE_DEPFILES)
+endif
+endif
 
 ######################################################################
 # Distribution
@@ -532,7 +544,7 @@ distcheck:
 # Cleanup
 ######################################################################
 
-.phony: clean
+.PHONY: clean
 
 clean:
 	@$(call CFG_ECHO, cleaning)
