@@ -37,46 +37,116 @@ type binopsig =
 
 let rec tyspec_to_str (ts:tyspec) : string =
 
-  let join (strings:string list) = String.concat ", " strings in
+  let fmt = Format.fprintf in
+  let fmt_ident (ff:Format.formatter) (i:Ast.ident) : unit =
+    fmt ff  "%s" i
+  in
+  let fmt_obox ff = Format.pp_open_box ff 4 in
+  let fmt_cbox ff = Format.pp_close_box ff () in
+  let fmt_obr ff = fmt ff "<" in
+  let fmt_cbr ff = fmt ff ">" in
+  let fmt_obb ff = (fmt_obox ff; fmt_obr ff) in
+  let fmt_cbb ff = (fmt_cbox ff; fmt_cbr ff) in
 
-  let format_dict (dct:dict) =
-    let format_name ident tv tail =
-      (ident ^ " : " ^ (tyspec_to_str !tv))::tail
+  let rec fmt_fields (flav:string) (ff:Format.formatter) (flds:dict) : unit =
+    fmt_obb ff;
+    fmt ff "%s :" flav;
+    let fmt_entry ident tv =
+      fmt ff "@\n";
+      fmt_ident ff ident;
+      fmt ff " : ";
+      fmt_tyspec ff (!tv);
     in
-      join (Hashtbl.fold format_name dct [])
-  in
+      Hashtbl.iter fmt_entry flds;
+      fmt_cbb ff
 
-  let join_tvs tvs =
-    let tv_to_str tv = tyspec_to_str !tv in
-      join (Array.to_list (Array.map tv_to_str tvs))
-  in
+  and fmt_parametric ff tv params =
+    begin
+      match !params with
+          None ->
+            fmt_obb ff;
+            fmt ff "maybe-parametric ";
+            fmt_tyspec ff (!tv);
+            fmt_cbb ff;
+        | Some tvs ->
+            fmt_obb ff;
+            fmt ff "parametric (";
+            fmt_tyspec ff (!tv);
+            fmt ff ")[";
+            fmt_tvs ff tvs;
+            fmt ff "]";
+            fmt_cbb ff;
+    end
+
+  and fmt_tvs ff tvs =
+    fmt_obox ff;
+    let fmt_tv i tv =
+      if i <> 0
+      then fmt ff ", ";
+      fmt_tyspec ff (!tv)
+    in
+      Array.iteri fmt_tv tvs;
+      fmt_cbox ff;
+
+  and fmt_tyspec ff ts =
     match ts with
-        TYSPEC_equiv tv -> ":" ^ (tyspec_to_str !tv)
-      | TYSPEC_all -> "<?>"
-      | TYSPEC_resolved ty -> Ast.sprintf_ty () ty
+        TYSPEC_all -> fmt ff "<?>"
+      | TYSPEC_comparable -> fmt ff "<comparable>"
+      | TYSPEC_plusable -> fmt ff "<plusable>"
+      | TYSPEC_integral -> fmt ff "<integral>"
+      | TYSPEC_loggable -> fmt ff "<loggable>"
+      | TYSPEC_numeric -> fmt ff "<numeric>"
+      | TYSPEC_ordered -> fmt ff "<ordered>"
+      | TYSPEC_resolved ty ->
+          Ast.fmt_ty ff ty
+
+      | TYSPEC_equiv tv ->
+          fmt ff ":";
+          fmt_tyspec ff (!tv)
+
       | TYSPEC_callable (out, ins) ->
-          Printf.sprintf "<callable fn(%s) -> %s>"
-            (join_tvs ins) (tyspec_to_str !out)
-      | TYSPEC_collection tv -> "<collection of " ^ (tyspec_to_str !tv) ^ ">"
-      | TYSPEC_comparable -> "<comparable>"
-      | TYSPEC_plusable -> "<plusable>"
+          fmt_obb ff;
+          fmt ff "callable fn(";
+          fmt_tvs ff ins;
+          fmt ff ") -> ";
+          fmt_tyspec ff (!out);
+          fmt_cbb ff;
+
+      | TYSPEC_collection tv ->
+          fmt_obb ff;
+          fmt ff "collection : ";
+          fmt_tyspec ff (!tv);
+          fmt_cbb ff;
+
+      | TYSPEC_tuple tvs ->
+          fmt ff "(";
+          fmt_tvs ff tvs;
+          fmt ff ")";
+
+      | TYSPEC_vector tv ->
+          fmt_obox ff;
+          fmt ff "vec[";
+          fmt_tyspec ff (!tv);
+          fmt_cbox ff;
+          fmt ff "]";
+
       | TYSPEC_dictionary dct ->
-          "<dictionary with members " ^ (format_dict dct) ^ ">"
-      | TYSPEC_integral -> "<integral>"
-      | TYSPEC_loggable -> "<loggable>"
-      | TYSPEC_numeric -> "<numeric>"
-      | TYSPEC_ordered -> "<ordered>"
+          fmt_fields "dictionary" ff dct
+
+      | TYSPEC_record dct ->
+          fmt_fields "record" ff dct
+
       | TYSPEC_parametric (tv, params) ->
-          begin
-            match !params with
-                None ->
-                  Printf.sprintf "<parametric (%s)[?]>" (tyspec_to_str !tv)
-              | Some tvs ->
-                  Printf.sprintf "<parametric (%s)[%s]>" (tyspec_to_str !tv) (join_tvs tvs)
-          end
-      | TYSPEC_record dct -> "<record with fields " ^ (format_dict dct) ^ ">"
-      | TYSPEC_tuple tvs -> "(" ^ (join_tvs tvs) ^ ")"
-      | TYSPEC_vector tv -> "vec[" ^ (tyspec_to_str !tv) ^ "]"
+          fmt_parametric ff tv params
+
+  in
+  let buf = Buffer.create 16 in
+  let bf = Format.formatter_of_buffer buf in
+    begin
+      fmt_tyspec bf ts;
+      Format.pp_print_flush bf ();
+      Buffer.contents buf
+    end
 ;;
 
 let iflog cx thunk =
@@ -131,14 +201,18 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
     and unify_tyvars  (av:tyvar) (bv:tyvar) : unit =
       iflog cx (fun _ ->
-                  log cx "unifying types: %s vs. %s"
-                    (tyspec_to_str !av) (tyspec_to_str !bv));
+                  log cx "unifying types:";
+                  log cx "input tyvar A: %s" (tyspec_to_str !av);
+                  log cx "input tyvar B: %s" (tyspec_to_str !bv));
       check_sane_tyvar av;
       check_sane_tyvar bv;
+
       unify_tyvars' av bv;
+
       iflog cx (fun _ ->
-                  log cx "    unified to: %s and %s"
-                    (tyspec_to_str !av) (tyspec_to_str !bv));
+                  log cx "unified types:";
+                  log cx "output tyvar A: %s" (tyspec_to_str !av);
+                  log cx "output tyvar B: %s" (tyspec_to_str !bv));
       check_sane_tyvar av;
       check_sane_tyvar bv;
 
@@ -163,10 +237,11 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       let merge_dicts a b =
         let c = Hashtbl.create ((Hashtbl.length a) + (Hashtbl.length b)) in
         let merge ident tv_a =
-          if Hashtbl.mem b ident
-          then unify_tyvars (Hashtbl.find b ident) tv_a;
-          Hashtbl.add c ident tv_a
+          if Hashtbl.mem c ident
+          then unify_tyvars (Hashtbl.find c ident) tv_a
+          else Hashtbl.add c ident tv_a
         in
+          Hashtbl.iter (Hashtbl.add c) b;
           Hashtbl.iter merge a;
           c
       in
