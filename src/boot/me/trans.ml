@@ -27,7 +27,7 @@ type clone_ctrl =
 type call_ctrl =
     CALL_direct
   | CALL_vtbl
-  | CALL_closure
+  | CALL_indirect
 
 let trans_visitor
     (cx:ctxt)
@@ -575,12 +575,12 @@ let trans_visitor
                           get_element_ptr self_args_cell
                             Abi.calltup_elt_extra_args
                         in
-                        let closure_arg =
+                        let state_arg =
                           get_element_ptr self_extra_args
                             Abi.extra_args_elt_closure
                         in
                         let (slot_mem, _) =
-                          need_mem_cell (deref_imm closure_arg (force_sz off))
+                          need_mem_cell (deref_imm state_arg (force_sz off))
                         in
                           Il.Mem (slot_mem, referent_type)
                       end
@@ -1509,7 +1509,7 @@ let trans_visitor
             Ast.REALM_thread ->
               begin
                 trans_upcall "upcall_new_thread" new_proc [| |];
-                copy_fn_args false (CLONE_all new_proc) false
+                copy_fn_args false (CLONE_all new_proc) CALL_indirect
                   fn_ty_params fn_ty proc_cell args [| |];
                 trans_upcall "upcall_start_thread" proc_cell
                   [|
@@ -1522,7 +1522,7 @@ let trans_visitor
          | _ ->
              begin
                  trans_upcall "upcall_new_proc" new_proc [| |];
-                 copy_fn_args false (CLONE_chan new_proc) false
+                 copy_fn_args false (CLONE_chan new_proc) CALL_indirect
                    fn_ty_params fn_ty proc_cell args [| |];
                  trans_upcall "upcall_start_proc" proc_cell
                    [|
@@ -2473,18 +2473,13 @@ let trans_visitor
       : unit =
     let (ptr, fn_ty) = trans_callee flv in
     let fn_ty_params = [| |] in
-    let direct = lval_is_static cx flv in
-    let extra_args =
-      if direct then
-        [||]
-      else
-        [| callee_binding_ptr flv direct |]
-    in
-      (* FIXME: true if caller is a member of a stateful module *)
+    let cc = call_ctrl flv in
+    let extra_args = call_extra_args flv cc in
+      (* FIXME: true if caller is object fn *)
     let caller_is_closure = false in
       log cx "trans_be_fn: %s call to lval %a"
-        (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
-      trans_be direct (fun () -> Ast.sprintf_lval () flv)
+        (call_ctrl_string cc) Ast.sprintf_lval flv;
+      trans_be cc (fun () -> Ast.sprintf_lval () flv)
         ptr fn_ty_params fn_ty caller_is_closure dst_cell args extra_args
 
   and trans_call_fn
@@ -2497,24 +2492,19 @@ let trans_visitor
       : unit =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (ptr, fn_ty) = trans_callee flv in
-    let direct = lval_is_static cx flv || lval_is_obj_vtbl cx flv in
-    let extra_args =
-      if direct then
-        [||]
-      else
-        [| callee_binding_ptr flv direct |]
-    in
+    let cc = call_ctrl flv in
+    let extra_args = call_extra_args flv cc in
       iflog
         begin
           fun _ ->
             log cx "trans_call_fn: %s call to lval %a"
-              (if direct then "direct" else "indirect") Ast.sprintf_lval flv;
+              (call_ctrl_string cc) Ast.sprintf_lval flv;
             log cx "lval type: %a" Ast.sprintf_ty fn_ty;
             Array.iteri (fun i t -> log cx "ty param %d = %a"
                            i Ast.sprintf_ty t)
               ty_params;
         end;
-      trans_call initializing direct (fun () -> Ast.sprintf_lval () flv)
+      trans_call initializing cc (fun () -> Ast.sprintf_lval () flv)
         ptr ty_params fn_ty
         dst_cell args extra_args
 
@@ -2528,7 +2518,7 @@ let trans_visitor
     let dst_cell = Il.Mem (force_to_mem imm_false) in
       iflog (fun _ -> annotate "predicate call");
       trans_call
-        true (lval_is_static cx flv) (fun _ -> Ast.sprintf_lval () flv)
+        true (call_ctrl flv) (fun _ -> Ast.sprintf_lval () flv)
         ptr fn_ty_params fn_ty
         dst_cell args [||];
       iflog (fun _ -> annotate "predicate check/fail");
@@ -2562,7 +2552,7 @@ let trans_visitor
 
   and trans_bind_fn
       (initializing:bool)
-      (direct:bool)
+      (cc:call_ctrl)
       (bind_id:node_id)
       (dst:Ast.lval)
       (flv:Ast.lval)
@@ -2584,8 +2574,8 @@ let trans_visitor
     let glue_fixup =
       get_fn_binding_glue bind_id fn_sig.Ast.sig_input_slots arg_bound_flags
     in
-    let target_fn_ptr = callee_fn_ptr target_ptr direct in
-    let target_binding_ptr = callee_binding_ptr flv direct in
+    let target_fn_ptr = callee_fn_ptr target_ptr cc in
+    let target_binding_ptr = callee_binding_ptr flv cc in
     let closure_rty = closure_referent_type bound_arg_slots in
     let closure_sz = force_sz (Il.referent_ty_size word_bits closure_rty) in
     let fn_cell = get_element_ptr dst_cell 0 in
@@ -2654,7 +2644,7 @@ let trans_visitor
   and copy_fn_args
       (tail_area:bool)
       (clone:clone_ctrl)
-      (direct:bool)
+      (cc:call_ctrl)
 
       (ty_params:Ast.ty array)
       (callee_ty:Ast.ty)
@@ -2667,7 +2657,7 @@ let trans_visitor
 
     let n_ty_params = Array.length ty_params in
     let all_callee_args_rty =
-      if direct
+      if cc = CALL_direct
       then call_args_referent_type cx n_ty_params callee_ty None
       else call_args_referent_type cx n_ty_params callee_ty (Some Il.OpaqueTy)
     in
@@ -2843,21 +2833,22 @@ let trans_visitor
 
   and callee_fn_ptr
       (fptr:Il.operand)
-      (direct:bool)
+      (cc:call_ctrl)
       : Il.operand =
-    if direct
-    then fptr
-    else
-      (* fptr is a pair [disp, binding*] *)
-      let pair_cell = need_cell (reify_ptr fptr) in
-      let disp_cell = get_element_ptr pair_cell 0 in
-        Il.Cell (crate_rel_to_ptr (Il.Cell disp_cell) Il.CodeTy)
+    match cc with
+        CALL_direct
+      | CALL_vtbl -> fptr
+      | CALL_indirect ->
+          (* fptr is a pair [disp, binding*] *)
+          let pair_cell = need_cell (reify_ptr fptr) in
+          let disp_cell = get_element_ptr pair_cell 0 in
+            Il.Cell (crate_rel_to_ptr (Il.Cell disp_cell) Il.CodeTy)
 
   and callee_binding_ptr
       (pair_lval:Ast.lval)
-      (direct:bool)
+      (cc:call_ctrl)
       : Il.operand =
-    if direct
+    if cc = CALL_direct
     then zero
     else
       let lval_base_id = lval_base_id pair_lval in
@@ -2865,9 +2856,41 @@ let trans_visitor
       let pair_cell = cell_of_block_slot pair_slot in
         Il.Cell (get_element_ptr pair_cell 1)
 
+  and call_ctrl flv : call_ctrl =
+    if lval_is_static cx flv
+    then CALL_direct
+    else
+      if lval_is_obj_vtbl cx flv
+      then CALL_vtbl
+      else CALL_indirect
+
+  and call_ctrl_string cc =
+    match cc with
+        CALL_direct -> "direct"
+      | CALL_indirect -> "indirect"
+      | CALL_vtbl -> "vtbl"
+
+  and call_extra_args
+      (flv:Ast.lval)
+      (cc:call_ctrl)
+      : Il.operand array =
+    match cc with
+        CALL_direct -> [| |]
+      | CALL_indirect -> [| callee_binding_ptr flv cc |]
+      | CALL_vtbl ->
+          match flv with
+              (* 
+               * FIXME: will need to pass both words of obj if we add
+               * a 'self' value for self-dispatch within objs.
+               *)
+              Ast.LVAL_ext (base, _) ->
+                let (obj, _) = trans_lval base in
+                let state = get_element_ptr obj 0 in
+                  [| Il.Cell state |]
+            | _ -> bug (lval_base_id flv) "call_extra_args on obj-fn without base obj"
 
   and trans_be
-      (direct:bool)
+      (cc:call_ctrl)
       (logname:(unit -> string))
 
       (callee_ptr:Il.operand)
@@ -2879,11 +2902,11 @@ let trans_visitor
       (caller_arg_atoms:Ast.atom array)
       (caller_extra_args:Il.operand array)
       : unit =
-    let callee_fptr = callee_fn_ptr callee_ptr direct in
+    let callee_fptr = callee_fn_ptr callee_ptr cc in
     let callee_code = code_of_operand callee_fptr in
     let callee_args_rty =
       call_args_referent_type cx 0 callee_ty
-        (if direct then None else (Some Il.OpaqueTy))
+        (if cc = CALL_direct then None else (Some Il.OpaqueTy))
     in
     let callee_argsz =
       force_sz (Il.referent_ty_size word_bits callee_args_rty)
@@ -2900,7 +2923,7 @@ let trans_visitor
                (Printf.sprintf "copy args for tail call to %s" (logname ())));
       copy_fn_args
         true
-        CLONE_none direct
+        CLONE_none cc
         call_ty_params
         callee_ty
         caller_output_cell caller_arg_atoms caller_extra_args;
@@ -2911,7 +2934,7 @@ let trans_visitor
 
   and trans_call
       ((*initializing*)_:bool)
-      (direct:bool)
+      (cc:call_ctrl)
       (logname:(unit -> string))
 
       (callee_ptr:Il.operand)
@@ -2923,12 +2946,12 @@ let trans_visitor
       (caller_extra_args:Il.operand array)
       : unit =
 
-    let callee_fptr = callee_fn_ptr callee_ptr direct in
+    let callee_fptr = callee_fn_ptr callee_ptr cc in
       iflog (fun _ -> annotate
                (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args
         false
-        CLONE_none direct
+        CLONE_none cc
         call_ty_params
         callee_ty
         caller_output_cell caller_arg_atoms caller_extra_args;
@@ -3101,8 +3124,8 @@ let trans_visitor
               match lval_ty cx flv with
                   Ast.TY_fn (tsig, _) ->
                     trans_bind_fn
-                      init (lval_is_static cx flv) stmt.id dst flv tsig args
-                      (* FIXME (bug 544382): implement bind for modules *)
+                      init (call_ctrl flv) stmt.id dst flv tsig args
+                      (* FIXME (bug 544382): implement bind for objs *)
                 | _ -> bug () "Binding unexpected lval."
           end
 
