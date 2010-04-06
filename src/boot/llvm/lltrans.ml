@@ -33,6 +33,8 @@ let trans_crate
    *)
   let bogus = Llvm.const_null (Llvm.i32_type llctx) in
 
+  let nil = Llvm.undef (Llvm.void_type llctx) in
+
   let ty_of = Hashtbl.find sem_cx.Semant.ctxt_all_item_types in
 
   let filename = Session.filename_of sess.Session.sess_in in
@@ -109,21 +111,28 @@ let trans_crate
       (llblock, llbuilder)
     in
 
-    (* Translates a list of AST statements to a sequence of LLVM instructions
-     * using the given LLVM builder. Returns the LLVM builder that can be used
-     * to add instructions to the end of the chain created in this way, which
-     * may not be the same builder that was passed in if extra basic blocks
-     * were created along the way. *)
+    let build_ret llatom : (Llvm.llbuilder -> Llvm.llvalue) =
+      if (Llvm.type_of llatom) == (Llvm.void_type llctx)
+      then Llvm.build_ret_void
+      else Llvm.build_ret llatom
+    in
+
+    (* Translates a list of AST statements to a sequence of LLVM instructions.
+     * The supplied "terminate" function appends the appropriate terminator
+     * instruction to the instruction stream. It may or may not be called,
+     * depending on whether the AST contains a terminating instruction
+     * explicitly. *)
     let rec trans_stmts
         (id_opt:node_id option)
         (llbuilder:Llvm.llbuilder)
         (stmts:Ast.stmt list)
-        : Llvm.llbuilder =
+        (terminate:(Llvm.llbuilder -> unit))
+        : unit =
       let trans_literal
           (lit:Ast.lit)
           : Llvm.llvalue =
         match lit with
-            Ast.LIT_nil -> Llvm.undef (Llvm.void_type llctx)
+            Ast.LIT_nil -> nil
           | Ast.LIT_bool value ->
             Llvm.const_int (Llvm.i1_type llctx) (if value then 1 else 0)
           | Ast.LIT_mach (mty, value, _) ->
@@ -184,22 +193,13 @@ let trans_crate
       in
 
       match stmts with
-          [] -> llbuilder
+          [] -> terminate llbuilder
         | { node = head }::tail ->
-            (* Translates the remaining statements as part of a new LLVM basic
-             * block and returns that basic block, that basic block's builder,
-             * along with a function that, given a builder, emits an
-             * unconditional branch instruction to the new basic block. This
-             * function is suitable for passing to trans_block. *)
-            let trans_tail_in_new_block () =
-              let (tail_llblock, tail_llbuilder) = new_block None in
-              let final_llbuilder = trans_stmts None tail_llbuilder tail in
-              let terminate llbuilder' =
-                ignore (Llvm.build_br tail_llblock llbuilder')
-              in
-              (tail_llblock, final_llbuilder, terminate)
+            let trans_tail_in_new_block () : Llvm.llbasicblock =
+              let (llblock, llbuilder') = new_block None in
+              trans_stmts id_opt llbuilder' tail terminate;
+              llblock
             in
-
             match head with
                 Ast.STMT_if {
                   Ast.if_test = test;
@@ -207,22 +207,25 @@ let trans_crate
                   Ast.if_else = else_opt
                 } ->
                   let llexpr = trans_expr test in
-                  let (next_llblock, final_llbuilder, terminate) =
-                    trans_tail_in_new_block ()
+                  let llnext = trans_tail_in_new_block () in
+                  let branch_to_next llbuilder' =
+                    ignore (Llvm.build_br llnext llbuilder')
                   in
-                  let then_llblock = trans_block if_then terminate in
-                  begin
+                  let llthen = trans_block if_then branch_to_next in
+                  let llelse =
                     match else_opt with
-                        None ->
-                          ignore (Llvm.build_cond_br llexpr then_llblock
-                            next_llblock llbuilder)
-                      | Some if_else ->
-                          let else_llblock = trans_block if_else terminate in
-                          ignore (Llvm.build_cond_br llexpr then_llblock
-                            else_llblock llbuilder)
-                  end;
-                  final_llbuilder
-              | _ -> trans_stmts id_opt llbuilder tail (* TODO *)
+                        None -> llnext
+                      | Some if_else -> trans_block if_else branch_to_next
+                  in
+                  ignore (Llvm.build_cond_br llexpr llthen llelse llbuilder)
+              | Ast.STMT_ret (_, atom_opt) ->
+                  let llatom =
+                    match atom_opt with
+                        None -> nil
+                      | Some atom -> trans_atom atom
+                  in
+                  ignore (build_ret llatom llbuilder)
+              | _ -> trans_stmts id_opt llbuilder tail terminate
 
     (* Translates an AST block to one or more LLVM basic blocks and returns the
      * first basic block. The supplied callback is expected to add a
@@ -232,12 +235,15 @@ let trans_crate
         (terminate:Llvm.llbuilder -> unit)
         : Llvm.llbasicblock =
       let (llblock, llbuilder) = new_block (Some id) in
-      let llbuilder' = trans_stmts (Some id) llbuilder (Array.to_list stmts) in
-      terminate llbuilder';
+      trans_stmts (Some id) llbuilder (Array.to_list stmts) terminate;
       llblock
     in
 
-    ignore (trans_block body ignore);
+    (* "Falling off the end" of a function needs to turn into an explicit "ret
+     * void" instruction. *)
+    let default_terminate llbuilder = ignore (Llvm.build_ret_void llbuilder) in
+
+    ignore (trans_block body default_terminate);
   in
 
   let trans_mod_item
