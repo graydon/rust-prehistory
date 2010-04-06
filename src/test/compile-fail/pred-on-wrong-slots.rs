@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 // error-pattern: Unsatisfied .* lt(a, c)
 

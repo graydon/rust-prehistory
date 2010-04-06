@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn f(str caller) {
   log caller;

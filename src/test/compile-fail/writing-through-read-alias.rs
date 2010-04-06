@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 // error-pattern: writing to read-alias
 
