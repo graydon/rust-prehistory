@@ -94,16 +94,26 @@ let trans_crate
       | Ast.MODE_interior _ -> base_llty
   in
 
-  let trans_fn
+  let (llitems:(node_id, Llvm.llvalue) Hashtbl.t) = Hashtbl.create 0 in
+  let declare_mod_item
       (name:Ast.ident)
+      { node = { Ast.decl_item = (item:Ast.mod_item') }; id = id }
+      : unit =
+    match item with
+        Ast.MOD_ITEM_fn _ ->
+          let llfn = Llvm.declare_function name (trans_ty (ty_of id)) llmod in
+          Hashtbl.add llitems id llfn
+      | _ -> () (* TODO *)
+  in
+
+  let trans_fn
       ({
         Ast.fn_input_slots = (header_slots:Ast.header_slots);
         Ast.fn_body = (body:Ast.block)
       }:Ast.fn)
-      (id:node_id)
+      (fn_id:node_id)
       : unit =
-    let llfnty = trans_ty (ty_of id) in
-    let llfn = Llvm.declare_function name llfnty llmod in
+    let llfn = Hashtbl.find llitems fn_id in
 
     (* LLVM requires that functions be grouped into basic blocks terminated by
      * terminator instructions, while our AST is less strict. So we have to do
@@ -156,7 +166,7 @@ let trans_crate
       let slots_table = Hashtbl.find sem_cx.Semant.ctxt_block_slots block_id in
       Hashtbl.iter init_slot slots_table;
     in
-    List.iter init_block (Hashtbl.find sem_cx.Semant.ctxt_frame_blocks id);
+    List.iter init_block (Hashtbl.find sem_cx.Semant.ctxt_frame_blocks fn_id);
 
     (* Translates a list of AST statements to a sequence of LLVM instructions.
      * The supplied "terminate" function appends the appropriate terminator
@@ -198,6 +208,7 @@ let trans_crate
               begin
                 match referent with
                     Semant.DEFN_slot _ -> Hashtbl.find slot_to_llvalue id
+                  | Semant.DEFN_item _ -> Hashtbl.find llitems id
                   | _ -> bogus_ptr (* TODO *)
               end
           | Ast.LVAL_ext _ -> bogus_ptr (* TODO *)
@@ -312,6 +323,9 @@ let trans_crate
     (* "Falling off the end" of a function needs to turn into an explicit
      * return instruction. *)
     let default_terminate llbuilder =
+      let llfnty =
+        Llvm.element_type (Llvm.type_of (Hashtbl.find llitems fn_id))
+      in
       ignore (build_ret (Llvm.undef (Llvm.return_type llfnty)) llbuilder)
     in
 
@@ -322,17 +336,19 @@ let trans_crate
   in
 
   let trans_mod_item
-      (name:Ast.ident)
+      (_:Ast.ident)
       { node = { Ast.decl_item = (item:Ast.mod_item') }; id = id }
       : unit =
     match item with
-        Ast.MOD_ITEM_fn fn -> trans_fn name fn id
+        Ast.MOD_ITEM_fn fn -> trans_fn fn id
       | _ -> ()
   in
 
   try
     let crate' = crate.node in
-    Hashtbl.iter trans_mod_item crate'.Ast.crate_items;
+    let items = crate'.Ast.crate_items in
+    Hashtbl.iter declare_mod_item items;
+    Hashtbl.iter trans_mod_item items;
     llmod
   with e -> Llvm.dispose_module llmod; raise e
 ;;
