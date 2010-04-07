@@ -145,6 +145,15 @@ endif
 ifneq ($(CFG_LLVM_CONFIG),)
   CFG_LLVM_CONFIG := $(shell which $(CFG_LLVM_CONFIG))
 endif
+ifneq ($(CFG_LLVM_CONFIG),)
+  CFG_LLVM_VERSION := $(shell $(CFG_LLVM_CONFIG) --version)
+  ifeq ($(CFG_LLVM_VERSION),2.8svn)
+    $(info cfg: using LLVM version 2.8svn)
+  else
+    CFG_LLVM_CONFIG :=
+    $(info cfg: incompatible LLVM version $(CFG_LLVM_VERSION), expected 2.8svn)
+  endif
+endif
 ifdef CFG_LLVM_CONFIG
   VARIANT=llvm
   WHERE := $(shell ocamlc -where)
