@@ -95,10 +95,22 @@ let trans_crate
 
   let trans_fn
       (name:Ast.ident)
-      ({ Ast.fn_body = (body:Ast.block) }:Ast.fn)
+      ({
+        Ast.fn_input_slots = (header_slots:Ast.header_slots);
+        Ast.fn_body = (body:Ast.block)
+      }:Ast.fn)
       (id:node_id)
       : unit =
     let llfn = Llvm.declare_function name (trans_ty (ty_of id)) llmod in
+
+    (* Create a map from argument slots to the corresponding llvalues. *)
+    let arg_slot_to_llvalue = Hashtbl.create 0 in
+    let add_arg_slot idx llparam =
+      let ({ id = id }, ident) = header_slots.(idx) in
+      Hashtbl.add arg_slot_to_llvalue id llparam;
+      Llvm.set_value_name ident llparam
+    in
+    Array.iteri add_arg_slot (Llvm.params llfn);
 
     (* LLVM requires that functions be grouped into basic blocks terminated by
      * terminator instructions, while our AST is less strict. So we have to do
@@ -148,7 +160,20 @@ let trans_crate
 
       let trans_lval (lval:Ast.lval) : Llvm.llvalue =
         match lval with
-            Ast.LVAL_base _ -> bogus (* TODO *)
+            Ast.LVAL_base { id = base_id } ->
+              let id =
+                Hashtbl.find sem_cx.Semant.ctxt_lval_to_referent base_id
+              in
+              let referent = Hashtbl.find sem_cx.Semant.ctxt_all_defns id in
+              begin
+                match referent with
+                    Semant.DEFN_slot _ ->
+                      if Hashtbl.mem sem_cx.Semant.ctxt_slot_is_arg id then
+                        Hashtbl.find arg_slot_to_llvalue id
+                      else
+                        bogus
+                  | _ -> bogus (* TODO *)
+              end
           | Ast.LVAL_ext _ -> bogus (* TODO *)
       in
 
