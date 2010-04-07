@@ -282,6 +282,14 @@ let trans_crate
                   let lldest = trans_lval dest in
                   ignore (Llvm.build_store llsrc lldest llbuilder);
                   trans_tail ()
+              | Ast.STMT_call (dest, fn, args) ->
+                  let llargs = Array.map trans_atom args in
+                  let llfn = trans_lval fn in
+                  let lldest = trans_lval dest in
+                  let llid = anon_llid "rv" in
+                  let llrv = Llvm.build_call llfn llargs llid llbuilder in
+                  ignore (Llvm.build_store llrv lldest llbuilder);
+                  trans_tail ()
               | Ast.STMT_if {
                   Ast.if_test = test;
                   Ast.if_then = if_then;
