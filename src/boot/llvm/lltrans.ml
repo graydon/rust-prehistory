@@ -227,11 +227,19 @@ let trans_crate
                 let lllhs = trans_atom lhs in
                 (lllhs, llrhs)
         in
+        let llid = anon_llid "expr" in
         match op with
             Ast.BINOP_eq ->
-              (* TODO: equality works on more than just numbers *)
-              let llid = anon_llid "expr" in
+              (* TODO: equality works on more than just integers *)
               Llvm.build_icmp Llvm.Icmp.Eq lllhs llrhs llid llbuilder
+
+            (* TODO: signed/unsigned distinction, floating point *)
+          | Ast.BINOP_add -> Llvm.build_add lllhs llrhs llid llbuilder
+          | Ast.BINOP_sub -> Llvm.build_sub lllhs llrhs llid llbuilder
+          | Ast.BINOP_mul -> Llvm.build_mul lllhs llrhs llid llbuilder
+          | Ast.BINOP_div -> Llvm.build_sdiv lllhs llrhs llid llbuilder
+          | Ast.BINOP_mod -> Llvm.build_srem lllhs llrhs llid llbuilder
+
           | _ -> bogus (* TODO *)
       in
 
