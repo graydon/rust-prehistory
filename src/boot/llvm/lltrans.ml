@@ -110,8 +110,8 @@ let trans_crate
      * a little trickery here to wrangle the statement sequence into LLVM's
      * format. *)
 
-    let new_block id_opt =
-      let llblock = Llvm.append_block llctx (node_llid id_opt "bb") llfn in
+    let new_block id_opt klass =
+      let llblock = Llvm.append_block llctx (node_llid id_opt klass) llfn in
       let llbuilder = Llvm.builder_at_end llctx llblock in
       (llblock, llbuilder)
     in
@@ -122,20 +122,41 @@ let trans_crate
       else Llvm.build_ret llatom
     in
 
+    (* Build up the slot-to-llvalue mapping, allocating space along the way. *)
+    let slot_to_llvalue = Hashtbl.create 0 in
+    let (_, llinitbuilder) = new_block None "init" in
+
     (* Allocate space for arguments (needed because arguments are lvalues in
-     * Rust), and store the resulting slot-to-llvalue mapping. *)
-    let (_, llargbuilder) = new_block None in
-    let arg_slot_to_llvalue = Hashtbl.create 0 in
+     * Rust), and store them in the slot-to-llvalue mapping. *)
     let build_arg idx llargval =
       let ({ id = id }, ident) = header_slots.(idx) in
       Llvm.set_value_name ident llargval;
       let llarg =
-        Llvm.build_alloca (Llvm.type_of llargval) (ident ^ "_ptr") llargbuilder
+        let llty = Llvm.type_of llargval in
+        Llvm.build_alloca llty (ident ^ "_ptr") llinitbuilder
       in
-      ignore (Llvm.build_store llargval llarg llargbuilder);
-      Hashtbl.add arg_slot_to_llvalue id llarg
+      ignore (Llvm.build_store llargval llarg llinitbuilder);
+      Hashtbl.add slot_to_llvalue id llarg
     in
     Array.iteri build_arg (Llvm.params llfn);
+
+    (* Allocate space for all the blocks' slots. *)
+    let init_block block_id =
+      let init_slot (key:Ast.slot_key) (slot_id:node_id) : unit =
+        let slot =
+          match Hashtbl.find sem_cx.Semant.ctxt_all_defns slot_id with
+              Semant.DEFN_slot slot -> slot
+            | _ -> raise (Failure "defn of slot not actually a slot")
+        in
+        let name = Ast.sprintf_slot_key () key in
+        let llty = trans_slot (Some slot_id) slot in
+        let llptr = Llvm.build_alloca llty name llinitbuilder in
+        Hashtbl.add slot_to_llvalue slot_id llptr
+      in
+      let slots_table = Hashtbl.find sem_cx.Semant.ctxt_block_slots block_id in
+      Hashtbl.iter init_slot slots_table;
+    in
+    List.iter init_block (Hashtbl.find sem_cx.Semant.ctxt_frame_blocks id);
 
     (* Translates a list of AST statements to a sequence of LLVM instructions.
      * The supplied "terminate" function appends the appropriate terminator
@@ -178,7 +199,7 @@ let trans_crate
                 match referent with
                     Semant.DEFN_slot _ ->
                       if Hashtbl.mem sem_cx.Semant.ctxt_slot_is_arg id then
-                        Hashtbl.find arg_slot_to_llvalue id
+                        Hashtbl.find slot_to_llvalue id
                       else
                         bogus_ptr
                   | _ -> bogus_ptr (* TODO *)
@@ -231,7 +252,7 @@ let trans_crate
           [] -> terminate llbuilder
         | { node = head }::tail ->
             let trans_tail_in_new_block () : Llvm.llbasicblock =
-              let (llblock, llbuilder') = new_block None in
+              let (llblock, llbuilder') = new_block None "bb" in
               trans_stmts id_opt llbuilder' tail terminate;
               llblock
             in
@@ -269,7 +290,7 @@ let trans_crate
         ({ node = (stmts:Ast.stmt array); id = id }:Ast.block)
         (terminate:Llvm.llbuilder -> unit)
         : Llvm.llbasicblock =
-      let (llblock, llbuilder) = new_block (Some id) in
+      let (llblock, llbuilder) = new_block (Some id) "bb" in
       trans_stmts (Some id) llbuilder (Array.to_list stmts) terminate;
       llblock
     in
@@ -280,9 +301,10 @@ let trans_crate
       ignore (build_ret (Llvm.undef (Llvm.return_type llfnty)) llbuilder)
     in
 
-    (* Build up the first body block, and link the argument block to it. *)
+    (* Build up the first body block, and link it to the end of the
+     * initialization block. *)
     let llbodyblock = (trans_block body default_terminate) in
-    ignore (Llvm.build_br llbodyblock llargbuilder)
+    ignore (Llvm.build_br llbodyblock llinitbuilder)
   in
 
   let trans_mod_item
