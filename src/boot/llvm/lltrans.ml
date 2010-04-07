@@ -197,11 +197,7 @@ let trans_crate
               let referent = Hashtbl.find sem_cx.Semant.ctxt_all_defns id in
               begin
                 match referent with
-                    Semant.DEFN_slot _ ->
-                      if Hashtbl.mem sem_cx.Semant.ctxt_slot_is_arg id then
-                        Hashtbl.find slot_to_llvalue id
-                      else
-                        bogus_ptr
+                    Semant.DEFN_slot _ -> Hashtbl.find slot_to_llvalue id
                   | _ -> bogus_ptr (* TODO *)
               end
           | Ast.LVAL_ext _ -> bogus_ptr (* TODO *)
