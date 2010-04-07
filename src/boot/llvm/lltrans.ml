@@ -32,6 +32,7 @@ let trans_crate
    * TODO: On some joyous day, remove me.
    *)
   let bogus = Llvm.const_null (Llvm.i32_type llctx) in
+  let bogus_ptr = Llvm.const_null (Llvm.pointer_type (Llvm.i32_type llctx)) in
 
   let nil = Llvm.undef (Llvm.void_type llctx) in
 
@@ -104,15 +105,6 @@ let trans_crate
     let llfnty = trans_ty (ty_of id) in
     let llfn = Llvm.declare_function name llfnty llmod in
 
-    (* Create a map from argument slots to the corresponding llvalues. *)
-    let arg_slot_to_llvalue = Hashtbl.create 0 in
-    let add_arg_slot idx llparam =
-      let ({ id = id }, ident) = header_slots.(idx) in
-      Hashtbl.add arg_slot_to_llvalue id llparam;
-      Llvm.set_value_name ident llparam
-    in
-    Array.iteri add_arg_slot (Llvm.params llfn);
-
     (* LLVM requires that functions be grouped into basic blocks terminated by
      * terminator instructions, while our AST is less strict. So we have to do
      * a little trickery here to wrangle the statement sequence into LLVM's
@@ -129,6 +121,21 @@ let trans_crate
       then Llvm.build_ret_void
       else Llvm.build_ret llatom
     in
+
+    (* Allocate space for arguments (needed because arguments are lvalues in
+     * Rust), and store the resulting slot-to-llvalue mapping. *)
+    let (_, llargbuilder) = new_block None in
+    let arg_slot_to_llvalue = Hashtbl.create 0 in
+    let build_arg idx llargval =
+      let ({ id = id }, ident) = header_slots.(idx) in
+      Llvm.set_value_name ident llargval;
+      let llarg =
+        Llvm.build_alloca (Llvm.type_of llargval) (ident ^ "_ptr") llargbuilder
+      in
+      ignore (Llvm.build_store llargval llarg llargbuilder);
+      Hashtbl.add arg_slot_to_llvalue id llarg
+    in
+    Array.iteri build_arg (Llvm.params llfn);
 
     (* Translates a list of AST statements to a sequence of LLVM instructions.
      * The supplied "terminate" function appends the appropriate terminator
@@ -159,6 +166,7 @@ let trans_crate
           | Ast.LIT_custom _ -> bogus (* TODO *)
       in
 
+      (* Translates an lval by reference into the appropriate pointer value. *)
       let trans_lval (lval:Ast.lval) : Llvm.llvalue =
         match lval with
             Ast.LVAL_base { id = base_id } ->
@@ -172,16 +180,17 @@ let trans_crate
                       if Hashtbl.mem sem_cx.Semant.ctxt_slot_is_arg id then
                         Hashtbl.find arg_slot_to_llvalue id
                       else
-                        bogus
-                  | _ -> bogus (* TODO *)
+                        bogus_ptr
+                  | _ -> bogus_ptr (* TODO *)
               end
-          | Ast.LVAL_ext _ -> bogus (* TODO *)
+          | Ast.LVAL_ext _ -> bogus_ptr (* TODO *)
       in
 
       let trans_atom (atom:Ast.atom) : Llvm.llvalue =
         match atom with
             Ast.ATOM_literal { node = lit } -> trans_literal lit
-          | Ast.ATOM_lval lval -> trans_lval lval
+          | Ast.ATOM_lval lval ->
+              Llvm.build_load (trans_lval lval) (anon_llid "tmp") llbuilder
       in
 
       let trans_binary_expr
@@ -271,7 +280,9 @@ let trans_crate
       ignore (build_ret (Llvm.undef (Llvm.return_type llfnty)) llbuilder)
     in
 
-    ignore (trans_block body default_terminate);
+    (* Build up the first body block, and link the argument block to it. *)
+    let llbodyblock = (trans_block body default_terminate) in
+    ignore (Llvm.build_br llbodyblock llargbuilder)
   in
 
   let trans_mod_item
