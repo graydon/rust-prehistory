@@ -251,13 +251,23 @@ let trans_crate
       match stmts with
           [] -> terminate llbuilder
         | { node = head }::tail ->
+            let trans_tail_with_builder llbuilder' : unit =
+              trans_stmts id_opt llbuilder' tail terminate
+            in
+            let trans_tail () = trans_tail_with_builder llbuilder in
             let trans_tail_in_new_block () : Llvm.llbasicblock =
               let (llblock, llbuilder') = new_block None "bb" in
-              trans_stmts id_opt llbuilder' tail terminate;
+              trans_tail_with_builder llbuilder';
               llblock
             in
+
             match head with
-                Ast.STMT_if {
+                Ast.STMT_copy (dest, src) ->
+                  let llsrc = trans_expr src in
+                  let lldest = trans_lval dest in
+                  ignore (Llvm.build_store llsrc lldest llbuilder);
+                  trans_tail ()
+              | Ast.STMT_if {
                   Ast.if_test = test;
                   Ast.if_then = if_then;
                   Ast.if_else = else_opt
