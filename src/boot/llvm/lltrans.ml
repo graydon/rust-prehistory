@@ -101,7 +101,8 @@ let trans_crate
       : unit =
     match item with
         Ast.MOD_ITEM_fn _ ->
-          let llfn = Llvm.declare_function name (trans_ty (ty_of id)) llmod in
+          let llty = trans_ty (ty_of id) in
+          let llfn = Llvm.declare_function ("_rust_" ^ name) llty llmod in
           Hashtbl.add llitems id llfn
       | _ -> () (* TODO *)
   in
