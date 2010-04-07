@@ -101,7 +101,8 @@ let trans_crate
       }:Ast.fn)
       (id:node_id)
       : unit =
-    let llfn = Llvm.declare_function name (trans_ty (ty_of id)) llmod in
+    let llfnty = trans_ty (ty_of id) in
+    let llfn = Llvm.declare_function name llfnty llmod in
 
     (* Create a map from argument slots to the corresponding llvalues. *)
     let arg_slot_to_llvalue = Hashtbl.create 0 in
@@ -264,9 +265,11 @@ let trans_crate
       llblock
     in
 
-    (* "Falling off the end" of a function needs to turn into an explicit "ret
-     * void" instruction. *)
-    let default_terminate llbuilder = ignore (Llvm.build_ret_void llbuilder) in
+    (* "Falling off the end" of a function needs to turn into an explicit
+     * return instruction. *)
+    let default_terminate llbuilder =
+      ignore (build_ret (Llvm.undef (Llvm.return_type llfnty)) llbuilder)
+    in
 
     ignore (trans_block body default_terminate);
   in
