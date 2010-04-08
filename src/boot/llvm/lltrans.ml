@@ -103,6 +103,7 @@ let trans_crate
         Ast.MOD_ITEM_fn _ ->
           let llty = trans_ty (ty_of id) in
           let llfn = Llvm.declare_function ("_rust_" ^ name) llty llmod in
+          Llvm.set_function_call_conv Llvm.CallConv.fast llfn;
           Hashtbl.add llitems id llfn
       | _ -> () (* TODO *)
   in
@@ -289,6 +290,7 @@ let trans_crate
                   let lldest = trans_lval dest in
                   let llid = anon_llid "rv" in
                   let llrv = Llvm.build_call llfn llargs llid llbuilder in
+                  Llvm.set_instruction_call_conv Llvm.CallConv.fast llrv;
                   ignore (Llvm.build_store llrv lldest llbuilder);
                   trans_tail ()
               | Ast.STMT_if {
