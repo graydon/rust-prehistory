@@ -871,15 +871,21 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
         match base_item.node.Ast.decl_item with
             Ast.MOD_ITEM_mod items ->
               begin
-                match comp with
-                    Ast.COMP_named (Ast.COMP_ident i) ->
-                      begin
-                        match htab_search items i with
-                            None -> err None "unknown module item '%s'" i
-                          | Some sub -> check_concrete base_item.node.Ast.decl_params sub
-                      end
-                  | _ ->
-                      bug () "unhandled lval-component in Semant.lval_item"
+                let i, args =
+                  match comp with
+                      Ast.COMP_named (Ast.COMP_ident i) -> (i, [||])
+                    | Ast.COMP_named (Ast.COMP_app (i, args)) -> (i, args)
+                    | _ ->
+                        bug () "unhandled lval-component '%a' in Semant.lval_item"
+                          Ast.sprintf_lval_component comp
+                in
+                  match htab_search items i with
+                      None -> bug () "unknown module item '%s'" i
+                    | Some sub ->
+                        assert
+                          ((Array.length sub.node.Ast.decl_params) =
+                              (Array.length args));
+                        check_concrete base_item.node.Ast.decl_params sub
               end
           | _ -> err None "lval base %a does not name a module" Ast.sprintf_lval base
 ;;

@@ -834,6 +834,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
     and unify_lval' (lval:Ast.lval) (tv:tyvar) : unit =
       let note_args args =
+        iflog cx (fun _ -> log cx "noting lval '%a' type arguments: %a"
+                    Ast.sprintf_lval lval Ast.sprintf_app_args args);
         Hashtbl.add
           cx.ctxt_call_lval_params
           (lval_base_id lval)

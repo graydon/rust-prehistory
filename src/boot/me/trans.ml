@@ -2690,12 +2690,19 @@ let trans_visitor
       trans_arg0 callee_output_cell caller_output_cell;
       trans_arg1 callee_proc_cell;
 
+      let get_tydesc ty_param =
+        match ty_param with
+            Ast.TY_param (idx, _, _) ->
+              (Il.Cell (alias (get_current_fn_ty_desc idx)))
+          | _ -> trans_tydesc ty_param
+      in
+
       Array.iteri
         begin
           fun i ty_param ->
             trans_init_slot_from_cell CLONE_none
               (get_element_ptr callee_ty_params i) word_slot
-              (crate_rel_to_ptr (trans_tydesc ty_param) Il.OpaqueTy) word_slot
+              (crate_rel_to_ptr (get_tydesc ty_param) Il.OpaqueTy) word_slot
         end
         ty_params;
 
