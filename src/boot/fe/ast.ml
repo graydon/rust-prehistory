@@ -467,7 +467,11 @@ let fmt_proto (ff:Format.formatter) (p:proto) : unit =
     | PROTO_plus -> fmt ff "+"
 
 let rec fmt_app (ff:Format.formatter) (i:ident) (tys:ty array) : unit =
-  fmt ff "%s[@[" i;
+  fmt ff "%s" i;
+  fmt_app_args ff tys
+
+and fmt_app_args (ff:Format.formatter) (tys:ty array) : unit =
+  fmt ff "[@[";
   for i = 0 to (Array.length tys) - 1;
   do
     if i != 0
