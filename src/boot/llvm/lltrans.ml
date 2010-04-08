@@ -356,10 +356,12 @@ let trans_crate
   in
 
   try
+    let (abi:Llabi.abi) = Llabi.declare_abi llctx llmod in
     let crate' = crate.node in
     let items = crate'.Ast.crate_items in
     Hashtbl.iter declare_mod_item items;
     Hashtbl.iter trans_mod_item items;
+    Llabi.postprocess_module llctx llmod abi;
     llmod
   with e -> Llvm.dispose_module llmod; raise e
 ;;
