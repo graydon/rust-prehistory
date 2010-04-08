@@ -317,7 +317,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       infinite-vec-type-recursion.rs)
 
 ifdef CFG_WINDOWSY
-TEST_XFAILS += test/run-pass/native_mod.rc
+TEST_XFAILS_X86 += test/run-pass/native_mod.rc
 endif
 
 TEST_RUN_PASS_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-pass/*.rc))
