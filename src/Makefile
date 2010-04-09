@@ -23,7 +23,7 @@ CFG_GCC_COMPILE_FLAGS :=
 CFG_GCC_LINK_FLAGS :=
 CFG_VALGRIND :=
 
-CFG_LLVM_CONFIG := llvm-config
+CFG_LLVM_CONFIG := #llvm-config
 
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
@@ -288,7 +288,6 @@ self: $(CFG_COMPILER)
 TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/linear-for-loop.rs \
                     test/run-pass/spawn-fn.rs \
-                    test/run-pass/yield2.rs \
                     test/run-pass/rec-auto.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \

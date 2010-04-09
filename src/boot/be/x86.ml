@@ -1211,11 +1211,27 @@ let activate_glue (e:Il.emitter) : unit =
   let edx_n = word_n (Il.Hreg edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
+  let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
 
     mov (rc edx) (c (sp_n 1));                       (* edx <- proc             *)
     save_callee_saves e;
     mov (edx_n Abi.proc_field_runtime_sp) (ro esp);  (* proc->runtime_sp <- esp *)
     mov (rc esp) (c (edx_n Abi.proc_field_rust_sp)); (* esp <- proc->rust_sp    *)
+
+  (*
+   * The activate glue is run in two case: 1) first time a proc starts 2) resuming
+   * a proc after it was descheduled. In case of 1), the value of proc->rust_sp
+   * is irrelevant. Popping 5 words off it here (4 callee saves, 1 ret value) has
+   * no consequence. For case 2), we are in a call into the runtime (upcall). As
+   * part of that sequence the code actually expects us to return from the
+   * runtime stack and rust_sp is expected to point to the stack level before
+   * the upcall, which does not include the callee saves and the return address.
+   * The call code sets esp from proc->rust_sp immediately after we return. So
+   * we make sure it has the right value and preemptively account for the values
+   * we have here on the stack.
+   *)
+
+    binary Il.ADD (edx_n Abi.proc_field_rust_sp) 0x16L;
 
     (**** IN PROC STACK ****)
     restore_callee_saves e;

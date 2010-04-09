@@ -1297,7 +1297,6 @@ class rust_crate_cache;
 
 struct rust_proc : public rc_base<rust_proc>, public rt_owned<rust_proc>, public rust_cond {
     // fields known to the compiler
-
     stk_seg *stk;
     uintptr_t runtime_sp;      // runtime sp while proc running.
     uintptr_t rust_sp;         // saved sp when not running.
