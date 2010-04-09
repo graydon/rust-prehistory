@@ -610,29 +610,15 @@ let new_asm_reader (sess:Session.sess) (s:filename) : asm_reader =
       asm_get_uleb =
         begin
           fun _ ->
-            let hi_mask = 0x80 in
-            let lo_mask = 0x7f in
-            let rec accum i =
-              tmp := Nativeint.logor (!tmp) (Nativeint.of_int (i land lo_mask));
-              if (i land hi_mask) = hi_mask
-              then
-                begin
-                  tmp := Nativeint.shift_left (!tmp) 7;
-                  incr off;
-                  accum arr.{!off}
-                end
-              else
-                Nativeint.to_int (!tmp)
+            let rec loop result shift =
+              let byte = arr.{!off} in
+                incr off;
+                let result = result lor ((byte land 0x7f) lsl shift) in
+                  if (byte land 0x80) = 0
+                  then result
+                  else loop result (shift+7)
             in
-            let first = arr.{!off} in
-              incr off;
-              if first = 0
-              then 0
-              else
-                begin
-                  tmp := Nativeint.zero;
-                  accum first
-                end
+              loop 0 0
         end;
       asm_get_zstr = (fun _ -> get_zstr_padded None);
       asm_get_zstr_padded = (fun pad -> get_zstr_padded (Some pad));

@@ -129,6 +129,7 @@ type dw_tag =
   | DW_TAG_condition
   | DW_TAG_shared_type
   | DW_TAG_lo_user
+  | DW_TAG_rust_type_param
   | DW_TAG_hi_user
 ;;
 
@@ -193,6 +194,7 @@ let dw_tag_to_int (tag:dw_tag) : int =
   | DW_TAG_condition -> 0x3f
   | DW_TAG_shared_type -> 0x40
   | DW_TAG_lo_user -> 0x4080
+  | DW_TAG_rust_type_param -> 0x4380
   | DW_TAG_hi_user -> 0xffff
 ;;
 
@@ -256,6 +258,7 @@ let dw_tag_of_int (i:int) : dw_tag =
   | 0x3f -> DW_TAG_condition
   | 0x40 -> DW_TAG_shared_type
   | 0x4080 -> DW_TAG_lo_user
+  | 0x4380 -> DW_TAG_rust_type_param
   | 0xffff -> DW_TAG_hi_user
   | _ -> bug () "bad DWARF tag code: %d" i
 ;;
@@ -321,6 +324,7 @@ let dw_tag_to_string (tag:dw_tag) : string =
   | DW_TAG_condition -> "DW_TAG_condition"
   | DW_TAG_shared_type -> "DW_TAG_shared_type"
   | DW_TAG_lo_user -> "DW_TAG_lo_user"
+  | DW_TAG_rust_type_param -> "DW_TAG_rust_type_param"
   | DW_TAG_hi_user -> "DW_TAG_hi_user"
 ;;
 
@@ -432,6 +436,8 @@ type dw_at =
   | DW_AT_pure
   | DW_AT_recursive
   | DW_AT_lo_user
+  | DW_AT_rust_type_param_id
+  | DW_AT_rust_type_param_index
   | DW_AT_hi_user
 ;;
 
@@ -525,6 +531,8 @@ let dw_at_to_int (a:dw_at) : int =
     | DW_AT_pure -> 0x67
     | DW_AT_recursive -> 0x68
     | DW_AT_lo_user -> 0x2000
+    | DW_AT_rust_type_param_id -> 0x2300
+    | DW_AT_rust_type_param_index -> 0x2301
     | DW_AT_hi_user -> 0x3fff
 ;;
 
@@ -617,8 +625,10 @@ let dw_at_of_int (i:int) : dw_at =
     | 0x67 -> DW_AT_pure
     | 0x68 -> DW_AT_recursive
     | 0x2000 -> DW_AT_lo_user
+    | 0x2300 -> DW_AT_rust_type_param_id
+    | 0x2301 -> DW_AT_rust_type_param_index
     | 0x3fff -> DW_AT_hi_user
-    | _ -> bug () "bad DWARF attribute code: %d" i
+    | _ -> bug () "bad DWARF attribute code: 0x%x" i
 ;;
 
 let dw_at_to_string (a:dw_at) : string =
@@ -710,6 +720,8 @@ let dw_at_to_string (a:dw_at) : string =
     | DW_AT_pure -> "DW_AT_pure"
     | DW_AT_recursive -> "DW_AT_recursive"
     | DW_AT_lo_user -> "DW_AT_lo_user"
+    | DW_AT_rust_type_param_id -> "DW_AT_rust_type_param_id"
+    | DW_AT_rust_type_param_index -> "DW_AT_rust_type_param_index"
     | DW_AT_hi_user -> "DW_AT_hi_user"
 ;;
 
@@ -850,7 +862,7 @@ let dw_form_of_int (i:int) : dw_form =
     | 0x14 -> DW_FORM_ref8
     | 0x15 -> DW_FORM_ref_udata
     | 0x16 -> DW_FORM_indirect
-    | _ -> bug () "bad DWARF attribute code: %d" i
+    | _ -> bug () "bad DWARF form code: 0x%x" i
 ;;
 
 let dw_form_to_string (f:dw_form) : string =
@@ -1178,6 +1190,15 @@ let (abbrev_unspecified_type:abbrev) =
    |])
 ;;
 
+let (abbrev_rust_type_param:abbrev) =
+  (DW_TAG_rust_type_param, DW_CHILDREN_no,
+   [|
+     (DW_AT_rust_type_param_index, DW_FORM_data4);
+     (DW_AT_rust_type_param_id, DW_FORM_data4);
+     (DW_AT_mutable, DW_FORM_flag);
+   |])
+;;
+
 let (abbrev_unspecified_ref_type:abbrev) =
   (DW_TAG_unspecified_type, DW_CHILDREN_no,
    [|
@@ -1488,6 +1509,25 @@ let dwarf_visitor
           emit_die die;
           ref_addr_for_fix fix
       in
+
+      let rust_type_param (p:(ty_param_idx * opaque_id * Ast.mutability)) =
+        let (idx, oid, mut) = p in
+        let fix = new_fixup "rust-type-param DIE" in
+        let die =
+          DEF (fix, SEQ [|
+                 uleb (get_abbrev_code abbrev_rust_type_param);
+                 (* DW_AT_rust_type_param_index: DW_FORM_data4 *)
+                 WORD (word_ty_mach, IMM (Int64.of_int idx));
+                 (* DW_AT_rust_type_param_id: DW_FORM_data4 *)
+                 WORD (word_ty_mach, IMM (Int64.of_int (int_of_opaque oid)));
+                 (* DW_AT_mutable, DW_FORM_flag *)
+                 BYTE (if mut = Ast.MUTABLE then 1 else 0)
+               |])
+        in
+          emit_die die;
+          ref_addr_for_fix fix
+      in
+
       let unspecified_ref_ty name ty =
         let fix = new_fixup ("unspecified-ref-type DIE: " ^ name) in
         let die =
@@ -1541,6 +1581,7 @@ let dwarf_visitor
           | Ast.TY_tag _ -> unspecified "tag"
           | Ast.TY_iso _ -> unspecified "iso"
           | Ast.TY_type -> unspecified "type"
+          | Ast.TY_param p -> rust_type_param p
           | _ -> unspecified "unknown"
   in
 
@@ -2136,10 +2177,22 @@ let rec extract_mod_items
     ((i:int),(dies:(int,die) Hashtbl.t))
     : unit =
 
+  let oid_map = Hashtbl.create 0 in
+
   let next_node_id _ : node_id =
     let id = !nref in
       nref:= Node ((int_of_node id)+1);
       id
+  in
+
+  let next_opaque_id _ : opaque_id =
+    let id = !oref in
+      oref:= Opaque ((int_of_opaque id)+1);
+      id
+  in
+
+  let get_oid id =
+    htab_search_or_add oid_map id (fun _ -> next_opaque_id ())
   in
 
   let (word_sz:int64) = abi.Abi.abi_word_sz in
@@ -2180,6 +2233,18 @@ let rec extract_mod_items
                 | "vec" -> Ast.TY_vec (get_referenced_slot die)
                 | "type" -> Ast.TY_type
                 | _ -> Ast.TY_nil (* FIXME: finish this. *)
+            end
+
+        | DW_TAG_rust_type_param ->
+            begin
+              let idx = get_num die DW_AT_rust_type_param_index in
+              let oid = get_oid (get_num die DW_AT_rust_type_param_id) in
+              let flag =
+                if (get_num die DW_AT_mutable) = 1
+                then Ast.MUTABLE
+                else Ast.IMMUTABLE
+              in
+                Ast.TY_param (idx, oid, flag)
             end
 
         | DW_TAG_string_type -> Ast.TY_str
