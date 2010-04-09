@@ -1227,6 +1227,7 @@ let sprintf_carg = sprintf_fmt fmt_carg;;
 let sprintf_constr = sprintf_fmt fmt_constr;;
 let sprintf_stmt = sprintf_fmt fmt_stmt;;
 let sprintf_mod_items = sprintf_fmt fmt_mod_items;;
+let sprintf_decl_params = sprintf_fmt fmt_decl_params;;
 let sprintf_app_args = sprintf_fmt fmt_app_args;;
 
 (*

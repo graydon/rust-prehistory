@@ -130,6 +130,7 @@ type dw_tag =
   | DW_TAG_shared_type
   | DW_TAG_lo_user
   | DW_TAG_rust_type_param
+  | DW_TAG_rust_type_param_decl
   | DW_TAG_hi_user
 ;;
 
@@ -195,6 +196,7 @@ let dw_tag_to_int (tag:dw_tag) : int =
   | DW_TAG_shared_type -> 0x40
   | DW_TAG_lo_user -> 0x4080
   | DW_TAG_rust_type_param -> 0x4380
+  | DW_TAG_rust_type_param_decl -> 0x4381
   | DW_TAG_hi_user -> 0xffff
 ;;
 
@@ -259,6 +261,7 @@ let dw_tag_of_int (i:int) : dw_tag =
   | 0x40 -> DW_TAG_shared_type
   | 0x4080 -> DW_TAG_lo_user
   | 0x4380 -> DW_TAG_rust_type_param
+  | 0x4381 -> DW_TAG_rust_type_param_decl
   | 0xffff -> DW_TAG_hi_user
   | _ -> bug () "bad DWARF tag code: %d" i
 ;;
@@ -325,6 +328,7 @@ let dw_tag_to_string (tag:dw_tag) : string =
   | DW_TAG_shared_type -> "DW_TAG_shared_type"
   | DW_TAG_lo_user -> "DW_TAG_lo_user"
   | DW_TAG_rust_type_param -> "DW_TAG_rust_type_param"
+  | DW_TAG_rust_type_param_decl -> "DW_TAG_rust_type_param_decl"
   | DW_TAG_hi_user -> "DW_TAG_hi_user"
 ;;
 
@@ -1149,7 +1153,7 @@ let (abbrev_subprogram:abbrev) =
 ;;
 
 let (abbrev_typedef:abbrev) =
-  (DW_TAG_typedef, DW_CHILDREN_no,
+  (DW_TAG_typedef, DW_CHILDREN_yes,
    [|
      (DW_AT_name, DW_FORM_string);
      (DW_AT_type, DW_FORM_ref_addr)
@@ -1193,6 +1197,16 @@ let (abbrev_unspecified_type:abbrev) =
 let (abbrev_rust_type_param:abbrev) =
   (DW_TAG_rust_type_param, DW_CHILDREN_no,
    [|
+     (DW_AT_rust_type_param_index, DW_FORM_data4);
+     (DW_AT_rust_type_param_id, DW_FORM_data4);
+     (DW_AT_mutable, DW_FORM_flag);
+   |])
+;;
+
+let (abbrev_rust_type_param_decl:abbrev) =
+  (DW_TAG_rust_type_param_decl, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
      (DW_AT_rust_type_param_index, DW_FORM_data4);
      (DW_AT_rust_type_param_id, DW_FORM_data4);
      (DW_AT_mutable, DW_FORM_flag);
@@ -1351,7 +1365,20 @@ let dwarf_visitor
           SUB ((M_POS fix), M_POS cu_info_section_fixup))
   in
 
+  (* Type-param DIEs. *)
 
+  let type_param_die (p:(ty_param_idx * opaque_id * Ast.mutability)) =
+    let (idx, oid, mut) = p in
+      SEQ [|
+        uleb (get_abbrev_code abbrev_rust_type_param);
+        (* DW_AT_rust_type_param_index: DW_FORM_data4 *)
+        WORD (word_ty_mach, IMM (Int64.of_int idx));
+        (* DW_AT_rust_type_param_id: DW_FORM_data4 *)
+        WORD (word_ty_mach, IMM (Int64.of_int (int_of_opaque oid)));
+        (* DW_AT_mutable, DW_FORM_flag *)
+        BYTE (if mut = Ast.MUTABLE then 1 else 0)
+      |]
+  in
 
   (* Type DIEs. *)
 
@@ -1511,19 +1538,8 @@ let dwarf_visitor
       in
 
       let rust_type_param (p:(ty_param_idx * opaque_id * Ast.mutability)) =
-        let (idx, oid, mut) = p in
         let fix = new_fixup "rust-type-param DIE" in
-        let die =
-          DEF (fix, SEQ [|
-                 uleb (get_abbrev_code abbrev_rust_type_param);
-                 (* DW_AT_rust_type_param_index: DW_FORM_data4 *)
-                 WORD (word_ty_mach, IMM (Int64.of_int idx));
-                 (* DW_AT_rust_type_param_id: DW_FORM_data4 *)
-                 WORD (word_ty_mach, IMM (Int64.of_int (int_of_opaque oid)));
-                 (* DW_AT_mutable, DW_FORM_flag *)
-                 BYTE (if mut = Ast.MUTABLE then 1 else 0)
-               |])
-        in
+        let die = DEF (fix, type_param_die p) in
           emit_die die;
           ref_addr_for_fix fix
       in
@@ -1731,6 +1747,30 @@ let dwarf_visitor
       curr_cu_line := []
   in
 
+  let type_param_decl_die (p:(Ast.ident * (ty_param_idx * opaque_id * Ast.mutability))) =
+    let (ident, (idx, oid, mut)) = p in
+      SEQ [|
+        uleb (get_abbrev_code abbrev_rust_type_param_decl);
+        (* DW_AT_name:  DW_FORM_string *)
+        ZSTRING (Filename.basename ident);
+        (* DW_AT_rust_type_param_index: DW_FORM_data4 *)
+        WORD (word_ty_mach, IMM (Int64.of_int idx));
+        (* DW_AT_rust_type_param_id: DW_FORM_data4 *)
+        WORD (word_ty_mach, IMM (Int64.of_int (int_of_opaque oid)));
+        (* DW_AT_mutable, DW_FORM_flag *)
+        BYTE (if mut = Ast.MUTABLE then 1 else 0)
+      |]
+  in
+
+  let emit_type_param_decl_dies
+      (params:(Ast.ty_param identified) array)
+      : unit =
+    Array.iter
+      (fun p ->
+         emit_die (type_param_decl_die p.node))
+      params;
+  in
+
   let emit_module_die
       (id:Ast.ident)
       : unit =
@@ -1742,7 +1782,7 @@ let dwarf_visitor
          ZSTRING id;
        |])
     in
-      emit_die module_die
+      emit_die module_die;
   in
 
   let emit_subprogram_die
@@ -1815,8 +1855,11 @@ let dwarf_visitor
       match item.node.Ast.decl_item with
           Ast.MOD_ITEM_mod _ ->
             begin
-              log cx "walking module '%s'" (path_name());
-              emit_module_die id
+              log cx "walking module '%s' with %d type params"
+                (path_name())
+                (Array.length item.node.Ast.decl_params);
+              emit_module_die id;
+              emit_type_param_decl_dies item.node.Ast.decl_params;
             end
         | Ast.MOD_ITEM_fn _ ->
             begin
@@ -1826,17 +1869,21 @@ let dwarf_visitor
                     Ast.TY_fn tfn -> tfn
                   | _ -> bug () "non-fn type when emitting dwarf for MOD_ITEM_fn"
               in
-                log cx "walking function '%s'" (path_name());
-                emit_subprogram_die
-                  id
-                  tsig.Ast.sig_output_slot
-                  (Hashtbl.find cx.ctxt_fn_fixups item.id)
+                log cx "walking function '%s' with %d type params"
+                  (path_name())
+                  (Array.length item.node.Ast.decl_params);
+                emit_subprogram_die id tsig.Ast.sig_output_slot
+                  (Hashtbl.find cx.ctxt_fn_fixups item.id);
+                emit_type_param_decl_dies item.node.Ast.decl_params;
             end
         | Ast.MOD_ITEM_public_type _
         | Ast.MOD_ITEM_opaque_type _ ->
             begin
-              log cx "walking typedef '%s'" (path_name());
-              emit_typedef_die id (Hashtbl.find cx.ctxt_all_type_items item.id)
+              log cx "walking typedef '%s' with %d type params"
+                (path_name())
+                (Array.length item.node.Ast.decl_params);
+              emit_typedef_die id (Hashtbl.find cx.ctxt_all_type_items item.id);
+              emit_type_param_decl_dies item.node.Ast.decl_params;
             end
         | _ -> ()
     end;
@@ -1862,7 +1909,9 @@ let dwarf_visitor
     begin
       match item.node.Ast.decl_item with
           Ast.MOD_ITEM_mod _
-        | Ast.MOD_ITEM_fn _ -> emit_null_die ()
+        | Ast.MOD_ITEM_fn _
+        | Ast.MOD_ITEM_public_type _
+        | Ast.MOD_ITEM_opaque_type _ -> emit_null_die ()
         | _ -> ()
     end;
     if Hashtbl.mem cx.ctxt_item_files item.id
@@ -2220,6 +2269,21 @@ let rec extract_mod_items
 
   let get_name die = get_str die DW_AT_name in
 
+  let get_type_param die =
+    let idx = get_num die DW_AT_rust_type_param_index in
+    let oid = get_oid (get_num die DW_AT_rust_type_param_id) in
+    let mut =
+      if (get_num die DW_AT_mutable) = 1
+      then Ast.MUTABLE
+      else Ast.IMMUTABLE
+    in
+      (idx, oid, mut)
+  in
+
+  let get_type_param_decl die =
+    ((get_str die DW_AT_name), (get_type_param die))
+  in
+
   let rec get_ty die : Ast.ty =
       match die.die_tag with
 
@@ -2236,16 +2300,7 @@ let rec extract_mod_items
             end
 
         | DW_TAG_rust_type_param ->
-            begin
-              let idx = get_num die DW_AT_rust_type_param_index in
-              let oid = get_oid (get_num die DW_AT_rust_type_param_id) in
-              let flag =
-                if (get_num die DW_AT_mutable) = 1
-                then Ast.MUTABLE
-                else Ast.IMMUTABLE
-              in
-                Ast.TY_param (idx, oid, flag)
-            end
+            Ast.TY_param (get_type_param die)
 
         | DW_TAG_string_type -> Ast.TY_str
 
@@ -2348,8 +2403,8 @@ let rec extract_mod_items
       node = n }
   in
 
-  let decl i =
-    wrap { Ast.decl_params = [| |];
+  let decl p i =
+    wrap { Ast.decl_params = p;
            Ast.decl_item = i; }
   in
 
@@ -2362,6 +2417,18 @@ let rec extract_mod_items
               DW_TAG_formal_parameter -> Some (get_referenced_slot child)
             | _ -> None
       end
+  in
+
+  let get_type_param_decls die =
+    arr_map_partial
+      die.die_children
+      begin
+        fun child ->
+          match child.die_tag with
+              DW_TAG_rust_type_param_decl ->
+                Some (wrap (get_type_param_decl child))
+              | _ -> None
+        end
   in
 
   let extract_children mis die =
@@ -2390,7 +2457,7 @@ let rec extract_mod_items
           let ident = get_name die in
           let ty = get_referenced_ty die in
           let tyi = Ast.MOD_ITEM_public_type ty in
-            htab_put mis ident (decl tyi)
+            htab_put mis ident (decl (get_type_param_decls die) tyi)
 
       | DW_TAG_compile_unit ->
           extract_children mis die
@@ -2399,7 +2466,7 @@ let rec extract_mod_items
           let ident = get_name die in
           let sub_mis = get_mod_items die in
           let mi = Ast.MOD_ITEM_mod sub_mis in
-            htab_put mis ident (decl mi)
+            htab_put mis ident (decl (get_type_param_decls die) mi)
 
       | DW_TAG_subprogram ->
           (* FIXME: finish this. *)
@@ -2416,7 +2483,7 @@ let rec extract_mod_items
                        Ast.fn_body = (wrap [||]); }
           in
           let fn = Ast.MOD_ITEM_fn tfn in
-            htab_put mis ident (decl fn)
+            htab_put mis ident (decl (get_type_param_decls die) fn)
 
       | _ -> ()
 ;;
