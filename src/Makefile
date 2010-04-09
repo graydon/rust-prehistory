@@ -72,6 +72,7 @@ ifdef CFG_WINDOWSY
   CFG_EXE_SUFFIX := .exe
   CFG_BOOT := ./rustboot.exe
   CFG_COMPILER := ./rustc.exe
+  CFG_GCC_COMPILE_FLAGS += -march=i686
   CFG_GCC_LINK_FLAGS += -shared -fPIC
   CFG_RUN_TARG = $(1)
   # FIXME: support msvc at some point
