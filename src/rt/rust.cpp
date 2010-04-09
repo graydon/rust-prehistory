@@ -207,6 +207,45 @@ struct circ_buf : public rt_owned<circ_buf> {
     void shift(void *dst);
 };
 
+// Ticket lock-based spinlock implementation.
+
+class spinlock {
+    unsigned next_ticket;
+    unsigned now_serving;
+
+    void pause();
+public:
+    spinlock() {
+        next_ticket = now_serving = 0;
+    }
+
+    void lock();
+    void unlock();
+};
+
+void
+spinlock::pause()
+{
+    asm volatile("pause\n" : : : "memory");
+}
+
+void
+spinlock::lock()
+{
+    unsigned my_ticket = __sync_fetch_and_add(&next_ticket, 1);
+
+    while (now_serving != my_ticket)
+        pause();
+}
+
+void
+spinlock::unlock()
+{
+    // Only one thread at a time owns the ticket word, so we don't need a synchronized
+    // increment here.
+    ++next_ticket;
+}
+
 // Interrupt transparent queue, Schoen et. al, "On Interrupt-Transparent Synchronization
 // in an Embedded Object-Oriented Operating System", 2000. enqueue() is allowed to
 // interrupt enqueue() and dequeue(), however, dequeue() is not allowed to interrupt
