@@ -7,6 +7,7 @@ let finalize_module
     (llctx:Llvm.llcontext)
     (llmod:Llvm.llmodule)
     (abi:Llabi.abi)
+    runtime
     : unit =
   let i32 = Llvm.i32_type llctx in
   let crate_ptr = Llvm.declare_global abi.Llabi.crate_ty "rust_crate" llmod in
@@ -29,6 +30,11 @@ let finalize_module
   in
 
   let crate_val =
+    let crate_addr = Llvm.const_ptrtoint crate_ptr i32 in
+    let activate_glue_off =
+      let addr = Llvm.const_ptrtoint runtime#get_activate_glue i32 in
+      Llvm.const_sub addr crate_addr
+    in
     Llvm.const_struct llctx [|
       Llvm.const_int i32 0;             (* ptrdiff_t image_base_off *)
       crate_ptr;                        (* uintptr_t self_addr *)
@@ -36,7 +42,7 @@ let finalize_module
       Llvm.const_int i32 0;             (* size_t debug_abbrev_sz *)
       Llvm.const_int i32 0;             (* ptrdiff_t debug_info_off *)
       Llvm.const_int i32 0;             (* size_t debug_info_sz *)
-      Llvm.const_int i32 0;             (* size_t activate_glue_off *)
+      activate_glue_off;                (* size_t activate_glue_off *)
       Llvm.const_int i32 0;             (* size_t main_exit_proc_glue_off *)
       Llvm.const_int i32 0;             (* size_t unwind_glue_off *)
       Llvm.const_int i32 0;             (* size_t yield_glue_off *)

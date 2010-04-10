@@ -43,6 +43,9 @@ let trans_crate
 
   let (abi:Llabi.abi) = Llabi.declare_abi llctx llmod in
 
+  (* TODO: other runtimes besides x86 *)
+  let runtime = Llx86.define_runtime llctx llmod abi in
+
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
     let tycon =
       match mty with
@@ -367,7 +370,7 @@ let trans_crate
     let items = crate'.Ast.crate_items in
     Hashtbl.iter declare_mod_item items;
     Hashtbl.iter trans_mod_item items;
-    Llfinal.finalize_module llctx llmod abi;
+    Llfinal.finalize_module llctx llmod abi runtime;
     llmod
   with e -> Llvm.dispose_module llmod; raise e
 ;;
