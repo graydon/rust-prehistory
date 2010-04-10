@@ -4,11 +4,13 @@
 
 type abi = {
   crate_ty:   Llvm.lltype;
+  proc_ty:    Llvm.lltype;
   rust_start: Llvm.llvalue
 };;
 
 let declare_abi (llctx:Llvm.llcontext) (llmod:Llvm.llmodule) : abi =
   let i32 = Llvm.i32_type llctx in
+
   let crate_ty =
     (* TODO: other architectures besides x86 *)
     let crate_opaque_ty = Llvm.opaque_type llctx in
@@ -31,13 +33,30 @@ let declare_abi (llctx:Llvm.llcontext) (llmod:Llvm.llmodule) : abi =
     Llvm.refine_type crate_opaque_ty (Llvm.type_of_handle crate_tyhandle);
     Llvm.type_of_handle crate_tyhandle
   in
+  ignore (Llvm.define_type_name "rust_crate" crate_ty llmod);
+
+  let proc_ty =
+    (* TODO: other architectures besides x86 *)
+    Llvm.struct_type llctx [|
+      i32;                    (* size_t refcnt *)
+      Llvm.pointer_type i32;  (* stk_seg *stk *)
+      Llvm.pointer_type i32;  (* uintptr_t runtime_sp *)
+      Llvm.pointer_type i32;  (* uintptr_t rust_sp *)
+      Llvm.pointer_type i32;  (* rust_rt *rt *)
+      Llvm.pointer_type i32   (* rust_crate_cache *cache *)
+    |]
+  in
+  ignore (Llvm.define_type_name "rust_proc" proc_ty llmod);
+
   let rust_start_ty =
-    let main_ty = Llvm.function_type (Llvm.void_type llctx) [| |] in
+    let proc_ptr_ty = Llvm.pointer_type proc_ty in
+    let main_ty = Llvm.function_type (Llvm.void_type llctx) [| proc_ptr_ty |] in
     let args_ty = Array.map Llvm.pointer_type [| main_ty; crate_ty |] in
     Llvm.function_type i32 args_ty
   in
   {
     crate_ty = crate_ty;
+    proc_ty = proc_ty;
     rust_start = Llvm.declare_function "rust_start" rust_start_ty llmod
   }
 ;;

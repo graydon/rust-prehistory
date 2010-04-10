@@ -41,6 +41,8 @@ let trans_crate
   let filename = Session.filename_of sess.Session.sess_in in
   let llmod = Llvm.create_module llctx filename in
 
+  let (abi:Llabi.abi) = Llabi.declare_abi llctx llmod in
+
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
     let tycon =
       match mty with
@@ -65,9 +67,10 @@ let trans_crate
       | Ast.TY_str -> Llvm.pointer_type (Llvm.i8_type llctx)
       | Ast.TY_fn
             ({ Ast.sig_input_slots = ins; Ast.sig_output_slot = out }, _) ->
-          let out_llty = trans_slot None out in
-          let in_lltys = Array.map (trans_slot None) ins in
-          Llvm.function_type out_llty in_lltys
+          let llout = trans_slot None out in
+          let llprocty = Llvm.pointer_type abi.Llabi.proc_ty in
+          let llins = Array.map (trans_slot None) ins in
+          Llvm.function_type llout (Array.append [| llprocty |] llins)
       | Ast.TY_constrained (ty', _) -> trans_ty ty'
       | Ast.TY_tup _ | Ast.TY_vec _ | Ast.TY_rec _ | Ast.TY_tag _
             | Ast.TY_iso _ | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _
@@ -116,6 +119,7 @@ let trans_crate
       (fn_id:node_id)
       : unit =
     let llfn = Hashtbl.find llitems fn_id in
+    let llproc = Llvm.param llfn 0 in
 
     (* LLVM requires that functions be grouped into basic blocks terminated by
      * terminator instructions, while our AST is less strict. So we have to do
@@ -141,14 +145,16 @@ let trans_crate
     (* Allocate space for arguments (needed because arguments are lvalues in
      * Rust), and store them in the slot-to-llvalue mapping. *)
     let build_arg idx llargval =
-      let ({ id = id }, ident) = header_slots.(idx) in
-      Llvm.set_value_name ident llargval;
-      let llarg =
-        let llty = Llvm.type_of llargval in
-        Llvm.build_alloca llty (ident ^ "_ptr") llinitbuilder
-      in
-      ignore (Llvm.build_store llargval llarg llinitbuilder);
-      Hashtbl.add slot_to_llvalue id llarg
+      if idx != 0
+      then
+        let ({ id = id }, ident) = header_slots.(idx - 1) in
+        Llvm.set_value_name ident llargval;
+        let llarg =
+          let llty = Llvm.type_of llargval in
+          Llvm.build_alloca llty (ident ^ "_ptr") llinitbuilder
+        in
+        ignore (Llvm.build_store llargval llarg llinitbuilder);
+        Hashtbl.add slot_to_llvalue id llarg
     in
     Array.iteri build_arg (Llvm.params llfn);
 
@@ -286,10 +292,11 @@ let trans_crate
                   trans_tail ()
               | Ast.STMT_call (dest, fn, args) ->
                   let llargs = Array.map trans_atom args in
+                  let llallargs = Array.append [| llproc |] llargs in
                   let llfn = trans_lval fn in
                   let lldest = trans_lval dest in
                   let llid = anon_llid "rv" in
-                  let llrv = Llvm.build_call llfn llargs llid llbuilder in
+                  let llrv = Llvm.build_call llfn llallargs llid llbuilder in
                   Llvm.set_instruction_call_conv Llvm.CallConv.fast llrv;
                   ignore (Llvm.build_store llrv lldest llbuilder);
                   trans_tail ()
@@ -356,7 +363,6 @@ let trans_crate
   in
 
   try
-    let (abi:Llabi.abi) = Llabi.declare_abi llctx llmod in
     let crate' = crate.node in
     let items = crate'.Ast.crate_items in
     Hashtbl.iter declare_mod_item items;
