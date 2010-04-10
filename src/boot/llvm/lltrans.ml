@@ -367,7 +367,7 @@ let trans_crate
     let items = crate'.Ast.crate_items in
     Hashtbl.iter declare_mod_item items;
     Hashtbl.iter trans_mod_item items;
-    Llabi.postprocess_module llctx llmod abi;
+    Llfinal.finalize_module llctx llmod abi;
     llmod
   with e -> Llvm.dispose_module llmod; raise e
 ;;

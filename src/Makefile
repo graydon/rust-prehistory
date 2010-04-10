@@ -162,7 +162,7 @@ ifdef CFG_LLVM_CONFIG
   LLVM_NATIVE_LIBS := llvm.cmxa llvm_bitwiter.cmxa
   LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
   LLVM_INCS := -I boot/llvm
-  LLVM_MLS := $(addprefix boot/llvm/, llabi.ml lltrans.ml llemit.ml)
+  LLVM_MLS := $(addprefix boot/llvm/, llabi.ml llfinal.ml lltrans.ml llemit.ml)
   $(info cfg: found llvm-config at $(CFG_LLVM_CONFIG))
 else
   VARIANT=x86
