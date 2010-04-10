@@ -2663,9 +2663,10 @@ let trans_visitor
     in
     let all_callee_args_cell = callee_args_cell tail_area all_callee_args_rty in
 
-    let _ = iflog (fun _ -> log cx
-                     "copying fn args to %d-ty-param call with rty: %s\n"
-                     n_ty_params (Il.string_of_referent_ty all_callee_args_rty))
+    let _ = iflog (fun _ -> annotate
+                     (Printf.sprintf
+                        "copying fn args to %d-ty-param call with rty: %s\n"
+                        n_ty_params (Il.string_of_referent_ty all_callee_args_rty)))
     in
     let callee_arg_slots = ty_arg_slots callee_ty in
     let callee_output_cell =
@@ -2693,16 +2694,21 @@ let trans_visitor
       let get_tydesc ty_param =
         match ty_param with
             Ast.TY_param (idx, _, _) ->
-              (Il.Cell (alias (get_current_fn_ty_desc idx)))
-          | _ -> trans_tydesc ty_param
+              (alias (get_current_fn_ty_desc idx))
+          | _ ->
+              (crate_rel_to_ptr (trans_tydesc ty_param) Il.OpaqueTy)
       in
 
       Array.iteri
         begin
           fun i ty_param ->
+            iflog (fun _ ->
+                     annotate
+                       (Printf.sprintf "fn-call ty param %d of %d"
+                          i n_ty_params));
             trans_init_slot_from_cell CLONE_none
               (get_element_ptr callee_ty_params i) word_slot
-              (crate_rel_to_ptr (get_tydesc ty_param) Il.OpaqueTy) word_slot
+              (get_tydesc ty_param) word_slot
         end
         ty_params;
 
@@ -3483,7 +3489,10 @@ let trans_visitor
         (fun _ -> Hashtbl.length cx.ctxt_import_lib_num)
     in
     let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
-    let args_rty = direct_call_args_referent_type cx 0 fnid in
+    let n_ty_params = n_item_ty_params cx fnid in
+    let args_rty =
+      direct_call_args_referent_type cx n_ty_params fnid
+    in
     let caller_args_cell = caller_args_cell args_rty in
     let callee_args_cell = callee_args_cell false args_rty in
       begin
@@ -3550,6 +3559,9 @@ let trans_visitor
                 in
                 let _ = check_rty_sz (pointee_type out) in
                 let args =
+                  let ty_params_cell =
+                    get_element_ptr caller_args_cell Abi.calltup_elt_ty_params
+                  in
                   let args_cell =
                     get_element_ptr caller_args_cell Abi.calltup_elt_args
                   in
@@ -3558,16 +3570,23 @@ let trans_visitor
                         Il.Mem (_, Il.StructTy elts) -> Array.length elts
                       | _ -> bug () "non-StructTy in Trans.trans_imported_fn"
                   in
+                  let mk_ty_param i =
+                    Il.Cell (get_element_ptr ty_params_cell i)
+                  in
                   let mk_arg i =
                     let arg = get_element_ptr args_cell i in
                     let _ = check_rty_sz (Il.cell_referent_ty arg) in
                       Il.Cell arg
                   in
-                    Array.init n_args mk_arg
+                    Array.append
+                      (Array.init n_ty_params mk_ty_param)
+                      (Array.init n_args mk_arg)
                 in
                 let nabi = { nabi_convention = conv;
                              nabi_indirect = true }
                 in
+                  if conv <> CONV_rust
+                  then assert (n_ty_params = 0);
                   trans_upcall "upcall_import_c_sym" f
                     [| Il.Cell (curr_crate_ptr());
                        imm (Int64.of_int lib_num);

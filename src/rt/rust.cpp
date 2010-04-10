@@ -164,6 +164,14 @@ struct frame_glue_fns {
     uintptr_t reloc_glue_off;
 };
 
+struct type_desc {
+    size_t size;
+    size_t align;
+    uintptr_t copy_glue_off;
+    uintptr_t drop_glue_off;
+    uintptr_t free_glue_off;
+};
+
 template <typename T>
 class ptr_vec : public rt_owned<ptr_vec<T> > {
     static const size_t INIT_SIZE = 8;
@@ -303,6 +311,8 @@ struct rust_vec : public rc_base<rust_vec> {
     size_t alloc;
     size_t fill;
     uint8_t data[];
+    rust_vec(size_t alloc, size_t fill)
+        : alloc(alloc), fill(fill) {}
 };
 
 struct rust_str : public rc_base<rust_str> {
@@ -3364,6 +3374,21 @@ str_alloc(rust_proc *proc, size_t n_bytes)
     if (!st)
         proc->fail(2);
     return st;
+}
+
+extern "C" CDECL rust_vec*
+vec_alloc(rust_proc *proc, type_desc *t, size_t n_elts)
+{
+    rust_rt *rt = proc->rt;
+    rt->log(LOG_MEM, "vec_alloc %" PRIdPTR " elements of size %" PRIdPTR,
+            n_elts, t->size);
+    size_t n_bytes = n_elts * t->size;
+    size_t alloc = next_power_of_two(n_bytes + sizeof(rust_vec));
+    void *mem = rt->malloc(alloc);
+    rust_vec *vec = new (mem) rust_vec(alloc, 0);
+    if (!vec)
+        proc->fail(3);
+    return vec;
 }
 
 extern "C" CDECL char const *
