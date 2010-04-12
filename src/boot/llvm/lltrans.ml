@@ -44,7 +44,7 @@ let trans_crate
   let (abi:Llabi.abi) = Llabi.declare_abi llctx llmod in
 
   (* TODO: other runtimes besides x86 *)
-  let runtime = Llx86.define_runtime llctx llmod abi in
+  let runtime = Llx86.define_runtime llctx llmod abi sess in
 
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
     let tycon =

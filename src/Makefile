@@ -161,9 +161,10 @@ ifdef CFG_LLVM_CONFIG
   LLVM_LIBS := llvm.cma llvm_bitwriter.cma
   LLVM_NATIVE_LIBS := llvm.cmxa llvm_bitwiter.cmxa
   LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
-  LLVM_INCS := -I boot/llvm
+  LLVM_INCS := -I boot/llvm -I $(shell $(CFG_LLVM_CONFIG) --libdir)/ocaml
   LLVM_MLS := $(addprefix boot/llvm/, llabi.ml llx86.ml llfinal.ml lltrans.ml \
     llemit.ml)
+  CFG_LLC_COMPILE_FLAGS := -march=x86
   $(info cfg: found llvm-config at $(CFG_LLVM_CONFIG))
 else
   VARIANT=x86
@@ -189,7 +190,7 @@ OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael $(CFG_OCAMLOPT_PROFILE_FLAGS
 
 ifdef CFG_LLVM_CONFIG
   ML_LIBS += $(LLVM_LIBS) -custom -cclib -lstdc++ $(LLVM_CLIBS)
-  ML_NATIVE_LIBS += $(LLVM_NATIVE_LIBS) -custom -cclib -lstdc++ $(LLVM_CLIBS)
+  ML_NATIVE_LIBS += $(LLVM_NATIVE_LIBS) -cclib -lstdc++ $(LLVM_CLIBS)
 endif
 
 # List them in link order.
@@ -431,33 +432,35 @@ test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_BOOT) $(CFG_RUNTI
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
 
-test/run-pass/%.llvm$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+%.s: %.bc
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(<:.rc=.bc) -llvm $<
-	$(CFG_QUIET)llc -o $(<:.rc=.s) $(<:.rc=.bc)
-	$(CFG_QUIET)gcc -o $@ $(<:.rc=.s)
+	$(CFG_QUIET)llc $(CFG_LLC_COMPILE_FLAGS) -o $@ $<
+
+%.llvm$(CFG_EXE_SUFFIX): %.s $(CFG_RUNTIME)
+	@$(call CFG_ECHO, compile [llvm]: $<)
+	$(CFG_QUIET)gcc $(CFG_GCC_COMPILE_FLAGS) -o $@ $< -L. -lrustrt
+
+test/run-pass/%.bc: test/run-pass/%.rc $(CFG_BOOT) $(CFG_STDLIB)
+	@$(call CFG_ECHO, compile [llvm]: $<)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ -llvm $<
 
 test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [x86]: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
 
-test/run-pass/%.llvm$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+test/run-pass/%.bc: test/run-pass/%.rs $(CFG_BOOT) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(<:.rs=.bc) -llvm $<
-	$(CFG_QUIET)llc -o $(<:.rs=.s) $(<:.rs=.bc)
-	$(CFG_QUIET)gcc -o $@ $(<:.rs=.s)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ -llvm $<
 
 test/run-fail/%.x86$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [x86]: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
 
-test/run-fail/%.llvm$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+test/run-fail/%.bc: test/run-fail/%.rs $(CFG_BOOT) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(<:.rs=.bc) -llvm $<
-	$(CFG_QUIET)llc -o $(<:.rs=.s) $(<:.rs=.bc)
-	$(CFG_QUIET)gcc -o $@ $(<:.rs=.s)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ -llvm $<
 
 
 ######################################################################
