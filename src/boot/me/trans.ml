@@ -1254,6 +1254,13 @@ let trans_visitor
     let fix = get_typed_mem_glue g ty inner in
       fix
 
+  (*
+   * Glue functions use the same calling convention as ordinary functions.
+   *
+   * Each glue function expects its own particular arguments, which are
+   * usually aliases-- ie, caller doesn't transfer ownership to the glue.
+   *)
+
   and trans_call_clone_glue
       (dst:Il.cell)
       (fix:fixup)

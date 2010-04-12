@@ -292,6 +292,7 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/linear-for-loop.rs \
                     test/run-pass/spawn-fn.rs \
                     test/run-pass/rec-auto.rs \
+                    test/run-pass/foreach-simple.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
                     test/compile-fail/infinite-vec-type-recursion.rs
@@ -299,7 +300,7 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
 TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       basic.rs bind-thunk.rs bind-trivial.rs char.rs comm.rs \
                       complex.rs dead-code-one-arm-if.rs deep.rs div-mod.rs \
-                      drop-on-ret.rs exterior.rs fact.rs \
+                      drop-on-ret.rs exterior.rs fact.rs foreach-simple.rs \
                       simple-obj.rs fun-call-variants.rs \
                       fun-indirect-call.rs generic-fn.rs hello.rs \
                       inner-module.rs int.rs large-records.rs lazychan.rs \

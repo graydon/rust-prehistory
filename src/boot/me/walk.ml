@@ -393,6 +393,16 @@ and walk_stmt
       walk_lval v lv;
       walk_block v s.Ast.for_body
   in
+  let walk_stmt_foreach
+      (s:Ast.stmt_foreach)
+      : unit =
+    let (si,_) = s.Ast.foreach_slot in
+    let (f,az) = s.Ast.foreach_call in
+      walk_slot_identified v si;
+      walk_lval v f;
+      Array.iter (walk_lval v) az;
+      walk_block v s.Ast.foreach_body
+  in
   let walk_stmt_while
       (s:Ast.stmt_while)
       : unit =
@@ -431,6 +441,9 @@ and walk_stmt
 
       | Ast.STMT_for f ->
           walk_stmt_for f
+
+      | Ast.STMT_foreach f ->
+          walk_stmt_foreach f
 
       | Ast.STMT_while w ->
           walk_stmt_while w
@@ -529,7 +542,6 @@ and walk_stmt
       (* FIXME (bug 541526): finish this as needed. *)
       | Ast.STMT_slice _
       | Ast.STMT_note _
-      | Ast.STMT_foreach _
       | Ast.STMT_alt_type _
       | Ast.STMT_alt_port _ ->
           bug () "unimplemented statement type in Walk.walk_stmt"

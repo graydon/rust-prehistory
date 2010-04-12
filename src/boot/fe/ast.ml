@@ -284,6 +284,7 @@ and stmt_while =
 and stmt_foreach =
     {
       foreach_proto: proto;
+      foreach_slot: (slot identified * ident);
       foreach_call: (lval * lval array);
       foreach_body: block;
     }
@@ -1054,8 +1055,49 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
               fmt_cbb ff
             end
 
-      | STMT_foreach _ -> fmt ff "?stmt_foreach?"
-      | STMT_put _ -> fmt ff "?stmt_put?"
+      | STMT_foreach sforeach ->
+          let proto = sforeach.foreach_proto in
+          let (slot, ident) = sforeach.foreach_slot in
+          let (f, az) = sforeach.foreach_call in
+            begin
+              fmt_obox ff;
+              fmt ff "for";
+              fmt_proto ff proto;
+              fmt ff " (";
+              fmt_slot ff slot.node;
+              fmt ff " ";
+              fmt_ident ff ident;
+              fmt ff " = ";
+              fmt_lval ff f;
+              fmt ff "(";
+              for i = 0 to (Array.length az) - 1
+              do
+                if i != 0
+                then fmt ff ", ";
+                fmt_lval ff az.(i);
+              done;
+              fmt ff ")) ";
+              fmt_obr ff;
+              fmt_stmts ff sforeach.foreach_body.node;
+              fmt_cbb ff
+            end
+
+      | STMT_put (proto, atom) ->
+          fmt ff "put";
+          begin
+            begin
+              match proto with
+                  Some p -> fmt_proto ff p
+                | None -> ()
+            end;
+            begin
+              match atom with
+                  Some a -> (fmt ff " "; fmt_atom ff a)
+                | None -> ()
+            end;
+            fmt ff ";"
+          end
+
       | STMT_alt_tag _ -> fmt ff "?stmt_alt_tag?"
       | STMT_alt_type _ -> fmt ff "?stmt_alt_type?"
       | STMT_alt_port _ -> fmt ff "?stmt_alt_port?"

@@ -281,6 +281,25 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                       Ast.for_seq = seq;
                       Ast.for_body = body_block; }) |]
 
+      | FOR (Some proto) ->
+          bump ps;
+          let inner ps : ((Ast.slot identified * Ast.ident) * Ast.stmt array * (Ast.lval * Ast.lval array)) =
+            let slot = (parse_identified_slot_and_ident false ps) in
+            let _    = (expect ps EQ) in
+            let (stmts1, itor) = (rstr true parse_lval) ps in
+            let (stmts2, args) = arj1st (ctxt "exprs: iterator args" (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_lval) ps) in
+              (slot, Array.append stmts1 stmts2, (itor, args))
+          in
+          let (slot, stmts, call) = ctxt "stmts: foreach head" (bracketed LPAREN RPAREN inner) ps in
+          let body_block = ctxt "stmts: foreach body" parse_block ps in
+          let bpos = lexpos ps in
+            Array.append stmts [| span ps apos bpos
+                                    (Ast.STMT_foreach
+                                       { Ast.foreach_proto = proto;
+                                         Ast.foreach_slot = slot;
+                                         Ast.foreach_call = call;
+                                         Ast.foreach_body = body_block; }) |]
+
       | WHILE ->
           bump ps;
           let (stmts, test) = ctxt "stmts: while cond" (bracketed LPAREN RPAREN parse_expr) ps in
