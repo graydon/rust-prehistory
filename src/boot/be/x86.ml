@@ -184,6 +184,7 @@ let reg_str r =
 
 (* This is a basic ABI. You might need to customize it by platform. *)
 let (n_hardregs:int) = 6;;
+let (n_callee_saves:int) = 4;;
 
 
 let is_ty32 (ty:Il.scalar_ty) : bool =
@@ -594,13 +595,13 @@ let emit_c_call
           mov ret (c (r tmp1));
 
       | _ when in_prologue ->
-          (* 
+          (*
            * We have to do something a little surprising here:
            * we're doing a 'grow' call so ebp is going to point
            * into a dead stack frame on call-return. So we
            * temporarily store proc-ptr into ebp and then reload
            * esp *and* ebp via ebp->rust_sp on the other side of
-           * the call. 
+           * the call.
            *)
           mov (rc ebp) (c proc_ptr);
           emit (Il.call ret fptr);
@@ -662,7 +663,7 @@ let emit_native_call_in_thunk
 
     begin
       match fn with
-          (* 
+          (*
            * NB: old path, remove when/if you're sure you don't
            * want native-linker-symbol-driven imports.
            *)
@@ -673,7 +674,7 @@ let emit_native_call_in_thunk
               emit_c_call e (rc eax) (h edx) (h ecx) nabi false code args;
 
         | _ ->
-            (* 
+            (*
              * NB: new path, ignores nabi_indirect, assumes
              * indirect via pointer from upcall_import_c_sym
              * or crate cache.
@@ -896,7 +897,7 @@ let fn_prologue
    *  | + spill       |
    *  | caller arg K  |
    *  | ...           |
-   *  | caller arg 0  | 
+   *  | caller arg 0  |
    *  | retpc         | <-- sp we received, top of callee frame
    *  | callee save 1 |
    *  | ...           |
@@ -912,23 +913,23 @@ let fn_prologue
    *  | ...           |
    *  | next save N   | <-- bottom of region we must reserve
    *  | ...           |
-   * 
+   *
    * A "frame base" is the retpc and set of callee-saves.
-   * 
+   *
    * We need to reserve room for our frame *and* the next frame-base,
    * because we're going to be blindly entering the next frame-base
    * (pushing eip and callee-saves) before we perform the next check.
    *)
 
-  (* 
+  (*
    * We double the reserved callsz because we need a 'temporary tail-call region'
-   * above the actual call region, in case there's a drop call at the end of 
+   * above the actual call region, in case there's a drop call at the end of
    * assembling the tail-call args and before copying them to callee position.
    *)
 
   let callsz = add_sz callsz callsz in
 
-  (* 
+  (*
    * Add in *another* word to handle an extra-awkward spill of the
    * callee address that might occur during an indirect tail call.
    *)
@@ -1011,7 +1012,7 @@ let fn_prologue
           sub (rc esp) dynamic_frame_sz;
 
           (* Zero the frame.
-           * 
+           *
            * FIXME: this is awful, will go away when we have proper CFI.
            *)
           mov (rc edi) (ro esp);
@@ -1090,7 +1091,7 @@ let fn_tail_call
      * this is reserved for the purpose of making tail-calls *only*, so we do
      * not collide with glue calls we had to make while dropping the frame,
      * after assembling our arg region.
-     * 
+     *
      * Thus, esp points to the "normal" arg region, and we need to move it
      * to point to the tail-call arg region. To make matters simple, both
      * regions are the same size, one atop the other.
@@ -1099,15 +1100,15 @@ let fn_tail_call
     annotate e "tail call: move esp to temporary tail call arg-prep area";
     binary Il.ADD (rc esp) caller_callsz;
 
-    (* 
+    (*
      * If we're given a non-ImmPtr callee, we may need to move it to a known
      * cell to avoid clobbering its register while we do the argument shuffle
      * below.
-     * 
+     *
      * Sadly, we are too register-starved to just flush our callee to a reg;
      * so we carve out an extra word of the temporary call-region and use
-     * it. 
-     * 
+     * it.
+     *
      * This is ridiculous, but works.
      *)
     begin
@@ -1128,11 +1129,11 @@ let fn_tail_call
 
     (*
      * stack grows downwards; copy from high to low
-     * 
+     *
      *   bpw = word_sz
      *   w = floor(callee_argsz / word_sz)
      *   b = callee_argsz % word_sz
-     * 
+     *
      * byte copies:
      *   +------------------------+
      *   |                        |
@@ -1162,9 +1163,9 @@ let fn_tail_call
     (* NOTE: must copy top-to-bottom in case the regions overlap *)
     inline_memcpy e callee_argsz (h edx) (h esp) (h eax) false;
 
-    (* 
+    (*
      * We're done with eax now; so in the case where we had to spill
-     * our callee codeptr, we can reload it into eax here and rewrite 
+     * our callee codeptr, we can reload it into eax here and rewrite
      * our callee into *eax.
      *)
     let callee_code =
@@ -1218,20 +1219,51 @@ let activate_glue (e:Il.emitter) : unit =
     mov (edx_n Abi.proc_field_runtime_sp) (ro esp);  (* proc->runtime_sp <- esp *)
     mov (rc esp) (c (edx_n Abi.proc_field_rust_sp)); (* esp <- proc->rust_sp    *)
 
-  (*
-   * The activate glue is run in two case: 1) first time a proc starts 2) resuming
-   * a proc after it was descheduled. In case of 1), the value of proc->rust_sp
-   * is irrelevant. Popping 5 words off it here (4 callee saves, 1 ret value) has
-   * no consequence. For case 2), we are in a call into the runtime (upcall). As
-   * part of that sequence the code actually expects us to return from the
-   * runtime stack and rust_sp is expected to point to the stack level before
-   * the upcall, which does not include the callee saves and the return address.
-   * The call code sets esp from proc->rust_sp immediately after we return. So
-   * we make sure it has the right value and preemptively account for the values
-   * we have here on the stack.
-   *)
+    (*
+     * There are two paths we can arrive at this code from:
+     *
+     *
+     *   1. We are activating a proc for the first time. When we switch into the
+     *      proc stack and 'ret' to its first instruction, we'll start doing
+     *      whatever the first instruction says. Probably saving registers and
+     *      starting to establish a frame. Harmless stuff, doesn't look at
+     *      proc->rust_sp again except when it clobbers it during a later upcall.
+     *
+     *
+     *   2. We are resuming a proc that was descheduled by the yield glue below.
+     *      When we switch into the proc stack and 'ret', we'll be ret'ing to a
+     *      very particular instruction:
+     *
+     *              "esp <- proc->rust_sp"
+     *
+     *      this is the first instruction we 'ret' to after this glue, because
+     *      it is the first instruction following *any* upcall, and the proc we
+     *      are activating was descheduled mid-upcall.
+     *
+     *      Unfortunately for us, we have already restored esp from proc->rust_sp
+     *      and are about to eat the 5 words off the top of it.
+     *
+     *
+     *      | ...    | <-- where esp will be once we restore + ret, below,
+     *      | retpc  |     and where we'd *like* proc->rust_sp to wind up.
+     *      | ebp    |
+     *      | edi    |
+     *      | esi    |
+     *      | ebx    | <-- current proc->rust_sp == current esp
+     *
+     *
+     *      This is a problem. If we return to "esp <- proc->rust_sp" it will
+     *      push esp back down by 5 words. This manifests as a rust stack that
+     *      grows by 5 words on each yield/reactivate. Not good.
+     *
+     *      So what we do here is just adjust proc->rust_sp up 5 words as well,
+     *      to mirror the movement in esp we're about to perform. That way the
+     *      "esp <- proc->rust_sp" we 'ret' to below will be a no-op. Esp won't
+     *      move, and the proc's stack won't grow.
+     *)
 
-    binary Il.ADD (edx_n Abi.proc_field_rust_sp) 0x16L;
+    binary Il.ADD (edx_n Abi.proc_field_rust_sp)
+      (Int64.mul (Int64.of_int (n_callee_saves + 1)) word_sz);
 
     (**** IN PROC STACK ****)
     restore_callee_saves e;
@@ -1242,18 +1274,30 @@ let activate_glue (e:Il.emitter) : unit =
 
 let yield_glue (e:Il.emitter) : unit =
 
-  (*
-   * More glue code. Here we've been called from a proc and
-   * we want to return to the saved C stack/pc. So:
+  (* More glue code, this time the 'bottom half' of yielding.
    *
-   *   - save regs on proc stack
-   *   - save sp to proc.sp
-   *   - load saved C sp (switch stack)
-   *   - undo alignment (see activate_glue)
-   *   - restore saved C regs
-   *   - return to saved C pc
+   * We arrived here because an upcall decided to deschedule the
+   * running proc. So the upcall's return address got patched to the
+   * first instruction of this glue code.
    *
-   *   *esp          = [retpc  ]
+   * When the upcall does 'ret' it will come here, and its esp will be
+   * pointing to the last argument pushed on the C stack before making
+   * the upcall: the 0th argument to the upcall, which is always the
+   * proc ptr performing the upcall. That's where we take over.
+   *
+   * Our goal is to complete the descheduling
+   *
+   *   - Switch over to the proc stack temporarily.
+   *
+   *   - Save the proc's callee-saves onto the proc stack.
+   *     (the proc is now 'descheduled', safe to set aside)
+   *
+   *   - Switch *back* to the C stack.
+   *
+   *   - Restore the C-stack callee-saves.
+   *
+   *   - Return to the caller on the C stack that activated the proc.
+   *
    *)
   let esp_n = word_n (Il.Hreg esp) in
   let edx_n = word_n (Il.Hreg edx) in
@@ -1363,7 +1407,7 @@ let rm_r (c:Il.cell) (r:int) : Asm.frag =
   let reg_ebp = 6 in
   let reg_esp = 7 in
 
-  (* 
+  (*
    * We do a little contortion here to accommodate the special case of
    * being asked to form esp-relative addresses; these require SIB
    * bytes on x86. Of course!
@@ -1499,7 +1543,7 @@ let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
     | (Il.Cell c, Il.Imm (i, TY_u8)) when is_rm8 c ->
         insn_rm_r_imm 0x80 c slash7 TY_u8 i
     | (Il.Cell c, Il.Imm (i, _)) when is_rm32 c ->
-        (* 
+        (*
          * NB: We can't switch on signed-ness here, as 'cmp' is
          * defined to sign-extend its operand; i.e. we have to treat
          * it as though you're emitting a signed byte (in the sense of
@@ -1561,8 +1605,8 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
     (* MOVZX: m32 <- zx(r8) *)
     | (false, _, (Il.Cell (Il.Reg ((Il.Hreg r), src_ty) as src_cell)))
         when (is_m32 dst) && is_ty8 src_ty ->
-        (* Fake with 2 insns: 
-         * 
+        (* Fake with 2 insns:
+         *
          * movzx r32 <- r8;   (in-place zero-extension)
          * mov m32 <- r32;    (NB: must happen in AL/CL/DL/BL)
          *)
@@ -1580,8 +1624,8 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
     (* MOVSX: m32 <- sx(r8) *)
     | (true, _, (Il.Cell (Il.Reg ((Il.Hreg r), src_ty) as src_cell)))
         when (is_m32 dst) && is_ty8 src_ty ->
-        (* Fake with 2 insns: 
-         * 
+        (* Fake with 2 insns:
+         *
          * movsx r32 <- r8;   (in-place sign-extension)
          * mov m32 <- r32;    (NB: must happen in AL/CL/DL/BL)
          *)
