@@ -42,7 +42,7 @@ class runtime
               begin
                 fun (sym,asm) ->
                   Printf.sprintf
-                    "\t.globl %s%s\n\t.align %d\n%s%s:\n\t%s"
+                    "\t.globl %s%s\n\t.balign %d\n%s%s:\n\t%s"
                     prefix sym align prefix sym asm
               end
               glue
