@@ -2,11 +2,11 @@
 
 fn a(chan[int] c) {
   if (true) {
-    log "proc a";
-    log "proc a";
-    log "proc a";
-    log "proc a";
-    log "proc a";
+    log "task a";
+    log "task a";
+    log "task a";
+    log "task a";
+    log "task a";
   }
   c <| 10;
 }
@@ -39,12 +39,12 @@ fn main() {
 
 fn b(chan[int] c) {
   if (true) {
-    log "proc b";
-    log "proc b";
-    log "proc b";
-    log "proc b";
-    log "proc b";
-    log "proc b";
+    log "task b";
+    log "task b";
+    log "task b";
+    log "task b";
+    log "task b";
+    log "task b";
   }
   c <| 10;
 }
