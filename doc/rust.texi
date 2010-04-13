@@ -335,12 +335,11 @@ primarily of immutable types, but also permits limited, local
 @sp 1
 @item Structural algebraic data types
 
-The Rust type system is structural rather than nominal (with the
-exception of opaque module types), and contains the standard
-assortment of useful ``algebraic'' type constructors from functional
-languages, such as function types, tuples, record types, vectors, and
-tagged disjoint unions. Structural types may be @emph{pattern-matched}
-in an @code{alt} statement.
+The Rust type system is structural rather than nominal, and contains
+the standard assortment of useful ``algebraic'' type constructors from
+functional languages, such as function types, tuples, record types,
+vectors, and tagged disjoint unions. Structural types may be
+@emph{pattern-matched} in an @code{alt} statement.
 
 @sp 1
 @item Generic code
@@ -369,13 +368,15 @@ declared @code{auto} and Rust will infer the type from its use in the
 function.
 
 @sp 1
-@item Existential module system
+@item Structural object system
 
-Rust's module system is based on existential types with local
-opening. It permits higher-order modules, module composition,
-projection and indirection. Modules are both static binding constructs
-and also first class values, but are (mostly) orthogonal to
-compilation units.
+Rust has a lightweight object system based on structural object types:
+there is no ``class hierarchy'' nor any concept of inheritence. Method
+overriding, object extension and restriction are all performed
+explicitly on object values, which are little more than
+order-insensitive records of methods sharing a common state
+value. Objects can be mutable or immutable, and immutable objects can
+have destructors.
 
 @sp 1
 @item Dynamic type
@@ -436,11 +437,11 @@ related tasks.
 @sp 1
 @item Deterministic destruction
 
-Immutable modules can have destructors functions, which are executed
+Immutable objects can have destructor functions, which are executed
 deterministically in bottom-up ownership order, as control frames are
-exited and/or modules are otherwise freed from data structures holding
+exited and/or objects are otherwise freed from data structures holding
 them. The same destructors are run in the same order whether the
-module is deleted by unwinding during failure or normal execution.
+object is deleted by unwinding during failure or normal execution.
 
 Similarly, the rules for freeing immutable memory are deterministic
 and predictable: on scope-exit or structure-release, interior slots
@@ -677,6 +678,7 @@ The keywords are:
 @tab @code{tag}
 @tab @code{vec}
 @tab @code{str}
+@tab @code{obj}
 @item @code{task}
 @tab @code{port}
 @tab @code{chan}
@@ -1488,9 +1490,10 @@ context). There are no general parametric types.
 
 @menu
 * Ref.Item.Mod::                Items defining modules.
-* Ref.Item.Type::               Items defining the types of values and slots.
 * Ref.Item.Fn::                 Items defining functions.
 * Ref.Item.Pred::               Items defining typestate predicates.
+* Ref.Item.Obj::                Items defining objects.
+* Ref.Item.Type::               Items defining the types of values and slots.
 @end menu
 
 @page
@@ -1498,88 +1501,30 @@ context). There are no general parametric types.
 @subsection Ref.Item.Mod
 @c * Ref.Item.Mod::           Items defining sub-modules.
 
-A @dfn{module item} contains declarations of @emph{items}. Items may
-include functions, modules, types and predicate declarations. These
-declarations have both static and dynamic interpretation. The purpose
-of a module is to organise @emph{names} and control
-@emph{visibility}. Modules are declared with the keyword @code{mod}.
+A @dfn{module item} contains declarations of other @emph{items}. The items
+within a module may be functions, predicates, modules, objects or
+types. These declarations have both static and dynamic
+interpretation. The purpose of a module is to organise @emph{names}
+and control @emph{visibility}. Modules are declared with the keyword
+@code{mod}.
 
 An example of a module:
 @example
-mod map[K,V] @{
-    type t = vec[(K,V)];
-    fn new() -> t @{
-        ret vec();
+mod math @{
+    type complex = (f64,f64);
+    fn sin(f64) -> f64 @{
+        @dots{}
     @}
-
-    fn add(^t map, ~K key, ~V val) -> () @{
+    fn cos(f64) -> f64 @{
         @dots{}
     @}
 
-    fn? get(~t map, ~K key) -> ~V @{
+    fn tan(f64) -> f64 @{
         @dots{}
     @}
+    @dots{}
 @}
 @end example
-
-A module may also be stored as a first class @emph{value}. Such a
-value has a @emph{module type}, which complicates the type system
-since modules may themselves declare types. @xref{Ref.Type.Mod}. As a result
-of the type rules governing modules, a module @emph{value}, if passed
-as a first-class entity in a slot, must be @emph{opened} as a declared
-@emph{module item} before it can be used in a scope.
-
-Example of opening a module:
-@example
-// Declare the type of map-modules
-type map_ty[K,V] = mod @{
-                       type t;
-                       fn new() -> t;
-                       fn add(^t map, ~K k, ~V v) -> ();
-                       fn? get(~t map, ~K k) -> ~V;
-                   @};
-
-// Dynamically acquire a particular map-module implementation
-let map_ty[int,str] map_v = get_map_impl[int,str]();
-
-// Open the map-implementation module value as a module item.
-mod map = map_v;
-
-// Use the module item.
-let map.t m = map.new();
-map.add(m, 10, "hello");
-@end example
-
-
-@page
-@node       Ref.Item.Type
-@subsection Ref.Item.Type
-@c * Ref.Item.Type::          Items defining the types of values and slots.
-
-A @dfn{type} defines an @emph{interpretation} of a value in
-memory. @xref{Ref.Type}. Types are declared with the keyword
-@code{type}. A type's interpretation is used for the values held in
-any slot with that type. @xref{Ref.Mem.Slot}. The interpretation of a
-value includes:
-
-@itemize
-@item Whether the value is composed of sub-values or is indivisible.
-@item Whether the value represents textual or numerical information.
-@item Whether the value represents integral or floating-point information.
-@item The sequence of memory operations required to access the value and its components.
-@item Whether the value is mutable or immutable.
-@end itemize
-
-For example, the type @code{rec(u8 x, u8 y)} defines the
-interpretation of values that are composite records, each containing
-two unsigned two's complement 8-bit integers accessed through the
-components @code{x} and @code{y}, and laid out in memory with the
-@code{x} component preceding the @code{y} component.
-
-Some types are @emph{recursive}. A recursive type is one that includes
-its own definition as a component, by named reference. Recursive types
-are restricted to occur only within a single crate, and only through a
-restricted form of @code{tag} type. @xref{Ref.Type.Tag}.
 
 @page
 @node       Ref.Item.Fn
@@ -1710,6 +1655,71 @@ pred divides(int d, int i) @{
 @}
 @end example
 
+
+@page
+@node       Ref.Item.Obj
+@subsection Ref.Item.Obj
+@c * Ref.Item.Obj::          Items defining objects.
+
+An @dfn{object item} defines the @emph{state} and @emph{methods} of a
+set of @emph{object values}. Object values have object types.
+@xref{Ref.Type.Obj}.
+
+An @emph{object item} declaration -- in addition to providing a scope
+for state and method declarations -- implicitly declares a static
+function called the @emph{object constructor}, as well as a named
+@emph{object type}. The name given to the object item is resolved to a
+type when used in type context, or a constructor function when used in
+value context (such as a call).
+
+Example of an object item:
+@example
+obj counter(int state) @{
+    fn incr() @{
+       state += 1;
+    @}
+    fn get() -> int @{
+       ret state;
+    @}
+@}
+
+let counter c = counter(1);
+
+c.incr();
+c.incr();
+check (c.get() == 3);
+@end example
+
+@page
+@node       Ref.Item.Type
+@subsection Ref.Item.Type
+@c * Ref.Item.Type::          Items defining the types of values and slots.
+
+A @dfn{type} defines an @emph{interpretation} of a value in
+memory. @xref{Ref.Type}. Types are declared with the keyword
+@code{type}. A type's interpretation is used for the values held in
+any slot with that type. @xref{Ref.Mem.Slot}. The interpretation of a
+value includes:
+
+@itemize
+@item Whether the value is composed of sub-values or is indivisible.
+@item Whether the value represents textual or numerical information.
+@item Whether the value represents integral or floating-point information.
+@item The sequence of memory operations required to access the value and its components.
+@item Whether the value is mutable or immutable.
+@end itemize
+
+For example, the type @code{rec(u8 x, u8 y)} defines the
+interpretation of values that are composite records, each containing
+two unsigned two's complement 8-bit integers accessed through the
+components @code{x} and @code{y}, and laid out in memory with the
+@code{x} component preceding the @code{y} component.
+
+Some types are @emph{recursive}. A recursive type is one that includes
+its own definition as a component, by named reference. Recursive types
+are restricted to occur only within a single crate, and only through a
+restricted form of @code{tag} type. @xref{Ref.Type.Tag}.
+
 @page
 @node    Ref.Type
 @section Ref.Type
@@ -1744,7 +1754,7 @@ identifiers in any context.
 * Ref.Type.Port::               Unique inter-task message-receipt endpoints.
 * Ref.Type.Chan::               Copyable inter-task message-sending capabilities.
 * Ref.Type.Task::               General coroutine-instance types.
-* Ref.Type.Mod::                Collections of items.
+* Ref.Type.Obj::                Abstract types.
 * Ref.Type.Constr::             Constrained types.
 * Ref.Type.Type::               Types describing types.
 @end menu
@@ -2064,11 +2074,56 @@ slots holding those references), the released task immediately fails.
 
 
 @page
-@node       Ref.Type.Mod
-@subsection Ref.Type.Mod
-@c * Ref.Type.Mod::                Units of information hiding.
+@node       Ref.Type.Obj
+@subsection Ref.Type.Obj
+@c * Ref.Type.Obj::                Object types.
 
-@emph{TODO: first-class existential module types}.
+A @dfn{object type} describes values of abstract type, that carry some
+hidden @emph{state} and are manipulated through a set of un-ordered
+@emph{methods}. Every object item (@pxref{Ref.Item.Obj}) implicitly declares an object type
+carrying method types for all the methods of the object item.
+
+Object types can also be declared in isolation, independent of any
+object item declaration. Such a ``plain'' object type can be used to
+describe an interface that a variety of particular objects may conform
+to, by supporting a superset of the methods.
+
+An example of an object type with two separate object items supporting
+it, and a client function using both items via the object type:
+
+@example
+
+type taker = obj @{ fn take(int); @};
+
+obj adder(int x) @{
+    fn take(int y) @{
+        x += y;
+    @}
+@}
+
+obj sender(chan[int] c) @{
+    fn take(int z) @{
+        c <| z;
+    @}
+@}
+
+fn give_ints(taker t) @{
+    t.take(1);
+    t.take(2);
+    t.take(3);
+@}
+
+let port[int] p = port();
+
+let taker t1 = adder(0);
+let taker t2 = sender(chan(p));
+
+give_ints(t1);
+give_ints(t2);
+
+@end example
+
+
 
 @page
 @node       Ref.Type.Constr
