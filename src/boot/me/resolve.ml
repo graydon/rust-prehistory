@@ -54,6 +54,18 @@ let stmt_collecting_visitor
     inner.Walk.visit_block_post b;
     ignore (Stack.pop block_ids)
   in
+
+  let visit_for_block
+      ((si:Ast.slot identified),(ident:Ast.ident))
+      (block_id:node_id)
+      : unit =
+    let slots = Hashtbl.find cx.ctxt_block_slots block_id in
+    let key = Ast.KEY_ident ident in
+      log cx "found decl of '%s' in for-loop block header" ident;
+      htab_put slots key si.id;
+      htab_put cx.ctxt_slot_keys si.id key
+  in
+
   let visit_stmt_pre stmt =
     begin
       htab_put cx.ctxt_all_stmts stmt.id stmt;
@@ -95,16 +107,9 @@ let stmt_collecting_visitor
                       htab_put cx.ctxt_slot_keys sid.id key
             end
         | Ast.STMT_for f ->
-            begin
-              let slots = Hashtbl.find cx.ctxt_block_slots f.Ast.for_body.id in
-              let (si,ident) = f.Ast.for_slot in
-              let key = Ast.KEY_ident ident in
-                begin
-                  log cx "found decl of '%s' in linear-for block header" ident;
-                  htab_put slots key si.id;
-                  htab_put cx.ctxt_slot_keys si.id key
-                end
-            end
+            visit_for_block f.Ast.for_slot f.Ast.for_body.id
+        | Ast.STMT_foreach f ->
+            visit_for_block f.Ast.foreach_slot f.Ast.foreach_body.id
         | Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
             let resolve_arm { node = (_, bindings, block); id = _ } =
               let slots = Hashtbl.find cx.ctxt_block_slots block.id in
