@@ -65,7 +65,7 @@
                 ("port", PORT);
                 ("chan", CHAN);
 
-                ("proc", PROC);
+                ("task", TASK);
 
                 ("true", LIT_BOOL true);
                 ("false", LIT_BOOL false);
