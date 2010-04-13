@@ -286,7 +286,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         match ty with
             Ast.TY_mach _ | Ast.TY_int | Ast.TY_char | Ast.TY_str -> true
           | Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_chan _
-          | Ast.TY_port _ | Ast.TY_proc | Ast.TY_tup _ | Ast.TY_vec _
+          | Ast.TY_port _ | Ast.TY_task | Ast.TY_tup _ | Ast.TY_vec _
           | Ast.TY_rec _ | Ast.TY_tag _ | Ast.TY_iso _ | Ast.TY_idx _ ->
               comparable
           | Ast.TY_fn _ | Ast.TY_pred _ | Ast.TY_obj _ | Ast.TY_opaque _
@@ -911,7 +911,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       match stmt.node with
           Ast.STMT_spawn (out, _, callee, args) ->
             let out_tv = ref (TYSPEC_resolved ([||], Ast.TY_nil)) in
-              unify_lval out (ref (TYSPEC_resolved ([||], Ast.TY_proc)));
+              unify_lval out (ref (TYSPEC_resolved ([||], Ast.TY_task)));
               check_callable out_tv callee args
 
         | Ast.STMT_init_rec (lval, fields, Some base) ->

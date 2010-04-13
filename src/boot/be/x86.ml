@@ -481,7 +481,7 @@ let restore_frame_base (e:Il.emitter) (base:Il.reg) (retpc:Il.reg) : unit =
  *
  *   *ebp+20+(4*N) = [argN   ]
  *   ...
- *   *ebp+24       = [arg1   ] = proc ptr
+ *   *ebp+24       = [arg1   ] = task ptr
  *   *ebp+20       = [arg0   ] = out ptr
  *   *ebp+16       = [retpc  ]
  *   *ebp+12       = [old_ebp]
@@ -502,11 +502,11 @@ let frame_base_sz = Int64.mul (Int64.of_int frame_base_words) word_sz;;
 let frame_info_words = 2 (* crate ptr, crate-rel frame info disp *) ;;
 let frame_info_sz = Int64.mul (Int64.of_int frame_info_words) word_sz;;
 
-let implicit_arg_words = 2 (* proc ptr,out ptr *);;
+let implicit_arg_words = 2 (* task ptr,out ptr *);;
 let implicit_args_sz =  Int64.mul (Int64.of_int implicit_arg_words) word_sz;;
 
 let out_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words);;
-let proc_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words+1);;
+let task_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words+1);;
 let ty_param_n i = wordptr_n (Il.Hreg ebp) (frame_base_words + implicit_arg_words + i);;
 
 let spill_slot (i:Il.spill) : Il.mem =
@@ -552,19 +552,19 @@ let emit_c_call
   let mov dst src = emit (Il.umov dst src) in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
 
-  let args =                                                      (* rust calls get proc as arg0  *)
+  let args =                                                      (* rust calls get task as arg0  *)
     if nabi.nabi_convention = CONV_rust
-    then Array.append [| c proc_ptr |] args
+    then Array.append [| c task_ptr |] args
     else args
   in
   let nargs = Array.length args in
   let arg_sz = Int64.mul (Int64.of_int nargs) word_sz
   in
 
-    mov (r tmp1) (c proc_ptr);                                    (* tmp1 = proc from argv[-1]    *)
+    mov (r tmp1) (c task_ptr);                                    (* tmp1 = task from argv[-1]    *)
     mov (r tmp2) (ro esp);                                        (* tmp2 = esp                   *)
-    mov (word_n tmp1 Abi.proc_field_rust_sp) (c (r tmp2));        (* proc->rust_sp = tmp2         *)
-    mov (rc esp) (c (word_n tmp1 Abi.proc_field_runtime_sp));     (* esp = proc->runtime_sp       *)
+    mov (word_n tmp1 Abi.task_field_rust_sp) (c (r tmp2));        (* task->rust_sp = tmp2         *)
+    mov (rc esp) (c (word_n tmp1 Abi.task_field_runtime_sp));     (* esp = task->runtime_sp       *)
 
     binary Il.SUB (rc esp) arg_sz;                                (* make room on the stack and   *)
     binary Il.AND (rc esp) 0xfffffffffffffff0L;                   (* and 16-byte align sp         *)
@@ -590,8 +590,8 @@ let emit_c_call
           assert (not in_prologue);
           (* If ret is esp-relative, use a temporary register until we switched stacks. *)
           emit (Il.call (r tmp1) fptr);
-          mov (r tmp2) (c proc_ptr);
-          mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
+          mov (r tmp2) (c task_ptr);
+          mov (rc esp) (c (word_n tmp2 Abi.task_field_rust_sp));
           mov ret (c (r tmp1));
 
       | _ when in_prologue ->
@@ -599,19 +599,19 @@ let emit_c_call
            * We have to do something a little surprising here:
            * we're doing a 'grow' call so ebp is going to point
            * into a dead stack frame on call-return. So we
-           * temporarily store proc-ptr into ebp and then reload
+           * temporarily store task-ptr into ebp and then reload
            * esp *and* ebp via ebp->rust_sp on the other side of
            * the call.
            *)
-          mov (rc ebp) (c proc_ptr);
+          mov (rc ebp) (c task_ptr);
           emit (Il.call ret fptr);
-          mov (rc esp) (c (word_n (h ebp) Abi.proc_field_rust_sp));
+          mov (rc esp) (c (word_n (h ebp) Abi.task_field_rust_sp));
           mov (rc ebp) (ro esp);
 
       | _ ->
           emit (Il.call ret fptr);
-          mov (r tmp2) (c proc_ptr);
-          mov (rc esp) (c (word_n tmp2 Abi.proc_field_rust_sp));
+          mov (r tmp2) (c task_ptr);
+          mov (rc esp) (c (word_n tmp2 Abi.task_field_rust_sp));
 ;;
 
 let emit_void_prologue_call
@@ -694,7 +694,7 @@ let emit_native_call_in_thunk
 let unwind_glue
     (e:Il.emitter)
     (nabi:nabi)
-    (exit_proc_fixup:fixup)
+    (exit_task_fixup:fixup)
     : unit =
 
   let fp_n = word_n (Il.Hreg ebp) in
@@ -712,8 +712,8 @@ let unwind_glue
   let skip_jmp_fix = new_fixup "skip jump" in
   let exit_jmp_fix = new_fixup "exit jump" in
 
-    mov (rc edx) (c proc_ptr);                      (* switch back to rust stack    *)
-    mov (rc esp) (c (edx_n Abi.proc_field_rust_sp));
+    mov (rc edx) (c task_ptr);                      (* switch back to rust stack    *)
+    mov (rc esp) (c (edx_n Abi.task_field_rust_sp));
 
     mark repeat_jmp_fix;
 
@@ -729,7 +729,7 @@ let unwind_glue
     emit (Il.jmp Il.JE (codefix skip_jmp_fix));     (* if glue-fn is nonzero        *)
     add ecx esi;                                    (* add crate ptr to disp.       *)
     push (ro ebp);                                  (* frame-to-drop                *)
-    push (c proc_ptr);                              (* form usual call to glue      *)
+    push (c task_ptr);                              (* form usual call to glue      *)
     push (immi 0L);                                 (* outptr                       *)
     emit (Il.call (rc eax) (reg_codeptr (h ecx)));  (* call glue_fn, trashing eax.  *)
     pop (rc eax);
@@ -746,8 +746,8 @@ let unwind_glue
     (* exit path. *)
     mark exit_jmp_fix;
 
-    let callee = Abi.load_fixup_codeptr e (h eax) exit_proc_fixup false nabi.nabi_indirect in
-      emit_c_call e (rc eax) (h edx) (h ecx) nabi false callee [| (c proc_ptr) |];
+    let callee = Abi.load_fixup_codeptr e (h eax) exit_task_fixup false nabi.nabi_indirect in
+      emit_c_call e (rc eax) (h edx) (h ecx) nabi false callee [| (c task_ptr) |];
 ;;
 
 (* Puts result in eax; clobbers ecx, edx in the process. *)
@@ -858,7 +858,7 @@ let fn_prologue
     (framesz:size)
     (callsz:size)
     (nabi:nabi)
-    (grow_proc_fixup:fixup)
+    (grow_task_fixup:fixup)
     : unit =
 
   let esi_n = word_n (h esi) in
@@ -952,8 +952,8 @@ let fn_prologue
     let restart_pc = e.Il.emit_pc in
 
       mov (rc ebp) (ro esp);                        (* Establish frame base.     *)
-      mov (rc esi) (c proc_ptr);                    (* esi = proc                *)
-      mov (rc esi) (c (esi_n Abi.proc_field_stk));  (* esi = proc->stk           *)
+      mov (rc esi) (c task_ptr);                    (* esi = task                *)
+      mov (rc esi) (c (esi_n Abi.task_field_stk));  (* esi = task->stk           *)
       add (rc esi) (imm
                       (Asm.ADD
                          ((word_off_n Abi.stk_field_data),
@@ -1004,7 +1004,7 @@ let fn_prologue
           sub (rc esi) (ro edi);
           add (rc esi) (Il.Imm (boundary_sz, word_ty));
           (* Perform 'grow' upcall, then restart frame-entry. *)
-          emit_void_prologue_call e nabi grow_proc_fixup [| ro esi |];
+          emit_void_prologue_call e nabi grow_task_fixup [| ro esi |];
           emit (Il.jmp Il.JMP (Il.CodeLabel restart_pc));
           Il.patch_jump e bypass_grow_upcall_jmp_pc e.Il.emit_pc;
 
@@ -1197,14 +1197,14 @@ let activate_glue (e:Il.emitter) : unit =
    *
    *   - save regs on C stack
    *   - align sp on a 16-byte boundary
-   *   - save sp to proc.runtime_sp (runtime_sp is thus always aligned)
-   *   - load saved proc sp (switch stack)
-   *   - restore saved proc regs
-   *   - return to saved proc pc
+   *   - save sp to task.runtime_sp (runtime_sp is thus always aligned)
+   *   - load saved task sp (switch stack)
+   *   - restore saved task regs
+   *   - return to saved task pc
    *
    * Our incoming stack looks like this:
    *
-   *   *esp+4        = [arg1   ] = proc ptr
+   *   *esp+4        = [arg1   ] = task ptr
    *   *esp          = [retpc  ]
    *)
 
@@ -1214,58 +1214,58 @@ let activate_glue (e:Il.emitter) : unit =
   let mov dst src = emit (Il.umov dst src) in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
 
-    mov (rc edx) (c (sp_n 1));                       (* edx <- proc             *)
+    mov (rc edx) (c (sp_n 1));                       (* edx <- task             *)
     save_callee_saves e;
-    mov (edx_n Abi.proc_field_runtime_sp) (ro esp);  (* proc->runtime_sp <- esp *)
-    mov (rc esp) (c (edx_n Abi.proc_field_rust_sp)); (* esp <- proc->rust_sp    *)
+    mov (edx_n Abi.task_field_runtime_sp) (ro esp);  (* task->runtime_sp <- esp *)
+    mov (rc esp) (c (edx_n Abi.task_field_rust_sp)); (* esp <- task->rust_sp    *)
 
     (*
      * There are two paths we can arrive at this code from:
      *
      *
-     *   1. We are activating a proc for the first time. When we switch into the
-     *      proc stack and 'ret' to its first instruction, we'll start doing
+     *   1. We are activating a task for the first time. When we switch into the
+     *      task stack and 'ret' to its first instruction, we'll start doing
      *      whatever the first instruction says. Probably saving registers and
      *      starting to establish a frame. Harmless stuff, doesn't look at
-     *      proc->rust_sp again except when it clobbers it during a later upcall.
+     *      task->rust_sp again except when it clobbers it during a later upcall.
      *
      *
-     *   2. We are resuming a proc that was descheduled by the yield glue below.
-     *      When we switch into the proc stack and 'ret', we'll be ret'ing to a
+     *   2. We are resuming a task that was descheduled by the yield glue below.
+     *      When we switch into the task stack and 'ret', we'll be ret'ing to a
      *      very particular instruction:
      *
-     *              "esp <- proc->rust_sp"
+     *              "esp <- task->rust_sp"
      *
      *      this is the first instruction we 'ret' to after this glue, because
-     *      it is the first instruction following *any* upcall, and the proc we
+     *      it is the first instruction following *any* upcall, and the task we
      *      are activating was descheduled mid-upcall.
      *
-     *      Unfortunately for us, we have already restored esp from proc->rust_sp
+     *      Unfortunately for us, we have already restored esp from task->rust_sp
      *      and are about to eat the 5 words off the top of it.
      *
      *
      *      | ...    | <-- where esp will be once we restore + ret, below,
-     *      | retpc  |     and where we'd *like* proc->rust_sp to wind up.
+     *      | retpc  |     and where we'd *like* task->rust_sp to wind up.
      *      | ebp    |
      *      | edi    |
      *      | esi    |
-     *      | ebx    | <-- current proc->rust_sp == current esp
+     *      | ebx    | <-- current task->rust_sp == current esp
      *
      *
-     *      This is a problem. If we return to "esp <- proc->rust_sp" it will
+     *      This is a problem. If we return to "esp <- task->rust_sp" it will
      *      push esp back down by 5 words. This manifests as a rust stack that
      *      grows by 5 words on each yield/reactivate. Not good.
      *
-     *      So what we do here is just adjust proc->rust_sp up 5 words as well,
+     *      So what we do here is just adjust task->rust_sp up 5 words as well,
      *      to mirror the movement in esp we're about to perform. That way the
-     *      "esp <- proc->rust_sp" we 'ret' to below will be a no-op. Esp won't
-     *      move, and the proc's stack won't grow.
+     *      "esp <- task->rust_sp" we 'ret' to below will be a no-op. Esp won't
+     *      move, and the task's stack won't grow.
      *)
 
-    binary Il.ADD (edx_n Abi.proc_field_rust_sp)
+    binary Il.ADD (edx_n Abi.task_field_rust_sp)
       (Int64.mul (Int64.of_int (n_callee_saves + 1)) word_sz);
 
-    (**** IN PROC STACK ****)
+    (**** IN TASK STACK ****)
     restore_callee_saves e;
     emit Il.Ret;
     (***********************)
@@ -1277,26 +1277,26 @@ let yield_glue (e:Il.emitter) : unit =
   (* More glue code, this time the 'bottom half' of yielding.
    *
    * We arrived here because an upcall decided to deschedule the
-   * running proc. So the upcall's return address got patched to the
+   * running task. So the upcall's return address got patched to the
    * first instruction of this glue code.
    *
    * When the upcall does 'ret' it will come here, and its esp will be
    * pointing to the last argument pushed on the C stack before making
    * the upcall: the 0th argument to the upcall, which is always the
-   * proc ptr performing the upcall. That's where we take over.
+   * task ptr performing the upcall. That's where we take over.
    *
    * Our goal is to complete the descheduling
    *
-   *   - Switch over to the proc stack temporarily.
+   *   - Switch over to the task stack temporarily.
    *
-   *   - Save the proc's callee-saves onto the proc stack.
-   *     (the proc is now 'descheduled', safe to set aside)
+   *   - Save the task's callee-saves onto the task stack.
+   *     (the task is now 'descheduled', safe to set aside)
    *
    *   - Switch *back* to the C stack.
    *
    *   - Restore the C-stack callee-saves.
    *
-   *   - Return to the caller on the C stack that activated the proc.
+   *   - Return to the caller on the C stack that activated the task.
    *
    *)
   let esp_n = word_n (Il.Hreg esp) in
@@ -1304,11 +1304,11 @@ let yield_glue (e:Il.emitter) : unit =
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    mov (rc edx) (c (esp_n 0));                         (* edx <- arg0 (proc)      *)
-    mov (rc esp) (c (edx_n Abi.proc_field_rust_sp));    (* esp <- proc->rust_sp    *)
+    mov (rc edx) (c (esp_n 0));                         (* edx <- arg0 (task)      *)
+    mov (rc esp) (c (edx_n Abi.task_field_rust_sp));    (* esp <- task->rust_sp    *)
     save_callee_saves e;
-    mov (edx_n Abi.proc_field_rust_sp) (ro esp);        (* proc->rust_sp <- esp    *)
-    mov (rc esp) (c (edx_n Abi.proc_field_runtime_sp)); (* esp <- proc->runtime_sp *)
+    mov (edx_n Abi.task_field_rust_sp) (ro esp);        (* task->rust_sp <- esp    *)
+    mov (rc esp) (c (edx_n Abi.task_field_runtime_sp)); (* esp <- task->runtime_sp *)
 
     (**** IN C STACK ****)
     restore_callee_saves e;
@@ -1380,7 +1380,7 @@ let (abi:Abi.abi) =
     Abi.abi_sp_reg = (Il.Hreg esp);
     Abi.abi_fp_reg = (Il.Hreg ebp);
     Abi.abi_dwarf_fp_reg = dwarf_ebp;
-    Abi.abi_pp_cell = proc_ptr;
+    Abi.abi_tp_cell = task_ptr;
     Abi.abi_frame_base_sz = frame_base_sz;
     Abi.abi_frame_info_sz = frame_info_sz;
     Abi.abi_implicit_args_sz = implicit_args_sz;

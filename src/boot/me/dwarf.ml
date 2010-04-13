@@ -1592,7 +1592,7 @@ let dwarf_visitor
           | Ast.TY_vec s -> unspecified_ref_slot "vec" s
           | Ast.TY_chan t -> unspecified_ref_ty "chan" t
           | Ast.TY_port t -> unspecified_ref_ty "port" t
-          | Ast.TY_proc -> unspecified "proc"
+          | Ast.TY_task -> unspecified "task"
           | Ast.TY_fn _ -> unspecified "fn"
           | Ast.TY_tag _ -> unspecified "tag"
           | Ast.TY_iso _ -> unspecified "iso"
@@ -2291,7 +2291,7 @@ let rec extract_mod_items
             begin
               match get_name die with
                   "nil" -> Ast.TY_nil
-                | "proc" -> Ast.TY_proc
+                | "task" -> Ast.TY_task
                 | "port" -> Ast.TY_port (get_referenced_ty die)
                 | "chan" -> Ast.TY_chan (get_referenced_ty die)
                 | "vec" -> Ast.TY_vec (get_referenced_slot die)

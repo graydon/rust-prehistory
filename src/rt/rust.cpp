@@ -47,7 +47,7 @@ extern "C" {
 #define I(rt, e) ((e) ? (void)0 :                           \
                   (rt)->srv->fatal(#e, __FILE__, __LINE__))
 
-struct rust_proc;
+struct rust_task;
 struct rust_port;
 struct rust_chan;
 struct rust_token;
@@ -57,7 +57,7 @@ static uint32_t const LOG_ALL = 0xffffffff;
 static uint32_t const LOG_ERR =        0x1;
 static uint32_t const LOG_MEM =        0x2;
 static uint32_t const LOG_COMM =       0x4;
-static uint32_t const LOG_PROC =       0x8;
+static uint32_t const LOG_TASK =       0x8;
 static uint32_t const LOG_UPCALL =    0x10;
 static uint32_t const LOG_RT =        0x20;
 static uint32_t const LOG_ULOG =      0x40;
@@ -66,16 +66,16 @@ static uint32_t const LOG_DWARF =    0x100;
 static uint32_t const LOG_LINK =     0x200;
 
 #ifdef __GNUC__
-#define LOG_UPCALL_ENTRY(proc)                                          \
-    (proc)->rt->log(LOG_UPCALL,                                         \
-                    "upcall proc: 0x%" PRIxPTR                          \
+#define LOG_UPCALL_ENTRY(task)                                          \
+    (task)->rt->log(LOG_UPCALL,                                         \
+                    "upcall task: 0x%" PRIxPTR                          \
                     " retpc: 0x%" PRIxPTR,                              \
-                    (proc), __builtin_return_address(0))
+                    (task), __builtin_return_address(0))
 #else
-#define LOG_UPCALL_ENTRY(proc)                                          \
-    (proc)->rt->log(LOG_UPCALL,                                         \
-                    "upcall proc: 0x%" PRIxPTR                          \
-                    (proc))
+#define LOG_UPCALL_ENTRY(task)                                          \
+    (task)->rt->log(LOG_UPCALL,                                         \
+                    "upcall task: 0x%" PRIxPTR                          \
+                    (task))
 #endif
 
 static uint32_t
@@ -91,8 +91,8 @@ get_logbits()
             bits |= LOG_MEM;
         if (strstr(c, "comm"))
             bits |= LOG_COMM;
-        if (strstr(c, "proc"))
-            bits |= LOG_PROC;
+        if (strstr(c, "task"))
+            bits |= LOG_TASK;
         if (strstr(c, "up"))
             bits |= LOG_UPCALL;
         if (strstr(c, "rt"))
@@ -139,13 +139,13 @@ struct rt_owned {
 };
 
 template <typename T>
-struct proc_owned {
+struct task_owned {
     void operator delete(void *ptr) {
-        ((T *)ptr)->proc->rt->free(ptr);
+        ((T *)ptr)->task->rt->free(ptr);
     }
 };
 
-// Proc stack segments. Heap allocated and chained together.
+// Task stack segments. Heap allocated and chained together.
 
 struct stk_seg {
     unsigned int valgrind_id;
@@ -345,13 +345,13 @@ struct rust_rt {
     rust_crate const *root_crate;
     rust_srv *srv;
     uint32_t logbits;
-    ptr_vec<rust_proc> running_procs;
-    ptr_vec<rust_proc> blocked_procs;
-    ptr_vec<rust_proc> dead_procs;
+    ptr_vec<rust_task> running_tasks;
+    ptr_vec<rust_task> blocked_tasks;
+    ptr_vec<rust_task> dead_tasks;
     ptr_vec<rust_crate_cache> caches;
     randctx rctx;
-    rust_proc *root_proc;
-    rust_proc *curr_proc;
+    rust_task *root_task;
+    rust_task *curr_task;
     int rval;
     lockfree_queue *incoming; // incoming messages from other threads
 #ifndef __WIN32__
@@ -361,7 +361,7 @@ struct rust_rt {
     rust_rt(rust_srv *srv, rust_crate const *root_crate);
     ~rust_rt();
 
-    void activate(rust_proc *proc);
+    void activate(rust_task *task);
     void log(uint32_t logbit, char const *fmt, ...);
     void logptr(char const *msg, uintptr_t ptrval);
     template<typename T>
@@ -377,13 +377,13 @@ struct rust_rt {
 #endif
 
     rust_crate_cache *get_cache(rust_crate const *crate);
-    size_t n_live_procs();
-    void add_proc_to_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc);
-    void remove_proc_from_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc);
-    const char *state_vec_name(ptr_vec<rust_proc> *v);
+    size_t n_live_tasks();
+    void add_task_to_state_vec(ptr_vec<rust_task> *v, rust_task *task);
+    void remove_task_from_state_vec(ptr_vec<rust_task> *v, rust_task *task);
+    const char *state_vec_name(ptr_vec<rust_task> *v);
 
-    void reap_dead_procs();
-    rust_proc *sched();
+    void reap_dead_tasks();
+    rust_task *sched();
 };
 
 inline void *operator new(size_t sz, void *mem) {
@@ -408,7 +408,7 @@ inline void *operator new[](size_t sz, rust_rt &rt) {
 
 // Crates.
 
-typedef void CDECL (*activate_glue_ty)(rust_proc *);
+typedef void CDECL (*activate_glue_ty)(rust_task *);
 
 class rust_crate
 {
@@ -425,7 +425,7 @@ class rust_crate
     size_t debug_info_sz;         // Size of .debug_info.
 
     ptrdiff_t activate_glue_off;
-    ptrdiff_t main_exit_proc_glue_off;
+    ptrdiff_t main_exit_task_glue_off;
     ptrdiff_t unwind_glue_off;
     ptrdiff_t yield_glue_off;
 
@@ -449,8 +449,8 @@ public:
         return (activate_glue_ty) ((uintptr_t)this + activate_glue_off);
     }
 
-    uintptr_t get_main_exit_proc_glue() const {
-        return ((uintptr_t)this + main_exit_proc_glue_off);
+    uintptr_t get_main_exit_task_glue() const {
+        return ((uintptr_t)this + main_exit_task_glue_off);
     }
 
     uintptr_t get_unwind_glue() const {
@@ -1260,19 +1260,19 @@ public:
 
 
 // A cond(ition) is something we can block on. This can be a channel (writing), a
-// port (reading) or a proc (waiting).
+// port (reading) or a task (waiting).
 
 struct rust_cond {
 };
 
-// An alarm can be put into a wait queue and the proc will be notified when
+// An alarm can be put into a wait queue and the task will be notified when
 // the wait queue is flushed.
 
 struct rust_alarm {
-    rust_proc *receiver;
+    rust_task *receiver;
     size_t idx;
 
-    rust_alarm(rust_proc *receiver);
+    rust_alarm(rust_task *receiver);
 };
 
 typedef ptr_vec<rust_alarm> rust_wait_queue;
@@ -1304,22 +1304,22 @@ typedef ptr_vec<rust_alarm> rust_wait_queue;
  *  - The third word at the head of a gc_val is a linked-list pointer
  *    to the gc_val that was allocated (temporally) just before
  *    it. Following this list traces through all the currently active
- *    gc_vals in a proc.
+ *    gc_vals in a task.
  *
- *  - The proc has a gc_alloc_chain field that points to the most-recent
+ *  - The task has a gc_alloc_chain field that points to the most-recent
  *    gc_val allocated.
  *
  *  - GC proceeds as follows:
  *
- *    - The proc calls frame_glue_fns.mark_glue(fp) which marks the
+ *    - The task calls frame_glue_fns.mark_glue(fp) which marks the
  *      frame and then loops, walking down the frame chain. This marks
  *      all the frames with GC roots (each of those functions in turn
  *      may recursively call into the GC graph, that's for the mark
  *      glue to decide).
  *
- *    - The proc then asks its runtime for its gc_alloc_chain.
+ *    - The task then asks its runtime for its gc_alloc_chain.
  *
- *    - The proc calls
+ *    - The task calls
  *
  *        (~1 & gc_alloc_chain[1])(gc_ptr=&gc_alloc_chain)
  *
@@ -1332,7 +1332,7 @@ typedef ptr_vec<rust_alarm> rust_wait_queue;
  *      graph (and possibly run dtors).
  *
  *    - Note that there is no "special gc state" at work here; the
- *      proc looks like it's running normal code that happens to not
+ *      task looks like it's running normal code that happens to not
  *      perform any gc_val allocation. Mark-bit twiddling is
  *      open-coded into all the mark functions, which know their
  *      contents; we only have to do O(frames) indirect calls to mark,
@@ -1344,31 +1344,31 @@ typedef ptr_vec<rust_alarm> rust_wait_queue;
 
 class rust_crate_cache;
 
-struct rust_proc : public rc_base<rust_proc>, public rt_owned<rust_proc>, public rust_cond {
+struct rust_task : public rc_base<rust_task>, public rt_owned<rust_task>, public rust_cond {
     // fields known to the compiler
     stk_seg *stk;
-    uintptr_t runtime_sp;      // runtime sp while proc running.
+    uintptr_t runtime_sp;      // runtime sp while task running.
     uintptr_t rust_sp;         // saved sp when not running.
     uintptr_t gc_alloc_chain;  // linked list of GC allocations.
     rust_rt *rt;
     rust_crate_cache *cache;
 
     // fields known only to the runtime
-    ptr_vec<rust_proc> *state;
+    ptr_vec<rust_task> *state;
     rust_cond *cond;
     uintptr_t* dptr;           // rendezvous pointer for send/recv
-    rust_proc *spawner;        // parent-link
+    rust_task *spawner;        // parent-link
     size_t idx;
 
-    // wait queue for procs waiting for this proc
-    rust_wait_queue waiting_procs;
+    // wait queue for tasks waiting for this task
+    rust_wait_queue waiting_tasks;
     rust_alarm alarm;
 
-    rust_proc(rust_rt *rt,
-              rust_proc *spawner);
-    ~rust_proc();
+    rust_task(rust_rt *rt,
+              rust_task *spawner);
+    ~rust_task();
 
-    void start(uintptr_t exit_proc_glue,
+    void start(uintptr_t exit_task_glue,
                uintptr_t spawnee_fn,
                uintptr_t args,
                size_t callsz);
@@ -1378,49 +1378,49 @@ struct rust_proc : public rc_base<rust_proc>, public rt_owned<rust_proc>, public
     bool dead();
 
     const char *state_str();
-    void transition(ptr_vec<rust_proc> *svec, ptr_vec<rust_proc> *dvec);
+    void transition(ptr_vec<rust_task> *svec, ptr_vec<rust_task> *dvec);
 
     void block(rust_cond *on);
     void wakeup(rust_cond *from);
     void die();
     void unblock();
 
-    void check_active() { I(rt, rt->curr_proc == this); }
-    void check_suspended() { I(rt, rt->curr_proc != this); }
+    void check_active() { I(rt, rt->curr_task == this); }
+    void check_suspended() { I(rt, rt->curr_task != this); }
 
     // Swap in some glue code to run when we have returned to the
-    // proc's context (assuming we're the active proc).
+    // task's context (assuming we're the active task).
     void run_after_return(size_t nargs, uintptr_t glue);
 
     // Swap in some glue code to run when we're next activated
-    // (assuming we're the suspended proc).
+    // (assuming we're the suspended task).
     void run_on_resume(uintptr_t glue);
 
     // Save callee-saved registers and return to the main loop.
     void yield(size_t nargs);
 
-    // Fail this proc (assuming caller-on-stack is different proc).
+    // Fail this task (assuming caller-on-stack is different task).
     void kill();
 
-    // Fail self, assuming caller-on-stack is this proc.
+    // Fail self, assuming caller-on-stack is this task.
     void fail(size_t nargs);
 
-    // Notify procs waiting for us that we are about to die.
-    void notify_waiting_procs();
+    // Notify tasks waiting for us that we are about to die.
+    void notify_waiting_tasks();
 
     uintptr_t get_fp();
     uintptr_t get_previous_fp(uintptr_t fp);
     frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
 };
 
-struct rust_port : public rc_base<rust_port>, public proc_owned<rust_port>, public rust_cond {
+struct rust_port : public rc_base<rust_port>, public task_owned<rust_port>, public rust_cond {
     // fields known only to the runtime
-    rust_proc *proc;
+    rust_task *task;
     size_t unit_sz;
     ptr_vec<rust_token> writers;
     ptr_vec<rust_chan> chans;
 
-    rust_port(rust_proc *proc, size_t unit_sz);
+    rust_port(rust_task *task, size_t unit_sz);
     ~rust_port();
 };
 
@@ -1437,9 +1437,9 @@ struct rust_token : public rust_cond {
     void withdraw();
 };
 
-struct rust_chan : public rc_base<rust_chan>, public proc_owned<rust_chan> {
+struct rust_chan : public rc_base<rust_chan>, public task_owned<rust_chan> {
     // fields known only to the runtime
-    rust_proc* proc;
+    rust_task* task;
     rust_port* port;
     circ_buf buf;
     size_t idx;           // Index into port->chans.
@@ -1448,7 +1448,7 @@ struct rust_chan : public rc_base<rust_chan>, public proc_owned<rust_chan> {
     // writers vector if we have something to send to the port
     rust_token token;
 
-    rust_chan(rust_proc *proc, rust_port *port);
+    rust_chan(rust_task *task, rust_port *port);
     ~rust_chan();
 
     void disassociate();
@@ -1671,21 +1671,21 @@ rust_str::~rust_str()
 
 // Ports
 
-rust_port::rust_port(rust_proc *proc, size_t unit_sz) :
-    proc(proc),
+rust_port::rust_port(rust_task *task, size_t unit_sz) :
+    task(task),
     unit_sz(unit_sz),
-    writers(proc->rt),
-    chans(proc->rt)
+    writers(task->rt),
+    chans(task->rt)
 {
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
     rt->log(LOG_MEM|LOG_COMM,
-            "new rust_port(proc=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
-            PRIxPTR, (uintptr_t)proc, unit_sz, (uintptr_t)this);
+            "new rust_port(task=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
+            PRIxPTR, (uintptr_t)task, unit_sz, (uintptr_t)this);
 }
 
 rust_port::~rust_port()
 {
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
     rt->log(LOG_COMM|LOG_MEM,
             "~rust_port 0x%" PRIxPTR,
             (uintptr_t)this);
@@ -1693,10 +1693,10 @@ rust_port::~rust_port()
         chans.pop()->disassociate();
 }
 
-rust_chan::rust_chan(rust_proc *proc, rust_port *port) :
-    proc(proc),
+rust_chan::rust_chan(rust_task *task, rust_port *port) :
+    task(task),
     port(port),
-    buf(proc->rt, port->unit_sz),
+    buf(task->rt, port->unit_sz),
     token(this)
 {
     if (port)
@@ -1715,7 +1715,7 @@ rust_chan::~rust_chan()
 void
 rust_chan::disassociate()
 {
-    I(proc->rt, port);
+    I(task->rt, port);
 
     if (token.pending())
         token.withdraw();
@@ -1747,7 +1747,7 @@ void
 rust_token::submit()
 {
     rust_port *port = chan->port;
-    rust_rt *rt = chan->proc->rt;
+    rust_rt *rt = chan->task->rt;
 
     I(rt, port);
     I(rt, !submitted);
@@ -1759,15 +1759,15 @@ rust_token::submit()
 void
 rust_token::withdraw()
 {
-    rust_proc *proc = chan->proc;
+    rust_task *task = chan->task;
     rust_port *port = chan->port;
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
 
     I(rt, port);
     I(rt, submitted);
 
-    if (proc->blocked())
-        proc->wakeup(this); // must be blocked on us (or dead)
+    if (task->blocked())
+        task->wakeup(this); // must be blocked on us (or dead)
     port->writers.swapdel(this);
     submitted = false;
 }
@@ -1801,7 +1801,7 @@ del_stk(rust_rt *rt, stk_seg *stk)
     rt->free(stk);
 }
 
-/* Processes */
+/* Tasks */
 
 /* FIXME (bug 541585): ifdef by platform. This is getting absurdly x86-specific. */
 size_t const n_callee_saves = 4;
@@ -1830,18 +1830,18 @@ next_power_of_two(size_t s)
 }
 
 extern "C" void
-upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
+upcall_grow_task(rust_task *task, size_t n_frame_bytes)
 {
-    LOG_UPCALL_ENTRY(proc);
+    LOG_UPCALL_ENTRY(task);
 
-    rust_rt *rt = proc->rt;
-    stk_seg *old_stk = proc->stk;
+    rust_rt *rt = task->rt;
+    stk_seg *old_stk = task->stk;
     uintptr_t old_top = (uintptr_t) old_stk->limit;
     uintptr_t old_bottom = (uintptr_t) &old_stk->data[0];
-    uintptr_t rust_sp_disp = old_top - proc->rust_sp;
+    uintptr_t rust_sp_disp = old_top - task->rust_sp;
     size_t ssz = old_top - old_bottom;
-    rt->log(LOG_MEM|LOG_PROC|LOG_UPCALL,
-            "upcall_grow_proc(%" PRIdPTR
+    rt->log(LOG_MEM|LOG_TASK|LOG_UPCALL,
+            "upcall_grow_task(%" PRIdPTR
             "), old size %" PRIdPTR
             " bytes (old lim: 0x%" PRIxPTR ")",
             n_frame_bytes, ssz, old_top);
@@ -1850,14 +1850,14 @@ upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
         ssz = n_frame_bytes;
     ssz = next_power_of_two(ssz);
 
-    rt->log(LOG_MEM|LOG_PROC, "upcall_grow_proc growing stk 0x%" PRIxPTR " to %d bytes",
+    rt->log(LOG_MEM|LOG_TASK, "upcall_grow_task growing stk 0x%" PRIxPTR " to %d bytes",
             old_stk, ssz);
 
     stk_seg *stk = new_stk(rt, ssz);
     uintptr_t new_bottom = (uintptr_t) &stk->data[0];
     uintptr_t new_top = (uintptr_t) &stk->data[ssz];
     size_t n_copy = old_top - old_bottom;
-    rt->log(LOG_MEM|LOG_PROC,
+    rt->log(LOG_MEM|LOG_TASK,
             "copying %d bytes of stack from [0x%" PRIxPTR ", 0x%" PRIxPTR "]"
             " to [0x%" PRIxPTR ", 0x%" PRIxPTR "]",
             n_copy,
@@ -1868,10 +1868,10 @@ upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
 
     stk->valgrind_id = VALGRIND_STACK_REGISTER(new_bottom, new_top);
     stk->limit = new_top;
-    proc->stk = stk;
-    proc->rust_sp = new_top - rust_sp_disp;
+    task->stk = stk;
+    task->rust_sp = new_top - rust_sp_disp;
 
-    rt->log(LOG_MEM|LOG_PROC, "processing relocations");
+    rt->log(LOG_MEM|LOG_TASK, "processing relocations");
 
     // FIXME (bug 541586): this is the most ridiculously crude relocation scheme ever.
     // Try actually, you know, writing out reloc descriptors?
@@ -1884,13 +1884,13 @@ upcall_grow_proc(rust_proc *proc, size_t n_frame_bytes)
             *p += (new_top - old_top);
         }
     }
-    rt->log(LOG_MEM|LOG_PROC, "processed %d relocations", n_relocs);
+    rt->log(LOG_MEM|LOG_TASK, "processed %d relocations", n_relocs);
 
     del_stk(rt, old_stk);
     rt->logptr("grown stk limit", new_top);
 }
 
-rust_alarm::rust_alarm(rust_proc *receiver) :
+rust_alarm::rust_alarm(rust_task *receiver) :
     receiver(receiver)
 {
 }
@@ -2141,48 +2141,48 @@ public:
 
 };
 
-rust_proc::rust_proc(rust_rt *rt, rust_proc *spawner) :
+rust_task::rust_task(rust_rt *rt, rust_task *spawner) :
     stk(new_stk(rt, 0)),
     runtime_sp(0),
     rust_sp(stk->limit),
     gc_alloc_chain(0),
     rt(rt),
     cache(NULL),
-    state(&rt->running_procs),
+    state(&rt->running_tasks),
     cond(NULL),
     dptr(0),
     spawner(spawner),
     idx(0),
-    waiting_procs(rt),
+    waiting_tasks(rt),
     alarm(this)
 {
-    rt->logptr("new proc", (uintptr_t)this);
+    rt->logptr("new task", (uintptr_t)this);
 }
 
-rust_proc::~rust_proc()
+rust_task::~rust_task()
 {
-    rt->log(LOG_MEM|LOG_PROC,
-            "~rust_proc 0x%" PRIxPTR ", refcnt=%d",
+    rt->log(LOG_MEM|LOG_TASK,
+            "~rust_task 0x%" PRIxPTR ", refcnt=%d",
             (uintptr_t)this, refcnt);
 
     /*
     for (uintptr_t fp = get_fp(); fp; fp = get_previous_fp(fp)) {
         frame_glue_fns *glue_fns = get_frame_glue_fns(fp);
-        rt->log(LOG_MEM|LOG_PROC,
-                "~rust_proc, frame fp=0x%" PRIxPTR ", glue_fns=0x%" PRIxPTR,
+        rt->log(LOG_MEM|LOG_TASK,
+                "~rust_task, frame fp=0x%" PRIxPTR ", glue_fns=0x%" PRIxPTR,
                 fp, glue_fns);
         if (glue_fns) {
-            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, mark_glue=0x%" PRIxPTR, glue_fns->mark_glue);
-            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, drop_glue=0x%" PRIxPTR, glue_fns->drop_glue);
-            rt->log(LOG_MEM|LOG_PROC, "~rust_proc, reloc_glue=0x%" PRIxPTR, glue_fns->reloc_glue);
+            rt->log(LOG_MEM|LOG_TASK, "~rust_task, mark_glue=0x%" PRIxPTR, glue_fns->mark_glue);
+            rt->log(LOG_MEM|LOG_TASK, "~rust_task, drop_glue=0x%" PRIxPTR, glue_fns->drop_glue);
+            rt->log(LOG_MEM|LOG_TASK, "~rust_task, reloc_glue=0x%" PRIxPTR, glue_fns->reloc_glue);
         }
     }
     */
 
     /* FIXME: tighten this up, there are some more
-       assertions that hold at proc-lifecycle events. */
+       assertions that hold at task-lifecycle events. */
     I(rt, refcnt == 0 ||
-      (refcnt == 1 && this == rt->root_proc));
+      (refcnt == 1 && this == rt->root_task));
 
     del_stk(rt, stk);
     if (cache)
@@ -2190,12 +2190,12 @@ rust_proc::~rust_proc()
 }
 
 void
-rust_proc::start(uintptr_t exit_proc_glue,
+rust_task::start(uintptr_t exit_task_glue,
                  uintptr_t spawnee_fn,
                  uintptr_t args,
                  size_t callsz)
 {
-    rt->logptr("exit-proc glue", exit_proc_glue);
+    rt->logptr("exit-task glue", exit_task_glue);
     rt->logptr("from spawnee", spawnee_fn);
 
     // Set sp to last uintptr_t-sized cell of segment and align down (since its a stack).
@@ -2203,17 +2203,17 @@ rust_proc::start(uintptr_t exit_proc_glue,
     rust_sp = align_down(rust_sp);
 
     // Begin synthesizing frames. There are two: a "fully formed"
-    // exit-proc frame at the top of the stack -- that pretends to be
+    // exit-task frame at the top of the stack -- that pretends to be
     // mid-execution -- and a just-starting frame beneath it that
     // starts executing the first instruction of the spawnee. The
-    // spawnee *thinks* it was called by the exit-proc frame above
+    // spawnee *thinks* it was called by the exit-task frame above
     // it. It wasn't; we put that fake frame in place here, but the
-    // illusion is enough for the spawnee to return to the exit-proc
+    // illusion is enough for the spawnee to return to the exit-task
     // frame when it's done, and exit.
     uintptr_t *spp = (uintptr_t *)rust_sp;
 
-    // The exit_proc_glue frame we synthesize above the frame we activate:
-    *spp-- = (uintptr_t) this;       // proc
+    // The exit_task_glue frame we synthesize above the frame we activate:
+    *spp-- = (uintptr_t) this;       // task
     *spp-- = (uintptr_t) 0;          // output
     *spp-- = (uintptr_t) 0;          // retpc
     for (size_t j = 0; j < n_callee_saves; ++j) {
@@ -2221,7 +2221,7 @@ rust_proc::start(uintptr_t exit_proc_glue,
     }
 
     // We want 'frame_base' to point to the last callee-save in this
-    // (exit-proc) frame, because we're going to inject this
+    // (exit-task) frame, because we're going to inject this
     // frame-pointer into the callee-save frame pointer value in the
     // *next* (spawnee) frame. A cheap trick, but this means the
     // spawnee frame will restore the proper frame pointer of the glue
@@ -2235,13 +2235,13 @@ rust_proc::start(uintptr_t exit_proc_glue,
     if (args)  {
         uintptr_t *src = (uintptr_t *)args;
         src += 1;                  // spawn-call output slot
-        src += 1;                  // spawn-call proc slot
-        // Memcpy all but the proc and output pointers
+        src += 1;                  // spawn-call task slot
+        // Memcpy all but the task and output pointers
         callsz -= (2 * sizeof(uintptr_t));
         spp = (uintptr_t*) (((uintptr_t)spp) - callsz);
         memcpy(spp, src, callsz);
 
-        // Move sp down to point to proc cell.
+        // Move sp down to point to task cell.
         spp--;
     } else {
         // We're at root, starting up.
@@ -2251,9 +2251,9 @@ rust_proc::start(uintptr_t exit_proc_glue,
     // The *implicit* incoming args to the spawnee frame we're
     // activating: FIXME (bug 541587): wire up output-address properly
     // so spawnee can write a return value.
-    *spp-- = (uintptr_t) this;            // proc
+    *spp-- = (uintptr_t) this;            // task
     *spp-- = (uintptr_t) 0;               // output addr
-    *spp-- = (uintptr_t) exit_proc_glue;  // retpc
+    *spp-- = (uintptr_t) exit_task_glue;  // retpc
 
     // The context the activate_glue needs to switch stack.
     *spp-- = (uintptr_t) spawnee_fn;      // instruction to start at
@@ -2268,7 +2268,7 @@ rust_proc::start(uintptr_t exit_proc_glue,
     // Back up one, we overshot where sp should be.
     rust_sp = (uintptr_t) (spp+1);
 
-    rt->add_proc_to_state_vec(&rt->running_procs, this);
+    rt->add_task_to_state_vec(&rt->running_tasks, this);
 }
 
 void
@@ -2283,9 +2283,9 @@ push_onto_thread_stack(uintptr_t &sp, uintptr_t value)
 }
 
 void
-rust_proc::run_after_return(size_t nargs, uintptr_t glue)
+rust_task::run_after_return(size_t nargs, uintptr_t glue)
 {
-    // This is only safe to call if we're the currently-running proc.
+    // This is only safe to call if we're the currently-running task.
     check_active();
 
     uintptr_t sp = runtime_sp;
@@ -2294,7 +2294,7 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
     sp = align_down(sp - nargs * sizeof(uintptr_t));
 
     uintptr_t *retpc = ((uintptr_t *) sp) - 1;
-    rt->log(LOG_PROC|LOG_MEM,
+    rt->log(LOG_TASK|LOG_MEM,
             "run_after_return: overwriting retpc=0x%" PRIxPTR
             " @ runtime_sp=0x%" PRIxPTR
             " with glue=0x%" PRIxPTR,
@@ -2307,7 +2307,7 @@ rust_proc::run_after_return(size_t nargs, uintptr_t glue)
 }
 
 void
-rust_proc::run_on_resume(uintptr_t glue)
+rust_task::run_on_resume(uintptr_t glue)
 {
     // This is only safe to call if we're suspended.
     check_suspended();
@@ -2315,7 +2315,7 @@ rust_proc::run_on_resume(uintptr_t glue)
     // Inject glue as resume address in the suspended frame.
     uintptr_t* rsp = (uintptr_t*) rust_sp;
     rsp += n_callee_saves;
-    rt->log(LOG_PROC|LOG_MEM,
+    rt->log(LOG_TASK|LOG_MEM,
             "run_on_resume: overwriting retpc=0x%" PRIxPTR
             " @ rust_sp=0x%" PRIxPTR
             " with glue=0x%" PRIxPTR,
@@ -2324,10 +2324,10 @@ rust_proc::run_on_resume(uintptr_t glue)
 }
 
 void
-rust_proc::yield(size_t nargs)
+rust_task::yield(size_t nargs)
 {
-    rt->log(LOG_PROC,
-            "proc 0x%" PRIxPTR " yielding", this);
+    rt->log(LOG_TASK,
+            "task 0x%" PRIxPTR " yielding", this);
     run_after_return(nargs, rt->root_crate->get_yield_glue());
 }
 
@@ -2338,30 +2338,30 @@ get_callee_save_fp(uintptr_t *top_of_callee_saves)
 }
 
 void
-rust_proc::kill() {
+rust_task::kill() {
     // Note the distinction here: kill() is when you're in an upcall
-    // from process A and want to force-fail process B, you do B->kill().
+    // from task A and want to force-fail task B, you do B->kill().
     // If you want to fail yourself you do self->fail(upcall_nargs).
-    rt->log(LOG_PROC, "killing proc 0x%" PRIxPTR, this);
-    // Unblock the proc so it can unwind.
+    rt->log(LOG_TASK, "killing task 0x%" PRIxPTR, this);
+    // Unblock the task so it can unwind.
     unblock();
-    if (this == rt->root_proc)
+    if (this == rt->root_task)
         rt->fail();
     run_on_resume(rt->root_crate->get_unwind_glue());
 }
 
 void
-rust_proc::fail(size_t nargs) {
+rust_task::fail(size_t nargs) {
     // See note in ::kill() regarding who should call this.
-    rt->log(LOG_PROC, "proc 0x%" PRIxPTR " failing", this);
-    // Unblock the proc so it can unwind.
+    rt->log(LOG_TASK, "task 0x%" PRIxPTR " failing", this);
+    // Unblock the task so it can unwind.
     unblock();
-    if (this == rt->root_proc)
+    if (this == rt->root_task)
         rt->fail();
     run_after_return(nargs, rt->root_crate->get_unwind_glue());
     if (spawner) {
-        rt->log(LOG_PROC,
-                "proc 0x%" PRIxPTR
+        rt->log(LOG_TASK,
+                "task 0x%" PRIxPTR
                 " propagating failure to parent 0x%" PRIxPTR,
                 this, spawner);
         spawner->kill();
@@ -2369,100 +2369,100 @@ rust_proc::fail(size_t nargs) {
 }
 
 void
-rust_proc::notify_waiting_procs()
+rust_task::notify_waiting_tasks()
 {
-    while (waiting_procs.length() > 0) {
-        rust_proc *p = waiting_procs.pop()->receiver;
+    while (waiting_tasks.length() > 0) {
+        rust_task *p = waiting_tasks.pop()->receiver;
         if (!p->dead())
             p->wakeup(this);
     }
 }
 
 uintptr_t
-rust_proc::get_fp() {
-    // sp in any suspended proc points to the last callee-saved reg on
-    // the proc stack.
+rust_task::get_fp() {
+    // sp in any suspended task points to the last callee-saved reg on
+    // the task stack.
     return get_callee_save_fp((uintptr_t*)rust_sp);
 }
 
 uintptr_t
-rust_proc::get_previous_fp(uintptr_t fp) {
+rust_task::get_previous_fp(uintptr_t fp) {
     // fp happens to, coincidentally (!) also point to the last
-    // callee-save on the proc stack.
+    // callee-save on the task stack.
     return get_callee_save_fp((uintptr_t*)fp);
 }
 
 frame_glue_fns*
-rust_proc::get_frame_glue_fns(uintptr_t fp) {
+rust_task::get_frame_glue_fns(uintptr_t fp) {
     fp -= sizeof(uintptr_t);
     return *((frame_glue_fns**) fp);
 }
 
 bool
-rust_proc::running()
+rust_task::running()
 {
-    return state == &rt->running_procs;
+    return state == &rt->running_tasks;
 }
 
 bool
-rust_proc::blocked()
+rust_task::blocked()
 {
-    return state == &rt->blocked_procs;
+    return state == &rt->blocked_tasks;
 }
 
 bool
-rust_proc::blocked_on(rust_cond *on)
+rust_task::blocked_on(rust_cond *on)
 {
     return blocked() && cond == on;
 }
 
 bool
-rust_proc::dead()
+rust_task::dead()
 {
-    return state == &rt->dead_procs;
+    return state == &rt->dead_tasks;
 }
 
 void
-rust_proc::transition(ptr_vec<rust_proc> *src, ptr_vec<rust_proc> *dst)
+rust_task::transition(ptr_vec<rust_task> *src, ptr_vec<rust_task> *dst)
 {
     I(rt, state == src);
-    rt->log(LOG_PROC,
-            "proc 0x%" PRIxPTR " state change '%s' -> '%s'",
+    rt->log(LOG_TASK,
+            "task 0x%" PRIxPTR " state change '%s' -> '%s'",
             (uintptr_t)this,
             rt->state_vec_name(src),
             rt->state_vec_name(dst));
-    rt->remove_proc_from_state_vec(src, this);
-    rt->add_proc_to_state_vec(dst, this);
+    rt->remove_task_from_state_vec(src, this);
+    rt->add_task_to_state_vec(dst, this);
     state = dst;
 }
 
 void
-rust_proc::block(rust_cond *on)
+rust_task::block(rust_cond *on)
 {
     I(rt, on);
-    transition(&rt->running_procs, &rt->blocked_procs);
-    rt->log(LOG_PROC,
-            "proc 0x%" PRIxPTR " blocking on 0x%" PRIxPTR,
+    transition(&rt->running_tasks, &rt->blocked_tasks);
+    rt->log(LOG_TASK,
+            "task 0x%" PRIxPTR " blocking on 0x%" PRIxPTR,
             (uintptr_t)this,
             (uintptr_t)on);
     cond = on;
 }
 
 void
-rust_proc::wakeup(rust_cond *from)
+rust_task::wakeup(rust_cond *from)
 {
-    transition(&rt->blocked_procs, &rt->running_procs);
+    transition(&rt->blocked_tasks, &rt->running_tasks);
     I(rt, cond == from);
 }
 
 void
-rust_proc::die()
+rust_task::die()
 {
-    transition(&rt->running_procs, &rt->dead_procs);
+    transition(&rt->running_tasks, &rt->dead_tasks);
 }
 
 void
-rust_proc::unblock()
+rust_task::unblock()
 {
     if (blocked())
         wakeup(cond);
@@ -2471,10 +2471,10 @@ rust_proc::unblock()
 // Runtime
 
 static void
-del_all_procs(rust_rt *rt, ptr_vec<rust_proc> *v) {
+del_all_tasks(rust_rt *rt, ptr_vec<rust_task> *v) {
     I(rt, v);
     while (v->length()) {
-        rt->log(LOG_PROC, "deleting proc %" PRIdPTR, v->length() - 1);
+        rt->log(LOG_TASK, "deleting task %" PRIdPTR, v->length() - 1);
         delete v->pop();
     }
 }
@@ -2483,12 +2483,12 @@ rust_rt::rust_rt(rust_srv *srv, rust_crate const *root_crate) :
     root_crate(root_crate),
     srv(srv),
     logbits(get_logbits()),
-    running_procs(this),
-    blocked_procs(this),
-    dead_procs(this),
+    running_tasks(this),
+    blocked_tasks(this),
+    dead_tasks(this),
     caches(this),
-    root_proc(NULL),
-    curr_proc(NULL),
+    root_task(NULL),
+    curr_task(NULL),
     rval(0)
 {
     logptr("new rt", (uintptr_t)this);
@@ -2521,16 +2521,16 @@ rust_rt::rust_rt(rust_srv *srv, rust_crate const *root_crate) :
 #endif
     randinit(&rctx, 1);
 
-    root_proc = new (this) rust_proc(this, NULL);
+    root_task = new (this) rust_task(this, NULL);
 }
 
 rust_rt::~rust_rt() {
-    log(LOG_PROC, "deleting all running procs");
-    del_all_procs(this, &running_procs);
-    log(LOG_PROC, "deleting all blocked procs");
-    del_all_procs(this, &blocked_procs);
-    log(LOG_PROC, "deleting all dead procs");
-    del_all_procs(this, &dead_procs);
+    log(LOG_TASK, "deleting all running tasks");
+    del_all_tasks(this, &running_tasks);
+    log(LOG_TASK, "deleting all blocked tasks");
+    del_all_tasks(this, &blocked_tasks);
+    log(LOG_TASK, "deleting all dead tasks");
+    del_all_tasks(this, &dead_tasks);
 #ifndef __WIN32__
     pthread_attr_destroy(&attr);
 #endif
@@ -2539,10 +2539,10 @@ rust_rt::~rust_rt() {
 }
 
 void
-rust_rt::activate(rust_proc *proc) {
-    curr_proc = proc;
-    root_crate->get_activate_glue()(proc);
-    curr_proc = NULL;
+rust_rt::activate(rust_task *task) {
+    curr_task = task;
+    root_crate->get_activate_glue()(task);
+    curr_task = NULL;
 }
 
 void
@@ -2570,7 +2570,7 @@ rust_rt::logptr(char const *msg, T* ptrval) {
 
 void
 rust_rt::fail() {
-    log(LOG_RT, "runtime 0x%" PRIxPTR " root proc failed", this);
+    log(LOG_RT, "runtime 0x%" PRIxPTR " root task failed", this);
     I(this, rval == 0);
     rval = 1;
 }
@@ -2627,51 +2627,51 @@ rust_rt::win32_require(LPCTSTR fn, BOOL ok) {
 #endif
 
 size_t
-rust_rt::n_live_procs()
+rust_rt::n_live_tasks()
 {
-    return running_procs.length() + blocked_procs.length();
+    return running_tasks.length() + blocked_tasks.length();
 }
 
 void
-rust_rt::add_proc_to_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc)
+rust_rt::add_task_to_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 {
-    log(LOG_MEM|LOG_PROC,
-        "adding proc 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
-        (uintptr_t)proc, state_vec_name(v), (uintptr_t)v);
-    v->push(proc);
+    log(LOG_MEM|LOG_TASK,
+        "adding task 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
+        (uintptr_t)task, state_vec_name(v), (uintptr_t)v);
+    v->push(task);
 }
 
 
 void
-rust_rt::remove_proc_from_state_vec(ptr_vec<rust_proc> *v, rust_proc *proc)
+rust_rt::remove_task_from_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 {
-    log(LOG_MEM|LOG_PROC,
-        "removing proc 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
-        (uintptr_t)proc, state_vec_name(v), (uintptr_t)v);
-    I(this, (*v)[proc->idx] == proc);
-    v->swapdel(proc);
+    log(LOG_MEM|LOG_TASK,
+        "removing task 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
+        (uintptr_t)task, state_vec_name(v), (uintptr_t)v);
+    I(this, (*v)[task->idx] == task);
+    v->swapdel(task);
 }
 
 const char *
-rust_rt::state_vec_name(ptr_vec<rust_proc> *v)
+rust_rt::state_vec_name(ptr_vec<rust_task> *v)
 {
-    if (v == &running_procs)
+    if (v == &running_tasks)
         return "running";
-    if (v == &blocked_procs)
+    if (v == &blocked_tasks)
         return "blocked";
-    I(this, v == &dead_procs);
+    I(this, v == &dead_tasks);
     return "dead";
 }
 
 void
-rust_rt::reap_dead_procs()
+rust_rt::reap_dead_tasks()
 {
-    for (size_t i = 0; i < dead_procs.length(); ) {
-        rust_proc *p = dead_procs[i];
-        if (p == root_proc || p->refcnt == 0) {
-            I(this, !p->waiting_procs.length());
-            dead_procs.swapdel(p);
-            log(LOG_PROC, "deleting unreferenced dead proc 0x%" PRIxPTR, p);
+    for (size_t i = 0; i < dead_tasks.length(); ) {
+        rust_task *p = dead_tasks[i];
+        if (p == root_task || p->refcnt == 0) {
+            I(this, !p->waiting_tasks.length());
+            dead_tasks.swapdel(p);
+            log(LOG_TASK, "deleting unreferenced dead task 0x%" PRIxPTR, p);
             delete p;
             continue;
         }
@@ -2679,101 +2679,101 @@ rust_rt::reap_dead_procs()
     }
 }
 
-rust_proc *
+rust_task *
 rust_rt::sched()
 {
     I(this, this);
-    // FIXME: in the face of failing processes, this is not always right.
-    // I(this, n_live_procs() > 0);
-    if (running_procs.length() > 0) {
+    // FIXME: in the face of failing taskesses, this is not always right.
+    // I(this, n_live_tasks() > 0);
+    if (running_tasks.length() > 0) {
         size_t i = rand(&rctx);
-        i %= running_procs.length();
-        return (rust_proc *)running_procs[i];
+        i %= running_tasks.length();
+        return (rust_task *)running_tasks[i];
     }
-    log(LOG_RT|LOG_PROC,
-        "no schedulable processes");
+    log(LOG_RT|LOG_TASK,
+        "no schedulable tasks");
     return NULL;
 }
 
 /* Upcalls */
 
-extern "C" CDECL char const *str_buf(rust_proc *proc, rust_str *s);
+extern "C" CDECL char const *str_buf(rust_task *task, rust_str *s);
 
 extern "C" CDECL void
-upcall_log_int(rust_proc *proc, int32_t i)
+upcall_log_int(rust_task *task, int32_t i)
 {
-    LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL|LOG_ULOG,
+    LOG_UPCALL_ENTRY(task);
+    task->rt->log(LOG_UPCALL|LOG_ULOG,
                   "upcall log_int(0x%" PRIx32 " = %" PRId32 " = '%c')",
                   i, i, (char)i);
 }
 
 extern "C" CDECL void
-upcall_log_str(rust_proc *proc, rust_str *str)
+upcall_log_str(rust_task *task, rust_str *str)
 {
-    LOG_UPCALL_ENTRY(proc);
-    const char *c = str_buf(proc, str);
-    proc->rt->log(LOG_UPCALL|LOG_ULOG,
+    LOG_UPCALL_ENTRY(task);
+    const char *c = str_buf(task, str);
+    task->rt->log(LOG_UPCALL|LOG_ULOG,
                   "upcall log_str(\"%s\")",
                   c);
 }
 
 extern "C" CDECL void
-upcall_trace_word(rust_proc *proc, uintptr_t i)
+upcall_trace_word(rust_task *task, uintptr_t i)
 {
-    LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL|LOG_TRACE,
+    LOG_UPCALL_ENTRY(task);
+    task->rt->log(LOG_UPCALL|LOG_TRACE,
                   "trace: 0x%" PRIxPTR "",
                   i, i, (char)i);
 }
 
 extern "C" CDECL void
-upcall_trace_str(rust_proc *proc, char const *c)
+upcall_trace_str(rust_task *task, char const *c)
 {
-    LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL|LOG_TRACE,
+    LOG_UPCALL_ENTRY(task);
+    task->rt->log(LOG_UPCALL|LOG_TRACE,
                   "trace: %s",
                   c);
 }
 
 extern "C" CDECL rust_port*
-upcall_new_port(rust_proc *proc, size_t unit_sz)
+upcall_new_port(rust_task *task, size_t unit_sz)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-            "upcall_new_port(proc=0x%" PRIxPTR ", unit_sz=%d)",
-            (uintptr_t)proc, unit_sz);
-    return new (rt) rust_port(proc, unit_sz);
+            "upcall_new_port(task=0x%" PRIxPTR ", unit_sz=%d)",
+            (uintptr_t)task, unit_sz);
+    return new (rt) rust_port(task, unit_sz);
 }
 
 extern "C" CDECL void
-upcall_del_port(rust_proc *proc, rust_port *port)
+upcall_del_port(rust_task *task, rust_port *port)
 {
-    LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+    LOG_UPCALL_ENTRY(task);
+    task->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
                   "upcall del_port(0x%" PRIxPTR ")", (uintptr_t)port);
-    I(proc->rt, !port->refcnt);
+    I(task->rt, !port->refcnt);
     delete port;
 }
 
 extern "C" CDECL rust_chan*
-upcall_new_chan(rust_proc *proc, rust_port *port)
+upcall_new_chan(rust_task *task, rust_port *port)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-            "upcall_new_chan(proc=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
-            (uintptr_t)proc, port);
+            "upcall_new_chan(task=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
+            (uintptr_t)task, port);
     I(rt, port);
-    return new (rt) rust_chan(proc, port);
+    return new (rt) rust_chan(task, port);
 }
 
 extern "C" CDECL void
-upcall_del_chan(rust_proc *proc, rust_chan *chan)
+upcall_del_chan(rust_task *task, rust_chan *chan)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
             "upcall del_chan(0x%" PRIxPTR ")", (uintptr_t)chan);
     I(rt, !chan->refcnt);
@@ -2781,10 +2781,10 @@ upcall_del_chan(rust_proc *proc, rust_chan *chan)
 }
 
 extern "C" CDECL rust_chan *
-upcall_clone_chan(rust_proc *proc, rust_proc *owner, rust_chan *chan)
+upcall_clone_chan(rust_task *task, rust_task *owner, rust_chan *chan)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
             "upcall clone_chan(owner 0x%" PRIxPTR ", chan 0x%" PRIxPTR ")",
             (uintptr_t)owner, (uintptr_t)chan);
@@ -2816,7 +2816,7 @@ upcall_clone_chan(rust_proc *proc, rust_proc *owner, rust_chan *chan)
 static int
 attempt_transmission(rust_rt *rt,
                      rust_chan *src,
-                     rust_proc *dst)
+                     rust_task *dst)
 {
     I(rt, src);
     I(rt, dst);
@@ -2843,12 +2843,12 @@ attempt_transmission(rust_rt *rt,
 
     uintptr_t *dptr = dst->dptr;
     rt->log(LOG_COMM,
-            "receiving %d bytes into dst_proc=0x%" PRIxPTR ", dptr=0x%" PRIxPTR,
+            "receiving %d bytes into dst_task=0x%" PRIxPTR ", dptr=0x%" PRIxPTR,
             port->unit_sz, dst, dptr);
     buf->shift(dptr);
 
     // Wake up the sender if its waiting for the send operation.
-    rust_proc *sender = src->proc;
+    rust_task *sender = src->task;
     rust_token *token = &src->token;
     if (sender->blocked_on(token))
         sender->wakeup(token);
@@ -2861,36 +2861,36 @@ attempt_transmission(rust_rt *rt,
 }
 
 extern "C" CDECL void
-upcall_yield(rust_proc *proc)
+upcall_yield(rust_task *task)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_COMM, "upcall yield()");
-    proc->yield(1);
+    task->yield(1);
 }
 
 extern "C" CDECL void
-upcall_join(rust_proc *proc, rust_proc *other)
+upcall_join(rust_task *task, rust_task *other)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall join(other=0x%" PRIxPTR ")",
             (uintptr_t)other);
 
-    // If the other proc is already dying, we dont have to wait for it.
+    // If the other task is already dying, we dont have to wait for it.
     if (!other->dead()) {
-        other->waiting_procs.push(&proc->alarm);
-        proc->block(other);
-        proc->yield(2);
+        other->waiting_tasks.push(&task->alarm);
+        task->block(other);
+        task->yield(2);
     }
 }
 
 extern "C" CDECL void
-upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
+upcall_send(rust_task *task, rust_chan *chan, void *sptr)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall send(chan=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
             (uintptr_t)chan,
@@ -2909,104 +2909,104 @@ upcall_send(rust_proc *proc, rust_chan *chan, void *sptr)
             "sending via token 0x%" PRIxPTR,
             (uintptr_t)token);
 
-    if (port->proc) {
+    if (port->task) {
         chan->buf.push(sptr);
-        proc->block(token);
-        attempt_transmission(rt, chan, port->proc);
+        task->block(token);
+        attempt_transmission(rt, chan, port->task);
         if (chan->buf.unread && !token->pending())
             token->submit();
     } else {
         rt->log(LOG_COMM|LOG_ERR,
-                "port has no proc (possibly throw?)");
+                "port has no task (possibly throw?)");
     }
 
-    if (!proc->running())
-        proc->yield(3);
+    if (!task->running())
+        task->yield(3);
 }
 
 extern "C" CDECL void
-upcall_recv(rust_proc *proc, uintptr_t *dptr, rust_port *port)
+upcall_recv(rust_task *task, uintptr_t *dptr, rust_port *port)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_COMM,
             "upcall recv(dptr=0x" PRIxPTR ", port=0x%" PRIxPTR ")",
             (uintptr_t)dptr,
             (uintptr_t)port);
 
     I(rt, port);
-    I(rt, port->proc);
-    I(rt, proc);
-    I(rt, port->proc == proc);
+    I(rt, port->task);
+    I(rt, task);
+    I(rt, port->task == task);
 
-    proc->block(port);
+    task->block(port);
 
     if (port->writers.length() > 0) {
-        I(rt, proc->rt);
+        I(rt, task->rt);
         size_t i = rand(&rt->rctx);
         i %= port->writers.length();
         rust_token *token = port->writers[i];
         rust_chan *chan = token->chan;
-        if (attempt_transmission(rt, chan, proc))
+        if (attempt_transmission(rt, chan, task))
             token->withdraw();
     } else {
         rt->log(LOG_COMM,
                 "no writers sending to port", (uintptr_t)port);
     }
 
-    if (!proc->running()) {
-        proc->dptr = dptr;
-        proc->yield(3);
+    if (!task->running()) {
+        task->dptr = dptr;
+        task->yield(3);
     }
 }
 
 extern "C" CDECL void
-upcall_fail(rust_proc *proc, char const *expr, char const *file, size_t line)
+upcall_fail(rust_task *task, char const *expr, char const *file, size_t line)
 {
-    LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL|LOG_ERR, "upcall fail '%s', %s:%" PRIdPTR,
+    LOG_UPCALL_ENTRY(task);
+    task->rt->log(LOG_UPCALL|LOG_ERR, "upcall fail '%s', %s:%" PRIdPTR,
                   expr, file, line);
-    proc->fail(4);
+    task->fail(4);
 }
 
 extern "C" CDECL void
-upcall_kill(rust_proc *proc, rust_proc *target)
+upcall_kill(rust_task *task, rust_task *target)
 {
-    LOG_UPCALL_ENTRY(proc);
-    proc->rt->log(LOG_UPCALL, "upcall kill target=0x%" PRIxPTR, target);
+    LOG_UPCALL_ENTRY(task);
+    task->rt->log(LOG_UPCALL, "upcall kill target=0x%" PRIxPTR, target);
     target->kill();
 }
 
 extern "C" CDECL void
-upcall_exit(rust_proc *proc)
+upcall_exit(rust_task *task)
 {
-    LOG_UPCALL_ENTRY(proc);
+    LOG_UPCALL_ENTRY(task);
 
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL, "upcall exit");
-    proc->die();
-    proc->notify_waiting_procs();
-    proc->yield(1);
+    task->die();
+    task->notify_waiting_tasks();
+    task->yield(1);
 }
 
 extern "C" CDECL uintptr_t
-upcall_malloc(rust_proc *proc, size_t nbytes)
+upcall_malloc(rust_task *task, size_t nbytes)
 {
-    LOG_UPCALL_ENTRY(proc);
+    LOG_UPCALL_ENTRY(task);
 
-    void *p = proc->rt->malloc(nbytes);
-    proc->rt->log(LOG_UPCALL|LOG_MEM,
+    void *p = task->rt->malloc(nbytes);
+    task->rt->log(LOG_UPCALL|LOG_MEM,
                   "upcall malloc(%u) = 0x%" PRIxPTR,
                   nbytes, (uintptr_t)p);
     return (uintptr_t) p;
 }
 
 extern "C" CDECL void
-upcall_free(rust_proc *proc, void* ptr)
+upcall_free(rust_task *task, void* ptr)
 {
-    LOG_UPCALL_ENTRY(proc);
+    LOG_UPCALL_ENTRY(task);
 
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
     rt->log(LOG_UPCALL|LOG_MEM,
             "upcall free(0x%" PRIxPTR ")",
             (uintptr_t)ptr);
@@ -3015,11 +3015,11 @@ upcall_free(rust_proc *proc, void* ptr)
 
 
 extern "C" CDECL rust_str *
-upcall_new_str(rust_proc *proc, char const *s, size_t fill)
+upcall_new_str(rust_task *task, char const *s, size_t fill)
 {
-    LOG_UPCALL_ENTRY(proc);
+    LOG_UPCALL_ENTRY(task);
 
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
     size_t alloc = next_power_of_two(fill);
     void *mem = rt->malloc(sizeof(rust_str) + alloc);
     rust_str *st = new (mem) rust_str(rt, alloc, fill, s);
@@ -3040,9 +3040,9 @@ upcall_new_str(rust_proc *proc, char const *s, size_t fill)
  * Returns the new value for the slot dst.
  */
 extern "C" CDECL rust_str *
-upcall_str_concat(rust_proc *proc, rust_str *dst, rust_str *a, rust_str *b)
+upcall_str_concat(rust_task *task, rust_str *dst, rust_str *a, rust_str *b)
 {
-    LOG_UPCALL_ENTRY(proc);
+    LOG_UPCALL_ENTRY(task);
 
     size_t fill = a->fill + b->fill - 1;
     size_t alloc = next_power_of_two(fill);
@@ -3050,7 +3050,7 @@ upcall_str_concat(rust_proc *proc, rust_str *dst, rust_str *a, rust_str *b)
     // fast path
     if (dst == a && a->refcnt == 1) {
         if (alloc > a->alloc) {
-            void *mem = proc->rt->realloc(a, sizeof(rust_str) + alloc);
+            void *mem = task->rt->realloc(a, sizeof(rust_str) + alloc);
             a = static_cast<rust_str *>(mem);
             a->alloc = alloc;
         }
@@ -3085,33 +3085,33 @@ rust_rt::get_cache(rust_crate const *crate) {
 }
 
 static rust_crate_cache::c_sym *
-fetch_c_sym(rust_proc *proc,
+fetch_c_sym(rust_task *task,
             rust_crate const *curr_crate,
             size_t lib_num,
             size_t c_sym_num,
             char const *library,
             char const *symbol)
 {
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
 
-    if (proc->cache && proc->cache->crate != curr_crate) {
-        proc->rt->log(LOG_LINK, "lookup uses different crate");
-        proc->cache->deref();
-        proc->cache = NULL;
+    if (task->cache && task->cache->crate != curr_crate) {
+        task->rt->log(LOG_LINK, "lookup uses different crate");
+        task->cache->deref();
+        task->cache = NULL;
     }
 
-    if (!proc->cache) {
-        proc->rt->log(LOG_LINK, "fetching cache for current crate");
-        proc->cache = rt->get_cache(curr_crate);
+    if (!task->cache) {
+        task->rt->log(LOG_LINK, "fetching cache for current crate");
+        task->cache = rt->get_cache(curr_crate);
     }
 
-    rust_crate_cache *cache = proc->cache;
+    rust_crate_cache *cache = task->cache;
     rust_crate_cache::lib *l = cache->get_lib(lib_num, library);
     return cache->get_c_sym(c_sym_num, l, symbol);
 }
 
 extern "C" CDECL uintptr_t
-upcall_import_rust_sym(rust_proc *proc,
+upcall_import_rust_sym(rust_task *task,
                        rust_crate const *curr_crate,
                        size_t lib_num,      // # of lib
                        size_t c_sym_num,    // # of C sym "rust_crate" in lib
@@ -3119,8 +3119,8 @@ upcall_import_rust_sym(rust_proc *proc,
                        char const *library,
                        char const **path)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
 
     rt->log(LOG_UPCALL|LOG_LINK,
             "upcall import rust sym: lib #%" PRIdPTR
@@ -3136,32 +3136,32 @@ upcall_import_rust_sym(rust_proc *proc,
     rt->log(LOG_UPCALL|LOG_LINK,
             "import C symbol 'rust_crate' from lib #%" PRIdPTR,lib_num);
     rust_crate_cache::c_sym *c =
-        fetch_c_sym(proc, curr_crate, lib_num, c_sym_num, library, "rust_crate");
+        fetch_c_sym(task, curr_crate, lib_num, c_sym_num, library, "rust_crate");
 
     rt->log(LOG_UPCALL|LOG_LINK, "import rust symbol inside crate");
     rust_crate_cache::rust_sym *s =
-        proc->cache->get_rust_sym(rust_sym_num, rt, curr_crate, c, path);
+        task->cache->get_rust_sym(rust_sym_num, rt, curr_crate, c, path);
 
     uintptr_t addr = s->get_val();
     if (addr) {
         rt->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
         rt->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
-        proc->fail(7);
+        task->fail(7);
     }
     return addr;
 }
 
 extern "C" CDECL uintptr_t
-upcall_import_c_sym(rust_proc *proc,
+upcall_import_c_sym(rust_task *task,
                     rust_crate const *curr_crate,
                     size_t lib_num,      // # of lib
                     size_t c_sym_num,    // # of C sym
                     char const *library,
                     char const *symbol)
 {
-    LOG_UPCALL_ENTRY(proc);
-    rust_rt *rt = proc->rt;
+    LOG_UPCALL_ENTRY(task);
+    rust_rt *rt = task->rt;
 
     rt->log(LOG_UPCALL|LOG_LINK,
             "upcall import c sym: lib #%" PRIdPTR
@@ -3171,14 +3171,14 @@ upcall_import_c_sym(rust_proc *proc,
             lib_num, library, c_sym_num, symbol, curr_crate);
 
     rust_crate_cache::c_sym *c =
-        fetch_c_sym(proc, curr_crate, lib_num, c_sym_num, library, symbol);
+        fetch_c_sym(task, curr_crate, lib_num, c_sym_num, library, symbol);
 
     uintptr_t addr = c->get_val();
     if (addr) {
         rt->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
         rt->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
-        proc->fail(6);
+        task->fail(6);
     }
     return addr;
 }
@@ -3207,62 +3207,62 @@ static void *rust_thread_start(void *ptr)
     return 0;
 }
 
-extern "C" CDECL rust_proc *
-upcall_new_proc(rust_proc *spawner)
+extern "C" CDECL rust_task *
+upcall_new_task(rust_task *spawner)
 {
     LOG_UPCALL_ENTRY(spawner);
 
     rust_rt *rt = spawner->rt;
-    rust_proc *proc = new (rt) rust_proc(rt, spawner);
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-            "upcall new_proc(spawner 0x%" PRIxPTR ") = 0x%" PRIxPTR,
-            spawner, proc);
-    return proc;
+    rust_task *task = new (rt) rust_task(rt, spawner);
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+            "upcall new_task(spawner 0x%" PRIxPTR ") = 0x%" PRIxPTR,
+            spawner, task);
+    return task;
 }
 
-extern "C" CDECL rust_proc *
-upcall_start_proc(rust_proc *spawner, rust_proc *proc, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
+extern "C" CDECL rust_task *
+upcall_start_task(rust_task *spawner, rust_task *task, uintptr_t exit_task_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     LOG_UPCALL_ENTRY(spawner);
 
     rust_rt *rt = spawner->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-            "upcall start_proc(proc 0x%" PRIxPTR " exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
-            proc, exit_proc_glue, spawnee_fn, callsz);
-    proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
-    return proc;
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+            "upcall start_task(task 0x%" PRIxPTR " exit_task_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
+            task, exit_task_glue, spawnee_fn, callsz);
+    task->start(exit_task_glue, spawnee_fn, spawner->rust_sp, callsz);
+    return task;
 }
 
-extern "C" CDECL rust_proc *
-upcall_new_thread(rust_proc *proc)
+extern "C" CDECL rust_task *
+upcall_new_thread(rust_task *task)
 {
-    LOG_UPCALL_ENTRY(proc);
+    LOG_UPCALL_ENTRY(task);
 
-    rust_rt *old_rt = proc->rt;
+    rust_rt *old_rt = task->rt;
     rust_rt *new_rt = new rust_rt(old_rt->srv->clone(), old_rt->root_crate);
     new_rt->log(LOG_UPCALL|LOG_MEM,
                 "upcall new_thread() = 0x%" PRIxPTR,
-                new_rt->root_proc);
-    return new_rt->root_proc;
+                new_rt->root_task);
+    return new_rt->root_task;
 }
 
-extern "C" CDECL rust_proc *
-upcall_start_thread(rust_proc *spawner, rust_proc *root_proc, uintptr_t exit_proc_glue, uintptr_t spawnee_fn, size_t callsz)
+extern "C" CDECL rust_task *
+upcall_start_thread(rust_task *spawner, rust_task *root_task, uintptr_t exit_task_glue, uintptr_t spawnee_fn, size_t callsz)
 {
     LOG_UPCALL_ENTRY(spawner);
 
     rust_rt *rt = spawner->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_PROC,
-            "upcall start_thread(exit_proc_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
-            exit_proc_glue, spawnee_fn, callsz);
-    root_proc->start(exit_proc_glue, spawnee_fn, spawner->rust_sp, callsz);
+    rt->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+            "upcall start_thread(exit_task_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
+            exit_task_glue, spawnee_fn, callsz);
+    root_task->start(exit_task_glue, spawnee_fn, spawner->rust_sp, callsz);
 
 #if defined(__WIN32__)
     DWORD thread;
-    CreateThread(NULL, 0, rust_thread_start, root_proc->rt, 0, &thread);
+    CreateThread(NULL, 0, rust_thread_start, root_task->rt, 0, &thread);
 #else
     pthread_t thread;
-    pthread_create(&thread, &rt->attr, rust_thread_start, (void *)root_proc->rt);
+    pthread_create(&thread, &rt->attr, rust_thread_start, (void *)root_task->rt);
 #endif
 
     return 0; /* nil */
@@ -3272,27 +3272,27 @@ static int
 rust_main_loop(rust_rt *rt)
 {
     int rval;
-    rust_proc *proc;
+    rust_task *task;
 
     rt->log(LOG_RT, "control is in rust runtime library");
-    rt->logptr("main exit-proc glue", rt->root_crate->get_main_exit_proc_glue());
+    rt->logptr("main exit-task glue", rt->root_crate->get_main_exit_task_glue());
 
-    while ((proc = rt->sched()) != NULL) {
-        I(rt, proc->running());
+    while ((task = rt->sched()) != NULL) {
+        I(rt, task->running());
 
-        rt->log(LOG_PROC, "activating proc 0x%" PRIxPTR ", sp=0x%" PRIxPTR,
-                (uintptr_t)proc, proc->rust_sp);
+        rt->log(LOG_TASK, "activating task 0x%" PRIxPTR ", sp=0x%" PRIxPTR,
+                (uintptr_t)task, task->rust_sp);
 
-        rt->activate(proc);
+        rt->activate(task);
 
-        rt->log(LOG_PROC,
-                "returned from proc 0x%" PRIxPTR " in state '%s', sp=0x%" PRIxPTR,
-                (uintptr_t)proc, rt->state_vec_name(proc->state), proc->rust_sp);
+        rt->log(LOG_TASK,
+                "returned from task 0x%" PRIxPTR " in state '%s', sp=0x%" PRIxPTR,
+                (uintptr_t)task, rt->state_vec_name(task->state), task->rust_sp);
 
-        I(rt, proc->rust_sp >= (uintptr_t) &proc->stk->data[0]);
-        I(rt, proc->rust_sp < proc->stk->limit);
+        I(rt, task->rust_sp >= (uintptr_t) &task->stk->data[0]);
+        I(rt, task->rust_sp < task->stk->limit);
 
-        rt->reap_dead_procs();
+        rt->reap_dead_tasks();
     }
 
     rt->log(LOG_RT, "finished main loop (rt.rval = %d)", rt->rval);
@@ -3365,21 +3365,21 @@ rust_srv::clone()
 /* Native builtins. */
 
 extern "C" CDECL rust_str*
-str_alloc(rust_proc *proc, size_t n_bytes)
+str_alloc(rust_task *task, size_t n_bytes)
 {
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
     size_t alloc = next_power_of_two(n_bytes);
     void *mem = rt->malloc(sizeof(rust_str) + alloc);
     rust_str *st = new (mem) rust_str(rt, alloc, 1, "");
     if (!st)
-        proc->fail(2);
+        task->fail(2);
     return st;
 }
 
 extern "C" CDECL rust_vec*
-vec_alloc(rust_proc *proc, type_desc *t, size_t n_elts)
+vec_alloc(rust_task *task, type_desc *t, size_t n_elts)
 {
-    rust_rt *rt = proc->rt;
+    rust_rt *rt = task->rt;
     rt->log(LOG_MEM, "vec_alloc %" PRIdPTR " elements of size %" PRIdPTR,
             n_elts, t->size);
     size_t n_bytes = n_elts * t->size;
@@ -3387,18 +3387,18 @@ vec_alloc(rust_proc *proc, type_desc *t, size_t n_elts)
     void *mem = rt->malloc(alloc);
     rust_vec *vec = new (mem) rust_vec(alloc, 0);
     if (!vec)
-        proc->fail(3);
+        task->fail(3);
     return vec;
 }
 
 extern "C" CDECL char const *
-str_buf(rust_proc *proc, rust_str *s)
+str_buf(rust_task *task, rust_str *s)
 {
     return (char const *)&s->data[0];
 }
 
 extern "C" CDECL rust_str*
-implode(rust_proc *proc, rust_vec *v)
+implode(rust_task *task, rust_vec *v)
 {
     /*
      * We received a vec of u32 unichars. Implode to a string.
@@ -3408,7 +3408,7 @@ implode(rust_proc *proc, rust_vec *v)
     rust_str *s;
 
     size_t fill = v->fill >> 2;
-    s = upcall_new_str(proc, NULL, fill);
+    s = upcall_new_str(task, NULL, fill);
 
     uint32_t *src = (uint32_t*) &v->data[0];
     uint8_t *dst = &s->data[0];
@@ -3431,7 +3431,7 @@ rust_start(uintptr_t main_fn, rust_crate const *crate)
             rust_crate_reader rdr(&rt, crate);
         }
 
-        rt.root_proc->start(crate->get_main_exit_proc_glue(), main_fn, NULL, 0);
+        rt.root_task->start(crate->get_main_exit_task_glue(), main_fn, NULL, 0);
 
         ret = rust_main_loop(&rt);
     }

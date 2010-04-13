@@ -95,7 +95,7 @@ and ty =
   | TY_port of ty
 
   | TY_obj of ty_obj
-  | TY_proc
+  | TY_task
 
   | TY_opaque of (opaque_id * mutability)
   | TY_param of (ty_param_idx * opaque_id * mutability)
@@ -642,7 +642,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_type -> fmt ff "type"
 
   | TY_fn tfn -> fmt_ty_fn ff None tfn
-  | TY_proc -> fmt ff "proc"
+  | TY_task -> fmt ff "task"
   | TY_tag ttag -> fmt_tag ff ttag
   | TY_iso tiso -> fmt_iso ff tiso
   | TY_idx idx -> fmt ff "<idx#%d>" idx

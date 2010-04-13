@@ -202,9 +202,9 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
         bump ps;
         Ast.TY_any
 
-    | PROC ->
+    | TASK ->
         bump ps;
-        Ast.TY_proc
+        Ast.TY_task
 
     | CHAN ->
         bump ps;

@@ -84,13 +84,13 @@ let trans_crate
       | Ast.TY_fn
             ({ Ast.sig_input_slots = ins; Ast.sig_output_slot = out }, _) ->
           let llout = trans_slot None out in
-          let llprocty = Llvm.pointer_type abi.Llabi.proc_ty in
+          let lltaskty = Llvm.pointer_type abi.Llabi.task_ty in
           let llins = Array.map (trans_slot None) ins in
-          Llvm.function_type llout (Array.append [| llprocty |] llins)
+          Llvm.function_type llout (Array.append [| lltaskty |] llins)
       | Ast.TY_constrained (ty', _) -> trans_ty ty'
       | Ast.TY_tup _ | Ast.TY_vec _ | Ast.TY_rec _ | Ast.TY_tag _
             | Ast.TY_iso _ | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _
-            | Ast.TY_port _ | Ast.TY_obj _ | Ast.TY_proc | Ast.TY_opaque _
+            | Ast.TY_port _ | Ast.TY_obj _ | Ast.TY_task | Ast.TY_opaque _
             | Ast.TY_param _ | Ast.TY_named _ | Ast.TY_type ->
           Llvm.opaque_type llctx (* TODO *)
 
@@ -164,7 +164,7 @@ let trans_crate
       (fn_id:node_id)
       : unit =
     let llfn = Hashtbl.find llitems fn_id in
-    let llproc = Llvm.param llfn 0 in
+    let lltask = Llvm.param llfn 0 in
 
     (* LLVM requires that functions be grouped into basic blocks terminated by
      * terminator instructions, while our AST is less strict. So we have to do
@@ -337,7 +337,7 @@ let trans_crate
                   trans_tail ()
               | Ast.STMT_call (dest, fn, args) ->
                   let llargs = Array.map trans_atom args in
-                  let llallargs = Array.append [| llproc |] llargs in
+                  let llallargs = Array.append [| lltask |] llargs in
                   let llfn = trans_lval fn in
                   let lldest = trans_lval dest in
                   let llid = anon_llid "rv" in

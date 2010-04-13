@@ -18,8 +18,8 @@ type code = {
 type glue =
     GLUE_activate
   | GLUE_yield
-  | GLUE_exit_main_proc
-  | GLUE_exit_proc
+  | GLUE_exit_main_task
+  | GLUE_exit_task
   | GLUE_mark of Ast.ty
   | GLUE_drop of Ast.ty
   | GLUE_free of Ast.ty
@@ -150,7 +150,7 @@ type ctxt =
 
       ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
-      ctxt_main_exit_proc_glue_fixup: fixup;
+      ctxt_main_exit_task_glue_fixup: fixup;
     }
 ;;
 
@@ -224,7 +224,7 @@ let new_ctxt sess abi crate =
 
     ctxt_main_fn_fixup = new_fixup (string_of_name crate.Ast.crate_main);
     ctxt_main_name = string_of_name crate.Ast.crate_main;
-    ctxt_main_exit_proc_glue_fixup = new_fixup "main exit-proc glue"
+    ctxt_main_exit_task_glue_fixup = new_fixup "main exit-task glue"
   }
 ;;
 
@@ -556,7 +556,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_pred : ('slots * Ast.constrs) -> 'ty;
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
-      ty_fold_proc : unit -> 'ty;
+      ty_fold_task : unit -> 'ty;
       ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
       ty_fold_param : (int * opaque_id * Ast.mutability) -> 'ty;
       ty_fold_named : Ast.name -> 'ty;
@@ -606,7 +606,7 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
   | Ast.TY_obj t -> f.ty_fold_obj (fold_obj t)
-  | Ast.TY_proc -> f.ty_fold_proc ()
+  | Ast.TY_task -> f.ty_fold_task ()
 
   | Ast.TY_opaque x -> f.ty_fold_opaque x
   | Ast.TY_param x -> f.ty_fold_param x
@@ -643,7 +643,7 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_pred = (fun _ -> default);
       ty_fold_chan = (fun _ -> default);
       ty_fold_port = (fun _ -> default);
-      ty_fold_proc = (fun _ -> default);
+      ty_fold_task = (fun _ -> default);
       ty_fold_opaque = (fun _ -> default);
       ty_fold_param = (fun _ -> default);
       ty_fold_named = (fun _ -> default);
@@ -685,7 +685,7 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
                       id (Ast.TY_pred (islots, constrs)));
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
     ty_fold_port = (fun t -> id (Ast.TY_port t));
-    ty_fold_proc = (fun _ -> id Ast.TY_proc);
+    ty_fold_task = (fun _ -> id Ast.TY_task);
     ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
     ty_fold_param = (fun (i, oid, mut) -> id (Ast.TY_param (i, oid, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
@@ -1279,7 +1279,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
       | Ast.TY_chan _
       | Ast.TY_port _
-      | Ast.TY_proc
+      | Ast.TY_task
       | Ast.TY_type -> rc_ptr
 
       | Ast.TY_param (i, _, _) -> Il.ParamTy i
@@ -1305,11 +1305,11 @@ and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
     | Ast.MODE_write_alias -> sp rty
 ;;
 
-let proc_rty (abi:Abi.abi) : Il.referent_ty =
+let task_rty (abi:Abi.abi) : Il.referent_ty =
   Il.StructTy
     begin
       Array.init
-        Abi.n_visible_proc_fields
+        Abi.n_visible_task_fields
         (fun _ -> word_rty abi)
     end
 ;;
@@ -1338,7 +1338,7 @@ let call_args_referent_type_full
     : Il.referent_ty =
   let out_slot_rty = slot_referent_type abi out_slot in
   let out_ptr_rty = Il.ScalarTy (Il.AddrTy out_slot_rty) in
-  let proc_ptr_rty = Il.ScalarTy (Il.AddrTy (proc_rty abi)) in
+  let task_ptr_rty = Il.ScalarTy (Il.AddrTy (task_rty abi)) in
   let ty_param_rtys =
     let td = Il.ScalarTy (Il.AddrTy (tydesc_rty abi)) in
       Il.StructTy (Array.init n_ty_params (fun _ -> td))
@@ -1351,7 +1351,7 @@ let call_args_referent_type_full
     Il.StructTy
       [|
         out_ptr_rty;                (* Abi.calltup_elt_out_ptr    *)
-        proc_ptr_rty;               (* Abi.calltup_elt_proc_ptr   *)
+        task_ptr_rty;               (* Abi.calltup_elt_task_ptr   *)
         ty_param_rtys;              (* Abi.calltup_elt_ty_params  *)
         arg_rtys;                   (* Abi.calltup_elt_args       *)
         Il.StructTy extra_arg_rtys  (* Abi.calltup_elt_extra_args *)
@@ -1440,9 +1440,9 @@ let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
 
 (* FIXME: eliminate this, it duplicates logic elsewhere. *)
 let fn_call_tup (abi:Abi.abi) (inputs:Ast.ty_tup) : Ast.ty_tup =
-  let proc_ptr = word_slot abi in
+  let task_ptr = word_slot abi in
   let out_ptr = word_slot abi in
-    Array.append [| out_ptr; proc_ptr |] inputs
+    Array.append [| out_ptr; task_ptr |] inputs
 ;;
 
 
@@ -1555,7 +1555,7 @@ let ty_str (ty:Ast.ty) : string =
          ty_fold_port = (fun t -> "R" ^ t);
          (* FIXME: encode obj types. *)
          ty_fold_obj = (fun _ -> "o");
-         ty_fold_proc = (fun _ -> "P");
+         ty_fold_task = (fun _ -> "P");
          (* FIXME: encode opaque and param numbers. *)
          ty_fold_opaque = (fun _ -> "Q");
          ty_fold_param = (fun _ -> "A");
@@ -1571,8 +1571,8 @@ let glue_str (cx:ctxt) (g:glue) : string =
   match g with
       GLUE_activate -> "glue$activate"
     | GLUE_yield -> "glue$yield"
-    | GLUE_exit_main_proc -> "glue$exit_main_proc"
-    | GLUE_exit_proc -> "glue$exit_proc"
+    | GLUE_exit_main_task -> "glue$exit_main_task"
+    | GLUE_exit_task -> "glue$exit_task"
     | GLUE_mark ty -> "glue$mark$" ^ (ty_str ty)
     | GLUE_drop ty -> "glue$drop$" ^ (ty_str ty)
     | GLUE_free ty -> "glue$free$" ^ (ty_str ty)

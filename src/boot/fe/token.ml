@@ -124,10 +124,10 @@ type token =
   (* Object type *)
   | OBJ
 
-  (* Comm and proc types *)
+  (* Comm and task types *)
   | CHAN
   | PORT
-  | PROC
+  | TASK
 
   | EOF
 
@@ -287,8 +287,8 @@ let rec string_of_tok t =
     | CHAN          -> "chan"
     | PORT          -> "port"
 
-    (* Process types *)
-    | PROC         -> "proc"
+    (* Taskess types *)
+    | TASK         -> "task"
 
     | EOF        -> "<EOF>"
 ;;

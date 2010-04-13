@@ -46,7 +46,7 @@ let finalize_module
       Llvm.const_int i32 0;             (* ptrdiff_t debug_info_off *)
       Llvm.const_int i32 0;             (* size_t debug_info_sz *)
       activate_glue_off;                (* size_t activate_glue_off *)
-      Llvm.const_int i32 0;             (* size_t main_exit_proc_glue_off *)
+      Llvm.const_int i32 0;             (* size_t main_exit_task_glue_off *)
       Llvm.const_int i32 0;             (* size_t unwind_glue_off *)
       yield_glue_off;                   (* size_t yield_glue_off *)
       Llvm.const_int i32 rust_fn_count; (* int n_rust_syms *)

@@ -11,13 +11,13 @@
 
 let rc_base_field_refcnt = 0;;
 
-let proc_field_refcnt = rc_base_field_refcnt;;
-let proc_field_stk = proc_field_refcnt + 1;;
-let proc_field_runtime_sp = proc_field_stk + 1;;
-let proc_field_rust_sp = proc_field_runtime_sp + 1;;
-let proc_field_gc_alloc_chain = proc_field_rust_sp + 1;;
-let proc_field_rt = proc_field_gc_alloc_chain + 1;;
-let n_visible_proc_fields = proc_field_rt + 1;;
+let task_field_refcnt = rc_base_field_refcnt;;
+let task_field_stk = task_field_refcnt + 1;;
+let task_field_runtime_sp = task_field_stk + 1;;
+let task_field_rust_sp = task_field_runtime_sp + 1;;
+let task_field_gc_alloc_chain = task_field_rust_sp + 1;;
+let task_field_rt = task_field_gc_alloc_chain + 1;;
+let n_visible_task_fields = task_field_rt + 1;;
 
 let frame_glue_fns_field_mark = 0;;
 let frame_glue_fns_field_drop = 1;;
@@ -57,7 +57,7 @@ let tydesc_field_drop_glue = 3;;
 let tydesc_field_free_glue = 4;;
 
 let calltup_elt_out_ptr = 0;;
-let calltup_elt_proc_ptr = 1;;
+let calltup_elt_task_ptr = 1;;
 let calltup_elt_ty_params = 2;;
 let calltup_elt_args = 3;;
 let calltup_elt_extra_args = 4;;
@@ -98,7 +98,7 @@ type abi =
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;
     abi_dwarf_fp_reg: int;
-    abi_pp_cell: Il.cell;
+    abi_tp_cell: Il.cell;
     abi_implicit_args_sz: int64;
     abi_frame_base_sz: int64;
     abi_frame_info_sz: int64;

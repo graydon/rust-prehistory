@@ -255,7 +255,7 @@ and walk_ty
       | Ast.TY_int -> ()
       | Ast.TY_bool -> ()
       | Ast.TY_nil -> ()
-      | Ast.TY_proc -> ()
+      | Ast.TY_task -> ()
       | Ast.TY_any -> ()
   in
     walk_bracketed
@@ -500,8 +500,8 @@ and walk_stmt
       | Ast.STMT_yield ->
           ()
 
-      | Ast.STMT_join proc ->
-          walk_lval v proc
+      | Ast.STMT_join task ->
+          walk_lval v task
 
       | Ast.STMT_send (dst,src) ->
           walk_lval v dst;

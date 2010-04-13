@@ -376,8 +376,8 @@ let trans_visitor
   and deref_imm (ptr:Il.cell) (imm:int64) : Il.cell =
     deref_off ptr (Asm.IMM imm)
 
-  and pp_imm (imm:int64) : Il.cell =
-    deref_imm abi.Abi.abi_pp_cell imm
+  and tp_imm (imm:int64) : Il.cell =
+    deref_imm abi.Abi.abi_tp_cell imm
   in
 
   let cell_vreg_num (vr:(int option) ref) : int =
@@ -953,7 +953,7 @@ let trans_visitor
       push_new_emitter_with_vregs ();
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter())
-        framesz callsz nabi_rust (upcall_fixup "upcall_grow_proc");
+        framesz callsz nabi_rust (upcall_fixup "upcall_grow_task");
       write_frame_info_ptrs None;
       iflog (fun _ -> annotate "finished prologue");
 
@@ -975,7 +975,7 @@ let trans_visitor
     capture_emitted_glue fix spill g;
     pop_emitter ()
 
-  and emit_exit_proc_glue (fix:fixup) (g:glue) : unit =
+  and emit_exit_task_glue (fix:fixup) (g:glue) : unit =
     let name = glue_str cx g in
     let spill = new_fixup (name ^ " spill") in
       push_new_emitter_with_vregs ();
@@ -988,13 +988,13 @@ let trans_visitor
       capture_emitted_glue fix spill g;
       pop_emitter ()
 
-  and get_exit_proc_glue _ : fixup =
-    let g = GLUE_exit_proc in
+  and get_exit_task_glue _ : fixup =
+    let g = GLUE_exit_task in
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
             let fix = new_fixup (glue_str cx g) in
-              emit_exit_proc_glue fix g;
+              emit_exit_task_glue fix g;
               fix
 
   (*
@@ -1232,11 +1232,11 @@ let trans_visitor
     let inner (arg:Il.cell) =
       let dst = deref (ptr_at (fp_imm out_mem_disp) ty) in
       let src = deref arg in
-        (* FIXME: Gross hack here: we know clone_proc is one-past arg
+        (* FIXME: Gross hack here: we know clone_task is one-past arg
          * in clone glue args.
          *)
-      let clone_proc = word_at (fp_imm (Int64.add arg0_disp (word_n 1))) in
-        clone_ty clone_proc ty dst src curr_iso
+      let clone_task = word_at (fp_imm (Int64.add arg0_disp (word_n 1))) in
+        clone_ty clone_task ty dst src curr_iso
     in
     let fix = get_typed_mem_glue g ty inner in
       fix
@@ -1265,21 +1265,21 @@ let trans_visitor
       (dst:Il.cell)
       (fix:fixup)
       (arg:Il.cell)
-      (clone_proc:Il.cell)
+      (clone_task:Il.cell)
       : unit =
     let code = fixup_to_code fix in
     let arg_tup = arg_tup_cell [| word_slot; word_slot |] in
       (* Arg0 is target of clone, to which we write. *)
-      (* Arg1 is process-pointer, as usual. *)
+      (* Arg1 is task-pointer, as usual. *)
       (* Arg2 is the address of the slot we're cloning. *)
-      (* Arg3 is the process that will own the data. *)
+      (* Arg3 is the task that will own the data. *)
       aliasing true dst
         begin
           fun dst ->
             mov (get_element_ptr arg_tup 0) (Il.Cell dst);
-            mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
+            mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_tp_cell);
             mov (get_element_ptr arg_tup 2) (Il.Cell arg);
-            mov (get_element_ptr arg_tup 3) (Il.Cell clone_proc);
+            mov (get_element_ptr arg_tup 3) (Il.Cell clone_task);
             call_code code
         end
 
@@ -1291,13 +1291,13 @@ let trans_visitor
     let code = code_of_cell glue  in
     let arg_tup = arg_tup_cell [| word_slot |] in
       (* Arg0 is target of copy, to which we write. *)
-      (* Arg1 is process-pointer, as usual. *)
+      (* Arg1 is task-pointer, as usual. *)
       (* Arg2 is the address of the slot we're cloning. *)
       aliasing true dst
         begin
           fun dst ->
             mov (get_element_ptr arg_tup 0) (Il.Cell dst);
-            mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
+            mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_tp_cell);
             mov (get_element_ptr arg_tup 2) (Il.Cell src);
             call_code code
         end
@@ -1306,9 +1306,9 @@ let trans_visitor
     let code = fixup_to_code fix in
     let arg_tup = arg_tup_cell [| word_slot |] in
       (* Arg0 we ignore, not present. *)
-      (* Arg1 is process-pointer, as usual. *)
+      (* Arg1 is task-pointer, as usual. *)
       (* Arg2 is the sole pointer we pass in. *)
-      mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_pp_cell);
+      mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_tp_cell);
       mov (get_element_ptr arg_tup 2) (Il.Cell arg);
       call_code code
 
@@ -1492,7 +1492,7 @@ let trans_visitor
       (fn_lval:Ast.lval)
       (args:Ast.atom array)
       : unit =
-    let (proc_cell, _) = trans_lval_init dst in
+    let (task_cell, _) = trans_lval_init dst in
     let (fptr_operand, fn_ty) = trans_callee fn_lval in
     let fn_ty_params = [| |] in
     let _ =
@@ -1502,39 +1502,39 @@ let trans_visitor
     in
     let args_rty = call_args_referent_type cx 0 fn_ty None in
     let fptr_operand = reify_ptr fptr_operand in
-    let exit_proc_glue_fixup = get_exit_proc_glue () in
+    let exit_task_glue_fixup = get_exit_task_glue () in
     let callsz =
       calculate_sz_in_current_frame (Il.referent_ty_size word_bits args_rty)
     in
-    let exit_proc_glue_fptr = code_fixup_to_ptr_operand exit_proc_glue_fixup in
-    let exit_proc_glue_fptr = reify_ptr exit_proc_glue_fptr in
+    let exit_task_glue_fptr = code_fixup_to_ptr_operand exit_task_glue_fixup in
+    let exit_task_glue_fptr = reify_ptr exit_task_glue_fptr in
 
-      iflog (fun _ -> annotate "spawn proc: copy args");
+      iflog (fun _ -> annotate "spawn task: copy args");
 
-      let new_proc = next_vreg_cell Il.voidptr_t in
+      let new_task = next_vreg_cell Il.voidptr_t in
         match realm with
             Ast.REALM_thread ->
               begin
-                trans_upcall "upcall_new_thread" new_proc [| |];
-                copy_fn_args false (CLONE_all new_proc) CALL_indirect
-                  fn_ty_params fn_ty proc_cell args [| |];
-                trans_upcall "upcall_start_thread" proc_cell
+                trans_upcall "upcall_new_thread" new_task [| |];
+                copy_fn_args false (CLONE_all new_task) CALL_indirect
+                  fn_ty_params fn_ty task_cell args [| |];
+                trans_upcall "upcall_start_thread" task_cell
                   [|
-                    Il.Cell new_proc;
-                    exit_proc_glue_fptr;
+                    Il.Cell new_task;
+                    exit_task_glue_fptr;
                     fptr_operand;
                     callsz
                   |];
             end
          | _ ->
              begin
-                 trans_upcall "upcall_new_proc" new_proc [| |];
-                 copy_fn_args false (CLONE_chan new_proc) CALL_indirect
-                   fn_ty_params fn_ty proc_cell args [| |];
-                 trans_upcall "upcall_start_proc" proc_cell
+                 trans_upcall "upcall_new_task" new_task [| |];
+                 copy_fn_args false (CLONE_chan new_task) CALL_indirect
+                   fn_ty_params fn_ty task_cell args [| |];
+                 trans_upcall "upcall_start_task" task_cell
                    [|
-                     Il.Cell new_proc;
-                     exit_proc_glue_fptr;
+                     Il.Cell new_task;
+                     exit_task_glue_fptr;
                      fptr_operand;
                      callsz
                    |];
@@ -1572,8 +1572,8 @@ let trans_visitor
   and trans_yield () : unit =
     trans_void_upcall "upcall_yield" [| |];
 
-  and trans_join (proc:Ast.lval) : unit =
-    trans_void_upcall "upcall_join" [| trans_atom (Ast.ATOM_lval proc) |]
+  and trans_join (task:Ast.lval) : unit =
+    trans_void_upcall "upcall_join" [| trans_atom (Ast.ATOM_lval task) |]
 
   and trans_send (chan:Ast.lval) (src:Ast.lval) : unit =
     let (srccell, _) = trans_lval src in
@@ -1615,8 +1615,8 @@ let trans_visitor
   and trans_del_chan (chan:Il.cell) : unit =
     trans_void_upcall "upcall_del_chan" [| Il.Cell chan |]
 
-  and trans_kill_proc (proc:Il.cell) : unit =
-    trans_void_upcall "upcall_kill" [| Il.Cell proc |]
+  and trans_kill_task (task:Il.cell) : unit =
+    trans_void_upcall "upcall_kill" [| Il.Cell task |]
 
   (*
    * A vec is implicitly exterior: every slot vec[T] is 1 word and
@@ -1721,7 +1721,7 @@ let trans_visitor
         match ty with
             Ast.TY_port _ -> MEM_rc_opaque Abi.port_field_refcnt
           | Ast.TY_chan _ -> MEM_rc_opaque Abi.chan_field_refcnt
-          | Ast.TY_proc -> MEM_rc_opaque Abi.proc_field_refcnt
+          | Ast.TY_task -> MEM_rc_opaque Abi.task_field_refcnt
               (* Vecs and strs are pseudo-exterior. *)
           | Ast.TY_vec _ -> MEM_rc_struct
           | Ast.TY_str -> MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
@@ -1885,7 +1885,7 @@ let trans_visitor
     iter_ty_slots ty cell mark_slot curr_iso
 
   and clone_ty
-      (clone_proc:Il.cell)
+      (clone_task:Il.cell)
       (ty:Ast.ty)
       (dst:Il.cell)
       (src:Il.cell)
@@ -1894,14 +1894,14 @@ let trans_visitor
     match ty with
         Ast.TY_chan _ ->
           trans_upcall "upcall_clone_chan" dst
-            [| (Il.Cell clone_proc); (Il.Cell src) |]
-      | Ast.TY_proc
+            [| (Il.Cell clone_task); (Il.Cell src) |]
+      | Ast.TY_task
       | Ast.TY_port _
       | _ when type_is_mutable ty
           -> bug () "cloning mutable type"
       | _ when i64_le (ty_sz abi ty) word_sz
           -> mov dst (Il.Cell src)
-      | _ -> iter_ty_slots_full ty dst src (clone_slot clone_proc) curr_iso
+      | _ -> iter_ty_slots_full ty dst src (clone_slot clone_task) curr_iso
 
   and copy_ty
       (ty:Ast.ty)
@@ -1954,7 +1954,7 @@ let trans_visitor
     match ty with
         Ast.TY_port _ -> trans_del_port cell
       | Ast.TY_chan _ -> trans_del_chan cell
-      | Ast.TY_proc -> trans_kill_proc cell
+      | Ast.TY_task -> trans_kill_task cell
       | _ -> trans_free cell
 
   and maybe_iso
@@ -2031,7 +2031,7 @@ let trans_visitor
             (Il.string_of_referent_ty (Il.cell_referent_ty cell))
 
   and clone_slot
-      (clone_proc:Il.cell)
+      (clone_task:Il.cell)
       (dst:Il.cell)
       (src:Il.cell)
       (dst_slot:Ast.slot)
@@ -2044,11 +2044,11 @@ let trans_visitor
             let curr_iso = maybe_enter_iso ty curr_iso in
             let dst = deref_slot true dst dst_slot in
             let glue_fix = get_clone_glue (slot_ty dst_slot) curr_iso in
-              trans_call_clone_glue dst glue_fix src clone_proc
+              trans_call_clone_glue dst glue_fix src clone_task
 
         | Ast.MODE_read_alias
         | Ast.MODE_write_alias -> bug () "cloning into alias slot"
-        | Ast.MODE_interior _ -> clone_ty clone_proc ty dst src curr_iso
+        | Ast.MODE_interior _ -> clone_ty clone_task ty dst src curr_iso
 
   and drop_slot
       (cell:Il.cell)
@@ -2162,7 +2162,7 @@ let trans_visitor
                 iflog (fun _ -> annotate "init GC exterior: load next-pointer");
                 let next = exterior_gc_next_cell cell in
                   mov next (Il.Cell
-                              (pp_imm (word_n Abi.proc_field_gc_alloc_chain)));
+                              (tp_imm (word_n Abi.task_field_gc_alloc_chain)));
 
         | MEM_rc_opaque rc_off ->
             iflog (fun _ -> annotate "init RC exterior: malloc");
@@ -2456,10 +2456,10 @@ let trans_visitor
         | _ -> false
     in
       match clone with
-          CLONE_chan clone_proc ->
+          CLONE_chan clone_task ->
             let clone =
               if (type_contains_chan (slot_ty src_slot))
-              then CLONE_all clone_proc
+              then CLONE_all clone_task
               else CLONE_none
             in
               trans_init_slot_from_cell clone dst dst_slot src src_slot
@@ -2467,10 +2467,10 @@ let trans_visitor
             if is_alias_cell
             then mov dst (Il.Cell (alias src))
             else trans_copy_slot true dst dst_slot src src_slot None
-        | CLONE_all clone_proc ->
+        | CLONE_all clone_task ->
             if is_alias_cell
             then bug () "attempting to clone alias cell"
-            else clone_slot clone_proc dst src dst_slot None
+            else clone_slot clone_task dst src dst_slot None
 
   and trans_be_fn
       (cx:ctxt)
@@ -2610,12 +2610,12 @@ let trans_visitor
       output_cell word_slot
 
   and trans_arg1 (arg_cell:Il.cell) : unit =
-    (* Emit arg1 of any call: the process pointer. *)
-    iflog (fun _ -> annotate "fn-call arg 1: process pointer");
+    (* Emit arg1 of any call: the task pointer. *)
+    iflog (fun _ -> annotate "fn-call arg 1: task pointer");
     trans_init_slot_from_cell
       CLONE_none
       arg_cell word_slot
-      abi.Abi.abi_pp_cell word_slot
+      abi.Abi.abi_tp_cell word_slot
 
   and trans_argN
       (clone:clone_ctrl)
@@ -2679,8 +2679,8 @@ let trans_visitor
     let callee_output_cell =
       get_element_ptr all_callee_args_cell Abi.calltup_elt_out_ptr
     in
-    let callee_proc_cell =
-      get_element_ptr all_callee_args_cell Abi.calltup_elt_proc_ptr
+    let callee_task_cell =
+      get_element_ptr all_callee_args_cell Abi.calltup_elt_task_ptr
     in
     let callee_ty_params =
       get_element_ptr all_callee_args_cell Abi.calltup_elt_ty_params
@@ -2696,7 +2696,7 @@ let trans_visitor
     let n_extras = Array.length caller_extra_args in
 
       trans_arg0 callee_output_cell caller_output_cell;
-      trans_arg1 callee_proc_cell;
+      trans_arg1 callee_task_cell;
 
       let get_tydesc ty_param =
         match ty_param with
@@ -2778,7 +2778,7 @@ let trans_visitor
       (* 
        * NB: 'all_*_args', both self and callee, are always 4-tuples: 
        * 
-       *    [out_ptr, proc_ptr, [args], [extra_args]] 
+       *    [out_ptr, task_ptr, [args], [extra_args]] 
        * 
        * The first few bindings here just destructure those via GEP.
        * 
@@ -2806,11 +2806,11 @@ let trans_visitor
           (Il.Cell (get_element_ptr all_self_args_cell
                       Abi.calltup_elt_out_ptr));
 
-        iflog (fun _ -> annotate "copy proc-ptr");
+        iflog (fun _ -> annotate "copy task-ptr");
         mov
-          (get_element_ptr all_callee_args_cell Abi.calltup_elt_proc_ptr)
+          (get_element_ptr all_callee_args_cell Abi.calltup_elt_task_ptr)
           (Il.Cell (get_element_ptr all_self_args_cell
-                      Abi.calltup_elt_proc_ptr));
+                      Abi.calltup_elt_task_ptr));
 
         iflog (fun _ -> annotate "extract closure extra-arg");
         let closure_cell =
@@ -3086,8 +3086,8 @@ let trans_visitor
       | Ast.STMT_yield ->
           trans_yield ()
 
-      | Ast.STMT_join proc ->
-          trans_join proc
+      | Ast.STMT_join task ->
+          trans_join task
 
       | Ast.STMT_send (chan,src) ->
           trans_send chan src
@@ -3385,7 +3385,7 @@ let trans_visitor
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue
         (emitter()) framesz callsz nabi_rust
-        (upcall_fixup "upcall_grow_proc");
+        (upcall_fixup "upcall_grow_task");
 
       write_frame_info_ptrs (Some fnid);
       iflog (fun _ -> annotate "finished prologue");
@@ -3676,10 +3676,10 @@ let trans_visitor
           if path_name() = cx.ctxt_main_name
           then
             begin
-              log cx "emitting main exit-proc glue for %s" cx.ctxt_main_name;
-              emit_exit_proc_glue
-                cx.ctxt_main_exit_proc_glue_fixup
-                GLUE_exit_main_proc;
+              log cx "emitting main exit-task glue for %s" cx.ctxt_main_name;
+              emit_exit_task_glue
+                cx.ctxt_main_exit_task_glue_fixup
+                GLUE_exit_main_task;
             end;
           trans_fn i.id f.Ast.fn_body
 
@@ -3788,7 +3788,7 @@ let trans_visitor
             Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_info_fixup);
 
             crate_rel_word cx.ctxt_activate_fixup;
-            crate_rel_word cx.ctxt_main_exit_proc_glue_fixup;
+            crate_rel_word cx.ctxt_main_exit_task_glue_fixup;
             crate_rel_word cx.ctxt_unwind_fixup;
             crate_rel_word cx.ctxt_yield_fixup;
 

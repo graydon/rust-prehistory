@@ -45,7 +45,7 @@ let x86_glue
     [
       ("rust_activate_glue",
        String.concat "\n\t"
-         (["movl  4(%esp),%edx    # edx = rust_proc"]
+         (["movl  4(%esp),%edx    # edx = rust_task"]
           @ save_callee_saves
           @ store_esp_to_runtime_sp
           @ load_esp_from_rust_sp
@@ -60,7 +60,7 @@ let x86_glue
       ("rust_yield_glue",
        String.concat "\n\t"
 
-         (["movl  0(%esp),%edx    # edx = rust_proc"]
+         (["movl  0(%esp),%edx    # edx = rust_task"]
           @ load_esp_from_rust_sp
           @ save_callee_saves
           @ store_esp_to_rust_sp
@@ -86,8 +86,8 @@ let x86_glue
       end
   in
   let decl_glue s =
-    let proc_ptr_ty = Llvm.pointer_type abi.Llabi.proc_ty in
-    let ty = Llvm.function_type (Llvm.void_type llctx) [| proc_ptr_ty |] in
+    let task_ptr_ty = Llvm.pointer_type abi.Llabi.task_ty in
+    let ty = Llvm.function_type (Llvm.void_type llctx) [| task_ptr_ty |] in
       Llvm.declare_function s ty llmod;
   in
     {

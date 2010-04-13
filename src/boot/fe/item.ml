@@ -445,7 +445,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
       | JOIN ->
           bump ps;
-          let (stmts, lval) = ctxt "stmts: proc expr" parse_lval ps in
+          let (stmts, lval) = ctxt "stmts: task expr" parse_lval ps in
             expect ps SEMI;
             spans ps stmts apos (Ast.STMT_join lval)
 

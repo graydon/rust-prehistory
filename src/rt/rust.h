@@ -24,7 +24,7 @@
 #define CDECL
 #endif
 
-struct rust_proc;
+struct rust_task;
 
 struct rust_srv {
     size_t live_allocs;
