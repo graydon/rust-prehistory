@@ -1025,6 +1025,13 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               unify_lval callee callee_tv;
               unify_lval bound bound_tv
 
+        | Ast.STMT_foreach fe ->
+            let out_tv = ref TYSPEC_all in
+            let (si, _) = fe.Ast.foreach_slot in
+            let (callee, args) = fe.Ast.foreach_call in
+              unify_slot si.node (Some si.id) out_tv;
+              check_callable out_tv callee args
+
         (* FIXME (bug 541531): plenty more to handle here. *)
         | _ ->
             log cx "warning: not typechecking stmt %s\n"
