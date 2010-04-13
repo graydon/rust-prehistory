@@ -400,7 +400,7 @@ and walk_stmt
     let (f,az) = s.Ast.foreach_call in
       walk_slot_identified v si;
       walk_lval v f;
-      Array.iter (walk_lval v) az;
+      Array.iter (walk_atom v) az;
       walk_block v s.Ast.foreach_body
   in
   let walk_stmt_while

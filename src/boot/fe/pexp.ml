@@ -295,9 +295,9 @@ and apply_mutability (ps:pstate) (slot:Ast.slot) (mut:Ast.mutability) : Ast.slot
   in
     { slot with Ast.slot_mode = mode }
 
-and parse_slot (param_slot:bool) (ps:pstate) : Ast.slot =
+and parse_slot (aliases_ok:bool) (ps:pstate) : Ast.slot =
   let mut = parse_mutability ps in
-  match (peek ps, param_slot) with
+  match (peek ps, aliases_ok) with
       (AT, _) ->
         bump ps;
         let ty = parse_ty ps in
@@ -326,18 +326,18 @@ and parse_slot (param_slot:bool) (ps:pstate) : Ast.slot =
             Ast.slot_ty = Some ty }
 
 and parse_slot_and_ident
-    (param_slot:bool)
+    (aliases_ok:bool)
     (ps:pstate)
     : (Ast.slot * Ast.ident) =
-  let slot = ctxt "slot and ident: slot" (parse_slot param_slot) ps in
+  let slot = ctxt "slot and ident: slot" (parse_slot aliases_ok) ps in
   let ident = ctxt "slot and ident: ident" parse_ident ps in
     (slot, ident)
 
 and parse_slot_and_optional_ignored_ident
-    (param_slot:bool)
+    (aliases_ok:bool)
     (ps:pstate)
     : Ast.slot =
-  let slot = parse_slot param_slot ps in
+  let slot = parse_slot aliases_ok ps in
     begin
       match peek ps with
           IDENT _ -> bump ps
@@ -345,9 +345,9 @@ and parse_slot_and_optional_ignored_ident
     end;
     slot
 
-and parse_identified_slot (param_slot:bool) (ps:pstate) : Ast.slot identified =
+and parse_identified_slot (aliases_ok:bool) (ps:pstate) : Ast.slot identified =
   let apos = lexpos ps in
-  let slot = parse_slot param_slot ps in
+  let slot = parse_slot aliases_ok ps in
   let bpos = lexpos ps in
     span ps apos bpos slot
 

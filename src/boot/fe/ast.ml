@@ -285,7 +285,7 @@ and stmt_foreach =
     {
       foreach_proto: proto;
       foreach_slot: (slot identified * ident);
-      foreach_call: (lval * lval array);
+      foreach_call: (lval * atom array);
       foreach_body: block;
     }
 
@@ -807,6 +807,18 @@ and fmt_atom (ff:Format.formatter) (a:atom) : unit =
       ATOM_literal lit -> fmt_lit ff lit.node
     | ATOM_lval lval -> fmt_lval ff lval
 
+and fmt_atoms (ff:Format.formatter) (az:atom array) : unit =
+  fmt ff "(";
+  Array.iteri
+    begin
+      fun i a ->
+        if i != 0
+        then fmt ff ", ";
+        fmt_atom ff a;
+    end
+    az;
+  fmt ff ")"
+
 and fmt_lval_component (ff:Format.formatter) (lvc:lval_component) : unit =
   match lvc with
       COMP_named nc -> fmt_name_component ff nc
@@ -846,14 +858,8 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt ff " = spawn ";
           fmt_realm ff realm;
           fmt_lval ff fn;
-          fmt ff "(";
-          for i = 0 to (Array.length args) - 1
-          do
-            if i != 0
-            then fmt ff ", ";
-            fmt_atom ff args.(i);
-          done;
-          fmt ff ");";
+          fmt_atoms ff args;
+          fmt ff ";";
 
       | STMT_while sw ->
           let (stmts, e) = sw.while_lval in
@@ -929,14 +935,8 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           end;
           fmt ff " ";
           fmt_lval ff fn;
-          fmt ff "(";
-          for i = 0 to (Array.length args) - 1
-          do
-            if i != 0
-            then fmt ff ", ";
-            fmt_atom ff args.(i);
-          done;
-          fmt ff ");";
+          fmt_atoms ff args;
+          fmt ff ";";
 
       | STMT_block b -> fmt_block ff b.node
 
@@ -958,14 +958,8 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_lval ff dst;
           fmt ff " = ";
           fmt_lval ff fn;
-          fmt ff "(";
-          for i = 0 to (Array.length args) - 1
-          do
-            if i != 0
-            then fmt ff ", ";
-            fmt_atom ff args.(i);
-          done;
-          fmt ff ");";
+          fmt_atoms ff args;
+          fmt ff ";";
 
       | STMT_decl (DECL_slot (skey, sloti)) ->
           if sloti.node.slot_ty != None then fmt ff "let ";
@@ -1069,14 +1063,8 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
               fmt_ident ff ident;
               fmt ff " = ";
               fmt_lval ff f;
-              fmt ff "(";
-              for i = 0 to (Array.length az) - 1
-              do
-                if i != 0
-                then fmt ff ", ";
-                fmt_lval ff az.(i);
-              done;
-              fmt ff ")) ";
+              fmt_atoms ff az;
+              fmt ff ") ";
               fmt_obr ff;
               fmt_stmts ff sforeach.foreach_body.node;
               fmt_cbb ff

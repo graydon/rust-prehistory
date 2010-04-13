@@ -30,30 +30,30 @@ and parse_lval (ps:pstate) : (Ast.stmt array * Ast.lval) =
     Pexp.desugar_lval ps pexp
 
 and parse_identified_slot_and_ident
-    (param_slot:bool)
+    (aliases_ok:bool)
     (ps:pstate)
     : (Ast.slot identified * Ast.ident) =
-  let slot = ctxt "identified slot and ident: slot" (Pexp.parse_identified_slot param_slot) ps in
+  let slot = ctxt "identified slot and ident: slot" (Pexp.parse_identified_slot aliases_ok) ps in
   let ident = ctxt "identified slot and ident: ident" Pexp.parse_ident ps in
     (slot, ident)
 
 and parse_two_or_more_identified_tup_slots_and_idents
-    (param_slot:bool)
+    (aliases_ok:bool)
     (ps:pstate)
     : ((Ast.slot identified) array * Ast.ident array) =
   let both =
     ctxt "two+ tup slots and idents"
-      (bracketed_two_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident param_slot)) ps
+      (bracketed_two_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident aliases_ok)) ps
   in
   let (slots, idents) = List.split (Array.to_list both) in
     (arr slots, arr idents)
 
 and parse_zero_or_more_identified_slot_ident_pairs
-    (param_slot:bool)
+    (aliases_ok:bool)
     (ps:pstate)
     : (((Ast.slot identified) * Ast.ident) array) =
   ctxt "zero+ tup slots and idents"
-    (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident param_slot)) ps
+    (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident aliases_ok)) ps
 
 and parse_block (ps:pstate) : Ast.block =
   let apos = lexpos ps in
@@ -283,12 +283,12 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
       | FOR (Some proto) ->
           bump ps;
-          let inner ps : ((Ast.slot identified * Ast.ident) * Ast.stmt array * (Ast.lval * Ast.lval array)) =
-            let slot = (parse_identified_slot_and_ident false ps) in
+          let inner ps : ((Ast.slot identified * Ast.ident) * Ast.stmt array * (Ast.lval * Ast.atom array)) =
+            let slot = (parse_identified_slot_and_ident true ps) in
             let _    = (expect ps EQ) in
-            let (stmts1, itor) = (rstr true parse_lval) ps in
-            let (stmts2, args) = arj1st (ctxt "exprs: iterator args" (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_lval) ps) in
-              (slot, Array.append stmts1 stmts2, (itor, args))
+            let (stmts1, iter) = (rstr true parse_lval) ps in
+            let (stmts2, args) = parse_expr_atom_list LPAREN RPAREN ps in
+              (slot, Array.append stmts1 stmts2, (iter, args))
           in
           let (slot, stmts, call) = ctxt "stmts: foreach head" (bracketed LPAREN RPAREN inner) ps in
           let body_block = ctxt "stmts: foreach body" parse_block ps in
