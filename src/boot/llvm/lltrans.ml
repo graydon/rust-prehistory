@@ -11,6 +11,20 @@ let trans_crate
     (crate:Ast.crate)
     : Llvm.llmodule =
 
+  (* Helpers for adding metadata. *)
+  let (dbg_mdkind:int) = Llvm.mdkind_id llctx "dbg" in
+  let set_dbg_metadata (inst:Llvm.llvalue) (md:Llvm.llvalue) : unit =
+    Llvm.set_metadata inst dbg_mdkind md
+  in
+  let md_str (s:string) : Llvm.llvalue = Llvm.mdstring llctx s in
+  let md_node (vals:Llvm.llvalue array) : Llvm.llvalue = Llvm.mdnode llctx vals in
+  let const_i32 (i:int) : Llvm.llvalue = Llvm.const_int (Llvm.i32_type llctx) i in
+  let const_i1 (i:int) : Llvm.llvalue = Llvm.const_int (Llvm.i1_type llctx) i in
+  let llvm_debug_version : int = 0x8 lsl 16 in
+  let const_dw_tag (tag:Dwarf.dw_tag) : Llvm.llvalue =
+    const_i32 (llvm_debug_version lor (Dwarf.dw_tag_to_int tag))
+  in
+
   (* Translation of our node_ids into LLVM identifiers, which are strings. *)
   let next_anon_llid = ref 0 in
   let num_llid num klass = Printf.sprintf "%s%d" klass num in
@@ -43,8 +57,7 @@ let trans_crate
 
   let (abi:Llabi.abi) = Llabi.declare_abi llctx llmod in
 
-  (* TODO: other runtimes besides x86 *)
-  let runtime = Llx86.define_runtime llctx llmod abi sess in
+  let asm_glue = Llasm.get_glue llctx llmod abi sess in
 
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
     let tycon =
@@ -105,13 +118,42 @@ let trans_crate
       (name:Ast.ident)
       { node = { Ast.decl_item = (item:Ast.mod_item') }; id = id }
       : unit =
-    match item with
-        Ast.MOD_ITEM_fn _ ->
-          let llty = trans_ty (ty_of id) in
-          let llfn = Llvm.declare_function ("_rust_" ^ name) llty llmod in
-          Llvm.set_function_call_conv Llvm.CallConv.fast llfn;
-          Hashtbl.add llitems id llfn
-      | _ -> () (* TODO *)
+    let full_name = Semant.item_str sem_cx id in
+    let line_num =
+      match Session.get_span sess id with
+          None -> 0
+        | Some span ->
+            let (_, line, _) = span.lo in
+              line
+    in
+      match item with
+          Ast.MOD_ITEM_fn _ ->
+            let llty = trans_ty (ty_of id) in
+            let llfn = Llvm.declare_function ("_rust_" ^ name) llty llmod in
+            let meta =
+              md_node
+                [|
+                  const_dw_tag Dwarf.DW_TAG_subprogram;
+                  const_i32 0; (* unused *)
+                  const_i32 0; (* context metadata llvalue *)
+                  md_str name;
+                  md_str full_name;
+                  md_str full_name;
+                  const_i32 0; (* file metadata llvalue *)
+                  const_i32 line_num;
+                  const_i32 0; (* type descriptor metadata llvalue *)
+                  const_i1 1;  (* flag: local to compile unit? *)
+                  const_i1 1;  (* flag: defined in compile unit? *)
+                |]
+            in
+              Llvm.set_function_call_conv Llvm.CallConv.fast llfn;
+              Hashtbl.add llitems id llfn;
+
+              (* FIXME: Adding metadata does not work yet. . *)
+              let _ = fun _ -> set_dbg_metadata llfn meta in
+                ()
+
+        | _ -> () (* TODO *)
   in
 
   let trans_fn
@@ -370,7 +412,7 @@ let trans_crate
     let items = crate'.Ast.crate_items in
     Hashtbl.iter declare_mod_item items;
     Hashtbl.iter trans_mod_item items;
-    Llfinal.finalize_module llctx llmod abi runtime;
+    Llfinal.finalize_module llctx llmod abi asm_glue;
     llmod
   with e -> Llvm.dispose_module llmod; raise e
 ;;

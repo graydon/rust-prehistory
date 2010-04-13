@@ -7,7 +7,7 @@ let finalize_module
     (llctx:Llvm.llcontext)
     (llmod:Llvm.llmodule)
     (abi:Llabi.abi)
-    runtime
+    (asm_glue:Llasm.asm_glue)
     : unit =
   let i32 = Llvm.i32_type llctx in
   let crate_ptr = Llvm.declare_global abi.Llabi.crate_ty "rust_crate" llmod in
@@ -31,10 +31,13 @@ let finalize_module
 
   let crate_val =
     let crate_addr = Llvm.const_ptrtoint crate_ptr i32 in
-    let activate_glue_off =
-      let addr = Llvm.const_ptrtoint runtime#get_activate_glue i32 in
-      Llvm.const_sub addr crate_addr
+    let glue_off glue =
+      let addr = Llvm.const_ptrtoint glue i32 in
+        Llvm.const_sub addr crate_addr
     in
+    let activate_glue_off = glue_off asm_glue.Llasm.asm_activate_glue in
+    let yield_glue_off = glue_off asm_glue.Llasm.asm_activate_glue in
+
     Llvm.const_struct llctx [|
       Llvm.const_int i32 0;             (* ptrdiff_t image_base_off *)
       crate_ptr;                        (* uintptr_t self_addr *)
@@ -45,7 +48,7 @@ let finalize_module
       activate_glue_off;                (* size_t activate_glue_off *)
       Llvm.const_int i32 0;             (* size_t main_exit_proc_glue_off *)
       Llvm.const_int i32 0;             (* size_t unwind_glue_off *)
-      Llvm.const_int i32 0;             (* size_t yield_glue_off *)
+      yield_glue_off;                   (* size_t yield_glue_off *)
       Llvm.const_int i32 rust_fn_count; (* int n_rust_syms *)
       Llvm.const_int i32 c_fn_count;    (* int n_c_syms *)
       Llvm.const_int i32 0              (* int n_libs *)
@@ -72,3 +75,12 @@ let finalize_module
   ignore (Llvm.build_ret (Llvm.const_int i32 0) main_builder)
 ;;
 
+
+(*
+ * Local Variables:
+ * fill-column: 70;
+ * indent-tabs-mode: nil
+ * buffer-file-coding-system: utf-8-unix
+ * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
+ * End:
+ *)

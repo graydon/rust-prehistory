@@ -23,7 +23,7 @@ CFG_GCC_COMPILE_FLAGS :=
 CFG_GCC_LINK_FLAGS :=
 CFG_VALGRIND :=
 
-CFG_LLVM_CONFIG := #llvm-config
+CFG_LLVM_CONFIG := llvm-config
 
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
@@ -162,7 +162,7 @@ ifdef CFG_LLVM_CONFIG
   LLVM_NATIVE_LIBS := llvm.cmxa llvm_bitwiter.cmxa
   LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
   LLVM_INCS := -I boot/llvm -I $(shell $(CFG_LLVM_CONFIG) --libdir)/ocaml
-  LLVM_MLS := $(addprefix boot/llvm/, llabi.ml llx86.ml llfinal.ml lltrans.ml \
+  LLVM_MLS := $(addprefix boot/llvm/, llabi.ml llasm.ml llfinal.ml lltrans.ml \
     llemit.ml)
   CFG_LLC_COMPILE_FLAGS := -march=x86
   $(info cfg: found llvm-config at $(CFG_LLVM_CONFIG))
