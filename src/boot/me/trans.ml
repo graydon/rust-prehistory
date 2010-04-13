@@ -3286,6 +3286,14 @@ let trans_visitor
 
       | Ast.STMT_decl _ -> ()
 
+      | Ast.STMT_foreach _ ->
+          let depth = Hashtbl.find cx.ctxt_loop_depths stmt.id in
+          let fn_depth = Hashtbl.find cx.ctxt_fn_loop_depths (current_fn ()) in
+            begin
+              Printf.printf "for-each at depth %d in function of max depth %d\n" depth fn_depth;
+              bugi cx stmt.id "for-each not yet implemented"
+            end
+
       | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt %a"
           Ast.sprintf_stmt stmt
 

@@ -277,6 +277,7 @@ let main_pipeline _ =
          Mode.process_crate;
          Mutable.process_crate;
          Gctype.process_crate;
+         Loop.process_crate;
          Layout.process_crate;
          Trans.process_crate |]
   in

@@ -31,21 +31,32 @@ let layout_visitor
    *     |crate ptr                   |
    *     |crate-rel frame info disp   |
    *     +----------------------------+ <-- fp - abi_frame_info_sz
+   *     |iterator link segments      |
+   *     |...                         |
+   *     |...                         |
+   *     +----------------------------+ <-- fp - (abi_frame_info_sz + ilssz)
    *     |spills determined in ra     |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - (abi_frame_info_sz + spillsz)
+   *     +----------------------------+ <-- fp - (abi_frame_info_sz + ilssz + spillsz)
    *     |...                         |
    *     |frame-allocated stuff       |
    *     |determined in resolve       |
    *     |laid out in layout          |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - framesz == sp + callsz
+   *     +----------------------------+ <-- fp - framesz
+   *     |...                         |
+   *     |iterator frames             |
+   *     |initially none              |
+   *     |resizes during execution    |
+   *     |...                         |
+   *     |...                         |
+   *     +----------------------------+ <-- fp - (framesz + itframesz) == sp + callsz
    *     |call space                  |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - (framesz + callsz) == sp
+   *     +----------------------------+ <-- fp - (framesz + itframesz + callsz) == sp
    *
    *   - Slot offsets fall into three classes:
    *
@@ -56,8 +67,8 @@ let layout_visitor
    *        (above the frame-base)
    *
    *     #3 outgoing arg slots are positive offsets from sp
-   *        (they could be negative from fp as well, this is just
-   *         historical)
+   *        (since itframesz changes dynamically, easier than
+   *         calculating as negative offsets from fp)
    *
    *   - Slots are split into two classes:
    *

@@ -102,6 +102,8 @@ type ctxt =
       ctxt_slot_offsets: (node_id,size) Hashtbl.t;
       ctxt_frame_sizes: (node_id,size) Hashtbl.t;
       ctxt_call_sizes: (node_id,size) Hashtbl.t;
+      ctxt_loop_depths: (node_id,int) Hashtbl.t;
+      ctxt_fn_loop_depths: (node_id,int) Hashtbl.t;
 
       (* Mutability and GC stuff. *)
       ctxt_mutable_slot_referent: (node_id,unit) Hashtbl.t;
@@ -191,6 +193,9 @@ let new_ctxt sess abi crate =
     ctxt_slot_offsets = Hashtbl.create 0;
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
+
+    ctxt_loop_depths = Hashtbl.create 0;
+    ctxt_fn_loop_depths = Hashtbl.create 0;
 
     ctxt_fn_fixups = Hashtbl.create 0;
     ctxt_block_fixups = Hashtbl.create 0;

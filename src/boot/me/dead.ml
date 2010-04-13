@@ -5,12 +5,12 @@
 open Semant;;
 open Common;;
 
-let log cx = Session.log "tail"
+let log cx = Session.log "dead"
   cx.ctxt_sess.Session.sess_log_mode
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-let tail_check_visitor
+let dead_code_visitor
     ((*cx*)_:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
@@ -97,12 +97,12 @@ let process_crate
   let path = Stack.create () in
   let passes =
     [|
-      (tail_check_visitor cx
+      (dead_code_visitor cx
          Walk.empty_visitor)
     |]
   in
 
-    run_passes cx "tail" path passes (log cx "%s") crate;
+    run_passes cx "dead" path passes (log cx "%s") crate;
     ()
 ;;
 
