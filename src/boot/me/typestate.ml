@@ -434,6 +434,11 @@ let condition_assigning_visitor
               raise_precondition s.id precond;
               Array.iter visit_arm at.Ast.alt_tag_arms
 
+        | Ast.STMT_foreach fe ->
+            let (si, _) = fe.Ast.foreach_slot in
+            let block_entry_state = [| Constr_init si.id |] in
+              raise_postcondition fe.Ast.foreach_body.id block_entry_state
+
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
@@ -657,7 +662,6 @@ let graph_special_block_structure_building_visitor
             in
             let succ_stmts = List.filter (fun x -> not (List.mem x arm_blocks)) dsts in
               remove_flow_edges graph s.id succ_stmts
-
 
         | _ -> ()
     end;
