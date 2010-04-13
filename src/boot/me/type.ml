@@ -125,11 +125,10 @@ let rec tyspec_to_str (ts:tyspec) : string =
           fmt ff ")";
 
       | TYSPEC_vector tv ->
-          fmt_obox ff;
-          fmt ff "vec[";
+          fmt_obb ff;
+          fmt ff "vector ";
           fmt_tyspec ff (!tv);
-          fmt_cbox ff;
-          fmt ff "]";
+          fmt_cbb ff;
 
       | TYSPEC_dictionary dct ->
           fmt_fields "dictionary" ff dct
