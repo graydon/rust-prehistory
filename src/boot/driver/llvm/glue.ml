@@ -22,6 +22,7 @@ let alt_pipeline sess sem_cx crate =
       Mode.process_crate;
       Mutable.process_crate;
       Gctype.process_crate;
+      Loop.process_crate;
       Layout.process_crate
     |];
   Llemit.trans_and_process_crate sess sem_cx crate
