@@ -161,7 +161,7 @@ ifdef CFG_LLVM_CONFIG
   LLVM_LIBS := llvm.cma llvm_bitwriter.cma
   LLVM_NATIVE_LIBS := llvm.cmxa llvm_bitwiter.cmxa
   LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
-  LLVM_INCS := -I boot/llvm -I $(shell $(CFG_LLVM_CONFIG) --libdir)/ocaml
+  LLVM_INCS := -I boot/llvm -I $(WHERE)
   LLVM_MLS := $(addprefix boot/llvm/, llabi.ml llasm.ml llfinal.ml lltrans.ml \
     llemit.ml)
   CFG_LLC_COMPILE_FLAGS := -march=x86
@@ -250,10 +250,6 @@ $(CFG_BOOT): $(BOOT_CMOS) $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)ocamlc$(OPT) -o $@ $(OCAMLC_FLAGS) $(ML_LIBS) $(BOOT_CMOS)
 endif
-
-%.cmi: %.mli $(MKFILES)
-	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)ocamlc$(OPT) -c -o $@ $(OCAMLC_FLAGS) $<
 
 %.cmo: %.ml $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
