@@ -93,7 +93,7 @@ combining, trimming, and implementing.
 Thanks for your time.
 @flushright
                                    - Graydon Hoare
-                                     Jan 2010
+                                     April 2010
 @end flushright
 
 
@@ -169,29 +169,52 @@ salient features of Rust, relative to other languages.
 @itemize
 
 @sp 1
+@item No @code{null} pointers
+
+The initialisation state of every slot is statically computed as
+part of the typestate system (see below), and requires that all
+slots are initialised before use. There is no @code{null} value;
+uninitialised slots are uninitialised, and can only be written to, not
+read.
+
+The common use for @code{null} in other languages -- as a sentinel
+value -- is subsumed into the more general facility of disjoint union
+types. A program must explicitly model its use of such types.
+
+@sp 1
+@item Lightweight tasks with no shared mutable state
+
+Like many @emph{actor} languages, Rust provides an isolation (and
+concurrency) model based on lightweight tasks scheduled by the
+language runtime. These tasks are very inexpensive and statically
+unable to mutate one another's local memory. Breaking the rule of
+task isolation is only possible by calling external (C/C++) code.
+
+Inter-task communication is typed, asynchronous and simplex, based on
+passing messages over channels to ports. Transmission can be
+rate-limited or rate-unlimited. Selection between multiple senders is
+pseudo-randomised on the receiver side.
+
+@sp 1
 @item Predictable native code, simple runtime
 
 The meaning and cost of every operation within a Rust program is
 intended to be easy to model for the reader. The code should not
 ``surprise'' the programmer once it has been compiled.
 
-Rust is designed to be compiled to mostly-static native code, with
-relatively large compilation units and plenty of room for whole-unit
-optimisation. The output of a Rust compilation is a standard loadable
-object of machine code (ELF, PE, Mach-O), containing standard metadata
-(DWARF), and works with @emph{existing} disassemblers, analysis tools,
-debuggers and profilers. Such object files can be dynamically loaded,
-via the standard operating-system loader, into other processes, and
-executed cooperatively.
+Rust compiles quickly to native code. Rust compilation units are large
+and are subject to aggressive whole-unit optimisation. The compiled
+units are standard loadable objects (ELF, PE, Mach-O) containing
+standard metadata (DWARF) and are compatible with existing, standard
+low-level tools (disassemblers, debuggers, profilers, loaders).
 
-The runtime is relatively small and provides some memory management,
-lightweight task scheduling, internal communication queueing and
-reflection services, but these are all implemented in a
-straightforward and obvious fashion, in standard C, with a low-level
-service provider interface available to embeddings. No research-level
-virtual machine, JIT or garbage collection technology is required. It
-should be relatively easy to adapt a Rust front-end on to many
-existing native toolchains.
+The Rust runtime library is a small collection of support code for
+scheduling, memory management, inter-task communication, reflection
+and runtime linkage. This library is written in standard C++ and is
+quite straightforward. It presents a simple interface to
+embeddings. No research-level virtual machine, JIT or garbage
+collection technology is required. It should be relatively easy to
+adapt a Rust front-end on to many existing native toolchains.
 
 @sp 1
 @item Integrated system-construction facility
@@ -210,43 +233,135 @@ mechanisms or restrictions of crates. Modules and crates serve
 different roles.
 
 @sp 1
-@item Lightweight cooperative tasks
-
-Like many @emph{actor} languages, Rust provides an isolation (and
-concurrency) model based on lightweight tasks scheduled by the
-language runtime. These tasks are inexpensive and @emph{mostly}
-statically secure from one another; breaking the rule of task
-isolation is only possible by calling external (C) code.
-
-Inter-task communication is typed, asynchronous and simplex, based
-on passing messages over channels to ports. Transmission can be
-rate-limited or rate-unlimited. Communication is fair and
-pseudo-randomised on the receiver side.
-
-@sp 1
 @item Stack-based iterator functions
 
-Between the extremes of ``asynchronous concurrent tasks'' and
-``synchronous single-invocation functions'', Rust also provides a form
-of multiple-invocation iterator function, modeled after the same
-facility in @code{CLU}. Iterator functions can @emph{temporarily}
-suspend execution and return a value to their caller, resuming
-execution at the point of suspension when they are re-invoked.
-
-The iterator function facility is tightly integrated into the
-@code{for} loop construct. Only @code{for} loop headers can invoke
-iterator functions, and iterator frames live on the same call stack as
-normal function frames, so cannot escape the invoking loop.
+Rust provides a type of multiple-invocation iterator function that
+is very efficient: the iterator state lives only on the stack and
+is tightly coupled to the loop that invoked it.
 
 @sp 1
 @item Direct interface to C code
 
 Rust can load and call many C library functions simply by declaring
-them in the enclosing crate file. Calling a C function statically
-marks a task as ``unsafe'', unless the unsafe task is further
-isolated within an external ``heavyweight'' operating-system
-subprocess. Every ``unsafe'' task in a Rust compilation unit must
-be explicitly marked as audited and authorised in the crate file.
+them. Calling a C function statically marks a task as ``unsafe'',
+unless the unsafe task is further isolated within an external
+``heavyweight'' operating-system subprocess. Every ``unsafe'' task in
+a Rust compilation unit must be explicitly marked as audited and
+authorised in the crate file.
+
+@sp 1
+@item Structural algebraic data types
+
+The Rust type system is structural rather than nominal, and contains
+the standard assortment of useful ``algebraic'' type constructors from
+functional languages, such as function types, tuples, record types,
+vectors, and tagged disjoint unions. Structural types may be
+@emph{pattern-matched} in an @code{alt} statement.
+
+@sp 1
+@item Generic code
+
+Rust supports a simple form of parametric polymorphism: functions,
+types and objects can be parameterised by other types. Type parameters
+are treated as opaque within the parameterised code.
+
+@sp 1
+@item Argument binding
+
+Rust provides a mechanism of binding function arguments to functions,
+producing new functions that accept the remaining un-bound
+arguments. This mechanism combines some of the features of lexical
+closures with some of the features of currying, in a smaller and more
+predictable package.
+
+@sp 1
+@item Local type inference
+
+To save some quantity of programmer key-pressing, Rust supports local
+type inference: signatures of functions and programs always require
+type annotation, but within the body of a function many types can be
+declared @code{auto} and Rust will infer the type from its use in the
+function.
+
+@sp 1
+@item Structural object system
+
+Rust has a lightweight object system based on structural object types:
+there is no ``class hierarchy'' nor any concept of inheritence. Method
+overriding, object extension and restriction are all performed
+explicitly on object values, which are little more than
+order-insensitive records of methods sharing a common state
+value. Objects can be mutable or immutable, and immutable objects can
+have destructors.
+
+@sp 1
+@item Dynamic type
+
+Rust includes support for slots of a top type, @code{any}, that can
+hold any type of value whatsoever. An @code{any} slot is simply a pair
+of a type code and an exterior value of that type. Injection into an
+@code{any} and projection by type-case-selection is integrated into the
+language.
+
+@sp 1
+@item Dynamic metaprogramming (reflection)
+
+Rust supports run-time reflection on the structure of a crate, using
+the same DWARF tables used to support the @code{any} type and various
+other runtime services.
+
+@sp 1
+@item Static metaprogramming (syntactic extension)
+
+Rust supports a system for syntactic extension that can be loaded into
+the compiler, to implement user-defined notations, macros,
+program-generators and the like. These notations are @emph{marked}
+using a special form of bracketing, such that a reader unfamiliar with
+the extension can still parse the surrounding text by skipping over
+the bracketed ``extension text''.
+
+@sp 1
+@item Idempotent failure
+
+If a task fails due to a signal, or if it executes the special
+@code{fail} statement, it enters the @emph{failing} state. A failing
+task unwinds its control stack, frees all of its owned resources
+(executing destructors) and enters the @emph{dead} state. Failure
+is idempotent and non-recoverable.
+
+@sp 1
+@item Signal handling
+
+Rust has a system for propagating task-failures and other spontaneous
+events between tasks. Some signals can be trapped and redirected to
+channels; other signals are fatal and result in task-failure. Tasks
+can designate other tasks to handle signals for them. This permits organising
+tasks into mutually-supervising or mutually-failing groups.
+
+@sp 1
+@item Deterministic destruction
+
+Immutable objects can have destructor functions, which are executed
+deterministically in bottom-up ownership order, as control frames are
+exited and/or objects are otherwise freed from data structures holding
+them. The same destructors are run in the same order whether the
+object is deleted by unwinding during failure or normal execution.
+
+Similarly, the rules for freeing immutable memory are deterministic
+and predictable: on scope-exit or structure-release, interior slots
+are released immediately, exterior slots have their reference count
+decreased and are released if the count drops to zero. Alias slots are
+not affected by scope exit.
+
+Unreferenced mutable memory is freed at an undefined time between the
+moment the last reference to it from a live frame drops, and the end
+of the lifetime of the task owning it. Mutable memory can point to
+immutable memory; doing so merely delays (to an undefined future time)
+the moment when the deterministic, bottom-up destruction sequence for
+the referenced immutable memory @emph{starts}. In other words, the
+immutable ``leaves'' of a mutable structure are released in a
+locally-predictable order, even if the ``interior'' of the mutable
+structure is released in an unpredictable order.
 
 @sp 1
 @item Typestate system
@@ -331,134 +446,6 @@ therefore encourages the programmer to write in a style that consists
 primarily of immutable types, but also permits limited, local
 (per-task) mutability.
 
-
-@sp 1
-@item Structural algebraic data types
-
-The Rust type system is structural rather than nominal, and contains
-the standard assortment of useful ``algebraic'' type constructors from
-functional languages, such as function types, tuples, record types,
-vectors, and tagged disjoint unions. Structural types may be
-@emph{pattern-matched} in an @code{alt} statement.
-
-@sp 1
-@item Generic code
-
-Rust supports a simple form of parametric polymorphism: functions,
-types and modules can be parameterised by other types. Type parameters
-are treated as opaque within the parameterised code.
-
-@sp 1
-@item Argument binding
-
-Rust lacks a general facility for capturing lexical environments in
-first class @emph{closures}, but instead supports a form of partial
-function-argument application via the @code{bind} operator. Binding
-arguments in Rust is similar to the feature of @emph{function
-currying} in other languages, but may bind @emph{any} members of an
-argument tuple, not just the leftmost.
-
-@sp 1
-@item Local type inference
-
-To save some quantity of programmer key-pressing, Rust supports local
-type inference: signatures of functions and programs always require
-type annotation, but within the body of a function many types can be
-declared @code{auto} and Rust will infer the type from its use in the
-function.
-
-@sp 1
-@item Structural object system
-
-Rust has a lightweight object system based on structural object types:
-there is no ``class hierarchy'' nor any concept of inheritence. Method
-overriding, object extension and restriction are all performed
-explicitly on object values, which are little more than
-order-insensitive records of methods sharing a common state
-value. Objects can be mutable or immutable, and immutable objects can
-have destructors.
-
-@sp 1
-@item Dynamic type
-
-Rust includes support for slots of a top type, @code{any}, that can
-hold any type of value whatsoever. An @code{any} slot is simply a pair
-of a type code and an exterior value of that type. Injection into an
-@code{any} and projection by type-case-selection is integrated into the
-language.
-
-@sp 1
-@item Dynamic metaprogramming (reflection)
-
-Rust supports run-time reflection on the structure of a crate, using
-the same DWARF tables used to support the @code{any} type and various
-other runtime services.
-
-@sp 1
-@item Static metaprogramming (syntactic extension)
-
-Rust supports a system for syntactic extension that can be loaded into
-the compiler, to implement user-defined notations, macros,
-program-generators and the like. These notations are @emph{marked}
-using a special form of bracketing, such that a reader unfamiliar with
-the extension can still parse the surrounding text by skipping over
-the bracketed ``extension text''.
-
-@sp 1
-@item Signal handling
-
-The Rust runtime includes a system for sending @emph{signals} to
-tasks.  A signal is similar to a normal message sent on a normal
-channel, with two differences: signals are usually
-sent @emph{spontaneously} by the runtime, due to external events; and
-they are sent @emph{to a task}, rather than a particular port. The
-types of value that can be sent as a signal are pre-defined for all
-tasks, as part of the standard library.
-
-Some signals can be trapped, others cannot. If a signal cannot be
-trapped, a task receiving it immediately @emph{fails}. If a signal
-can be trapped, a task receiving it can specify whether to ignore
-the signal, route it to a channel, or fail.
-
-@sp 1
-@item Failure and finishing
-
-If a task fails due to a signal, or if it executes the special
-@code{fail} statement, it enters the @emph{failing} state. A failing
-task unwinds its control stack, frees all of its owned resources
-(executing destructors) and enters the @emph{finished} state. Failure
-is idempotent and non-recoverable.
-
-If a task finishes due to failure, it may cause the runtime to
-signal any @emph{linked} tasks. This can be used to independently
-arrange supervision and failure-propagation modes for groups of
-related tasks.
-
-@sp 1
-@item Deterministic destruction
-
-Immutable objects can have destructor functions, which are executed
-deterministically in bottom-up ownership order, as control frames are
-exited and/or objects are otherwise freed from data structures holding
-them. The same destructors are run in the same order whether the
-object is deleted by unwinding during failure or normal execution.
-
-Similarly, the rules for freeing immutable memory are deterministic
-and predictable: on scope-exit or structure-release, interior slots
-are released immediately, exterior slots have their reference count
-decreased and are released if the count drops to zero. Alias slots are
-not affected by scope exit.
-
-Unreferenced mutable memory is freed at an undefined time between the
-moment the last reference to it from a live frame drops, and the end
-of the lifetime of the task owning it. Mutable memory can point to
-immutable memory; doing so merely delays (to an undefined future time)
-the moment when the deterministic, bottom-up destruction sequence for
-the referenced immutable memory @emph{starts}. In other words, the
-immutable ``leaves'' of a mutable structure are released in a
-locally-predictable order, even if the ``interior'' of the mutable
-structure is released in an unpredictable order.
-
 @end itemize
 
 
@@ -541,9 +528,15 @@ NJ, USA).
 @end itemize
 
 @sp 1
-Additional influences can be seen from the ML family, Camlp4, and various
-``pre-Object-Orientation'' languages of the 70s (CLU, Ada, Mesa, Alphard,
-Euclid, etc.)
+Additional specific influences can be seen from the following languages:
+@itemize
+@item The structural algebraic types and compilation manager of SML.
+@item The stack-iterator system of CLU, Sather and Objective C 2.0.
+@item The @code{bind} operator from Sather.
+@item The syntax-extension systems of Camlp4 and the Common Lisp readtable.
+@item The deterministic destructor system of C++.
+@item The term @code{task} from Ada.
+@end itemize
 
 @c ############################################################
 @c Tutorial
@@ -882,7 +875,7 @@ names of items. @xref{Ref.Item}.
 
 An example of a name with type parameters:
 @example
-m.map[int,str].key;
+m.map[int,str];
 @end example
 
 An lval component may include an indexing operator. Index operators
@@ -929,7 +922,6 @@ successful produces a single crate in executable form.
 @node       Ref.Comp.Crate
 @subsection Ref.Comp.Crate
 @c * Ref.Comp.Crate::              Units of compilation, versioning, distribution and loading.
-@c NOTE influences: SML CM, Mesa Configurations, owens/flatt "units"
 
 A @dfn{crate} is a unit of compilation, versioning, distribution and
 loading. Crates are defined by @emph{crate source files}, which are a
@@ -1073,7 +1065,7 @@ expression literals:
 // In a crate file:
 
 // Requests the 're' syntax extension from the compilation environment.
-syntax re; 
+syntax re;
 
 // Also declares an import dependency on the module 're'.
 use re;
@@ -1267,26 +1259,23 @@ destroyed or until its enclosing allocation is destroyed.
 @subsection Ref.Mem.Acct
 @c * Ref.Mem.Acct::                Memory accounting model.
 
-Every task is associated with a memory account. An @dfn{account} is
-a counter -- possibly shared between multiple tasks -- measuring
-all memory that has been allocated and not released by tasks
-sharing the account. Each account has a budget. The @dfn{budget} of an
-account is the maximum amount of memory that can be simultaneously
-allocated in the account before the runtime generates a signal for the
-allocating task.
+Every task belongs to a domain, and that domain tracks the amount of
+memory allocated and not yet released by tasks within
+it. @xref{Ref.Task.Dom}. Each domain has a memory budget. The
+@dfn{budget} of a domain is the maximum amount of memory that can be
+simultaneously allocated in the domain. If a task tries to allocate
+memory within a domain with an exceeded budget, the task will receive
+a signal.
 
-Initially a task has the same account as its parent, but a task
-may choose to allocate a sub-account of a fixed size from within its
-account and assign some number of its child tasks to the
-sub-account. Within a task, accounting is strictly enforced: all
-memory allocated through the runtime, both user data, sub-accounts and
+Within a task, accounting is strictly enforced: all memory allocated
+through the runtime library, both user data, sub-domains and
 runtime-support structures such as channel and signal queues, are
-charged to a task's account.
+charged to a task's domain.
 
-When a communication channel crosses from one account to another, any
+When a communication channel crosses from one domain to another, any
 value sent over the channel is @emph{deeply copied} during
 transmission. That is: any exterior slots reachable from the value
-have their heap allocation copied, and charged to the new account.
+have their heap allocation copied, and charged to the new domain.
 
 
 @page
@@ -1311,6 +1300,7 @@ operating-system processes.
 @menu
 * Ref.Task.Comm::               Inter-task communication.
 * Ref.Task.Life::               Task lifecycle and state transitions.
+* Ref.Task.Dom::                Task domains.
 * Ref.Task.Sched::              Task scheduling model.
 @end menu
 
@@ -1357,18 +1347,17 @@ contains a message queue and asynchronously sending a message merely
 inserts it into the channel's queue; message receipt is the
 responsibility of the receiving task.
 
-Queued messages in channels are charged to the memory account of the
-@emph{sending} task. If too many messages are queued for
-transmission from a single sending task, without being received by
-a receiving task, the sending task may exceed its memory budget,
-which causes a run-time signal. To help control this possibility, a
-semi-synchronous send operation is possible, which blocks until there
-is room in the existing queue and then executes an asynchronous
-send. A full @code{flush} operation is also available, which blocks
-until a channel's queue is @emph{empty}. A @code{flush} does
-@emph{not} guarantee that a message has been @emph{received} by any
-particular recipient when the sending task is
-unblocked. @xref{Ref.Stmt.Flush}.
+Queued messages in channels are charged to the domain of the
+@emph{sending} task. If too many messages are queued for transmission
+from a single sending task, without being received by a receiving
+task, the sending task may exceed its memory budget, which causes a
+run-time signal. To help control this possibility, a semi-synchronous
+send operation is possible, which blocks until there is room in the
+existing queue and then executes an asynchronous send. A full
+@code{flush} operation is also available, which blocks until a
+channel's queue is @emph{empty}. A @code{flush} does @emph{not}
+guarantee that a message has been @emph{received} by any particular
+recipient when the sending task is unblocked. @xref{Ref.Stmt.Flush}.
 
 The asynchronous message-send operator is @code{<+}. The
 semi-synchronous message-send operator is @code{<|}. @xref{Ref.Stmt.Send}. The
@@ -1385,47 +1374,27 @@ of a task are:
 
 @itemize
 @item running
-@item native call
-@item blocked reading
-@item blocked writing
-@item blocked flushing
+@item blocked
 @item failing
-@item finished
+@item dead
 @end itemize
 
 A task begins its lifecycle -- once it has been spawned -- in the
 @emph{running} state. In this state it executes the statements of its
 entry function, and any functions called by the entry function.
 
-If a task makes a native call, it is temporarily suspended from
-the @emph{running} state and enters the @emph{native call} state. A
-task returns from the @emph{native call} state to
-either @emph{running} or @emph{failing}, depending on the execution of
-the native code.
-
-A task may transition from the @emph{running} state to
-the @emph{blocked reading} state any time it executes a receive
-statement (@code{<-}) on a port that does not have any tasks
-waiting to send. When another task eventually sends on a channel
-connected to the receiving port, the receiving task will transition
-out of @emph{blocked reading} state, back to @emph{running}.
-
-A task may transition from the @emph{running} state to
-the @emph{blocked writing} any time it executes a semi-synchronous
-send (@code{<|}) on a channel with a full queue. When the queue has
-room, the sending task will unblock and transition out
-of @emph{blocked writing} state, back to @emph{running}.
-
-A task may transition from the @emph{running} state to
-the @emph{blocked flushing} any time it executes a @code{flush} on a
-channel with a nonempty queue. When the queue is empty, the flushing
-task will unblock and transition out of @emph{blocked flushing}
-state, back to @emph{running}.
+A task may transition from the @emph{running} state to the
+@emph{blocked} state any time it executes a communication statement on
+a port or channel that cannot be immediately completed.  When the
+communication statement can be completed -- when a message arrives at
+a sender, or a queue drains sufficiently to complete a
+semi-synchronous send -- then the blocked task will unblock and
+transition back to @emph{running}.
 
 A task may transition to the @emph{failing} state at any time, due
 to an un-trapped signal or the execution of a @code{fail}
 statement. Once @emph{failing}, a task unwinds its stack and
-transitions to the @emph{finished} state. Unwinding the stack of a
+transitions to the @emph{dead} state. Unwinding the stack of a
 task is done by the task itself, on its own control stack. If a
 value with a destructor is freed during unwinding, the code for the
 destructor is run, also on the task's control stack. If the
@@ -1434,27 +1403,50 @@ of unwinding and failing may suspend temporarily, and may involve
 (recursive) unwinding of the stack of a failed
 destructor. Nonetheless, the outermost unwinding activity will
 continue until the stack is unwound and the task transitions to the
-@emph{finished} state. There is no way to ``recover'' from task
+@emph{dead} state. There is no way to ``recover'' from task
 failure.
 
+A task in the @emph{dead} state cannot transition to other states;
+it exists only to have its termination status inspected by other
+tasks, and/or to await reclamation when the last reference to it
+drops.
+
+@page
+@node       Ref.Task.Dom
+@subsection Ref.Task.Dom
+@c * Ref.Task.Dom::                Task domains
+
+Every task belongs to a domain. A @dfn{domain} is a structure that
+owns tasks, schedules tasks, tracks memory allocation within tasks and
+manages access to runtime services on behalf of tasks.
+
+Typically each domain runs on a separate operating-system
+@emph{thread}, or within an isolated operating-system
+@emph{process}. An easy way to think of a domain is as an abstraction
+over either an operating-system thread @emph{or} a process.
+
+The key feature of a domain is that it isolates memory references
+created by the Rust tasks within it. No Rust task can refer directly
+to memory outside its domain.
+
+Tasks can own sub-domains, which in turn own their own tasks. Every
+domain owns one @emph{root task}, which is the root of the tree of
+tasks owned by the domain.
 
 @page
 @node       Ref.Task.Sched
 @subsection Ref.Task.Sched
 @c * Ref.Task.Sched::              Task scheduling model.
 
-Every task has a @dfn{time slice counter}, which is a hidden
-numeric slot that is decremented on each loop back-edge and function
-call. The runtime repeatedly selects a task in the @emph{running}
-state, via fair pseudo-random choice, and activates it. If the time
-slice counter on a task reaches zero, the task yields control to
-the runtime. The task has its time slice counter reset to the
-configured initial time slice value for the runtime, and it is once
-again made available as a choice for the scheduler to pseudo-randomly select.
+Every task is @emph{scheduled} within its
+domain. @xref{Ref.Task.Dom}. The currently scheduled task is given a
+finite @emph{time slice} in which to execute, after which it is
+@emph{descheduled} at a loop-edge or similar preemption point, and
+another task within the domain is scheduled, pseudo-randomly.
 
-If a task enters a non-running state -- for example, if it blocks
-on reading or writing -- it is not available for activation by the
-scheduler, but its time slice counter is unaffected.
+An executing task can @code{yield} control at any time, which
+deschedules it immediately. Entering any other non-executing state
+(blocked, dead) similarly deschedules the task.
 
 @page
 @node    Ref.Item
@@ -1465,8 +1457,8 @@ An @dfn{item} is a component of a module. Items are entirely
 determined at compile-time, remain constant during execution, and may
 reside in read-only memory.
 
-There are 4 primary kinds of item: types, functions, predicates
-and modules.
+There are 5 primary kinds of item: modules, functions, predicates,
+objects and types.
 
 All items form an implicit scope for the declaration of sub-items. In
 other words, within a function or predicate, declarations of items can
@@ -1478,15 +1470,16 @@ namespace is qualified by the name of the enclosing item. The exact
 locations in which sub-items may be declared is given by the grammar.
 @xref{Ref.Gram}.
 
-Items may be @emph{parameterised} by type. Type parameters are given
-as a comma-separated list of identifiers enclosed in square brackets
-(@code{[]}), after the name of the item and before its definition.
-The type parameters of an item are part of the name, not the type of
-the item; in order to refer to the type-parameterised item, a
-referencing name must in general provide type arguments as a list of
-comma-separated types enclosed within square brackets (though the
-type-inference system can often infer such argument types from
-context). There are no general parametric types.
+Functions, predicates, objects and types may be @emph{parameterised}
+by type. Type parameters are given as a comma-separated list of
+identifiers enclosed in square brackets (@code{[]}), after the name of
+the item and before its definition.  The type parameters of an item
+are part of the name, not the type of the item; in order to refer to
+the type-parameterised item, a referencing name must in general
+provide type arguments as a list of comma-separated types enclosed
+within square brackets (though the type-inference system can often
+infer such argument types from context). There are no general
+parametric types.
 
 @menu
 * Ref.Item.Mod::                Items defining modules.
@@ -1743,8 +1736,9 @@ identifiers in any context.
 @menu
 * Ref.Type.Any::                An open sum of every possible type.
 * Ref.Type.Mach::               Machine-level types.
+* Ref.Type.Int::                The machine-dependent integer types.
 * Ref.Type.Prim::               Primitive types.
-* Ref.Type.Int::                The arbitrary-precision integer type.
+* Ref.Type.Big::                The arbitrary-precision integer type.
 * Ref.Type.Text::               Strings and characters.
 * Ref.Type.Rec::                Fixed products of heterogeneous types.
 * Ref.Type.Tup::                Fixed products of homogeneous types.
@@ -1795,6 +1789,20 @@ The IEEE 754 single-precision and double-precision floating point
 types: @code{f32} and @code{f64}, respectively.
 @end itemize
 
+@page
+@node       Ref.Type.Int
+@subsection Ref.Type.Int
+
+The Rust type @code{int}@footnote{A Rust @code{int} is analogous to a
+C @code{int}.} is a machine-dependent signed integer type large enough
+to address any element in a @code{vec[u8]} that could be represented
+in memory on the target machine, interpreting negative offsets as
+usual starting from the @emph{end} of the @code{vec}.
+
+The Rust type @code{uint}@footnote{A Rust @code{uint} is analogous to
+a C @code{unsigned int}.} is a machine-dependent unsigned integer type
+of the same number of bits as the rust type @code{int}.
+
 
 @page
 @node       Ref.Type.Prim
@@ -1810,20 +1818,23 @@ type and the value are pronounced ``nil'').
 The boolean type @code{bool} with values @code{true} and @code{false}.
 @item
 The machine types.
+@item
+The machine-dependent integer types.
 @end itemize
 
+
 @page
-@node       Ref.Type.Int
-@subsection Ref.Type.Int
+@node       Ref.Type.Big
+@subsection Ref.Type.Big
 
-The Rust type @code{int}@footnote{A Rust @code{int} is similar to a
-Lisp bignum or a Python long integer, @emph{not} a C @code{int}.} is
-an arbitrary precision integer type that fits in a machine
-word @emph{when possible} and transparently expands to a boxed ``big
-integer'' allocated in the run-time heap when it overflows or
-underflows outside of the range of a machine word.
+The Rust type @code{big}@footnote{A Rust @code{big} is analogous to a
+Lisp bignum or a Python long integer.} is an arbitrary precision
+integer type that fits in a machine word @emph{when possible} and
+transparently expands to a boxed ``big integer'' allocated in the
+run-time heap when it overflows or underflows outside of the range of
+a machine word.
 
-A Rust @code{int} grows to accommodate extra binary digits as they are
+A Rust @code{big} grows to accommodate extra binary digits as they are
 needed, by taking extra memory from the memory budget available to
 each Rust task, and should only exhaust its range due to memory
 exhaustion.
@@ -2536,8 +2547,8 @@ channel, and apply a send operator to it and a value to send.
 
 The @emph{asynchronous send} operator @code{<+} adds a value to the
 channel's queue, without blocking. If the queue is full, it is
-extended, taking memory from the task's memory account. If the
-task memory budget is exhausted, a signal is sent to the task.
+extended, taking memory from the task's domain. If the task memory
+budget is exhausted, a signal is sent to the task.
 
 The @emph{semi-synchronous send} operator @code{<|} adds a value to
 the channel's queue @emph{only if} the queue has room; if the queue is
@@ -2583,7 +2594,7 @@ expression denoting a port, and applies the @emph{receive operator}
 (@code{<-}) to the pair, copying a value out of the port and into the
 @var{lval}. The statement causes the receiving task to enter the
 @emph{blocked reading} state until a task is sending a value to the
-port, at which point the runtime fairly and pseudo-randomly selects a
+port, at which point the runtime pseudo-randomly selects a
 sending task and copies a value from the head of one of the task
 queues to the receiving slot, and un-blocks the receiving
 task. @xref{Ref.Run.Comm}.
@@ -2619,14 +2630,15 @@ let int x = add(1, 2);
 @c * Ref.Stmt.Bind::               Statement for binding arguments to functions.
 
 A @dfn{bind statement} constructs a new function from an existing
-function. The new function has zero or more of its arguments
-@emph{bound} into a new, hidden exterior tuple that holds the
-bindings. For each concrete argument passed in the @code{bind}
-statement, the corresponding parameter in the existing function is
-@emph{omitted} as a parameter of the new function. For each argument
-passed the placeholder symbol @code{_} in the @code{bind} statement,
-the corresponding parameter of the existing function is
-@emph{retained} as a parameter of the new function.
+function.@footnote{The @code{bind} statement is analogous to the
+@code{bind} expression in the Sather language.}  The new function has
+zero or more of its arguments @emph{bound} into a new, hidden exterior
+tuple that holds the bindings. For each concrete argument passed in
+the @code{bind} statement, the corresponding parameter in the existing
+function is @emph{omitted} as a parameter of the new function. For
+each argument passed the placeholder symbol @code{_} in the
+@code{bind} statement, the corresponding parameter of the existing
+function is @emph{retained} as a parameter of the new function.
 
 Any subsequent invocation of the new function with residual arguments
 causes invocation of the existing function with the combination of
@@ -2723,14 +2735,15 @@ Executing a @code{put} statement copies a value into the put slot of
 the current iterator function, suspends execution of the current
 iterator function, and transfers control to the current put-recipient
 frame.@footnote{A @code{put} statement is analogous to a @code{yield}
-statement in the CLU language, or in more recent languages providing a
-``generator'' facility, such as Python, Javascript or C#. Like the
-generators of CLU, but @emph{unlike} these later languages, Rust's
-iterator functions reside on the stack and obey a strict stack
-discipline.} The current put-recipient will eventually resume the
-suspended iterator function containing the @code{put} statement,
-either continuing execution after the @code{put} statement, or
-terminating its execution and destroying the iterator function frame.
+statement in the CLU, Sather and Objective C 2.0 languages, or in more
+recent languages providing a ``generator'' facility, such as Python,
+Javascript or C#. Like the generators of CLU, Sather and Objective C
+2.0, but @emph{unlike} these later languages, Rust's iterator
+functions reside on the stack and obey a strict stack discipline.} The
+current put-recipient will eventually resume the suspended iterator
+function containing the @code{put} statement, either continuing
+execution after the @code{put} statement, or terminating its execution
+and destroying the iterator function frame.
 
 
 @page
@@ -2742,7 +2755,7 @@ Executing a @code{fail} statement causes a task to enter the
 @emph{failing} state. In the @emph{failing} state, a task unwinds
 its stack, destroying all frames and freeing all resources until it
 reaches its entry frame, at which point it halts execution in the
-@emph{finished} state.
+@emph{dead} state.
 
 @page
 @node       Ref.Stmt.Log
@@ -3180,11 +3193,9 @@ if check even(x) @{
 @section Ref.Run
 @c * Ref.Run::                     Organisation of runtime services.
 
-The Rust @dfn{runtime}@footnote{The @emph{runtime} (un-hyphenated) is
-a piece of code; it provides a variety of services @emph{at
-run-time}.} is a relatively compact collection of C and Rust code that
-provides fundamental services and datatypes to all Rust tasks at
-run-time. It is smaller and simpler than many modern language
+The Rust @dfn{runtime} is a relatively compact collection of C and
+Rust code that provides fundamental services and datatypes to all Rust
+tasks at run-time. It is smaller and simpler than many modern language
 runtimes. It is tightly integrated into the language's execution model
 of slots, tasks, communication, reflection, logging and signal
 handling.
@@ -3304,13 +3315,12 @@ Logging is an @emph{optional} component of the runtime.
 @c * Ref.Run.Sig::               Runtime signal handler.
 
 The runtime signal-handling system is driven by a signal-dispatch
-table and a signal queue associated with each task. Sending a
-signal to a task inserts the signal into the task's signal queue
-and marks the task as having a pending signal. At the next
-scheduling opportunity, the runtime processes signals in the task's
-queue using its dispatch table. The signal queue memory is charged to
-the task's memory account; if the queue grows too big, the task
-will fail.
+table and a signal queue associated with each task. Sending a signal
+to a task inserts the signal into the task's signal queue and marks
+the task as having a pending signal. At the next scheduling
+opportunity, the runtime processes signals in the task's queue using
+its dispatch table. The signal queue memory is charged to the task's
+domain; if the queue grows too big, the task will fail.
 
 Signal handling is a @emph{mandatory} component of the runtime.
 
