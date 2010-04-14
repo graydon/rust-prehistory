@@ -198,8 +198,7 @@ let lookup_type_by_ident
       | Some (scopes, id) ->
           let ty =
             match htab_search cx.ctxt_all_defns id with
-                Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_opaque_type t})
-              | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_public_type t}) -> t
+                Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type t}) -> t
               | Some (DEFN_ty_param (_, x)) -> Ast.TY_param x
               | _ -> err None "identifier '%s' resolves to non-type" ident
           in
@@ -244,18 +243,16 @@ let type_reference_and_tag_extracting_visitor
   let visit_mod_item_pre id params item =
     begin
       match item.node.Ast.decl_item with
-          Ast.MOD_ITEM_public_type ty
-        | Ast.MOD_ITEM_opaque_type ty
-          ->
+          Ast.MOD_ITEM_type ty ->
             begin
-                log cx "extracting references for type node %d" (int_of_node item.id);
-                let referenced = get_ty_references ty cx (!scopes) in
-                  List.iter (fun i -> log cx "type %d references type %d"
-                               (int_of_node item.id) (int_of_node i)) referenced;
-                  htab_put node_to_references item.id referenced;
-                  match ty with
-                      Ast.TY_tag ttag -> htab_put all_tags item.id (ttag, (!scopes))
-                    | _ -> ()
+              log cx "extracting references for type node %d" (int_of_node item.id);
+              let referenced = get_ty_references ty cx (!scopes) in
+                List.iter (fun i -> log cx "type %d references type %d"
+                             (int_of_node item.id) (int_of_node i)) referenced;
+                htab_put node_to_references item.id referenced;
+                match ty with
+                    Ast.TY_tag ttag -> htab_put all_tags item.id (ttag, (!scopes))
+                  | _ -> ()
             end
         | _ -> ()
     end;
@@ -413,8 +410,7 @@ let type_resolving_visitor
     begin
       try
         match item.node.Ast.decl_item with
-          | Ast.MOD_ITEM_public_type ty
-          | Ast.MOD_ITEM_opaque_type ty ->
+            Ast.MOD_ITEM_type ty ->
               let ty =
                 resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info ty
               in
@@ -635,8 +631,7 @@ let resolve_recursion
         if can_reach id [] id
         then begin
           match Hashtbl.find cx.ctxt_all_defns id with
-              DEFN_item { Ast.decl_item = Ast.MOD_ITEM_public_type (Ast.TY_tag _) }
-            | DEFN_item { Ast.decl_item = Ast.MOD_ITEM_opaque_type (Ast.TY_tag _ ) } ->
+              DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type (Ast.TY_tag _) } ->
                 log cx "type %d is a recursive tag" (int_of_node id);
                 Hashtbl.replace recursive_tag_types id ()
             | _ ->

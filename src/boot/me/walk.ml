@@ -191,8 +191,7 @@ and walk_mod_item
     : unit =
   let children _ =
     match item.node.Ast.decl_item with
-        Ast.MOD_ITEM_opaque_type ty
-      | Ast.MOD_ITEM_public_type ty -> walk_ty v ty
+        Ast.MOD_ITEM_type ty -> walk_ty v ty
       | Ast.MOD_ITEM_fn f -> walk_fn v f
       | Ast.MOD_ITEM_pred p -> walk_pred v p
       | Ast.MOD_ITEM_tag (htup, ttag, _) ->
@@ -245,7 +244,6 @@ and walk_ty
             walk_constrs v cs
           end
       | Ast.TY_named _ -> ()
-      | Ast.TY_opaque _ -> ()
       | Ast.TY_param _ -> ()
       | Ast.TY_idx _ -> ()
       | Ast.TY_mach _ -> ()

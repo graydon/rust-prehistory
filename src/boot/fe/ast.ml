@@ -97,7 +97,6 @@ and ty =
   | TY_obj of ty_obj
   | TY_task
 
-  | TY_opaque of (opaque_id * mutability)
   | TY_param of (ty_param_idx * opaque_id * mutability)
   | TY_named of name
   | TY_type
@@ -422,8 +421,7 @@ and ('param, 'item) decl =
     }
 
 and mod_item' =
-    MOD_ITEM_opaque_type of ty
-  | MOD_ITEM_public_type of ty
+    MOD_ITEM_type of ty
   | MOD_ITEM_tag of (header_tup * ty_tag * node_id)
   | MOD_ITEM_pred of pred
   | MOD_ITEM_mod of mod_items
@@ -633,10 +631,8 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
         fmt_slots ff slots (Some idents);
         fmt ff "@]"
 
-  | TY_opaque (id, m) -> (fmt_mutable ff m;
-                          fmt ff "<opaque#%d>" (int_of_opaque id))
   | TY_param (i, oid, m) -> (fmt_mutable ff m;
-                             fmt ff "<param#%d>=<opaque#%d>" i
+                             fmt ff "<p#%d/o#%d>" i
                                (int_of_opaque oid))
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
@@ -1115,7 +1111,7 @@ and fmt_decl_params (ff:Format.formatter) (params:ty_param array) : unit =
         let (ident, (i, oid, mut)) = params.(i) in
           fmt_mutable ff mut;
           fmt_ident ff ident;
-          fmt ff "=<param#%d>=<opaque#%d>" i (int_of_opaque oid)
+          fmt ff "=<p#%d/o#%d>" i (int_of_opaque oid)
       done;
       fmt ff "]"
     end;
@@ -1177,15 +1173,8 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
   let params = item.node.decl_params in
     begin
       match item.node.decl_item with
-          MOD_ITEM_opaque_type ty ->
+          MOD_ITEM_type ty ->
             fmt ff "type ";
-            fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
-            fmt ff " = ";
-            fmt_ty ff ty;
-            fmt ff ";";
-
-        | MOD_ITEM_public_type ty ->
-            fmt ff "pub type ";
             fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
             fmt ff " = ";
             fmt_ty ff ty;

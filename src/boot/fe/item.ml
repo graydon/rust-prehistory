@@ -660,7 +660,6 @@ and parse_pred (ps:pstate) : Ast.pred =
 
 and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
   let apos = lexpos ps in
-  let public = Pexp.flag ps PUB in
   let pure =
     match peek ps with
         PURE -> (bump ps; Ast.PURE)
@@ -706,11 +705,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
           let ty = ctxt "mod type item: ty" Pexp.parse_ty ps in
           let _ = expect ps SEMI in
           let bpos = lexpos ps in
-          let item =
-            if public
-            then (Ast.MOD_ITEM_public_type ty)
-            else (Ast.MOD_ITEM_opaque_type ty)
-          in
+          let item = Ast.MOD_ITEM_type ty in
             (ident, span ps apos bpos (decl params item))
 
       | MOD ->
@@ -861,24 +856,13 @@ and parse_mod_item_from_signature (ps:pstate)
           in
             (ident, span ps apos bpos (decl params fn))
 
-    | PUB ->
-        bump ps;
-        expect ps TYPE;
-        let (ident, params) = parse_ident_and_params ps "type pub type" in
-        let t = Pexp.parse_ty ps in
-          expect ps SEMI;
-          let bpos = lexpos ps in
-            (ident, span ps apos bpos (decl params (Ast.MOD_ITEM_public_type t)))
-
     | TYPE ->
         bump ps;
         let (ident, params) = parse_ident_and_params ps "type type" in
+        let t = Pexp.parse_ty ps in
           expect ps SEMI;
           let bpos = lexpos ps in
-            (ident, span ps apos bpos
-               (decl params
-                  (Ast.MOD_ITEM_opaque_type
-                     (Ast.TY_opaque ((next_opaque_id ps), Ast.IMMUTABLE)))))
+            (ident, span ps apos bpos (decl params (Ast.MOD_ITEM_type t)))
 
     (* FIXME: parse pred, obj. *)
     | _ -> raise (unexpected ps)
@@ -911,8 +895,7 @@ and expand_tags
       | _ -> [| |]
   in
     match item.node.Ast.decl_item with
-        Ast.MOD_ITEM_public_type tyd -> handle_ty_decl item.id tyd
-      | Ast.MOD_ITEM_opaque_type tyd -> handle_ty_decl item.id tyd
+        Ast.MOD_ITEM_type tyd -> handle_ty_decl item.id tyd
       | _ -> [| |]
 
 

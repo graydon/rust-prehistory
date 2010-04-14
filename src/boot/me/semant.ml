@@ -562,7 +562,6 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
       ty_fold_task : unit -> 'ty;
-      ty_fold_opaque : (opaque_id * Ast.mutability) -> 'ty;
       ty_fold_param : (int * opaque_id * Ast.mutability) -> 'ty;
       ty_fold_named : Ast.name -> 'ty;
       ty_fold_type : unit -> 'ty;
@@ -613,7 +612,6 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_obj t -> f.ty_fold_obj (fold_obj t)
   | Ast.TY_task -> f.ty_fold_task ()
 
-  | Ast.TY_opaque x -> f.ty_fold_opaque x
   | Ast.TY_param x -> f.ty_fold_param x
   | Ast.TY_named n -> f.ty_fold_named n
   | Ast.TY_type -> f.ty_fold_type ()
@@ -649,7 +647,6 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_chan = (fun _ -> default);
       ty_fold_port = (fun _ -> default);
       ty_fold_task = (fun _ -> default);
-      ty_fold_opaque = (fun _ -> default);
       ty_fold_param = (fun _ -> default);
       ty_fold_named = (fun _ -> default);
       ty_fold_type = (fun _ -> default);
@@ -691,7 +688,6 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
     ty_fold_port = (fun t -> id (Ast.TY_port t));
     ty_fold_task = (fun _ -> id Ast.TY_task);
-    ty_fold_opaque = (fun (opa, mut) -> id (Ast.TY_opaque (opa, mut)));
     ty_fold_param = (fun (i, oid, mut) -> id (Ast.TY_param (i, oid, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
     ty_fold_type = (fun _ -> id (Ast.TY_type));
@@ -1002,8 +998,7 @@ let ty_obj_of_obj (obj:Ast.obj) : Ast.ty_obj =
 
 let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =
   match item.node.Ast.decl_item with
-      Ast.MOD_ITEM_opaque_type _
-    | Ast.MOD_ITEM_public_type _ -> Ast.TY_type
+      Ast.MOD_ITEM_type _ -> Ast.TY_type
     | Ast.MOD_ITEM_pred p -> (Ast.TY_pred (ty_pred_of_pred p))
     | Ast.MOD_ITEM_fn f -> (Ast.TY_fn (ty_fn_of_fn f))
     | Ast.MOD_ITEM_mod _ -> bug () "Semant.ty_of_mod_item on mod"
@@ -1289,7 +1284,6 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
       | Ast.TY_param (i, _, _) -> Il.ParamTy i
 
-      | Ast.TY_opaque _ -> bug () "opaque type in referent_type"
       | Ast.TY_named _ -> bug () "named type in referent_type"
       | Ast.TY_constrained (t, _) -> referent_type abi t
 
@@ -1562,7 +1556,6 @@ let ty_str (ty:Ast.ty) : string =
          ty_fold_obj = (fun _ -> "o");
          ty_fold_task = (fun _ -> "P");
          (* FIXME: encode opaque and param numbers. *)
-         ty_fold_opaque = (fun _ -> "Q");
          ty_fold_param = (fun _ -> "A");
          ty_fold_named = (fun _ -> bug () "string-encoding named type");
          ty_fold_type = (fun _ -> "T");

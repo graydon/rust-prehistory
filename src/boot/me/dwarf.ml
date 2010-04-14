@@ -1876,8 +1876,7 @@ let dwarf_visitor
                   (Hashtbl.find cx.ctxt_fn_fixups item.id);
                 emit_type_param_decl_dies item.node.Ast.decl_params;
             end
-        | Ast.MOD_ITEM_public_type _
-        | Ast.MOD_ITEM_opaque_type _ ->
+        | Ast.MOD_ITEM_type _ ->
             begin
               log cx "walking typedef '%s' with %d type params"
                 (path_name())
@@ -1910,8 +1909,7 @@ let dwarf_visitor
       match item.node.Ast.decl_item with
           Ast.MOD_ITEM_mod _
         | Ast.MOD_ITEM_fn _
-        | Ast.MOD_ITEM_public_type _
-        | Ast.MOD_ITEM_opaque_type _ -> emit_null_die ()
+        | Ast.MOD_ITEM_type _ -> emit_null_die ()
         | _ -> ()
     end;
     if Hashtbl.mem cx.ctxt_item_files item.id
@@ -2456,7 +2454,7 @@ let rec extract_mod_items
         DW_TAG_typedef ->
           let ident = get_name die in
           let ty = get_referenced_ty die in
-          let tyi = Ast.MOD_ITEM_public_type ty in
+          let tyi = Ast.MOD_ITEM_type ty in
             htab_put mis ident (decl (get_type_param_decls die) tyi)
 
       | DW_TAG_compile_unit ->
