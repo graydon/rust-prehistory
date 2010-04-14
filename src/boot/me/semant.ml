@@ -48,7 +48,7 @@ type data =
 
 type defn =
     DEFN_slot of Ast.slot
-  | DEFN_item of (Ast.ty_param identified, Ast.mod_item') Ast.decl
+  | DEFN_item of Ast.mod_item_decl
   | DEFN_ty_param of Ast.ty_param
   | DEFN_obj_fn of (node_id * Ast.fn)
 ;;

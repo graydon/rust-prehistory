@@ -414,12 +414,6 @@ and obj =
 
 and ty_param = ident * (ty_param_idx * opaque_id * mutability)
 
-and ('param, 'item) decl =
-    {
-      decl_params: 'param array;
-      decl_item: 'item;
-    }
-
 and mod_item' =
     MOD_ITEM_type of ty
   | MOD_ITEM_tag of (header_tup * ty_tag * node_id)
@@ -428,7 +422,13 @@ and mod_item' =
   | MOD_ITEM_fn of fn
   | MOD_ITEM_obj of obj
 
-and mod_item = (((ty_param identified), mod_item') decl) identified
+and mod_item_decl =
+    {
+      decl_params: (ty_param identified) array;
+      decl_item: mod_item';
+    }
+
+and mod_item = mod_item_decl identified
 and mod_items = (ident, mod_item) Hashtbl.t
 
 and crate' =
