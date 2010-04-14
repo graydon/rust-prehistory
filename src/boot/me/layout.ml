@@ -34,11 +34,11 @@ let layout_visitor
    *     |iterator link segments      |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - (abi_frame_info_sz + ilssz)
+   *     +----------------------------+ <-- fp - (abi_frame_info_sz + (k * abi_loop_info_sz))
    *     |spills determined in ra     |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - (abi_frame_info_sz + ilssz + spillsz)
+   *     +----------------------------+ <-- fp - (abi_frame_info_sz + (k * abi_loop_info_sz) + spillsz)
    *     |...                         |
    *     |frame-allocated stuff       |
    *     |determined in resolve       |
@@ -220,10 +220,12 @@ let layout_visitor
   let update_frame_size _ =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
     let frame_spill = Hashtbl.find cx.ctxt_spill_fixups frame_id in
+    let loop_depth = Int64.of_int (Hashtbl.find cx.ctxt_fn_loop_depths frame_id) in
     let sz =
       add_sz
         (add_sz
-           (rty_sz (frame_rty frame_blocks))
+           (add_sz (rty_sz (frame_rty frame_blocks))
+                   (SIZE_fixed (Int64.mul loop_depth cx.ctxt_abi.Abi.abi_loop_info_sz)))
            (SIZE_fixup_mem_sz frame_spill))
         (SIZE_fixed cx.ctxt_abi.Abi.abi_frame_info_sz)
     in
@@ -319,15 +321,14 @@ let layout_visitor
     let frame_spill = Hashtbl.find cx.ctxt_spill_fixups frame_id in
     let spill_sz = SIZE_fixup_mem_sz frame_spill in
     let info_sz = SIZE_fixed cx.ctxt_abi.Abi.abi_frame_info_sz in
+    let loop_depth = Int64.of_int (Hashtbl.find cx.ctxt_fn_loop_depths frame_id) in
+    let loop_sz = SIZE_fixed (Int64.mul loop_depth cx.ctxt_abi.Abi.abi_loop_info_sz) in
+    let locals_off = add_sz (add_sz spill_sz info_sz) loop_sz in
     let off =
       if Stack.is_empty frame_blocks
-      then add_sz spill_sz info_sz
+      then locals_off
       else
-        add_sz
-          spill_sz
-          (add_sz
-             info_sz
-             (rty_sz (frame_rty frame_blocks)))
+        add_sz locals_off (rty_sz (frame_rty frame_blocks))
     in
     let block_slots = Stack.create() in
     let frame_block_ids = Hashtbl.find cx.ctxt_frame_blocks frame_id in

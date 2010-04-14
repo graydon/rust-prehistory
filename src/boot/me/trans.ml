@@ -965,7 +965,8 @@ let trans_visitor
       iflog (fun _ -> annotate_quads (glue_str cx g));
       let code = { code_fixup = fix;
                    code_quads = emitted_quads e;
-                   code_vregs_and_spill = Some (Il.num_vregs e, spill) }
+                   code_vregs_and_spill = Some (Il.num_vregs e, spill);
+                   code_spill_disp = 0L }
       in
         htab_put cx.ctxt_glue_code g code
 
@@ -1131,7 +1132,8 @@ let trans_visitor
                *)
             let tmp_code = { code_fixup = fix;
                              code_quads = [| |];
-                             code_vregs_and_spill = None } in
+                             code_vregs_and_spill = None;
+                             code_spill_disp = 0L } in
             let spill = new_fixup (name ^ " spill") in
               htab_put cx.ctxt_glue_code g tmp_code;
               trans_mem_glue_frame_entry 1 spill;
@@ -3317,9 +3319,12 @@ let trans_visitor
               None -> (assert (n_vregs = 0); None)
             | Some spill -> Some (n_vregs, spill)
         in
+        let loop_depth = Int64.of_int (Hashtbl.find cx.ctxt_fn_loop_depths node) in
+        let spill_disp = Int64.mul loop_depth (cx.ctxt_abi.Abi.abi_loop_info_sz) in
         let code = { code_fixup = fix;
                      code_quads = quads;
-                     code_vregs_and_spill = vr_s }
+                     code_vregs_and_spill = vr_s;
+                     code_spill_disp = spill_disp }
         in
           htab_put item_code node code;
           htab_put cx.ctxt_all_item_code node code
@@ -3768,7 +3773,8 @@ let trans_visitor
         let code =
           { code_fixup = fix;
             code_quads = emitted_quads e;
-            code_vregs_and_spill = None }
+            code_vregs_and_spill = None;
+            code_spill_disp = 0L }
         in
           htab_put cx.ctxt_glue_code glue code
     in

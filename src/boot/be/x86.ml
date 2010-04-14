@@ -501,6 +501,8 @@ let frame_base_sz = Int64.mul (Int64.of_int frame_base_words) word_sz;;
 
 let frame_info_words = 2 (* crate ptr, crate-rel frame info disp *) ;;
 let frame_info_sz = Int64.mul (Int64.of_int frame_info_words) word_sz;;
+let loop_info_words = 3 (* iterator retpc, iterator esp, loop function esp *) ;;
+let loop_info_sz = Int64.mul (Int64.of_int loop_info_words) word_sz;;
 
 let implicit_arg_words = 2 (* task ptr,out ptr *);;
 let implicit_args_sz =  Int64.mul (Int64.of_int implicit_arg_words) word_sz;;
@@ -509,10 +511,10 @@ let out_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words);;
 let task_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words+1);;
 let ty_param_n i = wordptr_n (Il.Hreg ebp) (frame_base_words + implicit_arg_words + i);;
 
-let spill_slot (i:Il.spill) : Il.mem =
+let spill_slot (i:Il.spill) (spill_disp:int64) : Il.mem =
   let imm = (Asm.IMM
                (Int64.neg
-                  (Int64.add frame_info_sz
+                  (Int64.add (Int64.add frame_info_sz spill_disp)
                      (Int64.mul word_sz
                         (Int64.of_int (i+1))))))
   in
@@ -1383,6 +1385,7 @@ let (abi:Abi.abi) =
     Abi.abi_tp_cell = task_ptr;
     Abi.abi_frame_base_sz = frame_base_sz;
     Abi.abi_frame_info_sz = frame_info_sz;
+    Abi.abi_loop_info_sz = loop_info_sz;
     Abi.abi_implicit_args_sz = implicit_args_sz;
     Abi.abi_spill_slot = spill_slot;
   }

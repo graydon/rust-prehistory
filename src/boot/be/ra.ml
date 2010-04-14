@@ -335,7 +335,7 @@ let dump_quads cx =
 
 
 (* Simple local register allocator. Nothing fancy. *)
-let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
+let reg_alloc (sess:Session.sess) (quads:Il.quads) (spill_disp:int64) (vregs:int) (abi:Abi.abi) =
  try
     let cx = new_ctxt sess quads vregs abi in
     let _ =
@@ -348,7 +348,7 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (vregs:int) (abi:Abi.abi) =
     in
 
     (* Work out pre-spilled slots and allocate 'em. *)
-    let spill_slot (s:Il.spill) = abi.Abi.abi_spill_slot s in
+    let spill_slot (s:Il.spill) = abi.Abi.abi_spill_slot s spill_disp in
     let n_pre_spills = convert_pre_spills cx spill_slot in
 
     let (live_in_vregs, live_out_vregs) =
