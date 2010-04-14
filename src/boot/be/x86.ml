@@ -1191,6 +1191,25 @@ let fn_tail_call
     emit (Il.jmp Il.JMP callee_code);
 ;;
 
+let loop_info_ty =
+  Il.StructTy [| Il.ScalarTy (Il.ValTy word_bits); (* iterator retpc *)
+                 Il.ScalarTy (Il.ValTy word_bits); (* iterator esp *)
+                 Il.ScalarTy (Il.ValTy word_bits); (* loop esp *)
+              |]
+;;
+
+let loop_info_field_iterator_retpc = 0;;
+let loop_info_field_iterator_sp = 1;;
+let loop_info_field_loop_fn_sp = 2;;
+
+let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
+  let edx_n = word_n (h edx) in
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let extra_args_1_off = Asm.IMM (Int64.add frame_base_sz implicit_args_sz) in
+    mov (rc edx) (c (word_at_off (h ebp) extra_args_1_off));       (* edx <- extra_args[1] *)
+    mov (edx_n loop_info_field_iterator_sp) (ro esp)               (* extra_args[1] <- esp *)
+;;
 
 let activate_glue (e:Il.emitter) : unit =
   (*
@@ -1367,6 +1386,7 @@ let (abi:Abi.abi) =
     Abi.abi_emit_fn_prologue = fn_prologue;
     Abi.abi_emit_fn_epilogue = fn_epilogue;
     Abi.abi_emit_fn_tail_call = fn_tail_call;
+    Abi.abi_emit_iterator_prologue = iterator_prologue;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_native_call = emit_native_call;

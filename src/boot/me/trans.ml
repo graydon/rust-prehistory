@@ -3390,7 +3390,7 @@ let trans_visitor
       end
   in
 
-  let trans_frame_entry (fnid:node_id) : unit =
+  let trans_frame_entry (fnid:node_id) (proto_opt:Ast.proto option) : unit =
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
       Stack.push (Stack.create()) epilogue_jumps;
@@ -3401,6 +3401,11 @@ let trans_visitor
         (upcall_fixup "upcall_grow_task");
 
       write_frame_info_ptrs (Some fnid);
+      begin
+        match proto_opt with
+            Some proto -> abi.Abi.abi_emit_iterator_prologue (emitter()) proto
+          | None -> ()
+      end;
       iflog (fun _ -> annotate "finished prologue");
   in
 
@@ -3418,9 +3423,13 @@ let trans_visitor
     pop_emitter ()
   in
 
-  let trans_fn (fnid:node_id) (body:Ast.block) : unit =
+  let trans_fn
+      (fnid:node_id)
+      (proto_opt:Ast.proto option)
+      (body:Ast.block)
+      : unit =
     Stack.push fnid fns;
-    trans_frame_entry fnid;
+    trans_frame_entry fnid proto_opt;
     trans_block body;
     trans_frame_exit fnid true;
     ignore (Stack.pop fns);
@@ -3430,7 +3439,7 @@ let trans_visitor
       (obj_id:node_id)
       (state:Ast.header_slots)
       : unit =
-    trans_frame_entry obj_id;
+    trans_frame_entry obj_id None;
 
     let slots = Array.map (fun (sloti,_) -> sloti.node) state in
     let state_ty = Ast.TY_tup slots in
@@ -3500,8 +3509,8 @@ let trans_visitor
                              [| Asm.WORD (word_ty_mach, Asm.IMM 0L) |]))
   in
 
-  let trans_required_fn (fnid:node_id) (blockid:node_id) : unit =
-    trans_frame_entry fnid;
+  let trans_required_fn (fnid:node_id) (proto_opt:Ast.proto option) (blockid:node_id) : unit =
+    trans_frame_entry fnid proto_opt;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
     let (ilib, conv) = Hashtbl.find cx.ctxt_required_items fnid in
     let lib_num =
@@ -3630,7 +3639,7 @@ let trans_visitor
       (tagid:node_id)
       (tag:(Ast.header_tup * Ast.ty_tag * node_id))
       : unit =
-    trans_frame_entry tagid;
+    trans_frame_entry tagid None;
     trace_str cx.ctxt_sess.Session.sess_trace_tag
       ("in tag constructor " ^ n);
     let (header_tup, _, _) = tag in
@@ -3694,9 +3703,9 @@ let trans_visitor
                 cx.ctxt_main_exit_task_glue_fixup
                 GLUE_exit_main_task;
             end;
-          trans_fn i.id f.Ast.fn_body
+          trans_fn i.id f.Ast.fn_aux.Ast.fn_proto f.Ast.fn_body
 
-      | Ast.MOD_ITEM_pred p -> trans_fn i.id p.Ast.pred_body
+      | Ast.MOD_ITEM_pred p -> trans_fn i.id None p.Ast.pred_body
       | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
       | Ast.MOD_ITEM_obj ob -> trans_obj_ctor i.id ob.Ast.obj_state
       | _ -> ()
@@ -3705,13 +3714,13 @@ let trans_visitor
   let visit_required_mod_item_pre _ _ i =
     iflog (fun _ -> log cx "translating required item #%d = %s" (int_of_node i.id) (path_name()));
     match i.node.Ast.decl_item with
-        Ast.MOD_ITEM_fn f -> trans_required_fn i.id f.Ast.fn_body.id
+        Ast.MOD_ITEM_fn f -> trans_required_fn i.id f.Ast.fn_aux.Ast.fn_proto f.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
       | _ -> bugi cx i.id "unsupported type of require: %s" (path_name())
   in
 
   let visit_local_obj_fn_pre _ _ fn =
-    trans_fn fn.id fn.node.Ast.fn_body
+    trans_fn fn.id fn.node.Ast.fn_aux.Ast.fn_proto fn.node.Ast.fn_body
   in
 
   let visit_required_obj_fn_pre _ _ _ =
