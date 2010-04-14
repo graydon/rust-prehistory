@@ -1462,7 +1462,7 @@ let trans_visitor
       "exited block";
 
   and upcall_fixup (name:string) : fixup =
-    Semant.import_native cx IMPORT_LIB_rustrt name;
+    Semant.require_native cx REQUIRED_LIB_rustrt name;
 
   and trans_upcall
       (name:string)
@@ -3495,13 +3495,13 @@ let trans_visitor
                              [| Asm.WORD (word_ty_mach, Asm.IMM 0L) |]))
   in
 
-  let trans_imported_fn (fnid:node_id) (blockid:node_id) : unit =
+  let trans_required_fn (fnid:node_id) (blockid:node_id) : unit =
     trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
-    let (ilib, conv) = Hashtbl.find cx.ctxt_imported_items fnid in
+    let (ilib, conv) = Hashtbl.find cx.ctxt_required_items fnid in
     let lib_num =
-      htab_search_or_add cx.ctxt_import_lib_num ilib
-        (fun _ -> Hashtbl.length cx.ctxt_import_lib_num)
+      htab_search_or_add cx.ctxt_required_lib_num ilib
+        (fun _ -> Hashtbl.length cx.ctxt_required_lib_num)
     in
     let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
     let n_ty_params = n_item_ty_params cx fnid in
@@ -3512,23 +3512,23 @@ let trans_visitor
     let callee_args_cell = callee_args_cell false args_rty in
       begin
         match ilib with
-            IMPORT_LIB_rust ls ->
+            REQUIRED_LIB_rust ls ->
               begin
                 let c_sym_num =
-                  htab_search_or_add cx.ctxt_import_c_sym_num
+                  htab_search_or_add cx.ctxt_required_c_sym_num
                     (ilib, "rust_crate")
-                    (fun _ -> Hashtbl.length cx.ctxt_import_c_sym_num)
+                    (fun _ -> Hashtbl.length cx.ctxt_required_c_sym_num)
                 in
                 let rust_sym_num =
-                  htab_search_or_add cx.ctxt_import_rust_sym_num fnid
-                    (fun _ -> Hashtbl.length cx.ctxt_import_rust_sym_num)
+                  htab_search_or_add cx.ctxt_required_rust_sym_num fnid
+                    (fun _ -> Hashtbl.length cx.ctxt_required_rust_sym_num)
                 in
                 let path_elts = stk_elts_from_bot path in
-                let _ = assert (ls.import_prefix < (List.length path_elts)) in
-                let relative_path_elts = list_drop ls.import_prefix path_elts in
-                let libstr = trans_static_string ls.import_libname in
+                let _ = assert (ls.required_prefix < (List.length path_elts)) in
+                let relative_path_elts = list_drop ls.required_prefix path_elts in
+                let libstr = trans_static_string ls.required_libname in
                 let relpath = trans_static_name_components relative_path_elts in
-                  trans_upcall "upcall_import_rust_sym" f
+                  trans_upcall "upcall_require_rust_sym" f
                     [| Il.Cell (curr_crate_ptr());
                        imm (Int64.of_int lib_num);
                        imm (Int64.of_int c_sym_num);
@@ -3551,23 +3551,23 @@ let trans_visitor
                     call_code (code_of_operand (Il.Cell f));
               end
 
-          | IMPORT_LIB_c ls ->
+          | REQUIRED_LIB_c ls ->
               begin
                 let c_sym_str = string_of_name_component (Stack.top path) in
                 let c_sym_num =
                   (* FIXME: permit remapping symbol names to handle
                    * mangled variants.
                    *)
-                  htab_search_or_add cx.ctxt_import_c_sym_num (ilib, c_sym_str)
-                    (fun _ -> Hashtbl.length cx.ctxt_import_c_sym_num)
+                  htab_search_or_add cx.ctxt_required_c_sym_num (ilib, c_sym_str)
+                    (fun _ -> Hashtbl.length cx.ctxt_required_c_sym_num)
                 in
-                let libstr = trans_static_string ls.import_libname in
+                let libstr = trans_static_string ls.required_libname in
                 let symstr = trans_static_string c_sym_str in
                 let check_rty_sz rty =
                   let sz = force_sz (Il.referent_ty_size word_bits rty) in
                     if sz = 0L || sz = word_sz
                     then ()
-                    else bug () "bad arg or ret cell size for native import"
+                    else bug () "bad arg or ret cell size for native require"
                 in
                 let out =
                   get_element_ptr caller_args_cell Abi.calltup_elt_out_ptr
@@ -3583,7 +3583,7 @@ let trans_visitor
                   let n_args =
                     match args_cell with
                         Il.Mem (_, Il.StructTy elts) -> Array.length elts
-                      | _ -> bug () "non-StructTy in Trans.trans_imported_fn"
+                      | _ -> bug () "non-StructTy in Trans.trans_required_fn"
                   in
                   let mk_ty_param i =
                     Il.Cell (get_element_ptr ty_params_cell i)
@@ -3602,7 +3602,7 @@ let trans_visitor
                 in
                   if conv <> CONV_rust
                   then assert (n_ty_params = 0);
-                  trans_upcall "upcall_import_c_sym" f
+                  trans_upcall "upcall_require_c_sym" f
                     [| Il.Cell (curr_crate_ptr());
                        imm (Int64.of_int lib_num);
                        imm (Int64.of_int c_sym_num);
@@ -3614,7 +3614,7 @@ let trans_visitor
               end
 
           | _ -> bug ()
-              "Trans.imported_rust_fn on unexpected form of import library"
+              "Trans.required_rust_fn on unexpected form of require library"
       end;
       emit Il.Leave;
       trans_frame_exit fnid false;
@@ -3697,28 +3697,28 @@ let trans_visitor
       | _ -> ()
   in
 
-  let visit_imported_mod_item_pre _ _ i =
-    iflog (fun _ -> log cx "translating imported item #%d = %s" (int_of_node i.id) (path_name()));
+  let visit_required_mod_item_pre _ _ i =
+    iflog (fun _ -> log cx "translating required item #%d = %s" (int_of_node i.id) (path_name()));
     match i.node.Ast.decl_item with
-        Ast.MOD_ITEM_fn f -> trans_imported_fn i.id f.Ast.fn_body.id
+        Ast.MOD_ITEM_fn f -> trans_required_fn i.id f.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
-      | _ -> bugi cx i.id "unsupported type of import: %s" (path_name())
+      | _ -> bugi cx i.id "unsupported type of require: %s" (path_name())
   in
 
   let visit_local_obj_fn_pre _ _ fn =
     trans_fn fn.id fn.node.Ast.fn_body
   in
 
-  let visit_imported_obj_fn_pre _ _ _ =
+  let visit_required_obj_fn_pre _ _ _ =
     ()
   in
 
   let visit_obj_fn_pre obj ident fn =
     enter_file_for fn.id;
     begin
-      if Hashtbl.mem cx.ctxt_imported_items fn.id
+      if Hashtbl.mem cx.ctxt_required_items fn.id
       then
-        visit_imported_obj_fn_pre obj ident fn
+        visit_required_obj_fn_pre obj ident fn
       else
         visit_local_obj_fn_pre obj ident fn
     end;
@@ -3728,9 +3728,9 @@ let trans_visitor
   let visit_mod_item_pre n p i =
     enter_file_for i.id;
     begin
-      if Hashtbl.mem cx.ctxt_imported_items i.id
+      if Hashtbl.mem cx.ctxt_required_items i.id
       then
-        visit_imported_mod_item_pre n p i
+        visit_required_mod_item_pre n p i
       else
         visit_local_mod_item_pre n p i
     end;
@@ -3800,9 +3800,9 @@ let trans_visitor
             crate_rel_word cx.ctxt_unwind_fixup;
             crate_rel_word cx.ctxt_yield_fixup;
 
-            tab_sz cx.ctxt_import_rust_sym_num;
-            tab_sz cx.ctxt_import_c_sym_num;
-            tab_sz cx.ctxt_import_lib_num;
+            tab_sz cx.ctxt_required_rust_sym_num;
+            tab_sz cx.ctxt_required_c_sym_num;
+            tab_sz cx.ctxt_required_lib_num;
           |]))
     in
 
@@ -3830,7 +3830,7 @@ let trans_visitor
       htab_put cx.ctxt_data
         DATA_crate crate_data;
 
-      export_existing_native cx SEG_data "rust_crate" cx.ctxt_crate_fixup;
+      provide_existing_native cx SEG_data "rust_crate" cx.ctxt_crate_fixup;
 
       leave_file_for crate.id
   in

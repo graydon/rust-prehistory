@@ -434,7 +434,7 @@ and mod_items = (ident, mod_item) Hashtbl.t
 and crate' =
     {
       crate_items: mod_items;
-      crate_imported: (node_id, (import_lib * nabi_conv)) Hashtbl.t;
+      crate_required: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;
     }

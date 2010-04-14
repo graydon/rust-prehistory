@@ -18,7 +18,7 @@ type pstate =
       pstate_opaque_id    : opaque_id ref;
       pstate_get_mod      : (filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items);
       pstate_infer_lib_name : (Ast.ident -> filename);
-      pstate_imported       : (node_id, (import_lib * nabi_conv)) Hashtbl.t; }
+      pstate_required       : (node_id, (required_lib * nabi_conv)) Hashtbl.t; }
 ;;
 
 let log (ps:pstate) = Session.log "parse"
@@ -40,7 +40,7 @@ let make_parser
     (tok:Lexing.lexbuf -> token)
     (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
     (infer_lib_name:Ast.ident -> filename)
-    (imported:(node_id, (import_lib * nabi_conv)) Hashtbl.t)
+    (required:(node_id, (required_lib * nabi_conv)) Hashtbl.t)
     (fname:string)
     : pstate =
   let lexbuf = Lexing.from_channel (open_in fname) in
@@ -63,7 +63,7 @@ let make_parser
         pstate_opaque_id = oref;
         pstate_get_mod = get_mod;
         pstate_infer_lib_name = infer_lib_name;
-        pstate_imported = imported; }
+        pstate_required = required; }
     in
       iflog ps (fun _ -> log ps "made parser for: %s\n%!" fname);
       ps

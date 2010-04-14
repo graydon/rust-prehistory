@@ -724,10 +724,10 @@ let rustrt_imports sem =
     {
       pe_import_dll_name_fixup = new_fixup "dll name";
       pe_import_dll_name = (match lib with
-                                IMPORT_LIB_rustrt -> "rustrt.dll"
-                              | IMPORT_LIB_crt -> "msvcrt.dll"
-                              | IMPORT_LIB_rust ls
-                              | IMPORT_LIB_c ls -> ls.import_libname);
+                                REQUIRED_LIB_rustrt -> "rustrt.dll"
+                              | REQUIRED_LIB_crt -> "msvcrt.dll"
+                              | REQUIRED_LIB_rust ls
+                              | REQUIRED_LIB_c ls -> ls.required_libname);
       pe_import_dll_ILT_fixup = new_fixup "dll ILT";
       pe_import_dll_IAT_fixup = new_fixup "dll IAT";
       pe_import_dll_imports =
@@ -747,7 +747,7 @@ let rustrt_imports sem =
     Array.of_list
       (List.map
          make_imports_for_lib
-         (htab_pairs sem.Semant.ctxt_native_imports))
+         (htab_pairs sem.Semant.ctxt_native_required))
 ;;
 
 
@@ -764,7 +764,7 @@ let crate_exports (sem:Semant.ctxt) : pe_export array =
   in
     Array.concat
       (List.map export_seg
-         (htab_pairs sem.Semant.ctxt_native_exports))
+         (htab_pairs sem.Semant.ctxt_native_provided))
 ;;
 
 
@@ -789,7 +789,7 @@ let emit_file
   let symtab_fixup = new_fixup "symbol table" in
   let strtab_fixup = new_fixup "string table" in
 
-  let rust_start_fixup = Semant.import_native sem IMPORT_LIB_rustrt "rust_start" in
+  let rust_start_fixup = Semant.require_native sem REQUIRED_LIB_rustrt "rust_start" in
 
   let header = (pe_header
                   ~machine: IMAGE_FILE_MACHINE_I386

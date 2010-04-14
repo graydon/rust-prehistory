@@ -737,12 +737,12 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
               let path = parse_lib_name ident in
               let items = parse_mod_items_from_signature ps in
               let bpos = lexpos ps in
-              let ilib = IMPORT_LIB_c { import_libname = path;
-                                        import_prefix = ps.pstate_depth }
+              let rlib = REQUIRED_LIB_c { required_libname = path;
+                                          required_prefix = ps.pstate_depth }
               in
               let item = decl params (Ast.MOD_ITEM_mod items) in
               let item = span ps apos bpos item in
-                note_imported_mod ps {lo=apos; hi=bpos} conv ilib item;
+                note_required_mod ps {lo=apos; hi=bpos} conv rlib item;
                 (ident, item)
           end
 
@@ -756,8 +756,8 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             *)
             let bpos = lexpos ps in
               expect ps SEMI;
-              let ilib = IMPORT_LIB_rust { import_libname = path;
-                                           import_prefix = ps.pstate_depth }
+              let rlib = REQUIRED_LIB_rust { required_libname = path;
+                                             required_prefix = ps.pstate_depth }
               in
               let items = ps.pstate_get_mod path ps.pstate_node_id ps.pstate_opaque_id in
                 iflog ps
@@ -768,7 +768,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                   end;
                 let item = decl [||] (Ast.MOD_ITEM_mod items) in
                 let item = span ps apos bpos item in
-                  note_imported_mod ps {lo=apos; hi=bpos} CONV_rust ilib item;
+                  note_required_mod ps {lo=apos; hi=bpos} CONV_rust rlib item;
                   (ident, item)
           end
 
@@ -923,15 +923,15 @@ and expand_tags_to_items
       id_items
 
 
-and note_imported_mod
+and note_required_mod
     (ps:pstate)
     (sp:span)
     (conv:nabi_conv)
-    (ilib:import_lib)
+    (rlib:required_lib)
     (item:Ast.mod_item)
     : unit =
-  iflog ps (fun _ -> log ps "marking item #%d as imported" (int_of_node item.id));
-  htab_put ps.pstate_imported item.id (ilib, conv);
+  iflog ps (fun _ -> log ps "marking item #%d as required" (int_of_node item.id));
+  htab_put ps.pstate_required item.id (rlib, conv);
   if not (Hashtbl.mem ps.pstate_sess.Session.sess_spans item.id)
   then Hashtbl.add ps.pstate_sess.Session.sess_spans item.id sp;
   match item.node.Ast.decl_item with
@@ -939,7 +939,7 @@ and note_imported_mod
         Hashtbl.iter
           begin
             fun _ sub ->
-              note_imported_mod ps sp conv ilib sub
+              note_required_mod ps sp conv rlib sub
           end
           items
     | _ -> ()

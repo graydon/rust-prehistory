@@ -92,7 +92,7 @@ type ctxt =
       ctxt_all_lvals: (node_id,Ast.lval) Hashtbl.t;
       ctxt_all_defns: (node_id,defn) Hashtbl.t;                         (* definition id --> definition *)
       ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;               (* reference id --> definition id *)
-      ctxt_imported_items: (node_id, (import_lib * nabi_conv)) Hashtbl.t;
+      ctxt_required_items: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
       ctxt_pat_to_tag: (node_id,node_id) Hashtbl.t;
 
       (* Layout-y stuff. *)
@@ -143,12 +143,12 @@ type ctxt =
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
 
-      ctxt_native_imports: (import_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
-      ctxt_native_exports: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_native_required: (required_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_native_provided: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
 
-      ctxt_import_rust_sym_num: (node_id, int) Hashtbl.t;
-      ctxt_import_c_sym_num: ((import_lib * string), int) Hashtbl.t;
-      ctxt_import_lib_num: (import_lib, int) Hashtbl.t;
+      ctxt_required_rust_sym_num: (node_id, int) Hashtbl.t;
+      ctxt_required_c_sym_num: ((required_lib * string), int) Hashtbl.t;
+      ctxt_required_lib_num: (required_lib, int) Hashtbl.t;
 
       ctxt_main_fn_fixup: fixup;
       ctxt_main_name: string;
@@ -173,7 +173,7 @@ let new_ctxt sess abi crate =
     ctxt_all_lvals = Hashtbl.create 0;
     ctxt_all_defns = Hashtbl.create 0;
     ctxt_lval_to_referent = Hashtbl.create 0;
-    ctxt_imported_items = crate.Ast.crate_imported;
+    ctxt_required_items = crate.Ast.crate_required;
     ctxt_pat_to_tag = Hashtbl.create 0;
 
     ctxt_mutable_slot_referent = Hashtbl.create 0;
@@ -220,12 +220,12 @@ let new_ctxt sess abi crate =
     ctxt_glue_code = Hashtbl.create 0;
     ctxt_data = Hashtbl.create 0;
 
-    ctxt_native_imports = Hashtbl.create 0;
-    ctxt_native_exports = Hashtbl.create 0;
+    ctxt_native_required = Hashtbl.create 0;
+    ctxt_native_provided = Hashtbl.create 0;
 
-    ctxt_import_rust_sym_num = Hashtbl.create 0;
-    ctxt_import_c_sym_num = Hashtbl.create 0;
-    ctxt_import_lib_num = Hashtbl.create 0;
+    ctxt_required_rust_sym_num = Hashtbl.create 0;
+    ctxt_required_c_sym_num = Hashtbl.create 0;
+    ctxt_required_lib_num = Hashtbl.create 0;
 
     ctxt_main_fn_fixup = new_fixup (string_of_name crate.Ast.crate_main);
     ctxt_main_name = string_of_name crate.Ast.crate_main;
@@ -335,24 +335,24 @@ let get_spill (cx:ctxt) (id:node_id) : fixup =
   else bugi cx id "missing spill fixup"
 ;;
 
-let import_native (cx:ctxt) (lib:import_lib) (name:string) : fixup =
-  let lib_tab = (htab_search_or_add cx.ctxt_native_imports lib
+let require_native (cx:ctxt) (lib:required_lib) (name:string) : fixup =
+  let lib_tab = (htab_search_or_add cx.ctxt_native_required lib
                    (fun _ -> Hashtbl.create 0))
   in
     htab_search_or_add lib_tab name
-      (fun _ -> new_fixup ("import: " ^ name))
+      (fun _ -> new_fixup ("require: " ^ name))
 ;;
 
-let export_native (cx:ctxt) (seg:segment) (name:string) : fixup =
-  let seg_tab = (htab_search_or_add cx.ctxt_native_exports seg
+let provide_native (cx:ctxt) (seg:segment) (name:string) : fixup =
+  let seg_tab = (htab_search_or_add cx.ctxt_native_provided seg
                    (fun _ -> Hashtbl.create 0))
   in
     htab_search_or_add seg_tab name
-      (fun _ -> new_fixup ("export: " ^ name))
+      (fun _ -> new_fixup ("provide: " ^ name))
 ;;
 
-let export_existing_native (cx:ctxt) (seg:segment) (name:string) (fix:fixup) : unit =
-  let seg_tab = (htab_search_or_add cx.ctxt_native_exports seg
+let provide_existing_native (cx:ctxt) (seg:segment) (name:string) (fix:fixup) : unit =
+  let seg_tab = (htab_search_or_add cx.ctxt_native_provided seg
                    (fun _ -> Hashtbl.create 0))
   in
     htab_put seg_tab name fix

@@ -116,18 +116,18 @@ let string_to_nabi (s:string) (indirect:bool) : nabi option =
                nabi_convention = c }
 ;;
 
-type import_lib_spec =
+type required_lib_spec =
     {
-      import_libname: string;
-      import_prefix: int;
+      required_libname: string;
+      required_prefix: int;
     }
 ;;
 
-type import_lib =
-    IMPORT_LIB_rustrt
-  | IMPORT_LIB_crt
-  | IMPORT_LIB_rust of import_lib_spec
-  | IMPORT_LIB_c of import_lib_spec
+type required_lib =
+    REQUIRED_LIB_rustrt
+  | REQUIRED_LIB_crt
+  | REQUIRED_LIB_rust of required_lib_spec
+  | REQUIRED_LIB_c of required_lib_spec
 ;;
 
 type segment =

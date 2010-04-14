@@ -3154,19 +3154,19 @@ fetch_c_sym(rust_task *task,
 }
 
 extern "C" CDECL uintptr_t
-upcall_import_rust_sym(rust_task *task,
-                       rust_crate const *curr_crate,
-                       size_t lib_num,      // # of lib
-                       size_t c_sym_num,    // # of C sym "rust_crate" in lib
-                       size_t rust_sym_num, // # of rust sym
-                       char const *library,
-                       char const **path)
+upcall_require_rust_sym(rust_task *task,
+                        rust_crate const *curr_crate,
+                        size_t lib_num,      // # of lib
+                        size_t c_sym_num,    // # of C sym "rust_crate" in lib
+                        size_t rust_sym_num, // # of rust sym
+                        char const *library,
+                        char const **path)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
 
     dom->log(LOG_UPCALL|LOG_LINK,
-             "upcall import rust sym: lib #%" PRIdPTR
+             "upcall require rust sym: lib #%" PRIdPTR
              " = %s, c_sym #%" PRIdPTR
              ", rust_sym #%" PRIdPTR
              ", curr_crate = 0x%" PRIxPTR,
@@ -3177,12 +3177,12 @@ upcall_import_rust_sym(rust_task *task,
     }
 
     dom->log(LOG_UPCALL|LOG_LINK,
-             "import C symbol 'rust_crate' from lib #%" PRIdPTR,lib_num);
+             "require C symbol 'rust_crate' from lib #%" PRIdPTR,lib_num);
     rust_crate_cache::c_sym *c =
         fetch_c_sym(task, curr_crate, lib_num, c_sym_num,
                     library, "rust_crate");
 
-    dom->log(LOG_UPCALL|LOG_LINK, "import rust symbol inside crate");
+    dom->log(LOG_UPCALL|LOG_LINK, "require rust symbol inside crate");
     rust_crate_cache::rust_sym *s =
         task->cache->get_rust_sym(rust_sym_num, dom, curr_crate, c, path);
 
@@ -3199,18 +3199,18 @@ upcall_import_rust_sym(rust_task *task,
 }
 
 extern "C" CDECL uintptr_t
-upcall_import_c_sym(rust_task *task,
-                    rust_crate const *curr_crate,
-                    size_t lib_num,      // # of lib
-                    size_t c_sym_num,    // # of C sym
-                    char const *library,
-                    char const *symbol)
+upcall_require_c_sym(rust_task *task,
+                     rust_crate const *curr_crate,
+                     size_t lib_num,      // # of lib
+                     size_t c_sym_num,    // # of C sym
+                     char const *library,
+                     char const *symbol)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
 
     dom->log(LOG_UPCALL|LOG_LINK,
-             "upcall import c sym: lib #%" PRIdPTR
+             "upcall require c sym: lib #%" PRIdPTR
              " = %s, c_sym #%" PRIdPTR
              " = %s"
              ", curr_crate = 0x%" PRIxPTR,

@@ -467,7 +467,7 @@ let elf32_linux_x86_file
     ~(text_frags:(string option, frag) Hashtbl.t)
     ~(data_frags:(string option, frag) Hashtbl.t)
     ~(rodata_frags:(string option, frag) Hashtbl.t)
-    ~(import_fixups:(string, fixup) Hashtbl.t)
+    ~(required_fixups:(string, fixup) Hashtbl.t)
     ~(dwarf:Dwarf.debug_records)
     ~(sem:Semant.ctxt)
     ~(needed_libs:string array)
@@ -1021,8 +1021,8 @@ let elf32_linux_x86_file
       (strtab_frag, symtab_frag)
   in
 
-  let import_sym name st_bind _(*fixup*) =
-    let name_fixup = new_fixup ("import symbol name fixup: '" ^ name ^ "'") in
+  let require_sym name st_bind _(*fixup*) =
+    let name_fixup = new_fixup ("require symbol name fixup: '" ^ name ^ "'") in
     let strtab_frag = DEF (name_fixup, ZSTRING name) in
     let symtab_frag =
       symbol
@@ -1057,7 +1057,7 @@ let elf32_linux_x86_file
        (body_frag :: body_frags))
   in
 
-  let frags_of_import_symbol sym_emitter st_bind symname plt_entry_fixup x =
+  let frags_of_require_symbol sym_emitter st_bind symname plt_entry_fixup x =
     let (i, strtab_frags, symtab_frags,
          plt_frags, got_plt_frags, rela_plt_frags) = x in
     let (strtab_frag, symtab_frag) = sym_emitter symname st_bind None in
@@ -1110,7 +1110,7 @@ let elf32_linux_x86_file
 
   (* Emit text export symbols. *)
   let (global_text_strtab_frags, global_text_symtab_frags) =
-    match htab_search sem.Semant.ctxt_native_exports SEG_text with
+    match htab_search sem.Semant.ctxt_native_provided SEG_text with
         None -> ([], [])
       | Some etab ->
           Hashtbl.fold
@@ -1166,7 +1166,7 @@ let elf32_linux_x86_file
 
   (* Emit rodata export symbols. *)
   let (rodata_strtab_frags, rodata_symtab_frags) =
-    match htab_search sem.Semant.ctxt_native_exports SEG_data with
+    match htab_search sem.Semant.ctxt_native_provided SEG_data with
         None -> ([], [])
       | Some etab ->
           Hashtbl.fold
@@ -1199,15 +1199,15 @@ let elf32_linux_x86_file
   in
 
   let (_,
-       import_strtab_frags,
-       import_symtab_frags,
+       require_strtab_frags,
+       require_symtab_frags,
        plt_frags,
        got_plt_frags,
        rela_plt_frags) =
-    Hashtbl.fold (frags_of_import_symbol import_sym STB_GLOBAL) import_fixups
+    Hashtbl.fold (frags_of_require_symbol require_sym STB_GLOBAL) required_fixups
       (1,[],[],[plt0_frag],[got_prefix],[])
   in
-  let import_symtab_frags = List.rev import_symtab_frags in
+  let require_symtab_frags = List.rev require_symtab_frags in
   let plt_frags = List.rev plt_frags in
   let got_plt_frags = List.rev got_plt_frags in
   let rela_plt_frags = List.rev rela_plt_frags in
@@ -1252,7 +1252,7 @@ let elf32_linux_x86_file
                             ~st_shndx: 0L) in
 
   let dynsym_frags = (null_symtab_frag ::
-                        (import_symtab_frags @
+                        (require_symtab_frags @
                            global_text_symtab_frags @
                            local_text_symtab_frags @
                            rodata_symtab_frags @
@@ -1260,7 +1260,7 @@ let elf32_linux_x86_file
   in
 
   let dynstr_frags = (null_strtab_frag ::
-                        (import_strtab_frags @
+                        (require_strtab_frags @
                            global_text_strtab_frags @
                            local_text_strtab_frags @
                            rodata_strtab_frags @
@@ -1445,7 +1445,7 @@ let emit_file
   let text_frags = Hashtbl.create 4 in
   let rodata_frags = Hashtbl.create 4 in
   let data_frags = Hashtbl.create 4 in
-  let import_fixups = Hashtbl.create 4 in
+  let required_fixups = Hashtbl.create 4 in
 
   (*
    * Startup on elf-linux is more complex than in win32. It's
@@ -1477,7 +1477,7 @@ let emit_file
   let init_fixup = new_fixup "_init function entry" in
   let fini_fixup = new_fixup "_fini function entry" in
   let start_fixup = new_fixup "start function entry" in
-  let rust_start_fixup = (Semant.import_native sem IMPORT_LIB_rustrt "rust_start") in
+  let rust_start_fixup = (Semant.require_native sem REQUIRED_LIB_rustrt "rust_start") in
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
   let start_fn =
@@ -1530,7 +1530,7 @@ let emit_file
     htab_put text_frags (Some "main") main_fn;
     htab_put text_frags None code;
     htab_put rodata_frags None data;
-    htab_put import_fixups "__libc_start_main" libc_start_main_fixup;
+    htab_put required_fixups "__libc_start_main" libc_start_main_fixup;
 
     Hashtbl.iter
       begin
@@ -1538,11 +1538,11 @@ let emit_file
           Hashtbl.iter
             begin
               fun name fixup ->
-                htab_put import_fixups name fixup
+                htab_put required_fixups name fixup
             end
             tab
       end
-      sem.Semant.ctxt_native_imports
+      sem.Semant.ctxt_native_required
   in
   let all_frags =
     elf32_linux_x86_file
@@ -1553,7 +1553,7 @@ let emit_file
       ~dwarf
       ~sem
       ~rodata_frags
-      ~import_fixups
+      ~required_fixups
       ~needed_libs
   in
   let buf = Buffer.create 0xffff in

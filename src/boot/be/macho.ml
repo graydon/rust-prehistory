@@ -617,12 +617,12 @@ let emit_file
 
   let mh_execute_header_fixup = new_fixup "__mh_execute header" in
 
-  let nxargc_fixup = (Semant.export_native sem SEG_data "NXArgc") in
-  let nxargv_fixup = (Semant.export_native sem SEG_data "NXArgv") in
-  let progname_fixup = (Semant.export_native sem SEG_data "__progname") in
-  let environ_fixup = (Semant.export_native sem SEG_data "environ") in
-  let exit_fixup = (Semant.import_native sem IMPORT_LIB_crt "exit") in
-  let rust_start_fixup = (Semant.import_native sem IMPORT_LIB_rustrt "rust_start") in
+  let nxargc_fixup = (Semant.provide_native sem SEG_data "NXArgc") in
+  let nxargv_fixup = (Semant.provide_native sem SEG_data "NXArgv") in
+  let progname_fixup = (Semant.provide_native sem SEG_data "__progname") in
+  let environ_fixup = (Semant.provide_native sem SEG_data "environ") in
+  let exit_fixup = (Semant.require_native sem REQUIRED_LIB_crt "exit") in
+  let rust_start_fixup = (Semant.require_native sem REQUIRED_LIB_rustrt "rust_start") in
 
   let start_fixup = new_fixup "start function entry" in
 
@@ -734,14 +734,14 @@ let emit_file
                (List.map
                   (fun (name,fix) -> (lib,name,fix))
                   (htab_pairs tab)))
-            (htab_pairs sem.Semant.ctxt_native_imports)))
+            (htab_pairs sem.Semant.ctxt_native_required)))
   in
 
-  let dylib_index (lib:import_lib) : int =
+  let dylib_index (lib:required_lib) : int =
     match lib with
-        IMPORT_LIB_rustrt -> 1
-      | IMPORT_LIB_crt -> 2
-      | _ -> bug () "Macho.dylib_index on nonstandard import lib."
+        REQUIRED_LIB_rustrt -> 1
+      | REQUIRED_LIB_crt -> 2
+      | _ -> bug () "Macho.dylib_index on nonstandard required lib."
   in
 
   (* Make undef symbols for native imports. *)
@@ -767,7 +767,7 @@ let emit_file
       Array.of_list
         (List.concat
            (List.map export_symbols_of_seg
-              (htab_pairs sem.Semant.ctxt_native_exports)))
+              (htab_pairs sem.Semant.ctxt_native_provided)))
   in
 
   (* Make private symbols for items. *)

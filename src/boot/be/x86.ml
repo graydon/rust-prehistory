@@ -665,7 +665,7 @@ let emit_native_call_in_thunk
       match fn with
           (*
            * NB: old path, remove when/if you're sure you don't
-           * want native-linker-symbol-driven imports.
+           * want native-linker-symbol-driven requirements.
            *)
           Il.ImmPtr (fix, _) ->
             let code =
@@ -676,7 +676,7 @@ let emit_native_call_in_thunk
         | _ ->
             (*
              * NB: new path, ignores nabi_indirect, assumes
-             * indirect via pointer from upcall_import_c_sym
+             * indirect via pointer from upcall_require_c_sym
              * or crate cache.
              *)
             mov (rc eax) fn;

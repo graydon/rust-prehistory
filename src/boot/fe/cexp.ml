@@ -245,7 +245,7 @@ type env = { env_bindings: (Ast.ident * cval) list;
              env_prefix: filename list;
              env_items: (filename, Ast.mod_items) Hashtbl.t;
              env_files: (node_id,filename) Hashtbl.t;
-             env_imported: (node_id, (import_lib * nabi_conv)) Hashtbl.t;
+             env_required: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
              env_ps: pstate; }
 
 let unexpected_val (expected:string) (v:cval)  =
@@ -309,7 +309,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
             ps.pstate_lexfun
             ps.pstate_get_mod
             ps.pstate_infer_lib_name
-            env.env_imported
+            env.env_required
             full_path
         in
         let items = Item.parse_mod_items p EOF in
@@ -335,8 +335,8 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         let ps = env.env_ps in
         let name = eval_cexp_to_ident env u.use_name in
         let filename = ps.pstate_infer_lib_name name in
-        let ilib = IMPORT_LIB_rust { import_libname = filename;
-                                     import_prefix = 1 }
+        let rlib = REQUIRED_LIB_rust { required_libname = filename;
+                                       required_prefix = 1 }
         in
         let items = ps.pstate_get_mod filename ps.pstate_node_id ps.pstate_opaque_id in
           iflog ps
@@ -348,7 +348,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
           let item = decl [||] (Ast.MOD_ITEM_mod items) in
           let item = { id = id; node = item } in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
-            Item.note_imported_mod env.env_ps span CONV_rust ilib item;
+            Item.note_required_mod env.env_ps span CONV_rust rlib item;
             CVAL_mod_item (name, item)
 
     | CEXP_nat_mod {node=cn;id=id} ->
@@ -366,12 +366,12 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         in
         let item = decl [||] (Ast.MOD_ITEM_mod cn.nat_items) in
         let item = { id = id; node = item } in
-        let ilib = IMPORT_LIB_c { import_libname = filename;
-                                  import_prefix = 1 }
+        let rlib = REQUIRED_LIB_c { required_libname = filename;
+                                    required_prefix = 1 }
         in
         let ps = env.env_ps in
         let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
-          Item.note_imported_mod env.env_ps span conv ilib item;
+          Item.note_required_mod env.env_ps span conv rlib item;
           CVAL_mod_item (name, item)
 
     | CEXP_pexp exp ->
@@ -481,7 +481,7 @@ let find_main_fn
     Hashtbl.iter (extract_fn prefix_name) items
   and extract_fn prefix_name ident item =
     if not (Array.length item.node.Ast.decl_params = 0) ||
-      Hashtbl.mem ps.pstate_imported item.id
+      Hashtbl.mem ps.pstate_required item.id
     then ()
     else
       match item.node.Ast.decl_item with
@@ -517,7 +517,7 @@ let with_err_handling sess thunk =
         let apos = lexpos ps in
           span ps apos apos
             { Ast.crate_items = Hashtbl.create 0;
-              Ast.crate_imported = Hashtbl.create 0;
+              Ast.crate_required = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
               Ast.crate_files = Hashtbl.create 0 }
 ;;
@@ -533,9 +533,9 @@ let parse_crate_file
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
   let oref = ref (Opaque 0) in
-  let imported = Hashtbl.create 4 in
+  let required = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess tok get_mod infer_lib_name imported fname
+    make_parser tref nref oref sess tok get_mod infer_lib_name required fname
   in
 
   let files = Hashtbl.create 0 in
@@ -567,7 +567,7 @@ let parse_crate_file
               env_prefix = [Filename.dirname fname];
               env_items = Hashtbl.create 0;
               env_files = files;
-              env_imported = imported;
+              env_required = required;
               env_ps = ps; }
   in
     with_err_handling sess
@@ -586,7 +586,7 @@ let parse_crate_file
           let bpos = lexpos ps in
           let main = find_main_fn ps items in
           let crate = { Ast.crate_items = items;
-                        Ast.crate_imported = imported;
+                        Ast.crate_required = required;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
           in
@@ -606,9 +606,9 @@ let parse_src_file
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
   let oref = ref (Opaque 0) in
-  let imported = Hashtbl.create 4 in
+  let required = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess tok get_mod infer_lib_name imported fname
+    make_parser tref nref oref sess tok get_mod infer_lib_name required fname
   in
     with_err_handling sess
       begin
@@ -619,7 +619,7 @@ let parse_src_file
           let files = Hashtbl.create 0 in
           let main = find_main_fn ps items in
           let crate = { Ast.crate_items = items;
-                        Ast.crate_imported = imported;
+                        Ast.crate_required = required;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
           in
