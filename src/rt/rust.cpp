@@ -27,10 +27,10 @@ extern "C" {
 #include <wincrypt.h>
 }
 #elif defined(__GNUC__)
- /*
-  * Only for RTLD_DEFAULT, remove _GNU_SOURCE when that dies. We want
-  * to be non-GNU-dependent.
-  */
+/*
+ * Only for RTLD_DEFAULT, remove _GNU_SOURCE when that dies. We want
+ * to be non-GNU-dependent.
+ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -44,14 +44,14 @@ extern "C" {
 #error "Platform not supported."
 #endif
 
-#define I(rt, e) ((e) ? (void)0 :                           \
-                  (rt)->srv->fatal(#e, __FILE__, __LINE__))
+#define I(dom, e) ((e) ? (void)0 :                              \
+                   (dom)->srv->fatal(#e, __FILE__, __LINE__))
 
 struct rust_task;
 struct rust_port;
 struct rust_chan;
 struct rust_token;
-struct rust_rt;
+struct rust_dom;
 
 static uint32_t const LOG_ALL = 0xffffffff;
 static uint32_t const LOG_ERR =        0x1;
@@ -66,16 +66,16 @@ static uint32_t const LOG_DWARF =    0x100;
 static uint32_t const LOG_LINK =     0x200;
 
 #ifdef __GNUC__
-#define LOG_UPCALL_ENTRY(task)                                          \
-    (task)->rt->log(LOG_UPCALL,                                         \
-                    "upcall task: 0x%" PRIxPTR                          \
-                    " retpc: 0x%" PRIxPTR,                              \
-                    (task), __builtin_return_address(0))
+#define LOG_UPCALL_ENTRY(task)                              \
+    (task)->dom->log(LOG_UPCALL,                            \
+                     "upcall task: 0x%" PRIxPTR             \
+                     " retpc: 0x%" PRIxPTR,                 \
+                     (task), __builtin_return_address(0))
 #else
-#define LOG_UPCALL_ENTRY(task)                                          \
-    (task)->rt->log(LOG_UPCALL,                                         \
-                    "upcall task: 0x%" PRIxPTR                          \
-                    (task))
+#define LOG_UPCALL_ENTRY(task)                  \
+    (task)->dom->log(LOG_UPCALL,                \
+                     "upcall task: 0x%" PRIxPTR \
+                     (task))
 #endif
 
 static uint32_t
@@ -95,7 +95,7 @@ get_logbits()
             bits |= LOG_TASK;
         if (strstr(c, "up"))
             bits |= LOG_UPCALL;
-        if (strstr(c, "rt"))
+        if (strstr(c, "dom"))
             bits |= LOG_RT;
         if (strstr(c, "ulog"))
             bits |= LOG_ULOG;
@@ -132,16 +132,16 @@ struct rc_base {
 };
 
 template <typename T>
-struct rt_owned {
+struct dom_owned {
     void operator delete(void *ptr) {
-        ((T *)ptr)->rt->free(ptr);
+        ((T *)ptr)->dom->free(ptr);
     }
 };
 
 template <typename T>
 struct task_owned {
     void operator delete(void *ptr) {
-        ((T *)ptr)->task->rt->free(ptr);
+        ((T *)ptr)->task->dom->free(ptr);
     }
 };
 
@@ -173,16 +173,16 @@ struct type_desc {
 };
 
 template <typename T>
-class ptr_vec : public rt_owned<ptr_vec<T> > {
+class ptr_vec : public dom_owned<ptr_vec<T> > {
     static const size_t INIT_SIZE = 8;
 
-    rust_rt *rt;
+    rust_dom *dom;
     size_t alloc;
     size_t fill;
     T **data;
 
 public:
-    ptr_vec(rust_rt *rt);
+    ptr_vec(rust_dom *dom);
     ~ptr_vec();
 
     size_t length() {
@@ -196,18 +196,18 @@ public:
     void swapdel(T* p);
 };
 
-struct circ_buf : public rt_owned<circ_buf> {
+struct circ_buf : public dom_owned<circ_buf> {
     static const size_t INIT_CIRC_BUF_UNITS = 8;
     static const size_t MAX_CIRC_BUF_SIZE = 1 << 24;
 
-    rust_rt *rt;
+    rust_dom *dom;
     size_t alloc;
     size_t unit_sz;
     size_t next;
     size_t unread;
     uint8_t *data;
 
-    circ_buf(rust_rt *rt, size_t unit_sz);
+    circ_buf(rust_dom *dom, size_t unit_sz);
     ~circ_buf();
 
     void transfer(void *dst);
@@ -320,7 +320,7 @@ struct rust_str : public rc_base<rust_str> {
     size_t fill;
     uint8_t data[];         // C99 "flexible array" element.
 
-    rust_str(rust_rt *rt, size_t alloc, size_t fill, char const *s);
+    rust_str(rust_dom *dom, size_t alloc, size_t fill, char const *s);
     ~rust_str();
 };
 
@@ -337,7 +337,7 @@ crate_rel(rust_crate const *crate, T const *t) {
     return (T const*)(((uintptr_t)crate) + ((ptrdiff_t)t));
 }
 
-struct rust_rt {
+struct rust_dom {
     // NB: the root crate must remain in memory until the root of the
     // tree of runtimes exits. All runtimes within this tree have a
     // copy of this root_crate value and use it for finding utility
@@ -358,8 +358,8 @@ struct rust_rt {
     pthread_attr_t attr;
 #endif
 
-    rust_rt(rust_srv *srv, rust_crate const *root_crate);
-    ~rust_rt();
+    rust_dom(rust_srv *srv, rust_crate const *root_crate);
+    ~rust_dom();
 
     void activate(rust_task *task);
     void log(uint32_t logbit, char const *fmt, ...);
@@ -390,20 +390,20 @@ inline void *operator new(size_t sz, void *mem) {
     return mem;
 }
 
-inline void *operator new(size_t sz, rust_rt *rt) {
-    return rt->malloc(sz);
+inline void *operator new(size_t sz, rust_dom *dom) {
+    return dom->malloc(sz);
 }
 
-inline void *operator new[](size_t sz, rust_rt *rt) {
-    return rt->malloc(sz);
+inline void *operator new[](size_t sz, rust_dom *dom) {
+    return dom->malloc(sz);
 }
 
-inline void *operator new(size_t sz, rust_rt &rt) {
-    return rt.malloc(sz);
+inline void *operator new(size_t sz, rust_dom &dom) {
+    return dom.malloc(sz);
 }
 
-inline void *operator new[](size_t sz, rust_rt &rt) {
-    return rt.malloc(sz);
+inline void *operator new[](size_t sz, rust_dom &dom) {
+    return dom.malloc(sz);
 }
 
 // Crates.
@@ -463,27 +463,27 @@ public:
 
     struct mem_area
     {
-        rust_rt *rt;
+        rust_dom *dom;
         uintptr_t base;
         uintptr_t lim;
 
-        mem_area(rust_rt *rt, uintptr_t pos, size_t sz)
-            : rt(rt),
+        mem_area(rust_dom *dom, uintptr_t pos, size_t sz)
+            : dom(dom),
               base(pos),
               lim(pos + sz)
         {
-            rt->log(LOG_MEM, "new mem_area [0x%" PRIxPTR ",0x%" PRIxPTR "]",
-                    base, lim);
+            dom->log(LOG_MEM, "new mem_area [0x%" PRIxPTR ",0x%" PRIxPTR "]",
+                     base, lim);
         }
     };
 
-    mem_area get_debug_info(rust_rt *rt) const {
-        return mem_area(rt, ((uintptr_t)this + debug_info_off),
+    mem_area get_debug_info(rust_dom *dom) const {
+        return mem_area(dom, ((uintptr_t)this + debug_info_off),
                         debug_info_sz);
     }
 
-    mem_area get_debug_abbrev(rust_rt *rt) const {
-        return mem_area(rt, ((uintptr_t)this + debug_abbrev_off),
+    mem_area get_debug_abbrev(rust_dom *dom) const {
+        return mem_area(dom, ((uintptr_t)this + debug_abbrev_off),
                         debug_abbrev_sz);
     }
 
@@ -727,11 +727,11 @@ class rust_crate_reader
             if (!ok)
                 return;
             out = *((T*)(pos));
-            // mem.rt->log(LOG_MEM, "get %d bytes @ 0x%" PRIxPTR " = %d / '%c'",
+            // mem.dom->log(LOG_MEM, "get %d bytes @ 0x%" PRIxPTR " = %d / '%c'",
             //             sizeof(T), pos, (int)out, (char)out);
             pos += sizeof(T);
             ok &= !at_end();
-            I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
+            I(mem.dom, at_end() || (mem.base <= pos && pos < mem.lim));
         }
 
         template<typename T>
@@ -745,8 +745,8 @@ class rust_crate_reader
                 if (!(byte & 0x80))
                     break;
             }
-            // mem.rt->log(LOG_MEM, "got uleb 0x%" PRIxPTR, out);
-            I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
+            // mem.dom->log(LOG_MEM, "got uleb 0x%" PRIxPTR, out);
+            I(mem.dom, at_end() || (mem.base <= pos && pos < mem.lim));
         }
 
         bool adv_zstr(size_t sz) {
@@ -775,10 +775,10 @@ class rust_crate_reader
                 ok = false;
             if (!ok)
                 return;
-            // mem.rt->log(LOG_MEM, "adv %d bytes", amt);
+            // mem.dom->log(LOG_MEM, "adv %d bytes", amt);
             pos += amt;
             ok &= !at_end();
-            I(mem.rt, at_end() || (mem.base <= pos && pos < mem.lim));
+            I(mem.dom, at_end() || (mem.base <= pos && pos < mem.lim));
         }
 
         template<typename T>
@@ -788,17 +788,17 @@ class rust_crate_reader
     };
 
 
-    struct abbrev : rt_owned<abbrev>
+    struct abbrev : dom_owned<abbrev>
     {
-        rust_rt *rt;
+        rust_dom *dom;
         uintptr_t body_off;
         size_t body_sz;
         uintptr_t tag;
         uint8_t has_children;
         size_t idx;
-        abbrev(rust_rt *rt, uintptr_t body_off, size_t body_sz,
+        abbrev(rust_dom *dom, uintptr_t body_off, size_t body_sz,
                uintptr_t tag, uint8_t has_children) :
-            rt(rt),
+            dom(dom),
             body_off(body_off),
             tag(tag),
             has_children(has_children),
@@ -812,12 +812,12 @@ class rust_crate_reader
     public:
         abbrev_reader(rust_crate::mem_area &abbrev_mem)
             : mem_reader(abbrev_mem),
-              abbrevs(abbrev_mem.rt)
+              abbrevs(abbrev_mem.dom)
         {
-            rust_rt *rt = mem.rt;
+            rust_dom *dom = mem.dom;
             while (is_ok()) {
 
-                // rt->log(LOG_DWARF, "reading new abbrev at 0x%" PRIxPTR, tell_off());
+                // dom->log(LOG_DWARF, "reading new abbrev at 0x%" PRIxPTR, tell_off());
 
                 uintptr_t idx, tag;
                 uint8_t has_children;
@@ -829,16 +829,16 @@ class rust_crate_reader
                 size_t body_off = tell_off();
                 while (is_ok() && step_attr_form_pair(attr, form));
 
-                // rt->log(LOG_DWARF,
+                // dom->log(LOG_DWARF,
                 //         "finished scanning attr/form pairs, pos=0x%"
                 //         PRIxPTR ", lim=0x%" PRIxPTR ", is_ok=%d, at_end=%d",
                 //        pos, mem.lim, is_ok(), at_end());
 
                 if (is_ok() || at_end()) {
-                    rt->log(LOG_DWARF, "read abbrev: %" PRIdPTR, idx);
-                    I(rt, idx = abbrevs.length() + 1);
-                    abbrevs.push(new (rt) abbrev(rt, body_off, tell_off() - body_off,
-                                                 tag, has_children));
+                    dom->log(LOG_DWARF, "read abbrev: %" PRIdPTR, idx);
+                    I(dom, idx = abbrevs.length() + 1);
+                    abbrevs.push(new (dom) abbrev(dom, body_off, tell_off() - body_off,
+                                                  tag, has_children));
                 }
             }
         }
@@ -854,10 +854,10 @@ class rust_crate_reader
         {
             attr = 0;
             form = 0;
-            // mem.rt->log(LOG_DWARF, "reading attr/form pair at 0x%" PRIxPTR, tell_off());
+            // mem.dom->log(LOG_DWARF, "reading attr/form pair at 0x%" PRIxPTR, tell_off());
             get_uleb(attr);
             get_uleb(form);
-            // mem.rt->log(LOG_DWARF, "attr 0x%" PRIxPTR ", form 0x%" PRIxPTR, attr, form);
+            // mem.dom->log(LOG_DWARF, "attr 0x%" PRIxPTR ", form 0x%" PRIxPTR, attr, form);
             return ! (attr == 0 && form == 0);
         }
         ~abbrev_reader() {
@@ -867,7 +867,7 @@ class rust_crate_reader
         }
     };
 
-    rust_rt *rt;
+    rust_dom *dom;
     size_t idx;
     rust_crate const *crate;
 
@@ -910,18 +910,18 @@ public:
                 return form == DW_FORM_string;
             }
 
-            size_t get_ssz(rust_rt *rt) const {
-                I(rt, is_string());
+            size_t get_ssz(rust_dom *dom) const {
+                I(dom, is_string());
                 return val.str.sz;
             }
 
-            char const *get_str(rust_rt *rt) const {
-                I(rt, is_string());
+            char const *get_str(rust_dom *dom) const {
+                I(dom, is_string());
                 return val.str.s;
             }
 
-            uintptr_t get_num(rust_rt *rt) const {
-                I(rt, is_numeric());
+            uintptr_t get_num(rust_dom *dom) const {
+                I(dom, is_numeric());
                 return val.num;
             }
 
@@ -935,7 +935,7 @@ public:
             die_reader *rdr;
             rdr_sess(die_reader *rdr) : rdr(rdr)
             {
-                I(rdr->mem.rt, !rdr->in_use);
+                I(rdr->mem.dom, !rdr->in_use);
                 rdr->in_use = true;
             }
             ~rdr_sess()
@@ -957,7 +957,7 @@ public:
                   off(off),
                   using_rdr(false)
             {
-                rust_rt *rt = rdr->mem.rt;
+                rust_dom *dom = rdr->mem.dom;
                 rdr_sess use(rdr);
 
                 rdr->reset();
@@ -970,11 +970,11 @@ public:
                 rdr->get_uleb(ab_idx);
                 if (!ab_idx) {
                     ab = NULL;
-                    rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> (null)", off);
+                    dom->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> (null)", off);
                 } else {
                     ab = rdr->abbrevs.get_abbrev(ab_idx);
-                    rt->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, off, ab_idx);
-                    rt->log(LOG_DWARF, "  tag 0x%x, has children: %d", ab->tag, ab->has_children);
+                    dom->log(LOG_DWARF, "DIE <0x%" PRIxPTR "> abbrev 0x%" PRIxPTR, off, ab_idx);
+                    dom->log(LOG_DWARF, "  tag 0x%x, has children: %d", ab->tag, ab->has_children);
                 }
             }
 
@@ -1018,7 +1018,7 @@ public:
                         break;
 
                     case DW_FORM_ref_addr:
-                        I(rdr->mem.rt, sizeof(uintptr_t) == 4);
+                        I(rdr->mem.dom, sizeof(uintptr_t) == 4);
                     case DW_FORM_addr:
                     case DW_FORM_data4:
                         rdr->get(u32);
@@ -1040,7 +1040,7 @@ public:
                         break;
 
                     default:
-                        rdr->mem.rt->log(LOG_DWARF, "  unknown dwarf form: 0x%" PRIxPTR, a.form);
+                        rdr->mem.dom->log(LOG_DWARF, "  unknown dwarf form: 0x%" PRIxPTR, a.form);
                         rdr->fail();
                         break;
                     }
@@ -1056,7 +1056,7 @@ public:
                     attr a;
                     while (step_attr(a)) {
                         if (a.at == at && a.is_string()) {
-                            c = a.get_str(rdr->mem.rt);
+                            c = a.get_str(rdr->mem.dom);
                             return true;
                         }
                     }
@@ -1072,7 +1072,7 @@ public:
                     attr a;
                     while (step_attr(a)) {
                         if (a.at == at && a.is_numeric()) {
-                            n = a.get_num(rdr->mem.rt);
+                            n = a.get_num(rdr->mem.dom);
                             return true;
                         }
                     }
@@ -1096,9 +1096,9 @@ public:
             }
 
             bool find_child_by_name(char const *c, die &child, bool exact=false) {
-                rust_rt *rt = rdr->mem.rt;
-                I(rt, has_children());
-                I(rt, !is_null());
+                rust_dom *dom = rdr->mem.dom;
+                I(dom, has_children());
+                I(dom, !is_null());
 
                 for (die ch = next(); !ch.is_null(); ch = ch.next_sibling()) {
                     char const *ac;
@@ -1118,9 +1118,9 @@ public:
             }
 
             bool find_child_by_tag(dw_tag tag, die &child) {
-                rust_rt *rt = rdr->mem.rt;
-                I(rt, has_children());
-                I(rt, !is_null());
+                rust_dom *dom = rdr->mem.dom;
+                I(dom, has_children());
+                I(dom, !is_null());
 
                 for (child = next(); !child.is_null(); child = child.next_sibling()) {
                     if (child.tag() == tag)
@@ -1130,7 +1130,7 @@ public:
             }
 
             die next() const {
-                rust_rt *rt = rdr->mem.rt;
+                rust_dom *dom = rdr->mem.dom;
 
                 if (is_null()) {
                     rdr->seek_off(off + 1);
@@ -1142,13 +1142,13 @@ public:
                     if (start_attrs()) {
                         attr a;
                         while (step_attr(a)) {
-                            I(rt, !(a.is_numeric() && a.is_string()));
+                            I(dom, !(a.is_numeric() && a.is_string()));
                             if (a.is_numeric())
-                                rt->log(LOG_DWARF, "  attr num: 0x%" PRIxPTR, a.get_num(rt));
+                                dom->log(LOG_DWARF, "  attr num: 0x%" PRIxPTR, a.get_num(dom));
                             else if (a.is_string())
-                                rt->log(LOG_DWARF, "  attr str: %s", a.get_str(rt));
+                                dom->log(LOG_DWARF, "  attr str: %s", a.get_str(dom));
                             else
-                                rt->log(LOG_DWARF, "  attr ??:");
+                                dom->log(LOG_DWARF, "  attr ??:");
                         }
                     }
                 }
@@ -1158,11 +1158,11 @@ public:
             die next_sibling() const {
                 // FIXME: use DW_AT_sibling, when present.
                 if (has_children()) {
-                    // rdr->mem.rt->log(LOG_DWARF, "+++ children of die 0x%" PRIxPTR, off);
+                    // rdr->mem.dom->log(LOG_DWARF, "+++ children of die 0x%" PRIxPTR, off);
                     die child = next();
                     while (!child.is_null())
                         child = child.next_sibling();
-                    // rdr->mem.rt->log(LOG_DWARF, "--- children of die 0x%" PRIxPTR, off);
+                    // rdr->mem.dom->log(LOG_DWARF, "--- children of die 0x%" PRIxPTR, off);
                     return child.next();
                 } else {
                     return next();
@@ -1190,12 +1190,12 @@ public:
         }
 
         void dump() {
-            rust_rt *rt = mem.rt;
+            rust_dom *dom = mem.dom;
             die d = first_die();
             while (!d.is_null())
                 d = d.next_sibling();
-            I(rt, d.is_null());
-            I(rt, d.off == mem.lim - mem.base);
+            I(dom, d.is_null());
+            I(dom, d.off == mem.lim - mem.base);
         }
 
 
@@ -1210,7 +1210,7 @@ public:
               sizeof_addr(0),
               in_use(false)
         {
-            rust_rt *rt = mem.rt;
+            rust_dom *dom = mem.dom;
 
             rdr_sess use(this);
 
@@ -1222,16 +1222,16 @@ public:
             get(sizeof_addr);
 
             if (is_ok()) {
-                rt->log(LOG_DWARF, "new root CU at 0x%" PRIxPTR, die_mem.base);
-                rt->log(LOG_DWARF, "CU unit length: %" PRId32, cu_unit_length);
-                rt->log(LOG_DWARF, "dwarf version: %" PRId16, dwarf_vers);
-                rt->log(LOG_DWARF, "CU abbrev off: %" PRId32, cu_abbrev_off);
-                rt->log(LOG_DWARF, "size of address: %" PRId8, sizeof_addr);
-                I(rt, sizeof_addr == sizeof(uintptr_t));
-                I(rt, dwarf_vers >= 2);
-                I(rt, cu_base + cu_unit_length == die_mem.lim - die_mem.base);
+                dom->log(LOG_DWARF, "new root CU at 0x%" PRIxPTR, die_mem.base);
+                dom->log(LOG_DWARF, "CU unit length: %" PRId32, cu_unit_length);
+                dom->log(LOG_DWARF, "dwarf version: %" PRId16, dwarf_vers);
+                dom->log(LOG_DWARF, "CU abbrev off: %" PRId32, cu_abbrev_off);
+                dom->log(LOG_DWARF, "size of address: %" PRId8, sizeof_addr);
+                I(dom, sizeof_addr == sizeof(uintptr_t));
+                I(dom, dwarf_vers >= 2);
+                I(dom, cu_base + cu_unit_length == die_mem.lim - die_mem.base);
             } else {
-                rt->log(LOG_DWARF, "failed to read root CU header");
+                dom->log(LOG_DWARF, "failed to read root CU header");
             }
         }
 
@@ -1241,18 +1241,18 @@ public:
 
     die_reader dies;
 
-    rust_crate_reader(rust_rt *rt,
+    rust_crate_reader(rust_dom *dom,
                       rust_crate const *crate)
-        : rt(rt),
+        : dom(dom),
           crate(crate),
-          abbrev_mem(crate->get_debug_abbrev(rt)),
+          abbrev_mem(crate->get_debug_abbrev(dom)),
           abbrevs(abbrev_mem),
-          die_mem(crate->get_debug_info(rt)),
+          die_mem(crate->get_debug_info(dom)),
           dies(die_mem, abbrevs)
     {
-        rt->log(LOG_MEM, "crate_reader on crate: 0x%" PRIxPTR, this);
-        rt->log(LOG_MEM, "debug_abbrev: 0x%" PRIxPTR, abbrev_mem.base);
-        rt->log(LOG_MEM, "debug_info: 0x%" PRIxPTR, die_mem.base);
+        dom->log(LOG_MEM, "crate_reader on crate: 0x%" PRIxPTR, this);
+        dom->log(LOG_MEM, "debug_abbrev: 0x%" PRIxPTR, abbrev_mem.base);
+        dom->log(LOG_MEM, "debug_info: 0x%" PRIxPTR, die_mem.base);
         // For now, perform diagnostics only.
         dies.dump();
     }
@@ -1344,13 +1344,13 @@ typedef ptr_vec<rust_alarm> rust_wait_queue;
 
 class rust_crate_cache;
 
-struct rust_task : public rc_base<rust_task>, public rt_owned<rust_task>, public rust_cond {
+struct rust_task : public rc_base<rust_task>, public dom_owned<rust_task>, public rust_cond {
     // fields known to the compiler
     stk_seg *stk;
     uintptr_t runtime_sp;      // runtime sp while task running.
     uintptr_t rust_sp;         // saved sp when not running.
     uintptr_t gc_alloc_chain;  // linked list of GC allocations.
-    rust_rt *rt;
+    rust_dom *dom;
     rust_crate_cache *cache;
 
     // fields known only to the runtime
@@ -1364,7 +1364,7 @@ struct rust_task : public rc_base<rust_task>, public rt_owned<rust_task>, public
     rust_wait_queue waiting_tasks;
     rust_alarm alarm;
 
-    rust_task(rust_rt *rt,
+    rust_task(rust_dom *dom,
               rust_task *spawner);
     ~rust_task();
 
@@ -1385,8 +1385,8 @@ struct rust_task : public rc_base<rust_task>, public rt_owned<rust_task>, public
     void die();
     void unblock();
 
-    void check_active() { I(rt, rt->curr_task == this); }
-    void check_suspended() { I(rt, rt->curr_task != this); }
+    void check_active() { I(dom, dom->curr_task == this); }
+    void check_suspended() { I(dom, dom->curr_task != this); }
 
     // Swap in some glue code to run when we have returned to the
     // task's context (assuming we're the active task).
@@ -1470,32 +1470,32 @@ rc_base<T>::~rc_base()
 // Utility type: pointer-vector.
 
 template <typename T>
-ptr_vec<T>::ptr_vec(rust_rt *rt) :
-    rt(rt),
+ptr_vec<T>::ptr_vec(rust_dom *dom) :
+    dom(dom),
     alloc(INIT_SIZE),
     fill(0),
-    data(new (rt) T*[alloc])
+    data(new (dom) T*[alloc])
 {
-    I(rt, data);
-    rt->log(LOG_MEM,
-            "new ptr_vec(data=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
-            (uintptr_t)data, (uintptr_t)this);
+    I(dom, data);
+    dom->log(LOG_MEM,
+             "new ptr_vec(data=0x%" PRIxPTR ") -> 0x%" PRIxPTR,
+             (uintptr_t)data, (uintptr_t)this);
 }
 
 template <typename T>
 ptr_vec<T>::~ptr_vec()
 {
-    I(rt, data);
-    rt->log(LOG_MEM,
-            "~ptr_vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
-            (uintptr_t)this, (uintptr_t)data);
-    I(rt, fill == 0);
-    rt->free(data);
+    I(dom, data);
+    dom->log(LOG_MEM,
+             "~ptr_vec 0x%" PRIxPTR ", data=0x%" PRIxPTR,
+             (uintptr_t)this, (uintptr_t)data);
+    I(dom, fill == 0);
+    dom->free(data);
 }
 
 template <typename T> T *&
 ptr_vec<T>::operator[](size_t offset) {
-    I(rt, data[offset]->idx == offset);
+    I(dom, data[offset]->idx == offset);
     return data[offset];
 }
 
@@ -1503,14 +1503,14 @@ template <typename T>
 void
 ptr_vec<T>::push(T *p)
 {
-    I(rt, data);
-    I(rt, fill <= alloc);
+    I(dom, data);
+    I(dom, fill <= alloc);
     if (fill == alloc) {
         alloc *= 2;
-        data = (T **)rt->realloc(data, alloc * sizeof(T*));
-        I(rt, data);
+        data = (T **)dom->realloc(data, alloc * sizeof(T*));
+        I(dom, data);
     }
-    I(rt, fill < alloc);
+    I(dom, fill < alloc);
     p->idx = fill;
     data[fill++] = p;
 }
@@ -1526,13 +1526,13 @@ template <typename T>
 void
 ptr_vec<T>::trim(size_t sz)
 {
-    I(rt, data);
+    I(dom, data);
     if (sz <= (alloc / 4) &&
         (alloc / 2) >= INIT_SIZE) {
         alloc /= 2;
-        I(rt, alloc >= fill);
-        data = (T **)rt->realloc(data, alloc * sizeof(T*));
-        I(rt, data);
+        I(dom, alloc >= fill);
+        data = (T **)dom->realloc(data, alloc * sizeof(T*));
+        I(dom, data);
     }
 }
 
@@ -1541,9 +1541,9 @@ void
 ptr_vec<T>::swapdel(T *item)
 {
     /* Swap the endpoint into i and decr fill. */
-    I(rt, data);
-    I(rt, fill > 0);
-    I(rt, item->idx < fill);
+    I(dom, data);
+    I(dom, fill > 0);
+    I(dom, item->idx < fill);
     fill--;
     if (fill > 0) {
         T *subst = data[fill];
@@ -1555,29 +1555,29 @@ ptr_vec<T>::swapdel(T *item)
 
 // Utility type: circular buffer.
 
-circ_buf::circ_buf(rust_rt *rt, size_t unit_sz) :
-    rt(rt),
+circ_buf::circ_buf(rust_dom *dom, size_t unit_sz) :
+    dom(dom),
     alloc(INIT_CIRC_BUF_UNITS * unit_sz),
     unit_sz(unit_sz),
     next(0),
     unread(0),
-    data((uint8_t *)rt->calloc(alloc))
+    data((uint8_t *)dom->calloc(alloc))
 {
-    I(rt, unit_sz);
-    rt->log(LOG_MEM|LOG_COMM,
-            "new circ_buf(alloc=%d, unread=%d) -> circ_buf=0x%" PRIxPTR,
-            alloc, unread, this);
-    I(rt, data);
+    I(dom, unit_sz);
+    dom->log(LOG_MEM|LOG_COMM,
+             "new circ_buf(alloc=%d, unread=%d) -> circ_buf=0x%" PRIxPTR,
+             alloc, unread, this);
+    I(dom, data);
 }
 
 circ_buf::~circ_buf()
 {
-    rt->log(LOG_MEM|LOG_COMM,
-            "~circ_buf 0x%" PRIxPTR,
-            this);
-    I(rt, data);
-    // I(rt, unread == 0);
-    rt->free(data);
+    dom->log(LOG_MEM|LOG_COMM,
+             "~circ_buf 0x%" PRIxPTR,
+             this);
+    I(dom, data);
+    // I(dom, unread == 0);
+    dom->free(data);
 }
 
 void
@@ -1585,7 +1585,7 @@ circ_buf::transfer(void *dst)
 {
     size_t i;
     uint8_t *d = (uint8_t *)dst;
-    I(rt, dst);
+    I(dom, dst);
     for (i = 0; i < unread; i += unit_sz)
         memcpy(&d[i], &data[next + i % alloc], unit_sz);
 }
@@ -1596,30 +1596,30 @@ circ_buf::push(void *src)
     size_t i;
     void *tmp;
 
-    I(rt, src);
-    I(rt, unread <= alloc);
+    I(dom, src);
+    I(dom, unread <= alloc);
 
     /* Grow if necessary. */
     if (unread == alloc) {
-        I(rt, alloc <= MAX_CIRC_BUF_SIZE);
-        tmp = rt->malloc(alloc << 1);
+        I(dom, alloc <= MAX_CIRC_BUF_SIZE);
+        tmp = dom->malloc(alloc << 1);
         transfer(tmp);
         alloc <<= 1;
-        rt->free(data);
+        dom->free(data);
         data = (uint8_t *)tmp;
     }
 
-    rt->log(LOG_MEM|LOG_COMM,
-            "circ buf push, unread=%d, alloc=%d, unit_sz=%d",
-            unread, alloc, unit_sz);
+    dom->log(LOG_MEM|LOG_COMM,
+             "circ buf push, unread=%d, alloc=%d, unit_sz=%d",
+             unread, alloc, unit_sz);
 
-    I(rt, unread < alloc);
-    I(rt, unread + unit_sz <= alloc);
+    I(dom, unread < alloc);
+    I(dom, unread + unit_sz <= alloc);
 
     i = (next + unread) % alloc;
     memcpy(&data[i], src, unit_sz);
 
-    rt->log(LOG_MEM|LOG_COMM, "pushed data at index %d", i);
+    dom->log(LOG_MEM|LOG_COMM, "pushed data at index %d", i);
     unread += unit_sz;
 }
 
@@ -1629,39 +1629,39 @@ circ_buf::shift(void *dst)
     size_t i;
     void *tmp;
 
-    I(rt, dst);
-    I(rt, unit_sz > 0);
-    I(rt, unread >= unit_sz);
-    I(rt, unread <= alloc);
-    I(rt, data);
+    I(dom, dst);
+    I(dom, unit_sz > 0);
+    I(dom, unread >= unit_sz);
+    I(dom, unread <= alloc);
+    I(dom, data);
     i = next;
     memcpy(dst, &data[i], unit_sz);
-    rt->log(LOG_MEM|LOG_COMM, "shifted data from index %d", i);
+    dom->log(LOG_MEM|LOG_COMM, "shifted data from index %d", i);
     unread -= unit_sz;
     next += unit_sz;
-    I(rt, next <= alloc);
+    I(dom, next <= alloc);
     if (next == alloc)
         next = 0;
 
     /* Shrink if necessary. */
     if (alloc >= INIT_CIRC_BUF_UNITS * unit_sz &&
         unread <= alloc / 4) {
-        tmp = rt->malloc(alloc / 2);
+        tmp = dom->malloc(alloc / 2);
         transfer(tmp);
         alloc >>= 1;
-        rt->free(data);
+        dom->free(data);
         data = (uint8_t *)tmp;
     }
 }
 
 // Strings
 
-rust_str::rust_str(rust_rt *rt, size_t alloc, size_t fill, char const *s) :
+rust_str::rust_str(rust_dom *dom, size_t alloc, size_t fill, char const *s) :
     alloc(alloc),
     fill(fill)
 {
-    I(rt, s);
-    I(rt, fill > 0);
+    I(dom, s);
+    I(dom, fill > 0);
     memcpy(&data[0], s, fill);
 }
 
@@ -1674,21 +1674,21 @@ rust_str::~rust_str()
 rust_port::rust_port(rust_task *task, size_t unit_sz) :
     task(task),
     unit_sz(unit_sz),
-    writers(task->rt),
-    chans(task->rt)
+    writers(task->dom),
+    chans(task->dom)
 {
-    rust_rt *rt = task->rt;
-    rt->log(LOG_MEM|LOG_COMM,
-            "new rust_port(task=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
-            PRIxPTR, (uintptr_t)task, unit_sz, (uintptr_t)this);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_MEM|LOG_COMM,
+             "new rust_port(task=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
+             PRIxPTR, (uintptr_t)task, unit_sz, (uintptr_t)this);
 }
 
 rust_port::~rust_port()
 {
-    rust_rt *rt = task->rt;
-    rt->log(LOG_COMM|LOG_MEM,
-            "~rust_port 0x%" PRIxPTR,
-            (uintptr_t)this);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_COMM|LOG_MEM,
+             "~rust_port 0x%" PRIxPTR,
+             (uintptr_t)this);
     while (chans.length() > 0)
         chans.pop()->disassociate();
 }
@@ -1696,7 +1696,7 @@ rust_port::~rust_port()
 rust_chan::rust_chan(rust_task *task, rust_port *port) :
     task(task),
     port(port),
-    buf(task->rt, port->unit_sz),
+    buf(task->dom, port->unit_sz),
     token(this)
 {
     if (port)
@@ -1715,7 +1715,7 @@ rust_chan::~rust_chan()
 void
 rust_chan::disassociate()
 {
-    I(task->rt, port);
+    I(task->dom, port);
 
     if (token.pending())
         token.withdraw();
@@ -1747,10 +1747,10 @@ void
 rust_token::submit()
 {
     rust_port *port = chan->port;
-    rust_rt *rt = chan->task->rt;
+    rust_dom *dom = chan->task->dom;
 
-    I(rt, port);
-    I(rt, !submitted);
+    I(dom, port);
+    I(dom, !submitted);
 
     port->writers.push(this);
     submitted = true;
@@ -1761,10 +1761,10 @@ rust_token::withdraw()
 {
     rust_task *task = chan->task;
     rust_port *port = chan->port;
-    rust_rt *rt = task->rt;
+    rust_dom *dom = task->dom;
 
-    I(rt, port);
-    I(rt, submitted);
+    I(dom, port);
+    I(dom, submitted);
 
     if (task->blocked())
         task->wakeup(this); // must be blocked on us (or dead)
@@ -1777,16 +1777,16 @@ rust_token::withdraw()
 static size_t const min_stk_bytes = 0x300;
 
 static stk_seg*
-new_stk(rust_rt *rt, size_t minsz)
+new_stk(rust_dom *dom, size_t minsz)
 {
     if (minsz < min_stk_bytes)
         minsz = min_stk_bytes;
     size_t sz = sizeof(stk_seg) + minsz;
-    stk_seg *stk = (stk_seg *)rt->malloc(sz);
-    rt->logptr("new stk", (uintptr_t)stk);
+    stk_seg *stk = (stk_seg *)dom->malloc(sz);
+    dom->logptr("new stk", (uintptr_t)stk);
     memset(stk, 0, sizeof(stk_seg));
     stk->limit = (uintptr_t) &stk->data[minsz];
-    rt->logptr("stk limit", stk->limit);
+    dom->logptr("stk limit", stk->limit);
     stk->valgrind_id =
         VALGRIND_STACK_REGISTER(&stk->data[0],
                                 &stk->data[minsz]);
@@ -1794,11 +1794,11 @@ new_stk(rust_rt *rt, size_t minsz)
 }
 
 static void
-del_stk(rust_rt *rt, stk_seg *stk)
+del_stk(rust_dom *dom, stk_seg *stk)
 {
     VALGRIND_STACK_DEREGISTER(stk->valgrind_id);
-    rt->logptr("freeing stk segment", (uintptr_t)stk);
-    rt->free(stk);
+    dom->logptr("freeing stk segment", (uintptr_t)stk);
+    dom->free(stk);
 }
 
 /* Tasks */
@@ -1834,35 +1834,35 @@ upcall_grow_task(rust_task *task, size_t n_frame_bytes)
 {
     LOG_UPCALL_ENTRY(task);
 
-    rust_rt *rt = task->rt;
+    rust_dom *dom = task->dom;
     stk_seg *old_stk = task->stk;
     uintptr_t old_top = (uintptr_t) old_stk->limit;
     uintptr_t old_bottom = (uintptr_t) &old_stk->data[0];
     uintptr_t rust_sp_disp = old_top - task->rust_sp;
     size_t ssz = old_top - old_bottom;
-    rt->log(LOG_MEM|LOG_TASK|LOG_UPCALL,
-            "upcall_grow_task(%" PRIdPTR
-            "), old size %" PRIdPTR
-            " bytes (old lim: 0x%" PRIxPTR ")",
-            n_frame_bytes, ssz, old_top);
+    dom->log(LOG_MEM|LOG_TASK|LOG_UPCALL,
+             "upcall_grow_task(%" PRIdPTR
+             "), old size %" PRIdPTR
+             " bytes (old lim: 0x%" PRIxPTR ")",
+             n_frame_bytes, ssz, old_top);
     ssz *= 2;
     if (ssz < n_frame_bytes)
         ssz = n_frame_bytes;
     ssz = next_power_of_two(ssz);
 
-    rt->log(LOG_MEM|LOG_TASK, "upcall_grow_task growing stk 0x%" PRIxPTR " to %d bytes",
-            old_stk, ssz);
+    dom->log(LOG_MEM|LOG_TASK, "upcall_grow_task growing stk 0x%" PRIxPTR " to %d bytes",
+             old_stk, ssz);
 
-    stk_seg *stk = new_stk(rt, ssz);
+    stk_seg *stk = new_stk(dom, ssz);
     uintptr_t new_bottom = (uintptr_t) &stk->data[0];
     uintptr_t new_top = (uintptr_t) &stk->data[ssz];
     size_t n_copy = old_top - old_bottom;
-    rt->log(LOG_MEM|LOG_TASK,
-            "copying %d bytes of stack from [0x%" PRIxPTR ", 0x%" PRIxPTR "]"
-            " to [0x%" PRIxPTR ", 0x%" PRIxPTR "]",
-            n_copy,
-            old_bottom, old_bottom + n_copy,
-            new_top - n_copy, new_top);
+    dom->log(LOG_MEM|LOG_TASK,
+             "copying %d bytes of stack from [0x%" PRIxPTR ", 0x%" PRIxPTR "]"
+             " to [0x%" PRIxPTR ", 0x%" PRIxPTR "]",
+             n_copy,
+             old_bottom, old_bottom + n_copy,
+             new_top - n_copy, new_top);
 
     memcpy((void*)(new_top - n_copy), (void*)old_bottom, n_copy);
 
@@ -1871,23 +1871,23 @@ upcall_grow_task(rust_task *task, size_t n_frame_bytes)
     task->stk = stk;
     task->rust_sp = new_top - rust_sp_disp;
 
-    rt->log(LOG_MEM|LOG_TASK, "processing relocations");
+    dom->log(LOG_MEM|LOG_TASK, "processing relocations");
 
     // FIXME (bug 541586): this is the most ridiculously crude relocation scheme ever.
     // Try actually, you know, writing out reloc descriptors?
     size_t n_relocs = 0;
     for (uintptr_t* p = (uintptr_t*)(new_top - n_copy); p < (uintptr_t*)new_top; ++p) {
         if (old_bottom <= *p && *p < old_top) {
-            //rt->log(LOG_MEM, "relocating pointer 0x%" PRIxPTR " by %d bytes",
+            //dom->log(LOG_MEM, "relocating pointer 0x%" PRIxPTR " by %d bytes",
             //        *p, (new_top - old_top));
             n_relocs++;
             *p += (new_top - old_top);
         }
     }
-    rt->log(LOG_MEM|LOG_TASK, "processed %d relocations", n_relocs);
+    dom->log(LOG_MEM|LOG_TASK, "processed %d relocations", n_relocs);
 
-    del_stk(rt, old_stk);
-    rt->logptr("grown stk limit", new_top);
+    del_stk(dom, old_stk);
+    dom->logptr("grown stk limit", new_top);
 }
 
 rust_alarm::rust_alarm(rust_task *receiver) :
@@ -1896,26 +1896,26 @@ rust_alarm::rust_alarm(rust_task *receiver) :
 }
 
 class
-rust_crate_cache : public rt_owned<rust_crate_cache>, public rc_base<rust_crate_cache>
+rust_crate_cache : public dom_owned<rust_crate_cache>, public rc_base<rust_crate_cache>
 {
 public:
 
-    class lib : public rc_base<lib>, public rt_owned<lib>
+    class lib : public rc_base<lib>, public dom_owned<lib>
     {
         uintptr_t handle;
     public:
-        rust_rt *rt;
-        lib(rust_rt *rt, char const *name)
+        rust_dom *dom;
+        lib(rust_dom *dom, char const *name)
             : handle(0),
-              rt(rt)
+              dom(dom)
         {
 #if defined(__WIN32__)
             handle = (uintptr_t)LoadLibrary(_T(name));
-            // rt->win32_require(_T("LoadLibrary"), handle != 0);
+            // dom->win32_require(_T("LoadLibrary"), handle != 0);
 #else
             handle = (uintptr_t)dlopen(name, RTLD_LOCAL|RTLD_LAZY);
 #endif
-            rt->log(LOG_LINK, "loaded library '%s' as 0x%"  PRIxPTR, name, handle);
+            dom->log(LOG_LINK, "loaded library '%s' as 0x%"  PRIxPTR, name, handle);
         }
 
         uintptr_t get_handle() {
@@ -1923,7 +1923,7 @@ public:
         }
 
         ~lib() {
-            rt->log(LOG_LINK, "~rust_crate_cache::lib(0x%" PRIxPTR ")", handle);
+            dom->log(LOG_LINK, "~rust_crate_cache::lib(0x%" PRIxPTR ")", handle);
             if (handle) {
 #if defined(__WIN32__)
                 FreeLibrary((HMODULE)handle);
@@ -1935,30 +1935,30 @@ public:
     };
 
 
-    class c_sym : public rc_base<c_sym>, public rt_owned<c_sym>
+    class c_sym : public rc_base<c_sym>, public dom_owned<c_sym>
     {
         uintptr_t val;
         lib *library;
 
     public:
-        rust_rt *rt;
-        c_sym(rust_rt *rt, lib *library, char const *name)
+        rust_dom *dom;
+        c_sym(rust_dom *dom, lib *library, char const *name)
             : val(0),
               library(library),
-              rt(rt)
+              dom(dom)
         {
             library->ref();
             uintptr_t handle = library->get_handle();
             if (handle) {
 #if defined(__WIN32__)
                 val = (uintptr_t)GetProcAddress((HMODULE)handle, _T(name));
-                // rt->win32_require(_T("GetProcAddress"), val != 0);
+                // dom->win32_require(_T("GetProcAddress"), val != 0);
 #else
                 val = (uintptr_t)dlsym((void*)handle, name);
 #endif
-                rt->log(LOG_LINK, "resolved symbol '%s' to 0x%"  PRIxPTR, name, val);
+                dom->log(LOG_LINK, "resolved symbol '%s' to 0x%"  PRIxPTR, name, val);
             } else {
-                rt->log(LOG_LINK, "unresolved symbol '%s', null lib handle", name);
+                dom->log(LOG_LINK, "unresolved symbol '%s', null lib handle", name);
             }
         }
 
@@ -1967,31 +1967,31 @@ public:
         }
 
         ~c_sym() {
-            rt->log(LOG_LINK, "~rust_crate_cache::c_sym(0x%" PRIxPTR ")", val);
+            dom->log(LOG_LINK, "~rust_crate_cache::c_sym(0x%" PRIxPTR ")", val);
             library->deref();
         }
     };
 
-    class rust_sym : public rc_base<rust_sym>, public rt_owned<rust_sym>
+    class rust_sym : public rc_base<rust_sym>, public dom_owned<rust_sym>
     {
         uintptr_t val;
         c_sym *crate_sym;
 
     public:
-        rust_rt *rt;
-        rust_sym(rust_rt *rt, rust_crate const *curr_crate, c_sym *crate_sym, char const **path)
+        rust_dom *dom;
+        rust_sym(rust_dom *dom, rust_crate const *curr_crate, c_sym *crate_sym, char const **path)
             : val(0),
               crate_sym(crate_sym),
-              rt(rt)
+              dom(dom)
         {
             crate_sym->ref();
             typedef rust_crate_reader::die_reader::die die;
             rust_crate const *crate = (rust_crate*)crate_sym->get_val();
             if (!crate) {
-                rt->log(LOG_LINK, "failed to resolve symbol, null crate symbol");
+                dom->log(LOG_LINK, "failed to resolve symbol, null crate symbol");
                 return;
             }
-            rust_crate_reader rdr(rt, crate);
+            rust_crate_reader rdr(dom, crate);
             bool found_root = false;
             bool found_leaf = false;
             for (die d = rdr.dies.first_die();
@@ -2005,13 +2005,13 @@ public:
                       && !t1.is_null()
                       && t1.find_child_by_name(crate_rel(curr_crate, *c), t2));
                      ++c, t1=t2) {
-                    rt->log(LOG_DWARF|LOG_LINK, "matched die <0x%"  PRIxPTR
-                            ">, child '%s' = die<0x%" PRIxPTR ">",
-                            t1.off, crate_rel(curr_crate, *c), t2.off);
+                    dom->log(LOG_DWARF|LOG_LINK, "matched die <0x%"  PRIxPTR
+                             ">, child '%s' = die<0x%" PRIxPTR ">",
+                             t1.off, crate_rel(curr_crate, *c), t2.off);
                     found_root = found_root || true;
                     if (!*(c+1) && t2.find_num_attr(DW_AT_low_pc, val)) {
-                        rt->log(LOG_DWARF|LOG_LINK, "found relative address: 0x%"  PRIxPTR, val);
-                        rt->log(LOG_DWARF|LOG_LINK, "plus image-base 0x%"  PRIxPTR, crate->get_image_base());
+                        dom->log(LOG_DWARF|LOG_LINK, "found relative address: 0x%"  PRIxPTR, val);
+                        dom->log(LOG_DWARF|LOG_LINK, "plus image-base 0x%"  PRIxPTR, crate->get_image_base());
                         val += crate->get_image_base();
                         found_leaf = true;
                         break;
@@ -2021,9 +2021,9 @@ public:
                     break;
             }
             if (found_leaf) {
-                rt->log(LOG_LINK, "resolved symbol to 0x%"  PRIxPTR, val);
+                dom->log(LOG_LINK, "resolved symbol to 0x%"  PRIxPTR, val);
             } else {
-                rt->log(LOG_LINK, "failed to resolve symbol");
+                dom->log(LOG_LINK, "failed to resolve symbol");
             }
         }
 
@@ -2032,17 +2032,17 @@ public:
         }
 
         ~rust_sym() {
-            rt->log(LOG_LINK, "~rust_crate_cache::rust_sym(0x%" PRIxPTR ")", val);
+            dom->log(LOG_LINK, "~rust_crate_cache::rust_sym(0x%" PRIxPTR ")", val);
             crate_sym->deref();
         }
     };
 
     lib *get_lib(size_t n, char const *name)
     {
-        I(rt, n < crate->n_libs);
+        I(dom, n < crate->n_libs);
         lib *library = libs[n];
         if (!library) {
-            library = new (rt) lib(rt, name);
+            library = new (dom) lib(dom, name);
             libs[n] = library;
         }
         return library;
@@ -2050,22 +2050,22 @@ public:
 
     c_sym *get_c_sym(size_t n, lib *library, char const *name)
     {
-        I(rt, n < crate->n_c_syms);
+        I(dom, n < crate->n_c_syms);
         c_sym *sym = c_syms[n];
-        rt->log(LOG_LINK, "cached C symbol %s = 0x%" PRIxPTR, name, sym);
+        dom->log(LOG_LINK, "cached C symbol %s = 0x%" PRIxPTR, name, sym);
         if (!sym) {
-            sym = new (rt) c_sym(rt, library, name);
+            sym = new (dom) c_sym(dom, library, name);
             c_syms[n] = sym;
         }
         return sym;
     }
 
-    rust_sym *get_rust_sym(size_t n, rust_rt *rt, rust_crate const *curr_crate, c_sym *crate_sym, char const **path)
+    rust_sym *get_rust_sym(size_t n, rust_dom *dom, rust_crate const *curr_crate, c_sym *crate_sym, char const **path)
     {
-        I(rt, n < crate->n_rust_syms);
+        I(dom, n < crate->n_rust_syms);
         rust_sym *sym = rust_syms[n];
         if (!sym) {
-            sym = new (rt) rust_sym(rt, curr_crate, crate_sym, path);
+            sym = new (dom) rust_sym(dom, curr_crate, crate_sym, path);
             rust_syms[n] = sym;
         }
         return sym;
@@ -2081,30 +2081,30 @@ private:
 public:
 
     rust_crate const *crate;
-    rust_rt *rt;
+    rust_dom *dom;
     size_t idx;
 
-    rust_crate_cache(rust_rt *rt,
+    rust_crate_cache(rust_dom *dom,
                      rust_crate const *crate)
-        : rust_syms((rust_sym**) rt->calloc(sizeof(rust_sym*) * crate->n_rust_syms)),
-          c_syms((c_sym**) rt->calloc(sizeof(c_sym*) * crate->n_c_syms)),
-          libs((lib**) rt->calloc(sizeof(lib*) * crate->n_libs)),
+        : rust_syms((rust_sym**) dom->calloc(sizeof(rust_sym*) * crate->n_rust_syms)),
+          c_syms((c_sym**) dom->calloc(sizeof(c_sym*) * crate->n_c_syms)),
+          libs((lib**) dom->calloc(sizeof(lib*) * crate->n_libs)),
           crate(crate),
-          rt(rt),
+          dom(dom),
           idx(0)
-        {
-            I(rt, rust_syms);
-            I(rt, c_syms);
-            I(rt, libs);
-        }
+    {
+        I(dom, rust_syms);
+        I(dom, c_syms);
+        I(dom, libs);
+    }
 
     void flush() {
-        rt->log(LOG_LINK, "rust_crate_cache::flush()");
+        dom->log(LOG_LINK, "rust_crate_cache::flush()");
         for (size_t i = 0; i < crate->n_rust_syms; ++i) {
             rust_sym *s = rust_syms[i];
             if (s) {
-                rt->log(LOG_LINK, "rust_crate_cache::flush() deref rust_sym %"
-                        PRIdPTR " (rc=%" PRIdPTR ")", i, s->refcnt);
+                dom->log(LOG_LINK, "rust_crate_cache::flush() deref rust_sym %"
+                         PRIdPTR " (rc=%" PRIdPTR ")", i, s->refcnt);
                 s->deref();
             }
             rust_syms[i] = NULL;
@@ -2113,8 +2113,8 @@ public:
         for (size_t i = 0; i < crate->n_c_syms; ++i) {
             c_sym *s = c_syms[i];
             if (s) {
-                rt->log(LOG_LINK, "rust_crate_cache::flush() deref c_sym %"
-                        PRIdPTR " (rc=%" PRIdPTR ")", i, s->refcnt);
+                dom->log(LOG_LINK, "rust_crate_cache::flush() deref c_sym %"
+                         PRIdPTR " (rc=%" PRIdPTR ")", i, s->refcnt);
                 s->deref();
             }
             c_syms[i] = NULL;
@@ -2123,8 +2123,8 @@ public:
         for (size_t i = 0; i < crate->n_libs; ++i) {
             lib *l = libs[i];
             if (l) {
-                rt->log(LOG_LINK, "rust_crate_cache::flush() deref lib %"
-                        PRIdPTR " (rc=%" PRIdPTR ")", i, l->refcnt);
+                dom->log(LOG_LINK, "rust_crate_cache::flush() deref lib %"
+                         PRIdPTR " (rc=%" PRIdPTR ")", i, l->refcnt);
                 l->deref();
             }
             libs[i] = NULL;
@@ -2134,57 +2134,57 @@ public:
     ~rust_crate_cache()
     {
         flush();
-        rt->free(rust_syms);
-        rt->free(c_syms);
-        rt->free(libs);
+        dom->free(rust_syms);
+        dom->free(c_syms);
+        dom->free(libs);
     }
 
 };
 
-rust_task::rust_task(rust_rt *rt, rust_task *spawner) :
-    stk(new_stk(rt, 0)),
+rust_task::rust_task(rust_dom *dom, rust_task *spawner) :
+    stk(new_stk(dom, 0)),
     runtime_sp(0),
     rust_sp(stk->limit),
     gc_alloc_chain(0),
-    rt(rt),
+    dom(dom),
     cache(NULL),
-    state(&rt->running_tasks),
+    state(&dom->running_tasks),
     cond(NULL),
     dptr(0),
     spawner(spawner),
     idx(0),
-    waiting_tasks(rt),
+    waiting_tasks(dom),
     alarm(this)
 {
-    rt->logptr("new task", (uintptr_t)this);
+    dom->logptr("new task", (uintptr_t)this);
 }
 
 rust_task::~rust_task()
 {
-    rt->log(LOG_MEM|LOG_TASK,
-            "~rust_task 0x%" PRIxPTR ", refcnt=%d",
-            (uintptr_t)this, refcnt);
+    dom->log(LOG_MEM|LOG_TASK,
+             "~rust_task 0x%" PRIxPTR ", refcnt=%d",
+             (uintptr_t)this, refcnt);
 
     /*
-    for (uintptr_t fp = get_fp(); fp; fp = get_previous_fp(fp)) {
-        frame_glue_fns *glue_fns = get_frame_glue_fns(fp);
-        rt->log(LOG_MEM|LOG_TASK,
-                "~rust_task, frame fp=0x%" PRIxPTR ", glue_fns=0x%" PRIxPTR,
-                fp, glue_fns);
-        if (glue_fns) {
-            rt->log(LOG_MEM|LOG_TASK, "~rust_task, mark_glue=0x%" PRIxPTR, glue_fns->mark_glue);
-            rt->log(LOG_MEM|LOG_TASK, "~rust_task, drop_glue=0x%" PRIxPTR, glue_fns->drop_glue);
-            rt->log(LOG_MEM|LOG_TASK, "~rust_task, reloc_glue=0x%" PRIxPTR, glue_fns->reloc_glue);
-        }
-    }
+      for (uintptr_t fp = get_fp(); fp; fp = get_previous_fp(fp)) {
+      frame_glue_fns *glue_fns = get_frame_glue_fns(fp);
+      dom->log(LOG_MEM|LOG_TASK,
+      "~rust_task, frame fp=0x%" PRIxPTR ", glue_fns=0x%" PRIxPTR,
+      fp, glue_fns);
+      if (glue_fns) {
+      dom->log(LOG_MEM|LOG_TASK, "~rust_task, mark_glue=0x%" PRIxPTR, glue_fns->mark_glue);
+      dom->log(LOG_MEM|LOG_TASK, "~rust_task, drop_glue=0x%" PRIxPTR, glue_fns->drop_glue);
+      dom->log(LOG_MEM|LOG_TASK, "~rust_task, reloc_glue=0x%" PRIxPTR, glue_fns->reloc_glue);
+      }
+      }
     */
 
     /* FIXME: tighten this up, there are some more
        assertions that hold at task-lifecycle events. */
-    I(rt, refcnt == 0 ||
-      (refcnt == 1 && this == rt->root_task));
+    I(dom, refcnt == 0 ||
+      (refcnt == 1 && this == dom->root_task));
 
-    del_stk(rt, stk);
+    del_stk(dom, stk);
     if (cache)
         cache->deref();
 }
@@ -2195,8 +2195,8 @@ rust_task::start(uintptr_t exit_task_glue,
                  uintptr_t args,
                  size_t callsz)
 {
-    rt->logptr("exit-task glue", exit_task_glue);
-    rt->logptr("from spawnee", spawnee_fn);
+    dom->logptr("exit-task glue", exit_task_glue);
+    dom->logptr("from spawnee", spawnee_fn);
 
     // Set sp to last uintptr_t-sized cell of segment and align down (since its a stack).
     rust_sp -= sizeof(uintptr_t);
@@ -2228,7 +2228,7 @@ rust_task::start(uintptr_t exit_task_glue,
     // frame as it runs its epilogue.
     uintptr_t frame_base = (uintptr_t) (spp+1);
 
-    *spp-- = (uintptr_t) rt->root_crate;  // crate ptr
+    *spp-- = (uintptr_t) dom->root_crate;  // crate ptr
     *spp-- = (uintptr_t) 0;               // frame_glue_fns
 
     // Copy args from spawner to spawnee.
@@ -2245,7 +2245,7 @@ rust_task::start(uintptr_t exit_task_glue,
         spp--;
     } else {
         // We're at root, starting up.
-        I(rt, callsz==0);
+        I(dom, callsz==0);
     }
 
     // The *implicit* incoming args to the spawnee frame we're
@@ -2268,7 +2268,7 @@ rust_task::start(uintptr_t exit_task_glue,
     // Back up one, we overshot where sp should be.
     rust_sp = (uintptr_t) (spp+1);
 
-    rt->add_task_to_state_vec(&rt->running_tasks, this);
+    dom->add_task_to_state_vec(&dom->running_tasks, this);
 }
 
 void
@@ -2294,11 +2294,11 @@ rust_task::run_after_return(size_t nargs, uintptr_t glue)
     sp = align_down(sp - nargs * sizeof(uintptr_t));
 
     uintptr_t *retpc = ((uintptr_t *) sp) - 1;
-    rt->log(LOG_TASK|LOG_MEM,
-            "run_after_return: overwriting retpc=0x%" PRIxPTR
-            " @ runtime_sp=0x%" PRIxPTR
-            " with glue=0x%" PRIxPTR,
-            *retpc, sp, glue);
+    dom->log(LOG_TASK|LOG_MEM,
+             "run_after_return: overwriting retpc=0x%" PRIxPTR
+             " @ runtime_sp=0x%" PRIxPTR
+             " with glue=0x%" PRIxPTR,
+             *retpc, sp, glue);
 
     // Move the current return address (which points into rust code) onto the rust
     // stack and pretend we just called into the glue.
@@ -2315,20 +2315,20 @@ rust_task::run_on_resume(uintptr_t glue)
     // Inject glue as resume address in the suspended frame.
     uintptr_t* rsp = (uintptr_t*) rust_sp;
     rsp += n_callee_saves;
-    rt->log(LOG_TASK|LOG_MEM,
-            "run_on_resume: overwriting retpc=0x%" PRIxPTR
-            " @ rust_sp=0x%" PRIxPTR
-            " with glue=0x%" PRIxPTR,
-            *rsp, rsp, glue);
+    dom->log(LOG_TASK|LOG_MEM,
+             "run_on_resume: overwriting retpc=0x%" PRIxPTR
+             " @ rust_sp=0x%" PRIxPTR
+             " with glue=0x%" PRIxPTR,
+             *rsp, rsp, glue);
     *rsp = glue;
 }
 
 void
 rust_task::yield(size_t nargs)
 {
-    rt->log(LOG_TASK,
-            "task 0x%" PRIxPTR " yielding", this);
-    run_after_return(nargs, rt->root_crate->get_yield_glue());
+    dom->log(LOG_TASK,
+             "task 0x%" PRIxPTR " yielding", this);
+    run_after_return(nargs, dom->root_crate->get_yield_glue());
 }
 
 static inline uintptr_t
@@ -2342,28 +2342,28 @@ rust_task::kill() {
     // Note the distinction here: kill() is when you're in an upcall
     // from task A and want to force-fail task B, you do B->kill().
     // If you want to fail yourself you do self->fail(upcall_nargs).
-    rt->log(LOG_TASK, "killing task 0x%" PRIxPTR, this);
+    dom->log(LOG_TASK, "killing task 0x%" PRIxPTR, this);
     // Unblock the task so it can unwind.
     unblock();
-    if (this == rt->root_task)
-        rt->fail();
-    run_on_resume(rt->root_crate->get_unwind_glue());
+    if (this == dom->root_task)
+        dom->fail();
+    run_on_resume(dom->root_crate->get_unwind_glue());
 }
 
 void
 rust_task::fail(size_t nargs) {
     // See note in ::kill() regarding who should call this.
-    rt->log(LOG_TASK, "task 0x%" PRIxPTR " failing", this);
+    dom->log(LOG_TASK, "task 0x%" PRIxPTR " failing", this);
     // Unblock the task so it can unwind.
     unblock();
-    if (this == rt->root_task)
-        rt->fail();
-    run_after_return(nargs, rt->root_crate->get_unwind_glue());
+    if (this == dom->root_task)
+        dom->fail();
+    run_after_return(nargs, dom->root_crate->get_unwind_glue());
     if (spawner) {
-        rt->log(LOG_TASK,
-                "task 0x%" PRIxPTR
-                " propagating failure to parent 0x%" PRIxPTR,
-                this, spawner);
+        dom->log(LOG_TASK,
+                 "task 0x%" PRIxPTR
+                 " propagating failure to parent 0x%" PRIxPTR,
+                 this, spawner);
         spawner->kill();
     }
 }
@@ -2372,9 +2372,9 @@ void
 rust_task::notify_waiting_tasks()
 {
     while (waiting_tasks.length() > 0) {
-        rust_task *p = waiting_tasks.pop()->receiver;
-        if (!p->dead())
-            p->wakeup(this);
+        rust_task *t = waiting_tasks.pop()->receiver;
+        if (!t->dead())
+            t->wakeup(this);
     }
 }
 
@@ -2401,13 +2401,13 @@ rust_task::get_frame_glue_fns(uintptr_t fp) {
 bool
 rust_task::running()
 {
-    return state == &rt->running_tasks;
+    return state == &dom->running_tasks;
 }
 
 bool
 rust_task::blocked()
 {
-    return state == &rt->blocked_tasks;
+    return state == &dom->blocked_tasks;
 }
 
 bool
@@ -2419,46 +2419,46 @@ rust_task::blocked_on(rust_cond *on)
 bool
 rust_task::dead()
 {
-    return state == &rt->dead_tasks;
+    return state == &dom->dead_tasks;
 }
 
 void
 rust_task::transition(ptr_vec<rust_task> *src, ptr_vec<rust_task> *dst)
 {
-    I(rt, state == src);
-    rt->log(LOG_TASK,
-            "task 0x%" PRIxPTR " state change '%s' -> '%s'",
-            (uintptr_t)this,
-            rt->state_vec_name(src),
-            rt->state_vec_name(dst));
-    rt->remove_task_from_state_vec(src, this);
-    rt->add_task_to_state_vec(dst, this);
+    I(dom, state == src);
+    dom->log(LOG_TASK,
+             "task 0x%" PRIxPTR " state change '%s' -> '%s'",
+             (uintptr_t)this,
+             dom->state_vec_name(src),
+             dom->state_vec_name(dst));
+    dom->remove_task_from_state_vec(src, this);
+    dom->add_task_to_state_vec(dst, this);
     state = dst;
 }
 
 void
 rust_task::block(rust_cond *on)
 {
-    I(rt, on);
-    transition(&rt->running_tasks, &rt->blocked_tasks);
-    rt->log(LOG_TASK,
-            "task 0x%" PRIxPTR " blocking on 0x%" PRIxPTR,
-            (uintptr_t)this,
-            (uintptr_t)on);
+    I(dom, on);
+    transition(&dom->running_tasks, &dom->blocked_tasks);
+    dom->log(LOG_TASK,
+             "task 0x%" PRIxPTR " blocking on 0x%" PRIxPTR,
+             (uintptr_t)this,
+             (uintptr_t)on);
     cond = on;
 }
 
 void
 rust_task::wakeup(rust_cond *from)
 {
-    transition(&rt->blocked_tasks, &rt->running_tasks);
-    I(rt, cond == from);
+    transition(&dom->blocked_tasks, &dom->running_tasks);
+    I(dom, cond == from);
 }
 
 void
 rust_task::die()
 {
-    transition(&rt->running_tasks, &rt->dead_tasks);
+    transition(&dom->running_tasks, &dom->dead_tasks);
 }
 
 void
@@ -2471,15 +2471,15 @@ rust_task::unblock()
 // Runtime
 
 static void
-del_all_tasks(rust_rt *rt, ptr_vec<rust_task> *v) {
-    I(rt, v);
+del_all_tasks(rust_dom *dom, ptr_vec<rust_task> *v) {
+    I(dom, v);
     while (v->length()) {
-        rt->log(LOG_TASK, "deleting task %" PRIdPTR, v->length() - 1);
+        dom->log(LOG_TASK, "deleting task %" PRIdPTR, v->length() - 1);
         delete v->pop();
     }
 }
 
-rust_rt::rust_rt(rust_srv *srv, rust_crate const *root_crate) :
+rust_dom::rust_dom(rust_srv *srv, rust_crate const *root_crate) :
     root_crate(root_crate),
     srv(srv),
     logbits(get_logbits()),
@@ -2491,7 +2491,7 @@ rust_rt::rust_rt(rust_srv *srv, rust_crate const *root_crate) :
     curr_task(NULL),
     rval(0)
 {
-    logptr("new rt", (uintptr_t)this);
+    logptr("new dom", (uintptr_t)this);
     memset(&rctx, 0, sizeof(rctx));
 
 #ifdef __WIN32__
@@ -2524,7 +2524,7 @@ rust_rt::rust_rt(rust_srv *srv, rust_crate const *root_crate) :
     root_task = new (this) rust_task(this, NULL);
 }
 
-rust_rt::~rust_rt() {
+rust_dom::~rust_dom() {
     log(LOG_TASK, "deleting all running tasks");
     del_all_tasks(this, &running_tasks);
     log(LOG_TASK, "deleting all blocked tasks");
@@ -2539,14 +2539,14 @@ rust_rt::~rust_rt() {
 }
 
 void
-rust_rt::activate(rust_task *task) {
+rust_dom::activate(rust_task *task) {
     curr_task = task;
     root_crate->get_activate_glue()(task);
     curr_task = NULL;
 }
 
 void
-rust_rt::log(uint32_t logbit, char const *fmt, ...) {
+rust_dom::log(uint32_t logbit, char const *fmt, ...) {
     char buf[256];
     if (logbits & logbit) {
         va_list args;
@@ -2558,58 +2558,58 @@ rust_rt::log(uint32_t logbit, char const *fmt, ...) {
 }
 
 void
-rust_rt::logptr(char const *msg, uintptr_t ptrval) {
+rust_dom::logptr(char const *msg, uintptr_t ptrval) {
     log(LOG_MEM, "%s 0x%" PRIxPTR, msg, ptrval);
 }
 
 template<typename T> void
-rust_rt::logptr(char const *msg, T* ptrval) {
+rust_dom::logptr(char const *msg, T* ptrval) {
     log(LOG_MEM, "%s 0x%" PRIxPTR, msg, (uintptr_t)ptrval);
 }
 
 
 void
-rust_rt::fail() {
+rust_dom::fail() {
     log(LOG_RT, "runtime 0x%" PRIxPTR " root task failed", this);
     I(this, rval == 0);
     rval = 1;
 }
 
 void *
-rust_rt::malloc(size_t sz) {
+rust_dom::malloc(size_t sz) {
     void *p = srv->malloc(sz);
     I(this, p);
-    log(LOG_MEM, "rust_rt::malloc(%d) -> 0x%" PRIxPTR,
+    log(LOG_MEM, "rust_dom::malloc(%d) -> 0x%" PRIxPTR,
         sz, p);
     return p;
 }
 
 void *
-rust_rt::calloc(size_t sz) {
+rust_dom::calloc(size_t sz) {
     void *p = this->malloc(sz);
     memset(p, 0, sz);
     return p;
 }
 
 void *
-rust_rt::realloc(void *p, size_t sz) {
+rust_dom::realloc(void *p, size_t sz) {
     void *p1 = srv->realloc(p, sz);
     I(this, p1);
-    log(LOG_MEM, "rust_rt::realloc(0x%" PRIxPTR ", %d) -> 0x%" PRIxPTR,
+    log(LOG_MEM, "rust_dom::realloc(0x%" PRIxPTR ", %d) -> 0x%" PRIxPTR,
         p, sz, p1);
     return p1;
 }
 
 void
-rust_rt::free(void *p) {
-    log(LOG_MEM, "rust_rt::free(0x%" PRIxPTR ")", p);
+rust_dom::free(void *p) {
+    log(LOG_MEM, "rust_dom::free(0x%" PRIxPTR ")", p);
     I(this, p);
     srv->free(p);
 }
 
 #ifdef __WIN32__
 void
-rust_rt::win32_require(LPCTSTR fn, BOOL ok) {
+rust_dom::win32_require(LPCTSTR fn, BOOL ok) {
     if (!ok) {
         LPTSTR buf;
         DWORD err = GetLastError();
@@ -2627,13 +2627,13 @@ rust_rt::win32_require(LPCTSTR fn, BOOL ok) {
 #endif
 
 size_t
-rust_rt::n_live_tasks()
+rust_dom::n_live_tasks()
 {
     return running_tasks.length() + blocked_tasks.length();
 }
 
 void
-rust_rt::add_task_to_state_vec(ptr_vec<rust_task> *v, rust_task *task)
+rust_dom::add_task_to_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 {
     log(LOG_MEM|LOG_TASK,
         "adding task 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
@@ -2643,7 +2643,7 @@ rust_rt::add_task_to_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 
 
 void
-rust_rt::remove_task_from_state_vec(ptr_vec<rust_task> *v, rust_task *task)
+rust_dom::remove_task_from_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 {
     log(LOG_MEM|LOG_TASK,
         "removing task 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
@@ -2653,7 +2653,7 @@ rust_rt::remove_task_from_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 }
 
 const char *
-rust_rt::state_vec_name(ptr_vec<rust_task> *v)
+rust_dom::state_vec_name(ptr_vec<rust_task> *v)
 {
     if (v == &running_tasks)
         return "running";
@@ -2664,15 +2664,15 @@ rust_rt::state_vec_name(ptr_vec<rust_task> *v)
 }
 
 void
-rust_rt::reap_dead_tasks()
+rust_dom::reap_dead_tasks()
 {
     for (size_t i = 0; i < dead_tasks.length(); ) {
-        rust_task *p = dead_tasks[i];
-        if (p == root_task || p->refcnt == 0) {
-            I(this, !p->waiting_tasks.length());
-            dead_tasks.swapdel(p);
-            log(LOG_TASK, "deleting unreferenced dead task 0x%" PRIxPTR, p);
-            delete p;
+        rust_task *t = dead_tasks[i];
+        if (t == root_task || t->refcnt == 0) {
+            I(this, !t->waiting_tasks.length());
+            dead_tasks.swapdel(t);
+            log(LOG_TASK, "deleting unreferenced dead task 0x%" PRIxPTR, t);
+            delete t;
             continue;
         }
         ++i;
@@ -2680,7 +2680,7 @@ rust_rt::reap_dead_tasks()
 }
 
 rust_task *
-rust_rt::sched()
+rust_dom::sched()
 {
     I(this, this);
     // FIXME: in the face of failing taskesses, this is not always right.
@@ -2703,9 +2703,9 @@ extern "C" CDECL void
 upcall_log_int(rust_task *task, int32_t i)
 {
     LOG_UPCALL_ENTRY(task);
-    task->rt->log(LOG_UPCALL|LOG_ULOG,
-                  "upcall log_int(0x%" PRIx32 " = %" PRId32 " = '%c')",
-                  i, i, (char)i);
+    task->dom->log(LOG_UPCALL|LOG_ULOG,
+                   "upcall log_int(0x%" PRIx32 " = %" PRId32 " = '%c')",
+                   i, i, (char)i);
 }
 
 extern "C" CDECL void
@@ -2713,47 +2713,47 @@ upcall_log_str(rust_task *task, rust_str *str)
 {
     LOG_UPCALL_ENTRY(task);
     const char *c = str_buf(task, str);
-    task->rt->log(LOG_UPCALL|LOG_ULOG,
-                  "upcall log_str(\"%s\")",
-                  c);
+    task->dom->log(LOG_UPCALL|LOG_ULOG,
+                   "upcall log_str(\"%s\")",
+                   c);
 }
 
 extern "C" CDECL void
 upcall_trace_word(rust_task *task, uintptr_t i)
 {
     LOG_UPCALL_ENTRY(task);
-    task->rt->log(LOG_UPCALL|LOG_TRACE,
-                  "trace: 0x%" PRIxPTR "",
-                  i, i, (char)i);
+    task->dom->log(LOG_UPCALL|LOG_TRACE,
+                   "trace: 0x%" PRIxPTR "",
+                   i, i, (char)i);
 }
 
 extern "C" CDECL void
 upcall_trace_str(rust_task *task, char const *c)
 {
     LOG_UPCALL_ENTRY(task);
-    task->rt->log(LOG_UPCALL|LOG_TRACE,
-                  "trace: %s",
-                  c);
+    task->dom->log(LOG_UPCALL|LOG_TRACE,
+                   "trace: %s",
+                   c);
 }
 
 extern "C" CDECL rust_port*
 upcall_new_port(rust_task *task, size_t unit_sz)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-            "upcall_new_port(task=0x%" PRIxPTR ", unit_sz=%d)",
-            (uintptr_t)task, unit_sz);
-    return new (rt) rust_port(task, unit_sz);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+             "upcall_new_port(task=0x%" PRIxPTR ", unit_sz=%d)",
+             (uintptr_t)task, unit_sz);
+    return new (dom) rust_port(task, unit_sz);
 }
 
 extern "C" CDECL void
 upcall_del_port(rust_task *task, rust_port *port)
 {
     LOG_UPCALL_ENTRY(task);
-    task->rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-                  "upcall del_port(0x%" PRIxPTR ")", (uintptr_t)port);
-    I(task->rt, !port->refcnt);
+    task->dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+                   "upcall del_port(0x%" PRIxPTR ")", (uintptr_t)port);
+    I(task->dom, !port->refcnt);
     delete port;
 }
 
@@ -2761,22 +2761,22 @@ extern "C" CDECL rust_chan*
 upcall_new_chan(rust_task *task, rust_port *port)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-            "upcall_new_chan(task=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
-            (uintptr_t)task, port);
-    I(rt, port);
-    return new (rt) rust_chan(task, port);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+             "upcall_new_chan(task=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
+             (uintptr_t)task, port);
+    I(dom, port);
+    return new (dom) rust_chan(task, port);
 }
 
 extern "C" CDECL void
 upcall_del_chan(rust_task *task, rust_chan *chan)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-            "upcall del_chan(0x%" PRIxPTR ")", (uintptr_t)chan);
-    I(rt, !chan->refcnt);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+             "upcall del_chan(0x%" PRIxPTR ")", (uintptr_t)chan);
+    I(dom, !chan->refcnt);
     delete chan;
 }
 
@@ -2784,11 +2784,11 @@ extern "C" CDECL rust_chan *
 upcall_clone_chan(rust_task *task, rust_task *owner, rust_chan *chan)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
-            "upcall clone_chan(owner 0x%" PRIxPTR ", chan 0x%" PRIxPTR ")",
-            (uintptr_t)owner, (uintptr_t)chan);
-    return new (owner->rt) rust_chan(owner, chan->port);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+             "upcall clone_chan(owner 0x%" PRIxPTR ", chan 0x%" PRIxPTR ")",
+             (uintptr_t)owner, (uintptr_t)chan);
+    return new (owner->dom) rust_chan(owner, chan->port);
 }
 
 /*
@@ -2814,37 +2814,37 @@ upcall_clone_chan(rust_task *task, rust_task *owner, rust_chan *chan)
  */
 
 static int
-attempt_transmission(rust_rt *rt,
+attempt_transmission(rust_dom *dom,
                      rust_chan *src,
                      rust_task *dst)
 {
-    I(rt, src);
-    I(rt, dst);
+    I(dom, src);
+    I(dom, dst);
 
     rust_port *port = src->port;
     if (!port) {
-        rt->log(LOG_COMM,
-                "src died, transmission incomplete");
+        dom->log(LOG_COMM,
+                 "src died, transmission incomplete");
         return 0;
     }
 
     circ_buf *buf = &src->buf;
     if (buf->unread == 0) {
-        rt->log(LOG_COMM,
-                "buffer empty, transmission incomplete");
+        dom->log(LOG_COMM,
+                 "buffer empty, transmission incomplete");
         return 0;
     }
 
     if (!dst->blocked_on(port)) {
-        rt->log(LOG_COMM,
-                "dst in non-reading state, transmission incomplete");
+        dom->log(LOG_COMM,
+                 "dst in non-reading state, transmission incomplete");
         return 0;
     }
 
     uintptr_t *dptr = dst->dptr;
-    rt->log(LOG_COMM,
-            "receiving %d bytes into dst_task=0x%" PRIxPTR ", dptr=0x%" PRIxPTR,
-            port->unit_sz, dst, dptr);
+    dom->log(LOG_COMM,
+             "receiving %d bytes into dst_task=0x%" PRIxPTR ", dptr=0x%" PRIxPTR,
+             port->unit_sz, dst, dptr);
     buf->shift(dptr);
 
     // Wake up the sender if its waiting for the send operation.
@@ -2856,7 +2856,7 @@ attempt_transmission(rust_rt *rt,
     // Wakeup the receiver, there is new data.
     dst->wakeup(port);
 
-    rt->log(LOG_COMM, "transmission complete");
+    dom->log(LOG_COMM, "transmission complete");
     return 1;
 }
 
@@ -2864,8 +2864,8 @@ extern "C" CDECL void
 upcall_yield(rust_task *task)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_COMM, "upcall yield()");
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_COMM, "upcall yield()");
     task->yield(1);
 }
 
@@ -2873,10 +2873,10 @@ extern "C" CDECL void
 upcall_join(rust_task *task, rust_task *other)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_COMM,
-            "upcall join(other=0x%" PRIxPTR ")",
-            (uintptr_t)other);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_COMM,
+             "upcall join(other=0x%" PRIxPTR ")",
+             (uintptr_t)other);
 
     // If the other task is already dying, we dont have to wait for it.
     if (!other->dead()) {
@@ -2890,34 +2890,34 @@ extern "C" CDECL void
 upcall_send(rust_task *task, rust_chan *chan, void *sptr)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_COMM,
-            "upcall send(chan=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
-            (uintptr_t)chan,
-            (uintptr_t)sptr);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_COMM,
+             "upcall send(chan=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
+             (uintptr_t)chan,
+             (uintptr_t)sptr);
 
-    I(rt, chan);
-    I(rt, sptr);
+    I(dom, chan);
+    I(dom, sptr);
 
     rust_port *port = chan->port;
-    rt->log(LOG_MEM|LOG_COMM,
-            "send to port", (uintptr_t)port);
-    I(rt, port);
+    dom->log(LOG_MEM|LOG_COMM,
+             "send to port", (uintptr_t)port);
+    I(dom, port);
 
     rust_token *token = &chan->token;
-    rt->log(LOG_MEM|LOG_COMM,
-            "sending via token 0x%" PRIxPTR,
-            (uintptr_t)token);
+    dom->log(LOG_MEM|LOG_COMM,
+             "sending via token 0x%" PRIxPTR,
+             (uintptr_t)token);
 
     if (port->task) {
         chan->buf.push(sptr);
         task->block(token);
-        attempt_transmission(rt, chan, port->task);
+        attempt_transmission(dom, chan, port->task);
         if (chan->buf.unread && !token->pending())
             token->submit();
     } else {
-        rt->log(LOG_COMM|LOG_ERR,
-                "port has no task (possibly throw?)");
+        dom->log(LOG_COMM|LOG_ERR,
+                 "port has no task (possibly throw?)");
     }
 
     if (!task->running())
@@ -2928,30 +2928,30 @@ extern "C" CDECL void
 upcall_recv(rust_task *task, uintptr_t *dptr, rust_port *port)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_COMM,
-            "upcall recv(dptr=0x" PRIxPTR ", port=0x%" PRIxPTR ")",
-            (uintptr_t)dptr,
-            (uintptr_t)port);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_COMM,
+             "upcall recv(dptr=0x" PRIxPTR ", port=0x%" PRIxPTR ")",
+             (uintptr_t)dptr,
+             (uintptr_t)port);
 
-    I(rt, port);
-    I(rt, port->task);
-    I(rt, task);
-    I(rt, port->task == task);
+    I(dom, port);
+    I(dom, port->task);
+    I(dom, task);
+    I(dom, port->task == task);
 
     task->block(port);
 
     if (port->writers.length() > 0) {
-        I(rt, task->rt);
-        size_t i = rand(&rt->rctx);
+        I(dom, task->dom);
+        size_t i = rand(&dom->rctx);
         i %= port->writers.length();
         rust_token *token = port->writers[i];
         rust_chan *chan = token->chan;
-        if (attempt_transmission(rt, chan, task))
+        if (attempt_transmission(dom, chan, task))
             token->withdraw();
     } else {
-        rt->log(LOG_COMM,
-                "no writers sending to port", (uintptr_t)port);
+        dom->log(LOG_COMM,
+                 "no writers sending to port", (uintptr_t)port);
     }
 
     if (!task->running()) {
@@ -2964,8 +2964,8 @@ extern "C" CDECL void
 upcall_fail(rust_task *task, char const *expr, char const *file, size_t line)
 {
     LOG_UPCALL_ENTRY(task);
-    task->rt->log(LOG_UPCALL|LOG_ERR, "upcall fail '%s', %s:%" PRIdPTR,
-                  expr, file, line);
+    task->dom->log(LOG_UPCALL|LOG_ERR, "upcall fail '%s', %s:%" PRIdPTR,
+                   expr, file, line);
     task->fail(4);
 }
 
@@ -2973,7 +2973,7 @@ extern "C" CDECL void
 upcall_kill(rust_task *task, rust_task *target)
 {
     LOG_UPCALL_ENTRY(task);
-    task->rt->log(LOG_UPCALL, "upcall kill target=0x%" PRIxPTR, target);
+    task->dom->log(LOG_UPCALL, "upcall kill target=0x%" PRIxPTR, target);
     target->kill();
 }
 
@@ -2982,8 +2982,8 @@ upcall_exit(rust_task *task)
 {
     LOG_UPCALL_ENTRY(task);
 
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL, "upcall exit");
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL, "upcall exit");
     task->die();
     task->notify_waiting_tasks();
     task->yield(1);
@@ -2994,10 +2994,10 @@ upcall_malloc(rust_task *task, size_t nbytes)
 {
     LOG_UPCALL_ENTRY(task);
 
-    void *p = task->rt->malloc(nbytes);
-    task->rt->log(LOG_UPCALL|LOG_MEM,
-                  "upcall malloc(%u) = 0x%" PRIxPTR,
-                  nbytes, (uintptr_t)p);
+    void *p = task->dom->malloc(nbytes);
+    task->dom->log(LOG_UPCALL|LOG_MEM,
+                   "upcall malloc(%u) = 0x%" PRIxPTR,
+                   nbytes, (uintptr_t)p);
     return (uintptr_t) p;
 }
 
@@ -3006,11 +3006,11 @@ upcall_free(rust_task *task, void* ptr)
 {
     LOG_UPCALL_ENTRY(task);
 
-    rust_rt *rt = task->rt;
-    rt->log(LOG_UPCALL|LOG_MEM,
-            "upcall free(0x%" PRIxPTR ")",
-            (uintptr_t)ptr);
-    rt->free(ptr);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_MEM,
+             "upcall free(0x%" PRIxPTR ")",
+             (uintptr_t)ptr);
+    dom->free(ptr);
 }
 
 
@@ -3019,13 +3019,13 @@ upcall_new_str(rust_task *task, char const *s, size_t fill)
 {
     LOG_UPCALL_ENTRY(task);
 
-    rust_rt *rt = task->rt;
+    rust_dom *dom = task->dom;
     size_t alloc = next_power_of_two(fill);
-    void *mem = rt->malloc(sizeof(rust_str) + alloc);
-    rust_str *st = new (mem) rust_str(rt, alloc, fill, s);
-    rt->log(LOG_UPCALL|LOG_MEM,
-            "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
-            s, fill, st);
+    void *mem = dom->malloc(sizeof(rust_str) + alloc);
+    rust_str *st = new (mem) rust_str(dom, alloc, fill, s);
+    dom->log(LOG_UPCALL|LOG_MEM,
+             "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
+             s, fill, st);
     return st;
 }
 
@@ -3050,7 +3050,7 @@ upcall_str_concat(rust_task *task, rust_str *dst, rust_str *a, rust_str *b)
     // fast path
     if (dst == a && a->refcnt == 1) {
         if (alloc > a->alloc) {
-            void *mem = task->rt->realloc(a, sizeof(rust_str) + alloc);
+            void *mem = task->dom->realloc(a, sizeof(rust_str) + alloc);
             a = static_cast<rust_str *>(mem);
             a->alloc = alloc;
         }
@@ -3065,7 +3065,7 @@ upcall_str_concat(rust_task *task, rust_str *dst, rust_str *a, rust_str *b)
 }
 
 rust_crate_cache *
-rust_rt::get_cache(rust_crate const *crate) {
+rust_dom::get_cache(rust_crate const *crate) {
     log(LOG_LINK, "looking for crate-cache for crate 0x%" PRIxPTR, crate);
     rust_crate_cache *cache = NULL;
     for (size_t i = 0; i < caches.length(); ++i) {
@@ -3092,17 +3092,17 @@ fetch_c_sym(rust_task *task,
             char const *library,
             char const *symbol)
 {
-    rust_rt *rt = task->rt;
+    rust_dom *dom = task->dom;
 
     if (task->cache && task->cache->crate != curr_crate) {
-        task->rt->log(LOG_LINK, "lookup uses different crate");
+        task->dom->log(LOG_LINK, "lookup uses different crate");
         task->cache->deref();
         task->cache = NULL;
     }
 
     if (!task->cache) {
-        task->rt->log(LOG_LINK, "fetching cache for current crate");
-        task->cache = rt->get_cache(curr_crate);
+        task->dom->log(LOG_LINK, "fetching cache for current crate");
+        task->cache = dom->get_cache(curr_crate);
     }
 
     rust_crate_cache *cache = task->cache;
@@ -3120,33 +3120,33 @@ upcall_import_rust_sym(rust_task *task,
                        char const **path)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
+    rust_dom *dom = task->dom;
 
-    rt->log(LOG_UPCALL|LOG_LINK,
-            "upcall import rust sym: lib #%" PRIdPTR
-            " = %s, c_sym #%" PRIdPTR
-            ", rust_sym #%" PRIdPTR
-            ", curr_crate = 0x%" PRIxPTR,
-            lib_num, library, c_sym_num, rust_sym_num,
-            curr_crate);
+    dom->log(LOG_UPCALL|LOG_LINK,
+             "upcall import rust sym: lib #%" PRIdPTR
+             " = %s, c_sym #%" PRIdPTR
+             ", rust_sym #%" PRIdPTR
+             ", curr_crate = 0x%" PRIxPTR,
+             lib_num, library, c_sym_num, rust_sym_num,
+             curr_crate);
     for (char const **c = crate_rel(curr_crate, path); *c; ++c) {
-        rt->log(LOG_UPCALL, " + %s", crate_rel(curr_crate, *c));
+        dom->log(LOG_UPCALL, " + %s", crate_rel(curr_crate, *c));
     }
 
-    rt->log(LOG_UPCALL|LOG_LINK,
-            "import C symbol 'rust_crate' from lib #%" PRIdPTR,lib_num);
+    dom->log(LOG_UPCALL|LOG_LINK,
+             "import C symbol 'rust_crate' from lib #%" PRIdPTR,lib_num);
     rust_crate_cache::c_sym *c =
         fetch_c_sym(task, curr_crate, lib_num, c_sym_num, library, "rust_crate");
 
-    rt->log(LOG_UPCALL|LOG_LINK, "import rust symbol inside crate");
+    dom->log(LOG_UPCALL|LOG_LINK, "import rust symbol inside crate");
     rust_crate_cache::rust_sym *s =
-        task->cache->get_rust_sym(rust_sym_num, rt, curr_crate, c, path);
+        task->cache->get_rust_sym(rust_sym_num, dom, curr_crate, c, path);
 
     uintptr_t addr = s->get_val();
     if (addr) {
-        rt->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
+        dom->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
-        rt->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
+        dom->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
         task->fail(7);
     }
     return addr;
@@ -3161,47 +3161,47 @@ upcall_import_c_sym(rust_task *task,
                     char const *symbol)
 {
     LOG_UPCALL_ENTRY(task);
-    rust_rt *rt = task->rt;
+    rust_dom *dom = task->dom;
 
-    rt->log(LOG_UPCALL|LOG_LINK,
-            "upcall import c sym: lib #%" PRIdPTR
-            " = %s, c_sym #%" PRIdPTR
-            " = %s"
-            ", curr_crate = 0x%" PRIxPTR,
-            lib_num, library, c_sym_num, symbol, curr_crate);
+    dom->log(LOG_UPCALL|LOG_LINK,
+             "upcall import c sym: lib #%" PRIdPTR
+             " = %s, c_sym #%" PRIdPTR
+             " = %s"
+             ", curr_crate = 0x%" PRIxPTR,
+             lib_num, library, c_sym_num, symbol, curr_crate);
 
     rust_crate_cache::c_sym *c =
         fetch_c_sym(task, curr_crate, lib_num, c_sym_num, library, symbol);
 
     uintptr_t addr = c->get_val();
     if (addr) {
-        rt->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
+        dom->log(LOG_UPCALL|LOG_LINK, "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
-        rt->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
+        dom->log(LOG_UPCALL|LOG_LINK, "failed to resolve symbol");
         task->fail(6);
     }
     return addr;
 }
 
 static int
-rust_main_loop(rust_rt *rt);
+rust_main_loop(rust_dom *dom);
 
 #if defined(__WIN32__)
 static DWORD WINAPI rust_thread_start(void *ptr)
 #elif defined(__GNUC__)
-static void *rust_thread_start(void *ptr)
+    static void *rust_thread_start(void *ptr)
 #else
 #error "Platform not supported"
 #endif
 {
     // We were handed the runtime we are supposed to run.
-    rust_rt *rt = (rust_rt *)ptr;
+    rust_dom *dom = (rust_dom *)ptr;
 
     // Start a new rust main loop for this thread.
-    rust_main_loop(rt);
+    rust_main_loop(dom);
 
-    rust_srv *srv = rt->srv;
-    delete rt;
+    rust_srv *srv = dom->srv;
+    delete dom;
     delete srv;
 
     return 0;
@@ -3212,11 +3212,11 @@ upcall_new_task(rust_task *spawner)
 {
     LOG_UPCALL_ENTRY(spawner);
 
-    rust_rt *rt = spawner->rt;
-    rust_task *task = new (rt) rust_task(rt, spawner);
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
-            "upcall new_task(spawner 0x%" PRIxPTR ") = 0x%" PRIxPTR,
-            spawner, task);
+    rust_dom *dom = spawner->dom;
+    rust_task *task = new (dom) rust_task(dom, spawner);
+    dom->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+             "upcall new_task(spawner 0x%" PRIxPTR ") = 0x%" PRIxPTR,
+             spawner, task);
     return task;
 }
 
@@ -3225,10 +3225,10 @@ upcall_start_task(rust_task *spawner, rust_task *task, uintptr_t exit_task_glue,
 {
     LOG_UPCALL_ENTRY(spawner);
 
-    rust_rt *rt = spawner->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
-            "upcall start_task(task 0x%" PRIxPTR " exit_task_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
-            task, exit_task_glue, spawnee_fn, callsz);
+    rust_dom *dom = spawner->dom;
+    dom->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+             "upcall start_task(task 0x%" PRIxPTR " exit_task_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
+             task, exit_task_glue, spawnee_fn, callsz);
     task->start(exit_task_glue, spawnee_fn, spawner->rust_sp, callsz);
     return task;
 }
@@ -3238,12 +3238,12 @@ upcall_new_thread(rust_task *task)
 {
     LOG_UPCALL_ENTRY(task);
 
-    rust_rt *old_rt = task->rt;
-    rust_rt *new_rt = new rust_rt(old_rt->srv->clone(), old_rt->root_crate);
-    new_rt->log(LOG_UPCALL|LOG_MEM,
-                "upcall new_thread() = 0x%" PRIxPTR,
-                new_rt->root_task);
-    return new_rt->root_task;
+    rust_dom *old_dom = task->dom;
+    rust_dom *new_dom = new rust_dom(old_dom->srv->clone(), old_dom->root_crate);
+    new_dom->log(LOG_UPCALL|LOG_MEM,
+                 "upcall new_thread() = 0x%" PRIxPTR,
+                 new_dom->root_task);
+    return new_dom->root_task;
 }
 
 extern "C" CDECL rust_task *
@@ -3251,52 +3251,52 @@ upcall_start_thread(rust_task *spawner, rust_task *root_task, uintptr_t exit_tas
 {
     LOG_UPCALL_ENTRY(spawner);
 
-    rust_rt *rt = spawner->rt;
-    rt->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
-            "upcall start_thread(exit_task_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
-            exit_task_glue, spawnee_fn, callsz);
+    rust_dom *dom = spawner->dom;
+    dom->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+             "upcall start_thread(exit_task_glue 0x%" PRIxPTR ", spawnee 0x%" PRIxPTR ", callsz %d)",
+             exit_task_glue, spawnee_fn, callsz);
     root_task->start(exit_task_glue, spawnee_fn, spawner->rust_sp, callsz);
 
 #if defined(__WIN32__)
     DWORD thread;
-    CreateThread(NULL, 0, rust_thread_start, root_task->rt, 0, &thread);
+    CreateThread(NULL, 0, rust_thread_start, root_task->dom, 0, &thread);
 #else
     pthread_t thread;
-    pthread_create(&thread, &rt->attr, rust_thread_start, (void *)root_task->rt);
+    pthread_create(&thread, &dom->attr, rust_thread_start, (void *)root_task->dom);
 #endif
 
     return 0; /* nil */
 }
 
 static int
-rust_main_loop(rust_rt *rt)
+rust_main_loop(rust_dom *dom)
 {
     int rval;
     rust_task *task;
 
-    rt->log(LOG_RT, "control is in rust runtime library");
-    rt->logptr("main exit-task glue", rt->root_crate->get_main_exit_task_glue());
+    dom->log(LOG_RT, "control is in rust runtime library");
+    dom->logptr("main exit-task glue", dom->root_crate->get_main_exit_task_glue());
 
-    while ((task = rt->sched()) != NULL) {
-        I(rt, task->running());
+    while ((task = dom->sched()) != NULL) {
+        I(dom, task->running());
 
-        rt->log(LOG_TASK, "activating task 0x%" PRIxPTR ", sp=0x%" PRIxPTR,
-                (uintptr_t)task, task->rust_sp);
+        dom->log(LOG_TASK, "activating task 0x%" PRIxPTR ", sp=0x%" PRIxPTR,
+                 (uintptr_t)task, task->rust_sp);
 
-        rt->activate(task);
+        dom->activate(task);
 
-        rt->log(LOG_TASK,
-                "returned from task 0x%" PRIxPTR " in state '%s', sp=0x%" PRIxPTR,
-                (uintptr_t)task, rt->state_vec_name(task->state), task->rust_sp);
+        dom->log(LOG_TASK,
+                 "returned from task 0x%" PRIxPTR " in state '%s', sp=0x%" PRIxPTR,
+                 (uintptr_t)task, dom->state_vec_name(task->state), task->rust_sp);
 
-        I(rt, task->rust_sp >= (uintptr_t) &task->stk->data[0]);
-        I(rt, task->rust_sp < task->stk->limit);
+        I(dom, task->rust_sp >= (uintptr_t) &task->stk->data[0]);
+        I(dom, task->rust_sp < task->stk->limit);
 
-        rt->reap_dead_tasks();
+        dom->reap_dead_tasks();
     }
 
-    rt->log(LOG_RT, "finished main loop (rt.rval = %d)", rt->rval);
-    rval = rt->rval;
+    dom->log(LOG_RT, "finished main loop (dom.rval = %d)", dom->rval);
+    rval = dom->rval;
 
     return rval;
 }
@@ -3320,7 +3320,7 @@ rust_srv::~rust_srv()
 void
 rust_srv::log(char const *str)
 {
-    printf("rt: %s\n", str);
+    printf("dom: %s\n", str);
 }
 
 void *
@@ -3367,10 +3367,10 @@ rust_srv::clone()
 extern "C" CDECL rust_str*
 str_alloc(rust_task *task, size_t n_bytes)
 {
-    rust_rt *rt = task->rt;
+    rust_dom *dom = task->dom;
     size_t alloc = next_power_of_two(n_bytes);
-    void *mem = rt->malloc(sizeof(rust_str) + alloc);
-    rust_str *st = new (mem) rust_str(rt, alloc, 1, "");
+    void *mem = dom->malloc(sizeof(rust_str) + alloc);
+    rust_str *st = new (mem) rust_str(dom, alloc, 1, "");
     if (!st)
         task->fail(2);
     return st;
@@ -3379,12 +3379,12 @@ str_alloc(rust_task *task, size_t n_bytes)
 extern "C" CDECL rust_vec*
 vec_alloc(rust_task *task, type_desc *t, size_t n_elts)
 {
-    rust_rt *rt = task->rt;
-    rt->log(LOG_MEM, "vec_alloc %" PRIdPTR " elements of size %" PRIdPTR,
-            n_elts, t->size);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_MEM, "vec_alloc %" PRIdPTR " elements of size %" PRIdPTR,
+             n_elts, t->size);
     size_t n_bytes = n_elts * t->size;
     size_t alloc = next_power_of_two(n_bytes + sizeof(rust_vec));
-    void *mem = rt->malloc(alloc);
+    void *mem = dom->malloc(alloc);
     rust_vec *vec = new (mem) rust_vec(alloc, 0);
     if (!vec)
         task->fail(3);
@@ -3425,15 +3425,15 @@ rust_start(uintptr_t main_fn, rust_crate const *crate)
     int ret;
     {
         rust_srv srv;
-        rust_rt rt(&srv, crate);
+        rust_dom dom(&srv, crate);
 
-        if (rt.logbits & LOG_DWARF) {
-            rust_crate_reader rdr(&rt, crate);
+        if (dom.logbits & LOG_DWARF) {
+            rust_crate_reader rdr(&dom, crate);
         }
 
-        rt.root_task->start(crate->get_main_exit_task_glue(), main_fn, NULL, 0);
+        dom.root_task->start(crate->get_main_exit_task_glue(), main_fn, NULL, 0);
 
-        ret = rust_main_loop(&rt);
+        ret = rust_main_loop(&dom);
     }
 
 #if !defined(__WIN32__)

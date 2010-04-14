@@ -16,8 +16,8 @@ let task_field_stk = task_field_refcnt + 1;;
 let task_field_runtime_sp = task_field_stk + 1;;
 let task_field_rust_sp = task_field_runtime_sp + 1;;
 let task_field_gc_alloc_chain = task_field_rust_sp + 1;;
-let task_field_rt = task_field_gc_alloc_chain + 1;;
-let n_visible_task_fields = task_field_rt + 1;;
+let task_field_dom = task_field_gc_alloc_chain + 1;;
+let n_visible_task_fields = task_field_dom + 1;;
 
 let frame_glue_fns_field_mark = 0;;
 let frame_glue_fns_field_drop = 1;;
