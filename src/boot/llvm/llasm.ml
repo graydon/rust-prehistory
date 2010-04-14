@@ -8,7 +8,11 @@ type asm_glue =
     {
       asm_activate_glue : Llvm.llvalue;
       asm_yield_glue : Llvm.llvalue;
+      asm_upcall_glues : Llvm.llvalue array;
     }
+;;
+
+let n_upcall_glues = 7
 ;;
 
 (* x86-specific asm. *)
@@ -41,11 +45,13 @@ let x86_glue
   let load_esp_from_runtime_sp = ["movl   8(%edx), %esp"] in
   let store_esp_to_rust_sp     = ["movl  %esp, 12(%edx)"] in
   let store_esp_to_runtime_sp  = ["movl  %esp,  8(%edx)"] in
+  let list_init i f = (Array.to_list (Array.init i f)) in
+  let list_init_concat i f = List.concat (list_init i f) in
   let glue =
     [
       ("rust_activate_glue",
        String.concat "\n\t"
-         (["movl  4(%esp),%edx    # edx = rust_task"]
+         (["movl  4(%esp), %edx    # edx = rust_task"]
           @ save_callee_saves
           @ store_esp_to_runtime_sp
           @ load_esp_from_rust_sp
@@ -53,14 +59,14 @@ let x86_glue
              * This 'add' instruction is a bit surprising.
              * See lengthy comment in boot/be/x86.ml activate_glue.
              *)
-          @ ["addl  $20,12(%edx)"]
+          @ ["addl  $20, 12(%edx)"]
           @ restore_callee_saves
           @ ["ret"]));
 
       ("rust_yield_glue",
        String.concat "\n\t"
 
-         (["movl  0(%esp),%edx    # edx = rust_task"]
+         (["movl  0(%esp), %edx    # edx = rust_task"]
           @ load_esp_from_rust_sp
           @ save_callee_saves
           @ store_esp_to_rust_sp
@@ -68,6 +74,41 @@ let x86_glue
           @ restore_callee_saves
           @ ["ret"]))
     ]
+    @ list_init n_upcall_glues
+      begin
+        fun i ->
+          (* 
+           * 0, 4, 8, 12 are callee-saves
+           * 16 is retpc
+           * 20 is taskptr
+           * 24 is callee
+           * 28 .. (7+i) * 4 are args
+           *)
+          ((Printf.sprintf "rust_upcall_%d" i),
+           String.concat "\n\t"
+             (save_callee_saves
+              @ ["movl  %esp, %ebp     # ebp = rust_sp";
+                 "movl  20(%esp), %edx # edx = rust_task"]
+              @ store_esp_to_rust_sp
+              @ load_esp_from_runtime_sp
+              @ [Printf.sprintf
+                   "subl  $%d, %%esp   # esp -= args" ((i+1)*4);
+                 "andl  $~0xf, %esp    # align esp down";
+                 "movl  %edx, (%esp)   # arg[0] = rust_task "]
+              @ (list_init_concat i
+                   begin
+                     fun j ->
+                       [ Printf.sprintf "movl  %d(%%ebp),%%edx" ((j+7)*4);
+                         Printf.sprintf "movl  %%edx,%d(%%esp)" ((j+1)*4) ]
+                   end)
+
+              @ ["movl  24(%ebp), %edx # edx = callee";
+                 "call  *(%edx)        # call *%edx";
+                 "movl  20(%ebp), %edx # edx = rust_task"]
+              @ load_esp_from_rust_sp
+              @ restore_callee_saves
+              @ ["ret"]))
+      end
   in
   let _ =
     Llvm.set_module_inline_asm llmod
@@ -90,9 +131,22 @@ let x86_glue
     let ty = Llvm.function_type (Llvm.void_type llctx) [| task_ptr_ty |] in
       Llvm.declare_function s ty llmod;
   in
+  let decl_upcall n =
+    let task_ptr_ty = Llvm.pointer_type abi.Llabi.task_ty in
+    let word_ty = Llvm.i32_type llctx in
+    let callee_ty = Llvm.i32_type llctx in
+    let args_ty =
+      Array.append
+        [| task_ptr_ty; callee_ty |]
+        (Array.init n (fun _ -> word_ty))
+    in
+    let ty = Llvm.function_type word_ty args_ty in
+      Llvm.declare_function (Printf.sprintf "rust_upcall_%d" n) ty llmod
+  in
     {
       asm_activate_glue = decl_glue "rust_activate_glue";
-      asm_yield_glue = decl_glue "rust_yield_glue"
+      asm_yield_glue = decl_glue "rust_yield_glue";
+      asm_upcall_glues = Array.init n_upcall_glues decl_upcall;
     }
 ;;
 
