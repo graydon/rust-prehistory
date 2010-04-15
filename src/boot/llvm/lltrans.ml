@@ -465,9 +465,28 @@ let trans_crate
   in
 
   let exit_task_glue =
-    let llty = fn_ty void_ty [| word_ty; task_ptr_ty |] in
+    (* The exit-task glue does not get called.
+     * 
+     * Rather, control arrives at it by *returning* to the first
+     * instruction of it, when control falls off the end of the task's
+     * root function.
+     * 
+     * There is a "fake" frame set up by the runtime, underneath us,
+     * that we find ourselves in. This frame has the shape of a frame
+     * entered with 2 standard arguments (outptr + taskptr), then a
+     * retpc and N callee-saves sitting on the stack; all this is under
+     * ebp. Then there are 2 *outgoing* args at sp[0] and sp[1].
+     * 
+     * All these are fake except the taskptr, which is the one bit we
+     * want. So we construct an equally fake cdecl llvm signature here
+     * to crudely *get* the taskptr that's sitting 2 words up from sp,
+     * and pass it to upcall_exit.
+     * 
+     * The latter never returns.
+     *)
+    let llty = fn_ty void_ty [| task_ptr_ty |] in
     let llfn = Llvm.declare_function "rust_exit_task_glue" llty llmod in
-    let lltask = Llvm.param llfn 1 in
+    let lltask = Llvm.param llfn 0 in
     let llblock = Llvm.append_block llctx "body" llfn in
     let llbuilder = Llvm.builder_at_end llctx llblock in
       trans_upcall llbuilder lltask "upcall_exit" None [||];
@@ -475,14 +494,14 @@ let trans_crate
       llfn
   in
 
-  try
-    let crate' = crate.node in
-    let items = crate'.Ast.crate_items in
-    Hashtbl.iter declare_mod_item items;
-    Hashtbl.iter trans_mod_item items;
-    Llfinal.finalize_module llctx llmod abi asm_glue exit_task_glue;
-    llmod
-  with e -> Llvm.dispose_module llmod; raise e
+    try
+      let crate' = crate.node in
+      let items = crate'.Ast.crate_items in
+        Hashtbl.iter declare_mod_item items;
+        Hashtbl.iter trans_mod_item items;
+        Llfinal.finalize_module llctx llmod abi asm_glue exit_task_glue;
+        llmod
+    with e -> Llvm.dispose_module llmod; raise e
 ;;
 
 (*

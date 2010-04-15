@@ -106,7 +106,7 @@ let x86_glue
                    end)
 
               @ ["movl  24(%ebp), %edx # edx = callee";
-                 "call  *(%edx)        # call *%edx";
+                 "call  *%edx          # call *%edx";
                  "movl  20(%ebp), %edx # edx = rust_task"]
               @ load_esp_from_rust_sp
               @ restore_callee_saves
