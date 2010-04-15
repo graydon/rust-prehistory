@@ -47,6 +47,7 @@ let x86_glue
   let store_esp_to_runtime_sp  = ["movl  %esp,  8(%edx)"] in
   let list_init i f = (Array.to_list (Array.init i f)) in
   let list_init_concat i f = List.concat (list_init i f) in
+
   let glue =
     [
       ("rust_activate_glue",
@@ -84,6 +85,7 @@ let x86_glue
            * 24 is callee
            * 28 .. (7+i) * 4 are args
            *)
+
           ((Printf.sprintf "rust_upcall_%d" i),
            String.concat "\n\t"
              (save_callee_saves
@@ -95,6 +97,7 @@ let x86_glue
                    "subl  $%d, %%esp   # esp -= args" ((i+1)*4);
                  "andl  $~0xf, %esp    # align esp down";
                  "movl  %edx, (%esp)   # arg[0] = rust_task "]
+
               @ (list_init_concat i
                    begin
                      fun j ->
@@ -110,6 +113,7 @@ let x86_glue
               @ ["ret"]))
       end
   in
+
   let _ =
     Llvm.set_module_inline_asm llmod
       begin
@@ -126,22 +130,31 @@ let x86_glue
           end
       end
   in
+
+  let decl_cdecl_fn name out_ty arg_tys =
+    let ty = Llvm.function_type out_ty arg_tys in
+    let fn = Llvm.declare_function name ty llmod in
+      Llvm.set_function_call_conv Llvm.CallConv.c fn;
+      fn
+  in
+
   let decl_glue s =
     let task_ptr_ty = Llvm.pointer_type abi.Llabi.task_ty in
-    let ty = Llvm.function_type (Llvm.void_type llctx) [| task_ptr_ty |] in
-      Llvm.declare_function s ty llmod;
+    let void_ty = Llvm.void_type llctx in
+      decl_cdecl_fn s void_ty [| task_ptr_ty |]
   in
+
   let decl_upcall n =
     let task_ptr_ty = Llvm.pointer_type abi.Llabi.task_ty in
-    let word_ty = Llvm.i32_type llctx in
-    let callee_ty = Llvm.i32_type llctx in
+    let word_ty = abi.Llabi.word_ty in
+    let callee_ty = word_ty in
     let args_ty =
       Array.append
         [| task_ptr_ty; callee_ty |]
         (Array.init n (fun _ -> word_ty))
     in
-    let ty = Llvm.function_type word_ty args_ty in
-      Llvm.declare_function (Printf.sprintf "rust_upcall_%d" n) ty llmod
+    let name = Printf.sprintf "rust_upcall_%d" n in
+      decl_cdecl_fn name word_ty args_ty
   in
     {
       asm_activate_glue = decl_glue "rust_activate_glue";

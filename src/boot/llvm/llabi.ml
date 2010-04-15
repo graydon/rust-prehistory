@@ -5,7 +5,8 @@
 type abi = {
   crate_ty:   Llvm.lltype;
   task_ty:    Llvm.lltype;
-  rust_start: Llvm.llvalue
+  word_ty:    Llvm.lltype;
+  rust_start: Llvm.llvalue;
 };;
 
 let declare_abi (llctx:Llvm.llcontext) (llmod:Llvm.llmodule) : abi =
@@ -57,6 +58,7 @@ let declare_abi (llctx:Llvm.llcontext) (llmod:Llvm.llmodule) : abi =
   {
     crate_ty = crate_ty;
     task_ty = task_ty;
+    word_ty = i32;
     rust_start = Llvm.declare_function "rust_start" rust_start_ty llmod
   }
 ;;

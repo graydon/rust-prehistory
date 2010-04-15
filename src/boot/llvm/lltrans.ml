@@ -57,7 +57,64 @@ let trans_crate
 
   let (abi:Llabi.abi) = Llabi.declare_abi llctx llmod in
 
+  let (void_ty:Llvm.lltype) = Llvm.void_type llctx in
+  let (word_ty:Llvm.lltype) = abi.Llabi.word_ty in
+  let (task_ty:Llvm.lltype) = abi.Llabi.task_ty in
+  let (task_ptr_ty:Llvm.lltype) = Llvm.pointer_type task_ty in
+  let fn_ty (out:Llvm.lltype) (args:Llvm.lltype array) : Llvm.lltype =
+    Llvm.function_type out args
+  in
+
   let asm_glue = Llasm.get_glue llctx llmod abi sess in
+
+  let extern_upcalls = Hashtbl.create 0 in
+  let trans_upcall
+      (llbuilder:Llvm.llbuilder)
+      (lltask:Llvm.llvalue)
+      (name:string)
+      (lldest:Llvm.llvalue option)
+      (llargs:Llvm.llvalue array) =
+    let n = Array.length llargs in
+    let llglue = asm_glue.Llasm.asm_upcall_glues.(n) in
+    let llupcall = htab_search_or_add extern_upcalls name
+      begin
+        fun _ ->
+          let args_ty =
+            Array.append
+              [| task_ptr_ty |]
+              (Array.init n (fun i -> Llvm.type_of llargs.(i)))
+          in
+          let out_ty = match lldest with
+              None -> void_ty
+            | Some v -> Llvm.type_of v
+          in
+          let fty = fn_ty out_ty args_ty in
+            (* 
+             * NB: At this point it actually doesn't matter what type
+             * we gave the upcall function, as we're just going to
+             * pointercast it to a word and pass it to the upcall-glue
+             * for now. But possibly in the future it might matter if
+             * we develop a proper upcall calling convention.
+             *)
+            Llvm.declare_function name fty llmod
+      end
+    in
+      (* Cast everything to plain words so we can hand off to the glue. *)
+    let llupcall = Llvm.const_pointercast llupcall word_ty in
+    let llargs =
+      Array.map
+        (fun arg -> Llvm.const_pointercast arg word_ty)
+        llargs
+    in
+    let llallargs = Array.append [| lltask; llupcall |] llargs in
+    let llid = anon_llid "rv" in
+    let llrv = Llvm.build_call llglue llallargs llid llbuilder in
+      Llvm.set_instruction_call_conv Llvm.CallConv.c llrv;
+      match lldest with
+          None -> ()
+        | Some lldest ->
+            ignore (Llvm.build_store llrv lldest llbuilder);
+  in
 
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
     let tycon =
@@ -69,29 +126,29 @@ let trans_crate
         | TY_f32 -> Llvm.float_type
         | TY_f64 -> Llvm.double_type
     in
-    tycon llctx
+      tycon llctx
   in
 
   let rec trans_ty (ty:Ast.ty) : Llvm.lltype =
     match ty with
         Ast.TY_any -> Llvm.opaque_type llctx
-      | Ast.TY_nil -> Llvm.void_type llctx
+      | Ast.TY_nil -> void_ty
       | Ast.TY_bool -> Llvm.i1_type llctx
       | Ast.TY_mach mty -> trans_mach_ty mty
-      | Ast.TY_int -> Llvm.i32_type llctx (* FIXME: bignums? *)
+      | Ast.TY_int -> word_ty
       | Ast.TY_char -> Llvm.i32_type llctx
       | Ast.TY_str -> Llvm.pointer_type (Llvm.i8_type llctx)
       | Ast.TY_fn
-            ({ Ast.sig_input_slots = ins; Ast.sig_output_slot = out }, _) ->
+          ({ Ast.sig_input_slots = ins; Ast.sig_output_slot = out }, _) ->
           let llout = trans_slot None out in
           let lltaskty = Llvm.pointer_type abi.Llabi.task_ty in
           let llins = Array.map (trans_slot None) ins in
-          Llvm.function_type llout (Array.append [| lltaskty |] llins)
+            Llvm.function_type llout (Array.append [| lltaskty |] llins)
       | Ast.TY_constrained (ty', _) -> trans_ty ty'
       | Ast.TY_tup _ | Ast.TY_vec _ | Ast.TY_rec _ | Ast.TY_tag _
-            | Ast.TY_iso _ | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _
-            | Ast.TY_port _ | Ast.TY_obj _ | Ast.TY_task | Ast.TY_param _
-            | Ast.TY_named _ | Ast.TY_type ->
+      | Ast.TY_iso _ | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _
+      | Ast.TY_port _ | Ast.TY_obj _ | Ast.TY_task | Ast.TY_param _
+      | Ast.TY_named _ | Ast.TY_type ->
           Llvm.opaque_type llctx (* TODO *)
 
   (* Translates the type of a slot into the corresponding LLVM type. If the
@@ -407,12 +464,23 @@ let trans_crate
       | _ -> ()
   in
 
+  let exit_task_glue =
+    let llty = fn_ty void_ty [| word_ty; task_ptr_ty |] in
+    let llfn = Llvm.declare_function "rust_exit_task_glue" llty llmod in
+    let lltask = Llvm.param llfn 1 in
+    let llblock = Llvm.append_block llctx "body" llfn in
+    let llbuilder = Llvm.builder_at_end llctx llblock in
+      trans_upcall llbuilder lltask "upcall_exit" None [||];
+      ignore (Llvm.build_ret_void llbuilder);
+      llfn
+  in
+
   try
     let crate' = crate.node in
     let items = crate'.Ast.crate_items in
     Hashtbl.iter declare_mod_item items;
     Hashtbl.iter trans_mod_item items;
-    Llfinal.finalize_module llctx llmod abi asm_glue;
+    Llfinal.finalize_module llctx llmod abi asm_glue exit_task_glue;
     llmod
   with e -> Llvm.dispose_module llmod; raise e
 ;;

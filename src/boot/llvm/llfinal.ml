@@ -8,6 +8,7 @@ let finalize_module
     (llmod:Llvm.llmodule)
     (abi:Llabi.abi)
     (asm_glue:Llasm.asm_glue)
+    (exit_task_glue:Llvm.llvalue)
     : unit =
   let i32 = Llvm.i32_type llctx in
   let crate_ptr = Llvm.declare_global abi.Llabi.crate_ty "rust_crate" llmod in
@@ -37,6 +38,7 @@ let finalize_module
     in
     let activate_glue_off = glue_off asm_glue.Llasm.asm_activate_glue in
     let yield_glue_off = glue_off asm_glue.Llasm.asm_activate_glue in
+    let exit_task_glue_off = glue_off exit_task_glue in
 
     Llvm.const_struct llctx [|
       Llvm.const_int i32 0;             (* ptrdiff_t image_base_off *)
@@ -46,7 +48,7 @@ let finalize_module
       Llvm.const_int i32 0;             (* ptrdiff_t debug_info_off *)
       Llvm.const_int i32 0;             (* size_t debug_info_sz *)
       activate_glue_off;                (* size_t activate_glue_off *)
-      Llvm.const_int i32 0;             (* size_t main_exit_task_glue_off *)
+      exit_task_glue_off;               (* size_t main_exit_task_glue_off *)
       Llvm.const_int i32 0;             (* size_t unwind_glue_off *)
       yield_glue_off;                   (* size_t yield_glue_off *)
       Llvm.const_int i32 rust_fn_count; (* int n_rust_syms *)
