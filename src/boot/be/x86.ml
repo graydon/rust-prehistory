@@ -1191,12 +1191,14 @@ let fn_tail_call
     emit (Il.jmp Il.JMP callee_code);
 ;;
 
+(*
 let loop_info_ty =
   Il.StructTy [| Il.ScalarTy (Il.ValTy word_bits); (* iterator retpc *)
                  Il.ScalarTy (Il.ValTy word_bits); (* iterator esp *)
                  Il.ScalarTy (Il.ValTy word_bits); (* loop esp *)
               |]
 ;;
+*)
 
 let loop_info_field_iterator_retpc = 0;;
 let loop_info_field_iterator_sp = 1;;

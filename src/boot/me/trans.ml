@@ -3033,6 +3033,13 @@ let trans_visitor
     let last_jumps = Array.map trans_arm arms in
     Array.iter patch last_jumps
 
+  and trans_put
+      ((*proto_opt*)_:Ast.proto option)
+      ((*atom_opt*)_:Ast.atom option)
+      : unit =
+    ()
+
+
   and trans_stmt (stmt:Ast.stmt) : unit =
     (* Helper to localize errors by stmt, at minimum. *)
     try
@@ -3295,6 +3302,9 @@ let trans_visitor
               Printf.printf "for-each at depth %d in function of max depth %d\n" depth fn_depth;
               bugi cx stmt.id "for-each not yet implemented"
             end
+
+      | Ast.STMT_put (proto_opt, atom_opt) ->
+          trans_put proto_opt atom_opt
 
       | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt %a"
           Ast.sprintf_stmt stmt
