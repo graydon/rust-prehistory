@@ -1490,7 +1490,7 @@ let trans_visitor
   and trans_spawn
       ((*initializing*)_:bool)
       (dst:Ast.lval)
-      (realm:Ast.realm)
+      (domain:Ast.domain)
       (fn_lval:Ast.lval)
       (args:Ast.atom array)
       : unit =
@@ -1514,8 +1514,8 @@ let trans_visitor
       iflog (fun _ -> annotate "spawn task: copy args");
 
       let new_task = next_vreg_cell Il.voidptr_t in
-        match realm with
-            Ast.REALM_thread ->
+        match domain with
+            Ast.DOMAIN_thread ->
               begin
                 trans_upcall "upcall_new_thread" new_task [| |];
                 copy_fn_args false (CLONE_all new_task) CALL_indirect
@@ -3101,8 +3101,8 @@ let trans_visitor
       | Ast.STMT_send (chan,src) ->
           trans_send chan src
 
-      | Ast.STMT_spawn (dst, realm, plv, args) ->
-          trans_spawn (maybe_init stmt.id "spawn" dst) dst realm plv args
+      | Ast.STMT_spawn (dst, domain, plv, args) ->
+          trans_spawn (maybe_init stmt.id "spawn" dst) dst domain plv args
 
       | Ast.STMT_recv (dst, chan) ->
           trans_recv (maybe_init stmt.id "recv" dst) dst chan
