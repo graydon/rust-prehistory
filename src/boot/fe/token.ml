@@ -79,8 +79,9 @@ type token =
   | AUTO
   | MUTABLE
 
-  (* Module-item qualifiers *)
-  | PUB
+  (* Name management. *)
+  | IMPORT
+  | EXPORT
 
   (* Value / stmt declarators. *)
   | LET
@@ -234,8 +235,9 @@ let rec string_of_tok t =
     | AUTO       -> "auto"
     | MUTABLE    -> "mutable"
 
-    (* Declarator qualifiers *)
-    | PUB        -> "pub"
+    (* Name management *)
+    | IMPORT     -> "import"
+    | EXPORT     -> "export"
 
     (* Value / stmt declarators. *)
     | LET        -> "let"

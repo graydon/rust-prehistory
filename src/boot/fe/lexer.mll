@@ -38,7 +38,8 @@
                 ("mutable", MUTABLE);
                 ("auto", AUTO);
 
-                ("pub", PUB);
+                ("import", IMPORT);
+                ("export", EXPORT);
 
                 ("let", LET);
 
