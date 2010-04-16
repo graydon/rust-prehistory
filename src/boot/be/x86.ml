@@ -459,6 +459,21 @@ let restore_callee_saves (e:Il.emitter) : unit =
 ;;
 
 
+let save_callee_saves_at (e:Il.emitter) (reg:Il.reg) : unit =
+    Il.emit e (Il.umov (word_n reg 0) (ro ebp));
+    Il.emit e (Il.umov (word_n reg 1) (ro edi));
+    Il.emit e (Il.umov (word_n reg 2) (ro esi));
+    Il.emit e (Il.umov (word_n reg 3) (ro ebx));
+;;
+
+let restore_callee_saves_at (e:Il.emitter) (reg:Il.reg) : unit =
+    Il.emit e (Il.umov (rc ebx) (c (word_n reg 0)));
+    Il.emit e (Il.umov (rc esi) (c (word_n reg 1)));
+    Il.emit e (Il.umov (rc edi) (c (word_n reg 2)));
+    Il.emit e (Il.umov (rc ebp) (c (word_n reg 3)));
+;;
+
+
 (* restores registers from the frame base without updating esp:
  *   - sets ebp, edi, esi, ebx to stored values from frame base
  *   - sets `retpc' register to stored retpc from frame base
@@ -1229,6 +1244,7 @@ let put (e:Il.emitter) : unit =
   let (_, tgtc) = vreg e in
   let (_, tmpc1) = vreg e in
   let (_, tmpc2) = vreg e in
+  let (tmp3, tmpc3) = vreg e in
   let retpc_off = Asm.IMM (Int64.sub frame_base_sz word_sz) in
   (* FIXME: are these addresses backwards? *)
   let extra_args_0_off = Asm.IMM (Int64.add (Int64.add frame_base_sz implicit_args_sz) word_sz) in
@@ -1237,12 +1253,11 @@ let put (e:Il.emitter) : unit =
     mov tmpc1 (c (word_at_off (h ebp) extra_args_0_off));          (* tmp1 <- extra_args[0] *)
     sub tgtc (c tmpc1);                                            (* tgt <- tgt - tmp1 *)
     mov tmpc2 (c (word_at_off (h ebp) extra_args_1_off));          (* tmp2 <- extra_args[1]->it_retpc *)
-    (* FIXME: can't do this with push/pop *)
-    restore_callee_saves e;                                        (* ebp <- ... *)
+    mov tmpc3 (ro ebp);                                            (* tmp3 <- ebp *)
     mov (rc esp) (c tmpc2);                                        (* esp <- &extra_args[1]->it_retpc *)
+    restore_callee_saves_at e tmp3;                                (* ebp <- ... *)
     call (c tgtc);                                                 (* call tgt *)
-    (* FIXME: can't do this with push/pop *)
-    save_callee_saves e                                            (* ... <- ebp *)
+    save_callee_saves_at e tmp3                                    (* ... <- ebp *)
 ;;
 
 let activate_glue (e:Il.emitter) : unit =
