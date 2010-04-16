@@ -29,6 +29,13 @@ type call_ctrl =
   | CALL_vtbl
   | CALL_indirect
 
+type foreach_ctrl =
+    {
+      foreach_fixup: fixup;
+      foreach_depth: int;
+    }
+;;
+
 let trans_visitor
     (cx:ctxt)
     (path:Ast.name_component Stack.t)
@@ -124,6 +131,16 @@ let trans_visitor
       : Il.referent_ty =
     call_args_referent_type cx (n_item_ty_params cx id) (fn_ty id) closure
   in
+(*
+  let callable_ty_proto
+      (fty:Ast.ty)
+      : Ast.proto option =
+    match fty with
+        Ast.TY_fn (_, taux) -> taux.Ast.fn_proto
+      | Ast.TY_pred _ -> None
+      | _ -> bug () "expected callable (fn or pred) type"
+  in
+*)
 
   let (fns:node_id Stack.t) = Stack.create () in
   let current_fn () = Stack.top fns in
@@ -2483,7 +2500,7 @@ let trans_visitor
     let (ptr, fn_ty) = trans_callee flv in
     let fn_ty_params = [| |] in
     let cc = call_ctrl flv in
-    let extra_args = call_extra_args flv cc in
+    let extra_args = call_extra_args flv None cc in
       (* FIXME: true if caller is object fn *)
     let caller_is_closure = false in
       log cx "trans_be_fn: %s call to lval %a"
@@ -2491,29 +2508,29 @@ let trans_visitor
       trans_be cc (fun () -> Ast.sprintf_lval () flv)
         ptr fn_ty_params fn_ty caller_is_closure dst_cell args extra_args
 
-  and trans_call_fn
+  and trans_prepare_fn_call
       (initializing:bool)
       (cx:ctxt)
       (dst:Ast.lval)
       (flv:Ast.lval)
       (ty_params:Ast.ty array)
       (args:Ast.atom array)
-      : unit =
+      : Il.operand =
     let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (ptr, fn_ty) = trans_callee flv in
     let cc = call_ctrl flv in
-    let extra_args = call_extra_args flv cc in
+    let extra_args = call_extra_args flv None cc in
       iflog
         begin
           fun _ ->
-            log cx "trans_call_fn: %s call to lval %a"
+            log cx "trans_prepare_fn_call: %s call to lval %a"
               (call_ctrl_string cc) Ast.sprintf_lval flv;
             log cx "lval type: %a" Ast.sprintf_ty fn_ty;
             Array.iteri (fun i t -> log cx "ty param %d = %a"
                            i Ast.sprintf_ty t)
               ty_params;
         end;
-      trans_call initializing cc (fun () -> Ast.sprintf_lval () flv)
+      trans_prepare_call initializing cc (fun () -> Ast.sprintf_lval () flv)
         ptr ty_params fn_ty
         dst_cell args extra_args
 
@@ -2526,16 +2543,19 @@ let trans_visitor
     let fn_ty_params = [| |] in
     let dst_cell = Il.Mem (force_to_mem imm_false) in
       iflog (fun _ -> annotate "predicate call");
-      trans_call
-        true (call_ctrl flv) (fun _ -> Ast.sprintf_lval () flv)
-        ptr fn_ty_params fn_ty
-        dst_cell args [||];
-      iflog (fun _ -> annotate "predicate check/fail");
-      let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
-      let errstr = Printf.sprintf "predicate check: %a"
-        Ast.sprintf_constr constr
+      let fn_ptr =
+        trans_prepare_call
+          true (call_ctrl flv) (fun _ -> Ast.sprintf_lval () flv)
+          ptr fn_ty_params fn_ty
+          dst_cell args [||]
       in
-        trans_cond_fail errstr jmp
+        call_code (code_of_operand fn_ptr);
+        iflog (fun _ -> annotate "predicate check/fail");
+        let jmp = trans_compare Il.JE (Il.Cell dst_cell) imm_true in
+        let errstr = Printf.sprintf "predicate check: %a"
+          Ast.sprintf_constr constr
+        in
+          trans_cond_fail errstr jmp
 
   and trans_init_closure
       (closure_cell:Il.cell)
@@ -2890,21 +2910,37 @@ let trans_visitor
       | CALL_indirect -> "indirect"
       | CALL_vtbl -> "vtbl"
 
+  and iterator_extra_args
+      (fco:foreach_ctrl option)
+      : Il.operand array =
+    match fco with
+        None -> [| |]
+      | Some fc ->
+          abi.Abi.abi_iterator_extra_args fc.foreach_fixup fc.foreach_depth
+
   and call_extra_args
       (flv:Ast.lval)
+      (fc:foreach_ctrl option)
       (cc:call_ctrl)
       : Il.operand array =
-    match cc with
-        CALL_direct -> [| |]
-      | CALL_indirect -> [| callee_binding_ptr flv cc |]
-      | CALL_vtbl ->
-          match flv with
-              (* 
-               * FIXME: will need to pass both words of obj if we add
-               * a 'self' value for self-dispatch within objs.
-               *)
-              Ast.LVAL_ext (base, _) -> [| callee_binding_ptr base cc |]
-            | _ -> bug (lval_base_id flv) "call_extra_args on obj-fn without base obj"
+    let binding_extra_args =
+      begin
+        match cc with
+            CALL_direct -> [| |]
+          | CALL_indirect -> [| callee_binding_ptr flv cc |]
+          | CALL_vtbl ->
+              begin
+                match flv with
+                    (* 
+                     * FIXME: will need to pass both words of obj if we add
+                     * a 'self' value for self-dispatch within objs.
+                     *)
+                    Ast.LVAL_ext (base, _) -> [| callee_binding_ptr base cc |]
+                  | _ -> bug (lval_base_id flv) "call_extra_args on obj-fn without base obj"
+              end
+      end
+    in
+      Array.append (iterator_extra_args fc) binding_extra_args
 
   and trans_be
       (cc:call_ctrl)
@@ -2949,7 +2985,7 @@ let trans_visitor
         (force_sz (current_fn_callsz())) caller_argsz callee_code callee_argsz;
 
 
-  and trans_call
+  and trans_prepare_call
       ((*initializing*)_:bool)
       (cc:call_ctrl)
       (logname:(unit -> string))
@@ -2961,7 +2997,7 @@ let trans_visitor
       (caller_output_cell:Il.cell)
       (caller_arg_atoms:Ast.atom array)
       (caller_extra_args:Il.operand array)
-      : unit =
+      : Il.operand =
 
     let callee_fptr = callee_fn_ptr callee_ptr cc in
       iflog (fun _ -> annotate
@@ -2978,7 +3014,7 @@ let trans_visitor
        * initializing, overwrite the slot; this is ok if we're writing
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
-      call_code (code_of_operand callee_fptr)
+      callee_fptr
 
   (* FIXME: eliminate this, it duplicates logic elsewhere. *)
   and arg_tup_cell
@@ -3069,6 +3105,17 @@ let trans_visitor
       trans_init_slot_from_atom
         CLONE_none dst_cell dst_slot at
 
+  and trans_foreach_body
+      (depth:int)
+      (it_ptr_reg:Il.reg)
+      (body:Ast.block)
+      : unit =
+    begin
+      abi.Abi.abi_emit_iteration_prologue (emitter ()) depth;
+      trans_block body;
+      abi.Abi.abi_emit_iteration_epilogue (emitter ()) depth it_ptr_reg;
+    end
+
   and trans_stmt_full (stmt:Ast.stmt) : unit =
     match stmt.node with
 
@@ -3143,7 +3190,10 @@ let trans_visitor
               match ty with
                   Ast.TY_fn _
                 | Ast.TY_pred _ ->
-                    trans_call_fn init cx dst flv ty_params args
+                    let fn_ptr =
+                      trans_prepare_fn_call init cx dst flv ty_params args
+                    in
+                      call_code (code_of_operand fn_ptr)
                 | _ -> bug () "Calling unexpected lval."
           end
 
@@ -3309,12 +3359,40 @@ let trans_visitor
 
       | Ast.STMT_decl _ -> ()
 
-      | Ast.STMT_foreach _ ->
+      | Ast.STMT_foreach fe ->
+          let (dst_slot, dst_id) = fe.Ast.foreach_slot in
+          let dst =
+            Ast.LVAL_base { id = dst_slot.id;
+                            node = Ast.BASE_ident dst_id }
+          in
+          let (flv, args) = fe.Ast.foreach_call in
+          let ty_params =
+            match htab_search cx.ctxt_call_lval_params (lval_base_id flv) with
+                Some params -> params
+              | None -> [| |]
+          in
           let depth = Hashtbl.find cx.ctxt_loop_depths stmt.id in
           let fn_depth = Hashtbl.find cx.ctxt_fn_loop_depths (current_fn ()) in
+          let body_fixup = new_fixup "foreach loop body" in
+          let it_ptr_reg = next_vreg () in
+          let it_ptr_cell = Il.Reg (it_ptr_reg, Il.AddrTy Il.CodeTy) in
             begin
-              Printf.printf "for-each at depth %d in function of max depth %d\n" depth fn_depth;
-              bugi cx stmt.id "for-each not yet implemented"
+              iflog (fun _ ->
+                       log cx "for-each at depth %d in fn of depth %d\n" depth fn_depth);
+              let fn_ptr = trans_prepare_fn_call true cx dst flv ty_params args in
+                
+                mov it_ptr_cell fn_ptr;                                      (* p <- &fn *)
+                abi.Abi.abi_emit_loop_prologue (emitter ()) depth;           (* save stack pointer *)
+                let jmp = mark () in
+                  emit (Il.jmp Il.JMP Il.CodeNone);                          (* jump L2 *)
+
+                  emit (Il.Enter body_fixup);                                (* L1: *)
+                  trans_foreach_body depth it_ptr_reg fe.Ast.foreach_body;   (* loop body *)
+                  patch jmp;                                                 (* L2: *)
+                  call_code (code_of_operand (Il.Cell it_ptr_cell));         (* call p *)
+                  emit Il.Leave;
+
+                  abi.Abi.abi_emit_loop_epilogue (emitter ()) depth;         (* restore stack pointer *)
             end
 
       | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt %a"

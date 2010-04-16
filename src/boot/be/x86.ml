@@ -1231,10 +1231,23 @@ let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
 
 let iterator_epilogue ((*e*)_:Il.emitter) ((*proto*)_:Ast.proto) : unit = ();;
 
-let iteration_prologue ((*e*)_:Il.emitter) : unit = ();;
-let iteration_epilogue ((*e*)_:Il.emitter) : unit = ();;
-let loop_prologue ((*e*)_:Il.emitter) : unit = ();;
-let loop_epilogue ((*e*)_:Il.emitter) : unit = ();;
+let iteration_prologue
+    ((*e*)_:Il.emitter)
+    ((*depth*)_:int)
+    : unit =
+  ()
+;;
+
+let iteration_epilogue
+    ((*e*)_:Il.emitter)
+    ((*depth*)_:int)
+    ((*it_ptr_reg*)_:Il.reg)
+    : unit =
+  ()
+;;
+
+let loop_prologue ((*e*)_:Il.emitter) ((*depth*)_:int) : unit = ();;
+let loop_epilogue ((*e*)_:Il.emitter) ((*depth*)_:int) : unit = ();;
 
 let put (e:Il.emitter) : unit =
   let emit = Il.emit e in
@@ -1259,6 +1272,13 @@ let put (e:Il.emitter) : unit =
     restore_callee_saves_at e tmp3;                                (* ebp <- ... *)
     call (c tgtc);                                                 (* call tgt *)
     save_callee_saves_at e tmp3                                    (* ... <- ebp *)
+;;
+
+let iterator_extra_args
+    ((*foreach_loop*)_:Common.fixup)
+    ((*depth*)_:int)
+    : Il.operand array =
+  [| |]
 ;;
 
 let activate_glue (e:Il.emitter) : unit =
@@ -1443,6 +1463,7 @@ let (abi:Abi.abi) =
     Abi.abi_emit_loop_prologue = loop_prologue;
     Abi.abi_emit_loop_epilogue = loop_epilogue;
     Abi.abi_emit_put = put;
+    Abi.abi_iterator_extra_args = iterator_extra_args;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_native_call = emit_native_call;
