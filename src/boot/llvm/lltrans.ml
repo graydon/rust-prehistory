@@ -496,7 +496,7 @@ let trans_crate
 
     try
       let crate' = crate.node in
-      let items = crate'.Ast.crate_items in
+      let items = snd (crate'.Ast.crate_items) in
         Hashtbl.iter declare_mod_item items;
         Hashtbl.iter trans_mod_item items;
         Llfinal.finalize_module llctx llmod abi asm_glue exit_task_glue;
