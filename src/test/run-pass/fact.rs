@@ -2,7 +2,7 @@
 
 fn f(int x) -> int {
   // log "in f:";
-  // log x;
+  log x;
   if (x == 1) {
     // log "bottoming out";
     ret 1;
@@ -10,7 +10,7 @@ fn f(int x) -> int {
     // log "recurring";
     let int y = x * f(x-1);
     // log "returned";
-    // log y;
+    log y;
     ret y;
   }
 }

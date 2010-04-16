@@ -4,12 +4,24 @@
 
 open Common;;
 
+
+let log cx = Session.log "trans"
+  cx.Semant.ctxt_sess.Session.sess_log_trans
+  cx.Semant.ctxt_sess.Session.sess_log_out
+;;
+
 let trans_crate
     (sem_cx:Semant.ctxt)
     (llctx:Llvm.llcontext)
     (sess:Session.sess)
     (crate:Ast.crate)
     : Llvm.llmodule =
+
+  let iflog thunk =
+    if sess.Session.sess_log_trans
+    then thunk ()
+    else ()
+  in
 
   (* Helpers for adding metadata. *)
   let (dbg_mdkind:int) = Llvm.mdkind_id llctx "dbg" in
@@ -67,6 +79,35 @@ let trans_crate
 
   let asm_glue = Llasm.get_glue llctx llmod abi sess in
 
+  let llty_str llty =
+    Llvm.string_of_lltype llty
+  in
+
+  let llval_str llv =
+    let ts = llty_str (Llvm.type_of llv) in
+      match Llvm.value_name llv with
+          "" ->
+            Printf.sprintf "<anon=%s>" ts
+        | s -> Printf.sprintf "<%s=%s>" s ts
+  in
+
+  let llvals_str llvals =
+    (String.concat ", "
+       (Array.to_list
+          (Array.map llval_str llvals)))
+  in
+
+  let build_call callee args rvid builder =
+    iflog
+      begin
+        fun _ ->
+          let name = Llvm.value_name callee in
+          log sem_cx "build_call: %s(%s)" name (llvals_str args);
+          log sem_cx "build_call: typeof(%s) = %s" name (llty_str (Llvm.type_of callee))
+      end;
+    Llvm.build_call callee args rvid builder
+  in
+
   let extern_upcalls = Hashtbl.create 0 in
   let trans_upcall
       (llbuilder:Llvm.llbuilder)
@@ -103,12 +144,12 @@ let trans_crate
     let llupcall = Llvm.const_pointercast llupcall word_ty in
     let llargs =
       Array.map
-        (fun arg -> Llvm.const_pointercast arg word_ty)
+        (fun arg -> Llvm.build_bitcast arg word_ty (anon_llid "arg") llbuilder)
         llargs
     in
     let llallargs = Array.append [| lltask; llupcall |] llargs in
     let llid = anon_llid "rv" in
-    let llrv = Llvm.build_call llglue llallargs llid llbuilder in
+    let llrv = build_call llglue llallargs llid llbuilder in
       Llvm.set_instruction_call_conv Llvm.CallConv.c llrv;
       match lldest with
           None -> ()
@@ -141,9 +182,14 @@ let trans_crate
       | Ast.TY_fn
           ({ Ast.sig_input_slots = ins; Ast.sig_output_slot = out }, _) ->
           let llout = trans_slot None out in
+          let lloutptr =
+            if Semant.slot_ty out = Ast.TY_nil
+            then word_ty
+            else Llvm.pointer_type llout
+          in
           let lltaskty = Llvm.pointer_type abi.Llabi.task_ty in
           let llins = Array.map (trans_slot None) ins in
-            Llvm.function_type llout (Array.append [| lltaskty |] llins)
+            fn_ty void_ty (Array.append [| lloutptr; lltaskty |] llins)
       | Ast.TY_constrained (ty', _) -> trans_ty ty'
       | Ast.TY_tup _ | Ast.TY_vec _ | Ast.TY_rec _ | Ast.TY_tag _
       | Ast.TY_iso _ | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _
@@ -203,7 +249,7 @@ let trans_crate
                   const_i1 1;  (* flag: defined in compile unit? *)
                 |]
             in
-              Llvm.set_function_call_conv Llvm.CallConv.fast llfn;
+              Llvm.set_function_call_conv Llvm.CallConv.c llfn;
               Hashtbl.add llitems id llfn;
 
               (* FIXME: Adding metadata does not work yet. . *)
@@ -221,7 +267,8 @@ let trans_crate
       (fn_id:node_id)
       : unit =
     let llfn = Hashtbl.find llitems fn_id in
-    let lltask = Llvm.param llfn 0 in
+    let lloutptr = Llvm.param llfn 0 in
+    let lltask = Llvm.param llfn 1 in
 
     (* LLVM requires that functions be grouped into basic blocks terminated by
      * terminator instructions, while our AST is less strict. So we have to do
@@ -234,12 +281,6 @@ let trans_crate
       (llblock, llbuilder)
     in
 
-    let build_ret llatom : (Llvm.llbuilder -> Llvm.llvalue) =
-      if (Llvm.type_of llatom) == (Llvm.void_type llctx)
-      then Llvm.build_ret_void
-      else Llvm.build_ret llatom
-    in
-
     (* Build up the slot-to-llvalue mapping, allocating space along the way. *)
     let slot_to_llvalue = Hashtbl.create 0 in
     let (_, llinitbuilder) = new_block None "init" in
@@ -247,9 +288,9 @@ let trans_crate
     (* Allocate space for arguments (needed because arguments are lvalues in
      * Rust), and store them in the slot-to-llvalue mapping. *)
     let build_arg idx llargval =
-      if idx != 0
+      if idx > 1
       then
-        let ({ id = id }, ident) = header_slots.(idx - 1) in
+        let ({ id = id }, ident) = header_slots.(idx - 2) in
         Llvm.set_value_name ident llargval;
         let llarg =
           let llty = Llvm.type_of llargval in
@@ -309,6 +350,7 @@ let trans_crate
 
       (* Translates an lval by reference into the appropriate pointer value. *)
       let trans_lval (lval:Ast.lval) : Llvm.llvalue =
+        iflog (fun _ -> log sem_cx "trans_lval: %a" Ast.sprintf_lval lval);
         match lval with
             Ast.LVAL_base { id = base_id } ->
               let id =
@@ -325,6 +367,7 @@ let trans_crate
       in
 
       let trans_atom (atom:Ast.atom) : Llvm.llvalue =
+        iflog (fun _ -> log sem_cx "trans_atom: %a" Ast.sprintf_atom atom);
         match atom with
             Ast.ATOM_literal { node = lit } -> trans_literal lit
           | Ast.ATOM_lval lval ->
@@ -367,15 +410,31 @@ let trans_crate
       let trans_unary_expr _ = bogus in (* TODO *)
 
       let trans_expr (expr:Ast.expr) : Llvm.llvalue =
+        iflog (fun _ -> log sem_cx "trans_expr: %a" Ast.sprintf_expr expr);
         match expr with
             Ast.EXPR_binary binexp -> trans_binary_expr binexp
           | Ast.EXPR_unary unexp -> trans_unary_expr unexp
           | Ast.EXPR_atom atom -> trans_atom atom
       in
 
+      let upcall name lldest llargs =
+        trans_upcall llbuilder lltask name lldest llargs
+      in
+
+      let trans_log_str (atom:Ast.atom) : unit =
+        upcall "upcall_log_str" None [| trans_atom atom |]
+      in
+
+      let trans_log_int (atom:Ast.atom) : unit =
+        upcall "upcall_log_int" None [| trans_atom atom |]
+      in
+
       match stmts with
           [] -> terminate llbuilder
-        | { node = head }::tail ->
+        | head::tail ->
+
+            iflog (fun _ -> log sem_cx "trans_stmt: %a" Ast.sprintf_stmt head);
+
             let trans_tail_with_builder llbuilder' : unit =
               trans_stmts id_opt llbuilder' tail terminate
             in
@@ -386,46 +445,64 @@ let trans_crate
               llblock
             in
 
-            match head with
+            match head.node with
                 Ast.STMT_copy (dest, src) ->
                   let llsrc = trans_expr src in
                   let lldest = trans_lval dest in
                   ignore (Llvm.build_store llsrc lldest llbuilder);
                   trans_tail ()
+
               | Ast.STMT_call (dest, fn, args) ->
                   let llargs = Array.map trans_atom args in
-                  let llallargs = Array.append [| lltask |] llargs in
-                  let llfn = trans_lval fn in
                   let lldest = trans_lval dest in
-                  let llid = anon_llid "rv" in
-                  let llrv = Llvm.build_call llfn llallargs llid llbuilder in
-                  Llvm.set_instruction_call_conv Llvm.CallConv.fast llrv;
-                  ignore (Llvm.build_store llrv lldest llbuilder);
-                  trans_tail ()
-              | Ast.STMT_if {
-                  Ast.if_test = test;
-                  Ast.if_then = if_then;
-                  Ast.if_else = else_opt
-                } ->
-                  let llexpr = trans_expr test in
+                  let llfn = trans_lval fn in
+                  let llallargs = Array.append [| lldest; lltask |] llargs in
+                  let llrv = build_call llfn llallargs "" llbuilder in
+                    Llvm.set_instruction_call_conv Llvm.CallConv.c llrv;
+                    trans_tail ()
+
+              | Ast.STMT_if sif ->
+                  let llexpr = trans_expr sif.Ast.if_test in
                   let llnext = trans_tail_in_new_block () in
                   let branch_to_next llbuilder' =
                     ignore (Llvm.build_br llnext llbuilder')
                   in
-                  let llthen = trans_block if_then branch_to_next in
+                  let llthen = trans_block sif.Ast.if_then branch_to_next in
                   let llelse =
-                    match else_opt with
+                    match sif.Ast.if_else with
                         None -> llnext
                       | Some if_else -> trans_block if_else branch_to_next
                   in
                   ignore (Llvm.build_cond_br llexpr llthen llelse llbuilder)
+
               | Ast.STMT_ret (_, atom_opt) ->
-                  let llatom =
+                  begin
                     match atom_opt with
-                        None -> nil
-                      | Some atom -> trans_atom atom
-                  in
-                  ignore (build_ret llatom llbuilder)
+                        None -> ()
+                      | Some atom ->
+                          ignore (Llvm.build_store (trans_atom atom) lloutptr llbuilder)
+                  end;
+                  ignore (Llvm.build_ret_void llbuilder)
+
+              | Ast.STMT_log a ->
+                  begin
+                    match Semant.atom_type sem_cx a with
+                        (* NB: If you extend this, be sure to update the typechecking
+                         * code in type.ml as well. *)
+                        Ast.TY_str -> trans_log_str a
+                      | Ast.TY_int -> trans_log_int a
+                      | Ast.TY_bool -> trans_log_int a
+                      | Ast.TY_char -> trans_log_int a
+                      | Ast.TY_mach (TY_u8) -> trans_log_int a
+                      | Ast.TY_mach (TY_u16) -> trans_log_int a
+                      | Ast.TY_mach (TY_u32) -> trans_log_int a
+                      | Ast.TY_mach (TY_s8) -> trans_log_int a
+                      | Ast.TY_mach (TY_s16) -> trans_log_int a
+                      | Ast.TY_mach (TY_s32) -> trans_log_int a
+                      | _ -> Semant.bugi sem_cx head.id "unimplemented logging type"
+                  end;
+                  trans_tail ()
+
               | _ -> trans_stmts id_opt llbuilder tail terminate
 
     (* Translates an AST block to one or more LLVM basic blocks and returns the
@@ -443,10 +520,7 @@ let trans_crate
     (* "Falling off the end" of a function needs to turn into an explicit
      * return instruction. *)
     let default_terminate llbuilder =
-      let llfnty =
-        Llvm.element_type (Llvm.type_of (Hashtbl.find llitems fn_id))
-      in
-      ignore (build_ret (Llvm.undef (Llvm.return_type llfnty)) llbuilder)
+      ignore (Llvm.build_ret_void llbuilder)
     in
 
     (* Build up the first body block, and link it to the end of the
