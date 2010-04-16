@@ -459,11 +459,12 @@ let restore_callee_saves (e:Il.emitter) : unit =
 ;;
 
 
+(* FIXME: check the order here *)
 let save_callee_saves_at (e:Il.emitter) (reg:Il.reg) : unit =
-    Il.emit e (Il.umov (word_n reg 0) (ro ebp));
-    Il.emit e (Il.umov (word_n reg 1) (ro edi));
-    Il.emit e (Il.umov (word_n reg 2) (ro esi));
-    Il.emit e (Il.umov (word_n reg 3) (ro ebx));
+    Il.emit e (Il.umov (word_n reg 3) (ro ebp));
+    Il.emit e (Il.umov (word_n reg 2) (ro edi));
+    Il.emit e (Il.umov (word_n reg 1) (ro esi));
+    Il.emit e (Il.umov (word_n reg 0) (ro ebx));
 ;;
 
 let restore_callee_saves_at (e:Il.emitter) (reg:Il.reg) : unit =
