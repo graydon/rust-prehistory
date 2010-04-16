@@ -131,16 +131,6 @@ let trans_visitor
       : Il.referent_ty =
     call_args_referent_type cx (n_item_ty_params cx id) (fn_ty id) closure
   in
-(*
-  let callable_ty_proto
-      (fty:Ast.ty)
-      : Ast.proto option =
-    match fty with
-        Ast.TY_fn (_, taux) -> taux.Ast.fn_proto
-      | Ast.TY_pred _ -> None
-      | _ -> bug () "expected callable (fn or pred) type"
-  in
-*)
 
   let (fns:node_id Stack.t) = Stack.create () in
   let current_fn () = Stack.top fns in
