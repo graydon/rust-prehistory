@@ -1213,6 +1213,14 @@ let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
     mov (edx_n loop_info_field_iterator_sp) (ro esp)               (* extra_args[1] <- esp *)
 ;;
 
+let iterator_epilogue ((*e*)_:Il.emitter) ((*proto*)_:Ast.proto) : unit = ();;
+
+let iteration_prologue ((*e*)_:Il.emitter) : unit = ();;
+let iteration_epilogue ((*e*)_:Il.emitter) : unit = ();;
+let loop_prologue ((*e*)_:Il.emitter) : unit = ();;
+let loop_epilogue ((*e*)_:Il.emitter) : unit = ();;
+let put ((*e*)_:Il.emitter) : unit = ();;
+
 let activate_glue (e:Il.emitter) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
@@ -1389,6 +1397,12 @@ let (abi:Abi.abi) =
     Abi.abi_emit_fn_epilogue = fn_epilogue;
     Abi.abi_emit_fn_tail_call = fn_tail_call;
     Abi.abi_emit_iterator_prologue = iterator_prologue;
+    Abi.abi_emit_iterator_epilogue = iterator_epilogue;
+    Abi.abi_emit_iteration_prologue = iteration_prologue;
+    Abi.abi_emit_iteration_epilogue = iteration_epilogue;
+    Abi.abi_emit_loop_prologue = loop_prologue;
+    Abi.abi_emit_loop_epilogue = loop_epilogue;
+    Abi.abi_emit_put = put;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_native_call = emit_native_call;

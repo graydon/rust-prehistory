@@ -3033,13 +3033,6 @@ let trans_visitor
     let last_jumps = Array.map trans_arm arms in
     Array.iter patch last_jumps
 
-  and trans_put
-      ((*proto_opt*)_:Ast.proto option)
-      ((*atom_opt*)_:Ast.atom option)
-      : unit =
-    ()
-
-
   and trans_stmt (stmt:Ast.stmt) : unit =
     (* Helper to localize errors by stmt, at minimum. *)
     try
@@ -3063,6 +3056,18 @@ let trans_visitor
            annotate (Printf.sprintf "%s on dst lval %a"
                        act Ast.sprintf_lval dst));
       b
+
+  and trans_set_outptr (at:Ast.atom) : unit =
+    let (dst_mem, _) =
+      need_mem_cell
+        (deref (wordptr_at (fp_imm out_mem_disp)))
+    in
+    let atom_ty = atom_type cx at in
+    let dst_slot = interior_slot atom_ty in
+    let dst_ty = referent_type abi atom_ty in
+    let dst_cell = Il.Mem (dst_mem, dst_ty) in
+      trans_init_slot_from_atom
+        CLONE_none dst_cell dst_slot at
 
   and trans_stmt_full (stmt:Ast.stmt) : unit =
     match stmt.node with
@@ -3246,21 +3251,12 @@ let trans_visitor
                   begin
                     match atom_opt with
                         None -> ()
-                      | Some at ->
-                          let (dst_mem, _) =
-                            need_mem_cell
-                              (deref (wordptr_at (fp_imm out_mem_disp)))
-                          in
-                          let atom_ty = atom_type cx at in
-                          let dst_slot = interior_slot atom_ty in
-                          let dst_ty = referent_type abi atom_ty in
-                          let dst_cell = Il.Mem (dst_mem, dst_ty) in
-                            trans_init_slot_from_atom
-                              CLONE_none dst_cell dst_slot at
+                      | Some at -> trans_set_outptr at
                   end;
                   Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;
                 emit (Il.jmp Il.JMP Il.CodeNone)
+            (* FIXME: implement this for iterators *)
             | Some _ -> ()
           end
 
@@ -3291,6 +3287,23 @@ let trans_visitor
                     Ast.sprintf_stmt stmt
           end
 
+      | Ast.STMT_put (proto_opt, atom_opt) ->
+          begin
+            match proto_opt with
+                None ->
+                  begin
+                    begin
+                      match atom_opt with
+                          None -> ()
+                        | Some at -> trans_set_outptr at
+                    end;
+                    abi.Abi.abi_emit_put (emitter ())
+                  end
+              | Some _ ->
+                  bugi cx stmt.id "put{?,!,*,+} unhandled in trans_stmt %a"
+                    Ast.sprintf_stmt stmt
+          end
+
       | Ast.STMT_alt_tag stmt_alt_tag -> trans_alt_tag stmt_alt_tag
 
       | Ast.STMT_decl _ -> ()
@@ -3302,9 +3315,6 @@ let trans_visitor
               Printf.printf "for-each at depth %d in function of max depth %d\n" depth fn_depth;
               bugi cx stmt.id "for-each not yet implemented"
             end
-
-      | Ast.STMT_put (proto_opt, atom_opt) ->
-          trans_put proto_opt atom_opt
 
       | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt %a"
           Ast.sprintf_stmt stmt

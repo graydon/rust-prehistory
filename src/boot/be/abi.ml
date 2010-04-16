@@ -82,6 +82,12 @@ type abi =
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_fn_tail_call: (Il.emitter -> int64 -> int64 -> Il.code -> int64 -> unit);
     abi_emit_iterator_prologue: (Il.emitter -> Ast.proto -> unit);
+    abi_emit_iterator_epilogue: (Il.emitter -> Ast.proto -> unit);
+    abi_emit_iteration_prologue: (Il.emitter -> unit);
+    abi_emit_iteration_epilogue: (Il.emitter -> unit);
+    abi_emit_loop_prologue: (Il.emitter -> unit);
+    abi_emit_loop_epilogue: (Il.emitter -> unit);
+    abi_emit_put: (Il.emitter -> unit);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 
