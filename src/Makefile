@@ -296,10 +296,10 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
 TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       basic.rs bind-thunk.rs bind-trivial.rs char.rs comm.rs \
                       complex.rs dead-code-one-arm-if.rs deep.rs div-mod.rs \
-                      drop-on-ret.rs exterior.rs fact.rs foreach-simple.rs \
+                      drop-on-ret.rs exterior.rs foreach-simple.rs \
                       simple-obj.rs fun-call-variants.rs \
                       fun-indirect-call.rs generic-fn.rs hello.rs \
-                      inner-module.rs int.rs large-records.rs lazychan.rs \
+                      inner-module.rs large-records.rs lazychan.rs \
                       linear-for-loop.rs many.rs mlist.rs mlist_cycle.rs \
                       mutual-recursion-group.rs native.rc native.rs \
                       native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \

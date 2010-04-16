@@ -37,7 +37,7 @@ let finalize_module
         Llvm.const_sub addr crate_addr
     in
     let activate_glue_off = glue_off asm_glue.Llasm.asm_activate_glue in
-    let yield_glue_off = glue_off asm_glue.Llasm.asm_activate_glue in
+    let yield_glue_off = glue_off asm_glue.Llasm.asm_yield_glue in
     let exit_task_glue_off = glue_off exit_task_glue in
 
     Llvm.const_struct llctx [|
