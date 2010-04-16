@@ -287,8 +287,9 @@ let trans_crate
 
     (* Allocate space for arguments (needed because arguments are lvalues in
      * Rust), and store them in the slot-to-llvalue mapping. *)
+    let n_implicit_args = 2 in
     let build_arg idx llargval =
-      if idx > 1
+      if idx >= n_implicit_args
       then
         let ({ id = id }, ident) = header_slots.(idx - 2) in
         Llvm.set_value_name ident llargval;
