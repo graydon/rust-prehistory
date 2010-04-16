@@ -3256,8 +3256,9 @@ let trans_visitor
                   Stack.push (mark()) (Stack.top epilogue_jumps);
                 end;
                 emit (Il.jmp Il.JMP Il.CodeNone)
-            (* FIXME: implement this for iterators *)
-            | Some _ -> ()
+            | Some _ ->
+                bugi cx stmt.id "ret{?,!,*,+} unhandled in trans_stmt %a"
+                  Ast.sprintf_stmt stmt
           end
 
       | Ast.STMT_be (proto_opt, flv, args) ->

@@ -1219,7 +1219,31 @@ let iteration_prologue ((*e*)_:Il.emitter) : unit = ();;
 let iteration_epilogue ((*e*)_:Il.emitter) : unit = ();;
 let loop_prologue ((*e*)_:Il.emitter) : unit = ();;
 let loop_epilogue ((*e*)_:Il.emitter) : unit = ();;
-let put ((*e*)_:Il.emitter) : unit = ();;
+
+let put (e:Il.emitter) : unit =
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let binary op dst src = emit (Il.binary op dst (c dst) src) in
+  let sub = binary Il.SUB in
+  let call src = emit (Il.call (Il.next_vreg_cell e Il.voidptr_t) (Il.CodePtr src)) in
+  let (_, tgtc) = vreg e in
+  let (_, tmpc1) = vreg e in
+  let (_, tmpc2) = vreg e in
+  let retpc_off = Asm.IMM (Int64.sub frame_base_sz word_sz) in
+  (* FIXME: are these addresses backwards? *)
+  let extra_args_0_off = Asm.IMM (Int64.add (Int64.add frame_base_sz implicit_args_sz) word_sz) in
+  let extra_args_1_off = Asm.IMM (Int64.add frame_base_sz implicit_args_sz) in
+    mov tgtc (c (word_at_off (h ebp) retpc_off));                  (* tgt <- *retpc *)
+    mov tmpc1 (c (word_at_off (h ebp) extra_args_0_off));          (* tmp1 <- extra_args[0] *)
+    sub tgtc (c tmpc1);                                            (* tgt <- tgt - tmp1 *)
+    mov tmpc2 (c (word_at_off (h ebp) extra_args_1_off));          (* tmp2 <- extra_args[1]->it_retpc *)
+    (* FIXME: can't do this with push/pop *)
+    restore_callee_saves e;                                        (* ebp <- ... *)
+    mov (rc esp) (c tmpc2);                                        (* esp <- &extra_args[1]->it_retpc *)
+    call (c tgtc);                                                 (* call tgt *)
+    (* FIXME: can't do this with push/pop *)
+    save_callee_saves e                                            (* ... <- ebp *)
+;;
 
 let activate_glue (e:Il.emitter) : unit =
   (*
