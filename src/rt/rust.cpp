@@ -59,7 +59,7 @@ static uint32_t const LOG_MEM =        0x2;
 static uint32_t const LOG_COMM =       0x4;
 static uint32_t const LOG_TASK =       0x8;
 static uint32_t const LOG_UPCALL =    0x10;
-static uint32_t const LOG_RT =        0x20;
+static uint32_t const LOG_DOM =       0x20;
 static uint32_t const LOG_ULOG =      0x40;
 static uint32_t const LOG_TRACE =     0x80;
 static uint32_t const LOG_DWARF =    0x100;
@@ -96,7 +96,7 @@ get_logbits()
         if (strstr(c, "up"))
             bits |= LOG_UPCALL;
         if (strstr(c, "dom"))
-            bits |= LOG_RT;
+            bits |= LOG_DOM;
         if (strstr(c, "ulog"))
             bits |= LOG_ULOG;
         if (strstr(c, "trace"))
@@ -340,7 +340,7 @@ crate_rel(rust_crate const *crate, T const *t) {
 
 struct rust_dom {
     // NB: the root crate must remain in memory until the root of the
-    // tree of runtimes exits. All runtimes within this tree have a
+    // tree of domains exits. All domains within this tree have a
     // copy of this root_crate value and use it for finding utility
     // glue.
     rust_crate const *root_crate;
@@ -1329,7 +1329,7 @@ typedef ptr_vec<rust_alarm> rust_wait_queue;
  *      may recursively call into the GC graph, that's for the mark
  *      glue to decide).
  *
- *    - The task then asks its runtime for its gc_alloc_chain.
+ *    - The task then asks its domain for its gc_alloc_chain.
  *
  *    - The task calls
  *
@@ -2510,7 +2510,7 @@ rust_task::unblock()
         wakeup(cond);
 }
 
-// Runtime
+// Domains
 
 static void
 del_all_tasks(rust_dom *dom, ptr_vec<rust_task> *v) {
@@ -2612,7 +2612,7 @@ rust_dom::logptr(char const *msg, T* ptrval) {
 
 void
 rust_dom::fail() {
-    log(LOG_RT, "runtime 0x%" PRIxPTR " root task failed", this);
+    log(LOG_DOM, "domain 0x%" PRIxPTR " root task failed", this);
     I(this, rval == 0);
     rval = 1;
 }
@@ -2732,7 +2732,7 @@ rust_dom::sched()
         i %= running_tasks.length();
         return (rust_task *)running_tasks[i];
     }
-    log(LOG_RT|LOG_TASK,
+    log(LOG_DOM|LOG_TASK,
         "no schedulable tasks");
     return NULL;
 }
@@ -3242,7 +3242,7 @@ static DWORD WINAPI rust_thread_start(void *ptr)
 #error "Platform not supported"
 #endif
 {
-    // We were handed the runtime we are supposed to run.
+    // We were handed the domain we are supposed to run.
     rust_dom *dom = (rust_dom *)ptr;
 
     // Start a new rust main loop for this thread.
@@ -3337,7 +3337,7 @@ rust_main_loop(rust_dom *dom)
     int rval;
     rust_task *task;
 
-    dom->log(LOG_RT, "control is in rust runtime library");
+    dom->log(LOG_DOM, "running main-loop on domain 0x%" PRIxPTR, dom);
     dom->logptr("main exit-task glue",
                 dom->root_crate->get_main_exit_task_glue());
 
@@ -3362,7 +3362,7 @@ rust_main_loop(rust_dom *dom)
         dom->reap_dead_tasks();
     }
 
-    dom->log(LOG_RT, "finished main loop (dom.rval = %d)", dom->rval);
+    dom->log(LOG_DOM, "finished main-loop (dom.rval = %d)", dom->rval);
     rval = dom->rval;
 
     return rval;
@@ -3387,7 +3387,7 @@ rust_srv::~rust_srv()
 void
 rust_srv::log(char const *str)
 {
-    printf("dom: %s\n", str);
+    printf("rt: %s\n", str);
 }
 
 void *
