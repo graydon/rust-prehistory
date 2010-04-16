@@ -418,7 +418,7 @@ and mod_item' =
     MOD_ITEM_type of ty
   | MOD_ITEM_tag of (header_tup * ty_tag * node_id)
   | MOD_ITEM_pred of pred
-  | MOD_ITEM_mod of mod_items
+  | MOD_ITEM_mod of (mod_view * mod_items)
   | MOD_ITEM_fn of fn
   | MOD_ITEM_obj of obj
 
@@ -431,9 +431,26 @@ and mod_item_decl =
 and mod_item = mod_item_decl identified
 and mod_items = (ident, mod_item) Hashtbl.t
 
+and import =
+    {
+      import_from: name;
+      import_item: ident;
+      import_as: ident;
+    }
+
+and export =
+    EXPORT_all_decls
+  | EXPORT_ident of ident
+
+and mod_view =
+    {
+      view_imports: import list;
+      view_exports: export list;
+    }
+
 and crate' =
     {
-      crate_items: mod_items;
+      crate_items: (mod_view * mod_items);
       crate_required: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;
@@ -1194,12 +1211,13 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
             fmt_stmts ff p.pred_body.node;
             fmt_cbb ff
 
-        | MOD_ITEM_mod items ->
+        | MOD_ITEM_mod (view,items) ->
             fmt_obox ff;
             fmt ff "mod ";
             fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
             fmt ff " ";
             fmt_obr ff;
+            fmt_mod_view ff view;
             fmt_mod_items ff items;
             fmt_cbb ff
 
@@ -1210,11 +1228,34 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
             fmt_obj ff id (Array.map (fun i -> i.node) params) obj
     end
 
+and fmt_import (ff:Format.formatter) (import:import) : unit =
+  fmt ff "@\n";
+  fmt ff "import ";
+  if import.import_as <> import.import_item
+  then
+    fmt ff "%s = " import.import_as;
+  fmt_name ff import.import_from;
+  fmt ff ".";
+  fmt_ident ff import.import_item;
+
+and fmt_export (ff:Format.formatter) (export:export) : unit =
+  fmt ff "@\n";
+  match export with
+      EXPORT_all_decls -> fmt ff "export *;"
+    | EXPORT_ident i -> fmt ff "export %s;" i
+
+
+and fmt_mod_view (ff:Format.formatter) (mv:mod_view) : unit =
+  List.iter (fmt_import ff) mv.view_imports;
+  List.iter (fmt_export ff) mv.view_exports
+
 and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
   Hashtbl.iter (fmt_mod_item ff) mi
 
 and fmt_crate (ff:Format.formatter) (c:crate) : unit =
-    fmt_mod_items ff c.node.crate_items
+  let (view,items) = c.node.crate_items in
+    fmt_mod_view ff view;
+    fmt_mod_items ff items
 
 
 let fmt_to_str (f:Format.formatter -> 'a -> unit) (v:'a) : string =

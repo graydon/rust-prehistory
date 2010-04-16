@@ -5,6 +5,10 @@ open Parser;;
 
 (* Item grammar. *)
 
+let empty_view = { Ast.view_imports = [];
+                   Ast.view_exports = [] }
+;;
+
 let rec parse_expr (ps:pstate) : (Ast.stmt array * Ast.expr) =
   let pexp = ctxt "expr" Pexp.parse_pexp ps in
     Pexp.desugar_expr ps pexp
@@ -766,7 +770,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                       log ps "extracted mod from %s (binding to %s)" path ident;
                       log ps "%a" Ast.sprintf_mod_items items;
                   end;
-                let item = decl [||] (Ast.MOD_ITEM_mod items) in
+                let item = decl [||] (Ast.MOD_ITEM_mod (empty_view, items)) in
                 let item = span ps apos bpos item in
                   note_required_mod ps {lo=apos; hi=bpos} CONV_rust rlib item;
                   (ident, item)
@@ -813,7 +817,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
       | _ -> raise (unexpected ps)
 
 
-and parse_mod_items_from_signature (ps:pstate) : Ast.mod_items =
+and parse_mod_items_from_signature (ps:pstate) : (Ast.mod_view * Ast.mod_items) =
     let mis = Hashtbl.create 0 in
       expect ps LBRACE;
       while not (peek ps = RBRACE)
@@ -824,7 +828,7 @@ and parse_mod_items_from_signature (ps:pstate) : Ast.mod_items =
           Hashtbl.add mis ident mti;
       done;
       expect ps RBRACE;
-      mis
+      (empty_view, mis)
 
 
 and parse_mod_item_from_signature (ps:pstate)
@@ -935,7 +939,7 @@ and note_required_mod
   if not (Hashtbl.mem ps.pstate_sess.Session.sess_spans item.id)
   then Hashtbl.add ps.pstate_sess.Session.sess_spans item.id sp;
   match item.node.Ast.decl_item with
-      Ast.MOD_ITEM_mod items ->
+      Ast.MOD_ITEM_mod (_, items) ->
         Hashtbl.iter
           begin
             fun _ sub ->
@@ -948,8 +952,10 @@ and note_required_mod
 and parse_mod_items
     (ps:pstate)
     (terminal:token)
-    : Ast.mod_items =
+    : (Ast.mod_view * Ast.mod_items) =
   ps.pstate_depth <- ps.pstate_depth + 1;
+  let imports = ref [] in
+  let exports = ref [] in
   let items = Hashtbl.create 4 in
     while (not (peek ps = terminal))
     do
@@ -959,7 +965,10 @@ and parse_mod_items
     done;
     expect ps terminal;
     ps.pstate_depth <- ps.pstate_depth - 1;
-    items
+    let view = { Ast.view_imports = !imports;
+                 Ast.view_exports = !exports }
+    in
+      (view, items)
 ;;
 
 

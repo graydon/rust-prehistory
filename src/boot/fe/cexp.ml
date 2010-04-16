@@ -329,7 +329,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         let sub_items = Array.map (eval_cexp_to_mod env) d.dir_mods in
         let add (k, v) = htab_put items k v in
           Array.iter add sub_items;
-            CVAL_mod_item (name, rewrap_items id items)
+            CVAL_mod_item (name, rewrap_items id (Item.empty_view, items))
 
     | CEXP_use_mod {node=u; id=id} ->
         let ps = env.env_ps in
@@ -345,7 +345,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
                 log ps "extracted mod signature from %s (binding to %s)" filename name;
                 log ps "%a" Ast.sprintf_mod_items items;
             end;
-          let item = decl [||] (Ast.MOD_ITEM_mod items) in
+          let item = decl [||] (Ast.MOD_ITEM_mod (Item.empty_view, items)) in
           let item = { id = id; node = item } in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
             Item.note_required_mod env.env_ps span CONV_rust rlib item;
@@ -364,7 +364,7 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
               None -> env.env_ps.pstate_infer_lib_name name
             | Some p -> eval_cexp_to_str env p
         in
-        let item = decl [||] (Ast.MOD_ITEM_mod cn.nat_items) in
+        let item = decl [||] (Ast.MOD_ITEM_mod (Item.empty_view, cn.nat_items)) in
         let item = { id = id; node = item } in
         let rlib = REQUIRED_LIB_c { required_libname = filename;
                                     required_prefix = 1 }
@@ -485,7 +485,7 @@ let find_main_fn
     then ()
     else
       match item.node.Ast.decl_item with
-          Ast.MOD_ITEM_mod items ->
+          Ast.MOD_ITEM_mod (_, items) ->
             dig (Some (extend prefix_name ident)) items
 
        | Ast.MOD_ITEM_fn _ ->
@@ -516,7 +516,7 @@ let with_err_handling sess thunk =
           ps.pstate_ctxt;
         let apos = lexpos ps in
           span ps apos apos
-            { Ast.crate_items = Hashtbl.create 0;
+            { Ast.crate_items = (Item.empty_view, Hashtbl.create 0);
               Ast.crate_required = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
               Ast.crate_files = Hashtbl.create 0 }
@@ -585,7 +585,7 @@ let parse_crate_file
           in
           let bpos = lexpos ps in
           let main = find_main_fn ps items in
-          let crate = { Ast.crate_items = items;
+          let crate = { Ast.crate_items = (Item.empty_view, items);
                         Ast.crate_required = required;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
@@ -617,7 +617,7 @@ let parse_src_file
           let items = Item.parse_mod_items ps EOF in
           let bpos = lexpos ps in
           let files = Hashtbl.create 0 in
-          let main = find_main_fn ps items in
+          let main = find_main_fn ps (snd items) in
           let crate = { Ast.crate_items = items;
                         Ast.crate_required = required;
                         Ast.crate_main = main;

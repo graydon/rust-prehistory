@@ -173,7 +173,7 @@ let rec walk_crate
     : unit =
     walk_bracketed
       v.visit_crate_pre
-      (fun _ -> walk_mod_items v crate.node.Ast.crate_items)
+      (fun _ -> walk_mod_items v (snd crate.node.Ast.crate_items))
       v.visit_crate_post
       crate
 
@@ -197,7 +197,7 @@ and walk_mod_item
       | Ast.MOD_ITEM_tag (htup, ttag, _) ->
           walk_header_tup v htup;
           walk_ty_tag v ttag
-      | Ast.MOD_ITEM_mod items ->
+      | Ast.MOD_ITEM_mod (_, items) ->
           walk_mod_items v items
       | Ast.MOD_ITEM_obj ob ->
           walk_header_slots v ob.Ast.obj_state;

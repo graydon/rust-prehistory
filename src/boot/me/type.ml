@@ -1116,7 +1116,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       let init_mod_dict id defn =
         let rec tv_of_item id item =
           match item.Ast.decl_item with
-              Ast.MOD_ITEM_mod items ->
+              Ast.MOD_ITEM_mod (_, items) ->
                 if Hashtbl.mem bindings id
                 then Hashtbl.find bindings id
                 else

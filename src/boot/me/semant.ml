@@ -871,7 +871,7 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
     | Ast.LVAL_ext (base, comp) ->
         let base_item = lval_item cx base in
         match base_item.node.Ast.decl_item with
-            Ast.MOD_ITEM_mod items ->
+            Ast.MOD_ITEM_mod (_, items) ->
               begin
                 let i, args =
                   match comp with
@@ -1119,7 +1119,7 @@ let lookup_by_ident
             end
 
       | SCOPE_crate crate ->
-          check_items crate.node.Ast.crate_items
+          check_items (snd crate.node.Ast.crate_items)
 
       | SCOPE_mod_item item ->
           begin
@@ -1138,7 +1138,7 @@ let lookup_by_ident
                         | None -> check_slots obj.Ast.obj_state
                     end
 
-                | Ast.MOD_ITEM_mod md ->
+                | Ast.MOD_ITEM_mod (_, md) ->
                     check_items md
 
                 | _ -> None
