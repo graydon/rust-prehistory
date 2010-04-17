@@ -435,7 +435,7 @@ let trans_crate
         upcall "upcall_log_int" None [| trans_atom atom |]
       in
 
-      (* FIXME: this may be irrelevant; possibly LLVM will wind up up
+      (* FIXME: this may be irrelevant; possibly LLVM will wind up
        * using GOT and such wherever it needs to to achieve PIC
        * data.
        *)
