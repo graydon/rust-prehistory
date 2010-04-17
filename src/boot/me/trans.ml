@@ -3100,11 +3100,14 @@ let trans_visitor
       (it_ptr_reg:Il.reg)
       (body:Ast.block)
       : unit =
-    begin
-      abi.Abi.abi_emit_iteration_prologue (emitter ()) depth;
-      trans_block body;
-      abi.Abi.abi_emit_iteration_epilogue (emitter ()) depth it_ptr_reg;
-    end
+    let get_callsz () =
+      calculate_sz_in_current_frame (current_fn_callsz ())
+    in
+      begin
+        abi.Abi.abi_emit_iteration_prologue (emitter ()) depth get_callsz;
+        trans_block body;
+        abi.Abi.abi_emit_iteration_epilogue (emitter ()) depth it_ptr_reg;
+      end
 
   and trans_stmt_full (stmt:Ast.stmt) : unit =
     match stmt.node with

@@ -1232,6 +1232,7 @@ let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
 let iteration_prologue
     ((*e*)_:Il.emitter)
     ((*depth*)_:int)
+    ((*get_callsz*)_:unit -> Il.operand)
     : unit =
   ()
 ;;
