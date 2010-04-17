@@ -1229,8 +1229,6 @@ let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
     mov (edx_n loop_info_field_iterator_sp) (ro esp)               (* extra_args[1] <- esp *)
 ;;
 
-let iterator_epilogue ((*e*)_:Il.emitter) ((*proto*)_:Ast.proto) : unit = ();;
-
 let iteration_prologue
     ((*e*)_:Il.emitter)
     ((*depth*)_:int)
@@ -1246,8 +1244,24 @@ let iteration_epilogue
   ()
 ;;
 
-let loop_prologue ((*e*)_:Il.emitter) ((*depth*)_:int) : unit = ();;
-let loop_epilogue ((*e*)_:Il.emitter) ((*depth*)_:int) : unit = ();;
+let loop_prologue
+    ((*e*)_:Il.emitter)
+    ((*depth*)_:int)
+    : unit =
+  ()
+;;
+
+let loop_epilogue
+    (e:Il.emitter)
+    (depth:int)
+    : unit =
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
+  let loop_esp_idx = Int64.mul (Int64.of_int loop_info_field_loop_fn_sp) word_sz in
+  let loop_esp_off = Asm.IMM (Int64.neg (Int64.sub ils_base loop_esp_idx)) in
+    mov (rc esp) (c (word_at_off (h ebp) loop_esp_off))            (* esp <- ils[i].loop_esp *)
+;;
 
 let put (e:Il.emitter) : unit =
   let emit = Il.emit e in
@@ -1457,7 +1471,6 @@ let (abi:Abi.abi) =
     Abi.abi_emit_fn_epilogue = fn_epilogue;
     Abi.abi_emit_fn_tail_call = fn_tail_call;
     Abi.abi_emit_iterator_prologue = iterator_prologue;
-    Abi.abi_emit_iterator_epilogue = iterator_epilogue;
     Abi.abi_emit_iteration_prologue = iteration_prologue;
     Abi.abi_emit_iteration_epilogue = iteration_epilogue;
     Abi.abi_emit_loop_prologue = loop_prologue;
