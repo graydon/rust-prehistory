@@ -68,9 +68,13 @@ let trans_crate
   let llmod = Llvm.create_module llctx filename in
 
   let (abi:Llabi.abi) = Llabi.declare_abi llctx llmod in
+  let (crate_ptr:Llvm.llvalue) =
+    Llvm.declare_global abi.Llabi.crate_ty "rust_crate" llmod
+  in
 
   let (void_ty:Llvm.lltype) = Llvm.void_type llctx in
   let (word_ty:Llvm.lltype) = abi.Llabi.word_ty in
+  let (wordptr_ty:Llvm.lltype) = Llvm.pointer_type word_ty in
   let (task_ty:Llvm.lltype) = abi.Llabi.task_ty in
   let (task_ptr_ty:Llvm.lltype) = Llvm.pointer_type task_ty in
   let fn_ty (out:Llvm.lltype) (args:Llvm.lltype array) : Llvm.lltype =
@@ -144,7 +148,7 @@ let trans_crate
     let llupcall = Llvm.const_pointercast llupcall word_ty in
     let llargs =
       Array.map
-        (fun arg -> Llvm.build_bitcast arg word_ty (anon_llid "arg") llbuilder)
+        (fun arg -> Llvm.build_pointercast arg word_ty (anon_llid "arg") llbuilder)
         llargs
     in
     let llallargs = Array.append [| lltask; llupcall |] llargs in
@@ -154,7 +158,8 @@ let trans_crate
       match lldest with
           None -> ()
         | Some lldest ->
-            ignore (Llvm.build_store llrv lldest llbuilder);
+            let lldest = Llvm.build_pointercast lldest wordptr_ty "" llbuilder in
+              ignore (Llvm.build_store llrv lldest llbuilder);
   in
 
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
@@ -430,6 +435,22 @@ let trans_crate
         upcall "upcall_log_int" None [| trans_atom atom |]
       in
 
+      (* FIXME: this may be irrelevant; possibly LLVM will wind up up
+       * using GOT and such wherever it needs to to achieve PIC
+       * data.
+       *)
+      (*
+        let crate_rel (v:Llvm.llvalue) : Llvm.llvalue =
+        let v_int = Llvm.const_pointercast v word_ty in
+        let c_int = Llvm.const_pointercast crate_ptr word_ty in
+        Llvm.const_sub v_int c_int
+        in
+      *)
+
+      let static_str (s:string) : Llvm.llvalue =
+        Llvm.define_global (anon_llid "str") (Llvm.const_stringz llctx s) llmod
+      in
+
       match stmts with
           [] -> terminate llbuilder
         | head::tail ->
@@ -504,6 +525,13 @@ let trans_crate
                   end;
                   trans_tail ()
 
+              | Ast.STMT_init_str (dst, str) ->
+                  let d = trans_lval dst in
+                  let s = static_str str in
+                  let len = Llvm.const_int word_ty ((String.length str) + 1) in
+                    upcall "upcall_new_str" (Some d) [| s; len |];
+                    trans_tail ()
+
               | _ -> trans_stmts id_opt llbuilder tail terminate
 
     (* Translates an AST block to one or more LLVM basic blocks and returns the
@@ -574,7 +602,7 @@ let trans_crate
       let items = snd (crate'.Ast.crate_items) in
         Hashtbl.iter declare_mod_item items;
         Hashtbl.iter trans_mod_item items;
-        Llfinal.finalize_module llctx llmod abi asm_glue exit_task_glue;
+        Llfinal.finalize_module llctx llmod abi asm_glue exit_task_glue crate_ptr;
         llmod
     with e -> Llvm.dispose_module llmod; raise e
 ;;

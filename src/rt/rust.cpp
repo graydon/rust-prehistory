@@ -3061,8 +3061,9 @@ extern "C" CDECL rust_str *
 upcall_new_str(rust_task *task, char const *s, size_t fill)
 {
     LOG_UPCALL_ENTRY(task);
-
     rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_MEM,
+             "upcall new_str('%s', %" PRIdPTR ")", s, fill);
     size_t alloc = next_power_of_two(fill);
     void *mem = dom->malloc(sizeof(rust_str) + alloc);
     rust_str *st = new (mem) rust_str(dom, alloc, fill, s);

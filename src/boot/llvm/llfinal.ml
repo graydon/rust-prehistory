@@ -9,9 +9,9 @@ let finalize_module
     (abi:Llabi.abi)
     (asm_glue:Llasm.asm_glue)
     (exit_task_glue:Llvm.llvalue)
+    (crate_ptr:Llvm.llvalue)
     : unit =
   let i32 = Llvm.i32_type llctx in
-  let crate_ptr = Llvm.declare_global abi.Llabi.crate_ty "rust_crate" llmod in
 
   (* Count the number of Rust functions and the number of C functions by simply
    * (and crudely) testing whether each function in the module begins with
@@ -85,3 +85,4 @@ let finalize_module
  * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)
+
