@@ -1245,10 +1245,15 @@ let iteration_epilogue
 ;;
 
 let loop_prologue
-    ((*e*)_:Il.emitter)
-    ((*depth*)_:int)
+    (e:Il.emitter)
+    (depth:int)
     : unit =
-  ()
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
+  let loop_esp_idx = Int64.mul (Int64.of_int loop_info_field_loop_fn_sp) word_sz in
+  let loop_esp_off = Asm.IMM (Int64.neg (Int64.sub ils_base loop_esp_idx)) in
+    mov (word_at_off (h ebp) loop_esp_off) (ro esp)                (* ils[i].loop_esp <- esp *)
 ;;
 
 let loop_epilogue
