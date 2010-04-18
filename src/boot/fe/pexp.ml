@@ -93,14 +93,18 @@ and parse_name_base (ps:pstate) : Ast.name_base =
            | _ -> Ast.BASE_ident i)
     | _ -> raise (unexpected ps)
 
+and parse_name_ext (ps:pstate) (base:Ast.name) : Ast.name =
+  match peek ps with
+      DOT ->
+        bump ps;
+        let comps = one_or_more DOT parse_name_component ps in
+          Array.fold_left (fun x y -> Ast.NAME_ext (x, y)) base comps
+    | _ -> base
+
+
 and parse_name (ps:pstate) : Ast.name =
   let base = Ast.NAME_base (parse_name_base ps) in
-    match peek ps with
-        DOT ->
-          bump ps;
-          let comps = one_or_more DOT parse_name_component ps in
-            Array.fold_left (fun x y -> Ast.NAME_ext (x, y)) base comps
-      | _ -> base
+    parse_name_ext ps base
 
 and parse_carg_base (ps:pstate) : Ast.carg_base =
   match peek ps with

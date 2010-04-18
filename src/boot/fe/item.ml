@@ -5,8 +5,8 @@ open Parser;;
 
 (* Item grammar. *)
 
-let empty_view = { Ast.view_imports = [];
-                   Ast.view_exports = [] }
+let empty_view = { Ast.view_imports = [||];
+                   Ast.view_exports = [||] }
 ;;
 
 let rec parse_expr (ps:pstate) : (Ast.stmt array * Ast.expr) =
@@ -949,24 +949,90 @@ and note_required_mod
     | _ -> ()
 
 
+and parse_import
+    (ps:pstate)
+    : Ast.import =
+  let import a n =
+    match n with
+        Ast.NAME_ext (n, Ast.COMP_ident i) ->
+          { Ast.import_from = Some n;
+            Ast.import_item = i;
+            Ast.import_as =
+              match a with
+                  None -> i
+                | Some a -> a }
+      | Ast.NAME_base (Ast.BASE_ident i) ->
+          { Ast.import_from = None;
+            Ast.import_item = i;
+            Ast.import_as = i }
+      | _ ->
+          raise (Parse_err (ps, "bad import specification"))
+  in
+    match peek ps with
+        IDENT i ->
+          begin
+            bump ps;
+            match peek ps with
+                EQ ->
+                  (* 
+                   * import x = ...
+                   *)
+                  bump ps;
+                  import (Some i) (Pexp.parse_name ps)
+              | _ ->
+                  (*
+                   * import x...
+                   *)
+                  import None (Pexp.parse_name_ext ps
+                                 (Ast.NAME_base
+                                    (Ast.BASE_ident i)))
+          end
+      | _ ->
+          import None (Pexp.parse_name ps)
+
+
+and parse_export
+    (ps:pstate)
+    : Ast.export =
+  match peek ps with
+      STAR -> bump ps; Ast.EXPORT_all_decls
+    | IDENT i -> bump ps; Ast.EXPORT_ident i
+    | _ -> raise (unexpected ps)
+
+
 and parse_mod_items
     (ps:pstate)
     (terminal:token)
     : (Ast.mod_view * Ast.mod_items) =
   ps.pstate_depth <- ps.pstate_depth + 1;
-  let imports = ref [] in
-  let exports = ref [] in
+  let imports = Queue.create () in
+  let exports = Queue.create () in
+  let in_view = ref true in
   let items = Hashtbl.create 4 in
     while (not (peek ps = terminal))
     do
-      let (ident, item) = parse_mod_item ps in
-        htab_put items ident item;
-        expand_tags_to_items ps item items;
+      if !in_view
+      then
+        match peek ps with
+            IMPORT ->
+              bump ps;
+              Queue.add (parse_import ps) imports;
+              expect ps SEMI;
+          | EXPORT ->
+              bump ps;
+              Queue.add (parse_export ps) exports;
+              expect ps SEMI;
+          | _ ->
+              in_view := false
+      else
+        let (ident, item) = parse_mod_item ps in
+          htab_put items ident item;
+          expand_tags_to_items ps item items;
     done;
     expect ps terminal;
     ps.pstate_depth <- ps.pstate_depth - 1;
-    let view = { Ast.view_imports = !imports;
-                 Ast.view_exports = !exports }
+    let view = { Ast.view_imports = queue_to_arr imports;
+                 Ast.view_exports = queue_to_arr exports }
     in
       (view, items)
 ;;

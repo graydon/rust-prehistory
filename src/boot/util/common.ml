@@ -406,6 +406,18 @@ let arr_exists (f:int -> 'a -> bool) (a:'a array) : bool =
     loop 0
 ;;
 
+(* 
+ * Auxiliary queue functions. 
+ *)
+
+let queue_to_list (q:'a Queue.t) : 'a list =
+  Queue.fold (fun ls elt -> elt :: ls)  []  q
+;;
+
+let queue_to_arr (q:'a Queue.t) : 'a array =
+  Array.of_list (queue_to_list q)
+;;
+
 (*
  * Auxiliary int64 functions
  *)

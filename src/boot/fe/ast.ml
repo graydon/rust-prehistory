@@ -433,7 +433,7 @@ and mod_items = (ident, mod_item) Hashtbl.t
 
 and import =
     {
-      import_from: name;
+      import_from: name option;
       import_item: ident;
       import_as: ident;
     }
@@ -444,8 +444,8 @@ and export =
 
 and mod_view =
     {
-      view_imports: import list;
-      view_exports: export list;
+      view_imports: import array;
+      view_exports: export array;
     }
 
 and crate' =
@@ -1234,9 +1234,13 @@ and fmt_import (ff:Format.formatter) (import:import) : unit =
   if import.import_as <> import.import_item
   then
     fmt ff "%s = " import.import_as;
-  fmt_name ff import.import_from;
-  fmt ff ".";
-  fmt_ident ff import.import_item;
+  match import.import_from with
+      None ->
+        fmt_ident ff import.import_item
+    | Some from ->
+        fmt_name ff from;
+        fmt ff ".";
+        fmt_ident ff import.import_item;
 
 and fmt_export (ff:Format.formatter) (export:export) : unit =
   fmt ff "@\n";
@@ -1246,8 +1250,8 @@ and fmt_export (ff:Format.formatter) (export:export) : unit =
 
 
 and fmt_mod_view (ff:Format.formatter) (mv:mod_view) : unit =
-  List.iter (fmt_import ff) mv.view_imports;
-  List.iter (fmt_export ff) mv.view_exports
+  Array.iter (fmt_import ff) mv.view_imports;
+  Array.iter (fmt_export ff) mv.view_exports
 
 and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
   Hashtbl.iter (fmt_mod_item ff) mi
