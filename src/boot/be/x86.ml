@@ -871,6 +871,50 @@ let rec size_calculation_stack_highwater (size:size) : int =
         + 1
 ;;
 
+let boundary_sz = (Asm.IMM
+                     (Int64.add                   (* Extra non-frame room:           *)
+                        frame_base_sz             (* to safely enter the next frame, *)
+                        frame_base_sz))           (* and make a 'grow' upcall there. *)
+;;
+
+let stack_growth_check
+    (e:Il.emitter)
+    (nabi:nabi)
+    (grow_task_fixup:fixup)
+    (growsz:Il.operand)
+    (grow_jmp:int option)
+    (restart_pc:int)
+    : unit =
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let add dst src = emit (Il.binary Il.ADD dst (Il.Cell dst) src) in
+  let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
+    mov (rc edi) (ro esp);                        (* edi = esp                 *)
+    sub (rc edi) growsz;                          (* edi -= size-request       *)
+    emit (Il.cmp (ro esi) (ro edi));
+    (* Jump *over* 'grow' upcall on non-underflow: if esi (bottom) is <= edi (proposed-esp) *)
+
+    let bypass_grow_upcall_jmp_pc = e.Il.emit_pc in
+      emit (Il.jmp Il.JBE Il.CodeNone);
+
+      begin
+        match grow_jmp with
+            None -> ()
+          | Some j -> Il.patch_jump e j e.Il.emit_pc
+      end;
+      (* Extract growth-amount from edi. *)
+      mov (rc esi) (ro esp);
+      sub (rc esi) (ro edi);
+      add (rc esi) (Il.Imm (boundary_sz, word_ty));
+      (* Perform 'grow' upcall, then restart frame-entry. *)
+      emit_void_prologue_call e nabi grow_task_fixup [| ro esi |];
+      emit (Il.jmp Il.JMP (Il.CodeLabel restart_pc));
+      Il.patch_jump e bypass_grow_upcall_jmp_pc e.Il.emit_pc;
+
+      (* Establish a frame, wherever we landed. *)
+      sub (rc esp) growsz
+;;
+
 let fn_prologue
     (e:Il.emitter)
     (framesz:size)
@@ -953,12 +997,6 @@ let fn_prologue
    *)
   let callsz = add_sz (SIZE_fixed word_sz) callsz in
 
-  let boundary_sz = (Asm.IMM
-                       (Int64.add                   (* Extra non-frame room:           *)
-                          frame_base_sz             (* to safely enter the next frame, *)
-                          frame_base_sz))           (* and make a 'grow' upcall there. *)
-  in
-
   (*
    * Cumulative dynamic-frame size.
    *)
@@ -1004,38 +1042,15 @@ let fn_prologue
       in
 
         (* "Full" frame size-check. *)
-        mov (rc edi) (ro esp);                        (* edi = esp                 *)
-        sub (rc edi) dynamic_frame_sz;                (* edi -= size-request       *)
-        emit (Il.cmp (ro esi) (ro edi));
-        (* Jump *over* 'grow' upcall on non-underflow: if esi (bottom) is <= edi (proposed-esp) *)
+        stack_growth_check e nabi grow_task_fixup dynamic_frame_sz dynamic_grow_jmp restart_pc;
 
-        let bypass_grow_upcall_jmp_pc = e.Il.emit_pc in
-          emit (Il.jmp Il.JBE Il.CodeNone);
-
-          begin
-            match dynamic_grow_jmp with
-                None -> ()
-              | Some j -> Il.patch_jump e j e.Il.emit_pc
-          end;
-          (* Extract growth-amount from edi. *)
-          mov (rc esi) (ro esp);
-          sub (rc esi) (ro edi);
-          add (rc esi) (Il.Imm (boundary_sz, word_ty));
-          (* Perform 'grow' upcall, then restart frame-entry. *)
-          emit_void_prologue_call e nabi grow_task_fixup [| ro esi |];
-          emit (Il.jmp Il.JMP (Il.CodeLabel restart_pc));
-          Il.patch_jump e bypass_grow_upcall_jmp_pc e.Il.emit_pc;
-
-          (* Establish a frame, wherever we landed. *)
-          sub (rc esp) dynamic_frame_sz;
-
-          (* Zero the frame.
-           *
-           * FIXME: this is awful, will go away when we have proper CFI.
-           *)
-          mov (rc edi) (ro esp);
-          mov (rc ecx) dynamic_frame_sz;
-          emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
+        (* Zero the frame.
+         *
+         * FIXME: this is awful, will go away when we have proper CFI.
+         *)
+        mov (rc edi) (ro esp);
+        mov (rc ecx) dynamic_frame_sz;
+        emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
 ;;
 
 
