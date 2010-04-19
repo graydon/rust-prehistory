@@ -74,6 +74,7 @@ and ty =
   | TY_bool
   | TY_mach of ty_mach
   | TY_int
+  | TY_uint
   | TY_char
   | TY_str
 
@@ -328,6 +329,7 @@ and lit =
   | LIT_bool of bool
   | LIT_mach of (ty_mach * int64 * string)
   | LIT_int of (int64 * string)
+  | LIT_uint of (int64 * string)
   | LIT_char of char
   | LIT_custom of lit_custom
 
@@ -624,6 +626,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_bool -> fmt ff "bool"
   | TY_mach m -> fmt_mach ff m
   | TY_int -> fmt ff "int"
+  | TY_uint -> fmt ff "uint"
   | TY_char -> fmt ff "char"
   | TY_str -> fmt ff "str"
 
@@ -800,6 +803,7 @@ and fmt_lit (ff:Format.formatter) (l:lit) : unit =
         fmt ff "(%s)" s
       end
   | LIT_int (_,s) -> fmt ff "%s" s
+  | LIT_uint (_,s) -> fmt ff "%s" s
   | LIT_char c -> fmt ff "'%s'" (Char.escaped c)
   | LIT_custom _ -> fmt ff "?lit?"
 

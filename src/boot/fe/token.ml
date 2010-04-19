@@ -109,6 +109,7 @@ type token =
   (* Reserved type names *)
   | BOOL
   | INT
+  | UINT
   | CHAR
   | STR
   | MACH          of Common.ty_mach
@@ -265,6 +266,7 @@ let rec string_of_tok t =
     (* Reserved type names *)
     | BOOL       -> "bool"
     | INT        -> "int"
+    | UINT       -> "uint"
     | CHAR       -> "char"
     | STR        -> "str"
     | MACH m     -> Common.string_of_ty_mach m

@@ -284,7 +284,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
       let rec is_comparable_or_ordered (comparable:bool) (ty:Ast.ty) : bool =
         match ty with
-            Ast.TY_mach _ | Ast.TY_int | Ast.TY_char | Ast.TY_str -> true
+            Ast.TY_mach _ | Ast.TY_int | Ast.TY_uint | Ast.TY_char | Ast.TY_str -> true
           | Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_chan _
           | Ast.TY_port _ | Ast.TY_task | Ast.TY_tup _ | Ast.TY_vec _
           | Ast.TY_rec _ | Ast.TY_tag _ | Ast.TY_iso _ | Ast.TY_idx _ ->
@@ -758,6 +758,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               | Ast.LIT_bool _ -> Ast.TY_bool
               | Ast.LIT_mach (mty, _, _) -> Ast.TY_mach mty
               | Ast.LIT_int (_, _) -> Ast.TY_int
+              | Ast.LIT_uint (_, _) -> Ast.TY_uint
               | Ast.LIT_char _ -> Ast.TY_char
               | _ -> bug () "unimplemented atom literal"
             in

@@ -548,6 +548,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_bool : unit -> 'ty;
       ty_fold_mach : ty_mach -> 'ty;
       ty_fold_int : unit -> 'ty;
+      ty_fold_uint : unit -> 'ty;
       ty_fold_char : unit -> 'ty;
       ty_fold_str : unit -> 'ty;
       ty_fold_tup : 'slots -> 'ty;
@@ -593,6 +594,7 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_bool -> f.ty_fold_bool ()
   | Ast.TY_mach m -> f.ty_fold_mach m
   | Ast.TY_int -> f.ty_fold_int ()
+  | Ast.TY_uint -> f.ty_fold_uint ()
   | Ast.TY_char -> f.ty_fold_char ()
   | Ast.TY_str -> f.ty_fold_str ()
 
@@ -634,6 +636,7 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_bool = (fun _ -> default);
       ty_fold_mach = (fun _ -> default);
       ty_fold_int = (fun _ -> default);
+      ty_fold_uint = (fun _ -> default);
       ty_fold_char = (fun _ -> default);
       ty_fold_str = (fun _ -> default);
       ty_fold_tup = (fun _ -> default);
@@ -670,6 +673,7 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_bool = (fun _ -> id Ast.TY_bool);
     ty_fold_mach = (fun m -> id (Ast.TY_mach m));
     ty_fold_int = (fun _ -> id Ast.TY_int);
+    ty_fold_uint = (fun _ -> id Ast.TY_uint);
     ty_fold_char = (fun _ -> id Ast.TY_char);
     ty_fold_str = (fun _ -> id Ast.TY_str);
     ty_fold_tup =  (fun slots -> id (Ast.TY_tup slots));
@@ -953,6 +957,7 @@ let rec lval_ty (cx:ctxt) (lval:Ast.lval) : Ast.ty =
 let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
   match at with
       Ast.ATOM_literal {node=(Ast.LIT_int _); id=_} -> Ast.TY_int
+    | Ast.ATOM_literal {node=(Ast.LIT_uint _); id=_} -> Ast.TY_uint
     | Ast.ATOM_literal {node=(Ast.LIT_bool _); id=_} -> Ast.TY_bool
     | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
     | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
@@ -1296,7 +1301,8 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
     match t with
         Ast.TY_any -> Il.StructTy [| word;  ptr |]
       | Ast.TY_nil -> Il.NilTy
-      | Ast.TY_int -> word
+      | Ast.TY_int
+      | Ast.TY_uint -> word
 
       | Ast.TY_bool -> sv Il.Bits8
 
@@ -1599,6 +1605,7 @@ let ty_str (ty:Ast.ty) : string =
          ty_fold_bool = (fun _ -> "b");
          ty_fold_mach = fold_mach;
          ty_fold_int = (fun _ -> "i");
+         ty_fold_uint = (fun _ -> "u");
          ty_fold_char = (fun _ -> "c");
          ty_fold_str = (fun _ -> "s");
          ty_fold_vec = (fun s -> "v" ^ s);

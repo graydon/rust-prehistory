@@ -52,6 +52,7 @@
                 ("bool", BOOL);
 
                 ("int", INT);
+                ("uint", UINT);
 
                 ("char", CHAR);
                 ("str", STR);

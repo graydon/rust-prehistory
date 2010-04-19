@@ -347,8 +347,9 @@ let trans_crate
             let llty = trans_mach_ty mty in
             Llvm.const_of_int64 llty value (mach_is_signed mty)
           | Ast.LIT_int (value, _) ->
-            (* TODO: bignums? *)
             Llvm.const_of_int64 (Llvm.i32_type llctx) value true
+          | Ast.LIT_uint (value, _) ->
+            Llvm.const_of_int64 (Llvm.i32_type llctx) value false
           | Ast.LIT_char ch ->
             Llvm.const_int (Llvm.i32_type llctx) (Char.code ch)
           | Ast.LIT_custom _ -> bogus (* TODO *)

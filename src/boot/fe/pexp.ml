@@ -194,6 +194,10 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
         bump ps;
         Ast.TY_int
 
+    | UINT ->
+        bump ps;
+        Ast.TY_uint
+
     | CHAR ->
         bump ps;
         Ast.TY_char
@@ -540,6 +544,17 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                     span ps apos bpos (PEXP_lval (PLVAL_ident i))
                 end
         end
+
+    | UINT ->
+        bump ps;
+        let inner ps =
+          match peek ps with
+              LIT_INT (n, s) -> bump ps; (n, s)
+            | _ -> raise (unexpected ps)
+        in
+        let (num, str) = bracketed LPAREN RPAREN inner ps in
+        let bpos = lexpos ps in
+            span ps apos bpos (PEXP_lit (Ast.LIT_uint (num, str)))
 
     | MACH m ->
         bump ps;

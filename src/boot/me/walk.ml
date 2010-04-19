@@ -251,6 +251,7 @@ and walk_ty
       | Ast.TY_str -> ()
       | Ast.TY_char -> ()
       | Ast.TY_int -> ()
+      | Ast.TY_uint -> ()
       | Ast.TY_bool -> ()
       | Ast.TY_nil -> ()
       | Ast.TY_task -> ()

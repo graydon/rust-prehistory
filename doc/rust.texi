@@ -1858,15 +1858,18 @@ types: @code{f32} and @code{f64}, respectively.
 @node       Ref.Type.Int
 @subsection Ref.Type.Int
 
-The Rust type @code{int}@footnote{A Rust @code{int} is analogous to a
-C @code{int}.} is a machine-dependent signed integer type large enough
-to address any element in a @code{vec[u8]} that could be represented
-in memory on the target machine, interpreting negative offsets as
-usual starting from the @emph{end} of the @code{vec}.
 
 The Rust type @code{uint}@footnote{A Rust @code{uint} is analogous to
-a C @code{unsigned int}.} is a machine-dependent unsigned integer type
-of the same number of bits as the rust type @code{int}.
+a C99 @code{uintptr_t}.} is a two's complement unsigned integer type
+with with target-machine-dependent size. Its size, in bits, is equal
+to the number of bits required to hold any memory address on the
+target machine.
+
+The Rust type @code{int}@footnote{A Rust @code{int} is analogous to a
+C99 @code{intptr_t}.} is a two's complement signed integer type with
+target-machine-dependent size. Its size, in bits, is equal to the size
+of the rust type @code{uint} on the same target machine.
+
 
 
 @page
