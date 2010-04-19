@@ -748,7 +748,7 @@ a later version of the language. @xref{Ref.Type.Mach}.
 
 Syntactic extensions are marked with the @emph{pound} sigil @code{#}
 (U+0023), followed by a qualified name of a compile-time imported
-module, an optional parenthesized list of @emph{tokens}, and an
+module item, an optional parenthesized list of @emph{tokens}, and an
 optional brace-enclosed region of free-form text (with brace-matching
 and brace-escaping used to determine the limit of the
 region). @xref{Ref.Comp.Syntax}.
@@ -1511,13 +1511,78 @@ mod math @{
     fn cos(f64) -> f64 @{
         @dots{}
     @}
-
     fn tan(f64) -> f64 @{
         @dots{}
     @}
     @dots{}
 @}
 @end example
+
+Modules may also include any number of @dfn{import and export
+declarations}. These declarations must precede any module item
+declarations within the module, and control the visibility of names
+both within the module and outside of it.
+
+@menu
+* Ref.Item.Mod.Import::            Declarations for module-local synonyms.
+* Ref.Item.Mod.Export::            Declarations for restricting visibility.
+@end menu
+
+@page
+@node          Ref.Item.Mod.Import
+@subsubsection Ref.Item.Mod.Import
+@c * Ref.Item.Mod.Import::     Declarations for module-local synonyms.
+
+An @dfn{import declaration} creates one or more local name bindings
+synonymous with some other name. Usually an import declaration is used
+to shorten the path required to refer to a module item.
+
+@emph{Note}: unlike many languages, Rust's @code{import} declarations do
+@emph{not} declare linkage-dependency with external crates. Linkage
+dependencies are independently declared with @code{use}
+declarations. @xref{Ref.Comp.Crate}.
+
+An example of an import:
+@example
+import std.math.sin;
+fn main() @{
+    // Equivalent to 'log std.math.sin(1.0);'
+    log sin(1.0);
+@}
+@end example
+
+@page
+@node          Ref.Item.Mod.Export
+@subsubsection Ref.Item.Mod.Export
+@c * Ref.Item.Mod.Import::     Declarations for restricting visibility.
+
+An @dfn{export declaration} restricts the set of local declarations within a module
+that can be accessed from code outside the module. By default, all local declarations in
+a module are exported. If a module contains an export declaration, this declaration replaces
+the default export with the export specified.
+
+An example of an export:
+@example
+mod foo @{
+    export primary;
+
+    fn primary() @{
+        helper(1, 2);
+        helper(3, 4);
+    @}
+
+    fn helper(int x, int y) @{
+        @dots{}
+    @}
+@}
+
+fn main() @{
+    foo.primary();  // Will compile.
+    foo.helper(2,3) // ERROR: will not compile.
+@}
+@end example
+
+
 
 @page
 @node       Ref.Item.Fn
