@@ -5,8 +5,14 @@ open Parser;;
 
 (* Item grammar. *)
 
+let default_exports =
+  let e = Hashtbl.create 0 in
+    Hashtbl.add e Ast.EXPORT_all_decls ();
+    e
+;;
+
 let empty_view = { Ast.view_imports = Hashtbl.create 0;
-                   Ast.view_exports = Hashtbl.create 0 }
+                   Ast.view_exports = default_exports }
 ;;
 
 let rec parse_expr (ps:pstate) : (Ast.stmt array * Ast.expr) =

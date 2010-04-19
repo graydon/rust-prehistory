@@ -854,6 +854,11 @@ let rec lval_slot (cx:ctxt) (lval:Ast.lval) : Ast.slot =
           project_type_to_slot base_ty comp
 ;;
 
+let exports_permit (view:Ast.mod_view) (ident:Ast.ident) : bool =
+  (Hashtbl.mem view.Ast.view_exports Ast.EXPORT_all_decls) ||
+    (Hashtbl.mem view.Ast.view_exports (Ast.EXPORT_ident ident))
+;;
+
 (* NB: this will fail if lval is not an item. *)
 let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
   match lval with
@@ -862,12 +867,13 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
           let referent = lval_to_referent cx nb.id in
             match htab_search cx.ctxt_all_defns referent with
                 Some (DEFN_item item) -> {node=item; id=referent}
-              | _ -> bug () "lval does not name an item"
+              | _ -> err (Some (lval_base_id lval))
+                  "lval does not name an item"
         end
     | Ast.LVAL_ext (base, comp) ->
         let base_item = lval_item cx base in
         match base_item.node.Ast.decl_item with
-            Ast.MOD_ITEM_mod (_, items) ->
+            Ast.MOD_ITEM_mod (view, items) ->
               begin
                 let i, args =
                   match comp with
@@ -878,14 +884,16 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
                           Ast.sprintf_lval_component comp
                 in
                   match htab_search items i with
-                      None -> bug () "unknown module item '%s'" i
-                    | Some sub ->
+                    | Some sub when exports_permit view i ->
                         assert
                           ((Array.length sub.node.Ast.decl_params) =
                               (Array.length args));
                         check_concrete base_item.node.Ast.decl_params sub
+                    | _ -> err (Some (lval_base_id lval))
+                        "unknown module item '%s'" i
               end
-          | _ -> err None "lval base %a does not name a module" Ast.sprintf_lval base
+          | _ -> err (Some (lval_base_id lval))
+              "lval base %a does not name a module" Ast.sprintf_lval base
 ;;
 
 let lval_is_slot (cx:ctxt) (lval:Ast.lval) : bool =
@@ -1091,44 +1099,47 @@ let rec lookup_by_ident
       ((view:Ast.mod_view),(items:Ast.mod_items))
       (ident:Ast.ident)
       : ((scope list * node_id) option) =
-    match htab_search items ident with
-        Some i -> Some (scopes, i.id)
-      | None ->
-          match htab_search view.Ast.view_imports ident with
-              None -> None
-            | Some (Ast.NAME_base (Ast.BASE_ident i))
-            | Some (Ast.NAME_base (Ast.BASE_app (i, _))) ->
-                lookup_by_ident cx scopes i
-            | Some name ->
-                begin
-                  let get_item node =
-                    match htab_search cx.ctxt_all_defns node with
-                        Some (DEFN_item item) -> item
-                      | Some _ -> err (Some node) "defn is not an item"
-                      | None -> bug () "missing defn"
-                  in
-                  let project_scopes_and_node sn ext =
-                    match sn with
-                        None -> None
-                      | Some (scopes, node) ->
-                          let item = get_item node in
-                          match (item.Ast.decl_item, ext) with
-                              (Ast.MOD_ITEM_mod md, Ast.COMP_ident i)
-                            | (Ast.MOD_ITEM_mod md, Ast.COMP_app (i, _))
-                              -> check_items scopes md i
-                            | _ -> None
-                  in
-                  let rec lookup_and_project n =
-                    match n with
-                        Ast.NAME_base (Ast.BASE_ident i)
-                      | Ast.NAME_base (Ast.BASE_app (i, _)) ->
-                          lookup_by_ident cx scopes i
-                      | Ast.NAME_ext (n, ext) ->
-                          project_scopes_and_node (lookup_and_project n) ext
-                      | _ -> None
-                  in
-                    lookup_and_project name
-                end
+    if not (exports_permit view ident)
+    then None
+    else
+      match htab_search items ident with
+          Some i -> Some (scopes, i.id)
+        | None ->
+            match htab_search view.Ast.view_imports ident with
+                None -> None
+              | Some (Ast.NAME_base (Ast.BASE_ident i))
+              | Some (Ast.NAME_base (Ast.BASE_app (i, _))) ->
+                  lookup_by_ident cx scopes i
+              | Some name ->
+                  begin
+                    let get_item node =
+                      match htab_search cx.ctxt_all_defns node with
+                          Some (DEFN_item item) -> item
+                        | Some _ -> err (Some node) "defn is not an item"
+                        | None -> bug () "missing defn"
+                    in
+                    let project_scopes_and_node sn ext =
+                      match sn with
+                          None -> None
+                        | Some (scopes, node) ->
+                            let item = get_item node in
+                              match (item.Ast.decl_item, ext) with
+                                  (Ast.MOD_ITEM_mod md, Ast.COMP_ident i)
+                                | (Ast.MOD_ITEM_mod md, Ast.COMP_app (i, _))
+                                  -> check_items scopes md i
+                                | _ -> None
+                    in
+                    let rec lookup_and_project n =
+                      match n with
+                          Ast.NAME_base (Ast.BASE_ident i)
+                        | Ast.NAME_base (Ast.BASE_app (i, _)) ->
+                            lookup_by_ident cx scopes i
+                        | Ast.NAME_ext (n, ext) ->
+                            project_scopes_and_node (lookup_and_project n) ext
+                        | _ -> None
+                    in
+                      lookup_and_project name
+                  end
   in
   let check_slots scopes islots =
     arr_search islots
