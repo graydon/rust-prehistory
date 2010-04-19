@@ -453,6 +453,12 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           let bpos = lexpos ps in
             [| span ps apos bpos Ast.STMT_yield |]
 
+      | FAIL ->
+          bump ps;
+          expect ps SEMI;
+          let bpos = lexpos ps in
+            [| span ps apos bpos Ast.STMT_fail |]
+
       | JOIN ->
           bump ps;
           let (stmts, lval) = ctxt "stmts: task expr" parse_lval ps in

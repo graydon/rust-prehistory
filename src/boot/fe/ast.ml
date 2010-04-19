@@ -234,6 +234,7 @@ and stmt' =
   | STMT_alt_port of stmt_alt_port
 
   (* structural and misc stmts. *)
+  | STMT_fail
   | STMT_yield
   | STMT_join of lval
   | STMT_send of (lval * lval)
@@ -1096,6 +1097,9 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
             fmt ff ";"
           end
 
+      | STMT_fail -> fmt ff "fail;"
+      | STMT_yield -> fmt ff "yield;"
+
       | STMT_alt_tag _ -> fmt ff "?stmt_alt_tag?"
       | STMT_alt_type _ -> fmt ff "?stmt_alt_type?"
       | STMT_alt_port _ -> fmt ff "?stmt_alt_port?"
@@ -1106,7 +1110,6 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_slice _ -> fmt ff "?stmt_slice?"
       | STMT_init_chan _ -> fmt ff "?stmt_init_chan?"
       | STMT_init_port _ -> fmt ff "?stmt_init_port?"
-      | STMT_yield -> fmt ff "?stmt_yield?"
       | STMT_join _ -> fmt ff "?stmt_join?"
       | STMT_send _ -> fmt ff "?stmt_send?"
       | STMT_recv _ -> fmt ff "?stmt_recv?"

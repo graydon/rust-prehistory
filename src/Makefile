@@ -310,7 +310,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \
                       writealias.rs yield.rs yield2.rs) \
                     $(addprefix test/run-fail/,fail.rs linked-failure.rs \
-                      pred.rs vec_overrun.rs vec_underrun.rs) \
+                      pred.rs vec_overrun.rs vec_underrun.rs explicit-fail.rs) \
                     $(addprefix test/compile-fail/,rec-missing-fields.rs \
                       infinite-tag-type-recursion.rs \
                       infinite-vec-type-recursion.rs)

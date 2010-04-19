@@ -1583,6 +1583,22 @@ let trans_visitor
   and trans_yield () : unit =
     trans_void_upcall "upcall_yield" [| |];
 
+  and trans_fail () : unit =
+    let (filename, line, _) =
+      match !curr_stmt with
+          None -> ("<none>", 0, 0)
+        | Some stmt_id ->
+            match (Session.get_span cx.ctxt_sess stmt_id) with
+                None -> ("<none>", 0, 0)
+              | Some sp -> sp.lo
+    in
+      trans_void_upcall "upcall_fail"
+        [|
+          trans_static_string "explicit failure";
+          trans_static_string filename;
+          imm (Int64.of_int line)
+        |];
+
   and trans_join (task:Ast.lval) : unit =
     trans_void_upcall "upcall_join" [| trans_atom (Ast.ATOM_lval task) |]
 
@@ -3137,6 +3153,9 @@ let trans_visitor
 
       | Ast.STMT_yield ->
           trans_yield ()
+
+      | Ast.STMT_fail ->
+          trans_fail ()
 
       | Ast.STMT_join task ->
           trans_join task

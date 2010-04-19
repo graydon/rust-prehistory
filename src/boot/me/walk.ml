@@ -496,7 +496,8 @@ and walk_stmt
       | Ast.STMT_decl (Ast.DECL_slot (_, slot)) ->
           walk_slot_identified v slot
 
-      | Ast.STMT_yield ->
+      | Ast.STMT_yield
+      | Ast.STMT_fail ->
           ()
 
       | Ast.STMT_join task ->
