@@ -861,10 +861,6 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
         begin
           let referent = lval_to_referent cx nb.id in
             match htab_search cx.ctxt_all_defns referent with
-                (*
-                 * FIXME: returning empty params this way is wrong.
-                 * DEFN_item should hold an Ast.mod_item' decl.
-                 *)
                 Some (DEFN_item item) -> {node=item; id=referent}
               | _ -> bug () "lval does not name an item"
         end
@@ -1085,71 +1081,120 @@ let scope_stack_managing_visitor
 
 (* Generic lookup, used for slots, items, types, etc. *)
 
-let lookup_by_ident
+let rec lookup_by_ident
     (cx:ctxt)
     (scopes:scope list)
     (ident:Ast.ident)
     : ((scope list * node_id) option) =
-  let check_items items =
+  let rec check_items
+      (scopes:scope list)
+      ((view:Ast.mod_view),(items:Ast.mod_items))
+      (ident:Ast.ident)
+      : ((scope list * node_id) option) =
     match htab_search items ident with
-        None -> None
-      | Some i -> Some i.id
+        Some i -> Some (scopes, i.id)
+      | None ->
+          match htab_search view.Ast.view_imports ident with
+              None -> None
+            | Some (Ast.NAME_base (Ast.BASE_ident i))
+            | Some (Ast.NAME_base (Ast.BASE_app (i, _))) ->
+                lookup_by_ident cx scopes i
+            | Some name ->
+                begin
+                  let get_item node =
+                    match htab_search cx.ctxt_all_defns node with
+                        Some (DEFN_item item) -> item
+                      | Some _ -> err (Some node) "defn is not an item"
+                      | None -> bug () "missing defn"
+                  in
+                  let project_scopes_and_node sn ext =
+                    match sn with
+                        None -> None
+                      | Some (scopes, node) ->
+                          let item = get_item node in
+                          match (item.Ast.decl_item, ext) with
+                              (Ast.MOD_ITEM_mod md, Ast.COMP_ident i)
+                            | (Ast.MOD_ITEM_mod md, Ast.COMP_app (i, _))
+                              -> check_items scopes md i
+                            | _ -> None
+                  in
+                  let rec lookup_and_project n =
+                    match n with
+                        Ast.NAME_base (Ast.BASE_ident i)
+                      | Ast.NAME_base (Ast.BASE_app (i, _)) ->
+                          lookup_by_ident cx scopes i
+                      | Ast.NAME_ext (n, ext) ->
+                          project_scopes_and_node (lookup_and_project n) ext
+                      | _ -> None
+                  in
+                    lookup_and_project name
+                end
   in
-  let check_slots islots =
+  let check_slots scopes islots =
     arr_search islots
       (fun _ (sloti,ident') ->
          if ident = ident'
-         then Some sloti.id
+         then Some (scopes, sloti.id)
          else None)
   in
-  let check_params params =
+  let check_params scopes params =
     arr_search params
       (fun _ {node=(i,_); id=id} ->
-         if i = ident then Some id else None)
+         if i = ident then Some (scopes, id) else None)
   in
-  let check_scope scope =
+  let check_scope scopes scope =
     match scope with
         SCOPE_block block_id ->
           let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
           let block_items = Hashtbl.find cx.ctxt_block_items block_id in
             begin
               match htab_search block_slots (Ast.KEY_ident ident) with
-                  Some id -> Some id
-                | None -> htab_search block_items ident
+                  Some id -> Some (scopes, id)
+                | None ->
+                    match htab_search block_items ident with
+                        Some id -> Some (scopes, id)
+                      | None -> None
             end
 
       | SCOPE_crate crate ->
-          check_items (snd crate.node.Ast.crate_items)
+          check_items scopes crate.node.Ast.crate_items ident
 
       | SCOPE_mod_item item ->
           begin
             let item_match =
               match item.node.Ast.decl_item with
                   Ast.MOD_ITEM_fn f ->
-                    check_slots f.Ast.fn_input_slots
+                    check_slots scopes f.Ast.fn_input_slots
 
                 | Ast.MOD_ITEM_pred p ->
-                    check_slots p.Ast.pred_input_slots
+                    check_slots scopes p.Ast.pred_input_slots
 
                 | Ast.MOD_ITEM_obj obj ->
                     begin
                       match htab_search obj.Ast.obj_fns ident with
-                          Some fn -> Some fn.id
-                        | None -> check_slots obj.Ast.obj_state
+                          Some fn -> Some (scopes, fn.id)
+                        | None -> check_slots scopes obj.Ast.obj_state
                     end
 
-                | Ast.MOD_ITEM_mod (_, md) ->
-                    check_items md
+                | Ast.MOD_ITEM_mod md ->
+                    check_items scopes md ident
 
                 | _ -> None
             in
               match item_match with
                   Some _ -> item_match
-                | None -> check_params item.node.Ast.decl_params
+                | None -> check_params scopes item.node.Ast.decl_params
           end
-
   in
-    list_search_ctxt scopes check_scope
+  let rec search scopes =
+    match scopes with
+        [] -> None
+      | scope::rest ->
+          match check_scope scopes scope with
+              None -> search rest
+            | x -> x
+  in
+    search scopes
 ;;
 
 let lookup_by_temp

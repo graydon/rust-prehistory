@@ -2463,8 +2463,8 @@ let rec extract_mod_items
       | DW_TAG_module ->
           let ident = get_name die in
           let sub_mis = get_mod_items die in
-          let view = { Ast.view_imports = [||];
-                       Ast.view_exports = [||] }
+          let view = { Ast.view_imports = Hashtbl.create 0;
+                       Ast.view_exports = Hashtbl.create 0 }
           in
           let mi = Ast.MOD_ITEM_mod (view, sub_mis) in
             htab_put mis ident (decl (get_type_param_decls die) mi)

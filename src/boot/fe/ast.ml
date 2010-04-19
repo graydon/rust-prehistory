@@ -431,21 +431,14 @@ and mod_item_decl =
 and mod_item = mod_item_decl identified
 and mod_items = (ident, mod_item) Hashtbl.t
 
-and import =
-    {
-      import_from: name option;
-      import_item: ident;
-      import_as: ident;
-    }
-
 and export =
     EXPORT_all_decls
   | EXPORT_ident of ident
 
 and mod_view =
     {
-      view_imports: import array;
-      view_exports: export array;
+      view_imports: (ident, name) Hashtbl.t;
+      view_exports: (export, unit) Hashtbl.t;
     }
 
 and crate' =
@@ -1228,30 +1221,21 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
             fmt_obj ff id (Array.map (fun i -> i.node) params) obj
     end
 
-and fmt_import (ff:Format.formatter) (import:import) : unit =
+and fmt_import (ff:Format.formatter) (ident:ident) (name:name) : unit =
   fmt ff "@\n";
   fmt ff "import ";
-  if import.import_as <> import.import_item
-  then
-    fmt ff "%s = " import.import_as;
-  match import.import_from with
-      None ->
-        fmt_ident ff import.import_item
-    | Some from ->
-        fmt_name ff from;
-        fmt ff ".";
-        fmt_ident ff import.import_item;
+  fmt ff "%s = " ident;
+  fmt_name ff name;
 
-and fmt_export (ff:Format.formatter) (export:export) : unit =
+and fmt_export (ff:Format.formatter) (export:export) _ : unit =
   fmt ff "@\n";
   match export with
       EXPORT_all_decls -> fmt ff "export *;"
     | EXPORT_ident i -> fmt ff "export %s;" i
 
-
 and fmt_mod_view (ff:Format.formatter) (mv:mod_view) : unit =
-  Array.iter (fmt_import ff) mv.view_imports;
-  Array.iter (fmt_export ff) mv.view_exports
+  Hashtbl.iter (fmt_import ff) mv.view_imports;
+  Hashtbl.iter (fmt_export ff) mv.view_exports
 
 and fmt_mod_items (ff:Format.formatter) (mi:mod_items) : unit =
   Hashtbl.iter (fmt_mod_item ff) mi

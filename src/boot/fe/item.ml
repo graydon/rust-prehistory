@@ -5,8 +5,8 @@ open Parser;;
 
 (* Item grammar. *)
 
-let empty_view = { Ast.view_imports = [||];
-                   Ast.view_exports = [||] }
+let empty_view = { Ast.view_imports = Hashtbl.create 0;
+                   Ast.view_exports = Hashtbl.create 0 }
 ;;
 
 let rec parse_expr (ps:pstate) : (Ast.stmt array * Ast.expr) =
@@ -951,22 +951,22 @@ and note_required_mod
 
 and parse_import
     (ps:pstate)
-    : Ast.import =
+    (imports:(Ast.ident, Ast.name) Hashtbl.t)
+    : unit =
   let import a n =
-    match n with
-        Ast.NAME_ext (n, Ast.COMP_ident i) ->
-          { Ast.import_from = Some n;
-            Ast.import_item = i;
-            Ast.import_as =
-              match a with
-                  None -> i
-                | Some a -> a }
-      | Ast.NAME_base (Ast.BASE_ident i) ->
-          { Ast.import_from = None;
-            Ast.import_item = i;
-            Ast.import_as = i }
-      | _ ->
-          raise (Parse_err (ps, "bad import specification"))
+    let a = match a with
+        None ->
+          begin
+            match n with
+                Ast.NAME_ext (_, Ast.COMP_ident i)
+              | Ast.NAME_ext (_, Ast.COMP_app (i, _))
+              | Ast.NAME_base (Ast.BASE_ident i)
+              | Ast.NAME_base (Ast.BASE_app (i, _)) -> i
+              | _ -> raise (Parse_err (ps, "bad import specification"))
+          end
+      | Some i -> i
+    in
+      Hashtbl.add imports a n
   in
     match peek ps with
         IDENT i ->
@@ -993,11 +993,15 @@ and parse_import
 
 and parse_export
     (ps:pstate)
-    : Ast.export =
-  match peek ps with
-      STAR -> bump ps; Ast.EXPORT_all_decls
-    | IDENT i -> bump ps; Ast.EXPORT_ident i
-    | _ -> raise (unexpected ps)
+    (exports:(Ast.export, unit) Hashtbl.t)
+    : unit =
+  let e =
+    match peek ps with
+        STAR -> bump ps; Ast.EXPORT_all_decls
+      | IDENT i -> bump ps; Ast.EXPORT_ident i
+      | _ -> raise (unexpected ps)
+  in
+    Hashtbl.add exports e ()
 
 
 and parse_mod_items
@@ -1005,8 +1009,8 @@ and parse_mod_items
     (terminal:token)
     : (Ast.mod_view * Ast.mod_items) =
   ps.pstate_depth <- ps.pstate_depth + 1;
-  let imports = Queue.create () in
-  let exports = Queue.create () in
+  let imports = Hashtbl.create 0 in
+  let exports = Hashtbl.create 0 in
   let in_view = ref true in
   let items = Hashtbl.create 4 in
     while (not (peek ps = terminal))
@@ -1016,11 +1020,11 @@ and parse_mod_items
         match peek ps with
             IMPORT ->
               bump ps;
-              Queue.add (parse_import ps) imports;
+              parse_import ps imports;
               expect ps SEMI;
           | EXPORT ->
               bump ps;
-              Queue.add (parse_export ps) exports;
+              parse_export ps exports;
               expect ps SEMI;
           | _ ->
               in_view := false
@@ -1029,10 +1033,12 @@ and parse_mod_items
           htab_put items ident item;
           expand_tags_to_items ps item items;
     done;
+    if (Hashtbl.length exports) = 0
+    then Hashtbl.add exports Ast.EXPORT_all_decls ();
     expect ps terminal;
     ps.pstate_depth <- ps.pstate_depth - 1;
-    let view = { Ast.view_imports = queue_to_arr imports;
-                 Ast.view_exports = queue_to_arr exports }
+    let view = { Ast.view_imports = imports;
+                 Ast.view_exports = exports }
     in
       (view, items)
 ;;
