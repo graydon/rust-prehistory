@@ -2924,7 +2924,7 @@ let trans_visitor
     match fco with
         None -> [| |]
       | Some fc ->
-          abi.Abi.abi_iterator_extra_args fc.foreach_fixup fc.foreach_depth
+          abi.Abi.abi_iterator_extra_args (emitter ()) fc.foreach_fixup fc.foreach_depth
 
   and call_extra_args
       (flv:Ast.lval)

@@ -517,7 +517,7 @@ let frame_base_sz = Int64.mul (Int64.of_int frame_base_words) word_sz;;
 
 let frame_info_words = 2 (* crate ptr, crate-rel frame info disp *) ;;
 let frame_info_sz = Int64.mul (Int64.of_int frame_info_words) word_sz;;
-let loop_info_words = 3 (* iterator retpc, iterator esp, loop function esp *) ;;
+let loop_info_words = 7 (* iterator retpc, iterator esp, loop function esp, callee-saves (ebp,edi,esi,ebx) *) ;;
 let loop_info_sz = Int64.mul (Int64.of_int loop_info_words) word_sz;;
 
 let implicit_arg_words = 2 (* task ptr,out ptr *);;
@@ -1226,14 +1226,6 @@ let fn_tail_call
     emit (Il.jmp Il.JMP callee_code);
 ;;
 
-(*
-let loop_info_ty =
-  Il.StructTy [| Il.ScalarTy (Il.ValTy word_bits); (* iterator retpc *)
-                 Il.ScalarTy (Il.ValTy word_bits); (* iterator esp *)
-                 Il.ScalarTy (Il.ValTy word_bits); (* loop esp *)
-              |]
-;;
-*)
 
 let loop_info_field_iterator_retpc = 0;;
 let loop_info_field_iterator_sp = 1;;
@@ -1249,7 +1241,7 @@ let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
     mov (edx_n loop_info_field_iterator_sp) (ro esp)               (* extra_args[1] <- esp *)
 ;;
 
-(* precondition: esp = &ils[depth] *)
+(* precondition: esp == &ils[depth] *)
 let iteration_prologue
     (e:Il.emitter)
     (nabi:nabi)
@@ -1361,10 +1353,20 @@ let put (e:Il.emitter) : unit =
 ;;
 
 let iterator_extra_args
-    ((*foreach_loop*)_:Common.fixup)
-    ((*depth*)_:int)
+    (e:Il.emitter)
+    (foreach_loop:Common.fixup)
+    (depth:int)
     : Il.operand array =
-  [| |]
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
+  let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
+  let (_, tmpc) = vreg e in
+    mov tmpc (ro ebp);                                             (* tmp <- ebp *)
+    sub tmpc (imm (Asm.IMM ils_base));                             (* tmp <- &ils[depth] *)
+    let extra_arg0 = imm (Asm.M_SZ foreach_loop) in
+    let extra_arg1 = c tmpc in
+      [| extra_arg0; extra_arg1 |]
 ;;
 
 let activate_glue (e:Il.emitter) : unit =

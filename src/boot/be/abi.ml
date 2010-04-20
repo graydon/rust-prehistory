@@ -88,7 +88,7 @@ type abi =
     abi_emit_loop_epilogue: (Il.emitter -> int -> unit);
     abi_emit_put: (Il.emitter -> unit);
 
-    abi_iterator_extra_args: (Common.fixup -> int -> Il.operand array);
+    abi_iterator_extra_args: (Il.emitter -> Common.fixup -> int -> Il.operand array);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 
