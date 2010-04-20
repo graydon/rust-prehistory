@@ -1269,12 +1269,12 @@ let iteration_prologue
 
       (* this uses vregs, so we have to use vregs for temps from here on *)
       let callsz = get_callsz () in
-      let (tmp1, tmp1c) = vreg e in
+      let (tmp1, tmpc1) = vreg e in
       let (tmp2, _) = vreg e in
 
-        mov tmp1c (c task_ptr);                                    (* tmp1 <- task *)
-        mov tmp1c (c (word_n tmp1 Abi.task_field_stk));            (* tmp1 <- task->stk *)
-        add tmp1c (imm
+        mov tmpc1 (c task_ptr);                                    (* tmp1 <- task *)
+        mov tmpc1 (c (word_n tmp1 Abi.task_field_stk));            (* tmp1 <- task->stk *)
+        add tmpc1 (imm
                      (Asm.ADD
                         ((word_off_n Abi.stk_field_data),
                          boundary_sz)));
@@ -1287,10 +1287,28 @@ let iteration_prologue
 ;;
 
 let iteration_epilogue
-    ((*e*)_:Il.emitter)
-    ((*it_ptr_reg*)_:Il.reg)
+    (e:Il.emitter)
+    (depth:int)
+    (it_ptr_reg:Il.reg)
     : unit =
-  ()
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let add dst src = emit (Il.binary Il.ADD dst (Il.Cell dst) src) in
+  (* FIXME: abstract all this arithmetic *)
+  let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
+  let it_retpc_idx = Int64.mul (Int64.of_int loop_info_field_iterator_retpc) word_sz in
+  let it_retpc_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_retpc_idx)) in
+  let it_esp_idx = Int64.mul (Int64.of_int loop_info_field_iterator_sp) word_sz in
+  let it_esp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_esp_idx)) in
+  let callee_saves_idx = Int64.mul (Int64.of_int loop_info_field_callee_saves) word_sz in
+  let callee_saves_off = Asm.IMM (Int64.neg (Int64.sub ils_base callee_saves_idx)) in
+    mov (r it_ptr_reg) (c (word_at_off (h ebp) it_retpc_off));     (* it <- ils[depth].it_retpc *)
+    mov (rc esp) (c (word_at_off (h ebp) it_esp_off));             (* esp <- ils[depth].it_esp *)
+    let (tmp, tmpc) = vreg e in
+      mov tmpc (ro ebp);                                           (* tmp <- ebp *)
+      add tmpc (imm callee_saves_off);                             (* tmp += offsetof(it_callee_saves) *)
+      restore_callee_saves_at e tmp;                               (* restore iterator callee-saves *)
+      emit (Il.jmp Il.JMP (Il.CodePtr (c (r it_ptr_reg))))         (* jmp it *)
 ;;
 
 let loop_prologue

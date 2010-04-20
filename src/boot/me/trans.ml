@@ -3114,6 +3114,7 @@ let trans_visitor
         CLONE_none dst_cell dst_slot at
 
   and trans_foreach_body
+      (depth:int)
       (it_ptr_reg:Il.reg)
       (body:Ast.block)
       : unit =
@@ -3123,7 +3124,7 @@ let trans_visitor
       begin
         abi.Abi.abi_emit_iteration_prologue (emitter ()) nabi_rust (upcall_fixup "upcall_grow_task") get_callsz;
         trans_block body;
-        abi.Abi.abi_emit_iteration_epilogue (emitter ()) it_ptr_reg;
+        abi.Abi.abi_emit_iteration_epilogue (emitter ()) depth it_ptr_reg;
       end
 
   and trans_stmt_full (stmt:Ast.stmt) : unit =
@@ -3396,7 +3397,7 @@ let trans_visitor
                   emit (Il.jmp Il.JMP Il.CodeNone);                          (* jump L2 *)
 
                   emit (Il.Enter body_fixup);                                (* L1: *)
-                  trans_foreach_body it_ptr_reg fe.Ast.foreach_body;         (* loop body *)
+                  trans_foreach_body depth it_ptr_reg fe.Ast.foreach_body;   (* loop body *)
                   patch jmp;                                                 (* L2: *)
                   call_code (code_of_operand (Il.Cell it_ptr_cell));         (* call p *)
                   emit Il.Leave;
