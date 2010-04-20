@@ -3521,10 +3521,6 @@ struct command_line_args
             dom.win32_require("WideCharToMultiByte(1)", n_chars != 0);
         }
         LocalFree(wargv);
-#elif defined(__linux__)
-#else
-        argc = 0;
-        argv = NULL;
 #endif
         size_t vec_fill = sizeof(rust_str *) * argc;
         size_t vec_alloc = next_power_of_two(sizeof(rust_vec) + vec_fill);

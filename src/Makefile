@@ -321,10 +321,6 @@ TEST_XFAILS_X86 += test/run-pass/native_mod.rc
 TEST_XFAILS_LLVM += test/run-pass/native_mod.rc
 endif
 
-ifeq ($(CFG_OSTYPE), Darwin)
-TEST_XFAILS_X86 += test/run-pass/command-line-args.rs
-endif
-
 TEST_RUN_PASS_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-pass/*.rc))
 TEST_RUN_PASS_CRATES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(wildcard test/run-pass/*.rc))
 TEST_RUN_PASS_SOURCES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-pass/*.rs))
