@@ -882,17 +882,19 @@ let stack_growth_check
     (nabi:nabi)
     (grow_task_fixup:fixup)
     (growsz:Il.operand)
-    (grow_jmp:int option)
-    (restart_pc:int)
+    (grow_jmp:Il.label option)
+    (restart_pc:Il.label)
+    (end_reg:Il.reg)                              (* stack limit on entry, new stack pointer on exit *)
+    (tmp_reg:Il.reg)                              (* temporary (trashed) *)
     : unit =
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
   let add dst src = emit (Il.binary Il.ADD dst (Il.Cell dst) src) in
   let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
-    mov (rc edi) (ro esp);                        (* edi = esp                 *)
-    sub (rc edi) growsz;                          (* edi -= size-request       *)
-    emit (Il.cmp (ro esi) (ro edi));
-    (* Jump *over* 'grow' upcall on non-underflow: if esi (bottom) is <= edi (proposed-esp) *)
+    mov (r tmp_reg) (ro esp);                     (* tmp = esp                 *)
+    sub (r tmp_reg) growsz;                       (* tmp -= size-request       *)
+    emit (Il.cmp (c (r end_reg)) (c (r tmp_reg)));
+    (* Jump *over* 'grow' upcall on non-underflow: if end_reg <= tmp_reg *)
 
     let bypass_grow_upcall_jmp_pc = e.Il.emit_pc in
       emit (Il.jmp Il.JBE Il.CodeNone);
@@ -902,17 +904,14 @@ let stack_growth_check
             None -> ()
           | Some j -> Il.patch_jump e j e.Il.emit_pc
       end;
-      (* Extract growth-amount from edi. *)
-      mov (rc esi) (ro esp);
-      sub (rc esi) (ro edi);
-      add (rc esi) (Il.Imm (boundary_sz, word_ty));
+      (* Extract growth-amount from tmp_reg. *)
+      mov (r end_reg) (ro esp);
+      sub (r end_reg) (c (r tmp_reg));
+      add (r end_reg) (Il.Imm (boundary_sz, word_ty));
       (* Perform 'grow' upcall, then restart frame-entry. *)
-      emit_void_prologue_call e nabi grow_task_fixup [| ro esi |];
+      emit_void_prologue_call e nabi grow_task_fixup [| c (r end_reg) |];
       emit (Il.jmp Il.JMP (Il.CodeLabel restart_pc));
-      Il.patch_jump e bypass_grow_upcall_jmp_pc e.Il.emit_pc;
-
-      (* Establish a frame, wherever we landed. *)
-      sub (rc esp) growsz
+      Il.patch_jump e bypass_grow_upcall_jmp_pc e.Il.emit_pc
 ;;
 
 let fn_prologue
@@ -1042,7 +1041,12 @@ let fn_prologue
       in
 
         (* "Full" frame size-check. *)
-        stack_growth_check e nabi grow_task_fixup dynamic_frame_sz dynamic_grow_jmp restart_pc;
+        stack_growth_check e nabi grow_task_fixup
+          dynamic_frame_sz dynamic_grow_jmp restart_pc (h esi) (h edi);
+
+
+        (* Establish a frame, wherever we landed. *)
+        sub (rc esp) dynamic_frame_sz;
 
         (* Zero the frame.
          *
@@ -1234,6 +1238,7 @@ let loop_info_ty =
 let loop_info_field_iterator_retpc = 0;;
 let loop_info_field_iterator_sp = 1;;
 let loop_info_field_loop_fn_sp = 2;;
+let loop_info_field_callee_saves = 3;;
 
 let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
   let edx_n = word_n (h edx) in
@@ -1244,17 +1249,45 @@ let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
     mov (edx_n loop_info_field_iterator_sp) (ro esp)               (* extra_args[1] <- esp *)
 ;;
 
+(* precondition: esp = &ils[depth] *)
 let iteration_prologue
-    ((*e*)_:Il.emitter)
-    ((*depth*)_:int)
-    ((*get_callsz*)_:unit -> Il.operand)
+    (e:Il.emitter)
+    (nabi:nabi)
+    (grow_task_fixup:fixup)
+    (get_callsz:unit -> Il.operand)
     : unit =
-  ()
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
+  let add dst src = emit (Il.binary Il.ADD dst (Il.Cell dst) src) in
+  let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
+    mov (rc edx) (ro esp);                                         (* edx <- &ils[depth] *)
+    mov (rc esp) (c (word_n (h esp) loop_info_field_iterator_sp)); (* esp <- ils[depth].it_esp *)
+    save_callee_saves_at e (h edx);                                (* save iterator's callee-saves *)
+
+    let restart_pc = e.Il.emit_pc in
+      mov (rc ebp) (ro esp);                                       (* establish frame base *)
+
+      (* this uses vregs, so we have to use vregs for temps from here on *)
+      let callsz = get_callsz () in
+      let (tmp1, tmp1c) = vreg e in
+      let (tmp2, _) = vreg e in
+
+        mov tmp1c (c task_ptr);                                    (* tmp1 <- task *)
+        mov tmp1c (c (word_n tmp1 Abi.task_field_stk));            (* tmp1 <- task->stk *)
+        add tmp1c (imm
+                     (Asm.ADD
+                        ((word_off_n Abi.stk_field_data),
+                         boundary_sz)));
+
+        stack_growth_check e nabi grow_task_fixup                  (* check for stack space *)
+          callsz None restart_pc tmp1 tmp2;
+
+        (* Establish a frame, wherever we landed. *)
+        sub (rc esp) callsz
 ;;
 
 let iteration_epilogue
     ((*e*)_:Il.emitter)
-    ((*depth*)_:int)
     ((*it_ptr_reg*)_:Il.reg)
     : unit =
   ()
