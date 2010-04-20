@@ -1458,15 +1458,43 @@ let objfile_start
     ~(crate_fixup:fixup)
     ~(indirect_start:bool)
     : unit =
+  let ebp_n = word_n (Il.Hreg ebp) in
+  let emit = Il.emit e in
+  let mov dst src = emit (Il.umov dst src) in
   let push_pos32 = push_pos32 e in
     Il.emit_full e (Some start_fixup) Il.Dead;
     save_callee_saves e;
-    Il.emit e (Il.umov (rc ebp) (ro esp));
-    Il.emit e (Il.Push (immi 0L));
+    mov (rc ebp) (ro esp);
+
+    (* If we're very lucky, the platform will have left us with
+     * something sensible in the startup stack like so:
+     * 
+     *   *ebp+24       = [arg1   ] = argv
+     *   *ebp+20       = [arg0   ] = argc
+     *   *ebp+16       = [retpc  ]
+     *   *ebp+12       = [old_ebp]
+     *   *ebp+8        = [old_edi]
+     *   *ebp+4        = [old_esi]
+     *   *ebp          = [old_ebx]
+     * 
+     * This is not the case everywhere, but we start with this
+     * assumption and correct it in the runtime library.
+     *)
+
+    (* Copy argv. *)
+    mov (rc eax) (c (ebp_n (2 + n_callee_saves)));
+    Il.emit e (Il.Push (ro eax));
+
+    (* Copy argc. *)
+    mov (rc eax) (c (ebp_n (1 + n_callee_saves)));
+    Il.emit e (Il.Push (ro eax));
+
     push_pos32 crate_fixup;
     push_pos32 main_fn_fixup;
     let fptr = Abi.load_fixup_codeptr e (h eax) rust_start_fixup true indirect_start in
       Il.emit e (Il.call (rc eax) fptr);
+      Il.emit e (Il.Pop (rc ecx));
+      Il.emit e (Il.Pop (rc ecx));
       Il.emit e (Il.Pop (rc ecx));
       Il.emit e (Il.Pop (rc ecx));
       Il.emit e (Il.umov (rc esp) (ro ebp));

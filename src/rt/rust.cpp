@@ -3489,13 +3489,62 @@ implode(rust_task *task, rust_vec *v)
     return s;
 }
 
+struct command_line_args
+{
+    rust_dom &dom;
+    int argc;
+    char **argv;
+
+    command_line_args(rust_dom &dom,
+                      int sys_argc,
+                      char **sys_argv)
+        : dom(dom),
+          argc(sys_argc),
+          argv(sys_argv)
+    {
+#ifdef __WIN32__
+        LPCWSTR cmdline = GetCommandLineW();
+        LPWSTR *wargv = CommandLineToArgvW(cmdline, &argc);
+        dom.win32_require("CommandLineToArgvW", argv != NULL);
+        argv = (char **) dom.malloc(sizeof(char*) * argc);
+        for (int i = 0; i < argc; ++i) {
+            int n_chars = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1,
+                                              NULL, 0, NULL, NULL);
+            dom.win32_require("WideCharToMultiByte(0)", n_chars != 0);
+            argv[i] = (char *) dom.malloc(n_chars);
+            n_chars = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1,
+                                          argv[i], n_chars, NULL, NULL);
+            dom.win32_require("WideCharToMultiByte(1)", n_chars != 0);
+        }
+        LocalFree(wargv);
+#else
+        argc = 0;
+        argv = NULL;
+#endif
+    }
+
+    ~command_line_args() {
+#ifdef __WIN32__
+        for (int i = 0; i < argc; ++i) {
+            dom.free(argv[i]);
+        }
+        dom.free(argv);
+#endif
+    }
+};
+
 extern "C" CDECL int
-rust_start(uintptr_t main_fn, rust_crate const *crate)
+rust_start(uintptr_t main_fn, rust_crate const *crate, int argc, char **argv)
 {
     int ret;
     {
         rust_srv srv;
         rust_dom dom(&srv, crate);
+        command_line_args args(dom, argc, argv);
+
+        dom.log(LOG_ALL, "startup: %d args", args.argc);
+        for (int i = 0; i < args.argc; ++i)
+            dom.log(LOG_ALL, "startup: arg[%d] = '%s'", i, args.argv[i]);
 
         if (dom.logbits & LOG_DWARF) {
             rust_crate_reader rdr(&dom, crate);
