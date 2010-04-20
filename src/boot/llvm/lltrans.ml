@@ -182,6 +182,7 @@ let trans_crate
       | Ast.TY_bool -> Llvm.i1_type llctx
       | Ast.TY_mach mty -> trans_mach_ty mty
       | Ast.TY_int -> word_ty
+      | Ast.TY_uint -> word_ty
       | Ast.TY_char -> Llvm.i32_type llctx
       | Ast.TY_str -> Llvm.pointer_type (Llvm.i8_type llctx)
       | Ast.TY_fn
