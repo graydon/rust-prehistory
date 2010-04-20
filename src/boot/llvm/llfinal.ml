@@ -64,6 +64,8 @@ let finalize_module
     let main_ty = Llvm.function_type i32 [| i32; i32 |] in
     Llvm.define_function "main" main_ty llmod
   in
+  let argc = Llvm.param main_fn 0 in
+  let argv = Llvm.param main_fn 1 in
   let main_builder = Llvm.builder_at_end llctx (Llvm.entry_block main_fn) in
   let rust_main_fn =
     match Llvm.lookup_function "_rust_main" llmod with
@@ -71,7 +73,7 @@ let finalize_module
       | Some fn -> fn
   in
   let rust_start = abi.Llabi.rust_start in
-  let rust_start_args = [| rust_main_fn; crate_ptr |] in
+  let rust_start_args = [| rust_main_fn; crate_ptr; argc; argv |] in
     ignore (Llvm.build_call rust_start rust_start_args "start_rust" main_builder);
     ignore (Llvm.build_ret (Llvm.const_int i32 0) main_builder)
 ;;

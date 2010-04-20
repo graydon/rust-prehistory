@@ -3506,7 +3506,7 @@ struct command_line_args
           argv(sys_argv),
           args(NULL)
     {
-#ifdef __WIN32__
+#if defined(__WIN32__)
         LPCWSTR cmdline = GetCommandLineW();
         LPWSTR *wargv = CommandLineToArgvW(cmdline, &argc);
         dom.win32_require("CommandLineToArgvW", argv != NULL);
@@ -3521,6 +3521,7 @@ struct command_line_args
             dom.win32_require("WideCharToMultiByte(1)", n_chars != 0);
         }
         LocalFree(wargv);
+#elif defined(__linux__)
 #else
         argc = 0;
         argv = NULL;
@@ -3541,11 +3542,13 @@ struct command_line_args
     }
 
     ~command_line_args() {
-        // FIXME (bug 560452): horrible hack to handle non-cascading vec drop glue.
-        rust_str **strs = (rust_str**) &args->data[0];
-        for (int i = 0; i < argc; ++i)
-            dom.free(strs[i]);
-        dom.free(args);
+        if (args) {
+            // FIXME (bug 560452): horrible hack to handle non-cascading vec drop glue.
+            rust_str **strs = (rust_str**) &args->data[0];
+            for (int i = 0; i < argc; ++i)
+                dom.free(strs[i]);
+            dom.free(args);
+        }
 
 #ifdef __WIN32__
         for (int i = 0; i < argc; ++i) {

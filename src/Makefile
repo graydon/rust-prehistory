@@ -301,7 +301,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       fun-indirect-call.rs generic-fn.rs hello.rs \
                       inner-module.rs large-records.rs lazychan.rs \
                       linear-for-loop.rs many.rs mlist.rs mlist_cycle.rs \
-                      mutual-recursion-group.rs native.rc \
+                      mutual-recursion-group.rs native.rc command-line-args.rs \
                       native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \
                       rec-extend.rs rec.rs rec_tup.rs return-nil.rs \
                       s32-sub.rs s8-incr.rs spawn-fn.rs spawn.rs \
@@ -319,9 +319,10 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
 ifdef CFG_WINDOWSY
 TEST_XFAILS_X86 += test/run-pass/native_mod.rc
 TEST_XFAILS_LLVM += test/run-pass/native_mod.rc
-else
+endif
+
+ifeq ($(CFG_OSTYPE), Darwin)
 TEST_XFAILS_X86 += test/run-pass/command-line-args.rs
-TEST_XFAILS_LLVM += test/run-pass/command-line-args.rs
 endif
 
 TEST_RUN_PASS_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-pass/*.rc))

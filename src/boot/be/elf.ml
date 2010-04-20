@@ -1476,7 +1476,7 @@ let emit_file
 
   let init_fixup = new_fixup "_init function entry" in
   let fini_fixup = new_fixup "_fini function entry" in
-  let start_fixup = new_fixup "start function entry" in
+  let main_fixup = new_fixup "start function entry" in
   let rust_start_fixup = (Semant.require_native sem REQUIRED_LIB_rustrt "rust_start") in
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
@@ -1486,6 +1486,14 @@ let emit_file
       (Il.Push (Il.Cell (Il.Reg (Il.Hreg r, Il.ValTy Il.Bits32))))
     in
     let push_pos32 = X86.push_pos32 e in
+
+      Il.emit e (Il.unary Il.UMOV (X86.rc X86.ebp) (X86.immi 0L));
+      Il.emit e (Il.Pop (X86.rc X86.esi));
+      Il.emit e (Il.unary Il.UMOV (X86.rc X86.ecx) (X86.ro X86.esp));
+      Il.emit e (Il.binary Il.AND
+                   (X86.rc X86.esp) (X86.ro X86.esp)
+                   (X86.immi 0xfffffffffffffff0L));
+
       push_r32 X86.eax;
       push_r32 X86.esp;
       push_r32 X86.edx;
@@ -1493,7 +1501,7 @@ let emit_file
       push_pos32 init_fixup;
       push_r32 X86.ecx;
       push_r32 X86.esi;
-      push_pos32 start_fixup;
+      push_pos32 main_fixup;
       Il.emit e (Il.call
                    (Il.Reg (Il.Hreg X86.eax, Il.ValTy Il.Bits32))
                    (Il.direct_code_ptr libc_start_main_fixup));
@@ -1509,7 +1517,7 @@ let emit_file
   let main_fn =
     let e = X86.new_emitter_without_vregs () in
       X86.objfile_start e
-        ~start_fixup ~rust_start_fixup
+        ~start_fixup: main_fixup ~rust_start_fixup
         ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
         ~crate_fixup: sem.Semant.ctxt_crate_fixup
         ~indirect_start: false;
