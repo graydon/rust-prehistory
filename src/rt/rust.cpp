@@ -3064,8 +3064,8 @@ upcall_new_str(rust_task *task, char const *s, size_t fill)
     rust_dom *dom = task->dom;
     dom->log(LOG_UPCALL|LOG_MEM,
              "upcall new_str('%s', %" PRIdPTR ")", s, fill);
-    size_t alloc = next_power_of_two(fill);
-    void *mem = dom->malloc(sizeof(rust_str) + alloc);
+    size_t alloc = next_power_of_two(sizeof(rust_str) + fill);
+    void *mem = dom->malloc(alloc);
     rust_str *st = new (mem) rust_str(dom, alloc, fill, s);
     dom->log(LOG_UPCALL|LOG_MEM,
              "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
@@ -3089,12 +3089,12 @@ upcall_str_concat(rust_task *task, rust_str *dst, rust_str *a, rust_str *b)
     LOG_UPCALL_ENTRY(task);
 
     size_t fill = a->fill + b->fill - 1;
-    size_t alloc = next_power_of_two(fill);
+    size_t alloc = next_power_of_two(sizeof(rust_str) + fill);
 
     // fast path
     if (dst == a && a->refcnt == 1) {
         if (alloc > a->alloc) {
-            void *mem = task->dom->realloc(a, sizeof(rust_str) + alloc);
+            void *mem = task->dom->realloc(a, alloc);
             a = static_cast<rust_str *>(mem);
             a->alloc = alloc;
         }
@@ -3438,8 +3438,8 @@ extern "C" CDECL rust_str*
 str_alloc(rust_task *task, size_t n_bytes)
 {
     rust_dom *dom = task->dom;
-    size_t alloc = next_power_of_two(n_bytes);
-    void *mem = dom->malloc(sizeof(rust_str) + alloc);
+    size_t alloc = next_power_of_two(sizeof(rust_str) + n_bytes);
+    void *mem = dom->malloc(alloc);
     rust_str *st = new (mem) rust_str(dom, alloc, 1, "");
     if (!st)
         task->fail(2);
@@ -3452,8 +3452,8 @@ vec_alloc(rust_task *task, type_desc *t, size_t n_elts)
     rust_dom *dom = task->dom;
     dom->log(LOG_MEM, "vec_alloc %" PRIdPTR " elements of size %" PRIdPTR,
              n_elts, t->size);
-    size_t n_bytes = n_elts * t->size;
-    size_t alloc = next_power_of_two(n_bytes + sizeof(rust_vec));
+    size_t fill = n_elts * t->size;
+    size_t alloc = next_power_of_two(sizeof(rust_vec) + fill);
     void *mem = dom->malloc(alloc);
     rust_vec *vec = new (mem) rust_vec(alloc, 0);
     if (!vec)
@@ -3495,12 +3495,16 @@ struct command_line_args
     int argc;
     char **argv;
 
+    // vec[str] passed to rust_task::start.
+    rust_vec *args;
+
     command_line_args(rust_dom &dom,
                       int sys_argc,
                       char **sys_argv)
         : dom(dom),
           argc(sys_argc),
-          argv(sys_argv)
+          argv(sys_argv),
+          args(NULL)
     {
 #ifdef __WIN32__
         LPCWSTR cmdline = GetCommandLineW();
@@ -3521,9 +3525,28 @@ struct command_line_args
         argc = 0;
         argv = NULL;
 #endif
+        size_t vec_fill = sizeof(rust_str *) * argc;
+        size_t vec_alloc = next_power_of_two(sizeof(rust_vec) + vec_fill);
+        void *mem = dom.malloc(vec_alloc);
+        args = new (mem) rust_vec(vec_alloc, vec_fill);
+        rust_str **strs = (rust_str**) &args->data[0];
+        for (int i = 0; i < argc; ++i) {
+            size_t str_fill = strlen(argv[i]) + 1;
+            size_t str_alloc = next_power_of_two(sizeof(rust_str) + str_fill);
+            mem = dom.malloc(str_alloc);
+            strs[i] = new (mem) rust_str(&dom, str_alloc, str_fill, argv[i]);
+        }
+        // FIXME (bug 560452): horrible hack to handle non-cascading vec drop glue.
+        args->ref();
     }
 
     ~command_line_args() {
+        // FIXME (bug 560452): horrible hack to handle non-cascading vec drop glue.
+        rust_str **strs = (rust_str**) &args->data[0];
+        for (int i = 0; i < argc; ++i)
+            dom.free(strs[i]);
+        dom.free(args);
+
 #ifdef __WIN32__
         for (int i = 0; i < argc; ++i) {
             dom.free(argv[i]);
@@ -3542,16 +3565,20 @@ rust_start(uintptr_t main_fn, rust_crate const *crate, int argc, char **argv)
         rust_dom dom(&srv, crate);
         command_line_args args(dom, argc, argv);
 
-        dom.log(LOG_ALL, "startup: %d args", args.argc);
+        dom.log(LOG_DOM, "startup: %d args", args.argc);
         for (int i = 0; i < args.argc; ++i)
-            dom.log(LOG_ALL, "startup: arg[%d] = '%s'", i, args.argv[i]);
+            dom.log(LOG_DOM, "startup: arg[%d] = '%s'", i, args.argv[i]);
 
         if (dom.logbits & LOG_DWARF) {
             rust_crate_reader rdr(&dom, crate);
         }
 
+        uintptr_t main_args[3] = { 0, 0, (uintptr_t)args.args };
+
         dom.root_task->start(crate->get_main_exit_task_glue(),
-                             main_fn, NULL, 0);
+                             main_fn,
+                             (uintptr_t)&main_args,
+                             sizeof(main_args));
 
         ret = rust_main_loop(&dom);
     }

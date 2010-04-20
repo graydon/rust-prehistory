@@ -310,13 +310,18 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \
                       writealias.rs yield.rs yield2.rs) \
                     $(addprefix test/run-fail/,fail.rs linked-failure.rs \
-                      pred.rs vec_overrun.rs vec_underrun.rs explicit-fail.rs) \
+                      pred.rs vec_overrun.rs str_overrun.rs vec_underrun.rs \
+                      explicit-fail.rs) \
                     $(addprefix test/compile-fail/,rec-missing-fields.rs \
                       infinite-tag-type-recursion.rs \
                       infinite-vec-type-recursion.rs)
 
 ifdef CFG_WINDOWSY
 TEST_XFAILS_X86 += test/run-pass/native_mod.rc
+TEST_XFAILS_LLVM += test/run-pass/native_mod.rc
+else
+TEST_XFAILS_X86 += test/run-pass/command-line-args.rs
+TEST_XFAILS_LLVM += test/run-pass/command-line-args.rs
 endif
 
 TEST_RUN_PASS_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-pass/*.rc))
