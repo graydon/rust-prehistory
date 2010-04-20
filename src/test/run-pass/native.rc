@@ -9,4 +9,4 @@ native mod libc = target_libc {
   fn puts(int s) -> ();
 }
 
-mod user = "native.rs";
+mod user = "native_src/native.rs";

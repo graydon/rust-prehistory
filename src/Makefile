@@ -301,7 +301,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       fun-indirect-call.rs generic-fn.rs hello.rs \
                       inner-module.rs large-records.rs lazychan.rs \
                       linear-for-loop.rs many.rs mlist.rs mlist_cycle.rs \
-                      mutual-recursion-group.rs native.rc native.rs \
+                      mutual-recursion-group.rs native.rc \
                       native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \
                       rec-extend.rs rec.rs rec_tup.rs return-nil.rs \
                       s32-sub.rs s8-incr.rs spawn-fn.rs spawn.rs \
