@@ -1281,7 +1281,7 @@ let iteration_prologue
 let iteration_epilogue
     (e:Il.emitter)
     (depth:int)
-    (it_ptr_reg:Il.reg)
+    (it_ptr_cell:Il.cell)
     : unit =
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
@@ -1294,13 +1294,13 @@ let iteration_epilogue
   let it_esp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_esp_idx)) in
   let callee_saves_idx = Int64.mul (Int64.of_int loop_info_field_callee_saves) word_sz in
   let callee_saves_off = Asm.IMM (Int64.neg (Int64.sub ils_base callee_saves_idx)) in
-    mov (r it_ptr_reg) (c (word_at_off (h ebp) it_retpc_off));     (* it <- ils[depth].it_retpc *)
+    mov it_ptr_cell (c (word_at_off (h ebp) it_retpc_off));        (* it <- ils[depth].it_retpc *)
     mov (rc esp) (c (word_at_off (h ebp) it_esp_off));             (* esp <- ils[depth].it_esp *)
     let (tmp, tmpc) = vreg e in
       mov tmpc (ro ebp);                                           (* tmp <- ebp *)
       add tmpc (imm callee_saves_off);                             (* tmp += offsetof(it_callee_saves) *)
       restore_callee_saves_at e tmp;                               (* restore iterator callee-saves *)
-      emit (Il.jmp Il.JMP (Il.CodePtr (c (r it_ptr_reg))))         (* jmp it *)
+      emit (Il.jmp Il.JMP (Il.CodePtr (c it_ptr_cell)))            (* jmp it *)
 ;;
 
 let loop_prologue
