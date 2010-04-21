@@ -377,6 +377,7 @@ and binop =
 and unop =
     UNOP_not
   | UNOP_neg
+  | UNOP_cast of ty
 
 
 and header_slots = ((slot identified) * ident) array
@@ -755,13 +756,23 @@ and fmt_binop (ff:Format.formatter) (b:binop) : unit =
     end
 
 
-and fmt_unop (ff:Format.formatter) (u:unop) : unit =
-  fmt ff "%s"
-    begin
-      match u with
-          UNOP_not -> "!"
-        | UNOP_neg -> "-"
-    end
+and fmt_unop (ff:Format.formatter) (u:unop) (a:atom) : unit =
+  begin
+    match u with
+        UNOP_not ->
+          fmt ff "!";
+          fmt_atom ff a
+
+      | UNOP_neg ->
+          fmt ff "-";
+          fmt_atom ff a
+
+      | UNOP_cast t ->
+          fmt_ty ff t;
+          fmt ff "(";
+          fmt_atom ff a;
+          fmt ff ")"
+  end
 
 and fmt_expr (ff:Format.formatter) (e:expr) : unit =
   match e with
@@ -775,8 +786,7 @@ and fmt_expr (ff:Format.formatter) (e:expr) : unit =
       end
   | EXPR_unary (u,a) ->
       begin
-        fmt_unop ff u;
-        fmt_atom ff a
+        fmt_unop ff u a;
       end
   | EXPR_atom a -> fmt_atom ff a
 

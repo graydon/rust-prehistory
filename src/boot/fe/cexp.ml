@@ -428,6 +428,7 @@ and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
                 CVAL_bool (not (eval_pexp_to_bool env a))
             | Ast.UNOP_neg ->
                 CVAL_num (Int64.neg (eval_pexp_to_num env a))
+            | _ -> bug () "Unexpected unop in Cexp.eval_pexp"
         end
 
     | Pexp.PEXP_lval (Pexp.PLVAL_ident ident) ->

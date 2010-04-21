@@ -545,54 +545,88 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                 end
         end
 
-    | UINT ->
-        bump ps;
-        let inner ps =
+    | (INT | UINT) as tok ->
+        begin
+          bump ps;
+          expect ps LPAREN;
           match peek ps with
-              LIT_INT (n, s) -> bump ps; (n, s)
-            | _ -> raise (unexpected ps)
-        in
-        let (num, str) = bracketed LPAREN RPAREN inner ps in
-        let bpos = lexpos ps in
-            span ps apos bpos (PEXP_lit (Ast.LIT_uint (num, str)))
+              LIT_INT i ->
+                bump ps;
+                expect ps RPAREN;
+                let bpos = lexpos ps in
+                  span ps apos bpos
+                    (PEXP_lit
+                       (if tok = INT
+                        then (Ast.LIT_int i)
+                        else (Ast.LIT_uint i)))
+
+          | _ ->
+              let pexp = parse_pexp ps in
+                expect ps RPAREN;
+                let bpos = lexpos ps in
+                let t =
+                  if tok = INT
+                  then Ast.TY_int
+                  else Ast.TY_uint
+                in
+                  span ps apos bpos
+                    (PEXP_unop ((Ast.UNOP_cast t), pexp))
+        end
 
     | MACH m ->
-        bump ps;
-        let inner ps =
-          match peek ps with
-              LIT_INT (n,s) -> bump ps; (n,s)
+        let literal (num, str) =
+          let _ = bump ps in
+          let _ = expect ps RPAREN in
+          let bpos = lexpos ps in
+          let check_range (lo:int64) (hi:int64) : unit =
+            if (num < lo) or (num > hi)
+            then raise (err (Printf.sprintf
+                               "integral literal %Ld out of range [%Ld,%Ld]"
+                               num lo hi) ps)
+            else ()
+          in
+            begin
+              match m with
+                  TY_u8 -> check_range 0L 0xffL
+                | TY_u16 -> check_range 0L 0xffffL
+                | TY_u32 -> check_range 0L 0xffffffffL
+                    (* | TY_u64 -> ... *)
+                | TY_s8 -> check_range (-128L) 127L
+                | TY_s16 -> check_range (-32768L) 32767L
+                | TY_s32 -> check_range (-2147483648L) 2147483647L
+                    (*
+                      | TY_s64 -> ...
+                      | TY_f32 -> ...
+                      | TY_f64 -> ...
+                    *)
+                | _ -> ()
+            end;
+            span ps apos bpos
+              (PEXP_lit
+                 (Ast.LIT_mach
+                    (m, num, str)))
+
+        in
+          begin
+            bump ps;
+            expect ps LPAREN;
+            match peek ps with
+                LIT_INT (n,s) -> literal (n,s)
               | MINUS ->
                   begin
                     bump ps;
                     match peek ps with
-                        LIT_INT (n,s) -> bump ps; (Int64.neg n, "-" ^ s)
+                        LIT_INT (n,s) ->
+                          literal (Int64.neg n, "-" ^ s)
                       | _ -> raise (unexpected ps)
                   end
-              | _ -> raise (unexpected ps)
-        in
-        let (num, str) = bracketed LPAREN RPAREN inner ps in
-        let bpos = lexpos ps in
-        let check_range (lo:int64) (hi:int64) : unit =
-          if (num < lo) or (num > hi)
-          then raise (err (Printf.sprintf "integral literal %Ld out of range [%Ld,%Ld]" num lo hi) ps)
-          else ()
-        in
-          begin
-            (match m with
-                 TY_u8 -> check_range 0L 0xffL
-               | TY_u16 -> check_range 0L 0xffffL
-               | TY_u32 -> check_range 0L 0xffffffffL
-               (* | TY_u64 -> ... *)
-               | TY_s8 -> check_range (-128L) 127L
-               | TY_s16 -> check_range (-32768L) 32767L
-               | TY_s32 -> check_range (-2147483648L) 2147483647L
-               (*
-               | TY_s64 -> ...
-               | TY_f32 -> ...
-               | TY_f64 -> ...
-               *)
-               | _ -> ());
-            span ps apos bpos (PEXP_lit (Ast.LIT_mach (m, num, str)))
+              | _ ->
+                  let pexp = parse_pexp ps in
+                    expect ps RPAREN;
+                    let bpos = lexpos ps in
+                    let t = Ast.TY_mach m in
+                      span ps apos bpos
+                        (PEXP_unop ((Ast.UNOP_cast t), pexp))
           end
 
     | _ ->

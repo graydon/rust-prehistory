@@ -1431,6 +1431,7 @@ let trans_visitor
           let op = match unop with
               Ast.UNOP_not -> Il.NOT
             | Ast.UNOP_neg -> Il.NEG
+            | Ast.UNOP_cast _ -> bug () "unsupported cast operator"
           in
             anno ();
             emit (Il.unary op dst src);

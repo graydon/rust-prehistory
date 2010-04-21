@@ -829,6 +829,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                     let tv_a = ref TYSPEC_numeric in
                       unify_atom atom tv_a;
                       unify_tyvars tv tv_a
+                | Ast.UNOP_cast t ->
+                    let tv_a = ref TYSPEC_all in
+                      unify_atom atom tv_a;
+                      unify_ty t tv
             end
         | Ast.EXPR_atom atom -> unify_atom atom tv
 
