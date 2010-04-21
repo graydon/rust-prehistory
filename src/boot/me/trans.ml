@@ -2529,12 +2529,11 @@ let trans_visitor
   and trans_prepare_fn_call
       (initializing:bool)
       (cx:ctxt)
-      (dst:Ast.lval)
+      (dst_cell:Il.cell)
       (flv:Ast.lval)
       (ty_params:Ast.ty array)
       (args:Ast.atom array)
       : Il.operand =
-    let (dst_cell, _) = trans_lval_maybe_init initializing dst in
     let (ptr, fn_ty) = trans_callee flv in
     let cc = call_ctrl flv in
     let extra_args = call_extra_args flv None cc in
@@ -3210,8 +3209,9 @@ let trans_visitor
               match ty with
                   Ast.TY_fn _
                 | Ast.TY_pred _ ->
+                    let (dst_cell, _) = trans_lval_maybe_init init dst in
                     let fn_ptr =
-                      trans_prepare_fn_call init cx dst flv ty_params args
+                      trans_prepare_fn_call init cx dst_cell flv ty_params args
                     in
                       call_code (code_of_operand fn_ptr)
                 | _ -> bug () "Calling unexpected lval."
@@ -3380,11 +3380,8 @@ let trans_visitor
       | Ast.STMT_decl _ -> ()
 
       | Ast.STMT_foreach fe ->
-          let (dst_slot, dst_id) = fe.Ast.foreach_slot in
-          let dst =
-            Ast.LVAL_base { id = dst_slot.id;
-                            node = Ast.BASE_ident dst_id }
-          in
+          let (dst_slot, _) = fe.Ast.foreach_slot in
+          let dst_cell = cell_of_block_slot dst_slot.id in
           let (flv, args) = fe.Ast.foreach_call in
           let ty_params =
             match htab_search cx.ctxt_call_lval_params (lval_base_id flv) with
@@ -3399,7 +3396,7 @@ let trans_visitor
             begin
               iflog (fun _ ->
                        log cx "for-each at depth %d in fn of depth %d\n" depth fn_depth);
-              let fn_ptr = trans_prepare_fn_call true cx dst flv ty_params args in
+              let fn_ptr = trans_prepare_fn_call true cx dst_cell flv ty_params args in
                 
                 mov it_ptr_cell fn_ptr;                                      (* p <- &fn *)
                 abi.Abi.abi_emit_loop_prologue (emitter ()) depth;           (* save stack pointer *)
