@@ -1471,7 +1471,7 @@ let call_args_referent_type
             match taux.Ast.fn_proto with
                 None -> with_closure [| |]
                   (* FIXME: extra-args will expand with non-empty call-protocol *)
-              | _ -> bug cx "nonempty call protocols not yet implemented"
+              | Some _ -> with_closure cx.ctxt_abi.Abi.abi_iterator_extra_arg_tys
           in
             call_args_referent_type_full
               cx.ctxt_abi

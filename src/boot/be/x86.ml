@@ -1370,6 +1370,8 @@ let iterator_extra_args
       [| extra_arg0; extra_arg1 |]
 ;;
 
+let iterator_extra_arg_tys = [| Il.ScalarTy (Il.ValTy word_bits); Il.ScalarTy (Il.AddrTy Il.OpaqueTy) |] ;;
+
 let activate_glue (e:Il.emitter) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
@@ -1580,6 +1582,7 @@ let (abi:Abi.abi) =
     Abi.abi_emit_loop_epilogue = loop_epilogue;
     Abi.abi_emit_put = put;
     Abi.abi_iterator_extra_args = iterator_extra_args;
+    Abi.abi_iterator_extra_arg_tys = iterator_extra_arg_tys;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_native_call = emit_native_call;
