@@ -996,7 +996,9 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
         | Ast.STMT_decl _ -> ()
 
-        | Ast.STMT_ret (_, atom_opt) ->
+        (* FIXME: deal with difference between return-type vs. put-type *)
+        | Ast.STMT_ret (_, atom_opt)
+        | Ast.STMT_put (_, atom_opt) ->
             begin
               match atom_opt with
                   None -> unify_ty Ast.TY_nil !retval_tv_r
