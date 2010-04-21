@@ -830,6 +830,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                       unify_atom atom tv_a;
                       unify_tyvars tv tv_a
                 | Ast.UNOP_cast t ->
+                    (* 
+                     * FIXME: check cast-validity in post-typecheck pass.
+                     * Only some casts make sense.
+                     *)
                     let tv_a = ref TYSPEC_all in
                       unify_atom atom tv_a;
                       unify_ty t tv

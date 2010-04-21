@@ -813,6 +813,36 @@ let type_is_cyclic (t:Ast.ty) : bool =
 ;;
 
 
+let type_is_unsigned_2s_complement t =
+  match t with
+      Ast.TY_mach TY_u8
+    | Ast.TY_mach TY_u16
+    | Ast.TY_mach TY_u32
+    | Ast.TY_mach TY_u64
+    | Ast.TY_char
+    | Ast.TY_uint
+    | Ast.TY_bool -> true
+    | _ -> false
+;;
+
+
+let type_is_signed_2s_complement t =
+  match t with
+      Ast.TY_mach TY_s8
+    | Ast.TY_mach TY_s16
+    | Ast.TY_mach TY_s32
+    | Ast.TY_mach TY_s64
+    | Ast.TY_int -> true
+    | _ -> false
+;;
+
+
+let type_is_2s_complement t =
+  (type_is_unsigned_2s_complement t)
+  || (type_is_signed_2s_complement t)
+;;
+
+
 let check_concrete params thing =
   if Array.length params = 0
   then thing

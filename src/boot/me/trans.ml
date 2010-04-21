@@ -1431,7 +1431,16 @@ let trans_visitor
           let op = match unop with
               Ast.UNOP_not -> Il.NOT
             | Ast.UNOP_neg -> Il.NEG
-            | Ast.UNOP_cast _ -> bug () "unsupported cast operator"
+            | Ast.UNOP_cast t ->
+                let at = atom_type cx a in
+                if (type_is_2s_complement at) &&
+                  (type_is_2s_complement t)
+                then
+                  if type_is_unsigned_2s_complement t
+                  then Il.UMOV
+                  else Il.IMOV
+                else
+                  err None "unsupported cast operator"
           in
             anno ();
             emit (Il.unary op dst src);

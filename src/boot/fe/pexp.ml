@@ -545,29 +545,45 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                 end
         end
 
-    | (INT | UINT) as tok ->
+    | (INT | UINT | CHAR | BOOL) as tok ->
         begin
           bump ps;
           expect ps LPAREN;
           match peek ps with
-              LIT_INT i ->
+              (LIT_INT _ | LIT_CHAR _ | LIT_BOOL _) as tok2 ->
                 bump ps;
                 expect ps RPAREN;
+                let i = match tok2 with
+                    LIT_INT i -> i
+                  | LIT_CHAR c -> (Int64.of_int (Char.code c),
+                                   Char.escaped c)
+                  | LIT_BOOL b -> if b then (1L, "1") else (0L, "0")
+                  | _ -> bug () "expected int/char literal"
+                in
                 let bpos = lexpos ps in
                   span ps apos bpos
                     (PEXP_lit
-                       (if tok = INT
-                        then (Ast.LIT_int i)
-                        else (Ast.LIT_uint i)))
+                       (match tok with
+                            INT -> Ast.LIT_int i
+                          | UINT -> Ast.LIT_uint i
+                          | CHAR ->
+                              Ast.LIT_char
+                                (Char.chr
+                                   (Int64.to_int (fst i)))
+                          | BOOL -> Ast.LIT_bool (fst i <> 0L)
+                          | _ -> bug () "expected int/uint/char/bool token"))
 
           | _ ->
               let pexp = parse_pexp ps in
                 expect ps RPAREN;
                 let bpos = lexpos ps in
                 let t =
-                  if tok = INT
-                  then Ast.TY_int
-                  else Ast.TY_uint
+                  match tok with
+                      INT -> Ast.TY_int
+                    | UINT -> Ast.TY_uint
+                    | CHAR -> Ast.TY_char
+                    | BOOL -> Ast.TY_bool
+                    | _ -> bug () "expected int/uint/char/bool token"
                 in
                   span ps apos bpos
                     (PEXP_unop ((Ast.UNOP_cast t), pexp))
