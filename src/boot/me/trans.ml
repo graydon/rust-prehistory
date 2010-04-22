@@ -2532,11 +2532,12 @@ let trans_visitor
       (dst_cell:Il.cell)
       (flv:Ast.lval)
       (ty_params:Ast.ty array)
+      (fco:foreach_ctrl option)
       (args:Ast.atom array)
       : Il.operand =
     let (ptr, fn_ty) = trans_callee flv in
     let cc = call_ctrl flv in
-    let extra_args = call_extra_args flv None cc in
+    let extra_args = call_extra_args flv fco cc in
       iflog
         begin
           fun _ ->
@@ -2933,7 +2934,10 @@ let trans_visitor
     match fco with
         None -> [| |]
       | Some fc ->
-          abi.Abi.abi_iterator_extra_args (emitter ()) fc.foreach_fixup fc.foreach_depth
+          begin
+            iflog (fun _ -> annotate "emit extra iterator args");
+            abi.Abi.abi_iterator_extra_args (emitter ()) fc.foreach_fixup fc.foreach_depth
+          end
 
   and call_extra_args
       (flv:Ast.lval)
@@ -3211,7 +3215,7 @@ let trans_visitor
                 | Ast.TY_pred _ ->
                     let (dst_cell, _) = trans_lval_maybe_init init dst in
                     let fn_ptr =
-                      trans_prepare_fn_call init cx dst_cell flv ty_params args
+                      trans_prepare_fn_call init cx dst_cell flv ty_params None args
                     in
                       call_code (code_of_operand fn_ptr)
                 | _ -> bug () "Calling unexpected lval."
@@ -3391,12 +3395,13 @@ let trans_visitor
           let depth = Hashtbl.find cx.ctxt_loop_depths stmt.id in
           let fn_depth = Hashtbl.find cx.ctxt_fn_loop_depths (current_fn ()) in
           let body_fixup = new_fixup "foreach loop body" in
+          let fc = { foreach_fixup = body_fixup; foreach_depth = depth } in
           let it_ptr_reg = next_vreg () in
           let it_ptr_cell = Il.Reg (it_ptr_reg, Il.AddrTy Il.CodeTy) in
             begin
               iflog (fun _ ->
                        log cx "for-each at depth %d in fn of depth %d\n" depth fn_depth);
-              let fn_ptr = reify_ptr (trans_prepare_fn_call true cx dst_cell flv ty_params args) in
+              let fn_ptr = reify_ptr (trans_prepare_fn_call true cx dst_cell flv ty_params (Some fc) args) in
 
                 mov it_ptr_cell fn_ptr;                                      (* p <- &fn *)
                 abi.Abi.abi_emit_loop_prologue (emitter ()) depth;           (* save stack pointer *)
