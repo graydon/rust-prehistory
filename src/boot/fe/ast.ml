@@ -456,6 +456,25 @@ and crate' =
 and crate = crate' identified
 ;;
 
+(*
+ * NB: names can only be type-parametric in their *last* path-entry.
+ * All path-entries before that must be ident or idx (non-parametric).
+ *)
+let sane_name (n:name) : bool =
+  let rec sane_prefix (n:name) : bool =
+      match n with
+          NAME_base (BASE_ident _)
+        | NAME_base (BASE_temp _) -> true
+        | NAME_ext (prefix, COMP_ident _)
+        | NAME_ext (prefix, COMP_idx _) -> sane_prefix prefix
+        | _ -> false
+  in
+    match n with
+        NAME_base _ -> true
+      | NAME_ext (prefix, _) -> sane_prefix prefix
+;;
+
+
 (***********************************************************************)
 
 (* FIXME (bug 541525): finish all parts with ?foo? as their output. *)

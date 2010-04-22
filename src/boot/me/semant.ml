@@ -703,6 +703,40 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_constrained = (fun (t, constrs) -> id (Ast.TY_constrained (t, constrs))) }
 ;;
 
+let rebuild_ty_under_params
+    (ty:Ast.ty)
+    (params:Ast.ty_param array)
+    (args:Ast.ty array)
+    : Ast.ty =
+  if (Array.length params) <> (Array.length args)
+  then err None "mismatched type-params"
+  else
+    let pmap = Hashtbl.create (Array.length args) in
+    let substituted = ref false in
+    let base = ty_fold_rebuild (fun t -> t) in
+    let ty_fold_param (i, oid, mut) =
+      let param = Ast.TY_param (i, oid, mut) in
+        match htab_search pmap param with
+            None -> param
+          | Some arg -> (substituted := true; arg)
+    in
+      Array.iteri
+        (fun i (_, param) -> htab_put pmap (Ast.TY_param param) args.(i))
+        params;
+      let fold = { base with ty_fold_param = ty_fold_param } in
+      let ty' = fold_ty fold ty in
+        (* 
+         * FIXME: "substituted" and "ty'" here are only required
+         * because the current type-equality-comparison code in Type
+         * uses <> and will judge some cases, such as rebuilt tags, as
+         * unequal simply due to the different hashtable order in the
+         * fold. 
+         *)
+        if !substituted
+        then ty'
+        else ty
+;;
+
 let associative_binary_op_ty_fold
     (default:'a)
     (fn:'a -> 'a -> 'a)
@@ -1128,58 +1162,131 @@ let scope_stack_managing_visitor
 
 (* Generic lookup, used for slots, items, types, etc. *)
 
-let rec lookup_by_ident
+type resolved = ((scope list * node_id) option) ;;
+
+let get_item (cx:ctxt) (node:node_id) : Ast.mod_item_decl =
+  match htab_search cx.ctxt_all_defns node with
+      Some (DEFN_item item) -> item
+    | Some _ -> err (Some node) "defn is not an item"
+    | None -> bug () "missing defn"
+;;
+
+let get_mod_item
+    (cx:ctxt)
+    (node:node_id)
+    : (Ast.mod_view * Ast.mod_items) =
+  match get_item cx node with
+      { Ast.decl_item = Ast.MOD_ITEM_mod md } -> md
+    | _ -> err (Some node) "defn is not a mod"
+;;
+
+let get_name_comp_ident
+    (comp:Ast.name_component)
+    : Ast.ident =
+  match comp with
+      Ast.COMP_ident i -> i
+    | Ast.COMP_app (i, _) -> i
+    | Ast.COMP_idx i -> string_of_int i
+;;
+
+let get_name_base_ident
+    (comp:Ast.name_base)
+    : Ast.ident =
+  match comp with
+      Ast.BASE_ident i -> i
+    | Ast.BASE_app (i, _) -> i
+    | Ast.BASE_temp _ ->
+        bug () "get_name_base_ident on BASE_temp"
+;;
+
+let rec project_ident_from_items
+    (cx:ctxt)
+    (scopes:scope list)
+    ((view:Ast.mod_view),(items:Ast.mod_items))
+    (ident:Ast.ident)
+    : resolved =
+  if not (exports_permit view ident)
+  then None
+  else
+    match htab_search items ident with
+        Some i -> Some (scopes, i.id)
+      | None ->
+          match htab_search view.Ast.view_imports ident with
+              None -> None
+            | Some name -> lookup_by_name cx scopes name
+
+and project_name_comp_from_resolved
+    (cx:ctxt)
+    (mod_res:resolved)
+    (ext:Ast.name_component)
+    : resolved =
+  match mod_res with
+      None -> None
+    | Some (scopes, id) ->
+        let scope = (SCOPE_mod_item {id=id; node=get_item cx id}) in
+        let scopes = scope :: scopes in
+        let ident = get_name_comp_ident ext in
+        let md = get_mod_item cx id in
+          project_ident_from_items cx scopes md ident
+
+and lookup_by_name
+    (cx:ctxt)
+    (scopes:scope list)
+    (name:Ast.name)
+    : resolved =
+  assert (Ast.sane_name name);
+  match name with
+      Ast.NAME_base nb ->
+        let ident = get_name_base_ident nb in
+          lookup_by_ident cx scopes ident
+    | Ast.NAME_ext (name, ext) ->
+        let base_res = lookup_by_name cx scopes name in
+          project_name_comp_from_resolved cx base_res ext
+
+(*
+let rec get_mod_item_by_ident
+    (scopes:scope list)
+    ((view:Ast.mod_view),(items:Ast.mod_items))
+    (ident:Ast.ident)
+    : ((scope list * node_id) option) =
+  if not (exports_permit view ident)
+  then None
+  else
+    match htab_search items ident with
+        Some i -> Some (scopes, i.id)
+      | None ->
+          match htab_search view.Ast.view_imports ident with
+              None -> None
+            | Some (Ast.NAME_base nb) ->
+                lookup_by_ident cx scopes (get_name_base_ident nb)
+            | Some name ->
+                begin
+                  let project_scopes_and_node (sn: ext =
+                    match sn with
+                        None -> None
+                      | Some (scopes, node) ->
+                          let md = get_mod_item node in
+                          let i = get_name_comp_ident ext in
+                            get_mod_item_by_ident scopes md i
+                  in
+                  let rec lookup_and_project n =
+                    match n with
+                        Ast.NAME_base (Ast.BASE_ident i)
+                      | Ast.NAME_base (Ast.BASE_app (i, _)) ->
+                          lookup_by_ident cx scopes i
+                      | Ast.NAME_ext (n, ext) ->
+                          project_scopes_and_node (lookup_and_project n) ext
+                      | _ -> None
+                  in
+                    lookup_and_project name
+                end
+*)
+
+and lookup_by_ident
     (cx:ctxt)
     (scopes:scope list)
     (ident:Ast.ident)
-    : ((scope list * node_id) option) =
-  let rec check_items
-      (scopes:scope list)
-      ((view:Ast.mod_view),(items:Ast.mod_items))
-      (ident:Ast.ident)
-      : ((scope list * node_id) option) =
-    if not (exports_permit view ident)
-    then None
-    else
-      match htab_search items ident with
-          Some i -> Some (scopes, i.id)
-        | None ->
-            match htab_search view.Ast.view_imports ident with
-                None -> None
-              | Some (Ast.NAME_base (Ast.BASE_ident i))
-              | Some (Ast.NAME_base (Ast.BASE_app (i, _))) ->
-                  lookup_by_ident cx scopes i
-              | Some name ->
-                  begin
-                    let get_item node =
-                      match htab_search cx.ctxt_all_defns node with
-                          Some (DEFN_item item) -> item
-                        | Some _ -> err (Some node) "defn is not an item"
-                        | None -> bug () "missing defn"
-                    in
-                    let project_scopes_and_node sn ext =
-                      match sn with
-                          None -> None
-                        | Some (scopes, node) ->
-                            let item = get_item node in
-                              match (item.Ast.decl_item, ext) with
-                                  (Ast.MOD_ITEM_mod md, Ast.COMP_ident i)
-                                | (Ast.MOD_ITEM_mod md, Ast.COMP_app (i, _))
-                                  -> check_items scopes md i
-                                | _ -> None
-                    in
-                    let rec lookup_and_project n =
-                      match n with
-                          Ast.NAME_base (Ast.BASE_ident i)
-                        | Ast.NAME_base (Ast.BASE_app (i, _)) ->
-                            lookup_by_ident cx scopes i
-                        | Ast.NAME_ext (n, ext) ->
-                            project_scopes_and_node (lookup_and_project n) ext
-                        | _ -> None
-                    in
-                      lookup_and_project name
-                  end
-  in
+    : resolved =
   let check_slots scopes islots =
     arr_search islots
       (fun _ (sloti,ident') ->
@@ -1207,7 +1314,8 @@ let rec lookup_by_ident
             end
 
       | SCOPE_crate crate ->
-          check_items scopes crate.node.Ast.crate_items ident
+          project_ident_from_items
+            cx scopes crate.node.Ast.crate_items ident
 
       | SCOPE_mod_item item ->
           begin
@@ -1227,7 +1335,7 @@ let rec lookup_by_ident
                     end
 
                 | Ast.MOD_ITEM_mod md ->
-                    check_items scopes md ident
+                    project_ident_from_items cx scopes md ident
 
                 | _ -> None
             in

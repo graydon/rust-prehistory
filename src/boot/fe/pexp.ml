@@ -104,7 +104,10 @@ and parse_name_ext (ps:pstate) (base:Ast.name) : Ast.name =
 
 and parse_name (ps:pstate) : Ast.name =
   let base = Ast.NAME_base (parse_name_base ps) in
-    parse_name_ext ps base
+  let name = parse_name_ext ps base in
+    if Ast.sane_name name
+    then name
+    else raise (err "malformed name" ps)
 
 and parse_carg_base (ps:pstate) : Ast.carg_base =
   match peek ps with

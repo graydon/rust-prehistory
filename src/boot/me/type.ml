@@ -161,36 +161,6 @@ let rec resolve_tyvar (tv:tyvar) : tyvar =
     | _ -> tv
 ;;
 
-let rebuild_ty_under_params ty params args =
-  if (Array.length params) <> (Array.length args)
-  then err None "mismatched type-params"
-  else
-    let pmap = Hashtbl.create (Array.length args) in
-    let substituted = ref false in
-    let base = ty_fold_rebuild (fun t -> t) in
-    let ty_fold_param (i, oid, mut) =
-      let param = Ast.TY_param (i, oid, mut) in
-        match htab_search pmap param with
-            None -> param
-          | Some arg -> (substituted := true; arg)
-    in
-      Array.iteri
-        (fun i (_, param) -> htab_put pmap (Ast.TY_param param) args.(i))
-        params;
-      let fold = { base with ty_fold_param = ty_fold_param } in
-      let ty' = fold_ty fold ty in
-        (* 
-         * FIXME: "substituted" and "ty'" here are only required
-         * because the current equality-comparison code uses <> and
-         * will judge some cases, such as rebuilt tags, as unequal
-         * simply due to the different hashtable order in the
-         * fold.
-         *)
-        if !substituted
-        then ty'
-        else ty
-;;
-
 let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
   let log cx = Session.log "type"
     cx.ctxt_sess.Session.sess_log_type

@@ -191,18 +191,21 @@ let lookup_type_by_ident
     (cx:ctxt)
     (scopes:scope list)
     (ident:Ast.ident)
-    : ((scope list) * node_id * Ast.ty) =
+    : ((scope list) * node_id * Ast.ty * (Ast.ty_param array)) =
   let res = lookup cx scopes (Ast.KEY_ident ident) in
     match res with
-        None -> err None "identifier '%s' does not resolve to a type" ident
+        None -> bug () "unknown identifier '%s'" ident
       | Some (scopes, id) ->
-          let ty =
+          let ty, params =
             match htab_search cx.ctxt_all_defns id with
-                Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type t}) -> t
-              | Some (DEFN_ty_param (_, x)) -> Ast.TY_param x
+                Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type t;
+                                  Ast.decl_params = params }) ->
+                  (t, Array.map (fun p -> p.node) params)
+              | Some (DEFN_ty_param (_, x)) ->
+                  (Ast.TY_param x, [||])
               | _ -> err None "identifier '%s' resolves to non-type" ident
           in
-            (scopes, id, ty)
+            (scopes, id, ty, params)
 ;;
 
 
@@ -211,10 +214,21 @@ let lookup_type_by_name
     (scopes:scope list)
     (name:Ast.name)
     : ((scope list) * node_id * Ast.ty) =
+  iflog cx (fun _ -> log cx "lookup_type_by_name %a" Ast.sprintf_name name);
+  let ((scopes, node, ty, params), args) =
     match name with
         (Ast.NAME_base (Ast.BASE_ident ident)) ->
-          lookup_type_by_ident cx scopes ident
+          (lookup_type_by_ident cx scopes ident, [||])
+      | (Ast.NAME_base (Ast.BASE_app (ident, args))) ->
+          (lookup_type_by_ident cx scopes ident, args)
       | _ -> err None "unhandled form of name in Resolve.lookup_type_by_name"
+  in
+    iflog cx (fun _ -> log cx
+                "lookup_type_by_name %a found ty %a, applying type arguments"
+                Ast.sprintf_name name Ast.sprintf_ty ty);
+  let ty = rebuild_ty_under_params ty params args in
+    iflog cx (fun _ -> log cx "applied type is %a" Ast.sprintf_ty ty);
+    (scopes, node, ty)
 ;;
 
 
@@ -348,7 +362,8 @@ and resolve_type
   let base = ty_fold_rebuild (fun t -> t) in
   let ty_fold_named name =
     let (scopes, node, t) = lookup_type_by_name cx scopes name in
-      log cx "resolved type name '%a' to item %d" Ast.sprintf_name name (int_of_node node);
+      iflog cx (fun _ -> log cx "resolved type name '%a' to item %d"
+                  Ast.sprintf_name name (int_of_node node));
       match index_in_curr_iso recur node with
           Some i -> Ast.TY_idx i
         | None ->
@@ -360,6 +375,8 @@ and resolve_type
                       Ast.sprintf_name name)
               else
                 let recur = push_node recur node in
+                  iflog cx (fun _ -> log cx "recursively resolving type %a"
+                              Ast.sprintf_ty t);
                   resolve_type cx scopes recursive_tag_groups all_tags recur t
   in
   let fold =
