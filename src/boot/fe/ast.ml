@@ -98,6 +98,7 @@ and ty =
   | TY_obj of ty_obj
   | TY_task
 
+  | TY_native of opaque_id
   | TY_param of (ty_param_idx * opaque_id * mutability)
   | TY_named of name
   | TY_type
@@ -649,6 +650,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_param (i, oid, m) -> (fmt_mutable ff m;
                              fmt ff "<p#%d/o#%d>" i
                                (int_of_opaque oid))
+  | TY_native oid -> fmt ff "<native#%d>" (int_of_opaque oid)
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
 

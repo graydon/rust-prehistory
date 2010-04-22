@@ -564,6 +564,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
       ty_fold_task : unit -> 'ty;
+      ty_fold_native : opaque_id -> 'ty;
       ty_fold_param : (int * opaque_id * Ast.mutability) -> 'ty;
       ty_fold_named : Ast.name -> 'ty;
       ty_fold_type : unit -> 'ty;
@@ -615,6 +616,7 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_obj t -> f.ty_fold_obj (fold_obj t)
   | Ast.TY_task -> f.ty_fold_task ()
 
+  | Ast.TY_native x -> f.ty_fold_native x
   | Ast.TY_param x -> f.ty_fold_param x
   | Ast.TY_named n -> f.ty_fold_named n
   | Ast.TY_type -> f.ty_fold_type ()
@@ -651,6 +653,7 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_chan = (fun _ -> default);
       ty_fold_port = (fun _ -> default);
       ty_fold_task = (fun _ -> default);
+      ty_fold_native = (fun _ -> default);
       ty_fold_param = (fun _ -> default);
       ty_fold_named = (fun _ -> default);
       ty_fold_type = (fun _ -> default);
@@ -693,6 +696,7 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
     ty_fold_port = (fun t -> id (Ast.TY_port t));
     ty_fold_task = (fun _ -> id Ast.TY_task);
+    ty_fold_native = (fun oid -> id (Ast.TY_native oid));
     ty_fold_param = (fun (i, oid, mut) -> id (Ast.TY_param (i, oid, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
     ty_fold_type = (fun _ -> id (Ast.TY_type));
@@ -1375,6 +1379,8 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_task
       | Ast.TY_type -> rc_ptr
 
+      | Ast.TY_native _ -> ptr
+
       | Ast.TY_param (i, _, _) -> Il.ParamTy i
 
       | Ast.TY_named _ -> bug () "named type in referent_type"
@@ -1650,6 +1656,7 @@ let ty_str (ty:Ast.ty) : string =
          ty_fold_obj = (fun _ -> "o");
          ty_fold_task = (fun _ -> "P");
          (* FIXME: encode opaque and param numbers. *)
+         ty_fold_native = (fun _ -> "N");
          ty_fold_param = (fun _ -> "A");
          ty_fold_named = (fun _ -> bug () "string-encoding named type");
          ty_fold_type = (fun _ -> "T");

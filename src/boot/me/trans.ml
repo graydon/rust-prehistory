@@ -3832,6 +3832,7 @@ let trans_visitor
     match i.node.Ast.decl_item with
         Ast.MOD_ITEM_fn f -> trans_required_fn i.id f.Ast.fn_aux.Ast.fn_proto f.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
+      | Ast.MOD_ITEM_type _ -> ()
       | _ -> bugi cx i.id "unsupported type of require: %s" (path_name())
   in
 

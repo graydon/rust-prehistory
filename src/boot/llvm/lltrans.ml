@@ -200,7 +200,7 @@ let trans_crate
       | Ast.TY_tup _ | Ast.TY_vec _ | Ast.TY_rec _ | Ast.TY_tag _
       | Ast.TY_iso _ | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _
       | Ast.TY_port _ | Ast.TY_obj _ | Ast.TY_task | Ast.TY_param _
-      | Ast.TY_named _ | Ast.TY_type ->
+      | Ast.TY_native _ | Ast.TY_named _ | Ast.TY_type ->
           Llvm.opaque_type llctx (* TODO *)
 
   (* Translates the type of a slot into the corresponding LLVM type. If the

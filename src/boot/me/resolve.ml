@@ -415,7 +415,8 @@ let type_resolving_visitor
                 resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info ty
               in
                 log cx "resolved item %s, defining type %a" id Ast.sprintf_ty ty;
-                htab_put cx.ctxt_all_type_items item.id ty
+                htab_put cx.ctxt_all_type_items item.id ty;
+                htab_put cx.ctxt_all_item_types item.id Ast.TY_type
 
           (* Don't resolve the "type" of a mod item; just resolve its members. *)
           | Ast.MOD_ITEM_mod _ -> ()

@@ -746,7 +746,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                           None -> raise (unexpected ps)
                         | Some c -> c
                     end
-                | _ -> raise (unexpected ps)
+                | _ -> CONV_cdecl
             in
               expect ps MOD;
               let (ident, params) = parse_ident_and_params ps "native mod" in
@@ -875,7 +875,11 @@ and parse_mod_item_from_signature (ps:pstate)
     | TYPE ->
         bump ps;
         let (ident, params) = parse_ident_and_params ps "type type" in
-        let t = Pexp.parse_ty ps in
+        let t =
+          match peek ps with
+              SEMI -> Ast.TY_native (next_opaque_id ps)
+            | _ -> Pexp.parse_ty ps
+        in
           expect ps SEMI;
           let bpos = lexpos ps in
             (ident, span ps apos bpos (decl params (Ast.MOD_ITEM_type t)))
