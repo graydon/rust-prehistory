@@ -1243,45 +1243,6 @@ and lookup_by_name
         let base_res = lookup_by_name cx scopes name in
           project_name_comp_from_resolved cx base_res ext
 
-(*
-let rec get_mod_item_by_ident
-    (scopes:scope list)
-    ((view:Ast.mod_view),(items:Ast.mod_items))
-    (ident:Ast.ident)
-    : ((scope list * node_id) option) =
-  if not (exports_permit view ident)
-  then None
-  else
-    match htab_search items ident with
-        Some i -> Some (scopes, i.id)
-      | None ->
-          match htab_search view.Ast.view_imports ident with
-              None -> None
-            | Some (Ast.NAME_base nb) ->
-                lookup_by_ident cx scopes (get_name_base_ident nb)
-            | Some name ->
-                begin
-                  let project_scopes_and_node (sn: ext =
-                    match sn with
-                        None -> None
-                      | Some (scopes, node) ->
-                          let md = get_mod_item node in
-                          let i = get_name_comp_ident ext in
-                            get_mod_item_by_ident scopes md i
-                  in
-                  let rec lookup_and_project n =
-                    match n with
-                        Ast.NAME_base (Ast.BASE_ident i)
-                      | Ast.NAME_base (Ast.BASE_app (i, _)) ->
-                          lookup_by_ident cx scopes i
-                      | Ast.NAME_ext (n, ext) ->
-                          project_scopes_and_node (lookup_and_project n) ext
-                      | _ -> None
-                  in
-                    lookup_and_project name
-                end
-*)
-
 and lookup_by_ident
     (cx:ctxt)
     (scopes:scope list)

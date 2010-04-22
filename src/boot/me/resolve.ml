@@ -187,48 +187,36 @@ let all_item_collecting_visitor
 ;;
 
 
-let lookup_type_by_ident
-    (cx:ctxt)
-    (scopes:scope list)
-    (ident:Ast.ident)
-    : ((scope list) * node_id * Ast.ty * (Ast.ty_param array)) =
-  let res = lookup cx scopes (Ast.KEY_ident ident) in
-    match res with
-        None -> bug () "unknown identifier '%s'" ident
-      | Some (scopes, id) ->
-          let ty, params =
-            match htab_search cx.ctxt_all_defns id with
-                Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type t;
-                                  Ast.decl_params = params }) ->
-                  (t, Array.map (fun p -> p.node) params)
-              | Some (DEFN_ty_param (_, x)) ->
-                  (Ast.TY_param x, [||])
-              | _ -> err None "identifier '%s' resolves to non-type" ident
-          in
-            (scopes, id, ty, params)
-;;
-
-
 let lookup_type_by_name
     (cx:ctxt)
     (scopes:scope list)
     (name:Ast.name)
     : ((scope list) * node_id * Ast.ty) =
   iflog cx (fun _ -> log cx "lookup_type_by_name %a" Ast.sprintf_name name);
-  let ((scopes, node, ty, params), args) =
-    match name with
-        (Ast.NAME_base (Ast.BASE_ident ident)) ->
-          (lookup_type_by_ident cx scopes ident, [||])
-      | (Ast.NAME_base (Ast.BASE_app (ident, args))) ->
-          (lookup_type_by_ident cx scopes ident, args)
-      | _ -> err None "unhandled form of name in Resolve.lookup_type_by_name"
-  in
-    iflog cx (fun _ -> log cx
-                "lookup_type_by_name %a found ty %a, applying type arguments"
-                Ast.sprintf_name name Ast.sprintf_ty ty);
-  let ty = rebuild_ty_under_params ty params args in
-    iflog cx (fun _ -> log cx "applied type is %a" Ast.sprintf_ty ty);
-    (scopes, node, ty)
+  match lookup_by_name cx scopes name with
+      None -> err None "unknown name: %a" Ast.sprintf_name name
+    | Some (scopes, id) ->
+        let ty, params =
+          match htab_search cx.ctxt_all_defns id with
+              Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type t;
+                                Ast.decl_params = params }) ->
+                (t, Array.map (fun p -> p.node) params)
+            | Some (DEFN_ty_param (_, x)) ->
+                (Ast.TY_param x, [||])
+            | _ -> err None "Found non-type binding for %a" Ast.sprintf_name name
+        in
+          iflog cx (fun _ -> log cx
+                      "lookup_type_by_name %a found ty %a, applying type arguments"
+                      Ast.sprintf_name name Ast.sprintf_ty ty);
+          let args =
+            match name with
+                Ast.NAME_ext (_, Ast.COMP_app (_, args)) -> args
+              | Ast.NAME_base (Ast.BASE_app (_, args)) -> args
+              | _ -> [| |]
+          in
+          let ty = rebuild_ty_under_params ty params args in
+            iflog cx (fun _ -> log cx "applied type is %a" Ast.sprintf_ty ty);
+            (scopes, id, ty)
 ;;
 
 
