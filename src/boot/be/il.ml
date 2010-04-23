@@ -901,6 +901,38 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
       (old_lhs_op:operand) (new_lhs_op:operand)
       (old_rhs_op:operand) (new_rhs_op:operand)
       : unit =
+    (* 
+     * This is sufficiently obscure that it deserves an explanation.
+     * 
+     * The main idea here is to do two "mov_if_operands_differ" calls,
+     * such as one might have when setting up a binary quad.
+     * 
+     * The problem comes when you happen to hit a case like X86 div,
+     * which preallocates *both* operands. Preallocating both means we
+     * have to potentially issue two movs into the preallocated regs,
+     * and the second of those movs might be a problem. Specifically:
+     * the second mov-to-prealloc might make use of a vreg be moving from a
+     * register-indirect mem cell based on a vreg, and that vreg may
+     * wind up being assigned to an hreg that we just loaded the
+     * with the *first* mov. In other words, the second mov may retask
+     * the preallocated hreg we set up in the first mov.
+     * 
+     * You laugh, but of course this actually happens.
+     * 
+     * So here we do a conservative thing and check to see if either
+     * operand is memory-indirect at all. If either is, then for either
+     * of the 'old' operands we're *about* to mov into a prealloc reg,
+     * we first bounce them off a spill slot. Spill slots, thankfully,
+     * we can always count on being able to address irrespective of the
+     * opinions of the RA, as they are all just fp-relative.
+     * 
+     * A slightly more aggressive version of this would only bounce
+     * cases that are not fp-relative already, though doing so would
+     * require threading the notion of what fp *is* through to
+     * here. Possibly tighten this up in the future (or just
+     * ... destroy this backend ASAP).
+     * 
+     *)
     let has_reg_indirect op =
       match op with
           Cell (Mem _) -> true
