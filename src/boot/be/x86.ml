@@ -287,15 +287,21 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
         un
   in
 
-  let target_8bit_cmp_to_eax_and_ecx cmp =
+  let target_cmp cmp =
     let lhs_ty = Il.operand_scalar_ty cmp.Il.cmp_lhs in
     let rhs_ty = Il.operand_scalar_ty cmp.Il.cmp_rhs in
+      (* 8-bit compares we force to eax/ecx. *)
       if is_ty8 lhs_ty || is_ty8 rhs_ty
       then
         { Il.cmp_lhs = target_operand eax cmp.Il.cmp_lhs;
           Il.cmp_rhs = target_operand ecx cmp.Il.cmp_rhs }
       else
-        cmp
+        match cmp.Il.cmp_lhs with
+            (* Immediate LHS we force to eax. *)
+            Il.Imm _ ->
+              { cmp with
+                  Il.cmp_lhs = target_operand eax cmp.Il.cmp_lhs }
+          | _ -> cmp
   in
 
     match quad' with
@@ -320,7 +326,7 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
                   Il.Unary (target_8bit_unary_to_ecx un)
           end
 
-      | Il.Cmp cmp -> Il.Cmp (target_8bit_cmp_to_eax_and_ecx cmp)
+      | Il.Cmp cmp -> Il.Cmp (target_cmp cmp)
 
       | Il.Call c ->
           let ty = Il.cell_scalar_ty c.Il.call_dst in

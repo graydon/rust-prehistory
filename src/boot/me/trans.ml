@@ -3640,9 +3640,7 @@ let trans_visitor
     in
     let f = next_vreg_cell (Il.AddrTy (Il.CodeTy)) in
     let n_ty_params = n_item_ty_params cx fnid in
-    let args_rty =
-      direct_call_args_referent_type cx n_ty_params fnid
-    in
+    let args_rty = direct_call_args_referent_type cx fnid in
     let caller_args_cell = caller_args_cell args_rty in
     let callee_args_cell = callee_args_cell false args_rty in
       begin

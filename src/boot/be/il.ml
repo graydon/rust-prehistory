@@ -886,12 +886,49 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
     emit_quad (unary default_mov dst src)
   in
 
-  let mov_if_operands_differ (old_op:operand) (new_op:operand) : unit =
-    if not (new_op = old_op)
+  let mov_if_operands_differ
+      (old_op:operand) (new_op:operand)
+      : unit =
+    if (new_op <> old_op)
     then
       match new_op with
-          Cell new_cell -> emit_mov new_cell old_op
+          (Cell new_cell) ->
+            emit_mov new_cell old_op
         | _ -> ()
+  in
+
+  let mov_if_two_operands_differ
+      (old_lhs_op:operand) (new_lhs_op:operand)
+      (old_rhs_op:operand) (new_rhs_op:operand)
+      : unit =
+    let has_reg_indirect op =
+      match op with
+          Cell (Mem _) -> true
+        | _ -> false
+    in
+    let either_old_op_has_reg_indirect =
+      (has_reg_indirect old_lhs_op) || (has_reg_indirect old_rhs_op)
+    in
+    let old_lhs_op =
+      if either_old_op_has_reg_indirect && (new_lhs_op <> old_lhs_op)
+      then
+        let tmp = Mem (next_spill_slot e (ScalarTy (operand_scalar_ty old_lhs_op))) in
+          emit_mov tmp old_lhs_op;
+          Cell tmp
+      else
+        old_lhs_op
+    in
+    let old_rhs_op =
+      if either_old_op_has_reg_indirect && (new_rhs_op <> old_rhs_op)
+      then
+        let tmp = Mem (next_spill_slot e (ScalarTy (operand_scalar_ty old_rhs_op))) in
+          emit_mov tmp old_rhs_op;
+          Cell tmp
+      else
+        old_rhs_op
+    in
+      mov_if_operands_differ old_lhs_op new_lhs_op;
+      mov_if_operands_differ old_rhs_op new_rhs_op;
   in
 
   let mov_if_cells_differ (old_cell:cell) (new_cell:cell) : unit =
@@ -903,8 +940,9 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
     match (q', e.emit_preallocator q') with
         (Binary b, Binary b') ->
           begin
-            mov_if_operands_differ b.binary_lhs b'.binary_lhs;
-            mov_if_operands_differ b.binary_rhs b'.binary_rhs;
+            mov_if_two_operands_differ
+              b.binary_lhs b'.binary_lhs
+              b.binary_rhs b'.binary_rhs;
             if e.emit_is_2addr &&
               (not (b'.binary_lhs = (Cell b'.binary_dst)))
             then
@@ -923,8 +961,9 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
           mov_if_cells_differ u.unary_dst u'.unary_dst
 
       | (Cmp c, Cmp c') ->
-          mov_if_operands_differ c.cmp_lhs c'.cmp_lhs;
-          mov_if_operands_differ c.cmp_rhs c'.cmp_rhs;
+          mov_if_two_operands_differ
+            c.cmp_lhs c'.cmp_lhs
+            c.cmp_rhs c'.cmp_rhs;
           emit_quad (Cmp c');
 
       | (Push op, Push op') ->

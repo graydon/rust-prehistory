@@ -185,13 +185,16 @@ let layout_visitor
   in
 
   let layout_header (id:node_id) (input_slot_ids:node_id array) : unit =
-    let word_sz = cx.ctxt_abi.Abi.abi_word_sz in
-    let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
-    let offset = SIZE_fixed (Int64.add
-                               cx.ctxt_abi.Abi.abi_frame_base_sz
-                               (Int64.add
-                                  cx.ctxt_abi.Abi.abi_implicit_args_sz
-                                  (word_n (n_item_ty_params cx id))))
+    let rty = direct_call_args_referent_type cx id in
+    let offset =
+      match rty with
+          Il.StructTy elts ->
+            (add_sz
+               (SIZE_fixed cx.ctxt_abi.Abi.abi_frame_base_sz)
+               (Il.get_element_offset
+                  cx.ctxt_abi.Abi.abi_word_bits
+                  elts Abi.calltup_elt_args))
+        | _ -> bug () "call tuple has non-StructTy"
     in
       log cx "laying out header for node #%d at fp offset %s" (int_of_node id) (string_of_size offset);
       layout_slot_ids (Stack.create()) true false offset input_slot_ids
