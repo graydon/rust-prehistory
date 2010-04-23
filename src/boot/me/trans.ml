@@ -253,24 +253,7 @@ let trans_visitor
           (Il.string_of_operand  abi.Abi.abi_str_of_hardreg operand)
   in
 
-  let get_element_ptr (mem_cell:Il.cell) (i:int) : Il.cell =
-    match mem_cell with
-        Il.Mem (mem, Il.StructTy elts) when i >= 0 && i < (Array.length elts) ->
-          assert ((Array.length elts) != 0);
-          begin
-            let elt_rty = elts.(i) in
-            let elt_off = Il.get_element_offset word_bits elts i in
-              match elt_off with
-                  SIZE_fixed fixed_off ->
-                    Il.Mem (Il.mem_off_imm mem fixed_off, elt_rty)
-                | _ -> bug ()
-                    "get_element_ptr %d on dynamic-size cell: offset %s"
-                      i (string_of_size elt_off)
-          end
-
-      | _ -> bug () "get_element_ptr %d on cell %s" i
-          (Il.string_of_cell abi.Abi.abi_str_of_hardreg mem_cell)
-  in
+  let get_element_ptr = Il.get_element_ptr word_bits abi.Abi.abi_str_of_hardreg in
 
   let get_variant_ptr (mem_cell:Il.cell) (i:int) : Il.cell =
     match mem_cell with
