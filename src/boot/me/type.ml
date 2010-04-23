@@ -171,6 +171,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
   let (item_params:(node_id, tyvar array) Hashtbl.t) = Hashtbl.create 10 in
   let (lval_tyvars:(node_id, tyvar) Hashtbl.t) = Hashtbl.create 0 in
 
+  let path = Stack.create () in
+
   let visitor (cx:ctxt) (inner:Walk.visitor) : Walk.visitor =
 
     let rec unify_slot
@@ -1053,8 +1055,32 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       inner.Walk.visit_mod_item_pre n p mod_item
     in
 
+    let path_name (_:unit) : string =
+      string_of_name (Walk.path_to_name path)
+    in
+
     let visit_mod_item_post n p mod_item =
       inner.Walk.visit_mod_item_post n p mod_item;
+      match mod_item.node.Ast.decl_item with
+          Ast.MOD_ITEM_fn _
+            when (path_name()) = cx.ctxt_main_name ->
+              begin
+                match Hashtbl.find cx.ctxt_all_item_types mod_item.id with
+                    Ast.TY_fn (tsig, _) ->
+                      begin
+                        let vec_str =
+                          interior_slot (Ast.TY_vec (interior_slot Ast.TY_str))
+                        in
+                          match tsig.Ast.sig_input_slots with
+                              [| |] -> ()
+                            | [| vs |] when vs = vec_str -> ()
+                            | _ -> err (Some mod_item.id)
+                                "main fn has bad type signature"
+                      end
+                  | _ ->
+                      err (Some mod_item.id) "main item is not a function"
+              end
+        | _ -> ()
     in
 
       {
@@ -1066,7 +1092,6 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
   in
     try
-      let path = Stack.create () in
       let auto_queue = Queue.create () in
       let init_slot_tyvar id defn =
         match defn with
