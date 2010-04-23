@@ -407,7 +407,7 @@ let trans_visitor
 
   let get_ty_desc (fp:Il.reg) (fn:node_id) (param_idx:int) : Il.cell =
     let args_cell =
-      (* XXX: does this ever need extra-args info? *)
+      (* FIXME: does this ever need extra-args info? *)
       Il.Mem (based_imm fp out_mem_disp, (fn_args_rty fn None None))
     in
     let ty_params = get_element_ptr args_cell Abi.calltup_elt_ty_params in
