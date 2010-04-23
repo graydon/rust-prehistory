@@ -129,8 +129,6 @@ type dw_tag =
   | DW_TAG_condition
   | DW_TAG_shared_type
   | DW_TAG_lo_user
-  | DW_TAG_rust_type_param
-  | DW_TAG_rust_type_param_decl
   | DW_TAG_hi_user
 ;;
 
@@ -195,8 +193,6 @@ let dw_tag_to_int (tag:dw_tag) : int =
   | DW_TAG_condition -> 0x3f
   | DW_TAG_shared_type -> 0x40
   | DW_TAG_lo_user -> 0x4080
-  | DW_TAG_rust_type_param -> 0x4380
-  | DW_TAG_rust_type_param_decl -> 0x4381
   | DW_TAG_hi_user -> 0xffff
 ;;
 
@@ -260,8 +256,6 @@ let dw_tag_of_int (i:int) : dw_tag =
   | 0x3f -> DW_TAG_condition
   | 0x40 -> DW_TAG_shared_type
   | 0x4080 -> DW_TAG_lo_user
-  | 0x4380 -> DW_TAG_rust_type_param
-  | 0x4381 -> DW_TAG_rust_type_param_decl
   | 0xffff -> DW_TAG_hi_user
   | _ -> bug () "bad DWARF tag code: %d" i
 ;;
@@ -327,8 +321,6 @@ let dw_tag_to_string (tag:dw_tag) : string =
   | DW_TAG_condition -> "DW_TAG_condition"
   | DW_TAG_shared_type -> "DW_TAG_shared_type"
   | DW_TAG_lo_user -> "DW_TAG_lo_user"
-  | DW_TAG_rust_type_param -> "DW_TAG_rust_type_param"
-  | DW_TAG_rust_type_param_decl -> "DW_TAG_rust_type_param_decl"
   | DW_TAG_hi_user -> "DW_TAG_hi_user"
 ;;
 
@@ -440,6 +432,7 @@ type dw_at =
   | DW_AT_pure
   | DW_AT_recursive
   | DW_AT_lo_user
+  | DW_AT_rust_type_code
   | DW_AT_rust_type_param_index
   | DW_AT_hi_user
 ;;
@@ -534,6 +527,7 @@ let dw_at_to_int (a:dw_at) : int =
     | DW_AT_pure -> 0x67
     | DW_AT_recursive -> 0x68
     | DW_AT_lo_user -> 0x2000
+    | DW_AT_rust_type_code -> 0x2300
     | DW_AT_rust_type_param_index -> 0x2301
     | DW_AT_hi_user -> 0x3fff
 ;;
@@ -627,6 +621,7 @@ let dw_at_of_int (i:int) : dw_at =
     | 0x67 -> DW_AT_pure
     | 0x68 -> DW_AT_recursive
     | 0x2000 -> DW_AT_lo_user
+    | 0x2300 -> DW_AT_rust_type_code
     | 0x2301 -> DW_AT_rust_type_param_index
     | 0x3fff -> DW_AT_hi_user
     | _ -> bug () "bad DWARF attribute code: 0x%x" i
@@ -721,10 +716,57 @@ let dw_at_to_string (a:dw_at) : string =
     | DW_AT_pure -> "DW_AT_pure"
     | DW_AT_recursive -> "DW_AT_recursive"
     | DW_AT_lo_user -> "DW_AT_lo_user"
+    | DW_AT_rust_type_code -> "DW_AT_rust_type_code"
     | DW_AT_rust_type_param_index -> "DW_AT_rust_type_param_index"
     | DW_AT_hi_user -> "DW_AT_hi_user"
 ;;
 
+(*
+ * We encode our 'built-in types' using DW_TAG_pointer_type and various
+ * DW_AT_pointer_type_codes. This seems to be more gdb-compatible than
+ * the DWARF-recommended way of using DW_TAG_unspecified_type.
+ *)
+type dw_rust_type =
+    DW_RUST_type_param
+  | DW_RUST_nil
+  | DW_RUST_vec
+  | DW_RUST_chan
+  | DW_RUST_port
+  | DW_RUST_task
+  | DW_RUST_fn
+  | DW_RUST_tag
+  | DW_RUST_iso
+  | DW_RUST_type
+;;
+
+let dw_rust_type_to_int (pt:dw_rust_type) : int =
+  match pt with
+      DW_RUST_type_param -> 0x1
+    | DW_RUST_nil -> 0x2
+    | DW_RUST_vec -> 0x3
+    | DW_RUST_chan -> 0x4
+    | DW_RUST_port -> 0x5
+    | DW_RUST_task -> 0x6
+    | DW_RUST_fn -> 0x7
+    | DW_RUST_tag -> 0x8
+    | DW_RUST_iso -> 0x9
+    | DW_RUST_type -> 0xa
+;;
+
+let dw_rust_type_of_int (i:int) : dw_rust_type =
+  match i with
+      0x1 -> DW_RUST_type_param
+    | 0x2 -> DW_RUST_nil
+    | 0x3 -> DW_RUST_vec
+    | 0x4 -> DW_RUST_chan
+    | 0x5 -> DW_RUST_port
+    | 0x6 -> DW_RUST_task
+    | 0x7 -> DW_RUST_fn
+    | 0x8 -> DW_RUST_tag
+    | 0x9 -> DW_RUST_iso
+    | 0xa -> DW_RUST_type
+    | _ -> bug () "bad DWARF rust-pointer-type code: %d" i
+;;
 
 type dw_ate =
       DW_ATE_address
@@ -1183,35 +1225,48 @@ let (abbrev_formal:abbrev) =
    |])
 ;;
 
-let (abbrev_unspecified_type:abbrev) =
-  (DW_TAG_unspecified_type, DW_CHILDREN_no,
+let (abbrev_unspecified_anon_structure_type:abbrev) =
+  (DW_TAG_structure_type, DW_CHILDREN_no,
+   [|
+     (DW_AT_declaration, DW_FORM_flag);
+   |])
+;;
+
+let (abbrev_unspecified_structure_type:abbrev) =
+  (DW_TAG_structure_type, DW_CHILDREN_no,
    [|
      (DW_AT_name, DW_FORM_string);
+     (DW_AT_rust_type_code, DW_FORM_data1);
+     (DW_AT_declaration, DW_FORM_flag);
+   |])
+;;
+
+let (abbrev_unspecified_pointer_type:abbrev) =
+  (DW_TAG_pointer_type, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_rust_type_code, DW_FORM_data1);
+     (DW_AT_declaration, DW_FORM_flag);
+     (DW_AT_type, DW_FORM_ref_addr)
    |])
 ;;
 
 let (abbrev_rust_type_param:abbrev) =
-  (DW_TAG_rust_type_param, DW_CHILDREN_no,
+  (DW_TAG_pointer_type, DW_CHILDREN_no,
    [|
+     (DW_AT_rust_type_code, DW_FORM_data1);
      (DW_AT_rust_type_param_index, DW_FORM_data4);
      (DW_AT_mutable, DW_FORM_flag);
    |])
 ;;
 
 let (abbrev_rust_type_param_decl:abbrev) =
-  (DW_TAG_rust_type_param_decl, DW_CHILDREN_no,
+  (DW_TAG_formal_parameter, DW_CHILDREN_no,
    [|
+     (DW_AT_rust_type_code, DW_FORM_data1);
      (DW_AT_name, DW_FORM_string);
      (DW_AT_rust_type_param_index, DW_FORM_data4);
      (DW_AT_mutable, DW_FORM_flag);
-   |])
-;;
-
-let (abbrev_unspecified_ref_type:abbrev) =
-  (DW_TAG_unspecified_type, DW_CHILDREN_no,
-   [|
-     (DW_AT_name, DW_FORM_string);
-     (DW_AT_type, DW_FORM_ref_addr)
    |])
 ;;
 
@@ -1365,6 +1420,8 @@ let dwarf_visitor
     let (idx, mut) = p in
       SEQ [|
         uleb (get_abbrev_code abbrev_rust_type_param);
+        (* DW_AT_rust_type_code: DW_FORM_data1 *)
+        BYTE (dw_rust_type_to_int DW_RUST_type_param);
         (* DW_AT_rust_type_param_index: DW_FORM_data4 *)
         WORD (word_ty_mach, IMM (Int64.of_int idx));
         (* DW_AT_mutable, DW_FORM_flag *)
@@ -1516,13 +1573,30 @@ let dwarf_visitor
           ref_addr_for_fix fix
       in
 
-      let unspecified name =
-        let fix = new_fixup ("unspecified-type DIE: " ^ name) in
+      let unspecified_anon_struct _ =
+        let fix = new_fixup ("unspecified-anon-struct DIE") in
         let die =
           DEF (fix, SEQ [|
-                 uleb (get_abbrev_code abbrev_unspecified_type);
+                 uleb (get_abbrev_code abbrev_unspecified_anon_structure_type);
+                 (* DW_AT_declaration: DW_FORM_flag *)
+                 BYTE 1;
+               |])
+        in
+          emit_die die;
+          ref_addr_for_fix fix
+      in
+
+      let unspecified_struct name rust_ty =
+        let fix = new_fixup ("unspecified-struct DIE: " ^ name) in
+        let die =
+          DEF (fix, SEQ [|
+                 uleb (get_abbrev_code abbrev_unspecified_structure_type);
                  (* DW_AT_name: DW_FORM_string *)
-                 ZSTRING name
+                 ZSTRING name;
+                 (* DW_AT_rust_type_code: DW_FORM_data1 *)
+                 BYTE (dw_rust_type_to_int rust_ty);
+                 (* DW_AT_declaration: DW_FORM_flag *)
+                 BYTE 1;
                |])
         in
           emit_die die;
@@ -1536,36 +1610,39 @@ let dwarf_visitor
           ref_addr_for_fix fix
       in
 
-      let unspecified_ref_ty name ty =
-        let fix = new_fixup ("unspecified-ref-type DIE: " ^ name) in
+      let unspecified_ptr_with_ref name rust_ty ref_addr =
+        let fix = new_fixup ("unspecified-pointer-type-with-ref DIE: " ^ name) in
         let die =
           DEF (fix, SEQ [|
-                 uleb (get_abbrev_code abbrev_unspecified_ref_type);
+                 uleb (get_abbrev_code abbrev_unspecified_pointer_type);
                  (* DW_AT_name: DW_FORM_string *)
                  ZSTRING name;
+                 (* DW_AT_rust_type_code: DW_FORM_data1 *)
+                 BYTE (dw_rust_type_to_int rust_ty);
+                 (* DW_AT_declaration: DW_FORM_flag *)
+                 BYTE 1;
                  (* DW_AT_type: DW_FORM_ref_addr *)
-                 (ref_type_die ty)
+                 ref_addr
                |])
         in
           emit_die die;
           ref_addr_for_fix fix
       in
-      let unspecified_ref_slot name slot =
-        let fix = new_fixup ("unspecified-ref-slot DIE: " ^ name) in
-        let die =
-          DEF (fix, SEQ [|
-                 uleb (get_abbrev_code abbrev_unspecified_ref_type);
-                 (* DW_AT_name: DW_FORM_string *)
-                 ZSTRING name;
-                 (* DW_AT_type: DW_FORM_ref_addr *)
-                 (ref_slot_die slot)
-               |])
-        in
-          emit_die die;
-          ref_addr_for_fix fix
+
+      let unspecified_ptr_with_ref_ty name rust_ty ty =
+        unspecified_ptr_with_ref name rust_ty (ref_type_die ty)
       in
+
+      let unspecified_ptr_with_ref_slot name rust_ty slot =
+        unspecified_ptr_with_ref name rust_ty (ref_slot_die slot)
+      in
+
+      let unspecified_ptr name rust_ty =
+        unspecified_ptr_with_ref name rust_ty (unspecified_anon_struct ())
+      in
+
         match ty with
-            Ast.TY_nil -> unspecified "nil"
+            Ast.TY_nil -> unspecified_struct "nil" DW_RUST_nil
           | Ast.TY_bool -> base ("bool", DW_ATE_boolean, 1)
           | Ast.TY_mach (TY_u8)  -> base ("u8",  DW_ATE_unsigned, 1)
           | Ast.TY_mach (TY_u16) -> base ("u16", DW_ATE_unsigned, 2)
@@ -1581,16 +1658,16 @@ let dwarf_visitor
           | Ast.TY_rec trec -> record trec
           | Ast.TY_tup ttup -> record (Array.mapi (fun i s -> ("_" ^ (string_of_int i), s)) ttup)
 
-          | Ast.TY_vec s -> unspecified_ref_slot "vec" s
-          | Ast.TY_chan t -> unspecified_ref_ty "chan" t
-          | Ast.TY_port t -> unspecified_ref_ty "port" t
-          | Ast.TY_task -> unspecified "task"
-          | Ast.TY_fn _ -> unspecified "fn"
-          | Ast.TY_tag _ -> unspecified "tag"
-          | Ast.TY_iso _ -> unspecified "iso"
-          | Ast.TY_type -> unspecified "type"
+          | Ast.TY_vec s -> unspecified_ptr_with_ref_slot "vec" DW_RUST_vec s
+          | Ast.TY_chan t -> unspecified_ptr_with_ref_ty "chan" DW_RUST_chan t
+          | Ast.TY_port t -> unspecified_ptr_with_ref_ty "port" DW_RUST_port t
+          | Ast.TY_task -> unspecified_ptr "task" DW_RUST_task
+          | Ast.TY_fn _ -> unspecified_ptr "fn" DW_RUST_fn
+          | Ast.TY_tag _ -> unspecified_ptr "tag" DW_RUST_tag
+          | Ast.TY_iso _ -> unspecified_ptr "iso" DW_RUST_iso
+          | Ast.TY_type -> unspecified_ptr "type" DW_RUST_type
           | Ast.TY_param p -> rust_type_param p
-          | _ -> unspecified "unknown"
+          | _ -> unspecified_struct "nil" DW_RUST_nil
   in
 
   let finish_crate_cu_and_compose_headers _ =
@@ -1743,6 +1820,8 @@ let dwarf_visitor
     let (ident, (idx, mut)) = p in
       SEQ [|
         uleb (get_abbrev_code abbrev_rust_type_param_decl);
+        (* DW_AT_rust_type_code: DW_FORM_data1 *)
+        BYTE (dw_rust_type_to_int DW_RUST_type_param);
         (* DW_AT_name:  DW_FORM_string *)
         ZSTRING (Filename.basename ident);
         (* DW_AT_rust_type_param_index: DW_FORM_data4 *)
@@ -2259,22 +2338,41 @@ let rec extract_mod_items
     ((get_str die DW_AT_name), (get_type_param die))
   in
 
+  let is_rust_type die t =
+    match atab_search die.die_attrs DW_AT_rust_type_code with
+        Some (_, DATA_num n) -> (dw_rust_type_of_int n) = t
+      | _ -> false
+  in
+
   let rec get_ty die : Ast.ty =
       match die.die_tag with
 
-          DW_TAG_unspecified_type ->
-            begin
-              match get_name die with
-                  "nil" -> Ast.TY_nil
-                | "task" -> Ast.TY_task
-                | "port" -> Ast.TY_port (get_referenced_ty die)
-                | "chan" -> Ast.TY_chan (get_referenced_ty die)
-                | "vec" -> Ast.TY_vec (get_referenced_slot die)
-                | "type" -> Ast.TY_type
-                | _ -> Ast.TY_nil (* FIXME: finish this. *)
-            end
+          DW_TAG_structure_type
+            when is_rust_type die DW_RUST_nil ->
+              Ast.TY_nil
 
-        | DW_TAG_rust_type_param ->
+        | DW_TAG_pointer_type
+            when is_rust_type die DW_RUST_task ->
+            Ast.TY_task
+
+        | DW_TAG_pointer_type
+            when is_rust_type die DW_RUST_type ->
+            Ast.TY_type
+
+        | DW_TAG_pointer_type
+            when is_rust_type die DW_RUST_port ->
+            Ast.TY_port (get_referenced_ty die)
+
+        | DW_TAG_pointer_type
+            when is_rust_type die DW_RUST_chan ->
+            Ast.TY_chan (get_referenced_ty die)
+
+        | DW_TAG_pointer_type
+            when is_rust_type die DW_RUST_vec ->
+            Ast.TY_vec (get_referenced_slot die)
+
+        | DW_TAG_pointer_type
+            when is_rust_type die DW_RUST_type_param ->
             Ast.TY_param (get_type_param die)
 
         | DW_TAG_string_type -> Ast.TY_str
@@ -2384,26 +2482,20 @@ let rec extract_mod_items
   in
 
   let get_formals die =
-    arr_map_partial
-      die.die_children
-      begin
-        fun child ->
-          match child.die_tag with
-              DW_TAG_formal_parameter -> Some (get_referenced_slot child)
-            | _ -> None
-      end
-  in
-
-  let get_type_param_decls die =
-    arr_map_partial
-      die.die_children
-      begin
-        fun child ->
-          match child.die_tag with
-              DW_TAG_rust_type_param_decl ->
-                Some (wrap (get_type_param_decl child))
-              | _ -> None
+    let islots = Queue.create () in
+    let params = Queue.create () in
+      Array.iter
+        begin
+          fun child ->
+            match child.die_tag with
+                DW_TAG_formal_parameter ->
+                  if (is_rust_type child DW_RUST_type_param)
+                  then Queue.push (wrap (get_type_param_decl child)) params
+                  else Queue.push (get_referenced_slot child) islots
+              | _ -> ()
         end
+        die.die_children;
+      (queue_to_arr params, queue_to_arr islots)
   in
 
   let extract_children mis die =
@@ -2432,7 +2524,7 @@ let rec extract_mod_items
           let ident = get_name die in
           let ty = get_referenced_ty die in
           let tyi = Ast.MOD_ITEM_type ty in
-            htab_put mis ident (decl (get_type_param_decls die) tyi)
+            htab_put mis ident (decl [||] tyi)
 
       | DW_TAG_compile_unit ->
           extract_children mis die
@@ -2446,13 +2538,13 @@ let rec extract_mod_items
                        Ast.view_exports = exports }
           in
           let mi = Ast.MOD_ITEM_mod (view, sub_mis) in
-            htab_put mis ident (decl (get_type_param_decls die) mi)
+            htab_put mis ident (decl [||] mi)
 
       | DW_TAG_subprogram ->
           (* FIXME: finish this. *)
           let ident = get_name die in
           let oslot = get_referenced_slot die in
-          let islots = get_formals die in
+          let (params, islots) = get_formals die in
           let taux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
                        Ast.fn_proto = None }
           in
@@ -2463,7 +2555,7 @@ let rec extract_mod_items
                        Ast.fn_body = (wrap [||]); }
           in
           let fn = Ast.MOD_ITEM_fn tfn in
-            htab_put mis ident (decl (get_type_param_decls die) fn)
+            htab_put mis ident (decl params fn)
 
       | _ -> ()
 ;;
