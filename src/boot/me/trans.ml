@@ -1970,7 +1970,7 @@ let trans_visitor
             mov dst (Il.Cell src)
           end
 
-      | Ast.TY_param (i, _, _) ->
+      | Ast.TY_param (i, _) ->
           begin
             iflog (fun _ -> annotate
                      (Printf.sprintf "copy_ty: parametric copy %#d" i));
@@ -2749,7 +2749,7 @@ let trans_visitor
 
       let get_tydesc ty_param =
         match ty_param with
-            Ast.TY_param (idx, _, _) ->
+            Ast.TY_param (idx, _) ->
               (alias (get_current_fn_ty_desc idx))
           | _ ->
               (crate_rel_to_ptr (trans_tydesc ty_param) Il.OpaqueTy)

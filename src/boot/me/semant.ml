@@ -565,7 +565,7 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_port : 'ty -> 'ty;
       ty_fold_task : unit -> 'ty;
       ty_fold_native : opaque_id -> 'ty;
-      ty_fold_param : (int * opaque_id * Ast.mutability) -> 'ty;
+      ty_fold_param : (int * Ast.mutability) -> 'ty;
       ty_fold_named : Ast.name -> 'ty;
       ty_fold_type : unit -> 'ty;
       ty_fold_constrained : ('ty * Ast.constrs) -> 'ty }
@@ -697,7 +697,7 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_port = (fun t -> id (Ast.TY_port t));
     ty_fold_task = (fun _ -> id Ast.TY_task);
     ty_fold_native = (fun oid -> id (Ast.TY_native oid));
-    ty_fold_param = (fun (i, oid, mut) -> id (Ast.TY_param (i, oid, mut)));
+    ty_fold_param = (fun (i, mut) -> id (Ast.TY_param (i, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
     ty_fold_type = (fun _ -> id (Ast.TY_type));
     ty_fold_constrained = (fun (t, constrs) -> id (Ast.TY_constrained (t, constrs))) }
@@ -714,8 +714,8 @@ let rebuild_ty_under_params
     let pmap = Hashtbl.create (Array.length args) in
     let substituted = ref false in
     let base = ty_fold_rebuild (fun t -> t) in
-    let ty_fold_param (i, oid, mut) =
-      let param = Ast.TY_param (i, oid, mut) in
+    let ty_fold_param (i, mut) =
+      let param = Ast.TY_param (i, mut) in
         match htab_search pmap param with
             None -> param
           | Some arg -> (substituted := true; arg)
@@ -1450,7 +1450,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
       | Ast.TY_native _ -> ptr
 
-      | Ast.TY_param (i, _, _) -> Il.ParamTy i
+      | Ast.TY_param (i, _) -> Il.ParamTy i
 
       | Ast.TY_named _ -> bug () "named type in referent_type"
       | Ast.TY_constrained (t, _) -> referent_type abi t

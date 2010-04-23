@@ -99,7 +99,7 @@ and ty =
   | TY_task
 
   | TY_native of opaque_id
-  | TY_param of (ty_param_idx * opaque_id * mutability)
+  | TY_param of (ty_param_idx * mutability)
   | TY_named of name
   | TY_type
 
@@ -417,7 +417,7 @@ and obj =
  * even if it's a type that's bound by a quantifier in its environment.
  *)
 
-and ty_param = ident * (ty_param_idx * opaque_id * mutability)
+and ty_param = ident * (ty_param_idx * mutability)
 
 and mod_item' =
     MOD_ITEM_type of ty
@@ -666,9 +666,8 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
         fmt_slots ff slots (Some idents);
         fmt ff "@]"
 
-  | TY_param (i, oid, m) -> (fmt_mutable ff m;
-                             fmt ff "<p#%d/o#%d>" i
-                               (int_of_opaque oid))
+  | TY_param (i, m) -> (fmt_mutable ff m;
+                        fmt ff "<p#%d>" i)
   | TY_native oid -> fmt ff "<native#%d>" (int_of_opaque oid)
   | TY_named n -> fmt_name ff n
   | TY_type -> fmt ff "type"
@@ -1156,10 +1155,10 @@ and fmt_decl_params (ff:Format.formatter) (params:ty_param array) : unit =
       do
         if i <> 0
         then fmt ff ", ";
-        let (ident, (i, oid, mut)) = params.(i) in
+        let (ident, (i, mut)) = params.(i) in
           fmt_mutable ff mut;
           fmt_ident ff ident;
-          fmt ff "=<p#%d/o#%d>" i (int_of_opaque oid)
+          fmt ff "=<p#%d>" i
       done;
       fmt ff "]"
     end;
