@@ -128,15 +128,19 @@ let trans_visitor
   in
   let fn_args_rty
       (id:node_id)
+      (iterator:Il.referent_ty option)
       (closure:Il.referent_ty option)
       : Il.referent_ty =
-    call_args_referent_type cx (n_item_ty_params cx id) (fn_ty id) closure
+    call_args_referent_type cx (n_item_ty_params cx id) (fn_ty id) iterator closure
   in
 
   let (fns:node_id Stack.t) = Stack.create () in
   let current_fn () = Stack.top fns in
-  let current_fn_args_rty (closure:Il.referent_ty option) : Il.referent_ty =
-    fn_args_rty (current_fn()) closure
+  let current_fn_args_rty
+      (iterator:Il.referent_ty option)
+      (closure:Il.referent_ty option)
+      : Il.referent_ty =
+    fn_args_rty (current_fn()) iterator closure
   in
   let current_fn_callsz () = get_callsz cx (current_fn()) in
 
@@ -403,7 +407,8 @@ let trans_visitor
 
   let get_ty_desc (fp:Il.reg) (fn:node_id) (param_idx:int) : Il.cell =
     let args_cell =
-      Il.Mem (based_imm fp out_mem_disp, (fn_args_rty fn None))
+      (* XXX: does this ever need extra-args info? *)
+      Il.Mem (based_imm fp out_mem_disp, (fn_args_rty fn None None))
     in
     let ty_params = get_element_ptr args_cell Abi.calltup_elt_ty_params in
       deref (get_element_ptr ty_params param_idx)
@@ -574,7 +579,8 @@ let trans_visitor
                     then
                       begin
                         let curr_args_rty =
-                          current_fn_args_rty (Some Il.OpaqueTy)
+                          (* FIXME: this may need iterator-extra-args info *)
+                          current_fn_args_rty None (Some Il.OpaqueTy)
                         in
                         let self_args_cell =
                           caller_args_cell curr_args_rty
@@ -1065,10 +1071,12 @@ let trans_visitor
 
     let self_closure_rty = closure_referent_type bound_slots in
     let self_args_rty =
-      call_args_referent_type cx 0 self_ty (Some self_closure_rty)
+      (* FIXME: this may need iterator-extra-args info *)
+      call_args_referent_type cx 0 self_ty None (Some self_closure_rty)
     in
     let callee_args_rty =
-      call_args_referent_type cx 0 callee_ty (Some Il.OpaqueTy)
+      (* FIXME: this may need iterator-extra-args info *)
+      call_args_referent_type cx 0 callee_ty None (Some Il.OpaqueTy)
     in
 
     let callsz = Il.referent_ty_size word_bits callee_args_rty in
@@ -1521,7 +1529,7 @@ let trans_visitor
       if not (lval_is_direct_fn cx fn_lval)
       then bug () "unhandled indirect-spawn"
     in
-    let args_rty = call_args_referent_type cx 0 fn_ty None in
+    let args_rty = call_args_referent_type cx 0 fn_ty None None in
     let fptr_operand = reify_ptr fptr_operand in
     let exit_task_glue_fixup = get_exit_task_glue () in
     let callsz =
@@ -2703,10 +2711,11 @@ let trans_visitor
       : unit =
 
     let n_ty_params = Array.length ty_params in
+    (* FIXME: this may need iterator-extra-args info *)
     let all_callee_args_rty =
       if cc = CALL_direct
-      then call_args_referent_type cx n_ty_params callee_ty None
-      else call_args_referent_type cx n_ty_params callee_ty (Some Il.OpaqueTy)
+      then call_args_referent_type cx n_ty_params callee_ty None None
+      else call_args_referent_type cx n_ty_params callee_ty None (Some Il.OpaqueTy)
     in
     let all_callee_args_cell = callee_args_cell tail_area all_callee_args_rty in
 
@@ -2979,17 +2988,19 @@ let trans_visitor
     let callee_fptr = callee_fn_ptr callee_ptr cc in
     let callee_code = code_of_operand callee_fptr in
     let callee_args_rty =
-      call_args_referent_type cx 0 callee_ty
+      call_args_referent_type cx 0 callee_ty None
         (if cc = CALL_direct then None else (Some Il.OpaqueTy))
     in
     let callee_argsz =
       force_sz (Il.referent_ty_size word_bits callee_args_rty)
     in
-    let caller_args_rty =
-      current_fn_args_rty (if caller_is_closure
-                           then (Some Il.OpaqueTy)
-                           else None)
+    let closure_rty =
+      if caller_is_closure
+      then Some Il.OpaqueTy
+      else None
     in
+    (* FIXME: this will need iterator-extra-args info *)
+    let caller_args_rty = current_fn_args_rty None closure_rty in
     let
         caller_argsz = force_sz (Il.referent_ty_size word_bits caller_args_rty)
     in

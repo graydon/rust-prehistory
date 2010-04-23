@@ -1529,6 +1529,7 @@ let call_args_referent_type
     (cx:ctxt)
     (n_ty_params:int)
     (callee_ty:Ast.ty)
+    ((*iterator*)_:Il.referent_ty option)
     (closure:Il.referent_ty option)
     : Il.referent_ty =
   let with_closure e =
@@ -1572,7 +1573,7 @@ let indirect_call_args_referent_type
     (callee_ty:Ast.ty)
     (closure:Il.referent_ty)
     : Il.referent_ty =
-  call_args_referent_type cx n_ty_params callee_ty (Some closure)
+  call_args_referent_type cx n_ty_params callee_ty None (Some closure)
 ;;
 
 let direct_call_args_referent_type
@@ -1581,7 +1582,7 @@ let direct_call_args_referent_type
     : Il.referent_ty =
   let ity = Hashtbl.find cx.ctxt_all_item_types callee_node in
   let n_ty_params = n_item_ty_params cx callee_node in
-    call_args_referent_type cx n_ty_params ity None
+    call_args_referent_type cx n_ty_params ity None None
 ;;
 
 let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =
