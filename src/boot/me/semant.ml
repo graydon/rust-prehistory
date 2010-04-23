@@ -1501,7 +1501,8 @@ let call_args_referent_type_full
     (out_slot:Ast.slot)
     (n_ty_params:int)
     (in_slots:Ast.slot array)
-    (extra_arg_rtys:Il.referent_ty array)
+    (* FIXME: (iterator_arg_rtys:Il.referent_ty array) *)
+    (indirect_arg_rtys:Il.referent_ty array)
     : Il.referent_ty =
   let out_slot_rty = slot_referent_type abi out_slot in
   let out_ptr_rty = Il.ScalarTy (Il.AddrTy out_slot_rty) in
@@ -1517,11 +1518,12 @@ let call_args_referent_type_full
      *)
     Il.StructTy
       [|
-        out_ptr_rty;                (* Abi.calltup_elt_out_ptr    *)
-        task_ptr_rty;               (* Abi.calltup_elt_task_ptr   *)
-        ty_param_rtys;              (* Abi.calltup_elt_ty_params  *)
-        arg_rtys;                   (* Abi.calltup_elt_args       *)
-        Il.StructTy extra_arg_rtys  (* Abi.calltup_elt_extra_args *)
+        out_ptr_rty;                   (* Abi.calltup_elt_out_ptr       *)
+        task_ptr_rty;                  (* Abi.calltup_elt_task_ptr      *)
+        ty_param_rtys;                 (* Abi.calltup_elt_ty_params     *)
+        arg_rtys;                      (* Abi.calltup_elt_args          *)
+        (* FIXME: Il.StructTy iterator_arg_rtys *)
+        Il.StructTy indirect_arg_rtys  (* Abi.calltup_elt_indirect_args *)
       |]
 ;;
 
@@ -1538,7 +1540,7 @@ let call_args_referent_type
       | Some c ->
           Array.append e
             [|
-              Il.ScalarTy (Il.AddrTy c) (* Abi.extra_args_elt_closure *)
+              Il.ScalarTy (Il.AddrTy c) (* Abi.indirect_args_elt_closure *)
             |]
   in
     match callee_ty with
@@ -1546,7 +1548,6 @@ let call_args_referent_type
           let extras =
             match taux.Ast.fn_proto with
                 None -> with_closure [| |]
-                  (* FIXME: extra-args will expand with non-empty call-protocol *)
               | Some _ -> with_closure cx.ctxt_abi.Abi.abi_iterator_extra_arg_tys
           in
             call_args_referent_type_full

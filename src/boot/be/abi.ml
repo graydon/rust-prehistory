@@ -60,9 +60,10 @@ let calltup_elt_out_ptr = 0;;
 let calltup_elt_task_ptr = 1;;
 let calltup_elt_ty_params = 2;;
 let calltup_elt_args = 3;;
-let calltup_elt_extra_args = 4;;
+(* FIXME: let calltup_elt_iterator_args = 4;; *)
+let calltup_elt_indirect_args = 4;; (* FIXME: 5 *)
 
-let extra_args_elt_closure = 0;;
+let indirect_args_elt_closure = 0;;
 
 type abi =
   {

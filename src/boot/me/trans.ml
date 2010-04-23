@@ -36,6 +36,19 @@ type foreach_ctrl =
     }
 ;;
 
+type call =
+    {
+      call_ctrl: call_ctrl;
+      call_callee_ptr: Il.operand;
+      call_callee_ty: Ast.ty;
+      call_callee_ty_params: Ast.ty array;
+      call_output: Il.cell;
+      call_args: Ast.atom array;
+      call_iterator_args: Il.operand array;
+      call_indirect_args: Il.operand array;
+    }
+;;
+
 let trans_visitor
     (cx:ctxt)
     (path:Ast.name_component Stack.t)
@@ -568,13 +581,13 @@ let trans_visitor
                         let self_args_cell =
                           caller_args_cell curr_args_rty
                         in
-                        let self_extra_args =
+                        let self_indirect_args =
                           get_element_ptr self_args_cell
-                            Abi.calltup_elt_extra_args
+                            Abi.calltup_elt_indirect_args
                         in
                         let state_arg =
-                          get_element_ptr self_extra_args
-                            Abi.extra_args_elt_closure
+                          get_element_ptr self_indirect_args
+                            Abi.indirect_args_elt_closure
                         in
                         let (slot_mem, _) =
                           need_mem_cell (deref_imm state_arg (force_sz off))
@@ -1067,11 +1080,11 @@ let trans_visitor
       trans_glue_frame_entry callsz spill;
 
       let all_self_args_cell = caller_args_cell self_args_rty in
-      let self_extra_args_cell =
-        get_element_ptr all_self_args_cell Abi.calltup_elt_extra_args
+      let self_indirect_args_cell =
+        get_element_ptr all_self_args_cell Abi.calltup_elt_indirect_args
       in
       let closure_cell =
-        deref (get_element_ptr self_extra_args_cell Abi.extra_args_elt_closure)
+        deref (get_element_ptr self_indirect_args_cell Abi.indirect_args_elt_closure)
       in
       let closure_target_cell = get_element_ptr closure_cell Abi.binding_field_binding in
       let closure_target_fn_cell = get_element_ptr closure_target_cell Abi.binding_field_item in
@@ -1506,7 +1519,7 @@ let trans_visitor
       : unit =
     let (task_cell, _) = trans_lval_init dst in
     let (fptr_operand, fn_ty) = trans_callee fn_lval in
-    let fn_ty_params = [| |] in
+    (*let fn_ty_params = [| |] in*)
     let _ =
       (* FIXME: handle indirect-spawns (clone closure?). *)
       if not (lval_is_direct_fn cx fn_lval)
@@ -1524,12 +1537,20 @@ let trans_visitor
       iflog (fun _ -> annotate "spawn task: copy args");
 
       let new_task = next_vreg_cell Il.voidptr_t in
+      let call = { call_ctrl = CALL_indirect;
+                   call_callee_ptr = fptr_operand;
+                   call_callee_ty = fn_ty;
+                   call_callee_ty_params = [| |];
+                   call_output = task_cell;
+                   call_args = args;
+                   call_iterator_args = [| |];
+                   call_indirect_args = [| |] }
+      in
         match domain with
             Ast.DOMAIN_thread ->
               begin
                 trans_upcall "upcall_new_thread" new_task [| |];
-                copy_fn_args false (CLONE_all new_task) CALL_indirect
-                  fn_ty_params fn_ty task_cell args [| |];
+                copy_fn_args false (CLONE_all new_task) call;
                 trans_upcall "upcall_start_thread" task_cell
                   [|
                     Il.Cell new_task;
@@ -1541,8 +1562,7 @@ let trans_visitor
          | _ ->
              begin
                  trans_upcall "upcall_new_task" new_task [| |];
-                 copy_fn_args false (CLONE_chan new_task) CALL_indirect
-                   fn_ty_params fn_ty task_cell args [| |];
+                 copy_fn_args false (CLONE_chan new_task) call;
                  trans_upcall "upcall_start_task" task_cell
                    [|
                      Il.Cell new_task;
@@ -2507,15 +2527,21 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (ptr, fn_ty) = trans_callee flv in
-    let fn_ty_params = [| |] in
     let cc = call_ctrl flv in
-    let extra_args = call_extra_args flv None cc in
+    let call = { call_ctrl = cc;
+                 call_callee_ptr = ptr;
+                 call_callee_ty = fn_ty;
+                 call_callee_ty_params = [| |];
+                 call_output = dst_cell;
+                 call_args = args;
+                 call_iterator_args = call_iterator_args None;
+                 call_indirect_args = call_indirect_args flv cc }
+    in
       (* FIXME: true if caller is object fn *)
     let caller_is_closure = false in
       log cx "trans_be_fn: %s call to lval %a"
         (call_ctrl_string cc) Ast.sprintf_lval flv;
-      trans_be cc (fun () -> Ast.sprintf_lval () flv)
-        ptr fn_ty_params fn_ty caller_is_closure dst_cell args extra_args
+      trans_be (fun () -> Ast.sprintf_lval () flv) caller_is_closure call
 
   and trans_prepare_fn_call
       (initializing:bool)
@@ -2528,7 +2554,15 @@ let trans_visitor
       : Il.operand =
     let (ptr, fn_ty) = trans_callee flv in
     let cc = call_ctrl flv in
-    let extra_args = call_extra_args flv fco cc in
+    let call = { call_ctrl = cc;
+                 call_callee_ptr = ptr;
+                 call_callee_ty = fn_ty;
+                 call_callee_ty_params = ty_params;
+                 call_output = dst_cell;
+                 call_args = args;
+                 call_iterator_args = call_iterator_args fco;
+                 call_indirect_args = call_indirect_args flv cc }
+    in
       iflog
         begin
           fun _ ->
@@ -2539,9 +2573,7 @@ let trans_visitor
                            i Ast.sprintf_ty t)
               ty_params;
         end;
-      trans_prepare_call initializing cc (fun () -> Ast.sprintf_lval () flv)
-        ptr ty_params fn_ty
-        dst_cell args extra_args
+      trans_prepare_call initializing (fun () -> Ast.sprintf_lval () flv) call
 
   and trans_call_pred_and_check
       (constr:Ast.constr)
@@ -2549,14 +2581,19 @@ let trans_visitor
       (args:Ast.atom array)
       : unit =
     let (ptr, fn_ty) = trans_callee flv in
-    let fn_ty_params = [| |] in
     let dst_cell = Il.Mem (force_to_mem imm_false) in
+    let call = { call_ctrl = call_ctrl flv;
+                 call_callee_ptr = ptr;
+                 call_callee_ty = fn_ty;
+                 call_callee_ty_params = [| |];
+                 call_output = dst_cell;
+                 call_args = args;
+                 call_iterator_args = [| |];
+                 call_indirect_args = [| |] }
+    in
       iflog (fun _ -> annotate "predicate call");
       let fn_ptr =
-        trans_prepare_call
-          true (call_ctrl flv) (fun _ -> Ast.sprintf_lval () flv)
-          ptr fn_ty_params fn_ty
-          dst_cell args [||]
+        trans_prepare_call true (fun _ -> Ast.sprintf_lval () flv) call
       in
         call_code (code_of_operand fn_ptr);
         iflog (fun _ -> annotate "predicate check/fail");
@@ -2682,23 +2719,15 @@ let trans_visitor
   and copy_fn_args
       (tail_area:bool)
       (clone:clone_ctrl)
-      (cc:call_ctrl)
-
-      (ty_params:Ast.ty array)
-      (callee_ty:Ast.ty)
-
-      (caller_output_cell:Il.cell)
-      (caller_arg_atoms:Ast.atom array)
-      (caller_extra_args:Il.operand array)
-
+      (call:call)
       : unit =
 
-    let n_ty_params = Array.length ty_params in
+    let n_ty_params = Array.length call.call_callee_ty_params in
     (* FIXME: this may need iterator-extra-args info *)
     let all_callee_args_rty =
-      if cc = CALL_direct
-      then call_args_referent_type cx n_ty_params callee_ty None None
-      else call_args_referent_type cx n_ty_params callee_ty None (Some Il.OpaqueTy)
+      if call.call_ctrl = CALL_direct
+      then call_args_referent_type cx n_ty_params call.call_callee_ty None None
+      else call_args_referent_type cx n_ty_params call.call_callee_ty None (Some Il.OpaqueTy)
     in
     let all_callee_args_cell = callee_args_cell tail_area all_callee_args_rty in
 
@@ -2707,7 +2736,7 @@ let trans_visitor
                         "copying fn args to %d-ty-param call with rty: %s\n"
                         n_ty_params (Il.string_of_referent_ty all_callee_args_rty)))
     in
-    let callee_arg_slots = ty_arg_slots callee_ty in
+    let callee_arg_slots = ty_arg_slots call.call_callee_ty in
     let callee_output_cell =
       get_element_ptr all_callee_args_cell Abi.calltup_elt_out_ptr
     in
@@ -2720,14 +2749,14 @@ let trans_visitor
     let callee_args =
       get_element_ptr all_callee_args_cell Abi.calltup_elt_args
     in
-    let callee_extra_args =
-      get_element_ptr all_callee_args_cell Abi.calltup_elt_extra_args
+    let callee_indirect_args =
+      get_element_ptr all_callee_args_cell Abi.calltup_elt_indirect_args
     in
 
-    let n_args = Array.length caller_arg_atoms in
-    let n_extras = Array.length caller_extra_args in
+    let n_args = Array.length call.call_args in
+    let n_indirects = Array.length call.call_indirect_args in
 
-      trans_arg0 callee_output_cell caller_output_cell;
+      trans_arg0 callee_output_cell call.call_output;
       trans_arg1 callee_task_cell;
 
       let get_tydesc ty_param =
@@ -2749,32 +2778,32 @@ let trans_visitor
               (get_element_ptr callee_ty_params i) word_slot
               (get_tydesc ty_param) word_slot
         end
-        ty_params;
+        call.call_callee_ty_params;
 
       Array.iteri
         begin
           fun i arg_atom ->
             iflog (fun _ ->
                      annotate
-                       (Printf.sprintf "fn-call arg %d of %d (+ %d extra)"
-                          i n_args n_extras));
+                       (Printf.sprintf "fn-call arg %d of %d (+ %d indirect)"
+                          i n_args n_indirects));
             trans_argN
               clone
               (get_element_ptr callee_args i)
               callee_arg_slots.(i)
               arg_atom
         end
-        caller_arg_atoms;
+        call.call_args;
 
       Array.iteri
         begin
-          fun i extra_arg_operand ->
+          fun i indirect_arg_operand ->
             iflog (fun _ ->
-                     annotate (Printf.sprintf "fn-call extra-arg %d of %d"
-                                 i n_extras));
-            mov (get_element_ptr callee_extra_args i) extra_arg_operand
+                     annotate (Printf.sprintf "fn-call indirect-arg %d of %d"
+                                 i n_indirects));
+            mov (get_element_ptr callee_indirect_args i) indirect_arg_operand
         end
-        caller_extra_args
+        call.call_indirect_args
 
 
   and call_code (code:Il.code) : unit =
@@ -2810,7 +2839,7 @@ let trans_visitor
       (* 
        * NB: 'all_*_args', both self and callee, are always 4-tuples: 
        * 
-       *    [out_ptr, task_ptr, [args], [extra_args]] 
+       *    [out_ptr, task_ptr, [args], [indirect_args]] 
        * 
        * The first few bindings here just destructure those via GEP.
        * 
@@ -2824,8 +2853,8 @@ let trans_visitor
       let callee_args_cell =
         get_element_ptr all_callee_args_cell Abi.calltup_elt_args
       in
-      let self_extra_args_cell =
-        get_element_ptr all_self_args_cell Abi.calltup_elt_extra_args
+      let self_indirect_args_cell =
+        get_element_ptr all_self_args_cell Abi.calltup_elt_indirect_args
       in
 
       let n_args = Array.length arg_bound_flags in
@@ -2844,10 +2873,10 @@ let trans_visitor
           (Il.Cell (get_element_ptr all_self_args_cell
                       Abi.calltup_elt_task_ptr));
 
-        iflog (fun _ -> annotate "extract closure extra-arg");
+        iflog (fun _ -> annotate "extract closure indirect-arg");
         let closure_cell =
-          deref (get_element_ptr self_extra_args_cell
-                   Abi.extra_args_elt_closure)
+          deref (get_element_ptr self_indirect_args_cell
+                   Abi.indirect_args_elt_closure)
         in
         let closure_args_cell = get_element_ptr closure_cell 2 in
 
@@ -2920,23 +2949,21 @@ let trans_visitor
       | CALL_indirect -> "indirect"
       | CALL_vtbl -> "vtbl"
 
-  and iterator_extra_args
+  and call_iterator_args
       (fco:foreach_ctrl option)
       : Il.operand array =
     match fco with
         None -> [| |]
       | Some fc ->
           begin
-            iflog (fun _ -> annotate "emit extra iterator args");
+            iflog (fun _ -> annotate "calculate iterator args");
             abi.Abi.abi_iterator_extra_args (emitter ()) fc.foreach_fixup fc.foreach_depth
           end
 
-  and call_extra_args
+  and call_indirect_args
       (flv:Ast.lval)
-      (fc:foreach_ctrl option)
       (cc:call_ctrl)
       : Il.operand array =
-    let binding_extra_args =
       begin
         match cc with
             CALL_direct -> [| |]
@@ -2949,30 +2976,20 @@ let trans_visitor
                      * a 'self' value for self-dispatch within objs.
                      *)
                     Ast.LVAL_ext (base, _) -> [| callee_binding_ptr base cc |]
-                  | _ -> bug (lval_base_id flv) "call_extra_args on obj-fn without base obj"
+                  | _ -> bug (lval_base_id flv) "call_indirect_args on obj-fn without base obj"
               end
       end
-    in
-      Array.append (iterator_extra_args fc) binding_extra_args
 
   and trans_be
-      (cc:call_ctrl)
       (logname:(unit -> string))
-
-      (callee_ptr:Il.operand)
-      (call_ty_params:Ast.ty array)
-      (callee_ty:Ast.ty)
-
       (caller_is_closure:bool)
-      (caller_output_cell:Il.cell)
-      (caller_arg_atoms:Ast.atom array)
-      (caller_extra_args:Il.operand array)
+      (call:call)
       : unit =
-    let callee_fptr = callee_fn_ptr callee_ptr cc in
+    let callee_fptr = callee_fn_ptr call.call_callee_ptr call.call_ctrl in
     let callee_code = code_of_operand callee_fptr in
     let callee_args_rty =
-      call_args_referent_type cx 0 callee_ty None
-        (if cc = CALL_direct then None else (Some Il.OpaqueTy))
+      call_args_referent_type cx 0 call.call_callee_ty None
+        (if call.call_ctrl = CALL_direct then None else (Some Il.OpaqueTy))
     in
     let callee_argsz =
       force_sz (Il.referent_ty_size word_bits callee_args_rty)
@@ -2989,12 +3006,7 @@ let trans_visitor
     in
       iflog (fun _ -> annotate
                (Printf.sprintf "copy args for tail call to %s" (logname ())));
-      copy_fn_args
-        true
-        CLONE_none cc
-        call_ty_params
-        callee_ty
-        caller_output_cell caller_arg_atoms caller_extra_args;
+      copy_fn_args true CLONE_none call;
       iter_frame_and_arg_slots (current_fn ()) callee_drop_slot;
       abi.Abi.abi_emit_fn_tail_call (emitter())
         (force_sz (current_fn_callsz())) caller_argsz callee_code callee_argsz;
@@ -3002,27 +3014,14 @@ let trans_visitor
 
   and trans_prepare_call
       ((*initializing*)_:bool)
-      (cc:call_ctrl)
       (logname:(unit -> string))
-
-      (callee_ptr:Il.operand)
-      (call_ty_params:Ast.ty array)
-      (callee_ty:Ast.ty)
-
-      (caller_output_cell:Il.cell)
-      (caller_arg_atoms:Ast.atom array)
-      (caller_extra_args:Il.operand array)
+      (call:call)
       : Il.operand =
 
-    let callee_fptr = callee_fn_ptr callee_ptr cc in
+    let callee_fptr = callee_fn_ptr call.call_callee_ptr call.call_ctrl in
       iflog (fun _ -> annotate
                (Printf.sprintf "copy args for call to %s" (logname ())));
-      copy_fn_args
-        false
-        CLONE_none cc
-        call_ty_params
-        callee_ty
-        caller_output_cell caller_arg_atoms caller_extra_args;
+      copy_fn_args false CLONE_none call;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
       (* FIXME (bug 541535 ): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
