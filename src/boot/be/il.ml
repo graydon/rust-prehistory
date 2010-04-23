@@ -901,7 +901,7 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
       (old_lhs_op:operand) (new_lhs_op:operand)
       (old_rhs_op:operand) (new_rhs_op:operand)
       : unit =
-    (* 
+    (*
      * This is sufficiently obscure that it deserves an explanation.
      * 
      * The main idea here is to do two "mov_if_operands_differ" calls,
@@ -911,11 +911,11 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
      * which preallocates *both* operands. Preallocating both means we
      * have to potentially issue two movs into the preallocated regs,
      * and the second of those movs might be a problem. Specifically:
-     * the second mov-to-prealloc might make use of a vreg be moving from a
+     * the second mov-to-prealloc might make be moving from a
      * register-indirect mem cell based on a vreg, and that vreg may
-     * wind up being assigned to an hreg that we just loaded the
-     * with the *first* mov. In other words, the second mov may retask
-     * the preallocated hreg we set up in the first mov.
+     * wind up being assigned to an hreg that we just loaded with the
+     * first mov. In other words, the second mov may retask the
+     * preallocated hreg we set up in the first mov.
      * 
      * You laugh, but of course this actually happens.
      * 
