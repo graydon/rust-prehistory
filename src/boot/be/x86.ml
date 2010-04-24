@@ -1364,10 +1364,15 @@ let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
     sub tgtc (c tmpc1);                                            (* tgt <- tgt - tmp1 *)
     annotate e "put: get address of loop info segment";
     mov tmpc2 (c loop_info_ptr_cell);                              (* tmp2 <- &extra_args[1]->it_retpc *)
+    (*
+     * Note that we save ebp in a vreg so the RA spills
+     * and restores it across the call boundary.
+     *)
     mov tmpc3 (ro ebp);                                            (* tmp3 <- ebp *)
+    mov (rc eax) (ro ebp);                                         (* eax <- ebp *)
     mov (rc esp) (c tmpc2);                                        (* esp <- &extra_args[1]->it_retpc *)
     annotate e "put: restore callee-saves";
-    restore_callee_saves_at e tmp3;                                (* ebp <- ... *)
+    restore_callee_saves_at e (h eax);                             (* ebp <- ... *)
     call (c tgtc);                                                 (* call tgt *)
     save_callee_saves_at e tmp3                                    (* ... <- ebp *)
 ;;
