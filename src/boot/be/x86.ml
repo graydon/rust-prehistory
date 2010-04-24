@@ -1243,8 +1243,7 @@ let iterator_prologue (e:Il.emitter) (self_args_rty:Il.referent_ty) ((*proto*)_:
   let edx_n = word_n (h edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let args_base = Asm.IMM (Int64.add frame_base_sz implicit_args_sz) in
-  let all_args_cell = Il.Mem (Il.RegIn (h ebp, Some args_base), self_args_rty) in
+  let all_args_cell = Il.Mem (Il.RegIn (h ebp, Some (Asm.IMM frame_base_sz)), self_args_rty) in
   let iterator_args_cell = get_element_ptr all_args_cell Abi.calltup_elt_iterator_args in
   let loop_info_ptr_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_info_ptr in
     mov (rc edx) (c loop_info_ptr_cell);                           (* edx <- iterator_args[1] *)
