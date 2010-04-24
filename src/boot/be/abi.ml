@@ -60,8 +60,11 @@ let calltup_elt_out_ptr = 0;;
 let calltup_elt_task_ptr = 1;;
 let calltup_elt_ty_params = 2;;
 let calltup_elt_args = 3;;
-(* FIXME: let calltup_elt_iterator_args = 4;; *)
-let calltup_elt_indirect_args = 4;; (* FIXME: 5 *)
+let calltup_elt_iterator_args = 4;;
+let calltup_elt_indirect_args = 5;;
+
+let iterator_args_elt_loop_size = 0;;
+let iterator_args_elt_loop_info_ptr = 1;;
 
 let indirect_args_elt_closure = 0;;
 
@@ -82,15 +85,14 @@ type abi =
     abi_emit_fn_prologue: (Il.emitter -> Common.size -> Common.size -> Common.nabi -> Common.fixup -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_fn_tail_call: (Il.emitter -> int64 -> int64 -> Il.code -> int64 -> unit);
-    abi_emit_iterator_prologue: (Il.emitter -> Ast.proto -> unit);
+    abi_emit_iterator_prologue: (Il.emitter -> Il.referent_ty -> Ast.proto -> unit);
     abi_emit_iteration_prologue: (Il.emitter -> Common.nabi -> Common.fixup -> (unit -> Il.operand) -> unit);
     abi_emit_iteration_epilogue: (Il.emitter -> int -> Il.cell -> unit);
     abi_emit_loop_prologue: (Il.emitter -> int -> unit);
     abi_emit_loop_epilogue: (Il.emitter -> int -> unit);
     abi_emit_put: (Il.emitter -> unit);
 
-    abi_iterator_extra_args: (Il.emitter -> Common.fixup -> int -> Il.operand array);
-    abi_iterator_extra_arg_tys: Il.referent_ty array;
+    abi_iterator_args: (Il.emitter -> Common.fixup -> int -> Il.operand array);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 

@@ -448,6 +448,7 @@ let wordptr_n (reg:Il.reg) (i:int) : Il.cell =
     Il.Mem (mem, Il.ScalarTy (Il.AddrTy (Il.ScalarTy (Il.ValTy word_bits))))
 ;;
 
+let get_element_ptr = Il.get_element_ptr word_bits reg_str ;;
 
 let save_callee_saves (e:Il.emitter) : unit =
     Il.emit e (Il.Push (ro ebp));
@@ -1238,13 +1239,16 @@ let loop_info_field_iterator_sp = 1;;
 let loop_info_field_loop_fn_sp = 2;;
 let loop_info_field_callee_saves = 3;;
 
-let iterator_prologue (e:Il.emitter) ((*proto*)_:Ast.proto) : unit =
+let iterator_prologue (e:Il.emitter) (self_args_rty:Il.referent_ty) ((*proto*)_:Ast.proto) : unit =
   let edx_n = word_n (h edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let extra_args_1_off = Asm.IMM (Int64.add frame_base_sz implicit_args_sz) in
-    mov (rc edx) (c (word_at_off (h ebp) extra_args_1_off));       (* edx <- extra_args[1] *)
-    mov (edx_n loop_info_field_iterator_sp) (ro esp)               (* extra_args[1] <- esp *)
+  let args_base = Asm.IMM (Int64.add frame_base_sz implicit_args_sz) in
+  let all_args_cell = Il.Mem (Il.RegIn (h ebp, Some args_base), self_args_rty) in
+  let iterator_args_cell = get_element_ptr all_args_cell Abi.calltup_elt_iterator_args in
+  let loop_info_ptr_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_info_ptr in
+    mov (rc edx) (c loop_info_ptr_cell);                           (* edx <- iterator_args[1] *)
+    mov (edx_n loop_info_field_iterator_sp) (ro esp)               (* iterator_args[1] <- esp *)
 ;;
 
 (* precondition: esp == &ils[depth] *)
@@ -1359,7 +1363,7 @@ let put (e:Il.emitter) : unit =
     save_callee_saves_at e tmp3                                    (* ... <- ebp *)
 ;;
 
-let iterator_extra_args
+let iterator_args
     (e:Il.emitter)
     (foreach_loop:Common.fixup)
     (depth:int)
@@ -1371,12 +1375,10 @@ let iterator_extra_args
   let (_, tmpc) = vreg e in
     mov tmpc (ro ebp);                                             (* tmp <- ebp *)
     sub tmpc (imm (Asm.IMM ils_base));                             (* tmp <- &ils[depth] *)
-    let extra_arg0 = imm (Asm.M_SZ foreach_loop) in
-    let extra_arg1 = c tmpc in
-      [| extra_arg0; extra_arg1 |]
+    let arg0 = imm (Asm.M_SZ foreach_loop) in
+    let arg1 = c tmpc in
+      [| arg0; arg1 |]
 ;;
-
-let iterator_extra_arg_tys = [| Il.ScalarTy (Il.ValTy word_bits); Il.ScalarTy (Il.AddrTy Il.OpaqueTy) |] ;;
 
 let activate_glue (e:Il.emitter) : unit =
   (*
@@ -1587,8 +1589,7 @@ let (abi:Abi.abi) =
     Abi.abi_emit_loop_prologue = loop_prologue;
     Abi.abi_emit_loop_epilogue = loop_epilogue;
     Abi.abi_emit_put = put;
-    Abi.abi_iterator_extra_args = iterator_extra_args;
-    Abi.abi_iterator_extra_arg_tys = iterator_extra_arg_tys;
+    Abi.abi_iterator_args = iterator_args;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_native_call = emit_native_call;

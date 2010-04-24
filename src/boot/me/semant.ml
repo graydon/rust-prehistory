@@ -1501,7 +1501,7 @@ let call_args_referent_type_full
     (out_slot:Ast.slot)
     (n_ty_params:int)
     (in_slots:Ast.slot array)
-    (* FIXME: (iterator_arg_rtys:Il.referent_ty array) *)
+    (iterator_arg_rtys:Il.referent_ty array)
     (indirect_arg_rtys:Il.referent_ty array)
     : Il.referent_ty =
   let out_slot_rty = slot_referent_type abi out_slot in
@@ -1522,7 +1522,7 @@ let call_args_referent_type_full
         task_ptr_rty;                  (* Abi.calltup_elt_task_ptr      *)
         ty_param_rtys;                 (* Abi.calltup_elt_ty_params     *)
         arg_rtys;                      (* Abi.calltup_elt_args          *)
-        (* FIXME: Il.StructTy iterator_arg_rtys *)
+        Il.StructTy iterator_arg_rtys; (* Abi.calltup_elt_iterator_args *)
         Il.StructTy indirect_arg_rtys  (* Abi.calltup_elt_indirect_args *)
       |]
 ;;
@@ -1531,31 +1531,34 @@ let call_args_referent_type
     (cx:ctxt)
     (n_ty_params:int)
     (callee_ty:Ast.ty)
-    ((*iterator*)_:Il.referent_ty option)
     (closure:Il.referent_ty option)
     : Il.referent_ty =
-  let with_closure e =
+  let indirect_arg_rtys =
     match closure with
-        None -> e
+        None -> [| |]
       | Some c ->
-          Array.append e
-            [|
-              Il.ScalarTy (Il.AddrTy c) (* Abi.indirect_args_elt_closure *)
-            |]
+          [|
+            Il.ScalarTy (Il.AddrTy c)                             (* Abi.indirect_args_elt_closure       *)
+          |]
+  in
+  let iterator_arg_rtys proto =
+    match proto with
+        None -> [| |]
+      | Some _ ->
+          [|
+            Il.ScalarTy (Il.ValTy cx.ctxt_abi.Abi.abi_word_bits); (* Abi.iterator_args_elt_loop_size     *)
+            Il.ScalarTy (Il.AddrTy Il.OpaqueTy)                   (* Abi.iterator_args_elt_loop_info_ptr *)
+          |]
   in
     match callee_ty with
         Ast.TY_fn (tsig, taux) ->
-          let extras =
-            match taux.Ast.fn_proto with
-                None -> with_closure [| |]
-              | Some _ -> with_closure cx.ctxt_abi.Abi.abi_iterator_extra_arg_tys
-          in
-            call_args_referent_type_full
-              cx.ctxt_abi
-              tsig.Ast.sig_output_slot
-              n_ty_params
-              tsig.Ast.sig_input_slots
-              extras
+          call_args_referent_type_full
+            cx.ctxt_abi
+            tsig.Ast.sig_output_slot
+            n_ty_params
+            tsig.Ast.sig_input_slots
+            (iterator_arg_rtys taux.Ast.fn_proto)
+            indirect_arg_rtys
 
       | Ast.TY_pred (in_args, _) ->
           call_args_referent_type_full
@@ -1563,7 +1566,8 @@ let call_args_referent_type
             (interior_slot Ast.TY_bool)
             n_ty_params
             in_args
-            (with_closure [| |])
+            [| |]
+            indirect_arg_rtys
 
       | _ -> bug cx "Semant.call_args_referent_type on non-callable type"
 ;;
@@ -1574,7 +1578,7 @@ let indirect_call_args_referent_type
     (callee_ty:Ast.ty)
     (closure:Il.referent_ty)
     : Il.referent_ty =
-  call_args_referent_type cx n_ty_params callee_ty None (Some closure)
+  call_args_referent_type cx n_ty_params callee_ty (Some closure)
 ;;
 
 let direct_call_args_referent_type
@@ -1583,7 +1587,7 @@ let direct_call_args_referent_type
     : Il.referent_ty =
   let ity = Hashtbl.find cx.ctxt_all_item_types callee_node in
   let n_ty_params = n_item_ty_params cx callee_node in
-    call_args_referent_type cx n_ty_params ity None None
+    call_args_referent_type cx n_ty_params ity None
 ;;
 
 let ty_sz (abi:Abi.abi) (t:Ast.ty) : int64 =

@@ -388,7 +388,7 @@ let layout_visitor
                     DEFN_item i -> Array.length i.Ast.decl_params
                   | _ -> 0
               in
-              let rty = call_args_referent_type cx n_ty_params lv_ty None closure in
+              let rty = call_args_referent_type cx n_ty_params lv_ty closure in
               let sz = Il.referent_ty_size abi.Abi.abi_word_bits rty in
               let frame_id = fst (Stack.top frame_stack) in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in
