@@ -3369,7 +3369,8 @@ let trans_visitor
                           None -> ()
                         | Some at -> trans_set_outptr at
                     end;
-                    abi.Abi.abi_emit_put (emitter ())
+                    (* FIXME: might I be a closure? if so, then Some ... *)
+                    abi.Abi.abi_emit_put (emitter ()) (current_fn_args_rty None)
                   end
               | Some _ ->
                   bugi cx stmt.id "put{?,!,*,+} unhandled in trans_stmt %a"

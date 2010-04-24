@@ -1239,11 +1239,15 @@ let loop_info_field_iterator_sp = 1;;
 let loop_info_field_loop_fn_sp = 2;;
 let loop_info_field_callee_saves = 3;;
 
+let self_args_cell (self_args_rty:Il.referent_ty) : Il.cell =
+  Il.Mem (Il.RegIn (h ebp, Some (Asm.IMM frame_base_sz)), self_args_rty)
+;;
+
 let iterator_prologue (e:Il.emitter) (self_args_rty:Il.referent_ty) ((*proto*)_:Ast.proto) : unit =
   let edx_n = word_n (h edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
-  let all_args_cell = Il.Mem (Il.RegIn (h ebp, Some (Asm.IMM frame_base_sz)), self_args_rty) in
+  let all_args_cell = self_args_cell self_args_rty in
   let iterator_args_cell = get_element_ptr all_args_cell Abi.calltup_elt_iterator_args in
   let loop_info_ptr_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_info_ptr in
     mov (rc edx) (c loop_info_ptr_cell);                           (* edx <- iterator_args[1] *)
@@ -1336,7 +1340,7 @@ let loop_epilogue
     mov (rc esp) (c (word_at_off (h ebp) loop_esp_off))            (* esp <- ils[i].loop_esp *)
 ;;
 
-let put (e:Il.emitter) : unit =
+let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
   let binary op dst src = emit (Il.binary op dst (c dst) src) in
@@ -1348,15 +1352,21 @@ let put (e:Il.emitter) : unit =
   let (_, tmpc2) = vreg e in
   let (tmp3, tmpc3) = vreg e in
   let retpc_off = Asm.IMM (Int64.sub frame_base_sz word_sz) in
-  (* FIXME: are these addresses backwards? *)
-  let extra_args_0_off = Asm.IMM (Int64.add (Int64.add frame_base_sz implicit_args_sz) word_sz) in
-  let extra_args_1_off = Asm.IMM (Int64.add frame_base_sz implicit_args_sz) in
+  let all_args_cell = self_args_cell self_args_rty in
+  let iterator_args_cell = get_element_ptr all_args_cell Abi.calltup_elt_iterator_args in
+  let loop_size_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_size in
+  let loop_info_ptr_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_info_ptr in
+    annotate e "put: get retpc (bottom of loop)";
     mov tgtc (c (word_at_off (h ebp) retpc_off));                  (* tgt <- *retpc *)
-    mov tmpc1 (c (word_at_off (h ebp) extra_args_0_off));          (* tmp1 <- extra_args[0] *)
+    annotate e "put: get loop size";
+    mov tmpc1 (c loop_size_cell);                                  (* tmp1 <- extra_args[0] *)
+    annotate e "put: target = retpc - loop size";
     sub tgtc (c tmpc1);                                            (* tgt <- tgt - tmp1 *)
-    mov tmpc2 (c (word_at_off (h ebp) extra_args_1_off));          (* tmp2 <- extra_args[1]->it_retpc *)
+    annotate e "put: get address of loop info segment";
+    mov tmpc2 (c loop_info_ptr_cell);                              (* tmp2 <- &extra_args[1]->it_retpc *)
     mov tmpc3 (ro ebp);                                            (* tmp3 <- ebp *)
     mov (rc esp) (c tmpc2);                                        (* esp <- &extra_args[1]->it_retpc *)
+    annotate e "put: restore callee-saves";
     restore_callee_saves_at e tmp3;                                (* ebp <- ... *)
     call (c tgtc);                                                 (* call tgt *)
     save_callee_saves_at e tmp3                                    (* ... <- ebp *)

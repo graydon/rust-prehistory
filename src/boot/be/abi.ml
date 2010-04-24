@@ -90,7 +90,7 @@ type abi =
     abi_emit_iteration_epilogue: (Il.emitter -> int -> Il.cell -> unit);
     abi_emit_loop_prologue: (Il.emitter -> int -> unit);
     abi_emit_loop_epilogue: (Il.emitter -> int -> unit);
-    abi_emit_put: (Il.emitter -> unit);
+    abi_emit_put: (Il.emitter -> Il.referent_ty -> unit);
 
     abi_iterator_args: (Il.emitter -> Common.fixup -> int -> Il.operand array);
 
