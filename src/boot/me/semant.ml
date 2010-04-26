@@ -707,10 +707,12 @@ let rebuild_ty_under_params
     (ty:Ast.ty)
     (params:Ast.ty_param array)
     (args:Ast.ty array)
+    (resolve_names:bool)
     : Ast.ty =
   if (Array.length params) <> (Array.length args)
   then err None "mismatched type-params"
   else
+    let nmap = Hashtbl.create (Array.length args) in
     let pmap = Hashtbl.create (Array.length args) in
     let substituted = ref false in
     let base = ty_fold_rebuild (fun t -> t) in
@@ -720,10 +722,30 @@ let rebuild_ty_under_params
             None -> param
           | Some arg -> (substituted := true; arg)
     in
+    let ty_fold_named n =
+      match n with
+          Ast.NAME_base (Ast.BASE_ident id)
+            when resolve_names ->
+              begin
+                match htab_search nmap id with
+                    None -> Ast.TY_named n
+                  | Some arg -> (substituted := true; arg)
+              end
+        | _ -> Ast.TY_named n
+    in
       Array.iteri
-        (fun i (_, param) -> htab_put pmap (Ast.TY_param param) args.(i))
+        (fun i (ident, param) ->
+           htab_put pmap (Ast.TY_param param) args.(i);
+           if resolve_names
+           then
+             htab_put nmap ident args.(i))
         params;
-      let fold = { base with ty_fold_param = ty_fold_param } in
+      let fold =
+        { base with
+            ty_fold_param = ty_fold_param;
+            ty_fold_named = ty_fold_named;
+        }
+      in
       let ty' = fold_ty fold ty in
         (* 
          * FIXME: "substituted" and "ty'" here are only required

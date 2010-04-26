@@ -205,16 +205,17 @@ let lookup_type_by_name
                 (Ast.TY_param x, [||])
             | _ -> err None "Found non-type binding for %a" Ast.sprintf_name name
         in
+        let args =
+          match name with
+              Ast.NAME_ext (_, Ast.COMP_app (_, args)) -> args
+            | Ast.NAME_base (Ast.BASE_app (_, args)) -> args
+            | _ -> [| |]
+        in
           iflog cx (fun _ -> log cx
-                      "lookup_type_by_name %a found ty %a, applying type arguments"
-                      Ast.sprintf_name name Ast.sprintf_ty ty);
-          let args =
-            match name with
-                Ast.NAME_ext (_, Ast.COMP_app (_, args)) -> args
-              | Ast.NAME_base (Ast.BASE_app (_, args)) -> args
-              | _ -> [| |]
-          in
-          let ty = rebuild_ty_under_params ty params args in
+                      "lookup_type_by_name %a found ty %a, applying %d type args to %d params"
+                      Ast.sprintf_name name Ast.sprintf_ty ty
+                      (Array.length args) (Array.length params));
+          let ty = rebuild_ty_under_params ty params args true in
             iflog cx (fun _ -> log cx "applied type is %a" Ast.sprintf_ty ty);
             (scopes, id, ty)
 ;;

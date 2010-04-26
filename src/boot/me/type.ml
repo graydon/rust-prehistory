@@ -389,7 +389,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
           | (TYSPEC_resolved (params, ty), TYSPEC_app (tv, args))
           | (TYSPEC_app (tv, args), TYSPEC_resolved (params, ty)) ->
-              let ty = rebuild_ty_under_params ty params args in
+              let ty = rebuild_ty_under_params ty params args false in
                 unify_ty ty tv;
                 TYSPEC_resolved ([| |], ty)
 
