@@ -811,6 +811,7 @@ let jmp (op:jmpop) (targ:code) : quad' =
         jmp_targ = targ; }
 ;;
 
+
 let lea (dst:cell) (src:operand) : quad' =
   Lea { lea_dst = dst;
         lea_src = src; }
@@ -848,12 +849,17 @@ let mk_quad (q':quad') : quad =
     quad_fixup = None }
 ;;
 
-let emit_full (e:emitter) (fix:fixup option) (q':quad') =
+let emit_full
+    (e:emitter)
+    (fix:fixup option)
+    (implicits:label list)
+    (q':quad')
+    : unit =
   let fixup = ref fix in
   let emit_quad_bottom q' =
     grow_if_necessary e;
     e.emit_quads.(e.emit_pc) <- { quad_body = q';
-                                  quad_implicits = [];
+                                  quad_implicits = implicits;
                                   quad_fixup = (!fixup) };
     fixup := None;
     e.emit_pc <- e.emit_pc + 1
@@ -1028,7 +1034,7 @@ let emit_full (e:emitter) (fix:fixup option) (q':quad') =
 ;;
 
 let emit (e:emitter) (q':quad') : unit =
-  emit_full e None q'
+  emit_full e None [] q'
 ;;
 
 let patch_jump (e:emitter) (jmp:int) (targ:int) : unit =
