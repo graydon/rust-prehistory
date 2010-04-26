@@ -131,9 +131,12 @@ let kill_redundant_moves (cx:ctxt) : unit =
 ;;
 
 let quad_jump_target_labels (q:quad) : Il.label list =
-  match q.Il.quad_body with
-      Il.Jmp { Il.jmp_targ = Il.CodeLabel lab } -> [ lab ]
-    | _ -> []
+  let explicits =
+    match q.Il.quad_body with
+        Il.Jmp { Il.jmp_targ = Il.CodeLabel lab } -> [ lab ]
+      | _ -> []
+  in
+    explicits @ q.quad_implicits;
 ;;
 
 let quad_used_vregs (q:quad) : Il.vreg list =
