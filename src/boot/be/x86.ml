@@ -363,6 +363,7 @@ let clobbers (quad:Il.quad) : Il.hreg list =
             | _ -> [ ]
         end
     | Il.Call _ -> [ eax; ecx; edx; ]
+    | Il.Regfence -> [ eax; ecx; ebx; edx; edi; esi; ]
     | _ -> []
 ;;
 
@@ -2005,6 +2006,7 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
 
     | Il.Dead -> Asm.MARK
     | Il.Debug -> Asm.BYTES [| 0xcc |] (* int 3 *)
+    | Il.Regfence -> Asm.MARK
     | Il.End -> Asm.BYTES [| 0x90 |]
     | Il.Nop -> Asm.BYTES [| 0x90 |]
     | _ -> raise Unrecognized

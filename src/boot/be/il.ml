@@ -215,13 +215,14 @@ type quad' =
   | Push of operand
   | Pop of cell
   | Call of call
-  | Debug (* Debug-break pseudo-instruction. *)
+  | Debug          (* Debug-break pseudo-instruction. *)
   | Enter of fixup (* Enter-fixup-block pseudo-instruction. *)
   | Leave          (* Leave-fixup-block pseudo-instruction. *)
-  | Ret  (* Return to caller. *)
-  | Nop  (* Keep this quad here, emit CPU nop, will patch / trampoline later. *)
-  | Dead (* Keep this quad but emit nothing. *)
-  | End  (* Space past the end of quads to emit. *)
+  | Ret            (* Return to caller. *)
+  | Nop            (* Keep this quad here, emit CPU nop. *)
+  | Dead           (* Keep this quad but emit nothing. *)
+  | Regfence       (* Clobber all hregs. *)
+  | End            (* Space past the end of quads to emit. *)
 ;;
 
 type quad =
@@ -428,6 +429,7 @@ let process_quad (qp:quad_processor) (q:quad) : quad =
         | Ret -> Ret
         | Nop -> Nop
         | Debug -> Debug
+        | Regfence -> Regfence
         | Enter f -> Enter f
         | Leave -> Leave
         | Dead -> Dead
@@ -704,6 +706,7 @@ let string_of_quad (f:hreg_formatter) (q:quad) : string =
     | Nop -> "nop"
     | Dead -> "dead"
     | Debug -> "debug"
+    | Regfence -> "regfence"
     | Enter _ -> "enter lexical block"
     | Leave -> "leave lexical block"
     | End -> "---"
