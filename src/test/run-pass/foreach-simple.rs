@@ -8,8 +8,8 @@ fn main() {
 }
 
 fn* first_ten() -> int {
-  let int i = 0;
-  while (i < 10) {
+  let int i = 97;
+  while (i < 100) {
     log "first_ten";
     log i;
     put i;

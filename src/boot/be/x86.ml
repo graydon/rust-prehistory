@@ -1365,7 +1365,6 @@ let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
     mov tmpc2 (c loop_info_ptr_cell);                              (* tmp2 <- &extra_args[1]->it_retpc *)
     annotate e "put: save frame base";
     mov tmpc3 (ro ebp);                                            (* tmp3 <- ebp *)
-    mov (rc eax) (ro ebp);                                         (* eax <- ebp *)
     annotate e "put: suspend";
     mov (rc esp) (c tmpc2);                                        (* esp <- &extra_args[1]->it_retpc *)
     regfence ();                                                   (* spill live registers *)
