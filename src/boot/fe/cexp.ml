@@ -8,22 +8,23 @@ open Parser;;
  * expression-language describing crate configuration and
  * constants. They are completely evaluated at compile-time, in a
  * little micro-interpreter defined here, with the results of
- * evaluation being the crate structure full of items passed to the
- * rest of the compiler.
+ * evaluation being the sequence of directives controlling the rest of
+ * the compiler.
  * 
  * Cexps, like pexps, do not escape the language front-end.
  * 
  * You can think of the AST as a statement-language called "item"
  * sandwiched between two expression-languages, "cexp" on the outside
  * and "pexp" on the inside. The front-end evaluates cexp on the
- * outside in order to get one big item term, evaluating those parts of
- * pexp that are directly used by cexp in passing, and desugaring those
- * remaining parts of pexp that are embedded within the calculated item
- * term.
+ * outside in order to get one big directive-list, evaluating those
+ * parts of pexp that are directly used by cexp in passing, and
+ * desugaring those remaining parts of pexp that are embedded within
+ * the items of the directives.
  * 
- * The rest of the compiler only deals with the item term, which is
- * what most of AST describes ("most" because the type-grammar spans
- * both items and pexps).
+ * The rest of the compiler only deals with the directives, which are
+ * mostly just a set of containers for items. Items are what most of
+ * AST describes ("most" because the type-grammar spans both items and
+ * pexps).
  * 
  *)
 
@@ -34,37 +35,36 @@ type cexp =
   | CEXP_dir_mod of cexp_dir identified
   | CEXP_use_mod of cexp_use identified
   | CEXP_nat_mod of cexp_nat identified
-  | CEXP_pexp of Pexp.pexp
 
 and cexp_alt =
-    { alt_val: cexp;
-      alt_arms: (cexp * cexp) array;
-      alt_else: cexp }
+    { alt_val: Pexp.pexp;
+      alt_arms: (Pexp.pexp * cexp array) array;
+      alt_else: cexp array }
 
 and cexp_let =
-    { let_ident: cexp;
-      let_value: cexp;
-      let_body: cexp; }
+    { let_ident: Ast.ident;
+      let_value: Pexp.pexp;
+      let_body: cexp array; }
 
 and cexp_src =
-    { src_name: cexp;
-      src_path: cexp option }
+    { src_name: Ast.ident;
+      src_path: Pexp.pexp option }
 
 and cexp_dir =
-    { dir_name: cexp;
-      dir_path: cexp option;
-      dir_mods: cexp array }
+    { dir_name: Ast.ident;
+      dir_path: Pexp.pexp option;
+      dir_body: cexp array }
 
 and cexp_use =
-    { use_name: cexp;
-      use_path: cexp option;
-      use_meta: (cexp * cexp) array; }
+    { use_name: Ast.ident;
+      use_path: Pexp.pexp option;
+      use_meta: (Ast.ident * Pexp.pexp) array; }
 
 and cexp_nat =
-    { nat_abi: cexp;
-      nat_name: cexp;
-      nat_path: cexp option;
-      nat_meta: (cexp * cexp) array;
+    { nat_abi: string;
+      nat_name: Ast.ident;
+      nat_path: Pexp.pexp option;
+      nat_meta: (Ast.ident * Pexp.pexp) array;
       (* 
        * FIXME: possibly support embedding optional strings as
        * symbol-names, to handle mangling schemes that aren't
@@ -78,15 +78,25 @@ and cexp_nat =
 (* Cexp grammar. *)
 
 
-let rec parse_cexp (ps:pstate) : cexp =
+let rec parse_cexps (ps:pstate) (term:Token.token) : cexp array =
+  let cexps = Queue.create () in
+    while ((peek ps) <> term)
+    do
+      Queue.push (parse_cexp ps) cexps
+    done;
+    expect ps term;
+    queue_to_arr cexps
+
+
+and parse_cexp (ps:pstate) : cexp =
 
   let apos = lexpos ps in
     match peek ps with
         MOD ->
           begin
             bump ps;
-            let name = ctxt "mod: name" parse_cexp ps in
-            let path = ctxt "mod: path" parse_eq_cexp_opt ps
+            let name = ctxt "mod: name" Pexp.parse_ident ps in
+            let path = ctxt "mod: path" parse_eq_pexp_opt ps
             in
               match peek ps with
                   SEMI ->
@@ -96,7 +106,7 @@ let rec parse_cexp (ps:pstate) : cexp =
                         (span ps apos bpos { src_name = name;
                                              src_path = path })
                 | LBRACE ->
-                    let mods =
+                    let body =
                       bracketed_zero_or_more LBRACE RBRACE
                         None parse_cexp ps
                     in
@@ -104,7 +114,7 @@ let rec parse_cexp (ps:pstate) : cexp =
                       CEXP_dir_mod
                         (span ps apos bpos { dir_name = name;
                                              dir_path = path;
-                                             dir_mods = mods })
+                                             dir_body = body })
                 | _ -> raise (unexpected ps)
         end
 
@@ -112,19 +122,14 @@ let rec parse_cexp (ps:pstate) : cexp =
           begin
             bump ps;
             let abi =
-              let apos = lexpos ps in
                 match peek ps with
-                    MOD ->
-                      bump ps;
-                      let bpos = lexpos ps in
-                        CEXP_pexp (span ps apos bpos (Pexp.PEXP_str "cdecl"))
-                  | _ ->
-                      let cexp = parse_cexp ps in
-                        expect ps MOD;
-                        cexp
+                    MOD -> "cdecl"
+                  | LIT_STR s -> bump ps; s
+                  | _ -> raise (unexpected ps)
             in
-            let name = ctxt "native mod: name" parse_cexp ps in
-            let path = ctxt "native mod: path" parse_eq_cexp_opt ps in
+            let _ = expect ps MOD in
+            let name = ctxt "native mod: name" Pexp.parse_ident ps in
+            let path = ctxt "native mod: path" parse_eq_pexp_opt ps in
             let meta = [| |] in
             let items = Hashtbl.create 0 in
             let get_item ps =
@@ -145,8 +150,8 @@ let rec parse_cexp (ps:pstate) : cexp =
       | USE ->
           begin
             bump ps;
-            let name = ctxt "use mod: name" parse_cexp ps in
-            let path = ctxt "use mod: path" parse_eq_cexp_opt ps in
+            let name = ctxt "use mod: name" Pexp.parse_ident ps in
+            let path = ctxt "use mod: path" parse_eq_pexp_opt ps in
             let meta = [| |] in
             let bpos = lexpos ps in
               expect ps SEMI;
@@ -159,11 +164,13 @@ let rec parse_cexp (ps:pstate) : cexp =
       | LET ->
           begin
             bump ps;
-            let id = parse_cexp ps in
+            expect ps LPAREN;
+            let id = Pexp.parse_ident ps in
               expect ps EQ;
-              let v = parse_cexp ps in
-                expect ps IN;
-                let body = parse_cexp ps in
+              let v = Pexp.parse_pexp ps in
+                expect ps RPAREN;
+                expect ps LBRACE;
+                let body = parse_cexps ps RBRACE in
                 let bpos = lexpos ps in
                   CEXP_let
                     (span ps apos bpos
@@ -176,7 +183,7 @@ let rec parse_cexp (ps:pstate) : cexp =
           begin
             bump ps;
             expect ps LPAREN;
-            let v = parse_cexp ps in
+            let v = Pexp.parse_pexp ps in
               expect ps RPAREN;
               expect ps LBRACE;
               let rec consume_arms arms =
@@ -185,11 +192,10 @@ let rec parse_cexp (ps:pstate) : cexp =
                       begin
                         bump ps;
                         expect ps LPAREN;
-                        let cond = parse_cexp ps in
+                        let cond = Pexp.parse_pexp ps in
                           expect ps RPAREN;
                           expect ps LBRACE;
-                          let consequent = parse_cexp ps in
-                            expect ps RBRACE;
+                          let consequent = parse_cexps ps RBRACE in
                             let arm = (cond, consequent) in
                             consume_arms (arm::arms)
                       end
@@ -197,8 +203,7 @@ let rec parse_cexp (ps:pstate) : cexp =
                       begin
                         bump ps;
                         expect ps LBRACE;
-                        let consequent = parse_cexp ps in
-                          expect ps RBRACE;
+                        let consequent = parse_cexps ps RBRACE in
                           expect ps RBRACE;
                           let bpos = lexpos ps in
                             span ps apos bpos
@@ -212,15 +217,15 @@ let rec parse_cexp (ps:pstate) : cexp =
                 CEXP_alt (consume_arms [])
           end
 
-      | _ -> CEXP_pexp (Pexp.parse_pexp ps)
+      | _ -> raise (unexpected ps)
 
 
-and  parse_eq_cexp_opt (ps:pstate) : cexp option =
+and  parse_eq_pexp_opt (ps:pstate) : Pexp.pexp option =
   match peek ps with
       EQ ->
         begin
           bump ps;
-          Some (parse_cexp ps)
+          Some (Pexp.parse_pexp ps)
         end
     | _ -> None
 ;;
@@ -229,33 +234,37 @@ and  parse_eq_cexp_opt (ps:pstate) : cexp option =
 (*
  * Dynamic-typed micro-interpreter for the cexp language.
  * 
- * FIXME: probably want to expand this to handle simple records and sequences too,
- * possibly type-polymorphic '+' operator for concatenation as well.
+ * The product of evaluating a pexp is a pval.
+ * 
+ * The product of evlauating a cexp is a cdir array.
  *)
 
-type cval =
-    CVAL_str of string
-  | CVAL_num of int64
-  | CVAL_bool of bool
-  | CVAL_ident of Ast.ident
-  | CVAL_mod_item of (Ast.ident * Ast.mod_item)
+type pval =
+    PVAL_str of string
+  | PVAL_num of int64
+  | PVAL_bool of bool
 ;;
 
-type env = { env_bindings: (Ast.ident * cval) list;
+type cdir =
+    CDIR_meta of (Ast.ident * pval)
+  | CDIR_syntax of Ast.name
+  | CDIR_auth of Ast.name
+  | CDIR_check of (Ast.name * pval array)
+  | CDIR_mod of (Ast.ident * Ast.mod_item)
+
+type env = { env_bindings: (Ast.ident * pval) list;
              env_prefix: filename list;
              env_items: (filename, Ast.mod_items) Hashtbl.t;
              env_files: (node_id,filename) Hashtbl.t;
              env_required: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
              env_ps: pstate; }
 
-let unexpected_val (expected:string) (v:cval)  =
+let unexpected_val (expected:string) (v:pval)  =
   let got =
     match v with
-        CVAL_str s -> "str \"" ^ (String.escaped s) ^ "\""
-      | CVAL_num i -> "num " ^ (Int64.to_string i)
-      | CVAL_bool b -> if b then "bool true" else "bool false"
-      | CVAL_ident i -> "ident " ^ i
-      | CVAL_mod_item (name, _) -> "mod item " ^ name
+        PVAL_str s -> "str \"" ^ (String.escaped s) ^ "\""
+      | PVAL_num i -> "num " ^ (Int64.to_string i)
+      | PVAL_bool b -> if b then "bool true" else "bool false"
   in
     (* FIXME: proper error reporting, please. *)
     bug () "expected %s, got %s" expected got
@@ -267,36 +276,39 @@ let rewrap_items id items =
 ;;
 
 
-let rec eval_cexp (env:env) (exp:cexp) : cval =
+let rec eval_cexps (env:env) (exps:cexp array) : cdir array =
+  Parser.arj (Array.map (eval_cexp env) exps)
+
+and eval_cexp (env:env) (exp:cexp) : cdir array =
   match exp with
       CEXP_alt {node=ca} ->
-        let v = eval_cexp env ca.alt_val in
+        let v = eval_pexp env ca.alt_val in
         let rec try_arm i =
           if i >= Array.length ca.alt_arms
           then ca.alt_else
           else
             let (arm_head, arm_body) = ca.alt_arms.(i) in
-            let v' = eval_cexp env arm_head in
+            let v' = eval_pexp env arm_head in
               if v' = v
               then arm_body
               else try_arm (i+1)
         in
-          eval_cexp env (try_arm 0)
+          eval_cexps env (try_arm 0)
 
     | CEXP_let {node=cl} ->
-        let ident = eval_cexp_to_ident env cl.let_ident in
-        let v = eval_cexp env cl.let_value in
+        let ident = cl.let_ident in
+        let v = eval_pexp env cl.let_value in
         let env = { env with
                       env_bindings = ((ident,v)::env.env_bindings ) }
         in
-          eval_cexp env cl.let_body
+          eval_cexps env cl.let_body
 
     | CEXP_src_mod {node=s; id=id} ->
-        let name = eval_cexp_to_ident env s.src_name in
+        let name = s.src_name in
         let path =
           match s.src_path with
               None -> name ^ ".rs"
-            | Some p -> eval_cexp_to_str env p
+            | Some p -> eval_pexp_to_str env p
         in
         let full_path = List.fold_left Filename.concat "" (List.rev (path :: env.env_prefix)) in
         let ps = env.env_ps in
@@ -314,26 +326,32 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         in
         let items = Item.parse_mod_items p EOF in
           htab_put env.env_files id full_path;
-          CVAL_mod_item (name, rewrap_items id items)
+          [| CDIR_mod (name, rewrap_items id items) |]
 
     | CEXP_dir_mod {node=d; id=id} ->
         let items = Hashtbl.create 0 in
-        let name = eval_cexp_to_ident env d.dir_name in
+        let name = d.dir_name in
         let path =
           match d.dir_path with
               None -> name
-            | Some p -> eval_cexp_to_str env p
+            | Some p -> eval_pexp_to_str env p
         in
         let env = { env with
                       env_prefix = path :: env.env_prefix } in
-        let sub_items = Array.map (eval_cexp_to_mod env) d.dir_mods in
-        let add (k, v) = htab_put items k v in
-          Array.iter add sub_items;
-            CVAL_mod_item (name, rewrap_items id (Item.empty_view, items))
+        let sub_directives = eval_cexps env d.dir_body in
+        let add d =
+          match d with
+              CDIR_mod (name, item) ->
+                htab_put items name item
+            | _ -> raise (err "non-'mod' directive found in 'dir' directive"
+                            env.env_ps)
+        in
+          Array.iter add sub_directives;
+          [| CDIR_mod (name, rewrap_items id (Item.empty_view, items)) |]
 
     | CEXP_use_mod {node=u; id=id} ->
         let ps = env.env_ps in
-        let name = eval_cexp_to_ident env u.use_name in
+        let name = u.use_name in
         let filename = ps.pstate_infer_lib_name name in
         let rlib = REQUIRED_LIB_rust { required_libname = filename;
                                        required_prefix = 1 }
@@ -349,20 +367,20 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
           let item = { id = id; node = item } in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
             Item.note_required_mod env.env_ps span CONV_rust rlib item;
-            CVAL_mod_item (name, item)
+            [| CDIR_mod (name, item) |]
 
     | CEXP_nat_mod {node=cn;id=id} ->
         let conv =
-          let v = eval_cexp_to_str env cn.nat_abi in
+          let v = cn.nat_abi in
           match string_to_conv v with
-              None -> unexpected_val "calling convention" (CVAL_str v)
+              None -> unexpected_val "calling convention" (PVAL_str v)
             | Some c -> c
         in
-        let name = eval_cexp_to_ident env cn.nat_name in
+        let name = cn.nat_name in
         let filename =
           match cn.nat_path with
               None -> env.env_ps.pstate_infer_lib_name name
-            | Some p -> eval_cexp_to_str env p
+            | Some p -> eval_pexp_to_str env p
         in
         let item = decl [||] (Ast.MOD_ITEM_mod (Item.empty_view, cn.nat_items)) in
         let item = { id = id; node = item } in
@@ -372,97 +390,78 @@ let rec eval_cexp (env:env) (exp:cexp) : cval =
         let ps = env.env_ps in
         let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
           Item.note_required_mod env.env_ps span conv rlib item;
-          CVAL_mod_item (name, item)
-
-    | CEXP_pexp exp ->
-        eval_pexp env exp
+          [| CDIR_mod (name, item) |]
 
 
-
-and eval_cexp_to_str (env:env) (exp:cexp) : string =
-  match eval_cexp env exp with
-      CVAL_str s -> s
-    | v -> unexpected_val "str" v
-
-and eval_cexp_to_num (env:env) (exp:cexp) : int64 =
-  match eval_cexp env exp with
-      CVAL_num n -> n
-    | v -> unexpected_val "num" v
-
-and eval_cexp_to_bool (env:env) (exp:cexp) : bool =
-  match eval_cexp env exp with
-      CVAL_bool b -> b
-    | v -> unexpected_val "bool" v
-
-and eval_cexp_to_ident (env:env) (exp:cexp) : Ast.ident =
-  match eval_cexp env exp with
-      CVAL_ident i -> i
-    | v -> unexpected_val "ident" v
-
-and eval_cexp_to_mod (env:env) (exp:cexp) : (Ast.ident * Ast.mod_item) =
-  match eval_cexp env exp with
-      CVAL_mod_item i -> i
-    | v -> unexpected_val "mod item" v
-
-and eval_pexp (env:env) (exp:Pexp.pexp) : cval =
+and eval_pexp (env:env) (exp:Pexp.pexp) : pval =
   match exp.node with
     | Pexp.PEXP_binop (bop, a, b) ->
         begin
-          let av = eval_pexp_to_num env a in
-          let bv = eval_pexp_to_num env b in
-            CVAL_num
-              begin
-                match bop with
-                    Ast.BINOP_add -> Int64.add av bv
-                  | Ast.BINOP_sub -> Int64.sub av bv
-                  | Ast.BINOP_mul -> Int64.mul av bv
-                  | Ast.BINOP_div -> Int64.div av bv
-                  | _ -> bug () "unhandled arithmetic op in Cexp.eval_pexp"
-              end
+          let av = eval_pexp env a in
+          let bv = eval_pexp env b in
+            match (bop, av, bv) with
+                (Ast.BINOP_add, PVAL_str az, PVAL_str bz) ->
+                  PVAL_str (az ^ bz)
+              | _ ->
+                  let av = (need_num av) in
+                  let bv = (need_num bv) in
+                    PVAL_num
+                      begin
+                        match bop with
+                            Ast.BINOP_add -> Int64.add av bv
+                          | Ast.BINOP_sub -> Int64.sub av bv
+                          | Ast.BINOP_mul -> Int64.mul av bv
+                          | Ast.BINOP_div -> Int64.div av bv
+                          | _ -> bug () "unhandled arithmetic op in Cexp.eval_pexp"
+                      end
         end
 
     | Pexp.PEXP_unop (uop, a) ->
         begin
           match uop with
               Ast.UNOP_not ->
-                CVAL_bool (not (eval_pexp_to_bool env a))
+                PVAL_bool (not (eval_pexp_to_bool env a))
             | Ast.UNOP_neg ->
-                CVAL_num (Int64.neg (eval_pexp_to_num env a))
+                PVAL_num (Int64.neg (eval_pexp_to_num env a))
             | _ -> bug () "Unexpected unop in Cexp.eval_pexp"
         end
 
     | Pexp.PEXP_lval (Pexp.PLVAL_ident ident) ->
         begin
           match ltab_search env.env_bindings ident with
-              None -> CVAL_ident ident
+              None -> raise (err (Printf.sprintf "no binding for '%s' found"
+                                    ident) env.env_ps)
             | Some v -> v
         end
 
     | Pexp.PEXP_lit (Ast.LIT_bool b) ->
-        CVAL_bool b
+        PVAL_bool b
 
     | Pexp.PEXP_lit (Ast.LIT_int (i, _)) ->
-        CVAL_num i
+        PVAL_num i
 
     | Pexp.PEXP_str s ->
-        CVAL_str s
+        PVAL_str s
 
     | _ -> bug () "unexpected Pexp in Cexp.eval_pexp"
 
 
 and eval_pexp_to_str (env:env) (exp:Pexp.pexp) : string =
   match eval_pexp env exp with
-      CVAL_str s -> s
+      PVAL_str s -> s
     | v -> unexpected_val "str" v
 
-and eval_pexp_to_num (env:env) (exp:Pexp.pexp) : int64 =
-  match eval_pexp env exp with
-      CVAL_num n -> n
+and need_num (cv:pval) : int64 =
+  match cv with
+      PVAL_num n -> n
     | v -> unexpected_val "num" v
+
+and eval_pexp_to_num (env:env) (exp:Pexp.pexp) : int64 =
+  need_num (eval_pexp env exp)
 
 and eval_pexp_to_bool (env:env) (exp:Pexp.pexp) : bool =
   match eval_pexp env exp with
-      CVAL_bool b -> b
+      PVAL_bool b -> b
     | v -> unexpected_val "bool" v
 
 ;;
@@ -549,15 +548,15 @@ let parse_crate_file
         | MacOS_x86_macho -> ("macos", "x86", "libc.dylib")
     in
       [
-        ("target_os", CVAL_str os);
-        ("target_arch", CVAL_str arch);
-        ("target_libc", CVAL_str libc)
+        ("target_os", PVAL_str os);
+        ("target_arch", PVAL_str arch);
+        ("target_libc", PVAL_str libc)
       ]
   in
   let build_bindings =
     [
-      ("build_compiler", CVAL_str Sys.executable_name);
-      ("build_input", CVAL_str fname);
+      ("build_compiler", PVAL_str Sys.executable_name);
+      ("build_input", PVAL_str fname);
     ]
   in
   let initial_bindings =
@@ -575,14 +574,19 @@ let parse_crate_file
       begin
         fun _ ->
           let apos = lexpos ps in
+          let cexps = parse_cexps ps EOF in
+          let cdirs = eval_cexps env cexps in
           let _ =
-            while (not ((peek ps) = EOF))
-            do
-              let cexp = parse_cexp ps in
-                match eval_cexp env cexp with
-                    CVAL_mod_item (name, item) -> htab_put items name item
-                  | v -> unexpected_val "mod item" v
-            done
+            Array.iter
+              begin
+                fun d ->
+                  match d with
+                      CDIR_mod (name, item) -> htab_put items name item
+                    | _ ->
+                        raise
+                          (err "unhandled non-'mod' directive at top level" ps)
+              end
+              cdirs
           in
           let bpos = lexpos ps in
           let main = find_main_fn ps items in

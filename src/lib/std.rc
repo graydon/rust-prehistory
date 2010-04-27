@@ -1,7 +1,22 @@
 mod hello;
 mod main;
 
+
+// Platform-specific modules.
+
+alt (target_os) {
+  case ("win32") {
+    mod io = "win32_io.rs";
+    mod os = "win32_os.rs";
+  } else {
+    mod io = "unix_io.rs";
+    mod os = "unix_os.rs";
+  }
+}
+
+
 // Built-in types support modules.
+
 mod _int;
 mod _u8;
 mod _vec;
