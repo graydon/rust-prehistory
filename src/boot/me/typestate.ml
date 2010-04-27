@@ -439,6 +439,11 @@ let condition_assigning_visitor
             let block_entry_state = [| Constr_init si.id |] in
               raise_postcondition fe.Ast.foreach_body.id block_entry_state
 
+        | Ast.STMT_for fo ->
+            let (si, _) = fo.Ast.for_slot in
+            let block_entry_state = [| Constr_init si.id |] in
+              raise_postcondition fo.Ast.for_body.id block_entry_state
+
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
