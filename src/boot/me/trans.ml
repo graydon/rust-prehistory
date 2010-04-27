@@ -1365,6 +1365,24 @@ let trans_visitor
             trans_compare Il.JNE bool_operand
               (if invert then imm_true else imm_false)
 
+  and trans_binop (binop:Ast.binop) : Il.binop =
+    match binop with
+        Ast.BINOP_or -> Il.OR
+      | Ast.BINOP_and -> Il.AND
+
+      | Ast.BINOP_lsl -> Il.LSL
+      | Ast.BINOP_lsr -> Il.LSR
+      | Ast.BINOP_asr -> Il.ASR
+
+      | Ast.BINOP_add -> Il.ADD
+      | Ast.BINOP_sub -> Il.SUB
+
+      (* FIXME (bug 541544): switch on type of operands, IMUL/IDIV/IMOD etc. *)
+      | Ast.BINOP_mul -> Il.UMUL
+      | Ast.BINOP_div -> Il.UDIV
+      | Ast.BINOP_mod -> Il.UMOD
+      | _ -> bug () "bad binop to Trans.trans_binop"
+
   and trans_binary
       (binop:Ast.binop)
       (lhs:Il.operand)
@@ -1376,20 +1394,12 @@ let trans_visitor
         Il.Cell dst
     in
     match binop with
-        Ast.BINOP_or -> arith Il.OR
-      | Ast.BINOP_and -> arith Il.AND
-
-      | Ast.BINOP_lsl -> arith Il.LSL
-      | Ast.BINOP_lsr -> arith Il.LSR
-      | Ast.BINOP_asr -> arith Il.ASR
-
-      | Ast.BINOP_add -> arith Il.ADD
-      | Ast.BINOP_sub -> arith Il.SUB
-
+        Ast.BINOP_or | Ast.BINOP_and
+      | Ast.BINOP_lsl | Ast.BINOP_lsr | Ast.BINOP_asr
+      | Ast.BINOP_add | Ast.BINOP_sub
       (* FIXME (bug 541544): switch on type of operands, IMUL/IDIV/IMOD etc. *)
-      | Ast.BINOP_mul -> arith Il.UMUL
-      | Ast.BINOP_div -> arith Il.UDIV
-      | Ast.BINOP_mod -> arith Il.UMOD
+      | Ast.BINOP_mul | Ast.BINOP_div | Ast.BINOP_mod ->
+          arith (trans_binop binop)
 
       | _ -> let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy Il.Bits8) in
           mov dst imm_true;
@@ -3188,9 +3198,10 @@ let trans_visitor
                          Il.Cell dst_cell;
                          (trans_atom a_src); |]
                 | _ ->
-                    ignore (trans_binary binop
-                              (Il.Cell (deref_slot false dst_cell dst_slot))
-                              (trans_atom a_src))
+                    let lhs = deref_slot false dst_cell dst_slot in
+                    let rhs = trans_atom a_src in
+                    let op = trans_binop binop in
+                      emit (Il.binary op lhs (Il.Cell lhs) rhs);
           end
 
       | Ast.STMT_call (dst, flv, args) ->
