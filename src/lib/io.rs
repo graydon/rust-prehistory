@@ -3,5 +3,5 @@ type buf_reader = obj {
 };
 
 type buf_writer = obj {
-  fn writer(vec[u8] buf) -> uint;
+  fn write(vec[u8] buf) -> uint;
 };
