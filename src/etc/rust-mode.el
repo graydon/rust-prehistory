@@ -106,7 +106,7 @@
          "be" "be+" "be*" "be?" "be!"
          "put" "put+" "put*" "put?" "put!"
          "check" "prove"
-         "log"
+         "log" "in"
          "yield" "join"
          "break" "cont"
          "fail"))
