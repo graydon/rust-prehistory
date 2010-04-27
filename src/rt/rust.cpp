@@ -3467,6 +3467,12 @@ str_buf(rust_task *task, rust_str *s)
     return (char const *)&s->data[0];
 }
 
+extern "C" CDECL void *
+vec_buf(rust_task *task, rust_vec *v)
+{
+    return (void *)&v->data[0];
+}
+
 extern "C" CDECL rust_str*
 implode(rust_task *task, rust_vec *v)
 {
