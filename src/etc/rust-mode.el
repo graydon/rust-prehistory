@@ -56,7 +56,7 @@
   rust '("rec" "vec" "tag"
          "char" "str"
          "chan" "port"
-         "proc" "mod"
+         "proc" "mod" "obj"
          "fn" "pred"
          "any"
          "bool" "int" "uint"
