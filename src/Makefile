@@ -285,7 +285,6 @@ self: $(CFG_COMPILER)
 ######################################################################
 
 TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
-                    test/run-pass/linear-for-loop.rs \
                     test/run-pass/spawn-fn.rs \
                     test/run-pass/rec-auto.rs \
                     test/run-pass/foreach-simple.rs \

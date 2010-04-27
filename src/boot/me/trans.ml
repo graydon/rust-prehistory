@@ -3376,6 +3376,37 @@ let trans_visitor
 
       | Ast.STMT_decl _ -> ()
 
+      | Ast.STMT_for fo ->
+          let (dst_slot, _) = fo.Ast.for_slot in
+          let dst_cell = cell_of_block_slot dst_slot.id in
+          let (head_stmts, seq) = fo.Ast.for_seq in
+          let (seq_cell, seq_slot) = trans_lval_full false seq in
+          let unit_slot =
+            match slot_ty seq_slot with
+                Ast.TY_vec s -> s
+              | Ast.TY_str -> (interior_slot (Ast.TY_mach TY_u8))
+              | _ -> bug () "for-seq of non-vec, non-str type"
+          in
+          let unit_sz = slot_sz abi unit_slot in
+          let seq_cell = deref seq_cell in
+          let data = get_element_ptr seq_cell Abi.vec_elt_data in
+          let len = get_element_ptr seq_cell Abi.vec_elt_fill in
+          let ptr = next_vreg_cell Il.voidptr_t in
+          let lim = next_vreg_cell Il.voidptr_t in
+            Array.iter trans_stmt head_stmts;
+            lea lim (fst (need_mem_cell data));
+            mov ptr (Il.Cell lim);
+            emit (Il.binary Il.ADD lim (Il.Cell lim) (Il.Cell len));
+            let back_jmp_target = mark () in
+            let fwd_jmps = trans_compare Il.JAE (Il.Cell ptr) (Il.Cell lim) in
+            let unit_cell = ptr_cast ptr (slot_referent_type abi unit_slot) in
+              trans_copy_slot true dst_cell dst_slot.node (deref unit_cell) unit_slot None;
+              trans_block fo.Ast.for_body;
+              emit (Il.binary Il.ADD ptr (Il.Cell ptr) (imm unit_sz));
+              emit (Il.jmp Il.JMP (Il.CodeLabel back_jmp_target));
+              List.iter patch fwd_jmps;
+
+
       | Ast.STMT_foreach fe ->
           let (dst_slot, _) = fe.Ast.foreach_slot in
           let dst_cell = cell_of_block_slot dst_slot.id in
