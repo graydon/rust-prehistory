@@ -1341,6 +1341,7 @@ let loop_epilogue
 let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
+  let lea dst src = emit (Il.lea dst src) in
   let binary op dst src = emit (Il.binary op dst (c dst) src) in
   let sub = binary Il.SUB in
   let call src = emit (Il.call (Il.next_vreg_cell e Il.voidptr_t) (Il.CodePtr src)) in
@@ -1348,7 +1349,7 @@ let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
   let (tgt, _) = vreg e in
   let tgtc = Il.Reg (tgt, Il.AddrTy Il.CodeTy) in
   let (_, tmpc1) = vreg e in
-  let (_, tmpc2) = vreg e in
+  let (tmp2, tmpc2) = vreg e in
   let (_, tmpc3) = vreg e in
   let retpc_off = Asm.IMM (Int64.sub frame_base_sz word_sz) in
   let all_args_cell = self_args_cell self_args_rty in
@@ -1366,7 +1367,7 @@ let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
     annotate e "put: save frame base";
     mov tmpc3 (ro ebp);                                            (* tmp3 <- ebp *)
     annotate e "put: suspend";
-    mov (rc esp) (c tmpc2);                                        (* esp <- &extra_args[1]->it_retpc *)
+    lea (rc esp) (c (word_at_off tmp2 (Asm.IMM word_sz)));         (* esp <- &extra_args[1]->it_retpc + word_sz *)
     regfence ();                                                   (* spill live registers *)
     call (c tgtc);                                                 (* call tgt *)
     annotate e "put: resume and restore frame base";
