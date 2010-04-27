@@ -1299,7 +1299,7 @@ let (abbrev_exterior_slot:abbrev) =
 let (abbrev_struct_type:abbrev) =
     (DW_TAG_structure_type, DW_CHILDREN_yes,
      [|
-       (DW_AT_byte_size, DW_FORM_data4)
+       (DW_AT_byte_size, DW_FORM_block4)
      |])
 ;;
 
@@ -1309,8 +1309,8 @@ let (abbrev_struct_type_member:abbrev) =
        (DW_AT_name, DW_FORM_string);
        (DW_AT_type, DW_FORM_ref_addr);
        (DW_AT_mutable, DW_FORM_flag);
-       (DW_AT_data_member_location, DW_FORM_data4);
-       (DW_AT_byte_size, DW_FORM_data4)
+       (DW_AT_data_member_location, DW_FORM_block4);
+       (DW_AT_byte_size, DW_FORM_block4)
      |])
 ;;
 
@@ -1481,6 +1481,100 @@ let dwarf_visitor
       | Ast.MODE_read_alias _ -> alias_slot false
       | Ast.MODE_write_alias _ -> alias_slot true
 
+
+  and size_block4 (sz:size) (add_to_base:bool) : frag =
+    (* NB: typarams = "words following implicit args" by convention in ABI/x86. *)
+    let abi = cx.ctxt_abi in
+    let typarams = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
+    let word_n n = Int64.mul abi.Abi.abi_word_sz (Int64.of_int n) in
+    let param_n n = Int64.add typarams (word_n n) in
+    let param_n_field_k n k =
+      [ DW_OP_fbreg (IMM (param_n n));
+        DW_OP_deref;
+        DW_OP_constu (IMM (word_n k));
+        DW_OP_plus;
+        DW_OP_deref ]
+    in
+    let rec sz_ops (sz:size) : dw_op list =
+      match sz with
+          SIZE_fixed i ->
+            [ DW_OP_constu (IMM i) ]
+
+        | SIZE_fixup_mem_sz fix ->
+            [ DW_OP_constu (M_SZ fix) ]
+
+        | SIZE_fixup_mem_pos fix ->
+            [ DW_OP_constu (M_POS fix) ]
+
+        | SIZE_param_size i ->
+            param_n_field_k i Abi.tydesc_field_size
+
+        | SIZE_param_align i ->
+            param_n_field_k i Abi.tydesc_field_align
+
+        | SIZE_rt_neg s ->
+            (sz_ops s) @ [ DW_OP_neg ]
+
+        | SIZE_rt_add (a, b) ->
+            (sz_ops a) @ (sz_ops b) @ [ DW_OP_plus ]
+
+        | SIZE_rt_mul (a, b) ->
+            (sz_ops a) @ (sz_ops b) @ [ DW_OP_mul ]
+
+        | SIZE_rt_max (a, b) ->
+            (sz_ops a) @ (sz_ops b) @
+              [ DW_OP_over;   (* ... a b a          *)
+                DW_OP_over;   (* ... a b a b        *)
+                DW_OP_ge;     (* ... a b (a>=b?1:0) *)
+
+                (* jump +1 byte of dwarf ops if 1   *)
+                DW_OP_bra (IMM 1L);
+
+                (* do this if 0, when b is max.     *)
+                DW_OP_swap;   (* ... b a            *)
+
+                (* jump to here when a is max.      *)
+                DW_OP_drop;   (* ... max            *)
+              ]
+
+        | SIZE_rt_align (align, off) ->
+          (*
+           * calculate off + pad where:
+           *
+           * pad = (align - (off mod align)) mod align
+           *
+           * abbreviations in the code below:
+           *
+           *     t1 =          (off mod align)
+           *     t2 =  align - (off mod align)
+           *)
+            (sz_ops off) @ (sz_ops align) @
+              [
+                DW_OP_over;           (* ... off align off        *)
+                DW_OP_over;           (* ... off align off align  *)
+                DW_OP_mod;            (* ... align off t1         *)
+                DW_OP_pick (IMM 2L);  (* ... align off t1 align   *)
+                DW_OP_swap;           (* ... align off align t1   *)
+                DW_OP_minus;          (* ... align off t2         *)
+                DW_OP_swap;           (* ... align t2 off         *)
+                DW_OP_rot;            (* ... off align t2         *)
+                DW_OP_swap;           (* ... off t2 align         *)
+                DW_OP_mod;            (* ... off pad              *)
+                DW_OP_plus;           (* ... aligned              *)
+              ]
+    in
+    let ops = sz_ops sz in
+    let ops =
+      if add_to_base
+      then ops @ [ DW_OP_plus ]
+      else ops
+    in
+    let frag = SEQ (Array.map (dw_op_to_frag abi) (Array.of_list ops)) in
+    let block_fixup = new_fixup "DW_FORM_block4 fixup" in
+      SEQ [| WORD (TY_u32, F_SZ block_fixup);
+             DEF (block_fixup, frag) |]
+
+
   and ref_type_die
       (ty:Ast.ty)
       : frag =
@@ -1497,12 +1591,11 @@ let dwarf_visitor
       let record trec =
         let rty = referent_type abi (Ast.TY_rec trec) in
         let rty_sz = Il.referent_ty_size abi.Abi.abi_word_bits in
-        let rec_sz = force_sz (rty_sz rty) in
         let fix = new_fixup "record type DIE" in
         let die = DEF (fix, SEQ [|
                          uleb (get_abbrev_code abbrev_struct_type);
-                         (* DW_AT_byte_size: DW_FORM_data4 *)
-                         WORD (TY_u32, IMM rec_sz)
+                         (* DW_AT_byte_size: DW_FORM_block4 *)
+                         size_block4 (rty_sz rty) false
                        |]);
         in
         let rtys =
@@ -1522,10 +1615,10 @@ let dwarf_visitor
                             (ref_slot_die slot);
                             (* DW_AT_mutable: DW_FORM_flag *)
                             BYTE (if slot_is_mutable slot then 1 else 0);
-                            (* DW_AT_data_member_location: DW_FORM_data4 *)
-                            WORD (TY_u32, IMM (force_sz (Il.get_element_offset word_bits rtys i)));
-                            (* DW_AT_byte_size: DW_FORM_data4 *)
-                            WORD (TY_u32, IMM (force_sz (rty_sz rtys.(i)))) |]);
+                            (* DW_AT_data_member_location: DW_FORM_block4 *)
+                            size_block4 (Il.get_element_offset word_bits rtys i) true;
+                            (* DW_AT_byte_size: DW_FORM_block4 *)
+                            size_block4 (rty_sz rtys.(i)) false |]);
             end
             trec;
           emit_null_die ();
@@ -1859,6 +1952,9 @@ let dwarf_visitor
       (ret_slot:Ast.slot)
       (fix:fixup)
       : unit =
+    (* NB: retpc = "top word of frame-base" by convention in ABI/x86. *)
+    let abi = cx.ctxt_abi in
+    let retpc = Int64.sub abi.Abi.abi_frame_base_sz abi.Abi.abi_word_sz in
     let abbrev_code = get_abbrev_code abbrev_subprogram in
     let subprogram_die =
       (SEQ [|
@@ -1869,12 +1965,9 @@ let dwarf_visitor
          ref_slot_die ret_slot;
          addr_ranges fix;
          (* DW_AT_frame_base *)
-         dw_form_block1 [| DW_OP_reg cx.ctxt_abi.Abi.abi_dwarf_fp_reg |];
+         dw_form_block1 [| DW_OP_reg abi.Abi.abi_dwarf_fp_reg |];
          (* DW_AT_return_addr *)
-         (* 
-          * NB: we are fixing ebp[16] as the return address here; as in x86.ml.
-          *)
-         dw_form_block1 [| DW_OP_fbreg (Asm.IMM 16L); |]
+         dw_form_block1 [| DW_OP_fbreg (Asm.IMM retpc); |]
        |])
     in
       emit_die subprogram_die
@@ -2223,6 +2316,12 @@ let read_dies
     let len = ar.asm_get_u8() in
       ar.asm_adv len
   in
+
+  let adv_block4 _ =
+    let len = ar.asm_get_u32() in
+      ar.asm_adv len
+  in
+
   let all_dies = Hashtbl.create 0 in
   let root = (ar.asm_get_off()) - off in
 
@@ -2253,6 +2352,7 @@ let read_dies
                           | DW_FORM_data4 -> DATA_num (ar.asm_get_u32())
                           | DW_FORM_flag -> DATA_num (ar.asm_get_u8())
                           | DW_FORM_block1 -> (adv_block1(); DATA_other)
+                          | DW_FORM_block4 -> (adv_block4(); DATA_other)
                           | _ -> bug () "unknown DWARF form %d" (dw_form_to_int form)
                       in
                         (attr, (form, data))
@@ -2524,7 +2624,9 @@ let rec extract_mod_items
           let ident = get_name die in
           let ty = get_referenced_ty die in
           let tyi = Ast.MOD_ITEM_type ty in
-            htab_put mis ident (decl [||] tyi)
+          let (params, islots) = get_formals die in
+            assert ((Array.length islots) = 0);
+            htab_put mis ident (decl params tyi)
 
       | DW_TAG_compile_unit ->
           extract_children mis die
