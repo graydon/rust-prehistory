@@ -159,10 +159,15 @@ and parse_optional_trailing_constrs (ps:pstate) : Ast.constrs =
       COLON -> (bump ps; parse_constrs ps)
     | _ -> [| |]
 
-and parse_ty_fn (pure:bool) (ps:pstate) : Ast.ty_fn =
+and parse_ty_fn (pure:bool) (ps:pstate) : (Ast.ty_fn * Ast.ident option) =
   match peek ps with
       FN proto ->
         bump ps;
+        let ident =
+          match peek ps with
+              IDENT i -> bump ps; Some i
+            | _ -> None
+        in
         let in_slots =
           match peek ps with
               _ ->
@@ -175,14 +180,18 @@ and parse_ty_fn (pure:bool) (ps:pstate) : Ast.ty_fn =
             | _ -> slot_nil
         in
         let constrs = parse_optional_trailing_constrs ps in
-          ({ Ast.sig_input_slots = in_slots;
-             Ast.sig_input_constrs = constrs;
-             Ast.sig_output_slot = out_slot; },
-           (* FIXME: parse purity more thoroughly. *)
-           { Ast.fn_purity = (if pure
-                              then Ast.PURE
-                              else Ast.IMPURE Ast.IMMUTABLE);
-             Ast.fn_proto = proto; })
+        let tsig = { Ast.sig_input_slots = in_slots;
+                     Ast.sig_input_constrs = constrs;
+                     Ast.sig_output_slot = out_slot; }
+        in
+          (* FIXME: parse purity more thoroughly. *)
+        let taux = { Ast.fn_purity = (if pure
+                                      then Ast.PURE
+                                      else Ast.IMPURE Ast.IMMUTABLE);
+                     Ast.fn_proto = proto; }
+        in
+        let tfn = (tsig, taux) in
+          (tfn, ident)
 
     | _ -> raise (unexpected ps)
 
@@ -261,6 +270,21 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
             Ast.TY_rec entries
           end
 
+    | OBJ ->
+        bump ps;
+        let methods = Hashtbl.create 0 in
+        let parse_method ps =
+          let pure = flag ps PURE in
+          let (tfn, ident) = parse_ty_fn pure ps in
+            expect ps SEMI;
+            match ident with
+                None -> raise (err (Printf.sprintf "missing method identifier") ps)
+              | Some i -> htab_put methods i tfn
+        in
+          ignore (bracketed_zero_or_more LBRACE RBRACE None parse_method ps);
+          Ast.TY_obj methods
+
+
     | LPAREN ->
         let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps in
           if Array.length slots = 0
@@ -278,9 +302,9 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
         bump ps;
         Ast.TY_mach m
 
-    | PURE -> (bump ps; Ast.TY_fn (parse_ty_fn true ps))
+    | PURE -> (bump ps; Ast.TY_fn (fst (parse_ty_fn true ps)))
 
-    | FN _ -> Ast.TY_fn (parse_ty_fn false ps)
+    | FN _ -> Ast.TY_fn (fst (parse_ty_fn false ps))
 
     | _ -> raise (unexpected ps)
 
