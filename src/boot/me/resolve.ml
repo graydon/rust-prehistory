@@ -178,6 +178,7 @@ let all_item_collecting_visitor
   let visit_obj_fn_pre obj ident fn =
     htab_put cx.ctxt_all_defns fn.id (DEFN_obj_fn (obj.id, fn.node));
     htab_put cx.ctxt_all_item_names fn.id (Walk.path_to_name path);
+    note_header fn.id fn.node.Ast.fn_input_slots;
     inner.Walk.visit_obj_fn_pre obj ident fn
   in
 

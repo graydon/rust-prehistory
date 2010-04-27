@@ -1129,6 +1129,7 @@ let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =
 type scope =
     SCOPE_block of node_id
   | SCOPE_mod_item of Ast.mod_item
+  | SCOPE_obj_fn of (Ast.fn identified)
   | SCOPE_crate of Ast.crate
 ;;
 
@@ -1136,6 +1137,7 @@ let id_of_scope (sco:scope) : node_id =
   match sco with
       SCOPE_block id -> id
     | SCOPE_mod_item i -> i.id
+    | SCOPE_obj_fn f -> f.id
     | SCOPE_crate c -> c.id
 ;;
 
@@ -1165,6 +1167,14 @@ let scope_stack_managing_visitor
     inner.Walk.visit_mod_item_post n p i;
     pop();
   in
+  let visit_obj_fn_pre obj ident fn =
+    push (SCOPE_obj_fn fn);
+    inner.Walk.visit_obj_fn_pre obj ident fn
+  in
+  let visit_obj_fn_post obj ident fn =
+    inner.Walk.visit_obj_fn_post obj ident fn;
+    pop();
+  in
   let visit_crate_pre c =
     push (SCOPE_crate c);
     inner.Walk.visit_crate_pre c
@@ -1178,6 +1188,8 @@ let scope_stack_managing_visitor
         Walk.visit_block_post = visit_block_post;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_obj_fn_pre = visit_obj_fn_pre;
+        Walk.visit_obj_fn_post = visit_obj_fn_post;
         Walk.visit_crate_pre = visit_crate_pre;
         Walk.visit_crate_post = visit_crate_post; }
 ;;
@@ -1299,6 +1311,9 @@ and lookup_by_ident
       | SCOPE_crate crate ->
           project_ident_from_items
             cx scopes crate.node.Ast.crate_items ident
+
+      | SCOPE_obj_fn fn ->
+          check_slots scopes fn.node.Ast.fn_input_slots
 
       | SCOPE_mod_item item ->
           begin

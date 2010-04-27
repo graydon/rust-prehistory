@@ -166,7 +166,16 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
     cx.ctxt_sess.Session.sess_log_type
     cx.ctxt_sess.Session.sess_log_out
   in
-  let retval_tv_r = ref (ref TYSPEC_all) in
+  let retval_tvs = Stack.create () in
+  let push_retval_tv tv =
+    Stack.push tv retval_tvs
+  in
+  let pop_retval_tv _ =
+    ignore (Stack.pop retval_tvs)
+  in
+  let retval_tv _ =
+    Stack.top retval_tvs
+  in
   let (bindings:(node_id, tyvar) Hashtbl.t) = Hashtbl.create 10 in
   let (item_params:(node_id, tyvar array) Hashtbl.t) = Hashtbl.create 10 in
   let (lval_tyvars:(node_id, tyvar) Hashtbl.t) = Hashtbl.create 0 in
@@ -977,12 +986,12 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         | Ast.STMT_put (_, atom_opt) ->
             begin
               match atom_opt with
-                  None -> unify_ty Ast.TY_nil !retval_tv_r
-                | Some atom -> unify_atom atom !retval_tv_r
+                  None -> unify_ty Ast.TY_nil (retval_tv())
+                | Some atom -> unify_atom atom (retval_tv())
             end
 
         | Ast.STMT_be (_, callee, args) ->
-            check_callable (!retval_tv_r) callee args
+            check_callable (retval_tv()) callee args
 
         | Ast.STMT_bind (bound, callee, arg_opts) ->
             (* FIXME: handle binding type parameters eventually. *)
@@ -1044,17 +1053,31 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             raise (Semant_err ((Some stmt.id), msg))
     in
 
+    let enter_fn fn retspec =
+      let out = fn.Ast.fn_output_slot in
+        push_retval_tv (ref retspec);
+        unify_slot out.node (Some out.id) (retval_tv())
+    in
+
+    let visit_obj_fn_pre obj ident fn =
+      enter_fn fn.node TYSPEC_all;
+      inner.Walk.visit_obj_fn_pre obj ident fn
+    in
+
+    let visit_obj_fn_post obj ident fn =
+      inner.Walk.visit_obj_fn_post obj ident fn;
+      pop_retval_tv ();
+    in
+
     let visit_mod_item_pre n p mod_item =
       begin
         try
           match mod_item.node.Ast.decl_item with
-              Ast.MOD_ITEM_fn
-                { Ast.fn_output_slot = { node = node; id = id } } ->
-                  retval_tv_r := ref TYSPEC_all;
-                  unify_slot node (Some id) !retval_tv_r
+              Ast.MOD_ITEM_fn fn ->
+                enter_fn fn TYSPEC_all
 
             | Ast.MOD_ITEM_pred _ ->
-                retval_tv_r := ref (TYSPEC_resolved ([||], Ast.TY_bool))
+                push_retval_tv (ref (TYSPEC_resolved ([||], Ast.TY_bool)))
 
             | _ -> ()
         with Semant_err (None, msg) ->
@@ -1070,8 +1093,14 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
     let visit_mod_item_post n p mod_item =
       inner.Walk.visit_mod_item_post n p mod_item;
       match mod_item.node.Ast.decl_item with
-          Ast.MOD_ITEM_fn _
-            when (path_name()) = cx.ctxt_main_name ->
+
+          Ast.MOD_ITEM_pred _ ->
+            pop_retval_tv ();
+
+        | Ast.MOD_ITEM_fn _ ->
+            pop_retval_tv ();
+            if (path_name()) = cx.ctxt_main_name
+            then
               begin
                 match Hashtbl.find cx.ctxt_all_item_types mod_item.id with
                     Ast.TY_fn (tsig, _) ->
@@ -1095,6 +1124,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         inner with
           Walk.visit_mod_item_pre = visit_mod_item_pre;
           Walk.visit_mod_item_post = visit_mod_item_post;
+          Walk.visit_obj_fn_pre = visit_obj_fn_pre;
+          Walk.visit_obj_fn_post = visit_obj_fn_post;
           Walk.visit_stmt_pre = visit_stmt_pre
       }
 
