@@ -59,7 +59,7 @@
          "proc" "mod"
          "fn" "pred"
          "any"
-         "bool" "int"
+         "bool" "int" "uint"
          "s8" "s16" "s32" "s64"
          "u8" "u16" "u32" "u64"))
 
