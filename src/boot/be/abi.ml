@@ -56,6 +56,11 @@ let tydesc_field_copy_glue = 2;;
 let tydesc_field_drop_glue = 3;;
 let tydesc_field_free_glue = 4;;
 
+let vec_elt_rc = 0;;
+let vec_elt_alloc = 1;;
+let vec_elt_fill = 2;;
+let vec_elt_data = 3;;
+
 let calltup_elt_out_ptr = 0;;
 let calltup_elt_task_ptr = 1;;
 let calltup_elt_ty_params = 2;;

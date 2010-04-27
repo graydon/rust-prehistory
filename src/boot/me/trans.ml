@@ -650,6 +650,15 @@ let trans_visitor
       (comp:Ast.lval_component)
       : (Il.cell * Ast.slot) =
 
+    let bounds_checked_access at slot =
+      let atop = trans_atom at in
+      let unit_sz = slot_sz abi slot in
+      let idx = next_vreg_cell word_ty in
+        emit (Il.binary Il.UMUL idx atop (imm unit_sz));
+        let elt_mem = trans_bounds_check (deref cell) (Il.Cell idx) in
+          (Il.Mem (elt_mem, slot_referent_type abi slot), slot)
+    in
+
     match (base_ty, comp) with
         (Ast.TY_rec entries,
          Ast.COMP_named (Ast.COMP_ident id)) ->
@@ -662,26 +671,11 @@ let trans_visitor
 
       | (Ast.TY_vec slot,
          Ast.COMP_atom at) ->
-          let atop = trans_atom at in
-          let unit_sz = slot_sz abi slot in
-          let reg = next_vreg () in
-          let t = Il.Reg (reg, Il.ValTy word_bits) in
-            emit (Il.binary Il.UMUL t atop (imm unit_sz));
-            let (mem, _) = need_mem_cell (deref cell) in
-            let elt_mem = trans_bounds_check mem (Il.Cell t) in
-              (Il.Mem (elt_mem, slot_referent_type abi slot), slot)
+          bounds_checked_access at slot
 
       | (Ast.TY_str,
          Ast.COMP_atom at) ->
-          let atop = trans_atom at in
-          let unit_sz = 1L in
-          let reg = next_vreg () in
-          let t = Il.Reg (reg, Il.ValTy word_bits) in
-          let slot = interior_slot (Ast.TY_mach TY_u8) in
-            emit (Il.binary Il.UMUL t atop (imm unit_sz));
-            let (mem, _) = need_mem_cell (deref cell) in
-            let elt_mem = trans_bounds_check mem (Il.Cell t) in
-              (Il.Mem (elt_mem, Il.ScalarTy (Il.ValTy Il.Bits8)), slot)
+          bounds_checked_access at (interior_slot (Ast.TY_mach TY_u8))
 
       | (Ast.TY_obj fns,
          Ast.COMP_named (Ast.COMP_ident id)) ->
@@ -701,14 +695,15 @@ let trans_visitor
    * mul_idx: index value * unit size.
    * return: ptr to element.
    *)
-  and trans_bounds_check (vec:Il.mem) (mul_idx:Il.operand) : Il.mem =
-    let (len:Il.cell) = word_at (Il.mem_off_imm vec (word_n 2)) in
-    let (base:Il.cell) = Il.Reg (next_vreg(), Il.voidptr_t) in
+  and trans_bounds_check (vec:Il.cell) (mul_idx:Il.operand) : Il.mem =
+    let (len:Il.cell) = get_element_ptr vec Abi.vec_elt_fill in
+    let (data:Il.cell) = get_element_ptr vec Abi.vec_elt_data in
+    let (base:Il.cell) = next_vreg_cell Il.voidptr_t in
     let (elt_reg:Il.reg) = next_vreg () in
     let (elt:Il.cell) = Il.Reg (elt_reg, Il.voidptr_t) in
-    let (diff:Il.cell) = Il.Reg (next_vreg (), Il.ValTy word_bits) in
+    let (diff:Il.cell) = next_vreg_cell word_ty in
       annotate "bounds check";
-      lea base (Il.mem_off_imm vec (word_n 3));
+      lea base (fst (need_mem_cell data));
       emit (Il.binary Il.ADD elt (Il.Cell base) mul_idx);
       emit (Il.binary Il.SUB diff (Il.Cell elt) (Il.Cell base));
       let jmp = trans_compare Il.JB (Il.Cell diff) (Il.Cell len) in
