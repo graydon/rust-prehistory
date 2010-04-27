@@ -1015,6 +1015,14 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               unify_slot si.node (Some si.id) out_tv;
               check_callable out_tv callee args
 
+        | Ast.STMT_for fo ->
+            let mem_tv = ref TYSPEC_all in
+            let seq_tv = ref (TYSPEC_collection mem_tv) in
+            let (si, _) = fo.Ast.for_slot in
+            let (_, seq) = fo.Ast.for_seq in
+              unify_lval seq seq_tv;
+              unify_slot si.node (Some si.id) mem_tv
+
         (* FIXME (bug 541531): plenty more to handle here. *)
         | _ ->
             log cx "warning: not typechecking stmt %s\n"
@@ -1093,6 +1101,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
   in
     try
       let auto_queue = Queue.create () in
+
       let init_slot_tyvar id defn =
         match defn with
             DEFN_slot { Ast.slot_mode = _; Ast.slot_ty = None } ->
@@ -1105,6 +1114,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                 Hashtbl.add bindings id (ref (TYSPEC_resolved ([||], ty)))
           | _ -> ()
       in
+
       let init_item_tyvar id ty =
         let _ = iflog cx (fun _ -> log cx "initial item #%d type: %a"
                             (int_of_node id) Ast.sprintf_ty ty)
@@ -1151,6 +1161,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                 path
                 (visitor cx Walk.empty_visitor)))
           crate;
+
         let update_auto_tyvar id ty =
           let defn = Hashtbl.find cx.ctxt_all_defns id in
             match defn with
@@ -1159,20 +1170,34 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                     (DEFN_slot { slot_defn with Ast.slot_ty = Some ty })
               | _ -> bug () "check_auto_tyvar: no slot defn"
         in
-        let check_auto_tyvar id =
-          let ts = !(resolve_tyvar (Hashtbl.find bindings id)) in
+
+        let get_resolved_ty tv id =
+          let ts = !(resolve_tyvar tv) in
             match ts with
-                TYSPEC_resolved ([||], ty) -> update_auto_tyvar id ty
+                TYSPEC_resolved ([||], ty) -> ty
+              | TYSPEC_vector (tv) ->
+                  begin
+                    match !(resolve_tyvar tv) with
+                        TYSPEC_resolved ([||], ty) ->
+                          (Ast.TY_vec (interior_slot ty))
+                      | _ -> err (Some id) "unresolved vector-element type in %s (%d)"
+                          (tyspec_to_str ts) (int_of_node id)
+                  end
               | _ -> err (Some id) "unresolved type %s (%d)" (tyspec_to_str ts)
                   (int_of_node id)
         in
-        let record_lval_ty id tv =
-          let ts = !(resolve_tyvar tv) in
-            match ts with
-                TYSPEC_resolved ([||], ty) ->
-                  Hashtbl.add cx.ctxt_all_lval_types id ty
-              | _ -> err (Some id) "unresolved type %s" (tyspec_to_str ts)
+
+        let check_auto_tyvar id =
+          let tv = Hashtbl.find bindings id in
+          let ty = get_resolved_ty tv id in
+            update_auto_tyvar id ty
         in
+
+        let record_lval_ty id tv =
+          let ty = get_resolved_ty tv id in
+            Hashtbl.add cx.ctxt_all_lval_types id ty
+        in
+
           Queue.iter check_auto_tyvar auto_queue;
           Hashtbl.iter record_lval_ty lval_tyvars;
     with Semant_err (ido, str) -> report_err cx ido str
