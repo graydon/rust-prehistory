@@ -2,18 +2,20 @@ mod hello;
 mod main;
 
 
-// Platform-specific modules.
+// Target-OS module.
 
 alt (target_os) {
   case ("win32") {
-    mod io = "win32_io.rs";
     mod os = "win32_os.rs";
   } else {
-    mod io = "unix_io.rs";
     mod os = "unix_os.rs";
   }
 }
 
+// General IO and system-services modules.
+
+mod io;
+mod sys;
 
 // Built-in types support modules.
 
