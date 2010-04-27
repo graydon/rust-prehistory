@@ -1,5 +1,5 @@
 type buf_reader = obj {
-  fn read(vec[mutable u8] buf) -> uint;
+  fn read(vec[u8] buf) -> uint;
 };
 
 type buf_writer = obj {
