@@ -91,7 +91,7 @@ type abi =
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_fn_tail_call: (Il.emitter -> int64 -> int64 -> Il.code -> int64 -> unit);
     abi_emit_iterator_prologue: (Il.emitter -> Il.referent_ty -> Ast.proto -> unit);
-    abi_emit_iteration_prologue: (Il.emitter -> Common.nabi -> Common.fixup -> (unit -> Il.operand) -> unit);
+    abi_emit_iteration_prologue: (Il.emitter -> Common.nabi -> int -> int -> Common.fixup -> (unit -> Il.operand) -> unit);
     abi_emit_iteration_epilogue: (Il.emitter -> int -> Il.cell -> unit);
     abi_emit_loop_prologue: (Il.emitter -> int -> unit);
     abi_emit_loop_epilogue: (Il.emitter -> int -> unit);

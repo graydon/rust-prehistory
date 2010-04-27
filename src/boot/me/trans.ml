@@ -182,6 +182,13 @@ let trans_visitor
      *)
     emit Il.Dead
   in
+  let mark_implicit _ : quad_idx =
+    let pc = mark () in
+      begin
+        emit Il.Dead;
+        pc
+      end
+  in
 
   let annotations _ =
     (emitter()).Il.emit_annotations
@@ -2821,6 +2828,11 @@ let trans_visitor
       emit (Il.call vr code);
 
 
+  and call_iter_code (code:Il.code) (loop_head:Il.label) : unit =
+    let vr = next_vreg_cell Il.voidptr_t in
+      Il.emit_full (emitter ()) None [ loop_head ] (Il.call vr code);
+
+
   and copy_bound_args
       (dst_cell:Il.cell)
       (bound_arg_slots:Ast.slot array)
@@ -3130,16 +3142,23 @@ let trans_visitor
 
   and trans_foreach_body
       (depth:int)
+      (fn_depth:int)
       (it_ptr_cell:Il.cell)
       (body:Ast.block)
+      (loop_head:Il.label)
       : unit =
     let get_callsz () =
       calculate_sz_in_current_frame (current_fn_callsz ())
     in
+    let emit implicits insn =
+      Il.emit_full (emitter ()) None implicits insn
+    in
       begin
-        abi.Abi.abi_emit_iteration_prologue (emitter ()) nabi_rust (upcall_fixup "upcall_grow_task") get_callsz;
+        abi.Abi.abi_emit_iteration_prologue (emitter ()) nabi_rust
+          depth fn_depth (upcall_fixup "upcall_grow_task") get_callsz;
         trans_block body;
         abi.Abi.abi_emit_iteration_epilogue (emitter ()) depth it_ptr_cell;
+        emit [ loop_head ] (Il.jmp Il.JMP (Il.CodePtr (Il.Cell it_ptr_cell)))
       end
 
   and trans_stmt_full (stmt:Ast.stmt) : unit =
@@ -3431,22 +3450,26 @@ let trans_visitor
           let fn_depth = Hashtbl.find cx.ctxt_fn_loop_depths (current_fn ()) in
           let body_fixup = new_fixup "foreach loop body" in
           let fc = { foreach_fixup = body_fixup; foreach_depth = depth } in
-          let it_ptr_reg = next_vreg () in
-          let it_ptr_cell = Il.Reg (it_ptr_reg, Il.AddrTy Il.CodeTy) in
+          let ptr = next_vreg () in
+          let ptrc = Il.Reg (ptr, Il.AddrTy Il.CodeTy) in
+          let code = code_of_operand (Il.Cell ptrc) in
+          let body = fe.Ast.foreach_body in
             begin
               iflog (fun _ ->
                        log cx "for-each at depth %d in fn of depth %d\n" depth fn_depth);
               let fn_ptr = reify_ptr (trans_prepare_fn_call true cx dst_cell flv ty_params (Some fc) args) in
 
-                mov it_ptr_cell fn_ptr;                                      (* p <- &fn *)
+                mov ptrc fn_ptr;                                             (* p <- &fn *)
                 abi.Abi.abi_emit_loop_prologue (emitter ()) depth;           (* save stack pointer *)
                 let jmp = mark () in
                   emit (Il.jmp Il.JMP Il.CodeNone);                          (* jump L2 *)
-
-                  emit (Il.Enter body_fixup);                                (* L1: *)
-                  trans_foreach_body depth it_ptr_cell fe.Ast.foreach_body;  (* loop body *)
-                  patch jmp;                                                 (* L2: *)
-                  call_code (code_of_operand (Il.Cell it_ptr_cell));         (* call p *)
+                  emit (Il.Enter body_fixup);
+                  begin
+                    let loop_head = mark_implicit () in                      (* L1: *)
+                      trans_foreach_body depth fn_depth ptrc body loop_head; (* loop body *)
+                      patch jmp;                                             (* L2: *)
+                      call_iter_code code loop_head                          (* call p *)
+                  end;
                   emit Il.Leave;
 
                   abi.Abi.abi_emit_loop_epilogue (emitter ()) depth;         (* restore stack pointer *)
