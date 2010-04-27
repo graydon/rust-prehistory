@@ -1266,7 +1266,7 @@ let iteration_prologue
     : unit =
   let emit = Il.emit e in
   (* offset of frame info relative to current esp *)
-  let frame_info_offset = Int64.mul (Int64.of_int (fn_depth - depth)) word_sz in
+  let frame_info_offset = Int64.mul (Int64.of_int (fn_depth - depth)) loop_info_sz in
   (* offset of restored frame base relative to current esp *)
   let frame_base_offset = Int64.add frame_info_offset frame_info_sz in
   let mov dst src = emit (Il.umov dst src) in
