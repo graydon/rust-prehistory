@@ -441,6 +441,7 @@ and mod_view =
 and crate' =
     {
       crate_items: (mod_view * mod_items);
+      crate_meta: (ident * string) array;
       crate_required: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;

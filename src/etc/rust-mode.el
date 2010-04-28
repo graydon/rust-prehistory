@@ -146,7 +146,7 @@
 
 ;; keywords followed by non-type expressions in parens
 (c-lang-defconst c-paren-nontype-kwds
-  rust '("rec" "vec" "port" "chan"))
+  rust '("rec" "vec" "port" "chan" "meta"))
 
 ;; punctuation or paren syntax classes that have syntactic meaning
 (c-lang-defconst c-other-op-syntax-tokens

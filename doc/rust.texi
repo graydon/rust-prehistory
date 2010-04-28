@@ -1001,12 +1001,12 @@ An example of a crate:
 
 @example
 // Metadata about this crate
-meta author = "Jane Doe";
-meta name = "Project X";
-meta version = "2.5";
+meta (author = "Jane Doe",
+      name = "Project X",
+      ver = "2.5");
 
 // Import a module.
-use std (version = "1.0");
+use std (ver = "1.0");
 
 // Activate a syntax-extension.
 syntax re;

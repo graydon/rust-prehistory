@@ -1,3 +1,3 @@
-fn main() -> () {
-   hello.hello();
+fn main() {
+  log "Rust standard library.";
 }

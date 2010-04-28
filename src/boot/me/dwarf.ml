@@ -129,6 +129,7 @@ type dw_tag =
   | DW_TAG_condition
   | DW_TAG_shared_type
   | DW_TAG_lo_user
+  | DW_TAG_rust_meta
   | DW_TAG_hi_user
 ;;
 
@@ -193,6 +194,7 @@ let dw_tag_to_int (tag:dw_tag) : int =
   | DW_TAG_condition -> 0x3f
   | DW_TAG_shared_type -> 0x40
   | DW_TAG_lo_user -> 0x4080
+  | DW_TAG_rust_meta -> 0x4300
   | DW_TAG_hi_user -> 0xffff
 ;;
 
@@ -256,6 +258,7 @@ let dw_tag_of_int (i:int) : dw_tag =
   | 0x3f -> DW_TAG_condition
   | 0x40 -> DW_TAG_shared_type
   | 0x4080 -> DW_TAG_lo_user
+  | 0x4300 -> DW_TAG_rust_meta
   | 0xffff -> DW_TAG_hi_user
   | _ -> bug () "bad DWARF tag code: %d" i
 ;;
@@ -321,6 +324,7 @@ let dw_tag_to_string (tag:dw_tag) : string =
   | DW_TAG_condition -> "DW_TAG_condition"
   | DW_TAG_shared_type -> "DW_TAG_shared_type"
   | DW_TAG_lo_user -> "DW_TAG_lo_user"
+  | DW_TAG_rust_meta -> "DW_TAG_rust_meta"
   | DW_TAG_hi_user -> "DW_TAG_hi_user"
 ;;
 
@@ -1159,6 +1163,13 @@ let (abbrev_crate_cu:abbrev) =
     |])
  ;;
 
+let (abbrev_meta:abbrev) =
+  (DW_TAG_rust_meta, DW_CHILDREN_no,
+   [|
+     (DW_AT_name, DW_FORM_string);
+     (DW_AT_const_value, DW_FORM_string)
+   |])
+;;
 
 let (abbrev_srcfile_cu:abbrev) =
   (DW_TAG_compile_unit, DW_CHILDREN_yes,
@@ -1884,8 +1895,24 @@ let dwarf_visitor
       emit_die srcfile_cu_die
   in
 
+  let emit_meta_die
+      (meta:(Ast.ident * string))
+      : unit =
+    let abbrev_code = get_abbrev_code abbrev_meta in
+    let die =
+      SEQ [| uleb abbrev_code;
+             (* DW_AT_name: DW_FORM_string *)
+             ZSTRING (fst meta);
+             (* DW_AT_const_value: DW_FORM_string *)
+             ZSTRING (snd meta);
+          |]
+    in
+      emit_die die
+  in
+
   let begin_crate_cu_and_emit_cu_die
       (name:string)
+
       (cu_text_fixup:fixup)
       : unit =
     let abbrev_code = get_abbrev_code abbrev_crate_cu in
@@ -1996,6 +2023,7 @@ let dwarf_visitor
     let filename = (Hashtbl.find cx.ctxt_item_files crate.id) in
       log cx "walking crate CU '%s'" filename;
       begin_crate_cu_and_emit_cu_die filename (Hashtbl.find cx.ctxt_file_fixups crate.id);
+      Array.iter emit_meta_die crate.node.Ast.crate_meta;
       inner.Walk.visit_crate_pre crate
   in
 

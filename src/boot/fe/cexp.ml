@@ -35,6 +35,11 @@ type cexp =
   | CEXP_dir_mod of cexp_dir identified
   | CEXP_use_mod of cexp_use identified
   | CEXP_nat_mod of cexp_nat identified
+  | CEXP_meta of meta identified
+
+and meta = (Ast.ident * Pexp.pexp) array
+
+and meta_pat = (Ast.ident * (Pexp.pexp option)) array
 
 and cexp_alt =
     { alt_val: Pexp.pexp;
@@ -47,24 +52,23 @@ and cexp_let =
       let_body: cexp array; }
 
 and cexp_src =
-    { src_name: Ast.ident;
+    { src_ident: Ast.ident;
       src_path: Pexp.pexp option }
 
 and cexp_dir =
-    { dir_name: Ast.ident;
+    { dir_ident: Ast.ident;
       dir_path: Pexp.pexp option;
       dir_body: cexp array }
 
 and cexp_use =
-    { use_name: Ast.ident;
+    { use_ident: Ast.ident;
       use_path: Pexp.pexp option;
-      use_meta: (Ast.ident * Pexp.pexp) array; }
+      use_meta: meta_pat; }
 
 and cexp_nat =
     { nat_abi: string;
-      nat_name: Ast.ident;
+      nat_ident: Ast.ident;
       nat_path: Pexp.pexp option;
-      nat_meta: (Ast.ident * Pexp.pexp) array;
       (* 
        * FIXME: possibly support embedding optional strings as
        * symbol-names, to handle mangling schemes that aren't
@@ -87,6 +91,38 @@ let rec parse_cexps (ps:pstate) (term:Token.token) : cexp array =
     expect ps term;
     queue_to_arr cexps
 
+and parse_meta_input (ps:pstate) : (Ast.ident * Pexp.pexp option) =
+  let lab = (ctxt "meta input: label" Pexp.parse_ident ps) in
+    match peek ps with
+        EQ ->
+          bump ps;
+          let v =
+            match peek ps with
+                UNDERSCORE -> bump ps; None
+              | _ -> Some (Pexp.parse_pexp ps)
+          in
+            (lab, v)
+      | _ -> raise (unexpected ps)
+
+and parse_meta_pat (ps:pstate) : meta_pat =
+  bracketed_zero_or_more LPAREN RPAREN
+    (Some COMMA) parse_meta_input ps
+
+and parse_meta (ps:pstate) : meta =
+  Array.map
+    begin
+      fun (id,v) ->
+        match v with
+            None ->
+              raise (err "wildcard found in meta pattern where value expected" ps)
+          | Some v -> (id,v)
+    end
+    (parse_meta_pat ps)
+
+and parse_optional_meta_pat (ps:pstate) : meta_pat =
+  match peek ps with
+      LPAREN -> parse_meta_pat ps
+    | _ -> [| |]
 
 and parse_cexp (ps:pstate) : cexp =
 
@@ -103,7 +139,7 @@ and parse_cexp (ps:pstate) : cexp =
                     bump ps;
                     let bpos = lexpos ps in
                       CEXP_src_mod
-                        (span ps apos bpos { src_name = name;
+                        (span ps apos bpos { src_ident = name;
                                              src_path = path })
                 | LBRACE ->
                     let body =
@@ -112,7 +148,7 @@ and parse_cexp (ps:pstate) : cexp =
                     in
                     let bpos = lexpos ps in
                       CEXP_dir_mod
-                        (span ps apos bpos { dir_name = name;
+                        (span ps apos bpos { dir_ident = name;
                                              dir_path = path;
                                              dir_body = body })
                 | _ -> raise (unexpected ps)
@@ -130,7 +166,6 @@ and parse_cexp (ps:pstate) : cexp =
             let _ = expect ps MOD in
             let name = ctxt "native mod: name" Pexp.parse_ident ps in
             let path = ctxt "native mod: path" parse_eq_pexp_opt ps in
-            let meta = [| |] in
             let items = Hashtbl.create 0 in
             let get_item ps =
               let (ident, item) = Item.parse_mod_item_from_signature ps in
@@ -141,9 +176,8 @@ and parse_cexp (ps:pstate) : cexp =
               let bpos = lexpos ps in
                 CEXP_nat_mod
                   (span ps apos bpos { nat_abi = abi;
-                                       nat_name = name;
+                                       nat_ident = name;
                                        nat_path = path;
-                                       nat_meta = meta;
                                        nat_items = items })
           end
 
@@ -152,11 +186,11 @@ and parse_cexp (ps:pstate) : cexp =
             bump ps;
             let name = ctxt "use mod: name" Pexp.parse_ident ps in
             let path = ctxt "use mod: path" parse_eq_pexp_opt ps in
-            let meta = [| |] in
+            let meta = ctxt "use mod: meta" parse_optional_meta_pat ps in
             let bpos = lexpos ps in
               expect ps SEMI;
               CEXP_use_mod
-                (span ps apos bpos { use_name = name;
+                (span ps apos bpos { use_ident = name;
                                      use_path = path;
                                      use_meta = meta })
           end
@@ -217,6 +251,13 @@ and parse_cexp (ps:pstate) : cexp =
                 CEXP_alt (consume_arms [])
           end
 
+      | META ->
+          bump ps;
+          let meta = parse_meta ps in
+            expect ps SEMI;
+            let bpos = lexpos ps in
+              CEXP_meta (span ps apos bpos meta)
+
       | _ -> raise (unexpected ps)
 
 
@@ -246,7 +287,7 @@ type pval =
 ;;
 
 type cdir =
-    CDIR_meta of (Ast.ident * pval)
+    CDIR_meta of ((Ast.ident * string) array)
   | CDIR_syntax of Ast.name
   | CDIR_auth of Ast.name
   | CDIR_check of (Ast.name * pval array)
@@ -304,7 +345,7 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
           eval_cexps env cl.let_body
 
     | CEXP_src_mod {node=s; id=id} ->
-        let name = s.src_name in
+        let name = s.src_ident in
         let path =
           match s.src_path with
               None -> name ^ ".rs"
@@ -329,7 +370,7 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
 
     | CEXP_dir_mod {node=d; id=id} ->
         let items = Hashtbl.create 0 in
-        let name = d.dir_name in
+        let name = d.dir_ident in
         let path =
           match d.dir_path with
               None -> name
@@ -350,7 +391,7 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
 
     | CEXP_use_mod {node=u; id=id} ->
         let ps = env.env_ps in
-        let name = u.use_name in
+        let name = u.use_ident in
         let filename = ps.pstate_infer_lib_name name in
         let rlib = REQUIRED_LIB_rust { required_libname = filename;
                                        required_prefix = 1 }
@@ -375,7 +416,7 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
               None -> unexpected_val "calling convention" (PVAL_str v)
             | Some c -> c
         in
-        let name = cn.nat_name in
+        let name = cn.nat_ident in
         let filename =
           match cn.nat_path with
               None -> env.env_ps.pstate_infer_lib_name name
@@ -390,6 +431,9 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
         let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
           Item.note_required_mod env.env_ps span conv rlib item;
           [| CDIR_mod (name, item) |]
+
+    | CEXP_meta m ->
+        [| CDIR_meta (Array.map (fun (id, p) -> (id, eval_pexp_to_str env p)) m.node) |]
 
 
 and eval_pexp (env:env) (exp:Pexp.pexp) : pval =
@@ -516,6 +560,7 @@ let with_err_handling sess thunk =
         let apos = lexpos ps in
           span ps apos apos
             { Ast.crate_items = (Item.empty_view, Hashtbl.create 0);
+              Ast.crate_meta = [||];
               Ast.crate_required = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
               Ast.crate_files = Hashtbl.create 0 }
@@ -574,21 +619,25 @@ let parse_crate_file
           let apos = lexpos ps in
           let cexps = parse_cexps ps EOF in
           let cdirs = eval_cexps env cexps in
+          let meta = Queue.create () in
           let _ =
             Array.iter
               begin
                 fun d ->
                   match d with
                       CDIR_mod (name, item) -> htab_put items name item
+                    | CDIR_meta metas ->
+                        Array.iter (fun m -> Queue.add m meta) metas
                     | _ ->
                         raise
-                          (err "unhandled non-'mod' directive at top level" ps)
+                          (err "unhandled directive at top level" ps)
               end
               cdirs
           in
           let bpos = lexpos ps in
           let main = find_main_fn ps items in
           let crate = { Ast.crate_items = (Item.empty_view, items);
+                        Ast.crate_meta = queue_to_arr meta;
                         Ast.crate_required = required;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
@@ -622,6 +671,7 @@ let parse_src_file
           let main = find_main_fn ps (snd items) in
           let crate = { Ast.crate_items = items;
                         Ast.crate_required = required;
+                        Ast.crate_meta = [||];
                         Ast.crate_main = main;
                         Ast.crate_files = files }
           in
