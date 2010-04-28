@@ -1235,10 +1235,9 @@ let fn_tail_call
 ;;
 
 
-let loop_info_field_iterator_retpc = 0;;
-let loop_info_field_iterator_sp = 1;;
-let loop_info_field_loop_fn_sp = 2;;
-let loop_info_field_callee_saves = 3;;
+let loop_info_field_retpc = 0;;
+let loop_info_field_sp = 1;;
+let loop_info_field_fp = 2;;
 
 let self_args_cell (self_args_rty:Il.referent_ty) : Il.cell =
   Il.Mem (Il.RegIn (h ebp, Some (Asm.IMM frame_base_sz)), self_args_rty)
@@ -1252,7 +1251,7 @@ let iterator_prologue (e:Il.emitter) (self_args_rty:Il.referent_ty) ((*proto*)_:
   let iterator_args_cell = get_element_ptr all_args_cell Abi.calltup_elt_iterator_args in
   let loop_info_ptr_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_info_ptr in
     mov (rc edx) (c loop_info_ptr_cell);                           (* edx <- iterator_args[1] *)
-    mov (edx_n loop_info_field_iterator_sp) (ro esp)               (* iterator_args[1] <- esp *)
+    mov (edx_n loop_info_field_sp) (ro esp)                        (* iterator_args[1] <- esp *)
 ;;
 
 (* precondition: esp == &ils[depth] *)
@@ -1274,7 +1273,7 @@ let iteration_prologue
   let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
     mov (rc ebp) (ro esp);                                         (* ebp <- &ils[depth] *)
     add (rc ebp) (imm (Asm.IMM frame_base_offset));                (* ebp <- &ils[k] + frame_info_sz *)
-    mov (rc esp) (c (word_n (h esp) loop_info_field_iterator_sp)); (* esp <- ils[depth].it_esp *)
+    mov (rc esp) (c (word_n (h esp) loop_info_field_sp));          (* esp <- ils[depth].it_esp *)
 
     let restart_pc = e.Il.emit_pc in
 
@@ -1306,12 +1305,15 @@ let iteration_epilogue
   let mov dst src = emit (Il.umov dst src) in
   (* FIXME: abstract all this arithmetic *)
   let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
-  let it_retpc_idx = Int64.mul (Int64.of_int loop_info_field_iterator_retpc) word_sz in
+  let it_retpc_idx = Int64.mul (Int64.of_int loop_info_field_retpc) word_sz in
   let it_retpc_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_retpc_idx)) in
-  let it_esp_idx = Int64.mul (Int64.of_int loop_info_field_iterator_sp) word_sz in
-  let it_esp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_esp_idx)) in
+  let it_sp_idx = Int64.mul (Int64.of_int loop_info_field_sp) word_sz in
+  let it_sp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_sp_idx)) in
+  let it_fp_idx = Int64.mul (Int64.of_int loop_info_field_fp) word_sz in
+  let it_fp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_fp_idx)) in
     mov it_ptr_cell (c (word_at_off (h ebp) it_retpc_off));        (* it <- ils[depth].it_retpc *)
-    mov (rc esp) (c (word_at_off (h ebp) it_esp_off))              (* esp <- ils[depth].it_esp *)
+    mov (rc esp) (c (word_at_off (h ebp) it_sp_off));              (* esp <- ils[depth].it_esp *)
+    mov (rc ebp) (c (word_at_off (h ebp) it_fp_off))               (* ebp <- ils[depth].it_ebp *)
 ;;
 
 let loop_prologue
@@ -1321,9 +1323,9 @@ let loop_prologue
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
   let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
-  let loop_esp_idx = Int64.mul (Int64.of_int loop_info_field_loop_fn_sp) word_sz in
-  let loop_esp_off = Asm.IMM (Int64.neg (Int64.sub ils_base loop_esp_idx)) in
-    mov (word_at_off (h ebp) loop_esp_off) (ro esp)                (* ils[i].loop_esp <- esp *)
+  let it_fp_idx = Int64.mul (Int64.of_int loop_info_field_fp) word_sz in
+  let it_fp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_fp_idx)) in
+    mov (word_at_off (h ebp) it_fp_off) (ro esp)                   (* ils[i].it_ebp <- esp *)
 ;;
 
 let loop_epilogue
@@ -1333,9 +1335,9 @@ let loop_epilogue
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
   let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
-  let loop_esp_idx = Int64.mul (Int64.of_int loop_info_field_loop_fn_sp) word_sz in
-  let loop_esp_off = Asm.IMM (Int64.neg (Int64.sub ils_base loop_esp_idx)) in
-    mov (rc esp) (c (word_at_off (h ebp) loop_esp_off))            (* esp <- ils[i].loop_esp *)
+  let it_fp_idx = Int64.mul (Int64.of_int loop_info_field_fp) word_sz in
+  let it_fp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_fp_idx)) in
+    mov (rc esp) (c (word_at_off (h ebp) it_fp_off))               (* esp <- ils[i].it_ebp *)
 ;;
 
 let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
@@ -1350,7 +1352,6 @@ let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
   let tgtc = Il.Reg (tgt, Il.AddrTy Il.CodeTy) in
   let (_, tmpc1) = vreg e in
   let (tmp2, tmpc2) = vreg e in
-  let (_, tmpc3) = vreg e in
   let retpc_off = Asm.IMM (Int64.sub frame_base_sz word_sz) in
   let all_args_cell = self_args_cell self_args_rty in
   let iterator_args_cell = get_element_ptr all_args_cell Abi.calltup_elt_iterator_args in
@@ -1364,14 +1365,10 @@ let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
     sub tgtc (c tmpc1);                                            (* tgt <- tgt - tmp1 *)
     annotate e "put: get address of loop info segment";
     mov tmpc2 (c loop_info_ptr_cell);                              (* tmp2 <- &extra_args[1]->it_retpc *)
-    annotate e "put: save frame base";
-    mov tmpc3 (ro ebp);                                            (* tmp3 <- ebp *)
     annotate e "put: suspend";
     lea (rc esp) (c (word_at_off tmp2 (Asm.IMM word_sz)));         (* esp <- &extra_args[1]->it_retpc + word_sz *)
     regfence ();                                                   (* spill live registers *)
-    call (c tgtc);                                                 (* call tgt *)
-    annotate e "put: resume and restore frame base";
-    mov (rc ebp) (c tmpc3)                                         (* ebp <- tmp3 *)
+    call (c tgtc)                                                  (* call tgt *)
 ;;
 
 let iterator_args
