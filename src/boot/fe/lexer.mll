@@ -205,3 +205,31 @@ rule token = parse
 | "'\\''"                                 { LIT_CHAR ('\'')                                }
 
 | eof                           { EOF        }
+
+and bracequote buf depth = parse
+
+  '\\' '{'                      { Buffer.add_char buf '{';
+                                  bracequote buf depth lexbuf          }
+
+| '{'                           { Buffer.add_char buf '{';
+                                  bracequote buf (depth+1) lexbuf      }
+
+| '\\' '}'                      { Buffer.add_char buf '}';
+                                  bracequote buf depth lexbuf          }
+
+| '}'                           { if depth = 1
+                                  then BRACEQUOTE (Buffer.contents buf)
+                                  else
+                                    begin
+                                      Buffer.add_char buf '}';
+                                      bracequote buf (depth-1) lexbuf
+                                    end                                }
+
+| '\\' [^'{' '}']               { let s = Lexing.lexeme lexbuf in
+                                    Buffer.add_string buf s;
+                                    bracequote buf depth lexbuf        }
+
+
+| [^'\\' '{' '}']+              { let s = Lexing.lexeme lexbuf in
+                                    Buffer.add_string buf s;
+                                    bracequote buf depth lexbuf        }

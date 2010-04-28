@@ -133,6 +133,8 @@ type token =
 
   | EOF
 
+  | BRACEQUOTE of string
+
 ;;
 
 let rec string_of_tok t =
@@ -293,6 +295,8 @@ let rec string_of_tok t =
 
     (* Taskess types *)
     | TASK         -> "task"
+
+    | BRACEQUOTE _ -> "{...bracequote...}"
 
     | EOF        -> "<EOF>"
 ;;
