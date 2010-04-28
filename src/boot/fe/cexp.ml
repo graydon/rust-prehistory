@@ -318,7 +318,6 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
             ps.pstate_node_id
             ps.pstate_opaque_id
             ps.pstate_sess
-            ps.pstate_lexfun
             ps.pstate_get_mod
             ps.pstate_infer_lib_name
             env.env_required
@@ -525,7 +524,6 @@ let with_err_handling sess thunk =
 
 let parse_crate_file
     (sess:Session.sess)
-    (tok:Lexing.lexbuf -> Token.token)
     (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
     (infer_lib_name:(Ast.ident -> filename))
     : Ast.crate =
@@ -535,7 +533,7 @@ let parse_crate_file
   let oref = ref (Opaque 0) in
   let required = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess tok get_mod infer_lib_name required fname
+    make_parser tref nref oref sess get_mod infer_lib_name required fname
   in
 
   let files = Hashtbl.create 0 in
@@ -603,7 +601,6 @@ let parse_crate_file
 
 let parse_src_file
     (sess:Session.sess)
-    (tok:Lexing.lexbuf -> Token.token)
     (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
     (infer_lib_name:(Ast.ident -> filename))
     : Ast.crate =
@@ -613,7 +610,7 @@ let parse_src_file
   let oref = ref (Opaque 0) in
   let required = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess tok get_mod infer_lib_name required fname
+    make_parser tref nref oref sess get_mod infer_lib_name required fname
   in
     with_err_handling sess
       begin

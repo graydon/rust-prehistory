@@ -32,6 +32,7 @@ type pexp' =
   | PEXP_str of string
   | PEXP_mutable of pexp
   | PEXP_exterior of pexp
+  | PEXP_custom of Ast.name * (token array) * (string option)
 
 and plval =
     PLVAL_ident of Ast.ident
@@ -672,6 +673,38 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                         (PEXP_unop ((Ast.UNOP_cast t), pexp))
           end
 
+    | POUND ->
+        bump ps;
+        let name = parse_name ps in
+        let toks =
+          match peek ps with
+              LPAREN ->
+                bump ps;
+                let toks = Queue.create () in
+                  while (peek ps) <> RPAREN
+                  do
+                    Queue.add (peek ps) toks;
+                    bump ps;
+                  done;
+                  expect ps RPAREN;
+                  queue_to_arr toks
+            | _ -> [| |]
+        in
+        let str =
+          match peek ps with
+              LBRACE ->
+                begin
+                  bump_bracequote ps;
+                  match peek ps with
+                      BRACEQUOTE s -> bump ps; Some s
+                    | _ -> raise (unexpected ps)
+                end
+            | _ -> None
+        in
+        let bpos = lexpos ps in
+          span ps apos bpos
+            (PEXP_custom (name, toks, str))
+
     | _ ->
         let lit = parse_lit ps in
         let bpos = lexpos ps in
@@ -832,6 +865,41 @@ and parse_pexp_list (ps:pstate) : pexp array =
 
 ;;
 
+(* 
+ * FIXME: This is a crude approximation of the syntax-extension system,
+ * for purposes of prototyping and/or hard-wiring any extensions we
+ * wish to use in the bootstrap compiler. The eventual aim is to permit
+ * loading rust crates to process extensions, but this will likely
+ * require a rust-based frontend, or an ocaml-FFI-based connection to
+ * rust crates. At the moment we have neither.
+ *)
+
+let expand_pexp_custom
+    (ps:pstate)
+    (name:Ast.name)
+    (args:token array)
+    (body:string option)
+    : pexp' =
+  let nstr = Ast.fmt_to_str Ast.fmt_name name in
+    match (nstr, (Array.length args), body) with
+
+        ("shell", 0, Some cmd) ->
+          let c = Unix.open_process_in cmd in
+          let b = Buffer.create 32 in
+          let rec r _ =
+            try
+              Buffer.add_char b (input_char c);
+              r ()
+            with
+                End_of_file ->
+                  ignore (Unix.close_process_in c);
+                  Buffer.contents b
+          in
+            PEXP_str (r ())
+
+      | _ ->
+          raise (err ("unsupported syntax extension: " ^ nstr) ps)
+;;
 
 (* 
  * Desugarings depend on context:
@@ -946,6 +1014,10 @@ and desugar_expr_atom
 
       | PEXP_mutable _ ->
           raise (err "mutable keyword in atom context" ps)
+
+      | PEXP_custom (n, a, b) ->
+          desugar_expr_atom ps
+            { pexp with node = expand_pexp_custom ps n a b }
 
 
 and desugar_expr_mode_atom
@@ -1103,6 +1175,11 @@ and desugar_expr_init
 
       | PEXP_mutable _ ->
           raise (err "mutable keyword in initialiser context" ps)
+
+      | PEXP_custom (n, a, b) ->
+          desugar_expr_init ps dst_lval
+            { pexp with node = expand_pexp_custom ps n a b }
+
 
 and atom_lval (ps:pstate) (at:Ast.atom) : Ast.lval =
   match at with

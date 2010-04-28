@@ -9,7 +9,6 @@ type pstate =
       mutable pstate_ctxt : (string * pos) list;
       mutable pstate_rstr : bool;
       mutable pstate_depth: int;
-      pstate_lexfun       : Lexing.lexbuf -> token;
       pstate_lexbuf       : Lexing.lexbuf;
       pstate_file         : filename;
       pstate_sess         : Session.sess;
@@ -37,7 +36,6 @@ let make_parser
     (nref:node_id ref)
     (oref:opaque_id ref)
     (sess:Session.sess)
-    (tok:Lexing.lexbuf -> token)
     (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
     (infer_lib_name:Ast.ident -> filename)
     (required:(node_id, (required_lib * nabi_conv)) Hashtbl.t)
@@ -48,13 +46,12 @@ let make_parser
   let cpos = { lexbuf.Lexing.lex_curr_p with Lexing.pos_fname = fname } in
     lexbuf.Lexing.lex_start_p <- spos;
     lexbuf.Lexing.lex_curr_p <- cpos;
-    let first = tok lexbuf in
+    let first = Lexer.token lexbuf in
     let ps =
       { pstate_peek = first;
         pstate_ctxt = [];
         pstate_rstr = false;
         pstate_depth = 0;
-        pstate_lexfun = tok;
         pstate_lexbuf = lexbuf;
         pstate_file = fname;
         pstate_sess = sess;
@@ -227,7 +224,17 @@ let bump (ps:pstate) : unit =
   begin
     iflog ps (fun _ -> log ps "bumping past: %s"
                 (string_of_tok ps.pstate_peek));
-    ps.pstate_peek <- ps.pstate_lexfun ps.pstate_lexbuf
+    ps.pstate_peek <- Lexer.token ps.pstate_lexbuf
+  end
+;;
+
+let bump_bracequote (ps:pstate) : unit =
+  begin
+    assert (ps.pstate_peek = LBRACE);
+    iflog ps (fun _ -> log ps "bumping past: %s"
+                (string_of_tok ps.pstate_peek));
+    let buf = Buffer.create 32 in
+      ps.pstate_peek <- Lexer.bracequote buf 1 ps.pstate_lexbuf
   end
 ;;
 

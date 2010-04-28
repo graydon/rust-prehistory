@@ -1052,7 +1052,6 @@ let rec atom_type (cx:ctxt) (at:Ast.atom) : Ast.ty =
     | Ast.ATOM_literal {node=(Ast.LIT_char _); id=_} -> Ast.TY_char
     | Ast.ATOM_literal {node=(Ast.LIT_nil); id=_} -> Ast.TY_nil
     | Ast.ATOM_literal {node=(Ast.LIT_mach (m,_,_)); id=_} -> Ast.TY_mach m
-    | Ast.ATOM_literal _ -> bug () "unhandled form of literal '%a', in atom_type" Ast.sprintf_atom at
     | Ast.ATOM_lval lv -> lval_ty cx lv
 ;;
 

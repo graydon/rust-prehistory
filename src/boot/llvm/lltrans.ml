@@ -353,7 +353,6 @@ let trans_crate
             Llvm.const_of_int64 (Llvm.i32_type llctx) value false
           | Ast.LIT_char ch ->
             Llvm.const_int (Llvm.i32_type llctx) (Char.code ch)
-          | Ast.LIT_custom _ -> bogus (* TODO *)
       in
 
       (* Translates an lval by reference into the appropriate pointer value. *)

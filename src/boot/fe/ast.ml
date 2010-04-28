@@ -333,15 +333,7 @@ and lit =
   | LIT_int of (int64 * string)
   | LIT_uint of (int64 * string)
   | LIT_char of char
-  | LIT_custom of lit_custom
 
-
-and lit_custom =
-    {
-      lit_expander: lval;
-      lit_arg: lval;
-      lit_text: string;
-    }
 
 and lval_component =
     COMP_named of name_component
@@ -836,7 +828,6 @@ and fmt_lit (ff:Format.formatter) (l:lit) : unit =
   | LIT_int (_,s) -> fmt ff "%s" s
   | LIT_uint (_,s) -> fmt ff "%s" s
   | LIT_char c -> fmt ff "'%s'" (Char.escaped c)
-  | LIT_custom _ -> fmt ff "?lit?"
 
 and fmt_domain (ff:Format.formatter) (d:domain) : unit =
   match d with

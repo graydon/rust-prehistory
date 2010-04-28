@@ -95,7 +95,6 @@ let trans_visitor
 
   let imm (i:int64) : Il.operand = imm_of_ty i word_ty_mach in
   let simm (i:int64) : Il.operand = imm_of_ty i word_ty_signed_mach in
-  let marker = imm 0xdeadbeefL in
   let one = imm 1L in
   let zero = imm 0L in
   let imm_true = imm_of_ty 1L TY_u8 in
@@ -884,8 +883,6 @@ let trans_visitor
               | Ast.LIT_int (i, _) -> simm i
               | Ast.LIT_uint (i, _) -> imm i
               | Ast.LIT_mach (m, n, _) -> imm_of_ty n m
-
-              | _ -> marker
           end
 
   and fixup_to_ptr_operand

@@ -741,7 +741,6 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               | Ast.LIT_int (_, _) -> Ast.TY_int
               | Ast.LIT_uint (_, _) -> Ast.TY_uint
               | Ast.LIT_char _ -> Ast.TY_char
-              | _ -> bug () "unimplemented atom literal"
             in
               unify_ty ty tv
         | Ast.ATOM_lval lval -> unify_lval lval tv

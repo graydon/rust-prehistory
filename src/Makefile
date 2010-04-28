@@ -312,7 +312,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \
                       writealias.rs yield.rs yield2.rs cast.rs native-opaque-type.rs \
                       generic-type.rs generic-derived-type.rs generic-tag.rs \
-                      generic-obj.rs) \
+                      generic-obj.rs syntax-extension.rs) \
                     $(addprefix test/run-fail/,fail.rs linked-failure.rs \
                       pred.rs vec_overrun.rs str_overrun.rs vec_underrun.rs \
                       explicit-fail.rs) \
