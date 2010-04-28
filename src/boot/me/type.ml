@@ -286,9 +286,9 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       let integral (ty:Ast.ty) : bool =
         match ty with
             Ast.TY_int | Ast.TY_mach TY_u8 | Ast.TY_mach TY_u16
-          | Ast.TY_mach TY_u32 | Ast.TY_mach TY_u64 | Ast.TY_mach TY_s8
-          | Ast.TY_mach TY_s16 | Ast.TY_mach TY_s32
-          | Ast.TY_mach TY_s64 ->
+          | Ast.TY_mach TY_u32 | Ast.TY_mach TY_u64 | Ast.TY_mach TY_i8
+          | Ast.TY_mach TY_i16 | Ast.TY_mach TY_i32
+          | Ast.TY_mach TY_i64 ->
               true
           | _ -> false
       in
@@ -304,8 +304,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       let loggable (ty:Ast.ty) : bool =
         match ty with
             Ast.TY_str | Ast.TY_bool | Ast.TY_int | Ast.TY_char | Ast.TY_mach TY_u8
-          | Ast.TY_mach TY_u16 | Ast.TY_mach TY_u32 | Ast.TY_mach TY_s8
-          | Ast.TY_mach TY_s16 | Ast.TY_mach TY_s32 -> true
+          | Ast.TY_mach TY_u16 | Ast.TY_mach TY_u32 | Ast.TY_mach TY_i8
+          | Ast.TY_mach TY_i16 | Ast.TY_mach TY_i32 -> true
           | _ -> false
       in
 

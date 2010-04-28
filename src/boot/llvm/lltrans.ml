@@ -165,10 +165,10 @@ let trans_crate
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
     let tycon =
       match mty with
-          TY_u8 | TY_s8 -> Llvm.i8_type
-        | TY_u16 | TY_s16 -> Llvm.i16_type
-        | TY_u32 | TY_s32 -> Llvm.i32_type
-        | TY_u64 | TY_s64 -> Llvm.i64_type
+          TY_u8 | TY_i8 -> Llvm.i8_type
+        | TY_u16 | TY_i16 -> Llvm.i16_type
+        | TY_u32 | TY_i32 -> Llvm.i32_type
+        | TY_u64 | TY_i64 -> Llvm.i64_type
         | TY_f32 -> Llvm.float_type
         | TY_f64 -> Llvm.double_type
     in
@@ -516,8 +516,8 @@ let trans_crate
                         Ast.TY_str -> trans_log_str a
                       | Ast.TY_int | Ast.TY_bool | Ast.TY_char
                       | Ast.TY_mach (TY_u8) | Ast.TY_mach (TY_u16)
-                      | Ast.TY_mach (TY_u32) | Ast.TY_mach (TY_s8)
-                      | Ast.TY_mach (TY_s16) | Ast.TY_mach (TY_s32) ->
+                      | Ast.TY_mach (TY_u32) | Ast.TY_mach (TY_i8)
+                      | Ast.TY_mach (TY_i16) | Ast.TY_mach (TY_i32) ->
                           trans_log_int a
                       | _ -> Semant.bugi sem_cx head.id
                           "unimplemented logging type"

@@ -1000,13 +1000,13 @@ let dw_op_to_frag (abi:Abi.abi) (op:dw_op) : Asm.frag =
       DW_OP_addr e -> SEQ [| BYTE 0x03; WORD (abi.Abi.abi_word_ty, e) |]
     | DW_OP_deref -> BYTE 0x06
     | DW_OP_const1u e -> SEQ [| BYTE 0x08; WORD (TY_u8, e) |]
-    | DW_OP_const1s e -> SEQ [| BYTE 0x09; WORD (TY_s8, e) |]
+    | DW_OP_const1s e -> SEQ [| BYTE 0x09; WORD (TY_i8, e) |]
     | DW_OP_const2u e -> SEQ [| BYTE 0x0a; WORD (TY_u16, e) |]
-    | DW_OP_const2s e -> SEQ [| BYTE 0x0b; WORD (TY_s16, e) |]
+    | DW_OP_const2s e -> SEQ [| BYTE 0x0b; WORD (TY_i16, e) |]
     | DW_OP_const4u e -> SEQ [| BYTE 0x0c; WORD (TY_u32, e) |]
-    | DW_OP_const4s e -> SEQ [| BYTE 0x0d; WORD (TY_s32, e) |]
+    | DW_OP_const4s e -> SEQ [| BYTE 0x0d; WORD (TY_i32, e) |]
     | DW_OP_const8u e -> SEQ [| BYTE 0x0e; WORD (TY_u64, e) |]
-    | DW_OP_const8s e -> SEQ [| BYTE 0x0f; WORD (TY_s64, e) |]
+    | DW_OP_const8s e -> SEQ [| BYTE 0x0f; WORD (TY_i64, e) |]
     | DW_OP_constu e -> SEQ [| BYTE 0x10; ULEB128 e |]
     | DW_OP_consts e -> SEQ [| BYTE 0x11; SLEB128 e |]
     | DW_OP_dup -> BYTE 0x12
@@ -1031,8 +1031,8 @@ let dw_op_to_frag (abi:Abi.abi) (op:dw_op) : Asm.frag =
     | DW_OP_shr -> BYTE 0x25
     | DW_OP_shra -> BYTE 0x26
     | DW_OP_xor -> BYTE 0x27
-    | DW_OP_skip e -> SEQ [| BYTE 0x2f; WORD (TY_s16, e) |]
-    | DW_OP_bra e -> SEQ [| BYTE 0x28; WORD (TY_s16, e) |]
+    | DW_OP_skip e -> SEQ [| BYTE 0x2f; WORD (TY_i16, e) |]
+    | DW_OP_bra e -> SEQ [| BYTE 0x28; WORD (TY_i16, e) |]
     | DW_OP_eq -> BYTE 0x29
     | DW_OP_ge -> BYTE 0x2a
     | DW_OP_gt -> BYTE 0x2b
@@ -1353,10 +1353,10 @@ let dwarf_visitor
   in
   let (signed_word_ty_mach:ty_mach) =
     match word_bits with
-        Il.Bits8 -> TY_s8
-      | Il.Bits16 -> TY_s16
-      | Il.Bits32 -> TY_s32
-      | Il.Bits64 -> TY_s64
+        Il.Bits8 -> TY_i8
+      | Il.Bits16 -> TY_i16
+      | Il.Bits32 -> TY_i32
+      | Il.Bits64 -> TY_i64
   in
 
   let path_name _ = Ast.fmt_to_str Ast.fmt_name (Walk.path_to_name path) in
@@ -1741,10 +1741,10 @@ let dwarf_visitor
           | Ast.TY_mach (TY_u16) -> base ("u16", DW_ATE_unsigned, 2)
           | Ast.TY_mach (TY_u32) -> base ("u32", DW_ATE_unsigned, 4)
           | Ast.TY_mach (TY_u64) -> base ("u64", DW_ATE_unsigned, 8)
-          | Ast.TY_mach (TY_s8)  -> base ("s8",  DW_ATE_signed, 1)
-          | Ast.TY_mach (TY_s16) -> base ("s16", DW_ATE_signed, 2)
-          | Ast.TY_mach (TY_s32) -> base ("s32", DW_ATE_signed, 4)
-          | Ast.TY_mach (TY_s64) -> base ("s64", DW_ATE_signed, 8)
+          | Ast.TY_mach (TY_i8)  -> base ("i8",  DW_ATE_signed, 1)
+          | Ast.TY_mach (TY_i16) -> base ("i16", DW_ATE_signed, 2)
+          | Ast.TY_mach (TY_i32) -> base ("i32", DW_ATE_signed, 4)
+          | Ast.TY_mach (TY_i64) -> base ("i64", DW_ATE_signed, 8)
           | Ast.TY_int -> base ("int", DW_ATE_signed, word_sz_int)
           | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
           | Ast.TY_str -> string_type ()
@@ -2487,10 +2487,10 @@ let rec extract_mod_items
                 | ("u16", DW_ATE_unsigned, 2) -> Ast.TY_mach TY_u16
                 | ("u32", DW_ATE_unsigned, 4) -> Ast.TY_mach TY_u32
                 | ("u64", DW_ATE_unsigned, 8) -> Ast.TY_mach TY_u64
-                | ("s8", DW_ATE_signed, 1) -> Ast.TY_mach TY_u8
-                | ("s16", DW_ATE_signed, 2) -> Ast.TY_mach TY_u16
-                | ("s32", DW_ATE_signed, 4) -> Ast.TY_mach TY_u32
-                | ("s64", DW_ATE_signed, 8) -> Ast.TY_mach TY_u64
+                | ("i8", DW_ATE_signed, 1) -> Ast.TY_mach TY_i8
+                | ("i16", DW_ATE_signed, 2) -> Ast.TY_mach TY_i16
+                | ("i32", DW_ATE_signed, 4) -> Ast.TY_mach TY_i32
+                | ("i64", DW_ATE_signed, 8) -> Ast.TY_mach TY_i64
                 | ("char", DW_ATE_unsigned_char, 4) -> Ast.TY_char
                 | ("int", DW_ATE_signed, sz) when sz = word_sz_int -> Ast.TY_int
                 | _ -> bug () "unexpected type of DW_TAG_base_type"

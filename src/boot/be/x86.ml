@@ -1666,7 +1666,7 @@ let rm_r (c:Il.cell) (r:int) : Asm.frag =
             match a with
                 Il.Abs disp ->
                   Asm.SEQ [| Asm.BYTE (modrm_deref_disp32 r);
-                             Asm.WORD (TY_s32, disp) |]
+                             Asm.WORD (TY_i32, disp) |]
 
               | Il.RegIn ((Il.Hreg rm), None) when rm != reg_ebp ->
                   seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
@@ -1678,22 +1678,22 @@ let rm_r (c:Il.cell) (r:int) : Asm.frag =
               | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM n)) when imm_is_signed_byte n ->
                   seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
-                    (Asm.WORD (TY_s8, Asm.IMM n))
+                    (Asm.WORD (TY_i8, Asm.IMM n))
 
               | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM n)) ->
                   seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
-                    (Asm.WORD (TY_s32, Asm.IMM n))
+                    (Asm.WORD (TY_i32, Asm.IMM n))
 
               | Il.RegIn ((Il.Hreg rm), Some disp) ->
                   Asm.new_relaxation
                     [|
                       seq2 rm
                         (Asm.BYTE (modrm_deref_reg_plus_disp32 (reg rm) r))
-                        (Asm.WORD (TY_s32, disp));
+                        (Asm.WORD (TY_i32, disp));
                       seq2 rm
                         (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
-                        (Asm.WORD (TY_s8, disp))
+                        (Asm.WORD (TY_i8, disp))
                     |]
               | _ -> raise Unrecognized
           end
@@ -1713,12 +1713,12 @@ let insn_rm_r_imm (op:int) (c:Il.cell) (r:int) (ty:ty_mach) (i:Asm.expr64) : Asm
 let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64) : Asm.frag =
   match i with
       Asm.IMM n when imm_is_signed_byte n ->
-        insn_rm_r_imm op8 c r TY_s8 i
+        insn_rm_r_imm op8 c r TY_i8 i
     | _ ->
         Asm.new_relaxation
           [|
-            insn_rm_r_imm op32 c r TY_s32 i;
-            insn_rm_r_imm op8 c r TY_s8 i
+            insn_rm_r_imm op32 c r TY_i32 i;
+            insn_rm_r_imm op8 c r TY_i8 i
           |]
 ;;
 
@@ -1747,8 +1747,8 @@ let insn_pcrel_relax
   in
     Asm.new_relaxation
       [|
-        Asm.SEQ [| op32_frag; Asm.WORD (TY_s32, pcrel_expr); def |];
-        Asm.SEQ [| op8_frag; Asm.WORD (TY_s8, pcrel_expr); def |];
+        Asm.SEQ [| op32_frag; Asm.WORD (TY_i32, pcrel_expr); def |];
+        Asm.SEQ [| op8_frag; Asm.WORD (TY_i8, pcrel_expr); def |];
       |]
 ;;
 
@@ -1758,7 +1758,7 @@ let insn_pcrel_simple (op32:int) (fix:fixup) : Asm.frag =
   let pcrel_expr = (Asm.SUB (Asm.M_POS fix,
                              Asm.M_POS pcrel_mark_fixup))
   in
-    Asm.SEQ [| Asm.BYTE op32; Asm.WORD (TY_s32, pcrel_expr); def |]
+    Asm.SEQ [| Asm.BYTE op32; Asm.WORD (TY_i32, pcrel_expr); def |]
 ;;
 
 let insn_pcrel (op8:int) (op32:int) (fix:fixup) : Asm.frag =
@@ -1772,8 +1772,8 @@ let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.fr
 (* FIXME: tighten imm-based dispatch by imm type. *)
 let cmp (a:Il.operand) (b:Il.operand) : Asm.frag =
   match (a,b) with
-      (Il.Cell c, Il.Imm (i, TY_s8)) when is_rm8 c ->
-        insn_rm_r_imm 0x80 c slash7 TY_s8 i
+      (Il.Cell c, Il.Imm (i, TY_i8)) when is_rm8 c ->
+        insn_rm_r_imm 0x80 c slash7 TY_i8 i
     | (Il.Cell c, Il.Imm (i, TY_u8)) when is_rm8 c ->
         insn_rm_r_imm 0x80 c slash7 TY_u8 i
     | (Il.Cell c, Il.Imm (i, _)) when is_rm32 c ->
@@ -1871,7 +1871,7 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
     (* m8 <- imm8 (signed) *)
     | (_, _, Il.Imm ((Asm.IMM n), _))
         when is_m8 dst && imm_is_signed_byte n && signed ->
-          insn_rm_r_imm 0xc6 dst slash0 TY_s8 (Asm.IMM n)
+          insn_rm_r_imm 0xc6 dst slash0 TY_i8 (Asm.IMM n)
 
     (* m8 <- imm8 (unsigned) *)
     | (_, _, Il.Imm ((Asm.IMM n), _))
@@ -1880,7 +1880,7 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
 
     (* rm32 <- imm32 *)
     | (_, _, Il.Imm (i, _)) when is_rm32 dst || is_r8 dst ->
-        let t = if signed then TY_u32 else TY_s32 in
+        let t = if signed then TY_u32 else TY_i32 in
           insn_rm_r_imm 0xc7 dst slash0 t i
 
     | _ -> raise Unrecognized
@@ -1906,7 +1906,7 @@ let lea (dst:Il.cell) (src:Il.operand) : Asm.frag =
            *)
           Asm.SEQ [|
             insn_pcrel_simple 0xe8 get_next_pc_thunk_fixup;
-            Asm.DEF (anchor, insn_rm_r_imm 0x81 dst slash0 TY_s32 fix_off);
+            Asm.DEF (anchor, insn_rm_r_imm 0x81 dst slash0 TY_i32 fix_off);
           |]
 
     | _ -> raise Unrecognized
@@ -2046,13 +2046,13 @@ let mul_like (src:Il.operand) (signed:bool) (slash:int)
         insn_rm_r 0xf6 src slash
 
     | Il.Imm (_, TY_u32)
-    | Il.Imm (_, TY_s32) ->
+    | Il.Imm (_, TY_i32) ->
         let tmp = Il.Reg ((Il.Hreg edx), Il.ValTy Il.Bits32) in
         Asm.SEQ [| mov signed tmp src;
                    insn_rm_r 0xf7 tmp slash |]
 
     | Il.Imm (_, TY_u8)
-    | Il.Imm (_, TY_s8) ->
+    | Il.Imm (_, TY_i8) ->
         let tmp = Il.Reg ((Il.Hreg edx), Il.ValTy Il.Bits8) in
         Asm.SEQ [| mov signed tmp src;
                    insn_rm_r 0xf6 tmp slash |]

@@ -306,7 +306,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       mutual-recursion-group.rs native.rc command-line-args.rs \
                       native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \
                       rec-extend.rs rec.rs rec_tup.rs return-nil.rs \
-                      s32-sub.rs s8-incr.rs spawn-fn.rs spawn.rs \
+                      i32-sub.rs i8-incr.rs spawn-fn.rs spawn.rs \
                       stateful-obj.rs str-concat.rs str-idx.rs tag.rs \
                       tail-cps.rs tail-direct.rs threads.rs tup.rs \
                       u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \

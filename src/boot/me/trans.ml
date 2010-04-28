@@ -78,10 +78,10 @@ let trans_visitor
   in
   let (word_ty_signed_mach:ty_mach) =
     match word_bits with
-        Il.Bits8 -> TY_s8
-      | Il.Bits16 -> TY_s16
-      | Il.Bits32 -> TY_s32
-      | Il.Bits64 -> TY_s64
+        Il.Bits8 -> TY_i8
+      | Il.Bits16 -> TY_i16
+      | Il.Bits32 -> TY_i32
+      | Il.Bits64 -> TY_i64
   in
   let (word_slot:Ast.slot) = word_slot abi in
   let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
@@ -3172,8 +3172,8 @@ let trans_visitor
                 Ast.TY_str -> trans_log_str a
               | Ast.TY_int | Ast.TY_bool | Ast.TY_char | Ast.TY_mach (TY_u8)
               | Ast.TY_mach (TY_u16) | Ast.TY_mach (TY_u32)
-              | Ast.TY_mach (TY_s8) | Ast.TY_mach (TY_s16)
-              | Ast.TY_mach (TY_s32) ->
+              | Ast.TY_mach (TY_i8) | Ast.TY_mach (TY_i16)
+              | Ast.TY_mach (TY_i32) ->
                   trans_log_int a
               | _ -> bugi cx stmt.id "unimplemented logging type"
           end

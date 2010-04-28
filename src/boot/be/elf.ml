@@ -174,7 +174,7 @@ let section_header
     : frag =
   SEQ
     [|
-      WORD (TY_s32, (SUB
+      WORD (TY_i32, (SUB
                        ((F_POS shname_string_fixup),
                         (F_POS shstring_table_fixup))));
       WORD (TY_u32, (IMM (match sh_type with

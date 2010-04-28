@@ -888,10 +888,10 @@ let type_is_unsigned_2s_complement t =
 
 let type_is_signed_2s_complement t =
   match t with
-      Ast.TY_mach TY_s8
-    | Ast.TY_mach TY_s16
-    | Ast.TY_mach TY_s32
-    | Ast.TY_mach TY_s64
+      Ast.TY_mach TY_i8
+    | Ast.TY_mach TY_i16
+    | Ast.TY_mach TY_i32
+    | Ast.TY_mach TY_i64
     | Ast.TY_int -> true
     | _ -> false
 ;;
@@ -1447,18 +1447,18 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_bool -> sv Il.Bits8
 
       | Ast.TY_mach (TY_u8)
-      | Ast.TY_mach (TY_s8) -> sv Il.Bits8
+      | Ast.TY_mach (TY_i8) -> sv Il.Bits8
 
       | Ast.TY_mach (TY_u16)
-      | Ast.TY_mach (TY_s16) -> sv Il.Bits16
+      | Ast.TY_mach (TY_i16) -> sv Il.Bits16
 
       | Ast.TY_mach (TY_u32)
-      | Ast.TY_mach (TY_s32)
+      | Ast.TY_mach (TY_i32)
       | Ast.TY_mach (TY_f32)
       | Ast.TY_char -> sv Il.Bits32
 
       | Ast.TY_mach (TY_u64)
-      | Ast.TY_mach (TY_s64)
+      | Ast.TY_mach (TY_i64)
       | Ast.TY_mach (TY_f64) -> sv Il.Bits64
 
       | Ast.TY_str -> sp (Il.StructTy [| word; word; word; ptr |])
@@ -1735,10 +1735,10 @@ let ty_str (ty:Ast.ty) : string =
       | TY_u16 -> "U1"
       | TY_u32 -> "U2"
       | TY_u64 -> "U3"
-      | TY_s8 -> "S0"
-      | TY_s16 -> "S1"
-      | TY_s32 -> "S2"
-      | TY_s64 -> "S3"
+      | TY_i8 -> "I0"
+      | TY_i16 -> "I1"
+      | TY_i32 -> "I2"
+      | TY_i64 -> "I3"
       | TY_f32 -> "F2"
       | TY_f64 -> "F3"
   in

@@ -662,10 +662,10 @@ The keywords are:
 @tab @code{u32}
 @tab @code{u64}
 @tab @code{f32}
-@item @code{s8}
-@tab @code{s16}
-@tab @code{s32}
-@tab @code{s64}
+@item @code{i8}
+@tab @code{i16}
+@tab @code{i32}
+@tab @code{i64}
 @tab @code{f64}
 @item @code{rec}
 @tab @code{tag}
@@ -1844,7 +1844,7 @@ The unsigned two's complement word types @code{u8}, @code{u16},
 intervals @math{[0,(2^8)-1)]}, @math{[0,(2^{16})-1)]},
 @math{[0,(2^{32})-1)]} and @math{[0,(2^{64})-1)]} respectively.
 @item
-The signed two's complement word types @code{s8}, @code{s16}, @code{s32} and @code{s64},
+The signed two's complement word types @code{i8}, @code{i16}, @code{i32} and @code{i64},
 with values drawn from the integer
 intervals @math{[-(2^7),(2^7)-1)]}, @math{[-(2^{15}),(2^{15})-1)]},
 @math{[-(2^{31}),(2^{31})-1)]} and @math{[-(2^{63}),(2^{63})-1)]}

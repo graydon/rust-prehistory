@@ -82,10 +82,10 @@
                 ("u16", MACH TY_u16);
                 ("u32", MACH TY_u32);
                 ("u64", MACH TY_u64);
-                ("s8", MACH TY_s8);
-                ("s16", MACH TY_s16);
-                ("s32", MACH TY_s32);
-                ("s64", MACH TY_s64);
+                ("i8", MACH TY_i8);
+                ("i16", MACH TY_i16);
+                ("i32", MACH TY_i32);
+                ("i64", MACH TY_i64);
                 ("f32", MACH TY_f32);
                 ("f64", MACH TY_f64)
               ]

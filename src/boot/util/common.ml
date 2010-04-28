@@ -38,17 +38,17 @@ type ty_mach =
   | TY_u16
   | TY_u32
   | TY_u64
-  | TY_s8
-  | TY_s16
-  | TY_s32
-  | TY_s64
+  | TY_i8
+  | TY_i16
+  | TY_i32
+  | TY_i64
   | TY_f32
   | TY_f64
 ;;
 
 let mach_is_integral (mach:ty_mach) : bool =
   match mach with
-      TY_s8 | TY_s16 | TY_s32 | TY_s64
+      TY_i8 | TY_i16 | TY_i32 | TY_i64
     | TY_u8 | TY_u16 | TY_u32 | TY_u64 -> true
     | TY_f32 | TY_f64 -> false
 ;;
@@ -56,7 +56,7 @@ let mach_is_integral (mach:ty_mach) : bool =
 
 let mach_is_signed (mach:ty_mach) : bool =
   match mach with
-      TY_s8 | TY_s16 | TY_s32 | TY_s64 -> true
+      TY_i8 | TY_i16 | TY_i32 | TY_i64 -> true
     | TY_u8 | TY_u16 | TY_u32 | TY_u64
     | TY_f32 | TY_f64 -> false
 ;;
@@ -67,10 +67,10 @@ let string_of_ty_mach (mach:ty_mach) : string =
   | TY_u16 -> "u16"
   | TY_u32 -> "u32"
   | TY_u64 -> "u64"
-  | TY_s8 -> "s8"
-  | TY_s16 -> "s16"
-  | TY_s32 -> "s32"
-  | TY_s64 -> "s64"
+  | TY_i8 -> "i8"
+  | TY_i16 -> "i16"
+  | TY_i32 -> "i32"
+  | TY_i64 -> "i64"
   | TY_f32 -> "f32"
   | TY_f64 -> "f64"
 ;;
@@ -81,10 +81,10 @@ let bytes_of_ty_mach (mach:ty_mach) : int =
   | TY_u16 -> 2
   | TY_u32 -> 4
   | TY_u64 -> 8
-  | TY_s8 -> 1
-  | TY_s16 -> 2
-  | TY_s32 -> 4
-  | TY_s64 -> 8
+  | TY_i8 -> 1
+  | TY_i16 -> 2
+  | TY_i32 -> 4
+  | TY_i64 -> 8
   | TY_f32 -> 4
   | TY_f64 -> 8
 ;;

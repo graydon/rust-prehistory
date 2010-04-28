@@ -245,13 +245,13 @@ let cell_is_scalar (c:cell) : bool =
 let bits_of_ty_mach (tm:ty_mach) : bits =
   match tm with
     | TY_u8 -> Bits8
-    | TY_s8 -> Bits8
+    | TY_i8 -> Bits8
     | TY_u16 -> Bits16
-    | TY_s16 -> Bits16
+    | TY_i16 -> Bits16
     | TY_u32 -> Bits32
-    | TY_s32 -> Bits32
+    | TY_i32 -> Bits32
     | TY_u64 -> Bits64
-    | TY_s64 -> Bits64
+    | TY_i64 -> Bits64
     | TY_f32 -> Bits32
     | TY_f64 -> Bits64
 ;;

@@ -7,8 +7,8 @@ fn main() {
   let u32 u = u32(i);
   check (u == u32(0x51));
   check (u == u32('Q'));
-  check (s8(i) == s8('Q'));
-  check (s8(u8(i)) == s8(u8('Q')));
+  check (i8(i) == i8('Q'));
+  check (i8(u8(i)) == i8(u8('Q')));
   check (char(0x51) == 'Q');
 
   check (true == bool(1));

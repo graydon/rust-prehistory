@@ -634,11 +634,11 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                 | TY_u16 -> check_range 0L 0xffffL
                 | TY_u32 -> check_range 0L 0xffffffffL
                     (* | TY_u64 -> ... *)
-                | TY_s8 -> check_range (-128L) 127L
-                | TY_s16 -> check_range (-32768L) 32767L
-                | TY_s32 -> check_range (-2147483648L) 2147483647L
+                | TY_i8 -> check_range (-128L) 127L
+                | TY_i16 -> check_range (-32768L) 32767L
+                | TY_i32 -> check_range (-2147483648L) 2147483647L
                     (*
-                      | TY_s64 -> ...
+                      | TY_i64 -> ...
                       | TY_f32 -> ...
                       | TY_f64 -> ...
                     *)
