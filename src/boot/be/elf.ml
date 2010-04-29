@@ -463,6 +463,7 @@ let elf32_386_rela_frag r =
 
 let elf32_linux_x86_file
     ~(sess:Session.sess)
+    ~(crate:Ast.crate)
     ~(entry_name:string)
     ~(text_frags:(string option, frag) Hashtbl.t)
     ~(data_frags:(string option, frag) Hashtbl.t)
@@ -1262,19 +1263,6 @@ let elf32_linux_x86_file
        |])
   in
 
-  let note_rust_frags meta =
-    SEQ (Array.map
-           (fun (k,v) ->
-              let padded s = SEQ [| ZSTRING s; ALIGN_FILE (4, MARK) |] in
-              let sz s = IMM (Int64.of_int ((String.length s) + 1)) in
-                SEQ [| WORD (TY_u32, sz k);
-                       WORD (TY_u32, sz v);
-                       WORD (TY_u32, IMM 0L);
-                       padded k;
-                       padded v; |])
-           meta)
-  in
-
   let null_strtab_fixup = new_fixup "null dynstrtab entry" in
   let null_strtab_frag = DEF (null_strtab_fixup, ZSTRING "") in
   let null_symtab_frag = (symbol
@@ -1376,7 +1364,8 @@ let elf32_linux_x86_file
   in
 
   let note_rust_section =
-    DEF (note_rust_section_fixup, note_rust_frags [| ("rust", "metadata") |])
+    DEF (note_rust_section_fixup,
+         (Asm.note_rust_frags crate.node.Ast.crate_meta))
   in
 
 
@@ -1478,6 +1467,7 @@ let elf32_linux_x86_file
 
 let emit_file
     (sess:Session.sess)
+    (crate:Ast.crate)
     (code:Asm.frag)
     (data:Asm.frag)
     (sem:Semant.ctxt)
@@ -1597,6 +1587,7 @@ let emit_file
   let all_frags =
     elf32_linux_x86_file
       ~sess
+      ~crate
       ~entry_name: "_start"
       ~text_frags
       ~data_frags
@@ -1626,6 +1617,7 @@ let sniff
       (stat.Unix.st_size > 4)
     then
       let ar = new_asm_reader sess filename in
+      let _ = log sess "sniffing ELF file" in
         if (ar.asm_get_zstr_padded 4) = elf_magic
         then (ar.asm_seek 0; Some ar)
         else None
@@ -1640,6 +1632,7 @@ let get_sections
     (ar:asm_reader)
     : (string,(int*int)) Hashtbl.t =
   let sects = Hashtbl.create 0 in
+  let _ = log sess "reading sections" in
   let elf_id = ar.asm_get_zstr_padded 4 in
   let _ = assert (elf_id = elf_magic) in
 

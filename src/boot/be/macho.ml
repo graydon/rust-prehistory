@@ -607,6 +607,7 @@ let macho_header_32
 
 let emit_file
     (sess:Session.sess)
+    (crate:Ast.crate)
     (code:Asm.frag)
     (data:Asm.frag)
     (sem:Semant.ctxt)
@@ -658,11 +659,17 @@ let emit_file
   let data_section_fixup = new_fixup "__data section" in
   let const_section_fixup = new_fixup "__const section" in
   let bss_section_fixup = new_fixup "__bss section" in
+  let note_rust_section_fixup = new_fixup "__note.rust section" in
   let nl_symbol_ptr_section_fixup = new_fixup "__nl_symbol_ptr section" in
 
   let data_section = def_aligned data_sect_align data_section_fixup data in
   let const_section = def_aligned data_sect_align const_section_fixup (SEQ [| |]) in
   let bss_section = def_aligned data_sect_align bss_section_fixup (SEQ [| |]) in
+  let note_rust_section =
+    def_aligned
+      data_sect_align note_rust_section_fixup
+      (Asm.note_rust_frags crate.node.Ast.crate_meta)
+  in
 
   (* Officially, Apple doesn't support DWARF sections like this. Whatever. *)
   let debug_info_section =
@@ -860,6 +867,7 @@ let emit_file
           ("__data", data_sect_align_log2, [], S_REGULAR, data_section_fixup);
           ("__const", data_sect_align_log2, [], S_REGULAR, const_section_fixup);
           ("__bss", data_sect_align_log2, [], S_REGULAR, bss_section_fixup);
+          ("__note.rust", data_sect_align_log2, [], S_REGULAR, note_rust_section_fixup);
           ("__nl_symbol_ptr", data_sect_align_log2,
            [], S_NON_LAZY_SYMBOL_POINTERS, nl_symbol_ptr_section_fixup)
         |];
@@ -997,6 +1005,7 @@ let emit_file
        data_section;
        const_section;
        bss_section;
+       note_rust_section;
        nl_symbol_ptr_section
      |])
   in
@@ -1051,6 +1060,7 @@ let sniff
       (stat.Unix.st_size > 4)
     then
       let ar = new_asm_reader sess filename in
+      let _ = log sess "sniffing Mach-O file" in
         if (ar.asm_get_u32()) = (Int64.to_int mh_magic)
         then (ar.asm_seek 0; Some ar)
         else None
@@ -1065,6 +1075,7 @@ let get_sections
     (ar:asm_reader)
     : (string,(int*int)) Hashtbl.t =
   let sects = Hashtbl.create 0 in
+  let _ = log sess "reading sections" in
   let magic = ar.asm_get_u32() in
   let _ = assert (magic = (Int64.to_int mh_magic)) in
   let _ = ar.asm_adv_u32() in (* cpu type *)

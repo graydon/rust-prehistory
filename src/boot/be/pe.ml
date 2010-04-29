@@ -346,6 +346,7 @@ type pe_section_id =
   | SECTION_ID_DEBUG_ABBREV
   | SECTION_ID_DEBUG_LINE
   | SECTION_ID_DEBUG_FRAME
+  | SECTION_ID_NOTE_RUST
 ;;
 
 type pe_section_characteristics =
@@ -386,8 +387,9 @@ let pe_section_header
       | SECTION_ID_DEBUG_INFO
       | SECTION_ID_DEBUG_ABBREV
       | SECTION_ID_DEBUG_LINE
-      | SECTION_ID_DEBUG_FRAME -> [ IMAGE_SCN_CNT_INITIALIZED_DATA;
-                                    IMAGE_SCN_MEM_READ ]
+      | SECTION_ID_DEBUG_FRAME
+      | SECTION_ID_NOTE_RUST -> [ IMAGE_SCN_CNT_INITIALIZED_DATA;
+                                  IMAGE_SCN_MEM_READ ]
   in
     SEQ [|
       STRING
@@ -418,6 +420,7 @@ let pe_section_header
             | SECTION_ID_DEBUG_ABBREV   -> "/47\x00\x00\x00\x00\x00"
             | SECTION_ID_DEBUG_LINE     -> "/61\x00\x00\x00\x00\x00"
             | SECTION_ID_DEBUG_FRAME    -> "/73\x00\x00\x00\x00\x00"
+            | SECTION_ID_NOTE_RUST      -> "/86\x00\x00\x00\x00\x00"
         end;
 
       (* The next two pairs are only supposed to be different if the
@@ -770,6 +773,7 @@ let crate_exports (sem:Semant.ctxt) : pe_export array =
 
 let emit_file
     (sess:Session.sess)
+    (crate:Ast.crate)
     (code:Asm.frag)
     (data:Asm.frag)
     (sem:Semant.ctxt)
@@ -788,13 +792,16 @@ let emit_file
   let image_fixup = new_fixup "image fixup" in
   let symtab_fixup = new_fixup "symbol table" in
   let strtab_fixup = new_fixup "string table" in
+  let note_rust_fixup = new_fixup ".note.rust section" in
 
-  let rust_start_fixup = Semant.require_native sem REQUIRED_LIB_rustrt "rust_start" in
+  let rust_start_fixup =
+    Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"
+  in
 
   let header = (pe_header
                   ~machine: IMAGE_FILE_MACHINE_I386
                   ~symbol_table_fixup: symtab_fixup
-                  ~number_of_sections: 7L
+                  ~number_of_sections: 8L
                   ~number_of_symbols: 0L
                   ~loader_hdr_fixup: loader_hdr_fixup
                   ~characteristics:([IMAGE_FILE_EXECUTABLE_IMAGE;
@@ -827,6 +834,7 @@ let emit_file
                ZSTRING ".debug_abbrev";
                ZSTRING ".debug_line";
                ZSTRING ".debug_frame";
+               ZSTRING ".note.rust";
              |])))
   in
   let loader_header = (pe_loader_header
@@ -900,6 +908,10 @@ let emit_file
                               ~hdr_fixup: sem.Semant.ctxt_debug_frame_fixup)
   in
 *)
+  let note_rust_header = (pe_section_header
+                            ~id: SECTION_ID_NOTE_RUST
+                            ~hdr_fixup: note_rust_fixup)
+  in
   let all_headers = (def_file_aligned
                        all_hdrs_fixup
                        (SEQ
@@ -922,6 +934,7 @@ let emit_file
                             debug_line_header;
                             debug_frame_header;
                             *)
+                            note_rust_header;
                           |]))
   in
 
@@ -967,6 +980,10 @@ let emit_file
     def_aligned sem.Semant.ctxt_debug_frame_fixup dw.Dwarf.debug_frame
   in
 *)
+  let note_rust_section =
+    def_aligned note_rust_fixup
+      (Asm.note_rust_frags crate.node.Ast.crate_meta)
+  in
 
   let all_frags = SEQ [| MEMPOS pe_image_base;
                          (def_file_aligned image_fixup
@@ -981,6 +998,7 @@ let emit_file
                                     debug_abbrev_section;
                                     (* debug_line_section; *)
                                     (* debug_frame_section; *)
+                                    note_rust_section;
                                     ALIGN_MEM (pe_mem_alignment, MARK) |]))|]
   in
   let buf = Buffer.create 0xffff in
@@ -1003,6 +1021,7 @@ let sniff
       (stat.Unix.st_size >= pe_file_alignment)
     then
       let ar = new_asm_reader sess filename in
+      let _ = log sess "sniffing PE file" in
         (* PE header offset is at 0x3c in the MS-DOS compatibility header. *)
       let _ = ar.asm_seek 0x3c in
       let pe_hdr_off = ar.asm_get_u32() in
@@ -1025,6 +1044,7 @@ let get_sections
     (sess:Session.sess)
     (ar:asm_reader)
     : (string,(int*int)) Hashtbl.t =
+  let _ = log sess "reading sections" in
   (* PE header offset is at 0x3c in the MS-DOS compatibility header. *)
   let _ = ar.asm_seek 0x3c in
   let pe_hdr_off = ar.asm_get_u32() in

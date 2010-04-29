@@ -644,7 +644,68 @@ let new_asm_reader (sess:Session.sess) (s:filename) : asm_reader =
 ;;
 
 
+(* 
+ * Metadata note-section encoding / decoding.
+ * 
+ * Since the only object format that defines a "note" section at all is
+ * ELF, we model the contents of the metadata section on ELF's
+ * notes. But the same blob of data is stuck into PE and Mach-O files
+ * too.
+ * 
+ * The format is essentially just the ELF note format:
+ * 
+ *    <un-padded-size-of-name:u32>
+ *    <size-of-desc:u32>
+ *    <type-code=0:u32>
+ *    <name="rust":zstr>
+ *    <0-pad to 4-byte boundary>
+ *    <n=meta-count:u32>
+ *    <k1:zstr> <v1:zstr>
+ *    ...
+ *    <kn:zstr> <vn:zstr>
+ *    <0-pad to 4-byte boundary>
+ * 
+ *)
+let note_rust_frags (meta:(Ast.ident * string) array) : frag =
+  let desc_fixup = new_fixup ".rust.note metadata" in
+  let desc =
+    DEF (desc_fixup,
+         SEQ [|
+           WORD (TY_u32, IMM (Int64.of_int (Array.length meta)));
+           SEQ (Array.map
+                  (fun (k,v) -> SEQ [| ZSTRING k; ZSTRING v; |])
+                  meta);
+           ALIGN_FILE (4, MARK) |])
+  in
+  let name = "rust" in
+  let ty = 0L in
+  let padded_name = SEQ [| ZSTRING name;
+                           ALIGN_FILE (4, MARK) |]
+  in
+  let name_sz = IMM (Int64.of_int ((String.length name) + 1)) in
+    SEQ [| WORD (TY_u32, name_sz);
+           WORD (TY_u32, F_SZ desc_fixup);
+           WORD (TY_u32, IMM ty);
+           padded_name;
+           desc;|]
+;;
 
+let read_rust_note (ar:asm_reader) : (Ast.ident * string) array =
+  ar.asm_adv_u32 ();
+  ar.asm_adv_u32 ();
+  assert ((ar.asm_get_u32 ()) = 0);
+  let rust_name = ar.asm_get_zstr_padded 8 in
+    assert (rust_name = "rust");
+    let n = ar.asm_get_u32() in
+    let meta = Queue.create () in
+      for i = 1 to n
+      do
+        let k = ar.asm_get_zstr() in
+        let v = ar.asm_get_zstr() in
+          Queue.add (k,v) meta
+      done;
+      queue_to_arr meta
+;;
 
 (*
  * Local Variables:

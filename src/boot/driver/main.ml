@@ -60,27 +60,70 @@ let (sess:Session.sess) =
   }
 ;;
 
-let die_cache = Hashtbl.create 0
+let ar_cache = Hashtbl.create 0 ;;
+let sects_cache = Hashtbl.create 0;;
+let meta_cache = Hashtbl.create 0;;
+let die_cache = Hashtbl.create 0;;
+
+let get_ar (filename:filename) : Asm.asm_reader option =
+  htab_search_or_add ar_cache filename
+    begin
+      fun _ ->
+        let sniff =
+          match sess.Session.sess_targ with
+              Win32_x86_pe -> Pe.sniff
+            | MacOS_x86_macho -> Macho.sniff
+            | Linux_x86_elf -> Elf.sniff
+        in
+          sniff sess filename
+    end
+;;
+
+
+let get_sects (filename:filename) :
+    (Asm.asm_reader * ((string,(int*int)) Hashtbl.t)) option =
+  htab_search_or_add sects_cache filename
+    begin
+      fun _ ->
+        match get_ar filename with
+            None -> None
+          | Some ar ->
+              let get_sections =
+                match sess.Session.sess_targ with
+                    Win32_x86_pe -> Pe.get_sections
+                  | MacOS_x86_macho -> Macho.get_sections
+                  | Linux_x86_elf -> Elf.get_sections
+              in
+                Some (ar, (get_sections sess ar))
+    end
+;;
+
+let get_meta (filename:filename) : ((Ast.ident * string) array) option =
+  htab_search_or_add meta_cache filename
+    begin
+      fun _ ->
+        match get_sects filename with
+            None -> None
+          | Some (ar, sects) ->
+              match htab_search sects ".note.rust" with
+                  Some (off, _) ->
+                    ar.Asm.asm_seek off;
+                    Some (Asm.read_rust_note ar)
+                | None -> None
+    end
 ;;
 
 let get_dies_opt (filename:filename) : ((int * ((int,Dwarf.die) Hashtbl.t)) option) =
   htab_search_or_add die_cache filename
     begin
       fun _ ->
-        let (sniff, get_sections) =
-          match sess.Session.sess_targ with
-              Win32_x86_pe -> (Pe.sniff, Pe.get_sections)
-            | MacOS_x86_macho -> (Macho.sniff, Macho.get_sections)
-            | Linux_x86_elf -> (Elf.sniff, Elf.get_sections)
-        in
-          match sniff sess filename with
-              None -> None
-            | Some ar ->
-                let sects = get_sections sess ar in
-                let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
-                let dies = Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs in
-                  ar.Asm.asm_close ();
-                  Some dies
+        match get_sects filename with
+            None -> None
+          | Some (ar, sects) ->
+              let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
+              let dies = Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs in
+                ar.Asm.asm_close ();
+                Some dies
     end
 ;;
 
@@ -97,10 +140,6 @@ let get_mod (filename:filename) (nref:node_id ref) (oref:opaque_id ref) : Ast.mo
   let items = Hashtbl.create 0 in
     Dwarf.extract_mod_items nref oref abi items dies;
     items
-;;
-
-let get_meta (filename:filename) : (Ast.ident * string) array =
-    Dwarf.extract_meta (get_dies filename)
 ;;
 
 let infer_lib_name (ident:filename) : filename =
@@ -142,14 +181,18 @@ let dump_sig (filename:filename) : unit =
 ;;
 
 let dump_meta (filename:filename) : unit =
-  let meta = get_meta filename in
-    Array.iter
-      begin
-        fun (k,v) ->
-          Printf.fprintf stdout "%s = %S\n%!" k v;
-      end
-      meta;
-    exit 0
+  begin
+    match get_meta filename with
+        None -> Printf.fprintf stderr "Error: bad crate file: %s\n%!" filename
+      | Some meta ->
+          Array.iter
+            begin
+              fun (k,v) ->
+                Printf.fprintf stdout "%s = %S\n%!" k v;
+            end
+            meta
+  end;
+  exit 0
 ;;
 
 let argspecs =
@@ -379,7 +422,7 @@ let main_pipeline _ =
             | Linux_x86_elf -> Elf.emit_file
         in
           Session.time_inner "emit" sess
-            (fun _ -> emitter sess code data sem_cx dwarf);
+            (fun _ -> emitter sess crate code data sem_cx dwarf);
           exit_if_failed ()
 ;;
 
