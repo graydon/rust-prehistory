@@ -608,6 +608,7 @@ let elf32_linux_x86_file
   let debug_abbrev_section_name_fixup = new_fixup "string name of '.debug_abbrev' section" in
   let debug_line_section_name_fixup = new_fixup "string name of '.debug_line' section" in
   let debug_frame_section_name_fixup = new_fixup "string name of '.debug_frame' section" in
+  let note_rust_section_name_fixup = new_fixup "string name of '.note.rust section" in
 
   (* let interpndx      = 1L in *)  (* Section index of .interp *)
   let textndx        = 2L in  (* Section index of .text *)
@@ -637,6 +638,7 @@ let elf32_linux_x86_file
   let bss_section_fixup = new_fixup ".bss section" in
   let dynamic_section_fixup = new_fixup ".dynamic section" in
   let shstrtab_section_fixup = new_fixup ".shstrtab section" in
+  let note_rust_section_fixup = new_fixup ".shstrtab section" in
 
   let shstrtab_section =
     SEQ
@@ -661,6 +663,7 @@ let elf32_linux_x86_file
         DEF (debug_abbrev_section_name_fixup, ZSTRING ".debug_abbrev");
         DEF (debug_line_section_name_fixup, ZSTRING ".debug_line");
         DEF (debug_frame_section_name_fixup, ZSTRING ".debug_frame");
+        DEF (note_rust_section_name_fixup, ZSTRING ".note.rust");
       |]
   in
 
@@ -899,6 +902,17 @@ let elf32_linux_x86_file
            ~sh_link: None);
 *)
 
+        (* .note.rust *)
+        (section_header
+           ~shstring_table_fixup: shstrtab_section_fixup
+           ~shname_string_fixup: note_rust_section_name_fixup
+           ~sh_type: SHT_NOTE
+           ~sh_flags: []
+           ~section_fixup: (Some note_rust_section_fixup)
+           ~sh_addralign: 1L
+           ~sh_entsize: 0L
+           ~sh_link: None);
+
       |]
   in
   let section_header_table = SEQ section_headers in
@@ -917,12 +931,14 @@ let elf32_linux_x86_file
   let segment_2_fixup = new_fixup "segment 2" in
   let segment_3_fixup = new_fixup "segment 3" in
   let segment_4_fixup = new_fixup "segment 4" in
+  let segment_5_fixup = new_fixup "segment 5" in
 
   let segment_0_align = 4 in
   let segment_1_align = 1 in
   let segment_2_align = 0x1000 in
   let segment_3_align = 0x1000 in
   let segment_4_align = 0x1000 in
+  let segment_5_align = 1 in
 
   let program_headers = [|
         (program_header
@@ -950,6 +966,11 @@ let elf32_linux_x86_file
            ~segment_fixup: segment_4_fixup
            ~p_flags: [ PF_R; PF_W ]
            ~p_align: (Int64.of_int segment_4_align));
+        (program_header
+           ~p_type: PT_NOTE
+           ~segment_fixup: segment_5_fixup
+           ~p_flags: [ PF_R;]
+           ~p_align: (Int64.of_int segment_5_align));
       |]
   in
   let program_header_table = SEQ program_headers in
@@ -1241,6 +1262,19 @@ let elf32_linux_x86_file
        |])
   in
 
+  let note_rust_frags meta =
+    SEQ (Array.map
+           (fun (k,v) ->
+              let padded s = SEQ [| ZSTRING s; ALIGN_FILE (4, MARK) |] in
+              let sz s = IMM (Int64.of_int ((String.length s) + 1)) in
+                SEQ [| WORD (TY_u32, sz k);
+                       WORD (TY_u32, sz v);
+                       WORD (TY_u32, IMM 0L);
+                       padded k;
+                       padded v; |])
+           meta)
+  in
+
   let null_strtab_fixup = new_fixup "null dynstrtab entry" in
   let null_strtab_frag = DEF (null_strtab_fixup, ZSTRING "") in
   let null_symtab_frag = (symbol
@@ -1341,6 +1375,10 @@ let elf32_linux_x86_file
     DEF (dynamic_section_fixup, dynamic_frags)
   in
 
+  let note_rust_section =
+    DEF (note_rust_section_fixup, note_rust_frags [| ("rust", "metadata") |])
+  in
+
 
   let page_alignment = 0x1000 in
 
@@ -1426,6 +1464,10 @@ let elf32_linux_x86_file
                     (segment_4_align,
                      DEF (segment_4_fixup,
                           dynamic_section));
+                  ALIGN_FILE
+                    (segment_5_align,
+                     DEF (segment_5_fixup,
+                          note_rust_section));
                 |]));
         DEF (shstrtab_section_fixup,
              shstrtab_section);
