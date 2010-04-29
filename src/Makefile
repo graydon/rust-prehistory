@@ -176,6 +176,9 @@ endif
 
 MKFILES := Makefile
 
+# add current directory to library search path of CFG_BOOT command line
+
+CFG_BOOT += -L .
 
 ######################################################################
 # Boot targets and rules
@@ -204,7 +207,7 @@ IL_MLS := $(addprefix boot/be/, asm.ml il.ml abi.ml)
 ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml type.ml dead.ml \
           typestate.ml mode.ml mutable.ml gctype.ml loop.ml layout.ml trans.ml dwarf.ml)
 FE_MLS := $(addprefix boot/fe/, ast.ml token.ml lexer.ml parser.ml pexp.ml item.ml cexp.ml)
-DRIVER_TOP_MLS := $(addprefix boot/driver/, $(VARIANT)/glue.ml main.ml)
+DRIVER_TOP_MLS := $(addprefix boot/driver/, $(VARIANT)/glue.ml lib.ml main.ml)
 
 BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(FE_MLS) $(IL_MLS) $(ME_MLS) \
   $(BE_MLS) $(LLVM_MLS) $(DRIVER_TOP_MLS)

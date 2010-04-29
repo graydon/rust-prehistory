@@ -47,6 +47,7 @@ let (sess:Session.sess) =
     Session.sess_log_insn = false;
     Session.sess_log_asm = false;
     Session.sess_log_obj = false;
+    Session.sess_log_lib = false;
     Session.sess_log_out = stdout;
     Session.sess_trace_block = false;
     Session.sess_trace_drop = false;
@@ -57,97 +58,8 @@ let (sess:Session.sess) =
     Session.sess_report_gc = false;
     Session.sess_report_deps = false;
     Session.sess_timings = Hashtbl.create 0;
+    Session.sess_lib_dirs = Queue.create ();
   }
-;;
-
-let ar_cache = Hashtbl.create 0 ;;
-let sects_cache = Hashtbl.create 0;;
-let meta_cache = Hashtbl.create 0;;
-let die_cache = Hashtbl.create 0;;
-
-let get_ar (filename:filename) : Asm.asm_reader option =
-  htab_search_or_add ar_cache filename
-    begin
-      fun _ ->
-        let sniff =
-          match sess.Session.sess_targ with
-              Win32_x86_pe -> Pe.sniff
-            | MacOS_x86_macho -> Macho.sniff
-            | Linux_x86_elf -> Elf.sniff
-        in
-          sniff sess filename
-    end
-;;
-
-
-let get_sects (filename:filename) :
-    (Asm.asm_reader * ((string,(int*int)) Hashtbl.t)) option =
-  htab_search_or_add sects_cache filename
-    begin
-      fun _ ->
-        match get_ar filename with
-            None -> None
-          | Some ar ->
-              let get_sections =
-                match sess.Session.sess_targ with
-                    Win32_x86_pe -> Pe.get_sections
-                  | MacOS_x86_macho -> Macho.get_sections
-                  | Linux_x86_elf -> Elf.get_sections
-              in
-                Some (ar, (get_sections sess ar))
-    end
-;;
-
-let get_meta (filename:filename) : ((Ast.ident * string) array) option =
-  htab_search_or_add meta_cache filename
-    begin
-      fun _ ->
-        match get_sects filename with
-            None -> None
-          | Some (ar, sects) ->
-              match htab_search sects ".note.rust" with
-                  Some (off, _) ->
-                    ar.Asm.asm_seek off;
-                    Some (Asm.read_rust_note ar)
-                | None -> None
-    end
-;;
-
-let get_dies_opt (filename:filename) : ((int * ((int,Dwarf.die) Hashtbl.t)) option) =
-  htab_search_or_add die_cache filename
-    begin
-      fun _ ->
-        match get_sects filename with
-            None -> None
-          | Some (ar, sects) ->
-              let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
-              let dies = Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs in
-                ar.Asm.asm_close ();
-                Hashtbl.remove ar_cache filename;
-                Some dies
-    end
-;;
-
-let get_dies (filename:filename) : (int * ((int,Dwarf.die) Hashtbl.t)) =
-  match get_dies_opt filename with
-      None ->
-        Printf.fprintf stderr "Error: bad crate file: %s\n%!" filename;
-        exit 1
-    | Some dies -> dies
-;;
-
-let get_mod (filename:filename) (nref:node_id ref) (oref:opaque_id ref) : Ast.mod_items =
-  let dies = get_dies filename in
-  let items = Hashtbl.create 0 in
-    Dwarf.extract_mod_items nref oref abi items dies;
-    items
-;;
-
-let infer_lib_name (ident:filename) : filename =
-  match sess.Session.sess_targ with
-      Win32_x86_pe -> ident ^ ".dll"
-    | MacOS_x86_macho -> "lib" ^ ident ^ ".dylib"
-    | Linux_x86_elf -> "lib" ^ ident ^ ".so"
 ;;
 
 let default_output_filename (sess:Session.sess) : filename option =
@@ -158,7 +70,7 @@ let default_output_filename (sess:Session.sess) : filename option =
         let out =
           if sess.Session.sess_library_mode
           then
-            infer_lib_name base
+            Lib.infer_lib_name sess base
           else
             base ^ (match sess.Session.sess_targ with
                         Linux_x86_elf -> ""
@@ -176,14 +88,14 @@ let set_default_output_filename (sess:Session.sess) : unit =
 
 
 let dump_sig (filename:filename) : unit =
-  let items = get_mod filename (ref (Node 0)) (ref (Opaque 0)) in
+  let items = Lib.get_file_mod sess abi filename (ref (Node 0)) (ref (Opaque 0)) in
     Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_mod_items items);
     exit 0
 ;;
 
 let dump_meta (filename:filename) : unit =
   begin
-    match get_meta filename with
+    match Lib.get_meta sess filename with
         None -> Printf.fprintf stderr "Error: bad crate file: %s\n%!" filename
       | Some meta ->
           Array.iter
@@ -204,14 +116,15 @@ let argspecs =
                                         "win32-x86-pe" -> Win32_x86_pe
                                       | "macos-x86-macho" -> MacOS_x86_macho
                                       | _ -> Linux_x86_elf))),
-     ("target (default: " ^ (match sess.Session.sess_targ with
-                                 Win32_x86_pe -> "win32-x86-pe"
-                               | Linux_x86_elf -> "linux-x86-elf"
-                               | MacOS_x86_macho -> "macos-x86-macho"
-                            ) ^ ")"));
+     (" target (default: " ^ (match sess.Session.sess_targ with
+                                  Win32_x86_pe -> "win32-x86-pe"
+                                | Linux_x86_elf -> "linux-x86-elf"
+                                | MacOS_x86_macho -> "macos-x86-macho"
+                             ) ^ ")"));
     ("-o", Arg.String (fun s -> sess.Session.sess_out <- Some s),
-     "output filename (default: " ^ (Session.filename_of sess.Session.sess_out) ^ ")");
+     "file to output (default: " ^ (Session.filename_of sess.Session.sess_out) ^ ")");
     ("-shared", Arg.Unit (fun _ -> sess.Session.sess_library_mode <- true), "compile a shared-library crate");
+    ("-L", Arg.String (fun s -> Queue.add s sess.Session.sess_lib_dirs), "dir to add to library path");
     ("-llex", Arg.Unit (fun _ -> sess.Session.sess_log_lex <- true), "log lexing");
     ("-lparse", Arg.Unit (fun _ -> sess.Session.sess_log_parse <- true), "log parsing");
     ("-last", Arg.Unit (fun _ -> sess.Session.sess_log_ast <- true), "log post-parse AST");
@@ -232,6 +145,7 @@ let argspecs =
     ("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");
     ("-lasm", Arg.Unit (fun _ -> sess.Session.sess_log_asm <- true), "log assembly");
     ("-lobj", Arg.Unit (fun _ -> sess.Session.sess_log_obj <- true), "log object file generation");
+    ("-llib", Arg.Unit (fun _ -> sess.Session.sess_log_lib <- true), "log library search");
     ("-tblock", Arg.Unit (fun _ -> sess.Session.sess_trace_block <- true), "emit block-boundary tracing code");
     ("-tdrop", Arg.Unit (fun _ -> sess.Session.sess_trace_drop <- true), "emit slot-drop tracing code");
     ("-ttag", Arg.Unit (fun _ -> sess.Session.sess_trace_tag <- true), "emit tag-construction tracing code");
@@ -283,10 +197,16 @@ let (crate:Ast.crate) =
         let infile = Session.filename_of sess.Session.sess_in in
         let crate =
           if Filename.check_suffix infile ".rc"
-          then Cexp.parse_crate_file sess get_mod infer_lib_name
+          then
+            Cexp.parse_crate_file sess
+              (Lib.get_mod sess abi)
+              (Lib.infer_lib_name sess)
           else
             if Filename.check_suffix infile ".rs"
-            then Cexp.parse_src_file sess get_mod infer_lib_name
+            then
+              Cexp.parse_src_file sess
+                (Lib.get_mod sess abi)
+                (Lib.infer_lib_name sess)
             else
               begin
                 Printf.fprintf stderr

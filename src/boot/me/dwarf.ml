@@ -2289,11 +2289,16 @@ type die =
       die_tag: dw_tag;
       die_attrs: (dw_at * (dw_form * data)) array;
       die_children: die array; }
+;;
+
+type rooted_dies = (int * (int,die) Hashtbl.t)
+;;
 
 let fmt_dies
     (ff:Format.formatter)
-    ((root:int),(dies:(int,die) Hashtbl.t))
+    (dies:rooted_dies)
     : unit =
+  let ((root:int),(dies:(int,die) Hashtbl.t)) = dies in
   let rec fmt_die die =
     Ast.fmt ff "@\nDIE <0x%x> %s" die.die_off (dw_tag_to_string die.die_tag);
     Array.iter

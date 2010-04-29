@@ -28,6 +28,10 @@ open Parser;;
  * 
  *)
 
+type meta = (Ast.ident * Pexp.pexp) array;;
+
+type meta_pat = (Ast.ident * (Pexp.pexp option)) array;;
+
 type cexp =
     CEXP_alt of cexp_alt identified
   | CEXP_let of cexp_let identified
@@ -35,7 +39,7 @@ type cexp =
   | CEXP_dir_mod of cexp_dir identified
   | CEXP_use_mod of cexp_use identified
   | CEXP_nat_mod of cexp_nat identified
-  | CEXP_meta of Item.meta identified
+  | CEXP_meta of meta identified
 
 and cexp_alt =
     { alt_val: Pexp.pexp;
@@ -58,8 +62,7 @@ and cexp_dir =
 
 and cexp_use =
     { use_ident: Ast.ident;
-      use_path: Pexp.pexp option;
-      use_meta: Item.meta_pat; }
+      use_meta: meta_pat; }
 
 and cexp_nat =
     { nat_abi: string;
@@ -77,6 +80,47 @@ and cexp_nat =
 
 (* Cexp grammar. *)
 
+let parse_meta_input (ps:pstate) : (Ast.ident * Pexp.pexp option) =
+  let lab = (ctxt "meta input: label" Pexp.parse_ident ps) in
+    match peek ps with
+        EQ ->
+          bump ps;
+          let v =
+            match peek ps with
+                UNDERSCORE -> bump ps; None
+              | _ -> Some (Pexp.parse_pexp ps)
+          in
+            (lab, v)
+      | _ -> raise (unexpected ps)
+;;
+
+let parse_meta_pat (ps:pstate) : meta_pat =
+  bracketed_zero_or_more LPAREN RPAREN
+    (Some COMMA) parse_meta_input ps
+;;
+
+let parse_meta (ps:pstate) : meta =
+  Array.map
+    begin
+      fun (id,v) ->
+        match v with
+            None ->
+              raise (err "wildcard found in meta pattern where value expected" ps)
+          | Some v -> (id,v)
+    end
+    (parse_meta_pat ps)
+;;
+
+let parse_optional_meta_pat
+    (ps:pstate)
+    (ident:Ast.ident)
+    : meta_pat =
+  match peek ps with
+      LPAREN -> parse_meta_pat ps
+    | _ ->
+        let apos = lexpos ps in
+          [| ("name", Some (span ps apos apos (Pexp.PEXP_str ident))) |]
+;;
 
 let rec parse_cexps (ps:pstate) (term:Token.token) : cexp array =
   let cexps = Queue.create () in
@@ -147,14 +191,12 @@ and parse_cexp (ps:pstate) : cexp =
       | USE ->
           begin
             bump ps;
-            let name = ctxt "use mod: name" Pexp.parse_ident ps in
-            let path = ctxt "use mod: path" parse_eq_pexp_opt ps in
-            let meta = ctxt "use mod: meta" Item.parse_optional_meta_pat ps in
+            let ident = ctxt "use mod: name" Pexp.parse_ident ps in
+            let meta = ctxt "use mod: meta" parse_optional_meta_pat ps ident in
             let bpos = lexpos ps in
               expect ps SEMI;
               CEXP_use_mod
-                (span ps apos bpos { use_ident = name;
-                                     use_path = path;
+                (span ps apos bpos { use_ident = ident;
                                      use_meta = meta })
           end
 
@@ -216,7 +258,7 @@ and parse_cexp (ps:pstate) : cexp =
 
       | META ->
           bump ps;
-          let meta = Item.parse_meta ps in
+          let meta = parse_meta ps in
             expect ps SEMI;
             let bpos = lexpos ps in
               CEXP_meta (span ps apos bpos meta)
@@ -355,17 +397,28 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
     | CEXP_use_mod {node=u; id=id} ->
         let ps = env.env_ps in
         let name = u.use_ident in
-        let filename = ps.pstate_infer_lib_name name in
-        let rlib = REQUIRED_LIB_rust { required_libname = filename;
-                                       required_prefix = 1 }
+        let (path, items) =
+          let meta_pat =
+            Array.map
+              begin
+                fun (k,vo) ->
+                  match vo with
+                      None -> (k, None)
+                    | Some p -> (k, Some (eval_pexp_to_str env p))
+              end
+              u.use_meta
+          in
+          ps.pstate_get_mod meta_pat id ps.pstate_node_id ps.pstate_opaque_id
         in
-        let items = ps.pstate_get_mod filename ps.pstate_node_id ps.pstate_opaque_id in
           iflog ps
             begin
               fun _ ->
-                log ps "extracted mod signature from %s (binding to %s)" filename name;
+                log ps "extracted mod signature from %s (binding to %s)" path name;
                 log ps "%a" Ast.sprintf_mod_items items;
             end;
+          let rlib = REQUIRED_LIB_rust { required_libname = path;
+                                         required_prefix = 1 }
+          in
           let item = decl [||] (Ast.MOD_ITEM_mod (Item.empty_view, items)) in
           let item = { id = id; node = item } in
           let span = Hashtbl.find ps.pstate_sess.Session.sess_spans id in
@@ -532,7 +585,7 @@ let with_err_handling sess thunk =
 
 let parse_crate_file
     (sess:Session.sess)
-    (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
+    (get_mod:(Ast.meta_pat -> node_id -> (node_id ref) -> (opaque_id ref) -> (filename * Ast.mod_items)))
     (infer_lib_name:(Ast.ident -> filename))
     : Ast.crate =
   let fname = Session.filename_of sess.Session.sess_in in
@@ -613,7 +666,7 @@ let parse_crate_file
 
 let parse_src_file
     (sess:Session.sess)
-    (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
+    (get_mod:(Ast.meta_pat -> node_id -> (node_id ref) -> (opaque_id ref) -> (filename * Ast.mod_items)))
     (infer_lib_name:(Ast.ident -> filename))
     : Ast.crate =
   let fname = Session.filename_of sess.Session.sess_in in

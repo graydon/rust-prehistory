@@ -15,7 +15,11 @@ type pstate =
       pstate_temp_id      : temp_id ref;
       pstate_node_id      : node_id ref;
       pstate_opaque_id    : opaque_id ref;
-      pstate_get_mod      : (filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items);
+      pstate_get_mod      : (Ast.meta_pat ->
+                               node_id ->
+                                 (node_id ref) ->
+                                   (opaque_id ref) ->
+                                     (filename * Ast.mod_items));
       pstate_infer_lib_name : (Ast.ident -> filename);
       pstate_required       : (node_id, (required_lib * nabi_conv)) Hashtbl.t; }
 ;;
@@ -36,7 +40,11 @@ let make_parser
     (nref:node_id ref)
     (oref:opaque_id ref)
     (sess:Session.sess)
-    (get_mod:(filename -> (node_id ref) -> (opaque_id ref) -> Ast.mod_items))
+    (get_mod:(Ast.meta_pat ->
+                node_id ->
+                  (node_id ref) ->
+                    (opaque_id ref) ->
+                      (filename * Ast.mod_items)))
     (infer_lib_name:Ast.ident -> filename)
     (required:(node_id, (required_lib * nabi_conv)) Hashtbl.t)
     (fname:string)

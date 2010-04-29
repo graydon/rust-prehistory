@@ -1,7 +1,8 @@
 mod hello;
 mod main;
 
-meta (name = "Rust standard library",
+meta (name = "std",
+      desc = "Rust standard library",
       uuid = "122bed0b-c19b-4b82-b0b7-7ae8aead7297",
       url = "http://rust-lang.org/src/std",
       ver = "0.0.1");

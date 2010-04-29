@@ -1066,7 +1066,6 @@ let get_sections
 
   let num_symbols = ar.asm_get_u32() in
   let _ = log sess "     num symbols: %d" num_symbols in
-  let _ = assert (num_symbols = 0) in
 
   let loader_hdr_size = ar.asm_get_u16() in
   let _ = log sess "loader header sz: %d" loader_hdr_size in

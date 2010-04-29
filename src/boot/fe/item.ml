@@ -5,10 +5,6 @@ open Parser;;
 
 (* Item grammar. *)
 
-type meta = (Ast.ident * Pexp.pexp) array;;
-
-type meta_pat = (Ast.ident * (Pexp.pexp option)) array;;
-
 let default_exports =
   let e = Hashtbl.create 0 in
     Hashtbl.add e Ast.EXPORT_all_decls ();
@@ -678,7 +674,7 @@ and parse_pred (ps:pstate) : Ast.pred =
       Ast.pred_input_constrs = constrs;
       Ast.pred_body = body }
 
-and parse_meta_input (ps:pstate) : (Ast.ident * Pexp.pexp option) =
+and parse_meta_input (ps:pstate) : (Ast.ident * string option) =
   let lab = (ctxt "meta input: label" Pexp.parse_ident ps) in
     match peek ps with
         EQ ->
@@ -686,16 +682,17 @@ and parse_meta_input (ps:pstate) : (Ast.ident * Pexp.pexp option) =
           let v =
             match peek ps with
                 UNDERSCORE -> bump ps; None
-              | _ -> Some (Pexp.parse_pexp ps)
+              | LIT_STR s -> bump ps; Some s
+              | _ -> raise (unexpected ps)
           in
             (lab, v)
       | _ -> raise (unexpected ps)
 
-and parse_meta_pat (ps:pstate) : meta_pat =
+and parse_meta_pat (ps:pstate) : Ast.meta_pat =
   bracketed_zero_or_more LPAREN RPAREN
     (Some COMMA) parse_meta_input ps
 
-and parse_meta (ps:pstate) : meta =
+and parse_meta (ps:pstate) : Ast.meta =
   Array.map
     begin
       fun (id,v) ->
@@ -706,10 +703,10 @@ and parse_meta (ps:pstate) : meta =
     end
     (parse_meta_pat ps)
 
-and parse_optional_meta_pat (ps:pstate) : meta_pat =
+and parse_optional_meta_pat (ps:pstate) (ident:Ast.ident) : Ast.meta_pat =
   match peek ps with
       LPAREN -> parse_meta_pat ps
-    | _ -> [| |]
+    | _ -> [| ("name", Some ident) |]
 
 and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
   let apos = lexpos ps in
@@ -803,14 +800,17 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
           begin
             bump ps;
             let ident = ctxt "use mod: ident" Pexp.parse_ident ps in
-            let path = parse_lib_name ident in
-            let _ = ctxt "use mod: meta" parse_optional_meta_pat ps in
+            let meta = ctxt "use mod: meta" parse_optional_meta_pat ps ident in
+            let bpos = lexpos ps in
+            let id = (span ps apos bpos ()).id in
+            let (path, items) =
+              ps.pstate_get_mod meta id ps.pstate_node_id ps.pstate_opaque_id
+            in
             let bpos = lexpos ps in
               expect ps SEMI;
               let rlib = REQUIRED_LIB_rust { required_libname = path;
                                              required_prefix = ps.pstate_depth }
               in
-              let items = ps.pstate_get_mod path ps.pstate_node_id ps.pstate_opaque_id in
                 iflog ps
                   begin
                     fun _ ->

@@ -1002,7 +1002,8 @@ An example of a crate:
 @example
 // Metadata about this crate
 meta (author = "Jane Doe",
-      name = "Project X",
+      name = "projx"
+      desc = "Project X",
       ver = "2.5");
 
 // Import a module.
@@ -1012,7 +1013,7 @@ use std (ver = "1.0");
 syntax re;
 
 // Define some modules.
-pub mod foo = "foo.rs";
+mod foo = "foo.rs";
 mod bar @{
     mod quux = "quux.rs";
 @}

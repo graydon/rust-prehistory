@@ -31,6 +31,7 @@ type sess =
   mutable sess_log_insn: bool;
   mutable sess_log_asm: bool;
   mutable sess_log_obj: bool;
+  mutable sess_log_lib: bool;
   mutable sess_log_out: out_channel;
   mutable sess_trace_block: bool;
   mutable sess_trace_drop: bool;
@@ -41,6 +42,7 @@ type sess =
   mutable sess_report_deps: bool;
   sess_timings: (string, float) Hashtbl.t;
   sess_spans: (node_id,span) Hashtbl.t;
+  sess_lib_dirs: filename Queue.t;
 }
 ;;
 

@@ -1,6 +1,8 @@
 // -*- rust -*-
 
-use std;
+use std (name = "std",
+         url = "http://rust-lang.org/src/std",
+         uuid = _, ver = _);
 
 fn main() {
   auto s = std._str.alloc(10);
