@@ -3,7 +3,7 @@
  *)
 
 open Common;;
-
+open Transutil;;
 
 let log cx = Session.log "trans"
   cx.Semant.ctxt_sess.Session.sess_log_trans
@@ -308,7 +308,8 @@ let trans_crate
     in
     Array.iteri build_arg (Llvm.params llfn);
 
-    (* Allocate space for all the blocks' slots. *)
+    (* Allocate space for all the blocks' slots.
+     * and zero the exteriors. *)
     let init_block block_id =
       let init_slot (key:Ast.slot_key) (slot_id:node_id) : unit =
         let slot =
@@ -319,7 +320,16 @@ let trans_crate
         let name = Ast.sprintf_slot_key () key in
         let llty = trans_slot (Some slot_id) slot in
         let llptr = Llvm.build_alloca llty name llinitbuilder in
-        Hashtbl.add slot_to_llvalue slot_id llptr
+          begin
+            match slot_mem_ctrl slot with
+                MEM_rc_struct
+              | MEM_rc_opaque _ ->
+                  ignore (Llvm.build_store
+                            (Llvm.const_pointer_null llty)
+                            llptr llinitbuilder);
+              | _ -> ()
+          end;
+          Hashtbl.add slot_to_llvalue slot_id llptr
       in
       let slots_table = Hashtbl.find sem_cx.Semant.ctxt_block_slots block_id in
       Hashtbl.iter init_slot slots_table;

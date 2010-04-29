@@ -2,6 +2,7 @@
 
 open Semant;;
 open Common;;
+open Transutil;;
 
 let log cx = Session.log "trans"
   cx.ctxt_sess.Session.sess_log_trans
@@ -11,29 +12,6 @@ let log cx = Session.log "trans"
 let arr_max a = (Array.length a) - 1;;
 
 type quad_idx = int
-;;
-
-type mem_ctrl =
-    MEM_rc_opaque of int
-  | MEM_rc_struct
-  | MEM_gc
-  | MEM_interior
-
-type clone_ctrl =
-    CLONE_none
-  | CLONE_chan of Il.cell
-  | CLONE_all of Il.cell
-
-type call_ctrl =
-    CALL_direct
-  | CALL_vtbl
-  | CALL_indirect
-
-type foreach_ctrl =
-    {
-      foreach_fixup: fixup;
-      foreach_depth: int;
-    }
 ;;
 
 type call =
@@ -65,7 +43,9 @@ let trans_visitor
   let curr_stmt = ref None in
 
   let (abi:Abi.abi) = cx.ctxt_abi in
-  let (word_sz:int64) = abi.Abi.abi_word_sz in
+  let (word_sz:int64) = word_sz abi in
+  let (word_slot:Ast.slot) = word_slot abi in
+
   let (word_bits:Il.bits) = abi.Abi.abi_word_bits in
   let (word_ty:Il.scalar_ty) = Il.ValTy word_bits in
   let (word_rty:Il.referent_ty) = Il.ScalarTy word_ty in
@@ -83,11 +63,9 @@ let trans_visitor
       | Il.Bits32 -> TY_i32
       | Il.Bits64 -> TY_i64
   in
-  let (word_slot:Ast.slot) = word_slot abi in
-  let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
+  let word_n = word_n abi in
   let exterior_rc_body_off : int64 = word_n Abi.exterior_rc_slot_field_body in
   let exterior_gc_body_off : int64 = word_n Abi.exterior_gc_slot_field_body in
-
 
   let imm_of_ty (i:int64) (tm:ty_mach) : Il.operand =
     Il.Imm (Asm.IMM i, tm)
@@ -1732,57 +1710,6 @@ let trans_visitor
   and exterior_gc_next_cell (cell:Il.cell) : Il.cell =
     exterior_ctrl_cell cell Abi.exterior_gc_slot_field_next
 
-  and exterior_gc_allocation_size (slot:Ast.slot) : int64 =
-    (Int64.add
-       (ty_sz  abi (slot_ty slot))
-       (word_n Abi.exterior_gc_header_size))
-
-  and exterior_rc_allocation_size (slot:Ast.slot) : int64 =
-      (Int64.add
-         (ty_sz abi (slot_ty slot))
-         (word_n Abi.exterior_rc_header_size))
-
-
-  and ty_is_structured (t:Ast.ty) : bool =
-    let fold = ty_fold_bool_or false in
-    let fold = { fold with
-                   ty_fold_tup = (fun _ -> true);
-                   ty_fold_vec = (fun _ -> true);
-                   ty_fold_rec = (fun _ -> true);
-                   ty_fold_tag = (fun _ -> true);
-                   ty_fold_iso = (fun _ -> true);
-                   ty_fold_idx = (fun _ -> true);
-                   ty_fold_fn = (fun _ -> true);
-                   ty_fold_pred = (fun _ -> true);
-                   ty_fold_obj = (fun _ -> true) }
-    in
-      fold_ty fold t
-
-
-  and slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
-    let ty = slot_ty slot in
-      if type_is_mutable ty
-      then
-        match slot.Ast.slot_mode with
-            Ast.MODE_exterior _ -> MEM_gc
-          | _ -> MEM_interior
-      else
-        match ty with
-            Ast.TY_port _ -> MEM_rc_opaque Abi.port_field_refcnt
-          | Ast.TY_chan _ -> MEM_rc_opaque Abi.chan_field_refcnt
-          | Ast.TY_task -> MEM_rc_opaque Abi.task_field_refcnt
-              (* Vecs and strs are pseudo-exterior. *)
-          | Ast.TY_vec _ -> MEM_rc_struct
-          | Ast.TY_str -> MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
-          | _ ->
-              match slot.Ast.slot_mode with
-                  Ast.MODE_exterior _ when ty_is_structured (slot_ty slot) ->
-                    MEM_rc_struct
-                | Ast.MODE_exterior _ ->
-                    MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
-                | _ ->
-                    MEM_interior
-
   and iter_rec_slots
       (dst_cell:Il.cell)
       (src_cell:Il.cell)
@@ -2058,7 +1985,7 @@ let trans_visitor
                     patch null_cell_jump;
                     patch already_marked_jump
 
-        | MEM_interior when ty_is_structured ty ->
+        | MEM_interior when type_is_structured ty ->
             (iflog (fun _ -> annotate ("mark interior slot " ^
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
             let (mem, _) = need_mem_cell cell in
@@ -2165,7 +2092,7 @@ let trans_visitor
               patch j;
               patch null_jmp
 
-        | MEM_interior when ty_is_structured ty ->
+        | MEM_interior when type_is_structured ty ->
             (iflog (fun _ -> annotate ("drop interior slot " ^
                                          (Ast.fmt_to_str Ast.fmt_slot slot))));
             let (mem, _) = need_mem_cell cell in
@@ -2191,7 +2118,7 @@ let trans_visitor
       match slot_mem_ctrl slot with
           MEM_gc ->
             iflog (fun _ -> annotate "init GC exterior: malloc");
-            let sz = exterior_gc_allocation_size slot in
+            let sz = exterior_gc_allocation_size abi slot in
               (* 
                * Malloc and then immediately shift down to point to
                * the pseudo-rc cell.
@@ -2215,7 +2142,7 @@ let trans_visitor
 
         | MEM_rc_opaque rc_off ->
             iflog (fun _ -> annotate "init RC exterior: malloc");
-            let sz = exterior_rc_allocation_size slot in
+            let sz = exterior_rc_allocation_size abi slot in
               trans_malloc cell sz;
               iflog (fun _ -> annotate "init RC exterior: load refcount");
               let rc = exterior_ctrl_cell cell rc_off in
@@ -2223,7 +2150,7 @@ let trans_visitor
 
         | MEM_rc_struct ->
             iflog (fun _ -> annotate "init RC exterior: malloc");
-            let sz = exterior_rc_allocation_size slot in
+            let sz = exterior_rc_allocation_size abi slot in
               trans_malloc cell sz;
               iflog (fun _ -> annotate "init RC exterior: load refcount");
               let rc = exterior_rc_cell cell in
@@ -3625,7 +3552,7 @@ let trans_visitor
     let exterior_state_slot = exterior_slot state_ty in
     let state_ptr_rty = slot_referent_type abi exterior_state_slot in
     let state_malloc_sz =
-      exterior_rc_allocation_size exterior_state_slot
+      exterior_rc_allocation_size abi exterior_state_slot
     in
 
     let ctor_ty = Hashtbl.find cx.ctxt_all_item_types obj_id in
