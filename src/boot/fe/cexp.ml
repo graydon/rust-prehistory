@@ -35,11 +35,7 @@ type cexp =
   | CEXP_dir_mod of cexp_dir identified
   | CEXP_use_mod of cexp_use identified
   | CEXP_nat_mod of cexp_nat identified
-  | CEXP_meta of meta identified
-
-and meta = (Ast.ident * Pexp.pexp) array
-
-and meta_pat = (Ast.ident * (Pexp.pexp option)) array
+  | CEXP_meta of Item.meta identified
 
 and cexp_alt =
     { alt_val: Pexp.pexp;
@@ -63,7 +59,7 @@ and cexp_dir =
 and cexp_use =
     { use_ident: Ast.ident;
       use_path: Pexp.pexp option;
-      use_meta: meta_pat; }
+      use_meta: Item.meta_pat; }
 
 and cexp_nat =
     { nat_abi: string;
@@ -90,39 +86,6 @@ let rec parse_cexps (ps:pstate) (term:Token.token) : cexp array =
     done;
     expect ps term;
     queue_to_arr cexps
-
-and parse_meta_input (ps:pstate) : (Ast.ident * Pexp.pexp option) =
-  let lab = (ctxt "meta input: label" Pexp.parse_ident ps) in
-    match peek ps with
-        EQ ->
-          bump ps;
-          let v =
-            match peek ps with
-                UNDERSCORE -> bump ps; None
-              | _ -> Some (Pexp.parse_pexp ps)
-          in
-            (lab, v)
-      | _ -> raise (unexpected ps)
-
-and parse_meta_pat (ps:pstate) : meta_pat =
-  bracketed_zero_or_more LPAREN RPAREN
-    (Some COMMA) parse_meta_input ps
-
-and parse_meta (ps:pstate) : meta =
-  Array.map
-    begin
-      fun (id,v) ->
-        match v with
-            None ->
-              raise (err "wildcard found in meta pattern where value expected" ps)
-          | Some v -> (id,v)
-    end
-    (parse_meta_pat ps)
-
-and parse_optional_meta_pat (ps:pstate) : meta_pat =
-  match peek ps with
-      LPAREN -> parse_meta_pat ps
-    | _ -> [| |]
 
 and parse_cexp (ps:pstate) : cexp =
 
@@ -186,7 +149,7 @@ and parse_cexp (ps:pstate) : cexp =
             bump ps;
             let name = ctxt "use mod: name" Pexp.parse_ident ps in
             let path = ctxt "use mod: path" parse_eq_pexp_opt ps in
-            let meta = ctxt "use mod: meta" parse_optional_meta_pat ps in
+            let meta = ctxt "use mod: meta" Item.parse_optional_meta_pat ps in
             let bpos = lexpos ps in
               expect ps SEMI;
               CEXP_use_mod
@@ -253,7 +216,7 @@ and parse_cexp (ps:pstate) : cexp =
 
       | META ->
           bump ps;
-          let meta = parse_meta ps in
+          let meta = Item.parse_meta ps in
             expect ps SEMI;
             let bpos = lexpos ps in
               CEXP_meta (span ps apos bpos meta)

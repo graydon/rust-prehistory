@@ -5,6 +5,10 @@ open Parser;;
 
 (* Item grammar. *)
 
+type meta = (Ast.ident * Pexp.pexp) array;;
+
+type meta_pat = (Ast.ident * (Pexp.pexp option)) array;;
+
 let default_exports =
   let e = Hashtbl.create 0 in
     Hashtbl.add e Ast.EXPORT_all_decls ();
@@ -674,6 +678,39 @@ and parse_pred (ps:pstate) : Ast.pred =
       Ast.pred_input_constrs = constrs;
       Ast.pred_body = body }
 
+and parse_meta_input (ps:pstate) : (Ast.ident * Pexp.pexp option) =
+  let lab = (ctxt "meta input: label" Pexp.parse_ident ps) in
+    match peek ps with
+        EQ ->
+          bump ps;
+          let v =
+            match peek ps with
+                UNDERSCORE -> bump ps; None
+              | _ -> Some (Pexp.parse_pexp ps)
+          in
+            (lab, v)
+      | _ -> raise (unexpected ps)
+
+and parse_meta_pat (ps:pstate) : meta_pat =
+  bracketed_zero_or_more LPAREN RPAREN
+    (Some COMMA) parse_meta_input ps
+
+and parse_meta (ps:pstate) : meta =
+  Array.map
+    begin
+      fun (id,v) ->
+        match v with
+            None ->
+              raise (err "wildcard found in meta pattern where value expected" ps)
+          | Some v -> (id,v)
+    end
+    (parse_meta_pat ps)
+
+and parse_optional_meta_pat (ps:pstate) : meta_pat =
+  match peek ps with
+      LPAREN -> parse_meta_pat ps
+    | _ -> [| |]
+
 and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
   let apos = lexpos ps in
   let pure =
@@ -767,9 +804,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             bump ps;
             let ident = ctxt "use mod: ident" Pexp.parse_ident ps in
             let path = parse_lib_name ident in
-            (*
-            let meta = [| |] in
-            *)
+            let _ = ctxt "use mod: meta" parse_optional_meta_pat ps in
             let bpos = lexpos ps in
               expect ps SEMI;
               let rlib = REQUIRED_LIB_rust { required_libname = path;

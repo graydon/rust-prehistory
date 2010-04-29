@@ -60,20 +60,35 @@ let (sess:Session.sess) =
   }
 ;;
 
+let die_cache = Hashtbl.create 0
+;;
+
+let get_dies (filename:filename) : (int * ((int,Dwarf.die) Hashtbl.t)) =
+  htab_search_or_add die_cache filename
+    begin
+      fun _ ->
+        let ar = Asm.new_asm_reader sess filename in
+        let get_sections =
+          match sess.Session.sess_targ with
+              Win32_x86_pe -> Pe.get_sections
+            | MacOS_x86_macho -> Macho.get_sections
+            | Linux_x86_elf -> Elf.get_sections
+        in
+        let sects = get_sections sess ar in
+        let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
+          Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs
+    end
+
+
 let get_mod (filename:filename) (nref:node_id ref) (oref:opaque_id ref) : Ast.mod_items =
-  let ar = Asm.new_asm_reader sess filename in
-    let get_sections =
-      match sess.Session.sess_targ with
-          Win32_x86_pe -> Pe.get_sections
-        | MacOS_x86_macho -> Macho.get_sections
-        | Linux_x86_elf -> Elf.get_sections
-    in
-    let sects = get_sections sess ar in
-    let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
-    let dies = Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs in
-    let items = Hashtbl.create 0 in
-      Dwarf.extract_mod_items nref oref abi items dies;
-      items
+  let dies = get_dies filename in
+  let items = Hashtbl.create 0 in
+    Dwarf.extract_mod_items nref oref abi items dies;
+    items
+;;
+
+let get_meta (filename:filename) : (Ast.ident * string) array =
+    Dwarf.extract_meta (get_dies filename)
 ;;
 
 let infer_lib_name (ident:filename) : filename =
@@ -108,10 +123,20 @@ let set_default_output_filename (sess:Session.sess) : unit =
 ;;
 
 
-let dump_file (filename:filename) : unit =
+let dump_sig (filename:filename) : unit =
   let items = get_mod filename (ref (Node 0)) (ref (Opaque 0)) in
-    Printf.fprintf stdout "extracted mod:\n%!";
     Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_mod_items items);
+    exit 0
+;;
+
+let dump_meta (filename:filename) : unit =
+  let meta = get_meta filename in
+    Array.iter
+      begin
+        fun (k,v) ->
+          Printf.fprintf stdout "%s = %S\n%!" k v;
+      end
+      meta;
     exit 0
 ;;
 
@@ -161,7 +186,8 @@ let argspecs =
      "emit all tracing code");
     ("-rtime", Arg.Unit (fun _ -> sess.Session.sess_report_timing <- true), "report timing of compiler phases");
     ("-rgc", Arg.Unit (fun _ -> sess.Session.sess_report_gc <- true), "report gc behavior of compiler");
-    ("-rdwarf", Arg.String dump_file, "report DWARF info in compiled file, then exit");
+    ("-rsig", Arg.String dump_sig, "report type-signature from DWARF info in compiled file, then exit");
+    ("-rmeta", Arg.String dump_meta, "report metadata from DWARF info in compiled file, then exit");
     ("-rdeps", Arg.Unit (fun _ -> sess.Session.sess_report_deps <- true), "report dependencies of input, then exit");
   ] @ (Glue.alt_argspecs sess)
 ;;

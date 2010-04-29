@@ -2412,6 +2412,41 @@ let read_dies
     (root, all_dies)
 ;;
 
+let rec extract_meta
+    ((i:int),(dies:(int,die) Hashtbl.t))
+    :  (Ast.ident * string) array =
+  let meta = Queue.create () in
+
+  let get_attr die attr =
+    atab_find die.die_attrs attr
+  in
+
+  let get_str die attr  =
+    match get_attr die attr with
+        (_, DATA_str s) -> s
+      | _ -> bug () "unexpected num form for %s" (dw_at_to_string attr)
+  in
+
+  let die = Hashtbl.find dies i in
+    begin
+      match die.die_tag with
+          DW_TAG_rust_meta ->
+            let n = get_str die DW_AT_name in
+            let v = get_str die DW_AT_const_value in
+              Queue.add (n,v) meta
+
+        | DW_TAG_compile_unit ->
+            Array.iter
+              (fun child ->
+                 Array.iter (fun m -> Queue.add m meta)
+                   (extract_meta (child.die_off,dies)))
+              die.die_children
+
+        | _ -> ()
+    end;
+    queue_to_arr meta
+;;
+
 
 let rec extract_mod_items
     (nref:node_id ref)
