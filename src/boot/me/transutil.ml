@@ -109,6 +109,50 @@ let slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
 ;;
 
 
+let iter_block_slots
+    (cx:Semant.ctxt)
+    (block_id:node_id)
+    (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
+    : unit =
+  let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
+    Hashtbl.iter
+      begin
+        fun key slot_id ->
+          let slot = referent_to_slot cx slot_id in
+            fn key slot_id slot
+      end
+      block_slots
+;;
+
+let iter_frame_slots
+    (cx:Semant.ctxt)
+    (frame_id:node_id)
+    (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
+    : unit =
+  let blocks = Hashtbl.find cx.ctxt_frame_blocks frame_id in
+    List.iter (fun block -> iter_block_slots cx block fn) blocks
+;;
+
+let iter_frame_and_arg_slots
+    (cx:Semant.ctxt)
+    (frame_id:node_id)
+    (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
+    : unit =
+  iter_frame_slots cx frame_id fn;
+  match htab_search cx.ctxt_frame_args frame_id with
+      None -> ()
+    | Some ls ->
+        List.iter
+          begin
+            fun slot_id ->
+              let key = Hashtbl.find cx.ctxt_slot_keys slot_id in
+              let slot = referent_to_slot cx slot_id in
+                fn key slot_id slot
+          end
+          ls
+;;
+
+
 (*
  * Local Variables:
  * fill-column: 70;

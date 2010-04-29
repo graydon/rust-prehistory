@@ -576,47 +576,6 @@ let trans_visitor
             end
   in
 
-  let iter_block_slots
-      (block_id:node_id)
-      (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
-      : unit =
-    let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
-      Hashtbl.iter
-        begin
-          fun key slot_id ->
-            let slot = referent_to_slot cx slot_id in
-              fn key slot_id slot
-        end
-        block_slots
-
-  in
-
-  let iter_frame_slots
-      (frame_id:node_id)
-      (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
-      : unit =
-    let blocks = Hashtbl.find cx.ctxt_frame_blocks frame_id in
-      List.iter (fun block -> iter_block_slots block fn) blocks
-  in
-
-  let iter_frame_and_arg_slots
-      (frame_id:node_id)
-      (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
-      : unit =
-    iter_frame_slots frame_id fn;
-    match htab_search cx.ctxt_frame_args frame_id with
-        None -> ()
-      | Some ls ->
-          List.iter
-            begin
-              fun slot_id ->
-                let key = Hashtbl.find cx.ctxt_slot_keys slot_id in
-                let slot = referent_to_slot cx slot_id in
-                  fn key slot_id slot
-            end
-            ls
-  in
-
   let binop_to_jmpop (binop:Ast.binop) : Il.jmpop =
     match binop with
         Ast.BINOP_eq -> Il.JE
@@ -1439,7 +1398,7 @@ let trans_visitor
     Array.iter trans_stmt block.node;
     trace_str cx.ctxt_sess.Session.sess_trace_block
       "exiting block";
-    iter_block_slots block.id
+    iter_block_slots cx block.id
       begin
         fun slotkey slot_id slot ->
           if (not (slot_is_obj_state cx slot_id))
@@ -2952,7 +2911,7 @@ let trans_visitor
       iflog (fun _ -> annotate
                (Printf.sprintf "copy args for tail call to %s" (logname ())));
       copy_fn_args true CLONE_none call;
-      iter_frame_and_arg_slots (current_fn ()) callee_drop_slot;
+      iter_frame_and_arg_slots cx (current_fn ()) callee_drop_slot;
       abi.Abi.abi_emit_fn_tail_call (emitter())
         (force_sz (current_fn_callsz())) caller_argsz callee_code callee_argsz;
 
@@ -3438,7 +3397,7 @@ let trans_visitor
       get_mem_glue glue
         begin
           fun mem ->
-            iter_frame_and_arg_slots fnid
+            iter_frame_and_arg_slots cx fnid
               begin
                 fun key slot_id slot ->
                   match htab_search cx.ctxt_slot_offsets slot_id with
@@ -3520,7 +3479,7 @@ let trans_visitor
     then
       begin
         iflog (fun _ -> annotate "drop frame");
-        iter_frame_and_arg_slots fnid callee_drop_slot;
+        iter_frame_and_arg_slots cx fnid callee_drop_slot;
       end;
     iflog (fun _ -> annotate "epilogue");
     abi.Abi.abi_emit_fn_epilogue (emitter());

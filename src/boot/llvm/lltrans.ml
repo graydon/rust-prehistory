@@ -311,12 +311,7 @@ let trans_crate
     (* Allocate space for all the blocks' slots.
      * and zero the exteriors. *)
     let init_block block_id =
-      let init_slot (key:Ast.slot_key) (slot_id:node_id) : unit =
-        let slot =
-          match Hashtbl.find sem_cx.Semant.ctxt_all_defns slot_id with
-              Semant.DEFN_slot slot -> slot
-            | _ -> raise (Failure "defn of slot not actually a slot")
-        in
+      let init_slot (key:Ast.slot_key) (slot_id:node_id) (slot:Ast.slot) : unit =
         let name = Ast.sprintf_slot_key () key in
         let llty = trans_slot (Some slot_id) slot in
         let llptr = Llvm.build_alloca llty name llinitbuilder in
@@ -331,10 +326,33 @@ let trans_crate
           end;
           Hashtbl.add slot_to_llvalue slot_id llptr
       in
-      let slots_table = Hashtbl.find sem_cx.Semant.ctxt_block_slots block_id in
-      Hashtbl.iter init_slot slots_table;
+        iter_block_slots sem_cx block_id init_slot
     in
+
+    let drop_slot llbuilder (_:Ast.slot_key) (slot_id:node_id) (slot:Ast.slot) : unit =
+      let llptr = Hashtbl.find slot_to_llvalue slot_id in
+      let llty = trans_slot (Some slot_id) slot in
+        begin
+          match slot_mem_ctrl slot with
+              MEM_rc_struct
+            | MEM_rc_opaque _ ->
+                (* FIXME: temporary, completely wrong. *)
+                ignore (Llvm.build_store
+                          (Llvm.const_pointer_null llty)
+                          llptr llbuilder);
+            | _ -> ()
+        end
+    in
+
+    let exit_block llbuilder block_id =
+      iter_block_slots sem_cx block_id
+        (fun key slot_id slot ->
+           if (not (Semant.slot_is_obj_state sem_cx slot_id))
+           then drop_slot llbuilder key slot_id slot)
+    in
+
     List.iter init_block (Hashtbl.find sem_cx.Semant.ctxt_frame_blocks fn_id);
+
 
     (* Translates a list of AST statements to a sequence of LLVM instructions.
      * The supplied "terminate" function appends the appropriate terminator
@@ -342,10 +360,10 @@ let trans_crate
      * depending on whether the AST contains a terminating instruction
      * explicitly. *)
     let rec trans_stmts
-        (id_opt:node_id option)
+        (block_id:node_id)
         (llbuilder:Llvm.llbuilder)
         (stmts:Ast.stmt list)
-        (terminate:(Llvm.llbuilder -> unit))
+        (terminate:(Llvm.llbuilder -> node_id -> unit))
         : unit =
       let trans_literal
           (lit:Ast.lit)
@@ -463,13 +481,13 @@ let trans_crate
       in
 
       match stmts with
-          [] -> terminate llbuilder
+          [] -> terminate llbuilder block_id
         | head::tail ->
 
             iflog (fun _ -> log sem_cx "trans_stmt: %a" Ast.sprintf_stmt head);
 
             let trans_tail_with_builder llbuilder' : unit =
-              trans_stmts id_opt llbuilder' tail terminate
+              trans_stmts block_id llbuilder' tail terminate
             in
             let trans_tail () = trans_tail_with_builder llbuilder in
             let trans_tail_in_new_block () : Llvm.llbasicblock =
@@ -497,7 +515,7 @@ let trans_crate
               | Ast.STMT_if sif ->
                   let llexpr = trans_expr sif.Ast.if_test in
                   let llnext = trans_tail_in_new_block () in
-                  let branch_to_next llbuilder' =
+                  let branch_to_next llbuilder' _ =
                     ignore (Llvm.build_br llnext llbuilder')
                   in
                   let llthen = trans_block sif.Ast.if_then branch_to_next in
@@ -515,6 +533,7 @@ let trans_crate
                       | Some atom ->
                           ignore (Llvm.build_store (trans_atom atom) lloutptr llbuilder)
                   end;
+                  exit_block llbuilder block_id;
                   ignore (Llvm.build_ret_void llbuilder)
 
               | Ast.STMT_log a ->
@@ -540,30 +559,31 @@ let trans_crate
                     upcall "upcall_new_str" (Some d) [| s; len |];
                     trans_tail ()
 
-              | _ -> trans_stmts id_opt llbuilder tail terminate
+              | _ -> trans_stmts block_id llbuilder tail terminate
 
     (* Translates an AST block to one or more LLVM basic blocks and returns the
      * first basic block. The supplied callback is expected to add a
      * terminator instruction. *)
     and trans_block
         ({ node = (stmts:Ast.stmt array); id = id }:Ast.block)
-        (terminate:Llvm.llbuilder -> unit)
+        (terminate:Llvm.llbuilder -> node_id -> unit)
         : Llvm.llbasicblock =
       let (llblock, llbuilder) = new_block (Some id) "bb" in
-      trans_stmts (Some id) llbuilder (Array.to_list stmts) terminate;
-      llblock
+        trans_stmts id llbuilder (Array.to_list stmts) terminate;
+        llblock
     in
 
     (* "Falling off the end" of a function needs to turn into an explicit
      * return instruction. *)
-    let default_terminate llbuilder =
+    let default_terminate llbuilder block_id =
+      exit_block llbuilder block_id;
       ignore (Llvm.build_ret_void llbuilder)
     in
 
     (* Build up the first body block, and link it to the end of the
      * initialization block. *)
     let llbodyblock = (trans_block body default_terminate) in
-    ignore (Llvm.build_br llbodyblock llinitbuilder)
+      ignore (Llvm.build_br llbodyblock llinitbuilder)
   in
 
   let trans_mod_item
