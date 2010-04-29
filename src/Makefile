@@ -24,6 +24,7 @@ CFG_GCC_LINK_FLAGS :=
 CFG_VALGRIND :=
 
 CFG_LLVM_CONFIG := llvm-config
+CFG_BOOT_FLAGS :=
 
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
@@ -89,7 +90,7 @@ ifdef CFG_UNIXY
   ifdef MINGW_CROSS
     CFG_INFO := $(info cfg: mingw-cross)
     CFG_GCC_CROSS := i586-mingw32msvc-
-    CFG_BOOT += -t win32-x86-pe
+    CFG_BOOT_FLAGS += -t win32-x86-pe
     CFG_RUNTIME := rustrt.dll
     CFG_STDLIB := std.dll
     CFG_COMPILER := ./rustc.exe
@@ -178,7 +179,7 @@ MKFILES := Makefile
 
 # add current directory to library search path of CFG_BOOT command line
 
-CFG_BOOT += -L .
+CFG_BOOT_FLAGS += -L .
 
 ######################################################################
 # Boot targets and rules
@@ -238,7 +239,7 @@ $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) $(RUNTIME_HDR)
 
 $(CFG_STDLIB): $(STDLIB_CRATE) $(CFG_BOOT) $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -shared -o $@ $(STDLIB_CRATE)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -shared -o $@ $(STDLIB_CRATE)
 
 %$(CFG_OBJ_SUFFIX): %.cpp $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
@@ -275,7 +276,7 @@ endif
 
 $(CFG_COMPILER): $(COMPILER_CRATE) $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
 
 self: $(CFG_COMPILER)
@@ -430,12 +431,12 @@ test/compile-fail/%.x86.out: test/compile-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
 test/compile-fail/%.llvm.out: test/compile-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
 	@$(call CFG_ECHO, compile [llvm]: $<)
 	$(CFG_QUIET)rm -f $@
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
 	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $< | tr -d '\n\r'`" $@
 
 test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [x86]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
 
 %.s: %.bc
@@ -448,25 +449,25 @@ test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_BOOT) $(CFG_RUNTI
 
 test/run-pass/%.bc: test/run-pass/%.rc $(CFG_BOOT) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ -llvm $<
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ -llvm $<
 
 test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [x86]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
 
 test/run-pass/%.bc: test/run-pass/%.rs $(CFG_BOOT) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ -llvm $<
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ -llvm $<
 
 test/run-fail/%.x86$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [x86]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ $<
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
 
 test/run-fail/%.bc: test/run-fail/%.rs $(CFG_BOOT) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $@ -llvm $<
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ -llvm $<
 
 
 ######################################################################
@@ -501,15 +502,15 @@ CRATE_DEPFILES := $(ALL_TEST_CRATES:%.rc=%.d) $(STDLIB_DEPFILE)
 
 $(STDLIB_DEPFILE): $(STDLIB_CRATE) $(MKFILES) $(CFG_BOOT)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)$(CFG_BOOT) -shared -rdeps $< $(CFG_PATH_MUNGE) >$@
+	$(CFG_QUIET)$(CFG_BOOT) $(CFG_BOOT_FLAGS) -shared -rdeps $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.rc $(MKFILES) $(CFG_BOOT)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)$(CFG_BOOT) -rdeps $< $(CFG_PATH_MUNGE) >$@
+	$(CFG_QUIET)$(CFG_BOOT) $(CFG_BOOT_FLAGS) -rdeps $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.rs $(MKFILES) $(CFG_BOOT)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)$(CFG_BOOT) -rdeps $< $(CFG_PATH_MUNGE) >$@
+	$(CFG_QUIET)$(CFG_BOOT) $(CFG_BOOT_FLAGS) -rdeps $< $(CFG_PATH_MUNGE) >$@
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(CRATE_DEPFILES)
