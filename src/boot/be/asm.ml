@@ -544,6 +544,7 @@ type asm_reader =
       asm_adv_u16: unit -> unit;
       asm_adv_u8: unit -> unit;
       asm_adv_zstr: unit -> unit;
+      asm_close: unit -> unit;
     }
 ;;
 
@@ -561,24 +562,27 @@ let new_asm_reader (sess:Session.sess) (s:filename) : asm_reader =
   let tmp = ref Nativeint.zero in
   let buf = Buffer.create 16 in
   let off = ref 0 in
+  let is_open = ref true in
   let get_word_as_int (nbytes:int) : int =
-  let lsb0 = true in
-    tmp := Nativeint.zero;
-    if lsb0
-    then
-      for j = nbytes-1 downto 0 do
-        tmp := Nativeint.shift_left (!tmp) 8;
-        tmp := Nativeint.logor (!tmp) (Nativeint.of_int arr.{(!off) + j})
-      done
-    else
-      for j = 0 to nbytes-1 do
-        tmp := Nativeint.shift_left (!tmp) 8;
-        tmp := Nativeint.logor (!tmp) (Nativeint.of_int arr.{(!off) + j})
-      done;
-    off := (!off) + nbytes;
-    Nativeint.to_int (!tmp)
+    assert (!is_open);
+    let lsb0 = true in
+      tmp := Nativeint.zero;
+      if lsb0
+      then
+        for j = nbytes-1 downto 0 do
+          tmp := Nativeint.shift_left (!tmp) 8;
+          tmp := Nativeint.logor (!tmp) (Nativeint.of_int arr.{(!off) + j})
+        done
+      else
+        for j = 0 to nbytes-1 do
+          tmp := Nativeint.shift_left (!tmp) 8;
+          tmp := Nativeint.logor (!tmp) (Nativeint.of_int arr.{(!off) + j})
+        done;
+      off := (!off) + nbytes;
+      Nativeint.to_int (!tmp)
   in
   let get_zstr_padded pad_opt =
+    assert (!is_open);
     let i = ref (!off) in
       Buffer.clear buf;
       let buflen_ok _ =
@@ -601,7 +605,10 @@ let new_asm_reader (sess:Session.sess) (s:filename) : asm_reader =
       end;
       Buffer.contents buf
   in
-  let bump i = off := (!off) + i in
+  let bump i =
+    assert (!is_open);
+    off := (!off) + i
+  in
     {
       asm_seek = (fun i -> off := i);
       asm_get_u32 = (fun _ -> get_word_as_int 4);
@@ -628,7 +635,11 @@ let new_asm_reader (sess:Session.sess) (s:filename) : asm_reader =
       asm_adv_u16 = (fun _ -> bump 2);
       asm_adv_u8 = (fun _ -> bump 1);
       asm_adv_zstr = (fun _ -> while arr.{!off} != 0
-                      do incr off done)
+                      do incr off done);
+      asm_close = (fun _ ->
+                     assert (!is_open);
+                     Unix.close fd;
+                     is_open := false)
     }
 ;;
 

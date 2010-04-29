@@ -63,22 +63,32 @@ let (sess:Session.sess) =
 let die_cache = Hashtbl.create 0
 ;;
 
-let get_dies (filename:filename) : (int * ((int,Dwarf.die) Hashtbl.t)) =
+let get_dies_opt (filename:filename) : ((int * ((int,Dwarf.die) Hashtbl.t)) option) =
   htab_search_or_add die_cache filename
     begin
       fun _ ->
-        let ar = Asm.new_asm_reader sess filename in
-        let get_sections =
+        let (sniff, get_sections) =
           match sess.Session.sess_targ with
-              Win32_x86_pe -> Pe.get_sections
-            | MacOS_x86_macho -> Macho.get_sections
-            | Linux_x86_elf -> Elf.get_sections
+              Win32_x86_pe -> (Pe.sniff, Pe.get_sections)
+            | MacOS_x86_macho -> (Macho.sniff, Macho.get_sections)
+            | Linux_x86_elf -> (Elf.sniff, Elf.get_sections)
         in
-        let sects = get_sections sess ar in
-        let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
-          Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs
+          match sniff sess filename with
+              None -> None
+            | Some ar ->
+                let sects = get_sections sess ar in
+                let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
+                  Some (Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs)
     end
+;;
 
+let get_dies (filename:filename) : (int * ((int,Dwarf.die) Hashtbl.t)) =
+  match get_dies_opt filename with
+      None ->
+        Printf.fprintf stderr "Error: bad crate file: %s\n%!" filename;
+        exit 1
+    | Some dies -> dies
+;;
 
 let get_mod (filename:filename) (nref:node_id ref) (oref:opaque_id ref) : Ast.mod_items =
   let dies = get_dies filename in

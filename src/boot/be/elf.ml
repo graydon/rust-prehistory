@@ -1572,13 +1572,34 @@ let emit_file
     close_out out
 ;;
 
+let elf_magic = "\x7fELF";;
+
+let sniff
+    (sess:Session.sess)
+    (filename:filename)
+    : asm_reader option =
+  try
+    let stat = Unix.stat filename in
+    if (stat.Unix.st_kind = Unix.S_REG) &&
+      (stat.Unix.st_size > 4)
+    then
+      let ar = new_asm_reader sess filename in
+        if (ar.asm_get_zstr_padded 4) = elf_magic
+        then (ar.asm_seek 0; Some ar)
+        else None
+    else
+      None
+  with
+      _ -> None
+;;
+
 let get_sections
     (sess:Session.sess)
     (ar:asm_reader)
     : (string,(int*int)) Hashtbl.t =
   let sects = Hashtbl.create 0 in
   let elf_id = ar.asm_get_zstr_padded 4 in
-  let _ = assert (elf_id = "\x7fELF") in
+  let _ = assert (elf_id = elf_magic) in
 
   let _ = ar.asm_seek 0x10 in
   let _ = ar.asm_adv_u16 () in (* e_type *)

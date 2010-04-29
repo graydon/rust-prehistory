@@ -991,6 +991,35 @@ let emit_file
     close_out out
 ;;
 
+let pe_magic = "PE";;
+
+let sniff
+    (sess:Session.sess)
+    (filename:filename)
+    : asm_reader option =
+  try
+    let stat = Unix.stat filename in
+    if (stat.Unix.st_kind = Unix.S_REG) &&
+      (stat.Unix.st_size >= pe_file_alignment)
+    then
+      let ar = new_asm_reader sess filename in
+        (* PE header offset is at 0x3c in the MS-DOS compatibility header. *)
+      let _ = ar.asm_seek 0x3c in
+      let pe_hdr_off = ar.asm_get_u32() in
+      let _ = log sess "PE header offset: 0x%x" pe_hdr_off in
+
+      let _ = ar.asm_seek pe_hdr_off in
+      let pe_signature = ar.asm_get_zstr_padded 4 in
+      let _ = log sess "    PE signature: '%s'" pe_signature in
+        if pe_signature = pe_magic
+        then (ar.asm_seek 0; Some ar)
+        else None
+    else
+      None
+  with
+      _ -> None
+;;
+
 
 let get_sections
     (sess:Session.sess)
@@ -1004,7 +1033,7 @@ let get_sections
   let _ = ar.asm_seek pe_hdr_off in
   let pe_signature = ar.asm_get_zstr_padded 4 in
   let _ = log sess "    PE signature: '%s'" pe_signature in
-  let _ = assert (pe_signature = "PE") in
+  let _ = assert (pe_signature = pe_magic) in
   let _ = ar.asm_adv_u16() in (* machine type *)
 
   let num_sections = ar.asm_get_u16() in

@@ -1040,6 +1040,26 @@ let emit_file
     close_out out
 ;;
 
+
+let sniff
+    (sess:Session.sess)
+    (filename:filename)
+    : asm_reader option =
+  try
+    let stat = Unix.stat filename in
+    if (stat.Unix.st_kind = Unix.S_REG) &&
+      (stat.Unix.st_size > 4)
+    then
+      let ar = new_asm_reader sess filename in
+        if (ar.asm_get_u32()) = (Int64.to_int mh_magic)
+        then (ar.asm_seek 0; Some ar)
+        else None
+    else
+      None
+  with
+      _ -> None
+;;
+
 let get_sections
     (sess:Session.sess)
     (ar:asm_reader)
