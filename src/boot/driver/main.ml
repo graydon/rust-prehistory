@@ -123,6 +123,7 @@ let get_dies_opt (filename:filename) : ((int * ((int,Dwarf.die) Hashtbl.t)) opti
               let abbrevs = Dwarf.read_abbrevs sess ar (Hashtbl.find sects ".debug_abbrev") in
               let dies = Dwarf.read_dies sess ar (Hashtbl.find sects ".debug_info")  abbrevs in
                 ar.Asm.asm_close ();
+                Hashtbl.remove ar_cache filename;
                 Some dies
     end
 ;;
