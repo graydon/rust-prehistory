@@ -495,6 +495,10 @@ let trans_crate
 
     List.iter init_block (Hashtbl.find sem_cx.Semant.ctxt_frame_blocks fn_id);
 
+    let static_str (s:string) : Llvm.llvalue =
+      Llvm.define_global (anon_llid "str") (Llvm.const_stringz llctx s) llmod
+    in
+
 
     (* Translates a list of AST statements to a sequence of LLVM instructions.
      * The supplied "terminate" function appends the appropriate terminator
@@ -602,6 +606,25 @@ let trans_crate
         upcall llbuilder lltask "upcall_log_int" None [| trans_atom atom |]
       in
 
+      let trans_fail
+          (llbuilder:Llvm.llbuilder)
+          (lltask:Llvm.llvalue)
+          (reason:string)
+          (stmt_id:node_id)
+          : unit =
+        let (file, line, _) =
+          match Session.get_span sem_cx.Semant.ctxt_sess stmt_id with
+              None -> ("<none>", 0, 0)
+            | Some sp -> sp.lo
+        in
+        upcall llbuilder lltask "upcall_fail" None [|
+          static_str reason;
+          static_str file;
+          Llvm.const_int (Llvm.i32_type llctx) line
+        |];
+        ignore (Llvm.build_unreachable llbuilder)
+      in
+
       (* FIXME: this may be irrelevant; possibly LLVM will wind up
        * using GOT and such wherever it needs to to achieve PIC
        * data.
@@ -613,10 +636,6 @@ let trans_crate
         Llvm.const_sub v_int c_int
         in
       *)
-
-      let static_str (s:string) : Llvm.llvalue =
-        Llvm.define_global (anon_llid "str") (Llvm.const_stringz llctx s) llmod
-      in
 
       match stmts with
           [] -> terminate llbuilder block_id
@@ -686,6 +705,9 @@ let trans_crate
                   exit_block llbuilder block_id;
                   ignore (Llvm.build_ret_void llbuilder)
 
+              | Ast.STMT_fail ->
+                  trans_fail llbuilder lltask "explicit failure" head.id
+
               | Ast.STMT_log a ->
                   begin
                     match Semant.atom_type sem_cx a with
@@ -701,6 +723,14 @@ let trans_crate
                           "unimplemented logging type"
                   end;
                   trans_tail ()
+
+              | Ast.STMT_check_expr expr ->
+                  let llexpr = trans_expr expr in
+                  let (llfail, llfailbuilder) = new_block None "fail" in
+                  let reason = Ast.fmt_to_str Ast.fmt_expr expr in
+                  trans_fail llfailbuilder lltask reason head.id;
+                  let llnext = trans_tail_in_new_block () in
+                  ignore (Llvm.build_cond_br llexpr llnext llfail llbuilder)
 
               | Ast.STMT_init_str (dst, str) ->
                   let d = trans_lval dst in
