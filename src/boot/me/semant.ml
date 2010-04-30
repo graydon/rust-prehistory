@@ -1204,6 +1204,13 @@ let get_item (cx:ctxt) (node:node_id) : Ast.mod_item_decl =
     | None -> bug () "missing defn"
 ;;
 
+let get_slot (cx:ctxt) (node:node_id) : Ast.slot =
+  match htab_search cx.ctxt_all_defns node with
+      Some (DEFN_slot slot) -> slot
+    | Some _ -> err (Some node) "defn is not a slot"
+    | None -> bug () "missing defn"
+;;
+
 let get_mod_item
     (cx:ctxt)
     (node:node_id)

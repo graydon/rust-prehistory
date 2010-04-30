@@ -62,7 +62,8 @@ let trans_crate
 
   let nil = Llvm.undef (Llvm.void_type llctx) in
 
-  let ty_of = Hashtbl.find sem_cx.Semant.ctxt_all_item_types in
+  let ty_of_item = Hashtbl.find sem_cx.Semant.ctxt_all_item_types in
+  let ty_of_slot n = Semant.slot_ty (Semant.get_slot sem_cx n) in
 
   let filename = Session.filename_of sess.Session.sess_in in
   let llmod = Llvm.create_module llctx filename in
@@ -205,21 +206,18 @@ let trans_crate
 
   (* Translates the type of a slot into the corresponding LLVM type. If the
    * id_opt parameter is specified, then the type will be fetched from the
-   * context if it isn't stored with the slot. Otherwise, an untyped slot
-   * produces an error. *)
+   * context. *)
   and trans_slot (id_opt:node_id option) (slot:Ast.slot) : Llvm.lltype =
     let ty =
-      match (slot.Ast.slot_ty, id_opt) with
-          (None, None) ->
-            raise (Failure "llvm_trans: found untyped anonymous slot")
-        | (None, Some id) -> ty_of id
-        | (Some ty, _) -> ty
+      match id_opt with
+          Some id -> ty_of_slot id
+        | None -> Semant.slot_ty slot
     in
     let base_llty = trans_ty ty in
-    match slot.Ast.slot_mode with
-        Ast.MODE_exterior _ | Ast.MODE_read_alias | Ast.MODE_write_alias ->
-          Llvm.pointer_type base_llty
-      | Ast.MODE_interior _ -> base_llty
+      match slot.Ast.slot_mode with
+          Ast.MODE_exterior _ | Ast.MODE_read_alias | Ast.MODE_write_alias ->
+            Llvm.pointer_type base_llty
+        | Ast.MODE_interior _ -> base_llty
   in
 
   let (llitems:(node_id, Llvm.llvalue) Hashtbl.t) = Hashtbl.create 0 in
@@ -237,7 +235,7 @@ let trans_crate
     in
       match item with
           Ast.MOD_ITEM_fn _ ->
-            let llty = trans_ty (ty_of id) in
+            let llty = trans_ty (ty_of_item id) in
             let llfn = Llvm.declare_function ("_rust_" ^ name) llty llmod in
             let meta =
               md_node
