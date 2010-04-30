@@ -314,9 +314,30 @@ let trans_crate
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
+
+    let new_block klass =
+      let llblock = Llvm.insertion_block llbuilder in
+      let llfn = Llvm.block_parent llblock in
+      let llblock = Llvm.append_block llctx (anon_llid klass) llfn in
+      let llbuilder = Llvm.builder_at_end llctx llblock in
+        (llblock, llbuilder)
+    in
+
     (* FIXME: implementation here is temporary, completely wrong. *)
     let llty = trans_slot None slot in
     let ty = Semant.slot_ty slot in
+
+    let if_ptr_not_null (inner:Llvm.llbuilder -> unit) : Llvm.llbuilder =
+      let null = (Llvm.const_pointer_null llty) in
+      let test = Llvm.build_icmp Llvm.Icmp.Eq null ptr (anon_llid "nullp") llbuilder in
+      let (llthen, llthen_builder) = new_block "then" in
+      let (llnext, llnext_builder) = new_block "next" in
+        ignore (Llvm.build_cond_br test llthen llnext llbuilder);
+        inner llthen_builder;
+        ignore (Llvm.build_br llnext llthen_builder);
+        llnext_builder
+    in
+
       match slot_mem_ctrl slot with
           MEM_rc_struct
         | MEM_rc_opaque _ ->
@@ -324,10 +345,19 @@ let trans_crate
                       (Llvm.const_pointer_null llty)
                       ptr llbuilder);
             if false
-            then free_ty llbuilder lltask ty ptr
+            then
+              ignore
+                (if_ptr_not_null
+                   begin
+                     fun llbuilder ->
+                       free_ty llbuilder lltask ty ptr
+                   end)
+
         | MEM_interior when type_is_structured ty ->
-            if false
-            then drop_ty llbuilder lltask ty ptr curr_iso
+            (* FIXME: to handle recursive types, need to call drop
+               glue here, not inline. *)
+            drop_ty llbuilder lltask ty ptr curr_iso
+
         | _ -> ()
 
   and free_ty
