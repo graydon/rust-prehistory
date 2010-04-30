@@ -82,6 +82,10 @@ let trans_crate
     Llvm.function_type out args
   in
 
+  (* 
+     let imm (i:int64) : Llvm.llvalue = Llvm.const_int word_ty (Int64.to_int i) in
+  *)
+
   let asm_glue = Llasm.get_glue llctx llmod abi sess in
 
   let llty_str llty =
@@ -112,6 +116,8 @@ let trans_crate
       end;
     Llvm.build_call callee args rvid builder
   in
+
+  (* Upcall translation *)
 
   let extern_upcalls = Hashtbl.create 0 in
   let trans_upcall
@@ -162,6 +168,32 @@ let trans_crate
             let lldest = Llvm.build_pointercast lldest wordptr_ty "" llbuilder in
               ignore (Llvm.build_store llrv lldest llbuilder);
   in
+
+  let upcall
+      (llbuilder:Llvm.llbuilder)
+      (lltask:Llvm.llvalue)
+      (name:string)
+      (lldest:Llvm.llvalue option)
+      (llargs:Llvm.llvalue array)
+      : unit =
+    trans_upcall llbuilder lltask name lldest llargs
+  in
+
+  let trans_free
+      (llbuilder:Llvm.llbuilder)
+      (lltask:Llvm.llvalue)
+      (src:Llvm.llvalue)
+      : unit =
+    upcall llbuilder lltask "upcall_free" None [| src |]
+  in
+
+    (*
+      let trans_malloc (llbuilder:Llvm.llbuilder) (dst:Llvm.llvalue) (nbytes:int64) : unit =
+      upcall llbuilder "upcall_malloc" (Some dst) [| imm nbytes |]
+      in
+    *)
+
+  (* Type translation *)
 
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
     let tycon =
@@ -218,6 +250,97 @@ let trans_crate
           Ast.MODE_exterior _ | Ast.MODE_read_alias | Ast.MODE_write_alias ->
             Llvm.pointer_type base_llty
         | Ast.MODE_interior _ -> base_llty
+  in
+
+  let get_element_ptr
+      (llbuilder:Llvm.llbuilder)
+      (ptr:Llvm.llvalue)
+      (i:int)
+      : Llvm.llvalue =
+    let idx = Llvm.const_int (Llvm.i32_type llctx) i in
+      Llvm.build_gep ptr [| idx |] (anon_llid "gep") llbuilder
+  in
+
+  let rec iter_ty_slots_full
+      (llbuilder:Llvm.llbuilder)
+      (ty:Ast.ty)
+      (dst_ptr:Llvm.llvalue)
+      (src_ptr:Llvm.llvalue)
+      (f:Llvm.llvalue -> Llvm.llvalue -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+    match ty with
+        Ast.TY_rec entries ->
+          iter_rec_slots (get_element_ptr llbuilder)
+            dst_ptr src_ptr entries f curr_iso
+
+      | Ast.TY_tup slots ->
+          iter_tup_slots (get_element_ptr llbuilder)
+            dst_ptr src_ptr slots f curr_iso
+
+      | Ast.TY_tag _
+      | Ast.TY_iso _
+      | Ast.TY_fn _
+      | Ast.TY_pred _
+      | Ast.TY_obj _ ->
+          bug () "unimplemented ty in Lltrans.iter_ty_slots_full"
+
+      | _ -> ()
+
+  and iter_ty_slots
+      (llbuilder:Llvm.llbuilder)
+      (ty:Ast.ty)
+      (ptr:Llvm.llvalue)
+      (f:Llvm.llvalue -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+    iter_ty_slots_full llbuilder ty ptr ptr
+      (fun _ src_ptr slot curr_iso -> f src_ptr slot curr_iso)
+      curr_iso
+
+  and drop_ty
+      (llbuilder:Llvm.llbuilder)
+      (lltask:Llvm.llvalue)
+      (ty:Ast.ty)
+      (ptr:Llvm.llvalue)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+    iter_ty_slots llbuilder ty ptr (drop_slot llbuilder lltask) curr_iso
+
+  and drop_slot
+      (llbuilder:Llvm.llbuilder)
+      (lltask:Llvm.llvalue)
+      (ptr:Llvm.llvalue)
+      (slot:Ast.slot)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+    (* FIXME: implementation here is temporary, completely wrong. *)
+    let llty = trans_slot None slot in
+    let ty = Semant.slot_ty slot in
+      match slot_mem_ctrl slot with
+          MEM_rc_struct
+        | MEM_rc_opaque _ ->
+            ignore (Llvm.build_store
+                      (Llvm.const_pointer_null llty)
+                      ptr llbuilder);
+            if false
+            then free_ty llbuilder lltask ty ptr
+        | MEM_interior when type_is_structured ty ->
+            if false
+            then drop_ty llbuilder lltask ty ptr curr_iso
+        | _ -> ()
+
+  and free_ty
+      (llbuilder:Llvm.llbuilder)
+      (lltask:Llvm.llvalue)
+      (ty:Ast.ty)
+      (ptr:Llvm.llvalue)
+      : unit =
+    match ty with
+        Ast.TY_port _
+      | Ast.TY_chan _
+      | Ast.TY_task -> bug () "unimplemented ty in Lltrans.free_ty"
+      | _ -> trans_free llbuilder lltask ptr
   in
 
   let (llitems:(node_id, Llvm.llvalue) Hashtbl.t) = Hashtbl.create 0 in
@@ -327,26 +450,15 @@ let trans_crate
         iter_block_slots sem_cx block_id init_slot
     in
 
-    let drop_slot llbuilder (_:Ast.slot_key) (slot_id:node_id) (slot:Ast.slot) : unit =
-      let llptr = Hashtbl.find slot_to_llvalue slot_id in
-      let llty = trans_slot (Some slot_id) slot in
-        begin
-          match slot_mem_ctrl slot with
-              MEM_rc_struct
-            | MEM_rc_opaque _ ->
-                (* FIXME: temporary, completely wrong. *)
-                ignore (Llvm.build_store
-                          (Llvm.const_pointer_null llty)
-                          llptr llbuilder);
-            | _ -> ()
-        end
-    in
-
     let exit_block llbuilder block_id =
       iter_block_slots sem_cx block_id
-        (fun key slot_id slot ->
-           if (not (Semant.slot_is_obj_state sem_cx slot_id))
-           then drop_slot llbuilder key slot_id slot)
+        begin
+          fun _ slot_id slot ->
+            if (not (Semant.slot_is_obj_state sem_cx slot_id))
+            then
+              let ptr = Hashtbl.find slot_to_llvalue slot_id in
+                drop_slot llbuilder lltask ptr slot None
+        end
     in
 
     List.iter init_block (Hashtbl.find sem_cx.Semant.ctxt_frame_blocks fn_id);
@@ -450,16 +562,12 @@ let trans_crate
           | Ast.EXPR_atom atom -> trans_atom atom
       in
 
-      let upcall name lldest llargs =
-        trans_upcall llbuilder lltask name lldest llargs
-      in
-
       let trans_log_str (atom:Ast.atom) : unit =
-        upcall "upcall_log_str" None [| trans_atom atom |]
+        upcall llbuilder lltask "upcall_log_str" None [| trans_atom atom |]
       in
 
       let trans_log_int (atom:Ast.atom) : unit =
-        upcall "upcall_log_int" None [| trans_atom atom |]
+        upcall llbuilder lltask "upcall_log_int" None [| trans_atom atom |]
       in
 
       (* FIXME: this may be irrelevant; possibly LLVM will wind up
@@ -554,7 +662,7 @@ let trans_crate
                   let d = trans_lval dst in
                   let s = static_str str in
                   let len = Llvm.const_int word_ty ((String.length str) + 1) in
-                    upcall "upcall_new_str" (Some d) [| s; len |];
+                    upcall llbuilder lltask "upcall_new_str" (Some d) [| s; len |];
                     trans_tail ()
 
               | _ -> trans_stmts block_id llbuilder tail terminate

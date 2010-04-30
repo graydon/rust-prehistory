@@ -163,6 +163,37 @@ let next_power_of_two (x:int64) : int64 =
     Int64.add 1L (!xr)
 ;;
 
+let iter_tup_slots
+    (get_element_ptr:'a -> int -> 'a)
+    (dst_ptr:'a)
+    (src_ptr:'a)
+    (slots:Ast.ty_tup)
+    (f:'a -> 'a -> Ast.slot -> (Ast.ty_iso option) -> unit)
+    (curr_iso:Ast.ty_iso option)
+    : unit =
+  Array.iteri
+    begin
+      fun i slot ->
+        f (get_element_ptr dst_ptr i)
+          (get_element_ptr src_ptr i)
+          slot curr_iso
+    end
+    slots
+;;
+
+let iter_rec_slots
+    (get_element_ptr:'a -> int -> 'a)
+    (dst_ptr:'a)
+    (src_ptr:'a)
+    (entries:Ast.ty_rec)
+    (f:'a -> 'a -> Ast.slot -> (Ast.ty_iso option) -> unit)
+    (curr_iso:Ast.ty_iso option)
+    : unit =
+  iter_tup_slots get_element_ptr dst_ptr src_ptr (Array.map snd entries) f curr_iso
+;;
+
+
+
 
 (*
  * Local Variables:

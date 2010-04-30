@@ -1659,31 +1659,6 @@ let trans_visitor
   and exterior_gc_next_cell (cell:Il.cell) : Il.cell =
     exterior_ctrl_cell cell Abi.exterior_gc_slot_field_next
 
-  and iter_rec_slots
-      (dst_cell:Il.cell)
-      (src_cell:Il.cell)
-      (entries:Ast.ty_rec)
-      (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
-      (curr_iso:Ast.ty_iso option)
-      : unit =
-    iter_tup_slots dst_cell src_cell (Array.map snd entries) f curr_iso
-
-  and iter_tup_slots
-      (dst_cell:Il.cell)
-      (src_cell:Il.cell)
-      (slots:Ast.ty_tup)
-      (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
-      (curr_iso:Ast.ty_iso option)
-      : unit =
-    Array.iteri
-      begin
-        fun i slot ->
-          f (get_element_ptr dst_cell i)
-            (get_element_ptr src_cell i)
-            slot curr_iso
-      end
-      slots
-
   and iter_tag_slots
         (dst_cell:Il.cell)
         (src_cell:Il.cell)
@@ -1710,6 +1685,7 @@ let trans_visitor
               in
               let ttup = Hashtbl.find ttag key in
                 iter_tup_slots
+                  get_element_ptr
                   (get_variant_ptr dst_union i)
                   (get_variant_ptr src_union i)
                   ttup f curr_iso;
@@ -1734,10 +1710,14 @@ let trans_visitor
          *)
         match ty with
             Ast.TY_rec entries ->
-              iter_rec_slots dst_cell src_cell entries f curr_iso
+              iter_rec_slots
+                get_element_ptr dst_cell src_cell
+                entries f curr_iso
 
           | Ast.TY_tup slots ->
-              iter_tup_slots dst_cell src_cell slots f curr_iso
+              iter_tup_slots
+                get_element_ptr dst_cell src_cell
+                slots f curr_iso
 
           | Ast.TY_tag tag ->
               iter_tag_slots dst_cell src_cell tag f curr_iso
