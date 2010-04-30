@@ -229,11 +229,13 @@ let trans_crate
           let lltaskty = Llvm.pointer_type abi.Llabi.task_ty in
           let llins = Array.map (trans_slot None) ins in
             fn_ty void_ty (Array.append [| lloutptr; lltaskty |] llins)
+      | Ast.TY_tup slots ->
+          Llvm.struct_type llctx (Array.map (trans_slot None) slots)
       | Ast.TY_constrained (ty', _) -> trans_ty ty'
-      | Ast.TY_tup _ | Ast.TY_vec _ | Ast.TY_rec _ | Ast.TY_tag _
-      | Ast.TY_iso _ | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _
-      | Ast.TY_port _ | Ast.TY_obj _ | Ast.TY_task | Ast.TY_param _
-      | Ast.TY_native _ | Ast.TY_named _ | Ast.TY_type ->
+      | Ast.TY_vec _ | Ast.TY_rec _ | Ast.TY_tag _ | Ast.TY_iso _
+      | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _ | Ast.TY_port _
+      | Ast.TY_obj _ | Ast.TY_task | Ast.TY_param _ | Ast.TY_native _
+      | Ast.TY_named _ | Ast.TY_type ->
           Llvm.opaque_type llctx (* TODO *)
 
   (* Translates the type of a slot into the corresponding LLVM type. If the
@@ -633,7 +635,19 @@ let trans_crate
             in
 
             match head.node with
-                Ast.STMT_copy (dest, src) ->
+                Ast.STMT_init_tup (dest, atoms) ->
+                  let zero = const_i32 0 in
+                  let lldest = trans_lval dest in
+                  let trans_tup_atom idx (_, atom) =
+                    let indices = [| zero; const_i32 idx |] in
+                    let gep_id = anon_llid "init_tup_gep" in
+                    let ptr = Llvm.build_gep lldest indices gep_id llbuilder in
+                    ignore (Llvm.build_store (trans_atom atom) ptr llbuilder)
+                  in
+                  Array.iteri trans_tup_atom atoms;
+                  trans_tail ()
+
+              | Ast.STMT_copy (dest, src) ->
                   let llsrc = trans_expr src in
                   let lldest = trans_lval dest in
                   ignore (Llvm.build_store llsrc lldest llbuilder);
