@@ -1631,10 +1631,10 @@ let trans_visitor
     let alloc_sz = next_power_of_two padded_sz in
       trans_malloc dstcell alloc_sz;
       let vec = deref dstcell in
-        mov (get_element_ptr vec 0) one;
-        mov (get_element_ptr vec 1) (imm alloc_sz);
-        mov (get_element_ptr vec 2) (imm init_sz);
-        let body_mem = fst (need_mem_cell (get_element_ptr vec 3)) in
+        mov (get_element_ptr vec Abi.vec_elt_rc) one;
+        mov (get_element_ptr vec Abi.vec_elt_alloc) (imm alloc_sz);
+        mov (get_element_ptr vec Abi.vec_elt_fill) (imm init_sz);
+        let body_mem = fst (need_mem_cell (get_element_ptr vec Abi.vec_elt_data)) in
         let unit_rty = slot_referent_type abi unit_slot in
         let body_rty = Il.StructTy (Array.map (fun _ -> unit_rty) atoms) in
         let body = Il.Mem (body_mem, body_rty) in
@@ -1645,16 +1645,6 @@ let trans_visitor
                   trans_init_slot_from_atom CLONE_none cell unit_slot atom
             end
             atoms
-
-  and next_power_of_two (x:int64) : int64 =
-    let xr = ref (Int64.sub x 1L) in
-      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 1);
-      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 2);
-      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 4);
-      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 8);
-      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 16);
-      xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 32);
-      Int64.add 1L (!xr)
 
   and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =
     let (rc_mem, _) = need_mem_cell (deref_imm cell (word_n off)) in

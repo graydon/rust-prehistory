@@ -152,6 +152,17 @@ let iter_frame_and_arg_slots
           ls
 ;;
 
+let next_power_of_two (x:int64) : int64 =
+  let xr = ref (Int64.sub x 1L) in
+    xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 1);
+    xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 2);
+    xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 4);
+    xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 8);
+    xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 16);
+    xr := Int64.logor (!xr) (Int64.shift_right_logical (!xr) 32);
+    Int64.add 1L (!xr)
+;;
+
 
 (*
  * Local Variables:
