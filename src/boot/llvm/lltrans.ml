@@ -82,9 +82,7 @@ let trans_crate
     Llvm.function_type out args
   in
 
-  (* 
-     let imm (i:int64) : Llvm.llvalue = Llvm.const_int word_ty (Int64.to_int i) in
-  *)
+  let imm (i:int64) : Llvm.llvalue = Llvm.const_int word_ty (Int64.to_int i) in
 
   let asm_glue = Llasm.get_glue llctx llmod abi sess in
 
@@ -195,6 +193,8 @@ let trans_crate
 
   (* Type translation *)
 
+  let lltys = Hashtbl.create 0 in
+
   let trans_mach_ty (mty:ty_mach) : Llvm.lltype =
     let tycon =
       match mty with
@@ -208,35 +208,62 @@ let trans_crate
       tycon llctx
   in
 
-  let rec trans_ty (ty:Ast.ty) : Llvm.lltype =
+
+  let rec trans_ty_full (ty:Ast.ty) : Llvm.lltype =
+    let p t = Llvm.pointer_type t in
+    let s ts = Llvm.struct_type llctx ts in
+    let opaque _ = Llvm.opaque_type llctx in
+    let vec_body_ty _ =
+      s [| word_ty; word_ty; word_ty; (opaque()) |]
+    in
+    let rc_opaque_ty =
+      s [| word_ty; (opaque()) |]
+    in
     match ty with
-        Ast.TY_any -> Llvm.opaque_type llctx
+        Ast.TY_any -> opaque ()
       | Ast.TY_nil -> void_ty
       | Ast.TY_bool -> Llvm.i1_type llctx
       | Ast.TY_mach mty -> trans_mach_ty mty
       | Ast.TY_int -> word_ty
       | Ast.TY_uint -> word_ty
       | Ast.TY_char -> Llvm.i32_type llctx
-      | Ast.TY_str -> Llvm.pointer_type (Llvm.i8_type llctx)
-      | Ast.TY_fn
-          ({ Ast.sig_input_slots = ins; Ast.sig_output_slot = out }, _) ->
-          let llout = trans_slot None out in
+      | Ast.TY_vec _
+      | Ast.TY_str -> p (vec_body_ty())
+
+      | Ast.TY_fn tfn ->
+          let (tsig, _) = tfn in
           let lloutptr =
-            if Semant.slot_ty out = Ast.TY_nil
+            if Semant.slot_ty tsig.Ast.sig_output_slot = Ast.TY_nil
             then word_ty
-            else Llvm.pointer_type llout
+            else p (trans_slot None tsig.Ast.sig_output_slot)
           in
-          let lltaskty = Llvm.pointer_type abi.Llabi.task_ty in
-          let llins = Array.map (trans_slot None) ins in
+          let lltaskty = p abi.Llabi.task_ty in
+          let llins = Array.map (trans_slot None) tsig.Ast.sig_input_slots in
             fn_ty void_ty (Array.append [| lloutptr; lltaskty |] llins)
+
       | Ast.TY_tup slots ->
-          Llvm.struct_type llctx (Array.map (trans_slot None) slots)
+          s (Array.map (trans_slot None) slots)
+
+      | Ast.TY_rec entries ->
+          s (Array.map (fun e -> trans_slot None (snd e)) entries)
+
       | Ast.TY_constrained (ty', _) -> trans_ty ty'
-      | Ast.TY_vec _ | Ast.TY_rec _ | Ast.TY_tag _ | Ast.TY_iso _
-      | Ast.TY_idx _ | Ast.TY_pred _ | Ast.TY_chan _ | Ast.TY_port _
-      | Ast.TY_obj _ | Ast.TY_task | Ast.TY_param _ | Ast.TY_native _
-      | Ast.TY_named _ | Ast.TY_type ->
-          Llvm.opaque_type llctx (* TODO *)
+
+      | Ast.TY_chan _ | Ast.TY_port _ | Ast.TY_task  ->
+          p rc_opaque_ty
+
+      | Ast.TY_native _ ->
+          word_ty
+
+      | Ast.TY_tag _ | Ast.TY_iso _
+      | Ast.TY_idx _ | Ast.TY_pred _
+      | Ast.TY_obj _ | Ast.TY_type -> (opaque()) (* TODO *)
+
+      | Ast.TY_param _ | Ast.TY_named _ ->
+          bug () "unresolved type in lltrans"
+
+  and trans_ty t =
+    htab_search_or_add lltys t (fun _ -> trans_ty_full t)
 
   (* Translates the type of a slot into the corresponding LLVM type. If the
    * id_opt parameter is specified, then the type will be fetched from the
@@ -261,8 +288,14 @@ let trans_crate
       (ptr:Llvm.llvalue)
       (i:int)
       : Llvm.llvalue =
+    (* 
+     * GEP takes a first-index of zero. Because it must! And this is
+     * sufficiently surprising that the GEP FAQ exists. And you must
+     * read it.
+     *)
+    let deref_ptr = Llvm.const_int (Llvm.i32_type llctx) 0 in
     let idx = Llvm.const_int (Llvm.i32_type llctx) i in
-      Llvm.build_gep ptr [| idx |] (anon_llid "gep") llbuilder
+      Llvm.build_gep ptr [| deref_ptr; idx |] (anon_llid "gep") llbuilder
   in
 
   let free_ty
@@ -335,6 +368,8 @@ let trans_crate
       : unit =
 
     let llfn = Llvm.block_parent (Llvm.insertion_block (!llbuilder)) in
+    let llty = trans_slot None slot in
+    let ty = Semant.slot_ty slot in
 
     let new_block klass =
       let llblock = Llvm.append_block llctx (anon_llid klass) llfn in
@@ -342,31 +377,68 @@ let trans_crate
         (llblock, llbuilder)
     in
 
-    (* FIXME: implementation here is temporary, completely wrong. *)
-    let llty = trans_slot None slot in
-    let ty = Semant.slot_ty slot in
-
-    let if_ptr_in_slot_not_null (inner:Llvm.llbuilder -> Llvm.llvalue -> unit) : unit =
-      let ptr = Llvm.build_load slot_ptr (anon_llid "tmp") (!llbuilder) in
+    let if_ptr_in_slot_not_null
+        (inner:Llvm.llvalue -> Llvm.llbuilder -> Llvm.llbuilder)
+        (llbuilder:Llvm.llbuilder)
+        : Llvm.llbuilder =
+      let ptr = Llvm.build_load slot_ptr (anon_llid "tmp") llbuilder in
       let null = Llvm.const_pointer_null llty in
-      let test = Llvm.build_icmp Llvm.Icmp.Ne null ptr (anon_llid "nullp") (!llbuilder) in
+      let test = Llvm.build_icmp Llvm.Icmp.Ne null ptr (anon_llid "nullp") llbuilder in
       let (llthen, llthen_builder) = new_block "then" in
       let (llnext, llnext_builder) = new_block "next" in
-        ignore (Llvm.build_cond_br test llthen llnext (!llbuilder));
-        inner llthen_builder ptr;
-        ignore (Llvm.build_br llnext llthen_builder);
-        llbuilder := llnext_builder
+        ignore (Llvm.build_cond_br test llthen llnext llbuilder);
+        let llthen_builder = inner ptr llthen_builder in
+          ignore (Llvm.build_br llnext llthen_builder);
+          llnext_builder
     in
+
+    let decr_refcnt_and_if_zero
+        (rc_elt:int)
+        (inner:Llvm.llvalue -> Llvm.llbuilder -> Llvm.llbuilder)
+        (ptr:Llvm.llvalue)
+        (llbuilder:Llvm.llbuilder)
+        : Llvm.llbuilder  =
+      let rc_ptr = get_element_ptr llbuilder ptr rc_elt in
+      let rc = Llvm.build_load rc_ptr (anon_llid "rc") llbuilder in
+      let rc = Llvm.build_sub rc (imm 1L) (anon_llid "tmp") llbuilder in
+      let _ = Llvm.build_store rc rc_ptr llbuilder in
+        log sem_cx "rc type: %s" (llval_str rc);
+      let test = Llvm.build_icmp Llvm.Icmp.Eq rc (imm 0L) (anon_llid "zerop") llbuilder in
+      let (llthen, llthen_builder) = new_block "then" in
+      let (llnext, llnext_builder) = new_block "next" in
+        ignore (Llvm.build_cond_br test llthen llnext llbuilder);
+        let llthen_builder = inner ptr llthen_builder in
+          ignore (Llvm.build_br llnext llthen_builder);
+          llnext_builder
+    in
+
+    let free_and_null_out_slot
+        (ptr:Llvm.llvalue)
+        (llbuilder:Llvm.llbuilder)
+        : Llvm.llbuilder =
+      free_ty llbuilder lltask ty ptr;
+      let null = Llvm.const_pointer_null llty in
+        ignore (Llvm.build_store null slot_ptr llbuilder);
+        llbuilder
+    in
+
       begin
           match slot_mem_ctrl slot with
               MEM_rc_struct
-            | MEM_rc_opaque _
             | MEM_gc ->
-                if_ptr_in_slot_not_null
-                  begin
-                    fun llbuilder ptr ->
-                      free_ty llbuilder lltask ty ptr
-                  end
+                llbuilder :=
+                  if_ptr_in_slot_not_null
+                    (decr_refcnt_and_if_zero
+                       Abi.exterior_rc_slot_field_refcnt
+                       free_and_null_out_slot)
+                    (!llbuilder)
+
+            | MEM_rc_opaque i ->
+                llbuilder :=
+                  if_ptr_in_slot_not_null
+                    (decr_refcnt_and_if_zero i
+                       free_and_null_out_slot)
+                    (!llbuilder)
 
             | MEM_interior when type_is_structured ty ->
                 (* FIXME: to handle recursive types, need to call drop
