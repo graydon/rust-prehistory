@@ -249,7 +249,9 @@ let trans_crate
     in
     let base_llty = trans_ty ty in
       match slot.Ast.slot_mode with
-          Ast.MODE_exterior _ | Ast.MODE_read_alias | Ast.MODE_write_alias ->
+          Ast.MODE_exterior _
+        | Ast.MODE_read_alias
+        | Ast.MODE_write_alias ->
             Llvm.pointer_type base_llty
         | Ast.MODE_interior _ -> base_llty
   in
@@ -263,22 +265,37 @@ let trans_crate
       Llvm.build_gep ptr [| idx |] (anon_llid "gep") llbuilder
   in
 
-  let rec iter_ty_slots_full
+  let free_ty
       (llbuilder:Llvm.llbuilder)
+      (lltask:Llvm.llvalue)
+      (ty:Ast.ty)
+      (ptr:Llvm.llvalue)
+      : unit =
+    match ty with
+        Ast.TY_port _
+      | Ast.TY_chan _
+      | Ast.TY_task -> bug () "unimplemented ty in Lltrans.free_ty"
+      | _ -> trans_free llbuilder lltask ptr
+  in
+
+  let rec iter_ty_slots_full
+      (llbuilder:Llvm.llbuilder ref)
       (ty:Ast.ty)
       (dst_ptr:Llvm.llvalue)
       (src_ptr:Llvm.llvalue)
       (f:Llvm.llvalue -> Llvm.llvalue -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
+
+    (* NB: must deref llbuilder at call-time; don't curry this. *)
+    let gep p i = get_element_ptr (!llbuilder) p i in
+
     match ty with
         Ast.TY_rec entries ->
-          iter_rec_slots (get_element_ptr llbuilder)
-            dst_ptr src_ptr entries f curr_iso
+          iter_rec_slots gep dst_ptr src_ptr entries f curr_iso
 
       | Ast.TY_tup slots ->
-          iter_tup_slots (get_element_ptr llbuilder)
-            dst_ptr src_ptr slots f curr_iso
+          iter_tup_slots gep dst_ptr src_ptr slots f curr_iso
 
       | Ast.TY_tag _
       | Ast.TY_iso _
@@ -290,7 +307,7 @@ let trans_crate
       | _ -> ()
 
   and iter_ty_slots
-      (llbuilder:Llvm.llbuilder)
+      (llbuilder:Llvm.llbuilder ref)
       (ty:Ast.ty)
       (ptr:Llvm.llvalue)
       (f:Llvm.llvalue -> Ast.slot -> (Ast.ty_iso option) -> unit)
@@ -301,7 +318,7 @@ let trans_crate
       curr_iso
 
   and drop_ty
-      (llbuilder:Llvm.llbuilder)
+      (llbuilder:Llvm.llbuilder ref)
       (lltask:Llvm.llvalue)
       (ty:Ast.ty)
       (ptr:Llvm.llvalue)
@@ -310,16 +327,16 @@ let trans_crate
     iter_ty_slots llbuilder ty ptr (drop_slot llbuilder lltask) curr_iso
 
   and drop_slot
-      (llbuilder:Llvm.llbuilder)
+      (llbuilder:Llvm.llbuilder ref)
       (lltask:Llvm.llvalue)
-      (ptr:Llvm.llvalue)
+      (slot_ptr:Llvm.llvalue)
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
 
+    let llfn = Llvm.block_parent (Llvm.insertion_block (!llbuilder)) in
+
     let new_block klass =
-      let llblock = Llvm.insertion_block llbuilder in
-      let llfn = Llvm.block_parent llblock in
       let llblock = Llvm.append_block llctx (anon_llid klass) llfn in
       let llbuilder = Llvm.builder_at_end llctx llblock in
         (llblock, llbuilder)
@@ -329,50 +346,35 @@ let trans_crate
     let llty = trans_slot None slot in
     let ty = Semant.slot_ty slot in
 
-    let if_ptr_not_null (inner:Llvm.llbuilder -> unit) : Llvm.llbuilder =
-      let null = (Llvm.const_pointer_null llty) in
-      let test = Llvm.build_icmp Llvm.Icmp.Eq null ptr (anon_llid "nullp") llbuilder in
+    let if_ptr_in_slot_not_null (inner:Llvm.llbuilder -> Llvm.llvalue -> unit) : unit =
+      let ptr = Llvm.build_load slot_ptr (anon_llid "tmp") (!llbuilder) in
+      let null = Llvm.const_pointer_null llty in
+      let test = Llvm.build_icmp Llvm.Icmp.Ne null ptr (anon_llid "nullp") (!llbuilder) in
       let (llthen, llthen_builder) = new_block "then" in
       let (llnext, llnext_builder) = new_block "next" in
-        ignore (Llvm.build_cond_br test llthen llnext llbuilder);
-        inner llthen_builder;
+        ignore (Llvm.build_cond_br test llthen llnext (!llbuilder));
+        inner llthen_builder ptr;
         ignore (Llvm.build_br llnext llthen_builder);
-        llnext_builder
+        llbuilder := llnext_builder
     in
+      begin
+          match slot_mem_ctrl slot with
+              MEM_rc_struct
+            | MEM_rc_opaque _
+            | MEM_gc ->
+                if_ptr_in_slot_not_null
+                  begin
+                    fun llbuilder ptr ->
+                      free_ty llbuilder lltask ty ptr
+                  end
 
-      match slot_mem_ctrl slot with
-          MEM_rc_struct
-        | MEM_rc_opaque _ ->
-            ignore (Llvm.build_store
-                      (Llvm.const_pointer_null llty)
-                      ptr llbuilder);
-            if false
-            then
-              ignore
-                (if_ptr_not_null
-                   begin
-                     fun llbuilder ->
-                       free_ty llbuilder lltask ty ptr
-                   end)
+            | MEM_interior when type_is_structured ty ->
+                (* FIXME: to handle recursive types, need to call drop
+                   glue here, not inline. *)
+                drop_ty llbuilder lltask ty slot_ptr curr_iso
 
-        | MEM_interior when type_is_structured ty ->
-            (* FIXME: to handle recursive types, need to call drop
-               glue here, not inline. *)
-            drop_ty llbuilder lltask ty ptr curr_iso
-
-        | _ -> ()
-
-  and free_ty
-      (llbuilder:Llvm.llbuilder)
-      (lltask:Llvm.llvalue)
-      (ty:Ast.ty)
-      (ptr:Llvm.llvalue)
-      : unit =
-    match ty with
-        Ast.TY_port _
-      | Ast.TY_chan _
-      | Ast.TY_task -> bug () "unimplemented ty in Lltrans.free_ty"
-      | _ -> trans_free llbuilder lltask ptr
+            | _ -> ()
+        end
   in
 
   let (llitems:(node_id, Llvm.llvalue) Hashtbl.t) = Hashtbl.create 0 in
@@ -463,7 +465,7 @@ let trans_crate
 
     (* Allocate space for all the blocks' slots.
      * and zero the exteriors. *)
-    let init_block block_id =
+    let init_block (block_id:node_id) : unit =
       let init_slot (key:Ast.slot_key) (slot_id:node_id) (slot:Ast.slot) : unit =
         let name = Ast.sprintf_slot_key () key in
         let llty = trans_slot (Some slot_id) slot in
@@ -471,7 +473,8 @@ let trans_crate
           begin
             match slot_mem_ctrl slot with
                 MEM_rc_struct
-              | MEM_rc_opaque _ ->
+              | MEM_rc_opaque _
+              | MEM_gc ->
                   ignore (Llvm.build_store
                             (Llvm.const_pointer_null llty)
                             llptr llinitbuilder);
@@ -482,15 +485,17 @@ let trans_crate
         iter_block_slots sem_cx block_id init_slot
     in
 
-    let exit_block llbuilder block_id =
-      iter_block_slots sem_cx block_id
-        begin
-          fun _ slot_id slot ->
-            if (not (Semant.slot_is_obj_state sem_cx slot_id))
-            then
-              let ptr = Hashtbl.find slot_to_llvalue slot_id in
-                drop_slot llbuilder lltask ptr slot None
-        end
+    let exit_block (llbuilder:Llvm.llbuilder) (block_id:node_id) : Llvm.llbuilder =
+      let r = ref llbuilder in
+        iter_block_slots sem_cx block_id
+          begin
+            fun _ slot_id slot ->
+              if (not (Semant.slot_is_obj_state sem_cx slot_id))
+              then
+                let ptr = Hashtbl.find slot_to_llvalue slot_id in
+                  drop_slot r lltask ptr slot None
+          end;
+        !r
     in
 
     List.iter init_block (Hashtbl.find sem_cx.Semant.ctxt_frame_blocks fn_id);
@@ -702,8 +707,8 @@ let trans_crate
                       | Some atom ->
                           ignore (Llvm.build_store (trans_atom atom) lloutptr llbuilder)
                   end;
-                  exit_block llbuilder block_id;
-                  ignore (Llvm.build_ret_void llbuilder)
+                  let llbuilder = exit_block llbuilder block_id in
+                    ignore (Llvm.build_ret_void llbuilder)
 
               | Ast.STMT_fail ->
                   trans_fail llbuilder lltask "explicit failure" head.id
@@ -756,8 +761,8 @@ let trans_crate
     (* "Falling off the end" of a function needs to turn into an explicit
      * return instruction. *)
     let default_terminate llbuilder block_id =
-      exit_block llbuilder block_id;
-      ignore (Llvm.build_ret_void llbuilder)
+      let llbuilder = exit_block llbuilder block_id in
+        ignore (Llvm.build_ret_void llbuilder)
     in
 
     (* Build up the first body block, and link it to the end of the
