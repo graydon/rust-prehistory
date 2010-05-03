@@ -772,7 +772,7 @@ let trans_crate
                   in
                   ignore (Llvm.build_cond_br llexpr llthen llelse llbuilder)
 
-              | Ast.STMT_ret (_, atom_opt) ->
+              | Ast.STMT_ret atom_opt ->
                   begin
                     match atom_opt with
                         None -> ()
