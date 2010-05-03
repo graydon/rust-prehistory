@@ -1,13 +1,13 @@
 // -*- rust -*-
 
 fn main() {
-  for* (int i = first_ten()) {
+  for each (int i = first_ten()) {
     log "main";
     log i;
   }
 }
 
-fn* first_ten() -> int {
+iter first_ten() -> int {
   let int i = 97;
   while (i < 100) {
     log "first_ten";

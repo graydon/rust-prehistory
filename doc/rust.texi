@@ -233,10 +233,10 @@ mechanisms or restrictions of crates. Modules and crates serve
 different roles.
 
 @sp 1
-@item Stack-based iterator functions
+@item Stack-based iterators
 
-Rust provides a type of multiple-invocation iterator function that
-is very efficient: the iterator state lives only on the stack and
+Rust provides a type of function-like multiple-invocation iterator
+that is very efficient: the iterator state lives only on the stack and
 is tightly coupled to the loop that invoked it.
 
 @sp 1
@@ -676,6 +676,9 @@ The keywords are:
 @tab @code{tag}
 @tab @code{vec}
 @tab @code{str}
+@item @code{fn}
+@tab @code{iter}
+@tab @code{pred}
 @tab @code{obj}
 @item @code{task}
 @tab @code{port}
@@ -697,31 +700,11 @@ The keywords are:
 @tab @code{claim}
 @tab @code{check}
 @tab @code{prove}
-@item @code{fn}
-@tab @code{fn?}
-@tab @code{fn!}
-@tab @code{fn*}
-@tab @code{fn+}
 @item @code{for}
-@tab @code{for?}
-@tab @code{for!}
-@tab @code{for*}
-@tab @code{for+}
-@item @code{ret}
-@tab @code{ret?}
-@tab @code{ret!}
-@tab @code{ret*}
-@tab @code{ret+}
-@item @code{put}
-@tab @code{put?}
-@tab @code{put!}
-@tab @code{put*}
-@tab @code{put+}
-@item @code{be}
-@tab @code{be?}
-@tab @code{be!}
-@tab @code{be*}
-@tab @code{be+}
+@tab @code{each}
+@tab @code{ret}
+@tab @code{put}
+@tab @code{be}
 @end multitable
 
 @sp 2
@@ -1461,33 +1444,34 @@ An @dfn{item} is a component of a module. Items are entirely
 determined at compile-time, remain constant during execution, and may
 reside in read-only memory.
 
-There are 5 primary kinds of item: modules, functions, predicates,
-objects and types.
+There are 6 primary kinds of item: modules, functions, iterators,
+predicates, objects and types.
 
 All items form an implicit scope for the declaration of sub-items. In
-other words, within a function or predicate, declarations of items can
-(in many cases) be mixed with the statements, control blocks, and
-similar artifacts that otherwise compose the item body. The meaning of
-these scoped items is the same as if the item was declared outside the
-scope, except that the item's @emph{path name} within the module
-namespace is qualified by the name of the enclosing item. The exact
-locations in which sub-items may be declared is given by the grammar.
-@xref{Ref.Gram}.
+other words, within a function, object, iterator or predicate,
+declarations of items can (in many cases) be mixed with the
+statements, control blocks, and similar artifacts that otherwise
+compose the item body. The meaning of these scoped items is the same
+as if the item was declared outside the scope, except that the item's
+@emph{path name} within the module namespace is qualified by the name
+of the enclosing item. The exact locations in which sub-items may be
+declared is given by the grammar.  @xref{Ref.Gram}.
 
-Functions, predicates, objects and types may be @emph{parameterised}
-by type. Type parameters are given as a comma-separated list of
-identifiers enclosed in square brackets (@code{[]}), after the name of
-the item and before its definition.  The type parameters of an item
-are part of the name, not the type of the item; in order to refer to
-the type-parameterised item, a referencing name must in general
-provide type arguments as a list of comma-separated types enclosed
-within square brackets (though the type-inference system can often
-infer such argument types from context). There are no general
-parametric types.
+Functions, iterators, predicates, objects and types may be
+@emph{parameterised} by type. Type parameters are given as a
+comma-separated list of identifiers enclosed in square brackets
+(@code{[]}), after the name of the item and before its definition.
+The type parameters of an item are part of the name, not the type of
+the item; in order to refer to the type-parameterised item, a
+referencing name must in general provide type arguments as a list of
+comma-separated types enclosed within square brackets (though the
+type-inference system can often infer such argument types from
+context). There are no general parametric types.
 
 @menu
 * Ref.Item.Mod::                Items defining modules.
 * Ref.Item.Fn::                 Items defining functions.
+* Ref.Item.Iter::               Items defining iterators.
 * Ref.Item.Pred::               Items defining typestate predicates.
 * Ref.Item.Obj::                Items defining objects.
 * Ref.Item.Type::               Items defining the types of values and slots.
@@ -1618,28 +1602,7 @@ function is one that has no side effects, calls no impure functions,
 and is declared with the @code{pure} keyword. A function lacking any
 of these characteristics is @dfn{impure}.
 
-There are two primary kinds of functions: @emph{solo functions}
-and @emph{iterator functions}.
-
-@menu
-* Ref.Item.Fn.Solo::            Items defining solo functions.
-* Ref.Item.Fn.Iter::            Items defining iterator functions.
-@end menu
-
-@page
-@node          Ref.Item.Fn.Solo
-@subsubsection Ref.Item.Fn.Solo
-@c * Ref.Item.Fn.Solo::     Items defining solo functions.
-
-Solo functions are those that return a single value. The output slot
-of a solo function is the type of value that will be provided when the
-function executes a @code{ret} or @code{be} statement and completes
-its execution.
-
-A @code{put} statement cannot occur in the statements of a solo
-function.
-
-An example of a solo function:
+An example of a function:
 @example
 fn add(int x, int y) -> int @{
     ret x + y;
@@ -1647,39 +1610,30 @@ fn add(int x, int y) -> int @{
 @end example
 
 @page
-@node          Ref.Item.Fn.Iter
-@subsubsection Ref.Item.Fn.Iter
-@c * Ref.Item.Fn.Iter::     Items defining iterator functions.
+@node          Ref.Item.Iter
+@subsection    Ref.Item.Iter
+@c * Ref.Item.Iter::          Items defining iterators.
 
-Iterator functions are those that have a @emph{protocol}. The protocol
-of an iterator function defines how many values (in a
-``zero-one-infinity'' counting sense) the iterator function will
-@code{put} before it executes a @code{ret} or @code{be} statement and
-completes its execution. Protocols are indicated by a variant of the
-@code{fn} keyword, as follows:
+Iterators are function-like items that can @code{put} multiple values
+during their execution before returning or tail-calling.
 
-@itemize
-@item
-@code{fn?} indicates a function that will put either 0 or 1 value, then complete.
-@item
-@code{fn!} indicates a function that will put exactly 1 value, then complete.
-@item
-@code{fn*} indicates a function that will put 0 or more values, then complete.
-@item
-@code{fn+} indicates a function that will put 1 or more values, then complete.
-@end itemize
+Putting a value is similar to returning a value -- the argument to
+@code{put} is copied into the caller's frame and control transfers
+back to the caller -- but the iterator frame is only @emph{suspended}
+during the put, and will be @emph{resumed} at the statement after the
+@code{put}, on the next iteration of the caller's loop.
 
-The output type of an iterator function is the type of value that the
-function will @code{put}, before it eventually executes a @code{ret}
-or @code{be} statement of type @code{()} and completes its execution.
+The output type of an iterator is the type of value that the function
+will @code{put}, before it eventually executes a @code{ret} or
+@code{be} statement of type @code{()} and completes its execution.
 
-An iterator function can only be called in the loop header of a
-matching @code{for} loop. For example a @code{fn+} iterator function
-can only be called from a @code{for+} loop header. @xref{Ref.Stmt.For.Iter}.
+An iterator can only be called in the loop header of a matching
+@code{for each} loop or as the argument in a @code{put each}
+statement.  @xref{Ref.Stmt.Foreach}.
 
-An example of an iterator function:
+An example of an iterator:
 @example
-fn* range(int lo, int hi) -> int @{
+iter range(int lo, int hi) -> int @{
     let int i = lo;
     while (i < hi) @{
         put i;
@@ -1688,8 +1642,8 @@ fn* range(int lo, int hi) -> int @{
 @}
 
 let int sum = 0;
-for* (int x = range(0,100)) @{
-    sum = sum + x;
+for each (int x = range(0,100)) @{
+    sum += x;
 @}
 @end example
 
@@ -1813,7 +1767,8 @@ identifiers in any context.
 * Ref.Type.Tup::                Fixed products of homogeneous types.
 * Ref.Type.Vec::                Open products of homogeneous types.
 * Ref.Type.Tag::                Closed sums of heterogeneous types.
-* Ref.Type.Fn::                 Subroutines and scoped coroutine types.
+* Ref.Type.Fn::                 Subroutine types.
+* Ref.Type.Iter::               Scoped coroutine types.
 * Ref.Type.Port::               Unique inter-task message-receipt endpoints.
 * Ref.Type.Chan::               Copyable inter-task message-sending capabilities.
 * Ref.Type.Task::               General coroutine-instance types.
@@ -1931,7 +1886,7 @@ The record type-constructor @code{rec} forms new heterogeneous product
 of slots.@footnote{The @code{rec} type-constructor is analogous to
 the @code{struct} type-constructor in the Algol/C family, the
 @emph{record} types of the ML family, or the @emph{structure} types of
-the Lisp family}. Fields of a @code{rec} type are accessed by name and
+the Lisp family.} Fields of a @code{rec} type are accessed by name and
 are arranged in memory in the order specified by the @code{rec} type.
 
 An example of a @code{rec} type and its use:
@@ -2017,7 +1972,7 @@ access to a vector is always bounds-checked.
 The @code{tag} type-constructor forms new heterogeneous disjoint sum
 types.@footnote{The @code{tag} type is analogous to a
 @code{data} constructor declaration in ML or a @emph{pick ADT} in
-Limbo}. A @code{tag} type consists of a number of @emph{variants},
+Limbo.} A @code{tag} type consists of a number of @emph{variants},
 each of which is independently named and takes an optional tuple of
 arguments.
 
@@ -2055,12 +2010,11 @@ let list[int] a = cons(7, cons(13, nil));
 @subsection Ref.Type.Fn
 
 The function type-constructor @code{fn} forms new function types. A
-function type consists of an optional protocol, an input type, an
-output type, and a set of flag indicating whether the function is
-@code{pure}. Like all functions, first-class values of function type
-may be @emph{solo functions} or @emph{iterator functions}. @xref{Ref.Item.Fn}.
+function type consists of a set of input types, an output type, and a
+flag indicating whether the function is
+@code{pure}. @xref{Ref.Item.Fn}.
 
-An example of a solo @code{fn} type:
+An example of a @code{fn} type:
 @example
 fn add(int x, int y) -> int @{
   ret x + y;
@@ -2071,6 +2025,31 @@ let int x = add(5,7);
 type binop = fn(int,int) -> int;
 let binop bo = add;
 x = bo(5,7);
+@end example
+
+@page
+@node       Ref.Type.Iter
+@subsection Ref.Type.Iter
+
+The iterator type-constructor @code{iter} forms new iterator types. An
+witeratorfunction type consists a set of input types, an output type,
+and a flag indicating whether the iterator is
+@code{pure}. @xref{Ref.Item.Iter}.
+
+An example of an @code{iter} type:
+@example
+iter range(int x, int y) -> int @{
+  while (x < y) @{
+    put x;
+    x += 1;
+  @}
+@}
+
+type itt = iter(int,int) -> int;
+let itt i = range;
+for each (int j = i(5,7)) @{
+  @dots{};
+@}
 @end example
 
 
@@ -2278,7 +2257,7 @@ actions.
 * Ref.Stmt.Send::               Statements for sending a value into a channel.
 * Ref.Stmt.Flush::              Statement for flushing a channel queue.
 * Ref.Stmt.Recv::               Statement for receiving a value from a channel.
-* Ref.Stmt.Call::               Statement for calling a solo function.
+* Ref.Stmt.Call::               Statement for calling a function.
 * Ref.Stmt.Bind::               Statement for binding arguments to functions.
 * Ref.Stmt.Ret::                Statement for stopping and producing a value.
 * Ref.Stmt.Be::                 Statement for stopping and executing a tail call.
@@ -2289,7 +2268,8 @@ actions.
 * Ref.Stmt.While::              Statement for simple conditional looping.
 * Ref.Stmt.Break::              Statement for terminating a loop.
 * Ref.Stmt.Cont::               Statement for terminating a single loop iteration.
-* Ref.Stmt.For::                Statement for complex conditional looping.
+* Ref.Stmt.For::                Statement for looping over strings and vectors.
+* Ref.Stmt.Foreach::            Statement for looping via an iterator.
 * Ref.Stmt.If::                 Statement for simple conditional branching.
 * Ref.Stmt.Alt::                Statement for complex conditional branching.
 * Ref.Stmt.Prove::              Statement for static assertion of typestate.
@@ -2680,10 +2660,10 @@ let str s <- p;
 @page
 @node       Ref.Stmt.Call
 @subsection Ref.Stmt.Call
-@c * Ref.Stmt.Call::               Statement for calling a solo function.
+@c * Ref.Stmt.Call::               Statement for calling a function.
 
-A @dfn{call statement} invokes a solo function, providing a tuple of
-input slots and a reference to an output slot. If the solo function
+A @dfn{call statement} invokes a function, providing a tuple of
+input slots and a reference to an output slot. If the function
 eventually returns, then the statement completes.
 
 A call statement statically requires that the precondtion declared in
@@ -2703,7 +2683,7 @@ let int x = add(1, 2);
 
 A @dfn{bind statement} constructs a new function from an existing
 function.@footnote{The @code{bind} statement is analogous to the
-@code{bind} expression in the Sather language.}  The new function has
+@code{bind} expression in the Sather language.} The new function has
 zero or more of its arguments @emph{bound} into a new, hidden exterior
 tuple that holds the bindings. For each concrete argument passed in
 the @code{bind} statement, the corresponding parameter in the existing
@@ -2804,18 +2784,21 @@ with a new copy of itself.
 @c * Ref.Stmt.Put::                Statement for pausing and producing a value.
 
 Executing a @code{put} statement copies a value into the put slot of
-the current iterator function, suspends execution of the current
-iterator function, and transfers control to the current put-recipient
-frame.@footnote{A @code{put} statement is analogous to a @code{yield}
+the current iterator, suspends execution of the current
+iterator, and transfers control to the current put-recipient
+frame.
+
+A @code{put} statement is only valid within an iterator.
+@footnote{A @code{put} statement is analogous to a @code{yield}
 statement in the CLU, Sather and Objective C 2.0 languages, or in more
 recent languages providing a ``generator'' facility, such as Python,
 Javascript or C#. Like the generators of CLU, Sather and Objective C
-2.0, but @emph{unlike} these later languages, Rust's iterator
-functions reside on the stack and obey a strict stack discipline.} The
+2.0, but @emph{unlike} these later languages, Rust's iterators
+reside on the stack and obey a strict stack discipline.} The
 current put-recipient will eventually resume the suspended iterator
-function containing the @code{put} statement, either continuing
+containing the @code{put} statement, either continuing
 execution after the @code{put} statement, or terminating its execution
-and destroying the iterator function frame.
+and destroying the iterator frame.
 
 
 @page
@@ -2934,7 +2917,7 @@ do @{
 @page
 @node       Ref.Stmt.Break
 @subsection Ref.Stmt.Break
-@c * Ref.Stmt.For::                Statement for terminating a loop.
+@c * Ref.Stmt.Break::              Statement for terminating a loop.
 
 Executing a @code{break} statement immediately terminates the
 innermost loop enclosing it. It is only permitted in the body of a
@@ -2943,14 +2926,14 @@ loop.
 @page
 @node       Ref.Stmt.Cont
 @subsection Ref.Stmt.Cont
-@c * Ref.Stmt.For::                Statement for terminating a single loop iteration.
+@c * Ref.Stmt.Cont::               Statement for terminating a single loop iteration.
 
 Executing a @code{cont} statement immediately terminates the current
 iteration of the innermost loop enclosing it, returning control to the
 loop @emph{head}. In the case of a @code{while} loop, the head is the
 conditional expression controlling the loop. In the case of a
-@code{for} loop, the head is the iterator or vector-slice increment
-controlling the loop.
+@code{for} or @code{for each} loop, the head is the iterator or
+vector-slice increment controlling the loop.
 
 A @code{cont} statement is only permitted in the body of a loop.
 
@@ -2958,69 +2941,51 @@ A @code{cont} statement is only permitted in the body of a loop.
 @page
 @node       Ref.Stmt.For
 @subsection Ref.Stmt.For
-@c * Ref.Stmt.For::                Statement for complex conditional looping.
+@c * Ref.Stmt.For::                Statement for looping over strings and vectors.
 
-A @code{for} statement is a loop construct. There are two types of
-@code{for} statement: @emph{linear} for-loops and @emph{iterator}
-for-loops.
+A @dfn{for loop} is controlled by a vector or string. The for loop
+bounds-checks the underlying sequence @emph{once} when initiating the
+loop, then repeatedly copies each value of the underlying sequence
+into the element variable, executing the loop body once per copy. To
+perform a for loop on a sub-range of a vector or string, form a
+temporary slice over the sub-range and run the loop over the slice.
 
-@menu
-* Ref.Stmt.For.Linear::         Statement for looping over vectors.
-* Ref.Stmt.For.Iter::           Statement for general conditional looping.
-@end menu
-
-@page
-@node          Ref.Stmt.For.Linear
-@subsubsection Ref.Stmt.For.Linear
-@c * Ref.Stmt.For.Linear::         Statement for looping over vectors.
-
-A @dfn{linear for-loop} is controlled by a vector or string. The
-linear for-loop bounds-checks the underlying sequence @emph{once} when
-initiating the loop, then repeatedly copies each value of the
-underlying sequence into the element variable, executing the loop body
-once per copy. To perform a linear for-loop on a sub-range of a vector
-or string, form a temporary slice over the sub-range and run the loop
-over the slice.
-
-Example of a 4 linear for-loops, all identical:
+Example of a 4 for loops, all identical:
 @example
 let vec[foo] v = vec(a, b, c);
 
-for (~foo e = v.(0, vec.len(v), 1)) @{
+for (~foo e in v.(0, _vec.len(v))) @{
     bar(e);
 @}
 
-for (~foo e = v.(0, vec.len(v))) @{
+for (~foo e in v.(0,)) @{
     bar(e);
 @}
 
-for (~foo e = v.(0,)) @{
+for (~foo e in v.(,)) @{
     bar(e);
 @}
 
-for (~foo e = v.(,)) @{
+for (~foo e in v) @{
     bar(e);
 @}
 @end example
 
 @page
-@node          Ref.Stmt.For.Iter
-@subsubsection Ref.Stmt.For.Iter
-@c * Ref.Stmt.For.Iter::           Statement for general conditional looping.
+@node          Ref.Stmt.Foreach
+@subsection    Ref.Stmt.Foreach
+@c * Ref.Stmt.Foreach::           Statement for general conditional looping.
 
-An @dfn{iterator} for-loop is controlled by an iterator function. The
-for loop executes once for each value @code{put} by the iterator
-function.  When the iterator function returns or fails, the loop
-terminates.
+An @dfn{foreach loop} is denoted by the @code{for each} keywords, and
+is controlled by an iterator. The loop executes once for each value
+@code{put} by the iterator.  When the iterator returns or fails, the
+loop terminates.
 
-The protocol of an iterator for-loop must match the protocol of the iterator
-function it is calling. @xref{Ref.Item.Fn.Iter}.
-
-Example of an iterator for-loop:
+Example of a foreach loop:
 @example
 let str txt;
 let vec[str] lines;
-for* (~str s = str.split(txt, "\n")) @{
+for each (~str s = _str.split(txt, "\n")) @{
     vec.push(lines, s);
 @}
 @end example
@@ -3047,7 +3012,7 @@ block is skipped and any @code{else} block is executed.
 
 An @code{alt} statement is a multi-directional branch in program control.
 There are three kinds of @code{alt} statement: communication @code{alt}
-statements, @code{alt tag} statements, and @code{alt type} statements.
+statements, pattern @code{alt} statements, and @code{alt type} statements.
 
 The form of each kind of @code{alt} is similar: an initial @emph{head}
 that describes the criteria for branching, followed by a sequence of

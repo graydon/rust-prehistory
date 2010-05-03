@@ -108,8 +108,8 @@ let stmt_collecting_visitor
             end
         | Ast.STMT_for f ->
             visit_for_block f.Ast.for_slot f.Ast.for_body.id
-        | Ast.STMT_foreach f ->
-            visit_for_block f.Ast.foreach_slot f.Ast.foreach_body.id
+        | Ast.STMT_for_each f ->
+            visit_for_block f.Ast.for_each_slot f.Ast.for_each_body.id
         | Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
             let resolve_arm { node = (_, bindings, block); id = _ } =
               let slots = Hashtbl.find cx.ctxt_block_slots block.id in

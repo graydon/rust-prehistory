@@ -2716,7 +2716,7 @@ let rec extract_mod_items
           let oslot = get_referenced_slot die in
           let (params, islots) = get_formals die in
           let taux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
-                       Ast.fn_proto = None }
+                       Ast.fn_is_iter = false }
           in
           let tfn = { Ast.fn_input_slots = form_header_slots islots;
                        Ast.fn_input_constrs = [| |];

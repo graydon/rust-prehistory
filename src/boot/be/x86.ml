@@ -1243,7 +1243,7 @@ let self_args_cell (self_args_rty:Il.referent_ty) : Il.cell =
   Il.Mem (Il.RegIn (h ebp, Some (Asm.IMM frame_base_sz)), self_args_rty)
 ;;
 
-let iterator_prologue (e:Il.emitter) (self_args_rty:Il.referent_ty) ((*proto*)_:Ast.proto) : unit =
+let iterator_prologue (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
   let edx_n = word_n (h edx) in
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in

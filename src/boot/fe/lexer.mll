@@ -26,17 +26,27 @@
                 ("alt", ALT);
                 ("case", CASE);
 
+                ("for", FOR);
+                ("each", EACH);
+                ("put", PUT);
+                ("ret", RET);
+                ("be", BE);
+
                 ("fail", FAIL);
                 ("fini", FINI);
 
                 ("type", TYPE);
                 ("pred", PRED);
                 ("check", CHECK);
+                ("claim", CLAIM);
                 ("prove", PROVE);
 
                 ("pure", PURE);
                 ("mutable", MUTABLE);
                 ("auto", AUTO);
+
+                ("fn", FN);
+                ("iter", ITER);
 
                 ("import", IMPORT);
                 ("export", EXPORT);
@@ -158,36 +168,6 @@ rule token = parse
 | ')'                          { RPAREN     }
 | '['                          { LBRACKET   }
 | ']'                          { RBRACKET   }
-
-| "fn"                         { FN None                }
-| "fn?"                        { FN (Some Ast.PROTO_ques)   }
-| "fn!"                        { FN (Some Ast.PROTO_bang)   }
-| "fn*"                        { FN (Some Ast.PROTO_star)   }
-| "fn+"                        { FN (Some Ast.PROTO_plus)   }
-
-| "for"                        { FOR None               }
-| "for?"                       { FOR (Some Ast.PROTO_ques)  }
-| "for!"                       { FOR (Some Ast.PROTO_bang)  }
-| "for*"                       { FOR (Some Ast.PROTO_star)  }
-| "for+"                       { FOR (Some Ast.PROTO_plus)  }
-
-| "ret"                        { RET None               }
-| "ret?"                       { RET (Some Ast.PROTO_ques)  }
-| "ret!"                       { RET (Some Ast.PROTO_bang)  }
-| "ret*"                       { RET (Some Ast.PROTO_star)  }
-| "ret+"                       { RET (Some Ast.PROTO_plus)  }
-
-| "put"                        { PUT None               }
-| "put?"                       { PUT (Some Ast.PROTO_ques)  }
-| "put!"                       { PUT (Some Ast.PROTO_bang)  }
-| "put*"                       { PUT (Some Ast.PROTO_star)  }
-| "put+"                       { PUT (Some Ast.PROTO_plus)  }
-
-| "be"                         { BE None               }
-| "be?"                        { BE (Some Ast.PROTO_ques)  }
-| "be!"                        { BE (Some Ast.PROTO_bang)  }
-| "be*"                        { BE (Some Ast.PROTO_star)  }
-| "be+"                        { BE (Some Ast.PROTO_plus)  }
 
 | id as i
                                { try

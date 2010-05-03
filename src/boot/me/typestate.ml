@@ -403,7 +403,11 @@ let condition_assigning_visitor
                   raise_postcondition s.id postcond
               end
 
-        | Ast.STMT_ret (_, Some at) ->
+        | Ast.STMT_ret (Some at) ->
+            let precond = Array.map (fun s -> Constr_init s) (atom_slots cx at) in
+              raise_precondition s.id precond
+
+        | Ast.STMT_put (Some at) ->
             let precond = Array.map (fun s -> Constr_init s) (atom_slots cx at) in
               raise_precondition s.id precond
 
@@ -434,10 +438,10 @@ let condition_assigning_visitor
               raise_precondition s.id precond;
               Array.iter visit_arm at.Ast.alt_tag_arms
 
-        | Ast.STMT_foreach fe ->
-            let (si, _) = fe.Ast.foreach_slot in
+        | Ast.STMT_for_each fe ->
+            let (si, _) = fe.Ast.for_each_slot in
             let block_entry_state = [| Constr_init si.id |] in
-              raise_postcondition fe.Ast.foreach_body.id block_entry_state
+              raise_postcondition fe.Ast.for_each_body.id block_entry_state
 
         | Ast.STMT_for fo ->
             let (si, _) = fo.Ast.for_slot in

@@ -293,6 +293,7 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/spawn-fn.rs \
                     test/run-pass/rec-auto.rs \
                     test/run-pass/foreach-simple.rs \
+                    test/run-pass/vec-slice.rs \
                     test/run-pass/generic-derived-type.rs \
                     test/run-pass/generic-tag.rs \
                     test/run-pass/generic-obj.rs \
@@ -303,7 +304,7 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
 TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       basic.rs bind-thunk.rs bind-trivial.rs char.rs comm.rs \
                       complex.rs dead-code-one-arm-if.rs deep.rs div-mod.rs \
-                      drop-on-ret.rs exterior.rs foreach-simple.rs \
+                      drop-on-ret.rs exterior.rs foreach-simple.rs vec-slice.rs \
                       simple-obj.rs import.rs fun-call-variants.rs \
                       fun-indirect-call.rs generic-fn.rs \
                       inner-module.rs large-records.rs lazychan.rs \

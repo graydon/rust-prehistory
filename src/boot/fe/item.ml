@@ -275,40 +275,46 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                    Ast.if_then = then_block;
                    Ast.if_else = else_block; })
 
-      | FOR None ->
+      | FOR ->
           bump ps;
-          let inner ps =
-            let slot = (parse_identified_slot_and_ident false ps) in
-            let _    = (expect ps IN) in
-            let lval = (parse_lval ps) in
-              (slot, lval) in
-          let (slot, seq) = ctxt "stmts: for head" (bracketed LPAREN RPAREN inner) ps in
-          let body_block = ctxt "stmts: for body" parse_block ps in
-          let bpos = lexpos ps in
-            [| span ps apos bpos
-                 (Ast.STMT_for
-                    { Ast.for_slot = slot;
-                      Ast.for_seq = seq;
-                      Ast.for_body = body_block; }) |]
-
-      | FOR (Some proto) ->
-          bump ps;
-          let inner ps : ((Ast.slot identified * Ast.ident) * Ast.stmt array * (Ast.lval * Ast.atom array)) =
-            let slot = (parse_identified_slot_and_ident true ps) in
-            let _    = (expect ps EQ) in
-            let (stmts1, iter) = (rstr true parse_lval) ps in
-            let (stmts2, args) = parse_expr_atom_list LPAREN RPAREN ps in
-              (slot, Array.append stmts1 stmts2, (iter, args))
-          in
-          let (slot, stmts, call) = ctxt "stmts: foreach head" (bracketed LPAREN RPAREN inner) ps in
-          let body_block = ctxt "stmts: foreach body" parse_block ps in
-          let bpos = lexpos ps in
-            Array.append stmts [| span ps apos bpos
-                                    (Ast.STMT_foreach
-                                       { Ast.foreach_proto = proto;
-                                         Ast.foreach_slot = slot;
-                                         Ast.foreach_call = call;
-                                         Ast.foreach_body = body_block; }) |]
+          begin
+            match peek ps with
+                EACH ->
+                  bump ps;
+                  let inner ps : ((Ast.slot identified * Ast.ident)
+                                  * Ast.stmt array
+                                  * (Ast.lval * Ast.atom array)) =
+                    let slot = (parse_identified_slot_and_ident true ps) in
+                    let _    = (expect ps EQ) in
+                    let (stmts1, iter) = (rstr true parse_lval) ps in
+                    let (stmts2, args) = parse_expr_atom_list LPAREN RPAREN ps in
+                      (slot, Array.append stmts1 stmts2, (iter, args))
+                  in
+                  let (slot, stmts, call) = ctxt "stmts: foreach head"
+                    (bracketed LPAREN RPAREN inner) ps
+                  in
+                  let body_block = ctxt "stmts: foreach body" parse_block ps in
+                  let bpos = lexpos ps in
+                    Array.append stmts [| span ps apos bpos
+                                            (Ast.STMT_for_each
+                                               { Ast.for_each_slot = slot;
+                                                 Ast.for_each_call = call;
+                                                 Ast.for_each_body = body_block; }) |]
+              | _ ->
+                  let inner ps =
+                    let slot = (parse_identified_slot_and_ident false ps) in
+                    let _    = (expect ps IN) in
+                    let lval = (parse_lval ps) in
+                      (slot, lval) in
+                  let (slot, seq) = ctxt "stmts: for head" (bracketed LPAREN RPAREN inner) ps in
+                  let body_block = ctxt "stmts: for body" parse_block ps in
+                  let bpos = lexpos ps in
+                    [| span ps apos bpos
+                         (Ast.STMT_for
+                            { Ast.for_slot = slot;
+                              Ast.for_seq = seq;
+                              Ast.for_body = body_block; }) |]
+          end
 
       | WHILE ->
           bump ps;
@@ -320,19 +326,34 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                     { Ast.while_lval = (stmts, test);
                       Ast.while_body = body_block; }) |]
 
-      | PUT proto ->
-          bump ps;
-          let (stmts, e) =
+      | PUT ->
+          begin
+            bump ps;
             match peek ps with
-                SEMI -> (arr [], None)
-              | _ ->
-                  let (stmts, expr) = ctxt "stmts: put expr" parse_expr_atom ps in
+                EACH ->
+                  bump ps;
+                  let (lstmts, lval) = ctxt "put each: lval" (rstr true parse_lval) ps in
+                  let (astmts, args) = ctxt "put each: args" (parse_expr_atom_list LPAREN RPAREN) ps in
+                  let bpos = lexpos ps in
+                  let be = span ps apos bpos (Ast.STMT_put_each (lval, args)) in
                     expect ps SEMI;
-                    (stmts, Some expr)
-          in
-            spans ps stmts apos (Ast.STMT_put (proto, e))
+                    Array.concat [ lstmts; astmts; [| be |] ]
 
-      | RET proto ->
+              | _ ->
+                  begin
+                    let (stmts, e) =
+                      match peek ps with
+                          SEMI -> (arr [], None)
+                        | _ ->
+                            let (stmts, expr) = ctxt "stmts: put expr" parse_expr_atom ps in
+                              expect ps SEMI;
+                              (stmts, Some expr)
+                    in
+                      spans ps stmts apos (Ast.STMT_put e)
+                  end
+          end
+
+      | RET ->
           bump ps;
           let (stmts, e) =
             match peek ps with
@@ -342,14 +363,14 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                     expect ps SEMI;
                     (stmts, Some expr)
           in
-            spans ps stmts apos (Ast.STMT_ret (proto, e))
+            spans ps stmts apos (Ast.STMT_ret e)
 
-      | BE proto ->
+      | BE ->
           bump ps;
           let (lstmts, lval) = ctxt "be: lval" (rstr true parse_lval) ps in
           let (astmts, args) = ctxt "be: args" (parse_expr_atom_list LPAREN RPAREN) ps in
           let bpos = lexpos ps in
-          let be = span ps apos bpos (Ast.STMT_be (proto, lval, args)) in
+          let be = span ps apos bpos (Ast.STMT_be (lval, args)) in
             expect ps SEMI;
             Array.concat [ lstmts; astmts; [| be |] ]
 
@@ -654,7 +675,7 @@ and parse_in_and_out
 
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn
-    (proto_opt:Ast.proto option)
+    (is_iter:bool)
     (pure:Ast.purity)
     (ps:pstate)
     : Ast.fn =
@@ -664,7 +685,7 @@ and parse_fn
         Ast.fn_input_constrs = constrs;
         Ast.fn_output_slot = output;
         Ast.fn_aux = { Ast.fn_purity = pure;
-                       Ast.fn_proto = proto_opt; };
+                       Ast.fn_is_iter = is_iter; };
         Ast.fn_body = body; }
 
 and parse_pred (ps:pstate) : Ast.pred =
@@ -730,14 +751,15 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
 
     match peek ps with
 
-        FN proto_opt ->
-          bump ps;
-          let (ident, params) = parse_ident_and_params ps "fn" in
-          let fn = ctxt "mod fn item: fn" (parse_fn proto_opt pure) ps in
-          let bpos = lexpos ps in
-            (ident,
-             span ps apos bpos
-               (decl params (Ast.MOD_ITEM_fn fn)))
+        FN | ITER ->
+          let is_iter = (peek ps) = ITER in
+            bump ps;
+            let (ident, params) = parse_ident_and_params ps "fn" in
+            let fn = ctxt "mod fn item: fn" (parse_fn is_iter pure) ps in
+            let bpos = lexpos ps in
+              (ident,
+               span ps apos bpos
+                 (decl params (Ast.MOD_ITEM_fn fn)))
 
       | PRED ->
           bump ps;
@@ -840,12 +862,13 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                       | _ -> Ast.IMPURE Ast.IMMUTABLE
                   in
                     match peek ps with
-                        FN proto_opt ->
-                          bump ps;
-                          let ident = ctxt "obj fn: ident" Pexp.parse_ident ps in
-                          let fn = ctxt "obj fn: fn" (parse_fn proto_opt pure) ps in
-                          let bpos = lexpos ps in
-                            htab_put fns ident (span ps apos bpos fn)
+                        FN | ITER ->
+                          let is_iter = (peek ps) = ITER in
+                            bump ps;
+                            let ident = ctxt "obj fn: ident" Pexp.parse_ident ps in
+                            let fn = ctxt "obj fn: fn" (parse_fn is_iter pure) ps in
+                            let bpos = lexpos ps in
+                              htab_put fns ident (span ps apos bpos fn)
                       | RBRACE -> ()
                       | _ -> raise (unexpected ps)
                 done;
@@ -889,21 +912,22 @@ and parse_mod_item_from_signature (ps:pstate)
           let bpos = lexpos ps in
           (ident, span ps apos bpos (decl params (Ast.MOD_ITEM_mod items)))
 
-    | FN _ ->
-        bump ps;
-        let (ident, params) = parse_ident_and_params ps "fn signature" in
-        let (inputs, constrs, output) = parse_in_and_out ps in
-          expect ps SEMI;
-          let bpos = lexpos ps in
-          let body = span ps apos bpos [| |] in
-          let fn =
-            Ast.MOD_ITEM_fn
-              { Ast.fn_input_slots = inputs;
-                Ast.fn_input_constrs = constrs;
-                Ast.fn_output_slot = output;
-                Ast.fn_aux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
-                               Ast.fn_proto = None; };
-                Ast.fn_body = body; }
+    | FN | ITER ->
+        let is_iter = (peek ps) = ITER in
+          bump ps;
+          let (ident, params) = parse_ident_and_params ps "fn signature" in
+          let (inputs, constrs, output) = parse_in_and_out ps in
+            expect ps SEMI;
+            let bpos = lexpos ps in
+            let body = span ps apos bpos [| |] in
+            let fn =
+              Ast.MOD_ITEM_fn
+                { Ast.fn_input_slots = inputs;
+                  Ast.fn_input_constrs = constrs;
+                  Ast.fn_output_slot = output;
+                  Ast.fn_aux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
+                                 Ast.fn_is_iter = is_iter; };
+                  Ast.fn_body = body; }
           in
             (ident, span ps apos bpos (decl params fn))
 

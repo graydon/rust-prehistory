@@ -44,8 +44,8 @@ let alias_analysis_visitor
         | Ast.STMT_init_chan (dst, _) -> alias dst
         | Ast.STMT_init_vec (dst, _, _) -> alias dst
         | Ast.STMT_init_str (dst, _) -> alias dst
-        | Ast.STMT_foreach sfe ->
-            let (slot, _) = sfe.Ast.foreach_slot in
+        | Ast.STMT_for_each sfe ->
+            let (slot, _) = sfe.Ast.for_each_slot in
               alias_slot slot.id
         | _ -> () (* FIXME (bug 541572): plenty more to handle here. *)
     end;

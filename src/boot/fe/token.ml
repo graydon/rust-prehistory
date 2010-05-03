@@ -63,15 +63,17 @@ type token =
   | FINI
 
   | IN
-  | FOR of Ast.proto option
-  | PUT of Ast.proto option
-  | RET of Ast.proto option
-  | BE of Ast.proto option
+  | FOR
+  | EACH
+  | PUT
+  | RET
+  | BE
 
   (* Type and type-state keywords *)
   | TYPE
   | PRED
   | CHECK
+  | CLAIM
   | PROVE
 
   (* Type qualifiers *)
@@ -121,7 +123,8 @@ type token =
   | ANY
 
   (* Callable type constructors *)
-  | FN of Ast.proto option
+  | FN
+  | ITER
 
   (* Object type *)
   | OBJ
@@ -202,35 +205,18 @@ let rec string_of_tok t =
     | FINI       -> "fini"
 
     | IN         -> "in"
-    | FOR None   -> "for"
-    | FOR (Some Ast.PROTO_ques)   -> "for?"
-    | FOR (Some Ast.PROTO_bang)   -> "for!"
-    | FOR (Some Ast.PROTO_star)   -> "for*"
-    | FOR (Some Ast.PROTO_plus)   -> "for+"
-
-    | PUT None   -> "put"
-    | PUT (Some Ast.PROTO_ques)   -> "put?"
-    | PUT (Some Ast.PROTO_bang)   -> "put!"
-    | PUT (Some Ast.PROTO_star)   -> "put*"
-    | PUT (Some Ast.PROTO_plus)   -> "put+"
-
-    | RET None   -> "ret"
-    | RET (Some Ast.PROTO_ques)   -> "ret?"
-    | RET (Some Ast.PROTO_bang)   -> "ret!"
-    | RET (Some Ast.PROTO_star)   -> "ret*"
-    | RET (Some Ast.PROTO_plus)   -> "ret+"
-
-    | BE None   -> "be"
-    | BE (Some Ast.PROTO_ques)   -> "be?"
-    | BE (Some Ast.PROTO_bang)   -> "be!"
-    | BE (Some Ast.PROTO_star)   -> "be*"
-    | BE (Some Ast.PROTO_plus)   -> "be+"
+    | FOR        -> "for"
+    | EACH       -> "each"
+    | PUT        -> "put"
+    | RET        -> "ret"
+    | BE         -> "be"
 
 
     (* Type and type-state keywords *)
     | TYPE       -> "type"
     | PRED       -> "pred"
     | CHECK      -> "check"
+    | CLAIM      -> "claim"
     | PROVE      -> "prove"
 
     (* Type qualifiers *)
@@ -255,7 +241,7 @@ let rec string_of_tok t =
 
     (* Literals *)
     | LIT_INT (_,s)  -> s
-    | LIT_FLO n -> n
+    | LIT_FLO n  -> n
     | LIT_STR s  -> ("\"" ^ (String.escaped s) ^ "\"")
     | LIT_CHAR c -> ("'" ^ (Char.escaped c) ^ "'")
     | LIT_BOOL b -> if b then "true" else "false"
@@ -279,15 +265,12 @@ let rec string_of_tok t =
     | VEC        -> "vec"
     | ANY        -> "any"
 
-    (* Function type constructors *)
-    | FN None   -> "fn"
-    | FN (Some Ast.PROTO_ques)   -> "fn?"
-    | FN (Some Ast.PROTO_bang)   -> "fn!"
-    | FN (Some Ast.PROTO_star)   -> "fn*"
-    | FN (Some Ast.PROTO_plus)   -> "fn+"
+    (* Callable type constructors *)
+    | FN         -> "fn"
+    | ITER       -> "fn"
 
     (* Object type *)
-    | OBJ -> "obj"
+    | OBJ        -> "obj"
 
     (* Ports and channels *)
     | CHAN          -> "chan"
@@ -298,7 +281,7 @@ let rec string_of_tok t =
 
     | BRACEQUOTE _ -> "{...bracequote...}"
 
-    | EOF        -> "<EOF>"
+    | EOF          -> "<EOF>"
 ;;
 
 

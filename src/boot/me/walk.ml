@@ -393,15 +393,15 @@ and walk_stmt
       walk_lval v lv;
       walk_block v s.Ast.for_body
   in
-  let walk_stmt_foreach
-      (s:Ast.stmt_foreach)
+  let walk_stmt_for_each
+      (s:Ast.stmt_for_each)
       : unit =
-    let (si,_) = s.Ast.foreach_slot in
-    let (f,az) = s.Ast.foreach_call in
+    let (si,_) = s.Ast.for_each_slot in
+    let (f,az) = s.Ast.for_each_call in
       walk_slot_identified v si;
       walk_lval v f;
       Array.iter (walk_atom v) az;
-      walk_block v s.Ast.foreach_body
+      walk_block v s.Ast.for_each_body
   in
   let walk_stmt_while
       (s:Ast.stmt_while)
@@ -442,8 +442,8 @@ and walk_stmt
       | Ast.STMT_for f ->
           walk_stmt_for f
 
-      | Ast.STMT_foreach f ->
-          walk_stmt_foreach f
+      | Ast.STMT_for_each f ->
+          walk_stmt_for_each f
 
       | Ast.STMT_while w ->
           walk_stmt_while w
@@ -484,11 +484,15 @@ and walk_stmt
           walk_lval v p;
           Array.iter (walk_atom v) az
 
-      | Ast.STMT_ret (_, ao) ->
+      | Ast.STMT_ret ao ->
           walk_option (walk_atom v) ao
 
-      | Ast.STMT_put (_, at) ->
+      | Ast.STMT_put at ->
           walk_option (walk_atom v) at
+
+      | Ast.STMT_put_each (lv, ats) ->
+          walk_lval v lv;
+          Array.iter (walk_atom v) ats
 
       (* FIXME: this should have a param array, and invoke the visitors. *)
       | Ast.STMT_decl (Ast.DECL_mod_item (id, mi)) ->
@@ -512,7 +516,7 @@ and walk_stmt
           walk_lval v dst;
           walk_lval v src
 
-      | Ast.STMT_be (_, lv, ats) ->
+      | Ast.STMT_be (lv, ats) ->
           walk_lval v lv;
           Array.iter (walk_atom v) ats
 

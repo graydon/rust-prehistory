@@ -161,37 +161,38 @@ and parse_optional_trailing_constrs (ps:pstate) : Ast.constrs =
 
 and parse_ty_fn (pure:bool) (ps:pstate) : (Ast.ty_fn * Ast.ident option) =
   match peek ps with
-      FN proto ->
-        bump ps;
-        let ident =
-          match peek ps with
-              IDENT i -> bump ps; Some i
-            | _ -> None
-        in
-        let in_slots =
-          match peek ps with
-              _ ->
-                bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
-                  (parse_slot_and_optional_ignored_ident true) ps
-        in
-        let out_slot =
-          match peek ps with
-              RARROW -> (bump ps; parse_slot false ps)
-            | _ -> slot_nil
-        in
-        let constrs = parse_optional_trailing_constrs ps in
-        let tsig = { Ast.sig_input_slots = in_slots;
-                     Ast.sig_input_constrs = constrs;
-                     Ast.sig_output_slot = out_slot; }
-        in
-          (* FIXME: parse purity more thoroughly. *)
-        let taux = { Ast.fn_purity = (if pure
-                                      then Ast.PURE
-                                      else Ast.IMPURE Ast.IMMUTABLE);
-                     Ast.fn_proto = proto; }
-        in
-        let tfn = (tsig, taux) in
-          (tfn, ident)
+      FN | ITER ->
+        let is_iter = (peek ps) = ITER in
+          bump ps;
+          let ident =
+            match peek ps with
+                IDENT i -> bump ps; Some i
+              | _ -> None
+          in
+          let in_slots =
+            match peek ps with
+                _ ->
+                  bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
+                    (parse_slot_and_optional_ignored_ident true) ps
+          in
+          let out_slot =
+            match peek ps with
+                RARROW -> (bump ps; parse_slot false ps)
+              | _ -> slot_nil
+          in
+          let constrs = parse_optional_trailing_constrs ps in
+          let tsig = { Ast.sig_input_slots = in_slots;
+                       Ast.sig_input_constrs = constrs;
+                       Ast.sig_output_slot = out_slot; }
+          in
+            (* FIXME: parse purity more thoroughly. *)
+          let taux = { Ast.fn_purity = (if pure
+                                        then Ast.PURE
+                                        else Ast.IMPURE Ast.IMMUTABLE);
+                       Ast.fn_is_iter = is_iter; }
+          in
+          let tfn = (tsig, taux) in
+            (tfn, ident)
 
     | _ -> raise (unexpected ps)
 

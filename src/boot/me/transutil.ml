@@ -20,10 +20,10 @@ type call_ctrl =
   | CALL_indirect
 ;;
 
-type foreach_ctrl =
+type for_each_ctrl =
     {
-      foreach_fixup: fixup;
-      foreach_depth: int;
+      for_each_fixup: fixup;
+      for_each_depth: int;
     }
 ;;
 

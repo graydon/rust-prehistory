@@ -32,13 +32,6 @@ type slot_key =
    write foo[int,int].bar but not foo.bar.
  *)
 
-type proto =
-    PROTO_ques  (* fn? foo(...): may yield 1 value or return w/o yielding. Never resumes. *)
-  | PROTO_bang  (* fn! foo(...): yields 1 value. Never resumes.                           *)
-  | PROTO_star  (* fn* foo(...): may yield N >= 0 values, then returns.                   *)
-  | PROTO_plus  (* fn+ foo(...): yields N > 0 values then returns.                        *)
-;;
-
 type mutability =
     IMMUTABLE
   | MUTABLE
@@ -184,8 +177,8 @@ and ty_sig =
 
 and ty_fn_aux =
     {
+      fn_is_iter: bool;
       fn_purity: purity;
-      fn_proto: proto option;
     }
 
 and ty_fn = (ty_sig * ty_fn_aux)
@@ -198,12 +191,6 @@ and ty_obj = (ident,ty_fn) Hashtbl.t
 
 and check_calls = (lval * (atom array)) array
 
-(* put+ f(a,b) means to call f with current put addr and self as ret
- * addr. this is a 'tail yield' that bypasses us during f execution.
- *
- * ret+ f(a,b) means to call f with current put addr and current ret
- * addr. this is a 'tail call' that destroys us.
- *)
 and stmt' =
 
   (* lval-assigning stmts. *)
@@ -224,12 +211,13 @@ and stmt' =
   (* control-flow stmts. *)
   | STMT_while of stmt_while
   | STMT_do_while of stmt_while
-  | STMT_foreach of stmt_foreach
   | STMT_for of stmt_for
+  | STMT_for_each of stmt_for_each
   | STMT_if of stmt_if
-  | STMT_put of (proto option * atom option)
-  | STMT_ret of (proto option * atom option)
-  | STMT_be of (proto option * lval * (atom array))
+  | STMT_put of (atom option)
+  | STMT_put_each of (lval * (atom array))
+  | STMT_ret of (atom option)
+  | STMT_be of (lval * (atom array))
   | STMT_alt_tag of stmt_alt_tag
   | STMT_alt_type of stmt_alt_type
   | STMT_alt_port of stmt_alt_port
@@ -283,12 +271,11 @@ and stmt_while =
       while_body: block;
     }
 
-and stmt_foreach =
+and stmt_for_each =
     {
-      foreach_proto: proto;
-      foreach_slot: (slot identified * ident);
-      foreach_call: (lval * atom array);
-      foreach_body: block;
+      for_each_slot: (slot identified * ident);
+      for_each_call: (lval * atom array);
+      for_each_body: block;
     }
 
 and stmt_for =
@@ -489,13 +476,6 @@ let fmt_slot_key ff (s:slot_key) : unit =
       KEY_ident i -> fmt_ident ff i
     | KEY_temp t -> fmt_temp ff t
 
-let fmt_proto (ff:Format.formatter) (p:proto) : unit =
-  match p with
-      PROTO_ques -> fmt ff "?"
-    | PROTO_bang -> fmt ff "!"
-    | PROTO_star -> fmt ff "*"
-    | PROTO_plus -> fmt ff "+"
-
 let rec fmt_app (ff:Format.formatter) (i:ident) (tys:ty array) : unit =
   fmt ff "%s" i;
   fmt_app_args ff tys
@@ -575,12 +555,7 @@ and fmt_ty_fn
           PURE -> fmt ff "pure "
         | IMPURE mut -> fmt_mutable ff mut
     end;
-    fmt ff "fn";
-    begin
-      match ta.fn_proto with
-          None -> ()
-        | Some p -> fmt_proto ff p
-    end;
+    fmt ff "%s" (if ta.fn_is_iter then "iter" else "fn");
     begin
       match ident_and_params with
           Some (id, params) ->
@@ -948,31 +923,21 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           end;
           fmt_cbb ff
 
-      | STMT_ret (po, ao) ->
+      | STMT_ret (ao) ->
           fmt ff "ret";
-          begin
-            match po with
-                None -> ()
-              | Some proto -> fmt_proto ff proto
-          end;
-          fmt ff " ";
           begin
             match ao with
                 None -> ()
-              | Some at -> fmt_atom ff at
+              | Some at ->
+                  fmt ff " ";
+                  fmt_atom ff at
           end;
           fmt ff ";"
 
-      | STMT_be (po, fn, args) ->
-          fmt ff "be";
-          begin
-            match po with
-                None -> ()
-              | Some proto -> fmt_proto ff proto
-          end;
-          fmt ff " ";
+      | STMT_be (fn, az) ->
+          fmt ff "be ";
           fmt_lval ff fn;
-          fmt_atoms ff args;
+          fmt_atoms ff az;
           fmt ff ";";
 
       | STMT_block b -> fmt_block ff b.node
@@ -1086,42 +1051,38 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
               fmt_cbb ff
             end
 
-      | STMT_foreach sforeach ->
-          let proto = sforeach.foreach_proto in
-          let (slot, ident) = sforeach.foreach_slot in
-          let (f, az) = sforeach.foreach_call in
+      | STMT_for_each sf ->
+          let (slot, ident) = sf.for_each_slot in
+          let (f, az) = sf.for_each_call in
             begin
               fmt_obox ff;
-              fmt ff "for";
-              fmt_proto ff proto;
-              fmt ff " (";
+              fmt ff "for each (";
               fmt_slot ff slot.node;
               fmt ff " ";
               fmt_ident ff ident;
               fmt ff " = ";
               fmt_lval ff f;
               fmt_atoms ff az;
-              fmt ff ") ";
+              fmt ff " ";
               fmt_obr ff;
-              fmt_stmts ff sforeach.foreach_body.node;
+              fmt_stmts ff sf.for_each_body.node;
               fmt_cbb ff
             end
 
-      | STMT_put (proto, atom) ->
-          fmt ff "put";
+      | STMT_put (atom) ->
+          fmt ff "put ";
           begin
-            begin
-              match proto with
-                  Some p -> fmt_proto ff p
-                | None -> ()
-            end;
-            begin
-              match atom with
-                  Some a -> (fmt ff " "; fmt_atom ff a)
-                | None -> ()
-            end;
-            fmt ff ";"
-          end
+            match atom with
+                Some a -> (fmt ff " "; fmt_atom ff a)
+              | None -> ()
+          end;
+          fmt ff ";"
+
+      | STMT_put_each (f, az) ->
+          fmt ff "put each ";
+          fmt_lval ff f;
+          fmt_atoms ff az;
+          fmt ff ";"
 
       | STMT_fail -> fmt ff "fail;"
       | STMT_yield -> fmt ff "yield;"
@@ -1175,13 +1136,7 @@ and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : uni
         PURE -> fmt ff "pure "
       | IMPURE mut -> fmt_mutable ff mut
   end;
-  fmt ff "fn";
-  begin
-    match f.fn_aux.fn_proto with
-        None -> ()
-      | Some p -> fmt_proto ff p
-  end;
-  fmt ff " ";
+  fmt ff "%s "(if f.fn_aux.fn_is_iter then "iter" else "fn");
   fmt_ident_and_params ff id params;
   fmt_header_slots ff f.fn_input_slots;
   fmt_decl_constrs ff f.fn_input_constrs;

@@ -45,7 +45,7 @@ let dead_code_visitor
 
         | Ast.STMT_while { Ast.while_body = body }
         | Ast.STMT_do_while { Ast.while_body = body }
-        | Ast.STMT_foreach { Ast.foreach_body = body }
+        | Ast.STMT_for_each { Ast.for_each_body = body }
         | Ast.STMT_for { Ast.for_body = body } ->
             if (Hashtbl.mem must_exit body.id) then
               Hashtbl.add must_exit s.id ()

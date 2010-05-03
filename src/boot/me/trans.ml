@@ -2406,7 +2406,7 @@ let trans_visitor
       (dst_cell:Il.cell)
       (flv:Ast.lval)
       (ty_params:Ast.ty array)
-      (fco:foreach_ctrl option)
+      (fco:for_each_ctrl option)
       (args:Ast.atom array)
       : Il.operand =
     let (ptr, fn_ty) = trans_callee flv in
@@ -2825,14 +2825,14 @@ let trans_visitor
       | CALL_vtbl -> "vtbl"
 
   and call_iterator_args
-      (fco:foreach_ctrl option)
+      (fco:for_each_ctrl option)
       : Il.operand array =
     match fco with
         None -> [| |]
       | Some fc ->
           begin
             iflog (fun _ -> annotate "calculate iterator args");
-            abi.Abi.abi_iterator_args (emitter ()) fc.foreach_fixup fc.foreach_depth
+            abi.Abi.abi_iterator_args (emitter ()) fc.for_each_fixup fc.for_each_depth
           end
 
   and call_indirect_args
@@ -2993,7 +2993,7 @@ let trans_visitor
       trans_init_slot_from_atom
         CLONE_none dst_cell dst_slot at
 
-  and trans_foreach_body
+  and trans_for_each_body
       (depth:int)
       (fn_depth:int)
       (it_ptr_cell:Il.cell)
@@ -3192,68 +3192,43 @@ let trans_visitor
             (fun i (fn, args) -> trans_call_pred_and_check preds.(i) fn args)
             calls
 
-      | Ast.STMT_ret (proto_opt, atom_opt) ->
+      | Ast.STMT_ret atom_opt ->
           begin
-          match proto_opt with
-              None ->
-                begin
-                  begin
-                    match atom_opt with
-                        None -> ()
-                      | Some at -> trans_set_outptr at
-                  end;
-                  Stack.push (mark()) (Stack.top epilogue_jumps);
-                end;
-                emit (Il.jmp Il.JMP Il.CodeNone)
-            | Some _ ->
-                bugi cx stmt.id "ret{?,!,*,+} unhandled in trans_stmt %a"
-                  Ast.sprintf_stmt stmt
-          end
+            match atom_opt with
+                None -> ()
+              | Some at -> trans_set_outptr at
+          end;
+          Stack.push (mark()) (Stack.top epilogue_jumps);
+          emit (Il.jmp Il.JMP Il.CodeNone)
 
-      | Ast.STMT_be (proto_opt, flv, args) ->
+      | Ast.STMT_be (flv, args) ->
+          let ty = lval_ty cx flv in
+            begin
+              match ty with
+                  Ast.TY_fn (tsig, _) ->
+                    let result_ty = slot_ty tsig.Ast.sig_output_slot in
+                    let (dst_mem, _) =
+                      need_mem_cell
+                        (deref (wordptr_at (fp_imm out_mem_disp)))
+                    in
+                    let dst_rty = referent_type abi result_ty in
+                    let dst_cell = Il.Mem (dst_mem, dst_rty) in
+                      trans_be_fn cx dst_cell flv args
+
+                | Ast.TY_pred _ ->
+                    bug () "be pred not yet implemented"
+
+                | _ -> bug () "Calling unexpected lval."
+            end
+
+      | Ast.STMT_put atom_opt ->
           begin
-            match proto_opt with
-                None ->
-                  begin
-                    let ty = lval_ty cx flv in
-                      match ty with
-                          Ast.TY_fn (tsig, _) ->
-                            let result_ty = slot_ty tsig.Ast.sig_output_slot in
-                            let (dst_mem, _) =
-                              need_mem_cell
-                                (deref (wordptr_at (fp_imm out_mem_disp)))
-                            in
-                            let dst_rty = referent_type abi result_ty in
-                            let dst_cell = Il.Mem (dst_mem, dst_rty) in
-                              trans_be_fn cx dst_cell flv args
-
-                        | Ast.TY_pred _ ->
-                            bug () "be pred not yet implemented"
-
-                        | _ -> bug () "Calling unexpected lval."
-                  end
-              | Some _ ->
-                  bugi cx stmt.id "be{?,!,*,+} unhandled in trans_stmt %a"
-                    Ast.sprintf_stmt stmt
-          end
-
-      | Ast.STMT_put (proto_opt, atom_opt) ->
-          begin
-            match proto_opt with
-                None ->
-                  begin
-                    begin
-                      match atom_opt with
-                          None -> ()
-                        | Some at -> trans_set_outptr at
-                    end;
-                    (* FIXME: might I be a closure? if so, then Some ... *)
-                    abi.Abi.abi_emit_put (emitter ()) (current_fn_args_rty None)
-                  end
-              | Some _ ->
-                  bugi cx stmt.id "put{?,!,*,+} unhandled in trans_stmt %a"
-                    Ast.sprintf_stmt stmt
-          end
+            match atom_opt with
+                None -> ()
+              | Some at -> trans_set_outptr at
+          end;
+          (* FIXME: might I be a closure? if so, then Some ... *)
+          abi.Abi.abi_emit_put (emitter ()) (current_fn_args_rty None)
 
       | Ast.STMT_alt_tag stmt_alt_tag -> trans_alt_tag stmt_alt_tag
 
@@ -3290,10 +3265,10 @@ let trans_visitor
               List.iter patch fwd_jmps;
 
 
-      | Ast.STMT_foreach fe ->
-          let (dst_slot, _) = fe.Ast.foreach_slot in
+      | Ast.STMT_for_each fe ->
+          let (dst_slot, _) = fe.Ast.for_each_slot in
           let dst_cell = cell_of_block_slot dst_slot.id in
-          let (flv, args) = fe.Ast.foreach_call in
+          let (flv, args) = fe.Ast.for_each_call in
           let ty_params =
             match htab_search cx.ctxt_call_lval_params (lval_base_id flv) with
                 Some params -> params
@@ -3301,12 +3276,12 @@ let trans_visitor
           in
           let depth = Hashtbl.find cx.ctxt_loop_depths stmt.id in
           let fn_depth = Hashtbl.find cx.ctxt_fn_loop_depths (current_fn ()) in
-          let body_fixup = new_fixup "foreach loop body" in
-          let fc = { foreach_fixup = body_fixup; foreach_depth = depth } in
+          let body_fixup = new_fixup "for_each loop body" in
+          let fc = { for_each_fixup = body_fixup; for_each_depth = depth } in
           let ptr = next_vreg () in
           let ptrc = Il.Reg (ptr, Il.AddrTy Il.CodeTy) in
           let code = code_of_operand (Il.Cell ptrc) in
-          let body = fe.Ast.foreach_body in
+          let body = fe.Ast.for_each_body in
             begin
               iflog (fun _ ->
                        log cx "for-each at depth %d in fn of depth %d\n" depth fn_depth);
@@ -3319,7 +3294,7 @@ let trans_visitor
                   emit (Il.Enter body_fixup);
                   begin
                     let loop_head = mark_implicit () in                      (* L1: *)
-                      trans_foreach_body depth fn_depth ptrc body loop_head; (* loop body *)
+                      trans_for_each_body depth fn_depth ptrc body loop_head;(* loop body *)
                       patch jmp;                                             (* L2: *)
                       call_iter_code code loop_head                          (* call p *)
                   end;
@@ -3422,7 +3397,7 @@ let trans_visitor
       end
   in
 
-  let trans_frame_entry (fnid:node_id) (proto_opt:Ast.proto option) : unit =
+  let trans_frame_entry (fnid:node_id) (is_iter:bool) : unit =
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
       Stack.push (Stack.create()) epilogue_jumps;
@@ -3433,13 +3408,10 @@ let trans_visitor
         (upcall_fixup "upcall_grow_task");
 
       write_frame_info_ptrs (Some fnid);
-      begin
-        match proto_opt with
-            Some proto ->
-              (* FIXME: might I be a closure? if so, then Some ... *)
-              abi.Abi.abi_emit_iterator_prologue (emitter()) (current_fn_args_rty None) proto
-          | None -> ()
-      end;
+      if is_iter
+      then
+        (* FIXME: might I be a closure? if so, then Some ... *)
+        abi.Abi.abi_emit_iterator_prologue (emitter()) (current_fn_args_rty None);
       iflog (fun _ -> annotate "finished prologue");
   in
 
@@ -3459,11 +3431,11 @@ let trans_visitor
 
   let trans_fn
       (fnid:node_id)
-      (proto_opt:Ast.proto option)
+      (is_iter:bool)
       (body:Ast.block)
       : unit =
     Stack.push fnid fns;
-    trans_frame_entry fnid proto_opt;
+    trans_frame_entry fnid is_iter;
     trans_block body;
     trans_frame_exit fnid true;
     ignore (Stack.pop fns);
@@ -3473,7 +3445,7 @@ let trans_visitor
       (obj_id:node_id)
       (state:Ast.header_slots)
       : unit =
-    trans_frame_entry obj_id None;
+    trans_frame_entry obj_id false;
 
     let slots = Array.map (fun (sloti,_) -> sloti.node) state in
     let state_ty = Ast.TY_tup slots in
@@ -3543,8 +3515,8 @@ let trans_visitor
                              [| Asm.WORD (word_ty_mach, Asm.IMM 0L) |]))
   in
 
-  let trans_required_fn (fnid:node_id) (proto_opt:Ast.proto option) (blockid:node_id) : unit =
-    trans_frame_entry fnid proto_opt;
+  let trans_required_fn (fnid:node_id) (is_iter:bool) (blockid:node_id) : unit =
+    trans_frame_entry fnid is_iter;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
     let (ilib, conv) = Hashtbl.find cx.ctxt_required_items fnid in
     let lib_num =
@@ -3671,7 +3643,7 @@ let trans_visitor
       (tagid:node_id)
       (tag:(Ast.header_tup * Ast.ty_tag * node_id))
       : unit =
-    trans_frame_entry tagid None;
+    trans_frame_entry tagid false;
     trace_str cx.ctxt_sess.Session.sess_trace_tag
       ("in tag constructor " ^ n);
     let (header_tup, _, _) = tag in
@@ -3735,9 +3707,9 @@ let trans_visitor
                 cx.ctxt_main_exit_task_glue_fixup
                 GLUE_exit_main_task;
             end;
-          trans_fn i.id f.Ast.fn_aux.Ast.fn_proto f.Ast.fn_body
+          trans_fn i.id f.Ast.fn_aux.Ast.fn_is_iter f.Ast.fn_body
 
-      | Ast.MOD_ITEM_pred p -> trans_fn i.id None p.Ast.pred_body
+      | Ast.MOD_ITEM_pred p -> trans_fn i.id false p.Ast.pred_body
       | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
       | Ast.MOD_ITEM_obj ob -> trans_obj_ctor i.id ob.Ast.obj_state
       | _ -> ()
@@ -3746,14 +3718,14 @@ let trans_visitor
   let visit_required_mod_item_pre _ _ i =
     iflog (fun _ -> log cx "translating required item #%d = %s" (int_of_node i.id) (path_name()));
     match i.node.Ast.decl_item with
-        Ast.MOD_ITEM_fn f -> trans_required_fn i.id f.Ast.fn_aux.Ast.fn_proto f.Ast.fn_body.id
+        Ast.MOD_ITEM_fn f -> trans_required_fn i.id f.Ast.fn_aux.Ast.fn_is_iter f.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
       | Ast.MOD_ITEM_type _ -> ()
       | _ -> bugi cx i.id "unsupported type of require: %s" (path_name())
   in
 
   let visit_local_obj_fn_pre _ _ fn =
-    trans_fn fn.id fn.node.Ast.fn_aux.Ast.fn_proto fn.node.Ast.fn_body
+    trans_fn fn.id fn.node.Ast.fn_aux.Ast.fn_is_iter fn.node.Ast.fn_body
   in
 
   let visit_required_obj_fn_pre _ _ _ =

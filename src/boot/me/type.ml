@@ -981,15 +981,15 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         | Ast.STMT_decl _ -> ()
 
         (* FIXME: deal with difference between return-type vs. put-type *)
-        | Ast.STMT_ret (_, atom_opt)
-        | Ast.STMT_put (_, atom_opt) ->
+        | Ast.STMT_ret atom_opt
+        | Ast.STMT_put atom_opt ->
             begin
               match atom_opt with
                   None -> unify_ty Ast.TY_nil (retval_tv())
                 | Some atom -> unify_atom atom (retval_tv())
             end
 
-        | Ast.STMT_be (_, callee, args) ->
+        | Ast.STMT_be (callee, args) ->
             check_callable (retval_tv()) callee args
 
         | Ast.STMT_bind (bound, callee, arg_opts) ->
@@ -1016,10 +1016,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               unify_lval callee callee_tv;
               unify_lval bound bound_tv
 
-        | Ast.STMT_foreach fe ->
+        | Ast.STMT_for_each fe ->
             let out_tv = ref TYSPEC_all in
-            let (si, _) = fe.Ast.foreach_slot in
-            let (callee, args) = fe.Ast.foreach_call in
+            let (si, _) = fe.Ast.for_each_slot in
+            let (callee, args) = fe.Ast.for_each_call in
               unify_slot si.node (Some si.id) out_tv;
               check_callable out_tv callee args
 

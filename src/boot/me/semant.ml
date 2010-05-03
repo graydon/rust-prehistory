@@ -1103,7 +1103,7 @@ let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =
     | Ast.MOD_ITEM_mod _ -> bug () "Semant.ty_of_mod_item on mod"
     | Ast.MOD_ITEM_obj ob ->
         let taux = { Ast.fn_purity = Ast.PURE;
-                     Ast.fn_proto = None }
+                     Ast.fn_is_iter = false }
         in
         let tobj = Ast.TY_obj (ty_obj_of_obj ob) in
         let tsig = { Ast.sig_input_slots = arg_slots ob.Ast.obj_state;
@@ -1114,7 +1114,7 @@ let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =
 
     | Ast.MOD_ITEM_tag (htup, ttag, _) ->
         let taux = { Ast.fn_purity = Ast.PURE;
-                     Ast.fn_proto = None }
+                     Ast.fn_is_iter = false }
         in
         let tsig = { Ast.sig_input_slots = tup_slots htup;
                      Ast.sig_input_constrs = [| |];
@@ -1584,14 +1584,11 @@ let call_args_referent_type
             Il.ScalarTy (Il.AddrTy c)                             (* Abi.indirect_args_elt_closure       *)
           |]
   in
-  let iterator_arg_rtys proto =
-    match proto with
-        None -> [| |]
-      | Some _ ->
-          [|
-            Il.ScalarTy (Il.ValTy cx.ctxt_abi.Abi.abi_word_bits); (* Abi.iterator_args_elt_loop_size     *)
-            Il.ScalarTy (Il.AddrTy Il.OpaqueTy)                   (* Abi.iterator_args_elt_loop_info_ptr *)
-          |]
+  let iterator_arg_rtys _ =
+    [|
+      Il.ScalarTy (Il.ValTy cx.ctxt_abi.Abi.abi_word_bits); (* Abi.iterator_args_elt_loop_size     *)
+      Il.ScalarTy (Il.AddrTy Il.OpaqueTy)                   (* Abi.iterator_args_elt_loop_info_ptr *)
+    |]
   in
     match callee_ty with
         Ast.TY_fn (tsig, taux) ->
@@ -1600,7 +1597,7 @@ let call_args_referent_type
             tsig.Ast.sig_output_slot
             n_ty_params
             tsig.Ast.sig_input_slots
-            (iterator_arg_rtys taux.Ast.fn_proto)
+            (if taux.Ast.fn_is_iter then (iterator_arg_rtys()) else [||])
             indirect_arg_rtys
 
       | Ast.TY_pred (in_args, _) ->
@@ -1668,7 +1665,7 @@ let mk_ty_fn
     : Ast.ty =
   (* In some cases we don't care what aux or constrs are. *)
   let taux = { Ast.fn_purity = Ast.PURE;
-               Ast.fn_proto = None; }
+               Ast.fn_is_iter = false; }
   in
   let tsig = { Ast.sig_input_slots = arg_slots;
                Ast.sig_input_constrs = [| |];

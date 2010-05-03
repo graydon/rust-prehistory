@@ -86,7 +86,7 @@ let loop_depth_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-        | Ast.STMT_foreach _ ->
+        | Ast.STMT_for_each _ ->
             let fcx = Stack.top fcxs in
               begin
                 htab_put cx.ctxt_loop_depths s.id fcx.current_depth;
@@ -100,7 +100,7 @@ let loop_depth_visitor
   let visit_stmt_post s =
     inner.Walk.visit_stmt_post s;
     match s.node with
-      | Ast.STMT_foreach _ -> pop_loop ()
+      | Ast.STMT_for_each _ -> pop_loop ()
       | _ -> ()
 
   in
