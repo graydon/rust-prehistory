@@ -724,11 +724,6 @@ let trans_crate
               trans_stmts block_id llbuilder' tail terminate
             in
             let trans_tail () = trans_tail_with_builder llbuilder in
-            let trans_tail_in_new_block () : Llvm.llbasicblock =
-              let (llblock, llbuilder') = new_block None "bb" in
-              trans_tail_with_builder llbuilder';
-              llblock
-            in
 
             match head.node with
                 Ast.STMT_init_tup (dest, atoms) ->
@@ -760,7 +755,7 @@ let trans_crate
 
               | Ast.STMT_if sif ->
                   let llexpr = trans_expr sif.Ast.if_test in
-                  let llnext = trans_tail_in_new_block () in
+                  let (llnext, llnextbuilder) = new_block None "next" in
                   let branch_to_next llbuilder' _ =
                     ignore (Llvm.build_br llnext llbuilder')
                   in
@@ -770,7 +765,8 @@ let trans_crate
                         None -> llnext
                       | Some if_else -> trans_block if_else branch_to_next
                   in
-                  ignore (Llvm.build_cond_br llexpr llthen llelse llbuilder)
+                  ignore (Llvm.build_cond_br llexpr llthen llelse llbuilder);
+                  trans_tail_with_builder llnextbuilder
 
               | Ast.STMT_ret atom_opt ->
                   begin
@@ -806,8 +802,9 @@ let trans_crate
                   let (llfail, llfailbuilder) = new_block None "fail" in
                   let reason = Ast.fmt_to_str Ast.fmt_expr expr in
                   trans_fail llfailbuilder lltask reason head.id;
-                  let llnext = trans_tail_in_new_block () in
-                  ignore (Llvm.build_cond_br llexpr llnext llfail llbuilder)
+                  let (llok, llokbuilder) = new_block None "ok" in
+                  ignore (Llvm.build_cond_br llexpr llok llfail llbuilder);
+                  trans_tail_with_builder llokbuilder
 
               | Ast.STMT_init_str (dst, str) ->
                   let d = trans_lval dst in
