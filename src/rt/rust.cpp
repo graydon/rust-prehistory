@@ -40,6 +40,7 @@ extern "C" {
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <errno.h>
 #else
 #error "Platform not supported."
 #endif
@@ -3465,7 +3466,11 @@ last_os_error(rust_task *task) {
                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                   (LPTSTR) &buf, 0, NULL );
 #else
-    // FIXME: implement a version with strerror
+    char buf[1024];
+    if (strerror_r(errno, buf, sizeof(buf)) != 0) {
+        task->fail(1);
+        return NULL;
+    }
 #endif
 
     size_t fill = strlen(buf) + 1;
