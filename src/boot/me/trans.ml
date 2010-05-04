@@ -626,9 +626,13 @@ let trans_visitor
           let sorted_idents = sorted_htab_keys fns in
           let i = arr_idx sorted_idents id in
           let fn_ty = Hashtbl.find fns id in
-          let (table_mem, _) = (need_mem_cell (deref (get_element_ptr cell Abi.binding_field_item))) in
+          let table_ptr = get_element_ptr cell Abi.binding_field_item in
+          let (table_mem, _) = need_mem_cell (deref table_ptr) in
           let callee_disp = Il.Cell (word_at (Il.mem_off_imm table_mem (word_n i))) in
-            (crate_rel_to_ptr callee_disp Il.CodeTy, interior_slot (Ast.TY_fn fn_ty))
+          let ptr_cell = next_vreg_cell (Il.AddrTy Il.CodeTy) in
+            mov ptr_cell (Il.Cell table_ptr);
+            emit (Il.binary Il.ADD ptr_cell (Il.Cell ptr_cell) callee_disp);
+            (ptr_cell, interior_slot (Ast.TY_fn fn_ty))
 
 
       | _ -> bug () "unhandled form of lval_ext in trans_slot_lval_ext"
@@ -778,17 +782,22 @@ let trans_visitor
           fun _ ->
             iflog (fun _ -> log cx "emitting %d-entry obj vtbl for %s"
                      (Hashtbl.length obj.Ast.obj_fns) (path_name()));
+            let table_fix = new_fixup "vtbl" in
+            let table_rel_word fix =
+              Asm.WORD (word_ty_signed_mach,
+                        Asm.SUB (Asm.M_POS fix, Asm.M_POS table_fix))
+            in
             let fptrs =
               Array.map
                 begin
                   fun k ->
                     let fn = Hashtbl.find obj.Ast.obj_fns k in
                     let fix = get_fn_fixup cx fn.id in
-                      crate_rel_word fix
+                      table_rel_word fix
                 end
                 (sorted_htab_keys obj.Ast.obj_fns)
             in
-              Asm.SEQ fptrs
+              Asm.DEF (table_fix, Asm.SEQ fptrs)
         end
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
