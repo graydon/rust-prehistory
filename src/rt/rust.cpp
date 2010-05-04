@@ -2725,7 +2725,7 @@ rust_task *
 rust_dom::sched()
 {
     I(this, this);
-    // FIXME: in the face of failing taskesses, this is not always right.
+    // FIXME: in the face of failing tasks, this is not always right.
     // I(this, n_live_tasks() > 0);
     if (running_tasks.length() > 0) {
         size_t i = rand(&rctx);
@@ -3056,7 +3056,6 @@ upcall_free(rust_task *task, void* ptr)
     dom->free(ptr);
 }
 
-
 extern "C" CDECL rust_str *
 upcall_new_str(rust_task *task, char const *s, size_t fill)
 {
@@ -3066,6 +3065,10 @@ upcall_new_str(rust_task *task, char const *s, size_t fill)
              "upcall new_str('%s', %" PRIdPTR ")", s, fill);
     size_t alloc = next_power_of_two(sizeof(rust_str) + fill);
     void *mem = dom->malloc(alloc);
+    if (!mem) {
+        task->fail(3);
+        return NULL;
+    }
     rust_str *st = new (mem) rust_str(dom, alloc, fill, s);
     dom->log(LOG_UPCALL|LOG_MEM,
              "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
@@ -3433,16 +3436,50 @@ rust_srv::clone()
 }
 
 /* Native builtins. */
-
 extern "C" CDECL rust_str*
 str_alloc(rust_task *task, size_t n_bytes)
 {
     rust_dom *dom = task->dom;
     size_t alloc = next_power_of_two(sizeof(rust_str) + n_bytes);
     void *mem = dom->malloc(alloc);
-    rust_str *st = new (mem) rust_str(dom, alloc, 1, "");
-    if (!st)
+    if (!mem) {
         task->fail(2);
+        return NULL;
+    }
+    rust_str *st = new (mem) rust_str(dom, alloc, 1, "");
+    return st;
+}
+
+extern "C" CDECL rust_str*
+last_os_error(rust_task *task) {
+    rust_dom *dom = task->dom;
+    dom->log(LOG_TASK, "last_os_error()");
+
+#ifdef __WIN32__
+    LPTSTR buf;
+    DWORD err = GetLastError();
+    FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                  FORMAT_MESSAGE_FROM_SYSTEM |
+                  FORMAT_MESSAGE_IGNORE_INSERTS,
+                  NULL, err,
+                  MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                  (LPTSTR) &buf, 0, NULL );
+#else
+    // FIXME: implement a version with strerror
+#endif
+
+    size_t fill = strlen(buf) + 1;
+    size_t alloc = next_power_of_two(sizeof(rust_str) + fill);
+    void *mem = dom->malloc(alloc);
+    if (!mem) {
+        task->fail(1);
+        return NULL;
+    }
+    rust_str *st = new (mem) rust_str(dom, alloc, fill, buf);
+
+#ifdef __WIN32__
+    LocalFree((HLOCAL)buf);
+#endif
     return st;
 }
 
@@ -3455,9 +3492,11 @@ vec_alloc(rust_task *task, type_desc *t, size_t n_elts)
     size_t fill = n_elts * t->size;
     size_t alloc = next_power_of_two(sizeof(rust_vec) + fill);
     void *mem = dom->malloc(alloc);
-    rust_vec *vec = new (mem) rust_vec(alloc, 0);
-    if (!vec)
+    if (!mem) {
         task->fail(3);
+        return NULL;
+    }
+    rust_vec *vec = new (mem) rust_vec(alloc, 0);
     return vec;
 }
 

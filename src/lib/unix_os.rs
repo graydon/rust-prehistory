@@ -1,7 +1,10 @@
+import _str.sbuf;
+import _vec.vbuf;
+
 native mod libc {
-  fn open(_str.rustrt.sbuf s, int flags) -> int;
-  fn read(int fd, _vec.rustrt.vbuf buf, uint count) -> int;
-  fn write(int fd, _vec.rustrt.vbuf buf, uint count) -> int;
+  fn open(sbuf s, int flags) -> int;
+  fn read(int fd, vbuf buf, uint count) -> int;
+  fn write(int fd, vbuf buf, uint count) -> int;
   fn close(int fd) -> int;
 }
 
@@ -20,8 +23,7 @@ fn mk_buf_reader(str s) -> io.buf_reader {
     }
   }
 
-  auto sb = _str.buf(s);
-  auto fd = libc.open(sb, libc.open(sb, 0));
+  auto fd = libc.open(_str.buf(s), 0);
   if (fd < 0) {
     fail;
   }

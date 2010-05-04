@@ -1,3 +1,5 @@
+import vbuf = rustrt.vbuf;
+
 native "rust" mod rustrt {
   type vbuf;
   fn vec_buf[T](vec[T] v) -> vbuf;
@@ -13,6 +15,6 @@ fn len[T](vec[T] v) -> uint {
   ret rustrt.vec_len[T](v);
 }
 
-fn buf[T](vec[T] v) -> rustrt.vbuf {
+fn buf[T](vec[T] v) -> vbuf {
   ret rustrt.vec_buf[T](v);
 }

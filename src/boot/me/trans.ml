@@ -1822,6 +1822,7 @@ let trans_visitor
       | Ast.TY_bool
       | Ast.TY_mach _
       | Ast.TY_int
+      | Ast.TY_native _
       | Ast.TY_char ->
           begin
             iflog (fun _ -> annotate
