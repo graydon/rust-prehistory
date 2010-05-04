@@ -303,9 +303,11 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
       let loggable (ty:Ast.ty) : bool =
         match ty with
-            Ast.TY_str | Ast.TY_bool | Ast.TY_int | Ast.TY_char | Ast.TY_mach TY_u8
-          | Ast.TY_mach TY_u16 | Ast.TY_mach TY_u32 | Ast.TY_mach TY_i8
-          | Ast.TY_mach TY_i16 | Ast.TY_mach TY_i32 -> true
+            Ast.TY_str | Ast.TY_bool | Ast.TY_int | Ast.TY_uint
+          | Ast.TY_char
+          | Ast.TY_mach TY_u8 | Ast.TY_mach TY_u16 | Ast.TY_mach TY_u32
+          | Ast.TY_mach TY_i8 | Ast.TY_mach TY_i16 | Ast.TY_mach TY_i32
+              -> true
           | _ -> false
       in
 

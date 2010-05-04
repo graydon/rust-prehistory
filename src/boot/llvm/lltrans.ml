@@ -787,7 +787,7 @@ let trans_crate
                         (* NB: If you extend this, be sure to update the
                          * typechecking code in type.ml as well. *)
                         Ast.TY_str -> trans_log_str a
-                      | Ast.TY_int | Ast.TY_bool | Ast.TY_char
+                      | Ast.TY_int | Ast.TY_uint | Ast.TY_bool | Ast.TY_char
                       | Ast.TY_mach (TY_u8) | Ast.TY_mach (TY_u16)
                       | Ast.TY_mach (TY_u32) | Ast.TY_mach (TY_i8)
                       | Ast.TY_mach (TY_i16) | Ast.TY_mach (TY_i32) ->
