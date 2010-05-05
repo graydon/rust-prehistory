@@ -313,18 +313,11 @@ struct rust_vec : public rc_base<rust_vec> {
     size_t alloc;
     size_t fill;
     uint8_t data[];
-    rust_vec(size_t alloc, size_t fill)
-        : alloc(alloc), fill(fill) {}
+    rust_vec(rust_dom *dom, size_t alloc, size_t fill, uint8_t const *data);
+    ~rust_vec();
 };
 
-struct rust_str : public rc_base<rust_str> {
-    size_t alloc;
-    size_t fill;
-    uint8_t data[];         // C99 "flexible array" element.
-
-    rust_str(rust_dom *dom, size_t alloc, size_t fill, char const *s);
-    ~rust_str();
-};
+typedef rust_vec rust_str;
 
 class rust_crate;
 class rust_crate_cache;
@@ -1672,18 +1665,20 @@ circ_buf::shift(void *dst)
     }
 }
 
-// Strings
+// Vectors
 
-rust_str::rust_str(rust_dom *dom, size_t alloc, size_t fill, char const *s) :
+rust_vec::rust_vec(rust_dom *dom, size_t alloc, size_t fill, uint8_t const *d) :
     alloc(alloc),
     fill(fill)
 {
-    I(dom, s);
-    I(dom, fill > 0);
-    memcpy(&data[0], s, fill);
+    if (d || fill) {
+        I(dom, d);
+        I(dom, fill);
+        memcpy(&data[0], d, fill);
+    }
 }
 
-rust_str::~rust_str()
+rust_vec::~rust_vec()
 {
 }
 
@@ -3070,7 +3065,7 @@ upcall_new_str(rust_task *task, char const *s, size_t fill)
         task->fail(3);
         return NULL;
     }
-    rust_str *st = new (mem) rust_str(dom, alloc, fill, s);
+    rust_str *st = new (mem) rust_str(dom, alloc, fill, (uint8_t const *)s);
     dom->log(LOG_UPCALL|LOG_MEM,
              "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
              s, fill, st);
@@ -3111,6 +3106,31 @@ upcall_str_concat(rust_task *task, rust_str *dst, rust_str *a, rust_str *b)
     // FIXME implement?
     return NULL;
 }
+
+extern "C" CDECL rust_str *
+upcall_vec_realloc(rust_task *task, rust_vec *v, size_t n_bytes)
+{
+    LOG_UPCALL_ENTRY(task);
+    rust_dom *dom = task->dom;
+    size_t alloc = next_power_of_two(sizeof(rust_vec) + n_bytes);
+    if (v->refcnt == 1) {
+        v = (rust_vec*)dom->realloc(v, alloc);
+        if (!v) {
+            task->fail(3);
+            return NULL;
+        }
+        v->alloc = alloc;
+    } else {
+        void *mem = dom->malloc(alloc);
+        if (!mem) {
+            task->fail(3);
+            return NULL;
+        }
+        v = new (mem) rust_vec(dom, alloc, v->fill, &v->data[0]);
+    }
+    return v;
+}
+
 
 rust_crate_cache *
 rust_dom::get_cache(rust_crate const *crate) {
@@ -3447,7 +3467,7 @@ str_alloc(rust_task *task, size_t n_bytes)
         task->fail(2);
         return NULL;
     }
-    rust_str *st = new (mem) rust_str(dom, alloc, 1, "");
+    rust_str *st = new (mem) rust_str(dom, alloc, 1, (uint8_t const *)"");
     return st;
 }
 
@@ -3481,7 +3501,7 @@ last_os_error(rust_task *task) {
         task->fail(1);
         return NULL;
     }
-    rust_str *st = new (mem) rust_str(dom, alloc, fill, buf);
+    rust_str *st = new (mem) rust_str(dom, alloc, fill, (const uint8_t *)buf);
 
 #ifdef __WIN32__
     LocalFree((HLOCAL)buf);
@@ -3502,7 +3522,7 @@ vec_alloc(rust_task *task, type_desc *t, size_t n_elts)
         task->fail(3);
         return NULL;
     }
-    rust_vec *vec = new (mem) rust_vec(alloc, 0);
+    rust_vec *vec = new (mem) rust_vec(dom, alloc, 0, NULL);
     return vec;
 }
 
@@ -3522,28 +3542,6 @@ extern "C" CDECL size_t
 vec_len(rust_task *task, type_desc *ty, rust_vec *v)
 {
     return v->fill;
-}
-
-extern "C" CDECL rust_str*
-implode(rust_task *task, rust_vec *v)
-{
-    /*
-     * We received a vec of u32 unichars. Implode to a string.
-     * FIXME: this needs to do a proper utf-8 encoding.
-     */
-    size_t i;
-    rust_str *s;
-
-    size_t fill = v->fill >> 2;
-    s = upcall_new_str(task, NULL, fill);
-
-    uint32_t *src = (uint32_t*) &v->data[0];
-    uint8_t *dst = &s->data[0];
-
-    for (i = 0; i < fill; ++i)
-        *dst++ = *src;
-
-    return s;
 }
 
 struct command_line_args
@@ -3582,14 +3580,15 @@ struct command_line_args
         size_t vec_fill = sizeof(rust_str *) * argc;
         size_t vec_alloc = next_power_of_two(sizeof(rust_vec) + vec_fill);
         void *mem = dom.malloc(vec_alloc);
-        args = new (mem) rust_vec(vec_alloc, vec_fill);
+        args = new (mem) rust_vec(&dom, vec_alloc, 0, NULL);
         rust_str **strs = (rust_str**) &args->data[0];
         for (int i = 0; i < argc; ++i) {
             size_t str_fill = strlen(argv[i]) + 1;
             size_t str_alloc = next_power_of_two(sizeof(rust_str) + str_fill);
             mem = dom.malloc(str_alloc);
-            strs[i] = new (mem) rust_str(&dom, str_alloc, str_fill, argv[i]);
+            strs[i] = new (mem) rust_str(&dom, str_alloc, str_fill, (uint8_t const *)argv[i]);
         }
+        args->fill = vec_fill;
         // FIXME (bug 560452): horrible hack to handle non-cascading vec drop glue.
         args->ref();
     }
