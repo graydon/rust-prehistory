@@ -214,6 +214,14 @@ let trans_visitor
     emit (Il.umov dst src)
   in
 
+  let add (dst:Il.cell) (a:Il.operand) (b:Il.operand) : unit =
+    emit (Il.binary Il.ADD dst a b);
+  in
+
+  let add_to (dst:Il.cell) (src:Il.operand) : unit =
+    add dst (Il.Cell dst) src;
+  in
+
   let lea (dst:Il.cell) (src:Il.mem) : unit =
     emit (Il.lea dst (Il.Cell (Il.Mem (src, Il.OpaqueTy))))
   in
@@ -270,7 +278,7 @@ let trans_visitor
   and crate_rel_to_ptr (rel:Il.operand) (rty:Il.referent_ty) : Il.cell =
     let cell = next_vreg_cell (Il.AddrTy rty) in
       mov cell (Il.Cell (curr_crate_ptr()));
-      emit (Il.binary Il.ADD cell (Il.Cell cell) rel);
+      add_to cell rel;
       cell
 
   (* 
@@ -421,7 +429,7 @@ let trans_visitor
             let op_a = calculate_sz fp fn a in
             let op_b = calculate_sz fp fn b in
             let tmp = next_vreg_cell word_ty in
-              emit (Il.binary Il.ADD tmp op_a op_b);
+              add tmp op_a op_b;
               Il.Cell tmp
 
         | SIZE_rt_mul (a, b) ->
@@ -465,7 +473,7 @@ let trans_visitor
                 annotate "tmp = tmp % align";
                 emit (Il.binary Il.UMOD t3 (Il.Cell t2) op_align);
                 annotate "tmp = tmp + off";
-                emit (Il.binary Il.ADD t4 (Il.Cell t3) op_off);
+                add t4 (Il.Cell t3) op_off;
                 Il.Cell t4
     in
       iflog (fun _ -> annotate
@@ -496,7 +504,7 @@ let trans_visitor
              let v = next_vreg () in
              let c = (Il.Reg (v, word_ty)) in
                mov c (Il.Cell (Il.Reg (reg, word_ty)));
-               emit (Il.binary Il.ADD c (Il.Cell c) runtime_size);
+               add_to c runtime_size;
                based v
 
   and fp_off_sz (size:size) : Il.mem =
@@ -519,7 +527,7 @@ let trans_visitor
           let v = next_vreg () in
           let c = (Il.Reg (v, word_ty)) in
             mov c (Il.Cell ptr);
-            emit (Il.binary Il.ADD c (Il.Cell c) runtime_size);
+            add_to c runtime_size;
             Il.Mem (based v, (pointee_type ptr))
   in
 
@@ -631,7 +639,7 @@ let trans_visitor
           let callee_disp = Il.Cell (word_at (Il.mem_off_imm table_mem (word_n i))) in
           let ptr_cell = next_vreg_cell (Il.AddrTy Il.CodeTy) in
             mov ptr_cell (Il.Cell table_ptr);
-            emit (Il.binary Il.ADD ptr_cell (Il.Cell ptr_cell) callee_disp);
+            add_to ptr_cell callee_disp;
             (ptr_cell, interior_slot (Ast.TY_fn fn_ty))
 
 
@@ -651,7 +659,7 @@ let trans_visitor
     let (diff:Il.cell) = next_vreg_cell word_ty in
       annotate "bounds check";
       lea base (fst (need_mem_cell data));
-      emit (Il.binary Il.ADD elt (Il.Cell base) mul_idx);
+      add elt (Il.Cell base) mul_idx;
       emit (Il.binary Il.SUB diff (Il.Cell elt) (Il.Cell base));
       let jmp = trans_compare Il.JB (Il.Cell diff) (Il.Cell len) in
         trans_cond_fail "bounds check" jmp;
@@ -2064,8 +2072,8 @@ let trans_visitor
                * the pseudo-rc cell.
                *)
               trans_malloc cell sz;
-              emit (Il.binary Il.ADD cell (Il.Cell cell)
-                      (imm (word_n Abi.exterior_gc_malloc_return_adjustment)));
+              add_to cell
+                (imm (word_n Abi.exterior_gc_malloc_return_adjustment));
 
               iflog (fun _ -> annotate "init GC exterior: load control word");
               let ctrl = exterior_gc_ctrl_cell cell in
@@ -2170,7 +2178,7 @@ let trans_visitor
     let lightweight_rc src_rc =
       (* Lightweight copy: twiddle refcounts, move pointer. *)
       anno "refcounted light";
-      emit (Il.binary Il.ADD src_rc (Il.Cell src_rc) one);
+      add_to src_rc one;
       if not initializing
       then
         drop_slot dst dst_slot None;
@@ -3265,13 +3273,13 @@ let trans_visitor
             Array.iter trans_stmt head_stmts;
             lea lim (fst (need_mem_cell data));
             mov ptr (Il.Cell lim);
-            emit (Il.binary Il.ADD lim (Il.Cell lim) (Il.Cell len));
+            add_to lim (Il.Cell len);
             let back_jmp_target = mark () in
             let fwd_jmps = trans_compare Il.JAE (Il.Cell ptr) (Il.Cell lim) in
             let unit_cell = ptr_cast ptr (slot_referent_type abi unit_slot) in
               trans_copy_slot true dst_cell dst_slot.node (deref unit_cell) unit_slot None;
               trans_block fo.Ast.for_body;
-              emit (Il.binary Il.ADD ptr (Il.Cell ptr) (imm unit_sz));
+              add_to ptr (imm unit_sz);
               emit (Il.jmp Il.JMP (Il.CodeLabel back_jmp_target));
               List.iter patch fwd_jmps;
 
