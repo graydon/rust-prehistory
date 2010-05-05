@@ -917,7 +917,6 @@ and parse_mod_item_from_signature (ps:pstate)
           bump ps;
           let (ident, params) = parse_ident_and_params ps "fn signature" in
           let (inputs, constrs, output) = parse_in_and_out ps in
-            expect ps SEMI;
             let bpos = lexpos ps in
             let body = span ps apos bpos [| |] in
             let fn =
@@ -928,8 +927,23 @@ and parse_mod_item_from_signature (ps:pstate)
                   Ast.fn_aux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
                                  Ast.fn_is_iter = is_iter; };
                   Ast.fn_body = body; }
-          in
-            (ident, span ps apos bpos (decl params fn))
+            in
+            let node = span ps apos bpos (decl params fn) in
+              begin
+                match peek ps with
+                    EQ ->
+                      bump ps;
+                      begin
+                        match peek ps with
+                            LIT_STR s ->
+                              bump ps;
+                              htab_put ps.pstate_required_syms node.id s
+                          | _ -> raise (unexpected ps)
+                      end;
+                  | _ -> ()
+              end;
+              expect ps SEMI;
+              (ident, node)
 
     | TYPE ->
         bump ps;

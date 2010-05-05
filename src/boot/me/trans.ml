@@ -3582,7 +3582,12 @@ let trans_visitor
 
           | REQUIRED_LIB_c ls ->
               begin
-                let c_sym_str = string_of_name_component (Stack.top path) in
+                let c_sym_str =
+                  match htab_search cx.ctxt_required_syms fnid with
+                      Some s -> s
+                    | None ->
+                        string_of_name_component (Stack.top path)
+                in
                 let c_sym_num =
                   (* FIXME: permit remapping symbol names to handle
                    * mangled variants.

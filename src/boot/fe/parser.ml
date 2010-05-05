@@ -21,7 +21,8 @@ type pstate =
                                    (opaque_id ref) ->
                                      (filename * Ast.mod_items));
       pstate_infer_lib_name : (Ast.ident -> filename);
-      pstate_required       : (node_id, (required_lib * nabi_conv)) Hashtbl.t; }
+      pstate_required       : (node_id, (required_lib * nabi_conv)) Hashtbl.t;
+      pstate_required_syms  : (node_id, string) Hashtbl.t; }
 ;;
 
 let log (ps:pstate) = Session.log "parse"
@@ -47,6 +48,7 @@ let make_parser
                       (filename * Ast.mod_items)))
     (infer_lib_name:Ast.ident -> filename)
     (required:(node_id, (required_lib * nabi_conv)) Hashtbl.t)
+    (required_syms:(node_id, string) Hashtbl.t)
     (fname:string)
     : pstate =
   let lexbuf = Lexing.from_channel (open_in fname) in
@@ -68,7 +70,8 @@ let make_parser
         pstate_opaque_id = oref;
         pstate_get_mod = get_mod;
         pstate_infer_lib_name = infer_lib_name;
-        pstate_required = required; }
+        pstate_required = required;
+        pstate_required_syms = required_syms; }
     in
       iflog ps (fun _ -> log ps "made parser for: %s\n%!" fname);
       ps

@@ -303,6 +303,7 @@ type env = { env_bindings: (Ast.ident * pval) list;
              env_items: (filename, Ast.mod_items) Hashtbl.t;
              env_files: (node_id,filename) Hashtbl.t;
              env_required: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
+             env_required_syms: (node_id, string) Hashtbl.t;
              env_ps: pstate; }
 
 let unexpected_val (expected:string) (v:pval)  =
@@ -367,6 +368,7 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
             ps.pstate_get_mod
             ps.pstate_infer_lib_name
             env.env_required
+            env.env_required_syms
             full_path
         in
         let items = Item.parse_mod_items p EOF in
@@ -578,6 +580,7 @@ let with_err_handling sess thunk =
             { Ast.crate_items = (Item.empty_view, Hashtbl.create 0);
               Ast.crate_meta = [||];
               Ast.crate_required = Hashtbl.create 0;
+              Ast.crate_required_syms = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
               Ast.crate_files = Hashtbl.create 0 }
 ;;
@@ -593,8 +596,9 @@ let parse_crate_file
   let nref = ref (Node 0) in
   let oref = ref (Opaque 0) in
   let required = Hashtbl.create 4 in
+  let required_syms = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess get_mod infer_lib_name required fname
+    make_parser tref nref oref sess get_mod infer_lib_name required required_syms fname
   in
 
   let files = Hashtbl.create 0 in
@@ -627,6 +631,7 @@ let parse_crate_file
               env_items = Hashtbl.create 0;
               env_files = files;
               env_required = required;
+              env_required_syms = required_syms;
               env_ps = ps; }
   in
     with_err_handling sess
@@ -655,6 +660,7 @@ let parse_crate_file
           let crate = { Ast.crate_items = (Item.empty_view, items);
                         Ast.crate_meta = queue_to_arr meta;
                         Ast.crate_required = required;
+                        Ast.crate_required_syms = required_syms;
                         Ast.crate_main = main;
                         Ast.crate_files = files }
           in
@@ -673,9 +679,10 @@ let parse_src_file
   let tref = ref (Temp 0) in
   let nref = ref (Node 0) in
   let oref = ref (Opaque 0) in
-  let required = Hashtbl.create 4 in
+  let required = Hashtbl.create 0 in
+  let required_syms = Hashtbl.create 0 in
   let ps =
-    make_parser tref nref oref sess get_mod infer_lib_name required fname
+    make_parser tref nref oref sess get_mod infer_lib_name required required_syms fname
   in
     with_err_handling sess
       begin
@@ -687,6 +694,7 @@ let parse_src_file
           let main = find_main_fn ps (snd items) in
           let crate = { Ast.crate_items = items;
                         Ast.crate_required = required;
+                        Ast.crate_required_syms = required_syms;
                         Ast.crate_meta = [||];
                         Ast.crate_main = main;
                         Ast.crate_files = files }

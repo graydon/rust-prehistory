@@ -24,7 +24,9 @@ mod sys;
 alt (target_os) {
   case ("win32") {
     mod os = "win32_os.rs";
+  } case ("macos") {
+    mod os = "macos_os.rs";
   } else {
-    mod os = "unix_os.rs";
+    mod os = "linux_os.rs";
   }
 }

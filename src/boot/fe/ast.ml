@@ -434,6 +434,7 @@ and crate' =
       crate_items: (mod_view * mod_items);
       crate_meta: meta;
       crate_required: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
+      crate_required_syms: (node_id, string) Hashtbl.t;
       crate_files: (node_id,filename) Hashtbl.t;
       crate_main: name;
     }

@@ -3466,8 +3466,9 @@ last_os_error(rust_task *task) {
                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                   (LPTSTR) &buf, 0, NULL );
 #else
-    char buf[1024];
-    if (strerror_r(errno, buf, sizeof(buf)) != 0) {
+    char cbuf[1024];
+    char *buf = strerror_r(errno, cbuf, sizeof(cbuf));
+    if (!buf) {
         task->fail(1);
         return NULL;
     }
@@ -3512,9 +3513,15 @@ str_buf(rust_task *task, rust_str *s)
 }
 
 extern "C" CDECL void *
-vec_buf(rust_task *task, rust_vec *v)
+vec_buf(rust_task *task, type_desc *ty, rust_vec *v)
 {
     return (void *)&v->data[0];
+}
+
+extern "C" CDECL size_t
+vec_len(rust_task *task, type_desc *ty, rust_vec *v)
+{
+    return v->fill;
 }
 
 extern "C" CDECL rust_str*
