@@ -3072,6 +3072,26 @@ upcall_new_str(rust_task *task, char const *s, size_t fill)
     return st;
 }
 
+extern "C" CDECL rust_vec *
+upcall_new_vec(rust_task *task, size_t fill)
+{
+    LOG_UPCALL_ENTRY(task);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_MEM,
+             "upcall new_vec(%" PRIdPTR ")", fill);
+    size_t alloc = next_power_of_two(sizeof(rust_vec) + fill);
+    void *mem = dom->malloc(alloc);
+    if (!mem) {
+        task->fail(3);
+        return NULL;
+    }
+    rust_vec *v = new (mem) rust_vec(dom, alloc, 0, NULL);
+    dom->log(LOG_UPCALL|LOG_MEM,
+             "upcall new_vec(%" PRIdPTR ") = 0x%" PRIxPTR,
+             fill, v);
+    return v;
+}
+
 
 extern "C" CDECL rust_str *
 upcall_vec_grow(rust_task *task, rust_vec *v, size_t n_bytes)
