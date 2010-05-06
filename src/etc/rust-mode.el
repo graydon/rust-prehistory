@@ -102,11 +102,9 @@
 
 ;; statement keywords followed by a simple expression
 (c-lang-defconst c-simple-stmt-kwds
-  rust '("ret" "ret+" "ret*" "ret?" "ret!"
-         "be" "be+" "be*" "be?" "be!"
-         "put" "put+" "put*" "put?" "put!"
-         "check" "prove"
-         "log" "in"
+  rust '("ret" "be""put"
+         "check" "prove" "claim"
+         "log" "in" "each"
          "yield" "join"
          "break" "cont"
          "fail"))
