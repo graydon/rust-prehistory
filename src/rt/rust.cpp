@@ -3072,62 +3072,44 @@ upcall_new_str(rust_task *task, char const *s, size_t fill)
     return st;
 }
 
-/*
- * Here we have dst = a + b for strings.  If dst and a point to the
- * same rust_str, *and* that rust_str is singly-referenced, then we
- * optimise by growing it in place.  Otherwise, we want dst to point
- * to a brand-new rust_str, formed by concatenating a and b (note that
- * dst and a might still be the same in this case, but not
- * singly-referenced).
- *
- * Returns the new value for the slot dst.
- */
-extern "C" CDECL rust_str *
-upcall_str_concat(rust_task *task, rust_str *dst, rust_str *a, rust_str *b)
-{
-    LOG_UPCALL_ENTRY(task);
-
-    size_t fill = a->fill + b->fill - 1;
-    size_t alloc = next_power_of_two(sizeof(rust_str) + fill);
-
-    // fast path
-    if (dst == a && a->refcnt == 1) {
-        if (alloc > a->alloc) {
-            void *mem = task->dom->realloc(a, alloc);
-            a = static_cast<rust_str *>(mem);
-            a->alloc = alloc;
-        }
-        memcpy(&a->data[a->fill - 1], b->data, b->fill);
-        a->fill = fill;
-        return a;
-    }
-
-    // regular ol' path
-    // FIXME implement?
-    return NULL;
-}
 
 extern "C" CDECL rust_str *
-upcall_vec_realloc(rust_task *task, rust_vec *v, size_t n_bytes)
+upcall_vec_grow(rust_task *task, rust_vec *v, size_t n_bytes)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    size_t alloc = next_power_of_two(sizeof(rust_vec) + n_bytes);
+    dom->log(LOG_UPCALL|LOG_MEM,
+             "upcall vec_grow(%" PRIxPTR ", %" PRIdPTR ")", v, n_bytes);
+    size_t alloc = next_power_of_two(sizeof(rust_vec) + v->fill + n_bytes);
     if (v->refcnt == 1) {
+
+        // Fastest path: already large enough.
+        if (v->alloc >= alloc) {
+            dom->log(LOG_UPCALL|LOG_MEM, "no-growth path");
+            return v;
+        }
+
+        // Second-fastest path: can at least realloc.
+        dom->log(LOG_UPCALL|LOG_MEM, "realloc path");
         v = (rust_vec*)dom->realloc(v, alloc);
         if (!v) {
             task->fail(3);
             return NULL;
         }
         v->alloc = alloc;
+
     } else {
+        // Slowest path: make a new vec.
+        dom->log(LOG_UPCALL|LOG_MEM, "new vec path");
         void *mem = dom->malloc(alloc);
         if (!mem) {
             task->fail(3);
             return NULL;
         }
+        v->deref();
         v = new (mem) rust_vec(dom, alloc, v->fill, &v->data[0]);
     }
+    I(dom, sizeof(rust_vec) + v->fill <= v->alloc);
     return v;
 }
 

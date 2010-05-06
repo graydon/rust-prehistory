@@ -298,6 +298,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       let plusable (ty:Ast.ty) : bool =
         match ty with
             Ast.TY_str -> true
+          | Ast.TY_vec _ -> true
           | _ -> numeric ty
       in
 

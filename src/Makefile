@@ -306,7 +306,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       complex.rs dead-code-one-arm-if.rs deep.rs div-mod.rs \
                       drop-on-ret.rs exterior.rs foreach-simple.rs vec-slice.rs \
                       simple-obj.rs import.rs fun-call-variants.rs \
-                      fun-indirect-call.rs generic-fn.rs \
+                      fun-indirect-call.rs generic-fn.rs vec-concat.rs \
                       inner-module.rs large-records.rs lazychan.rs \
                       linear-for-loop.rs many.rs mlist.rs mlist_cycle.rs \
                       mutual-recursion-group.rs native.rc command-line-args.rs \

@@ -222,6 +222,14 @@ let trans_visitor
     add dst (Il.Cell dst) src;
   in
 
+  let sub (dst:Il.cell) (a:Il.operand) (b:Il.operand) : unit =
+    emit (Il.binary Il.SUB dst a b);
+  in
+
+  let sub_from (dst:Il.cell) (src:Il.operand) : unit =
+    sub dst (Il.Cell dst) src;
+  in
+
   let lea (dst:Il.cell) (src:Il.mem) : unit =
     emit (Il.lea dst (Il.Cell (Il.Mem (src, Il.OpaqueTy))))
   in
@@ -3033,6 +3041,93 @@ let trans_visitor
         emit [ loop_head ] (Il.jmp Il.JMP (Il.CodePtr (Il.Cell it_ptr_cell)))
       end
 
+  and trans_copy_binop dst binop a_src =
+    let (dst_cell, dst_slot) = trans_lval_maybe_init false dst in
+    let src_oper = trans_atom a_src in
+      match slot_ty dst_slot with
+          Ast.TY_str
+        | Ast.TY_vec _ ->
+            begin
+              let (dst_elt_slot, trim_trailing_null) =
+                match slot_ty dst_slot with
+                    Ast.TY_str -> (interior_slot (Ast.TY_mach TY_u8), true)
+                  | Ast.TY_vec e -> (e, false)
+                  | _ ->  bug () "unexpected dst type in copy_binop"
+              in
+                match atom_type cx a_src with
+                    Ast.TY_str
+                  | Ast.TY_vec _ ->
+                      let src_cell = need_cell src_oper in
+                      let src_vec = deref src_cell in
+                      let src_fill = get_element_ptr src_vec Abi.vec_elt_fill in
+                      let src_elt_slot =
+                        match atom_type cx a_src with
+                            Ast.TY_str -> interior_slot (Ast.TY_mach TY_u8)
+                          | Ast.TY_vec e -> e
+                          | _ -> bug () "unexpected src type in copy_binop"
+                      in
+                      let dst_vec = deref dst_cell in
+                      let dst_fill = get_element_ptr dst_vec Abi.vec_elt_fill in
+                        if trim_trailing_null
+                        then sub_from dst_fill (imm 1L);
+                        trans_upcall "upcall_vec_grow"
+                          dst_cell
+                          [| Il.Cell dst_cell;
+                             Il.Cell src_fill |];
+
+                        (*
+                         * By now, dst_cell points to a vec/str
+                         * with room for us to add to.
+                         *)
+
+                        (* Reload dst vec, fill; might have changed. *)
+                        let dst_vec = deref dst_cell in
+                        let dst_fill = get_element_ptr dst_vec Abi.vec_elt_fill in
+
+                        (* Copy loop: *)
+                        let pty s = Il.AddrTy (slot_referent_type abi s) in
+                        let dptr = next_vreg_cell (pty dst_elt_slot) in
+                        let sptr = next_vreg_cell (pty src_elt_slot) in
+                        let dlim = next_vreg_cell (pty dst_elt_slot) in
+                        let dst_elt_sz = slot_sz abi dst_elt_slot in
+                        let src_elt_sz = slot_sz abi src_elt_slot in
+                        let dst_data = get_element_ptr dst_vec Abi.vec_elt_data in
+                        let src_data = get_element_ptr src_vec Abi.vec_elt_data in
+                          lea dptr (fst (need_mem_cell dst_data));
+                          lea sptr (fst (need_mem_cell src_data));
+                          add_to dptr (Il.Cell dst_fill);
+                          mov dlim (Il.Cell dptr);
+                          add_to dlim (Il.Cell src_fill);
+                          let fwd_jmp = mark () in
+                            emit (Il.jmp Il.JMP Il.CodeNone);
+                            let back_jmp_targ = mark () in
+                              (* copy slot *)
+                              trans_copy_slot true
+                                (deref dptr) dst_elt_slot
+                                (deref sptr) src_elt_slot
+                                None;
+                              add_to dptr (imm dst_elt_sz);
+                              add_to sptr (imm src_elt_sz);
+                              patch fwd_jmp;
+                              let back_jmp =
+                                trans_compare Il.JB (Il.Cell dptr) (Il.Cell dlim) in
+                                List.iter (fun j -> patch_existing j back_jmp_targ) back_jmp;
+                                let v = next_vreg_cell word_ty in
+                                  mov v (Il.Cell src_fill);
+                                  add_to dst_fill (Il.Cell v);
+                  | t ->
+                      begin
+                        bug () "unsupported concatenation type %a" Ast.sprintf_ty t
+                      end
+            end
+
+        | _ ->
+            let dst_cell = deref_slot false dst_cell dst_slot in
+            let op = trans_binop binop in
+              emit (Il.binary op dst_cell (Il.Cell dst_cell) src_oper);
+
+
+
   and trans_stmt_full (stmt:Ast.stmt) : unit =
     match stmt.node with
 
@@ -3079,21 +3174,7 @@ let trans_visitor
           trans_copy (maybe_init stmt.id "copy" dst) dst e_src
 
       | Ast.STMT_copy_binop (dst, binop, a_src) ->
-          begin
-            let initializing = (maybe_init stmt.id "copy" dst) in
-            let (dst_cell, dst_slot) = trans_lval_maybe_init initializing dst in
-              match slot_ty dst_slot with
-                  Ast.TY_str ->
-                    trans_upcall "upcall_str_concat" dst_cell
-                      [| Il.Cell dst_cell;
-                         Il.Cell dst_cell;
-                         (trans_atom a_src); |]
-                | _ ->
-                    let lhs = deref_slot false dst_cell dst_slot in
-                    let rhs = trans_atom a_src in
-                    let op = trans_binop binop in
-                      emit (Il.binary op lhs (Il.Cell lhs) rhs);
-          end
+          trans_copy_binop dst binop a_src
 
       | Ast.STMT_call (dst, flv, args) ->
           begin

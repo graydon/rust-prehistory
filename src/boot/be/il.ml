@@ -865,9 +865,8 @@ let emit_full
     e.emit_pc <- e.emit_pc + 1
   in
 
-
   let emit_quad (q':quad') : unit =
-    (* decay mem-mem movs *)
+    (* re-decay any freshly generated mem-mem movs. *)
     match q' with
         Unary { unary_dst = Mem (dst_mem, ScalarTy src_st);
                 unary_src = Cell (Mem (src_mem, ScalarTy dst_st));
@@ -983,6 +982,7 @@ let emit_full
       emit_mov old_cell (Cell new_cell)
   in
 
+  let emit_decayed_quad q' =
     match (q', e.emit_preallocator q') with
         (Binary b, Binary b') ->
           begin
@@ -1031,6 +1031,18 @@ let emit_full
       | (x, y) ->
           assert (x = y);
           emit_quad x
+  in
+
+    (* pre-decay mem-mem movs. *)
+    match q' with
+        Unary { unary_dst = Mem (dst_mem, ScalarTy src_st);
+                unary_src = Cell (Mem (src_mem, ScalarTy dst_st));
+                unary_op = op }
+          when is_mov op ->
+            let v = next_vreg_cell e dst_st in
+              emit_decayed_quad (unary op v (Cell (Mem (src_mem, ScalarTy src_st))));
+              emit_decayed_quad (unary op (Mem (dst_mem, ScalarTy dst_st)) (Cell v))
+      | _ -> emit_decayed_quad q'
 ;;
 
 let emit (e:emitter) (q':quad') : unit =
