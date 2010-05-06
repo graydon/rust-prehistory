@@ -1385,13 +1385,23 @@ let trans_visitor
                         ": plain exit, finale")
         end
     in
-
+    let is_prim_type t =
+      match t with
+          Ast.TY_int
+        | Ast.TY_uint
+        | Ast.TY_char
+        | Ast.TY_mach _
+        | Ast.TY_bool -> true
+        | _ -> false
+    in
     match expr with
-
         Ast.EXPR_binary (binop, a, b) ->
+          assert (is_prim_type (atom_type cx a));
+          assert (is_prim_type (atom_type cx b));
           trans_binary binop (trans_atom a) (trans_atom b)
 
       | Ast.EXPR_unary (unop, a) ->
+          assert (is_prim_type (atom_type cx a));
           let src = trans_atom a in
           let bits = Il.operand_bits word_bits src in
           let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy bits) in
@@ -2259,10 +2269,33 @@ let trans_visitor
       (src:Ast.expr)
       : unit =
     let (dst_cell, dst_slot) = trans_lval_maybe_init initializing dst in
-      match src with
-          (Ast.EXPR_binary _)
-        | (Ast.EXPR_unary _)
-        | (Ast.EXPR_atom (Ast.ATOM_literal _)) ->
+      match (slot_ty dst_slot, src) with
+          (Ast.TY_vec _,
+           Ast.EXPR_binary (Ast.BINOP_add,
+                            Ast.ATOM_lval a, Ast.ATOM_lval b))
+        | (Ast.TY_str,
+           Ast.EXPR_binary (Ast.BINOP_add,
+                            Ast.ATOM_lval a, Ast.ATOM_lval b)) ->
+            (*
+             * Translate str or vec
+             * 
+             *   s = a + b
+             * 
+             * as
+             * 
+             *   s = a;
+             *   s += b;
+             *)
+            let (a_cell, a_slot) = trans_lval a in
+            let (b_cell, b_slot) = trans_lval b in
+              trans_copy_slot initializing dst_cell dst_slot
+                a_cell a_slot None;
+              trans_vec_append dst_cell dst_slot
+                (Il.Cell b_cell) (slot_ty b_slot)
+
+        | (_, Ast.EXPR_binary _)
+        | (_, Ast.EXPR_unary _)
+        | (_, Ast.EXPR_atom (Ast.ATOM_literal _)) ->
             (*
              * Translations of these expr types yield vregs,
              * so copy is just MOV into the lval.
@@ -2270,7 +2303,7 @@ let trans_visitor
             let src_operand = trans_expr src in
               mov (deref_slot false dst_cell dst_slot) src_operand
 
-        | Ast.EXPR_atom (Ast.ATOM_lval src_lval) ->
+        | (_, Ast.EXPR_atom (Ast.ATOM_lval src_lval)) ->
             if lval_is_direct_fn cx src_lval then
               trans_copy_direct_fn dst_cell src_lval
             else
@@ -3041,86 +3074,88 @@ let trans_visitor
         emit [ loop_head ] (Il.jmp Il.JMP (Il.CodePtr (Il.Cell it_ptr_cell)))
       end
 
+
+  and trans_vec_append dst_cell dst_slot src_oper src_ty =
+    let (dst_elt_slot, trim_trailing_null) =
+      match slot_ty dst_slot with
+          Ast.TY_str -> (interior_slot (Ast.TY_mach TY_u8), true)
+        | Ast.TY_vec e -> (e, false)
+        | _ ->  bug () "unexpected dst type in trans_vec_append"
+    in
+      match src_ty with
+          Ast.TY_str
+        | Ast.TY_vec _ ->
+            let src_cell = need_cell src_oper in
+            let src_vec = deref src_cell in
+            let src_fill = get_element_ptr src_vec Abi.vec_elt_fill in
+            let src_elt_slot =
+              match src_ty with
+                  Ast.TY_str -> interior_slot (Ast.TY_mach TY_u8)
+                | Ast.TY_vec e -> e
+                | _ -> bug () "unexpected src type in trans_vec_append"
+            in
+            let dst_vec = deref dst_cell in
+            let dst_fill = get_element_ptr dst_vec Abi.vec_elt_fill in
+              if trim_trailing_null
+              then sub_from dst_fill (imm 1L);
+              trans_upcall "upcall_vec_grow"
+                dst_cell
+                [| Il.Cell dst_cell;
+                   Il.Cell src_fill |];
+
+              (* 
+               * By now, dst_cell points to a vec/str with room for us
+               * to add to.
+               *)
+
+              (* Reload dst vec, fill; might have changed. *)
+              let dst_vec = deref dst_cell in
+              let dst_fill = get_element_ptr dst_vec Abi.vec_elt_fill in
+
+              (* Copy loop: *)
+              let pty s = Il.AddrTy (slot_referent_type abi s) in
+              let dptr = next_vreg_cell (pty dst_elt_slot) in
+              let sptr = next_vreg_cell (pty src_elt_slot) in
+              let dlim = next_vreg_cell (pty dst_elt_slot) in
+              let dst_elt_sz = slot_sz abi dst_elt_slot in
+              let src_elt_sz = slot_sz abi src_elt_slot in
+              let dst_data = get_element_ptr dst_vec Abi.vec_elt_data in
+              let src_data = get_element_ptr src_vec Abi.vec_elt_data in
+                lea dptr (fst (need_mem_cell dst_data));
+                lea sptr (fst (need_mem_cell src_data));
+                add_to dptr (Il.Cell dst_fill);
+                mov dlim (Il.Cell dptr);
+                add_to dlim (Il.Cell src_fill);
+                let fwd_jmp = mark () in
+                  emit (Il.jmp Il.JMP Il.CodeNone);
+                  let back_jmp_targ = mark () in
+                    (* copy slot *)
+                    trans_copy_slot true
+                      (deref dptr) dst_elt_slot
+                      (deref sptr) src_elt_slot
+                      None;
+                    add_to dptr (imm dst_elt_sz);
+                    add_to sptr (imm src_elt_sz);
+                    patch fwd_jmp;
+                    let back_jmp =
+                      trans_compare Il.JB (Il.Cell dptr) (Il.Cell dlim) in
+                      List.iter (fun j -> patch_existing j back_jmp_targ) back_jmp;
+                      let v = next_vreg_cell word_ty in
+                        mov v (Il.Cell src_fill);
+                        add_to dst_fill (Il.Cell v);
+        | t ->
+            begin
+              bug () "unsupported vector-append type %a" Ast.sprintf_ty t
+            end
+
+
   and trans_copy_binop dst binop a_src =
     let (dst_cell, dst_slot) = trans_lval_maybe_init false dst in
     let src_oper = trans_atom a_src in
       match slot_ty dst_slot with
           Ast.TY_str
         | Ast.TY_vec _ when binop = Ast.BINOP_add ->
-            begin
-              let (dst_elt_slot, trim_trailing_null) =
-                match slot_ty dst_slot with
-                    Ast.TY_str -> (interior_slot (Ast.TY_mach TY_u8), true)
-                  | Ast.TY_vec e -> (e, false)
-                  | _ ->  bug () "unexpected dst type in copy_binop"
-              in
-                match atom_type cx a_src with
-                    Ast.TY_str
-                  | Ast.TY_vec _ ->
-                      let src_cell = need_cell src_oper in
-                      let src_vec = deref src_cell in
-                      let src_fill = get_element_ptr src_vec Abi.vec_elt_fill in
-                      let src_elt_slot =
-                        match atom_type cx a_src with
-                            Ast.TY_str -> interior_slot (Ast.TY_mach TY_u8)
-                          | Ast.TY_vec e -> e
-                          | _ -> bug () "unexpected src type in copy_binop"
-                      in
-                      let dst_vec = deref dst_cell in
-                      let dst_fill = get_element_ptr dst_vec Abi.vec_elt_fill in
-                        if trim_trailing_null
-                        then sub_from dst_fill (imm 1L);
-                        trans_upcall "upcall_vec_grow"
-                          dst_cell
-                          [| Il.Cell dst_cell;
-                             Il.Cell src_fill |];
-
-                        (*
-                         * By now, dst_cell points to a vec/str
-                         * with room for us to add to.
-                         *)
-
-                        (* Reload dst vec, fill; might have changed. *)
-                        let dst_vec = deref dst_cell in
-                        let dst_fill = get_element_ptr dst_vec Abi.vec_elt_fill in
-
-                        (* Copy loop: *)
-                        let pty s = Il.AddrTy (slot_referent_type abi s) in
-                        let dptr = next_vreg_cell (pty dst_elt_slot) in
-                        let sptr = next_vreg_cell (pty src_elt_slot) in
-                        let dlim = next_vreg_cell (pty dst_elt_slot) in
-                        let dst_elt_sz = slot_sz abi dst_elt_slot in
-                        let src_elt_sz = slot_sz abi src_elt_slot in
-                        let dst_data = get_element_ptr dst_vec Abi.vec_elt_data in
-                        let src_data = get_element_ptr src_vec Abi.vec_elt_data in
-                          lea dptr (fst (need_mem_cell dst_data));
-                          lea sptr (fst (need_mem_cell src_data));
-                          add_to dptr (Il.Cell dst_fill);
-                          mov dlim (Il.Cell dptr);
-                          add_to dlim (Il.Cell src_fill);
-                          let fwd_jmp = mark () in
-                            emit (Il.jmp Il.JMP Il.CodeNone);
-                            let back_jmp_targ = mark () in
-                              (* copy slot *)
-                              trans_copy_slot true
-                                (deref dptr) dst_elt_slot
-                                (deref sptr) src_elt_slot
-                                None;
-                              add_to dptr (imm dst_elt_sz);
-                              add_to sptr (imm src_elt_sz);
-                              patch fwd_jmp;
-                              let back_jmp =
-                                trans_compare Il.JB (Il.Cell dptr) (Il.Cell dlim) in
-                                List.iter (fun j -> patch_existing j back_jmp_targ) back_jmp;
-                                let v = next_vreg_cell word_ty in
-                                  mov v (Il.Cell src_fill);
-                                  add_to dst_fill (Il.Cell v);
-                  | t ->
-                      begin
-                        bug () "unsupported concatenation type %a" Ast.sprintf_ty t
-                      end
-            end
-
+            trans_vec_append dst_cell dst_slot src_oper (atom_type cx a_src)
         | _ ->
             let dst_cell = deref_slot false dst_cell dst_slot in
             let op = trans_binop binop in

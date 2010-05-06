@@ -306,14 +306,14 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       complex.rs dead-code-one-arm-if.rs deep.rs div-mod.rs \
                       drop-on-ret.rs exterior.rs foreach-simple.rs vec-slice.rs \
                       simple-obj.rs import.rs fun-call-variants.rs \
-                      fun-indirect-call.rs generic-fn.rs vec-concat.rs \
+                      fun-indirect-call.rs generic-fn.rs vec-append.rs vec-concat.rs \
                       inner-module.rs large-records.rs lazychan.rs \
                       linear-for-loop.rs many.rs mlist.rs mlist_cycle.rs \
                       mutual-recursion-group.rs native.rc command-line-args.rs \
                       native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \
                       rec-extend.rs rec.rs rec_tup.rs return-nil.rs \
                       i32-sub.rs i8-incr.rs spawn-fn.rs spawn.rs \
-                      stateful-obj.rs str-concat.rs str-idx.rs tag.rs \
+                      stateful-obj.rs str-append.rs str-concat.rs str-idx.rs tag.rs \
                       tail-cps.rs tail-direct.rs threads.rs tup.rs \
                       u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \
                       writealias.rs yield.rs yield2.rs cast.rs native-opaque-type.rs \
