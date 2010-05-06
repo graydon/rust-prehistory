@@ -411,11 +411,11 @@ let arr_exists (f:int -> 'a -> bool) (a:'a array) : bool =
  *)
 
 let queue_to_list (q:'a Queue.t) : 'a list =
-  Queue.fold (fun ls elt -> elt :: ls)  []  q
+  List.rev (Queue.fold (fun ls elt -> elt :: ls)  []  q)
 ;;
 
 let queue_to_arr (q:'a Queue.t) : 'a array =
-  Array.of_list (queue_to_list q)
+  Array.init (Queue.length q) (fun _ -> Queue.take q)
 ;;
 
 (*
