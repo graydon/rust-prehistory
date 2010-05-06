@@ -97,14 +97,13 @@
 
 ;; statement keywords you can stick bracketed substatements after
 (c-lang-defconst c-block-stmt-2-kwds
-  rust '("for" "for+" "for*" "for?" "for!"
-         "if" "else" "alt" "while" "do" "case"))
+  rust '("for" "each" "if" "else" "alt" "while" "do" "case"))
 
 ;; statement keywords followed by a simple expression
 (c-lang-defconst c-simple-stmt-kwds
-  rust '("ret" "be""put"
+  rust '("ret" "be" "put"
          "check" "prove" "claim"
-         "log" "in" "each"
+         "log" "in"
          "yield" "join"
          "break" "cont"
          "fail"))
