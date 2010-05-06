@@ -3046,7 +3046,7 @@ let trans_visitor
     let src_oper = trans_atom a_src in
       match slot_ty dst_slot with
           Ast.TY_str
-        | Ast.TY_vec _ ->
+        | Ast.TY_vec _ when binop = Ast.BINOP_add ->
             begin
               let (dst_elt_slot, trim_trailing_null) =
                 match slot_ty dst_slot with
