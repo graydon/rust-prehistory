@@ -56,10 +56,10 @@
   rust '("rec" "vec" "tag"
          "char" "str"
          "chan" "port"
-         "proc" "mod" "obj"
-         "fn" "pred"
+         "task" "mod" "obj"
+         "fn" "pred" "iter"
          "any"
-         "bool" "int" "uint"
+         "bool" "int" "uint" "big"
          "i8" "i16" "i32" "i64"
          "u8" "u16" "u32" "u64"))
 
@@ -68,7 +68,7 @@
 
 ;; declarator-block openings
 (c-lang-defconst c-other-block-decl-kwds
-  rust '("mod" "fn" "pred"))
+  rust '("mod" "fn" "pred" "iter" "obj"))
 
 ;; type-defining declarators
 (c-lang-defconst c-typedef-decl-kwds
@@ -76,11 +76,11 @@
 
 ;; declaration modifiers
 (c-lang-defconst c-modifier-kwds
-  rust '("native" "pub" "mutable" "@" "~" "^"))
+  rust '("native" "mutable" "@" "~" "^"))
 
 ;; declarators that refer to other namespaces
 (c-lang-defconst c-ref-list-kwds
-  rust '("use"))
+  rust '("use" "import" "export"))
 
 ;; ops that are used to form identifiers
 (c-lang-defconst c-identifier-ops
