@@ -214,6 +214,10 @@ let trans_visitor
     emit (Il.umov dst src)
   in
 
+  let umul (dst:Il.cell) (a:Il.operand) (b:Il.operand) : unit =
+    emit (Il.binary Il.UMUL dst a b);
+  in
+
   let add (dst:Il.cell) (a:Il.operand) (b:Il.operand) : unit =
     emit (Il.binary Il.ADD dst a b);
   in
@@ -522,6 +526,34 @@ let trans_visitor
     based_sz abi.Abi.abi_fp_reg (current_fn()) abi.Abi.abi_sp_reg size
   in
 
+  let slot_sz_in_current_frame (slot:Ast.slot) : Il.operand =
+    let rty = slot_referent_type abi slot in
+    let sz = Il.referent_ty_size word_bits rty in
+      calculate_sz_in_current_frame sz
+  in
+
+  let get_element_ptr_dyn mem_cell i =
+    match mem_cell with
+        Il.Mem (mem, Il.StructTy elts) when i >= 0 && i < (Array.length elts) ->
+          assert ((Array.length elts) != 0);
+          begin
+            let elt_rty = elts.(i) in
+            let elt_off = Il.get_element_offset word_bits elts i in
+              match elt_off with
+                  SIZE_fixed fixed_off ->
+                    Il.Mem (Il.mem_off_imm mem fixed_off, elt_rty)
+                | sz ->
+                    let sz = calculate_sz_in_current_frame sz in
+                    let v = next_vreg word_ty in
+                    let vc = Il.Reg (v, word_ty) in
+                      lea vc mem;
+                      add_to vc sz;
+                      Il.Mem (based v, elt_rty)
+          end
+      | _ -> bug () "get_element_ptr_dyn %d on cell %s" i
+          (Il.string_of_cell abi.Abi.abi_str_of_hardreg mem_cell)
+  in
+
   let deref_off_sz
       (fp:Il.reg)
       (fn:node_id)
@@ -611,9 +643,9 @@ let trans_visitor
 
     let bounds_checked_access at slot =
       let atop = trans_atom at in
-      let unit_sz = slot_sz abi slot in
+      let unit_sz = slot_sz_in_current_frame slot in
       let idx = next_vreg_cell word_ty in
-        emit (Il.binary Il.UMUL idx atop (imm unit_sz));
+        emit (Il.binary Il.UMUL idx atop unit_sz);
         let elt_mem = trans_bounds_check (deref cell) (Il.Cell idx) in
           (Il.Mem (elt_mem, slot_referent_type abi slot), slot)
     in
@@ -622,11 +654,11 @@ let trans_visitor
         (Ast.TY_rec entries,
          Ast.COMP_named (Ast.COMP_ident id)) ->
           let i = arr_idx (Array.map fst entries) id in
-            (get_element_ptr cell i, snd entries.(i))
+            (get_element_ptr_dyn cell i, snd entries.(i))
 
       | (Ast.TY_tup entries,
          Ast.COMP_named (Ast.COMP_idx i)) ->
-          (get_element_ptr cell i, entries.(i))
+          (get_element_ptr_dyn cell i, entries.(i))
 
       | (Ast.TY_vec slot,
          Ast.COMP_atom at) ->
@@ -1654,32 +1686,28 @@ let trans_visitor
    *)
 
   and trans_init_vec (dst:Ast.lval) (atoms:Ast.atom array) : unit =
-    let (dstcell, dst_slot) = trans_lval_init dst in
+    let (dst_cell, dst_slot) = trans_lval_init dst in
     let unit_slot = match slot_ty dst_slot with
         Ast.TY_vec s -> s
       | _ -> bug () "init dst of vec-init has non-vec type"
     in
-    let unit_sz = slot_sz abi unit_slot in
-    let n_inits = Array.length atoms in
-    let init_sz = Int64.mul unit_sz (Int64.of_int n_inits) in
-    let padded_sz = Int64.add init_sz (word_n 3) in
-    let alloc_sz = next_power_of_two padded_sz in
-      trans_malloc dstcell alloc_sz;
-      let vec = deref dstcell in
-        mov (get_element_ptr vec Abi.vec_elt_rc) one;
-        mov (get_element_ptr vec Abi.vec_elt_alloc) (imm alloc_sz);
-        mov (get_element_ptr vec Abi.vec_elt_fill) (imm init_sz);
-        let body_mem = fst (need_mem_cell (get_element_ptr vec Abi.vec_elt_data)) in
+    let fill = next_vreg_cell word_ty in
+    let unit_sz = slot_sz_in_current_frame unit_slot in
+      umul fill unit_sz (imm (Int64.of_int (Array.length atoms)));
+      trans_upcall "upcall_new_vec" dst_cell [| Il.Cell fill |];
+      let vec = deref dst_cell in
+        let body_mem = fst (need_mem_cell (get_element_ptr_dyn vec Abi.vec_elt_data)) in
         let unit_rty = slot_referent_type abi unit_slot in
         let body_rty = Il.StructTy (Array.map (fun _ -> unit_rty) atoms) in
         let body = Il.Mem (body_mem, body_rty) in
           Array.iteri
             begin
               fun i atom ->
-                let cell = get_element_ptr body i in
+                let cell = get_element_ptr_dyn body i in
                   trans_init_slot_from_atom CLONE_none cell unit_slot atom
             end
-            atoms
+            atoms;
+            mov (get_element_ptr vec Abi.vec_elt_fill) (Il.Cell fill);
 
   and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =
     let (rc_mem, _) = need_mem_cell (deref_imm cell (word_n off)) in
@@ -1704,8 +1732,8 @@ let trans_visitor
       let tag_keys = sorted_htab_keys ttag in
       let src_tag = get_element_ptr src_cell 0 in
       let dst_tag = get_element_ptr dst_cell 0 in
-      let src_union = get_element_ptr src_cell 1 in
-      let dst_union = get_element_ptr dst_cell 1 in
+      let src_union = get_element_ptr_dyn src_cell 1 in
+      let dst_union = get_element_ptr_dyn dst_cell 1 in
       let tmp = next_vreg_cell word_ty in
         f dst_tag src_tag word_slot curr_iso;
         mov tmp (Il.Cell src_tag);
@@ -1720,7 +1748,7 @@ let trans_visitor
               in
               let ttup = Hashtbl.find ttag key in
                 iter_tup_slots
-                  get_element_ptr
+                  get_element_ptr_dyn
                   (get_variant_ptr dst_union i)
                   (get_variant_ptr src_union i)
                   ttup f curr_iso;
@@ -1746,12 +1774,12 @@ let trans_visitor
         match ty with
             Ast.TY_rec entries ->
               iter_rec_slots
-                get_element_ptr dst_cell src_cell
+                get_element_ptr_dyn dst_cell src_cell
                 entries f curr_iso
 
           | Ast.TY_tup slots ->
               iter_tup_slots
-                get_element_ptr dst_cell src_cell
+                get_element_ptr_dyn dst_cell src_cell
                 slots f curr_iso
 
           | Ast.TY_tag tag ->
@@ -2169,8 +2197,8 @@ let trans_visitor
     Array.iteri
       begin
         fun i slot ->
-          let sub_dst_cell = get_element_ptr dst i in
-          let sub_src_cell = get_element_ptr src i in
+          let sub_dst_cell = get_element_ptr_dyn dst i in
+          let sub_src_cell = get_element_ptr_dyn src i in
             trans_copy_slot initializing
               sub_dst_cell slot sub_src_cell slot None
       end
@@ -2339,7 +2367,7 @@ let trans_visitor
         fun i atom ->
           trans_init_slot_from_atom
             CLONE_none
-            (get_element_ptr dst i)
+            (get_element_ptr_dyn dst i)
             dst_slots.(i)
             atom
       end
@@ -2363,15 +2391,15 @@ let trans_visitor
                 Some atom ->
                   trans_init_slot_from_atom
                     CLONE_none
-                    (get_element_ptr dst i)
+                    (get_element_ptr_dyn dst i)
                     slot
                     atom
               | None ->
                   let (src, _) = trans_lval base in
                     trans_copy_slot
                       true
-                      (get_element_ptr dst i) slot
-                      (get_element_ptr src i) slot
+                      (get_element_ptr_dyn dst i) slot
+                      (get_element_ptr_dyn src i) slot
                       None
       end
       trec
@@ -2663,13 +2691,13 @@ let trans_visitor
       get_element_ptr all_callee_args_cell Abi.calltup_elt_ty_params
     in
     let callee_args =
-      get_element_ptr all_callee_args_cell Abi.calltup_elt_args
+      get_element_ptr_dyn all_callee_args_cell Abi.calltup_elt_args
     in
     let callee_iterator_args =
-      get_element_ptr all_callee_args_cell Abi.calltup_elt_iterator_args
+      get_element_ptr_dyn all_callee_args_cell Abi.calltup_elt_iterator_args
     in
     let callee_indirect_args =
-      get_element_ptr all_callee_args_cell Abi.calltup_elt_indirect_args
+      get_element_ptr_dyn all_callee_args_cell Abi.calltup_elt_indirect_args
     in
 
     let n_args = Array.length call.call_args in
@@ -2709,7 +2737,7 @@ let trans_visitor
                           i n_args n_indirects));
             trans_argN
               clone
-              (get_element_ptr callee_args i)
+              (get_element_ptr_dyn callee_args i)
               callee_arg_slots.(i)
               arg_atom
         end
@@ -2721,7 +2749,7 @@ let trans_visitor
             iflog (fun _ ->
                      annotate (Printf.sprintf "fn-call iterator-arg %d of %d"
                                  i n_iterators));
-            mov (get_element_ptr callee_iterator_args i) iterator_arg_operand
+            mov (get_element_ptr_dyn callee_iterator_args i) iterator_arg_operand
         end
         call.call_iterator_args;
 
@@ -2731,7 +2759,7 @@ let trans_visitor
             iflog (fun _ ->
                      annotate (Printf.sprintf "fn-call indirect-arg %d of %d"
                                  i n_indirects));
-            mov (get_element_ptr callee_indirect_args i) indirect_arg_operand
+            mov (get_element_ptr_dyn callee_indirect_args i) indirect_arg_operand
         end
         call.call_indirect_args
 
@@ -2993,7 +3021,7 @@ let trans_visitor
     in
     let tag_keys = sorted_htab_keys ty_tag in
     let tag_cell:Il.cell = get_element_ptr lval_cell 0 in
-    let union_cell:Il.cell = get_element_ptr lval_cell 1 in
+    let union_cell:Il.cell = get_element_ptr_dyn lval_cell 1 in
     let trans_arm
         { node = ((tag_id:Ast.ident), slots, (block:Ast.block)) } : quad_idx =
       let tag_name = Ast.NAME_base (Ast.BASE_ident tag_id) in
@@ -3004,7 +3032,7 @@ let trans_visitor
       let tup_cell:Il.cell = get_variant_ptr union_cell tag_number in
       let trans_dst idx ({ node = dst_slot; id = dst_id }, _) =
         let dst_cell = cell_of_block_slot dst_id in
-        let src_operand = Il.Cell (get_element_ptr tup_cell idx) in
+        let src_operand = Il.Cell (get_element_ptr_dyn tup_cell idx) in
         mov (deref_slot true dst_cell dst_slot) src_operand
       in
       Array.iteri trans_dst slots;
@@ -3117,10 +3145,10 @@ let trans_visitor
               let dptr = next_vreg_cell (pty dst_elt_slot) in
               let sptr = next_vreg_cell (pty src_elt_slot) in
               let dlim = next_vreg_cell (pty dst_elt_slot) in
-              let dst_elt_sz = slot_sz abi dst_elt_slot in
-              let src_elt_sz = slot_sz abi src_elt_slot in
-              let dst_data = get_element_ptr dst_vec Abi.vec_elt_data in
-              let src_data = get_element_ptr src_vec Abi.vec_elt_data in
+              let dst_elt_sz = slot_sz_in_current_frame dst_elt_slot in
+              let src_elt_sz = slot_sz_in_current_frame src_elt_slot in
+              let dst_data = get_element_ptr_dyn dst_vec Abi.vec_elt_data in
+              let src_data = get_element_ptr_dyn src_vec Abi.vec_elt_data in
                 lea dptr (fst (need_mem_cell dst_data));
                 lea sptr (fst (need_mem_cell src_data));
                 add_to dptr (Il.Cell dst_fill);
@@ -3134,8 +3162,8 @@ let trans_visitor
                       (deref dptr) dst_elt_slot
                       (deref sptr) src_elt_slot
                       None;
-                    add_to dptr (imm dst_elt_sz);
-                    add_to sptr (imm src_elt_sz);
+                    add_to dptr dst_elt_sz;
+                    add_to sptr src_elt_sz;
                     patch fwd_jmp;
                     let back_jmp =
                       trans_compare Il.JB (Il.Cell dptr) (Il.Cell dlim) in
@@ -3380,9 +3408,9 @@ let trans_visitor
               | Ast.TY_str -> (interior_slot (Ast.TY_mach TY_u8))
               | _ -> bug () "for-seq of non-vec, non-str type"
           in
-          let unit_sz = slot_sz abi unit_slot in
+          let unit_sz = slot_sz_in_current_frame unit_slot in
           let seq_cell = deref seq_cell in
-          let data = get_element_ptr seq_cell Abi.vec_elt_data in
+          let data = get_element_ptr_dyn seq_cell Abi.vec_elt_data in
           let len = get_element_ptr seq_cell Abi.vec_elt_fill in
           let ptr = next_vreg_cell Il.voidptr_t in
           let lim = next_vreg_cell Il.voidptr_t in
@@ -3395,7 +3423,7 @@ let trans_visitor
             let unit_cell = ptr_cast ptr (slot_referent_type abi unit_slot) in
               trans_copy_slot true dst_cell dst_slot.node (deref unit_cell) unit_slot None;
               trans_block fo.Ast.for_body;
-              add_to ptr (imm unit_sz);
+              add_to ptr unit_sz;
               emit (Il.jmp Il.JMP (Il.CodeLabel back_jmp_target));
               List.iter patch fwd_jmps;
 
@@ -3807,7 +3835,7 @@ let trans_visitor
     let _ = log cx "tag variant: %s -> tag value #%d" n i in
     let out_cell = deref (ptr_at (fp_imm out_mem_disp) (Ast.TY_tag ttag)) in
     let tag_cell = get_element_ptr out_cell 0 in
-    let union_cell = get_element_ptr out_cell 1 in
+    let union_cell = get_element_ptr_dyn out_cell 1 in
     let dst = get_variant_ptr union_cell i in
     let dst_ty = snd (need_mem_cell dst) in
     let src = Il.Mem (fp_imm arg0_disp, dst_ty) in
