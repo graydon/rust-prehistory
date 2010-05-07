@@ -95,6 +95,15 @@ let trans_visitor
     Asm.SEQ (Array.map crate_rel_word fixups)
   in
 
+  let table_of_table_rel_fixups (fixups:fixup array) : Asm.frag =
+    let table_fix = new_fixup "vtbl" in
+    let table_rel_word fix =
+      Asm.WORD (word_ty_signed_mach,
+                Asm.SUB (Asm.M_POS fix, Asm.M_POS table_fix))
+    in
+      Asm.DEF (table_fix, Asm.SEQ (Array.map table_rel_word fixups))
+  in
+
   let nabi_indirect =
       match cx.ctxt_sess.Session.sess_targ with
           Linux_x86_elf -> false
@@ -810,7 +819,7 @@ let trans_visitor
             [|
               Asm.WORD (word_ty_mach, Asm.IMM (ty_sz abi t));
               Asm.WORD (word_ty_mach, Asm.IMM (ty_align abi t));
-              table_of_crate_rel_fixups
+              table_of_table_rel_fixups
                 [|
                   get_copy_glue t None;
                   get_drop_glue t None;
@@ -830,22 +839,14 @@ let trans_visitor
           fun _ ->
             iflog (fun _ -> log cx "emitting %d-entry obj vtbl for %s"
                      (Hashtbl.length obj.Ast.obj_fns) (path_name()));
-            let table_fix = new_fixup "vtbl" in
-            let table_rel_word fix =
-              Asm.WORD (word_ty_signed_mach,
-                        Asm.SUB (Asm.M_POS fix, Asm.M_POS table_fix))
-            in
-            let fptrs =
-              Array.map
-                begin
-                  fun k ->
-                    let fn = Hashtbl.find obj.Ast.obj_fns k in
-                    let fix = get_fn_fixup cx fn.id in
-                      table_rel_word fix
-                end
-                (sorted_htab_keys obj.Ast.obj_fns)
-            in
-              Asm.DEF (table_fix, Asm.SEQ fptrs)
+            table_of_table_rel_fixups
+              (Array.map
+                 begin
+                   fun k ->
+                     let fn = Hashtbl.find obj.Ast.obj_fns k in
+                       get_fn_fixup cx fn.id
+                 end
+                 (sorted_htab_keys obj.Ast.obj_fns))
         end
 
   and trans_init_str (dst:Ast.lval) (s:string) : unit =
@@ -1900,12 +1901,12 @@ let trans_visitor
             iflog (fun _ -> annotate
                      (Printf.sprintf "copy_ty: parametric copy %#d" i));
             let ty_desc = get_current_fn_ty_desc i in
-            let copy_glue =
+            let copy_glue_offset =
               get_element_ptr ty_desc Abi.tydesc_field_copy_glue
             in
-            let copy_glue_ptr =
-              crate_rel_to_ptr (Il.Cell copy_glue) Il.CodeTy
-            in
+            let copy_glue_ptr = next_vreg_cell (Il.AddrTy Il.CodeTy) in
+              lea copy_glue_ptr (fst (need_mem_cell ty_desc));
+              add_to copy_glue_ptr (Il.Cell copy_glue_offset);
               aliasing false src
                 (fun src ->
                    trans_call_copy_glue copy_glue_ptr dst src)
