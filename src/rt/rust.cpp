@@ -3488,9 +3488,9 @@ last_os_error(rust_task *task) {
                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                   (LPTSTR) &buf, 0, NULL );
 #else
-    char cbuf[1024];
-    char *buf = strerror_r(errno, cbuf, sizeof(cbuf));
-    if (!buf) {
+    char buf[1024];
+    int err = strerror_r(errno, buf, sizeof(buf));
+    if (err) {
         task->fail(1);
         return NULL;
     }
