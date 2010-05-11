@@ -60,7 +60,8 @@ let trans_crate
   let bogus = Llvm.const_null (Llvm.i32_type llctx) in
   let bogus_ptr = Llvm.const_null (Llvm.pointer_type (Llvm.i32_type llctx)) in
 
-  let nil = Llvm.undef (Llvm.void_type llctx) in
+  let llnilty = Llvm.array_type (Llvm.i1_type llctx) 0 in
+  let llnil = Llvm.const_array llnilty [| |] in
 
   let ty_of_item = Hashtbl.find sem_cx.Semant.ctxt_all_item_types in
   let ty_of_slot n = Semant.slot_ty (Semant.get_slot sem_cx n) in
@@ -221,7 +222,7 @@ let trans_crate
     in
     match ty with
         Ast.TY_any -> opaque ()
-      | Ast.TY_nil -> void_ty
+      | Ast.TY_nil -> llnilty
       | Ast.TY_bool -> Llvm.i1_type llctx
       | Ast.TY_mach mty -> trans_mach_ty mty
       | Ast.TY_int -> word_ty
@@ -232,11 +233,7 @@ let trans_crate
 
       | Ast.TY_fn tfn ->
           let (tsig, _) = tfn in
-          let lloutptr =
-            if Semant.slot_ty tsig.Ast.sig_output_slot = Ast.TY_nil
-            then word_ty
-            else p (trans_slot None tsig.Ast.sig_output_slot)
-          in
+          let lloutptr = p (trans_slot None tsig.Ast.sig_output_slot) in
           let lltaskty = p abi.Llabi.task_ty in
           let llins = Array.map (trans_slot None) tsig.Ast.sig_input_slots in
             fn_ty void_ty (Array.append [| lloutptr; lltaskty |] llins)
@@ -592,7 +589,7 @@ let trans_crate
           (lit:Ast.lit)
           : Llvm.llvalue =
         match lit with
-            Ast.LIT_nil -> nil
+            Ast.LIT_nil -> llnil
           | Ast.LIT_bool value ->
             Llvm.const_int (Llvm.i1_type llctx) (if value then 1 else 0)
           | Ast.LIT_mach (mty, value, _) ->

@@ -51,8 +51,9 @@ let declare_abi (llctx:Llvm.llcontext) (llmod:Llvm.llmodule) : abi =
 
   let rust_start_ty =
     let task_ptr_ty = Llvm.pointer_type task_ty in
+    let llnilty = Llvm.array_type (Llvm.i1_type llctx) 0 in
     let main_ty = Llvm.function_type (Llvm.void_type llctx)
-      [| i32; task_ptr_ty; |]
+      [| Llvm.pointer_type llnilty; task_ptr_ty; |]
     in
     let args_ty = Array.map Llvm.pointer_type [| main_ty; crate_ty; |] in
     let args_ty = Array.append args_ty [| i32; i32 |] in
