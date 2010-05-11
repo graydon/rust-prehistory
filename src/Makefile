@@ -316,10 +316,11 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       i32-sub.rs i8-incr.rs spawn-fn.rs spawn.rs \
                       stateful-obj.rs str-append.rs str-concat.rs str-idx.rs tag.rs \
                       tail-cps.rs tail-direct.rs threads.rs tup.rs \
-                      u32-decr.rs u8-incr-decr.rs u8-incr.rs user.rs vec.rs \
-                      writealias.rs yield.rs yield2.rs cast.rs native-opaque-type.rs \
-                      generic-type.rs generic-derived-type.rs generic-tag.rs \
-                      generic-obj.rs syntax-extension.rs) \
+                      u32-decr.rs u8-incr-decr.rs u8-incr.rs unit.rs user.rs \
+                      vec.rs writealias.rs yield.rs yield2.rs cast.rs \
+                      native-opaque-type.rs generic-type.rs \
+                      generic-derived-type.rs generic-tag.rs generic-obj.rs \
+                      syntax-extension.rs) \
                     $(addprefix test/run-fail/,fail.rs linked-failure.rs \
                       pred.rs vec_overrun.rs str_overrun.rs vec_underrun.rs \
                       explicit-fail.rs) \
