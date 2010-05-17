@@ -1653,14 +1653,6 @@ let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
     Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
 ;;
 
-(* FIXME: eliminate this, it duplicates logic elsewhere. *)
-let fn_call_tup (abi:Abi.abi) (inputs:Ast.ty_tup) : Ast.ty_tup =
-  let task_ptr = word_slot abi in
-  let out_ptr = word_slot abi in
-    Array.append [| out_ptr; task_ptr |] inputs
-;;
-
-
 let mk_ty_fn
     (out_slot:Ast.slot)
     (arg_slots:Ast.slot array)

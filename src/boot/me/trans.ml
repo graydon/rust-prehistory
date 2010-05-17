@@ -1270,17 +1270,16 @@ let trans_visitor
       : unit =
     let code = fixup_to_code fix in
     let arg_tup = arg_tup_cell [| word_slot; word_slot |] in
-      (* Arg0 is target of clone, to which we write. *)
-      (* Arg1 is task-pointer, as usual. *)
-      (* Arg2 is the address of the slot we're cloning. *)
-      (* Arg3 is the task that will own the data. *)
+    let out = get_element_ptr arg_tup Abi.calltup_elt_out_ptr in
+    let tp = get_element_ptr arg_tup Abi.calltup_elt_task_ptr in
+    let args = get_element_ptr arg_tup Abi.calltup_elt_args in
       aliasing true dst
         begin
           fun dst ->
-            mov (get_element_ptr arg_tup 0) (Il.Cell dst);
-            mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_tp_cell);
-            mov (get_element_ptr arg_tup 2) (Il.Cell arg);
-            mov (get_element_ptr arg_tup 3) (Il.Cell clone_task);
+            mov out (Il.Cell dst);
+            mov tp (Il.Cell abi.Abi.abi_tp_cell);
+            mov (get_element_ptr args 0) (Il.Cell arg);
+            mov (get_element_ptr args 1) (Il.Cell clone_task);
             call_code code
         end
 
@@ -1291,26 +1290,25 @@ let trans_visitor
       : unit =
     let code = code_of_cell glue  in
     let arg_tup = arg_tup_cell [| word_slot |] in
-      (* Arg0 is target of copy, to which we write. *)
-      (* Arg1 is task-pointer, as usual. *)
-      (* Arg2 is the address of the slot we're cloning. *)
+    let out = get_element_ptr arg_tup Abi.calltup_elt_out_ptr in
+    let tp = get_element_ptr arg_tup Abi.calltup_elt_task_ptr in
+    let args = get_element_ptr arg_tup Abi.calltup_elt_args in
       aliasing true dst
         begin
           fun dst ->
-            mov (get_element_ptr arg_tup 0) (Il.Cell dst);
-            mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_tp_cell);
-            mov (get_element_ptr arg_tup 2) (Il.Cell src);
+            mov out (Il.Cell dst);
+            mov tp (Il.Cell abi.Abi.abi_tp_cell);
+            mov (get_element_ptr args 0) (Il.Cell src);
             call_code code
         end
 
   and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
     let code = fixup_to_code fix in
     let arg_tup = arg_tup_cell [| word_slot |] in
-      (* Arg0 we ignore, not present. *)
-      (* Arg1 is task-pointer, as usual. *)
-      (* Arg2 is the sole pointer we pass in. *)
-      mov (get_element_ptr arg_tup 1) (Il.Cell abi.Abi.abi_tp_cell);
-      mov (get_element_ptr arg_tup 2) (Il.Cell arg);
+    let tp = get_element_ptr arg_tup Abi.calltup_elt_task_ptr in
+    let args = get_element_ptr arg_tup Abi.calltup_elt_args in
+      mov tp  (Il.Cell abi.Abi.abi_tp_cell);
+      mov (get_element_ptr args 0) (Il.Cell arg);
       call_code code
 
   (* trans_compare returns a quad number of the cjmp, which the caller
@@ -2993,14 +2991,12 @@ let trans_visitor
        * do that.  *)
       callee_fptr
 
-  (* FIXME: eliminate this, it duplicates logic elsewhere. *)
   and arg_tup_cell
       (arg_slots:Ast.slot array)
       : Il.cell =
-    let mem = sp_imm 0L in
-    let ty = Ast.TY_tup (fn_call_tup abi arg_slots) in
-    let rty = referent_type abi ty in
-      Il.Mem (mem, rty)
+    let fty = mk_simple_ty_fn arg_slots in
+    let rty = call_args_referent_type cx 0 fty None in
+      callee_args_cell false rty
 
   and callee_drop_slot
       (_:Ast.slot_key)
