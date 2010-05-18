@@ -820,6 +820,8 @@ let trans_visitor
       (DATA_tydesc t)
       begin
         fun _ ->
+          log cx "tydesc for %a has sz=%Ld, align=%Ld"
+            Ast.sprintf_ty t (ty_sz abi t) (ty_align abi t);
           Asm.SEQ
             [|
               Asm.WORD (word_ty_mach, Asm.IMM (ty_sz abi t));
@@ -1137,6 +1139,7 @@ let trans_visitor
                              code_spill_disp = 0L } in
             let spill = new_fixup (name ^ " spill") in
               htab_put cx.ctxt_glue_code g tmp_code;
+              log cx "emitting glue: %s" name;
               trans_mem_glue_frame_entry 1 spill;
               let (arg:Il.mem) = fp_imm arg0_disp in
                 inner arg;
@@ -2738,6 +2741,7 @@ let trans_visitor
       trans_arg1 callee_task_cell;
 
       let get_tydesc ty_param =
+        log cx "getting tydesc for %a" Ast.sprintf_ty ty_param;
         match ty_param with
             Ast.TY_param (idx, _) ->
               (get_current_fn_ty_desc idx)
@@ -3079,7 +3083,9 @@ let trans_visitor
       iflog
         begin
           fun _ ->
-            annotate (Ast.fmt_to_str Ast.fmt_stmt_body stmt)
+            let s = Ast.fmt_to_str Ast.fmt_stmt_body stmt in
+              log cx "translating stmt: %s" s;
+              annotate s;
         end;
       curr_stmt := Some stmt.id;
       trans_stmt_full stmt;
@@ -4149,8 +4155,11 @@ let process_crate
     [|
       (fixup_assigning_visitor cx path
          Walk.empty_visitor);
-      (trans_visitor cx path
-         Walk.empty_visitor)
+      (Walk.mod_item_logging_visitor
+         (log cx "translation pass: %s")
+         path
+         (trans_visitor cx path
+            Walk.empty_visitor))
     |];
   in
     log cx "translating crate with main function %s" cx.ctxt_main_name;
