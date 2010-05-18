@@ -892,9 +892,6 @@ let trans_visitor
   and code_fixup_to_ptr_operand (fix:fixup) : Il.operand =
     fixup_to_ptr_operand abi.Abi.abi_has_pcrel_code fix Il.CodeTy
 
-  and fixup_to_code (fix:fixup) : Il.code =
-    code_of_operand (code_fixup_to_ptr_operand fix)
-
   (* A pointer-valued op may be of the form ImmPtr, which carries its
    * target fixup, "constant-propagated" through trans so that
    * pc-relative addressing can make use of it whenever
@@ -1255,12 +1252,44 @@ let trans_visitor
     let fix = get_typed_mem_glue g ty inner in
       fix
 
-  (*
-   * Glue functions use the same calling convention as ordinary functions.
-   *
+  (* Glue functions use mostly the same calling convention as ordinary
+   * functions.
+   * 
    * Each glue function expects its own particular arguments, which are
-   * usually aliases-- ie, caller doesn't transfer ownership to the glue.
+   * usually aliases-- ie, caller doesn't transfer ownership to the
+   * glue. And nothing is represented in terms of AST nodes. So we
+   * don't do lvals-and-atoms here.
    *)
+
+  and trans_call_static_glue
+      (callee:Il.operand)
+      (dst:Il.cell option)
+      (args:Il.cell array)
+      : unit =
+    let code = code_of_operand callee in
+    let arg_tup = arg_tup_cell (Array.init (Array.length args) (fun _ -> word_slot)) in
+    let out = get_element_ptr arg_tup Abi.calltup_elt_out_ptr in
+    let tp = get_element_ptr arg_tup Abi.calltup_elt_task_ptr in
+    let arg_slots = get_element_ptr arg_tup Abi.calltup_elt_args in
+    let inner _ =
+      trans_arg1 tp;
+      Array.iteri
+        begin
+          fun i arg ->
+            mov (get_element_ptr arg_slots i) (Il.Cell arg)
+        end
+        args;
+      call_code code
+    in
+      match dst with
+          None -> inner()
+        | Some dst ->
+            aliasing true dst
+              begin
+              fun dst ->
+                mov out (Il.Cell dst);
+                inner()
+              end
 
   and trans_call_clone_glue
       (dst:Il.cell)
@@ -1268,20 +1297,15 @@ let trans_visitor
       (arg:Il.cell)
       (clone_task:Il.cell)
       : unit =
-    let code = fixup_to_code fix in
-    let arg_tup = arg_tup_cell [| word_slot; word_slot |] in
-    let out = get_element_ptr arg_tup Abi.calltup_elt_out_ptr in
-    let tp = get_element_ptr arg_tup Abi.calltup_elt_task_ptr in
-    let args = get_element_ptr arg_tup Abi.calltup_elt_args in
-      aliasing true dst
-        begin
-          fun dst ->
-            mov out (Il.Cell dst);
-            mov tp (Il.Cell abi.Abi.abi_tp_cell);
-            mov (get_element_ptr args 0) (Il.Cell arg);
-            mov (get_element_ptr args 1) (Il.Cell clone_task);
-            call_code code
-        end
+    trans_call_static_glue
+      (code_fixup_to_ptr_operand fix)
+      (Some dst)
+      [| arg; clone_task |]
+
+  and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
+    trans_call_static_glue
+      (code_fixup_to_ptr_operand fix)
+      None [| arg |]
 
   and trans_call_copy_glue
       (glue:Il.cell)
@@ -1302,14 +1326,6 @@ let trans_visitor
             call_code code
         end
 
-  and trans_call_mem_glue (fix:fixup) (arg:Il.cell) : unit =
-    let code = fixup_to_code fix in
-    let arg_tup = arg_tup_cell [| word_slot |] in
-    let tp = get_element_ptr arg_tup Abi.calltup_elt_task_ptr in
-    let args = get_element_ptr arg_tup Abi.calltup_elt_args in
-      mov tp  (Il.Cell abi.Abi.abi_tp_cell);
-      mov (get_element_ptr args 0) (Il.Cell arg);
-      call_code code
 
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
