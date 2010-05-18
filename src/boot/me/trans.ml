@@ -2502,6 +2502,7 @@ let trans_visitor
       (cx:ctxt)
       (dst_cell:Il.cell)
       (flv:Ast.lval)
+      (ty_params:Ast.ty array)
       (args:Ast.atom array)
       : unit =
     let (ptr, fn_ty) = trans_callee flv in
@@ -2509,7 +2510,7 @@ let trans_visitor
     let call = { call_ctrl = cc;
                  call_callee_ptr = ptr;
                  call_callee_ty = fn_ty;
-                 call_callee_ty_params = [| |];
+                 call_callee_ty_params = ty_params;
                  call_output = dst_cell;
                  call_args = args;
                  call_iterator_args = call_iterator_args None;
@@ -3400,6 +3401,11 @@ let trans_visitor
 
       | Ast.STMT_be (flv, args) ->
           let ty = lval_ty cx flv in
+          let ty_params =
+            match htab_search cx.ctxt_call_lval_params (lval_base_id flv) with
+                Some params -> params
+              | None -> [| |]
+            in
             begin
               match ty with
                   Ast.TY_fn (tsig, _) ->
@@ -3410,7 +3416,7 @@ let trans_visitor
                     in
                     let dst_rty = referent_type abi result_ty in
                     let dst_cell = Il.Mem (dst_mem, dst_rty) in
-                      trans_be_fn cx dst_cell flv args
+                      trans_be_fn cx dst_cell flv ty_params args
 
                 | Ast.TY_pred _ ->
                     bug () "be pred not yet implemented"
