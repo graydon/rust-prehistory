@@ -114,7 +114,7 @@ ifdef CFG_GCC
   CFG_GCC_LINK_FLAGS += -g
   CFG_COMPILE_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
   CFG_LINK_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_LINK_FLAGS) -o $(1)
-  CFG_DEPEND_C = $(CFG_GCC_CROSS)g++ -MT "$(1)" -MM $(2)
+  CFG_DEPEND_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_COMPILE_FLAGS) -MT "$(1)" -MM $(2)
 else
   CFG_ERR := $(error please try on a system with gcc)
 endif

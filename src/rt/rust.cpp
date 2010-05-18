@@ -1,6 +1,6 @@
 /*
  * Rust runtime library.
- * Copyright 2008, 2009 Graydon Hoare <graydon@pobox.com>.
+ * Copyright 2008-2010 Graydon Hoare <graydon@pobox.com>.
  * Released under MIT license.
  * See file COPYING for details.
  */
@@ -27,13 +27,6 @@ extern "C" {
 #include <wincrypt.h>
 }
 #elif defined(__GNUC__)
-/*
- * Only for RTLD_DEFAULT, remove _GNU_SOURCE when that dies. We want
- * to be non-GNU-dependent.
- */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -43,6 +36,10 @@ extern "C" {
 #include <errno.h>
 #else
 #error "Platform not supported."
+#endif
+
+#ifndef __i386__
+#error "Target CPU not supported."
 #endif
 
 #define I(dom, e) ((e) ? (void)0 :                              \
@@ -3264,7 +3261,7 @@ rust_main_loop(rust_dom *dom);
 #if defined(__WIN32__)
 static DWORD WINAPI rust_thread_start(void *ptr)
 #elif defined(__GNUC__)
-    static void *rust_thread_start(void *ptr)
+static void *rust_thread_start(void *ptr)
 #else
 #error "Platform not supported"
 #endif
@@ -3478,15 +3475,26 @@ last_os_error(rust_task *task) {
     rust_dom *dom = task->dom;
     dom->log(LOG_TASK, "last_os_error()");
 
-#ifdef __WIN32__
+#if defined(__WIN32__)
     LPTSTR buf;
     DWORD err = GetLastError();
-    FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                  FORMAT_MESSAGE_FROM_SYSTEM |
-                  FORMAT_MESSAGE_IGNORE_INSERTS,
-                  NULL, err,
-                  MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                  (LPTSTR) &buf, 0, NULL );
+    DWORD res = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                              FORMAT_MESSAGE_FROM_SYSTEM |
+                              FORMAT_MESSAGE_IGNORE_INSERTS,
+                              NULL, err,
+                              MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                              (LPTSTR) &buf, 0, NULL);
+    if (!res) {
+        task->fail(1);
+        return NULL;
+    }
+#elif defined(_GNU_SOURCE)
+    char cbuf[1024];
+    char *buf = strerror_r(errno, cbuf, sizeof(cbuf));
+    if (!buf) {
+        task->fail(1);
+        return NULL;
+    }
 #else
     char buf[1024];
     int err = strerror_r(errno, buf, sizeof(buf));
@@ -3495,7 +3503,6 @@ last_os_error(rust_task *task) {
         return NULL;
     }
 #endif
-
     size_t fill = strlen(buf) + 1;
     size_t alloc = next_power_of_two(sizeof(rust_str) + fill);
     void *mem = dom->malloc(alloc);
