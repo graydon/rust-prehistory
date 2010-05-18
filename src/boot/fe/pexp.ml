@@ -1031,6 +1031,8 @@ and desugar_expr_mode_atom
     match pexp.node with
         PEXP_mutable {node=(PEXP_exterior e); id=_} ->
           desugar_inner (Ast.MODE_exterior Ast.MUTABLE) e
+      | PEXP_exterior e ->
+          desugar_inner (Ast.MODE_exterior Ast.IMMUTABLE) e
       | PEXP_mutable e ->
           desugar_inner (Ast.MODE_interior Ast.MUTABLE) e
       | _ ->
