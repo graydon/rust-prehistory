@@ -298,6 +298,7 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/generic-fn.rs \
                     test/run-pass/generic-tag.rs \
                     test/run-pass/generic-obj.rs \
+                    test/run-pass/generic-drop-glue.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
                     test/compile-fail/infinite-vec-type-recursion.rs
@@ -320,6 +321,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       vec.rs writealias.rs yield.rs yield2.rs cast.rs \
                       native-opaque-type.rs generic-type.rs \
                       generic-derived-type.rs generic-tag.rs generic-obj.rs \
+                      generic-drop-glue.rs \
                       syntax-extension.rs clone-with-exterior.rs) \
                     $(addprefix test/run-fail/,fail.rs linked-failure.rs \
                       pred.rs vec_overrun.rs str_overrun.rs vec_underrun.rs \
