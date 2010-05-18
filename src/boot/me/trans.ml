@@ -2134,7 +2134,7 @@ let trans_visitor
       match slot_mem_ctrl slot with
           MEM_gc -> exterior_gc_body_off
         | MEM_rc_struct -> exterior_rc_body_off
-        | MEM_rc_opaque _
+        | MEM_rc_opaque off -> word_n off
         | MEM_interior -> bug () "exterior_body_off of MEM_interior"
 
   (* Returns the offset of the slot-body in the initialized allocation. *)
