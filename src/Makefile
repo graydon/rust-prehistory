@@ -290,7 +290,7 @@ self: $(CFG_COMPILER)
 ######################################################################
 
 TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
-                    test/run-pass/spawn-fn.rs \
+                    test/run-pass/clone-with-exterior.rs \
                     test/run-pass/rec-auto.rs \
                     test/run-pass/foreach-simple.rs \
                     test/run-pass/vec-slice.rs \
@@ -320,7 +320,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
                       vec.rs writealias.rs yield.rs yield2.rs cast.rs \
                       native-opaque-type.rs generic-type.rs \
                       generic-derived-type.rs generic-tag.rs generic-obj.rs \
-                      syntax-extension.rs) \
+                      syntax-extension.rs clone-with-exterior.rs) \
                     $(addprefix test/run-fail/,fail.rs linked-failure.rs \
                       pred.rs vec_overrun.rs str_overrun.rs vec_underrun.rs \
                       explicit-fail.rs) \
