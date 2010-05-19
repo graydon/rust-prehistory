@@ -1157,10 +1157,19 @@ let trans_visitor
 
   and get_typed_mem_glue
       (g:glue)
-      (ty:Ast.ty)
-      (inner:Il.cell -> unit)
+      (fty:Ast.ty)
+      (inner:Il.cell -> Il.cell -> unit)
       : fixup =
-    get_mem_glue g (fun mem -> inner (ptr_at mem ty))
+      get_mem_glue g
+        begin
+          fun _ ->
+            let n_ty_params = 0 in
+            let calltup_rty = call_args_referent_type cx n_ty_params fty None in
+            let calltup_cell = caller_args_cell calltup_rty in
+            let out_cell = get_element_ptr calltup_cell Abi.calltup_elt_out_ptr in
+            let args_cell = get_element_ptr calltup_cell Abi.calltup_elt_args in
+              inner out_cell args_cell
+        end
 
   and trace_str b s =
     if b
@@ -1175,20 +1184,24 @@ let trans_visitor
     then
       trans_void_upcall "upcall_trace_word" [| Il.Cell w |]
 
+
   and get_drop_glue
       (ty:Ast.ty)
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_drop ty in
-    let inner (arg:Il.cell) =
-      trace_str cx.ctxt_sess.Session.sess_trace_drop
-        "in drop-glue, dropping";
-      trace_word cx.ctxt_sess.Session.sess_trace_drop arg;
-      drop_ty ty (deref arg) curr_iso;
-      trace_str cx.ctxt_sess.Session.sess_trace_drop
-        "drop-glue complete";
+    let inner _ (args:Il.cell) =
+      let arg = get_element_ptr args 0 in
+        trace_str cx.ctxt_sess.Session.sess_trace_drop
+          "in drop-glue, dropping";
+        trace_word cx.ctxt_sess.Session.sess_trace_drop arg;
+        drop_ty ty (deref arg) curr_iso;
+        trace_str cx.ctxt_sess.Session.sess_trace_drop
+          "drop-glue complete";
     in
-      get_typed_mem_glue g ty inner
+    let fty = mk_simple_ty_fn [| read_alias_slot ty |] in
+      get_typed_mem_glue g fty inner
+
 
   and get_free_glue
       (ty:Ast.ty)
@@ -1196,12 +1209,13 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_free ty in
-    let inner (arg:Il.cell) =
+    let inner _ (args:Il.cell) =
       (* 
-       * Free-glue assumes we're looking at a pointer to an 
+       * Free-glue assumes it's called with a pointer to an 
        * exterior allocation with normal exterior layout. It's
        * just a way to move drop+free out of leaf code. 
        *)
+      let arg = get_element_ptr args 0 in
       let (body_mem, _) = need_mem_cell (deref_imm arg exterior_rc_body_off) in
       let vr = next_vreg_cell Il.voidptr_t in
         lea vr body_mem;
@@ -1225,7 +1239,8 @@ let trans_visitor
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "free-glue complete";
     in
-      get_typed_mem_glue g ty inner
+    let fty = mk_simple_ty_fn [| read_alias_slot ty |] in
+      get_typed_mem_glue g fty inner
 
 
   and get_mark_glue
@@ -1233,48 +1248,48 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_mark ty in
-    let inner (arg:Il.cell) = mark_ty ty (deref arg) curr_iso in
-    let fix = get_typed_mem_glue g ty inner in
-      fix
+    let inner _ (args:Il.cell) =
+      mark_ty ty (deref (get_element_ptr args 0)) curr_iso
+    in
+    let fty = mk_simple_ty_fn [| read_alias_slot ty |] in
+      get_typed_mem_glue g fty inner
+
 
   and get_clone_glue
       (ty:Ast.ty)
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_clone ty in
-    let inner _ =
-      let n_ty_params = 0 in
-      let fty =
-        mk_ty_fn
-          (interior_slot ty)     (* dst *)
-          [|
-            read_alias_slot ty;  (* src *)
-            word_slot            (* clone-task *)
-          |]
-      in
-      let calltup_rty = call_args_referent_type cx n_ty_params fty None in
-      let calltup_cell = callee_args_cell false calltup_rty in
-      let args_cell = get_element_ptr calltup_cell Abi.calltup_elt_args in
-      let dst = deref (get_element_ptr calltup_cell Abi.calltup_elt_out_ptr) in
-      let src = deref (get_element_ptr args_cell 0) in
-      let clone_task = deref (get_element_ptr args_cell 1) in
+    let inner (out_ptr:Il.cell) (args:Il.cell) =
+      let dst = deref out_ptr in
+      let src = deref (get_element_ptr args 0) in
+      let clone_task = get_element_ptr args 1 in
         clone_ty clone_task ty dst src curr_iso
     in
-    let fix = get_typed_mem_glue g ty inner in
-      fix
+    let fty =
+      mk_ty_fn
+        (interior_slot ty)     (* dst *)
+        [|
+          read_alias_slot ty;  (* src *)
+          word_slot            (* clone-task *)
+        |]
+    in
+      get_typed_mem_glue g fty inner
+
 
   and get_copy_glue
       (ty:Ast.ty)
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_copy ty in
-    let inner (arg:Il.cell) =
-      let dst = deref (ptr_at (fp_imm out_mem_disp) ty) in
-      let src = deref arg in
+    let inner (out_ptr:Il.cell) (args:Il.cell) =
+      let dst = deref out_ptr in
+      let src = deref (get_element_ptr args 0) in
         copy_ty ty dst src curr_iso
     in
-    let fix = get_typed_mem_glue g ty inner in
-      fix
+    let fty = mk_ty_fn (interior_slot ty) [| read_alias_slot ty |] in
+      get_typed_mem_glue g fty inner
+
 
   (* Glue functions use mostly the same calling convention as ordinary
    * functions.
