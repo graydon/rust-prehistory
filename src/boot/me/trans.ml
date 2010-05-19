@@ -1242,13 +1242,22 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : fixup =
     let g = GLUE_clone ty in
-    let inner (arg:Il.cell) =
-      let dst = deref (ptr_at (fp_imm out_mem_disp) ty) in
-      let src = deref arg in
-        (* FIXME: Gross hack here: we know clone_task is one-past arg
-         * in clone glue args.
-         *)
-      let clone_task = word_at (fp_imm (Int64.add arg0_disp (word_n 1))) in
+    let inner _ =
+      let n_ty_params = 0 in
+      let fty =
+        mk_ty_fn
+          (interior_slot ty)     (* dst *)
+          [|
+            read_alias_slot ty;  (* src *)
+            word_slot            (* clone-task *)
+          |]
+      in
+      let calltup_rty = call_args_referent_type cx n_ty_params fty None in
+      let calltup_cell = callee_args_cell false calltup_rty in
+      let args_cell = get_element_ptr calltup_cell Abi.calltup_elt_args in
+      let dst = deref (get_element_ptr calltup_cell Abi.calltup_elt_out_ptr) in
+      let src = deref (get_element_ptr args_cell 0) in
+      let clone_task = deref (get_element_ptr args_cell 1) in
         clone_ty clone_task ty dst src curr_iso
     in
     let fix = get_typed_mem_glue g ty inner in

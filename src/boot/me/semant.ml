@@ -1648,6 +1648,11 @@ let word_slot (abi:Abi.abi) : Ast.slot =
   interior_slot (Ast.TY_mach abi.Abi.abi_word_ty)
 ;;
 
+let read_alias_slot (ty:Ast.ty) : Ast.slot =
+  { Ast.slot_mode = Ast.MODE_read_alias;
+    Ast.slot_ty = Some ty }
+;;
+
 let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
   { Ast.slot_mode = Ast.MODE_write_alias;
     Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
