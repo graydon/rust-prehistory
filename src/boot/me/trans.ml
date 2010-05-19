@@ -95,13 +95,17 @@ let trans_visitor
     Asm.SEQ (Array.map crate_rel_word fixups)
   in
 
+  let table_of_fixup_rel_fixups (fixup:fixup) (fixups:fixup array) : Asm.frag =
+    let fixup_rel_word fix =
+      Asm.WORD (word_ty_signed_mach,
+                Asm.SUB (Asm.M_POS fix, Asm.M_POS fixup))
+    in
+      Asm.SEQ (Array.map fixup_rel_word fixups)
+  in
+
   let table_of_table_rel_fixups (fixups:fixup array) : Asm.frag =
     let table_fix = new_fixup "vtbl" in
-    let table_rel_word fix =
-      Asm.WORD (word_ty_signed_mach,
-                Asm.SUB (Asm.M_POS fix, Asm.M_POS table_fix))
-    in
-      Asm.DEF (table_fix, Asm.SEQ (Array.map table_rel_word fixups))
+      Asm.DEF (table_fix, table_of_fixup_rel_fixups table_fix fixups)
   in
 
   let nabi_indirect =
@@ -820,19 +824,22 @@ let trans_visitor
       (DATA_tydesc t)
       begin
         fun _ ->
+          let tydesc_fixup = new_fixup "tydesc" in
           log cx "tydesc for %a has sz=%Ld, align=%Ld"
             Ast.sprintf_ty t (ty_sz abi t) (ty_align abi t);
-          Asm.SEQ
-            [|
-              Asm.WORD (word_ty_mach, Asm.IMM (ty_sz abi t));
-              Asm.WORD (word_ty_mach, Asm.IMM (ty_align abi t));
-              table_of_table_rel_fixups
-                [|
-                  get_copy_glue t None;
-                  get_drop_glue t None;
-                  get_free_glue t (slot_mem_ctrl (interior_slot t)) None;
-                |]
-            |]
+            Asm.DEF
+              (tydesc_fixup,
+               Asm.SEQ
+                 [|
+                   Asm.WORD (word_ty_mach, Asm.IMM (ty_sz abi t));
+                   Asm.WORD (word_ty_mach, Asm.IMM (ty_align abi t));
+                   table_of_fixup_rel_fixups tydesc_fixup
+                     [|
+                       get_copy_glue t None;
+                       get_drop_glue t None;
+                       get_free_glue t (slot_mem_ctrl (interior_slot t)) None;
+                     |]
+                 |])
       end
 
   and trans_obj_vtbl (id:node_id) : Il.operand =
