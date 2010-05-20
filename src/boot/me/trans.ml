@@ -1229,7 +1229,7 @@ let trans_visitor
         if mctrl = MEM_gc
         then
           begin
-            lea vr (fst (need_mem_cell cell));
+            lea vr (fst (need_mem_cell (deref cell)));
             emit (Il.binary Il.SUB vr (Il.Cell vr)
                     (imm
                        (word_n Abi.exterior_gc_malloc_return_adjustment)));
