@@ -301,32 +301,94 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
                     test/compile-fail/infinite-vec-type-recursion.rs
 
-TEST_XFAILS_LLVM := $(addprefix test/run-pass/,acyclic-unwind.rs alt-tag.rs \
-                      basic.rs bind-thunk.rs bind-trivial.rs char.rs comm.rs \
-                      complex.rs dead-code-one-arm-if.rs deep.rs div-mod.rs \
-                      drop-on-ret.rs exterior.rs foreach-simple.rs vec-slice.rs \
-                      simple-obj.rs import.rs fun-call-variants.rs \
-                      fun-indirect-call.rs generic-fn.rs vec-append.rs vec-concat.rs \
-                      inner-module.rs large-records.rs lazychan.rs \
-                      linear-for-loop.rs many.rs mlist.rs mlist_cycle.rs \
-                      mutual-recursion-group.rs native.rc command-line-args.rs \
-                      native_mod.rc opeq.rs pred.rs readalias.rs rec-auto.rs \
-                      rec-extend.rs rec.rs rec_tup.rs return-nil.rs \
-                      i32-sub.rs i8-incr.rs spawn-fn.rs spawn.rs \
-                      stateful-obj.rs str-append.rs str-concat.rs str-idx.rs tag.rs \
-                      tail-cps.rs tail-direct.rs threads.rs tup.rs \
-                      u32-decr.rs u8-incr-decr.rs u8-incr.rs unit.rs user.rs \
-                      vec.rs writealias.rs yield.rs yield2.rs cast.rs \
-                      native-opaque-type.rs generic-type.rs \
-                      generic-derived-type.rs generic-tag.rs generic-obj.rs \
+TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
+                      acyclic-unwind.rs \
+                      alt-tag.rs \
+                      basic.rs \
+                      bind-thunk.rs \
+                      bind-trivial.rs \
+                      cast.rs \
+                      char.rs \
+                      clone-with-exterior.rs \
+                      comm.rs \
+                      complex.rs \
+                      dead-code-one-arm-if.rs \
+                      deep.rs \
+                      div-mod.rs \
+                      drop-on-ret.rs \
+                      exterior.rs \
+                      foreach-simple.rs \
+                      vec-slice.rs \
+                      simple-obj.rs \
+                      import.rs \
+                      fun-call-variants.rs \
+                      fun-indirect-call.rs \
+                      generic-derived-type.rs \
                       generic-drop-glue.rs \
-                      syntax-extension.rs clone-with-exterior.rs) \
-                    $(addprefix test/run-fail/,fail.rs linked-failure.rs \
-                      pred.rs vec_overrun.rs str_overrun.rs vec_underrun.rs \
-                      explicit-fail.rs) \
-                    $(addprefix test/compile-fail/,rec-missing-fields.rs \
+                      generic-fn.rs \
+                      generic-obj.rs \
+                      generic-tag.rs \
+                      generic-type.rs \
+                      vec-append.rs \
+                      vec-concat.rs \
+                      inner-module.rs \
+                      large-records.rs \
+                      lazychan.rs \
+                      linear-for-loop.rs \
+                      many.rs \
+                      mlist.rs \
+                      mlist_cycle.rs \
+                      mutual-recursion-group.rs \
+                      native.rc \
+                      command-line-args.rs \
+                      native_mod.rc \
+                      opeq.rs \
+                      pred.rs \
+                      readalias.rs \
+                      rec-auto.rs \
+                      rec-extend.rs \
+                      rec.rs \
+                      rec_tup.rs \
+                      return-nil.rs \
+                      i32-sub.rs \
+                      i8-incr.rs \
+                      spawn-fn.rs \
+                      spawn.rs \
+                      stateful-obj.rs \
+                      str-append.rs \
+                      str-concat.rs \
+                      str-idx.rs \
+                      syntax-extension.rs \
+                      tag.rs \
+                      tail-cps.rs \
+                      tail-direct.rs \
+                      threads.rs \
+                      tup.rs \
+                      u32-decr.rs \
+                      u8-incr-decr.rs \
+                      u8-incr.rs \
+                      unit.rs \
+                      user.rs \
+                      vec.rs \
+                      writealias.rs \
+                      yield.rs \
+                      yield2.rs \
+                      native-opaque-type.rs \
+                     ) \
+                    $(addprefix test/run-fail/, \
+                      explicit-fail.rs \
+                      fail.rs \
+                      linked-failure.rs \
+                      pred.rs \
+                      vec_overrun.rs \
+                      str_overrun.rs \
+                      vec_underrun.rs \
+                     ) \
+                    $(addprefix test/compile-fail/, \
+                      rec-missing-fields.rs \
                       infinite-tag-type-recursion.rs \
-                      infinite-vec-type-recursion.rs)
+                      infinite-vec-type-recursion.rs \
+                     )
 
 ifdef CFG_WINDOWSY
 TEST_XFAILS_X86 += test/run-pass/native_mod.rc
