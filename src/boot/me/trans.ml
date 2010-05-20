@@ -64,9 +64,6 @@ let trans_visitor
       | Il.Bits64 -> TY_i64
   in
   let word_n = word_n abi in
-  let exterior_rc_body_off : int64 = word_n Abi.exterior_rc_slot_field_body in
-  let exterior_gc_body_off : int64 = word_n Abi.exterior_gc_slot_field_body in
-
   let imm_of_ty (i:int64) (tm:ty_mach) : Il.operand =
     Il.Imm (Asm.IMM i, tm)
   in
@@ -1217,7 +1214,10 @@ let trans_visitor
        *)
       let fp = get_element_ptr args 0 in
       let cell = get_element_ptr args 1 in
-      let (body_mem, _) = need_mem_cell (deref_imm cell exterior_rc_body_off) in
+      let (body_mem, _) =
+        need_mem_cell
+          (get_element_ptr (deref cell) Abi.exterior_rc_slot_field_body)
+      in
       let vr = next_vreg_cell Il.voidptr_t in
         lea vr body_mem;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
@@ -1229,10 +1229,10 @@ let trans_visitor
         if mctrl = MEM_gc
         then
           begin
+            lea vr (fst (need_mem_cell cell));
             emit (Il.binary Il.SUB vr (Il.Cell vr)
                     (imm
-                       (Int64.add exterior_rc_body_off
-                          (word_n Abi.exterior_gc_malloc_return_adjustment))));
+                       (word_n Abi.exterior_gc_malloc_return_adjustment)));
             trans_free vr
           end
         else
@@ -1240,7 +1240,7 @@ let trans_visitor
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "free-glue complete";
     in
-    let fty = mk_simple_ty_fn [| word_slot; read_alias_slot ty |] in
+    let fty = mk_simple_ty_fn [| word_slot; exterior_slot ty |] in
       get_typed_mem_glue g fty inner
 
 
@@ -2038,7 +2038,8 @@ let trans_visitor
                   emit (Il.binary Il.OR gc_word (Il.Cell gc_word) one);
                   (* Iterate over exterior slots marking outgoing links. *)
                   let (body_mem, _) =
-                    need_mem_cell (deref_imm cell exterior_gc_body_off)
+                    need_mem_cell
+                      (get_element_ptr (deref cell) Abi.exterior_gc_slot_field_body)
                   in
                   let ty = maybe_iso curr_iso ty in
                   let curr_iso = maybe_enter_iso ty curr_iso in
@@ -2122,13 +2123,11 @@ let trans_visitor
     let ty = slot_ty slot in
     let mctrl = slot_mem_ctrl slot in
       match mctrl with
-          MEM_rc_opaque rc_off ->
+          MEM_rc_opaque ->
             (* Refcounted opaque objects we handle without glue functions. *)
             let _ = check_exterior_rty cell in
             let null_jmp = null_check () in
-            let (rc_mem, _) = need_mem_cell (deref_imm cell (word_n rc_off)) in
-            let rc = word_at rc_mem in
-            let j = drop_refcount_and_cmp rc in
+            let j = drop_refcount_and_cmp (exterior_rc_cell cell) in
               free_ty ty cell;
               (* Null the slot out to prevent double-free if the frame
                * unwinds.
@@ -2208,14 +2207,7 @@ let trans_visitor
                   mov next (Il.Cell
                               (tp_imm (word_n Abi.task_field_gc_alloc_chain)));
 
-        | MEM_rc_opaque rc_off ->
-            iflog (fun _ -> annotate "init RC exterior: malloc");
-            let sz = exterior_rc_allocation_size abi slot in
-              trans_malloc cell sz;
-              iflog (fun _ -> annotate "init RC exterior: load refcount");
-              let rc = exterior_ctrl_cell cell rc_off in
-                mov rc one
-
+        | MEM_rc_opaque
         | MEM_rc_struct ->
             iflog (fun _ -> annotate "init RC exterior: malloc");
             let sz = exterior_rc_allocation_size abi slot in
@@ -2226,33 +2218,18 @@ let trans_visitor
 
         | MEM_interior -> bug () "init_exterior_slot of MEM_interior"
 
-  and deref_exterior
-      (initializing:bool)
-      (cell:Il.cell)
-      (slot:Ast.slot)
-      : Il.typed_mem =
-    iflog (fun _ -> annotate ("deref exterior: " ^
-                                (if initializing
-                                 then "init"
-                                 else "access") ^ ", " ^
-                                (Il.string_of_cell
-                                   abi.Abi.abi_str_of_hardreg cell)));
-    if initializing
-    then init_exterior_slot cell slot;
-    begin
-      match pointee_type cell with
-          Il.StructTy parts
-            when (Array.length parts == 2) &&
-              (parts.(0) = Il.ScalarTy word_ty) ->
-                need_mem_cell (get_element_ptr (deref cell) 1)
-        | ty -> bug () "Dereferencing exterior cell with bad IL type: %s"
-            (Il.string_of_referent_ty ty)
-    end
 
   and deref_slot (initializing:bool) (cell:Il.cell) (slot:Ast.slot) : Il.cell =
     match slot.Ast.slot_mode with
-        Ast.MODE_interior _ -> cell
-      | Ast.MODE_exterior _ -> Il.Mem (deref_exterior initializing cell slot)
+        Ast.MODE_interior _ ->
+          cell
+
+      | Ast.MODE_exterior _ ->
+          check_exterior_rty cell;
+          if initializing
+          then init_exterior_slot cell slot;
+          get_element_ptr (deref cell) Abi.exterior_rc_slot_field_body
+
       | Ast.MODE_read_alias
       | Ast.MODE_write_alias ->
           if initializing
@@ -2305,9 +2282,8 @@ let trans_visitor
       assert (slot_ty src_slot = slot_ty dst_slot);
       match (slot_mem_ctrl src_slot,
              slot_mem_ctrl dst_slot) with
-        | (MEM_rc_opaque src_rc_off, MEM_rc_opaque _) ->
-            lightweight_rc (exterior_ctrl_cell src src_rc_off)
 
+        | (MEM_rc_opaque, MEM_rc_opaque)
         | (MEM_gc, MEM_gc)
         | (MEM_rc_struct, MEM_rc_struct) ->
             lightweight_rc (exterior_rc_cell src)

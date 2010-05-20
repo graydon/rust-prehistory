@@ -430,10 +430,11 @@ let trans_crate
                        free_and_null_out_slot)
                     (!llbuilder)
 
-            | MEM_rc_opaque i ->
+            | MEM_rc_opaque ->
                 llbuilder :=
                   if_ptr_in_slot_not_null
-                    (decr_refcnt_and_if_zero i
+                    (decr_refcnt_and_if_zero
+                       Abi.exterior_rc_slot_field_refcnt
                        free_and_null_out_slot)
                     (!llbuilder)
 
@@ -542,7 +543,7 @@ let trans_crate
           begin
             match slot_mem_ctrl slot with
                 MEM_rc_struct
-              | MEM_rc_opaque _
+              | MEM_rc_opaque
               | MEM_gc ->
                   ignore (Llvm.build_store
                             (Llvm.const_pointer_null llty)

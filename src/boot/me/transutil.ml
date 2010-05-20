@@ -2,7 +2,7 @@ open Common;;
 open Semant;;
 
 type mem_ctrl =
-    MEM_rc_opaque of int
+    MEM_rc_opaque
   | MEM_rc_struct
   | MEM_gc
   | MEM_interior
@@ -92,18 +92,18 @@ let slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
         | _ -> MEM_interior
     else
       match ty with
-          Ast.TY_port _ -> MEM_rc_opaque Abi.port_field_refcnt
-        | Ast.TY_chan _ -> MEM_rc_opaque Abi.chan_field_refcnt
-        | Ast.TY_task -> MEM_rc_opaque Abi.task_field_refcnt
+          Ast.TY_port _ -> MEM_rc_opaque
+        | Ast.TY_chan _ -> MEM_rc_opaque
+        | Ast.TY_task -> MEM_rc_opaque
             (* Vecs and strs are pseudo-exterior. *)
         | Ast.TY_vec _ -> MEM_rc_struct
-        | Ast.TY_str -> MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
+        | Ast.TY_str -> MEM_rc_opaque
         | _ ->
             match slot.Ast.slot_mode with
                 Ast.MODE_exterior _ when type_is_structured (slot_ty slot) ->
                   MEM_rc_struct
               | Ast.MODE_exterior _ ->
-                  MEM_rc_opaque Abi.exterior_rc_slot_field_refcnt
+                  MEM_rc_opaque
               | _ ->
                   MEM_interior
 ;;

@@ -36,10 +36,6 @@ let exterior_gc_header_size = 3;;
 
 let exterior_gc_malloc_return_adjustment = 2;;
 
-let port_field_refcnt = rc_base_field_refcnt;;
-
-let chan_field_refcnt = rc_base_field_refcnt;;
-
 let stk_field_valgrind_id = 0 + 1;;
 let stk_field_limit = stk_field_valgrind_id + 1;;
 let stk_field_data = stk_field_limit + 1;;
