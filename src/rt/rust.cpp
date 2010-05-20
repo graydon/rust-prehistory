@@ -1423,6 +1423,7 @@ struct rust_task : public rc_base<rust_task>,
     uintptr_t get_fp();
     uintptr_t get_previous_fp(uintptr_t fp);
     frame_glue_fns *get_frame_glue_fns(uintptr_t fp);
+    rust_crate_cache * get_crate_cache(rust_crate const *curr_crate);
 };
 
 struct rust_port : public rc_base<rust_port>,
@@ -2519,6 +2520,23 @@ rust_task::unblock()
         wakeup(cond);
 }
 
+rust_crate_cache *
+rust_task::get_crate_cache(rust_crate const *curr_crate)
+{
+    if (cache && cache->crate != curr_crate) {
+        dom->log(LOG_TASK, "switching task crate-cache to crate 0x%" PRIxPTR, curr_crate);
+        cache->deref();
+        cache = NULL;
+    }
+
+    if (!cache) {
+        dom->log(LOG_TASK, "fetching cache for current crate");
+        cache = dom->get_cache(curr_crate);
+    }
+    return cache;
+}
+
+
 // Domains
 
 static void
@@ -3167,6 +3185,7 @@ rust_dom::get_cache(rust_crate const *crate) {
     return cache;
 }
 
+
 static rust_crate_cache::c_sym *
 fetch_c_sym(rust_task *task,
             rust_crate const *curr_crate,
@@ -3175,20 +3194,7 @@ fetch_c_sym(rust_task *task,
             char const *library,
             char const *symbol)
 {
-    rust_dom *dom = task->dom;
-
-    if (task->cache && task->cache->crate != curr_crate) {
-        task->dom->log(LOG_LINK, "lookup uses different crate");
-        task->cache->deref();
-        task->cache = NULL;
-    }
-
-    if (!task->cache) {
-        task->dom->log(LOG_LINK, "fetching cache for current crate");
-        task->cache = dom->get_cache(curr_crate);
-    }
-
-    rust_crate_cache *cache = task->cache;
+    rust_crate_cache *cache = task->get_crate_cache(curr_crate);
     rust_crate_cache::lib *l = cache->get_lib(lib_num, library);
     return cache->get_c_sym(c_sym_num, l, symbol);
 }
