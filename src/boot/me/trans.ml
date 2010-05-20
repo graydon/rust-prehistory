@@ -2181,14 +2181,6 @@ let trans_visitor
             let ty = maybe_iso curr_iso ty in
               drop_ty fp ty cell curr_iso
 
-
-  and exterior_body_off (slot:Ast.slot) : int64 =
-      match slot_mem_ctrl slot with
-          MEM_gc -> exterior_gc_body_off
-        | MEM_rc_struct -> exterior_rc_body_off
-        | MEM_rc_opaque off -> word_n off
-        | MEM_interior -> bug () "exterior_body_off of MEM_interior"
-
   (* Returns the offset of the slot-body in the initialized allocation. *)
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
       match slot_mem_ctrl slot with
@@ -2239,26 +2231,23 @@ let trans_visitor
       (cell:Il.cell)
       (slot:Ast.slot)
       : Il.typed_mem =
-    let body_ty =
+    iflog (fun _ -> annotate ("deref exterior: " ^
+                                (if initializing
+                                 then "init"
+                                 else "access") ^ ", " ^
+                                (Il.string_of_cell
+                                   abi.Abi.abi_str_of_hardreg cell)));
+    if initializing
+    then init_exterior_slot cell slot;
+    begin
       match pointee_type cell with
           Il.StructTy parts
             when (Array.length parts == 2) &&
-              (parts.(0) = Il.ScalarTy word_ty) -> parts.(1)
+              (parts.(0) = Il.ScalarTy word_ty) ->
+                need_mem_cell (get_element_ptr (deref cell) 1)
         | ty -> bug () "Dereferencing exterior cell with bad IL type: %s"
             (Il.string_of_referent_ty ty)
-    in
-      iflog (fun _ -> annotate ("deref exterior: " ^
-                                  (if initializing
-                                   then "init"
-                                   else "access") ^ ", " ^
-                                  (Il.string_of_cell
-                                     abi.Abi.abi_str_of_hardreg cell)));
-      if initializing
-      then init_exterior_slot cell slot;
-      let (mem, _) =
-        need_mem_cell (deref_imm cell (exterior_body_off slot))
-      in
-        (mem, body_ty)
+    end
 
   and deref_slot (initializing:bool) (cell:Il.cell) (slot:Ast.slot) : Il.cell =
     match slot.Ast.slot_mode with

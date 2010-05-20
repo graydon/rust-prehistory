@@ -297,7 +297,6 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/generic-derived-type.rs \
                     test/run-pass/generic-tag.rs \
                     test/run-pass/generic-obj.rs \
-                    test/run-pass/generic-drop-glue.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
                     test/compile-fail/infinite-vec-type-recursion.rs
