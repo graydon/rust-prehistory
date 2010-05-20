@@ -19,6 +19,7 @@
 #include "rust.h"
 #include "rand.h"
 #include "valgrind.h"
+#include "uthash.h"
 
 #if defined(__WIN32__)
 extern "C" {
@@ -163,11 +164,17 @@ struct frame_glue_fns {
 };
 
 struct type_desc {
+    // First part of type_desc is known to compiler.
     size_t size;
     size_t align;
     uintptr_t copy_glue_off;
     uintptr_t drop_glue_off;
     uintptr_t free_glue_off;
+
+    // Residual fields past here are known only to runtime.
+    UT_hash_handle hh;
+    size_t n_params;
+    uintptr_t params[];
 };
 
 template <typename T>
@@ -2107,6 +2114,7 @@ private:
     rust_sym **rust_syms;
     c_sym **c_syms;
     lib **libs;
+    type_desc *type_descs;
 
 public:
 
@@ -2120,6 +2128,7 @@ public:
                     dom->calloc(sizeof(rust_sym*) * crate->n_rust_syms)),
           c_syms((c_sym**) dom->calloc(sizeof(c_sym*) * crate->n_c_syms)),
           libs((lib**) dom->calloc(sizeof(lib*) * crate->n_libs)),
+          type_descs(NULL),
           crate(crate),
           dom(dom),
           idx(0)
@@ -2159,6 +2168,13 @@ public:
                 l->deref();
             }
             libs[i] = NULL;
+        }
+
+        while (type_descs) {
+            type_desc *d = type_descs;
+            HASH_DEL(type_descs, d);
+            dom->log(LOG_MEM, "rust_crate_cache::flush() tydesc %" PRIxPTR, d);
+            dom->free(d);
         }
     }
 
