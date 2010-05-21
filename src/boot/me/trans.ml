@@ -1363,11 +1363,14 @@ let trans_visitor
       (fp:Il.cell)
       (arg:Il.cell)
       : unit =
-    iflog (fun _ -> annotate (Printf.sprintf "calling tydesc[%d].glue[%d]" ty_param vtbl_idx));
-    trans_call_dynamic_glue
-      (get_ty_desc (fst (force_to_reg (Il.Cell fp))) ty_param)
-      vtbl_idx
-      None [| fp; arg |]
+    iflog (fun _ ->
+             annotate (Printf.sprintf "calling tydesc[%d].glue[%d]"
+                         ty_param vtbl_idx));
+    let td = get_ty_desc (fst (force_to_reg (Il.Cell fp))) ty_param in
+      trans_call_dynamic_glue
+        td
+        vtbl_idx
+        None [| fp; arg; td; |]
 
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
