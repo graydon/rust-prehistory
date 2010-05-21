@@ -218,8 +218,21 @@ BOOT_CMXS := $(BOOT_MLS:.ml=.cmx)
 BOOT_OBJS := $(BOOT_MLS:.ml=.o)
 BOOT_CMIS := $(BOOT_MLS:.ml=.cmi)
 
-RUNTIME_CS := rt/rust.cpp rt/isaac/randport.cpp
-RUNTIME_HDR := rt/rust.h
+RUNTIME_CS := rt/rust.cpp \
+              rt/rust_builtin.cpp \
+              rt/rust_crate.cpp \
+              rt/rust_crate_cache.cpp \
+              rt/rust_crate_reader.cpp \
+              rt/rust_comm.cpp \
+              rt/rust_dom.cpp \
+              rt/rust_task.cpp \
+              rt/rust_upcall.cpp \
+              rt/isaac/randport.cpp
+RUNTIME_HDR := rt/rust.h \
+               rt/rust_dwarf.h \
+               rt/rust_internal.h \
+               rt/rust_util.h
+
 RUNTIME_INCS := -Irt/isaac -Irt/uthash
 RUNTIME_OBJS := $(RUNTIME_CS:.cpp=$(CFG_OBJ_SUFFIX))
 RUNTIME_LIBS := $(CFG_RUNTIME_LIBS)
