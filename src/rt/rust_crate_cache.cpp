@@ -179,10 +179,39 @@ rust_crate_cache::get_rust_sym(size_t n,
     return sym;
 }
 
-type_desc *
-rust_crate_cache::get_type_desc(size_t n_descs, type_desc const *descs)
+static inline void
+adjust_disp(uintptr_t &disp, const void *oldp, const void *newp)
 {
-    return NULL;
+    disp += (uintptr_t)oldp;
+    disp -= (uintptr_t)newp;
+}
+
+type_desc *
+rust_crate_cache::get_type_desc(size_t size,
+                                size_t align,
+                                size_t n_descs,
+                                type_desc const **descs)
+{
+    I(dom, n_descs > 0);
+    type_desc *td = NULL;
+    size_t keysz = n_descs * sizeof(type_desc*);
+    HASH_FIND(hh,this->type_descs,descs,keysz,td);
+    if (td)
+        return td;
+    td = (type_desc*) dom->malloc(sizeof(type_desc) + keysz);
+    if (!td)
+        return NULL;
+    // By convention, desc 0 is the root descriptor.
+    // but we ignore the size and alignment of it and use the
+    // passed-in, computed values.
+    memcpy(td, descs[0], sizeof(type_desc));
+    for (size_t i = 0; i < n_descs; ++i)
+        td->descs[i] = descs[i];
+    adjust_disp(td->copy_glue_off, descs[0], td);
+    adjust_disp(td->drop_glue_off, descs[0], td);
+    adjust_disp(td->free_glue_off, descs[0], td);
+    HASH_ADD(hh,this->type_descs,descs,keysz,td);
+    return td;
 }
 
 rust_crate_cache::rust_crate_cache(rust_dom *dom,

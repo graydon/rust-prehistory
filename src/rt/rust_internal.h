@@ -287,7 +287,7 @@ struct type_desc {
     // Residual fields past here are known only to runtime.
     UT_hash_handle hh;
     size_t n_descs;
-    uintptr_t descs[];
+    const type_desc *descs[];
 };
 
 class
@@ -338,7 +338,10 @@ public:
                            rust_crate const *curr_crate,
                            c_sym *crate_sym,
                            char const **path);
-    type_desc *get_type_desc(size_t n_descs, type_desc const *descs);
+    type_desc *get_type_desc(size_t size,
+                             size_t align,
+                             size_t n_descs,
+                             type_desc const **descs);
 
 private:
 

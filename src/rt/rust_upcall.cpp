@@ -522,11 +522,13 @@ upcall_require_c_sym(rust_task *task,
 extern "C" CDECL type_desc *
 upcall_get_type_desc(rust_task *task,
                      rust_crate const *curr_crate,
+                     size_t size,
+                     size_t align,
                      size_t n_descs,
-                     type_desc const *descs)
+                     type_desc const **descs)
 {
     rust_crate_cache *cache = task->get_crate_cache(curr_crate);
-    return cache->get_type_desc(n_descs, descs);
+    return cache->get_type_desc(size, align, n_descs, descs);
 }
 
 
