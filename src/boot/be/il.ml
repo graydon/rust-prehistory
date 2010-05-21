@@ -1003,7 +1003,17 @@ let emit_full
 
       | (Unary u, Unary u') ->
           mov_if_operands_differ u.unary_src u'.unary_src;
-          emit_quad (Unary u');
+          (* Assume '2addr' means '1addr' for unary ops. *)
+          if e.emit_is_2addr &&
+            (u'.unary_op = NEG || u'.unary_op = NOT) &&
+            (not (u'.unary_src = (Cell u'.unary_dst)))
+            then
+              begin
+                emit_mov u'.unary_dst u'.unary_src;
+                emit_quad (Unary { u' with unary_src = (Cell u'.unary_dst) })
+              end
+            else
+              emit_quad (Unary u');
           mov_if_cells_differ u.unary_dst u'.unary_dst
 
       | (Cmp c, Cmp c') ->

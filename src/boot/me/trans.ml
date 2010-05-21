@@ -158,6 +158,12 @@ let trans_visitor
   let emit q = Il.emit (emitter()) q in
   let next_vreg _ = Il.next_vreg (emitter()) in
   let next_vreg_cell t = Il.next_vreg_cell (emitter()) t in
+  let next_spill_cell t =
+    let s = Il.next_spill (emitter()) in
+    let spill_mem = Il.Spill s in
+    let spill_ta = (spill_mem, Il.ScalarTy t) in
+      Il.Mem spill_ta
+  in
   let mark _ : quad_idx = (emitter()).Il.emit_pc in
   let patch_existing (jmp:quad_idx) (targ:quad_idx) : unit =
     Il.patch_jump (emitter()) jmp targ
@@ -322,11 +328,9 @@ let trans_visitor
 
   and force_to_mem (src:Il.operand) : Il.typed_mem =
     let do_spill op (t:Il.scalar_ty) =
-      let s = (Il.next_spill (emitter())) in
-      let spill_mem = Il.Spill s in
-      let spill_ta = (spill_mem, Il.ScalarTy t) in
-        mov (Il.Mem spill_ta) op;
-        spill_ta
+      let spill = next_spill_cell t in
+        mov spill op;
+        need_mem_cell spill
     in
     match src with
         Il.Cell (Il.Mem ta) -> ta
@@ -421,6 +425,24 @@ let trans_visitor
 
   let get_current_fn_ty_desc (param_idx:int) : Il.cell =
     get_ty_desc abi.Abi.abi_fp_reg param_idx
+  in
+
+  let linearize_ty_params (t:Ast.ty) : Il.operand array =
+    let base = ty_fold_list_concat () in
+    let ty_fold_param (i, _) =
+      [ Il.Cell (get_current_fn_ty_desc i) ]
+    in
+    let fold = { base with ty_fold_param = ty_fold_param } in
+      Array.of_list (fold_ty fold t)
+  in
+
+  let has_parametric_types (t:Ast.ty) : bool =
+    let base = ty_fold_bool_or false in
+    let ty_fold_param _ =
+      true
+    in
+    let fold = { base with ty_fold_param = ty_fold_param } in
+      fold_ty fold t
   in
 
   let rec calculate_sz (fp:Il.reg) (size:size) : Il.operand =
@@ -1769,6 +1791,25 @@ let trans_visitor
             atoms;
             mov (get_element_ptr vec Abi.vec_elt_fill) (Il.Cell fill);
 
+  and get_dynamic_ty_desc (t:Ast.ty) : Il.cell =
+    let td = next_vreg_cell Il.voidptr_t in
+    let tys = linearize_ty_params t in
+    let n = Int64.of_int (Array.length tys) in
+      (* FIXME: this relies on knowledge that spills are contiguous. *)
+    let stys =
+      Array.map
+        begin
+          fun t ->
+            let s = next_spill_cell Il.voidptr_t in
+              mov s t;
+              Il.Cell s
+        end
+        tys
+    in
+      trans_upcall "upcall_get_type_desc" td
+        (Array.append [| imm 0L; imm 0L; imm n |] stys);
+      td
+
   and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =
     let (rc_mem, _) = need_mem_cell (deref_imm cell (word_n off)) in
     word_at rc_mem
@@ -2763,6 +2804,8 @@ let trans_visitor
         match ty_param with
             Ast.TY_param (idx, _) ->
               (get_current_fn_ty_desc idx)
+          | t when has_parametric_types t ->
+              (get_dynamic_ty_desc t)
           | _ ->
               (crate_rel_to_ptr (trans_tydesc ty_param) Il.OpaqueTy)
       in
