@@ -519,6 +519,17 @@ upcall_require_c_sym(rust_task *task,
     return addr;
 }
 
+extern "C" CDECL type_desc *
+upcall_get_type_desc(rust_task *task,
+                     rust_crate const *curr_crate,
+                     size_t n_descs,
+                     type_desc const *descs)
+{
+    rust_crate_cache *cache = task->get_crate_cache(curr_crate);
+    return cache->get_type_desc(n_descs, descs);
+}
+
+
 #if defined(__WIN32__)
 static DWORD WINAPI rust_thread_start(void *ptr)
 #elif defined(__GNUC__)

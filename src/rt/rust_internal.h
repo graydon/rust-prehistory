@@ -286,58 +286,59 @@ struct type_desc {
 
     // Residual fields past here are known only to runtime.
     UT_hash_handle hh;
-    size_t n_params;
-    uintptr_t params[];
+    size_t n_descs;
+    uintptr_t descs[];
 };
 
 class
 rust_crate_cache : public dom_owned<rust_crate_cache>,
                    public rc_base<rust_crate_cache>
 {
- public:
-  class lib :
-  public rc_base<lib>, public dom_owned<lib>
-  {
-    uintptr_t handle;
-  public:
-    rust_dom *dom;
-    lib(rust_dom *dom, char const *name);
-    uintptr_t get_handle();
-    ~lib();
-  };
+public:
+    class lib :
+        public rc_base<lib>, public dom_owned<lib>
+    {
+        uintptr_t handle;
+    public:
+        rust_dom *dom;
+        lib(rust_dom *dom, char const *name);
+        uintptr_t get_handle();
+        ~lib();
+    };
 
-  class c_sym :
-  public rc_base<c_sym>, public dom_owned<c_sym>
-  {
-    uintptr_t val;
-    lib *library;
-  public:
-    rust_dom *dom;
-    c_sym(rust_dom *dom, lib *library, char const *name);
-    uintptr_t get_val();
-    ~c_sym();
-  };
+    class c_sym :
+        public rc_base<c_sym>, public dom_owned<c_sym>
+    {
+        uintptr_t val;
+        lib *library;
+    public:
+        rust_dom *dom;
+        c_sym(rust_dom *dom, lib *library, char const *name);
+        uintptr_t get_val();
+        ~c_sym();
+    };
 
-  class rust_sym :
-  public rc_base<rust_sym>, public dom_owned<rust_sym>
-  {
-    uintptr_t val;
-    c_sym *crate_sym;
-  public:
-    rust_dom *dom;
-    rust_sym(rust_dom *dom, rust_crate const *curr_crate,
-             c_sym *crate_sym, char const **path);
-    uintptr_t get_val();
-    ~rust_sym();
-  };
+    class rust_sym :
+        public rc_base<rust_sym>, public dom_owned<rust_sym>
+    {
+        uintptr_t val;
+        c_sym *crate_sym;
+    public:
+        rust_dom *dom;
+        rust_sym(rust_dom *dom, rust_crate const *curr_crate,
+                 c_sym *crate_sym, char const **path);
+        uintptr_t get_val();
+        ~rust_sym();
+    };
 
-  lib *get_lib(size_t n, char const *name);
-  c_sym *get_c_sym(size_t n, lib *library, char const *name);
-  rust_sym *get_rust_sym(size_t n,
-                         rust_dom *dom,
-                         rust_crate const *curr_crate,
-                         c_sym *crate_sym,
-                         char const **path);
+    lib *get_lib(size_t n, char const *name);
+    c_sym *get_c_sym(size_t n, lib *library, char const *name);
+    rust_sym *get_rust_sym(size_t n,
+                           rust_dom *dom,
+                           rust_crate const *curr_crate,
+                           c_sym *crate_sym,
+                           char const **path);
+    type_desc *get_type_desc(size_t n_descs, type_desc const *descs);
 
 private:
 
