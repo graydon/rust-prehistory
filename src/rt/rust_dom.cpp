@@ -32,8 +32,8 @@ get_logbits()
             bits |= LOG_TRACE;
         if (strstr(c, "dwarf"))
             bits |= LOG_DWARF;
-        if (strstr(c, "link"))
-            bits |= LOG_LINK;
+        if (strstr(c, "cache"))
+            bits |= LOG_CACHE;
         if (strstr(c, "all"))
             bits = 0xffffffff;
     }
@@ -267,7 +267,7 @@ rust_dom::sched()
 
 rust_crate_cache *
 rust_dom::get_cache(rust_crate const *crate) {
-    log(LOG_LINK, "looking for crate-cache for crate 0x%" PRIxPTR, crate);
+    log(LOG_CACHE, "looking for crate-cache for crate 0x%" PRIxPTR, crate);
     rust_crate_cache *cache = NULL;
     for (size_t i = 0; i < caches.length(); ++i) {
         rust_crate_cache *c = caches[i];
@@ -277,7 +277,7 @@ rust_dom::get_cache(rust_crate const *crate) {
         }
     }
     if (!cache) {
-        log(LOG_LINK, "making new crate-cache for crate 0x%" PRIxPTR, crate);
+        log(LOG_CACHE, "making new crate-cache for crate 0x%" PRIxPTR, crate);
         cache = new (this) rust_crate_cache(this, crate);
         caches.push(cache);
     }

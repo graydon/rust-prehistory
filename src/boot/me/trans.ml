@@ -1807,7 +1807,8 @@ let trans_visitor
         tys
     in
       trans_upcall "upcall_get_type_desc" td
-        (Array.append [| imm 0L; imm 0L; imm n |] stys);
+        (Array.append [| Il.Cell (curr_crate_ptr());
+                         imm 0L; imm 0L; imm n |] stys);
       td
 
   and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =

@@ -71,7 +71,7 @@ static uint32_t const LOG_DOM =       0x20;
 static uint32_t const LOG_ULOG =      0x40;
 static uint32_t const LOG_TRACE =     0x80;
 static uint32_t const LOG_DWARF =    0x100;
-static uint32_t const LOG_LINK =     0x200;
+static uint32_t const LOG_CACHE =    0x200;
 
 
 // Every reference counted object should derive from this base class.

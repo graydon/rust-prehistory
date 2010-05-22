@@ -453,7 +453,7 @@ upcall_require_rust_sym(rust_task *task,
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
 
-    dom->log(LOG_UPCALL|LOG_LINK,
+    dom->log(LOG_UPCALL|LOG_CACHE,
              "upcall require rust sym: lib #%" PRIdPTR
              " = %s, c_sym #%" PRIdPTR
              ", rust_sym #%" PRIdPTR
@@ -464,22 +464,22 @@ upcall_require_rust_sym(rust_task *task,
         dom->log(LOG_UPCALL, " + %s", crate_rel(curr_crate, *c));
     }
 
-    dom->log(LOG_UPCALL|LOG_LINK,
+    dom->log(LOG_UPCALL|LOG_CACHE,
              "require C symbol 'rust_crate' from lib #%" PRIdPTR,lib_num);
     rust_crate_cache::c_sym *c =
         fetch_c_sym(task, curr_crate, lib_num, c_sym_num,
                     library, "rust_crate");
 
-    dom->log(LOG_UPCALL|LOG_LINK, "require rust symbol inside crate");
+    dom->log(LOG_UPCALL|LOG_CACHE, "require rust symbol inside crate");
     rust_crate_cache::rust_sym *s =
         task->cache->get_rust_sym(rust_sym_num, dom, curr_crate, c, path);
 
     uintptr_t addr = s->get_val();
     if (addr) {
-        dom->log(LOG_UPCALL|LOG_LINK,
+        dom->log(LOG_UPCALL|LOG_CACHE,
                  "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
-        dom->log(LOG_UPCALL|LOG_LINK,
+        dom->log(LOG_UPCALL|LOG_CACHE,
                  "failed to resolve symbol");
         task->fail(7);
     }
@@ -497,7 +497,7 @@ upcall_require_c_sym(rust_task *task,
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
 
-    dom->log(LOG_UPCALL|LOG_LINK,
+    dom->log(LOG_UPCALL|LOG_CACHE,
              "upcall require c sym: lib #%" PRIdPTR
              " = %s, c_sym #%" PRIdPTR
              " = %s"
@@ -509,10 +509,10 @@ upcall_require_c_sym(rust_task *task,
 
     uintptr_t addr = c->get_val();
     if (addr) {
-        dom->log(LOG_UPCALL|LOG_LINK,
+        dom->log(LOG_UPCALL|LOG_CACHE,
                  "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
-        dom->log(LOG_UPCALL|LOG_LINK,
+        dom->log(LOG_UPCALL|LOG_CACHE,
                  "failed to resolve symbol");
         task->fail(6);
     }
@@ -527,8 +527,15 @@ upcall_get_type_desc(rust_task *task,
                      size_t n_descs,
                      type_desc const **descs)
 {
+    LOG_UPCALL_ENTRY(task);
+    rust_dom *dom = task->dom;
+    dom->log(LOG_UPCALL|LOG_CACHE,
+             "upcall get_type_desc with #%" PRIdPTR " descs",
+             n_descs);
     rust_crate_cache *cache = task->get_crate_cache(curr_crate);
-    return cache->get_type_desc(size, align, n_descs, descs);
+    type_desc *td = cache->get_type_desc(size, align, n_descs, descs);
+    dom->log(LOG_UPCALL|LOG_CACHE, "returning tydesc 0x%" PRIxPTR, td);
+    return td;
 }
 
 
