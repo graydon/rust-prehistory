@@ -2809,33 +2809,16 @@ let trans_visitor
     let n_args = Array.length call.call_args in
     let n_iterators = Array.length call.call_iterator_args in
     let n_indirects = Array.length call.call_indirect_args in
-
-      trans_arg0 callee_output_cell call.call_output;
-      trans_arg1 callee_task_cell;
-
-      let get_tydesc ty_param =
-        log cx "getting tydesc for %a" Ast.sprintf_ty ty_param;
-        match ty_param with
-            Ast.TY_param (idx, _) ->
-              (get_current_fn_ty_desc idx)
-          | t when has_parametric_types t ->
-              (get_dynamic_ty_desc t)
-          | _ ->
-              (crate_rel_to_ptr (trans_tydesc ty_param) Il.OpaqueTy)
-      in
-
-      Array.iteri
-        begin
-          fun i ty_param ->
-            iflog (fun _ ->
-                     annotate
-                       (Printf.sprintf "fn-call ty param %d of %d"
-                          i n_ty_params));
-            trans_init_slot_from_cell CLONE_none
-              (get_element_ptr callee_ty_params i) word_slot
-              (get_tydesc ty_param) word_slot
-        end
-        call.call_callee_ty_params;
+    let get_tydesc ty_param =
+      log cx "getting tydesc for %a" Ast.sprintf_ty ty_param;
+      match ty_param with
+          Ast.TY_param (idx, _) ->
+            (get_current_fn_ty_desc idx)
+        | t when has_parametric_types t ->
+            (get_dynamic_ty_desc t)
+        | _ ->
+            (crate_rel_to_ptr (trans_tydesc ty_param) Il.OpaqueTy)
+    in
 
       Array.iteri
         begin
@@ -2870,7 +2853,25 @@ let trans_visitor
                                  i n_indirects));
             mov (get_element_ptr_dyn callee_indirect_args i) indirect_arg_operand
         end
-        call.call_indirect_args
+        call.call_indirect_args;
+
+      Array.iteri
+        begin
+          fun i ty_param ->
+            iflog (fun _ ->
+                     annotate
+                       (Printf.sprintf "fn-call ty param %d of %d"
+                          i n_ty_params));
+            trans_init_slot_from_cell CLONE_none
+              (get_element_ptr callee_ty_params i) word_slot
+              (get_tydesc ty_param) word_slot
+        end
+        call.call_callee_ty_params;
+
+        trans_arg1 callee_task_cell;
+
+        trans_arg0 callee_output_cell call.call_output
+
 
 
   and call_code (code:Il.code) : unit =
