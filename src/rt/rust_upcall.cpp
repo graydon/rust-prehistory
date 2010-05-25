@@ -530,7 +530,7 @@ upcall_get_type_desc(rust_task *task,
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
     dom->log(LOG_UPCALL|LOG_CACHE,
-             "upcall get_type_desc with #%" PRIdPTR " descs",
+             "upcall get_type_desc with %" PRIdPTR " descs",
              n_descs);
     rust_crate_cache *cache = task->get_crate_cache(curr_crate);
     type_desc *td = cache->get_type_desc(size, align, n_descs, descs);

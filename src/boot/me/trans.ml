@@ -1796,19 +1796,24 @@ let trans_visitor
     let tys = linearize_ty_params t in
     let n = Int64.of_int (Array.length tys) in
       (* FIXME: this relies on knowledge that spills are contiguous. *)
-    let stys =
+    let descs =
       Array.map
         begin
           fun t ->
             let s = next_spill_cell Il.voidptr_t in
               mov s t;
-              Il.Cell s
+              s
         end
         tys
     in
+    let descs_ptr = next_vreg_cell Il.voidptr_t in
+      if (Array.length descs) > 0
+      then lea descs_ptr (fst (need_mem_cell descs.(0)))
+      else mov descs_ptr zero;
       trans_upcall "upcall_get_type_desc" td
-        (Array.append [| Il.Cell (curr_crate_ptr());
-                         imm 0L; imm 0L; imm n |] stys);
+        [| Il.Cell (curr_crate_ptr());
+           imm 0L; imm 0L; imm n;
+           Il.Cell descs_ptr |];
       td
 
   and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =
