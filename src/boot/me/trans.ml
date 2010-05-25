@@ -1334,29 +1334,23 @@ let trans_visitor
       (dst:Il.cell option)
       (args:Il.cell array)
       : unit =
-    let arg_tup = arg_tup_cell (Array.init (Array.length args) (fun _ -> word_slot)) in
-    let tp = get_element_ptr arg_tup Abi.calltup_elt_task_ptr in
-    let arg_slots = get_element_ptr arg_tup Abi.calltup_elt_args in
-    let inner _ =
-      trans_arg1 tp;
-      Array.iteri
-        begin
-          fun i arg ->
-            mov (get_element_ptr arg_slots i) (Il.Cell arg)
-        end
-        args;
-      call_code code
+    let inner dst =
+      let scratch = next_vreg_cell Il.voidptr_t in
+      let pop _ = emit (Il.Pop scratch) in
+        for i = ((Array.length args) - 1) downto 0
+        do
+          emit (Il.Push (Il.Cell args.(i)))
+        done;
+        emit (Il.Push (Il.Cell abi.Abi.abi_tp_cell));
+        emit (Il.Push dst);
+        call_code code;
+        pop ();
+        pop ();
+        Array.iter (fun _ -> pop()) args;
     in
       match dst with
-          None -> inner ()
-        | Some dst ->
-            aliasing true dst
-              begin
-              fun dst ->
-                let out = get_element_ptr arg_tup Abi.calltup_elt_out_ptr in
-                  mov out (Il.Cell dst);
-                  inner ()
-              end
+          None -> inner zero
+        | Some dst -> aliasing true dst (fun dst -> inner (Il.Cell dst))
 
   and trans_call_static_glue
       (callee:Il.operand)
@@ -3101,13 +3095,6 @@ let trans_visitor
        * to an interior output slot, but we'll leak any exteriors as we
        * do that.  *)
       callee_fptr
-
-  and arg_tup_cell
-      (arg_slots:Ast.slot array)
-      : Il.cell =
-    let fty = mk_simple_ty_fn arg_slots in
-    let rty = call_args_referent_type cx 0 fty None in
-      callee_args_cell false rty
 
   and callee_drop_slot
       (_:Ast.slot_key)

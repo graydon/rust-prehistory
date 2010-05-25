@@ -997,12 +997,19 @@ let fn_prologue
    *)
 
   let callsz = add_sz callsz callsz in
+  let n_glue_args = Int64.of_int Abi.worst_case_glue_call_args in
+  let n_glue_words = Int64.mul word_sz n_glue_args in
 
   (*
    * Add in *another* word to handle an extra-awkward spill of the
    * callee address that might occur during an indirect tail call.
    *)
   let callsz = add_sz (SIZE_fixed word_sz) callsz in
+
+  (*
+   * Add in enough words for a glue-call (these occur underneath esp)
+   *)
+  let callsz = add_sz (SIZE_fixed n_glue_words) callsz in
 
   (*
    * Cumulative dynamic-frame size.
@@ -1063,6 +1070,9 @@ let fn_prologue
         mov (rc edi) (ro esp);
         mov (rc ecx) dynamic_frame_sz;
         emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
+
+        (* Move esp back up over the glue region. *)
+        add (rc esp) (immi n_glue_words);
 ;;
 
 
