@@ -1806,13 +1806,17 @@ let trans_visitor
         end
         tys
     in
+    let rty = referent_type abi t in
+    let (size_sz, align_sz) = Il.referent_ty_layout word_bits rty in
+    let size = calculate_sz_in_current_frame size_sz in
+    let align = calculate_sz_in_current_frame align_sz in
     let descs_ptr = next_vreg_cell Il.voidptr_t in
       if (Array.length descs) > 0
       then lea descs_ptr (fst (need_mem_cell descs.(0)))
       else mov descs_ptr zero;
       trans_upcall "upcall_get_type_desc" td
         [| Il.Cell (curr_crate_ptr());
-           imm 0L; imm 0L; imm n;
+           size; align; imm n;
            Il.Cell descs_ptr |];
       td
 
