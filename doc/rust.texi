@@ -1907,10 +1907,7 @@ itself a comma-separated list of two or more values.
 Tuples are equivalent to records labeled by ascending integer-like
 names prefixed by the underscore character: @code{_0}, @code{_1},
 @code{_2}, etc. The fields of a tuple are laid out in memory
-contiguously, like a record, in order specified by the tuple type. In
-addition to named field access, tuples can be be ``destructured'' into
-named constituents, in various syntactic contexts, such as in a tuple
-initialisation statement or a function parameter list.
+contiguously, like a record, in order specified by the tuple type.
 
 An example of a tuple type and its use:
 @example
@@ -1918,8 +1915,7 @@ type pair = (int,str);
 let pair p = (10,"hello");
 check (p._0 == 10);
 p._1 = "world";
-let (int x, str s) = p;
-check (s == p._1 & p._1 == "world");
+check (p._1 == "world");
 @end example
 
 
