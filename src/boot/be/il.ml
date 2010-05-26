@@ -725,6 +725,7 @@ type emitter = { mutable emit_pc: int;
                  mutable emit_quads: quads;
                  emit_annotations: (int,string) Hashtbl.t;
                  emit_size_cache: (size,operand) Hashtbl.t;
+                 emit_node: node_id option;
                }
 
 
@@ -740,7 +741,12 @@ let deadq = { quad_fixup = None;
 ;;
 
 
-let new_emitter (preallocator:quad' -> quad') (is_2addr:bool) (vregs_ok:bool) =
+let new_emitter
+    (preallocator:quad' -> quad')
+    (is_2addr:bool)
+    (vregs_ok:bool)
+    (node:node_id option)
+    : emitter =
   {
     emit_pc = 0;
     emit_next_vreg = (if vregs_ok then Some 0 else None);
@@ -750,6 +756,7 @@ let new_emitter (preallocator:quad' -> quad') (is_2addr:bool) (vregs_ok:bool) =
     emit_quads = Array.create 4 badq;
     emit_annotations = Hashtbl.create 0;
     emit_size_cache = Hashtbl.create 0;
+    emit_node = node;
   }
 ;;
 

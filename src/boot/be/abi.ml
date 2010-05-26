@@ -69,8 +69,8 @@ let iterator_args_elt_loop_info_ptr = 1;;
 
 let indirect_args_elt_closure = 0;;
 
-(* src, dst, tydesc. *)
-let worst_case_glue_call_args = 3;;
+(* ty_params, src, dst, tydesc. *)
+let worst_case_glue_call_args = 4;;
 
 type abi =
   {
