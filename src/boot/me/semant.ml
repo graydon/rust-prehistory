@@ -1519,7 +1519,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_port _
       | Ast.TY_task -> rc_ptr
 
-      | Ast.TY_type -> tydesc_rty abi
+      | Ast.TY_type -> sp (tydesc_rty abi)
 
       | Ast.TY_native _ -> ptr
 
