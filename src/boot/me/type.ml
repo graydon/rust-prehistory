@@ -872,7 +872,13 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                   unify_atom atom (ref (TYSPEC_resolved ([||], Ast.TY_int)));
                   TYSPEC_collection tv
             in
-              unify_lval' base (ref base_ts)
+            let base_tv = ref base_ts in
+              unify_lval' base base_tv;
+              match !(resolve_tyvar base_tv) with
+                  TYSPEC_resolved (_, ty) ->
+                    unify_ty (slot_ty (project_type_to_slot ty comp)) tv
+                | _ ->
+                    ()
 
     and unify_lval (lval:Ast.lval) (tv:tyvar) : unit =
       let id = lval_base_id lval in
