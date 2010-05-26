@@ -1214,7 +1214,7 @@ let trans_visitor
 
   and ty_params_covering (t:Ast.ty) : Ast.slot =
     let n_ty_params = n_used_type_params t in
-    let params = Array.init n_ty_params (fun _ -> word_slot) in
+    let params = Array.init n_ty_params (fun _ -> interior_slot Ast.TY_type) in
       read_alias_slot (Ast.TY_tup params)
 
   and get_drop_glue

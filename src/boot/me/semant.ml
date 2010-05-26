@@ -1435,6 +1435,21 @@ let word_rty (abi:Abi.abi) : Il.referent_ty =
   Il.ScalarTy (word_sty abi)
 ;;
 
+let tydesc_rty (abi:Abi.abi) : Il.referent_ty =
+  (* 
+   * NB: must match corresponding tydesc structure
+   * in trans and offsets in ABI exactly.
+   *)
+  Il.StructTy
+    [|
+      word_rty abi;                      (* Abi.tydesc_field_size      *)
+      word_rty abi;                      (* Abi.tydesc_field_align     *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_copy_glue *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_drop_glue *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_free_glue *)
+    |]
+;;
+
 let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
   let s t = Il.ScalarTy t in
   let v b = Il.ValTy b in
@@ -1502,8 +1517,9 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
 
       | Ast.TY_chan _
       | Ast.TY_port _
-      | Ast.TY_task
-      | Ast.TY_type -> rc_ptr
+      | Ast.TY_task -> rc_ptr
+
+      | Ast.TY_type -> tydesc_rty abi
 
       | Ast.TY_native _ -> ptr
 
@@ -1536,21 +1552,6 @@ let task_rty (abi:Abi.abi) : Il.referent_ty =
         Abi.n_visible_task_fields
         (fun _ -> word_rty abi)
     end
-;;
-
-let tydesc_rty (abi:Abi.abi) : Il.referent_ty =
-  (* 
-   * NB: must match corresponding tydesc structure
-   * in trans and offsets in ABI exactly.
-   *)
-  Il.StructTy
-    [|
-      word_rty abi;                      (* Abi.tydesc_field_size      *)
-      word_rty abi;                      (* Abi.tydesc_field_align     *)
-      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_copy_glue *)
-      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_drop_glue *)
-      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_free_glue *)
-    |]
 ;;
 
 let call_args_referent_type_full
