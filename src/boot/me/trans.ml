@@ -580,7 +580,11 @@ let trans_visitor
       calculate_sz_in_current_frame sz
   in
 
-  let get_element_ptr_dyn mem_cell i =
+  let get_element_ptr_dyn
+      (ty_params:Il.cell)
+      (mem_cell:Il.cell)
+      (i:int)
+      : Il.cell =
     match mem_cell with
         Il.Mem (mem, Il.StructTy elts) when i >= 0 && i < (Array.length elts) ->
           assert ((Array.length elts) != 0);
@@ -591,15 +595,19 @@ let trans_visitor
                   SIZE_fixed fixed_off ->
                     Il.Mem (Il.mem_off_imm mem fixed_off, elt_rty)
                 | sz ->
-                    let sz = calculate_sz_in_current_frame sz in
+                    let sz = calculate_sz ty_params sz in
                     let v = next_vreg word_ty in
                     let vc = Il.Reg (v, word_ty) in
                       lea vc mem;
                       add_to vc sz;
                       Il.Mem (based v, elt_rty)
           end
-      | _ -> bug () "get_element_ptr_dyn %d on cell %s" i
+      | _ -> bug () "get_element_ptr_dyn_in_current_frame %d on cell %s" i
           (Il.string_of_cell abi.Abi.abi_str_of_hardreg mem_cell)
+  in
+
+  let get_element_ptr_dyn_in_current_frame (mem_cell:Il.cell) (i:int) : Il.cell =
+    get_element_ptr_dyn (get_ty_params_of_current_frame()) mem_cell i
   in
 
   let deref_off_sz
@@ -708,11 +716,11 @@ let trans_visitor
         (Ast.TY_rec entries,
          Ast.COMP_named (Ast.COMP_ident id)) ->
           let i = arr_idx (Array.map fst entries) id in
-            (get_element_ptr_dyn cell i, snd entries.(i))
+            (get_element_ptr_dyn_in_current_frame cell i, snd entries.(i))
 
       | (Ast.TY_tup entries,
          Ast.COMP_named (Ast.COMP_idx i)) ->
-          (get_element_ptr_dyn cell i, entries.(i))
+          (get_element_ptr_dyn_in_current_frame cell i, entries.(i))
 
       | (Ast.TY_vec slot,
          Ast.COMP_atom at) ->
@@ -1806,14 +1814,14 @@ let trans_visitor
       umul fill unit_sz (imm (Int64.of_int (Array.length atoms)));
       trans_upcall "upcall_new_vec" dst_cell [| Il.Cell fill |];
       let vec = deref dst_cell in
-        let body_mem = fst (need_mem_cell (get_element_ptr_dyn vec Abi.vec_elt_data)) in
+        let body_mem = fst (need_mem_cell (get_element_ptr_dyn_in_current_frame vec Abi.vec_elt_data)) in
         let unit_rty = slot_referent_type abi unit_slot in
         let body_rty = Il.StructTy (Array.map (fun _ -> unit_rty) atoms) in
         let body = Il.Mem (body_mem, body_rty) in
           Array.iteri
             begin
               fun i atom ->
-                let cell = get_element_ptr_dyn body i in
+                let cell = get_element_ptr_dyn_in_current_frame body i in
                   trans_init_slot_from_atom CLONE_none cell unit_slot atom
             end
             atoms;
@@ -1862,17 +1870,18 @@ let trans_visitor
     exterior_ctrl_cell cell Abi.exterior_gc_slot_field_next
 
   and iter_tag_slots
-        (dst_cell:Il.cell)
-        (src_cell:Il.cell)
-        (ttag:Ast.ty_tag)
-        (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
-        (curr_iso:Ast.ty_iso option)
-        : unit =
-      let tag_keys = sorted_htab_keys ttag in
+      (ty_params:Il.cell)
+      (dst_cell:Il.cell)
+      (src_cell:Il.cell)
+      (ttag:Ast.ty_tag)
+      (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+    let tag_keys = sorted_htab_keys ttag in
       let src_tag = get_element_ptr src_cell 0 in
       let dst_tag = get_element_ptr dst_cell 0 in
-      let src_union = get_element_ptr_dyn src_cell 1 in
-      let dst_union = get_element_ptr_dyn dst_cell 1 in
+      let src_union = get_element_ptr_dyn ty_params src_cell 1 in
+      let dst_union = get_element_ptr_dyn ty_params dst_cell 1 in
       let tmp = next_vreg_cell word_ty in
         f dst_tag src_tag word_slot curr_iso;
         mov tmp (Il.Cell src_tag);
@@ -1887,7 +1896,7 @@ let trans_visitor
               in
               let ttup = Hashtbl.find ttag key in
                 iter_tup_slots
-                  get_element_ptr_dyn
+                  (get_element_ptr_dyn ty_params)
                   (get_variant_ptr dst_union i)
                   (get_variant_ptr src_union i)
                   ttup f curr_iso;
@@ -1899,67 +1908,68 @@ let trans_visitor
     tiso.Ast.iso_group.(tiso.Ast.iso_index)
 
   and iter_ty_slots_full
-        (ty:Ast.ty)
-        (dst_cell:Il.cell)
-        (src_cell:Il.cell)
-        (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
-        (curr_iso:Ast.ty_iso option)
-        : unit =
-        (* 
-         * FIXME: this will require some reworking if we support
-         * rec, tag or tup slots that fit in a vreg. It requires 
-         * addrs presently.
-         *)
-        match ty with
-            Ast.TY_rec entries ->
-              iter_rec_slots
-                get_element_ptr_dyn dst_cell src_cell
-                entries f curr_iso
+      (ty_params:Il.cell)
+      (ty:Ast.ty)
+      (dst_cell:Il.cell)
+      (src_cell:Il.cell)
+      (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+    (* 
+     * FIXME: this will require some reworking if we support
+     * rec, tag or tup slots that fit in a vreg. It requires 
+     * addrs presently.
+     *)
+    match ty with
+        Ast.TY_rec entries ->
+          iter_rec_slots
+            (get_element_ptr_dyn ty_params) dst_cell src_cell
+            entries f curr_iso
 
-          | Ast.TY_tup slots ->
-              iter_tup_slots
-                get_element_ptr_dyn dst_cell src_cell
-                slots f curr_iso
+      | Ast.TY_tup slots ->
+          iter_tup_slots
+            (get_element_ptr_dyn ty_params) dst_cell src_cell
+            slots f curr_iso
 
-          | Ast.TY_tag tag ->
-              iter_tag_slots dst_cell src_cell tag f curr_iso
+      | Ast.TY_tag tag ->
+          iter_tag_slots ty_params dst_cell src_cell tag f curr_iso
 
-          | Ast.TY_iso tiso ->
-              let ttag = get_iso_tag tiso in
-                iter_tag_slots dst_cell src_cell ttag f (Some tiso)
+      | Ast.TY_iso tiso ->
+          let ttag = get_iso_tag tiso in
+            iter_tag_slots ty_params dst_cell src_cell ttag f (Some tiso)
 
-          | Ast.TY_fn _
-          | Ast.TY_pred _
-          | Ast.TY_obj _ ->
+      | Ast.TY_fn _
+      | Ast.TY_pred _
+      | Ast.TY_obj _ ->
 
-              (* Fake-int to provoke copying of the static part. *)
-              let src_fn_field_cell = get_element_ptr src_cell 0 in
-              let dst_fn_field_cell = get_element_ptr dst_cell 0 in
-                f dst_fn_field_cell
-                  src_fn_field_cell
-                  (interior_slot Ast.TY_int) curr_iso;
+          (* Fake-int to provoke copying of the static part. *)
+          let src_fn_field_cell = get_element_ptr src_cell 0 in
+          let dst_fn_field_cell = get_element_ptr dst_cell 0 in
+            f dst_fn_field_cell
+              src_fn_field_cell
+              (interior_slot Ast.TY_int) curr_iso;
 
-                let src_binding_field_cell = get_element_ptr src_cell 1 in
-                let dst_binding_field_cell = get_element_ptr dst_cell 1 in
-                  emit (Il.cmp (Il.Cell src_binding_field_cell) zero);
-                  let null_jmp = mark() in
-                    emit (Il.jmp Il.JE Il.CodeNone);
-                    (* TY_fn and TY_mod are stored as pairs
-                     * [item_ptr, closure_ptr].
-                     *)
-                    (* Call thunk if we have a src binding. *)
-                    (* FIXME (bug 543738): this is completely wrong,
-                     * need a second thunk that generates code to make
-                     * use of a runtime type descriptor extracted from
-                     * a binding tuple. For now this only works by
-                     * accident. 
-                     *)
-                    (f dst_binding_field_cell
-                       src_binding_field_cell
-                       (exterior_slot Ast.TY_int) curr_iso);
-                    patch null_jmp
+            let src_binding_field_cell = get_element_ptr src_cell 1 in
+            let dst_binding_field_cell = get_element_ptr dst_cell 1 in
+              emit (Il.cmp (Il.Cell src_binding_field_cell) zero);
+              let null_jmp = mark() in
+                emit (Il.jmp Il.JE Il.CodeNone);
+                (* TY_fn and TY_mod are stored as pairs
+                 * [item_ptr, closure_ptr].
+                 *)
+                (* Call thunk if we have a src binding. *)
+                (* FIXME (bug 543738): this is completely wrong,
+                 * need a second thunk that generates code to make
+                 * use of a runtime type descriptor extracted from
+                 * a binding tuple. For now this only works by
+                 * accident. 
+                 *)
+                (f dst_binding_field_cell
+                   src_binding_field_cell
+                   (exterior_slot Ast.TY_int) curr_iso);
+                patch null_jmp
 
-          | _ -> ()
+      | _ -> ()
 
   (* 
    * This just calls iter_ty_slots_full with your cell as both src and
@@ -1968,12 +1978,13 @@ let trans_visitor
    * passed-in src slots.
    *)
   and iter_ty_slots
+      (ty_params:Il.cell)
       (ty:Ast.ty)
       (cell:Il.cell)
       (f:Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    iter_ty_slots_full ty cell cell
+    iter_ty_slots_full ty_params ty cell cell
       (fun _ src_cell slot curr_iso -> f src_cell slot curr_iso)
       curr_iso
 
@@ -1995,7 +2006,7 @@ let trans_visitor
             end
 
       | _ ->
-          iter_ty_slots ty cell (drop_slot ty_params) curr_iso
+          iter_ty_slots ty_params ty cell (drop_slot ty_params) curr_iso
 
   and mark_ty
       (ty_params:Il.cell)
@@ -2003,7 +2014,7 @@ let trans_visitor
       (cell:Il.cell)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    iter_ty_slots ty cell (mark_slot ty_params) curr_iso
+    iter_ty_slots ty_params ty cell (mark_slot ty_params) curr_iso
 
   and clone_ty
       (ty_params:Il.cell)
@@ -2023,7 +2034,9 @@ let trans_visitor
           -> bug () "cloning mutable type"
       | _ when i64_le (ty_sz abi ty) word_sz
           -> mov dst (Il.Cell src)
-      | _ -> iter_ty_slots_full ty dst src (clone_slot ty_params clone_task) curr_iso
+      | _ ->
+          iter_ty_slots_full ty_params ty dst src
+            (clone_slot ty_params clone_task) curr_iso
 
   and copy_ty
       (ty_params:Il.cell)
@@ -2063,7 +2076,7 @@ let trans_visitor
             end
 
       | _ ->
-          iter_ty_slots_full ty dst src
+          iter_ty_slots_full ty_params ty dst src
             (fun dst src slot curr_iso ->
                trans_copy_slot ty_params true
                  dst slot src slot curr_iso)
@@ -2340,8 +2353,8 @@ let trans_visitor
     Array.iteri
       begin
         fun i slot ->
-          let sub_dst_cell = get_element_ptr_dyn dst i in
-          let sub_src_cell = get_element_ptr_dyn src i in
+          let sub_dst_cell = get_element_ptr_dyn ty_params dst i in
+          let sub_src_cell = get_element_ptr_dyn ty_params src i in
             trans_copy_slot
               ty_params initializing
               sub_dst_cell slot sub_src_cell slot None
@@ -2511,7 +2524,7 @@ let trans_visitor
         fun i atom ->
           trans_init_slot_from_atom
             CLONE_none
-            (get_element_ptr_dyn dst i)
+            (get_element_ptr_dyn_in_current_frame dst i)
             dst_slots.(i)
             atom
       end
@@ -2535,15 +2548,15 @@ let trans_visitor
                 Some atom ->
                   trans_init_slot_from_atom
                     CLONE_none
-                    (get_element_ptr_dyn dst i)
+                    (get_element_ptr_dyn_in_current_frame dst i)
                     slot
                     atom
               | None ->
                   let (src, _) = trans_lval base in
                     trans_copy_slot
                       (get_ty_params_of_current_frame()) true
-                      (get_element_ptr_dyn dst i) slot
-                      (get_element_ptr_dyn src i) slot
+                      (get_element_ptr_dyn_in_current_frame dst i) slot
+                      (get_element_ptr_dyn_in_current_frame src i) slot
                       None
       end
       trec
@@ -2842,13 +2855,16 @@ let trans_visitor
       get_element_ptr all_callee_args_cell Abi.calltup_elt_ty_params
     in
     let callee_args =
-      get_element_ptr_dyn all_callee_args_cell Abi.calltup_elt_args
+      get_element_ptr_dyn_in_current_frame
+        all_callee_args_cell Abi.calltup_elt_args
     in
     let callee_iterator_args =
-      get_element_ptr_dyn all_callee_args_cell Abi.calltup_elt_iterator_args
+      get_element_ptr_dyn_in_current_frame
+        all_callee_args_cell Abi.calltup_elt_iterator_args
     in
     let callee_indirect_args =
-      get_element_ptr_dyn all_callee_args_cell Abi.calltup_elt_indirect_args
+      get_element_ptr_dyn_in_current_frame
+        all_callee_args_cell Abi.calltup_elt_indirect_args
     in
 
     let n_args = Array.length call.call_args in
@@ -2874,7 +2890,7 @@ let trans_visitor
                           i n_args n_indirects));
             trans_argN
               clone
-              (get_element_ptr_dyn callee_args i)
+              (get_element_ptr_dyn_in_current_frame callee_args i)
               callee_arg_slots.(i)
               arg_atom
         end
@@ -2886,7 +2902,9 @@ let trans_visitor
             iflog (fun _ ->
                      annotate (Printf.sprintf "fn-call iterator-arg %d of %d"
                                  i n_iterators));
-            mov (get_element_ptr_dyn callee_iterator_args i) iterator_arg_operand
+            mov
+              (get_element_ptr_dyn_in_current_frame callee_iterator_args i)
+              iterator_arg_operand
         end
         call.call_iterator_args;
 
@@ -2896,7 +2914,9 @@ let trans_visitor
             iflog (fun _ ->
                      annotate (Printf.sprintf "fn-call indirect-arg %d of %d"
                                  i n_indirects));
-            mov (get_element_ptr_dyn callee_indirect_args i) indirect_arg_operand
+            mov
+              (get_element_ptr_dyn_in_current_frame callee_indirect_args i)
+              indirect_arg_operand
         end
         call.call_indirect_args;
 
@@ -3172,7 +3192,7 @@ let trans_visitor
     in
     let tag_keys = sorted_htab_keys ty_tag in
     let tag_cell:Il.cell = get_element_ptr lval_cell 0 in
-    let union_cell:Il.cell = get_element_ptr_dyn lval_cell 1 in
+    let union_cell:Il.cell = get_element_ptr_dyn_in_current_frame lval_cell 1 in
     let trans_arm
         { node = ((tag_id:Ast.ident), slots, (block:Ast.block)) } : quad_idx =
       let tag_name = Ast.NAME_base (Ast.BASE_ident tag_id) in
@@ -3183,7 +3203,7 @@ let trans_visitor
       let tup_cell:Il.cell = get_variant_ptr union_cell tag_number in
       let trans_dst idx ({ node = dst_slot; id = dst_id }, _) =
         let dst_cell = cell_of_block_slot dst_id in
-        let src_operand = Il.Cell (get_element_ptr_dyn tup_cell idx) in
+        let src_operand = Il.Cell (get_element_ptr_dyn_in_current_frame tup_cell idx) in
         mov (deref_slot true dst_cell dst_slot) src_operand
       in
       Array.iteri trans_dst slots;
@@ -3300,8 +3320,14 @@ let trans_visitor
               let dlim = next_vreg_cell (pty dst_elt_slot) in
               let dst_elt_sz = slot_sz_in_current_frame dst_elt_slot in
               let src_elt_sz = slot_sz_in_current_frame src_elt_slot in
-              let dst_data = get_element_ptr_dyn dst_vec Abi.vec_elt_data in
-              let src_data = get_element_ptr_dyn src_vec Abi.vec_elt_data in
+              let dst_data =
+                get_element_ptr_dyn_in_current_frame
+                  dst_vec Abi.vec_elt_data
+              in
+              let src_data =
+                get_element_ptr_dyn_in_current_frame
+                  src_vec Abi.vec_elt_data
+              in
                 lea dptr (fst (need_mem_cell dst_data));
                 lea sptr (fst (need_mem_cell src_data));
                 add_to dptr (Il.Cell dst_fill);
@@ -3569,7 +3595,9 @@ let trans_visitor
           in
           let unit_sz = slot_sz_in_current_frame unit_slot in
           let seq_cell = deref seq_cell in
-          let data = get_element_ptr_dyn seq_cell Abi.vec_elt_data in
+          let data =
+            get_element_ptr_dyn_in_current_frame seq_cell Abi.vec_elt_data
+          in
           let len = get_element_ptr seq_cell Abi.vec_elt_fill in
           let ptr = next_vreg_cell Il.voidptr_t in
           let lim = next_vreg_cell Il.voidptr_t in
@@ -3998,7 +4026,7 @@ let trans_visitor
     let _ = log cx "tag variant: %s -> tag value #%d" n i in
     let out_cell = deref (ptr_at (fp_imm out_mem_disp) (Ast.TY_tag ttag)) in
     let tag_cell = get_element_ptr out_cell 0 in
-    let union_cell = get_element_ptr_dyn out_cell 1 in
+    let union_cell = get_element_ptr_dyn_in_current_frame out_cell 1 in
     let dst = get_variant_ptr union_cell i in
     let dst_ty = snd (need_mem_cell dst) in
     let src = Il.Mem (fp_imm arg0_disp, dst_ty) in
