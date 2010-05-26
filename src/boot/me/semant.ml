@@ -800,6 +800,10 @@ let ty_fold_bool_or (default:bool) : bool simple_ty_fold =
   associative_binary_op_ty_fold default (fun a b -> a || b)
 ;;
 
+let ty_fold_int_max (default:int) : int simple_ty_fold =
+  associative_binary_op_ty_fold default (fun a b -> max a b)
+;;
+
 let ty_fold_list_concat _ : ('a list) simple_ty_fold =
   associative_binary_op_ty_fold [] (fun a b -> a @ b)
 ;;
@@ -903,6 +907,14 @@ let type_is_2s_complement t =
   (type_is_unsigned_2s_complement t)
   || (type_is_signed_2s_complement t)
 ;;
+
+let n_used_type_params t =
+  let fold_param (i,_) = i+1 in
+  let fold = ty_fold_int_max 0 in
+  let fold = { fold with ty_fold_param = fold_param } in
+    fold_ty fold t
+;;
+
 
 
 let check_concrete params thing =

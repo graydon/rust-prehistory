@@ -415,22 +415,30 @@ let trans_visitor
     slot_referent_type abi (referent_to_slot cx slot_id)
   in
 
-  let get_ty_desc (fp:Il.reg) (param_idx:int) : Il.cell =
-    let fn_ty = mk_simple_ty_fn [| |] in
-    let fn_rty = call_args_referent_type cx (param_idx + 1) fn_ty None in
-    let args_cell = Il.Mem (based_imm fp out_mem_disp, fn_rty) in
-    let ty_params = get_element_ptr args_cell Abi.calltup_elt_ty_params in
+  let get_ty_param (ty_params:Il.cell) (param_idx:int) : Il.cell =
       get_element_ptr ty_params param_idx
   in
 
-  let get_current_fn_ty_desc (param_idx:int) : Il.cell =
-    get_ty_desc abi.Abi.abi_fp_reg param_idx
+  let get_ty_params_of_frame (fp:Il.reg) (n_params:int) : Il.cell =
+    let fn_ty = mk_simple_ty_fn [| |] in
+    let fn_rty = call_args_referent_type cx n_params fn_ty None in
+    let args_cell = Il.Mem (based_imm fp out_mem_disp, fn_rty) in
+      get_element_ptr args_cell Abi.calltup_elt_ty_params
+  in
+
+  let get_ty_params_of_current_frame _ : Il.cell =
+    let n_ty_params = n_item_ty_params cx (current_fn()) in
+      get_ty_params_of_frame abi.Abi.abi_fp_reg n_ty_params
+  in
+
+  let get_ty_param_in_current_frame (param_idx:int) : Il.cell =
+    get_ty_param (get_ty_params_of_current_frame()) param_idx
   in
 
   let linearize_ty_params (t:Ast.ty) : Il.operand array =
     let base = ty_fold_list_concat () in
     let ty_fold_param (i, _) =
-      [ Il.Cell (get_current_fn_ty_desc i) ]
+      [ Il.Cell (get_ty_param_in_current_frame i) ]
     in
     let fold = { base with ty_fold_param = ty_fold_param } in
       Array.of_list (fold_ty fold t)
@@ -445,10 +453,11 @@ let trans_visitor
       fold_ty fold t
   in
 
-  let rec calculate_sz (fp:Il.reg) (size:size) : Il.operand =
+  let rec calculate_sz (ty_params:Il.cell) (size:size) : Il.operand =
     iflog (fun _ -> annotate
              (Printf.sprintf "calculating size %s"
                 (string_of_size size)));
+    let sub_sz = calculate_sz ty_params in
     match htab_search (emitter()).Il.emit_size_cache size with
         Some op -> op
       | _ ->
@@ -459,36 +468,36 @@ let trans_visitor
               | SIZE_fixup_mem_sz f -> Il.Imm (Asm.M_SZ f, word_ty_mach)
 
               | SIZE_param_size i ->
-                  let ty_desc = deref (get_ty_desc fp i) in
+                  let ty_desc = deref (get_ty_param ty_params i) in
                     Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_size)
 
               | SIZE_param_align i ->
-                  let ty_desc = deref (get_ty_desc fp i) in
+                  let ty_desc = deref (get_ty_param ty_params i) in
                     Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_align)
 
               | SIZE_rt_neg a ->
-                  let op_a = calculate_sz fp a in
+                  let op_a = sub_sz a in
                   let tmp = next_vreg_cell word_ty in
                     emit (Il.unary Il.NEG tmp op_a);
                     Il.Cell tmp
 
               | SIZE_rt_add (a, b) ->
-                  let op_a = calculate_sz fp a in
-                  let op_b = calculate_sz fp b in
+                  let op_a = sub_sz a in
+                  let op_b = sub_sz b in
                   let tmp = next_vreg_cell word_ty in
                     add tmp op_a op_b;
                     Il.Cell tmp
 
               | SIZE_rt_mul (a, b) ->
-                  let op_a = calculate_sz fp a in
-                  let op_b = calculate_sz fp b in
+                  let op_a = sub_sz a in
+                  let op_b = sub_sz b in
                   let tmp = next_vreg_cell word_ty in
                     emit (Il.binary Il.UMUL tmp op_a op_b);
                     Il.Cell tmp
 
               | SIZE_rt_max (a, b) ->
-                  let op_a = calculate_sz fp a in
-                  let op_b = calculate_sz fp b in
+                  let op_a = sub_sz a in
+                  let op_b = sub_sz b in
                   let tmp = next_vreg_cell word_ty in
                     mov tmp op_a;
                     emit (Il.cmp op_a op_b);
@@ -506,9 +515,9 @@ let trans_visitor
                    *
                    *)
                   annotate "fetch alignment";
-                  let op_align = calculate_sz fp align in
+                  let op_align = sub_sz align in
                     annotate "fetch offset";
-                    let op_off = calculate_sz fp off in
+                    let op_off = sub_sz off in
                     let t1 = next_vreg_cell word_ty in
                     let t2 = next_vreg_cell word_ty in
                     let t3 = next_vreg_cell word_ty in
@@ -532,7 +541,7 @@ let trans_visitor
 
 
   and calculate_sz_in_current_frame (size:size) : Il.operand =
-    calculate_sz abi.Abi.abi_fp_reg size
+    calculate_sz (get_ty_params_of_current_frame()) size
 
   and caller_args_cell (args_rty:Il.referent_ty) : Il.cell =
     Il.Mem (fp_imm out_mem_disp, args_rty)
@@ -544,11 +553,11 @@ let trans_visitor
     else
       Il.Mem (sp_imm 0L, args_rty)
 
-  and based_sz (fp:Il.reg) (reg:Il.reg) (size:size) : Il.mem =
+  and based_sz (ty_params:Il.cell) (reg:Il.reg) (size:size) : Il.mem =
     match Il.size_to_expr64 size with
         Some e -> based_off reg e
       | None ->
-             let runtime_size = calculate_sz fp size in
+             let runtime_size = calculate_sz ty_params size in
              let v = next_vreg () in
              let c = (Il.Reg (v, word_ty)) in
                mov c (Il.Cell (Il.Reg (reg, word_ty)));
@@ -556,10 +565,10 @@ let trans_visitor
                based v
 
   and fp_off_sz (size:size) : Il.mem =
-    based_sz abi.Abi.abi_fp_reg abi.Abi.abi_fp_reg size
+    based_sz (get_ty_params_of_current_frame()) abi.Abi.abi_fp_reg size
 
   and sp_off_sz (size:size) : Il.mem =
-    based_sz abi.Abi.abi_fp_reg abi.Abi.abi_sp_reg size
+    based_sz (get_ty_params_of_current_frame()) abi.Abi.abi_sp_reg size
   in
 
   let slot_sz_in_current_frame (slot:Ast.slot) : Il.operand =
@@ -591,19 +600,16 @@ let trans_visitor
   in
 
   let deref_off_sz
-      (fp:Il.reg)
+      (ty_params:Il.cell)
       (ptr:Il.cell)
       (size:size)
       : Il.cell =
     match Il.size_to_expr64 size with
         Some e -> deref_off ptr e
       | None ->
-          let runtime_size = calculate_sz fp size in
-          let v = next_vreg () in
-          let c = (Il.Reg (v, word_ty)) in
-            mov c (Il.Cell ptr);
-            add_to c runtime_size;
-            Il.Mem (based v, (pointee_type ptr))
+          let (r,_) = force_to_reg (Il.Cell ptr) in
+          let mem = based_sz ty_params r size in
+            Il.Mem (mem, (pointee_type ptr))
   in
 
   let cell_of_block_slot
@@ -1206,6 +1212,10 @@ let trans_visitor
     then
       trans_void_upcall "upcall_trace_word" [| Il.Cell w |]
 
+  and ty_params_covering (t:Ast.ty) : Ast.slot =
+    let n_ty_params = n_used_type_params t in
+    let params = Array.init n_ty_params (fun _ -> word_slot) in
+      read_alias_slot (Ast.TY_tup params)
 
   and get_drop_glue
       (ty:Ast.ty)
@@ -1213,16 +1223,17 @@ let trans_visitor
       : fixup =
     let g = GLUE_drop ty in
     let inner _ (args:Il.cell) =
-      let fp = get_element_ptr args 0 in
+      let ty_params = deref (get_element_ptr args 0) in
       let cell = get_element_ptr args 1 in
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "in drop-glue, dropping";
         trace_word cx.ctxt_sess.Session.sess_trace_drop cell;
-        drop_ty fp ty (deref cell) curr_iso;
+        drop_ty ty_params ty (deref cell) curr_iso;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "drop-glue complete";
     in
-    let fty = mk_simple_ty_fn [| word_slot; read_alias_slot ty |] in
+    let ty_params_ptr = ty_params_covering ty in
+    let fty = mk_simple_ty_fn [| ty_params_ptr; read_alias_slot ty |] in
       get_typed_mem_glue g fty inner
 
 
@@ -1238,7 +1249,7 @@ let trans_visitor
        * exterior allocation with normal exterior layout. It's
        * just a way to move drop+free out of leaf code. 
        *)
-      let fp = get_element_ptr args 0 in
+      let ty_params = deref (get_element_ptr args 0) in
       let cell = get_element_ptr args 1 in
       let (body_mem, _) =
         need_mem_cell
@@ -1249,7 +1260,7 @@ let trans_visitor
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "in free-glue, calling drop-glue";
         trace_word cx.ctxt_sess.Session.sess_trace_drop vr;
-        trans_call_simple_static_glue (get_drop_glue ty curr_iso) fp vr;
+        trans_call_simple_static_glue (get_drop_glue ty curr_iso) ty_params vr;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "back in free-glue, calling free";
         if mctrl = MEM_gc
@@ -1266,7 +1277,8 @@ let trans_visitor
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "free-glue complete";
     in
-    let fty = mk_simple_ty_fn [| word_slot; exterior_slot ty |] in
+    let ty_params_ptr = ty_params_covering ty in
+    let fty = mk_simple_ty_fn [| ty_params_ptr; exterior_slot ty |] in
       get_typed_mem_glue g fty inner
 
 
@@ -1276,11 +1288,12 @@ let trans_visitor
       : fixup =
     let g = GLUE_mark ty in
     let inner _ (args:Il.cell) =
-      let fp = get_element_ptr args 0 in
+      let ty_params = deref (get_element_ptr args 0) in
       let cell = get_element_ptr args 1 in
-        mark_ty fp ty (deref cell) curr_iso
+        mark_ty ty_params ty (deref cell) curr_iso
     in
-    let fty = mk_simple_ty_fn [| word_slot; read_alias_slot ty |] in
+    let ty_params_ptr = ty_params_covering ty in
+    let fty = mk_simple_ty_fn [| ty_params_ptr; read_alias_slot ty |] in
       get_typed_mem_glue g fty inner
 
 
@@ -1370,27 +1383,27 @@ let trans_visitor
 
   and trans_call_simple_static_glue
       (fix:fixup)
-      (fp:Il.cell)
+      (ty_params:Il.cell)
       (arg:Il.cell)
       : unit =
     trans_call_static_glue
       (code_fixup_to_ptr_operand fix)
-      None [| fp; arg |]
+      None [| alias ty_params; arg |]
 
   and trans_call_simple_dynamic_glue
       (ty_param:int)
       (vtbl_idx:int)
-      (fp:Il.cell)
+      (ty_params:Il.cell)
       (arg:Il.cell)
       : unit =
     iflog (fun _ ->
              annotate (Printf.sprintf "calling tydesc[%d].glue[%d]"
                          ty_param vtbl_idx));
-    let td = get_ty_desc (fst (force_to_reg (Il.Cell fp))) ty_param in
+    let td = get_ty_param ty_params ty_param in
       trans_call_dynamic_glue
         td
         vtbl_idx
-        None [| fp; arg; td; |]
+        None [| alias ty_params; arg; td; |]
 
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
@@ -1948,7 +1961,7 @@ let trans_visitor
       curr_iso
 
   and drop_ty
-      (fp:Il.cell)
+      (ty_params:Il.cell)
       (ty:Ast.ty)
       (cell:Il.cell)
       (curr_iso:Ast.ty_iso option)
@@ -1961,19 +1974,19 @@ let trans_visitor
             begin
               fun cell ->
                 trans_call_simple_dynamic_glue
-                   i Abi.tydesc_field_drop_glue fp cell
+                   i Abi.tydesc_field_drop_glue ty_params cell
             end
 
       | _ ->
-          iter_ty_slots ty cell (drop_slot fp) curr_iso
+          iter_ty_slots ty cell (drop_slot ty_params) curr_iso
 
   and mark_ty
-      (fp:Il.cell)
+      (ty_params:Il.cell)
       (ty:Ast.ty)
       (cell:Il.cell)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    iter_ty_slots ty cell (mark_slot fp) curr_iso
+    iter_ty_slots ty cell (mark_slot ty_params) curr_iso
 
   and clone_ty
       (clone_task:Il.cell)
@@ -2025,7 +2038,7 @@ let trans_visitor
             begin
               fun src ->
                 trans_call_dynamic_glue
-                  (get_current_fn_ty_desc i)
+                  (get_ty_param_in_current_frame i)
                   Abi.tydesc_field_copy_glue
                   (Some dst) [| src |]
             end
@@ -2066,7 +2079,7 @@ let trans_visitor
       | _ -> curr_iso
 
   and mark_slot
-      (fp:Il.cell)
+      (ty_params:Il.cell)
       (cell:Il.cell)
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
@@ -2096,7 +2109,9 @@ let trans_visitor
                   let ty = maybe_iso curr_iso ty in
                   let curr_iso = maybe_enter_iso ty curr_iso in
                     lea tmp body_mem;
-                    trans_call_simple_static_glue (get_mark_glue ty curr_iso) fp tmp;
+                    trans_call_simple_static_glue
+                      (get_mark_glue ty curr_iso)
+                      ty_params tmp;
                     patch null_cell_jump;
                     patch already_marked_jump
 
@@ -2108,7 +2123,9 @@ let trans_visitor
             let ty = maybe_iso curr_iso ty in
             let curr_iso = maybe_enter_iso ty curr_iso in
               lea tmp mem;
-              trans_call_simple_static_glue (get_mark_glue ty curr_iso) fp tmp
+              trans_call_simple_static_glue
+                (get_mark_glue ty curr_iso)
+                ty_params tmp
 
         | _ -> ()
 
@@ -2149,10 +2166,10 @@ let trans_visitor
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
-      drop_slot (Il.Reg (abi.Abi.abi_fp_reg, word_ty)) cell slot curr_iso
+      drop_slot (get_ty_params_of_current_frame()) cell slot curr_iso
 
   and drop_slot
-      (fp:Il.cell)
+      (ty_params:Il.cell)
       (cell:Il.cell)
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
@@ -2209,7 +2226,8 @@ let trans_visitor
             let ty = maybe_iso curr_iso ty in
             let curr_iso = maybe_enter_iso ty curr_iso in
               trans_call_simple_static_glue
-                (get_free_glue ty mctrl curr_iso) fp cell;
+                (get_free_glue ty mctrl curr_iso)
+                ty_params cell;
               (* Null the slot out to prevent double-free if the frame
                * unwinds.
                *)
@@ -2225,12 +2243,14 @@ let trans_visitor
             let ty = maybe_iso curr_iso ty in
             let curr_iso = maybe_enter_iso ty curr_iso in
               lea vr mem;
-              trans_call_simple_static_glue (get_drop_glue ty curr_iso) fp vr
+              trans_call_simple_static_glue
+                (get_drop_glue ty curr_iso)
+                ty_params vr
 
         | MEM_interior ->
             (* Interior allocation of all-interior value: free directly. *)
             let ty = maybe_iso curr_iso ty in
-              drop_ty fp ty cell curr_iso
+              drop_ty ty_params ty cell curr_iso
 
   (* Returns the offset of the slot-body in the initialized allocation. *)
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
@@ -2807,7 +2827,7 @@ let trans_visitor
       log cx "getting tydesc for %a" Ast.sprintf_ty ty_param;
       match ty_param with
           Ast.TY_param (idx, _) ->
-            (get_current_fn_ty_desc idx)
+            (get_ty_param_in_current_frame idx)
         | t when has_parametric_types t ->
             (get_dynamic_ty_desc t)
         | _ ->
@@ -3603,6 +3623,7 @@ let trans_visitor
       end
 
   and get_frame_glue_fns (fnid:node_id) : Il.operand =
+    let n_ty_params = n_item_ty_params cx fnid in
     let get_frame_glue glue inner =
       get_mem_glue glue
         begin
@@ -3615,10 +3636,11 @@ let trans_visitor
                         let referent_type = slot_id_referent_type slot_id in
                         let fp_cell = rty_ptr_at mem referent_type in
                         let (fp, st) = force_to_reg (Il.Cell fp_cell) in
+                        let ty_params = get_ty_params_of_frame fp n_ty_params in
                         let slot_cell =
-                          deref_off_sz fp (Il.Reg (fp,st)) off
+                          deref_off_sz ty_params (Il.Reg (fp,st)) off
                         in
-                          inner key slot_id fp_cell slot slot_cell
+                          inner key slot_id ty_params slot slot_cell
                     | _ -> ()
               end
         end
@@ -3630,15 +3652,15 @@ let trans_visitor
           let mark_frame_glue_fixup =
             get_frame_glue (GLUE_mark_frame fnid)
               begin
-                fun _ _ fp slot slot_cell ->
-                  mark_slot fp slot_cell slot None
+                fun _ _ ty_params slot slot_cell ->
+                  mark_slot ty_params slot_cell slot None
               end
           in
           let drop_frame_glue_fixup =
             get_frame_glue (GLUE_drop_frame fnid)
               begin
-                fun _ _ fp slot slot_cell ->
-                  drop_slot fp slot_cell slot None
+                fun _ _ ty_params slot slot_cell ->
+                  drop_slot ty_params slot_cell slot None
               end
           in
           let reloc_frame_glue_fixup =
