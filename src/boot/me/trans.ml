@@ -438,13 +438,26 @@ let trans_visitor
     get_ty_param (get_ty_params_of_current_frame()) param_idx
   in
 
-  let linearize_ty_params (t:Ast.ty) : Il.operand array =
-    let base = ty_fold_list_concat () in
-    let ty_fold_param (i, _) =
-      [ Il.Cell (get_ty_param_in_current_frame i) ]
+  let linearize_ty_params (ty:Ast.ty) : (Ast.ty * Il.operand array) =
+    let htab = Hashtbl.create 0 in
+    let q = Queue.create () in
+    let base = ty_fold_rebuild (fun t -> t) in
+    let ty_fold_param (i, mut) =
+      let param = Ast.TY_param (i, mut) in
+        match htab_search htab param with
+            Some p -> p
+          | None ->
+              let p = Ast.TY_param (Hashtbl.length htab, mut) in
+                htab_put htab param p;
+                Queue.add (Il.Cell (get_ty_param_in_current_frame i)) q;
+                p
     in
-    let fold = { base with ty_fold_param = ty_fold_param } in
-      Array.of_list (fold_ty fold t)
+      let fold =
+        { base with
+            ty_fold_param = ty_fold_param; }
+      in
+      let ty = fold_ty fold ty in
+        (ty, queue_to_arr q)
   in
 
   let has_parametric_types (t:Ast.ty) : bool =
@@ -471,12 +484,12 @@ let trans_visitor
               | SIZE_fixup_mem_sz f -> Il.Imm (Asm.M_SZ f, word_ty_mach)
 
               | SIZE_param_size i ->
-                  let ty_desc = deref (get_ty_param ty_params i) in
-                    Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_size)
+                  let tydesc = deref (get_ty_param ty_params i) in
+                    Il.Cell (get_element_ptr tydesc Abi.tydesc_field_size)
 
               | SIZE_param_align i ->
-                  let ty_desc = deref (get_ty_param ty_params i) in
-                    Il.Cell (get_element_ptr ty_desc Abi.tydesc_field_align)
+                  let tydesc = deref (get_ty_param ty_params i) in
+                    Il.Cell (get_element_ptr tydesc Abi.tydesc_field_align)
 
               | SIZE_rt_neg a ->
                   let op_a = sub_sz a in
@@ -858,20 +871,20 @@ let trans_visitor
                (trans_crate_rel_static_string_operand s)
                (referent_type abi Ast.TY_str))
 
-  and trans_tydesc (t:Ast.ty) : Il.operand =
+  and trans_tydesc (t:Ast.ty) (sz:int64) (align:int64) : Il.operand =
     trans_crate_rel_data_operand
       (DATA_tydesc t)
       begin
         fun _ ->
           let tydesc_fixup = new_fixup "tydesc" in
           log cx "tydesc for %a has sz=%Ld, align=%Ld"
-            Ast.sprintf_ty t (ty_sz abi t) (ty_align abi t);
+            Ast.sprintf_ty t sz align;
             Asm.DEF
               (tydesc_fixup,
                Asm.SEQ
                  [|
-                   Asm.WORD (word_ty_mach, Asm.IMM (ty_sz abi t));
-                   Asm.WORD (word_ty_mach, Asm.IMM (ty_align abi t));
+                   Asm.WORD (word_ty_mach, Asm.IMM sz);
+                   Asm.WORD (word_ty_mach, Asm.IMM align);
                    table_of_fixup_rel_fixups tydesc_fixup
                      [|
                        get_copy_glue t None;
@@ -1274,7 +1287,7 @@ let trans_visitor
       let cell = get_element_ptr args 1 in
       let (body_mem, _) =
         need_mem_cell
-          (get_element_ptr (deref cell) Abi.exterior_rc_slot_field_body)
+          (get_element_ptr_dyn ty_params (deref cell) Abi.exterior_rc_slot_field_body)
       in
       let vr = next_vreg_cell Il.voidptr_t in
         lea vr body_mem;
@@ -1399,12 +1412,12 @@ let trans_visitor
     trans_call_glue (code_of_operand callee) dst args
 
   and trans_call_dynamic_glue
-      (ty_desc:Il.cell)
+      (tydesc:Il.cell)
       (idx:int)
       (dst:Il.cell option)
       (args:Il.cell array)
       : unit =
-    let fptr = get_vtbl_entry ty_desc idx in
+    let fptr = get_vtbl_entry tydesc idx in
       trans_call_glue (code_of_operand (Il.Cell fptr)) dst args
 
   and trans_call_simple_static_glue
@@ -1827,32 +1840,30 @@ let trans_visitor
             atoms;
             mov (get_element_ptr vec Abi.vec_elt_fill) (Il.Cell fill);
 
-  and get_dynamic_ty_desc (t:Ast.ty) : Il.cell =
+  and get_dynamic_tydesc (t:Ast.ty) : Il.cell =
     let td = next_vreg_cell Il.voidptr_t in
-    let tys = linearize_ty_params t in
-    let n = Int64.of_int (Array.length tys) in
-      (* FIXME: this relies on knowledge that spills are contiguous. *)
-    let descs =
-      Array.map
-        begin
-          fun t ->
-            let s = next_spill_cell Il.voidptr_t in
-              mov s t;
-              s
-        end
-        tys
+    let root_desc =
+      Il.Cell (crate_rel_to_ptr (trans_tydesc t 0L 0L) (tydesc_rty abi))
     in
+    let (t, param_descs) = linearize_ty_params t in
+    let descs = Array.append [| root_desc |] param_descs in
+    let n = Array.length descs in
     let rty = referent_type abi t in
     let (size_sz, align_sz) = Il.referent_ty_layout word_bits rty in
     let size = calculate_sz_in_current_frame size_sz in
     let align = calculate_sz_in_current_frame align_sz in
     let descs_ptr = next_vreg_cell Il.voidptr_t in
       if (Array.length descs) > 0
-      then lea descs_ptr (fst (need_mem_cell descs.(0)))
-      else mov descs_ptr zero;
+      then
+      (* FIXME: this relies on knowledge that spills are contiguous. *)
+        let spills = Array.map (fun _ -> next_spill_cell Il.voidptr_t) descs in
+          Array.iteri (fun i t -> mov spills.(n-(i+1)) t) descs;
+          lea descs_ptr (fst (need_mem_cell spills.(n-1)))
+      else
+        mov descs_ptr zero;
       trans_upcall "upcall_get_type_desc" td
         [| Il.Cell (curr_crate_ptr());
-           size; align; imm n;
+           size; align; imm (Int64.of_int n);
            Il.Cell descs_ptr |];
       td
 
@@ -2876,9 +2887,12 @@ let trans_visitor
           Ast.TY_param (idx, _) ->
             (get_ty_param_in_current_frame idx)
         | t when has_parametric_types t ->
-            (get_dynamic_ty_desc t)
+            (get_dynamic_tydesc t)
         | _ ->
-            (crate_rel_to_ptr (trans_tydesc ty_param) Il.OpaqueTy)
+            (crate_rel_to_ptr (trans_tydesc ty_param
+                                 (ty_sz abi ty_param)
+                                 (ty_align abi ty_param))
+               (tydesc_rty abi))
     in
 
       Array.iteri

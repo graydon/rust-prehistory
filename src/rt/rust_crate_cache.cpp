@@ -195,7 +195,7 @@ rust_crate_cache::get_type_desc(size_t size,
     I(dom, n_descs > 0);
     type_desc *td = NULL;
     size_t keysz = n_descs * sizeof(type_desc*);
-    HASH_FIND(hh,this->type_descs,descs,keysz,td);
+    HASH_FIND(hh, this->type_descs, descs, keysz, td);
     if (td) {
         dom->log(LOG_CACHE, "rust_crate_cache::get_type_desc hit");
         return td;
@@ -208,12 +208,18 @@ rust_crate_cache::get_type_desc(size_t size,
     // but we ignore the size and alignment of it and use the
     // passed-in, computed values.
     memcpy(td, descs[0], sizeof(type_desc));
-    for (size_t i = 0; i < n_descs; ++i)
+    td->size = size;
+    td->align = align;
+    for (size_t i = 0; i < n_descs; ++i) {
+        dom->log(LOG_CACHE,
+                 "rust_crate_cache::descs[%" PRIdPTR "] = 0x%" PRIxPTR,
+                 i, descs[i]);
         td->descs[i] = descs[i];
+    }
     adjust_disp(td->copy_glue_off, descs[0], td);
     adjust_disp(td->drop_glue_off, descs[0], td);
     adjust_disp(td->free_glue_off, descs[0], td);
-    HASH_ADD(hh,this->type_descs,descs,keysz,td);
+    HASH_ADD(hh, this->type_descs, descs, keysz, td);
     return td;
 }
 
