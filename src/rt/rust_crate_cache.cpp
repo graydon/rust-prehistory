@@ -192,7 +192,7 @@ rust_crate_cache::get_type_desc(size_t size,
                                 size_t n_descs,
                                 type_desc const **descs)
 {
-    I(dom, n_descs > 0);
+    I(dom, n_descs > 1);
     type_desc *td = NULL;
     size_t keysz = n_descs * sizeof(type_desc*);
     HASH_FIND(hh, this->type_descs, descs, keysz, td);
@@ -208,6 +208,7 @@ rust_crate_cache::get_type_desc(size_t size,
     // but we ignore the size and alignment of it and use the
     // passed-in, computed values.
     memcpy(td, descs[0], sizeof(type_desc));
+    td->first_param = &td->descs[1];
     td->size = size;
     td->align = align;
     for (size_t i = 0; i < n_descs; ++i) {

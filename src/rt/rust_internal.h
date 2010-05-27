@@ -278,6 +278,8 @@ public:
 
 struct type_desc {
     // First part of type_desc is known to compiler.
+    // first_param = &descs[0] if dynamic, null if static.
+    const type_desc **first_param;
     size_t size;
     size_t align;
     uintptr_t copy_glue_off;

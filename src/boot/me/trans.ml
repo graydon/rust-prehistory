@@ -883,6 +883,7 @@ let trans_visitor
               (tydesc_fixup,
                Asm.SEQ
                  [|
+                   Asm.WORD (word_ty_mach, Asm.IMM 0L);
                    Asm.WORD (word_ty_mach, Asm.IMM sz);
                    Asm.WORD (word_ty_mach, Asm.IMM align);
                    table_of_fixup_rel_fixups tydesc_fixup
@@ -1429,6 +1430,20 @@ let trans_visitor
       (code_fixup_to_ptr_operand fix)
       None [| alias ty_params; arg |]
 
+  and get_tydesc_params
+      (outer_ty_params:Il.cell)
+      (td:Il.cell)
+      : Il.cell =
+    let first_param = get_element_ptr (deref td) Abi.tydesc_field_first_param in
+    let res = next_vreg_cell Il.voidptr_t in
+      mov res (Il.Cell (alias outer_ty_params));
+      emit (Il.cmp (Il.Cell first_param) zero);
+      let no_param_jmp = mark() in
+        emit (Il.jmp Il.JE Il.CodeNone);
+        mov res (Il.Cell first_param);
+        patch no_param_jmp;
+        res
+
   and trans_call_simple_dynamic_glue
       (ty_param:int)
       (vtbl_idx:int)
@@ -1439,9 +1454,10 @@ let trans_visitor
              annotate (Printf.sprintf "calling tydesc[%d].glue[%d]"
                          ty_param vtbl_idx));
     let td = get_ty_param ty_params ty_param in
+    let ty_params_ptr = get_tydesc_params ty_params td in
       trans_call_dynamic_glue
         td vtbl_idx
-        None [| alias ty_params; arg; td; |]
+        None [| ty_params_ptr; arg; |]
 
   (* trans_compare returns a quad number of the cjmp, which the caller
      patches to the cjmp destination.  *)
@@ -2081,9 +2097,10 @@ let trans_visitor
             begin
               fun src ->
                 let td = get_ty_param ty_params i in
+                let ty_params_ptr = get_tydesc_params ty_params td in
                   trans_call_dynamic_glue
                     td Abi.tydesc_field_copy_glue
-                    (Some dst) [| alias ty_params; src; td; |]
+                    (Some dst) [| ty_params_ptr; src; |]
             end
 
       | _ ->

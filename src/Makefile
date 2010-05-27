@@ -307,7 +307,6 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/rec-auto.rs \
                     test/run-pass/foreach-simple.rs \
                     test/run-pass/vec-slice.rs \
-                    test/run-pass/generic-derived-type.rs \
                     test/run-pass/generic-tag.rs \
                     test/run-pass/generic-obj.rs \
                     test/compile-fail/rec-missing-fields.rs \
