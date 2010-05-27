@@ -61,7 +61,7 @@ let trans_crate
   let bogus_ptr = Llvm.const_null (Llvm.pointer_type (Llvm.i32_type llctx)) in
 
   let llnilty = Llvm.array_type (Llvm.i1_type llctx) 0 in
-  let llnil = Llvm.const_array llnilty [| |] in
+  let llnil = Llvm.const_array (Llvm.i1_type llctx) [| |] in
 
   let ty_of_item = Hashtbl.find sem_cx.Semant.ctxt_all_item_types in
   let ty_of_slot n = Semant.slot_ty (Semant.get_slot sem_cx n) in
