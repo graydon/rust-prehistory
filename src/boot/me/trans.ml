@@ -714,7 +714,9 @@ let trans_visitor
                       begin
                         let state_arg = get_closure_for_current_frame () in
                         let (slot_mem, _) =
-                          need_mem_cell (deref_imm state_arg (force_sz off))
+                          need_mem_cell (deref_off_sz
+                                           (get_ty_params_of_current_frame())
+                                           state_arg off)
                         in
                           Il.Mem (slot_mem, referent_type)
                       end
