@@ -202,6 +202,10 @@ let lookup_type_by_name
               Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type t;
                                 Ast.decl_params = params }) ->
                 (t, Array.map (fun p -> p.node) params)
+            | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_obj ob;
+                                Ast.decl_params = params }) ->
+                (Ast.TY_obj (ty_obj_of_obj ob),
+                 Array.map (fun p -> p.node) params)
             | Some (DEFN_ty_param (_, x)) ->
                 (Ast.TY_param x, [||])
             | _ -> err None "Found non-type binding for %a" Ast.sprintf_name name
