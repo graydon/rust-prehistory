@@ -325,10 +325,10 @@ let get_callsz (cx:ctxt) (id:node_id) : size =
   else bugi cx id "missing callsz"
 ;;
 
-let n_item_ty_params (cx:ctxt) (id:node_id) : int =
+let rec n_item_ty_params (cx:ctxt) (id:node_id) : int =
   match Hashtbl.find cx.ctxt_all_defns id with
       DEFN_item i -> Array.length i.Ast.decl_params
-    | DEFN_obj_fn _ -> 0
+    | DEFN_obj_fn (oid,_) -> n_item_ty_params cx oid
     | _ -> bugi cx id "n_item_ty_params on non-item"
 ;;
 
