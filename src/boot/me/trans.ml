@@ -130,7 +130,12 @@ let trans_visitor
       (id:node_id)
       (closure:Il.referent_ty option)
       : Il.referent_ty =
-    call_args_referent_type cx (n_item_ty_params cx id) (fn_ty id) closure
+    let n_params =
+      if item_is_obj_fn cx id
+      then 0
+      else n_item_ty_params cx id
+    in
+      call_args_referent_type cx n_params (fn_ty id) closure
   in
 
   let emitters = Stack.create () in
@@ -460,23 +465,22 @@ let trans_visitor
   let get_ty_params_of_current_frame _ : Il.cell =
     let id = current_fn() in
     let n_ty_params = n_item_ty_params cx id in
-      match Hashtbl.find cx.ctxt_all_defns id with
-          DEFN_obj_fn _ ->
-            (* FIXME: it'd be nice to do all this with GEP. *)
-            let state_arg = get_closure_for_current_frame () in
-            let (ty_params_mem, _) =
-              need_mem_cell
-                (deref_imm state_arg (word_n Abi.exterior_rc_slot_field_body))
-            in
-            let ty_params_ty = Ast.TY_tup (make_tydesc_slots n_ty_params) in
-            let ty_params_rty = referent_type abi ty_params_ty in
-              Il.Mem (ty_params_mem, ty_params_rty)
+      if item_is_obj_fn cx id
+      then
+        begin
+          (* FIXME: it'd be nice to do all this with GEP. *)
+          let state_arg = get_closure_for_current_frame () in
+          let (ty_params_mem, _) =
+            need_mem_cell
+              (deref_imm state_arg (word_n Abi.exterior_rc_slot_field_body))
+          in
+          let ty_params_ty = Ast.TY_tup (make_tydesc_slots n_ty_params) in
+          let ty_params_rty = referent_type abi ty_params_ty in
+            Il.Mem (ty_params_mem, ty_params_rty)
+        end
 
-        | DEFN_item _ ->
-              get_ty_params_of_frame abi.Abi.abi_fp_reg n_ty_params
-
-        | _ ->
-            bug () "get_ty_params_of_current_frame on bad DEFN type"
+      else
+        get_ty_params_of_frame abi.Abi.abi_fp_reg n_ty_params
   in
 
   let get_ty_param_in_current_frame (param_idx:int) : Il.cell =

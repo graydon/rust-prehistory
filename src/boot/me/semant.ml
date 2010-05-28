@@ -332,6 +332,12 @@ let rec n_item_ty_params (cx:ctxt) (id:node_id) : int =
     | _ -> bugi cx id "n_item_ty_params on non-item"
 ;;
 
+let item_is_obj_fn (cx:ctxt) (id:node_id) : bool =
+  match Hashtbl.find cx.ctxt_all_defns id with
+      DEFN_obj_fn _ -> true
+    | _ -> false
+;;
+
 let get_spill (cx:ctxt) (id:node_id) : fixup =
   if Hashtbl.mem cx.ctxt_spill_fixups id
   then Hashtbl.find cx.ctxt_spill_fixups id
