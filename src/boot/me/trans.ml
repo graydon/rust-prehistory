@@ -3830,13 +3830,28 @@ let trans_visitor
       : unit =
     trans_frame_entry obj_id false;
 
-    let slots = Array.map (fun (sloti,_) -> sloti.node) state in
-    let state_ty = Ast.TY_tup slots in
-    let src_rty = slot_referent_type abi (interior_slot state_ty) in
-    let exterior_state_slot = exterior_slot state_ty in
-    let state_ptr_rty = slot_referent_type abi exterior_state_slot in
+    let all_args_rty = current_fn_args_rty None in
+    let all_args_cell = caller_args_cell all_args_rty in
+    let frame_args =
+      get_element_ptr all_args_cell Abi.calltup_elt_args
+    in
+    let frame_ty_params =
+      get_element_ptr all_args_cell Abi.calltup_elt_ty_params
+    in
+
+    let n_ty_params = n_item_ty_params cx obj_id in
+    let obj_ty_params_tup =
+      Array.init n_ty_params (fun _ -> interior_slot Ast.TY_type)
+    in
+    let obj_args_tup = Array.map (fun (sloti,_) -> sloti.node) state in
+    let state_ty =
+      Ast.TY_tup [| interior_slot (Ast.TY_tup obj_ty_params_tup);
+                    interior_slot (Ast.TY_tup obj_args_tup); |]
+    in
+    let state_ptr_slot = exterior_slot state_ty in
+    let state_ptr_rty = slot_referent_type abi state_ptr_slot in
     let state_malloc_sz =
-      exterior_rc_allocation_size abi exterior_state_slot
+      exterior_rc_allocation_size abi state_ptr_slot
     in
 
     let ctor_ty = Hashtbl.find cx.ctxt_all_item_types obj_id in
@@ -3847,7 +3862,7 @@ let trans_visitor
     in
     let vtbl_ptr = trans_obj_vtbl obj_id in
     let _ = iflog (fun _ -> annotate "calculate vtbl-ptr from displacement") in
-    let src_cell = crate_rel_to_ptr vtbl_ptr Il.CodeTy in
+    let vtbl_cell = crate_rel_to_ptr vtbl_ptr Il.CodeTy in
 
     let _ = iflog (fun _ -> annotate "load destination obj pair ptr") in
     let dst_pair_cell = deref (ptr_at (fp_imm out_mem_disp) obj_ty) in
@@ -3856,7 +3871,7 @@ let trans_visitor
 
       (* Load first cell of pair with vtbl ptr.*)
       iflog (fun _ -> annotate "mov vtbl-ptr to obj.item cell");
-      mov dst_pair_item_cell (Il.Cell src_cell);
+      mov dst_pair_item_cell (Il.Cell vtbl_cell);
 
       (* Load second cell of pair with pointer to fresh state tuple.*)
       iflog (fun _ -> annotate (Printf.sprintf
@@ -3869,15 +3884,20 @@ let trans_visitor
         iflog (fun _ -> annotate "load obj.state ptr to vreg");
         mov state_ptr (Il.Cell dst_pair_state_cell);
         let state = deref state_ptr in
-        let refcnt_cell = get_element_ptr state 0 in
-        let body_cell = get_element_ptr state 1 in
-        let src_arg_mem = (fp_imm arg0_disp, src_rty) in
-          iflog (fun _ -> annotate "write refcnt=1 to state[0]");
-          mov refcnt_cell one;
-          iflog (fun _ -> annotate "copy state args to state[1..]");
+        let refcnt = get_element_ptr state 0 in
+        let body = get_element_ptr state 1 in
+        let obj_ty_params = get_element_ptr body 0 in
+        let obj_args = get_element_ptr body 1 in
+          iflog (fun _ -> annotate "write refcnt=1 to obj state");
+          mov refcnt one;
+          iflog (fun _ -> annotate "copy ctor ty params to obj ty params");
           trans_copy_tup
-            (get_ty_params_of_current_frame()) true
-            body_cell (Il.Mem src_arg_mem) slots;
+            frame_ty_params true
+            obj_ty_params frame_ty_params obj_ty_params_tup;
+          iflog (fun _ -> annotate "copy ctor args args to obj args");
+          trans_copy_tup
+            frame_ty_params true
+            obj_args frame_args obj_args_tup;
           trans_frame_exit obj_id false;
   in
 
