@@ -3932,7 +3932,7 @@ let trans_visitor
           trans_copy_tup
             frame_ty_params true
             obj_ty_params frame_ty_params obj_ty_params_tup;
-          iflog (fun _ -> annotate "copy ctor args args to obj args");
+          iflog (fun _ -> annotate "copy ctor args to obj args");
           trans_copy_tup
             frame_ty_params true
             obj_args frame_args obj_args_tup;

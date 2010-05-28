@@ -549,7 +549,11 @@ let max_sz (a:size) (b:size) : size =
       | SIZE_rt_align (a,b) -> (no_negs a) && (no_negs b)
   in
     match (a, b) with
-        (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_max a b)
+        (a, SIZE_rt_max (b, c)) when a = b -> SIZE_rt_max (a, c)
+      | (a, SIZE_rt_max (b, c)) when a = c -> SIZE_rt_max (a, b)
+      | (SIZE_rt_max (b, c), a) when a = b -> SIZE_rt_max (a, c)
+      | (SIZE_rt_max (b, c), a) when a = c -> SIZE_rt_max (a, b)
+      | (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_max a b)
       | (SIZE_fixed 0L, b) when no_negs b -> b
       | (a, SIZE_fixed 0L) when no_negs a -> b
       | (a, SIZE_fixed b) -> SIZE_rt_max (SIZE_fixed b, a)
@@ -580,7 +584,8 @@ let align_sz (a:size) (b:size) : size =
   in
     match (a, b) with
         (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
-      | (SIZE_fixed 1L, b) -> b
+      | (SIZE_fixed 1L, b) -> b (* everything is 1-aligned. *)
+      | (_, SIZE_fixed 0L) -> b (* 0 is everything-aligned. *)
       | (SIZE_fixed a, b) ->
           let inner_alignment = alignment_of b in
           if (Int64.rem a inner_alignment) = 0L
