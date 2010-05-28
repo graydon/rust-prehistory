@@ -1780,8 +1780,8 @@ let trans_visitor
     let fwd_jmps = trans_cond false e in
       trans_cond_fail (Ast.fmt_to_str Ast.fmt_expr e) fwd_jmps
 
-  and trans_malloc (dst:Il.cell) (nbytes:int64) : unit =
-    trans_upcall "upcall_malloc" dst [| imm nbytes |]
+  and trans_malloc (dst:Il.cell) (nbytes:Il.operand) : unit =
+    trans_upcall "upcall_malloc" dst [| nbytes |]
 
   and trans_free (src:Il.cell) : unit =
     trans_void_upcall "upcall_free" [| Il.Cell src |]
@@ -2359,7 +2359,7 @@ let trans_visitor
                * Malloc and then immediately shift down to point to
                * the pseudo-rc cell.
                *)
-              trans_malloc cell sz;
+              trans_malloc cell (imm sz);
               add_to cell
                 (imm (word_n Abi.exterior_gc_malloc_return_adjustment));
 
@@ -2380,7 +2380,7 @@ let trans_visitor
         | MEM_rc_struct ->
             iflog (fun _ -> annotate "init RC exterior: malloc");
             let sz = exterior_rc_allocation_size abi slot in
-              trans_malloc cell sz;
+              trans_malloc cell (imm sz);
               iflog (fun _ -> annotate "init RC exterior: load refcount");
               let rc = exterior_rc_cell cell in
                 mov rc one
@@ -2833,7 +2833,7 @@ let trans_visitor
       iflog (fun _ -> annotate "assign glue-code to fn slot of pair");
       mov fn_cell (crate_rel_imm glue_fixup);
       iflog (fun _ -> annotate "heap-allocate closure to binding slot of pair");
-      trans_malloc closure_cell closure_sz;
+      trans_malloc closure_cell (imm closure_sz);
       trans_init_closure
         (deref closure_cell)
         target_fn_ptr target_binding_ptr
@@ -3867,10 +3867,12 @@ let trans_visitor
     let all_args_rty = current_fn_args_rty None in
     let all_args_cell = caller_args_cell all_args_rty in
     let frame_args =
-      get_element_ptr all_args_cell Abi.calltup_elt_args
+      get_element_ptr_dyn_in_current_frame
+        all_args_cell Abi.calltup_elt_args
     in
     let frame_ty_params =
-      get_element_ptr all_args_cell Abi.calltup_elt_ty_params
+      get_element_ptr_dyn_in_current_frame
+        all_args_cell Abi.calltup_elt_ty_params
     in
 
     let n_ty_params = n_item_ty_params cx obj_id in
@@ -3883,7 +3885,10 @@ let trans_visitor
     let state_ptr_slot = exterior_slot state_ty in
     let state_ptr_rty = slot_referent_type abi state_ptr_slot in
     let state_malloc_sz =
-      exterior_rc_allocation_size abi state_ptr_slot
+      calculate_sz_in_current_frame
+        (SIZE_rt_add
+           ((SIZE_fixed (word_n Abi.exterior_rc_header_size)),
+            (Il.referent_ty_size word_bits state_ptr_rty)))
     in
 
     let ctor_ty = Hashtbl.find cx.ctxt_all_item_types obj_id in
@@ -3906,9 +3911,7 @@ let trans_visitor
       mov dst_pair_item_cell (Il.Cell vtbl_cell);
 
       (* Load second cell of pair with pointer to fresh state tuple.*)
-      iflog (fun _ -> annotate (Printf.sprintf
-                                  "malloc %Ld state-tuple bytes to obj.state cell"
-                                  state_malloc_sz));
+      iflog (fun _ -> annotate "malloc state-tuple to obj.state cell");
       trans_malloc dst_pair_state_cell state_malloc_sz;
 
       (* Copy args into the state tuple. *)
@@ -3916,10 +3919,10 @@ let trans_visitor
         iflog (fun _ -> annotate "load obj.state ptr to vreg");
         mov state_ptr (Il.Cell dst_pair_state_cell);
         let state = deref state_ptr in
-        let refcnt = get_element_ptr state 0 in
-        let body = get_element_ptr state 1 in
-        let obj_ty_params = get_element_ptr body 0 in
-        let obj_args = get_element_ptr body 1 in
+        let refcnt = get_element_ptr_dyn_in_current_frame state 0 in
+        let body = get_element_ptr_dyn_in_current_frame state 1 in
+        let obj_ty_params = get_element_ptr_dyn_in_current_frame body 0 in
+        let obj_args = get_element_ptr_dyn_in_current_frame body 1 in
           iflog (fun _ -> annotate "write refcnt=1 to obj state");
           mov refcnt one;
           iflog (fun _ -> annotate "copy ctor ty params to obj ty params");
