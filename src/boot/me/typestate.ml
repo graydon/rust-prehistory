@@ -304,8 +304,10 @@ let condition_assigning_visitor
   in
 
   let visit_obj_fn_pre obj ident fn =
-    let (input_keys, init_keys) = obj_keys obj.node resolve_constr_to_key in
-      raise_entry_state input_keys init_keys fn.node.Ast.fn_body;
+    let (obj_input_keys, obj_init_keys) = obj_keys obj.node resolve_constr_to_key in
+    let (fn_input_keys, fn_init_keys) = fn_keys fn.node resolve_constr_to_key in
+      raise_entry_state obj_input_keys obj_init_keys fn.node.Ast.fn_body;
+      raise_entry_state fn_input_keys fn_init_keys fn.node.Ast.fn_body;
       inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
