@@ -2115,6 +2115,7 @@ let trans_visitor
       | Ast.TY_int
       | Ast.TY_uint
       | Ast.TY_native _
+      | Ast.TY_type
       | Ast.TY_char ->
           iflog
             (fun _ -> annotate
