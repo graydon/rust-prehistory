@@ -3884,13 +3884,14 @@ let trans_visitor
       Ast.TY_tup [| interior_slot (Ast.TY_tup obj_ty_params_tup);
                     interior_slot (Ast.TY_tup obj_args_tup); |]
     in
+    let state_rty = slot_referent_type abi (interior_slot state_ty) in
     let state_ptr_slot = exterior_slot state_ty in
     let state_ptr_rty = slot_referent_type abi state_ptr_slot in
     let state_malloc_sz =
       calculate_sz_in_current_frame
         (SIZE_rt_add
            ((SIZE_fixed (word_n Abi.exterior_rc_header_size)),
-            (Il.referent_ty_size word_bits state_ptr_rty)))
+            (Il.referent_ty_size word_bits state_rty)))
     in
 
     let ctor_ty = Hashtbl.find cx.ctxt_all_item_types obj_id in
