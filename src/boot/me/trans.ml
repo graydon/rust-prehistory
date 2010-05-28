@@ -405,6 +405,11 @@ let trans_visitor
     deref_imm abi.Abi.abi_tp_cell imm
   in
 
+
+  let make_tydesc_slots n =
+    Array.init n (fun _ -> interior_slot Ast.TY_type)
+  in
+
   let cell_vreg_num (vr:(int option) ref) : int =
     match !vr with
         None ->
@@ -418,6 +423,10 @@ let trans_visitor
     slot_referent_type abi (referent_to_slot cx slot_id)
   in
 
+  let caller_args_cell (args_rty:Il.referent_ty) : Il.cell =
+    Il.Mem (fp_imm out_mem_disp, args_rty)
+  in
+
   let get_ty_param (ty_params:Il.cell) (param_idx:int) : Il.cell =
       get_element_ptr ty_params param_idx
   in
@@ -429,9 +438,45 @@ let trans_visitor
       get_element_ptr args_cell Abi.calltup_elt_ty_params
   in
 
+  let get_indirect_args_for_current_frame _ =
+    let curr_args_rty =
+      current_fn_args_rty (Some Il.OpaqueTy)
+    in
+    let self_args_cell =
+      caller_args_cell curr_args_rty
+    in
+      get_element_ptr self_args_cell
+        Abi.calltup_elt_indirect_args
+  in
+
+  let get_closure_for_current_frame _ =
+    let self_indirect_args =
+      get_indirect_args_for_current_frame ()
+    in
+      get_element_ptr self_indirect_args
+        Abi.indirect_args_elt_closure
+  in
+
   let get_ty_params_of_current_frame _ : Il.cell =
-    let n_ty_params = n_item_ty_params cx (current_fn()) in
-      get_ty_params_of_frame abi.Abi.abi_fp_reg n_ty_params
+    let id = current_fn() in
+    let n_ty_params = n_item_ty_params cx id in
+      match Hashtbl.find cx.ctxt_all_defns id with
+          DEFN_obj_fn _ ->
+            (* FIXME: it'd be nice to do all this with GEP. *)
+            let state_arg = get_closure_for_current_frame () in
+            let (ty_params_mem, _) =
+              need_mem_cell
+                (deref_imm state_arg (word_n Abi.exterior_rc_slot_field_body))
+            in
+            let ty_params_ty = Ast.TY_tup (make_tydesc_slots n_ty_params) in
+            let ty_params_rty = referent_type abi ty_params_ty in
+              Il.Mem (ty_params_mem, ty_params_rty)
+
+        | DEFN_item _ ->
+              get_ty_params_of_frame abi.Abi.abi_fp_reg n_ty_params
+
+        | _ ->
+            bug () "get_ty_params_of_current_frame on bad DEFN type"
   in
 
   let get_ty_param_in_current_frame (param_idx:int) : Il.cell =
@@ -559,9 +604,6 @@ let trans_visitor
   and calculate_sz_in_current_frame (size:size) : Il.operand =
     calculate_sz (get_ty_params_of_current_frame()) size
 
-  and caller_args_cell (args_rty:Il.referent_ty) : Il.cell =
-    Il.Mem (fp_imm out_mem_disp, args_rty)
-
   and callee_args_cell (tail_area:bool) (args_rty:Il.referent_ty) : Il.cell =
     if tail_area
     then
@@ -666,20 +708,7 @@ let trans_visitor
                     if slot_is_obj_state cx slot_id
                     then
                       begin
-                        let curr_args_rty =
-                          current_fn_args_rty (Some Il.OpaqueTy)
-                        in
-                        let self_args_cell =
-                          caller_args_cell curr_args_rty
-                        in
-                        let self_indirect_args =
-                          get_element_ptr self_args_cell
-                            Abi.calltup_elt_indirect_args
-                        in
-                        let state_arg =
-                          get_element_ptr self_indirect_args
-                            Abi.indirect_args_elt_closure
-                        in
+                        let state_arg = get_closure_for_current_frame () in
                         let (slot_mem, _) =
                           need_mem_cell (deref_imm state_arg (force_sz off))
                         in
@@ -1249,7 +1278,7 @@ let trans_visitor
 
   and ty_params_covering (t:Ast.ty) : Ast.slot =
     let n_ty_params = n_used_type_params t in
-    let params = Array.init n_ty_params (fun _ -> interior_slot Ast.TY_type) in
+    let params = make_tydesc_slots n_ty_params in
       read_alias_slot (Ast.TY_tup params)
 
   and get_drop_glue
@@ -3840,9 +3869,7 @@ let trans_visitor
     in
 
     let n_ty_params = n_item_ty_params cx obj_id in
-    let obj_ty_params_tup =
-      Array.init n_ty_params (fun _ -> interior_slot Ast.TY_type)
-    in
+    let obj_ty_params_tup = make_tydesc_slots n_ty_params in
     let obj_args_tup = Array.map (fun (sloti,_) -> sloti.node) state in
     let state_ty =
       Ast.TY_tup [| interior_slot (Ast.TY_tup obj_ty_params_tup);
