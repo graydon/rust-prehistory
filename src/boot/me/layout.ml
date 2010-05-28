@@ -204,7 +204,7 @@ let layout_visitor
     let offset =
       let word_sz = cx.ctxt_abi.Abi.abi_word_sz in
       let word_n (n:int) = Int64.mul word_sz (Int64.of_int n) in
-        SIZE_fixed (word_n Abi.exterior_rc_slot_field_body)
+        SIZE_fixed (word_n (Abi.exterior_rc_slot_field_body + (n_item_ty_params cx id)))
     in
       log cx "laying out object-state for node #%d at offset %s" (int_of_node id) (string_of_size offset);
       layout_slot_ids (Stack.create()) true false offset state_slot_ids
