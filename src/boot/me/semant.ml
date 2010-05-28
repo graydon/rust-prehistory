@@ -1647,7 +1647,11 @@ let direct_call_args_referent_type
     (callee_node:node_id)
     : Il.referent_ty =
   let ity = Hashtbl.find cx.ctxt_all_item_types callee_node in
-  let n_ty_params = n_item_ty_params cx callee_node in
+  let n_ty_params =
+    if item_is_obj_fn cx callee_node
+    then 0
+    else n_item_ty_params cx callee_node
+  in
     call_args_referent_type cx n_ty_params ity None
 ;;
 
