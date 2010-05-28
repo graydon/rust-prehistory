@@ -4156,7 +4156,11 @@ let trans_visitor
 
       | Ast.MOD_ITEM_pred p -> trans_fn i.id false p.Ast.pred_body
       | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
-      | Ast.MOD_ITEM_obj ob -> trans_obj_ctor i.id ob.Ast.obj_state
+      | Ast.MOD_ITEM_obj ob ->
+          trans_obj_ctor i.id
+            (Array.map (fun (sloti,ident) ->
+                          ({sloti with node = get_slot cx sloti.id},ident))
+               ob.Ast.obj_state)
       | _ -> ()
   in
 
