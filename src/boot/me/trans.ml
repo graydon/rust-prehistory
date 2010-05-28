@@ -3824,6 +3824,8 @@ let trans_visitor
       Stack.push (Stack.create()) epilogue_jumps;
       push_new_emitter_with_vregs (Some fnid);
       iflog (fun _ -> annotate "prologue");
+      iflog (fun _ -> annotate (Printf.sprintf "framesz %s" (string_of_size framesz)));
+      iflog (fun _ -> annotate (Printf.sprintf "callsz %s" (string_of_size callsz)));
       abi.Abi.abi_emit_fn_prologue
         (emitter()) framesz callsz nabi_rust
         (upcall_fixup "upcall_grow_task");

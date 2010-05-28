@@ -280,11 +280,13 @@ let layout_visitor
 
         | Ast.MOD_ITEM_tag (header_slots, _, _) ->
             enter_frame i.id;
+            update_frame_size ();
             layout_header i.id
               (Array.map (fun sid -> sid.id) header_slots)
 
         | Ast.MOD_ITEM_obj obj ->
             enter_frame i.id;
+            update_frame_size ();
             let ids = header_slot_ids obj.Ast.obj_state in
               layout_obj_state i.id ids;
               Array.iter
