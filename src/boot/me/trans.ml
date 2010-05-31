@@ -140,12 +140,13 @@ let trans_visitor
 
   let emitters = Stack.create () in
   let push_new_emitter (vregs_ok:bool) (fnid:node_id option) =
-    Stack.push
-      (Il.new_emitter
+    let e = Il.new_emitter
          abi.Abi.abi_prealloc_quad
          abi.Abi.abi_is_2addr_machine
-         vregs_ok fnid)
-      emitters
+         vregs_ok fnid
+    in
+      Stack.push (Hashtbl.create 0) e.Il.emit_size_cache;
+      Stack.push e emitters;
   in
 
   let push_new_emitter_with_vregs fnid = push_new_emitter true fnid in
@@ -153,6 +154,13 @@ let trans_visitor
 
   let pop_emitter _ = ignore (Stack.pop emitters) in
   let emitter _ = Stack.top emitters in
+  let emitter_size_cache _ = Stack.top (emitter()).Il.emit_size_cache in
+  let push_emitter_size_cache _ =
+    Stack.push (Hashtbl.copy (emitter_size_cache())) (emitter()).Il.emit_size_cache
+  in
+  let pop_emitter_size_cache _ =
+    ignore (Stack.pop (emitter()).Il.emit_size_cache)
+  in
   let emit q = Il.emit (emitter()) q in
   let next_vreg _ = Il.next_vreg (emitter()) in
   let next_vreg_cell t = Il.next_vreg_cell (emitter()) t in
@@ -523,7 +531,7 @@ let trans_visitor
              (Printf.sprintf "calculating size %s"
                 (string_of_size size)));
     let sub_sz = calculate_sz ty_params in
-    match htab_search (emitter()).Il.emit_size_cache size with
+    match htab_search (emitter_size_cache()) size with
         Some op -> op
       | _ ->
           let res =
@@ -601,7 +609,7 @@ let trans_visitor
                      (Printf.sprintf "calculated size %s is %s"
                         (string_of_size size)
                         (Il.string_of_operand abi.Abi.abi_str_of_hardreg res)));
-            htab_put (emitter()).Il.emit_size_cache size res;
+            htab_put (emitter_size_cache()) size res;
             res
 
 
@@ -1655,6 +1663,7 @@ let trans_visitor
   and trans_block (block:Ast.block) : unit =
     trace_str cx.ctxt_sess.Session.sess_trace_block
       "entering block";
+    push_emitter_size_cache ();
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups block.id));
     Array.iter trans_stmt block.node;
     trace_str cx.ctxt_sess.Session.sess_trace_block
@@ -1682,6 +1691,7 @@ let trans_visitor
             end;
       end;
     emit Il.Leave;
+    pop_emitter_size_cache ();
     trace_str cx.ctxt_sess.Session.sess_trace_block
       "exited block";
 
