@@ -816,19 +816,31 @@ let trans_visitor
       : (Il.cell * Ast.slot) =
 
     let rec trans_slot_lval_full (initializing:bool) lv =
-      match lv with
-          Ast.LVAL_ext (base, comp) ->
-            let (base_cell, base_slot) =
-              trans_slot_lval_full initializing base
-            in
-            let base_cell' = deref_slot initializing base_cell base_slot in
-              trans_slot_lval_ext (slot_ty base_slot) base_cell' comp
+      let (cell, slot) =
+        match lv with
+            Ast.LVAL_ext (base, comp) ->
+              let (base_cell, base_slot) =
+                trans_slot_lval_full initializing base
+              in
+              let base_cell' = deref_slot initializing base_cell base_slot in
+                trans_slot_lval_ext (slot_ty base_slot) base_cell' comp
 
-        | Ast.LVAL_base nb ->
-            let slot = lval_to_slot cx nb.id in
-            let referent = lval_to_referent cx nb.id in
-            let cell = cell_of_block_slot referent in
-              (cell, slot)
+          | Ast.LVAL_base nb ->
+              let slot = lval_to_slot cx nb.id in
+              let referent = lval_to_referent cx nb.id in
+              let cell = cell_of_block_slot referent in
+                (cell, slot)
+      in
+        iflog
+          begin
+            fun _ ->
+              annotate
+                (Printf.sprintf "lval %a = %s"
+                   Ast.sprintf_lval lv
+                   (Il.string_of_cell abi.Abi.abi_str_of_hardreg cell))
+          end;
+        (cell, slot)
+
     in
       if lval_is_slot cx lv
       then trans_slot_lval_full initializing lv
