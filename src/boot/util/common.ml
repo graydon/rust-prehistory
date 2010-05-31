@@ -534,7 +534,7 @@ let mul_sz (a:size) (b:size) : size =
     | (a, b) -> SIZE_rt_mul (a, b)
 ;;
 
-let max_sz (a:size) (b:size) : size =
+let rec max_sz (a:size) (b:size) : size =
   let rec no_negs x =
     match x with
         SIZE_fixed _
@@ -549,14 +549,19 @@ let max_sz (a:size) (b:size) : size =
       | SIZE_rt_align (a,b) -> (no_negs a) && (no_negs b)
   in
     match (a, b) with
-        (a, SIZE_rt_max (b, c)) when a = b -> SIZE_rt_max (a, c)
-      | (a, SIZE_rt_max (b, c)) when a = c -> SIZE_rt_max (a, b)
-      | (SIZE_rt_max (b, c), a) when a = b -> SIZE_rt_max (a, c)
-      | (SIZE_rt_max (b, c), a) when a = c -> SIZE_rt_max (a, b)
+        (SIZE_rt_align _, SIZE_fixed 1L) -> a
+      | (SIZE_fixed 1L, SIZE_rt_align _) -> b
+      | (SIZE_param_align _, SIZE_fixed 1L) -> a
+      | (SIZE_fixed 1L, SIZE_param_align _) -> b
+      | (a, SIZE_rt_max (b, c)) when a = b -> max_sz a c
+      | (a, SIZE_rt_max (b, c)) when a = c -> max_sz a b
+      | (SIZE_rt_max (b, c), a) when a = b -> max_sz a c
+      | (SIZE_rt_max (b, c), a) when a = c -> max_sz a b
       | (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_max a b)
       | (SIZE_fixed 0L, b) when no_negs b -> b
       | (a, SIZE_fixed 0L) when no_negs a -> b
-      | (a, SIZE_fixed b) -> SIZE_rt_max (SIZE_fixed b, a)
+      | (a, SIZE_fixed b) -> max_sz (SIZE_fixed b) a
+      | (a, b) when a = b -> a
       | (a, b) -> SIZE_rt_max (a, b)
 ;;
 
@@ -580,10 +585,13 @@ let align_sz (a:size) (b:size) : size =
             if (Int64.rem n inner_alignment) = 0L
             then inner_alignment
             else 1L (* This could be lcd(...) or such. *)
+      | SIZE_rt_max (a, SIZE_fixed 1L) -> alignment_of a
+      | SIZE_rt_max (SIZE_fixed 1L, b) -> alignment_of b
       | _ -> 1L
   in
     match (a, b) with
         (SIZE_fixed a, SIZE_fixed b) -> SIZE_fixed (i64_align a b)
+      | (SIZE_fixed x, _) when i64_lt x 1L -> bug () "alignment less than 1"
       | (SIZE_fixed 1L, b) -> b (* everything is 1-aligned. *)
       | (_, SIZE_fixed 0L) -> b (* 0 is everything-aligned. *)
       | (SIZE_fixed a, b) ->
@@ -591,6 +599,8 @@ let align_sz (a:size) (b:size) : size =
           if (Int64.rem a inner_alignment) = 0L
           then b
           else SIZE_rt_align (SIZE_fixed a, b)
+      | (SIZE_rt_max (a, SIZE_fixed 1L), b) -> SIZE_rt_align (a, b)
+      | (SIZE_rt_max (SIZE_fixed 1L, a), b) -> SIZE_rt_align (a, b)
       | (a, b) -> SIZE_rt_align (a, b)
 ;;
 
