@@ -14,7 +14,11 @@ obj buf[T]((T,T,T) data) {
 
 fn main() {
   let buf[int] b = buf[int]((1,2,3));
+  log "constructed object";
   log b.get(0);
   log b.get(1);
   log b.get(2);
+  check (b.get(0) == 1);
+  check (b.get(1) == 2);
+  check (b.get(2) == 3);
 }

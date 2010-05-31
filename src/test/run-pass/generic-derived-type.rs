@@ -10,6 +10,8 @@ fn f[T](T t) -> (T,T) {
 
 fn main() {
   auto b = f[int](10);
+  log b._0;
+  log b._1;
   check (b._0 == 10);
   check (b._1 == 10);
 }
