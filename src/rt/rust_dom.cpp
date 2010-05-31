@@ -3,6 +3,7 @@
 // Released under MIT license.
 // See file COPYING for details.
 
+#include <stdarg.h>
 #include "rust_internal.h"
 
 template class ptr_vec<rust_task>;

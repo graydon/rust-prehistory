@@ -20,7 +20,6 @@
 #include "rust.h"
 
 #include "rand.h"
-#include "valgrind.h"
 #include "uthash.h"
 
 #if defined(__WIN32__)

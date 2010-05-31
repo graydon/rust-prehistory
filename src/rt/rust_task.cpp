@@ -5,6 +5,9 @@
 
 #include "rust_internal.h"
 
+#include "valgrind.h"
+#include "memcheck.h"
+
 // Stacks
 
 static size_t const min_stk_bytes = 0x300;
@@ -208,7 +211,6 @@ rust_task::grow(size_t n_frame_bytes)
              PRIxPTR " to %d bytes", old_stk, ssz);
 
     stk_seg *nstk = new_stk(dom, ssz);
-    uintptr_t new_bottom = (uintptr_t) &nstk->data[0];
     uintptr_t new_top = (uintptr_t) &nstk->data[ssz];
     size_t n_copy = old_top - old_bottom;
     dom->log(LOG_MEM|LOG_TASK,
@@ -218,9 +220,9 @@ rust_task::grow(size_t n_frame_bytes)
              old_bottom, old_bottom + n_copy,
              new_top - n_copy, new_top);
 
+    VALGRIND_MAKE_MEM_DEFINED((void*)old_bottom, n_copy);
     memcpy((void*)(new_top - n_copy), (void*)old_bottom, n_copy);
 
-    nstk->valgrind_id = VALGRIND_STACK_REGISTER(new_bottom, new_top);
     nstk->limit = new_top;
     this->stk = nstk;
     this->rust_sp = new_top - rust_sp_disp;
@@ -241,7 +243,6 @@ rust_task::grow(size_t n_frame_bytes)
         }
     }
     dom->log(LOG_MEM|LOG_TASK, "processed %d relocations", n_relocs);
-
     del_stk(dom, old_stk);
     dom->logptr("grown stk limit", new_top);
 }
