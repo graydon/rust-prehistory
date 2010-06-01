@@ -338,6 +338,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       generic-drop-glue.rs \
                       generic-fn.rs \
                       generic-obj.rs \
+                      generic-obj-with-derived-type.rs \
                       generic-tag.rs \
                       generic-type.rs \
                       vec-append.rs \
