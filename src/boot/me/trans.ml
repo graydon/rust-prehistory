@@ -647,6 +647,12 @@ let trans_visitor
       calculate_sz_in_current_frame sz
   in
 
+  let slot_sz_with_ty_params (ty_params:Il.cell) (slot:Ast.slot) : Il.operand =
+    let rty = slot_referent_type abi slot in
+    let sz = Il.referent_ty_size word_bits rty in
+      calculate_sz ty_params sz
+  in
+
   let get_element_ptr_dyn
       (ty_params:Il.cell)
       (mem_cell:Il.cell)
@@ -3346,14 +3352,14 @@ let trans_visitor
 
 
   and iter_seq_slots
-      ((*ty_params*)_:Il.cell)
+      (ty_params:Il.cell)
       (dst_cell:Il.cell)
       (src_cell:Il.cell)
       (unit_slot:Ast.slot)
       (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    let unit_sz = slot_sz_in_current_frame unit_slot in
+    let unit_sz = slot_sz_with_ty_params ty_params unit_slot in
     (* Unlike many of the iter_ty_slots helpers; this one allocates a vreg and
      * so has to be aware of when it's iterating over 2 the slots of cells or just 1.
      *)
@@ -3361,7 +3367,7 @@ let trans_visitor
       then
         begin
           let data =
-            get_element_ptr_dyn_in_current_frame src_cell Abi.vec_elt_data
+            get_element_ptr_dyn ty_params src_cell Abi.vec_elt_data
           in
           let len = get_element_ptr src_cell Abi.vec_elt_fill in
           let ptr = next_vreg_cell Il.voidptr_t in
