@@ -26,6 +26,7 @@ let iflog cx thunk =
   else ()
 ;;
 
+
 let block_scope_forming_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
@@ -131,6 +132,7 @@ let stmt_collecting_visitor
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
+
 let all_item_collecting_visitor
     (cx:ctxt)
     (path:Ast.name_component Stack.t)
@@ -188,41 +190,20 @@ let all_item_collecting_visitor
 ;;
 
 
-let lookup_type_by_name
+let lookup_type_node_by_name
     (cx:ctxt)
     (scopes:scope list)
     (name:Ast.name)
-    : ((scope list) * node_id * Ast.ty) =
-  iflog cx (fun _ -> log cx "lookup_type_by_name %a" Ast.sprintf_name name);
+    : node_id =
+  iflog cx (fun _ -> log cx "lookup_simple_type_by_name %a" Ast.sprintf_name name);
   match lookup_by_name cx scopes name with
       None -> err None "unknown name: %a" Ast.sprintf_name name
-    | Some (scopes, id) ->
-        let ty, params =
-          match htab_search cx.ctxt_all_defns id with
-              Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type t;
-                                Ast.decl_params = params }) ->
-                (t, Array.map (fun p -> p.node) params)
-            | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_obj ob;
-                                Ast.decl_params = params }) ->
-                (Ast.TY_obj (ty_obj_of_obj ob),
-                 Array.map (fun p -> p.node) params)
-            | Some (DEFN_ty_param (_, x)) ->
-                (Ast.TY_param x, [||])
-            | _ -> err None "Found non-type binding for %a" Ast.sprintf_name name
-        in
-        let args =
-          match name with
-              Ast.NAME_ext (_, Ast.COMP_app (_, args)) -> args
-            | Ast.NAME_base (Ast.BASE_app (_, args)) -> args
-            | _ -> [| |]
-        in
-          iflog cx (fun _ -> log cx
-                      "lookup_type_by_name %a found ty %a, applying %d type args to %d params"
-                      Ast.sprintf_name name Ast.sprintf_ty ty
-                      (Array.length args) (Array.length params));
-          let ty = rebuild_ty_under_params ty params args true in
-            iflog cx (fun _ -> log cx "applied type is %a" Ast.sprintf_ty ty);
-            (scopes, id, ty)
+    | Some (_, id) ->
+        match htab_search cx.ctxt_all_defns id with
+            Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type _ })
+          | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_obj _ })
+          | Some (DEFN_ty_param _) -> id
+          | _ -> err None "Found non-type binding for %a" Ast.sprintf_name name
 ;;
 
 
@@ -233,8 +214,7 @@ let get_ty_references
     : node_id list =
   let base = ty_fold_list_concat () in
   let ty_fold_named n =
-    let (_, node, _) = lookup_type_by_name cx scopes n in
-      [ node ]
+    [ lookup_type_node_by_name cx scopes n ]
   in
   let fold = { base with ty_fold_named = ty_fold_named } in
     fold_ty fold t
@@ -271,11 +251,24 @@ let type_reference_and_tag_extracting_visitor
 ;;
 
 
-
 type recur_info =
     { recur_all_nodes: node_id list;
       recur_curr_iso: (node_id array) option; }
 ;;
+
+let empty_recur_info =
+  { recur_all_nodes = [];
+    recur_curr_iso = None }
+;;
+
+let push_node r n =
+  { r with recur_all_nodes = n :: r.recur_all_nodes }
+;;
+
+let set_iso r i =
+  { r with recur_curr_iso = Some i }
+;;
+
 
 let index_in_curr_iso (recur:recur_info) (node:node_id) : int option =
   match recur.recur_curr_iso with
@@ -290,19 +283,6 @@ let index_in_curr_iso (recur:recur_info) (node:node_id) : int option =
             else search (i+1)
         in
           search 0
-;;
-
-let empty_recur_info =
-  { recur_all_nodes = [];
-    recur_curr_iso = None }
-;;
-
-let push_node r n =
-  { r with recur_all_nodes = n :: r.recur_all_nodes }
-;;
-
-let set_iso r i =
-  { r with recur_curr_iso = Some i }
 ;;
 
 
@@ -345,6 +325,62 @@ let rec ty_iso_of
       Ast.TY_iso { Ast.iso_index = (search 0);
                    Ast.iso_group = group }
 
+
+and lookup_type_by_name
+    (cx:ctxt)
+    (scopes:scope list)
+    (recursive_tag_groups:(node_id,(node_id,unit) Hashtbl.t) Hashtbl.t)
+    (all_tags:(node_id,(Ast.ty_tag * (scope list))) Hashtbl.t)
+    (recur:recur_info)
+    (name:Ast.name)
+    : ((scope list) * node_id * Ast.ty) =
+  iflog cx (fun _ -> log cx "lookup_type_by_name %a" Ast.sprintf_name name);
+  match lookup_by_name cx scopes name with
+      None -> err None "unknown name: %a" Ast.sprintf_name name
+    | Some (scopes', id) ->
+        let ty, params =
+          match htab_search cx.ctxt_all_defns id with
+              Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type t;
+                                Ast.decl_params = params }) ->
+                (t, Array.map (fun p -> p.node) params)
+            | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_obj ob;
+                                Ast.decl_params = params }) ->
+                (Ast.TY_obj (ty_obj_of_obj ob),
+                 Array.map (fun p -> p.node) params)
+            | Some (DEFN_ty_param (_, x)) ->
+                (Ast.TY_param x, [||])
+            | _ -> err None "Found non-type binding for %a" Ast.sprintf_name name
+        in
+        let args =
+          match name with
+              Ast.NAME_ext (_, Ast.COMP_app (_, args)) -> args
+            | Ast.NAME_base (Ast.BASE_app (_, args)) -> args
+            | _ -> [| |]
+        in
+        let args =
+          iflog cx (fun _ -> log cx
+                      "lookup_type_by_name %a resolving %d type args"
+                      Ast.sprintf_name name
+                      (Array.length args));
+          Array.mapi
+            begin
+              fun i t ->
+                let t = resolve_type cx scopes recursive_tag_groups all_tags recur t in
+                  iflog cx (fun _ -> log cx
+                              "lookup_type_by_name resolved arg %d to %a" i
+                              Ast.sprintf_ty t);
+                  t
+            end
+            args
+        in
+          iflog cx (fun _ -> log cx
+                      "lookup_type_by_name %a found ty %a, applying %d type args to %d params"
+                      Ast.sprintf_name name Ast.sprintf_ty ty
+                      (Array.length args) (Array.length params));
+          let ty = rebuild_ty_under_params ty params args true in
+            iflog cx (fun _ -> log cx "applied type is %a" Ast.sprintf_ty ty);
+            (scopes', id, ty)
+
 and resolve_type
     (cx:ctxt)
     (scopes:(scope list))
@@ -355,7 +391,7 @@ and resolve_type
     : Ast.ty =
   let base = ty_fold_rebuild (fun t -> t) in
   let ty_fold_named name =
-    let (scopes, node, t) = lookup_type_by_name cx scopes name in
+    let (scopes, node, t) = lookup_type_by_name cx scopes recursive_tag_groups all_tags recur name in
       iflog cx (fun _ -> log cx "resolved type name '%a' to item %d"
                   Ast.sprintf_name name (int_of_node node));
       match index_in_curr_iso recur node with
