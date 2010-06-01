@@ -68,6 +68,16 @@ last_os_error(rust_task *task) {
     return st;
 }
 
+extern "C" CDECL size_t
+size_of(rust_task *task, type_desc *t) {
+  return t->size;
+}
+
+extern "C" CDECL size_t
+align_of(rust_task *task, type_desc *t) {
+  return t->align;
+}
+
 extern "C" CDECL rust_vec*
 vec_alloc(rust_task *task, type_desc *t, size_t n_elts)
 {

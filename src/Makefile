@@ -386,6 +386,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       yield.rs \
                       yield2.rs \
                       native-opaque-type.rs \
+                      type-sizes.rs \
                      ) \
                     $(addprefix test/run-fail/, \
                       explicit-fail.rs \
