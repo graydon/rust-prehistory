@@ -307,6 +307,7 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/rec-auto.rs \
                     test/run-pass/foreach-simple.rs \
                     test/run-pass/vec-slice.rs \
+                    test/run-pass/vec-drop.rs \
                     test/run-pass/generic-tag.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
@@ -343,6 +344,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       generic-type.rs \
                       vec-append.rs \
                       vec-concat.rs \
+                      vec-drop.rs \
                       inner-module.rs \
                       large-records.rs \
                       lazychan.rs \
