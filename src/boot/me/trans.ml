@@ -3377,7 +3377,7 @@ let trans_visitor
             add_to lim (Il.Cell len);
             let back_jmp_target = mark () in
             let fwd_jmps = trans_compare Il.JAE (Il.Cell ptr) (Il.Cell lim) in
-            let unit_cell = ptr_cast ptr (slot_referent_type abi unit_slot) in
+            let unit_cell = deref (ptr_cast ptr (slot_referent_type abi unit_slot)) in
               f unit_cell unit_cell unit_slot curr_iso;
               add_to ptr unit_sz;
               emit (Il.jmp Il.JMP (Il.CodeLabel back_jmp_target));
@@ -3409,7 +3409,7 @@ let trans_visitor
             trans_copy_slot
               ty_params true
               dst_cell dst_slot.node
-              (deref src_cell) unit_slot curr_iso;
+              src_cell unit_slot curr_iso;
             trans_block fo.Ast.for_body;
         end
         None
