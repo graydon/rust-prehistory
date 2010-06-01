@@ -67,22 +67,6 @@ let exterior_rc_allocation_size (abi:Abi.abi) (slot:Ast.slot) : int64 =
      (word_n abi Abi.exterior_rc_header_size))
 ;;
 
-let type_is_structured (t:Ast.ty) : bool =
-  let fold = ty_fold_bool_or false in
-  let fold = { fold with
-                 ty_fold_tup = (fun _ -> true);
-                 ty_fold_vec = (fun _ -> true);
-                 ty_fold_rec = (fun _ -> true);
-                 ty_fold_tag = (fun _ -> true);
-                 ty_fold_iso = (fun _ -> true);
-                 ty_fold_idx = (fun _ -> true);
-                 ty_fold_fn = (fun _ -> true);
-                 ty_fold_pred = (fun _ -> true);
-                 ty_fold_obj = (fun _ -> true) }
-  in
-    fold_ty fold t
-;;
-
 let slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
   let ty = slot_ty slot in
     if type_is_mutable ty

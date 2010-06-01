@@ -814,6 +814,22 @@ let ty_fold_list_concat _ : ('a list) simple_ty_fold =
   associative_binary_op_ty_fold [] (fun a b -> a @ b)
 ;;
 
+let type_is_structured (t:Ast.ty) : bool =
+  let fold = ty_fold_bool_or false in
+  let fold = { fold with
+                 ty_fold_tup = (fun _ -> true);
+                 ty_fold_vec = (fun _ -> true);
+                 ty_fold_rec = (fun _ -> true);
+                 ty_fold_tag = (fun _ -> true);
+                 ty_fold_iso = (fun _ -> true);
+                 ty_fold_idx = (fun _ -> true);
+                 ty_fold_fn = (fun _ -> true);
+                 ty_fold_pred = (fun _ -> true);
+                 ty_fold_obj = (fun _ -> true) }
+  in
+    fold_ty fold t
+;;
+
 (* Mutability analysis. *)
 
 let mode_is_mutable (m:Ast.mode) : bool =

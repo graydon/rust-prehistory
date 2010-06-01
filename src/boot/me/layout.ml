@@ -150,6 +150,7 @@ let layout_visitor
       let (elt_size, elt_align) = rty_layout rt in
         if vregs_ok
           && (is_subword_size elt_size)
+          && (not (type_is_structured (slot_ty slot)))
           && (not (force_slot_to_mem slot))
           && (not (Hashtbl.mem cx.ctxt_slot_aliased id))
         then

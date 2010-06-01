@@ -438,7 +438,7 @@ let trans_crate
                        free_and_null_out_slot)
                     (!llbuilder)
 
-            | MEM_interior when type_is_structured ty ->
+            | MEM_interior when Semant.type_is_structured ty ->
                 (* FIXME: to handle recursive types, need to call drop
                    glue here, not inline. *)
                 drop_ty llbuilder lltask ty slot_ptr curr_iso
