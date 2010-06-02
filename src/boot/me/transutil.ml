@@ -69,26 +69,22 @@ let exterior_rc_allocation_size (abi:Abi.abi) (slot:Ast.slot) : int64 =
 
 let slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
   let ty = slot_ty slot in
-    if type_is_mutable ty
-    then
-      match slot.Ast.slot_mode with
-          Ast.MODE_exterior _ -> MEM_gc
-        | _ -> MEM_interior
-    else
-      match ty with
-          Ast.TY_port _
-        | Ast.TY_chan _
-        | Ast.TY_task
-        | Ast.TY_vec _
-        | Ast.TY_str -> MEM_rc_opaque
-        | _ ->
-            match slot.Ast.slot_mode with
-                Ast.MODE_exterior _ when type_is_structured (slot_ty slot) ->
-                  MEM_rc_struct
-              | Ast.MODE_exterior _ ->
-                  MEM_rc_opaque
-              | _ ->
-                  MEM_interior
+    match ty with
+        Ast.TY_port _
+      | Ast.TY_chan _
+      | Ast.TY_task
+      | Ast.TY_vec _
+      | Ast.TY_str -> MEM_rc_opaque
+      | _ ->
+          match slot.Ast.slot_mode with
+              Ast.MODE_exterior _ when type_is_structured ty ->
+                if type_is_mutable ty
+                then MEM_gc
+                else MEM_rc_struct
+            | Ast.MODE_exterior _ ->
+                MEM_rc_opaque
+            | _ ->
+                MEM_interior
 ;;
 
 

@@ -344,6 +344,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       vec-append.rs \
                       vec-concat.rs \
                       vec-drop.rs \
+                      mutable-vec-drop.rs \
                       inner-module.rs \
                       large-records.rs \
                       lazychan.rs \
