@@ -2081,34 +2081,7 @@ let trans_visitor
 
       | Ast.TY_fn _
       | Ast.TY_pred _
-      | Ast.TY_obj _ ->
-
-          (* Fake-int to provoke copying of the static part. *)
-          let src_fn_field_cell = get_element_ptr src_cell 0 in
-          let dst_fn_field_cell = get_element_ptr dst_cell 0 in
-            f dst_fn_field_cell
-              src_fn_field_cell
-              (interior_slot Ast.TY_int) curr_iso;
-
-            let src_binding_field_cell = get_element_ptr src_cell 1 in
-            let dst_binding_field_cell = get_element_ptr dst_cell 1 in
-              emit (Il.cmp (Il.Cell src_binding_field_cell) zero);
-              let null_jmp = mark() in
-                emit (Il.jmp Il.JE Il.CodeNone);
-                (* TY_fn and TY_mod are stored as pairs
-                 * [item_ptr, closure_ptr].
-                 *)
-                (* Call thunk if we have a src binding. *)
-                (* FIXME (bug 543738): this is completely wrong,
-                 * need a second thunk that generates code to make
-                 * use of a runtime type descriptor extracted from
-                 * a binding tuple. For now this only works by
-                 * accident. 
-                 *)
-                (f dst_binding_field_cell
-                   src_binding_field_cell
-                   (exterior_slot Ast.TY_int) curr_iso);
-                patch null_jmp
+      | Ast.TY_obj _ -> bug () "Attempting to iterate over fn/pred/obj slots"
 
       | Ast.TY_vec _
       | Ast.TY_str ->
@@ -2151,6 +2124,25 @@ let trans_visitor
                    i Abi.tydesc_field_drop_glue ty_params cell
             end
 
+      | Ast.TY_pred _
+      | Ast.TY_fn _
+      | Ast.TY_obj _ ->
+          begin
+            let binding = get_element_ptr cell Abi.binding_field_binding in
+            let null_jmp = null_check binding in
+              (* Drop non-null bindings. *)
+              (* FIXME (bug 543738): this is completely wrong,
+               * need a second thunk that generates code to make
+               * use of a runtime type descriptor extracted from
+               * a binding tuple. For now this only works by
+               * accident. 
+               *)
+              drop_slot ty_params binding
+                (exterior_slot Ast.TY_int) curr_iso;
+              patch null_jmp
+          end
+
+
       | _ ->
           iter_ty_slots ty_params ty cell (drop_slot ty_params) curr_iso
 
@@ -2160,7 +2152,12 @@ let trans_visitor
       (cell:Il.cell)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    iter_ty_slots ty_params ty cell (mark_slot ty_params) curr_iso
+    match ty with
+      | Ast.TY_pred _
+      | Ast.TY_fn _
+      | Ast.TY_obj _ -> ()
+      | _ ->
+          iter_ty_slots ty_params ty cell (mark_slot ty_params) curr_iso
 
   and clone_ty
       (ty_params:Il.cell)
@@ -2180,6 +2177,9 @@ let trans_visitor
           -> bug () "cloning mutable type"
       | _ when i64_le (ty_sz abi ty) word_sz
           -> mov dst (Il.Cell src)
+      | Ast.TY_pred _
+      | Ast.TY_fn _
+      | Ast.TY_obj _ -> ()
       | _ ->
           iter_ty_slots_full ty_params ty dst src
             (clone_slot ty_params clone_task) curr_iso
@@ -2222,6 +2222,28 @@ let trans_visitor
                     td Abi.tydesc_field_copy_glue
                     (Some dst) [| ty_params_ptr; src; |]
             end
+
+      | Ast.TY_pred _
+      | Ast.TY_fn _
+      | Ast.TY_obj _ ->
+          begin
+            let src_item = get_element_ptr src Abi.binding_field_item in
+            let dst_item = get_element_ptr dst Abi.binding_field_item in
+            let src_binding = get_element_ptr src Abi.binding_field_binding in
+            let dst_binding = get_element_ptr dst Abi.binding_field_binding in
+              mov dst_item (Il.Cell src_item);
+              let null_jmp = null_check src_binding in
+                (* Copy if we have a src binding. *)
+                (* FIXME (bug 543738): this is completely wrong, call
+                 * through to the binding's self-copy fptr. For now
+                 * this only works by accident.
+                 *)
+                trans_copy_slot ty_params true
+                  dst_binding (exterior_slot Ast.TY_int)
+                  src_binding (exterior_slot Ast.TY_int)
+                  curr_iso;
+                patch null_jmp
+          end
 
       | _ ->
           iter_ty_slots_full ty_params ty dst src
@@ -2358,18 +2380,18 @@ let trans_visitor
       : unit =
       drop_slot (get_ty_params_of_current_frame()) cell slot curr_iso
 
+  and null_check (cell:Il.cell) : quad_idx =
+    emit (Il.cmp (Il.Cell cell) zero);
+    let j = mark() in
+      emit (Il.jmp Il.JE Il.CodeNone);
+      j
+
   and drop_slot
       (ty_params:Il.cell)
       (cell:Il.cell)
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    let null_check _ =
-      emit (Il.cmp (Il.Cell cell) zero);
-      let j = mark() in
-        emit (Il.jmp Il.JE Il.CodeNone);
-        j
-    in
     let drop_refcount_and_cmp rc =
       (iflog (fun _ -> annotate ("drop refcount and maybe free slot " ^
                                    (Ast.fmt_to_str Ast.fmt_slot slot))));
@@ -2385,7 +2407,7 @@ let trans_visitor
           MEM_rc_opaque ->
             (* Refcounted opaque objects we handle without glue functions. *)
             let _ = check_exterior_rty cell in
-            let null_jmp = null_check () in
+            let null_jmp = null_check cell in
             let j = drop_refcount_and_cmp (exterior_rc_cell cell) in
               free_ty ty_params ty cell curr_iso;
               (* Null the slot out to prevent double-free if the frame
@@ -2410,7 +2432,7 @@ let trans_visitor
              * further exterior members; if it doesn't we can elide the
              * call to the glue function.  *)
             let _ = check_exterior_rty cell in
-            let null_jmp = null_check () in
+            let null_jmp = null_check cell in
             let rc = exterior_rc_cell cell in
             let j = drop_refcount_and_cmp rc in
             let ty = maybe_iso curr_iso ty in
