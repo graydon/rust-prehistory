@@ -2019,6 +2019,8 @@ let trans_visitor
        * vreg and so has to be aware of when it's iterating over 2
        * sequences of cells or just 1.
        *)
+      check_exterior_rty src_cell;
+      check_exterior_rty dst_cell;
       if dst_cell = src_cell
       then
         begin
@@ -2229,13 +2231,20 @@ let trans_visitor
             curr_iso
 
   and free_ty
+      (ty_params:Il.cell)
       (ty:Ast.ty)
       (cell:Il.cell)
+      (curr_iso:Ast.ty_iso option)
       : unit =
     match ty with
         Ast.TY_port _ -> trans_del_port cell
       | Ast.TY_chan _ -> trans_del_chan cell
       | Ast.TY_task -> trans_kill_task cell
+      | Ast.TY_vec s ->
+          iter_seq_slots ty_params cell cell s
+            (fun _ src slot iso -> drop_slot ty_params src slot iso) curr_iso;
+          trans_free cell
+
       | _ -> trans_free cell
 
   and maybe_iso
@@ -2378,7 +2387,7 @@ let trans_visitor
             let _ = check_exterior_rty cell in
             let null_jmp = null_check () in
             let j = drop_refcount_and_cmp (exterior_rc_cell cell) in
-              free_ty ty cell;
+              free_ty ty_params ty cell curr_iso;
               (* Null the slot out to prevent double-free if the frame
                * unwinds.
                *)
