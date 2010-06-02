@@ -675,7 +675,7 @@ let trans_visitor
                       add_to vc sz;
                       Il.Mem (based v, elt_rty)
           end
-      | _ -> bug () "get_element_ptr_dyn_in_current_frame %d on cell %s" i
+      | _ -> bug () "get_element_ptr_dyn %d on cell %s" i
           (Il.string_of_cell abi.Abi.abi_str_of_hardreg mem_cell)
   in
 
@@ -1997,6 +1997,55 @@ let trans_visitor
   and get_iso_tag tiso =
     tiso.Ast.iso_group.(tiso.Ast.iso_index)
 
+
+  and seq_unit_slot (seq:Ast.ty) : Ast.slot =
+    match seq with
+        Ast.TY_vec s -> s
+      | Ast.TY_str -> (interior_slot (Ast.TY_mach TY_u8))
+      | _ -> bug () "seq_unit_slot of non-vec, non-str type"
+
+
+  and iter_seq_slots
+      (ty_params:Il.cell)
+      (dst_cell:Il.cell)
+      (src_cell:Il.cell)
+      (unit_slot:Ast.slot)
+      (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (curr_iso:Ast.ty_iso option)
+      : unit =
+    let unit_sz = slot_sz_with_ty_params ty_params unit_slot in
+      (* 
+       * Unlike most of the iter_ty_slots helpers; this one allocates a
+       * vreg and so has to be aware of when it's iterating over 2
+       * sequences of cells or just 1.
+       *)
+      if dst_cell = src_cell
+      then
+        begin
+          let src_cell = deref src_cell in
+          let data =
+            get_element_ptr_dyn ty_params src_cell Abi.vec_elt_data
+          in
+          let len = get_element_ptr src_cell Abi.vec_elt_fill in
+          let ptr = next_vreg_cell Il.voidptr_t in
+          let lim = next_vreg_cell Il.voidptr_t in
+            lea lim (fst (need_mem_cell data));
+            mov ptr (Il.Cell lim);
+            add_to lim (Il.Cell len);
+            let back_jmp_target = mark () in
+            let fwd_jmps = trans_compare Il.JAE (Il.Cell ptr) (Il.Cell lim) in
+            let unit_cell = deref (ptr_cast ptr (slot_referent_type abi unit_slot)) in
+              f unit_cell unit_cell unit_slot curr_iso;
+              add_to ptr unit_sz;
+              emit (Il.jmp Il.JMP (Il.CodeLabel back_jmp_target));
+              List.iter patch fwd_jmps;
+        end
+      else
+        begin
+          bug () "Unsupported form of seq iter: src != dst."
+        end
+
+
   and iter_ty_slots_full
       (ty_params:Il.cell)
       (ty:Ast.ty)
@@ -2058,6 +2107,11 @@ let trans_visitor
                    src_binding_field_cell
                    (exterior_slot Ast.TY_int) curr_iso);
                 patch null_jmp
+
+      | Ast.TY_vec _
+      | Ast.TY_str ->
+          let unit_slot = seq_unit_slot ty in
+            iter_seq_slots ty_params dst_cell src_cell unit_slot f curr_iso
 
       | _ -> ()
 
@@ -3351,57 +3405,13 @@ let trans_visitor
         CLONE_none dst_cell dst_slot at
 
 
-  and iter_seq_slots
-      (ty_params:Il.cell)
-      (dst_cell:Il.cell)
-      (src_cell:Il.cell)
-      (unit_slot:Ast.slot)
-      (f:Il.cell -> Il.cell -> Ast.slot -> (Ast.ty_iso option) -> unit)
-      (curr_iso:Ast.ty_iso option)
-      : unit =
-    let unit_sz = slot_sz_with_ty_params ty_params unit_slot in
-    (* Unlike many of the iter_ty_slots helpers; this one allocates a vreg and
-     * so has to be aware of when it's iterating over 2 the slots of cells or just 1.
-     *)
-      if dst_cell = src_cell
-      then
-        begin
-          let data =
-            get_element_ptr_dyn ty_params src_cell Abi.vec_elt_data
-          in
-          let len = get_element_ptr src_cell Abi.vec_elt_fill in
-          let ptr = next_vreg_cell Il.voidptr_t in
-          let lim = next_vreg_cell Il.voidptr_t in
-            lea lim (fst (need_mem_cell data));
-            mov ptr (Il.Cell lim);
-            add_to lim (Il.Cell len);
-            let back_jmp_target = mark () in
-            let fwd_jmps = trans_compare Il.JAE (Il.Cell ptr) (Il.Cell lim) in
-            let unit_cell = deref (ptr_cast ptr (slot_referent_type abi unit_slot)) in
-              f unit_cell unit_cell unit_slot curr_iso;
-              add_to ptr unit_sz;
-              emit (Il.jmp Il.JMP (Il.CodeLabel back_jmp_target));
-              List.iter patch fwd_jmps;
-        end
-      else
-        begin
-          bug () "Unsupported form of seq iter: src != dst."
-        end
-
-
   and trans_for_loop (fo:Ast.stmt_for) : unit =
     let ty_params = get_ty_params_of_current_frame () in
     let (dst_slot, _) = fo.Ast.for_slot in
     let dst_cell = cell_of_block_slot dst_slot.id in
     let (head_stmts, seq) = fo.Ast.for_seq in
     let (seq_cell, seq_slot) = trans_lval_full false seq in
-    let seq_cell = deref seq_cell in
-    let unit_slot =
-      match slot_ty seq_slot with
-          Ast.TY_vec s -> s
-        | Ast.TY_str -> (interior_slot (Ast.TY_mach TY_u8))
-        | _ -> bug () "for-seq of non-vec, non-str type"
-    in
+    let unit_slot = seq_unit_slot (slot_ty seq_slot) in
       Array.iter trans_stmt head_stmts;
       iter_seq_slots ty_params seq_cell seq_cell unit_slot
         begin

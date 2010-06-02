@@ -76,11 +76,10 @@ let slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
         | _ -> MEM_interior
     else
       match ty with
-          Ast.TY_port _ -> MEM_rc_opaque
-        | Ast.TY_chan _ -> MEM_rc_opaque
-        | Ast.TY_task -> MEM_rc_opaque
-            (* Vecs and strs are pseudo-exterior. *)
-        | Ast.TY_vec _ -> MEM_rc_struct
+          Ast.TY_port _
+        | Ast.TY_chan _
+        | Ast.TY_task
+        | Ast.TY_vec _
         | Ast.TY_str -> MEM_rc_opaque
         | _ ->
             match slot.Ast.slot_mode with
