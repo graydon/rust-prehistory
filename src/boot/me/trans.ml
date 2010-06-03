@@ -3982,12 +3982,9 @@ let trans_visitor
         all_args_cell Abi.calltup_elt_ty_params
     in
 
-    let n_ty_params = n_item_ty_params cx obj_id in
-    let obj_ty_params_tup = make_tydesc_slots n_ty_params in
     let obj_args_tup = Array.map (fun (sloti,_) -> sloti.node) state in
     let state_ty =
       Ast.TY_tup [| interior_slot Ast.TY_type;
-                    interior_slot (Ast.TY_tup obj_ty_params_tup);
                     interior_slot (Ast.TY_tup obj_args_tup); |]
     in
     let state_rty = slot_referent_type abi (interior_slot state_ty) in
@@ -4031,16 +4028,11 @@ let trans_visitor
         let refcnt = get_element_ptr_dyn_in_current_frame state 0 in
         let body = get_element_ptr_dyn_in_current_frame state 1 in
         let obj_tydesc = get_element_ptr_dyn_in_current_frame body 0 in
-        let obj_ty_params = get_element_ptr_dyn_in_current_frame body 1 in
-        let obj_args = get_element_ptr_dyn_in_current_frame body 2 in
+        let obj_args = get_element_ptr_dyn_in_current_frame body 1 in
           iflog (fun _ -> annotate "write refcnt=1 to obj state");
           mov refcnt one;
           iflog (fun _ -> annotate "get args-tup tydesc");
           mov obj_tydesc (Il.Cell (get_tydesc (Ast.TY_tup obj_args_tup)));
-          iflog (fun _ -> annotate "copy ctor ty params to obj ty params");
-          trans_copy_tup
-            frame_ty_params true
-            obj_ty_params frame_ty_params obj_ty_params_tup;
           iflog (fun _ -> annotate "copy ctor args to obj args");
           trans_copy_tup
             frame_ty_params true
