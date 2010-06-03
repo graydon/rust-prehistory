@@ -480,7 +480,8 @@ let trans_visitor
           let state_arg = get_closure_for_current_frame () in
           let (ty_params_mem, _) =
             need_mem_cell
-              (deref_imm state_arg (word_n Abi.exterior_rc_slot_field_body))
+              (deref_imm state_arg (word_n (Abi.exterior_rc_slot_field_body
+                                            + 1 (* the state tydesc. *))))
           in
           let ty_params_ty = Ast.TY_tup (make_tydesc_slots n_ty_params) in
           let ty_params_rty = referent_type abi ty_params_ty in
@@ -932,7 +933,7 @@ let trans_visitor
                (trans_crate_rel_static_string_operand s)
                (referent_type abi Ast.TY_str))
 
-  and trans_tydesc (t:Ast.ty) (sz:int64) (align:int64) : Il.operand =
+  and get_static_tydesc (t:Ast.ty) (sz:int64) (align:int64) : Il.operand =
     trans_crate_rel_data_operand
       (DATA_tydesc t)
       begin
@@ -1922,7 +1923,7 @@ let trans_visitor
   and get_dynamic_tydesc (t:Ast.ty) : Il.cell =
     let td = next_vreg_cell Il.voidptr_t in
     let root_desc =
-      Il.Cell (crate_rel_to_ptr (trans_tydesc t 0L 0L) (tydesc_rty abi))
+      Il.Cell (crate_rel_to_ptr (get_static_tydesc t 0L 0L) (tydesc_rty abi))
     in
     let (t, param_descs) = linearize_ty_params t in
     let descs = Array.append [| root_desc |] param_descs in
@@ -1945,6 +1946,19 @@ let trans_visitor
            size; align; imm (Int64.of_int n);
            Il.Cell descs_ptr |];
       td
+
+  and get_tydesc (ty:Ast.ty) : Il.cell =
+      log cx "getting tydesc for %a" Ast.sprintf_ty ty;
+    match ty with
+        Ast.TY_param (idx, _) ->
+          (get_ty_param_in_current_frame idx)
+      | t when has_parametric_types t ->
+          (get_dynamic_tydesc t)
+      | _ ->
+          (crate_rel_to_ptr (get_static_tydesc ty
+                               (ty_sz abi ty)
+                               (ty_align abi ty))
+             (tydesc_rty abi))
 
   and exterior_ctrl_cell (cell:Il.cell) (off:int) : Il.cell =
     let (rc_mem, _) = need_mem_cell (deref_imm cell (word_n off)) in
@@ -3047,19 +3061,6 @@ let trans_visitor
     let n_args = Array.length call.call_args in
     let n_iterators = Array.length call.call_iterator_args in
     let n_indirects = Array.length call.call_indirect_args in
-    let get_tydesc ty_param =
-      log cx "getting tydesc for %a" Ast.sprintf_ty ty_param;
-      match ty_param with
-          Ast.TY_param (idx, _) ->
-            (get_ty_param_in_current_frame idx)
-        | t when has_parametric_types t ->
-            (get_dynamic_tydesc t)
-        | _ ->
-            (crate_rel_to_ptr (trans_tydesc ty_param
-                                 (ty_sz abi ty_param)
-                                 (ty_align abi ty_param))
-               (tydesc_rty abi))
-    in
 
       Array.iteri
         begin
@@ -3985,7 +3986,8 @@ let trans_visitor
     let obj_ty_params_tup = make_tydesc_slots n_ty_params in
     let obj_args_tup = Array.map (fun (sloti,_) -> sloti.node) state in
     let state_ty =
-      Ast.TY_tup [| interior_slot (Ast.TY_tup obj_ty_params_tup);
+      Ast.TY_tup [| interior_slot Ast.TY_type;
+                    interior_slot (Ast.TY_tup obj_ty_params_tup);
                     interior_slot (Ast.TY_tup obj_args_tup); |]
     in
     let state_rty = slot_referent_type abi (interior_slot state_ty) in
@@ -4028,10 +4030,13 @@ let trans_visitor
         let state = deref state_ptr in
         let refcnt = get_element_ptr_dyn_in_current_frame state 0 in
         let body = get_element_ptr_dyn_in_current_frame state 1 in
-        let obj_ty_params = get_element_ptr_dyn_in_current_frame body 0 in
-        let obj_args = get_element_ptr_dyn_in_current_frame body 1 in
+        let obj_tydesc = get_element_ptr_dyn_in_current_frame body 0 in
+        let obj_ty_params = get_element_ptr_dyn_in_current_frame body 1 in
+        let obj_args = get_element_ptr_dyn_in_current_frame body 2 in
           iflog (fun _ -> annotate "write refcnt=1 to obj state");
           mov refcnt one;
+          iflog (fun _ -> annotate "get args-tup tydesc");
+          mov obj_tydesc (Il.Cell (get_tydesc (Ast.TY_tup obj_args_tup)));
           iflog (fun _ -> annotate "copy ctor ty params to obj ty params");
           trans_copy_tup
             frame_ty_params true

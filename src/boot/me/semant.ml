@@ -1529,7 +1529,9 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
             Il.StructTy [| codeptr; fn_closure_ptr |]
 
       | Ast.TY_obj _ ->
-          let obj_closure_ptr = sp (Il.StructTy [| word; Il.OpaqueTy |]) in
+          let obj_closure_ptr = sp (Il.StructTy [| word;
+                                                   sp (tydesc_rty abi);
+                                                   Il.OpaqueTy |]) in
             Il.StructTy [| ptr; obj_closure_ptr |]
 
       | Ast.TY_tag ttag -> tag ttag
