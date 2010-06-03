@@ -477,12 +477,10 @@ let trans_visitor
       then
         begin
           (* FIXME: it'd be nice to do all this with GEP. *)
-          let state_arg = get_closure_for_current_frame () in
-          let (ty_params_mem, _) =
-            need_mem_cell
-              (deref_imm state_arg (word_n (Abi.exterior_rc_slot_field_body
-                                            + 1 (* the state tydesc. *))))
-          in
+          let obj_ptr = deref (ptr_cast
+                                 (get_closure_for_current_frame ())
+                                 (Il.ScalarTy (Il.AddrTy (obj_closure_rty abi)))) in
+          let (ty_params_mem, _) = need_mem_cell (get_element_ptr obj_ptr 2) in
           let ty_params_ty = Ast.TY_tup (make_tydesc_slots n_ty_params) in
           let ty_params_rty = referent_type abi ty_params_ty in
             Il.Mem (ty_params_mem, ty_params_rty)

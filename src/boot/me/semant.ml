@@ -1472,6 +1472,14 @@ let tydesc_rty (abi:Abi.abi) : Il.referent_ty =
     |]
 ;;
 
+let obj_closure_rty (abi:Abi.abi) : Il.referent_ty =
+  Il.StructTy [| word_rty abi;
+                 Il.ScalarTy (Il.AddrTy (tydesc_rty abi));
+                 word_rty abi (* A lie: it's opaque, but this permits
+                               * GEP'ing to it. *)
+              |]
+;;
+
 let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
   let s t = Il.ScalarTy t in
   let v b = Il.ValTy b in
@@ -1529,9 +1537,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
             Il.StructTy [| codeptr; fn_closure_ptr |]
 
       | Ast.TY_obj _ ->
-          let obj_closure_ptr = sp (Il.StructTy [| word;
-                                                   sp (tydesc_rty abi);
-                                                   Il.OpaqueTy |]) in
+          let obj_closure_ptr = sp (obj_closure_rty abi) in
             Il.StructTy [| ptr; obj_closure_ptr |]
 
       | Ast.TY_tag ttag -> tag ttag
@@ -1562,11 +1568,11 @@ and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
   let word = sv abi.Abi.abi_word_bits in
 
   let rty = referent_type abi (slot_ty sl) in
-  match sl.Ast.slot_mode with
-      Ast.MODE_exterior _ -> sp (Il.StructTy [| word; rty |])
-    | Ast.MODE_interior _ -> rty
-    | Ast.MODE_read_alias -> sp rty
-    | Ast.MODE_write_alias -> sp rty
+    match sl.Ast.slot_mode with
+        Ast.MODE_exterior _ -> sp (Il.StructTy [| word; rty |])
+      | Ast.MODE_interior _ -> rty
+      | Ast.MODE_read_alias -> sp rty
+      | Ast.MODE_write_alias -> sp rty
 ;;
 
 let task_rty (abi:Abi.abi) : Il.referent_ty =
