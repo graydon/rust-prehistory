@@ -192,6 +192,13 @@ let is_ty32 (ty:Il.scalar_ty) : bool =
       Il.ValTy (Il.Bits32) -> true
     | Il.AddrTy _ -> true
     | _ -> false
+;;
+
+let is_r32 (c:Il.cell) : bool =
+  match c with
+      Il.Reg (_, st) -> is_ty32 st
+    | _ -> false
+;;
 
 let is_rm32 (c:Il.cell) : bool =
   match c with
@@ -218,17 +225,20 @@ let is_m8 (c:Il.cell) : bool =
     | _ -> false
 ;;
 
+let is_ok_r8 (r:Il.hreg) : bool =
+  (r == eax || r == ebx || r == ecx || r == edx)
+;;
+
 let is_r8 (c:Il.cell) : bool =
   match c with
-      Il.Reg (_, st) -> is_ty8 st
+      Il.Reg (Il.Hreg r, st) when is_ok_r8 r -> is_ty8 st
     | _ -> false
 ;;
 
 let is_rm8 (c:Il.cell) : bool =
   match c with
       Il.Mem (_, Il.ScalarTy st) -> is_ty8 st
-    | Il.Reg (_, st) -> is_ty8 st
-    | _ -> false
+    | _ -> is_r8 c
 ;;
 
 let prealloc_quad (quad':Il.quad') : Il.quad' =
@@ -246,62 +256,13 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
         Il.binary_dst = target_cell dst bin.Il.binary_dst }
   in
 
-  let target_8bit_binary_to_ecx bin =
-    let lhs_ty = Il.operand_scalar_ty bin.Il.binary_lhs in
-    let dst_ty = Il.cell_scalar_ty bin.Il.binary_dst in
-      if is_ty8 lhs_ty || is_ty8 dst_ty
-      then
-        { bin with
-            Il.binary_lhs = target_operand ecx bin.Il.binary_lhs;
-            Il.binary_dst = target_cell ecx bin.Il.binary_dst }
-      else
-        bin
-  in
-
-  let target_8bit_unary_to_ecx un =
-    let src_ty = Il.operand_scalar_ty un.Il.unary_src in
-    let dst_ty = Il.cell_scalar_ty un.Il.unary_dst in
-      if is_ty8 src_ty || is_ty8 dst_ty
-      then
-        { un with
-            Il.unary_src = target_operand ecx un.Il.unary_src;
-            Il.unary_dst = target_cell ecx un.Il.unary_dst }
-      else
-        un
-  in
-
-  let target_8bit_mem_mov_to_ecx un =
-    let src_ty = Il.operand_scalar_ty un.Il.unary_src in
-    let dst_ty = Il.cell_scalar_ty un.Il.unary_dst in
-      if is_ty8 src_ty || is_ty8 dst_ty
-      then
-        match (un.Il.unary_src, un.Il.unary_dst) with
-            (Il.Cell (Il.Mem _), Il.Reg _) ->
-              { un with
-                  Il.unary_dst = target_cell ecx un.Il.unary_dst }
-          | (Il.Cell (Il.Reg _), Il.Mem _) ->
-              { un with
-                  Il.unary_src = target_operand ecx un.Il.unary_src }
-          | _ -> un
-      else
-        un
-  in
-
   let target_cmp cmp =
-    let lhs_ty = Il.operand_scalar_ty cmp.Il.cmp_lhs in
-    let rhs_ty = Il.operand_scalar_ty cmp.Il.cmp_rhs in
-      (* 8-bit compares we force to eax/ecx. *)
-      if is_ty8 lhs_ty || is_ty8 rhs_ty
-      then
-        { Il.cmp_lhs = target_operand eax cmp.Il.cmp_lhs;
-          Il.cmp_rhs = target_operand ecx cmp.Il.cmp_rhs }
-      else
-        match cmp.Il.cmp_lhs with
-            (* Immediate LHS we force to eax. *)
-            Il.Imm _ ->
-              { cmp with
-                  Il.cmp_lhs = target_operand eax cmp.Il.cmp_lhs }
-          | _ -> cmp
+    match cmp.Il.cmp_lhs with
+        (* Immediate LHS we force to eax. *)
+        Il.Imm _ ->
+          { cmp with
+              Il.cmp_lhs = target_operand eax cmp.Il.cmp_lhs }
+      | _ -> cmp
   in
 
     match quad' with
@@ -313,17 +274,8 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
                     Il.IMUL | Il.UMUL
                   | Il.IDIV | Il.UDIV -> target_bin_to_hreg bin eax ecx
                   | Il.IMOD | Il.UMOD -> target_bin_to_hreg bin eax ecx
-                  | _ -> target_8bit_binary_to_ecx bin
+                  | _ -> bin
               end
-          end
-
-      | Il.Unary un ->
-          begin
-            match un.Il.unary_op with
-                Il.IMOV | Il.UMOV ->
-                  Il.Unary (target_8bit_mem_mov_to_ecx un)
-              | _  ->
-                  Il.Unary (target_8bit_unary_to_ecx un)
           end
 
       | Il.Cmp cmp -> Il.Cmp (target_cmp cmp)
@@ -347,11 +299,27 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
 ;;
 
 let constrain_vregs (q:Il.quad) (hregs:Bits.t array) : unit =
+
+  let involves_8bit_cell =
+    let b = ref false in
+    let qp_cell _ c =
+      match c with
+          Il.Reg (_, Il.ValTy Il.Bits8)
+        | Il.Mem (_, Il.ScalarTy (Il.ValTy Il.Bits8)) ->
+            (b := true; c)
+        | _ -> c
+    in
+      ignore (Il.process_quad { Il.identity_processor with
+                                  Il.qp_cell_read = qp_cell;
+                                  Il.qp_cell_write = qp_cell } q);
+      !b
+  in
+
   let qp_mem _ m = m in
   let qp_cell _ c =
     begin
       match c with
-          Il.Reg (Il.Vreg v, Il.ValTy Il.Bits8) ->
+          Il.Reg (Il.Vreg v, _) when involves_8bit_cell ->
             (* 8-bit register cells must only be al, cl, dl, bl. Not esi/edi. *)
             let hv = hregs.(v) in
               List.iter (fun bad -> Bits.set hv bad false) [esi; edi]
@@ -1839,6 +1807,12 @@ let zero (dst:Il.cell) (count:Il.operand) : Asm.frag =
 ;;
 
 let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
+  if is_ty8 (Il.cell_scalar_ty dst) || is_ty8 (Il.operand_scalar_ty src)
+  then
+    begin
+      (match dst with Il.Reg (Il.Hreg r, _) -> assert (is_ok_r8 r) | _ -> ());
+      (match src with Il.Cell (Il.Reg (Il.Hreg r, _)) -> assert (is_ok_r8 r) | _ -> ());
+    end;
 
   match (signed, dst, src) with
 
@@ -1863,14 +1837,14 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
           insn_rm_r 0x8b src_cell (reg r)
 
     (* MOVZX: r8/r32 <- zx(rm8) *)
-    | (false, Il.Reg ((Il.Hreg r, dst_ty)), Il.Cell src_cell)
-        when (is_ty8 dst_ty || is_ty32 dst_ty) && is_rm8 src_cell ->
+    | (false, Il.Reg ((Il.Hreg r, _)), Il.Cell src_cell)
+        when (is_r8 dst || is_r32 dst) && is_rm8 src_cell ->
         Asm.SEQ [| Asm.BYTE 0x0f;
                    insn_rm_r 0xb6 src_cell (reg r) |]
 
     (* MOVZX: m32 <- zx(r8) *)
-    | (false, _, (Il.Cell (Il.Reg ((Il.Hreg r), src_ty) as src_cell)))
-        when (is_m32 dst) && is_ty8 src_ty ->
+    | (false, _, (Il.Cell (Il.Reg ((Il.Hreg r), _) as src_cell)))
+        when (is_m32 dst) && is_r8 src_cell ->
         (* Fake with 2 insns:
          *
          * movzx r32 <- r8;   (in-place zero-extension)
@@ -1882,14 +1856,14 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
                 |]
 
     (* MOVSX: r8/r32 <- sx(rm8) *)
-    | (true, Il.Reg ((Il.Hreg r), dst_ty), Il.Cell src_cell)
-        when (is_ty8 dst_ty || is_ty32 dst_ty) && is_rm8 src_cell ->
+    | (true, Il.Reg ((Il.Hreg r), _), Il.Cell src_cell)
+        when (is_r8 dst || is_r32 dst) && is_rm8 src_cell ->
         Asm.SEQ [| Asm.BYTE 0x0f;
                    insn_rm_r 0xbe src_cell (reg r) |]
 
     (* MOVSX: m32 <- sx(r8) *)
-    | (true, _, (Il.Cell (Il.Reg ((Il.Hreg r), src_ty) as src_cell)))
-        when (is_m32 dst) && is_ty8 src_ty ->
+    | (true, _, (Il.Cell (Il.Reg ((Il.Hreg r), _) as src_cell)))
+        when (is_m32 dst) && is_r8 src_cell ->
         (* Fake with 2 insns:
          *
          * movsx r32 <- r8;   (in-place sign-extension)

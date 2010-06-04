@@ -370,19 +370,6 @@ let calculate_vreg_constraints (cx:ctxt) : Bits.t array =
     constraints
 ;;
 
-let rec select_constrained
-    (cx:ctxt)
-    (constraints:Bits.t)
-    (inactive:Il.hreg list)
-    : Il.hreg option =
-  match inactive with
-      [] -> None
-    | h::hs ->
-        if Bits.get constraints h
-        then Some h
-        else select_constrained cx constraints hs
-;;
-
 (* Simple local register allocator. Nothing fancy. *)
 let reg_alloc
     (sess:Session.sess)
@@ -462,6 +449,7 @@ let reg_alloc
           else ()
       else ()
     in
+
     let inactivate_hreg hreg =
       if (Hashtbl.mem hreg_to_vreg hreg) &&
         (hreg < cx.ctxt_abi.Abi.abi_n_hardregs)
@@ -473,26 +461,44 @@ let reg_alloc
           inactive_hregs := hreg :: (!inactive_hregs);
       else ()
     in
+
     let spill_specific_hreg i hreg =
       clean_hreg i hreg;
       inactivate_hreg hreg
     in
-    let spill_some_hreg i =
-      match !active_hregs with
-          [] -> raise (Ra_error ("spilling with no active hregs"));
-        | h::_ ->
+
+    let rec select_constrained
+        (constraints:Bits.t)
+        (hregs:Il.hreg list)
+        : Il.hreg option =
+      match hregs with
+          [] -> None
+        | h::hs ->
+            if Bits.get constraints h
+            then Some h
+            else select_constrained constraints hs
+    in
+
+    let spill_constrained constrs i =
+      match select_constrained constrs (!active_hregs) with
+          None -> raise (Ra_error ("unable to spill according to constraint"));
+        | Some h ->
             begin
               spill_specific_hreg i h;
               h
             end
     in
+
+    let all_hregs = Bits.create abi.Abi.abi_n_hardregs true in
+
     let spill_all_regs i =
       while (!active_hregs) != []
       do
-        let _ = spill_some_hreg i in
+        let _ = spill_constrained all_hregs i in
           ()
       done
     in
+
     let reload vreg hreg =
       if Hashtbl.mem vreg_to_spill vreg
       then
@@ -505,12 +511,26 @@ let reg_alloc
 
     let use_vreg def i vreg =
       if Hashtbl.mem vreg_to_hreg vreg
-      then Hashtbl.find vreg_to_hreg vreg
+      then
+        begin
+          let h = Hashtbl.find vreg_to_hreg vreg in
+          iflog cx (fun _ -> log cx "found cached assignment %s for <v%d>"
+                      (hr_str h) vreg);
+            h
+        end
       else
         let hreg =
-          match select_constrained cx vreg_constraints.(vreg) (!inactive_hregs) with
-              None -> spill_some_hreg i
-            | Some h -> h
+          let constrs = vreg_constraints.(vreg) in
+          match select_constrained constrs (!inactive_hregs) with
+              None ->
+                let h = spill_constrained constrs i in
+                  iflog cx (fun _ -> log cx "selected %s to spill and use for <v%d>"
+                              (hr_str h) vreg);
+                  h
+            | Some h ->
+                iflog cx (fun _ -> log cx "selected inactive %s for <v%d>"
+                            (hr_str h) vreg);
+                h
         in
           inactive_hregs := List.filter (fun x -> x != hreg) (!inactive_hregs);
           active_hregs := (!active_hregs) @ [hreg];
@@ -597,8 +617,7 @@ let reg_alloc
               end
           end;
           List.iter inactivate_hreg clobbers;
-          List.iter (fun i -> Hashtbl.replace dirty_vregs i ())
-            (quad_defined_vregs quad);
+          List.iter (fun i -> Hashtbl.replace dirty_vregs i ()) defined;
       done;
       cx.ctxt_quads <- Array.of_list (List.rev (!newq));
       kill_redundant_moves cx;
