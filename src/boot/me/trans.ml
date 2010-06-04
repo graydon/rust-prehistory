@@ -3999,9 +3999,10 @@ let trans_visitor
     in
 
     let obj_args_tup = Array.map (fun (sloti,_) -> sloti.node) state in
+    let obj_args_slot = interior_slot (Ast.TY_tup obj_args_tup) in
     let state_ty =
       Ast.TY_tup [| interior_slot Ast.TY_type;
-                    interior_slot (Ast.TY_tup obj_args_tup); |]
+                    obj_args_slot |]
     in
     let state_rty = slot_referent_type abi (interior_slot state_ty) in
     let state_ptr_slot = exterior_slot state_ty in
@@ -4053,6 +4054,15 @@ let trans_visitor
           trans_copy_tup
             frame_ty_params true
             obj_args frame_args obj_args_tup;
+          (* We have to do something curious here: we can't drop the
+           * arg slots directly as in the normal frame-exit sequence,
+           * because the arg slot ids are actually given layout
+           * positions inside the object state, and are at different
+           * offsets within that state than within the current
+           * frame. So we manually drop the argument tuple here,
+           * without mentioning the arg slot ids.
+           *)
+          drop_slot frame_ty_params frame_args obj_args_slot None;
           trans_frame_exit obj_id false;
   in
 
