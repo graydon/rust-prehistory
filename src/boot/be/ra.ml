@@ -336,9 +336,60 @@ let dump_quads cx =
   done
 ;;
 
+let calculate_vreg_constraints (cx:ctxt) : Bits.t array =
+  let abi = cx.ctxt_abi in
+  let n_vregs = cx.ctxt_n_vregs in
+  let n_hregs = abi.Abi.abi_n_hardregs in
+  let constraints = Array.init n_vregs (fun _ -> Bits.create n_hregs true) in
+    Array.iteri
+      begin
+        fun i q ->
+          abi.Abi.abi_constrain_vregs q constraints;
+          iflog cx
+            begin
+              fun _ ->
+                let hr_str = cx.ctxt_abi.Abi.abi_str_of_hardreg in
+                  log cx "constraints for quad %d = %s"
+                    i (string_of_quad hr_str q);
+                  let qp_reg _ r =
+                    begin
+                      match r with
+                          Il.Hreg _ -> ()
+                        | Il.Vreg v ->
+                            let hregs = Bits.to_list constraints.(v) in
+                              log cx "<v%d> constrained to hregs: [%s]"
+                                v (list_to_str hregs hr_str)
+                    end;
+                    r
+                  in
+                    ignore (Il.process_quad { Il.identity_processor with
+                                                Il.qp_reg = qp_reg } q)
+            end;
+      end
+      cx.ctxt_quads;
+    constraints
+;;
+
+let rec select_constrained
+    (cx:ctxt)
+    (constraints:Bits.t)
+    (inactive:Il.hreg list)
+    : Il.hreg option =
+  match inactive with
+      [] -> None
+    | h::hs ->
+        if Bits.get constraints h
+        then Some h
+        else select_constrained cx constraints hs
+;;
 
 (* Simple local register allocator. Nothing fancy. *)
-let reg_alloc (sess:Session.sess) (quads:Il.quads) (spill_disp:int64) (vregs:int) (abi:Abi.abi) =
+let reg_alloc
+    (sess:Session.sess)
+    (quads:Il.quads)
+    (spill_disp:int64)
+    (vregs:int)
+    (abi:Abi.abi) =
  try
     let cx = new_ctxt sess quads vregs abi in
     let _ =
@@ -357,6 +408,9 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (spill_disp:int64) (vregs:int
     let (live_in_vregs, live_out_vregs) =
       Session.time_inner "RA liveness" sess
         (fun _ -> calculate_live_bitvectors cx)
+    in
+    let (vreg_constraints:Bits.t array) = (* vreg idx -> hreg bits.t *)
+      calculate_vreg_constraints cx
     in
     let inactive_hregs = ref [] in (* [hreg] *)
     let active_hregs = ref [] in (* [hreg] *)
@@ -454,9 +508,9 @@ let reg_alloc (sess:Session.sess) (quads:Il.quads) (spill_disp:int64) (vregs:int
       then Hashtbl.find vreg_to_hreg vreg
       else
         let hreg =
-          match !inactive_hregs with
-              [] -> spill_some_hreg i
-            | x::_ -> x
+          match select_constrained cx vreg_constraints.(vreg) (!inactive_hregs) with
+              None -> spill_some_hreg i
+            | Some h -> h
         in
           inactive_hregs := List.filter (fun x -> x != hreg) (!inactive_hregs);
           active_hregs := (!active_hregs) @ [hreg];

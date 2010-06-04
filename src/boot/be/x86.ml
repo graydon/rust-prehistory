@@ -346,6 +346,27 @@ let prealloc_quad (quad':Il.quad') : Il.quad' =
       | x -> x
 ;;
 
+let constrain_vregs (q:Il.quad) (hregs:Bits.t array) : unit =
+  let qp_mem _ m = m in
+  let qp_cell _ c =
+    begin
+      match c with
+          Il.Reg (Il.Vreg v, Il.ValTy Il.Bits8) ->
+            (* 8-bit register cells must only be al, cl, dl, bl. Not esi/edi. *)
+            let hv = hregs.(v) in
+              List.iter (fun bad -> Bits.set hv bad false) [esi; edi]
+        | _ -> ()
+    end;
+    c
+  in
+    ignore
+      (Il.process_quad { Il.identity_processor with
+                           Il.qp_mem = qp_mem;
+                           Il.qp_cell_read = qp_cell;
+                           Il.qp_cell_write = qp_cell } q)
+;;
+
+
 let clobbers (quad:Il.quad) : Il.hreg list =
   match quad.Il.quad_body with
       Il.Binary bin ->
@@ -1597,6 +1618,7 @@ let (abi:Abi.abi) =
     Abi.abi_n_hardregs = n_hardregs;
     Abi.abi_str_of_hardreg = reg_str;
     Abi.abi_prealloc_quad = prealloc_quad;
+    Abi.abi_constrain_vregs = constrain_vregs;
 
     Abi.abi_emit_fn_prologue = fn_prologue;
     Abi.abi_emit_fn_epilogue = fn_epilogue;
