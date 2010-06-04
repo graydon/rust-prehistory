@@ -2139,8 +2139,7 @@ let trans_visitor
             end
 
       | Ast.TY_pred _
-      | Ast.TY_fn _
-      | Ast.TY_obj _ ->
+      | Ast.TY_fn _ ->
           begin
             let binding = get_element_ptr cell Abi.binding_field_binding in
             let null_jmp = null_check binding in
@@ -2153,6 +2152,24 @@ let trans_visitor
                *)
               drop_slot ty_params binding
                 (exterior_slot Ast.TY_int) curr_iso;
+              patch null_jmp
+          end
+
+      | Ast.TY_obj _ ->
+          begin
+            let binding = get_element_ptr cell Abi.binding_field_binding in
+            let null_jmp = null_check binding in
+            let obj = deref binding in
+            let rc = get_element_ptr obj 0 in
+            let rc_jmp = drop_refcount_and_cmp rc in
+            let tydesc = get_element_ptr obj 1 in
+            let body = get_element_ptr obj 2 in
+            let ty_params = get_element_ptr (deref tydesc) Abi.tydesc_field_first_param in
+              trans_call_dynamic_glue tydesc
+                Abi.tydesc_field_drop_glue None [| ty_params; alias body |];
+              trans_free binding;
+              mov binding zero;
+              patch rc_jmp;
               patch null_jmp
           end
 
@@ -2400,21 +2417,20 @@ let trans_visitor
       emit (Il.jmp Il.JE Il.CodeNone);
       j
 
+  and drop_refcount_and_cmp (rc:Il.cell) : quad_idx =
+    iflog (fun _ -> annotate "drop refcount and maybe free");
+    emit (Il.binary Il.SUB rc (Il.Cell rc) one);
+    emit (Il.cmp (Il.Cell rc) zero);
+    let j = mark () in
+      emit (Il.jmp Il.JNE Il.CodeNone);
+      j
+
   and drop_slot
       (ty_params:Il.cell)
       (cell:Il.cell)
       (slot:Ast.slot)
       (curr_iso:Ast.ty_iso option)
       : unit =
-    let drop_refcount_and_cmp rc =
-      (iflog (fun _ -> annotate ("drop refcount and maybe free slot " ^
-                                   (Ast.fmt_to_str Ast.fmt_slot slot))));
-      emit (Il.binary Il.SUB rc (Il.Cell rc) one);
-      emit (Il.cmp (Il.Cell rc) zero);
-      let j = mark () in
-        emit (Il.jmp Il.JNE Il.CodeNone);
-        j
-    in
     let ty = slot_ty slot in
     let mctrl = slot_mem_ctrl slot in
       match mctrl with
