@@ -86,7 +86,7 @@ let to_list (v:t) : int list =
   else
     let accum = ref [] in
     let word = ref v.storage.(0) in
-      for i = 0 to v.nbits do
+      for i = 0 to (v.nbits-1) do
         if i mod int_bits = 0
         then word := v.storage.(i / int_bits);
         if (1 land (!word)) = 1
