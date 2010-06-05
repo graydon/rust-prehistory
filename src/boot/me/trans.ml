@@ -3370,10 +3370,13 @@ let trans_visitor
       callee_fptr
 
   and callee_drop_slot
-      (_:Ast.slot_key)
+      (k:Ast.slot_key)
       (slot_id:node_id)
       (slot:Ast.slot)
       : unit =
+    iflog (fun _ ->
+             annotate (Printf.sprintf "callee_drop_slot %d = %s "
+                         (int_of_node slot_id) (Ast.fmt_to_str Ast.fmt_slot_key k)));
     drop_slot_in_current_frame (cell_of_block_slot slot_id) slot None
 
 
