@@ -4213,7 +4213,7 @@ let trans_visitor
               "Trans.required_rust_fn on unexpected form of require library"
       end;
       emit Il.Leave;
-      trans_frame_exit fnid false;
+      trans_frame_exit fnid true;
   in
 
   let trans_tag
