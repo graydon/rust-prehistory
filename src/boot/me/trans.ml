@@ -1675,28 +1675,6 @@ let trans_visitor
     Array.iter trans_stmt block.node;
     trace_str cx.ctxt_sess.Session.sess_trace_block
       "exiting block";
-    iter_block_slots cx block.id
-      begin
-        fun slotkey slot_id slot ->
-          if (not (slot_is_obj_state cx slot_id))
-          then
-            begin
-              (* FIXME (bug 541543): this is not going to free things in
-               * the proper order; we need to analyze the decl order in an
-               * earlier phase and thread it through to here.  *)
-              iflog
-                begin
-                  fun _ ->
-                    annotate
-                      ("drop slot: " ^
-                         (Ast.fmt_to_str Ast.fmt_slot_key slotkey))
-                end;
-              trace_str cx.ctxt_sess.Session.sess_trace_drop
-                ("dropping slot " ^ (Ast.fmt_to_str Ast.fmt_slot_key slotkey));
-              let cell = cell_of_block_slot slot_id in
-                drop_slot_in_current_frame cell slot None
-            end;
-      end;
     emit Il.Leave;
     pop_emitter_size_cache ();
     trace_str cx.ctxt_sess.Session.sess_trace_block
