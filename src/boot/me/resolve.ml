@@ -172,6 +172,9 @@ let all_item_collecting_visitor
             note_header i.id p.Ast.pred_input_slots
         | Ast.MOD_ITEM_obj ob ->
             note_header i.id ob.Ast.obj_state;
+        | Ast.MOD_ITEM_tag (header_slots, _, _) ->
+            let skey i = Printf.sprintf "_%d" i in
+              note_header i.id (Array.mapi (fun i s -> (s, skey i)) header_slots)
         | _ -> ()
     end;
       inner.Walk.visit_mod_item_pre n p i
