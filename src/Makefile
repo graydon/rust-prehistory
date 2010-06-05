@@ -308,8 +308,6 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/foreach-simple.rs \
                     test/run-pass/vec-slice.rs \
                     test/run-pass/spawn-fn.rs \
-                    test/run-pass/native.rc \
-                    test/run-pass/native_mod.rc \
                     test/run-pass/generic-tag.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
