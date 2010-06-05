@@ -4191,7 +4191,7 @@ let trans_visitor
               "Trans.required_rust_fn on unexpected form of require library"
       end;
       emit Il.Leave;
-      trans_frame_exit fnid true;
+      trans_frame_exit fnid false;
   in
 
   let trans_tag
