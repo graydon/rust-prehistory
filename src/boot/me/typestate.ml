@@ -800,30 +800,111 @@ let lifecycle_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
+
+  (*
+   * This visitor doesn't *calculate* part of the typestate; it uses
+   * the typestates calculated in earlier passes to extract "summaries"
+   * of slot-lifecycle events into the ctxt tables
+   * ctxt_copy_stmt_is_init and ctxt_post_stmt_slot_drops. These are
+   * used later on in translation.
+   *)
+
+  let (live_block_slots:(node_id Stack.t) Stack.t) = Stack.create () in
+
+  let visit_block_pre b =
+    Stack.push (Stack.create()) live_block_slots;
+    inner.Walk.visit_block_pre b
+  in
+
+  let note_drops stmt slots =
+    iflog cx
+      begin
+        fun _ ->
+          log cx "implicit drop of %d slots after stmt %a: "
+            (List.length slots)
+            Ast.sprintf_stmt stmt;
+          List.iter (fun s -> log cx "drop: %a"
+                       Ast.sprintf_slot_key (Hashtbl.find cx.ctxt_slot_keys s))
+            slots
+      end;
+    htab_put cx.ctxt_post_stmt_slot_drops stmt.id slots
+  in
+
+  let visit_block_post b =
+    inner.Walk.visit_block_post b;
+    let blk_live = Stack.pop live_block_slots in
+    let stmts = b.node in
+    let len = Array.length stmts in
+      if len > 0
+      then
+        begin
+          let s = stmts.(len-1) in
+            match s.node with
+                Ast.STMT_ret _
+              | Ast.STMT_be _ ->
+                  () (* Taken care of in visit_stmt_post below. *)
+            | _ ->
+                let slots = stk_elts_from_top blk_live in
+                  note_drops s slots
+        end;
+  in
+
   let visit_stmt_pre s =
     begin
-      match s.node with
-          Ast.STMT_copy (lv_dst, _)
-        | Ast.STMT_call (lv_dst, _, _)
-        | Ast.STMT_recv (lv_dst, _) ->
-            let prestate = Hashtbl.find cx.ctxt_prestates s.id in
-            let poststate = Hashtbl.find cx.ctxt_poststates s.id in
-            let dst_slots = lval_slots cx lv_dst in
-            let is_initializing slot =
-              let cid = Hashtbl.find cx.ctxt_constr_ids (Constr_init slot) in
-              let i = int_of_constr cid in
-                (not (Bits.get prestate i)) && (Bits.get poststate i)
-            in
-            let initializing = List.exists is_initializing (Array.to_list dst_slots) in
-              if initializing
-              then Hashtbl.add cx.ctxt_copy_stmt_is_init s.id ()
-              else ()
+      let init_lval lv_dst =
+        let dst_slots = lval_slots cx lv_dst in
+          Array.iter (fun sl -> Stack.push sl (Stack.top live_block_slots)) dst_slots;
+      in
+        match s.node with
+            Ast.STMT_copy (lv_dst, _)
+          | Ast.STMT_call (lv_dst, _, _)
+          | Ast.STMT_recv (lv_dst, _) ->
+              let prestate = Hashtbl.find cx.ctxt_prestates s.id in
+              let poststate = Hashtbl.find cx.ctxt_poststates s.id in
+              let dst_slots = lval_slots cx lv_dst in
+              let is_initializing slot =
+                let cid = Hashtbl.find cx.ctxt_constr_ids (Constr_init slot) in
+                let i = int_of_constr cid in
+                  (not (Bits.get prestate i)) && (Bits.get poststate i)
+              in
+              let initializing = List.exists is_initializing (Array.to_list dst_slots) in
+                if initializing
+                then
+                  begin
+                    Hashtbl.add cx.ctxt_copy_stmt_is_init s.id ();
+                    init_lval lv_dst
+                  end;
+
+          | Ast.STMT_init_rec (lv_dst, _, _)
+          | Ast.STMT_init_tup (lv_dst, _)
+          | Ast.STMT_init_vec (lv_dst, _, _)
+          | Ast.STMT_init_str (lv_dst, _)
+          | Ast.STMT_init_port lv_dst
+          | Ast.STMT_init_chan (lv_dst, _) ->
+              init_lval lv_dst
+
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
   in
+
+  let visit_stmt_post s =
+    inner.Walk.visit_stmt_post s;
+    match s.node with
+        Ast.STMT_ret _
+      | Ast.STMT_be _ ->
+          let stks = stk_elts_from_top live_block_slots in
+          let slots = List.concat (List.map stk_elts_from_top stks) in
+            note_drops s slots
+      | _ -> ()
+  in
+
     { inner with
-        Walk.visit_stmt_pre = visit_stmt_pre }
+        Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_block_post = visit_block_post;
+        Walk.visit_stmt_pre = visit_stmt_pre;
+        Walk.visit_stmt_post = visit_stmt_post
+    }
 ;;
 
 let process_crate
