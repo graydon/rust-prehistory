@@ -29,5 +29,4 @@ fn main() {
   i <- p;
   log "received int";
   check (i == 10);
-  join w;
 }
