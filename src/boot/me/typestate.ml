@@ -311,6 +311,12 @@ let condition_assigning_visitor
       inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
+  let visit_obj_drop_pre obj b =
+    let (obj_input_keys, obj_init_keys) = obj_keys obj.node resolve_constr_to_key in
+      raise_entry_state obj_input_keys obj_init_keys b;
+      inner.Walk.visit_obj_drop_pre obj b
+  in
+
   let visit_callable_pre s dst lv args =
     let referent_ty = lval_ty cx lv in
       begin
@@ -465,6 +471,7 @@ let condition_assigning_visitor
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_obj_fn_pre = visit_obj_fn_pre;
+        Walk.visit_obj_drop_pre = visit_obj_drop_pre;
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
