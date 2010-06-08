@@ -36,6 +36,7 @@ type glue =
   | GLUE_drop_frame of node_id
   | GLUE_reloc_frame of node_id
   | GLUE_fn_binding of node_id
+  | GLUE_obj_drop of node_id
 ;;
 
 type data =
@@ -1853,7 +1854,8 @@ let glue_str (cx:ctxt) (g:glue) : string =
          * FIXME: the node_id here isn't an item, it's a statement; 
          * lookup bind target and encode bound arg tuple type.
          *)
-    | GLUE_fn_binding _ -> "glue$fn_binding"
+    | GLUE_fn_binding i -> "glue$fn_binding$" ^ (string_of_int (int_of_node i))
+    | GLUE_obj_drop oid -> (item_str cx oid) ^ ".drop"
 ;;
 
 
