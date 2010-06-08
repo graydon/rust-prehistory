@@ -680,6 +680,7 @@ The keywords are:
 @tab @code{iter}
 @tab @code{pred}
 @tab @code{obj}
+@tab @code{drop}
 @item @code{task}
 @tab @code{port}
 @tab @code{chan}
