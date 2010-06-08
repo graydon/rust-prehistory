@@ -260,7 +260,8 @@ let layout_visitor
       htab_put cx.ctxt_frame_sizes id (SIZE_fixed 0L);
       htab_put cx.ctxt_call_sizes id glue_callsz;
       htab_put cx.ctxt_spill_fixups id (new_fixup "frame spill fixup");
-      htab_put cx.ctxt_frame_blocks id []
+      htab_put cx.ctxt_frame_blocks id [];
+      update_frame_size ();
   in
 
   let leave_frame _ =
@@ -284,13 +285,11 @@ let layout_visitor
 
         | Ast.MOD_ITEM_tag (header_slots, _, _) ->
             enter_frame i.id;
-            update_frame_size ();
             layout_header i.id
               (Array.map (fun sid -> sid.id) header_slots)
 
         | Ast.MOD_ITEM_obj obj ->
             enter_frame i.id;
-            update_frame_size ();
             let ids = header_slot_ids obj.Ast.obj_state in
               layout_obj_state i.id ids;
               Array.iter
