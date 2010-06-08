@@ -1223,6 +1223,19 @@ and fmt_obj (ff:Format.formatter) (id:ident) (params:ty_param array) (obj:obj) :
         fmt_fn ff id [||] fn.node
     end
     obj.obj_fns;
+  begin
+    match obj.obj_drop with
+        None -> ()
+      | Some d ->
+          begin
+            fmt ff "@\n";
+            fmt_obox ff;
+            fmt ff "drop ";
+            fmt_obr ff;
+            fmt_stmts ff d.node;
+            fmt_cbb ff;
+          end
+  end;
   fmt_cbb ff
 
 
