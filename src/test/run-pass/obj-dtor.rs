@@ -7,8 +7,17 @@ obj worker(chan[int] c) {
 
 fn do_work(chan[int] c) {
   log "in child task";
-  let worker w = worker(c);
-  log "constructed worker";
+  {
+    let worker w = worker(c);
+    log "constructed worker";
+  }
+  log "destructed worker";
+  while(true) {
+    // Deadlock-condition not handled properly yet, need to avoid
+    // exiting the child early.
+    c <| 11;
+    yield;
+  }
 }
 
 fn main() {
