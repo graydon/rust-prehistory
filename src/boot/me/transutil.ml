@@ -112,12 +112,11 @@ let iter_frame_slots
     List.iter (fun block -> iter_block_slots cx block fn) blocks
 ;;
 
-let iter_frame_and_arg_slots
+let iter_arg_slots
     (cx:Semant.ctxt)
     (frame_id:node_id)
     (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
     : unit =
-  iter_frame_slots cx frame_id fn;
   match htab_search cx.ctxt_frame_args frame_id with
       None -> ()
     | Some ls ->
@@ -129,6 +128,15 @@ let iter_frame_and_arg_slots
                 fn key slot_id slot
           end
           ls
+;;
+
+let iter_frame_and_arg_slots
+    (cx:Semant.ctxt)
+    (frame_id:node_id)
+    (fn:Ast.slot_key -> node_id -> Ast.slot -> unit)
+    : unit =
+  iter_frame_slots cx frame_id fn;
+  iter_arg_slots cx frame_id fn;
 ;;
 
 let next_power_of_two (x:int64) : int64 =
