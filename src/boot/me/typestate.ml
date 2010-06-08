@@ -311,6 +311,29 @@ let condition_assigning_visitor
       inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
+  let visit_callable_pre s dst lv args =
+    let referent_ty = lval_ty cx lv in
+      begin
+        match referent_ty with
+            Ast.TY_fn (tsig,_) ->
+              let formal_constrs = tsig.Ast.sig_input_constrs in
+              let names = atoms_to_names args in
+              let constrs = Array.map (apply_names_to_constr names) formal_constrs in
+              let keys = Array.map resolve_constr_to_key constrs in
+                raise_precondition s.id keys
+          | Ast.TY_pred (_,formal_constrs) ->
+              let names = atoms_to_names args in
+              let constrs = Array.map (apply_names_to_constr names) formal_constrs in
+              let keys = Array.map resolve_constr_to_key constrs in
+                raise_precondition s.id keys
+          | _ -> ()
+      end;
+      begin
+        let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
+          raise_postcondition s.id postcond
+      end
+  in
+
   let visit_stmt_pre s =
     begin
       match s.node with
@@ -384,26 +407,11 @@ let condition_assigning_visitor
 
         | Ast.STMT_spawn (dst, _, lv, args)
         | Ast.STMT_call (dst, lv, args) ->
-            let referent_ty = lval_ty cx lv in
-              begin
-                match referent_ty with
-                    Ast.TY_fn (tsig,_) ->
-                      let formal_constrs = tsig.Ast.sig_input_constrs in
-                      let names = atoms_to_names args in
-                      let constrs = Array.map (apply_names_to_constr names) formal_constrs in
-                      let keys = Array.map resolve_constr_to_key constrs in
-                        raise_precondition s.id keys
-                  | Ast.TY_pred (_,formal_constrs) ->
-                      let names = atoms_to_names args in
-                      let constrs = Array.map (apply_names_to_constr names) formal_constrs in
-                      let keys = Array.map resolve_constr_to_key constrs in
-                        raise_precondition s.id keys
-                  | _ -> ()
-              end;
-              begin
-                let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
-                  raise_postcondition s.id postcond
-              end
+            visit_callable_pre s dst lv args
+
+        | Ast.STMT_bind (dst, lv, args_opt) ->
+            let args = arr_map_partial args_opt (fun a -> a) in
+            visit_callable_pre s dst lv args
 
         | Ast.STMT_ret (Some at) ->
             let precond = Array.map (fun s -> Constr_init s) (atom_slots cx at) in
@@ -858,7 +866,9 @@ let lifecycle_visitor
         match s.node with
             Ast.STMT_copy (lv_dst, _)
           | Ast.STMT_call (lv_dst, _, _)
-          | Ast.STMT_recv (lv_dst, _) ->
+          | Ast.STMT_spawn (lv_dst, _, _, _)
+          | Ast.STMT_recv (lv_dst, _)
+          | Ast.STMT_bind (lv_dst, _, _) ->
               let prestate = Hashtbl.find cx.ctxt_prestates s.id in
               let poststate = Hashtbl.find cx.ctxt_poststates s.id in
               let dst_slots = lval_slots cx lv_dst in
