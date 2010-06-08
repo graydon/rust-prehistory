@@ -40,7 +40,7 @@ let trans_visitor
   in
 
   let curr_file = Stack.create () in
-  let curr_stmt = ref None in
+  let curr_stmt = Stack.create () in
 
   let (abi:Abi.abi) = cx.ctxt_abi in
   let (word_sz:int64) = word_sz abi in
@@ -1767,15 +1767,17 @@ let trans_visitor
              end;
       ()
 
+  and get_curr_span _ =
+      if Stack.is_empty curr_stmt
+      then ("<none>", 0, 0)
+      else
+        let stmt_id = Stack.top curr_stmt in
+          match (Session.get_span cx.ctxt_sess stmt_id) with
+              None -> ("<none>", 0, 0)
+            | Some sp -> sp.lo
+
   and trans_cond_fail (str:string) (fwd_jmps:quad_idx list) : unit =
-    let (filename, line, _) =
-      match !curr_stmt with
-          None -> ("<none>", 0, 0)
-        | Some stmt_id ->
-            match (Session.get_span cx.ctxt_sess stmt_id) with
-                None -> ("<none>", 0, 0)
-              | Some sp -> sp.lo
-    in
+    let (filename, line, _) = get_curr_span () in
       iflog (fun _ -> annotate ("condition-fail: " ^ str));
       trans_void_upcall "upcall_fail"
         [|
@@ -1799,14 +1801,7 @@ let trans_visitor
     trans_void_upcall "upcall_yield" [| |];
 
   and trans_fail () : unit =
-    let (filename, line, _) =
-      match !curr_stmt with
-          None -> ("<none>", 0, 0)
-        | Some stmt_id ->
-            match (Session.get_span cx.ctxt_sess stmt_id) with
-                None -> ("<none>", 0, 0)
-              | Some sp -> sp.lo
-    in
+    let (filename, line, _) = get_curr_span () in
       trans_void_upcall "upcall_fail"
         [|
           trans_static_string "explicit failure";
@@ -3404,9 +3399,10 @@ let trans_visitor
               log cx "translating stmt: %s" s;
               annotate s;
         end;
-      curr_stmt := Some stmt.id;
+      Stack.push stmt.id curr_stmt;
       trans_stmt_full stmt;
       curr_stmt := None
+      ignore (Stack.pop curr_stmt);
     with
         Semant_err (None, msg) -> raise (Semant_err ((Some stmt.id), msg))
 
