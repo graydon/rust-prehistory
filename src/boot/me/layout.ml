@@ -325,6 +325,16 @@ let layout_visitor
     leave_frame ()
   in
 
+  let visit_obj_drop_pre obj b =
+    enter_frame b.id;
+    inner.Walk.visit_obj_drop_pre obj b
+  in
+
+  let visit_obj_drop_post obj b =
+    inner.Walk.visit_obj_drop_post obj b;
+    leave_frame ()
+  in
+
   let visit_block_pre b =
     let (frame_id, frame_blocks) = Stack.top frame_stack in
     let frame_spill = Hashtbl.find cx.ctxt_spill_fixups frame_id in
@@ -413,6 +423,8 @@ let layout_visitor
 
         Walk.visit_obj_fn_pre = visit_obj_fn_pre;
         Walk.visit_obj_fn_post = visit_obj_fn_post;
+        Walk.visit_obj_drop_pre = visit_obj_drop_pre;
+        Walk.visit_obj_drop_post = visit_obj_drop_post;
 
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_block_pre = visit_block_pre;
