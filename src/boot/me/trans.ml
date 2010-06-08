@@ -1073,17 +1073,23 @@ let trans_visitor
       mov (word_at (fp_imm frame_crate_ptr)) (Il.Cell (crate_ptr_cell));
       mov (word_at (fp_imm frame_fns_disp)) frame_fns
 
-  and trans_glue_frame_entry
+  and trans_glue_frame_entry_full
       (callsz:size)
-      (spill:fixup)
+      (framesz:size)
       : unit =
-    let framesz = SIZE_fixup_mem_sz spill in
       push_new_emitter_with_vregs None;
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter())
         framesz callsz nabi_rust (upcall_fixup "upcall_grow_task");
       write_frame_info_ptrs None;
       iflog (fun _ -> annotate "finished prologue");
+
+  and trans_glue_frame_entry
+      (callsz:size)
+      (spill:fixup)
+      : unit =
+    let framesz = SIZE_fixup_mem_sz spill in
+      trans_glue_frame_entry_full callsz framesz
 
   and emitted_quads e =
     Array.sub e.Il.emit_quads 0 e.Il.emit_pc
@@ -4310,6 +4316,22 @@ let trans_visitor
       | _ -> bugi cx i.id "unsupported type of require: %s" (path_name())
   in
 
+  let visit_obj_drop_pre obj b =
+    let g = GLUE_obj_drop obj.id in
+    let fix =
+      match htab_search cx.ctxt_glue_code g with
+          Some code -> code.code_fixup
+        | None -> bug () "visit_obj_drop_pre without assigned fixup"
+    in
+    let framesz = get_framesz cx b.id in
+    let callsz = get_callsz cx b.id in
+    let spill = Hashtbl.find cx.ctxt_spill_fixups b.id in
+      trans_glue_frame_entry_full callsz framesz;
+      trans_block b;
+      trans_glue_frame_exit fix spill g;
+      inner.Walk.visit_obj_drop_pre obj b
+  in
+
   let visit_local_obj_fn_pre _ _ fn =
     trans_fn fn.id fn.node.Ast.fn_aux.Ast.fn_is_iter fn.node.Ast.fn_body
   in
@@ -4325,7 +4347,7 @@ let trans_visitor
       then
         visit_required_obj_fn_pre obj ident fn
       else
-        visit_local_obj_fn_pre obj ident fn
+        visit_local_obj_fn_pre obj ident fn;
     end;
     inner.Walk.visit_obj_fn_pre obj ident fn
   in
@@ -4448,6 +4470,7 @@ let trans_visitor
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_obj_fn_pre = visit_obj_fn_pre;
         Walk.visit_obj_fn_post = visit_obj_fn_post;
+        Walk.visit_obj_drop_pre = visit_obj_drop_pre;
     }
 ;;
 
@@ -4513,6 +4536,17 @@ let fixup_assigning_visitor
     inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
+  let visit_obj_drop_pre obj b =
+    let g = GLUE_obj_drop obj.id in
+    let fix = new_fixup (path_name()) in
+    let tmp_code = { code_fixup = fix;
+                     code_quads = [| |];
+                     code_vregs_and_spill = None;
+                     code_spill_disp = 0L } in
+      htab_put cx.ctxt_glue_code g tmp_code;
+      inner.Walk.visit_obj_drop_pre obj b
+  in
+
   let visit_block_pre b =
     htab_put cx.ctxt_block_fixups b.id (new_fixup "lexical block");
     inner.Walk.visit_block_pre b
@@ -4527,6 +4561,7 @@ let fixup_assigning_visitor
       Walk.visit_crate_pre = visit_crate_pre;
       Walk.visit_mod_item_pre = visit_mod_item_pre;
       Walk.visit_obj_fn_pre = visit_obj_fn_pre;
+      Walk.visit_obj_drop_pre = visit_obj_drop_pre;
       Walk.visit_block_pre = visit_block_pre; }
 
 
