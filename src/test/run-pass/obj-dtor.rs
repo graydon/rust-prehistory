@@ -1,16 +1,24 @@
-fn main() {
-  obj holder(@(mutable int) h) {
-    drop {
-      log "in dtor";
-      h -= 1;
-    }
+obj worker(chan[int] c) {
+  drop {
+    log "in dtor";
+    c <| 10;
   }
+}
 
-  let @(mutable int) i = 10;
-  {
-    log "allocating obj";
-    let holder h = holder(i);
-  }
-  log "finished dtor";
-  check (i == 9);
+fn do_work(chan[int] c) {
+  log "in child task";
+  let worker w = worker(c);
+  log "constructed worker";
+}
+
+fn main() {
+  let port[int] p = port();
+  log "spawning worker";
+  auto w = spawn do_work(chan(p));
+  let int i;
+  log "parent waiting for shutdown";
+  i <- p;
+  log "received int";
+  check (i == 10);
+  join w;
 }
