@@ -33,7 +33,7 @@
                 ("be", BE);
 
                 ("fail", FAIL);
-                ("fini", FINI);
+                ("drop", DROP);
 
                 ("type", TYPE);
                 ("pred", PRED);

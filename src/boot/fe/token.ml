@@ -60,7 +60,7 @@ type token =
   | CASE
 
   | FAIL
-  | FINI
+  | DROP
 
   | IN
   | FOR
@@ -202,7 +202,7 @@ let rec string_of_tok t =
     | CASE       -> "case"
 
     | FAIL       -> "fail"
-    | FINI       -> "fini"
+    | DROP       -> "drop"
 
     | IN         -> "in"
     | FOR        -> "for"

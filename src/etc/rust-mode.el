@@ -106,7 +106,7 @@
          "log" "in"
          "yield" "join"
          "break" "cont"
-         "fail"))
+         "fail" "drop"))
 
 ;; don't do 'case' the way it is in C
 (c-lang-defconst c-case-kwds
