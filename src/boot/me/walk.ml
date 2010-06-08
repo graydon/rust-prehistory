@@ -38,6 +38,10 @@ type visitor =
         (Ast.obj identified) -> Ast.ident -> (Ast.fn identified) -> unit;
       visit_obj_fn_post:
         (Ast.obj identified) -> Ast.ident -> (Ast.fn identified) -> unit;
+      visit_obj_drop_pre:
+        (Ast.obj identified) -> Ast.block -> unit;
+      visit_obj_drop_post:
+        (Ast.obj identified) -> Ast.block -> unit;
       visit_crate_pre: Ast.crate -> unit;
       visit_crate_post: Ast.crate -> unit;
     }
@@ -65,6 +69,8 @@ let empty_visitor =
     visit_mod_item_post = (fun _ _ _ -> ());
     visit_obj_fn_pre = (fun _ _ _ -> ());
     visit_obj_fn_post = (fun _ _ _ -> ());
+    visit_obj_drop_pre = (fun _ _ -> ());
+    visit_obj_drop_post = (fun _ _ -> ());
     visit_crate_pre = (fun _ -> ());
     visit_crate_post = (fun _ -> ()); }
 ;;
@@ -89,11 +95,21 @@ let path_managing_visitor
     inner.visit_obj_fn_post obj ident fn;
     ignore (Stack.pop path)
   in
+  let visit_obj_drop_pre obj b =
+    Stack.push (Ast.COMP_ident "drop") path;
+    inner.visit_obj_drop_pre obj b
+  in
+  let visit_obj_drop_post obj b =
+    inner.visit_obj_drop_post obj b;
+    ignore (Stack.pop path)
+  in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;
         visit_mod_item_post = visit_mod_item_post;
         visit_obj_fn_pre = visit_obj_fn_pre;
         visit_obj_fn_post = visit_obj_fn_post;
+        visit_obj_drop_pre = visit_obj_drop_pre;
+        visit_obj_drop_post = visit_obj_drop_post;
     }
 ;;
 
@@ -121,25 +137,42 @@ let mod_item_logging_visitor
   let path_name _ = Ast.fmt_to_str Ast.fmt_name (path_to_name path) in
   let visit_mod_item_pre name params item =
     logfn (Printf.sprintf "entering %s" (path_name()));
-    inner.visit_mod_item_pre name params item
+    inner.visit_mod_item_pre name params item;
+    logfn (Printf.sprintf "entered %s" (path_name()));
   in
   let visit_mod_item_post name params item =
     logfn (Printf.sprintf "leaving %s" (path_name()));
     inner.visit_mod_item_post name params item;
+    logfn (Printf.sprintf "left %s" (path_name()));
   in
   let visit_obj_fn_pre obj ident fn =
     logfn (Printf.sprintf "entering %s" (path_name()));
-    inner.visit_obj_fn_pre obj ident fn
+    inner.visit_obj_fn_pre obj ident fn;
+    logfn (Printf.sprintf "entered %s" (path_name()));
   in
   let visit_obj_fn_post obj ident fn =
     logfn (Printf.sprintf "leaving %s" (path_name()));
     inner.visit_obj_fn_post obj ident fn;
+    logfn (Printf.sprintf "left %s" (path_name()));
+  in
+  let visit_obj_drop_pre obj b =
+    logfn (Printf.sprintf "entering %s" (path_name()));
+    inner.visit_obj_drop_pre obj b;
+    logfn (Printf.sprintf "entered %s" (path_name()));
+  in
+  let visit_obj_drop_post obj fn =
+    logfn (Printf.sprintf "leaving %s" (path_name()));
+    inner.visit_obj_drop_post obj fn;
+    logfn (Printf.sprintf "left %s" (path_name()));
   in
     { inner with
         visit_mod_item_pre = visit_mod_item_pre;
         visit_mod_item_post = visit_mod_item_post;
         visit_obj_fn_pre = visit_obj_fn_pre;
-        visit_obj_fn_post = visit_obj_fn_post; }
+        visit_obj_fn_post = visit_obj_fn_post;
+        visit_obj_drop_pre = visit_obj_drop_pre;
+        visit_obj_drop_post = visit_obj_drop_post;
+    }
 ;;
 
 
@@ -203,7 +236,13 @@ and walk_mod_item
           walk_header_slots v ob.Ast.obj_state;
           walk_constrs v ob.Ast.obj_constrs;
           let oid = { node = ob; id = item.id } in
-            Hashtbl.iter (walk_obj_fn v oid) ob.Ast.obj_fns
+            Hashtbl.iter (walk_obj_fn v oid) ob.Ast.obj_fns;
+            match ob.Ast.obj_drop with
+                None -> ()
+              | Some d ->
+                  v.visit_obj_drop_pre oid d;
+                  walk_block v d;
+                  v.visit_obj_drop_post oid d
 
   in
     walk_bracketed
