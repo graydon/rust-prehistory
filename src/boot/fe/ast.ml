@@ -833,6 +833,20 @@ and fmt_atoms (ff:Format.formatter) (az:atom array) : unit =
     az;
   fmt ff ")"
 
+and fmt_atom_opts (ff:Format.formatter) (az:(atom option) array) : unit =
+  fmt ff "(";
+  Array.iteri
+    begin
+      fun i a ->
+        if i != 0
+        then fmt ff ", ";
+        match a with
+            None -> fmt ff "_"
+          | Some a -> fmt_atom ff a;
+    end
+    az;
+  fmt ff ")"
+
 and fmt_lval_component (ff:Format.formatter) (lvc:lval_component) : unit =
   match lvc with
       COMP_named nc -> fmt_name_component ff nc
@@ -965,6 +979,13 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_atoms ff args;
           fmt ff ";";
 
+      | STMT_bind (dst, fn, arg_opts) ->
+          fmt_lval ff dst;
+          fmt ff " = ";
+          fmt_lval ff fn;
+          fmt_atom_opts ff arg_opts;
+          fmt ff ";";
+
       | STMT_decl (DECL_slot (skey, sloti)) ->
           if sloti.node.slot_ty != None then fmt ff "let ";
           fmt_slot ff sloti.node;
@@ -1025,13 +1046,41 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           fmt_lval ff dst;
           fmt ff " = \"%s\"" (String.escaped s)
 
+      | STMT_init_port dst ->
+          fmt_lval ff dst;
+          fmt ff " = port();"
+
+      | STMT_init_chan (dst, port_opt) ->
+          fmt_lval ff dst;
+          fmt ff " = chan(";
+          begin
+            match port_opt with
+                None -> ()
+              | Some lv -> fmt_lval ff lv
+          end;
+          fmt ff ");"
+
       | STMT_check_expr expr ->
           fmt ff "check (";
           fmt_expr ff expr;
           fmt ff ");"
 
+      | STMT_check_if (constrs, _, block) ->
+          fmt_obox ff;
+          fmt ff "check if (";
+          fmt_constrs ff constrs;
+          fmt ff ")";
+          fmt_obr ff;
+          fmt_stmts ff block.node;
+          fmt_cbb ff
+
       | STMT_check (constrs, _) ->
           fmt ff "check ";
+          fmt_constrs ff constrs;
+          fmt ff ";"
+
+      | STMT_prove constrs ->
+          fmt ff "prove ";
           fmt_constrs ff constrs;
           fmt ff ";"
 
@@ -1089,19 +1138,28 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
       | STMT_fail -> fmt ff "fail;"
       | STMT_yield -> fmt ff "yield;"
 
+      | STMT_send (chan, v) ->
+          fmt_lval ff chan;
+          fmt ff " <| ";
+          fmt_lval ff v;
+          fmt ff ";";
+
+      | STMT_recv (d, port) ->
+          fmt_lval ff d;
+          fmt ff " <- ";
+          fmt_lval ff port;
+          fmt ff ";";
+
+      | STMT_join t ->
+          fmt ff "join ";
+          fmt_lval ff t;
+          fmt ff ";"
+
       | STMT_alt_tag _ -> fmt ff "?stmt_alt_tag?"
       | STMT_alt_type _ -> fmt ff "?stmt_alt_type?"
       | STMT_alt_port _ -> fmt ff "?stmt_alt_port?"
-      | STMT_prove _ -> fmt ff "?stmt_prove?"
-      | STMT_check_if _ -> fmt ff "?stmt_check_if?"
       | STMT_note _ -> fmt ff "?stmt_note?"
-      | STMT_bind _ -> fmt ff "?stmt_bind?"
       | STMT_slice _ -> fmt ff "?stmt_slice?"
-      | STMT_init_chan _ -> fmt ff "?stmt_init_chan?"
-      | STMT_init_port _ -> fmt ff "?stmt_init_port?"
-      | STMT_join _ -> fmt ff "?stmt_join?"
-      | STMT_send _ -> fmt ff "?stmt_send?"
-      | STMT_recv _ -> fmt ff "?stmt_recv?"
   end
 
 and fmt_decl_params (ff:Format.formatter) (params:ty_param array) : unit =
