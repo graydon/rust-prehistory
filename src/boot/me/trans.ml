@@ -3319,7 +3319,7 @@ let trans_visitor
       iflog (fun _ -> annotate
                (Printf.sprintf "copy args for tail call to %s" (logname ())));
       copy_fn_args true CLONE_none call;
-      iter_frame_and_arg_slots cx (current_fn ()) callee_drop_slot;
+      drop_slots_at_curr_stmt();
       abi.Abi.abi_emit_fn_tail_call (emitter())
         (force_sz (current_fn_callsz())) caller_argsz callee_code callee_argsz;
 
@@ -3389,6 +3389,24 @@ let trans_visitor
     let last_jumps = Array.map trans_arm arms in
     Array.iter patch last_jumps
 
+  and drop_slots_at_curr_stmt _ : unit =
+    let stmt = Stack.top curr_stmt in
+      match htab_search cx.ctxt_post_stmt_slot_drops stmt with
+          None -> ()
+        | Some slots ->
+            List.iter
+              begin
+                fun slot_id ->
+                  let slot = get_slot cx slot_id in
+                  let k = Hashtbl.find cx.ctxt_slot_keys slot_id in
+                    iflog (fun _ ->
+                             annotate (Printf.sprintf "post-stmt, drop_slot %d = %s "
+                                         (int_of_node slot_id)
+                                         (Ast.fmt_to_str Ast.fmt_slot_key k)));
+                    drop_slot_in_current_frame (cell_of_block_slot slot_id) slot None
+              end
+              slots
+
   and trans_stmt (stmt:Ast.stmt) : unit =
     (* Helper to localize errors by stmt, at minimum. *)
     try
@@ -3401,7 +3419,12 @@ let trans_visitor
         end;
       Stack.push stmt.id curr_stmt;
       trans_stmt_full stmt;
-      curr_stmt := None
+      begin
+        match stmt.node with
+            Ast.STMT_be _
+          | Ast.STMT_ret _ -> ()
+          | _ -> drop_slots_at_curr_stmt();
+      end;
       ignore (Stack.pop curr_stmt);
     with
         Semant_err (None, msg) -> raise (Semant_err ((Some stmt.id), msg))
@@ -3737,6 +3760,7 @@ let trans_visitor
                 None -> ()
               | Some at -> trans_set_outptr at
           end;
+          drop_slots_at_curr_stmt();
           Stack.push (mark()) (Stack.top epilogue_jumps);
           emit (Il.jmp Il.JMP Il.CodeNone)
 
@@ -3934,13 +3958,13 @@ let trans_visitor
       iflog (fun _ -> annotate "finished prologue");
   in
 
-  let trans_frame_exit (fnid:node_id) (drop_slots:bool) : unit =
+  let trans_frame_exit (fnid:node_id) (drop_args:bool) : unit =
     Stack.iter patch (Stack.pop epilogue_jumps);
-    if drop_slots
+    if drop_args
     then
       begin
-        iflog (fun _ -> annotate "drop frame");
-        iter_frame_and_arg_slots cx fnid callee_drop_slot;
+        iflog (fun _ -> annotate "drop args");
+        iter_arg_slots cx fnid callee_drop_slot;
       end;
     iflog (fun _ -> annotate "epilogue");
     abi.Abi.abi_emit_fn_epilogue (emitter());
