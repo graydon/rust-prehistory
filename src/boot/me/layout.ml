@@ -248,7 +248,10 @@ let layout_visitor
 
   let glue_callsz =
     let word = interior_slot Ast.TY_int in
-    let glue_fn = mk_simple_ty_fn [| word; word |] in
+    let glue_fn =
+      mk_simple_ty_fn
+        (Array.init Abi.worst_case_glue_call_args (fun _ -> word))
+    in
       rty_sz (indirect_call_args_referent_type cx 0 glue_fn Il.OpaqueTy)
   in
 
