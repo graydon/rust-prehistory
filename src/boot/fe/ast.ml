@@ -385,6 +385,7 @@ and obj =
       obj_state: header_slots;
       obj_constrs: constrs;
       obj_fns: (ident,fn identified) Hashtbl.t;
+      obj_drop: block option;
     }
 
 (*

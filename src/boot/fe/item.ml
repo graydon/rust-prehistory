@@ -769,6 +769,7 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             bump ps;
             let (ident, params) = parse_ident_and_params ps "obj" in
             let (state, constrs) = (ctxt "obj state" parse_inputs ps) in
+            let drop = ref None in
               expect ps LBRACE;
               let fns = Hashtbl.create 0 in
                 while (not (peek ps = RBRACE))
@@ -788,14 +789,21 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                             let fn = ctxt "obj fn: fn" (parse_fn is_iter pure) ps in
                             let bpos = lexpos ps in
                               htab_put fns ident (span ps apos bpos fn)
+
+                      | DROP ->
+                          bump ps;
+                          drop := Some (parse_block ps)
+
                       | RBRACE -> ()
+
                       | _ -> raise (unexpected ps)
                 done;
                 expect ps RBRACE;
                 let bpos = lexpos ps in
                 let obj = { Ast.obj_state = state;
                             Ast.obj_constrs = constrs;
-                            Ast.obj_fns = fns }
+                            Ast.obj_fns = fns;
+                            Ast.obj_drop = !drop }
                 in
                   (ident,
                    span ps apos bpos
