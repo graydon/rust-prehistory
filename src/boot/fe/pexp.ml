@@ -305,7 +305,7 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
 
     | PURE -> (bump ps; Ast.TY_fn (fst (parse_ty_fn true ps)))
 
-    | FN _ -> Ast.TY_fn (fst (parse_ty_fn false ps))
+    | FN -> Ast.TY_fn (fst (parse_ty_fn false ps))
 
     | _ -> raise (unexpected ps)
 
