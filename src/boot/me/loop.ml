@@ -83,6 +83,23 @@ let loop_depth_visitor
       htab_put cx.ctxt_fn_loop_depths fn.id fcx.max_depth
   in
 
+  let visit_obj_drop_pre
+      (obj:Ast.obj identified)
+      (b:Ast.block)
+      : unit =
+    Stack.push top_fcx fcxs;
+    inner.Walk.visit_obj_drop_pre obj b
+  in
+
+  let visit_obj_drop_post
+      (obj:Ast.obj identified)
+      (b:Ast.block)
+      : unit =
+    inner.Walk.visit_obj_drop_post obj b;
+    let fcx = Stack.pop fcxs in
+      htab_put cx.ctxt_fn_loop_depths b.id fcx.max_depth
+  in
+
   let visit_stmt_pre s =
     begin
       match s.node with
@@ -109,6 +126,8 @@ let loop_depth_visitor
         Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_obj_fn_pre = visit_obj_fn_pre;
         Walk.visit_obj_fn_post = visit_obj_fn_post;
+        Walk.visit_obj_drop_pre = visit_obj_drop_pre;
+        Walk.visit_obj_drop_post = visit_obj_drop_post;
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_stmt_post = visit_stmt_post }
 ;;
