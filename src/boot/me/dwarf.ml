@@ -1541,8 +1541,8 @@ let dwarf_visitor
                              |]));
               ref_addr_for_fix fix
       | Ast.MODE_interior _ -> ref_type_die (slot_ty slot)
-      | Ast.MODE_read_alias _ -> alias_slot false
-      | Ast.MODE_write_alias _ -> alias_slot true
+      | Ast.MODE_read_alias -> alias_slot false
+      | Ast.MODE_write_alias -> alias_slot true
 
 
   and size_block4 (sz:size) (add_to_base:bool) : frag =

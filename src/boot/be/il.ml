@@ -336,8 +336,8 @@ let rec referent_ty_layout (word_bits:bits) (rt:referent_ty) : (size * size) =
           in
             Array.fold_left accum (SIZE_fixed 0L, SIZE_fixed 1L) rts
         end
-   | OpaqueTy _ -> bug () "opaque ty in referent_ty_layout"
-   | CodeTy _ -> bug () "code ty in referent_ty_layout"
+   | OpaqueTy -> bug () "opaque ty in referent_ty_layout"
+   | CodeTy -> bug () "code ty in referent_ty_layout"
    | ParamTy i -> (SIZE_param_size i, SIZE_param_align i)
    | NilTy -> (SIZE_fixed 0L, SIZE_fixed 1L)
 
