@@ -53,6 +53,7 @@ type defn =
   | DEFN_item of Ast.mod_item_decl
   | DEFN_ty_param of Ast.ty_param
   | DEFN_obj_fn of (node_id * Ast.fn)
+  | DEFN_obj_drop of node_id
 ;;
 
 type glue_code = (glue, code) Hashtbl.t;;
@@ -332,12 +333,14 @@ let rec n_item_ty_params (cx:ctxt) (id:node_id) : int =
   match Hashtbl.find cx.ctxt_all_defns id with
       DEFN_item i -> Array.length i.Ast.decl_params
     | DEFN_obj_fn (oid,_) -> n_item_ty_params cx oid
+    | DEFN_obj_drop oid -> n_item_ty_params cx oid
     | _ -> bugi cx id "n_item_ty_params on non-item"
 ;;
 
 let item_is_obj_fn (cx:ctxt) (id:node_id) : bool =
   match Hashtbl.find cx.ctxt_all_defns id with
-      DEFN_obj_fn _ -> true
+      DEFN_obj_fn _
+    | DEFN_obj_drop _ -> true
     | _ -> false
 ;;
 
