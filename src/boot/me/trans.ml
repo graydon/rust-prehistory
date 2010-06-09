@@ -1073,23 +1073,17 @@ let trans_visitor
       mov (word_at (fp_imm frame_crate_ptr)) (Il.Cell (crate_ptr_cell));
       mov (word_at (fp_imm frame_fns_disp)) frame_fns
 
-  and trans_glue_frame_entry_full
+  and trans_glue_frame_entry
       (callsz:size)
-      (framesz:size)
+      (spill:fixup)
       : unit =
+    let framesz = SIZE_fixup_mem_sz spill in
       push_new_emitter_with_vregs None;
       iflog (fun _ -> annotate "prologue");
       abi.Abi.abi_emit_fn_prologue (emitter())
         framesz callsz nabi_rust (upcall_fixup "upcall_grow_task");
       write_frame_info_ptrs None;
       iflog (fun _ -> annotate "finished prologue");
-
-  and trans_glue_frame_entry
-      (callsz:size)
-      (spill:fixup)
-      : unit =
-    let framesz = SIZE_fixup_mem_sz spill in
-      trans_glue_frame_entry_full callsz framesz
 
   and emitted_quads e =
     Array.sub e.Il.emit_quads 0 e.Il.emit_pc
@@ -4326,8 +4320,14 @@ let trans_visitor
     let framesz = get_framesz cx b.id in
     let callsz = get_callsz cx b.id in
     let spill = Hashtbl.find cx.ctxt_spill_fixups b.id in
-      trans_glue_frame_entry_full callsz framesz;
+      push_new_emitter_with_vregs (Some b.id);
+      iflog (fun _ -> annotate "prologue");
+      abi.Abi.abi_emit_fn_prologue (emitter())
+        framesz callsz nabi_rust (upcall_fixup "upcall_grow_task");
+      write_frame_info_ptrs None;
+      iflog (fun _ -> annotate "finished prologue");
       trans_block b;
+      Hashtbl.remove cx.ctxt_glue_code g;
       trans_glue_frame_exit fix spill g;
       inner.Walk.visit_obj_drop_pre obj b
   in
