@@ -187,9 +187,16 @@ let all_item_collecting_visitor
     inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
+  let visit_obj_drop_pre obj b =
+    htab_put cx.ctxt_all_defns b.id (DEFN_obj_drop obj.id);
+    htab_put cx.ctxt_all_item_names b.id (Walk.path_to_name path);
+    inner.Walk.visit_obj_drop_pre obj b
+  in
+
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
-        Walk.visit_obj_fn_pre = visit_obj_fn_pre; }
+        Walk.visit_obj_fn_pre = visit_obj_fn_pre;
+        Walk.visit_obj_drop_pre = visit_obj_drop_pre; }
 ;;
 
 
@@ -511,6 +518,12 @@ let type_resolving_visitor
       inner.Walk.visit_obj_fn_pre obj ident fn
   in
 
+  let visit_obj_drop_pre obj b =
+    let fty = mk_simple_ty_fn [| |] in
+      htab_put cx.ctxt_all_item_types b.id fty;
+      inner.Walk.visit_obj_drop_pre obj b
+  in
+
   let visit_lval_pre lv =
     let rec rebuild_lval' lv =
         match lv with
@@ -553,6 +566,7 @@ let type_resolving_visitor
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_obj_fn_pre = visit_obj_fn_pre;
+        Walk.visit_obj_drop_pre = visit_obj_drop_pre;
         Walk.visit_lval_pre = visit_lval_pre; }
 ;;
 
