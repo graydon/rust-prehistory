@@ -1162,6 +1162,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           match Hashtbl.find cx.ctxt_all_defns id with
               DEFN_item i -> Array.map (fun p -> p.node) i.Ast.decl_params
             | DEFN_obj_fn _ -> [| |]
+            | DEFN_obj_drop _ -> [| |]
             | _ -> err (Some id) "expected item defn for item tyvar"
         in
         let spec = TYSPEC_resolved (params, ty) in
