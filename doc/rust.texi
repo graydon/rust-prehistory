@@ -496,7 +496,7 @@ primarily of immutable types, but also permits limited, local
 Rust is not a particularly original language. It may however appear
 unusual by contemporary standards, as its design elements are drawn
 from a number of ``historical'' languages that have, with a few
-exceptions, fallen out of favour. Four prominent lineages contribute
+exceptions, fallen out of favour. Five prominent lineages contribute
 the most:
 
 @itemize
@@ -508,15 +508,16 @@ their group at IBM Watson Research Center (Yorktown Heights, NY, USA).
 
 @sp 1
 @item
-The Napier (1985) and Napier88 (1988) family. These languages were
-developed by Malcolm Atkinson, Ron Morrison and others in their group
-at the University of St. Andrews (St. Andrews, Fife, UK).
-
-@sp 1
-@item
 The Erlang (1987) language, developed by Joe Armstrong, Robert
 Virding, Claes Wikstr@"om, Mike Williams and others in their group at
 the Ericsson Computer Science Laboratory (@"Alvsj@"o, Stockholm, Sweden) .
+
+@sp 1
+@item
+The Sather (1990) language, developed by Stephen Omohundro, Chu-Cheow
+Lim, Heinz Schmidt and others in their group at The International
+Computer Science Institute of the University of California, Berkeley
+(Berkeley, CA, USA).
 
 @sp 1
 @item
@@ -524,14 +525,18 @@ The Newsqueak (1988), Alef (1995), and Limbo (1996) family. These languages
 were developed by Rob Pike, Phil Winterbottom, Sean Dorward and others in
 their group at Bell labs Computing Sciences Reserch Center (Murray Hill,
 NJ, USA).
+
+@sp 1
+@item
+The Napier (1985) and Napier88 (1988) family. These languages were
+developed by Malcolm Atkinson, Ron Morrison and others in their group
+at the University of St. Andrews (St. Andrews, Fife, UK).
 @end itemize
 
 @sp 1
 Additional specific influences can be seen from the following languages:
 @itemize
 @item The structural algebraic types and compilation manager of SML.
-@item The stack-iterator system of CLU, Sather and Objective C 2.0.
-@item The @code{bind} operator from Sather.
 @item The syntax-extension systems of Camlp4 and the Common Lisp readtable.
 @item The deterministic destructor system of C++.
 @item The term @code{task} from Ada.
