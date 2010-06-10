@@ -262,8 +262,7 @@ vectors, and tagged disjoint unions. Structural types may be
 @item Generic code
 
 Rust supports a simple form of parametric polymorphism: functions,
-types and objects can be parameterised by other types. Type parameters
-are treated as opaque within the parameterised code.
+types and objects can be parameterised by other types.
 
 @sp 1
 @item Argument binding
@@ -298,17 +297,17 @@ have destructors.
 @item Dynamic type
 
 Rust includes support for slots of a top type, @code{any}, that can
-hold any type of value whatsoever. An @code{any} slot is simply a pair
-of a type code and an exterior value of that type. Injection into an
-@code{any} and projection by type-case-selection is integrated into the
-language.
+hold any type of value whatsoever. An @code{any} slot is a pair of a
+type code and an exterior value of that type. Injection into an
+@code{any} and projection by type-case-selection is integrated into
+the language.
 
 @sp 1
 @item Dynamic metaprogramming (reflection)
 
-Rust supports run-time reflection on the structure of a crate, using
-the same DWARF tables used to support the @code{any} type and various
-other runtime services.
+Rust supports run-time reflection on the structure of a crate, using a
+combination of custom descriptor structures and the DWARF metadata
+tables used to support crate linkage and other runtime services.
 
 @sp 1
 @item Static metaprogramming (syntactic extension)
@@ -335,8 +334,8 @@ is idempotent and non-recoverable.
 Rust has a system for propagating task-failures and other spontaneous
 events between tasks. Some signals can be trapped and redirected to
 channels; other signals are fatal and result in task-failure. Tasks
-can designate other tasks to handle signals for them. This permits organising
-tasks into mutually-supervising or mutually-failing groups.
+can designate other tasks to handle signals for them. This permits
+organising tasks into mutually-supervising or mutually-failing groups.
 
 @sp 1
 @item Deterministic destruction
@@ -979,11 +978,6 @@ directives, except they govern the syntax extension namespace
 @code{syntax} directive also makes its extension available to all
 subsequent directives in the crate file.
 
-The @code{native} directives of a crate declare top-level ``special''
-items that are not available to nested modules. This restriction
-simplifies the treatment of first-class modules elsewhere in the
-language.
-
 An example of a crate:
 
 @example
@@ -1094,10 +1088,10 @@ Allocations in the stack and the heap consist of @emph{slots}.
 @subsection Ref.Mem.Alloc
 @c * Ref.Mem.Alloc::               Memory allocation model.
 
-The @dfn{items} of a program are those functions, modules, types, and
-other artifacts that have their value calculated at compile-time and
-stored uniquely in the memory image of the rust process. Items are
-neither dynamically allocated nor freed.
+The @dfn{items} of a program are those functions, predicates,
+iterators, objects, modules and types that have their value calculated
+at compile-time and stored uniquely in the memory image of the rust
+process. Items are neither dynamically allocated nor freed.
 
 A task's @dfn{stack} consists of activation frames automatically
 allocated on entry to each function as the task executes. A stack
@@ -1545,10 +1539,11 @@ fn main() @{
 @subsubsection Ref.Item.Mod.Export
 @c * Ref.Item.Mod.Import::     Declarations for restricting visibility.
 
-An @dfn{export declaration} restricts the set of local declarations within a module
-that can be accessed from code outside the module. By default, all local declarations in
-a module are exported. If a module contains an export declaration, this declaration replaces
-the default export with the export specified.
+An @dfn{export declaration} restricts the set of local declarations
+within a module that can be accessed from code outside the module. By
+default, all local declarations in a module are exported. If a module
+contains an export declaration, this declaration replaces the default
+export with the export specified.
 
 An example of an export:
 @example
@@ -2060,7 +2055,7 @@ simplex inter-task communication facility. @xref{Ref.Task.Comm}. A
 @code{port} type takes a single type parameter, denoting the type of
 value that can be received from a @code{port} value of that type.
 
-Ports are modeled as mutable native modules with built-in meaning to
+Ports are modeled as mutable native types with built-in meaning to
 the language. They cannot be transmitted over channels or otherwise
 replicated, and are always local to the task that creates them.
 
@@ -2084,8 +2079,8 @@ parameter, denoting the type of value that can be sent to a channel of
 that type.
 
 Channels are immutable types, and can be transmitted over channels to
-other tasks. They are modeled as immutable native modules with
-built-in meaning to the language.
+other tasks. They are modeled as immutable native types with built-in
+meaning to the language.
 
 When a task sends a message into a channel, the task forms an
 outgoing queue associated with that channel. The per-task queue
@@ -2122,10 +2117,10 @@ purpose of a variable of @code{task} type is to manage the lifecycle
 of the associated task. Communication is carried out solely using
 channels and ports.
 
-Like ports, tasks are modeled as mutable native module types with
-built-in meaning to the language. They cannot be transmitted over
-channels or otherwise replicated, and are always local to the task
-that spawns them.
+Like ports, tasks are modeled as mutable native types with built-in
+meaning to the language. They cannot be transmitted over channels or
+otherwise replicated, and are always local to the task that spawns
+them.
 
 If all references to a task are dropped (due to the release of any
 slots holding those references), the released task immediately fails.
@@ -2494,10 +2489,10 @@ containing block, both before and after the declaration.
 
 An @dfn{item declaration statement} has a syntactic form identical to
 an item declaration within a module. Declaring an item -- a function,
-type, module or predicate -- locally within a statement block is
-simply a way of restricting its scope to a narrow region containing
-all of its uses; it is otherwise identical in meaning to declaring the
-item outside the statement block.
+predicate, iterator, object, type or module -- locally within a
+statement block is simply a way of restricting its scope to a narrow
+region containing all of its uses; it is otherwise identical in
+meaning to declaring the item outside the statement block.
 
 @page
 @node          Ref.Stmt.Decl.Slot
