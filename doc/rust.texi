@@ -2024,8 +2024,8 @@ x = bo(5,7);
 @subsection Ref.Type.Iter
 
 The iterator type-constructor @code{iter} forms new iterator types. An
-witeratorfunction type consists a set of input types, an output type,
-and a flag indicating whether the iterator is
+iterator type consists a set of input types, an output type, and a
+flag indicating whether the iterator is
 @code{pure}. @xref{Ref.Item.Iter}.
 
 An example of an @code{iter} type:
