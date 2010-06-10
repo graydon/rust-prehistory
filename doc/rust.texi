@@ -2221,8 +2221,9 @@ let ordered_range rng2 = rec(low=15, high=17);
 Rust has two kinds of expressions: @emph{parsed expressions} and
 @emph{primitive expressions}.  The former are syntactic sugar and are
 eliminated during parsing. The latter are very minimal, consisting
-only of paths, possibly combined via a single level (non-recursive)
-unary or binary machine-level operation (ALU or FPU). @xref{Ref.Path}.
+only of paths and primitive literals, possibly combined via a single
+level (non-recursive) unary or binary machine-level operation (ALU or
+FPU). @xref{Ref.Path}.
 
 For the most part, Rust semantics are defined in terms of
 @emph{statements}, which parsed expressions are desugared to. The
@@ -2235,11 +2236,11 @@ statements, @xref{Ref.Stmt.Copy}.
 @section Ref.Stmt
 @c * Ref.Stmt::               Executable statements.
 
-A @dfn{statement} is a component of a function or a predicate. When a
-function is spawned into a task, the task @emph{executes}
-statements in an order determined by the body of the enclosing
-structure. Each statement causes the task to perform certain
-actions.
+A @dfn{statement} is a component of a block, which are in turn
+components of outer blocks, functions, predicates or iterators. When a
+function is spawned into a task, the task @emph{executes} statements
+in an order determined by the body of the enclosing structure. Each
+statement causes the task to perform certain actions.
 
 @menu
 * Ref.Stmt.Stat::               The static typestate system of statement analysis.
@@ -2281,8 +2282,8 @@ statement in its environment.
 
 The legality of a statement is partly governed by syntactic rules,
 partly by its conformance to the types of slots it affects, and partly
-by a purely statement-oriented static analysis. This section describes
-the statement-oriented static analysis, also called the
+by a statement-oriented static dataflow analysis. This section describes
+the statement-oriented static dataflow analysis, also called the
 @emph{typestate} system.
 
 @menu
