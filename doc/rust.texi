@@ -1991,8 +1991,8 @@ a = cat;
 
 An example of a @emph{recursive} @code{tag} type and its use:
 @example
-type list[T] = tag[T](nil,
-                      cons(T, @@list[T]));
+type list[T] = tag(nil,
+                   cons(T, @@list[T]));
 let list[int] a = cons(7, cons(13, nil));
 @end example
 
