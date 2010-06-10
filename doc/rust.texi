@@ -341,7 +341,7 @@ organising tasks into mutually-supervising or mutually-failing groups.
 @item Deterministic destruction
 
 Immutable objects can have destructor functions, which are executed
-deterministically in bottom-up ownership order, as control frames are
+deterministically in top-down ownership order, as control frames are
 exited and/or objects are otherwise freed from data structures holding
 them. The same destructors are run in the same order whether the
 object is deleted by unwinding during failure or normal execution.
@@ -356,7 +356,7 @@ Unreferenced mutable memory is freed at an undefined time between the
 moment the last reference to it from a live frame drops, and the end
 of the lifetime of the task owning it. Mutable memory can point to
 immutable memory; doing so merely delays (to an undefined future time)
-the moment when the deterministic, bottom-up destruction sequence for
+the moment when the deterministic, top-down destruction sequence for
 the referenced immutable memory @emph{starts}. In other words, the
 immutable ``leaves'' of a mutable structure are released in a
 locally-predictable order, even if the ``interior'' of the mutable
@@ -437,7 +437,7 @@ garbage-collected heaps. Collection pauses in these local heaps are
 brief and do not interrupt other tasks.
 
 Immutable values are reference-counted and have a deterministic
-destruction order: bottom-up, immediately upon release of the last
+destruction order: top-down, immediately upon release of the last
 live reference.
 
 Mutable types can refer to immutable types, but not vice-versa. Rust
