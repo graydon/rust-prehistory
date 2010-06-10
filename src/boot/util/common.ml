@@ -430,8 +430,8 @@ let i64_max (a:int64) (b:int64) : int64 = (if (Int64.compare a b) > 0 then a els
 let i64_min (a:int64) (b:int64) : int64 = (if (Int64.compare a b) < 0 then a else b)
 let i64_align (align:int64) (v:int64) : int64 =
   (assert (align <> 0L));
-  let padding = Int64.rem (Int64.sub align (Int64.rem v align)) align in
-    Int64.add v padding
+  let mask = Int64.sub align 1L in
+    Int64.logand (Int64.lognot mask) (Int64.add v mask)
 ;;
 
 let rec i64_for (lo:int64) (hi:int64) (thunk:int64 -> unit) : unit =
@@ -463,8 +463,8 @@ let i32_max (a:int32) (b:int32) : int32 = (if (Int32.compare a b) > 0 then a els
 let i32_min (a:int32) (b:int32) : int32 = (if (Int32.compare a b) < 0 then a else b)
 let i32_align (align:int32) (v:int32) : int32 =
   (assert (align <> 0l));
-  let padding = Int32.rem (Int32.sub align (Int32.rem v align)) align in
-    Int32.add v padding
+  let mask = Int32.sub align 1l in
+    Int32.logand (Int32.lognot mask) (Int32.add v mask)
 ;;
 
 

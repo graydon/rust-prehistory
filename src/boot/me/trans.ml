@@ -586,25 +586,28 @@ let trans_visitor
                    * calculate off + pad where:
                    *
                    * pad = (align - (off mod align)) mod align
+                   * 
+                   * In our case it's always a power of two, 
+                   * so we can just do:
+                   * 
+                   * mask = align-1
+                   * off += mask
+                   * off &= ~mask
                    *
                    *)
                   annotate "fetch alignment";
                   let op_align = sub_sz align in
                     annotate "fetch offset";
                     let op_off = sub_sz off in
-                    let t1 = next_vreg_cell word_ty in
-                    let t2 = next_vreg_cell word_ty in
-                    let t3 = next_vreg_cell word_ty in
-                    let t4 = next_vreg_cell word_ty in
-                      annotate "tmp = off % align";
-                      emit (Il.binary Il.UMOD t1 op_off op_align);
-                      annotate "tmp = align - tmp";
-                      emit (Il.binary Il.SUB t2 op_align (Il.Cell t1));
-                      annotate "tmp = tmp % align";
-                      emit (Il.binary Il.UMOD t3 (Il.Cell t2) op_align);
-                      annotate "tmp = tmp + off";
-                      add t4 (Il.Cell t3) op_off;
-                      Il.Cell t4
+                    let mask = next_vreg_cell word_ty in
+                    let off = next_vreg_cell word_ty in
+                      mov mask op_align;
+                      sub_from mask one;
+                      mov off op_off;
+                      add_to off (Il.Cell mask);
+                      emit (Il.unary Il.NOT mask (Il.Cell mask));
+                      emit (Il.binary Il.AND off (Il.Cell off) (Il.Cell mask));
+                      Il.Cell off
           in
             iflog (fun _ -> annotate
                      (Printf.sprintf "calculated size %s is %s"

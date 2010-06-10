@@ -772,17 +772,16 @@ let rec calculate_sz (e:Il.emitter) (size:size) : unit =
   let push x = emit (Il.Push x) in
   let pop x = emit (Il.Pop x) in
   let neg x = emit (Il.unary Il.NEG (rc x) (ro x)) in
+  let bnot x = emit (Il.unary Il.NOT (rc x) (ro x)) in
+  let band x y = emit (Il.binary Il.AND (rc x) (ro x) (ro y)) in
   let add x y = emit (Il.binary Il.ADD (rc x) (ro x) (ro y)) in
   let mul x y = emit (Il.binary Il.UMUL (rc x) (ro x) (ro y)) in
-  let sub x y = emit (Il.binary Il.SUB (rc x) (ro x) (ro y)) in
+  let subi x y = emit (Il.binary Il.SUB (rc x) (ro x) (immi y)) in
   let eax_gets_a_and_ecx_gets_b a b =
     calculate_sz e b;
     push (ro eax);
     calculate_sz e a;
     pop (rc ecx);
-  in
-  let edx_gets_eax_mod_ecx _ =
-    emit (Il.binary Il.UMOD (rc edx) (ro eax) (ro ecx))
   in
     match size with
         SIZE_fixed i ->
@@ -828,24 +827,19 @@ let rec calculate_sz (e:Il.emitter) (size:size) : unit =
            *
            * pad = (align - (off mod align)) mod align
            *
-           * abbreviations in the table below:
-           *
-           *     t1 =          (off mod align)
-           *     t2 =  align - (off mod align)
+           * In our case it's always a power of two, 
+           * so we can just do:
+           * 
+           * mask = align-1
+           * off += mask
+           * off &= ~mask
+           * 
            *)
-                                                 (* eax      ecx      edx     sp[0] *)
-                                                 (* ------------------------------- *)
-          eax_gets_a_and_ecx_gets_b off align;   (* off      align                  *)
-          push (ro eax);                         (* off      align            off   *)
-          mov (rc edx) (immi 0L);                (* off      align            off   *)
-          edx_gets_eax_mod_ecx ();               (*          align    t1      off   *)
-          mov (rc eax) (ro edx);                 (* t1       align    t1      off   *)
-          mov (rc eax) (ro ecx);                 (* align    align    t1      off   *)
-          sub eax edx;                           (* t2       align    t1      off   *)
-          mov (rc edx) (immi 0L);                (* t2       align            off   *)
-          edx_gets_eax_mod_ecx ();               (*          align    pad     off   *)
-          pop (rc eax);                          (* off      align    pad           *)
-          add eax edx                            (* off+pad  align    pad           *)
+          eax_gets_a_and_ecx_gets_b off align;
+          subi ecx 1L;
+          add eax ecx;
+          bnot ecx;
+          band eax ecx;
 ;;
 
 let rec size_calculation_stack_highwater (size:size) : int =
