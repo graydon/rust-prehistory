@@ -936,7 +936,12 @@ let trans_visitor
                (trans_crate_rel_static_string_operand s)
                (referent_type abi Ast.TY_str))
 
-  and get_static_tydesc (t:Ast.ty) (sz:int64) (align:int64) : Il.operand =
+  and get_static_tydesc
+      (idopt:node_id option)
+      (t:Ast.ty)
+      (sz:int64)
+      (align:int64)
+      : Il.operand =
     trans_crate_rel_data_operand
       (DATA_tydesc t)
       begin
@@ -954,7 +959,17 @@ let trans_visitor
                    table_of_fixup_rel_fixups tydesc_fixup
                      [|
                        get_copy_glue t None;
-                       get_drop_glue t None;
+                       begin
+                         match idopt with
+                             None -> get_drop_glue t None;
+                           | Some oid ->
+                               begin
+                                 let g = GLUE_obj_drop oid in
+                                   match htab_search cx.ctxt_glue_code g with
+                                       Some code -> code.code_fixup
+                                     | None -> get_drop_glue t None
+                               end
+                       end;
                        get_free_glue t (slot_mem_ctrl (interior_slot t)) None;
                      |]
                  |])
@@ -1896,10 +1911,10 @@ let trans_visitor
             atoms;
             mov (get_element_ptr vec Abi.vec_elt_fill) (Il.Cell fill);
 
-  and get_dynamic_tydesc (t:Ast.ty) : Il.cell =
+  and get_dynamic_tydesc (idopt:node_id option) (t:Ast.ty) : Il.cell =
     let td = next_vreg_cell Il.voidptr_t in
     let root_desc =
-      Il.Cell (crate_rel_to_ptr (get_static_tydesc t 0L 0L) (tydesc_rty abi))
+      Il.Cell (crate_rel_to_ptr (get_static_tydesc idopt t 0L 0L) (tydesc_rty abi))
     in
     let (t, param_descs) = linearize_ty_params t in
     let descs = Array.append [| root_desc |] param_descs in
@@ -1923,15 +1938,15 @@ let trans_visitor
            Il.Cell descs_ptr |];
       td
 
-  and get_tydesc (ty:Ast.ty) : Il.cell =
+  and get_tydesc (idopt:node_id option) (ty:Ast.ty) : Il.cell =
       log cx "getting tydesc for %a" Ast.sprintf_ty ty;
     match ty with
         Ast.TY_param (idx, _) ->
           (get_ty_param_in_current_frame idx)
       | t when has_parametric_types t ->
-          (get_dynamic_tydesc t)
+          (get_dynamic_tydesc idopt t)
       | _ ->
-          (crate_rel_to_ptr (get_static_tydesc ty
+          (crate_rel_to_ptr (get_static_tydesc idopt ty
                                (ty_sz abi ty)
                                (ty_align abi ty))
              (tydesc_rty abi))
@@ -3102,7 +3117,7 @@ let trans_visitor
                           i n_ty_params));
             trans_init_slot_from_cell CLONE_none
               (get_element_ptr callee_ty_params i) word_slot
-              (get_tydesc ty_param) word_slot
+              (get_tydesc None ty_param) word_slot
         end
         call.call_callee_ty_params;
 
@@ -4053,7 +4068,7 @@ let trans_visitor
           iflog (fun _ -> annotate "write refcnt=1 to obj state");
           mov refcnt one;
           iflog (fun _ -> annotate "get args-tup tydesc");
-          mov obj_tydesc (Il.Cell (get_tydesc (Ast.TY_tup obj_args_tup)));
+          mov obj_tydesc (Il.Cell (get_tydesc (Some obj_id) (Ast.TY_tup obj_args_tup)));
           iflog (fun _ -> annotate "copy ctor args to obj args");
           trans_copy_tup
             frame_ty_params true
@@ -4330,9 +4345,16 @@ let trans_visitor
       write_frame_info_ptrs None;
       iflog (fun _ -> annotate "finished prologue");
       trans_block b;
-      Hashtbl.remove cx.ctxt_glue_code g;
-      trans_glue_frame_exit fix spill g;
-      inner.Walk.visit_obj_drop_pre obj b
+      iflog (fun _ -> annotate "dropping");
+      let ty_params = get_ty_params_of_current_frame() in
+      let obj_slots = Array.map (fun (sloti,_) -> sloti.node) obj.node.Ast.obj_state in
+      let obj_tup = Ast.TY_tup obj_slots in
+      let obj_tup_drop_glue = get_drop_glue obj_tup None in
+      let obj_ptr = get_closure_for_current_frame () in
+        trans_call_simple_static_glue obj_tup_drop_glue ty_params obj_ptr;
+        Hashtbl.remove cx.ctxt_glue_code g;
+        trans_glue_frame_exit fix spill g;
+        inner.Walk.visit_obj_drop_pre obj b
   in
 
   let visit_local_obj_fn_pre _ _ fn =
