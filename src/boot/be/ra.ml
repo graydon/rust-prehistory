@@ -374,7 +374,6 @@ let calculate_vreg_constraints (cx:ctxt) : Bits.t array =
 let reg_alloc
     (sess:Session.sess)
     (quads:Il.quads)
-    (spill_disp:int64)
     (vregs:int)
     (abi:Abi.abi) =
  try
@@ -389,7 +388,7 @@ let reg_alloc
     in
 
     (* Work out pre-spilled slots and allocate 'em. *)
-    let spill_slot (s:Il.spill) = abi.Abi.abi_spill_slot s spill_disp in
+    let spill_slot (s:Il.spill) = abi.Abi.abi_spill_slot s in
     let n_pre_spills = convert_pre_spills cx spill_slot in
 
     let (live_in_vregs, live_out_vregs) =

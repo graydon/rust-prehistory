@@ -66,8 +66,7 @@ let calltup_elt_args = 3;;
 let calltup_elt_iterator_args = 4;;
 let calltup_elt_indirect_args = 5;;
 
-let iterator_args_elt_loop_size = 0;;
-let iterator_args_elt_loop_info_ptr = 1;;
+let iterator_args_elt_loop_info_ptr = 0;;
 
 let indirect_args_elt_closure = 0;;
 
@@ -92,14 +91,6 @@ type abi =
     abi_emit_fn_prologue: (Il.emitter -> Common.size -> Common.size -> Common.nabi -> Common.fixup -> unit);
     abi_emit_fn_epilogue: (Il.emitter -> unit);
     abi_emit_fn_tail_call: (Il.emitter -> int64 -> int64 -> Il.code -> int64 -> unit);
-    abi_emit_iterator_prologue: (Il.emitter -> Il.referent_ty -> unit);
-    abi_emit_iteration_prologue: (Il.emitter -> Common.nabi -> int -> int -> Common.fixup -> (unit -> Il.operand) -> unit);
-    abi_emit_iteration_epilogue: (Il.emitter -> int -> Il.cell -> unit);
-    abi_emit_loop_prologue: (Il.emitter -> int -> unit);
-    abi_emit_loop_epilogue: (Il.emitter -> int -> unit);
-    abi_emit_put: (Il.emitter -> Il.referent_ty -> unit);
-
-    abi_iterator_args: (Il.emitter -> Common.fixup -> int -> Il.operand array);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 
@@ -121,8 +112,7 @@ type abi =
     abi_implicit_args_sz: int64;
     abi_frame_base_sz: int64;
     abi_frame_info_sz: int64;
-    abi_loop_info_sz: int64;
-    abi_spill_slot: (Il.spill -> int64 -> Il.mem);
+    abi_spill_slot: (Il.spill -> Il.mem);
   }
 ;;
 

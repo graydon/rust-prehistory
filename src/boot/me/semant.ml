@@ -12,7 +12,6 @@ type code = {
   code_fixup: fixup;
   code_quads: Il.quads;
   code_vregs_and_spill: (int * fixup) option;
-  code_spill_disp: int64;
 }
 ;;
 

@@ -514,8 +514,6 @@ let frame_base_sz = Int64.mul (Int64.of_int frame_base_words) word_sz;;
 
 let frame_info_words = 2 (* crate ptr, crate-rel frame info disp *) ;;
 let frame_info_sz = Int64.mul (Int64.of_int frame_info_words) word_sz;;
-let loop_info_words = 3 (* iterator retpc, iterator esp, loop function esp *) ;;
-let loop_info_sz = Int64.mul (Int64.of_int loop_info_words) word_sz;;
 
 let implicit_arg_words = 2 (* task ptr,out ptr *);;
 let implicit_args_sz =  Int64.mul (Int64.of_int implicit_arg_words) word_sz;;
@@ -524,10 +522,10 @@ let out_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words);;
 let task_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words+1);;
 let ty_param_n i = wordptr_n (Il.Hreg ebp) (frame_base_words + implicit_arg_words + i);;
 
-let spill_slot (i:Il.spill) (spill_disp:int64) : Il.mem =
+let spill_slot (i:Il.spill) : Il.mem =
   let imm = (Asm.IMM
                (Int64.neg
-                  (Int64.add (Int64.add frame_info_sz spill_disp)
+                  (Int64.add frame_info_sz
                      (Int64.mul word_sz
                         (Int64.of_int (i+1))))))
   in
@@ -1236,151 +1234,6 @@ let self_args_cell (self_args_rty:Il.referent_ty) : Il.cell =
   Il.Mem (Il.RegIn (h ebp, Some (Asm.IMM frame_base_sz)), self_args_rty)
 ;;
 
-let iterator_prologue (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
-  let edx_n = word_n (h edx) in
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-  let all_args_cell = self_args_cell self_args_rty in
-  let iterator_args_cell = get_element_ptr all_args_cell Abi.calltup_elt_iterator_args in
-  let loop_info_ptr_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_info_ptr in
-    mov (rc edx) (c loop_info_ptr_cell);                           (* edx <- iterator_args[1] *)
-    mov (edx_n loop_info_field_sp) (ro esp)                        (* iterator_args[1] <- esp *)
-;;
-
-(* precondition: esp == &ils[depth] *)
-let iteration_prologue
-    (e:Il.emitter)
-    (nabi:nabi)
-    (depth:int)
-    (fn_depth:int)
-    (grow_task_fixup:fixup)
-    (get_callsz:unit -> Il.operand)
-    : unit =
-  let emit = Il.emit e in
-  (* offset of frame info relative to current esp *)
-  let frame_info_offset = Int64.mul (Int64.of_int (fn_depth - depth)) loop_info_sz in
-  (* offset of restored frame base relative to current esp *)
-  let frame_base_offset = Int64.add frame_info_offset frame_info_sz in
-  let mov dst src = emit (Il.umov dst src) in
-  let add dst src = emit (Il.binary Il.ADD dst (Il.Cell dst) src) in
-  let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
-    mov (rc ebp) (ro esp);                                         (* ebp <- &ils[depth] *)
-    add (rc ebp) (imm (Asm.IMM frame_base_offset));                (* ebp <- &ils[k] + frame_info_sz *)
-    mov (rc esp) (c (word_n (h esp) loop_info_field_sp));          (* esp <- ils[depth].it_esp *)
-
-    let restart_pc = e.Il.emit_pc in
-
-      (* this uses vregs, so we have to use vregs for temps from here on *)
-      let callsz = get_callsz () in
-      let (tmp1, tmpc1) = vreg e in
-      let (tmp2, _) = vreg e in
-
-        mov tmpc1 (c task_ptr);                                    (* tmp1 <- task *)
-        mov tmpc1 (c (word_n tmp1 Abi.task_field_stk));            (* tmp1 <- task->stk *)
-        add tmpc1 (imm
-                     (Asm.ADD
-                        ((word_off_n Abi.stk_field_data),
-                         boundary_sz)));
-
-        stack_growth_check e nabi grow_task_fixup                  (* check for stack space *)
-          callsz None restart_pc tmp1 tmp2;
-
-        (* Establish a frame, wherever we landed. *)
-        sub (rc esp) callsz
-;;
-
-let iteration_epilogue
-    (e:Il.emitter)
-    (depth:int)
-    (it_ptr_cell:Il.cell)
-    : unit =
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-  (* FIXME: abstract all this arithmetic *)
-  let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
-  let it_retpc_idx = Int64.mul (Int64.of_int loop_info_field_retpc) word_sz in
-  let it_retpc_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_retpc_idx)) in
-  let it_sp_idx = Int64.mul (Int64.of_int loop_info_field_sp) word_sz in
-  let it_sp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_sp_idx)) in
-  let it_fp_idx = Int64.mul (Int64.of_int loop_info_field_fp) word_sz in
-  let it_fp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_fp_idx)) in
-    mov it_ptr_cell (c (word_at_off (h ebp) it_retpc_off));        (* it <- ils[depth].it_retpc *)
-    mov (rc esp) (c (word_at_off (h ebp) it_sp_off));              (* esp <- ils[depth].it_esp *)
-    mov (rc ebp) (c (word_at_off (h ebp) it_fp_off))               (* ebp <- ils[depth].it_ebp *)
-;;
-
-let loop_prologue
-    (e:Il.emitter)
-    (depth:int)
-    : unit =
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-  let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
-  let it_fp_idx = Int64.mul (Int64.of_int loop_info_field_fp) word_sz in
-  let it_fp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_fp_idx)) in
-    mov (word_at_off (h ebp) it_fp_off) (ro esp)                   (* ils[i].it_ebp <- esp *)
-;;
-
-let loop_epilogue
-    (e:Il.emitter)
-    (depth:int)
-    : unit =
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-  let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
-  let it_fp_idx = Int64.mul (Int64.of_int loop_info_field_fp) word_sz in
-  let it_fp_off = Asm.IMM (Int64.neg (Int64.sub ils_base it_fp_idx)) in
-    mov (rc esp) (c (word_at_off (h ebp) it_fp_off))               (* esp <- ils[i].it_ebp *)
-;;
-
-let put (e:Il.emitter) (self_args_rty:Il.referent_ty) : unit =
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-  let lea dst src = emit (Il.lea dst src) in
-  let binary op dst src = emit (Il.binary op dst (c dst) src) in
-  let sub = binary Il.SUB in
-  let call src = emit (Il.call (Il.next_vreg_cell e Il.voidptr_t) (Il.CodePtr src)) in
-  let regfence () = emit Il.Regfence in
-  let (tgt, _) = vreg e in
-  let tgtc = Il.Reg (tgt, Il.AddrTy Il.CodeTy) in
-  let (_, tmpc1) = vreg e in
-  let (tmp2, tmpc2) = vreg e in
-  let retpc_off = Asm.IMM (Int64.sub frame_base_sz word_sz) in
-  let all_args_cell = self_args_cell self_args_rty in
-  let iterator_args_cell = get_element_ptr all_args_cell Abi.calltup_elt_iterator_args in
-  let loop_size_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_size in
-  let loop_info_ptr_cell = get_element_ptr iterator_args_cell Abi.iterator_args_elt_loop_info_ptr in
-    annotate e "put: get retpc (bottom of loop)";
-    mov tgtc (c (word_at_off (h ebp) retpc_off));                  (* tgt <- *retpc *)
-    annotate e "put: get loop size";
-    mov tmpc1 (c loop_size_cell);                                  (* tmp1 <- extra_args[0] *)
-    annotate e "put: target = retpc - loop size";
-    sub tgtc (c tmpc1);                                            (* tgt <- tgt - tmp1 *)
-    annotate e "put: get address of loop info segment";
-    mov tmpc2 (c loop_info_ptr_cell);                              (* tmp2 <- &extra_args[1]->it_retpc *)
-    annotate e "put: suspend";
-    lea (rc esp) (c (word_at_off tmp2 (Asm.IMM word_sz)));         (* esp <- &extra_args[1]->it_retpc + word_sz *)
-    regfence ();                                                   (* spill live registers *)
-    call (c tgtc)                                                  (* call tgt *)
-;;
-
-let iterator_args
-    (e:Il.emitter)
-    (foreach_loop:Common.fixup)
-    (depth:int)
-    : Il.operand array =
-  let emit = Il.emit e in
-  let mov dst src = emit (Il.umov dst src) in
-  let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
-  let ils_base = Int64.add frame_info_sz (Int64.mul loop_info_sz (Int64.of_int (depth + 1))) in
-  let (_, tmpc) = vreg e in
-    mov tmpc (ro ebp);                                             (* tmp <- ebp *)
-    sub tmpc (imm (Asm.IMM ils_base));                             (* tmp <- &ils[depth] *)
-    let arg0 = imm (Asm.M_SZ foreach_loop) in
-    let arg1 = c tmpc in
-      [| arg0; arg1 |]
-;;
-
 let activate_glue (e:Il.emitter) : unit =
   (*
    * This is a bit of glue-code. It should be emitted once per
@@ -1585,13 +1438,6 @@ let (abi:Abi.abi) =
     Abi.abi_emit_fn_prologue = fn_prologue;
     Abi.abi_emit_fn_epilogue = fn_epilogue;
     Abi.abi_emit_fn_tail_call = fn_tail_call;
-    Abi.abi_emit_iterator_prologue = iterator_prologue;
-    Abi.abi_emit_iteration_prologue = iteration_prologue;
-    Abi.abi_emit_iteration_epilogue = iteration_epilogue;
-    Abi.abi_emit_loop_prologue = loop_prologue;
-    Abi.abi_emit_loop_epilogue = loop_epilogue;
-    Abi.abi_emit_put = put;
-    Abi.abi_iterator_args = iterator_args;
     Abi.abi_clobbers = clobbers;
 
     Abi.abi_emit_native_call = emit_native_call;
@@ -1610,7 +1456,6 @@ let (abi:Abi.abi) =
     Abi.abi_tp_cell = task_ptr;
     Abi.abi_frame_base_sz = frame_base_sz;
     Abi.abi_frame_info_sz = frame_info_sz;
-    Abi.abi_loop_info_sz = loop_info_sz;
     Abi.abi_implicit_args_sz = implicit_args_sz;
     Abi.abi_spill_slot = spill_slot;
   }

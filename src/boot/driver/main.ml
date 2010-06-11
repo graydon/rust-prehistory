@@ -295,7 +295,6 @@ let main_pipeline _ =
                  (fun _ ->
                     Ra.reg_alloc sess
                       code.Semant.code_quads
-                      code.Semant.code_spill_disp
                       n_vregs abi))
             in
             let insns = select_insns quads' in

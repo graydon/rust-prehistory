@@ -182,13 +182,6 @@ let trans_visitor
      *)
     emit Il.Dead
   in
-  let mark_implicit _ : quad_idx =
-    let pc = mark () in
-      begin
-        emit Il.Dead;
-        pc
-      end
-  in
 
   let current_fn () =
     match (emitter()).Il.emit_node with
@@ -1118,8 +1111,7 @@ let trans_visitor
       iflog (fun _ -> annotate_quads (glue_str cx g));
       let code = { code_fixup = fix;
                    code_quads = emitted_quads e;
-                   code_vregs_and_spill = Some (Il.num_vregs e, spill);
-                   code_spill_disp = 0L }
+                   code_vregs_and_spill = Some (Il.num_vregs e, spill); }
       in
         htab_put cx.ctxt_glue_code g code
 
@@ -1286,8 +1278,7 @@ let trans_visitor
                *)
             let tmp_code = { code_fixup = fix;
                              code_quads = [| |];
-                             code_vregs_and_spill = None;
-                             code_spill_disp = 0L } in
+                             code_vregs_and_spill = None; } in
             let spill = new_fixup (name ^ " spill") in
               htab_put cx.ctxt_glue_code g tmp_code;
               log cx "emitting glue: %s" name;
@@ -3140,11 +3131,6 @@ let trans_visitor
       emit (Il.call vr code);
 
 
-  and call_iter_code (code:Il.code) (loop_head:Il.label) : unit =
-    let vr = next_vreg_cell Il.voidptr_t in
-      Il.emit_full (emitter ()) None [ loop_head ] (Il.call vr code);
-
-
   and copy_bound_args
       (dst_cell:Il.cell)
       (bound_arg_slots:Ast.slot array)
@@ -3293,10 +3279,10 @@ let trans_visitor
       : Il.operand array =
     match fco with
         None -> [| |]
-      | Some fc ->
+      | Some _ ->
           begin
             iflog (fun _ -> annotate "calculate iterator args");
-            abi.Abi.abi_iterator_args (emitter ()) fc.for_each_fixup fc.for_each_depth
+            [| |]
           end
 
   and call_indirect_args
@@ -3497,28 +3483,6 @@ let trans_visitor
             trans_block fo.Ast.for_body;
         end
         None
-
-
-  and trans_for_each_body
-      (depth:int)
-      (fn_depth:int)
-      (it_ptr_cell:Il.cell)
-      (body:Ast.block)
-      (loop_head:Il.label)
-      : unit =
-    let get_callsz () =
-      calculate_sz_in_current_frame (current_fn_callsz ())
-    in
-    let emit implicits insn =
-      Il.emit_full (emitter ()) None implicits insn
-    in
-      begin
-        abi.Abi.abi_emit_iteration_prologue (emitter ()) nabi_rust
-          depth fn_depth (upcall_fixup "upcall_grow_task") get_callsz;
-        trans_block body;
-        abi.Abi.abi_emit_iteration_epilogue (emitter ()) depth it_ptr_cell;
-        emit [ loop_head ] (Il.jmp Il.JMP (Il.CodePtr (Il.Cell it_ptr_cell)))
-      end
 
 
   and trans_vec_append dst_cell dst_slot src_oper src_ty =
@@ -3811,14 +3775,7 @@ let trans_visitor
                 | _ -> bug () "Calling unexpected lval."
             end
 
-      | Ast.STMT_put atom_opt ->
-          begin
-            match atom_opt with
-                None -> ()
-              | Some at -> trans_set_outptr at
-          end;
-          (* FIXME: might I be a closure? if so, then Some ... *)
-          abi.Abi.abi_emit_put (emitter ()) (current_fn_args_rty None)
+      | Ast.STMT_put _ -> ()
 
       | Ast.STMT_alt_tag stmt_alt_tag -> trans_alt_tag stmt_alt_tag
 
@@ -3827,43 +3784,7 @@ let trans_visitor
       | Ast.STMT_for fo ->
           trans_for_loop fo
 
-      | Ast.STMT_for_each fe ->
-          let (dst_slot, _) = fe.Ast.for_each_slot in
-          let dst_cell = cell_of_block_slot dst_slot.id in
-          let (flv, args) = fe.Ast.for_each_call in
-          let ty_params =
-            match htab_search cx.ctxt_call_lval_params (lval_base_id flv) with
-                Some params -> params
-              | None -> [| |]
-          in
-          let depth = Hashtbl.find cx.ctxt_loop_depths stmt.id in
-          let fn_depth = Hashtbl.find cx.ctxt_fn_loop_depths (current_fn ()) in
-          let body_fixup = new_fixup "for_each loop body" in
-          let fc = { for_each_fixup = body_fixup; for_each_depth = depth } in
-          let ptr = next_vreg () in
-          let ptrc = Il.Reg (ptr, Il.AddrTy Il.CodeTy) in
-          let code = code_of_operand (Il.Cell ptrc) in
-          let body = fe.Ast.for_each_body in
-            begin
-              iflog (fun _ ->
-                       log cx "for-each at depth %d in fn of depth %d\n" depth fn_depth);
-              let fn_ptr = reify_ptr (trans_prepare_fn_call true cx dst_cell flv ty_params (Some fc) args) in
-
-                mov ptrc fn_ptr;                                             (* p <- &fn *)
-                abi.Abi.abi_emit_loop_prologue (emitter ()) depth;           (* save stack pointer *)
-                let jmp = mark () in
-                  emit (Il.jmp Il.JMP Il.CodeNone);                          (* jump L2 *)
-                  emit (Il.Enter body_fixup);
-                  begin
-                    let loop_head = mark_implicit () in                      (* L1: *)
-                      trans_for_each_body depth fn_depth ptrc body loop_head;(* loop body *)
-                      patch jmp;                                             (* L2: *)
-                      call_iter_code code loop_head                          (* call p *)
-                  end;
-                  emit Il.Leave;
-
-                  abi.Abi.abi_emit_loop_epilogue (emitter ()) depth;         (* restore stack pointer *)
-            end
+      | Ast.STMT_for_each _ -> ()
 
       | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt %a"
           Ast.sprintf_stmt stmt
@@ -3888,12 +3809,9 @@ let trans_visitor
               None -> (assert (n_vregs = 0); None)
             | Some spill -> Some (n_vregs, spill)
         in
-        let loop_depth = Int64.of_int (Hashtbl.find cx.ctxt_fn_loop_depths node) in
-        let spill_disp = Int64.mul loop_depth (cx.ctxt_abi.Abi.abi_loop_info_sz) in
         let code = { code_fixup = fix;
                      code_quads = quads;
-                     code_vregs_and_spill = vr_s;
-                     code_spill_disp = spill_disp }
+                     code_vregs_and_spill = vr_s; }
         in
           htab_put item_code node code;
           htab_put cx.ctxt_all_item_code node code
@@ -3960,7 +3878,7 @@ let trans_visitor
       end
   in
 
-  let trans_frame_entry (fnid:node_id) (is_iter:bool) : unit =
+  let trans_frame_entry (fnid:node_id) : unit =
     let framesz = get_framesz cx fnid in
     let callsz = get_callsz cx fnid in
       Stack.push (Stack.create()) epilogue_jumps;
@@ -3973,10 +3891,6 @@ let trans_visitor
         (upcall_fixup "upcall_grow_task");
 
       write_frame_info_ptrs (Some fnid);
-      if is_iter
-      then
-        (* FIXME: might I be a closure? if so, then Some ... *)
-        abi.Abi.abi_emit_iterator_prologue (emitter()) (current_fn_args_rty None);
       iflog (fun _ -> annotate "finished prologue");
   in
 
@@ -3996,10 +3910,9 @@ let trans_visitor
 
   let trans_fn
       (fnid:node_id)
-      (is_iter:bool)
       (body:Ast.block)
       : unit =
-    trans_frame_entry fnid is_iter;
+    trans_frame_entry fnid;
     trans_block body;
     trans_frame_exit fnid true;
   in
@@ -4008,7 +3921,7 @@ let trans_visitor
       (obj_id:node_id)
       (state:Ast.header_slots)
       : unit =
-    trans_frame_entry obj_id false;
+    trans_frame_entry obj_id;
 
     let all_args_rty = current_fn_args_rty None in
     let all_args_cell = caller_args_cell all_args_rty in
@@ -4108,8 +4021,8 @@ let trans_visitor
                              [| Asm.WORD (word_ty_mach, Asm.IMM 0L) |]))
   in
 
-  let trans_required_fn (fnid:node_id) (is_iter:bool) (blockid:node_id) : unit =
-    trans_frame_entry fnid is_iter;
+  let trans_required_fn (fnid:node_id) (blockid:node_id) : unit =
+    trans_frame_entry fnid;
     emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups blockid));
     let (ilib, conv) = Hashtbl.find cx.ctxt_required_items fnid in
     let lib_num =
@@ -4247,7 +4160,7 @@ let trans_visitor
       (tagid:node_id)
       (tag:(Ast.header_tup * Ast.ty_tag * node_id))
       : unit =
-    trans_frame_entry tagid false;
+    trans_frame_entry tagid;
     trace_str cx.ctxt_sess.Session.sess_trace_tag
       ("in tag constructor " ^ n);
     let (header_tup, _, _) = tag in
@@ -4311,7 +4224,7 @@ let trans_visitor
                 cx.ctxt_main_exit_task_glue_fixup
                 GLUE_exit_main_task;
             end;
-          trans_fn i.id f.Ast.fn_aux.Ast.fn_is_iter f.Ast.fn_body
+          trans_fn i.id f.Ast.fn_body
 
       | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
       | Ast.MOD_ITEM_obj ob ->
@@ -4325,7 +4238,7 @@ let trans_visitor
   let visit_required_mod_item_pre _ _ i =
     iflog (fun _ -> log cx "translating required item #%d = %s" (int_of_node i.id) (path_name()));
     match i.node.Ast.decl_item with
-        Ast.MOD_ITEM_fn f -> trans_required_fn i.id f.Ast.fn_aux.Ast.fn_is_iter f.Ast.fn_body.id
+        Ast.MOD_ITEM_fn f -> trans_required_fn i.id f.Ast.fn_body.id
       | Ast.MOD_ITEM_mod _ -> ()
       | Ast.MOD_ITEM_type _ -> ()
       | _ -> bugi cx i.id "unsupported type of require: %s" (path_name())
@@ -4354,7 +4267,7 @@ let trans_visitor
   in
 
   let visit_local_obj_fn_pre _ _ fn =
-    trans_fn fn.id fn.node.Ast.fn_aux.Ast.fn_is_iter fn.node.Ast.fn_body
+    trans_fn fn.id fn.node.Ast.fn_body
   in
 
   let visit_required_obj_fn_pre _ _ _ =
@@ -4416,8 +4329,7 @@ let trans_visitor
           let code =
             { code_fixup = fix;
               code_quads = emitted_quads e;
-              code_vregs_and_spill = None;
-              code_spill_disp = 0L }
+              code_vregs_and_spill = None; }
           in
             htab_put cx.ctxt_glue_code glue code
     in
@@ -4561,8 +4473,7 @@ let fixup_assigning_visitor
     let fix = new_fixup (path_name()) in
     let tmp_code = { code_fixup = fix;
                      code_quads = [| |];
-                     code_vregs_and_spill = None;
-                     code_spill_disp = 0L } in
+                     code_vregs_and_spill = None; } in
       htab_put cx.ctxt_glue_code g tmp_code;
       inner.Walk.visit_obj_drop_pre obj b
   in
