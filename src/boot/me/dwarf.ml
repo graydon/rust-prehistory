@@ -1373,6 +1373,7 @@ let (abbrev_obj_subroutine_type:abbrev) =
 let (abbrev_obj_type:abbrev) =
     (DW_TAG_interface_type, DW_CHILDREN_yes,
      [|
+       (DW_AT_pure, DW_FORM_flag);
        (DW_AT_mutable, DW_FORM_flag);
      |])
 ;;
@@ -1805,8 +1806,9 @@ let dwarf_visitor
                  (* DW_AT_pure: DW_FORM_flag *)
                  BYTE (if taux.Ast.fn_effect = Ast.PURE then 1 else 0);
                  (* DW_AT_mutable: DW_FORM_flag *)
-                 BYTE (if taux.Ast.fn_effect = (Ast.IMPURE Ast.MUTABLE)
-                       then 1 else 0);
+                 BYTE (match taux.Ast.fn_effect with
+                           Ast.STATE | Ast.UNSAFE -> 1
+                         | _ -> 0);
                  (* DW_AT_rust_iterator: DW_FORM_flag *)
                  BYTE (if taux.Ast.fn_is_iter then 1 else 0)
                |])
@@ -1830,8 +1832,9 @@ let dwarf_visitor
                  (* DW_AT_pure: DW_FORM_flag *)
                  BYTE (if taux.Ast.fn_effect = Ast.PURE then 1 else 0);
                  (* DW_AT_mutable: DW_FORM_flag *)
-                 BYTE (if taux.Ast.fn_effect = (Ast.IMPURE Ast.MUTABLE)
-                       then 1 else 0);
+                 BYTE (match taux.Ast.fn_effect with
+                           Ast.STATE | Ast.UNSAFE -> 1
+                         | _ -> 0);
                  (* DW_AT_rust_iterator: DW_FORM_flag *)
                  BYTE (if taux.Ast.fn_is_iter then 1 else 0)
                |])
@@ -1842,14 +1845,17 @@ let dwarf_visitor
           ref_addr_for_fix fix
       in
 
-      let obj_type ob =
+      let obj_type (eff,ob) =
         let fix = new_fixup "object type" in
         let die =
           DEF (fix, SEQ [|
                  uleb (get_abbrev_code abbrev_obj_type);
+                 (* DW_AT_pure: DW_FORM_flag *)
+                 BYTE (if eff = Ast.PURE then 1 else 0);
                  (* DW_AT_mutable: DW_FORM_flag *)
-                 (* FIXME: model mutability properly. *)
-                 BYTE 0;
+                 BYTE (match eff with
+                           Ast.STATE | Ast.UNSAFE -> 1
+                         | _ -> 0);
                |])
         in
           emit_die die;
@@ -2662,8 +2668,8 @@ let rec extract_mod_items
   let get_effect die =
     match (get_mutability die, get_flag die DW_AT_pure) with
         (Ast.MUTABLE, true) -> bug () "mutable + pure combination in dwarf"
-      | (Ast.MUTABLE, false) -> Ast.IMPURE Ast.MUTABLE
-      | (Ast.IMMUTABLE, false) -> Ast.IMPURE Ast.IMMUTABLE
+      | (Ast.MUTABLE, false) -> Ast.STATE
+      | (Ast.IMMUTABLE, false) -> Ast.IO
       | (Ast.IMMUTABLE, true) -> Ast.PURE
   in
 
@@ -2785,6 +2791,7 @@ let rec extract_mod_items
             end
 
         | DW_TAG_interface_type ->
+            let eff = get_effect die in
             let fns = Hashtbl.create 0 in
               Array.iter
                 begin
@@ -2794,7 +2801,7 @@ let rec extract_mod_items
                       Hashtbl.add fns (get_name child) (get_ty_fn child)
                 end
                 die.die_children;
-              Ast.TY_obj fns
+              Ast.TY_obj (eff,fns)
 
         | DW_TAG_subroutine_type ->
             Ast.TY_fn (get_ty_fn die)
@@ -2932,7 +2939,7 @@ let rec extract_mod_items
           let ident = get_name die in
           let oslot = get_referenced_slot die in
           let (params, islots) = get_formals die in
-          let taux = { Ast.fn_effect = Ast.IMPURE Ast.IMMUTABLE;
+          let taux = { Ast.fn_effect = Ast.IO; (* FIXME: finish this! *)
                        Ast.fn_is_iter = false }
           in
           let tfn = { Ast.fn_input_slots = form_header_slots islots;

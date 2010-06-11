@@ -64,7 +64,7 @@
          "u8" "u16" "u32" "u64"))
 
 (c-lang-defconst c-type-modifier-kwds
-  rust '("pure"))
+  rust '("io" "state" "unsafe"))
 
 ;; declarator-block openings
 (c-lang-defconst c-other-block-decl-kwds
@@ -80,7 +80,7 @@
 
 ;; declarators that refer to other namespaces
 (c-lang-defconst c-ref-list-kwds
-  rust '("use" "import" "export"))
+  rust '("use" "auth" "import" "export"))
 
 ;; ops that are used to form identifiers
 (c-lang-defconst c-identifier-ops

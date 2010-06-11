@@ -268,7 +268,7 @@ and walk_ty
       | Ast.TY_tag ttag -> walk_ty_tag v ttag
       | Ast.TY_iso tiso -> Array.iter (walk_ty_tag v) tiso.Ast.iso_group
       | Ast.TY_fn tfn -> walk_ty_fn v tfn
-      | Ast.TY_obj fns ->
+      | Ast.TY_obj (_, fns) ->
           Hashtbl.iter (fun _ tfn -> walk_ty_fn v tfn) fns
       | Ast.TY_pred (slots, constrs) ->
           begin

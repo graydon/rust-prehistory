@@ -16,7 +16,7 @@ mod _str;
 
 // General IO and system-services modules.
 
-mod io;
+mod _io;
 mod sys;
 
 // Target-OS module.

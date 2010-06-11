@@ -572,8 +572,8 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_iso : (int * 'tag array) -> 'ty;
       ty_fold_idx : int -> 'ty;
       ty_fold_fn : (('slots * Ast.constrs * 'slot) * Ast.ty_fn_aux) -> 'ty;
-      ty_fold_obj : ((Ast.ident, (('slots * Ast.constrs * 'slot) *
-                                    Ast.ty_fn_aux)) Hashtbl.t) -> 'ty;
+      ty_fold_obj : (Ast.effect * (Ast.ident, (('slots * Ast.constrs * 'slot) *
+                                                 Ast.ty_fn_aux)) Hashtbl.t) -> 'ty;
       ty_fold_pred : ('slots * Ast.constrs) -> 'ty;
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
@@ -627,7 +627,7 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_chan t -> f.ty_fold_chan (fold_ty f t)
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
-  | Ast.TY_obj t -> f.ty_fold_obj (fold_obj t)
+  | Ast.TY_obj (eff,t) -> f.ty_fold_obj (eff, (fold_obj t))
   | Ast.TY_task -> f.ty_fold_task ()
 
   | Ast.TY_native x -> f.ty_fold_native x
@@ -701,10 +701,10 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
                                                      Ast.iso_group = tags }));
     ty_fold_idx = (fun i -> id (Ast.TY_idx i));
     ty_fold_fn = (fun t -> id (Ast.TY_fn (rebuild_fn t)));
-    ty_fold_obj = (fun fns ->
+    ty_fold_obj = (fun (eff,fns) ->
                      id (Ast.TY_obj
-                           (htab_map fns
-                              (fun id fn -> (id, rebuild_fn fn)))));
+                           (eff, (htab_map fns
+                                    (fun id fn -> (id, rebuild_fn fn))))));
     ty_fold_pred = (fun (islots, constrs) ->
                       id (Ast.TY_pred (islots, constrs)));
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
@@ -797,7 +797,7 @@ let associative_binary_op_ty_fold
         ty_fold_tag = (fun a -> a);
         ty_fold_iso = (fun (_,iso) -> reduce (Array.to_list iso));
         ty_fold_fn = reduce_fn;
-        ty_fold_obj = (fun fns ->
+        ty_fold_obj = (fun (_,fns) ->
                          reduce (List.map reduce_fn (htab_vals fns)));
         ty_fold_pred = (fun (islots, _) -> islots);
         ty_fold_chan = (fun a -> a);
@@ -972,7 +972,7 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
     | (Ast.TY_str, Ast.COMP_atom _) ->
         interior_slot (Ast.TY_mach TY_u8)
 
-    | (Ast.TY_obj fns, Ast.COMP_named (Ast.COMP_ident id)) ->
+    | (Ast.TY_obj (_, fns), Ast.COMP_named (Ast.COMP_ident id)) ->
         interior_slot (Ast.TY_fn (Hashtbl.find fns id))
 
     | (_,_) ->
@@ -1134,7 +1134,8 @@ let ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
 ;;
 
 let ty_obj_of_obj (obj:Ast.obj) : Ast.ty_obj =
-  htab_map obj.Ast.obj_fns (fun i f -> (i, ty_fn_of_fn f.node))
+  (obj.Ast.obj_effect,
+   htab_map obj.Ast.obj_fns (fun i f -> (i, ty_fn_of_fn f.node)))
 ;;
 
 let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =

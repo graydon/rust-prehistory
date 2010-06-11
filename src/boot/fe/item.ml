@@ -595,7 +595,7 @@ and parse_in_and_out
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn
     (is_iter:bool)
-    (pure:Ast.effect)
+    (effect:Ast.effect)
     (ps:pstate)
     : Ast.fn =
     let (inputs, constrs, output) = ctxt "fn: in_and_out" parse_in_and_out ps in
@@ -603,7 +603,7 @@ and parse_fn
       { Ast.fn_input_slots = inputs;
         Ast.fn_input_constrs = constrs;
         Ast.fn_output_slot = output;
-        Ast.fn_aux = { Ast.fn_effect = pure;
+        Ast.fn_aux = { Ast.fn_effect = effect;
                        Ast.fn_is_iter = is_iter; };
         Ast.fn_body = body; }
 
@@ -648,14 +648,51 @@ and parse_optional_meta_pat (ps:pstate) (ident:Ast.ident) : Ast.meta_pat =
       LPAREN -> parse_meta_pat ps
     | _ -> [| ("name", Some ident) |]
 
+
+and parse_obj_item
+    (ps:pstate)
+    (apos:pos)
+    (effect:Ast.effect)
+    : (Ast.ident * Ast.mod_item) =
+  expect ps OBJ;
+  let (ident, params) = parse_ident_and_params ps "obj" in
+  let (state, constrs) = (ctxt "obj state" parse_inputs ps) in
+  let drop = ref None in
+    expect ps LBRACE;
+    let fns = Hashtbl.create 0 in
+      while (not (peek ps = RBRACE))
+      do
+        let apos = lexpos ps in
+          match peek ps with
+              IO | STATE | UNSAFE | FN | ITER ->
+                let effect = Pexp.parse_effect ps in
+                let is_iter = (peek ps) = ITER in
+                  bump ps;
+                  let ident = ctxt "obj fn: ident" Pexp.parse_ident ps in
+                  let fn = ctxt "obj fn: fn" (parse_fn is_iter effect) ps in
+                  let bpos = lexpos ps in
+                    htab_put fns ident (span ps apos bpos fn)
+            | DROP ->
+                bump ps;
+                drop := Some (parse_block ps)
+            | RBRACE -> ()
+            | _ -> raise (unexpected ps)
+      done;
+      expect ps RBRACE;
+      let bpos = lexpos ps in
+      let obj = { Ast.obj_state = state;
+                  Ast.obj_effect = effect;
+                  Ast.obj_constrs = constrs;
+                  Ast.obj_fns = fns;
+                  Ast.obj_drop = !drop }
+      in
+        (ident,
+         span ps apos bpos
+           (decl params (Ast.MOD_ITEM_obj obj)))
+
+
 and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
   let apos = lexpos ps in
-  let pure =
-    match peek ps with
-        PURE -> (bump ps; Ast.PURE)
-      | MUTABLE -> (bump ps; Ast.IMPURE Ast.MUTABLE)
-      | _ -> Ast.IMPURE Ast.IMMUTABLE
-  in
   let parse_lib_name ident =
     match peek ps with
         EQ ->
@@ -670,15 +707,21 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
 
     match peek ps with
 
-        FN | ITER ->
-          let is_iter = (peek ps) = ITER in
-            bump ps;
-            let (ident, params) = parse_ident_and_params ps "fn" in
-            let fn = ctxt "mod fn item: fn" (parse_fn is_iter pure) ps in
-            let bpos = lexpos ps in
-              (ident,
-               span ps apos bpos
-                 (decl params (Ast.MOD_ITEM_fn fn)))
+        IO | STATE | UNSAFE | OBJ | FN | ITER ->
+          let effect = Pexp.parse_effect ps in
+            begin
+              match peek ps with
+                  OBJ -> parse_obj_item ps apos effect
+                | _ ->
+                    let is_iter = (peek ps) = ITER in
+                      bump ps;
+                      let (ident, params) = parse_ident_and_params ps "fn" in
+                      let fn = ctxt "mod fn item: fn" (parse_fn is_iter effect) ps in
+                      let bpos = lexpos ps in
+                        (ident,
+                         span ps apos bpos
+                           (decl params (Ast.MOD_ITEM_fn fn)))
+            end
 
       | PRED ->
           bump ps;
@@ -764,51 +807,6 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                   (ident, item)
           end
 
-      | OBJ ->
-          begin
-            bump ps;
-            let (ident, params) = parse_ident_and_params ps "obj" in
-            let (state, constrs) = (ctxt "obj state" parse_inputs ps) in
-            let drop = ref None in
-              expect ps LBRACE;
-              let fns = Hashtbl.create 0 in
-                while (not (peek ps = RBRACE))
-                do
-                  let apos = lexpos ps in
-                  let pure =
-                    match peek ps with
-                        PURE -> (bump ps; Ast.PURE)
-                      | MUTABLE -> (bump ps; Ast.IMPURE Ast.MUTABLE)
-                      | _ -> Ast.IMPURE Ast.IMMUTABLE
-                  in
-                    match peek ps with
-                        FN | ITER ->
-                          let is_iter = (peek ps) = ITER in
-                            bump ps;
-                            let ident = ctxt "obj fn: ident" Pexp.parse_ident ps in
-                            let fn = ctxt "obj fn: fn" (parse_fn is_iter pure) ps in
-                            let bpos = lexpos ps in
-                              htab_put fns ident (span ps apos bpos fn)
-
-                      | DROP ->
-                          bump ps;
-                          drop := Some (parse_block ps)
-
-                      | RBRACE -> ()
-
-                      | _ -> raise (unexpected ps)
-                done;
-                expect ps RBRACE;
-                let bpos = lexpos ps in
-                let obj = { Ast.obj_state = state;
-                            Ast.obj_constrs = constrs;
-                            Ast.obj_fns = fns;
-                            Ast.obj_drop = !drop }
-                in
-                  (ident,
-                   span ps apos bpos
-                     (decl params (Ast.MOD_ITEM_obj obj)))
-          end
 
 
       | _ -> raise (unexpected ps)
@@ -839,11 +837,12 @@ and parse_mod_item_from_signature (ps:pstate)
           let bpos = lexpos ps in
           (ident, span ps apos bpos (decl params (Ast.MOD_ITEM_mod items)))
 
-    | FN | ITER ->
-        let is_iter = (peek ps) = ITER in
-          bump ps;
-          let (ident, params) = parse_ident_and_params ps "fn signature" in
-          let (inputs, constrs, output) = parse_in_and_out ps in
+      | IO | STATE | UNSAFE | FN | ITER ->
+          let effect = Pexp.parse_effect ps in
+          let is_iter = (peek ps) = ITER in
+            bump ps;
+            let (ident, params) = parse_ident_and_params ps "fn signature" in
+            let (inputs, constrs, output) = parse_in_and_out ps in
             let bpos = lexpos ps in
             let body = span ps apos bpos [| |] in
             let fn =
@@ -851,7 +850,7 @@ and parse_mod_item_from_signature (ps:pstate)
                 { Ast.fn_input_slots = inputs;
                   Ast.fn_input_constrs = constrs;
                   Ast.fn_output_slot = output;
-                  Ast.fn_aux = { Ast.fn_effect = Ast.IMPURE Ast.IMMUTABLE;
+                  Ast.fn_aux = { Ast.fn_effect = effect;
                                  Ast.fn_is_iter = is_iter; };
                   Ast.fn_body = body; }
             in

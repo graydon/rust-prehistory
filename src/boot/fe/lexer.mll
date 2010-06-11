@@ -11,13 +11,12 @@
   let keyword_table = Hashtbl.create 100
   let _ =
     List.iter (fun (kwd, tok) -> Common.htab_put keyword_table kwd tok)
-              [ ("crate", CRATE);
-                ("mod", MOD);
+              [ ("mod", MOD);
                 ("use", USE);
-
-                ("native", NATIVE);
-                ("syntax", SYNTAX);
                 ("meta", META);
+                ("auth", AUTH);
+
+                ("syntax", SYNTAX);
 
                 ("if", IF);
                 ("else", ELSE);
@@ -41,7 +40,11 @@
                 ("claim", CLAIM);
                 ("prove", PROVE);
 
-                ("pure", PURE);
+                ("io", IO);
+                ("state", STATE);
+                ("unsafe", UNSAFE);
+
+                ("native", NATIVE);
                 ("mutable", MUTABLE);
                 ("auto", AUTO);
 

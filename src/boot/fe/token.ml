@@ -41,14 +41,13 @@ type token =
   | RBRACE
 
   (* Module and crate keywords *)
-  | CRATE
   | MOD
   | USE
-  | NATIVE
+  | AUTH
+  | META
 
   (* Metaprogramming keywords *)
   | SYNTAX
-  | META
   | POUND
 
   (* Statement keywords *)
@@ -76,16 +75,21 @@ type token =
   | CLAIM
   | PROVE
 
+  (* Effect keywords *)
+  | IO
+  | STATE
+  | UNSAFE
+
   (* Type qualifiers *)
-  | PURE
+  | NATIVE
   | AUTO
   | MUTABLE
 
-  (* Name management. *)
+  (* Name management *)
   | IMPORT
   | EXPORT
 
-  (* Value / stmt declarators. *)
+  (* Value / stmt declarators *)
   | LET
 
   (* Magic runtime services *)
@@ -183,10 +187,9 @@ let rec string_of_tok t =
     | RBRACE     -> "}"
 
     (* Module and crate keywords *)
-    | CRATE      -> "crate"
     | MOD        -> "mod"
     | USE        -> "use"
-    | NATIVE     -> "native"
+    | AUTH       -> "auth"
 
     (* Metaprogramming keywords *)
     | SYNTAX     -> "syntax"
@@ -211,7 +214,6 @@ let rec string_of_tok t =
     | RET        -> "ret"
     | BE         -> "be"
 
-
     (* Type and type-state keywords *)
     | TYPE       -> "type"
     | PRED       -> "pred"
@@ -219,8 +221,13 @@ let rec string_of_tok t =
     | CLAIM      -> "claim"
     | PROVE      -> "prove"
 
+    (* Effect keywords *)
+    | IO         -> "io"
+    | STATE      -> "state"
+    | UNSAFE     -> "unsafe"
+
     (* Type qualifiers *)
-    | PURE       -> "pure"
+    | NATIVE     -> "native"
     | AUTO       -> "auto"
     | MUTABLE    -> "mutable"
 

@@ -159,7 +159,14 @@ and parse_optional_trailing_constrs (ps:pstate) : Ast.constrs =
       COLON -> (bump ps; parse_constrs ps)
     | _ -> [| |]
 
-and parse_ty_fn (pure:bool) (ps:pstate) : (Ast.ty_fn * Ast.ident option) =
+and parse_effect (ps:pstate) : Ast.effect =
+  match peek ps with
+      IO -> bump ps; Ast.IO
+    | STATE -> bump ps; Ast.STATE
+    | UNSAFE -> bump ps; Ast.UNSAFE
+    | _ -> Ast.PURE
+
+and parse_ty_fn (effect:Ast.effect) (ps:pstate) : (Ast.ty_fn * Ast.ident option) =
   match peek ps with
       FN | ITER ->
         let is_iter = (peek ps) = ITER in
@@ -185,16 +192,14 @@ and parse_ty_fn (pure:bool) (ps:pstate) : (Ast.ty_fn * Ast.ident option) =
                        Ast.sig_input_constrs = constrs;
                        Ast.sig_output_slot = out_slot; }
           in
-            (* FIXME: parse effect more thoroughly. *)
-          let taux = { Ast.fn_effect = (if pure
-                                        then Ast.PURE
-                                        else Ast.IMPURE Ast.IMMUTABLE);
+          let taux = { Ast.fn_effect = effect;
                        Ast.fn_is_iter = is_iter; }
           in
           let tfn = (tsig, taux) in
             (tfn, ident)
 
     | _ -> raise (unexpected ps)
+
 
 and parse_atomic_ty (ps:pstate) : Ast.ty =
   match peek ps with
@@ -271,21 +276,6 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
             Ast.TY_rec entries
           end
 
-    | OBJ ->
-        bump ps;
-        let methods = Hashtbl.create 0 in
-        let parse_method ps =
-          let pure = flag ps PURE in
-          let (tfn, ident) = parse_ty_fn pure ps in
-            expect ps SEMI;
-            match ident with
-                None -> raise (err (Printf.sprintf "missing method identifier") ps)
-              | Some i -> htab_put methods i tfn
-        in
-          ignore (bracketed_zero_or_more LBRACE RBRACE None parse_method ps);
-          Ast.TY_obj methods
-
-
     | LPAREN ->
         let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps in
           if Array.length slots = 0
@@ -303,9 +293,28 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
         bump ps;
         Ast.TY_mach m
 
-    | PURE -> (bump ps; Ast.TY_fn (fst (parse_ty_fn true ps)))
+    | IO | STATE | UNSAFE | OBJ | FN | ITER ->
+        let effect = parse_effect ps in
+          begin
+            match peek ps with
+                OBJ ->
+                  bump ps;
+                  let methods = Hashtbl.create 0 in
+                  let parse_method ps =
+                    let effect = parse_effect ps in
+                    let (tfn, ident) = parse_ty_fn effect ps in
+                      expect ps SEMI;
+                      match ident with
+                          None -> raise (err (Printf.sprintf "missing method identifier") ps)
+                        | Some i -> htab_put methods i tfn
+                  in
+                    ignore (bracketed_zero_or_more LBRACE RBRACE None parse_method ps);
+                    Ast.TY_obj (effect, methods)
 
-    | FN -> Ast.TY_fn (fst (parse_ty_fn false ps))
+              | FN | ITER ->
+                  Ast.TY_fn (fst (parse_ty_fn effect ps))
+              | _ -> raise (unexpected ps)
+          end
 
     | _ -> raise (unexpected ps)
 

@@ -800,7 +800,7 @@ let trans_visitor
          Ast.COMP_atom at) ->
           bounds_checked_access at (interior_slot (Ast.TY_mach TY_u8))
 
-      | (Ast.TY_obj fns,
+      | (Ast.TY_obj (_,fns),
          Ast.COMP_named (Ast.COMP_ident id)) ->
           let sorted_idents = sorted_htab_keys fns in
           let i = arr_idx sorted_idents id in

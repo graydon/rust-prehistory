@@ -39,7 +39,9 @@ type mutability =
 
 type effect =
     PURE
-  | IMPURE of mutability
+  | IO
+  | STATE
+  | UNSAFE
 ;;
 
 type name_base =
@@ -187,7 +189,7 @@ and ty_pred = (slot array * constrs)
 
 and ty_obj_header = (slot array * constrs)
 
-and ty_obj = (ident,ty_fn) Hashtbl.t
+and ty_obj = (effect * ((ident,ty_fn) Hashtbl.t))
 
 and check_calls = (lval * (atom array)) array
 
@@ -383,6 +385,7 @@ and pred =
 and obj =
     {
       obj_state: header_slots;
+      obj_effect: effect;
       obj_constrs: constrs;
       obj_fns: (ident,fn identified) Hashtbl.t;
       obj_drop: block option;
@@ -546,17 +549,23 @@ and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) opt
   done;
   fmt ff "@])"
 
+and fmt_effect
+    (ff:Format.formatter)
+    (effect:effect)
+    : unit =
+  match effect with
+      PURE -> ()
+    | IO -> fmt ff "io"
+    | STATE -> fmt ff "state"
+    | UNSAFE -> fmt ff "unsafe"
+
 and fmt_ty_fn
     (ff:Format.formatter)
     (ident_and_params:(ident * ty_param array) option)
     (tf:ty_fn)
     : unit =
   let (tsig, ta) = tf in
-    begin
-      match ta.fn_effect with
-          PURE -> fmt ff "pure "
-        | IMPURE mut -> fmt_mutable ff mut
-    end;
+    fmt_effect ff ta.fn_effect;
     fmt ff "%s" (if ta.fn_is_iter then "iter" else "fn");
     begin
       match ident_and_params with
@@ -654,8 +663,9 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_constrained _ -> fmt ff "?constrained?"
   | TY_pred tp -> fmt_ty_pred ff None tp
 
-  | TY_obj fns ->
+  | TY_obj (effect, fns) ->
       fmt_obox ff;
+      fmt_effect ff effect;
       fmt ff "obj ";
       fmt_obr ff;
       Hashtbl.iter
@@ -1191,11 +1201,7 @@ and fmt_ident_and_params (ff:Format.formatter) (id:ident) (params:ty_param array
 
 and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : unit =
   fmt_obox ff;
-  begin
-    match f.fn_aux.fn_effect with
-        PURE -> fmt ff "pure "
-      | IMPURE mut -> fmt_mutable ff mut
-  end;
+  fmt_effect ff f.fn_aux.fn_effect;
   fmt ff "%s "(if f.fn_aux.fn_is_iter then "iter" else "fn");
   fmt_ident_and_params ff id params;
   fmt_header_slots ff f.fn_input_slots;
@@ -1210,6 +1216,7 @@ and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : uni
 
 and fmt_obj (ff:Format.formatter) (id:ident) (params:ty_param array) (obj:obj) : unit =
   fmt_obox ff;
+  fmt_effect ff obj.obj_effect;
   fmt ff "obj ";
   fmt_ident_and_params ff id params;
   fmt_header_slots ff obj.obj_state;

@@ -656,8 +656,11 @@ The keywords are:
 @tab @code{export}
 @tab @code{let}
 @tab @code{auto}
+@item @code{io}
+@tab @code{state}
+@tab @code{unsafe}
+@tab @code{auth}
 @item @code{bind}
-@tab @code{pure}
 @tab @code{type}
 @tab @code{true}
 @tab @code{false}

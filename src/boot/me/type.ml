@@ -375,7 +375,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                 match ty with
                     Ast.TY_rec fields ->
                       unify_dict_with_record_fields dct fields
-                  | Ast.TY_obj fns ->
+                  | Ast.TY_obj (_, fns) ->
                       unify_dict_with_obj_fns dct fns
                   | _ -> fail ()
               end;
