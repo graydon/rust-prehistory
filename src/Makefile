@@ -309,7 +309,6 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/vec-slice.rs \
                     test/run-pass/generic-tag.rs \
                     test/run-pass/bind-obj-ctor.rs \
-                    test/run-pass/obj-dtor.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
                     test/compile-fail/infinite-vec-type-recursion.rs

@@ -52,6 +52,7 @@ let tydesc_field_align = 2;;
 let tydesc_field_copy_glue = 3;;
 let tydesc_field_drop_glue = 4;;
 let tydesc_field_free_glue = 5;;
+let tydesc_field_obj_drop_glue = 6;;
 
 let vec_elt_rc = 0;;
 let vec_elt_alloc = 1;;

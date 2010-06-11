@@ -339,7 +339,8 @@ let rec n_item_ty_params (cx:ctxt) (id:node_id) : int =
 
 let item_is_obj_fn (cx:ctxt) (id:node_id) : bool =
   match Hashtbl.find cx.ctxt_all_defns id with
-      DEFN_obj_fn _ -> true
+      DEFN_obj_fn _
+    | DEFN_obj_drop _ -> true
     | _ -> false
 ;;
 
@@ -1469,11 +1470,13 @@ let tydesc_rty (abi:Abi.abi) : Il.referent_ty =
    *)
   Il.StructTy
     [|
-      word_rty abi;                      (* Abi.tydesc_field_size      *)
-      word_rty abi;                      (* Abi.tydesc_field_align     *)
-      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_copy_glue *)
-      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_drop_glue *)
-      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_free_glue *)
+      word_rty abi;                      (* Abi.tydesc_field_first_param   *)
+      word_rty abi;                      (* Abi.tydesc_field_size          *)
+      word_rty abi;                      (* Abi.tydesc_field_align         *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_copy_glue     *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_drop_glue     *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_free_glue     *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_obj_drop_glue *)
     |]
 ;;
 

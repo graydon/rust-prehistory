@@ -92,12 +92,13 @@ let trans_visitor
     Asm.SEQ (Array.map crate_rel_word fixups)
   in
 
+  let fixup_rel_word (base:fixup) (fix:fixup) =
+    Asm.WORD (word_ty_signed_mach,
+              Asm.SUB (Asm.M_POS fix, Asm.M_POS base))
+  in
+
   let table_of_fixup_rel_fixups (fixup:fixup) (fixups:fixup array) : Asm.frag =
-    let fixup_rel_word fix =
-      Asm.WORD (word_ty_signed_mach,
-                Asm.SUB (Asm.M_POS fix, Asm.M_POS fixup))
-    in
-      Asm.SEQ (Array.map fixup_rel_word fixups)
+    Asm.SEQ (Array.map (fixup_rel_word fixup) fixups)
   in
 
   let table_of_table_rel_fixups (fixups:fixup array) : Asm.frag =
@@ -470,17 +471,20 @@ let trans_visitor
         Abi.indirect_args_elt_closure
   in
 
+  let get_obj_for_current_frame _ =
+    deref (ptr_cast
+             (get_closure_for_current_frame ())
+             (Il.ScalarTy (Il.AddrTy (obj_closure_rty abi))))
+  in
+
   let get_ty_params_of_current_frame _ : Il.cell =
     let id = current_fn() in
     let n_ty_params = n_item_ty_params cx id in
       if item_is_obj_fn cx id
       then
         begin
-          let obj_ptr = deref (ptr_cast
-                                 (get_closure_for_current_frame ())
-                                 (Il.ScalarTy (Il.AddrTy (obj_closure_rty abi)))) in
-
-          let tydesc = get_element_ptr obj_ptr 1 in
+          let obj = get_obj_for_current_frame() in
+          let tydesc = get_element_ptr obj 1 in
           let ty_params_ty = Ast.TY_tup (make_tydesc_slots n_ty_params) in
           let ty_params_rty = referent_type abi ty_params_ty in
           let ty_params = get_element_ptr (deref tydesc) Abi.tydesc_field_first_param in
@@ -959,19 +963,22 @@ let trans_visitor
                    table_of_fixup_rel_fixups tydesc_fixup
                      [|
                        get_copy_glue t None;
-                       begin
-                         match idopt with
-                             None -> get_drop_glue t None;
-                           | Some oid ->
-                               begin
-                                 let g = GLUE_obj_drop oid in
-                                   match htab_search cx.ctxt_glue_code g with
-                                       Some code -> code.code_fixup
-                                     | None -> get_drop_glue t None
-                               end
-                       end;
+                       get_drop_glue t None;
                        get_free_glue t (slot_mem_ctrl (interior_slot t)) None;
-                     |]
+                     |];
+                   (* Include any obj-dtor, if this is an obj and has one. *)
+                   begin
+                     match idopt with
+                         None -> Asm.WORD (word_ty_mach, Asm.IMM 0L);
+                       | Some oid ->
+                           begin
+                             let g = GLUE_obj_drop oid in
+                               match htab_search cx.ctxt_glue_code g with
+                                   Some code ->
+                                     fixup_rel_word tydesc_fixup code.code_fixup;
+                                 | None -> Asm.WORD (word_ty_mach, Asm.IMM 0L);
+                           end
+                   end;
                  |])
       end
 
@@ -2156,6 +2163,13 @@ let trans_visitor
             let tydesc = get_element_ptr obj 1 in
             let body = get_element_ptr obj 2 in
             let ty_params = get_element_ptr (deref tydesc) Abi.tydesc_field_first_param in
+            let dtor = get_element_ptr (deref tydesc) Abi.tydesc_field_obj_drop_glue in
+            let null_dtor_jmp = null_check dtor in
+              (* Call any dtor, if present. *)
+              trans_call_dynamic_glue tydesc
+                Abi.tydesc_field_obj_drop_glue None [| binding |];
+              patch null_dtor_jmp;
+              (* Drop the body. *)
               trans_call_dynamic_glue tydesc
                 Abi.tydesc_field_drop_glue None [| ty_params; alias body |];
               trans_free binding;
@@ -4345,16 +4359,9 @@ let trans_visitor
       write_frame_info_ptrs None;
       iflog (fun _ -> annotate "finished prologue");
       trans_block b;
-      iflog (fun _ -> annotate "dropping");
-      let ty_params = get_ty_params_of_current_frame() in
-      let obj_slots = Array.map (fun (sloti,_) -> sloti.node) obj.node.Ast.obj_state in
-      let obj_tup = Ast.TY_tup obj_slots in
-      let obj_tup_drop_glue = get_drop_glue obj_tup None in
-      let obj_ptr = get_closure_for_current_frame () in
-        trans_call_simple_static_glue obj_tup_drop_glue ty_params obj_ptr;
-        Hashtbl.remove cx.ctxt_glue_code g;
-        trans_glue_frame_exit fix spill g;
-        inner.Walk.visit_obj_drop_pre obj b
+      Hashtbl.remove cx.ctxt_glue_code g;
+      trans_glue_frame_exit fix spill g;
+      inner.Walk.visit_obj_drop_pre obj b
   in
 
   let visit_local_obj_fn_pre _ _ fn =
@@ -4410,20 +4417,20 @@ let trans_visitor
 
     let emit_aux_global_glue cx glue fix fn =
       let glue_name = glue_str cx glue in
-      push_new_emitter_without_vregs None;
-      let e = emitter() in
-        fn e;
-        iflog (fun _ -> annotate_quads glue_name);
-        if (Il.num_vregs e) != 0
-        then bug () "%s uses nonzero vregs" glue_name;
-        pop_emitter();
-        let code =
-          { code_fixup = fix;
-            code_quads = emitted_quads e;
-            code_vregs_and_spill = None;
-            code_spill_disp = 0L }
-        in
-          htab_put cx.ctxt_glue_code glue code
+        push_new_emitter_without_vregs None;
+        let e = emitter() in
+          fn e;
+          iflog (fun _ -> annotate_quads glue_name);
+          if (Il.num_vregs e) != 0
+          then bug () "%s uses nonzero vregs" glue_name;
+          pop_emitter();
+          let code =
+            { code_fixup = fix;
+              code_quads = emitted_quads e;
+              code_vregs_and_spill = None;
+              code_spill_disp = 0L }
+          in
+            htab_put cx.ctxt_glue_code glue code
     in
 
     let tab_sz htab =

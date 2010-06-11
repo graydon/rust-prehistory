@@ -182,8 +182,10 @@ rust_crate_cache::get_rust_sym(size_t n,
 static inline void
 adjust_disp(uintptr_t &disp, const void *oldp, const void *newp)
 {
-    disp += (uintptr_t)oldp;
-    disp -= (uintptr_t)newp;
+    if (disp) {
+        disp += (uintptr_t)oldp;
+        disp -= (uintptr_t)newp;
+    }
 }
 
 type_desc *
@@ -220,6 +222,7 @@ rust_crate_cache::get_type_desc(size_t size,
     adjust_disp(td->copy_glue_off, descs[0], td);
     adjust_disp(td->drop_glue_off, descs[0], td);
     adjust_disp(td->free_glue_off, descs[0], td);
+    adjust_disp(td->obj_drop_glue_off, descs[0], td);
     HASH_ADD(hh, this->type_descs, descs, keysz, td);
     return td;
 }

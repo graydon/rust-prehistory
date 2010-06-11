@@ -284,6 +284,7 @@ struct type_desc {
     uintptr_t copy_glue_off;
     uintptr_t drop_glue_off;
     uintptr_t free_glue_off;
+    uintptr_t obj_drop_glue_off; // For custom destructors.
 
     // Residual fields past here are known only to runtime.
     UT_hash_handle hh;
