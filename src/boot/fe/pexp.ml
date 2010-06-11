@@ -185,8 +185,8 @@ and parse_ty_fn (pure:bool) (ps:pstate) : (Ast.ty_fn * Ast.ident option) =
                        Ast.sig_input_constrs = constrs;
                        Ast.sig_output_slot = out_slot; }
           in
-            (* FIXME: parse purity more thoroughly. *)
-          let taux = { Ast.fn_purity = (if pure
+            (* FIXME: parse effect more thoroughly. *)
+          let taux = { Ast.fn_effect = (if pure
                                         then Ast.PURE
                                         else Ast.IMPURE Ast.IMMUTABLE);
                        Ast.fn_is_iter = is_iter; }

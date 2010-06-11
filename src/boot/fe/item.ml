@@ -595,7 +595,7 @@ and parse_in_and_out
 (* parse_fn starts at the first lparen of the sig. *)
 and parse_fn
     (is_iter:bool)
-    (pure:Ast.purity)
+    (pure:Ast.effect)
     (ps:pstate)
     : Ast.fn =
     let (inputs, constrs, output) = ctxt "fn: in_and_out" parse_in_and_out ps in
@@ -603,7 +603,7 @@ and parse_fn
       { Ast.fn_input_slots = inputs;
         Ast.fn_input_constrs = constrs;
         Ast.fn_output_slot = output;
-        Ast.fn_aux = { Ast.fn_purity = pure;
+        Ast.fn_aux = { Ast.fn_effect = pure;
                        Ast.fn_is_iter = is_iter; };
         Ast.fn_body = body; }
 
@@ -851,7 +851,7 @@ and parse_mod_item_from_signature (ps:pstate)
                 { Ast.fn_input_slots = inputs;
                   Ast.fn_input_constrs = constrs;
                   Ast.fn_output_slot = output;
-                  Ast.fn_aux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
+                  Ast.fn_aux = { Ast.fn_effect = Ast.IMPURE Ast.IMMUTABLE;
                                  Ast.fn_is_iter = is_iter; };
                   Ast.fn_body = body; }
             in

@@ -37,7 +37,7 @@ type mutability =
   | MUTABLE
 ;;
 
-type purity =
+type effect =
     PURE
   | IMPURE of mutability
 ;;
@@ -178,7 +178,7 @@ and ty_sig =
 and ty_fn_aux =
     {
       fn_is_iter: bool;
-      fn_purity: purity;
+      fn_effect: effect;
     }
 
 and ty_fn = (ty_sig * ty_fn_aux)
@@ -553,7 +553,7 @@ and fmt_ty_fn
     : unit =
   let (tsig, ta) = tf in
     begin
-      match ta.fn_purity with
+      match ta.fn_effect with
           PURE -> fmt ff "pure "
         | IMPURE mut -> fmt_mutable ff mut
     end;
@@ -1192,7 +1192,7 @@ and fmt_ident_and_params (ff:Format.formatter) (id:ident) (params:ty_param array
 and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : unit =
   fmt_obox ff;
   begin
-    match f.fn_aux.fn_purity with
+    match f.fn_aux.fn_effect with
         PURE -> fmt ff "pure "
       | IMPURE mut -> fmt_mutable ff mut
   end;

@@ -1803,9 +1803,9 @@ let dwarf_visitor
                  (* DW_AT_type: DW_FORM_ref_addr *)
                  (ref_slot_die tsig.Ast.sig_output_slot);
                  (* DW_AT_pure: DW_FORM_flag *)
-                 BYTE (if taux.Ast.fn_purity = Ast.PURE then 1 else 0);
+                 BYTE (if taux.Ast.fn_effect = Ast.PURE then 1 else 0);
                  (* DW_AT_mutable: DW_FORM_flag *)
-                 BYTE (if taux.Ast.fn_purity = (Ast.IMPURE Ast.MUTABLE)
+                 BYTE (if taux.Ast.fn_effect = (Ast.IMPURE Ast.MUTABLE)
                        then 1 else 0);
                  (* DW_AT_rust_iterator: DW_FORM_flag *)
                  BYTE (if taux.Ast.fn_is_iter then 1 else 0)
@@ -1828,9 +1828,9 @@ let dwarf_visitor
                  (* DW_AT_type: DW_FORM_ref_addr *)
                  (ref_slot_die tsig.Ast.sig_output_slot);
                  (* DW_AT_pure: DW_FORM_flag *)
-                 BYTE (if taux.Ast.fn_purity = Ast.PURE then 1 else 0);
+                 BYTE (if taux.Ast.fn_effect = Ast.PURE then 1 else 0);
                  (* DW_AT_mutable: DW_FORM_flag *)
-                 BYTE (if taux.Ast.fn_purity = (Ast.IMPURE Ast.MUTABLE)
+                 BYTE (if taux.Ast.fn_effect = (Ast.IMPURE Ast.MUTABLE)
                        then 1 else 0);
                  (* DW_AT_rust_iterator: DW_FORM_flag *)
                  BYTE (if taux.Ast.fn_is_iter then 1 else 0)
@@ -2659,7 +2659,7 @@ let rec extract_mod_items
     else Ast.IMMUTABLE
   in
 
-  let get_purity die =
+  let get_effect die =
     match (get_mutability die, get_flag die DW_AT_pure) with
         (Ast.MUTABLE, true) -> bug () "mutable + pure combination in dwarf"
       | (Ast.MUTABLE, false) -> Ast.IMPURE Ast.MUTABLE
@@ -2842,7 +2842,7 @@ let rec extract_mod_items
             else None
         end
     in
-    let purity = get_purity die in
+    let effect = get_effect die in
     let iter = get_flag die DW_AT_rust_iterator in
     let tsig =
       { Ast.sig_input_slots = ins;
@@ -2851,7 +2851,7 @@ let rec extract_mod_items
     in
     let taux =
       { Ast.fn_is_iter = iter;
-        Ast.fn_purity = purity }
+        Ast.fn_effect = effect }
     in
       (tsig, taux)
   in
@@ -2932,7 +2932,7 @@ let rec extract_mod_items
           let ident = get_name die in
           let oslot = get_referenced_slot die in
           let (params, islots) = get_formals die in
-          let taux = { Ast.fn_purity = Ast.IMPURE Ast.IMMUTABLE;
+          let taux = { Ast.fn_effect = Ast.IMPURE Ast.IMMUTABLE;
                        Ast.fn_is_iter = false }
           in
           let tfn = { Ast.fn_input_slots = form_header_slots islots;

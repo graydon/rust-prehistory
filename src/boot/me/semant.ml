@@ -1144,7 +1144,7 @@ let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =
     | Ast.MOD_ITEM_fn f -> (Ast.TY_fn (ty_fn_of_fn f))
     | Ast.MOD_ITEM_mod _ -> bug () "Semant.ty_of_mod_item on mod"
     | Ast.MOD_ITEM_obj ob ->
-        let taux = { Ast.fn_purity = Ast.PURE;
+        let taux = { Ast.fn_effect = Ast.PURE;
                      Ast.fn_is_iter = false }
         in
         let tobj = Ast.TY_obj (ty_obj_of_obj ob) in
@@ -1155,7 +1155,7 @@ let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =
           (Ast.TY_fn (tsig, taux))
 
     | Ast.MOD_ITEM_tag (htup, ttag, _) ->
-        let taux = { Ast.fn_purity = Ast.PURE;
+        let taux = { Ast.fn_effect = Ast.PURE;
                      Ast.fn_is_iter = false }
         in
         let tsig = { Ast.sig_input_slots = tup_slots htup;
@@ -1718,7 +1718,7 @@ let mk_ty_fn
     (arg_slots:Ast.slot array)
     : Ast.ty =
   (* In some cases we don't care what aux or constrs are. *)
-  let taux = { Ast.fn_purity = Ast.PURE;
+  let taux = { Ast.fn_effect = Ast.PURE;
                Ast.fn_is_iter = false; }
   in
   let tsig = { Ast.sig_input_slots = arg_slots;
