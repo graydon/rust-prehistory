@@ -339,8 +339,7 @@ let rec n_item_ty_params (cx:ctxt) (id:node_id) : int =
 
 let item_is_obj_fn (cx:ctxt) (id:node_id) : bool =
   match Hashtbl.find cx.ctxt_all_defns id with
-      DEFN_obj_fn _
-    | DEFN_obj_drop _ -> true
+      DEFN_obj_fn _ -> true
     | _ -> false
 ;;
 
