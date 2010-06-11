@@ -9,23 +9,19 @@ let trans_and_process_crate
     (crate:Ast.crate)
     : unit =
   let llcontext = Llvm.create_context () in
+  let emit_file (llmod:Llvm.llmodule) : unit =
+    let filename = Session.filename_of sess.Session.sess_out in
+    if not (Llvm_bitwriter.write_bitcode_file llmod filename)
+    then raise (Failure ("failed to write the LLVM bitcode '" ^ filename
+      ^ "'"))
+  in
+  let llmod = Lltrans.trans_crate sem_cx llcontext sess crate in
   begin
     try
-      let emit_file (llmod:Llvm.llmodule) : unit =
-        let filename = Session.filename_of sess.Session.sess_out in
-        if not (Llvm_bitwriter.write_bitcode_file llmod filename)
-        then raise (Failure ("failed to write the LLVM bitcode '" ^ filename
-          ^ "'"))
-      in
-      let llmod = Lltrans.trans_crate sem_cx llcontext sess crate in
-      begin
-        try
-          emit_file llmod
-        with e -> Llvm.dispose_module llmod; raise e
-      end;
-      Llvm.dispose_module llmod
-    with e -> Llvm.dispose_context llcontext; raise e
+      emit_file llmod
+    with e -> Llvm.dispose_module llmod; raise e
   end;
+  Llvm.dispose_module llmod;
   Llvm.dispose_context llcontext
 ;;
 
