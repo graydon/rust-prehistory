@@ -1,6 +1,5 @@
 fn main() {
-  // Testcase for bug 544382 -- will probably be easier to fix if
-  // we merge preds and pure fns first (bug 563406).
+  // Testcase for bug 544382.
   obj simple(int x, int y) {
     fn sum() -> int {
       ret x + y;

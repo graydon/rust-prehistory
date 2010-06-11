@@ -35,7 +35,6 @@
                 ("drop", DROP);
 
                 ("type", TYPE);
-                ("pred", PRED);
                 ("check", CHECK);
                 ("claim", CLAIM);
                 ("prove", PROVE);

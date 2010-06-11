@@ -405,7 +405,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
             expect ps SEMI;
             spans ps stmts apos (Ast.STMT_join lval)
 
-      | MOD | OBJ | TYPE | FN | PRED | USE | NATIVE ->
+      | MOD | OBJ | TYPE | FN | USE | NATIVE ->
           let (ident, item) = ctxt "stmt: decl" parse_mod_item ps in
           let decl = Ast.DECL_mod_item (ident, item) in
           let stmts = expand_tags_to_stmts ps item in
@@ -607,13 +607,6 @@ and parse_fn
                        Ast.fn_is_iter = is_iter; };
         Ast.fn_body = body; }
 
-and parse_pred (ps:pstate) : Ast.pred =
-  let (inputs, constrs) = ctxt "pred: inputs" parse_inputs ps in
-  let body = ctxt "pred: body" parse_block ps in
-    { Ast.pred_input_slots = inputs;
-      Ast.pred_input_constrs = constrs;
-      Ast.pred_body = body }
-
 and parse_meta_input (ps:pstate) : (Ast.ident * string option) =
   let lab = (ctxt "meta input: label" Pexp.parse_ident ps) in
     match peek ps with
@@ -722,15 +715,6 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                          span ps apos bpos
                            (decl params (Ast.MOD_ITEM_fn fn)))
             end
-
-      | PRED ->
-          bump ps;
-          let (ident, params) = parse_ident_and_params ps "pred" in
-          let pred = ctxt "mod pred item: pred" parse_pred ps in
-          let bpos = lexpos ps in
-            (ident,
-             span ps apos bpos
-               (decl params (Ast.MOD_ITEM_pred pred)))
 
       | TYPE ->
           bump ps;
@@ -883,7 +867,7 @@ and parse_mod_item_from_signature (ps:pstate)
           let bpos = lexpos ps in
             (ident, span ps apos bpos (decl params (Ast.MOD_ITEM_type t)))
 
-    (* FIXME: parse pred, obj. *)
+    (* FIXME: parse obj. *)
     | _ -> raise (unexpected ps)
 
 

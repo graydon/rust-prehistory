@@ -7,7 +7,7 @@ native "rust" mod rustrt {
   fn str_alloc(int n_bytes) -> str;
 }
 
-pred is_utf8(vec[u8] v) {
+fn is_utf8(vec[u8] v) -> bool {
 }
 
 fn alloc(int n_bytes) -> str {

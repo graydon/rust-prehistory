@@ -2092,7 +2092,6 @@ let trans_visitor
             iter_tag_slots ty_params dst_cell src_cell ttag f (Some tiso)
 
       | Ast.TY_fn _
-      | Ast.TY_pred _
       | Ast.TY_obj _ -> bug () "Attempting to iterate over fn/pred/obj slots"
 
       | Ast.TY_vec _
@@ -2136,7 +2135,6 @@ let trans_visitor
                    i Abi.tydesc_field_drop_glue ty_params cell
             end
 
-      | Ast.TY_pred _
       | Ast.TY_fn _ ->
           begin
             let binding = get_element_ptr cell Abi.binding_field_binding in
@@ -2189,7 +2187,6 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : unit =
     match ty with
-      | Ast.TY_pred _
       | Ast.TY_fn _
       | Ast.TY_obj _ -> ()
       | _ ->
@@ -2213,7 +2210,6 @@ let trans_visitor
           -> bug () "cloning mutable type"
       | _ when i64_le (ty_sz abi ty) word_sz
           -> mov dst (Il.Cell src)
-      | Ast.TY_pred _
       | Ast.TY_fn _
       | Ast.TY_obj _ -> ()
       | _ ->
@@ -2259,7 +2255,6 @@ let trans_visitor
                     (Some dst) [| ty_params_ptr; src; |]
             end
 
-      | Ast.TY_pred _
       | Ast.TY_fn _
       | Ast.TY_obj _ ->
           begin
@@ -3033,7 +3028,6 @@ let trans_visitor
   and ty_arg_slots (ty:Ast.ty) : Ast.slot array =
     match ty with
         Ast.TY_fn (tsig, _) -> tsig.Ast.sig_input_slots
-      | Ast.TY_pred (args, _) -> args
       | _ -> bug () "Trans.ty_arg_slots on non-callable type: %a"
           Ast.sprintf_ty ty
 
@@ -3680,8 +3674,7 @@ let trans_visitor
                 | None -> [| |]
             in
               match ty with
-                  Ast.TY_fn _
-                | Ast.TY_pred _ ->
+                  Ast.TY_fn _ ->
                     let (dst_cell, _) = trans_lval_maybe_init init dst in
                     let fn_ptr =
                       trans_prepare_fn_call init cx dst_cell flv ty_params None args
@@ -3814,9 +3807,6 @@ let trans_visitor
                     let dst_rty = referent_type abi result_ty in
                     let dst_cell = Il.Mem (dst_mem, dst_rty) in
                       trans_be_fn cx dst_cell flv ty_params args
-
-                | Ast.TY_pred _ ->
-                    bug () "be pred not yet implemented"
 
                 | _ -> bug () "Calling unexpected lval."
             end
@@ -4323,7 +4313,6 @@ let trans_visitor
             end;
           trans_fn i.id f.Ast.fn_aux.Ast.fn_is_iter f.Ast.fn_body
 
-      | Ast.MOD_ITEM_pred p -> trans_fn i.id false p.Ast.pred_body
       | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
       | Ast.MOD_ITEM_obj ob ->
           trans_obj_ctor i.id
@@ -4537,8 +4526,7 @@ let fixup_assigning_visitor
     begin
       match i.node.Ast.decl_item with
 
-          Ast.MOD_ITEM_pred _
-        | Ast.MOD_ITEM_tag _ ->
+          Ast.MOD_ITEM_tag _ ->
             htab_put cx.ctxt_fn_fixups i.id
               (new_fixup (path_name()));
 

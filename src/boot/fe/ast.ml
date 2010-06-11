@@ -86,7 +86,6 @@ and ty =
   | TY_idx of int
 
   | TY_fn of ty_fn
-  | TY_pred of ty_pred
   | TY_chan of ty
   | TY_port of ty
 
@@ -184,8 +183,6 @@ and ty_fn_aux =
     }
 
 and ty_fn = (ty_sig * ty_fn_aux)
-
-and ty_pred = (slot array * constrs)
 
 and ty_obj_header = (slot array * constrs)
 
@@ -375,13 +372,6 @@ and fn =
       fn_body: block;
     }
 
-and pred =
-    {
-      pred_input_slots: header_slots;
-      pred_input_constrs: constrs;
-      pred_body: block;
-    }
-
 and obj =
     {
       obj_state: header_slots;
@@ -405,7 +395,6 @@ and ty_param = ident * (ty_param_idx * mutability)
 and mod_item' =
     MOD_ITEM_type of ty
   | MOD_ITEM_tag of (header_tup * ty_tag * node_id)
-  | MOD_ITEM_pred of pred
   | MOD_ITEM_mod of (mod_view * mod_items)
   | MOD_ITEM_fn of fn
   | MOD_ITEM_obj of obj
@@ -579,23 +568,6 @@ and fmt_ty_fn
     fmt ff " -> ";
     fmt_slot ff tsig.sig_output_slot;
 
-and fmt_ty_pred
-    (ff:Format.formatter)
-    (ident_and_params:(ident * ty_param array) option)
-    (tp:ty_pred)
-    : unit =
-  let (in_slots, in_constrs) = tp in
-    fmt ff "pred";
-    begin
-      match ident_and_params with
-          Some (id, params) ->
-            fmt ff " ";
-            fmt_ident_and_params ff id params
-        | None -> ()
-    end;
-    fmt_slots ff in_slots None;
-    fmt_decl_constrs ff in_constrs
-
 and fmt_tag (ff:Format.formatter) (ttag:ty_tag) : unit =
   fmt ff "@[tag(@[";
   let first = ref true in
@@ -661,7 +633,6 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_iso tiso -> fmt_iso ff tiso
   | TY_idx idx -> fmt ff "<idx#%d>" idx
   | TY_constrained _ -> fmt ff "?constrained?"
-  | TY_pred tp -> fmt_ty_pred ff None tp
 
   | TY_obj (effect, fns) ->
       fmt_obox ff;
@@ -1260,17 +1231,6 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
 
         | MOD_ITEM_tag _ ->
             fmt ff "?tagdecl?"
-
-        | MOD_ITEM_pred p ->
-            fmt_obox ff;
-            fmt ff "pred ";
-            fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
-            fmt_header_slots ff p.pred_input_slots;
-            fmt_decl_constrs ff p.pred_input_constrs;
-            fmt ff " ";
-            fmt_obr ff;
-            fmt_stmts ff p.pred_body.node;
-            fmt_cbb ff
 
         | MOD_ITEM_mod (view,items) ->
             fmt_obox ff;

@@ -252,8 +252,7 @@ let trans_crate
       | Ast.TY_native _ ->
           word_ty
 
-      | Ast.TY_tag _ | Ast.TY_iso _
-      | Ast.TY_idx _ | Ast.TY_pred _
+      | Ast.TY_tag _ | Ast.TY_iso _ | Ast.TY_idx _
       | Ast.TY_obj _ | Ast.TY_type -> (opaque()) (* TODO *)
 
       | Ast.TY_param _ | Ast.TY_named _ ->
@@ -330,7 +329,6 @@ let trans_crate
       | Ast.TY_tag _
       | Ast.TY_iso _
       | Ast.TY_fn _
-      | Ast.TY_pred _
       | Ast.TY_obj _ ->
           bug () "unimplemented ty in Lltrans.iter_ty_slots_full"
 

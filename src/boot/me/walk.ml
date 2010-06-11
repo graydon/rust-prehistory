@@ -226,7 +226,6 @@ and walk_mod_item
     match item.node.Ast.decl_item with
         Ast.MOD_ITEM_type ty -> walk_ty v ty
       | Ast.MOD_ITEM_fn f -> walk_fn v f
-      | Ast.MOD_ITEM_pred p -> walk_pred v p
       | Ast.MOD_ITEM_tag (htup, ttag, _) ->
           walk_header_tup v htup;
           walk_ty_tag v ttag
@@ -270,11 +269,6 @@ and walk_ty
       | Ast.TY_fn tfn -> walk_ty_fn v tfn
       | Ast.TY_obj (_, fns) ->
           Hashtbl.iter (fun _ tfn -> walk_ty_fn v tfn) fns
-      | Ast.TY_pred (slots, constrs) ->
-          begin
-            Array.iter (walk_slot v) slots;
-            walk_constrs v constrs
-          end
       | Ast.TY_chan t -> walk_ty v t
       | Ast.TY_port t -> walk_ty v t
       | Ast.TY_constrained (t,cs) ->
@@ -323,15 +317,6 @@ and walk_ty_fn
   walk_ty_sig v tsig
 
 
-and walk_ty_pred
-    (v:visitor)
-    (tpred:Ast.ty_pred)
-    : unit =
-  let (slots, constrs) = tpred in
-    Array.iter (walk_slot v) slots;
-    walk_constrs v constrs
-
-
 and walk_constrs
     (v:visitor)
     (cs:Ast.constrs)
@@ -372,14 +357,6 @@ and walk_header_tup
     (htup:Ast.header_tup)
     : unit =
   Array.iter (walk_slot_identified v) htup
-
-and walk_pred
-    (v:visitor)
-    (p:Ast.pred)
-    : unit =
-  walk_header_slots v p.Ast.pred_input_slots;
-  walk_constrs v p.Ast.pred_input_constrs;
-  walk_block v p.Ast.pred_body
 
 and walk_obj_fn
     (v:visitor)

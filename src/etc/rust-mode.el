@@ -57,7 +57,7 @@
          "char" "str"
          "chan" "port"
          "task" "mod" "obj"
-         "fn" "pred" "iter"
+         "fn" "iter"
          "any"
          "bool" "int" "uint" "big"
          "i8" "i16" "i32" "i64"
@@ -68,7 +68,7 @@
 
 ;; declarator-block openings
 (c-lang-defconst c-other-block-decl-kwds
-  rust '("mod" "fn" "pred" "iter" "obj"))
+  rust '("mod" "fn" "iter" "obj"))
 
 ;; type-defining declarators
 (c-lang-defconst c-typedef-decl-kwds

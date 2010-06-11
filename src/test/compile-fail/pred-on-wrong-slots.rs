@@ -5,7 +5,7 @@
 fn f(int a, int b) : lt(a,b) {
 }
 
-pred lt(int a, int b) {
+fn lt(int a, int b) -> bool {
   ret a < b;
 }
 

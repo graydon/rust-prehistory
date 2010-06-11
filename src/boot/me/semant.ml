@@ -404,8 +404,6 @@ let defn_is_static (d:defn) : bool =
 let defn_is_callable (d:defn) : bool =
   match d with
       DEFN_slot { Ast.slot_ty = Some Ast.TY_fn _ }
-    | DEFN_slot { Ast.slot_ty = Some Ast.TY_pred _ }
-    | DEFN_item { Ast.decl_item = (Ast.MOD_ITEM_pred _ ) }
     | DEFN_item { Ast.decl_item = (Ast.MOD_ITEM_fn _ ) } -> true
     | _ -> false
 ;;
@@ -574,7 +572,6 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_fn : (('slots * Ast.constrs * 'slot) * Ast.ty_fn_aux) -> 'ty;
       ty_fold_obj : (Ast.effect * (Ast.ident, (('slots * Ast.constrs * 'slot) *
                                                  Ast.ty_fn_aux)) Hashtbl.t) -> 'ty;
-      ty_fold_pred : ('slots * Ast.constrs) -> 'ty;
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
       ty_fold_task : unit -> 'ty;
@@ -623,7 +620,6 @@ let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   | Ast.TY_idx i -> f.ty_fold_idx i
 
   | Ast.TY_fn (tsig,taux) -> f.ty_fold_fn (fold_sig tsig, taux)
-  | Ast.TY_pred (slots, constrs) -> f.ty_fold_pred (fold_slots slots, constrs)
   | Ast.TY_chan t -> f.ty_fold_chan (fold_ty f t)
   | Ast.TY_port t -> f.ty_fold_port (fold_ty f t)
 
@@ -663,7 +659,6 @@ let ty_fold_default (default:'a) : 'a simple_ty_fold =
       ty_fold_idx = (fun _ -> default);
       ty_fold_fn = (fun _ -> default);
       ty_fold_obj = (fun _ -> default);
-      ty_fold_pred = (fun _ -> default);
       ty_fold_chan = (fun _ -> default);
       ty_fold_port = (fun _ -> default);
       ty_fold_task = (fun _ -> default);
@@ -705,8 +700,6 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
                      id (Ast.TY_obj
                            (eff, (htab_map fns
                                     (fun id fn -> (id, rebuild_fn fn))))));
-    ty_fold_pred = (fun (islots, constrs) ->
-                      id (Ast.TY_pred (islots, constrs)));
     ty_fold_chan = (fun t -> id (Ast.TY_chan t));
     ty_fold_port = (fun t -> id (Ast.TY_port t));
     ty_fold_task = (fun _ -> id Ast.TY_task);
@@ -799,7 +792,6 @@ let associative_binary_op_ty_fold
         ty_fold_fn = reduce_fn;
         ty_fold_obj = (fun (_,fns) ->
                          reduce (List.map reduce_fn (htab_vals fns)));
-        ty_fold_pred = (fun (islots, _) -> islots);
         ty_fold_chan = (fun a -> a);
         ty_fold_port = (fun a -> a);
         ty_fold_constrained = (fun (a, _) -> a) }
@@ -830,7 +822,6 @@ let type_is_structured (t:Ast.ty) : bool =
                  ty_fold_iso = (fun _ -> true);
                  ty_fold_idx = (fun _ -> true);
                  ty_fold_fn = (fun _ -> true);
-                 ty_fold_pred = (fun _ -> true);
                  ty_fold_obj = (fun _ -> true) }
   in
     fold_ty fold t
@@ -1128,11 +1119,6 @@ let ty_fn_of_fn (fn:Ast.fn) : Ast.ty_fn =
    fn.Ast.fn_aux )
 ;;
 
-let ty_pred_of_pred (pred:Ast.pred) : Ast.ty_pred =
-  (arg_slots pred.Ast.pred_input_slots,
-   pred.Ast.pred_input_constrs)
-;;
-
 let ty_obj_of_obj (obj:Ast.obj) : Ast.ty_obj =
   (obj.Ast.obj_effect,
    htab_map obj.Ast.obj_fns (fun i f -> (i, ty_fn_of_fn f.node)))
@@ -1141,7 +1127,6 @@ let ty_obj_of_obj (obj:Ast.obj) : Ast.ty_obj =
 let ty_of_mod_item ((*inside*)_:bool) (item:Ast.mod_item) : Ast.ty =
   match item.node.Ast.decl_item with
       Ast.MOD_ITEM_type _ -> Ast.TY_type
-    | Ast.MOD_ITEM_pred p -> (Ast.TY_pred (ty_pred_of_pred p))
     | Ast.MOD_ITEM_fn f -> (Ast.TY_fn (ty_fn_of_fn f))
     | Ast.MOD_ITEM_mod _ -> bug () "Semant.ty_of_mod_item on mod"
     | Ast.MOD_ITEM_obj ob ->
@@ -1371,9 +1356,6 @@ and lookup_by_ident
                   Ast.MOD_ITEM_fn f ->
                     check_slots scopes f.Ast.fn_input_slots
 
-                | Ast.MOD_ITEM_pred p ->
-                    check_slots scopes p.Ast.pred_input_slots
-
                 | Ast.MOD_ITEM_obj obj ->
                     begin
                       match htab_search obj.Ast.obj_fns ident with
@@ -1540,8 +1522,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_tup tt -> tup tt
       | Ast.TY_rec tr -> tup (Array.map snd tr)
 
-      | Ast.TY_fn _
-      | Ast.TY_pred _ ->
+      | Ast.TY_fn _ ->
           let fn_closure_ptr = sp (Il.StructTy [| word; Il.OpaqueTy |]) in
             Il.StructTy [| codeptr; fn_closure_ptr |]
 
@@ -1652,15 +1633,6 @@ let call_args_referent_type
             n_ty_params
             tsig.Ast.sig_input_slots
             (if taux.Ast.fn_is_iter then (iterator_arg_rtys()) else [||])
-            indirect_arg_rtys
-
-      | Ast.TY_pred (in_args, _) ->
-          call_args_referent_type_full
-            cx.ctxt_abi
-            (interior_slot Ast.TY_bool)
-            n_ty_params
-            in_args
-            [| |]
             indirect_arg_rtys
 
       | _ -> bug cx "Semant.call_args_referent_type on non-callable type"
@@ -1819,7 +1791,6 @@ let ty_str (ty:Ast.ty) : string =
          ty_fold_idx = (fun i -> "x" ^ (string_of_int i));
          (* FIXME: encode constrs, aux as well. *)
          ty_fold_fn = (fun ((ins,_,out),_) -> "f" ^ ins ^ out);
-         ty_fold_pred = (fun (ins,_) -> "p" ^ ins);
          ty_fold_chan = (fun t -> "H" ^ t);
          ty_fold_port = (fun t -> "R" ^ t);
          (* FIXME: encode obj types. *)

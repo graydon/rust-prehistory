@@ -685,7 +685,6 @@ The keywords are:
 @tab @code{str}
 @item @code{fn}
 @tab @code{iter}
-@tab @code{pred}
 @tab @code{obj}
 @tab @code{drop}
 @item @code{task}
@@ -1096,10 +1095,10 @@ Allocations in the stack and the heap consist of @emph{slots}.
 @subsection Ref.Mem.Alloc
 @c * Ref.Mem.Alloc::               Memory allocation model.
 
-The @dfn{items} of a program are those functions, predicates,
-iterators, objects, modules and types that have their value calculated
-at compile-time and stored uniquely in the memory image of the rust
-process. Items are neither dynamically allocated nor freed.
+The @dfn{items} of a program are those functions, iterators, objects,
+modules and types that have their value calculated at compile-time and
+stored uniquely in the memory image of the rust process. Items are
+neither dynamically allocated nor freed.
 
 A task's @dfn{stack} consists of activation frames automatically
 allocated on entry to each function as the task executes. A stack
@@ -1447,35 +1446,34 @@ An @dfn{item} is a component of a module. Items are entirely
 determined at compile-time, remain constant during execution, and may
 reside in read-only memory.
 
-There are 6 primary kinds of item: modules, functions, iterators,
-predicates, objects and types.
+There are 5 primary kinds of item: modules, functions, iterators,
+objects and types.
 
 All items form an implicit scope for the declaration of sub-items. In
-other words, within a function, object, iterator or predicate,
-declarations of items can (in many cases) be mixed with the
-statements, control blocks, and similar artifacts that otherwise
-compose the item body. The meaning of these scoped items is the same
-as if the item was declared outside the scope, except that the item's
-@emph{path name} within the module namespace is qualified by the name
-of the enclosing item. The exact locations in which sub-items may be
-declared is given by the grammar.  @xref{Ref.Gram}.
+other words, within a function, object or iterator, declarations of
+items can (in many cases) be mixed with the statements, control
+blocks, and similar artifacts that otherwise compose the item
+body. The meaning of these scoped items is the same as if the item was
+declared outside the scope, except that the item's @emph{path name}
+within the module namespace is qualified by the name of the enclosing
+item. The exact locations in which sub-items may be declared is given
+by the grammar.  @xref{Ref.Gram}.
 
-Functions, iterators, predicates, objects and types may be
-@emph{parameterised} by type. Type parameters are given as a
-comma-separated list of identifiers enclosed in square brackets
-(@code{[]}), after the name of the item and before its definition.
-The type parameters of an item are part of the name, not the type of
-the item; in order to refer to the type-parameterised item, a
-referencing name must in general provide type arguments as a list of
-comma-separated types enclosed within square brackets (though the
-type-inference system can often infer such argument types from
-context). There are no general parametric types.
+Functions, iterators, objects and types may be @emph{parameterised} by
+type. Type parameters are given as a comma-separated list of
+identifiers enclosed in square brackets (@code{[]}), after the name of
+the item and before its definition.  The type parameters of an item
+are part of the name, not the type of the item; in order to refer to
+the type-parameterised item, a referencing name must in general
+provide type arguments as a list of comma-separated types enclosed
+within square brackets (though the type-inference system can often
+infer such argument types from context). There are no general
+parametric types.
 
 @menu
 * Ref.Item.Mod::                Items defining modules.
 * Ref.Item.Fn::                 Items defining functions.
 * Ref.Item.Iter::               Items defining iterators.
-* Ref.Item.Pred::               Items defining typestate predicates.
 * Ref.Item.Obj::                Items defining objects.
 * Ref.Item.Type::               Items defining the types of values and slots.
 @end menu
@@ -1485,8 +1483,8 @@ context). There are no general parametric types.
 @subsection Ref.Item.Mod
 @c * Ref.Item.Mod::           Items defining sub-modules.
 
-A @dfn{module item} contains declarations of other @emph{items}. The items
-within a module may be functions, predicates, modules, objects or
+A @dfn{module item} contains declarations of other @emph{items}. The
+items within a module may be functions, modules, objects or
 types. These declarations have both static and dynamic
 interpretation. The purpose of a module is to organise @emph{names}
 and control @emph{visibility}. Modules are declared with the keyword
@@ -1600,11 +1598,12 @@ source code, an implicit @code{ret} statement is appended to the end
 of the control path during compilation, returning the implicit
 @code{()} value.
 
-A function may be @emph{pure} or @emph{impure}, depending on the
-presence or absence of the keyword prefix @code{pure}. A @dfn{pure}
-function is one that has no side effects, calls no impure functions,
-and is declared with the @code{pure} keyword. A function lacking any
-of these characteristics is @dfn{impure}.
+A function may have an @emph{effect}, which may be either @code{io},
+@code{state}, @code{unsafe}. If no effect is specified, the function is
+said to be @dfn{pure}.
+
+Any pure boolean function is also called a @emph{predicate}, and may be
+used as part of the static typestate system. @xref{Ref.Stmt.Stat.Constr}.
 
 An example of a function:
 @example
@@ -1648,30 +1647,6 @@ iter range(int lo, int hi) -> int @{
 let int sum = 0;
 for each (int x = range(0,100)) @{
     sum += x;
-@}
-@end example
-
-
-@page
-@node       Ref.Item.Pred
-@subsection Ref.Item.Pred
-@c * Ref.Item.Pred::          Items defining typestate predicates.
-
-A predicate is a pure function returning @code{bool}, that also
-carries special meaning to the typestate system. Specifically, a
-predicate can be used as part of a @emph{constraint}; introducing a new
-predicate into a program enlarges the set of constraints that
-can be statically checked. @xref{Ref.Stmt.Stat.Constr}. Predicates
-are declared with the keyword @code{pred}.
-
-Since predicates are implicitly @code{pure} and implicitly return
-@code{bool}, the signature of a @code{pred} cannot include a
-@code{pure} modifier, nor specify an output slot.
-
-An example of a predicate:
-@example
-pred divides(int d, int i) @{
-    ret d % i == 0;
 @}
 @end example
 
@@ -2010,9 +1985,8 @@ let list[int] a = cons(7, cons(13, nil));
 @subsection Ref.Type.Fn
 
 The function type-constructor @code{fn} forms new function types. A
-function type consists of a set of input types, an output type, and a
-flag indicating whether the function is
-@code{pure}. @xref{Ref.Item.Fn}.
+function type consists of a set of input types, an output type, and an
+@emph{effect}. @xref{Ref.Item.Fn}.
 
 An example of a @code{fn} type:
 @example
@@ -2032,9 +2006,8 @@ x = bo(5,7);
 @subsection Ref.Type.Iter
 
 The iterator type-constructor @code{iter} forms new iterator types. An
-iterator type consists a set of input types, an output type, and a
-flag indicating whether the iterator is
-@code{pure}. @xref{Ref.Item.Iter}.
+iterator type consists a set of input types, an output type, and an
+@emph{effect}. @xref{Ref.Item.Iter}.
 
 An example of an @code{iter} type:
 @example
@@ -2245,10 +2218,10 @@ statements, @xref{Ref.Stmt.Copy}.
 @c * Ref.Stmt::               Executable statements.
 
 A @dfn{statement} is a component of a block, which are in turn
-components of outer blocks, functions, predicates or iterators. When a
-function is spawned into a task, the task @emph{executes} statements
-in an order determined by the body of the enclosing structure. Each
-statement causes the task to perform certain actions.
+components of outer blocks, functions or iterators. When a function is
+spawned into a task, the task @emph{executes} statements in an order
+determined by the body of the enclosing structure. Each statement
+causes the task to perform certain actions.
 
 @menu
 * Ref.Stmt.Stat::               The static typestate system of statement analysis.
@@ -2356,12 +2329,14 @@ This implicit graph is called the @dfn{control flow graph}, or @dfn{CFG}.
 @subsubsection Ref.Stmt.Stat.Constr
 @c * Ref.Stmt.Stat.Constr::          Predicates applied to slots.
 
-A @dfn{constraint} is a predicate applied to specific slots. @xref{Ref.Item.Pred}.
+A @dfn{predicate} is any pure boolean function. @xref{Ref.Item.Fn}.
+
+A @dfn{constraint} is a predicate applied to specific slots.
 
 For example, consider the following code:
 
 @example
-pred is_less_than(int a, int b) @{
+fn is_less_than(int a, int b) -> bool @{
      ret a < b;
 @}
 
@@ -2498,10 +2473,10 @@ containing block, both before and after the declaration.
 
 An @dfn{item declaration statement} has a syntactic form identical to
 an item declaration within a module. Declaring an item -- a function,
-predicate, iterator, object, type or module -- locally within a
-statement block is simply a way of restricting its scope to a narrow
-region containing all of its uses; it is otherwise identical in
-meaning to declaring the item outside the statement block.
+iterator, object, type or module -- locally within a statement block
+is simply a way of restricting its scope to a narrow region containing
+all of its uses; it is otherwise identical in meaning to declaring the
+item outside the statement block.
 
 @page
 @node          Ref.Stmt.Decl.Slot
@@ -2824,10 +2799,9 @@ logging buffer provided by the runtime or emitted to a system
 console. Log statements are enabled or disabled dynamically at
 run-time on a per-task and per-item basis. @xref{Ref.Run.Log}.
 
-Executing a @code{log} statement not considered a ``side effect'' for
-the purposes of differentiating pure and impure functions. In other
-words, a pure function remains pure even if it contains a log
-statement.
+Executing a @code{log} statement not considered an ``io effect'' in
+the effect system. In other words, a pure function remains pure even
+if it contains a log statement.
 
 @example
 @end example
@@ -3175,7 +3149,7 @@ statements, propagating conditions forward and statically comparing
 implied states and their specifications. @xref{Ref.Stmt.Stat}.
 
 @example
-pred even(~int x) @{
+fn even(~int x) -> bool @{
     ret x & 1 == 0;
 @}
 
@@ -3326,9 +3300,9 @@ filtering process:
 @item
 By Item
 
-Each @emph{item} (module, function, predicate, etc.) in Rust has
-a static name-path within its crate module, and can have logging enabled
-or disabled on a name-path-prefix basis.
+Each @emph{item} (module, function, iterator, object, type) in Rust
+has a static name-path within its crate module, and can have logging
+enabled or disabled on a name-path-prefix basis.
 
 @sp 1
 @item
@@ -3341,9 +3315,9 @@ disabled on an ownership-path-prefix basis.
 
 Logging is integrated into the language for efficiency reasons, as
 well as the need to filter logs based on these two built-in
-dimensions, and finally due to the need to consider logging as
-a @emph{pure} (non-side-effect-producing) operation for the purposes
-of the typestate algorithm.
+dimensions, and finally due to the need to consider logging as a
+@emph{pure} (non-effectful) operation for the purposes of the
+effect system.
 
 Logging is an @emph{optional} component of the runtime.
 

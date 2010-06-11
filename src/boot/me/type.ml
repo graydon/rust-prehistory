@@ -270,7 +270,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           | Ast.TY_port _ | Ast.TY_task | Ast.TY_tup _ | Ast.TY_vec _
           | Ast.TY_rec _ | Ast.TY_tag _ | Ast.TY_iso _ | Ast.TY_idx _ ->
               comparable
-          | Ast.TY_fn _ | Ast.TY_pred _ | Ast.TY_obj _
+          | Ast.TY_fn _ | Ast.TY_obj _
           | Ast.TY_param _ | Ast.TY_native _ | Ast.TY_type -> false
           | Ast.TY_named _ -> bug () "is_comparable_or_ordered: TY_named TODO"
           | Ast.TY_constrained (ty, _) ->
@@ -342,9 +342,6 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                         then fail ();
                         unify_slot out_slot None out_tv;
                         Array.iteri unify_in_slot in_slots
-                    | Ast.TY_pred (slots, _) ->
-                        unify_ty Ast.TY_bool out_tv;
-                        Array.iteri unify_in_slot slots
                     | _ -> fail ()
                 end;
                 TYSPEC_resolved (params, ty)
@@ -1084,9 +1081,6 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               Ast.MOD_ITEM_fn fn ->
                 enter_fn fn TYSPEC_all
 
-            | Ast.MOD_ITEM_pred _ ->
-                push_retval_tv (ref (TYSPEC_resolved ([||], Ast.TY_bool)))
-
             | _ -> ()
         with Semant_err (None, msg) ->
           raise (Semant_err ((Some mod_item.id), msg))
@@ -1101,9 +1095,6 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
     let visit_mod_item_post n p mod_item =
       inner.Walk.visit_mod_item_post n p mod_item;
       match mod_item.node.Ast.decl_item with
-
-          Ast.MOD_ITEM_pred _ ->
-            pop_retval_tv ();
 
         | Ast.MOD_ITEM_fn _ ->
             pop_retval_tv ();

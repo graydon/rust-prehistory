@@ -4,9 +4,9 @@ fn mul(u8 x, u8 y) -> u8 { ret x * y; }
 fn div(u8 x, u8 y) -> u8 { ret x / y; }
 fn rem(u8 x, u8 y) -> u8 { ret x % y; }
 
-pred lt(u8 x, u8 y) { ret x < y; }
-pred le(u8 x, u8 y) { ret x <= y; }
-pred eq(u8 x, u8 y) { ret x == y; }
-pred ne(u8 x, u8 y) { ret x != y; }
-pred ge(u8 x, u8 y) { ret x >= y; }
-pred gt(u8 x, u8 y) { ret x > y; }
+fn lt(u8 x, u8 y) -> bool { ret x < y; }
+fn le(u8 x, u8 y) -> bool { ret x <= y; }
+fn eq(u8 x, u8 y) -> bool { ret x == y; }
+fn ne(u8 x, u8 y) -> bool { ret x != y; }
+fn ge(u8 x, u8 y) -> bool { ret x >= y; }
+fn gt(u8 x, u8 y) -> bool { ret x > y; }

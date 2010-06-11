@@ -114,10 +114,6 @@ let fn_keys fn resolver =
     entry_keys fn.Ast.fn_input_slots fn.Ast.fn_input_constrs resolver
 ;;
 
-let pred_keys pred resolver =
-    entry_keys pred.Ast.pred_input_slots pred.Ast.pred_input_constrs resolver
-;;
-
 let constr_id_assigning_visitor
     (cx:ctxt)
     (scopes:(scope list) ref)
@@ -158,10 +154,6 @@ let constr_id_assigning_visitor
           let (input_keys, init_keys) = obj_keys ob resolve_constr_to_key in
             note_keys input_keys;
             note_keys init_keys
-      | Ast.MOD_ITEM_pred p ->
-          let (input_keys, init_keys) = pred_keys p resolve_constr_to_key in
-            note_keys input_keys;
-            note_keys init_keys
       | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -190,11 +182,6 @@ let constr_id_assigning_visitor
                 match referent_ty with
                     Ast.TY_fn (tsig,_) ->
                       let constrs = tsig.Ast.sig_input_constrs in
-                      let names = atoms_to_names args in
-                      let constrs' = Array.map (apply_names_to_constr names) constrs in
-                        Array.iter visit_constr_pre constrs'
-
-                  | Ast.TY_pred (_, constrs) ->
                       let names = atoms_to_names args in
                       let constrs' = Array.map (apply_names_to_constr names) constrs in
                         Array.iter visit_constr_pre constrs'
@@ -294,10 +281,6 @@ let condition_assigning_visitor
             let (input_keys, init_keys) = fn_keys f resolve_constr_to_key in
               raise_entry_state input_keys init_keys f.Ast.fn_body
 
-        | Ast.MOD_ITEM_pred p ->
-            let (input_keys, init_keys) = pred_keys p resolve_constr_to_key in
-              raise_entry_state input_keys init_keys p.Ast.pred_body
-
         | _ -> ()
     end;
     inner.Walk.visit_mod_item_pre n p i
@@ -323,11 +306,6 @@ let condition_assigning_visitor
         match referent_ty with
             Ast.TY_fn (tsig,_) ->
               let formal_constrs = tsig.Ast.sig_input_constrs in
-              let names = atoms_to_names args in
-              let constrs = Array.map (apply_names_to_constr names) formal_constrs in
-              let keys = Array.map resolve_constr_to_key constrs in
-                raise_precondition s.id keys
-          | Ast.TY_pred (_,formal_constrs) ->
               let names = atoms_to_names args in
               let constrs = Array.map (apply_names_to_constr names) formal_constrs in
               let keys = Array.map resolve_constr_to_key constrs in

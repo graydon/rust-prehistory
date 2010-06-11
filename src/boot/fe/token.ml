@@ -70,7 +70,6 @@ type token =
 
   (* Type and type-state keywords *)
   | TYPE
-  | PRED
   | CHECK
   | CLAIM
   | PROVE
@@ -216,7 +215,6 @@ let rec string_of_tok t =
 
     (* Type and type-state keywords *)
     | TYPE       -> "type"
-    | PRED       -> "pred"
     | CHECK      -> "check"
     | CLAIM      -> "claim"
     | PROVE      -> "prove"

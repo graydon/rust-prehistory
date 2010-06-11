@@ -278,11 +278,6 @@ let layout_visitor
             layout_header i.id
               (header_slot_ids f.Ast.fn_input_slots)
 
-        | Ast.MOD_ITEM_pred p ->
-            enter_frame i.id;
-            layout_header i.id
-              (header_slot_ids p.Ast.pred_input_slots)
-
         | Ast.MOD_ITEM_tag (header_slots, _, _) ->
             enter_frame i.id;
             layout_header i.id
@@ -306,7 +301,6 @@ let layout_visitor
     begin
       match i.node.Ast.decl_item with
           Ast.MOD_ITEM_fn _
-        | Ast.MOD_ITEM_pred _
         | Ast.MOD_ITEM_tag _
         | Ast.MOD_ITEM_obj _ -> leave_frame ()
         | _ -> ()

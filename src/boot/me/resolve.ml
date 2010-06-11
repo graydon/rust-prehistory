@@ -168,8 +168,6 @@ let all_item_collecting_visitor
       match i.node.Ast.decl_item with
           Ast.MOD_ITEM_fn f ->
             note_header i.id f.Ast.fn_input_slots;
-        | Ast.MOD_ITEM_pred p ->
-            note_header i.id p.Ast.pred_input_slots
         | Ast.MOD_ITEM_obj ob ->
             note_header i.id ob.Ast.obj_state;
         | Ast.MOD_ITEM_tag (header_slots, _, _) ->
