@@ -36,12 +36,12 @@ let loop_depth_visitor
   let (fcxs : fn_ctxt Stack.t) = Stack.create () in
 
   let push_loop () =
-    let fcx = Stack.top fcxs in
+    let fcx = Stack.pop fcxs in
       Stack.push (incr_depth fcx) fcxs
   in
 
   let pop_loop () =
-    let fcx = Stack.top fcxs in
+    let fcx = Stack.pop fcxs in
       Stack.push (decr_depth fcx) fcxs
   in
 
