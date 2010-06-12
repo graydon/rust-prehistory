@@ -424,7 +424,7 @@ let condition_assigning_visitor
 
         | Ast.STMT_alt_tag at ->
             let precond = Array.map (fun s -> Constr_init s) (lval_slots cx at.Ast.alt_tag_lval) in
-            let visit_arm { node = (_, header_slots, block) } =
+            let visit_arm { node = (Ast.PAT_tag (_, header_slots), block) } =
               (* FIXME: propagate tag-carried constrs here. *)
               let (input_keys, init_keys) = entry_keys header_slots [| |] resolve_constr_to_key in
                 raise_entry_state input_keys init_keys block
@@ -661,7 +661,7 @@ let graph_special_block_structure_building_visitor
         | Ast.STMT_alt_tag at ->
             let dsts = Hashtbl.find graph s.id in
             let arm_blocks =
-              let arm_block_id { node = (_, _, block) } = block.id in
+              let arm_block_id { node = (_, block) } = block.id in
               Array.to_list (Array.map arm_block_id at.Ast.alt_tag_arms)
             in
             let succ_stmts = List.filter (fun x -> not (List.mem x arm_blocks)) dsts in

@@ -61,7 +61,7 @@ let dead_code_visitor
             Hashtbl.add must_exit s.id ()
 
         | Ast.STMT_alt_tag { Ast.alt_tag_arms = arms } ->
-            let arm_ids = Array.map (fun { node = (_, _, block) } -> block.id) arms in
+            let arm_ids = Array.map (fun { node = (_, block) } -> block.id) arms in
               if all_must_exit arm_ids then
                 Hashtbl.add must_exit s.id ()
 

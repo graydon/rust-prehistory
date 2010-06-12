@@ -240,7 +240,7 @@ and stmt = stmt' identified
 and stmt_alt_tag =
     {
       alt_tag_lval: lval;
-      alt_tag_arms: pat array;
+      alt_tag_arms: arm array;
     }
 
 and stmt_alt_type =
@@ -300,8 +300,10 @@ and domain =
     DOMAIN_local
   | DOMAIN_thread
 
-and pat' = ident * header_slots * block
-and pat = pat' identified
+and pat = PAT_tag of ident * header_slots
+
+and arm' = pat * block
+and arm = arm' identified
 
 and atom =
     ATOM_literal of (lit identified)

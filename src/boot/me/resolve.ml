@@ -112,7 +112,7 @@ let stmt_collecting_visitor
         | Ast.STMT_for_each f ->
             visit_for_block f.Ast.for_each_slot f.Ast.for_each_body.id
         | Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
-            let resolve_arm { node = (_, bindings, block); id = _ } =
+            let resolve_arm { node = (Ast.PAT_tag (_, bindings), block) } =
               let slots = Hashtbl.find cx.ctxt_block_slots block.id in
               let iter_binding ({ node = _; id = node_id }, ident) =
                 let key = Ast.KEY_ident ident in
@@ -749,7 +749,7 @@ let pattern_resolving_visitor
     begin
       match stmt.node with
         Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
-          let resolve_arm { node = (ident, _, _); id = arm_id } =
+          let resolve_arm { node = (Ast.PAT_tag (ident, _), _); id = arm_id } =
             match lookup_by_ident cx !scopes ident with
                 None ->
                   err (Some arm_id) "unresolved tag constructor '%s'" ident
