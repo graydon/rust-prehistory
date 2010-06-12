@@ -1696,13 +1696,14 @@ let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
     Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
 ;;
 
-let mk_ty_fn
+let mk_ty_fn_or_iter
     (out_slot:Ast.slot)
     (arg_slots:Ast.slot array)
+    (is_iter:bool)
     : Ast.ty =
   (* In some cases we don't care what aux or constrs are. *)
   let taux = { Ast.fn_effect = Ast.PURE;
-               Ast.fn_is_iter = false; }
+               Ast.fn_is_iter = is_iter; }
   in
   let tsig = { Ast.sig_input_slots = arg_slots;
                Ast.sig_input_constrs = [| |];
@@ -1711,12 +1712,27 @@ let mk_ty_fn
     Ast.TY_fn (tsig, taux)
 ;;
 
+let mk_ty_fn
+    (out_slot:Ast.slot)
+    (arg_slots:Ast.slot array)
+    : Ast.ty =
+  mk_ty_fn_or_iter out_slot arg_slots false
+;;
+
 let mk_simple_ty_fn
     (arg_slots:Ast.slot array)
     : Ast.ty =
   (* In some cases we don't care what the output slot is. *)
   let out_slot = interior_slot Ast.TY_nil in
     mk_ty_fn out_slot arg_slots
+;;
+
+let mk_simple_ty_iter
+    (arg_slots:Ast.slot array)
+    : Ast.ty =
+  (* In some cases we don't care what the output slot is. *)
+  let out_slot = interior_slot Ast.TY_nil in
+    mk_ty_fn_or_iter out_slot arg_slots true
 ;;
 
 

@@ -547,7 +547,7 @@ let type_resolving_visitor
     begin
       match stmt.node with
           Ast.STMT_for_each _ ->
-            let fty = mk_simple_ty_fn [| |] in
+            let fty = mk_simple_ty_iter [| |] in
               htab_put cx.ctxt_all_item_types stmt.id fty;
         | _ -> ()
     end;

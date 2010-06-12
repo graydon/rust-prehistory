@@ -3587,7 +3587,9 @@ let trans_visitor
     end;
     let block_fptr = Il.Cell (get_iter_block_fn_for_current_frame ()) in
     let fp = get_iter_outer_frame_ptr_for_current_frame () in
-      trans_call_glue (code_of_operand block_fptr) None [| fp |]
+    let vr = next_vreg_cell Il.voidptr_t in
+      mov vr zero;
+      trans_call_glue (code_of_operand block_fptr) None [| vr; fp |]
 
   and trans_vec_append dst_cell dst_slot src_oper src_ty =
     let (dst_elt_slot, trim_trailing_null) =
