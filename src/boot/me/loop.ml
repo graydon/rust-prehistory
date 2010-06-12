@@ -10,22 +10,18 @@ let log cx = Session.log "loop"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
-type fn_ctxt = { current_depth: int;
-                 max_depth: int; }
+type fn_ctxt = { current_depth: int;  }
 ;;
 
 let incr_depth (fcx:fn_ctxt) =
-  let depth = fcx.current_depth + 1 in
-    { current_depth = depth;
-      max_depth = max fcx.max_depth depth; }
+    { current_depth = fcx.current_depth + 1; }
 ;;
 
 let decr_depth (fcx:fn_ctxt) =
-  { fcx with current_depth = fcx.current_depth - 1; }
+  { current_depth = fcx.current_depth - 1; }
 ;;
 
-let top_fcx = { current_depth = 0;
-                max_depth = 0; }
+let top_fcx = { current_depth = 0; }
 ;;
 
 let loop_depth_visitor
@@ -60,8 +56,7 @@ let loop_depth_visitor
       (item:Ast.mod_item)
       : unit =
     inner.Walk.visit_mod_item_post ident ty_params item;
-    let fcx = Stack.pop fcxs in
-      htab_put cx.ctxt_fn_loop_depths item.id fcx.max_depth
+    ignore (Stack.pop fcxs);
   in
 
   let visit_obj_fn_pre
@@ -79,8 +74,7 @@ let loop_depth_visitor
       (fn:Ast.fn identified)
       : unit =
     inner.Walk.visit_obj_fn_pre obj ident fn;
-    let fcx = Stack.pop fcxs in
-      htab_put cx.ctxt_fn_loop_depths fn.id fcx.max_depth
+    ignore (Stack.pop fcxs)
   in
 
   let visit_obj_drop_pre
@@ -96,20 +90,27 @@ let loop_depth_visitor
       (b:Ast.block)
       : unit =
     inner.Walk.visit_obj_drop_post obj b;
-    let fcx = Stack.pop fcxs in
-      htab_put cx.ctxt_fn_loop_depths b.id fcx.max_depth
+    ignore (Stack.pop fcxs)
+  in
+
+  let visit_slot_identified_pre sloti =
+    let fcx = Stack.top fcxs in
+      if not (Hashtbl.mem cx.ctxt_slot_loop_depths sloti.id)
+      then
+        htab_put cx.ctxt_slot_loop_depths sloti.id fcx.current_depth;
+      inner.Walk.visit_slot_identified_pre sloti
   in
 
   let visit_stmt_pre s =
-    begin
-      match s.node with
-        | Ast.STMT_for_each _ ->
-            let fcx = Stack.top fcxs in
-              begin
-                htab_put cx.ctxt_loop_depths s.id fcx.current_depth;
+    let fcx = Stack.top fcxs in
+      htab_put cx.ctxt_stmt_loop_depths s.id fcx.current_depth;
+      begin
+        match s.node with
+          | Ast.STMT_for_each fe ->
+              let (sloti, _) = fe.Ast.for_each_slot in
+                htab_put cx.ctxt_slot_loop_depths sloti.id fcx.current_depth;
                 push_loop ()
-              end
-        | _ -> ()
+          | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
   in
@@ -128,6 +129,7 @@ let loop_depth_visitor
         Walk.visit_obj_fn_post = visit_obj_fn_post;
         Walk.visit_obj_drop_pre = visit_obj_drop_pre;
         Walk.visit_obj_drop_post = visit_obj_drop_post;
+        Walk.visit_slot_identified_pre = visit_slot_identified_pre;
         Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_stmt_post = visit_stmt_post }
 ;;

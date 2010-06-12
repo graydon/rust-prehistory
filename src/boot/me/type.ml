@@ -1154,6 +1154,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               DEFN_item i -> Array.map (fun p -> p.node) i.Ast.decl_params
             | DEFN_obj_fn _ -> [| |]
             | DEFN_obj_drop _ -> [| |]
+            | DEFN_loop_body _ -> [| |]
             | _ -> err (Some id) "expected item defn for item tyvar"
         in
         let spec = TYSPEC_resolved (params, ty) in

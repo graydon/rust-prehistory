@@ -107,8 +107,8 @@ type ctxt =
       ctxt_slot_offsets: (node_id,size) Hashtbl.t;
       ctxt_frame_sizes: (node_id,size) Hashtbl.t;
       ctxt_call_sizes: (node_id,size) Hashtbl.t;
-      ctxt_loop_depths: (node_id,int) Hashtbl.t;
-      ctxt_fn_loop_depths: (node_id,int) Hashtbl.t;
+      ctxt_stmt_loop_depths: (node_id,int) Hashtbl.t;
+      ctxt_slot_loop_depths: (node_id,int) Hashtbl.t;
 
       (* Mutability and GC stuff. *)
       ctxt_mutable_slot_referent: (node_id,unit) Hashtbl.t;
@@ -202,8 +202,8 @@ let new_ctxt sess abi crate =
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
 
-    ctxt_loop_depths = Hashtbl.create 0;
-    ctxt_fn_loop_depths = Hashtbl.create 0;
+    ctxt_slot_loop_depths = Hashtbl.create 0;
+    ctxt_stmt_loop_depths = Hashtbl.create 0;
 
     ctxt_fn_fixups = Hashtbl.create 0;
     ctxt_block_fixups = Hashtbl.create 0;
@@ -310,6 +310,14 @@ let lval_to_slot (cx:ctxt) (id:node_id) : Ast.slot =
   match resolve_lval_id cx id with
       DEFN_slot slot -> slot
     | _ -> bugi cx id "unknown slot"
+;;
+
+let get_stmt_depth (cx:ctxt) (id:node_id) : int =
+  Hashtbl.find cx.ctxt_stmt_loop_depths id
+;;
+
+let get_slot_depth (cx:ctxt) (id:node_id) : int =
+  Hashtbl.find cx.ctxt_slot_loop_depths id
 ;;
 
 let get_fn_fixup (cx:ctxt) (id:node_id) : fixup =

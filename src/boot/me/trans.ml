@@ -481,6 +481,14 @@ let trans_visitor
         (Il.ScalarTy (Il.AddrTy Il.CodeTy))
   in
 
+  let get_iter_outer_frame_ptr_for_current_frame _ =
+    let self_iterator_args =
+      get_iterator_args_for_current_frame ()
+    in
+      get_element_ptr self_iterator_args
+        Abi.iterator_args_elt_outer_frame_ptr
+  in
+
   let get_obj_for_current_frame _ =
     deref (ptr_cast
              (get_closure_for_current_frame ())
@@ -752,7 +760,34 @@ let trans_visitor
                         in
                           Il.Mem (slot_mem, referent_type)
                       end
-                    else Il.Mem (fp_off_sz off, referent_type)
+                    else
+                      if (Stack.is_empty curr_stmt)
+                      then
+                        Il.Mem (fp_off_sz off, referent_type)
+                      else
+                        let slot_depth = get_slot_depth cx slot_id in
+                        let stmt_depth = get_stmt_depth cx (Stack.top curr_stmt) in
+                          if slot_depth <> stmt_depth
+                          then
+                            let _ = assert (slot_depth < stmt_depth) in
+                            let _ = annotate "access outer frame slot from loop" in
+                            let diff = stmt_depth - slot_depth in
+                            let fp = get_iter_outer_frame_ptr_for_current_frame () in
+                              if diff > 1
+                              then
+                                bug () "unsupported nested for each loop";
+                              for i = 1 to diff do
+                                (* FIXME: access outer caller-block fps,
+                                 * given nearest caller-block fp.
+                                 *)
+                                mov fp (Il.Cell fp)
+                              done;
+                              let p = based_sz (get_ty_params_of_current_frame())
+                                (fst (force_to_reg (Il.Cell fp))) off
+                              in
+                                Il.Mem (p, referent_type)
+                          else
+                            Il.Mem (fp_off_sz off, referent_type)
             end
   in
 
@@ -3299,7 +3334,8 @@ let trans_visitor
       | Some fco ->
           begin
             iflog (fun _ -> annotate "calculate iterator args");
-            [| reify_ptr (code_fixup_to_ptr_operand fco.for_each_fixup) |]
+            [| reify_ptr (code_fixup_to_ptr_operand fco.for_each_fixup);
+               Il.Cell (Il.Reg (abi.Abi.abi_fp_reg, Il.voidptr_t)); |]
           end
 
   and call_indirect_args
@@ -3530,12 +3566,11 @@ let trans_visitor
             Some params -> params
           | None -> [| |]
       in
-      let depth = Hashtbl.find cx.ctxt_loop_depths id in
-      let fn_depth = Hashtbl.find cx.ctxt_fn_loop_depths (current_fn ()) in
+      let depth = Hashtbl.find cx.ctxt_stmt_loop_depths id in
       let fc = { for_each_fixup = fix; for_each_depth = depth } in
         begin
           iflog (fun _ ->
-                   log cx "for-each at depth %d in fn of depth %d\n" depth fn_depth);
+                   log cx "for-each at depth %d\n" depth);
           let jmp = mark () in
           let fn_ptr =
             trans_prepare_fn_call true cx dst_cell flv ty_params (Some fc) args
@@ -3551,7 +3586,8 @@ let trans_visitor
         | Some at -> trans_set_outptr at
     end;
     let block_fptr = Il.Cell (get_iter_block_fn_for_current_frame ()) in
-      trans_call_glue (code_of_operand block_fptr) None [| |]
+    let fp = get_iter_outer_frame_ptr_for_current_frame () in
+      trans_call_glue (code_of_operand block_fptr) None [| fp |]
 
   and trans_vec_append dst_cell dst_slot src_oper src_ty =
     let (dst_elt_slot, trim_trailing_null) =

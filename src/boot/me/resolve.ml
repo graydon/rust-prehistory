@@ -543,6 +543,17 @@ let type_resolving_visitor
       inner.Walk.visit_obj_drop_pre obj b
   in
 
+  let visit_stmt_pre stmt =
+    begin
+      match stmt.node with
+          Ast.STMT_for_each _ ->
+            let fty = mk_simple_ty_fn [| |] in
+              htab_put cx.ctxt_all_item_types stmt.id fty;
+        | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre stmt
+  in
+
   let visit_lval_pre lv =
     let rec rebuild_lval' lv =
         match lv with
@@ -586,6 +597,7 @@ let type_resolving_visitor
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_obj_fn_pre = visit_obj_fn_pre;
         Walk.visit_obj_drop_pre = visit_obj_drop_pre;
+        Walk.visit_stmt_pre = visit_stmt_pre;
         Walk.visit_lval_pre = visit_lval_pre; }
 ;;
 
