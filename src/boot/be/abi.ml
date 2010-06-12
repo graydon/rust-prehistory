@@ -66,7 +66,7 @@ let calltup_elt_args = 3;;
 let calltup_elt_iterator_args = 4;;
 let calltup_elt_indirect_args = 5;;
 
-let iterator_args_elt_loop_info_ptr = 0;;
+let iterator_args_elt_block_fn = 0;;
 
 let indirect_args_elt_closure = 0;;
 

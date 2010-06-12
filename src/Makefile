@@ -305,7 +305,6 @@ self: $(CFG_COMPILER)
 TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/clone-with-exterior.rs \
                     test/run-pass/rec-auto.rs \
-                    test/run-pass/foreach-simple.rs \
                     test/run-pass/vec-slice.rs \
                     test/run-pass/generic-tag.rs \
                     test/run-pass/bind-obj-ctor.rs \

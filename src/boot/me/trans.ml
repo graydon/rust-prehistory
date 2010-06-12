@@ -445,15 +445,21 @@ let trans_visitor
       get_element_ptr args_cell Abi.calltup_elt_ty_params
   in
 
-  let get_indirect_args_for_current_frame _ =
+  let get_args_for_current_frame _ =
     let curr_args_rty =
       current_fn_args_rty (Some Il.OpaqueTy)
     in
-    let self_args_cell =
       caller_args_cell curr_args_rty
-    in
-      get_element_ptr self_args_cell
-        Abi.calltup_elt_indirect_args
+  in
+
+  let get_indirect_args_for_current_frame _ =
+    get_element_ptr (get_args_for_current_frame ())
+      Abi.calltup_elt_indirect_args
+  in
+
+  let get_iterator_args_for_current_frame _ =
+    get_element_ptr (get_args_for_current_frame ())
+      Abi.calltup_elt_iterator_args
   in
 
   let get_closure_for_current_frame _ =
@@ -462,6 +468,17 @@ let trans_visitor
     in
       get_element_ptr self_indirect_args
         Abi.indirect_args_elt_closure
+  in
+
+  let get_iter_block_fn_for_current_frame _ =
+    let self_iterator_args =
+      get_iterator_args_for_current_frame ()
+    in
+    let blk_fn = get_element_ptr self_iterator_args
+      Abi.iterator_args_elt_block_fn
+    in
+      ptr_cast blk_fn
+        (Il.ScalarTy (Il.AddrTy Il.CodeTy))
   in
 
   let get_obj_for_current_frame _ =
@@ -3527,6 +3544,14 @@ let trans_visitor
             patch jmp;
         end
 
+  and trans_put (atom_opt:Ast.atom option) : unit =
+    begin
+      match atom_opt with
+          None -> ()
+        | Some at -> trans_set_outptr at
+    end;
+    let block_fptr = Il.Cell (get_iter_block_fn_for_current_frame ()) in
+      trans_call_glue (code_of_operand block_fptr) None [| |]
 
   and trans_vec_append dst_cell dst_slot src_oper src_ty =
     let (dst_elt_slot, trim_trailing_null) =
@@ -3818,7 +3843,8 @@ let trans_visitor
                 | _ -> bug () "Calling unexpected lval."
             end
 
-      | Ast.STMT_put _ -> ()
+      | Ast.STMT_put atom_opt ->
+          trans_put atom_opt
 
       | Ast.STMT_alt_tag stmt_alt_tag -> trans_alt_tag stmt_alt_tag
 
