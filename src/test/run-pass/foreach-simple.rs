@@ -1,7 +1,7 @@
 // -*- rust -*-
 
 fn main() {
-  for each (int i = first_ten()) {
+  for each (int i in first_ten()) {
     log "main";
   }
 }

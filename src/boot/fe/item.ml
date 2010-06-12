@@ -275,7 +275,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                                   * Ast.stmt array
                                   * (Ast.lval * Ast.atom array)) =
                     let slot = (parse_identified_slot_and_ident true ps) in
-                    let _    = (expect ps EQ) in
+                    let _    = (expect ps IN) in
                     let (stmts1, iter) = (rstr true parse_lval) ps in
                     let (stmts2, args) = parse_expr_atom_list LPAREN RPAREN ps in
                       (slot, Array.append stmts1 stmts2, (iter, args))
