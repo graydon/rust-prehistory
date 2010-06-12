@@ -371,9 +371,16 @@ let layout_visitor
     *)
   in
 
-  (* Call-size calculation. *)
-
   let visit_stmt_pre (s:Ast.stmt) : unit =
+
+    (* Assign synthetic frames for the for_each loop bodies. *)
+    begin
+      match s.node with
+          Ast.STMT_for_each _ -> enter_frame s.id
+        | _ -> ()
+    end;
+
+    (* Call-size calculation. *)
     begin
       let callees =
         match s.node with
@@ -407,6 +414,15 @@ let layout_visitor
     inner.Walk.visit_stmt_pre s
   in
 
+  let visit_stmt_post (s:Ast.stmt) : unit =
+    begin
+      match s.node with
+          Ast.STMT_for_each _ -> leave_frame ()
+        | _ -> ()
+    end;
+  in
+
+
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
@@ -417,6 +433,7 @@ let layout_visitor
         Walk.visit_obj_drop_post = visit_obj_drop_post;
 
         Walk.visit_stmt_pre = visit_stmt_pre;
+        Walk.visit_stmt_post = visit_stmt_post;
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post }
 ;;

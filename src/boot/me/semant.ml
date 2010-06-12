@@ -31,11 +31,12 @@ type glue =
   | GLUE_read of Ast.ty
   | GLUE_unwind
   | GLUE_get_next_pc
-  | GLUE_mark_frame of node_id
-  | GLUE_drop_frame of node_id
-  | GLUE_reloc_frame of node_id
-  | GLUE_fn_binding of node_id
-  | GLUE_obj_drop of node_id
+  | GLUE_mark_frame of node_id    (* node is the frame           *)
+  | GLUE_drop_frame of node_id    (* node is the frame           *)
+  | GLUE_reloc_frame of node_id   (* node is the frame           *)
+  | GLUE_fn_binding of node_id    (* node is the 'bind' stmt     *)
+  | GLUE_obj_drop of node_id      (* node is the obj             *)
+  | GLUE_loop_body of node_id     (* node is the 'for each' stmt *)
 ;;
 
 type data =
@@ -53,6 +54,7 @@ type defn =
   | DEFN_ty_param of Ast.ty_param
   | DEFN_obj_fn of (node_id * Ast.fn)
   | DEFN_obj_drop of node_id
+  | DEFN_loop_body of node_id
 ;;
 
 type glue_code = (glue, code) Hashtbl.t;;
@@ -333,6 +335,7 @@ let rec n_item_ty_params (cx:ctxt) (id:node_id) : int =
       DEFN_item i -> Array.length i.Ast.decl_params
     | DEFN_obj_fn (oid,_) -> n_item_ty_params cx oid
     | DEFN_obj_drop oid -> n_item_ty_params cx oid
+    | DEFN_loop_body fid -> n_item_ty_params cx fid
     | _ -> bugi cx id "n_item_ty_params on non-item"
 ;;
 
@@ -1832,6 +1835,7 @@ let glue_str (cx:ctxt) (g:glue) : string =
          *)
     | GLUE_fn_binding i -> "glue$fn_binding$" ^ (string_of_int (int_of_node i))
     | GLUE_obj_drop oid -> (item_str cx oid) ^ ".drop"
+    | GLUE_loop_body i -> "glue$loop_body$" ^ (string_of_int (int_of_node i))
 ;;
 
 

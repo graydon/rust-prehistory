@@ -139,6 +139,8 @@ let all_item_collecting_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
 
+  let items = Stack.create () in
+
   let push_on_item_arg_list item_id arg_id =
     let existing =
       match htab_search cx.ctxt_frame_args item_id with
@@ -159,6 +161,7 @@ let all_item_collecting_visitor
   in
 
   let visit_mod_item_pre n p i =
+    Stack.push i.id items;
     Array.iter (fun p -> htab_put cx.ctxt_all_defns p.id (DEFN_ty_param p.node)) p;
     htab_put cx.ctxt_all_defns i.id (DEFN_item i.node);
     htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
@@ -178,6 +181,11 @@ let all_item_collecting_visitor
       inner.Walk.visit_mod_item_pre n p i
   in
 
+  let visit_mod_item_post n p i =
+    inner.Walk.visit_mod_item_post n p i;
+    ignore (Stack.pop items)
+  in
+
   let visit_obj_fn_pre obj ident fn =
     htab_put cx.ctxt_all_defns fn.id (DEFN_obj_fn (obj.id, fn.node));
     htab_put cx.ctxt_all_item_names fn.id (Walk.path_to_name path);
@@ -191,10 +199,23 @@ let all_item_collecting_visitor
     inner.Walk.visit_obj_drop_pre obj b
   in
 
+  let visit_stmt_pre s =
+    begin
+      match s.node with
+          Ast.STMT_for_each _ ->
+            htab_put cx.ctxt_all_defns s.id (DEFN_loop_body (Stack.top items));
+            htab_put cx.ctxt_all_item_names s.id (Walk.path_to_name path);
+        | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre s;
+  in
+
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post;
         Walk.visit_obj_fn_pre = visit_obj_fn_pre;
-        Walk.visit_obj_drop_pre = visit_obj_drop_pre; }
+        Walk.visit_obj_drop_pre = visit_obj_drop_pre;
+        Walk.visit_stmt_pre = visit_stmt_pre; }
 ;;
 
 

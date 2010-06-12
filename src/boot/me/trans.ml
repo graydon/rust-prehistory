@@ -3485,6 +3485,22 @@ let trans_visitor
         end
         None
 
+  and trans_for_each_loop (id:node_id) (fe:Ast.stmt_for_each) : unit =
+    let g = GLUE_loop_body id in
+    let name = glue_str cx g in
+    let fix = new_fixup name in
+    let framesz = get_framesz cx id in
+    let callsz = get_callsz cx id in
+    let spill = Hashtbl.find cx.ctxt_spill_fixups id in
+      push_new_emitter_with_vregs (Some id);
+      iflog (fun _ -> annotate "prologue");
+      abi.Abi.abi_emit_fn_prologue (emitter())
+        framesz callsz nabi_rust (upcall_fixup "upcall_grow_task");
+      write_frame_info_ptrs None;
+      iflog (fun _ -> annotate "finished prologue");
+      trans_block fe.Ast.for_each_body;
+      trans_glue_frame_exit fix spill g;
+
 
   and trans_vec_append dst_cell dst_slot src_oper src_ty =
     let (dst_elt_slot, trim_trailing_null) =
@@ -3785,7 +3801,8 @@ let trans_visitor
       | Ast.STMT_for fo ->
           trans_for_loop fo
 
-      | Ast.STMT_for_each _ -> ()
+      | Ast.STMT_for_each fe ->
+          trans_for_each_loop stmt.id fe
 
       | _ -> bugi cx stmt.id "unhandled form of statement in trans_stmt %a"
           Ast.sprintf_stmt stmt
