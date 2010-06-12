@@ -3279,10 +3279,10 @@ let trans_visitor
       : Il.operand array =
     match fco with
         None -> [| |]
-      | Some _ ->
+      | Some fco ->
           begin
             iflog (fun _ -> annotate "calculate iterator args");
-            [| |]
+            [| code_fixup_to_ptr_operand fco.for_each_fixup |]
           end
 
   and call_indirect_args
@@ -3500,6 +3500,32 @@ let trans_visitor
       iflog (fun _ -> annotate "finished prologue");
       trans_block fe.Ast.for_each_body;
       trans_glue_frame_exit fix spill g;
+
+      (* 
+       * We've now emitted the body helper-fn. Next, set up a loop that
+       * calls the iter and passes the helper-fn in.
+       *)
+      let (dst_slot, _) = fe.Ast.for_each_slot in
+      let dst_cell = cell_of_block_slot dst_slot.id in
+      let (flv, args) = fe.Ast.for_each_call in
+      let ty_params =
+        match htab_search cx.ctxt_call_lval_params (lval_base_id flv) with
+            Some params -> params
+          | None -> [| |]
+      in
+      let depth = Hashtbl.find cx.ctxt_loop_depths id in
+      let fn_depth = Hashtbl.find cx.ctxt_fn_loop_depths (current_fn ()) in
+      let fc = { for_each_fixup = fix; for_each_depth = depth } in
+        begin
+          iflog (fun _ ->
+                   log cx "for-each at depth %d in fn of depth %d\n" depth fn_depth);
+          let jmp = mark () in
+          let fn_ptr =
+            trans_prepare_fn_call true cx dst_cell flv ty_params (Some fc) args
+          in
+            call_code (code_of_operand fn_ptr);
+            patch jmp;
+        end
 
 
   and trans_vec_append dst_cell dst_slot src_oper src_ty =
