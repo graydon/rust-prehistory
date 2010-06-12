@@ -3282,7 +3282,7 @@ let trans_visitor
       | Some fco ->
           begin
             iflog (fun _ -> annotate "calculate iterator args");
-            [| code_fixup_to_ptr_operand fco.for_each_fixup |]
+            [| reify_ptr (code_fixup_to_ptr_operand fco.for_each_fixup) |]
           end
 
   and call_indirect_args
