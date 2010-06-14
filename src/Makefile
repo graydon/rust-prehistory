@@ -331,6 +331,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       exterior.rs \
                       foreach-simple.rs \
                       foreach-simple-outer-slot.rs \
+                      foreach-put-structured.rs \
                       vec-slice.rs \
                       simple-obj.rs \
                       import.rs \
