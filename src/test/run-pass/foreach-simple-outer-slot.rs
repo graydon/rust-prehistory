@@ -8,10 +8,9 @@ fn main() {
 }
 
 iter first_ten() -> int {
-  let int i = 90;
-  while (i < 100) {
+  let int i = 0;
+  while (i < 10) {
     log "first_ten";
-    log i;
     put i;
     i = i + 1;
   }
