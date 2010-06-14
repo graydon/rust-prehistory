@@ -10,6 +10,8 @@ let alias_analysis_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
+  let curr_stmt = Stack.create () in
+
   let alias_slot (slot_id:node_id) : unit =
     begin
       log cx "noting slot #%d as aliased" (int_of_node slot_id);
@@ -26,6 +28,7 @@ let alias_analysis_visitor
       | _ -> err None "unhandled form of lval in alias analysis"
   in
   let visit_stmt_pre s =
+    Stack.push s.id curr_stmt;
     begin
       match s.node with
           (* FIXME (bug 541574): must expand this analysis to cover
@@ -51,7 +54,32 @@ let alias_analysis_visitor
     end;
     inner.Walk.visit_stmt_pre s
   in
-    { inner with Walk.visit_stmt_pre = visit_stmt_pre }
+  let visit_stmt_post s =
+    inner.Walk.visit_stmt_post s;
+    ignore (Stack.pop curr_stmt);
+  in
+
+  let visit_lval_pre lv =
+    let slot_id = lval_to_referent cx (lval_base_id lv) in
+      if (not (Stack.is_empty curr_stmt)) && (referent_is_slot cx slot_id)
+      then
+        begin
+          let slot_depth = get_slot_depth cx slot_id in
+          let stmt_depth = get_stmt_depth cx (Stack.top curr_stmt) in
+            if slot_depth <> stmt_depth
+            then
+              begin
+                let _ = assert (slot_depth < stmt_depth) in
+                  alias_slot slot_id
+              end
+        end
+  in
+
+    { inner with
+        Walk.visit_stmt_pre = visit_stmt_pre;
+        Walk.visit_stmt_post = visit_stmt_post;
+        Walk.visit_lval_pre = visit_lval_pre
+    }
 ;;
 
 let process_crate

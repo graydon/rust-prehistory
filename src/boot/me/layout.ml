@@ -137,6 +137,12 @@ let layout_visitor
       | _ -> false
   in
 
+  let iflog thunk =
+    if cx.ctxt_sess.Session.sess_log_layout
+    then thunk ()
+    else ()
+  in
+
   let layout_slot_ids
       (slot_accum:slot_stack)
       (upwards:bool)
@@ -155,7 +161,14 @@ let layout_visitor
           && (not (Hashtbl.mem cx.ctxt_slot_aliased id))
         then
           begin
-            log cx "assigning slot #%d to vreg" (int_of_node id);
+            iflog
+              begin
+                fun _ ->
+                  let k = Hashtbl.find cx.ctxt_slot_keys id in
+                    log cx "assigning slot #%d = %a to vreg"
+                      (int_of_node id)
+                      Ast.sprintf_slot_key k;
+              end;
             htab_put cx.ctxt_slot_vregs id (ref None);
             (off,align)
           end
@@ -168,7 +181,15 @@ let layout_visitor
               else neg_sz (add_sz elt_off elt_size)
             in
               Stack.push (slot_referent_type cx.ctxt_abi slot) slot_accum;
-              log cx "slot #%d offset: %s" (int_of_node id) (string_of_size frame_off);
+            iflog
+              begin
+                fun _ ->
+                  let k = Hashtbl.find cx.ctxt_slot_keys id in
+                    log cx "assigning slot #%d = %a frame-offset %s"
+                      (int_of_node id)
+                      Ast.sprintf_slot_key k
+                      (string_of_size frame_off);
+              end;
               if (not (Hashtbl.mem cx.ctxt_slot_offsets id))
               then htab_put cx.ctxt_slot_offsets id frame_off;
               (add_sz elt_off elt_size, max_sz elt_align align)
@@ -328,6 +349,8 @@ let layout_visitor
   in
 
   let visit_block_pre b =
+    if Hashtbl.mem cx.ctxt_block_is_loop_body b.id
+    then enter_frame b.id;
     let (frame_id, frame_blocks) = Stack.top frame_stack in
     let frame_spill = Hashtbl.find cx.ctxt_spill_fixups frame_id in
     let spill_sz = SIZE_fixup_mem_sz frame_spill in
@@ -350,6 +373,8 @@ let layout_visitor
 
   let visit_block_post b =
     inner.Walk.visit_block_post b;
+    if Hashtbl.mem cx.ctxt_block_is_loop_body b.id
+    then leave_frame();
     (* FIXME (bug 541568): In earlier versions of this file, multiple
      * lexical blocks in the same frame would reuse space from one to
      * the next so long as they were not nested; The (commented-out)
@@ -372,13 +397,6 @@ let layout_visitor
   in
 
   let visit_stmt_pre (s:Ast.stmt) : unit =
-
-    (* Assign synthetic frames for the for_each loop bodies. *)
-    begin
-      match s.node with
-          Ast.STMT_for_each _ -> enter_frame s.id
-        | _ -> ()
-    end;
 
     (* Call-size calculation. *)
     begin
@@ -414,14 +432,6 @@ let layout_visitor
     inner.Walk.visit_stmt_pre s
   in
 
-  let visit_stmt_post (s:Ast.stmt) : unit =
-    begin
-      match s.node with
-          Ast.STMT_for_each _ -> leave_frame ()
-        | _ -> ()
-    end;
-  in
-
 
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
@@ -433,7 +443,6 @@ let layout_visitor
         Walk.visit_obj_drop_post = visit_obj_drop_post;
 
         Walk.visit_stmt_pre = visit_stmt_pre;
-        Walk.visit_stmt_post = visit_stmt_post;
         Walk.visit_block_pre = visit_block_pre;
         Walk.visit_block_post = visit_block_post }
 ;;

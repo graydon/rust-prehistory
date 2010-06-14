@@ -15,14 +15,14 @@ let alt_pipeline sess sem_cx crate =
   Array.iter process
     [|
       Resolve.process_crate;
-      Alias.process_crate;
-      Dead.process_crate;
       Type.process_crate;
       Typestate.process_crate;
+      Loop.process_crate;
+      Alias.process_crate;
+      Dead.process_crate;
       Mode.process_crate;
       Mutable.process_crate;
       Gctype.process_crate;
-      Loop.process_crate;
       Layout.process_crate
     |];
   Llemit.trans_and_process_crate sess sem_cx crate

@@ -31,12 +31,12 @@ type glue =
   | GLUE_read of Ast.ty
   | GLUE_unwind
   | GLUE_get_next_pc
-  | GLUE_mark_frame of node_id    (* node is the frame           *)
-  | GLUE_drop_frame of node_id    (* node is the frame           *)
-  | GLUE_reloc_frame of node_id   (* node is the frame           *)
-  | GLUE_fn_binding of node_id    (* node is the 'bind' stmt     *)
-  | GLUE_obj_drop of node_id      (* node is the obj             *)
-  | GLUE_loop_body of node_id     (* node is the 'for each' stmt *)
+  | GLUE_mark_frame of node_id    (* node is the frame                 *)
+  | GLUE_drop_frame of node_id    (* node is the frame                 *)
+  | GLUE_reloc_frame of node_id   (* node is the frame                 *)
+  | GLUE_fn_binding of node_id    (* node is the 'bind' stmt           *)
+  | GLUE_obj_drop of node_id      (* node is the obj                   *)
+  | GLUE_loop_body of node_id     (* node is the 'for each' body block *)
 ;;
 
 type data =
@@ -107,6 +107,7 @@ type ctxt =
       ctxt_slot_offsets: (node_id,size) Hashtbl.t;
       ctxt_frame_sizes: (node_id,size) Hashtbl.t;
       ctxt_call_sizes: (node_id,size) Hashtbl.t;
+      ctxt_block_is_loop_body: (node_id,unit) Hashtbl.t;
       ctxt_stmt_loop_depths: (node_id,int) Hashtbl.t;
       ctxt_slot_loop_depths: (node_id,int) Hashtbl.t;
 
@@ -202,6 +203,7 @@ let new_ctxt sess abi crate =
     ctxt_frame_sizes = Hashtbl.create 0;
     ctxt_call_sizes = Hashtbl.create 0;
 
+    ctxt_block_is_loop_body = Hashtbl.create 0;
     ctxt_slot_loop_depths = Hashtbl.create 0;
     ctxt_stmt_loop_depths = Hashtbl.create 0;
 

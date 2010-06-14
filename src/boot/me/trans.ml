@@ -770,18 +770,32 @@ let trans_visitor
                           if slot_depth <> stmt_depth
                           then
                             let _ = assert (slot_depth < stmt_depth) in
-                            let _ = annotate "access outer frame slot from loop" in
+                            let _ =
+                              iflog
+                                begin
+                                  fun _ ->
+                                    let k = Hashtbl.find cx.ctxt_slot_keys slot_id in
+                                      annotate
+                                        (Printf.sprintf
+                                           "access outer frame slot #%d = %s from loop"
+                                           (int_of_node slot_id)
+                                           (Ast.fmt_to_str Ast.fmt_slot_key k))
+                                end
+                            in
                             let diff = stmt_depth - slot_depth in
+                            let _ = annotate "get outer frame pointer" in
                             let fp = get_iter_outer_frame_ptr_for_current_frame () in
                               if diff > 1
                               then
                                 bug () "unsupported nested for each loop";
-                              for i = 1 to diff do
+                              for i = 2 to diff do
                                 (* FIXME: access outer caller-block fps,
                                  * given nearest caller-block fp.
                                  *)
+                                let _ = annotate "step to outer-outer frame" in
                                 mov fp (Il.Cell fp)
                               done;
+                              let _ = annotate "calculate size" in
                               let p = based_sz (get_ty_params_of_current_frame())
                                 (fst (force_to_reg (Il.Cell fp))) off
                               in
@@ -3538,7 +3552,8 @@ let trans_visitor
         end
         None
 
-  and trans_for_each_loop (id:node_id) (fe:Ast.stmt_for_each) : unit =
+  and trans_for_each_loop (stmt_id:node_id) (fe:Ast.stmt_for_each) : unit =
+    let id = fe.Ast.for_each_body.id in
     let g = GLUE_loop_body id in
     let name = glue_str cx g in
     let fix = new_fixup name in
@@ -3558,6 +3573,7 @@ let trans_visitor
        * We've now emitted the body helper-fn. Next, set up a loop that
        * calls the iter and passes the helper-fn in.
        *)
+      emit (Il.Enter (Hashtbl.find cx.ctxt_block_fixups fe.Ast.for_each_head.id));
       let (dst_slot, _) = fe.Ast.for_each_slot in
       let dst_cell = cell_of_block_slot dst_slot.id in
       let (flv, args) = fe.Ast.for_each_call in
@@ -3566,18 +3582,17 @@ let trans_visitor
             Some params -> params
           | None -> [| |]
       in
-      let depth = Hashtbl.find cx.ctxt_stmt_loop_depths id in
+      let depth = Hashtbl.find cx.ctxt_stmt_loop_depths stmt_id in
       let fc = { for_each_fixup = fix; for_each_depth = depth } in
-        begin
-          iflog (fun _ ->
-                   log cx "for-each at depth %d\n" depth);
-          let jmp = mark () in
-          let fn_ptr =
-            trans_prepare_fn_call true cx dst_cell flv ty_params (Some fc) args
-          in
-            call_code (code_of_operand fn_ptr);
-            patch jmp;
-        end
+        iflog (fun _ ->
+                 log cx "for-each at depth %d\n" depth);
+        let jmp = mark () in
+        let fn_ptr =
+          trans_prepare_fn_call true cx dst_cell flv ty_params (Some fc) args
+        in
+          call_code (code_of_operand fn_ptr);
+          patch jmp;
+          emit Il.Leave;
 
   and trans_put (atom_opt:Ast.atom option) : unit =
     begin

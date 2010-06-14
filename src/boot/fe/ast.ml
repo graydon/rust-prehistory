@@ -274,6 +274,7 @@ and stmt_for_each =
     {
       for_each_slot: (slot identified * ident);
       for_each_call: (lval * atom array);
+      for_each_head: block;
       for_each_body: block;
     }
 

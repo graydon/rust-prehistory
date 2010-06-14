@@ -110,7 +110,7 @@ let stmt_collecting_visitor
         | Ast.STMT_for f ->
             visit_for_block f.Ast.for_slot f.Ast.for_body.id
         | Ast.STMT_for_each f ->
-            visit_for_block f.Ast.for_each_slot f.Ast.for_each_body.id
+            visit_for_block f.Ast.for_each_slot f.Ast.for_each_head.id
         | Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
             let resolve_arm { node = (Ast.PAT_tag (_, bindings), block) } =
               let slots = Hashtbl.find cx.ctxt_block_slots block.id in
@@ -202,9 +202,10 @@ let all_item_collecting_visitor
   let visit_stmt_pre s =
     begin
       match s.node with
-          Ast.STMT_for_each _ ->
-            htab_put cx.ctxt_all_defns s.id (DEFN_loop_body (Stack.top items));
-            htab_put cx.ctxt_all_item_names s.id (Walk.path_to_name path);
+          Ast.STMT_for_each fe ->
+            let id = fe.Ast.for_each_body.id in
+              htab_put cx.ctxt_all_defns id (DEFN_loop_body (Stack.top items));
+              htab_put cx.ctxt_all_item_names id (Walk.path_to_name path);
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s;
@@ -546,9 +547,10 @@ let type_resolving_visitor
   let visit_stmt_pre stmt =
     begin
       match stmt.node with
-          Ast.STMT_for_each _ ->
+          Ast.STMT_for_each fe ->
+            let id = fe.Ast.for_each_body.id in
             let fty = mk_simple_ty_iter [| |] in
-              htab_put cx.ctxt_all_item_types stmt.id fty;
+              htab_put cx.ctxt_all_item_types id fty;
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre stmt

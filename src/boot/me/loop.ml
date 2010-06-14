@@ -95,9 +95,7 @@ let loop_depth_visitor
 
   let visit_slot_identified_pre sloti =
     let fcx = Stack.top fcxs in
-      if not (Hashtbl.mem cx.ctxt_slot_loop_depths sloti.id)
-      then
-        htab_put cx.ctxt_slot_loop_depths sloti.id fcx.current_depth;
+      htab_put cx.ctxt_slot_loop_depths sloti.id fcx.current_depth;
       inner.Walk.visit_slot_identified_pre sloti
   in
 
@@ -107,21 +105,24 @@ let loop_depth_visitor
       begin
         match s.node with
           | Ast.STMT_for_each fe ->
-              let (sloti, _) = fe.Ast.for_each_slot in
-                htab_put cx.ctxt_slot_loop_depths sloti.id fcx.current_depth;
-                push_loop ()
+              htab_put cx.ctxt_block_is_loop_body fe.Ast.for_each_body.id ();
           | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
   in
 
-  let visit_stmt_post s =
-    inner.Walk.visit_stmt_post s;
-    match s.node with
-      | Ast.STMT_for_each _ -> pop_loop ()
-      | _ -> ()
-
+  let visit_block_pre b =
+    if Hashtbl.mem cx.ctxt_block_is_loop_body b.id
+    then push_loop ();
+    inner.Walk.visit_block_pre b
   in
+
+  let visit_block_post b =
+    inner.Walk.visit_block_post b;
+    if Hashtbl.mem cx.ctxt_block_is_loop_body b.id
+    then pop_loop ()
+  in
+
     { inner with
         Walk.visit_mod_item_pre = visit_mod_item_pre;
         Walk.visit_mod_item_post = visit_mod_item_post;
@@ -131,7 +132,8 @@ let loop_depth_visitor
         Walk.visit_obj_drop_post = visit_obj_drop_post;
         Walk.visit_slot_identified_pre = visit_slot_identified_pre;
         Walk.visit_stmt_pre = visit_stmt_pre;
-        Walk.visit_stmt_post = visit_stmt_post }
+        Walk.visit_block_pre = visit_block_pre;
+        Walk.visit_block_post = visit_block_post }
 ;;
 
 let process_crate

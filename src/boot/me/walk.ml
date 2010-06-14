@@ -417,7 +417,7 @@ and walk_stmt
       walk_slot_identified v si;
       walk_lval v f;
       Array.iter (walk_atom v) az;
-      walk_block v s.Ast.for_each_body
+      walk_block v s.Ast.for_each_head
   in
   let walk_stmt_while
       (s:Ast.stmt_while)

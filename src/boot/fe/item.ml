@@ -285,10 +285,21 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                   in
                   let body_block = ctxt "stmts: foreach body" parse_block ps in
                   let bpos = lexpos ps in
+                  let head_block =
+                    (* 
+                     * Slightly weird, but we put an extra nesting level of block
+                     * here to separate the part that lives in our frame (the iter slot)
+                     * from the part that lives in the callee frame (the body block).
+                     *)
+                    span ps apos bpos [|
+                      span ps apos bpos (Ast.STMT_block body_block);
+                    |]
+                  in
                     Array.append stmts [| span ps apos bpos
                                             (Ast.STMT_for_each
                                                { Ast.for_each_slot = slot;
                                                  Ast.for_each_call = call;
+                                                 Ast.for_each_head = head_block;
                                                  Ast.for_each_body = body_block; }) |]
               | _ ->
                   let inner ps =

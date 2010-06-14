@@ -272,14 +272,14 @@ let main_pipeline _ =
          proc sem_cx crate;
          exit_if_failed ())
       [| Resolve.process_crate;
-         Alias.process_crate;
-         Dead.process_crate;
          Type.process_crate;
          Typestate.process_crate;
+         Loop.process_crate;
+         Alias.process_crate;
+         Dead.process_crate;
          Mode.process_crate;
          Mutable.process_crate;
          Gctype.process_crate;
-         Loop.process_crate;
          Layout.process_crate;
          Trans.process_crate |]
   in
