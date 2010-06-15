@@ -395,6 +395,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       obj-drop.rs \
                       obj-dtor.rs \
                       obj-with-vec.rs \
+                      else-if.rs \
                      ) \
                     $(addprefix test/run-fail/, \
                       explicit-fail.rs \

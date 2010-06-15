@@ -256,21 +256,37 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           end
 
       | IF ->
-          bump ps;
-          let (stmts, expr) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
-          let then_block = ctxt "stmts: if-then" parse_block ps in
-          let else_block =
-            (match peek ps with
-                 ELSE ->
-                   bump ps;
-                   Some (ctxt "stmts: if-else" parse_block ps)
-               | _ -> None)
+          let final_else = ref None in
+          let rec parse_stmt_if _ =
+            bump ps;
+            let (stmts, expr) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
+            let then_block = ctxt "stmts: if-then" parse_block ps in
+              begin
+                match peek ps with
+                    ELSE ->
+                      begin
+                        bump ps;
+                        match peek ps with
+                            IF ->
+                              let nested_if = parse_stmt_if () in
+                              let bpos = lexpos ps in
+                                final_else := Some (span ps apos bpos nested_if)
+                          | _ ->
+                              final_else := Some (ctxt "stmts: if-else" parse_block ps)
+                      end
+                  | _ -> ()
+              end;
+              let res =
+                spans ps stmts apos
+                  (Ast.STMT_if
+                     { Ast.if_test = expr;
+                       Ast.if_then = then_block;
+                       Ast.if_else = !final_else; })
+              in
+                final_else := None;
+                res
           in
-            spans ps stmts apos
-              (Ast.STMT_if
-                 { Ast.if_test = expr;
-                   Ast.if_then = then_block;
-                   Ast.if_else = else_block; })
+            parse_stmt_if()
 
       | FOR ->
           bump ps;
