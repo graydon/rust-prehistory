@@ -9,17 +9,17 @@ type color = tag(
 fn process(color c) -> int {
   let int x;
   alt (c) {
-    case (rgb(int r, int g, int b)) {
+    case (rgb(r, _, _)) {
       log "rgb";
       log r;
       x = r;
     }
-    case (rgba(int r, int g, int b, int a)) {
+    case (rgba(_, _, _, a)) {
       log "rgba";
       log a;
       x = a;
     }
-    case (hsl(int h, int s, int l)) {
+    case (hsl(_, s, _)) {
       log "hsl";
       log s;
       x = s;

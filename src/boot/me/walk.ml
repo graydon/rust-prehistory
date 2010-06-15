@@ -23,6 +23,8 @@ type visitor =
       visit_ty_post: Ast.ty -> unit;
       visit_constr_pre: Ast.constr -> unit;
       visit_constr_post: Ast.constr -> unit;
+      visit_pat_pre: Ast.pat -> unit;
+      visit_pat_post: Ast.pat -> unit;
       visit_block_pre: Ast.block -> unit;
       visit_block_post: Ast.block -> unit;
 
@@ -59,6 +61,8 @@ let empty_visitor =
     visit_ty_post = (fun _ -> ());
     visit_constr_pre = (fun _ -> ());
     visit_constr_post = (fun _ -> ());
+    visit_pat_pre = (fun _ -> ());
+    visit_pat_post = (fun _ -> ());
     visit_block_pre = (fun _ -> ());
     visit_block_post = (fun _ -> ());
     visit_lit_pre = (fun _ -> ());
@@ -554,8 +558,8 @@ and walk_stmt
       | Ast.STMT_alt_tag
           { Ast.alt_tag_lval = lval; Ast.alt_tag_arms = arms } ->
           walk_lval v lval;
-          let walk_arm { node = (Ast.PAT_tag (_, header_slots), block) } =
-            walk_header_slots v header_slots;
+          let walk_arm { node = (pat, block) } =
+            walk_pat v pat;
             walk_block v block
           in
           Array.iter walk_arm arms
@@ -632,6 +636,24 @@ and walk_lval
     (fun _ -> ())
     v.visit_lval_post
     lv
+
+
+and walk_pat
+    (v:visitor)
+    (p:Ast.pat)
+    : unit =
+  let rec walk p =
+    match p with
+        Ast.PAT_lit lit -> walk_lit v lit
+      | Ast.PAT_tag (_, pats) -> Array.iter walk pats
+      | Ast.PAT_slot (si, _) -> walk_slot_identified v si
+      | Ast.PAT_wild -> ()
+  in
+  walk_bracketed
+    v.visit_pat_pre
+    (fun _ -> walk p)
+    v.visit_pat_post
+    p
 
 
 and walk_block

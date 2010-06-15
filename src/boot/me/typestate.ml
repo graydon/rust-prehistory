@@ -424,13 +424,23 @@ let condition_assigning_visitor
 
         | Ast.STMT_alt_tag at ->
             let precond = Array.map (fun s -> Constr_init s) (lval_slots cx at.Ast.alt_tag_lval) in
-            let visit_arm { node = (Ast.PAT_tag (_, header_slots), block) } =
+            let visit_arm { node = (pat, block) } =
               (* FIXME: propagate tag-carried constrs here. *)
-              let (input_keys, init_keys) = entry_keys header_slots [| |] resolve_constr_to_key in
-                raise_entry_state input_keys init_keys block
+              let rec get_slots pat =
+                match pat with
+                    Ast.PAT_slot header_slot -> [| header_slot |]
+                  | Ast.PAT_tag (_, pats) ->
+                      Array.concat (List.map get_slots (Array.to_list pats))
+                  | _ -> [| |]
+              in
+              let header_slots = get_slots pat in
+              let (input_keys, init_keys) =
+                entry_keys header_slots [| |] resolve_constr_to_key
+              in
+              raise_entry_state input_keys init_keys block
             in
-              raise_precondition s.id precond;
-              Array.iter visit_arm at.Ast.alt_tag_arms
+            raise_precondition s.id precond;
+            Array.iter visit_arm at.Ast.alt_tag_arms
 
         | Ast.STMT_for_each fe ->
             let (si, _) = fe.Ast.for_each_slot in

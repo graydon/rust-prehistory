@@ -301,7 +301,11 @@ and domain =
     DOMAIN_local
   | DOMAIN_thread
 
-and pat = PAT_tag of ident * header_slots
+and pat =
+    PAT_lit of lit
+  | PAT_tag of ident * (pat array)
+  | PAT_slot of ((slot identified) * ident)
+  | PAT_wild
 
 and arm' = pat * block
 and arm = arm' identified

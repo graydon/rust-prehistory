@@ -205,34 +205,41 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                 TYPE -> [| |]
               | LPAREN ->
                   let (stmts, lval) = bracketed LPAREN RPAREN parse_lval ps in
-                  let parse_tag_pat ps =
+                  let rec parse_pat ps =
                     match peek ps with
                         IDENT ident ->
+                          let apos = lexpos ps in
                           bump ps;
-                          ident,
-                          begin
-                            match peek ps with
-                                LPAREN ->
-                                (parse_zero_or_more_identified_slot_ident_pairs
-                                  false ps)
-                              | _ -> [| |]
-                          end
+                          let bpos = lexpos ps in
+
+                          (* TODO: nullary constructors *)
+                          if peek ps != LPAREN then
+                            let mode = Ast.MODE_interior Ast.IMMUTABLE in
+                            let slot =
+                              { Ast.slot_mode = mode; Ast.slot_ty = None }
+                            in
+                            Ast.PAT_slot ((span ps apos bpos slot), ident)
+                          else
+                            let pats =
+                              bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
+                                parse_pat ps
+                            in
+                            Ast.PAT_tag (ident, pats)
+                      | LIT_INT _ | LIT_CHAR _ | LIT_BOOL _ ->
+                          Ast.PAT_lit (Pexp.parse_lit ps)
+                      | UNDERSCORE -> bump ps; Ast.PAT_wild
                       | tok -> raise (Parse_err (ps,
-                          "Expected tag constructor but found '" ^
-                          (string_of_tok tok) ^ "'"))
+                          "Expected pattern but found '" ^
+                            (string_of_tok tok) ^ "'"))
                   in
                   let rec parse_arms ps =
                     match peek ps with
                         CASE ->
                           bump ps;
-                          begin
-                            match bracketed LPAREN RPAREN parse_tag_pat ps with
-                              (tag_cons, tag_vars) ->
-                                let block = parse_block ps in
-                                let pat = Ast.PAT_tag (tag_cons, tag_vars) in
-                                let arm = (pat, block) in
-                                (span ps apos (lexpos ps) arm)::(parse_arms ps)
-                          end
+                          let pat = bracketed LPAREN RPAREN parse_pat ps in
+                          let block = parse_block ps in
+                          let arm = (pat, block) in
+                          (span ps apos (lexpos ps) arm)::(parse_arms ps)
                       | _ -> []
                   in
                   let parse_alt_block ps =

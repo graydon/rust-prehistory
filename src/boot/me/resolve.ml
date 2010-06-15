@@ -111,17 +111,18 @@ let stmt_collecting_visitor
             visit_for_block f.Ast.for_slot f.Ast.for_body.id
         | Ast.STMT_for_each f ->
             visit_for_block f.Ast.for_each_slot f.Ast.for_each_head.id
-        | Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
-            let resolve_arm { node = (Ast.PAT_tag (_, bindings), block) } =
-              let slots = Hashtbl.find cx.ctxt_block_slots block.id in
-              let iter_binding ({ node = _; id = node_id }, ident) =
-                let key = Ast.KEY_ident ident in
-                htab_put slots key node_id;
-                htab_put cx.ctxt_slot_keys node_id key;
-              in
-              Array.iter iter_binding bindings
+        | Ast.STMT_alt_tag { Ast.alt_tag_arms = arms } ->
+            let rec resolve_pat block pat =
+              match pat with
+                  Ast.PAT_slot ({ id = slot_id }, ident) ->
+                    let slots = Hashtbl.find cx.ctxt_block_slots block.id in
+                    let key = Ast.KEY_ident ident in
+                    htab_put slots key slot_id;
+                    htab_put cx.ctxt_slot_keys slot_id key
+                | Ast.PAT_tag (_, pats) -> Array.iter (resolve_pat block) pats
+                | Ast.PAT_lit _ | Ast.PAT_wild -> ()
             in
-            Array.iter resolve_arm arms
+            Array.iter (fun { node = (p, b) } -> resolve_pat b p) arms
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre stmt
@@ -784,16 +785,23 @@ let pattern_resolving_visitor
     begin
       match stmt.node with
         Ast.STMT_alt_tag { Ast.alt_tag_lval = _; Ast.alt_tag_arms = arms } ->
-          let resolve_arm { node = (Ast.PAT_tag (ident, _), _); id = arm_id } =
-            match lookup_by_ident cx !scopes ident with
-                None ->
-                  err (Some arm_id) "unresolved tag constructor '%s'" ident
-              | Some (_, tag_id) ->
-                  match Hashtbl.find cx.ctxt_all_defns tag_id with
-                      DEFN_item { Ast.decl_item = Ast.MOD_ITEM_tag _ } ->
-                        Hashtbl.add cx.ctxt_pat_to_tag arm_id tag_id
-                    | _ ->
-                        err (Some arm_id) "'%s' is not a tag constructor" ident
+          let resolve_arm { node = arm } =
+            match fst arm with
+                Ast.PAT_tag (ident, _) ->
+                  begin
+                    match lookup_by_ident cx !scopes ident with
+                        None ->
+                          err None "unresolved tag constructor '%s'" ident
+                      | Some (_, tag_id) ->
+                          match Hashtbl.find cx.ctxt_all_defns tag_id with
+                              DEFN_item {
+                                  Ast.decl_item = Ast.MOD_ITEM_tag _
+                                } -> ()
+                            | _ ->
+                                err None "'%s' is not a tag constructor" ident
+                  end
+              | _ -> ()
+
           in
           Array.iter resolve_arm arms
       | _ -> ()
