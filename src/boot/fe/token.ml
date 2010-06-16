@@ -15,7 +15,9 @@ type token =
   | GT
   | NOT
   | AND
+  | ANDAND
   | OR
+  | OROR
   | LSL
   | LSR
   | ASR
@@ -160,7 +162,9 @@ let rec string_of_tok t =
     | GT         -> ">"
     | NOT        -> "!"
     | AND        -> "&"
+    | ANDAND     -> "&&"
     | OR         -> "|"
+    | OROR       -> "||"
     | LSL        -> "<<"
     | LSR        -> ">>"
     | ASR        -> ">>>"

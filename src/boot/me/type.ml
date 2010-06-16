@@ -749,22 +749,27 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
       match expr with
           Ast.EXPR_binary (binop, lhs, rhs) ->
             let binop_sig = match binop with
-                Ast.BINOP_or -> BINOPSIG_bool_bool_bool
-              | Ast.BINOP_and -> BINOPSIG_bool_bool_bool
-              | Ast.BINOP_eq -> BINOPSIG_comp_comp_bool
+                Ast.BINOP_eq
               | Ast.BINOP_ne -> BINOPSIG_comp_comp_bool
-              | Ast.BINOP_lt -> BINOPSIG_ord_ord_bool
-              | Ast.BINOP_le -> BINOPSIG_ord_ord_bool
-              | Ast.BINOP_ge -> BINOPSIG_ord_ord_bool
+
+              | Ast.BINOP_lt
+              | Ast.BINOP_le
+              | Ast.BINOP_ge
               | Ast.BINOP_gt -> BINOPSIG_ord_ord_bool
-              | Ast.BINOP_lsl -> BINOPSIG_integ_integ_integ
-              | Ast.BINOP_lsr -> BINOPSIG_integ_integ_integ
+
+              | Ast.BINOP_or
+              | Ast.BINOP_and
+              | Ast.BINOP_lsl
+              | Ast.BINOP_lsr
               | Ast.BINOP_asr -> BINOPSIG_integ_integ_integ
+
               | Ast.BINOP_add -> BINOPSIG_plus_plus_plus
-              | Ast.BINOP_sub -> BINOPSIG_num_num_num
-              | Ast.BINOP_mul -> BINOPSIG_num_num_num
-              | Ast.BINOP_div -> BINOPSIG_num_num_num
+
+              | Ast.BINOP_sub
+              | Ast.BINOP_mul
+              | Ast.BINOP_div
               | Ast.BINOP_mod -> BINOPSIG_num_num_num
+
               | Ast.BINOP_send -> bug () "BINOP_send found in expr"
             in
               begin

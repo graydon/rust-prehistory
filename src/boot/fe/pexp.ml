@@ -26,6 +26,8 @@ type pexp' =
   | PEXP_port
   | PEXP_chan of (pexp option)
   | PEXP_binop of (Ast.binop * pexp * pexp)
+  | PEXP_lazy_and of (pexp * pexp)
+  | PEXP_lazy_or of (pexp * pexp)
   | PEXP_unop of (Ast.unop * pexp)
   | PEXP_lval of plval
   | PEXP_lit of Ast.lit
@@ -818,13 +820,31 @@ and parse_shift_pexp (ps:pstate) : pexp =
         LSL -> binop_rhs ps name apos lhs parse_shift_pexp Ast.BINOP_lsl
       | LSR -> binop_rhs ps name apos lhs parse_shift_pexp Ast.BINOP_lsr
       | ASR -> binop_rhs ps name apos lhs parse_shift_pexp Ast.BINOP_asr
+      | _ -> lhs
+
+
+and parse_and_pexp (ps:pstate) : pexp =
+  let name = "and pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_shift_pexp ps in
+    match peek ps with
+        AND -> binop_rhs ps name apos lhs parse_and_pexp Ast.BINOP_and
       | _   -> lhs
+
+
+and parse_or_pexp (ps:pstate) : pexp =
+  let name = "or pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_and_pexp ps in
+    match peek ps with
+        OR -> binop_rhs ps name apos lhs parse_or_pexp Ast.BINOP_or
+      | _  -> lhs
 
 
 and parse_relational_pexp (ps:pstate) : pexp =
   let name = "relational pexp" in
   let apos = lexpos ps in
-  let lhs = ctxt (name ^ " lhs") parse_shift_pexp ps in
+  let lhs = ctxt (name ^ " lhs") parse_or_pexp ps in
     match peek ps with
         LT -> binop_rhs ps name apos lhs parse_relational_pexp Ast.BINOP_lt
       | LE -> binop_rhs ps name apos lhs parse_relational_pexp Ast.BINOP_le
@@ -843,26 +863,36 @@ and parse_equality_pexp (ps:pstate) : pexp =
       | _    -> lhs
 
 
-and parse_and_pexp (ps:pstate) : pexp =
-  let name = "and pexp" in
+and parse_andand_pexp (ps:pstate) : pexp =
+  let name = "andand pexp" in
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_equality_pexp ps in
     match peek ps with
-        AND -> binop_rhs ps name apos lhs parse_and_pexp Ast.BINOP_and
+        ANDAND ->
+          bump ps;
+          let rhs = parse_andand_pexp ps in
+          let bpos = lexpos ps in
+            span ps apos bpos (PEXP_lazy_and (lhs, rhs))
+
       | _   -> lhs
 
 
-and parse_or_pexp (ps:pstate) : pexp =
-  let name = "or pexp" in
+and parse_oror_pexp (ps:pstate) : pexp =
+  let name = "oror pexp" in
   let apos = lexpos ps in
-  let lhs = ctxt (name ^ " lhs") parse_and_pexp ps in
+  let lhs = ctxt (name ^ " lhs") parse_andand_pexp ps in
     match peek ps with
-        OR -> binop_rhs ps name apos lhs parse_or_pexp Ast.BINOP_or
+        OROR ->
+          bump ps;
+          let rhs = parse_oror_pexp ps in
+          let bpos = lexpos ps in
+            span ps apos bpos (PEXP_lazy_or (lhs, rhs))
+
       | _  -> lhs
 
 
 and parse_pexp (ps:pstate) : pexp =
-  parse_or_pexp ps
+  parse_oror_pexp ps
 
 
 and parse_pexp_list (ps:pstate) : pexp array =
@@ -997,6 +1027,8 @@ and desugar_expr_atom
 
         PEXP_unop _
       | PEXP_binop _
+      | PEXP_lazy_or _
+      | PEXP_lazy_and _
       | PEXP_rec _
       | PEXP_tup _
       | PEXP_str _
@@ -1073,22 +1105,63 @@ and desugar_expr_init
   let s = Hashtbl.find ps.pstate_sess.Session.sess_spans pexp.id in
   let (apos, bpos) = (s.lo, s.hi) in
 
+  (* Helpers. *)
+  let ss x = span ps apos bpos x in
+  let cp v = Ast.STMT_copy (clone_lval ps dst_lval, v) in
+  let aa x y = Array.append x y in
+  let ac xs = Array.concat xs in
+
     match pexp.node with
 
         PEXP_lit _
       | PEXP_lval _ ->
           let (stmts, atom) = desugar_expr_atom ps pexp in
-          let expr = Ast.EXPR_atom atom in
-            Array.append stmts
-              [| span ps apos bpos (Ast.STMT_copy (dst_lval, expr)) |]
+            aa stmts [| ss (cp (Ast.EXPR_atom atom)) |]
 
       | PEXP_binop (op, lhs, rhs) ->
           let (lhs_stmts, lhs_atom) = desugar_expr_atom ps lhs in
           let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
-          let expr = Ast.EXPR_binary (op, lhs_atom, rhs_atom) in
-          let copy_stmt = span ps apos bpos
-            (Ast.STMT_copy (dst_lval, expr)) in
-              Array.concat [ lhs_stmts; rhs_stmts; [| copy_stmt |] ]
+          let copy_stmt = ss (cp (Ast.EXPR_binary (op, lhs_atom, rhs_atom))) in
+            ac [ lhs_stmts; rhs_stmts; [| copy_stmt |] ]
+
+      (* x = a && b ==> if (a) { x = b; } else { x = false; } *)
+
+      | PEXP_lazy_and (lhs, rhs) ->
+          let (lhs_stmts, lhs_atom) = desugar_expr_atom ps lhs in
+          let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
+          let sthen =
+            ss (aa rhs_stmts [| ss (cp (Ast.EXPR_atom rhs_atom)) |])
+          in
+          let selse =
+            ss [| ss (cp (Ast.EXPR_atom
+                            (Ast.ATOM_literal (ss (Ast.LIT_bool false))))) |]
+          in
+          let sif =
+            ss (Ast.STMT_if { Ast.if_test = Ast.EXPR_atom lhs_atom;
+                              Ast.if_then = sthen;
+                              Ast.if_else = Some selse })
+          in
+            aa lhs_stmts [| sif |]
+
+      (* x = a || b ==> if (a) { x = true; } else { x = b; } *)
+
+      | PEXP_lazy_or (lhs, rhs) ->
+          let (lhs_stmts, lhs_atom) = desugar_expr_atom ps lhs in
+          let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
+          let sthen =
+            ss [| ss (cp (Ast.EXPR_atom
+                            (Ast.ATOM_literal (ss (Ast.LIT_bool true))))) |]
+          in
+          let selse =
+            ss (aa rhs_stmts [| ss (cp (Ast.EXPR_atom rhs_atom)) |])
+          in
+          let sif =
+            ss (Ast.STMT_if { Ast.if_test = Ast.EXPR_atom lhs_atom;
+                              Ast.if_then = sthen;
+                              Ast.if_else = Some selse })
+          in
+            aa lhs_stmts [| sif |]
+
 
       | PEXP_unop (op, rhs) ->
           let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in

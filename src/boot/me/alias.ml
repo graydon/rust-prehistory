@@ -25,32 +25,64 @@ let alias_analysis_visitor
           let referent = Hashtbl.find cx.ctxt_lval_to_referent nb.id in
             if (referent_is_slot cx referent)
             then alias_slot referent
-      | _ -> err None "unhandled form of lval in alias analysis"
+      | _ -> err None "unhandled form of lval %a in alias analysis"
+          Ast.sprintf_lval lval
   in
+
+  let alias_atom at =
+    match at with
+        Ast.ATOM_lval lv -> alias lv
+      | _ -> err None "aliasing literal"
+  in
+
+  let alias_call_args dst callee args =
+    alias dst;
+    let callee_ty = lval_ty cx callee in
+      match callee_ty with
+          Ast.TY_fn (tsig,_) ->
+            Array.iteri
+              begin
+                fun i slot ->
+                  match slot.Ast.slot_mode with
+                      Ast.MODE_read_alias
+                    | Ast.MODE_write_alias ->
+                        alias_atom args.(i)
+                    | _ -> ()
+              end
+              tsig.Ast.sig_input_slots
+        | _ -> ()
+  in
+
   let visit_stmt_pre s =
     Stack.push s.id curr_stmt;
     begin
-      match s.node with
-          (* FIXME (bug 541574): must expand this analysis to cover
-           * alias-forming arg slots, when they are supported.*)
+      try
+        match s.node with
+            (* FIXME (bug 541574): must expand this analysis to cover
+             * alias-forming arg slots, when they are supported.*)
 
-          (* FIXME (bug 541559): actually all these *existing* cases
-           * can probably go now that we're using Trans.aliasing to
-           * form short-term spill-based aliases. Only aliases that
-           * survive 'into' a sub-block (those formed during iteration)
-           * need to be handled in this module.  *)
-          Ast.STMT_call (dst, _, _) -> alias dst
-        | Ast.STMT_spawn (dst, _, _, _) -> alias dst
-        | Ast.STMT_send (_, src) -> alias src
-        | Ast.STMT_recv (dst, _) -> alias dst
-        | Ast.STMT_init_port (dst) -> alias dst
-        | Ast.STMT_init_chan (dst, _) -> alias dst
-        | Ast.STMT_init_vec (dst, _, _) -> alias dst
-        | Ast.STMT_init_str (dst, _) -> alias dst
-        | Ast.STMT_for_each sfe ->
-            let (slot, _) = sfe.Ast.for_each_slot in
-              alias_slot slot.id
-        | _ -> () (* FIXME (bug 541572): plenty more to handle here. *)
+            (* FIXME (bug 541559): actually all these *existing* cases
+             * can probably go now that we're using Trans.aliasing to
+             * form short-term spill-based aliases. Only aliases that
+             * survive 'into' a sub-block (those formed during iteration)
+             * need to be handled in this module.  *)
+            Ast.STMT_call (dst, callee, args)
+          | Ast.STMT_spawn (dst, _, callee, args)
+            -> alias_call_args dst callee args
+
+          | Ast.STMT_send (_, src) -> alias src
+          | Ast.STMT_recv (dst, _) -> alias dst
+          | Ast.STMT_init_port (dst) -> alias dst
+          | Ast.STMT_init_chan (dst, _) -> alias dst
+          | Ast.STMT_init_vec (dst, _, _) -> alias dst
+          | Ast.STMT_init_str (dst, _) -> alias dst
+          | Ast.STMT_for_each sfe ->
+              let (slot, _) = sfe.Ast.for_each_slot in
+                alias_slot slot.id
+          | _ -> () (* FIXME (bug 541572): plenty more to handle here. *)
+      with
+          Semant_err (None, msg) ->
+            raise (Semant_err ((Some s.id), msg))
     end;
     inner.Walk.visit_stmt_pre s
   in

@@ -135,7 +135,9 @@ rule token = parse
 | '>'                          { GT         }
 | '!'                          { NOT        }
 | '&'                          { AND        }
+| "&&"                         { ANDAND     }
 | '|'                          { OR         }
+| "||"                         { OROR       }
 | "<<"                         { LSL        }
 | ">>"                         { LSR        }
 | ">>>"                        { ASR        }

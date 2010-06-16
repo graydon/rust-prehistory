@@ -842,7 +842,8 @@ let type_is_structured (t:Ast.ty) : bool =
 let mode_is_mutable (m:Ast.mode) : bool =
   match m with
       Ast.MODE_exterior Ast.MUTABLE
-    | Ast.MODE_interior Ast.MUTABLE -> true
+    | Ast.MODE_interior Ast.MUTABLE
+    | Ast.MODE_write_alias -> true
     | _ -> false
 ;;
 
