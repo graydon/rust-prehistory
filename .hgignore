@@ -10,3 +10,4 @@
 \.d$
 \.o$
 \.git($|/)
+\.gitignore$
