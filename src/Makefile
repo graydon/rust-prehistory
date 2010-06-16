@@ -345,6 +345,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       generic-obj-with-derived-type.rs \
                       generic-tag.rs \
                       generic-type.rs \
+                      generic-fn-infer.rs \
                       vec-append.rs \
                       vec-concat.rs \
                       vec-drop.rs \
