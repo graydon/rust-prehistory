@@ -61,6 +61,8 @@
                 ("yield", YIELD);
                 ("join", JOIN);
 
+                ("xor", XOR);
+
                 ("bool", BOOL);
 
                 ("int", INT);
@@ -157,6 +159,7 @@ rule token = parse
 | "<<="                        { OPEQ (LSL) }
 | ">>="                        { OPEQ (LSR) }
 | ">>>="                       { OPEQ (ASR) }
+| "xor="                       { OPEQ (XOR) }
 
 | '#'                          { POUND      }
 | '@'                          { AT         }

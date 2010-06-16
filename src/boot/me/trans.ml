@@ -1658,6 +1658,7 @@ let trans_visitor
     match binop with
         Ast.BINOP_or -> Il.OR
       | Ast.BINOP_and -> Il.AND
+      | Ast.BINOP_xor -> Il.XOR
 
       | Ast.BINOP_lsl -> Il.LSL
       | Ast.BINOP_lsr -> Il.LSR
@@ -1683,7 +1684,7 @@ let trans_visitor
         Il.Cell dst
     in
     match binop with
-        Ast.BINOP_or | Ast.BINOP_and
+        Ast.BINOP_or | Ast.BINOP_and | Ast.BINOP_xor
       | Ast.BINOP_lsl | Ast.BINOP_lsr | Ast.BINOP_asr
       | Ast.BINOP_add | Ast.BINOP_sub
       (* FIXME (bug 541544): switch on type of operands, IMUL/IDIV/IMOD etc. *)

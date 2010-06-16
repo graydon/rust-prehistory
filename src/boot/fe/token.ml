@@ -101,6 +101,9 @@ type token =
   | YIELD
   | JOIN
 
+  (* Operators *)
+  | XOR
+
   (* Literals *)
   | LIT_INT       of (int64 * string)
   | LIT_FLO       of string
@@ -165,6 +168,7 @@ let rec string_of_tok t =
     | ANDAND     -> "&&"
     | OR         -> "|"
     | OROR       -> "||"
+    | XOR        -> "xor"
     | LSL        -> "<<"
     | LSR        -> ">>"
     | ASR        -> ">>>"

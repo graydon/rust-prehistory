@@ -759,6 +759,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
               | Ast.BINOP_or
               | Ast.BINOP_and
+              | Ast.BINOP_xor
               | Ast.BINOP_lsl
               | Ast.BINOP_lsr
               | Ast.BINOP_asr -> BINOPSIG_integ_integ_integ

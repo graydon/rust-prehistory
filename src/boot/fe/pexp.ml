@@ -832,10 +832,19 @@ and parse_and_pexp (ps:pstate) : pexp =
       | _   -> lhs
 
 
+and parse_xor_pexp (ps:pstate) : pexp =
+  let name = "xor pexp" in
+  let apos = lexpos ps in
+  let lhs = ctxt (name ^ " lhs") parse_and_pexp ps in
+    match peek ps with
+        XOR -> binop_rhs ps name apos lhs parse_xor_pexp Ast.BINOP_xor
+      | _ -> lhs
+
+
 and parse_or_pexp (ps:pstate) : pexp =
   let name = "or pexp" in
   let apos = lexpos ps in
-  let lhs = ctxt (name ^ " lhs") parse_and_pexp ps in
+  let lhs = ctxt (name ^ " lhs") parse_xor_pexp ps in
     match peek ps with
         OR -> binop_rhs ps name apos lhs parse_or_pexp Ast.BINOP_or
       | _  -> lhs

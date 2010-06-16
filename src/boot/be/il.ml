@@ -143,7 +143,7 @@ type binop =
   | IMUL | UMUL
   | IDIV | UDIV
   | IMOD | UMOD
-  | AND | OR
+  | AND | OR | XOR
   | LSL | LSR | ASR
 ;;
 
@@ -624,6 +624,7 @@ let string_of_binop (op:binop) : string =
     | UMOD -> "umod"
     | AND -> "and"
     | OR -> "or"
+    | XOR -> "xor"
     | LSL -> "lsl"
     | LSR -> "lsr"
     | ASR -> "asr"

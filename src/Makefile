@@ -399,6 +399,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       obj-with-vec.rs \
                       else-if.rs \
                       lazy-and-or.rs \
+                      bitwise.rs \
                      ) \
                     $(addprefix test/run-fail/, \
                       explicit-fail.rs \

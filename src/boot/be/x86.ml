@@ -1972,6 +1972,12 @@ let select_insn (q:Il.quad) : Asm.frag =
                                         rm_dst_op32=0x09;
                                         rm_src_op8=0x0a;
                                         rm_src_op32=0x0b; }
+                | (_, Il.XOR) -> binop { insn="XOR";
+                                         immslash=slash6;
+                                         rm_dst_op8=0x30;
+                                         rm_dst_op32=0x31;
+                                         rm_src_op8=0x32;
+                                         rm_src_op32=0x33; }
 
                 | (Il.Reg (Il.Hreg r, t), Il.UMUL)
                     when (is_ty32 t || is_ty8 t) && r = eax ->

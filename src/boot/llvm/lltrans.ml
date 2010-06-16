@@ -638,7 +638,7 @@ let trans_crate
                   | Ast.BINOP_lt | Ast.BINOP_le | Ast.BINOP_ge | Ast.BINOP_gt
                   | Ast.BINOP_lsl | Ast.BINOP_lsr | Ast.BINOP_asr
                   | Ast.BINOP_add | Ast.BINOP_sub | Ast.BINOP_mul
-                  | Ast.BINOP_div | Ast.BINOP_mod ->
+                  | Ast.BINOP_div | Ast.BINOP_mod | Ast.BINOP_xor ->
                 (trans_atom lhs, trans_atom rhs)
             | Ast.BINOP_send ->
                 let llrhs = trans_atom rhs in
