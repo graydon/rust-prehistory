@@ -616,12 +616,12 @@ PKG_NAME := rust
 PKG_VER  := $(shell date +"%Y-%m-%d")-snap
 PKG_DIR := $(PKG_NAME)-$(PKG_VER)
 PKG_TAR := $(PKG_DIR).tar.gz
-PKG_3RDPARTY := rt/valgrind.h \
+PKG_3RDPARTY := rt/valgrind.h rt/memcheck.h \
                 rt/isaac/rand.h rt/isaac/standard.h \
                 rt/uthash/uthash.h rt/uthash/utlist.h \
                 rt/bigint/bigint.h rt/bigint/bigint_int.cpp \
                 rt/bigint/bigint_ext.cpp rt/bigint/low_primes.h
-PKG_FILES := README COPYING\
+PKG_FILES := README \
              $(MKFILES) $(BOOT_MLS) boot/fe/lexer.mll \
              $(COMPILER_CRATE) $(COMPILER_INPUTS) \
              $(STDLIB_CRATE) $(STDLIB_INPUTS) \
@@ -632,6 +632,7 @@ dist:
 	@$(call CFG_ECHO, making dist dir)
 	$(CFG_QUIET)mkdir -p dist/$(PKG_DIR)
 	$(CFG_QUIET)tar -c $(PKG_FILES) | tar -x -C dist/$(PKG_DIR)
+	$(CFG_QUIET)cp ../LICENSE.txt dist/$(PKG_DIR)
 	$(CFG_QUIET)tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
 	$(CFG_QUIET)rm -Rf dist
 
@@ -644,6 +645,7 @@ distcheck:
 	$(CFG_QUIET)make -C dist/$(PKG_DIR) check
 	$(CFG_QUIET)make -C dist/$(PKG_DIR) clean
 	@$(call CFG_ECHO, making tarball)
+	$(CFG_QUIET)cp ../LICENSE.txt dist/$(PKG_DIR)
 	$(CFG_QUIET)tar -czf $(PKG_TAR) -C dist $(PKG_DIR)
 	$(CFG_QUIET)rm -Rf dist
 	@echo
