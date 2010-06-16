@@ -672,4 +672,4 @@ clean:
 	$(CFG_QUIET)rm -f $(TEST_COMPILE_FAIL_EXES_X86) $(TEST_COMPILE_FAIL_OUTS_X86)
 	$(CFG_QUIET)rm -f $(TEST_COMPILE_FAIL_EXES_LLVM) $(TEST_COMPILE_FAIL_OUTS_LLVM)
 	$(CFG_QUIET)rm -Rf $(PKG_NAME)-*.tar.gz dist
-	$(CFG_QUIET)rm -f $(foreach ext,cmx cmi cmo cma o a d exe,$(wildcard boot/*/*.$(ext)))
+	$(CFG_QUIET)rm -f $(foreach ext,cmx cmi cmo cma o a d exe,$(wildcard boot/*/*.$(ext) boot/*/*/*.$(ext)))

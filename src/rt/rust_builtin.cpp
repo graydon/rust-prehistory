@@ -1,7 +1,3 @@
-// This file is part of the rust language runtime library.
-// Copyright 2008-2010 Graydon Hoare <graydon@pobox.com>.
-// Released under MIT license.
-// See file COPYING for details.
 
 #include "rust_internal.h"
 

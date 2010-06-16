@@ -1,11 +1,6 @@
 #ifndef RUST_DWARF_H
 #define RUST_DWARF_H
 
-// This file is part of the rust language runtime library.
-// Copyright 2008-2010 Graydon Hoare <graydon@pobox.com>.
-// Released under MIT license.
-// See file COPYING for details.
-
 enum
 dw_form
   {

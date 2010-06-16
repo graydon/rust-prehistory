@@ -1,11 +1,6 @@
 #ifndef RUST_INTERNAL_H
 #define RUST_INTERNAL_H
 
-// This file is part of the rust language runtime library.
-// Copyright 2008-2010 Graydon Hoare <graydon@pobox.com>.
-// Released under MIT license.
-// See file COPYING for details.
-
 #define __STDC_LIMIT_MACROS 1
 #define __STDC_CONSTANT_MACROS 1
 #define __STDC_FORMAT_MACROS 1

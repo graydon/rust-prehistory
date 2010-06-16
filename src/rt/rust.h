@@ -2,15 +2,8 @@
 #define RUST_H__
 
 /*
- * Rust runtime library.
- * Copyright 2008, 2009 Graydon Hoare <graydon@pobox.com>.
- * Released under MIT license.
- * See file COPYING for details.
- */
-
-/*
  * Include this file after you've defined the ISO C9x stdint
- * types (size, uint8, uintptr, etc.)
+ * types (size_t, uint8_t, uintptr_t, etc.)
  */
 
 #ifdef __i386__

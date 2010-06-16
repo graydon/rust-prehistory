@@ -10,7 +10,8 @@
 @ifinfo
 This manual is for the ``Rust'' programming language.
 
-qCopyright 2006-2010 Graydon Hoare
+Copyright 2006-2010 Graydon Hoare
+Copyright 2009-2010 Mozilla Foundation
 
 All rights reserved (for the time being).
 @end ifinfo
@@ -28,8 +29,9 @@ All rights reserved (for the time being).
 @page
 @vskip 0pt plus 1filll
 Copyright @copyright{} 2006-2010 Graydon Hoare
+Copyright @copyright{} 2009-2010 Mozilla Foundation
 
-All rights reserved (for the time being).
+See accompanying LICENSE.txt for terms.
 @end titlepage
 
 @ifnottex
@@ -75,15 +77,6 @@ certain parts do not, certain parts will be removed or changed.
 This manual is a snapshot written in the present tense. Some features
 described do not yet exist in working code. Some may be temporary.
 
-At this point, the language is non-public. Please keep this document,
-and your knowledge of the language's existence, to yourself. A small
-group of developers is working on an initial implementation, including
-revision of this document, in private. The project will transition to
-``public'' eventually, but we wish to have a window of time for fast,
-focused work without interruption or public debate. Languages require
-a certain degree of internal coherence, and do not particularly
-benefit from @emph{design} by committee anyway.
-
 If you have suggestions to make, please try to focus them on
 @emph{reductions} to the language: possible features that can be
 combined or omitted. At this point, every ``additive'' feature we're
@@ -93,7 +86,7 @@ combining, trimming, and implementing.
 Thanks for your time.
 @flushright
                                    - Graydon Hoare
-                                     April 2010
+                                     June 2010
 @end flushright
 
 

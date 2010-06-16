@@ -1,21 +1,22 @@
-This is a very, very preliminary work-in-progress sort of snapshot of the Rust compiler.
+This is preliminary version of the Rust compiler.
 
 Source layout:
 
 boot/              The bootstrap compiler
 boot/fe            - Front end (lexer, parser, AST)
-boot/me            - Middle end (semantic checks, layout, IL, translation)
-boot/be            - Back end (regalloc, insn selection, assembly, objfile emitter)
+boot/me            - Middle end (resolving, semantic checks, layout, translation)
+boot/be            - Back end (IL, regalloc, insn selection, assembly, objfile emitter)
 boot/util          - Ubiquitous helpers
+boot/llvm          - LLVM-based alternative back end
 boot/driver        - Compiler driver (command-line processing, pass-sequencing)
 
 comp/              The self-hosted compiler (doesn't exist yet)
 comp/*             - Same structure as in boot/
 
 rt/                The runtime system
-rt/rust.c          - The majority of the runtime services
+rt/rust_*.cpp      - The majority of the runtime services
 rt/isaac           - The PRNG used for pseudo-random choices in the runtime
-rt/bigint          - The bigint library used for the 'int' type
+rt/bigint          - The bigint library used for the 'big' type
 rt/uthash          - Small hashtable-and-list library for C, used in runtime
 
 test/              Testsuite (for both bootstrap and self-hosted)
@@ -23,5 +24,4 @@ test/compile-fail  - Tests that should fail to compile
 test/run-fail      - Tests that should compile, run and fail
 test/run-pass      - Tests that should compile, run and succeed
 
-
-Please be gentle, this is a part-time project, it's a bit of a mess.
+Please be gentle, it's a work in progress.
