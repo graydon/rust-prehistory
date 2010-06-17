@@ -836,20 +836,39 @@ let type_is_structured (t:Ast.ty) : bool =
     fold_ty fold t
 ;;
 
-(* State-effect analysis. *)
+(* Effect analysis. *)
+let effect_le x y =
+  match (x,y) with
+      (Ast.UNSAFE, _) -> true
+    | (Ast.STATE, Ast.PURE) -> true
+    | (Ast.STATE, Ast.IO) -> true
+    | (Ast.STATE, Ast.STATE) -> true
+    | (Ast.IO, Ast.PURE) -> true
+    | (Ast.IO, Ast.IO) -> true
+    | (Ast.PURE, Ast.PURE) -> true
+    | _ -> false
+;;
 
-let type_has_state (t:Ast.ty) : bool =
-  let fold_slot (_, mut, b) =
-    if b
-    then true
-    else mut
+let type_effect (t:Ast.ty) : Ast.effect =
+  let lower_of x y =
+    if effect_le x y then x else y
   in
-  let fold = ty_fold_bool_or false in
+  let fold_slot ((*mode*)_, mut, eff) =
+    if mut
+    then lower_of Ast.STATE eff
+    else eff
+  in
+  let fold = associative_binary_op_ty_fold Ast.PURE lower_of in
   let fold = { fold with ty_fold_slot = fold_slot } in
     fold_ty fold t
 ;;
 
-(* Analyze whether a type contains a channel, in which case we have to deep copy. *)
+let type_has_state (t:Ast.ty) : bool =
+  effect_le (type_effect t) Ast.STATE
+;;
+
+
+(* Various type analyses. *)
 
 let type_contains_chan (t:Ast.ty) : bool =
   let fold_chan _ = true in
