@@ -32,6 +32,8 @@ type meta = (Ast.ident * Pexp.pexp) array;;
 
 type meta_pat = (Ast.ident * (Pexp.pexp option)) array;;
 
+type auth = (Ast.name * Ast.effect);;
+
 type cexp =
     CEXP_alt of cexp_alt identified
   | CEXP_let of cexp_let identified
@@ -40,6 +42,7 @@ type cexp =
   | CEXP_use_mod of cexp_use identified
   | CEXP_nat_mod of cexp_nat identified
   | CEXP_meta of meta identified
+  | CEXP_auth of auth identified
 
 and cexp_alt =
     { alt_val: Pexp.pexp;
@@ -263,6 +266,15 @@ and parse_cexp (ps:pstate) : cexp =
             let bpos = lexpos ps in
               CEXP_meta (span ps apos bpos meta)
 
+      | AUTH ->
+          bump ps;
+          let name = Pexp.parse_name ps in
+            expect ps EQ;
+            let effect = Pexp.parse_effect ps in
+              expect ps SEMI;
+              let bpos = lexpos ps in
+                CEXP_auth (span ps apos bpos (name, effect))
+
       | _ -> raise (unexpected ps)
 
 
@@ -294,9 +306,9 @@ type pval =
 type cdir =
     CDIR_meta of ((Ast.ident * string) array)
   | CDIR_syntax of Ast.name
-  | CDIR_auth of Ast.name
   | CDIR_check of (Ast.name * pval array)
   | CDIR_mod of (Ast.ident * Ast.mod_item)
+  | CDIR_auth of auth
 
 type env = { env_bindings: (Ast.ident * pval) list;
              env_prefix: filename list;
@@ -453,6 +465,8 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
     | CEXP_meta m ->
         [| CDIR_meta (Array.map (fun (id, p) -> (id, eval_pexp_to_str env p)) m.node) |]
 
+    | CEXP_auth a -> [| CDIR_auth a.node |]
+
 
 and eval_pexp (env:env) (exp:Pexp.pexp) : pval =
   match exp.node with
@@ -579,6 +593,7 @@ let with_err_handling sess thunk =
           span ps apos apos
             { Ast.crate_items = (Item.empty_view, Hashtbl.create 0);
               Ast.crate_meta = [||];
+              Ast.crate_auth = Hashtbl.create 0;
               Ast.crate_required = Hashtbl.create 0;
               Ast.crate_required_syms = Hashtbl.create 0;
               Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
@@ -634,6 +649,7 @@ let parse_crate_file
               env_required_syms = required_syms;
               env_ps = ps; }
   in
+  let auth = Hashtbl.create 0 in
     with_err_handling sess
       begin
         fun _ ->
@@ -649,6 +665,10 @@ let parse_crate_file
                       CDIR_mod (name, item) -> htab_put items name item
                     | CDIR_meta metas ->
                         Array.iter (fun m -> Queue.add m meta) metas
+                    | CDIR_auth (n,e) ->
+                        if Hashtbl.mem auth n
+                        then raise (err "duplicate 'auth' clause" ps)
+                        else Hashtbl.add auth n e
                     | _ ->
                         raise
                           (err "unhandled directive at top level" ps)
@@ -659,6 +679,7 @@ let parse_crate_file
           let main = find_main_fn ps items in
           let crate = { Ast.crate_items = (Item.empty_view, items);
                         Ast.crate_meta = queue_to_arr meta;
+                        Ast.crate_auth = auth;
                         Ast.crate_required = required;
                         Ast.crate_required_syms = required_syms;
                         Ast.crate_main = main;
@@ -695,6 +716,7 @@ let parse_src_file
           let crate = { Ast.crate_items = items;
                         Ast.crate_required = required;
                         Ast.crate_required_syms = required_syms;
+                        Ast.crate_auth = Hashtbl.create 0;
                         Ast.crate_meta = [||];
                         Ast.crate_main = main;
                         Ast.crate_files = files }
