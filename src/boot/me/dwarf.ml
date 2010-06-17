@@ -1206,6 +1206,8 @@ let (abbrev_subprogram:abbrev) =
      (DW_AT_high_pc, DW_FORM_addr);
      (DW_AT_frame_base, DW_FORM_block1);
      (DW_AT_return_addr, DW_FORM_block1);
+     (DW_AT_mutable, DW_FORM_flag);
+     (DW_AT_pure, DW_FORM_flag);
    |])
 ;;
 
@@ -1486,8 +1488,8 @@ let dwarf_visitor
       match eff with
           Ast.UNSAFE -> (1,1)
         | Ast.STATE -> (1,0)
-        | Ast.IO -> (0,1)
-        | Ast.PURE -> (0,0)
+        | Ast.IO -> (0,0)
+        | Ast.PURE -> (0,1)
     in
       SEQ [|
         (* DW_AT_mutable: DW_FORM_flag *)
@@ -2129,6 +2131,7 @@ let dwarf_visitor
   let emit_subprogram_die
       (id:Ast.ident)
       (ret_slot:Ast.slot)
+      (effect:Ast.effect)
       (fix:fixup)
       : unit =
     (* NB: retpc = "top word of frame-base" by convention in ABI/x86. *)
@@ -2146,7 +2149,8 @@ let dwarf_visitor
          (* DW_AT_frame_base *)
          dw_form_block1 [| DW_OP_reg abi.Abi.abi_dwarf_fp_reg |];
          (* DW_AT_return_addr *)
-         dw_form_block1 [| DW_OP_fbreg (Asm.IMM retpc); |]
+         dw_form_block1 [| DW_OP_fbreg (Asm.IMM retpc); |];
+         encode_effect effect;
        |])
     in
       emit_die subprogram_die
@@ -2206,7 +2210,7 @@ let dwarf_visitor
         | Ast.MOD_ITEM_fn _ ->
             begin
               let ty = Hashtbl.find cx.ctxt_all_item_types item.id in
-              let (tsig,_) =
+              let (tsig,taux) =
                 match ty with
                     Ast.TY_fn tfn -> tfn
                   | _ -> bug () "non-fn type when emitting dwarf for MOD_ITEM_fn"
@@ -2214,7 +2218,7 @@ let dwarf_visitor
                 log cx "walking function '%s' with %d type params"
                   (path_name())
                   (Array.length item.node.Ast.decl_params);
-                emit_subprogram_die id tsig.Ast.sig_output_slot
+                emit_subprogram_die id tsig.Ast.sig_output_slot taux.Ast.fn_effect
                   (Hashtbl.find cx.ctxt_fn_fixups item.id);
                 emit_type_param_decl_dies item.node.Ast.decl_params;
             end
@@ -2938,8 +2942,9 @@ let rec extract_mod_items
           (* FIXME: finish this. *)
           let ident = get_name die in
           let oslot = get_referenced_slot die in
+          let effect = get_effect die in
           let (params, islots) = get_formals die in
-          let taux = { Ast.fn_effect = Ast.IO; (* FIXME: finish this! *)
+          let taux = { Ast.fn_effect = effect;
                        Ast.fn_is_iter = false }
           in
           let tfn = { Ast.fn_input_slots = form_header_slots islots;
