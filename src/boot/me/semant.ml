@@ -858,44 +858,6 @@ let type_contains_chan (t:Ast.ty) : bool =
     fold_ty fold t
 ;;
 
-(* GC analysis. *)
-
-(* If a type is cyclic, it is managed by mark-sweep GC, not
- * refcounting.
- * 
- * A type T is "cyclic" iff it contains a mutable slot that contains an
- * un-captured TY_idx (that is, there is a 'mutability point' between
- * the TY_idx and its enclosing TY_iso).
- * 
- *)
-
-let type_is_cyclic (t:Ast.ty) : bool =
-
-  let contains_uncaptured_idx t =
-    let fold_idx _ = true in
-    let fold_iso _ = false in
-    let fold = ty_fold_bool_or false in
-    let fold = { fold with
-                   ty_fold_idx = fold_idx;
-                   ty_fold_iso = fold_iso }
-    in
-      fold_ty fold t
-  in
-
-  let is_cyclic = ref false in
-  let fold_slot (mode, mut, ty) =
-    if mut && contains_uncaptured_idx ty
-    then is_cyclic := true;
-    { Ast.slot_mode = mode;
-      Ast.slot_mutable = mut;
-      Ast.slot_ty = Some t }
-  in
-  let fold = ty_fold_rebuild (fun t -> t) in
-  let fold = { fold with ty_fold_slot = fold_slot } in
-  let _ = fold_ty fold t in
-    !is_cyclic
-;;
-
 
 let type_is_unsigned_2s_complement t =
   match t with
