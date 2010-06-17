@@ -6,6 +6,11 @@ let log cx = Session.log "effect"
   cx.ctxt_sess.Session.sess_log_out
 ;;
 
+let iflog cx thunk =
+  if cx.ctxt_sess.Session.sess_log_effect
+  then thunk ()
+  else ()
+;;
 
 let mutability_checking_visitor
     (cx:ctxt)
@@ -54,7 +59,8 @@ let mutability_checking_visitor
 ;;
 
 let function_effect_propagation_visitor
-    ((*cx*)_:ctxt)
+    (item_effect:(node_id, Ast.effect) Hashtbl.t)
+    (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
   (* 
@@ -65,7 +71,84 @@ let function_effect_propagation_visitor
    *    - Native calls lower to 'unsafe'
    *    - Calling a function with effect e lowers to e.
    *)
-  inner
+  let curr_fn = Stack.create () in
+  let visit_mod_item_pre n p i =
+    begin
+      match i.node.Ast.decl_item with
+          Ast.MOD_ITEM_fn _ -> Stack.push i.id curr_fn
+        | _ -> ()
+    end;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+  let visit_mod_item_post n p i =
+    inner.Walk.visit_mod_item_post n p i;
+    match i.node.Ast.decl_item with
+        Ast.MOD_ITEM_fn _ -> ignore (Stack.pop curr_fn)
+      | _ -> ()
+  in
+  let visit_obj_drop_pre o b =
+    Stack.push b.id curr_fn;
+    inner.Walk.visit_obj_drop_pre o b
+  in
+  let visit_obj_drop_post o b =
+    inner.Walk.visit_obj_drop_post o b;
+    ignore (Stack.pop curr_fn);
+  in
+
+  let lower_to ne =
+    let fn_id = Stack.top curr_fn in
+    let e =
+      match htab_search item_effect fn_id with
+          None -> Ast.PURE
+        | Some e -> e
+    in
+    let ne = lower_effect_of ne e in
+      if ne <> e
+      then
+        begin
+          iflog cx
+            begin
+              fun _ ->
+                let name = Hashtbl.find cx.ctxt_all_item_names fn_id in
+                log cx "lowering calculated effect for '%a' from '%a' to '%a'"
+                  Ast.sprintf_name name
+                  Ast.sprintf_effect e
+                  Ast.sprintf_effect ne
+            end;
+          Hashtbl.replace item_effect fn_id ne
+        end;
+  in
+
+  let visit_stmt_pre s =
+    begin
+      match s.node with
+          Ast.STMT_send _
+        | Ast.STMT_recv _ -> lower_to Ast.IO
+
+        | Ast.STMT_call (_, fn, _) ->
+            if lval_is_slot cx fn
+            then
+              let t = lval_slot cx fn in
+                begin
+                  match slot_ty t with
+                      Ast.TY_fn (_, taux) ->
+                        lower_to taux.Ast.fn_effect;
+                    | _ -> bug () "non-fn callee"
+                end
+            else
+              if Hashtbl.mem cx.ctxt_required_items (lval_item cx fn).id
+              then lower_to Ast.UNSAFE
+        | _ -> ()
+    end;
+    inner.Walk.visit_stmt_pre s
+  in
+
+    { inner with
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post;
+        Walk.visit_obj_drop_pre = visit_obj_drop_pre;
+        Walk.visit_obj_drop_post = visit_obj_drop_post;
+        Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
 let binding_effect_propagation_visitor
@@ -74,7 +157,11 @@ let binding_effect_propagation_visitor
     : Walk.visitor =
   (* This visitor lowers the effect of an object or binding according
    * to its slots: holding a 'state' slot lowers any obj item, or
-   * bind-stmt LHS, to 'state'. *)
+   * bind-stmt LHS, to 'state'.
+   * 
+   * Binding (or implicitly just making a native 1st-class) makes the LHS
+   * unsafe.
+   *)
   inner
 ;;
 
@@ -95,11 +182,12 @@ let process_crate
     (crate:Ast.crate)
     : unit =
   let path = Stack.create () in
+  let item_effect = Hashtbl.create 0 in
   let passes =
     [|
       (mutability_checking_visitor cx
          Walk.empty_visitor);
-      (function_effect_propagation_visitor cx
+      (function_effect_propagation_visitor item_effect cx
          Walk.empty_visitor);
       (binding_effect_propagation_visitor cx
          Walk.empty_visitor);

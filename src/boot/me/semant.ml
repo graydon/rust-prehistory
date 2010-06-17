@@ -849,16 +849,17 @@ let effect_le x y =
     | _ -> false
 ;;
 
+let lower_effect_of x y =
+  if effect_le x y then x else y
+;;
+
 let type_effect (t:Ast.ty) : Ast.effect =
-  let lower_of x y =
-    if effect_le x y then x else y
-  in
   let fold_slot ((*mode*)_, mut, eff) =
     if mut
-    then lower_of Ast.STATE eff
+    then lower_effect_of Ast.STATE eff
     else eff
   in
-  let fold = associative_binary_op_ty_fold Ast.PURE lower_of in
+  let fold = associative_binary_op_ty_fold Ast.PURE lower_effect_of in
   let fold = { fold with ty_fold_slot = fold_slot } in
     fold_ty fold t
 ;;
