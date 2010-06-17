@@ -558,6 +558,7 @@ and fmt_ty_fn
     : unit =
   let (tsig, ta) = tf in
     fmt_effect ff ta.fn_effect;
+    if ta.fn_effect <> PURE then fmt ff " ";
     fmt ff "%s" (if ta.fn_is_iter then "iter" else "fn");
     begin
       match ident_and_params with
@@ -625,6 +626,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
         fmt ff "@]"
 
   | TY_param (i, e) -> (fmt_effect ff e;
+                        if e <> PURE then fmt ff " ";
                         fmt ff "<p#%d>" i)
   | TY_native oid -> fmt ff "<native#%d>" (int_of_opaque oid)
   | TY_named n -> fmt_name ff n
@@ -640,6 +642,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_obj (effect, fns) ->
       fmt_obox ff;
       fmt_effect ff effect;
+      if effect <> PURE then fmt ff " ";
       fmt ff "obj ";
       fmt_obr ff;
       Hashtbl.iter
@@ -1161,6 +1164,7 @@ and fmt_decl_params (ff:Format.formatter) (params:ty_param array) : unit =
         then fmt ff ", ";
         let (ident, (i, e)) = params.(i) in
           fmt_effect ff e;
+          if e <> PURE then fmt ff " ";
           fmt_ident ff ident;
           fmt ff "=<p#%d>" i
       done;
@@ -1179,6 +1183,7 @@ and fmt_ident_and_params (ff:Format.formatter) (id:ident) (params:ty_param array
 and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : unit =
   fmt_obox ff;
   fmt_effect ff f.fn_aux.fn_effect;
+  if f.fn_aux.fn_effect <> PURE then fmt ff " ";
   fmt ff "%s "(if f.fn_aux.fn_is_iter then "iter" else "fn");
   fmt_ident_and_params ff id params;
   fmt_header_slots ff f.fn_input_slots;
@@ -1194,6 +1199,7 @@ and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : uni
 and fmt_obj (ff:Format.formatter) (id:ident) (params:ty_param array) (obj:obj) : unit =
   fmt_obox ff;
   fmt_effect ff obj.obj_effect;
+  if obj.obj_effect <> PURE then fmt ff " ";
   fmt ff "obj ";
   fmt_ident_and_params ff id params;
   fmt_header_slots ff obj.obj_state;
