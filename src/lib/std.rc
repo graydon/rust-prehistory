@@ -19,6 +19,11 @@ mod _str;
 mod _io;
 mod sys;
 
+// Authorize various rule-bendings.
+auth _io = unsafe;
+auth _str = unsafe;
+auth _vec = unsafe;
+
 // Target-OS module.
 
 alt (target_os) {

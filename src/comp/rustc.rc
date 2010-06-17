@@ -21,6 +21,8 @@ mod driver {
     mod rustc;
 }
 
+auth driver = unsafe;
+
 // Local Variables:
 // fill-column: 70;
 // indent-tabs-mode: nil
