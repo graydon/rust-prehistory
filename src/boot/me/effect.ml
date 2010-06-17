@@ -95,7 +95,7 @@ let function_effect_propagation_visitor
     ignore (Stack.pop curr_fn);
   in
 
-  let lower_to ne =
+  let lower_to s ne =
     let fn_id = Stack.top curr_fn in
     let e =
       match htab_search item_effect fn_id with
@@ -110,10 +110,11 @@ let function_effect_propagation_visitor
             begin
               fun _ ->
                 let name = Hashtbl.find cx.ctxt_all_item_names fn_id in
-                log cx "lowering calculated effect for '%a' from '%a' to '%a'"
-                  Ast.sprintf_name name
-                  Ast.sprintf_effect e
-                  Ast.sprintf_effect ne
+                  log cx "lowering calculated effect for '%a' from '%a' to '%a'"
+                    Ast.sprintf_name name
+                    Ast.sprintf_effect e
+                    Ast.sprintf_effect ne;
+                  log cx "at stmt %a" Ast.sprintf_stmt s
             end;
           Hashtbl.replace item_effect fn_id ne
         end;
@@ -123,7 +124,7 @@ let function_effect_propagation_visitor
     begin
       match s.node with
           Ast.STMT_send _
-        | Ast.STMT_recv _ -> lower_to Ast.IO
+        | Ast.STMT_recv _ -> lower_to s Ast.IO
 
         | Ast.STMT_call (_, fn, _) ->
             if lval_is_slot cx fn
@@ -132,12 +133,12 @@ let function_effect_propagation_visitor
                 begin
                   match slot_ty t with
                       Ast.TY_fn (_, taux) ->
-                        lower_to taux.Ast.fn_effect;
+                        lower_to s taux.Ast.fn_effect;
                     | _ -> bug () "non-fn callee"
                 end
             else
               if Hashtbl.mem cx.ctxt_required_items (lval_item cx fn).id
-              then lower_to Ast.UNSAFE
+              then lower_to s Ast.UNSAFE
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
@@ -166,14 +167,85 @@ let binding_effect_propagation_visitor
 ;;
 
 let effect_checking_visitor
-    ((*cx*)_:ctxt)
+    (item_auth:(node_id, Ast.effect) Hashtbl.t)
+    (item_effect:(node_id, Ast.effect) Hashtbl.t)
+    (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
   (*
    * This visitor checks that each type, item and obj declares
    * effects consistent with what we calculated.
    *)
-  inner
+  let auth_stack = Stack.create () in
+  let _ = Stack.push Ast.PURE auth_stack in
+  let visit_mod_item_pre n p i =
+    begin
+      match htab_search item_auth i.id with
+          None -> ()
+        | Some e ->
+            let curr = Stack.top auth_stack in
+            let next = lower_effect_of e curr in
+              Stack.push next auth_stack;
+              iflog cx
+                begin
+                  fun _ ->
+                    let name = Hashtbl.find cx.ctxt_all_item_names i.id in
+                      log cx "entering '%a', adjusting authorized effect from '%a' to '%a'"
+                        Ast.sprintf_name name
+                        Ast.sprintf_effect curr
+                        Ast.sprintf_effect next
+                end
+    end;
+    begin
+      match i.node.Ast.decl_item with
+          Ast.MOD_ITEM_fn f ->
+            let e =
+              match htab_search item_effect i.id with
+                None -> Ast.PURE
+              | Some e -> e
+            in
+            let fe = f.Ast.fn_aux.Ast.fn_effect in
+            let ae = Stack.top auth_stack in
+              if e <> fe && e <> ae
+              then
+                begin
+                  let name = Hashtbl.find cx.ctxt_all_item_names i.id in
+                    err (Some i.id) "%a claims effect '%a' but calculated effect is '%a'%s"
+                      Ast.sprintf_name name
+                      Ast.sprintf_effect fe
+                      Ast.sprintf_effect e
+                      begin
+                        if ae <> fe
+                        then
+                          Printf.sprintf " (auth effect is '%a')"
+                            Ast.sprintf_effect ae
+                        else ""
+                      end
+                end
+        | _ -> ()
+    end;
+    inner.Walk.visit_mod_item_pre n p i
+  in
+  let visit_mod_item_post n p i =
+    inner.Walk.visit_mod_item_post n p i;
+    match htab_search item_auth i.id with
+        None -> ()
+      | Some _ ->
+          let curr = Stack.pop auth_stack in
+          let next = Stack.top auth_stack in
+          iflog cx
+            begin
+              fun _ ->
+                let name = Hashtbl.find cx.ctxt_all_item_names i.id in
+                  log cx "leaving '%a', restoring authorized effect from '%a' to '%a'"
+                    Ast.sprintf_name name
+                    Ast.sprintf_effect curr
+                    Ast.sprintf_effect next
+            end
+  in
+    { inner with
+        Walk.visit_mod_item_pre = visit_mod_item_pre;
+        Walk.visit_mod_item_post = visit_mod_item_post; }
 ;;
 
 
@@ -182,6 +254,7 @@ let process_crate
     (crate:Ast.crate)
     : unit =
   let path = Stack.create () in
+  let item_auth = Hashtbl.create 0 in
   let item_effect = Hashtbl.create 0 in
   let passes =
     [|
@@ -191,10 +264,20 @@ let process_crate
          Walk.empty_visitor);
       (binding_effect_propagation_visitor cx
          Walk.empty_visitor);
-      (effect_checking_visitor cx
+      (effect_checking_visitor item_auth item_effect cx
          Walk.empty_visitor);
     |]
   in
+  let root_scope = [ SCOPE_crate crate ] in
+  let auth_effect name eff =
+    match lookup_by_name cx root_scope name with
+        None -> ()
+      | Some (_, id) ->
+          if referent_is_item cx id
+          then htab_put item_auth id eff
+          else err (Some id) "auth clause in crate refers to non-item"
+  in
+    Hashtbl.iter auth_effect crate.node.Ast.crate_auth;
     run_passes cx "effect" path passes (log cx "%s") crate
 ;;
 
