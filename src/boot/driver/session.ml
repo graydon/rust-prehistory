@@ -16,13 +16,12 @@ type sess =
   mutable sess_log_parse: bool;
   mutable sess_log_ast: bool;
   mutable sess_log_resolve: bool;
-  mutable sess_log_alias: bool;
-  mutable sess_log_auto: bool;
   mutable sess_log_type: bool;
+  mutable sess_log_effect: bool;
   mutable sess_log_typestate: bool;
-  mutable sess_log_mode: bool;
-  mutable sess_log_mutable: bool;
-  mutable sess_log_gctype: bool;
+  mutable sess_log_dead: bool;
+  mutable sess_log_loop: bool;
+  mutable sess_log_alias: bool;
   mutable sess_log_layout: bool;
   mutable sess_log_trans: bool;
   mutable sess_log_itype: bool;

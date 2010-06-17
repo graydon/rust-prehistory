@@ -32,13 +32,12 @@ let (sess:Session.sess) =
     Session.sess_log_parse = false;
     Session.sess_log_ast = false;
     Session.sess_log_resolve = false;
-    Session.sess_log_alias = false;
-    Session.sess_log_auto = false;
     Session.sess_log_type = false;
+    Session.sess_log_effect = false;
     Session.sess_log_typestate = false;
-    Session.sess_log_mode = false;
-    Session.sess_log_mutable = false;
-    Session.sess_log_gctype = false;
+    Session.sess_log_loop = false;
+    Session.sess_log_alias = false;
+    Session.sess_log_dead = false;
     Session.sess_log_layout = false;
     Session.sess_log_itype = false;
     Session.sess_log_trans = false;
@@ -129,13 +128,12 @@ let argspecs =
     ("-lparse", Arg.Unit (fun _ -> sess.Session.sess_log_parse <- true), "log parsing");
     ("-last", Arg.Unit (fun _ -> sess.Session.sess_log_ast <- true), "log post-parse AST");
     ("-lresolve", Arg.Unit (fun _ -> sess.Session.sess_log_resolve <- true), "log resolution");
-    ("-lalias", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log alias analysis");
-    ("-lauto", Arg.Unit (fun _ -> sess.Session.sess_log_auto <- true), "log auto type-inference");
     ("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
+    ("-leffect", Arg.Unit (fun _ -> sess.Session.sess_log_effect <- true), "log effect checking");
     ("-ltypestate", Arg.Unit (fun _ -> sess.Session.sess_log_typestate <- true), "log typestate checking");
-    ("-lmode", Arg.Unit (fun _ -> sess.Session.sess_log_mode <- true), "log mode checking");
-    ("-lmutable", Arg.Unit (fun _ -> sess.Session.sess_log_mutable <- true), "log mutability checking");
-    ("-lgctype", Arg.Unit (fun _ -> sess.Session.sess_log_gctype <- true), "log gc type analysis");
+    ("-lloop", Arg.Unit (fun _ -> sess.Session.sess_log_loop <- true), "log loop-depth analysis");
+    ("-lalias", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log alias analysis");
+    ("-ldead", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log dead-code analysis");
     ("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
     ("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
     ("-litype", Arg.Unit (fun _ -> sess.Session.sess_log_itype <- true;
@@ -273,13 +271,11 @@ let main_pipeline _ =
          exit_if_failed ())
       [| Resolve.process_crate;
          Type.process_crate;
+         Effect.process_crate;
          Typestate.process_crate;
          Loop.process_crate;
          Alias.process_crate;
          Dead.process_crate;
-         Mode.process_crate;
-         Mutable.process_crate;
-         Gctype.process_crate;
          Layout.process_crate;
          Trans.process_crate |]
   in

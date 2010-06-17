@@ -206,7 +206,7 @@ BE_MLS := $(addprefix boot/be/, x86.ml ra.ml pe.ml elf.ml \
           macho.ml)
 IL_MLS := $(addprefix boot/be/, asm.ml il.ml abi.ml)
 ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml type.ml dead.ml \
-          typestate.ml mode.ml mutable.ml gctype.ml loop.ml layout.ml transutil.ml \
+          effect.ml typestate.ml loop.ml layout.ml transutil.ml \
           trans.ml dwarf.ml)
 FE_MLS := $(addprefix boot/fe/, ast.ml token.ml lexer.ml parser.ml pexp.ml item.ml cexp.ml)
 DRIVER_TOP_MLS := $(addprefix boot/driver/, $(VARIANT)/glue.ml lib.ml main.ml)

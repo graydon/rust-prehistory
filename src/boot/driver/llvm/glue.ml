@@ -16,13 +16,11 @@ let alt_pipeline sess sem_cx crate =
     [|
       Resolve.process_crate;
       Type.process_crate;
+      Effect.process_crate;
       Typestate.process_crate;
       Loop.process_crate;
       Alias.process_crate;
       Dead.process_crate;
-      Mode.process_crate;
-      Mutable.process_crate;
-      Gctype.process_crate;
       Layout.process_crate
     |];
   Llemit.trans_and_process_crate sess sem_cx crate
@@ -33,7 +31,7 @@ let alt_pipeline sess sem_cx crate =
  * fill-column: 70;
  * indent-tabs-mode: nil
  * buffer-file-coding-system: utf-8-unix
- * compile-command: "make -k -C ../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
+ * compile-command: "make -k -C ../../.. 2>&1 | sed -e 's/\\/x\\//x:\\//g'";
  * End:
  *)
 

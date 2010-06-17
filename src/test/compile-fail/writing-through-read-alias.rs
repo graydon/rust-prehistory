@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-// error-pattern: writing to read-alias
+// error-pattern: writing to non-mutable slot
 
 type point = rec(int x, int y, int z);
 

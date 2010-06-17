@@ -1,35 +1,9 @@
 open Semant;;
 open Common;;
 
-let log cx = Session.log "mutable"
-  cx.ctxt_sess.Session.sess_log_mutable
+let log cx = Session.log "effect"
+  cx.ctxt_sess.Session.sess_log_effect
   cx.ctxt_sess.Session.sess_log_out
-;;
-
-
-let mutability_analysis_visitor
-    (cx:ctxt)
-    (inner:Walk.visitor)
-    : Walk.visitor =
-
-  (* 
-   * This visitor classifies every identified slot as containing-a-mutable-type
-   * or not, on the basis of the following analysis:
-   * 
-   * - A slot is mutable if it is qualified with 'mutable'.
-   * - A type is mutable if it can contain a mutable slot (transitively). 
-   * 
-   *)
-  let visit_slot_identified_post s =
-      inner.Walk.visit_slot_identified_post s;
-    (* Pick up the auto type-resolved slot. *)
-    let slot = referent_to_slot cx s.id in
-      begin
-        if type_has_state (slot_ty slot)
-        then Hashtbl.replace cx.ctxt_mutable_slot_referent s.id ();
-      end
-  in
-    { inner with Walk.visit_slot_identified_post = visit_slot_identified_post }
 ;;
 
 
@@ -92,11 +66,10 @@ let process_crate
   let passes =
     [|
       (mutability_checking_visitor cx
-         (mutability_analysis_visitor cx
-            Walk.empty_visitor));
+         Walk.empty_visitor);
     |]
   in
-    run_passes cx "mutable" path passes (log cx "%s") crate
+    run_passes cx "effect" path passes (log cx "%s") crate
 ;;
 
 (*

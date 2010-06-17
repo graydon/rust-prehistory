@@ -6,7 +6,7 @@ open Semant;;
 open Common;;
 
 let log cx = Session.log "loop"
-  cx.ctxt_sess.Session.sess_log_mode
+  cx.ctxt_sess.Session.sess_log_loop
   cx.ctxt_sess.Session.sess_log_out
 ;;
 

@@ -110,9 +110,6 @@ type ctxt =
       ctxt_stmt_loop_depths: (node_id,int) Hashtbl.t;
       ctxt_slot_loop_depths: (node_id,int) Hashtbl.t;
 
-      (* Mutability and GC stuff. *)
-      ctxt_mutable_slot_referent: (node_id,unit) Hashtbl.t;
-
       (* Typestate-y stuff. *)
       ctxt_constrs: (constr_id,constr_key) Hashtbl.t;
       ctxt_constr_ids: (constr_key,constr_id) Hashtbl.t;
@@ -181,8 +178,6 @@ let new_ctxt sess abi crate =
     ctxt_lval_to_referent = Hashtbl.create 0;
     ctxt_required_items = crate.Ast.crate_required;
     ctxt_required_syms = crate.Ast.crate_required_syms;
-
-    ctxt_mutable_slot_referent = Hashtbl.create 0;
 
     ctxt_constrs = Hashtbl.create 0;
     ctxt_constr_ids = Hashtbl.create 0;
