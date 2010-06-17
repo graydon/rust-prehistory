@@ -481,7 +481,7 @@ and parse_bottom_pexp (ps:pstate) : pexp =
         begin
           let slot =
             match peek ps with
-                RPAREN -> bracketed LBRACKET RBRACKET (parse_slot false) ps
+                LBRACKET -> bracketed LBRACKET RBRACKET (parse_slot false) ps
               | _ -> { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
                        Ast.slot_ty = None }
           in
