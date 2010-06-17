@@ -14,15 +14,11 @@ let mutability_checking_visitor
   (* 
    * This visitor enforces the following rules:
    * 
-   * - A predicate can't apply to a slot holding a mutable type.
-   *   (note: A predicate *can* apply to a mutable slot holding an
-   *    immutable type.)
-   * 
    * - A channel type carrying a mutable type is illegal.
    * 
    * - Writing to an immutable slot is illegal.
    * 
-   * - Forming a write-alias to an immutable slot is illegal.
+   * - Forming a mutable alias to an immutable slot is illegal.
    * 
    *)
   let visit_ty_pre t =
@@ -57,6 +53,42 @@ let mutability_checking_visitor
         Walk.visit_stmt_pre = visit_stmt_pre }
 ;;
 
+let function_effect_propagation_visitor
+    ((*cx*)_:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+  (* 
+   * This visitor calculates the effect of each function according to
+   * its statements:
+   * 
+   *    - Communication lowers to 'io'
+   *    - Native calls lower to 'unsafe'
+   *    - Calling a function with effect e lowers to e.
+   *)
+  inner
+;;
+
+let binding_effect_propagation_visitor
+    ((*cx*)_:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+  (* This visitor lowers the effect of an object or binding according
+   * to its slots: holding a 'state' slot lowers any obj item, or
+   * bind-stmt LHS, to 'state'. *)
+  inner
+;;
+
+let effect_checking_visitor
+    ((*cx*)_:ctxt)
+    (inner:Walk.visitor)
+    : Walk.visitor =
+  (*
+   * This visitor checks that each type, item and obj declares
+   * effects consistent with what we calculated.
+   *)
+  inner
+;;
+
 
 let process_crate
     (cx:ctxt)
@@ -66,6 +98,12 @@ let process_crate
   let passes =
     [|
       (mutability_checking_visitor cx
+         Walk.empty_visitor);
+      (function_effect_propagation_visitor cx
+         Walk.empty_visitor);
+      (binding_effect_propagation_visitor cx
+         Walk.empty_visitor);
+      (effect_checking_visitor cx
          Walk.empty_visitor);
     |]
   in
