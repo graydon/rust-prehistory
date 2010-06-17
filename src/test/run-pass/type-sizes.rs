@@ -3,7 +3,7 @@ import size_of = std.sys.rustrt.size_of;
 
 use std;
 
-fn main() {
+unsafe fn main() {
   check (size_of[u8]() == uint(1));
   check (size_of[u32]() == uint(4));
   check (size_of[char]() == uint(4));

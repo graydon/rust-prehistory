@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-fn main() {
+io fn main() {
   let port[int] p = port();
   auto c = chan(p);
   let int y;
@@ -18,6 +18,6 @@ fn main() {
   check (y == 10);
 }
 
-fn child(chan[int] c) {
+io fn child(chan[int] c) {
   c <| 10;
 }

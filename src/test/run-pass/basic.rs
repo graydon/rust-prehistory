@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-fn a(chan[int] c) {
+io fn a(chan[int] c) {
   if (true) {
     log "task a";
     log "task a";
@@ -22,7 +22,7 @@ fn g(int x, str y) -> int {
   ret z;
 }
 
-fn main() {
+io fn main() {
     let int n = 2 + 3 * 7;
     let str s = "hello there";
     let port[int] p = port();
@@ -37,7 +37,7 @@ fn main() {
     log "children finished, root finishing";
 }
 
-fn b(chan[int] c) {
+io fn b(chan[int] c) {
   if (true) {
     log "task b";
     log "task b";

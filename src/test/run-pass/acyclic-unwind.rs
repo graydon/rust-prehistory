@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-fn f(chan[int] c)
+io fn f(chan[int] c)
 {
   type t = tup(int,int,int);
 
@@ -18,7 +18,7 @@ fn f(chan[int] c)
 }
 
 
-fn main() {
+io fn main() {
   let port[int] p = port();
   spawn f(chan(p));
   let int i;
