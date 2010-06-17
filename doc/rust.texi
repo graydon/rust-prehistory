@@ -673,6 +673,7 @@ The keywords are:
 @tab @code{i64}
 @tab @code{f64}
 @item @code{rec}
+@tab @code{tup}
 @tab @code{tag}
 @tab @code{vec}
 @tab @code{str}
@@ -1854,7 +1855,7 @@ vector of 8-bit unsigned words holding a UTF-8 codepoints.
 @node       Ref.Type.Rec
 @subsection Ref.Type.Rec
 
-The record type-constructor @code{rec} forms new heterogeneous product
+The record type-constructor @code{rec} forms a new heterogeneous product
 of slots.@footnote{The @code{rec} type-constructor is analogous to
 the @code{struct} type-constructor in the Algol/C family, the
 @emph{record} types of the ML family, or the @emph{structure} types of
@@ -1872,19 +1873,18 @@ let int px = p.x;
 @node       Ref.Type.Tup
 @subsection Ref.Type.Tup
 
-The tuple type-constructor is a parenthesised, comma-separated list of
-two or more slots. It exactly mirrors the tuple value-constructor,
-itself a comma-separated list of two or more values.
-
-Tuples are equivalent to records labeled by ascending integer-like
-names prefixed by the underscore character: @code{_0}, @code{_1},
-@code{_2}, etc. The fields of a tuple are laid out in memory
-contiguously, like a record, in order specified by the tuple type.
+The tuple type-constructor @code{tup} forms a new heterogeneous
+product of slots exactly as the @code{rec} type-constructor does, with
+the difference that tuple slots are automatically assigned implicit
+field names, given by ascending integers prefixed by the underscore
+character: @code{_0}, @code{_1}, @code{_2}, etc. The fields of a tuple
+are laid out in memory contiguously, like a record, in order specified
+by the tuple type.
 
 An example of a tuple type and its use:
 @example
-type pair = (int,str);
-let pair p = (10,"hello");
+type pair = tup(int,str);
+let pair p = tup(10,"hello");
 check (p._0 == 10);
 p._1 = "world";
 check (p._1 == "world");

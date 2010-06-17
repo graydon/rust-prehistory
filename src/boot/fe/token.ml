@@ -126,6 +126,7 @@ type token =
 
   (* Algebraic type constructors *)
   | REC
+  | TUP
   | TAG
   | VEC
   | ANY
@@ -274,6 +275,7 @@ let rec string_of_tok t =
 
     (* Algebraic type constructors *)
     | REC        -> "rec"
+    | TUP        -> "tup"
     | TAG        -> "tag"
     | VEC        -> "vec"
     | ANY        -> "any"

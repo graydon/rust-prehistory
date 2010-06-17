@@ -5,8 +5,8 @@ obj handle[T](T data) {
 }
 
 fn main() {
-  type rgb = (u8,u8,u8);
-  let handle[rgb] h = handle[rgb]((u8(1), u8(2), u8(3)));
+  type rgb = tup(u8,u8,u8);
+  let handle[rgb] h = handle[rgb](tup(u8(1), u8(2), u8(3)));
   log "constructed object";
   log h.get()._0;
   log h.get()._1;

@@ -53,7 +53,7 @@
 
 ;; rust type keywords
 (c-lang-defconst c-primitive-type-kwds
-  rust '("rec" "vec" "tag"
+  rust '("rec" "tup" "vec" "tag"
          "char" "str"
          "chan" "port"
          "task" "mod" "obj"
@@ -143,7 +143,7 @@
 
 ;; keywords followed by non-type expressions in parens
 (c-lang-defconst c-paren-nontype-kwds
-  rust '("rec" "vec" "port" "chan" "meta"))
+  rust '("rec" "tup" "vec" "port" "chan" "meta"))
 
 ;; punctuation or paren syntax classes that have syntactic meaning
 (c-lang-defconst c-other-op-syntax-tokens

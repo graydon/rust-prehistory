@@ -4,7 +4,7 @@ fn id[T](T x) -> T {
    ret x;
 }
 
-type triple = (int,int,int);
+type triple = tup(int,int,int);
 
 fn main() {
    auto x = 62;
@@ -12,8 +12,8 @@ fn main() {
    auto a = 'a';
    auto b = 'b';
 
-   let triple p = (65, 66, 67);
-   let triple q = (68, 69, 70);
+   let triple p = tup(65, 66, 67);
+   let triple q = tup(68, 69, 70);
 
    y = id[int](x);
    log y;

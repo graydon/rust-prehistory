@@ -278,18 +278,10 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
             Ast.TY_rec entries
           end
 
-    | LPAREN ->
+    | TUP ->
+        bump ps;
         let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps in
-          if Array.length slots = 0
-          then Ast.TY_nil
-          else
-            if Array.length slots = 1 && (match slots.(0).Ast.slot_mode with
-                                              Ast.MODE_interior _ -> true
-                                            | _ -> false)
-            then match slots.(0).Ast.slot_ty with
-                None -> raise (err "slot without type" ps )
-              | Some t -> t
-            else Ast.TY_tup slots
+          Ast.TY_tup slots
 
     | MACH m ->
         bump ps;
@@ -317,6 +309,19 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
                   Ast.TY_fn (fst (parse_ty_fn effect ps))
               | _ -> raise (unexpected ps)
           end
+
+    | LPAREN ->
+        begin
+          bump ps;
+          match peek ps with
+              RPAREN ->
+                bump ps;
+                Ast.TY_nil
+            | _ ->
+                let t = parse_ty ps in
+                  expect ps RPAREN;
+                  t
+        end
 
     | _ -> raise (unexpected ps)
 
@@ -459,19 +464,8 @@ and parse_bottom_pexp (ps:pstate) : pexp =
   check_rstr_start ps;
   let apos = lexpos ps in
   match peek ps with
-      LPAREN ->
-        let pexps = ctxt "paren pexps(s)" (rstr false parse_pexp_list) ps in
-        let bpos = lexpos ps in
-          if Array.length pexps = 0
-          then span ps apos bpos (PEXP_lit Ast.LIT_nil)
-          else
-            if Array.length pexps = 1
-            then
-              pexps.(0)
-            else
-              span ps apos bpos (PEXP_tup pexps)
 
-    | MUTABLE ->
+      MUTABLE ->
         bump ps;
         let inner = parse_pexp ps in
         let bpos = lexpos ps in
@@ -482,6 +476,12 @@ and parse_bottom_pexp (ps:pstate) : pexp =
         let inner = parse_pexp ps in
         let bpos = lexpos ps in
           span ps apos bpos (PEXP_exterior inner)
+
+    | TUP ->
+        bump ps;
+        let pexps = ctxt "paren pexps(s)" (rstr false parse_pexp_list) ps in
+        let bpos = lexpos ps in
+          span ps apos bpos (PEXP_tup pexps)
 
     | REC ->
           bump ps;
@@ -715,6 +715,20 @@ and parse_bottom_pexp (ps:pstate) : pexp =
         let bpos = lexpos ps in
           span ps apos bpos
             (PEXP_custom (name, toks, str))
+
+    | LPAREN ->
+        begin
+          bump ps;
+          match peek ps with
+              RPAREN ->
+                bump ps;
+                let bpos = lexpos ps in
+                  span ps apos bpos (PEXP_lit Ast.LIT_nil)
+            | _ ->
+                let pexp = parse_pexp ps in
+                  expect ps RPAREN;
+                  pexp
+        end
 
     | _ ->
         let lit = parse_lit ps in

@@ -2,10 +2,10 @@
 
 fn f(chan[int] c)
 {
-  type t = (int,int,int);
+  type t = tup(int,int,int);
 
   // Allocate an exterior.
-  let @t x = (1,2,3);
+  let @t x = tup(1,2,3);
 
   // Signal parent that we've allocated an exterior.
   c <| 1;

@@ -1,8 +1,8 @@
-iter pairs() -> (int,int) {
+iter pairs() -> tup(int,int) {
   let int i = 0;
   let int j = 0;
   while (i < 10) {
-    put (i, j);
+    put tup(i, j);
     i += 1;
     j += i;
   }
@@ -11,7 +11,7 @@ iter pairs() -> (int,int) {
 fn main() {
   let int i = 10;
   let int j = 0;
-  for each ((int,int) p in pairs()) {
+  for each (tup(int,int) p in pairs()) {
       log p._0;
       log p._1;
       check (p._0 + 10 == i);
