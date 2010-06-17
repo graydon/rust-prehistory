@@ -404,7 +404,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           bump ps;
           let (stmts, slot, ident) =
             ctxt "stmt slot" parse_slot_and_ident_and_init ps in
-          let slot = Pexp.apply_mutability ps slot Ast.MUTABLE in
+          let slot = Pexp.apply_mutability slot Ast.MUTABLE in
           let bpos = lexpos ps in
           let decl = Ast.DECL_slot (Ast.KEY_ident ident,
                                     (span ps apos bpos slot))
@@ -415,7 +415,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           bump ps;
           let (stmts, slot, ident) =
             ctxt "stmt slot" parse_auto_slot_and_init ps in
-          let slot = Pexp.apply_mutability ps slot Ast.MUTABLE in
+          let slot = Pexp.apply_mutability slot Ast.MUTABLE in
           let bpos = lexpos ps in
           let decl = Ast.DECL_slot (Ast.KEY_ident ident,
                                     (span ps apos bpos slot))

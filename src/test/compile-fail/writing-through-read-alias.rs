@@ -4,7 +4,7 @@
 
 type point = rec(int x, int y, int z);
 
-fn f(~point p) {
+fn f(&point p) {
   p.x = 13;
 }
 

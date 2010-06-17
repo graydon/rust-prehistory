@@ -2457,8 +2457,7 @@ let trans_visitor
                 (Some dst)
                 [| alias ty_params; src; clone_task |]
 
-        | Ast.MODE_read_alias
-        | Ast.MODE_write_alias -> bug () "cloning into alias slot"
+        | Ast.MODE_alias _ -> bug () "cloning into alias slot"
         | Ast.MODE_interior _ ->
             clone_ty ty_params clone_task ty dst src curr_iso
 
@@ -2602,8 +2601,7 @@ let trans_visitor
           then init_exterior_slot cell slot;
           get_element_ptr (deref cell) Abi.exterior_rc_slot_field_body
 
-      | Ast.MODE_read_alias
-      | Ast.MODE_write_alias ->
+      | Ast.MODE_alias _  ->
           if initializing
           then cell
           else deref cell
@@ -2833,8 +2831,7 @@ let trans_visitor
       : unit =
     let is_alias_cell =
       match dst_slot.Ast.slot_mode with
-          Ast.MODE_read_alias
-        | Ast.MODE_write_alias -> true
+          Ast.MODE_alias _ -> true
         | _ -> false
     in
       match atom with
@@ -2866,8 +2863,7 @@ let trans_visitor
     assert (slot_ty src_slot = slot_ty dst_slot);
     let is_alias_cell =
       match dst_slot.Ast.slot_mode with
-          Ast.MODE_read_alias
-        | Ast.MODE_write_alias -> true
+          Ast.MODE_alias _ -> true
         | _ -> false
     in
       match clone with

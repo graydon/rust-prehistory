@@ -377,23 +377,20 @@ that hold} before and after statements.
 
 Every variable or field in Rust is a combination of a type and a mode;
 this combination is called a @emph{slot}. There are 4 kinds of slot
-mode, denoting 4 ways of referring to a value:
+mode, denoting 3 ways of referring to a value:
 
 @itemize
 @item ``interior'' (slot contains value)
 @item ``exterior'' (slot points to to managed heap allocation)
-@item ``read-alias'' (slot points directly to provably-live address)
-@item ``write-alias'' (as with read-alias, but permitting writes)
+@item ``alias'' (slot points directly to provably-live address)
 @end itemize
 
 Interior slots declared as variables in a function are allocated very
 quickly on the stack, as part of a local activation frame, as in C or
-C++. Read-alias slots permit efficient by-reference parameter passing
+C++. Alias slots permit efficient by-reference parameter passing
 without adjusting heap reference counts or interacting with garbage
 collection, as alias lifetimes are statically guaranteed to outlive
-callee lifetimes. Write-alias slots additionally permit controlled
-mutation of a slot by a callee, effectively providing ``out
-parameters''.
+callee lifetimes.
 
 Copying data between slots of different modes may cause either a
 simple address assignment or reference-count adjustment, or may cause
@@ -1149,7 +1146,7 @@ references to heap allocations are dropped.
 @c * Ref.Mem.Slot::                Memory containment and reference model.
 
 A @dfn{slot} is a component of an allocation. A slot either holds a
-value or the address of another allocation. Every slot has one of four
+value or the address of another allocation. Every slot has one of three
 possible @emph{modes}.
 
 The possible @dfn{modes} of a slot are:
@@ -1180,44 +1177,32 @@ pt2.z = 4;
 @end example
 
 @sp 1
-@item @dfn{Write-alias mode}
+@item @dfn{Alias mode}
 
 The slot holds the address of a value. The referenced value may reside
 within a stack allocation @emph{or} a heap allocation.
 
-Write-alias slots can only be declared as members of a function
-signature, bound to the lifetime of a stack frame. Write-alias
+Alias slots can @emph{only} be declared as members of a function
+or iterator signature, bound to the lifetime of a stack frame. Alias
 slots cannot be declared as members of general data types.
 
-Write-alias slots are indicated by the @emph{caret} sigil @code{^}.
+Alias slots are indicated by the @emph{ampersand} sigil @code{&}.
 
-For example, the following function accepts a single write-alias
-parameter:
-@example
-fn incr(^int i) -> () @{
-    i = i + 1;
-@}
-@end example
-
-@sp 1
-@item @dfn{Read-alias mode}
-
-The meaning of the slot is the same as if it were in write-alias mode,
-but the value can only be read from the slot, not written to.
-
-Like write-aliases, read-alias slots can only be declared as members
-of a function signature, and cannot be declared as members of general
-data types.
-
-Read-alias slots are indicated by the @emph{tilde} sigil @code{~}.
-
-For example, the following function accepts a single read-alias
+The following example function accepts a single read-only alias
 parameter:
 @example
 type point3d = rec(int x, int y, int z);
 
-fn extract_z(~point3d p) -> int @{
+fn extract_z(&point3d p) -> int @{
     ret p.z;
+@}
+@end example
+
+The following example function accepts a single mutable alias
+parameter:
+@example
+fn incr(mutable &int i) -> () @{
+    i = i + 1;
 @}
 @end example
 
@@ -2539,7 +2524,7 @@ arguments are copied form the spawning task to the spawned task before the spawn
 begins execution.
 
 Only arguments of interior or exterior mode are permitted in the
-function called by a spawn statement, not arguments with alias modes.
+function called by a spawn statement, not arguments with alias mode.
 
 The result of a @code{spawn} statement is a @code{task} value.
 
@@ -2683,12 +2668,12 @@ check (add(4,5) == add5(4));
 @end example
 
 A @code{bind} statement generally stores a copy of the bound arguments
-in the hidden exterior tuple. For bound interior slots and both kinds
-of alias slot in the bound function signature, an interior slot is
+in the hidden exterior tuple. For bound interior slots and alias slots
+in the bound function signature, an interior slot is allocated in the
+hidden tuple and populated with a copy of the bound value. For bound
+exterior slots in the bound function signature, an exterior slot is
 allocated in the hidden tuple and populated with a copy of the bound
-value. For bound exterior slots in the bound function signature, an
-exterior slot is allocated in the hidden tuple and populated with a
-copy of the bound value, an exterior (pointer) value.
+value, an exterior (pointer) value.
 
 The @code{bind} statement is a lightweight mechanism for simulating
 the more elaborate construct of @emph{lexical closures} that exist in
@@ -2822,11 +2807,11 @@ the @code{note} to the internal logging diagnostic buffer.
 
 An example of a @code{note} statement:
 @example
-fn read_file_lines(~str path) -> vec[str] @{
+fn read_file_lines(&str path) -> vec[str] @{
     note path;
     vec[str] r;
     file f = open_read(path);
-    for* (str ~s = lines(f)) @{
+    for* (str &s = lines(f)) @{
         vec.append(r,s);
     @}
     ret r;
@@ -2922,19 +2907,19 @@ Example of a 4 for loops, all identical:
 @example
 let vec[foo] v = vec(a, b, c);
 
-for (~foo e in v.(0, _vec.len(v))) @{
+for (&foo e in v.(0, _vec.len(v))) @{
     bar(e);
 @}
 
-for (~foo e in v.(0,)) @{
+for (&foo e in v.(0,)) @{
     bar(e);
 @}
 
-for (~foo e in v.(,)) @{
+for (&foo e in v.(,)) @{
     bar(e);
 @}
 
-for (~foo e in v) @{
+for (&foo e in v) @{
     bar(e);
 @}
 @end example
@@ -2953,7 +2938,7 @@ Example of a foreach loop:
 @example
 let str txt;
 let vec[str] lines;
-for each (~str s = _str.split(txt, "\n")) @{
+for each (&str s = _str.split(txt, "\n")) @{
     vec.push(lines, s);
 @}
 @end example
@@ -3142,7 +3127,7 @@ statements, propagating conditions forward and statically comparing
 implied states and their specifications. @xref{Ref.Stmt.Stat}.
 
 @example
-fn even(~int x) -> bool @{
+fn even(&int x) -> bool @{
     ret x & 1 == 0;
 @}
 

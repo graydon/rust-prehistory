@@ -843,7 +843,7 @@ let mode_is_mutable (m:Ast.mode) : bool =
   match m with
       Ast.MODE_exterior Ast.MUTABLE
     | Ast.MODE_interior Ast.MUTABLE
-    | Ast.MODE_write_alias -> true
+    | Ast.MODE_alias Ast.MUTABLE -> true
     | _ -> false
 ;;
 
@@ -1572,8 +1572,7 @@ and slot_referent_type (abi:Abi.abi) (sl:Ast.slot) : Il.referent_ty =
     match sl.Ast.slot_mode with
         Ast.MODE_exterior _ -> sp (Il.StructTy [| word; rty |])
       | Ast.MODE_interior _ -> rty
-      | Ast.MODE_read_alias -> sp rty
-      | Ast.MODE_write_alias -> sp rty
+      | Ast.MODE_alias _ -> sp rty
 ;;
 
 let task_rty (abi:Abi.abi) : Il.referent_ty =
@@ -1688,12 +1687,12 @@ let word_slot (abi:Abi.abi) : Ast.slot =
 ;;
 
 let read_alias_slot (ty:Ast.ty) : Ast.slot =
-  { Ast.slot_mode = Ast.MODE_read_alias;
+  { Ast.slot_mode = Ast.MODE_alias Ast.IMMUTABLE;
     Ast.slot_ty = Some ty }
 ;;
 
 let word_write_alias_slot (abi:Abi.abi) : Ast.slot =
-  { Ast.slot_mode = Ast.MODE_write_alias;
+  { Ast.slot_mode = Ast.MODE_alias Ast.MUTABLE;
     Ast.slot_ty = Some (Ast.TY_mach abi.Abi.abi_word_ty) }
 ;;
 
@@ -1755,8 +1754,9 @@ let ty_str (ty:Ast.ty) : string =
       | Ast.MODE_interior Ast.IMMUTABLE -> ty
       | Ast.MODE_exterior Ast.MUTABLE -> "M" ^ ty
       | Ast.MODE_interior Ast.MUTABLE -> "m" ^ ty
-      | Ast.MODE_read_alias -> "r" ^ ty
-      | Ast.MODE_write_alias -> "w" ^ ty
+      | Ast.MODE_alias Ast.IMMUTABLE -> "r" ^ ty
+      | Ast.MODE_alias Ast.MUTABLE -> "w" ^ ty
+
   in
   let num n = (string_of_int n) ^ "$" in
   let len a = num (Array.length a) in

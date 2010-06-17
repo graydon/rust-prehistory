@@ -16,7 +16,8 @@ let mode_check_visitor
         (fun slot_id ->
            let slot = referent_to_slot cx slot_id in
              match slot.Ast.slot_mode with
-                 Ast.MODE_read_alias -> err (Some id) "writing to read-alias"
+                 Ast.MODE_alias Ast.IMMUTABLE ->
+                   err (Some id) "writing to read-alias"
                | _ -> ())
         slot_ids
   in

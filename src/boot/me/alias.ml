@@ -44,8 +44,7 @@ let alias_analysis_visitor
               begin
                 fun i slot ->
                   match slot.Ast.slot_mode with
-                      Ast.MODE_read_alias
-                    | Ast.MODE_write_alias ->
+                      Ast.MODE_alias _ ->
                         alias_atom args.(i)
                     | _ -> ()
               end

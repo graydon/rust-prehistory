@@ -1509,41 +1509,41 @@ let dwarf_visitor
           Hashtbl.add emitted_slots slot res;
           res
       in
-    let alias_slot mut =
-      let fix = new_fixup "alias DIE" in
-        emit_die (DEF (fix, SEQ [|
-                         uleb (get_abbrev_code abbrev_alias_slot);
-                         (* DW_AT_type: DW_FORM_ref_addr *)
-                         (ref_type_die (slot_ty slot));
-                         (* DW_AT_mutable: DW_FORM_flag *)
-                         BYTE (if mut then 1 else 0)
-                       |]));
-        ref_addr_for_fix fix
-    in
-      match slot.Ast.slot_mode with
-          Ast.MODE_exterior mut ->
-            let fix = new_fixup "exterior DIE" in
-              emit_die (DEF (fix, SEQ [|
-                               uleb (get_abbrev_code abbrev_exterior_slot);
-                               (* DW_AT_type: DW_FORM_ref_addr *)
-                               (ref_type_die (slot_ty slot));
-                               (* DW_AT_mutable: DW_FORM_flag *)
-                               BYTE (if mut = Ast.MUTABLE then 1 else 0);
-                               (* DW_AT_data_location: DW_FORM_block1 *)
-                               (* This is a DWARF expression for moving
-                                  from the address of an exterior
-                                  allocation to the address of its
-                                  body. *)
-                               dw_form_block1 [| DW_OP_push_object_address;
-                                                 DW_OP_lit (word_sz_int
-                                                            * Abi.exterior_rc_slot_field_body);
-                                                 DW_OP_plus;
-                                                 DW_OP_deref |]
-                             |]));
-              ref_addr_for_fix fix
-      | Ast.MODE_interior _ -> ref_type_die (slot_ty slot)
-      | Ast.MODE_read_alias -> alias_slot false
-      | Ast.MODE_write_alias -> alias_slot true
+
+        match slot.Ast.slot_mode with
+            Ast.MODE_exterior mut ->
+              let fix = new_fixup "exterior DIE" in
+                emit_die (DEF (fix, SEQ [|
+                                 uleb (get_abbrev_code abbrev_exterior_slot);
+                                 (* DW_AT_type: DW_FORM_ref_addr *)
+                                 (ref_type_die (slot_ty slot));
+                                 (* DW_AT_mutable: DW_FORM_flag *)
+                                 BYTE (if mut = Ast.MUTABLE then 1 else 0);
+                                 (* DW_AT_data_location: DW_FORM_block1 *)
+                                 (* This is a DWARF expression for moving
+                                    from the address of an exterior
+                                    allocation to the address of its
+                                    body. *)
+                                 dw_form_block1 [| DW_OP_push_object_address;
+                                                   DW_OP_lit (word_sz_int
+                                                              * Abi.exterior_rc_slot_field_body);
+                                                   DW_OP_plus;
+                                                   DW_OP_deref |]
+                               |]));
+                ref_addr_for_fix fix
+
+          | Ast.MODE_interior _ -> ref_type_die (slot_ty slot)
+
+          | Ast.MODE_alias mut ->
+              let fix = new_fixup "alias DIE" in
+                emit_die (DEF (fix, SEQ [|
+                                 uleb (get_abbrev_code abbrev_alias_slot);
+                                 (* DW_AT_type: DW_FORM_ref_addr *)
+                                 (ref_type_die (slot_ty slot));
+                                 (* DW_AT_mutable: DW_FORM_flag *)
+                                 BYTE (if mut = Ast.MUTABLE then 1 else 0)
+                               |]));
+                ref_addr_for_fix fix
 
 
   and size_block4 (sz:size) (add_to_base:bool) : frag =
@@ -2817,8 +2817,7 @@ let rec extract_mod_items
             (* Exterior slots have a 'data_location' attr. *)
             match (atab_search die.die_attrs DW_AT_data_location, mut) with
                 (Some _, mut) -> Ast.MODE_exterior mut
-              | (None, Ast.MUTABLE) -> Ast.MODE_write_alias
-              | (None, Ast.IMMUTABLE) -> Ast.MODE_read_alias
+              | (None, mut) -> Ast.MODE_alias mut
           in
             { Ast.slot_mode = mode; Ast.slot_ty = Some ty }
       | _ ->

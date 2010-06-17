@@ -269,7 +269,7 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
         let parse_rec_entry ps =
           let mut = parse_mutability ps in
           let (slot, ident) = parse_slot_and_ident false ps in
-            (ident, apply_mutability ps slot mut)
+            (ident, apply_mutability slot mut)
         in
         let entries = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_rec_entry ps in
         let labels = Array.map (fun (l, _) -> l) entries in
@@ -335,15 +335,12 @@ and parse_mutability (ps:pstate) : Ast.mutability =
   then Ast.MUTABLE
   else Ast.IMMUTABLE
 
-and apply_mutability (ps:pstate) (slot:Ast.slot) (mut:Ast.mutability) : Ast.slot =
+and apply_mutability (slot:Ast.slot) (mut:Ast.mutability) : Ast.slot =
   let mode =
-    match (slot.Ast.slot_mode, mut) with
-        (Ast.MODE_exterior _, mut) -> Ast.MODE_exterior mut
-      | (Ast.MODE_interior _, mut) -> Ast.MODE_interior mut
-      | (Ast.MODE_read_alias, Ast.MUTABLE)
-      | (Ast.MODE_write_alias, Ast.MUTABLE) ->
-          raise (err "mutable alias slot" ps)
-      | (m, _) -> m
+    match slot.Ast.slot_mode with
+        (Ast.MODE_exterior _) -> Ast.MODE_exterior mut
+      | (Ast.MODE_interior _) -> Ast.MODE_interior mut
+      | (Ast.MODE_alias _) -> Ast.MODE_alias mut
   in
     { slot with Ast.slot_mode = mode }
 
@@ -356,20 +353,10 @@ and parse_slot (aliases_ok:bool) (ps:pstate) : Ast.slot =
           { Ast.slot_mode = Ast.MODE_exterior mut;
             Ast.slot_ty = Some ty }
 
-    | (CARET, true) ->
+    | (AND, true) ->
         bump ps;
-        if mut = Ast.MUTABLE
-        then raise (err "mutable qualifier on write-alias" ps);
         let ty = parse_ty ps in
-          { Ast.slot_mode = Ast.MODE_write_alias;
-            Ast.slot_ty = Some ty }
-
-    | (TILDE, true) ->
-        bump ps;
-        if mut = Ast.MUTABLE
-        then raise (err "mutable qualifier on read-alias" ps);
-        let ty = parse_ty ps in
-          { Ast.slot_mode = Ast.MODE_read_alias;
+          { Ast.slot_mode = Ast.MODE_alias mut;
             Ast.slot_ty = Some ty }
 
     | _ ->

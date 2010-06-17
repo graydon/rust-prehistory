@@ -102,8 +102,7 @@ and ty =
 and mode =
     MODE_exterior of mutability
   | MODE_interior of mutability
-  | MODE_read_alias
-  | MODE_write_alias
+  | MODE_alias of mutability
 
 and slot = { slot_mode: mode;
              slot_ty: ty option; }
@@ -521,8 +520,7 @@ and fmt_mode (ff:Format.formatter) (m:mode) : unit =
   match m with
       MODE_exterior m -> (fmt_mutable ff m; fmt ff "@@")
     | MODE_interior m -> fmt_mutable ff m
-    | MODE_read_alias -> fmt ff "~"
-    | MODE_write_alias -> fmt ff "^"
+    | MODE_alias m -> (fmt_mutable ff m; fmt ff "&")
 
 and fmt_slot (ff:Format.formatter) (s:slot) : unit =
   match s.slot_ty with

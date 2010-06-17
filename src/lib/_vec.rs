@@ -11,7 +11,7 @@ fn alloc[T](int n_elts) -> vec[T] {
   ret rustrt.vec_alloc[T](n_elts);
 }
 
-fn init[T](~T t, int n_elts) -> vec[T] {
+fn init[T](&T t, int n_elts) -> vec[T] {
   let vec[T] v = alloc[T](n_elts);
   let int i = n_elts;
   while (i > 0) {

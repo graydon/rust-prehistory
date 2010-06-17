@@ -273,8 +273,7 @@ let trans_crate
     let base_llty = trans_ty ty in
       match slot.Ast.slot_mode with
           Ast.MODE_exterior _
-        | Ast.MODE_read_alias
-        | Ast.MODE_write_alias ->
+        | Ast.MODE_alias _ ->
             Llvm.pointer_type base_llty
         | Ast.MODE_interior _ -> base_llty
   in
