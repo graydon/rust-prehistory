@@ -918,7 +918,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
         | Ast.STMT_init_rec (lval, fields, Some base) ->
             let dct = Hashtbl.create 10 in
             let tvrec = ref (TYSPEC_record dct) in
-            let add_field (ident, _, atom) =
+            let add_field (ident, _, _, atom) =
               let tv = ref TYSPEC_all in
                 unify_atom atom tv;
                 Hashtbl.add dct ident tv
@@ -931,7 +931,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
         | Ast.STMT_init_rec (lval, fields, None) ->
             let dct = Hashtbl.create 10 in
-            let add_field (ident, _, atom) =
+            let add_field (ident, _, _, atom) =
               let tv = ref TYSPEC_all in
                 unify_atom atom tv;
                 Hashtbl.add dct ident tv
@@ -940,7 +940,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               unify_lval lval (ref (TYSPEC_record dct))
 
         | Ast.STMT_init_tup (lval, members) ->
-            let member_to_tv (_, atom) =
+            let member_to_tv (_, _, atom) =
               let tv = ref TYSPEC_all in
                 unify_atom atom tv;
                 tv

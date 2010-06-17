@@ -1282,6 +1282,7 @@ let (abbrev_rust_type_param:abbrev) =
      (DW_AT_rust_type_code, DW_FORM_data1);
      (DW_AT_rust_type_param_index, DW_FORM_data4);
      (DW_AT_mutable, DW_FORM_flag);
+     (DW_AT_pure, DW_FORM_flag);
    |])
 ;;
 
@@ -1292,6 +1293,7 @@ let (abbrev_rust_type_param_decl:abbrev) =
      (DW_AT_name, DW_FORM_string);
      (DW_AT_rust_type_param_index, DW_FORM_data4);
      (DW_AT_mutable, DW_FORM_flag);
+     (DW_AT_pure, DW_FORM_flag);
    |])
 ;;
 
@@ -1344,8 +1346,8 @@ let (abbrev_subroutine_type:abbrev) =
      [|
        (* FIXME: model effects properly. *)
        (DW_AT_type, DW_FORM_ref_addr); (* NB: output type. *)
-       (DW_AT_pure, DW_FORM_flag);
        (DW_AT_mutable, DW_FORM_flag);
+       (DW_AT_pure, DW_FORM_flag);
        (DW_AT_rust_iterator, DW_FORM_flag);
      |])
 ;;
@@ -1364,8 +1366,8 @@ let (abbrev_obj_subroutine_type:abbrev) =
        (* FIXME: model effects properly. *)
        (DW_AT_name, DW_FORM_string);
        (DW_AT_type, DW_FORM_ref_addr); (* NB: output type. *)
-       (DW_AT_pure, DW_FORM_flag);
        (DW_AT_mutable, DW_FORM_flag);
+       (DW_AT_pure, DW_FORM_flag);
        (DW_AT_rust_iterator, DW_FORM_flag);
      |])
 ;;
@@ -1373,8 +1375,8 @@ let (abbrev_obj_subroutine_type:abbrev) =
 let (abbrev_obj_type:abbrev) =
     (DW_TAG_interface_type, DW_CHILDREN_yes,
      [|
-       (DW_AT_pure, DW_FORM_flag);
        (DW_AT_mutable, DW_FORM_flag);
+       (DW_AT_pure, DW_FORM_flag);
      |])
 ;;
 
@@ -1478,18 +1480,34 @@ let dwarf_visitor
           SUB ((M_POS fix), M_POS cu_info_section_fixup))
   in
 
+  let encode_effect eff =
+    (* Note: weird encoding: mutable+pure = unsafe. *)
+    let mut_byte, pure_byte =
+      match eff with
+          Ast.UNSAFE -> (1,1)
+        | Ast.STATE -> (1,0)
+        | Ast.IO -> (0,1)
+        | Ast.PURE -> (0,0)
+    in
+      SEQ [|
+        (* DW_AT_mutable: DW_FORM_flag *)
+        BYTE mut_byte;
+        (* DW_AT_pure: DW_FORM_flag *)
+        BYTE pure_byte;
+      |]
+  in
+
   (* Type-param DIEs. *)
 
-  let type_param_die (p:(ty_param_idx * Ast.mutability)) =
-    let (idx, mut) = p in
+  let type_param_die (p:(ty_param_idx * Ast.effect)) =
+    let (idx, eff) = p in
       SEQ [|
         uleb (get_abbrev_code abbrev_rust_type_param);
         (* DW_AT_rust_type_code: DW_FORM_data1 *)
         BYTE (dw_rust_type_to_int DW_RUST_type_param);
         (* DW_AT_rust_type_param_index: DW_FORM_data4 *)
         WORD (word_ty_mach, IMM (Int64.of_int idx));
-        (* DW_AT_mutable, DW_FORM_flag *)
-        BYTE (if mut = Ast.MUTABLE then 1 else 0)
+        encode_effect eff;
       |]
   in
 
@@ -1511,14 +1529,14 @@ let dwarf_visitor
       in
 
         match slot.Ast.slot_mode with
-            Ast.MODE_exterior mut ->
+            Ast.MODE_exterior ->
               let fix = new_fixup "exterior DIE" in
                 emit_die (DEF (fix, SEQ [|
                                  uleb (get_abbrev_code abbrev_exterior_slot);
                                  (* DW_AT_type: DW_FORM_ref_addr *)
                                  (ref_type_die (slot_ty slot));
                                  (* DW_AT_mutable: DW_FORM_flag *)
-                                 BYTE (if mut = Ast.MUTABLE then 1 else 0);
+                                 BYTE (if slot.Ast.slot_mutable then 1 else 0);
                                  (* DW_AT_data_location: DW_FORM_block1 *)
                                  (* This is a DWARF expression for moving
                                     from the address of an exterior
@@ -1532,16 +1550,17 @@ let dwarf_visitor
                                |]));
                 ref_addr_for_fix fix
 
-          | Ast.MODE_interior _ -> ref_type_die (slot_ty slot)
+          (* FIXME: encode mutable-ness of interiors. *)
+          | Ast.MODE_interior -> ref_type_die (slot_ty slot)
 
-          | Ast.MODE_alias mut ->
+          | Ast.MODE_alias ->
               let fix = new_fixup "alias DIE" in
                 emit_die (DEF (fix, SEQ [|
                                  uleb (get_abbrev_code abbrev_alias_slot);
                                  (* DW_AT_type: DW_FORM_ref_addr *)
                                  (ref_type_die (slot_ty slot));
                                  (* DW_AT_mutable: DW_FORM_flag *)
-                                 BYTE (if mut = Ast.MUTABLE then 1 else 0)
+                                 BYTE (if slot.Ast.slot_mutable then 1 else 0)
                                |]));
                 ref_addr_for_fix fix
 
@@ -1678,7 +1697,7 @@ let dwarf_visitor
                             (* DW_AT_type: DW_FORM_ref_addr *)
                             (ref_slot_die slot);
                             (* DW_AT_mutable: DW_FORM_flag *)
-                            BYTE (if slot_is_mutable slot then 1 else 0);
+                            BYTE (if slot.Ast.slot_mutable then 1 else 0);
                             (* DW_AT_data_member_location: DW_FORM_block4 *)
                             size_block4 (Il.get_element_offset word_bits rtys i) true;
                             (* DW_AT_byte_size: DW_FORM_block4 *)
@@ -1758,7 +1777,7 @@ let dwarf_visitor
           ref_addr_for_fix fix
       in
 
-      let rust_type_param (p:(ty_param_idx * Ast.mutability)) =
+      let rust_type_param (p:(ty_param_idx * Ast.effect)) =
         let fix = new_fixup "rust-type-param DIE" in
         let die = DEF (fix, type_param_die p) in
           emit_die die;
@@ -1803,12 +1822,7 @@ let dwarf_visitor
                  uleb (get_abbrev_code abbrev_subroutine_type);
                  (* DW_AT_type: DW_FORM_ref_addr *)
                  (ref_slot_die tsig.Ast.sig_output_slot);
-                 (* DW_AT_pure: DW_FORM_flag *)
-                 BYTE (if taux.Ast.fn_effect = Ast.PURE then 1 else 0);
-                 (* DW_AT_mutable: DW_FORM_flag *)
-                 BYTE (match taux.Ast.fn_effect with
-                           Ast.STATE | Ast.UNSAFE -> 1
-                         | _ -> 0);
+                 encode_effect taux.Ast.fn_effect;
                  (* DW_AT_rust_iterator: DW_FORM_flag *)
                  BYTE (if taux.Ast.fn_is_iter then 1 else 0)
                |])
@@ -1829,12 +1843,7 @@ let dwarf_visitor
                  ZSTRING ident;
                  (* DW_AT_type: DW_FORM_ref_addr *)
                  (ref_slot_die tsig.Ast.sig_output_slot);
-                 (* DW_AT_pure: DW_FORM_flag *)
-                 BYTE (if taux.Ast.fn_effect = Ast.PURE then 1 else 0);
-                 (* DW_AT_mutable: DW_FORM_flag *)
-                 BYTE (match taux.Ast.fn_effect with
-                           Ast.STATE | Ast.UNSAFE -> 1
-                         | _ -> 0);
+                 encode_effect taux.Ast.fn_effect;
                  (* DW_AT_rust_iterator: DW_FORM_flag *)
                  BYTE (if taux.Ast.fn_is_iter then 1 else 0)
                |])
@@ -1850,12 +1859,7 @@ let dwarf_visitor
         let die =
           DEF (fix, SEQ [|
                  uleb (get_abbrev_code abbrev_obj_type);
-                 (* DW_AT_pure: DW_FORM_flag *)
-                 BYTE (if eff = Ast.PURE then 1 else 0);
-                 (* DW_AT_mutable: DW_FORM_flag *)
-                 BYTE (match eff with
-                           Ast.STATE | Ast.UNSAFE -> 1
-                         | _ -> 0);
+                 encode_effect eff;
                |])
         in
           emit_die die;
@@ -2085,8 +2089,8 @@ let dwarf_visitor
       curr_cu_line := []
   in
 
-  let type_param_decl_die (p:(Ast.ident * (ty_param_idx * Ast.mutability))) =
-    let (ident, (idx, mut)) = p in
+  let type_param_decl_die (p:(Ast.ident * (ty_param_idx * Ast.effect))) =
+    let (ident, (idx, eff)) = p in
       SEQ [|
         uleb (get_abbrev_code abbrev_rust_type_param_decl);
         (* DW_AT_rust_type_code: DW_FORM_data1 *)
@@ -2095,8 +2099,7 @@ let dwarf_visitor
         ZSTRING (Filename.basename ident);
         (* DW_AT_rust_type_param_index: DW_FORM_data4 *)
         WORD (word_ty_mach, IMM (Int64.of_int idx));
-        (* DW_AT_mutable, DW_FORM_flag *)
-        BYTE (if mut = Ast.MUTABLE then 1 else 0)
+        encode_effect eff;
       |]
   in
 
@@ -2659,26 +2662,21 @@ let rec extract_mod_items
       | _ -> bug () "unexpected non-flag form for %s" (dw_at_to_string attr)
   in
 
-  let get_mutability die =
-    if get_flag die DW_AT_mutable
-    then Ast.MUTABLE
-    else Ast.IMMUTABLE
-  in
-
   let get_effect die =
-    match (get_mutability die, get_flag die DW_AT_pure) with
-        (Ast.MUTABLE, true) -> bug () "mutable + pure combination in dwarf"
-      | (Ast.MUTABLE, false) -> Ast.STATE
-      | (Ast.IMMUTABLE, false) -> Ast.IO
-      | (Ast.IMMUTABLE, true) -> Ast.PURE
+    match (get_flag die DW_AT_mutable, get_flag die DW_AT_pure) with
+        (* Note: weird encoding: mutable+pure = unsafe. *)
+        (true, true) -> Ast.UNSAFE
+      | (true, false) -> Ast.STATE
+      | (false, false) -> Ast.IO
+      | (false, true) -> Ast.PURE
   in
 
   let get_name die = get_str die DW_AT_name in
 
   let get_type_param die =
     let idx = get_num die DW_AT_rust_type_param_index in
-    let mut = get_mutability die in
-      (idx, mut)
+    let e = get_effect die in
+      (idx, e)
   in
 
   let get_native_id die =
@@ -2812,18 +2810,21 @@ let rec extract_mod_items
     match die.die_tag with
         DW_TAG_reference_type ->
           let ty = get_referenced_ty die in
-          let mut = get_mutability die in
+          let mut = get_flag die DW_AT_mutable in
           let mode =
             (* Exterior slots have a 'data_location' attr. *)
-            match (atab_search die.die_attrs DW_AT_data_location, mut) with
-                (Some _, mut) -> Ast.MODE_exterior mut
-              | (None, mut) -> Ast.MODE_alias mut
+            match atab_search die.die_attrs DW_AT_data_location with
+                Some _ -> Ast.MODE_exterior
+              | None -> Ast.MODE_alias
           in
-            { Ast.slot_mode = mode; Ast.slot_ty = Some ty }
+            { Ast.slot_mode = mode;
+              Ast.slot_mutable = mut;
+              Ast.slot_ty = Some ty }
       | _ ->
           let ty = get_ty die in
             (* FIXME: encode mutability of interior slots properly. *)
-            { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
+            { Ast.slot_mode = Ast.MODE_interior;
+              Ast.slot_mutable = false;
               Ast.slot_ty = Some ty }
 
   and get_referenced_ty die =

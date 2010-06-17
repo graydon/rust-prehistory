@@ -78,7 +78,7 @@ let slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
       | _ ->
           match slot.Ast.slot_mode with
               Ast.MODE_exterior _ when type_is_structured ty ->
-                if type_is_mutable ty
+                if type_has_state ty
                 then MEM_gc
                 else MEM_rc_struct
             | Ast.MODE_exterior _ ->

@@ -25,7 +25,7 @@ let mutability_analysis_visitor
     (* Pick up the auto type-resolved slot. *)
     let slot = referent_to_slot cx s.id in
       begin
-        if type_is_mutable (slot_ty slot)
+        if type_has_state (slot_ty slot)
         then Hashtbl.replace cx.ctxt_mutable_slot_referent s.id ();
       end
   in
@@ -53,14 +53,14 @@ let mutability_checking_visitor
    *)
   let visit_ty_pre t =
     match t with
-        Ast.TY_chan t' when type_is_mutable t' ->
+        Ast.TY_chan t' when type_has_state t' ->
           err None "channel of mutable type: %a " Ast.sprintf_ty t'
       | _ -> ()
   in
 
   let check_write id dst =
     let dst_slot = lval_slot cx dst in
-      if ((slot_is_mutable dst_slot) or
+      if (dst_slot.Ast.slot_mutable or
             (Hashtbl.mem cx.ctxt_copy_stmt_is_init id))
       then ()
       else err (Some id) "writing to non-mutable slot"

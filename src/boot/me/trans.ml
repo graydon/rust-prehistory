@@ -2264,7 +2264,7 @@ let trans_visitor
             [| (Il.Cell clone_task); (Il.Cell src) |]
       | Ast.TY_task
       | Ast.TY_port _
-      | _ when type_is_mutable ty
+      | _ when type_has_state ty
           -> bug () "cloning mutable type"
       | _ when i64_le (ty_sz abi ty) word_sz
           -> mov dst (Il.Cell src)
@@ -2797,13 +2797,13 @@ let trans_visitor
       (dst:Il.cell)
       (dst_slots:Ast.slot array)
       (trec:Ast.ty_rec)
-      (atab:(Ast.ident * Ast.mode * Ast.atom) array)
+      (atab:(Ast.ident * Ast.mode * bool * Ast.atom) array)
       (base:Ast.lval)
       : unit =
     Array.iteri
       begin
         fun i (fml_ident, _) ->
-          let fml_entry _ (act_ident, _, atom) =
+          let fml_entry _ (act_ident, _, _, atom) =
             if act_ident = fml_ident then Some atom else None
           in
           let slot = dst_slots.(i) in
@@ -3825,7 +3825,7 @@ let trans_visitor
             begin
               match base with
                   None ->
-                    let atoms = Array.map (fun (_, _, atom) -> atom) atab in
+                    let atoms = Array.map (fun (_, _, _, atom) -> atom) atab in
                       trans_init_structural_from_atoms dst_cell dst_slots atoms
                 | Some base_lval ->
                     trans_init_rec_update dst_cell dst_slots trec atab base_lval
@@ -3838,7 +3838,7 @@ let trans_visitor
                 Ast.TY_tup ttup -> ttup
               | _ -> bugi cx stmt.id "non-tup destination type in stmt_init_tup"
           in
-          let atoms = Array.map (fun (_, atom) -> atom) mode_atoms in
+          let atoms = Array.map (fun (_, _, atom) -> atom) mode_atoms in
           let dst_cell = deref_slot true slot_cell slot in
             trans_init_structural_from_atoms dst_cell dst_slots atoms
 

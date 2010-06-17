@@ -10,13 +10,15 @@ let mode_check_visitor
     (cx:ctxt)
     (inner:Walk.visitor)
     : Walk.visitor =
+  (* FIXME: sink this whole thing into mutability / effect-checking
+     pass. *)
   let check_write id dst =
     let slot_ids = lval_slots cx dst in
       Array.iter
         (fun slot_id ->
            let slot = referent_to_slot cx slot_id in
-             match slot.Ast.slot_mode with
-                 Ast.MODE_alias Ast.IMMUTABLE ->
+             match (slot.Ast.slot_mode, slot.Ast.slot_mutable) with
+                 (Ast.MODE_alias, false) ->
                    err (Some id) "writing to read-alias"
                | _ -> ())
         slot_ids

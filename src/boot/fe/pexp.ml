@@ -330,39 +330,25 @@ and flag (ps:pstate) (tok:token) : bool =
   then (bump ps; true)
   else false
 
-and parse_mutability (ps:pstate) : Ast.mutability =
-  if flag ps MUTABLE
-  then Ast.MUTABLE
-  else Ast.IMMUTABLE
+and parse_mutability (ps:pstate) : bool =
+  flag ps MUTABLE
 
-and apply_mutability (slot:Ast.slot) (mut:Ast.mutability) : Ast.slot =
-  let mode =
-    match slot.Ast.slot_mode with
-        (Ast.MODE_exterior _) -> Ast.MODE_exterior mut
-      | (Ast.MODE_interior _) -> Ast.MODE_interior mut
-      | (Ast.MODE_alias _) -> Ast.MODE_alias mut
-  in
-    { slot with Ast.slot_mode = mode }
+and apply_mutability (slot:Ast.slot) (mut:bool) : Ast.slot =
+  { slot with Ast.slot_mutable = mut }
 
 and parse_slot (aliases_ok:bool) (ps:pstate) : Ast.slot =
   let mut = parse_mutability ps in
+  let mode =
   match (peek ps, aliases_ok) with
-      (AT, _) ->
-        bump ps;
-        let ty = parse_ty ps in
-          { Ast.slot_mode = Ast.MODE_exterior mut;
-            Ast.slot_ty = Some ty }
-
-    | (AND, true) ->
-        bump ps;
-        let ty = parse_ty ps in
-          { Ast.slot_mode = Ast.MODE_alias mut;
-            Ast.slot_ty = Some ty }
-
-    | _ ->
-        let ty = parse_ty ps in
-          { Ast.slot_mode = Ast.MODE_interior mut;
-            Ast.slot_ty = Some ty }
+      (AT, _) -> bump ps; Ast.MODE_exterior
+    | (AND, true) -> bump ps; Ast.MODE_alias
+    | (AND, false) -> raise (err "alias slot in prohibited context" ps)
+    | _ -> Ast.MODE_interior
+  in
+  let ty = parse_ty ps in
+    { Ast.slot_mode = mode;
+      Ast.slot_mutable = mut;
+      Ast.slot_ty = Some ty }
 
 and parse_slot_and_ident
     (aliases_ok:bool)
@@ -482,7 +468,8 @@ and parse_bottom_pexp (ps:pstate) : pexp =
           let slot =
             match peek ps with
                 LBRACKET -> bracketed LBRACKET RBRACKET (parse_slot false) ps
-              | _ -> { Ast.slot_mode = Ast.MODE_interior Ast.IMMUTABLE;
+              | _ -> { Ast.slot_mode = Ast.MODE_interior;
+                       Ast.slot_mutable = false;
                        Ast.slot_ty = None }
           in
           let pexps = ctxt "vec pexp: exprs" parse_pexp_list ps in
@@ -1071,23 +1058,23 @@ and desugar_expr_atom
             { pexp with node = expand_pexp_custom ps n a b }
 
 
-and desugar_expr_mode_atom
+and desugar_expr_mode_mut_atom
     (ps:pstate)
     (pexp:pexp)
-    : (Ast.stmt array * (Ast.mode * Ast.atom)) =
-  let desugar_inner mut e =
+    : (Ast.stmt array * (Ast.mode * bool * Ast.atom)) =
+  let desugar_inner mode mut e =
     let (stmts, atom) = desugar_expr_atom ps e in
-      (stmts, (mut, atom))
+      (stmts, (mode, mut, atom))
   in
     match pexp.node with
         PEXP_mutable {node=(PEXP_exterior e); id=_} ->
-          desugar_inner (Ast.MODE_exterior Ast.MUTABLE) e
+          desugar_inner Ast.MODE_exterior true e
       | PEXP_exterior e ->
-          desugar_inner (Ast.MODE_exterior Ast.IMMUTABLE) e
+          desugar_inner Ast.MODE_exterior false e
       | PEXP_mutable e ->
-          desugar_inner (Ast.MODE_interior Ast.MUTABLE) e
+          desugar_inner Ast.MODE_interior true e
       | _ ->
-          desugar_inner (Ast.MODE_interior Ast.IMMUTABLE) pexp
+          desugar_inner Ast.MODE_interior false pexp
 
 and desugar_expr_atoms
     (ps:pstate)
@@ -1101,11 +1088,11 @@ and desugar_opt_expr_atoms
     : (Ast.stmt array * Ast.atom option array) =
   arj1st (Array.map (desugar_opt_expr_atom ps) pexps)
 
-and desugar_expr_mode_atoms
+and desugar_expr_mode_mut_atoms
     (ps:pstate)
     (pexps:pexp array)
-    : (Ast.stmt array * (Ast.mode * Ast.atom) array) =
-  arj1st (Array.map (desugar_expr_mode_atom ps) pexps)
+    : (Ast.stmt array * (Ast.mode * bool * Ast.atom) array) =
+  arj1st (Array.map (desugar_expr_mode_mut_atom ps) pexps)
 
 and desugar_expr_init
     (ps:pstate)
@@ -1213,8 +1200,8 @@ and desugar_expr_init
                 Array.map
                   begin
                     fun (ident, pexp) ->
-                      let (stmts, (mut, atom)) = desugar_expr_mode_atom ps pexp in
-                        (stmts, (ident, mut, atom))
+                      let (stmts, (mode, mut, atom)) = desugar_expr_mode_mut_atom ps pexp in
+                        (stmts, (ident, mode, mut, atom))
                   end
                   args
               end
@@ -1231,7 +1218,7 @@ and desugar_expr_init
             end
 
       | PEXP_tup args ->
-          let (arg_stmts, arg_mode_atoms) = desugar_expr_mode_atoms ps args in
+          let (arg_stmts, arg_mode_atoms) = desugar_expr_mode_mut_atoms ps args in
           let stmt = span ps apos bpos (Ast.STMT_init_tup (dst_lval, arg_mode_atoms)) in
             Array.append arg_stmts [| stmt |]
 

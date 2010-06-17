@@ -214,9 +214,10 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
                           (* TODO: nullary constructors *)
                           if peek ps != LPAREN then
-                            let mode = Ast.MODE_interior Ast.IMMUTABLE in
                             let slot =
-                              { Ast.slot_mode = mode; Ast.slot_ty = None }
+                              { Ast.slot_mode = Ast.MODE_interior;
+                                Ast.slot_mutable = false;
+                                Ast.slot_ty = None }
                             in
                             Ast.PAT_slot ((span ps apos bpos slot), ident)
                           else
@@ -404,7 +405,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           bump ps;
           let (stmts, slot, ident) =
             ctxt "stmt slot" parse_slot_and_ident_and_init ps in
-          let slot = Pexp.apply_mutability slot Ast.MUTABLE in
+          let slot = Pexp.apply_mutability slot true in
           let bpos = lexpos ps in
           let decl = Ast.DECL_slot (Ast.KEY_ident ident,
                                     (span ps apos bpos slot))
@@ -415,7 +416,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           bump ps;
           let (stmts, slot, ident) =
             ctxt "stmt slot" parse_auto_slot_and_init ps in
-          let slot = Pexp.apply_mutability slot Ast.MUTABLE in
+          let slot = Pexp.apply_mutability slot true in
           let bpos = lexpos ps in
           let decl = Ast.DECL_slot (Ast.KEY_ident ident,
                                     (span ps apos bpos slot))
@@ -540,12 +541,12 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
 and parse_ty_param (iref:int ref) (ps:pstate) : Ast.ty_param identified =
   let apos = lexpos ps in
-  let mut = Pexp.parse_mutability ps in
+  let e = Pexp.parse_effect ps in
   let ident = Pexp.parse_ident ps in
   let i = !iref in
   let bpos = lexpos ps in
     incr iref;
-    span ps apos bpos (ident, (i, mut))
+    span ps apos bpos (ident, (i, e))
 
 and parse_ty_params (ps:pstate)
     : (Ast.ty_param identified) array =

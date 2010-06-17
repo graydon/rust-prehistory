@@ -32,11 +32,6 @@ type slot_key =
    write foo[int,int].bar but not foo.bar.
  *)
 
-type mutability =
-    IMMUTABLE
-  | MUTABLE
-;;
-
 type effect =
     PURE
   | IO
@@ -93,18 +88,19 @@ and ty =
   | TY_task
 
   | TY_native of opaque_id
-  | TY_param of (ty_param_idx * mutability)
+  | TY_param of (ty_param_idx * effect)
   | TY_named of name
   | TY_type
 
   | TY_constrained of (ty * constrs)
 
 and mode =
-    MODE_exterior of mutability
-  | MODE_interior of mutability
-  | MODE_alias of mutability
+    MODE_exterior
+  | MODE_interior
+  | MODE_alias
 
 and slot = { slot_mode: mode;
+             slot_mutable: bool;
              slot_ty: ty option; }
 
 and ty_tup = slot array
@@ -193,8 +189,8 @@ and stmt' =
 
   (* lval-assigning stmts. *)
     STMT_spawn of (lval * domain * lval * (atom array))
-  | STMT_init_rec of (lval * ((ident * mode * atom) array) * lval option)
-  | STMT_init_tup of (lval * ((mode * atom) array))
+  | STMT_init_rec of (lval * ((ident * mode * bool * atom) array) * lval option)
+  | STMT_init_tup of (lval * ((mode * bool * atom) array))
   | STMT_init_vec of (lval * slot * (atom array))
   | STMT_init_str of (lval * string)
   | STMT_init_port of lval
@@ -397,7 +393,7 @@ and obj =
  * even if it's a type that's bound by a quantifier in its environment.
  *)
 
-and ty_param = ident * (ty_param_idx * mutability)
+and ty_param = ident * (ty_param_idx * effect)
 
 and mod_item' =
     MOD_ITEM_type of ty
@@ -511,21 +507,21 @@ and fmt_name (ff:Format.formatter) (n:name) : unit =
         fmt ff ".";
         fmt_name_component ff nc
 
-and fmt_mutable (ff:Format.formatter) (m:mutability) : unit =
-  match m with
-      MUTABLE -> fmt ff "mutable "
-    | IMMUTABLE -> ()
+and fmt_mutable (ff:Format.formatter) (m:bool) : unit =
+  if m
+  then fmt ff "mutable ";
 
 and fmt_mode (ff:Format.formatter) (m:mode) : unit =
   match m with
-      MODE_exterior m -> (fmt_mutable ff m; fmt ff "@@")
-    | MODE_interior m -> fmt_mutable ff m
-    | MODE_alias m -> (fmt_mutable ff m; fmt ff "&")
+      MODE_exterior -> fmt ff "@@"
+    | MODE_alias -> fmt ff "&"
+    | MODE_interior -> ()
 
 and fmt_slot (ff:Format.formatter) (s:slot) : unit =
   match s.slot_ty with
       None -> fmt ff "auto"
     | Some t ->
+        fmt_mutable ff s.slot_mutable;
         fmt_mode ff s.slot_mode;
         fmt_ty ff t
 
@@ -627,7 +623,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
         fmt_slots ff slots (Some idents);
         fmt ff "@]"
 
-  | TY_param (i, m) -> (fmt_mutable ff m;
+  | TY_param (i, e) -> (fmt_effect ff e;
                         fmt ff "<p#%d>" i)
   | TY_native oid -> fmt ff "<native#%d>" (int_of_opaque oid)
   | TY_named n -> fmt_name ff n
@@ -991,9 +987,10 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           do
             if i != 0
             then fmt ff ", ";
-            let (ident, mode, atom) = entries.(i) in
+            let (ident, mode, mut, atom) = entries.(i) in
               fmt_ident ff ident;
               fmt ff " = ";
+              fmt_mutable ff mut;
               fmt_mode ff mode;
               fmt_atom ff atom;
           done;
@@ -1024,7 +1021,8 @@ and fmt_stmt_body (ff:Format.formatter) (s:stmt) : unit =
           do
             if i != 0
             then fmt ff ", ";
-            let (mode, atom) = entries.(i) in
+            let (mode, mut, atom) = entries.(i) in
+              fmt_mutable ff mut;
               fmt_mode ff mode;
               fmt_atom ff atom;
           done;
@@ -1160,8 +1158,8 @@ and fmt_decl_params (ff:Format.formatter) (params:ty_param array) : unit =
       do
         if i <> 0
         then fmt ff ", ";
-        let (ident, (i, mut)) = params.(i) in
-          fmt_mutable ff mut;
+        let (ident, (i, e)) = params.(i) in
+          fmt_effect ff e;
           fmt_ident ff ident;
           fmt ff "=<p#%d>" i
       done;

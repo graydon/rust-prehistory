@@ -352,7 +352,7 @@ let condition_assigning_visitor
               raise_postcondition s.id postcond
 
         | Ast.STMT_init_tup (dst, modes_atoms) ->
-            let precond = Array.map (fun s -> Constr_init s) (modes_and_atoms_slots cx modes_atoms) in
+            let precond = Array.map (fun s -> Constr_init s) (modes_muts_and_atoms_slots cx modes_atoms) in
             let postcond = Array.map (fun s -> Constr_init s) (lval_slots cx dst) in
               raise_precondition s.id precond;
               raise_postcondition s.id postcond
