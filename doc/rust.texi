@@ -947,7 +947,7 @@ become prefixes of the paths of items and slots defined within any
 included Rust source files.
 
 The @code{use} directives within the crate specify @emph{other crates}
-to import into the crate's namesapce; these directives may specify
+to import into the crate's namespace; these directives may specify
 loose or tight ``matching criteria'' for imported crates, depending on
 the preferences of the crate developer. In the simplest case, a
 @code{use} directive may only specify a symbolic name and leave the
