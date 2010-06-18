@@ -404,10 +404,16 @@ and lookup_type_by_name
             end
             args
         in
-          iflog cx (fun _ -> log cx
-                      "lookup_type_by_name %a found ty %a, applying %d type args to %d params"
-                      Ast.sprintf_name name Ast.sprintf_ty ty
-                      (Array.length args) (Array.length params));
+          iflog cx
+            begin
+              fun _ ->
+                log cx
+                  "lookup_type_by_name %a found ty %a, applying %d type args to %d params"
+                  Ast.sprintf_name name Ast.sprintf_ty ty
+                  (Array.length args) (Array.length params);
+                log cx "params: %s" (Ast.fmt_to_str Ast.fmt_decl_params params);
+                log cx "args: %s" (Ast.fmt_to_str Ast.fmt_app_args args);
+            end;
           let ty = rebuild_ty_under_params ty params args true in
             iflog cx (fun _ -> log cx "applied type is %a" Ast.sprintf_ty ty);
             (scopes', id, ty)
@@ -423,8 +429,8 @@ and resolve_type
   let base = ty_fold_rebuild (fun t -> t) in
   let ty_fold_named name =
     let (scopes, node, t) = lookup_type_by_name cx scopes recursive_tag_groups all_tags recur name in
-      iflog cx (fun _ -> log cx "resolved type name '%a' to item %d"
-                  Ast.sprintf_name name (int_of_node node));
+      iflog cx (fun _ -> log cx "resolved type name '%a' to item %d with ty %a"
+                  Ast.sprintf_name name (int_of_node node) Ast.sprintf_ty t);
       match index_in_curr_iso recur node with
           Some i -> Ast.TY_idx i
         | None ->

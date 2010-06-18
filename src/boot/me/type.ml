@@ -839,9 +839,28 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               let referent = Hashtbl.find cx.ctxt_lval_to_referent nbi.id in
                 begin
                   match Hashtbl.find cx.ctxt_all_defns referent with
-                      DEFN_slot slot -> unify_slot slot (Some referent) tv
+                      DEFN_slot slot ->
+                        iflog cx
+                          begin
+                            fun _ ->
+                              let tv = Hashtbl.find bindings referent in
+                              log cx "lval-base slot tyspec for %a = %s"
+                                Ast.sprintf_lval lval (tyspec_to_str (!tv));
+                          end;
+                        unify_slot slot (Some referent) tv
+
                     | _ ->
                         let spec = (!(Hashtbl.find bindings referent)) in
+                        let _ =
+                          iflog cx
+                            begin
+                              fun _ ->
+                                log cx "lval-base item tyspec for %a = %s"
+                                  Ast.sprintf_lval lval (tyspec_to_str spec);
+                                log cx "unifying with supplied spec %s"
+                                  (tyspec_to_str !tv)
+                            end
+                        in
                         let tv =
                           match nbi.node with
                               Ast.BASE_ident _ -> tv
@@ -885,10 +904,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
     and unify_lval (lval:Ast.lval) (tv:tyvar) : unit =
       let id = lval_base_id lval in
       (* Fetch lval with type components resolved. *)
-        iflog cx (fun _ -> log cx
-                    "fetching resolved version of lval #%d"
-                    (int_of_node id));
         let lval = Hashtbl.find cx.ctxt_all_lvals id in
+        iflog cx (fun _ -> log cx
+                    "fetched resolved version of lval #%d = %a"
+                    (int_of_node id) Ast.sprintf_lval lval);
           Hashtbl.add lval_tyvars id tv;
           unify_lval' lval tv
 
