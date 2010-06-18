@@ -1597,12 +1597,7 @@ let emit_file
       ~required_fixups
       ~needed_libs
   in
-  let buf = Buffer.create 0xffff in
-  let out = open_out_bin (Session.filename_of sess.Session.sess_out) in
-    write_frag ~sess ~lsb0: true ~buf ~frag: all_frags;
-    Buffer.output_buffer out buf;
-    flush out;
-    close_out out
+    write_out_frag sess true all_frags
 ;;
 
 let elf_magic = "\x7fELF";;

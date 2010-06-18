@@ -521,6 +521,16 @@ let fold_flags (f:'a -> int64) (flags:'a list) : int64 =
   List.fold_left (Int64.logor) 0x0L (List.map f flags)
 ;;
 
+let write_out_frag sess lsb0 frag =
+  let buf = Buffer.create 0xffff in
+  let file = Session.filename_of sess.Session.sess_out in
+  let out = open_out_bin file in
+    write_frag ~sess ~lsb0 ~buf ~frag;
+    Buffer.output_buffer out buf;
+    flush out;
+    close_out out;
+    Unix.chmod file 0o755
+;;
 
 (* Asm-reader stuff for loading info back from mapped files. *)
 (*

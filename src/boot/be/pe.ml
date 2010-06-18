@@ -1001,12 +1001,7 @@ let emit_file
                                     note_rust_section;
                                     ALIGN_MEM (pe_mem_alignment, MARK) |]))|]
   in
-  let buf = Buffer.create 0xffff in
-  let out = open_out_bin (Session.filename_of sess.Session.sess_out) in
-    write_frag ~sess ~lsb0: true ~buf ~frag: all_frags;
-    Buffer.output_buffer out buf;
-    flush out;
-    close_out out
+    write_out_frag sess true all_frags
 ;;
 
 let pe_magic = "PE";;

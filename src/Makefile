@@ -530,7 +530,6 @@ test/compile-fail/%.llvm.out: test/compile-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
 test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [x86]: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
-	$(CFG_QUIET)chmod 0755 $@
 
 %.s: %.bc
 	@$(call CFG_ECHO, compile [llvm]: $<)
@@ -547,7 +546,6 @@ test/run-pass/%.bc: test/run-pass/%.rc $(CFG_BOOT) $(CFG_STDLIB)
 test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [x86]: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
-	$(CFG_QUIET)chmod 0755 $@
 
 test/run-pass/%.bc: test/run-pass/%.rs $(CFG_BOOT) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [llvm]: $<)
@@ -556,7 +554,6 @@ test/run-pass/%.bc: test/run-pass/%.rs $(CFG_BOOT) $(CFG_STDLIB)
 test/run-fail/%.x86$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [x86]: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
-	$(CFG_QUIET)chmod 0755 $@
 
 test/run-fail/%.bc: test/run-fail/%.rs $(CFG_BOOT) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile [llvm]: $<)

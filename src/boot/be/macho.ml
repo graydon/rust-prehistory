@@ -1040,13 +1040,7 @@ let emit_file
       linkedit_segment;
     |]
   in
-
-  let buf = Buffer.create 0xffff in
-  let out = open_out_bin (Session.filename_of sess.Session.sess_out) in
-    write_frag ~sess ~lsb0: true ~buf ~frag: segments;
-    Buffer.output_buffer out buf;
-    flush out;
-    close_out out
+    write_out_frag sess true segments
 ;;
 
 
