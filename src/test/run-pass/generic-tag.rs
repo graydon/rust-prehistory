@@ -1,5 +1,6 @@
-type list[T] = tag(cons(T, @list[T]), nil());
+type option[T] = tag(some(@T), none());
 
 fn main() {
-  let list[int] a = cons[int](10, cons[int](12, cons[int](13, nil[int]())));
+  let option[int] a = some[int](10);
+  a = none[int]();
 }
