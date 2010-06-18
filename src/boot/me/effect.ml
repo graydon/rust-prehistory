@@ -185,13 +185,16 @@ let effect_checking_visitor
    * effects consistent with what we calculated.
    *)
   let auth_stack = Stack.create () in
-  let _ = Stack.push Ast.PURE auth_stack in
   let visit_mod_item_pre n p i =
     begin
       match htab_search item_auth i.id with
           None -> ()
         | Some e ->
-            let curr = Stack.top auth_stack in
+            let curr =
+              if Stack.is_empty auth_stack
+              then Ast.PURE
+              else Stack.top auth_stack
+            in
             let next = lower_effect_of e curr in
               Stack.push next auth_stack;
               iflog cx
@@ -213,8 +216,12 @@ let effect_checking_visitor
               | Some e -> e
             in
             let fe = f.Ast.fn_aux.Ast.fn_effect in
-            let ae = Stack.top auth_stack in
-              if e <> fe && e <> ae
+            let ae =
+              if Stack.is_empty auth_stack
+              then None
+              else Some (Stack.top auth_stack)
+            in
+              if e <> fe && (ae <> (Some e))
               then
                 begin
                   let name = Hashtbl.find cx.ctxt_all_item_names i.id in
@@ -223,11 +230,11 @@ let effect_checking_visitor
                       Ast.sprintf_effect fe
                       Ast.sprintf_effect e
                       begin
-                        if ae <> fe
-                        then
-                          Printf.sprintf " (auth effect is '%a')"
-                            Ast.sprintf_effect ae
-                        else ""
+                        match ae with
+                            Some ae when ae <> fe ->
+                              Printf.sprintf " (auth effect is '%a')"
+                                Ast.sprintf_effect ae
+                          | _ -> ""
                       end
                 end
         | _ -> ()
@@ -240,7 +247,11 @@ let effect_checking_visitor
         None -> ()
       | Some _ ->
           let curr = Stack.pop auth_stack in
-          let next = Stack.top auth_stack in
+          let next =
+            if Stack.is_empty auth_stack
+            then Ast.PURE
+            else Stack.top auth_stack
+          in
           iflog cx
             begin
               fun _ ->
