@@ -4,6 +4,8 @@
 .*~$
 \.out$
 \.exe$
+\.x86$
+\.llvm$
 \.orig$
 \.cmo$
 \.cmi$

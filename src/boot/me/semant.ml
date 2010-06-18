@@ -730,39 +730,74 @@ let rebuild_ty_under_params
   else
     let nmap = Hashtbl.create (Array.length args) in
     let pmap = Hashtbl.create (Array.length args) in
-    let substituted = ref false in
-    let base = ty_fold_rebuild (fun t -> t) in
-    let ty_fold_param (i, mut) =
-      let param = Ast.TY_param (i, mut) in
-        match htab_search pmap param with
-            None -> param
-          | Some arg -> (substituted := true; arg)
-    in
-    let ty_fold_named n =
-      match n with
-          Ast.NAME_base (Ast.BASE_ident id)
-            when resolve_names ->
-              begin
-                match htab_search nmap id with
-                    None -> Ast.TY_named n
-                  | Some arg -> (substituted := true; arg)
-              end
-        | _ -> Ast.TY_named n
-    in
+    let _ =
       Array.iteri
-        (fun i (ident, param) ->
-           htab_put pmap (Ast.TY_param param) args.(i);
-           if resolve_names
-           then
-             htab_put nmap ident args.(i))
-        params;
+        begin
+          fun i (ident, param) ->
+            htab_put pmap (Ast.TY_param param) args.(i);
+            if resolve_names
+            then
+              htab_put nmap ident args.(i)
+        end
+        params
+    in
+    let substituted = ref false in
+    let rec rebuild_ty t =
+      let base = ty_fold_rebuild (fun t -> t) in
+      let ty_fold_param (i, mut) =
+        let param = Ast.TY_param (i, mut) in
+          match htab_search pmap param with
+              None -> param
+            | Some arg -> (substituted := true; arg)
+      in
+      let ty_fold_named n =
+        let rec rebuild_name n =
+          match n with
+              Ast.NAME_base nb ->
+                Ast.NAME_base (rebuild_name_base nb)
+            | Ast.NAME_ext (n, nc) ->
+                Ast.NAME_ext (rebuild_name n,
+                              rebuild_name_component nc)
+
+        and rebuild_name_base nb =
+          match nb with
+              Ast.BASE_ident i ->
+                Ast.BASE_ident i
+            | Ast.BASE_temp t ->
+                Ast.BASE_temp t
+            | Ast.BASE_app (i, tys) ->
+                Ast.BASE_app (i, rebuild_tys tys)
+
+        and rebuild_name_component nc =
+          match nc with
+              Ast.COMP_ident i ->
+                Ast.COMP_ident i
+            | Ast.COMP_app (i, tys) ->
+                Ast.COMP_app (i, rebuild_tys tys)
+            | Ast.COMP_idx i ->
+                Ast.COMP_idx i
+
+        and rebuild_tys tys =
+          Array.map (fun t -> rebuild_ty t) tys
+        in
+        let n = rebuild_name n in
+          match n with
+              Ast.NAME_base (Ast.BASE_ident id)
+                when resolve_names ->
+                  begin
+                    match htab_search nmap id with
+                        None -> Ast.TY_named n
+                      | Some arg -> (substituted := true; arg)
+                  end
+            | _ -> Ast.TY_named n
+      in
       let fold =
         { base with
             ty_fold_param = ty_fold_param;
             ty_fold_named = ty_fold_named;
         }
       in
-      let ty' = fold_ty fold ty in
+      let t' = fold_ty fold t in
         (* 
          * FIXME: "substituted" and "ty'" here are only required
          * because the current type-equality-comparison code in Type
@@ -771,8 +806,10 @@ let rebuild_ty_under_params
          * fold. 
          *)
         if !substituted
-        then ty'
-        else ty
+        then t'
+        else t
+    in
+      rebuild_ty ty
 ;;
 
 let associative_binary_op_ty_fold

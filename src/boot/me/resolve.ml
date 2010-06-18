@@ -365,7 +365,7 @@ and lookup_type_by_name
     (recur:recur_info)
     (name:Ast.name)
     : ((scope list) * node_id * Ast.ty) =
-  iflog cx (fun _ -> log cx "lookup_type_by_name %a" Ast.sprintf_name name);
+  iflog cx (fun _ -> log cx "+++ lookup_type_by_name %a" Ast.sprintf_name name);
   match lookup_by_name cx scopes name with
       None -> err None "unknown name: %a" Ast.sprintf_name name
     | Some (scopes', id) ->
@@ -415,7 +415,9 @@ and lookup_type_by_name
                 log cx "args: %s" (Ast.fmt_to_str Ast.fmt_app_args args);
             end;
           let ty = rebuild_ty_under_params ty params args true in
-            iflog cx (fun _ -> log cx "applied type is %a" Ast.sprintf_ty ty);
+            iflog cx (fun _ -> log cx "--- lookup_type_by_name %a ==> %a"
+                        Ast.sprintf_name name
+                        Ast.sprintf_ty ty);
             (scopes', id, ty)
 
 and resolve_type

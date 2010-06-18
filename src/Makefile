@@ -403,6 +403,8 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       lazy-and-or.rs \
                       bitwise.rs \
                       export-non-interference.rs \
+                      box-unbox.rs \
+                      generic-type-synonym.rs \
                      ) \
                     $(addprefix test/run-fail/, \
                       explicit-fail.rs \
