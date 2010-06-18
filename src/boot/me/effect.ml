@@ -127,18 +127,26 @@ let function_effect_propagation_visitor
         | Ast.STMT_recv _ -> lower_to s Ast.IO
 
         | Ast.STMT_call (_, fn, _) ->
-            if lval_is_slot cx fn
-            then
-              let t = lval_slot cx fn in
+            let lower_to_callee_ty t =
+              match t with
+                  Ast.TY_fn (_, taux) ->
+                    lower_to s taux.Ast.fn_effect;
+                | _ -> bug () "non-fn callee"
+            in
+              if lval_is_slot cx fn
+              then
+                let t = lval_slot cx fn in
+                  lower_to_callee_ty (slot_ty t)
+              else
                 begin
-                  match slot_ty t with
-                      Ast.TY_fn (_, taux) ->
-                        lower_to s taux.Ast.fn_effect;
-                    | _ -> bug () "non-fn callee"
+                  let item = lval_item cx fn in
+                  let t = Hashtbl.find cx.ctxt_all_item_types item.id in
+                    lower_to_callee_ty t;
+                    match htab_search cx.ctxt_required_items item.id with
+                        None -> ()
+                      | Some (REQUIRED_LIB_rust _, _) -> ()
+                      | Some _ -> lower_to s Ast.UNSAFE
                 end
-            else
-              if Hashtbl.mem cx.ctxt_required_items (lval_item cx fn).id
-              then lower_to s Ast.UNSAFE
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s
