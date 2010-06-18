@@ -1083,7 +1083,12 @@ let patch_jump (e:emitter) (jmp:int) (targ:int) : unit =
 
 (* More query functions. *)
 
-let get_element_ptr (word_bits:bits) (fmt:hreg_formatter) (mem_cell:cell) (i:int) : cell =
+let get_element_ptr
+    (word_bits:bits)
+    (fmt:hreg_formatter)
+    (mem_cell:cell)
+    (i:int)
+    : cell =
   match mem_cell with
       Mem (mem, StructTy elts) when i >= 0 && i < (Array.length elts) ->
         assert ((Array.length elts) != 0);

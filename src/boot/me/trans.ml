@@ -2599,7 +2599,9 @@ let trans_visitor
           check_exterior_rty cell;
           if initializing
           then init_exterior_slot cell slot;
-          get_element_ptr (deref cell) Abi.exterior_rc_slot_field_body
+          get_element_ptr_dyn_in_current_frame
+            (deref cell)
+            Abi.exterior_rc_slot_field_body
 
       | Ast.MODE_alias _  ->
           if initializing
