@@ -102,7 +102,6 @@ let rec tyspec_to_str (ts:tyspec) : string =
             Ast.fmt_ty ff ty
 
       | TYSPEC_equiv tv ->
-          fmt ff ":";
           fmt_tyspec ff (!tv)
 
       | TYSPEC_callable (out, ins) ->
