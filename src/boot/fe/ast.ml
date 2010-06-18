@@ -611,7 +611,7 @@ and fmt_ty (ff:Format.formatter) (t:ty) : unit =
   | TY_char -> fmt ff "char"
   | TY_str -> fmt ff "str"
 
-  | TY_tup slots -> fmt_slots ff slots None
+  | TY_tup slots -> (fmt ff "tup"; fmt_slots ff slots None)
   | TY_vec s -> (fmt ff "vec["; fmt_slot ff s; fmt ff "]")
   | TY_chan t -> (fmt ff "chan["; fmt_ty ff t; fmt ff "]")
   | TY_port t -> (fmt ff "port["; fmt_ty ff t; fmt ff "]")
