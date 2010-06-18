@@ -1310,6 +1310,15 @@ and lookup_by_ident
       (fun _ {node=(i,_); id=id} ->
          if i = ident then Some (scopes, id) else None)
   in
+  let passed_capture_scope = ref false in
+  let would_capture r =
+    match r with
+        None -> None
+      | Some _ ->
+          if !passed_capture_scope
+          then err None "attempted dynamic environment-capture"
+          else r
+  in
   let check_scope scopes scope =
     match scope with
         SCOPE_block block_id ->
@@ -1317,7 +1326,7 @@ and lookup_by_ident
           let block_items = Hashtbl.find cx.ctxt_block_items block_id in
             begin
               match htab_search block_slots (Ast.KEY_ident ident) with
-                  Some id -> Some (scopes, id)
+                  Some id -> would_capture (Some (scopes, id))
                 | None ->
                     match htab_search block_items ident with
                         Some id -> Some (scopes, id)
@@ -1329,7 +1338,7 @@ and lookup_by_ident
             cx scopes crate.node.Ast.crate_items ident true
 
       | SCOPE_obj_fn fn ->
-          check_slots scopes fn.node.Ast.fn_input_slots
+          would_capture (check_slots scopes fn.node.Ast.fn_input_slots)
 
       | SCOPE_mod_item item ->
           begin
@@ -1352,7 +1361,9 @@ and lookup_by_ident
             in
               match item_match with
                   Some _ -> item_match
-                | None -> check_params scopes item.node.Ast.decl_params
+                | None ->
+                    would_capture
+                      (check_params scopes item.node.Ast.decl_params)
           end
   in
   let rec search scopes =
@@ -1360,7 +1371,25 @@ and lookup_by_ident
         [] -> None
       | scope::rest ->
           match check_scope scopes scope with
-              None -> search rest
+              None ->
+                begin
+                  let is_ty_item i =
+                    match i.node.Ast.decl_item with
+                        Ast.MOD_ITEM_type _ -> true
+                      | _ -> false
+                  in
+                    match scope with
+                        SCOPE_block _
+                      | SCOPE_obj_fn _ ->
+                          search rest
+
+                      | SCOPE_mod_item item when is_ty_item item ->
+                          search rest
+
+                      | _ ->
+                          passed_capture_scope := true;
+                          search rest
+                end
             | x -> x
   in
     search scopes
@@ -1371,12 +1400,18 @@ let lookup_by_temp
     (scopes:scope list)
     (temp:temp_id)
     : ((scope list * node_id) option) =
+  let passed_item_scope = ref false in
   let check_scope scope =
-    match scope with
-        SCOPE_block block_id ->
-          let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
-            htab_search block_slots (Ast.KEY_temp temp)
-      | _ -> None
+    if !passed_item_scope
+    then None
+    else
+      match scope with
+          SCOPE_block block_id ->
+            let block_slots = Hashtbl.find cx.ctxt_block_slots block_id in
+              htab_search block_slots (Ast.KEY_temp temp)
+        | _ ->
+            passed_item_scope := true;
+            None
   in
     list_search_ctxt scopes check_scope
 ;;
