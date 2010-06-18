@@ -1253,8 +1253,9 @@ let rec project_ident_from_items
     (scopes:scope list)
     ((view:Ast.mod_view),(items:Ast.mod_items))
     (ident:Ast.ident)
+    (inside:bool)
     : resolved =
-  if not (exports_permit view ident)
+  if not (inside || (exports_permit view ident))
   then None
   else
     match htab_search items ident with
@@ -1276,7 +1277,7 @@ and project_name_comp_from_resolved
         let scopes = scope :: scopes in
         let ident = get_name_comp_ident ext in
         let md = get_mod_item cx id in
-          project_ident_from_items cx scopes md ident
+          project_ident_from_items cx scopes md ident false
 
 and lookup_by_name
     (cx:ctxt)
@@ -1325,7 +1326,7 @@ and lookup_by_ident
 
       | SCOPE_crate crate ->
           project_ident_from_items
-            cx scopes crate.node.Ast.crate_items ident
+            cx scopes crate.node.Ast.crate_items ident true
 
       | SCOPE_obj_fn fn ->
           check_slots scopes fn.node.Ast.fn_input_slots
@@ -1345,7 +1346,7 @@ and lookup_by_ident
                     end
 
                 | Ast.MOD_ITEM_mod md ->
-                    project_ident_from_items cx scopes md ident
+                    project_ident_from_items cx scopes md ident true
 
                 | _ -> None
             in

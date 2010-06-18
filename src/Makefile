@@ -400,6 +400,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       else-if.rs \
                       lazy-and-or.rs \
                       bitwise.rs \
+                      export-non-interference.rs \
                      ) \
                     $(addprefix test/run-fail/, \
                       explicit-fail.rs \
