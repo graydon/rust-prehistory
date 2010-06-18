@@ -923,7 +923,11 @@ and expand_tags
             in
             let header = Array.map (fun slot -> (clone_span ps item slot)) tup in
             let tag_item' = Ast.MOD_ITEM_tag (header, ttag, id) in
-            let tag_item = clone_span ps item (decl item.node.Ast.decl_params tag_item') in
+            let cloned_params =
+              Array.map (fun p -> clone_span ps p p.node)
+                item.node.Ast.decl_params
+            in
+            let tag_item = clone_span ps item (decl cloned_params tag_item') in
               tags := (ident, tag_item) :: (!tags)
         end
         ttag;
