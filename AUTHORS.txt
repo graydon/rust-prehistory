@@ -4,4 +4,5 @@ Graydon Hoare <graydon@mozilla.com>
 Andreas Gal <gal@mozilla.com>
 Dave Herman <dherman@mozilla.com>
 Patrick Walton <pwalton@mozilla.com>
+Roy Frostig <froystig@mozilla.com>
 Brendan Eich <brendan@mozilla.com>
