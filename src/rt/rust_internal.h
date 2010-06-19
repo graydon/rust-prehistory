@@ -709,7 +709,7 @@ rust_main_loop(rust_dom *dom);
 //
 // Local Variables:
 // mode: C++
-// fill-column: 70;
+// fill-column: 78;
 // indent-tabs-mode: nil
 // c-basic-offset: 4
 // buffer-file-coding-system: utf-8-unix

@@ -169,8 +169,8 @@
       (c-lang-const c-cpp-matchers)))
 
 (defcustom rust-font-lock-extra-types nil
-  "*List of extra types (aside from the type keywords) to recognize in rust mode.
-Each list item should be a regexp matching a single identifier.")
+  "*List of extra types (aside from the type keywords) to recognize in
+rust mode.Each list item should be a regexp matching a single identifier.")
 
 (defconst rust-font-lock-keywords-1 (c-lang-const c-matchers-1 rust)
   "Minimal highlighting for rust mode.")

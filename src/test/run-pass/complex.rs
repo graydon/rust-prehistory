@@ -2,7 +2,12 @@
 
 type t = int;
 fn putstr(str s) {}
-fn putint(int i) { let int i = 33; while (i < 36) { putstr("hi"); i = i + 1; } }
+fn putint(int i) {
+  let int i = 33;
+  while (i < 36) {
+    putstr("hi"); i = i + 1;
+  }
+}
 fn zerg(int i) -> int { ret i; }
 fn foo(int x) -> int {
   let t y = x + 2;

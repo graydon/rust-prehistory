@@ -19,7 +19,7 @@ endif
 
 CFG_INFO := $(info cfg: building on $(CFG_OSTYPE) $(CFG_CPUTYPE))
 
-CFG_GCC_COMPILE_FLAGS :=
+CFG_GCC_CFLAGS :=
 CFG_GCC_LINK_FLAGS :=
 CFG_VALGRIND :=
 
@@ -29,17 +29,18 @@ CFG_BOOT_FLAGS := $(FLAGS)
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
   CFG_STDLIB := libstd.so
-  CFG_GCC_COMPILE_FLAGS += -fPIC
+  CFG_GCC_CFLAGS += -fPIC
   CFG_GCC_LINK_FLAGS += -shared -fPIC -ldl -lpthread
   ifeq ($(CFG_CPUTYPE), x86_64)
-    CFG_GCC_COMPILE_FLAGS += -m32
+    CFG_GCC_CFLAGS += -m32
     CFG_GCC_LINK_FLAGS += -m32
   endif
   CFG_NATIVE := 1
   CFG_UNIXY := 1
   CFG_VALGRIND := $(shell which valgrind)
   ifdef CFG_VALGRIND
-    CFG_VALGRIND += --run-libc-freeres=no --leak-check=full --quiet --vex-iropt-level=0
+    CFG_VALGRIND += --run-libc-freeres=no --leak-check=full \
+                    --quiet --vex-iropt-level=0
   endif
 endif
 
@@ -52,7 +53,7 @@ ifeq ($(CFG_OSTYPE), Darwin)
   # "on an i386" when the whole userspace is 64-bit and the compiler
   # emits 64-bit binaries by default. So we just force -m32 here. Smarter
   # approaches welcome!
-  CFG_GCC_COMPILE_FLAGS += -m32
+  CFG_GCC_CFLAGS += -m32
   CFG_GCC_LINK_FLAGS += -m32
 endif
 
@@ -73,7 +74,7 @@ ifdef CFG_WINDOWSY
   CFG_EXE_SUFFIX := .exe
   CFG_BOOT := ./rustboot.exe
   CFG_COMPILER := ./rustc.exe
-  CFG_GCC_COMPILE_FLAGS += -march=i686
+  CFG_GCC_CFLAGS += -march=i686
   CFG_GCC_LINK_FLAGS += -shared -fPIC
   CFG_RUN_TARG = $(1)
   # FIXME: support msvc at some point
@@ -99,10 +100,10 @@ ifdef CFG_UNIXY
     endif
     CFG_OBJ_SUFFIX := .o
     CFG_EXE_SUFFIX := .exe
-    CFG_GCC_COMPILE_FLAGS :=
+    CFG_GCC_CFLAGS :=
     CFG_GCC_LINK_FLAGS := -shared
     ifeq ($(CFG_CPUTYPE), x86_64)
-      CFG_GCC_COMPILE_FLAGS += -m32
+      CFG_GCC_CFLAGS += -m32
       CFG_GCC_LINK_FLAGS += -m32
     endif
   endif
@@ -110,11 +111,11 @@ endif
 
 ifdef CFG_GCC
   CFG_INFO := $(info cfg: using gcc)
-  CFG_GCC_COMPILE_FLAGS += -Wall -Werror -fno-rtti -fno-exceptions -g
+  CFG_GCC_CFLAGS += -Wall -Werror -fno-rtti -fno-exceptions -g
   CFG_GCC_LINK_FLAGS += -g
-  CFG_COMPILE_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_COMPILE_FLAGS) -c -o $(1) $(2)
+  CFG_COMPILE_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_CFLAGS) -c -o $(1) $(2)
   CFG_LINK_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_LINK_FLAGS) -o $(1)
-  CFG_DEPEND_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_COMPILE_FLAGS) -MT "$(1)" -MM $(2)
+  CFG_DEPEND_C = $(CFG_GCC_CROSS)g++ $(CFG_GCC_CFLAGS) -MT "$(1)" -MM $(2)
 else
   CFG_ERR := $(error please try on a system with gcc)
 endif
@@ -161,11 +162,12 @@ ifdef CFG_LLVM_CONFIG
   WHERE := $(shell ocamlc -where)
   LLVM_LIBS := llvm.cma llvm_bitwriter.cma
   LLVM_NATIVE_LIBS := llvm.cmxa llvm_bitwiter.cmxa
-  LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
+  LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm \
+    -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
   LLVM_INCS := -I boot/llvm -I $(WHERE)
   LLVM_MLS := $(addprefix boot/llvm/, llabi.ml llasm.ml llfinal.ml lltrans.ml \
     llemit.ml)
-  CFG_LLC_COMPILE_FLAGS := -march=x86
+  CFG_LLC_CFLAGS := -march=x86
   $(info cfg: found llvm-config at $(CFG_LLVM_CONFIG))
 else
   VARIANT=x86
@@ -205,10 +207,11 @@ DRIVER_BOT_MLS := $(addprefix boot/driver/, session.ml)
 BE_MLS := $(addprefix boot/be/, x86.ml ra.ml pe.ml elf.ml \
           macho.ml)
 IL_MLS := $(addprefix boot/be/, asm.ml il.ml abi.ml)
-ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml type.ml dead.ml \
-          effect.ml typestate.ml loop.ml layout.ml transutil.ml \
-          trans.ml dwarf.ml)
-FE_MLS := $(addprefix boot/fe/, ast.ml token.ml lexer.ml parser.ml pexp.ml item.ml cexp.ml)
+ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml \
+            type.ml dead.ml effect.ml typestate.ml loop.ml layout.ml  \
+            transutil.ml trans.ml dwarf.ml)
+FE_MLS := $(addprefix boot/fe/, ast.ml token.ml lexer.ml parser.ml pexp.ml \
+            item.ml cexp.ml)
 DRIVER_TOP_MLS := $(addprefix boot/driver/, $(VARIANT)/glue.ml lib.ml main.ml)
 
 BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(FE_MLS) $(IL_MLS) $(ME_MLS) \
@@ -253,7 +256,8 @@ $(CFG_RUNTIME): $(RUNTIME_OBJS) $(MKFILES) $(RUNTIME_HDR)
 
 $(CFG_STDLIB): $(STDLIB_CRATE) $(CFG_BOOT) $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -shared -o $@ $(STDLIB_CRATE)
+	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) \
+      -shared -o $@ $(STDLIB_CRATE)
 
 %$(CFG_OBJ_SUFFIX): %.cpp $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
@@ -262,7 +266,8 @@ $(CFG_STDLIB): $(STDLIB_CRATE) $(CFG_BOOT) $(MKFILES)
 ifdef CFG_NATIVE
 $(CFG_BOOT): $(BOOT_CMXS) $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
-	$(CFG_QUIET)ocamlopt$(OPT) -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) $(BOOT_CMXS)
+	$(CFG_QUIET)ocamlopt$(OPT) -o $@ $(OCAMLOPT_FLAGS) $(ML_NATIVE_LIBS) \
+      $(BOOT_CMXS)
 else
 $(CFG_BOOT): $(BOOT_CMOS) $(MKFILES)
 	@$(call CFG_ECHO, compile: $<)
@@ -429,88 +434,98 @@ TEST_XFAILS_X86 += test/run-pass/native-mod.rc
 TEST_XFAILS_LLVM += test/run-pass/native-mod.rc
 endif
 
-TEST_RUN_PASS_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-pass/*.rc))
-TEST_RUN_PASS_CRATES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(wildcard test/run-pass/*.rc))
-TEST_RUN_PASS_SOURCES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-pass/*.rs))
-TEST_RUN_PASS_SOURCES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(wildcard test/run-pass/*.rs))
-TEST_RUN_PASS_EXTRAS := $(wildcard test/run-pass/*/*.rs)
-TEST_RUN_PASS_EXES_X86 := \
-                      $(TEST_RUN_PASS_CRATES_X86:.rc=.x86$(CFG_EXE_SUFFIX)) \
-                      $(TEST_RUN_PASS_SOURCES_X86:.rs=.x86$(CFG_EXE_SUFFIX))
-TEST_RUN_PASS_EXES_LLVM := \
-                      $(TEST_RUN_PASS_CRATES_LLVM:.rc=.llvm$(CFG_EXE_SUFFIX)) \
-                      $(TEST_RUN_PASS_SOURCES_LLVM:.rs=.llvm$(CFG_EXE_SUFFIX))
-TEST_RUN_PASS_OUTS_X86  := \
-                    $(TEST_RUN_PASS_EXES_X86:.x86$(CFG_EXE_SUFFIX)=.x86.out)
-TEST_RUN_PASS_OUTS_LLVM := \
-                    $(TEST_RUN_PASS_EXES_LLVM:.llvm$(CFG_EXE_SUFFIX)=.llvm.out)
+RPASS_RC := $(wildcard test/run-pass/*.rc)
+RPASS_RS := $(wildcard test/run-pass/*.rs)
+RFAIL_RC := $(wildcard test/run-fail/*.rc)
+RFAIL_RS := $(wildcard test/run-fail/*.rs)
+CFAIL_RC := $(wildcard test/compile-fail/*.rc)
+CFAIL_RS := $(wildcard test/compile-fail/*.rs)
+
+TEST_RPASS_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(RPASS_RC))
+TEST_RPASS_CRATES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(RPASS_RC))
+TEST_RPASS_SOURCES_X86 := $(filter-out $(TEST_XFAILS_X86), $(RPASS_RS))
+TEST_RPASS_SOURCES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(RPASS_RS))
+TEST_RPASS_EXTRAS := $(wildcard test/run-pass/*/*.rs)
+TEST_RPASS_EXES_X86 := \
+                      $(TEST_RPASS_CRATES_X86:.rc=.x86$(CFG_EXE_SUFFIX)) \
+                      $(TEST_RPASS_SOURCES_X86:.rs=.x86$(CFG_EXE_SUFFIX))
+TEST_RPASS_EXES_LLVM := \
+                      $(TEST_RPASS_CRATES_LLVM:.rc=.llvm$(CFG_EXE_SUFFIX)) \
+                      $(TEST_RPASS_SOURCES_LLVM:.rs=.llvm$(CFG_EXE_SUFFIX))
+TEST_RPASS_OUTS_X86  := \
+                    $(TEST_RPASS_EXES_X86:.x86$(CFG_EXE_SUFFIX)=.x86.out)
+TEST_RPASS_OUTS_LLVM := \
+                    $(TEST_RPASS_EXES_LLVM:.llvm$(CFG_EXE_SUFFIX)=.llvm.out)
 
 
-TEST_RUN_FAIL_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-fail/*.rc))
-TEST_RUN_FAIL_CRATES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(wildcard test/run-fail/*.rc))
-TEST_RUN_FAIL_SOURCES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-fail/*.rs))
-TEST_RUN_FAIL_SOURCES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(wildcard test/run-fail/*.rs))
-TEST_RUN_FAIL_EXTRAS := $(wildcard test/run-fail/*/*.rs)
-TEST_RUN_FAIL_EXES_X86 := \
-                      $(TEST_RUN_FAIL_CRATES_X86:.rc=.x86$(CFG_EXE_SUFFIX)) \
-                      $(TEST_RUN_FAIL_SOURCES_X86:.rs=.x86$(CFG_EXE_SUFFIX))
-TEST_RUN_FAIL_EXES_LLVM := \
-                      $(TEST_RUN_FAIL_CRATES_LLVM:.rc=.llvm$(CFG_EXE_SUFFIX)) \
-                      $(TEST_RUN_FAIL_SOURCES_LLVM:.rs=.llvm$(CFG_EXE_SUFFIX))
-TEST_RUN_FAIL_OUTS_X86  := \
-                    $(TEST_RUN_FAIL_EXES_X86:.x86$(CFG_EXE_SUFFIX)=.x86.out)
-TEST_RUN_FAIL_OUTS_LLVM := \
-                    $(TEST_RUN_FAIL_EXES_LLVM:.llvm$(CFG_EXE_SUFFIX)=.llvm.out)
+TEST_RFAIL_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(RFAIL_RC))
+TEST_RFAIL_CRATES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(RFAIL_RC))
+TEST_RFAIL_SOURCES_X86 := $(filter-out $(TEST_XFAILS_X86), $(RFAIL_RS))
+TEST_RFAIL_SOURCES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(RFAIL_RS))
+TEST_RFAIL_EXTRAS := $(wildcard test/run-fail/*/*.rs)
+TEST_RFAIL_EXES_X86 := \
+                      $(TEST_RFAIL_CRATES_X86:.rc=.x86$(CFG_EXE_SUFFIX)) \
+                      $(TEST_RFAIL_SOURCES_X86:.rs=.x86$(CFG_EXE_SUFFIX))
+TEST_RFAIL_EXES_LLVM := \
+                      $(TEST_RFAIL_CRATES_LLVM:.rc=.llvm$(CFG_EXE_SUFFIX)) \
+                      $(TEST_RFAIL_SOURCES_LLVM:.rs=.llvm$(CFG_EXE_SUFFIX))
+TEST_RFAIL_OUTS_X86  := \
+                    $(TEST_RFAIL_EXES_X86:.x86$(CFG_EXE_SUFFIX)=.x86.out)
+TEST_RFAIL_OUTS_LLVM := \
+                    $(TEST_RFAIL_EXES_LLVM:.llvm$(CFG_EXE_SUFFIX)=.llvm.out)
 
 
-TEST_COMPILE_FAIL_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/compile-fail/*.rc))
-TEST_COMPILE_FAIL_CRATES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(wildcard test/compile-fail/*.rc))
-TEST_COMPILE_FAIL_SOURCES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/compile-fail/*.rs))
-TEST_COMPILE_FAIL_SOURCES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(wildcard test/compile-fail/*.rs))
-TEST_COMPILE_FAIL_EXTRAS := $(wildcard test/compile-fail/*/*.rs)
-TEST_COMPILE_FAIL_EXES_X86 := \
-                  $(TEST_COMPILE_FAIL_CRATES_X86:.rc=.x86$(CFG_EXE_SUFFIX)) \
-                  $(TEST_COMPILE_FAIL_SOURCES_X86:.rs=.x86$(CFG_EXE_SUFFIX))
-TEST_COMPILE_FAIL_EXES_LLVM := \
-                  $(TEST_COMPILE_FAIL_CRATES_LLVM:.rc=.llvm$(CFG_EXE_SUFFIX)) \
-                  $(TEST_COMPILE_FAIL_SOURCES_LLVM:.rs=.llvm$(CFG_EXE_SUFFIX))
-TEST_COMPILE_FAIL_OUTS_X86 := \
-                $(TEST_COMPILE_FAIL_EXES_X86:.x86$(CFG_EXE_SUFFIX)=.x86.out)
-TEST_COMPILE_FAIL_OUTS_LLVM := \
-                $(TEST_COMPILE_FAIL_EXES_LLVM:.llvm$(CFG_EXE_SUFFIX)=.llvm.out)
+TEST_CFAIL_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(CFAIL_RC))
+TEST_CFAIL_CRATES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(CFAIL_RC))
+TEST_CFAIL_SOURCES_X86 := $(filter-out $(TEST_XFAILS_X86), $(CFAIL_RS))
+TEST_CFAIL_SOURCES_LLVM := $(filter-out $(TEST_XFAILS_LLVM), $(CFAIL_RS))
+TEST_CFAIL_EXTRAS := $(wildcard test/compile-fail/*/*.rs)
+TEST_CFAIL_EXES_X86 := \
+                  $(TEST_CFAIL_CRATES_X86:.rc=.x86$(CFG_EXE_SUFFIX)) \
+                  $(TEST_CFAIL_SOURCES_X86:.rs=.x86$(CFG_EXE_SUFFIX))
+TEST_CFAIL_EXES_LLVM := \
+                  $(TEST_CFAIL_CRATES_LLVM:.rc=.llvm$(CFG_EXE_SUFFIX)) \
+                  $(TEST_CFAIL_SOURCES_LLVM:.rs=.llvm$(CFG_EXE_SUFFIX))
+TEST_CFAIL_OUTS_X86 := \
+                $(TEST_CFAIL_EXES_X86:.x86$(CFG_EXE_SUFFIX)=.x86.out)
+TEST_CFAIL_OUTS_LLVM := \
+                $(TEST_CFAIL_EXES_LLVM:.llvm$(CFG_EXE_SUFFIX)=.llvm.out)
 
-ALL_TEST_CRATES := $(TEST_COMPILE_FAIL_CRATES_X86) \
-                   $(TEST_RUN_FAIL_CRATES_X86) \
-                   $(TEST_RUN_PASS_CRATES_X86)
+ALL_TEST_CRATES := $(TEST_CFAIL_CRATES_X86) \
+                   $(TEST_RFAIL_CRATES_X86) \
+                   $(TEST_RPASS_CRATES_X86)
 
-ALL_TEST_SOURCES := $(TEST_COMPILE_FAIL_SOURCES_X86) \
-                    $(TEST_RUN_FAIL_SOURCES_X86) \
-                    $(TEST_RUN_PASS_SOURCES_X86)
+ALL_TEST_SOURCES := $(TEST_CFAIL_SOURCES_X86) \
+                    $(TEST_RFAIL_SOURCES_X86) \
+                    $(TEST_RPASS_SOURCES_X86)
 
 ALL_TEST_INPUTS := $(wildcard test/*/*.rs test/*/*/*.rs test/*/*.rc)
 
 
-check_nocompile: $(TEST_COMPILE_FAIL_OUTS_X86)
+check_nocompile: $(TEST_CFAIL_OUTS_X86)
 
-check: $(TEST_RUN_PASS_EXES_X86) $(TEST_RUN_FAIL_EXES_X86) \
-       $(TEST_RUN_PASS_OUTS_X86) $(TEST_RUN_FAIL_OUTS_X86) \
-       $(TEST_COMPILE_FAIL_OUTS_X86)
+check: $(TEST_RPASS_EXES_X86) $(TEST_RFAIL_EXES_X86) \
+       $(TEST_RPASS_OUTS_X86) $(TEST_RFAIL_OUTS_X86) \
+       $(TEST_CFAIL_OUTS_X86)
 
 ifeq ($(VARIANT),llvm)
-ALL_TEST_CRATES += $(TEST_COMPILE_FAIL_CRATES_LLVM) \
-                   $(TEST_RUN_FAIL_CRATES_LLVM) \
-                   $(TEST_RUN_PASS_CRATES_LLVM)
+ALL_TEST_CRATES += $(TEST_CFAIL_CRATES_LLVM) \
+                   $(TEST_RFAIL_CRATES_LLVM) \
+                   $(TEST_RPASS_CRATES_LLVM)
 
-ALL_TEST_SOURCES += $(TEST_COMPILE_FAIL_SOURCES_LLVM) \
-                    $(TEST_RUN_FAIL_SOURCES_LLVM) \
-                    $(TEST_RUN_PASS_SOURCES_LLVM)
+ALL_TEST_SOURCES += $(TEST_CFAIL_SOURCES_LLVM) \
+                    $(TEST_RFAIL_SOURCES_LLVM) \
+                    $(TEST_RPASS_SOURCES_LLVM)
 
-check_nocompile: $(TEST_COMPILE_FAIL_OUTS_LLVM)
+check_nocompile: $(TEST_CFAIL_OUTS_LLVM)
 
-check:  $(TEST_RUN_PASS_EXES_LLVM) $(TEST_RUN_FAIL_EXES_LLVM) \
-        $(TEST_RUN_PASS_OUTS_LLVM) $(TEST_RUN_FAIL_OUTS_LLVM) \
-        $(TEST_COMPILE_FAIL_OUTS_LLVM)
+check:  $(TEST_RPASS_EXES_LLVM) $(TEST_RFAIL_EXES_LLVM) \
+        $(TEST_RPASS_OUTS_LLVM) $(TEST_RFAIL_OUTS_LLVM) \
+        $(TEST_CFAIL_OUTS_LLVM)
 endif
+
+REQ := $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+BOOT := $(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS)
 
 test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 	@$(call CFG_ECHO, run: $<)
@@ -519,52 +534,57 @@ test/run-pass/%.out: test/run-pass/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 test/run-fail/%.out: test/run-fail/%$(CFG_EXE_SUFFIX) $(CFG_RUNTIME)
 	@$(call CFG_ECHO, run: $<)
 	$(CFG_QUIET)rm -f $@
-	$(CFG_QUIET)$(call CFG_RUN_TARG, $<) >$@ 2>&1 ; X=$$? ; if [ $$X -eq 0 ] ; then exit 1 ; else exit 0 ; fi
-	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $(basename $(basename $@)).rs | tr -d '\n\r'`" $@
+	$(CFG_QUIET)$(call CFG_RUN_TARG, $<) >$@ 2>&1 ; X=$$? ; \
+      if [ $$X -eq 0 ] ; then exit 1 ; else exit 0 ; fi
+	$(CFG_QUIET)grep --text --quiet \
+      "`awk -F: '/error-pattern/ { print $$2 }' \
+        $(basename $(basename $@)).rs | tr -d '\n\r'`" $@
 
-test/compile-fail/%.x86.out: test/compile-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
+test/compile-fail/%.x86.out: test/compile-fail/%.rs $(REQ)
 	@$(call CFG_ECHO, compile [x86]: $<)
 	$(CFG_QUIET)rm -f $@
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
-	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $< | tr -d '\n\r'`" $@
+	$(BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	$(CFG_QUIET)grep --text --quiet \
+      "`awk -F: '/error-pattern/ { print $$2 }' $< | tr -d '\n\r'`" $@
 
-test/compile-fail/%.llvm.out: test/compile-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME)
+test/compile-fail/%.llvm.out: test/compile-fail/%.rs $(REQ)
 	@$(call CFG_ECHO, compile [llvm]: $<)
 	$(CFG_QUIET)rm -f $@
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
-	$(CFG_QUIET)grep --text --quiet "`awk -F: '/error-pattern/ { print $$2 }' $< | tr -d '\n\r'`" $@
+	$(BOOT) -o $(@:.out=$(CFG_EXE_SUFFIX)) $< >$@ 2>&1 || true
+	$(CFG_QUIET)grep --text --quiet \
+      "`awk -F: '/error-pattern/ { print $$2 }' $< | tr -d '\n\r'`" $@
 
-test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rc $(REQ)
 	@$(call CFG_ECHO, compile [x86]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
+	$(BOOT) -o $@ $<
 
 %.s: %.bc
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)llc $(CFG_LLC_COMPILE_FLAGS) -o $@ $<
+	$(CFG_QUIET)llc $(CFG_LLC_CFLAGS) -o $@ $<
 
 %.llvm$(CFG_EXE_SUFFIX): %.s $(CFG_RUNTIME)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)gcc $(CFG_GCC_COMPILE_FLAGS) -o $@ $< -L. -lrustrt
+	$(CFG_QUIET)gcc $(CFG_GCC_CFLAGS) -o $@ $< -L. -lrustrt
 
-test/run-pass/%.bc: test/run-pass/%.rc $(CFG_BOOT) $(CFG_STDLIB)
+test/run-pass/%.bc: test/run-pass/%.rc $(REQ)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ -llvm $<
+	$(BOOT) -o $@ -llvm $<
 
-test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+test/run-pass/%.x86$(CFG_EXE_SUFFIX): test/run-pass/%.rs $(REQ)
 	@$(call CFG_ECHO, compile [x86]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
+	$(BOOT) -o $@ $<
 
-test/run-pass/%.bc: test/run-pass/%.rs $(CFG_BOOT) $(CFG_STDLIB)
+test/run-pass/%.bc: test/run-pass/%.rs $(REQ)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ -llvm $<
+	$(BOOT) -o $@ -llvm $<
 
-test/run-fail/%.x86$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+test/run-fail/%.x86$(CFG_EXE_SUFFIX): test/run-fail/%.rs $(REQ)
 	@$(call CFG_ECHO, compile [x86]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
+	$(BOOT) -o $@ $<
 
-test/run-fail/%.bc: test/run-fail/%.rs $(CFG_BOOT) $(CFG_STDLIB)
+test/run-fail/%.bc: test/run-fail/%.rs $(REQ)
 	@$(call CFG_ECHO, compile [llvm]: $<)
-	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ -llvm $<
+	$(BOOT) -o $@ -llvm $<
 
 
 ######################################################################
@@ -576,7 +596,9 @@ C_DEPFILES := $(RUNTIME_CS:%.cpp=%.d)
 
 %.d: %.cpp $(MKFILES)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)$(call CFG_DEPEND_C, $@ $(patsubst %.cpp, %$(CFG_OBJ_SUFFIX), $<), $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
+	$(CFG_QUIET)$(call CFG_DEPEND_C, $@ \
+      $(patsubst %.cpp, %$(CFG_OBJ_SUFFIX), $<), \
+      $(RUNTIME_INCS)) $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.ml $(MKFILES)
 	@$(call CFG_ECHO, dep: $<)
@@ -599,15 +621,15 @@ CRATE_DEPFILES := $(ALL_TEST_CRATES:%.rc=%.d) $(STDLIB_DEPFILE)
 
 $(STDLIB_DEPFILE): $(STDLIB_CRATE) $(MKFILES) $(CFG_BOOT)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)$(CFG_BOOT) $(CFG_BOOT_FLAGS) -shared -rdeps $< $(CFG_PATH_MUNGE) >$@
+	$(BOOT) -shared -rdeps $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.rc $(MKFILES) $(CFG_BOOT)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)$(CFG_BOOT) $(CFG_BOOT_FLAGS) -rdeps $< $(CFG_PATH_MUNGE) >$@
+	$(BOOT) -rdeps $< $(CFG_PATH_MUNGE) >$@
 
 %.d: %.rs $(MKFILES) $(CFG_BOOT)
 	@$(call CFG_ECHO, dep: $<)
-	$(CFG_QUIET)$(CFG_BOOT) $(CFG_BOOT_FLAGS) -rdeps $< $(CFG_PATH_MUNGE) >$@
+	$(BOOT) -rdeps $< $(CFG_PATH_MUNGE) >$@
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(CRATE_DEPFILES)
@@ -668,16 +690,18 @@ distcheck:
 
 clean:
 	@$(call CFG_ECHO, cleaning)
-	$(CFG_QUIET)rm -f $(RUNTIME_OBJS) $(BOOT_CMOS) $(BOOT_CMIS) $(BOOT_CMXS) $(BOOT_OBJS)
+	$(CFG_QUIET)rm -f $(RUNTIME_OBJS)
+	$(CFG_QUIET)rm -f $(BOOT_CMOS) $(BOOT_CMIS) $(BOOT_CMXS) $(BOOT_OBJS)
 	$(CFG_QUIET)rm -f $(CFG_COMPILER)
 	$(CFG_QUIET)rm -f $(ML_DEPFILES) $(C_DEPFILES) $(CRATE_DEPFILES)
 	$(CFG_QUIET)rm -f boot/fe/lexer.ml
 	$(CFG_QUIET)rm -f $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
-	$(CFG_QUIET)rm -f $(TEST_RUN_PASS_EXES_X86) $(TEST_RUN_PASS_OUTS_X86)
-	$(CFG_QUIET)rm -f $(TEST_RUN_PASS_EXES_LLVM) $(TEST_RUN_PASS_OUTS_LLVM)
-	$(CFG_QUIET)rm -f $(TEST_RUN_FAIL_EXES_X86) $(TEST_RUN_FAIL_OUTS_X86)
-	$(CFG_QUIET)rm -f $(TEST_RUN_FAIL_EXES_LLVM) $(TEST_RUN_FAIL_OUTS_LLVM)
-	$(CFG_QUIET)rm -f $(TEST_COMPILE_FAIL_EXES_X86) $(TEST_COMPILE_FAIL_OUTS_X86)
-	$(CFG_QUIET)rm -f $(TEST_COMPILE_FAIL_EXES_LLVM) $(TEST_COMPILE_FAIL_OUTS_LLVM)
+	$(CFG_QUIET)rm -f $(TEST_RPASS_EXES_X86) $(TEST_RPASS_OUTS_X86)
+	$(CFG_QUIET)rm -f $(TEST_RPASS_EXES_LLVM) $(TEST_RPASS_OUTS_LLVM)
+	$(CFG_QUIET)rm -f $(TEST_RFAIL_EXES_X86) $(TEST_RFAIL_OUTS_X86)
+	$(CFG_QUIET)rm -f $(TEST_RFAIL_EXES_LLVM) $(TEST_RFAIL_OUTS_LLVM)
+	$(CFG_QUIET)rm -f $(TEST_CFAIL_EXES_X86) $(TEST_CFAIL_OUTS_X86)
+	$(CFG_QUIET)rm -f $(TEST_CFAIL_EXES_LLVM) $(TEST_CFAIL_OUTS_LLVM)
 	$(CFG_QUIET)rm -Rf $(PKG_NAME)-*.tar.gz dist
-	$(CFG_QUIET)rm -f $(foreach ext,cmx cmi cmo cma o a d exe,$(wildcard boot/*/*.$(ext) boot/*/*/*.$(ext)))
+	$(CFG_QUIET)rm -f $(foreach ext,cmx cmi cmo cma o a d exe,\
+                        $(wildcard boot/*/*.$(ext) boot/*/*/*.$(ext)))

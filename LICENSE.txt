@@ -53,7 +53,8 @@ The following third party packages are included:
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions are met:
+    modification, are permitted provided that the following conditions are
+    met:
 
         * Redistributions of source code must retain the above copyright
           notice, this list of conditions and the following disclaimer.
@@ -71,9 +72,10 @@ The following third party packages are included:
     SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-* Two header files that are part of the Valgrind package. These files are found
-  at src/rt/valgrind.h and src/rt/memcheck.h, within this distribution. These
-  files are redistributed under the following terms, as noted in them:
+* Two header files that are part of the Valgrind package. These files are
+  found at src/rt/valgrind.h and src/rt/memcheck.h, within this
+  distribution. These files are redistributed under the following terms, as
+  noted in them:
 
   for src/rt/valgrind.h:
 
