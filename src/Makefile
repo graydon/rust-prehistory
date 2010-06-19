@@ -392,7 +392,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       u8-incr.rs \
                       unit.rs \
                       user.rs \
-                      utf-8.rs \
+                      utf8.rs \
                       vec.rs \
                       writealias.rs \
                       yield.rs \
