@@ -452,6 +452,11 @@ let trans_visitor
       caller_args_cell curr_args_rty
   in
 
+  let get_explicit_args_for_current_frame _ =
+    get_element_ptr (get_args_for_current_frame ())
+      Abi.calltup_elt_args
+  in
+
   let get_indirect_args_for_current_frame _ =
     get_element_ptr (get_args_for_current_frame ())
       Abi.calltup_elt_indirect_args
@@ -4347,7 +4352,7 @@ let trans_visitor
     let union_cell = get_element_ptr_dyn_in_current_frame out_cell 1 in
     let dst = get_variant_ptr union_cell i in
     let dst_ty = snd (need_mem_cell dst) in
-    let src = Il.Mem (fp_imm arg0_disp, dst_ty) in
+    let src = get_explicit_args_for_current_frame () in
       (* A clever compiler will inline this. We are not clever. *)
         iflog (fun _ -> annotate (Printf.sprintf "write tag #%d" i));
         mov tag_cell (imm (Int64.of_int i));
