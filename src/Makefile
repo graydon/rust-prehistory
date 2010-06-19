@@ -309,6 +309,7 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
                     test/run-pass/generic-fn-infer.rs \
                     test/run-pass/generic-recursive-tag.rs \
                     test/run-pass/generic-tag.rs \
+                    test/run-pass/generic-tag-alt.rs \
                     test/run-pass/bind-obj-ctor.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
@@ -346,6 +347,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       generic-obj-with-derived-type.rs \
                       generic-recursive-tag.rs \
                       generic-tag.rs \
+                      generic-tag-alt.rs \
                       generic-type.rs \
                       generic-fn-infer.rs \
                       vec-append.rs \
