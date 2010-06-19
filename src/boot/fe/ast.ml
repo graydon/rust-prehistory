@@ -358,6 +358,7 @@ and binop =
 
 and unop =
     UNOP_not
+  | UNOP_bitnot
   | UNOP_neg
   | UNOP_cast of ty
 
@@ -743,6 +744,10 @@ and fmt_unop (ff:Format.formatter) (u:unop) (a:atom) : unit =
     match u with
         UNOP_not ->
           fmt ff "!";
+          fmt_atom ff a
+
+      | UNOP_bitnot ->
+          fmt ff "~";
           fmt_atom ff a
 
       | UNOP_neg ->

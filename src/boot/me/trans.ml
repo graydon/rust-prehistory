@@ -1736,7 +1736,8 @@ let trans_visitor
           let bits = Il.operand_bits word_bits src in
           let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy bits) in
           let op = match unop with
-              Ast.UNOP_not -> Il.NOT
+              Ast.UNOP_not
+            | Ast.UNOP_bitnot -> Il.NOT
             | Ast.UNOP_neg -> Il.NEG
             | Ast.UNOP_cast t ->
                 let at = atom_type cx a in

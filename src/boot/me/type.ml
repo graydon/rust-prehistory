@@ -810,6 +810,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                   Ast.UNOP_not ->
                     unify_atom atom (ref (TYSPEC_resolved ([||], Ast.TY_bool)));
                     unify_ty Ast.TY_bool tv
+                | Ast.UNOP_bitnot ->
+                    let tv_a = ref TYSPEC_integral in
+                      unify_atom atom tv_a;
+                      unify_tyvars tv tv_a
                 | Ast.UNOP_neg ->
                     let tv_a = ref TYSPEC_numeric in
                       unify_atom atom tv_a;

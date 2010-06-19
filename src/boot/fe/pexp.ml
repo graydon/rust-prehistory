@@ -753,9 +753,16 @@ and parse_negation_pexp (ps:pstate) : pexp =
     let apos = lexpos ps in
       match peek ps with
           NOT ->
+            bump ps;
             let rhs = ctxt "negation pexp" parse_negation_pexp ps in
             let bpos = lexpos ps in
               span ps apos bpos (PEXP_unop (Ast.UNOP_not, rhs))
+
+        | TILDE ->
+            bump ps;
+            let rhs = ctxt "negation pexp" parse_negation_pexp ps in
+            let bpos = lexpos ps in
+              span ps apos bpos (PEXP_unop (Ast.UNOP_bitnot, rhs))
 
         | _ ->
             let lhs = parse_bottom_pexp ps in
