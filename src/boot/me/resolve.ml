@@ -316,6 +316,13 @@ let index_in_curr_iso (recur:recur_info) (node:node_id) : int option =
           search 0
 ;;
 
+let need_ty_tag t =
+  match t with
+      (* FIXME: this is a bit of a hack, though honest. *)
+      Ast.TY_tag ttag -> ttag
+    | _ -> err None "needed ty_tag"
+;;
+
 
 let rec ty_iso_of
     (cx:ctxt)
@@ -323,6 +330,7 @@ let rec ty_iso_of
     (all_tags:(node_id,(Ast.ty_tag * (scope list))) Hashtbl.t)
     (n:node_id)
     : Ast.ty =
+  let _ = iflog cx (fun _ -> log cx "+++ ty_iso_of #%d" (int_of_node n)) in
   let group_table = Hashtbl.find recursive_tag_groups n in
   let group_array = Array.of_list (htab_keys group_table) in
   let compare_nodes a_id b_id =
@@ -336,10 +344,8 @@ let rec ty_iso_of
   let resolve_member member =
     let (tag, scopes) = Hashtbl.find all_tags member in
     let ty = Ast.TY_tag tag in
-      match resolve_type cx scopes recursive_tag_groups all_tags recur ty with
-          (* FIXME: this is a bit of a hack, though honest. *)
-          Ast.TY_tag ttag -> ttag
-        | _ -> err None "resolving iso group, tag changed to non-tag"
+    let ty = resolve_type cx scopes recursive_tag_groups all_tags recur ty in
+      need_ty_tag ty
   in
     Array.sort compare_nodes group_array;
     log cx "resolving node %d, %d-member iso group" (int_of_node n) (Array.length group_array);
@@ -353,8 +359,12 @@ let rec ty_iso_of
         then i
         else search (i+1)
     in
+    let iso =
       Ast.TY_iso { Ast.iso_index = (search 0);
                    Ast.iso_group = group }
+    in
+    iflog cx (fun _ -> log cx "--- ty_iso_of #%d ==> %a" (int_of_node n) Ast.sprintf_ty iso);
+      iso
 
 
 and lookup_type_by_name
@@ -428,6 +438,7 @@ and resolve_type
     (recur:recur_info)
     (t:Ast.ty)
     : Ast.ty =
+  let _ = iflog cx (fun _ -> log cx "+++ resolve_type %a" Ast.sprintf_ty t) in
   let base = ty_fold_rebuild (fun t -> t) in
   let ty_fold_named name =
     let (scopes, node, t) = lookup_type_by_name cx scopes recursive_tag_groups all_tags recur name in
@@ -437,7 +448,12 @@ and resolve_type
           Some i -> Ast.TY_idx i
         | None ->
             if Hashtbl.mem recursive_tag_groups node
-            then ty_iso_of cx recursive_tag_groups all_tags node
+            then
+              begin
+                let ttag = need_ty_tag t in
+                  Hashtbl.replace all_tags node (ttag, scopes);
+                  ty_iso_of cx recursive_tag_groups all_tags node
+              end
             else
               if List.mem node recur.recur_all_nodes
               then (err (Some node) "infinite recursive type definition: '%a'"
@@ -452,7 +468,9 @@ and resolve_type
     { base with
         ty_fold_named = ty_fold_named; }
   in
-    fold_ty fold t
+  let t' = fold_ty fold t in
+    iflog cx (fun _ -> log cx "--- resolve_type %a ==> %a" Ast.sprintf_ty t Ast.sprintf_ty t');
+    t'
 ;;
 
 
