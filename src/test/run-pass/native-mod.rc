@@ -13,4 +13,4 @@ native "rust" mod rustrt {
   fn str_buf(str s) -> int;
 }
 
-mod inner = "native_mod_src/inner.rs";
+mod inner = "native-mod-src/inner.rs";

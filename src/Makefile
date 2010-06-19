@@ -302,7 +302,7 @@ self: $(CFG_COMPILER)
 # Testing
 ######################################################################
 
-TEST_XFAILS_X86 :=  test/run-pass/mlist_cycle.rs \
+TEST_XFAILS_X86 :=  test/run-pass/mlist-cycle.rs \
                     test/run-pass/clone-with-exterior.rs \
                     test/run-pass/rec-auto.rs \
                     test/run-pass/vec-slice.rs \
@@ -360,18 +360,18 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       linear-for-loop.rs \
                       many.rs \
                       mlist.rs \
-                      mlist_cycle.rs \
+                      mlist-cycle.rs \
                       mutual-recursion-group.rs \
                       native.rc \
                       command-line-args.rs \
-                      native_mod.rc \
+                      native-mod.rc \
                       opeq.rs \
                       pred.rs \
                       readalias.rs \
                       rec-auto.rs \
                       rec-extend.rs \
                       rec.rs \
-                      rec_tup.rs \
+                      rec-tup.rs \
                       return-nil.rs \
                       i32-sub.rs \
                       i8-incr.rs \
@@ -414,9 +414,9 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       fail.rs \
                       linked-failure.rs \
                       pred.rs \
-                      vec_overrun.rs \
-                      str_overrun.rs \
-                      vec_underrun.rs \
+                      vec-overrun.rs \
+                      str-overrun.rs \
+                      vec-underrun.rs \
                      ) \
                     $(addprefix test/compile-fail/, \
                       rec-missing-fields.rs \
@@ -425,8 +425,8 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                      )
 
 ifdef CFG_WINDOWSY
-TEST_XFAILS_X86 += test/run-pass/native_mod.rc
-TEST_XFAILS_LLVM += test/run-pass/native_mod.rc
+TEST_XFAILS_X86 += test/run-pass/native-mod.rc
+TEST_XFAILS_LLVM += test/run-pass/native-mod.rc
 endif
 
 TEST_RUN_PASS_CRATES_X86 := $(filter-out $(TEST_XFAILS_X86), $(wildcard test/run-pass/*.rc))
