@@ -239,7 +239,8 @@ and str buf = parse
     }
 
 and str_escape buf = parse
-    'u' ((hexdig hexdig hexdig hexdig) as h)
+    'x' ((hexdig hexdig) as h)
+  | 'u' ((hexdig hexdig hexdig hexdig) as h)
   | 'U'
       ((hexdig hexdig hexdig hexdig
         hexdig hexdig hexdig hexdig) as h)
@@ -247,6 +248,12 @@ and str_escape buf = parse
         Buffer.add_string buf (char_as_utf8 (int_of_string ("0x" ^ h)));
         str buf lexbuf
       }
+  | 'n' { Buffer.add_char buf '\n'; str buf lexbuf }
+  | 'r' { Buffer.add_char buf '\r'; str buf lexbuf }
+  | 't' { Buffer.add_char buf '\t'; str buf lexbuf }
+  | '\\' { Buffer.add_char buf '\\'; str buf lexbuf }
+  | '"' { Buffer.add_char buf '"'; str buf lexbuf }
+  | _ as c { fail lexbuf ("bad escape: \\" ^ (Char.escaped c))  }
 
 
 and ext_str n buf = parse
@@ -267,7 +274,8 @@ and ext_str n buf = parse
 
 
 and char = parse
-  _ as c
+    '\\' { char_escape lexbuf }
+  | _ as c
     {
       let c = Char.code c in
         if bounds 0 c 0x7f
@@ -289,6 +297,23 @@ and char = parse
                   then ext_char 5 (c land 0b0000_0001) lexbuf
                   else fail lexbuf "bad initial utf-8 byte"
     }
+
+and char_escape = parse
+    'x' ((hexdig hexdig) as h)
+  | 'u' ((hexdig hexdig hexdig hexdig) as h)
+  | 'U'
+      ((hexdig hexdig hexdig hexdig
+        hexdig hexdig hexdig hexdig) as h)
+      {
+        end_char (int_of_string ("0x" ^ h)) lexbuf
+      }
+  | 'n' { end_char (Char.code '\n') lexbuf }
+  | 'r' { end_char (Char.code '\r') lexbuf }
+  | 't' { end_char (Char.code '\t') lexbuf }
+  | '\\' { end_char (Char.code '\\') lexbuf }
+  | '\'' { end_char (Char.code '\'') lexbuf }
+  | _ as c { fail lexbuf ("bad escape: \\" ^ (Char.escaped c))  }
+
 
 and ext_char n accum = parse
   _ as c

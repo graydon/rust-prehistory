@@ -11,6 +11,9 @@ fn main() {
   check (int(y_diaeresis) == 0xff);
   check (int(pi) == 0x3a0);
 
+  check (int(pi) == int('\u03a0'));
+  check (int('\x0a') == int('\n'));
+
   let str bhutan = "འབྲུག་ཡུལ།";
   let str japan = "日本";
   let str uzbekistan = "Ўзбекистон";
