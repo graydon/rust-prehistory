@@ -568,8 +568,8 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                 expect ps RPAREN;
                 let i = match tok2 with
                     LIT_INT i -> i
-                  | LIT_CHAR c -> (Int64.of_int (Char.code c),
-                                   Char.escaped c)
+                  | LIT_CHAR c -> (Int64.of_int c,
+                                   Common.escaped_char c)
                   | LIT_BOOL b -> if b then (1L, "1") else (0L, "0")
                   | _ -> bug () "expected int/char literal"
                 in
@@ -581,8 +581,7 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                           | UINT -> Ast.LIT_uint i
                           | CHAR ->
                               Ast.LIT_char
-                                (Char.chr
-                                   (Int64.to_int (fst i)))
+                                (Int64.to_int (fst i))
                           | BOOL -> Ast.LIT_bool (fst i <> 0L)
                           | _ -> bug () "expected int/uint/char/bool token"))
 

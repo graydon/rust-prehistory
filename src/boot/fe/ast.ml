@@ -320,7 +320,7 @@ and lit =
   | LIT_mach of (ty_mach * int64 * string)
   | LIT_int of (int64 * string)
   | LIT_uint of (int64 * string)
-  | LIT_char of char
+  | LIT_char of int
 
 
 and lval_component =
@@ -797,7 +797,7 @@ and fmt_lit (ff:Format.formatter) (l:lit) : unit =
       end
   | LIT_int (_,s) -> fmt ff "%s" s
   | LIT_uint (_,s) -> fmt ff "%s" s
-  | LIT_char c -> fmt ff "'%s'" (Char.escaped c)
+  | LIT_char c -> fmt ff "'%s'" (Common.escaped_char c)
 
 and fmt_domain (ff:Format.formatter) (d:domain) : unit =
   match d with

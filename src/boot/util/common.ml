@@ -467,6 +467,21 @@ let i32_align (align:int32) (v:int32) : int32 =
     Int32.logand (Int32.lognot mask) (Int32.add v mask)
 ;;
 
+(*
+ * Int-as-unichar functions.
+ *)
+
+let bounds lo c hi = (lo <= c) && (c <= hi)
+;;
+
+let escaped_char i =
+  if bounds 0 i 0x7f
+  then Char.escaped (Char.chr i)
+  else
+    if bounds 0 i 0xffff
+    then Printf.sprintf "\\u%4.4X" i
+    else Printf.sprintf "\\U%8.8X" i
+;;
 
 (*
  * Size-expressions.

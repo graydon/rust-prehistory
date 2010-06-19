@@ -108,7 +108,7 @@ type token =
   | LIT_INT       of (int64 * string)
   | LIT_FLO       of string
   | LIT_STR       of string
-  | LIT_CHAR      of char
+  | LIT_CHAR      of int
   | LIT_BOOL      of bool
 
   (* Name components *)
@@ -257,7 +257,7 @@ let rec string_of_tok t =
     | LIT_INT (_,s)  -> s
     | LIT_FLO n  -> n
     | LIT_STR s  -> ("\"" ^ (String.escaped s) ^ "\"")
-    | LIT_CHAR c -> ("'" ^ (Char.escaped c) ^ "'")
+    | LIT_CHAR c -> ("'" ^ (Common.escaped_char c) ^ "'")
     | LIT_BOOL b -> if b then "true" else "false"
 
     (* Name components *)

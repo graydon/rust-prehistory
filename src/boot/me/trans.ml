@@ -1080,7 +1080,7 @@ let trans_visitor
         Ast.LIT_nil -> Il.Cell (nil_ptr)
       | Ast.LIT_bool false -> imm_false
       | Ast.LIT_bool true -> imm_true
-      | Ast.LIT_char c -> imm_of_ty (Int64.of_int (Char.code c)) TY_u32
+      | Ast.LIT_char c -> imm_of_ty (Int64.of_int c) TY_u32
       | Ast.LIT_int (i, _) -> simm i
       | Ast.LIT_uint (i, _) -> imm i
       | Ast.LIT_mach (m, n, _) -> imm_of_ty n m
