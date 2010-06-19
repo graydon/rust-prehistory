@@ -715,7 +715,7 @@ and fmt_binop (ff:Format.formatter) (b:binop) : unit =
       match b with
           BINOP_or -> "|"
         | BINOP_and -> "&"
-        | BINOP_xor -> "xor"
+        | BINOP_xor -> "^"
 
         | BINOP_eq -> "=="
         | BINOP_ne -> "!="

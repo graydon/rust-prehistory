@@ -14,6 +14,8 @@ type token =
   | GE
   | GT
   | NOT
+  | TILDE
+  | CARET
   | AND
   | ANDAND
   | OR
@@ -26,8 +28,6 @@ type token =
 
   (* Structural symbols *)
   | AT
-  | TILDE
-  | CARET
   | DOT
   | COMMA
   | SEMI
@@ -101,9 +101,6 @@ type token =
   | YIELD
   | JOIN
 
-  (* Operators *)
-  | XOR
-
   (* Literals *)
   | LIT_INT       of (int64 * string)
   | LIT_FLO       of string
@@ -164,12 +161,13 @@ let rec string_of_tok t =
     | NE         -> "!="
     | GE         -> ">="
     | GT         -> ">"
+    | TILDE      -> "~"
+    | CARET      -> "^"
     | NOT        -> "!"
     | AND        -> "&"
     | ANDAND     -> "&&"
     | OR         -> "|"
     | OROR       -> "||"
-    | XOR        -> "xor"
     | LSL        -> "<<"
     | LSR        -> ">>"
     | ASR        -> ">>>"
@@ -178,8 +176,6 @@ let rec string_of_tok t =
 
     (* Structural symbols *)
     | AT         -> "@"
-    | TILDE      -> "~"
-    | CARET      -> "^"
     | DOT        -> "."
     | COMMA      -> ","
     | SEMI       -> ";"

@@ -504,7 +504,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                         | PERCENT -> Ast.BINOP_mod
                         | AND     -> Ast.BINOP_and
                         | OR      -> Ast.BINOP_or
-                        | XOR     -> Ast.BINOP_xor
+                        | CARET   -> Ast.BINOP_xor
                         | LSL     -> Ast.BINOP_lsl
                         | LSR     -> Ast.BINOP_lsr
                         | ASR     -> Ast.BINOP_asr

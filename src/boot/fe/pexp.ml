@@ -824,7 +824,7 @@ and parse_xor_pexp (ps:pstate) : pexp =
   let apos = lexpos ps in
   let lhs = ctxt (name ^ " lhs") parse_and_pexp ps in
     match peek ps with
-        XOR -> binop_rhs ps name apos lhs parse_xor_pexp Ast.BINOP_xor
+        CARET -> binop_rhs ps name apos lhs parse_xor_pexp Ast.BINOP_xor
       | _ -> lhs
 
 
