@@ -452,11 +452,6 @@ let trans_visitor
       caller_args_cell curr_args_rty
   in
 
-  let get_explicit_args_for_current_frame _ =
-    get_element_ptr (get_args_for_current_frame ())
-      Abi.calltup_elt_args
-  in
-
   let get_indirect_args_for_current_frame _ =
     get_element_ptr (get_args_for_current_frame ())
       Abi.calltup_elt_indirect_args
@@ -713,6 +708,12 @@ let trans_visitor
   let get_element_ptr_dyn_in_current_frame (mem_cell:Il.cell) (i:int) : Il.cell =
     get_element_ptr_dyn (get_ty_params_of_current_frame()) mem_cell i
   in
+
+  let get_explicit_args_for_current_frame _ =
+    get_element_ptr_dyn_in_current_frame (get_args_for_current_frame ())
+      Abi.calltup_elt_args
+  in
+
 
   let deref_off_sz
       (ty_params:Il.cell)
