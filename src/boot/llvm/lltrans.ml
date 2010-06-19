@@ -598,7 +598,7 @@ let trans_crate
           | Ast.LIT_uint (value, _) ->
             Llvm.const_of_int64 (Llvm.i32_type llctx) value false
           | Ast.LIT_char ch ->
-            Llvm.const_int (Llvm.i32_type llctx) (Char.code ch)
+            Llvm.const_int (Llvm.i32_type llctx) ch
       in
 
       (* Translates an lval by reference into the appropriate pointer value. *)
