@@ -1232,22 +1232,29 @@ and fmt_obj (ff:Format.formatter) (id:ident) (params:ty_param array) (obj:obj) :
 and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
   fmt ff "@\n";
   let params = item.node.decl_params in
+  let params = Array.map (fun i -> i.node) params in
     begin
       match item.node.decl_item with
           MOD_ITEM_type ty ->
             fmt ff "type ";
-            fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
+            fmt_ident_and_params ff id params;
             fmt ff " = ";
             fmt_ty ff ty;
             fmt ff ";";
 
-        | MOD_ITEM_tag _ ->
-            fmt ff "?tagdecl?"
+        | MOD_ITEM_tag (hdr, ttag, _) ->
+            fmt ff "fn ";
+            fmt_ident_and_params ff id params;
+            fmt_header_slots ff
+              (Array.mapi (fun i s -> (s,(Printf.sprintf "_%d" i))) hdr);
+            fmt ff " -> ";
+            fmt_ty ff (TY_tag ttag);
+            fmt ff ";";
 
         | MOD_ITEM_mod (view,items) ->
             fmt_obox ff;
             fmt ff "mod ";
-            fmt_ident_and_params ff id (Array.map (fun i -> i.node) params);
+            fmt_ident_and_params ff id params;
             fmt ff " ";
             fmt_obr ff;
             fmt_mod_view ff view;
@@ -1255,10 +1262,10 @@ and fmt_mod_item (ff:Format.formatter) (id:ident) (item:mod_item) : unit =
             fmt_cbb ff
 
         | MOD_ITEM_fn f ->
-            fmt_fn ff id (Array.map (fun i -> i.node) params) f
+            fmt_fn ff id params f
 
         | MOD_ITEM_obj obj ->
-            fmt_obj ff id (Array.map (fun i -> i.node) params) obj
+            fmt_obj ff id params obj
     end
 
 and fmt_import (ff:Format.formatter) (ident:ident) (name:name) : unit =
