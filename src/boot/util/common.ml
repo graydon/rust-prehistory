@@ -483,6 +483,48 @@ let escaped_char i =
     else Printf.sprintf "\\U%8.8X" i
 ;;
 
+let char_as_utf8 i =
+  let buf = Buffer.create 8 in
+  let addb i =
+    Buffer.add_char buf (Char.chr (i land 0xff))
+  in
+  let fini _ =
+    Buffer.contents buf
+  in
+  let rec add_trailing_bytes n i =
+    if n = 0
+    then fini()
+    else
+      begin
+        addb (0b1000_0000 lor ((i lsr ((n-1) * 6)) land 0b11_1111));
+        add_trailing_bytes (n-1) i
+      end
+  in
+    if bounds 0 i 0x7f
+    then (addb i; fini())
+    else
+      if bounds 0x80 i 0x7ff
+      then (addb ((0b1100_0000) lor (i lsr 6));
+            add_trailing_bytes 1 i)
+      else
+        if bounds 0x800 i 0xffff
+        then (addb ((0b1110_0000) lor (i lsr 12));
+              add_trailing_bytes 2 i)
+        else
+          if bounds 0x1000 i 0x1f_ffff
+          then (addb ((0b1111_0000) lor (i lsr 18));
+                add_trailing_bytes 3 i)
+          else
+            if bounds 0x20_0000 i 0x3ff_ffff
+            then (addb ((0b1111_1000) lor (i lsr 24));
+                  add_trailing_bytes 4 i)
+            else
+              if bounds 0x400_0000 i 0x7fff_ffff
+              then (addb ((0b1111_1100) lor (i lsr 30));
+                    add_trailing_bytes 5 i)
+              else bug () "bad unicode character 0x%X" i
+;;
+
 (*
  * Size-expressions.
  *)

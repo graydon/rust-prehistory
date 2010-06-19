@@ -120,8 +120,9 @@
 ;;
 }
 
+let hexdig = ['0'-'9' 'a'-'f' 'A'-'F']
 let bin = "0b" ['0' '1']['0' '1' '_']*
-let hex = "0x" ['0'-'9' 'a'-'f' 'A'-'F']['0'-'9' 'a'-'f' 'A'-'F' '_']*
+let hex = "0x" hexdig ['0'-'9' 'a'-'f' 'A'-'F' '_']*
 let dec = ['0'-'9']+
 let exp = ['e''E']['-''+']? dec
 let flo = (dec '.' dec (exp?)) | (dec exp)
@@ -213,6 +214,7 @@ and str buf = parse
     {
       match ch with
           '"' -> LIT_STR (Buffer.contents buf)
+        | '\\' -> str_escape buf lexbuf
         | _ ->
             Buffer.add_char buf ch;
             let c = Char.code ch in
@@ -235,6 +237,17 @@ and str buf = parse
                         then ext_str 5 buf lexbuf
                         else fail lexbuf "bad initial utf-8 byte"
     }
+
+and str_escape buf = parse
+    'u' ((hexdig hexdig hexdig hexdig) as h)
+  | 'U'
+      ((hexdig hexdig hexdig hexdig
+        hexdig hexdig hexdig hexdig) as h)
+      {
+        Buffer.add_string buf (char_as_utf8 (int_of_string ("0x" ^ h)));
+        str buf lexbuf
+      }
+
 
 and ext_str n buf = parse
     _ as ch
