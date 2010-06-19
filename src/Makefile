@@ -24,7 +24,7 @@ CFG_GCC_LINK_FLAGS :=
 CFG_VALGRIND :=
 
 CFG_LLVM_CONFIG := llvm-config
-CFG_BOOT_FLAGS :=
+CFG_BOOT_FLAGS := $(FLAGS)
 
 ifeq ($(CFG_OSTYPE), Linux)
   CFG_RUNTIME := librustrt.so
