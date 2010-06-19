@@ -163,10 +163,10 @@ rule token = parse
 | '_'                          { UNDERSCORE }
 | '}'                          { RBRACE     }
 
-| "+="                         { OPEQ (PLUS) }
-| "-="                         { OPEQ (MINUS) }
-| "*="                         { OPEQ (STAR) }
-| "/="                         { OPEQ (SLASH) }
+| "+="                         { OPEQ (PLUS)    }
+| "-="                         { OPEQ (MINUS)   }
+| "*="                         { OPEQ (STAR)    }
+| "/="                         { OPEQ (SLASH)   }
 | "%="                         { OPEQ (PERCENT) }
 | "&="                         { OPEQ (AND) }
 | "|="                         { OPEQ (OR)  }
@@ -195,52 +195,104 @@ rule token = parse
                                      Hashtbl.find keyword_table i
                                  with
                                      Not_found -> IDENT (i)
-                                           }
+                                            }
 
 | bin as n                      { LIT_INT (Int64.of_string n, n)    }
 | hex as n                      { LIT_INT (Int64.of_string n, n)    }
 | dec as n                      { LIT_INT (Int64.of_string n, n)    }
-| flo as n                      { LIT_FLO n                                                }
-| (['"'] ([^'"']|"\\\"")* ['"'])  as s    { LIT_STR  (Scanf.sscanf s "%S" (fun x -> x))    }
-| "'\\''"                                 { LIT_CHAR (Char.code '\'')                      }
-| '\''                          { char lexbuf }
+| flo as n                      { LIT_FLO n                         }
+
+| '\''                          { char lexbuf                       }
+| '"'                           { let buf = Buffer.create 32 in
+                                    str buf lexbuf                  }
 
 | eof                           { EOF        }
 
+and str buf = parse
+    _ as ch
+    {
+      match ch with
+          '"' -> LIT_STR (Buffer.contents buf)
+        | _ ->
+            Buffer.add_char buf ch;
+            let c = Char.code ch in
+              if bounds 0 c 0x7f
+              then str buf lexbuf
+              else
+                if ((c land 0b1110_0000) == 0b1100_0000)
+                then ext_str 1 buf lexbuf
+                else
+                  if ((c land 0b1111_0000) == 0b1110_0000)
+                  then ext_str 2 buf lexbuf
+                  else
+                    if ((c land 0b1111_1000) == 0b1111_0000)
+                    then ext_str 3 buf lexbuf
+                    else
+                      if ((c land 0b1111_1100) == 0b1111_1000)
+                      then ext_str 4 buf lexbuf
+                      else
+                        if ((c land 0b1111_1110) == 0b1111_1100)
+                        then ext_str 5 buf lexbuf
+                        else fail lexbuf "bad initial utf-8 byte"
+    }
+
+and ext_str n buf = parse
+    _ as ch
+      {
+        let c = Char.code ch in
+          if ((c land 0b1100_0000) == (0b1000_0000))
+          then
+            begin
+              Buffer.add_char buf ch;
+              if n = 1
+              then str buf lexbuf
+              else ext_str (n-1) buf lexbuf
+            end
+          else
+            fail lexbuf "bad trailing utf-8 byte"
+      }
+
+
 and char = parse
-  _ as c                        { let c = Char.code c in
-                                    if bounds 0 c 0x7f
-                                    then end_char c lexbuf
-                                    else
-                                      if ((c land 0b1110_0000) == 0b1100_0000)
-                                      then ext_char 1 (c land 0b0001_1111) lexbuf
-                                      else
-                                        if ((c land 0b1111_0000) == 0b1110_0000)
-                                        then ext_char 2 (c land 0b0000_1111) lexbuf
-                                        else
-                                          if ((c land 0b1111_1000) == 0b1111_0000)
-                                          then ext_char 3 (c land 0b0000_0111) lexbuf
-                                          else
-                                            if ((c land 0b1111_1100) == 0b1111_1000)
-                                            then ext_char 4 (c land 0b0000_0011) lexbuf
-                                            else
-                                              if ((c land 0b1111_1110) == 0b1111_1100)
-                                              then ext_char 5 (c land 0b0000_0001) lexbuf
-                                              else fail lexbuf "bad initial utf-8 byte"   }
+  _ as c
+    {
+      let c = Char.code c in
+        if bounds 0 c 0x7f
+        then end_char c lexbuf
+        else
+          if ((c land 0b1110_0000) == 0b1100_0000)
+          then ext_char 1 (c land 0b0001_1111) lexbuf
+          else
+            if ((c land 0b1111_0000) == 0b1110_0000)
+            then ext_char 2 (c land 0b0000_1111) lexbuf
+            else
+              if ((c land 0b1111_1000) == 0b1111_0000)
+              then ext_char 3 (c land 0b0000_0111) lexbuf
+              else
+                if ((c land 0b1111_1100) == 0b1111_1000)
+                then ext_char 4 (c land 0b0000_0011) lexbuf
+                else
+                  if ((c land 0b1111_1110) == 0b1111_1100)
+                  then ext_char 5 (c land 0b0000_0001) lexbuf
+                  else fail lexbuf "bad initial utf-8 byte"
+    }
 
 and ext_char n accum = parse
-  _ as c                        { let c = Char.code c in
-                                    if ((c land 0b1100_0000) == (0b1000_0000))
-                                    then
-                                      let accum = (accum lsl 6) lor (c land 0b0011_1111) in
-                                        if n = 1
-                                        then end_char accum lexbuf
-                                        else ext_char (n-1) accum lexbuf
-                                    else
-                                      fail lexbuf "bad trailing utf-8 byte"               }
+  _ as c
+    {
+      let c = Char.code c in
+        if ((c land 0b1100_0000) == (0b1000_0000))
+        then
+          let accum = (accum lsl 6) lor (c land 0b0011_1111) in
+            if n = 1
+            then end_char accum lexbuf
+            else ext_char (n-1) accum lexbuf
+        else
+          fail lexbuf "bad trailing utf-8 byte"
+    }
 
 and end_char accum = parse
-  '\''                          { LIT_CHAR accum                       }
+  '\'' { LIT_CHAR accum }
 
 
 and bracequote buf depth = parse

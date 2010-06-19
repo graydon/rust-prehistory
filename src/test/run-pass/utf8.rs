@@ -11,8 +11,8 @@ fn main() {
   check (int(y_diaeresis) == 0xff);
   check (int(pi) == 0x3a0);
 
-  //let bhutan = "འབྲུག་ཡུལ།";
-  //let japan = "日本";
-  //let uzbekistan = "Ўзбекистон";
-  //let austria = "Österreich";
+  let str bhutan = "འབྲུག་ཡུལ།";
+  let str japan = "日本";
+  let str uzbekistan = "Ўзбекистон";
+  let str austria = "Österreich";
 }
