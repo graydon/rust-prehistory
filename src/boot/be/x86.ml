@@ -330,6 +330,27 @@ let constrain_vregs (q:Il.quad) (hregs:Bits.t array) : unit =
     end;
     c
   in
+    begin
+      match q.Il.quad_body with
+          Il.Binary b ->
+            begin
+              match b.Il.binary_op with
+                  (* Shifts *)
+                | Il.LSL | Il.LSR | Il.ASR ->
+                    begin
+                      match b.Il.binary_rhs with
+                          Il.Cell (Il.Reg (Il.Vreg v, _)) ->
+                            let hv = hregs.(v) in
+                              (* Shift src has to be ecx. *)
+                              List.iter
+                                (fun bad -> Bits.set hv bad false)
+                                [eax; edx; ebx; esi; edi]
+                        | _ -> ()
+                    end
+                | _ -> ()
+            end
+        | _ -> ()
+    end;
     ignore
       (Il.process_quad { Il.identity_processor with
                            Il.qp_mem = qp_mem;
@@ -2028,6 +2049,7 @@ let select_insn (q:Il.quad) : Asm.frag =
           then
             let binop = alu_binop b.Il.binary_dst b.Il.binary_rhs in
             let mulop = mul_like b.Il.binary_rhs in
+
             let divop signed slash =
               Asm.SEQ [|
                 (* xor edx edx, then mul_like. *)
@@ -2035,6 +2057,7 @@ let select_insn (q:Il.quad) : Asm.frag =
                 mul_like b.Il.binary_rhs signed slash
               |]
             in
+
             let modop signed slash =
               Asm.SEQ [|
                 (* divop, then mov remainder to eax instead. *)
@@ -2042,6 +2065,30 @@ let select_insn (q:Il.quad) : Asm.frag =
                 mov false (rc eax) (ro edx)
               |]
             in
+
+            let shiftop slash =
+              let src = b.Il.binary_rhs in
+              let dst = b.Il.binary_dst in
+              let mask i = Asm.AND (i, Asm.IMM 0xffL) in
+              if is_rm8 dst
+              then
+                match src with
+                    Il.Imm (i, _) ->
+                      insn_rm_r_imm 0xC0 dst slash TY_u8 (mask i)
+                  | Il.Cell (Il.Reg ((Il.Hreg r), _))
+                      when r = ecx ->
+                      Asm.SEQ [| Asm.BYTE 0xD2; rm_r dst slash |]
+                  | _ -> raise Unrecognized
+              else
+                match src with
+                    Il.Imm (i, _) ->
+                        insn_rm_r_imm 0xC1 dst slash TY_u8 (mask i)
+                  | Il.Cell (Il.Reg ((Il.Hreg r), _))
+                      when r = ecx ->
+                      Asm.SEQ [| Asm.BYTE 0xD3; rm_r dst slash |]
+                  | _ -> raise Unrecognized
+            in
+
               match (b.Il.binary_dst, b.Il.binary_op) with
                   (_, Il.ADD) -> binop { insn="ADD";
                                          immslash=slash0;
@@ -2073,6 +2120,10 @@ let select_insn (q:Il.quad) : Asm.frag =
                                          rm_dst_op32=0x31;
                                          rm_src_op8=0x32;
                                          rm_src_op32=0x33; }
+
+                | (_, Il.LSL) -> shiftop slash4
+                | (_, Il.LSR) -> shiftop slash5
+                | (_, Il.ASR) -> shiftop slash7
 
                 | (Il.Reg (Il.Hreg r, t), Il.UMUL)
                     when (is_ty32 t || is_ty8 t) && r = eax ->

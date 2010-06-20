@@ -13,6 +13,9 @@ fn main() {
 
   check (~(0xf0) & 0xff == 0xf);
   check (0xf0 | 0xf == 0xff);
+  check (0xf << 4 == 0xf0);
+  check (0xf0 >> 4 == 0xf);
+  check (-16 >>> 2 == -4);
   check (0b1010_1010 | 0b0101_0101 == 0xff);
 }
 
