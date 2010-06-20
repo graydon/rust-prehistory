@@ -10,7 +10,7 @@ def report_err(s):
     print("%s:%d: %s" % (fileinput.filename(), fileinput.filelineno(), s))
     err=1
 
-for line in fileinput.input():
+for line in fileinput.input(openhook=fileinput.hook_encoded("utf-8")):
     if line.find('\t') != -1 and fileinput.filename().find("Makefile") == -1:
         report_err("tab character")
 
