@@ -43,8 +43,13 @@ and parse_identified_slot_and_ident
     (aliases_ok:bool)
     (ps:pstate)
     : (Ast.slot identified * Ast.ident) =
-  let slot = ctxt "identified slot and ident: slot" (Pexp.parse_identified_slot aliases_ok) ps in
-  let ident = ctxt "identified slot and ident: ident" Pexp.parse_ident ps in
+  let slot =
+    ctxt "identified slot and ident: slot"
+      (Pexp.parse_identified_slot aliases_ok) ps
+  in
+  let ident =
+    ctxt "identified slot and ident: ident" Pexp.parse_ident ps
+  in
     (slot, ident)
 
 and parse_zero_or_more_identified_slot_ident_pairs
@@ -52,12 +57,15 @@ and parse_zero_or_more_identified_slot_ident_pairs
     (ps:pstate)
     : (((Ast.slot identified) * Ast.ident) array) =
   ctxt "zero+ slots and idents"
-    (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_identified_slot_and_ident aliases_ok)) ps
+    (paren_comma_list
+       (parse_identified_slot_and_ident aliases_ok)) ps
 
 and parse_block (ps:pstate) : Ast.block =
   let apos = lexpos ps in
-  let stmts = arj (ctxt "block: stmts"
-                     (bracketed_zero_or_more LBRACE RBRACE None parse_stmts) ps)
+  let stmts =
+    arj (ctxt "block: stmts"
+           (bracketed_zero_or_more LBRACE RBRACE
+              None parse_stmts) ps)
   in
   let bpos = lexpos ps in
     span ps apos bpos stmts
@@ -148,7 +156,8 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                 | Ast.CARG_base (Ast.BASE_named nb) ->
                     Ast.LVAL_base (span ps apos bpos nb)
                 | Ast.CARG_ext (pth, nc) ->
-                    Ast.LVAL_ext (carg_path_to_lval bpos pth, Ast.COMP_named nc)
+                    Ast.LVAL_ext (carg_path_to_lval bpos pth,
+                                  Ast.COMP_named nc)
             in
 
             let carg_to_atom (bpos:pos) (carg:Ast.carg)
@@ -163,7 +172,9 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
             let synthesise_check_call (bpos:pos) (constr:Ast.constr)
                 : (Ast.lval * (Ast.atom array)) =
               let lval = name_to_lval bpos constr.Ast.constr_name in
-              let args = Array.map (carg_to_atom bpos) constr.Ast.constr_args in
+              let args =
+                Array.map (carg_to_atom bpos) constr.Ast.constr_args
+              in
                 (lval, args)
             in
 
@@ -175,7 +186,9 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
               match peek ps with
                   LPAREN ->
                     bump ps;
-                    let (stmts, expr) = ctxt "stmts: check value" parse_expr ps in
+                    let (stmts, expr) =
+                      ctxt "stmts: check value" parse_expr ps
+                    in
                       expect ps RPAREN;
                       expect ps SEMI;
                       spans ps stmts apos (Ast.STMT_check_expr expr)
@@ -188,14 +201,18 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                       let block = parse_block ps in
                       let bpos = lexpos ps in
                       let calls = synthesise_check_calls bpos constrs in
-                        [| span ps apos bpos (Ast.STMT_check_if (constrs, calls, block)) |]
+                        [| span ps apos bpos
+                             (Ast.STMT_check_if (constrs, calls, block))
+                        |]
 
                 | _ ->
                     let constrs = Pexp.parse_constrs ps in
                       expect ps SEMI;
                       let bpos = lexpos ps in
                       let calls = synthesise_check_calls bpos constrs in
-                        [| span ps apos bpos (Ast.STMT_check (constrs, calls)) |]
+                        [| span ps apos bpos
+                             (Ast.STMT_check (constrs, calls))
+                        |]
           end
 
       | ALT ->
@@ -222,8 +239,7 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                             Ast.PAT_slot ((span ps apos bpos slot), ident)
                           else
                             let pats =
-                              bracketed_zero_or_more LPAREN RPAREN (Some COMMA)
-                                parse_pat ps
+                              paren_comma_list parse_pat ps
                             in
                             Ast.PAT_tag (ident, pats)
                       | LIT_INT _ | LIT_CHAR _ | LIT_BOOL _ ->
@@ -260,7 +276,10 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           let final_else = ref None in
           let rec parse_stmt_if _ =
             bump ps;
-            let (stmts, expr) = ctxt "stmts: if cond" (bracketed LPAREN RPAREN parse_expr) ps in
+            let (stmts, expr) =
+              ctxt "stmts: if cond"
+                (bracketed LPAREN RPAREN parse_expr) ps
+            in
             let then_block = ctxt "stmts: if-then" parse_block ps in
               begin
                 match peek ps with
@@ -271,9 +290,11 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                             IF ->
                               let nested_if = parse_stmt_if () in
                               let bpos = lexpos ps in
-                                final_else := Some (span ps apos bpos nested_if)
+                                final_else :=
+                                  Some (span ps apos bpos nested_if)
                           | _ ->
-                              final_else := Some (ctxt "stmts: if-else" parse_block ps)
+                              final_else :=
+                                Some (ctxt "stmts: if-else" parse_block ps)
                       end
                   | _ -> ()
               end;
@@ -301,37 +322,45 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                     let slot = (parse_identified_slot_and_ident true ps) in
                     let _    = (expect ps IN) in
                     let (stmts1, iter) = (rstr true parse_lval) ps in
-                    let (stmts2, args) = parse_expr_atom_list LPAREN RPAREN ps in
+                    let (stmts2, args) =
+                      parse_expr_atom_list LPAREN RPAREN ps
+                    in
                       (slot, Array.append stmts1 stmts2, (iter, args))
                   in
                   let (slot, stmts, call) = ctxt "stmts: foreach head"
                     (bracketed LPAREN RPAREN inner) ps
                   in
-                  let body_block = ctxt "stmts: foreach body" parse_block ps in
+                  let body_block =
+                    ctxt "stmts: foreach body" parse_block ps
+                  in
                   let bpos = lexpos ps in
                   let head_block =
                     (* 
-                     * Slightly weird, but we put an extra nesting level of block
-                     * here to separate the part that lives in our frame (the iter slot)
-                     * from the part that lives in the callee frame (the body block).
+                     * Slightly weird, but we put an extra nesting level of
+                     * block here to separate the part that lives in our frame
+                     * (the iter slot) from the part that lives in the callee
+                     * frame (the body block).
                      *)
                     span ps apos bpos [|
                       span ps apos bpos (Ast.STMT_block body_block);
                     |]
                   in
-                    Array.append stmts [| span ps apos bpos
-                                            (Ast.STMT_for_each
-                                               { Ast.for_each_slot = slot;
-                                                 Ast.for_each_call = call;
-                                                 Ast.for_each_head = head_block;
-                                                 Ast.for_each_body = body_block; }) |]
+                    Array.append stmts
+                      [| span ps apos bpos
+                           (Ast.STMT_for_each
+                              { Ast.for_each_slot = slot;
+                                Ast.for_each_call = call;
+                                Ast.for_each_head = head_block;
+                                Ast.for_each_body = body_block; }) |]
               | _ ->
                   let inner ps =
                     let slot = (parse_identified_slot_and_ident false ps) in
                     let _    = (expect ps IN) in
                     let lval = (parse_lval ps) in
                       (slot, lval) in
-                  let (slot, seq) = ctxt "stmts: for head" (bracketed LPAREN RPAREN inner) ps in
+                  let (slot, seq) =
+                    ctxt "stmts: for head" (bracketed LPAREN RPAREN inner) ps
+                  in
                   let body_block = ctxt "stmts: for body" parse_block ps in
                   let bpos = lexpos ps in
                     [| span ps apos bpos
@@ -343,7 +372,9 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
       | WHILE ->
           bump ps;
-          let (stmts, test) = ctxt "stmts: while cond" (bracketed LPAREN RPAREN parse_expr) ps in
+          let (stmts, test) =
+            ctxt "stmts: while cond" (bracketed LPAREN RPAREN parse_expr) ps
+          in
           let body_block = ctxt "stmts: while body" parse_block ps in
           let bpos = lexpos ps in
             [| span ps apos bpos
@@ -357,10 +388,17 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
             match peek ps with
                 EACH ->
                   bump ps;
-                  let (lstmts, lval) = ctxt "put each: lval" (rstr true parse_lval) ps in
-                  let (astmts, args) = ctxt "put each: args" (parse_expr_atom_list LPAREN RPAREN) ps in
+                  let (lstmts, lval) =
+                    ctxt "put each: lval" (rstr true parse_lval) ps
+                  in
+                  let (astmts, args) =
+                    ctxt "put each: args"
+                      (parse_expr_atom_list LPAREN RPAREN) ps
+                  in
                   let bpos = lexpos ps in
-                  let be = span ps apos bpos (Ast.STMT_put_each (lval, args)) in
+                  let be =
+                    span ps apos bpos (Ast.STMT_put_each (lval, args))
+                  in
                     expect ps SEMI;
                     Array.concat [ lstmts; astmts; [| be |] ]
 
@@ -370,7 +408,9 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                       match peek ps with
                           SEMI -> (arr [], None)
                         | _ ->
-                            let (stmts, expr) = ctxt "stmts: put expr" parse_expr_atom ps in
+                            let (stmts, expr) =
+                              ctxt "stmts: put expr" parse_expr_atom ps
+                            in
                               expect ps SEMI;
                               (stmts, Some expr)
                     in
@@ -384,7 +424,9 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
             match peek ps with
                 SEMI -> (bump ps; (arr [], None))
               | _ ->
-                  let (stmts, expr) = ctxt "stmts: ret expr" parse_expr_atom ps in
+                  let (stmts, expr) =
+                    ctxt "stmts: ret expr" parse_expr_atom ps
+                  in
                     expect ps SEMI;
                     (stmts, Some expr)
           in
@@ -393,7 +435,9 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
       | BE ->
           bump ps;
           let (lstmts, lval) = ctxt "be: lval" (rstr true parse_lval) ps in
-          let (astmts, args) = ctxt "be: args" (parse_expr_atom_list LPAREN RPAREN) ps in
+          let (astmts, args) =
+            ctxt "be: args" (parse_expr_atom_list LPAREN RPAREN) ps
+          in
           let bpos = lexpos ps in
           let be = span ps apos bpos (Ast.STMT_be (lval, args)) in
             expect ps SEMI;
@@ -450,10 +494,13 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
       | LPAREN ->
           let (lstmts, lvals) =
             arj1st (ctxt "stmt: paren_copy_to_tup tup"
-                      (bracketed_one_or_more LPAREN RPAREN (Some COMMA) parse_lval) ps)
+                      (bracketed_one_or_more LPAREN RPAREN (Some COMMA)
+                         parse_lval) ps)
           in
           let _ = expect ps EQ in
-          let (estmts, atom) = ctxt "stmt: paren_copy_to_tup rval" parse_expr_atom ps in
+          let (estmts, atom) =
+            ctxt "stmt: paren_copy_to_tup rval" parse_expr_atom ps
+          in
           let _ = expect ps SEMI in
           let stmts = Array.append lstmts estmts in
           let bpos = lexpos ps in
@@ -494,7 +541,9 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
                 | OPEQ binop_token ->
                     bump ps;
-                    let (stmts, rhs) = ctxt "stmt: opeq rhs" parse_expr_atom ps in
+                    let (stmts, rhs) =
+                      ctxt "stmt: opeq rhs" parse_expr_atom ps
+                    in
                     let binop =
                       match binop_token with
                           PLUS    -> Ast.BINOP_add
@@ -511,7 +560,8 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
                         | _       -> raise (err "unknown opeq token" ps)
                     in
                       expect ps SEMI;
-                      spans ps stmts apos (Ast.STMT_copy_binop (lval, binop, rhs))
+                      spans ps stmts apos
+                        (Ast.STMT_copy_binop (lval, binop, rhs))
 
                 | LARROW ->
                     bump ps;
@@ -521,18 +571,25 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
 
                 | SEND ->
                     bump ps;
-                    let (stmts, rhs) = ctxt "stmt: send rhs" parse_expr_atom ps in
+                    let (stmts, rhs) =
+                      ctxt "stmt: send rhs" parse_expr_atom ps
+                    in
                     let _ = expect ps SEMI in
                     let bpos = lexpos ps in
                     let (src, copy) = match rhs with
                         Ast.ATOM_lval lv -> (lv, [| |])
                       | _ ->
-                          let (_, tmp, tempdecl) = build_tmp ps slot_auto apos bpos in
+                          let (_, tmp, tempdecl) =
+                            build_tmp ps slot_auto apos bpos
+                          in
                           let copy = span ps apos bpos
                             (Ast.STMT_copy (tmp, Ast.EXPR_atom rhs)) in
                               ((clone_lval ps tmp), [| tempdecl; copy |])
                     in
-                    let send = span ps apos bpos (Ast.STMT_send (lval, src)) in
+                    let send =
+                      span ps apos bpos
+                        (Ast.STMT_send (lval, src))
+                    in
                       Array.concat [ stmts; copy; [| send |] ]
 
                 | _ -> raise (unexpected ps)
@@ -552,13 +609,16 @@ and parse_ty_params (ps:pstate)
     : (Ast.ty_param identified) array =
   match peek ps with
       LBRACKET ->
-        bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA) (parse_ty_param (ref 0)) ps
+        bracketed_zero_or_more LBRACKET RBRACKET (Some COMMA)
+          (parse_ty_param (ref 0)) ps
     | _ -> arr []
 
 and parse_ident_and_params (ps:pstate) (cstr:string)
     : (Ast.ident * (Ast.ty_param identified) array) =
   let ident = ctxt ("mod " ^ cstr ^ " item: ident") Pexp.parse_ident ps in
-  let params = ctxt ("mod " ^ cstr ^ " item: type params") parse_ty_params ps in
+  let params =
+    ctxt ("mod " ^ cstr ^ " item: type params") parse_ty_params ps
+  in
     (ident, params)
 
 and parse_inputs
@@ -615,13 +675,16 @@ and parse_inputs
 
 and parse_in_and_out
     (ps:pstate)
-    : ((Ast.slot identified * Ast.ident) array * Ast.constrs * Ast.slot identified) =
+    : ((Ast.slot identified * Ast.ident) array
+       * Ast.constrs
+       * Ast.slot identified) =
   let (inputs, constrs) = parse_inputs ps in
   let output =
     match peek ps with
         RARROW ->
           bump ps;
-          ctxt "fn in and out: output slot" (Pexp.parse_identified_slot true) ps
+          ctxt "fn in and out: output slot"
+            (Pexp.parse_identified_slot true) ps
       | _ ->
           let apos = lexpos ps in
             span ps apos apos slot_nil
@@ -635,7 +698,9 @@ and parse_fn
     (effect:Ast.effect)
     (ps:pstate)
     : Ast.fn =
-    let (inputs, constrs, output) = ctxt "fn: in_and_out" parse_in_and_out ps in
+    let (inputs, constrs, output) =
+      ctxt "fn: in_and_out" parse_in_and_out ps
+    in
     let body = ctxt "fn: body" parse_block ps in
       { Ast.fn_input_slots = inputs;
         Ast.fn_input_constrs = constrs;
@@ -668,7 +733,8 @@ and parse_meta (ps:pstate) : Ast.meta =
       fun (id,v) ->
         match v with
             None ->
-              raise (err "wildcard found in meta pattern where value expected" ps)
+              raise (err ("wildcard found in meta "
+                          ^ "pattern where value expected") ps)
           | Some v -> (id,v)
     end
     (parse_meta_pat ps)
@@ -746,7 +812,9 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
                     let is_iter = (peek ps) = ITER in
                       bump ps;
                       let (ident, params) = parse_ident_and_params ps "fn" in
-                      let fn = ctxt "mod fn item: fn" (parse_fn is_iter effect) ps in
+                      let fn =
+                        ctxt "mod fn item: fn" (parse_fn is_iter effect) ps
+                      in
                       let bpos = lexpos ps in
                         (ident,
                          span ps apos bpos
@@ -805,7 +873,9 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
           begin
             bump ps;
             let ident = ctxt "use mod: ident" Pexp.parse_ident ps in
-            let meta = ctxt "use mod: meta" parse_optional_meta_pat ps ident in
+            let meta =
+              ctxt "use mod: meta" parse_optional_meta_pat ps ident
+            in
             let bpos = lexpos ps in
             let id = (span ps apos bpos ()).id in
             let (path, items) =
@@ -813,13 +883,15 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
             in
             let bpos = lexpos ps in
               expect ps SEMI;
-              let rlib = REQUIRED_LIB_rust { required_libname = path;
-                                             required_prefix = ps.pstate_depth }
+              let rlib =
+                REQUIRED_LIB_rust { required_libname = path;
+                                    required_prefix = ps.pstate_depth }
               in
                 iflog ps
                   begin
                     fun _ ->
-                      log ps "extracted mod from %s (binding to %s)" path ident;
+                      log ps "extracted mod from %s (binding to %s)"
+                        path ident;
                       log ps "%a" Ast.sprintf_mod_items items;
                   end;
                 let item = decl [||] (Ast.MOD_ITEM_mod (empty_view, items)) in
@@ -833,7 +905,9 @@ and parse_mod_item (ps:pstate) : (Ast.ident * Ast.mod_item) =
       | _ -> raise (unexpected ps)
 
 
-and parse_mod_items_from_signature (ps:pstate) : (Ast.mod_view * Ast.mod_items) =
+and parse_mod_items_from_signature
+    (ps:pstate)
+    : (Ast.mod_view * Ast.mod_items) =
     let mis = Hashtbl.create 0 in
       expect ps LBRACE;
       while not (peek ps = RBRACE)
@@ -919,15 +993,21 @@ and expand_tags
           fun name tup ->
             let ident = match name with
                 Ast.NAME_base (Ast.BASE_ident ident) -> ident
-              | _ -> raise (Parse_err (ps, "unexpected name type while expanding tag"))
+              | _ ->
+                  raise (Parse_err
+                           (ps, "unexpected name type while expanding tag"))
             in
-            let header = Array.map (fun slot -> (clone_span ps item slot)) tup in
+            let header =
+              Array.map (fun slot -> (clone_span ps item slot)) tup
+            in
             let tag_item' = Ast.MOD_ITEM_tag (header, ttag, id) in
             let cloned_params =
               Array.map (fun p -> clone_span ps p p.node)
                 item.node.Ast.decl_params
             in
-            let tag_item = clone_span ps item (decl cloned_params tag_item') in
+            let tag_item =
+              clone_span ps item (decl cloned_params tag_item')
+            in
               tags := (ident, tag_item) :: (!tags)
         end
         ttag;
@@ -974,7 +1054,10 @@ and note_required_mod
     (rlib:required_lib)
     (item:Ast.mod_item)
     : unit =
-  iflog ps (fun _ -> log ps "marking item #%d as required" (int_of_node item.id));
+  iflog ps
+    begin
+      fun _ -> log ps "marking item #%d as required" (int_of_node item.id)
+    end;
   htab_put ps.pstate_required item.id (rlib, conv);
   if not (Hashtbl.mem ps.pstate_sess.Session.sess_spans item.id)
   then Hashtbl.add ps.pstate_sess.Session.sess_spans item.id sp;

@@ -33,9 +33,15 @@ type visitor =
       visit_lval_pre: Ast.lval -> unit;
       visit_lval_post: Ast.lval -> unit;
       visit_mod_item_pre:
-        Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
+        (Ast.ident
+         -> ((Ast.ty_param identified) array)
+           -> Ast.mod_item
+             -> unit);
       visit_mod_item_post:
-        Ast.ident -> ((Ast.ty_param identified) array) -> Ast.mod_item -> unit;
+        (Ast.ident
+         -> ((Ast.ty_param identified) array)
+           -> Ast.mod_item
+             -> unit);
       visit_obj_fn_pre:
         (Ast.obj identified) -> Ast.ident -> (Ast.fn identified) -> unit;
       visit_obj_fn_post:
@@ -122,7 +128,8 @@ let rec name_of ncs =
       [] -> bug () "Walk.name_of_ncs: empty path"
     | [(Ast.COMP_ident i)] -> Ast.NAME_base (Ast.BASE_ident i)
     | [(Ast.COMP_app x)] -> Ast.NAME_base (Ast.BASE_app x)
-    | [(Ast.COMP_idx _)] -> bug () "Walk.name_of_ncs: path-name contains COMP_idx"
+    | [(Ast.COMP_idx _)] ->
+        bug () "Walk.name_of_ncs: path-name contains COMP_idx"
     | nc::ncs -> Ast.NAME_ext (name_of ncs, nc)
 ;;
 

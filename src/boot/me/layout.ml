@@ -20,8 +20,8 @@ let layout_visitor
    *     |caller args                 |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp + abi_frame_base_sz + abi_implicit_args_sz
-   *     |task ptr (implicit arg)     |
+   *     +----------------------------+ <-- fp + abi_frame_base_sz
+   *     |task ptr (implicit arg)     |        + abi_implicit_args_sz
    *     |output ptr (implicit arg)   |
    *     +----------------------------+ <-- fp + abi_frame_base_sz
    *     |return pc                   |
@@ -31,32 +31,21 @@ let layout_visitor
    *     |crate ptr                   |
    *     |crate-rel frame info disp   |
    *     +----------------------------+ <-- fp - abi_frame_info_sz
-   *     |iterator link segments      |
-   *     |...                         |
-   *     |...                         |
-   *     +----------------------------+ <-- fp - (abi_frame_info_sz + (k * abi_loop_info_sz))
    *     |spills determined in ra     |
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - (abi_frame_info_sz + (k * abi_loop_info_sz) + spillsz)
-   *     |...                         |
+   *     +----------------------------+ <-- fp - (abi_frame_info_sz
+   *     |...                         |            + spillsz)
    *     |frame-allocated stuff       |
    *     |determined in resolve       |
    *     |laid out in layout          |
    *     |...                         |
    *     |...                         |
    *     +----------------------------+ <-- fp - framesz
-   *     |...                         |
-   *     |iterator frames             |
-   *     |initially none              |
-   *     |resizes during execution    |
+   *     |call space                  |      == sp + callsz
    *     |...                         |
    *     |...                         |
-   *     +----------------------------+ <-- fp - (framesz + itframesz) == sp + callsz
-   *     |call space                  |
-   *     |...                         |
-   *     |...                         |
-   *     +----------------------------+ <-- fp - (framesz + itframesz + callsz) == sp
+   *     +----------------------------+ <-- fp - (framesz + callsz) == sp
    *
    *   - Slot offsets fall into three classes:
    *
@@ -129,7 +118,9 @@ let layout_visitor
   in
 
   let rty_sz rty = Il.referent_ty_size cx.ctxt_abi.Abi.abi_word_bits rty in
-  let rty_layout rty = Il.referent_ty_layout cx.ctxt_abi.Abi.abi_word_bits rty in
+  let rty_layout rty =
+    Il.referent_ty_layout cx.ctxt_abi.Abi.abi_word_bits rty
+  in
 
   let is_subword_size sz =
     match sz with
@@ -198,8 +189,13 @@ let layout_visitor
       ignore (Array.fold_left accum (offset, SIZE_fixed 0L) slots)
   in
 
-  let layout_block (slot_accum:slot_stack) (offset:size) (block:Ast.block) : unit =
-    log cx "laying out block #%d at fp offset %s" (int_of_node block.id) (string_of_size offset);
+  let layout_block
+      (slot_accum:slot_stack)
+      (offset:size)
+      (block:Ast.block)
+      : unit =
+    log cx "laying out block #%d at fp offset %s"
+      (int_of_node block.id) (string_of_size offset);
     let block_slot_ids =
       Array.of_list (htab_vals (Hashtbl.find cx.ctxt_block_slots block.id))
     in
@@ -218,7 +214,8 @@ let layout_visitor
                   elts Abi.calltup_elt_args))
         | _ -> bug () "call tuple has non-StructTy"
     in
-      log cx "laying out header for node #%d at fp offset %s" (int_of_node id) (string_of_size offset);
+      log cx "laying out header for node #%d at fp offset %s"
+        (int_of_node id) (string_of_size offset);
       layout_slot_ids (Stack.create()) true false offset input_slot_ids
   in
 
@@ -229,7 +226,8 @@ let layout_visitor
         SIZE_fixed (word_n (Abi.exterior_rc_slot_field_body
                             + 1 (* the state tydesc. *)))
     in
-      log cx "laying out object-state for node #%d at offset %s" (int_of_node id) (string_of_size offset);
+      log cx "laying out object-state for node #%d at offset %s"
+        (int_of_node id) (string_of_size offset);
       layout_slot_ids (Stack.create()) true false offset state_slot_ids
   in
 
@@ -419,7 +417,9 @@ let layout_visitor
                     DEFN_item i -> Array.length i.Ast.decl_params
                   | _ -> 0
               in
-              let rty = call_args_referent_type cx n_ty_params lv_ty closure in
+              let rty =
+                call_args_referent_type cx n_ty_params lv_ty closure
+              in
               let sz = Il.referent_ty_size abi.Abi.abi_word_bits rty in
               let frame_id = fst (Stack.top frame_stack) in
               let curr = Hashtbl.find cx.ctxt_call_sizes frame_id in

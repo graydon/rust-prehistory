@@ -29,9 +29,15 @@ let trans_crate
     Llvm.set_metadata inst dbg_mdkind md
   in
   let md_str (s:string) : Llvm.llvalue = Llvm.mdstring llctx s in
-  let md_node (vals:Llvm.llvalue array) : Llvm.llvalue = Llvm.mdnode llctx vals in
-  let const_i32 (i:int) : Llvm.llvalue = Llvm.const_int (Llvm.i32_type llctx) i in
-  let const_i1 (i:int) : Llvm.llvalue = Llvm.const_int (Llvm.i1_type llctx) i in
+  let md_node (vals:Llvm.llvalue array) : Llvm.llvalue =
+    Llvm.mdnode llctx vals
+  in
+  let const_i32 (i:int) : Llvm.llvalue =
+    Llvm.const_int (Llvm.i32_type llctx) i
+  in
+  let const_i1 (i:int) : Llvm.llvalue =
+    Llvm.const_int (Llvm.i1_type llctx) i
+  in
   let llvm_debug_version : int = 0x8 lsl 16 in
   let const_dw_tag (tag:Dwarf.dw_tag) : Llvm.llvalue =
     const_i32 (llvm_debug_version lor (Dwarf.dw_tag_to_int tag))
@@ -83,7 +89,9 @@ let trans_crate
     Llvm.function_type out args
   in
 
-  let imm (i:int64) : Llvm.llvalue = Llvm.const_int word_ty (Int64.to_int i) in
+  let imm (i:int64) : Llvm.llvalue =
+    Llvm.const_int word_ty (Int64.to_int i)
+  in
 
   let asm_glue = Llasm.get_glue llctx llmod abi sess in
 
@@ -111,7 +119,8 @@ let trans_crate
         fun _ ->
           let name = Llvm.value_name callee in
           log sem_cx "build_call: %s(%s)" name (llvals_str args);
-          log sem_cx "build_call: typeof(%s) = %s" name (llty_str (Llvm.type_of callee))
+          log sem_cx "build_call: typeof(%s) = %s"
+            name (llty_str (Llvm.type_of callee))
       end;
     Llvm.build_call callee args rvid builder
   in
@@ -154,7 +163,9 @@ let trans_crate
     let llupcall = Llvm.const_pointercast llupcall word_ty in
     let llargs =
       Array.map
-        (fun arg -> Llvm.build_pointercast arg word_ty (anon_llid "arg") llbuilder)
+        (fun arg ->
+           Llvm.build_pointercast arg word_ty
+             (anon_llid "arg") llbuilder)
         llargs
     in
     let llallargs = Array.append [| lltask; llupcall |] llargs in
@@ -164,7 +175,9 @@ let trans_crate
       match lldest with
           None -> ()
         | Some lldest ->
-            let lldest = Llvm.build_pointercast lldest wordptr_ty "" llbuilder in
+            let lldest =
+              Llvm.build_pointercast lldest wordptr_ty "" llbuilder
+            in
               ignore (Llvm.build_store llrv lldest llbuilder);
   in
 
@@ -186,11 +199,12 @@ let trans_crate
     upcall llbuilder lltask "upcall_free" None [| src |]
   in
 
-    (*
-      let trans_malloc (llbuilder:Llvm.llbuilder) (dst:Llvm.llvalue) (nbytes:int64) : unit =
-      upcall llbuilder "upcall_malloc" (Some dst) [| imm nbytes |]
-      in
-    *)
+  (*
+   * let trans_malloc (llbuilder:Llvm.llbuilder)
+   *                  (dst:Llvm.llvalue) (nbytes:int64) : unit =
+   *   upcall llbuilder "upcall_malloc" (Some dst) [| imm nbytes |]
+   * in
+   *)
 
   (* Type translation *)
 
@@ -311,7 +325,11 @@ let trans_crate
       (ty:Ast.ty)
       (dst_ptr:Llvm.llvalue)
       (src_ptr:Llvm.llvalue)
-      (f:Llvm.llvalue -> Llvm.llvalue -> Ast.slot -> (Ast.ty_iso option) -> unit)
+      (f:(Llvm.llvalue
+          -> Llvm.llvalue
+            -> Ast.slot
+              -> (Ast.ty_iso option)
+                -> unit))
       (curr_iso:Ast.ty_iso option)
       : unit =
 
@@ -377,7 +395,9 @@ let trans_crate
         : Llvm.llbuilder =
       let ptr = Llvm.build_load slot_ptr (anon_llid "tmp") llbuilder in
       let null = Llvm.const_pointer_null llty in
-      let test = Llvm.build_icmp Llvm.Icmp.Ne null ptr (anon_llid "nullp") llbuilder in
+      let test =
+        Llvm.build_icmp Llvm.Icmp.Ne null ptr (anon_llid "nullp") llbuilder
+      in
       let (llthen, llthen_builder) = new_block "then" in
       let (llnext, llnext_builder) = new_block "next" in
         ignore (Llvm.build_cond_br test llthen llnext llbuilder);
@@ -397,7 +417,10 @@ let trans_crate
       let rc = Llvm.build_sub rc (imm 1L) (anon_llid "tmp") llbuilder in
       let _ = Llvm.build_store rc rc_ptr llbuilder in
         log sem_cx "rc type: %s" (llval_str rc);
-      let test = Llvm.build_icmp Llvm.Icmp.Eq rc (imm 0L) (anon_llid "zerop") llbuilder in
+      let test =
+        Llvm.build_icmp Llvm.Icmp.Eq
+          rc (imm 0L) (anon_llid "zerop") llbuilder
+      in
       let (llthen, llthen_builder) = new_block "then" in
       let (llnext, llnext_builder) = new_block "next" in
         ignore (Llvm.build_cond_br test llthen llnext llbuilder);
@@ -509,7 +532,8 @@ let trans_crate
       (llblock, llbuilder)
     in
 
-    (* Build up the slot-to-llvalue mapping, allocating space along the way. *)
+    (* Build up the slot-to-llvalue mapping, allocating space along the
+     * way. *)
     let slot_to_llvalue = Hashtbl.create 0 in
     let (_, llinitbuilder) = new_block None "init" in
 
@@ -533,7 +557,11 @@ let trans_crate
     (* Allocate space for all the blocks' slots.
      * and zero the exteriors. *)
     let init_block (block_id:node_id) : unit =
-      let init_slot (key:Ast.slot_key) (slot_id:node_id) (slot:Ast.slot) : unit =
+      let init_slot
+          (key:Ast.slot_key)
+          (slot_id:node_id)
+          (slot:Ast.slot)
+          : unit =
         let name = Ast.sprintf_slot_key () key in
         let llty = trans_slot (Some slot_id) slot in
         let llptr = Llvm.build_alloca llty name llinitbuilder in
@@ -552,7 +580,10 @@ let trans_crate
         iter_block_slots sem_cx block_id init_slot
     in
 
-    let exit_block (llbuilder:Llvm.llbuilder) (block_id:node_id) : Llvm.llbuilder =
+    let exit_block
+        (llbuilder:Llvm.llbuilder)
+        (block_id:node_id)
+        : Llvm.llbuilder =
       let r = ref llbuilder in
         iter_block_slots sem_cx block_id
           begin
@@ -601,7 +632,8 @@ let trans_crate
             Llvm.const_int (Llvm.i32_type llctx) ch
       in
 
-      (* Translates an lval by reference into the appropriate pointer value. *)
+      (* Translates an lval by reference into the appropriate pointer
+       * value. *)
       let trans_lval (lval:Ast.lval) : Llvm.llvalue =
         iflog (fun _ -> log sem_cx "trans_lval: %a" Ast.sprintf_lval lval);
         match lval with
@@ -713,7 +745,8 @@ let trans_crate
           [] -> terminate llbuilder block_id
         | head::tail ->
 
-            iflog (fun _ -> log sem_cx "trans_stmt: %a" Ast.sprintf_stmt head);
+            iflog (fun _ ->
+                     log sem_cx "trans_stmt: %a" Ast.sprintf_stmt head);
 
             let trans_tail_with_builder llbuilder' : unit =
               trans_stmts block_id llbuilder' tail terminate
@@ -727,7 +760,9 @@ let trans_crate
                   let trans_tup_atom idx (_, _, atom) =
                     let indices = [| zero; const_i32 idx |] in
                     let gep_id = anon_llid "init_tup_gep" in
-                    let ptr = Llvm.build_gep lldest indices gep_id llbuilder in
+                    let ptr =
+                      Llvm.build_gep lldest indices gep_id llbuilder
+                    in
                     ignore (Llvm.build_store (trans_atom atom) ptr llbuilder)
                   in
                   Array.iteri trans_tup_atom atoms;
@@ -768,7 +803,8 @@ let trans_crate
                     match atom_opt with
                         None -> ()
                       | Some atom ->
-                          ignore (Llvm.build_store (trans_atom atom) lloutptr llbuilder)
+                          ignore (Llvm.build_store (trans_atom atom)
+                                    lloutptr llbuilder)
                   end;
                   let llbuilder = exit_block llbuilder block_id in
                     ignore (Llvm.build_ret_void llbuilder)
@@ -804,15 +840,21 @@ let trans_crate
               | Ast.STMT_init_str (dst, str) ->
                   let d = trans_lval dst in
                   let s = static_str str in
-                  let len = Llvm.const_int word_ty ((String.length str) + 1) in
-                    upcall llbuilder lltask "upcall_new_str" (Some d) [| s; len |];
+                  let len =
+                    Llvm.const_int word_ty ((String.length str) + 1)
+                  in
+                    upcall llbuilder lltask "upcall_new_str"
+                      (Some d) [| s; len |];
                     trans_tail ()
 
               | _ -> trans_stmts block_id llbuilder tail terminate
 
-    (* Translates an AST block to one or more LLVM basic blocks and returns the
-     * first basic block. The supplied callback is expected to add a
-     * terminator instruction. *)
+    (* 
+     * Translates an AST block to one or more LLVM basic blocks and returns
+     * the first basic block. The supplied callback is expected to add a
+     * terminator instruction.
+     *)
+
     and trans_block
         ({ node = (stmts:Ast.stmt array); id = id }:Ast.block)
         (terminate:Llvm.llbuilder -> node_id -> unit)
@@ -879,7 +921,8 @@ let trans_crate
       let items = snd (crate'.Ast.crate_items) in
         Hashtbl.iter declare_mod_item items;
         Hashtbl.iter trans_mod_item items;
-        Llfinal.finalize_module llctx llmod abi asm_glue exit_task_glue crate_ptr;
+        Llfinal.finalize_module
+          llctx llmod abi asm_glue exit_task_glue crate_ptr;
         llmod
     with e -> Llvm.dispose_module llmod; raise e
 ;;

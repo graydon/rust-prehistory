@@ -108,7 +108,8 @@ let parse_meta (ps:pstate) : meta =
       fun (id,v) ->
         match v with
             None ->
-              raise (err "wildcard found in meta pattern where value expected" ps)
+              raise (err ("wildcard found in meta pattern "
+                          ^ "where value expected") ps)
           | Some v -> (id,v)
     end
     (parse_meta_pat ps)
@@ -195,7 +196,9 @@ and parse_cexp (ps:pstate) : cexp =
           begin
             bump ps;
             let ident = ctxt "use mod: name" Pexp.parse_ident ps in
-            let meta = ctxt "use mod: meta" parse_optional_meta_pat ps ident in
+            let meta =
+              ctxt "use mod: meta" parse_optional_meta_pat ps ident
+            in
             let bpos = lexpos ps in
               expect ps SEMI;
               CEXP_use_mod
@@ -369,7 +372,10 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
               None -> name ^ ".rs"
             | Some p -> eval_pexp_to_str env p
         in
-        let full_path = List.fold_left Filename.concat "" (List.rev (path :: env.env_prefix)) in
+        let full_path =
+          List.fold_left Filename.concat ""
+            (List.rev (path :: env.env_prefix))
+        in
         let ps = env.env_ps in
         let p =
           make_parser
@@ -427,7 +433,8 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
           iflog ps
             begin
               fun _ ->
-                log ps "extracted mod signature from %s (binding to %s)" path name;
+                log ps "extracted mod signature from %s (binding to %s)"
+                  path name;
                 log ps "%a" Ast.sprintf_mod_items items;
             end;
           let rlib = REQUIRED_LIB_rust { required_libname = path;
@@ -452,7 +459,9 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
               None -> env.env_ps.pstate_infer_lib_name name
             | Some p -> eval_pexp_to_str env p
         in
-        let item = decl [||] (Ast.MOD_ITEM_mod (Item.empty_view, cn.nat_items)) in
+        let item =
+          decl [||] (Ast.MOD_ITEM_mod (Item.empty_view, cn.nat_items))
+        in
         let item = { id = id; node = item } in
         let rlib = REQUIRED_LIB_c { required_libname = filename;
                                     required_prefix = 1 }
@@ -463,7 +472,14 @@ and eval_cexp (env:env) (exp:cexp) : cdir array =
           [| CDIR_mod (name, item) |]
 
     | CEXP_meta m ->
-        [| CDIR_meta (Array.map (fun (id, p) -> (id, eval_pexp_to_str env p)) m.node) |]
+        [| CDIR_meta
+             begin
+               Array.map
+                 begin
+                   fun (id, p) -> (id, eval_pexp_to_str env p)
+                 end
+                 m.node
+             end |]
 
     | CEXP_auth a -> [| CDIR_auth a.node |]
 
@@ -487,7 +503,9 @@ and eval_pexp (env:env) (exp:Pexp.pexp) : pval =
                           | Ast.BINOP_sub -> Int64.sub av bv
                           | Ast.BINOP_mul -> Int64.mul av bv
                           | Ast.BINOP_div -> Int64.div av bv
-                          | _ -> bug () "unhandled arithmetic op in Cexp.eval_pexp"
+                          | _ ->
+                              bug ()
+                                "unhandled arithmetic op in Cexp.eval_pexp"
                       end
         end
 
@@ -603,7 +621,7 @@ let with_err_handling sess thunk =
 
 let parse_crate_file
     (sess:Session.sess)
-    (get_mod:(Ast.meta_pat -> node_id -> (node_id ref) -> (opaque_id ref) -> (filename * Ast.mod_items)))
+    (get_mod:get_mod_fn)
     (infer_lib_name:(Ast.ident -> filename))
     : Ast.crate =
   let fname = Session.filename_of sess.Session.sess_in in
@@ -613,7 +631,8 @@ let parse_crate_file
   let required = Hashtbl.create 4 in
   let required_syms = Hashtbl.create 4 in
   let ps =
-    make_parser tref nref oref sess get_mod infer_lib_name required required_syms fname
+    make_parser tref nref oref sess get_mod
+      infer_lib_name required required_syms fname
   in
 
   let files = Hashtbl.create 0 in
@@ -693,7 +712,7 @@ let parse_crate_file
 
 let parse_src_file
     (sess:Session.sess)
-    (get_mod:(Ast.meta_pat -> node_id -> (node_id ref) -> (opaque_id ref) -> (filename * Ast.mod_items)))
+    (get_mod:get_mod_fn)
     (infer_lib_name:(Ast.ident -> filename))
     : Ast.crate =
   let fname = Session.filename_of sess.Session.sess_in in
@@ -703,7 +722,8 @@ let parse_src_file
   let required = Hashtbl.create 0 in
   let required_syms = Hashtbl.create 0 in
   let ps =
-    make_parser tref nref oref sess get_mod infer_lib_name required required_syms fname
+    make_parser tref nref oref sess get_mod
+      infer_lib_name required required_syms fname
   in
     with_err_handling sess
       begin

@@ -226,6 +226,9 @@ type pe_subsystem =
   | IMAGE_SUBSYSTEM_WINDOWS_CUI
 ;;
 
+let zero32 = WORD (TY_u32, (IMM 0L))
+;;
+
 let pe_loader_header
     ~(sess:Session.sess)
     ~(text_fixup:fixup)
@@ -242,56 +245,59 @@ let pe_loader_header
   DEF
     (loader_hdr_fixup,
      SEQ [|
-       WORD (TY_u16, (IMM 0x10bL));                 (* COFF magic tag for PE32.  *)
+       WORD (TY_u16, (IMM 0x10bL));          (* COFF magic tag for PE32.  *)
        (* Snagged *)
-       WORD (TY_u8, (IMM 0x2L));                    (* Linker major version.     *)
-       WORD (TY_u8, (IMM 0x38L));                   (* Linker minor version.     *)
+       WORD (TY_u8, (IMM 0x2L));             (* Linker major version.     *)
+       WORD (TY_u8, (IMM 0x38L));            (* Linker minor version.     *)
 
-       WORD (TY_u32, (F_SZ text_fixup));            (* "size of code"            *)
-       WORD (TY_u32, (F_SZ init_data_fixup));       (* "size of all init data"   *)
-       WORD (TY_u32, (IMM size_of_uninit_data));
+       WORD (TY_u32, (F_SZ text_fixup));     (* "size of code"            *)
+       WORD (TY_u32,                         (* "size of all init data"   *)
+             (F_SZ init_data_fixup));
+       WORD (TY_u32,
+             (IMM size_of_uninit_data));
 
        if sess.Session.sess_library_mode
        then
-         WORD (TY_u32, (IMM 0L))                    (* DLLMain *)
+         zero32             (* DLLMain *)
        else
-         WORD (TY_u32, (rva entry_point_fixup));    (* "address of entry point"  *)
+         WORD (TY_u32,
+               (rva entry_point_fixup));     (* "address of entry point"  *)
 
-       WORD (TY_u32, (rva text_fixup));             (* "base of code"            *)
-       WORD (TY_u32, (rva init_data_fixup));        (* "base of data"            *)
+       WORD (TY_u32, (rva text_fixup));      (* "base of code"            *)
+       WORD (TY_u32, (rva init_data_fixup)); (* "base of data"            *)
        WORD (TY_u32, (IMM pe_image_base));
        WORD (TY_u32, (IMM (Int64.of_int
                       pe_mem_alignment)));
        WORD (TY_u32, (IMM (Int64.of_int
                       pe_file_alignment)));
 
-       WORD (TY_u16, (IMM 4L));                     (* Major OS version: NT4.     *)
-       WORD (TY_u16, (IMM 0L));                     (* Minor OS version.          *)
-       WORD (TY_u16, (IMM 1L));                     (* Major image version.       *)
-       WORD (TY_u16, (IMM 0L));                     (* Minor image version.       *)
-       WORD (TY_u16, (IMM 4L));                     (* Major subsystem version.   *)
-       WORD (TY_u16, (IMM 0L));                     (* Minor subsystem version.   *)
+       WORD (TY_u16, (IMM 4L));             (* Major OS version: NT4.     *)
+       WORD (TY_u16, (IMM 0L));             (* Minor OS version.          *)
+       WORD (TY_u16, (IMM 1L));             (* Major image version.       *)
+       WORD (TY_u16, (IMM 0L));             (* Minor image version.       *)
+       WORD (TY_u16, (IMM 4L));             (* Major subsystem version.   *)
+       WORD (TY_u16, (IMM 0L));             (* Minor subsystem version.   *)
 
-       WORD (TY_u32, (IMM 0L));                     (* Reserved.                  *)
+       zero32;                              (* Reserved.                  *)
 
        WORD (TY_u32, (M_SZ image_fixup));
        WORD (TY_u32, (M_SZ all_hdrs_fixup));
 
-       WORD (TY_u32, (IMM 0L));                     (* Checksum, but OK if zero.  *)
+       zero32;                              (* Checksum, but OK if zero.  *)
        WORD (TY_u16, (IMM (match subsys with
                         IMAGE_SUBSYSTEM_WINDOWS_GUI -> 2L
                       | IMAGE_SUBSYSTEM_WINDOWS_CUI -> 3L)));
 
-       WORD (TY_u16, (IMM 0L));                     (* DLL characteristics.       *)
+       WORD (TY_u16, (IMM 0L));             (* DLL characteristics.       *)
 
-       WORD (TY_u32, (IMM 0x100000L));              (* Size of stack reserve.     *)
-       WORD (TY_u32, (IMM 0x4000L));                (* Size of stack commit.      *)
+       WORD (TY_u32, (IMM 0x100000L));      (* Size of stack reserve.     *)
+       WORD (TY_u32, (IMM 0x4000L));        (* Size of stack commit.      *)
 
-       WORD (TY_u32, (IMM 0x100000L));              (* Size of heap reserve.      *)
-       WORD (TY_u32, (IMM 0x1000L));                (* Size of heap commit.       *)
+       WORD (TY_u32, (IMM 0x100000L));      (* Size of heap reserve.      *)
+       WORD (TY_u32, (IMM 0x1000L));        (* Size of heap commit.       *)
 
-       WORD (TY_u32, (IMM 0L));                     (* Reserved.                  *)
-       WORD (TY_u32, (IMM 16L));                    (* Number of dir references.  *)
+       zero32;                              (* Reserved.                  *)
+       WORD (TY_u32, (IMM 16L));            (* Number of dir references.  *)
 
        (* Begin directories, variable part of hdr.        *)
 
@@ -312,21 +318,21 @@ let pe_loader_header
        WORD (TY_u32, (rva import_dir_fixup));
        WORD (TY_u32, (M_SZ import_dir_fixup));
 
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Resource dir.      *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Exception dir.     *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Security dir.      *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Base reloc dir.    *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Debug dir.         *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Image desc dir.    *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Mach spec dir.     *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* TLS dir.           *)
+       zero32; zero32;    (* Resource dir.      *)
+       zero32; zero32;    (* Exception dir.     *)
+       zero32; zero32;    (* Security dir.      *)
+       zero32; zero32;    (* Base reloc dir.    *)
+       zero32; zero32;    (* Debug dir.         *)
+       zero32; zero32;    (* Image desc dir.    *)
+       zero32; zero32;    (* Mach spec dir.     *)
+       zero32; zero32;    (* TLS dir.           *)
 
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Load config.       *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Bound import.      *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* IAT                *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* Delay import.      *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* COM descriptor     *)
-       WORD (TY_u32, (IMM 0L)); WORD (TY_u32, (IMM 0L));    (* ????????           *)
+       zero32; zero32;    (* Load config.       *)
+       zero32; zero32;    (* Bound import.      *)
+       zero32; zero32;    (* IAT                *)
+       zero32; zero32;    (* Delay import.      *)
+       zero32; zero32;    (* COM descriptor     *)
+       zero32; zero32;    (* ????????           *)
      |])
 
 ;;
@@ -433,9 +439,9 @@ let pe_section_header
       WORD (TY_u32, (F_SZ hdr_fixup));  (* "Size of raw data"    *)
       WORD (TY_u32, (F_POS hdr_fixup)); (* "Pointer to raw data" *)
 
-      WORD (TY_u32, (IMM 0L));      (* Reserved. *)
-      WORD (TY_u32, (IMM 0L));      (* Reserved. *)
-      WORD (TY_u32, (IMM 0L));      (* Reserved. *)
+      zero32;      (* Reserved. *)
+      zero32;      (* Reserved. *)
+      zero32;      (* Reserved. *)
 
       WORD (TY_u32, (IMM (fold_flags
                      (fun c -> match c with
@@ -491,17 +497,15 @@ type pe_import_dll_entry =
      "import lookup table" (ILT, also in this section). The slot is
      a pointer to a string in this section giving the name.
 
-     Immediately *after* the ILT, there is an "import address table"
-     (IAT), which is initially identical to the ILT. The loader
-     replaces the entries in the IAT slots with the imported pointers
-     at runtime.
+     Immediately *after* the ILT, there is an "import address table" (IAT),
+     which is initially identical to the ILT. The loader replaces the entries
+     in the IAT slots with the imported pointers at runtime.
 
-     A central directory at the start of the section lists all the the
-     import thunk tables. Each entry in the import directory is 20 bytes
-     (5 words) but only the last 2 are used: the second last is a pointer
-     to the string name of the DLL in question (string also in this
-     section) and the last is a pointer to the import thunk table itself
-     (also in this section).
+     A central directory at the start of the section lists all the the import
+     thunk tables. Each entry in the import directory is 20 bytes (5 words)
+     but only the last 2 are used: the second last is a pointer to the string
+     name of the DLL in question (string also in this section) and the last is
+     a pointer to the import thunk table itself (also in this section).
 
      Curiously, of the 5 documents I've consulted on the nature of the
      first 3 fields, I find a variety of interpretations.
@@ -521,11 +525,15 @@ let pe_import_section
          first, last, or both of the slots in one of these rows points
          to the RVA of the name/hint used to look the import up. This
          table format is a mess!  *)
-      WORD (TY_u32, (rva entry.pe_import_dll_ILT_fixup));    (* Import lookup table. *)
-      WORD (TY_u32, (IMM 0L));                               (* Timestamp, unused.   *)
-      WORD (TY_u32, (IMM 0x0L));                             (* Forwarder chain, unused. *)
+      WORD (TY_u32,
+            (rva
+               entry.pe_import_dll_ILT_fixup)); (* Import lookup table. *)
+      WORD (TY_u32, (IMM 0L));                  (* Timestamp, unused.   *)
+      WORD (TY_u32, (IMM 0x0L));                (* Forwarder chain, unused. *)
       WORD (TY_u32, (rva entry.pe_import_dll_name_fixup));
-      WORD (TY_u32, (rva entry.pe_import_dll_IAT_fixup));    (* Import address table.*)
+      WORD (TY_u32,
+            (rva
+               entry.pe_import_dll_IAT_fixup)); (* Import address table.*)
     |]
   in
 
@@ -538,7 +546,8 @@ let pe_import_section
   let form_IAT_slot
       (import:pe_import)
       : frag =
-    (DEF (import.pe_import_address_fixup, (WORD (TY_u32, (rva import.pe_import_name_fixup)))))
+    (DEF (import.pe_import_address_fixup,
+          (WORD (TY_u32, (rva import.pe_import_name_fixup)))))
   in
 
   let form_tables_for_dll
@@ -635,7 +644,9 @@ let pe_export_section
             (fun e -> (WORD (TY_u32, rva e.pe_export_address_fixup)))
             exports))
   in
-  let export_name_pointer_table_fixup = new_fixup "export name pointer table" in
+  let export_name_pointer_table_fixup =
+      new_fixup "export name pointer table"
+  in
   let export_name_pointer_table =
     DEF
       (export_name_pointer_table_fixup,
@@ -671,13 +682,13 @@ let pe_export_section
       WORD (TY_u32, IMM 0L);               (* Timestamp, unused.  *)
       WORD (TY_u16, IMM 0L);               (* Major vers., unused *)
       WORD (TY_u16, IMM 0L);               (* Minor vers., unused *)
-      WORD (TY_u32, rva image_name_fixup); (* Name RVA (of this image).      *)
-      WORD (TY_u32, IMM 1L);               (* Ordinal base, 1 by convention. *)
-      WORD (TY_u32, n_exports);            (* # entries in EAT.              *)
-      WORD (TY_u32, n_exports);            (* # entries in ENPT/EOT.         *)
-      WORD (TY_u32, rva export_addr_table_fixup);          (* EAT  *)
-      WORD (TY_u32, rva export_name_pointer_table_fixup);  (* ENPT *)
-      WORD (TY_u32, rva export_ordinal_table_fixup);       (* EOT  *)
+      WORD (TY_u32, rva image_name_fixup); (* Name RVA.           *)
+      WORD (TY_u32, IMM 1L);               (* Ordinal base = 1.   *)
+      WORD (TY_u32, n_exports);          (* # entries in EAT.     *)
+      WORD (TY_u32, n_exports);          (* # entries in ENPT/EOT.*)
+      WORD (TY_u32, rva export_addr_table_fixup);         (* EAT  *)
+      WORD (TY_u32, rva export_name_pointer_table_fixup); (* ENPT *)
+      WORD (TY_u32, rva export_ordinal_table_fixup);      (* EOT  *)
     |]
   in
     def_aligned export_dir_fixup
@@ -686,7 +697,8 @@ let pe_export_section
          export_addr_table;
          export_name_pointer_table;
          export_ordinal_table;
-         DEF (image_name_fixup, ZSTRING (Session.filename_of sess.Session.sess_out));
+         DEF (image_name_fixup,
+              ZSTRING (Session.filename_of sess.Session.sess_out));
          export_name_table
        |])
 ;;
@@ -719,8 +731,6 @@ let pe_text_section
          crate_code
        |])
 ;;
-
-(*********************************************************************************)
 
 let rustrt_imports sem =
   let make_imports_for_lib (lib, tab) =
@@ -881,13 +891,15 @@ let emit_file
                        ~hdr_fixup: data_fixup)
   in
 (*
-  let debug_aranges_header = (pe_section_header
-                                ~id: SECTION_ID_DEBUG_ARANGES
-                                ~hdr_fixup: sem.Semant.ctxt_debug_aranges_fixup)
+  let debug_aranges_header =
+    (pe_section_header
+      ~id: SECTION_ID_DEBUG_ARANGES
+      ~hdr_fixup: sem.Semant.ctxt_debug_aranges_fixup)
   in
-  let debug_pubnames_header = (pe_section_header
-                                 ~id: SECTION_ID_DEBUG_PUBNAMES
-                                 ~hdr_fixup: sem.Semant.ctxt_debug_pubnames_fixup)
+  let debug_pubnames_header =
+    (pe_section_header
+      ~id: SECTION_ID_DEBUG_PUBNAMES
+      ~hdr_fixup: sem.Semant.ctxt_debug_pubnames_fixup)
   in
 *)
   let debug_info_header = (pe_section_header
@@ -899,13 +911,15 @@ let emit_file
                                ~hdr_fixup: sem.Semant.ctxt_debug_abbrev_fixup)
   in
 (*
-  let debug_line_header = (pe_section_header
-                             ~id: SECTION_ID_DEBUG_LINE
-                             ~hdr_fixup: sem.Semant.ctxt_debug_line_fixup)
+  let debug_line_header =
+    (pe_section_header
+      ~id: SECTION_ID_DEBUG_LINE
+      ~hdr_fixup: sem.Semant.ctxt_debug_line_fixup)
   in
-  let debug_frame_header = (pe_section_header
-                              ~id: SECTION_ID_DEBUG_FRAME
-                              ~hdr_fixup: sem.Semant.ctxt_debug_frame_fixup)
+  let debug_frame_header =
+    (pe_section_header
+      ~id: SECTION_ID_DEBUG_FRAME
+      ~hdr_fixup: sem.Semant.ctxt_debug_frame_fixup)
   in
 *)
   let note_rust_header = (pe_section_header
@@ -987,7 +1001,8 @@ let emit_file
 
   let all_frags = SEQ [| MEMPOS pe_image_base;
                          (def_file_aligned image_fixup
-                            (SEQ [| DEF (sem.Semant.ctxt_image_base_fixup, MARK);
+                            (SEQ [| DEF (sem.Semant.ctxt_image_base_fixup,
+                                         MARK);
                                     all_headers;
                                     text_section;
                                     bss_section;
@@ -999,7 +1014,11 @@ let emit_file
                                     (* debug_line_section; *)
                                     (* debug_frame_section; *)
                                     note_rust_section;
-                                    ALIGN_MEM (pe_mem_alignment, MARK) |]))|]
+                                    ALIGN_MEM (pe_mem_alignment, MARK)
+                                 |]
+                            )
+                         )
+                      |]
   in
     write_out_frag sess true all_frags
 ;;
@@ -1082,7 +1101,9 @@ let get_sections
           assert ((String.length sect_name) > 0);
           if sect_name.[0] = '/'
           then
-            let off_str = String.sub sect_name 1 ((String.length sect_name) - 1) in
+            let off_str =
+              String.sub sect_name 1 ((String.length sect_name) - 1)
+            in
             let i = int_of_string off_str in
             let curr = ar.asm_get_off() in
               ar.asm_seek (symtab_off + i);
@@ -1101,7 +1122,8 @@ let get_sections
       let _ = ar.asm_adv_u32() in (* reserved *)
       let _ = ar.asm_adv_u32() in (* flags *)
         Hashtbl.add sects sect_name (file_off, file_sz);
-        log sess "       section %d: %s, size %d, offset 0x%x" i sect_name file_sz file_off;
+        log sess "       section %d: %s, size %d, offset 0x%x"
+          i sect_name file_sz file_off;
     done
   in
     sects

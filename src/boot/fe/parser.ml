@@ -4,6 +4,13 @@ open Token;;
 
 (* Fundamental parser types and actions *)
 
+type get_mod_fn = (Ast.meta_pat
+                   -> node_id
+                     -> (node_id ref)
+                       -> (opaque_id ref)
+                         -> (filename * Ast.mod_items))
+;;
+
 type pstate =
     { mutable pstate_peek : token;
       mutable pstate_ctxt : (string * pos) list;
@@ -15,11 +22,7 @@ type pstate =
       pstate_temp_id      : temp_id ref;
       pstate_node_id      : node_id ref;
       pstate_opaque_id    : opaque_id ref;
-      pstate_get_mod      : (Ast.meta_pat ->
-                               node_id ->
-                                 (node_id ref) ->
-                                   (opaque_id ref) ->
-                                     (filename * Ast.mod_items));
+      pstate_get_mod      : get_mod_fn;
       pstate_infer_lib_name : (Ast.ident -> filename);
       pstate_required       : (node_id, (required_lib * nabi_conv)) Hashtbl.t;
       pstate_required_syms  : (node_id, string) Hashtbl.t; }
@@ -41,11 +44,7 @@ let make_parser
     (nref:node_id ref)
     (oref:opaque_id ref)
     (sess:Session.sess)
-    (get_mod:(Ast.meta_pat ->
-                node_id ->
-                  (node_id ref) ->
-                    (opaque_id ref) ->
-                      (filename * Ast.mod_items)))
+    (get_mod:get_mod_fn)
     (infer_lib_name:Ast.ident -> filename)
     (required:(node_id, (required_lib * nabi_conv)) Hashtbl.t)
     (required_syms:(node_id, string) Hashtbl.t)
@@ -127,11 +126,14 @@ let spans
   Array.append things [| (span ps apos (lexpos ps) thing) |]
 ;;
 
-(* The point of this is to make a new node_id entry for a node that is a "copy" of
-   an lval returned from somewhere else. For example if you create a temp, the lval
-   it returns can only be used in *one* place, for the node_id denotes the place that
-   lval is first used; subsequent uses of 'the same' reference must clone_lval it 
-   into a new node_id. Otherwise there is trouble. *)
+(* 
+ * The point of this is to make a new node_id entry for a node that is a
+ * "copy" of an lval returned from somewhere else. For example if you create
+ * a temp, the lval it returns can only be used in *one* place, for the
+ * node_id denotes the place that lval is first used; subsequent uses of
+ * 'the same' reference must clone_lval it into a new node_id. Otherwise
+ * there is trouble.
+ *)
 
 let clone_span
     (ps:pstate)
@@ -326,6 +328,13 @@ let bracketed_zero_or_more
   bracketed_seq 0 bra ket sepOpt (ctxt "bracketed_seq" prule) ps
 ;;
 
+
+let paren_comma_list
+    (prule:pstate -> 'a)
+    (ps:pstate)
+    : 'a array =
+  bracketed_zero_or_more LPAREN RPAREN (Some COMMA) prule ps
+;;
 
 let bracketed_one_or_more
     (bra:token)

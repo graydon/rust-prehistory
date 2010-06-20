@@ -110,7 +110,7 @@ let function_effect_propagation_visitor
             begin
               fun _ ->
                 let name = Hashtbl.find cx.ctxt_all_item_names fn_id in
-                  log cx "lowering calculated effect for '%a' from '%a' to '%a'"
+                  log cx "lowering calculated effect on '%a': '%a' -> '%a'"
                     Ast.sprintf_name name
                     Ast.sprintf_effect e
                     Ast.sprintf_effect ne;
@@ -201,7 +201,8 @@ let effect_checking_visitor
                 begin
                   fun _ ->
                     let name = Hashtbl.find cx.ctxt_all_item_names i.id in
-                      log cx "entering '%a', adjusting authorized effect from '%a' to '%a'"
+                      log cx
+                        "entering '%a', adjusting auth effect: '%a' -> '%a'"
                         Ast.sprintf_name name
                         Ast.sprintf_effect curr
                         Ast.sprintf_effect next
@@ -225,7 +226,8 @@ let effect_checking_visitor
               then
                 begin
                   let name = Hashtbl.find cx.ctxt_all_item_names i.id in
-                    err (Some i.id) "%a claims effect '%a' but calculated effect is '%a'%s"
+                    err (Some i.id)
+                      "%a claims effect '%a' but calculated effect is '%a'%s"
                       Ast.sprintf_name name
                       Ast.sprintf_effect fe
                       Ast.sprintf_effect e
@@ -256,7 +258,8 @@ let effect_checking_visitor
             begin
               fun _ ->
                 let name = Hashtbl.find cx.ctxt_all_item_names i.id in
-                  log cx "leaving '%a', restoring authorized effect from '%a' to '%a'"
+                  log cx
+                    "leaving '%a', restoring auth effect: '%a' -> '%a'"
                     Ast.sprintf_name name
                     Ast.sprintf_effect curr
                     Ast.sprintf_effect next

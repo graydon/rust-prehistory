@@ -68,8 +68,10 @@ rust_crate_cache::c_sym::get_val() {
 
 
 
-rust_crate_cache::rust_sym::rust_sym(rust_dom *dom, rust_crate const *curr_crate,
-                                     c_sym *crate_sym, char const **path)
+rust_crate_cache::rust_sym::rust_sym(rust_dom *dom,
+                                     rust_crate const *curr_crate,
+                                     c_sym *crate_sym,
+                                     char const **path)
     : val(0),
       crate_sym(crate_sym),
       dom(dom)

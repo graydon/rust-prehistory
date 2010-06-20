@@ -6,14 +6,14 @@ type tyspec =
   | TYSPEC_all
   | TYSPEC_resolved of (Ast.ty_param array) * Ast.ty
   | TYSPEC_callable of (tyvar * tyvar array)   (* out, ins *)
-  | TYSPEC_collection of tyvar                 (* homogeneous ordered collection *)
+  | TYSPEC_collection of tyvar                 (* vec or str *)
   | TYSPEC_comparable                          (* comparable with = and != *)
   | TYSPEC_plusable                            (* nums, vecs, and strings *)
   | TYSPEC_dictionary of dict
-  | TYSPEC_integral                            (* integer-like *)
+  | TYSPEC_integral                            (* int-like *)
   | TYSPEC_loggable
-  | TYSPEC_numeric                             (* integer-like or float-like *)
-  | TYSPEC_ordered                             (* comparable with < and friends *)
+  | TYSPEC_numeric                             (* int-like or float-like *)
+  | TYSPEC_ordered                             (* comparable with < etc. *)
   | TYSPEC_record of dict
   | TYSPEC_tuple of tyvar array                (* heterogeneous tuple *)
   | TYSPEC_vector of tyvar
@@ -196,7 +196,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
     and check_sane_tyvar tv =
       match !tv with
-          TYSPEC_resolved (_, (Ast.TY_named _)) -> bug () "named-type in type checker"
+          TYSPEC_resolved (_, (Ast.TY_named _)) ->
+            bug () "named-type in type checker"
         | _ -> ()
 
     and unify_tyvars  (av:tyvar) (bv:tyvar) : unit =
@@ -235,7 +236,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
           c
       in
 
-      let unify_dict_with_record_fields (dct:dict) (fields:Ast.ty_rec) : unit =
+      let unify_dict_with_record_fields
+          (dct:dict)
+          (fields:Ast.ty_rec)
+          : unit =
         let rec find_slot (query:Ast.ident) i : Ast.slot =
           if i = Array.length fields
           then fail ()
@@ -264,7 +268,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
       let rec is_comparable_or_ordered (comparable:bool) (ty:Ast.ty) : bool =
         match ty with
-            Ast.TY_mach _ | Ast.TY_int | Ast.TY_uint | Ast.TY_char | Ast.TY_str -> true
+            Ast.TY_mach _ | Ast.TY_int | Ast.TY_uint
+          | Ast.TY_char | Ast.TY_str -> true
           | Ast.TY_any | Ast.TY_nil | Ast.TY_bool | Ast.TY_chan _
           | Ast.TY_port _ | Ast.TY_task | Ast.TY_tup _ | Ast.TY_vec _
           | Ast.TY_rec _ | Ast.TY_tag _ | Ast.TY_iso _ | Ast.TY_idx _ ->
@@ -326,8 +331,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               then fail()
               else TYSPEC_resolved (params_a, ty_a)
 
-          | (TYSPEC_resolved (params, ty), TYSPEC_callable (out_tv, in_tvs))
-          | (TYSPEC_callable (out_tv, in_tvs), TYSPEC_resolved (params, ty)) ->
+          | (TYSPEC_resolved (params, ty),
+             TYSPEC_callable (out_tv, in_tvs))
+          | (TYSPEC_callable (out_tv, in_tvs),
+             TYSPEC_resolved (params, ty)) ->
               let unify_in_slot i in_slot =
                 unify_slot in_slot None in_tvs.(i)
               in
@@ -379,11 +386,15 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
           | (TYSPEC_resolved (params, ty), TYSPEC_integral)
           | (TYSPEC_integral, TYSPEC_resolved (params, ty)) ->
-              if not (integral ty) then fail () else TYSPEC_resolved (params, ty)
+              if not (integral ty)
+              then fail ()
+              else TYSPEC_resolved (params, ty)
 
           | (TYSPEC_resolved (params, ty), TYSPEC_loggable)
           | (TYSPEC_loggable, TYSPEC_resolved (params, ty)) ->
-              if not (loggable ty) then fail () else TYSPEC_resolved (params, ty)
+              if not (loggable ty)
+              then fail ()
+              else TYSPEC_resolved (params, ty)
 
           | (TYSPEC_resolved (params, ty), TYSPEC_numeric)
           | (TYSPEC_numeric, TYSPEC_resolved (params, ty)) ->
@@ -775,8 +786,10 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               begin
                 match binop_sig with
                     BINOPSIG_bool_bool_bool ->
-                      unify_atom lhs (ref (TYSPEC_resolved ([||], Ast.TY_bool)));
-                      unify_atom rhs (ref (TYSPEC_resolved ([||], Ast.TY_bool)));
+                      unify_atom lhs
+                        (ref (TYSPEC_resolved ([||], Ast.TY_bool)));
+                      unify_atom rhs
+                        (ref (TYSPEC_resolved ([||], Ast.TY_bool)));
                       unify_ty Ast.TY_bool tv
                   | BINOPSIG_comp_comp_bool ->
                       let tv_a = ref TYSPEC_comparable in
@@ -808,7 +821,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
             begin
               match unop with
                   Ast.UNOP_not ->
-                    unify_atom atom (ref (TYSPEC_resolved ([||], Ast.TY_bool)));
+                    unify_atom atom
+                      (ref (TYSPEC_resolved ([||], Ast.TY_bool)));
                     unify_ty Ast.TY_bool tv
                 | Ast.UNOP_bitnot ->
                     let tv_a = ref TYSPEC_integral in
@@ -1133,7 +1147,8 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                     Ast.TY_fn (tsig, _) ->
                       begin
                         let vec_str =
-                          interior_slot (Ast.TY_vec (interior_slot Ast.TY_str))
+                          interior_slot (Ast.TY_vec
+                                           (interior_slot Ast.TY_str))
                         in
                           match tsig.Ast.sig_input_slots with
                               [| |] -> ()
@@ -1240,11 +1255,15 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                     match !(resolve_tyvar tv) with
                         TYSPEC_resolved ([||], ty) ->
                           (Ast.TY_vec (interior_slot ty))
-                      | _ -> err (Some id) "unresolved vector-element type in %s (%d)"
-                          (tyspec_to_str ts) (int_of_node id)
+                      | _ ->
+                          err (Some id)
+                            "unresolved vector-element type in %s (%d)"
+                            (tyspec_to_str ts) (int_of_node id)
                   end
-              | _ -> err (Some id) "unresolved type %s (%d)" (tyspec_to_str ts)
-                  (int_of_node id)
+              | _ -> err (Some id)
+                  "unresolved type %s (%d)"
+                    (tyspec_to_str ts)
+                    (int_of_node id)
         in
 
         let check_auto_tyvar id =

@@ -89,22 +89,61 @@ type abi =
 
     abi_prealloc_quad: (Il.quad' -> Il.quad');
     abi_constrain_vregs: (Il.quad -> Bits.t array -> unit);
-    abi_emit_fn_prologue: (Il.emitter -> Common.size -> Common.size -> Common.nabi -> Common.fixup -> unit);
+
+    abi_emit_fn_prologue: (Il.emitter
+                           -> Common.size        (* framesz *)
+                             -> Common.size      (* callsz  *)
+                               -> Common.nabi
+                                 -> Common.fixup (* grow_task *)
+                                   -> unit);
+
     abi_emit_fn_epilogue: (Il.emitter -> unit);
-    abi_emit_fn_tail_call: (Il.emitter -> int64 -> int64 -> Il.code -> int64 -> unit);
+
+    abi_emit_fn_tail_call: (Il.emitter
+                            -> int64            (* caller_callsz *)
+                              -> int64          (* caller_argsz  *)
+                                -> Il.code      (* callee_code   *)
+                                  -> int64      (* callee_argsz  *)
+                                    -> unit);
 
     abi_clobbers: (Il.quad -> Il.hreg list);
 
-    abi_emit_native_call: (Il.emitter -> Il.cell -> Common.nabi -> Common.fixup -> Il.operand array -> unit);
-    abi_emit_native_void_call: (Il.emitter -> Common.nabi -> Common.fixup -> Il.operand array -> unit);
-    abi_emit_native_call_in_thunk: (Il.emitter -> Il.cell -> Common.nabi -> Il.operand -> Il.operand array -> unit);
-    abi_emit_inline_memcpy: (Il.emitter -> int64 -> Il.reg -> Il.reg -> Il.reg -> bool -> unit);
+    abi_emit_native_call: (Il.emitter
+                           -> Il.cell                 (* ret    *)
+                             -> Common.nabi
+                               -> Common.fixup        (* callee *)
+                                 -> Il.operand array  (* args   *)
+                                   -> unit);
+
+    abi_emit_native_void_call: (Il.emitter
+                                -> Common.nabi
+                                  -> Common.fixup             (* callee *)
+                                    -> Il.operand array       (* args   *)
+                                      -> unit);
+
+    abi_emit_native_call_in_thunk: (Il.emitter
+                                    -> Il.cell                (* ret    *)
+                                      -> Common.nabi
+                                        -> Il.operand         (* callee *)
+                                          -> Il.operand array (* args   *)
+                                            -> unit);
+    abi_emit_inline_memcpy: (Il.emitter
+                             -> int64           (* n_bytes   *)
+                               -> Il.reg        (* dst_ptr   *)
+                                 -> Il.reg      (* src_ptr   *)
+                                   -> Il.reg    (* tmp_reg   *)
+                                     -> bool    (* ascending *)
+                                       -> unit);
 
     (* Global glue. *)
     abi_activate: (Il.emitter -> unit);
     abi_yield: (Il.emitter -> unit);
     abi_unwind: (Il.emitter -> Common.nabi -> Common.fixup -> unit);
-    abi_get_next_pc_thunk: ((Il.reg * Common.fixup * (Il.emitter -> unit)) option);
+    abi_get_next_pc_thunk:
+      ((Il.reg                   (* output            *)
+        * Common.fixup           (* thunk in objfile  *)
+        * (Il.emitter -> unit))  (* fn to make thunk  *)
+         option);
 
     abi_sp_reg: Il.reg;
     abi_fp_reg: Il.reg;

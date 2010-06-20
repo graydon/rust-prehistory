@@ -25,6 +25,16 @@ let bug _ =
   in Printf.ksprintf k
 ;;
 
+exception Semant_err of ((node_id option) * string)
+;;
+
+let err (idopt:node_id option) =
+  let k s =
+    raise (Semant_err (idopt, s))
+  in
+    Printf.ksprintf k
+;;
+
 (* Some ubiquitous low-level types. *)
 
 type target =
@@ -182,13 +192,21 @@ let htab_search (htab:('a,'b) Hashtbl.t) (k:'a) : ('b option) =
   else None
 ;;
 
-let htab_search_or_default (htab:('a,'b) Hashtbl.t) (k:'a) (def:unit -> 'b) : 'b =
+let htab_search_or_default
+    (htab:('a,'b) Hashtbl.t)
+    (k:'a)
+    (def:unit -> 'b)
+    : 'b =
   match htab_search htab k with
       Some v -> v
     | None -> def()
 ;;
 
-let htab_search_or_add (htab:('a,'b) Hashtbl.t) (k:'a) (mk:unit -> 'b) : 'b =
+let htab_search_or_add
+    (htab:('a,'b) Hashtbl.t)
+    (k:'a)
+    (mk:unit -> 'b)
+    : 'b =
   let def () =
     let v = mk() in
       Hashtbl.add htab k v;
@@ -202,7 +220,10 @@ let htab_put (htab:('a,'b) Hashtbl.t) (a:'a) (b:'b) : unit =
   Hashtbl.add htab a b
 ;;
 
-let htab_map (htab:('a,'b) Hashtbl.t) (f:'a -> 'b -> ('c * 'd)) : (('c,'d) Hashtbl.t) =
+let htab_map
+    (htab:('a,'b) Hashtbl.t)
+    (f:'a -> 'b -> ('c * 'd))
+    : (('c,'d) Hashtbl.t) =
   let ntab = Hashtbl.create (Hashtbl.length htab) in
   let g a b =
     let (c,d) = f a b in
@@ -213,7 +234,10 @@ let htab_map (htab:('a,'b) Hashtbl.t) (f:'a -> 'b -> ('c * 'd)) : (('c,'d) Hasht
 ;;
 
 
-let htab_fold (fn:'a -> 'b -> 'c -> 'c)  (init:'c) (h:('a, 'b) Hashtbl.t) : 'c =
+let htab_fold
+    (fn:'a -> 'b -> 'c -> 'c)
+    (init:'c)
+    (h:('a, 'b) Hashtbl.t) : 'c =
   let accum = ref init in
   let f a b = accum := (fn a b (!accum)) in
     Hashtbl.iter f h;
@@ -221,7 +245,10 @@ let htab_fold (fn:'a -> 'b -> 'c -> 'c)  (init:'c) (h:('a, 'b) Hashtbl.t) : 'c =
 ;;
 
 
-let reduce_hash_to_list (fn:'a -> 'b -> 'c)  (h:('a, 'b) Hashtbl.t) : ('c list) =
+let reduce_hash_to_list
+    (fn:'a -> 'b -> 'c)
+    (h:('a, 'b) Hashtbl.t)
+    : ('c list) =
   htab_fold (fun a b ls -> (fn a b) :: ls) [] h
 ;;
 
@@ -426,8 +453,10 @@ let i64_lt (a:int64) (b:int64) : bool = (Int64.compare a b) < 0
 let i64_le (a:int64) (b:int64) : bool = (Int64.compare a b) <= 0
 let i64_ge (a:int64) (b:int64) : bool = (Int64.compare a b) >= 0
 let i64_gt (a:int64) (b:int64) : bool = (Int64.compare a b) > 0
-let i64_max (a:int64) (b:int64) : int64 = (if (Int64.compare a b) > 0 then a else b)
-let i64_min (a:int64) (b:int64) : int64 = (if (Int64.compare a b) < 0 then a else b)
+let i64_max (a:int64) (b:int64) : int64 =
+  (if (Int64.compare a b) > 0 then a else b)
+let i64_min (a:int64) (b:int64) : int64 =
+  (if (Int64.compare a b) < 0 then a else b)
 let i64_align (align:int64) (v:int64) : int64 =
   (assert (align <> 0L));
   let mask = Int64.sub align 1L in
@@ -459,8 +488,10 @@ let i32_lt (a:int32) (b:int32) : bool = (Int32.compare a b) < 0
 let i32_le (a:int32) (b:int32) : bool = (Int32.compare a b) <= 0
 let i32_ge (a:int32) (b:int32) : bool = (Int32.compare a b) >= 0
 let i32_gt (a:int32) (b:int32) : bool = (Int32.compare a b) > 0
-let i32_max (a:int32) (b:int32) : int32 = (if (Int32.compare a b) > 0 then a else b)
-let i32_min (a:int32) (b:int32) : int32 = (if (Int32.compare a b) < 0 then a else b)
+let i32_max (a:int32) (b:int32) : int32 =
+  (if (Int32.compare a b) > 0 then a else b)
+let i32_min (a:int32) (b:int32) : int32 =
+  (if (Int32.compare a b) < 0 then a else b)
 let i32_align (align:int32) (v:int32) : int32 =
   (assert (align <> 0l));
   let mask = Int32.sub align 1l in
@@ -559,7 +590,8 @@ let rec string_of_size (s:size) : string =
     | SIZE_rt_max (a, b) ->
         Printf.sprintf "max(%s,%s)" (string_of_size a) (string_of_size b)
     | SIZE_rt_align (align, off) ->
-        Printf.sprintf "align(%s,%s)" (string_of_size align) (string_of_size off)
+        Printf.sprintf "align(%s,%s)"
+          (string_of_size align) (string_of_size off)
 ;;
 
 let neg_sz (a:size) : size =
@@ -664,7 +696,8 @@ let align_sz (a:size) (b:size) : size =
 let force_sz (a:size) : int64 =
   match a with
       SIZE_fixed i -> i
-    | _ -> bug () "force_sz: forced non-fixed size expression %s" (string_of_size a)
+    | _ -> bug () "force_sz: forced non-fixed size expression %s"
+        (string_of_size a)
 ;;
 
 (*

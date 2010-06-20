@@ -13,13 +13,18 @@ let finalize_module
     : unit =
   let i32 = Llvm.i32_type llctx in
 
-  (* Count the number of Rust functions and the number of C functions by simply
-   * (and crudely) testing whether each function in the module begins with
-   * "_rust_". *)
+  (*
+   * Count the number of Rust functions and the number of C functions by
+   * simply (and crudely) testing whether each function in the module begins
+   * with "_rust_".
+   *)
+
   let (rust_fn_count, c_fn_count) =
     let count (rust_fn_count, c_fn_count) fn =
       let begins_with prefix str =
-        let (str_len, prefix_len) = (String.length str, String.length prefix) in
+        let (str_len, prefix_len) =
+          (String.length str, String.length prefix)
+        in
         prefix_len <= str_len && (String.sub str 0 prefix_len) = prefix
       in
       if begins_with "_rust_" (Llvm.value_name fn) then
@@ -74,7 +79,8 @@ let finalize_module
   in
   let rust_start = abi.Llabi.rust_start in
   let rust_start_args = [| rust_main_fn; crate_ptr; argc; argv |] in
-    ignore (Llvm.build_call rust_start rust_start_args "start_rust" main_builder);
+    ignore (Llvm.build_call
+              rust_start rust_start_args "start_rust" main_builder);
     ignore (Llvm.build_ret (Llvm.const_int i32 0) main_builder)
 ;;
 

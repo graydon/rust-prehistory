@@ -623,7 +623,9 @@ let emit_file
   let progname_fixup = (Semant.provide_native sem SEG_data "__progname") in
   let environ_fixup = (Semant.provide_native sem SEG_data "environ") in
   let exit_fixup = (Semant.require_native sem REQUIRED_LIB_crt "exit") in
-  let rust_start_fixup = (Semant.require_native sem REQUIRED_LIB_rustrt "rust_start") in
+  let rust_start_fixup =
+    Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"
+  in
 
   let start_fixup = new_fixup "start function entry" in
 
@@ -663,8 +665,12 @@ let emit_file
   let nl_symbol_ptr_section_fixup = new_fixup "__nl_symbol_ptr section" in
 
   let data_section = def_aligned data_sect_align data_section_fixup data in
-  let const_section = def_aligned data_sect_align const_section_fixup (SEQ [| |]) in
-  let bss_section = def_aligned data_sect_align bss_section_fixup (SEQ [| |]) in
+  let const_section =
+    def_aligned data_sect_align const_section_fixup (SEQ [| |])
+  in
+  let bss_section =
+    def_aligned data_sect_align bss_section_fixup (SEQ [| |])
+  in
   let note_rust_section =
     def_aligned
       data_sect_align note_rust_section_fixup
@@ -697,7 +703,8 @@ let emit_file
     let strtab_entry_fixup = new_fixup "strtab entry" in
       (SEQ
          [|
-           WORD (TY_u32, SUB ((F_POS strtab_entry_fixup), (F_POS strtab_fixup)));
+           WORD (TY_u32, SUB ((F_POS strtab_entry_fixup),
+                              (F_POS strtab_fixup)));
            BYTE (Int64.to_int (fold_flags n_type_code nty));
            BYTE sect_index;
            WORD (TY_u16, IMM (n_desc_code nd));
@@ -705,7 +712,10 @@ let emit_file
          |], strtab_entry_fixup)
   in
 
-  let sect_symbol_nlist_entry (seg:segment) (fixup_to_use:fixup) : (frag * fixup) =
+  let sect_symbol_nlist_entry
+      (seg:segment)
+      (fixup_to_use:fixup)
+      : (frag * fixup) =
     let nty = [ N_SECT; N_EXT ] in
     let nd = (0, [], REFERENCE_FLAG_UNDEFINED_NON_LAZY) in
     let (sect_index, _(*seg_fix*)) =
@@ -716,7 +726,10 @@ let emit_file
       symbol_nlist_entry sect_index nty nd (M_POS fixup_to_use)
   in
 
-  let sect_private_symbol_nlist_entry (seg:segment) (fixup_to_use:fixup) : (frag * fixup) =
+  let sect_private_symbol_nlist_entry
+      (seg:segment)
+      (fixup_to_use:fixup)
+      : (frag * fixup) =
     let nty = [ N_SECT; ] in
     let nd = (0, [], REFERENCE_FLAG_UNDEFINED_NON_LAZY) in
     let (sect_index, _(*seg_fix*)) =
@@ -827,7 +840,9 @@ let emit_file
   let indirect_symtab =
     DEF (indirect_symtab_fixup,
          SEQ (Array.mapi
-                (fun i _ -> WORD(TY_u32, IMM (Int64.of_int (i + indirect_symbols_off))))
+                (fun i _ -> WORD (TY_u32,
+                                  IMM (Int64.of_int
+                                         (i + indirect_symbols_off))))
                 indirect_symbols))
   in
 
@@ -864,20 +879,26 @@ let emit_file
         [VM_PROT_READ; VM_PROT_WRITE]
         [VM_PROT_READ; VM_PROT_WRITE]
         [|
-          ("__data", data_sect_align_log2, [], S_REGULAR, data_section_fixup);
-          ("__const", data_sect_align_log2, [], S_REGULAR, const_section_fixup);
-          ("__bss", data_sect_align_log2, [], S_REGULAR, bss_section_fixup);
-          ("__note.rust", data_sect_align_log2, [], S_REGULAR, note_rust_section_fixup);
-          ("__nl_symbol_ptr", data_sect_align_log2,
-           [], S_NON_LAZY_SYMBOL_POINTERS, nl_symbol_ptr_section_fixup)
+          ("__data", data_sect_align_log2, [],
+           S_REGULAR, data_section_fixup);
+          ("__const", data_sect_align_log2, [],
+           S_REGULAR, const_section_fixup);
+          ("__bss", data_sect_align_log2, [],
+           S_REGULAR, bss_section_fixup);
+          ("__note.rust", data_sect_align_log2, [],
+           S_REGULAR, note_rust_section_fixup);
+          ("__nl_symbol_ptr", data_sect_align_log2, [],
+           S_NON_LAZY_SYMBOL_POINTERS, nl_symbol_ptr_section_fixup)
         |];
 
       macho_segment_command "__DWARF" dwarf_segment_fixup
         [VM_PROT_READ]
         [VM_PROT_READ]
         [|
-          ("__debug_info", data_sect_align_log2, [], S_REGULAR, sem.Semant.ctxt_debug_info_fixup);
-          ("__debug_abbrev", data_sect_align_log2, [], S_REGULAR, sem.Semant.ctxt_debug_abbrev_fixup);
+          ("__debug_info", data_sect_align_log2, [],
+           S_REGULAR, sem.Semant.ctxt_debug_info_fixup);
+          ("__debug_abbrev", data_sect_align_log2, [],
+           S_REGULAR, sem.Semant.ctxt_debug_abbrev_fixup);
         |];
 
       macho_segment_command "__LINKEDIT" linkedit_segment_fixup
@@ -891,9 +912,12 @@ let emit_file
 
 
       macho_dysymtab_command
-        0L                                            (Int64.of_int n_local_syms)
-        (Int64.of_int n_local_syms)                   (Int64.of_int n_export_syms)
-        (Int64.of_int (n_local_syms + n_export_syms)) (Int64.of_int n_undef_syms)
+        0L
+        (Int64.of_int n_local_syms)
+        (Int64.of_int n_local_syms)
+        (Int64.of_int n_export_syms)
+        (Int64.of_int (n_local_syms + n_export_syms))
+        (Int64.of_int n_undef_syms)
         indirect_symtab_fixup;
 
       macho_dylinker_command;
@@ -932,22 +956,29 @@ let emit_file
 
       (* Store argv. *)
       Abi.load_fixup_addr e edx nxargv_fixup Il.OpaqueTy;
-      Il.emit e (Il.lea (X86.rc X86.ecx) (Il.Cell (Il.Mem ((Il.RegIn (Il.Hreg X86.ebp,
-                                                                      Some (X86.word_off_n 2))),
-                                                           Il.OpaqueTy))));
+      Il.emit e (Il.lea (X86.rc X86.ecx)
+                   (Il.Cell (Il.Mem ((Il.RegIn (Il.Hreg X86.ebp,
+                                                Some (X86.word_off_n 2))),
+                                     Il.OpaqueTy))));
       Il.emit e (Il.umov edx_pointee (X86.ro X86.ecx));
       Il.emit e (Il.Push (X86.ro X86.ecx));
 
       (* Store argc. *)
       Abi.load_fixup_addr e edx nxargc_fixup Il.OpaqueTy;
-      Il.emit e (Il.umov (X86.rc X86.eax) (X86.c (X86.word_n (Il.Hreg X86.ebp) 1)));
+      Il.emit e (Il.umov (X86.rc X86.eax)
+                   (X86.c (X86.word_n (Il.Hreg X86.ebp) 1)));
       Il.emit e (Il.umov edx_pointee (X86.ro X86.eax));
       Il.emit e (Il.Push (X86.ro X86.eax));
 
       (* Calculte and store envp. *)
-      Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM 1L)));
-      Il.emit e (Il.binary Il.UMUL (X86.rc X86.eax) (X86.ro X86.eax) (X86.imm (Asm.IMM X86.word_sz)));
-      Il.emit e (Il.binary Il.ADD (X86.rc X86.eax) (X86.ro X86.eax) (X86.ro X86.ecx));
+      Il.emit e (Il.binary Il.ADD
+                   (X86.rc X86.eax) (X86.ro X86.eax)
+                   (X86.imm (Asm.IMM 1L)));
+      Il.emit e (Il.binary Il.UMUL
+                   (X86.rc X86.eax) (X86.ro X86.eax)
+                   (X86.imm (Asm.IMM X86.word_sz)));
+      Il.emit e (Il.binary Il.ADD (X86.rc X86.eax)
+                   (X86.ro X86.eax) (X86.ro X86.ecx));
       Abi.load_fixup_addr e edx environ_fixup Il.OpaqueTy;
       Il.emit e (Il.umov edx_pointee (X86.ro X86.eax));
 
@@ -976,7 +1007,7 @@ let emit_file
         objfile_start e;
         X86.frags_of_emitted_quads sess e
     in
-      def_aligned text_sect_align text_section_fixup 
+      def_aligned text_sect_align text_section_fixup
         (SEQ [|
            start_code;
            code
@@ -993,7 +1024,8 @@ let emit_file
   in
 
   let zero_segment = align_both seg_align
-    (SEQ [| MEMPOS 0L; DEF (zero_segment_fixup, SEQ [| MEMPOS 0x1000L; MARK |] ) |])
+    (SEQ [| MEMPOS 0L; DEF (zero_segment_fixup,
+                            SEQ [| MEMPOS 0x1000L; MARK |] ) |])
   in
 
   let data_segment = def_aligned seg_align data_segment_fixup

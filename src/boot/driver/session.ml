@@ -1,6 +1,6 @@
 (*
- * This module goes near the *bottom* of the dependency DAG, and holds logging,
- * option, and global-state machinery for a single run of the compiler.
+ * This module goes near the bottom of the dependency DAG, and holds option,
+ * and global-state machinery for a single run of the compiler.
  *)
 
 open Common;;

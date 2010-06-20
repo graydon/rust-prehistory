@@ -94,8 +94,13 @@ type ctxt =
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
       ctxt_all_lvals: (node_id,Ast.lval) Hashtbl.t;
-      ctxt_all_defns: (node_id,defn) Hashtbl.t;                         (* definition id --> definition *)
-      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;               (* reference id --> definition id *)
+
+      (* definition id --> definition *)
+      ctxt_all_defns: (node_id,defn) Hashtbl.t;
+
+      (* reference id --> definition id *)
+      ctxt_lval_to_referent: (node_id,node_id) Hashtbl.t;
+
       ctxt_required_items: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
       ctxt_required_syms: (node_id, string) Hashtbl.t;
 
@@ -146,8 +151,10 @@ type ctxt =
       ctxt_glue_code: glue_code;
       ctxt_data: data_frags;
 
-      ctxt_native_required: (required_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
-      ctxt_native_provided: (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_native_required:
+        (required_lib,((string,fixup) Hashtbl.t)) Hashtbl.t;
+      ctxt_native_provided:
+        (segment,((string, fixup) Hashtbl.t)) Hashtbl.t;
 
       ctxt_required_rust_sym_num: (node_id, int) Hashtbl.t;
       ctxt_required_c_sym_num: ((required_lib * string), int) Hashtbl.t;
@@ -234,16 +241,6 @@ let new_ctxt sess abi crate =
     ctxt_main_name = string_of_name crate.Ast.crate_main;
     ctxt_main_exit_task_glue_fixup = new_fixup "main exit-task glue"
   }
-;;
-
-exception Semant_err of ((node_id option) * string)
-;;
-
-let err (idopt:node_id option) =
-  let k s =
-    raise (Semant_err (idopt, s))
-  in
-    Printf.ksprintf k
 ;;
 
 let report_err cx ido str =
@@ -371,7 +368,12 @@ let provide_native (cx:ctxt) (seg:segment) (name:string) : fixup =
       (fun _ -> new_fixup ("provide: " ^ name))
 ;;
 
-let provide_existing_native (cx:ctxt) (seg:segment) (name:string) (fix:fixup) : unit =
+let provide_existing_native
+    (cx:ctxt)
+    (seg:segment)
+    (name:string)
+    (fix:fixup)
+    : unit =
   let seg_tab = (htab_search_or_add cx.ctxt_native_provided seg
                    (fun _ -> Hashtbl.create 0))
   in
@@ -511,15 +513,17 @@ let atoms_slots (cx:ctxt) (az:Ast.atom array) : node_id array =
   Array.concat (List.map (atom_slots cx) (Array.to_list az))
 ;;
 
-let modes_muts_and_atoms_slots (cx:ctxt) (az:(Ast.mode * bool * Ast.atom) array) : node_id array =
-  Array.concat (List.map (fun (_,_,a) -> atom_slots cx a) (Array.to_list az))
+let tup_inputs_slots (cx:ctxt) (az:Ast.tup_input array) : node_id array =
+  Array.concat (List.map
+                  (fun (_,_,a) -> atom_slots cx a)
+                  (Array.to_list az))
 ;;
 
-let entries_slots (cx:ctxt)
-    (entries:(Ast.ident * Ast.mode * bool * Ast.atom) array) : node_id array =
+let rec_inputs_slots (cx:ctxt)
+    (inputs:Ast.rec_input array) : node_id array =
   Array.concat (List.map
                   (fun (_, _, _, atom) -> atom_slots cx atom)
-                  (Array.to_list entries))
+                  (Array.to_list inputs))
 ;;
 
 let expr_slots (cx:ctxt) (e:Ast.expr) : node_id array =
@@ -577,8 +581,9 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
       ty_fold_iso : (int * 'tag array) -> 'ty;
       ty_fold_idx : int -> 'ty;
       ty_fold_fn : (('slots * Ast.constrs * 'slot) * Ast.ty_fn_aux) -> 'ty;
-      ty_fold_obj : (Ast.effect * (Ast.ident, (('slots * Ast.constrs * 'slot) *
-                                                 Ast.ty_fn_aux)) Hashtbl.t) -> 'ty;
+      ty_fold_obj : (Ast.effect
+                     * (Ast.ident, (('slots * Ast.constrs * 'slot) *
+                                      Ast.ty_fn_aux)) Hashtbl.t) -> 'ty;
       ty_fold_chan : 'ty -> 'ty;
       ty_fold_port : 'ty -> 'ty;
       ty_fold_task : unit -> 'ty;
@@ -591,7 +596,9 @@ type ('ty, 'slot, 'slots, 'tag) ty_fold =
 
 let rec fold_ty (f:('ty, 'slot, 'slots, 'tag) ty_fold) (ty:Ast.ty) : 'ty =
   let fold_slot (s:Ast.slot) : 'slot =
-    f.ty_fold_slot (s.Ast.slot_mode, s.Ast.slot_mutable, fold_ty f (slot_ty s))
+    f.ty_fold_slot (s.Ast.slot_mode,
+                    s.Ast.slot_mutable,
+                    fold_ty f (slot_ty s))
   in
   let fold_slots (slots:Ast.slot array) : 'slots =
     f.ty_fold_slots (Array.map fold_slot slots)
@@ -716,7 +723,8 @@ let ty_fold_rebuild (id:Ast.ty -> Ast.ty)
     ty_fold_param = (fun (i, mut) -> id (Ast.TY_param (i, mut)));
     ty_fold_named = (fun n -> id (Ast.TY_named n));
     ty_fold_type = (fun _ -> id (Ast.TY_type));
-    ty_fold_constrained = (fun (t, constrs) -> id (Ast.TY_constrained (t, constrs))) }
+    ty_fold_constrained = (fun (t, constrs) ->
+                             id (Ast.TY_constrained (t, constrs))) }
 ;;
 
 let rebuild_ty_under_params
@@ -832,7 +840,8 @@ let associative_binary_op_ty_fold
         ty_fold_tup = (fun a -> a);
         ty_fold_vec = (fun a -> a);
         ty_fold_rec = (fun sz ->
-                         reduce (Array.to_list (Array.map (fun (_, s) -> s) sz)));
+                         reduce (Array.to_list
+                                   (Array.map (fun (_, s) -> s) sz)));
         ty_fold_tag = (fun a -> a);
         ty_fold_iso = (fun (_,iso) -> reduce (Array.to_list iso));
         ty_fold_fn = reduce_fn;
@@ -961,7 +970,10 @@ let check_concrete params thing =
 ;;
 
 
-let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
+let project_type_to_slot
+    (base_ty:Ast.ty)
+    (comp:Ast.lval_component)
+    : Ast.slot =
   match (base_ty, comp) with
       (Ast.TY_rec elts, Ast.COMP_named (Ast.COMP_ident id)) ->
         begin
@@ -985,7 +997,9 @@ let project_type_to_slot (base_ty:Ast.ty) (comp:Ast.lval_component) : Ast.slot =
         interior_slot (Ast.TY_fn (Hashtbl.find fns id))
 
     | (_,_) ->
-        bug () "unhandled form of lval-ext in Semant.project_slot: %a indexed by %a"
+        bug ()
+          "unhandled form of lval-ext in Semant."
+          "project_slot: %a indexed by %a"
           Ast.sprintf_ty base_ty Ast.sprintf_lval_component comp
 ;;
 
@@ -1025,7 +1039,8 @@ let rec lval_item (cx:ctxt) (lval:Ast.lval) : Ast.mod_item =
                       Ast.COMP_named (Ast.COMP_ident i) -> (i, [||])
                     | Ast.COMP_named (Ast.COMP_app (i, args)) -> (i, args)
                     | _ ->
-                        bug () "unhandled lval-component '%a' in Semant.lval_item"
+                        bug ()
+                          "unhandled lval-component '%a' in Semant.lval_item"
                           Ast.sprintf_lval_component comp
                 in
                   match htab_search items i with
@@ -1669,13 +1684,16 @@ let call_args_referent_type
         None -> [| |]
       | Some c ->
           [|
-            Il.ScalarTy (Il.AddrTy c)                             (* Abi.indirect_args_elt_closure       *)
+            (* Abi.indirect_args_elt_closure *)
+            Il.ScalarTy (Il.AddrTy c)
           |]
   in
   let iterator_arg_rtys _ =
     [|
-      Il.ScalarTy (Il.ValTy cx.ctxt_abi.Abi.abi_word_bits); (* Abi.iterator_args_elt_loop_size     *)
-      Il.ScalarTy (Il.AddrTy Il.OpaqueTy)                   (* Abi.iterator_args_elt_loop_info_ptr *)
+      (* Abi.iterator_args_elt_loop_size *)
+      Il.ScalarTy (Il.ValTy cx.ctxt_abi.Abi.abi_word_bits);
+      (* Abi.iterator_args_elt_loop_info_ptr *)
+      Il.ScalarTy (Il.AddrTy Il.OpaqueTy)
     |]
   in
     match callee_ty with
@@ -1722,7 +1740,8 @@ let ty_align (abi:Abi.abi) (t:Ast.ty) : int64 =
 ;;
 
 let slot_sz (abi:Abi.abi) (s:Ast.slot) : int64 =
-  force_sz (Il.referent_ty_size abi.Abi.abi_word_bits (slot_referent_type abi s))
+  force_sz (Il.referent_ty_size abi.Abi.abi_word_bits
+              (slot_referent_type abi s))
 ;;
 
 let word_slot (abi:Abi.abi) : Ast.slot =
@@ -1905,9 +1924,12 @@ let glue_str (cx:ctxt) (g:glue) : string =
          * FIXME: the node_id here isn't an item, it's a statement; 
          * lookup bind target and encode bound arg tuple type.
          *)
-    | GLUE_fn_binding i -> "glue$fn_binding$" ^ (string_of_int (int_of_node i))
-    | GLUE_obj_drop oid -> (item_str cx oid) ^ ".drop"
-    | GLUE_loop_body i -> "glue$loop_body$" ^ (string_of_int (int_of_node i))
+    | GLUE_fn_binding i
+      -> "glue$fn_binding$" ^ (string_of_int (int_of_node i))
+    | GLUE_obj_drop oid
+      -> (item_str cx oid) ^ ".drop"
+    | GLUE_loop_body i
+      -> "glue$loop_body$" ^ (string_of_int (int_of_node i))
 ;;
 
 

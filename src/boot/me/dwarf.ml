@@ -1077,7 +1077,8 @@ let dw_op_to_frag (abi:Abi.abi) (op:dw_op) : Asm.frag =
     | DW_OP_call_ref e -> SEQ [| BYTE 0x9a; WORD (abi.Abi.abi_word_ty, e) |]
     | DW_OP_form_tls_address -> BYTE 0x9b
     | DW_OP_call_frame_cfa -> BYTE 0x9c
-    | DW_OP_bit_piece (sz, off) -> SEQ [| BYTE 0x9d; ULEB128 sz; ULEB128 off |]
+    | DW_OP_bit_piece (sz, off) ->
+        SEQ [| BYTE 0x9d; ULEB128 sz; ULEB128 off |]
 ;;
 
 type dw_lns =
@@ -1533,22 +1534,26 @@ let dwarf_visitor
         match slot.Ast.slot_mode with
             Ast.MODE_exterior ->
               let fix = new_fixup "exterior DIE" in
+              let body_off =
+                word_sz_int * Abi.exterior_rc_slot_field_body
+              in
                 emit_die (DEF (fix, SEQ [|
                                  uleb (get_abbrev_code abbrev_exterior_slot);
                                  (* DW_AT_type: DW_FORM_ref_addr *)
                                  (ref_type_die (slot_ty slot));
                                  (* DW_AT_mutable: DW_FORM_flag *)
-                                 BYTE (if slot.Ast.slot_mutable then 1 else 0);
+                                 BYTE (if slot.Ast.slot_mutable
+                                       then 1 else 0);
                                  (* DW_AT_data_location: DW_FORM_block1 *)
                                  (* This is a DWARF expression for moving
                                     from the address of an exterior
                                     allocation to the address of its
                                     body. *)
-                                 dw_form_block1 [| DW_OP_push_object_address;
-                                                   DW_OP_lit (word_sz_int
-                                                              * Abi.exterior_rc_slot_field_body);
-                                                   DW_OP_plus;
-                                                   DW_OP_deref |]
+                                 dw_form_block1
+                                   [| DW_OP_push_object_address;
+                                      DW_OP_lit body_off;
+                                      DW_OP_plus;
+                                      DW_OP_deref |]
                                |]));
                 ref_addr_for_fix fix
 
@@ -1568,9 +1573,13 @@ let dwarf_visitor
 
 
   and size_block4 (sz:size) (add_to_base:bool) : frag =
-    (* NB: typarams = "words following implicit args" by convention in ABI/x86. *)
+    (* NB: typarams = "words following implicit args" by convention in
+     * ABI/x86.
+     *)
     let abi = cx.ctxt_abi in
-    let typarams = Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz in
+    let typarams =
+      Int64.add abi.Abi.abi_frame_base_sz abi.Abi.abi_implicit_args_sz
+    in
     let word_n n = Int64.mul abi.Abi.abi_word_sz (Int64.of_int n) in
     let param_n n = Int64.add typarams (word_n n) in
     let param_n_field_k n k =
@@ -1701,7 +1710,9 @@ let dwarf_visitor
                             (* DW_AT_mutable: DW_FORM_flag *)
                             BYTE (if slot.Ast.slot_mutable then 1 else 0);
                             (* DW_AT_data_member_location: DW_FORM_block4 *)
-                            size_block4 (Il.get_element_offset word_bits rtys i) true;
+                            size_block4
+                              (Il.get_element_offset word_bits rtys i)
+                              true;
                             (* DW_AT_byte_size: DW_FORM_block4 *)
                             size_block4 (rty_sz rtys.(i)) false |]);
             end
@@ -1755,7 +1766,8 @@ let dwarf_visitor
         let fix = new_fixup "unspecified-anon-struct DIE" in
         let die =
           DEF (fix, SEQ [|
-                 uleb (get_abbrev_code abbrev_unspecified_anon_structure_type);
+                 uleb (get_abbrev_code
+                         abbrev_unspecified_anon_structure_type);
                  (* DW_AT_declaration: DW_FORM_flag *)
                  BYTE 1;
                |])
@@ -1830,7 +1842,9 @@ let dwarf_visitor
                |])
         in
           emit_die die;
-          Array.iter (fun s -> ignore (formal_type s)) tsig.Ast.sig_input_slots;
+          Array.iter
+            (fun s -> ignore (formal_type s))
+            tsig.Ast.sig_input_slots;
           emit_null_die ();
           ref_addr_for_fix fix
       in
@@ -1851,7 +1865,9 @@ let dwarf_visitor
                |])
         in
           emit_die die;
-          Array.iter (fun s -> ignore (formal_type s)) tsig.Ast.sig_input_slots;
+          Array.iter
+            (fun s -> ignore (formal_type s))
+            tsig.Ast.sig_input_slots;
           emit_null_die ();
           ref_addr_for_fix fix
       in
@@ -1913,7 +1929,10 @@ let dwarf_visitor
           | Ast.TY_char -> base ("char", DW_ATE_unsigned_char, 4)
           | Ast.TY_str -> string_type ()
           | Ast.TY_rec trec -> record trec
-          | Ast.TY_tup ttup -> record (Array.mapi (fun i s -> ("_" ^ (string_of_int i), s)) ttup)
+          | Ast.TY_tup ttup ->
+              record (Array.mapi (fun i s ->
+                                    ("_" ^ (string_of_int i), s))
+                        ttup)
 
           | Ast.TY_vec s -> unspecified_ptr_with_ref_slot DW_RUST_vec s
           | Ast.TY_chan t -> unspecified_ptr_with_ref_ty DW_RUST_chan t
@@ -1926,7 +1945,9 @@ let dwarf_visitor
           | Ast.TY_native i -> native_ptr_type i
           | Ast.TY_param p -> rust_type_param p
           | Ast.TY_obj ob -> obj_type ob
-          | _ -> bug () "unimplemented dwarf encoding for type %a" Ast.sprintf_ty ty
+          | _ ->
+              bug () "unimplemented dwarf encoding for type %a"
+                Ast.sprintf_ty ty
   in
 
   let finish_crate_cu_and_compose_headers _ =
@@ -1944,15 +1965,18 @@ let dwarf_visitor
     let info_header_and_curr_infos =
       SEQ
         [|
-          WORD (TY_u32, (ADD                                (* unit_length:            *)
-                           ((F_SZ cu_info_fixup),           (* including this header,  *)
-                            (F_SZ info_header_fixup))));    (* excluding this word.    *)
+          WORD (TY_u32,                          (* unit_length:          *)
+                (ADD
+                   ((F_SZ cu_info_fixup),        (* including this header,*)
+                    (F_SZ info_header_fixup)))); (* excluding this word.  *)
           DEF (info_header_fixup,
                (SEQ [|
-                  WORD (TY_u16, IMM 2L);                    (* DWARF version           *)
-                  (* Since we share abbrevs across all CUs, offset is always 0.        *)
-                  WORD (TY_u32, IMM 0L);                    (* CU-abbrev offset.       *)
-                  BYTE 4;                                   (* Size of an address.     *)
+                  WORD (TY_u16, IMM 2L);         (* DWARF version         *)
+                  (* Since we share abbrevs across all CUs, 
+                   * offset is always 0.
+                   *)
+                  WORD (TY_u32, IMM 0L);         (* CU-abbrev offset.     *)
+                  BYTE 4;                        (* Size of an address.   *)
                 |]));
           DEF (cu_info_fixup,
                SEQ (Array.of_list (List.rev (!curr_cu_infos))));
@@ -1965,28 +1989,32 @@ let dwarf_visitor
     let line_header_and_curr_line =
       SEQ
         [|
-          WORD (TY_u32, (ADD                                (* unit_length:             *)
-                           ((F_SZ cu_line_fixup),           (* including this header,   *)
-                            (F_SZ cu_line_header_fixup)))); (* excluding this word.     *)
+          WORD
+            (TY_u32,                              (* unit_length:         *)
+             (ADD
+                ((F_SZ cu_line_fixup),           (* including this header,*)
+                 (F_SZ cu_line_header_fixup)))); (* excluding this word.  *)
           DEF (cu_line_header_fixup,
                (SEQ [|
-                  WORD (TY_u16, IMM 2L);                    (* DWARF version.           *)
-                  WORD (TY_u32, (F_SZ line_header_fixup));  (* Another header-length.   *)
+                  WORD (TY_u16, IMM 2L);         (* DWARF version.        *)
+                  WORD
+                    (TY_u32,
+                     (F_SZ line_header_fixup));  (* Another header-length.*)
                   DEF (line_header_fixup,
                        SEQ [|
-                         BYTE 1;                            (* Minimum insn length.     *)
-                         BYTE 1;                            (* default_is_stmt          *)
-                         BYTE 0;                            (* line_base                *)
-                         BYTE 0;                            (* line_range               *)
-                         BYTE (max_dw_lns + 1);             (* opcode_base              *)
-                         BYTES                              (* opcode arity array.      *)
+                         BYTE 1;                 (* Minimum insn length.  *)
+                         BYTE 1;                 (* default_is_stmt       *)
+                         BYTE 0;                 (* line_base             *)
+                         BYTE 0;                 (* line_range            *)
+                         BYTE (max_dw_lns + 1);  (* opcode_base           *)
+                         BYTES                   (* opcode arity array.   *)
                            (Array.init max_dw_lns
                               (fun i ->
                                  (dw_lns_arity
                                     (int_to_dw_lns
                                        (i+1)))));
-                         (BYTE 0);                          (* List of include dirs.    *)
-                         (BYTE 0);                          (* List of file entries.    *)
+                         (BYTE 0);               (* List of include dirs. *)
+                         (BYTE 0);               (* List of file entries. *)
                        |])|]));
           DEF (cu_line_fixup,
                SEQ (Array.of_list (List.rev (!curr_cu_line))));
@@ -2178,7 +2206,8 @@ let dwarf_visitor
       : unit =
     let filename = (Hashtbl.find cx.ctxt_item_files crate.id) in
       log cx "walking crate CU '%s'" filename;
-      begin_crate_cu_and_emit_cu_die filename (Hashtbl.find cx.ctxt_file_fixups crate.id);
+      begin_crate_cu_and_emit_cu_die filename
+        (Hashtbl.find cx.ctxt_file_fixups crate.id);
       Array.iter emit_meta_die crate.node.Ast.crate_meta;
       inner.Walk.visit_crate_pre crate
   in
@@ -2193,7 +2222,8 @@ let dwarf_visitor
       begin
         let filename = (Hashtbl.find cx.ctxt_item_files item.id) in
           log cx "walking srcfile CU '%s'" filename;
-          emit_srcfile_cu_die filename (Hashtbl.find cx.ctxt_file_fixups item.id);
+          emit_srcfile_cu_die filename
+            (Hashtbl.find cx.ctxt_file_fixups item.id);
       end
     else
       ();
@@ -2213,12 +2243,15 @@ let dwarf_visitor
               let (tsig,taux) =
                 match ty with
                     Ast.TY_fn tfn -> tfn
-                  | _ -> bug () "non-fn type when emitting dwarf for MOD_ITEM_fn"
+                  | _ ->
+                      bug ()
+                        "non-fn type when emitting dwarf for MOD_ITEM_fn"
               in
                 log cx "walking function '%s' with %d type params"
                   (path_name())
                   (Array.length item.node.Ast.decl_params);
-                emit_subprogram_die id tsig.Ast.sig_output_slot taux.Ast.fn_effect
+                emit_subprogram_die
+                  id tsig.Ast.sig_output_slot taux.Ast.fn_effect
                   (Hashtbl.find cx.ctxt_fn_fixups item.id);
                 emit_type_param_decl_dies item.node.Ast.decl_params;
             end
@@ -2227,7 +2260,8 @@ let dwarf_visitor
               log cx "walking typedef '%s' with %d type params"
                 (path_name())
                 (Array.length item.node.Ast.decl_params);
-              emit_typedef_die id (Hashtbl.find cx.ctxt_all_type_items item.id);
+              emit_typedef_die
+                id (Hashtbl.find cx.ctxt_all_type_items item.id);
               emit_type_param_decl_dies item.node.Ast.decl_params;
             end
         | _ -> ()
@@ -2241,7 +2275,9 @@ let dwarf_visitor
     inner.Walk.visit_crate_post crate;
     assert (Hashtbl.mem cx.ctxt_item_files crate.id);
     emit_null_die();
-    log cx "finishing crate CU and composing headers (%d DIEs collected)" (List.length (!curr_cu_infos));
+    log cx
+      "finishing crate CU and composing headers (%d DIEs collected)"
+      (List.length (!curr_cu_infos));
     finish_crate_cu_and_compose_headers ()
   in
 
@@ -2320,7 +2356,9 @@ let dwarf_visitor
                                 [| DW_OP_fbreg off |]
                       end
                   | None ->
-                      (* FIXME (bug 541569): handle slots assigned to vregs. *)
+                      (* FIXME (bug 541569): handle slots assigned to
+                       * vregs.
+                       *)
                       ()
             end
     end;
@@ -2410,7 +2448,10 @@ let read_abbrevs
         let tag = ar.asm_get_uleb() in
         let has_children = ar.asm_get_u8() in
         let pairs = ref [] in
-        let _ = log sess "abbrev: %d, tag: %d, has_children: %d" n tag has_children in
+        let _ =
+          log sess "abbrev: %d, tag: %d, has_children: %d"
+            n tag has_children
+        in
         let rec read_pairs _ =
           let attr = ar.asm_get_uleb() in
           let form = ar.asm_get_uleb() in
@@ -2525,7 +2566,10 @@ let read_dies
             if abbrev_num = 0
             then die_arr()
             else
-              let _ = log sess "DIE at off <%d> with abbrev %d" die_off abbrev_num in
+              let _ =
+                log sess "DIE at off <%d> with abbrev %d"
+                  die_off abbrev_num
+              in
               let abbrev = Hashtbl.find abbrevs abbrev_num in
               let (tag, children, attrs) = abbrev in
               let attrs =
@@ -2542,7 +2586,9 @@ let read_dies
                           | DW_FORM_flag -> DATA_num (ar.asm_get_u8())
                           | DW_FORM_block1 -> (adv_block1(); DATA_other)
                           | DW_FORM_block4 -> (adv_block4(); DATA_other)
-                          | _ -> bug () "unknown DWARF form %d" (dw_form_to_int form)
+                          | _ ->
+                              bug () "unknown DWARF form %d"
+                                (dw_form_to_int form)
                       in
                         (attr, (form, data))
                   end
@@ -2749,8 +2795,10 @@ let rec extract_mod_items
                 | ("i32", DW_ATE_signed, 4) -> Ast.TY_mach TY_i32
                 | ("i64", DW_ATE_signed, 8) -> Ast.TY_mach TY_i64
                 | ("char", DW_ATE_unsigned_char, 4) -> Ast.TY_char
-                | ("int", DW_ATE_signed, sz) when sz = word_sz_int -> Ast.TY_int
-                | ("uint", DW_ATE_unsigned, sz) when sz = word_sz_int -> Ast.TY_uint
+                | ("int", DW_ATE_signed, sz)
+                    when sz = word_sz_int -> Ast.TY_int
+                | ("uint", DW_ATE_unsigned, sz)
+                    when sz = word_sz_int -> Ast.TY_uint
                 | _ -> bug () "unexpected type of DW_TAG_base_type"
             end
 
@@ -2808,7 +2856,9 @@ let rec extract_mod_items
         | DW_TAG_subroutine_type ->
             Ast.TY_fn (get_ty_fn die)
 
-        | _ -> bug () "unexpected tag in get_ty: %s" (dw_tag_to_string die.die_tag)
+        | _ ->
+            bug () "unexpected tag in get_ty: %s"
+              (dw_tag_to_string die.die_tag)
 
   and get_slot die : Ast.slot =
     match die.die_tag with

@@ -45,19 +45,19 @@
  * EBX, ESP, EBP, ESI, EDI. There are two unusual deviations from the rule
  * though:
  *
- *  - In primary modes 00, 01 and 10, r/m=100 means "use SIB byte".
- *    You can use (unscaled) ESP as the base register in these modes by appending
- *    the SIB byte 0x24. We do that in our rm_r operand-encoder function.
+ *  - In primary modes 00, 01 and 10, r/m=100 means "use SIB byte".  You can
+ *    use (unscaled) ESP as the base register in these modes by appending the
+ *    SIB byte 0x24. We do that in our rm_r operand-encoder function.
  *
- *  - In primary mode 00, r/m=101 means "just disp32", no register is involved.
- *    There is no way to use EBP in primary mode 00. If you try, we just
- *    decay into a mode 01 with an appended 8-bit immediate displacement.
+ *  - In primary mode 00, r/m=101 means "just disp32", no register is
+ *    involved.  There is no way to use EBP in primary mode 00. If you try, we
+ *    just decay into a mode 01 with an appended 8-bit immediate displacement.
  *
- * Some opcodes are written 0xNN +rd. This means "we decided to chew up a whole
- * pile of opcodes here, with each opcode including a hard-wired reference to a
- * register". For example, POP is "0x58 +rd", which means that the 1-byte insns
- * 0x58..0x5f are chewed up for "POP EAX" ... "POP EDI" (again, the canonical
- * order of register numberings)
+ * Some opcodes are written 0xNN +rd. This means "we decided to chew up a
+ * whole pile of opcodes here, with each opcode including a hard-wired
+ * reference to a register". For example, POP is "0x58 +rd", which means that
+ * the 1-byte insns 0x58..0x5f are chewed up for "POP EAX" ... "POP EDI"
+ * (again, the canonical order of register numberings)
  *)
 
 (*
@@ -109,7 +109,8 @@ let slash7 = 7;;
 
 (*
  * Translate an IL-level hwreg number from 0..nregs into the 3-bit code number
- * used through the mod r/m byte and /r sub-register specifiers of the x86 ISA.
+ * used through the mod r/m byte and /r sub-register specifiers of the x86
+ * ISA.
  *
  * See "Table 2-2: 32-Bit Addressing Forms with the ModR/M Byte", in the IA32
  * Architecture Software Developer's Manual, volume 2a.
@@ -141,7 +142,8 @@ let reg r =
     | 3 -> code_esi
     | 4 -> code_edi
     | 5 -> code_edx
-        (* Never assigned by the register allocator, but synthetic code uses them *)
+        (* Never assigned by the register allocator, but synthetic code uses
+           them *)
     | 6 -> code_ebp
     | 7 -> code_esp
     | _ -> raise (Invalid_argument "X86.reg")
@@ -320,7 +322,8 @@ let constrain_vregs (q:Il.quad) (hregs:Bits.t array) : unit =
     begin
       match c with
           Il.Reg (Il.Vreg v, _) when involves_8bit_cell ->
-            (* 8-bit register cells must only be al, cl, dl, bl. Not esi/edi. *)
+            (* 8-bit register cells must only be al, cl, dl, bl.
+             * Not esi/edi. *)
             let hv = hregs.(v) in
               List.iter (fun bad -> Bits.set hv bad false) [esi; edi]
         | _ -> ()
@@ -520,7 +523,8 @@ let implicit_args_sz =  Int64.mul (Int64.of_int implicit_arg_words) word_sz;;
 
 let out_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words);;
 let task_ptr = wordptr_n (Il.Hreg ebp) (frame_base_words+1);;
-let ty_param_n i = wordptr_n (Il.Hreg ebp) (frame_base_words + implicit_arg_words + i);;
+let ty_param_n i =
+  wordptr_n (Il.Hreg ebp) (frame_base_words + implicit_arg_words + i);;
 
 let spill_slot (i:Il.spill) : Il.mem =
   let imm = (Asm.IMM
@@ -565,7 +569,8 @@ let emit_c_call
   let mov dst src = emit (Il.umov dst src) in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
 
-  let args =                                                      (* rust calls get task as arg0  *)
+  (* rust calls get task as arg0  *)
+  let args =
     if nabi.nabi_convention = CONV_rust
     then Array.append [| c task_ptr |] args
     else args
@@ -574,34 +579,45 @@ let emit_c_call
   let arg_sz = Int64.mul (Int64.of_int nargs) word_sz
   in
 
-    mov (r tmp1) (c task_ptr);                                    (* tmp1 = task from argv[-1]    *)
-    mov (r tmp2) (ro esp);                                        (* tmp2 = esp                   *)
-    mov (word_n tmp1 Abi.task_field_rust_sp) (c (r tmp2));        (* task->rust_sp = tmp2         *)
-    mov (rc esp) (c (word_n tmp1 Abi.task_field_runtime_sp));     (* esp = task->runtime_sp       *)
+    mov (r tmp1) (c task_ptr);               (* tmp1 = task from argv[-1] *)
+    mov (r tmp2) (ro esp);                   (* tmp2 = esp                *)
+    mov                                      (* task->rust_sp = tmp2      *)
+      (word_n tmp1 Abi.task_field_rust_sp)
+      (c (r tmp2));
+    mov                                      (* esp = task->runtime_sp    *)
+      (rc esp)
+      (c (word_n tmp1 Abi.task_field_runtime_sp));
 
-    binary Il.SUB (rc esp) arg_sz;                                (* make room on the stack and   *)
-    binary Il.AND (rc esp) 0xfffffffffffffff0L;                   (* and 16-byte align sp         *)
+    binary Il.SUB (rc esp) arg_sz;           (* make room on the stack    *)
+    binary Il.AND (rc esp)                   (* and 16-byte align sp      *)
+      0xfffffffffffffff0L;
 
-    Array.iteri (fun i (arg:Il.operand) ->                        (* write arguments onto C stack *)
-                     match arg with
-                         Il.Cell (Il.Mem (a, ty)) ->
-                           begin
-                             match a with
-                                 Il.RegIn (Il.Hreg base, off) when base == esp ->
-                                   mov (r tmp1) (c (Il.Mem (Il.RegIn (tmp2, off), ty)));
-                                   mov (word_n (h esp) i) (c (r tmp1));
-                               | _ ->
-                                   mov (r tmp1) arg;
-                                   mov (word_n (h esp) i) (c (r tmp1));
-                           end
-                       | _ ->
-                           mov (word_n (h esp) i) arg)
-                  args;
+    Array.iteri
+      begin
+        fun i (arg:Il.operand) ->   (* write args to C stack     *)
+          match arg with
+              Il.Cell (Il.Mem (a, ty)) ->
+                begin
+                  match a with
+                      Il.RegIn (Il.Hreg base, off) when base == esp ->
+                        mov (r tmp1) (c (Il.Mem (Il.RegIn (tmp2, off), ty)));
+                        mov (word_n (h esp) i) (c (r tmp1));
+                    | _ ->
+                        mov (r tmp1) arg;
+                        mov (word_n (h esp) i) (c (r tmp1));
+                end
+            | _ ->
+                mov (word_n (h esp) i) arg
+      end
+      args;
 
     match ret with
         Il.Mem (Il.RegIn (Il.Hreg base, _), _) when base == esp ->
           assert (not in_prologue);
-          (* If ret is esp-relative, use a temporary register until we switched stacks. *)
+
+          (* If ret is esp-relative, use a temporary register until we
+             switched stacks. *)
+
           emit (Il.call (r tmp1) fptr);
           mov (r tmp2) (c task_ptr);
           mov (rc esp) (c (word_n tmp2 Abi.task_field_rust_sp));
@@ -725,42 +741,57 @@ let unwind_glue
   let skip_jmp_fix = new_fixup "skip jump" in
   let exit_jmp_fix = new_fixup "exit jump" in
 
-    mov (rc edx) (c task_ptr);                      (* switch back to rust stack    *)
-    mov (rc esp) (c (edx_n Abi.task_field_rust_sp));
+    mov (rc edx) (c task_ptr);          (* switch back to rust stack    *)
+    mov
+      (rc esp)
+      (c (edx_n Abi.task_field_rust_sp));
 
     mark repeat_jmp_fix;
 
-    mov (rc esi) (c (fp_n (-1)));                   (* esi <- crate ptr             *)
-    mov (rc edx) (c (fp_n (-2)));                   (* edx <- frame glue functions. *)
+    mov (rc esi) (c (fp_n (-1)));       (* esi <- crate ptr             *)
+    mov (rc edx) (c (fp_n (-2)));       (* edx <- frame glue functions. *)
     emit (Il.cmp (ro edx) (immi 0L));
 
-    emit (Il.jmp Il.JE (codefix skip_jmp_fix));     (* if struct* is nonzero        *)
-    add edx esi;                                    (* add crate ptr to disp.       *)
-    mov (rc ecx) (c (edx_n glue_field));            (* ecx <- drop glue             *)
+    emit
+      (Il.jmp Il.JE
+         (codefix skip_jmp_fix));       (* if struct* is nonzero        *)
+    add edx esi;                        (* add crate ptr to disp.       *)
+    mov
+      (rc ecx)
+      (c (edx_n glue_field));           (* ecx <- drop glue             *)
     emit (Il.cmp (ro ecx) (immi 0L));
 
-    emit (Il.jmp Il.JE (codefix skip_jmp_fix));     (* if glue-fn is nonzero        *)
-    add ecx esi;                                    (* add crate ptr to disp.       *)
-    push (ro ebp);                                  (* frame-to-drop                *)
-    push (c task_ptr);                              (* form usual call to glue      *)
-    push (immi 0L);                                 (* outptr                       *)
-    emit (Il.call (rc eax) (reg_codeptr (h ecx)));  (* call glue_fn, trashing eax.  *)
+    emit
+      (Il.jmp Il.JE
+         (codefix skip_jmp_fix));       (* if glue-fn is nonzero        *)
+    add ecx esi;                        (* add crate ptr to disp.       *)
+    push (ro ebp);                      (* frame-to-drop                *)
+    push (c task_ptr);                  (* form usual call to glue      *)
+    push (immi 0L);                     (* outptr                       *)
+    emit (Il.call (rc eax)
+            (reg_codeptr (h ecx)));     (* call glue_fn, trashing eax.  *)
     pop (rc eax);
     pop (rc eax);
     pop (rc eax);
 
     mark skip_jmp_fix;
-    mov (rc edx) (c (fp_n 3));                      (* load next fp (callee-saves[3]) *)
+    mov (rc edx) (c (fp_n 3));          (* load next fp (callee-saves[3]) *)
     emit (Il.cmp (ro edx) (immi 0L));
-    emit (Il.jmp Il.JE (codefix exit_jmp_fix));     (* if nonzero                     *)
-    mov (rc ebp) (ro edx);                          (* move to next frame             *)
-    emit (Il.jmp Il.JMP (codefix repeat_jmp_fix));  (* loop                           *)
+    emit (Il.jmp Il.JE
+            (codefix exit_jmp_fix));    (* if nonzero                     *)
+    mov (rc ebp) (ro edx);              (* move to next frame             *)
+    emit (Il.jmp Il.JMP
+            (codefix repeat_jmp_fix));  (* loop                           *)
 
     (* exit path. *)
     mark exit_jmp_fix;
 
-    let callee = Abi.load_fixup_codeptr e (h eax) exit_task_fixup false nabi.nabi_indirect in
-      emit_c_call e (rc eax) (h edx) (h ecx) nabi false callee [| (c task_ptr) |];
+    let callee =
+      Abi.load_fixup_codeptr
+        e (h eax) exit_task_fixup false nabi.nabi_indirect
+    in
+      emit_c_call
+        e (rc eax) (h edx) (h ecx) nabi false callee [| (c task_ptr) |];
 ;;
 
 (* Puts result in eax; clobbers ecx, edx in the process. *)
@@ -860,10 +891,11 @@ let rec size_calculation_stack_highwater (size:size) : int =
         + 1
 ;;
 
-let boundary_sz = (Asm.IMM
-                     (Int64.add                   (* Extra non-frame room:           *)
-                        frame_base_sz             (* to safely enter the next frame, *)
-                        frame_base_sz))           (* and make a 'grow' upcall there. *)
+let boundary_sz =
+  (Asm.IMM
+     (Int64.add                   (* Extra non-frame room:           *)
+        frame_base_sz             (* to safely enter the next frame, *)
+        frame_base_sz))           (* and make a 'grow' upcall there. *)
 ;;
 
 let stack_growth_check
@@ -873,17 +905,23 @@ let stack_growth_check
     (growsz:Il.operand)
     (grow_jmp:Il.label option)
     (restart_pc:Il.label)
-    (end_reg:Il.reg)                              (* stack limit on entry, new stack pointer on exit *)
-    (tmp_reg:Il.reg)                              (* temporary (trashed) *)
+    (end_reg:Il.reg)              (* 
+                                   * stack limit on entry,
+                                   * new stack pointer on exit 
+                                   *)
+    (tmp_reg:Il.reg)              (* temporary (trashed) *)
     : unit =
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
   let add dst src = emit (Il.binary Il.ADD dst (Il.Cell dst) src) in
   let sub dst src = emit (Il.binary Il.SUB dst (Il.Cell dst) src) in
-    mov (r tmp_reg) (ro esp);                     (* tmp = esp                 *)
-    sub (r tmp_reg) growsz;                       (* tmp -= size-request       *)
+    mov (r tmp_reg) (ro esp);         (* tmp = esp                 *)
+    sub (r tmp_reg) growsz;           (* tmp -= size-request       *)
     emit (Il.cmp (c (r end_reg)) (c (r tmp_reg)));
-    (* Jump *over* 'grow' upcall on non-underflow: if end_reg <= tmp_reg *)
+    (* 
+     * Jump *over* 'grow' upcall on non-underflow:
+     * if end_reg <= tmp_reg
+     *)
 
     let bypass_grow_upcall_jmp_pc = e.Il.emit_pc in
       emit (Il.jmp Il.JBE Il.CodeNone);
@@ -966,15 +1004,16 @@ let fn_prologue
    *
    * A "frame base" is the retpc and set of callee-saves.
    *
-   * We need to reserve room for our frame *and* the next frame-base,
-   * because we're going to be blindly entering the next frame-base
-   * (pushing eip and callee-saves) before we perform the next check.
+   * We need to reserve room for our frame *and* the next frame-base, because
+   * we're going to be blindly entering the next frame-base (pushing eip and
+   * callee-saves) before we perform the next check.
    *)
 
   (*
-   * We double the reserved callsz because we need a 'temporary tail-call region'
-   * above the actual call region, in case there's a drop call at the end of
-   * assembling the tail-call args and before copying them to callee position.
+   * We double the reserved callsz because we need a 'temporary tail-call
+   * region' above the actual call region, in case there's a drop call at the
+   * end of assembling the tail-call args and before copying them to callee
+   * position.
    *)
 
   let callsz = add_sz callsz callsz in
@@ -1002,9 +1041,11 @@ let fn_prologue
 
     let restart_pc = e.Il.emit_pc in
 
-      mov (rc ebp) (ro esp);                        (* Establish frame base.     *)
-      mov (rc esi) (c task_ptr);                    (* esi = task                *)
-      mov (rc esi) (c (esi_n Abi.task_field_stk));  (* esi = task->stk           *)
+      mov (rc ebp) (ro esp);             (* Establish frame base.     *)
+      mov (rc esi) (c task_ptr);         (* esi = task                *)
+      mov
+        (rc esi)
+        (c (esi_n Abi.task_field_stk));  (* esi = task->stk           *)
       add (rc esi) (imm
                       (Asm.ADD
                          ((word_off_n Abi.stk_field_data),
@@ -1022,10 +1063,15 @@ let fn_prologue
                              call_and_frame_sz)))
                 in
                   (* Primordial size-check. *)
-                  mov (rc edi) (ro esp);                          (* edi = esp                 *)
-                  sub (rc edi) (imm primordial_frame_sz);         (* edi -= size-request       *)
+                  mov (rc edi) (ro esp);  (* edi = esp            *)
+                  sub                     (* edi -= size-request  *)
+                    (rc edi)
+                    (imm primordial_frame_sz);
                   emit (Il.cmp (ro esi) (ro edi));
-                  (* Jump to 'grow' upcall on underflow: if esi (bottom) is > edi (proposed-esp) *)
+
+                  (* Jump to 'grow' upcall on underflow: if esi (bottom) is >
+                     edi (proposed-esp) *)
+
                   let primordial_underflow_jmp_pc = e.Il.emit_pc in
                     emit (Il.jmp Il.JA Il.CodeNone);
 
@@ -1048,6 +1094,7 @@ let fn_prologue
          *
          * FIXME: this is awful, will go away when we have proper CFI.
          *)
+
         mov (rc edi) (ro esp);
         mov (rc ecx) dynamic_frame_sz;
         emit (Il.unary Il.ZERO (word_at (h edi)) (ro ecx));
@@ -1258,34 +1305,39 @@ let activate_glue (e:Il.emitter) : unit =
   let mov dst src = emit (Il.umov dst src) in
   let binary op dst imm = emit (Il.binary op dst (c dst) (immi imm)) in
 
-    mov (rc edx) (c (sp_n 1));                       (* edx <- task             *)
+    mov (rc edx) (c (sp_n 1));            (* edx <- task             *)
     save_callee_saves e;
-    mov (edx_n Abi.task_field_runtime_sp) (ro esp);  (* task->runtime_sp <- esp *)
-    mov (rc esp) (c (edx_n Abi.task_field_rust_sp)); (* esp <- task->rust_sp    *)
+    mov
+      (edx_n Abi.task_field_runtime_sp)
+      (ro esp);                           (* task->runtime_sp <- esp *)
+    mov
+      (rc esp)
+      (c (edx_n Abi.task_field_rust_sp)); (* esp <- task->rust_sp    *)
 
     (*
      * There are two paths we can arrive at this code from:
      *
      *
-     *   1. We are activating a task for the first time. When we switch into the
-     *      task stack and 'ret' to its first instruction, we'll start doing
-     *      whatever the first instruction says. Probably saving registers and
-     *      starting to establish a frame. Harmless stuff, doesn't look at
-     *      task->rust_sp again except when it clobbers it during a later upcall.
+     *   1. We are activating a task for the first time. When we switch into
+     *      the task stack and 'ret' to its first instruction, we'll start
+     *      doing whatever the first instruction says. Probably saving
+     *      registers and starting to establish a frame. Harmless stuff,
+     *      doesn't look at task->rust_sp again except when it clobbers it
+     *      during a later upcall.
      *
      *
-     *   2. We are resuming a task that was descheduled by the yield glue below.
-     *      When we switch into the task stack and 'ret', we'll be ret'ing to a
-     *      very particular instruction:
+     *   2. We are resuming a task that was descheduled by the yield glue
+     *      below.  When we switch into the task stack and 'ret', we'll be
+     *      ret'ing to a very particular instruction:
      *
      *              "esp <- task->rust_sp"
      *
      *      this is the first instruction we 'ret' to after this glue, because
-     *      it is the first instruction following *any* upcall, and the task we
-     *      are activating was descheduled mid-upcall.
+     *      it is the first instruction following *any* upcall, and the task
+     *      we are activating was descheduled mid-upcall.
      *
-     *      Unfortunately for us, we have already restored esp from task->rust_sp
-     *      and are about to eat the 5 words off the top of it.
+     *      Unfortunately for us, we have already restored esp from
+     *      task->rust_sp and are about to eat the 5 words off the top of it.
      *
      *
      *      | ...    | <-- where esp will be once we restore + ret, below,
@@ -1295,15 +1347,15 @@ let activate_glue (e:Il.emitter) : unit =
      *      | esi    |
      *      | ebx    | <-- current task->rust_sp == current esp
      *
-     *
+     * 
      *      This is a problem. If we return to "esp <- task->rust_sp" it will
      *      push esp back down by 5 words. This manifests as a rust stack that
      *      grows by 5 words on each yield/reactivate. Not good.
-     *
-     *      So what we do here is just adjust task->rust_sp up 5 words as well,
-     *      to mirror the movement in esp we're about to perform. That way the
-     *      "esp <- task->rust_sp" we 'ret' to below will be a no-op. Esp won't
-     *      move, and the task's stack won't grow.
+     * 
+     *      So what we do here is just adjust task->rust_sp up 5 words as
+     *      well, to mirror the movement in esp we're about to perform. That
+     *      way the "esp <- task->rust_sp" we 'ret' to below will be a
+     *      no-op. Esp won't move, and the task's stack won't grow.
      *)
 
     binary Il.ADD (edx_n Abi.task_field_rust_sp)
@@ -1348,11 +1400,18 @@ let yield_glue (e:Il.emitter) : unit =
   let emit = Il.emit e in
   let mov dst src = emit (Il.umov dst src) in
 
-    mov (rc edx) (c (esp_n 0));                         (* edx <- arg0 (task)      *)
-    mov (rc esp) (c (edx_n Abi.task_field_rust_sp));    (* esp <- task->rust_sp    *)
+    mov
+      (rc edx) (c (esp_n 0));                (* edx <- arg0 (task)      *)
+    mov
+      (rc esp)
+      (c (edx_n Abi.task_field_rust_sp));    (* esp <- task->rust_sp    *)
     save_callee_saves e;
-    mov (edx_n Abi.task_field_rust_sp) (ro esp);        (* task->rust_sp <- esp    *)
-    mov (rc esp) (c (edx_n Abi.task_field_runtime_sp)); (* esp <- task->runtime_sp *)
+    mov                                      (* task->rust_sp <- esp    *)
+      (edx_n Abi.task_field_rust_sp)
+      (ro esp);
+    mov
+      (rc esp)
+      (c (edx_n Abi.task_field_runtime_sp)); (* esp <- task->runtime_sp *)
 
     (**** IN C STACK ****)
     restore_callee_saves e;
@@ -1409,7 +1468,9 @@ let objfile_start
 
     push_pos32 crate_fixup;
     push_pos32 main_fn_fixup;
-    let fptr = Abi.load_fixup_codeptr e (h eax) rust_start_fixup true indirect_start in
+    let fptr =
+      Abi.load_fixup_codeptr e (h eax) rust_start_fixup true indirect_start
+    in
       Il.emit e (Il.call (rc eax) fptr);
       Il.emit e (Il.Pop (rc ecx));
       Il.emit e (Il.Pop (rc ecx));
@@ -1510,11 +1571,16 @@ let rm_r (c:Il.cell) (r:int) : Asm.frag =
               | Il.RegIn ((Il.Hreg rm), None) when rm != reg_ebp ->
                   seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
 
-              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM 0L)) when rm != reg_ebp ->
+              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM 0L))
+                  when rm != reg_ebp ->
                   seq1 rm (Asm.BYTE (modrm_deref_reg (reg rm) r))
 
-              (* The next two are just to save the relaxation system some churn. *)
-              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM n)) when imm_is_signed_byte n ->
+              (* The next two are just to save the relaxation system some
+               * churn.
+               *)
+
+              | Il.RegIn ((Il.Hreg rm), Some (Asm.IMM n))
+                  when imm_is_signed_byte n ->
                   seq2 rm
                     (Asm.BYTE (modrm_deref_reg_plus_disp8 (reg rm) r))
                     (Asm.WORD (TY_i8, Asm.IMM n))
@@ -1545,11 +1611,23 @@ let insn_rm_r (op:int) (c:Il.cell) (r:int) : Asm.frag =
 ;;
 
 
-let insn_rm_r_imm (op:int) (c:Il.cell) (r:int) (ty:ty_mach) (i:Asm.expr64) : Asm.frag =
+let insn_rm_r_imm
+    (op:int)
+    (c:Il.cell)
+    (r:int)
+    (ty:ty_mach)
+    (i:Asm.expr64)
+    : Asm.frag =
   Asm.SEQ [| Asm.BYTE op; rm_r c r; Asm.WORD (ty, i) |]
 ;;
 
-let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64) : Asm.frag =
+let insn_rm_r_imm_s8_s32
+    (op8:int)
+    (op32:int)
+    (c:Il.cell)
+    (r:int)
+    (i:Asm.expr64)
+    : Asm.frag =
   match i with
       Asm.IMM n when imm_is_signed_byte n ->
         insn_rm_r_imm op8 c r TY_i8 i
@@ -1561,7 +1639,13 @@ let insn_rm_r_imm_s8_s32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64)
           |]
 ;;
 
-let insn_rm_r_imm_u8_u32 (op8:int) (op32:int) (c:Il.cell) (r:int) (i:Asm.expr64) : Asm.frag =
+let insn_rm_r_imm_u8_u32
+    (op8:int)
+    (op32:int)
+    (c:Il.cell)
+    (r:int)
+    (i:Asm.expr64)
+    : Asm.frag =
   match i with
       Asm.IMM n when imm_is_unsigned_byte n ->
         insn_rm_r_imm op8 c r TY_u8 i
@@ -1604,7 +1688,12 @@ let insn_pcrel (op8:int) (op32:int) (fix:fixup) : Asm.frag =
   insn_pcrel_relax (Asm.BYTE op8) (Asm.BYTE op32) fix
 ;;
 
-let insn_pcrel_prefix32 (op8:int) (prefix32:int) (op32:int) (fix:fixup) : Asm.frag =
+let insn_pcrel_prefix32
+    (op8:int)
+    (prefix32:int)
+    (op32:int)
+    (fix:fixup)
+    : Asm.frag =
   insn_pcrel_relax (Asm.BYTE op8) (Asm.BYTES [| prefix32; op32 |]) fix
 ;;
 
@@ -1649,8 +1738,12 @@ let mov (signed:bool) (dst:Il.cell) (src:Il.operand) : Asm.frag =
   if is_ty8 (Il.cell_scalar_ty dst) || is_ty8 (Il.operand_scalar_ty src)
   then
     begin
-      (match dst with Il.Reg (Il.Hreg r, _) -> assert (is_ok_r8 r) | _ -> ());
-      (match src with Il.Cell (Il.Reg (Il.Hreg r, _)) -> assert (is_ok_r8 r) | _ -> ());
+      (match dst with
+           Il.Reg (Il.Hreg r, _)
+           -> assert (is_ok_r8 r) | _ -> ());
+      (match src with
+           Il.Cell (Il.Reg (Il.Hreg r, _))
+           -> assert (is_ok_r8 r) | _ -> ());
     end;
 
   match (signed, dst, src) with
@@ -1769,7 +1862,8 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
                   match c.Il.call_targ with
 
                       Il.CodePtr (Il.Cell c)
-                        when Il.cell_referent_ty c = Il.ScalarTy (Il.AddrTy Il.CodeTy) ->
+                        when Il.cell_referent_ty c
+                          = Il.ScalarTy (Il.AddrTy Il.CodeTy) ->
                         insn_rm_r 0xff c slash2
 
                     | Il.CodePtr (Il.ImmPtr (f, Il.CodeTy)) ->
@@ -1808,7 +1902,8 @@ let select_insn_misc (q:Il.quad') : Asm.frag =
                 insn_pcrel 0xeb 0xe9 f
 
             | (Il.JMP, Il.CodePtr (Il.Cell c))
-                when Il.cell_referent_ty c = Il.ScalarTy (Il.AddrTy Il.CodeTy) ->
+                when Il.cell_referent_ty c
+                  = Il.ScalarTy (Il.AddrTy Il.CodeTy) ->
                 insn_rm_r 0xff c slash4
 
             (* FIXME: refactor this to handle cell-based jumps

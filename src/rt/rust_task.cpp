@@ -232,8 +232,8 @@ rust_task::grow(size_t n_frame_bytes)
     for (uintptr_t* p = (uintptr_t*)(new_top - n_copy);
          p < (uintptr_t*)new_top; ++p) {
         if (old_bottom <= *p && *p < old_top) {
-            //dom->log(LOG_MEM, "relocating pointer 0x%" PRIxPTR " by %d bytes",
-            //        *p, (new_top - old_top));
+            //dom->log(LOG_MEM, "relocating pointer 0x%" PRIxPTR
+            //        " by %d bytes", *p, (new_top - old_top));
             n_relocs++;
             *p += (new_top - old_top);
         }
@@ -445,7 +445,8 @@ rust_crate_cache *
 rust_task::get_crate_cache(rust_crate const *curr_crate)
 {
     if (cache && cache->crate != curr_crate) {
-        dom->log(LOG_TASK, "switching task crate-cache to crate 0x%" PRIxPTR, curr_crate);
+        dom->log(LOG_TASK, "switching task crate-cache to crate 0x%"
+                 PRIxPTR, curr_crate);
         cache->deref();
         cache = NULL;
     }

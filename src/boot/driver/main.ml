@@ -87,7 +87,8 @@ let set_default_output_filename (sess:Session.sess) : unit =
 
 
 let dump_sig (filename:filename) : unit =
-  let items = Lib.get_file_mod sess abi filename (ref (Node 0)) (ref (Opaque 0)) in
+  let items =
+    Lib.get_file_mod sess abi filename (ref (Node 0)) (ref (Opaque 0)) in
     Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_mod_items items);
     exit 0
 ;;
@@ -107,6 +108,10 @@ let dump_meta (filename:filename) : unit =
   exit 0
 ;;
 
+let flag f opt desc =
+  (opt, Arg.Unit f, desc)
+;;
+
 let argspecs =
   [
     ("-t", Arg.Symbol (["linux-x86-elf"; "win32-x86-pe"; "macos-x86-macho"],
@@ -121,42 +126,74 @@ let argspecs =
                                 | MacOS_x86_macho -> "macos-x86-macho"
                              ) ^ ")"));
     ("-o", Arg.String (fun s -> sess.Session.sess_out <- Some s),
-     "file to output (default: " ^ (Session.filename_of sess.Session.sess_out) ^ ")");
-    ("-shared", Arg.Unit (fun _ -> sess.Session.sess_library_mode <- true), "compile a shared-library crate");
-    ("-L", Arg.String (fun s -> Queue.add s sess.Session.sess_lib_dirs), "dir to add to library path");
-    ("-llex", Arg.Unit (fun _ -> sess.Session.sess_log_lex <- true), "log lexing");
-    ("-lparse", Arg.Unit (fun _ -> sess.Session.sess_log_parse <- true), "log parsing");
-    ("-last", Arg.Unit (fun _ -> sess.Session.sess_log_ast <- true), "log post-parse AST");
-    ("-lresolve", Arg.Unit (fun _ -> sess.Session.sess_log_resolve <- true), "log resolution");
-    ("-ltype", Arg.Unit (fun _ -> sess.Session.sess_log_type <- true), "log type checking");
-    ("-leffect", Arg.Unit (fun _ -> sess.Session.sess_log_effect <- true), "log effect checking");
-    ("-ltypestate", Arg.Unit (fun _ -> sess.Session.sess_log_typestate <- true), "log typestate checking");
-    ("-lloop", Arg.Unit (fun _ -> sess.Session.sess_log_loop <- true), "log loop-depth analysis");
-    ("-lalias", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log alias analysis");
-    ("-ldead", Arg.Unit (fun _ -> sess.Session.sess_log_alias <- true), "log dead-code analysis");
-    ("-llayout", Arg.Unit (fun _ -> sess.Session.sess_log_layout <- true), "log frame layout");
-    ("-ltrans", Arg.Unit (fun _ -> sess.Session.sess_log_trans <- true), "log intermediate translation");
+     "file to output (default: "
+     ^ (Session.filename_of sess.Session.sess_out) ^ ")");
+    ("-shared", Arg.Unit (fun _ -> sess.Session.sess_library_mode <- true),
+     "compile a shared-library crate");
+    ("-L", Arg.String (fun s -> Queue.add s sess.Session.sess_lib_dirs),
+     "dir to add to library path");
     ("-litype", Arg.Unit (fun _ -> sess.Session.sess_log_itype <- true;
                             Il.log_iltypes := true), "log IL types");
-    ("-ldwarf", Arg.Unit (fun _ -> sess.Session.sess_log_dwarf <- true), "log DWARF record generation");
-    ("-lra", Arg.Unit (fun _ -> sess.Session.sess_log_ra <- true), "log register allocation");
-    ("-linsn", Arg.Unit (fun _ -> sess.Session.sess_log_insn <- true), "log instruction selection");
-    ("-lasm", Arg.Unit (fun _ -> sess.Session.sess_log_asm <- true), "log assembly");
-    ("-lobj", Arg.Unit (fun _ -> sess.Session.sess_log_obj <- true), "log object file generation");
-    ("-llib", Arg.Unit (fun _ -> sess.Session.sess_log_lib <- true), "log library search");
-    ("-tblock", Arg.Unit (fun _ -> sess.Session.sess_trace_block <- true), "emit block-boundary tracing code");
-    ("-tdrop", Arg.Unit (fun _ -> sess.Session.sess_trace_drop <- true), "emit slot-drop tracing code");
-    ("-ttag", Arg.Unit (fun _ -> sess.Session.sess_trace_tag <- true), "emit tag-construction tracing code");
+    (flag (fun _ -> sess.Session.sess_log_lex <- true)
+       "-llex"      "log lexing");
+    (flag (fun _ -> sess.Session.sess_log_parse <- true)
+       "-lparse"    "log parsing");
+    (flag (fun _ -> sess.Session.sess_log_ast <- true)
+       "-last"      "log AST");
+    (flag (fun _ -> sess.Session.sess_log_resolve <- true)
+       "-lresolve"  "log resolution");
+    (flag (fun _ -> sess.Session.sess_log_type <- true)
+       "-ltype"     "log type checking");
+    (flag (fun _ -> sess.Session.sess_log_effect <- true)
+       "-leffect"   "log effect checking");
+    (flag (fun _ -> sess.Session.sess_log_typestate <- true)
+       "-ltypestate" "log typestate pass");
+    (flag (fun _ -> sess.Session.sess_log_loop <- true)
+       "-lloop"      "log loop analysis");
+    (flag (fun _ -> sess.Session.sess_log_alias <- true)
+       "-lalias"      "log alias analysis");
+    (flag (fun _ -> sess.Session.sess_log_dead <- true)
+       "-ldead"       "log dead analysis");
+    (flag (fun _ -> sess.Session.sess_log_layout <- true)
+       "-llayout"     "log frame layout");
+    (flag (fun _ -> sess.Session.sess_log_trans <- true)
+       "-ltrans"      "log IR translation");
+    (flag (fun _ -> sess.Session.sess_log_dwarf <- true)
+       "-ldwarf"      "log DWARF generation");
+    (flag (fun _ -> sess.Session.sess_log_ra <- true)
+       "-lra"         "log register allocation");
+    (flag (fun _ -> sess.Session.sess_log_insn <- true)
+       "-linsn"       "log instruction selection");
+    (flag (fun _ -> sess.Session.sess_log_asm <- true)
+       "-lasm"        "log assembly");
+    (flag (fun _ -> sess.Session.sess_log_obj <- true)
+       "-lobj"        "log object-file generation");
+    (flag (fun _ -> sess.Session.sess_log_lib <- true)
+       "-llib"        "log library search");
+
+    (flag (fun _ -> sess.Session.sess_trace_block <- true)
+       "-tblock"      "emit block-boundary tracing code");
+    (flag (fun _ -> sess.Session.sess_trace_drop <- true)
+       "-tdrop"       "emit slot-drop tracing code");
+    (flag (fun _ -> sess.Session.sess_trace_tag <- true)
+       "-ttag"        "emit tag-construction tracing code");
+
     ("-tall", Arg.Unit (fun _ ->
                           sess.Session.sess_trace_block <- true;
                           sess.Session.sess_trace_drop <- true;
                           sess.Session.sess_trace_tag <- true ),
      "emit all tracing code");
-    ("-rtime", Arg.Unit (fun _ -> sess.Session.sess_report_timing <- true), "report timing of compiler phases");
-    ("-rgc", Arg.Unit (fun _ -> sess.Session.sess_report_gc <- true), "report gc behavior of compiler");
-    ("-rsig", Arg.String dump_sig, "report type-signature from DWARF info in compiled file, then exit");
-    ("-rmeta", Arg.String dump_meta, "report metadata from DWARF info in compiled file, then exit");
-    ("-rdeps", Arg.Unit (fun _ -> sess.Session.sess_report_deps <- true), "report dependencies of input, then exit");
+
+    (flag (fun _ -> sess.Session.sess_report_timing <- true)
+       "-rtime"        "report timing of compiler phases");
+    (flag (fun _ -> sess.Session.sess_report_gc <- true)
+       "-rgc"          "report gc behavior of compiler");
+    ("-rsig", Arg.String dump_sig,
+     "report type-signature from DWARF info in compiled file, then exit");
+    ("-rmeta", Arg.String dump_meta,
+     "report metadata from DWARF info in compiled file, then exit");
+    ("-rdeps", Arg.Unit (fun _ -> sess.Session.sess_report_deps <- true),
+     "report dependencies of input, then exit");
   ] @ (Glue.alt_argspecs sess)
 ;;
 
@@ -228,7 +265,8 @@ let (crate:Ast.crate) =
                     fun out ->
                       Printf.fprintf stdout "%s: \\\n" out;
                       Hashtbl.iter
-                        (fun _ file -> Printf.fprintf stdout "    %s \\\n" file)
+                        (fun _ file ->
+                           Printf.fprintf stdout "    %s \\\n" file)
                         crate.node.Ast.crate_files;
                       Printf.fprintf stdout "\n"
                   end
@@ -280,7 +318,9 @@ let main_pipeline _ =
          Trans.process_crate |]
   in
 
-  (* Tying up various knots, allocating registers and selecting instructions. *)
+  (* Tying up various knots, allocating registers and selecting
+   * instructions.
+   *)
   let process_code _ (code:Semant.code) : Asm.frag =
     let frag =
       match code.Semant.code_vregs_and_spill with
@@ -309,14 +349,17 @@ let main_pipeline _ =
   let (file_frags:Asm.frag) =
     let process_file file_id frag_code =
       let file_fix = Hashtbl.find sem_cx.Semant.ctxt_file_fixups file_id in
-        Asm.DEF (file_fix, list_to_seq (reduce_hash_to_list process_code frag_code))
+        Asm.DEF (file_fix,
+                 list_to_seq (reduce_hash_to_list process_code frag_code))
     in
-      list_to_seq (reduce_hash_to_list process_file sem_cx.Semant.ctxt_file_code)
+      list_to_seq (reduce_hash_to_list
+                     process_file sem_cx.Semant.ctxt_file_code)
   in
 
     exit_if_failed ();
     let (glue_frags:Asm.frag) =
-      list_to_seq (reduce_hash_to_list process_code sem_cx.Semant.ctxt_glue_code)
+      list_to_seq (reduce_hash_to_list
+                     process_code sem_cx.Semant.ctxt_glue_code)
     in
 
       exit_if_failed ();

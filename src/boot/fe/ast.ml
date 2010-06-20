@@ -54,8 +54,8 @@ and name =
   | NAME_ext of (name * name_component)
 
 (*
- * Type expressions are transparent to type names, their equality is structural.
- * (after normalization)
+ * Type expressions are transparent to type names, their equality is
+ * structural.  (after normalization)
  *)
 and ty =
 
@@ -185,12 +185,16 @@ and ty_obj = (effect * ((ident,ty_fn) Hashtbl.t))
 
 and check_calls = (lval * (atom array)) array
 
+and rec_input = (ident * mode * bool * atom)
+
+and tup_input = (mode * bool * atom)
+
 and stmt' =
 
   (* lval-assigning stmts. *)
     STMT_spawn of (lval * domain * lval * (atom array))
-  | STMT_init_rec of (lval * ((ident * mode * bool * atom) array) * lval option)
-  | STMT_init_tup of (lval * ((mode * bool * atom) array))
+  | STMT_init_rec of (lval * (rec_input array) * lval option)
+  | STMT_init_tup of (lval * (tup_input array))
   | STMT_init_vec of (lval * slot * (atom array))
   | STMT_init_str of (lval * string)
   | STMT_init_port of lval
@@ -527,7 +531,11 @@ and fmt_slot (ff:Format.formatter) (s:slot) : unit =
         fmt_mode ff s.slot_mode;
         fmt_ty ff t
 
-and fmt_slots (ff:Format.formatter) (slots:slot array) (idents:(ident array) option) : unit =
+and fmt_slots
+    (ff:Format.formatter)
+    (slots:slot array)
+    (idents:(ident array) option)
+    : unit =
   fmt ff "(@[";
   for i = 0 to (Array.length slots) - 1
   do
@@ -1181,11 +1189,20 @@ and fmt_header_slots (ff:Format.formatter) (hslots:header_slots) : unit =
     (Array.map (fun (s,_) -> s.node) hslots)
     (Some (Array.map (fun (_, i) -> i) hslots))
 
-and fmt_ident_and_params (ff:Format.formatter) (id:ident) (params:ty_param array) : unit =
+and fmt_ident_and_params
+    (ff:Format.formatter)
+    (id:ident)
+    (params:ty_param array)
+    : unit =
   fmt_ident ff id;
   fmt_decl_params ff params
 
-and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : unit =
+and fmt_fn
+    (ff:Format.formatter)
+    (id:ident)
+    (params:ty_param array)
+    (f:fn)
+    : unit =
   fmt_obox ff;
   fmt_effect ff f.fn_aux.fn_effect;
   if f.fn_aux.fn_effect <> PURE then fmt ff " ";
@@ -1201,7 +1218,12 @@ and fmt_fn (ff:Format.formatter) (id:ident) (params:ty_param array) (f:fn) : uni
   fmt_cbb ff
 
 
-and fmt_obj (ff:Format.formatter) (id:ident) (params:ty_param array) (obj:obj) : unit =
+and fmt_obj
+    (ff:Format.formatter)
+    (id:ident)
+    (params:ty_param array)
+    (obj:obj)
+    : unit =
   fmt_obox ff;
   fmt_effect ff obj.obj_effect;
   if obj.obj_effect <> PURE then fmt ff " ";

@@ -89,7 +89,8 @@ let stmt_collecting_visitor
                 if Hashtbl.mem slots (Ast.KEY_temp tmp)
                 then
                   err (Some id)
-                    "duplicate declaration of temp #%d in block" (int_of_temp tmp)
+                    "duplicate declaration of temp #%d in block"
+                    (int_of_temp tmp)
                 else
                   log cx "found decl of temp #%d in block" (int_of_temp tmp)
               in
@@ -163,7 +164,8 @@ let all_item_collecting_visitor
 
   let visit_mod_item_pre n p i =
     Stack.push i.id items;
-    Array.iter (fun p -> htab_put cx.ctxt_all_defns p.id (DEFN_ty_param p.node)) p;
+    Array.iter (fun p -> htab_put cx.ctxt_all_defns p.id
+                  (DEFN_ty_param p.node)) p;
     htab_put cx.ctxt_all_defns i.id (DEFN_item i.node);
     htab_put cx.ctxt_all_item_names i.id (Walk.path_to_name path);
     log cx "collected item #%d: %s" (int_of_node i.id) n;
@@ -176,7 +178,8 @@ let all_item_collecting_visitor
             note_header i.id ob.Ast.obj_state;
         | Ast.MOD_ITEM_tag (header_slots, _, _) ->
             let skey i = Printf.sprintf "_%d" i in
-              note_header i.id (Array.mapi (fun i s -> (s, skey i)) header_slots)
+              note_header i.id
+                (Array.mapi (fun i s -> (s, skey i)) header_slots)
         | _ -> ()
     end;
       inner.Walk.visit_mod_item_pre n p i
@@ -205,8 +208,10 @@ let all_item_collecting_visitor
       match s.node with
           Ast.STMT_for_each fe ->
             let id = fe.Ast.for_each_body.id in
-              htab_put cx.ctxt_all_defns id (DEFN_loop_body (Stack.top items));
-              htab_put cx.ctxt_all_item_names id (Walk.path_to_name path);
+              htab_put cx.ctxt_all_defns id
+                (DEFN_loop_body (Stack.top items));
+              htab_put cx.ctxt_all_item_names id
+                (Walk.path_to_name path);
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre s;
@@ -226,7 +231,9 @@ let lookup_type_node_by_name
     (scopes:scope list)
     (name:Ast.name)
     : node_id =
-  iflog cx (fun _ -> log cx "lookup_simple_type_by_name %a" Ast.sprintf_name name);
+  iflog cx (fun _ ->
+              log cx "lookup_simple_type_by_name %a"
+                Ast.sprintf_name name);
   match lookup_by_name cx scopes name with
       None -> err None "unknown name: %a" Ast.sprintf_name name
     | Some (_, id) ->
@@ -234,7 +241,9 @@ let lookup_type_node_by_name
             Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type _ })
           | Some (DEFN_item { Ast.decl_item = Ast.MOD_ITEM_obj _ })
           | Some (DEFN_ty_param _) -> id
-          | _ -> err None "Found non-type binding for %a" Ast.sprintf_name name
+          | _ ->
+              err None "Found non-type binding for %a"
+                Ast.sprintf_name name
 ;;
 
 
@@ -264,13 +273,16 @@ let type_reference_and_tag_extracting_visitor
       match item.node.Ast.decl_item with
           Ast.MOD_ITEM_type ty ->
             begin
-              log cx "extracting references for type node %d" (int_of_node item.id);
+              log cx "extracting references for type node %d"
+                (int_of_node item.id);
               let referenced = get_ty_references ty cx (!scopes) in
-                List.iter (fun i -> log cx "type %d references type %d"
-                             (int_of_node item.id) (int_of_node i)) referenced;
+                List.iter
+                  (fun i -> log cx "type %d references type %d"
+                     (int_of_node item.id) (int_of_node i)) referenced;
                 htab_put node_to_references item.id referenced;
                 match ty with
-                    Ast.TY_tag ttag -> htab_put all_tags item.id (ttag, (!scopes))
+                    Ast.TY_tag ttag ->
+                      htab_put all_tags item.id (ttag, (!scopes))
                   | _ -> ()
             end
         | _ -> ()
@@ -348,8 +360,10 @@ let rec ty_iso_of
       need_ty_tag ty
   in
     Array.sort compare_nodes group_array;
-    log cx "resolving node %d, %d-member iso group" (int_of_node n) (Array.length group_array);
-    Array.iteri (fun i n -> log cx "member %d: %d" i (int_of_node n)) group_array;
+    log cx "resolving node %d, %d-member iso group"
+      (int_of_node n) (Array.length group_array);
+    Array.iteri (fun i n -> log cx "member %d: %d" i
+                   (int_of_node n)) group_array;
     let group = Array.map resolve_member group_array in
     let rec search i =
       if i >= (Array.length group_array)
@@ -363,7 +377,9 @@ let rec ty_iso_of
       Ast.TY_iso { Ast.iso_index = (search 0);
                    Ast.iso_group = group }
     in
-    iflog cx (fun _ -> log cx "--- ty_iso_of #%d ==> %a" (int_of_node n) Ast.sprintf_ty iso);
+    iflog cx (fun _ ->
+                log cx "--- ty_iso_of #%d ==> %a"
+                  (int_of_node n) Ast.sprintf_ty iso);
       iso
 
 
@@ -375,7 +391,9 @@ and lookup_type_by_name
     (recur:recur_info)
     (name:Ast.name)
     : ((scope list) * node_id * Ast.ty) =
-  iflog cx (fun _ -> log cx "+++ lookup_type_by_name %a" Ast.sprintf_name name);
+  iflog cx (fun _ ->
+              log cx "+++ lookup_type_by_name %a"
+                Ast.sprintf_name name);
   match lookup_by_name cx scopes name with
       None -> err None "unknown name: %a" Ast.sprintf_name name
     | Some (scopes', id) ->
@@ -390,7 +408,9 @@ and lookup_type_by_name
                  Array.map (fun p -> p.node) params)
             | Some (DEFN_ty_param (_, x)) ->
                 (Ast.TY_param x, [||])
-            | _ -> err None "Found non-type binding for %a" Ast.sprintf_name name
+            | _ ->
+                err None "Found non-type binding for %a"
+                  Ast.sprintf_name name
         in
         let args =
           match name with
@@ -406,7 +426,10 @@ and lookup_type_by_name
           Array.mapi
             begin
               fun i t ->
-                let t = resolve_type cx scopes recursive_tag_groups all_tags recur t in
+                let t =
+                  resolve_type cx scopes recursive_tag_groups
+                    all_tags recur t
+                in
                   iflog cx (fun _ -> log cx
                               "lookup_type_by_name resolved arg %d to %a" i
                               Ast.sprintf_ty t);
@@ -418,11 +441,14 @@ and lookup_type_by_name
             begin
               fun _ ->
                 log cx
-                  "lookup_type_by_name %a found ty %a, applying %d type args to %d params"
-                  Ast.sprintf_name name Ast.sprintf_ty ty
+                  "lookup_type_by_name %a found ty %a"
+                  Ast.sprintf_name name Ast.sprintf_ty ty;
+                log cx "applying %d type args to %d params"
                   (Array.length args) (Array.length params);
-                log cx "params: %s" (Ast.fmt_to_str Ast.fmt_decl_params params);
-                log cx "args: %s" (Ast.fmt_to_str Ast.fmt_app_args args);
+                log cx "params: %s"
+                  (Ast.fmt_to_str Ast.fmt_decl_params params);
+                log cx "args: %s"
+                  (Ast.fmt_to_str Ast.fmt_app_args args);
             end;
           let ty = rebuild_ty_under_params ty params args true in
             iflog cx (fun _ -> log cx "--- lookup_type_by_name %a ==> %a"
@@ -441,8 +467,11 @@ and resolve_type
   let _ = iflog cx (fun _ -> log cx "+++ resolve_type %a" Ast.sprintf_ty t) in
   let base = ty_fold_rebuild (fun t -> t) in
   let ty_fold_named name =
-    let (scopes, node, t) = lookup_type_by_name cx scopes recursive_tag_groups all_tags recur name in
-      iflog cx (fun _ -> log cx "resolved type name '%a' to item %d with ty %a"
+    let (scopes, node, t) =
+      lookup_type_by_name cx scopes recursive_tag_groups all_tags recur name
+    in
+      iflog cx (fun _ ->
+                  log cx "resolved type name '%a' to item %d with ty %a"
                   Ast.sprintf_name name (int_of_node node) Ast.sprintf_ty t);
       match index_in_curr_iso recur node with
           Some i -> Ast.TY_idx i
@@ -469,7 +498,9 @@ and resolve_type
         ty_fold_named = ty_fold_named; }
   in
   let t' = fold_ty fold t in
-    iflog cx (fun _ -> log cx "--- resolve_type %a ==> %a" Ast.sprintf_ty t Ast.sprintf_ty t');
+    iflog cx (fun _ ->
+                log cx "--- resolve_type %a ==> %a"
+                  Ast.sprintf_ty t Ast.sprintf_ty t');
     t'
 ;;
 
@@ -492,7 +523,9 @@ let type_resolving_visitor
       | Some ty -> { s with Ast.slot_ty = Some (resolve_ty ty) }
   in
 
-  let resolve_slot_identified (s:Ast.slot identified) : (Ast.slot identified) =
+  let resolve_slot_identified
+      (s:Ast.slot identified)
+      : (Ast.slot identified) =
     try
       let slot = resolve_slot s.node in
         { s with node = slot }
@@ -516,13 +549,18 @@ let type_resolving_visitor
         match item.node.Ast.decl_item with
             Ast.MOD_ITEM_type ty ->
               let ty =
-                resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info ty
+                resolve_type cx (!scopes) recursive_tag_groups
+                  all_tags empty_recur_info ty
               in
-                log cx "resolved item %s, defining type %a" id Ast.sprintf_ty ty;
+                log cx "resolved item %s, defining type %a"
+                  id Ast.sprintf_ty ty;
                 htab_put cx.ctxt_all_type_items item.id ty;
                 htab_put cx.ctxt_all_item_types item.id Ast.TY_type
 
-          (* Don't resolve the "type" of a mod item; just resolve its members. *)
+          (* 
+           * Don't resolve the "type" of a mod item; just resolve its
+           * members.
+           *)
           | Ast.MOD_ITEM_mod _ -> ()
 
           | Ast.MOD_ITEM_tag (header_slots, _, nid)
@@ -530,14 +568,23 @@ let type_resolving_visitor
               begin
                 match ty_of_mod_item true item with
                     Ast.TY_fn (tsig, taux) ->
-                      let input_slots = Array.map (fun sloti -> resolve_slot sloti.node) header_slots in
-                      let output_slot = interior_slot (ty_iso_of cx recursive_tag_groups all_tags nid) in
-                      let ty =
-                        Ast.TY_fn ({tsig with
-                                      Ast.sig_input_slots = input_slots;
-                                      Ast.sig_output_slot = output_slot }, taux)
+                      let input_slots =
+                        Array.map
+                          (fun sloti -> resolve_slot sloti.node)
+                          header_slots
                       in
-                        log cx "resolved recursive tag %s, type as %a" id Ast.sprintf_ty ty;
+                      let output_slot =
+                        interior_slot (ty_iso_of cx recursive_tag_groups
+                                         all_tags nid)
+                      in
+                      let ty =
+                        Ast.TY_fn
+                          ({tsig with
+                              Ast.sig_input_slots = input_slots;
+                              Ast.sig_output_slot = output_slot }, taux)
+                      in
+                        log cx "resolved recursive tag %s, type as %a"
+                          id Ast.sprintf_ty ty;
                         htab_put cx.ctxt_all_item_types item.id ty
                   | _ -> bug () "recursive tag with non-function type"
               end
@@ -545,7 +592,8 @@ let type_resolving_visitor
           | _ ->
               let t = ty_of_mod_item true item in
               let ty =
-                resolve_type cx (!scopes) recursive_tag_groups all_tags empty_recur_info t
+                resolve_type cx (!scopes) recursive_tag_groups
+                  all_tags empty_recur_info t
               in
                 log cx "resolved item %s, type as %a" id Ast.sprintf_ty ty;
                 htab_put cx.ctxt_all_item_types item.id ty;
@@ -585,35 +633,37 @@ let type_resolving_visitor
 
   let visit_lval_pre lv =
     let rec rebuild_lval' lv =
-        match lv with
-            Ast.LVAL_ext (base, ext) ->
-              let ext =
-                match ext with
-                    Ast.COMP_named (Ast.COMP_ident _)
-                  | Ast.COMP_named (Ast.COMP_idx _)
-                  | Ast.COMP_atom (Ast.ATOM_literal _) -> ext
-                  | Ast.COMP_atom (Ast.ATOM_lval lv) ->
-                      Ast.COMP_atom (Ast.ATOM_lval (rebuild_lval lv))
-                  | Ast.COMP_named (Ast.COMP_app (ident, params)) ->
-                      Ast.COMP_named (Ast.COMP_app (ident, Array.map resolve_ty params))
-              in
-                Ast.LVAL_ext (rebuild_lval' base, ext)
+      match lv with
+          Ast.LVAL_ext (base, ext) ->
+            let ext =
+              match ext with
+                  Ast.COMP_named (Ast.COMP_ident _)
+                | Ast.COMP_named (Ast.COMP_idx _)
+                | Ast.COMP_atom (Ast.ATOM_literal _) -> ext
+                | Ast.COMP_atom (Ast.ATOM_lval lv) ->
+                    Ast.COMP_atom (Ast.ATOM_lval (rebuild_lval lv))
+                | Ast.COMP_named (Ast.COMP_app (ident, params)) ->
+                    Ast.COMP_named
+                      (Ast.COMP_app (ident, Array.map resolve_ty params))
+            in
+              Ast.LVAL_ext (rebuild_lval' base, ext)
 
-          | Ast.LVAL_base nb ->
-              let node =
-                match nb.node with
-                    Ast.BASE_ident _
-                  | Ast.BASE_temp _ -> nb.node
-                  | Ast.BASE_app (ident, params) ->
-                      Ast.BASE_app (ident, Array.map resolve_ty params)
-              in
-                Ast.LVAL_base {nb with node = node}
+        | Ast.LVAL_base nb ->
+            let node =
+              match nb.node with
+                  Ast.BASE_ident _
+                | Ast.BASE_temp _ -> nb.node
+                | Ast.BASE_app (ident, params) ->
+                    Ast.BASE_app (ident, Array.map resolve_ty params)
+            in
+              Ast.LVAL_base {nb with node = node}
 
     and rebuild_lval lv =
       let id = lval_base_id lv in
       let lv' = rebuild_lval' lv in
         iflog cx (fun _ -> log cx "rebuilt lval %a as %a (#%d)"
-                    Ast.sprintf_lval lv Ast.sprintf_lval lv' (int_of_node id));
+                    Ast.sprintf_lval lv Ast.sprintf_lval lv'
+                    (int_of_node id));
         htab_put cx.ctxt_all_lvals id lv';
         lv'
     in
@@ -640,14 +690,17 @@ let lval_base_resolving_visitor
     log cx "looking up slot or item with ident '%s'" ident;
     match lookup cx (!scopes) (Ast.KEY_ident ident) with
         None -> err (Some id) "unresolved identifier '%s'" ident
-      | Some (_, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
+      | Some (_, id) -> (log cx "resolved to node id #%d"
+                           (int_of_node id); id)
   in
   let lookup_slot_by_temp id temp =
     log cx "looking up temp slot #%d" (int_of_temp temp);
     let res = lookup cx (!scopes) (Ast.KEY_temp temp) in
       match res with
-          None -> err (Some id) "unresolved temp node #%d" (int_of_temp temp)
-        | Some (_, id) -> (log cx "resolved to node id #%d" (int_of_node id); id)
+          None -> err
+            (Some id) "unresolved temp node #%d" (int_of_temp temp)
+        | Some (_, id) ->
+            (log cx "resolved to node id #%d" (int_of_node id); id)
   in
   let lookup_referent_by_name_base id nb =
     match nb with
@@ -658,7 +711,9 @@ let lval_base_resolving_visitor
 
   let visit_lval_pre lv =
     let rec lookup_lval lv =
-      iflog cx (fun _ -> log cx "looking up lval #%d" (int_of_node (lval_base_id lv)));
+      iflog cx (fun _ ->
+                  log cx "looking up lval #%d"
+                    (int_of_node (lval_base_id lv)));
       match lv with
           Ast.LVAL_ext (base, ext) ->
             begin
@@ -711,12 +766,12 @@ let lval_base_resolving_visitor
  *  - how can you calculate these?
  * 
  *    - start by making a map from named-tag-node-id -> referenced-other-nodes
- *    - for each member in the set, if you can get from itself to itself, keep it,
- *      otherwise it's non-recursive => non-interesting, delete it.
+ *    - for each member in the set, if you can get from itself to itself, keep
+ *      it, otherwise it's non-recursive => non-interesting, delete it.
  *    - group the members (now all recursive) by dependency
  *    - assign index-number to each elt of group
- *    - fully resolve each elt of group, turning names into numbers or chasing through to
- *      fully-resolving targets as necessary
+ *    - fully resolve each elt of group, turning names into numbers or chasing
+ *      through to fully-resolving targets as necessary
  *    - place group in iso, store differently-indexed value in table for each
  * 
  * 
@@ -738,7 +793,11 @@ let resolve_recursion
 
   let recursive_tag_types = Hashtbl.create 0 in
 
-  let rec can_reach (target:node_id) (visited:node_id list) (curr:node_id) : bool =
+  let rec can_reach
+      (target:node_id)
+      (visited:node_id list)
+      (curr:node_id)
+      : bool =
     if List.mem curr visited
     then false
     else
@@ -756,7 +815,8 @@ let resolve_recursion
         if can_reach id [] id
         then begin
           match Hashtbl.find cx.ctxt_all_defns id with
-              DEFN_item { Ast.decl_item = Ast.MOD_ITEM_type (Ast.TY_tag _) } ->
+              DEFN_item
+                { Ast.decl_item = Ast.MOD_ITEM_type (Ast.TY_tag _) } ->
                 log cx "type %d is a recursive tag" (int_of_node id);
                 Hashtbl.replace recursive_tag_types id ()
             | _ ->
@@ -788,7 +848,8 @@ let resolve_recursion
               end;
             match htab_search node_to_references node with
                 None -> ()
-              | Some referenced -> List.iter (walk (node :: visited)) referenced
+              | Some referenced ->
+                  List.iter (walk (node :: visited)) referenced
           end
       in
         walk [] root;

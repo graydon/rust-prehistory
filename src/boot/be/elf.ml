@@ -250,7 +250,7 @@ let program_header
                             | PT_PHDR -> 6L)));
       WORD (TY_u32, (F_POS segment_fixup));
       WORD (TY_u32, (M_POS segment_fixup));
-      WORD (TY_u32, (M_POS segment_fixup)); (* IMM 0L); p_paddr, 0 on most archs *)
+      WORD (TY_u32, (M_POS segment_fixup));
       WORD (TY_u32, (F_SZ segment_fixup));
       WORD (TY_u32, (M_SZ segment_fixup));
       WORD (TY_u32, (IMM (fold_flags
@@ -567,49 +567,59 @@ let elf32_linux_x86_file
    *
    *)
 
-  (* There are 11 official section headers in the file we're making:  *)
-  (*                                                                  *)
-  (* section 0: <null section>                                        *)
-  (*                                                                  *)
-  (* section 1:  .interp            (segment 1: R+X, INTERP)          *)
-  (*                                                                  *)
-  (* section 2:  .text              (segment 2: R+X, LOAD)            *)
-  (* section 3:  .rodata                   ...                        *)
-  (* section 4:  .dynsym                   ...                        *)
-  (* section 5:  .dynstr                   ...                        *)
-  (* section 6:  .hash                     ...                        *)
-  (* section 7:  .plt                      ...                        *)
-  (* section 8:  .got                      ...                        *)
-  (* section 9:  .rela.plt                 ...                        *)
-  (*                                                                  *)
-  (* section 10: .data              (segment 3: R+W, LOAD)            *)
-  (* section 11: .bss                      ...                        *)
-  (*                                                                  *)
-  (* section 12:  .dynamic          (segment 4: R+W, DYNAMIC)         *)
-  (*                                                                  *)
-  (* section 13: .shstrtab          (not in a segment)                *)
+    (* There are 17 official section headers in the file we're making:  *)
+    (*                                                                  *)
+    (* section 0: <null section>                                        *)
+    (*                                                                  *)
+    (* section 1:  .interp            (segment 1: R+X, INTERP)          *)
+    (*                                                                  *)
+    (* section 2:  .text              (segment 2: R+X, LOAD)            *)
+    (* section 3:  .rodata                   ...                        *)
+    (* section 4:  .dynsym                   ...                        *)
+    (* section 5:  .dynstr                   ...                        *)
+    (* section 6:  .hash                     ...                        *)
+    (* section 7:  .plt                      ...                        *)
+    (* section 8:  .got                      ...                        *)
+    (* section 9:  .rela.plt                 ...                        *)
+    (*                                                                  *)
+    (* section 10: .data              (segment 3: R+W, LOAD)            *)
+    (* section 11: .bss                      ...                        *)
+    (*                                                                  *)
+    (* section 12: .dynamic           (segment 4: R+W, DYNAMIC)         *)
+    (*                                                                  *)
+    (* section 13: .shstrtab          (not in a segment)                *)
+    (* section 14: .debug_aranges     (segment 2: cont'd)               *)
+    (* section 15: .debug_pubnames           ...                        *)
+    (* section 14: .debug_info               ...                        *)
+    (* section 15: .debug_abbrev             ...                        *)
+    (* section 14: .debug_line               ...                        *)
+    (* section 15: .debug_frame              ...                        *)
+    (* section 16: .note..rust        (segment 5: NOTE)                 *)
 
-  let null_section_name_fixup = new_fixup "string name of <null> section" in
-  let interp_section_name_fixup = new_fixup "string name of '.interp' section" in
-  let text_section_name_fixup = new_fixup "string name of '.text' section" in
-  let rodata_section_name_fixup = new_fixup "string name of '.rodata' section" in
-  let dynsym_section_name_fixup = new_fixup "string name of '.dynsym' section" in
-  let dynstr_section_name_fixup = new_fixup "string name of '.dynstr' section" in
-  let hash_section_name_fixup = new_fixup "string name of '.hash' section" in
-  let plt_section_name_fixup = new_fixup "string name of '.plt' section" in
-  let got_plt_section_name_fixup = new_fixup "string name of '.got.plt' section" in
-  let rela_plt_section_name_fixup = new_fixup "string name of '.rela.plt' section" in
-  let data_section_name_fixup = new_fixup "string name of '.data' section" in
-  let bss_section_name_fixup = new_fixup "string name of '.bss' section" in
-  let dynamic_section_name_fixup = new_fixup "string name of '.dynamic' section" in
-  let shstrtab_section_name_fixup = new_fixup "string name of '.shstrtab' section" in
-  let debug_aranges_section_name_fixup = new_fixup "string name of '.debug_aranges' section" in
-  let debug_pubnames_section_name_fixup = new_fixup "string name of '.debug_pubnames' section" in
-  let debug_info_section_name_fixup = new_fixup "string name of '.debug_info' section" in
-  let debug_abbrev_section_name_fixup = new_fixup "string name of '.debug_abbrev' section" in
-  let debug_line_section_name_fixup = new_fixup "string name of '.debug_line' section" in
-  let debug_frame_section_name_fixup = new_fixup "string name of '.debug_frame' section" in
-  let note_rust_section_name_fixup = new_fixup "string name of '.note.rust section" in
+    let sname s =
+      new_fixup (Printf.sprintf "string name of '%s' section" s)
+    in
+    let null_section_name_fixup = sname "<null>" in
+    let interp_section_name_fixup = sname ".interp"in
+    let text_section_name_fixup = sname ".text" in
+    let rodata_section_name_fixup = sname ".rodata" in
+    let dynsym_section_name_fixup = sname ".dynsym" in
+    let dynstr_section_name_fixup = sname ".dynstr" in
+    let hash_section_name_fixup = sname ".hash" in
+    let plt_section_name_fixup = sname ".plt" in
+    let got_plt_section_name_fixup = sname ".got.plt" in
+    let rela_plt_section_name_fixup = sname ".rela.plt" in
+    let data_section_name_fixup = sname ".data" in
+    let bss_section_name_fixup = sname ".bss" in
+    let dynamic_section_name_fixup = sname ".dynamic" in
+    let shstrtab_section_name_fixup = sname ".shstrtab" in
+    let debug_aranges_section_name_fixup = sname ".debug_aranges" in
+    let debug_pubnames_section_name_fixup = sname ".debug_pubnames" in
+    let debug_info_section_name_fixup = sname ".debug_info" in
+    let debug_abbrev_section_name_fixup = sname ".debug_abbrev" in
+    let debug_line_section_name_fixup = sname ".debug_line" in
+    let debug_frame_section_name_fixup = sname ".debug_frame" in
+    let note_rust_section_name_fixup = sname ".note.rust" in
 
   (* let interpndx      = 1L in *)  (* Section index of .interp *)
   let textndx        = 2L in  (* Section index of .text *)
@@ -1044,7 +1054,9 @@ let elf32_linux_x86_file
   in
 
   let require_sym name st_bind _(*fixup*) =
-    let name_fixup = new_fixup ("require symbol name fixup: '" ^ name ^ "'") in
+    let name_fixup =
+      new_fixup ("require symbol name fixup: '" ^ name ^ "'")
+    in
     let strtab_frag = DEF (name_fixup, ZSTRING name) in
     let symtab_frag =
       symbol
@@ -1065,7 +1077,9 @@ let elf32_linux_x86_file
       match symname_opt with
           None -> (MARK, MARK, symbody)
         | Some symname ->
-            let body_fixup = new_fixup ("symbol body fixup: '" ^ symname ^ "'") in
+            let body_fixup =
+              new_fixup ("symbol body fixup: '" ^ symname ^ "'")
+            in
             let body =
               if symname = entry_name
               then DEF (e_entry_fixup, DEF (body_fixup, symbody))
@@ -1113,8 +1127,10 @@ let elf32_linux_x86_file
         Il.emit e (Il.jmp Il.JMP (Il.direct_code_ptr plt0_fixup));
         X86.frags_of_emitted_quads sess e
     in
-    let got_plt_frag = DEF (jump_slot_fixup,
-                            WORD (TY_u32, (M_POS jump_slot_initial_target_fixup))) in
+    let got_plt_frag =
+      DEF (jump_slot_fixup,
+           WORD (TY_u32, (M_POS jump_slot_initial_target_fixup)))
+    in
     let rela_plt =
       { elf32_386_rela_type = R_386_JMP_SLOT;
         elf32_386_rela_offset = (M_POS jump_slot_fixup);
@@ -1163,7 +1179,9 @@ let elf32_linux_x86_file
     let symbol_frags_of_code _ code accum =
       let (strtab_frags, symtab_frags) = accum in
       let fix = code.Semant.code_fixup in
-      let (strtab_frag, symtab_frag) = text_sym fix.fixup_name STB_LOCAL fix in
+      let (strtab_frag, symtab_frag) =
+        text_sym fix.fixup_name STB_LOCAL fix
+      in
       (strtab_frag :: strtab_frags,
        symtab_frag :: symtab_frags)
     in
@@ -1171,16 +1189,20 @@ let elf32_linux_x86_file
     let symbol_frags_of_glue_code g code accum =
       let (strtab_frags, symtab_frags) = accum in
       let fix = code.Semant.code_fixup in
-      let (strtab_frag, symtab_frag) = text_sym (Semant.glue_str sem g) STB_LOCAL fix in
+      let (strtab_frag, symtab_frag) =
+        text_sym (Semant.glue_str sem g) STB_LOCAL fix
+      in
       (strtab_frag :: strtab_frags,
        symtab_frag :: symtab_frags)
     in
 
     let item_str_frags, item_sym_frags =
-      Hashtbl.fold symbol_frags_of_code sem.Semant.ctxt_all_item_code ([], [])
+      Hashtbl.fold symbol_frags_of_code
+        sem.Semant.ctxt_all_item_code ([], [])
     in
     let glue_str_frags, glue_sym_frags =
-      Hashtbl.fold symbol_frags_of_glue_code sem.Semant.ctxt_glue_code ([], [])
+      Hashtbl.fold symbol_frags_of_glue_code
+        sem.Semant.ctxt_glue_code ([], [])
     in
       (item_str_frags @ glue_str_frags,
        item_sym_frags @ glue_sym_frags)
@@ -1226,7 +1248,8 @@ let elf32_linux_x86_file
        plt_frags,
        got_plt_frags,
        rela_plt_frags) =
-    Hashtbl.fold (frags_of_require_symbol require_sym STB_GLOBAL) required_fixups
+    Hashtbl.fold (frags_of_require_symbol require_sym STB_GLOBAL)
+      required_fixups
       (1,[],[],[plt0_frag],[got_prefix],[])
   in
   let require_symtab_frags = List.rev require_symtab_frags in
@@ -1234,15 +1257,21 @@ let elf32_linux_x86_file
   let got_plt_frags = List.rev got_plt_frags in
   let rela_plt_frags = List.rev rela_plt_frags in
 
-  let dynamic_needed_strtab_frags = Array.make (Array.length needed_libs) MARK in
+  let dynamic_needed_strtab_frags =
+    Array.make (Array.length needed_libs) MARK
+  in
 
   let dynamic_frags =
     let dynamic_needed_frags = Array.make (Array.length needed_libs) MARK in
       for i = 0 to (Array.length needed_libs) - 1 do
-        let fixup = new_fixup ("needed library name fixup: " ^ needed_libs.(i)) in
-          dynamic_needed_frags.(i) <- elf32_dyn_frag (DT_NEEDED, SUB (M_POS fixup,
-                                                                      M_POS dynstr_section_fixup));
-          dynamic_needed_strtab_frags.(i) <- DEF (fixup, ZSTRING needed_libs.(i))
+        let fixup =
+          new_fixup ("needed library name fixup: " ^ needed_libs.(i))
+        in
+          dynamic_needed_frags.(i) <-
+            elf32_dyn_frag (DT_NEEDED, SUB (M_POS fixup,
+                                            M_POS dynstr_section_fixup));
+          dynamic_needed_strtab_frags.(i) <-
+            DEF (fixup, ZSTRING needed_libs.(i))
       done;
       (SEQ [|
          SEQ dynamic_needed_frags;
@@ -1383,19 +1412,29 @@ let elf32_linux_x86_file
   in
 
   let debug_aranges_section =
-    def_aligned sem.Semant.ctxt_debug_aranges_fixup dwarf.Dwarf.debug_aranges
+    def_aligned
+      sem.Semant.ctxt_debug_aranges_fixup
+      dwarf.Dwarf.debug_aranges
   in
   let debug_pubnames_section =
-    def_aligned sem.Semant.ctxt_debug_pubnames_fixup dwarf.Dwarf.debug_pubnames
+    def_aligned
+      sem.Semant.ctxt_debug_pubnames_fixup
+      dwarf.Dwarf.debug_pubnames
   in
   let debug_info_section =
-    def_aligned sem.Semant.ctxt_debug_info_fixup dwarf.Dwarf.debug_info
+    def_aligned
+      sem.Semant.ctxt_debug_info_fixup
+      dwarf.Dwarf.debug_info
   in
   let debug_abbrev_section =
-    def_aligned sem.Semant.ctxt_debug_abbrev_fixup dwarf.Dwarf.debug_abbrev
+    def_aligned
+      sem.Semant.ctxt_debug_abbrev_fixup
+      dwarf.Dwarf.debug_abbrev
   in
   let debug_line_section =
-    def_aligned sem.Semant.ctxt_debug_line_fixup dwarf.Dwarf.debug_line
+    def_aligned
+      sem.Semant.ctxt_debug_line_fixup
+      dwarf.Dwarf.debug_line
   in
   let debug_frame_section =
     def_aligned sem.Semant.ctxt_debug_frame_fixup dwarf.Dwarf.debug_frame
@@ -1509,7 +1548,9 @@ let emit_file
   let init_fixup = new_fixup "_init function entry" in
   let fini_fixup = new_fixup "_fini function entry" in
   let main_fixup = new_fixup "start function entry" in
-  let rust_start_fixup = (Semant.require_native sem REQUIRED_LIB_rustrt "rust_start") in
+  let rust_start_fixup =
+    Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"
+  in
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
   let start_fn =

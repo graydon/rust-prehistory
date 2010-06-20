@@ -176,7 +176,8 @@ let iter_rec_slots
     (f:'a -> 'a -> Ast.slot -> (Ast.ty_iso option) -> unit)
     (curr_iso:Ast.ty_iso option)
     : unit =
-  iter_tup_slots get_element_ptr dst_ptr src_ptr (Array.map snd entries) f curr_iso
+  iter_tup_slots get_element_ptr dst_ptr src_ptr
+    (Array.map snd entries) f curr_iso
 ;;
 
 

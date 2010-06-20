@@ -147,16 +147,19 @@ command_line_args
             size_t str_fill = strlen(argv[i]) + 1;
             size_t str_alloc = next_power_of_two(sizeof(rust_str) + str_fill);
             mem = dom.malloc(str_alloc);
-            strs[i] = new (mem) rust_str(&dom, str_alloc, str_fill, (uint8_t const *)argv[i]);
+            strs[i] = new (mem) rust_str(&dom, str_alloc, str_fill,
+                                         (uint8_t const *)argv[i]);
         }
         args->fill = vec_fill;
-        // FIXME (bug 560452): horrible hack to handle non-cascading vec drop glue.
+        // FIXME (bug 560452): horrible hack to handle non-cascading vec drop
+        // glue.
         args->ref();
     }
 
     ~command_line_args() {
         if (args) {
-            // FIXME (bug 560452): horrible hack to handle non-cascading vec drop glue.
+            // FIXME (bug 560452): horrible hack to handle non-cascading vec
+            // drop glue.
             rust_str **strs = (rust_str**) &args->data[0];
             for (int i = 0; i < argc; ++i)
                 dom.free(strs[i]);

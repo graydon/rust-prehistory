@@ -154,7 +154,8 @@ ifneq ($(CFG_LLVM_CONFIG),)
     $(info cfg: using LLVM version 2.8svn)
   else
     CFG_LLVM_CONFIG :=
-    $(info cfg: incompatible LLVM version $(CFG_LLVM_VERSION), expected 2.8svn)
+    $(info cfg: incompatible LLVM version $(CFG_LLVM_VERSION), \
+      expected 2.8svn)
   endif
 endif
 ifdef CFG_LLVM_CONFIG
@@ -162,11 +163,11 @@ ifdef CFG_LLVM_CONFIG
   WHERE := $(shell ocamlc -where)
   LLVM_LIBS := llvm.cma llvm_bitwriter.cma
   LLVM_NATIVE_LIBS := llvm.cmxa llvm_bitwiter.cmxa
-  LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` -lllvm \
-    -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
+  LLVM_CLIBS := $(shell for c in `$(CFG_LLVM_CONFIG) --ldflags --libs` \
+    -lllvm -lllvm_bitwriter; do echo -cclib && echo $$c; done | xargs echo)
   LLVM_INCS := -I boot/llvm -I $(WHERE)
-  LLVM_MLS := $(addprefix boot/llvm/, llabi.ml llasm.ml llfinal.ml lltrans.ml \
-    llemit.ml)
+  LLVM_MLS := $(addprefix boot/llvm/, llabi.ml llasm.ml llfinal.ml \
+    lltrans.ml llemit.ml)
   CFG_LLC_CFLAGS := -march=x86
   $(info cfg: found llvm-config at $(CFG_LLVM_CONFIG))
 else
@@ -192,7 +193,8 @@ ML_INCS := -I boot/fe -I boot/me -I boot/be -I boot/driver/$(VARIANT) \
 ML_LIBS := unix.cma nums.cma bigarray.cma
 ML_NATIVE_LIBS := unix.cmxa nums.cmxa bigarray.cmxa
 OCAMLC_FLAGS := -g $(ML_INCS) -w Ael -warn-error Ael
-OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael $(CFG_OCAMLOPT_PROFILE_FLAGS)
+OCAMLOPT_FLAGS := $(ML_INCS) -w Ael -warn-error Ael \
+                    $(CFG_OCAMLOPT_PROFILE_FLAGS)
 
 ifdef CFG_LLVM_CONFIG
   ML_LIBS += $(LLVM_LIBS) -custom -cclib -lstdc++ $(LLVM_CLIBS)
@@ -212,7 +214,7 @@ ME_MLS := $(addprefix boot/me/, walk.ml semant.ml resolve.ml alias.ml \
             transutil.ml trans.ml dwarf.ml)
 FE_MLS := $(addprefix boot/fe/, ast.ml token.ml lexer.ml parser.ml pexp.ml \
             item.ml cexp.ml)
-DRIVER_TOP_MLS := $(addprefix boot/driver/, $(VARIANT)/glue.ml lib.ml main.ml)
+DRIVER_TOP_MLS := $(addprefix boot/driver/, lib.ml $(VARIANT)/glue.ml main.ml)
 
 BOOT_MLS := $(UTIL_BOT_MLS) $(DRIVER_BOT_MLS) $(FE_MLS) $(IL_MLS) $(ME_MLS) \
   $(BE_MLS) $(LLVM_MLS) $(DRIVER_TOP_MLS)
@@ -504,7 +506,8 @@ ALL_TEST_INPUTS := $(wildcard test/*/*.rs test/*/*/*.rs test/*/*.rc)
 
 check_nocompile: $(TEST_CFAIL_OUTS_X86)
 
-check: $(TEST_RPASS_EXES_X86) $(TEST_RFAIL_EXES_X86) \
+check: tidy \
+       $(TEST_RPASS_EXES_X86) $(TEST_RFAIL_EXES_X86) \
        $(TEST_RPASS_OUTS_X86) $(TEST_RFAIL_OUTS_X86) \
        $(TEST_CFAIL_OUTS_X86)
 
@@ -519,7 +522,8 @@ ALL_TEST_SOURCES += $(TEST_CFAIL_SOURCES_LLVM) \
 
 check_nocompile: $(TEST_CFAIL_OUTS_LLVM)
 
-check:  $(TEST_RPASS_EXES_LLVM) $(TEST_RFAIL_EXES_LLVM) \
+check:  tidy \
+        $(TEST_RPASS_EXES_LLVM) $(TEST_RFAIL_EXES_LLVM) \
         $(TEST_RPASS_OUTS_LLVM) $(TEST_RFAIL_OUTS_LLVM) \
         $(TEST_CFAIL_OUTS_LLVM)
 endif
@@ -650,6 +654,7 @@ PKG_3RDPARTY := rt/valgrind.h rt/memcheck.h \
                 rt/bigint/bigint.h rt/bigint/bigint_int.cpp \
                 rt/bigint/bigint_ext.cpp rt/bigint/low_primes.h
 PKG_FILES := README \
+             $(wildcard etc/*.*) \
              $(MKFILES) $(BOOT_MLS) boot/fe/lexer.mll \
              $(COMPILER_CRATE) $(COMPILER_INPUTS) \
              $(STDLIB_CRATE) $(STDLIB_INPUTS) \
@@ -686,7 +691,14 @@ distcheck:
 # Cleanup
 ######################################################################
 
-.PHONY: clean
+.PHONY: clean tidy
+
+tidy:
+	@$(call CFG_ECHO, check: formatting)
+	$(CFG_QUIET) python etc/tidy.py \
+      $(wildcard ../*.txt) \
+      ../README \
+      $(filter-out boot/fe/lexer.ml $(PKG_3RDPARTY), $(PKG_FILES))
 
 clean:
 	@$(call CFG_ECHO, cleaning)

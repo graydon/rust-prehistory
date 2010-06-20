@@ -209,8 +209,12 @@ let calculate_live_bitvectors
       let q = quads.(i) in
         quad_uncond_jmp.(i) <- quad_is_unconditional_jump q;
         quad_jmp_targs.(i) <- quad_jump_target_labels q;
-        List.iter (fun v -> Bits.set quad_used_vrs.(i) v true) (quad_used_vregs q);
-        List.iter (fun v -> Bits.set quad_defined_vrs.(i) v true) (quad_defined_vregs q)
+        List.iter
+          (fun v -> Bits.set quad_used_vrs.(i) v true)
+          (quad_used_vregs q);
+        List.iter
+          (fun v -> Bits.set quad_defined_vrs.(i) v true)
+          (quad_defined_vregs q)
     done;
 
     while !outer_changed do
@@ -223,7 +227,10 @@ let calculate_live_bitvectors
       let inner_changed = ref true in
         while !inner_changed do
           inner_changed := false;
-          iflog cx (fun _ -> log cx "iterating inner bitvector calculation over %d quads" n_quads);
+          iflog cx
+            (fun _ ->
+               log cx "iterating inner bitvector calculation over %d quads"
+                 n_quads);
           for i = n_quads - 1 downto 0 do
 
             let note_change b = if b then inner_changed := true in
@@ -322,7 +329,8 @@ let dump_quads cx =
     let q = cx.ctxt_quads.(i) in
     match q.quad_fixup with
         None -> ()
-      | Some f -> maxlablen := max (!maxlablen) ((String.length f.fixup_name) + 1)
+      | Some f ->
+          maxlablen := max (!maxlablen) ((String.length f.fixup_name) + 1)
   done;
   for i = 0 to len
   do
@@ -442,7 +450,8 @@ let reg_alloc
                 let spill_cell = Il.Mem (spill_mem, Il.ScalarTy word_ty) in
                   log cx "spilling <%d> from %s to %s"
                     vreg (hr_str hreg) (string_of_mem hr_str spill_mem);
-                  prepend (Il.mk_quad (Il.umov spill_cell (Il.Cell (hr hreg))));
+                  prepend (Il.mk_quad
+                             (Il.umov spill_cell (Il.Cell (hr hreg))));
               else ()
             end
           else ()
@@ -480,7 +489,8 @@ let reg_alloc
 
     let spill_constrained constrs i =
       match select_constrained constrs (!active_hregs) with
-          None -> raise (Ra_error ("unable to spill according to constraint"));
+          None ->
+            raise (Ra_error ("unable to spill according to constraint"));
         | Some h ->
             begin
               spill_specific_hreg i h;
@@ -523,15 +533,17 @@ let reg_alloc
           match select_constrained constrs (!inactive_hregs) with
               None ->
                 let h = spill_constrained constrs i in
-                  iflog cx (fun _ -> log cx "selected %s to spill and use for <v%d>"
-                              (hr_str h) vreg);
+                  iflog cx
+                    (fun _ -> log cx "selected %s to spill and use for <v%d>"
+                       (hr_str h) vreg);
                   h
             | Some h ->
                 iflog cx (fun _ -> log cx "selected inactive %s for <v%d>"
                             (hr_str h) vreg);
                 h
         in
-          inactive_hregs := List.filter (fun x -> x != hreg) (!inactive_hregs);
+          inactive_hregs :=
+            List.filter (fun x -> x != hreg) (!inactive_hregs);
           active_hregs := (!active_hregs) @ [hreg];
           Hashtbl.replace hreg_to_vreg hreg vreg;
           Hashtbl.replace vreg_to_hreg vreg hreg;
@@ -581,13 +593,16 @@ let reg_alloc
                     then hr_str (Hashtbl.find vreg_to_hreg v)
                     else "??"
                   in
-                  let vr_str (v:int) : string = Printf.sprintf "v%d=%s" v (hr v) in
+                  let vr_str (v:int) : string =
+                    Printf.sprintf "v%d=%s" v (hr v)
+                  in
                   let lstr lab ls fn =
                     if List.length ls = 0
                     then ()
                     else log cx "\t%s: [%s]" lab (list_to_str ls fn)
                   in
-                    log cx "processing quad %d = %s" i (string_of_quad hr_str quad);
+                    log cx "processing quad %d = %s"
+                      i (string_of_quad hr_str quad);
                     (lstr "dirt" (htab_keys dirty_vregs) vr_str);
                     (lstr "clob" clobbers hr_str);
                     (lstr "in" (Bits.to_list live_in_vregs.(i)) vr_str);
@@ -624,7 +639,8 @@ let reg_alloc
       iflog cx
         begin
           fun _ ->
-            log cx "spills: %d pre-spilled, %d total" n_pre_spills cx.ctxt_next_spill;
+            log cx "spills: %d pre-spilled, %d total"
+              n_pre_spills cx.ctxt_next_spill;
             log cx "register-allocated quads:";
             dump_quads cx;
         end;

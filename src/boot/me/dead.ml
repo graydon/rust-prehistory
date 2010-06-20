@@ -1,5 +1,6 @@
-(*
- * A simple dead-code analysis that rejects code following unconditional 'ret' or 'be'.
+(* 
+ * A simple dead-code analysis that rejects code following unconditional
+ * 'ret' or 'be'. 
  *)
 
 open Semant;;
@@ -51,8 +52,8 @@ let dead_code_visitor
               Hashtbl.add must_exit s.id ()
 
         | Ast.STMT_if { Ast.if_then = b1; Ast.if_else = Some b2 } ->
-            if (Hashtbl.mem must_exit b1.id) && (Hashtbl.mem must_exit b2.id) then
-              Hashtbl.add must_exit s.id ()
+            if (Hashtbl.mem must_exit b1.id) && (Hashtbl.mem must_exit b2.id)
+            then Hashtbl.add must_exit s.id ()
 
         | Ast.STMT_if _ -> ()
 
@@ -61,11 +62,14 @@ let dead_code_visitor
             Hashtbl.add must_exit s.id ()
 
         | Ast.STMT_alt_tag { Ast.alt_tag_arms = arms } ->
-            let arm_ids = Array.map (fun { node = (_, block) } -> block.id) arms in
-              if all_must_exit arm_ids then
-                Hashtbl.add must_exit s.id ()
+            let arm_ids =
+              Array.map (fun { node = (_, block) } -> block.id) arms
+            in
+              if all_must_exit arm_ids
+              then Hashtbl.add must_exit s.id ()
 
-        | Ast.STMT_alt_type { Ast.alt_type_arms = arms; Ast.alt_type_else = alt_type_else } ->
+        | Ast.STMT_alt_type { Ast.alt_type_arms = arms;
+                              Ast.alt_type_else = alt_type_else } ->
             let arm_ids = Array.map (fun (_, _, block) -> block.id) arms in
             let else_ids =
               begin

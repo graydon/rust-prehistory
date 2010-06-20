@@ -229,7 +229,7 @@ rust_crate
     // The following fields are emitted by the compiler for the static
     // rust_crate object inside each compiled crate.
 
-    ptrdiff_t image_base_off;     // Offset from this to the loaded image base.
+    ptrdiff_t image_base_off;     // (Loaded image base) - this.
     uintptr_t self_addr;          // Un-relocated addres of 'this'.
 
     ptrdiff_t debug_abbrev_off;   // Offset from this to .debug_abbrev.

@@ -20,7 +20,7 @@ and referent_ty =
     ScalarTy of scalar_ty
   | StructTy of referent_ty array
   | UnionTy of referent_ty array
-  | ParamTy of ty_param_idx (* Thing of size given by current-frame type param #n *)
+  | ParamTy of ty_param_idx (* Thing of current-frame type-param #n *)
   | OpaqueTy                (* Unknown memory-resident thing. *)
   | CodeTy                  (* Executable machine code. *)
   | NilTy                   (* 0 bits of space. *)
@@ -349,7 +349,11 @@ and referent_ty_align (word_bits:bits) (rt:referent_ty) : size =
 
 ;;
 
-let get_element_offset (word_bits:bits) (elts:referent_ty array) (i:int) : size =
+let get_element_offset
+    (word_bits:bits)
+    (elts:referent_ty array)
+    (i:int)
+    : size =
   let elts_before = Array.sub elts 0 i in
   let elt_rty = elts.(i) in
   let elts_before_size = referent_ty_size word_bits (StructTy elts_before) in
@@ -557,7 +561,8 @@ let rec string_of_expr64 (e64:Asm.expr64) : string =
 let string_of_off (e:Asm.expr64 option) : string =
   match e with
       None -> ""
-    | Some (Asm.IMM i) when (i64_lt i 0L) -> Printf.sprintf " - 0x%Lx" (Int64.neg i)
+    | Some (Asm.IMM i) when (i64_lt i 0L) ->
+        Printf.sprintf " - 0x%Lx" (Int64.neg i)
     | Some e' -> " + " ^ (string_of_expr64 e')
 ;;
 
@@ -581,7 +586,8 @@ let string_of_cell (f:hreg_formatter) (c:cell) : string =
     | Mem (a,ty) ->
         if !log_iltypes
         then
-          Printf.sprintf "%s:%s" (string_of_mem f a) (string_of_referent_ty ty)
+          Printf.sprintf "%s:%s"
+            (string_of_mem f a) (string_of_referent_ty ty)
         else
           Printf.sprintf "%s" (string_of_mem f a)
 ;;
@@ -592,7 +598,8 @@ let string_of_operand (f:hreg_formatter) (op:operand) : string =
     | ImmPtr (f, ty) ->
         if !log_iltypes
         then
-          Printf.sprintf "$<%s>.mpos:%s*" f.fixup_name (string_of_referent_ty ty)
+          Printf.sprintf "$<%s>.mpos:%s*"
+            f.fixup_name (string_of_referent_ty ty)
         else
           Printf.sprintf "$<%s>.mpos" f.fixup_name
     | Imm (i, ty) ->
@@ -884,8 +891,10 @@ let emit_full
                 unary_op = op }
           when is_mov op ->
             let v = next_vreg_cell e dst_st in
-              emit_quad_bottom (unary op v (Cell (Mem (src_mem, ScalarTy src_st))));
-              emit_quad_bottom (unary op (Mem (dst_mem, ScalarTy dst_st)) (Cell v))
+              emit_quad_bottom
+                (unary op v (Cell (Mem (src_mem, ScalarTy src_st))));
+              emit_quad_bottom
+                (unary op (Mem (dst_mem, ScalarTy dst_st)) (Cell v))
       | _ -> emit_quad_bottom q'
   in
 
@@ -968,7 +977,10 @@ let emit_full
     let old_lhs_op =
       if either_old_op_has_reg_indirect && (new_lhs_op <> old_lhs_op)
       then
-        let tmp = Mem (next_spill_slot e (ScalarTy (operand_scalar_ty old_lhs_op))) in
+        let tmp =
+          Mem (next_spill_slot e
+                 (ScalarTy (operand_scalar_ty old_lhs_op)))
+        in
           emit_mov tmp old_lhs_op;
           Cell tmp
       else
@@ -977,7 +989,10 @@ let emit_full
     let old_rhs_op =
       if either_old_op_has_reg_indirect && (new_rhs_op <> old_rhs_op)
       then
-        let tmp = Mem (next_spill_slot e (ScalarTy (operand_scalar_ty old_rhs_op))) in
+        let tmp =
+          Mem (next_spill_slot e
+                 (ScalarTy (operand_scalar_ty old_rhs_op)))
+        in
           emit_mov tmp old_rhs_op;
           Cell tmp
       else
@@ -1005,7 +1020,8 @@ let emit_full
             then
               begin
                 emit_mov b'.binary_dst b'.binary_lhs;
-                emit_quad (Binary { b' with binary_lhs = (Cell b'.binary_dst) })
+                emit_quad (Binary { b' with
+                                      binary_lhs = (Cell b'.binary_dst) })
               end
             else
               emit_quad (Binary b');
@@ -1061,8 +1077,10 @@ let emit_full
                 unary_op = op }
           when is_mov op ->
             let v = next_vreg_cell e dst_st in
-              emit_decayed_quad (unary op v (Cell (Mem (src_mem, ScalarTy src_st))));
-              emit_decayed_quad (unary op (Mem (dst_mem, ScalarTy dst_st)) (Cell v))
+              emit_decayed_quad
+                (unary op v (Cell (Mem (src_mem, ScalarTy src_st))));
+              emit_decayed_quad
+                (unary op (Mem (dst_mem, ScalarTy dst_st)) (Cell v))
       | _ -> emit_decayed_quad q'
 ;;
 

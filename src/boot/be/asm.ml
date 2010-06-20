@@ -124,7 +124,9 @@ let rec eval32 (e:expr32)
   let expandInt _ _ v = Int32.of_int v in
   let checkdef kind name v inj =
     match v with
-        None -> raise (Undef_sym (kind ^ " fixup " ^ name ^ " undefined in eval32"))
+        None ->
+          raise (Undef_sym (kind ^ " fixup " ^ name
+                            ^ " undefined in eval32"))
       | Some x -> inj kind name x
   in
   match e with
@@ -144,10 +146,17 @@ let rec eval32 (e:expr32)
     | OR (a, b) -> Int32.logor (eval32 a) (eval32 b)
     | NOT a -> Int32.lognot (eval32 a)
     | NEG a -> Int32.neg (eval32 a)
-    | F_POS f -> checkdef "file position" f.fixup_name f.fixup_file_pos expandInt
-    | F_SZ f -> checkdef "file size" f.fixup_name f.fixup_file_sz expandInt
-    | M_POS f -> checkdef "mem position" f.fixup_name f.fixup_mem_pos chop64
-    | M_SZ f -> checkdef "mem size" f.fixup_name f.fixup_mem_sz chop64
+    | F_POS f ->
+        checkdef "file position"
+          f.fixup_name f.fixup_file_pos expandInt
+    | F_SZ f ->
+        checkdef "file size"
+          f.fixup_name f.fixup_file_sz expandInt
+    | M_POS f ->
+        checkdef "mem position"
+          f.fixup_name f.fixup_mem_pos chop64
+    | M_SZ f ->
+        checkdef "mem size" f.fixup_name f.fixup_mem_sz chop64
     | EXT i -> Int32.of_int i
 ;;
 
@@ -155,7 +164,9 @@ let rec eval64 (e:expr64)
     : int64  =
   let checkdef kind name v inj =
     match v with
-        None -> raise (Undef_sym (kind ^ " fixup '" ^ name ^ "' undefined in eval64"))
+        None ->
+          raise (Undef_sym (kind ^ " fixup '"
+                            ^ name ^ "' undefined in eval64"))
       | Some x -> inj x
   in
   match e with
@@ -175,10 +186,18 @@ let rec eval64 (e:expr64)
     | OR (a, b) -> Int64.logor (eval64 a) (eval64 b)
     | NOT a -> Int64.lognot (eval64 a)
     | NEG a -> Int64.neg (eval64 a)
-    | F_POS f -> checkdef "file position" f.fixup_name f.fixup_file_pos Int64.of_int
-    | F_SZ f -> checkdef "file size" f.fixup_name f.fixup_file_sz Int64.of_int
-    | M_POS f -> checkdef "mem position" f.fixup_name f.fixup_mem_pos (fun x -> x)
-    | M_SZ f -> checkdef "mem size" f.fixup_name f.fixup_mem_sz (fun x -> x)
+    | F_POS f ->
+        checkdef "file position"
+          f.fixup_name f.fixup_file_pos Int64.of_int
+    | F_SZ f ->
+        checkdef "file size"
+          f.fixup_name f.fixup_file_sz Int64.of_int
+    | M_POS f ->
+        checkdef "mem position"
+          f.fixup_name f.fixup_mem_pos (fun x -> x)
+    | M_SZ f ->
+        checkdef "mem size"
+          f.fixup_name f.fixup_mem_sz (fun x -> x)
     | EXT e -> Int64.of_int32 (eval32 e)
 ;;
 
@@ -455,7 +474,11 @@ and lower_frag
         MARK -> ()
 
       | SEQ frags ->
-          Array.iter (fun frag -> lower_frag ~sess ~lsb0 ~buf ~relax ~frag) frags
+          Array.iter
+            begin
+              fun frag ->
+                lower_frag ~sess ~lsb0 ~buf ~relax ~frag
+            end frags
 
       | PAD c ->
           for i = 1 to c do
@@ -469,7 +492,8 @@ and lower_frag
       | BYTE i -> byte i
 
       | BYTES bs ->
-          iflog sess (fun _ -> log sess "lowering %d bytes" (Array.length bs));
+          iflog sess (fun _ -> log sess "lowering %d bytes"
+                        (Array.length bs));
           Array.iter byte bs
 
       | CHAR c ->
@@ -511,7 +535,8 @@ and lower_frag
       | RELAX rel ->
           begin
             try
-              lower_frag sess lsb0 buf relax rel.relax_options.(!(rel.relax_choice))
+              lower_frag sess lsb0 buf relax
+                rel.relax_options.(!(rel.relax_choice))
             with
                 Bad_fit _ -> Queue.add rel relax
           end
@@ -558,7 +583,10 @@ type asm_reader =
     }
 ;;
 
-type mmap_arr = (int, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t;;
+type mmap_arr =
+    (int, Bigarray.int8_unsigned_elt, Bigarray.c_layout)
+      Bigarray.Array1.t
+;;
 
 let new_asm_reader (sess:Session.sess) (s:filename) : asm_reader =
   iflog sess (fun _ -> log sess "opening file %s" s);

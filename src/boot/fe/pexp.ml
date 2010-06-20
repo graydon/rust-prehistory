@@ -45,7 +45,8 @@ and plval =
 and pexp = pexp' Common.identified
 ;;
 
-(* Pexp grammar. Includes names, idents, types, constrs, binops and unops, etc. *)
+(* Pexp grammar. Includes names, idents, types, constrs, binops and unops,
+   etc. *)
 
 let parse_ident (ps:pstate) : Ast.ident =
   match peek ps with
@@ -55,7 +56,7 @@ let parse_ident (ps:pstate) : Ast.ident =
     | _ -> raise (unexpected ps)
 ;;
 
-(* enforces the restricted pexp grammar when applicable (e.g. after "bind") *)
+(* Enforces the restricted pexp grammar when applicable (e.g. after "bind") *)
 let check_rstr_start (ps:pstate) : 'a =
   if (ps.pstate_rstr) then
     match peek ps with
@@ -71,7 +72,8 @@ let rec parse_name_component (ps:pstate) : Ast.name_component =
              LBRACKET ->
                let tys =
                  ctxt "name_component: apply"
-                   (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
+                   (bracketed_one_or_more LBRACKET RBRACKET
+                      (Some COMMA) parse_ty) ps
                in
                  Ast.COMP_app (id, tys)
            | _ -> Ast.COMP_ident id)
@@ -89,7 +91,8 @@ and parse_name_base (ps:pstate) : Ast.name_base =
              LBRACKET ->
                let tys =
                  ctxt "name_base: apply"
-                   (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
+                   (bracketed_one_or_more LBRACKET RBRACKET
+                      (Some COMMA) parse_ty) ps
                in
                  Ast.BASE_app (i, tys)
            | _ -> Ast.BASE_ident i)
@@ -126,7 +129,8 @@ and parse_carg (ps:pstate) : Ast.carg =
                 DOT ->
                   bump ps;
                   let comps = one_or_more DOT parse_name_component ps in
-                    Array.fold_left (fun x y -> Ast.CARG_ext (x, y)) base comps
+                    Array.fold_left
+                      (fun x y -> Ast.CARG_ext (x, y)) base comps
               | _ -> base
           in
             Ast.CARG_path path
@@ -137,10 +141,14 @@ and parse_carg (ps:pstate) : Ast.carg =
 
 and parse_constraint (ps:pstate) : Ast.constr =
   match peek ps with
-      (* NB: A constraint *looks* a lot like an EXPR_call, but is restricted *)
-      (* syntactically: the constraint name needs to be a name (not an lval) *)
-      (* and the constraint args all need to be cargs, which are similar to  *)
-      (* names but can begin with the 'formal' base anchor '*'.              *)
+
+      (*
+       * NB: A constraint *looks* a lot like an EXPR_call, but is restricted
+       * syntactically: the constraint name needs to be a name (not an lval)
+       * and the constraint args all need to be cargs, which are similar to
+       * names but can begin with the 'formal' base anchor '*'.
+       *)
+
       IDENT _ ->
         let n = ctxt "constraint: name" parse_name ps in
         let args = ctxt "constraint: args"
@@ -168,7 +176,10 @@ and parse_effect (ps:pstate) : Ast.effect =
     | UNSAFE -> bump ps; Ast.UNSAFE
     | _ -> Ast.PURE
 
-and parse_ty_fn (effect:Ast.effect) (ps:pstate) : (Ast.ty_fn * Ast.ident option) =
+and parse_ty_fn
+    (effect:Ast.effect)
+    (ps:pstate)
+    : (Ast.ty_fn * Ast.ident option) =
   match peek ps with
       FN | ITER ->
         let is_iter = (peek ps) = ITER in
@@ -201,6 +212,12 @@ and parse_ty_fn (effect:Ast.effect) (ps:pstate) : (Ast.ty_fn * Ast.ident option)
             (tfn, ident)
 
     | _ -> raise (unexpected ps)
+
+and check_dup_rec_labels ps labels =
+  arr_check_dups labels
+    (fun l _ ->
+       raise (err (Printf.sprintf
+                     "duplicate record label: %s" l) ps));
 
 
 and parse_atomic_ty (ps:pstate) : Ast.ty =
@@ -256,12 +273,15 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
           let ident = parse_ident ps in
           let tup =
             match peek ps with
-                LPAREN -> bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps
+                LPAREN -> paren_comma_list (parse_slot false) ps
               | _ -> raise (err "tag variant missing argument list" ps)
           in
             htab_put htab (Ast.NAME_base (Ast.BASE_ident ident)) tup
         in
-        let _ = bracketed_one_or_more LPAREN RPAREN (Some COMMA) (ctxt "tag: variant" parse_tag_entry) ps in
+        let _ =
+          bracketed_one_or_more LPAREN RPAREN
+            (Some COMMA) (ctxt "tag: variant" parse_tag_entry) ps
+        in
           Ast.TY_tag htab
 
     | REC ->
@@ -271,16 +291,16 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
           let (slot, ident) = parse_slot_and_ident false ps in
             (ident, apply_mutability slot mut)
         in
-        let entries = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_rec_entry ps in
+        let entries = paren_comma_list parse_rec_entry ps in
         let labels = Array.map (fun (l, _) -> l) entries in
           begin
-            arr_check_dups labels (fun l _ -> raise (err (Printf.sprintf "duplicate record label: %s" l) ps));
+            check_dup_rec_labels ps labels;
             Ast.TY_rec entries
           end
 
     | TUP ->
         bump ps;
-        let slots = bracketed_zero_or_more LPAREN RPAREN (Some COMMA) (parse_slot false) ps in
+        let slots = paren_comma_list (parse_slot false) ps in
           Ast.TY_tup slots
 
     | MACH m ->
@@ -299,10 +319,13 @@ and parse_atomic_ty (ps:pstate) : Ast.ty =
                     let (tfn, ident) = parse_ty_fn effect ps in
                       expect ps SEMI;
                       match ident with
-                          None -> raise (err (Printf.sprintf "missing method identifier") ps)
+                          None ->
+                            raise (err (Printf.sprintf
+                                          "missing method identifier") ps)
                         | Some i -> htab_put methods i tfn
                   in
-                    ignore (bracketed_zero_or_more LBRACE RBRACE None parse_method ps);
+                    ignore (bracketed_zero_or_more LBRACE RBRACE
+                              None parse_method ps);
                     Ast.TY_obj (effect, methods)
 
               | FN | ITER ->
@@ -370,7 +393,10 @@ and parse_slot_and_optional_ignored_ident
     end;
     slot
 
-and parse_identified_slot (aliases_ok:bool) (ps:pstate) : Ast.slot identified =
+and parse_identified_slot
+    (aliases_ok:bool)
+    (ps:pstate)
+    : Ast.slot identified =
   let apos = lexpos ps in
   let slot = parse_slot aliases_ok ps in
   let bpos = lexpos ps in
@@ -410,13 +436,16 @@ and parse_rec_body (ps:pstate) : pexp' = (*((Ast.ident * pexp) array) =*)
           let inputs = one_or_more COMMA parse_rec_input ps in
           let labels = Array.map (fun (l, _) -> l) inputs in
             begin
-              arr_check_dups labels (fun l _ -> raise (err (Printf.sprintf "duplicate record label: %s" l) ps));
+              check_dup_rec_labels ps labels;
               match peek ps with
                   RPAREN -> (bump ps; PEXP_rec (inputs, None))
                 | WITH ->
                     begin
                       bump ps;
-                      let base = ctxt "rec input: extension base" parse_pexp ps in
+                      let base =
+                        ctxt "rec input: extension base"
+                          parse_pexp ps
+                      in
                         expect ps RPAREN;
                         PEXP_rec (inputs, Some base)
                     end
@@ -531,7 +560,7 @@ and parse_bottom_pexp (ps:pstate) : pexp =
             let pexp = ctxt "bind pexp: function" (rstr true parse_pexp) ps in
             let args =
               ctxt "bind args"
-                (bracketed_zero_or_more LPAREN RPAREN (Some COMMA) parse_bind_arg) ps
+                (paren_comma_list parse_bind_arg) ps
             in
             let bpos = lexpos ps in
               span ps apos bpos (PEXP_bind (pexp, args))
@@ -545,7 +574,8 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                 begin
                   let tys =
                     ctxt "apply-type expr"
-                      (bracketed_one_or_more LBRACKET RBRACKET (Some COMMA) parse_ty) ps
+                      (bracketed_one_or_more LBRACKET RBRACKET
+                         (Some COMMA) parse_ty) ps
                   in
                   let bpos = lexpos ps in
                     span ps apos bpos (PEXP_lval (PLVAL_app (i, tys)))
@@ -737,11 +767,13 @@ and parse_ext_pexp (ps:pstate) (pexp:pexp) : pexp =
                     let rhs = rstr false parse_pexp ps in
                       expect ps RPAREN;
                       let bpos = lexpos ps in
-                        span ps apos bpos (PEXP_lval (PLVAL_ext_pexp (pexp, rhs)))
+                        span ps apos bpos
+                          (PEXP_lval (PLVAL_ext_pexp (pexp, rhs)))
                 | _ ->
                     let rhs = parse_name_component ps in
                     let bpos = lexpos ps in
-                      span ps apos bpos (PEXP_lval (PLVAL_ext_name (pexp, rhs)))
+                      span ps apos bpos
+                        (PEXP_lval (PLVAL_ext_name (pexp, rhs)))
             in
               parse_ext_pexp ps ext
           end
@@ -1124,7 +1156,9 @@ and desugar_expr_init
       | PEXP_binop (op, lhs, rhs) ->
           let (lhs_stmts, lhs_atom) = desugar_expr_atom ps lhs in
           let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
-          let copy_stmt = ss (cp (Ast.EXPR_binary (op, lhs_atom, rhs_atom))) in
+          let copy_stmt =
+            ss (cp (Ast.EXPR_binary (op, lhs_atom, rhs_atom)))
+          in
             ac [ lhs_stmts; rhs_stmts; [| copy_stmt |] ]
 
       (* x = a && b ==> if (a) { x = b; } else { x = false; } *)
@@ -1169,23 +1203,22 @@ and desugar_expr_init
       | PEXP_unop (op, rhs) ->
           let (rhs_stmts, rhs_atom) = desugar_expr_atom ps rhs in
           let expr = Ast.EXPR_unary (op, rhs_atom) in
-          let copy_stmt = span ps apos bpos
-            (Ast.STMT_copy (dst_lval, expr)) in
-              Array.append rhs_stmts [| copy_stmt |]
+          let copy_stmt = ss (cp expr) in
+            aa rhs_stmts [| copy_stmt |]
 
       | PEXP_call (fn, args) ->
           let (fn_stmts, fn_atom) = desugar_expr_atom ps fn in
           let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
           let fn_lval = atom_lval ps fn_atom in
-          let call_stmt = span ps apos bpos (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
-            Array.concat [ fn_stmts; arg_stmts; [| call_stmt |] ]
+          let call_stmt = ss (Ast.STMT_call (dst_lval, fn_lval, arg_atoms)) in
+            ac [ fn_stmts; arg_stmts; [| call_stmt |] ]
 
       | PEXP_bind (fn, args) ->
           let (fn_stmts, fn_atom) = desugar_expr_atom ps fn in
           let (arg_stmts, arg_atoms) = desugar_opt_expr_atoms ps args in
           let fn_lval = atom_lval ps fn_atom in
-          let bind_stmt = span ps apos bpos (Ast.STMT_bind (dst_lval, fn_lval, arg_atoms)) in
-            Array.concat [ fn_stmts; arg_stmts; [| bind_stmt |] ]
+          let bind_stmt = ss (Ast.STMT_bind (dst_lval, fn_lval, arg_atoms)) in
+            ac [ fn_stmts; arg_stmts; [| bind_stmt |] ]
 
       | PEXP_spawn (domain, sub) ->
           begin
@@ -1194,8 +1227,10 @@ and desugar_expr_init
                   let (fn_stmts, fn_atom) = desugar_expr_atom ps fn in
                   let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
                   let fn_lval = atom_lval ps fn_atom in
-                  let spawn_stmt = span ps apos bpos (Ast.STMT_spawn (dst_lval, domain, fn_lval, arg_atoms)) in
-                    Array.concat [ fn_stmts; arg_stmts; [| spawn_stmt |] ]
+                  let spawn_stmt =
+                    ss (Ast.STMT_spawn (dst_lval, domain, fn_lval, arg_atoms))
+                  in
+                    ac [ fn_stmts; arg_stmts; [| spawn_stmt |] ]
               | _ -> raise (err "non-call spawn" ps)
           end
 
@@ -1206,7 +1241,9 @@ and desugar_expr_init
                 Array.map
                   begin
                     fun (ident, pexp) ->
-                      let (stmts, (mode, mut, atom)) = desugar_expr_mode_mut_atom ps pexp in
+                      let (stmts, (mode, mut, atom)) =
+                        desugar_expr_mode_mut_atom ps pexp
+                      in
                         (stmts, (ident, mode, mut, atom))
                   end
                   args
@@ -1216,29 +1253,36 @@ and desugar_expr_init
               match base with
                   Some base ->
                     let (base_stmts, base_lval) = desugar_lval ps base in
-                    let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, Some base_lval)) in
-                      Array.concat [ arg_stmts; base_stmts; [| rec_stmt |] ]
+                    let rec_stmt =
+                      ss (Ast.STMT_init_rec
+                            (dst_lval, entries, Some base_lval))
+                    in
+                      ac [ arg_stmts; base_stmts; [| rec_stmt |] ]
                 | None ->
-                    let rec_stmt = span ps apos bpos (Ast.STMT_init_rec (dst_lval, entries, None)) in
-                      Array.append arg_stmts [| rec_stmt |]
+                    let rec_stmt =
+                      ss (Ast.STMT_init_rec (dst_lval, entries, None))
+                    in
+                      aa arg_stmts [| rec_stmt |]
             end
 
       | PEXP_tup args ->
-          let (arg_stmts, arg_mode_atoms) = desugar_expr_mode_mut_atoms ps args in
-          let stmt = span ps apos bpos (Ast.STMT_init_tup (dst_lval, arg_mode_atoms)) in
-            Array.append arg_stmts [| stmt |]
+          let (arg_stmts, arg_mode_atoms) =
+            desugar_expr_mode_mut_atoms ps args
+          in
+          let stmt = ss (Ast.STMT_init_tup (dst_lval, arg_mode_atoms)) in
+            aa arg_stmts [| stmt |]
 
       | PEXP_str s ->
-          let stmt = span ps apos bpos (Ast.STMT_init_str (dst_lval, s)) in
+          let stmt = ss (Ast.STMT_init_str (dst_lval, s)) in
             [| stmt |]
 
       | PEXP_vec (slot, args) ->
           let (arg_stmts, arg_atoms) = desugar_expr_atoms ps args in
-          let stmt = span ps apos bpos (Ast.STMT_init_vec (dst_lval, slot, arg_atoms)) in
-            Array.append arg_stmts [| stmt |]
+          let stmt = ss (Ast.STMT_init_vec (dst_lval, slot, arg_atoms)) in
+            aa arg_stmts [| stmt |]
 
       | PEXP_port ->
-          [| span ps apos bpos (Ast.STMT_init_port dst_lval) |]
+          [| ss (Ast.STMT_init_port dst_lval) |]
 
       | PEXP_chan pexp_opt ->
           let (port_stmts, port_opt) =
@@ -1246,16 +1290,18 @@ and desugar_expr_init
                 None -> ([||], None)
               | Some port_pexp ->
                   begin
-                    let (port_stmts, port_atom) = desugar_expr_atom ps port_pexp in
+                    let (port_stmts, port_atom) =
+                      desugar_expr_atom ps port_pexp
+                    in
                     let port_lval = atom_lval ps port_atom in
                       (port_stmts, Some port_lval)
                   end
           in
           let chan_stmt =
-            span ps apos bpos
+            ss
               (Ast.STMT_init_chan (dst_lval, port_opt))
           in
-            Array.append port_stmts [| chan_stmt |]
+            aa port_stmts [| chan_stmt |]
 
       | PEXP_exterior _ ->
           raise (err "exterior symbol in initialiser context" ps)

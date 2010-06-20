@@ -99,8 +99,11 @@ rust_crate_reader::mem_reader::adv(size_t amt)
 }
 
 
-rust_crate_reader::abbrev::abbrev(rust_dom *dom, uintptr_t body_off, size_t body_sz,
-                                  uintptr_t tag, uint8_t has_children) :
+rust_crate_reader::abbrev::abbrev(rust_dom *dom,
+                                  uintptr_t body_off,
+                                  size_t body_sz,
+                                  uintptr_t tag,
+                                  uint8_t has_children) :
   dom(dom),
   body_off(body_off),
   tag(tag),
@@ -109,7 +112,8 @@ rust_crate_reader::abbrev::abbrev(rust_dom *dom, uintptr_t body_off, size_t body
 {}
 
 
-rust_crate_reader::abbrev_reader::abbrev_reader(rust_crate::mem_area &abbrev_mem)
+rust_crate_reader::abbrev_reader::abbrev_reader
+  (rust_crate::mem_area &abbrev_mem)
   : mem_reader(abbrev_mem),
     abbrevs(abbrev_mem.dom)
 {
@@ -153,7 +157,8 @@ rust_crate_reader::abbrev_reader::get_abbrev(size_t i) {
 }
 
 bool
-rust_crate_reader::abbrev_reader::step_attr_form_pair(uintptr_t &attr, uintptr_t &form)
+rust_crate_reader::abbrev_reader::step_attr_form_pair(uintptr_t &attr,
+                                                      uintptr_t &form)
 {
   attr = 0;
   form = 0;

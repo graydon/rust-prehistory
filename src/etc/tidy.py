@@ -1,15 +1,25 @@
-#!/bin/env python
+#!/usr/bin/python
 
-maxlen=70
+import sys, fileinput
 
-def report(msg):
-    print ("%s:%d: %s" % (fileinput.filename(), fileinput.filelineno(), msg))
+err=0
+cols=78
 
-import fileinput
+def report_err(s):
+    global err
+    print("%s:%d: %s" % (fileinput.filename(), fileinput.filelineno(), s))
+    err=1
+
 for line in fileinput.input():
-    if len(line.rstrip("\n")) > maxlen:
-        report("overlong line")
-    if line.find("\t") != -1:
-        report("line with tab")
-    if line.rstrip(" \t") != line:
-        report("line with trailing whitespace")
+    if line.find('\t') != -1 and fileinput.filename().find("Makefile") == -1:
+        report_err("tab character")
+
+    if line.find('\r') != -1:
+        report_err("CR character")
+
+    if len(line)-1 > cols:
+        report_err("line longer than %d chars" % cols)
+
+
+sys.exit(err)
+

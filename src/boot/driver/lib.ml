@@ -203,12 +203,12 @@ let get_mod
       end
       sess.Session.sess_lib_dirs;
     match Queue.length found with
-        0 -> Semant.err (Some use_id) "unsatisfied 'use' clause"
+        0 -> Common.err (Some use_id) "unsatisfied 'use' clause"
       | 1 ->
           let filename = Queue.pop found in
           let items = get_file_mod sess abi filename nref oref in
             (filename, items)
-      | _ -> Semant.err (Some use_id) "multiple crates match 'use' clause"
+      | _ -> Common.err (Some use_id) "multiple crates match 'use' clause"
 ;;
 
 let infer_lib_name
