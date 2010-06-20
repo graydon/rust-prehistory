@@ -364,7 +364,7 @@ and unop =
     UNOP_not
   | UNOP_bitnot
   | UNOP_neg
-  | UNOP_cast of ty
+  | UNOP_cast of ty identified
 
 
 and header_slots = ((slot identified) * ident) array
@@ -763,10 +763,9 @@ and fmt_unop (ff:Format.formatter) (u:unop) (a:atom) : unit =
           fmt_atom ff a
 
       | UNOP_cast t ->
-          fmt_ty ff t;
-          fmt ff "(";
           fmt_atom ff a;
-          fmt ff ")"
+          fmt ff " as ";
+          fmt_ty ff t.node;
   end
 
 and fmt_expr (ff:Format.formatter) (e:expr) : unit =

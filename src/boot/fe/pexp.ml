@@ -627,6 +627,7 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                     | BOOL -> Ast.TY_bool
                     | _ -> bug () "expected int/uint/char/bool token"
                 in
+                let t = span ps apos bpos t in
                   span ps apos bpos
                     (PEXP_unop ((Ast.UNOP_cast t), pexp))
         end
@@ -682,7 +683,7 @@ and parse_bottom_pexp (ps:pstate) : pexp =
                   let pexp = parse_pexp ps in
                     expect ps RPAREN;
                     let bpos = lexpos ps in
-                    let t = Ast.TY_mach m in
+                    let t = span ps apos bpos (Ast.TY_mach m) in
                       span ps apos bpos
                         (PEXP_unop ((Ast.UNOP_cast t), pexp))
           end
@@ -931,9 +932,23 @@ and parse_oror_pexp (ps:pstate) : pexp =
 
       | _  -> lhs
 
+and parse_as_pexp (ps:pstate) : pexp =
+  let apos = lexpos ps in
+  let pexp = ctxt "as pexp" parse_oror_pexp ps in
+    match peek ps with
+        AS ->
+          bump ps;
+          let tapos = lexpos ps in
+          let t = parse_ty ps in
+          let bpos = lexpos ps in
+          let t = span ps tapos bpos t in
+            span ps apos bpos
+              (PEXP_unop ((Ast.UNOP_cast t), pexp))
+
+      | _       -> pexp
 
 and parse_pexp (ps:pstate) : pexp =
-  parse_oror_pexp ps
+  parse_as_pexp ps
 
 
 and parse_pexp_list (ps:pstate) : pexp array =

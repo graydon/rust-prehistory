@@ -855,7 +855,7 @@ let trans_visitor
       | _ -> bug () "Unhandled binop in binop_to_jmpop"
   in
 
-  let get_vtbl_entry (table_ptr:Il.cell) (i:int) : Il.cell =
+  let get_vtbl_entry_idx (table_ptr:Il.cell) (i:int) : Il.cell =
     (* Vtbls are encoded as tables of table-relative displacements. *)
     let (table_mem, _) = need_mem_cell (deref table_ptr) in
     let disp = Il.Cell (word_at (Il.mem_off_imm table_mem (word_n i))) in
@@ -863,6 +863,19 @@ let trans_visitor
       mov ptr_cell (Il.Cell table_ptr);
       add_to ptr_cell disp;
       ptr_cell
+  in
+
+  let get_vtbl_entry
+      (obj_cell:Il.cell)
+      (obj_ty:Ast.ty_obj)
+      (id:Ast.ident)
+      : (Il.cell * Ast.ty_fn) =
+    let (_, fns) = obj_ty in
+    let sorted_idents = sorted_htab_keys fns in
+    let i = arr_idx sorted_idents id in
+    let fn_ty = Hashtbl.find fns id in
+    let table_ptr = get_element_ptr obj_cell Abi.binding_field_item in
+      (get_vtbl_entry_idx table_ptr i, fn_ty)
   in
 
   let rec trans_slot_lval_ext
@@ -898,13 +911,9 @@ let trans_visitor
          Ast.COMP_atom at) ->
           bounds_checked_access at (interior_slot (Ast.TY_mach TY_u8))
 
-      | (Ast.TY_obj (_,fns),
+      | (Ast.TY_obj obj_ty,
          Ast.COMP_named (Ast.COMP_ident id)) ->
-          let sorted_idents = sorted_htab_keys fns in
-          let i = arr_idx sorted_idents id in
-          let fn_ty = Hashtbl.find fns id in
-          let table_ptr = get_element_ptr cell Abi.binding_field_item in
-          let cell = get_vtbl_entry table_ptr i in
+          let (cell, fn_ty) = get_vtbl_entry cell obj_ty id in
             (cell, (interior_slot (Ast.TY_fn fn_ty)))
 
 
@@ -1083,11 +1092,11 @@ let trans_visitor
                  |])
       end
 
-  and trans_obj_vtbl (id:node_id) : Il.operand =
+  and get_obj_vtbl (id:node_id) : Il.operand =
     let obj =
       match Hashtbl.find cx.ctxt_all_defns id with
           DEFN_item { Ast.decl_item=Ast.MOD_ITEM_obj obj} -> obj
-        | _ -> bug () "Trans.trans_obj_vtbl on non-obj referent"
+        | _ -> bug () "Trans.get_obj_vtbl on non-obj referent"
     in
       trans_crate_rel_data_operand (DATA_obj_vtbl id)
         begin
@@ -1104,8 +1113,87 @@ let trans_visitor
                  (sorted_htab_keys obj.Ast.obj_fns))
         end
 
-  and trans_init_str (dst:Ast.lval) (s:string) : unit =
-    (* Include null byte. *)
+
+  and trans_copy_forward_args (args_rty:Il.referent_ty) : unit =
+    let caller_args_cell = caller_args_cell args_rty in
+    let callee_args_cell = callee_args_cell false args_rty in
+    let (dst_reg, _) = force_to_reg (Il.Cell (alias callee_args_cell)) in
+    let (src_reg, _) = force_to_reg (Il.Cell (alias caller_args_cell)) in
+    let tmp_reg = next_vreg () in
+    let nbytes = force_sz (Il.referent_ty_size word_bits args_rty) in
+      abi.Abi.abi_emit_inline_memcpy (emitter())
+        nbytes dst_reg src_reg tmp_reg false;
+
+
+  and get_forwarding_obj_fn
+      (ident:Ast.ident)
+      (caller:Ast.ty_obj)
+      (callee:Ast.ty_obj)
+      : fixup =
+    (* Forwarding "glue" is not glue in the normal sense of being called with
+     * only Abi.worst_case_glue_call_args args; the functions are full-fleged
+     * obj fns like any other, and they perform a full call to the target
+     * obj. We just use the glue facility here to store the forwarding
+     * operators somewhere.
+     *)
+    let g = GLUE_forward (ident, caller, callee) in
+    let fix = new_fixup (glue_str cx g) in
+    let fty = Hashtbl.find (snd caller) ident in
+    let self_args_rty =
+      call_args_referent_type cx 0
+        (Ast.TY_fn fty) (Some (obj_closure_rty abi))
+    in
+    let callsz = Il.referent_ty_size word_bits self_args_rty in
+    let spill = new_fixup "forwarding fn spill" in
+      trans_glue_frame_entry callsz spill;
+      let all_self_args_cell = caller_args_cell self_args_rty in
+      let self_indirect_args_cell =
+        get_element_ptr all_self_args_cell Abi.calltup_elt_indirect_args
+      in
+        (*
+         * Note: this is wrong. This assumes our closure is a vtbl,
+         * when in fact it is a pointer to a refcounted malloc slab
+         * containing an obj. Bleh.
+         *)
+      let closure_cell =
+        deref (get_element_ptr self_indirect_args_cell
+                 Abi.indirect_args_elt_closure)
+      in
+
+      let (callee_fn_cell, _) =
+        get_vtbl_entry closure_cell callee ident
+      in
+        iflog (fun _ -> annotate "copy args forward to callee");
+        trans_copy_forward_args self_args_rty;
+
+        iflog (fun _ -> annotate "call through to callee");
+        (* FIXME: use a tail-call here. *)
+        call_code (code_of_cell callee_fn_cell);
+        trans_glue_frame_exit fix spill g;
+        fix
+
+
+  and get_forwarding_vtbl
+      (caller:Ast.ty_obj)
+      (callee:Ast.ty_obj)
+      : Il.operand =
+    trans_crate_rel_data_operand (DATA_forwarding_vtbl (caller,callee))
+      begin
+        fun _ ->
+          let (_,fns) = caller in
+          iflog (fun _ -> log cx "emitting %d-entry obj forwarding vtbl"
+                   (Hashtbl.length fns));
+            table_of_table_rel_fixups
+              (Array.map
+                 begin
+                   fun k ->
+                     get_forwarding_obj_fn k caller callee
+                 end
+                 (sorted_htab_keys fns))
+        end
+
+    and trans_init_str (dst:Ast.lval) (s:string) : unit =
+      (* Include null byte. *)
     let init_sz = Int64.of_int ((String.length s) + 1) in
     let static = trans_static_string s in
     let (dst, _) = trans_lval_init dst in
@@ -1622,7 +1710,7 @@ let trans_visitor
       (dst:Il.cell option)
       (args:Il.cell array)
       : unit =
-    let fptr = get_vtbl_entry tydesc idx in
+    let fptr = get_vtbl_entry_idx tydesc idx in
       trans_call_glue (code_of_operand (Il.Cell fptr)) dst args
 
   and trans_call_simple_static_glue
@@ -1775,47 +1863,39 @@ let trans_visitor
                         ": plain exit, finale")
         end
     in
-    let is_prim_type t =
-      match t with
-          Ast.TY_int
-        | Ast.TY_uint
-        | Ast.TY_char
-        | Ast.TY_mach _
-        | Ast.TY_bool -> true
-        | _ -> false
-    in
-    match expr with
-        Ast.EXPR_binary (binop, a, b) ->
-          assert (is_prim_type (atom_type cx a));
-          assert (is_prim_type (atom_type cx b));
-          trans_binary binop (trans_atom a) (trans_atom b)
+      match expr with
+          Ast.EXPR_binary (binop, a, b) ->
+            assert (is_prim_type (atom_type cx a));
+            assert (is_prim_type (atom_type cx b));
+            trans_binary binop (trans_atom a) (trans_atom b)
 
-      | Ast.EXPR_unary (unop, a) ->
-          assert (is_prim_type (atom_type cx a));
-          let src = trans_atom a in
-          let bits = Il.operand_bits word_bits src in
-          let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy bits) in
-          let op = match unop with
-              Ast.UNOP_not
-            | Ast.UNOP_bitnot -> Il.NOT
-            | Ast.UNOP_neg -> Il.NEG
-            | Ast.UNOP_cast t ->
-                let at = atom_type cx a in
-                if (type_is_2s_complement at) &&
-                  (type_is_2s_complement t)
-                then
-                  if type_is_unsigned_2s_complement t
-                  then Il.UMOV
-                  else Il.IMOV
-                else
-                  err None "unsupported cast operator"
-          in
-            anno ();
-            emit (Il.unary op dst src);
-            Il.Cell dst
+        | Ast.EXPR_unary (unop, a) ->
+            assert (is_prim_type (atom_type cx a));
+            let src = trans_atom a in
+            let bits = Il.operand_bits word_bits src in
+            let dst = Il.Reg (Il.next_vreg (emitter()), Il.ValTy bits) in
+            let op = match unop with
+                Ast.UNOP_not
+              | Ast.UNOP_bitnot -> Il.NOT
+              | Ast.UNOP_neg -> Il.NEG
+              | Ast.UNOP_cast t ->
+                  let t = Hashtbl.find cx.ctxt_all_cast_types t.id in
+                  let at = atom_type cx a in
+                    if (type_is_2s_complement at) &&
+                      (type_is_2s_complement t)
+                    then
+                      if type_is_unsigned_2s_complement t
+                      then Il.UMOV
+                      else Il.IMOV
+                    else
+                      err None "unsupported cast operator"
+            in
+              anno ();
+              emit (Il.unary op dst src);
+              Il.Cell dst
 
-      | Ast.EXPR_atom a ->
-          trans_atom a
+        | Ast.EXPR_atom a ->
+            trans_atom a
 
   and trans_block (block:Ast.block) : unit =
     trace_str cx.ctxt_sess.Session.sess_trace_block
@@ -2835,6 +2915,48 @@ let trans_visitor
                 a_cell a_slot None;
               trans_vec_append dst_cell dst_slot
                 (Il.Cell b_cell) (slot_ty b_slot)
+
+
+        | (Ast.TY_obj caller_obj_ty,
+           Ast.EXPR_unary (Ast.UNOP_cast t, a)) ->
+            let src_ty = atom_type cx a in
+            let _ = assert (not (is_prim_type (src_ty))) in
+              begin
+                let t = Hashtbl.find cx.ctxt_all_cast_types t.id in
+                let _ = assert (t = (Ast.TY_obj caller_obj_ty)) in
+                let callee_obj_ty =
+                  match atom_type cx a with
+                      Ast.TY_obj t -> t
+                    | _ -> bug () "obj cast from non-obj type"
+                in
+                let src_cell = need_cell (trans_atom a) in
+                let src_slot = interior_slot src_ty in
+
+                (* FIXME: this is wrong. It treats the underlying obj-state
+                 * as the same as the callee and simply substitutes the
+                 * forwarding vtbl, which would be great if it had any way
+                 * convey the callee vtbl to the forwarding functions. But it
+                 * doesn't. Instead, we have to malloc a fresh 3-word
+                 * refcounted obj to hold the callee's vtbl+state pair, copy
+                 * that in as the state here.
+                 *)
+                let _ =
+                  trans_copy_slot (get_ty_params_of_current_frame())
+                    initializing
+                    dst_cell dst_slot
+                    src_cell src_slot
+                in
+                let caller_vtbl_oper =
+                  get_forwarding_vtbl caller_obj_ty callee_obj_ty
+                in
+                let caller_obj =
+                  deref_slot initializing dst_cell dst_slot
+                in
+                let caller_vtbl =
+                  get_element_ptr caller_obj Abi.binding_field_item
+                in
+                  mov caller_vtbl caller_vtbl_oper
+              end
 
         | (_, Ast.EXPR_binary _)
         | (_, Ast.EXPR_unary _)
@@ -4253,7 +4375,7 @@ let trans_visitor
           Ast.TY_fn (tsig, _) -> slot_ty tsig.Ast.sig_output_slot
         | _ -> bug () "object constructor doesn't have function type"
     in
-    let vtbl_ptr = trans_obj_vtbl obj_id in
+    let vtbl_ptr = get_obj_vtbl obj_id in
     let _ =
       iflog (fun _ -> annotate "calculate vtbl-ptr from displacement")
     in
@@ -4341,7 +4463,6 @@ let trans_visitor
     let n_ty_params = n_item_ty_params cx fnid in
     let args_rty = direct_call_args_referent_type cx fnid in
     let caller_args_cell = caller_args_cell args_rty in
-    let callee_args_cell = callee_args_cell false args_rty in
       begin
         match ilib with
             REQUIRED_LIB_rust ls ->
@@ -4374,19 +4495,9 @@ let trans_visitor
                        libstr;
                        relpath |];
 
-                  let (dst_reg, _) =
-                    force_to_reg (Il.Cell (alias callee_args_cell))
-                  in
-                  let (src_reg, _) =
-                    force_to_reg (Il.Cell (alias caller_args_cell))
-                  in
-                  let tmp_reg = next_vreg () in
-                  let nbytes =
-                    force_sz (Il.referent_ty_size word_bits args_rty)
-                  in
-                    abi.Abi.abi_emit_inline_memcpy (emitter())
-                      nbytes dst_reg src_reg tmp_reg false;
-                    call_code (code_of_operand (Il.Cell f));
+                  trans_copy_forward_args args_rty;
+
+                  call_code (code_of_operand (Il.Cell f));
               end
 
           | REQUIRED_LIB_c ls ->

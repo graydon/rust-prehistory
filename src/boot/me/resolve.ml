@@ -626,6 +626,9 @@ let type_resolving_visitor
             let id = fe.Ast.for_each_body.id in
             let fty = mk_simple_ty_iter [| |] in
               htab_put cx.ctxt_all_item_types id fty;
+        | Ast.STMT_copy (_, Ast.EXPR_unary (Ast.UNOP_cast t, _)) ->
+            let ty = resolve_ty t.node in
+              htab_put cx.ctxt_all_cast_types t.id ty
         | _ -> ()
     end;
     inner.Walk.visit_stmt_pre stmt

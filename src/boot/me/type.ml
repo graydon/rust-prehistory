@@ -838,6 +838,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
                      * Only some casts make sense.
                      *)
                     let tv_a = ref TYSPEC_all in
+                    let t = Hashtbl.find cx.ctxt_all_cast_types t.id in
                       unify_atom atom tv_a;
                       unify_ty t tv
             end

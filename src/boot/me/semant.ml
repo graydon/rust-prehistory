@@ -37,6 +37,7 @@ type glue =
   | GLUE_fn_binding of node_id    (* node is the 'bind' stmt           *)
   | GLUE_obj_drop of node_id      (* node is the obj                   *)
   | GLUE_loop_body of node_id     (* node is the 'for each' body block *)
+  | GLUE_forward of (Ast.ident * Ast.ty_obj * Ast.ty_obj)
 ;;
 
 type data =
@@ -45,6 +46,7 @@ type data =
   | DATA_tydesc of Ast.ty
   | DATA_frame_glue_fns of node_id
   | DATA_obj_vtbl of node_id
+  | DATA_forwarding_vtbl of (Ast.ty_obj * Ast.ty_obj)
   | DATA_crate
 ;;
 
@@ -90,6 +92,7 @@ type ctxt =
       ctxt_all_item_names: (node_id,Ast.name) Hashtbl.t;
       ctxt_all_item_types: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_lval_types: (node_id,Ast.ty) Hashtbl.t;
+      ctxt_all_cast_types: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_type_items: (node_id,Ast.ty) Hashtbl.t;
       ctxt_all_stmts: (node_id,Ast.stmt) Hashtbl.t;
       ctxt_item_files: (node_id,filename) Hashtbl.t;
@@ -177,6 +180,7 @@ let new_ctxt sess abi crate =
     ctxt_all_item_names = Hashtbl.create 0;
     ctxt_all_item_types = Hashtbl.create 0;
     ctxt_all_lval_types = Hashtbl.create 0;
+    ctxt_all_cast_types = Hashtbl.create 0;
     ctxt_all_type_items = Hashtbl.create 0;
     ctxt_all_stmts = Hashtbl.create 0;
     ctxt_item_files = crate.Ast.crate_files;
@@ -923,6 +927,16 @@ let type_has_state (t:Ast.ty) : bool =
 
 
 (* Various type analyses. *)
+
+let is_prim_type (t:Ast.ty) : bool =
+  match t with
+      Ast.TY_int
+    | Ast.TY_uint
+    | Ast.TY_char
+    | Ast.TY_mach _
+    | Ast.TY_bool -> true
+    | _ -> false
+;;
 
 let type_contains_chan (t:Ast.ty) : bool =
   let fold_chan _ = true in
@@ -1937,6 +1951,11 @@ let glue_str (cx:ctxt) (g:glue) : string =
       -> (item_str cx oid) ^ ".drop"
     | GLUE_loop_body i
       -> "glue$loop_body$" ^ (string_of_int (int_of_node i))
+    | GLUE_forward (id, oty1, oty2)
+      -> "glue$forward$"
+        ^ id
+        ^ "$" ^ (ty_str (Ast.TY_obj oty1))
+        ^ "$" ^ (ty_str (Ast.TY_obj oty2))
 ;;
 
 

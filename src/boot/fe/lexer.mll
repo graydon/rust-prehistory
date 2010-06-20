@@ -100,6 +100,7 @@
 
                 ("in", IN);
 
+                ("as", AS);
                 ("with", WITH);
 
                 ("bind", BIND);

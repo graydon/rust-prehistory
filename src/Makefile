@@ -311,6 +311,7 @@ self: $(CFG_COMPILER)
 
 TEST_XFAILS_X86 :=  test/run-pass/mlist-cycle.rs \
                     test/run-pass/clone-with-exterior.rs \
+                    test/run-pass/obj-as.rs \
                     test/run-pass/rec-auto.rs \
                     test/run-pass/vec-slice.rs \
                     test/run-pass/generic-fn-infer.rs \
@@ -377,6 +378,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       native-mod.rc \
                       native-opaque-type.rs \
                       native.rc \
+                      obj-.rs \
                       obj-drop.rs \
                       obj-dtor.rs \
                       obj-with-vec.rs \
