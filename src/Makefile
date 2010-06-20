@@ -325,63 +325,70 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist-cycle.rs \
 TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       acyclic-unwind.rs \
                       alt-tag.rs \
+                      argv.rs \
                       basic.rs \
                       bind-obj-ctor.rs \
                       bind-thunk.rs \
                       bind-trivial.rs \
+                      bitwise.rs \
+                      box-unbox.rs \
                       cast.rs \
                       char.rs \
                       clone-with-exterior.rs \
                       comm.rs \
+                      command-line-args.rs \
                       complex.rs \
                       dead-code-one-arm-if.rs \
                       deep.rs \
                       div-mod.rs \
                       drop-on-ret.rs \
+                      else-if.rs \
+                      export-non-interference.rs \
                       exterior.rs \
-                      foreach-simple.rs \
-                      foreach-simple-outer-slot.rs \
                       foreach-put-structured.rs \
-                      vec-slice.rs \
-                      simple-obj.rs \
-                      import.rs \
+                      foreach-simple-outer-slot.rs \
+                      foreach-simple.rs \
                       fun-call-variants.rs \
                       fun-indirect-call.rs \
                       generic-derived-type.rs \
                       generic-drop-glue.rs \
-                      generic-fn.rs \
-                      generic-obj.rs \
-                      generic-obj-with-derived-type.rs \
-                      generic-recursive-tag.rs \
-                      generic-tag.rs \
-                      generic-tag-alt.rs \
-                      generic-type.rs \
                       generic-fn-infer.rs \
-                      vec-append.rs \
-                      vec-concat.rs \
-                      vec-drop.rs \
-                      mutable-vec-drop.rs \
+                      generic-fn.rs \
+                      generic-obj-with-derived-type.rs \
+                      generic-obj.rs \
+                      generic-recursive-tag.rs \
+                      generic-tag-alt.rs \
+                      generic-tag.rs \
+                      generic-type-synonym.rs \
+                      generic-type.rs \
+                      i32-sub.rs \
+                      i8-incr.rs \
+                      import.rs \
                       inner-module.rs \
                       large-records.rs \
+                      lazy-and-or.rs \
                       lazychan.rs \
                       linear-for-loop.rs \
                       many.rs \
-                      mlist.rs \
                       mlist-cycle.rs \
+                      mlist.rs \
+                      mutable-vec-drop.rs \
                       mutual-recursion-group.rs \
-                      native.rc \
-                      command-line-args.rs \
                       native-mod.rc \
+                      native-opaque-type.rs \
+                      native.rc \
+                      obj-drop.rs \
+                      obj-dtor.rs \
+                      obj-with-vec.rs \
                       opeq.rs \
                       pred.rs \
                       readalias.rs \
                       rec-auto.rs \
                       rec-extend.rs \
-                      rec.rs \
                       rec-tup.rs \
+                      rec.rs \
                       return-nil.rs \
-                      i32-sub.rs \
-                      i8-incr.rs \
+                      simple-obj.rs \
                       spawn-fn.rs \
                       spawn.rs \
                       stateful-obj.rs \
@@ -394,27 +401,21 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       tail-direct.rs \
                       threads.rs \
                       tup.rs \
+                      type-sizes.rs \
                       u32-decr.rs \
                       u8-incr-decr.rs \
                       u8-incr.rs \
                       unit.rs \
                       user.rs \
                       utf8.rs \
+                      vec-append.rs \
+                      vec-concat.rs \
+                      vec-drop.rs \
+                      vec-slice.rs \
                       vec.rs \
                       writealias.rs \
                       yield.rs \
                       yield2.rs \
-                      native-opaque-type.rs \
-                      type-sizes.rs \
-                      obj-drop.rs \
-                      obj-dtor.rs \
-                      obj-with-vec.rs \
-                      else-if.rs \
-                      lazy-and-or.rs \
-                      bitwise.rs \
-                      export-non-interference.rs \
-                      box-unbox.rs \
-                      generic-type-synonym.rs \
                      ) \
                     $(addprefix test/run-fail/, \
                       explicit-fail.rs \

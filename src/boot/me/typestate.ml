@@ -858,8 +858,22 @@ let lifecycle_visitor
 
   let (live_block_slots:(node_id Stack.t) Stack.t) = Stack.create () in
 
+  let (implicit_init_block_slots:(node_id,node_id) Hashtbl.t) =
+    Hashtbl.create 0
+  in
+
+  let mark_slot_init sl =
+    Stack.push sl (Stack.top live_block_slots)
+  in
+
+
   let visit_block_pre b =
     Stack.push (Stack.create()) live_block_slots;
+    begin
+      match htab_search implicit_init_block_slots b.id with
+          None -> ()
+        | Some slot -> mark_slot_init slot
+    end;
     inner.Walk.visit_block_pre b
   in
 
@@ -901,9 +915,7 @@ let lifecycle_visitor
     begin
       let init_lval lv_dst =
         let dst_slots = lval_slots cx lv_dst in
-          Array.iter
-            (fun sl -> Stack.push sl (Stack.top live_block_slots))
-            dst_slots;
+          Array.iter mark_slot_init dst_slots;
       in
         match s.node with
             Ast.STMT_copy (lv_dst, _)
@@ -938,6 +950,23 @@ let lifecycle_visitor
           | Ast.STMT_init_port lv_dst
           | Ast.STMT_init_chan (lv_dst, _) ->
               init_lval lv_dst
+
+          | Ast.STMT_for f ->
+              log cx "noting implicit init for slot %d in for-block %d"
+                (int_of_node (fst f.Ast.for_slot).id)
+                (int_of_node (f.Ast.for_body.id));
+              htab_put implicit_init_block_slots
+                f.Ast.for_body.id
+                (fst f.Ast.for_slot).id
+
+          | Ast.STMT_for_each f ->
+              log cx "noting implicit init for slot %d in for_each-block %d"
+                (int_of_node (fst f.Ast.for_each_slot).id)
+                (int_of_node (f.Ast.for_each_body.id));
+              htab_put implicit_init_block_slots
+                f.Ast.for_each_body.id
+                (fst f.Ast.for_each_slot).id
+
 
         | _ -> ()
     end;

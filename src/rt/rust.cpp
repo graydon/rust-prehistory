@@ -151,15 +151,15 @@ command_line_args
                                          (uint8_t const *)argv[i]);
         }
         args->fill = vec_fill;
-        // FIXME (bug 560452): horrible hack to handle non-cascading vec drop
-        // glue.
+        // If the caller has a declared args array, they may drop; but
+        // we don't know if they have such an array. So we pin the args
+        // array here to ensure it survives to program-shutdown.
         args->ref();
     }
 
     ~command_line_args() {
         if (args) {
-            // FIXME (bug 560452): horrible hack to handle non-cascading vec
-            // drop glue.
+            // Drop the args we've had pinned here.
             rust_str **strs = (rust_str**) &args->data[0];
             for (int i = 0; i < argc; ++i)
                 dom.free(strs[i]);
