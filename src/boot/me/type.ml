@@ -1140,7 +1140,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
 
         | Ast.MOD_ITEM_fn _ ->
             pop_retval_tv ();
-            if (path_name()) = cx.ctxt_main_name
+            if (Some (path_name())) = cx.ctxt_main_name
             then
               begin
                 match Hashtbl.find cx.ctxt_all_item_types mod_item.id with

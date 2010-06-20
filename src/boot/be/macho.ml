@@ -623,11 +623,12 @@ let emit_file
   let progname_fixup = (Semant.provide_native sem SEG_data "__progname") in
   let environ_fixup = (Semant.provide_native sem SEG_data "environ") in
   let exit_fixup = (Semant.require_native sem REQUIRED_LIB_crt "exit") in
-  let rust_start_fixup =
-    Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"
+  let (start_fixup, rust_start_fixup) =
+    if sess.Session.sess_library_mode
+    then (None, None)
+    else (Some (new_fixup "start function entry"),
+          Some (Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"))
   in
-
-  let start_fixup = new_fixup "start function entry" in
 
   let text_sect_align_log2 = 2 in
   let data_sect_align_log2 = 2 in
@@ -926,7 +927,12 @@ let emit_file
 
       macho_dylib_command "/usr/lib/libSystem.B.dylib";
 
-      macho_thread_command start_fixup
+      begin
+        match start_fixup with
+            None -> MARK
+          | Some start_fixup ->
+              macho_thread_command start_fixup
+      end;
     |]
   in
 
@@ -939,7 +945,7 @@ let emit_file
       load_commands
   in
 
-  let objfile_start e =
+  let objfile_start e start_fixup rust_start_fixup main_fn_fixup =
     let edx = X86.h X86.edx in
     let edx_pointee =
       Il.Mem ((Il.RegIn (edx, None)), Il.ScalarTy (Il.AddrTy Il.OpaqueTy))
@@ -985,7 +991,7 @@ let emit_file
       (* Push 16 bytes to preserve SSE alignment. *)
       Abi.load_fixup_addr e edx sem.Semant.ctxt_crate_fixup Il.OpaqueTy;
       Il.emit e (Il.Push (X86.ro X86.edx));
-      Abi.load_fixup_addr e edx sem.Semant.ctxt_main_fn_fixup Il.OpaqueTy;
+      Abi.load_fixup_addr e edx main_fn_fixup Il.OpaqueTy;
       Il.emit e (Il.Push (X86.ro X86.edx));
       let fptr = Abi.load_fixup_codeptr e edx rust_start_fixup true true in
         Il.emit e (Il.call (X86.rc X86.eax) fptr);
@@ -1003,9 +1009,17 @@ let emit_file
 
   let text_section =
     let start_code =
-      let e = X86.new_emitter_without_vregs () in
-        objfile_start e;
-        X86.frags_of_emitted_quads sess e
+      match (start_fixup, rust_start_fixup,
+             sem.Semant.ctxt_main_fn_fixup) with
+          (None, _, _)
+        | (_, None, _)
+        | (_, _, None) -> MARK
+        | (Some start_fixup,
+           Some rust_start_fixup,
+           Some main_fn_fixup) ->
+            let e = X86.new_emitter_without_vregs () in
+              objfile_start e start_fixup rust_start_fixup main_fn_fixup;
+              X86.frags_of_emitted_quads sess e
     in
       def_aligned text_sect_align text_section_fixup
         (SEQ [|

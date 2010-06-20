@@ -97,6 +97,7 @@ type e_version =
 
 
 let elf32_header
+    ~(sess:Session.sess)
     ~(ei_data:ei_data)
     ~(e_type:e_type)
     ~(e_machine:e_machine)
@@ -109,6 +110,11 @@ let elf32_header
     ~(e_shstrndx:int64)
     : frag =
   let elf_header_fixup = new_fixup "elf header" in
+  let entry_pos =
+    if sess.Session.sess_library_mode
+    then (IMM 0L)
+    else (M_POS e_entry_fixup)
+  in
     DEF
       (elf_header_fixup,
        SEQ [| elf_identification ELFCLASS32 ei_data;
@@ -125,7 +131,7 @@ let elf32_header
               WORD (TY_u32, (IMM (match e_version with
                                       EV_NONE -> 0L
                                     | EV_CURRENT -> 1L)));
-              WORD (TY_u32, (M_POS e_entry_fixup));
+              WORD (TY_u32, entry_pos);
               WORD (TY_u32, (F_POS e_phoff_fixup));
               WORD (TY_u32, (F_POS e_shoff_fixup));
               WORD (TY_u32, (IMM 0L)); (* e_flags *)
@@ -990,6 +996,7 @@ let elf32_linux_x86_file
 
   let elf_header =
     elf32_header
+      ~sess
       ~ei_data: ELFDATA2LSB
       ~e_type: ET_DYN
       ~e_machine: EM_386
@@ -1547,13 +1554,20 @@ let emit_file
 
   let init_fixup = new_fixup "_init function entry" in
   let fini_fixup = new_fixup "_fini function entry" in
-  let main_fixup = new_fixup "start function entry" in
-  let rust_start_fixup =
-    Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"
+  let (start_fixup, rust_start_fixup) =
+    if sess.Session.sess_library_mode
+    then (None, None)
+    else (Some (new_fixup "start function entry"),
+          Some (Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"))
   in
   let libc_start_main_fixup = new_fixup "__libc_start_main@plt stub" in
 
-  let start_fn =
+  let start_fn _ =
+    let start_fixup =
+      match start_fixup with
+          None -> bug () "missing start fixup in non-library mode"
+        | Some s -> s
+    in
     let e = X86.new_emitter_without_vregs () in
     let push_r32 r = Il.emit e
       (Il.Push (Il.Cell (Il.Reg (Il.Hreg r, Il.ValTy Il.Bits32))))
@@ -1574,27 +1588,35 @@ let emit_file
       push_pos32 init_fixup;
       push_r32 X86.ecx;
       push_r32 X86.esi;
-      push_pos32 main_fixup;
+      push_pos32 start_fixup;
       Il.emit e (Il.call
                    (Il.Reg (Il.Hreg X86.eax, Il.ValTy Il.Bits32))
                    (Il.direct_code_ptr libc_start_main_fixup));
       X86.frags_of_emitted_quads sess e
   in
 
-  let do_nothing_fn =
+  let do_nothing_fn _ =
     let e = X86.new_emitter_without_vregs () in
       Il.emit e Il.Ret;
       X86.frags_of_emitted_quads sess e
   in
 
-  let main_fn =
-    let e = X86.new_emitter_without_vregs () in
-      X86.objfile_start e
-        ~start_fixup: main_fixup ~rust_start_fixup
-        ~main_fn_fixup: sem.Semant.ctxt_main_fn_fixup
-        ~crate_fixup: sem.Semant.ctxt_crate_fixup
-        ~indirect_start: false;
-      X86.frags_of_emitted_quads sess e
+  let main_fn _ =
+    match (start_fixup, rust_start_fixup, sem.Semant.ctxt_main_fn_fixup) with
+        (None, _, _)
+      | (_, None, _)
+      | (_, _, None) -> MARK
+      | (Some start_fixup,
+         Some rust_start_fixup,
+         Some main_fn_fixup) ->
+          let e = X86.new_emitter_without_vregs () in
+            X86.objfile_start e
+              ~start_fixup
+              ~rust_start_fixup
+              ~main_fn_fixup
+              ~crate_fixup: sem.Semant.ctxt_crate_fixup
+              ~indirect_start: false;
+            X86.frags_of_emitted_quads sess e
   in
 
   let needed_libs =
@@ -1605,13 +1627,19 @@ let emit_file
   in
 
   let _ =
-    htab_put text_frags (Some "_start") start_fn;
-    htab_put text_frags (Some "_init") (DEF (init_fixup, do_nothing_fn));
-    htab_put text_frags (Some "_fini") (DEF (fini_fixup, do_nothing_fn));
-    htab_put text_frags (Some "main") main_fn;
+    if not sess.Session.sess_library_mode
+    then
+      begin
+        htab_put text_frags (Some "_start") (start_fn());
+        htab_put text_frags (Some "_init")
+          (DEF (init_fixup, do_nothing_fn()));
+        htab_put text_frags (Some "_fini")
+          (DEF (fini_fixup, do_nothing_fn()));
+        htab_put text_frags (Some "main") (main_fn ());
+        htab_put required_fixups "__libc_start_main" libc_start_main_fixup;
+      end;
     htab_put text_frags None code;
     htab_put rodata_frags None data;
-    htab_put required_fixups "__libc_start_main" libc_start_main_fixup;
 
     Hashtbl.iter
       begin

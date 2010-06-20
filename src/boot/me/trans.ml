@@ -1247,7 +1247,7 @@ let trans_visitor
       match htab_search cx.ctxt_glue_code g with
           Some code -> code.code_fixup
         | None ->
-            let fix = new_fixup (glue_str cx g) in
+            let fix = cx.ctxt_exit_task_fixup in
               emit_exit_task_glue fix g;
               fix
 
@@ -4531,17 +4531,7 @@ let trans_visitor
     iflog (fun _ -> log cx "translating local item #%d = %s"
              (int_of_node i.id) (path_name()));
     match i.node.Ast.decl_item with
-        Ast.MOD_ITEM_fn f ->
-          if path_name() = cx.ctxt_main_name
-          then
-            begin
-              log cx "emitting main exit-task glue for %s" cx.ctxt_main_name;
-              emit_exit_task_glue
-                cx.ctxt_main_exit_task_glue_fixup
-                GLUE_exit_main_task;
-            end;
-          trans_fn i.id f.Ast.fn_body
-
+        Ast.MOD_ITEM_fn f -> trans_fn i.id f.Ast.fn_body
       | Ast.MOD_ITEM_tag t -> trans_tag n i.id t
       | Ast.MOD_ITEM_obj ob ->
           trans_obj_ctor i.id
@@ -4674,7 +4664,7 @@ let trans_visitor
             Asm.WORD (word_ty_mach, Asm.M_SZ cx.ctxt_debug_info_fixup);
 
             crate_rel_word cx.ctxt_activate_fixup;
-            crate_rel_word cx.ctxt_main_exit_task_glue_fixup;
+            crate_rel_word cx.ctxt_exit_task_fixup;
             crate_rel_word cx.ctxt_unwind_fixup;
             crate_rel_word cx.ctxt_yield_fixup;
 
@@ -4697,6 +4687,8 @@ let trans_visitor
         cx.ctxt_unwind_fixup
         (fun e -> abi.Abi.abi_unwind
            e nabi_rust (upcall_fixup "upcall_exit"));
+
+      ignore (get_exit_task_glue ());
 
       begin
         match abi.Abi.abi_get_next_pc_thunk with
@@ -4763,9 +4755,14 @@ let fixup_assigning_visitor
             begin
               let path = path_name () in
               let fixup =
-                if path = cx.ctxt_main_name
-                then cx.ctxt_main_fn_fixup
-                else new_fixup path
+                if (not cx.ctxt_sess.Session.sess_library_mode)
+                  && (Some path) = cx.ctxt_main_name
+                then
+                  match cx.ctxt_main_fn_fixup with
+                      None -> bug () "missing main fixup in trans"
+                    | Some fix -> fix
+                else
+                  new_fixup path
               in
                 htab_put cx.ctxt_fn_fixups i.id fixup;
             end
@@ -4829,7 +4826,12 @@ let process_crate
             Walk.empty_visitor))
     |];
   in
-    log cx "translating crate with main function %s" cx.ctxt_main_name;
+    log cx "translating crate";
+    begin
+      match cx.ctxt_main_name with
+          None -> ()
+        | Some m -> log cx "with main fn %s" m
+    end;
     run_passes cx "trans" path passes (log cx "%s") crate;
 ;;
 

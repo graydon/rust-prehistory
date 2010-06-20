@@ -614,7 +614,7 @@ let with_err_handling sess thunk =
               Ast.crate_auth = Hashtbl.create 0;
               Ast.crate_required = Hashtbl.create 0;
               Ast.crate_required_syms = Hashtbl.create 0;
-              Ast.crate_main = Ast.NAME_base (Ast.BASE_ident "none");
+              Ast.crate_main = None;
               Ast.crate_files = Hashtbl.create 0 }
 ;;
 
@@ -695,7 +695,10 @@ let parse_crate_file
               cdirs
           in
           let bpos = lexpos ps in
-          let main = find_main_fn ps items in
+          let main =
+            if ps.pstate_sess.Session.sess_library_mode
+            then None
+            else Some (find_main_fn ps items) in
           let crate = { Ast.crate_items = (Item.empty_view, items);
                         Ast.crate_meta = queue_to_arr meta;
                         Ast.crate_auth = auth;
@@ -732,7 +735,11 @@ let parse_src_file
           let items = Item.parse_mod_items ps EOF in
           let bpos = lexpos ps in
           let files = Hashtbl.create 0 in
-          let main = find_main_fn ps (snd items) in
+          let main =
+            if ps.pstate_sess.Session.sess_library_mode
+            then None
+            else Some (find_main_fn ps (snd items))
+          in
           let crate = { Ast.crate_items = items;
                         Ast.crate_required = required;
                         Ast.crate_required_syms = required_syms;

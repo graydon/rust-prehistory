@@ -73,8 +73,8 @@ rust_main_loop(rust_dom *dom)
     rust_task *task;
 
     dom->log(LOG_DOM, "running main-loop on domain 0x%" PRIxPTR, dom);
-    dom->logptr("main exit-task glue",
-                dom->root_crate->get_main_exit_task_glue());
+    dom->logptr("exit-task glue",
+                dom->root_crate->get_exit_task_glue());
 
     while ((task = dom->sched()) != NULL) {
         I(dom, task->running());
@@ -195,7 +195,7 @@ rust_start(uintptr_t main_fn, rust_crate const *crate, int argc, char **argv)
 
         uintptr_t main_args[3] = { 0, 0, (uintptr_t)args.args };
 
-        dom.root_task->start(crate->get_main_exit_task_glue(),
+        dom.root_task->start(crate->get_exit_task_glue(),
                              main_fn,
                              (uintptr_t)&main_args,
                              sizeof(main_args));

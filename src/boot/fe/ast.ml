@@ -438,7 +438,7 @@ and crate' =
       crate_required: (node_id, (required_lib * nabi_conv)) Hashtbl.t;
       crate_required_syms: (node_id, string) Hashtbl.t;
       crate_files: (node_id,filename) Hashtbl.t;
-      crate_main: name;
+      crate_main: name option;
     }
 and crate = crate' identified
 ;;

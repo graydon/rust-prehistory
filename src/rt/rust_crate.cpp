@@ -17,8 +17,8 @@ rust_crate::get_activate_glue() const {
 }
 
 uintptr_t
-rust_crate::get_main_exit_task_glue() const {
-  return ((uintptr_t)this + main_exit_task_glue_off);
+rust_crate::get_exit_task_glue() const {
+  return ((uintptr_t)this + exit_task_glue_off);
 }
 
 uintptr_t

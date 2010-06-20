@@ -230,11 +230,10 @@ let zero32 = WORD (TY_u32, (IMM 0L))
 ;;
 
 let pe_loader_header
-    ~(sess:Session.sess)
     ~(text_fixup:fixup)
     ~(init_data_fixup:fixup)
     ~(size_of_uninit_data:int64)
-    ~(entry_point_fixup:fixup)
+    ~(entry_point_fixup:fixup option)
     ~(image_fixup:fixup)
     ~(all_hdrs_fixup:fixup)
     ~(subsys:pe_subsystem)
@@ -256,12 +255,14 @@ let pe_loader_header
        WORD (TY_u32,
              (IMM size_of_uninit_data));
 
-       if sess.Session.sess_library_mode
-       then
-         zero32             (* DLLMain *)
-       else
-         WORD (TY_u32,
-               (rva entry_point_fixup));     (* "address of entry point"  *)
+       begin
+         match entry_point_fixup with
+             None -> zero32                  (* Library mode: DLLMain     *)
+           | Some entry_point_fixup ->
+               WORD (TY_u32,
+                     (rva
+                        entry_point_fixup))  (* "address of entry point"  *)
+       end;
 
        WORD (TY_u32, (rva text_fixup));      (* "base of code"            *)
        WORD (TY_u32, (rva init_data_fixup)); (* "base of data"            *)
@@ -706,28 +707,38 @@ let pe_export_section
 let pe_text_section
     ~(sess:Session.sess)
     ~(sem:Semant.ctxt)
-    ~(start_fixup:fixup)
-    ~(rust_start_fixup:fixup)
-    ~(main_fn_fixup:fixup)
+    ~(start_fixup:fixup option)
+    ~(rust_start_fixup:fixup option)
+    ~(main_fn_fixup:fixup option)
     ~(text_fixup:fixup)
     ~(crate_code:frag)
     : frag =
-  let e = X86.new_emitter_without_vregs () in
-    (*
-     * We are called from the Microsoft C library startup routine,
-     * and assumed to be stdcall; so we have to clean up our own
-     * stack before returning.
-     *)
-    X86.objfile_start e
-      ~start_fixup
-      ~rust_start_fixup
-      ~main_fn_fixup
-      ~crate_fixup: sem.Semant.ctxt_crate_fixup
-      ~indirect_start: true;
+  let startup =
+    match (start_fixup, rust_start_fixup, main_fn_fixup) with
+        (None, _, _)
+      | (_, None, _)
+      | (_, _, None) -> MARK
+      | (Some start_fixup,
+         Some rust_start_fixup,
+         Some main_fn_fixup) ->
+          let e = X86.new_emitter_without_vregs () in
+            (*
+             * We are called from the Microsoft C library startup routine,
+             * and assumed to be stdcall; so we have to clean up our own
+             * stack before returning.
+             *)
+            X86.objfile_start e
+              ~start_fixup
+              ~rust_start_fixup
+              ~main_fn_fixup
+              ~crate_fixup: sem.Semant.ctxt_crate_fixup
+              ~indirect_start: true;
+            X86.frags_of_emitted_quads sess e;
+  in
     def_aligned
       text_fixup
       (SEQ [|
-         X86.frags_of_emitted_quads sess e;
+         startup;
          crate_code
        |])
 ;;
@@ -796,7 +807,6 @@ let emit_file
   let import_dir_fixup = new_fixup "import directory" in
   let export_dir_fixup = new_fixup "export directory" in
   let text_fixup = new_fixup "text section" in
-  let start_fixup = new_fixup "start" in
   let bss_fixup = new_fixup "bss section" in
   let data_fixup = new_fixup "data section" in
   let image_fixup = new_fixup "image fixup" in
@@ -804,8 +814,12 @@ let emit_file
   let strtab_fixup = new_fixup "string table" in
   let note_rust_fixup = new_fixup ".note.rust section" in
 
-  let rust_start_fixup =
-    Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"
+  let (start_fixup, rust_start_fixup) =
+    if sess.Session.sess_library_mode
+    then (None, None)
+    else
+      (Some (new_fixup "start"),
+       Some (Semant.require_native sem REQUIRED_LIB_rustrt "rust_start"))
   in
 
   let header = (pe_header
@@ -848,7 +862,6 @@ let emit_file
              |])))
   in
   let loader_header = (pe_loader_header
-                         ~sess
                          ~text_fixup
                          ~init_data_fixup: all_init_data_fixup
                          ~size_of_uninit_data: 0L

@@ -135,6 +135,7 @@ type ctxt =
       ctxt_activate_fixup: fixup;
       ctxt_yield_fixup: fixup;
       ctxt_unwind_fixup: fixup;
+      ctxt_exit_task_fixup: fixup;
 
       ctxt_debug_aranges_fixup: fixup;
       ctxt_debug_pubnames_fixup: fixup;
@@ -160,9 +161,8 @@ type ctxt =
       ctxt_required_c_sym_num: ((required_lib * string), int) Hashtbl.t;
       ctxt_required_lib_num: (required_lib, int) Hashtbl.t;
 
-      ctxt_main_fn_fixup: fixup;
-      ctxt_main_name: string;
-      ctxt_main_exit_task_glue_fixup: fixup;
+      ctxt_main_fn_fixup: fixup option;
+      ctxt_main_name: string option;
     }
 ;;
 
@@ -215,6 +215,7 @@ let new_ctxt sess abi crate =
     ctxt_activate_fixup = new_fixup "activate glue";
     ctxt_yield_fixup = new_fixup "yield glue";
     ctxt_unwind_fixup = new_fixup "unwind glue";
+    ctxt_exit_task_fixup = new_fixup "exit-task glue";
 
     ctxt_debug_aranges_fixup = new_fixup "debug_aranges section";
     ctxt_debug_pubnames_fixup = new_fixup "debug_pubnames section";
@@ -237,9 +238,15 @@ let new_ctxt sess abi crate =
     ctxt_required_c_sym_num = Hashtbl.create 0;
     ctxt_required_lib_num = Hashtbl.create 0;
 
-    ctxt_main_fn_fixup = new_fixup (string_of_name crate.Ast.crate_main);
-    ctxt_main_name = string_of_name crate.Ast.crate_main;
-    ctxt_main_exit_task_glue_fixup = new_fixup "main exit-task glue"
+    ctxt_main_fn_fixup =
+      (match crate.Ast.crate_main with
+           None -> None
+         | Some n -> Some (new_fixup (string_of_name n)));
+
+    ctxt_main_name =
+      (match crate.Ast.crate_main with
+           None -> None
+         | Some n -> Some (string_of_name n));
   }
 ;;
 

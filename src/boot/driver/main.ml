@@ -89,19 +89,19 @@ let set_default_output_filename (sess:Session.sess) : unit =
 let dump_sig (filename:filename) : unit =
   let items =
     Lib.get_file_mod sess abi filename (ref (Node 0)) (ref (Opaque 0)) in
-    Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_mod_items items);
+    Printf.fprintf stdout "%s\n" (Ast.fmt_to_str Ast.fmt_mod_items items);
     exit 0
 ;;
 
 let dump_meta (filename:filename) : unit =
   begin
     match Lib.get_meta sess filename with
-        None -> Printf.fprintf stderr "Error: bad crate file: %s\n%!" filename
+        None -> Printf.fprintf stderr "Error: bad crate file: %s\n" filename
       | Some meta ->
           Array.iter
             begin
               fun (k,v) ->
-                Printf.fprintf stdout "%s = %S\n%!" k v;
+                Printf.fprintf stdout "%s = %S\n" k v;
             end
             meta
   end;
@@ -206,7 +206,7 @@ let exit_if_failed _ =
 Arg.parse
   argspecs
   (fun arg -> sess.Session.sess_in <- (Some arg))
-  ("usage: " ^ Sys.argv.(0) ^ " [options] (CRATE_FILE.rc|SOURCE_FILE.rs)\n%!")
+  ("usage: " ^ Sys.argv.(0) ^ " [options] (CRATE_FILE.rc|SOURCE_FILE.rs)\n")
 ;;
 
 let _ = set_default_output_filename  sess
@@ -214,13 +214,13 @@ let _ = set_default_output_filename  sess
 
 let _ =
   if sess.Session.sess_out = None
-  then (Printf.fprintf stderr "Error: no output file specified\n%!"; exit 1)
+  then (Printf.fprintf stderr "Error: no output file specified\n"; exit 1)
   else ()
 ;;
 
 let _ =
   if sess.Session.sess_in = None
-  then (Printf.fprintf stderr "Error: empty input filename\n%!"; exit 1)
+  then (Printf.fprintf stderr "Error: empty input filename\n"; exit 1)
   else ()
 ;;
 
@@ -245,7 +245,7 @@ let (crate:Ast.crate) =
             else
               begin
                 Printf.fprintf stderr
-                  "Error: unrecognized input file type: %s\n%!"
+                  "Error: unrecognized input file type: %s\n"
                   infile;
                 exit 1
               end
@@ -284,9 +284,9 @@ exit_if_failed ()
 if sess.Session.sess_log_ast
 then
   begin
-    Printf.fprintf stdout "Post-parse AST:\n%!";
+    Printf.fprintf stdout "Post-parse AST:\n";
     Format.set_margin 80;
-    Printf.fprintf stdout "%s\n%!" (Ast.fmt_to_str Ast.fmt_crate crate)
+    Printf.fprintf stdout "%s\n" (Ast.fmt_to_str Ast.fmt_crate crate)
   end
 
 let list_to_seq ls = Asm.SEQ (Array.of_list ls);;
