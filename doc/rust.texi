@@ -192,11 +192,12 @@ The meaning and cost of every operation within a Rust program is intended to
 be easy to model for the reader. The code should not ``surprise'' the
 programmer once it has been compiled.
 
-Rust compiles quickly to native code. Rust compilation units are large and the
-compilation model naturally fits multi-file, whole-library or whole-program
-optimisation. The compiled units are standard loadable objects (ELF, PE,
-Mach-O) containing standard metadata (DWARF) and are compatible with existing,
-standard low-level tools (disassemblers, debuggers, profilers, loaders).
+Rust compiles to native code. Rust compilation units are large and the
+compilation model is designed around multi-file, whole-library or
+whole-program optimisation. The compiled units are standard loadable objects
+(ELF, PE, Mach-O) containing standard metadata (DWARF) and are compatible with
+existing, standard low-level tools (disassemblers, debuggers, profilers,
+dynamic loaders).
 
 The Rust runtime library is a small collection of support code for scheduling,
 memory management, inter-task communication, reflection and runtime
@@ -232,10 +233,11 @@ coupled to the loop that invoked it.
 @item Direct interface to C code
 
 Rust can load and call many C library functions simply by declaring
-them. Calling a C function statically marks a task as ``unsafe'', unless the
-unsafe task is further isolated within an external ``heavyweight''
-operating-system subprocess. Every ``unsafe'' task in a Rust compilation unit
-must be explicitly marked as audited and authorised in the crate file.
+them. Calling a C function statically marks a function as ``unsafe'', unless
+the task calling the unsafe function is further isolated within an external
+``heavyweight'' operating-system subprocess. Every ``unsafe'' function or
+module in a Rust compilation unit must be explicitly authorised in the crate
+file.
 
 @sp 1
 @item Structural algebraic data types
@@ -249,34 +251,34 @@ disjoint unions. Structural types may be @emph{pattern-matched} in an
 @sp 1
 @item Generic code
 
-Rust supports a simple form of parametric polymorphism: functions, types and
-objects can be parameterised by other types.
+Rust supports a simple form of parametric polymorphism: functions, iterators,
+types and objects can be parameterised by other types.
 
 @sp 1
 @item Argument binding
 
-Rust provides a mechanism of binding function arguments to functions,
+Rust provides a mechanism of partially binding arguments to functions,
 producing new functions that accept the remaining un-bound arguments. This
 mechanism combines some of the features of lexical closures with some of the
-features of currying, in a smaller and more predictable package.
+features of currying, in a smaller and simpler package.
 
 @sp 1
 @item Local type inference
 
 To save some quantity of programmer key-pressing, Rust supports local type
-inference: signatures of functions and programs always require type
-annotation, but within the body of a function many types can be declared
-@code{auto} and Rust will infer the type from its use in the function.
+inference: signatures of functions, objects and iterators always require type
+annotation, but within the body of a function or iterator many slots can be
+declared @code{auto} and Rust will infer the slot's type from its uses.
 
 @sp 1
 @item Structural object system
 
 Rust has a lightweight object system based on structural object types: there
 is no ``class hierarchy'' nor any concept of inheritence. Method overriding,
-object extension and restriction are all performed explicitly on object
-values, which are little more than order-insensitive records of methods
-sharing a common state value. Objects can be mutable or immutable, and
-immutable objects can have destructors.
+and object restriction are performed explicitly on object values, which are
+little more than order-insensitive records of methods sharing a common private
+value. Objects can be mutable or immutable, and immutable objects can have
+destructors.
 
 @sp 1
 @item Dynamic type
@@ -296,7 +298,7 @@ to support crate linkage and other runtime services.
 @sp 1
 @item Static metaprogramming (syntactic extension)
 
-Rust supports a system for syntactic extension that can be loaded into the
+Rust supports a system for syntactic extensions that can be loaded into the
 compiler, to implement user-defined notations, macros, program-generators and
 the like. These notations are @emph{marked} using a special form of
 bracketing, such that a reader unfamiliar with the extension can still parse
@@ -334,9 +336,13 @@ immediately, exterior slots have their reference count decreased and are
 released if the count drops to zero. Alias slots are not affected by scope
 exit.
 
-Unreferenced mutable memory is freed at an undefined time between the moment
-the last reference to it from a live frame drops, and the end of the lifetime
-of the task owning it. Mutable memory can point to immutable memory; doing so
+Mutable memory is local to a task, and is subject to per-task garbage
+collection. As a result, unreferenced mutable memory is not necessarily freed
+immediately; if it is acyclic it is freed when the last reference to it drops,
+but if it is part of a reference cycle it will be freed when the GC collects
+it (or when the owning task terminates, at the latest).
+
+Mutable memory can point to immutable memory but not vice-versa. Doing so
 merely delays (to an undefined future time) the moment when the deterministic,
 top-down destruction sequence for the referenced immutable memory
 @emph{starts}. In other words, the immutable ``leaves'' of a mutable structure
@@ -362,14 +368,14 @@ and after statements.
 @sp 1
 @item Static control over memory allocation, packing and aliasing.
 
-Every variable or field in Rust is a combination of a type and a mode; this
-combination is called a @emph{slot}. There are 3 kinds of slot mode, denoting
-3 ways of referring to a value:
+Every variable or field in Rust is a combination of a type, a mutability flag
+and a @emph{mode}; this combination is called a @emph{slot}. There are 3 kinds
+of @dfn{slot mode}, denoting 3 ways of referring to a value:
 
 @itemize
 @item ``interior'' (slot contains value)
-@item ``exterior'' (slot points to to managed heap allocation)
-@item ``alias'' (slot points directly to provably-live address)
+@item ``exterior'', (slot points to to managed heap allocation)
+@item ``alias'', (slot points directly to provably-live address)
 @end itemize
 
 Interior slots declared as variables in a function are allocated very quickly
@@ -393,22 +399,22 @@ of a slot occurs after it has been initialised.
 @sp 1
 @item Static control over mutability.
 
-Data types in Rust are classified as either immutable or mutable. By default,
-all types are immutable.
+Slots in Rust are classified as either immutable or mutable. By default,
+all slots are immutable.
 
-If a slot within a type is declared as @code{mutable}, the type is
-a @code{state} type and must be declared as such.
+If a slot within a type is declared as @code{mutable}, the type is a
+@code{state} type and must be declared as such.
 
 This classification of data types in Rust interacts with the memory allocation
 and transmission rules. In particular:
 
 @itemize
 @item Only immutable (non-state) values can be sent over channels.
-@item Only immutable (non-state) types can have destructor functions.
+@item Only immutable (non-state) objects can have destructor functions.
 @end itemize
 
-State values are allocated within local (per-task) garbage-collected
-heaps. Collection pauses in these local heaps are brief and do not interrupt
+State values are subject to local (per-task) garbage-collection. Garbage
+collection costs are therefore also task-local and do not interrupt or suspend
 other tasks.
 
 Immutable values are reference-counted and have a deterministic destruction
@@ -510,7 +516,6 @@ Additional specific influences can be seen from the following languages:
 @item The structural algebraic types and compilation manager of SML.
 @item The syntax-extension systems of Camlp4 and the Common Lisp readtable.
 @item The deterministic destructor system of C++.
-@item The term @code{task} from Ada.
 @end itemize
 
 @c ############################################################
@@ -556,7 +561,12 @@ property classes are organised into @emph{tokens}. Tokens are defined as the
 longest contiguous sequence of characters within the same token type
 (identifier, keyword, literal, symbol), or interrupted by ignored characters.
 
-Most tokens in Rust follow rules similar to the C and Java family.
+Most tokens in Rust follow rules similar to the C family.
+
+Most tokens (including identifiers, whitespace, keywords, operators and
+structural symbols) are drawn from the ASCII-compatible range of
+Unicode. String and character literals, however, may include the full range of
+Unicode characters.
 
 @emph{TODO: formalise this section much more}.
 
@@ -578,14 +588,13 @@ Most tokens in Rust follow rules similar to the C and Java family.
 The classes of @emph{whitespace} and @emph{comment} is ignored, and are not
 considered as tokens.
 
-@dfn{Whitespace} is any sequence of Unicode characters with the @emph{General
-Category} property @code{Zs}, @code{Zl}, or @code{Zp}.
+@dfn{Whitespace} is any sequence of the Unicode characters U+0020 (space),
+U+0009 (tab, @code{'\t'}), U+000A (LF, @code{'\n'}), U+000D (CR, @code{'\r'}).
 
-@dfn{Comments} are any sequence of Unicode characters beginning with U+002f
-U+002f (@code{//}) and extending to the end of a line (a Unicode character
-with @emph{General Category} property @code{Zl}), @emph{excluding} cases in
-which such a sequence occurs within a string literal token or a syntactic
-extension token.
+@dfn{Comments} are any sequence of Unicode characters beginning with U+002F
+U+002F (@code{//}) and extending to the next U+000a character,
+@emph{excluding} cases in which such a sequence occurs within a string literal
+token or a syntactic extension token.
 
 
 @page
@@ -593,16 +602,15 @@ extension token.
 @subsection Ref.Lex.Ident
 @c * Ref.Lex.Ident::             Identifier tokens.
 
-Identifiers follow the pattern of C and Java identifiers: they begin with a
+Identifiers follow the pattern of C identifiers: they begin with a
 @emph{letter} or underscore character @code{_} (Unicode character U+005f), and
 continue with any combination of @emph{letters}, @emph{digits} and
 underscores, and must not be equal to any keyword. @xref{Ref.Lex.Key}.
 
-A @emph{letter} is a Unicode character with the @emph{General Category}
-property @code{Lu}, @code{Ll}, @code{Lt}, @code{Lm}, or @code{Lo}.
+A @emph{letter} is a Unicode character in the ranges U+0061-U+007A and
+U+0041-U+005A (@code{a-z} and @code{A-Z}).
 
-A @emph{digit} is a Unicode character with the @emph{General Category}
-property @code{Nd}.
+A @emph{digit} is a Unicode character in the range U+0030-U0039 (@code{0-9}).
 
 @page
 @node       Ref.Lex.Key
@@ -628,6 +636,7 @@ The keywords are:
 @tab @code{state}
 @tab @code{unsafe}
 @tab @code{auth}
+@tab @code{with}
 @item @code{bind}
 @tab @code{type}
 @tab @code{true}
@@ -655,6 +664,7 @@ The keywords are:
 @item @code{fn}
 @tab @code{iter}
 @tab @code{obj}
+@tab @code{as}
 @tab @code{drop}
 @item @code{task}
 @tab @code{port}
@@ -682,12 +692,6 @@ The keywords are:
 @tab @code{put}
 @tab @code{be}
 @end multitable
-
-@sp 2
-In addition to these names, any symbols consisting of a single lowercase
-letter in the ASCII range @code{a-z} followed by a sequence of 1 or more
-decimal digits is reserved as a future machine type in a later version of the
-language. @xref{Ref.Type.Mach}.
 
 @page
 @node       Ref.Lex.Num
@@ -728,8 +732,6 @@ The special symbols are:
 @multitable @columnfractions .1 .1 .1 .1 .1 .1
 
 @item @code{@@}
-@tab @code{~}
-@tab @code{^}
 @tab @code{_}
 @item @code{#}
 @tab @code{:}
@@ -762,8 +764,11 @@ The special symbols are:
 @item @code{&}
 @tab @code{|}
 @tab @code{!}
-@tab @code{&=}
+@tab @code{~}
+@tab @code{^}
+@item @code{&=}
 @tab @code{|=}
+@tab @code{^=}
 @tab @code{!=}
 @item @code{>>}
 @tab @code{>>>}
@@ -778,8 +783,6 @@ The special symbols are:
 @tab @code{>}
 @item @code{&&}
 @tab @code{||}
-@tab @code{&&=}
-@tab @code{||=}
 @end multitable
 
 @page
@@ -852,7 +855,7 @@ x.y.(1 + v).z;
 @section Ref.Gram
 @c * Ref.Gram::                    Grammar.
 
-@emph{TODO: LL(1), it reads like C, Alef and Napier; formalise here}.
+@emph{TODO: LL(1), it reads like C, Alef and bits of Napier; formalise here}.
 
 @page
 @node    Ref.Comp
@@ -893,8 +896,7 @@ Compilation Manager, a @emph{unit} in the Owens and Flatt module system, or a
 @item Metadata about the crate, such as author, name, version, and copyright.
 @item The source-file and directory modules that make up the crate.
 @item The set of syntax extensions to enable for the crate.
-@item The set of native functions that the crate imports.
-@item The set of @emph{other} crates that the crate depends on.
+@item Any external crates or native modules that the crate imports to its top level.
 @item The organisation of the crate's internal namespace.
 @item The set of names exported from the crate.
 @end itemize
@@ -917,15 +919,17 @@ to Rust source files. The names given to such modules in @code{mod} directives
 become prefixes of the paths of items and slots defined within any included
 Rust source files.
 
-The @code{use} directives within the crate specify @emph{other crates} to
-import into the crate's namespace; these directives may specify loose or tight
-``matching criteria'' for imported crates, depending on the preferences of the
-crate developer. In the simplest case, a @code{use} directive may only specify
-a symbolic name and leave the task of locating and binding an appropriate
-crate to a compile-time heuristic. In a more controlled case, a @code{use}
-directive may specify any metadata as matching criteria, such as a URI, an
-author name or version number, a checksum or even a cryptographic signature,
-in order to select an an appropriate imported crate. @xref{Ref.Comp.Meta}.
+The @code{use} directives within the crate specify @emph{other crates} to scan
+for, locate, import into the crate's module namespace during compilation, and
+link against at runtime. Use directives may also occur independently in rust
+source files. These directives may specify loose or tight ``matching
+criteria'' for imported crates, depending on the preferences of the crate
+developer. In the simplest case, a @code{use} directive may only specify a
+symbolic name and leave the task of locating and binding an appropriate crate
+to a compile-time heuristic. In a more controlled case, a @code{use} directive
+may specify any metadata as matching criteria, such as a URI, an author name
+or version number, a checksum or even a cryptographic signature, in order to
+select an an appropriate imported crate. @xref{Ref.Comp.Meta}.
 
 The compiled form of a crate is a loadable and executable object file full of
 machine code, in a standard loadable operating-system format such as ELF, PE
@@ -975,7 +979,7 @@ with the crate. This metadata can, in turn, be used in providing partial
 matching parameters to syntax-extension loading and crate importing
 directives, denoted by @code{syntax} and @code{use} keywords respectively.
 
-Alternatively, metadata can serve as a light-weight form of documentation.
+Alternatively, metadata can serve as a simple form of documentation.
 
 @page
 @node          Ref.Comp.Syntax
@@ -1030,9 +1034,9 @@ let bool matched = re.match(pattern, s);
 @section Ref.Mem
 @c * Ref.Mem::                     Semantic model of memory.
 
-A Rust task's memory consists of a static set of @emph{items}, a set
-of tasks each with its own @emph{stack}, and a @emph{heap} shared
-by all tasks.
+A Rust task's memory consists of a static set of @emph{items}, a set of tasks
+each with its own @emph{stack}, and a @emph{heap}. Immutable portions of the
+heap may be shared between tasks, mutable portions may not.
 
 Allocations in the stack and the heap consist of @emph{slots}.
 
@@ -1058,18 +1062,17 @@ A task's @dfn{stack} consists of activation frames automatically allocated on
 entry to each function as the task executes. A stack allocation is reclaimed
 when control leaves the frame containing it.
 
-The @dfn{heap} is a general term that describes two separate memory areas that
-can contain exterior allocations: the @emph{local heap} and the @emph{shared
-heap}. The heap used for an exterior allocation depends on the type held in
-the allocation.
+The @dfn{heap} is a general term that describes two separate sets of exterior
+allocations: @emph{local heap} allocations and the @emph{shared heap}
+allocations.
 
-Exterior allocations of mutable types are made within a @dfn{local heap},
+Exterior allocations of mutable types are @dfn{local heap} allocations,
 owned by the task. Such @dfn{local allocations} cannot pass over channels and
 do not outlive the task that owns them. When unreferenced, they are collected
 using a general (cycle-aware) garbage-collector local to each task. Garbage
 collection within a local heap does not interrupt execution of other tasks.
 
-Exterior allocations of immutable types are made within a @dfn{shared heap},
+Exterior allocations of immutable types are @dfn{shared heap} allocations,
 and can be multiply-referenced by many different tasks. Such @dfn{shared
 allocations} can pass over channels, and live as long as the last task
 referencing them. When unreferenced, they are collected immediately using
@@ -1082,9 +1085,9 @@ reference-counting.
 @subsection Ref.Mem.Own
 @c * Ref.Mem.Own::                 Memory ownership model.
 
-A task @emph{owns} all the interior allocations in its stack and exterior
-allocations in its local heap. A task @emph{shares} the exterior allocations
-in the shared heap with other tasks. A task does not own any items.
+A task @emph{owns} all the interior allocations in its stack and @emph{local}
+exterior allocations. A task @emph{shares} ownership of @emph{shared} exterior
+allocations. A task does not own any items.
 
 @dfn{Ownership} of an allocation means that the owning task is the only task
 that can access the allocation.
@@ -1196,9 +1199,9 @@ the runtime library, both user data, sub-domains and runtime-support
 structures such as channel and signal queues, are charged to a task's domain.
 
 When a communication channel crosses from one domain to another, any value
-sent over the channel is @emph{deeply copied} during transmission. That is:
-any exterior slots reachable from the value have their heap allocation copied,
-and charged to the new domain.
+sent over the channel is guaranteed to have been @emph{detached} from the
+domain's memory graph (singly referenced, and/or deep-copied), so its memory
+cost is transferred to the receiving domain.
 
 
 @page
@@ -1252,9 +1255,9 @@ cannot be rebound to a different port from the one it was constructed with.
 
 Many channels can be bound to the same port, but each channel is bound to a
 single port. In other words, channels and ports exist in an N:1 relationship,
-N channels to 1 port, where N is a non-negative integer. @footnote{It may help
-to remember nautical terminology when differentiating channels from ports.
-Many different waterways -- channels -- may lead to the same port.}
+N channels to 1 port. @footnote{It may help to remember nautical terminology
+when differentiating channels from ports.  Many different waterways --
+channels -- may lead to the same port.}
 
 Each port and channel can carry only one type of message. The message type is
 encoded as a parameter of the channel or port type. The message type of a
