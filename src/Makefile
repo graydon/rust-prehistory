@@ -353,6 +353,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       fun-indirect-call.rs \
                       generic-derived-type.rs \
                       generic-drop-glue.rs \
+                      generic-exterior-box.rs \
                       generic-fn-infer.rs \
                       generic-fn.rs \
                       generic-obj-with-derived-type.rs \
