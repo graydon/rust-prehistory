@@ -1639,11 +1639,6 @@ Every slot and value in a Rust program has a type. The @dfn{type} of a
 @emph{value} defines the interpretation of the memory holding it. The type of
 a @emph{slot} may also include constraints. @xref{Ref.Type.Constr}.
 
-Some types and type-constructors are @dfn{built-in}, meaning that their value
-constructors are defined in this manual. Other types or type-constructors are
-@dfn{user-defined}, meaning that their value constructors depend on portions
-of user programs.
-
 Built-in types and type-constructors are tightly integrated into the language,
 in nontrivial ways that are not possible to emulate in user-defined
 types. User-defined types have limited capabilities. In addition, every
