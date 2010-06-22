@@ -293,8 +293,7 @@ and stmt_if =
 
 and slice =
     { slice_start: atom option;
-      slice_len: atom option;
-      slice_step: atom option }
+      slice_len: atom option; }
 
 and domain =
     DOMAIN_local
