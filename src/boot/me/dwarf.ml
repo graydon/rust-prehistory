@@ -2356,7 +2356,7 @@ let dwarf_visitor
                                 [| DW_OP_fbreg off |]
                       end
                   | None ->
-                      (* FIXME (bug 541569): handle slots assigned to
+                      (* FIXME (issue #28): handle slots assigned to
                        * vregs.
                        *)
                       ()

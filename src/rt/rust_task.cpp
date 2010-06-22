@@ -37,7 +37,7 @@ del_stk(rust_dom *dom, stk_seg *stk)
 
 // Tasks
 
-// FIXME (bug 541585): ifdef by platform. This is getting absurdly
+// FIXME (issue #31): ifdef by platform. This is getting absurdly
 // x86-specific.
 
 size_t const n_callee_saves = 4;
@@ -225,7 +225,7 @@ rust_task::grow(size_t n_frame_bytes)
 
     dom->log(LOG_MEM|LOG_TASK, "processing relocations");
 
-    // FIXME (bug 541586): this is the most ridiculously crude
+    // FIXME (issue #32): this is the most ridiculously crude
     // relocation scheme ever. Try actually, you know, writing out
     // reloc descriptors?
     size_t n_relocs = 0;

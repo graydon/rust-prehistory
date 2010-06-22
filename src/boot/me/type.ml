@@ -1080,7 +1080,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               unify_lval seq seq_tv;
               unify_slot si.node (Some si.id) mem_tv
 
-        (* FIXME (bug 541531): plenty more to handle here. *)
+        (* FIXME (issue #52): plenty more to handle here. *)
         | _ ->
             log cx "warning: not typechecking stmt %s\n"
               (Ast.sprintf_stmt () stmt)

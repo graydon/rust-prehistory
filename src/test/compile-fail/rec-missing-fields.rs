@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-// https://bugzilla.mozilla.org/show_bug.cgi?id=552790
+// Issue #51.
 
 type point = rec(int x, int y);
 

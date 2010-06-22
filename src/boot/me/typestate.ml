@@ -34,7 +34,7 @@ let determine_constr_key
    * unique key for idenfitying a predicate.
    *)
   let key =
-    (* FIXME (bug 541527): handle other forms of constr name. *)
+    (* FIXME (issue #23): handle other forms of constr name. *)
     match c.Ast.constr_name with
         Ast.NAME_base nb -> name_base_to_slot_key nb
       | x ->
@@ -57,7 +57,7 @@ let determine_constr_key
   in
   let tighten_to_carg carg =
     match carg with
-        (* FIXME (bug 541527): handle other forms of constr-arg. *)
+        (* FIXME (issue #23): handle other forms of constr-arg. *)
         Ast.CARG_path (Ast.CARG_base (Ast.BASE_formal)) -> ()
       | Ast.CARG_path
           (Ast.CARG_ext (Ast.CARG_base (Ast.BASE_formal), _)) -> ()

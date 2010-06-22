@@ -2707,7 +2707,7 @@ let trans_visitor
              * an extra couple cells on the front.
              *)
 
-            (* FIXME (bug 541542): check to see that the exterior has
+            (* FIXME (issue #25): check to see that the exterior has
              * further exterior members; if it doesn't we can elide the
              * call to the glue function.  *)
             let _ = check_exterior_rty cell in
@@ -3679,7 +3679,7 @@ let trans_visitor
                (Printf.sprintf "copy args for call to %s" (logname ())));
       copy_fn_args false CLONE_none call;
       iflog (fun _ -> annotate (Printf.sprintf "call %s" (logname ())));
-      (* FIXME (bug 541535 ): we need to actually handle writing to an
+      (* FIXME (issue #24): we need to actually handle writing to an
        * already-initialised slot. Currently we blindly assume we're
        * initializing, overwrite the slot; this is ok if we're writing
        * to an interior output slot, but we'll leak any exteriors as we

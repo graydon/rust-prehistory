@@ -78,7 +78,7 @@ let layout_visitor
    *     within it. Though at the moment it's the sum of them, due to
    *     the blood-curdling hack we use to ensure proper unwind/drop
    *     behavior in absence of CFI or similar precise frame-evolution
-   *     tracking. See visit_block_post below (bug 541568).
+   *     tracking. See visit_block_post below (issue #27).
    *
    *   - Each call is examined and the size of the call tuple required
    *     for that call is calculated. The call size is the maximum of all
@@ -94,7 +94,7 @@ let layout_visitor
    *)
 
   let force_slot_to_mem (slot:Ast.slot) : bool =
-    (* FIXME (bug 541559): For the time being we force any slot that
+    (* FIXME (issue #26): For the time being we force any slot that
      * points into memory or is of opaque/code type to be stored in the
      * frame rather than in a vreg. This can probably be relaxed in the
      * future.
@@ -373,7 +373,7 @@ let layout_visitor
     inner.Walk.visit_block_post b;
     if Hashtbl.mem cx.ctxt_block_is_loop_body b.id
     then leave_frame();
-    (* FIXME (bug 541568): In earlier versions of this file, multiple
+    (* FIXME (issue #27): In earlier versions of this file, multiple
      * lexical blocks in the same frame would reuse space from one to
      * the next so long as they were not nested; The (commented-out)
      * code here supports that logic. Unfortunately since our marking

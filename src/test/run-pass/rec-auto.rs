@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-// https://bugzilla.mozilla.org/show_bug.cgi?id=552706
+// Issue #50.
 
 fn main() {
   auto x = rec(foo = "hello", bar = "world");

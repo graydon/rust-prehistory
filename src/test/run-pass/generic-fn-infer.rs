@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-// Bug 566518: infer type parameters in function applications
+// Issue #45: infer type parameters in function applications
 
 fn id[T](T x) -> T {
   ret x;

@@ -60,7 +60,7 @@ let alias_analysis_visitor
             (* FIXME (bug 541574): must expand this analysis to cover
              * alias-forming arg slots, when they are supported.*)
 
-            (* FIXME (bug 541559): actually all these *existing* cases
+            (* FIXME (issue #26): actually all these *existing* cases
              * can probably go now that we're using Trans.aliasing to
              * form short-term spill-based aliases. Only aliases that
              * survive 'into' a sub-block (those formed during iteration)
@@ -78,7 +78,7 @@ let alias_analysis_visitor
           | Ast.STMT_for_each sfe ->
               let (slot, _) = sfe.Ast.for_each_slot in
                 alias_slot slot.id
-          | _ -> () (* FIXME (bug 541572): plenty more to handle here. *)
+          | _ -> () (* FIXME (issue #29): plenty more to handle here. *)
       with
           Semant_err (None, msg) ->
             raise (Semant_err ((Some s.id), msg))
