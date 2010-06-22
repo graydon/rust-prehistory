@@ -55,17 +55,6 @@ let word_ty_signed_mach (abi:Abi.abi) : ty_mach =
     | Il.Bits64 -> TY_i64
 ;;
 
-let exterior_gc_allocation_size (abi:Abi.abi) (slot:Ast.slot) : int64 =
-  (Int64.add
-     (ty_sz abi (slot_ty slot))
-     (word_n abi Abi.exterior_gc_header_size))
-;;
-
-let exterior_rc_allocation_size (abi:Abi.abi) (slot:Ast.slot) : int64 =
-  (Int64.add
-     (ty_sz abi (slot_ty slot))
-     (word_n abi Abi.exterior_rc_header_size))
-;;
 
 let slot_mem_ctrl (slot:Ast.slot) : mem_ctrl =
   let ty = slot_ty slot in

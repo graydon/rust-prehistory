@@ -706,21 +706,21 @@ let trans_visitor
     match mem_cell with
         Il.Mem (mem, Il.StructTy elts)
           when i >= 0 && i < (Array.length elts) ->
-          assert ((Array.length elts) != 0);
-          begin
-            let elt_rty = elts.(i) in
-            let elt_off = Il.get_element_offset word_bits elts i in
-              match elt_off with
-                  SIZE_fixed fixed_off ->
-                    Il.Mem (Il.mem_off_imm mem fixed_off, elt_rty)
-                | sz ->
-                    let sz = calculate_sz ty_params sz in
-                    let v = next_vreg word_ty in
-                    let vc = Il.Reg (v, word_ty) in
-                      lea vc mem;
-                      add_to vc sz;
-                      Il.Mem (based v, elt_rty)
-          end
+            assert ((Array.length elts) != 0);
+            begin
+              let elt_rty = elts.(i) in
+              let elt_off = Il.get_element_offset word_bits elts i in
+                match elt_off with
+                    SIZE_fixed fixed_off ->
+                      Il.Mem (Il.mem_off_imm mem fixed_off, elt_rty)
+                  | sz ->
+                      let sz = calculate_sz ty_params sz in
+                      let v = next_vreg word_ty in
+                      let vc = Il.Reg (v, word_ty) in
+                        lea vc mem;
+                        add_to vc sz;
+                        Il.Mem (based v, elt_rty)
+            end
       | _ -> bug () "get_element_ptr_dyn %d on cell %s" i
           (cell_str mem_cell)
   in
@@ -2187,6 +2187,31 @@ let trans_visitor
   and exterior_gc_next_cell (cell:Il.cell) : Il.cell =
     exterior_ctrl_cell cell Abi.exterior_gc_slot_field_next
 
+  and exterior_allocation_size
+      (slot:Ast.slot)
+      : Il.operand =
+    let header_sz =
+      match slot_mem_ctrl slot with
+          MEM_gc -> word_n Abi.exterior_gc_header_size
+        | MEM_rc_opaque
+        | MEM_rc_struct -> word_n Abi.exterior_rc_header_size
+        | MEM_interior -> bug () "exterior_allocation_size of MEM_interior"
+    in
+    let t = slot_ty slot in
+    let refty_sz =
+      Il.referent_ty_size abi.Abi.abi_word_bits (referent_type abi t)
+    in
+      match refty_sz with
+          SIZE_fixed _ -> imm (Int64.add (ty_sz abi t) header_sz)
+        | _ ->
+            let ty_params = get_ty_params_of_current_frame() in
+            let refty_sz = calculate_sz ty_params refty_sz in
+            let v = next_vreg word_ty in
+            let vc = Il.Reg (v, word_ty) in
+              mov vc refty_sz;
+              add_to vc (imm header_sz);
+              Il.Cell vc;
+
   and iter_tag_slots
       (ty_params:Il.cell)
       (dst_cell:Il.cell)
@@ -2721,44 +2746,43 @@ let trans_visitor
 
   (* Returns the offset of the slot-body in the initialized allocation. *)
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
-      match slot_mem_ctrl slot with
-          MEM_gc ->
-            iflog (fun _ -> annotate "init GC exterior: malloc");
-            let sz = exterior_gc_allocation_size abi slot in
-              (* 
-               * Malloc and then immediately shift down to point to
-               * the pseudo-rc cell.
-               *)
-              trans_malloc cell (imm sz);
-              add_to cell
-                (imm (word_n Abi.exterior_gc_malloc_return_adjustment));
+    match slot_mem_ctrl slot with
+        MEM_gc ->
+          iflog (fun _ -> annotate "init GC exterior: malloc");
+          let sz = exterior_allocation_size slot in
+            (* 
+             * Malloc and then immediately shift down to point to
+             * the pseudo-rc cell.
+             *)
+            trans_malloc cell sz;
+            add_to cell
+              (imm (word_n Abi.exterior_gc_malloc_return_adjustment));
 
-              iflog (fun _ -> annotate "init GC exterior: load control word");
-              let ctrl = exterior_gc_ctrl_cell cell in
-              let fix = get_drop_glue (slot_ty slot) None in
-              let tmp = next_vreg_cell Il.voidptr_t in
-              let rc = exterior_rc_cell cell in
-                mov rc one;
-                lea tmp (Il.Abs (Asm.M_POS fix));
-                mov ctrl (Il.Cell tmp);
-                iflog (fun _ ->
-                         annotate "init GC exterior: load next-pointer");
-                let next = exterior_gc_next_cell cell in
-                  mov next
-                    (Il.Cell
-                       (tp_imm (word_n Abi.task_field_gc_alloc_chain)));
+            iflog (fun _ -> annotate "init GC exterior: load control word");
+            let ctrl = exterior_gc_ctrl_cell cell in
+            let fix = get_drop_glue (slot_ty slot) None in
+            let tmp = next_vreg_cell Il.voidptr_t in
+            let rc = exterior_rc_cell cell in
+              mov rc one;
+              lea tmp (Il.Abs (Asm.M_POS fix));
+              mov ctrl (Il.Cell tmp);
+              iflog (fun _ ->
+                       annotate "init GC exterior: load next-pointer");
+              let next = exterior_gc_next_cell cell in
+                mov next
+                  (Il.Cell
+                     (tp_imm (word_n Abi.task_field_gc_alloc_chain)));
 
-        | MEM_rc_opaque
-        | MEM_rc_struct ->
-            iflog (fun _ -> annotate "init RC exterior: malloc");
-            let sz = exterior_rc_allocation_size abi slot in
-              trans_malloc cell (imm sz);
-              iflog (fun _ -> annotate "init RC exterior: load refcount");
-              let rc = exterior_rc_cell cell in
-                mov rc one
+      | MEM_rc_opaque
+      | MEM_rc_struct ->
+          iflog (fun _ -> annotate "init RC exterior: malloc");
+          let sz = exterior_allocation_size slot in
+            trans_malloc cell sz;
+            iflog (fun _ -> annotate "init RC exterior: load refcount");
+            let rc = exterior_rc_cell cell in
+              mov rc one
 
-        | MEM_interior -> bug () "init_exterior_slot of MEM_interior"
-
+      | MEM_interior -> bug () "init_exterior_slot of MEM_interior"
 
   and deref_slot
       (initializing:bool)
