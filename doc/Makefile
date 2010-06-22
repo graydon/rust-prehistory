@@ -5,7 +5,7 @@ all: rust.pdf rust.html
 	texi2pdf $<
 
 %.html: %.texi
-	makeinfo --html --force --no-split --output=$@ $<
+	makeinfo --html --ifhtml --force --no-split --output=$@ $<
 
 clean:
 	rm -f rust.aux rust.cp rust.fn rust.ky rust.log rust.pdf \

@@ -1652,10 +1652,10 @@ Rust; they cannot be used as user-defined identifiers in any context.
 * Ref.Type.Prim::               Primitive types.
 * Ref.Type.Big::                The arbitrary-precision integer type.
 * Ref.Type.Text::               Strings and characters.
-* Ref.Type.Rec::                Fixed products of heterogeneous types.
-* Ref.Type.Tup::                Fixed products of homogeneous types.
+* Ref.Type.Rec::                Labeled products of heterogeneous types.
+* Ref.Type.Tup::                Unlabeled products of homogeneous types.
 * Ref.Type.Vec::                Open products of homogeneous types.
-* Ref.Type.Tag::                Closed sums of heterogeneous types.
+* Ref.Type.Tag::                Disjoint sums of heterogeneous types.
 * Ref.Type.Fn::                 Subroutine types.
 * Ref.Type.Iter::               Scoped coroutine types.
 * Ref.Type.Port::               Unique inter-task message-receipt endpoints.
@@ -1687,15 +1687,40 @@ The machine types are the following:
 @itemize
 @item
 The unsigned two's complement word types @code{u8}, @code{u16}, @code{u32} and
-@code{u64}, with values drawn from the integer intervals @math{[0,(2^8)-1)]},
-@math{[0,(2^{16})-1)]}, @math{[0,(2^{32})-1)]} and @math{[0,(2^{64})-1)]}
-respectively.
+@code{u64}, with values drawn from the integer intervals
+@iftex
+@math{[0, 2^8 - 1]},
+@math{[0, 2^{16} - 1]},
+@math{[0, 2^{32} - 1]} and
+@math{[0, 2^{64} - 1]}
+@end iftex
+@ifhtml
+@html
+[0, 2<sup>8</sup>-1],
+[0, 2<sup>16</sup>-1],
+[0, 2<sup>32</sup>-1] and
+[0, 2<sup>64</sup>-1]
+@end html
+@end ifhtml
+ respectively.
 @item
 The signed two's complement word types @code{i8}, @code{i16}, @code{i32} and
 @code{i64}, with values drawn from the integer intervals
-@math{[-(2^7),(2^7)-1)]}, @math{[-(2^{15}),(2^{15})-1)]},
-@math{[-(2^{31}),(2^{31})-1)]} and @math{[-(2^{63}),(2^{63})-1)]}
-respectively.
+@iftex
+@math{[-(2^7),(2^7)-1)]},
+@math{[-(2^{15}),2^{15}-1)]},
+@math{[-(2^{31}),2^{31}-1)]} and
+@math{[-(2^{63}),2^{63}-1)]}
+@end iftex
+@ifhtml
+@html
+[-(2<sup>7</sup>), 2<sup>7</sup>-1],
+[-(2<sup>15</sup>), 2<sup>15</sup>-1],
+[-(2<sup>31</sup>), 2<sup>31</sup>-1] and
+[-(2<sup>63</sup>), 2<sup>63</sup>-1]
+@end html
+@end ifhtml
+ respectively.
 @item
 The IEEE 754 single-precision and double-precision floating point types:
 @code{f32} and @code{f64}, respectively.
@@ -1726,8 +1751,12 @@ The primitive types are the following:
 
 @itemize
 @item
-The unary type @code{()}, having the single value @code{()} (both the
-type and the value are pronounced ``nil'').
+The ``nil'' type @code{()}, having the single ``nil'' value
+@code{()}.@footnote{The ``nil'' value @code{()} is @emph{not} a sentinel
+``null pointer'' value for alias or exterior slots; the ``nil'' type is the
+implicit return type from functions otherwise lacking a return type, and can
+be used in other contexts (such as message-sending or type-parametric code) as
+a zero-byte type.}
 @item
 The boolean type @code{bool} with values @code{true} and @code{false}.
 @item
@@ -1761,7 +1790,7 @@ A value of type @code{char} is a Unicode character, represented as a 32-bit
 unsigned word holding a UCS-4 codepoint.
 
 A value of type @code{str} is a Unicode string, represented as a vector of
-8-bit unsigned bytes holding a UTF-8 codepoints.
+8-bit unsigned bytes holding a sequence of UTF-8 codepoints.
 
 @page
 @node       Ref.Type.Rec
@@ -1808,13 +1837,12 @@ check (p._1 == "world");
 
 The vector type-constructor @code{vec} represents a homogeneous array of
 slots. A vector has a fixed size, and may or may not have mutable member
-slots.  If the slots of a vector are mutable, the vector is a mutable type.
+slots.  If the slots of a vector are mutable, the vector is a @emph{state}
+type.
 
-Vectors can be sliced. Slicing a vector produces a new vector pointing to the
-same underlying storage as the sliced vector, possibly with a different
-origin, length and (optionally) increment value. The underlying storage of a
-vector carries a reference-count maintained by all vectors sharing it, and is
-released when the last referencing vector is released.
+Vectors can be sliced. A slice expression builds a new vector by copying a
+contiguous range -- given by a pair of indices representing a half-open
+interval -- out of the sliced vector.
 
 And example of a @code{vec} type and its use:
 @example
@@ -1886,7 +1914,8 @@ let list[int] a = cons(7, cons(13, nil));
 @subsection Ref.Type.Fn
 
 The function type-constructor @code{fn} forms new function types. A function
-type consists of a set of input types, an output type, and an
+type consists of a sequence of input slots, an optional set of input
+constraints (@pxref{Ref.Stmt.Stat.Constr}), an output slot, and an
 @emph{effect}. @xref{Ref.Item.Fn}.
 
 An example of a @code{fn} type:
@@ -1907,8 +1936,8 @@ x = bo(5,7);
 @subsection Ref.Type.Iter
 
 The iterator type-constructor @code{iter} forms new iterator types. An
-iterator type consists a set of input types, an output type, and an
-@emph{effect}. @xref{Ref.Item.Iter}.
+iterator type consists a sequence of input slots, an optional set of input
+constraints, an output slot, and an @emph{effect}. @xref{Ref.Item.Iter}.
 
 An example of an @code{iter} type:
 @example
@@ -1919,9 +1948,7 @@ iter range(int x, int y) -> int @{
   @}
 @}
 
-type itt = iter(int,int) -> int;
-let itt i = range;
-for each (int j = i(5,7)) @{
+for each (int i = range(5,7)) @{
   @dots{};
 @}
 @end example
@@ -1959,7 +1986,7 @@ communication facility. @xref{Ref.Task.Comm}. A @code{chan} type takes a
 single type parameter, denoting the type of value that can be sent to a
 channel of that type.
 
-Channels are immutable types, and can be transmitted over channels to other
+Channels are immutable, and can be transmitted over channels to other
 tasks. They are modeled as immutable native types with built-in meaning to the
 language.
 
@@ -2011,30 +2038,44 @@ holding those references), the released task immediately fails.
 @c * Ref.Type.Obj::                Object types.
 
 A @dfn{object type} describes values of abstract type, that carry some hidden
-@emph{state} and are manipulated through a set of un-ordered
+@emph{fields} and are accessed through a set of un-ordered
 @emph{methods}. Every object item (@pxref{Ref.Item.Obj}) implicitly declares
-an object type carrying method types for all the methods of the object item.
+an object type carrying methods with types derived from all the methods of the
+object item.
 
 Object types can also be declared in isolation, independent of any object item
 declaration. Such a ``plain'' object type can be used to describe an interface
 that a variety of particular objects may conform to, by supporting a superset
 of the methods.
 
+An object type that can contain a state must be declared as a @code{state obj}
+like any other state type. And similarly a method type that performs I/O or
+makes native calls must be declared @code{io} or @code{unsafe}, like any other
+function.
+
+Moreover, @emph{all} methods of a state object are implicitly state functions -- as
+they all bind the same mutable state field(s) -- so implicitly have an effect
+lower than @code{io}. It is therefore unnecessary to declare methods within a
+state object type (or state object item) as @code{io}.
+
 An example of an object type with two separate object items supporting it, and
 a client function using both items via the object type:
 
 @example
 
-type taker = obj @{ fn take(int); @};
+state type taker =
+    state obj @{
+        fn take(int);
+    @};
 
-obj adder(int x) @{
+state obj adder(mutable int x) @{
     fn take(int y) @{
         x += y;
     @}
 @}
 
 obj sender(chan[int] c) @{
-    fn take(int z) @{
+    io fn take(int z) @{
         c <| z;
     @}
 @}
@@ -2112,10 +2153,10 @@ right hand side of copy statements, @xref{Ref.Stmt.Copy}.
 @section Ref.Stmt
 @c * Ref.Stmt::               Executable statements.
 
-A @dfn{statement} is a component of a block, which are in turn components of
-outer blocks, functions or iterators. When a function is spawned into a task,
-the task @emph{executes} statements in an order determined by the body of the
-enclosing structure. Each statement causes the task to perform certain
+A @dfn{statement} is a component of a block, which is in turn a components of
+an outer block, a function or an iterator. When a function is spawned into a
+task, the task @emph{executes} statements in an order determined by the body
+of the enclosing structure. Each statement causes the task to perform certain
 actions.
 
 @menu
@@ -2290,7 +2331,7 @@ typestate algorithm; prestates and poststates are @emph{outputs} from the
 typestate algorithm.
 
 The typestate algorithm analyses the preconditions and postconditions of every
-statement in a block, and attempts to compute a condition for each
+statement in a block, and computes a condition for each
 typestate. Specifically:
 
 @itemize
@@ -2336,11 +2377,11 @@ It is important to understand that the typestate system has @emph{no insight}
 into the meaning of a particular predicate. Predicates and constraints are not
 evaluated in any way at compile time. Predicates are treated as specific (but
 unknown) functions applied to specific (also unknown) slots. All the typestate
-system does is track which of those predicates -- whatever they do --
-@emph{must hold} in order for program control to reach a particular point in
-the CFG. The fundamental building block, therefore, is the @code{check}
-statement, which tells the typestate system ``if control passes this
-statement, the checked predicate holds''.
+system does is track which of those predicates -- whatever they calculate --
+@emph{must have been checked already} in order for program control to reach a
+particular point in the CFG. The fundamental building block, therefore, is the
+@code{check} statement, which tells the typestate system ``if control passes
+this statement, the checked predicate holds''.
 
 From this building block, constraints can be propagated to function signatures
 and constrained types, and the responsibility to @code{check} a constraint
@@ -2373,6 +2414,9 @@ object, type or module -- locally within a statement block is simply a way of
 restricting its scope to a narrow region containing all of its uses; it is
 otherwise identical in meaning to declaring the item outside the statement
 block.
+
+Note: there is no implicit capture of the function's dynamic environment when
+declaring a function-local item.
 
 @page
 @node          Ref.Stmt.Decl.Slot
@@ -2463,8 +2507,9 @@ auto result <- out;
 @c * Ref.Stmt.Send::            Statements for sending a value into a channel.
 
 Sending a value through a channel can be done via two different statements.
-Both statements take an @emph{lval}, denoting a channel, and apply a send
-operator to it and a value to send.
+Both statements take an @emph{lval}, denoting a channel, and a value to send
+into the channel. The action of @emph{sending} varies depending on the
+@dfn{send operator} employed.
 
 The @emph{asynchronous send} operator @code{<+} adds a value to the channel's
 queue, without blocking. If the queue is full, it is extended, taking memory
@@ -2682,9 +2727,9 @@ by the runtime or emitted to a system console. Log statements are enabled or
 disabled dynamically at run-time on a per-task and per-item
 basis. @xref{Ref.Run.Log}.
 
-Executing a @code{log} statement not considered an ``io effect'' in the effect
-system. In other words, a pure function remains pure even if it contains a log
-statement.
+Executing a @code{log} statement not considered an @code{io} effect in the
+effect system. In other words, a pure function remains pure even if it
+contains a log statement.
 
 @example
 @end example
@@ -3114,15 +3159,13 @@ The runtime provides C and Rust code to manage several built-in types:
 @itemize
 @item @code{vec}, the type of vectors.
 @item @code{str}, the type of UTF-8 strings.
-@item @code{int}, the type of arbitrary-precision integers.
+@item @code{big}, the type of arbitrary-precision integers.
 @item @code{chan}, the type of communication channels.
 @item @code{port}, the type of communication ports.
 @item @code{task}, the type of tasks.
 @end itemize
 Support for other built-in types such as simple types, tuples,
-records, vectors and tags is open-coded by the Rust compiler.
-
-Built-in type support code is a @emph{mandatory} component of the runtime.
+records, and tags is open-coded by the Rust compiler.
 
 @page
 @node       Ref.Run.Comm
@@ -3135,20 +3178,14 @@ queues, as well as code to copy values between queues and their recipients and
 to serialize values for transmission over operating-system inter-process
 communication facilities.
 
-Communication is a @emph{mandatory} component of the runtime, though the
-portion that invokes operating-system communication facilities is
-@emph{optional}.
-
 @page
 @node       Ref.Run.Refl
 @subsection Ref.Run.Refl
 @c * Ref.Run.Refl::                Runtime reflection system.
 
 The runtime reflection system is driven by the DWARF tables emitted into a
-crate at compile-time. Reflecting on a slot or type allocates a Rust data
-structure corresponding to the DWARF DIE for that slot or type.
-
-Reflection is a @emph{mandatory} component of the runtime.
+crate at compile-time. Reflecting on a slot or item allocates a Rust data
+structure corresponding to the DWARF DIE for that slot or item.
 
 @page
 @node       Ref.Run.Log
@@ -3179,11 +3216,7 @@ ownership-path-prefix basis.
 @end itemize
 
 Logging is integrated into the language for efficiency reasons, as well as the
-need to filter logs based on these two built-in dimensions, and finally due to
-the need to consider logging as a @emph{pure} (non-effectful) operation for
-the purposes of the effect system.
-
-Logging is an @emph{optional} component of the runtime.
+need to filter logs based on these two built-in dimensions.
 
 @page
 @node       Ref.Run.Sig
@@ -3196,8 +3229,6 @@ signal into the task's signal queue and marks the task as having a pending
 signal. At the next scheduling opportunity, the runtime processes signals in
 the task's queue using its dispatch table. The signal queue memory is charged
 to the task's domain; if the queue grows too big, the task will fail.
-
-Signal handling is a @emph{mandatory} component of the runtime.
 
 @c ############################################################
 @c end main body of nodes
