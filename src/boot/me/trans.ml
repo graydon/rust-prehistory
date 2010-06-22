@@ -1072,6 +1072,7 @@ let trans_visitor
                        get_copy_glue t None;
                        get_drop_glue t None;
                        get_free_glue t (slot_mem_ctrl (interior_slot t)) None;
+                       get_mark_glue t None;
                      |];
                    (* Include any obj-dtor, if this is an obj and has one. *)
                    begin
@@ -2575,22 +2576,22 @@ let trans_visitor
     let ty = slot_ty slot in
       match slot_mem_ctrl slot with
           MEM_gc ->
-            (iflog (fun _ ->
-                      annotate ("mark GC slot " ^
-                                  (Ast.fmt_to_str Ast.fmt_slot slot))));
-            log cx "marking MEM_gc slot: %a" Ast.sprintf_slot slot;
+            note_gc_step slot "mark GC slot: check for null:";
             emit (Il.cmp (Il.Cell cell) zero);
             let null_cell_jump = mark () in
               emit (Il.jmp Il.JE Il.CodeNone);
               let gc_word = exterior_gc_ctrl_cell cell in
               let tmp = next_vreg_cell Il.voidptr_t in
                 (* if this has been marked already, jump to exit.*)
+                note_gc_step slot "mark GC slot: check for mark:";
                 emit (Il.binary Il.AND tmp (Il.Cell gc_word) one);
                 let already_marked_jump = mark () in
-                  emit (Il.jmp Il.JNZ Il.CodeNone);
+                  emit (Il.jmp Il.JZ Il.CodeNone);
                   (* Set mark bit in allocation header. *)
+                  note_gc_step slot "mark GC slot: mark:";
                   emit (Il.binary Il.OR gc_word (Il.Cell gc_word) one);
                   (* Iterate over exterior slots marking outgoing links. *)
+                  log cx "slot rty: %s" (cell_str cell);
                   let (body_mem, _) =
                     need_mem_cell
                       (get_element_ptr (deref cell)
@@ -2603,7 +2604,8 @@ let trans_visitor
                       (get_mark_glue ty curr_iso)
                       ty_params tmp;
                     patch null_cell_jump;
-                    patch already_marked_jump
+                    patch already_marked_jump;
+                    note_gc_step slot "mark GC slot: done marking:";
 
         | MEM_interior when type_is_structured ty ->
             (iflog (fun _ ->
@@ -2713,6 +2715,8 @@ let trans_visitor
             let _ = check_exterior_rty cell in
             let null_jmp = null_check cell in
             let rc = exterior_rc_cell cell in
+            let _ = note_gc_step slot "dropping refcount" in
+            let _ = trace_word cx.ctxt_sess.Session.sess_trace_gc rc in
             let j = drop_refcount_and_cmp rc in
             let ty = maybe_iso curr_iso ty in
             let curr_iso = maybe_enter_iso ty curr_iso in
@@ -2744,6 +2748,17 @@ let trans_visitor
             let ty = maybe_iso curr_iso ty in
               drop_ty ty_params ty cell curr_iso
 
+  and note_gc_step slot step =
+    if cx.ctxt_sess.Session.sess_trace_gc ||
+      cx.ctxt_sess.Session.sess_log_trans
+    then
+      let slotstr = Ast.fmt_to_str Ast.fmt_slot slot in
+      let str = step ^ " " ^ slotstr in
+        begin
+          annotate str;
+          trace_str cx.ctxt_sess.Session.sess_trace_gc str
+        end
+
   (* Returns the offset of the slot-body in the initialized allocation. *)
   and init_exterior_slot (cell:Il.cell) (slot:Ast.slot) : unit =
     match slot_mem_ctrl slot with
@@ -2754,24 +2769,23 @@ let trans_visitor
              * Malloc and then immediately shift down to point to
              * the pseudo-rc cell.
              *)
+            note_gc_step slot "init GC exterior: malloc slot:";
             trans_malloc cell sz;
             add_to cell
               (imm (word_n Abi.exterior_gc_malloc_return_adjustment));
-
-            iflog (fun _ -> annotate "init GC exterior: load control word");
+            note_gc_step slot "init GC exterior: load control word";
             let ctrl = exterior_gc_ctrl_cell cell in
-            let fix = get_drop_glue (slot_ty slot) None in
-            let tmp = next_vreg_cell Il.voidptr_t in
+            let tydesc = get_tydesc None (slot_ty slot) in
             let rc = exterior_rc_cell cell in
               mov rc one;
-              lea tmp (Il.Abs (Asm.M_POS fix));
-              mov ctrl (Il.Cell tmp);
-              iflog (fun _ ->
-                       annotate "init GC exterior: load next-pointer");
+              mov ctrl (Il.Cell tydesc);
+              note_gc_step slot "init GC exterior: load chain next-ptr";
               let next = exterior_gc_next_cell cell in
-                mov next
-                  (Il.Cell
-                     (tp_imm (word_n Abi.task_field_gc_alloc_chain)));
+              let chain = tp_imm (word_n Abi.task_field_gc_alloc_chain) in
+                mov next (Il.Cell chain);
+                note_gc_step slot "init GC exterior: link GC mem to chain";
+                mov chain (Il.Cell cell);
+                note_gc_step slot "init GC exterior: done initializing";
 
       | MEM_rc_opaque
       | MEM_rc_struct ->

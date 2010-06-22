@@ -220,6 +220,7 @@ rust_crate_cache::get_type_desc(size_t size,
     adjust_disp(td->copy_glue_off, descs[0], td);
     adjust_disp(td->drop_glue_off, descs[0], td);
     adjust_disp(td->free_glue_off, descs[0], td);
+    adjust_disp(td->mark_glue_off, descs[0], td);
     adjust_disp(td->obj_drop_glue_off, descs[0], td);
     HASH_ADD(hh, this->type_descs, descs, keysz, td);
     return td;

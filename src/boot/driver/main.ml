@@ -51,6 +51,7 @@ let (sess:Session.sess) =
     Session.sess_trace_block = false;
     Session.sess_trace_drop = false;
     Session.sess_trace_tag = false;
+    Session.sess_trace_gc = false;
     Session.sess_failed = false;
     Session.sess_spans = Hashtbl.create 0;
     Session.sess_report_timing = false;
@@ -177,6 +178,8 @@ let argspecs =
        "-tdrop"       "emit slot-drop tracing code");
     (flag (fun _ -> sess.Session.sess_trace_tag <- true)
        "-ttag"        "emit tag-construction tracing code");
+    (flag (fun _ -> sess.Session.sess_trace_gc <- true)
+       "-tgc"         "emit GC tracing code");
 
     ("-tall", Arg.Unit (fun _ ->
                           sess.Session.sess_trace_block <- true;

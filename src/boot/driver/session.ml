@@ -35,6 +35,7 @@ type sess =
   mutable sess_trace_block: bool;
   mutable sess_trace_drop: bool;
   mutable sess_trace_tag: bool;
+  mutable sess_trace_gc: bool;
   mutable sess_failed: bool;
   mutable sess_report_timing: bool;
   mutable sess_report_gc: bool;

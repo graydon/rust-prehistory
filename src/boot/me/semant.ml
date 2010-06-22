@@ -1549,6 +1549,7 @@ let tydesc_rty (abi:Abi.abi) : Il.referent_ty =
       Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_copy_glue     *)
       Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_drop_glue     *)
       Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_free_glue     *)
+      Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_mark_glue     *)
       Il.ScalarTy (Il.AddrTy Il.CodeTy); (* Abi.tydesc_field_obj_drop_glue *)
     |]
 ;;
@@ -1623,7 +1624,7 @@ let rec referent_type (abi:Abi.abi) (t:Ast.ty) : Il.referent_ty =
       | Ast.TY_tag ttag -> tag ttag
       | Ast.TY_iso tiso -> tag tiso.Ast.iso_group.(tiso.Ast.iso_index)
 
-      | Ast.TY_idx _ -> Il.OpaqueTy
+      | Ast.TY_idx _ -> word (* A lie, but permits GEP'ing to it. *)
 
       | Ast.TY_chan _
       | Ast.TY_port _
