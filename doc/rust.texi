@@ -163,9 +163,9 @@ features of Rust, relative to other languages.
 @item No @code{null} pointers
 
 The initialisation state of every slot is statically computed as part of the
-typestate system (see below), and requires that all slots are initialised
-before use. There is no @code{null} value; uninitialised slots are
-uninitialised, and can only be written to, not read.
+typestate system (see below), and requires that all slots are initialized
+before use. There is no @code{null} value; uninitialized slots are
+uninitialized, and can only be written to, not read.
 
 The common use for @code{null} in other languages -- as a sentinel value -- is
 subsumed into the more general facility of disjoint union types. A program
@@ -182,7 +182,7 @@ external (C/C++) code.
 
 Inter-task communication is typed, asynchronous and simplex, based on passing
 messages over channels to ports. Transmission can be rate-limited or
-rate-unlimited. Selection between multiple senders is pseudo-randomised on the
+rate-unlimited. Selection between multiple senders is pseudo-randomized on the
 receiver side.
 
 @sp 1
@@ -236,7 +236,7 @@ Rust can load and call many C library functions simply by declaring
 them. Calling a C function statically marks a function as ``unsafe'', unless
 the task calling the unsafe function is further isolated within an external
 ``heavyweight'' operating-system subprocess. Every ``unsafe'' function or
-module in a Rust compilation unit must be explicitly authorised in the crate
+module in a Rust compilation unit must be explicitly authorized in the crate
 file.
 
 @sp 1
@@ -252,7 +252,7 @@ disjoint unions. Structural types may be @emph{pattern-matched} in an
 @item Generic code
 
 Rust supports a simple form of parametric polymorphism: functions, iterators,
-types and objects can be parameterised by other types.
+types and objects can be parameterized by other types.
 
 @sp 1
 @item Argument binding
@@ -394,7 +394,7 @@ predictable and automatic, as part of the definition of the copy operator
 In addition, slots have a static initialisation state that is calculated by
 the typestate system. This permits late initialisation of variables in
 functions with complex control-flow, while still guaranteeing that every use
-of a slot occurs after it has been initialised.
+of a slot occurs after it has been initialized.
 
 @sp 1
 @item Static control over mutability.
@@ -557,7 +557,7 @@ The lexical structure of a Rust source file or crate file is defined in terms
 of Unicode character codes and character properties.
 
 Groups of Unicode character codes and characters drawn from particular
-property classes are organised into @emph{tokens}. Tokens are defined as the
+property classes are organized into @emph{tokens}. Tokens are defined as the
 longest contiguous sequence of characters within the same token type
 (identifier, keyword, literal, symbol), or interrupted by ignored characters.
 
@@ -568,7 +568,7 @@ structural symbols) are drawn from the ASCII-compatible range of
 Unicode. String and character literals, however, may include the full range of
 Unicode characters.
 
-@emph{TODO: formalise this section much more}.
+@emph{TODO: formalize this section much more}.
 
 @menu
 * Ref.Lex.Ignore::       Ignored characters.
@@ -718,7 +718,7 @@ optional parenthesized list of @emph{tokens}, and an optional brace-enclosed
 region of free-form text (with brace-matching and brace-escaping used to
 determine the limit of the region). @xref{Ref.Comp.Syntax}.
 
-@emph{TODO: formalise those terms more}.
+@emph{TODO: formalize those terms more}.
 
 @page
 @node       Ref.Lex.Sym
@@ -855,7 +855,7 @@ x.y.(1 + v).z;
 @section Ref.Gram
 @c * Ref.Gram::                    Grammar.
 
-@emph{TODO: LL(1), it reads like C, Alef and bits of Napier; formalise here}.
+@emph{TODO: LL(1), it reads like C, Alef and bits of Napier; formalize here}.
 
 @page
 @node    Ref.Comp
@@ -1174,12 +1174,12 @@ fn incr(mutable &int i) -> () @{
 @subsection Ref.Mem.Init
 @c * Ref.Mem.Init::                Initialisation state of memory.
 
-A slot is either initialised or uninitialised at every point in a program. An
-@dfn{initialised} slot is one that holds a value. An @dfn{uninitialised} slot
+A slot is either initialized or uninitialized at every point in a program. An
+@dfn{initialized} slot is one that holds a value. An @dfn{uninitialized} slot
 is one that has not yet had a value written into it, or has had its value
 deleted, and so holds undefined memory. The typestate system ensures that an
-uninitialised slot cannot be read, but can be written to. A slot becomes
-initialised in any statement that writes to it, and remains initialised until
+uninitialized slot cannot be read, but can be written to. A slot becomes
+initialized in any statement that writes to it, and remains initialized until
 explicitly destroyed or until its enclosing allocation is destroyed.
 
 @page
@@ -1382,11 +1382,11 @@ the item's @emph{path name} within the module namespace is qualified by the
 name of the enclosing item. The exact locations in which sub-items may be
 declared is given by the grammar.  @xref{Ref.Gram}.
 
-Functions, iterators, objects and types may be @emph{parameterised} by
+Functions, iterators, objects and types may be @emph{parameterized} by
 type. Type parameters are given as a comma-separated list of identifiers
 enclosed in square brackets (@code{[]}), after the name of the item and before
 its definition.  The type parameters of an item are part of the name, not the
-type of the item; in order to refer to the type-parameterised item, a
+type of the item; in order to refer to the type-parameterized item, a
 referencing name must in general provide type arguments as a list of
 comma-separated types enclosed within square brackets (though the
 type-inference system can often infer such argument types from context). There
@@ -1408,7 +1408,7 @@ are no general parametric types.
 A @dfn{module item} contains declarations of other @emph{items}. The items
 within a module may be functions, modules, objects or types. These
 declarations have both static and dynamic interpretation. The purpose of a
-module is to organise @emph{names} and control @emph{visibility}. Modules are
+module is to organize @emph{names} and control @emph{visibility}. Modules are
 declared with the keyword @code{mod}.
 
 An example of a module:
@@ -1843,7 +1843,7 @@ the result; in this case, however, the slot holding the vector recycles the
 underlying storage in-place (since the reference-count of the underlying
 storage is equal to 1).
 
-All accessible elements of a vector are always initialised, and access to a
+All accessible elements of a vector are always initialized, and access to a
 vector is always bounds-checked.
 
 
@@ -2396,7 +2396,7 @@ the name of the slot being declared, and @var{optional-init} is either the
 empty string or an equals sign (@code{=}) followed by a primitive expression.
 
 Both forms introduce a new slot into the containing block scope. The new slot
-is visible across the entire scope, but is initialised only at the point
+is visible across the entire scope, but is initialized only at the point
 following the declaration statement.
 
 The latter (@code{auto}) form of slot declaration causes the compiler to infer
@@ -2855,7 +2855,7 @@ for each (&str s = _str.split(txt, "\n")) @{
 @c * Ref.Stmt.If::                 Statement for simple conditional branching.
 
 An @code{if} statement is a conditional branch in program control. The form of
-an @code{if} statement is a parenthesised condition expression, followed by a
+an @code{if} statement is a parenthesized condition expression, followed by a
 consequent block, and an optional trailing @code{else} block. The condition
 expression must have type @code{bool}. If the condition expression evaluates
 to @code{true}, the consequent block is executed and any @code{else} block is
