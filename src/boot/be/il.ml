@@ -1,6 +1,6 @@
 open Common;;
 
-(* FIXME (bug 541581): thread a session object through this eventually. *)
+(* FIXME (issue #1): thread a session object through this eventually. *)
 let log_iltypes = ref false;;
 
 (* IL type system, very rudimentary. *)

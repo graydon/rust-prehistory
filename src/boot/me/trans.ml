@@ -1375,7 +1375,7 @@ let trans_visitor
     let bindings = Array.map (slot_referent_type abi) bs in
       Il.StructTy [| rc; targ; Il.StructTy bindings |]
 
-  (* FIXME (bug 544925): this should eventually use tail calling logic *)
+  (* FIXME (issue #2): this should eventually use tail calling logic *)
 
   and emit_fn_binding_glue
       (arg_slots:Ast.slot array)
