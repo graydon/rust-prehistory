@@ -378,7 +378,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       native-mod.rc \
                       native-opaque-type.rs \
                       native.rc \
-                      obj-.rs \
+                      obj-as.rs \
                       obj-drop.rs \
                       obj-dtor.rs \
                       obj-with-vec.rs \
