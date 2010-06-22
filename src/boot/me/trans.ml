@@ -1368,7 +1368,7 @@ let trans_visitor
 
   and closure_referent_type
       (bs:Ast.slot array)
-      (* FIXME (bug 546448): mutability flag *)
+      (* FIXME (issue #5): mutability flag *)
       : Il.referent_ty =
     let rc = Il.ScalarTy word_ty in
     let targ = referent_type abi (mk_simple_ty_fn [||]) in
@@ -1439,8 +1439,6 @@ let trans_visitor
         call_code (code_of_cell closure_target_fn_cell);
         trans_glue_frame_exit fix spill g
 
-
-  (* FIXME (546471): abstract out common glue-emitting logic *)
 
   and get_fn_binding_glue
       (bind_id:node_id)

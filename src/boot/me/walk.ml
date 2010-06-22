@@ -571,7 +571,7 @@ and walk_stmt
           in
           Array.iter walk_arm arms
 
-      (* FIXME (bug 541526): finish this as needed. *)
+      (* FIXME (issue #20): finish this as needed. *)
       | Ast.STMT_slice _
       | Ast.STMT_note _
       | Ast.STMT_alt_type _
