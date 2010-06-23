@@ -7,3 +7,10 @@
    fun:_Exit
    fun:exit
 }
+
+{
+ leaked-TLS-chunk-x86-exit-path-fails-to-clean-up
+ Memcheck:Leak
+ fun:calloc
+ fun:_dl_allocate_tls
+}
