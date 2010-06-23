@@ -57,9 +57,6 @@ let alias_analysis_visitor
     begin
       try
         match s.node with
-            (* FIXME (bug 541574): must expand this analysis to cover
-             * alias-forming arg slots, when they are supported.*)
-
             (* FIXME (issue #26): actually all these *existing* cases
              * can probably go now that we're using Trans.aliasing to
              * form short-term spill-based aliases. Only aliases that

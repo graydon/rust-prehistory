@@ -463,7 +463,7 @@ let sane_name (n:name) : bool =
 
 (***********************************************************************)
 
-(* FIXME (bug 541525): finish all parts with ?foo? as their output. *)
+(* FIXME (issue #19): finish all parts with ?foo? as their output. *)
 
 let fmt = Format.fprintf;;
 

@@ -1,5 +1,5 @@
 fn main() {
-  // Testcase for bug 544382.
+  // Testcase for issue #59.
   obj simple(int x, int y) {
     fn sum() -> int {
       ret x + y;

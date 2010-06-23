@@ -1816,7 +1816,7 @@ let trans_visitor
       | Ast.BINOP_add -> Il.ADD
       | Ast.BINOP_sub -> Il.SUB
 
-      (* FIXME (bug 541544):
+      (* FIXME (issue #57):
        * switch on type of operands, IMUL/IDIV/IMOD etc.
        *)
       | Ast.BINOP_mul -> Il.UMUL
@@ -1838,7 +1838,7 @@ let trans_visitor
         Ast.BINOP_or | Ast.BINOP_and | Ast.BINOP_xor
       | Ast.BINOP_lsl | Ast.BINOP_lsr | Ast.BINOP_asr
       | Ast.BINOP_add | Ast.BINOP_sub
-      (* FIXME (bug 541544):
+      (* FIXME (issue #57):
        * switch on type of operands, IMUL/IDIV/IMOD etc.
        *)
       | Ast.BINOP_mul | Ast.BINOP_div | Ast.BINOP_mod ->
@@ -2382,7 +2382,7 @@ let trans_visitor
             let binding = get_element_ptr cell Abi.binding_field_binding in
             let null_jmp = null_check binding in
               (* Drop non-null bindings. *)
-              (* FIXME (bug 543738): this is completely wrong,
+              (* FIXME (issue #58): this is completely wrong,
                * need a second thunk that generates code to make
                * use of a runtime type descriptor extracted from
                * a binding tuple. For now this only works by
@@ -2511,7 +2511,7 @@ let trans_visitor
               mov dst_item (Il.Cell src_item);
               let null_jmp = null_check src_binding in
                 (* Copy if we have a src binding. *)
-                (* FIXME (bug 543738): this is completely wrong, call
+                (* FIXME (issue #58): this is completely wrong, call
                  * through to the binding's self-copy fptr. For now
                  * this only works by accident.
                  *)
@@ -4093,7 +4093,6 @@ let trans_visitor
                   Ast.TY_fn (tsig, _) ->
                     trans_bind_fn
                       init (call_ctrl flv) stmt.id dst flv tsig args
-                      (* FIXME (bug 544382): implement bind for objs *)
                 | _ -> bug () "Binding unexpected lval."
           end
 

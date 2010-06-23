@@ -163,8 +163,8 @@ rust_task::start(uintptr_t exit_task_glue,
     }
 
     // The *implicit* incoming args to the spawnee frame we're
-    // activating: FIXME (bug 541587): wire up output-address properly
-    // so spawnee can write a return value.
+    // activating:
+
     *spp-- = (uintptr_t) this;            // task
     *spp-- = (uintptr_t) 0;               // output addr
     *spp-- = (uintptr_t) exit_task_glue;  // retpc
