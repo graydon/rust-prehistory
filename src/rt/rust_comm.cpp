@@ -10,97 +10,6 @@ rust_alarm::rust_alarm(rust_task *receiver) :
 {
 }
 
-// Ticket lock-based spinlock implementation.
-
-class spinlock {
-    unsigned next_ticket;
-    unsigned now_serving;
-
-    void pause();
-public:
-    spinlock() {
-        next_ticket = now_serving = 0;
-    }
-
-    void lock();
-    void unlock();
-};
-
-void
-spinlock::pause()
-{
-    asm volatile("pause\n" : : : "memory");
-}
-
-void
-spinlock::lock()
-{
-    unsigned my_ticket = __sync_fetch_and_add(&next_ticket, 1);
-
-    while (now_serving != my_ticket)
-        pause();
-}
-
-void
-spinlock::unlock()
-{
-    // Only one thread at a time owns the ticket word, so we don't
-    // need a synchronized increment here.
-    ++next_ticket;
-}
-
-// Interrupt transparent queue, Schoen et. al, "On
-// Interrupt-Transparent Synchronization in an Embedded
-// Object-Oriented Operating System", 2000. enqueue() is allowed to
-// interrupt enqueue() and dequeue(), however, dequeue() is not
-// allowed to interrupt itself.
-
-struct lockfree_queue_chain {
-    lockfree_queue_chain *next;
-};
-
-class lockfree_queue : public lockfree_queue_chain {
-    lockfree_queue_chain *tail;
-public:
-    lockfree_queue();
-    void enqueue(lockfree_queue_chain *item);
-    lockfree_queue_chain *dequeue();
-};
-
-lockfree_queue::lockfree_queue() :
-    tail(this)
-{
-}
-
-void
-lockfree_queue::enqueue(lockfree_queue_chain *item)
-{
-    item->next = (lockfree_queue_chain *)0;
-    lockfree_queue_chain *last = tail;
-    tail = item;
-    while (last->next)
-        last = last->next;
-    last->next = item;
-}
-
-lockfree_queue_chain *
-lockfree_queue::dequeue()
-{
-    lockfree_queue_chain *item = next;
-    if (item && !(next = item->next)) {
-        tail = (lockfree_queue_chain *)this;
-        if (item->next) {
-            lockfree_queue_chain *lost = item->next;
-            lockfree_queue_chain *help;
-            do {
-                help = lost->next;
-                enqueue(lost);
-            } while ((lost = help) != (lockfree_queue_chain *)0);
-        }
-    }
-    return item;
-}
-
 
 // Circular buffers.
 
@@ -226,40 +135,6 @@ rust_port::~rust_port()
              (uintptr_t)this);
     while (chans.length() > 0)
         chans.pop()->disassociate();
-}
-
-
-// Channels.
-
-rust_chan::rust_chan(rust_task *task, rust_port *port) :
-    task(task),
-    port(port),
-    buf(task->dom, port->unit_sz),
-    token(this)
-{
-    if (port)
-        port->chans.push(this);
-}
-
-rust_chan::~rust_chan()
-{
-    if (port) {
-        if (token.pending())
-            token.withdraw();
-        port->chans.swapdel(this);
-    }
-}
-
-void
-rust_chan::disassociate()
-{
-    I(task->dom, port);
-
-    if (token.pending())
-        token.withdraw();
-
-    // Delete reference to the port/
-    port = NULL;
 }
 
 

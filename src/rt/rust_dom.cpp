@@ -7,7 +7,7 @@ template class ptr_vec<rust_task>;
 static uint32_t
 get_logbits()
 {
-    uint32_t bits = LOG_ULOG|LOG_ERR;
+    uint32_t bits = LOG_ULOG|LOG_ERR|LOG_MEM|LOG_DOM|LOG_COMM|LOG_TASK;
     char *c = getenv("RUST_LOG");
     if (c) {
         bits = 0;

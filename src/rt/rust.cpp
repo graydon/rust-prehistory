@@ -1,6 +1,14 @@
-
 #include "rust_internal.h"
+#include "util/array_list.h"
 
+
+// #define TRACK_ALLOCATIONS
+// For debugging, keeps track of live allocations, so you can find out
+// exactly what leaked.
+
+#ifdef TRACK_ALLOCATIONS
+array_list<void *> allocation_list;
+#endif
 
 rust_srv::rust_srv() :
     live_allocs(0)
@@ -14,6 +22,14 @@ rust_srv::~rust_srv()
         snprintf(msg, sizeof(msg),
                  "leaked memory in rust main loop (%" PRIuPTR " objects)",
                  live_allocs);
+#ifdef TRACK_ALLOCATIONS
+        for (size_t i = 0; i < allocation_list.size(); i++) {
+            if (allocation_list[i] != NULL) {
+                printf("allocation 0x%" PRIxPTR " was not freed\n",
+                        (uintptr_t) allocation_list[i]);
+            }
+        }
+#endif
         fatal(msg, __FILE__, __LINE__);
     }
 }
@@ -24,28 +40,47 @@ rust_srv::log(char const *str)
     printf("rt: %s\n", str);
 }
 
+
+
 void *
 rust_srv::malloc(size_t bytes)
 {
     ++live_allocs;
-    return ::malloc(bytes);
+    void * val = ::malloc(bytes);
+#ifdef TRACK_ALLOCATIONS
+    allocation_list.append(val);
+#endif
+    return val;
 }
 
 void *
 rust_srv::realloc(void *p, size_t bytes)
 {
-    if (!p)
+    if (!p) {
         live_allocs++;
-    return ::realloc(p, bytes);
+    }
+    void * val = ::realloc(p, bytes);
+#ifdef TRACK_ALLOCATIONS
+    if (allocation_list.replace(p, val) == NULL) {
+        fatal("not in allocation_list", __FILE__, __LINE__);
+    }
+#endif
+    return val;
 }
 
 void
 rust_srv::free(void *p)
 {
-    if (live_allocs < 1)
+    if (live_allocs < 1) {
         fatal("live_allocs < 1", __FILE__, __LINE__);
+    }
     live_allocs--;
     ::free(p);
+#ifdef TRACK_ALLOCATIONS
+    if (allocation_list.replace(p, NULL) == NULL) {
+        fatal("not in allocation_list", __FILE__, __LINE__);
+    }
+#endif
 }
 
 void

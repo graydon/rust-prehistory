@@ -231,8 +231,10 @@ RUNTIME_CS := rt/rust.cpp \
               rt/rust_comm.cpp \
               rt/rust_dom.cpp \
               rt/rust_task.cpp \
+              rt/rust_chan.cpp \
               rt/rust_upcall.cpp \
               rt/isaac/randport.cpp
+              
 RUNTIME_HDR := rt/rust.h \
                rt/rust_dwarf.h \
                rt/rust_internal.h \
@@ -319,6 +321,7 @@ TEST_XFAILS_X86 :=  test/run-pass/mlist-cycle.rs \
                     test/run-pass/generic-tag.rs \
                     test/run-pass/generic-tag-alt.rs \
                     test/run-pass/bind-obj-ctor.rs \
+                    test/run-pass/task-comm.rs \
                     test/compile-fail/rec-missing-fields.rs \
                     test/compile-fail/infinite-tag-type-recursion.rs \
                     test/compile-fail/infinite-vec-type-recursion.rs
@@ -419,6 +422,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       writealias.rs \
                       yield.rs \
                       yield2.rs \
+                      task-comm.rs \
                      ) \
                     $(addprefix test/run-fail/, \
                       explicit-fail.rs \
@@ -514,6 +518,7 @@ check: tidy \
        $(TEST_RPASS_EXES_X86) $(TEST_RFAIL_EXES_X86) \
        $(TEST_RPASS_OUTS_X86) $(TEST_RFAIL_OUTS_X86) \
        $(TEST_CFAIL_OUTS_X86)
+
 
 ifeq ($(VARIANT),llvm)
 ALL_TEST_CRATES += $(TEST_CFAIL_CRATES_LLVM) \

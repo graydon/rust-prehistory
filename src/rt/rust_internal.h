@@ -44,7 +44,7 @@ extern "C" {
 
 struct rust_task;
 struct rust_port;
-struct rust_chan;
+class rust_chan;
 struct rust_token;
 struct rust_dom;
 class rust_crate;
@@ -107,6 +107,7 @@ task_owned
         ((T *)ptr)->task->dom->free(ptr);
     }
 };
+
 
 // Helper class used regularly elsewhere.
 
@@ -687,22 +688,7 @@ struct circ_buf : public dom_owned<circ_buf> {
     void shift(void *dst);
 };
 
-struct rust_chan : public rc_base<rust_chan>,
-                   public task_owned<rust_chan> {
-    rust_task* task;
-    rust_port* port;
-    circ_buf buf;
-    size_t idx;           // Index into port->chans.
-
-    // Token belonging to this chan, it will be placed into a port's
-    // writers vector if we have something to send to the port.
-    rust_token token;
-
-    rust_chan(rust_task *task, rust_port *port);
-    ~rust_chan();
-
-    void disassociate();
-};
+#include "rust_chan.h"
 
 int
 rust_main_loop(rust_dom *dom);

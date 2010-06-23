@@ -156,7 +156,7 @@ attempt_transmission(rust_dom *dom,
         return 0;
     }
 
-    circ_buf *buf = &src->buf;
+    circ_buf *buf = &src->buffer;
     if (buf->unread == 0) {
         dom->log(LOG_COMM,
                  "buffer empty, transmission incomplete");
@@ -239,10 +239,10 @@ upcall_send(rust_task *task, rust_chan *chan, void *sptr)
              (uintptr_t)token);
 
     if (port->task) {
-        chan->buf.push(sptr);
+        chan->buffer.push(sptr);
         task->block(token);
         attempt_transmission(dom, chan, port->task);
-        if (chan->buf.unread && !token->pending())
+        if (chan->buffer.unread && !token->pending())
             token->submit();
     } else {
         dom->log(LOG_COMM|LOG_ERR,
@@ -302,7 +302,8 @@ extern "C" CDECL void
 upcall_kill(rust_task *task, rust_task *target)
 {
     LOG_UPCALL_ENTRY(task);
-    task->dom->log(LOG_UPCALL, "upcall kill target=0x%" PRIxPTR, target);
+    task->dom->log(LOG_UPCALL|LOG_TASK,
+            "upcall kill target=0x%" PRIxPTR, target);
     target->kill();
 }
 
@@ -312,7 +313,7 @@ upcall_exit(rust_task *task)
     LOG_UPCALL_ENTRY(task);
 
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL, "upcall exit");
+    dom->log(LOG_UPCALL|LOG_TASK, "upcall exit");
     task->die();
     task->notify_waiting_tasks();
     task->yield(1);

@@ -1,6 +1,6 @@
 // -*- rust -*-
 
 fn main() {
-  log "hello, world";
+  log "hello, world.";
 }
 
