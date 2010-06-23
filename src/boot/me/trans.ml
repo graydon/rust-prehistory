@@ -1288,6 +1288,17 @@ let trans_visitor
       mov (word_at (fp_imm frame_crate_ptr)) (Il.Cell (crate_ptr_cell));
       mov (word_at (fp_imm frame_fns_disp)) frame_fns
 
+  and check_interrupt_flag _ =
+    let wordptr_ty = Il.AddrTy (Il.ScalarTy word_ty) in
+    let dom = next_vreg_cell wordptr_ty in
+    let flag = next_vreg_cell word_ty in
+      mov dom (Il.Cell (tp_imm (word_n Abi.task_field_dom)));
+      mov flag (Il.Cell (deref_imm dom
+                           (word_n Abi.dom_field_interrupt_flag)));
+      let null_jmp = null_check flag in
+        trans_yield ();
+        patch null_jmp
+
   and trans_glue_frame_entry
       (callsz:size)
       (spill:fixup)
@@ -1298,6 +1309,7 @@ let trans_visitor
       abi.Abi.abi_emit_fn_prologue (emitter())
         framesz callsz nabi_rust (upcall_fixup "upcall_grow_task");
       write_frame_info_ptrs None;
+      check_interrupt_flag ();
       iflog (fun _ -> annotate "finished prologue");
 
   and emitted_quads e =
@@ -2298,6 +2310,7 @@ let trans_visitor
             in
               f unit_cell unit_cell unit_slot curr_iso;
               add_to ptr unit_sz;
+              check_interrupt_flag ();
               emit (Il.jmp Il.JMP (Il.CodeLabel back_jmp_target));
               List.iter patch fwd_jmps;
         end
@@ -3924,12 +3937,10 @@ let trans_visitor
       let fc = { for_each_fixup = fix; for_each_depth = depth } in
         iflog (fun _ ->
                  log cx "for-each at depth %d\n" depth);
-        let jmp = mark () in
         let fn_ptr =
           trans_prepare_fn_call true cx dst_cell flv ty_params (Some fc) args
         in
           call_code (code_of_operand fn_ptr);
-          patch jmp;
           emit Il.Leave;
 
   and trans_put (atom_opt:Ast.atom option) : unit =
@@ -4013,6 +4024,7 @@ let trans_visitor
                     add_to dptr dst_elt_sz;
                     add_to sptr src_elt_sz;
                     patch fwd_jmp;
+                    check_interrupt_flag ();
                     let back_jmp =
                       trans_compare Il.JB (Il.Cell dptr) (Il.Cell dlim) in
                       List.iter
@@ -4191,6 +4203,7 @@ let trans_visitor
               trans_block sw.Ast.while_body;
               patch fwd_jmp;
               Array.iter trans_stmt head_stmts;
+              check_interrupt_flag ();
               let back_jmps = trans_cond false head_expr in
                 List.iter (fun j -> patch_existing j block_begin) back_jmps;
 
@@ -4371,6 +4384,7 @@ let trans_visitor
         (upcall_fixup "upcall_grow_task");
 
       write_frame_info_ptrs (Some fnid);
+      check_interrupt_flag ();
       iflog (fun _ -> annotate "finished prologue");
   in
 

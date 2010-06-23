@@ -233,8 +233,9 @@ RUNTIME_CS := rt/rust.cpp \
               rt/rust_task.cpp \
               rt/rust_chan.cpp \
               rt/rust_upcall.cpp \
+              rt/rust_timer.cpp \
               rt/isaac/randport.cpp
-              
+
 RUNTIME_HDR := rt/rust.h \
                rt/rust_dwarf.h \
                rt/rust_internal.h \
@@ -388,6 +389,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       obj-dtor.rs \
                       obj-with-vec.rs \
                       opeq.rs \
+                      preempt.rs \
                       pred.rs \
                       readalias.rs \
                       rec-auto.rs \
@@ -443,6 +445,9 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
 ifdef CFG_WINDOWSY
 TEST_XFAILS_X86 += test/run-pass/native-mod.rc
 TEST_XFAILS_LLVM += test/run-pass/native-mod.rc
+else
+TEST_XFAILS_X86 += test/run-pass/preempt.rs
+TEST_XFAILS_LLVM += test/run-pass/preempt.rs
 endif
 
 RPASS_RC := $(wildcard test/run-pass/*.rc)

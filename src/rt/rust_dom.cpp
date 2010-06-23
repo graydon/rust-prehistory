@@ -31,6 +31,8 @@ get_logbits()
             bits |= LOG_DWARF;
         if (strstr(c, "cache"))
             bits |= LOG_CACHE;
+        if (strstr(c, "timer"))
+            bits |= LOG_TIMER;
         if (strstr(c, "all"))
             bits = 0xffffffff;
     }
@@ -38,6 +40,7 @@ get_logbits()
 }
 
 rust_dom::rust_dom(rust_srv *srv, rust_crate const *root_crate) :
+    interrupt_flag(0),
     root_crate(root_crate),
     srv(srv),
     logbits(get_logbits()),

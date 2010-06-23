@@ -104,6 +104,9 @@ rust_srv::clone()
 int
 rust_main_loop(rust_dom *dom)
 {
+    // Make sure someone is watching, to pull us out of infinite loops.
+    rust_timer timer(*dom);
+
     int rval;
     rust_task *task;
 
@@ -116,6 +119,8 @@ rust_main_loop(rust_dom *dom)
 
         dom->log(LOG_TASK, "activating task 0x%" PRIxPTR ", sp=0x%" PRIxPTR,
                  (uintptr_t)task, task->rust_sp);
+
+        dom->interrupt_flag = 0;
 
         dom->activate(task);
 

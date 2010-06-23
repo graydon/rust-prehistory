@@ -66,7 +66,11 @@ static uint32_t const LOG_ULOG =      0x40;
 static uint32_t const LOG_TRACE =     0x80;
 static uint32_t const LOG_DWARF =    0x100;
 static uint32_t const LOG_CACHE =    0x200;
+static uint32_t const LOG_TIMER =    0x400;
 
+// This drives our preemption scheme.
+
+static size_t const TIME_SLICE_IN_MS = 10;
 
 // Every reference counted object should derive from this base class.
 
@@ -140,6 +144,11 @@ public:
 struct
 rust_dom
 {
+    // Fields known to the compiler:
+    uintptr_t interrupt_flag;
+
+    // Fields known only by the runtime:
+
     // NB: the root crate must remain in memory until the root of the
     // tree of domains exits. All domains within this tree have a
     // copy of this root_crate value and use it for finding utility
@@ -207,6 +216,29 @@ inline void *operator new(size_t sz, rust_dom &dom) {
 inline void *operator new[](size_t sz, rust_dom &dom) {
     return dom.malloc(sz);
 }
+
+struct
+rust_timer
+{
+    // FIXME: This will probably eventually need replacement
+    // with something more sophisticated and integrated with
+    // an IO event-handling library, when we have such a thing.
+    // For now it's just the most basic "thread that can interrupt
+    // its associated domain-thread" device, so that we have
+    // *some* form of task-preemption.
+    rust_dom &dom;
+    uintptr_t exit_flag;
+
+#if defined(__WIN32__)
+    HANDLE thread;
+#else
+    pthread_attr_t attr;
+    pthread_t thread;
+#endif
+
+    rust_timer(rust_dom &dom);
+    ~rust_timer();
+};
 
 #include "rust_util.h"
 

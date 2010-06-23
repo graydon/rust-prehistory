@@ -623,8 +623,10 @@ upcall_start_thread(rust_task *spawner,
     root_task->start(exit_task_glue, spawnee_fn, spawner->rust_sp, callsz);
 
 #if defined(__WIN32__)
-    DWORD thread;
-    CreateThread(NULL, 0, rust_thread_start, root_task->dom, 0, &thread);
+    HANDLE thread;
+    thread = CreateThread(NULL, 0, rust_thread_start, root_task->dom,
+                          0, NULL);
+    dom->win32_require("CreateThread", thread != NULL);
 #else
     pthread_t thread;
     pthread_create(&thread, &dom->attr, rust_thread_start,
