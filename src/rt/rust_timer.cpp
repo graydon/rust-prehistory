@@ -42,10 +42,9 @@ win32_timer_loop(void *ptr)
 
 #elif defined(__GNUC__)
 static void *
-pthreads_timer_loop(void *ptr)
+pthread_timer_loop(void *ptr)
 {
     // Disabling until tested on a posix machine.
-#if 0
     // We were handed the rust_timer that owns us.
     rust_timer *timer = (rust_timer *)ptr;
     rust_dom &dom(timer->dom);
@@ -54,7 +53,6 @@ pthreads_timer_loop(void *ptr)
         dom.interrupt_flag = 1;
     }
     pthread_exit(NULL);
-#endif
     return 0;
 
 }
