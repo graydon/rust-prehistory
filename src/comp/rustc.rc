@@ -1,16 +1,6 @@
 
 // -*- C++ -*-
-
-native "rust" mod librust {
-  fn str_buf(str s) -> int;
-}
-
-native mod libc {
-  fn fopen(int path, int mode) -> int;
-  fn fgetc(int file) -> int;
-  fn fclose(int file) -> ();
-  fn puts(int s) -> ();
-}
+use std;
 
 mod fe {
     mod lexer;
@@ -20,8 +10,6 @@ mod fe {
 mod driver {
     mod rustc;
 }
-
-auth driver = unsafe;
 
 // Local Variables:
 // fill-column: 78;
