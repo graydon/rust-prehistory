@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-type mlist = tag(cons(int,mutable @mlist), nil());
+type list = tag(cons(int,@list), nil());
 
 fn main() {
   cons(10, cons(11, cons(12, nil())));

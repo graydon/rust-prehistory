@@ -74,6 +74,13 @@ align_of(rust_task *task, type_desc *t) {
   return t->align;
 }
 
+extern "C" CDECL size_t
+refcount(rust_task *task, type_desc *t, size_t *v) {
+    // Passed-in value has refcount 1 too high
+    // because it was ref'ed while making the call.
+    return (*v) - 1;
+}
+
 extern "C" CDECL rust_vec*
 vec_alloc(rust_task *task, type_desc *t, size_t n_elts)
 {

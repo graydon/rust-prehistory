@@ -374,6 +374,7 @@ TEST_XFAILS_LLVM := $(addprefix test/run-pass/, \
                       lazy-and-or.rs \
                       lazychan.rs \
                       linear-for-loop.rs \
+                      list.rs \
                       many.rs \
                       mlist-cycle.rs \
                       mlist.rs \

@@ -1545,12 +1545,10 @@ let trans_visitor
     let inner _ (args:Il.cell) =
       let ty_params = deref (get_element_ptr args 0) in
       let cell = get_element_ptr args 1 in
-        trace_str cx.ctxt_sess.Session.sess_trace_drop
-          "in drop-glue, dropping";
+        note_drop_step ty "in drop-glue, dropping";
         trace_word cx.ctxt_sess.Session.sess_trace_drop cell;
         drop_ty ty_params ty (deref cell) curr_iso;
-        trace_str cx.ctxt_sess.Session.sess_trace_drop
-          "drop-glue complete";
+        note_drop_step ty "drop-glue complete";
     in
     let ty_params_ptr = ty_params_covering ty in
     let fty = mk_simple_ty_fn [| ty_params_ptr; read_alias_slot ty |] in
@@ -1578,16 +1576,20 @@ let trans_visitor
       in
       let vr = next_vreg_cell Il.voidptr_t in
         lea vr body_mem;
-        trace_str cx.ctxt_sess.Session.sess_trace_drop
-          "in free-glue, calling drop-glue";
+        note_drop_step ty "in free-glue, calling drop-glue on body";
         trace_word cx.ctxt_sess.Session.sess_trace_drop vr;
         trans_call_simple_static_glue
           (get_drop_glue ty curr_iso) ty_params vr;
-        trace_str cx.ctxt_sess.Session.sess_trace_drop
-          "back in free-glue, calling free";
+        note_drop_step ty "back in free-glue, calling free";
+        if type_has_state ty
+        then
+          note_drop_step ty "type has state"
+        else
+          note_drop_step ty "type has no state";
         if mctrl = MEM_gc
         then
           begin
+            note_drop_step ty "MEM_gc, adjusting pointer";
             lea vr (fst (need_mem_cell (deref cell)));
             emit (Il.binary Il.SUB vr (Il.Cell vr)
                     (imm
@@ -1595,7 +1597,10 @@ let trans_visitor
             trans_free vr
           end
         else
-          trans_free cell;
+          begin
+            note_drop_step ty "not MEM_gc";
+            trans_free cell;
+          end;
         trace_str cx.ctxt_sess.Session.sess_trace_drop
           "free-glue complete";
     in
@@ -2681,6 +2686,9 @@ let trans_visitor
       (curr_iso:Ast.ty_iso option)
       : unit =
     let ty = slot_ty slot in
+    let ty = maybe_iso curr_iso ty in
+    let curr_iso = maybe_enter_iso ty curr_iso in
+    let slot = {slot with Ast.slot_ty = Some ty} in
     let mctrl = slot_mem_ctrl slot in
       match mctrl with
           MEM_rc_opaque ->
@@ -2713,11 +2721,9 @@ let trans_visitor
             let _ = check_exterior_rty cell in
             let null_jmp = null_check cell in
             let rc = exterior_rc_cell cell in
-            let _ = note_gc_step slot "dropping refcount" in
+            let _ = note_gc_step slot "dropping refcount on " in
             let _ = trace_word cx.ctxt_sess.Session.sess_trace_gc rc in
             let j = drop_refcount_and_cmp rc in
-            let ty = maybe_iso curr_iso ty in
-            let curr_iso = maybe_enter_iso ty curr_iso in
               trans_call_simple_static_glue
                 (get_free_glue ty mctrl curr_iso)
                 ty_params cell;
@@ -2734,8 +2740,6 @@ let trans_visitor
                                   (Ast.fmt_to_str Ast.fmt_slot slot))));
             let (mem, _) = need_mem_cell cell in
             let vr = next_vreg_cell Il.voidptr_t in
-            let ty = maybe_iso curr_iso ty in
-            let curr_iso = maybe_enter_iso ty curr_iso in
               lea vr mem;
               trans_call_simple_static_glue
                 (get_drop_glue ty curr_iso)
@@ -2746,12 +2750,30 @@ let trans_visitor
             let ty = maybe_iso curr_iso ty in
               drop_ty ty_params ty cell curr_iso
 
+  and note_drop_step ty step =
+    if cx.ctxt_sess.Session.sess_trace_drop ||
+      cx.ctxt_sess.Session.sess_log_trans
+    then
+      let slotstr = Ast.fmt_to_str Ast.fmt_ty ty in
+      let str = step ^ " " ^ slotstr in
+        begin
+          annotate str;
+          trace_str cx.ctxt_sess.Session.sess_trace_drop str
+        end
+
   and note_gc_step slot step =
     if cx.ctxt_sess.Session.sess_trace_gc ||
       cx.ctxt_sess.Session.sess_log_trans
     then
+      let mctrl_str =
+        match slot_mem_ctrl slot with
+            MEM_gc -> "MEM_gc"
+          | MEM_rc_struct -> "MEM_rc_struct"
+          | MEM_rc_opaque -> "MEM_rc_struct"
+          | MEM_interior -> "MEM_rc_struct"
+      in
       let slotstr = Ast.fmt_to_str Ast.fmt_slot slot in
-      let str = step ^ " " ^ slotstr in
+      let str = step ^ " " ^ mctrl_str ^ " " ^ slotstr in
         begin
           annotate str;
           trace_str cx.ctxt_sess.Session.sess_trace_gc str
@@ -2775,7 +2797,9 @@ let trans_visitor
             let ctrl = exterior_gc_ctrl_cell cell in
             let tydesc = get_tydesc None (slot_ty slot) in
             let rc = exterior_rc_cell cell in
+              note_gc_step slot "init GC exterior: set refcount";
               mov rc one;
+              trace_word cx.ctxt_sess.Session.sess_trace_gc rc;
               mov ctrl (Il.Cell tydesc);
               note_gc_step slot "init GC exterior: load chain next-ptr";
               let next = exterior_gc_next_cell cell in
@@ -2783,7 +2807,7 @@ let trans_visitor
                 mov next (Il.Cell chain);
                 note_gc_step slot "init GC exterior: link GC mem to chain";
                 mov chain (Il.Cell cell);
-                note_gc_step slot "init GC exterior: done initializing";
+                note_gc_step slot "init GC exterior: done initializing"
 
       | MEM_rc_opaque
       | MEM_rc_struct ->
@@ -2916,6 +2940,8 @@ let trans_visitor
     let ty = slot_ty src_slot in
     let ty = maybe_iso curr_iso ty in
     let curr_iso = maybe_enter_iso ty curr_iso in
+    let dst_slot = { dst_slot with Ast.slot_ty = Some ty } in
+    let src_slot = { src_slot with Ast.slot_ty = Some ty } in
     let dst = deref_slot initializing dst dst_slot in
     let src = deref_slot false src src_slot in
       copy_ty ty_params ty dst src curr_iso
