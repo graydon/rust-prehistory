@@ -1,9 +1,10 @@
 /*
- * lock_free_queue.cpp
- *
- *  Created on: Jun 18, 2010
- *      Author: Michael Bebenita
+ * Interrupt transparent queue, Schoen et. al, "On Interrupt-Transparent
+ * Synchronization in an Embedded Object-Oriented Operating System", 2000.
+ * enqueue() is allowed to interrupt enqueue() and dequeue(), however,
+ * dequeue() is not allowed to interrupt itself.
  */
+
 
 #include "lock_free_queue.h"
 

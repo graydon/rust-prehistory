@@ -1,10 +1,3 @@
-/*
- * spin_lock.h
- *
- *  Created on: Jun 16, 2010
- *      Author: Michael Bebenita
- */
-
 #ifndef UNFAIRTICKETLOCK_H_
 #define UNFAIRTICKETLOCK_H_
 

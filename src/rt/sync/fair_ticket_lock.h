@@ -1,10 +1,3 @@
-/*
- * FairTicketLock.h
- *
- *  Created on: Jun 16, 2010
- *      Author: Michael Bebenita
- */
-
 #ifndef FAIRTICKETLOCK_H_
 #define FAIRTICKETLOCK_H_
 

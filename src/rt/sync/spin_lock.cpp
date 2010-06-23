@@ -1,8 +1,5 @@
 /*
- * spin_lock.cpp
- *
- *  Created on: Jun 16, 2010
- *      Author: Michael Bebenita
+ * Your average spin lock.
  */
 
 #include "globals.h"

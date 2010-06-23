@@ -1,15 +1,11 @@
-/*
- *  Created on: Jun 17, 2010
- *      Author: Michael Bebenita
- */
-
 #ifndef LIST_H
 #define LIST_H
 
 /**
  * A simple, resizable array list.
  */
-template <typename T> class array_list {
+template <typename T>
+class array_list {
 	static const size_t INITIAL_CAPACITY = 8;
 	size_t _size;
 	T * _data;

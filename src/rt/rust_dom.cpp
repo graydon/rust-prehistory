@@ -7,7 +7,7 @@ template class ptr_vec<rust_task>;
 static uint32_t
 get_logbits()
 {
-    uint32_t bits = LOG_ULOG|LOG_ERR|LOG_MEM|LOG_DOM|LOG_COMM|LOG_TASK;
+    uint32_t bits = LOG_ULOG|LOG_ERR;
     char *c = getenv("RUST_LOG");
     if (c) {
         bits = 0;
@@ -286,7 +286,7 @@ rust_dom::get_cache(rust_crate const *crate) {
 //
 // Local Variables:
 // mode: C++
-// fill-column: 78;
+// fill-column: 70;
 // indent-tabs-mode: nil
 // c-basic-offset: 4
 // buffer-file-coding-system: utf-8-unix

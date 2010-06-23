@@ -1,15 +1,11 @@
 /*
- * fair_ticket_lock.cpp
- *
- *  Created on: Jun 16, 2010
- *      Author: Michael Bebenita
- *       Notes: This works well as long as the number of contending threads
- *              is less than the number of processors. This is because of
- *              the fair locking scheme. If the thread that is next in line
- *              for acquiring the lock is not currently running, no other
- *              thread can acquire the lock. This is terrible for performance,
- *              and it seems that all fair locking schemes suffer from this
- *              behavior.
+ * This works well as long as the number of contending threads
+ * is less than the number of processors. This is because of
+ * the fair locking scheme. If the thread that is next in line
+ * for acquiring the lock is not currently running, no other
+ * thread can acquire the lock. This is terrible for performance,
+ * and it seems that all fair locking schemes suffer from this
+ * behavior.
  */
 
 // #define TRACE
