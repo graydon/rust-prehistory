@@ -40,7 +40,8 @@ ifeq ($(CFG_OSTYPE), Linux)
   CFG_VALGRIND := $(shell which valgrind)
   ifdef CFG_VALGRIND
     CFG_VALGRIND += --run-libc-freeres=no --leak-check=full \
-                    --quiet --vex-iropt-level=0
+                    --quiet --vex-iropt-level=0 \
+                    --suppressions=etc/x86.supp
   endif
 endif
 
