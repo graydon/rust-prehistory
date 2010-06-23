@@ -21,6 +21,9 @@ fn mk_buf_reader(str s) -> buf_reader {
         ret uint(count);
       }
     }
+    drop {
+      os.libc.close(fd);
+    }
   }
 
   auto fd = os.libc.open(_str.buf(s), 0);
