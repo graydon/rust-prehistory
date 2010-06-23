@@ -1,6 +1,9 @@
 {
-   leaked-TLS-chunk-x86-exit-path-fails-to-clean-up
-   Memcheck:Leak
-   fun:calloc
-   fun:_dl_allocate_tls
+   our-failure-to-setup-freeres-structure
+   Memcheck:Free
+   fun:free
+   obj:*
+   fun:_vgnU_freeres
+   fun:_Exit
+   fun:exit
 }
