@@ -68,17 +68,16 @@ let string_of_name (n:Ast.name) : string =
   Ast.fmt_to_str Ast.fmt_name n
 ;;
 
-(* The node_id in the Constr_pred constr_key is the innermost block_id
-   of any of the constr's pred name or cargs; this is the *outermost*
-   block_id in which its constr_id can possibly be shared. It serves
-   only to uniquely identify the constr.
-   
-   The node_id in the Constr_init constr_key is just a slot id. 
-   Constr_init is the builtin (un-named) constraint that means "slot is
-   initialized". Not every slot is.
+(* The only need for a carg is to uniquely identify a constraint-arg
+ * in a scope-independent fashion. So we just look up the node that's
+ * used as the base of any such arg and glue it on the front of the 
+ * symbolic name.
  *)
+
+type constr_key_arg = Constr_arg_node of (node_id * Ast.carg_path)
+                      | Constr_arg_lit of Ast.lit
 type constr_key =
-    Constr_pred of (Ast.constr * node_id)
+    Constr_pred of (node_id * constr_key_arg array)
   | Constr_init of node_id
 
 type ctxt =

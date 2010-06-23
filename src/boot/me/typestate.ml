@@ -23,66 +23,100 @@ let name_base_to_slot_key (nb:Ast.name_base) : Ast.slot_key =
 let determine_constr_key
     (cx:ctxt)
     (scopes:(scope list))
-    (scope_ids:node_id list)
+    (formal_base:node_id option)
     (c:Ast.constr)
     : constr_key =
-  (* 
-   * The idea here is to work out the innermost scope of either 
-   * the constraint itself or any of the slots used as arguments.
-   * 
-   * The combination of that, plus the constr itself, forms a 
-   * unique key for idenfitying a predicate.
-   *)
-  let key =
-    (* FIXME (issue #23): handle other forms of constr name. *)
-    match c.Ast.constr_name with
-        Ast.NAME_base nb -> name_base_to_slot_key nb
-      | x ->
-          err None "unhandled form of constraint-name: %a"
-            Ast.sprintf_name x
-  in
+
   let cid =
-    ref (match lookup cx scopes key with
-             Some (scope::_, _) -> id_of_scope scope
-           | _ ->
-               err None "unresolved constraint '%a'"
-                 Ast.sprintf_slot_key key)
+    match lookup_by_name cx scopes c.Ast.constr_name with
+        Some (_, cid) ->
+          if referent_is_item cx cid
+          then
+            begin
+              match Hashtbl.find cx.ctxt_all_item_types cid with
+                  Ast.TY_fn (_, taux) ->
+                    begin
+                      if taux.Ast.fn_effect = Ast.PURE
+                      then cid
+                      else err (Some cid) "impure function used in constraint"
+                    end
+                | _ -> bug () "bad type of predicate"
+            end
+          else
+            bug () "slot used as predicate"
+      | None -> bug () "predicate not found"
   in
-  let rec tighten_to id sids =
-    match sids with
-        [] -> ()
-      | x::_ when x = (!cid) -> ()
-      | x::_ when x = id -> cid := id
-      | _::xs -> tighten_to id xs
-  in
-  let tighten_to_carg carg =
+
+  let constr_arg_of_carg carg =
     match carg with
-        (* FIXME (issue #23): handle other forms of constr-arg. *)
-        Ast.CARG_path (Ast.CARG_base (Ast.BASE_formal)) -> ()
-      | Ast.CARG_path
-          (Ast.CARG_ext (Ast.CARG_base (Ast.BASE_formal), _)) -> ()
-      | Ast.CARG_lit _ -> ()
-      | Ast.CARG_path (Ast.CARG_base (Ast.BASE_named nb)) ->
-          begin
-            let key = name_base_to_slot_key nb in
-              match lookup cx scopes key with
-                  Some (scope::_, _) ->
-                    tighten_to (id_of_scope scope) scope_ids
-                | _ ->
-                    err None "unresolved constraint-arg '%a'"
-                      Ast.sprintf_slot_key key
-          end
-      | _ ->
-          err None "unhandled form of constraint-arg name: %a"
-            Ast.sprintf_carg carg
+        Ast.CARG_path pth ->
+          let rec node_base_of pth =
+            match pth with
+                Ast.CARG_base Ast.BASE_formal ->
+                  begin
+                    match formal_base with
+                        Some id -> id
+                      | None ->
+                          bug () "formal symbol * used in free constraint"
+                  end
+              | Ast.CARG_ext (pth, _) -> node_base_of pth
+              | Ast.CARG_base (Ast.BASE_named nb) ->
+                  begin
+                    match lookup_by_name cx scopes (Ast.NAME_base nb) with
+                        None -> bug () "constraint-arg not found"
+                      | Some (_, aid) ->
+                          if referent_is_slot cx aid
+                          then
+                            if type_has_state
+                              (slot_ty (referent_to_slot cx aid))
+                            then err (Some aid)
+                              "predicate applied to slot of mutable type"
+                            else aid
+                          else
+                            (* Items are always constant, they're ok. 
+                             * Weird to be using them in a constr, but ok. *)
+                            aid
+                  end
+          in
+            Constr_arg_node (node_base_of pth, pth)
+
+      | Ast.CARG_lit lit -> Constr_arg_lit lit
   in
-    Array.iter tighten_to_carg c.Ast.constr_args;
-    Constr_pred (c, !cid)
+    Constr_pred (cid, Array.map constr_arg_of_carg c.Ast.constr_args)
 ;;
 
 let fmt_constr_key cx ckey =
   match ckey with
-      Constr_pred (constr, _) -> Ast.fmt_to_str Ast.fmt_constr constr
+      Constr_pred (cid, args) ->
+        let fmt_constr_arg carg =
+          match carg with
+              Constr_arg_lit lit ->
+                Ast.fmt_to_str Ast.fmt_lit lit
+            | Constr_arg_node (id, pth) ->
+                let rec fmt_pth pth =
+                  match pth with
+                      Ast.CARG_base _ ->
+                        if referent_is_slot cx id
+                        then
+                          let key = Hashtbl.find cx.ctxt_slot_keys id in
+                            Ast.fmt_to_str Ast.fmt_slot_key key
+                        else
+                          let n = Hashtbl.find cx.ctxt_all_item_names id in
+                            Ast.fmt_to_str Ast.fmt_name n
+                    | Ast.CARG_ext (pth, nc) ->
+                        let b = fmt_pth pth in
+                          b ^ (Ast.fmt_to_str Ast.fmt_name_component nc)
+                in
+                  fmt_pth pth
+        in
+        let pred_name = Hashtbl.find cx.ctxt_all_item_names cid in
+          Printf.sprintf "%s(%s)"
+            (Ast.fmt_to_str Ast.fmt_name pred_name)
+            (String.concat ", "
+               (List.map
+                  fmt_constr_arg
+                  (Array.to_list args)))
+
     | Constr_init n when Hashtbl.mem cx.ctxt_slot_keys n ->
         Printf.sprintf "<init #%d = %s>"
           (int_of_node n)
@@ -123,10 +157,11 @@ let constr_id_assigning_visitor
     (inner:Walk.visitor)
     : Walk.visitor =
 
-  let scope_ids _ = List.map id_of_scope (!scopes) in
-
-  let resolve_constr_to_key (constr:Ast.constr) : constr_key =
-    determine_constr_key cx (!scopes) (scope_ids()) constr
+  let resolve_constr_to_key
+      (formal_base:node_id)
+      (constr:Ast.constr)
+      : constr_key =
+    determine_constr_key cx (!scopes) (Some formal_base) constr
   in
 
   let note_constr_key key =
@@ -146,14 +181,15 @@ let constr_id_assigning_visitor
   let note_keys = Array.iter note_constr_key in
 
   let visit_mod_item_pre n p i =
+    let resolver = resolve_constr_to_key i.id in
     begin
     match i.node.Ast.decl_item with
         Ast.MOD_ITEM_fn f ->
-          let (input_keys, init_keys) = fn_keys f resolve_constr_to_key in
+          let (input_keys, init_keys) = fn_keys f resolver in
             note_keys input_keys;
             note_keys init_keys
       | Ast.MOD_ITEM_obj ob ->
-          let (input_keys, init_keys) = obj_keys ob resolve_constr_to_key in
+          let (input_keys, init_keys) = obj_keys ob resolver in
             note_keys input_keys;
             note_keys init_keys
       | _ -> ()
@@ -161,10 +197,10 @@ let constr_id_assigning_visitor
     inner.Walk.visit_mod_item_pre n p i
   in
 
-  let visit_constr_pre c =
-    let key = determine_constr_key cx (!scopes) (scope_ids()) c in
+  let visit_constr_pre formal_base c =
+    let key = determine_constr_key cx (!scopes) formal_base c in
       note_constr_key key;
-      inner.Walk.visit_constr_pre c
+      inner.Walk.visit_constr_pre formal_base c
   in
     (* 
      * We want to generate, for any call site, a variant of 
@@ -179,6 +215,7 @@ let constr_id_assigning_visitor
     begin
       match s.node with
           Ast.STMT_call (_, lv, args) ->
+            let referent = lval_to_referent cx (lval_base_id lv) in
             let referent_ty = lval_ty cx lv in
               begin
                 match referent_ty with
@@ -188,7 +225,7 @@ let constr_id_assigning_visitor
                       let constrs' =
                         Array.map (apply_names_to_constr names) constrs
                       in
-                        Array.iter visit_constr_pre constrs'
+                        Array.iter (visit_constr_pre (Some referent)) constrs'
 
                   | _ -> ()
               end
@@ -242,7 +279,6 @@ let condition_assigning_visitor
     (scopes:(scope list) ref)
     (inner:Walk.visitor)
     : Walk.visitor =
-  let scope_ids _ = List.map id_of_scope (!scopes) in
 
   let raise_bits (bitv:Bits.t) (keys:constr_key array) : unit =
     Array.iter
@@ -267,8 +303,11 @@ let condition_assigning_visitor
       raise_bits bitv keys
   in
 
-  let resolve_constr_to_key (constr:Ast.constr) : constr_key =
-    determine_constr_key cx (!scopes) (scope_ids()) constr
+  let resolve_constr_to_key
+      (formal_base:node_id option)
+      (constr:Ast.constr)
+      : constr_key =
+    determine_constr_key cx (!scopes) formal_base constr
   in
 
   let raise_entry_state input_keys init_keys block =
@@ -285,7 +324,9 @@ let condition_assigning_visitor
     begin
       match i.node.Ast.decl_item with
           Ast.MOD_ITEM_fn f ->
-            let (input_keys, init_keys) = fn_keys f resolve_constr_to_key in
+            let (input_keys, init_keys) =
+              fn_keys f (resolve_constr_to_key (Some i.id))
+            in
               raise_entry_state input_keys init_keys f.Ast.fn_body
 
         | _ -> ()
@@ -295,10 +336,10 @@ let condition_assigning_visitor
 
   let visit_obj_fn_pre obj ident fn =
     let (obj_input_keys, obj_init_keys) =
-      obj_keys obj.node resolve_constr_to_key
+      obj_keys obj.node (resolve_constr_to_key (Some obj.id))
     in
     let (fn_input_keys, fn_init_keys) =
-      fn_keys fn.node resolve_constr_to_key
+      fn_keys fn.node (resolve_constr_to_key (Some fn.id))
     in
       raise_entry_state obj_input_keys obj_init_keys fn.node.Ast.fn_body;
       raise_entry_state fn_input_keys fn_init_keys fn.node.Ast.fn_body;
@@ -307,7 +348,7 @@ let condition_assigning_visitor
 
   let visit_obj_drop_pre obj b =
     let (obj_input_keys, obj_init_keys) =
-      obj_keys obj.node resolve_constr_to_key
+      obj_keys obj.node (resolve_constr_to_key (Some obj.id))
     in
       raise_entry_state obj_input_keys obj_init_keys b;
       inner.Walk.visit_obj_drop_pre obj b
@@ -323,7 +364,7 @@ let condition_assigning_visitor
               let constrs =
                 Array.map (apply_names_to_constr names) formal_constrs
               in
-              let keys = Array.map resolve_constr_to_key constrs in
+              let keys = Array.map (resolve_constr_to_key None) constrs in
                 raise_precondition s.id keys
           | _ -> ()
       end;
@@ -339,7 +380,7 @@ let condition_assigning_visitor
     begin
       match s.node with
           Ast.STMT_check (constrs, _) ->
-            let postcond = Array.map resolve_constr_to_key constrs in
+            let postcond = Array.map (resolve_constr_to_key None) constrs in
               raise_postcondition s.id postcond
 
         | Ast.STMT_recv (dst, src) ->
@@ -456,7 +497,7 @@ let condition_assigning_visitor
               in
               let header_slots = get_slots pat in
               let (input_keys, init_keys) =
-                entry_keys header_slots [| |] resolve_constr_to_key
+                entry_keys header_slots [| |] (resolve_constr_to_key None)
               in
               raise_entry_state input_keys init_keys block
             in

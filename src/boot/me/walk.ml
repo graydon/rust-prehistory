@@ -21,8 +21,8 @@ type visitor =
       visit_expr_post: Ast.expr -> unit;
       visit_ty_pre: Ast.ty -> unit;
       visit_ty_post: Ast.ty -> unit;
-      visit_constr_pre: Ast.constr -> unit;
-      visit_constr_post: Ast.constr -> unit;
+      visit_constr_pre: node_id option -> Ast.constr -> unit;
+      visit_constr_post: node_id option -> Ast.constr -> unit;
       visit_pat_pre: Ast.pat -> unit;
       visit_pat_post: Ast.pat -> unit;
       visit_block_pre: Ast.block -> unit;
@@ -65,8 +65,8 @@ let empty_visitor =
     visit_expr_post = (fun _ -> ());
     visit_ty_pre = (fun _ -> ());
     visit_ty_post = (fun _ -> ());
-    visit_constr_pre = (fun _ -> ());
-    visit_constr_post = (fun _ -> ());
+    visit_constr_pre = (fun _ _ -> ());
+    visit_constr_post = (fun _ _ -> ());
     visit_pat_pre = (fun _ -> ());
     visit_pat_post = (fun _ -> ());
     visit_block_pre = (fun _ -> ());
@@ -236,7 +236,7 @@ and walk_mod_item
   let children _ =
     match item.node.Ast.decl_item with
         Ast.MOD_ITEM_type ty -> walk_ty v ty
-      | Ast.MOD_ITEM_fn f -> walk_fn v f
+      | Ast.MOD_ITEM_fn f -> walk_fn v f item.id
       | Ast.MOD_ITEM_tag (htup, ttag, _) ->
           walk_header_tup v htup;
           walk_ty_tag v ttag
@@ -244,7 +244,7 @@ and walk_mod_item
           walk_mod_items v items
       | Ast.MOD_ITEM_obj ob ->
           walk_header_slots v ob.Ast.obj_state;
-          walk_constrs v ob.Ast.obj_constrs;
+          walk_constrs v (Some item.id) ob.Ast.obj_constrs;
           let oid = { node = ob; id = item.id } in
             Hashtbl.iter (walk_obj_fn v oid) ob.Ast.obj_fns;
             match ob.Ast.obj_drop with
@@ -285,7 +285,7 @@ and walk_ty
       | Ast.TY_constrained (t,cs) ->
           begin
             walk_ty v t;
-            walk_constrs v cs
+            walk_constrs v None cs
           end
       | Ast.TY_named _ -> ()
       | Ast.TY_param _ -> ()
@@ -315,7 +315,7 @@ and walk_ty_sig
     : unit =
   begin
     Array.iter (walk_slot v) s.Ast.sig_input_slots;
-    walk_constrs v s.Ast.sig_input_constrs;
+    walk_constrs v None s.Ast.sig_input_constrs;
     walk_slot v s.Ast.sig_output_slot;
   end
 
@@ -330,9 +330,10 @@ and walk_ty_fn
 
 and walk_constrs
     (v:visitor)
+    (formal_base:node_id option)
     (cs:Ast.constrs)
     : unit =
-  Array.iter (walk_constr v) cs
+  Array.iter (walk_constr v formal_base) cs
 
 and walk_check_calls
     (v:visitor)
@@ -349,12 +350,13 @@ and walk_check_calls
 
 and walk_constr
     (v:visitor)
+    (formal_base:node_id option)
     (c:Ast.constr)
     : unit =
   walk_bracketed
-    v.visit_constr_pre
+    (v.visit_constr_pre formal_base)
     (fun _ -> ())
-    v.visit_constr_post
+    (v.visit_constr_post formal_base)
     c
 
 and walk_header_slots
@@ -376,15 +378,16 @@ and walk_obj_fn
     (f:Ast.fn identified)
     : unit =
   v.visit_obj_fn_pre obj ident f;
-  walk_fn v f.node;
+  walk_fn v f.node f.id;
   v.visit_obj_fn_post obj ident f
 
 and walk_fn
     (v:visitor)
     (f:Ast.fn)
+    (id:node_id)
     : unit =
   walk_header_slots v f.Ast.fn_input_slots;
-  walk_constrs v f.Ast.fn_input_constrs;
+  walk_constrs v (Some id) f.Ast.fn_input_constrs;
   walk_slot_identified v f.Ast.fn_output_slot;
   walk_block v f.Ast.fn_body
 
@@ -551,16 +554,16 @@ and walk_stmt
           walk_expr v e
 
       | Ast.STMT_check (cs, calls) ->
-          walk_constrs v cs;
+          walk_constrs v None cs;
           walk_check_calls v calls
 
       | Ast.STMT_check_if (cs,calls,b) ->
-          walk_constrs v cs;
+          walk_constrs v None cs;
           walk_check_calls v calls;
           walk_block v b
 
       | Ast.STMT_prove cs ->
-          walk_constrs v cs
+          walk_constrs v None cs
 
       | Ast.STMT_alt_tag
           { Ast.alt_tag_lval = lval; Ast.alt_tag_arms = arms } ->
