@@ -299,7 +299,7 @@ endif
 # Main compiler targets and rules
 ######################################################################
 
-$(CFG_COMPILER): $(COMPILER_CRATE) $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
+$(CFG_COMPILER): $(COMPILER_INPUTS) $(CFG_BOOT) $(CFG_RUNTIME) $(CFG_STDLIB)
 	@$(call CFG_ECHO, compile: $<)
 	$(CFG_QUIET)OCAMLRUNPARAM="b1" $(CFG_BOOT) $(CFG_BOOT_FLAGS) -o $@ $<
 	$(CFG_QUIET)chmod 0755 $@
@@ -672,7 +672,7 @@ PKG_3RDPARTY := rt/valgrind.h rt/memcheck.h \
 PKG_FILES := README \
              $(wildcard etc/*.*) \
              $(MKFILES) $(BOOT_MLS) boot/fe/lexer.mll \
-             $(COMPILER_CRATE) $(COMPILER_INPUTS) \
+             $(COMPILER_INPUTS) \
              $(STDLIB_CRATE) $(STDLIB_INPUTS) \
              $(RUNTIME_CS) $(RUNTIME_HDR) $(PKG_3RDPARTY) \
              $(ALL_TEST_INPUTS)
