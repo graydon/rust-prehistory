@@ -11,6 +11,7 @@
 This manual is for the ``Rust'' programming language.
 
 Copyright 2006-2010 Graydon Hoare
+
 Copyright 2009-2010 Mozilla Foundation
 
 All rights reserved (for the time being).
@@ -25,10 +26,12 @@ All rights reserved (for the time being).
 @title Rust
 @subtitle A safe, concurrent, practical language.
 @author Graydon Hoare
+@author Mozilla Foundation
 
 @page
 @vskip 0pt plus 1filll
 Copyright @copyright{} 2006-2010 Graydon Hoare
+
 Copyright @copyright{} 2009-2010 Mozilla Foundation
 
 See accompanying LICENSE.txt for terms.
@@ -98,16 +101,16 @@ table. The task ahead involves combining, trimming, and implementing.
 @end quotation
 @sp 2
 
-Rust is a ``curly-brace'' block-structured statement language. It visually
+Rust is a curly-brace, block-structured statement language. It visually
 resembles the C language family, but differs significantly in syntactic and
 semantic details. Its design is oriented toward concerns of ``programming in
 the large'', that is, of creating and maintaining @emph{boundaries} -- both
 abstract and operational -- that preserve large-system @emph{integrity},
 @emph{availability} and @emph{concurrency}.
 
-It supports imperative procedural, concurrent actor and pure functional
-styles. Rust also supports generic programming and metaprogramming, in both
-static and dynamic styles.
+It supports a mixture of imperative procedural, concurrent actor, object
+oriented and pure functional styles. Rust also supports generic programming
+and metaprogramming, in both static and dynamic styles.
 
 @menu
 * Goals::                      Intentions, motivations.
@@ -160,7 +163,7 @@ features of Rust, relative to other languages.
 @sp 1
 @item No @code{null} pointers
 
-The initialisation state of every slot is statically computed as part of the
+The initialization state of every slot is statically computed as part of the
 typestate system (see below), and requires that all slots are initialized
 before use. There is no @code{null} value; uninitialized slots are
 uninitialized, and can only be written to, not read.
@@ -192,7 +195,7 @@ programmer once it has been compiled.
 
 Rust compiles to native code. Rust compilation units are large and the
 compilation model is designed around multi-file, whole-library or
-whole-program optimisation. The compiled units are standard loadable objects
+whole-program optimization. The compiled units are standard loadable objects
 (ELF, PE, Mach-O) containing standard metadata (DWARF) and are compatible with
 existing, standard low-level tools (disassemblers, debuggers, profilers,
 dynamic loaders).
@@ -250,7 +253,7 @@ disjoint unions. Structural types may be @emph{pattern-matched} in an
 @item Generic code
 
 Rust supports a simple form of parametric polymorphism: functions, iterators,
-types and objects can be parameterized by other types.
+types and objects can be parametrized by other types.
 
 @sp 1
 @item Argument binding
@@ -272,7 +275,7 @@ declared @code{auto} and Rust will infer the slot's type from its uses.
 @item Structural object system
 
 Rust has a lightweight object system based on structural object types: there
-is no ``class hierarchy'' nor any concept of inheritence. Method overriding,
+is no ``class hierarchy'' nor any concept of inheritance. Method overriding
 and object restriction are performed explicitly on object values, which are
 little more than order-insensitive records of methods sharing a common private
 value. Objects can be mutable or immutable, and immutable objects can have
@@ -317,7 +320,7 @@ Rust has a system for propagating task-failures and other spontaneous
 events between tasks. Some signals can be trapped and redirected to
 channels; other signals are fatal and result in task-failure. Tasks
 can designate other tasks to handle signals for them. This permits
-organising tasks into mutually-supervising or mutually-failing groups.
+organizing tasks into mutually-supervising or mutually-failing groups.
 
 @sp 1
 @item Deterministic destruction
@@ -389,8 +392,8 @@ another, or between stack and heap. Transplanting, when necessary, is
 predictable and automatic, as part of the definition of the copy operator
 (@code{=}).
 
-In addition, slots have a static initialisation state that is calculated by
-the typestate system. This permits late initialisation of variables in
+In addition, slots have a static initialization state that is calculated by
+the typestate system. This permits late initialization of variables in
 functions with complex control-flow, while still guaranteeing that every use
 of a slot occurs after it has been initialized.
 
@@ -446,7 +449,7 @@ immutable types, but also permits limited, local (per-task) mutability.
 @quotation
   In our approach, all data is private to some process, and processes can
   only communicate through communications channels. @emph{Security}, as used
-  in this paper, is the property which guarantees that tasks in a system
+  in this paper, is the property which guarantees that processes in a system
   cannot affect each other except by explicit communication.
 
   When security is absent, nothing which can be proven about a single module
@@ -543,7 +546,7 @@ Additional specific influences can be seen from the following languages:
 * Ref.Type::                    The types of values held in memory.
 * Ref.Expr::                    Parsed and primitive expressions.
 * Ref.Stmt::                    Executable statements.
-* Ref.Run::                     Organisation of runtime services.
+* Ref.Run::                     Organization of runtime services.
 @end menu
 
 @page
@@ -554,10 +557,10 @@ Additional specific influences can be seen from the following languages:
 The lexical structure of a Rust source file or crate file is defined in terms
 of Unicode character codes and character properties.
 
-Groups of Unicode character codes and characters drawn from particular
-property classes are organized into @emph{tokens}. Tokens are defined as the
-longest contiguous sequence of characters within the same token type
-(identifier, keyword, literal, symbol), or interrupted by ignored characters.
+Groups of Unicode character codes and characters are organized into
+@emph{tokens}. Tokens are defined as the longest contiguous sequence of
+characters within the same token type (identifier, keyword, literal, symbol),
+or interrupted by ignored characters.
 
 Most tokens in Rust follow rules similar to the C family.
 
@@ -586,7 +589,7 @@ Unicode characters.
 The classes of @emph{whitespace} and @emph{comment} is ignored, and are not
 considered as tokens.
 
-@dfn{Whitespace} is any sequence of the Unicode characters U+0020 (space),
+@dfn{Whitespace} is any of the following Unicode characters: U+0020 (space),
 U+0009 (tab, @code{'\t'}), U+000A (LF, @code{'\n'}), U+000D (CR, @code{'\r'}).
 
 @dfn{Comments} are any sequence of Unicode characters beginning with U+002F
@@ -843,7 +846,7 @@ enclosed in parentheses and can include any integral expression. Indexing
 operators can only be applied to vectors or strings, and imply a run-time
 bounds-check. @xref{Ref.Type.Vec}.
 
-An example of an lval with a dynamic indexing opertor:
+An example of an lval with a dynamic indexing operator:
 @example
 x.y.(1 + v).z;
 @end example
@@ -867,7 +870,7 @@ of compilation. A program that fails to compile due to violation of a
 compile-time rule has no defined semantics at run-time; the compiler should
 halt with an error report, and produce no executable artifact.
 
-The compilation model centers on artifacts called @emph{crates}. Each
+The compilation model centres on artifacts called @emph{crates}. Each
 compilation is directed towards a single crate in source form, and if
 successful produces a single crate in executable form.
 
@@ -895,7 +898,7 @@ Compilation Manager, a @emph{unit} in the Owens and Flatt module system, or a
 @item The source-file and directory modules that make up the crate.
 @item The set of syntax extensions to enable for the crate.
 @item Any external crates or native modules that the crate imports to its top level.
-@item The organisation of the crate's internal namespace.
+@item The organization of the crate's internal namespace.
 @item The set of names exported from the crate.
 @end itemize
 
@@ -1042,7 +1045,7 @@ Allocations in the stack and the heap consist of @emph{slots}.
 * Ref.Mem.Alloc::               Memory allocation model.
 * Ref.Mem.Own::                 Memory ownership model.
 * Ref.Mem.Slot::                Memory containment and reference model.
-* Ref.Mem.Init::                Initialisation state of memory.
+* Ref.Mem.Init::                Initialization state of memory.
 * Ref.Mem.Acct::                Memory accounting model.
 @end menu
 
@@ -1160,7 +1163,7 @@ fn extract_z(&point3d p) -> int @{
 The following example function accepts a single mutable alias
 parameter:
 @example
-fn incr(mutable &int i) -> () @{
+fn incr(mutable &int i) @{
     i = i + 1;
 @}
 @end example
@@ -1170,7 +1173,7 @@ fn incr(mutable &int i) -> () @{
 @page
 @node       Ref.Mem.Init
 @subsection Ref.Mem.Init
-@c * Ref.Mem.Init::                Initialisation state of memory.
+@c * Ref.Mem.Init::                Initialization state of memory.
 
 A slot is either initialized or uninitialized at every point in a program. An
 @dfn{initialized} slot is one that holds a value. An @dfn{uninitialized} slot
@@ -1380,11 +1383,11 @@ the item's @emph{path name} within the module namespace is qualified by the
 name of the enclosing item. The exact locations in which sub-items may be
 declared is given by the grammar.  @xref{Ref.Gram}.
 
-Functions, iterators, objects and types may be @emph{parameterized} by
+Functions, iterators, objects and types may be @emph{parametrized} by
 type. Type parameters are given as a comma-separated list of identifiers
 enclosed in square brackets (@code{[]}), after the name of the item and before
 its definition.  The type parameters of an item are part of the name, not the
-type of the item; in order to refer to the type-parameterized item, a
+type of the item; in order to refer to the type-parametrized item, a
 referencing name must in general provide type arguments as a list of
 comma-separated types enclosed within square brackets (though the
 type-inference system can often infer such argument types from context). There
@@ -1851,7 +1854,7 @@ let vec[int] v2 = v.(0,1); // Form a slice.
 
 Vectors always @emph{allocate} a storage region sufficient to store the first
 power of two worth of elements greater than or equal to the size of the
-largest slice sharing the storage. This behavior supports idiomatic in-place
+largest slice sharing the storage. This behaviour supports idiomatic in-place
 ``growth'' of a mutable slot holding a vector:
 
 @example
@@ -2201,7 +2204,7 @@ statement-oriented static dataflow analysis, also called the @emph{typestate}
 system.
 
 @menu
-* Ref.Stmt.Stat.Point::         Inter-statement positions of logical judgments.
+* Ref.Stmt.Stat.Point::         Inter-statement positions of logical judgements.
 * Ref.Stmt.Stat.CFG::           The control flow graph formed by statements.
 * Ref.Stmt.Stat.Constr::        Predicates applied to slots.
 * Ref.Stmt.Stat.Cond::          Constraints required and implied by a statement.
@@ -2212,7 +2215,7 @@ system.
 @page
 @node          Ref.Stmt.Stat.Point
 @subsubsection Ref.Stmt.Stat.Point
-@c * Ref.Stmt.Stat.Point::         Inter-statement positions of logical judgments.
+@c * Ref.Stmt.Stat.Point::         Inter-statement positions of logical judgements.
 
 A @dfn{point} exists before and after any statement in a Rust program.
 For example, this code:
@@ -2232,7 +2235,7 @@ Consists of two statements and four points:
 @end itemize
 
 The typestate system reasons over points, rather than statements. This may
-seem counterintuitive, but points are the more primitive concept. Another way
+seem counter-intuitive, but points are the more primitive concept. Another way
 of thinking about a point is as a set of @emph{instants in time} at which the
 state of a task is fixed. By contrast, a statement represents a @emph{duration
 in time}, during which the state of the task changes. The typestate system is
@@ -2487,7 +2490,7 @@ The result of a @code{spawn} statement is a @code{task} value.
 
 An example of a @code{spawn} statement:
 @example
-fn helper(chan[u8] out) -> () @{
+fn helper(chan[u8] out) @{
     // do some work.
     out <| result;
 @}
@@ -2576,7 +2579,7 @@ A @dfn{call statement} invokes a function, providing a tuple of input slots
 and a reference to an output slot. If the function eventually returns, then
 the statement completes.
 
-A call statement statically requires that the precondtion declared in the
+A call statement statically requires that the precondition declared in the
 callee's signature is satisfied by the statement prestate. In this way,
 typestates propagate through function boundaries. @xref{Ref.Stmt.Stat}.
 
@@ -2630,7 +2633,7 @@ and populated with a copy of the bound value, an exterior (pointer) value.
 The @code{bind} statement is a lightweight mechanism for simulating the more
 elaborate construct of @emph{lexical closures} that exist in other
 languages. Rust has no support for lexical closures, but many realistic uses
-of them can be achileved with @code{bind} statements.
+of them can be achieved with @code{bind} statements.
 
 
 @page
@@ -2669,7 +2672,7 @@ last statement in a block.
 
 An example of a @code{be} statement:
 @example
-fn print_loop(int n) -> () @{
+fn print_loop(int n) @{
   if (n <= 0) @{
     ret;
   @} else @{
@@ -2707,7 +2710,7 @@ statement, or terminating its execution and destroying the iterator frame.
 @page
 @node       Ref.Stmt.Fail
 @subsection Ref.Stmt.Fail
-@c * Ref.Stmt.Fail::               Statement for nonlocal control transfer during failure.
+@c * Ref.Stmt.Fail::               Statement for causing task failure.
 
 Executing a @code{fail} statement causes a task to enter the @emph{failing}
 state. In the @emph{failing} state, a task unwinds its stack, destroying all
@@ -2741,7 +2744,7 @@ A @code{note} statement has no effect during normal execution. The purpose of
 a @code{note} statement is to provide additional diagnostic information to the
 logging subsystem during task failure. @xref{Ref.Stmt.Log}. Using @code{note}
 statements, normal diagnostic logging can be kept relatively sparse, while
-still providing verbose diagnostic ``backtraces'' when a task fails.
+still providing verbose diagnostic ``back-traces'' when a task fails.
 
 When a task is failing, control frames @emph{unwind} from the innermost frame
 to the outermost, and from the innermost lexical block within an unwinding
@@ -2911,11 +2914,11 @@ statements, pattern @code{alt} statements, and @code{alt type} statements.
 
 The form of each kind of @code{alt} is similar: an initial @emph{head} that
 describes the criteria for branching, followed by a sequence of zero or more
-labaled @emph{arms}, each of which describes a @emph{case} and provides a
-@emph{block} of statements associated with the case. When an @code{alt} is
-executed, control enters the head, determines which of the cases to branch to,
-branches to the block associated with the chosen case, and then proceeds to
-the statement following the @code{alt} when the case block completes.
+@emph{arms}, each of which describes a @emph{case} and provides a @emph{block}
+of statements associated with the case. When an @code{alt} is executed,
+control enters the head, determines which of the cases to branch to, branches
+to the block associated with the chosen case, and then proceeds to the
+statement following the @code{alt} when the case block completes.
 
 @menu
 * Ref.Stmt.Alt.Comm::         Statement for branching on communication events.
@@ -2936,7 +2939,7 @@ To execute a communication @code{alt}, the runtime checks all of the ports and
 channels involved in the arms of the statement to see if any @code{case} can
 execute without blocking.  If no @code{case} can execute, the task blocks, and
 the runtime unblocks the task when a @code{case} @emph{can} execute. The
-runtime then makes a pseudorandom choice from among the set of @code{case}
+runtime then makes a pseudo-random choice from among the set of @code{case}
 statements that can execute, executes the statement of the @code{case} and
 branches to the block of that arm.
 
@@ -3067,7 +3070,7 @@ fn even(&int x) -> bool @{
     ret x & 1 == 0;
 @}
 
-fn print_even(int x) : even(x) -> () @{
+fn print_even(int x) : even(x) @{
     print(x);
 @}
 
@@ -3116,7 +3119,7 @@ if check even(x) @{
 @page
 @node    Ref.Run
 @section Ref.Run
-@c * Ref.Run::                     Organisation of runtime services.
+@c * Ref.Run::                     Organization of runtime services.
 
 The Rust @dfn{runtime} is a relatively compact collection of C and Rust code
 that provides fundamental services and datatypes to all Rust tasks at
