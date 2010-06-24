@@ -1,6 +1,62 @@
 open Common;;
 open Semant;;
 
+(* A note on GC:
+ * 
+ * We employ -- or "will employ" when the last few pieces of it are done -- a
+ * "simple" precise, mark-sweep, single-generation, per-task (thereby
+ * preemptable and relatively quick) GC scheme on mutable memory.
+ * 
+ * - For the sake of this note, call any exterior of 'state' effect a gc_val.
+ *
+ * - gc_vals come from the same malloc as all other values but undergo
+ *   different storage management.
+ *
+ *  - Every frame has a frame_glue_fns pointer in its fp[-1] slot, written on
+ *    function-entry.
+ *
+ *  - gc_vals have *three* extra words at their head, not one.
+ *
+ *  - A pointer to a gc_val, however, points to the third of these three
+ *    words. So a certain quantity of code can treat gc_vals the same way it
+ *    would treat refcounted exterior vals.
+ *
+ *  - The first word at the head of a gc_val is used as a refcount, as in
+ *    non-gc allocations.
+ *
+ *  - The (-1)st word at the head of a gc_val is a pointer to a tydesc,
+ *    with the low bit of that pointer used as a mark bit.
+ *
+ *  - The (-2)nd word at the head of a gc_val is a linked-list pointer to the
+ *    gc_val that was allocated (temporally) just before it. Following this
+ *    list traces through all the currently active gc_vals in a task.
+ *
+ *  - The task has a gc_alloc_chain field that points to the most-recent
+ *    gc_val allocated.
+ *
+ *  - GC glue has two phases, mark and sweep:
+ * 
+ *    - The mark phase walks down the frame chain, like the unwinder. It calls
+ *      each frame's mark glue as it's passing through. This will mark all the
+ *      reachable parts of the task's gc_vals.
+ * 
+ *    - The sweep phase walks down the task's gc_alloc_chain checking to see
+ *      if each allocation has been marked. If marked, it has its mark-bit
+ *      reset and the sweep passes it by. If unmarked, it has its tydesc
+ *      free_glue called on its body, and is unlinked from the chain. The
+ *      free-glue will cause the allocation to (recursively) drop all of its
+ *      references and/or run dtors.
+ * 
+ *    - Note that there is no "special gc state" at work here; the task looks
+ *      like it's running normal code that happens to not perform any gc_val
+ *      allocation. Mark-bit twiddling is open-coded into all the mark
+ *      functions, which know their contents; we only have to do O(frames)
+ *      indirect calls to mark, the rest are static. Sweeping costs O(gc-heap)
+ *      indirect calls, unfortunately, because the set of sweep functions to
+ *      call is arbitrary based on allocation order.
+ *)
+
+
 type mem_ctrl =
     MEM_rc_opaque
   | MEM_rc_struct

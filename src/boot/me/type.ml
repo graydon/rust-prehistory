@@ -276,7 +276,7 @@ let process_crate (cx:ctxt) (crate:Ast.crate) : unit =
               comparable
           | Ast.TY_fn _ | Ast.TY_obj _
           | Ast.TY_param _ | Ast.TY_native _ | Ast.TY_type -> false
-          | Ast.TY_named _ -> bug () "is_comparable_or_ordered: TY_named TODO"
+          | Ast.TY_named _ -> bug () "unexpected named type"
           | Ast.TY_constrained (ty, _) ->
               is_comparable_or_ordered comparable ty
       in

@@ -411,7 +411,6 @@ let arr_check_dups (a:'a array) (f:'a -> 'a -> unit) : unit =
     | None -> ()
 ;;
 
-(* FIXME: use Array.build or whatever it's called for efficiency *)
 let arr_map2 (f:'a -> 'b -> 'c) (a:'a array) (b:'b array) : 'c array =
   assert ((Array.length a) = (Array.length b));
   Array.init (Array.length a) (fun i -> f a.(i) b.(i))

@@ -56,8 +56,6 @@ let layout_visitor
    *        (above the frame-base)
    *
    *     #3 outgoing arg slots are positive offsets from sp
-   *        (since itframesz changes dynamically, easier than
-   *         calculating as negative offsets from fp)
    *
    *   - Slots are split into two classes:
    *
@@ -378,7 +376,7 @@ let layout_visitor
      * the next so long as they were not nested; The (commented-out)
      * code here supports that logic. Unfortunately since our marking
      * and unwinding strategy is very simplistic for now (analogous to
-     * shadow stacks) we're going to have give lexical block in a frame
+     * shadow stacks) we're going to give each lexical block in a frame
      * its own space in the frame, even if they seem like they *should*
      * be able to reuse space. This makes it possible to arrive at the
      * frame and work out which variables are live (and which frame

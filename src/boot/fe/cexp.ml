@@ -4,27 +4,24 @@ open Token;;
 open Parser;;
 
 (* NB: cexps (crate-expressions / constant-expressions) are only used
- * transiently during compilation: they are the outermost
- * expression-language describing crate configuration and
- * constants. They are completely evaluated at compile-time, in a
- * little micro-interpreter defined here, with the results of
- * evaluation being the sequence of directives controlling the rest of
- * the compiler.
+ * transiently during compilation: they are the outermost expression-language
+ * describing crate configuration and constants. They are completely evaluated
+ * at compile-time, in a little micro-interpreter defined here, with the
+ * results of evaluation being the sequence of directives controlling the rest
+ * of the compiler.
  * 
  * Cexps, like pexps, do not escape the language front-end.
  * 
- * You can think of the AST as a statement-language called "item"
- * sandwiched between two expression-languages, "cexp" on the outside
- * and "pexp" on the inside. The front-end evaluates cexp on the
- * outside in order to get one big directive-list, evaluating those
- * parts of pexp that are directly used by cexp in passing, and
- * desugaring those remaining parts of pexp that are embedded within
- * the items of the directives.
+ * You can think of the AST as a statement-language called "item" sandwiched
+ * between two expression-languages, "cexp" on the outside and "pexp" on the
+ * inside. The front-end evaluates cexp on the outside in order to get one big
+ * directive-list, evaluating those parts of pexp that are directly used by
+ * cexp in passing, and desugaring those remaining parts of pexp that are
+ * embedded within the items of the directives.
  * 
- * The rest of the compiler only deals with the directives, which are
- * mostly just a set of containers for items. Items are what most of
- * AST describes ("most" because the type-grammar spans both items and
- * pexps).
+ * The rest of the compiler only deals with the directives, which are mostly
+ * just a set of containers for items. Items are what most of AST describes
+ * ("most" because the type-grammar spans both items and pexps).
  * 
  *)
 

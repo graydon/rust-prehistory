@@ -1,9 +1,3 @@
-/*
- * rust_chan.cpp
- *
- *  Created on: Jun 21, 2010
- *      Author:
- */
 
 #include "rust_internal.h"
 #include "rust_chan.h"

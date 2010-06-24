@@ -1154,7 +1154,7 @@ let trans_visitor
         (*
          * Note: this is wrong. This assumes our closure is a vtbl,
          * when in fact it is a pointer to a refcounted malloc slab
-         * containing an obj. Bleh.
+         * containing an obj.
          *)
       let closure_cell =
         deref (get_element_ptr self_indirect_args_cell
@@ -1961,7 +1961,7 @@ let trans_visitor
     let (fptr_operand, fn_ty) = trans_callee fn_lval in
     (*let fn_ty_params = [| |] in*)
     let _ =
-      (* FIXME: handle indirect-spawns (clone closure?). *)
+      (* FIXME: handle indirect-spawns (clone closure). *)
       if not (lval_is_direct_fn cx fn_lval)
       then bug () "unhandled indirect-spawn"
     in
@@ -3139,7 +3139,7 @@ let trans_visitor
                 match clone with
                     CLONE_none ->
                       (* 
-                       * FIXME: this won't work on write aliases, it
+                       * FIXME: this won't work on mutable aliases, it
                        * doesn't know to reload. Try something
                        * else.
                        *)
@@ -4283,7 +4283,7 @@ let trans_visitor
     let name = path_name () in
     let f =
       if Stack.is_empty curr_file
-      then bugi cx node "Missing file scope when capturing quads."
+      then bugi cx node "missing file scope when capturing quads."
       else Stack.top curr_file
     in
     let item_code = Hashtbl.find cx.ctxt_file_code f in

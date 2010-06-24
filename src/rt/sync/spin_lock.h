@@ -1,5 +1,5 @@
-#ifndef UNFAIRTICKETLOCK_H_
-#define UNFAIRTICKETLOCK_H_
+#ifndef UNFAIR_TICKET_LOCK_H
+#define UNFAIR_TICKET_LOCK_H
 
 class spin_lock {
     unsigned ticket;
@@ -11,4 +11,4 @@ public:
     void unlock();
 };
 
-#endif /* UNFAIRTICKETLOCK_H_ */
+#endif /* UNFAIR_TICKET_LOCK_H */

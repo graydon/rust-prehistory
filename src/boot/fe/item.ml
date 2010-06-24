@@ -491,45 +491,6 @@ and parse_stmts (ps:pstate) : Ast.stmt array =
           let stmts = expand_tags_to_stmts ps item in
             spans ps stmts apos (Ast.STMT_decl decl)
 
-      | LPAREN ->
-          let (lstmts, lvals) =
-            arj1st (ctxt "stmt: paren_copy_to_tup tup"
-                      (bracketed_one_or_more LPAREN RPAREN (Some COMMA)
-                         parse_lval) ps)
-          in
-          let _ = expect ps EQ in
-          let (estmts, atom) =
-            ctxt "stmt: paren_copy_to_tup rval" parse_expr_atom ps
-          in
-          let _ = expect ps SEMI in
-          let stmts = Array.append lstmts estmts in
-          let bpos = lexpos ps in
-            (*
-             * A little destructuring assignment sugar:
-             *
-             *   (a, b) = foo();
-             *
-             * desugars to:
-             *
-             *   auto t_n = foo();
-             *   a = t_n.{0};
-             *   b = t_n.{1};
-             *
-             *)
-
-          let (_, tmp, tempdecl) =
-            build_tmp ps slot_auto apos bpos in
-          let copy = span ps apos bpos
-            (Ast.STMT_copy (tmp, Ast.EXPR_atom atom)) in
-          let make_copy i dst =
-            let ext = Ast.COMP_named (Ast.COMP_idx i) in
-            let lval = Ast.LVAL_ext ((clone_lval ps tmp), ext) in
-            let e = Ast.EXPR_atom (Ast.ATOM_lval lval) in
-              span ps apos bpos (Ast.STMT_copy (dst, e))
-          in
-            let copies = Array.mapi make_copy lvals in
-              Array.concat [ stmts; [| tempdecl; copy |]; copies ]
-
       | _ ->
           let (lstmts, lval) = ctxt "stmt: lval" parse_lval ps in
             begin

@@ -330,7 +330,6 @@ let index_in_curr_iso (recur:recur_info) (node:node_id) : int option =
 
 let need_ty_tag t =
   match t with
-      (* FIXME: this is a bit of a hack, though honest. *)
       Ast.TY_tag ttag -> ttag
     | _ -> err None "needed ty_tag"
 ;;

@@ -388,7 +388,6 @@ let main_pipeline _ =
           exit_if_failed ()
 ;;
 
-(* And we're off! *)
 if sess.Session.sess_alt_backend
 then Glue.alt_pipeline sess sem_cx crate
 else main_pipeline ()

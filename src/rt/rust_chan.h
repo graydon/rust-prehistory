@@ -1,17 +1,11 @@
-/*
- * rust_chan.h
- *
- *  Created on: Jun 21, 2010
- *      Author:
- */
 
-#ifndef RUST_CHAN_H_
-#define RUST_CHAN_H_
+#ifndef RUST_CHAN_H
+#define RUST_CHAN_H
 
 class rust_chan : public rc_base<rust_chan>, public task_owned<rust_chan> {
 public:
-	rust_chan(rust_task *task, rust_port *port);
-	~rust_chan();
+    rust_chan(rust_task *task, rust_port *port);
+    ~rust_chan();
 
     rust_task *task;
     rust_port *port;
@@ -25,7 +19,4 @@ public:
     void disassociate();
 };
 
-#endif /* RUST_CHAN_H_ */
-
-
-
+#endif /* RUST_CHAN_H */

@@ -448,10 +448,10 @@ let macho_thread_command
       WORD (TY_u32, IMM 0x0L); (* ebp *)
       WORD (TY_u32, IMM 0x0L); (* esp *)
 
-      WORD (TY_u32, IMM 0x0L); (* ss *)
-      WORD (TY_u32, IMM 0x0L); (* eflags *)
-      WORD (TY_u32, M_POS entry); (* eip *)
-      WORD (TY_u32, IMM 0x0L); (* cs *)
+      WORD (TY_u32, IMM 0x0L);    (* ss     *)
+      WORD (TY_u32, IMM 0x0L);    (* eflags *)
+      WORD (TY_u32, M_POS entry); (* eip    *)
+      WORD (TY_u32, IMM 0x0L);    (* cs     *)
 
       WORD (TY_u32, IMM 0x0L); (* ds *)
       WORD (TY_u32, IMM 0x0L); (* es *)
@@ -678,7 +678,8 @@ let emit_file
       (Asm.note_rust_frags crate.node.Ast.crate_meta)
   in
 
-  (* Officially, Apple doesn't support DWARF sections like this. Whatever. *)
+  (* Officially Apple doesn't claim to support DWARF sections like this, but
+     they work. *)
   let debug_info_section =
     def_aligned data_sect_align
       sem.Semant.ctxt_debug_info_fixup
@@ -1073,11 +1074,6 @@ let emit_file
 
   let segments =
     SEQ [|
-      (* 
-       * Correct? Perhaps the OSX notion of image-base is the
-       * beginning of the text segment rather than the zero
-       * segment? 
-       *)
       DEF (sem.Semant.ctxt_image_base_fixup, MARK);
       zero_segment;
       text_segment;

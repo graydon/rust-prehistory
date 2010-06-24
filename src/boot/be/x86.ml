@@ -14,7 +14,7 @@
  *
  * We're not going to use sib, but modrm is worth discussing.
  *
- * The high two bits of modrm denote an operand "mode". The modes are:
+ * The high two bits of modrm denote an addressing mode. The modes are:
  *
  *   00 - "mostly" *(reg)
  *   01 - "mostly" *(reg) + disp8
@@ -477,22 +477,6 @@ let restore_callee_saves (e:Il.emitter) : unit =
     Il.emit e (Il.Pop (rc esi));
     Il.emit e (Il.Pop (rc edi));
     Il.emit e (Il.Pop (rc ebp));
-;;
-
-
-(* FIXME: check the order here *)
-let save_callee_saves_at (e:Il.emitter) (reg:Il.reg) : unit =
-    Il.emit e (Il.umov (word_n reg 3) (ro ebp));
-    Il.emit e (Il.umov (word_n reg 2) (ro edi));
-    Il.emit e (Il.umov (word_n reg 1) (ro esi));
-    Il.emit e (Il.umov (word_n reg 0) (ro ebx));
-;;
-
-let restore_callee_saves_at (e:Il.emitter) (reg:Il.reg) : unit =
-    Il.emit e (Il.umov (rc ebx) (c (word_n reg 0)));
-    Il.emit e (Il.umov (rc esi) (c (word_n reg 1)));
-    Il.emit e (Il.umov (rc edi) (c (word_n reg 2)));
-    Il.emit e (Il.umov (rc ebp) (c (word_n reg 3)));
 ;;
 
 

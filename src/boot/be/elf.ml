@@ -935,12 +935,13 @@ let elf32_linux_x86_file
   let section_header_table = SEQ section_headers in
 
 
-  (* There are 3 official program headers in the file we're making:   *)
+  (* There are 6 official program headers in the file we're making:   *)
   (* segment 0: RX / PHDR                                             *)
   (* segment 1: R  / INTERP                                           *)
   (* segment 2: RX / LOAD                                             *)
   (* segment 3: RW / LOAD                                             *)
   (* segment 4: RW / DYNAMIC                                          *)
+  (* segment 5: R                                                     *)
 
   let program_header_table_fixup = new_fixup "program header table" in
   let segment_0_fixup = new_fixup "segment 0" in

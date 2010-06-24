@@ -15,9 +15,9 @@ spin_lock::~spin_lock() {
 
 static inline unsigned xchg32(void *ptr, unsigned x) {
     __asm__ __volatile__("xchgl %0,%1"
-            :"=r" ((unsigned) x)
-            :"m" (*(volatile unsigned *)ptr), "0" (x)
-            :"memory");
+                :"=r" ((unsigned) x)
+                :"m" (*(volatile unsigned *)ptr), "0" (x)
+                :"memory");
     return x;
 }
 

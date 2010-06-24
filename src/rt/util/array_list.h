@@ -1,5 +1,5 @@
-#ifndef LIST_H
-#define LIST_H
+#ifndef ARRAY_LIST_H
+#define ARRAY_LIST_H
 
 /**
  * A simple, resizable array list.
@@ -66,4 +66,4 @@ template<typename T> T & array_list<T>::operator[](size_t index) {
     return _data[index];
 }
 
-#endif /* LIST_H */
+#endif /* ARRAY_LIST_H */

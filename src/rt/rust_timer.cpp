@@ -1,9 +1,9 @@
 
 #include "rust_internal.h"
 
-// The entire mechanism in this file is not at all optimal; every domain
-// (thread) spawns its own secondary timer thread, and that timer thread
-// *never idles*. It sleep-loops interrupting the domain.
+// The mechanism in this file is very crude; every domain (thread) spawns its
+// own secondary timer thread, and that timer thread *never idles*. It
+// sleep-loops interrupting the domain.
 //
 // This will need replacement, particularly in order to achieve an actual
 // state of idling when we're waiting on the outside world.  Though that might
@@ -44,7 +44,6 @@ win32_timer_loop(void *ptr)
 static void *
 pthread_timer_loop(void *ptr)
 {
-    // Disabling until tested on a posix machine.
     // We were handed the rust_timer that owns us.
     rust_timer *timer = (rust_timer *)ptr;
     rust_dom &dom(timer->dom);

@@ -105,26 +105,25 @@ and slot = { slot_mode: mode;
 
 and ty_tup = slot array
 
-(* In closed type terms a constraint may refer to components of the
- * term by anchoring off the "formal symbol" '*', which represents "the
- * term this constraint is attached to".
- *
- *
- * For example, if I have a tuple type (int,int), I may wish to enforce
- * the lt predicate on it; I can write this as a constrained type term
- * like:
- *
- * (int,int) : lt( *.{0}, *.{1} )
- *
+(* In closed type terms a constraint may refer to components of the term by
+ * anchoring off the "formal symbol" '*', which represents "the term this
+ * constraint is attached to".
+ * 
+ * 
+ * For example, if I have a tuple type tup(int,int), I may wish to enforce the
+ * lt predicate on it; I can write this as a constrained type term like:
+ * 
+ * tup(int,int) : lt( *._0, *._1 )
+ * 
  * In fact all tuple types are converted to this form for purpose of
  * type-compatibility testing; the argument tuple in a function
- *
+ * 
  * fn (int x, int y) : lt(x, y) -> int
- *
+ * 
  * desugars to
- *
- * fn ((int, int) : lt( *.{0}, *.{1} )) -> int
- *
+ * 
+ * fn (tup(int, int) : lt( *._1, *._2 )) -> int
+ * 
  *)
 
 and carg_base =
@@ -258,7 +257,7 @@ and stmt_decl =
 
 and stmt_alt_port =
     {
-      (* else lval is a timeout value, an f64 count of seconds. *)
+      (* else lval is a timeout value. *)
       alt_port_arms: (lval * lval) array;
       alt_port_else: (lval * stmt) option;
     }

@@ -185,7 +185,7 @@ attempt_transmission(rust_dom *dom,
     if (sender->blocked_on(token))
         sender->wakeup(token);
 
-    // Wakeup the receiver, there is new data.
+    // Wake up the receiver, there is new data.
     dst->wakeup(port);
 
     dom->log(rust_log::COMM, "transmission complete");
@@ -639,7 +639,7 @@ upcall_start_thread(rust_task *spawner,
                    (void *)root_task->dom);
 #endif
 
-    return 0; /* nil */
+    return 0;
 }
 
 //

@@ -1,5 +1,5 @@
-#ifndef LOCK_FREE_QUEUE_H_
-#define LOCK_FREE_QUEUE_H_
+#ifndef LOCK_FREE_QUEUE_H
+#define LOCK_FREE_QUEUE_H
 
 class lock_free_queue_node {
     lock_free_queue_node *next;
@@ -12,4 +12,4 @@ public:
     lock_free_queue_node *dequeue();
 };
 
-#endif /* LOCK_FREE_QUEUE_H_ */
+#endif /* LOCK_FREE_QUEUE_H */

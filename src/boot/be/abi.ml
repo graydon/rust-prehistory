@@ -7,7 +7,8 @@
  * Make some attempt to factor it as time goes by.
  *)
 
-(* Word offsets for structure fields in rust.h, and elsewhere in compiler. *)
+(* Word offsets for structure fields in rust-internal.h, and elsewhere in
+   compiler. *)
 
 let rc_base_field_refcnt = 0;;
 

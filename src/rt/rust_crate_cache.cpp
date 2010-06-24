@@ -7,7 +7,6 @@ rust_crate_cache::lib::lib(rust_dom *dom, char const *name)
 {
 #if defined(__WIN32__)
     handle = (uintptr_t)LoadLibrary(_T(name));
-    // dom->win32_require(_T("LoadLibrary"), handle != 0);
 #else
     handle = (uintptr_t)dlopen(name, RTLD_LOCAL|RTLD_LAZY);
 #endif
@@ -44,7 +43,6 @@ rust_crate_cache::c_sym::c_sym(rust_dom *dom, lib *library, char const *name)
     if (handle) {
 #if defined(__WIN32__)
         val = (uintptr_t)GetProcAddress((HMODULE)handle, _T(name));
-        // dom->win32_require(_T("GetProcAddress"), val != 0);
 #else
         val = (uintptr_t)dlsym((void*)handle, name);
 #endif

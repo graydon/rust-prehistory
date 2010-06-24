@@ -1,6 +1,6 @@
 (*
  * Walk crate and generate DWARF-3 records. This file might also go in
- * the me/ directory; it's half-middle-end, half-back-end. Debug info is
+ * the be/ directory; it's half-middle-end, half-back-end. Debug info is
  * like that.
  *
  * Some notes about DWARF:
@@ -1637,24 +1637,23 @@ let dwarf_visitor
            *
            * pad = (align - (off mod align)) mod align
            *
-           * abbreviations in the code below:
-           *
-           *     t1 =          (off mod align)
-           *     t2 =  align - (off mod align)
+           * In our case it's always a power of two, 
+           * so we can just do:
+           * 
+           * mask = align-1
+           * off += mask
+           * off &= ~mask
+           * 
            *)
             (sz_ops off) @ (sz_ops align) @
               [
-                DW_OP_over;           (* ... off align off        *)
-                DW_OP_over;           (* ... off align off align  *)
-                DW_OP_mod;            (* ... align off t1         *)
-                DW_OP_pick (IMM 2L);  (* ... align off t1 align   *)
-                DW_OP_swap;           (* ... align off align t1   *)
-                DW_OP_minus;          (* ... align off t2         *)
-                DW_OP_swap;           (* ... align t2 off         *)
-                DW_OP_rot;            (* ... off align t2         *)
-                DW_OP_swap;           (* ... off t2 align         *)
-                DW_OP_mod;            (* ... off pad              *)
-                DW_OP_plus;           (* ... aligned              *)
+                DW_OP_lit 1;          (* ... off align 1      *)
+                DW_OP_minus;          (* ... off mask         *)
+                DW_OP_dup;            (* ... off mask mask    *)
+                DW_OP_not;            (* ... off mask ~mask   *)
+                DW_OP_rot;            (* ... ~mask off mask   *)
+                DW_OP_plus;           (* ... ~mask (off+mask) *)
+                DW_OP_and;            (* ... aligned          *)
               ]
     in
     let ops = sz_ops sz in

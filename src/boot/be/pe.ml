@@ -2,9 +2,6 @@
 
    Module for writing Microsoft PE files
 
-   Notes
-   -----
-
    Every image has a base address it's to be loaded at.
 
    "file pointer" = offset in file

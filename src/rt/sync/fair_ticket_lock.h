@@ -1,5 +1,5 @@
-#ifndef FAIRTICKETLOCK_H_
-#define FAIRTICKETLOCK_H_
+#ifndef FAIR_TICKET_LOCK_H
+#define FAIR_TICKET_LOCK_H
 
 class fair_ticket_lock {
     unsigned next_ticket;
@@ -12,4 +12,4 @@ public:
     void unlock();
 };
 
-#endif /* FAIRTICKETLOCK_H_ */
+#endif /* FAIR_TICKET_LOCK_H */

@@ -1,5 +1,5 @@
-#ifndef RUST_H__
-#define RUST_H__
+#ifndef RUST_H
+#define RUST_H
 
 /*
  * Include this file after you've defined the ISO C9x stdint
@@ -16,8 +16,6 @@
 #else
 #define CDECL
 #endif
-
-struct rust_task;
 
 struct rust_srv {
     size_t live_allocs;
@@ -48,4 +46,4 @@ inline void *operator new(size_t size, rust_srv *srv)
  * End:
  */
 
-#endif /* RUST_H__ */
+#endif /* RUST_H */
