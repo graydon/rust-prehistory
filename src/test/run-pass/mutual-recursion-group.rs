@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 type colour = tag(red(), green(), blue());
 type tree = tag(children(@list), leaf(colour));

@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 fn main(vec[str] args) -> () {
   let int i = 0;

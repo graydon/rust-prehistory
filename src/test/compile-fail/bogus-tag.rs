@@ -1,4 +1,4 @@
-// -*- C -*-
+// -*- rust -*-
 
 type color = tag(
   rgb(int, int, int),
