@@ -70,18 +70,16 @@ shifts and is fleshed out in working code. Certain parts work, certain parts
 do not, certain parts will be removed or changed.
 
 This manual is a snapshot written in the present tense. Some features
-described do not yet exist in working code. Some may be temporary.
+described do not yet exist in working code. Some may be temporary. It
+is a @emph{draft}, and we ask that you not take anything you read here
+as either definitive or final. The manual is to help you get a sense
+of the language and its organization, not to serve as a complete
+specification. At least not yet.
 
 If you have suggestions to make, please try to focus them on @emph{reductions}
 to the language: possible features that can be combined or omitted. At this
 point, every ``additive'' feature we're likely to support is already on the
 table. The task ahead involves combining, trimming, and implementing.
-
-Thanks for your time.
-@flushright
-                                   - Graydon Hoare
-                                     June 2010
-@end flushright
 
 
 @c ############################################################
