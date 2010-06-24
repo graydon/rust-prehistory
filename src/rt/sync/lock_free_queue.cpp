@@ -5,10 +5,10 @@
  * dequeue() is not allowed to interrupt itself.
  */
 
-
 #include "lock_free_queue.h"
 
-lock_free_queue::lock_free_queue() : tail(this) {
+lock_free_queue::lock_free_queue() :
+    tail(this) {
 }
 
 void lock_free_queue::enqueue(lock_free_queue_node *item) {

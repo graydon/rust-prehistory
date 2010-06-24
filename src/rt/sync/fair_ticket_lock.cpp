@@ -11,7 +11,7 @@
 // #define TRACE
 
 fair_ticket_lock::fair_ticket_lock() {
-	next_ticket = now_serving = 0;
+    next_ticket = now_serving = 0;
 }
 
 fair_ticket_lock::~fair_ticket_lock() {
@@ -30,14 +30,14 @@ void fair_ticket_lock::lock() {
 }
 
 void fair_ticket_lock::unlock() {
-	now_serving ++;
+    now_serving++;
 #ifdef TRACE
-	printf("unlocked nextTicket: %d nowServing: %d",
-	        next_ticket, now_serving);
+    printf("unlocked nextTicket: %d nowServing: %d",
+            next_ticket, now_serving);
 #endif
 }
 
 void fair_ticket_lock::pause() {
-	asm volatile("pause\n" : : : "memory");
+    asm volatile("pause\n" : : : "memory");
 }
 
