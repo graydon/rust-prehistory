@@ -11,12 +11,12 @@ rust_crate_cache::lib::lib(rust_dom *dom, char const *name)
 #else
     handle = (uintptr_t)dlopen(name, RTLD_LOCAL|RTLD_LAZY);
 #endif
-    dom->log(LOG_CACHE, "loaded library '%s' as 0x%"  PRIxPTR,
+    dom->log(rust_log::CACHE, "loaded library '%s' as 0x%"  PRIxPTR,
              name, handle);
 }
 
 rust_crate_cache::lib::~lib() {
-    dom->log(LOG_CACHE, "~rust_crate_cache::lib(0x%" PRIxPTR ")",
+    dom->log(rust_log::CACHE, "~rust_crate_cache::lib(0x%" PRIxPTR ")",
              handle);
     if (handle) {
 #if defined(__WIN32__)
@@ -48,16 +48,17 @@ rust_crate_cache::c_sym::c_sym(rust_dom *dom, lib *library, char const *name)
 #else
         val = (uintptr_t)dlsym((void*)handle, name);
 #endif
-        dom->log(LOG_CACHE, "resolved symbol '%s' to 0x%"  PRIxPTR,
+        dom->log(rust_log::CACHE, "resolved symbol '%s' to 0x%"  PRIxPTR,
                  name, val);
     } else {
-        dom->log(LOG_CACHE, "unresolved symbol '%s', null lib handle",
+        dom->log(rust_log::CACHE, "unresolved symbol '%s', null lib handle",
                  name);
     }
 }
 
 rust_crate_cache::c_sym::~c_sym() {
-    dom->log(LOG_CACHE, "~rust_crate_cache::c_sym(0x%" PRIxPTR ")", val);
+    dom->log(rust_log::CACHE,
+            "~rust_crate_cache::c_sym(0x%" PRIxPTR ")", val);
     library->deref();
 }
 
@@ -80,7 +81,7 @@ rust_crate_cache::rust_sym::rust_sym(rust_dom *dom,
     typedef rust_crate_reader::die die;
     rust_crate const *crate = (rust_crate*)crate_sym->get_val();
     if (!crate) {
-        dom->log(LOG_CACHE,
+        dom->log(rust_log::CACHE,
                  "failed to resolve symbol, null crate symbol");
         return;
     }
@@ -98,14 +99,15 @@ rust_crate_cache::rust_sym::rust_sym(rust_dom *dom,
               && !t1.is_null()
               && t1.find_child_by_name(crate_rel(curr_crate, *c), t2));
              ++c, t1=t2) {
-            dom->log(LOG_DWARF|LOG_CACHE, "matched die <0x%"  PRIxPTR
-                     ">, child '%s' = die<0x%" PRIxPTR ">",
-                     t1.off, crate_rel(curr_crate, *c), t2.off);
+            dom->log(rust_log::DWARF|rust_log::CACHE,
+                    "matched die <0x%"  PRIxPTR
+                    ">, child '%s' = die<0x%" PRIxPTR ">",
+                    t1.off, crate_rel(curr_crate, *c), t2.off);
             found_root = found_root || true;
             if (!*(c+1) && t2.find_num_attr(DW_AT_low_pc, val)) {
-                dom->log(LOG_DWARF|LOG_CACHE,
+                dom->log(rust_log::DWARF|rust_log::CACHE,
                          "found relative address: 0x%"  PRIxPTR, val);
-                dom->log(LOG_DWARF|LOG_CACHE,
+                dom->log(rust_log::DWARF|rust_log::CACHE,
                          "plus image-base 0x%"  PRIxPTR,
                          crate->get_image_base());
                 val += crate->get_image_base();
@@ -117,14 +119,14 @@ rust_crate_cache::rust_sym::rust_sym(rust_dom *dom,
             break;
     }
     if (found_leaf) {
-        dom->log(LOG_CACHE, "resolved symbol to 0x%"  PRIxPTR, val);
+        dom->log(rust_log::CACHE, "resolved symbol to 0x%"  PRIxPTR, val);
     } else {
-        dom->log(LOG_CACHE, "failed to resolve symbol");
+        dom->log(rust_log::CACHE, "failed to resolve symbol");
     }
 }
 
 rust_crate_cache::rust_sym::~rust_sym() {
-    dom->log(LOG_CACHE,
+    dom->log(rust_log::CACHE,
              "~rust_crate_cache::rust_sym(0x%" PRIxPTR ")", val);
     crate_sym->deref();
 }
@@ -153,7 +155,7 @@ rust_crate_cache::get_c_sym(size_t n, lib *library, char const *name)
 {
     I(dom, n < crate->n_c_syms);
     c_sym *sym = c_syms[n];
-    dom->log(LOG_CACHE, "cached C symbol %s = 0x%" PRIxPTR, name, sym);
+    dom->log(rust_log::CACHE, "cached C symbol %s = 0x%" PRIxPTR, name, sym);
     if (!sym) {
         sym = new (dom) c_sym(dom, library, name);
         c_syms[n] = sym;
@@ -197,10 +199,10 @@ rust_crate_cache::get_type_desc(size_t size,
     size_t keysz = n_descs * sizeof(type_desc*);
     HASH_FIND(hh, this->type_descs, descs, keysz, td);
     if (td) {
-        dom->log(LOG_CACHE, "rust_crate_cache::get_type_desc hit");
+        dom->log(rust_log::CACHE, "rust_crate_cache::get_type_desc hit");
         return td;
     }
-    dom->log(LOG_CACHE, "rust_crate_cache::get_type_desc miss");
+    dom->log(rust_log::CACHE, "rust_crate_cache::get_type_desc miss");
     td = (type_desc*) dom->malloc(sizeof(type_desc) + keysz);
     if (!td)
         return NULL;
@@ -212,7 +214,7 @@ rust_crate_cache::get_type_desc(size_t size,
     td->size = size;
     td->align = align;
     for (size_t i = 0; i < n_descs; ++i) {
-        dom->log(LOG_CACHE,
+        dom->log(rust_log::CACHE,
                  "rust_crate_cache::descs[%" PRIdPTR "] = 0x%" PRIxPTR,
                  i, descs[i]);
         td->descs[i] = descs[i];
@@ -244,11 +246,12 @@ rust_crate_cache::rust_crate_cache(rust_dom *dom,
 
 void
 rust_crate_cache::flush() {
-    dom->log(LOG_CACHE, "rust_crate_cache::flush()");
+    dom->log(rust_log::CACHE, "rust_crate_cache::flush()");
     for (size_t i = 0; i < crate->n_rust_syms; ++i) {
         rust_sym *s = rust_syms[i];
         if (s) {
-            dom->log(LOG_CACHE, "rust_crate_cache::flush() deref rust_sym %"
+            dom->log(rust_log::CACHE,
+                     "rust_crate_cache::flush() deref rust_sym %"
                      PRIdPTR " (rc=%" PRIdPTR ")", i, s->refcnt);
             s->deref();
         }
@@ -258,7 +261,8 @@ rust_crate_cache::flush() {
     for (size_t i = 0; i < crate->n_c_syms; ++i) {
         c_sym *s = c_syms[i];
         if (s) {
-            dom->log(LOG_CACHE, "rust_crate_cache::flush() deref c_sym %"
+            dom->log(rust_log::CACHE,
+                     "rust_crate_cache::flush() deref c_sym %"
                      PRIdPTR " (rc=%" PRIdPTR ")", i, s->refcnt);
             s->deref();
         }
@@ -268,7 +272,7 @@ rust_crate_cache::flush() {
     for (size_t i = 0; i < crate->n_libs; ++i) {
         lib *l = libs[i];
         if (l) {
-            dom->log(LOG_CACHE, "rust_crate_cache::flush() deref lib %"
+            dom->log(rust_log::CACHE, "rust_crate_cache::flush() deref lib %"
                      PRIdPTR " (rc=%" PRIdPTR ")", i, l->refcnt);
             l->deref();
         }
@@ -278,7 +282,8 @@ rust_crate_cache::flush() {
     while (type_descs) {
         type_desc *d = type_descs;
         HASH_DEL(type_descs, d);
-        dom->log(LOG_MEM, "rust_crate_cache::flush() tydesc %" PRIxPTR, d);
+        dom->log(rust_log::MEM,
+                 "rust_crate_cache::flush() tydesc %" PRIxPTR, d);
         dom->free(d);
     }
 }

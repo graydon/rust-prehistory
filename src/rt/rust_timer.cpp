@@ -63,7 +63,7 @@ pthread_timer_loop(void *ptr)
 
 rust_timer::rust_timer(rust_dom &dom) : dom(dom), exit_flag(0)
 {
-    dom.log(LOG_TIMER, "creating timer for domain 0x%" PRIxPTR, &dom);
+    dom.log(rust_log::TIMER, "creating timer for domain 0x%" PRIxPTR, &dom);
 #if defined(__WIN32__)
     thread = CreateThread(NULL, 0, win32_timer_loop, this, 0, NULL);
     dom.win32_require("CreateThread", thread != NULL);

@@ -4,8 +4,7 @@
 /**
  * A simple, resizable array list.
  */
-template <typename T>
-class array_list {
+template <typename T> class array_list {
 	static const size_t INITIAL_CAPACITY = 8;
 	size_t _size;
 	T * _data;

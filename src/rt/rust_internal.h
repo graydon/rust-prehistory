@@ -15,6 +15,7 @@
 #include "rust.h"
 
 #include "rand.h"
+#include "rust_log.h"
 #include "uthash.h"
 
 #if defined(__WIN32__)
@@ -54,19 +55,6 @@ class lockfree_queue;
 struct stk_seg;
 struct type_desc;
 struct frame_glue_fns;
-
-static uint32_t const LOG_ALL = 0xffffffff;
-static uint32_t const LOG_ERR =        0x1;
-static uint32_t const LOG_MEM =        0x2;
-static uint32_t const LOG_COMM =       0x4;
-static uint32_t const LOG_TASK =       0x8;
-static uint32_t const LOG_UPCALL =    0x10;
-static uint32_t const LOG_DOM =       0x20;
-static uint32_t const LOG_ULOG =      0x40;
-static uint32_t const LOG_TRACE =     0x80;
-static uint32_t const LOG_DWARF =    0x100;
-static uint32_t const LOG_CACHE =    0x200;
-static uint32_t const LOG_TIMER =    0x400;
 
 // This drives our preemption scheme.
 
@@ -154,8 +142,9 @@ rust_dom
     // copy of this root_crate value and use it for finding utility
     // glue.
     rust_crate const *root_crate;
+    rust_log _log;
     rust_srv *srv;
-    uint32_t logbits;
+    // uint32_t logbits;
     ptr_vec<rust_task> running_tasks;
     ptr_vec<rust_task> blocked_tasks;
     ptr_vec<rust_task> dead_tasks;
@@ -165,6 +154,7 @@ rust_dom
     rust_task *curr_task;
     int rval;
     lockfree_queue *incoming; // incoming messages from other threads
+
 #ifndef __WIN32__
     pthread_attr_t attr;
 #endif
@@ -174,6 +164,7 @@ rust_dom
 
     void activate(rust_task *task);
     void log(uint32_t logbit, char const *fmt, ...);
+    rust_log & get_log();
     void logptr(char const *msg, uintptr_t ptrval);
     template<typename T>
     void logptr(char const *msg, T* ptrval);

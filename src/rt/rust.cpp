@@ -110,21 +110,23 @@ rust_main_loop(rust_dom *dom)
     int rval;
     rust_task *task;
 
-    dom->log(LOG_DOM, "running main-loop on domain 0x%" PRIxPTR, dom);
+    dom->log(rust_log::DOM,
+            "running main-loop on domain 0x%" PRIxPTR, dom);
     dom->logptr("exit-task glue",
-                dom->root_crate->get_exit_task_glue());
+            dom->root_crate->get_exit_task_glue());
 
     while ((task = dom->sched()) != NULL) {
         I(dom, task->running());
 
-        dom->log(LOG_TASK, "activating task 0x%" PRIxPTR ", sp=0x%" PRIxPTR,
-                 (uintptr_t)task, task->rust_sp);
+        dom->log(rust_log::TASK,
+                "activating task 0x%" PRIxPTR ", sp=0x%" PRIxPTR,
+                (uintptr_t)task, task->rust_sp);
 
         dom->interrupt_flag = 0;
 
         dom->activate(task);
 
-        dom->log(LOG_TASK,
+        dom->log(rust_log::TASK,
                  "returned from task 0x%" PRIxPTR
                  " in state '%s', sp=0x%" PRIxPTR,
                  (uintptr_t)task,
@@ -137,7 +139,7 @@ rust_main_loop(rust_dom *dom)
         dom->reap_dead_tasks();
     }
 
-    dom->log(LOG_DOM, "finished main-loop (dom.rval = %d)", dom->rval);
+    dom->log(rust_log::DOM, "finished main-loop (dom.rval = %d)", dom->rval);
     rval = dom->rval;
 
     return rval;
@@ -225,11 +227,12 @@ rust_start(uintptr_t main_fn, rust_crate const *crate, int argc, char **argv)
         rust_dom dom(&srv, crate);
         command_line_args args(dom, argc, argv);
 
-        dom.log(LOG_DOM, "startup: %d args", args.argc);
+        dom.log(rust_log::DOM, "startup: %d args", args.argc);
         for (int i = 0; i < args.argc; ++i)
-            dom.log(LOG_DOM, "startup: arg[%d] = '%s'", i, args.argv[i]);
+            dom.log(rust_log::DOM,
+                    "startup: arg[%d] = '%s'", i, args.argv[i]);
 
-        if (dom.logbits & LOG_DWARF) {
+        if (dom._log.is_tracing(rust_log::DWARF)) {
             rust_crate_reader rdr(&dom, crate);
         }
 

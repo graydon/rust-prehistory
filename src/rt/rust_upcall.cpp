@@ -6,15 +6,18 @@
 
 #ifdef __GNUC__
 #define LOG_UPCALL_ENTRY(task)                              \
-    (task)->dom->log(LOG_UPCALL,                            \
+    (task)->dom->get_log().reset_indent(0);                 \
+    (task)->dom->log(rust_log::UPCALL,                      \
                      "upcall task: 0x%" PRIxPTR             \
                      " retpc: 0x%" PRIxPTR,                 \
-                     (task), __builtin_return_address(0))
+                     (task), __builtin_return_address(0));  \
+    (task)->dom->get_log().indent();
 #else
-#define LOG_UPCALL_ENTRY(task)                  \
-    (task)->dom->log(LOG_UPCALL,                \
-                     "upcall task: 0x%" PRIxPTR \
-                     (task))
+#define LOG_UPCALL_ENTRY(task)                              \
+    (task)->dom->get_log().reset_indent(0);                 \
+    (task)->dom->log(rust_log::UPCALL,                      \
+                     "upcall task: 0x%" PRIxPTR (task));    \
+    (task)->dom->get_log().indent();
 #endif
 
 extern "C" CDECL char const *str_buf(rust_task *task, rust_str *s);
@@ -30,7 +33,7 @@ extern "C" CDECL void
 upcall_log_int(rust_task *task, int32_t i)
 {
     LOG_UPCALL_ENTRY(task);
-    task->dom->log(LOG_UPCALL|LOG_ULOG,
+    task->dom->log(rust_log::UPCALL|rust_log::ULOG,
                    "upcall log_int(0x%" PRIx32 " = %" PRId32 " = '%c')",
                    i, i, (char)i);
 }
@@ -40,7 +43,7 @@ upcall_log_str(rust_task *task, rust_str *str)
 {
     LOG_UPCALL_ENTRY(task);
     const char *c = str_buf(task, str);
-    task->dom->log(LOG_UPCALL|LOG_ULOG,
+    task->dom->log(rust_log::UPCALL|rust_log::ULOG,
                    "upcall log_str(\"%s\")",
                    c);
 }
@@ -49,7 +52,7 @@ extern "C" CDECL void
 upcall_trace_word(rust_task *task, uintptr_t i)
 {
     LOG_UPCALL_ENTRY(task);
-    task->dom->log(LOG_UPCALL|LOG_TRACE,
+    task->dom->log(rust_log::UPCALL|rust_log::TRACE,
                    "trace: 0x%" PRIxPTR "",
                    i, i, (char)i);
 }
@@ -58,7 +61,7 @@ extern "C" CDECL void
 upcall_trace_str(rust_task *task, char const *c)
 {
     LOG_UPCALL_ENTRY(task);
-    task->dom->log(LOG_UPCALL|LOG_TRACE,
+    task->dom->log(rust_log::UPCALL|rust_log::TRACE,
                    "trace: %s",
                    c);
 }
@@ -68,7 +71,7 @@ upcall_new_port(rust_task *task, size_t unit_sz)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+    dom->log(rust_log::UPCALL|rust_log::MEM|rust_log::COMM,
              "upcall_new_port(task=0x%" PRIxPTR ", unit_sz=%d)",
              (uintptr_t)task, unit_sz);
     return new (dom) rust_port(task, unit_sz);
@@ -78,7 +81,7 @@ extern "C" CDECL void
 upcall_del_port(rust_task *task, rust_port *port)
 {
     LOG_UPCALL_ENTRY(task);
-    task->dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+    task->dom->log(rust_log::UPCALL|rust_log::MEM|rust_log::COMM,
                    "upcall del_port(0x%" PRIxPTR ")", (uintptr_t)port);
     I(task->dom, !port->refcnt);
     delete port;
@@ -89,7 +92,7 @@ upcall_new_chan(rust_task *task, rust_port *port)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+    dom->log(rust_log::UPCALL|rust_log::MEM|rust_log::COMM,
              "upcall_new_chan(task=0x%" PRIxPTR ", port=0x%" PRIxPTR ")",
              (uintptr_t)task, port);
     I(dom, port);
@@ -101,7 +104,7 @@ upcall_del_chan(rust_task *task, rust_chan *chan)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+    dom->log(rust_log::UPCALL|rust_log::MEM|rust_log::COMM,
              "upcall del_chan(0x%" PRIxPTR ")", (uintptr_t)chan);
     I(dom, !chan->refcnt);
     delete chan;
@@ -112,7 +115,7 @@ upcall_clone_chan(rust_task *task, rust_task *owner, rust_chan *chan)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_MEM|LOG_COMM,
+    dom->log(rust_log::UPCALL|rust_log::MEM|rust_log::COMM,
              "upcall clone_chan(owner 0x%" PRIxPTR ", chan 0x%" PRIxPTR ")",
              (uintptr_t)owner, (uintptr_t)chan);
     return new (owner->dom) rust_chan(owner, chan->port);
@@ -151,26 +154,26 @@ attempt_transmission(rust_dom *dom,
 
     rust_port *port = src->port;
     if (!port) {
-        dom->log(LOG_COMM,
+        dom->log(rust_log::COMM,
                  "src died, transmission incomplete");
         return 0;
     }
 
     circ_buf *buf = &src->buffer;
     if (buf->unread == 0) {
-        dom->log(LOG_COMM,
+        dom->log(rust_log::COMM,
                  "buffer empty, transmission incomplete");
         return 0;
     }
 
     if (!dst->blocked_on(port)) {
-        dom->log(LOG_COMM,
+        dom->log(rust_log::COMM,
                  "dst in non-reading state, transmission incomplete");
         return 0;
     }
 
     uintptr_t *dptr = dst->dptr;
-    dom->log(LOG_COMM,
+    dom->log(rust_log::COMM,
              "receiving %d bytes into dst_task=0x%" PRIxPTR
              ", dptr=0x%" PRIxPTR,
              port->unit_sz, dst, dptr);
@@ -185,7 +188,7 @@ attempt_transmission(rust_dom *dom,
     // Wakeup the receiver, there is new data.
     dst->wakeup(port);
 
-    dom->log(LOG_COMM, "transmission complete");
+    dom->log(rust_log::COMM, "transmission complete");
     return 1;
 }
 
@@ -194,7 +197,7 @@ upcall_yield(rust_task *task)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_COMM, "upcall yield()");
+    dom->log(rust_log::UPCALL|rust_log::COMM, "upcall yield()");
     task->yield(1);
 }
 
@@ -203,7 +206,7 @@ upcall_join(rust_task *task, rust_task *other)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_COMM,
+    dom->log(rust_log::UPCALL|rust_log::COMM,
              "upcall join(other=0x%" PRIxPTR ")",
              (uintptr_t)other);
 
@@ -220,7 +223,7 @@ upcall_send(rust_task *task, rust_chan *chan, void *sptr)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_COMM,
+    dom->log(rust_log::UPCALL|rust_log::COMM,
              "upcall send(chan=0x%" PRIxPTR ", sptr=0x%" PRIxPTR ")",
              (uintptr_t)chan,
              (uintptr_t)sptr);
@@ -229,12 +232,12 @@ upcall_send(rust_task *task, rust_chan *chan, void *sptr)
     I(dom, sptr);
 
     rust_port *port = chan->port;
-    dom->log(LOG_MEM|LOG_COMM,
+    dom->log(rust_log::MEM|rust_log::COMM,
              "send to port", (uintptr_t)port);
     I(dom, port);
 
     rust_token *token = &chan->token;
-    dom->log(LOG_MEM|LOG_COMM,
+    dom->log(rust_log::MEM|rust_log::COMM,
              "sending via token 0x%" PRIxPTR,
              (uintptr_t)token);
 
@@ -245,7 +248,7 @@ upcall_send(rust_task *task, rust_chan *chan, void *sptr)
         if (chan->buffer.unread && !token->pending())
             token->submit();
     } else {
-        dom->log(LOG_COMM|LOG_ERR,
+        dom->log(rust_log::COMM|rust_log::ERR,
                  "port has no task (possibly throw?)");
     }
 
@@ -258,7 +261,7 @@ upcall_recv(rust_task *task, uintptr_t *dptr, rust_port *port)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_COMM,
+    dom->log(rust_log::UPCALL|rust_log::COMM,
              "upcall recv(dptr=0x" PRIxPTR ", port=0x%" PRIxPTR ")",
              (uintptr_t)dptr,
              (uintptr_t)port);
@@ -279,7 +282,7 @@ upcall_recv(rust_task *task, uintptr_t *dptr, rust_port *port)
         if (attempt_transmission(dom, chan, task))
             token->withdraw();
     } else {
-        dom->log(LOG_COMM,
+        dom->log(rust_log::COMM,
                  "no writers sending to port", (uintptr_t)port);
     }
 
@@ -293,7 +296,8 @@ extern "C" CDECL void
 upcall_fail(rust_task *task, char const *expr, char const *file, size_t line)
 {
     LOG_UPCALL_ENTRY(task);
-    task->dom->log(LOG_UPCALL|LOG_ERR, "upcall fail '%s', %s:%" PRIdPTR,
+    task->dom->log(rust_log::UPCALL|rust_log::ERR,
+                   "upcall fail '%s', %s:%" PRIdPTR,
                    expr, file, line);
     task->fail(4);
 }
@@ -302,8 +306,8 @@ extern "C" CDECL void
 upcall_kill(rust_task *task, rust_task *target)
 {
     LOG_UPCALL_ENTRY(task);
-    task->dom->log(LOG_UPCALL|LOG_TASK,
-            "upcall kill target=0x%" PRIxPTR, target);
+    task->dom->log(rust_log::UPCALL|rust_log::TASK,
+                   "upcall kill target=0x%" PRIxPTR, target);
     target->kill();
 }
 
@@ -313,7 +317,7 @@ upcall_exit(rust_task *task)
     LOG_UPCALL_ENTRY(task);
 
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_TASK, "upcall exit");
+    dom->log(rust_log::UPCALL|rust_log::TASK, "upcall exit");
     task->die();
     task->notify_waiting_tasks();
     task->yield(1);
@@ -325,7 +329,7 @@ upcall_malloc(rust_task *task, size_t nbytes)
     LOG_UPCALL_ENTRY(task);
 
     void *p = task->dom->malloc(nbytes);
-    task->dom->log(LOG_UPCALL|LOG_MEM,
+    task->dom->log(rust_log::UPCALL|rust_log::MEM,
                    "upcall malloc(%u) = 0x%" PRIxPTR,
                    nbytes, (uintptr_t)p);
     return (uintptr_t) p;
@@ -337,7 +341,7 @@ upcall_free(rust_task *task, void* ptr)
     LOG_UPCALL_ENTRY(task);
 
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_MEM,
+    dom->log(rust_log::UPCALL|rust_log::MEM,
              "upcall free(0x%" PRIxPTR ")",
              (uintptr_t)ptr);
     dom->free(ptr);
@@ -348,7 +352,7 @@ upcall_new_str(rust_task *task, char const *s, size_t fill)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_MEM,
+    dom->log(rust_log::UPCALL|rust_log::MEM,
              "upcall new_str('%s', %" PRIdPTR ")", s, fill);
     size_t alloc = next_power_of_two(sizeof(rust_str) + fill);
     void *mem = dom->malloc(alloc);
@@ -357,7 +361,7 @@ upcall_new_str(rust_task *task, char const *s, size_t fill)
         return NULL;
     }
     rust_str *st = new (mem) rust_str(dom, alloc, fill, (uint8_t const *)s);
-    dom->log(LOG_UPCALL|LOG_MEM,
+    dom->log(rust_log::UPCALL|rust_log::MEM,
              "upcall new_str('%s', %" PRIdPTR ") = 0x%" PRIxPTR,
              s, fill, st);
     return st;
@@ -368,7 +372,7 @@ upcall_new_vec(rust_task *task, size_t fill)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_MEM,
+    dom->log(rust_log::UPCALL|rust_log::MEM,
              "upcall new_vec(%" PRIdPTR ")", fill);
     size_t alloc = next_power_of_two(sizeof(rust_vec) + fill);
     void *mem = dom->malloc(alloc);
@@ -377,7 +381,7 @@ upcall_new_vec(rust_task *task, size_t fill)
         return NULL;
     }
     rust_vec *v = new (mem) rust_vec(dom, alloc, 0, NULL);
-    dom->log(LOG_UPCALL|LOG_MEM,
+    dom->log(rust_log::UPCALL|rust_log::MEM,
              "upcall new_vec(%" PRIdPTR ") = 0x%" PRIxPTR,
              fill, v);
     return v;
@@ -389,19 +393,19 @@ upcall_vec_grow(rust_task *task, rust_vec *v, size_t n_bytes)
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_MEM,
+    dom->log(rust_log::UPCALL|rust_log::MEM,
              "upcall vec_grow(%" PRIxPTR ", %" PRIdPTR ")", v, n_bytes);
     size_t alloc = next_power_of_two(sizeof(rust_vec) + v->fill + n_bytes);
     if (v->refcnt == 1) {
 
         // Fastest path: already large enough.
         if (v->alloc >= alloc) {
-            dom->log(LOG_UPCALL|LOG_MEM, "no-growth path");
+            dom->log(rust_log::UPCALL|rust_log::MEM, "no-growth path");
             return v;
         }
 
         // Second-fastest path: can at least realloc.
-        dom->log(LOG_UPCALL|LOG_MEM, "realloc path");
+        dom->log(rust_log::UPCALL|rust_log::MEM, "realloc path");
         v = (rust_vec*)dom->realloc(v, alloc);
         if (!v) {
             task->fail(3);
@@ -411,7 +415,7 @@ upcall_vec_grow(rust_task *task, rust_vec *v, size_t n_bytes)
 
     } else {
         // Slowest path: make a new vec.
-        dom->log(LOG_UPCALL|LOG_MEM, "new vec path");
+        dom->log(rust_log::UPCALL|rust_log::MEM, "new vec path");
         void *mem = dom->malloc(alloc);
         if (!mem) {
             task->fail(3);
@@ -450,7 +454,7 @@ upcall_require_rust_sym(rust_task *task,
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
 
-    dom->log(LOG_UPCALL|LOG_CACHE,
+    dom->log(rust_log::UPCALL|rust_log::CACHE,
              "upcall require rust sym: lib #%" PRIdPTR
              " = %s, c_sym #%" PRIdPTR
              ", rust_sym #%" PRIdPTR
@@ -458,25 +462,26 @@ upcall_require_rust_sym(rust_task *task,
              lib_num, library, c_sym_num, rust_sym_num,
              curr_crate);
     for (char const **c = crate_rel(curr_crate, path); *c; ++c) {
-        dom->log(LOG_UPCALL, " + %s", crate_rel(curr_crate, *c));
+        dom->log(rust_log::UPCALL, " + %s", crate_rel(curr_crate, *c));
     }
 
-    dom->log(LOG_UPCALL|LOG_CACHE,
+    dom->log(rust_log::UPCALL|rust_log::CACHE,
              "require C symbol 'rust_crate' from lib #%" PRIdPTR,lib_num);
     rust_crate_cache::c_sym *c =
         fetch_c_sym(task, curr_crate, lib_num, c_sym_num,
                     library, "rust_crate");
 
-    dom->log(LOG_UPCALL|LOG_CACHE, "require rust symbol inside crate");
+    dom->log(rust_log::UPCALL|rust_log::CACHE,
+             "require rust symbol inside crate");
     rust_crate_cache::rust_sym *s =
         task->cache->get_rust_sym(rust_sym_num, dom, curr_crate, c, path);
 
     uintptr_t addr = s->get_val();
     if (addr) {
-        dom->log(LOG_UPCALL|LOG_CACHE,
+        dom->log(rust_log::UPCALL|rust_log::CACHE,
                  "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
-        dom->log(LOG_UPCALL|LOG_CACHE,
+        dom->log(rust_log::UPCALL|rust_log::CACHE,
                  "failed to resolve symbol");
         task->fail(7);
     }
@@ -494,7 +499,7 @@ upcall_require_c_sym(rust_task *task,
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
 
-    dom->log(LOG_UPCALL|LOG_CACHE,
+    dom->log(rust_log::UPCALL|rust_log::CACHE,
              "upcall require c sym: lib #%" PRIdPTR
              " = %s, c_sym #%" PRIdPTR
              " = %s"
@@ -506,10 +511,10 @@ upcall_require_c_sym(rust_task *task,
 
     uintptr_t addr = c->get_val();
     if (addr) {
-        dom->log(LOG_UPCALL|LOG_CACHE,
+        dom->log(rust_log::UPCALL|rust_log::CACHE,
                  "found-or-cached addr: 0x%" PRIxPTR, addr);
     } else {
-        dom->log(LOG_UPCALL|LOG_CACHE,
+        dom->log(rust_log::UPCALL|rust_log::CACHE,
                  "failed to resolve symbol");
         task->fail(6);
     }
@@ -526,13 +531,14 @@ upcall_get_type_desc(rust_task *task,
 {
     LOG_UPCALL_ENTRY(task);
     rust_dom *dom = task->dom;
-    dom->log(LOG_UPCALL|LOG_CACHE,
+    dom->log(rust_log::UPCALL|rust_log::CACHE,
              "upcall get_type_desc with size=%" PRIdPTR
              ", align=%" PRIdPTR ", %" PRIdPTR " descs",
              size, align, n_descs);
     rust_crate_cache *cache = task->get_crate_cache(curr_crate);
     type_desc *td = cache->get_type_desc(size, align, n_descs, descs);
-    dom->log(LOG_UPCALL|LOG_CACHE, "returning tydesc 0x%" PRIxPTR, td);
+    dom->log(rust_log::UPCALL|rust_log::CACHE,
+             "returning tydesc 0x%" PRIxPTR, td);
     return td;
 }
 
@@ -565,7 +571,7 @@ upcall_new_task(rust_task *spawner)
 
     rust_dom *dom = spawner->dom;
     rust_task *task = new (dom) rust_task(dom, spawner);
-    dom->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+    dom->log(rust_log::UPCALL|rust_log::MEM|rust_log::TASK,
              "upcall new_task(spawner 0x%" PRIxPTR ") = 0x%" PRIxPTR,
              spawner, task);
     return task;
@@ -581,7 +587,7 @@ upcall_start_task(rust_task *spawner,
     LOG_UPCALL_ENTRY(spawner);
 
     rust_dom *dom = spawner->dom;
-    dom->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+    dom->log(rust_log::UPCALL|rust_log::MEM|rust_log::TASK,
              "upcall start_task(task 0x%" PRIxPTR
              " exit_task_glue 0x%" PRIxPTR
              ", spawnee 0x%" PRIxPTR
@@ -599,7 +605,7 @@ upcall_new_thread(rust_task *task)
     rust_dom *old_dom = task->dom;
     rust_dom *new_dom = new rust_dom(old_dom->srv->clone(),
                                      old_dom->root_crate);
-    new_dom->log(LOG_UPCALL|LOG_MEM,
+    new_dom->log(rust_log::UPCALL|rust_log::MEM,
                  "upcall new_thread() = 0x%" PRIxPTR,
                  new_dom->root_task);
     return new_dom->root_task;
@@ -615,7 +621,7 @@ upcall_start_thread(rust_task *spawner,
     LOG_UPCALL_ENTRY(spawner);
 
     rust_dom *dom = spawner->dom;
-    dom->log(LOG_UPCALL|LOG_MEM|LOG_TASK,
+    dom->log(rust_log::UPCALL|rust_log::MEM|rust_log::TASK,
              "upcall start_thread(exit_task_glue 0x%" PRIxPTR
              ", spawnee 0x%" PRIxPTR
              ", callsz %" PRIdPTR ")",

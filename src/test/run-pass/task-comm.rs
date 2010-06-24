@@ -19,7 +19,7 @@ io fn test00_start(chan[int] ch, int message, int count) {
 }
 
 io fn test00(bool is_multithreaded) {
-    let int number_of_tasks = 1;
+    let int number_of_tasks = 4;
     let int number_of_messages = 64;
     log "Creating tasks";
     

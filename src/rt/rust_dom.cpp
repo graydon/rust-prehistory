@@ -4,46 +4,11 @@
 
 template class ptr_vec<rust_task>;
 
-static uint32_t
-get_logbits()
-{
-    uint32_t bits = LOG_ULOG|LOG_ERR;
-    char *c = getenv("RUST_LOG");
-    if (c) {
-        bits = 0;
-        if (strstr(c, "err"))
-            bits |= LOG_ERR;
-        if (strstr(c, "mem"))
-            bits |= LOG_MEM;
-        if (strstr(c, "comm"))
-            bits |= LOG_COMM;
-        if (strstr(c, "task"))
-            bits |= LOG_TASK;
-        if (strstr(c, "up"))
-            bits |= LOG_UPCALL;
-        if (strstr(c, "dom"))
-            bits |= LOG_DOM;
-        if (strstr(c, "ulog"))
-            bits |= LOG_ULOG;
-        if (strstr(c, "trace"))
-            bits |= LOG_TRACE;
-        if (strstr(c, "dwarf"))
-            bits |= LOG_DWARF;
-        if (strstr(c, "cache"))
-            bits |= LOG_CACHE;
-        if (strstr(c, "timer"))
-            bits |= LOG_TIMER;
-        if (strstr(c, "all"))
-            bits = 0xffffffff;
-    }
-    return bits;
-}
-
 rust_dom::rust_dom(rust_srv *srv, rust_crate const *root_crate) :
     interrupt_flag(0),
     root_crate(root_crate),
+    _log(srv, this),
     srv(srv),
-    logbits(get_logbits()),
     running_tasks(this),
     blocked_tasks(this),
     dead_tasks(this),
@@ -89,17 +54,17 @@ static void
 del_all_tasks(rust_dom *dom, ptr_vec<rust_task> *v) {
     I(dom, v);
     while (v->length()) {
-        dom->log(LOG_TASK, "deleting task %" PRIdPTR, v->length() - 1);
+        dom->log(rust_log::TASK, "deleting task %" PRIdPTR, v->length() - 1);
         delete v->pop();
     }
 }
 
 rust_dom::~rust_dom() {
-    log(LOG_TASK, "deleting all running tasks");
+    log(rust_log::TASK, "deleting all running tasks");
     del_all_tasks(this, &running_tasks);
-    log(LOG_TASK, "deleting all blocked tasks");
+    log(rust_log::TASK, "deleting all blocked tasks");
     del_all_tasks(this, &blocked_tasks);
-    log(LOG_TASK, "deleting all dead tasks");
+    log(rust_log::TASK, "deleting all dead tasks");
     del_all_tasks(this, &dead_tasks);
 #ifndef __WIN32__
     pthread_attr_destroy(&attr);
@@ -116,31 +81,36 @@ rust_dom::activate(rust_task *task) {
 }
 
 void
-rust_dom::log(uint32_t logbit, char const *fmt, ...) {
+rust_dom::log(uint32_t type_bits, char const *fmt, ...) {
     char buf[256];
-    if (logbits & logbit) {
+    if (_log.is_tracing(type_bits)) {
         va_list args;
         va_start(args, fmt);
         vsnprintf(buf, sizeof(buf), fmt, args);
-        srv->log(buf);
+        _log.trace_ln(type_bits, buf);
         va_end(args);
     }
 }
 
+rust_log &
+rust_dom::get_log() {
+    return _log;
+}
+
 void
 rust_dom::logptr(char const *msg, uintptr_t ptrval) {
-    log(LOG_MEM, "%s 0x%" PRIxPTR, msg, ptrval);
+    log(rust_log::MEM, "%s 0x%" PRIxPTR, msg, ptrval);
 }
 
 template<typename T> void
 rust_dom::logptr(char const *msg, T* ptrval) {
-    log(LOG_MEM, "%s 0x%" PRIxPTR, msg, (uintptr_t)ptrval);
+    log(rust_log::MEM, "%s 0x%" PRIxPTR, msg, (uintptr_t)ptrval);
 }
 
 
 void
 rust_dom::fail() {
-    log(LOG_DOM, "domain 0x%" PRIxPTR " root task failed", this);
+    log(rust_log::DOM, "domain 0x%" PRIxPTR " root task failed", this);
     I(this, rval == 0);
     rval = 1;
 }
@@ -149,7 +119,7 @@ void *
 rust_dom::malloc(size_t sz) {
     void *p = srv->malloc(sz);
     I(this, p);
-    log(LOG_MEM, "rust_dom::malloc(%d) -> 0x%" PRIxPTR,
+    log(rust_log::MEM, "rust_dom::malloc(%d) -> 0x%" PRIxPTR,
         sz, p);
     return p;
 }
@@ -165,14 +135,14 @@ void *
 rust_dom::realloc(void *p, size_t sz) {
     void *p1 = srv->realloc(p, sz);
     I(this, p1);
-    log(LOG_MEM, "rust_dom::realloc(0x%" PRIxPTR ", %d) -> 0x%" PRIxPTR,
+    log(rust_log::MEM, "rust_dom::realloc(0x%" PRIxPTR ", %d) -> 0x%" PRIxPTR,
         p, sz, p1);
     return p1;
 }
 
 void
 rust_dom::free(void *p) {
-    log(LOG_MEM, "rust_dom::free(0x%" PRIxPTR ")", p);
+    log(rust_log::MEM, "rust_dom::free(0x%" PRIxPTR ")", p);
     I(this, p);
     srv->free(p);
 }
@@ -189,7 +159,7 @@ rust_dom::win32_require(LPCTSTR fn, BOOL ok) {
                       NULL, err,
                       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                       (LPTSTR) &buf, 0, NULL );
-        log(LOG_ERR, "%s failed with error %ld: %s", fn, err, buf);
+        log(rust_log::ERR, "%s failed with error %ld: %s", fn, err, buf);
         LocalFree((HLOCAL)buf);
         I(this, ok);
     }
@@ -205,7 +175,7 @@ rust_dom::n_live_tasks()
 void
 rust_dom::add_task_to_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 {
-    log(LOG_MEM|LOG_TASK,
+    log(rust_log::MEM|rust_log::TASK,
         "adding task 0x%" PRIxPTR " in state '%s' to vec 0x%" PRIxPTR,
         (uintptr_t)task, state_vec_name(v), (uintptr_t)v);
     v->push(task);
@@ -215,7 +185,7 @@ rust_dom::add_task_to_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 void
 rust_dom::remove_task_from_state_vec(ptr_vec<rust_task> *v, rust_task *task)
 {
-    log(LOG_MEM|LOG_TASK,
+    log(rust_log::MEM|rust_log::TASK,
         "removing task 0x%" PRIxPTR " in state '%s' from vec 0x%" PRIxPTR,
         (uintptr_t)task, state_vec_name(v), (uintptr_t)v);
     I(this, (*v)[task->idx] == task);
@@ -241,7 +211,8 @@ rust_dom::reap_dead_tasks()
         if (t == root_task || t->refcnt == 0) {
             I(this, !t->waiting_tasks.length());
             dead_tasks.swapdel(t);
-            log(LOG_TASK, "deleting unreferenced dead task 0x%" PRIxPTR, t);
+            log(rust_log::TASK,
+                "deleting unreferenced dead task 0x%" PRIxPTR, t);
             delete t;
             continue;
         }
@@ -260,14 +231,15 @@ rust_dom::sched()
         i %= running_tasks.length();
         return (rust_task *)running_tasks[i];
     }
-    log(LOG_DOM|LOG_TASK,
+    log(rust_log::DOM|rust_log::TASK,
         "no schedulable tasks");
     return NULL;
 }
 
 rust_crate_cache *
 rust_dom::get_cache(rust_crate const *crate) {
-    log(LOG_CACHE, "looking for crate-cache for crate 0x%" PRIxPTR, crate);
+    log(rust_log::CACHE,
+        "looking for crate-cache for crate 0x%" PRIxPTR, crate);
     rust_crate_cache *cache = NULL;
     for (size_t i = 0; i < caches.length(); ++i) {
         rust_crate_cache *c = caches[i];
@@ -277,7 +249,8 @@ rust_dom::get_cache(rust_crate const *crate) {
         }
     }
     if (!cache) {
-        log(LOG_CACHE, "making new crate-cache for crate 0x%" PRIxPTR, crate);
+        log(rust_log::CACHE,
+            "making new crate-cache for crate 0x%" PRIxPTR, crate);
         cache = new (this) rust_crate_cache(this, crate);
         caches.push(cache);
     }

@@ -2,10 +2,8 @@
    our-failure-to-setup-freeres-structure
    Memcheck:Free
    fun:free
-   obj:*
+   ...
    fun:_vgnU_freeres
-   fun:_Exit
-   fun:exit
 }
 
 {

@@ -22,7 +22,7 @@ circ_buf::circ_buf(rust_dom *dom, size_t unit_sz) :
     data((uint8_t *)dom->calloc(alloc))
 {
     I(dom, unit_sz);
-    dom->log(LOG_MEM|LOG_COMM,
+    dom->log(rust_log::MEM|rust_log::COMM,
              "new circ_buf(alloc=%d, unread=%d) -> circ_buf=0x%" PRIxPTR,
              alloc, unread, this);
     I(dom, data);
@@ -30,7 +30,7 @@ circ_buf::circ_buf(rust_dom *dom, size_t unit_sz) :
 
 circ_buf::~circ_buf()
 {
-    dom->log(LOG_MEM|LOG_COMM,
+    dom->log(rust_log::MEM|rust_log::COMM,
              "~circ_buf 0x%" PRIxPTR,
              this);
     I(dom, data);
@@ -67,7 +67,7 @@ circ_buf::push(void *src)
         data = (uint8_t *)tmp;
     }
 
-    dom->log(LOG_MEM|LOG_COMM,
+    dom->log(rust_log::MEM|rust_log::COMM,
              "circ buf push, unread=%d, alloc=%d, unit_sz=%d",
              unread, alloc, unit_sz);
 
@@ -77,7 +77,7 @@ circ_buf::push(void *src)
     i = (next + unread) % alloc;
     memcpy(&data[i], src, unit_sz);
 
-    dom->log(LOG_MEM|LOG_COMM, "pushed data at index %d", i);
+    dom->log(rust_log::MEM|rust_log::COMM, "pushed data at index %d", i);
     unread += unit_sz;
 }
 
@@ -94,7 +94,7 @@ circ_buf::shift(void *dst)
     I(dom, data);
     i = next;
     memcpy(dst, &data[i], unit_sz);
-    dom->log(LOG_MEM|LOG_COMM, "shifted data from index %d", i);
+    dom->log(rust_log::MEM|rust_log::COMM, "shifted data from index %d", i);
     unread -= unit_sz;
     next += unit_sz;
     I(dom, next <= alloc);
@@ -122,7 +122,7 @@ rust_port::rust_port(rust_task *task, size_t unit_sz) :
     chans(task->dom)
 {
     rust_dom *dom = task->dom;
-    dom->log(LOG_MEM|LOG_COMM,
+    dom->log(rust_log::MEM|rust_log::COMM,
              "new rust_port(task=0x%" PRIxPTR ", unit_sz=%d) -> port=0x%"
              PRIxPTR, (uintptr_t)task, unit_sz, (uintptr_t)this);
 }
@@ -130,7 +130,7 @@ rust_port::rust_port(rust_task *task, size_t unit_sz) :
 rust_port::~rust_port()
 {
     rust_dom *dom = task->dom;
-    dom->log(LOG_COMM|LOG_MEM,
+    dom->log(rust_log::COMM|rust_log::MEM,
              "~rust_port 0x%" PRIxPTR,
              (uintptr_t)this);
     while (chans.length() > 0)

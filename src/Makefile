@@ -234,6 +234,7 @@ RUNTIME_CS := rt/rust.cpp \
               rt/rust_task.cpp \
               rt/rust_chan.cpp \
               rt/rust_upcall.cpp \
+              rt/rust_log.cpp \
               rt/rust_timer.cpp \
               rt/isaac/randport.cpp
 
