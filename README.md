@@ -66,6 +66,27 @@ that's necessary to go from nothing to "well .. maybe .."
 I'd encourage reading it in this light: delusional dreams very gradually
 coming into focus, not any sort of grand plan being executed.
 
+Linking history in Git
+----------------------
+
+In order to browse the full history of the Rust project, you can link this
+history with that of the [active Rust repository].  To do so, clone the Rust
+repository, add a remote for the prehitory repository, then replace the first
+commit in the Rust repository with the last commit in the prehistory (the last
+one before the introduction of this README, to be more precise).
+
+    git clone https://github.com/rust-lang/rust.git
+    cd rust
+    git remote add prehistory https://github.com/graydon/rust-prehistory.git
+    git remote update prehistory
+    git replace c01efc669f09508b55eced32d3c88702578a7c3e c10ce161d8a58d78e10583fcea7e34eab0a518d0
+
+Now you should be able to see, for example, the full history of what "hello,
+world" looked like in Rust over the years:
+
+    git log -p src/test/run-pass/hello.rs
+
+[active Rust repository]: https://github.com/rust-lang/rust/
 
 License
 -------
