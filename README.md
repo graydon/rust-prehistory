@@ -84,7 +84,7 @@ one before the introduction of this README, to be more precise).
 Now you should be able to see, for example, the full history of what "hello,
 world" looked like in Rust over the years:
 
-    git log -p src/test/run-pass/hello.rs
+    git log -p --follow src/test/ui/hello.rs
 
 [active Rust repository]: https://github.com/rust-lang/rust/
 
