@@ -71,7 +71,7 @@ Linking history in Git
 
 In order to browse the full history of the Rust project, you can link this
 history with that of the [active Rust repository].  To do so, clone the Rust
-repository, add a remote for the prehitory repository, then replace the first
+repository, add a remote for the prehistory repository, then replace the first
 commit in the Rust repository with the last commit in the prehistory (the last
 one before the introduction of this README, to be more precise).
 
