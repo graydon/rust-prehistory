@@ -22,8 +22,8 @@ ways:
 
   1. Converted from Monotone and Mercurial revision control
   2. Knitted together history by date, sometimes a bit roughly
-  3. Deleted PDFs and other reference material I had put in the
-     repository for reference, but I have no right to redistribute.
+  3. Deleted [PDFs](PDFs.md) and other reference material I had put in
+     the repository for reference, but I have no right to redistribute.
   4. Deleted commits or files that are, by my own judgment,
      too embarrassing or too worthless to publish.
 
