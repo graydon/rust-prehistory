@@ -507,7 +507,7 @@ USA).
 @sp 1
 @item
 The Napier (1985) and Napier88 (1988) family. These languages were developed
-by Malcolm Atkinson, Ron Morrison and others in their group at the University
+by Ron Morrison, Fred Brown, Richard Connor and Al Dearle in their group at the University
 of St. Andrews (St. Andrews, Fife, UK).
 @end itemize
 
